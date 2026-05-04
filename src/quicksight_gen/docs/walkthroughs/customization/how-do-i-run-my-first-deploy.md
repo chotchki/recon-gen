@@ -4,8 +4,8 @@
 
 ## The story
 
-Your data is landing in `<prefix>_transactions` +
-`<prefix>_daily_balances`
+Your data is landing in `{{ l2_instance_name }}_transactions` +
+`{{ l2_instance_name }}_daily_balances`
 ([How do I map my production database?](how-do-i-map-my-database.md)),
 your `config.yaml` is in place
 ([How do I configure the deploy?](how-do-i-configure-the-deploy.md)),
@@ -248,7 +248,7 @@ Once your first deploy completes with all
 `CREATION_SUCCESSFUL`:
 
 1. **Open the dashboard in QuickSight.** Console → Dashboards
-   → `qs-gen-<prefix>-l1-dashboard` (or your custom prefix).
+   → `qs-gen-{{ l2_instance_name }}-l1-dashboard` (or your custom prefix).
    Click through the tabs. KPIs should populate; tables should
    render rows. Empty visuals usually mean the underlying
    dataset's SQL returned zero rows against your data — open

@@ -4,7 +4,7 @@
 
 ## The story
 
-You've populated `<prefix>_transactions` and `<prefix>_daily_balances`
+You've populated `{{ l2_instance_name }}_transactions` and `{{ l2_instance_name }}_daily_balances`
 from your upstream feed. The morning cut runs at 6 AM and the
 dashboards open at 8. Before you cut the load tag and go to bed,
 you'd like to know your feed is *internally consistent* — not "the
@@ -21,7 +21,7 @@ at 6:05 AM in your own pipeline.
 ## The question
 
 "Before I open the dashboards, what SQL can I run against my newly
-loaded `<prefix>_transactions` and `<prefix>_daily_balances` to
+loaded `{{ l2_instance_name }}_transactions` and `{{ l2_instance_name }}_daily_balances` to
 know the feed is sound — and what does each check correspond to on
 the dashboard if it's not?"
 
@@ -33,9 +33,9 @@ Three reference points:
   ("If you skip this, what dashboard breaks?") tell you which
   invariant a column violation will trip.
 - **`common/l2/schema.py`** — the prefixed L1 invariant views
-  (`<prefix>_drift`, `<prefix>_overdraft`, `<prefix>_limit_breach`,
-  `<prefix>_stuck_pending`, `<prefix>_stuck_unbundled`,
-  `<prefix>_expected_eod_balance_breach`) are the dashboard-side
+  (`{{ l2_instance_name }}_drift`, `{{ l2_instance_name }}_overdraft`, `{{ l2_instance_name }}_limit_breach`,
+  `{{ l2_instance_name }}_stuck_pending`, `{{ l2_instance_name }}_stuck_unbundled`,
+  `{{ l2_instance_name }}_expected_eod_balance_breach`) are the dashboard-side
   consequence of the invariants below. If your pre-flight passes,
   the L1 dashboard's Today's Exceptions KPI reads zero on the demo
   data.
@@ -77,7 +77,7 @@ SELECT
     transfer_id,
     SUM(amount_money) AS net,
     COUNT(*)          AS leg_count
-FROM <prefix>_transactions
+FROM {{ l2_instance_name }}_transactions
 WHERE status = 'Posted'
   AND transfer_type NOT IN ('external_txn', 'sale')   -- single-leg types
 GROUP BY transfer_id
@@ -94,9 +94,9 @@ post.
 mismatch shows up at the account level once the daily balance
 recompute runs) and the Today's Exceptions roll-up KPI fires.
 
-### Invariant 2 — `<prefix>_daily_balances.money` matches the recomputed cumulative sum
+### Invariant 2 — `{{ l2_instance_name }}_daily_balances.money` matches the recomputed cumulative sum
 
-The L1 Drift view (`<prefix>_drift`) does this recompute internally
+The L1 Drift view (`{{ l2_instance_name }}_drift`) does this recompute internally
 per (account, business_day). The pre-flight version below is the
 same shape, scoped to one day:
 
@@ -109,8 +109,8 @@ SELECT
     db.money                                         AS stored,
     COALESCE(SUM(t.amount_money), 0)                 AS recomputed,
     db.money - COALESCE(SUM(t.amount_money), 0)      AS drift
-FROM <prefix>_daily_balances db
-LEFT JOIN <prefix>_transactions t
+FROM {{ l2_instance_name }}_daily_balances db
+LEFT JOIN {{ l2_instance_name }}_transactions t
   ON t.account_id          = db.account_id
  AND t.business_day_start <= db.business_day_start
  AND t.status              = 'Posted'
@@ -121,8 +121,8 @@ HAVING db.money - COALESCE(SUM(t.amount_money), 0) <> 0;
 
 A row here means the balance feed and the transaction feed
 disagree on the same account-day. Either a posting is missing /
-extra in `<prefix>_transactions`, or the EOD `money` value in
-`<prefix>_daily_balances` is stale.
+extra in `{{ l2_instance_name }}_transactions`, or the EOD `money` value in
+`{{ l2_instance_name }}_daily_balances` is stale.
 
 **Dashboard consequence**: the L1 Drift sheet flags the offending
 (account, business_day); the Drift Timelines sheet shows the
@@ -137,11 +137,11 @@ SELECT DISTINCT
     t.transfer_id,
     t.transfer_type,
     t.transfer_parent_id   AS missing_parent
-FROM <prefix>_transactions t
+FROM {{ l2_instance_name }}_transactions t
 WHERE t.transfer_parent_id IS NOT NULL
   AND NOT EXISTS (
       SELECT 1
-      FROM <prefix>_transactions p
+      FROM {{ l2_instance_name }}_transactions p
       WHERE p.transfer_id = t.transfer_parent_id
   );
 ```
@@ -223,7 +223,7 @@ for the symptom-organized debug recipes.
 
 ## Related walkthroughs
 
-- [How do I populate `<prefix>_transactions` from my core banking system?](how-do-i-populate-transactions.md) —
+- [How do I populate `{{ l2_instance_name }}_transactions` from my core banking system?](how-do-i-populate-transactions.md) —
   the **prior step**: writing the projection these invariants check.
 - [How do I validate a single account-day after a load?](how-do-i-validate-a-single-account-day.md) —
   the single-account-day version of these invariants. Once

@@ -117,7 +117,7 @@ YAML the L1 dashboard reads. The instance declares:
 
 The same `common.l2.emit_schema(instance)` that powers L1 also powers
 L2 Flow Tracing — the per-instance prefixed PostgreSQL DDL produces
-the `<prefix>_current_transactions` matview every L2 Flow Tracing
+the `{{ l2_instance_name }}_current_transactions` matview every L2 Flow Tracing
 dataset reads.
 
 Switching the L2 instance switches the dashboard. The same
@@ -130,7 +130,7 @@ six check_types; the data populates per-instance.
 
 L1 and L2 Flow Tracing are sibling dashboards over one L2 instance,
 not layered ones. Per the M.2d.3 prefix-isolation pattern, they share
-the same `<prefix>_*` matviews on the same Aurora schema and produce
+the same `{{ l2_instance_name }}_*` matviews on the same Aurora schema and produce
 their dashboard IDs as `qs-gen-<l2_prefix>-l1-dashboard` and
 `qs-gen-<l2_prefix>-l2-flow-tracing` respectively — the prefix carries
 the L2 instance, so an integrator deploying both apps against the

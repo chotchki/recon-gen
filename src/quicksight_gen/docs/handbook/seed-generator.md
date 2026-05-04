@@ -32,7 +32,7 @@ default_scenario_for(instance)        # the auto-derived plant scenario
 `emit_full_seed` is the public entry point. It calls
 `emit_baseline_seed` for the 90-day healthy baseline, then concatenates
 the legacy `emit_seed` plant SQL on top. Both halves target the same
-`<prefix>_transactions` and `<prefix>_daily_balances` tables. Plant
+`{{ l2_instance_name }}_transactions` and `{{ l2_instance_name }}_daily_balances` tables. Plant
 account ids and baseline account ids live in disjoint pools
 (plants on `cust-0001`–`cust-0010`, baseline on `cust-0011`+) so the
 `(account_id, business_day)` PK on `daily_balances` never collides.
@@ -419,7 +419,7 @@ or a CRC32-derived per-Rail offset.
 - [Schema v6 — Data Feed Contract](../Schema_v6.md) — the column
   contract the seed populates against. The two-table base (`transactions`
   + `daily_balances`) is the same shape your production ETL writes.
-- [L1 Invariants](../L1_Invariants.md) — what each `<prefix>_*`
+- [L1 Invariants](../L1_Invariants.md) — what each `{{ l2_instance_name }}_*`
   invariant view returns. The plant overlays are designed so each L1
   invariant has at least one violating row to render.
 - [L1 Reconciliation Dashboard](l1.md) — the operator-facing

@@ -5,7 +5,7 @@
 ## What the sheet shows
 
 The raw posting ledger — one row per Money record (leg).
-Supersession-aware via the `<prefix>_current_transactions` matview:
+Supersession-aware via the `{{ l2_instance_name }}_current_transactions` matview:
 the matview projects only the highest-entry version per logical key,
 so what the analyst sees IS the current truth (no superseded
 entries pollute the view).
@@ -26,7 +26,7 @@ transfer) or browsed manually with the dropdown filters.
 ## Visuals
 
 - **Posting Ledger** (Table) — every leg from the
-  `<prefix>_current_transactions` matview. Columns:
+  `{{ l2_instance_name }}_current_transactions` matview. Columns:
     - `account_id`, `account_name`, `account_role` — who got posted
     - `transfer_id`, `transfer_type`, `rail_name` — what kind of
       transfer

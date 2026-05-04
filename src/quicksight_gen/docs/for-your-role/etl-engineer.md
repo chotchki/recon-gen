@@ -101,7 +101,7 @@ the proof your ETL is observable, not just running.**
    account, missing counterparty leg, force-posted-without-
    internal-catchup, supersession trail).
 4. After any schema or metadata change, refresh **all**
-   `<prefix>_*` matviews. The L1 invariant views don't auto-
+   `{{ l2_instance_name }}_*` matviews. The L1 invariant views don't auto-
    refresh; stale matviews are a frequent cause of "the
    dashboard shows yesterday's state."
 
@@ -110,11 +110,11 @@ the proof your ETL is observable, not just running.**
 Per the
 [Data Integration handbook](../handbook/etl.md), the refresh
 sequence is dependency-ordered: base tables first, then
-`<prefix>_drift` / `<prefix>_overdraft` / `<prefix>_limit_breach`
-/ `<prefix>_stuck_pending` / `<prefix>_stuck_unbundled`, then the
+`{{ l2_instance_name }}_drift` / `{{ l2_instance_name }}_overdraft` / `{{ l2_instance_name }}_limit_breach`
+/ `{{ l2_instance_name }}_stuck_pending` / `{{ l2_instance_name }}_stuck_unbundled`, then the
 Investigation matviews
-(`<prefix>_inv_pair_rolling_anomalies`,
-`<prefix>_inv_money_trail_edges`), then the daily-statement
+(`{{ l2_instance_name }}_inv_pair_rolling_anomalies`,
+`{{ l2_instance_name }}_inv_money_trail_edges`), then the daily-statement
 rollups. The CLI's `refresh_matviews_sql(l2_instance)` helper
 emits the right ordering for any L2 instance — call it from your
 load orchestrator after every transactions / daily_balances

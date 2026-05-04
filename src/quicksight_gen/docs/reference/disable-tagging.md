@@ -3,8 +3,8 @@
 !!! danger "This setting weakens cleanup safety. Read this page in full before opting in."
 
 The deploy pipeline tags every QuickSight resource it creates with
-``ManagedBy=quicksight-gen`` plus a ``ResourcePrefix=<prefix>`` and
-(when an L2 instance is set) ``L2Instance=<prefix>``. ``json clean``
+``ManagedBy=quicksight-gen`` plus a ``ResourcePrefix={{ l2_instance_name }}`` and
+(when an L2 instance is set) ``L2Instance={{ l2_instance_name }}``. ``json clean``
 uses those tags to fail-CLOSED-scope deletion to resources we
 deployed — anything untagged or wrongly tagged stays safe.
 

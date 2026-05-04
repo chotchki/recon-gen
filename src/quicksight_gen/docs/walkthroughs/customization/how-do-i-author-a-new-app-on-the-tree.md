@@ -5,8 +5,8 @@
 ## The story
 
 You've read the [shared schema](../../Schema_v6.md), pointed your
-production data at `<prefix>_transactions` +
-`<prefix>_daily_balances`, and the four shipped apps (L1
+production data at `{{ l2_instance_name }}_transactions` +
+`{{ l2_instance_name }}_daily_balances`, and the four shipped apps (L1
 Reconciliation Dashboard, L2 Flow Tracing, Investigation,
 Executives) cover most of what your operations team needs. But
 you have one more reporting cadence — say a board-level summary
@@ -32,7 +32,7 @@ visual-ID bookkeeping.
 
 "What's the minimum I need to write to add a fifth standalone
 dashboard, given that the dataset interface
-(`<prefix>_transactions` + `<prefix>_daily_balances` emitted by
+(`{{ l2_instance_name }}_transactions` + `{{ l2_instance_name }}_daily_balances` emitted by
 `common/l2/schema.py::emit_schema`) is already in place?"
 
 ## Where to look

@@ -4,8 +4,8 @@
 
 ## The story
 
-Your data lands in `<prefix>_transactions` and
-`<prefix>_daily_balances` per
+Your data lands in `{{ l2_instance_name }}_transactions` and
+`{{ l2_instance_name }}_daily_balances` per
 [How do I map my production database?](how-do-i-map-my-database.md).
 Most of the 32+ datasets work out of the box — they read directly
 from the two prefixed base tables (or from the L1 invariant views
@@ -77,7 +77,7 @@ OVERDRAFT_CONTRACT = DatasetContract(columns=[
 
 That's the interface every visual on the L1 Overdraft sheet
 reads. The default SQL just pulls these columns from
-`<prefix>_overdraft` (a view emitted by `common/l2/schema.py`).
+`{{ l2_instance_name }}_overdraft` (a view emitted by `common/l2/schema.py`).
 
 To swap the implementation, edit the `build_overdraft_dataset()`
 function and change the SQL — leaving the contract untouched:
@@ -235,14 +235,14 @@ dashboard still renders cleanly:
 
 - [How do I map my production database to the two base tables?](how-do-i-map-my-database.md) —
   the upstream prerequisite. SQL swaps assume your data is
-  already in `<prefix>_transactions` +
-  `<prefix>_daily_balances` (or in warehouse views you've
+  already in `{{ l2_instance_name }}_transactions` +
+  `{{ l2_instance_name }}_daily_balances` (or in warehouse views you've
   decided to read directly).
 - [Schema_v6 → The layered model](../../Schema_v6.md#the-layered-model) —
-  the L1 invariant views (`<prefix>_drift`, `<prefix>_overdraft`,
-  `<prefix>_limit_breach`, `<prefix>_stuck_pending`,
-  `<prefix>_stuck_unbundled`,
-  `<prefix>_expected_eod_balance_breach`) the default SQL
+  the L1 invariant views (`{{ l2_instance_name }}_drift`, `{{ l2_instance_name }}_overdraft`,
+  `{{ l2_instance_name }}_limit_breach`, `{{ l2_instance_name }}_stuck_pending`,
+  `{{ l2_instance_name }}_stuck_unbundled`,
+  `{{ l2_instance_name }}_expected_eod_balance_breach`) the default SQL
   reads. Read these to decide whether to redirect at the
   dataset level or recreate the views in your warehouse with
   the same shape.

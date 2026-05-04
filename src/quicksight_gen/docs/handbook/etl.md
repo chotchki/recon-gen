@@ -80,11 +80,11 @@ default formula, the `is_late` predicate SQL, and the
 multi-leg tie-breaker query.
 
 Several materialized views sit on top of these tables — the L1
-invariant matviews (`<prefix>_drift`, `<prefix>_overdraft`,
-`<prefix>_limit_breach`, `<prefix>_stuck_pending`,
-`<prefix>_stuck_unbundled`, `<prefix>_todays_exceptions`) plus
-the Investigation cluster (`<prefix>_inv_pair_rolling_anomalies`
-feeds Volume Anomalies; `<prefix>_inv_money_trail_edges` feeds
+invariant matviews (`{{ l2_instance_name }}_drift`, `{{ l2_instance_name }}_overdraft`,
+`{{ l2_instance_name }}_limit_breach`, `{{ l2_instance_name }}_stuck_pending`,
+`{{ l2_instance_name }}_stuck_unbundled`, `{{ l2_instance_name }}_todays_exceptions`) plus
+the Investigation cluster (`{{ l2_instance_name }}_inv_pair_rolling_anomalies`
+feeds Volume Anomalies; `{{ l2_instance_name }}_inv_money_trail_edges` feeds
 Money Trail and Account Network — recursive walk over
 `parent_transfer_id`). None are auto-refreshed: every ETL load
 must run `REFRESH MATERIALIZED VIEW` on each, or the operator-
@@ -183,8 +183,8 @@ reads, with three columns:
 
 Compare the `latest_date` values:
 
-- The two base tables — `<prefix>_transactions` and
-  `<prefix>_daily_balances` — reflect how fresh the source data
+- The two base tables — `{{ l2_instance_name }}_transactions` and
+  `{{ l2_instance_name }}_daily_balances` — reflect how fresh the source data
   is. Their `latest_date` is the high-water mark your ETL has
   loaded.
 - Every matview row below them should carry the **same**
@@ -199,7 +199,7 @@ Compare the `latest_date` values:
 PostgreSQL and Oracle materialized views do **not** auto-refresh.
 They only update when explicitly told to via
 `REFRESH MATERIALIZED VIEW`. An ETL load that writes new rows to
-`<prefix>_transactions` and `<prefix>_daily_balances` but doesn't
+`{{ l2_instance_name }}_transactions` and `{{ l2_instance_name }}_daily_balances` but doesn't
 follow up with the refresh statements leaves every matview pointed
 at the *previous* load — the dashboards visualize a stale snapshot
 and look unchanged.

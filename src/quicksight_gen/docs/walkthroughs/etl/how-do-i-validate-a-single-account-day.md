@@ -4,8 +4,8 @@
 
 ## The story
 
-You loaded a slice into `<prefix>_transactions` and
-`<prefix>_daily_balances`. The pre-flight invariants from
+You loaded a slice into `{{ l2_instance_name }}_transactions` and
+`{{ l2_instance_name }}_daily_balances`. The pre-flight invariants from
 [How do I prove my ETL is working?](how-do-i-prove-my-etl-is-working.md)
 returned zero rows, the dashboards render, and the L1 Today's
 Exceptions KPI all look reasonable. The whole feed *looks* fine.
@@ -99,7 +99,7 @@ This is the planted drift scenario — the demo seeds an
 unexplained delta into the {{ vocab.demo.drift_account.name }}
 balance row to give the L1 Drift sheet something to surface. In
 a real ETL, the same shape would mean either a posting was
-dropped on its way to `<prefix>_transactions` or an EOD `money`
+dropped on its way to `{{ l2_instance_name }}_transactions` or an EOD `money`
 value was written that doesn't match the postings feed.
 {% endif %}
 
@@ -146,14 +146,14 @@ Each KPI on the strip answers a specific question, and the
 table answers the rest:
 
 - **Opening Balance** — yesterday's closing, pulled from the
-  prior `<prefix>_daily_balances` row via `LAG()`. If this is
+  prior `{{ l2_instance_name }}_daily_balances` row via `LAG()`. If this is
   null on a day you expected to have history, your daily-balances
   feed has a gap.
 - **Total Debits** / **Total Credits** — the day's signed
   flows split by direction (`amount_money > 0` is a debit,
   `< 0` a credit) and absolute-valued for display.
 - **Closing Balance (Stored)** — the value in
-  `<prefix>_daily_balances` that your ETL wrote. Authoritative
+  `{{ l2_instance_name }}_daily_balances` that your ETL wrote. Authoritative
   for the row-as-loaded.
 - **Drift** — `stored − (opening + net flow)`. Zero means the
   posting feed and balance feed agree on this account-day.
@@ -180,10 +180,10 @@ collapse away:
 
 - **Drift sign tells you which feed is wrong.** Positive drift
   (stored higher than recomputed) means a posting is missing
-  from `<prefix>_transactions` *or* the balance was bumped above
+  from `{{ l2_instance_name }}_transactions` *or* the balance was bumped above
   what the postings explain. Negative drift is the opposite —
   most often a duplicate or oversigned leg in
-  `<prefix>_transactions`.
+  `{{ l2_instance_name }}_transactions`.
 - **Counter-account NULL means the chain is broken.** The
   detail table joins on `transfer_id` to resolve the other
   leg's account. A NULL counter_account_name is the visible
@@ -239,7 +239,7 @@ closing ≥ 0, every leg has a counter_account_name):
 - [What do I do when the demo passes but my prod data fails?](what-do-i-do-when-demo-passes-but-prod-fails.md) —
   Symptom 4 (Drift KPI fires unexpectedly) is the natural
   follow-up when the Daily Statement shows a non-zero drift.
-- [How do I populate `<prefix>_transactions` from my core banking system?](how-do-i-populate-transactions.md) —
+- [How do I populate `{{ l2_instance_name }}_transactions` from my core banking system?](how-do-i-populate-transactions.md) —
   the projection that this sheet reads. A drift here usually
   traces to a branch of that projection.
 - [L1 Reconciliation Dashboard: Drift](../l1/drift.md) /

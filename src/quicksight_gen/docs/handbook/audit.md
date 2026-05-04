@@ -46,8 +46,8 @@ order, top to bottom:
 - **Per-account-day Daily Statement walks** — one page per
   `(account_id, business_day)` pair. Five KPIs (Opening / Debits /
   Credits / Closing stored / Drift) sourced from the
-  `<prefix>_daily_statement_summary` matview, plus the day's
-  transactions from `<prefix>_current_transactions`. Walks render
+  `{{ l2_instance_name }}_daily_statement_summary` matview, plus the day's
+  transactions from `{{ l2_instance_name }}_current_transactions`. Walks render
   for every drifted account-day plus every internal-scope L2
   `Account` singleton (parent accounts) on every day in the
   period — clean walks are themselves auditor-relevant evidence
@@ -115,9 +115,9 @@ unlink.
 Every PDF carries a cryptographic fingerprint over **four inputs**
 that, taken together, fully determine the report's contents:
 
-1. `<prefix>_transactions` — every row up to the
+1. `{{ l2_instance_name }}_transactions` — every row up to the
    high-water-mark `MAX(entry)` at audit time.
-2. `<prefix>_daily_balances` — every row up to its own
+2. `{{ l2_instance_name }}_daily_balances` — every row up to its own
    `MAX(entry)`.
 3. The L2 instance YAML — file bytes, verbatim.
 4. The `quicksight-gen` code identity — `v{version}+g{git_short}`

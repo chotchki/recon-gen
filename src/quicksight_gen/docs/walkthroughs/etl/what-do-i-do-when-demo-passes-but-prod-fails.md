@@ -9,7 +9,7 @@ L2-fed dashboards (L1 Reconciliation, L2 Flow Tracing,
 Investigation, Executives), and saw the planted exception
 scenarios light up the way they should. You then wrote your own
 ETL against your own upstream feed, loaded a slice into the same
-`<prefix>_transactions` and `<prefix>_daily_balances` tables, and
+`{{ l2_instance_name }}_transactions` and `{{ l2_instance_name }}_daily_balances` tables, and
 the dashboards look *off* — KPIs at zero where they shouldn't be,
 KPIs spiking where they shouldn't, visuals rendering "N/A" where
 there should be values.
@@ -46,7 +46,7 @@ the last 7 days for the L1 dashboard) and your load may have used
 
 ```sql
 SELECT MIN(business_day_start), MAX(business_day_start), COUNT(*)
-FROM <prefix>_transactions
+FROM {{ l2_instance_name }}_transactions
 WHERE -- your scope filter, e.g.,
       account_id LIKE 'your-prefix-%';
 ```
@@ -69,7 +69,7 @@ intent.
 
 ```sql
 SELECT transfer_type, COUNT(*)
-FROM <prefix>_transactions
+FROM {{ l2_instance_name }}_transactions
 WHERE -- your scope filter
 GROUP BY transfer_type
 ORDER BY COUNT(*) DESC;
@@ -87,7 +87,7 @@ view directly to see which (account, day) pairs are flagged:
 
 ```sql
 SELECT account_id, business_day_start, money, recomputed, drift
-FROM <prefix>_drift
+FROM {{ l2_instance_name }}_drift
 WHERE -- your scope filter
 ORDER BY ABS(drift) DESC;
 ```
@@ -110,7 +110,7 @@ populates an optional key.
 
 ```sql
 SELECT COUNT(*) AS rows_missing_key
-FROM <prefix>_transactions
+FROM {{ l2_instance_name }}_transactions
 WHERE transfer_type = 'sale'
   AND -- your scope filter
   AND NOT JSON_EXISTS(metadata, '$.card_brand');
@@ -122,9 +122,9 @@ walkthrough) or make the visual filter to rows that have it.
 
 ### Symptom 4 — "L1 Drift KPI fires unexpectedly"
 
-**Most likely**: your `<prefix>_daily_balances.money` value
+**Most likely**: your `{{ l2_instance_name }}_daily_balances.money` value
 disagrees with the cumulative SUM of `amount_money` in
-`<prefix>_transactions`. Three sub-causes, in order of frequency:
+`{{ l2_instance_name }}_transactions`. Three sub-causes, in order of frequency:
 
 1. **Sign-flip on one leg** — your upstream uses opposite sign
    convention from ours and the projection caught most legs but
@@ -146,8 +146,8 @@ SELECT
     db.money                                         AS stored,
     COALESCE(SUM(t.amount_money), 0)                 AS recomputed,
     db.money - COALESCE(SUM(t.amount_money), 0)      AS drift
-FROM <prefix>_daily_balances db
-LEFT JOIN <prefix>_transactions t
+FROM {{ l2_instance_name }}_daily_balances db
+LEFT JOIN {{ l2_instance_name }}_transactions t
   ON t.account_id          = db.account_id
  AND t.business_day_start <= db.business_day_start
  AND t.status              = 'Posted'
@@ -183,14 +183,14 @@ to your subset:
 
 ```sql
 SELECT t.transfer_id, t.transfer_type, t.transfer_parent_id
-FROM <prefix>_transactions t
+FROM {{ l2_instance_name }}_transactions t
 WHERE -- your scope filter, e.g., a merchant_id metadata key
       JSON_VALUE(t.metadata, '$.merchant_id') = 'your-merchant-id'
   AND t.transfer_type IN ('payment', 'settlement', 'sale')
   AND (
       t.transfer_parent_id IS NULL
       OR NOT EXISTS (
-          SELECT 1 FROM <prefix>_transactions p
+          SELECT 1 FROM {{ l2_instance_name }}_transactions p
           WHERE p.transfer_id = t.transfer_parent_id
       )
   );
@@ -213,7 +213,7 @@ looks unbalanced.
 
 ```sql
 SELECT transfer_id, status, COUNT(*), SUM(amount_money)
-FROM <prefix>_transactions
+FROM {{ l2_instance_name }}_transactions
 WHERE transfer_id IN ( -- the offending transfer_ids
 )
 GROUP BY transfer_id, status;
@@ -263,7 +263,7 @@ Once you've identified the root cause:
 
 ## Related walkthroughs
 
-- [How do I populate `<prefix>_transactions` from my core banking system?](how-do-i-populate-transactions.md) —
+- [How do I populate `{{ l2_instance_name }}_transactions` from my core banking system?](how-do-i-populate-transactions.md) —
   the foundational projection that most fixes go back to.
 - [How do I prove my ETL is working before going live?](how-do-i-prove-my-etl-is-working.md) —
   the universal pre-flight checks. Most symptoms here are

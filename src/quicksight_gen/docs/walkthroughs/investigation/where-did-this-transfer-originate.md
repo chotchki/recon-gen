@@ -55,7 +55,7 @@ case file.
 The matview projects one row per multi-leg edge. **Single-leg
 transfers** (`sale` and `external_txn` types — where the
 counterparty leg lives in the external system, not in
-`<prefix>_transactions`) appear as chain members in the table but
+`{{ l2_instance_name }}_transactions`) appear as chain members in the table but
 **do not produce Sankey ribbons** because the Sankey needs a
 source × target pair on each edge. The sheet's description calls
 this out — if a chain mixes multi-leg and single-leg transfers,
@@ -63,7 +63,7 @@ the Sankey will look thinner than the table.
 
 ## The math, briefly
 
-The matview `<prefix>_inv_money_trail_edges` walks
+The matview `{{ l2_instance_name }}_inv_money_trail_edges` walks
 `transfer_parent_id` chains via PostgreSQL's `WITH RECURSIVE`. Each
 transfer's parent is the upstream transfer that funded it; chains
 terminate when `transfer_parent_id IS NULL` (the chain root). The
@@ -75,7 +75,7 @@ disambiguate accounts that share names.
 
 The matview **does not auto-refresh**. After every ETL load, the
 operator runs
-`REFRESH MATERIALIZED VIEW <prefix>_inv_money_trail_edges;` —
+`REFRESH MATERIALIZED VIEW {{ l2_instance_name }}_inv_money_trail_edges;` —
 see [Refresh contract](../../Schema_v6.md#refresh-contract).
 QuickSight Direct Query can't run a recursive CTE inside a custom-
 SQL dataset, so materialization isn't optional here.

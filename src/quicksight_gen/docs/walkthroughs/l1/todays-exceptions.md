@@ -5,8 +5,8 @@
 ## What the sheet shows
 
 The 9am roll-up. UNION ALL across all 5 L1 invariant views
-(`<prefix>_drift`, `<prefix>_ledger_drift`, `<prefix>_overdraft`,
-`<prefix>_limit_breach`, `<prefix>_expected_eod_balance_breach`)
+(`{{ l2_instance_name }}_drift`, `{{ l2_instance_name }}_ledger_drift`, `{{ l2_instance_name }}_overdraft`,
+`{{ l2_instance_name }}_limit_breach`, `{{ l2_instance_name }}_expected_eod_balance_breach`)
 scoped to the most recent business day in the data. Materialized
 at refresh time so each visual reads a small precomputed table
 rather than re-running the 5-branch UNION live.

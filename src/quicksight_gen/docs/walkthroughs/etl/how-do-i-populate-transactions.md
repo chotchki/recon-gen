@@ -1,4 +1,4 @@
-# How do I populate `<prefix>_transactions` from my core banking system?
+# How do I populate `{{ l2_instance_name }}_transactions` from my core banking system?
 
 *Engineering walkthrough — Data Integration Team. Foundational.*
 
@@ -8,7 +8,7 @@ You've got an upstream core banking system with a `gl_postings`
 table (or its local equivalent — `general_ledger.entry`,
 `accounting.posting_detail`, etc.). It carries one row per posting
 leg already, which is the natural granularity of our
-`<prefix>_transactions` table. You need to write the ETL job that
+`{{ l2_instance_name }}_transactions` table. You need to write the ETL job that
 lands it in our two-table schema by the morning cut so the four
 L2-fed dashboards (L1 Reconciliation, L2 Flow Tracing,
 Investigation, Executives) work.
@@ -23,7 +23,7 @@ the per-column failure modes.
 ## The question
 
 "For my core banking system's `gl_postings` table, what's the
-canonical projection that maps it to `<prefix>_transactions`? What
+canonical projection that maps it to `{{ l2_instance_name }}_transactions`? What
 columns must I populate, and what columns can wait until v2?"
 
 ## Where to look
@@ -39,7 +39,7 @@ Two reference points:
   `quicksight-gen schema apply --execute`) to see the rendered
   output for your L2 instance.
 
-The `<prefix>` in this walkthrough's SQL is your L2 instance name
+The `{{ l2_instance_name }}` in this walkthrough's SQL is your L2 instance name
 (e.g., `{{ l2_instance_name }}`); your ETL substitutes it once when wiring
 the projection.
 
@@ -55,13 +55,13 @@ l2 = load_instance("tests/l2/{{ l2_instance_name }}.yaml")
 print(emit_schema(l2)[:4000])
 ```
 
-The first `CREATE TABLE` block is `<prefix>_transactions` itself
+The first `CREATE TABLE` block is `{{ l2_instance_name }}_transactions` itself
 — the column list, types, and constraints your projection has to
-satisfy. The second is `<prefix>_daily_balances`. Read both
+satisfy. The second is `{{ l2_instance_name }}_daily_balances`. Read both
 end-to-end before writing the projection; they're the contract.
 
 For an end-to-end mapping from `core_banking.gl_postings` →
-`<prefix>_transactions`, see **Example 1** in `docs/Schema_v6.md`
+`{{ l2_instance_name }}_transactions`, see **Example 1** in `docs/Schema_v6.md`
 (the SQL block under "Populating customer DDA postings from core
 banking"). It's a real `INSERT INTO ... SELECT FROM` against a
 hypothetical core-banking source schema.
@@ -98,7 +98,7 @@ The mapping pattern looks like this for a customer-DDA posting
 (from Schema_v6 Example 1, abbreviated):
 
 ```sql
-INSERT INTO <prefix>_transactions (
+INSERT INTO {{ l2_instance_name }}_transactions (
     transaction_id, transfer_id, transfer_type, origin,
     account_id, account_name, account_parent_role, account_role,
     account_scope, amount_money, amount, status,
@@ -139,7 +139,7 @@ A few things to note about this projection:
   to exclude in-flight or rejected legs.
 - **`amount_money`** is `+` for money flowing INTO the account
   (a `debit` in bank's-bookkeeping terms), `−` for money flowing
-  OUT (a `credit`). `<prefix>_daily_balances.money` for any
+  OUT (a `credit`). `{{ l2_instance_name }}_daily_balances.money` for any
   account-day equals `SUM(amount_money)` up to that day, so getting
   this sign right is what makes the drift check honest. If your
   upstream uses the opposite sign convention, flip it here, not
@@ -175,7 +175,7 @@ If your upstream source isn't a `gl_postings` table — say it's a
 processor report, a Fed statement file, or a sweep-engine log —
 the same projection shape applies, but the inbound columns differ.
 Schema_v6.md's examples cover Fed-statement and processor-feed
-ingest; the same `INSERT INTO <prefix>_transactions` pattern
+ingest; the same `INSERT INTO {{ l2_instance_name }}_transactions` pattern
 applies regardless of source.
 
 ## Related walkthroughs
@@ -193,4 +193,4 @@ applies regardless of source.
   the column-by-column day-1 minimum the projection must satisfy.
 - [Investigation: Where did this transfer originate?](../investigation/where-did-this-transfer-originate.md) —
   a **downstream consumer** walkthrough: what an analyst does with
-  the `<prefix>_transactions` rows your projection lands.
+  the `{{ l2_instance_name }}_transactions` rows your projection lands.

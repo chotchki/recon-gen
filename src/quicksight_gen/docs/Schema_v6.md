@@ -40,29 +40,29 @@ Your ETL writes two tables. The L1 library projects everything else:
 
 ```
 ETL writes
-  ├── <prefix>_transactions       — one row per money-movement leg
-  └── <prefix>_daily_balances     — one row per (account, date) snapshot
+  ├── {{ l2_instance_name }}_transactions       — one row per money-movement leg
+  └── {{ l2_instance_name }}_daily_balances     — one row per (account, date) snapshot
                   ↓ (supersession projection — M.1.5)
 Current* matviews
-  ├── <prefix>_current_transactions
-  └── <prefix>_current_daily_balances
+  ├── {{ l2_instance_name }}_current_transactions
+  └── {{ l2_instance_name }}_current_daily_balances
                   ↓ (computed-balance derivation)
 Helpers
-  ├── <prefix>_computed_subledger_balance
-  └── <prefix>_computed_ledger_balance
+  ├── {{ l2_instance_name }}_computed_subledger_balance
+  └── {{ l2_instance_name }}_computed_ledger_balance
                   ↓ (SHOULD-constraint surfaces)
 L1 invariant matviews
-  ├── <prefix>_drift                          — leaf account drift
-  ├── <prefix>_ledger_drift                   — parent account drift
-  ├── <prefix>_overdraft                      — non-negative balance
-  ├── <prefix>_expected_eod_balance_breach    — declared EOD target
-  ├── <prefix>_limit_breach                   — outbound flow cap
-  ├── <prefix>_stuck_pending                  — per-rail Pending aging (M.2b.8)
-  └── <prefix>_stuck_unbundled                — per-rail Unbundled aging (M.2b.9)
+  ├── {{ l2_instance_name }}_drift                          — leaf account drift
+  ├── {{ l2_instance_name }}_ledger_drift                   — parent account drift
+  ├── {{ l2_instance_name }}_overdraft                      — non-negative balance
+  ├── {{ l2_instance_name }}_expected_eod_balance_breach    — declared EOD target
+  ├── {{ l2_instance_name }}_limit_breach                   — outbound flow cap
+  ├── {{ l2_instance_name }}_stuck_pending                  — per-rail Pending aging (M.2b.8)
+  └── {{ l2_instance_name }}_stuck_unbundled                — per-rail Unbundled aging (M.2b.9)
                   ↓ (UI convenience)
 Dashboard-shape matviews
-  ├── <prefix>_daily_statement_summary
-  └── <prefix>_todays_exceptions              — UNION over the 5 baselines
+  ├── {{ l2_instance_name }}_daily_statement_summary
+  └── {{ l2_instance_name }}_todays_exceptions              — UNION over the 5 baselines
 ```
 
 13 matviews per L2 instance; full per-view contract in
@@ -90,7 +90,7 @@ Every CREATE in the emitted DDL is prefixed by `instance.instance`
 Two L2 instances coexist in one database without conflict — `myorg_*`
 + `{{ l2_instance_name }}_*` live side-by-side. The dashboard queries are also
 prefix-parameterized; switching the deployed dashboard's L2 instance
-swaps every dataset's `FROM <prefix>_*` clause.
+swaps every dataset's `FROM {{ l2_instance_name }}_*` clause.
 
 Emit the schema for an instance:
 
@@ -106,7 +106,7 @@ target state.
 
 ---
 
-## Table 1 — `<prefix>_transactions`
+## Table 1 — `{{ l2_instance_name }}_transactions`
 
 One row per money-movement **leg**. Two-leg transfers (debit + credit
 pairs) write two rows; single-leg transfers (sales, external
@@ -168,22 +168,22 @@ load independently.
 ### Indexes
 
 ```sql
-CREATE INDEX idx_<prefix>_transactions_account_posting ON <prefix>_transactions (account_id, posting);
-CREATE INDEX idx_<prefix>_transactions_transfer        ON <prefix>_transactions (transfer_id);
-CREATE INDEX idx_<prefix>_transactions_type_status     ON <prefix>_transactions (transfer_type, status);
-CREATE INDEX idx_<prefix>_transactions_parent          ON <prefix>_transactions (transfer_parent_id);
+CREATE INDEX idx_{{ l2_instance_name }}_transactions_account_posting ON {{ l2_instance_name }}_transactions (account_id, posting);
+CREATE INDEX idx_{{ l2_instance_name }}_transactions_transfer        ON {{ l2_instance_name }}_transactions (transfer_id);
+CREATE INDEX idx_{{ l2_instance_name }}_transactions_type_status     ON {{ l2_instance_name }}_transactions (transfer_type, status);
+CREATE INDEX idx_{{ l2_instance_name }}_transactions_parent          ON {{ l2_instance_name }}_transactions (transfer_parent_id);
 
 -- Bundler eligibility hot-path: AggregatingRails query for Posted,
 -- unbundled rows by rail_name. Partial index on `bundle_id IS NULL`
 -- keeps it small as bundled-row count grows.
-CREATE INDEX idx_<prefix>_transactions_bundler_eligibility
-    ON <prefix>_transactions (rail_name, status)
+CREATE INDEX idx_{{ l2_instance_name }}_transactions_bundler_eligibility
+    ON {{ l2_instance_name }}_transactions (rail_name, status)
     WHERE bundle_id IS NULL;
 ```
 
 ---
 
-## Table 2 — `<prefix>_daily_balances`
+## Table 2 — `{{ l2_instance_name }}_daily_balances`
 
 One row per `(account_id, business_day_start)` snapshot. The bank's
 end-of-day stored balance for each account each day.
@@ -218,8 +218,8 @@ CHECK (supersedes IS NULL
 ### Indexes
 
 ```sql
-CREATE INDEX idx_<prefix>_daily_balances_business_day
-    ON <prefix>_daily_balances (business_day_start);
+CREATE INDEX idx_{{ l2_instance_name }}_daily_balances_business_day
+    ON {{ l2_instance_name }}_daily_balances (business_day_start);
 ```
 
 ---
@@ -258,11 +258,11 @@ matviews project **max(entry) per logical key**, so dashboard queries
 read the corrected version transparently:
 
 ```sql
-CREATE MATERIALIZED VIEW <prefix>_current_transactions AS
+CREATE MATERIALIZED VIEW {{ l2_instance_name }}_current_transactions AS
 SELECT * FROM (
     SELECT *,
            ROW_NUMBER() OVER (PARTITION BY id ORDER BY entry DESC) AS rn
-    FROM <prefix>_transactions
+    FROM {{ l2_instance_name }}_transactions
 ) sub
 WHERE rn = 1;
 ```
@@ -290,7 +290,7 @@ per-row JSON in `TEXT` columns. Read with SQL/JSON path:
 
 ```sql
 SELECT JSON_VALUE(tx.metadata, '$.customer_id') AS customer_id
-FROM   <prefix>_transactions tx
+FROM   {{ l2_instance_name }}_transactions tx
 WHERE  JSON_EXISTS(tx.metadata, '$.customer_id');
 ```
 
@@ -313,7 +313,7 @@ the `JSON_VALUE` / `JSON_QUERY` / `JSON_EXISTS` family.
 
 ## Refresh contract
 
-Every batch insert into `<prefix>_transactions` or `<prefix>_daily_balances`
+Every batch insert into `{{ l2_instance_name }}_transactions` or `{{ l2_instance_name }}_daily_balances`
 MUST be followed by `refresh_matviews_sql(instance)` to recompute
 every dependent matview in dependency order:
 
@@ -361,7 +361,7 @@ scan over the matview).
 
 To see *something* on the dashboard, populate these columns on every row:
 
-### `<prefix>_transactions` minimum columns
+### `{{ l2_instance_name }}_transactions` minimum columns
 
 `entry` (auto), `id`, `account_id`, `account_name`, `account_role`,
 `account_scope`, `amount_money`, `amount_direction`, `status`,
@@ -379,7 +379,7 @@ Optional on day 1; populate when a downstream check needs them:
 | `supersedes` | Correction workflows. NULL on every original posting. |
 | `metadata` | App-specific extension keys (per-app conventions). |
 
-### `<prefix>_daily_balances` minimum columns
+### `{{ l2_instance_name }}_daily_balances` minimum columns
 
 `entry` (auto), `account_id`, `account_name`, `account_role`,
 `account_scope`, `business_day_start`, `business_day_end`, `money`.
@@ -415,7 +415,7 @@ Two complementary lateness signals coexist in the v6 contract:
 - **Per-rail aging caps (L2-fed, M.2b path).** The L2 instance declares
   `max_pending_age` on each Rail and `max_unbundled_age` on rails picked
   up by an AggregatingRail. `emit_schema` inlines these as CASE branches
-  in the `<prefix>_stuck_pending` and `<prefix>_stuck_unbundled` matviews;
+  in the `{{ l2_instance_name }}_stuck_pending` and `{{ l2_instance_name }}_stuck_unbundled` matviews;
   any leg whose `EXTRACT(EPOCH FROM (NOW() - posting))` exceeds its rail's
   cap surfaces as a violation. This is the recommended path going forward
   — caps are configured once in YAML, the dashboard reads them generically.

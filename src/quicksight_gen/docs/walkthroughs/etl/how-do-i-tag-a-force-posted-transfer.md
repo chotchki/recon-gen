@@ -10,7 +10,7 @@ wire, the internal transfer. A handful of postings are *forced on
 us* by an external system: the Fed pushes an inbound ACH credit
 before our origination side caught up; the card processor reports
 a settlement before our internal catch-up posts. The bank still
-has to record those rows in `<prefix>_transactions` (otherwise the
+has to record those rows in `{{ l2_instance_name }}_transactions` (otherwise the
 GL is wrong), but they're a different *kind* of posting.
 
 The schema captures this with the `origin` column. Three values:
@@ -124,12 +124,12 @@ by an internal origination catch-up:
 
 ```sql
 -- Day 0: Fed force-posts. ExternalForcePosted, no parent.
-INSERT INTO <prefix>_transactions
+INSERT INTO {{ l2_instance_name }}_transactions
     (..., transfer_id, transfer_parent_id, origin, ...)
 VALUES (..., 'fed-xfer-EXAMPLE-001', NULL, 'ExternalForcePosted', ...);
 
 -- Day 2: internal catch-up posts. transfer_parent_id points at the Fed row.
-INSERT INTO <prefix>_transactions
+INSERT INTO {{ l2_instance_name }}_transactions
     (..., transfer_id, transfer_parent_id, origin, ...)
 VALUES (..., 'int-xfer-EXAMPLE-042', 'fed-xfer-EXAMPLE-001',
             'InternalInitiated', ...);
@@ -160,7 +160,7 @@ Once your Fed-statement projection is wired up:
 
 ## Related walkthroughs
 
-- [How do I populate `<prefix>_transactions` from my core banking system?](how-do-i-populate-transactions.md) —
+- [How do I populate `{{ l2_instance_name }}_transactions` from my core banking system?](how-do-i-populate-transactions.md) —
   the foundational projection. This walkthrough is its
   Fed-statement variant.
 - [How do I prove my ETL is working before going live?](how-do-i-prove-my-etl-is-working.md) —

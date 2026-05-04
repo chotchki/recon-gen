@@ -4,7 +4,7 @@
 
 ## The story
 
-The 11-column `<prefix>_transactions` contract intentionally
+The 11-column `{{ l2_instance_name }}_transactions` contract intentionally
 doesn't carry every per-`transfer_type` attribute as its own column
 — `card_brand` belongs on sales but is meaningless on internal
 transfers; `settlement_type` matters on settlements but not on
@@ -28,7 +28,7 @@ when teams add a new metadata key:
 ## The question
 
 "My team needs to add a new attribute (`originating_branch`,
-`risk_score`, `fx_rate`) to a subset of `<prefix>_transactions`
+`risk_score`, `fx_rate`) to a subset of `{{ l2_instance_name }}_transactions`
 rows. What's the contract for adding it without breaking existing
 dashboards or the portability of the SQL?"
 
@@ -137,7 +137,7 @@ the relevant `datasets.py` builder, add a projected column:
 SELECT
     -- existing columns ...
     JSON_VALUE(metadata, '$.originating_branch') AS originating_branch
-FROM <prefix>_transactions
+FROM {{ l2_instance_name }}_transactions
 WHERE transfer_type = 'sale';
 ```
 
@@ -179,7 +179,7 @@ Once the key is producing, consuming, and rendering:
 
 ## Related walkthroughs
 
-- [How do I populate `<prefix>_transactions` from my core banking system?](how-do-i-populate-transactions.md) —
+- [How do I populate `{{ l2_instance_name }}_transactions` from my core banking system?](how-do-i-populate-transactions.md) —
   the foundational projection. This walkthrough adds keys to that
   projection's `metadata` literal.
 - [How do I prove my ETL is working before going live?](how-do-i-prove-my-etl-is-working.md) —

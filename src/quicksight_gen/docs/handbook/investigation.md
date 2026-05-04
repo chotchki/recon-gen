@@ -34,7 +34,7 @@ Four sheets, four questions, in no particular order:
 - *Account Network* — what does this account's money network look
   like, on either side?
 
-The dashboard reads from the same `<prefix>_transactions` base table
+The dashboard reads from the same `{{ l2_instance_name }}_transactions` base table
 that L1 Reconciliation and L2 Flow Tracing read, plus two
 materialized views (`inv_pair_rolling_anomalies` and
 `inv_money_trail_edges`) that pre-compute the rolling-window
@@ -144,8 +144,8 @@ re-render this page.
 - [Schema v6 — Data Feed Contract](../Schema_v6.md) — column specs,
   metadata keys, and ETL examples for the upstream feeds. The
   [Materialized views](../Schema_v6.md#the-layered-model) section
-  documents `<prefix>_inv_pair_rolling_anomalies` (Volume Anomalies)
-  and `<prefix>_inv_money_trail_edges` (Money Trail / Account
+  documents `{{ l2_instance_name }}_inv_pair_rolling_anomalies` (Volume Anomalies)
+  and `{{ l2_instance_name }}_inv_money_trail_edges` (Money Trail / Account
   Network) plus the REFRESH cadence contract.
 - [Data Integration Handbook](etl.md) — the team that populates the
   data behind every walkthrough on this page. Read it when an anomaly

@@ -12,15 +12,15 @@ the load-bearing question: **how much work is this, actually?**
 The honest answer: the visual layer (32+ datasets across four
 L2-fed apps, the L1 invariant surface, drill-downs, filters,
 theming) binds to a contract that is two tables wide. Everything
-you see in the demo reads from `<prefix>_transactions` and
-`<prefix>_daily_balances` (where `<prefix>` is your L2 instance
+you see in the demo reads from `{{ l2_instance_name }}_transactions` and
+`{{ l2_instance_name }}_daily_balances` (where `{{ l2_instance_name }}` is your L2 instance
 name). If you can land your data into those two shapes — once, by
 your morning cut — every dashboard works without further plumbing
 on the dashboard side.
 
 The work that *isn't* trivial is the upstream ETL projection
 itself: deciding which of your source tables map to a leg in
-`<prefix>_transactions`, getting the sign convention right on
+`{{ l2_instance_name }}_transactions`, getting the sign convention right on
 `amount_money`, populating `transfer_parent_id` for chained
 transfers, tagging force-posts. That work belongs to your data
 integration team and lives in the
@@ -41,8 +41,8 @@ to know before I commit?"
 Two reference points before you write a line of mapping code:
 
 - **[Schema_v6.md → The minimum viable feed](../../Schema_v6.md#etl-contract-minimum-viable-feed)** —
-  the 11 mandatory columns on `<prefix>_transactions` + 6 on
-  `<prefix>_daily_balances`. Read these first. Anything beyond
+  the 11 mandatory columns on `{{ l2_instance_name }}_transactions` + 6 on
+  `{{ l2_instance_name }}_daily_balances`. Read these first. Anything beyond
   the minimum is conditional and can wait for v2.
 - **`common/l2/schema.py::emit_schema(l2_instance)`** — the
   source of truth for the prefixed DDL. Call it from Python to
@@ -63,10 +63,10 @@ quicksight-gen data apply --execute && quicksight-gen data
 refresh --execute`), your demo database (Postgres or Oracle,
 dispatched off `dialect:`) holds:
 
-- **`<prefix>_transactions`** — every money-movement leg, one
+- **`{{ l2_instance_name }}_transactions`** — every money-movement leg, one
   row per leg. Multiple legs of one financial event share a
   `transfer_id` and net to zero (the double-entry invariant).
-- **`<prefix>_daily_balances`** — one row per `(account_id,
+- **`{{ l2_instance_name }}_daily_balances`** — one row per `(account_id,
   business_day_start)`. The `money` column is what your ETL
   writes; the L1 Drift view recomputes `SUM(amount_money)` and
   surfaces the delta.
@@ -78,32 +78,32 @@ dispatched off `dialect:`) holds:
 That's it. No `pr_sales`, no `pr_settlements`, no
 `ledger_postings`, no per-persona staging tables, no separate AR
 dimension tables. Every exception check, every drill-down, every
-aging bucket reads from `<prefix>_transactions` and
-`<prefix>_daily_balances`.
+aging bucket reads from `{{ l2_instance_name }}_transactions` and
+`{{ l2_instance_name }}_daily_balances`.
 
 ## What it means
 
 For your source-system-to-base-table mapping, three patterns
 cover the common cases:
 
-### Pattern 1 — Core banking → `<prefix>_transactions` + `<prefix>_daily_balances`
+### Pattern 1 — Core banking → `{{ l2_instance_name }}_transactions` + `{{ l2_instance_name }}_daily_balances`
 
 Your core banking system has a `gl_postings` (or equivalent)
 detail table — one row per posting leg already. This is the
-natural match for `<prefix>_transactions`. Your nightly EOD
-`account_balance` snapshot maps to `<prefix>_daily_balances`.
+natural match for `{{ l2_instance_name }}_transactions`. Your nightly EOD
+`account_balance` snapshot maps to `{{ l2_instance_name }}_daily_balances`.
 Most of the projection is a column rename plus the sign-convention
 conversion.
 
 This is the canonical case. The
-[How do I populate `<prefix>_transactions` from my core banking system?](../etl/how-do-i-populate-transactions.md)
+[How do I populate `{{ l2_instance_name }}_transactions` from my core banking system?](../etl/how-do-i-populate-transactions.md)
 walkthrough has the full SQL projection.
 
-### Pattern 2 — Card processor / external feed → `<prefix>_transactions` (`external_txn`)
+### Pattern 2 — Card processor / external feed → `{{ l2_instance_name }}_transactions` (`external_txn`)
 
 Your card processor sends a daily settlement file. Each row is
 the processor's view of money landing in your account. These
-become `<prefix>_transactions` rows with
+become `{{ l2_instance_name }}_transactions` rows with
 `transfer_type = 'external_txn'`,
 `origin = 'ExternalForcePosted'`, and a populated
 `external_system` (e.g., `BankSync`, `PaymentHub`).
@@ -113,11 +113,11 @@ between bank-initiated activity and force-posted activity reads
 these rows correctly via the `origin` column, and Investigation's
 Money Trail walks them via `transfer_parent_id`.
 
-### Pattern 3 — Sweep engine / internal transfer log → `<prefix>_transactions` (multi-leg)
+### Pattern 3 — Sweep engine / internal transfer log → `{{ l2_instance_name }}_transactions` (multi-leg)
 
 Your CMS sweep engine emits one record per sweep operation —
 "move $X from sub-ledger A to concentration master B". That
-single record becomes **two** `<prefix>_transactions` rows (a
+single record becomes **two** `{{ l2_instance_name }}_transactions` rows (a
 debit leg on A, a credit leg on B) sharing one `transfer_id`. The
 legs must net to zero. The L1 drift checks read this directly.
 
@@ -172,7 +172,7 @@ Once you've decided this product fits your data:
 1. **Stand up the schema.** Call
    `emit_schema(l2_instance, dialect=...)` from `common.l2.schema` to
    render the per-prefix DDL — base tables
-   (`<prefix>_transactions` / `<prefix>_daily_balances`), Current*
+   (`{{ l2_instance_name }}_transactions` / `{{ l2_instance_name }}_daily_balances`), Current*
    views, computed-balance helpers, and L1 invariant matviews.
    Apply it to a dev Postgres or Oracle instance directly, or chain
    `quicksight-gen schema apply -c run/config.yaml --execute &&
@@ -186,8 +186,8 @@ Once you've decided this product fits your data:
    their entry point. Walk them through the
    minimum-viable-feed columns, the sign convention, and the
    pre-flight invariants. Their first deliverable is one
-   day's load against `<prefix>_transactions` +
-   `<prefix>_daily_balances`.
+   day's load against `{{ l2_instance_name }}_transactions` +
+   `{{ l2_instance_name }}_daily_balances`.
 3. **Validate with the dashboards.** Once a slice is loaded,
    open the L1 Reconciliation Dashboard's Today's Exceptions
    sheet. KPI at 0 with no detail rows means the feed landed
@@ -204,7 +204,7 @@ Once you've decided this product fits your data:
 
 - [Data Integration Handbook → How do I populate transactions?](../etl/how-do-i-populate-transactions.md) —
   the ETL-engineer view: the actual SQL projection from
-  `core_banking.gl_postings` to `<prefix>_transactions`.
+  `core_banking.gl_postings` to `{{ l2_instance_name }}_transactions`.
 - [Data Integration Handbook → How do I prove my ETL is working?](../etl/how-do-i-prove-my-etl-is-working.md) —
   the universal pre-flight invariants (net-zero, drift-recompute,
   parent-chain integrity) your ETL team runs before declaring a

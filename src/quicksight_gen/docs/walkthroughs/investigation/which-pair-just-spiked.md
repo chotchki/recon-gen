@@ -48,7 +48,7 @@ Three visuals:
 
 ## The math, briefly
 
-The matview `<prefix>_inv_pair_rolling_anomalies` computes, per
+The matview `{{ l2_instance_name }}_inv_pair_rolling_anomalies` computes, per
 (sender, recipient) pair, a 2-day rolling SUM (today + yesterday's
 transfer amounts). It then computes the **population mean** and
 **sample standard deviation** of that rolling SUM across every
@@ -69,7 +69,7 @@ deferred to a later phase).
 
 The matview **does not auto-refresh**. After every ETL load, the
 operator runs
-`REFRESH MATERIALIZED VIEW <prefix>_inv_pair_rolling_anomalies;`
+`REFRESH MATERIALIZED VIEW {{ l2_instance_name }}_inv_pair_rolling_anomalies;`
 — see [Refresh contract](../../Schema_v6.md#refresh-contract).
 A skipped refresh means the z-scores reflect yesterday's population.
 

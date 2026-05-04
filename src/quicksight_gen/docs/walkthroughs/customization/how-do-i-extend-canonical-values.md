@@ -14,7 +14,7 @@ groupable, drill-able, the whole experience the existing
 The good news: `transfer_type` is a value in the data, not an enum
 in the dashboard code. The Transfer Type dropdown filter on the L1
 Transactions sheet auto-populates from the distinct values present
-in the dataset. Add a row to `<prefix>_transactions` with
+in the dataset. Add a row to `{{ l2_instance_name }}_transactions` with
 `transfer_type = 'repo'` and the next dashboard load shows `repo`
 as a filterable value with no dashboard code change.
 
@@ -73,7 +73,7 @@ to see the values your L2 instance accepts. The L1 Transactions
 sheet's Transfer Type filter (and every type-scoped exception
 check) reads the column directly — no separate enum file in code,
 no per-value visual config. New values surface the moment they
-appear in `<prefix>_transactions`.
+appear in `{{ l2_instance_name }}_transactions`.
 
 The `account_type` column is unconstrained at the schema level:
 
@@ -171,7 +171,7 @@ ETL writes the new value.
 
 The four shipped apps share the same two prefixed base tables. A
 new `transfer_type` is a new *value* in the existing
-`<prefix>_transactions.transfer_type` column — not a new table,
+`{{ l2_instance_name }}_transactions.transfer_type` column — not a new table,
 not a new dataset, not a new sheet. This is the single
 load-bearing decision behind the schema: denormalization-by-default
 keeps the surface small enough that "add a movement type" is a
@@ -184,20 +184,20 @@ in `metadata`.
 
 ### Existing exception checks may or may not apply to your new type
 
-The L1 invariant views (`<prefix>_drift`, `<prefix>_overdraft`,
-`<prefix>_limit_breach`, `<prefix>_stuck_pending`,
-`<prefix>_stuck_unbundled`,
-`<prefix>_expected_eod_balance_breach`) read from
-`<prefix>_transactions` and `<prefix>_daily_balances` without
+The L1 invariant views (`{{ l2_instance_name }}_drift`, `{{ l2_instance_name }}_overdraft`,
+`{{ l2_instance_name }}_limit_breach`, `{{ l2_instance_name }}_stuck_pending`,
+`{{ l2_instance_name }}_stuck_unbundled`,
+`{{ l2_instance_name }}_expected_eod_balance_breach`) read from
+`{{ l2_instance_name }}_transactions` and `{{ l2_instance_name }}_daily_balances` without
 filtering on `transfer_type` for most account-level checks —
 they apply to *every* transfer that lands in the affected
 account. So your new `transfer_type = 'repo'` rows will
 participate in every account-level check:
 
-- **Drift (`<prefix>_drift`, `<prefix>_ledger_drift`)** — apply
+- **Drift (`{{ l2_instance_name }}_drift`, `{{ l2_instance_name }}_ledger_drift`)** — apply
   universally. A repo leg that doesn't net to zero with its
   counter-leg surfaces here, just like an ACH leg.
-- **Overdraft (`<prefix>_overdraft`)** — applies universally. A
+- **Overdraft (`{{ l2_instance_name }}_overdraft`)** — applies universally. A
   repo that drives a sub-ledger negative surfaces here.
 - **Type-scoped checks (limit breach, aging windows)** — read
   caps and ages declared per-`Rail` in the L2 instance. Won't
@@ -212,7 +212,7 @@ relevant rail; if no, the value-only path (Case A) is enough.
 
 The L2 instance declares each `TransferTemplate`'s leg shape.
 Single-leg types (`sale`, `external_txn` in the demo) don't have
-a counter-leg in `<prefix>_transactions`; their counterparty
+a counter-leg in `{{ l2_instance_name }}_transactions`; their counterparty
 sits in an external system. Multi-leg types (`ach`, `wire`,
 `internal`, etc.) have legs that net to zero.
 

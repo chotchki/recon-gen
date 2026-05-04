@@ -184,8 +184,8 @@ database via prefix isolation.
 ### 3. Refresh the matviews after every load
 
 The L1 invariant views are MATERIALIZED (M.1a.9) for dashboard
-performance. After every batch insert into `<prefix>_transactions`
-or `<prefix>_daily_balances`, refresh the dependent matviews:
+performance. After every batch insert into `{{ l2_instance_name }}_transactions`
+or `{{ l2_instance_name }}_daily_balances`, refresh the dependent matviews:
 
 ```python
 from quicksight_gen.common.l2 import refresh_matviews_sql
@@ -216,7 +216,7 @@ generic plant primitives (`DriftPlant`, `OverdraftPlant`,
 `SupersessionPlant`). Run the verify against your DB to PASS-gate
 your customization before touching the dashboard.
 
-For the full L1 invariant inventory (what each `<prefix>_*` view
+For the full L1 invariant inventory (what each `{{ l2_instance_name }}_*` view
 returns + its SHOULD-constraint motivation), see
 [L1 Invariants](../L1_Invariants.md).
 
@@ -225,7 +225,7 @@ returns + its SHOULD-constraint motivation), see
 - [Schema v6 — Data Feed Contract](../Schema_v6.md) — the column
   contract for the two base tables. Read this before mapping
   your source system.
-- [L1 Invariants](../L1_Invariants.md) — what each `<prefix>_*`
+- [L1 Invariants](../L1_Invariants.md) — what each `{{ l2_instance_name }}_*`
   view returns and what it asserts. The L1-fed dashboard reads
   these directly.
 - [L1 Reconciliation Dashboard](l1.md) — the L2-fed dashboard's

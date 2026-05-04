@@ -15,8 +15,8 @@ vocabulary:
 - **TechnicalCorrection** — the row was rewritten because the
   original posting was wrong (amount fix, account swap, etc).
 
-Reads from the BASE tables (`<prefix>_transactions`,
-`<prefix>_daily_balances`), not the Current* matviews — by
+Reads from the BASE tables (`{{ l2_instance_name }}_transactions`,
+`{{ l2_instance_name }}_daily_balances`), not the Current* matviews — by
 definition Current* hides the prior entries we want to audit here.
 
 ??? example "Screenshot"

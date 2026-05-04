@@ -5,7 +5,7 @@
 ## The story
 
 Your ETL team added a new attribute to
-`<prefix>_transactions.metadata` — say `originating_branch` on
+`{{ l2_instance_name }}_transactions.metadata` — say `originating_branch` on
 sales, or `risk_score` on external transfers. The key is landing
 in the JSON; you can see it in the database. Now you need to
 surface it on the dashboards: as a column in a table, a filter in
@@ -64,7 +64,7 @@ SELECT
     JSON_VALUE(metadata, '$.card_brand')      AS card_brand,
     JSON_VALUE(metadata, '$.cashier')         AS cashier,
     JSON_VALUE(metadata, '$.payment_method')  AS payment_method
-FROM <prefix>_transactions
+FROM {{ l2_instance_name }}_transactions
 WHERE transfer_type = 'sale'
 ```
 
@@ -99,7 +99,7 @@ Add the extraction to the relevant `build_*_dataset()` function:
 SELECT
     -- existing columns ...
     JSON_VALUE(metadata, '$.originating_branch') AS originating_branch
-FROM <prefix>_transactions
+FROM {{ l2_instance_name }}_transactions
 WHERE transfer_type = 'sale';
 ```
 
@@ -173,7 +173,7 @@ becomes friction:
 - Easier to typo (`'$.cardbrand'` silently returns NULL forever).
 
 The promotion path is a schema migration: add the column to
-`<prefix>_transactions` (or `<prefix>_daily_balances`), update
+`{{ l2_instance_name }}_transactions` (or `{{ l2_instance_name }}_daily_balances`), update
 the ETL projection to write the new column directly, and update
 dataset SQL to reference the column instead of `JSON_VALUE`. The
 `DatasetContract` doesn't change — same column name, same type,
