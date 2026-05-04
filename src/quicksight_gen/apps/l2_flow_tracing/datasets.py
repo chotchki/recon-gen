@@ -467,6 +467,15 @@ def declared_rail_names(l2_instance: L2Instance) -> list[str]:
 # (the X.1.b ``tenK-sample-values-V2`` 404 source).
 _TRANSACTION_STATUS_VALUES: tuple[str, ...] = ("Pending", "Posted", "Failed")
 _BUNDLE_STATUS_VALUES: tuple[str, ...] = ("Bundled", "Unbundled")
+# X.1.g — chain + TT completion_status enums. Mirror the CASE branches
+# in build_chain_instances_dataset / build_tt_instances_dataset so QS
+# dropdown options match the projected column values exactly.
+_CHAIN_COMPLETION_STATUS_VALUES: tuple[str, ...] = (
+    "Completed", "Incomplete", "No Required Children",
+)
+_TT_COMPLETION_STATUS_VALUES: tuple[str, ...] = (
+    "Complete", "Imbalanced", "Orphaned",
+)
 
 
 def transaction_status_values() -> list[str]:
@@ -481,6 +490,20 @@ def bundle_status_values() -> list[str]:
     dropdown source — see ``_BUNDLE_STATUS_VALUES`` for rationale.
     """
     return list(_BUNDLE_STATUS_VALUES)
+
+
+def chain_completion_status_values() -> list[str]:
+    """Bounded enum of chain-instances ``completion_status`` values.
+    Static dropdown source on the Chains sheet (X.1.g).
+    """
+    return list(_CHAIN_COMPLETION_STATUS_VALUES)
+
+
+def tt_completion_status_values() -> list[str]:
+    """Bounded enum of transfer-template ``completion_status`` values.
+    Static dropdown source on the Transfer Templates sheet (X.1.g).
+    """
+    return list(_TT_COMPLETION_STATUS_VALUES)
 
 
 def metadata_filter_clause(

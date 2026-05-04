@@ -358,15 +358,20 @@ def test_rails_table_sources_from_postings_dataset() -> None:
     assert table_dataset_ids == {"l2ft-postings-ds"}
 
 
-def test_rails_sheet_has_six_filter_controls() -> None:
-    """M.3.10c wires the filter bar with six controls: 2 date pickers
-    + rail / status / bundle CategoryFilters + cascade key + value."""
+def test_rails_sheet_has_seven_filter_controls() -> None:
+    """X.1.g — the filter bar carries seven parameter-driven controls:
+    2 date pickers + rail / status / bundle ParameterDropdowns +
+    cascade key + value. Pre-X.1.g the rail / status / bundle trio were
+    FilterDropdowns bound to FILTER_ALL_VALUES CategoryFilters; the
+    rewrite moved them onto parameter-bound CategoryFilters with
+    StaticValues source so QS doesn't lazy-fetch dropdown options."""
     app = build_l2_flow_tracing_app(_CFG)
     rails = _sheet_by_name(app, "Rails")
-    # 4 parameter controls (date×2 + meta-key + meta-value)
-    assert len(rails.parameter_controls) == 4
-    # 3 filter controls (rail + status + bundle)
-    assert len(rails.filter_controls) == 3
+    # 7 parameter controls (date×2 + rail + status + bundle + meta-key
+    # + meta-value)
+    assert len(rails.parameter_controls) == 7
+    # 0 filter controls — every control is now parameter-driven.
+    assert len(rails.filter_controls) == 0
 
 
 def test_rails_sheet_parameter_controls_titled_for_analyst() -> None:
@@ -375,9 +380,10 @@ def test_rails_sheet_parameter_controls_titled_for_analyst() -> None:
     app = build_l2_flow_tracing_app(_CFG)
     rails = _sheet_by_name(app, "Rails")
     titles = {ctrl.title for ctrl in rails.parameter_controls}
-    assert {"Date From", "Date To", "Metadata Key", "Metadata Value"} <= titles
-    filter_titles = {ctrl.title for ctrl in rails.filter_controls}
-    assert {"Rail", "Status", "Bundle"} <= filter_titles
+    assert {
+        "Date From", "Date To", "Rail", "Status", "Bundle",
+        "Metadata Key", "Metadata Value",
+    } <= titles
 
 
 # -- Chains sheet (M.3.6) ----------------------------------------------------

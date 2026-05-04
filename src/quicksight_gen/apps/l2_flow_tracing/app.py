@@ -32,6 +32,7 @@ Substep landmarks (each tab gets its own substep):
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Literal
 
 from quicksight_gen.apps.l2_flow_tracing.datasets import (
     DS_CHAIN_INSTANCES,
@@ -43,9 +44,14 @@ from quicksight_gen.apps.l2_flow_tracing.datasets import (
     META_KEY_ALL_SENTINEL,
     META_VALUE_PLACEHOLDER_SENTINEL,
     build_all_l2_flow_tracing_datasets,
+    bundle_status_values,
+    chain_completion_status_values,
     declared_chain_parents,
     declared_metadata_keys,
+    declared_rail_names,
     declared_template_names,
+    transaction_status_values,
+    tt_completion_status_values,
 )
 from quicksight_gen.common import rich_text as rt
 from quicksight_gen.common.config import Config
@@ -432,6 +438,68 @@ _DATE_START_STATIC = "1900-01-01T00:00:00.000Z"
 _DATE_END_STATIC = "2099-12-31T23:59:59.999Z"
 
 
+def _populate_param_filter_dropdown(
+    *,
+    sheet: Sheet,
+    analysis: Analysis,
+    dataset: Dataset,
+    fg_id: str,
+    filter_id: str,
+    param_name: str,
+    col: str,
+    title: str,
+    all_values: list[str],
+    cross_dataset: Literal["SINGLE_DATASET", "ALL_DATASETS"] = "SINGLE_DATASET",
+) -> None:
+    """X.1.g — replacement for the FilterDropdown(empty CategoryFilter)
+    pattern that pre-X.1.g triggered QS's lazy
+    ``tenK-sample-values-V2`` fetch (the cold-CI 404 source).
+
+    Wires three things in lock-step:
+
+    1. A multi-valued ``StringParam`` whose default is the full list
+       of declared values (so "no narrowing" is the analyst's starting
+       state — every row matches because every value is selected).
+    2. A ``ParameterDropdown(MULTI_SELECT, StaticValues)`` that lets
+       the analyst deselect values to narrow.
+    3. A parameter-bound ``CategoryFilter`` scoped to ``sheet`` that
+       does ``column EQUALS pXxx`` (interpreted as IN-style for
+       multi-valued params).
+
+    ``all_values`` is closed-set: callers pass either an L2-derived
+    list (rail / chain / template names) or a hardcoded enum
+    (transaction status / bundle status / completion status). Either
+    way, the universe is bounded at deploy time → no runtime fetch.
+
+    ``cross_dataset`` defaults ``SINGLE_DATASET``; pass ``ALL_DATASETS``
+    when the parameter should narrow several joined datasets that share
+    the same column name (the Templates sheet's ``template_name`` /
+    ``completion_status`` filters across tt-instances + tt-legs).
+    """
+    p = analysis.add_parameter(StringParam(
+        name=ParameterName(param_name),
+        multi_valued=True,
+        default=list(all_values),
+    ))
+    fg = analysis.add_filter_group(FilterGroup(
+        filter_group_id=fg_id,  # type: ignore[arg-type]
+        cross_dataset=cross_dataset,
+        filters=[CategoryFilter.with_parameter(
+            filter_id=filter_id,
+            dataset=dataset,
+            column=dataset[col],
+            parameter=p,
+        )],
+    ))
+    fg.scope_sheet(sheet)
+    sheet.add_parameter_dropdown(
+        parameter=p,
+        title=title,
+        type="MULTI_SELECT",
+        selectable_values=StaticValues(values=list(all_values)),
+    )
+
+
 def _populate_rails_sheet(
     cfg: Config,
     sheet: Sheet,
@@ -509,38 +577,33 @@ def _populate_rails_sheet(
     sheet.add_parameter_datetime_picker(parameter=date_end, title="Date To")
 
     # 3-5. Three "default-all multi-select" CategoryFilter dropdowns
-    # (rail / status / bundle status). Empty values + FILTER_ALL_VALUES
-    # is the AR/L1 idiom for "no filter applied until analyst picks".
-    # X.1.b experiment: tried adding StaticValues to FilterDropdown
-    # to eliminate the cold lazy-fetch path. AWS rejected with
-    # "doesn't support SELECT_ITEMS control with the given properties"
-    # — FilterDropdown + CategoryFilter(FILTER_ALL_VALUES) +
-    # StaticValues isn't a valid QS combo. The right shape is to
-    # restructure as a ParameterDropdown(StaticValues) writing to a
-    # parameter + a parameter-bound CategoryFilter (the pattern the
-    # Metadata Key dropdown already uses). Queued for a follow-up;
-    # for now leave FILTER_ALL_VALUES so the deploy at least lands
-    # cleanly even if the cold-fetch 404s persist for these 3.
-    def _cat_dropdown(*, fg_id: str, col: str, title: str) -> None:
-        cat = CategoryFilter.with_values(
-            filter_id=f"filter-{fg_id}",
-            dataset=ds_postings,
-            column=ds_postings[col],
-            values=[],
-            select_all_options="FILTER_ALL_VALUES",
-        )
-        fg = analysis.add_filter_group(FilterGroup(
-            filter_group_id=fg_id,  # type: ignore[arg-type]
-            cross_dataset="SINGLE_DATASET",
-            filters=[cat],
-        ))
-        fg.scope_sheet(sheet)
-        sheet.add_filter_dropdown(filter=cat, title=title)
-
-    _cat_dropdown(fg_id="fg-l2ft-rails-rail", col="rail_name", title="Rail")
-    _cat_dropdown(fg_id="fg-l2ft-rails-status", col="status", title="Status")
-    _cat_dropdown(
-        fg_id="fg-l2ft-rails-bundle", col="bundle_status", title="Bundle",
+    # (rail / status / bundle status). X.1.g — restructured from
+    # ``FilterDropdown(CategoryFilter(values=[], FILTER_ALL_VALUES))``
+    # to ``ParameterDropdown(StaticValues) + CategoryFilter.with_parameter``.
+    # The previous shape relied on QS's lazy ``tenK-sample-values-V2``
+    # fetch to populate dropdown options at render time; that endpoint
+    # 404s on cold per-CI-run dashboards (3 of the 4 X.1.a-traced
+    # 404s came from these dropdowns). The new shape sources options
+    # from StaticValues at deploy time and the parameter's default
+    # spans every value, so "no narrowing" is the analyst's starting
+    # state without QS having to query anything.
+    _populate_param_filter_dropdown(
+        sheet=sheet, analysis=analysis, dataset=ds_postings,
+        fg_id="fg-l2ft-rails-rail", filter_id="filter-l2ft-rails-rail",
+        param_name="pL2ftRail", col="rail_name", title="Rail",
+        all_values=declared_rail_names(l2_instance),
+    )
+    _populate_param_filter_dropdown(
+        sheet=sheet, analysis=analysis, dataset=ds_postings,
+        fg_id="fg-l2ft-rails-status", filter_id="filter-l2ft-rails-status",
+        param_name="pL2ftStatus", col="status", title="Status",
+        all_values=transaction_status_values(),
+    )
+    _populate_param_filter_dropdown(
+        sheet=sheet, analysis=analysis, dataset=ds_postings,
+        fg_id="fg-l2ft-rails-bundle", filter_id="filter-l2ft-rails-bundle",
+        param_name="pL2ftBundle", col="bundle_status", title="Bundle",
+        all_values=bundle_status_values(),
     )
 
     # 6. Metadata cascade — the M.3.10c novelty.
@@ -692,39 +755,25 @@ def _populate_chains_sheet(
     sheet.add_parameter_datetime_picker(parameter=date_start, title="Date From")
     sheet.add_parameter_datetime_picker(parameter=date_end, title="Date To")
 
-    # 3. Chain — multi-select on the L2-declared parent names. Empty
-    # default + FILTER_ALL_VALUES means "no filter" until analyst picks.
-    chain_filter = CategoryFilter.with_values(
+    # 3+4. Chain + Completion — X.1.g — parameter-bound CategoryFilters
+    # (was FilterDropdown(empty)+FILTER_ALL_VALUES, which forced QS to
+    # lazy-fetch dropdown options at render time).
+    _populate_param_filter_dropdown(
+        sheet=sheet, analysis=analysis, dataset=ds_chain_instances,
+        fg_id="fg-l2ft-chains-chain",
         filter_id="filter-l2ft-chains-chain",
-        dataset=ds_chain_instances,
-        column=ds_chain_instances["parent_chain_name"],
-        values=[],
-        select_all_options="FILTER_ALL_VALUES",
+        param_name="pL2ftChainsChain",
+        col="parent_chain_name", title="Chain",
+        all_values=declared_chain_parents(l2_instance),
     )
-    fg_chain = analysis.add_filter_group(FilterGroup(
-        filter_group_id="fg-l2ft-chains-chain",  # type: ignore[arg-type]
-        cross_dataset="SINGLE_DATASET",
-        filters=[chain_filter],
-    ))
-    fg_chain.scope_sheet(sheet)
-    sheet.add_filter_dropdown(filter=chain_filter, title="Chain")
-
-    # 4. Completion status — multi-select on the computed
-    # completion_status column.
-    completion_filter = CategoryFilter.with_values(
+    _populate_param_filter_dropdown(
+        sheet=sheet, analysis=analysis, dataset=ds_chain_instances,
+        fg_id="fg-l2ft-chains-completion",
         filter_id="filter-l2ft-chains-completion",
-        dataset=ds_chain_instances,
-        column=ds_chain_instances["completion_status"],
-        values=[],
-        select_all_options="FILTER_ALL_VALUES",
+        param_name="pL2ftChainsCompletion",
+        col="completion_status", title="Completion",
+        all_values=chain_completion_status_values(),
     )
-    fg_completion = analysis.add_filter_group(FilterGroup(
-        filter_group_id="fg-l2ft-chains-completion",  # type: ignore[arg-type]
-        cross_dataset="SINGLE_DATASET",
-        filters=[completion_filter],
-    ))
-    fg_completion.scope_sheet(sheet)
-    sheet.add_filter_dropdown(filter=completion_filter, title="Completion")
 
     # 5+6. Metadata cascade — same mechanism as Rails (M.3.10c memory):
     # SQL substitution on the chain-instances dataset for the table's
@@ -860,43 +909,29 @@ def _populate_transfer_templates_sheet(
     sheet.add_parameter_datetime_picker(parameter=date_start, title="Date From")
     sheet.add_parameter_datetime_picker(parameter=date_end, title="Date To")
 
-    # 3. Template — multi-select on declared template names.
-    # ALL_DATASETS so tt-legs narrows in lockstep.
-    template_filter = CategoryFilter.with_values(
+    # 3+4. Template + Completion — X.1.g — parameter-bound
+    # CategoryFilters with StaticValues source. Both keep ALL_DATASETS
+    # so tt-legs narrows in lockstep with tt-instances; M.3.10k
+    # denormalizes the same column names onto tt-legs to make this
+    # work.
+    _populate_param_filter_dropdown(
+        sheet=sheet, analysis=analysis, dataset=ds_tt_instances,
+        fg_id="fg-l2ft-tt-template",
         filter_id="filter-l2ft-tt-template",
-        dataset=ds_tt_instances,
-        column=ds_tt_instances["template_name"],
-        values=[],
-        select_all_options="FILTER_ALL_VALUES",
-    )
-    fg_template = analysis.add_filter_group(FilterGroup(
-        filter_group_id="fg-l2ft-tt-template",  # type: ignore[arg-type]
+        param_name="pL2ftTtTemplate",
+        col="template_name", title="Template",
+        all_values=declared_template_names(l2_instance),
         cross_dataset="ALL_DATASETS",
-        filters=[template_filter],
-    ))
-    fg_template.scope_sheet(sheet)
-    sheet.add_filter_dropdown(filter=template_filter, title="Template")
-
-    # 4. Completion — multi-select on the per-firing completion_status
-    # column (Complete / Imbalanced / Orphaned). M.3.10k: tt-legs
-    # denormalizes completion_status from the per-firing rollup so
-    # ALL_DATASETS lets one dropdown narrow BOTH the Sankey and the
-    # Table together. Picking 'Complete' shows just the firing(s)
-    # that landed cleanly across both visuals.
-    completion_filter = CategoryFilter.with_values(
+    )
+    _populate_param_filter_dropdown(
+        sheet=sheet, analysis=analysis, dataset=ds_tt_instances,
+        fg_id="fg-l2ft-tt-completion",
         filter_id="filter-l2ft-tt-completion",
-        dataset=ds_tt_instances,
-        column=ds_tt_instances["completion_status"],
-        values=[],
-        select_all_options="FILTER_ALL_VALUES",
-    )
-    fg_completion = analysis.add_filter_group(FilterGroup(
-        filter_group_id="fg-l2ft-tt-completion",  # type: ignore[arg-type]
+        param_name="pL2ftTtCompletion",
+        col="completion_status", title="Completion",
+        all_values=tt_completion_status_values(),
         cross_dataset="ALL_DATASETS",
-        filters=[completion_filter],
-    ))
-    fg_completion.scope_sheet(sheet)
-    sheet.add_filter_dropdown(filter=completion_filter, title="Completion")
+    )
 
     # 5+6. Metadata cascade — same mechanism as Rails / Chains.
     # mapped_dataset_params lists BOTH tt-instances + tt-legs so the
