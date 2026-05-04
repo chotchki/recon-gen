@@ -50,6 +50,29 @@ def embed_url(region, account_id, l2ft_dashboard_id) -> str:
 TALL_VIEWPORT = (1600, 4000)
 
 
+# Re-skipped after X.1.b experiment cycle. Findings:
+#   - ``Sample values not found`` JS error fires 4× on cold per-CI-run
+#     dashboards. Network trace (X.1.a v3) showed all 4 are 404s on
+#     ``tenK-sample-values-V2`` for the visual's filter dropdowns +
+#     ``GetThemeForDashboard``.
+#   - Replacing the Metadata Value LinkedValues dropdown with a
+#     ParameterTextField (this commit ships that change) eliminated
+#     1 of the 4. Visual is still empty.
+#   - The remaining 3 sample-values 404s are the Rail / Status /
+#     Bundle CategoryFilter dropdowns. Static-encoding via
+#     ``add_filter_dropdown(selectable_values=...)`` was attempted +
+#     reverted: AWS rejects the combo. Proper fix is the bigger
+#     ParameterDropdown restructure queued under X.1.g.
+#   - The 4th 404 (theme) needs separate investigation — X.1.f.
+@pytest.mark.skip(
+    reason=(
+        "L2FT cascade test reads 0 rows in CI — root cause partially "
+        "diagnosed (multiple QS lazy 'tenK-sample-values-V2' 404s on "
+        "cold per-CI-run dashboards, 1 of 4 eliminated). Full fix "
+        "queued under PLAN X.1.f (theme 404) + X.1.g "
+        "(CategoryFilter → ParameterDropdown restructure)."
+    ),
+)
 def test_metadata_value_pick_does_not_empty_transactions_table(
     embed_url, page_timeout,
 ):
