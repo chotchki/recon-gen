@@ -1,5 +1,52 @@
 # Release Notes
 
+## v8.6.15 — L2FT CategoryFilter dropdowns → ParameterDropdown(StaticValues) (Phase X.1.g)
+
+All 7 multi-select dropdowns on the L2 Flow Tracing dashboard
+(Rails: rail_name / status / bundle_status; Chains:
+parent_chain_name / completion_status; Transfer Templates:
+template_name / completion_status) migrated from
+``FilterDropdown(empty CategoryFilter + FILTER_ALL_VALUES)`` to
+``ParameterDropdown(MULTI_SELECT, StaticValues) +
+CategoryFilter.with_parameter``.
+
+The previous shape forced QuickSight to lazy-fetch each dropdown's
+distinct column values from the ``tenK-sample-values-V2`` endpoint
+at first render. That endpoint 404s on cold per-CI-run dashboards
+(diagnosed in X.1.a / X.1.b), and three of the four
+``Sample values not found`` JS errors traced to the L2FT cascade
+test failure all came from these dropdowns. The new shape sources
+options from a static list at deploy time — no runtime fetch
+needed, and the 404 path is structurally gone.
+
+The migration is centralized behind a
+``_populate_param_filter_dropdown`` helper at
+``apps/l2_flow_tracing/app.py`` that wires three things in
+lock-step: a multi-valued ``StringParam`` defaulting to all
+declared values, a ``ParameterDropdown(MULTI_SELECT, StaticValues)``
+for the option list, and a ``CategoryFilter.with_parameter``
+analysis-side filter. New dataset helpers
+``chain_completion_status_values`` /
+``tt_completion_status_values`` enumerate the bounded enum sets
+the SQL CASE branches produce.
+
+Per-dropdown browser e2e tests added under
+``tests/e2e/test_l2ft_{rails,chains,templates}_dropdowns.py``
+(7 tests, walks every advertised dropdown option) — guards both
+the X.1.g param-bound CategoryFilter narrowing and the broader
+"advertised dropdown value with no seed data" bug class. Already
+flagged two pre-existing data-coverage gaps locally
+(Status='Failed' has no seed rows; Chains
+Completion='No Required Children' is an all-optional chain
+branch never produced) — fixes queued under X.1.i and X.1.j.
+
+The L2FT cascade test (``test_l2ft_metadata_cascade.py``) is
+re-skipped: X.1.b's text-field swap made the Metadata Value
+control a free-text input, so the original
+LinkedValues+MULTI_SELECT cascade-source regression class is
+structurally unreachable. Rewrite (or deletion) queued as
+X.1.g.11.
+
 ## v8.6.14 — Auto-failure-screenshot hook in browser e2e (Phase X.1.a)
 
 Browser tests now capture a full-page screenshot when an exception
