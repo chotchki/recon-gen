@@ -952,7 +952,7 @@ limit_schedules:
       check issuance to surface anomalies.
 seed_hash:
   postgres: 9bacab3a711bc498316fde381bc7a77a9d286ffd975322808ef9fb8a284fa866
-  oracle: 9e3073367038fec9a8f5f6553f25850a68a30b413f1e9c5bef81fe3fd0f5691b
+  oracle: 7e74b5021c8e6429ed8fc215c6ebf1c338fbc52b9cb021b653712b508b19a746
 theme:
   theme_name: "Sasquatch National Bank Theme"
   version_description: "Sasquatch National Bank — forest green and gold palette"

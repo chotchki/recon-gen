@@ -123,7 +123,7 @@ limit_schedules:
     cap: 5000.00
 seed_hash:
   postgres: bfecc9bb05cffb1863576ae0670fde2adda2b58bbe9df985884b5fe8eed38d51
-  oracle: 11311b059ff8f80e51e15d42cdad623a27225a8bd199ec74af288efd623f41dd
+  oracle: a91dfcb72e14d2ee7f44accbd73d4628479b33a3fa8f696236551cfaf849ad29
 theme:
   theme_name: "QuickSight Gen Theme"
   version_description: "Auto-generated dashboard theme"

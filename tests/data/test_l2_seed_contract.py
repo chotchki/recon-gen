@@ -263,22 +263,26 @@ def _quoted_strings(text: str) -> set[str]:
 
 
 def _columns_documented_for(table_suffix: str) -> set[str]:
-    """Read Schema_v6.md's `## Table N — <prefix>_<table>` heading and
-    pull the backticked column names from the immediately-following
-    `### Columns` table.
+    """Read Schema_v6.md's `## Table N — {{ l2_instance_name }}_<table>`
+    heading and pull the backticked column names from the immediately-
+    following `### Columns` table.
 
     ``table_suffix`` is ``"transactions"`` or ``"daily_balances"``.
     """
     doc = SCHEMA_DOC.read_text()
-    # Find the section heading. Match `_<table_suffix>` to be safe.
+    # The doc uses mkdocs-macros placeholder `{{ l2_instance_name }}`
+    # for the per-instance prefix (committed at ff40c8e). Match the raw
+    # template form on disk — we don't render macros for this check.
+    prefix_token = r"\{\{ l2_instance_name \}\}"
     section_re = re.compile(
-        rf"^## Table \d+ — `<prefix>_{table_suffix}`",
+        rf"^## Table \d+ — `{prefix_token}_{re.escape(table_suffix)}`",
         re.MULTILINE,
     )
     m = section_re.search(doc)
     if m is None:
         raise AssertionError(
-            f"Schema_v6.md missing section heading for `<prefix>_{table_suffix}`"
+            f"Schema_v6.md missing section heading for "
+            f"`{{{{ l2_instance_name }}}}_{table_suffix}`"
         )
     # Read until the next `## ` heading.
     rest = doc[m.end():]
@@ -290,7 +294,8 @@ def _columns_documented_for(table_suffix: str) -> set[str]:
     cols_idx = section_body.find("### Columns")
     if cols_idx == -1:
         raise AssertionError(
-            f"`### Columns` subheading missing under `<prefix>_{table_suffix}`"
+            f"`### Columns` subheading missing under "
+            f"`{{{{ l2_instance_name }}}}_{table_suffix}`"
         )
     cols_body = section_body[cols_idx:]
     # Stop at the next `### ` subheading.
@@ -610,11 +615,11 @@ _BROAD_MODE_HASHES: dict[tuple[str, str], str] = {
     ("spec_example", "broad"):
         "227288a18517d90cddb8426e9582156b5ebc488dc159c02da9ae974c30ece9a6",
     ("spec_example", "l1_plus_broad"):
-        "6ac3ec04806d37150cb1b9e903da210bd48aeea4737bba55f20baf4291a76c23",
+        "234307b9ae59fedb6576294da7ea625779d98a08dc85e8214513a8e7fd4e65c1",
     ("sasquatch_pr", "broad"):
         "aa7ca741fab54645561433ac57595bc24e591c420c15e2120218c199e14d888a",
     ("sasquatch_pr", "l1_plus_broad"):
-        "58d379d41ea325a3929708b7617fa7f51dfa044ed9ab5db554b8b51333706b99",
+        "73d1361a08f32c9331ca5e4d6ebc8c3d9ad9b18299d776c832e69cba7f635eca",
 }
 
 
