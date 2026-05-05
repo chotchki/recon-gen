@@ -77,6 +77,18 @@ audit = [
     # absent config.yaml signing block = unsigned PDF (back-compat).
     "pyhanko>=0.30",
 ]
+serve = [
+    # Phase X.2 — self-hosted dashboard renderer (HTMX + d3 + Tailwind
+    # via CDN). Starlette is the ASGI framework; uvicorn[standard]
+    # bundles uvloop + httptools for the production-grade server.
+    # python-multipart is required for Starlette to parse HTMX form
+    # POSTs (the swap-on-mutation pattern). httpx is pulled in for
+    # Starlette's TestClient (tests/unit/test_html_server.py).
+    "starlette>=0.40",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.18",
+    "httpx>=0.27",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -104,6 +116,14 @@ dev = [
     # downloads browser binaries) is still only needed for the e2e
     # browser tests.
     "playwright>=1.40",
+    # Phase X.2 spike — Starlette server + TestClient for HTML renderer
+    # unit tests. Pulled into [dev] so the spike's tests run in the
+    # default `uv sync --extra dev` developer setup without a separate
+    # `--extra serve`.
+    "starlette>=0.40",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.18",
+    "httpx>=0.27",
 ]
 docs = [
     "mkdocs>=1.6",
