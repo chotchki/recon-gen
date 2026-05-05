@@ -140,6 +140,23 @@ def build_theme(cfg: Config, theme: ThemePreset | None) -> Theme | None:
     """
     if theme is None:
         return None
+    # X.1.f — guard: every L2 instance carries an ``instance`` field
+    # that becomes the cfg's ``l2_instance_prefix`` at build time, and
+    # the dashboard's ThemeArn (built downstream by the App tree)
+    # always includes the prefix. Building the theme without the
+    # prefix produces ``theme.json`` with an id that doesn't match
+    # the dashboard's ThemeArn → deployed dashboard has a dangling
+    # binding → QS's ``GetThemeForDashboard`` API call 404s on every
+    # embed. Caught here at build time so a future per-app generator
+    # can't silently regress to the pre-X.1.f bug.
+    if cfg.l2_instance_prefix is None:
+        raise ValueError(
+            "build_theme called with cfg.l2_instance_prefix=None — "
+            "stamp the prefix via cfg.with_l2_instance_prefix("
+            "str(l2_instance.instance)) before this call. The dashboard's "
+            "ThemeArn always includes the L2 segment, so the theme MUST "
+            "too or the binding becomes dangling."
+        )
     preset = theme
     theme_id = cfg.prefixed("theme")
 

@@ -217,6 +217,16 @@ def _generate_l1_dashboard(
     cfg = load_config(config_path)
     out = Path(output_dir)
     l2_instance = _resolve_l2(l2_instance_path)
+    # X.1.f — stamp cfg with the L2 prefix BEFORE building the theme.
+    # Without this, ``build_theme`` calls ``cfg.prefixed("theme")``
+    # without the L2 segment and emits ``theme.json`` with id
+    # ``<resource_prefix>-theme`` while the dashboard's ThemeArn (built
+    # downstream by ``build_l1_dashboard_app`` which DOES stamp the
+    # prefix) references ``<resource_prefix>-<l2>-theme``. Result: the
+    # deployed dashboard has a dangling ThemeArn → QS's
+    # ``GetThemeForDashboard`` API call 404s on every embed session.
+    if cfg.l2_instance_prefix is None:
+        cfg = cfg.with_l2_instance_prefix(str(l2_instance.instance))
 
     click.echo(
         f"L1 Dashboard: account={cfg.aws_account_id}, "
@@ -266,6 +276,9 @@ def _generate_l2_flow_tracing(
     cfg = load_config(config_path)
     out = Path(output_dir)
     l2_instance = _resolve_l2(l2_instance_path)
+    # X.1.f — see L1 Dashboard generator for the full rationale.
+    if cfg.l2_instance_prefix is None:
+        cfg = cfg.with_l2_instance_prefix(str(l2_instance.instance))
 
     click.echo(
         f"L2 Flow Tracing: account={cfg.aws_account_id}, "

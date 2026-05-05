@@ -1,5 +1,36 @@
 # Release Notes
 
+## v8.6.20 — Fix dangling theme binding (Phase X.1.f)
+
+The ``GetThemeForDashboard`` 404 captured in the X.1.b diagnostic
+bundle is fixed. Root cause: the L1 Dashboard and L2 Flow Tracing
+per-app generators in ``cli/_app_builders.py`` called
+``build_theme(cfg, ...)`` before stamping
+``cfg.l2_instance_prefix``, while their downstream ``build_*_app``
+calls stamped it. Result: ``theme.json`` shipped with id
+``<resource_prefix>-theme`` (no L2 segment) but every dashboard's
+``ThemeArn`` referenced ``<resource_prefix>-<l2>-theme``. QS
+embed sessions queried for a theme id that didn't exist on the
+account → 404 on every render.
+
+Investigation + Executives generators stamped the prefix
+correctly, so the bug was specific to L1 + L2FT — exactly the two
+dashboards X.1.b was trying to validate.
+
+Two-layer fix:
+
+1. Stamp ``cfg.l2_instance_prefix`` in both broken generators
+   before the ``build_theme`` call.
+2. Structural guard: ``build_theme`` now raises if the prefix
+   isn't stamped. The dashboard's ThemeArn always includes the L2
+   segment, so the theme MUST too — encoded in the type system
+   so a future per-app generator can't silently regress.
+
+Verified locally: ``aws quicksight describe-theme`` resolves the
+expected id post-deploy; the L2FT Rails browser e2e (which loads
+the deployed dashboard end-to-end) passes against the now-bound
+theme.
+
 ## v8.6.19 — Doc → CLI cross-reference checker (Phase X.1.h.B v0)
 
 New unit test at ``tests/unit/test_docs_cli_invocations.py`` walks
