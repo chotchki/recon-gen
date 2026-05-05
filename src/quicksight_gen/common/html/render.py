@@ -146,15 +146,19 @@ _BOOTSTRAP_JS = """\
       .attr('y', function(d) { return d.y0; })
       .attr('height', function(d) { return d.y1 - d.y0; })
       .attr('width', function(d) { return d.x1 - d.x0; })
-      .attr('fill', '#4682b4')
-      .style('cursor', 'pointer')
+      // Tailwind classes target SVG presentation via fill-* /
+      // stroke-* utilities. Hover + transition give the click
+      // affordance for free; cursor-pointer replaces the inline
+      // .style('cursor') we had before.
+      .attr('class', 'fill-blue-500 hover:fill-blue-700 cursor-pointer transition-colors')
       .on('click', function(event, d) {
         if (visualId) fireAnchorRequest(visualId, d.name);
       });
     svg.append('g').attr('fill', 'none')
       .selectAll('path').data(graph.links).enter().append('path')
       .attr('d', d3.sankeyLinkHorizontal())
-      .attr('stroke', '#999').attr('stroke-opacity', 0.4)
+      .attr('class', 'stroke-slate-400')
+      .attr('stroke-opacity', 0.35)
       .attr('stroke-width', function(d) { return Math.max(1, d.width); });
     svg.append('g').selectAll('text')
       .data(graph.nodes).enter().append('text')
@@ -165,7 +169,7 @@ _BOOTSTRAP_JS = """\
         return d.x0 < width / 2 ? 'start' : 'end';
       })
       .text(function(d) { return d.name; })
-      .style('font', '11px sans-serif');
+      .attr('class', 'fill-slate-700 text-xs font-sans pointer-events-none');
   }
 
   document.addEventListener('htmx:afterSwap', function(evt) {
@@ -185,11 +189,12 @@ _PAGE_SHELL = """\
   <meta charset="utf-8">
   <title>{title}</title>
 {dev_log_meta}
+  <link rel="stylesheet" href="/static/output.css">
   <script src="{htmx_src}"></script>
   <script src="{d3_src}"></script>
   <script src="{d3_sankey_src}"></script>
 </head>
-<body>
+<body class="bg-slate-50 text-slate-900 font-sans antialiased">
 {body}
   <script>{bootstrap_js}</script>
   <script>{dev_log_js}</script>
@@ -273,27 +278,42 @@ _DEV_LOG_JS = """\
 # multi-visual pages would need ``hx-include`` or an
 # ``htmx:configRequest`` hook to fan out the filter values.
 def _render_filter_form(visual_ids: list[str]) -> str:
-    parts = ['  <form id="filter-form">']
-    parts.append('    <label>From <input type="date" name="date_from"></label>')
-    parts.append('    <label>To <input type="date" name="date_to"></label>')
+    form_class = (
+        "flex flex-wrap items-center gap-3 mx-8 mb-6 p-4 "
+        "bg-white rounded-lg shadow-sm border border-slate-200"
+    )
+    label_class = "flex items-center gap-2 text-sm font-medium text-slate-700"
+    input_class = (
+        "px-2 py-1 border border-slate-300 rounded text-sm "
+        "focus:outline-none focus:ring-2 focus:ring-blue-500"
+    )
+    button_class = (
+        "px-3 py-1 bg-blue-600 text-white text-sm font-medium "
+        "rounded hover:bg-blue-700 active:bg-blue-800 "
+        "transition-colors cursor-pointer"
+    )
+    parts = [f'  <form id="filter-form" class="{form_class}">']
+    parts.append(
+        f'    <label class="{label_class}">From '
+        f'<input type="date" name="date_from" class="{input_class}"></label>'
+    )
+    parts.append(
+        f'    <label class="{label_class}">To '
+        f'<input type="date" name="date_to" class="{input_class}"></label>'
+    )
     for vid in visual_ids:
         # One Refresh button per visual. Triggered on click (button's
         # default trigger). Date-input ``change`` was tried on the
         # button via ``from:#filter-form`` but didn't fire reliably
         # in the spike; click is the floor — phase.1 can layer auto-
         # refresh-on-change via SSE or a less-clever trigger config.
-        # ``hx-include="#filter-form"`` collects the date inputs.
-        # ``hx-indicator`` visualises the request — a CSS rule on
-        # ``.htmx-request`` would normally style the button while the
-        # POST is in flight; without one, browsers still show their
-        # native pending-request indicator.
         esc = html.escape(vid)
         parts.append(
             f'    <button type="button"'
             f' hx-post="/visual/{esc}/data"'
             f' hx-target="#visual-data-{esc}"'
-            f' hx-include="#filter-form">'
-            f'Refresh</button>'
+            f' hx-include="#filter-form"'
+            f' class="{button_class}">Refresh</button>'
         )
     parts.append('  </form>')
     return "\n".join(parts)
@@ -337,9 +357,15 @@ def emit_html(app: App, sheet: Sheet, *, dev_log: bool = False) -> str:
         )
     app.resolve_auto_ids()
 
-    body_parts: list[str] = [f"  <h1>{html.escape(sheet.title)}</h1>"]
+    title_class = "text-3xl font-bold mt-8 mx-8 mb-2"
+    desc_class = "mx-8 mb-6 text-slate-600"
+    body_parts: list[str] = [
+        f'  <h1 class="{title_class}">{html.escape(sheet.title)}</h1>',
+    ]
     if sheet.description:
-        body_parts.append(f"  <p>{html.escape(sheet.description)}</p>")
+        body_parts.append(
+            f'  <p class="{desc_class}">{html.escape(sheet.description)}</p>'
+        )
     visual_ids = [str(getattr(v, "visual_id", "")) for v in sheet.visuals]
     body_parts.append(_render_filter_form(visual_ids))
     for visual in sheet.visuals:
@@ -414,16 +440,22 @@ def _render_visual(visual: Any) -> str:
     )
     visual_id = str(raw_visual_id)
     esc_id = html.escape(visual_id)
+    section_class = (
+        "mx-8 mb-6 p-4 bg-white rounded-lg shadow-sm "
+        "border border-slate-200"
+    )
+    h2_class = "text-xl font-semibold text-slate-800 mb-1"
+    subtitle_class = "subtitle text-sm text-slate-500 mb-4"
 
     parts: list[str] = []
     parts.append(
         f'  <section data-visual-kind="{html.escape(kind)}"'
-        f' data-visual-id="{esc_id}">'
+        f' data-visual-id="{esc_id}" class="{section_class}">'
     )
-    parts.append(f"    <h2>{html.escape(title)}</h2>")
+    parts.append(f'    <h2 class="{h2_class}">{html.escape(title)}</h2>')
     if subtitle:
         parts.append(
-            f'    <p class="subtitle">{html.escape(subtitle)}</p>'
+            f'    <p class="{subtitle_class}">{html.escape(subtitle)}</p>'
         )
     parts.append(
         f'    <div id="visual-data-{esc_id}" class="visual-data">'

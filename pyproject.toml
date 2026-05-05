@@ -177,6 +177,12 @@ quicksight_gen = [
     "docs/**/*.yml",
     # Phase O.1.c — hand-authored Graphviz diagrams.
     "docs/**/*.dot",
+    # X.2 spike — built Tailwind CSS for the HTML renderer's
+    # static page shell. ``output.css`` is the build artifact;
+    # ``input.css`` is the @source-config source. Both shipped so
+    # an installed wheel can serve the smoke runner without
+    # forcing the user to run the Tailwind CLI.
+    "common/html/assets/*.css",
 ]
 
 [tool.setuptools.dynamic]
@@ -246,3 +252,8 @@ venv = ".venv"
 # but the codebase treats them as package-internal — suppressing keeps
 # the convention without renaming everything to drop the underscore.
 reportPrivateUsage = false
+
+[dependency-groups]
+dev = [
+    "pytailwindcss>=0.3.0",
+]

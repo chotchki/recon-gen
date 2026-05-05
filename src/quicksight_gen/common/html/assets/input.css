@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+/* X.2 experiment — Tailwind v4 CSS-first config.
+ *
+ * @source directives tell Tailwind which files to scan for class
+ * names. The render module's page-shell HTML lives in render.py
+ * and the bootstrap JS embeds class names in d3 .attr('class', ...)
+ * calls — both are plain string content the regex scanner picks up.
+ */
+@source "../render.py";
+@source "../__main__.py";

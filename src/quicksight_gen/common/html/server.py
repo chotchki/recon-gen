@@ -38,10 +38,13 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
+from pathlib import Path
+
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, Response
-from starlette.routing import Route
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
 
 from quicksight_gen.common.html.render import (
     emit_html,
@@ -113,12 +116,24 @@ def make_app(
         print(f"DEV-LOG {json.dumps(payload)}", file=sys.stderr, flush=True)
         return Response(status_code=204)
 
-    routes: list[Route] = [
+    # Tailwind CSS lives next to this module in assets/; built by
+    # ``.venv/bin/tailwindcss -i .../assets/input.css -o
+    # .../assets/output.css``. Page shell links it as
+    # ``/static/output.css``. Tracked in git so the spike runs
+    # without forcing the user to build CSS first.
+    assets_dir = Path(__file__).parent / "assets"
+
+    routes: list[Route | Mount] = [
         Route("/", index, methods=["GET"]),
         Route(
             "/visual/{visual_id}/data",
             visual_data,
             methods=["POST"],
+        ),
+        Mount(
+            "/static",
+            app=StaticFiles(directory=str(assets_dir)),
+            name="static",
         ),
     ]
     if dev_log:

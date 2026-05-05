@@ -177,7 +177,7 @@ def test_emit_html_returns_complete_document() -> None:
     assert "<html" in out
     assert "</html>" in out.strip()
     assert "<head>" in out
-    assert "<body>" in out
+    assert "<body" in out  # may carry class attributes
 
 
 def test_emit_html_handles_empty_sheet() -> None:
