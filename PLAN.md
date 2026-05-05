@@ -190,6 +190,7 @@ Test: change one accent value in the L2 YAML, all four surfaces shift in lockste
 - [ ] **X.2.c — d3 renderers for the remaining visual primitives.** Currently Sankey + ForceGraph proven. Add one `case` arm + one `renderXxx` JS function each:
   - **KPI** — a single number + delta arrow. ~10 lines of d3 (mostly text styling).
   - **Table** — `<table>` with sortable headers (each `<th>` is a link to `?sort_column=col:desc`). Pagination via `?page_offset=N&page_size=50`. Tailwind classes for striped rows + sticky header.
+    - Comment: for the pagination, a big win over quicksight would be to give a total row count with the pagination (prefer 0-50 of x over page 1 of xx). this will make the e2e testing way easier
   - **BarChart** — d3 bars with axis labels (the plain-English ones added in v8.5.5 carry over via the tree).
   - **LineChart** — d3 line + axes + legend.
   - Per-renderer Layer 2 unit test: stub fetcher, assert SVG / DOM shape matches Layer 1 promise (rect counts, path counts, etc.).
