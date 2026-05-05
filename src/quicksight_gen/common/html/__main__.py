@@ -71,31 +71,37 @@ def _stub_money_trail_fetcher(
 ) -> dict[str, Any]:
     """Deterministic stub responsive to date params.
 
-    Without real data the swap looks the same every time, which
-    masks "is the swap actually firing?" bugs. Tying the link
-    weights to a hash of the date inputs makes each form change
-    visibly redraw the Sankey, proving the round-trip works
-    end-to-end.
+    The link weights use *different* multipliers per ribbon (primes
+    7/11/13/17), so any character change in either date visibly
+    shifts the ratios. d3-sankey scales widths relative to each
+    other and to the canvas — if all ribbons share the same base
+    multiplier, the proportions stay locked and the Sankey looks
+    identical even when the raw values change. Varying ratios per
+    seed unlocks visible change.
+
+    The seed value is also echoed into the first node label so a
+    glance at any swap confirms the round-trip ran with the
+    expected params (decouples "did the swap fire?" from "did the
+    Sankey shape change?").
     """
     seed = sum(ord(c) for c in (params.get("date_from", "") + params.get("date_to", "")))
-    base = max(10, seed % 50)
     # L1-layer: keep persona-blind. Real Money Trail Sankey labels
     # come from <prefix>_inv_money_trail_edges (source/target_display)
     # which the L2 instance's persona block populates; the spike just
     # proves the swap pattern, not the labels.
     return {
         "nodes": [
-            {"name": "External Acquirer"},
+            {"name": f"External Acquirer (seed={seed})"},
             {"name": "Customer DDA"},
             {"name": "GL Control"},
             {"name": "Concentration"},
             {"name": "Funds Pool"},
         ],
         "links": [
-            {"source": 0, "target": 1, "value": base * 100},
-            {"source": 1, "target": 2, "value": base * 80},
-            {"source": 2, "target": 3, "value": base * 60},
-            {"source": 3, "target": 4, "value": base * 40},
+            {"source": 0, "target": 1, "value": max(10, (seed * 7) % 100 + 10)},
+            {"source": 1, "target": 2, "value": max(10, (seed * 11) % 100 + 10)},
+            {"source": 2, "target": 3, "value": max(10, (seed * 13) % 100 + 10)},
+            {"source": 3, "target": 4, "value": max(10, (seed * 17) % 100 + 10)},
         ],
     }
 
