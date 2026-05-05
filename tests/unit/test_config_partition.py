@@ -45,7 +45,7 @@ def test_partition_from_explicit_datasource_arn() -> None:
     """Explicit datasource_arn carries the authoritative partition."""
     cfg = _cfg(
         datasource_arn=(
-            "arn:aws-us-gov:quicksight:us-gov-west-1"
+            "arn:aws-us-gov:quicksight:us-gov-east-1"
             ":111122223333:datasource/x"
         ),
     )
@@ -58,7 +58,7 @@ def test_partition_from_principal_arn_when_no_datasource_set() -> None:
     datasource_arn lands in the right partition."""
     cfg = Config(
         aws_account_id="111122223333",
-        aws_region="us-gov-west-1",
+        aws_region="us-gov-east-1",
         demo_database_url="postgresql://example",
         principal_arns=[
             "arn:aws-us-gov:iam::111122223333:user/operator",
@@ -81,30 +81,30 @@ def test_partition_china_partition() -> None:
 
 def test_dataset_arn_uses_partition() -> None:
     cfg = _cfg(
-        aws_region="us-gov-west-1",
+        aws_region="us-gov-east-1",
         datasource_arn=(
-            "arn:aws-us-gov:quicksight:us-gov-west-1"
+            "arn:aws-us-gov:quicksight:us-gov-east-1"
             ":111122223333:datasource/x"
         ),
     )
     arn = cfg.dataset_arn("my-dataset")
     assert arn == (
-        "arn:aws-us-gov:quicksight:us-gov-west-1"
+        "arn:aws-us-gov:quicksight:us-gov-east-1"
         ":111122223333:dataset/my-dataset"
     )
 
 
 def test_theme_arn_uses_partition() -> None:
     cfg = _cfg(
-        aws_region="us-gov-west-1",
+        aws_region="us-gov-east-1",
         datasource_arn=(
-            "arn:aws-us-gov:quicksight:us-gov-west-1"
+            "arn:aws-us-gov:quicksight:us-gov-east-1"
             ":111122223333:datasource/x"
         ),
     )
     arn = cfg.theme_arn("my-theme")
     assert arn == (
-        "arn:aws-us-gov:quicksight:us-gov-west-1"
+        "arn:aws-us-gov:quicksight:us-gov-east-1"
         ":111122223333:theme/my-theme"
     )
 
