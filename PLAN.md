@@ -77,7 +77,13 @@ Wedge: land auto-failure-screenshot first so all subsequent browser-test investi
 
 - [ ] **X.1.e — Pre-warm Rails sheet (perf hardening — reassess after X.1.b).** Originally proposed as a fix for the L2FT cascade test failure, but X.1.b's investigation will reveal whether the actual root cause was perf-related. If X.1.b resolves the failure without needing pre-warm, this item drops from scope. If perf was a contributing factor: visit Rails once during dashboard warm-up, navigate away, then re-enter for the actual assertion (cache is hot the second time).
 
-### X.2 — Cloud CI cost optimization
+### X.2 — Annoyed at quicksight limitations diversion
+- Soooo as a crazy thought, just as we used the strong type system to support multiple database server dialects, what if we did the same with the quicksight frontend? use the structure to generate a python backend that talks to the database server and a web frontend that renders the tables.
+- Ideally the end user uses the same IAM authentication that is required to see quicksight (or just IAM in general)
+- We don't need the fancy customization and could make all the navigation work easily (and without lying).
+- Also by having it be a dialect, we can compare using the same e2e test suite.
+
+### X.3 — Cloud CI cost optimization
 
 Out of active development iterations — manage cloud spend deliberately. Two-tier CI: a fast loop on every push that touches no AWS, and a gated full-e2e tier triggered by tag pushes (release gate, auto-fired), manual `workflow_dispatch`, or a weekly cron.
 
@@ -90,9 +96,9 @@ Out of active development iterations — manage cloud spend deliberately. Two-ti
   - Answer: Scale to zero is 100% doable, I'd just recommend start /stopping oracle. I'll reconfigure the scaling once we're here. For the start/stop I'll just need to know the additional permission grants.
   - **Concurrency redesign — fold in observed races (May 2026).** The current `e2e.yml` has two structural defects worth fixing as part of the X.2 redesign rather than separately: (1) **within-run race** — `e2e-pg-api` and `e2e-pg-browser` run in parallel within a single workflow run and both `schema apply` against the same `spec_example_*` tables, racing on DROP/CREATE. Caused the X.1.b L2FT cascade test to see an empty matview at assertion time. Fix: make `e2e-pg-browser` `needs: e2e-pg-api` (sequential within a run) OR give each job its own L2 instance prefix so the schemas don't collide. (2) **cross-run cancellation** — concurrency group `e2e-pg` with `cancel-in-progress: false` interacts badly with rapid push+dispatch sequences (observed 1-second cancellation when a push:main run's cleanup overlapped a queued workflow_dispatch). Fix: move concurrency to the workflow level (one run at a time, period) + simplify the per-job concurrency groups. Both are CI-shape changes that fit X.2's scope.
 
-### X.3 - Ask for configuring the row counts and date range for the data seeding
+### X.4 - Ask for configuring the row counts and date range for the data seeding
 
-### X.4 — README + verbiage update (post-X.2)
+### X.5 — README + verbiage update (post-X.2)
 
 - [ ] **X.4 — README + handbook positioning sweep.** We're not currently selling what this tool actually accomplishes. Detailed scope deferred until X.2 lands — the CI shape changes (release-gated true-e2e, fast feedback elsewhere) will likely shift how we describe the project's "shape." Sweep should also cover the docs handbook home pages, not just README — those carry customer-facing claims about what the tool does too.
 

@@ -1,5 +1,71 @@
 # Release Notes
 
+## v8.7.0 — Unified seed-hash lock surface (X.1.k)
+
+The seed-hash lock surface is now a single artifact per
+``(L2 instance, dialect)``: the canonical-anchor SQL itself,
+checked into ``tests/data/_locked_seeds/<instance>.<dialect>.sql``.
+Replaces the four pre-existing lock sites (YAML ``seed_hash:``
+blocks, ``L2Instance.seed_hash`` field, two
+``test_full_seed_hash_lock_*`` Python constants, ``_BROAD_MODE_HASHES``
+dict + matching parametrize test) — the partial-re-lock failure
+mode that ate CI from 2026-05-04 21:58 to the fix-CI commit
+collapses to a single "did you re-run ``data lock``?" question.
+
+### Breaking — CLI
+
+- ``quicksight-gen data hash`` is **removed**. Replaced by
+  ``quicksight-gen data lock`` with these flags:
+  - ``-c <config.yaml>`` — derives dialect from
+    ``demo_database_url`` (was hardcoded to postgres).
+  - ``--l2 <yaml_path>`` — picks which L2 to lock.
+  - default behavior: refresh the locked SQL file.
+  - ``--check`` — verify only; exits non-zero on drift, prints
+    a unified diff (50-line cap) of what shifted.
+- Run once per ``(postgres config, oracle config)`` to cover
+  both dialects. Re-lock after any seed-shape-changing commit
+  (new plant kind, plant emitter change, baseline generator
+  tweak) before pushing.
+
+### Breaking — L2 YAML schema
+
+- ``seed_hash:`` block dropped from the L2 institution YAML
+  schema. ``L2Instance.seed_hash`` field removed from the
+  Python dataclass.
+
+### emit_full_seed output
+
+Every emit now prepends a ``-- SHA256: <hex>`` header
+(deterministic against the body bytes). Saved-to-disk SQL
+self-identifies; the locked file's first line and its
+recomputed-hash value always travel together.
+
+### Test surface
+
+- New ``tests/data/test_locked_seeds.py`` auto-discovers
+  ``_locked_seeds/*.sql`` and byte-compares each fresh emit.
+  Adding a new ``(instance, dialect)`` pair = drop a file; no
+  Python parametrize list to maintain.
+- Locked spec_example at both dialects (~1.5 MB each).
+  Skipped sasquatch_pr — its emit is ~55 MB per dialect, too
+  much repo bloat for a determinism-checkpoint. spec_example
+  is the canonical L2 contract that catches every change to
+  the seed pipeline; sasquatch_pr is a flavor instance whose
+  L2-shape changes are obvious in the YAML diff at PR review.
+
+### Migration
+
+```bash
+# Re-lock both dialects against your local config + L2.
+.venv/bin/quicksight-gen data lock -c run/config.postgres.yaml --l2 path/to/your.yaml
+.venv/bin/quicksight-gen data lock -c run/config.oracle.yaml   --l2 path/to/your.yaml
+```
+
+The new CI gate (``test_locked_seeds.py``) catches missed
+re-locks with one test failure plus a unified SQL diff,
+instead of the 7+ scattered hash-mismatch assertions the
+old multi-site layout produced.
+
 ## v8.6.21 — Per-generator cross-reference consistency test (X.1.f follow-up)
 
 New unit test at
