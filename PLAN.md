@@ -8,21 +8,10 @@ X.2 - add the non quicksight renderer
 X.3 - add sqlite as a database dialect
   - Does not support materialized views but shouldn’t matter due to the local nature of the db
 X.4 - yaml editor - How do you handle the yaml? Aka the shape of the institution?
-- [ ] **Prereq: structure validator errors.** Today `L2ValidationError` carries a prose string — fine for CI. For the editor, errors get rendered inline next to the offending node, so the exception payload becomes API: `{rule_id, offending_entity_ref, human_message, suggested_fix?}`. Same validator code, same invariants — only the error shape changes. Land this before the graph editor itself so the editor can consume errors without parsing prose.
-- [ ] Its a graph, therefore a graph editor would work.
-- [ ] Start editor mode, from scratch yaml or load existing. The validation is the source of constraints.
-- [ ] Have a live rendering of the yaml file at the top.
-- [ ] Add an account or account template, see it appear. Make it a parent of another see the link.
-- [ ] Add toggles to show and hide the connections. Accounts, rails, chains, etc
-- [ ] Allow for live editing of the descriptions and see the markdown (see my site for preview)
-- [ ] In parallel, trigger a rebuild of the tool. You make a yaml edit, it goes. Sqlite may need to be a third database dialect, 100% local at that point, see the whole thing locally, and then decide how far to go into the cloud.
 X.5 - etl helper
-- [ ] Here is the target schema, what is your data source?
-- [ ] What columns map? Can i help you transform to make the mapping easier?
-- [ ] Want me to run and test or give you a sql merge to run it yourself? What dialect?
-- [ ] Crucially, what yaml constructs have data?  What are you still missing?
 X.6 - Stop the documentation lying.
 - [ ] Make the core domain model the source of the documentation site just as the yaml for the shape today. No duplication, use it to build the doc from the models.
+X.7 Cloud cost optimization
 
 
 ---
@@ -50,6 +39,31 @@ _Phase S / T / U / V / W sub-task detail removed during post-phase cleanup. RELE
 ---
 
 ## Phase X — e2e testing expansion + cloud CI cost optimization
+
+### Parallelism map
+
+Phase X has tracks that genuinely don't touch each other. Identifying them up front so they can be farmed to isolated agent worktrees (or to humans on side branches) without redundant merge pain.
+
+**Hard sequential — finish before fanning out:**
+- **X.2.a → X.2.b → X.2.f** — architecture cleanup → REST surface → real data fetcher. These set the foundation; every parallel track that touches App 2 depends on them. Lock these first, on a single branch, with a single owner.
+- **X.2.h, X.2.j, X.2.k** — depend on the body of X.2 being done.
+
+**Parallel candidates, in descending isolation:**
+
+1. **X.3 (SQLite dialect) — strongest parallel candidate.** Touches `common/sql/`, `common/l2/schema.py`, new locked seed file. Zero overlap with X.2 HTMX work. Can run in a worktree-isolated agent end-to-end through X.3.f. Skip X.3.g (CI cells) until X.2.h lands so the matrix cells line up. **Integration risk:** the locked seed file at `tests/data/_locked_seeds/spec_example.sqlite.sql` will need a re-lock if the seed pipeline shifts during X.2 — small risk, easy to detect via `data lock --check`.
+
+2. **X.2.g per-app builds** (Executives / Investigation / L2FT / L1) once X.2.c (renderers) + X.2.f (data fetcher) land. Each app is its own `apps/<app>/` world. **Integration risk:** the shared renderer (`common/html/render.py`) is the contention surface — one app discovers it needs a feature the others haven't asked for, the renderer changes mid-flight. **Mitigation:** sequence X.2.c fully BEFORE fanning the app builds, AND have a single owner gate-keep `render.py` edits during X.2.g. App tracks PR their `apps/<app>/` changes; renderer changes go through the gate-keeper.
+
+3. **X.2.c per-visual renderers** (KPI / Table / BarChart / LineChart). Each is one `case` arm in bootstrap + one JS function. All touch one file (`render.py`) so either sequence them or have agents open per-renderer PRs the human merges in order. The merge cost per renderer is small — sequencing is probably easier than coordinating.
+
+4. **X.5 backend** (`etl.yaml` schema + loader + `--end-date` CLI) can start parallel to X.4 — the UI piece blocks on App 1 existing but the data plumbing doesn't.
+
+**Integration pain mitigations (because integration IS always pain):**
+- **Frequent merges back to the integration branch (X.2 main-line) — don't let parallel tracks drift for more than 2-3 days.** Long-lived branches accumulate conflict surface logarithmically.
+- **Lock the foundation before fanning.** X.2.a/b/f decisions made AFTER agents fan out cost N times the cost made before.
+- **Per-track CI** that runs against the integration branch's tip, not just the track branch — catches "my track passed in isolation but doesn't compose."
+- **Single owner per shared file.** `render.py` and the data fetcher are the contention hotspots; everything else is per-app or per-dialect and naturally parallel.
+- **Track owners write a brief integration note when their work lands.** "I added the Table renderer's `?sort_column` query param — the Sheet builder downstream needs to wire it" type thing. Captures the cross-track ripple before it bites.
 
 ### X.1 — e2e fixes + auto-screenshot foundation
 
@@ -100,65 +114,260 @@ Wedge: land auto-failure-screenshot first so all subsequent browser-test investi
 
 - [ ] **X.1.e — Pre-warm Rails sheet (perf hardening — reassess after X.1.b).** Originally proposed as a fix for the L2FT cascade test failure, but X.1.b's investigation will reveal whether the actual root cause was perf-related. If X.1.b resolves the failure without needing pre-warm, this item drops from scope. If perf was a contributing factor: visit Rails once during dashboard warm-up, navigate away, then re-enter for the actual assertion (cache is hot the second time).
 
-### X.2 — Self-hosted dashboard renderer (QuickSight as one dialect, not THE frontend)
+### X.2 — App 2: self-hosted dashboard renderer (QuickSight as one dialect, not THE frontend)
 
-**Reframe.** Same way `Dialect.POSTGRES`/`ORACLE` are SQL dialects projected from one schema model, the dashboard tree (`common/tree/`) becomes a **dashboard model** with three renderers: QuickSight JSON (today), audit PDF (today, proves the pattern works), and a self-hosted HTML renderer (this phase). The tree's job description sharpens — it IS the dashboard, not a description of QS dashboards. The QS dialect becomes one of three, not the canonical one.
+**Reframe.** Same way `Dialect.POSTGRES`/`ORACLE` are SQL dialects projected from one schema model, the dashboard tree (`common/tree/`) becomes a **dashboard model** with three renderers: QuickSight JSON (today), audit PDF (today, proves the pattern works), and a self-hosted HTML renderer (this phase). The tree's job description sharpens — it IS the dashboard, not a description of QS dashboards.
 
-**Stack — Python backend + HTMX + Tailwind + CDN-loaded chart libraries.**
-- No bundler, no TS, no npm — same instinct as pip→uv. Containment of language spread is intentional.
-- Charting: HTMX extension pattern. Server renders `<div data-chart="sankey" data-rows='[...]'></div>`; an `hx-on::after-swap` handler re-hydrates chart divs in any swapped fragment via [d3](https://github.com/d3/d3) loaded from a CDN once. d3 is the right primitive — pure SVG, no bundler needed, native Sankey via `d3-sankey`, and it's the data-binding layer underneath vega-lite / ECharts so we keep the option to layer one of those later if we want declarative chart specs. ~50 lines of bootstrap JS total. Tailwind handles layout, not visualization, so the d3 dependency is unavoidable for Sankey/line/bar.
-- **Auth in two phases.** Phase 1 (sub-spike + developer tool): NONE. Local HTTP, DB creds from `config.yaml`, no auth code at all. The dashboard is read-only — there are no writes to authorize. Phase 2 (production / multi-user): OIDC at the front door via ALB + IAM Identity Center / Cognito, JWT in `X-Amzn-Oidc-Data` header, backend reads identity from JWT claims, exchanges via STS `AssumeRoleWithWebIdentity` for short-lived per-user AWS creds if it needs to talk to RDS via IAM Auth.
-- **Authorization is just "can this identity read these L2 prefixes?"** Read-only collapses the permission model to a single lookup: `identity → list of L2 instance prefixes`. Render those dashboards, hide the rest. No per-row SQL injection, no QS RowLevelSecurity datasets, no per-action verbs — the L2 instance prefix already segments data by customer (`qs_gen_acme_bank_*` vs `qs_gen_other_bank_*`). Structurally simpler than the QS path today.
+**Stack** (all proven via spike): Python backend (Starlette) + HTMX + Tailwind v4 (via `pytailwindcss` standalone CLI) + d3 from CDN. No bundler, no TS, no npm. Read-only surface, no auth in X.2 (auth deferred to backlog).
 
-**Why this is genuinely worth building, not just a "annoyed" diversion:**
-- **RESTful filtering as the killer USP.** Every (sheet, filter-set) is a URL. Bookmarkable, shareable, browser-back works. Compare to QS embed URLs (signed, single-use, don't carry filter state — see project memory `Embed URL must be generated against the dashboard region`). For audit/compliance contexts, "click this URL to see what I saw on May 5 at 3pm" is a regulator-grade affordance QS can't deliver. Pairs naturally with the existing audit PDF — both become reproducible-view artifacts.
-- **Server-side cache keys are trivial.** `(sheet, filter-set)` → SQL result. URL == cache key. This is the SPICE-equivalent for the Python backend.
-- **Bypasses the QS quirks log entirely.** URL parameter sync issue, dropdown click-target weirdness, spinner-forever footgun, render flakes — all of it stops being our problem. The quirks log stops growing for the HTMX dialect.
-- **No QS per-user license fees** for dashboards on the HTMX dialect. Real cost story for customers.
-- **Same e2e harness gates both dialects.** Layer 1 (matview check) is renderer-agnostic; Layer 2 swaps the driver. Bug-parity falls out of the harness shape already in place. _This is why X.1.c (Sasquatch L1 render flake) and X.1.d (apply layered pattern to all browser e2e) MUST land before X.2 starts — they harden the test suite that becomes the dialect-comparison gate._
+**Browser support.** Modern evergreens only — Chrome / Edge / Firefox / Safari, current minus 2 versions. No IE, no legacy mobile webview support. The HTMX + d3 + Tailwind v4 stack we're building on doesn't push beyond standard ES6 / modern SVG / CSS variables, so this is essentially "browsers people actually use today" — no exotic features being demanded.
 
-**Hard parts that are not impossible:**
-- **Sheet count + visual richness.** L1 dashboard alone is 11 sheets × 5–15 visuals each. MVP scope is ~6–12 weeks for L1 alone; L2 Flow Tracing / Investigation / Executives each add additional render time.
-- **Interactive filtering at scale.** 11 sheets × ~10 visuals × N filters = hundreds of HTMX round-trips per session. Fine for the demo; needs the cache layer above before scaling to per-customer production traffic.
-- **Embedding context.** Currently QS dashboards embed in customer apps via signed URLs. The HTMX dialect needs its own iframe-safe story (X-Frame-Options, signed-URL handoff, etc.).
-- **Maintenance.** Two implementations of the same surface = two places bugs hide. The "same e2e suite" mitigates but doesn't eliminate.
+**Why it's worth building (not just an annoyed diversion):**
+- **RESTful filtering as the killer USP.** Every (sheet, filter-set) is a bookmarkable URL — "click this URL to see what I saw on May 5 at 3pm." QS embed URLs are signed, single-use, don't carry filter state. Pairs with the audit PDF — both become reproducible-view artifacts.
+- **Server-side cache keys are trivial.** `(sheet, filter-set)` → SQL result. URL == cache key. SPICE-equivalent for the Python backend, with edge / browser caching free via Cache-Control.
+- **Bypasses the QS quirks log entirely.** URL parameter sync, dropdown click-target weirdness, spinner-forever footgun, render flakes — none of these surface for the HTMX dialect.
+- **No QS per-user license fees.** Real cost story for customers.
+- **Same e2e harness gates both dialects.** Layer 1 (matview check) is renderer-agnostic; Layer 2 swaps the driver. Bug-parity falls out of the harness shape already in place.
 
-**Sub-spike before committing to the phase** — ~2 days of scoped work that tells us the thesis holds (or doesn't). NO auth in any spike step — read-only + local HTTP + DB creds from `config.yaml` is enough to validate the architecture:
+**Hard parts (still real, but smaller post-spike):**
+- **Sheet count + visual richness.** L1 dashboard alone is 11 sheets × 5–15 visuals each. Each app's surface needs the full visual catalog wired (KPI / Table / BarChart / LineChart / Sankey + filters).
+- **Embedding context.** QS dashboards embed via signed URLs; HTMX dialect needs its own iframe story when phase.2 lands. Out of scope here.
+- **Maintenance.** Two render implementations of the same surface — Layer 2 e2e parity (the dialect-comparison gate) is what keeps them honest.
 
-- [ ] **X.2.spike.1 — Money Trail as static HTML.** Pick the Investigation app's Money Trail sheet (one Sankey + one table). Build `emit_html(sheet)` that server-renders the existing tree object as HTML. No filters yet, no auth, no embedding, no HTMX. Just proves "tree → HTML" is a clean projection. **Design constraint:** rendering functions take `tree: App` (or `Sheet`/`Visual`) as a parameter — never load from disk inside. This keeps the door open for X.4's stateful editor future (where the tree lives in a per-session in-memory object) without coupling the spike to it. Outcome: either the L1 primitives need a cleanup pass first, or they're frontend-agnostic enough to fan to a second dialect.
-- [ ] **X.2.spike.2 — Add ONE filter via HTMX swap.** Date range dropdown that re-renders the visuals when changed. Validates the interactive pattern + the chart-hydration hook on swapped fragments. **Architectural note:** this `hx-post` swap-on-mutation pattern is structurally identical to X.4's swap-on-edit pattern, just with a smaller mutation surface (filter values vs YAML body). What spike.2 proves about HTMX's swap latency at the visual level transfers directly to X.4's editor latency. Stay stateless on purpose for the spike — sessions are an X.4 concern. Outcome: HTMX-vs-SPA budget assessment.
-- [ ] **X.2.spike.3 — Run the harness's Layer 2 against it.** The dialect-comparison thesis. If the layered harness catches a render bug in HTMX the same way it catches one in QS, the architecture is sound.
-- [ ] **X.2.spike.4 — Decision gate.** If 1–3 work cleanly, X.2 becomes a structured phase. If not, the architecture-improvement value still lands (whatever needed cleanup in L1 surfaced) and X.2 closes as a parking-lot idea.
+**Spike sequence — proven on `phase-x-2-htmx-renderer` branch (Apr-May 2026):**
 
-**Phase split if the spike succeeds:**
+- [x] **X.2.spike.1** — `emit_html(app, sheet)` projects tree → HTML. Pure projection, takes in-memory tree node, never touches disk. spike.1.fix promoted `App._resolve_auto_ids` to public + threaded App through `emit_html` so `data-visual-id` attributes resolve before render.
+- [x] **X.2.spike.2** — Starlette server + HTMX swap + d3 hydration on swapped fragments. Pluggable `DataFetcher` callable so spike tests stay DB-free. `python -m quicksight_gen.common.html` is the smoke runner.
+- [x] **X.2.spike.3** — Layer 2 (Playwright + WebKit) against the local Starlette server. Positive case asserts SVG rect/path counts match Layer 1 fetcher's promise; negative case (route-intercepted empty body) catches the regression class. Same shape as the QS harness's Layer 2, different selectors. Dialect-comparison thesis proven.
+- [x] **X.2 capability experiments** — clickable Sankey via d3 + `htmx.ajax` (anchor click pattern), dev-log + HTMX event forwarder, Tailwind v4 CSS via pytailwindcss CLI (styles HTML + d3 SVG), ForceGraph visual via d3-force (proves new visual kinds add as one `case` arm + one render function).
 
-- [ ] **X.2.phase.1 — Developer-tool deploy.** Build out remaining sheets (L1 dashboard 11 sheets first, then L2FT / Investigation / Executives in dependency order). Still NO auth — ships as a `python -m quicksight_gen.serve` developer tool. The iteration speed advantage over QS deploy round-trips (`generate JSON → CreateDashboard → wait → embed → click` ≈ 30s+ vs `template re-render` ≈ <100ms) is itself worth shipping even if X.2.phase.2 never gets built. Customers iterate on dashboard shape with their own data, locally.
-- [ ] **X.2.phase.2 — Multi-user OIDC.** Add ALB + IAM Identity Center / Cognito front door. Backend trusts ALB-attached `X-Amzn-Oidc-Data` JWT, reads identity, looks up the user's allowed L2 prefixes, renders only those. Per-request STS `AssumeRoleWithWebIdentity` exchange if RDS IAM Auth is enabled — moves data-access enforcement to the database layer entirely. ALB does the OIDC dance; backend is ~50 lines of JWT verification + a `(identity → [prefix, ...])` lookup table.
+Architecture decisions captured in `docs/x_2_design_thoughts.md` (App 1 vs App 2 split, all-GET REST surface, plural nouns + nested resource paths, query-param state, cascade-rename via `HX-Trigger`, force-directed as shared primitive across three surfaces).
 
-**Why phase.1-without-auth is real, not just a corner-cutting story:** read-only operations have no writes to authorize. The QS dashboard surface is a read-only data view by definition (BI / observability). The "do you have access" check is binary; no "can you edit this row" subtleties. Skipping auth in phase.1 isn't deferring complexity, it's recognizing that the read-only surface doesn't need it for the local-iteration workflow.
+**Test matrix expansion (X.2 + X.3 woven together).** As renderers + DB backends multiply, the regression surface multiplies. The matrix that needs to stay green to call this "parity":
 
-**Other notes:**
-- **Bake the docs site into the same Python backend** — mkdocs already builds static HTML; serve it from the same FastAPI/Starlette/Flask app. One deploy, one auth surface, one cache. Removes the "docs live on Pages, dashboards live in QS, audit PDF lives wherever" three-surface story.
-- **The customer doesn't know exactly what they want yet.** The HTMX dialect's iteration speed (no QS deploy round-trip, no `analyses describe` 10s wait) becomes a UX exploration tool. Generate a sketch, iterate on filter shapes, decide what's useful, then commit to wiring it through QS.
+|                 | Postgres | Oracle | SQLite (X.3) |
+|-----------------|----------|--------|--------------|
+| **Layer 1** (matview check, renderer-agnostic — `_layer1_query.py`) | ✓ today | ✓ today | X.3.g |
+| **L2 QS JSON dialect** | ✓ today (`e2e-pg-api/browser`) | ✓ today (`e2e-oracle-api`) | N/A — QS doesn't read SQLite |
+| **L2 Audit PDF dialect** | ✓ today (`tests/audit/`) | ✓ today | X.3.g |
+| **L2 HTMX dialect (this phase)** | X.2.h | X.2.h | X.3.g |
+| **Cross-tool agreement** (U.8.b becomes 4-way: `expected == PDF == QS == HTMX`) | X.2.j | X.2.j | X.3.g |
 
-### X.3 — Cloud CI cost optimization
+Eight cells worth gating on (3 renderers × 3 DBs minus QS-on-SQLite). Five exist today; X.2.h adds two (HTMX × {PG, Oracle}); X.3.g adds three (Layer 1 + Audit PDF + HTMX, all on SQLite); X.2.j wraps it with the 4-way agreement contract that catches "all the renderers passed but they disagreed." Cost shape (which cells need AWS, which run on Docker / locally) lives in X.7.
 
+**Parity-as-much-as-possible principle.** Some cells are physically unsupportable — QS×SQLite is the obvious one (QuickSight can't read SQLite; no native datasource type for it). Future combos may surface similar gaps (e.g. a renderer that doesn't support a particular visual kind, a DB feature missing on one dialect). When that happens: mark the cell N/A in the matrix with a one-line reason, run every other combination in the row + column. The principle is parity wherever the combination is technically possible — not parity everywhere, regardless of physics.
+
+**Theme parity — its own 4-way test.** Distinct concern from data parity. The L2 YAML's `theme:` block (`common/l2/theme.py::ThemePreset`) is the single source of truth for accent / primary_fg / link_tint / etc. Today QS dashboards, audit PDF, and the docs site all consume it (Phase U.1 cover, v8.6.10 docs CSS injection). App 2 (X.2) currently uses hardcoded Tailwind classes — needs to consume the same theme. Once it does, the four visual surfaces below should render the same accent for the same theme spec:
+
+| Surface | Status |
+|---------|--------|
+| QS dashboard | ✓ today (`build_theme(cfg, theme)` → QS Theme JSON) |
+| Audit PDF | ✓ today (Phase U.1 cover) |
+| Docs site | ✓ today (v8.6.10 CSS injection) |
+| App 2 HTMX | X.2.l |
+
+Test: change one accent value in the L2 YAML, all four surfaces shift in lockstep. Becomes a release-gate visual smoke (one screenshot per surface; pixel-diff or eyeball — eyeball acceptable since the gate is "do they all match the spec," not "are they pixel-identical").
+
+**Scope to feature parity + e2e tests passing:**
+
+- [ ] **X.2.a — Architecture cleanup post-spike.** Promote the experimental code into the phase shape:
+  - Lift `tests/spike/test_html_layer2.py` → `tests/e2e/_harness_html2.py` (Layer 2 against HTMX dialect, fixture pattern matches the QS harness).
+  - Replace the smoke runner's stub fetcher with a real DB-backed `DataFetcher` factory; keep the stub callable for unit tests.
+  - Move the `python -m quicksight_gen.common.html` entry point under a Click subcommand (`quicksight-gen serve` group: `app2 apply`, mirroring the existing `schema | data | json | docs | audit` shape).
+  - Branch consolidation pass — squash / rebase the spike experiments before further work, get the diff reviewable.
+  - **JS tooling — same standalone-binary pattern as pytailwindcss:** add `biome` (Rust binary, single executable — replaces eslint + prettier + a minifier) via `biome-py` on PyPI or a 30-line downloader if no current wrapper. Adds to `[dev]` extras. CI step: `biome lint` + `biome check --write` (format) + `biome --apply --write --max-diagnostics=0` to gate merges. Minify in the build pipeline alongside the tailwindcss build. **JS unit tests:** extend the existing Playwright pattern — small HTML fixtures under `tests/js/` load the function under test in a real browser context, exercise it, write results to `window.__test_result` for Playwright to assert on. No jest / vitest / Node dependency. Trade-off: each test costs ~50ms Playwright launch overhead; we accept that because the JS is DOM/HTMX-coupled enough that real-browser tests catch the right class of bugs.
+
+- [ ] **X.2.b — All-GET REST surface per design doc.** Drop `POST /visual/{id}/data`. New routes (plural nouns, nested resources):
+  - `GET /` — landing page, lists `/dashboards`.
+  - `GET /dashboards` — fixed list of the four apps for the served L2 instance (L1 Dashboard + L2 Flow Tracing + Investigation + Executives). One App 2 process serves one L2 instance — multi-tenancy is the auth use case (deferred to phase.2).
+  - `GET /dashboards/:id` — redirect to first sheet OR render dashboard chrome + first sheet inline.
+  - `GET /dashboards/:id/sheets/:id` — full sheet content.
+  - `GET /dashboards/:id/sheets/:id/visuals/:id` — single visual (with chart data inline). Filter values via query string.
+  - Bookmarkability: `hx-push-url="true"` on every swap so URL stays in sync with filter / sort / page state. Browser back/forward replays.
+  - Cache-Control headers on data routes (Money Trail data scoped to a date range becomes cacheable per-tuple).
+  - `POST /log` (dev-only) is the only POST that survives — for the dev-log forwarder.
+
+- [ ] **X.2.c — d3 renderers for the remaining visual primitives.** Currently Sankey + ForceGraph proven. Add one `case` arm + one `renderXxx` JS function each:
+  - **KPI** — a single number + delta arrow. ~10 lines of d3 (mostly text styling).
+  - **Table** — `<table>` with sortable headers (each `<th>` is a link to `?sort_column=col:desc`). Pagination via `?page_offset=N&page_size=50`. Tailwind classes for striped rows + sticky header.
+    - Comment: for the pagination, a big win over quicksight would be to give a total row count with the pagination (prefer 0-50 of x over page 1 of xx). this will make the e2e testing way easier
+  - **BarChart** — d3 bars with axis labels (the plain-English ones added in v8.5.5 carry over via the tree).
+  - **LineChart** — d3 line + axes + legend.
+  - Per-renderer Layer 2 unit test: stub fetcher, assert SVG / DOM shape matches Layer 1 promise (rect counts, path counts, etc.).
+
+- [ ] **X.2.d — Filter primitives wired.** Currently date range form. Add:
+  - **ParameterDropdown** — `<select>` driven by L2 / dataset values; change fires a swap with the new value in `?param_<name>=...`.
+  - **CategoryFilter** — multi-select check group; change fires `?filter_<col>=v1,v2,v3`.
+  - **NumericRange** — two inputs or slider; fires `?min_<col>=N&max_<col>=M`.
+  - All values flow into URL query params per X.2.b. No form state.
+
+- [ ] **X.2.e — Sheet structure + cross-sheet + cross-app navigation.** Sheet tabs across the top of `/dashboards/:id`. Click switches sheet via `hx-get` + `hx-push-url`. Cross-sheet drills (currently QS `CustomActionURLOperation`) become plain `<a href>`s in the rendered HTML — `/dashboards/:id/sheets/:other-sheet?param_account_id=...`. URL-as-state means the QS URL-param-doesn't-sync-controls quirk doesn't surface.
+  - **Cross-app drills (QS-blocked, App 2 unblocks).** L1 → Investigation drills are dropped under QS (`project_qs_url_parameter_no_control_sync` memory: K.4.7 — URL fragment sets parameter but doesn't push values into bound controls). App 2's URL-as-state model makes this trivial — `<a href="/dashboards/investigation/sheets/money-trail?param_anchor=...">` works. Wire the previously-deferred K.4.7 cross-app drills back in for the App 2 dialect; QS dialect stays as-is. Drill destinations need to know the OTHER app's URL pattern — resolve at render time via a small `app_for(visual)` helper that maps tree references to dashboard ids.
+
+- [ ] **X.2.f — Real data fetcher.** Replace the stub `DataFetcher` callable with an implementation that:
+  - Takes the visual's dataset SQL (already in `apps/<app>/datasets.py`).
+  - Substitutes filter values into the SQL (parameterized — never string-format user input).
+  - Executes against the configured DB (Postgres / Oracle, dispatched via `Dialect`).
+  - Returns rows shaped per visual kind (Table → list of dicts, Sankey → nodes/links, KPI → number, etc.).
+  - Per-visual `data_shape()` helper on each tree primitive that documents the JSON shape its d3 renderer expects.
+
+- [ ] **X.2.g — Build out the 4 apps.** Order by dependency / risk, lightest first to surface architecture gaps early:
+  - **X.2.g.1 — Executives** (4 sheets, simplest visuals: KPI + Table + BarChart). Fastest end-to-end signal that the renderer carries a real app.
+  - **X.2.g.2 — Investigation** (5 sheets: Money Trail Sankey already proven via spike, Account Network already a force-directed shape).
+  - **X.2.g.3 — L2 Flow Tracing** (4 sheets: Rails, Chains, Templates, Hygiene — heavy on ParameterDropdown + cascading filters from X.1.g).
+  - **X.2.g.4 — L1 Dashboard** (11 sheets — biggest surface, do last when the renderer is settled).
+  - Per-app smoke: render every sheet, walk every drill, exercise every filter.
+  - **Discipline (pre-X.6 docs work):** every new sheet's `description` and every visual's `subtitle` is the single source of truth for the corresponding docs page. CLAUDE.md already mandates "every visual has a subtitle" — extend the rule to "the subtitle IS the docs source of truth." X.6 will read these strings to auto-generate walkthroughs; if they live in tree primitives now, X.6 has nothing to refactor.
+  - **App Info sheet parity.** Every QS app has the `Info` canary as its last sheet (CLAUDE.md mandate; renders App version + per-matview latest_date + deploy stamp). App 2 serves the same Info sheet — same diagnostic value when a sheet renders empty: glance at Info first to tell "App 2 is healthy, the data/SQL is the bug" from "App 2 itself broke." Renderer treats the Info text-box visual the same as a KPI card.
+
+- [ ] **X.2.h — Layer 2 e2e against the HTMX dialect.** Lift `tests/spike/test_html_layer2.py` pattern across the harness. Same fixture shape as the QS harness, same Layer-1 + Layer-2 assertions, different selectors:
+  - Add an `HTMX_HARNESS=1` env gate alongside `QS_GEN_E2E=1`.
+  - Re-use `_layer1_query.py` (already renderer-agnostic per X.1.d.1).
+  - Mirror every existing browser test (test_l1_*, test_inv_*, test_exec_*, test_l2ft_*) against the HTMX dialect.
+  - **Per-DB cells.** HTMX runs against PG + Oracle now (Docker, no AWS — HTMX dialect doesn't need QuickSight). SQLite cell lands when X.3 ships. Two new GHA jobs: `e2e-htmx-pg`, `e2e-htmx-oracle` (+ `e2e-htmx-sqlite` post-X.3).
+  - **Performance budget gate.** New `tests/perf/test_swap_latency.py` against the local Starlette server: assert P95 swap latency under a budget (initial: 100ms server-side per swap; revisit after the 4-app surface lands). Pass/fail in CI. Catches the day someone introduces an N+1 query that ruins the iteration UX. The "we run circles around QS" claim becomes measurable, not aspirational.
+  - The dialect-comparison gate: same Layer 2 assertion catches a render bug in both dialects = parity proven.
+
+- [ ] **X.2.i — Embed MkDocs into App 2.** `Mount("/docs", StaticFiles(directory=mkdocs_build_dir))` on the Starlette app. One process, one cache, one auth front (when phase.2 lands). Per the design thoughts. Removes the "docs live on Pages, dashboards live in QS, audit PDF lives wherever" three-surface story.
+
+- [ ] **X.2.j — Production validation + 4-way cross-tool agreement + backward-compat.** Deploy App 2 against real Aurora across all 4 apps with sasquatch_pr seed. Visual eyeball + Layer 2 e2e green = the "feature parity with QS, minus the bugs" claim verified. Cross-tool agreement extends U.8.b's three-way contract (`expected == PDF == QS dashboard`) to four-way (`expected == PDF == QS dashboard == HTMX dashboard`). Per DB. Becomes a release-gate test in `e2e-against-testpypi`. Catches the "all renderers individually passed but they disagree on a violation row" failure class — the only test that really earns the parity claim.
+  - **Backward-compat assertion.** Existing QS deploys keep working through X.2-X.5 ship. Both local CI (`pytest tests/json/`) and `e2e-against-testpypi` already exercise the QS surface — the assertion is "those tests stay green for the entire phase X, no exceptions." If a tree primitive change for App 2 breaks QS emit, that's a regression to be fixed, not a tradeoff to accept.
+
+- [ ] **X.2.l — Theme integration: L2 YAML drives Tailwind rendering.** Currently App 2 hardcodes Tailwind classes (`bg-slate-50`, `fill-blue-500`, etc.) — same source-of-truth violation as hand-written docs. Wire L2 theme through:
+  - `common/l2/theme.py::ThemePreset` is already the canonical theme. App 2's page shell injects per-instance CSS variables in `<head>` (`--color-accent: #...; --color-primary-fg: #...; ...`) read from the resolved theme.
+  - Tailwind v4's `@theme` block in `input.css` declares semantic color tokens (accent, primary-fg, link-tint, surface, surface-muted) that resolve to the CSS variables. Tailwind generates `bg-accent`, `text-accent`, `fill-accent`, etc. utilities that consume them.
+  - Replace hardcoded utility names in `render.py` (`bg-slate-50` → `bg-surface`, `fill-blue-500` → `fill-accent`, etc.) so the Tailwind output is theme-token-driven, not literal-color-driven.
+  - d3 SVG class strings in the bootstrap JS get the same treatment — `fill-accent` instead of `fill-blue-500`.
+  - **4-way theme parity test** (per the matrix above): single screenshot per surface (QS dashboard, audit PDF, docs site, App 2 HTMX) generated with the same L2 theme spec. Eyeball comparison gate at release. Fast — runs against the existing demo deploy.
+  - Honors the silent-fallback contract from N.4.k: when L2 has no `theme:` block, App 2 falls back to a built-in default Tailwind palette, same as QS does CLASSIC.
+  - **Accessibility rule (carries across all four surfaces).** Color SHALL NOT be the only indicator for status / category / severity. Use texture / icon / shading / position alongside. If the operator picks a low-contrast theme that's their call (theme is their input), but the visual encodings the renderer chooses must remain interpretable in monochrome. Phase X.2 enforcement is a code-review rule; future phase could add an a11y CI lint.
+
+- [ ] **X.2.m — Error handling: 5xx pages + transient toasters.** Today's spike returns raw stack traces on dataset failure / DB down / sheet-not-found. Production needs:
+  - **Full-page errors** (404 sheet not found, 500 dataset SQL crashed, 503 DB unreachable) — render a styled error page that fits the page shell + dev-log + theme. Includes a "report this" surface that captures URL + request-id + timestamp for the operator's logs.
+  - **Toasters for transient on-page errors** — a swap returned 5xx but the rest of the page is fine; show a dismissable toast at the top of the viewport ("Couldn't refresh Money Trail — retrying" with a manual retry button). HTMX has `htmx:responseError` → catch in the dev-log forwarder pattern, render the toast via OOB swap.
+  - **Structured server logs** — every 5xx writes a structured log line (timestamp / route / SQL / params / exception class + message) so prod operators can grep without guessing. Plain Python `logging` module to stderr; ALB / log aggregator picks it up downstream.
+  - **Health check endpoint** — `GET /healthz` returns 200 if the data fetcher can `SELECT 1` against the DB. ALB liveness / k8s readiness consume it.
+
+- [ ] **X.2.k — Release v8.x.0 / v9.0.0.** RELEASE_NOTES, README update reflecting the 4 apps now ship in two dialects, CLAUDE.md updates for the new `serve` CLI group + the architecture, tag + push.
+
+**Deferred to backlog (post-X.2):**
+- **Multi-user OIDC auth** (was X.2.phase.2). ALB + IAM Identity Center / Cognito + JWT in `X-Amzn-Oidc-Data` + per-request STS `AssumeRoleWithWebIdentity`. Read-only collapses authorization to a `(identity → [allowed L2 prefixes])` lookup. ~50 lines + ALB config; revisit when there's a customer asking for it.
+- **Per-customer caching layer** (CDN / Redis in front of the data fetcher).
+- **Embedding context** (X-Frame-Options, signed-URL handoff for iframe contexts).
+
+### X.3 — SQLite as a database dialect (integrator-local persona)
+
+**What.** Add `Dialect.SQLITE` alongside Postgres + Oracle. SQLite is the integrator persona's local-iteration backend per `docs/x_2_design_thoughts.md` — "did I design my YAML right?", run 100% local, no remote DB setup, no Docker, no AWS.
+
+**Why.** The integrator's iteration loop today requires either a live remote DB or a Docker-PG container. Both are heavyweight for "I want to see if my YAML edits look right." SQLite collapses that to a single file in `~/.quicksight-gen/` (or in-memory). App 2 (X.2) becomes the local viewer; SQLite becomes the local store.
+
+**Scope.**
+
+- [ ] **X.3.a — Dialect.SQLITE enum + connection plumbing.** Add to `common/sql/dialect.py`. Connection via stdlib `sqlite3` (no new dep). `demo_database_url: sqlite:///path/to/db.sqlite` parses via `urlparse`.
+- [ ] **X.3.b — SQLite schema emit.** `common/l2/schema.py::emit_schema(l2_instance, dialect=SQLITE)` needs the SQL dialect-aware bits Postgres + Oracle already have. JSON metadata via SQLite's `JSON1` extension (built-in since 3.38). Most of `common/sql/dialect.py` switching already accepts an enum; SQLite is a third arm.
+- [ ] **X.3.c — Materialized views as truncate-and-select-into.** Per design doc: SQLite has no `CREATE MATERIALIZED VIEW`, so `_l1_invariant_views_template` + `_inv_matviews_template` emit as `CREATE TABLE <prefix>_X AS SELECT ...` for SQLite. `refresh_matviews_sql` becomes `DELETE FROM <prefix>_X; INSERT INTO <prefix>_X SELECT ...` for SQLite. Same data contract, same column shapes — different SQL to populate. Preserves dialect-comparison parity with PG / Oracle.
+- [ ] **X.3.d — Seed pipeline against SQLite.** `data apply --execute -c config.sqlite.yaml` works. Hash-locked seed SQL needs a third locked file (`tests/data/_locked_seeds/spec_example.sqlite.sql`) for the contract.
+- [ ] **X.3.e — App 2 reads from SQLite.** The X.2.f data fetcher dispatches by dialect; SQLite arm uses `sqlite3` rows. Smoke runner gets `--sqlite` shorthand for the integrator's local-iteration flow.
+- [ ] **X.3.f — Documentation.** Handbook addition: "the integrator's local loop" — install, point at SQLite, edit YAML, see it. Probably one walkthrough page.
+- [ ] **X.3.g — CI cells (the SQLite column of the X.2 matrix).** Three new jobs (or three matrix-axis entries on existing workflows):
+  - `e2e-sqlite-layer1` — Layer 1 matview-check unit suite parametrized over the SQLite dialect. Mirrors what `_layer1_query.py` already does for PG / Oracle.
+  - `e2e-sqlite-audit` — Audit PDF generation against SQLite seed; same `tests/audit/` shape as PG / Oracle audit tests.
+  - `e2e-htmx-sqlite` — HTMX dialect Layer 2 against SQLite (the third DB cell of the X.2.h matrix; lights up when both X.2.h and X.3 land).
+  - Cheapest cells in the matrix — SQLite needs no DB instance, no AWS, no Docker. Runs anywhere, finishes fast. The integrator-local persona's iteration loop becomes the CI's iteration loop too.
+  - Updates `e2e-against-testpypi` to include the SQLite arm of the 4-way cross-tool agreement (`expected == PDF == HTMX` for SQLite — QS column drops because QS doesn't read SQLite).
+
+**Notes on portability:**
+- **Recursive CTEs.** Investigation matviews use `WITH RECURSIVE`; SQLite supports this since 3.8.3 — should port cleanly.
+- **CONCAT operator.** PG / Oracle / SQLite all use `||`. Same.
+- **Window functions.** SQLite supports them since 3.25; matview refresh queries port.
+- **Date arithmetic.** SQLite uses `date()` / `datetime()` functions. Already dialect-aware in `common/sql/dialect.py` per Phase P.
+
+### X.4 — App 1: YAML editor (the institution-shape helper)
+
+**What.** Per `docs/x_2_design_thoughts.md`: a web-based editor for the L2 institution YAML. Top-of-page force-directed view of the L2 + click-to-filter + filter toggles + cards for editing each L2 entity. Hitting save on a card PUTs the entity, server applies + cascades; affected scope reloads via `HX-Trigger: l2-cascade-reload`.
+
+**Why.** Hand-editing the L2 YAML is the integrator's primary friction. The validator is strict (good) but the feedback loop is "edit YAML → run schema apply → maybe see error → fix → repeat." A live editor with the L2 force-directed map + form-based entity editing collapses that loop.
+
+**Persona match.** The integrator. Local iteration loop, paired with X.3 SQLite for "edit YAML, see it apply against local data, see the dashboard render in App 2."
+
+**Architecture (per design doc):**
+- Same Starlette process as App 2 OR separate process — TBD when X.4 starts. Same-process for the dev tool (X.4 era); split when phase.2 auth lands (App 1 has writes, needs different auth posture than App 2's read-only).
+- REST shape: `/l2_shape` (force-directed view), `/l2_shape/accounts`, `/l2_shape/rails`, `/l2_shape/chains`, `/l2_shape/transfer_templates`, `/l2_shape/theme` — CRUD per entity type.
+- Cascade mechanism: PUT entity, server returns 200 + new body. When the change rippled (rename rewrites references, etc.) the response ALSO emits `HX-Trigger: l2-cascade-reload`. Client-side the L2-shape view + force-directed canvas listen for that event and `hx-get` themselves. No client-side cascade computation.
+- Force-directed visual is the **shared primitive** with App 2 — already in `common/tree/visuals.py::ForceGraph` from the X.2 spike. App 1's editor canvas + App 2's dashboard visual + App 1 ETL coverage overlay are three uses of the same renderer.
+
+**Scope (placeholder — fill in detail after X.2 lands):**
+
+- [ ] **X.4.a — Read-only L2 viewer.** `/l2_shape` GETs the L2, renders the force-directed map. Click a node → filter to the connected subgraph. Filter toggles for entity categories. Reset filters button. No edits yet — viewer first to confirm the visualization carries the L2 model.
+- [ ] **X.4.b — Per-entity card view.** GET `/l2_shape/accounts/:id` returns one entity's card (read-only). All fields visible. **Discipline (pre-X.6):** card field labels + helper text come from `common/l2/primitives.py` field docstrings, NOT hand-written in the editor template. Same source X.6's mkdocstrings expansion will eventually consume — keeps editor + docs aligned by construction.
+- [ ] **X.4.c — Edit + PUT + cascade.** Card flips to edit mode, save PUTs. Server applies + recomputes references + writes back the YAML. Response carries `HX-Trigger: l2-cascade-reload` when the change rippled.
+- [ ] **X.4.d — Live validation feedback.** PUT validates against the existing strict L2 validator; failure returns 400 + the validator error inline as a swap fragment under the form.
+- [ ] **X.4.e — Force-directed integration.** Editor canvas at the top stays in sync with edits via the same cascade-reload event.
+- [ ] **X.4.f — CLI integration.** `quicksight-gen edit -c config.yaml --l2 path/to/L2.yaml` opens the local server + browser tab.
+- [ ] **X.4.g — Layer 2 e2e.** Playwright tests covering the edit-cascade flow + force-directed canvas updates.
+- [ ] **X.4.h — Hot reload / rebuild button.** Integrator's loop is "edit YAML → see it in App 2." Today: change YAML → re-run `data apply --execute` → restart App 2. Painful. App 1 surfaces a "Rebuild" button that: (1) kills the App 2 process, (2) re-runs `data apply -c config.yaml --execute` (whichever backing DB the config.yaml points at — SQLite for the integrator-local persona, Postgres or Oracle when the operator runs against a remote DB), (3) restarts App 2, (4) reloads App 2's open tab once it's back up. UX shape will be obvious once the editor + ETL pieces land — defer detailed spec to when X.4 starts. Note for that future moment: the user can keep reading the YAML in App 1 while the rebuild runs, so the perceived downtime is small.
+
+### X.5 — App 1 ETL helper
+
+**What.** Per `docs/x_2_design_thoughts.md`: data-loading helper inside App 1. Two paths:
+1. Build up SQL load steps (saved to `etl.yaml`, NOT `config.yaml` — preserves the V.1.b allowlist boundary).
+2. Run the synthetic data generator (existing `data apply` pipeline, exposed via the App 1 UI).
+
+Plus: load repeatedly up to a defined date for time-travel simulations of business-over-time. View the force-directed L2 with data-coverage overlay (color/saturation by whether rows exist for each L2 primitive).
+
+**Why.** Closes the loop for the ETL engineer persona: "did I load all the data I expected to?" The data-coverage overlay on the force-directed view is the integrator's answer to "what's covered?"
+
+**Scope (placeholder — fill in detail after X.4 lands):**
+
+- [ ] **X.5.a — `etl.yaml` schema + loader.** New file alongside `config.yaml`, separate strict allowlist. Holds list of SQL load steps with `--end-date` parameter support.
+- [ ] **X.5.b — `data apply --end-date <ISO date>`.** Trivial in `emit_full_seed`: skip records past the cutoff. Punt on `--density-factor` for perf testing — note in PLAN, ship when needed.
+- [ ] **X.5.c — App 1 ETL UI.** SQL step builder cards, run button, progress feedback, link to view results in App 2.
+- [ ] **X.5.d — Force-directed coverage overlay.** Color/saturation by row-count per L2 primitive. Shared force-directed visual from X.2 + a second data fetcher that returns coverage stats.
+- [ ] **X.5.e — Time-travel re-loads.** Run loader repeatedly with advancing `--end-date` to simulate business-over-time. UI exposes the date stepper.
+
+### X.6 — Model-driven docs (drift reduction)
+
+**What.** Drive the documentation site from the same data model that drives the renderers. Today the L2 entity reference, visual reference, dataset reference, and per-sheet walkthroughs are hand-written in `docs/` Markdown — each is a place documentation can drift from code. Phase X.6 collapses those into `common/l2/primitives.py`, `common/tree/visuals.py`, `DatasetContract`, and the tree's `Sheet.description` / `Visual.subtitle` strings as the single source of truth, with mkdocs-macros + mkdocstrings rendering them into the docs site at build time.
+
+**Why.** Documentation drift is the failure mode this codebase has hit repeatedly (X.1.h ETL hallucination; persona-leak sweeps in Q.4 / Q.5; CLI-invocation drift caught by X.1.h.B). Each fix has been a one-off audit + handwritten correction. Auto-generation makes drift structurally impossible for the surfaces it covers — when the field docstring changes, the docs page changes the same commit.
+
+**Scope:**
+
+- [ ] **X.6.a — mkdocstrings expansion.** Auto-generate L2 entity reference (`common/l2/primitives.py` — Account, Rail, Chain, TransferTemplate, etc.) and visual reference (`common/tree/visuals.py` — KPI, Table, BarChart, Sankey, ForceGraph). Per-class page with docstring + field table. Replaces today's hand-written `docs/reference/l2-spec.md` + per-visual handbook callouts.
+- [ ] **X.6.b — Custom mkdocs-macros plugin: tree → walkthrough scaffolds.** Reads sheet/visual descriptions from each app's tree (`apps/<app>/app.py` builds the tree; the plugin walks it). Emits per-sheet walkthrough scaffold with the sheet's own `description` as the lede + each visual's `subtitle` as a section. Hand-written prose can extend the scaffold but the model-derived parts can't drift.
+- [ ] **X.6.c — Auto dataset reference.** `DatasetContract` lists columns + types + (often) shape. Generates per-dataset reference page. Replaces today's hand-written column lists in `docs/data-contract/`.
+- [ ] **X.6.d — Auto config reference.** Config dataclass + `etl.yaml` schema (X.5.a) + L2 schema validators → reference pages for each config file the user touches. Field docstrings + valid-value enums → docs.
+- [ ] **X.6.e — Live-embed App 2 fragments in mkdocs pages.** Because X.2.i mounts `/docs` in App 2's Starlette process, mkdocs pages can include `<iframe src="/dashboards/.../sheets/.../visuals/...">` fragments that render live. Doc walkthrough shows the actual visual it describes against the demo data, not a screenshot that goes stale. Use sparingly (page-load weight) — per-app handbook overview is the natural home.
+- [ ] **X.6.f — Migrate hand-written walkthroughs.** Sweep `docs/walkthroughs/` to use the X.6.b scaffolds. Hand-written content lives in extension blocks; model-derived content comes from the tree. Captures the prose that's still useful while killing the drift surface.
+- [ ] **X.6.g — README + handbook positioning sweep** (folded from former X.9). The 4 apps × 2 dialects × 3 DBs surface needs a fresh top-of-funnel pitch. README + handbook home pages should communicate what the tool now does — not what it did pre-X.2.
+- [ ] **X.6.h — Drift CI gate.** pytest test that fails if any docs page references a model attribute (field, class, enum value) that no longer exists. Same shape as X.1.h.B's CLI invocation checker — extracts model references from docs, asserts they resolve. Catches the regression class even when the auto-generation is bypassed for hand-written prose.
+
+- [ ] **X.6.i — Source-of-truth discipline sweep.** X.2.g + X.4.b only call out sheet description + visual subtitle + L2 entity field labels. Audit every analyst-facing string on tree primitives: parameter labels, calc field display names, drill action labels, dataset display names, theme token names, etc. Anything that appears in BOTH the rendered surface and the docs is a candidate for "lives on the tree, docs reads from it." Avoid the long-tail cleanup list that would otherwise hit at X.6 time.
+
+- [ ] **X.6.j — Self-host handbook guide.** New handbook page covering the App 2 deployment story end-to-end — Dockerfile recipe (multi-stage: tailwind build → wheel install → uvicorn entry), env var contract (`QS_GEN_*` vars consumed at boot), reverse-proxy notes, ALB / phase.2 OIDC pointers. Operators going from local-iteration → production-self-host should not have to grep the codebase. Companion: a working Dockerfile in the repo at `deploy/Dockerfile` (referenced from the guide).
+
+**Threads from X.2-X.5 already in place** (so X.6 has source material to consume):
+- X.2.g — sheet `description` + visual `subtitle` are the docs source of truth from day one.
+- X.4.b — L2 entity card labels come from `common/l2/primitives.py` field docstrings, not hand-written in the editor.
+
+### X.7 — Cloud CI cost optimization
+- Note there's an issue with auto creating quicksight datasources if they need to traverse a VPC endpoint. The work is parked on branch hotfix-v8.7.4-vpc-connection-arn.
 Out of active development iterations — manage cloud spend deliberately. Two-tier CI: a fast loop on every push that touches no AWS, and a gated full-e2e tier triggered by tag pushes (release gate, auto-fired), manual `workflow_dispatch`, or a weekly cron.
 
-- [ ] **X.2.a — Baseline the spend.** ~5 min in AWS Cost Explorer for the last 30 days; record the per-resource line items in this entry so X.2.b/c are sized against actual numbers. Without this we're guessing whether the right answer is "stop Oracle when idle" or "tear everything down between runs."
+- [ ] **X.7.a — Baseline the spend.** ~5 min in AWS Cost Explorer for the last 30 days; record the per-resource line items in this entry so X.7.b/c are sized against actual numbers. Without this we're guessing whether the right answer is "stop Oracle when idle" or "tear everything down between runs."
   - Answer: I think start/stop is fine for now, keeps the connect strings pretty static
 
-- [ ] **X.2.b — Fast loop on every push:main.** pytest + pyright + Docker-PG + Docker-Oracle (both dialects already containerized) for everything that doesn't need QuickSight: unit + integration + contract + docs build + audit PDF generation. No AWS resources touched. This is the per-commit feedback loop.
+- [ ] **X.7.b — Fast loop on every push:main.** pytest + pyright + Docker-PG + Docker-Oracle (both dialects already containerized) for everything that doesn't need QuickSight: unit + integration + contract + docs build + audit PDF generation. No AWS resources touched. This is the per-commit feedback loop.
 
-- [ ] **X.2.c — Gated full e2e on three triggers.** Combined behavior: everything from X.2.b + start AWS RDS (PG + Oracle, both pre-existing) + warm + deploy QS + run true e2e + stop RDS + (if a tag) push to TestPyPI then prod approve. Trigger sources: (1) **on tag push** — release pipeline auto-fires it as the gate before TestPyPI publish (no manual step; failing e2e blocks the release); (2) **manual workflow_dispatch** — operator on-demand verification; (3) **weekly cron** — catches AWS breaking us between releases. Use `start-db-instance` / `stop-db-instance` cycling instead of provision-and-terminate (RDS billing pauses when stopped except storage; ~5 min start vs ~10-20 min provision). Aurora Serverless v2 already scales to 0.5 ACU min — verify whether scale-to-0 is configurable. The DB should be clean at start anyway, so cycling pre-existing instances is equivalent to fresh provision for our purposes.
+- [ ] **X.7.c — Gated full e2e on three triggers.** Combined behavior: everything from X.7.b + start AWS RDS (PG + Oracle, both pre-existing) + warm + deploy QS + run true e2e + stop RDS + (if a tag) push to TestPyPI then prod approve. Trigger sources: (1) **on tag push** — release pipeline auto-fires it as the gate before TestPyPI publish (no manual step; failing e2e blocks the release); (2) **manual workflow_dispatch** — operator on-demand verification; (3) **weekly cron** — catches AWS breaking us between releases. Use `start-db-instance` / `stop-db-instance` cycling instead of provision-and-terminate (RDS billing pauses when stopped except storage; ~5 min start vs ~10-20 min provision). Aurora Serverless v2 already scales to 0.5 ACU min — verify whether scale-to-0 is configurable. The DB should be clean at start anyway, so cycling pre-existing instances is equivalent to fresh provision for our purposes.
   - Answer: Scale to zero is 100% doable, I'd just recommend start /stopping oracle. I'll reconfigure the scaling once we're here. For the start/stop I'll just need to know the additional permission grants.
-  - **Concurrency redesign — fold in observed races (May 2026).** The current `e2e.yml` has two structural defects worth fixing as part of the X.2 redesign rather than separately: (1) **within-run race** — `e2e-pg-api` and `e2e-pg-browser` run in parallel within a single workflow run and both `schema apply` against the same `spec_example_*` tables, racing on DROP/CREATE. Caused the X.1.b L2FT cascade test to see an empty matview at assertion time. Fix: make `e2e-pg-browser` `needs: e2e-pg-api` (sequential within a run) OR give each job its own L2 instance prefix so the schemas don't collide. (2) **cross-run cancellation** — concurrency group `e2e-pg` with `cancel-in-progress: false` interacts badly with rapid push+dispatch sequences (observed 1-second cancellation when a push:main run's cleanup overlapped a queued workflow_dispatch). Fix: move concurrency to the workflow level (one run at a time, period) + simplify the per-job concurrency groups. Both are CI-shape changes that fit X.2's scope.
+  - **Concurrency redesign — fold in observed races (May 2026).** The current `e2e.yml` has two structural defects worth fixing as part of the X.7 redesign rather than separately: (1) **within-run race** — `e2e-pg-api` and `e2e-pg-browser` run in parallel within a single workflow run and both `schema apply` against the same `spec_example_*` tables, racing on DROP/CREATE. Caused the X.1.b L2FT cascade test to see an empty matview at assertion time. Fix: make `e2e-pg-browser` `needs: e2e-pg-api` (sequential within a run) OR give each job its own L2 instance prefix so the schemas don't collide. (2) **cross-run cancellation** — concurrency group `e2e-pg` with `cancel-in-progress: false` interacts badly with rapid push+dispatch sequences (observed 1-second cancellation when a push:main run's cleanup overlapped a queued workflow_dispatch). Fix: move concurrency to the workflow level (one run at a time, period) + simplify the per-job concurrency groups. Both are CI-shape changes that fit X.7's scope.
 
-### X.4 - Ask for configuring the row counts and date range for the data seeding
+### X.8 - Ask for configuring the row counts and date range for the data seeding
 
-### X.5 — README + verbiage update (post-X.2)
+### X.9 — _(folded into X.6.g)_
 
-- [ ] **X.4 — README + handbook positioning sweep.** We're not currently selling what this tool actually accomplishes. Detailed scope deferred until X.2 lands — the CI shape changes (release-gated true-e2e, fast feedback elsewhere) will likely shift how we describe the project's "shape." Sweep should also cover the docs handbook home pages, not just README — those carry customer-facing claims about what the tool does too.
+The README + handbook positioning sweep is now X.6.g, since it shares the model-driven-docs concern.
 
 ---
 
@@ -174,6 +383,11 @@ Backlog beyond Phase X. Promote to a numbered phase entry when scope justifies i
 ### Dashboard polish
 
 - **Executives Transaction Volume + Money Moved — metadata grouping** (was Q.1.c.6). Needs L2-instance-aware metadata key dropdowns (cascading Key + Value like L2FT Rails sheet) plus a dataset pivot to expose metadata as a dim. Bigger than a punch-list item; queue as its own sub-phase.
+
+### Post-X.2 App 2 polish (queued — not part of phase X scope)
+
+- **Mobile / responsive.** Tailwind handles the layout primitives but no explicit mobile-first design pass. Promote when there's a customer story. Note: dashboards are dense by nature; mobile may always be a worse experience than desktop, regardless of effort.
+- **Per-table CSV / XLSX export.** Operators expect "export to spreadsheet" on tables (QS has it). Lower priority than feature parity — punt unless it's a small agent task. The audit PDF already covers the "regulator-ready snapshot" case; spreadsheet export is for analyst self-serve.
 
 ### Audit / data evaluation
 

@@ -27,7 +27,7 @@ Construction-time (raise immediately):
   ``minimum_value`` and ``minimum_parameter`` (or both on the
   maximum side).
 
-Emit-time (validated by ``App._resolve_auto_ids`` + the
+Emit-time (validated by ``App.resolve_auto_ids`` + the
 ``_validate_*`` methods, all run from ``emit_analysis`` /
 ``emit_dashboard``):
 

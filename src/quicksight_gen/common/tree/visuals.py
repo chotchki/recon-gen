@@ -129,7 +129,7 @@ class VisualLike(Protocol):
     sheet's grid layout (``sheet.layout.row(...).add_<kind>(...)``).
 
     ``visual_id`` is ``VisualId | AutoResolved`` — typed subtypes default
-    to ``AUTO`` and ``App._resolve_auto_ids`` replaces it with the
+    to ``AUTO`` and ``App.resolve_auto_ids`` replaces it with the
     derived id before emit. The walker / emit assert via ``isinstance``
     narrowing.
     """
@@ -148,7 +148,7 @@ def _visual_element_id(node: VisualLike) -> str:
     QuickSight uses for the visual itself); asserts auto-IDs are
     resolved before access."""
     assert not isinstance(node.visual_id, _AutoSentinel), (
-        "visual_id wasn't resolved — App._resolve_auto_ids() must run "
+        "visual_id wasn't resolved — App.resolve_auto_ids() must run "
         "before LayoutNode.element_id access."
     )
     return node.visual_id
@@ -189,7 +189,7 @@ class KPI:
 
     def emit(self) -> Visual:
         assert not isinstance(self.visual_id, _AutoSentinel), (
-            "visual_id wasn't resolved — App._resolve_auto_ids() must run "
+            "visual_id wasn't resolved — App.resolve_auto_ids() must run "
             "before Visual.emit(). This shouldn't happen via App.emit_*()."
         )
         # KPI doesn't carry Actions per the QuickSight model — KPIs aren't
@@ -754,4 +754,54 @@ class Sankey:
                 ),
                 Actions=[a.emit() for a in self.actions] if self.actions else None,
             ),
+        )
+
+
+@dataclass(eq=False)
+class ForceGraph:
+    """Force-directed network visual — HTMX-dialect only (X.2 spike
+    capability test for X.4).
+
+    QuickSight's standard visual library doesn't include a force
+    layout (only hierarchical ``SankeyDiagramVisual``), so this
+    primitive exists to prove the L1 tree primitives can host a
+    visual kind that no QS dialect emit knows how to render. The
+    HTMX renderer's bootstrap dispatches to ``renderForceGraph``
+    via d3-force; ``emit()`` raises because the QS pipeline
+    intentionally has no path for this kind.
+
+    Phase.1 design call: either keep this HTMX-only or wire a
+    custom-visual emitter for QS. The capability test is the
+    artifact; the layering decision is downstream.
+
+    No field-well slots — the visual's data shape (nodes + links)
+    flows through the data fetcher directly, not through QS field
+    wells. ``visual_id`` is optional (L.1.8.5 auto-ID).
+    """
+    title: str
+    subtitle: str | None = None
+    actions: list[Action] = field(default_factory=list[Action])
+    visual_id: VisualId | AutoResolved = AUTO
+
+    _AUTO_KIND: ClassVar[str] = "force-graph"
+
+    @property
+    def element_id(self) -> str:
+        return _visual_element_id(self)
+
+    @property
+    def element_type(self) -> GridLayoutElementType:
+        return "VISUAL"
+
+    def datasets(self) -> set[Dataset]:
+        return set()
+
+    def calc_fields(self) -> set[CalcField]:
+        return set()
+
+    def emit(self) -> Visual:
+        raise NotImplementedError(
+            "ForceGraph is an HTMX-dialect-only visual (X.2 spike "
+            "capability test). QS has no force-layout visual; this "
+            "is intentionally not wired to the QS emit path."
         )

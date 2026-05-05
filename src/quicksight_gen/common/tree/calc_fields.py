@@ -76,7 +76,7 @@ class CalcField:
 
     def emit(self) -> dict[str, str]:
         assert not isinstance(self.name, _AutoSentinel), (
-            "name wasn't resolved — App._resolve_auto_ids() must run "
+            "name wasn't resolved — App.resolve_auto_ids() must run "
             "before CalcField.emit()."
         )
         return {
@@ -103,12 +103,12 @@ ColumnRef = str | CalcField | Column
 def resolve_column(column: ColumnRef) -> str:
     """Read the column-name string off a ``ColumnRef``.
 
-    For a ``CalcField``, the name is set by ``App._resolve_auto_ids()``;
+    For a ``CalcField``, the name is set by ``App.resolve_auto_ids()``;
     callers asserting the resolver ran can rely on this returning ``str``.
     """
     if isinstance(column, CalcField):
         assert not isinstance(column.name, _AutoSentinel), (
-            "CalcField.name wasn't resolved — App._resolve_auto_ids() "
+            "CalcField.name wasn't resolved — App.resolve_auto_ids() "
             "must run before resolve_column() on a CalcField ref."
         )
         return column.name

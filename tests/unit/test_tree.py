@@ -1556,7 +1556,7 @@ class TestAutoVisualIds:
             title="Flagged",
             values=[Measure.count(_DS_FOO, "id")],
         )
-        # visual_id defaults to AUTO until App._resolve_auto_ids() fills it
+        # visual_id defaults to AUTO until App.resolve_auto_ids() fills it
         assert kpi.visual_id is AUTO
         app.emit_analysis()
         # Now resolved

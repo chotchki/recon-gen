@@ -77,6 +77,18 @@ audit = [
     # absent config.yaml signing block = unsigned PDF (back-compat).
     "pyhanko>=0.30",
 ]
+serve = [
+    # Phase X.2 — self-hosted dashboard renderer (HTMX + d3 + Tailwind
+    # via CDN). Starlette is the ASGI framework; uvicorn[standard]
+    # bundles uvloop + httptools for the production-grade server.
+    # python-multipart is required for Starlette to parse HTMX form
+    # POSTs (the swap-on-mutation pattern). httpx is pulled in for
+    # Starlette's TestClient (tests/unit/test_html_server.py).
+    "starlette>=0.40",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.18",
+    "httpx>=0.27",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -104,6 +116,14 @@ dev = [
     # downloads browser binaries) is still only needed for the e2e
     # browser tests.
     "playwright>=1.40",
+    # Phase X.2 spike — Starlette server + TestClient for HTML renderer
+    # unit tests. Pulled into [dev] so the spike's tests run in the
+    # default `uv sync --extra dev` developer setup without a separate
+    # `--extra serve`.
+    "starlette>=0.40",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.18",
+    "httpx>=0.27",
 ]
 docs = [
     "mkdocs>=1.6",
@@ -157,6 +177,16 @@ quicksight_gen = [
     "docs/**/*.yml",
     # Phase O.1.c — hand-authored Graphviz diagrams.
     "docs/**/*.dot",
+    # X.2 spike — built Tailwind CSS for the HTML renderer's
+    # static page shell. ``output.css`` is the build artifact;
+    # ``input.css`` is the @source-config source. Both shipped so
+    # an installed wheel can serve the smoke runner without
+    # forcing the user to run the Tailwind CLI.
+    "common/html/assets/*.css",
+    # X.2.a.1 — JS extracted to standalone .js files so biome can
+    # lint / format / minify them. render.py loads at module-import
+    # time; package_data ships them inside the wheel.
+    "common/html/assets/js/*.js",
 ]
 
 [tool.setuptools.dynamic]
@@ -226,3 +256,8 @@ venv = ".venv"
 # but the codebase treats them as package-internal — suppressing keeps
 # the convention without renaming everything to drop the underscore.
 reportPrivateUsage = false
+
+[dependency-groups]
+dev = [
+    "pytailwindcss>=0.3.0",
+]

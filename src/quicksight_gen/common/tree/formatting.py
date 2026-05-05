@@ -43,7 +43,7 @@ def _always_true(column_name: str) -> str:
 def _resolved_field_id(dim: Dim) -> str:
     assert not isinstance(dim.field_id, _AutoSentinel), (
         "CellFormat target Dim's field_id wasn't resolved — "
-        "App._resolve_auto_ids() must run before CellFormat.emit()."
+        "App.resolve_auto_ids() must run before CellFormat.emit()."
     )
     return dim.field_id
 

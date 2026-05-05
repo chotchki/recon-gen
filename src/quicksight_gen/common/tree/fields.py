@@ -132,7 +132,7 @@ class Dim:
 
     def emit(self) -> DimensionField:
         assert not isinstance(self.field_id, _AutoSentinel), (
-            "field_id wasn't resolved — App._resolve_auto_ids() must run "
+            "field_id wasn't resolved — App.resolve_auto_ids() must run "
             "before Dim.emit()."
         )
         col = ColumnIdentifier(
@@ -178,7 +178,7 @@ class Dim:
         when it was used as a table column (the by-far common case).
         """
         assert not isinstance(self.field_id, _AutoSentinel), (
-            "field_id wasn't resolved — App._resolve_auto_ids() must run "
+            "field_id wasn't resolved — App.resolve_auto_ids() must run "
             "before Dim.emit_unaggregated_field()."
         )
         out: dict[str, object] = {
@@ -322,7 +322,7 @@ class Measure:
 
     def emit(self) -> MeasureField:
         assert not isinstance(self.field_id, _AutoSentinel), (
-            "field_id wasn't resolved — App._resolve_auto_ids() must run "
+            "field_id wasn't resolved — App.resolve_auto_ids() must run "
             "before Measure.emit()."
         )
         col = ColumnIdentifier(
@@ -387,7 +387,7 @@ def resolve_field_id(ref: FieldRef) -> str:
     if isinstance(ref, str):
         return ref
     assert not isinstance(ref.field_id, _AutoSentinel), (
-        "field_id wasn't resolved — App._resolve_auto_ids() must run "
+        "field_id wasn't resolved — App.resolve_auto_ids() must run "
         "before resolve_field_id."
     )
     return ref.field_id

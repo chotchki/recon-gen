@@ -216,7 +216,7 @@ class ParameterDropdown:
 
     def emit(self) -> ParameterControl:
         assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App._resolve_auto_ids() must run."
+            "control_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         display_options: dict[str, Any] | None = None
         if self.hidden_select_all:
@@ -281,7 +281,7 @@ class ParameterSlider:
 
     def emit(self) -> ParameterControl:
         assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App._resolve_auto_ids() must run."
+            "control_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         return ParameterControl(
             Slider=ModelParameterSliderControl(
@@ -309,7 +309,7 @@ class ParameterDateTimePicker:
 
     def emit(self) -> ParameterControl:
         assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App._resolve_auto_ids() must run."
+            "control_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         return ParameterControl(
             DateTimePicker=ModelParameterDateTimePickerControl(
@@ -342,7 +342,7 @@ class ParameterTextField:
     def emit(self) -> ParameterControl:
         from quicksight_gen.common.models import ParameterTextFieldControl
         assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App._resolve_auto_ids() must run."
+            "control_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         return ParameterControl(
             TextField=ParameterTextFieldControl(
@@ -383,10 +383,10 @@ class FilterDropdown:
 
     def emit(self) -> FilterControl:
         assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App._resolve_auto_ids() must run."
+            "control_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         assert not isinstance(self.filter.filter_id, _AutoSentinel), (
-            "inner filter's filter_id wasn't resolved — App._resolve_auto_ids() must run."
+            "inner filter's filter_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         return FilterControl(
             Dropdown=ModelFilterDropDownControl(
@@ -420,10 +420,10 @@ class FilterSlider:
 
     def emit(self) -> FilterControl:
         assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App._resolve_auto_ids() must run."
+            "control_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         assert not isinstance(self.filter.filter_id, _AutoSentinel), (
-            "inner filter's filter_id wasn't resolved — App._resolve_auto_ids() must run."
+            "inner filter's filter_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         return FilterControl(
             Slider=ModelFilterSliderControl(
@@ -453,10 +453,10 @@ class FilterDateTimePicker:
 
     def emit(self) -> FilterControl:
         assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App._resolve_auto_ids() must run."
+            "control_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         assert not isinstance(self.filter.filter_id, _AutoSentinel), (
-            "inner filter's filter_id wasn't resolved — App._resolve_auto_ids() must run."
+            "inner filter's filter_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         return FilterControl(
             DateTimePicker=ModelFilterDateTimePickerControl(
@@ -486,10 +486,10 @@ class FilterCrossSheet:
 
     def emit(self) -> FilterControl:
         assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App._resolve_auto_ids() must run."
+            "control_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         assert not isinstance(self.filter.filter_id, _AutoSentinel), (
-            "inner filter's filter_id wasn't resolved — App._resolve_auto_ids() must run."
+            "inner filter's filter_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         return FilterControl(
             CrossSheet=ModelFilterCrossSheetControl(

@@ -1320,10 +1320,14 @@ class App:
             )
         return self.analysis.find_sheet(name=name, sheet_id=sheet_id)
 
-    def _resolve_auto_ids(self) -> None:
+    def resolve_auto_ids(self) -> None:
         """Walk the tree and assign auto-IDs to nodes that left their
         IDs unset. Called from emit_analysis / emit_dashboard before
-        any validation or emission.
+        any validation or emission, and exposed publicly so non-QS
+        renderers (HTML, future X.4 editor) can resolve IDs without
+        going through the full QS emit path.
+
+        Idempotent — re-runs are no-ops once IDs are filled in.
 
         Mixed scheme (L.1.8.5 + L.1.16): URL-facing IDs (``SheetId``,
         ``ParameterName``) and analyst-facing identifiers (``Dataset``
@@ -1347,8 +1351,6 @@ class App:
 
         Same-sheet drills also get their target_sheet back-filled here
         (Drill.target_sheet=AUTO means "the sheet that owns me").
-
-        Idempotent: nodes that already have explicit IDs aren't touched.
         """
         if self.analysis is None:
             return
@@ -1742,7 +1744,7 @@ class App:
         registered = set(self.analysis.calc_fields)
         unregistered = referenced - registered
         if unregistered:
-            # Names are populated by _resolve_auto_ids before validation
+            # Names are populated by resolve_auto_ids before validation
             # runs (see emit_analysis); fall back to "<unnamed>" for
             # safety.
             names = sorted(
@@ -1777,7 +1779,7 @@ class App:
             raise ValueError(
                 "App has no Analysis — call set_analysis() first."
             )
-        self._resolve_auto_ids()
+        self.resolve_auto_ids()
         self._validate_dataset_references()
         self._validate_calc_field_references()
         self._validate_parameter_references()
@@ -1801,7 +1803,7 @@ class App:
             raise ValueError(
                 "App has no Dashboard — call create_dashboard() first."
             )
-        self._resolve_auto_ids()
+        self.resolve_auto_ids()
         self._validate_dataset_references()
         self._validate_calc_field_references()
         self._validate_parameter_references()

@@ -101,7 +101,7 @@ def _resolve_drill_source(
     # Dim / Measure path — resolve field_id + shape.
     leaf = source
     assert not isinstance(leaf.field_id, _AutoSentinel), (
-        "Drill source field_id wasn't resolved — App._resolve_auto_ids() "
+        "Drill source field_id wasn't resolved — App.resolve_auto_ids() "
         "must run before Drill.emit()."
     )
     calc = calc_field_in(leaf.column)
@@ -134,7 +134,7 @@ class Drill:
       The drill navigates to that sheet (and writes parameter values
       to it).
     - **Same-sheet drill** (the walk-the-flow / re-render-around-new-anchor
-      pattern) — leave ``target_sheet`` as ``None``. ``App._resolve_auto_ids``
+      pattern) — leave ``target_sheet`` as ``None``. ``App.resolve_auto_ids``
       back-fills the field with the sheet that owns the visual carrying
       the drill, so the author never types ``target_sheet=this_sheet``
       when wiring a drill inside the function that builds the sheet.
@@ -168,10 +168,10 @@ class Drill:
 
     def emit(self) -> VisualCustomAction:
         assert not isinstance(self.action_id, _AutoSentinel), (
-            "action_id wasn't resolved — App._resolve_auto_ids() must run."
+            "action_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         assert not isinstance(self.target_sheet, _AutoSentinel), (
-            "target_sheet wasn't resolved — App._resolve_auto_ids() must "
+            "target_sheet wasn't resolved — App.resolve_auto_ids() must "
             "run before Drill.emit(). Same-sheet drills get back-filled "
             "with the owning sheet automatically."
         )
@@ -216,13 +216,13 @@ class SameSheetFilter:
 
     def emit(self) -> VisualCustomAction:
         assert not isinstance(self.action_id, _AutoSentinel), (
-            "action_id wasn't resolved — App._resolve_auto_ids() must run."
+            "action_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         target_ids: list[str] = []
         for v in self.target_visuals:
             assert not isinstance(v.visual_id, _AutoSentinel), (
                 f"SameSheetFilter target visual_id wasn't resolved — "
-                f"App._resolve_auto_ids() must run before emit."
+                f"App.resolve_auto_ids() must run before emit."
             )
             target_ids.append(v.visual_id)
         return VisualCustomAction(

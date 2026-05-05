@@ -90,7 +90,7 @@ class FilterLike(Protocol):
     L.1.7 dependency-graph walk.
 
     ``filter_id`` is ``str | None`` because typed wrappers default to
-    None and let ``App._resolve_auto_ids`` fill it. ``calc_field()``
+    None and let ``App.resolve_auto_ids`` fill it. ``calc_field()``
     returns the CalcField the filter references (or None if it points
     at a real column) — used by the dependency-graph walk and by
     FilterControl wrappers that need the filter_id post-resolve.
@@ -355,7 +355,7 @@ class CategoryFilter:
 
     def emit(self) -> Filter:
         assert not isinstance(self.filter_id, _AutoSentinel), (
-            "filter_id wasn't resolved — App._resolve_auto_ids() must run."
+            "filter_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         match self.binding:
             case _ParameterBinding(parameter=parameter):
@@ -484,7 +484,7 @@ class NumericRangeFilter:
 
     def emit(self) -> Filter:
         assert not isinstance(self.filter_id, _AutoSentinel), (
-            "filter_id wasn't resolved — App._resolve_auto_ids() must run."
+            "filter_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         return Filter(
             NumericRangeFilter=ModelNumericRangeFilter(
@@ -535,7 +535,7 @@ class TimeRangeFilter:
 
     def emit(self) -> Filter:
         assert not isinstance(self.filter_id, _AutoSentinel), (
-            "filter_id wasn't resolved — App._resolve_auto_ids() must run."
+            "filter_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         return Filter(
             TimeRangeFilter=ModelTimeRangeFilter(
@@ -585,7 +585,7 @@ class TimeEqualityFilter:
 
     def emit(self) -> Filter:
         assert not isinstance(self.filter_id, _AutoSentinel), (
-            "filter_id wasn't resolved — App._resolve_auto_ids() must run."
+            "filter_id wasn't resolved — App.resolve_auto_ids() must run."
         )
         return Filter(
             TimeEqualityFilter=ModelTimeEqualityFilter(
@@ -686,7 +686,7 @@ class FilterGroup:
 
     def emit(self) -> ModelFilterGroup:
         assert not isinstance(self.filter_group_id, _AutoSentinel), (
-            "filter_group_id wasn't resolved — App._resolve_auto_ids() "
+            "filter_group_id wasn't resolved — App.resolve_auto_ids() "
             "must run before FilterGroup.emit()."
         )
         if not self._scope_entries:
@@ -702,13 +702,13 @@ class FilterGroup:
                     Scope=SheetVisualScopingConfiguration.ALL_VISUALS,
                 ))
             else:
-                # Visuals' visual_id is resolved by App._resolve_auto_ids
+                # Visuals' visual_id is resolved by App.resolve_auto_ids
                 # which runs before emit; the assert above guarantees
                 # this code path only executes after resolution.
                 visual_ids: list[str] = []
                 for v in visuals:
                     assert not isinstance(v.visual_id, _AutoSentinel), (
-                        "visual_id wasn't resolved — App._resolve_auto_ids() "
+                        "visual_id wasn't resolved — App.resolve_auto_ids() "
                         "must run before FilterGroup.emit()."
                     )
                     visual_ids.append(v.visual_id)
