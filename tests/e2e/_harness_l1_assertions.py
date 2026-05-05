@@ -338,10 +338,21 @@ def _active_sheet_text(page: Any, *, timeout_ms: int) -> str:
     visual on the active sheet) so tab labels + sheet controls
     aren't included — purely the sheet body content.
 
+    X.1.c — bumps every paged table on the sheet to page-size 10000
+    BEFORE reading ``inner_text()``. Without this step QS's row
+    virtualization (~10 DOM rows at a time) silently hides any row
+    outside the rendered window, producing data-density-dependent
+    false negatives — sasquatch_pr's denser seed pushed the planted
+    Limit Breach row out of the visible 10 while spec_example's
+    sparser seed kept it in. The deterministic-yet-data-shape-
+    sensitive assertion bug looked like a render flake until the
+    table-virtualization mechanism was identified.
+
     Falls back to the whole page body if the analysis container
     selector doesn't match (older QS builds, embedded variants).
     """
     from quicksight_gen.common.browser.helpers import (
+        expand_all_tables_on_sheet,
         wait_for_table_cells_present,
     )
 
@@ -349,6 +360,13 @@ def _active_sheet_text(page: Any, *, timeout_ms: int) -> str:
     try:
         wait_for_table_cells_present(page, timeout_ms=timeout_ms)
     except Exception:  # noqa: BLE001 — tables may not exist on every sheet
+        pass
+    # X.1.c — expand every paged table to page-size 10000 so all rows
+    # mount in DOM before inner_text(). Best-effort; non-table visuals
+    # are silently skipped.
+    try:
+        expand_all_tables_on_sheet(page, timeout_ms=timeout_ms)
+    except Exception:  # noqa: BLE001 — best-effort expansion
         pass
     el = page.query_selector('[data-automation-id="analysis_visual"]')
     if el is None:

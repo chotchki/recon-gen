@@ -704,6 +704,97 @@ def count_table_rows(page: Page, visual_title: str) -> int:
     )
 
 
+def expand_all_tables_on_sheet(page: Page, *, timeout_ms: int = 10_000) -> int:
+    """Bump every paged table visual on the active sheet to page-size 10000.
+
+    X.1.c — QS tables virtualize at ~10 DOM rows. Assertions that read
+    ``inner_text()`` of a table to check whether a specific row is
+    present (e.g. the harness ``assert_l1_plants_visible`` walking the
+    sheet text for a planted account_id) silently miss any row outside
+    the rendered window. This is deterministic — not a flake — and
+    surfaces only when the seed is dense enough to push the target row
+    below the first ~10. (Spec_example passes; sasquatch_pr fails on
+    the same assertion code, same dashboard, because it has more
+    transactions hence more breach rows hence more table rows.)
+
+    This helper finds every visual on the active sheet that exposes
+    QS's ``simplePagedDisplayNav_dropdown_pageSize`` control, focuses
+    it, and bumps the page size to 10000 so all rows mount in DOM.
+    Visuals without pagination (KPIs, charts, line/bar) are silently
+    skipped — the helper detects pagination by attempting the
+    ``wait_for_selector`` lookup with a short per-visual timeout.
+
+    Returns the number of table visuals that were successfully
+    expanded. Caller can use the return for sanity checks but the
+    helper is best-effort by design — a sheet with zero paged tables
+    returns 0 and is not an error.
+
+    Cost: ~1.5–3s per table visual (focus dance + dropdown click +
+    settle). Acceptable for assertion paths that need correctness over
+    speed; not appropriate for inner loops where ``count_table_rows``
+    suffices.
+    """
+    expanded = 0
+    visuals = page.query_selector_all('[data-automation-id="analysis_visual"]')
+    for visual in visuals:
+        title_el = visual.query_selector(
+            '[data-automation-id="analysis_visual_title_label"]'
+        )
+        if title_el is None:
+            continue
+        title = title_el.inner_text().strip()
+        if not title:
+            continue
+        # Focus the visual to surface the page-size control. Use a JS
+        # click on the title so we dodge Playwright's actionability
+        # checks (which race against QS's re-render churn).
+        clicked = page.evaluate(
+            """(t) => {
+                const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
+                for (const v of visuals) {
+                    const lbl = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
+                    if (lbl && lbl.innerText.trim() === t) {
+                        lbl.click();
+                        return true;
+                    }
+                }
+                return false;
+            }""",
+            title,
+        )
+        if not clicked:
+            continue
+        # Brief settle for the page-size dropdown to mount.
+        page.wait_for_timeout(800)
+        try:
+            page.wait_for_selector(
+                '[data-automation-id="simplePagedDisplayNav_dropdown_pageSize"]',
+                timeout=1500, state="visible",
+            )
+        except Exception:
+            # No pagination — KPI / chart / line / bar / sankey. Skip.
+            continue
+        try:
+            page.locator(
+                '[data-automation-id="simplePagedDisplayNav_dropdown_pageSize"]'
+            ).first.click()
+            page.wait_for_selector(
+                '[data-automation-id="simplePagedDisplayNav_menuItem_pageSize_10000"]',
+                timeout=timeout_ms, state="visible",
+            )
+            page.locator(
+                '[data-automation-id="simplePagedDisplayNav_menuItem_pageSize_10000"]'
+            ).first.click()
+            page.wait_for_timeout(500)
+            expanded += 1
+        except Exception:
+            # Pagination existed but the bump failed — leave the table
+            # at its existing page size and let the caller's assertion
+            # decide if the partial-DOM read is enough.
+            continue
+    return expanded
+
+
 def count_table_total_rows(page: Page, visual_title: str, timeout_ms: int) -> int:
     """Return the full (post-filter) row count of a QS table visual.
 
