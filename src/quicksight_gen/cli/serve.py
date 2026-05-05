@@ -13,9 +13,10 @@ flag here — starting the server IS the operation, mirroring the
 ``docs serve`` shape (the ``apply`` verb is kept for surface symmetry
 with the other artifact groups).
 
-The fetcher wired here is the deterministic stub from
-``common/html/_smoke_app.py`` — X.2.a.4 swaps it for a real
-DB-backed factory keyed off the L2 instance + dialect.
+By default ``apply`` wires the real DB-backed fetcher (X.2.a.4) which
+hits the configured Postgres / Oracle / SQLite. Pass ``--stub`` to
+swap in the deterministic stub from ``_smoke_app.py`` — useful when
+iterating on the JS / page shell without a populated database.
 """
 
 from __future__ import annotations
@@ -64,21 +65,32 @@ def app2() -> None:
         "Default off so production deploys stay silent."
     ),
 )
+@click.option(
+    "--stub/--no-stub",
+    default=False,
+    show_default=True,
+    help=(
+        "Use the deterministic stub fetcher instead of querying the "
+        "configured DB. Useful for iterating on the JS / page shell "
+        "without a populated database."
+    ),
+)
 def app2_apply(  # type: ignore[no-untyped-def]
     config,
     l2_instance_path,
     host: str,
     port: int,
     dev_log: bool,
+    stub: bool,
 ) -> None:
     """Start the App2 HTMX/d3 dashboard server.
 
     Loads the config + L2 instance the same way the json / data /
-    audit groups do, builds the App2 tree, and runs uvicorn. Until
-    X.2.a.4 lands the real DataFetcher factory, the visual data
-    comes from a deterministic stub responsive to the date-range
-    form + click-anchor. Useful for iterating on the JS / page
-    shell without a populated database.
+    audit groups do, builds the App2 tree, and runs uvicorn. The
+    visual data comes from the configured DB by default; pass
+    ``--stub`` to swap in the deterministic stub fetcher (useful
+    when there's no populated database, or when iterating on the
+    JS / page shell only).
     """
     # Imported lazily so the CLI module imports cheaply (uvicorn
     # pulls a lot of asyncio + httptools bootstrap into memory) and
@@ -86,18 +98,30 @@ def app2_apply(  # type: ignore[no-untyped-def]
     # installed.
     import uvicorn  # noqa: PLC0415
 
+    from quicksight_gen.common.html._db_fetcher import (  # noqa: PLC0415
+        make_db_fetcher,
+    )
     from quicksight_gen.common.html._smoke_app import (  # noqa: PLC0415
         build_smoke_app,
         stub_money_trail_fetcher,
     )
     from quicksight_gen.common.html.server import make_app  # noqa: PLC0415
 
-    cfg, _instance = resolve_l2_for_demo(config, l2_instance_path)
+    cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
     tree_app, sheet = build_smoke_app(cfg)
+    if stub:
+        fetcher = stub_money_trail_fetcher
+        click.echo("data: stub fetcher (deterministic)")
+    else:
+        fetcher = make_db_fetcher(cfg, instance)
+        click.echo(
+            f"data: DB-backed ({cfg.dialect.value}) → "
+            f"{cfg.l2_instance_prefix or instance.instance}_inv_money_trail_edges"
+        )
     asgi_app = make_app(
         tree_app=tree_app,
         sheet=sheet,
-        data_fetcher=stub_money_trail_fetcher,
+        data_fetcher=fetcher,
         dev_log=dev_log,
     )
     click.echo(f"App2 server: http://{host}:{port}/")
