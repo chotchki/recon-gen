@@ -93,13 +93,43 @@ class Config:
         if self.datasource_arn is None and self.demo_database_url is not None:
             ds_id = self.prefixed("demo-datasource")
             self.datasource_arn = (
-                f"arn:aws:quicksight:{self.aws_region}:{self.aws_account_id}"
-                f":datasource/{ds_id}"
+                f"arn:{self.partition}:quicksight:{self.aws_region}"
+                f":{self.aws_account_id}:datasource/{ds_id}"
             )
         if self.datasource_arn is None:
             raise ValueError(
                 "datasource_arn is required unless demo_database_url is set."
             )
+
+    @property
+    def partition(self) -> str:
+        """AWS partition for synthesized ARNs.
+
+        Standard commercial AWS = ``aws``; GovCloud = ``aws-us-gov``;
+        China = ``aws-cn``. Hardcoding ``aws`` breaks deploys against
+        GovCloud / China where every account-bound resource ARN must
+        carry the matching partition or QS rejects the binding.
+
+        Resolution order:
+
+        1. If ``datasource_arn`` is set explicitly (the customer
+           supplied a pre-existing datasource), parse partition from
+           it — that's the authoritative shape for THIS account.
+        2. Else if ``principal_arns`` is non-empty, parse from the
+           first principal ARN — the customer's user/role is in the
+           same partition as the resources we're about to synthesize.
+        3. Else default ``aws`` (commercial; preserves prior behavior
+           for the spec_example / fuzz fixtures that don't carry a
+           principal).
+
+        Bare strings (no ``arn:`` prefix) fall through to the default.
+        """
+        for source in (self.datasource_arn, *self.principal_arns):
+            if source and source.startswith("arn:"):
+                parts = source.split(":", 2)
+                if len(parts) >= 2 and parts[1]:
+                    return parts[1]
+        return "aws"
 
     def with_l2_instance_prefix(self, prefix: str) -> "Config":
         """Return a new Config with the L2 prefix stamped in.
@@ -167,14 +197,14 @@ class Config:
 
     def dataset_arn(self, dataset_id: str) -> str:
         return (
-            f"arn:aws:quicksight:{self.aws_region}:{self.aws_account_id}"
-            f":dataset/{dataset_id}"
+            f"arn:{self.partition}:quicksight:{self.aws_region}"
+            f":{self.aws_account_id}:dataset/{dataset_id}"
         )
 
     def theme_arn(self, theme_id: str) -> str:
         return (
-            f"arn:aws:quicksight:{self.aws_region}:{self.aws_account_id}"
-            f":theme/{theme_id}"
+            f"arn:{self.partition}:quicksight:{self.aws_region}"
+            f":{self.aws_account_id}:theme/{theme_id}"
         )
 
     def prefixed(self, name: str) -> str:

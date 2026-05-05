@@ -1,5 +1,32 @@
 # Release Notes
 
+## v8.7.3 — Hotfix: synthesized ARNs honor AWS partition
+
+Three sites in ``Config`` (``__post_init__`` deriving
+``datasource_arn`` from ``demo_database_url``, ``dataset_arn()``,
+``theme_arn()``) hardcoded ``arn:aws:`` — broke every deploy against
+GovCloud (``aws-us-gov``) or China (``aws-cn``) since QuickSight
+rejects synthesized resource ARNs whose partition doesn't match the
+account's actual partition.
+
+Fix: new ``Config.partition`` property resolves the partition from,
+in order:
+
+1. The explicit ``datasource_arn`` if set (authoritative for
+   pre-existing customer datasources).
+2. The first ``principal_arns`` entry — the customer's user/role is
+   in the same partition as the resources we'll synthesize.
+3. ``aws`` as the default (preserves prior behavior for the
+   spec_example / fuzz fixtures that don't carry a principal).
+
+Bare strings and malformed ARNs (no ``arn:`` prefix, empty
+partition slot) silently fall through to the default — defensive
+against operator config typos.
+
+10 unit tests cover the resolution order, GovCloud +
+China + commercial partitions, the ``datasource_arn``-wins-over-
+principal precedence, and the bare-string / empty-partition edges.
+
 ## v8.7.2 — X.1 phase closed (planning milestone)
 
 No code change vs v8.7.1 — this is a planning-milestone tag marking
