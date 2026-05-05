@@ -83,7 +83,7 @@ Wedge: land auto-failure-screenshot first so all subsequent browser-test investi
 
 **Stack — Python backend + HTMX + Tailwind + CDN-loaded chart libraries.**
 - No bundler, no TS, no npm — same instinct as pip→uv. Containment of language spread is intentional.
-- Charting: HTMX extension pattern. Server renders `<div data-chart="sankey" data-rows='[...]'></div>`; an `hx-on::after-swap` handler re-hydrates chart divs in any swapped fragment via ECharts / vega-lite pulled from a CDN once. ~50 lines of bootstrap JS total. The "external chart lib" tax is unavoidable for Sankey/line/bar — Tailwind handles layout, not visualization.
+- Charting: HTMX extension pattern. Server renders `<div data-chart="sankey" data-rows='[...]'></div>`; an `hx-on::after-swap` handler re-hydrates chart divs in any swapped fragment via [d3](https://github.com/d3/d3) loaded from a CDN once. d3 is the right primitive — pure SVG, no bundler needed, native Sankey via `d3-sankey`, and it's the data-binding layer underneath vega-lite / ECharts so we keep the option to layer one of those later if we want declarative chart specs. ~50 lines of bootstrap JS total. Tailwind handles layout, not visualization, so the d3 dependency is unavoidable for Sankey/line/bar.
 - Auth: IAM via ALB or Lambda authorizer in front of the Python backend. Same auth surface the customer's QS embed already uses.
 - Per-user data scoping: inject user identity into the SQL WHERE in code (more flexible than QS RowLevelSecurity datasets — per-org/per-role/per-account is just Python).
 
