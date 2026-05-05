@@ -80,11 +80,11 @@
   function hydrate(root) {
     // Handle both initial-load (root = body, scan inside) and
     // post-swap (root = .visual-data div, walk up to section) cases.
-    if (root.matches && root.matches("[data-visual-kind]")) {
+    if (root.matches?.("[data-visual-kind]")) {
       hydrateSection(root);
       return;
     }
-    var section = root.closest && root.closest("[data-visual-kind]");
+    var section = root.closest?.("[data-visual-kind]");
     if (section) {
       hydrateSection(section);
       return;
@@ -132,7 +132,7 @@
         "class",
         "fill-blue-500 hover:fill-blue-700 cursor-pointer transition-colors",
       )
-      .on("click", (event, d) => {
+      .on("click", (_event, d) => {
         if (visualId) fireAnchorRequest(visualId, d.name);
       });
     svg
@@ -214,7 +214,7 @@
         "class",
         "fill-blue-500 hover:fill-blue-700 cursor-pointer transition-colors",
       )
-      .on("click", (event, d) => {
+      .on("click", (_event, d) => {
         if (visualId) fireAnchorRequest(visualId, d.id || d.label);
       });
 
@@ -244,4 +244,19 @@
   document.addEventListener("DOMContentLoaded", () => {
     hydrate(document.body);
   });
+
+  // X.2.a.2 — test-mode export. When window.__test_mode__ is set
+  // BEFORE this script runs (via Playwright's addInitScript), the
+  // IIFE-scoped functions become reachable for unit tests under
+  // tests/js/. Production deploys never set the flag, so the export
+  // costs nothing at runtime.
+  if (typeof window !== "undefined" && window.__test_mode__) {
+    window.__bootstrap_internals__ = {
+      fireAnchorRequest: fireAnchorRequest,
+      hydrate: hydrate,
+      hydrateSection: hydrateSection,
+      renderSankey: renderSankey,
+      renderForceGraph: renderForceGraph,
+    };
+  }
 })();

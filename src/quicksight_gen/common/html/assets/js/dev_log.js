@@ -21,10 +21,10 @@
   }
 
   function describe(el) {
-    if (!el || !el.tagName) return null;
+    if (!el?.tagName) return null;
     var s = el.tagName.toLowerCase();
     if (el.id) s += "#" + el.id;
-    if (el.getAttribute && el.getAttribute("data-visual-id")) {
+    if (el.getAttribute?.("data-visual-id")) {
       s += "[data-visual-id=" + el.getAttribute("data-visual-id") + "]";
     }
     return s;

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>bootstrap.js unit harness</title>
+    <script>
+      // X.2.a.2 — JS unit harness. Sets the test-mode flag BEFORE
+      // bootstrap.js loads so its IIFE exports the internals on
+      // window.__bootstrap_internals__. Mocks htmx.ajax with a
+      // recording stub so tests can assert on call shape without
+      // a real server. Listener for the custom 'sankey:click'
+      // event is wired here too so fireAnchorRequest's dev-log
+      // hook can be inspected from the test.
+      window.__test_mode__ = true;
+      window.__htmx_calls__ = [];
+      window.htmx = {
+        ajax: (verb, url, opts) => {
+          window.__htmx_calls__.push({ verb: verb, url: url, opts: opts });
+        },
+      };
+      window.__sankey_clicks__ = [];
+      document.addEventListener("DOMContentLoaded", () => {
+        document.body.addEventListener("sankey:click", (evt) => {
+          window.__sankey_clicks__.push(evt.detail);
+        });
+      });
+    </script>
+  </head>
+  <body>
+    <!-- fireAnchorRequest reads form values via FormData(#filter-form) -->
+    <form id="filter-form">
+      <input type="hidden" name="date_from" value="2024-01-01" />
+      <input type="hidden" name="date_to" value="2024-12-31" />
+    </form>
+    <!--
+      Path is relative to THIS file. file:// URLs resolve <script src>
+      relative to the loaded document, not pytest's cwd, so this works
+      regardless of where pytest is invoked from.
+    -->
+    <script src="../../../src/quicksight_gen/common/html/assets/js/bootstrap.js"></script>
+  </body>
+</html>
