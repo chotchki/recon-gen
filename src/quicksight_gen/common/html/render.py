@@ -47,8 +47,18 @@ _D3_SANKEY_SRC = (
 
 
 # Bootstrap JS — runs on initial page load AND after every HTMX swap.
-# Walks every ``[data-visual-kind]`` looking for a sibling/child
-# ``script.chart-data`` JSON payload; if found, dispatches by kind.
+# Hydration model:
+#
+#   <section data-visual-kind="Sankey" data-visual-id="X">
+#     <div id="visual-data-X" class="visual-data">  ← HTMX swap target
+#       <script type="application/json" class="chart-data">{...}</script>
+#     </div>
+#   </section>
+#
+# After swap, ``evt.detail.target`` is the .visual-data div. Walk UP
+# to its enclosing ``[data-visual-kind]`` section and dispatch by kind.
+# The script tag with the JSON payload sits inside the swap target.
+#
 # Currently supports ``Sankey`` only (spike.2 scope). New kinds add
 # one ``case`` arm.
 #
@@ -56,26 +66,40 @@ _D3_SANKEY_SRC = (
 # phase's swap-on-edit pattern reuses this exact dispatch.
 _BOOTSTRAP_JS = """\
 (function() {
+  function hydrateSection(section) {
+    var dataScript = section.querySelector('script.chart-data');
+    if (!dataScript) return;
+    var kind = section.getAttribute('data-visual-kind');
+    var data;
+    try { data = JSON.parse(dataScript.textContent); }
+    catch (e) { console.error('bad chart data', e); return; }
+    var target = section.querySelector('.visual-data');
+    if (!target) return;
+    target.querySelectorAll('svg').forEach(function(s) { s.remove(); });
+    switch (kind) {
+      case 'Sankey':
+        renderSankey(target, data);
+        break;
+      default:
+        console.warn('no hydrator for kind', kind);
+    }
+  }
+
   function hydrate(root) {
-    root.querySelectorAll('[data-visual-kind]').forEach(function(section) {
-      var dataScript = section.querySelector('script.chart-data');
-      if (!dataScript) return;
-      var kind = section.getAttribute('data-visual-kind');
-      var data;
-      try { data = JSON.parse(dataScript.textContent); }
-      catch (e) { console.error('bad chart data', e); return; }
-      var target = section.querySelector('.visual-data');
-      if (!target) return;
-      // Clear prior d3 SVG + leave the JSON script for re-hydrate.
-      target.querySelectorAll('svg').forEach(function(s) { s.remove(); });
-      switch (kind) {
-        case 'Sankey':
-          renderSankey(target, data);
-          break;
-        default:
-          console.warn('no hydrator for kind', kind);
-      }
-    });
+    // Handle both initial-load (root = body, scan inside) and
+    // post-swap (root = .visual-data div, walk up to section) cases.
+    if (root.matches && root.matches('[data-visual-kind]')) {
+      hydrateSection(root);
+      return;
+    }
+    var section = root.closest && root.closest('[data-visual-kind]');
+    if (section) {
+      hydrateSection(section);
+      return;
+    }
+    if (root.querySelectorAll) {
+      root.querySelectorAll('[data-visual-kind]').forEach(hydrateSection);
+    }
   }
 
   function renderSankey(target, data) {
@@ -152,16 +176,22 @@ def _render_filter_form(visual_ids: list[str]) -> str:
     parts.append('    <label>From <input type="date" name="date_from"></label>')
     parts.append('    <label>To <input type="date" name="date_to"></label>')
     for vid in visual_ids:
-        # One hidden trigger element per visual — each fires its own
-        # hx-post on form input change. spike.2 uses one visual so
-        # one element; multi-visual case fans out cleanly.
+        # One Refresh button per visual. Triggered on click (button's
+        # default trigger). Date-input ``change`` was tried on the
+        # button via ``from:#filter-form`` but didn't fire reliably
+        # in the spike; click is the floor — phase.1 can layer auto-
+        # refresh-on-change via SSE or a less-clever trigger config.
+        # ``hx-include="#filter-form"`` collects the date inputs.
+        # ``hx-indicator`` visualises the request — a CSS rule on
+        # ``.htmx-request`` would normally style the button while the
+        # POST is in flight; without one, browsers still show their
+        # native pending-request indicator.
         esc = html.escape(vid)
         parts.append(
             f'    <button type="button"'
             f' hx-post="/visual/{esc}/data"'
             f' hx-target="#visual-data-{esc}"'
-            f' hx-include="#filter-form"'
-            f' hx-trigger="click, change from:#filter-form delay:200ms">'
+            f' hx-include="#filter-form">'
             f'Refresh</button>'
         )
     parts.append('  </form>')
@@ -226,28 +256,31 @@ def emit_html(app: App, sheet: Sheet) -> str:
 def emit_visual_data_fragment(visual_id: str, data: Any) -> str:
     """Server-side fragment HTMX swaps into ``#visual-data-<visual_id>``.
 
-    Carries the d3-shaped chart data inside a ``<script
+    Carries the d3-shaped chart data as a ``<script
     type="application/json" class="chart-data">``. The bootstrap JS
     finds the script after swap, parses, and dispatches to the
     right d3 renderer by ``data-visual-kind`` on the parent
     section.
 
-    The outer ``<div>`` re-uses the same id the page-shell visual
-    placeholder did (``visual-data-<id>``) so HTMX's
-    ``hx-target="#visual-data-<id>"`` can swap it cleanly without
-    leaving stale IDs behind.
+    The fragment is the script tag ALONE (no wrapper div). HTMX's
+    default ``hx-swap="innerHTML"`` drops it inside the
+    ``visual-data-<id>`` placeholder — wrapping in another div with
+    the same id would create duplicate IDs after the swap.
+
+    The ``visual_id`` argument is currently used only for log /
+    debug context (it doesn't appear in the rendered fragment),
+    but kept in the signature so future callers can attach it as
+    a ``data-`` attribute on the script tag if needed.
 
     JSON serialization uses ``json.dumps`` — caller is responsible
     for shaping the payload (d3-sankey wants
     ``{"nodes": [...], "links": [...]}``; a future TimeSeries kind
     would shape differently).
     """
-    esc_id = html.escape(visual_id)
+    del visual_id  # reserved for future debug/diagnostic use
     payload = json.dumps(data)
     return (
-        f'<div id="visual-data-{esc_id}" class="visual-data">'
         f'<script type="application/json" class="chart-data">{payload}</script>'
-        f'</div>'
     )
 
 

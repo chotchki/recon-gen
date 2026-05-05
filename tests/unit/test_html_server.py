@@ -79,9 +79,12 @@ def test_get_root_returns_full_sheet_html() -> None:
 
 
 def test_post_visual_data_returns_swap_fragment() -> None:
-    """POST /visual/{id}/data returns a fragment with the d3 chart
-    data inside ``<script type="application/json" class="chart-data">``.
-    The page-shell bootstrap script depends on this exact shape."""
+    """POST /visual/{id}/data returns a bare ``<script
+    type="application/json" class="chart-data">`` tag with the d3
+    chart data. Default HTMX ``innerHTML`` swap drops it inside the
+    page-shell ``visual-data-<id>`` placeholder. No wrapper div —
+    wrapping in another div with the same id would create duplicate
+    IDs after the swap."""
     tree_app, sheet = _build_app()
     asgi = make_app(
         tree_app=tree_app,
@@ -98,14 +101,15 @@ def test_post_visual_data_returns_swap_fragment() -> None:
     )
     assert resp.status_code == 200
     body = resp.text
-    # Outer div HTMX swaps over the placeholder.
-    assert 'id="visual-data-v-sankey"' in body
-    # JSON payload script for the bootstrap to parse.
-    assert 'script type="application/json"' in body
+    # Fragment is the script tag alone — no wrapper, no duplicate IDs.
+    assert body.startswith("<script")
+    assert 'type="application/json"' in body
     assert 'class="chart-data"' in body
     # Payload JSON is intact.
     assert '"nodes"' in body
     assert '"links"' in body
+    # Sanity: no inner div re-wrap that would shadow #visual-data-X.
+    assert "<div" not in body
 
 
 def test_filter_params_land_in_fetcher() -> None:
@@ -166,7 +170,7 @@ def test_response_payload_round_trips_through_json() -> None:
     client = TestClient(asgi)
     body = client.post("/visual/v-sankey/data", data={}).text
     # Extract the JSON between the <script> tags and parse.
-    start = body.index(">", body.index("script type=\"application/json\"")) + 1
+    start = body.index(">") + 1
     end = body.index("</script>", start)
     parsed = json.loads(body[start:end])
     assert parsed == payload
