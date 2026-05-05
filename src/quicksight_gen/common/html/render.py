@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import html
 import json
+from pathlib import Path
 from typing import Any
 
 from quicksight_gen.common.tree._helpers import _AutoSentinel
@@ -45,201 +46,27 @@ _D3_SANKEY_SRC = (
     "https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js"
 )
 
-
-# Bootstrap JS — runs on initial page load AND after every HTMX swap.
-# Hydration model:
+# X.2.a.1 — JS lives in standalone .js files under assets/js/ so biome
+# can lint / format / minify them; render.py loads the contents at
+# module-import time + inlines them into the page shell. Standalone
+# files keep the JS analyzable by IDE / biome / Playwright unit tests
+# without a Python string boundary in the way.
 #
-#   <section data-visual-kind="Sankey" data-visual-id="X">
-#     <div id="visual-data-X" class="visual-data">  ← HTMX swap target
-#       <script type="application/json" class="chart-data">{...}</script>
-#     </div>
-#   </section>
-#
-# After swap, ``evt.detail.target`` is the .visual-data div. Walk UP
-# to its enclosing ``[data-visual-kind]`` section and dispatch by kind.
-# The script tag with the JSON payload sits inside the swap target.
-#
-# Currently supports ``Sankey`` only (spike.2 scope). New kinds add
-# one ``case`` arm.
-#
-# The ``htmx:afterSwap`` event is the X.4 future-proofing hook — that
-# phase's swap-on-edit pattern reuses this exact dispatch.
-_BOOTSTRAP_JS = """\
-(function() {
-  // Build the merged values dict for an anchor click — current form
-  // inputs PLUS the anchor selection. d3 owns the SVG so it owns the
-  // click; htmx.ajax() is HTMX's documented programmatic-trigger API
-  // and produces a request indistinguishable from an attribute-bound
-  // hx-post (same swap target, same headers, same hydrate path on
-  // the response).
-  function fireAnchorRequest(visualId, anchorName) {
-    var form = document.querySelector('#filter-form');
-    var values = {anchor: anchorName};
-    if (form) {
-      new FormData(form).forEach(function(v, k) { values[k] = v; });
-    }
-    // Fire a custom event so the dev-log forwarder (if enabled) can
-    // capture the user-intent moment BEFORE htmx.ajax fires its own
-    // events. No-op when dev-log is off.
-    document.body.dispatchEvent(new CustomEvent('sankey:click', {
-      detail: {visualId: visualId, anchor: anchorName},
-    }));
-    htmx.ajax('POST', '/visual/' + visualId + '/data', {
-      target: '#visual-data-' + visualId,
-      swap: 'innerHTML',
-      values: values,
-    });
-  }
+# Escape ``</script>`` → ``<\/script>``: any literal ``</script>`` in
+# the JS (e.g. inside a comment block illustrating the HTML shape)
+# would terminate the enclosing inline ``<script>`` tag at HTML-parse
+# time and break execution. The backslash form parses identically as
+# JS but doesn't trigger HTML's script-tag terminator.
+_ASSETS_JS_DIR = Path(__file__).parent / "assets" / "js"
 
-  function hydrateSection(section) {
-    var dataScript = section.querySelector('script.chart-data');
-    if (!dataScript) return;
-    var kind = section.getAttribute('data-visual-kind');
-    var visualId = section.getAttribute('data-visual-id');
-    var data;
-    try { data = JSON.parse(dataScript.textContent); }
-    catch (e) { console.error('bad chart data', e); return; }
-    var target = section.querySelector('.visual-data');
-    if (!target) return;
-    target.querySelectorAll('svg').forEach(function(s) { s.remove(); });
-    switch (kind) {
-      case 'Sankey':
-        renderSankey(target, data, visualId);
-        break;
-      case 'ForceGraph':
-        renderForceGraph(target, data, visualId);
-        break;
-      default:
-        console.warn('no hydrator for kind', kind);
-    }
-  }
 
-  function hydrate(root) {
-    // Handle both initial-load (root = body, scan inside) and
-    // post-swap (root = .visual-data div, walk up to section) cases.
-    if (root.matches && root.matches('[data-visual-kind]')) {
-      hydrateSection(root);
-      return;
-    }
-    var section = root.closest && root.closest('[data-visual-kind]');
-    if (section) {
-      hydrateSection(section);
-      return;
-    }
-    if (root.querySelectorAll) {
-      root.querySelectorAll('[data-visual-kind]').forEach(hydrateSection);
-    }
-  }
+def _load_inline_js(name: str) -> str:
+    raw = (_ASSETS_JS_DIR / name).read_text(encoding="utf-8")
+    return raw.replace("</script>", "<\\/script>")
 
-  function renderSankey(target, data, visualId) {
-    var width = target.clientWidth || 800;
-    var height = 400;
-    var svg = d3.select(target).append('svg')
-      .attr('width', width).attr('height', height);
-    var sankey = d3.sankey()
-      .nodeWidth(15).nodePadding(10)
-      .extent([[1, 1], [width - 1, height - 6]]);
-    var graph = sankey({
-      nodes: data.nodes.map(function(d) { return Object.assign({}, d); }),
-      links: data.links.map(function(d) { return Object.assign({}, d); }),
-    });
-    svg.append('g').selectAll('rect')
-      .data(graph.nodes).enter().append('rect')
-      .attr('x', function(d) { return d.x0; })
-      .attr('y', function(d) { return d.y0; })
-      .attr('height', function(d) { return d.y1 - d.y0; })
-      .attr('width', function(d) { return d.x1 - d.x0; })
-      // Tailwind classes target SVG presentation via fill-* /
-      // stroke-* utilities. Hover + transition give the click
-      // affordance for free; cursor-pointer replaces the inline
-      // .style('cursor') we had before.
-      .attr('class', 'fill-blue-500 hover:fill-blue-700 cursor-pointer transition-colors')
-      .on('click', function(event, d) {
-        if (visualId) fireAnchorRequest(visualId, d.name);
-      });
-    svg.append('g').attr('fill', 'none')
-      .selectAll('path').data(graph.links).enter().append('path')
-      .attr('d', d3.sankeyLinkHorizontal())
-      .attr('class', 'stroke-slate-400')
-      .attr('stroke-opacity', 0.35)
-      .attr('stroke-width', function(d) { return Math.max(1, d.width); });
-    svg.append('g').selectAll('text')
-      .data(graph.nodes).enter().append('text')
-      .attr('x', function(d) { return d.x0 < width / 2 ? d.x1 + 6 : d.x0 - 6; })
-      .attr('y', function(d) { return (d.y1 + d.y0) / 2; })
-      .attr('dy', '0.35em')
-      .attr('text-anchor', function(d) {
-        return d.x0 < width / 2 ? 'start' : 'end';
-      })
-      .text(function(d) { return d.name; })
-      .attr('class', 'fill-slate-700 text-xs font-sans pointer-events-none');
-  }
 
-  // d3-force ships in the d3 main bundle — no separate CDN needed.
-  // Layout is iterative (alpha decays each tick); ``sim.tick()`` fires
-  // until equilibrium then stops. Click on a node fires the same
-  // anchor pattern as the Sankey for consistency.
-  function renderForceGraph(target, data, visualId) {
-    var width = target.clientWidth || 800;
-    var height = 400;
-    var svg = d3.select(target).append('svg')
-      .attr('width', width).attr('height', height);
-
-    // Mutate copies — d3.forceSimulation rewrites x/y on the
-    // node/link objects it's given. Avoid stomping the JSON we
-    // received from the server.
-    var nodes = data.nodes.map(function(d) { return Object.assign({}, d); });
-    var links = data.links.map(function(d) { return Object.assign({}, d); });
-
-    var sim = d3.forceSimulation(nodes)
-      .force('link', d3.forceLink(links).id(function(d) { return d.id; })
-        .distance(80).strength(0.7))
-      .force('charge', d3.forceManyBody().strength(-220))
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collide', d3.forceCollide(22));
-
-    var link = svg.append('g').selectAll('line')
-      .data(links).enter().append('line')
-      .attr('class', 'stroke-slate-400')
-      .attr('stroke-opacity', 0.5)
-      .attr('stroke-width', 1.5);
-
-    var node = svg.append('g').selectAll('circle')
-      .data(nodes).enter().append('circle')
-      .attr('r', 12)
-      .attr('class', 'fill-blue-500 hover:fill-blue-700 cursor-pointer transition-colors')
-      .on('click', function(event, d) {
-        if (visualId) fireAnchorRequest(visualId, d.id || d.label);
-      });
-
-    var label = svg.append('g').selectAll('text')
-      .data(nodes).enter().append('text')
-      .text(function(d) { return d.label || d.id; })
-      .attr('class', 'fill-slate-700 text-xs font-sans pointer-events-none');
-
-    sim.on('tick', function() {
-      link
-        .attr('x1', function(d) { return d.source.x; })
-        .attr('y1', function(d) { return d.source.y; })
-        .attr('x2', function(d) { return d.target.x; })
-        .attr('y2', function(d) { return d.target.y; });
-      node
-        .attr('cx', function(d) { return d.x; })
-        .attr('cy', function(d) { return d.y; });
-      label
-        .attr('x', function(d) { return d.x + 14; })
-        .attr('y', function(d) { return d.y + 4; });
-    });
-  }
-
-  document.addEventListener('htmx:afterSwap', function(evt) {
-    hydrate(evt.detail.target);
-  });
-  document.addEventListener('DOMContentLoaded', function() {
-    hydrate(document.body);
-  });
-})();
-"""
+_BOOTSTRAP_JS = _load_inline_js("bootstrap.js")
+_DEV_LOG_JS = _load_inline_js("dev_log.js")
 
 
 _PAGE_SHELL = """\
@@ -262,74 +89,6 @@ _PAGE_SHELL = """\
 </html>
 """
 
-
-# Dev-log forwarder — wraps the HTMX event bus + custom 'sankey:click'
-# events and POSTs each to /log. Server echoes the events inline with
-# uvicorn's log stream so the developer sees what the browser is doing
-# in real time. Gated by a meta tag so production deploys (no meta =
-# no listeners attached, zero overhead).
-#
-# Anti-loop note: the /log POST goes via plain ``fetch``, NOT htmx, so
-# logging events don't generate more events. Errors swallowed so a
-# down /log endpoint can't break the page.
-_DEV_LOG_JS = """\
-(function() {
-  if (!document.querySelector('meta[name="dev-log"]')) return;
-
-  function send(eventName, payload) {
-    fetch('/log', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(Object.assign({event: eventName}, payload || {})),
-      keepalive: true,
-    }).catch(function() {});
-  }
-
-  function describe(el) {
-    if (!el || !el.tagName) return null;
-    var s = el.tagName.toLowerCase();
-    if (el.id) s += '#' + el.id;
-    if (el.getAttribute && el.getAttribute('data-visual-id')) {
-      s += '[data-visual-id=' + el.getAttribute('data-visual-id') + ']';
-    }
-    return s;
-  }
-
-  // HTMX event bus — the trigger / request / swap lifecycle.
-  var htmxEvents = [
-    'htmx:beforeRequest', 'htmx:afterRequest',
-    'htmx:beforeSwap', 'htmx:afterSwap',
-    'htmx:responseError', 'htmx:sendError', 'htmx:targetError',
-  ];
-  htmxEvents.forEach(function(name) {
-    document.body.addEventListener(name, function(evt) {
-      var detail = evt.detail || {};
-      var rc = detail.requestConfig || {};
-      var xhr = detail.xhr || {};
-      send(name, {
-        target: describe(evt.target),
-        verb: rc.verb || null,
-        path: rc.path || null,
-        status: xhr.status || null,
-      });
-    });
-  });
-
-  // Custom event the bootstrap fires on d3 node clicks — see
-  // fireAnchorRequest in the main bootstrap. Captures the
-  // user-intent moment BEFORE htmx.ajax fires so the log shows
-  // "click → request → swap" in order.
-  document.body.addEventListener('sankey:click', function(evt) {
-    var detail = evt.detail || {};
-    send('sankey:click', {
-      visualId: detail.visualId || null,
-      anchor: detail.anchor || null,
-    });
-  });
-
-  send('dev-log:ready', {ua: navigator.userAgent});
-})();
-"""
 
 
 # Form template — emits a date-range filter at the top of the page.

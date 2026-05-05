@@ -183,6 +183,10 @@ quicksight_gen = [
     # an installed wheel can serve the smoke runner without
     # forcing the user to run the Tailwind CLI.
     "common/html/assets/*.css",
+    # X.2.a.1 — JS extracted to standalone .js files so biome can
+    # lint / format / minify them. render.py loads at module-import
+    # time; package_data ships them inside the wheel.
+    "common/html/assets/js/*.js",
 ]
 
 [tool.setuptools.dynamic]
