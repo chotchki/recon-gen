@@ -1,5 +1,67 @@
 # Release Notes
 
+## v8.7.1 — X.1.c "flake" fix + X.1.d.1 layered helpers
+
+### X.1.c — Sasquatch L1 dashboard "flake" was table virtualization
+
+Diagnosed and fixed the
+``test_harness_l1_planted_scenarios_visible[sasquatch_pr]``
+intermittent failure. **Not a flake** — a deterministic
+data-density-dependent assertion bug.
+
+The harness's ``_active_sheet_text`` reads ``inner_text()`` of every
+visual on the active sheet to check whether a planted ``account_id``
+surfaces. QS tables virtualize at ~10 DOM rows; ``inner_text()`` only
+sees the rendered window. ``sasquatch_pr``'s denser seed pushed the
+planted Limit Breach row (``cust-0001-snb``) below the visible 10
+— ``spec_example``'s sparser seed kept it in view. Same code, same
+dashboard, opposite results purely on data density.
+
+Fix: new ``expand_all_tables_on_sheet`` helper bumps every paged
+table on the active sheet to page-size 10000 before reading text.
+Reuses the same QS ``simplePagedDisplayNav_dropdown_pageSize``
+control that ``count_table_total_rows`` already exercises for row
+counting; non-table visuals (KPIs, charts) silently skip via the
+short pagination-detection timeout.
+
+Verified live ``2026-05-04``: ``./run_e2e.sh --harness`` passes
+**15 / 15 tests in 13:47** across all 3 L2 instances, including the
+previously-flaking sasquatch_pr Limit Breach assertion.
+
+### X.1.d.1 — Shared Layer 1 (matview presence) query helpers
+
+New ``tests/e2e/_layer1_query.py`` module generalizes the
+``assert_l1_matview_rows_present`` pattern (used by the harness)
+into helpers that any browser e2e test can call to gate its render
+assertion behind a fast matview check:
+
+- ``query_matview_rows(conn, table, where, *, dialect, columns, limit)``
+- ``matview_row_count(conn, table, where, *, dialect)``
+- ``assert_matview_has_row(conn, table, where, *, dialect, context)``
+- ``assert_account_in_matview(conn, matview, account_id, *, dialect)``
+
+All branch placeholder syntax (Postgres ``%s``, Oracle ``:1``/``:2``)
+and Oracle's ``FETCH FIRST`` vs Postgres ``LIMIT``. 14 unit tests
+against an in-memory SQLite stand-in cover the SQL shape + assertion
+behavior; live bind format verified by the existing harness against
+Aurora / Oracle.
+
+X.1.d.2/.3 will wire these into the existing browser e2e tests
+(``test_inv_drilldown.py``, ``test_l2ft_metadata_cascade.py``,
+``test_l1_sheet_visuals.py``, etc.) — adoption work, no further
+helper changes expected.
+
+### CI workflow concurrency fix
+
+``e2e-pg-browser`` now ``needs: e2e-pg-api`` so the two PG jobs
+serialize within a single workflow run. Prior shape (both jobs in
+the same ``e2e-pg`` concurrency group with no internal dependency)
+caused GHA to cancel ``e2e-pg-browser`` whenever a sibling
+``e2e-pg-api`` was queued behind a prior run's ``cleanup-pg`` —
+the would-be-deadlock cancel pattern. Pulled forward from the
+X.2 (now X.3) "concurrency redesign" notes since X.1.c needed a
+working ``workflow_dispatch`` path for harness verification.
+
 ## v8.7.0 — Unified seed-hash lock surface (X.1.k)
 
 The seed-hash lock surface is now a single artifact per
