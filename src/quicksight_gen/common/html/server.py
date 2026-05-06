@@ -90,6 +90,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from quicksight_gen.common.html.render import (
+    FilterSpec,
     emit_dashboards_list,
     emit_error_page,
     emit_html,
@@ -137,6 +138,7 @@ class ServedDashboard:
     title: str
     data_fetcher: DataFetcher
     theme: ThemePreset | None = None
+    filter_specs: tuple[FilterSpec, ...] = ()
 
 
 def make_app(
@@ -250,6 +252,7 @@ def make_app(
             dashboard_id=dash_id, dev_log=dev_log,
             theme=served.theme,
             all_sheets=sheets,
+            filter_specs=served.filter_specs,
         ))
 
     async def sheet_view(request: Request) -> Response:
@@ -274,6 +277,7 @@ def make_app(
             dashboard_id=dash_id, dev_log=dev_log,
             theme=served.theme,
             all_sheets=sheets,
+            filter_specs=served.filter_specs,
         ))
 
     async def visual_data(request: Request) -> Response:

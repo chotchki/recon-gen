@@ -102,6 +102,7 @@ def app2_apply(  # type: ignore[no-untyped-def]
         make_db_fetcher,
     )
     from quicksight_gen.common.html._smoke_app import (  # noqa: PLC0415
+        SMOKE_FILTER_SPECS,
         build_smoke_app,
         stub_money_trail_fetcher,
     )
@@ -135,6 +136,7 @@ def app2_apply(  # type: ignore[no-untyped-def]
                 title="Smoke",
                 data_fetcher=fetcher,
                 theme=theme,
+                filter_specs=SMOKE_FILTER_SPECS,
             ),
         },
         dev_log=dev_log,

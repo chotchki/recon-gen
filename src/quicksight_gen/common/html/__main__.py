@@ -22,6 +22,7 @@ import sys
 import uvicorn
 
 from quicksight_gen.common.html._smoke_app import (
+    SMOKE_FILTER_SPECS,
     build_smoke_app,
     stub_money_trail_fetcher,
 )
@@ -39,6 +40,7 @@ def main() -> int:
                 sheet=sheet,
                 title="Smoke",
                 data_fetcher=stub_money_trail_fetcher,
+                filter_specs=SMOKE_FILTER_SPECS,
             ),
         },
         # Dev-log on for direct smoke runner: every HTMX event +
