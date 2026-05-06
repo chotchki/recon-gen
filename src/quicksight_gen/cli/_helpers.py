@@ -153,8 +153,19 @@ def emit_to_target(
 def connect_and_apply(
     cfg, sql: str, *, label: str,  # type: ignore[no-untyped-def]
 ) -> None:
-    """Open the demo DB connection, run ``sql``, commit; rollback on error."""
+    """Open the demo DB connection, run ``sql``, commit; rollback on error.
+
+    Cursor lifecycle: psycopg2 + oracledb both support
+    ``with conn.cursor() as cur`` (PEP 249's cursor context manager
+    protocol — close-on-exit semantics). sqlite3.Cursor doesn't
+    implement ``__enter__`` / ``__exit__`` (only sqlite3.Connection
+    does), so the SQLite arm acquires the cursor, runs the script,
+    and explicitly closes in a finally block. Same observable
+    behavior; different syntax driven by the underlying driver's
+    PEP 249 conformance level.
+    """
     from quicksight_gen.common.db import connect_demo_db, execute_script
+    from quicksight_gen.common.sql import Dialect
 
     if not cfg.demo_database_url:
         raise click.ClickException(
@@ -168,9 +179,19 @@ def connect_and_apply(
     except ImportError as e:
         raise click.ClickException(str(e)) from e
     try:
-        with conn.cursor() as cur:
-            click.echo(f"  Applying {label}...")
-            execute_script(cur, sql, dialect=cfg.dialect)
+        click.echo(f"  Applying {label}...")
+        if cfg.dialect is Dialect.SQLITE:
+            # sqlite3.Cursor lacks __enter__ / __exit__ — manage
+            # close() explicitly. Same observable behavior as the
+            # `with conn.cursor() as cur` block on PG / Oracle.
+            cur = conn.cursor()
+            try:
+                execute_script(cur, sql, dialect=cfg.dialect)
+            finally:
+                cur.close()
+        else:
+            with conn.cursor() as cur:
+                execute_script(cur, sql, dialect=cfg.dialect)
         conn.commit()
         click.echo(f"  {label.capitalize()} applied.")
     except Exception:
