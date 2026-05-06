@@ -20,7 +20,7 @@ config — see PLAN.md P.9d). X.3 added the SQLite arm using the stdlib
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Protocol
 from urllib.parse import parse_qs, urlparse
@@ -163,7 +163,9 @@ class _StddevSampAggregate:
     doesn't ship the SQL/2008 standard aggregate natively.
 
     Numerically stable single-pass: tracks running mean + sum of
-    squared deviations, computes ``SQRT(M2 / (n - 1))`` at finalize.
+    squared deviations (``m2`` in Welford notation, lowercased here
+    so pyright's ``reportConstantRedefinition`` doesn't trip on
+    the per-step reassignment).
     Returns NULL when n < 2 (matching the SQL standard semantic where
     sample stddev of a single value is undefined, not 0).
     """
@@ -171,7 +173,7 @@ class _StddevSampAggregate:
     def __init__(self) -> None:
         self.n = 0
         self.mean = 0.0
-        self.M2 = 0.0
+        self.m2 = 0.0
 
     def step(self, value: Any) -> None:
         if value is None:
@@ -181,12 +183,12 @@ class _StddevSampAggregate:
         delta = x - self.mean
         self.mean += delta / self.n
         delta2 = x - self.mean
-        self.M2 += delta * delta2
+        self.m2 += delta * delta2
 
     def finalize(self) -> float | None:
         if self.n < 2:
             return None
-        return (self.M2 / (self.n - 1)) ** 0.5
+        return (self.m2 / (self.n - 1)) ** 0.5  # SQRT(m2 / (n-1))
 
 
 def _register_sqlite_aggregates(conn: Any) -> None:
@@ -563,7 +565,7 @@ class _AsyncSqlitePool:
         return self._acquire()
 
     @asynccontextmanager
-    async def _acquire(self) -> AsyncIterator[AsyncConnection]:
+    async def _acquire(self) -> AsyncGenerator[AsyncConnection, None]:
         import aiosqlite  # noqa: PLC0415
 
         async with aiosqlite.connect(self._path) as conn:

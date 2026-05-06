@@ -207,13 +207,6 @@ def make_app(
             f"public, max-age={visual_data_cache_max_age_s}"
         )
 
-    # Snapshot the per-dashboard sheet ids so the visual_data
-    # handler can validate the URL slug without re-deriving it
-    # on every request.
-    sheet_ids: dict[str, str] = {
-        dash_id: str(d.sheet.sheet_id)
-        for dash_id, d in dashboards.items()
-    }
     # X.2.e — every analysis-attached sheet is reachable as a tab.
     # Snapshot the {dashboard_id: {sheet_id: Sheet}} mapping so the
     # /sheets/:s route can resolve a sheet without walking the tree

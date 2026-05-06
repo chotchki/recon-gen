@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 
@@ -52,8 +52,8 @@ class Config:
     aws_region: str
     datasource_arn: str | None = None
     resource_prefix: str = "qs-gen"
-    principal_arns: list[str] = field(default_factory=list)
-    extra_tags: dict[str, str] = field(default_factory=dict)
+    principal_arns: list[str] = field(default_factory=list[str])
+    extra_tags: dict[str, str] = field(default_factory=dict[str, str])
     demo_database_url: str | None = None
     # Per M.2d.3: when set, the L2 instance prefix becomes the middle
     # segment of every resource ID generated via ``cfg.prefixed(name)``,
@@ -255,7 +255,38 @@ _CONFIG_L2_ONLY_KEYS: frozenset[str] = frozenset({
 })
 
 
-def _reject_unknown_config_keys(raw: dict, path: Path) -> None:
+def _require_str(
+    values: dict[str, object], key: str, *, default: str | None = None,
+) -> str:
+    """Extract ``key`` as a ``str``, raising if absent/wrong-type.
+
+    Pyright sees ``dict[str, object].get(key)`` as ``object``; this
+    helper does the isinstance narrowing in one place so callers get
+    a properly-typed ``str``.
+    """
+    raw = values.get(key, default)
+    if raw is None:
+        raise ValueError(f"{key} is required")
+    if not isinstance(raw, str):
+        raise ValueError(
+            f"{key} must be a string; got {type(raw).__name__} ({raw!r})"
+        )
+    return raw
+
+
+def _opt_str(values: dict[str, object], key: str) -> str | None:
+    """``_require_str`` but None when missing."""
+    raw = values.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ValueError(
+            f"{key} must be a string; got {type(raw).__name__} ({raw!r})"
+        )
+    return raw
+
+
+def _reject_unknown_config_keys(raw: dict[str, object], path: Path) -> None:
     """Raise if config.yaml contains keys outside the env-only allowlist.
 
     V.1.b: catches the two common mis-edits — dropping an L2 institution
@@ -301,17 +332,28 @@ def load_config(path: str | Path | None = None) -> Config:
     V.1.b: rejects unknown YAML keys and L2-only keys (theme, persona,
     rails, etc.) with a pointer to the L2 institution YAML.
     """
-    values: dict = {}
+    values: dict[str, object] = {}
 
     # Try YAML first
     if path is not None:
         p = Path(path)
         if p.exists():
             with p.open() as f:
-                raw = yaml.safe_load(f)
+                # ``yaml.safe_load`` returns ``Any``; the isinstance
+                # guard below narrows to dict[Hashable, Any] which we
+                # treat as dict[str, object] (config keys are strings
+                # by convention, validated against allowlists).
+                raw: object = yaml.safe_load(f)
             if isinstance(raw, dict):
-                _reject_unknown_config_keys(raw, p)
-                values.update(raw)
+                # YAML dicts come back as dict[Any, Any]; coerce keys
+                # to str (the rest of the loader assumes string keys)
+                # and let pyright treat values as ``object`` from here.
+                raw_typed = cast(dict[Any, Any], raw)
+                raw_dict: dict[str, object] = {
+                    str(k): v for k, v in raw_typed.items()
+                }
+                _reject_unknown_config_keys(raw_dict, p)
+                values.update(raw_dict)
 
     # Env vars override YAML
     env_map = {
@@ -353,7 +395,11 @@ def load_config(path: str | Path | None = None) -> Config:
 
     # Extra tags: expect a dict under "extra_tags" in the YAML
     raw_tags = values.get("extra_tags", {})
-    extra_tags = dict(raw_tags) if isinstance(raw_tags, dict) else {}
+    extra_tags: dict[str, str] = {}
+    if isinstance(raw_tags, dict):
+        tags_typed = cast(dict[Any, Any], raw_tags)
+        for k, v in tags_typed.items():
+            extra_tags[str(k)] = str(v)
 
     # Principals: accept ``principal_arns`` (list or str) or legacy
     # ``principal_arn`` (str or list).
@@ -365,7 +411,9 @@ def load_config(path: str | Path | None = None) -> Config:
         if isinstance(raw, str):
             principal_arns.append(raw)
         elif isinstance(raw, list):
-            principal_arns.extend(str(item) for item in raw)
+            list_typed = cast(list[Any], raw)
+            for item in list_typed:
+                principal_arns.append(str(item))
 
     # Dialect parses to the enum; default Postgres for back-compat.
     raw_dialect = values.get("dialect")
@@ -386,18 +434,22 @@ def load_config(path: str | Path | None = None) -> Config:
     raw_signing = values.get("signing")
     signing: SigningConfig | None = None
     if isinstance(raw_signing, dict):
+        sig_typed = cast(dict[Any, Any], raw_signing)
+        sig_dict: dict[str, object] = {
+            str(k): v for k, v in sig_typed.items()
+        }
         try:
             signing = SigningConfig(
-                key_path=str(raw_signing["key_path"]),
-                cert_path=str(raw_signing["cert_path"]),
+                key_path=str(sig_dict["key_path"]),
+                cert_path=str(sig_dict["cert_path"]),
                 passphrase_env=(
-                    str(raw_signing["passphrase_env"])
-                    if raw_signing.get("passphrase_env") is not None
+                    str(sig_dict["passphrase_env"])
+                    if sig_dict.get("passphrase_env") is not None
                     else None
                 ),
                 signer_name=(
-                    str(raw_signing["signer_name"])
-                    if raw_signing.get("signer_name") is not None
+                    str(sig_dict["signer_name"])
+                    if sig_dict.get("signer_name") is not None
                     else None
                 ),
             )
@@ -414,6 +466,11 @@ def load_config(path: str | Path | None = None) -> Config:
         )
 
     raw_pool_size = values.get("app2_db_pool_size", 10)
+    if not isinstance(raw_pool_size, (int, str)):
+        raise ValueError(
+            f"app2_db_pool_size must be a positive integer; "
+            f"got {type(raw_pool_size).__name__} ({raw_pool_size!r})."
+        )
     try:
         pool_size = int(raw_pool_size)
     except (TypeError, ValueError) as exc:
@@ -427,13 +484,13 @@ def load_config(path: str | Path | None = None) -> Config:
         )
 
     return Config(
-        aws_account_id=values["aws_account_id"],
-        aws_region=values["aws_region"],
-        datasource_arn=values.get("datasource_arn"),
-        resource_prefix=values.get("resource_prefix", "qs-gen"),
+        aws_account_id=_require_str(values, "aws_account_id"),
+        aws_region=_require_str(values, "aws_region"),
+        datasource_arn=_opt_str(values, "datasource_arn"),
+        resource_prefix=_require_str(values, "resource_prefix", default="qs-gen"),
         principal_arns=principal_arns,
         extra_tags=extra_tags,
-        demo_database_url=values.get("demo_database_url"),
+        demo_database_url=_opt_str(values, "demo_database_url"),
         dialect=dialect,
         signing=signing,
         tagging_enabled=raw_tagging,

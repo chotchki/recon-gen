@@ -47,7 +47,7 @@ that follows.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from quicksight_gen.common.sql.dialect import Dialect
@@ -135,8 +135,8 @@ def execute_visual_sql(
         cur = conn.cursor()
         try:
             cur.execute(rewritten, binds)
-            rows = list(cur.fetchall())
-            description = cur.description or []
+            rows: list[Any] = list(cur.fetchall())
+            description: Sequence[Sequence[Any]] = cur.description or []
             columns = [str(c[0]) for c in description]
         finally:
             cur.close()

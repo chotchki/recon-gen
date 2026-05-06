@@ -84,17 +84,24 @@ def _find_visual_dataset_identifier(visual: Any) -> str | None:
     as "fetcher returns empty payload".
     """
     for field_name in _FIELDS_WITH_DATASET_REFS:
-        field_val = getattr(visual, field_name, None)
+        field_val: Any = getattr(visual, field_name, None)
         if field_val is None:
             continue
         # Most visual fields are lists of Dim/Measure; a few
         # (Sankey source/target on certain shapes) are scalar refs.
-        candidates = field_val if isinstance(field_val, list) else [field_val]
+        # Narrowing list[Any] from `isinstance(field_val, list)` keeps
+        # the element type as Unknown — explicit annotation collapses
+        # it back to ``list[Any]`` so pyright stops complaining about
+        # the per-item walk below.
+        if isinstance(field_val, list):
+            candidates: list[Any] = field_val  # pyright: ignore[reportUnknownVariableType]
+        else:
+            candidates = [field_val]
         for item in candidates:
-            ds = getattr(item, "dataset", None)
+            ds: Any = getattr(item, "dataset", None)
             if ds is None:
                 continue
-            identifier = getattr(ds, "identifier", None)
+            identifier: Any = getattr(ds, "identifier", None)
             if identifier:
                 return str(identifier)
     return None

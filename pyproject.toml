@@ -250,12 +250,22 @@ include = [
     "src/quicksight_gen/common/browser",
     "src/quicksight_gen/common/dataset_contract.py",
     "src/quicksight_gen/common/models.py",
+    # X.2.o.1 — async DB / App2 server surfaces. Added at strict
+    # together because they form one cohesive subsystem (pool →
+    # executor → fetcher → server route). Config gets pulled in
+    # alongside since X.2.n.6's ``app2_db_pool_size`` validation
+    # logic lives there.
+    "src/quicksight_gen/common/db.py",
+    "src/quicksight_gen/common/config.py",
+    "src/quicksight_gen/common/html/_sql_executor.py",
+    "src/quicksight_gen/common/html/_tree_fetcher.py",
+    "src/quicksight_gen/common/html/server.py",
 ]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
 extraPaths = ["src"]
 # Pin the venv so pyright resolves third-party stubs (Playwright,
-# boto3-stubs, psycopg2). Without this, ad-hoc ``pyright <file>``
+# boto3-stubs, psycopg). Without this, ad-hoc ``pyright <file>``
 # invocations on files in scope above can't resolve those packages
 # and surface ~300 false-positive "type is unknown" cascades. The
 # ``venvPath`` is the parent directory; ``venv`` is the directory
