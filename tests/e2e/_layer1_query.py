@@ -31,9 +31,44 @@ def _placeholder(dialect: Dialect, position: int) -> str:
     """Per-dialect bind-parameter placeholder.
 
     Postgres ``psycopg2`` uses ``%s`` (positional, all the same shape);
-    Oracle ``oracledb`` uses ``:1``, ``:2``, ... (positional, 1-indexed).
+    Oracle ``oracledb`` uses ``:1``, ``:2``, ... (positional, 1-indexed);
+    SQLite ``sqlite3`` uses ``?`` (positional, all the same shape).
     """
-    return f":{position}" if dialect is Dialect.ORACLE else "%s"
+    if dialect is Dialect.ORACLE:
+        return f":{position}"
+    if dialect is Dialect.SQLITE:
+        return "?"
+    return "%s"
+
+
+def _exec_one(db_conn: Any, sql: str, params: tuple[Any, ...]) -> Any:
+    """Run a single SQL with params; return all rows.
+
+    Wraps the ``cursor()`` lifecycle so callers don't have to. The
+    sqlite3 ``Cursor`` doesn't implement the context-manager protocol
+    that psycopg2 / oracledb do (see the X.3.f
+    ``connect_and_apply`` SQLite cursor fix), so this helper uses
+    explicit close instead of ``with``.
+    """
+    cur = db_conn.cursor()
+    try:
+        cur.execute(sql, params)
+        return cur.fetchall()
+    finally:
+        cur.close()
+
+
+def _exec_one_scalar(
+    db_conn: Any, sql: str, params: tuple[Any, ...],
+) -> Any:
+    """Run a single SQL expected to return one row, return the first column."""
+    cur = db_conn.cursor()
+    try:
+        cur.execute(sql, params)
+        row = cur.fetchone()
+        return row[0] if row else None
+    finally:
+        cur.close()
 
 
 def query_matview_rows(
@@ -78,9 +113,7 @@ def query_matview_rows(
             if dialect is Dialect.ORACLE
             else f" LIMIT {int(limit)}"
         )
-    with db_conn.cursor() as cur:
-        cur.execute(sql, tuple(params))
-        return list(cur.fetchall())
+    return list(_exec_one(db_conn, sql, tuple(params)))
 
 
 def matview_row_count(
@@ -104,10 +137,8 @@ def matview_row_count(
             clauses.append(f"{col} = {_placeholder(dialect, i)}")
             params.append(val)
         sql += " WHERE " + " AND ".join(clauses)
-    with db_conn.cursor() as cur:
-        cur.execute(sql, tuple(params))
-        row = cur.fetchone()
-        return int(row[0]) if row else 0
+    val = _exec_one_scalar(db_conn, sql, tuple(params))
+    return int(val) if val is not None else 0
 
 
 def assert_matview_has_row(

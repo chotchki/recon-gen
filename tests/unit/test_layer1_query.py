@@ -41,6 +41,9 @@ class _FakeCursor:
     def fetchone(self) -> tuple[Any, ...] | None:
         return self._real.fetchone()
 
+    def close(self) -> None:
+        self._real.close()
+
     def __enter__(self):
         return self
 
@@ -111,6 +114,9 @@ def test_oracle_limit_branch_renders_fetch_first() -> None:
 
         def fetchall(self):
             return []
+
+        def close(self) -> None:
+            pass
 
         def __enter__(self):
             return self
