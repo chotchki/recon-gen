@@ -487,6 +487,95 @@ def emit_error_page(
     )
 
 
+def _qs_richtext_to_html(content: str) -> str:
+    """Project the QS rich-text XML dialect to HTML (X.2.g.1.a).
+
+    The QS format (documented in ``common/rich_text.py``) wraps a
+    ``<text-box>`` root around inline runs / line breaks / bullets /
+    links. ElementTree parses it; this walker projects each tag to
+    a roughly-equivalent HTML node:
+
+      <text-box>...</text-box>            → just the children
+      <inline font-size="X" color="Y">…</inline> → <span style="…">…</span>
+      <br/>                                → <br>
+      <ul><li class="ql-indent-0">…</li></ul> → <ul><li>…</li></ul>
+      <a href="…" target="_self">…</a>     → <a href="…" target="_self">…</a>
+
+    Body text is XML-escaped on input + the output stays escaped (we
+    only emit element tags, never raw user prose). Unknown tags pass
+    through with their text + tail preserved so a future QS-side
+    addition degrades to "render the body, drop the styling".
+    """
+    import xml.etree.ElementTree as ET  # noqa: PLC0415
+
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError:
+        # Malformed XML — escape + render as preformatted so the
+        # operator at least sees the raw content.
+        return f'<pre class="text-xs text-secondary-fg">{html.escape(content)}</pre>'
+
+    def render(node: ET.Element) -> str:
+        tag = node.tag
+        text = html.escape(node.text or "")
+        children = "".join(render(c) for c in node)
+        tail = html.escape(node.tail or "")
+        if tag == "text-box":
+            return text + children + tail
+        if tag == "inline":
+            style_parts: list[str] = []
+            color = node.get("color")
+            if color:
+                style_parts.append(f"color: {color}")
+            font_size = node.get("font-size")
+            if font_size:
+                style_parts.append(f"font-size: {font_size}")
+            font_weight = node.get("font-weight")
+            if font_weight:
+                style_parts.append(f"font-weight: {font_weight}")
+            style_attr = (
+                f' style="{html.escape("; ".join(style_parts))}"'
+                if style_parts else ""
+            )
+            return f"<span{style_attr}>{text}{children}</span>{tail}"
+        if tag == "br":
+            return f"<br>{tail}"
+        if tag == "ul":
+            return f"<ul>{text}{children}</ul>{tail}"
+        if tag == "ol":
+            return f"<ol>{text}{children}</ol>{tail}"
+        if tag == "li":
+            # Drop the QS-required ``ql-indent-0`` class — HTML <li>
+            # doesn't need it.
+            return f"<li>{text}{children}</li>{tail}"
+        if tag == "a":
+            href = node.get("href", "")
+            target = node.get("target", "_self")
+            return (
+                f'<a href="{html.escape(href)}" target="{html.escape(target)}"'
+                f' class="text-accent hover:underline">'
+                f'{text}{children}</a>{tail}'
+            )
+        # Unknown tag: degrade to body + tail, drop the wrapper.
+        return f"{text}{children}{tail}"
+
+    return render(root)
+
+
+def _render_text_box(text_box: Any) -> str:
+    """Wrap a TextBox's projected HTML in a themed surface card so
+    it sits visually consistent with the data-visual sections.
+    Pulls the QS rich-text content via ``text_box.content``.
+    """
+    section_class = (
+        "mx-8 mb-6 p-4 bg-surface rounded-lg shadow-sm "
+        "border border-surface-border text-primary-fg"
+    )
+    raw = getattr(text_box, "content", "") or ""
+    inner = _qs_richtext_to_html(raw)
+    return f'  <section class="{section_class}">{inner}</section>'
+
+
 def _render_sheet_tabs(
     dashboard_id: str,
     sheets: Sequence[Sheet],
@@ -608,7 +697,17 @@ def emit_html(
         body_parts.append(_render_sheet_tabs(
             dashboard_id, all_sheets, sheet_id,
         ))
-    body_parts.append(_render_filter_form(visual_fetch_urls, filter_specs))
+    # X.2.g.1.a — only emit the filter form when this sheet has data
+    # visuals to refresh. Text-box-only sheets (e.g. Executives' Getting
+    # Started) used to show a vestigial date picker that did nothing.
+    if sheet.visuals:
+        body_parts.append(_render_filter_form(visual_fetch_urls, filter_specs))
+    # X.2.g.1.a — render text boxes too. Each sheet.text_boxes entry
+    # carries QS rich-text XML; ``_render_text_box`` projects it to
+    # equivalent HTML so Getting Started sheets actually show their
+    # welcome content instead of being blank.
+    for tb in sheet.text_boxes:
+        body_parts.append(_render_text_box(tb))
     for visual in sheet.visuals:
         body_parts.append(_render_visual(visual, dashboard_id, sheet_id))
     return _PAGE_SHELL.format(
@@ -705,9 +804,18 @@ def _render_visual(
         parts.append(
             f'    <p class="{subtitle_class}">{html.escape(subtitle)}</p>'
         )
+    # X.2.g.1.a — auto-fetch on load. Without ``hx-trigger="load"``
+    # the section sits empty until the user clicks Refresh, which
+    # surprises everyone (live reviews kept asking "why is my chart
+    # blank?"). The Refresh button still works; this just makes the
+    # initial paint Just Happen.
     parts.append(
-        f'    <div id="visual-data-{esc_id}" class="visual-data">'
-        f'<!-- HTMX swap target; populated by GET {esc_url} -->'
+        f'    <div id="visual-data-{esc_id}" class="visual-data"'
+        f' hx-get="{esc_url}"'
+        f' hx-trigger="load"'
+        f' hx-include="#filter-form"'
+        f' hx-swap="innerHTML">'
+        f'<!-- HTMX swap target; auto-fetches on DOMContentLoaded -->'
         f'</div>'
     )
     parts.append("  </section>")
