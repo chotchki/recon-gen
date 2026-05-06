@@ -487,20 +487,76 @@ def emit_error_page(
     )
 
 
+def _render_sheet_tabs(
+    dashboard_id: str,
+    sheets: Sequence[Sheet],
+    active_sheet_id: str,
+) -> str:
+    """Render sheet tabs across the top of the dashboard page (X.2.e).
+
+    Plain ``<a href>`` per sheet — simpler than HTMX swap and the
+    full-page reload is cheap once Tailwind / HTMX / d3 are cached
+    (only the page chrome reloads). The URL is always honored, no
+    fragment-vs-full-page distinction.
+
+    The active sheet's tab carries the accent background so the
+    user can see where they are. Inactive tabs use the surface
+    border color to look like tab dividers without screaming.
+    """
+    if len(sheets) <= 1:
+        # Single-sheet dashboards don't need a tab strip.
+        return ""
+    nav_class = (
+        "flex flex-wrap gap-1 mx-8 mt-4 mb-2 border-b border-surface-border"
+    )
+    active_tab_class = (
+        "px-4 py-2 text-sm font-medium bg-accent text-accent-fg "
+        "rounded-t-md no-underline"
+    )
+    inactive_tab_class = (
+        "px-4 py-2 text-sm font-medium text-secondary-fg "
+        "hover:text-primary-fg hover:bg-surface "
+        "rounded-t-md no-underline transition-colors"
+    )
+    parts = [f'  <nav class="{nav_class}">']
+    for s in sheets:
+        sid = str(s.sheet_id)
+        href = (
+            f"/dashboards/{html.escape(dashboard_id)}"
+            f"/sheets/{html.escape(sid)}"
+        )
+        cls = active_tab_class if sid == active_sheet_id else inactive_tab_class
+        parts.append(
+            f'    <a href="{href}" class="{cls}">{html.escape(s.name)}</a>'
+        )
+    parts.append('  </nav>')
+    return "\n".join(parts)
+
+
 def emit_html(
     app: App, sheet: Sheet, *,
     dashboard_id: str,
     dev_log: bool = False,
     theme: ThemePreset | None = None,
     filter_specs: Sequence[FilterSpec] = (),
+    all_sheets: Sequence[Sheet] = (),
 ) -> str:
     """Render a tree ``Sheet`` as a standalone HTML page.
 
-    Page shell pulls HTMX + d3 + d3-sankey, emits a filter form
-    (date-range plus any ``filter_specs`` controls) at the top of
-    the body that GETs each visual's data endpoint on Refresh,
-    plus one ``<section>`` per visual carrying its title, subtitle,
-    and the swap-target div.
+    Page shell pulls HTMX + d3 + d3-sankey, optionally emits a sheet
+    tab strip (when ``all_sheets`` carries more than one), then a
+    filter form (date-range plus any ``filter_specs`` controls) at
+    the top of the body that GETs each visual's data endpoint on
+    Refresh, plus one ``<section>`` per visual carrying its title,
+    subtitle, and the swap-target div.
+
+    ``all_sheets`` (X.2.e): when provided and longer than one, the
+    page renders sheet tabs at the top. Each tab links to
+    ``/dashboards/{dashboard_id}/sheets/{sheet_id}`` (plain
+    anchors — full page reload). The currently-rendered ``sheet``
+    is highlighted as active. Pass ``app.analysis.sheets`` to wire
+    every sheet in the analysis as a tab. Default ``()`` keeps
+    single-sheet behavior for callers that haven't migrated.
 
     Args:
         app: tree ``App`` node owning the analysis the sheet lives
@@ -548,6 +604,10 @@ def emit_html(
         )
         for v in sheet.visuals
     ]
+    if all_sheets:
+        body_parts.append(_render_sheet_tabs(
+            dashboard_id, all_sheets, sheet_id,
+        ))
     body_parts.append(_render_filter_form(visual_fetch_urls, filter_specs))
     for visual in sheet.visuals:
         body_parts.append(_render_visual(visual, dashboard_id, sheet_id))

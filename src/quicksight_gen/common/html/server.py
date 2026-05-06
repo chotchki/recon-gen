@@ -199,6 +199,19 @@ def make_app(
         dash_id: str(d.sheet.sheet_id)
         for dash_id, d in dashboards.items()
     }
+    # X.2.e — every analysis-attached sheet is reachable as a tab.
+    # Snapshot the {dashboard_id: {sheet_id: Sheet}} mapping so the
+    # /sheets/:s route can resolve a sheet without walking the tree
+    # on every request, and so the 404 path is fast (dict lookup).
+    all_sheets: dict[str, dict[str, "Sheet"]] = {}
+    for dash_id, d in dashboards.items():
+        analysis = d.tree_app.analysis
+        if analysis is None:
+            all_sheets[dash_id] = {str(d.sheet.sheet_id): d.sheet}
+        else:
+            all_sheets[dash_id] = {
+                str(s.sheet_id): s for s in analysis.sheets
+            }
     listing: list[tuple[str, str]] = [
         (dash_id, d.title) for dash_id, d in dashboards.items()
     ]
@@ -228,10 +241,39 @@ def make_app(
             # Raise so the themed 404 handler renders the page,
             # not Starlette's default plain-text "Not Found" body.
             raise HTTPException(status_code=404)
+        # Tab strip across the top — every analysis sheet becomes a tab.
+        # Single-sheet dashboards get an empty tab strip (suppressed
+        # by ``_render_sheet_tabs``).
+        sheets = tuple(all_sheets[dash_id].values())
         return HTMLResponse(emit_html(
             served.tree_app, served.sheet,
             dashboard_id=dash_id, dev_log=dev_log,
             theme=served.theme,
+            all_sheets=sheets,
+        ))
+
+    async def sheet_view(request: Request) -> Response:
+        """X.2.e — render a specific sheet by id.
+
+        Plain-anchor sheet tabs target this route. The dashboard's
+        analysis must contain a sheet with the matching id; unknown
+        ids 404 (themed via the same handler the dashboard route
+        uses).
+        """
+        dash_id = request.path_params["dashboard_id"]
+        served = dashboards.get(dash_id)
+        if served is None:
+            raise HTTPException(status_code=404)
+        sheet_id = request.path_params["sheet_id"]
+        sheet_for_dash = all_sheets[dash_id].get(sheet_id)
+        if sheet_for_dash is None:
+            raise HTTPException(status_code=404)
+        sheets = tuple(all_sheets[dash_id].values())
+        return HTMLResponse(emit_html(
+            served.tree_app, sheet_for_dash,
+            dashboard_id=dash_id, dev_log=dev_log,
+            theme=served.theme,
+            all_sheets=sheets,
         ))
 
     async def visual_data(request: Request) -> Response:
@@ -242,7 +284,11 @@ def make_app(
         served = dashboards.get(dash_id)
         if served is None:
             raise HTTPException(status_code=404)
-        if request.path_params["sheet_id"] != sheet_ids[dash_id]:
+        # X.2.e — any analysis sheet's visual is fetchable, not just
+        # the served (default landing) sheet. The fetcher resolves
+        # the visual_id; the sheet_id check protects against typos
+        # in the URL pattern.
+        if request.path_params["sheet_id"] not in all_sheets[dash_id]:
             raise HTTPException(status_code=404)
         visual_id = request.path_params["visual_id"]
         params: dict[str, str] = {}
@@ -336,6 +382,10 @@ def make_app(
         Route(
             "/dashboards/{dashboard_id}",
             dashboard_view, methods=["GET"],
+        ),
+        Route(
+            "/dashboards/{dashboard_id}/sheets/{sheet_id}",
+            sheet_view, methods=["GET"],
         ),
         Route(
             "/dashboards/{dashboard_id}/sheets/{sheet_id}"
