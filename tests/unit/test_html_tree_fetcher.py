@@ -1,15 +1,20 @@
 """X.2.g.0 — generic per-tree DataFetcher tests.
 
 Verifies the build-time visual indexing + the request-time
-SQL-execute → shape pipeline. Uses an in-memory SQLite fixture
-so tests run without psycopg2 / oracledb. The SQL registry is
-populated via a tiny test-helper that mimics what
+SQL-execute → shape pipeline. Uses an aiosqlite in-memory pool
+fixture so tests run without psycopg / oracledb. The SQL registry
+is populated via a tiny test-helper that mimics what
 ``build_dataset()`` does in production.
+
+X.2.n.4: ``make_tree_db_fetcher`` now takes an
+``AsyncConnectionPool`` and returns an async fetcher. Tests await
+the fetcher directly via ``asyncio.run`` per call so the test
+shape stays familiar.
 """
 
 from __future__ import annotations
 
-import sqlite3
+import asyncio
 from collections.abc import Iterator
 from typing import Any
 
@@ -21,6 +26,7 @@ from quicksight_gen.common.dataset_contract import (
     register_contract,
     register_sql,
 )
+from quicksight_gen.common.db import AsyncConnectionPool, make_connection_pool
 from quicksight_gen.common.html._tree_fetcher import (
     _find_visual_dataset_identifier,
     make_tree_db_fetcher,
@@ -99,30 +105,43 @@ def test_find_dataset_id_returns_none_for_visual_without_fields() -> None:
 
 
 @pytest.fixture
-def sqlite_factory() -> Iterator[Any]:
-    """In-memory SQLite seeded with a tiny test table."""
-    conn = sqlite3.connect(":memory:")
+def aiosqlite_pool() -> Iterator[AsyncConnectionPool]:
+    """File-backed temp SQLite seeded with a tiny test table.
+
+    aiosqlite + ``:memory:`` would give each connection a fresh
+    isolated DB (no shared state across the pool). Using a tempfile
+    means every acquire sees the same seeded data, mirroring
+    production semantics. Cleanup tears down the file at fixture
+    exit.
+    """
+    import sqlite3
+    import tempfile
+    import os
+
+    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    os.close(fd)
+
+    # Seed synchronously via stdlib sqlite3 — much simpler than
+    # async setup and the fixture is sync.
+    conn = sqlite3.connect(path)
     conn.execute("CREATE TABLE t (status TEXT, amount INTEGER)")
     conn.executemany(
         "INSERT INTO t VALUES (?, ?)",
         [("open", 100), ("open", 50), ("closed", 200), ("pending", 25)],
     )
     conn.commit()
+    conn.close()
 
-    def factory() -> Any:
-        class _ConnWrapper:
-            def cursor(self) -> Any:
-                return conn.cursor()
-
-            def close(self) -> None:
-                pass
-
-        return _ConnWrapper()
-
+    cfg = make_test_config(
+        dialect=Dialect.SQLITE,
+        demo_database_url=path,
+    )
+    pool = asyncio.run(make_connection_pool(cfg))
     try:
-        yield factory
+        yield pool
     finally:
-        conn.close()
+        asyncio.run(pool.close())
+        os.unlink(path)
 
 
 def _build_app_with_visuals() -> tuple[App, Dataset]:
@@ -155,7 +174,9 @@ def _build_app_with_visuals() -> tuple[App, Dataset]:
     return app, ds
 
 
-def test_make_tree_db_fetcher_dispatches_kpi(sqlite_factory: Any) -> None:
+def test_make_tree_db_fetcher_dispatches_kpi(
+    aiosqlite_pool: AsyncConnectionPool,
+) -> None:
     # X.2.g.1.c — dataset SQL is row-grain; the wrapper applies
     # SUM(amount) per the KPI's measure declaration.
     register_sql(
@@ -163,15 +184,17 @@ def test_make_tree_db_fetcher_dispatches_kpi(sqlite_factory: Any) -> None:
     )
     app, _ds_node = _build_app_with_visuals()
     fetcher = make_tree_db_fetcher(
-        app, _TEST_CFG_SQLITE, connection_factory=sqlite_factory,
+        app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
     )
-    out = fetcher("v-kpi", {})
+    out = asyncio.run(fetcher("v-kpi", {}))
     # KPI shape: {values: [{value, ...}]}
     assert "values" in out
     assert out["values"][0]["value"] == 375  # 100+50+200+25
 
 
-def test_make_tree_db_fetcher_dispatches_bar_chart(sqlite_factory: Any) -> None:
+def test_make_tree_db_fetcher_dispatches_bar_chart(
+    aiosqlite_pool: AsyncConnectionPool,
+) -> None:
     # X.2.g.1.c — dataset SQL is row-grain; the wrapper produces
     # SELECT status, SUM(amount) FROM (...) GROUP BY status.
     register_sql(
@@ -179,15 +202,17 @@ def test_make_tree_db_fetcher_dispatches_bar_chart(sqlite_factory: Any) -> None:
     )
     app, _ds_node = _build_app_with_visuals()
     fetcher = make_tree_db_fetcher(
-        app, _TEST_CFG_SQLITE, connection_factory=sqlite_factory,
+        app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
     )
-    out = fetcher("v-bar", {})
+    out = asyncio.run(fetcher("v-bar", {}))
     # BarChart shape: {categories, values, x_label, y_label}
     assert out["categories"] == ["closed", "open", "pending"]
     assert out["values"] == [200, 150, 25]
 
 
-def test_make_tree_db_fetcher_substitutes_filters(sqlite_factory: Any) -> None:
+def test_make_tree_db_fetcher_substitutes_filters(
+    aiosqlite_pool: AsyncConnectionPool,
+) -> None:
     """URL params with names referenced in the dataset SQL flow
     through to the bind dict (proves end-to-end X.2.d → X.2.f →
     X.2.g.0 round-trip)."""
@@ -197,28 +222,28 @@ def test_make_tree_db_fetcher_substitutes_filters(sqlite_factory: Any) -> None:
     )
     app, _ds_node = _build_app_with_visuals()
     fetcher = make_tree_db_fetcher(
-        app, _TEST_CFG_SQLITE, connection_factory=sqlite_factory,
+        app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
     )
-    out = fetcher("v-kpi", {"param_status": "open"})
+    out = asyncio.run(fetcher("v-kpi", {"param_status": "open"}))
     assert out["values"][0]["value"] == 150  # only "open" rows
 
 
 def test_make_tree_db_fetcher_unknown_visual_id_returns_empty(
-    sqlite_factory: Any,
+    aiosqlite_pool: AsyncConnectionPool,
 ) -> None:
     """Stale URLs (cached pages, swap-after-restart) shouldn't
     crash — empty payload renders an empty visual."""
     register_sql("x2g-test-ds", "SELECT status, amount FROM t")
     app, _ds_node = _build_app_with_visuals()
     fetcher = make_tree_db_fetcher(
-        app, _TEST_CFG_SQLITE, connection_factory=sqlite_factory,
+        app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
     )
-    out = fetcher("v-does-not-exist", {})
+    out = asyncio.run(fetcher("v-does-not-exist", {}))
     assert out == {}
 
 
 def test_make_tree_db_fetcher_visual_without_dataset_returns_empty(
-    sqlite_factory: Any,
+    aiosqlite_pool: AsyncConnectionPool,
 ) -> None:
     """A KPI with no measures (no dataset reference) gets an empty
     payload; doesn't fail at fetcher build time."""
@@ -233,13 +258,15 @@ def test_make_tree_db_fetcher_visual_without_dataset_returns_empty(
         KPI(title="Empty", subtitle=None, visual_id=VisualId("v-x")),
     )
     fetcher = make_tree_db_fetcher(
-        app, _TEST_CFG_SQLITE, connection_factory=sqlite_factory,
+        app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
     )
-    out = fetcher("v-x", {})
+    out = asyncio.run(fetcher("v-x", {}))
     assert out == {}
 
 
-def test_make_tree_db_fetcher_fails_loudly_on_missing_sql() -> None:
+def test_make_tree_db_fetcher_fails_loudly_on_missing_sql(
+    aiosqlite_pool: AsyncConnectionPool,
+) -> None:
     """If the registry doesn't have SQL for a referenced dataset,
     failure happens at build time (not buried inside a swap)."""
     # Use an identifier we DON'T register SQL for (contract registered at module top).
@@ -258,13 +285,12 @@ def test_make_tree_db_fetcher_fails_loudly_on_missing_sql() -> None:
     )
     with pytest.raises(KeyError, match="No SQL registered"):
         make_tree_db_fetcher(
-            app, _TEST_CFG_SQLITE,
-            connection_factory=lambda: None,  # never reached
+            app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
         )
 
 
 def test_make_tree_db_fetcher_indexes_visuals_across_sheets(
-    sqlite_factory: Any,
+    aiosqlite_pool: AsyncConnectionPool,
 ) -> None:
     """Multi-sheet App: every analysis sheet's visuals are
     addressable through the same fetcher."""
@@ -291,8 +317,8 @@ def test_make_tree_db_fetcher_indexes_visuals_across_sheets(
         values=[ds["amount"].sum()],
     ))
     fetcher = make_tree_db_fetcher(
-        app, _TEST_CFG_SQLITE, connection_factory=sqlite_factory,
+        app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
     )
     # Both visuals are reachable via the single fetcher.
-    assert fetcher("v-a", {})["values"][0]["value"] == 375
-    assert fetcher("v-b", {})["values"][0]["value"] == 375
+    assert asyncio.run(fetcher("v-a", {}))["values"][0]["value"] == 375
+    assert asyncio.run(fetcher("v-b", {}))["values"][0]["value"] == 375

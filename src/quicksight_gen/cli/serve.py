@@ -171,7 +171,17 @@ def app2_apply(  # type: ignore[no-untyped-def]
                 "Executives app has no analysis sheets — bug in builder."
             )
         sheet = tree_app.analysis.sheets[0]
-        fetcher = make_tree_db_fetcher(tree_app, cfg)
+        # X.2.n.4 — fetcher needs an open AsyncConnectionPool. The CLI
+        # spins one synchronously here; X.2.n.5 will move pool
+        # lifecycle into the server's startup hook so the CLI doesn't
+        # need to know about asyncio at all.
+        import asyncio  # noqa: PLC0415
+
+        from quicksight_gen.common.db import (  # noqa: PLC0415
+            make_connection_pool,
+        )
+        pool = asyncio.run(make_connection_pool(cfg))
+        fetcher = make_tree_db_fetcher(tree_app, cfg, pool=pool)
         smoke_filter_specs = ()
         click.echo(
             f"data: DB-backed ({cfg.dialect.value}) → "

@@ -198,7 +198,7 @@ def make_live_db_fetcher_for_app(
     tree_app: App,
     cfg: Any,
 ) -> DataFetcher:
-    """Construct a live-DB ``DataFetcher`` from a built tree.
+    """Construct a live-DB async ``DataFetcher`` from a built tree.
 
     Wrapper over ``make_tree_db_fetcher`` from the App2 source so
     e2e tests don't have to reach into the implementation details.
@@ -206,11 +206,24 @@ def make_live_db_fetcher_for_app(
     inline fetcher to ``html2_server`` — this helper is only for
     "I want the real DB-backed fetcher this app would use in
     production."
+
+    Opens an ``AsyncConnectionPool`` against the configured DB.
+    The pool is leaked at fixture teardown — fine for a test
+    process that's about to exit anyway, and avoids forcing every
+    caller to thread an ``async close()`` through their fixture.
+    For tighter lifecycle control, drop down to
+    ``make_connection_pool`` + ``make_tree_db_fetcher`` directly.
     """
+    import asyncio
+
+    from quicksight_gen.common.db import (  # noqa: PLC0415
+        make_connection_pool,
+    )
     from quicksight_gen.common.html._tree_fetcher import (  # noqa: PLC0415
         make_tree_db_fetcher,
     )
-    return make_tree_db_fetcher(tree_app, cfg)
+    pool = asyncio.run(make_connection_pool(cfg))
+    return make_tree_db_fetcher(tree_app, cfg, pool=pool)
 
 
 def make_recording_fetcher(

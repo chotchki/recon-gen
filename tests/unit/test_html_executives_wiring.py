@@ -4,19 +4,27 @@ Builds the real Executives tree + datasets, hands them to
 ``make_tree_db_fetcher``, asserts the fetcher constructs cleanly
 (no missing SQL in the registry) and dispatches by visual_id.
 
-Doesn't connect to a DB — the connection_factory raises if called.
 The construction-time invariants (every visual's dataset SQL is
 in the registry) are what this test pins; runtime DB execution
 is covered by the live PG verification step the operator runs
 manually before X.2.g.{2,3,4} land.
+
+X.2.n.4: ``make_tree_db_fetcher`` now takes an
+``AsyncConnectionPool``. We pass a stub pool whose ``acquire`` is
+never reached during the construction-only assertions.
 """
 
 from __future__ import annotations
+
+import asyncio
+from contextlib import asynccontextmanager
+from typing import Any
 
 import pytest
 
 from quicksight_gen.apps.executives.app import build_executives_app
 from quicksight_gen.apps.executives.datasets import build_all_datasets
+from quicksight_gen.common.db import AsyncConnectionPool
 from quicksight_gen.common.html._tree_fetcher import make_tree_db_fetcher
 from tests._test_helpers import make_test_config
 
@@ -27,10 +35,24 @@ from tests._test_helpers import make_test_config
 _TEST_CFG = make_test_config().with_l2_instance_prefix("spec_example")
 
 
-def _no_connect_factory() -> object:
-    raise RuntimeError(
-        "fetcher should not connect to the DB during this construction-only test",
-    )
+class _NoConnectPool:
+    """``AsyncConnectionPool`` whose ``acquire`` raises if reached.
+
+    Construction-only tests pass this so a regression that calls the
+    fetcher (instead of just building it) fails loudly with a clear
+    message rather than e.g. a TypeError on a None acquire.
+    """
+
+    @asynccontextmanager
+    async def acquire(self) -> Any:
+        raise RuntimeError(
+            "fetcher should not connect to the DB during this "
+            "construction-only test",
+        )
+        yield  # pragma: no cover  # required for asynccontextmanager shape
+
+    async def close(self) -> None:
+        return None
 
 
 def test_executives_tree_builds_with_expected_sheet_count() -> None:
@@ -53,7 +75,7 @@ def test_make_tree_db_fetcher_builds_for_executives_with_no_missing_sql() -> Non
     tree_app = build_executives_app(_TEST_CFG)
     # No raise == every visual's dataset SQL was found.
     fetcher = make_tree_db_fetcher(
-        tree_app, _TEST_CFG, connection_factory=_no_connect_factory,
+        tree_app, _TEST_CFG, pool=_NoConnectPool(),
     )
     assert callable(fetcher)
 
@@ -64,10 +86,10 @@ def test_executives_fetcher_returns_empty_for_unknown_visual_id() -> None:
     build_all_datasets(_TEST_CFG)
     tree_app = build_executives_app(_TEST_CFG)
     fetcher = make_tree_db_fetcher(
-        tree_app, _TEST_CFG, connection_factory=_no_connect_factory,
+        tree_app, _TEST_CFG, pool=_NoConnectPool(),
     )
     # Doesn't connect because the visual isn't in the index.
-    assert fetcher("v-no-such-thing", {}) == {}
+    assert asyncio.run(fetcher("v-no-such-thing", {})) == {}
 
 
 def test_executives_visuals_are_indexed_per_sheet() -> None:

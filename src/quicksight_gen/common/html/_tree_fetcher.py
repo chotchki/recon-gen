@@ -1,19 +1,21 @@
 """X.2.g.0 — generic per-tree DataFetcher factory.
 
-Given a tree ``App``, walk its visuals and build a ``DataFetcher``
-that dispatches by ``visual_id``. The fetcher resolves each
-visual's dataset SQL from the registry populated by
+Given a tree ``App``, walk its visuals and build an async
+``DataFetcher`` that dispatches by ``visual_id``. The fetcher
+resolves each visual's dataset SQL from the registry populated by
 ``build_dataset()`` (in ``common/dataset_contract.py``), executes
-via ``_sql_executor.execute_visual_sql``, and shapes via
+via ``_sql_executor.execute_visual_sql_async``, and shapes via
 ``_data_shape.shape_for_kind``.
 
-Per-app wiring (X.2.g.1 onward) is just:
+Per-app wiring (X.2.g.1 onward):
 
     from quicksight_gen.apps.executives.app import build_executives_app
     from quicksight_gen.apps.executives.datasets import build_all_datasets
+    from quicksight_gen.common.db import make_connection_pool
     build_all_datasets(cfg)         # populates the SQL registry
     tree_app = build_executives_app(cfg, l2_instance=instance)
-    fetcher = make_tree_db_fetcher(tree_app, cfg)
+    pool = await make_connection_pool(cfg, max_size=10)
+    fetcher = make_tree_db_fetcher(tree_app, cfg, pool=pool)
 
 No per-app fetcher code. The tree is the source of truth; visual
 kinds drive the shape; dataset identifiers drive the SQL.
@@ -22,22 +24,36 @@ Visuals without a recoverable dataset (e.g. ``SheetTextBox``,
 text-only Info panels) get a ``visual_id → None`` mapping at build
 time, and the fetcher returns an empty payload for them — the d3
 hydrators handle empty payloads gracefully.
+
+X.2.n.4 — the fetcher is now ``async def``. The tree walk +
+SQL-registry resolution + ``wrap_for_visual`` + ``shape_for_kind``
+remain sync (pure CPU); only the SQL-execute roundtrip is awaited.
+``DataFetcher`` is the new ``Awaitable``-returning type alias;
+``SyncDataFetcher`` stays available so test stubs and the legacy
+``_db_fetcher.py`` code paths continue to work without rewrite.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from quicksight_gen.common.config import Config
 from quicksight_gen.common.dataset_contract import get_sql
+from quicksight_gen.common.db import AsyncConnectionPool
 from quicksight_gen.common.html._data_shape import shape_for_kind
-from quicksight_gen.common.html._sql_executor import execute_visual_sql
+from quicksight_gen.common.html._sql_executor import execute_visual_sql_async
 from quicksight_gen.common.html._visual_sql import wrap_for_visual
 from quicksight_gen.common.tree.structure import App
 
 
-DataFetcher = Callable[[str, dict[str, str]], Any]
+# Async fetcher shape — what production callers (the App2 server)
+# get from ``make_tree_db_fetcher``.
+DataFetcher = Callable[[str, dict[str, str]], Awaitable[Any]]
+# Legacy sync alias, used by stub fetchers in tests + the older
+# ``_db_fetcher.py`` code paths. The server route accepts both via
+# ``inspect.iscoroutinefunction`` dispatch (X.2.n.5).
+SyncDataFetcher = Callable[[str, dict[str, str]], Any]
 
 
 # Visual fields that may carry Dim/Measure references back to a
@@ -86,10 +102,11 @@ def make_tree_db_fetcher(
     tree_app: App,
     cfg: Config,
     *,
-    connection_factory: Callable[[], Any] | None = None,
+    pool: AsyncConnectionPool,
 ) -> DataFetcher:
-    """Return a ``DataFetcher`` that resolves any visual in
-    ``tree_app`` to its dataset SQL → executes → shapes per kind.
+    """Return an async ``DataFetcher`` that resolves any visual in
+    ``tree_app`` to its dataset SQL → executes via the pool → shapes
+    per kind.
 
     Construction-time invariants:
 
@@ -100,20 +117,22 @@ def make_tree_db_fetcher(
        ``build_all_datasets(cfg)`` BEFORE this factory. The factory
        eagerly resolves every visual's SQL so a missing entry
        fails loudly here, not silently inside a hot HTMX swap.
-    3. ``connection_factory`` defaults to ``connect_demo_db(cfg)``
-       (lazy import — keeps psycopg2 / oracledb optional).
+    3. ``pool`` is required — the App2 server's startup hook opens
+       it via ``make_connection_pool(cfg)``; tests build a pool
+       against in-memory SQLite via the same factory.
 
     Args:
         tree_app: The App whose visuals need data. Must have its
             analysis attached (validated implicitly via the walk).
         cfg: Loaded config; supplies dialect for SQL placeholder
-            rewriting + the connection factory's default factory.
-        connection_factory: Optional callable returning a fresh
-            DB-API 2.0 connection. Tests inject a fake; production
-            opens the real DB.
+            rewriting.
+        pool: An open ``AsyncConnectionPool`` (PG / Oracle / SQLite).
+            Lifecycle (open + close) belongs to the caller — usually
+            the server's startup / shutdown hooks.
 
     Returns:
-        A ``DataFetcher`` matching the ``server.make_app`` contract.
+        An async ``DataFetcher`` matching the ``server.make_app``
+        contract: ``await fetcher(visual_id, params) -> Any``.
     """
     tree_app.resolve_auto_ids()
     if tree_app.analysis is None:
@@ -143,15 +162,7 @@ def make_tree_db_fetcher(
                 sql = wrap_for_visual(base_sql, visual)
             visual_index[vid] = (kind, sql)
 
-    if connection_factory is None:
-        from quicksight_gen.common.db import connect_demo_db  # noqa: PLC0415
-
-        def _default_factory() -> Any:
-            return connect_demo_db(cfg)
-
-        connection_factory = _default_factory
-
-    def fetcher(visual_id: str, params: dict[str, str]) -> Any:
+    async def fetcher(visual_id: str, params: dict[str, str]) -> Any:
         if visual_id not in visual_index:
             # Unknown visual_id — typically a stale URL from a
             # cached page. Return empty so the d3 renderers paint
@@ -163,8 +174,8 @@ def make_tree_db_fetcher(
             # Empty payload renders as a blank visual — fine for
             # the page-chrome-only case.
             return {}
-        rows, columns = execute_visual_sql(
-            connection_factory, sql, params, dialect=cfg.dialect,
+        rows, columns = await execute_visual_sql_async(
+            pool, sql, params, dialect=cfg.dialect,
         )
         # ForceGraph + Sankey have specialized projectors today
         # (_db_fetcher._topology_to_force_graph, etc.); the generic

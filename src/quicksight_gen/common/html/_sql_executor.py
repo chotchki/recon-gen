@@ -21,25 +21,39 @@ silently ignored (zero-impact when a sheet doesn't carry them).
 
 Placeholder dispatch:
 
-    Postgres → ``%(name)s``  (psycopg2 named bind)
+    Postgres → ``%(name)s``  (psycopg / psycopg_pool named bind)
     Oracle   → ``:name``     (oracledb named bind)
-    SQLite   → ``:name``     (sqlite3 named bind)
+    SQLite   → ``:name``     (aiosqlite named bind)
 
 So Oracle and SQLite share the source form (``:name``); Postgres
 gets a single rewrite pass before execution.
 
-Pure module — no network / no DB. The connection_factory is the
-seam. ``execute_visual_sql`` is renderer-agnostic; ``shape_for_kind``
-in ``_data_shape.py`` is the per-renderer step that follows.
+Two execute fns:
+
+  - ``execute_visual_sql_async`` (X.2.n.3): async; takes an
+    ``AsyncConnectionPool`` and uses ``async with pool.acquire()``
+    + ``await cur.execute()``. The hot path used by App2's
+    ``visual_data`` route.
+  - ``execute_visual_sql`` (legacy sync): kept for backward compat
+    with tests + scripts that pass a sync ``connection_factory``.
+    Will be removed once all callers move to the async pool.
+
+Pure module — no network / no DB at import. The pool / factory is
+the seam. ``execute_visual_sql_*`` is renderer-agnostic;
+``shape_for_kind`` in ``_data_shape.py`` is the per-renderer step
+that follows.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from quicksight_gen.common.sql.dialect import Dialect
+
+if TYPE_CHECKING:
+    from quicksight_gen.common.db import AsyncConnectionPool
 
 
 # Matches ``:name`` placeholders. Excludes ``::`` (Postgres cast
@@ -89,12 +103,18 @@ def execute_visual_sql(
     *,
     dialect: Dialect,
 ) -> tuple[list[tuple[Any, ...]], list[str]]:
-    """Execute a Visual's dataset SQL + return ``(rows, columns)``.
+    """Execute a Visual's dataset SQL via a sync DB-API 2.0 driver.
+
+    DEPRECATED — kept for backward compatibility with sync test
+    fixtures + ad-hoc scripts. The App2 server uses the async path
+    (``execute_visual_sql_async``) which doesn't block the event
+    loop. New code should pass an ``AsyncConnectionPool`` and
+    ``await execute_visual_sql_async(...)``.
 
     Args:
         connection_factory: returns a fresh DB-API 2.0 connection.
             Caller is responsible for pooling / sharing if relevant
-            — the spike opens + closes per call.
+            — this fn opens + closes per call.
         sql: dataset SQL with ``:name`` placeholders (any dialect).
         url_params: the URL-keyed filter dict the App2 server
             extracted from the request query string. Keys not
@@ -107,11 +127,6 @@ def execute_visual_sql(
         the list of column names from ``cursor.description``. The
         per-renderer shape adapter in ``_data_shape.py`` consumes
         this tuple.
-
-    Raises:
-        Whatever the DB driver raises on bad SQL / connection
-        failure. The App2 server's themed-500 handler (X.2.m)
-        catches it.
     """
     rewritten = rewrite_placeholders_for_dialect(sql, dialect)
     binds = collect_bind_params(sql, url_params)
@@ -127,4 +142,66 @@ def execute_visual_sql(
             cur.close()
     finally:
         conn.close()
+    return [tuple(r) for r in rows], columns
+
+
+async def execute_visual_sql_async(
+    pool: AsyncConnectionPool,
+    sql: str,
+    url_params: dict[str, str],
+    *,
+    dialect: Dialect,
+) -> tuple[list[tuple[Any, ...]], list[str]]:
+    """Async sibling of ``execute_visual_sql`` — the hot path for the
+    App2 ``visual_data`` route.
+
+    Acquires a connection from the pool (returns to pool on context
+    exit), opens a cursor, awaits ``execute`` + ``fetchall``, and
+    returns ``(rows, columns)`` in the same shape the sync version
+    produces. The pure-CPU bits (placeholder rewrite + bind
+    collection) stay sync; only the I/O bits await.
+
+    Cursor lifecycle is dialect-aware:
+      - psycopg: ``conn.cursor()`` returns a sync object that
+        supports ``await cur.execute(...)`` because it's actually
+        an AsyncCursor on AsyncConnection. Await-friendly throughout.
+      - oracledb async: same pattern — ``conn.cursor()`` is sync,
+        ``cur.execute()`` is awaitable.
+      - aiosqlite: ``await conn.execute(sql, params)`` returns a
+        cursor directly (``conn.cursor()`` works too; we use
+        ``conn.execute`` to keep the path tight).
+
+    Returns:
+        Same ``(rows, columns)`` shape as the sync version. Rows
+        are coerced to tuples (oracledb returns lists; psycopg
+        returns tuples; aiosqlite returns Row objects that pickle
+        as tuples).
+
+    Raises:
+        Whatever the underlying driver raises on bad SQL / pool
+        exhaustion / connection failure. The App2 server's themed
+        500 handler (X.2.m) catches it.
+    """
+    rewritten = rewrite_placeholders_for_dialect(sql, dialect)
+    binds = collect_bind_params(sql, url_params)
+    async with pool.acquire() as conn:
+        # aiosqlite's ``conn.execute`` returns a cursor directly and
+        # awaits the execute in one call — perfect for this shape.
+        # psycopg AsyncConnection + oracledb async also accept this
+        # pattern (psycopg's ``conn.execute(sql, params)`` is the
+        # documented one-shot for "give me a cursor with results").
+        cur = await conn.execute(rewritten, binds)
+        try:
+            rows = await cur.fetchall()
+            description = cur.description or []
+            columns = [str(c[0]) for c in description]
+        finally:
+            # aiosqlite cursors close async; psycopg / oracledb
+            # cursors are also async. Await regardless to keep the
+            # path uniform.
+            close = getattr(cur, "close", None)
+            if close is not None:
+                result = close()
+                if hasattr(result, "__await__"):
+                    await result
     return [tuple(r) for r in rows], columns

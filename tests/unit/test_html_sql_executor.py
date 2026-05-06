@@ -22,12 +22,15 @@ from typing import Any
 
 import pytest
 
+from quicksight_gen.common.db import AsyncConnectionPool, make_connection_pool
 from quicksight_gen.common.html._sql_executor import (
     collect_bind_params,
     execute_visual_sql,
+    execute_visual_sql_async,
     rewrite_placeholders_for_dialect,
 )
 from quicksight_gen.common.sql.dialect import Dialect
+from tests._test_helpers import make_test_config
 
 
 # ---------------------------------------------------------------------------
@@ -249,3 +252,107 @@ def test_execute_visual_sql_passes_pg_pyformat_to_cursor() -> None:
     assert "%(date_from)s" in received["sql"]
     assert ":date_from" not in received["sql"]
     assert received["params"] == {"date_from": "2030-01-01"}
+
+
+# ---------------------------------------------------------------------------
+# X.2.n.3 — Async executor against aiosqlite pool
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def aiosqlite_pool() -> Iterator[AsyncConnectionPool]:
+    """File-backed aiosqlite pool seeded with the same tiny table.
+
+    aiosqlite's ``:memory:`` mode gives each new connection a fresh
+    isolated DB — the shared-pool tests need a tempfile so every
+    acquire sees the seeded data.
+    """
+    import asyncio
+    import os
+    import sqlite3
+    import tempfile
+
+    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    os.close(fd)
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE t (id INTEGER, name TEXT, amount REAL)")
+    conn.executemany(
+        "INSERT INTO t VALUES (?, ?, ?)",
+        [(1, "alpha", 10.0), (2, "beta", 20.0), (3, "gamma", 30.0)],
+    )
+    conn.commit()
+    conn.close()
+
+    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=path)
+    pool = asyncio.run(make_connection_pool(cfg))
+    try:
+        yield pool
+    finally:
+        asyncio.run(pool.close())
+        os.unlink(path)
+
+
+def test_execute_visual_sql_async_returns_rows_and_columns(
+    aiosqlite_pool: AsyncConnectionPool,
+) -> None:
+    import asyncio
+
+    rows, cols = asyncio.run(execute_visual_sql_async(
+        aiosqlite_pool,
+        "SELECT id, name, amount FROM t ORDER BY id",
+        {},
+        dialect=Dialect.SQLITE,
+    ))
+    assert rows == [(1, "alpha", 10.0), (2, "beta", 20.0), (3, "gamma", 30.0)]
+    assert cols == ["id", "name", "amount"]
+
+
+def test_execute_visual_sql_async_substitutes_named_filter(
+    aiosqlite_pool: AsyncConnectionPool,
+) -> None:
+    import asyncio
+
+    rows, _cols = asyncio.run(execute_visual_sql_async(
+        aiosqlite_pool,
+        "SELECT id, name FROM t WHERE amount >= :min_amount ORDER BY id",
+        {"min_amount": "20"},
+        dialect=Dialect.SQLITE,
+    ))
+    assert [r[1] for r in rows] == ["beta", "gamma"]
+
+
+def test_execute_visual_sql_async_unreferenced_url_params_dont_break(
+    aiosqlite_pool: AsyncConnectionPool,
+) -> None:
+    """Same ignore-unreferenced behavior as the sync version — extra
+    URL params for filters this visual doesn't use must be silently
+    dropped from the bind dict."""
+    import asyncio
+
+    rows, _cols = asyncio.run(execute_visual_sql_async(
+        aiosqlite_pool,
+        "SELECT id FROM t WHERE amount >= :min_amount",
+        {
+            "min_amount": "15",
+            "filter_status": "open",
+            "param_view": "summary",
+            "date_from": "2030-01-01",
+        },
+        dialect=Dialect.SQLITE,
+    ))
+    assert {r[0] for r in rows} == {2, 3}
+
+
+def test_execute_visual_sql_async_empty_result_set(
+    aiosqlite_pool: AsyncConnectionPool,
+) -> None:
+    import asyncio
+
+    rows, cols = asyncio.run(execute_visual_sql_async(
+        aiosqlite_pool,
+        "SELECT id, name FROM t WHERE amount > :min_amount",
+        {"min_amount": "9999"},
+        dialect=Dialect.SQLITE,
+    ))
+    assert rows == []
+    assert cols == ["id", "name"]
