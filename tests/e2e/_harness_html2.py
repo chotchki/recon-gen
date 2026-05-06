@@ -163,6 +163,56 @@ def assert_layer2_sankey_shape(
     )
 
 
+def wait_for_kpi_value(page: Any, timeout_ms: int = 10000) -> str:
+    """Wait for at least one ``.kpi-value`` to appear in the DOM and
+    return its inner text. Used after page load / refresh to confirm
+    the auto-load swap (X.2.g.1.a) fired and the KPI renderer
+    hydrated."""
+    page.wait_for_function(
+        "() => document.querySelector('.kpi-value') !== null",
+        timeout=timeout_ms,
+    )
+    return str(page.locator(".kpi-value").first.inner_text())
+
+
+def wait_for_table_rows(
+    page: Any, min_rows: int = 1, timeout_ms: int = 10000,
+) -> int:
+    """Wait for ``min_rows`` data rows in any rendered Table visual.
+    Returns the actual row count seen.
+
+    The d3 Table renderer paints ``<tr>`` per row inside a
+    ``.table-data`` table. This wait fires after the HTMX swap +
+    bootstrap.js hydration."""
+    page.wait_for_function(
+        f"() => document.querySelectorAll('.table-data tbody tr').length >= {min_rows}",
+        timeout=timeout_ms,
+    )
+    return int(page.evaluate(
+        "() => document.querySelectorAll('.table-data tbody tr').length",
+    ))
+
+
+def make_live_db_fetcher_for_app(
+    *,
+    tree_app: App,
+    cfg: Any,
+) -> DataFetcher:
+    """Construct a live-DB ``DataFetcher`` from a built tree.
+
+    Wrapper over ``make_tree_db_fetcher`` from the App2 source so
+    e2e tests don't have to reach into the implementation details.
+    Tests that want stub fetchers continue to pass their own
+    inline fetcher to ``html2_server`` — this helper is only for
+    "I want the real DB-backed fetcher this app would use in
+    production."
+    """
+    from quicksight_gen.common.html._tree_fetcher import (  # noqa: PLC0415
+        make_tree_db_fetcher,
+    )
+    return make_tree_db_fetcher(tree_app, cfg)
+
+
 def make_recording_fetcher(
     response: dict[str, Any],
 ) -> tuple[DataFetcher, list[tuple[str, dict[str, str]]]]:

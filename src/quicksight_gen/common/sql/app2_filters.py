@@ -40,17 +40,35 @@ def app2_date_filter(date_column: str) -> str:
     """Return an AND-clause snippet that narrows ``date_column`` by
     the URL-bound ``:date_from`` / ``:date_to`` params.
 
-    Empty / missing values pass through (NULLIF guard). Caller
-    interpolates the snippet into a template SQL via
+    Empty / missing values pass through. Caller interpolates the
+    snippet into a template SQL via
     ``.format(date_filter=app2_date_filter("t.posting"))``.
 
+    Strategy: always pass a valid date string into ``CAST(... AS
+    DATE)``, using sentinel dates (``1900-01-01`` / ``9999-12-31``)
+    that don't actually filter when the URL param is empty /
+    missing. This avoids the PG gotcha where ``OR`` doesn't
+    reliably short-circuit and ``CAST('' AS DATE)`` errors at
+    plan time even when the guard is TRUE.
+
+    Dialect handling:
+
+    - PG: ``COALESCE(NULLIF('', ''), '1900-01-01')`` → ``'1900-01-01'``
+      → ``CAST(... AS DATE)`` succeeds. Filter is a no-op when
+      param is empty (``t.posting >= 1900-01-01`` matches all).
+    - Oracle: ``''`` is NULL → NULLIF preserves NULL → COALESCE
+      returns the sentinel → CAST succeeds. Same no-op semantics.
+    - SQLite: ``''`` is text → NULLIF returns NULL → COALESCE
+      returns sentinel. Comparison works against TEXT-stored ISO
+      dates by lex order (1900 sorts before any real date).
+
     The leading ``AND`` is included so the snippet drops cleanly
-    after a non-empty WHERE — for templates that have no other
-    WHERE conditions, the author writes ``WHERE 1=1 {date_filter}``.
+    after a non-empty WHERE — for templates with no other WHERE
+    conditions, the author writes ``WHERE 1=1 {date_filter}``.
     """
     return (
-        f"AND (NULLIF(:date_from, '') IS NULL "
-        f"OR {date_column} >= CAST(:date_from AS DATE)) "
-        f"AND (NULLIF(:date_to, '') IS NULL "
-        f"OR {date_column} <= CAST(:date_to AS DATE))"
+        f"AND {date_column} >= CAST("
+        f"COALESCE(NULLIF(:date_from, ''), '1900-01-01') AS DATE) "
+        f"AND {date_column} <= CAST("
+        f"COALESCE(NULLIF(:date_to, ''), '9999-12-31') AS DATE)"
     )
