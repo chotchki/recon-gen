@@ -12,8 +12,9 @@
 // to its enclosing [data-visual-kind] section and dispatch by kind.
 // The script tag with the JSON payload sits inside the swap target.
 //
-// Currently supports KPI + Sankey + ForceGraph. New visual kinds
-// add one case arm to hydrateSection + one renderXxx function.
+// Currently supports KPI + Table + Sankey + ForceGraph. New
+// visual kinds add one case arm to hydrateSection + one
+// renderXxx function.
 //
 // The htmx:afterSwap event is the X.4 future-proofing hook — that
 // phase's swap-on-edit pattern reuses this exact dispatch.
@@ -88,6 +89,9 @@
     switch (kind) {
       case "KPI":
         renderKPI(target, data, visualId);
+        break;
+      case "Table":
+        renderTable(target, data, visualId);
         break;
       case "Sankey":
         renderSankey(target, data, visualId);
@@ -175,6 +179,255 @@
       );
     }
     return value.toLocaleString("en-US");
+  }
+
+  // Table — sortable columns + page-offset pagination + a "0–50 of
+  // 1247" total-row count (X.2.a.6 hint: total row count is the
+  // win over QS's "page 1 of N" — both UX clearer for users AND
+  // testability win for e2e). Data shape:
+  //   { columns: [{name: "id", label: "ID", format?: "currency"|"number"|"date"}, ...],
+  //     rows: [["v1", "v2", ...], ...],
+  //     total_rows: 1247,
+  //     page_offset: 0,
+  //     page_size: 50,
+  //     sort_column?: "id:desc"  // current sort, server-resolved }
+  // Sort + paginate are URL state — clicking a header / pager fires
+  // an HTMX swap with new query-string params; URL == cache key
+  // (X.2.b's GET-shape contract) means the same view is bookmarkable.
+  function renderTable(target, data, visualId) {
+    var section = target.closest("section[data-visual-kind]");
+    var fetchUrl = section ? section.getAttribute("data-fetch-url") : null;
+    var columns = data.columns || [];
+    var rows = data.rows || [];
+    var pageOffset =
+      typeof data.page_offset === "number" ? data.page_offset : 0;
+    var pageSize =
+      typeof data.page_size === "number" ? data.page_size : rows.length;
+    var totalRows =
+      typeof data.total_rows === "number" ? data.total_rows : rows.length;
+    var currentSort = data.sort_column || "";
+
+    // Outer wrapper — overflow-x-auto so wide tables scroll
+    // horizontally rather than overflowing the dashboard layout.
+    var wrapper = d3
+      .select(target)
+      .append("div")
+      .attr("class", "overflow-x-auto");
+    var table = wrapper
+      .append("table")
+      .attr("class", "table-data min-w-full text-sm");
+
+    // Header row — sticky so long-scroll tables don't lose context.
+    var thead = table
+      .append("thead")
+      .attr("class", "sticky top-0 bg-slate-100 text-slate-700 font-semibold");
+    var headerRow = thead.append("tr");
+    headerRow
+      .selectAll("th")
+      .data(columns)
+      .enter()
+      .append("th")
+      .attr("class", "px-3 py-2 text-left border-b border-slate-300")
+      .each(function (col) {
+        var th = d3.select(this);
+        // Sort link — clicking flips sort direction (asc → desc →
+        // unsorted). Without a fetch URL the link still renders but
+        // doesn't carry the swap directives (renderTable is exercised
+        // outside an HTMX swap during JS unit tests).
+        var nextSort = nextSortDirection(col.name, currentSort);
+        var sortBadge = sortBadgeFor(col.name, currentSort);
+        if (fetchUrl) {
+          th.append("a")
+            .attr(
+              "href",
+              buildTableUrl(fetchUrl, {
+                sort_column: nextSort,
+                page_offset: 0,
+                page_size: pageSize,
+              }),
+            )
+            .attr(
+              "hx-get",
+              buildTableUrl(fetchUrl, {
+                sort_column: nextSort,
+                page_offset: 0,
+                page_size: pageSize,
+              }),
+            )
+            .attr("hx-target", "#visual-data-" + visualId)
+            .attr("hx-push-url", "true")
+            .attr("class", "table-sort-link hover:text-blue-700")
+            .text(col.label || col.name)
+            .append("span")
+            .attr("class", "table-sort-badge ml-1 text-xs")
+            .text(sortBadge);
+        } else {
+          th.append("span").text(col.label || col.name);
+          if (sortBadge) {
+            th.append("span")
+              .attr("class", "table-sort-badge ml-1 text-xs")
+              .text(sortBadge);
+          }
+        }
+      });
+
+    // Body — striped rows, monospace numerics where format hints
+    // it via tabular-nums.
+    var tbody = table.append("tbody");
+    var trs = tbody
+      .selectAll("tr")
+      .data(rows)
+      .enter()
+      .append("tr")
+      .attr(
+        "class",
+        (_d, i) => "table-row " + (i % 2 === 0 ? "bg-white" : "bg-slate-50"),
+      );
+    trs
+      .selectAll("td")
+      .data((row) => row.map((v, ci) => ({ value: v, col: columns[ci] || {} })))
+      .enter()
+      .append("td")
+      .attr(
+        "class",
+        (cell) =>
+          "px-3 py-2 border-b border-slate-200 " +
+          (isNumericFormat(cell.col.format) ? "tabular-nums text-right" : ""),
+      )
+      .text((cell) => formatTableCell(cell.value, cell.col.format));
+
+    // Pager — "0–50 of 1247" + Prev/Next links. Range uses 1-based
+    // human counting (so "1–50 of 1247" reads naturally) but the
+    // page_offset query param stays 0-based for consistency with
+    // standard pagination semantics.
+    var pager = wrapper
+      .append("div")
+      .attr(
+        "class",
+        "table-pager flex items-center justify-between mt-3 px-3 text-sm text-slate-600",
+      );
+    var displayStart = totalRows === 0 ? 0 : pageOffset + 1;
+    var displayEnd = Math.min(pageOffset + pageSize, totalRows);
+    pager
+      .append("span")
+      .attr("class", "table-pager-range")
+      .text(displayStart + "–" + displayEnd + " of " + totalRows);
+    var nav = pager.append("div").attr("class", "flex gap-2");
+    var prevDisabled = pageOffset <= 0;
+    var nextDisabled = pageOffset + pageSize >= totalRows;
+    if (fetchUrl) {
+      nav
+        .append("a")
+        .attr("class", pagerLinkClass(prevDisabled) + " table-pager-prev")
+        .attr("aria-disabled", prevDisabled ? "true" : "false")
+        .attr(
+          "href",
+          prevDisabled
+            ? null
+            : buildTableUrl(fetchUrl, {
+                page_offset: Math.max(0, pageOffset - pageSize),
+                page_size: pageSize,
+                sort_column: currentSort,
+              }),
+        )
+        .attr(
+          "hx-get",
+          prevDisabled
+            ? null
+            : buildTableUrl(fetchUrl, {
+                page_offset: Math.max(0, pageOffset - pageSize),
+                page_size: pageSize,
+                sort_column: currentSort,
+              }),
+        )
+        .attr("hx-target", "#visual-data-" + visualId)
+        .attr("hx-push-url", "true")
+        .text("← Prev");
+      nav
+        .append("a")
+        .attr("class", pagerLinkClass(nextDisabled) + " table-pager-next")
+        .attr("aria-disabled", nextDisabled ? "true" : "false")
+        .attr(
+          "href",
+          nextDisabled
+            ? null
+            : buildTableUrl(fetchUrl, {
+                page_offset: pageOffset + pageSize,
+                page_size: pageSize,
+                sort_column: currentSort,
+              }),
+        )
+        .attr(
+          "hx-get",
+          nextDisabled
+            ? null
+            : buildTableUrl(fetchUrl, {
+                page_offset: pageOffset + pageSize,
+                page_size: pageSize,
+                sort_column: currentSort,
+              }),
+        )
+        .attr("hx-target", "#visual-data-" + visualId)
+        .attr("hx-push-url", "true")
+        .text("Next →");
+    }
+    // After the new HTMX-attributed nodes are in the DOM, re-process
+    // them so HTMX's attribute scanner picks up the hx-get directives.
+    // Without this the click would 404 against the browser-resolved
+    // href instead of going through HTMX's swap pipeline.
+    if (typeof htmx !== "undefined" && htmx.process) {
+      htmx.process(target);
+    }
+  }
+
+  // Sort cycle: clicking a column cycles asc → desc → off (back to
+  // server default ordering). Encoded as ``col:asc`` / ``col:desc``
+  // / empty in the sort_column query param.
+  function nextSortDirection(colName, currentSort) {
+    if (currentSort === colName + ":asc") return colName + ":desc";
+    if (currentSort === colName + ":desc") return "";
+    return colName + ":asc";
+  }
+
+  function sortBadgeFor(colName, currentSort) {
+    if (currentSort === colName + ":asc") return "▲";
+    if (currentSort === colName + ":desc") return "▼";
+    return "";
+  }
+
+  function isNumericFormat(format) {
+    return format === "currency" || format === "number";
+  }
+
+  function formatTableCell(value, format) {
+    if (value == null) return "";
+    if (typeof value === "number") return formatKPIValue(value, format);
+    return String(value);
+  }
+
+  function pagerLinkClass(disabled) {
+    if (disabled) {
+      return "px-2 py-1 rounded text-slate-400 cursor-not-allowed";
+    }
+    return "px-2 py-1 rounded text-blue-600 hover:bg-blue-50 cursor-pointer";
+  }
+
+  // Merge query-string params onto the base fetch URL. Values that
+  // are empty / undefined / null get dropped so the URL stays
+  // canonical for caching.
+  function buildTableUrl(fetchUrl, params) {
+    var u = new URL(fetchUrl, window.location.origin);
+    Object.keys(params).forEach((key) => {
+      var val = params[key];
+      if (val === "" || val === null || val === undefined) {
+        u.searchParams.delete(key);
+      } else {
+        u.searchParams.set(key, String(val));
+      }
+    });
+    // Preserve relative URL form (path + ?...) so the link works
+    // both via HTMX and via direct navigation.
+    return u.pathname + u.search;
   }
 
   function renderSankey(target, data, visualId) {
@@ -339,9 +592,12 @@
       hydrate: hydrate,
       hydrateSection: hydrateSection,
       renderKPI: renderKPI,
+      renderTable: renderTable,
       renderSankey: renderSankey,
       renderForceGraph: renderForceGraph,
       formatKPIValue: formatKPIValue,
+      buildTableUrl: buildTableUrl,
+      nextSortDirection: nextSortDirection,
     };
   }
 })();
