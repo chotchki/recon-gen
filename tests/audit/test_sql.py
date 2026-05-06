@@ -20,8 +20,18 @@ renders the diff and the operator pastes the new value.
 Period under test is ``(2030-01-01, 2030-01-07)`` — chosen so the
 inclusive-end → exclusive-end conversion (`< end + 1 day`) yields
 ``DATE '2030-01-08'`` and the digit shape stays distinct from any
-realistic plant date. Prefix under test is ``ut`` (short, unambiguous,
-not a real fixture prefix) so the SQL strings stay legible.
+realistic plant date. Prefix under test is ``ut`` (short,
+unambiguous, not a real fixture prefix) so the SQL strings stay
+legible.
+
+The locked SQL captures the **Postgres dialect** form — the
+``_FakeCfg`` defaults to ``Dialect.POSTGRES``, and ``date_literal``
+emits ``DATE 'YYYY-MM-DD'`` for both Postgres and Oracle (the SQL-
+standard form, byte-identical between those two dialects). The
+SQLite arm of ``date_literal`` emits a plain ``'YYYY-MM-DD'`` string
+literal — covered by the e2e SQLite cell at
+``tests/e2e/test_audit_pdf_sqlite.py`` (X.3.g.2), not by these
+locked strings.
 """
 
 from __future__ import annotations
@@ -42,6 +52,7 @@ from quicksight_gen.cli.audit import (
     _query_stuck_unbundled_violations,
     _query_supersession,
 )
+from quicksight_gen.common.sql.dialect import Dialect
 
 
 # --- Fakes -------------------------------------------------------------------
@@ -51,11 +62,16 @@ from quicksight_gen.cli.audit import (
 class _FakeCfg:
     """Minimal cfg surface the query functions touch.
 
-    They only check ``demo_database_url`` (truthy → run; None → early
-    return). The patched ``connect_demo_db`` ignores the value so any
-    truthy string suffices.
+    They check ``demo_database_url`` (truthy → run; None → early
+    return) and ``dialect`` (the latter dispatches the per-dialect
+    date literal in ``date_literal``). The patched ``connect_demo_db``
+    ignores ``demo_database_url`` so any truthy string suffices; the
+    ``dialect`` value, in contrast, IS load-bearing — it picks which
+    SQL form ``date_literal`` returns. Default is ``POSTGRES`` so the
+    locked snapshots match the PG/Oracle form.
     """
     demo_database_url: str = "postgresql://stub/stub"
+    dialect: Dialect = Dialect.POSTGRES
 
 
 @dataclass

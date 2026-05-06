@@ -62,6 +62,7 @@ from quicksight_gen.common.provenance import (
     l2_yaml_sha256,
     quicksight_gen_code_identity,
 )
+from quicksight_gen.common.sql.dialect import date_literal
 from quicksight_gen.common.theme import DEFAULT_PRESET, resolve_l2_theme
 
 
@@ -197,9 +198,14 @@ def _query_executive_summary(
     renderers fall back to "—" placeholders so the layout stays
     previewable without a live connection.
 
-    Date literals use ``DATE 'YYYY-MM-DD'`` which both Postgres and
-    Oracle accept; the inclusive end is enforced via ``< end + 1
-    day`` so end-of-period TIMESTAMPs are caught.
+    Date literals are emitted via ``date_literal(value, dialect)`` from
+    ``common/sql/dialect.py`` — Postgres + Oracle get the SQL-standard
+    ``DATE 'YYYY-MM-DD'`` form (which both accept); SQLite gets the
+    plain quoted string (SQLite has no native DATE type, stores ISO
+    dates as TEXT, and ``CAST('YYYY-MM-DD' AS DATE)`` would coerce to
+    INTEGER 2030 — wrong for comparison). The inclusive end is
+    enforced via ``< end + 1 day`` so end-of-period TIMESTAMPs are
+    caught.
     """
     if cfg.demo_database_url is None:
         return None
@@ -208,8 +214,10 @@ def _query_executive_summary(
 
     prefix = instance.instance
     start, end = period
-    start_lit = f"DATE '{start.isoformat()}'"
-    end_excl_lit = f"DATE '{(end + timedelta(days=1)).isoformat()}'"
+    start_lit = date_literal(start.isoformat(), cfg.dialect)
+    end_excl_lit = date_literal(
+        (end + timedelta(days=1)).isoformat(), cfg.dialect,
+    )
 
     conn = connect_demo_db(cfg)
     try:
@@ -330,8 +338,10 @@ def _query_drift_violations(
 
     prefix = instance.instance
     start, end = period
-    start_lit = f"DATE '{start.isoformat()}'"
-    end_excl_lit = f"DATE '{(end + timedelta(days=1)).isoformat()}'"
+    start_lit = date_literal(start.isoformat(), cfg.dialect)
+    end_excl_lit = date_literal(
+        (end + timedelta(days=1)).isoformat(), cfg.dialect,
+    )
 
     conn = connect_demo_db(cfg)
     try:
@@ -403,8 +413,10 @@ def _query_overdraft_violations(
 
     prefix = instance.instance
     start, end = period
-    start_lit = f"DATE '{start.isoformat()}'"
-    end_excl_lit = f"DATE '{(end + timedelta(days=1)).isoformat()}'"
+    start_lit = date_literal(start.isoformat(), cfg.dialect)
+    end_excl_lit = date_literal(
+        (end + timedelta(days=1)).isoformat(), cfg.dialect,
+    )
 
     conn = connect_demo_db(cfg)
     try:
@@ -538,8 +550,10 @@ def _query_limit_breach_violations(
 
     prefix = instance.instance
     start, end = period
-    start_lit = f"DATE '{start.isoformat()}'"
-    end_excl_lit = f"DATE '{(end + timedelta(days=1)).isoformat()}'"
+    start_lit = date_literal(start.isoformat(), cfg.dialect)
+    end_excl_lit = date_literal(
+        (end + timedelta(days=1)).isoformat(), cfg.dialect,
+    )
 
     conn = connect_demo_db(cfg)
     try:
@@ -965,8 +979,10 @@ def _query_supersession(
 
     prefix = instance.instance
     start, end = period
-    start_lit = f"DATE '{start.isoformat()}'"
-    end_excl_lit = f"DATE '{(end + timedelta(days=1)).isoformat()}'"
+    start_lit = date_literal(start.isoformat(), cfg.dialect)
+    end_excl_lit = date_literal(
+        (end + timedelta(days=1)).isoformat(), cfg.dialect,
+    )
 
     conn = connect_demo_db(cfg)
     try:
@@ -1122,8 +1138,10 @@ def _query_daily_statement_walks(
 
     prefix = instance.instance
     start, end = period
-    start_lit = f"DATE '{start.isoformat()}'"
-    end_excl_lit = f"DATE '{(end + timedelta(days=1)).isoformat()}'"
+    start_lit = date_literal(start.isoformat(), cfg.dialect)
+    end_excl_lit = date_literal(
+        (end + timedelta(days=1)).isoformat(), cfg.dialect,
+    )
 
     conn = connect_demo_db(cfg)
     try:
@@ -1183,12 +1201,14 @@ def _query_daily_statement_walks(
             day_start_date = (
                 day_start.date() if hasattr(day_start, "date") else day_start
             )
-            day_start_lit = f"DATE '{day_start_date.isoformat()}'"
+            day_start_lit = date_literal(
+                day_start_date.isoformat(), cfg.dialect,
+            )
             # Next-day date computed in Python (avoids dialect-specific
             # INTERVAL syntax: PG = ``+ INTERVAL '1 day'``,
             # Oracle = ``+ INTERVAL '1' DAY``).
-            day_end_excl_lit = (
-                f"DATE '{(day_start_date + timedelta(days=1)).isoformat()}'"
+            day_end_excl_lit = date_literal(
+                (day_start_date + timedelta(days=1)).isoformat(), cfg.dialect,
             )
 
             # 2) Daily statement summary: 5 KPIs precomputed.

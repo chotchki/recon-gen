@@ -259,6 +259,34 @@ def to_date(timestamp_expr: str, dialect: Dialect) -> str:
     return f"TRUNC({timestamp_expr})"
 
 
+def date_literal(iso_value: str, dialect: Dialect) -> str:
+    """A SQL date literal that compares correctly on every dialect.
+
+    ``iso_value`` is the ``YYYY-MM-DD`` string form (caller produces it
+    via ``date.isoformat()``). The helper wraps it in the per-dialect
+    syntax that produces a value comparable against the dialect's
+    DATE / TIMESTAMP / TEXT-shaped date columns.
+
+    Postgres + Oracle: ``DATE 'YYYY-MM-DD'`` — the SQL-standard date
+    literal, accepted by both. Compares natively against DATE and
+    coerces correctly against TIMESTAMP columns.
+
+    SQLite: ``'YYYY-MM-DD'`` — a plain text literal. SQLite has no
+    native DATE type and stores ISO dates as TEXT; lexicographic TEXT
+    comparison happens to be correct for ISO-8601 (`'2030-01-01' <
+    '2030-01-02'` lexically, same as date-wise). The SQL-standard
+    ``DATE 'literal'`` form is rejected by SQLite (parses ``DATE`` as a
+    column reference), and ``CAST('YYYY-MM-DD' AS DATE)`` coerces to
+    INTEGER 2030 (NUMERIC affinity extracts the leading digits) — both
+    are wrong for SQLite. Use this helper instead of inline string
+    formatting at every audit / matview / dataset SQL site that needs
+    a date literal in a WHERE / CASE WHEN comparison.
+    """
+    if dialect is Dialect.SQLITE:
+        return f"'{iso_value}'"
+    return f"DATE '{iso_value}'"
+
+
 # Oracle type-name canonicalization. Postgres uses lowercase
 # ``numeric`` / ``bigint`` / ``date`` / ``timestamp`` per its docs;
 # Oracle wants ``NUMBER`` / ``DATE`` / ``TIMESTAMP``. The

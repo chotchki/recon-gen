@@ -16,6 +16,7 @@ from quicksight_gen.common.sql import (
     boolean_type,
     cast,
     create_matview,
+    date_literal,
     date_minus_days,
     date_trunc_day,
     decimal_type,
@@ -117,6 +118,12 @@ class TestPostgresDateTime:
         assert date_trunc_day("tx.posting", PG) == (
             "DATE_TRUNC('day', tx.posting)"
         )
+
+    def test_date_literal(self):
+        # SQL-standard ``DATE 'YYYY-MM-DD'`` literal — accepted by both
+        # Postgres and Oracle, byte-identical between them.
+        assert date_literal("2030-01-01", PG) == "DATE '2030-01-01'"
+        assert date_literal("2030-01-08", PG) == "DATE '2030-01-08'"
 
 
 class TestPostgresDdlIdempotency:
@@ -243,6 +250,13 @@ class TestOracleDateTime:
         assert date_trunc_day("tx.posting", ORA) == (
             "CAST(TRUNC(tx.posting) AS TIMESTAMP)"
         )
+
+    def test_date_literal_identical_to_postgres(self):
+        # Oracle accepts the same SQL-standard DATE literal as Postgres.
+        # ``date_literal`` returns the same bytes for both dialects so
+        # the audit f-string SQL is symmetric across them.
+        assert date_literal("2030-01-01", ORA) == "DATE '2030-01-01'"
+        assert date_literal("2030-01-08", ORA) == "DATE '2030-01-08'"
 
 
 class TestOracleDdlIdempotency:
@@ -407,6 +421,16 @@ class TestSqliteDateTime:
         assert date_trunc_day("tx.posting", SQLITE) == (
             "datetime(tx.posting, 'start of day')"
         )
+
+    def test_date_literal_plain_text(self):
+        # SQLite has no native DATE type and rejects ``DATE 'literal'``
+        # as a column reference. ``CAST('YYYY-MM-DD' AS DATE)`` coerces
+        # to INTEGER 2030 (NUMERIC affinity extracts the leading digits)
+        # — silently wrong for comparisons against TEXT-stored ISO
+        # dates. The plain quoted-string form sorts lexically and ISO
+        # ordering matches date ordering, so comparisons are correct.
+        assert date_literal("2030-01-01", SQLITE) == "'2030-01-01'"
+        assert date_literal("2030-01-08", SQLITE) == "'2030-01-08'"
 
 
 class TestSqliteDdlIdempotency:
