@@ -78,14 +78,14 @@ def app2() -> None:
 @click.option(
     "--app",
     "app_name",
-    type=click.Choice(["smoke", "executives"]),
+    type=click.Choice(["smoke", "executives", "investigation"]),
     default="smoke",
     show_default=True,
     help=(
         "Which App2 surface to serve. ``smoke`` is the spike fixture; "
-        "``executives`` (X.2.g.1) builds the real Executives tree + "
-        "wires its datasets through the generic tree fetcher. More "
-        "apps land at X.2.g.{2,3,4}."
+        "``executives`` (X.2.g.1) and ``investigation`` (X.2.g.2) "
+        "build the real tree + wire its datasets through the generic "
+        "tree fetcher. More apps land at X.2.g.{3,4}."
     ),
 )
 def app2_apply(  # type: ignore[no-untyped-def]
@@ -141,34 +141,48 @@ def app2_apply(  # type: ignore[no-untyped-def]
                 f"data: DB-backed ({cfg.dialect.value}) → "
                 f"{cfg.l2_instance_prefix or instance.instance}_inv_money_trail_edges"
             )
-    elif app_name == "executives":
-        # X.2.g.1 — real Executives app via the generic tree fetcher.
-        # build_all_datasets(cfg) populates the SQL registry (via
+    elif app_name in ("executives", "investigation"):
+        # X.2.g.{1,2} — real tree app via the generic tree fetcher.
+        # build_all_datasets(cfg, ...) populates the SQL registry (via
         # build_dataset → register_sql); make_tree_db_fetcher reads
         # that registry at construction time so a missing entry fails
         # loudly here instead of inside a hot HTMX swap.
-        from quicksight_gen.apps.executives.app import (  # noqa: PLC0415
-            build_executives_app,
-        )
-        from quicksight_gen.apps.executives.datasets import (  # noqa: PLC0415
-            build_all_datasets as build_executives_datasets,
-        )
+        if stub:
+            raise click.UsageError(
+                f"--stub is only supported for --app smoke. The "
+                f"{app_name} app needs a real DB."
+            )
         from quicksight_gen.common.html._tree_fetcher import (  # noqa: PLC0415
             make_tree_db_fetcher,
         )
 
-        if stub:
-            raise click.UsageError(
-                "--stub is only supported for --app smoke. The "
-                "executives app needs a real DB."
+        if app_name == "executives":
+            from quicksight_gen.apps.executives.app import (  # noqa: PLC0415
+                build_executives_app,
             )
-        # Populate the SQL registry; result list itself isn't needed
-        # by App2 (no QS dataset deploy). Side-effect-only call.
-        build_executives_datasets(cfg)
-        tree_app = build_executives_app(cfg, l2_instance=instance)
+            from quicksight_gen.apps.executives.datasets import (  # noqa: PLC0415
+                build_all_datasets as build_app_datasets,
+            )
+            # Executives doesn't take l2_instance on build_all_datasets;
+            # the per-app build_app_fn does, via the kwarg below.
+            build_app_datasets(cfg)
+            tree_app = build_executives_app(cfg, l2_instance=instance)
+        else:  # investigation
+            from quicksight_gen.apps.investigation.app import (  # noqa: PLC0415
+                build_investigation_app,
+            )
+            from quicksight_gen.apps.investigation.datasets import (  # noqa: PLC0415
+                build_all_datasets as build_inv_datasets,
+            )
+            # Investigation's build_all_datasets requires l2_instance
+            # (App Info matview names need the prefix). Mirrors L1 /
+            # L2FT signature.
+            build_inv_datasets(cfg, instance)
+            tree_app = build_investigation_app(cfg, l2_instance=instance)
+
         if tree_app.analysis is None or not tree_app.analysis.sheets:
             raise click.UsageError(
-                "Executives app has no analysis sheets — bug in builder."
+                f"{app_name} app has no analysis sheets — bug in builder."
             )
         sheet = tree_app.analysis.sheets[0]
         # X.2.n.4 — fetcher needs an open AsyncConnectionPool. The CLI
@@ -187,7 +201,7 @@ def app2_apply(  # type: ignore[no-untyped-def]
         smoke_filter_specs = ()
         click.echo(
             f"data: DB-backed ({cfg.dialect.value}) → "
-            f"executives tree fetcher "
+            f"{app_name} tree fetcher "
             f"(prefix={cfg.l2_instance_prefix or instance.instance})"
         )
     else:
