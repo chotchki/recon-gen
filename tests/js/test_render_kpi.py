@@ -147,7 +147,7 @@ def test_kpi_negative_delta_renders_red_with_down_arrow() -> None:
         browser.close()
     assert "▼" in delta_text
     assert "25" in delta_text
-    assert "text-red-600" in (delta_class or "")
+    assert "text-danger" in (delta_class or "")
 
 
 def test_kpi_positive_delta_renders_green_with_up_arrow() -> None:
@@ -166,7 +166,7 @@ def test_kpi_positive_delta_renders_green_with_up_arrow() -> None:
         browser.close()
     assert "▲" in delta_text
     assert "+12" in delta_text
-    assert "text-green-600" in (delta_class or "")
+    assert "text-success" in (delta_class or "")
 
 
 def test_kpi_omits_delta_when_not_provided() -> None:

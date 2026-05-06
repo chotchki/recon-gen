@@ -109,6 +109,9 @@ def app2_apply(  # type: ignore[no-untyped-def]
         ServedDashboard,
         make_app,
     )
+    from quicksight_gen.common.theme import (  # noqa: PLC0415
+        resolve_l2_theme,
+    )
 
     cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
     tree_app, sheet = build_smoke_app(cfg)
@@ -121,6 +124,9 @@ def app2_apply(  # type: ignore[no-untyped-def]
             f"data: DB-backed ({cfg.dialect.value}) → "
             f"{cfg.l2_instance_prefix or instance.instance}_inv_money_trail_edges"
         )
+    theme = resolve_l2_theme(instance)
+    if theme is not None:
+        click.echo(f"theme: L2-driven ({theme.theme_name})")
     asgi_app = make_app(
         dashboards={
             "smoke": ServedDashboard(
@@ -128,6 +134,7 @@ def app2_apply(  # type: ignore[no-untyped-def]
                 sheet=sheet,
                 title="Smoke",
                 data_fetcher=fetcher,
+                theme=theme,
             ),
         },
         dev_log=dev_log,

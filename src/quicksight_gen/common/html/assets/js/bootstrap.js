@@ -151,7 +151,7 @@
       .attr("class", "kpi-card flex-1 min-w-[180px] text-center");
     cards
       .append("div")
-      .attr("class", "kpi-value text-4xl font-bold text-blue-600 tabular-nums")
+      .attr("class", "kpi-value text-4xl font-bold text-accent tabular-nums")
       .text((d) => formatKPIValue(d.value, d.format));
     cards
       .filter((d) => typeof d.delta === "number")
@@ -160,7 +160,7 @@
         "class",
         (d) =>
           "kpi-delta text-sm tabular-nums " +
-          (d.delta < 0 ? "text-red-600" : "text-green-600"),
+          (d.delta < 0 ? "text-danger" : "text-success"),
       )
       .text(
         (d) =>
@@ -169,7 +169,7 @@
       );
     cards
       .append("div")
-      .attr("class", "kpi-label text-sm text-slate-600 mt-2")
+      .attr("class", "kpi-label text-sm text-secondary-fg mt-2")
       .text((d) => d.label || "");
   }
 
@@ -226,14 +226,17 @@
     // Header row — sticky so long-scroll tables don't lose context.
     var thead = table
       .append("thead")
-      .attr("class", "sticky top-0 bg-slate-100 text-slate-700 font-semibold");
+      .attr(
+        "class",
+        "sticky top-0 bg-surface-bg text-secondary-fg font-semibold",
+      );
     var headerRow = thead.append("tr");
     headerRow
       .selectAll("th")
       .data(columns)
       .enter()
       .append("th")
-      .attr("class", "px-3 py-2 text-left border-b border-slate-300")
+      .attr("class", "px-3 py-2 text-left border-b border-surface-border")
       .each(function (col) {
         var th = d3.select(this);
         // Sort link — clicking flips sort direction (asc → desc →
@@ -262,7 +265,7 @@
             )
             .attr("hx-target", "#visual-data-" + visualId)
             .attr("hx-push-url", "true")
-            .attr("class", "table-sort-link hover:text-blue-700")
+            .attr("class", "table-sort-link hover:opacity-80")
             .text(col.label || col.name)
             .append("span")
             .attr("class", "table-sort-badge ml-1 text-xs")
@@ -287,7 +290,7 @@
       .append("tr")
       .attr(
         "class",
-        (_d, i) => "table-row " + (i % 2 === 0 ? "bg-white" : "bg-slate-50"),
+        (_d, i) => "table-row " + (i % 2 === 0 ? "bg-white" : "bg-surface-bg"),
       );
     trs
       .selectAll("td")
@@ -297,7 +300,7 @@
       .attr(
         "class",
         (cell) =>
-          "px-3 py-2 border-b border-slate-200 " +
+          "px-3 py-2 border-b border-surface-border " +
           (isNumericFormat(cell.col.format) ? "tabular-nums text-right" : ""),
       )
       .text((cell) => formatTableCell(cell.value, cell.col.format));
@@ -310,7 +313,7 @@
       .append("div")
       .attr(
         "class",
-        "table-pager flex items-center justify-between mt-3 px-3 text-sm text-slate-600",
+        "table-pager flex items-center justify-between mt-3 px-3 text-sm text-secondary-fg",
       );
     var displayStart = totalRows === 0 ? 0 : pageOffset + 1;
     var displayEnd = Math.min(pageOffset + pageSize, totalRows);
@@ -452,19 +455,19 @@
       .attr("transform", "translate(0," + innerH + ")")
       .call(xAxis)
       .selectAll("text")
-      .attr("class", "text-xs fill-slate-700");
+      .attr("class", "text-xs fill-primary-fg");
     g.append("g")
       .attr("class", "barchart-y-axis")
       .call(yAxis)
       .selectAll("text")
-      .attr("class", "text-xs fill-slate-700");
+      .attr("class", "text-xs fill-primary-fg");
 
     // Axis labels (plain English from the tree per Q.1.a.3 — they
     // carry over via the tree's Measure.axis_label / Column.label).
     if (data.x_label) {
       svg
         .append("text")
-        .attr("class", "barchart-x-label text-xs fill-slate-600")
+        .attr("class", "barchart-x-label text-xs fill-secondary-fg")
         .attr("text-anchor", "middle")
         .attr("x", margin.left + innerW / 2)
         .attr("y", height - 8)
@@ -473,7 +476,7 @@
     if (data.y_label) {
       svg
         .append("text")
-        .attr("class", "barchart-y-label text-xs fill-slate-600")
+        .attr("class", "barchart-y-label text-xs fill-secondary-fg")
         .attr("text-anchor", "middle")
         .attr(
           "transform",
@@ -502,7 +505,7 @@
       )
       .enter()
       .append("rect")
-      .attr("class", "barchart-bar fill-blue-500 hover:fill-blue-700")
+      .attr("class", "barchart-bar fill-accent hover:opacity-80")
       .attr("x", (d) => (x0(d.category) || 0) + (x1(d.seriesName) || 0))
       .attr("y", (d) => (typeof d.value === "number" ? y(d.value) : innerH))
       .attr("width", x1.bandwidth())
@@ -580,17 +583,17 @@
       .attr("transform", "translate(0," + innerH + ")")
       .call(xAxis)
       .selectAll("text")
-      .attr("class", "text-xs fill-slate-700");
+      .attr("class", "text-xs fill-primary-fg");
     g.append("g")
       .attr("class", "linechart-y-axis")
       .call(yAxis)
       .selectAll("text")
-      .attr("class", "text-xs fill-slate-700");
+      .attr("class", "text-xs fill-primary-fg");
 
     if (data.x_label) {
       svg
         .append("text")
-        .attr("class", "linechart-x-label text-xs fill-slate-600")
+        .attr("class", "linechart-x-label text-xs fill-secondary-fg")
         .attr("text-anchor", "middle")
         .attr("x", margin.left + innerW / 2)
         .attr("y", height - 8)
@@ -599,7 +602,7 @@
     if (data.y_label) {
       svg
         .append("text")
-        .attr("class", "linechart-y-label text-xs fill-slate-600")
+        .attr("class", "linechart-y-label text-xs fill-secondary-fg")
         .attr("text-anchor", "middle")
         .attr(
           "transform",
@@ -672,7 +675,7 @@
         .append("text")
         .attr("x", 14)
         .attr("y", 9)
-        .attr("class", "text-xs fill-slate-700")
+        .attr("class", "text-xs fill-primary-fg")
         .text((s, i) => s.name || "Series " + (i + 1));
     }
   }
@@ -704,9 +707,9 @@
 
   function pagerLinkClass(disabled) {
     if (disabled) {
-      return "px-2 py-1 rounded text-slate-400 cursor-not-allowed";
+      return "px-2 py-1 rounded text-secondary-fg cursor-not-allowed";
     }
-    return "px-2 py-1 rounded text-blue-600 hover:bg-blue-50 cursor-pointer";
+    return "px-2 py-1 rounded text-accent hover:bg-link-tint cursor-pointer";
   }
 
   // Merge query-string params onto the base fetch URL. Values that
@@ -763,7 +766,7 @@
       // .style('cursor') we had before.
       .attr(
         "class",
-        "fill-blue-500 hover:fill-blue-700 cursor-pointer transition-colors",
+        "fill-accent hover:opacity-80 cursor-pointer transition-colors",
       )
       .on("click", (_event, d) => {
         if (visualId) fireAnchorRequest(visualId, d.name);
@@ -776,7 +779,7 @@
       .enter()
       .append("path")
       .attr("d", d3.sankeyLinkHorizontal())
-      .attr("class", "stroke-slate-400")
+      .attr("class", "stroke-secondary-fg")
       .attr("stroke-opacity", 0.35)
       .attr("stroke-width", (d) => Math.max(1, d.width));
     svg
@@ -790,7 +793,7 @@
       .attr("dy", "0.35em")
       .attr("text-anchor", (d) => (d.x0 < width / 2 ? "start" : "end"))
       .text((d) => d.name)
-      .attr("class", "fill-slate-700 text-xs font-sans pointer-events-none");
+      .attr("class", "fill-primary-fg text-xs font-sans pointer-events-none");
   }
 
   // d3-force ships in the d3 main bundle — no separate CDN needed.
@@ -832,7 +835,7 @@
       .data(links)
       .enter()
       .append("line")
-      .attr("class", "stroke-slate-400")
+      .attr("class", "stroke-secondary-fg")
       .attr("stroke-opacity", 0.5)
       .attr("stroke-width", 1.5);
 
@@ -845,7 +848,7 @@
       .attr("r", 12)
       .attr(
         "class",
-        "fill-blue-500 hover:fill-blue-700 cursor-pointer transition-colors",
+        "fill-accent hover:opacity-80 cursor-pointer transition-colors",
       )
       .on("click", (_event, d) => {
         if (visualId) fireAnchorRequest(visualId, d.id || d.label);
@@ -858,7 +861,7 @@
       .enter()
       .append("text")
       .text((d) => d.label || d.id)
-      .attr("class", "fill-slate-700 text-xs font-sans pointer-events-none");
+      .attr("class", "fill-primary-fg text-xs font-sans pointer-events-none");
 
     sim.on("tick", () => {
       link

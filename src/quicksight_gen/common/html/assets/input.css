@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* X.2 experiment — Tailwind v4 CSS-first config.
+/* X.2 — Tailwind v4 CSS-first config.
  *
  * @source directives tell Tailwind which files to scan for class
  * names. The render module's page-shell HTML lives in render.py
@@ -9,3 +9,60 @@
  */
 @source "../render.py";
 @source "../__main__.py";
+@source "../assets/js/bootstrap.js";
+
+/*
+ * X.2.l — Semantic theme tokens.
+ *
+ * Each token below declares a CSS variable that Tailwind v4 turns
+ * into a full set of color utilities (bg-accent, text-accent,
+ * fill-accent, stroke-accent, border-accent, etc.). The build-time
+ * defaults here mirror DEFAULT_PRESET (common/theme.py); per-L2
+ * overrides land at runtime via render.py's <head><style>:root
+ * { --color-accent: ...; ... }</style></head> injection.
+ *
+ * Why CSS variables: Tailwind utilities resolve their color values
+ * by reading these vars at paint time, not at compile time, so the
+ * runtime <style> override picks them up everywhere they're used —
+ * inline classes, d3-attr classes, hover states, all of it.
+ *
+ * Token semantics (single source of truth — render.py + bootstrap.js
+ * use these names; replacing the underlying color is a CSS-var swap):
+ *
+ *   accent           — primary brand colour (blue-600 default)
+ *   accent-hover     — slightly darker on hover
+ *   accent-fg        — text on accent background
+ *   link-tint        — pale-accent background tint (table cell hover, etc.)
+ *   surface          — primary card background (white)
+ *   surface-bg       — page background (slightly off-white)
+ *   surface-alt      — alternate stripe row background
+ *   surface-muted    — sticky table header background
+ *   surface-border   — card / input border
+ *   primary-fg       — main text colour
+ *   secondary-fg     — muted text / labels / axis ticks
+ *   danger           — error / negative-delta indicator
+ *   success          — positive-delta indicator
+ *   warning          — warning indicator
+ */
+@theme {
+  --color-accent: #0a2740;
+  --color-accent-fg: #ffffff;
+  --color-link-tint: #e8eff9;
+  --color-surface: #ffffff;
+  --color-surface-bg: #f6f9fc;
+  --color-surface-border: #e2e8f0;
+  --color-primary-fg: #1f2933;
+  --color-secondary-fg: #4b5563;
+  --color-danger: #c0392b;
+  --color-success: #218c5b;
+  --color-warning: #c08824;
+}
+
+/*
+ * Hover / active states use opacity utilities (hover:opacity-80 etc.)
+ * instead of a separate accent-hover token. Trade-off: visual
+ * consistency across theme variants is one ``var()`` worth of
+ * complexity less, at the cost of a slightly less precise hover
+ * shade. Worth it for the simpler theme contract.
+ */
+

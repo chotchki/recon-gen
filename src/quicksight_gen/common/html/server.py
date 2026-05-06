@@ -73,6 +73,7 @@ from quicksight_gen.common.html.render import (
     emit_html,
     emit_visual_data_fragment,
 )
+from quicksight_gen.common.l2.theme import ThemePreset
 from quicksight_gen.common.tree.structure import App, Sheet
 
 
@@ -102,11 +103,18 @@ class ServedDashboard:
         title: human-readable name for the ``/dashboards`` listing.
         data_fetcher: per-dashboard fetcher invoked on every GET to
             the visual data path. Returns d3-shaped chart data.
+        theme: per-dashboard ``ThemePreset`` injected as CSS
+            variables in the page shell. ``None`` falls back to
+            ``DEFAULT_PRESET`` (silent-fallback per N.4.k, mirrors
+            QS dialect's CLASSIC fallback). Multi-dashboard servers
+            usually share a single theme since the listing page
+            renders one palette across all entries.
     """
     tree_app: App
     sheet: Sheet
     title: str
     data_fetcher: DataFetcher
+    theme: ThemePreset | None = None
 
 
 def make_app(
@@ -172,6 +180,12 @@ def make_app(
     listing: list[tuple[str, str]] = [
         (dash_id, d.title) for dash_id, d in dashboards.items()
     ]
+    # Use the first dashboard's theme for the listing page — if any
+    # server hosts dashboards with different themes the listing
+    # picks the alphabetically-first one's. That edge case isn't
+    # the design target (one L2 instance → one theme); flagging it
+    # as a comment so a future multi-tenant story sees the seam.
+    listing_theme = next(iter(dashboards.values())).theme
 
     async def index(_request: Request) -> RedirectResponse:
         # ``/`` is a convenience redirect; ``/dashboards`` is the
@@ -181,7 +195,9 @@ def make_app(
         return RedirectResponse("/dashboards", status_code=302)
 
     async def dashboards_list(_request: Request) -> HTMLResponse:
-        return HTMLResponse(emit_dashboards_list(listing))
+        return HTMLResponse(
+            emit_dashboards_list(listing, theme=listing_theme),
+        )
 
     async def dashboard_view(request: Request) -> Response:
         dash_id = request.path_params["dashboard_id"]
@@ -191,6 +207,7 @@ def make_app(
         return HTMLResponse(emit_html(
             served.tree_app, served.sheet,
             dashboard_id=dash_id, dev_log=dev_log,
+            theme=served.theme,
         ))
 
     async def visual_data(request: Request) -> Response:

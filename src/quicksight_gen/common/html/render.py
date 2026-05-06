@@ -1,14 +1,28 @@
-"""X.2.spike — HTML renderer for tree ``Sheet`` objects.
+"""HTML renderer for App2 — projects a tree ``Sheet`` to a complete
+HTML page (HTMX + d3 dialect).
 
-spike.1 produces a static page from a ``Sheet`` node. spike.2 layers
-HTMX swap + d3 hydration on top: the page shell pulls HTMX + d3 +
-d3-sankey from CDNs, a date-range form at the top of the page posts
-to each visual's data endpoint on change, and a bootstrap script
-hydrates ``data-visual-kind`` fragments after each swap.
+Page shell pulls HTMX + d3 + d3-sankey from CDNs; bootstrap JS
+hydrates ``data-visual-kind`` fragments after every HTMX swap;
+the per-visual data fetch path is GET (X.2.b) with all filter
+state as query params.
+
+Theme integration (X.2.l)
+-------------------------
+
+The page shell injects an inline ``<style>:root { --color-accent:
+...; ... }</style>`` block carrying CSS-variable values from the
+served L2 instance's ``ThemePreset`` (or ``DEFAULT_PRESET`` when
+the L2 has no theme — silent-fallback contract from N.4.k). The
+Tailwind ``@theme`` block in ``assets/input.css`` declares the
+same token names with default values (build-time); the runtime
+override at ``:root`` wins via the cascade. Net effect: every
+``bg-accent`` / ``text-accent`` utility resolves per-instance
+without rebuilding Tailwind.
 
 Visual rendering shape:
 
-    <section data-visual-kind="<kind>" data-visual-id="<id>">
+    <section data-visual-kind="<kind>" data-visual-id="<id>"
+             data-fetch-url="/dashboards/.../visuals/<id>/data">
       <h2>{title}</h2>
       <p class="subtitle">{subtitle}</p>
       <div id="visual-data-<id>" class="visual-data">
@@ -16,17 +30,6 @@ Visual rendering shape:
              holding the chart data, bootstrap JS hydrates via d3 -->
       </div>
     </section>
-
-The hydration contract for spike.2 is:
-
-- Server renders ``<script type="application/json" class="chart-data">
-  {…d3-sankey shape…}</script>`` inside the ``visual-data-<id>`` div.
-- After ``htmx:afterSwap``, the bootstrap script walks any newly-
-  inserted ``[data-visual-kind]`` and dispatches by kind.
-
-spike.2 supports ``Sankey`` only — adding more kinds is one ``case``
-arm in the bootstrap. spike.3 brings the harness's Layer 2 against
-this surface; spike.4 is the decision gate.
 """
 
 from __future__ import annotations
@@ -36,6 +39,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from quicksight_gen.common.theme import DEFAULT_PRESET
+from quicksight_gen.common.l2.theme import ThemePreset
 from quicksight_gen.common.tree._helpers import _AutoSentinel
 from quicksight_gen.common.tree.structure import App, Sheet
 
@@ -77,11 +82,12 @@ _PAGE_SHELL = """\
   <title>{title}</title>
 {dev_log_meta}
   <link rel="stylesheet" href="/static/output.css">
+{theme_style}
   <script src="{htmx_src}"></script>
   <script src="{d3_src}"></script>
   <script src="{d3_sankey_src}"></script>
 </head>
-<body class="bg-slate-50 text-slate-900 font-sans antialiased">
+<body class="bg-surface-bg text-primary-fg font-sans antialiased">
 {body}
   <script>{bootstrap_js}</script>
   <script>{dev_log_js}</script>
@@ -89,6 +95,45 @@ _PAGE_SHELL = """\
 </html>
 """
 
+
+# X.2.l — semantic-token → ThemePreset-field mapping. Every Tailwind
+# utility in render.py / bootstrap.js eventually resolves to one of
+# these CSS variables. Adding a new token: append the (var-name,
+# preset-attr) pair here; declare ``--color-<name>`` in input.css's
+# @theme block with a default; use ``bg-<name>`` / ``text-<name>``
+# / ``fill-<name>`` etc. in markup.
+_THEME_TOKEN_MAP: list[tuple[str, str]] = [
+    ("--color-accent", "accent"),
+    ("--color-accent-fg", "accent_fg"),
+    ("--color-link-tint", "link_tint"),
+    ("--color-surface", "primary_bg"),
+    ("--color-surface-bg", "secondary_bg"),
+    ("--color-primary-fg", "primary_fg"),
+    ("--color-secondary-fg", "secondary_fg"),
+    ("--color-danger", "danger"),
+    ("--color-success", "success"),
+    ("--color-warning", "warning"),
+]
+
+
+def _emit_theme_style(theme: ThemePreset | None) -> str:
+    """Render the per-instance ``<style>:root { ... }</style>`` block.
+
+    Falls back to ``DEFAULT_PRESET`` when the L2 has no theme —
+    same silent-fallback contract as the QS dialect (N.4.k). The
+    block lives AFTER the Tailwind stylesheet so its ``:root``
+    declarations override the build-time defaults from input.css's
+    ``@theme`` block via cascade order.
+
+    Returns the ``<style>`` element as a string suitable for
+    embedding in the page ``<head>``.
+    """
+    resolved = theme or DEFAULT_PRESET
+    decls = "\n".join(
+        f"    {var}: {getattr(resolved, attr)};"
+        for var, attr in _THEME_TOKEN_MAP
+    )
+    return f'  <style>\n  :root {{\n{decls}\n  }}\n  </style>'
 
 
 # Form template — emits a date-range filter at the top of the page.
@@ -104,23 +149,23 @@ def _render_filter_form(
 
     ``visual_fetch_urls`` is a list of ``(visual_id, fetch_url)``
     tuples. Each Refresh button targets ``#visual-data-{visual_id}``
-    and GETs the URL. The visual_id appears twice (target id +
-    URL) — different roles, different sources of truth, so kept
-    explicit instead of derived from one or the other.
+    and GETs the URL.
     """
     form_class = (
         "flex flex-wrap items-center gap-3 mx-8 mb-6 p-4 "
-        "bg-white rounded-lg shadow-sm border border-slate-200"
+        "bg-surface rounded-lg shadow-sm border border-surface-border"
     )
-    label_class = "flex items-center gap-2 text-sm font-medium text-slate-700"
+    label_class = (
+        "flex items-center gap-2 text-sm font-medium text-primary-fg"
+    )
     input_class = (
-        "px-2 py-1 border border-slate-300 rounded text-sm "
-        "focus:outline-none focus:ring-2 focus:ring-blue-500"
+        "px-2 py-1 border border-surface-border rounded text-sm "
+        "focus:outline-none focus:ring-2 focus:ring-accent"
     )
     button_class = (
-        "px-3 py-1 bg-blue-600 text-white text-sm font-medium "
-        "rounded hover:bg-blue-700 active:bg-blue-800 "
-        "transition-colors cursor-pointer"
+        "px-3 py-1 bg-accent text-accent-fg text-sm font-medium "
+        "rounded hover:opacity-90 active:opacity-80 "
+        "transition-opacity cursor-pointer"
     )
     parts = [f'  <form id="filter-form" class="{form_class}">']
     parts.append(
@@ -169,7 +214,11 @@ def _visual_fetch_url(
     )
 
 
-def emit_dashboards_list(dashboards: list[tuple[str, str]]) -> str:
+def emit_dashboards_list(
+    dashboards: list[tuple[str, str]],
+    *,
+    theme: ThemePreset | None = None,
+) -> str:
     """Render the ``/dashboards`` landing page.
 
     ``dashboards`` is a list of ``(dashboard_id, title)`` tuples in
@@ -177,18 +226,18 @@ def emit_dashboards_list(dashboards: list[tuple[str, str]]) -> str:
     ``/dashboards/{dashboard_id}`` so the URL surface stays the
     bookmarkable layer (no JS required to navigate the list).
 
-    X.2.b.2 ships a single-entry listing per process; X.2.b.3 fans
-    it out to all 4 apps wired from the served L2 instance.
+    ``theme`` controls the CSS-variable values injected into the
+    page shell. When ``None``, ``DEFAULT_PRESET`` wins via
+    silent-fallback (N.4.k). Multi-dashboard servers should pass
+    a single shared theme — the listing is one page, one palette.
     """
     title_class = "text-3xl font-bold mt-8 mx-8 mb-2"
-    desc_class = "mx-8 mb-6 text-slate-600"
-    list_class = (
-        "mx-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
-    )
+    desc_class = "mx-8 mb-6 text-secondary-fg"
+    list_class = "mx-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
     item_class = (
-        "block p-4 bg-white rounded-lg shadow-sm border "
-        "border-slate-200 hover:border-blue-500 hover:shadow-md "
-        "transition-shadow text-slate-800"
+        "block p-4 bg-surface rounded-lg shadow-sm border "
+        "border-surface-border hover:border-accent hover:shadow-md "
+        "transition-shadow text-primary-fg"
     )
     body_parts: list[str] = [
         f'  <h1 class="{title_class}">Dashboards</h1>',
@@ -215,6 +264,7 @@ def emit_dashboards_list(dashboards: list[tuple[str, str]]) -> str:
         bootstrap_js=_BOOTSTRAP_JS,
         dev_log_js=_DEV_LOG_JS,
         dev_log_meta="",
+        theme_style=_emit_theme_style(theme),
     )
 
 
@@ -222,6 +272,7 @@ def emit_html(
     app: App, sheet: Sheet, *,
     dashboard_id: str,
     dev_log: bool = False,
+    theme: ThemePreset | None = None,
 ) -> str:
     """Render a tree ``Sheet`` as a standalone HTML page.
 
@@ -229,17 +280,6 @@ def emit_html(
     at the top of the body that GETs each visual's data endpoint on
     Refresh, plus one ``<section>`` per visual carrying its title,
     subtitle, and the swap-target div.
-
-    Takes both the App and the Sheet so internal-id resolution
-    (``app.resolve_auto_ids()``) can run. The Sheet alone has no
-    parent ref — without the App we'd emit ``data-visual-id=
-    "_AutoSentinel.AUTO"`` for any visual constructed with the
-    standard ``visual_id=AUTO`` default. The data URLs key off
-    ``data-visual-id``, so unresolved IDs would silently break the
-    swap dispatch.
-
-    The renderer still never touches disk — the App + Sheet are
-    in-memory tree objects. X.4's stateful editor stays unblocked.
 
     Args:
         app: tree ``App`` node owning the analysis the sheet lives
@@ -251,6 +291,10 @@ def emit_html(
             every visual's data-fetch URL + the Refresh button's
             ``hx-get`` so the path matches what ``server.make_app``
             wired its route for.
+        theme: ``ThemePreset`` to inject as CSS variables. When
+            ``None``, falls back to ``DEFAULT_PRESET`` (silent-
+            fallback per N.4.k, mirrors the QS dialect's CLASSIC
+            fallback).
 
     Returns:
         A complete, well-formed HTML document as a string. Title +
@@ -266,7 +310,7 @@ def emit_html(
     sheet_id = str(sheet.sheet_id)
 
     title_class = "text-3xl font-bold mt-8 mx-8 mb-2"
-    desc_class = "mx-8 mb-6 text-slate-600"
+    desc_class = "mx-8 mb-6 text-secondary-fg"
     body_parts: list[str] = [
         f'  <h1 class="{title_class}">{html.escape(sheet.title)}</h1>',
     ]
@@ -297,6 +341,7 @@ def emit_html(
         dev_log_meta=(
             '  <meta name="dev-log" content="1">' if dev_log else ""
         ),
+        theme_style=_emit_theme_style(theme),
     )
 
 
@@ -346,11 +391,6 @@ def _render_visual(
     for this visual's data. The bootstrap JS reads it when an
     in-chart click (e.g. Sankey node) needs to fire a swap, so the
     URL-construction authority stays server-side.
-
-    Visuals satisfy ``VisualLike`` (Protocol) — they all carry
-    ``title`` and most carry ``subtitle``. Read attributes
-    defensively via ``getattr`` so the renderer works against any
-    future ``VisualLike`` subtype without per-kind branching here.
     """
     title = getattr(visual, "title", "(untitled)")
     subtitle = getattr(visual, "subtitle", None)
@@ -366,11 +406,11 @@ def _render_visual(
     fetch_url = _visual_fetch_url(dashboard_id, sheet_id, visual_id)
     esc_url = html.escape(fetch_url)
     section_class = (
-        "mx-8 mb-6 p-4 bg-white rounded-lg shadow-sm "
-        "border border-slate-200"
+        "mx-8 mb-6 p-4 bg-surface rounded-lg shadow-sm "
+        "border border-surface-border"
     )
-    h2_class = "text-xl font-semibold text-slate-800 mb-1"
-    subtitle_class = "subtitle text-sm text-slate-500 mb-4"
+    h2_class = "text-xl font-semibold text-primary-fg mb-1"
+    subtitle_class = "subtitle text-sm text-secondary-fg mb-4"
 
     parts: list[str] = []
     parts.append(
