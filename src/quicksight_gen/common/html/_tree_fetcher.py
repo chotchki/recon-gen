@@ -33,6 +33,7 @@ from quicksight_gen.common.config import Config
 from quicksight_gen.common.dataset_contract import get_sql
 from quicksight_gen.common.html._data_shape import shape_for_kind
 from quicksight_gen.common.html._sql_executor import execute_visual_sql
+from quicksight_gen.common.html._visual_sql import wrap_for_visual
 from quicksight_gen.common.tree.structure import App
 
 
@@ -124,6 +125,10 @@ def make_tree_db_fetcher(
     # Pre-resolve every visual's (kind, sql) at build time. Failures
     # surface here, not at request time. Visuals without datasets
     # land with sql=None and return empty payloads at fetch time.
+    # X.2.g.1.c — wrap the dataset SQL with the visual's declared
+    # aggregation (KPI count → SELECT COUNT, BarChart → GROUP BY
+    # category, etc.). Without this, KPI visuals would render one
+    # card per dataset row instead of the aggregated value QS shows.
     visual_index: dict[str, tuple[str, str | None]] = {}
     for sheet in tree_app.analysis.sheets:
         for visual in sheet.visuals:
@@ -134,9 +139,8 @@ def make_tree_db_fetcher(
             ds_id = _find_visual_dataset_identifier(visual)
             sql: str | None = None
             if ds_id is not None:
-                # Eager lookup — fail loudly if the registry is missing
-                # an entry. Better here than inside a swap handler.
-                sql = get_sql(ds_id)
+                base_sql = get_sql(ds_id)
+                sql = wrap_for_visual(base_sql, visual)
             visual_index[vid] = (kind, sql)
 
     if connection_factory is None:

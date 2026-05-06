@@ -156,8 +156,10 @@ def _build_app_with_visuals() -> tuple[App, Dataset]:
 
 
 def test_make_tree_db_fetcher_dispatches_kpi(sqlite_factory: Any) -> None:
+    # X.2.g.1.c — dataset SQL is row-grain; the wrapper applies
+    # SUM(amount) per the KPI's measure declaration.
     register_sql(
-        "x2g-test-ds", "SELECT SUM(amount) FROM t",
+        "x2g-test-ds", "SELECT status, amount FROM t",
     )
     app, _ds_node = _build_app_with_visuals()
     fetcher = make_tree_db_fetcher(
@@ -170,9 +172,10 @@ def test_make_tree_db_fetcher_dispatches_kpi(sqlite_factory: Any) -> None:
 
 
 def test_make_tree_db_fetcher_dispatches_bar_chart(sqlite_factory: Any) -> None:
+    # X.2.g.1.c — dataset SQL is row-grain; the wrapper produces
+    # SELECT status, SUM(amount) FROM (...) GROUP BY status.
     register_sql(
-        "x2g-test-ds",
-        "SELECT status, SUM(amount) FROM t GROUP BY status ORDER BY status",
+        "x2g-test-ds", "SELECT status, amount FROM t",
     )
     app, _ds_node = _build_app_with_visuals()
     fetcher = make_tree_db_fetcher(
@@ -190,7 +193,7 @@ def test_make_tree_db_fetcher_substitutes_filters(sqlite_factory: Any) -> None:
     X.2.g.0 round-trip)."""
     register_sql(
         "x2g-test-ds",
-        "SELECT SUM(amount) FROM t WHERE status = :param_status",
+        "SELECT status, amount FROM t WHERE status = :param_status",
     )
     app, _ds_node = _build_app_with_visuals()
     fetcher = make_tree_db_fetcher(
@@ -205,7 +208,7 @@ def test_make_tree_db_fetcher_unknown_visual_id_returns_empty(
 ) -> None:
     """Stale URLs (cached pages, swap-after-restart) shouldn't
     crash — empty payload renders an empty visual."""
-    register_sql("x2g-test-ds", "SELECT SUM(amount) FROM t")
+    register_sql("x2g-test-ds", "SELECT status, amount FROM t")
     app, _ds_node = _build_app_with_visuals()
     fetcher = make_tree_db_fetcher(
         app, _TEST_CFG_SQLITE, connection_factory=sqlite_factory,
@@ -265,7 +268,7 @@ def test_make_tree_db_fetcher_indexes_visuals_across_sheets(
 ) -> None:
     """Multi-sheet App: every analysis sheet's visuals are
     addressable through the same fetcher."""
-    register_sql("x2g-multi-ds", "SELECT SUM(amount) FROM t")
+    register_sql("x2g-multi-ds", "SELECT status, amount FROM t")
     app = App(name="x2g-multi", cfg=_TEST_CFG_SQLITE)
     analysis = app.set_analysis(Analysis(
         analysis_id_suffix="multi", name="Multi",
