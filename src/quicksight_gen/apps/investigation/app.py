@@ -765,6 +765,26 @@ def _build_account_network_sheet(
 
     Layout: two Sankeys side-by-side on top (½ width each), full-width
     table below.
+
+    App2 alpha gap (X.2.g.2.c, deferred from v8.8.0a1)
+    --------------------------------------------------
+    The QS dialect drives anchor + direction filtering through the
+    ``pInvANetworkAnchor`` StringParam + four analysis-level calc
+    fields, all evaluated inside the QuickSight engine at render
+    time. App2 has no equivalent calc-field-to-SQL translator yet,
+    so under App2 this sheet renders **all flows from the matview
+    without anchor or direction filtering** — both directional
+    Sankeys show identical content (the full edge set), the table
+    is unfiltered, and the anchor dropdown's value is ignored.
+    Basic Sankey rendering still works (X.2.g.2.b), the page is
+    not broken — just less interactive than the QS view.
+
+    Closing the gap before v8.8.0 stable means either: (1) building
+    a calc-field-to-SQL emitter for the inbound / outbound direction
+    flags and the anchor predicate, OR (2) templating the dataset
+    SQL with App2-specific ``WHERE`` clauses bound to ``:param_*``
+    placeholders (mirroring the X.2.g.1.b ``app2_date_filter``
+    pattern). Tracked as task #646 / X.2.g.2.c follow-up.
     """
     del cfg
 
