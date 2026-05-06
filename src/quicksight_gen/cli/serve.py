@@ -75,6 +75,19 @@ def app2() -> None:
         "without a populated database."
     ),
 )
+@click.option(
+    "--app",
+    "app_name",
+    type=click.Choice(["smoke", "executives"]),
+    default="smoke",
+    show_default=True,
+    help=(
+        "Which App2 surface to serve. ``smoke`` is the spike fixture; "
+        "``executives`` (X.2.g.1) builds the real Executives tree + "
+        "wires its datasets through the generic tree fetcher. More "
+        "apps land at X.2.g.{2,3,4}."
+    ),
+)
 def app2_apply(  # type: ignore[no-untyped-def]
     config,
     l2_instance_path,
@@ -82,6 +95,7 @@ def app2_apply(  # type: ignore[no-untyped-def]
     port: int,
     dev_log: bool,
     stub: bool,
+    app_name: str,
 ) -> None:
     """Start the App2 HTMX/d3 dashboard server.
 
@@ -115,28 +129,70 @@ def app2_apply(  # type: ignore[no-untyped-def]
     )
 
     cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
-    tree_app, sheet = build_smoke_app(cfg)
-    if stub:
-        fetcher = stub_money_trail_fetcher
-        click.echo("data: stub fetcher (deterministic)")
-    else:
-        fetcher = make_db_fetcher(cfg, instance)
+    if app_name == "smoke":
+        tree_app, sheet = build_smoke_app(cfg)
+        smoke_filter_specs = SMOKE_FILTER_SPECS
+        if stub:
+            fetcher = stub_money_trail_fetcher
+            click.echo("data: stub fetcher (deterministic)")
+        else:
+            fetcher = make_db_fetcher(cfg, instance)
+            click.echo(
+                f"data: DB-backed ({cfg.dialect.value}) → "
+                f"{cfg.l2_instance_prefix or instance.instance}_inv_money_trail_edges"
+            )
+    elif app_name == "executives":
+        # X.2.g.1 — real Executives app via the generic tree fetcher.
+        # build_all_datasets(cfg) populates the SQL registry (via
+        # build_dataset → register_sql); make_tree_db_fetcher reads
+        # that registry at construction time so a missing entry fails
+        # loudly here instead of inside a hot HTMX swap.
+        from quicksight_gen.apps.executives.app import (  # noqa: PLC0415
+            build_executives_app,
+        )
+        from quicksight_gen.apps.executives.datasets import (  # noqa: PLC0415
+            build_all_datasets as build_executives_datasets,
+        )
+        from quicksight_gen.common.html._tree_fetcher import (  # noqa: PLC0415
+            make_tree_db_fetcher,
+        )
+
+        if stub:
+            raise click.UsageError(
+                "--stub is only supported for --app smoke. The "
+                "executives app needs a real DB."
+            )
+        # Populate the SQL registry; result list itself isn't needed
+        # by App2 (no QS dataset deploy). Side-effect-only call.
+        build_executives_datasets(cfg)
+        tree_app = build_executives_app(cfg, l2_instance=instance)
+        if tree_app.analysis is None or not tree_app.analysis.sheets:
+            raise click.UsageError(
+                "Executives app has no analysis sheets — bug in builder."
+            )
+        sheet = tree_app.analysis.sheets[0]
+        fetcher = make_tree_db_fetcher(tree_app, cfg)
+        smoke_filter_specs = ()
         click.echo(
             f"data: DB-backed ({cfg.dialect.value}) → "
-            f"{cfg.l2_instance_prefix or instance.instance}_inv_money_trail_edges"
+            f"executives tree fetcher "
+            f"(prefix={cfg.l2_instance_prefix or instance.instance})"
         )
+    else:
+        # click.Choice(...) above prevents this branch.
+        raise click.UsageError(f"Unknown --app value: {app_name!r}")
     theme = resolve_l2_theme(instance)
     if theme is not None:
         click.echo(f"theme: L2-driven ({theme.theme_name})")
     asgi_app = make_app(
         dashboards={
-            "smoke": ServedDashboard(
+            app_name: ServedDashboard(
                 tree_app=tree_app,
                 sheet=sheet,
-                title="Smoke",
+                title=app_name.title(),
                 data_fetcher=fetcher,
                 theme=theme,
-                filter_specs=SMOKE_FILTER_SPECS,
+                filter_specs=smoke_filter_specs,
             ),
         },
         dev_log=dev_log,

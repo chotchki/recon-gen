@@ -82,6 +82,14 @@ The d3-force visual we spiked under X.2 serves THREE surfaces:
 
 One renderer, three contexts. The visual primitive is in `common/tree/visuals.py` already; phase.1 wires the data overlays per surface.
 
+### Force Directed thoughts
+- Getting this right can be challenging, being able to tweak easily will be key
+- I don't know what knobs we have to play with, would like to know when its getting hard (not saying we shouldn't end there but generally I find fighting the library is a code smell until we know what we're doing)
+- Edges of the graph should be merged only if their direction matches
+- Merged Edges should merge their text boxes
+- We should try to spread to fill the available space.
+- Parents
+
 ## CLI surface additions
 - `data apply --end-date <ISO date>` — emit-time filter, drops records past the cutoff (does NOT change the seed generator; just truncates the timeline at write). Trivial in `emit_full_seed`. Enables timeline-truncation for "what did the data look like as of X" scenarios.
 - (Future, not in scope yet) `data apply --density-factor <N>` — multiplier on row-count for perf testing at scale. Punted to its own phase when needed.
