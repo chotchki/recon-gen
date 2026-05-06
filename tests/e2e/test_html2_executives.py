@@ -183,7 +183,7 @@ def test_filter_change_refetches_visuals(exec_server: str) -> None:
         _calls_log.clear()
         # Set a date and click Refresh on the first visual.
         page.fill('input[name="date_from"]', "2030-02-01")
-        page.click('button[hx-get]')
+        page.click('button#refresh-all')
         # Wait for the new swap to land (the kpi-value re-renders).
         page.wait_for_function(
             "() => document.querySelector('.kpi-value') !== null",

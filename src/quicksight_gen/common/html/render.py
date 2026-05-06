@@ -283,15 +283,20 @@ def _render_filter_form(
     visual_fetch_urls: list[tuple[str, str]],
     filter_specs: Sequence[FilterSpec] = (),
 ) -> str:
-    """Render the filter form with one Refresh button per visual.
+    """Render the filter form with a single Refresh button (X.2.g.1.d).
 
-    The form starts with the always-on date-range inputs, then
-    appends a control per ``filter_specs`` entry (X.2.d). Each
-    Refresh button targets ``#visual-data-{visual_id}`` and GETs
-    the URL with ``hx-include="#filter-form"`` — every named
-    input in the form (including the ones added via
-    ``filter_specs``) lands as a query param.
+    Previously the form had one Refresh button per visual, which
+    cluttered the UI (5 buttons for a 5-visual sheet). With X.2.g.1.a
+    auto-load, the per-visual button isn't needed for initial paint —
+    only after a filter change. ONE button now broadcasts a
+    ``refresh`` custom event that every visual section listens for
+    via ``hx-trigger="load, refresh from:body"``.
+
+    The button click does ``htmx.trigger(document.body, 'refresh')``
+    via the ``onclick`` handler. HTMX picks it up and re-fires every
+    visual's hx-get with the current form state.
     """
+    del visual_fetch_urls  # X.2.g.1.d — broadcast pattern doesn't need per-URL list
     form_class = (
         "flex flex-wrap items-center gap-3 mx-8 mb-6 p-4 "
         "bg-surface rounded-lg shadow-sm border border-surface-border"
@@ -317,22 +322,11 @@ def _render_filter_form(
             parts.append(_render_category_filter(spec))
         elif isinstance(spec, NumericRangeSpec):
             parts.append(_render_numeric_range(spec))
-    for vid, url in visual_fetch_urls:
-        # One Refresh button per visual. Triggered on click (button's
-        # default trigger). Date-input ``change`` was tried on the
-        # button via ``from:#filter-form`` but didn't fire reliably
-        # in the spike; click is the floor — phase.1 can layer auto-
-        # refresh-on-change via SSE or a less-clever trigger config.
-        esc_id = html.escape(vid)
-        esc_url = html.escape(url)
-        parts.append(
-            f'    <button type="button"'
-            f' hx-get="{esc_url}"'
-            f' hx-target="#visual-data-{esc_id}"'
-            f' hx-include="#filter-form"'
-            f' hx-push-url="true"'
-            f' class="{button_class}">Refresh</button>'
-        )
+    parts.append(
+        f'    <button type="button" id="refresh-all"'
+        f' onclick="htmx.trigger(document.body, \'refresh\')"'
+        f' class="{button_class}">Refresh</button>'
+    )
     parts.append('  </form>')
     return "\n".join(parts)
 
@@ -566,6 +560,10 @@ def _render_text_box(text_box: Any) -> str:
     """Wrap a TextBox's projected HTML in a themed surface card so
     it sits visually consistent with the data-visual sections.
     Pulls the QS rich-text content via ``text_box.content``.
+
+    Pre-grid fallback path — full-width section with mx-8 margin.
+    Use ``_render_text_box_in_grid`` when laying out inside the
+    sheet's CSS grid.
     """
     section_class = (
         "mx-8 mb-6 p-4 bg-surface rounded-lg shadow-sm "
@@ -574,6 +572,20 @@ def _render_text_box(text_box: Any) -> str:
     raw = getattr(text_box, "content", "") or ""
     inner = _qs_richtext_to_html(raw)
     return f'  <section class="{section_class}">{inner}</section>'
+
+
+def _render_text_box_in_grid(text_box: Any, *, col_span: int) -> str:
+    """Like ``_render_text_box`` but for use inside the CSS grid
+    container — drops the outer margin (the grid handles spacing)
+    + applies the per-slot column span via inline style."""
+    section_class = (
+        "p-4 bg-surface rounded-lg shadow-sm "
+        "border border-surface-border text-primary-fg"
+    )
+    raw = getattr(text_box, "content", "") or ""
+    inner = _qs_richtext_to_html(raw)
+    style = f' style="grid-column: span {col_span};"'
+    return f'  <section class="{section_class}"{style}>{inner}</section>'
 
 
 def _render_sheet_tabs(
@@ -702,14 +714,42 @@ def emit_html(
     # Started) used to show a vestigial date picker that did nothing.
     if sheet.visuals:
         body_parts.append(_render_filter_form(visual_fetch_urls, filter_specs))
-    # X.2.g.1.a — render text boxes too. Each sheet.text_boxes entry
-    # carries QS rich-text XML; ``_render_text_box`` projects it to
-    # equivalent HTML so Getting Started sheets actually show their
-    # welcome content instead of being blank.
-    for tb in sheet.text_boxes:
-        body_parts.append(_render_text_box(tb))
-    for visual in sheet.visuals:
-        body_parts.append(_render_visual(visual, dashboard_id, sheet_id))
+    # X.2.g.1.d — wrap visuals + text boxes in a CSS grid that
+    # respects the tree's GridSlot.col_span. The QS layout is a 36-col
+    # grid (see common/tree/structure.py::_GRID_WIDTH_COLS); two
+    # _HALF=18-col KPIs sit side-by-side, full-width Tables span 36.
+    # Without this wrapper, every visual stacked full-width regardless
+    # of declared layout (the screenshot bug).
+    grid_slots = list(getattr(sheet.layout, "grid_slots", []) or [])
+    if grid_slots:
+        body_parts.append(
+            '  <div class="mx-8 mb-6" '
+            'style="display: grid; grid-template-columns: repeat(36, 1fr); '
+            'gap: 1rem;">'
+        )
+        # Map each LayoutNode (Visual or TextBox) to its slot so the
+        # render helpers get col_span. The tree builds slots in
+        # placement order; we walk in that order so visuals appear
+        # row-by-row left-to-right.
+        for slot in grid_slots:
+            element = slot.element
+            if hasattr(element, "content"):  # TextBox
+                body_parts.append(_render_text_box_in_grid(
+                    element, col_span=slot.col_span,
+                ))
+            else:  # Visual
+                body_parts.append(_render_visual(
+                    element, dashboard_id, sheet_id,
+                    col_span=slot.col_span,
+                ))
+        body_parts.append('  </div>')
+    else:
+        # Pre-grid fallback: text boxes + visuals as full-width sections.
+        # Used when a sheet has no layout (legacy / spike trees).
+        for tb in sheet.text_boxes:
+            body_parts.append(_render_text_box(tb))
+        for visual in sheet.visuals:
+            body_parts.append(_render_visual(visual, dashboard_id, sheet_id))
     return _PAGE_SHELL.format(
         title=html.escape(sheet.title),
         body="\n".join(body_parts),
@@ -758,6 +798,8 @@ def emit_visual_data_fragment(visual_id: str, data: Any) -> str:
 
 def _render_visual(
     visual: Any, dashboard_id: str, sheet_id: str,
+    *,
+    col_span: int | None = None,
 ) -> str:
     """Render one visual as an HTML ``<section>``.
 
@@ -785,19 +827,30 @@ def _render_visual(
     esc_id = html.escape(visual_id)
     fetch_url = _visual_fetch_url(dashboard_id, sheet_id, visual_id)
     esc_url = html.escape(fetch_url)
+    # X.2.g.1.d — section sits inside a 36-col CSS grid. The grid
+    # container handles the outer margin; per-section margin is just
+    # vertical (mb-2) for visual breathing room. Pre-grid sections
+    # used mx-8 directly which is now the grid container's job.
     section_class = (
-        "mx-8 mb-6 p-4 bg-surface rounded-lg shadow-sm "
-        "border border-surface-border"
+        "p-4 bg-surface rounded-lg shadow-sm border border-surface-border"
     )
     h2_class = "text-xl font-semibold text-primary-fg mb-1"
     subtitle_class = "subtitle text-sm text-secondary-fg mb-4"
+
+    # CSS grid placement — inline style for the per-slot col-span
+    # because Tailwind's arbitrary-value support needs a JIT scan
+    # over every possible span (1–36) in the CSS, which we'd rather
+    # avoid. Inline style is one number per visual; small + clean.
+    grid_style = (
+        f' style="grid-column: span {col_span};"' if col_span else ""
+    )
 
     parts: list[str] = []
     parts.append(
         f'  <section data-visual-kind="{html.escape(kind)}"'
         f' data-visual-id="{esc_id}"'
         f' data-fetch-url="{esc_url}"'
-        f' class="{section_class}">'
+        f' class="{section_class}"{grid_style}>'
     )
     parts.append(f'    <h2 class="{h2_class}">{html.escape(title)}</h2>')
     if subtitle:
@@ -805,14 +858,14 @@ def _render_visual(
             f'    <p class="{subtitle_class}">{html.escape(subtitle)}</p>'
         )
     # X.2.g.1.a — auto-fetch on load. Without ``hx-trigger="load"``
-    # the section sits empty until the user clicks Refresh, which
-    # surprises everyone (live reviews kept asking "why is my chart
-    # blank?"). The Refresh button still works; this just makes the
-    # initial paint Just Happen.
+    # the section sits empty until the user clicks Refresh.
+    # X.2.g.1.d — also listen for the global ``refresh`` event the
+    # single Refresh button broadcasts via htmx.trigger(body, 'refresh').
+    # That replaces the per-visual Refresh buttons we used to emit.
     parts.append(
         f'    <div id="visual-data-{esc_id}" class="visual-data"'
         f' hx-get="{esc_url}"'
-        f' hx-trigger="load"'
+        f' hx-trigger="load, refresh from:body"'
         f' hx-include="#filter-form"'
         f' hx-swap="innerHTML">'
         f'<!-- HTMX swap target; auto-fetches on DOMContentLoaded -->'
