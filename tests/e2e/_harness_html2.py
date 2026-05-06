@@ -207,25 +207,35 @@ def make_live_db_fetcher_for_app(
     "I want the real DB-backed fetcher this app would use in
     production."
 
-    Opens an ``AsyncConnectionPool`` against the configured DB.
-    The pool is leaked at fixture teardown — fine for a test
-    process that's about to exit anyway, and avoids forcing every
-    caller to thread an ``async close()`` through their fixture.
-    For tighter lifecycle control, drop down to
-    ``make_connection_pool`` + ``make_tree_db_fetcher`` directly.
+    Pool lifecycle subtlety: an ``AsyncConnectionPool`` (psycopg or
+    aiosqlite) is bound to the asyncio event loop it was opened in.
+    The harness spins uvicorn in a thread with its own loop, so a
+    pool created outside that loop hangs forever on connection
+    acquire. Lazy-create the pool on the first fetcher invocation —
+    that runs inside uvicorn's loop, so the pool ends up in the
+    right place. The pool is leaked at process exit (fine for a
+    test process about to die).
     """
-    import asyncio
-
     from quicksight_gen.common.db import (  # noqa: PLC0415
         make_connection_pool,
     )
     from quicksight_gen.common.html._tree_fetcher import (  # noqa: PLC0415
         make_tree_db_fetcher,
     )
-    pool = asyncio.run(make_connection_pool(
-        cfg, max_size=cfg.app2_db_pool_size,
-    ))
-    return make_tree_db_fetcher(tree_app, cfg, pool=pool)
+
+    cached: dict[str, Any] = {}
+
+    async def fetcher(visual_id: str, params: Any) -> Any:
+        inner = cached.get("fn")
+        if inner is None:
+            pool = await make_connection_pool(
+                cfg, max_size=cfg.app2_db_pool_size,
+            )
+            inner = make_tree_db_fetcher(tree_app, cfg, pool=pool)
+            cached["fn"] = inner
+        return await inner(visual_id, params)
+
+    return fetcher
 
 
 def make_recording_fetcher(
