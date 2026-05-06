@@ -12,9 +12,9 @@
 // to its enclosing [data-visual-kind] section and dispatch by kind.
 // The script tag with the JSON payload sits inside the swap target.
 //
-// Currently supports KPI + Table + BarChart + Sankey + ForceGraph.
-// New visual kinds add one case arm to hydrateSection + one
-// renderXxx function.
+// Currently supports KPI + Table + BarChart + LineChart + Sankey
+// + ForceGraph. New visual kinds add one case arm to
+// hydrateSection + one renderXxx function.
 //
 // The htmx:afterSwap event is the X.4 future-proofing hook — that
 // phase's swap-on-edit pattern reuses this exact dispatch.
@@ -95,6 +95,9 @@
         break;
       case "BarChart":
         renderBarChart(target, data, visualId);
+        break;
+      case "LineChart":
+        renderLineChart(target, data, visualId);
         break;
       case "Sankey":
         renderSankey(target, data, visualId);
@@ -508,6 +511,172 @@
       );
   }
 
+  // LineChart — one line per series + axes + legend. Data shape:
+  //   { x_values: ["2026-01-01", ...] | [1, 2, 3, ...],
+  //     series: [{name?: "...", values: [n1, n2, ...], color?: "#hex"}, ...],
+  //     x_label?, y_label?, format?: "number"|"currency",
+  //     x_kind?: "date"|"number"  // controls x scale (default "date") }
+  // Single-series shorthand: ``{x_values, values, label}``.
+  // d3 native — d3.line() + d3.scaleTime / scaleLinear. Series get
+  // colour via Tailwind palette indices unless explicit ``color``
+  // is supplied per series.
+  function renderLineChart(target, data, _visualId) {
+    var width = target.clientWidth || 800;
+    var height = 320;
+    var margin = { top: 16, right: 24, bottom: 56, left: 64 };
+    var innerW = width - margin.left - margin.right;
+    var innerH = height - margin.top - margin.bottom;
+
+    var xValues = data.x_values || [];
+    var series = data.series
+      ? data.series
+      : [{ name: data.label || "", values: data.values || [] }];
+    var format = data.format;
+    var xKind = data.x_kind || "date";
+
+    var svg = d3
+      .select(target)
+      .append("svg")
+      .attr("width", width)
+      .attr("height", height);
+    var g = svg
+      .append("g")
+      .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+    // Parse x values per kind. Date strings (YYYY-MM-DD or full
+    // ISO) parse via Date.parse → scaleTime; numeric x values use
+    // scaleLinear (e.g. day-offsets, sequence indices).
+    var xParsed;
+    var xScale;
+    if (xKind === "date") {
+      xParsed = xValues.map((v) => new Date(v));
+      xScale = d3.scaleTime().domain(d3.extent(xParsed)).range([0, innerW]);
+    } else {
+      xParsed = xValues.map((v) => Number(v));
+      xScale = d3.scaleLinear().domain(d3.extent(xParsed)).range([0, innerW]);
+    }
+
+    var allValues = [];
+    series.forEach((s) => {
+      (s.values || []).forEach((v) => {
+        if (typeof v === "number") allValues.push(v);
+      });
+    });
+    var maxVal = allValues.length > 0 ? d3.max(allValues) : 0;
+    var minVal = allValues.length > 0 ? d3.min(allValues) : 0;
+    var yScale = d3
+      .scaleLinear()
+      .domain([Math.min(0, minVal), maxVal || 1])
+      .nice()
+      .range([innerH, 0]);
+
+    var xAxis = d3.axisBottom(xScale).ticks(6);
+    var yAxis = d3
+      .axisLeft(yScale)
+      .ticks(5)
+      .tickFormat((v) => formatKPIValue(v, format));
+    g.append("g")
+      .attr("class", "linechart-x-axis")
+      .attr("transform", "translate(0," + innerH + ")")
+      .call(xAxis)
+      .selectAll("text")
+      .attr("class", "text-xs fill-slate-700");
+    g.append("g")
+      .attr("class", "linechart-y-axis")
+      .call(yAxis)
+      .selectAll("text")
+      .attr("class", "text-xs fill-slate-700");
+
+    if (data.x_label) {
+      svg
+        .append("text")
+        .attr("class", "linechart-x-label text-xs fill-slate-600")
+        .attr("text-anchor", "middle")
+        .attr("x", margin.left + innerW / 2)
+        .attr("y", height - 8)
+        .text(data.x_label);
+    }
+    if (data.y_label) {
+      svg
+        .append("text")
+        .attr("class", "linechart-y-label text-xs fill-slate-600")
+        .attr("text-anchor", "middle")
+        .attr(
+          "transform",
+          "translate(16," + (margin.top + innerH / 2) + ") rotate(-90)",
+        )
+        .text(data.y_label);
+    }
+
+    // Default colour palette mirrors Tailwind's blue/emerald/amber/
+    // rose 500s — high contrast against the slate background.
+    var defaultPalette = [
+      "#3b82f6", // blue-500
+      "#10b981", // emerald-500
+      "#f59e0b", // amber-500
+      "#f43f5e", // rose-500
+      "#8b5cf6", // violet-500
+      "#06b6d4", // cyan-500
+    ];
+
+    var line = d3
+      .line()
+      .defined((d) => d.y != null && !Number.isNaN(d.y))
+      .x((d) => xScale(d.x))
+      .y((d) => yScale(d.y));
+
+    series.forEach((s, si) => {
+      var colour = s.color || defaultPalette[si % defaultPalette.length];
+      var points = (s.values || []).map((y, i) => ({
+        x: xParsed[i],
+        y: typeof y === "number" ? y : null,
+      }));
+      g.append("path")
+        .datum(points)
+        .attr("class", "linechart-line")
+        .attr("data-series-name", s.name || String(si))
+        .attr("fill", "none")
+        .attr("stroke", colour)
+        .attr("stroke-width", 2)
+        .attr("d", line);
+    });
+
+    // Legend — only when 2+ series (single-series chart's legend
+    // is just visual noise; the title carries the meaning).
+    var legend;
+    var entries;
+    if (series.length > 1) {
+      legend = svg
+        .append("g")
+        .attr("class", "linechart-legend")
+        .attr(
+          "transform",
+          "translate(" + (margin.left + 8) + "," + (margin.top + 4) + ")",
+        );
+      entries = legend
+        .selectAll("g.linechart-legend-entry")
+        .data(series)
+        .enter()
+        .append("g")
+        .attr("class", "linechart-legend-entry")
+        .attr("transform", (_d, i) => "translate(0," + i * 16 + ")");
+      entries
+        .append("rect")
+        .attr("width", 10)
+        .attr("height", 10)
+        .attr(
+          "fill",
+          (s, i) => s.color || defaultPalette[i % defaultPalette.length],
+        );
+      entries
+        .append("text")
+        .attr("x", 14)
+        .attr("y", 9)
+        .attr("class", "text-xs fill-slate-700")
+        .text((s, i) => s.name || "Series " + (i + 1));
+    }
+  }
+
   // Sort cycle: clicking a column cycles asc → desc → off (back to
   // server default ordering). Encoded as ``col:asc`` / ``col:desc``
   // / empty in the sort_column query param.
@@ -722,6 +891,7 @@
       renderKPI: renderKPI,
       renderTable: renderTable,
       renderBarChart: renderBarChart,
+      renderLineChart: renderLineChart,
       renderSankey: renderSankey,
       renderForceGraph: renderForceGraph,
       formatKPIValue: formatKPIValue,
