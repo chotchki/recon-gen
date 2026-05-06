@@ -66,3 +66,27 @@
  * shade. Worth it for the simpler theme contract.
  */
 
+/*
+ * Date input polish — Safari/Chrome render <input type="date"> with a
+ * default calendar icon that ignores the surrounding form theme. The
+ * pseudo-elements below recolor the icon to the accent token so the
+ * picker visually belongs to the form. Firefox ignores these (no-op).
+ */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+  padding: 2px;
+  border-radius: 3px;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+  background-color: var(--color-link-tint);
+}
+input[type="date"]::-webkit-datetime-edit {
+  color: var(--color-primary-fg);
+}
+input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
+

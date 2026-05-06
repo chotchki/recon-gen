@@ -45,12 +45,30 @@ Visual rendering shape:
 
 from __future__ import annotations
 
+import datetime as _dt
 import html
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
+
+
+def _json_default(obj: Any) -> Any:
+    """JSON encoder hook for SQL-row types ``json.dumps`` rejects.
+
+    DB drivers return ``Decimal`` for NUMERIC and ``date`` / ``datetime``
+    for DATE / TIMESTAMP — the d3 renderers want plain numbers and
+    ISO-8601 strings, so coerce here at the serialization boundary.
+    """
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, (_dt.datetime, _dt.date)):
+        return obj.isoformat()
+    raise TypeError(
+        f"Object of type {type(obj).__name__} is not JSON serializable"
+    )
 
 from quicksight_gen.common.theme import DEFAULT_PRESET
 from quicksight_gen.common.l2.theme import ThemePreset
@@ -218,9 +236,13 @@ _FORM_LABEL_CLASS = (
     "flex items-center gap-2 text-sm font-medium text-primary-fg"
 )
 _FORM_INPUT_CLASS = (
-    "px-2 py-1 border border-surface-border rounded text-sm "
-    "focus:outline-none focus:ring-2 focus:ring-accent"
+    "px-3 py-2 bg-surface border border-surface-border rounded-md text-sm "
+    "text-primary-fg shadow-sm transition-colors "
+    "hover:border-accent focus:outline-none focus:ring-2 focus:ring-accent "
+    "focus:border-accent"
 )
+_DATE_INPUT_CLASS = _FORM_INPUT_CLASS + " cursor-pointer"
+_DATE_INPUT_STYLE = "min-width: 10rem;"
 
 
 def _render_parameter_dropdown(spec: ParameterDropdownSpec) -> str:
@@ -303,11 +325,13 @@ def _render_filter_form(
     parts = [f'  <form id="filter-form" class="{form_class}">']
     parts.append(
         f'    <label class="{_FORM_LABEL_CLASS}">From '
-        f'<input type="date" name="date_from" class="{_FORM_INPUT_CLASS}"></label>'
+        f'<input type="date" name="date_from" class="{_DATE_INPUT_CLASS}"'
+        f' style="{_DATE_INPUT_STYLE}"></label>'
     )
     parts.append(
         f'    <label class="{_FORM_LABEL_CLASS}">To '
-        f'<input type="date" name="date_to" class="{_FORM_INPUT_CLASS}"></label>'
+        f'<input type="date" name="date_to" class="{_DATE_INPUT_CLASS}"'
+        f' style="{_DATE_INPUT_STYLE}"></label>'
     )
     for spec in filter_specs:
         if isinstance(spec, ParameterDropdownSpec):
@@ -709,7 +733,7 @@ def emit_html(
     # _HALF=18-col KPIs sit side-by-side, full-width Tables span 36.
     # Without this wrapper, every visual stacked full-width regardless
     # of declared layout (the screenshot bug).
-    grid_slots = list(getattr(sheet.layout, "grid_slots", []) or [])
+    grid_slots = list(getattr(sheet, "grid_slots", []) or [])
     if grid_slots:
         body_parts.append(
             '  <div class="mx-8 mb-6" '
@@ -779,7 +803,7 @@ def emit_visual_data_fragment(visual_id: str, data: Any) -> str:
     would shape differently).
     """
     del visual_id  # reserved for future debug/diagnostic use
-    payload = json.dumps(data)
+    payload = json.dumps(data, default=_json_default)
     return (
         f'<script type="application/json" class="chart-data">{payload}</script>'
     )
