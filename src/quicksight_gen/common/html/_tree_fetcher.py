@@ -44,18 +44,21 @@ from quicksight_gen.common.db import AsyncConnectionPool
 from quicksight_gen.common.html._data_shape import shape_for_kind
 from quicksight_gen.common.html._sql_executor import execute_visual_sql_async
 from quicksight_gen.common.html._visual_sql import wrap_for_visual
+from quicksight_gen.common.ids import VisualId
 from quicksight_gen.common.tree.structure import App
 
 
 # Async fetcher shape — what production callers (the App2 server)
-# get from ``make_tree_db_fetcher``. ``Mapping[str, str]`` (not
-# ``dict``) so callers signal "I'm not going to mutate the URL params"
-# at the type level.
-DataFetcher = Callable[[str, Mapping[str, str]], Awaitable[Any]]
+# get from ``make_tree_db_fetcher``. ``VisualId`` (X.2.o.3) ties the
+# fetcher to the tree's typed visual identifier — passing a SheetId
+# or DashboardId here is a type error at the call site.
+# ``Mapping[str, str]`` (not ``dict``) so callers signal "I'm not
+# going to mutate the URL params" at the type level.
+DataFetcher = Callable[[VisualId, Mapping[str, str]], Awaitable[Any]]
 # Legacy sync alias, used by stub fetchers in tests + the older
 # ``_db_fetcher.py`` code paths. The server route accepts both via
 # ``inspect.iscoroutinefunction`` dispatch (X.2.n.5).
-SyncDataFetcher = Callable[[str, Mapping[str, str]], Any]
+SyncDataFetcher = Callable[[VisualId, Mapping[str, str]], Any]
 
 
 # Visual fields that may carry Dim/Measure references back to a
@@ -157,12 +160,18 @@ def make_tree_db_fetcher(
     # aggregation (KPI count → SELECT COUNT, BarChart → GROUP BY
     # category, etc.). Without this, KPI visuals would render one
     # card per dataset row instead of the aggregated value QS shows.
-    visual_index: dict[str, tuple[str, str | None]] = {}
+    visual_index: dict[VisualId, tuple[str, str | None]] = {}
     for sheet in tree_app.analysis.sheets:
         for visual in sheet.visuals:
-            vid = str(getattr(visual, "visual_id", ""))
-            if not vid:
+            # ``visual.visual_id`` is ``VisualId | AutoResolved`` per
+            # the tree types; ``resolve_auto_ids()`` above guarantees
+            # we land on the str-shaped VisualId branch. Re-wrap for
+            # the type checker without changing runtime behavior
+            # (NewType is identity at runtime).
+            vid_raw = getattr(visual, "visual_id", None)
+            if not isinstance(vid_raw, str) or not vid_raw:
                 continue
+            vid = VisualId(vid_raw)
             kind = type(visual).__name__
             ds_id = _find_visual_dataset_identifier(visual)
             sql: str | None = None
@@ -171,7 +180,7 @@ def make_tree_db_fetcher(
                 sql = wrap_for_visual(base_sql, visual)
             visual_index[vid] = (kind, sql)
 
-    async def fetcher(visual_id: str, params: Mapping[str, str]) -> Any:
+    async def fetcher(visual_id: VisualId, params: Mapping[str, str]) -> Any:
         if visual_id not in visual_index:
             # Unknown visual_id — typically a stale URL from a
             # cached page. Return empty so the d3 renderers paint

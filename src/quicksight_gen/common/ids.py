@@ -27,3 +27,10 @@ SheetId = NewType("SheetId", str)
 VisualId = NewType("VisualId", str)
 FilterGroupId = NewType("FilterGroupId", str)
 ParameterName = NewType("ParameterName", str)
+# X.2.o.3 — dashboard slug used in App2 URL paths
+# (``/dashboards/{dashboard_id}/...``) and the
+# ``ServedDashboard`` mapping key. Distinct from QS resource ids
+# (analyses + dashboards in QS land) — the App2 server's own
+# routing slug. NewType so a SheetId can't be passed where a
+# DashboardId is expected at the route boundary.
+DashboardId = NewType("DashboardId", str)

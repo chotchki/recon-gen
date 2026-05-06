@@ -50,7 +50,7 @@ Pluggable data fetcher
 Each ``ServedDashboard`` owns a ``DataFetcher`` callable so the
 spike + tests can run without a database:
 
-    def stub(visual_id: str, params: dict[str, str]) -> Any:
+    def stub(visual_id: VisualId, params: Mapping[str, str]) -> Any:
         return {"nodes": [...], "links": [...]}
 
     app = make_app(dashboards={
@@ -98,6 +98,7 @@ from quicksight_gen.common.html.render import (
     emit_html,
     emit_visual_data_fragment,
 )
+from quicksight_gen.common.ids import VisualId
 from quicksight_gen.common.l2.theme import ThemePreset
 from quicksight_gen.common.tree.structure import App, Sheet
 
@@ -114,9 +115,13 @@ from quicksight_gen.common.tree.structure import App, Sheet
 #     ``visual_data`` wraps them in run_in_threadpool so they
 #     don't block the event loop.
 # ``inspect.iscoroutinefunction`` picks the dispatch at request time.
+# X.2.o.3: ``VisualId`` not ``str`` so the fetcher contract ties
+# back to the tree's typed visual identifier. Test stubs typed as
+# ``Callable[[str, ...], ...]`` remain assignable here via Callable
+# parameter contravariance (str is wider than VisualId on input).
 DataFetcher = Union[
-    Callable[[str, Mapping[str, str]], Awaitable[Any]],
-    Callable[[str, Mapping[str, str]], Any],
+    Callable[[VisualId, Mapping[str, str]], Awaitable[Any]],
+    Callable[[VisualId, Mapping[str, str]], Any],
 ]
 
 
@@ -290,7 +295,7 @@ def make_app(
         # 404 on stale URLs — both ids must resolve. The visual_id
         # gets validated implicitly (the fetcher raises for
         # unknown ids; that's the per-fetcher contract).
-        dash_id = request.path_params["dashboard_id"]
+        dash_id = str(request.path_params["dashboard_id"])
         served = dashboards.get(dash_id)
         if served is None:
             raise HTTPException(status_code=404)
@@ -298,9 +303,14 @@ def make_app(
         # the served (default landing) sheet. The fetcher resolves
         # the visual_id; the sheet_id check protects against typos
         # in the URL pattern.
-        if request.path_params["sheet_id"] not in all_sheets[dash_id]:
+        if str(request.path_params["sheet_id"]) not in all_sheets[dash_id]:
             raise HTTPException(status_code=404)
-        visual_id = request.path_params["visual_id"]
+        # X.2.o.3 — wrap path-extracted str into VisualId at the
+        # route boundary so the fetcher sees the typed identifier
+        # the DataFetcher contract requires. Path params come back
+        # as ``Any`` from Starlette; ``str()`` narrows then
+        # ``VisualId(...)`` brands.
+        visual_id = VisualId(str(request.path_params["visual_id"]))
         # ``Mapping[str, str]`` interface — built mutable for the
         # short construction window, then handed to the fetcher
         # contract that promises read-only access.
