@@ -874,6 +874,73 @@
     });
   }
 
+  // X.2.m — error toaster. HTMX swap targets that hit a 4xx / 5xx
+  // would otherwise leave the user staring at a blank panel (the
+  // server returned an error body, hx-target="#visual-data-X" wants
+  // to swap that body in, but our error page is a full HTML doc the
+  // user can't see in the panel). Catch htmx:responseError, surface
+  // a transient toast at top-right with the status + a generic
+  // message, and let the original target keep whatever it already
+  // had so the user sees context.
+  //
+  // Stacking: each toast appends to a single fixed container at
+  // top-right; multiple errors firing in quick succession stack
+  // vertically. Each toast auto-dismisses after ~5s via setTimeout
+  // (no CSS animation; setTimeout + remove() is the simpler floor).
+  function ensureToastContainer() {
+    var container = document.getElementById("htmx-error-toaster");
+    if (container) return container;
+    container = document.createElement("div");
+    container.id = "htmx-error-toaster";
+    // Tailwind classes resolve via the same theme tokens as the
+    // rest of the app — bg-danger / text-accent-fg pick up the
+    // per-instance --color-* values injected at the top of the
+    // page shell.
+    container.className =
+      "fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none";
+    document.body.appendChild(container);
+    return container;
+  }
+
+  function showErrorToast(message, status) {
+    var container = ensureToastContainer();
+    var toast = document.createElement("div");
+    toast.className =
+      "toast bg-danger text-accent-fg px-4 py-3 rounded-lg shadow-lg " +
+      "text-sm pointer-events-auto max-w-sm";
+    toast.setAttribute("role", "status");
+    var statusLabel = "";
+    if (status) statusLabel = " (HTTP " + status + ")";
+    toast.textContent = message + statusLabel;
+    container.appendChild(toast);
+    // Auto-dismiss after 5s. Keep the timeout reference local so a
+    // future "stack overflow" guard could clear them; today we let
+    // each toast manage its own lifetime.
+    setTimeout(() => {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 5000);
+    return toast;
+  }
+
+  // HTMX dispatches its events on the triggering element + they
+  // bubble up to document.body — listening on body matches the
+  // dev_log forwarder pattern (dev_log.js uses
+  // document.body.addEventListener for the same lifecycle events).
+  document.body.addEventListener("htmx:responseError", (evt) => {
+    var detail = evt.detail || {};
+    var xhr = detail.xhr || {};
+    showErrorToast(
+      "Couldn't load this section. Try again.",
+      xhr.status || null,
+    );
+  });
+  // htmx:sendError fires when the request itself fails (network down,
+  // CORS, etc.) — same UX answer as a 5xx, slightly different copy
+  // since "the server returned X" doesn't apply.
+  document.body.addEventListener("htmx:sendError", () => {
+    showErrorToast("Network error. Check your connection.", null);
+  });
+
   document.addEventListener("htmx:afterSwap", (evt) => {
     hydrate(evt.detail.target);
   });
@@ -900,6 +967,8 @@
       formatKPIValue: formatKPIValue,
       buildTableUrl: buildTableUrl,
       nextSortDirection: nextSortDirection,
+      showErrorToast: showErrorToast,
+      ensureToastContainer: ensureToastContainer,
     };
   }
 })();

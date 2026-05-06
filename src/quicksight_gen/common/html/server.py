@@ -25,6 +25,25 @@ different matviews via different fetchers). X.2.g wires the four
 QS apps (Executives / Investigation / L2 Flow Tracing / L1
 Dashboard) into this mapping from one L2 instance.
 
+Error handling (X.2.m)
+----------------------
+
+Two exception handlers wrap the app so production deploys never
+return a Starlette default error page:
+
+- ``HTTPException(404)`` (raised by route handlers when a
+  dashboard_id / sheet_id slug doesn't resolve) renders a themed
+  "Not found" page via ``emit_error_page``.
+- Generic ``Exception`` (anything uncaught from a route handler —
+  fetcher SQL crash, render-time bug, DB unreachable) returns 500
+  with a themed "Something went wrong" page. ``dev_log=True``
+  carries the traceback inside a collapsible ``<details>``;
+  production hides it.
+
+The HTMX ``htmx:responseError`` event in ``bootstrap.js`` surfaces
+a transient toast for 4xx / 5xx responses to swap targets so a
+failed visual data fetch shows context instead of a blank panel.
+
 Pluggable data fetcher
 ----------------------
 
@@ -56,6 +75,7 @@ from __future__ import annotations
 
 import json
 import sys
+import traceback
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -63,6 +83,7 @@ from typing import Any
 from pathlib import Path
 
 from starlette.applications import Starlette
+from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Mount, Route
@@ -70,6 +91,7 @@ from starlette.staticfiles import StaticFiles
 
 from quicksight_gen.common.html.render import (
     emit_dashboards_list,
+    emit_error_page,
     emit_html,
     emit_visual_data_fragment,
 )
@@ -203,7 +225,9 @@ def make_app(
         dash_id = request.path_params["dashboard_id"]
         served = dashboards.get(dash_id)
         if served is None:
-            return Response(status_code=404)
+            # Raise so the themed 404 handler renders the page,
+            # not Starlette's default plain-text "Not Found" body.
+            raise HTTPException(status_code=404)
         return HTMLResponse(emit_html(
             served.tree_app, served.sheet,
             dashboard_id=dash_id, dev_log=dev_log,
@@ -217,9 +241,9 @@ def make_app(
         dash_id = request.path_params["dashboard_id"]
         served = dashboards.get(dash_id)
         if served is None:
-            return Response(status_code=404)
+            raise HTTPException(status_code=404)
         if request.path_params["sheet_id"] != sheet_ids[dash_id]:
-            return Response(status_code=404)
+            raise HTTPException(status_code=404)
         visual_id = request.path_params["visual_id"]
         params: dict[str, str] = {}
         for key, value in request.query_params.items():
@@ -240,6 +264,64 @@ def make_app(
         # forwarded events grep-friendly.
         print(f"DEV-LOG {json.dumps(payload)}", file=sys.stderr, flush=True)
         return Response(status_code=204)
+
+    # X.2.m — themed error pages for 4xx / 5xx. The handlers reuse
+    # ``listing_theme`` so the error page inherits the per-dashboard
+    # theme (the same picking convention as the ``/dashboards``
+    # listing — the first dashboard's theme wins). A future
+    # multi-tenant story that mixes themes per request would route
+    # the per-request theme through here; flagged as a comment.
+    async def not_found_handler(
+        _request: Request, exc: Exception,
+    ) -> Response:
+        # Subtitle differs slightly when the URL pattern matched a
+        # dashboard route vs. a generic path — but we can't always
+        # tell from the exception alone (Starlette routes that
+        # don't match at all also raise 404). Single message keeps
+        # the contract simple: "the URL didn't resolve, here's
+        # the way back."
+        del exc
+        return HTMLResponse(
+            emit_error_page(
+                status_code=404,
+                headline="Not found",
+                subtitle=(
+                    "We couldn't find that dashboard or sheet. "
+                    "Bookmarks may be stale; the link below goes "
+                    "back to the dashboards list."
+                ),
+                theme=listing_theme,
+            ),
+            status_code=404,
+        )
+
+    async def server_error_handler(
+        _request: Request, exc: Exception,
+    ) -> Response:
+        # Dev-mode carries the traceback inside <details>; production
+        # hides it. ``traceback.format_exception`` gives the same
+        # shape Python prints to stderr when an exception goes
+        # uncaught — easiest for an operator to recognize when the
+        # page lands in a screenshot.
+        if dev_log:
+            tb_text = "".join(
+                traceback.format_exception(type(exc), exc, exc.__traceback__)
+            )
+        else:
+            tb_text = None
+        return HTMLResponse(
+            emit_error_page(
+                status_code=500,
+                headline="Something went wrong",
+                subtitle=(
+                    "We hit an error rendering this dashboard. Try "
+                    "again, or contact your admin if it persists."
+                ),
+                traceback_text=tb_text,
+                theme=listing_theme,
+            ),
+            status_code=500,
+        )
 
     # Tailwind CSS lives next to this module in assets/; built by
     # ``.venv/bin/tailwindcss -i .../assets/input.css -o
@@ -269,4 +351,17 @@ def make_app(
     ]
     if dev_log:
         routes.append(Route("/log", log_event, methods=["POST"]))
-    return Starlette(debug=False, routes=routes)
+    # exception_handlers maps status code (HTTPException) OR exception
+    # class (everything else) → handler. 404 goes via status code so
+    # it catches both raises from our route handlers AND Starlette's
+    # own "no route matched" 404. Generic ``Exception`` catches any
+    # uncaught throw from a fetcher / render path so production never
+    # returns the framework default page.
+    return Starlette(
+        debug=False,
+        routes=routes,
+        exception_handlers={
+            404: not_found_handler,
+            Exception: server_error_handler,
+        },
+    )

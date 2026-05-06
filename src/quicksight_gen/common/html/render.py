@@ -19,6 +19,17 @@ override at ``:root`` wins via the cascade. Net effect: every
 ``bg-accent`` / ``text-accent`` utility resolves per-instance
 without rebuilding Tailwind.
 
+Error pages (X.2.m)
+-------------------
+
+``emit_error_page`` renders a themed error shell for 4xx / 5xx
+responses using the same ``_emit_theme_style`` injection — so
+Starlette's exception handlers can return a styled "Something
+went wrong" / "Not found" page instead of the framework default.
+In dev mode the page can carry a traceback inside a collapsible
+``<details>`` block; production mode hides it (operators look at
+the server log).
+
 Visual rendering shape:
 
     <section data-visual-kind="<kind>" data-visual-id="<id>"
@@ -257,6 +268,84 @@ def emit_dashboards_list(
     body_parts.append('  </nav>')
     return _PAGE_SHELL.format(
         title="Dashboards",
+        body="\n".join(body_parts),
+        htmx_src=_HTMX_SRC,
+        d3_src=_D3_SRC,
+        d3_sankey_src=_D3_SANKEY_SRC,
+        bootstrap_js=_BOOTSTRAP_JS,
+        dev_log_js=_DEV_LOG_JS,
+        dev_log_meta="",
+        theme_style=_emit_theme_style(theme),
+    )
+
+
+def emit_error_page(
+    *,
+    status_code: int,
+    headline: str,
+    subtitle: str,
+    traceback_text: str | None = None,
+    theme: ThemePreset | None = None,
+) -> str:
+    """Render a themed error page for 4xx / 5xx responses (X.2.m).
+
+    Used by Starlette exception handlers in ``server.make_app`` so
+    every error surface — sheet-not-found, dashboard-not-found,
+    uncaught render exception, DB unreachable — lands on a page that
+    fits the rest of the app: same theme tokens, same shell, link
+    back to the dashboards listing.
+
+    Args:
+        status_code: HTTP status this page is being returned with.
+            Shown in small text under the headline (so operators on
+            the phone with a user can confirm "yes that's the 500
+            page" without dev tools).
+        headline: short error label (e.g. "Something went wrong",
+            "Not found"). HTML-escaped.
+        subtitle: longer human-readable explanation + next-step
+            guidance. HTML-escaped.
+        traceback_text: when set, included inside a collapsible
+            ``<details>`` block. Caller is expected to gate this on
+            whatever dev-mode flag governs traceback exposure
+            (``dev_log`` in the server today). Production callers
+            pass ``None`` so internals don't leak.
+        theme: same ``ThemePreset`` contract as ``emit_html`` —
+            ``None`` falls back to ``DEFAULT_PRESET``.
+
+    Returns:
+        A complete HTML document as a string.
+    """
+    title_class = "text-3xl font-bold mt-8 mx-8 mb-2 text-danger"
+    code_class = "mx-8 mb-4 text-sm text-secondary-fg tabular-nums"
+    desc_class = "mx-8 mb-6 text-primary-fg"
+    link_class = (
+        "inline-block mx-8 mb-6 px-3 py-1 bg-accent text-accent-fg "
+        "text-sm font-medium rounded hover:opacity-90 active:opacity-80 "
+        "transition-opacity cursor-pointer"
+    )
+    body_parts: list[str] = [
+        f'  <h1 class="{title_class}">{html.escape(headline)}</h1>',
+        f'  <p class="{code_class}">HTTP {int(status_code)}</p>',
+        f'  <p class="{desc_class}">{html.escape(subtitle)}</p>',
+        f'  <a href="/dashboards" class="{link_class}">Back to dashboards</a>',
+    ]
+    if traceback_text:
+        details_class = (
+            "mx-8 mb-6 p-4 bg-surface rounded-lg border "
+            "border-surface-border text-sm text-primary-fg"
+        )
+        summary_class = "cursor-pointer font-semibold text-secondary-fg"
+        pre_class = (
+            "mt-3 overflow-x-auto text-xs tabular-nums text-primary-fg"
+        )
+        body_parts.append(
+            f'  <details class="{details_class}">'
+            f'<summary class="{summary_class}">Traceback (dev mode)</summary>'
+            f'<pre class="{pre_class}">{html.escape(traceback_text)}</pre>'
+            f'</details>'
+        )
+    return _PAGE_SHELL.format(
+        title=html.escape(headline),
         body="\n".join(body_parts),
         htmx_src=_HTMX_SRC,
         d3_src=_D3_SRC,

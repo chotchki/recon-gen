@@ -30,12 +30,14 @@ push caching to edge / browser).
 
 from quicksight_gen.common.html.render import (
     emit_dashboards_list,
+    emit_error_page,
     emit_html,
     emit_visual_data_fragment,
 )
 
 __all__ = [
     "emit_dashboards_list",
+    "emit_error_page",
     "emit_html",
     "emit_visual_data_fragment",
 ]
