@@ -83,6 +83,7 @@ from typing import Any
 from pathlib import Path
 
 from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
@@ -298,7 +299,15 @@ def make_app(
         params: dict[str, str] = {}
         for key, value in request.query_params.items():
             params[str(key)] = str(value)
-        data = served.data_fetcher(visual_id, params)
+        # Fetcher is sync (psycopg2 / oracledb are blocking DB-API
+        # drivers); off-load to the threadpool so concurrent visuals
+        # on the same sheet don't serialize behind one another. With
+        # 4–10 visuals on a typical sheet, in-process serial execution
+        # makes "change a filter, see all visuals refresh" feel
+        # multi-second per visual instead of total.
+        data = await run_in_threadpool(
+            served.data_fetcher, visual_id, params,
+        )
         return HTMLResponse(
             emit_visual_data_fragment(visual_id, data),
             headers={"Cache-Control": visual_data_cache_header},
