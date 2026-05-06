@@ -86,7 +86,7 @@ def test_smoke_app_builder_emits_html(min_config: Path) -> None:
 
     cfg = load_config(str(min_config))
     tree_app, sheet = build_smoke_app(cfg)
-    html = emit_html(tree_app, sheet)
+    html = emit_html(tree_app, sheet, dashboard_id="smoke")
     assert "Money Trail" in html
     assert "smoke-sankey" in html
     assert "smoke-force" in html

@@ -121,6 +121,7 @@ def app2_apply(  # type: ignore[no-untyped-def]
     asgi_app = make_app(
         tree_app=tree_app,
         sheet=sheet,
+        dashboard_id="smoke",
         data_fetcher=fetcher,
         dev_log=dev_log,
     )

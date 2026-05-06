@@ -1,18 +1,16 @@
-"""X.2.a.5 — HTML2 Money Trail layer-2 e2e tests.
+"""HTML2 Money Trail layer-2 e2e tests.
 
-Lifted from ``tests/spike/test_html_layer2.py``. Same assertions
-(initial render, click pivots, missing-chart-data negative case),
-new shape:
+Lifted from ``tests/spike/test_html_layer2.py`` (X.2.a.5) and
+re-pointed to the X.2.b all-GET REST surface. Same assertions:
 
-- Server lifecycle is owned by the ``html2_server`` context manager
-  in ``_harness_html2`` — matches the QS harness's ``deploy``
-  fixture pattern.
-- DOM assertions go through ``assert_layer2_sankey_shape`` so the
-  rect/path counting logic is one helper used by every Sankey
-  test.
-- The fetcher is one of two shapes: ``stub_money_trail_fetcher``
-  for the round-trip, or a Playwright route override that injects
-  a per-test fragment.
+- initial render — page loads → Refresh → swap fires → d3 hydrates
+- click pivots — Sankey rect click GETs the data URL with anchor
+  in the query string → server returns new fragment → SVG redraws
+- missing chart-data — swap fragment dropped → SVG never appears
+
+Server lifecycle is owned by the ``html2_server`` context manager
+in ``_harness_html2`` (matches the QS harness ``deploy`` fixture
+shape). DOM assertions go through ``assert_layer2_sankey_shape``.
 
 Gated by ``QS_GEN_E2E=1`` like every other e2e test (no AWS, but
 ``conftest.py`` matches on path). Run alongside the QS dialect
@@ -43,13 +41,15 @@ from quicksight_gen.common.html._smoke_app import (
 playwright_sync_api = pytest.importorskip("playwright.sync_api")
 
 
-# Layer 1 ground truth: the stub fetcher, with the smoke app
-# anchored on a fixed (date_from, date_to) so the link counts
-# below are stable. The stub returns a 5-node / 4-link Sankey
-# regardless of seed (the values shift but the shape is stable
-# — see ``stub_money_trail_fetcher``).
+# Layer 1 ground truth: the stub fetcher returns a 5-node / 4-link
+# Sankey regardless of seed (the values shift but the shape is
+# stable — see ``stub_money_trail_fetcher``).
 _EXPECTED_SANKEY_NODES = 5
 _EXPECTED_SANKEY_LINKS = 4
+
+# Playwright glob matches BOTH the X.2.b nested URL pattern and
+# the per-test URL routes used to intercept it.
+_DATA_URL_GLOB = "**/visuals/**/data*"
 
 
 @pytest.fixture
@@ -84,21 +84,24 @@ def test_layer2_initial_load_renders_sankey(server_url: str) -> None:
 
 def test_layer2_click_pivots_sankey(server_url: str) -> None:
     """Click a node rect → d3 click handler fires htmx.ajax with
-    ``anchor`` merged into form values → server returns a new
-    fragment → SVG re-renders.
+    ``anchor`` in the query string → server returns a new fragment
+    → SVG re-renders.
 
     Override the server's response via Playwright route — without
     anchor: 2-link payload; with anchor: 4-link payload. The link
     COUNT change makes the assertion robust against d3-sankey's
-    relative-width scaling quirks."""
+    relative-width scaling quirks. With X.2.b's GET surface,
+    anchor lands in ``?anchor=`` not the POST body."""
     with playwright_sync_api.sync_playwright() as p:
         browser = p.webkit.launch(headless=True)
         page = browser.new_page()
 
         def anchor_aware_route(route: Any) -> None:
-            req = route.request
-            body = req.post_data or ""
-            anchor_present = "anchor=" in body and "anchor=&" not in body
+            url = route.request.url
+            anchor_present = (
+                "anchor=" in url and "anchor=&" not in url
+                and not url.endswith("anchor=")
+            )
             if anchor_present:
                 payload: dict[str, Any] = {
                     "nodes": [
@@ -135,17 +138,17 @@ def test_layer2_click_pivots_sankey(server_url: str) -> None:
                 status=200, content_type="text/html", body=fragment,
             )
 
-        page.route("**/visual/**/data", anchor_aware_route)
+        page.route(_DATA_URL_GLOB, anchor_aware_route)
 
-        captured_bodies: list[str] = []
+        captured_urls: list[str] = []
         page.on("request", lambda req: (
-            captured_bodies.append(req.post_data or "")
-            if "/visual/" in req.url and "/data" in req.url
+            captured_urls.append(req.url)
+            if "/visuals/" in req.url and "/data" in req.url
             else None
         ))
 
         page.goto(server_url)
-        with page.expect_response("**/visual/**/data") as init_resp:
+        with page.expect_response(_DATA_URL_GLOB) as init_resp:
             trigger_initial_swap(page)
         assert init_resp.value.status == 200
 
@@ -154,11 +157,11 @@ def test_layer2_click_pivots_sankey(server_url: str) -> None:
         before_paths = sankey_svg.locator("path").count()
 
         first_rect = sankey_svg.locator("rect").first
-        with page.expect_response("**/visual/**/data") as click_resp:
+        with page.expect_response(_DATA_URL_GLOB) as click_resp:
             first_rect.click()
         assert click_resp.value.status == 200, (
             f"Click triggered a response with bad status. "
-            f"Bodies seen: {captured_bodies}"
+            f"URLs seen: {captured_urls}"
         )
 
         page.wait_for_function(
@@ -170,15 +173,15 @@ def test_layer2_click_pivots_sankey(server_url: str) -> None:
         after_paths = sankey_svg.locator("path").count()
         browser.close()
 
-    assert len(captured_bodies) >= 2, (
-        f"Expected ≥2 POSTs, saw {len(captured_bodies)}: "
-        f"{captured_bodies}"
+    assert len(captured_urls) >= 2, (
+        f"Expected ≥2 GETs, saw {len(captured_urls)}: "
+        f"{captured_urls}"
     )
-    assert "anchor=" in captured_bodies[1], (
-        f"Second POST didn't include anchor in body. "
-        f"Body: {captured_bodies[1]!r}. fireAnchorRequest in the "
-        f"bootstrap JS isn't merging anchor into values, OR the "
-        f"click reached the wrong handler."
+    assert "anchor=" in captured_urls[1], (
+        f"Second GET didn't include anchor in URL. "
+        f"URL: {captured_urls[1]!r}. fireAnchorRequest in the "
+        f"bootstrap JS isn't merging anchor into the query string, "
+        f"OR the click reached the wrong handler."
     )
     assert before_paths == 2, (
         f"Initial render expected 2 paths (Layer 1 unanchored), "
@@ -186,7 +189,7 @@ def test_layer2_click_pivots_sankey(server_url: str) -> None:
     )
     assert after_paths == 4, (
         f"Post-click render expected 4 paths (Layer 1 anchored), "
-        f"got {after_paths}. Click fired (anchor in body) but d3 "
+        f"got {after_paths}. Click fired (anchor in URL) but d3 "
         f"didn't re-render the new link set, OR the response wasn't "
         f"swapped into the visual-data div."
     )
@@ -207,7 +210,7 @@ def test_layer2_catches_missing_chart_data_bug(server_url: str) -> None:
         def intercept(route: Any) -> None:
             route.fulfill(status=200, body="")
 
-        page.route("**/visual/**/data", intercept)
+        page.route(_DATA_URL_GLOB, intercept)
         page.goto(server_url)
         trigger_initial_swap(page)
 

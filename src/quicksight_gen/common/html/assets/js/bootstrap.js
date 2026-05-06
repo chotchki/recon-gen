@@ -23,9 +23,17 @@
   // inputs PLUS the anchor selection. d3 owns the SVG so it owns the
   // click; htmx.ajax() is HTMX's documented programmatic-trigger API
   // and produces a request indistinguishable from an attribute-bound
-  // hx-post (same swap target, same headers, same hydrate path on
+  // hx-get (same swap target, same headers, same hydrate path on
   // the response).
+  //
+  // X.2.b: GET, not POST — the URL is the cache key + bookmark, and
+  // the server's route is a path-templated GET. Each section carries
+  // its own data-fetch-url (server-side authority on URL shape).
   function fireAnchorRequest(visualId, anchorName) {
+    var section = document.querySelector(
+      'section[data-visual-id="' + visualId + '"]',
+    );
+    var fetchUrl = section ? section.getAttribute("data-fetch-url") : null;
     var form = document.querySelector("#filter-form");
     var values = { anchor: anchorName };
     if (form) {
@@ -41,7 +49,17 @@
         detail: { visualId: visualId, anchor: anchorName },
       }),
     );
-    htmx.ajax("POST", "/visual/" + visualId + "/data", {
+    if (!fetchUrl) {
+      // Defensive: a section without data-fetch-url means the page
+      // shell didn't render with X.2.b's REST surface. Surface it so
+      // a regression doesn't fail silently.
+      console.error(
+        "fireAnchorRequest: no data-fetch-url for visual",
+        visualId,
+      );
+      return;
+    }
+    htmx.ajax("GET", fetchUrl, {
       target: "#visual-data-" + visualId,
       swap: "innerHTML",
       values: values,

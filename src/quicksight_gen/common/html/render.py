@@ -92,11 +92,22 @@ _PAGE_SHELL = """\
 
 
 # Form template — emits a date-range filter at the top of the page.
-# ``hx-post`` targets each visual's data endpoint. For spike.2 with
-# one visual (Money Trail Sankey), this fires one POST per change;
-# multi-visual pages would need ``hx-include`` or an
-# ``htmx:configRequest`` hook to fan out the filter values.
-def _render_filter_form(visual_ids: list[str]) -> str:
+# X.2.b: each Refresh button uses ``hx-get`` against the per-visual
+# nested REST URL (``/dashboards/{d}/sheets/{s}/visuals/{v}/data``).
+# ``hx-include="#filter-form"`` serializes form fields as the query
+# string for the GET; ``hx-push-url="true"`` keeps the browser URL
+# in sync with the date filter so back/forward + bookmark Just Work.
+def _render_filter_form(
+    visual_fetch_urls: list[tuple[str, str]],
+) -> str:
+    """Render the date-range form with one Refresh button per visual.
+
+    ``visual_fetch_urls`` is a list of ``(visual_id, fetch_url)``
+    tuples. Each Refresh button targets ``#visual-data-{visual_id}``
+    and GETs the URL. The visual_id appears twice (target id +
+    URL) — different roles, different sources of truth, so kept
+    explicit instead of derived from one or the other.
+    """
     form_class = (
         "flex flex-wrap items-center gap-3 mx-8 mb-6 p-4 "
         "bg-white rounded-lg shadow-sm border border-slate-200"
@@ -120,37 +131,61 @@ def _render_filter_form(visual_ids: list[str]) -> str:
         f'    <label class="{label_class}">To '
         f'<input type="date" name="date_to" class="{input_class}"></label>'
     )
-    for vid in visual_ids:
+    for vid, url in visual_fetch_urls:
         # One Refresh button per visual. Triggered on click (button's
         # default trigger). Date-input ``change`` was tried on the
         # button via ``from:#filter-form`` but didn't fire reliably
         # in the spike; click is the floor — phase.1 can layer auto-
         # refresh-on-change via SSE or a less-clever trigger config.
-        esc = html.escape(vid)
+        esc_id = html.escape(vid)
+        esc_url = html.escape(url)
         parts.append(
             f'    <button type="button"'
-            f' hx-post="/visual/{esc}/data"'
-            f' hx-target="#visual-data-{esc}"'
+            f' hx-get="{esc_url}"'
+            f' hx-target="#visual-data-{esc_id}"'
             f' hx-include="#filter-form"'
+            f' hx-push-url="true"'
             f' class="{button_class}">Refresh</button>'
         )
     parts.append('  </form>')
     return "\n".join(parts)
 
 
-def emit_html(app: App, sheet: Sheet, *, dev_log: bool = False) -> str:
+def _visual_fetch_url(
+    dashboard_id: str, sheet_id: str, visual_id: str,
+) -> str:
+    """Build the GET data URL for one visual.
+
+    Single source of truth — every site that needs the URL (form
+    Refresh button, section ``data-fetch-url`` attribute, future
+    deep-link generators) calls this. Mirrors the route template
+    in ``server.py::make_app`` exactly; if either drifts, the path
+    constraint check on the server returns 404.
+    """
+    return (
+        f"/dashboards/{dashboard_id}"
+        f"/sheets/{sheet_id}"
+        f"/visuals/{visual_id}/data"
+    )
+
+
+def emit_html(
+    app: App, sheet: Sheet, *,
+    dashboard_id: str,
+    dev_log: bool = False,
+) -> str:
     """Render a tree ``Sheet`` as a standalone HTML page.
 
-    spike.2 scope: page shell pulls HTMX + d3 + d3-sankey, emits a
-    date-range form at the top of the body that posts to each
-    visual's data endpoint on change, plus one ``<section>`` per
-    visual carrying its title, subtitle, and the swap-target div.
+    Page shell pulls HTMX + d3 + d3-sankey, emits a date-range form
+    at the top of the body that GETs each visual's data endpoint on
+    Refresh, plus one ``<section>`` per visual carrying its title,
+    subtitle, and the swap-target div.
 
     Takes both the App and the Sheet so internal-id resolution
     (``app.resolve_auto_ids()``) can run. The Sheet alone has no
     parent ref — without the App we'd emit ``data-visual-id=
     "_AutoSentinel.AUTO"`` for any visual constructed with the
-    standard ``visual_id=AUTO`` default. The hx-post URLs key off
+    standard ``visual_id=AUTO`` default. The data URLs key off
     ``data-visual-id``, so unresolved IDs would silently break the
     swap dispatch.
 
@@ -163,6 +198,10 @@ def emit_html(app: App, sheet: Sheet, *, dev_log: bool = False) -> str:
             (idempotent).
         sheet: tree ``Sheet`` node. Must be one of
             ``app.analysis.sheets``; raises ``ValueError`` if not.
+        dashboard_id: URL slug for this dashboard. Embedded in
+            every visual's data-fetch URL + the Refresh button's
+            ``hx-get`` so the path matches what ``server.make_app``
+            wired its route for.
 
     Returns:
         A complete, well-formed HTML document as a string. Title +
@@ -175,6 +214,7 @@ def emit_html(app: App, sheet: Sheet, *, dev_log: bool = False) -> str:
             f"internal IDs (visual_id, control_id, etc.)."
         )
     app.resolve_auto_ids()
+    sheet_id = str(sheet.sheet_id)
 
     title_class = "text-3xl font-bold mt-8 mx-8 mb-2"
     desc_class = "mx-8 mb-6 text-slate-600"
@@ -185,10 +225,18 @@ def emit_html(app: App, sheet: Sheet, *, dev_log: bool = False) -> str:
         body_parts.append(
             f'  <p class="{desc_class}">{html.escape(sheet.description)}</p>'
         )
-    visual_ids = [str(getattr(v, "visual_id", "")) for v in sheet.visuals]
-    body_parts.append(_render_filter_form(visual_ids))
+    visual_fetch_urls = [
+        (
+            str(getattr(v, "visual_id", "")),
+            _visual_fetch_url(
+                dashboard_id, sheet_id, str(getattr(v, "visual_id", "")),
+            ),
+        )
+        for v in sheet.visuals
+    ]
+    body_parts.append(_render_filter_form(visual_fetch_urls))
     for visual in sheet.visuals:
-        body_parts.append(_render_visual(visual))
+        body_parts.append(_render_visual(visual, dashboard_id, sheet_id))
     return _PAGE_SHELL.format(
         title=html.escape(sheet.title),
         body="\n".join(body_parts),
@@ -234,14 +282,21 @@ def emit_visual_data_fragment(visual_id: str, data: Any) -> str:
     )
 
 
-def _render_visual(visual: Any) -> str:
+def _render_visual(
+    visual: Any, dashboard_id: str, sheet_id: str,
+) -> str:
     """Render one visual as an HTML ``<section>``.
 
-    spike.2: title + optional subtitle + swap-target div tagged
-    with the visual's class name (``data-visual-kind``) so the
-    bootstrap script dispatches d3 hydration per kind. The inner
-    div carries ``id="visual-data-<visual_id>"`` so HTMX's
-    ``hx-target`` selector matches.
+    Title + optional subtitle + swap-target div tagged with the
+    visual's class name (``data-visual-kind``) so the bootstrap
+    script dispatches d3 hydration per kind. The inner div carries
+    ``id="visual-data-<visual_id>"`` so HTMX's ``hx-target``
+    selector matches.
+
+    The section also carries ``data-fetch-url`` — the full GET URL
+    for this visual's data. The bootstrap JS reads it when an
+    in-chart click (e.g. Sankey node) needs to fire a swap, so the
+    URL-construction authority stays server-side.
 
     Visuals satisfy ``VisualLike`` (Protocol) — they all carry
     ``title`` and most carry ``subtitle``. Read attributes
@@ -259,6 +314,8 @@ def _render_visual(visual: Any) -> str:
     )
     visual_id = str(raw_visual_id)
     esc_id = html.escape(visual_id)
+    fetch_url = _visual_fetch_url(dashboard_id, sheet_id, visual_id)
+    esc_url = html.escape(fetch_url)
     section_class = (
         "mx-8 mb-6 p-4 bg-white rounded-lg shadow-sm "
         "border border-slate-200"
@@ -269,7 +326,9 @@ def _render_visual(visual: Any) -> str:
     parts: list[str] = []
     parts.append(
         f'  <section data-visual-kind="{html.escape(kind)}"'
-        f' data-visual-id="{esc_id}" class="{section_class}">'
+        f' data-visual-id="{esc_id}"'
+        f' data-fetch-url="{esc_url}"'
+        f' class="{section_class}">'
     )
     parts.append(f'    <h2 class="{h2_class}">{html.escape(title)}</h2>')
     if subtitle:
@@ -278,7 +337,7 @@ def _render_visual(visual: Any) -> str:
         )
     parts.append(
         f'    <div id="visual-data-{esc_id}" class="visual-data">'
-        f'<!-- HTMX swap target; populated by /visual/{esc_id}/data -->'
+        f'<!-- HTMX swap target; populated by GET {esc_url} -->'
         f'</div>'
     )
     parts.append("  </section>")

@@ -68,25 +68,33 @@ def _minimal_sheet() -> Sheet:
 
 def test_emit_html_includes_sheet_title() -> None:
     sheet = _minimal_sheet()
-    out = emit_html(_build_app(sheet), sheet)
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
     assert "Test Sheet Title" in out
 
 
 def test_emit_html_includes_sheet_description() -> None:
     sheet = _minimal_sheet()
-    out = emit_html(_build_app(sheet), sheet)
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
     assert "A short description." in out
 
 
 def test_emit_html_emits_one_section_per_visual() -> None:
     sheet = _minimal_sheet()
-    out = emit_html(_build_app(sheet), sheet)
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
     assert out.count("<section") == 1
 
 
 def test_emit_html_includes_visual_title_and_subtitle() -> None:
     sheet = _minimal_sheet()
-    out = emit_html(_build_app(sheet), sheet)
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
     assert "Open Exceptions" in out
     assert "Count of open invariant violations." in out
 
@@ -96,7 +104,9 @@ def test_emit_html_carries_visual_kind_attribute() -> None:
     so a single bootstrap JS can target d3 hydration per kind without
     reflection."""
     sheet = _minimal_sheet()
-    out = emit_html(_build_app(sheet), sheet)
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
     assert 'data-visual-kind="KPI"' in out
 
 
@@ -104,7 +114,9 @@ def test_emit_html_carries_visual_id_attribute() -> None:
     """Visual id lands too — needed when spike.2's hx-get fragment
     swap targets a specific visual."""
     sheet = _minimal_sheet()
-    out = emit_html(_build_app(sheet), sheet)
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
     assert 'data-visual-id="v-test-kpi"' in out
 
 
@@ -126,7 +138,9 @@ def test_emit_html_resolves_auto_visual_ids() -> None:
     sheet.visuals.append(KPI(title="K1", subtitle=None))
     sheet.visuals.append(KPI(title="K2", subtitle=None))
 
-    out = emit_html(_build_app(sheet), sheet)
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
     assert "_AutoSentinel" not in out
     # resolve_auto_ids feeds the position slug ``v-{kind}-s{sheet}-
     # {visual}`` through ``auto_id()`` (UUIDv5, M.4.4.10c) so the
@@ -147,7 +161,7 @@ def test_emit_html_rejects_sheet_not_in_app() -> None:
         name="Other",
     ))
     with pytest.raises(ValueError, match="not part of App"):
-        emit_html(other_app, sheet)
+        emit_html(other_app, sheet, dashboard_id="test-dashboard")
 
 
 def test_emit_html_escapes_titles() -> None:
@@ -162,7 +176,9 @@ def test_emit_html_escapes_titles() -> None:
     sheet.visuals.append(
         KPI(title="<b>bold</b>", subtitle=None, visual_id=VisualId("v-x")),
     )
-    out = emit_html(_build_app(sheet), sheet)
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
     assert "<script>alert(1)</script>" not in out
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in out
     assert "A &amp; B" in out
@@ -172,7 +188,9 @@ def test_emit_html_escapes_titles() -> None:
 
 def test_emit_html_returns_complete_document() -> None:
     sheet = _minimal_sheet()
-    out = emit_html(_build_app(sheet), sheet)
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
     assert out.startswith("<!DOCTYPE html>")
     assert "<html" in out
     assert "</html>" in out.strip()
@@ -189,7 +207,9 @@ def test_emit_html_handles_empty_sheet() -> None:
         title="Empty Sheet",
         description="No visuals yet.",
     )
-    out = emit_html(_build_app(sheet), sheet)
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
     assert "Empty Sheet" in out
     assert "<section" not in out
     assert out.startswith("<!DOCTYPE html>")
@@ -207,6 +227,8 @@ def test_emit_html_handles_visual_without_subtitle() -> None:
     sheet.visuals.append(
         KPI(title="Bare KPI", subtitle=None, visual_id=VisualId("v-bare")),
     )
-    out = emit_html(_build_app(sheet), sheet)
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
     assert "Bare KPI" in out
     assert 'class="subtitle"' not in out

@@ -46,6 +46,7 @@ def html2_server(
     tree_app: App,
     sheet: Sheet,
     data_fetcher: DataFetcher,
+    dashboard_id: str = "harness",
     dev_log: bool = False,
     startup_timeout_s: float = 5.0,
 ) -> Iterator[str]:
@@ -57,7 +58,10 @@ def html2_server(
         tree_app: Tree ``App`` owning the Sheet.
         sheet: Sheet to serve at ``/``.
         data_fetcher: Layer-1 source-of-truth callable invoked on
-            every POST to ``/visual/{id}/data``.
+            every GET to ``/dashboards/{d}/sheets/{s}/visuals/{v}/data``.
+        dashboard_id: URL slug embedded in every visual's data
+            URL. Defaults to ``"harness"`` so tests don't need to
+            care unless they're asserting on the path.
         dev_log: when True, the server prints HTMX + d3 click
             events forwarded from the browser. Off by default;
             harness debug runs flip it on.
@@ -71,6 +75,7 @@ def html2_server(
     """
     asgi = make_app(
         tree_app=tree_app, sheet=sheet,
+        dashboard_id=dashboard_id,
         data_fetcher=data_fetcher, dev_log=dev_log,
     )
     config = uvicorn.Config(
@@ -104,7 +109,7 @@ def trigger_initial_swap(page: Any) -> None:
     pattern but for the HTMX dialect — without this click, no
     SVG ever appears.
     """
-    page.click("button[hx-post]")
+    page.click("button[hx-get]")
 
 
 def visual_section(page: Any, kind: str) -> Any:

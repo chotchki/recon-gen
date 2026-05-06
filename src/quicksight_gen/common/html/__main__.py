@@ -35,6 +35,7 @@ def main() -> int:
     asgi_app = make_app(
         tree_app=tree_app,
         sheet=sheet,
+        dashboard_id="smoke",
         data_fetcher=stub_money_trail_fetcher,
         # Dev-log on for direct smoke runner: every HTMX event +
         # d3 click prints to stderr so the developer sees what
