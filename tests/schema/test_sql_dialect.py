@@ -40,6 +40,7 @@ from quicksight_gen.common.sql import (
 
 PG = Dialect.POSTGRES
 ORA = Dialect.ORACLE
+SQLITE = Dialect.SQLITE
 
 
 # -- Postgres branches -------------------------------------------------------
@@ -309,10 +310,163 @@ class TestDialectEnum:
     def test_string_values(self):
         assert Dialect.POSTGRES.value == "postgres"
         assert Dialect.ORACLE.value == "oracle"
+        assert Dialect.SQLITE.value == "sqlite"
 
     def test_round_trip_from_string(self):
         assert Dialect("postgres") is Dialect.POSTGRES
         assert Dialect("oracle") is Dialect.ORACLE
+        assert Dialect("sqlite") is Dialect.SQLITE
+
+
+# -- SQLite branches ---------------------------------------------------------
+
+
+class TestSqliteTypeNames:
+    """X.3.a — SQLite type names. SQLite is typeless internally so the
+    affinity names are advisory; we prefer ``TEXT`` / ``INTEGER`` /
+    ``NUMERIC`` over Postgres-shape names so the emitted DDL reads as
+    SQLite-native rather than Postgres-with-a-different-engine."""
+
+    def test_serial_type(self):
+        # No INTEGER PRIMARY KEY AUTOINCREMENT — composite (id, entry)
+        # PK can't use the auto-increment shortcut. Schema emit pairs
+        # the bare INTEGER type with a BEFORE INSERT trigger that
+        # computes entry per id.
+        assert serial_type(SQLITE) == "INTEGER"
+
+    def test_boolean_type(self):
+        assert boolean_type(SQLITE) == "INTEGER"
+
+    def test_text_type(self):
+        assert text_type(SQLITE) == "TEXT"
+
+    def test_timestamp_type(self):
+        # TIMESTAMP across all 3 dialects (P.9a kept the unification).
+        assert timestamp_type(SQLITE) == "TIMESTAMP"
+
+    def test_varchar_type(self):
+        # VARCHAR(N) collapses to TEXT — SQLite's VARCHAR length is
+        # advisory so dropping the (N) keeps the DDL honest.
+        assert varchar_type(100, SQLITE) == "TEXT"
+
+    def test_decimal_type(self):
+        assert decimal_type(20, 2, SQLITE) == "NUMERIC"
+
+
+class TestSqliteCasts:
+    def test_cast_numeric(self):
+        assert cast("col", "numeric", SQLITE) == "CAST(col AS NUMERIC)"
+
+    def test_cast_bigint(self):
+        # bigint → INTEGER (SQLite has only one integer type internally).
+        assert cast("(a + b)", "bigint", SQLITE) == "CAST((a + b) AS INTEGER)"
+
+    def test_typed_null_numeric(self):
+        assert typed_null("numeric", SQLITE) == "CAST(NULL AS NUMERIC)"
+
+    def test_typed_null_bigint(self):
+        assert typed_null("bigint", SQLITE) == "CAST(NULL AS INTEGER)"
+
+    def test_to_date(self):
+        assert to_date("posting", SQLITE) == "DATE(posting)"
+
+
+class TestSqliteJsonCheck:
+    def test_uses_json_valid(self):
+        # SQLite's JSON1 extension ships ``json_valid()``; the SQL/JSON
+        # standard ``IS JSON`` predicate isn't available.
+        assert json_check("metadata", SQLITE) == (
+            "CHECK (metadata IS NULL OR json_valid(metadata))"
+        )
+
+
+class TestSqliteDateTime:
+    def test_epoch_seconds_between(self):
+        # julianday(later) - julianday(earlier) returns fractional
+        # days; * 86400 gives seconds.
+        result = epoch_seconds_between("CURRENT_TIMESTAMP", "ct.posting", SQLITE)
+        assert "julianday(CURRENT_TIMESTAMP)" in result
+        assert "julianday(ct.posting)" in result
+        assert "* 86400" in result
+
+    def test_interval_days(self):
+        # SQLite has no INTERVAL; emit as a string for use inside
+        # date(expr, '<interval>') modifier.
+        assert interval_days(1, SQLITE) == "'1 days'"
+        assert interval_days(7, SQLITE) == "'7 days'"
+
+    def test_date_minus_days(self):
+        assert date_minus_days("pw.posted_day", 1, SQLITE) == (
+            "date(pw.posted_day, '-1 days')"
+        )
+
+    def test_date_trunc_day(self):
+        # datetime(expr, 'start of day') returns YYYY-MM-DD HH:MM:SS at
+        # midnight — matches the timestamp-shape semantics PG/Oracle
+        # deliver via DATE_TRUNC / CAST(TRUNC AS TIMESTAMP).
+        assert date_trunc_day("tx.posting", SQLITE) == (
+            "datetime(tx.posting, 'start of day')"
+        )
+
+
+class TestSqliteDdlIdempotency:
+    """X.3.a — SQLite DDL idempotency uses native ``IF EXISTS``."""
+
+    def test_drop_table(self):
+        # No CASCADE keyword — SQLite enforces FKs via PRAGMA, not
+        # CASCADE.
+        assert drop_table_if_exists("foo", SQLITE) == "DROP TABLE IF EXISTS foo;"
+
+    def test_drop_matview(self):
+        # Matviews land as plain tables in SQLite — drop them as tables.
+        assert drop_matview_if_exists("p_drift", SQLITE) == (
+            "DROP TABLE IF EXISTS p_drift;"
+        )
+
+    def test_drop_index(self):
+        assert drop_index_if_exists("idx_foo", SQLITE) == (
+            "DROP INDEX IF EXISTS idx_foo;"
+        )
+
+    def test_drop_view(self):
+        assert drop_view_if_exists("v_foo", SQLITE) == "DROP VIEW IF EXISTS v_foo;"
+
+
+class TestSqliteMatviews:
+    def test_matview_options_empty(self):
+        # CREATE TABLE … AS — no per-keyword suffix.
+        from quicksight_gen.common.sql import matview_create_keyword
+        assert matview_options(SQLITE) == ""
+        assert matview_create_keyword(SQLITE) == "CREATE TABLE"
+
+    def test_create_matview_emits_create_table(self):
+        sql = create_matview("p_drift", "SELECT 1", SQLITE)
+        assert sql == "CREATE TABLE p_drift AS SELECT 1"
+
+    def test_refresh_matview_raises(self):
+        # SQLite's matview refresh is a DELETE + INSERT pair using the
+        # matview body SELECT — which lives in the schema template,
+        # not in this helper. The dialect helper raises so callers get
+        # routed through ``refresh_matviews_sql`` in common.l2.schema.
+        import pytest as _pytest
+        with _pytest.raises(NotImplementedError, match="SQLite refresh"):
+            refresh_matview("p_drift", SQLITE)
+
+    def test_analyze_table(self):
+        assert analyze_table("p_drift", SQLITE) == "ANALYZE p_drift;"
+
+
+class TestSqliteRecursiveCte:
+    def test_with_recursive(self):
+        # SQLite requires the RECURSIVE keyword (same as PG).
+        assert with_recursive(SQLITE) == "WITH RECURSIVE"
+
+
+class TestSqliteDualFrom:
+    def test_no_from_dual_clause(self):
+        # SQLite accepts the bare ``SELECT 'x'`` form (like Postgres).
+        from quicksight_gen.common.sql import dual_from
+        assert dual_from(SQLITE) == ""
 
 
 # -- Default-arg behavior ---------------------------------------------------

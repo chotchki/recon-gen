@@ -35,13 +35,19 @@ resource_prefix: "qs-gen"
 # SQL dialect for the deployed datasource (default: postgres). Must
 # match the datasource type — a Postgres datasource_arn cannot serve
 # Oracle-rendered SQL and vice versa. Operators typically carry two
-# config files (config-postgres.yaml + config-oracle.yaml).
+# config files (config-postgres.yaml + config-oracle.yaml). For local
+# integrator iteration use `sqlite` — runs against a single-file or
+# in-memory database without a server (X.3); not deployable to
+# QuickSight (`json apply --execute` and `build_datasource` reject it).
 # dialect: "postgres"
 
-# PostgreSQL or Oracle connection URL for the demo apply command (optional).
+# Database connection URL for the demo apply command (optional).
 # Required for: `data apply --execute`, `audit apply --execute`.
-# When set, datasource_arn auto-derives from account/region/prefix.
+# When set, datasource_arn auto-derives from account/region/prefix
+# (Postgres + Oracle only — SQLite rejects datasource derivation).
 # demo_database_url: "postgresql://user:pass@localhost:5432/quicksight_demo"
+# demo_database_url: "oracle+oracledb://user:pass@host:1521/?service_name=ORCL"
+# demo_database_url: "sqlite:///tmp/quicksight_demo.sqlite"  # X.3 local-loop
 
 # U.7.b — Audit PDF auto-sign material (optional). PEM RSA key + cert.
 # When present, `audit apply --execute` runs the rendered PDF through

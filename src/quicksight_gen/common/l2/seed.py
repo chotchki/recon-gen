@@ -101,12 +101,26 @@ def _sql_timestamp_literal(iso_8601_str: str, dialect: Dialect) -> str:
     Oracle: typed ``TIMESTAMP 'YYYY-MM-DD HH:MI:SS'`` literal with a
     space separator (not ``T``).
 
+    SQLite: bare ISO-8601 string literal — SQLite has no native
+    TIMESTAMP type and stores datetimes as TEXT. The ``date()`` /
+    ``datetime()`` / ``julianday()`` functions parse the value at
+    read time. Use a space separator (not ``T``) so SQLite's
+    datetime parser recognizes the value (``T`` is accepted but the
+    space form keeps the seed output visually consistent across
+    dialects when read in a SQLite shell).
+
     The same helper is used for every timestamp the seed emits —
     transactions.posting and daily_balances.business_day_start.
     """
     naive = _strip_tz_offset(iso_8601_str)
     if dialect is Dialect.POSTGRES:
         return "'" + naive.replace("'", "''") + "'"
+    if dialect is Dialect.SQLITE:
+        # SQLite stores TIMESTAMP as TEXT; ISO-8601 with a space
+        # separator is the format ``date()`` / ``datetime()`` /
+        # ``julianday()`` recognize unambiguously.
+        sqlite_str = naive.replace("T", " ", 1).replace("'", "''")
+        return "'" + sqlite_str + "'"
     oracle_str = naive.replace("T", " ", 1).replace("'", "''")
     return f"TIMESTAMP '{oracle_str}'"
 
@@ -983,7 +997,16 @@ def emit_truncate_sql(
     the seed's deterministic-anchor contract). Oracle has no
     RESTART IDENTITY syntax — uses plain ``TRUNCATE TABLE``; the
     integrator can re-create the IDENTITY column if exact serial
-    parity matters.
+    parity matters. SQLite has no ``TRUNCATE`` statement at all —
+    uses ``DELETE FROM <table>`` plus a ``DELETE FROM
+    sqlite_sequence WHERE name = '<table>'`` to reset the
+    AUTOINCREMENT counter (the closest equivalent to PG's RESTART
+    IDENTITY). The sqlite_sequence table only exists once an
+    AUTOINCREMENT column has been written; the DELETE is gated by
+    a presence check via ``WHERE EXISTS (SELECT 1 FROM
+    sqlite_master WHERE name='sqlite_sequence')`` so a wipe on a
+    fresh schema (no rows yet, no sqlite_sequence row) is a no-op
+    rather than an error.
 
     Returns one SQL string. Idempotent — TRUNCATE on an empty table
     is a no-op. Use ``data clean -o FILE`` for the CLI surface.
@@ -993,6 +1016,20 @@ def emit_truncate_sql(
         body = (
             f"TRUNCATE TABLE {p}_transactions RESTART IDENTITY CASCADE;\n"
             f"TRUNCATE TABLE {p}_daily_balances RESTART IDENTITY CASCADE;\n"
+        )
+    elif dialect is Dialect.SQLITE:
+        # SQLite has no TRUNCATE — DELETE empties the table and
+        # sqlite_sequence reset reclaims the AUTOINCREMENT counter
+        # so the next INSERT starts at entry=1 (matches PG's RESTART
+        # IDENTITY semantics). The sqlite_sequence presence check
+        # avoids "no such table" on a fresh schema.
+        body = (
+            f"DELETE FROM {p}_transactions;\n"
+            f"DELETE FROM {p}_daily_balances;\n"
+            f"DELETE FROM sqlite_sequence "
+            f"WHERE name IN ('{p}_transactions', '{p}_daily_balances') "
+            f"AND EXISTS (SELECT 1 FROM sqlite_master "
+            f"WHERE name='sqlite_sequence');\n"
         )
     else:
         # Oracle: plain TRUNCATE; CASCADE in Oracle deletes child rows

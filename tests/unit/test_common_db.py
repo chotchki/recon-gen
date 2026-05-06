@@ -19,8 +19,10 @@ from quicksight_gen.common.config import Config
 from tests._test_helpers import make_test_config
 from quicksight_gen.common.db import (
     connect_demo_db,
+    execute_script,
     oracle_dsn,
     split_oracle_script,
+    sqlite_path,
 )
 from quicksight_gen.common.sql import Dialect
 
@@ -179,3 +181,87 @@ class TestConnectDemoDb:
         assert conn == "fake_ora_conn"
         # The DSN was translated to oracledb's native shape.
         assert called["dsn"] == "admin/secret@db.example.com:1521/ORCL"
+
+    def test_sqlite_branch_opens_inmemory(self) -> None:
+        # X.3.a — SQLite uses stdlib sqlite3 with no extra. ``:memory:``
+        # is the canonical in-memory DB string; SQLAlchemy-style URL
+        # form parses to the same path via ``sqlite_path``.
+        cfg = _cfg(dialect=Dialect.SQLITE, url="sqlite://:memory:")
+        conn = connect_demo_db(cfg)
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            assert cur.fetchone()[0] == 1
+        finally:
+            conn.close()
+
+    def test_sqlite_branch_opens_file(self, tmp_path) -> None:
+        # SQLAlchemy-style ``sqlite:///path`` translates to the file
+        # path correctly. Round-trip a CREATE/INSERT/SELECT to confirm
+        # the connection is a real DB-API 2.0 sqlite3.Connection.
+        db_file = tmp_path / "demo.sqlite"
+        cfg = _cfg(dialect=Dialect.SQLITE, url=f"sqlite:///{db_file}")
+        conn = connect_demo_db(cfg)
+        try:
+            cur = conn.cursor()
+            cur.execute("CREATE TABLE t (a INTEGER)")
+            cur.execute("INSERT INTO t VALUES (42)")
+            cur.execute("SELECT a FROM t")
+            assert cur.fetchone() == (42,)
+        finally:
+            conn.close()
+        assert db_file.exists()
+
+
+# -- sqlite_path -------------------------------------------------------------
+
+
+class TestSqlitePath:
+    """X.3.a — URL-to-path translation for the sqlite3 connection."""
+
+    def test_inmemory_url_form(self) -> None:
+        assert sqlite_path("sqlite://:memory:") == ":memory:"
+
+    def test_inmemory_bare(self) -> None:
+        # Bare ``:memory:`` (no scheme) passes through unchanged for
+        # ergonomics — the integrator can paste either form.
+        assert sqlite_path(":memory:") == ":memory:"
+
+    def test_triple_slash_absolute_path(self) -> None:
+        # SQLAlchemy convention: three slashes for relative, four for
+        # absolute. The path component is everything after the third
+        # slash.
+        assert sqlite_path("sqlite:///tmp/demo.sqlite") == "tmp/demo.sqlite"
+
+    def test_triple_slash_keeps_leading_slash_on_quad(self) -> None:
+        # ``sqlite:////tmp/demo.sqlite`` (four slashes) → absolute.
+        assert sqlite_path("sqlite:////tmp/demo.sqlite") == "/tmp/demo.sqlite"
+
+    def test_bare_path_passes_through(self) -> None:
+        assert sqlite_path("/tmp/demo.sqlite") == "/tmp/demo.sqlite"
+        assert sqlite_path("./relative.sqlite") == "./relative.sqlite"
+
+
+# -- execute_script SQLite branch -------------------------------------------
+
+
+class TestExecuteScriptSqlite:
+    """X.3.a — multi-statement script execution against SQLite."""
+
+    def test_executes_multi_statement_script(self) -> None:
+        import sqlite3
+
+        conn = sqlite3.connect(":memory:")
+        try:
+            cur = conn.cursor()
+            sql = (
+                "CREATE TABLE t (a INTEGER);\n"
+                "INSERT INTO t VALUES (1);\n"
+                "INSERT INTO t VALUES (2);\n"
+                "INSERT INTO t VALUES (3);"
+            )
+            execute_script(cur, sql, dialect=Dialect.SQLITE)
+            cur.execute("SELECT COUNT(*) FROM t")
+            assert cur.fetchone()[0] == 3
+        finally:
+            conn.close()

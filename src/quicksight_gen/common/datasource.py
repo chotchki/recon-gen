@@ -122,6 +122,12 @@ def build_datasource(cfg: Config) -> DataSource:
       1521, ``Database`` carries the service name / SID — accepted by
       QuickSight's create-data-source for either Easy Connect or
       SQLAlchemy-style URLs).
+    - SQLite: not supported by AWS QuickSight as a datasource type.
+      The SQLite dialect is the integrator's local-iteration storage
+      for the X.2 self-hosted renderer (X.3.e), not a deployable
+      QuickSight backend. Calling ``build_datasource`` against a SQLite
+      config raises ``ValueError`` with a pointer to the local-loop
+      docs.
 
     The DataSource ID derives from ``cfg.prefixed("demo-datasource")`` so
     when ``cfg.l2_instance_prefix`` is set (per-test harness, multi-tenant
@@ -129,10 +135,20 @@ def build_datasource(cfg: Config) -> DataSource:
     parsed URL; SSL is enabled by default; principal_arns from cfg
     become QS Permissions.
 
-    Raises ValueError if ``cfg.demo_database_url`` is unset.
+    Raises ValueError if ``cfg.demo_database_url`` is unset, or if the
+    dialect is SQLite (QuickSight has no SQLite datasource type).
     """
     if not cfg.demo_database_url:
         raise ValueError("demo_database_url is required to build a datasource")
+
+    if cfg.dialect is Dialect.SQLITE:
+        raise ValueError(
+            "SQLite is not a deployable QuickSight datasource type — "
+            "the SQLite dialect targets the local-iteration loop "
+            "(see docs/integrator/local-loop.md). For QuickSight deploys, "
+            "use 'dialect: postgres' or 'dialect: oracle' against an "
+            "RDS-managed instance."
+        )
 
     if cfg.dialect is Dialect.ORACLE:
         info = _parse_oracle_url(cfg.demo_database_url)

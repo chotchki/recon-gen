@@ -1,5 +1,5 @@
 """Dialect-specific SQL helpers — Phase P.2 catalog + P.3 Oracle fill +
-P.3.e cleanup.
+P.3.e cleanup + X.3 SQLite.
 
 Every helper takes an explicit ``Dialect`` (no defaults — see "P.3.e
 cleanup" below) and returns a dialect-appropriate SQL string. The
@@ -40,6 +40,13 @@ Phase notes:
 - ``_matview_options`` moved into this module from ``common.l2.schema``
   in P.3.e — it's a pure dialect helper and belongs alongside
   ``create_matview`` / ``refresh_matview``.
+- X.3 added the SQLite branch (3.38+, ships with stdlib ``sqlite3``).
+  SQLite has no ``CREATE MATERIALIZED VIEW``: matviews are emitted as
+  ``CREATE TABLE … AS SELECT`` and refreshed by ``DELETE`` + ``INSERT``.
+  JSON metadata uses SQLite's JSON1 functions (``json_valid``,
+  ``json_extract``); the ``IS JSON`` constraint becomes a
+  ``CHECK (json_valid(col))``. The dialect is the local-iteration
+  loop's storage — single-file or in-memory, no server required.
 """
 
 from __future__ import annotations
@@ -53,10 +60,13 @@ class Dialect(str, Enum):
     Postgres covers Postgres 17+ (the version floor required by the
     SQL/JSON path syntax we already use). Oracle covers Oracle 19c
     Standard Edition (the long-term-support version Phase P targets).
+    SQLite covers SQLite 3.38+ (the version floor for the JSON1
+    functions we depend on; ships with Python's stdlib ``sqlite3``).
     """
 
     POSTGRES = "postgres"
     ORACLE = "oracle"
+    SQLITE = "sqlite"
 
 
 # -- Type names (DDL) --------------------------------------------------------
@@ -65,10 +75,22 @@ class Dialect(str, Enum):
 def serial_type(dialect: Dialect) -> str:
     """Auto-incrementing 64-bit append-only key.
 
-    Postgres ``BIGSERIAL`` / Oracle ``NUMBER GENERATED ALWAYS AS IDENTITY``.
+    Postgres ``BIGSERIAL`` / Oracle
+    ``NUMBER GENERATED ALWAYS AS IDENTITY``. SQLite has no
+    auto-increment for non-INTEGER-PRIMARY-KEY columns (``entry``
+    participates in a composite PK with ``id``, so the
+    ``INTEGER PRIMARY KEY AUTOINCREMENT`` shortcut doesn't apply).
+    Schema emit pairs the bare ``INTEGER`` column type with a
+    ``BEFORE INSERT`` trigger that sets ``NEW.entry =
+    COALESCE((SELECT MAX(entry) FROM <table> WHERE id = NEW.id), 0)
+    + 1`` so the column behaves like a per-id supersession key —
+    the same semantic Postgres' ``BIGSERIAL`` + Oracle's IDENTITY
+    deliver via different mechanisms.
     """
     if dialect is Dialect.POSTGRES:
         return "BIGSERIAL"
+    if dialect is Dialect.SQLITE:
+        return "INTEGER"
     return "NUMBER GENERATED ALWAYS AS IDENTITY"
 
 
@@ -77,20 +99,25 @@ def boolean_type(dialect: Dialect) -> str:
 
     Postgres has a native ``BOOLEAN``; Oracle 19c does not, so the
     canonical encoding is ``NUMBER(1)`` with a ``CHECK (col IN (0, 1))``.
-    The helper returns just the type name — callers that need the
-    CHECK constraint compose it themselves.
+    SQLite has no native BOOLEAN — uses ``INTEGER`` (0/1) by
+    convention. The helper returns just the type name — callers that
+    need the CHECK constraint compose it themselves.
     """
     if dialect is Dialect.POSTGRES:
         return "BOOLEAN"
+    if dialect is Dialect.SQLITE:
+        return "INTEGER"
     return "NUMBER(1)"
 
 
 def text_type(dialect: Dialect) -> str:
     """Unbounded character data.
 
-    Postgres ``TEXT`` / Oracle ``CLOB``.
+    Postgres ``TEXT`` / Oracle ``CLOB`` / SQLite ``TEXT``.
     """
     if dialect is Dialect.POSTGRES:
+        return "TEXT"
+    if dialect is Dialect.SQLITE:
         return "TEXT"
     return "CLOB"
 
@@ -119,9 +146,16 @@ def json_text_type(dialect: Dialect) -> str:
     documents either trim at the ETL boundary or enable Oracle's
     ``MAX_STRING_SIZE=EXTENDED`` (lifts VARCHAR2 to 32767) and bump
     this helper.
+
+    SQLite uses ``TEXT`` here too — it's typeless under the hood
+    (``VARCHAR(N)`` parses but the length is purely advisory), so
+    matching the symmetric "string-shaped" treatment by emitting
+    plain ``TEXT`` keeps the SQL readable.
     """
     if dialect is Dialect.POSTGRES:
         return "VARCHAR(4000)"
+    if dialect is Dialect.SQLITE:
+        return "TEXT"
     return "VARCHAR2(4000)"
 
 
@@ -152,20 +186,29 @@ def timestamp_type(dialect: Dialect) -> str:  # noqa: ARG001
 def varchar_type(n: int, dialect: Dialect) -> str:
     """Bounded variable-length character.
 
-    Postgres ``VARCHAR(n)`` / Oracle ``VARCHAR2(n)``.
+    Postgres ``VARCHAR(n)`` / Oracle ``VARCHAR2(n)`` / SQLite
+    ``TEXT`` (SQLite is typeless internally; the ``(n)`` would parse
+    but enforce nothing, so emit plain ``TEXT`` for clarity).
     """
     if dialect is Dialect.POSTGRES:
         return f"VARCHAR({n})"
+    if dialect is Dialect.SQLITE:
+        return "TEXT"
     return f"VARCHAR2({n})"
 
 
 def decimal_type(precision: int, scale: int, dialect: Dialect) -> str:
     """Fixed-precision decimal.
 
-    Postgres ``DECIMAL(p,s)`` / Oracle ``NUMBER(p,s)``.
+    Postgres ``DECIMAL(p,s)`` / Oracle ``NUMBER(p,s)`` / SQLite
+    ``NUMERIC`` (SQLite is typeless and stores all numerics as one
+    of INTEGER / REAL / TEXT per its dynamic typing rules; ``NUMERIC``
+    is the affinity that prefers exact representation).
     """
     if dialect is Dialect.POSTGRES:
         return f"DECIMAL({precision},{scale})"
+    if dialect is Dialect.SQLITE:
+        return "NUMERIC"
     return f"NUMBER({precision},{scale})"
 
 
@@ -175,38 +218,44 @@ def decimal_type(precision: int, scale: int, dialect: Dialect) -> str:
 def cast(expr: str, type_name: str, dialect: Dialect) -> str:
     """Cast ``expr`` to ``type_name``.
 
-    Postgres ``expr::type`` / Oracle ``CAST(expr AS type)``. Note the
-    caller is responsible for passing a logical Postgres-style type
-    name (``numeric``, ``bigint``, ``text``, ``TIMESTAMP``); the
-    Oracle branch translates via ``_oracle_type_alias``.
+    Postgres ``expr::type`` / Oracle ``CAST(expr AS type)`` / SQLite
+    ``CAST(expr AS type)`` (SQLite uses standard SQL CAST syntax;
+    type-name aliasing remaps Postgres-shape names to SQLite affinity
+    names where they differ).
     """
     if dialect is Dialect.POSTGRES:
         return f"{expr}::{type_name}"
+    if dialect is Dialect.SQLITE:
+        return f"CAST({expr} AS {_sqlite_type_alias(type_name)})"
     return f"CAST({expr} AS {_oracle_type_alias(type_name)})"
 
 
 def typed_null(type_name: str, dialect: Dialect) -> str:
     """Typed NULL literal.
 
-    Postgres ``NULL::type`` / Oracle ``CAST(NULL AS type)``. Postgres
-    needs the explicit type because untyped NULL infers as ``text``,
-    which breaks downstream ``numeric > text`` comparisons.
+    Postgres ``NULL::type`` / Oracle ``CAST(NULL AS type)`` / SQLite
+    ``CAST(NULL AS type)`` (same standard SQL CAST as Oracle; type
+    aliasing maps to SQLite affinity names).
     """
     if dialect is Dialect.POSTGRES:
         return f"NULL::{type_name}"
+    if dialect is Dialect.SQLITE:
+        return f"CAST(NULL AS {_sqlite_type_alias(type_name)})"
     return f"CAST(NULL AS {_oracle_type_alias(type_name)})"
 
 
 def to_date(timestamp_expr: str, dialect: Dialect) -> str:
     """Truncate a timestamp expression to its date component.
 
-    Postgres ``expr::date`` / Oracle ``TRUNC(expr)``. Oracle's
-    ``CAST(expr AS DATE)`` would also work but ``TRUNC`` is the
-    idiomatic "drop the time" expression and reads cleaner for
-    callers writing per-day rollups.
+    Postgres ``expr::date`` / Oracle ``TRUNC(expr)`` / SQLite
+    ``DATE(expr)`` (SQLite has no native ``DATE`` type — ``DATE()``
+    returns the date portion as ``YYYY-MM-DD`` text, which is
+    sortable + groupable the same way the typed counterparts are).
     """
     if dialect is Dialect.POSTGRES:
         return f"{timestamp_expr}::date"
+    if dialect is Dialect.SQLITE:
+        return f"DATE({timestamp_expr})"
     return f"TRUNC({timestamp_expr})"
 
 
@@ -248,23 +297,63 @@ def _oracle_type_alias(type_name: str) -> str:
     return type_name
 
 
+# SQLite type-name canonicalization — maps Postgres-shape type names
+# to SQLite affinity names. SQLite's storage classes are NULL /
+# INTEGER / REAL / TEXT / BLOB; column "types" are advisory affinities
+# (NUMERIC / INTEGER / REAL / TEXT / BLOB). We map exact-precision
+# numerics to NUMERIC, integers to INTEGER, dates/timestamps to TEXT
+# (SQLite has no native datetime type — convention is ISO-8601 text
+# stored in TEXT-affinity columns + queried via ``date()`` / ``datetime()``
+# / ``strftime()``), and text-y types to TEXT. Anything we forgot
+# passes through unchanged.
+_SQLITE_TYPE_ALIASES = {
+    "numeric": "NUMERIC",
+    "bigint": "INTEGER",
+    "int": "INTEGER",
+    "integer": "INTEGER",
+    "smallint": "INTEGER",
+    "date": "TEXT",
+    "timestamp": "TEXT",
+    "text": "TEXT",
+    "boolean": "INTEGER",
+    "clob": "TEXT",
+}
+
+
+def _sqlite_type_alias(type_name: str) -> str:
+    """Return the SQLite equivalent of a Postgres-shape type name.
+
+    Direct hits in ``_SQLITE_TYPE_ALIASES`` win; otherwise the helper
+    rewrites ``varchar(N)`` → ``TEXT`` (SQLite ignores VARCHAR length).
+    Unhandled types pass through unchanged.
+    """
+    name_lower = type_name.lower()
+    if name_lower in _SQLITE_TYPE_ALIASES:
+        return _SQLITE_TYPE_ALIASES[name_lower]
+    # varchar(N) → TEXT — SQLite is typeless internally; the (N) is
+    # advisory at best.
+    import re
+    m = re.match(r"^varchar\((\d+)\)$", name_lower)
+    if m:
+        return "TEXT"
+    return type_name
+
+
 # -- JSON --------------------------------------------------------------------
 
 
 def json_check(col: str, dialect: Dialect) -> str:
-    """``CHECK (col IS NULL OR col IS JSON)`` in either dialect.
+    """``CHECK (col IS NULL OR col IS JSON)`` in PG / Oracle; SQLite
+    uses ``CHECK (col IS NULL OR json_valid(col))``.
 
-    The constraint syntax is identical in Postgres 16+ and Oracle
-    12.2+ (both implement the SQL/JSON standard). Helper exists so
-    the OR-NULL guard pattern stays consistent across emit sites
-    and so future Oracle-side variants (e.g. ``IS JSON STRICT``)
-    can land in one place.
-
-    ``dialect`` is currently ignored (output is identical) but the
-    parameter is kept so the signature matches every other helper —
-    one less special case for callers to remember.
+    The ``IS JSON`` SQL/JSON-standard constraint is supported in
+    Postgres 16+ and Oracle 12.2+ — bytes-identical there. SQLite
+    has no ``IS JSON`` predicate but ships ``json_valid(text)`` (returns
+    1 if the argument is well-formed JSON; 0 otherwise) via the
+    JSON1 extension (built into stdlib ``sqlite3`` since 3.38).
     """
-    del dialect  # see docstring; reserved for future Oracle variants
+    if dialect is Dialect.SQLITE:
+        return f"CHECK ({col} IS NULL OR json_valid({col}))"
     return f"CHECK ({col} IS NULL OR {col} IS JSON)"
 
 
@@ -277,10 +366,18 @@ def epoch_seconds_between(later: str, earlier: str, dialect: Dialect) -> str:
     Postgres ``EXTRACT(EPOCH FROM (later - earlier))``. Oracle has
     no EPOCH unit; the equivalent for TIMESTAMP arithmetic (which
     yields ``INTERVAL DAY TO SECOND``) is the sum of
-    EXTRACT(DAY/HOUR/MINUTE/SECOND FROM …) terms.
+    EXTRACT(DAY/HOUR/MINUTE/SECOND FROM …) terms. SQLite uses
+    ``(julianday(later) - julianday(earlier)) * 86400`` — julianday
+    returns the Julian Day Number as a REAL, so subtracting two
+    julianday values yields fractional days; multiplying by 86400
+    gives seconds.
     """
     if dialect is Dialect.POSTGRES:
         return f"EXTRACT(EPOCH FROM ({later} - {earlier}))"
+    if dialect is Dialect.SQLITE:
+        return (
+            f"((julianday({later}) - julianday({earlier})) * 86400)"
+        )
     diff = f"({later} - {earlier})"
     return (
         f"(EXTRACT(DAY FROM {diff}) * 86400 "
@@ -294,20 +391,66 @@ def interval_days(n: int, dialect: Dialect) -> str:
     """A SQL interval literal of ``n`` days.
 
     Postgres ``INTERVAL '<n> day'`` / Oracle ``INTERVAL '<n>' DAY``.
+    SQLite has no INTERVAL type — date arithmetic uses the ``date()``
+    function with a ``'+N days'`` modifier (see ``date_minus_days``);
+    a bare interval literal isn't usable on its own. This helper
+    returns the plain string ``'<n> days'`` for SQLite so callers
+    that compose it with ``date(expr, '<interval>')`` work; sites
+    that try to subtract a bare interval (e.g. ``RANGE BETWEEN
+    INTERVAL ... PRECEDING``) should use ``range_interval_days``
+    instead, which adapts to SQLite's numeric-only RANGE frames via
+    a Julian-day projection.
     """
     if dialect is Dialect.POSTGRES:
         return f"INTERVAL '{n} day'"
+    if dialect is Dialect.SQLITE:
+        return f"'{n} days'"
     return f"INTERVAL '{n}' DAY"
+
+
+def range_interval_days(n: int, dialect: Dialect) -> str:
+    """Day-interval expression for use inside a window-function
+    ``RANGE BETWEEN <expr> PRECEDING`` clause.
+
+    PG / Oracle take ordinary INTERVAL literals — same form
+    ``interval_days`` returns. SQLite's ``RANGE BETWEEN`` only
+    accepts numeric expressions (the ORDER BY column must be numeric
+    too), so the call site needs to project ``posted_day`` through
+    ``julianday()`` and use a bare integer here. Returns ``str(n)``
+    for SQLite so a ``RANGE BETWEEN N PRECEDING`` frame, paired with
+    ``ORDER BY julianday(posted_day)``, gives the same per-day
+    semantics PG / Oracle deliver via INTERVAL.
+    """
+    if dialect is Dialect.SQLITE:
+        return str(n)
+    return interval_days(n, dialect)
+
+
+def order_by_day_expr(day_col: str, dialect: Dialect) -> str:
+    """Per-dialect ``ORDER BY`` projection for date-keyed window
+    functions paired with ``range_interval_days``.
+
+    PG / Oracle: bare column name (intervals work directly against
+    DATE / TIMESTAMP). SQLite: wrap in ``julianday(<col>)`` so the
+    RANGE frame's numeric arithmetic lands on the same scale as
+    ``range_interval_days(N, SQLITE) = str(N)``.
+    """
+    if dialect is Dialect.SQLITE:
+        return f"julianday({day_col})"
+    return day_col
 
 
 def date_minus_days(date_expr: str, n: int, dialect: Dialect) -> str:
     """Subtract ``n`` days from a date expression.
 
     Postgres uses ``date - INTERVAL '<n> day'``; Oracle's DATE
-    arithmetic interprets ``date - n`` as N days directly.
+    arithmetic interprets ``date - n`` as N days directly. SQLite
+    uses ``date(expr, '-N days')``.
     """
     if dialect is Dialect.POSTGRES:
         return f"({date_expr} - {interval_days(n, dialect)})"
+    if dialect is Dialect.SQLITE:
+        return f"date({date_expr}, '-{n} days')"
     return f"({date_expr} - {n})"
 
 
@@ -321,7 +464,10 @@ def date_trunc_day(timestamp_expr: str, dialect: Dialect) -> str:
     on a TIMESTAMP returns a DATE, which loses subseconds + the
     timestamp shape; wrapping in ``CAST(... AS TIMESTAMP)`` puts it
     back in the timestamp domain so the L1 invariant matviews compare
-    equality the same way on both dialects.
+    equality the same way on both dialects. SQLite uses
+    ``datetime(expr, 'start of day')`` — returns ``YYYY-MM-DD HH:MM:SS``
+    text at midnight, sortable + groupable + JOIN-able against the
+    other text-shaped timestamp columns.
 
     Distinct from ``to_date`` (which returns DATE-shape on both): use
     ``date_trunc_day`` when the result needs to behave as a timestamp
@@ -330,6 +476,8 @@ def date_trunc_day(timestamp_expr: str, dialect: Dialect) -> str:
     """
     if dialect is Dialect.POSTGRES:
         return f"DATE_TRUNC('day', {timestamp_expr})"
+    if dialect is Dialect.SQLITE:
+        return f"datetime({timestamp_expr}, 'start of day')"
     return f"CAST(TRUNC({timestamp_expr}) AS TIMESTAMP)"
 
 
@@ -338,18 +486,24 @@ def date_trunc_day(timestamp_expr: str, dialect: Dialect) -> str:
 
 def drop_table_if_exists(name: str, dialect: Dialect) -> str:
     """Idempotent DROP TABLE — emits CASCADE so dependent FKs / views
-    drop transitively.
+    drop transitively (where the dialect supports CASCADE).
 
     Postgres has native ``DROP TABLE IF EXISTS … CASCADE``. Oracle 19c
     needs a PL/SQL block that catches ORA-00942 (table not found).
+    SQLite has ``DROP TABLE IF EXISTS …`` but no CASCADE keyword —
+    SQLite enforces FK-cascading via ``PRAGMA foreign_keys`` plus
+    ``ON DELETE CASCADE`` declarations on the FK; the schema we emit
+    has no FKs, so omitting CASCADE has no behavioral impact.
 
     Returned string is **fully terminated** (Postgres trailing ``;``,
-    Oracle ``END;`` PL/SQL terminator). Callers concatenate directly
-    without appending ``;`` to avoid a double-semicolon that Oracle's
-    PL/SQL parser rejects.
+    Oracle ``END;`` PL/SQL terminator, SQLite trailing ``;``). Callers
+    concatenate directly without appending ``;`` to avoid a
+    double-semicolon that Oracle's PL/SQL parser rejects.
     """
     if dialect is Dialect.POSTGRES:
         return f"DROP TABLE IF EXISTS {name} CASCADE;"
+    if dialect is Dialect.SQLITE:
+        return f"DROP TABLE IF EXISTS {name};"
     return _oracle_drop_if_exists(
         f"DROP TABLE {name} CASCADE CONSTRAINTS", ignore_codes=(-942,),
     )
@@ -359,11 +513,17 @@ def drop_matview_if_exists(name: str, dialect: Dialect) -> str:
     """Idempotent DROP MATERIALIZED VIEW.
 
     Postgres ``DROP MATERIALIZED VIEW IF EXISTS …;`` / Oracle PL/SQL
-    block catching ORA-12003 (matview does not exist). Returned string
-    is **fully terminated** — same convention as ``drop_table_if_exists``.
+    block catching ORA-12003 (matview does not exist). SQLite has no
+    ``CREATE MATERIALIZED VIEW``: matviews are emitted as plain
+    tables (``CREATE TABLE name AS SELECT …``), so the SQLite branch
+    drops them as ordinary tables (``DROP TABLE IF EXISTS name;``).
+    Returned string is **fully terminated** — same convention as
+    ``drop_table_if_exists``.
     """
     if dialect is Dialect.POSTGRES:
         return f"DROP MATERIALIZED VIEW IF EXISTS {name};"
+    if dialect is Dialect.SQLITE:
+        return f"DROP TABLE IF EXISTS {name};"
     return _oracle_drop_if_exists(
         f"DROP MATERIALIZED VIEW {name}", ignore_codes=(-12003, -942),
     )
@@ -373,10 +533,13 @@ def drop_index_if_exists(name: str, dialect: Dialect) -> str:
     """Idempotent DROP INDEX.
 
     Postgres ``DROP INDEX IF EXISTS …;`` / Oracle PL/SQL block
-    catching ORA-01418 (index does not exist). Returned string is
+    catching ORA-01418 (index does not exist) / SQLite native
+    ``DROP INDEX IF EXISTS …;``. Returned string is
     **fully terminated**.
     """
     if dialect is Dialect.POSTGRES:
+        return f"DROP INDEX IF EXISTS {name};"
+    if dialect is Dialect.SQLITE:
         return f"DROP INDEX IF EXISTS {name};"
     return _oracle_drop_if_exists(
         f"DROP INDEX {name}", ignore_codes=(-1418,),
@@ -387,9 +550,12 @@ def drop_view_if_exists(name: str, dialect: Dialect) -> str:
     """Idempotent DROP VIEW.
 
     Postgres ``DROP VIEW IF EXISTS …;`` / Oracle PL/SQL block
-    catching ORA-00942. Returned string is **fully terminated**.
+    catching ORA-00942 / SQLite native ``DROP VIEW IF EXISTS …;``.
+    Returned string is **fully terminated**.
     """
     if dialect is Dialect.POSTGRES:
+        return f"DROP VIEW IF EXISTS {name};"
+    if dialect is Dialect.SQLITE:
         return f"DROP VIEW IF EXISTS {name};"
     return _oracle_drop_if_exists(
         f"DROP VIEW {name}", ignore_codes=(-942,),
@@ -426,7 +592,11 @@ def create_matview(name: str, body_sql: str, dialect: Dialect) -> str:
     ``BUILD IMMEDIATE REFRESH ON DEMAND`` so behavior matches the
     Postgres expectation; without those options Oracle defaults to
     ``REFRESH FORCE ON DEMAND`` (incremental fast-refresh attempt
-    first), which has more setup requirements.
+    first), which has more setup requirements. SQLite has no
+    ``CREATE MATERIALIZED VIEW``: emits ``CREATE TABLE name AS body``
+    (the matview becomes a plain table populated at create time).
+    Refresh becomes ``DELETE FROM name; INSERT INTO name <body>;``
+    (see ``refresh_matview``).
 
     Note this helper does NOT add a trailing ``;`` — it's a one-shot
     convenience for callers that want the whole CREATE in one string,
@@ -436,6 +606,8 @@ def create_matview(name: str, body_sql: str, dialect: Dialect) -> str:
     """
     if dialect is Dialect.POSTGRES:
         return f"CREATE MATERIALIZED VIEW {name} AS {body_sql}"
+    if dialect is Dialect.SQLITE:
+        return f"CREATE TABLE {name} AS {body_sql}"
     return (
         f"CREATE MATERIALIZED VIEW {name} "
         f"BUILD IMMEDIATE REFRESH COMPLETE ON DEMAND AS {body_sql}"
@@ -448,14 +620,33 @@ def matview_options(dialect: Dialect) -> str:
     REFRESH COMPLETE ON DEMAND`` to match Postgres's build-on-create +
     manual-REFRESH semantics (without it Oracle defaults to
     ``REFRESH FORCE ON DEMAND``, which has more setup requirements).
+    SQLite uses ``CREATE TABLE … AS`` (see ``matview_create_keyword``);
+    no per-keyword suffix applies, so returns the empty string.
 
     Used by ``common.l2.schema`` to splice the suffix into per-matview
     template strings (so the SELECT body stays inline + readable).
-    Returns the empty string on Postgres so the substitution is a no-op.
+    Returns the empty string on Postgres + SQLite so the substitution
+    is a no-op.
     """
     if dialect is Dialect.POSTGRES:
         return ""
+    if dialect is Dialect.SQLITE:
+        return ""
     return " BUILD IMMEDIATE REFRESH COMPLETE ON DEMAND"
+
+
+def matview_create_keyword(dialect: Dialect) -> str:
+    """The ``CREATE …`` keyword the matview templates emit per dialect.
+
+    Postgres + Oracle: ``CREATE MATERIALIZED VIEW``. SQLite: just
+    ``CREATE TABLE`` (matviews land as plain tables — refresh
+    becomes a DELETE + INSERT pair, see ``refresh_matview``). Used by
+    ``common.l2.schema`` so the per-matview template strings can stay
+    one-line + dialect-clean instead of branching at every site.
+    """
+    if dialect is Dialect.SQLITE:
+        return "CREATE TABLE"
+    return "CREATE MATERIALIZED VIEW"
 
 
 def refresh_matview(name: str, dialect: Dialect) -> str:
@@ -463,12 +654,25 @@ def refresh_matview(name: str, dialect: Dialect) -> str:
 
     Postgres: ``REFRESH MATERIALIZED VIEW name;``. Oracle: a PL/SQL
     block invoking ``DBMS_MVIEW.REFRESH('name', method => 'C')`` —
-    ``C`` = complete refresh, matching Postgres semantics. Returned
-    string is **fully terminated** — same convention as the drop
-    helpers.
+    ``C`` = complete refresh, matching Postgres semantics. SQLite:
+    NOT a single statement — refresh on a matview-as-table is a
+    DELETE + INSERT pair, but the body SELECT lives in the schema
+    template, not here. The SQLite branch returns a sentinel that
+    callers in ``common.l2.schema.refresh_matviews_sql`` route
+    through ``_emit_sqlite_refresh_block`` (which knows the SELECT
+    body for each matview). Returned string is
+    **fully terminated** for PG / Oracle.
     """
     if dialect is Dialect.POSTGRES:
         return f"REFRESH MATERIALIZED VIEW {name};"
+    if dialect is Dialect.SQLITE:
+        # Sentinel — the per-matview SELECT body is needed to refresh,
+        # which the helper here doesn't know. ``refresh_matviews_sql``
+        # in ``common.l2.schema`` substitutes the right body.
+        raise NotImplementedError(
+            "SQLite refresh requires the matview body SELECT; call "
+            "refresh_matviews_sql in common.l2.schema instead.",
+        )
     return f"BEGIN DBMS_MVIEW.REFRESH('{name}', method => 'C'); END;"
 
 
@@ -476,10 +680,13 @@ def analyze_table(name: str, dialect: Dialect) -> str:
     """Refresh planner statistics on a table or matview.
 
     Postgres: ``ANALYZE name;``. Oracle: ``BEGIN
-    DBMS_STATS.GATHER_TABLE_STATS(USER, 'name'); END;``. Returned
-    string is **fully terminated**.
+    DBMS_STATS.GATHER_TABLE_STATS(USER, 'name'); END;``. SQLite:
+    ``ANALYZE name;`` (same syntax as Postgres). Returned string is
+    **fully terminated**.
     """
     if dialect is Dialect.POSTGRES:
+        return f"ANALYZE {name};"
+    if dialect is Dialect.SQLITE:
         return f"ANALYZE {name};"
     return f"BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, '{name}'); END;"
 
@@ -492,15 +699,18 @@ def dual_from(dialect: Dialect) -> str:
 
     Postgres accepts ``SELECT 'x' AS col`` with no FROM. Oracle 19c
     requires every SELECT to have a FROM clause; the canonical Oracle
-    pseudo-table for "one row, no real source" is ``dual``.
+    pseudo-table for "one row, no real source" is ``dual``. SQLite
+    accepts the bare ``SELECT`` (like Postgres).
 
-    Returns ``""`` on Postgres and ``" FROM dual"`` on Oracle. Compose
-    inline at the end of the SELECT list:
+    Returns ``""`` on Postgres + SQLite and ``" FROM dual"`` on
+    Oracle. Compose inline at the end of the SELECT list:
     ``f"SELECT {expr} AS col{dual_from(dialect)}"``. Combine with
-    ``WHERE 1=0`` (works on both dialects) for an empty-row sentinel
+    ``WHERE 1=0`` (works on every dialect) for an empty-row sentinel
     branch — ``WHERE FALSE`` is Postgres-only and breaks Oracle.
     """
     if dialect is Dialect.POSTGRES:
+        return ""
+    if dialect is Dialect.SQLITE:
         return ""
     return " FROM dual"
 
@@ -514,8 +724,11 @@ def with_recursive(dialect: Dialect) -> str:
     Postgres requires the explicit ``WITH RECURSIVE`` keyword. Oracle
     19c infers recursion from the CTE body's self-reference and
     accepts (but does not require) ``RECURSIVE`` — emit just ``WITH``
-    for portability across older Oracle releases.
+    for portability across older Oracle releases. SQLite requires
+    ``WITH RECURSIVE`` (same as Postgres).
     """
     if dialect is Dialect.POSTGRES:
+        return "WITH RECURSIVE"
+    if dialect is Dialect.SQLITE:
         return "WITH RECURSIVE"
     return "WITH"

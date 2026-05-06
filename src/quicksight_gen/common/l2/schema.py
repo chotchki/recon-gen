@@ -51,8 +51,11 @@ from quicksight_gen.common.sql import (
     drop_matview_if_exists,
     drop_table_if_exists,
     epoch_seconds_between,
-    interval_days,
+    json_check,
+    matview_create_keyword,
     matview_options,
+    order_by_day_expr,
+    range_interval_days,
     refresh_matview,
     serial_type,
     json_text_type,
@@ -127,6 +130,8 @@ def emit_schema(
     )
 
 
+
+
 def emit_schema_drop_sql(
     instance: L2Instance, *, dialect: Dialect = Dialect.POSTGRES,
 ) -> str:
@@ -191,10 +196,17 @@ def refresh_matviews_sql(
     helpers, then L1 invariants — because a downstream matview's
     REFRESH reads from upstream matview data.
 
-    Returns one `REFRESH MATERIALIZED VIEW <name>;` per line. Caller
-    splits + executes (psycopg2's cursor.execute can't run multiple
-    statements separated by `;` reliably; the verify script splits on
-    `;\\n` and runs each per-statement).
+    Returns one `REFRESH MATERIALIZED VIEW <name>;` per line on PG /
+    Oracle. SQLite has no matviews — refresh becomes a per-table
+    ``DELETE FROM <name>; INSERT INTO <name> <body>;`` pair, where
+    ``<body>`` is the same SELECT the matview was originally created
+    with. To avoid duplicating every matview body here, the SQLite
+    branch uses ``DROP TABLE … CREATE TABLE … AS <body>`` — re-runs
+    the schema's matview-create SQL by tearing down + rebuilding.
+
+    Caller splits + executes (psycopg2's cursor.execute can't run
+    multiple statements separated by `;` reliably; the verify script
+    splits on `;\\n` and runs each per-statement).
     """
     p = instance.instance
     names = [
@@ -224,6 +236,12 @@ def refresh_matviews_sql(
         f"{p}_inv_pair_rolling_anomalies",
         f"{p}_inv_money_trail_edges",
     ]
+    if dialect is Dialect.SQLITE:
+        # X.3.c — SQLite has no matviews. Refresh = DROP + re-emit
+        # the matview-as-table CREATE. We re-run the schema
+        # template, but only the matview block (drops + creates),
+        # since the base tables stay untouched by a refresh.
+        return _emit_sqlite_matview_refresh(instance)
     # REFRESH first, then ANALYZE — ANALYZE updates planner stats so
     # subsequent SELECTs use the indexes we ship on each matview
     # (without ANALYZE the planner doesn't know the post-REFRESH row
@@ -231,6 +249,123 @@ def refresh_matviews_sql(
     refreshes = "\n".join(refresh_matview(n, dialect) for n in names)
     analyzes = "\n".join(analyze_table(n, dialect) for n in names)
     return f"{refreshes}\n{analyzes}"
+
+
+def _emit_sqlite_matview_refresh(instance: L2Instance) -> str:
+    """X.3.c — SQLite refresh: tear down + re-emit every matview-as-table.
+
+    The matview bodies live in the schema templates. Rather than
+    duplicate them here, this helper re-runs the L1 invariant + Inv
+    matview emission against the same instance / dialect so the
+    refresh SQL is byte-equivalent to "drop then re-create" for every
+    matview.
+
+    The base tables (transactions / daily_balances) and base indexes
+    are NOT in scope — a refresh leaves rows in place; only the
+    derived matview tables get rebuilt.
+
+    The dependency order is enforced by the templates' DROP block
+    coming before the CREATE block (and the dashboard-shape /
+    Investigation matviews living in templates that already encode
+    the right order).
+
+    Returns one SQL string. ANALYZE follows the rebuild so the
+    planner picks up post-refresh row counts.
+    """
+    p = instance.instance
+    drops_l1 = _emit_l1_invariant_drops(p, Dialect.SQLITE)
+    drops_inv = _emit_inv_matview_drops(p, Dialect.SQLITE)
+    drops_curr_tx = drop_matview_if_exists(
+        f"{p}_current_transactions", Dialect.SQLITE,
+    )
+    drops_curr_db = drop_matview_if_exists(
+        f"{p}_current_daily_balances", Dialect.SQLITE,
+    )
+    # Re-emit Current* matviews + all L1/Inv matviews. We extract
+    # just the CREATE blocks from the schema templates by re-rendering
+    # the inv + L1 invariant view sections (which depend on
+    # current_*) plus the Current* matview CREATEs from the base
+    # template.
+    current_creates = _emit_sqlite_current_matview_creates(p)
+    invariants = _emit_l1_invariant_views(instance, dialect=Dialect.SQLITE)
+    inv_views = _emit_inv_views(instance, dialect=Dialect.SQLITE)
+    names = [
+        f"{p}_current_transactions",
+        f"{p}_current_daily_balances",
+        f"{p}_computed_subledger_balance",
+        f"{p}_computed_ledger_balance",
+        f"{p}_drift",
+        f"{p}_ledger_drift",
+        f"{p}_overdraft",
+        f"{p}_expected_eod_balance_breach",
+        f"{p}_limit_breach",
+        f"{p}_stuck_pending",
+        f"{p}_stuck_unbundled",
+        f"{p}_daily_statement_summary",
+        f"{p}_todays_exceptions",
+        f"{p}_inv_pair_rolling_anomalies",
+        f"{p}_inv_money_trail_edges",
+    ]
+    analyzes = "\n".join(analyze_table(n, Dialect.SQLITE) for n in names)
+    return (
+        f"-- ===========================================================\n"
+        f"-- SQLite matview refresh for L2 instance: {p}\n"
+        f"-- Drops + re-emits every matview-as-table; base tables stay.\n"
+        f"-- ===========================================================\n"
+        + drops_l1 + "\n"
+        + drops_inv + "\n"
+        + drops_curr_tx + "\n"
+        + drops_curr_db + "\n\n"
+        + current_creates + "\n\n"
+        + invariants + "\n\n"
+        + inv_views + "\n\n"
+        + analyzes + "\n"
+    )
+
+
+def _emit_sqlite_current_matview_creates(p: str) -> str:
+    """Re-emit the Current* matview CREATE statements + their indexes
+    for SQLite refresh.
+
+    These live inside ``_SCHEMA_TEMPLATE`` for the regular schema
+    emit; the refresh path can't invoke the full template (the base-
+    table CREATE would conflict with existing data). This helper
+    isolates just the Current* matview CREATEs + their indexes so
+    the SQLite refresh path can rebuild them after a DROP.
+    """
+    matview_kw = matview_create_keyword(Dialect.SQLITE)
+    matview_opts = matview_options(Dialect.SQLITE)
+    return (
+        f"{matview_kw} {p}_current_transactions{matview_opts} AS\n"
+        f"SELECT * FROM {p}_transactions tx\n"
+        f"WHERE tx.entry = (\n"
+        f"    SELECT MAX(entry) FROM {p}_transactions WHERE id = tx.id\n"
+        f");\n"
+        f"CREATE INDEX idx_{p}_curr_tx_account_posting\n"
+        f"    ON {p}_current_transactions (account_id, posting);\n"
+        f"CREATE INDEX idx_{p}_curr_tx_transfer ON {p}_current_transactions (transfer_id);\n"
+        f"CREATE INDEX idx_{p}_curr_tx_id ON {p}_current_transactions (id);\n"
+        f"CREATE INDEX idx_{p}_curr_tx_status ON {p}_current_transactions (status);\n"
+        f"CREATE INDEX idx_{p}_curr_tx_posting_transfer_type\n"
+        f"    ON {p}_current_transactions (posting, transfer_type);\n"
+        f"CREATE INDEX idx_{p}_curr_tx_template_name\n"
+        f"    ON {p}_current_transactions (template_name);\n"
+        f"CREATE INDEX idx_{p}_curr_tx_parent\n"
+        f"    ON {p}_current_transactions (transfer_parent_id);\n"
+        f"\n"
+        f"{matview_kw} {p}_current_daily_balances{matview_opts} AS\n"
+        f"SELECT * FROM {p}_daily_balances sb\n"
+        f"WHERE sb.entry = (\n"
+        f"    SELECT MAX(entry)\n"
+        f"    FROM {p}_daily_balances\n"
+        f"    WHERE account_id = sb.account_id\n"
+        f"      AND business_day_start = sb.business_day_start\n"
+        f");\n"
+        f"CREATE INDEX idx_{p}_curr_db_account_day\n"
+        f"    ON {p}_current_daily_balances (account_id, business_day_start);\n"
+        f"CREATE INDEX idx_{p}_curr_db_scope_day\n"
+        f"    ON {p}_current_daily_balances (account_scope, business_day_start);\n"
+    )
 
 
 def _emit_l1_invariant_views(
@@ -265,6 +400,7 @@ def _emit_l1_invariant_views(
         pending_age_cases=pending_age_cases,
         unbundled_age_cases=unbundled_age_cases,
         matview_options=matview_options(dialect),
+        matview_create_kw=matview_create_keyword(dialect),
         date_trunc_tx_posting=date_trunc_day("tx.posting", dialect),
         epoch_age_seconds=epoch_seconds_between(
             "CURRENT_TIMESTAMP", "ct.posting", dialect,
@@ -396,12 +532,14 @@ def _emit_inv_views(
     # PG-only optimization but the planner produces the same plan.
     rolling_window = (
         "PARTITION BY recipient_account_id, sender_account_id "
-        "ORDER BY posted_day "
-        f"RANGE BETWEEN {interval_days(1, dialect)} PRECEDING AND CURRENT ROW"
+        f"ORDER BY {order_by_day_expr('posted_day', dialect)} "
+        f"RANGE BETWEEN {range_interval_days(1, dialect)} "
+        f"PRECEDING AND CURRENT ROW"
     )
     return _INV_MATVIEWS_TEMPLATE.format(
         p=p,
         matview_options=matview_options(dialect),
+        matview_create_kw=matview_create_keyword(dialect),
         recipient_posting_to_date=to_date("recipient.posting", dialect),
         rolling_window=rolling_window,
         cast_avg_numeric=cast("AVG(window_sum)", "NUMERIC", dialect),
@@ -598,9 +736,36 @@ def _emit_base_schema(
         "vc255": varchar_type(255, dialect),
         "dec202": decimal_type(20, 2, dialect),
         # Matview options suffix (Oracle BUILD IMMEDIATE REFRESH COMPLETE
-        # ON DEMAND; empty on Postgres).
+        # ON DEMAND; empty on Postgres + SQLite).
         "matview_options": matview_options(dialect),
-        # Partial-index WHERE clause — PG only.
+        # Matview CREATE keyword — PG/Oracle ``CREATE MATERIALIZED VIEW``,
+        # SQLite ``CREATE TABLE`` (matviews land as plain tables).
+        "matview_create_kw": matview_create_keyword(dialect),
+        # JSON validity constraint — PG/Oracle ``IS JSON``,
+        # SQLite ``json_valid()``.
+        "metadata_json_check": json_check("metadata", dialect),
+        "limits_json_check": json_check("limits", dialect),
+        # Per-table ``entry`` column declaration. PG gets
+        # ``BIGSERIAL NOT NULL`` (auto-incrementing). Oracle gets
+        # ``NUMBER GENERATED ALWAYS AS IDENTITY NOT NULL``. SQLite
+        # gets ``INTEGER PRIMARY KEY AUTOINCREMENT`` — single-column
+        # PK is the only place SQLite supports auto-increment, so the
+        # composite ``(id, entry)`` PG/Oracle PK collapses to a
+        # ``UNIQUE`` constraint on SQLite (see ``tx_pk_decl`` /
+        # ``db_pk_decl`` below).
+        "tx_entry_decl": _entry_column_decl(dialect),
+        "db_entry_decl": _entry_column_decl(dialect),
+        # Per-table PK / UNIQUE declaration. PG/Oracle declare a
+        # composite ``PRIMARY KEY (id, entry)`` /
+        # ``PRIMARY KEY (account_id, business_day_start, entry)``.
+        # SQLite already has a single-column PK on ``entry`` (the
+        # AUTOINCREMENT half), so the composite shifts to ``UNIQUE``.
+        "tx_pk_decl": _pk_decl(("id", "entry"), dialect),
+        "db_pk_decl": _pk_decl(
+            ("account_id", "business_day_start", "entry"), dialect,
+        ),
+        # Partial-index WHERE clause — PG only. Oracle + SQLite get
+        # the full index.
         "bundler_partial_where": (
             "\n    WHERE bundle_id IS NULL"
             if dialect is Dialect.POSTGRES else ""
@@ -629,6 +794,38 @@ def _emit_base_schema(
     fmt["drop_metadata_indexes"] = _emit_metadata_index_drops(p, instance, dialect)
     fmt["metadata_indexes"] = _emit_metadata_index_creates(p, instance, dialect)
     return _SCHEMA_TEMPLATE.format(**fmt)
+
+
+def _entry_column_decl(dialect: Dialect) -> str:
+    """Per-dialect declaration for the ``entry`` column.
+
+    PG: ``BIGSERIAL NOT NULL``. Oracle:
+    ``NUMBER GENERATED ALWAYS AS IDENTITY NOT NULL``. SQLite:
+    ``INTEGER PRIMARY KEY AUTOINCREMENT`` — SQLite only supports
+    auto-increment on a single-column ``INTEGER PRIMARY KEY``, so the
+    composite-PK shape PG/Oracle use can't apply. The composite
+    ``(id, entry)`` uniqueness invariant gets enforced via a
+    ``UNIQUE`` constraint instead (see ``_pk_decl``).
+    """
+    if dialect is Dialect.SQLITE:
+        return "INTEGER PRIMARY KEY AUTOINCREMENT"
+    return f"{serial_type(dialect)}      NOT NULL"
+
+
+def _pk_decl(cols: tuple[str, ...], dialect: Dialect) -> str:
+    """Per-dialect PK / UNIQUE declaration for the base tables.
+
+    PG/Oracle: ``PRIMARY KEY (cols)`` — composite key including
+    ``entry`` per the L1 supersession contract. SQLite: ``UNIQUE
+    (cols)`` — the ``entry`` column already carries the table's
+    PRIMARY KEY (single-column AUTOINCREMENT, see
+    ``_entry_column_decl``), so the composite uniqueness shifts to a
+    UNIQUE constraint while preserving the same invariant.
+    """
+    cols_sql = ", ".join(cols)
+    if dialect is Dialect.SQLITE:
+        return f"UNIQUE ({cols_sql})"
+    return f"PRIMARY KEY ({cols_sql})"
 
 
 _SCHEMA_TEMPLATE = """\
@@ -693,7 +890,7 @@ _SCHEMA_TEMPLATE = """\
 --                 document the L2 schema emits.
 -- ---------------------------------------------------------------------
 CREATE TABLE {p}_transactions (
-    entry                {serial}      NOT NULL,
+    entry                {tx_entry_decl},
     id                   {vc100}   NOT NULL,
     account_id           {vc100}   NOT NULL,
     account_name         {vc255},
@@ -716,7 +913,7 @@ CREATE TABLE {p}_transactions (
     supersedes           {vc50},
     origin               {vc50}    NOT NULL,
     metadata             {json_text},
-    PRIMARY KEY (id, entry),
+    {tx_pk_decl},
     -- Sign-direction agreement (L1 Amount INVARIANT):
     --   money ≥ 0 if direction = Credit; money ≤ 0 if direction = Debit.
     CHECK (
@@ -724,7 +921,7 @@ CREATE TABLE {p}_transactions (
         OR
         (amount_direction = 'Debit'  AND amount_money <= 0)
     ),
-    CHECK (metadata IS NULL OR metadata IS JSON)
+    {metadata_json_check}
 );
 
 -- ---------------------------------------------------------------------
@@ -749,7 +946,7 @@ CREATE TABLE {p}_transactions (
 --                 daily_balances row is by construction a correction.
 -- ---------------------------------------------------------------------
 CREATE TABLE {p}_daily_balances (
-    entry                  {serial}      NOT NULL,
+    entry                  {db_entry_decl},
     account_id             {vc100}   NOT NULL,
     account_name           {vc255},
     account_role           {vc100},
@@ -762,9 +959,9 @@ CREATE TABLE {p}_daily_balances (
     money                  {dec202}  NOT NULL,
     limits                 {json_text},
     supersedes             {vc50},
-    PRIMARY KEY (account_id, business_day_start, entry),
+    {db_pk_decl},
     CHECK (business_day_end > business_day_start),
-    CHECK (limits IS NULL OR limits IS JSON)
+    {limits_json_check}
 );
 
 -- B-tree indexes for the dashboard's hot-path queries. No GIN on
@@ -809,7 +1006,7 @@ CREATE INDEX idx_{p}_daily_balances_business_day  ON {p}_daily_balances (busines
 -- contract: integrators MUST `REFRESH MATERIALIZED VIEW` after every
 -- batch insert into the base tables. The library ships
 -- `refresh_matviews_sql(instance)` that emits the right REFRESH order.
-CREATE MATERIALIZED VIEW {p}_current_transactions{matview_options} AS
+{matview_create_kw} {p}_current_transactions{matview_options} AS
 SELECT * FROM {p}_transactions tx
 WHERE tx.entry = (
     SELECT MAX(entry) FROM {p}_transactions WHERE id = tx.id
@@ -845,7 +1042,7 @@ CREATE INDEX idx_{p}_curr_tx_template_name
 CREATE INDEX idx_{p}_curr_tx_parent
     ON {p}_current_transactions (transfer_parent_id);
 
-CREATE MATERIALIZED VIEW {p}_current_daily_balances{matview_options} AS
+{matview_create_kw} {p}_current_daily_balances{matview_options} AS
 SELECT * FROM {p}_daily_balances sb
 WHERE sb.entry = (
     SELECT MAX(entry)
@@ -940,7 +1137,7 @@ _L1_INVARIANT_VIEWS_TEMPLATE = """\
 -- A "leaf" account is one with account_parent_role IS NOT NULL
 -- (i.e., it's a child of a parent role).
 -- ---------------------------------------------------------------------
-CREATE MATERIALIZED VIEW {p}_computed_subledger_balance{matview_options} AS
+{matview_create_kw} {p}_computed_subledger_balance{matview_options} AS
 SELECT
     sb.account_id,
     sb.business_day_start,
@@ -967,7 +1164,7 @@ CREATE INDEX idx_{p}_csb_account_day
 -- A "parent" account is one whose role appears as account_parent_role
 -- on at least one other account (resolved via subquery).
 -- ---------------------------------------------------------------------
-CREATE MATERIALIZED VIEW {p}_computed_ledger_balance{matview_options} AS
+{matview_create_kw} {p}_computed_ledger_balance{matview_options} AS
 SELECT
     parent_db.account_id,
     parent_db.account_role,
@@ -1016,7 +1213,7 @@ CREATE INDEX idx_{p}_clb_account_day
 -- and ¬IsParent(Account), Drift(Account, BusinessDay) SHOULD equal 0.
 -- Rows in this view are the violations: stored ≠ computed.
 -- ---------------------------------------------------------------------
-CREATE MATERIALIZED VIEW {p}_drift{matview_options} AS
+{matview_create_kw} {p}_drift{matview_options} AS
 SELECT
     sb.account_id,
     sb.account_name,
@@ -1055,7 +1252,7 @@ CREATE INDEX idx_{p}_drift_day_account_role
 -- and IsParent(Account), LedgerDrift(Account, BusinessDay) SHOULD equal 0.
 -- Rows in this view are the violations.
 -- ---------------------------------------------------------------------
-CREATE MATERIALIZED VIEW {p}_ledger_drift{matview_options} AS
+{matview_create_kw} {p}_ledger_drift{matview_options} AS
 SELECT
     sb.account_id,
     sb.account_name,
@@ -1085,7 +1282,7 @@ CREATE INDEX idx_{p}_ledger_drift_day_account_role
 -- Rows in this view are accounts × days where the stored balance is
 -- negative (overdraft).
 -- ---------------------------------------------------------------------
-CREATE MATERIALIZED VIEW {p}_overdraft{matview_options} AS
+{matview_create_kw} {p}_overdraft{matview_options} AS
 SELECT
     sb.account_id,
     sb.account_name,
@@ -1107,7 +1304,7 @@ CREATE INDEX idx_{p}_overdraft_role ON {p}_overdraft (account_role);
 -- set, money SHOULD equal expected_eod_balance.
 -- Rows are violations.
 -- ---------------------------------------------------------------------
-CREATE MATERIALIZED VIEW {p}_expected_eod_balance_breach{matview_options} AS
+{matview_create_kw} {p}_expected_eod_balance_breach{matview_options} AS
 SELECT
     sb.account_id,
     sb.account_name,
@@ -1137,7 +1334,7 @@ CREATE INDEX idx_{p}_eod_breach_account_day
 -- so no JOIN to daily_balances is needed (which also avoids the failure
 -- mode where a breach business_day has no enclosing daily_balance row).
 -- ---------------------------------------------------------------------
-CREATE MATERIALIZED VIEW {p}_limit_breach{matview_options} AS
+{matview_create_kw} {p}_limit_breach{matview_options} AS
 SELECT *
 FROM (
     SELECT
@@ -1184,7 +1381,7 @@ CREATE INDEX idx_{p}_lb_type ON {p}_limit_breach (transfer_type);
 -- dashboard can sort by staleness without re-evaluating CURRENT_TIMESTAMP
 -- on every visual.
 -- ---------------------------------------------------------------------
-CREATE MATERIALIZED VIEW {p}_stuck_pending{matview_options} AS
+{matview_create_kw} {p}_stuck_pending{matview_options} AS
 SELECT * FROM (
     SELECT
         ct.id AS transaction_id,
@@ -1230,7 +1427,7 @@ CREATE INDEX idx_{p}_sp_transfer ON {p}_stuck_pending (transfer_id);
 -- "stuck unbundled," it's just "stuck pending." The two views are
 -- structurally similar but cover disjoint conditions.
 -- ---------------------------------------------------------------------
-CREATE MATERIALIZED VIEW {p}_stuck_unbundled{matview_options} AS
+{matview_create_kw} {p}_stuck_unbundled{matview_options} AS
 SELECT * FROM (
     SELECT
         ct.id AS transaction_id,
@@ -1267,7 +1464,7 @@ CREATE INDEX idx_{p}_su_transfer ON {p}_stuck_unbundled (transfer_id);
 -- One row per (account_id, business_day_start). Sheet-local filters
 -- narrow to a single (account, day) at render time.
 -- ---------------------------------------------------------------------
-CREATE MATERIALIZED VIEW {p}_daily_statement_summary{matview_options} AS
+{matview_create_kw} {p}_daily_statement_summary{matview_options} AS
 WITH account_days AS (
     SELECT db.account_id, db.account_name, db.account_role,
            db.account_parent_role, db.account_scope,
@@ -1328,7 +1525,7 @@ CREATE INDEX idx_{p}_dss_account_day
 -- `magnitude` normalized per branch so sort-by-magnitude reads
 -- consistently regardless of check_type.
 -- ---------------------------------------------------------------------
-CREATE MATERIALIZED VIEW {p}_todays_exceptions{matview_options} AS
+{matview_create_kw} {p}_todays_exceptions{matview_options} AS
 WITH latest_day AS (
     SELECT MAX(business_day_start) AS day
     FROM {p}_current_daily_balances
@@ -1449,7 +1646,7 @@ _INV_MATVIEWS_TEMPLATE = """\
 -- Operators must run
 --     REFRESH MATERIALIZED VIEW {p}_inv_pair_rolling_anomalies;
 -- after each ETL load.
-CREATE MATERIALIZED VIEW {p}_inv_pair_rolling_anomalies{matview_options} AS
+{matview_create_kw} {p}_inv_pair_rolling_anomalies{matview_options} AS
 WITH pair_legs AS (
     -- v6 column rename. signed_amount becomes amount_money (signed,
     -- where positive is Credit/inflow and negative is Debit/outflow).
@@ -1583,7 +1780,7 @@ CROSS JOIN population pop;
 -- Operators must run
 --     REFRESH MATERIALIZED VIEW {p}_inv_money_trail_edges;
 -- after each ETL load.
-CREATE MATERIALIZED VIEW {p}_inv_money_trail_edges{matview_options} AS
+{matview_create_kw} {p}_inv_money_trail_edges{matview_options} AS
 {with_recursive_kw}
 distinct_transfers AS (
     -- One row per transfer_id with its parent. {p}_transactions has
