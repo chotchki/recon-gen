@@ -26,6 +26,7 @@ Substrate: pytest-as-orchestrator + this thin Python wrapper. See
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -36,7 +37,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 EXIT_SUCCESS: Final = 0
 EXIT_FAILURE: Final = 1
@@ -225,8 +226,13 @@ def _layer_command(layer: str, run_dir: Path) -> tuple[list[str], dict[str, str]
     Layer 1 (pyright) runs the binary directly; layer 2 (unit) sets
     ``QS_GEN_SKIP_PYRIGHT=1`` so the conftest sessionstart hook doesn't
     duplicate the pyright pass we already did at layer 1.
+
+    ``QS_GEN_LAYER`` + ``QS_GEN_RUN_DIR`` are threaded through to every
+    pytest subprocess so ``tests/conftest.py``'s makereport hook (c.2)
+    can write per-test timings into the right ``runs/<run-id>/timings/``
+    file.
     """
-    env_addl = {"QS_GEN_RUN_DIR": str(run_dir)}
+    env_addl = {"QS_GEN_RUN_DIR": str(run_dir), "QS_GEN_LAYER": layer}
     if layer == "pyright":
         return [str(_VENV_BIN / "pyright")], env_addl
     if layer == "unit":
@@ -275,6 +281,58 @@ def dispatch_layer(layer: str, run_dir: Path) -> LayerResult:
     result = subprocess.run(cmd, cwd=REPO_ROOT, env=env, check=False)
     duration = time.monotonic() - start
     return LayerResult(layer=layer, exit_code=result.returncode, duration_seconds=duration)
+
+
+def _aggregate_test_jsonl(run_dir: Path) -> dict[str, dict[str, dict[str, Any]]]:
+    """Read every ``timings/<layer>[-worker*].jsonl`` produced by conftest's
+    makereport hook (c.2); return ``{layer: {test_id: {duration, outcome}}}``.
+
+    The ``-worker*`` suffix lands when xdist parallelism kicks in (c.6); per-
+    worker files avoid append contention. For now (no xdist), each layer
+    writes one file."""
+    timings_dir = run_dir / "timings"
+    out: dict[str, dict[str, dict[str, Any]]] = {}
+    if not timings_dir.exists():
+        return out
+    for jsonl_file in sorted(timings_dir.glob("*.jsonl")):
+        # `<layer>.jsonl` or `<layer>-worker<n>.jsonl`
+        layer = jsonl_file.stem.split("-", 1)[0]
+        tests = out.setdefault(layer, {})
+        for line in jsonl_file.read_text().splitlines():
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            tests[str(record["test_id"])] = {
+                "duration_seconds": float(record["duration_seconds"]),
+                "outcome": str(record["outcome"]),
+            }
+    return out
+
+
+def collect_run_outputs(run_dir: Path, layer_results: Sequence[LayerResult]) -> None:
+    """Y.2.gate.c.2 — write ``timings.json`` + ``hashes.json`` after the chain.
+
+    ``timings.json`` aggregates per-layer wall-clock durations + per-test
+    timings (for layers that ran pytest, via the conftest hook).
+    ``hashes.json`` is a placeholder — populated by future tests/code as part
+    of ``c.13`` (hash-lock collapses into the runs dir).
+
+    Single-source-of-drift principle (audit §7.9): both files live alongside
+    each other under ``runs/<run-id>/``; ``c.3``'s drift-diff reads them
+    together against the prior run.
+    """
+    aggregated: dict[str, Any] = {
+        "layer_durations": {r.layer: r.duration_seconds for r in layer_results if not r.skipped},
+        "skipped_layers": [r.layer for r in layer_results if r.skipped],
+        "layer_exit_codes": {r.layer: r.exit_code for r in layer_results},
+        "test_durations": _aggregate_test_jsonl(run_dir),
+    }
+    (run_dir / "timings.json").write_text(json.dumps(aggregated, indent=2) + "\n")
+    hashes_path = run_dir / "hashes.json"
+    if not hashes_path.exists():
+        # Empty stub — c.13 fills this in when the global SHA256 lock collapses
+        # into per-run captures.
+        hashes_path.write_text("{}\n")
 
 
 def chain_through(target: str) -> list[str]:
@@ -409,14 +467,19 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     chain = chain_through(args.layer)
     print(f"runner: chain={chain}")
     final_code = EXIT_SUCCESS
+    layer_results: list[LayerResult] = []
     for layer in chain:
         result = dispatch_layer(layer, run_dir)
+        layer_results.append(result)
         marker = "skip" if result.skipped else ("ok" if result.passed else "FAIL")
         print(f"runner: layer-{marker} [{layer}] rc={result.exit_code} duration={result.duration_seconds:.2f}s")
         if not result.passed:
             print(f"runner: stop-on-first-failure — chain halted at {layer}", file=sys.stderr)
             final_code = EXIT_FAILURE
             break
+
+    collect_run_outputs(run_dir, layer_results)
+    print(f"runner: wrote {(run_dir / 'timings.json').relative_to(REPO_ROOT)}")
 
     pruned = prune_old_runs()
     if pruned:

@@ -321,12 +321,16 @@ def test_chain_through_browser_full() -> None:
 
 
 def test_layer_command_pyright() -> None:
-    """Layer 1 runs pyright directly — no pytest, no QS_GEN_SKIP_PYRIGHT needed."""
+    """Layer 1 runs pyright directly — no pytest, no QS_GEN_SKIP_PYRIGHT needed.
+
+    Both QS_GEN_RUN_DIR + QS_GEN_LAYER thread through (c.2 timings hook needs
+    them; pyright doesn't use them, but threading uniformly keeps the
+    layer-command shape symmetric)."""
     cmd_env = runner._layer_command("pyright", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env_addl = cmd_env
     assert cmd[-1].endswith("pyright")
-    assert env_addl == {"QS_GEN_RUN_DIR": "/tmp/run"}
+    assert env_addl == {"QS_GEN_RUN_DIR": "/tmp/run", "QS_GEN_LAYER": "pyright"}
 
 
 def test_layer_command_unit_skips_pyright() -> None:
@@ -438,3 +442,90 @@ def test_prune_runs_pattern_accepts_dirty_suffix() -> None:
     assert not runner._RUN_ID_PATTERN.match("operator-notes.txt")
     assert not runner._RUN_ID_PATTERN.match("scratch-dir")
     assert not runner._RUN_ID_PATTERN.match("20260507")
+
+
+# Y.2.gate.c.2 — timings + hashes capture tests.
+
+import json
+
+
+def test_layer_command_threads_qs_gen_layer_env() -> None:
+    """QS_GEN_LAYER must reach pytest subprocesses so conftest hooks know
+    which layer's JSONL file to append to."""
+    cmd_env = runner._layer_command("unit", Path("/tmp/run"))
+    assert cmd_env is not None
+    _, env_addl = cmd_env
+    assert env_addl["QS_GEN_LAYER"] == "unit"
+
+
+def test_aggregate_test_jsonl_empty_when_no_files(tmp_path: Path) -> None:
+    """Missing timings dir → empty mapping (no error)."""
+    assert runner._aggregate_test_jsonl(tmp_path) == {}
+
+
+def test_aggregate_test_jsonl_reads_one_layer(tmp_path: Path) -> None:
+    timings = tmp_path / "timings"
+    timings.mkdir()
+    (timings / "unit.jsonl").write_text(
+        '{"layer": "unit", "test_id": "tests/unit/foo.py::test_a", "duration_seconds": 0.012, "outcome": "passed"}\n'
+        '{"layer": "unit", "test_id": "tests/unit/foo.py::test_b", "duration_seconds": 0.005, "outcome": "passed"}\n'
+    )
+    result = runner._aggregate_test_jsonl(tmp_path)
+    assert "unit" in result
+    assert result["unit"]["tests/unit/foo.py::test_a"]["duration_seconds"] == 0.012
+    assert result["unit"]["tests/unit/foo.py::test_b"]["outcome"] == "passed"
+
+
+def test_aggregate_test_jsonl_merges_xdist_workers(tmp_path: Path) -> None:
+    """c.6 — when xdist is active, each worker writes <layer>-<worker_id>.jsonl;
+    aggregator merges them into one layer entry."""
+    timings = tmp_path / "timings"
+    timings.mkdir()
+    (timings / "unit-gw0.jsonl").write_text(
+        '{"layer": "unit", "test_id": "tests/unit/a.py::t1", "duration_seconds": 0.01, "outcome": "passed"}\n'
+    )
+    (timings / "unit-gw1.jsonl").write_text(
+        '{"layer": "unit", "test_id": "tests/unit/b.py::t2", "duration_seconds": 0.02, "outcome": "passed"}\n'
+    )
+    result = runner._aggregate_test_jsonl(tmp_path)
+    assert set(result["unit"].keys()) == {"tests/unit/a.py::t1", "tests/unit/b.py::t2"}
+
+
+def test_collect_run_outputs_writes_timings_json(tmp_path: Path) -> None:
+    layer_results = [
+        runner.LayerResult(layer="pyright", exit_code=0, duration_seconds=1.91),
+        runner.LayerResult(layer="unit", exit_code=0, duration_seconds=10.35),
+        runner.LayerResult(layer="deploy", exit_code=0, duration_seconds=0.0, skipped=True),
+    ]
+    runner.collect_run_outputs(tmp_path, layer_results)
+    timings = json.loads((tmp_path / "timings.json").read_text())
+    assert timings["layer_durations"] == {"pyright": 1.91, "unit": 10.35}
+    assert timings["skipped_layers"] == ["deploy"]
+    assert timings["layer_exit_codes"] == {"pyright": 0, "unit": 0, "deploy": 0}
+
+
+def test_collect_run_outputs_writes_empty_hashes_stub(tmp_path: Path) -> None:
+    """c.13 will populate hashes.json; for now it's a stub written iff missing."""
+    runner.collect_run_outputs(tmp_path, [])
+    assert (tmp_path / "hashes.json").read_text() == "{}\n"
+
+
+def test_collect_run_outputs_preserves_existing_hashes(tmp_path: Path) -> None:
+    """If something else already wrote hashes.json (e.g. a future test fixture
+    using c.13's API), don't clobber it."""
+    (tmp_path / "hashes.json").write_text('{"seed": "abc123"}\n')
+    runner.collect_run_outputs(tmp_path, [])
+    assert (tmp_path / "hashes.json").read_text() == '{"seed": "abc123"}\n'
+
+
+def test_collect_run_outputs_aggregates_test_durations(tmp_path: Path) -> None:
+    timings = tmp_path / "timings"
+    timings.mkdir()
+    (timings / "unit.jsonl").write_text(
+        '{"layer": "unit", "test_id": "tests/unit/a.py::t1", "duration_seconds": 0.01, "outcome": "passed"}\n'
+    )
+    runner.collect_run_outputs(
+        tmp_path, [runner.LayerResult(layer="unit", exit_code=0, duration_seconds=2.0)]
+    )
+    timings_json = json.loads((tmp_path / "timings.json").read_text())
+    assert "tests/unit/a.py::t1" in timings_json["test_durations"]["unit"]
