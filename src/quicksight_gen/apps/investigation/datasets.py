@@ -561,9 +561,20 @@ def build_account_network_dataset(cfg: Config) -> DataSet:
     companion dataset needed for Y.2.b.
     """
     p = _require_prefix(cfg)
+    # CTE wrap: ``source_display`` / ``target_display`` are SELECT-list
+    # aliases over concat expressions, not real matview columns. PG /
+    # Oracle / SQLite all evaluate WHERE before SELECT, so the aliases
+    # aren't visible to a same-query WHERE — `WHERE source_display = ...`
+    # raises ``UndefinedColumn``. Wrapping the projection in a CTE moves
+    # the WHERE one scope outward, where the alias IS in scope. Caught
+    # by ``tests/integration/verify_dataset_sql.py`` in seconds.
     base = _money_trail_base_sql(p)
     sql = (
-        f"{base}WHERE 1=1\n"
+        f"WITH base AS (\n"
+        f"{base}"
+        f")\n"
+        f"SELECT * FROM base\n"
+        f"WHERE 1=1\n"
         f"  AND (\n"
         f"    source_display = <<${P_INV_ANETWORK_ANCHOR}>>\n"
         f"    OR target_display = <<${P_INV_ANETWORK_ANCHOR}>>\n"
