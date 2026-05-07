@@ -166,7 +166,65 @@ If during implementation the orchestrator starts growing past ~600 LOC, that's a
 - `Y.2.gate.b.1` ... `b.11` — design sub-tasks proceed under this substrate. Some sub-tasks shrink (e.g. `b.1 variant axis catalog` is now "what markers + parametrize fixtures do we need").
 - `Y.2.gate.c` — implementation: bash entry-point shim + Python orchestrator + conftest deltas. Each `c.X` sub-task gets specific Python module / function ownership.
 
-**Open follow-ups (not deferrals — concrete sub-tasks that arise from this lock):**
-- Confirm pytest version + plugin availability for the JSON hook we'd use (likely a custom hook in conftest; no new dependency).
-- Confirm the `_dev/` package shape vs sibling alternatives (e.g., `tests/_runner/`). Lean `quicksight_gen/_dev/runner.py` because it's tooling that ships in dev installs but not in the customer wheel — pyproject.toml include rules handle that.
-- The bash entry-point shim — minimum viable shape. Probably ~10 lines (`#!/usr/bin/env bash; exec uv run python -m quicksight_gen._dev.runner "$@"` plus a "venv exists?" check).
+## 6. Follow-ups resolved (Y.2.gate.b.12 / b.13 / b.14, 2026-05-07)
+
+### b.12 — Pytest version + JSON-hook plugin confirmation
+
+**Verdict:** custom conftest hook is sufficient. **No new dependency.**
+
+- Pinned pytest version: `pytest>=7.0` in both `[dev]` and `[e2e]` extras (`pyproject.toml` lines 103, 157). Pytest ≥ 7 supports the hooks we need.
+- **Hook to use for per-test wall-clock timing**: `pytest_runtest_makereport(item, call)` — fires per test phase (setup / call / teardown). We capture `call.duration` at the `call` phase, key by `item.nodeid`, and accumulate into `$QS_GEN_RUN_DIR/timings/<variant>.json`. (The earlier draft mentioned `pytest_runtest_protocol` — that hook's lower-level and doesn't give us `duration` directly. `_makereport` is the standard timing-capture hook.)
+- **Hook for session-level data** (run-id metadata, hashes): `pytest_sessionstart(session)` writes the run-id metadata header; `pytest_sessionfinish(session, exitstatus)` flushes any final aggregates.
+- **Why no `pytest-json-report` plugin**: that plugin produces a single `.report.json` with a fixed schema. We want our own schema (per-variant files merged by the orchestrator into `runs/<run-id>/timings.json`), and we want it to live under `$QS_GEN_RUN_DIR/` not the cwd. Custom hook ~30 LOC, no extra dep.
+- **Bonus**: `pytest-xdist>=3.5` already pinned in `[e2e]` for the within-variant parallelism we need.
+
+### b.13 — `_dev/` package shape lock-in
+
+**Verdict:** `src/quicksight_gen/_dev/runner.py` with a `[tool.setuptools.packages.find] exclude` entry. Verify with a wheel-build test.
+
+- Today's `pyproject.toml` `[tool.setuptools.packages.find]` block (line 168-169) has only `where = ["src"]` — no `exclude`. So if we add `_dev/` with an `__init__.py`, it'd auto-include in the wheel.
+- **Lock**: extend the block to `where = ["src"], exclude = ["quicksight_gen._dev", "quicksight_gen._dev.*"]`. The `.*` covers nested submodules.
+- **Verification step (lands as part of `Y.2.gate.c`):** add a CI assertion that `pip wheel . -o /tmp/wheels && unzip -l /tmp/wheels/quicksight_gen-*.whl | grep _dev` returns no matches. Same shape as the existing `docs-portable-install` regression guard in `ci.yml`.
+- **Why not `tests/_runner/`**: `tests/__init__.py` exists, but the orchestrator semantically isn't a test — it INVOKES tests. Putting it under `tests/` blurs that boundary and complicates the `python -m ...` invocation form.
+- **Why not top-level `dev_tools/`**: more clutter; needs sys.path setup; the package-namespace solution is simpler.
+- **Side benefit**: pyright strict scope can include `src/quicksight_gen/_dev/` cleanly via the existing `[tool.pyright] include` list — no new path config.
+
+### b.14 — Bash entry-point shim minimum viable shape
+
+**Verdict:** ~12 lines of bash. Following `run_e2e.sh`'s style. SIGINT propagates through `exec` automatically; no trap needed.
+
+```bash
+#!/usr/bin/env bash
+#
+# Y.2.gate runner — layered test chain with per-run output isolation
+# and timing-diff drift detection.
+#
+# Usage examples:
+#   ./run_tests.sh up_to=browser
+#   ./run_tests.sh up_to=db --variants=pg --fuzz-seeds=10
+#   ./run_tests.sh sweep              # clean orphan AWS/Docker resources
+#   ./run_tests.sh up [local|aws]     # boot dependencies (default = both)
+#   ./run_tests.sh down [local|aws]   # tear down (default = both)
+#   ./run_tests.sh status [--cost]    # what's running
+#
+# All real logic lives in src/quicksight_gen/_dev/runner.py. This script
+# is a thin shim: verify the venv exists, exec the orchestrator. Argparse
+# is owned by Python.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+if [ ! -x ".venv/bin/python" ]; then
+  echo "error: .venv not found at ${SCRIPT_DIR}/.venv — run 'uv sync --all-extras' first" >&2
+  exit 1
+fi
+
+exec .venv/bin/python -m quicksight_gen._dev.runner "$@"
+```
+
+- **No arg parsing in bash** — the orchestrator owns it. The bash here only checks the venv and exec's.
+- **`exec` semantics**: replaces the bash process, so SIGINT / SIGTERM go directly to the Python process. No need for a trap to forward signals.
+- **Why `cd "$SCRIPT_DIR"`**: lets the operator run `./run_tests.sh ...` from any working directory; the orchestrator can rely on cwd being the repo root.
+- **`uv run` vs `.venv/bin/python` direct**: per memory `feedback_venv_invocation.md`, prefer `.venv/bin/...` direct invocation. `uv run` adds startup overhead (~200ms) per invocation; for an orchestrator that calls itself recursively or fires many subprocesses, that compounds.
+- **Top-level docstring of `runner.py`**: mirrors this usage block + lists the orchestrator's flags. The bash shim's comment block stays minimal.
