@@ -29,7 +29,8 @@ import argparse
 import os
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Final
@@ -50,6 +51,148 @@ LAYERS: Final[tuple[str, ...]] = (
 
 REPO_ROOT: Final = Path(__file__).resolve().parents[3]
 RUNS_DIR: Final = REPO_ROOT / "runs"
+
+# Y.2.gate.c.8 — per-layer dependency requirements. Authoritative mirror of
+# audit doc §3 (variant axes table). Cross-checked by
+# tests/unit/test_runner_skeleton.py::test_layer_deps_match_audit (c.14).
+#
+# Probe kinds (matched to _probe_* function names):
+#   "aws"     — AWS creds present + not expired (sts:GetCallerIdentity).
+#   "docker"  — Docker daemon reachable (`docker ps`).
+#   "qs_arn"  — QS_E2E_USER_ARN set (browser e2e signs embed URLs as this user).
+#
+# DB connectivity is probed via cfg-loaded URLs and lands when Y.2.gate.h.2
+# (cfg-driven DB strings) wires up. For now, layers that need DB rely on the
+# downstream pytest fixture failing loudly if the DB is unreachable.
+_LAYER_DEPS: Final[dict[str, frozenset[str]]] = {
+    "pyright": frozenset(),
+    "unit": frozenset(),
+    "db": frozenset({"docker"}),
+    "deploy": frozenset({"aws", "docker"}),
+    "api": frozenset({"aws", "docker"}),
+    "browser": frozenset({"aws", "docker", "qs_arn"}),
+}
+
+
+@dataclass(frozen=True)
+class ProbeFailure:
+    """Y.2.gate.c.8 — a single missing or broken dependency.
+
+    ``kind`` is a stable token (used by tests + telemetry); ``message`` is the
+    operator-facing string (b.14.4 refusal pattern — actionable, points at
+    what to do, never auto-invokes interactive flows).
+    """
+
+    kind: str
+    message: str
+
+
+def _run_probe_subprocess(cmd: list[str], timeout: float = 10.0) -> subprocess.CompletedProcess[str]:
+    """Run a probe subprocess with a timeout so a hanging command can't lock
+    the runner. ``timeout=10s`` is generous; AWS CLI typically finishes in <2s,
+    docker ps in <1s. On TimeoutExpired we synthesize a returncode=124 + empty
+    stdout/stderr the caller can branch on."""
+    try:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(args=cmd, returncode=124, stdout="", stderr="probe timed out")
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(args=cmd, returncode=127, stdout="", stderr=f"{cmd[0]}: not found")
+
+
+def _probe_aws() -> ProbeFailure | None:
+    """Y.2.gate.c.8 + b.14.4 — check AWS creds via ``aws sts get-caller-identity``.
+
+    Returns ``None`` if creds work. On expired/missing/unknown failure, returns
+    a ``ProbeFailure`` whose message tells the operator exactly what to type
+    (`! aws sso login`); we **never** auto-invoke the SSO browser flow."""
+    result = _run_probe_subprocess(["aws", "sts", "get-caller-identity"])
+    if result.returncode == 0:
+        return None
+
+    stderr_lower = result.stderr.lower()
+    if "expiredtoken" in stderr_lower or "tokenexpired" in stderr_lower:
+        return ProbeFailure(
+            kind="aws_creds_expired",
+            message="AWS creds expired — type '! aws sso login' yourself, then re-invoke",
+        )
+    if "unable to locate credentials" in stderr_lower or "no credentials" in stderr_lower:
+        return ProbeFailure(
+            kind="aws_no_creds",
+            message="No AWS credentials — set AWS_PROFILE or run 'aws configure', then re-invoke",
+        )
+    if result.returncode == 127:
+        return ProbeFailure(
+            kind="aws_cli_missing",
+            message="aws CLI not found — install awscli, then re-invoke",
+        )
+    return ProbeFailure(
+        kind="aws_check_failed",
+        message=f"AWS check failed (rc={result.returncode}): {result.stderr.strip() or '(no stderr)'}",
+    )
+
+
+def _probe_docker() -> ProbeFailure | None:
+    """Check Docker daemon is reachable via ``docker ps``."""
+    result = _run_probe_subprocess(["docker", "ps"])
+    if result.returncode == 0:
+        return None
+    if result.returncode == 127:
+        return ProbeFailure(
+            kind="docker_cli_missing",
+            message="docker CLI not found — install Docker Desktop / docker engine, then re-invoke",
+        )
+    if "cannot connect to the docker daemon" in result.stderr.lower():
+        return ProbeFailure(
+            kind="docker_daemon_down",
+            message="Docker daemon not running — start Docker Desktop (or `colima start`), then re-invoke",
+        )
+    return ProbeFailure(
+        kind="docker_check_failed",
+        message=f"Docker check failed (rc={result.returncode}): {result.stderr.strip() or '(no stderr)'}",
+    )
+
+
+def _probe_qs_e2e_user_arn() -> ProbeFailure | None:
+    """Check ``QS_E2E_USER_ARN`` env var is set (required for browser e2e
+    embed-URL signing). Auto-derivation from AWS identity lands under
+    ``Y.2.gate.h.1``; for now the env var is operator-set."""
+    if os.environ.get("QS_E2E_USER_ARN"):
+        return None
+    return ProbeFailure(
+        kind="qs_arn_unset",
+        message="QS_E2E_USER_ARN unset — export the QuickSight user ARN for embed signing, then re-invoke",
+    )
+
+
+_ProbeFunc = Callable[[], "ProbeFailure | None"]
+_PROBE_FUNCTIONS: Final[dict[str, _ProbeFunc]] = {
+    "aws": _probe_aws,
+    "docker": _probe_docker,
+    "qs_arn": _probe_qs_e2e_user_arn,
+}
+
+
+def probe_dependencies(layer: str) -> list[ProbeFailure]:
+    """Y.2.gate.c.8 — probe every dep ``layer`` needs; return all failures.
+
+    Probes run sequentially (cheap; few seconds total) and gather all failures
+    so the operator sees everything missing in one pass instead of fixing one,
+    re-running, hitting the next, etc. No state file (LOCKED §7.12) — each
+    invocation re-probes."""
+    failures: list[ProbeFailure] = []
+    for dep_kind in sorted(_LAYER_DEPS[layer]):
+        probe = _PROBE_FUNCTIONS[dep_kind]
+        result = probe()
+        if result is not None:
+            failures.append(result)
+    return failures
 
 
 def _short_sha() -> str:
@@ -110,7 +253,17 @@ def _normalize_argv(argv: Sequence[str]) -> list[str]:
 
 
 def cmd_up_to(args: argparse.Namespace) -> int:
-    """Run the test chain up to and including the named layer."""
+    """Run the test chain up to and including the named layer.
+
+    Pre-flight: probes the named layer's required deps (c.8). On any failure,
+    prints the operator-actionable message and exits NEEDS_OPERATOR — does NOT
+    auto-invoke any interactive flow (b.14.4)."""
+    failures = probe_dependencies(args.layer)
+    if failures:
+        for failure in failures:
+            print(f"runner: probe-fail [{failure.kind}] {failure.message}", file=sys.stderr)
+        return EXIT_NEEDS_OPERATOR
+
     run_id = create_run_id()
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
