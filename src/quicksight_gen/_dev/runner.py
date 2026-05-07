@@ -29,6 +29,7 @@ import argparse
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -45,13 +46,19 @@ EXIT_NEEDS_OPERATOR: Final = 2
 EXIT_CONFIG_ERROR: Final = 3
 
 LAYERS: Final[tuple[str, ...]] = (
-    "pyright",
     "unit",
     "db",
     "deploy",
     "api",
     "browser",
 )
+# Y.2.gate.c.7-followup (2026-05-07) — `pyright` collapsed into the `unit`
+# layer. The repo-root ``conftest.py::pytest_sessionstart`` (M.1.9c contract)
+# runs pyright on session start; on failure ``pytest.exit(returncode=2)``
+# fires before any test collects. So bare ``pytest tests/`` AND the runner
+# both type-check, with no double-pyright bookkeeping. Trade-off: pyright
+# duration folds into the unit layer's wall-clock instead of being its own
+# entry in `timings.json`. Acceptable because pyright is ~2s.
 
 REPO_ROOT: Final = Path(__file__).resolve().parents[3]
 RUNS_DIR: Final = REPO_ROOT / "runs"
@@ -80,7 +87,6 @@ _RUN_ID_PATTERN: Final = re.compile(r"^\d{8}T\d{6}Z-\w+(?:-dirty)?$")
 # (cfg-driven DB strings) wires up. For now, layers that need DB rely on the
 # downstream pytest fixture failing loudly if the DB is unreachable.
 _LAYER_DEPS: Final[dict[str, frozenset[str]]] = {
-    "pyright": frozenset(),
     "unit": frozenset(),
     "db": frozenset({"docker"}),
     "deploy": frozenset({"aws", "docker"}),
@@ -202,10 +208,14 @@ class RunOptions:
 
     - ``only`` — pytest ``-k <expr>`` filter (active now in c.7).
     - ``parallel`` — pytest-xdist worker count (active now in c.6; default 1 = serial).
+    - ``fuzz_seed_value`` — the actual fuzz seed VALUE for this run (resolved at
+      cmd_up_to entry: env-override > random-per-invocation; persists across xdist
+      workers in this run via env passthrough — c.6.xdist-safety lock).
     - ``trace_all`` — Playwright capture every test (env var passthrough; consumed by c.11).
     - ``allow_dirty_deploy`` — bypass tracked-changes refusal on layer 4+ (active now per b.10).
     - ``variants`` / ``fuzz_seeds`` — cross-variant fan-out via asyncio.gather (lands when
-      real variants exist; deploy/api/browser are stubs today).
+      real variants exist; deploy/api/browser are stubs today). ``fuzz_seeds`` = COUNT
+      (sample size for property-testing axis) vs ``fuzz_seed_value`` = VALUE.
     - ``skip_cheap`` — skip-if-already-green-this-SHA (active when cache lands; b.8).
     - ``keep_on_failure`` — don't tear down ephemeral state on failure (active when
       Y.2.gate.l.2 lifecycle commands land; b.14.3 / f.5).
@@ -215,10 +225,27 @@ class RunOptions:
     parallel: int = 1
     variants: str = "default"
     fuzz_seeds: int = 1
+    fuzz_seed_value: int | None = None
     skip_cheap: bool = False
     keep_on_failure: bool = False
     trace_all: bool = False
     allow_dirty_deploy: bool = False
+
+
+def resolve_fuzz_seed_value() -> int:
+    """Y.2.gate.c.6.xdist-safety — resolve the seed for this runner invocation.
+
+    Priority: ``QS_GEN_FUZZ_SEED`` env (operator pin for failure repro) > random
+    per session (`secrets.randbits(32)`). Per audit §7.11 (LOCKED): default = 1
+    random seed per run; cumulative coverage emerges across many runs. The seed
+    is pinned across xdist workers within a single run so parametrize collection
+    is deterministic (otherwise each worker rolls its own seed → collection
+    diverges → ``Different tests were collected`` error).
+    """
+    override = os.environ.get("QS_GEN_FUZZ_SEED")
+    if override is not None and override.strip():
+        return int(override)
+    return secrets.randbits(32)
 
 
 @dataclass(frozen=True)
@@ -252,9 +279,12 @@ def _layer_command(
     """Map layer → (subprocess argv, env additions). Returns None for layers
     not yet wired (cfg-loading-blocked: deploy / api / browser).
 
-    Layer 1 (pyright) runs the binary directly; layer 2 (unit) sets
-    ``QS_GEN_SKIP_PYRIGHT=1`` so the conftest sessionstart hook doesn't
-    duplicate the pyright pass we already did at layer 1.
+    Pyright runs via the repo-root ``conftest.py::pytest_sessionstart`` hook
+    (M.1.9c contract) at the start of every pytest invocation — so the unit
+    layer's pytest invocation type-checks before any test runs. Direct
+    ``pytest tests/`` invocations (developer one-test iteration) get the
+    same gate. No separate runner layer; pyright duration folds into the
+    unit layer's wall-clock.
 
     ``QS_GEN_LAYER`` + ``QS_GEN_RUN_DIR`` are threaded through to every
     pytest subprocess so ``tests/conftest.py``'s makereport hook (c.2)
@@ -264,13 +294,17 @@ def _layer_command(
     Y.2.gate.c.7 — `options.only` adds `-k <expr>` to pytest invocations;
     `options.trace_all` exports `QS_GEN_TRACE_ALL=1` (consumed by c.11
     browser fixtures).
+
+    Y.2.gate.c.6.xdist-safety — `options.fuzz_seed_value` exports
+    ``QS_GEN_FUZZ_SEED=<N>`` so all xdist workers see the same seed and
+    parametrize collection is deterministic.
     """
     opts = options or RunOptions()
     env_addl = {"QS_GEN_RUN_DIR": str(run_dir), "QS_GEN_LAYER": layer}
     if opts.trace_all:
         env_addl["QS_GEN_TRACE_ALL"] = "1"
-    if layer == "pyright":
-        return [str(_VENV_BIN / "pyright")], env_addl
+    if opts.fuzz_seed_value is not None:
+        env_addl["QS_GEN_FUZZ_SEED"] = str(opts.fuzz_seed_value)
     if layer == "unit":
         cmd = [
             str(_VENV_BIN / "pytest"),
@@ -286,7 +320,7 @@ def _layer_command(
             cmd += ["-k", opts.only]
         if opts.parallel > 1:
             cmd += ["-n", str(opts.parallel)]
-        return (cmd, {**env_addl, "QS_GEN_SKIP_PYRIGHT": "1"})
+        return (cmd, env_addl)
     if layer == "db":
         # 3a — DB SQL smoke (parametrized over 37 datasets). Behind QS_GEN_E2E=1.
         # Real DB connection comes from cfg; until cfg loading lands the test
@@ -296,7 +330,7 @@ def _layer_command(
             cmd += ["-k", opts.only]
         if opts.parallel > 1:
             cmd += ["-n", str(opts.parallel)]
-        return (cmd, {**env_addl, "QS_GEN_E2E": "1", "QS_GEN_SKIP_PYRIGHT": "1"})
+        return (cmd, {**env_addl, "QS_GEN_E2E": "1"})
     # deploy / api / browser: not yet wired. Need cfg loading (Y.2.gate.h.2)
     # + variant fan-out (b.2 testcontainers + b.3 App2-as-early-gate).
     return None
@@ -600,12 +634,18 @@ def _normalize_argv(argv: Sequence[str]) -> list[str]:
 
 def _options_from_args(args: argparse.Namespace) -> RunOptions:
     """Build a RunOptions from the argparse Namespace. Defaults are baked in
-    (most flags `default=False`/`default=None` from `_build_parser`)."""
+    (most flags `default=False`/`default=None` from `_build_parser`).
+
+    Y.2.gate.c.6.xdist-safety: ``fuzz_seed_value`` is resolved here (not
+    argparse) — operator overrides via ``QS_GEN_FUZZ_SEED`` env (the canonical
+    pinning channel per audit §7.11), else random per invocation.
+    """
     return RunOptions(
         only=getattr(args, "only", None),
         parallel=getattr(args, "parallel", 1),
         variants=getattr(args, "variants", "default"),
         fuzz_seeds=getattr(args, "fuzz_seeds", 1),
+        fuzz_seed_value=resolve_fuzz_seed_value(),
         skip_cheap=getattr(args, "skip_cheap", False),
         keep_on_failure=getattr(args, "keep_on_failure", False),
         trace_all=getattr(args, "trace_all", False),
@@ -651,6 +691,8 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     print(f"runner: run_id={run_id}")
     print(f"runner: run_dir={run_dir.relative_to(REPO_ROOT)}")
     print(f"runner: up_to={args.layer}")
+    if options.fuzz_seed_value is not None:
+        print(f"runner: fuzz_seed={options.fuzz_seed_value} (pin via QS_GEN_FUZZ_SEED env to repro)")
 
     chain = chain_through(args.layer)
     print(f"runner: chain={chain}")

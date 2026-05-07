@@ -85,9 +85,10 @@ def test_up_to_creates_run_dir() -> None:
 
 def test_layers_list_matches_audit_table() -> None:
     """Y.2.gate.b.11 lock — runner's LAYERS is the runtime authority; the audit
-    doc layer table is the documented mirror. This is the small-canonical-sample
-    cross-check that catches one-side-only edits (full version lands in c.14)."""
-    assert runner.LAYERS == ("pyright", "unit", "db", "deploy", "api", "browser")
+    doc layer table is the documented mirror. Pyright collapsed into unit
+    (2026-05-07): conftest sessionstart handles type-check before pytest
+    runs, no separate runner layer."""
+    assert runner.LAYERS == ("unit", "db", "deploy", "api", "browser")
 
 
 # Y.2.gate.c.8 — dependency probe tests.
@@ -104,15 +105,16 @@ def _fake_completed(returncode: int, stderr: str = "", stdout: str = "") -> subp
 def test_layer_deps_match_audit_table() -> None:
     """c.14-shape cross-check: layer-to-deps mapping reflects audit §3.
 
-    pyright/unit are dependency-free (in-process); db needs docker (containers
-    per b.2); deploy/api need aws + docker; browser adds qs_arn for embed
-    signing. Edits to either side without the other should fail loudly."""
-    assert runner._LAYER_DEPS["pyright"] == frozenset()
+    unit is dependency-free (in-process; pyright runs via conftest sessionstart);
+    db needs docker (containers per b.2); deploy/api need aws + docker; browser
+    adds qs_arn for embed signing. Edits to either side without the other
+    should fail loudly."""
     assert runner._LAYER_DEPS["unit"] == frozenset()
     assert runner._LAYER_DEPS["db"] == frozenset({"docker"})
     assert runner._LAYER_DEPS["deploy"] == frozenset({"aws", "docker"})
     assert runner._LAYER_DEPS["api"] == frozenset({"aws", "docker"})
     assert runner._LAYER_DEPS["browser"] == frozenset({"aws", "docker", "qs_arn"})
+    assert "pyright" not in runner._LAYER_DEPS
 
 
 def test_probe_aws_success_returns_none() -> None:
@@ -185,9 +187,10 @@ def test_probe_qs_arn_unset(monkeypatch: Any) -> None:
     assert result.kind == "qs_arn_unset"
 
 
-def test_probe_dependencies_pyright_no_deps() -> None:
-    """pyright layer requires nothing external; probe always empty."""
-    assert runner.probe_dependencies("pyright") == []
+def test_probe_dependencies_unit_no_deps() -> None:
+    """unit layer (which now also runs pyright via conftest) has no external
+    deps — pure in-process. Probe always empty."""
+    assert runner.probe_dependencies("unit") == []
 
 
 def test_probe_dependencies_browser_aggregates_failures(monkeypatch: Any) -> None:
@@ -312,39 +315,29 @@ def test_prune_old_runs_uses_mtime_not_name(tmp_path: Path) -> None:
 # Y.2.gate.c.5 — chain + dispatch tests.
 
 
-def test_chain_through_pyright() -> None:
-    assert runner.chain_through("pyright") == ["pyright"]
+def test_chain_through_unit_only() -> None:
+    """unit is the start of the chain (pyright collapsed into it via conftest)."""
+    assert runner.chain_through("unit") == ["unit"]
 
 
 def test_chain_through_db() -> None:
-    assert runner.chain_through("db") == ["pyright", "unit", "db"]
+    assert runner.chain_through("db") == ["unit", "db"]
 
 
 def test_chain_through_browser_full() -> None:
-    assert runner.chain_through("browser") == ["pyright", "unit", "db", "deploy", "api", "browser"]
+    assert runner.chain_through("browser") == ["unit", "db", "deploy", "api", "browser"]
 
 
-def test_layer_command_pyright() -> None:
-    """Layer 1 runs pyright directly — no pytest, no QS_GEN_SKIP_PYRIGHT needed.
-
-    Both QS_GEN_RUN_DIR + QS_GEN_LAYER thread through (c.2 timings hook needs
-    them; pyright doesn't use them, but threading uniformly keeps the
-    layer-command shape symmetric)."""
-    cmd_env = runner._layer_command("pyright", Path("/tmp/run"))
-    assert cmd_env is not None
-    cmd, env_addl = cmd_env
-    assert cmd[-1].endswith("pyright")
-    assert env_addl == {"QS_GEN_RUN_DIR": "/tmp/run", "QS_GEN_LAYER": "pyright"}
-
-
-def test_layer_command_unit_skips_pyright() -> None:
-    """Layer 2 sets QS_GEN_SKIP_PYRIGHT=1 so we don't pyright twice in one chain."""
+def test_layer_command_unit_runs_pytest() -> None:
+    """Unit layer runs pytest. Conftest sessionstart hook handles pyright
+    before any test collects — no QS_GEN_SKIP_PYRIGHT env needed."""
     cmd_env = runner._layer_command("unit", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env_addl = cmd_env
     assert cmd[0].endswith("pytest")
-    assert env_addl["QS_GEN_SKIP_PYRIGHT"] == "1"
+    assert "QS_GEN_SKIP_PYRIGHT" not in env_addl
     assert env_addl["QS_GEN_RUN_DIR"] == "/tmp/run"
+    assert env_addl["QS_GEN_LAYER"] == "unit"
 
 
 def test_layer_command_db_sets_e2e_gate() -> None:
@@ -375,7 +368,7 @@ def test_dispatch_layer_runs_real_subprocess(tmp_path: Path) -> None:
     """Real dispatch invokes subprocess.run; the result reflects the exit code."""
     fake = subprocess.CompletedProcess(args=["fake"], returncode=0, stdout="", stderr="")
     with patch.object(subprocess, "run", return_value=fake) as mock_run:
-        result = runner.dispatch_layer("pyright", tmp_path)
+        result = runner.dispatch_layer("unit", tmp_path)
     assert mock_run.called
     assert result.passed is True
     assert result.skipped is False
@@ -385,20 +378,23 @@ def test_dispatch_layer_runs_real_subprocess(tmp_path: Path) -> None:
 def test_dispatch_layer_failure_propagates(tmp_path: Path) -> None:
     fake = subprocess.CompletedProcess(args=["fake"], returncode=1, stdout="", stderr="")
     with patch.object(subprocess, "run", return_value=fake):
-        result = runner.dispatch_layer("pyright", tmp_path)
+        result = runner.dispatch_layer("unit", tmp_path)
     assert result.passed is False
     assert result.exit_code == 1
 
 
 def test_dispatch_layer_passes_run_dir_via_env(tmp_path: Path) -> None:
     """QS_GEN_RUN_DIR threads through to the pytest subprocess so conftest
-    fixtures (c.10/c.11/c.12) can route artifacts under runs/<run-id>/."""
+    fixtures (c.10/c.11/c.12) can route artifacts under runs/<run-id>/.
+    QS_GEN_FUZZ_SEED also threads (c.6.xdist-safety)."""
     fake = subprocess.CompletedProcess(args=["fake"], returncode=0, stdout="", stderr="")
     with patch.object(subprocess, "run", return_value=fake) as mock_run:
-        runner.dispatch_layer("pyright", tmp_path)
+        runner.dispatch_layer("unit", tmp_path, runner.RunOptions(fuzz_seed_value=42))
     call_kwargs = mock_run.call_args
     env = call_kwargs.kwargs["env"]
     assert env["QS_GEN_RUN_DIR"] == str(tmp_path)
+    assert env["QS_GEN_LAYER"] == "unit"
+    assert env["QS_GEN_FUZZ_SEED"] == "42"
 
 
 def test_cmd_up_to_stops_on_first_failure() -> None:
@@ -417,8 +413,8 @@ def test_cmd_up_to_stops_on_first_failure() -> None:
     ):
         code = runner.main(["up_to=db"])
     assert code == runner.EXIT_FAILURE
-    # pyright + unit dispatched; db should NOT have run because unit failed.
-    assert dispatched == ["pyright", "unit"]
+    # unit dispatched; db should NOT have run because unit failed.
+    assert dispatched == ["unit"]
 
 
 def test_cmd_up_to_runs_full_chain_when_all_pass() -> None:
@@ -435,7 +431,7 @@ def test_cmd_up_to_runs_full_chain_when_all_pass() -> None:
     ):
         code = runner.main(["up_to=browser"])
     assert code == runner.EXIT_SUCCESS
-    assert dispatched == ["pyright", "unit", "db", "deploy", "api", "browser"]
+    assert dispatched == ["unit", "db", "deploy", "api", "browser"]
 
 
 def test_prune_runs_pattern_accepts_dirty_suffix() -> None:
@@ -706,13 +702,11 @@ def test_layer_command_only_adds_pytest_k_flag() -> None:
     assert cmd[cmd.index("-k") + 1] == "test_drift"
 
 
-def test_layer_command_only_no_op_for_pyright() -> None:
-    """pyright doesn't run pytest, so --only has no effect on its command."""
-    opts = runner.RunOptions(only="test_drift")
-    cmd_env = runner._layer_command("pyright", Path("/tmp/run"), opts)
-    assert cmd_env is not None
-    cmd, _ = cmd_env
-    assert "-k" not in cmd
+def test_layer_command_unknown_layer_returns_none() -> None:
+    """Layers not in LAYERS — including the dropped 'pyright' — return None
+    (handled as 'not yet wired' stub by dispatch)."""
+    assert runner._layer_command("pyright", Path("/tmp/run")) is None
+    assert runner._layer_command("nonsense", Path("/tmp/run")) is None
 
 
 def test_layer_command_trace_all_sets_env() -> None:
@@ -734,7 +728,6 @@ def test_layer_command_no_trace_env_when_default() -> None:
 
 def test_is_deploy_or_later() -> None:
     """Layers 4+ touch external state; dirty-state refusal applies only there."""
-    assert runner._is_deploy_or_later("pyright") is False
     assert runner._is_deploy_or_later("unit") is False
     assert runner._is_deploy_or_later("db") is False
     assert runner._is_deploy_or_later("deploy") is True
@@ -860,11 +853,12 @@ def test_audit_doc_exists() -> None:
 def test_audit_layers_table_mentions_every_runner_layer() -> None:
     """Every runner LAYERS entry needs documentation in the audit. Maps
     runner names to audit-table descriptions; if the audit renames a row
-    or runner adds a layer, this catches the drift."""
+    or runner adds a layer, this catches the drift.
+
+    Pyright is NOT a runner layer (collapsed into unit via conftest sessionstart
+    per 2026-05-07 lock); audit still documents it as conceptual layer 1."""
     audit = _read_audit_text()
-    # Map runner → audit-doc descriptive name (audit table §2).
     runner_to_audit_name = {
-        "pyright": "pyright strict",
         "unit": "Unit + JSON tests",
         "db": "DB SQL smoke",
         "deploy": "Deploy",
@@ -882,12 +876,13 @@ def test_audit_layers_table_mentions_every_runner_layer() -> None:
 
 
 def test_audit_calls_pyright_pure_static_check() -> None:
-    """High-signal cell: audit row 1 (pyright) lists 'None — pure static check.'
-    Runner reflects: empty deps for pyright. If audit drops this guarantee
-    OR runner adds a dep to pyright, one of these fails."""
-    assert runner._LAYER_DEPS["pyright"] == frozenset()
+    """High-signal cell: audit row 1 (pyright) still describes it as 'pure
+    static check'. Pyright isn't a runner LAYER anymore (collapsed into unit
+    via conftest sessionstart) but it's still a documented conceptual gate;
+    the audit row should still characterize it as type-only / no externals."""
     audit = _read_audit_text()
     assert "pure static check" in audit
+    assert "pyright" not in runner._LAYER_DEPS  # not a runner LAYER
 
 
 def test_audit_calls_out_qs_e2e_user_arn_for_browser() -> None:
@@ -922,11 +917,11 @@ def test_audit_distinguishes_pg_oracle_dialect_axis() -> None:
 
 def test_audit_first_layer_pyright_has_no_external_preconditions() -> None:
     """Audit table row 1 'Preconditions' column should still say 'None'.
-    If someone adds a precondition there, the runner's empty-deps state for
-    pyright is now wrong — fix one or the other."""
+    Pyright runs via repo-root conftest sessionstart (not a runner layer),
+    but the audit still documents the no-externals contract."""
     audit = _read_audit_text()
     assert "None — pure static check" in audit
-    assert runner._LAYER_DEPS["pyright"] == frozenset()
+    assert "pyright" not in runner._LAYER_DEPS
 
 
 # Y.2.gate.c.6 — within-variant parallelism (--parallel=N → pytest -n N).
@@ -963,14 +958,6 @@ def test_layer_command_n_flag_threads_to_db_layer() -> None:
     assert "-n" in cmd
 
 
-def test_layer_command_n_flag_no_op_for_pyright() -> None:
-    """pyright doesn't run pytest, so -n has no place — and would crash."""
-    cmd_env = runner._layer_command("pyright", Path("/tmp/run"), runner.RunOptions(parallel=4))
-    assert cmd_env is not None
-    cmd, _ = cmd_env
-    assert "-n" not in cmd
-
-
 def test_argparse_accepts_parallel_int() -> None:
     parser = runner._build_parser()
     parsed = parser.parse_args(["up_to", "unit", "--parallel=8"])
@@ -988,3 +975,66 @@ def test_options_from_args_threads_parallel() -> None:
     parsed = parser.parse_args(["up_to", "unit", "--parallel=4"])
     opts = runner._options_from_args(parsed)
     assert opts.parallel == 4
+
+
+# Y.2.gate.c.6.xdist-safety — fuzz seed value resolution + env passthrough.
+
+
+def test_resolve_fuzz_seed_value_random_when_unset(monkeypatch: Any) -> None:
+    """No env override → fresh random seed each call. Two calls likely
+    different (32-bit space; collision odds vanishingly small)."""
+    monkeypatch.delenv("QS_GEN_FUZZ_SEED", raising=False)
+    a = runner.resolve_fuzz_seed_value()
+    b = runner.resolve_fuzz_seed_value()
+    assert isinstance(a, int) and 0 <= a < 2**32
+    assert a != b  # not pinned; would be flaky with 1-in-4-billion odds
+
+
+def test_resolve_fuzz_seed_value_honors_env(monkeypatch: Any) -> None:
+    """`QS_GEN_FUZZ_SEED=N` env → operator pin for failure repro. All workers
+    in this run see the same value."""
+    monkeypatch.setenv("QS_GEN_FUZZ_SEED", "12345")
+    assert runner.resolve_fuzz_seed_value() == 12345
+
+
+def test_resolve_fuzz_seed_value_random_on_blank_env(monkeypatch: Any) -> None:
+    """Blank env (e.g. accidentally exported empty) → fall back to random,
+    not crash on int('')."""
+    monkeypatch.setenv("QS_GEN_FUZZ_SEED", "")
+    seed = runner.resolve_fuzz_seed_value()
+    assert isinstance(seed, int)
+
+
+def test_run_options_fuzz_seed_value_default_none() -> None:
+    """RunOptions() default = None; resolution happens in _options_from_args.
+    A None value means 'don't set the env at all' (preserves existing env if
+    operator set it some other way)."""
+    assert runner.RunOptions().fuzz_seed_value is None
+
+
+def test_options_from_args_resolves_fuzz_seed(monkeypatch: Any) -> None:
+    """_options_from_args populates fuzz_seed_value (random unless env pinned)."""
+    monkeypatch.setenv("QS_GEN_FUZZ_SEED", "98765")
+    parser = runner._build_parser()
+    parsed = parser.parse_args(["up_to", "unit"])
+    opts = runner._options_from_args(parsed)
+    assert opts.fuzz_seed_value == 98765
+
+
+def test_layer_command_threads_qs_gen_fuzz_seed_env() -> None:
+    """fuzz_seed_value → QS_GEN_FUZZ_SEED env passed to subprocess. All xdist
+    workers inherit; parametrize collection is deterministic."""
+    opts = runner.RunOptions(fuzz_seed_value=42)
+    cmd_env = runner._layer_command("unit", Path("/tmp/run"), opts)
+    assert cmd_env is not None
+    _, env_addl = cmd_env
+    assert env_addl.get("QS_GEN_FUZZ_SEED") == "42"
+
+
+def test_layer_command_no_fuzz_env_when_value_none() -> None:
+    """fuzz_seed_value=None → no QS_GEN_FUZZ_SEED in env_addl. Preserves
+    operator's externally-set env (if any) without us shadowing it."""
+    cmd_env = runner._layer_command("unit", Path("/tmp/run"), runner.RunOptions())
+    assert cmd_env is not None
+    _, env_addl = cmd_env
+    assert "QS_GEN_FUZZ_SEED" not in env_addl
