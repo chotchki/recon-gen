@@ -49,12 +49,13 @@ Friction (looking up ARNs, env-var passthrough, `aws sso login`) is automation b
 | **Dialect: SQLite** | — | ✅ snapshot tests | — | — | (handled by 3e) | — | — | — | ✅ | — | — | — | ✅ (App2 supports it) | — |
 | **L2 instance: spec_example** | — | ✅ | — | — | ✅ | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **L2 instance: sasquatch_pr** | — | ✅ (`test_l2_sasquatch_pr.py` + parametrized seed tests) | — | — | (cfg-driven) | (cfg-driven) | — | — | — | (cfg-driven) | (via `QS_GEN_TEST_L2_INSTANCE`) | (via override) | — | ✅ |
-| **Fuzz seed (`QS_GEN_FUZZ_SEED`)** | — | — | — | — | — | — | ⚠️ | — | — | — | — | — | — | ✅ pinned via `run_e2e.sh` |
+| **Fuzz seed (`QS_GEN_FUZZ_SEED`)** _today_ | — | ⚠ 1 seed/run | — | — | — | — | ⚠ | — | — | — | — | — | — | ✅ pinned via `run_e2e.sh` |
+| **Fuzz seed** _under-exploited target_ (§7.11) | — | ✅ N seeds | — | — | ✅ N seeds | ✅ N seeds | ✅ N seeds | ⚠ | ✅ N seeds | ⚠ sample | ⚠ sample | ⚠ sample | ✅ N seeds | ✅ |
 
 **Notes:**
 - Layer 3c (runtime assertions) is PG-only because the file imports psycopg directly. To extend to Oracle, branch on `cfg.dialect`.
 - Layer 6 browser × Oracle is **not run today** (CI nightly cron is PG-only). Whether to add it is a separate decision — Oracle browser is mostly redundant since QuickSight renders the same regardless of underlying SQL dialect, but it would catch dialect-specific QS-side rendering bugs. **Opinion:** worth adding as a nightly cell.
-- Fuzz seed is only meaningfully exercised by the harness (layer 8). The seed contract test (`tests/data/test_l2_seed_contract.py`) generates a fresh seed per run unless pinned.
+- **Fuzz seed is dramatically under-exploited.** Today only one test consumes it (`tests/data/test_l2_seed_contract.py`) at one seed per session. The fuzzer (`tests/l2/fuzz.py::random_l2_yaml`) produces a different valid L2 topology per seed — every layer 2a/3a/3b/3c/3e/7 could parametrize across N seeds for property-testing-style coverage. See §7.11.
 
 ---
 
@@ -242,6 +243,57 @@ App2 (layer 7 in the audit, X.2.f/g/h) runs the **same dataset SQL** as QS, agai
 - **CI**: PR-quick = App2 only (fast PR feedback). Push:main = App2 + QS PG-API. Nightly = full matrix including QS browser. Existing `e2e.yml` cells become the QS-side cells; new `app2-e2e.yml` cell becomes the high-frequency gate.
 
 **Strategic reprioritization scope:** Not Y.2.gate-only. Y.2.gate.b/c slot App2 ahead of QS in the chain; Phase X.2.j (4-way cross-tool agreement) owns the App2-coverage growth that justifies it. Compounding wins: Y.2 SQL pushdown reduces QS query pressure → AWS contention easier; App2 layering reduces AWS dependency further → iteration speed compounds.
+
+---
+
+### 7.11 — Fuzz-seed property-testing as the highest-value parallelism target (user-flagged)
+
+**User observation:** the fuzz-seed variant axis is dramatically under-exploited; this is where parallelism unlocks the most coverage per minute.
+
+**Today's reality:**
+
+- `tests/l2/fuzz.py::random_l2_yaml(seed)` deterministically generates a **valid random L2 instance** — different topology of accounts / rails / transfers / chains / limit schedules per seed. Same seed = byte-identical YAML.
+- One test consumes it: `tests/data/test_l2_seed_contract.py`, **one seed per session** (random per run unless `QS_GEN_FUZZ_SEED=N` pins it).
+- Layer 8 (harness) honors the same pin so per-test ephemeral deploys are reproducible.
+- **That's it.** Every other layer runs against the static L2 fixtures (`spec_example` and `sasquatch_pr` in `src/quicksight_gen/_l2_fixtures/`).
+
+**The gap:**
+
+Each fuzz seed = a different synthetic L2 instance the generator says is valid. Property-testing-style sampling across N seeds would catch a class of bugs the static fixtures can't:
+
+- **Generator-output bugs**: "L2 with 0 merchant accounts crashes drift calc"; "L2 with 12 chains and 2 templates produces a SQL with duplicate alias"; "L2 with all rails of one transfer_type breaks the L2FT cascade dropdown"; etc.
+- **Cross-dialect inconsistencies**: PG accepts what Oracle rejects. With static fixtures, we only catch dialect bugs that happen to exercise the static topology. Fuzz seed × dialect catches them combinatorially.
+- **Schema-name collisions**: per-seed prefix uniqueness; no static-fixture coverage today.
+- **Edge cases** the human-written `spec_example` / `sasquatch_pr` deliberately avoid for readability.
+
+**The parallelism unlock:**
+
+| Gate | Today (1 seed) | With 100 seeds in parallel | With 1000 seeds (nightly) |
+|---|---|---|---|
+| Layer 2a JSON-emit (in-process) | ~10s | ~10s @ xdist=auto | ~30s |
+| Layer 3a DB SQL smoke (PG container) | ~17s | ~30s — 100 seeds × Docker PG, parallel | ~5min |
+| Layer 3a DB SQL smoke (Oracle container) | (not run) | ~5min — Oracle slow image, but parallel | ~30min |
+| Layer 7 App2 (local Docker) | (not parametrized) | ~2min — 100 servers + assertions, parallel | ~15min |
+
+The numbers above are rough but illustrate the shape: **iteration speed drops from "1 seed per run" to "100 seeds per run" without proportional wall-clock cost**, because local Docker per-variant + xdist absorbs the parallelism. The user's beefy Mac is the substrate — no AWS contention to worry about.
+
+**Design decisions for the runner:**
+
+- **Sample sizes per layer**: 100 seeds for layer 2a/3a/3b/3c/3e/7 on each `up_to=e2e` invocation; 1000 seeds on nightly. AWS-touching layers (4-6) sample 1-3 seeds since each costs minutes.
+- **Seed pool determinism**: the runner picks seeds from a deterministic sequence (e.g., `range(N)` or `Random(git_sha).sample(...)`) so the seed set is the same across local + CI for a given commit. Pinned by run-id for reproducibility.
+- **Failure attribution**: per-test failure carries `fuzz_seed=<N>` so a triager can `QS_GEN_FUZZ_SEED=<N>` reproduce locally. Same shape as the M.4.1.f harness failure manifest.
+- **Coverage threshold**: a seed that breaks 3 of 100 layer-3a tests is real signal; a seed that breaks 1/100 might be a generator edge case. Runner reports failure rate; threshold for ⚠ TBD (10%? 1%?).
+- **Generator regressions**: if a previously-green seed starts failing, that's a regression in either the generator or the consumer code. Runner diffs failing seeds against the prior run's set (same-shape pattern as the timing-diff in §7.9).
+
+**Compounds with §7.10's App2 promotion** — App2 against local Docker × 100 fuzz seeds is the same wall-clock as one App2 run, and exercises 100× more topology coverage. Each Phase Y / X.2 sweep that lands deepens what the property-test catches.
+
+**Decision needed:**
+
+- Sample sizes per layer (above are guesses; user calibration needed).
+- ⚠ threshold for "this seed is a real bug, not a generator edge case".
+- Whether the seed pool is fixed (range(N)) or hash-derived from the commit SHA.
+
+**Tracked under:** Y.2.gate.b (variants design — fuzz seed promoted from "Future" to first-class), Y.2.gate.c (implement seed-pool sampling), Y.2.gate.j (parallelism — fuzz-seed parallelism is the biggest single perf win).
 
 ---
 
