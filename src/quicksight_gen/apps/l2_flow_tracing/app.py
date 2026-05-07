@@ -1009,26 +1009,25 @@ def _populate_transfer_templates_sheet(
         title="Metadata Value",
     )
     # Y.1.p — analysis-level filter wakes the pKey bridge AND gates rows
-    # on `_meta_match_value`. ALL_DATASETS scope so it narrows tt-instances
-    # (Sankey) AND tt-legs (table) together. See Rails sheet for the full
-    # explanation.
+    # on `_meta_match_value`. ALL_DATASETS scope so QS applies the
+    # filter to every dataset on the sheet that has the column —
+    # tt-instances (Sankey) AND tt-legs (table) both project
+    # `_meta_match_value`, so the single filter narrows them together
+    # via column-name match. See Rails sheet for the full explanation.
+    #
+    # QS API constraint: a FilterGroup cannot contain multiple Filters
+    # spanning different DataSets — even under ALL_DATASETS the filter
+    # is declared against ONE dataset and the cross-dataset scope is
+    # how QS extends to siblings with the same column name.
     fg_meta_tt = analysis.add_filter_group(FilterGroup(
         filter_group_id="fg-l2ft-tt-meta-cascade",  # type: ignore[arg-type]
         cross_dataset="ALL_DATASETS",
-        filters=[
-            CategoryFilter.with_parameter(
-                filter_id="filter-l2ft-tt-meta-cascade-instances",
-                dataset=ds_tt_instances,
-                column=ds_tt_instances["_meta_match_value"],
-                parameter=p_meta_value,
-            ),
-            CategoryFilter.with_parameter(
-                filter_id="filter-l2ft-tt-meta-cascade-legs",
-                dataset=ds_tt_legs,
-                column=ds_tt_legs["_meta_match_value"],
-                parameter=p_meta_value,
-            ),
-        ],
+        filters=[CategoryFilter.with_parameter(
+            filter_id="filter-l2ft-tt-meta-cascade",
+            dataset=ds_tt_instances,
+            column=ds_tt_instances["_meta_match_value"],
+            parameter=p_meta_value,
+        )],
     ))
     fg_meta_tt.scope_sheet(sheet)
 
