@@ -379,6 +379,123 @@ The README + handbook positioning sweep is now X.6.g, since it shares the model-
 
 ---
 
+## Phase Y — SQL-level parameter pushdown (QuickSight + App2 convergence)
+
+**Why.** Today QS runs every visual as a Direct Query that pulls the *entire* dataset SQL result set, then narrows in QS's process via analysis-level FilterGroups + calc fields. Datasets are parameter-blind — the database has no idea the analyst's slider is set to 5 — so DB indexes never apply to the analyst's filter, and a 1k-row matview ships in full per visual. App2 (built the database-native way) uses bind variables that prune at SQL-execute time. Result: two implementations of one filter intent, drifting each other, AND a perf hit on QS that's only growing as the matviews grow.
+
+**Architectural shift.** The dataset SQL becomes the single source of truth — `<<$paramName>>` substitution for QS (literal at query time via `MappedDataSetParameters`); `:param_<name>` bind vars for App2 (one-line preprocessor in `_sql_executor`); analysis-level FilterGroups + calc fields go away (or stay only as decorative chrome where useful). What we lose: the QS Filters pane "active filters" list + per-visual filter icon — neither persona uses these today; the slider/dropdown control widget (the actual analyst input) is unchanged. What we gain: one SQL truth → drift gone; database does the filtering → orders-of-magnitude fewer rows on the wire; the calc field workarounds (window functions evaluated in QS engine) become real columns the database computes once.
+
+**Branch.** `phase-y-sql-pushdown` off `main` (current main, includes Phase X work merged through this point). Phase X's in-flight work (X.2.g.3 dataset `app2_sql=` blocks, etc.) gets *replaced* by Phase Y's convergent path — when Y lands, Phase X's branch rebases on top and drops the now-redundant `app2_sql=` plumbing.
+
+### Y.1 — Spike: prove the mechanism on Volume Anomalies
+
+Single sheet, single slider (`pInvAnomaliesSigma`), no calc fields. **PG-only spike** — SQLite + Oracle dialect coverage lands at Y.7 once the mechanism is proven; the spike is about verifying the QS substitution + App2 bind translation round-trip on the most-used dialect, not about full dialect spread. End-state: QS sees `<<$pInvAnomaliesSigma>>` substituted to the literal value; PG `pg_stat_statements` shows the WHERE clause hitting the database; row counts to QS drop by orders of magnitude; App2 still works via the bind preprocessor.
+
+- [ ] **Y.1.a — Branch off main as `phase-y-sql-pushdown`.**
+- [ ] **Y.1.b — Convert `pInvAnomaliesSigma` to a dataset parameter in `build_volume_anomalies_dataset`.** Dataset declares the parameter with default value; SQL gains `WHERE z_score >= <<$pInvAnomaliesSigma>>` (with `1=1` template guard).
+- [ ] **Y.1.c — Add `MappedDataSetParameters` bridging analysis param → dataset param.** The analysis-level `pInvAnomaliesSigma` flows down to the dataset's parameter via the mapping.
+- [ ] **Y.1.d — Drop `FG_INV_ANOMALIES_SIGMA` analysis-level FilterGroup from the Investigation app.** Confirm slider widget still drives the value.
+- [ ] **Y.1.e — App2 SQL preprocessor — `<<$paramName>>` → `:param_paramName`.** One pass over the SQL string at execute time in `_sql_executor.py`. Handles surrounding-quotes case for string params (regex `'<<\$(\w+)>>'` → `:param_\1` strips the quotes).
+- [ ] **Y.1.f — Drop the X.2.g.3.b `app2_sql=` block.** `build_volume_anomalies_dataset` returns ONE SQL; both dialects read it.
+- [ ] **Y.1.g — Re-lock affected hash tests + JSON-emit tests.** Volume Anomalies dataset SQL hash + analysis JSON hash both shift.
+- [ ] **Y.1.h — Deploy to Aurora PG; capture `pg_stat_statements` rows-on-the-wire baseline (pre-Y).** Then deploy Y, capture again. Document the row-count delta.
+- [ ] **Y.1.i — Deploy to Oracle; capture `v$sqlstats` baseline + post-Y delta.** Same shape as PG.
+- [ ] **Y.1.j — Performance verdict.** Concrete numbers: rows fetched per visual, query latency. Document in spike findings.
+- [ ] **Y.1.k — Cascade dropdown probe.** Wire one cascade dropdown (L2FT Rails as the simplest exemplar) end-to-end through the same pattern. Verify QS's UI cascade still re-fires when the source value changes a dataset-parameter target. If it doesn't: capture the workaround (might require keeping cascade source as analysis-only param, target as dataset param) and gate Y.2 cascade scope on the answer.
+- [ ] **Y.1.l — Spike commit + RELEASE_NOTES finding.** Branch is ready for sweep OR pivot decision documented.
+
+### Y.2 — Sweep simple-filter datasets (one sub-task per dataset)
+
+Spike-proven pattern applied across every sheet that has SQL-pushdownable filters today. Each sub-task is one dataset: convert FilterGroup → dataset parameter, drop `app2_sql=` if any, re-lock hash tests, verify deploy.
+
+- [ ] **Y.2.a — Money Trail dataset: `pInvMoneyTrailRoot` + `pInvMoneyTrailMaxHops` + `pInvMoneyTrailMinAmount`.** Three params on one dataset; the X.2.g.3.c `app2_sql=` block disappears.
+- [ ] **Y.2.b — Account Network dataset: `pInvANetworkAnchor` + `pInvANetworkMinAmount`.** Two params; the X.2.g.3.d `app2_sql=` block disappears.
+- [ ] **Y.2.c — L2FT Rails dataset: rail name + status + bundle status cascade.** Verify cascade behavior matches pre-Y per Y.1.k findings.
+- [ ] **Y.2.d — L2FT Chains dataset: parent chain + completion status cascade.**
+- [ ] **Y.2.e — L2FT Transfer Templates dataset: template + completion status cascade.**
+- [ ] **Y.2.f — L1 universal date range across every L1 dataset.** `date_from` / `date_to` move from analysis-level TimeRangeFilter into dataset SQL `WHERE posted_at BETWEEN <<$pDateFrom>> AND <<$pDateTo>>` pattern. Highest-impact change for L1 perf.
+- [ ] **Y.2.g — L1 per-sheet filter controls** (Drift / Overdraft / Limit Breach / Today's Exceptions / Daily Statement / Transactions / Pending Aging / Unbundled Aging / Supersession Audit). Per-sheet sub-bullet as we hit them.
+- [ ] **Y.2.h — Executives datasets review.** Verify whether any Exec sheet has filters that benefit; sweep what does. Likely a thin pass.
+
+### Y.3 — Push calc fields down to dataset SQL as real columns
+
+Calc fields exist in the QS analysis layer because QS could evaluate them in its engine. Pushing them into the dataset SQL as window functions in CTEs makes them real columns the database computes once at query time. Visuals reference real columns; the calc field declarations vanish from the analysis tree; both QS and App2 see one shape.
+
+- [ ] **Y.3.a — Recipient Fanout: `distinct_senders` window column.** `WITH base AS (...), enriched AS (SELECT base.*, COUNT(DISTINCT sender_account_id) OVER (PARTITION BY recipient_account_id) AS distinct_senders FROM base) SELECT * FROM enriched`. The HAVING-via-X.2.g.3.e becomes a plain `WHERE distinct_senders >= <<$pInvFanoutThreshold>>` (Y.2-style). Drops `CF_INV_FANOUT_DISTINCT_SENDERS` calc field.
+- [ ] **Y.3.b — Account Network: `is_inbound_edge` + `is_outbound_edge` + `is_anchor_edge` + `counterparty` window columns.** Each calc field's expression converts to a SQL CASE / window function in the dataset SQL. Drops the four calc field declarations.
+- [ ] **Y.3.c — Volume Anomalies: any calc fields used by the ranked table** (e.g. `z_score_max`). Same pattern.
+- [ ] **Y.3.d — Update visuals to reference real columns instead of calc fields.** `Measure.max(ds, calc_field)` becomes `Measure.max(ds["distinct_senders"])` etc. The Table-aggregated wrap (X.2.g.4 if we land it pre-Y) reads them naturally.
+- [ ] **Y.3.e — Drop now-unreferenced CalcField declarations from the analysis tree.** Sweep `apps/investigation/app.py`; remove the calc field constructors; the analysis emit no longer carries them.
+
+### Y.4 — Test sweep
+
+Hashes shift, FilterGroup-walking tests get pruned, App2 preprocessor gets unit coverage.
+
+- [ ] **Y.4.a — Re-lock all dataset SQL hash tests.** Per-instance + per-dialect.
+- [ ] **Y.4.b — Re-lock JSON-emit hash tests for every analysis whose FilterGroups / calc fields changed.** Investigation + L1 + L2FT all shift.
+- [ ] **Y.4.c — Update `tests/integration/verify_dataset_sql.py` smoke verifier for the new placeholder shape.** Verifier currently parses + executes dataset SQL; needs to pass dataset parameter values for `<<$>>` substitution to round-trip cleanly.
+- [ ] **Y.4.d — Drop or rewrite FilterGroup-walking tests that no longer apply.** Tests that asserted "Investigation has FG_INV_ANOMALIES_SIGMA scoped to sheet X" are obsolete. Replace with tests that assert "Volume Anomalies dataset SQL contains `:param_pInvAnomaliesSigma` after preprocessor".
+- [ ] **Y.4.e — App2 unit test for `<<$paramName>>` → `:param_paramName` preprocessor.** Cover string + numeric param shapes; cover the `'<<$pName>>'` quoted case.
+- [ ] **Y.4.f — Full unit test suite green.** Pytest + pyright clean.
+
+### Y.5 — App2 cleanup (drop now-redundant infrastructure)
+
+The X.2.g.3 work I (the engineer) added over the past few days becomes redundant once Y.1–Y.4 land. Sweep it.
+
+- [ ] **Y.5.a — Drop `app2_sql=` parameter from `build_dataset` signature.** All call sites converted in Y.1–Y.2.
+- [ ] **Y.5.b — Drop `app2_anchor_filter` / `app2_param_eq` / `app2_param_gte` / `app2_param_lte` helpers in `common/sql/app2_filters.py`.** Filter snippets now live in dataset SQL via `<<$>>` substitution; the App2-specific helper module shrinks to (or drops) `app2_date_filter` if Y.2.f converts it.
+- [ ] **Y.5.c — Drop `tests/unit/test_sql_app2_filters.py`** if all helpers gone; otherwise keep for what remains.
+- [ ] **Y.5.d — `_filter_specs_from_tree.py` simplifies.** ParameterControl auto-derive still walks tree controls (Y doesn't change that surface), but the LinkedValues query path may collapse if dataset parameters carry their own option lookup.
+
+### Y.6 — Performance verification (the headline result)
+
+The whole point of Phase Y. Concrete before/after numbers, per dialect.
+
+- [ ] **Y.6.a — Pre-Y baseline: rows-on-the-wire per dashboard load (PG).** Use `pg_stat_statements` + a clean dashboard-walk script. Capture rows-fetched + query duration per visual.
+- [ ] **Y.6.b — Pre-Y baseline (Oracle).** Same shape via `v$sqlstats`.
+- [ ] **Y.6.c — Post-Y measurement: same dashboards, same operations, fresh capture.** Per dialect.
+- [ ] **Y.6.d — Document deltas: % reduction in rows + query duration.** RELEASE_NOTES + a perf section in CLAUDE.md.
+- [ ] **Y.6.e — Identify any sheet that DIDN'T see expected gains and root-cause** (likely cases: dataset SQL that's already narrow; a missed pushdown opportunity).
+
+### Y.7 — e2e verification (clean on all three dialects, the gate)
+
+Per user direction: the e2e suite must be clean on PG, Oracle, AND SQLite before Y can merge. SQLite is App2-only (QS doesn't support it), so the SQLite gate is specifically about the App2 bind preprocessor + dataset SQL with `:param_<name>` placeholders working end-to-end through aiosqlite.
+
+- [ ] **Y.7.a — Full unit + integration suite green.**
+- [ ] **Y.7.b — `e2e-pg-api` green.** API layer covers the dataset-parameter wiring + analysis JSON shape on PG.
+- [ ] **Y.7.c — `e2e-oracle-api` green.** Same; surfaces any Oracle-specific `<<$>>` substitution + bind-translation quirks (Oracle's NUMBER/NUMERIC handling + empty-string-as-NULL semantics).
+- [ ] **Y.7.d — `e2e-pg-browser` green.** Browser-level cascade + slider drag round-trips end-to-end.
+- [ ] **Y.7.e — SQLite e2e green.** Layer 1 + Audit PDF SQLite tests (X.3.g.{1,2,3}) re-run after the dataset-SQL preprocessor changes; verify the bind translation works against aiosqlite.
+- [ ] **Y.7.f — Resolve any flakes / regressions.** Per-failure investigation; xfail only with documented reason + follow-up task.
+
+### Y.8 — Phase X rebase + merge
+
+Phase X's still-in-flight work (X.2.g.3 dataset SQL, anything dependent on `app2_sql=`) gets rebased on top of Y so it picks up the convergent shape. The X.2.g.3.* tasks I just completed are subsumed by Y.2 — they get DROPPED in the rebase, not preserved.
+
+- [ ] **Y.8.a — Rebase the in-flight Phase X branch onto `phase-y-sql-pushdown`.** Drop X.2.g.3.{a,b,c,d,e} commits; their effect is now in Y.2.
+- [ ] **Y.8.b — Resolve conflicts in `apps/investigation/datasets.py` + `cli/serve.py`.** Likely the two contention points.
+- [ ] **Y.8.c — Re-run e2e PG green post-rebase.**
+- [ ] **Y.8.d — Re-run e2e Oracle green post-rebase.**
+- [ ] **Y.8.e — Merge Phase Y to main.** Phase X continues from there with the new convergent path baked in.
+
+### Y.9 — Convention + docs sweep
+
+The new authoring pattern needs to be the canonical one for any future filter / parameter work. Docs catch up.
+
+- [ ] **Y.9.a — CLAUDE.md update.** New section "Authoring filters: SQL-level parameter pushdown is the canonical pattern" — `<<$paramName>>` in dataset SQL + `MappedDataSetParameters`; analysis-level FilterGroups deprecated for filter intent (kept only for visual highlighting if any case justifies it).
+- [ ] **Y.9.b — README sweep** for the architecture overview section.
+- [ ] **Y.9.c — Customization handbook walkthrough — "How filters work" page.** Cover the dataset-parameter pattern + cascade behavior + perf intent.
+- [ ] **Y.9.d — Migration note.** Customer L2 instance YAMLs are unaffected (this is internal architecture); flag explicitly so customers don't worry.
+
+### Y.10 — Cut release
+
+- [ ] **Y.10.a — Bump version (likely v9.0.0 — major architectural shift).**
+- [ ] **Y.10.b — RELEASE_NOTES entry: convergence + perf wins headlined.**
+- [ ] **Y.10.c — Tag + push.**
+- [ ] **Y.10.d — Verify release pipeline runs green** (the existing `e2e-against-testpypi` gate already covers this).
+
+---
+
 ## Sustainment & minor features
 
 Backlog beyond Phase X. Promote to a numbered phase entry when scope justifies it.
