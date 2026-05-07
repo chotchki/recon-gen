@@ -283,6 +283,119 @@ def dispatch_layer(layer: str, run_dir: Path) -> LayerResult:
     return LayerResult(layer=layer, exit_code=result.returncode, duration_seconds=duration)
 
 
+# Y.2.gate.c.3 — drift threshold. ±50% triggers a ⚠ marker. Spec'd in audit
+# §7.9 LOCKED 2026-05-07 — generous default; tightens as Phase Y / X.2 sweeps
+# settle baselines (Y.2.gate.j.9: "first run = baseline; ratchet via timing-diff").
+DRIFT_THRESHOLD_PCT: Final = 0.50
+
+
+@dataclass(frozen=True)
+class DriftEntry:
+    """Y.2.gate.c.3 — one layer's drift vs the prior run."""
+
+    layer: str
+    current_seconds: float
+    prior_seconds: float | None  # None if layer didn't run in the prior run
+
+    @property
+    def delta_pct(self) -> float | None:
+        if self.prior_seconds is None or self.prior_seconds == 0:
+            return None
+        return (self.current_seconds - self.prior_seconds) / self.prior_seconds
+
+    @property
+    def is_drift(self) -> bool:
+        delta = self.delta_pct
+        return delta is not None and abs(delta) >= DRIFT_THRESHOLD_PCT
+
+
+def _extract_sha(run_id: str) -> str:
+    """``20260507T213138Z-9336911[-dirty]`` → ``9336911``.
+
+    Used by `find_prior_run` to prefer matching-SHA prior runs over time-only
+    nearest neighbors (a same-SHA comparison is the closest signal — same code,
+    different timing).
+    """
+    parts = run_id.split("-")
+    return parts[1] if len(parts) >= 2 else ""
+
+
+def find_prior_run(current_run_id: str, runs_dir: Path | None = None) -> Path | None:
+    """Y.2.gate.c.3 — pick the best prior run for drift comparison.
+
+    Priority: (1) most-recent prior with the SAME SHA (closest signal — same
+    code, lets us see real timing drift); (2) most-recent prior overall (good
+    enough when no SHA match). Returns None if no prior runs exist."""
+    target = runs_dir if runs_dir is not None else RUNS_DIR
+    if not target.exists():
+        return None
+    current_sha = _extract_sha(current_run_id)
+    candidates = [
+        p for p in target.iterdir()
+        if (
+            p.is_dir()
+            and _RUN_ID_PATTERN.match(p.name)
+            and p.name != current_run_id
+            and (p / "timings.json").exists()
+        )
+    ]
+    if not candidates:
+        return None
+    same_sha = [p for p in candidates if _extract_sha(p.name) == current_sha]
+    if same_sha:
+        same_sha.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return same_sha[0]
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return candidates[0]
+
+
+def compute_drift(current: dict[str, Any], prior: dict[str, Any]) -> list[DriftEntry]:
+    """Y.2.gate.c.3 — diff per-layer durations between two timings.json blobs.
+
+    Only emits entries for layers present in `current` (not interested in
+    layers that ran in prior but not now — that's chain-narrowing, not drift)."""
+    current_durs: dict[str, float] = current.get("layer_durations", {})
+    prior_durs: dict[str, float] = prior.get("layer_durations", {})
+    entries: list[DriftEntry] = []
+    for layer, current_dur in current_durs.items():
+        prior_raw = prior_durs.get(layer)
+        prior_val = float(prior_raw) if prior_raw is not None else None
+        entries.append(DriftEntry(layer=layer, current_seconds=float(current_dur), prior_seconds=prior_val))
+    return entries
+
+
+def report_drift(current_run_dir: Path, runs_dir: Path | None = None) -> None:
+    """Y.2.gate.c.3 — find prior run, compute drift, print report.
+
+    Output shape:
+        drift: comparing against <prior_run_id>
+        drift: pyright 1.81s (was 1.85s, -2.2%)
+        drift: unit 15.20s (was 10.42s, +45.9%)
+        drift: db 24.10s (was 12.30s, +96.0%) ⚠
+
+    The ⚠ marker fires on `abs(delta_pct) >= DRIFT_THRESHOLD_PCT` (±50%);
+    same shape as hash-locked seed data — a sudden delta is signal, not noise.
+    """
+    prior_run = find_prior_run(current_run_dir.name, runs_dir)
+    if prior_run is None:
+        print("drift: no prior run to compare against")
+        return
+    print(f"drift: comparing against {prior_run.name}")
+    current = json.loads((current_run_dir / "timings.json").read_text())
+    prior = json.loads((prior_run / "timings.json").read_text())
+    for entry in compute_drift(current, prior):
+        if entry.prior_seconds is None:
+            print(f"drift: {entry.layer} {entry.current_seconds:.2f}s (new — no prior)")
+            continue
+        delta_pct = entry.delta_pct or 0.0
+        sign = "+" if delta_pct >= 0 else ""
+        marker = " ⚠" if entry.is_drift else ""
+        print(
+            f"drift: {entry.layer} {entry.current_seconds:.2f}s "
+            f"(was {entry.prior_seconds:.2f}s, {sign}{delta_pct * 100:.1f}%){marker}"
+        )
+
+
 def _aggregate_test_jsonl(run_dir: Path) -> dict[str, dict[str, dict[str, Any]]]:
     """Read every ``timings/<layer>[-worker*].jsonl`` produced by conftest's
     makereport hook (c.2); return ``{layer: {test_id: {duration, outcome}}}``.
@@ -480,6 +593,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
 
     collect_run_outputs(run_dir, layer_results)
     print(f"runner: wrote {(run_dir / 'timings.json').relative_to(REPO_ROOT)}")
+    report_drift(run_dir)
 
     pruned = prune_old_runs()
     if pruned:

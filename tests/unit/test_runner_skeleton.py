@@ -7,7 +7,10 @@ rest of the c-stage implementation (capture, diff, dispatch) builds on.
 
 from __future__ import annotations
 
+import os
 import re
+
+import pytest
 
 from quicksight_gen._dev import runner
 
@@ -529,3 +532,147 @@ def test_collect_run_outputs_aggregates_test_durations(tmp_path: Path) -> None:
     )
     timings_json = json.loads((tmp_path / "timings.json").read_text())
     assert "tests/unit/a.py::t1" in timings_json["test_durations"]["unit"]
+
+
+# Y.2.gate.c.3 — drift-diff tests.
+
+
+def _write_timings(run_dir: Path, layer_durations: dict[str, float]) -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "timings.json").write_text(json.dumps({"layer_durations": layer_durations}) + "\n")
+
+
+def test_extract_sha_clean() -> None:
+    assert runner._extract_sha("20260507T213138Z-9336911") == "9336911"
+
+
+def test_extract_sha_dirty() -> None:
+    assert runner._extract_sha("20260507T213138Z-9336911-dirty") == "9336911"
+
+
+def test_drift_entry_delta_pct() -> None:
+    entry = runner.DriftEntry(layer="unit", current_seconds=15.0, prior_seconds=10.0)
+    assert entry.delta_pct == 0.5  # +50%
+    assert entry.is_drift is True  # exactly at threshold = trigger
+
+
+def test_drift_entry_under_threshold() -> None:
+    entry = runner.DriftEntry(layer="unit", current_seconds=11.0, prior_seconds=10.0)
+    assert entry.delta_pct == pytest.approx(0.1)
+    assert entry.is_drift is False
+
+
+def test_drift_entry_no_prior() -> None:
+    entry = runner.DriftEntry(layer="unit", current_seconds=10.0, prior_seconds=None)
+    assert entry.delta_pct is None
+    assert entry.is_drift is False
+
+
+def test_drift_entry_zero_prior_avoids_div_by_zero() -> None:
+    entry = runner.DriftEntry(layer="unit", current_seconds=10.0, prior_seconds=0.0)
+    assert entry.delta_pct is None  # we skip rather than divide by zero
+    assert entry.is_drift is False
+
+
+def test_find_prior_run_no_runs_dir(tmp_path: Path) -> None:
+    """Missing runs/ → None, not a crash."""
+    assert runner.find_prior_run("20260507T120000Z-abc", runs_dir=tmp_path / "missing") is None
+
+
+def test_find_prior_run_no_other_runs(tmp_path: Path) -> None:
+    """Only the current run exists → None."""
+    _write_timings(tmp_path / "20260507T120000Z-abc", {"unit": 10.0})
+    assert runner.find_prior_run("20260507T120000Z-abc", runs_dir=tmp_path) is None
+
+
+def test_find_prior_run_prefers_same_sha(tmp_path: Path) -> None:
+    """Two priors: one with same SHA, one with different SHA + more recent.
+    Same-SHA wins (same-code comparison is the closest signal)."""
+    _write_timings(tmp_path / "20260101T120000Z-abc", {"unit": 10.0})
+    same_sha = tmp_path / "20260102T120000Z-abc"
+    _write_timings(same_sha, {"unit": 11.0})
+    base = time.time()
+    os.utime(same_sha, (base, base))
+    diff_sha = tmp_path / "20260507T120000Z-xyz"
+    _write_timings(diff_sha, {"unit": 30.0})
+    os.utime(diff_sha, (base + 100, base + 100))  # newer mtime
+    found = runner.find_prior_run("20260508T120000Z-abc", runs_dir=tmp_path)
+    assert found == same_sha
+
+
+def test_find_prior_run_falls_back_to_most_recent(tmp_path: Path) -> None:
+    """No same-SHA prior → most-recent overall."""
+    base = time.time()
+    older = tmp_path / "20260101T120000Z-old"
+    _write_timings(older, {"unit": 10.0})
+    os.utime(older, (base - 100, base - 100))
+    newer = tmp_path / "20260102T120000Z-new"
+    _write_timings(newer, {"unit": 11.0})
+    os.utime(newer, (base, base))
+    found = runner.find_prior_run("20260507T120000Z-current", runs_dir=tmp_path)
+    assert found == newer
+
+
+def test_find_prior_run_skips_runs_without_timings(tmp_path: Path) -> None:
+    """A run dir without timings.json (incomplete / failed early) is not a candidate."""
+    incomplete = tmp_path / "20260101T120000Z-old"
+    incomplete.mkdir()
+    # No timings.json
+    valid = tmp_path / "20260102T120000Z-new"
+    _write_timings(valid, {"unit": 11.0})
+    found = runner.find_prior_run("20260507T120000Z-current", runs_dir=tmp_path)
+    assert found == valid
+
+
+def test_compute_drift_layer_in_both() -> None:
+    current = {"layer_durations": {"unit": 15.0}}
+    prior = {"layer_durations": {"unit": 10.0}}
+    entries = runner.compute_drift(current, prior)
+    assert len(entries) == 1
+    assert entries[0].layer == "unit"
+    assert entries[0].delta_pct == 0.5
+
+
+def test_compute_drift_layer_only_in_current() -> None:
+    """New layer (not in prior) → entry with prior=None, no drift."""
+    current = {"layer_durations": {"unit": 10.0, "db": 25.0}}
+    prior = {"layer_durations": {"unit": 9.5}}
+    entries = runner.compute_drift(current, prior)
+    by_layer = {e.layer: e for e in entries}
+    assert by_layer["unit"].prior_seconds == 9.5
+    assert by_layer["db"].prior_seconds is None
+
+
+def test_compute_drift_ignores_layer_only_in_prior() -> None:
+    """Chain narrowing (`up_to=unit` after a prior `up_to=browser`) → don't
+    spam drift entries for layers we didn't run this time."""
+    current = {"layer_durations": {"unit": 10.0}}
+    prior = {"layer_durations": {"unit": 9.5, "db": 24.0, "deploy": 90.0}}
+    entries = runner.compute_drift(current, prior)
+    assert {e.layer for e in entries} == {"unit"}
+
+
+def test_report_drift_no_prior_prints_and_returns(tmp_path: Path, capsys: Any) -> None:
+    """First run ever → print "no prior" + return cleanly (no crash)."""
+    current = tmp_path / "runs" / "20260507T120000Z-abc"
+    _write_timings(current, {"unit": 10.0})
+    runner.report_drift(current, runs_dir=tmp_path / "runs")
+    out = capsys.readouterr().out
+    assert "no prior run" in out
+
+
+def test_report_drift_marks_over_threshold(tmp_path: Path, capsys: Any) -> None:
+    """+50% → ⚠ marker; +49% → no marker."""
+    runs = tmp_path / "runs"
+    prior = runs / "20260101T120000Z-abc"
+    _write_timings(prior, {"unit": 10.0, "db": 20.0})
+    current = runs / "20260102T120000Z-abc"
+    _write_timings(current, {"unit": 14.9, "db": 31.0})  # unit +49%, db +55%
+    runner.report_drift(current, runs_dir=runs)
+    out = capsys.readouterr().out
+    # unit is under threshold — no warning
+    unit_line = [line for line in out.splitlines() if "drift: unit" in line][0]
+    assert "⚠" not in unit_line
+    # db over threshold — warning
+    db_line = [line for line in out.splitlines() if "drift: db" in line][0]
+    assert "⚠" in db_line
