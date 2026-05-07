@@ -201,15 +201,18 @@ class RunOptions:
     Most flags are scaffolding today (consumed by future c-stage tasks):
 
     - ``only`` — pytest ``-k <expr>`` filter (active now in c.7).
+    - ``parallel`` — pytest-xdist worker count (active now in c.6; default 1 = serial).
     - ``trace_all`` — Playwright capture every test (env var passthrough; consumed by c.11).
     - ``allow_dirty_deploy`` — bypass tracked-changes refusal on layer 4+ (active now per b.10).
-    - ``variants`` / ``fuzz_seeds`` — variant fan-out (active in c.6).
+    - ``variants`` / ``fuzz_seeds`` — cross-variant fan-out via asyncio.gather (lands when
+      real variants exist; deploy/api/browser are stubs today).
     - ``skip_cheap`` — skip-if-already-green-this-SHA (active when cache lands; b.8).
     - ``keep_on_failure`` — don't tear down ephemeral state on failure (active when
       Y.2.gate.l.2 lifecycle commands land; b.14.3 / f.5).
     """
 
     only: str | None = None
+    parallel: int = 1
     variants: str = "default"
     fuzz_seeds: int = 1
     skip_cheap: bool = False
@@ -281,6 +284,8 @@ def _layer_command(
         ]
         if opts.only:
             cmd += ["-k", opts.only]
+        if opts.parallel > 1:
+            cmd += ["-n", str(opts.parallel)]
         return (cmd, {**env_addl, "QS_GEN_SKIP_PYRIGHT": "1"})
     if layer == "db":
         # 3a — DB SQL smoke (parametrized over 37 datasets). Behind QS_GEN_E2E=1.
@@ -289,6 +294,8 @@ def _layer_command(
         cmd = [str(_VENV_BIN / "pytest"), "tests/e2e/test_dataset_sql_smoke.py", "-q"]
         if opts.only:
             cmd += ["-k", opts.only]
+        if opts.parallel > 1:
+            cmd += ["-n", str(opts.parallel)]
         return (cmd, {**env_addl, "QS_GEN_E2E": "1", "QS_GEN_SKIP_PYRIGHT": "1"})
     # deploy / api / browser: not yet wired. Need cfg loading (Y.2.gate.h.2)
     # + variant fan-out (b.2 testcontainers + b.3 App2-as-early-gate).
@@ -596,6 +603,7 @@ def _options_from_args(args: argparse.Namespace) -> RunOptions:
     (most flags `default=False`/`default=None` from `_build_parser`)."""
     return RunOptions(
         only=getattr(args, "only", None),
+        parallel=getattr(args, "parallel", 1),
         variants=getattr(args, "variants", "default"),
         fuzz_seeds=getattr(args, "fuzz_seeds", 1),
         skip_cheap=getattr(args, "skip_cheap", False),
@@ -717,6 +725,13 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="<expr>",
         default=None,
         help="pytest -k <expr>: narrow within-layer tests. Active now.",
+    )
+    p_up_to.add_argument(
+        "--parallel",
+        type=int,
+        default=1,
+        metavar="N",
+        help="within-variant pytest-xdist worker count (default 1 = serial). Mirrors ./run_e2e.sh --parallel.",
     )
     p_up_to.add_argument(
         "--variants",

@@ -927,3 +927,64 @@ def test_audit_first_layer_pyright_has_no_external_preconditions() -> None:
     audit = _read_audit_text()
     assert "None — pure static check" in audit
     assert runner._LAYER_DEPS["pyright"] == frozenset()
+
+
+# Y.2.gate.c.6 — within-variant parallelism (--parallel=N → pytest -n N).
+
+
+def test_run_options_parallel_default_is_one() -> None:
+    """Default = serial (1 worker). Operator opts into parallelism."""
+    assert runner.RunOptions().parallel == 1
+
+
+def test_layer_command_no_n_flag_when_parallel_one() -> None:
+    """parallel=1 → no -n flag (let pytest run inline; cleaner output for
+    iteration-loop runs)."""
+    cmd_env = runner._layer_command("unit", Path("/tmp/run"), runner.RunOptions(parallel=1))
+    assert cmd_env is not None
+    cmd, _ = cmd_env
+    assert "-n" not in cmd
+
+
+def test_layer_command_adds_n_flag_when_parallel_gt_one() -> None:
+    """parallel=4 → pytest -n 4 (xdist)."""
+    cmd_env = runner._layer_command("unit", Path("/tmp/run"), runner.RunOptions(parallel=4))
+    assert cmd_env is not None
+    cmd, _ = cmd_env
+    assert "-n" in cmd
+    assert cmd[cmd.index("-n") + 1] == "4"
+
+
+def test_layer_command_n_flag_threads_to_db_layer() -> None:
+    """db layer (3a smoke) also takes -n; valuable for the 37 datasets."""
+    cmd_env = runner._layer_command("db", Path("/tmp/run"), runner.RunOptions(parallel=4))
+    assert cmd_env is not None
+    cmd, _ = cmd_env
+    assert "-n" in cmd
+
+
+def test_layer_command_n_flag_no_op_for_pyright() -> None:
+    """pyright doesn't run pytest, so -n has no place — and would crash."""
+    cmd_env = runner._layer_command("pyright", Path("/tmp/run"), runner.RunOptions(parallel=4))
+    assert cmd_env is not None
+    cmd, _ = cmd_env
+    assert "-n" not in cmd
+
+
+def test_argparse_accepts_parallel_int() -> None:
+    parser = runner._build_parser()
+    parsed = parser.parse_args(["up_to", "unit", "--parallel=8"])
+    assert parsed.parallel == 8
+
+
+def test_argparse_parallel_default_is_one() -> None:
+    parser = runner._build_parser()
+    parsed = parser.parse_args(["up_to", "unit"])
+    assert parsed.parallel == 1
+
+
+def test_options_from_args_threads_parallel() -> None:
+    parser = runner._build_parser()
+    parsed = parser.parse_args(["up_to", "unit", "--parallel=4"])
+    opts = runner._options_from_args(parsed)
+    assert opts.parallel == 4
