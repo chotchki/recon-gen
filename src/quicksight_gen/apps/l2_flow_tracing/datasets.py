@@ -166,6 +166,8 @@ CHAIN_INSTANCES_CONTRACT = DatasetContract(columns=[
     ColumnSpec("required_total", "INTEGER"),
     ColumnSpec("required_fired", "INTEGER"),
     ColumnSpec("completion_status", "STRING"),
+    # Y.1.p — analysis-level metadata cascade target (see POSTINGS_CONTRACT).
+    ColumnSpec("_meta_match_value", "STRING"),
 ])
 
 
@@ -194,6 +196,8 @@ TT_INSTANCES_CONTRACT = DatasetContract(columns=[
     ColumnSpec("net_diff", "DECIMAL"),
     ColumnSpec("leg_count", "INTEGER"),
     ColumnSpec("completion_status", "STRING"),
+    # Y.1.p — analysis-level metadata cascade target (see POSTINGS_CONTRACT).
+    ColumnSpec("_meta_match_value", "STRING"),
 ])
 
 
@@ -244,6 +248,8 @@ TT_LEGS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("flow_target", "STRING"),
     ColumnSpec("edge_kind", "STRING"),
     ColumnSpec("completion_status", "STRING"),
+    # Y.1.p — analysis-level metadata cascade target (see POSTINGS_CONTRACT).
+    ColumnSpec("_meta_match_value", "STRING"),
 ])
 
 
@@ -368,6 +374,10 @@ POSTINGS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("bundle_id", "STRING"),
     ColumnSpec("bundle_status", "STRING"),  # 'Bundled' / 'Unbundled' calc
     ColumnSpec("origin", "STRING"),
+    # Y.1.p — projected from <<$pKey>> via metadata_match_value_select_expr.
+    # Drives the analysis-level metadata cascade CategoryFilter; column
+    # is hidden from analyst-facing visuals (only the filter touches it).
+    ColumnSpec("_meta_match_value", "STRING"),
 ])
 
 
@@ -513,37 +523,55 @@ def tt_completion_status_values() -> list[str]:
     return list(_TT_COMPLETION_STATUS_VALUES)
 
 
-def metadata_filter_clause(
+# Y.1.p — passthrough sentinel projected when pKey is the ALL sentinel,
+# matched by the analysis-level CategoryFilter as the "no filter" case.
+META_MATCH_PASSTHROUGH_SENTINEL = "__ALL_PASSTHROUGH__"
+
+
+def metadata_match_value_select_expr(
     l2_instance: L2Instance, metadata_col: str,
 ) -> str:
-    """WHERE-fragment that filters by the metadata key/value cascade,
-    portable across Postgres + Oracle.
+    """SELECT-expression projecting ``_meta_match_value`` based on
+    ``<<$pKey>>``, portable across Postgres + Oracle.
 
-    The natural form ``JSON_VALUE(metadata, '$.' || <<$pKey>>) IN (...)``
-    works on Postgres but fails on Oracle: Oracle's ``JSON_VALUE``
-    requires the path argument to be a string literal at parse time
-    (ORA-40597 — JSON path expression syntax error). The runtime
-    concatenation ``'$.' || pKey`` is rejected even when the planner
-    could constant-fold it.
+    Y.1.p — replaces the OR-cascade WHERE clause with a single column
+    that the analysis-level CategoryFilter can target. The bridge from
+    URL params → analysis params → dataset params via QS's
+    ``MappedDataSetParameters`` only fires when an analysis-level
+    filter or calc field references the parameter (per the AWS docs:
+    ``optimize-queries-using-dataset-parameters``). The OR-cascade
+    pattern referenced ``<<$pKey>>`` only inside the dataset's WHERE,
+    so QS never had a "wake up" trigger for the bridge on URL load —
+    cascade was 100% broken in production for URL-stamped params.
 
-    Workaround: emit one branch per declared metadata key with the
-    JSON path as a literal, gated by ``<<$pKey>>`` matching that key.
-    The L2 instance enumerates the keys at generate time, so the
-    fan-out is bounded and static. Sentinel ``__ALL__`` short-circuits
-    the cascade so a freshly-loaded dashboard renders all rows.
+    New shape:
+      - Dataset SELECT projects ``_meta_match_value`` via this CASE.
+      - When ``pKey`` = ``__ALL__``, every row gets the passthrough
+        sentinel (analysis filter matches it, all rows pass).
+      - When ``pKey`` = a declared key, rows project
+        ``JSON_VALUE(metadata, '$.<key>')``.
+      - Analysis-level CategoryFilter on ``_meta_match_value`` with
+        values ``[${pL2ftMetaValue}, '__ALL_PASSTHROUGH__']`` is what
+        actually gates the rows AND wakes the bridge.
 
-    ``metadata_col`` is the column the JSON_VALUE reads from
-    (typically ``metadata`` or ``parent_metadata``).
+    The Oracle ``JSON_VALUE`` constraint (ORA-40597 — path arg must be
+    a literal at parse time) is preserved: the path is hard-coded per
+    branch.
     """
     keys = declared_metadata_keys(l2_instance)
-    lines = [f"  <<$pKey>> = {_sql_str(META_KEY_ALL_SENTINEL)}"]
+    lines = [
+        f"  CASE",
+        f"    WHEN <<$pKey>> = {_sql_str(META_KEY_ALL_SENTINEL)} "
+        f"THEN {_sql_str(META_MATCH_PASSTHROUGH_SENTINEL)}",
+    ]
     for k in keys:
         path = f"$.{k}"
         lines.append(
-            f"  OR (<<$pKey>> = {_sql_str(k)} "
-            f"AND JSON_VALUE({metadata_col}, {_sql_str(path)}) "
-            f"IN (<<$pValues>>))"
+            f"    WHEN <<$pKey>> = {_sql_str(k)} "
+            f"THEN JSON_VALUE({metadata_col}, {_sql_str(path)})"
         )
+    lines.append(f"    ELSE NULL")
+    lines.append(f"  END AS _meta_match_value")
     return "\n".join(lines)
 
 
@@ -579,6 +607,13 @@ def build_postings_dataset(
     — no parameterization needed for those.
     """
     prefix = l2_instance.instance
+    # Y.1.p — metadata cascade restructured per the AWS-documented
+    # pattern (mapped analysis params + analysis-level filter). The OR
+    # cascade in the WHERE is replaced by a `_meta_match_value` column
+    # (CASE on <<$pKey>>) that the sheet's CategoryFilter targets at
+    # the analysis layer. The analysis filter is what wakes the
+    # MappedDataSetParameters bridge so URL-stamped params actually
+    # propagate to the dataset substitution.
     sql = (
         f"SELECT\n"
         f"  id, transfer_id, transfer_parent_id, rail_name, transfer_type,\n"
@@ -596,15 +631,9 @@ def build_postings_dataset(
         f"  bundle_id,\n"
         f"  CASE WHEN bundle_id IS NULL THEN 'Unbundled' ELSE 'Bundled' END "
         f"AS bundle_status,\n"
-        f"  origin\n"
-        f"FROM {prefix}_current_transactions\n"
-        # The metadata cascade short-circuit: when pKey is the sentinel,
-        # the WHERE always evaluates true (no filtering); otherwise the
-        # per-key branches compare the leg's metadata against the picked
-        # values. See `metadata_filter_clause` for the per-dialect-safe
-        # WHERE shape.
-        f"WHERE\n"
-        f"{metadata_filter_clause(l2_instance, 'metadata')}"
+        f"  origin,\n"
+        f"{metadata_match_value_select_expr(l2_instance, 'metadata')}\n"
+        f"FROM {prefix}_current_transactions"
     )
     return build_dataset(
         cfg, cfg.prefixed("l2ft-postings-dataset"),
@@ -905,10 +934,10 @@ def build_chain_instances_dataset(
         f"    WHEN required_fired >= required_total "
         f"AND xor_violations = 0 THEN 'Completed'\n"
         f"    ELSE 'Incomplete'\n"
-        f"  END AS completion_status\n"
+        f"  END AS completion_status,\n"
+        # Y.1.p — projected for the analysis-level CategoryFilter cascade.
+        f"{metadata_match_value_select_expr(l2_instance, 'parent_metadata')}\n"
         f"FROM firing_completion\n"
-        f"WHERE\n"
-        f"{metadata_filter_clause(l2_instance, 'parent_metadata')}\n"
         f"ORDER BY parent_posting DESC"
     )
     return build_dataset(
@@ -1790,10 +1819,10 @@ def build_tt_instances_dataset(
         f"    WHEN required_fired < required_total THEN 'Orphaned'\n"
         f"    WHEN xor_violations > 0 THEN 'Orphaned'\n"
         f"    ELSE 'Complete'\n"
-        f"  END AS completion_status\n"
+        f"  END AS completion_status,\n"
+        # Y.1.p — projected for the analysis-level CategoryFilter cascade.
+        f"{metadata_match_value_select_expr(l2_instance, 'parent_metadata')}\n"
         f"FROM firing_completion\n"
-        f"WHERE\n"
-        f"{metadata_filter_clause(l2_instance, 'parent_metadata')}\n"
         f"ORDER BY posting DESC, template_name, transfer_id"
     )
     return build_dataset(
@@ -2005,19 +2034,21 @@ def build_tt_legs_dataset(
         f"  FROM parent_firings pf\n"
         f"  JOIN declared d ON d.parent_name = pf.template_name\n"
         f")\n"
+        # Y.1.p — both CTEs carry the `metadata` column from
+        # current_transactions; project _meta_match_value once per side
+        # so the final UNION rows all have a column the analysis-level
+        # CategoryFilter can target.
         f"SELECT template_name, transfer_id, posting, account_name, "
         f"account_role, amount_money, amount_direction, amount_abs, "
-        f"flow_source, flow_target, edge_kind, completion_status\n"
+        f"flow_source, flow_target, edge_kind, completion_status,\n"
+        f"{metadata_match_value_select_expr(l2_instance, 'metadata')}\n"
         f"FROM template_legs\n"
-        f"WHERE\n"
-        f"{metadata_filter_clause(l2_instance, 'metadata')}\n"
         f"UNION ALL\n"
         f"SELECT template_name, transfer_id, posting, account_name, "
         f"account_role, amount_money, amount_direction, amount_abs, "
-        f"flow_source, flow_target, edge_kind, completion_status\n"
+        f"flow_source, flow_target, edge_kind, completion_status,\n"
+        f"{metadata_match_value_select_expr(l2_instance, 'metadata')}\n"
         f"FROM chain_edges\n"
-        f"WHERE\n"
-        f"{metadata_filter_clause(l2_instance, 'metadata')}\n"
         f"ORDER BY posting DESC, template_name, transfer_id"
     )
     return build_dataset(
