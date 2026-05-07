@@ -139,13 +139,28 @@ What env vars the test paths consume today (sorted by category):
 
 Open design questions surfaced by the audit. Need user direction before Y.2.gate.b finalizes.
 
-### 7.1 — CLI verifiers vs pytest tests
+### 7.1 — CLI verifiers + scripts/ disposition (LOCKED 2026-05-07)
 
-**Today:** `verify_demo_apply.py` + `verify_dataset_sql.py` are CLI scripts. The latter has a pytest twin (`test_dataset_sql_smoke.py`); the former does not.
+**Today:** `verify_demo_apply.py` + `verify_dataset_sql.py` under `tests/integration/` are CLI scripts. The latter has a pytest twin (`test_dataset_sql_smoke.py`); the former does not. Plus six `scripts/*.py` in unclear status.
 
-**Decision:** Convert `verify_demo_apply.py` to `tests/e2e/test_demo_apply_row_counts.py` (or similar) and have CI call the pytest version. Then delete the CLI script. **Tracked in Y.2.gate.f.**
+**Locked principle:** **"Every script gets a validation step — if duplicated, delete; if not, fold into the runner."** No standalone scripts hanging around as "I might need this someday" sidecars. Either it's runner-integrated (output capture, runner flag, runner subcommand) or it's gone.
 
-**Question for user:** Are there other "CLI tests" you know about? (`scripts/*.py` is unclear — `dump_top_queries.py`, `harness_manual_deploy.py`, `m2_6_verify.py`, `qs_substitution_probe.py`, `sweep_harness_orphans.py` — are any of these "tests" in disguise?)
+**Per-script disposition (LOCKED 2026-05-07; tracked in Y.2.gate.f):**
+
+| Script | Disposition | Notes |
+|---|---|---|
+| `tests/integration/verify_dataset_sql.py` | **delete** | Duplicated by `tests/e2e/test_dataset_sql_smoke.py`. Drop the CLI variant + the CI step that calls it. |
+| `tests/integration/verify_demo_apply.py` | **fold into pytest** | Convert to `tests/e2e/test_demo_apply_row_counts.py`. CI calls the pytest version. Delete the CLI. |
+| `scripts/bake_sample_output.py` | **delete** (verify first) | User: "unneeded". Currently used by `release.yml::bake` to produce `out-sample.zip` as a release artifact. Verify whether the published wheel + docs make the sample bundle redundant; if so, drop both the script and the release step. |
+| `scripts/dump_top_queries.py` | **fold into runner output** | Functionality already valuable for troubleshooting (currently a per-job CI artifact). The runner should dump top queries per touched DB (local + remote) into `runs/<run-id>/db/<dialect>/top-queries.md` automatically. |
+| `scripts/harness_manual_deploy.py` | **fold into runner flag** | The need it serves is "run a test and don't tear it down on failure" — convert to a `./run_tests.sh --keep-on-failure` (or similar) flag. Cleanup happens via a general sweep command (see `sweep_harness_orphans.py` row). Then delete the script. |
+| `scripts/m2_6_verify.py` | **delete** (verify first) | User: "should be covered by existing tests". Pytest sweep needs to confirm before drop. |
+| `scripts/qs_substitution_probe.py` | **fold into test output if not duplicated** | If the probe surfaces something not already in `verify_dataset_sql.py` / `test_dataset_sql_smoke.py`, fold the probe's output into per-run capture (e.g., post-deploy diagnostic dump). Otherwise delete. |
+| `scripts/sweep_harness_orphans.py` | **fold into runner subcommand** | "the tool should handle this already" — `./run_tests.sh sweep` (or equivalent) cleans orphan resources tagged `ManagedBy:quicksight-gen`. Standalone script goes away. |
+
+**Companion observation:** P.9f.* sub-tasks (Oracle e2e flake debugging) appear to have been one-off mitigations for the missing orchestration. The orchestration arriving plus the per-run capture + drift detection should make that whole class of work unnecessary — re-evaluate after Y.2.gate lands.
+
+**Validation step (Y.2.gate.f gating):** before deleting any script, the runner must demonstrate equivalent coverage. For each "delete" row above, the validation either points at the existing pytest test that covers the same ground, or surfaces a gap that gets folded in instead.
 
 **Chris**: I think these are one off tools that have been built as we hit stuff. I think the product + testing tool covers it.
 
@@ -159,13 +174,31 @@ Open design questions surfaced by the audit. Need user direction before Y.2.gate
 
 **Why:** Silent-skip is the bug class that let Y.2.b through. The runner makes "no env vars to remember" viable because it knows what layer it's running. Loud failure on missing config completes the contract — the operator can never get into the state of "I thought the tests ran but they were silently skipped."
 
-### 7.3 — Runner shape: shell script, not Click subcommand (LOCKED — option B)
+### 7.3 — Runner shape: implementation language (UNLOCKED 2026-05-07; spike under Y.2.gate.b.0)
 
-**Discovered:** `cli/{json,schema,data,docs,audit}.py::test` already shell out to `pytest + pyright` for per-artifact testing. This is a precedent for "CLI invokes the test layers it cares about".
+**Status:** Earlier draft of this section LOCKED on "shell script (`./run_tests.sh`)" via discussion alone. **User flagged 2026-05-07: that lock was vibes-not-spike** — the choice has codebase-shape consequences (process management, parallelism, JSON drift detection, second-codebase risk) that warrant an actual evaluation. Re-opened as `Y.2.gate.b.0`. Don't treat any direction in this section as binding until that spike returns.
 
-**Decision (LOCKED 2026-05-07):** Option B. Build the runner as a shell script (`./run_tests.sh`). Developer-focused tooling, not shippable customer-facing surface. Existing `quicksight-gen <verb> test` subcommands stay as-is (per-artifact convenience) and may eventually delegate to the runner internally.
+**The constraint set the spike must address:**
 
-**Why:** The runner is dev infrastructure, not part of the customer-facing CLI. Shell script keeps it explicit + readable + outside the Click surface where customers might stumble onto it.
+- **Process management**: spawning subprocess (xdist children, Docker containers, AWS CLI, pytest), per-test timeout, cleanup-on-failure (`--keep-on-failure` flag from §7.1), trap on SIGINT.
+- **Parallelism**: cross-variant Docker fan-out at layer 3 (PG + Oracle simultaneously), App2 + QS in parallel at layer 6 (§7.10/§7.12), xdist within-layer, fuzz-seed × dialect product when sample > 1.
+- **JSON I/O**: `runs/<run-id>/timings.json` + `hashes.json` write-and-diff vs prior run. The diff loop (§7.9) is the runner's main control flow.
+- **Dependency graph**: layer N depends on 1..N-1 (chain semantics). Variant cells within a layer are independent.
+- **State / probe**: layer dispatch probes the actual dependency (`aws sts get-caller-identity`, `psycopg.connect`, `docker ps`) — no state file (§7.12 LOCKED).
+- **Codebase impact**: keep the surface small. "Huge second code base" is the explicit anti-goal.
+
+**Candidates the spike should evaluate (non-exhaustive):**
+
+| Option | Pros | Cons |
+|---|---|---|
+| Pure bash + jq + GNU parallel | Minimal deps; transparent | Process mgmt + JSON diff are bash-painful; structured logging painful |
+| Pure Python (asyncio + subprocess + stdlib json) | Same language as project; type-checked; clean parallelism | Yet-another-Python entry point; risks growing into the "huge second code base" |
+| `just` (Rust task runner) | Rust binary (memory: user prefers Rust tools); declarative recipe graph + parallel groups; tiny | Recipes still need helpers for JSON diff — split-brain shell+helper |
+| Pytest-as-orchestrator + thin Python wrapper | Reuses pytest's xdist + fixtures + session lifecycle (already have); marker-based layer graph; minimal new code | Layers cross "did Docker boot" / "did AWS resp" — pytest doesn't naturally express that |
+| `nox` / `tox` / `mise` | Battle-tested session runners | Heavier than the project needs; venv juggling overlaps with `uv` |
+| Click subcommand (`quicksight-gen test ...`) | Same CLI as everything else | Bloats user-facing CLI with dev tooling (the `cli/{json,schema,data}.py::test` precedent already shells out to pytest, which is a precedent in the *opposite* direction — it argues for keeping the test-runner OUT of the customer Click surface) |
+
+**Spike acceptance:** writes a short doc (`docs/audits/y_2_gate_b_0_runner_lang_spike.md`) comparing options on the constraint set above + a recommendation. The recommendation locks §7.3 (replace this section with the result). Y.2.gate.b's design work picks up under the chosen substrate.
 
 ### 7.4 — Dialect coverage gap (browser × Oracle) (LOCKED — add)
 
@@ -183,16 +216,19 @@ The audit found 5 sub-layers under "DB tests" (3a/3b/3c/3d/3e — parse, counts,
 
 **Decision (LOCKED 2026-05-07):** Collapse all 5 sub-layers under a single runner UX flag `up_to=db`. Power users scope further with `--only=…`. Internally the runner still tracks per-sub-layer for timing + failure attribution, but the operator-facing knob is one symbol.
 
-### 7.7 — Layer 7/8 placement (LOCKED)
+### 7.7 — Layer 7/8 placement (LOCKED 2026-05-07)
 
 **Today:** Layer 7 runs alongside layer 6 (in `pytest tests/e2e`); layer 8 runs ONLY via `--harness` (mutually exclusive with layer 5/6).
 
-**Decision (LOCKED 2026-05-07):**
+**Decision (LOCKED — collapse layer 8 into 6/7):**
 
-- **Layers 6 + 7 are flavors of the same layer** — both run "the e2e browser tests"; merging them gives a natural comparison point (App2 vs QS for the same scenario, side-by-side). Variant axis on the merged layer: `target = qs | app2`. Compounds with §7.10 — both run in parallel under §7.12's "parallel with fast-fail" framing.
-- **Layer 8 (harness) sits in parallel** to the merged 6/7 layer. It's a different shape — answers "did our (uncontrolled) dependencies break us?" — not "does our wiring render correctly?". **Stays first-class, not optional** ("optional is where stuff goes to die"). Continue investing in the test-failure troubleshooting tools (M.4.1.f manifests, etc.) the harness depends on.
+- **Layers 6 + 7 merge** into one browser-e2e layer with `target = qs | app2` variant axis. Both targets run in parallel with fast-fail (§7.10 / §7.12 refinement: "the main end deliverable is still AWS QuickSight; App2 + QS run in parallel, not sequential").
+- **Layer 8 (harness) is dropped as a distinct layer** (LOCKED 2026-05-07). User direction: "lean towards dropping layer 8 and making sure its validations are handled in the e2e harness already. ... I suspect our increased systematic logging is the real safetynet." Audit pass (Y.2.gate.f) confirms each `test_harness_*` shape is covered by an e2e test — anything genuinely unique gets folded into the merged 6/7 layer; everything else is the systematic-logging-now-handles-this case.
+- **Reasoning:** the original "harness = uncontrolled dependencies broke us" framing was load-bearing when failure-mode visibility was poor. With §7.9's per-run capture + drift detection (timings, hashes, top queries, fuzz-seed manifests, browser traces), the same signal surfaces from every e2e run — a separate harness lane stops earning its keep. The systematic logging IS the safetynet.
 
-**Why:** Adjacent flavors get adjacent layer numbers so the runner can express "test all browser flavors" cheaply. Independent shapes get independent layers so a harness regression doesn't masquerade as an app-wiring failure. The "no optional" framing prevents drift — we maintain layer 8, not let it bit-rot.
+**Why:** Independent layers earn their place by surfacing failure shapes the existing layers can't. Layer 8 used to do that; the new logging shape collapses the gap. One fewer concept in the runner; one fewer place tests can rot.
+
+**Validation step (Y.2.gate.f gating, same shape as scripts/ disposition):** for each `tests/e2e/test_harness_*.py`, point at the e2e test that covers the same shape OR fold the unique assertion into the merged 6/7 layer. Then delete the `_harness_*` infrastructure. Done in the same Y.2.gate.f sweep as the scripts/ disposition — both follow "validate, then delete-or-fold" principle.
 
 ### 7.8 — Wall-clock targets (LOCKED — emerge from §7.9)
 
@@ -378,9 +414,13 @@ The numbers above are rough but illustrate the shape: **iteration speed drops fr
 - The user explicitly opts in to a larger sample (`--fuzz-seeds=100`) when they want the heavier coverage in one shot — typical for nightly cron + pre-release runs.
 - A previously-green seed that suddenly fails on a new run = signal (regression in either generator or consumer); same drift-detection shape as the timings + hash-lock pattern.
 
-**Open calibration (no lock yet):** ⚠ threshold for "real bug vs generator edge case." Probably empirical — start with no threshold, tighten once we have data.
+**Threshold (LOCKED 2026-05-07 — fuzz failures are HARD FAIL, not warnings; revisit *only* when we have first-failure data).** User direction: "on the fuzz errors, I want it to be a failure that screams loudly until we see how many false positives it generates. ... I'm expecting it to be noisy at first and that's a good thing." Rationale: the cost of a real bug surfacing as a quiet ⚠ that everyone scrolls past is much higher than the cost of a generator edge case loudly stopping a run. The noisy-at-first phase is the point — every loud failure is either a real bug we're glad we caught, or a generator edge case worth fixing in the generator.
 
-**Tracked under:** Y.2.gate.b (variants design — fuzz seed first-class with single-random default), Y.2.gate.c (implement opt-in larger sampling), Y.2.gate.j (parallelism applies when sample > 1).
+- A failing fuzz seed = test failure = chain stops at that layer (same shape as any pytest failure).
+- The failure manifest carries `fuzz_seed=<N>` so reproduction is one-line (`QS_GEN_FUZZ_SEED=<N>`).
+- **No skiplist machinery is built preemptively** (LOCKED 2026-05-07 — explicit "wait for first fail"). The escape hatch (`--fuzz-seeds=0` to skip the axis entirely) already exists via the variant-disable path; nothing else gets added until first-failure data tells us whether more is needed.
+
+**Tracked under:** Y.2.gate.b (variants design — fuzz seed first-class with single-random default + hard-fail), Y.2.gate.c (implement opt-in larger sampling), Y.2.gate.j (parallelism applies when sample > 1).
 
 ---
 
@@ -405,9 +445,14 @@ That's the right design when the lock is the only drift signal. But once §7.9 c
 - **Per-fuzz-seed sizing**: heavier fuzz seeds for nightly (more rows, deeper chains) without touching the default. Compounds with §7.11 — the operator-opted-in larger sample can also opt into denser data.
 - **Generator regression detection still works**: a previously-green seed that suddenly produces different bytes for the same `--seed-density` = signal. The runner reports the diff; the operator decides if it's a legit generator improvement or a bug.
 
-**Migration path** (out of scope for Y.2.gate but tracked here for visibility): once the runner lands and the run-pair drift detection is proven, the global SHA256 lock in `tests/data/test_l2_baseline_seed.py` can transition from "pin the bytes forever" to "match the most-recent green run + any explicitly-locked baseline." Lower-friction generator tuning falls out of this.
+**Migration path (LOCKED 2026-05-07 — lands with the hash-lock move under `Y.2.gate.c.13`):** the tunable-parameter work is **not** a follow-up; it's a sub-task of Y.2.gate.c that ships in the same roll as the hash-lock-into-`runs/<run-id>/` move. Concrete deliverables:
 
-**For now**: Y.2.gate.c just needs to capture the hash to `runs/<run-id>/`; the global lock stays in place. The full transition to tunable parameters is a Y.2.gate-or-later follow-up once the run-pair pattern is proven.
+- Plumb `--seed-density=N` (or equivalent param) through `emit_full_seed`.
+- Drop the global SHA256 lock in `tests/data/test_l2_baseline_seed.py` in favor of the per-run hash recorded in `runs/<run-id>/hashes.json`.
+- Test asserts the previous default density still produces the same byte-output (regression guard against accidental generator drift during the transition).
+- Document the tunable in CLAUDE.md alongside the runs/<run-id>/ pattern.
+
+The "out of scope for Y.2.gate" framing in earlier drafts of this audit is replaced — running both work items together avoids leaving the old global-lock pattern in place after the runner lands. (User direction 2026-05-07: "Plan it as a sub-task, lands with the move of the hash lock code.")
 
 **Output isolation (what gets isolated):**
 
