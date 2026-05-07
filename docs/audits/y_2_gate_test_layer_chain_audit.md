@@ -202,6 +202,50 @@ The audit found 5 sub-layers under "DB tests". These differ in what they exercis
 
 The audit table marked some layers as "unknown" wall-clock. Before Y.2.gate.b finalizes the budget targets, we should measure each layer once and lock numbers in.
 
+### 7.10 — App2 against local Docker as the early e2e gate (user-flagged)
+
+**User question:** Can we expose local Docker databases to QuickSight as an early e2e gate? That would remove the AWS autoscaling contention in AWS and CI.
+
+**Direct answer:** Technically yes (VPC connection + Tailscale-into-VPC tunnel; we already have `vpc_connection_arn` plumbed via the parked `hotfix-v8.7.4-vpc-connection-arn` branch). But heavy infra, fragile, and doesn't actually solve the AWS contention because QS is still in AWS and still rate-limits at the API/render layer regardless of where the DB lives.
+
+**Better answer that's already built — promote App2 in the chain:**
+
+App2 (layer 7 in the audit, X.2.f/g/h) runs the **same dataset SQL** as QS, against any database including local Docker. No AWS contact, no QS rate-limits, no ARN/auth juggling. **It's the early e2e gate that already exists.**
+
+**Reframe:**
+
+| Pre-Y.2.gate framing | Post-Y.2.gate framing |
+|---|---|
+| Layer 7 (App2) ran alongside layer 6 (QS browser) with no clear ordering | Layer 7 (App2) becomes **layer 3.7** — runs after DB smoke, **before** QS deploy. Fast-feedback gate against local Docker. |
+| QS layer 5/6 was the canonical "e2e" | QS layer 5/6 becomes the **parity / regression cell** — catches QS-side rendering bugs (Sankey layout, dashboard structure, embed-URL signing) that App2 by definition can't. Runs nightly + pre-release; not on every iteration. |
+| Layer 4 (deploy) was a hard prerequisite for "e2e green" | Layer 4 (deploy) is a hard prerequisite for layer 5/6, but App2 (3.7) runs against ephemeral Docker and skips deploy entirely for fast-feedback runs. |
+
+**Coverage matrix:**
+
+| Bug class | App2 (local Docker) | QS (AWS) |
+|---|---|---|
+| Dialect SQL bugs (Y.2.b's `WHERE on alias`) | ✅ catches | ✅ catches |
+| Calc-field-to-SQL translation (X.2.g.2.c) | ✅ catches | ✅ catches (via different path) |
+| Pushdown parameter substitution (Y.1+) | ✅ via App2's `:param_*` bind preprocessor | ✅ via QS `<<$paramName>>` substitution |
+| QS-side rendering (Sankey layout, KPI styling) | ❌ — App2 has its own renderer | ✅ catches |
+| Embed URL signing / IAM identity | ❌ — App2 doesn't use embed URLs | ✅ catches |
+| QS dashboard structure / sheet count | ❌ | ✅ catches |
+| Filter widget UI behavior (dropdown, slider, date picker) | ⚠ App2 has equivalents but different UI surface | ✅ catches the QS-specific shape |
+
+**~80% of the bug classes that today require an AWS deploy are catchable in App2 against local Docker.** The remaining 20% (rendering, embed, dashboard structure) genuinely need QS — but that's a small, slow nightly cell rather than a per-iteration gate.
+
+**Implication for runner design:**
+
+- **Default invocation** (`./run_tests.sh up_to=e2e`) goes through layer 3.7 (App2 + Docker). No AWS contact. Wall-clock target: under 5 minutes including Docker startup.
+- **AWS invocation** (`./run_tests.sh up_to=qs-e2e` or similar) is opt-in for the cases where you actually changed QS-side wiring. Includes layer 4-6.
+- **CI**: PR-quick = App2 only (fast PR feedback). Push:main = App2 + QS PG-API. Nightly = full matrix including QS browser. Existing `e2e.yml` cells become the QS-side cells; new `app2-e2e.yml` cell becomes the high-frequency gate.
+
+**This is a strategic reprioritization** — not a Y.2.gate-only decision. Likely owned by Phase X.2.j (4-way cross-tool agreement). **Decision needed from user:** is this the right framing, or is QS still meant to be the canonical e2e and App2 the auxiliary?
+
+**Opinion:** Yes, flip it. App2 is faster, cheaper, catches more bugs per minute, doesn't require AWS auth. QS remains the "did the actual deployed thing render?" check, but at lower frequency. **This also relieves the QS-throttle bottleneck** Y.2.gate.j called out — and Y.2's SQL pushdown reduces it further. Compounding wins.
+
+---
+
 ### 7.9 — Per-run output isolation + timing capture (new)
 
 **User direction:** Every run gets its own isolated output dir, and the runner captures per-(layer, variant, test) timings. On the next run, the runner reads the prior run's timings and reports `step took 24s (was 19s, +26%)`. This becomes a smell detector — same shape as hash-locked seed data: a sudden timing delta flags a regression before it crashes the test.
