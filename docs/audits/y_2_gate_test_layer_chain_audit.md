@@ -174,31 +174,33 @@ Open design questions surfaced by the audit. Need user direction before Y.2.gate
 
 **Why:** Silent-skip is the bug class that let Y.2.b through. The runner makes "no env vars to remember" viable because it knows what layer it's running. Loud failure on missing config completes the contract — the operator can never get into the state of "I thought the tests ran but they were silently skipped."
 
-### 7.3 — Runner shape: implementation language (UNLOCKED 2026-05-07; spike under Y.2.gate.b.0)
+### 7.3 — Runner shape: pytest-as-orchestrator + thin Python wrapper (LOCKED 2026-05-07 by spike `Y.2.gate.b.0`)
 
-**Status:** Earlier draft of this section LOCKED on "shell script (`./run_tests.sh`)" via discussion alone. **User flagged 2026-05-07: that lock was vibes-not-spike** — the choice has codebase-shape consequences (process management, parallelism, JSON drift detection, second-codebase risk) that warrant an actual evaluation. Re-opened as `Y.2.gate.b.0`. Don't treat any direction in this section as binding until that spike returns.
+**Spike output:** `docs/audits/y_2_gate_b_0_runner_lang_spike.md`. Surveyed six candidates against the constraint set (process mgmt, parallelism, JSON I/O, dep probe, layer graph, variant selection, codebase budget). Anti-goal: avoid "huge second code base."
 
-**The constraint set the spike must address:**
+**Decision:**
 
-- **Process management**: spawning subprocess (xdist children, Docker containers, AWS CLI, pytest), per-test timeout, cleanup-on-failure (`--keep-on-failure` flag from §7.1), trap on SIGINT.
-- **Parallelism**: cross-variant Docker fan-out at layer 3 (PG + Oracle simultaneously), App2 + QS in parallel at layer 6 (§7.10/§7.12), xdist within-layer, fuzz-seed × dialect product when sample > 1.
-- **JSON I/O**: `runs/<run-id>/timings.json` + `hashes.json` write-and-diff vs prior run. The diff loop (§7.9) is the runner's main control flow.
-- **Dependency graph**: layer N depends on 1..N-1 (chain semantics). Variant cells within a layer are independent.
-- **State / probe**: layer dispatch probes the actual dependency (`aws sts get-caller-identity`, `psycopg.connect`, `docker ps`) — no state file (§7.12 LOCKED).
-- **Codebase impact**: keep the surface small. "Huge second code base" is the explicit anti-goal.
+- **CLI surface:** `./run_tests.sh up_to=<layer> [--variants=...] [--fuzz-seeds=N] [--only=...] [--skip-cheap] [--keep-on-failure] [--trace-all]`. The shell script is a ~10-line bash shim that `exec`s the Python orchestrator.
+- **Orchestrator:** `quicksight_gen/_dev/runner.py` (private dev package; not customer-facing). ~400 LOC budget. Owns argparse, run-id creation, dependency probe, per-variant subprocess dispatch via `asyncio.gather`, JSON capture/diff vs prior run, drift report.
+- **Substrate:** pytest. Tests carry layer markers (`@pytest.mark.layer3a`, etc.); per-variant fixture parametrization handles dialect/L2-instance/fuzz-seed axes; JSON-timing capture via `pytest_runtest_protocol` hook in conftest. Pytest-xdist handles within-variant parallelism (existing `./run_e2e.sh --parallel` knob carries over).
+- **Conftest delta:** add layer markers, `--variant` option that parametrizes DB/Docker fixtures, JSON-output hook. Most fixture infrastructure already exists.
 
-**Candidates the spike should evaluate (non-exhaustive):**
+**Why this wins:**
 
-| Option | Pros | Cons |
-|---|---|---|
-| Pure bash + jq + GNU parallel | Minimal deps; transparent | Process mgmt + JSON diff are bash-painful; structured logging painful |
-| Pure Python (asyncio + subprocess + stdlib json) | Same language as project; type-checked; clean parallelism | Yet-another-Python entry point; risks growing into the "huge second code base" |
-| `just` (Rust task runner) | Rust binary (memory: user prefers Rust tools); declarative recipe graph + parallel groups; tiny | Recipes still need helpers for JSON diff — split-brain shell+helper |
-| Pytest-as-orchestrator + thin Python wrapper | Reuses pytest's xdist + fixtures + session lifecycle (already have); marker-based layer graph; minimal new code | Layers cross "did Docker boot" / "did AWS resp" — pytest doesn't naturally express that |
-| `nox` / `tox` / `mise` | Battle-tested session runners | Heavier than the project needs; venv juggling overlaps with `uv` |
-| Click subcommand (`quicksight-gen test ...`) | Same CLI as everything else | Bloats user-facing CLI with dev tooling (the `cli/{json,schema,data}.py::test` precedent already shells out to pytest, which is a precedent in the *opposite* direction — it argues for keeping the test-runner OUT of the customer Click surface) |
+- **Process management**: pytest fixtures already do session/teardown with proper scope; orchestrator just spawns pytest subprocesses with timeouts.
+- **Parallelism**: `asyncio.gather` for cross-variant fan-out; pytest-xdist for within-variant. App2 + QS targets at the merged 6/7 layer = two parallel variants in the gather.
+- **JSON I/O**: stdlib `json`; pytest hooks emit per-test data cleanly.
+- **Dependency probe**: ~50 LOC orchestrator pre-flight before invoking pytest.
+- **Layer graph**: hard-coded sequential dispatch (`await dispatch(layer1); await dispatch(layer2); ...`) — no DAG engine needed.
+- **Codebase impact**: ~400 LOC orchestrator + small conftest changes. Dominated by reuse, not new code. Drift past ~600 LOC during implementation = signal to revisit (likely rebuilding pytest infra that should be fixtures).
 
-**Spike acceptance:** writes a short doc (`docs/audits/y_2_gate_b_0_runner_lang_spike.md`) comparing options on the constraint set above + a recommendation. The recommendation locks §7.3 (replace this section with the result). Y.2.gate.b's design work picks up under the chosen substrate.
+**Why the alternatives lose** (full comparison in the spike doc):
+
+- **Pure bash + jq**: JSON drift-diff loop is the dominant logic; bash makes it brittle. Cross-job error handling is footgun-rich.
+- **Pure Python (no pytest)**: reinvents fixture scoping, xdist, marker selection. The "huge second code base" trap.
+- **`just`**: the diff loop's Python helpers dominate; justfile becomes thin glue. Split-brain maintenance.
+- **`nox` / `tox` / `mise`**: built for env isolation (`uv` handles that already).
+- **Click subcommand**: same orchestrator code lives somewhere; question is the entry point. Existing precedent (`cli/{json,schema,data}.py::test` shells to pytest) argues *against* adding more dev tooling under customer Click.
 
 ### 7.4 — Dialect coverage gap (browser × Oracle) (LOCKED — add)
 
