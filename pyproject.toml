@@ -167,6 +167,11 @@ quicksight-gen = "quicksight_gen.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+# Y.2.gate.b.13 — _dev/ holds the test layer chain runner; importable from
+# conftest + tests during dev / CI but excluded from the customer wheel.
+# Wheel-build verification: see Y.2.gate.c (CI assertion that ``unzip -l``
+# of the built wheel returns no _dev matches).
+exclude = ["quicksight_gen._dev", "quicksight_gen._dev.*"]
 
 [tool.setuptools.package-data]
 quicksight_gen = [
@@ -259,6 +264,8 @@ include = [
     "src/quicksight_gen/common/html/_sql_executor.py",
     "src/quicksight_gen/common/html/_tree_fetcher.py",
     "src/quicksight_gen/common/html/server.py",
+    # Y.2.gate runner — dev tooling, kept strict from the start.
+    "src/quicksight_gen/_dev",
 ]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"

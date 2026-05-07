@@ -12,6 +12,9 @@ out/
 # Local run directory (contains config.yaml with secrets + generated out/)
 run/
 
+# Y.2.gate runner per-invocation output dirs; auto-pruned to last N=20
+runs/
+
 # IDE
 .idea/
 .vscode/
