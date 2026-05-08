@@ -1590,6 +1590,20 @@ def _run_one_variant(
                     )
                     return variant, [], EXIT_NEEDS_OPERATOR
 
+        # Y.2.gate.h.6 — thread cfg.default_l2_instance through to subprocesses
+        # via QS_GEN_TEST_L2_INSTANCE so the seed flow + dataset-SQL smoke test
+        # both pick the L2 instance the operator's external DB has been seeded
+        # with (default `default_l2_instance()` returns spec_example, which
+        # mismatches operators who seeded sasquatch_pr or another). Same shape
+        # as cfg.auth.aws_profile → AWS_PROFILE injection. Relative paths
+        # resolve from REPO_ROOT so subprocesses with arbitrary CWD find the
+        # YAML.
+        if runner_cfg is not None and runner_cfg.default_l2_instance is not None:
+            l2_path = Path(runner_cfg.default_l2_instance)
+            if not l2_path.is_absolute():
+                l2_path = REPO_ROOT / l2_path
+            variant_env[QS_GEN_TEST_L2_INSTANCE.name] = str(l2_path)
+
     if variant_env:
         for key, val in variant_env.items():
             display = (val[:60] + "...") if len(val) > 60 else val

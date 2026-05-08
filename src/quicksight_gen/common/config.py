@@ -122,6 +122,19 @@ class Config:
     # also uses ambient via OIDC). See combined spike for the full
     # decision + IAM runbook.
     auth: AuthConfig | None = None
+    # Y.2.gate.h.6 — Path to the L2 institution YAML the operator's external
+    # DB has been seeded with. Runner injects ``QS_GEN_TEST_L2_INSTANCE=<path>``
+    # into subprocess env_overrides so both the seed flow (passes ``--l2 <yaml>``
+    # to schema/data CLI subcommands) and the dataset-SQL smoke test (reads
+    # the env var to pick which L2's datasets to parametrize) align with the
+    # operator's actual DB state. Same shape as ``cfg.auth.aws_profile``:
+    # operator declares once in cfg, the runner threads it through. None =
+    # subprocesses fall back to ``default_l2_instance()`` (= bundled
+    # spec_example fixture); fine for greenfield local containers (local-pg
+    # / local-oracle / local-sqlite) but mismatches the operator's external
+    # Aurora when they've seeded a different L2 (e.g., sasquatch_pr).
+    # Relative paths resolve from the repo root.
+    default_l2_instance: str | None = None
     # v8.6.11 — When True (default), every Create* boto3 call passes
     # ``Tags=[ManagedBy, ResourcePrefix, L2Instance, *extra_tags]`` so
     # ``json clean`` can fail-CLOSED scope deletion to ourselves. Set
@@ -291,6 +304,7 @@ _CONFIG_ALLOWED_KEYS: frozenset[str] = frozenset({
     "aws_account_id", "aws_region", "datasource_arn", "resource_prefix",
     "principal_arns", "principal_arn", "extra_tags", "demo_database_url",
     "dialect", "signing", "tagging_enabled", "app2_db_pool_size", "auth",
+    "default_l2_instance",
 })
 
 _CONFIG_L2_ONLY_KEYS: frozenset[str] = frozenset({
@@ -569,6 +583,7 @@ def load_config(path: str | Path | None = None) -> Config:
         dialect=dialect,
         signing=signing,
         auth=auth,
+        default_l2_instance=_opt_str(values, "default_l2_instance"),
         tagging_enabled=raw_tagging,
         app2_db_pool_size=pool_size,
     )
