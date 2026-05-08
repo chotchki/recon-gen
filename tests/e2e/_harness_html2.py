@@ -39,6 +39,7 @@ from typing import Any
 
 import uvicorn
 
+from quicksight_gen.common.env_keys import EnvVarInvalid, QS_GEN_RUN_DIR
 from quicksight_gen.common.html.server import (
     DataFetcher, ServedDashboard, make_app,
 )
@@ -71,12 +72,16 @@ def _attach_app2_log_handler() -> tuple[logging.FileHandler | None, Path | None]
     direct ``pytest`` invocation; nowhere to put the file).
 
     Sidecar contract (matches c.10 / c.11 / c.12): any OSError on
-    mkdir / open is swallowed — capture failure must not break the
-    test session.
+    mkdir / open OR registry validator failure is swallowed —
+    capture failure must not break the test session.
     """
-    run_dir = os.environ.get("QS_GEN_RUN_DIR")
-    if not run_dir:
+    try:
+        run_dir_path = QS_GEN_RUN_DIR.get_or_none()
+    except EnvVarInvalid:
         return None, None
+    if run_dir_path is None:
+        return None, None
+    run_dir = str(run_dir_path)
     try:
         log_dir = Path(run_dir) / "app2"
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -172,7 +177,12 @@ def html2_server(
     # and our addHandler sticks. Trade-off: the uvicorn startup
     # banner doesn't reach the file (only stderr); every per-request
     # access log + traceback after that DOES land.
-    capture_enabled = bool(os.environ.get("QS_GEN_RUN_DIR"))
+    # Soft presence-check (sidecar pattern — bad env value should
+    # degrade to "not capturing" rather than fail the server boot).
+    try:
+        capture_enabled = QS_GEN_RUN_DIR.get_or_none() is not None
+    except EnvVarInvalid:
+        capture_enabled = False
     log_level = "info" if capture_enabled else "error"
     config = uvicorn.Config(
         asgi, host="127.0.0.1", port=0, log_level=log_level,

@@ -18,6 +18,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Generator, TypeVar
 
+from quicksight_gen.common.env_keys import (
+    EnvVarInvalid,
+    QS_E2E_SCREENSHOT_DIR,
+    QS_E2E_USER_ARN,
+    QS_GEN_RUN_DIR,
+    QS_GEN_TRACE_ALL,
+)
+
 if TYPE_CHECKING:
     # Playwright's sync API ships PEP 561 inline stubs — Page, Locator,
     # ElementHandle are all fully typed. Imported under TYPE_CHECKING
@@ -41,8 +49,8 @@ T = TypeVar("T")
 # if you need a different sink. Production CLI screenshot capture
 # uses an explicit ``output_dir`` arg to ``ScreenshotHarness`` and
 # does NOT touch this constant.
-SCREENSHOT_DIR = Path(
-    os.environ.get("QS_E2E_SCREENSHOT_DIR", "tests/e2e/screenshots")
+SCREENSHOT_DIR = (
+    QS_E2E_SCREENSHOT_DIR.get_or_none() or Path("tests/e2e/screenshots")
 ).resolve()
 
 
@@ -57,7 +65,13 @@ def get_user_arn() -> str:
     project AWS account ID into the source. Fail-loud is the
     contract.
     """
-    arn = os.environ.get("QS_E2E_USER_ARN")
+    # Use the registry's get_or_none() (NOT require()) so we keep the
+    # historical RuntimeError contract — unit tests assert the exact
+    # error type + message + runbook reference, and EnvVarRequired
+    # would be a behavior change. The registry's IAM-ARN regex
+    # validator still runs on the present value, surfacing
+    # malformed-ARN bugs at this boundary instead of inside boto.
+    arn = QS_E2E_USER_ARN.get_or_none()
     if not arn:
         raise RuntimeError(
             "QS_E2E_USER_ARN is not set. Embedding requires a "
@@ -233,8 +247,16 @@ def _stop_and_maybe_save_trace(context: object, *, failed: bool) -> None:
     """
     import zipfile
 
-    run_dir = os.environ.get("QS_GEN_RUN_DIR")
-    trace_all = bool(os.environ.get("QS_GEN_TRACE_ALL"))
+    # Sidecar contract — swallow registry validator failures (e.g.
+    # QS_GEN_RUN_DIR pointing at a non-dir) the same way the surrounding
+    # try/except swallows OSError. A misconfigured env var must not
+    # fail the wrapped browser test.
+    try:
+        run_dir_path = QS_GEN_RUN_DIR.get_or_none()
+    except EnvVarInvalid:
+        run_dir_path = None
+    run_dir = str(run_dir_path) if run_dir_path is not None else None
+    trace_all = bool(QS_GEN_TRACE_ALL.get_or_none())
     should_save = bool(run_dir) and (failed or trace_all)
     try:
         if should_save:
@@ -266,9 +288,14 @@ def _capture_dir_for(test_id: str) -> Path:
     env is set, else the legacy ``<SCREENSHOT_DIR>/_failures/`` flat
     dir.
     """
-    run_dir = os.environ.get("QS_GEN_RUN_DIR")
-    if run_dir:
-        return Path(run_dir) / "browser" / test_id
+    # Soft-fall through on bad value (matches the sidecar pattern in
+    # ``_finalize_browser_capture``).
+    try:
+        run_dir = QS_GEN_RUN_DIR.get_or_none()
+    except EnvVarInvalid:
+        run_dir = None
+    if run_dir is not None:
+        return run_dir / "browser" / test_id
     return SCREENSHOT_DIR / "_failures"
 
 
@@ -285,7 +312,12 @@ def _capture_path(filename_short: str, test_id: str) -> Path:
     is just ``<test_id>.png`` (no underscore prefix), matching the
     M.4.4.11-era convention.
     """
-    if os.environ.get("QS_GEN_RUN_DIR"):
+    # Soft-presence check (matches sidecar pattern).
+    try:
+        run_dir_present = QS_GEN_RUN_DIR.get_or_none() is not None
+    except EnvVarInvalid:
+        run_dir_present = False
+    if run_dir_present:
         return _capture_dir_for(test_id) / filename_short
     legacy_dir = _capture_dir_for(test_id)
     if filename_short == "screenshot.png":

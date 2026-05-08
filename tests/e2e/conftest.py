@@ -21,10 +21,21 @@ from pathlib import Path
 
 import pytest
 
+from quicksight_gen.common.env_keys import (
+    EnvVarInvalid,
+    QS_E2E_IDENTITY_REGION,
+    QS_E2E_PAGE_TIMEOUT,
+    QS_E2E_VISUAL_TIMEOUT,
+    QS_GEN_CONFIG,
+    QS_GEN_E2E,
+    QS_GEN_RUN_DIR,
+    QS_GEN_TEST_L2_INSTANCE,
+)
+
 
 def pytest_collection_modifyitems(config, items):
     """Skip all e2e tests unless QS_GEN_E2E=1."""
-    if os.environ.get("QS_GEN_E2E"):
+    if QS_GEN_E2E.get_or_none():
         return
     skip = pytest.mark.skip(reason="e2e tests disabled (set QS_GEN_E2E=1)")
     for item in items:
@@ -49,9 +60,9 @@ def pytest_runtest_makereport(item, call):
 # Timeout configuration
 # ---------------------------------------------------------------------------
 
-PAGE_TIMEOUT = int(os.environ.get("QS_E2E_PAGE_TIMEOUT", "30000"))
-VISUAL_TIMEOUT = int(os.environ.get("QS_E2E_VISUAL_TIMEOUT", "10000"))
-IDENTITY_REGION = os.environ.get("QS_E2E_IDENTITY_REGION", "us-east-1")
+PAGE_TIMEOUT = QS_E2E_PAGE_TIMEOUT.get_or_none() or 30000
+VISUAL_TIMEOUT = QS_E2E_VISUAL_TIMEOUT.get_or_none() or 10000
+IDENTITY_REGION = QS_E2E_IDENTITY_REGION.get_or_none() or "us-east-1"
 
 
 # ---------------------------------------------------------------------------
@@ -70,9 +81,14 @@ def cfg():
     """
     from quicksight_gen.common.config import load_config
 
-    explicit = os.environ.get("QS_GEN_CONFIG")
-    if explicit:
-        return load_config(explicit)
+    # Soft-fall: registry's must_be_file validator would raise on a
+    # bad pin; the discovery loop below has fallback candidates.
+    try:
+        explicit = QS_GEN_CONFIG.get_or_none()
+    except EnvVarInvalid:
+        explicit = None
+    if explicit is not None:
+        return load_config(str(explicit))
 
     candidates = (
         Path("config.yaml"),
@@ -116,9 +132,9 @@ def inv_l2_prefix() -> str:
     from quicksight_gen.apps.l1_dashboard._l2 import default_l2_instance
     from quicksight_gen.common.l2 import load_instance
 
-    override = os.environ.get("QS_GEN_TEST_L2_INSTANCE")
-    if override:
-        return str(load_instance(Path(override)).instance)
+    override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
+    if override is not None:
+        return str(load_instance(override).instance)
     return str(default_l2_instance().instance)
 
 
@@ -160,9 +176,9 @@ def exec_l2_prefix() -> str:
     from quicksight_gen.apps.l1_dashboard._l2 import default_l2_instance
     from quicksight_gen.common.l2 import load_instance
 
-    override = os.environ.get("QS_GEN_TEST_L2_INSTANCE")
-    if override:
-        return str(load_instance(Path(override)).instance)
+    override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
+    if override is not None:
+        return str(load_instance(override).instance)
     return str(default_l2_instance().instance)
 
 
@@ -205,9 +221,9 @@ def l1_l2_prefix() -> str:
     from quicksight_gen.apps.l1_dashboard._l2 import default_l2_instance
     from quicksight_gen.common.l2 import load_instance
 
-    override = os.environ.get("QS_GEN_TEST_L2_INSTANCE")
-    if override:
-        return str(load_instance(Path(override)).instance)
+    override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
+    if override is not None:
+        return str(load_instance(override).instance)
     return str(default_l2_instance().instance)
 
 
@@ -269,9 +285,9 @@ def l2ft_l2_prefix() -> str:
     from quicksight_gen.apps.l1_dashboard._l2 import default_l2_instance
     from quicksight_gen.common.l2 import load_instance
 
-    override = os.environ.get("QS_GEN_TEST_L2_INSTANCE")
-    if override:
-        return str(load_instance(Path(override)).instance)
+    override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
+    if override is not None:
+        return str(load_instance(override).instance)
     return str(default_l2_instance().instance)
 
 
@@ -437,9 +453,15 @@ def capture_top_queries(cfg, request):
     """
     yield
 
-    run_dir = os.environ.get("QS_GEN_RUN_DIR")
-    if not run_dir:
+    # Sidecar contract — swallow EnvVarInvalid (a misconfigured env
+    # var must not break a passing test session's teardown).
+    try:
+        run_dir_path = QS_GEN_RUN_DIR.get_or_none()
+    except EnvVarInvalid:
         return
+    if run_dir_path is None:
+        return
+    run_dir = str(run_dir_path)
     if not cfg.demo_database_url:
         return
 
@@ -475,12 +497,11 @@ def capture_top_queries(cfg, request):
     # Pick the substring filter — prefer the explicit L2 instance the
     # test session targeted, else the cfg's stamp, else the demo prefix.
     like_pattern = "spec_example"
-    override = os.environ.get("QS_GEN_TEST_L2_INSTANCE")
-    if override:
+    override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
+    if override is not None:
         try:
-            from pathlib import Path as _Path
             from quicksight_gen.common.l2 import load_instance
-            like_pattern = str(load_instance(_Path(override)).instance)
+            like_pattern = str(load_instance(override).instance)
         except Exception:
             pass
     elif cfg.l2_instance_prefix:

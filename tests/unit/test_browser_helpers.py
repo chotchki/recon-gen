@@ -22,12 +22,13 @@ from quicksight_gen.common.browser.helpers import (
     _test_id_from_pytest_env,
     get_user_arn,
 )
+from quicksight_gen.common.env_keys import QS_E2E_USER_ARN, QS_GEN_RUN_DIR
 
 
 class TestGetUserArn:
     def test_returns_env_var_when_set(self, monkeypatch):
         monkeypatch.setenv(
-            "QS_E2E_USER_ARN",
+            QS_E2E_USER_ARN.name,
             "arn:aws:quicksight:us-east-1:111122223333:user/default/test-user",
         )
         assert get_user_arn() == (
@@ -35,7 +36,7 @@ class TestGetUserArn:
         )
 
     def test_raises_when_env_var_unset(self, monkeypatch):
-        monkeypatch.delenv("QS_E2E_USER_ARN", raising=False)
+        monkeypatch.delenv(QS_E2E_USER_ARN.name, raising=False)
         with pytest.raises(RuntimeError, match="QS_E2E_USER_ARN is not set"):
             get_user_arn()
 
@@ -44,7 +45,7 @@ class TestGetUserArn:
         # Otherwise an unset-via-``export QS_E2E_USER_ARN=`` shell
         # idiom would slip through with an empty UserArn that AWS
         # rejects with a less obvious error.
-        monkeypatch.setenv("QS_E2E_USER_ARN", "")
+        monkeypatch.setenv(QS_E2E_USER_ARN.name, "")
         with pytest.raises(RuntimeError, match="QS_E2E_USER_ARN is not set"):
             get_user_arn()
 
@@ -52,7 +53,7 @@ class TestGetUserArn:
         # The runbook reference is the documented path for fixing
         # this in CI; if the doc moves, this test fails loud and
         # reminds the editor to update the message.
-        monkeypatch.delenv("QS_E2E_USER_ARN", raising=False)
+        monkeypatch.delenv(QS_E2E_USER_ARN.name, raising=False)
         with pytest.raises(RuntimeError) as exc_info:
             get_user_arn()
         assert ".github/E2E_SETUP.md" in str(exc_info.value)
@@ -113,13 +114,18 @@ class TestCaptureDirAndPath:
     ``<SCREENSHOT_DIR>/_failures/`` flat dir otherwise."""
 
     def test_capture_dir_runner_mode(self, monkeypatch, tmp_path) -> None:
+        # Y.2.gate.b.15 — registry's must_be_dir validator requires the
+        # path to exist; mkdir before setting the env so the test
+        # exercises the runner-mode path (not the soft-fall legacy
+        # branch that triggers on validator failure).
         run_dir = tmp_path / "run"
-        monkeypatch.setenv("QS_GEN_RUN_DIR", str(run_dir))
+        run_dir.mkdir(parents=True)
+        monkeypatch.setenv(QS_GEN_RUN_DIR.name, str(run_dir))
         out = _capture_dir_for("tests_e2e_test_foo__bar")
         assert out == run_dir / "browser" / "tests_e2e_test_foo__bar"
 
     def test_capture_dir_legacy_mode(self, monkeypatch) -> None:
-        monkeypatch.delenv("QS_GEN_RUN_DIR", raising=False)
+        monkeypatch.delenv(QS_GEN_RUN_DIR.name, raising=False)
         out = _capture_dir_for("any_test_id")
         assert out == SCREENSHOT_DIR / "_failures"
 
@@ -129,8 +135,10 @@ class TestCaptureDirAndPath:
         """Per-test directory means we don't need the test_id prefix
         on every file — names like ``screenshot.png`` are already
         scoped by their parent dir."""
+        # See test_capture_dir_runner_mode for why mkdir is needed.
         run_dir = tmp_path / "run"
-        monkeypatch.setenv("QS_GEN_RUN_DIR", str(run_dir))
+        run_dir.mkdir(parents=True)
+        monkeypatch.setenv(QS_GEN_RUN_DIR.name, str(run_dir))
         test_id = "tests_e2e_test_foo__bar"
         assert _capture_path("screenshot.png", test_id) == (
             run_dir / "browser" / test_id / "screenshot.png"
@@ -149,7 +157,7 @@ class TestCaptureDirAndPath:
         from concurrent test runs don't collide. Special-case:
         ``screenshot.png`` lands at ``<test_id>.png`` (no underscore
         prefix) per the M.4.4.11-era convention."""
-        monkeypatch.delenv("QS_GEN_RUN_DIR", raising=False)
+        monkeypatch.delenv(QS_GEN_RUN_DIR.name, raising=False)
         test_id = "tests_e2e_test_foo__bar"
         assert _capture_path("screenshot.png", test_id) == (
             SCREENSHOT_DIR / "_failures" / f"{test_id}.png"

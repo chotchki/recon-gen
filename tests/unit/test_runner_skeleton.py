@@ -13,6 +13,14 @@ import re
 import pytest
 
 from quicksight_gen._dev import runner
+from quicksight_gen.common.env_keys import (
+    QS_E2E_USER_ARN,
+    QS_GEN_CONFIG,
+    QS_GEN_DEMO_DATABASE_URL,
+    QS_GEN_FUZZ_SEED,
+    QS_GEN_RUNNER_YES,
+    QS_GEN_TEST_L2_INSTANCE,
+)
 
 
 def test_create_run_id_format() -> None:
@@ -184,12 +192,15 @@ def test_probe_docker_cli_missing() -> None:
 
 
 def test_probe_qs_arn_set(monkeypatch: Any) -> None:
-    monkeypatch.setenv("QS_E2E_USER_ARN", "arn:aws:quicksight:us-east-1:123:user/default/test")
+    # 12-digit account ID required by the registry's IAM-ARN validator
+    # (Y.2.gate.b.15) — the previous 3-digit test value would now
+    # raise EnvVarInvalid at the boundary, defeating the probe.
+    monkeypatch.setenv(QS_E2E_USER_ARN.name, "arn:aws:quicksight:us-east-1:111122223333:user/default/test")
     assert runner._probe_qs_e2e_user_arn() is None
 
 
 def test_probe_qs_arn_unset(monkeypatch: Any) -> None:
-    monkeypatch.delenv("QS_E2E_USER_ARN", raising=False)
+    monkeypatch.delenv(QS_E2E_USER_ARN.name, raising=False)
     result = runner._probe_qs_e2e_user_arn()
     assert result is not None
     assert result.kind == "qs_arn_unset"
@@ -206,7 +217,7 @@ def test_probe_dependencies_browser_aggregates_failures(monkeypatch: Any) -> Non
 
     Operator sees everything missing in one go; doesn't have to fix one,
     re-run, hit the next, etc."""
-    monkeypatch.delenv("QS_E2E_USER_ARN", raising=False)
+    monkeypatch.delenv(QS_E2E_USER_ARN.name, raising=False)
     fake_probes = {
         "aws": lambda: runner.ProbeFailure(kind="aws_creds_expired", message="..."),
         "docker": lambda: runner.ProbeFailure(kind="docker_daemon_down", message="..."),
@@ -812,7 +823,7 @@ def test_is_deploy_or_later() -> None:
 def test_cmd_up_to_dirty_refuses_at_deploy_layer(monkeypatch: Any) -> None:
     """b.10 — `up_to=deploy` (or higher) refuses on tracked-changes dirty
     state. NEEDS_OPERATOR exit, message tells operator what to do."""
-    monkeypatch.delenv("QS_GEN_RUNNER_YES", raising=False)
+    monkeypatch.delenv(QS_GEN_RUNNER_YES.name, raising=False)
     with patch.object(runner, "_is_dirty", return_value=True):
         code = runner.main(["up_to=deploy"])
     assert code == runner.EXIT_NEEDS_OPERATOR
@@ -820,7 +831,7 @@ def test_cmd_up_to_dirty_refuses_at_deploy_layer(monkeypatch: Any) -> None:
 
 def test_cmd_up_to_dirty_ok_below_deploy(monkeypatch: Any) -> None:
     """Layers 1-3 (pyright/unit/db) are local + idempotent; dirty state OK."""
-    monkeypatch.delenv("QS_GEN_RUNNER_YES", raising=False)
+    monkeypatch.delenv(QS_GEN_RUNNER_YES.name, raising=False)
 
     def fake_dispatch(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
         return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.01)
@@ -836,7 +847,7 @@ def test_cmd_up_to_dirty_ok_below_deploy(monkeypatch: Any) -> None:
 
 def test_cmd_up_to_allow_dirty_deploy_bypasses(monkeypatch: Any) -> None:
     """`--allow-dirty-deploy` bypasses the b.10 refusal."""
-    monkeypatch.delenv("QS_GEN_RUNNER_YES", raising=False)
+    monkeypatch.delenv(QS_GEN_RUNNER_YES.name, raising=False)
 
     def fake_dispatch(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
         return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.01)
@@ -853,7 +864,7 @@ def test_cmd_up_to_allow_dirty_deploy_bypasses(monkeypatch: Any) -> None:
 def test_cmd_up_to_qs_gen_runner_yes_env_bypasses_dirty(monkeypatch: Any) -> None:
     """QS_GEN_RUNNER_YES=1 also bypasses b.10 (mirrors b.14.3 destructive-op
     convention so the env var works for both flag families)."""
-    monkeypatch.setenv("QS_GEN_RUNNER_YES", "1")
+    monkeypatch.setenv(QS_GEN_RUNNER_YES.name, "1")
 
     def fake_dispatch(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
         return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.01)
@@ -1109,7 +1120,7 @@ def test_cmd_pyright_failure_returns_failure_exit() -> None:
 def test_resolve_fuzz_seed_value_random_when_unset(monkeypatch: Any) -> None:
     """No env override → fresh random seed each call. Two calls likely
     different (32-bit space; collision odds vanishingly small)."""
-    monkeypatch.delenv("QS_GEN_FUZZ_SEED", raising=False)
+    monkeypatch.delenv(QS_GEN_FUZZ_SEED.name, raising=False)
     a = runner.resolve_fuzz_seed_value()
     b = runner.resolve_fuzz_seed_value()
     assert isinstance(a, int) and 0 <= a < 2**32
@@ -1119,14 +1130,14 @@ def test_resolve_fuzz_seed_value_random_when_unset(monkeypatch: Any) -> None:
 def test_resolve_fuzz_seed_value_honors_env(monkeypatch: Any) -> None:
     """`QS_GEN_FUZZ_SEED=N` env → operator pin for failure repro. All workers
     in this run see the same value."""
-    monkeypatch.setenv("QS_GEN_FUZZ_SEED", "12345")
+    monkeypatch.setenv(QS_GEN_FUZZ_SEED.name, "12345")
     assert runner.resolve_fuzz_seed_value() == 12345
 
 
 def test_resolve_fuzz_seed_value_random_on_blank_env(monkeypatch: Any) -> None:
     """Blank env (e.g. accidentally exported empty) → fall back to random,
     not crash on int('')."""
-    monkeypatch.setenv("QS_GEN_FUZZ_SEED", "")
+    monkeypatch.setenv(QS_GEN_FUZZ_SEED.name, "")
     seed = runner.resolve_fuzz_seed_value()
     assert isinstance(seed, int)
 
@@ -1140,7 +1151,7 @@ def test_run_options_fuzz_seed_value_default_none() -> None:
 
 def test_options_from_args_resolves_fuzz_seed(monkeypatch: Any) -> None:
     """_options_from_args populates fuzz_seed_value (random unless env pinned)."""
-    monkeypatch.setenv("QS_GEN_FUZZ_SEED", "98765")
+    monkeypatch.setenv(QS_GEN_FUZZ_SEED.name, "98765")
     parser = runner._build_parser()
     parsed = parser.parse_args(["up_to", "unit"])
     opts = runner._options_from_args(parsed)
@@ -1227,7 +1238,7 @@ def _install_fake_aws(monkeypatch: Any) -> None:
     # Force the config-path probe to succeed by pointing it at any
     # existing file (PLAN.md is fine — we only check existence, the
     # file content is read by the stubbed load_config).
-    monkeypatch.setenv("QS_GEN_CONFIG", str(runner.REPO_ROOT / "PLAN.md"))
+    monkeypatch.setenv(QS_GEN_CONFIG.name, str(runner.REPO_ROOT / "PLAN.md"))
 
 
 def test_cmd_sweep_dry_run_collects_without_deleting(
@@ -1235,7 +1246,7 @@ def test_cmd_sweep_dry_run_collects_without_deleting(
 ) -> None:
     """No --yes → calls _collect, never calls sweep_qs_resources."""
     _install_fake_aws(monkeypatch)
-    monkeypatch.delenv("QS_GEN_RUNNER_YES", raising=False)
+    monkeypatch.delenv(QS_GEN_RUNNER_YES.name, raising=False)
     collect_calls, sweep_calls = _install_fake_harness_cleanup(
         monkeypatch,
         matched={
@@ -1260,7 +1271,7 @@ def test_cmd_sweep_dry_run_collects_without_deleting(
 def test_cmd_sweep_with_yes_invokes_sweep(monkeypatch: Any, capsys: Any) -> None:
     """--yes → sweep_qs_resources_by_tag is called; not _collect."""
     _install_fake_aws(monkeypatch)
-    monkeypatch.delenv("QS_GEN_RUNNER_YES", raising=False)
+    monkeypatch.delenv(QS_GEN_RUNNER_YES.name, raising=False)
     collect_calls, sweep_calls = _install_fake_harness_cleanup(
         monkeypatch,
         matched={
@@ -1284,7 +1295,7 @@ def test_cmd_sweep_qs_gen_runner_yes_env_bypasses_yes_flag(
     """`QS_GEN_RUNNER_YES=1` env matches `--yes` per the b.14.3
     destructive-op convention."""
     _install_fake_aws(monkeypatch)
-    monkeypatch.setenv("QS_GEN_RUNNER_YES", "1")
+    monkeypatch.setenv(QS_GEN_RUNNER_YES.name, "1")
     _, sweep_calls = _install_fake_harness_cleanup(
         monkeypatch,
         matched={
@@ -1303,7 +1314,7 @@ def test_cmd_sweep_no_config_file_returns_needs_operator(
 ) -> None:
     """When no config.yaml is discoverable, exit needs-operator
     instead of crashing on a missing file."""
-    monkeypatch.delenv("QS_GEN_CONFIG", raising=False)
+    monkeypatch.delenv(QS_GEN_CONFIG.name, raising=False)
     # Point REPO_ROOT at an empty tmp dir so the candidate paths
     # (run/config.yaml, config.yaml, run/config.{postgres,oracle}.yaml)
     # all resolve to non-existent files.
@@ -1533,7 +1544,7 @@ def test_dispatch_layer_does_not_thread_variant_env_to_unit(
         captured.update(env or {})
         return fake
 
-    monkeypatch.delenv("QS_GEN_DEMO_DATABASE_URL", raising=False)
+    monkeypatch.delenv(QS_GEN_DEMO_DATABASE_URL.name, raising=False)
     with patch.object(subprocess, "run", side_effect=capture_env):
         runner.dispatch_layer(
             "unit", tmp_path, runner.RunOptions(),
@@ -1593,7 +1604,7 @@ def test_seed_variant_local_pg_runs_three_subprocesses(
     monkeypatch.setattr(
         runner, "_resolve_seed_config_for_local_pg", lambda: cfg,
     )
-    monkeypatch.delenv("QS_GEN_TEST_L2_INSTANCE", raising=False)
+    monkeypatch.delenv(QS_GEN_TEST_L2_INSTANCE.name, raising=False)
 
     captured_cmds: list[list[str]] = []
     fake = subprocess.CompletedProcess(args=["fake"], returncode=0)
@@ -1627,7 +1638,7 @@ def test_seed_variant_threads_env_overrides_to_subprocesses(
     monkeypatch.setattr(
         runner, "_resolve_seed_config_for_local_pg", lambda: cfg,
     )
-    monkeypatch.delenv("QS_GEN_TEST_L2_INSTANCE", raising=False)
+    monkeypatch.delenv(QS_GEN_TEST_L2_INSTANCE.name, raising=False)
 
     captured_envs: list[dict[str, str]] = []
     fake = subprocess.CompletedProcess(args=["fake"], returncode=0)
@@ -1660,7 +1671,7 @@ def test_seed_variant_honors_qs_gen_test_l2_instance(
     monkeypatch.setattr(
         runner, "_resolve_seed_config_for_local_pg", lambda: cfg,
     )
-    monkeypatch.setenv("QS_GEN_TEST_L2_INSTANCE", str(l2_yaml))
+    monkeypatch.setenv(QS_GEN_TEST_L2_INSTANCE.name, str(l2_yaml))
 
     captured_cmds: list[list[str]] = []
     fake = subprocess.CompletedProcess(args=["fake"], returncode=0)
@@ -1702,7 +1713,7 @@ def test_seed_variant_raises_on_subprocess_failure(
     monkeypatch.setattr(
         runner, "_resolve_seed_config_for_local_pg", lambda: cfg,
     )
-    monkeypatch.delenv("QS_GEN_TEST_L2_INSTANCE", raising=False)
+    monkeypatch.delenv(QS_GEN_TEST_L2_INSTANCE.name, raising=False)
 
     fake_fail = subprocess.CompletedProcess(args=["fake"], returncode=1)
     with patch.object(subprocess, "run", return_value=fake_fail):
@@ -1718,7 +1729,7 @@ def test_resolve_seed_config_explicit_env_override(
     already honor."""
     cfg = tmp_path / "my_pg.yaml"
     cfg.write_text("dialect: postgres\n")
-    monkeypatch.setenv("QS_GEN_CONFIG", str(cfg))
+    monkeypatch.setenv(QS_GEN_CONFIG.name, str(cfg))
     assert runner._resolve_seed_config_for_local_pg() == cfg
 
 
@@ -1728,7 +1739,7 @@ def test_resolve_seed_config_explicit_env_missing_returns_none(
     """Operator pointed QS_GEN_CONFIG at a path that doesn't exist —
     don't silently fall back to a candidate. The override stated
     intent; respect it (and surface the absence)."""
-    monkeypatch.setenv("QS_GEN_CONFIG", str(tmp_path / "does-not-exist.yaml"))
+    monkeypatch.setenv(QS_GEN_CONFIG.name, str(tmp_path / "does-not-exist.yaml"))
     assert runner._resolve_seed_config_for_local_pg() is None
 
 
@@ -1739,7 +1750,7 @@ def test_resolve_seed_config_falls_back_to_run_postgres(
     root → return that path. We only check run/config.postgres.yaml
     here (not run/config.yaml) because run/config.yaml may be Oracle-
     flavored and won't match a Postgres container."""
-    monkeypatch.delenv("QS_GEN_CONFIG", raising=False)
+    monkeypatch.delenv(QS_GEN_CONFIG.name, raising=False)
     fake_repo = tmp_path / "repo"
     (fake_repo / "run").mkdir(parents=True)
     cfg = fake_repo / "run" / "config.postgres.yaml"

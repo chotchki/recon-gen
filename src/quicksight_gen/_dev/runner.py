@@ -40,6 +40,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Final, cast
 
+from quicksight_gen.common.env_keys import (
+    QS_E2E_USER_ARN,
+    QS_GEN_CONFIG,
+    QS_GEN_DEMO_DATABASE_URL,
+    QS_GEN_E2E,
+    QS_GEN_FUZZ_SEED,
+    QS_GEN_LAYER,
+    QS_GEN_RUN_DIR,
+    QS_GEN_RUNNER_YES,
+    QS_GEN_TEST_L2_INSTANCE,
+    QS_GEN_TRACE_ALL,
+)
+
 EXIT_SUCCESS: Final = 0
 EXIT_FAILURE: Final = 1
 EXIT_NEEDS_OPERATOR: Final = 2
@@ -208,8 +221,13 @@ def _probe_docker() -> ProbeFailure | None:
 def _probe_qs_e2e_user_arn() -> ProbeFailure | None:
     """Check ``QS_E2E_USER_ARN`` env var is set (required for browser e2e
     embed-URL signing). Auto-derivation from AWS identity lands under
-    ``Y.2.gate.h.1``; for now the env var is operator-set."""
-    if os.environ.get("QS_E2E_USER_ARN"):
+    ``Y.2.gate.h.1``; for now the env var is operator-set.
+
+    Y.2.gate.b.15 — registry call also runs the IAM-ARN regex
+    validator on PRESENCE, so a malformed ARN surfaces here instead
+    of inside the boto embed-URL call later.
+    """
+    if QS_E2E_USER_ARN.get_or_none():
         return None
     return ProbeFailure(
         kind="qs_arn_unset",
@@ -267,9 +285,9 @@ def resolve_fuzz_seed_value() -> int:
     is deterministic (otherwise each worker rolls its own seed → collection
     diverges → ``Different tests were collected`` error).
     """
-    override = os.environ.get("QS_GEN_FUZZ_SEED")
-    if override is not None and override.strip():
-        return int(override)
+    override = QS_GEN_FUZZ_SEED.get_or_none()
+    if override is not None:
+        return override
     return secrets.randbits(32)
 
 
@@ -325,11 +343,14 @@ def _layer_command(
     parametrize collection is deterministic.
     """
     opts = options or RunOptions()
-    env_addl = {"QS_GEN_RUN_DIR": str(run_dir), "QS_GEN_LAYER": layer}
+    env_addl = {
+        QS_GEN_RUN_DIR.name: str(run_dir),
+        QS_GEN_LAYER.name: layer,
+    }
     if opts.trace_all:
-        env_addl["QS_GEN_TRACE_ALL"] = "1"
+        env_addl[QS_GEN_TRACE_ALL.name] = "1"
     if opts.fuzz_seed_value is not None:
-        env_addl["QS_GEN_FUZZ_SEED"] = str(opts.fuzz_seed_value)
+        env_addl[QS_GEN_FUZZ_SEED.name] = str(opts.fuzz_seed_value)
     if layer == "unit":
         cmd = [
             str(_VENV_BIN / "pytest"),
@@ -355,7 +376,7 @@ def _layer_command(
             cmd += ["-k", opts.only]
         if opts.parallel > 1:
             cmd += ["-n", str(opts.parallel)]
-        return (cmd, {**env_addl, "QS_GEN_E2E": "1"})
+        return (cmd, {**env_addl, QS_GEN_E2E.name: "1"})
     if layer == "app2":
         # b.3.impl.layer — App2 e2e (HTMX dialect, Playwright WebKit
         # against the App2 Starlette server). Three test files today:
@@ -377,7 +398,7 @@ def _layer_command(
             cmd += ["-k", opts.only]
         if opts.parallel > 1:
             cmd += ["-n", str(opts.parallel)]
-        return (cmd, {**env_addl, "QS_GEN_E2E": "1"})
+        return (cmd, {**env_addl, QS_GEN_E2E.name: "1"})
     # deploy / api / browser: not yet wired. Need cfg loading (Y.2.gate.h.2)
     # + variant fan-out (b.3.impl.gather for the 6/7 asyncio.gather).
     return None
@@ -775,7 +796,7 @@ def setup_variant(name: str) -> tuple[dict[str, str], object | None]:
         container = PostgresContainer("postgres:17-alpine")
         container.start()
         raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]
-        return {"QS_GEN_DEMO_DATABASE_URL": _normalize_pg_url(raw_url)}, container
+        return {QS_GEN_DEMO_DATABASE_URL.name: _normalize_pg_url(raw_url)}, container
     raise ValueError(f"setup_variant: unknown variant {name!r}")
 
 
@@ -821,8 +842,16 @@ def _resolve_seed_config_for_local_pg() -> Path | None:
     can use against the local-pg container. Returns None if nothing
     matches; caller surfaces the failure with operator-actionable
     guidance.
+
+    QS_GEN_CONFIG is read via the typed registry; an explicit
+    operator pin at a non-existent path returns None (matches the
+    existing "respect the override; surface the absence" contract)
+    rather than letting the validator raise.
     """
-    explicit = os.environ.get("QS_GEN_CONFIG")
+    # Read the raw value to honor the "non-existent → None" contract
+    # (registry's must_be_file validator would otherwise raise on a
+    # bad explicit pin, but this code path wants a soft None).
+    explicit = os.environ.get(QS_GEN_CONFIG.name)
     if explicit:
         candidate = Path(explicit)
         if candidate.is_absolute():
@@ -886,9 +915,9 @@ def seed_variant(name: str, env_overrides: dict[str, str]) -> None:
 
     env = {**os.environ, **env_overrides}
     l2_arg: list[str] = []
-    l2_override = os.environ.get("QS_GEN_TEST_L2_INSTANCE")
+    l2_override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
     if l2_override:
-        l2_arg = ["--l2", l2_override]
+        l2_arg = ["--l2", str(l2_override)]
 
     seed_steps: tuple[tuple[str, ...], ...] = (
         ("schema", "apply"),
@@ -1009,7 +1038,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     options = _options_from_args(args)
 
     if _is_deploy_or_later(args.layer) and _is_dirty():
-        if not options.allow_dirty_deploy and not os.environ.get("QS_GEN_RUNNER_YES"):
+        if not options.allow_dirty_deploy and not QS_GEN_RUNNER_YES.get_or_none():
             print(
                 "runner: refusing to deploy: tracked changes present "
                 "(commit / stash, or pass --allow-dirty-deploy)",
@@ -1127,7 +1156,7 @@ def cmd_down(args: argparse.Namespace) -> int:
     """Tear down dependencies. scope = local | aws | all (default).
 
     Destructive — requires --yes (Y.2.gate.b.14.3 destructive-op opt-in)."""
-    if not args.yes and not os.environ.get("QS_GEN_RUNNER_YES"):
+    if not args.yes and not QS_GEN_RUNNER_YES.get_or_none():
         print("runner: 'down' is destructive — pass --yes (or set QS_GEN_RUNNER_YES=1)", file=sys.stderr)
         return EXIT_NEEDS_OPERATOR
     print(f"runner: down scope={args.scope} --yes — not implemented yet (Y.2.gate.l.2)")
@@ -1192,7 +1221,10 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     # Lookup mirrors tests/e2e/conftest.py::cfg with the per-dialect
     # files added (Phase P split run/config.yaml → per-dialect).
     config_path: Path | None = None
-    explicit = os.environ.get("QS_GEN_CONFIG")
+    # Soft-fallback: registry's must_be_file validator would raise on
+    # a non-existent pin; sweep is best-effort + cfg discovery has
+    # other candidates, so soak the absence rather than fail-loud.
+    explicit = os.environ.get(QS_GEN_CONFIG.name)
     if explicit:
         candidate = Path(explicit)
         if candidate.exists():
@@ -1248,7 +1280,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
         "quicksight", region_name=cfg.aws_region,
     )
 
-    confirm = bool(args.yes) or bool(os.environ.get("QS_GEN_RUNNER_YES"))
+    confirm = bool(args.yes) or bool(QS_GEN_RUNNER_YES.get_or_none())
     tag_key, tag_value = "Harness", "e2e"
 
     if not confirm:

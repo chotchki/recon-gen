@@ -35,7 +35,6 @@ caller can pinpoint the bad field.
 
 from __future__ import annotations
 
-import os
 import re
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
@@ -43,6 +42,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import yaml
+
+from quicksight_gen.common.env_keys import QS_GEN_RUN_DIR
 
 from .primitives import (
     Account,
@@ -1027,14 +1028,22 @@ def _capture_to_run_dir(raw_text: str, instance_prefix: str) -> None:
 
     Idempotent: same prefix loaded twice in one session writes the
     same bytes to the same file (cheap overwrite). Capture failures
-    (disk full, permission denied) are swallowed — the YAML load
-    must never fail because the sidecar can't write.
+    (disk full, permission denied, registry validator rejecting a
+    bad path) are swallowed — the YAML load must never fail because
+    the sidecar can't write.
     """
-    run_dir = os.environ.get("QS_GEN_RUN_DIR")
-    if not run_dir:
+    # Sidecar contract — swallow EnvVarInvalid too: a misconfigured
+    # registry value (must_be_dir failing because env points at a
+    # regular file) must not break ``load_instance``.
+    from quicksight_gen.common.env_keys import EnvVarInvalid
+    try:
+        run_dir = QS_GEN_RUN_DIR.get_or_none()
+    except EnvVarInvalid:
+        return
+    if run_dir is None:
         return
     try:
-        target_dir = Path(run_dir) / "l2"
+        target_dir = run_dir / "l2"
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / f"{instance_prefix}.yaml"
         target.write_text(raw_text)

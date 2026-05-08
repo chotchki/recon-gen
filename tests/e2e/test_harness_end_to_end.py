@@ -115,6 +115,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "data"))
 from test_l2_seed_contract import L2_INSTANCES  # noqa: E402
 
 from quicksight_gen.common.config import Config
+from quicksight_gen.common.env_keys import (
+    QS_E2E_PAGE_TIMEOUT,
+    QS_E2E_VISUAL_TIMEOUT,
+)
 from quicksight_gen.common.l2 import L2Instance, load_instance
 from quicksight_gen.common.l2.primitives import Identifier
 
@@ -744,8 +748,8 @@ def test_harness_l1_planted_scenarios_visible(
     manifest = harness_deployed["planted_manifest"]
     prefix = harness_deployed["prefix"]
     dashboard_id = harness_deployed["dashboard_ids"]["l1-dashboard"]
-    page_timeout = int(os.environ.get("QS_E2E_PAGE_TIMEOUT", "30000"))
-    visual_timeout = int(os.environ.get("QS_E2E_VISUAL_TIMEOUT", "30000"))
+    page_timeout = QS_E2E_PAGE_TIMEOUT.get_or_none() or 30000
+    visual_timeout = QS_E2E_VISUAL_TIMEOUT.get_or_none() or 30000
 
     # Layer 1: matview-row-presence. Fast, deterministic, points at
     # the seed/matview layer if it fails. NOT xfailed — this is the
@@ -883,8 +887,8 @@ def test_harness_l2ft_planted_scenarios_visible(
     manifest = harness_deployed["planted_manifest"]
     prefix = harness_deployed["prefix"]
     dashboard_id = harness_deployed["dashboard_ids"]["l2-flow-tracing"]
-    page_timeout = int(os.environ.get("QS_E2E_PAGE_TIMEOUT", "30000"))
-    visual_timeout = int(os.environ.get("QS_E2E_VISUAL_TIMEOUT", "30000"))
+    page_timeout = QS_E2E_PAGE_TIMEOUT.get_or_none() or 30000
+    visual_timeout = QS_E2E_VISUAL_TIMEOUT.get_or_none() or 30000
 
     # Layer 1: matview-row-presence. Fast, deterministic, points at
     # the seed/matview layer if it fails. Replaces the dashboard

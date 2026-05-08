@@ -43,6 +43,11 @@ from quicksight_gen.apps.l2_flow_tracing.datasets import (
 )
 from quicksight_gen.common.config import Config, load_config
 from quicksight_gen.common.db import connect_demo_db
+from quicksight_gen.common.env_keys import (
+    EnvVarInvalid,
+    QS_GEN_CONFIG,
+    QS_GEN_TEST_L2_INSTANCE,
+)
 from quicksight_gen.common.l2 import L2Instance, load_instance
 from quicksight_gen.common.models import DataSet
 from tests.integration.verify_dataset_sql import _smoke_one
@@ -65,9 +70,13 @@ def _build_all_datasets(cfg: Config, l2: L2Instance) -> list[DataSet]:
 def _load_cfg() -> Config:
     """Load cfg the same way the rest of the e2e suite does — explicit
     QS_GEN_CONFIG override, then per-dialect candidates."""
-    explicit = os.environ.get("QS_GEN_CONFIG")
-    if explicit:
-        return load_config(explicit)
+    # Soft-fall on validator (matches sweep / fixture pattern).
+    try:
+        explicit = QS_GEN_CONFIG.get_or_none()
+    except EnvVarInvalid:
+        explicit = None
+    if explicit is not None:
+        return load_config(str(explicit))
     candidates = (
         Path("config.yaml"),
         Path("run/config.yaml"),
@@ -83,9 +92,9 @@ def _load_cfg() -> Config:
 def _load_l2() -> L2Instance:
     """Honor the same QS_GEN_TEST_L2_INSTANCE override the rest of the
     suite uses; default to the persona-neutral spec_example fixture."""
-    override = os.environ.get("QS_GEN_TEST_L2_INSTANCE")
-    if override:
-        return load_instance(Path(override))
+    override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
+    if override is not None:
+        return load_instance(override)
     return default_l2_instance()
 
 

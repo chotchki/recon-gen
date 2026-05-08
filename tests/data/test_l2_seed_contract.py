@@ -49,6 +49,8 @@ from pathlib import Path
 
 import pytest
 
+from quicksight_gen.common.env_keys import QS_GEN_FUZZ_SEED
+
 from quicksight_gen.common.l2 import L2Instance, load_instance
 from quicksight_gen.common.l2.auto_scenario import default_scenario_for
 from quicksight_gen.common.l2.seed import emit_seed
@@ -66,9 +68,9 @@ CANONICAL_TODAY = date(2030, 1, 1)
 # for CI determinism (M.2d.9.3). Resolved once at module import so every
 # test in this file sees the same fuzz instance within a run.
 def _resolve_fuzz_seed() -> int:
-    override = os.environ.get("QS_GEN_FUZZ_SEED")
+    override = QS_GEN_FUZZ_SEED.get_or_none()
     if override is not None:
-        return int(override)
+        return override
     # secrets.randbits is cryptographically random — different across
     # dev runs, surfacing new shapes each test invocation.
     return secrets.randbits(32)

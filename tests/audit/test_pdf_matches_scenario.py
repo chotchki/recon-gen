@@ -36,6 +36,11 @@ from click.testing import CliRunner
 from quicksight_gen.cli import main
 from quicksight_gen.common.config import load_config
 from quicksight_gen.common.db import connect_demo_db
+from quicksight_gen.common.env_keys import (
+    EnvVarInvalid,
+    QS_GEN_CONFIG,
+    QS_GEN_DB_TESTS,
+)
 from quicksight_gen.common.l2 import load_instance
 from quicksight_gen.common.l2.auto_scenario import default_scenario_for
 from quicksight_gen.common.sql import Dialect
@@ -80,18 +85,29 @@ _ALL_INVARIANTS: tuple[Invariant, ...] = (
 
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get("QS_GEN_DB_TESTS") != "1",
+    not QS_GEN_DB_TESTS.get_or_none(),
     reason="Destructive DB tests gated on QS_GEN_DB_TESTS=1",
 )
+
+
+def _resolve_explicit_qs_gen_config() -> Path | None:
+    """Read QS_GEN_CONFIG via the registry but soft-fall on the
+    must_be_file validator failing — this fixture's discovery loop
+    has fallback candidates, so a bad pin should degrade rather than
+    raise inside test setup."""
+    try:
+        return QS_GEN_CONFIG.get_or_none()
+    except EnvVarInvalid:
+        return None
 
 
 @pytest.fixture(scope="module")
 def db_cfg():
     """Load cfg from the standard candidates; skip if no DB configured."""
-    explicit = os.environ.get("QS_GEN_CONFIG")
+    explicit = _resolve_explicit_qs_gen_config()
     candidates: tuple[Path, ...]
-    if explicit:
-        candidates = (Path(explicit),)
+    if explicit is not None:
+        candidates = (explicit,)
     else:
         candidates = (
             Path("config.yaml"),
@@ -116,9 +132,9 @@ def db_cfg():
 @pytest.fixture(scope="module")
 def db_cfg_path(db_cfg) -> Path:
     """Locate the cfg file on disk so we can pass `-c` to ``audit apply``."""
-    explicit = os.environ.get("QS_GEN_CONFIG")
-    if explicit:
-        return Path(explicit)
+    explicit = _resolve_explicit_qs_gen_config()
+    if explicit is not None:
+        return explicit
     for candidate in (
         Path("config.yaml"),
         Path("run/config.yaml"),

@@ -19,6 +19,12 @@ from typing import Any, Generator
 
 import pytest
 
+from quicksight_gen.common.env_keys import (
+    EnvVarInvalid,
+    QS_GEN_LAYER,
+    QS_GEN_RUN_DIR,
+)
+
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item: Any, call: Any) -> Generator[None, Any, None]:
@@ -34,10 +40,18 @@ def pytest_runtest_makereport(item: Any, call: Any) -> Generator[None, Any, None
     if report.when != "call":
         return
 
-    run_dir = os.environ.get("QS_GEN_RUN_DIR")
-    layer = os.environ.get("QS_GEN_LAYER")
-    if not run_dir or not layer:
+    # Sidecar contract — swallow registry validator failures (a test
+    # that monkeypatches QS_GEN_RUN_DIR to an invalid path for its
+    # own purposes must not cause the timings hook to crash the
+    # worker).
+    try:
+        run_dir_path = QS_GEN_RUN_DIR.get_or_none()
+    except EnvVarInvalid:
         return
+    layer = QS_GEN_LAYER.get_or_none()
+    if not run_dir_path or not layer:
+        return
+    run_dir = str(run_dir_path)
 
     record = {
         "layer": layer,

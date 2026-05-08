@@ -35,6 +35,7 @@ import pytest
 from quicksight_gen.apps.executives.app import build_executives_app
 from quicksight_gen.apps.executives.datasets import build_all_datasets
 from quicksight_gen.common.browser.helpers import webkit_page
+from quicksight_gen.common.env_keys import QS_GEN_RUN_DIR
 from tests._test_helpers import make_test_config
 from tests.e2e._harness_html2 import html2_server
 
@@ -239,15 +240,14 @@ def test_dev_log_events_land_in_server_log() -> None:
     assert against in legacy mode (direct pytest invocation). Runs
     under the runner (`./run_tests.sh up_to=app2 ...`).
     """
-    import os
     import time
     from pathlib import Path
-    run_dir_str = os.environ.get("QS_GEN_RUN_DIR")
-    if not run_dir_str:
+    run_dir_path = QS_GEN_RUN_DIR.get_or_none()
+    if run_dir_path is None:
         pytest.skip(
             "QS_GEN_RUN_DIR unset — server.log capture is runner-mode only"
         )
-    log_path = Path(run_dir_str) / "app2" / "server.log"
+    log_path = Path(run_dir_path) / "app2" / "server.log"
 
     build_all_datasets(_TEST_CFG)
     tree_app = build_executives_app(_TEST_CFG)

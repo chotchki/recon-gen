@@ -27,6 +27,7 @@ from quicksight_gen.common.l2 import (
     TwoLegRail,
     load_instance,
 )
+from quicksight_gen.common.env_keys import QS_GEN_RUN_DIR
 
 
 # -- Happy paths --------------------------------------------------------------
@@ -651,7 +652,7 @@ def test_capture_no_op_when_run_dir_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Y.2.gate.c.12 — direct invocation (env unset) writes nothing."""
-    monkeypatch.delenv("QS_GEN_RUN_DIR", raising=False)
+    monkeypatch.delenv(QS_GEN_RUN_DIR.name, raising=False)
     p = tmp_path / "src.yaml"
     p.write_text(_MINIMAL_YAML)
 
@@ -666,8 +667,13 @@ def test_capture_writes_yaml_when_run_dir_set(
 ) -> None:
     """Y.2.gate.c.12 — env set → ``<run-dir>/l2/<instance-prefix>.yaml``
     written with the same bytes as the source."""
+    # Y.2.gate.b.15 — must_be_dir validator requires the path to
+    # exist; the sidecar's _capture_to_run_dir swallows
+    # EnvVarInvalid, so without mkdir the capture would soft-fall
+    # to no-op and the assertion below would fail.
     run_dir = tmp_path / "run"
-    monkeypatch.setenv("QS_GEN_RUN_DIR", str(run_dir))
+    run_dir.mkdir(parents=True)
+    monkeypatch.setenv(QS_GEN_RUN_DIR.name, str(run_dir))
     p = tmp_path / "src.yaml"
     p.write_text(_MINIMAL_YAML)
 
@@ -685,8 +691,10 @@ def test_capture_filename_is_instance_prefix_not_source_basename(
     ``instance:`` field, not the source basename. This deduplicates
     across any path the operator might pass and matches the
     spec's ``<instance-or-seed>`` naming convention."""
+    # See test_capture_writes_yaml_when_run_dir_set for why mkdir is needed.
     run_dir = tmp_path / "run"
-    monkeypatch.setenv("QS_GEN_RUN_DIR", str(run_dir))
+    run_dir.mkdir(parents=True)
+    monkeypatch.setenv(QS_GEN_RUN_DIR.name, str(run_dir))
     p = tmp_path / "totally_unrelated_name.yaml"
     p.write_text(_MINIMAL_YAML)
 
@@ -703,8 +711,10 @@ def test_capture_overwrites_on_repeat_load(
     bytes to the same target — last write wins (idempotent for the
     no-mutation case; if the YAML changed mid-run the latest content
     is what lands)."""
+    # See test_capture_writes_yaml_when_run_dir_set for why mkdir is needed.
     run_dir = tmp_path / "run"
-    monkeypatch.setenv("QS_GEN_RUN_DIR", str(run_dir))
+    run_dir.mkdir(parents=True)
+    monkeypatch.setenv(QS_GEN_RUN_DIR.name, str(run_dir))
     p = tmp_path / "src.yaml"
     p.write_text(_MINIMAL_YAML)
 
@@ -728,7 +738,7 @@ def test_capture_sidecar_failure_doesnt_break_load(
     blocker.write_text("I am a file, not a directory.")
     # /<blocker>/l2/<prefix>.yaml — mkdir(blocker/l2) fails because
     # blocker is a file, but load_instance must still succeed.
-    monkeypatch.setenv("QS_GEN_RUN_DIR", str(blocker))
+    monkeypatch.setenv(QS_GEN_RUN_DIR.name, str(blocker))
     p = tmp_path / "src.yaml"
     p.write_text(_MINIMAL_YAML)
 

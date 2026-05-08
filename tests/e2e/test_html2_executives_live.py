@@ -60,6 +60,7 @@ from quicksight_gen.apps.executives.app import build_executives_app
 from quicksight_gen.apps.executives.datasets import build_all_datasets
 from quicksight_gen.common.browser.helpers import webkit_page
 from quicksight_gen.common.dataset_contract import get_sql
+from quicksight_gen.common.env_keys import QS_GEN_TEST_L2_INSTANCE
 from quicksight_gen.common.html._tree_fetcher import (
     _find_visual_dataset_identifier,
 )
@@ -92,9 +93,9 @@ def _load_l2_instance() -> Any:
     from quicksight_gen.apps.l1_dashboard._l2 import default_l2_instance
     from quicksight_gen.common.l2 import load_instance
 
-    override = os.environ.get("QS_GEN_TEST_L2_INSTANCE")
-    if override:
-        return load_instance(Path(override))
+    override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
+    if override is not None:
+        return load_instance(override)
     return default_l2_instance()
 
 
@@ -129,7 +130,7 @@ def live_db_exec_server(cfg: Any) -> Iterator[_LiveServer]:
     # almost certainly doesn't match the prefix used to seed the
     # operator's DB. Better to skip cleanly than fail with a
     # misleading "relation does not exist" error.
-    if not os.environ.get("QS_GEN_TEST_L2_INSTANCE"):
+    if QS_GEN_TEST_L2_INSTANCE.get_or_none() is None:
         pytest.skip(
             "live-DB e2e skipped: set QS_GEN_TEST_L2_INSTANCE to "
             "the L2 YAML matching your seeded DB (e.g. "

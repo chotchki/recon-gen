@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 
+from quicksight_gen.common.env_keys import QS_GEN_PRINCIPAL_ARNS
 from quicksight_gen.common.sql import Dialect
 
 if TYPE_CHECKING:
@@ -370,7 +371,7 @@ def load_config(path: str | Path | None = None) -> Config:
         if env_val is not None:
             values[cfg_key] = env_val
 
-    env_principals = os.environ.get("QS_GEN_PRINCIPAL_ARNS")
+    env_principals = QS_GEN_PRINCIPAL_ARNS.get_or_none()
     if env_principals is not None:
         values["principal_arns"] = [
             p.strip() for p in env_principals.split(",") if p.strip()
