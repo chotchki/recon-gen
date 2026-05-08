@@ -17,6 +17,7 @@ from quicksight_gen.common.env_keys import (
     QS_E2E_USER_ARN,
     QS_GEN_CONFIG,
     QS_GEN_DEMO_DATABASE_URL,
+    QS_GEN_E2E,
     QS_GEN_FUZZ_SEED,
     QS_GEN_RUNNER_YES,
     QS_GEN_TEST_L2_INSTANCE,
@@ -455,12 +456,65 @@ def test_layer_command_app2_threads_run_dir_env() -> None:
     assert env_addl["QS_GEN_RUN_DIR"] == "/tmp/myrun"
 
 
-def test_layer_command_stub_layers_return_none() -> None:
-    """deploy/api/browser are not yet wired (need cfg loading + variants).
-    None signals the dispatch path to record skipped=True. (`app2` IS
-    wired — see test_layer_command_app2_dispatches_html2_tests.)"""
-    for layer in ("deploy", "api", "browser"):
-        assert runner._layer_command(layer, Path("/tmp/run")) is None
+def test_layer_command_deploy_returns_none_without_variant_env() -> None:
+    """Y.2.gate.c.5.deploy — `deploy` needs cfg + L2 paths from variant_env.
+    Without them, returns None so dispatch_layer prints `dispatch-skip` with
+    a clear pointer to the cfg fields the operator can set."""
+    assert runner._layer_command("deploy", Path("/tmp/run")) is None
+
+
+def test_layer_command_deploy_returns_cmd_with_variant_env(tmp_path: Path) -> None:
+    """Y.2.gate.c.5.deploy — when variant_env supplies QS_GEN_CONFIG +
+    QS_GEN_TEST_L2_INSTANCE (per h+i.0 + h.6 injection), the deploy layer
+    constructs a `quicksight-gen json apply --execute -c <cfg> --l2 <l2>
+    -o <run_dir>/deploy/out` command."""
+    variant_env = {
+        QS_GEN_CONFIG.name: "/tmp/cfg.yaml",
+        QS_GEN_TEST_L2_INSTANCE.name: "/tmp/l2.yaml",
+    }
+    cmd_env = runner._layer_command(
+        "deploy", tmp_path, variant_env=variant_env,
+    )
+    assert cmd_env is not None
+    cmd, _env = cmd_env
+    assert "quicksight-gen" in cmd[0]
+    assert "json" in cmd
+    assert "apply" in cmd
+    assert "--execute" in cmd
+    assert "-c" in cmd and "/tmp/cfg.yaml" in cmd
+    assert "--l2" in cmd and "/tmp/l2.yaml" in cmd
+    assert "-o" in cmd
+    out_idx = cmd.index("-o") + 1
+    assert cmd[out_idx].endswith("/deploy/out")
+
+
+def test_layer_command_api_dispatches_pytest_marked_api() -> None:
+    """Y.2.gate.c.5.api — pytest -m api selects the boto3-only e2e files
+    (every test_*_deployed_resources.py + test_*_dashboard_structure.py +
+    test_*_filters.py carries `pytest.mark.api`). QS_GEN_E2E=1 like every
+    other tests/e2e/ file."""
+    cmd_env = runner._layer_command("api", Path("/tmp/run"))
+    assert cmd_env is not None
+    cmd, env = cmd_env
+    assert cmd[0].endswith("/pytest")
+    assert "-m" in cmd and "api" in cmd
+    assert "tests/e2e/" in cmd
+    assert env.get(QS_GEN_E2E.name) == "1"
+
+
+def test_layer_command_browser_dispatches_pytest_marked_browser() -> None:
+    """Y.2.gate.c.5.browser — pytest -m browser selects the Playwright
+    files. QS_GEN_E2E=1; default `-n 4` for parallel runners (per existing
+    `./run_e2e.sh` pattern). QS_E2E_USER_ARN comes through from the h.1
+    derivation in `_run_one_variant`'s variant_env."""
+    cmd_env = runner._layer_command("browser", Path("/tmp/run"))
+    assert cmd_env is not None
+    cmd, env = cmd_env
+    assert cmd[0].endswith("/pytest")
+    assert "-m" in cmd and "browser" in cmd
+    assert "tests/e2e/" in cmd
+    assert env.get(QS_GEN_E2E.name) == "1"
+    assert "-n" in cmd and "4" in cmd
 
 
 def test_app2_in_db_touching_layers() -> None:
@@ -1695,7 +1749,7 @@ def test_dispatch_layer_captures_stdout_and_stderr_to_files(
         "sys.stderr.write('hello-err\\n'); sys.exit(0)",
     ]
     monkeypatch.setattr(
-        runner, "_layer_command", lambda layer, run_dir, options: (cmd, {}),
+        runner, "_layer_command", lambda layer, run_dir, options, **_kw: (cmd, {}),
     )
 
     runner.dispatch_layer("db", tmp_path, runner.RunOptions())
@@ -1717,7 +1771,7 @@ def test_dispatch_layer_records_nonzero_exit_code(
     this to set EXIT_NEEDS_OPERATOR / stop the chain)."""
     cmd = [sys.executable, "-c", "import sys; sys.exit(7)"]
     monkeypatch.setattr(
-        runner, "_layer_command", lambda layer, run_dir, options: (cmd, {}),
+        runner, "_layer_command", lambda layer, run_dir, options, **_kw: (cmd, {}),
     )
 
     result = runner.dispatch_layer("db", tmp_path, runner.RunOptions())
@@ -1743,7 +1797,7 @@ def test_dispatch_layer_recursion_guard_fails_loud(
     """
     cmd = ["pytest", "tests/unit", "-q"]
     monkeypatch.setattr(
-        runner, "_layer_command", lambda layer, run_dir, options: (cmd, {}),
+        runner, "_layer_command", lambda layer, run_dir, options, **_kw: (cmd, {}),
     )
     # PYTEST_CURRENT_TEST is set automatically by pytest; sanity-assert
     # that we're inside it so the guard's first condition is met.

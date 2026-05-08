@@ -386,10 +386,22 @@ _VENV_BIN: Final = REPO_ROOT / ".venv" / "bin"
 
 
 def _layer_command(
-    layer: str, run_dir: Path, options: RunOptions | None = None
+    layer: str,
+    run_dir: Path,
+    options: RunOptions | None = None,
+    *,
+    variant_env: dict[str, str] | None = None,
 ) -> tuple[list[str], dict[str, str]] | None:
     """Map layer → (subprocess argv, env additions). Returns None for layers
-    not yet wired (cfg-loading-blocked: deploy / api / browser).
+    that need preconditions the runner can't supply (e.g., deploy without a
+    cfg-discovered L2 path).
+
+    ``variant_env`` (Y.2.gate.c.5) — env_overrides the per-variant setup
+    already injected (cfg path, L2 path, AWS profile, QS user ARN). The
+    deploy layer reads `QS_GEN_CONFIG` + `QS_GEN_TEST_L2_INSTANCE` from
+    here to construct the `quicksight-gen json apply` invocation; api +
+    browser layers don't need it directly (env passes through to the
+    pytest subprocess via the surrounding dispatch_layer).
 
     Pyright runs via the repo-root ``conftest.py::pytest_sessionstart`` hook
     (M.1.9c contract) at the start of every pytest invocation — so the unit
@@ -468,8 +480,68 @@ def _layer_command(
         if opts.parallel > 1:
             cmd += ["-n", str(opts.parallel)]
         return (cmd, {**env_addl, QS_GEN_E2E.name: "1"})
-    # deploy / api / browser: not yet wired. Need cfg loading (Y.2.gate.h.2)
-    # + variant fan-out (b.3.impl.gather for the 6/7 asyncio.gather).
+    if layer == "deploy":
+        # Y.2.gate.c.5.deploy — `quicksight-gen json apply --execute` against
+        # the cfg + L2 the per-variant setup already discovered. Cfg is
+        # threaded via QS_GEN_CONFIG (per-variant override OR
+        # _resolve_runner_cfg_path's default-candidate list); L2 is threaded
+        # via QS_GEN_TEST_L2_INSTANCE (cfg.default_l2_instance, h.6).
+        # Without either, the deploy can't pick what to push — return None
+        # so dispatch_layer prints `dispatch-skip` with a clear reason.
+        # Output dir lands inside the run dir so per-run JSON artifacts stay
+        # isolated (operator can diff between runs without `out/` collisions).
+        ve = variant_env or {}
+        cfg_str = ve.get(QS_GEN_CONFIG.name)
+        l2_str = ve.get(QS_GEN_TEST_L2_INSTANCE.name)
+        if cfg_str is None or l2_str is None:
+            # Caller's dispatch_layer will print `dispatch-skip` — operator
+            # gets a clear "set cfg.default_l2_instance:" pointer because
+            # without both we genuinely cannot construct the command.
+            return None
+        out_dir = run_dir / "deploy" / "out"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            str(_VENV_BIN / "quicksight-gen"), "json", "apply",
+            "--execute",
+            "-c", cfg_str,
+            "--l2", l2_str,
+            "-o", str(out_dir),
+        ]
+        # Note: `--allow-dirty-deploy` is a runner-only flag (cmd_up_to
+        # gates the chain on it); the inner `quicksight-gen json apply`
+        # CLI doesn't have a tracked-changes refusal of its own, so no
+        # pass-through is needed.
+        return (cmd, env_addl)
+    if layer == "api":
+        # Y.2.gate.c.5.api — boto3-only e2e tests verifying deployed QS
+        # resources via `describe_*` calls. Pytest mark `api` (set by
+        # pytestmark in every e2e file) selects the right files; no
+        # hardcoded test-file list to drift. Behind `QS_GEN_E2E=1`.
+        # Default `-n auto` for AWS-bound parallelism speed-up; operator
+        # can override via `--parallel`.
+        cmd = [
+            str(_VENV_BIN / "pytest"), "tests/e2e/", "-m", "api", "-q",
+        ]
+        if opts.only:
+            cmd += ["-k", opts.only]
+        cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
+        return (cmd, {**env_addl, QS_GEN_E2E.name: "1"})
+    if layer == "browser":
+        # Y.2.gate.c.5.browser — Playwright WebKit e2e against deployed QS
+        # embed URLs. Pytest mark `browser`. Default `-n 4` per existing
+        # `./run_e2e.sh` pattern (browser tier is heavy enough that 8+
+        # workers thrash QS embed limits). Behind `QS_GEN_E2E=1`.
+        # `QS_E2E_USER_ARN` already in subprocess env via h.1 derivation.
+        cmd = [
+            str(_VENV_BIN / "pytest"), "tests/e2e/", "-m", "browser", "-q",
+        ]
+        if opts.only:
+            cmd += ["-k", opts.only]
+        cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "4"]
+        return (cmd, {**env_addl, QS_GEN_E2E.name: "1"})
+    # Fallthrough: unknown layer name. Return None so dispatch prints
+    # `dispatch-skip` rather than crashing — easier-to-triage failure mode
+    # if someone adds a layer to LAYERS without wiring its command.
     return None
 
 
@@ -593,9 +665,23 @@ def dispatch_layer(
     same as before; failures leave a complete trail in the run dir for
     post-mortem (CI artifact upload, hands-off run review).
     """
-    cmd_env = _layer_command(layer, run_dir, options)
+    cmd_env = _layer_command(layer, run_dir, options, variant_env=variant_env)
     if cmd_env is None:
-        print(f"{terminal_prefix}runner: dispatch-skip [{layer}] not-yet-wired (cfg loading + variants)")
+        # Y.2.gate.c.5 — None means the layer needed preconditions that
+        # weren't satisfied (most often: deploy without a cfg-discovered
+        # cfg path or default L2 instance). Print a clear pointer to the
+        # cfg fields the operator can set to unblock.
+        if layer == "deploy":
+            print(
+                f"{terminal_prefix}runner: dispatch-skip [{layer}] cfg "
+                f"missing — set `auth.aws_profile` (h+i.0) AND "
+                f"`default_l2_instance` (h.6) in run/config.<dialect>.yaml"
+            )
+        else:
+            print(
+                f"{terminal_prefix}runner: dispatch-skip [{layer}] no "
+                f"command wired (unknown layer name?)"
+            )
         return LayerResult(layer=layer, exit_code=0, duration_seconds=0.0, skipped=True)
 
     cmd, env_addl = cmd_env
