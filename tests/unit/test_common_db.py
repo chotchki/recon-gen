@@ -144,7 +144,7 @@ class TestConnectDemoDb:
             called["url"] = url
             return "fake_pg_conn"
 
-        stub.connect = fake_connect  # type: ignore[attr-defined]
+        stub.connect = fake_connect  # type: ignore[attr-defined]: monkey-patching the .connect attribute onto a fake module
         monkeypatch.setitem(sys.modules, "psycopg", stub)
 
         cfg = _cfg(
@@ -172,7 +172,7 @@ class TestConnectDemoDb:
             called["dsn"] = dsn
             return "fake_ora_conn"
 
-        stub.connect = fake_connect  # type: ignore[attr-defined]
+        stub.connect = fake_connect  # type: ignore[attr-defined]: monkey-patching the .connect attribute onto a fake module
         monkeypatch.setitem(sys.modules, "oracledb", stub)
 
         cfg = _cfg(

@@ -114,7 +114,7 @@ def count_invariant_table_rows(
 
 
 def _locate_section_pages(
-    reader,  # type: ignore[no-untyped-def] # PdfReader
+    reader,  # type: ignore[no-untyped-def]: pypdf PdfReader, untyped to keep pyright off the optional dep
     title: str,
 ) -> tuple[int, int]:
     """Find ``(start, end_exclusive)`` page indices for a level-0 section.
@@ -141,7 +141,7 @@ def _locate_section_pages(
 
 
 def _section_layout_lines(
-    reader,  # type: ignore[no-untyped-def] # PdfReader
+    reader,  # type: ignore[no-untyped-def]: pypdf PdfReader, untyped to keep pyright off the optional dep
     *,
     start_page: int,
     end_page: int,

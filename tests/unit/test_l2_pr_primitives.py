@@ -133,7 +133,7 @@ class TestVariableClosure:
                 rails_by_name[str(n)]
                 for n in tt.leg_rails
                 if isinstance(rails_by_name.get(str(n)), SingleLegRail)
-                and rails_by_name[str(n)].leg_direction == "Variable"  # type: ignore[union-attr]
+                and rails_by_name[str(n)].leg_direction == "Variable"  # type: ignore[union-attr]: narrowed by the prior isinstance(..., SingleLegRail) check
             ]
             assert len(variable_legs) <= 1, (
                 f"TransferTemplate {tt.name!r}: more than one Variable "
@@ -149,7 +149,7 @@ class TestVariableClosure:
         for tt in inst.transfer_templates:
             has_variable = any(
                 isinstance(rails_by_name.get(str(n)), SingleLegRail)
-                and rails_by_name[str(n)].leg_direction == "Variable"  # type: ignore[union-attr]
+                and rails_by_name[str(n)].leg_direction == "Variable"  # type: ignore[union-attr]: narrowed by the prior isinstance(..., SingleLegRail) check
                 for n in tt.leg_rails
             )
             if not has_variable:

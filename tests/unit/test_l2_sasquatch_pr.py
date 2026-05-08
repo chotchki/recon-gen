@@ -167,7 +167,7 @@ def test_encompasses_ar_variable_closure_template() -> None:
     variable_legs = [
         rails_by_name[str(n)] for n in cycle.leg_rails
         if isinstance(rails_by_name.get(str(n)), SingleLegRail)
-        and rails_by_name[str(n)].leg_direction == "Variable"  # type: ignore[union-attr]
+        and rails_by_name[str(n)].leg_direction == "Variable"  # type: ignore[union-attr]: narrowed by the prior isinstance(..., SingleLegRail) check
     ]
     assert len(variable_legs) == 1, (
         f"InternalTransferCycle must contain exactly one Variable-direction "

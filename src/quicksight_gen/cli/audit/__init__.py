@@ -71,7 +71,7 @@ def audit() -> None:
     """Per-instance PDF reconciliation report (cover, summary, exceptions)."""
 
 
-def _period_option_from():  # type: ignore[no-untyped-def]
+def _period_option_from():  # type: ignore[no-untyped-def]: Click decorator strips the function-decorator return type
     return click.option(
         "--from", "period_from",
         type=click.DateTime(formats=["%Y-%m-%d"]), default=None,
@@ -82,7 +82,7 @@ def _period_option_from():  # type: ignore[no-untyped-def]
     )
 
 
-def _period_option_to():  # type: ignore[no-untyped-def]
+def _period_option_to():  # type: ignore[no-untyped-def]: Click decorator strips the function-decorator return type
     return click.option(
         "--to", "period_to",
         type=click.DateTime(formats=["%Y-%m-%d"]), default=None,
@@ -114,7 +114,7 @@ def _resolve_period(
     return start, end
 
 
-def _institution_name(instance) -> str:  # type: ignore[no-untyped-def]
+def _institution_name(instance) -> str:  # type: ignore[no-untyped-def]: instance is L2Instance, untyped pending audit-CLI sweep
     """Pull the institution display name from the L2 persona block.
 
     Falls back to the L2 instance identifier when no persona block is
@@ -126,7 +126,7 @@ def _institution_name(instance) -> str:  # type: ignore[no-untyped-def]
     return str(instance.instance)
 
 
-def _singleton_account_ids(instance) -> set[str]:  # type: ignore[no-untyped-def]
+def _singleton_account_ids(instance) -> set[str]:  # type: ignore[no-untyped-def]: instance is L2Instance, untyped pending audit-CLI sweep
     """IDs of L2 ``Account`` singletons (the N-N "shared" accounts).
 
     Used by the U.3 per-invariant tables to split rows: account_ids
@@ -140,7 +140,7 @@ def _singleton_account_ids(instance) -> set[str]:  # type: ignore[no-untyped-def
 
 
 def _internal_singleton_account_ids(
-    instance,  # type: ignore[no-untyped-def]
+    instance,  # type: ignore[no-untyped-def]: instance is L2Instance, untyped pending audit-CLI sweep
 ) -> set[str]:
     """IDs of internal-scope L2 ``Account`` singletons only.
 
@@ -190,7 +190,7 @@ _EXCEPTION_INVARIANTS: list[tuple[str, str, str | None]] = [
 
 
 def _query_executive_summary(
-    cfg, instance, period: tuple[date, date],  # type: ignore[no-untyped-def]
+    cfg, instance, period: tuple[date, date],  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> ExecSummary | None:
     """Aggregate the executive-summary totals against the demo DB.
 
@@ -318,7 +318,7 @@ class DriftViolation:
 
 
 def _query_drift_violations(
-    cfg, instance, period: tuple[date, date],  # type: ignore[no-untyped-def]
+    cfg, instance, period: tuple[date, date],  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> list[DriftViolation] | None:
     """Pull drift rows whose business day falls in the period.
 
@@ -396,7 +396,7 @@ class OverdraftViolation:
 
 
 def _query_overdraft_violations(
-    cfg, instance, period: tuple[date, date],  # type: ignore[no-untyped-def]
+    cfg, instance, period: tuple[date, date],  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> list[OverdraftViolation] | None:
     """Pull overdraft rows whose business day falls in the period.
 
@@ -536,7 +536,7 @@ class LimitBreachViolation:
 
 
 def _query_limit_breach_violations(
-    cfg, instance, period: tuple[date, date],  # type: ignore[no-untyped-def]
+    cfg, instance, period: tuple[date, date],  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> list[LimitBreachViolation] | None:
     """Pull limit_breach rows whose business day falls in the period.
 
@@ -677,7 +677,7 @@ class StuckPendingViolation:
 
 
 def _query_stuck_pending_violations(
-    cfg, instance,  # type: ignore[no-untyped-def]
+    cfg, instance,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> list[StuckPendingViolation] | None:
     """Pull all rows from the ``<prefix>_stuck_pending`` matview.
 
@@ -818,7 +818,7 @@ class StuckUnbundledViolation:
 
 
 def _query_stuck_unbundled_violations(
-    cfg, instance,  # type: ignore[no-untyped-def]
+    cfg, instance,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> list[StuckUnbundledViolation] | None:
     """Pull all rows from the ``<prefix>_stuck_unbundled`` matview.
 
@@ -962,7 +962,7 @@ class SupersessionAuditData:
 
 
 def _query_supersession(
-    cfg, instance, period: tuple[date, date],  # type: ignore[no-untyped-def]
+    cfg, instance, period: tuple[date, date],  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> SupersessionAuditData | None:
     """Aggregate supersession counts + in-window detail rows.
 
@@ -1108,7 +1108,7 @@ class DailyStatementWalk:
 
 
 def _query_daily_statement_walks(
-    cfg, instance,  # type: ignore[no-untyped-def]
+    cfg, instance,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
     period: tuple[date, date],
     singleton_ids: set[str],
 ) -> list[DailyStatementWalk] | None:
@@ -1181,7 +1181,7 @@ def _query_daily_statement_walks(
             pair_map[key] = (r[1], r[2], Decimal(r[3] or 0))
         if not pair_map:
             return []
-        def _to_date(v) -> date:  # type: ignore[no-untyped-def]
+        def _to_date(v) -> date:  # type: ignore[no-untyped-def]: local helper, accepts datetime or date duck-typed
             return v.date() if hasattr(v, "date") else v
 
         # Sort: business_day_end DESC, |drift| DESC, account_id ASC.
@@ -1316,7 +1316,7 @@ _APPENDIX_MATVIEWS: tuple[str, ...] = (
 
 
 def _query_matview_evidence(
-    cfg, instance,  # type: ignore[no-untyped-def]
+    cfg, instance,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> list[MatviewEvidence] | None:
     """Hash every matview the appendix advertises (U.7.c).
 

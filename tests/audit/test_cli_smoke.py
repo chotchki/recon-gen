@@ -659,7 +659,7 @@ def test_audit_pdf_bookmarks_resolve_to_real_pages(
     # Walk the outline: collect (depth, title, 1-indexed page).
     entries: list[tuple[int, str, int]] = []
 
-    def walk(items, depth=0):  # type: ignore[no-untyped-def]
+    def walk(items, depth=0):  # type: ignore[no-untyped-def]: items is pypdf outline (recursive list[Destination | list])
         for item in items:
             if isinstance(item, list):
                 walk(item, depth + 1)

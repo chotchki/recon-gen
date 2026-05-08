@@ -303,14 +303,14 @@ def _populate_account_coverage(
     kpi_row = sheet.layout.row(height=_KPI_ROW_SPAN)
     kpi_row.add_kpi(
         width=_HALF,
-        visual_id="exec-account-kpi-open",  # type: ignore[arg-type]
+        visual_id="exec-account-kpi-open",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         title="Total Open Accounts",
         subtitle="Every account that has ever appeared in daily_balances",
         values=[ds_acct["account_id"].count(field_id="exec-acct-open-count")],
     )
     kpi_row.add_kpi(
         width=_HALF,
-        visual_id="exec-account-kpi-active",  # type: ignore[arg-type]
+        visual_id="exec-account-kpi-active",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         title="Active Accounts",
         subtitle=(
             "Accounts with at least one successful transaction "
@@ -328,7 +328,7 @@ def _populate_account_coverage(
     chart_row = sheet.layout.row(height=_CHART_ROW_SPAN)
     chart_row.add_bar_chart(
         width=_HALF,
-        visual_id="exec-account-bar-open-by-type",  # type: ignore[arg-type]
+        visual_id="exec-account-bar-open-by-type",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         title="Open Accounts by Type",
         subtitle="Total open-account count grouped by account_type",
         category=[
@@ -344,7 +344,7 @@ def _populate_account_coverage(
     )
     chart_row.add_bar_chart(
         width=_HALF,
-        visual_id="exec-account-bar-active-by-type",  # type: ignore[arg-type]
+        visual_id="exec-account-bar-active-by-type",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         title="Active Accounts by Type",
         subtitle=(
             "Accounts with activity_count > 0, grouped by account_type"
@@ -366,7 +366,7 @@ def _populate_account_coverage(
     # surface at the top.
     sheet.layout.row(height=_TABLE_ROW_SPAN).add_table(
         width=_FULL,
-        visual_id="exec-account-detail-table",  # type: ignore[arg-type]
+        visual_id="exec-account-detail-table",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         title="Account Detail",
         subtitle=(
             "Per-account row with last activity date and total count "
@@ -413,7 +413,7 @@ def _populate_transaction_volume(
     kpi_row = sheet.layout.row(height=_KPI_ROW_SPAN)
     kpi_row.add_kpi(
         width=_HALF,
-        visual_id="exec-txn-kpi-total",  # type: ignore[arg-type]
+        visual_id="exec-txn-kpi-total",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         title="Total Transactions",
         subtitle=(
             "Sum of transfer count across the selected period and "
@@ -423,7 +423,7 @@ def _populate_transaction_volume(
     )
     kpi_row.add_kpi(
         width=_HALF,
-        visual_id="exec-txn-kpi-avg-daily",  # type: ignore[arg-type]
+        visual_id="exec-txn-kpi-avg-daily",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         title="Average Daily Volume",
         subtitle=(
             "Average daily transfer count, averaged across days that "
@@ -440,7 +440,7 @@ def _populate_transaction_volume(
     # composition signal in one visual.
     sheet.layout.row(height=_CHART_ROW_SPAN).add_bar_chart(
         width=_FULL,
-        visual_id="exec-txn-bar-daily-stacked",  # type: ignore[arg-type]
+        visual_id="exec-txn-bar-daily-stacked",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         title="Daily Transaction Count by Type",
         subtitle=(
             "Each day's transfer count, stacked by transfer_type so "
@@ -463,7 +463,7 @@ def _populate_transaction_volume(
     # date axis to give the "where did the volume come from" snapshot.
     sheet.layout.row(height=_CHART_ROW_SPAN).add_bar_chart(
         width=_FULL,
-        visual_id="exec-txn-bar-by-type",  # type: ignore[arg-type]
+        visual_id="exec-txn-bar-by-type",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         title="Period Total by Type",
         subtitle="Total transfer count over the selected period, per transfer_type",
         category=[
@@ -495,7 +495,7 @@ def _populate_money_moved(
     kpi_row = sheet.layout.row(height=_KPI_ROW_SPAN)
     kpi_row.add_kpi(
         width=_HALF,
-        visual_id="exec-money-kpi-net",  # type: ignore[arg-type]
+        visual_id="exec-money-kpi-net",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         title="Net Money Moved",
         subtitle=(
             "Σ signed amount across the period — positive = inflow to "
@@ -508,7 +508,7 @@ def _populate_money_moved(
     )
     kpi_row.add_kpi(
         width=_HALF,
-        visual_id="exec-money-kpi-gross",  # type: ignore[arg-type]
+        visual_id="exec-money-kpi-gross",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         title="Gross Money Moved",
         subtitle=(
             "Total handle — sum of per-transfer dollar magnitudes "
@@ -524,7 +524,7 @@ def _populate_money_moved(
     # be a line chart if the tree had one.
     sheet.layout.row(height=_CHART_ROW_SPAN).add_bar_chart(
         width=_FULL,
-        visual_id="exec-money-bar-daily-stacked",  # type: ignore[arg-type]
+        visual_id="exec-money-bar-daily-stacked",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         title="Daily Gross Dollars Moved by Type",
         subtitle=(
             "Each day's gross dollar volume, stacked by transfer_type"
@@ -549,7 +549,7 @@ def _populate_money_moved(
     # transfer_type.
     sheet.layout.row(height=_CHART_ROW_SPAN).add_bar_chart(
         width=_FULL,
-        visual_id="exec-money-bar-by-type",  # type: ignore[arg-type]
+        visual_id="exec-money-bar-by-type",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         title="Period Total Gross Dollars by Type",
         subtitle=(
             "Total gross dollar volume over the period, per "
@@ -658,7 +658,7 @@ def _wire_date_range_filter(
     # Accounts" by design, so use ALL_VALUES to keep them visible
     # regardless of date window.
     acct_fg = analysis.add_filter_group(FilterGroup(
-        filter_group_id=_FG_EXEC_DATE_ACCT,  # type: ignore[arg-type]
+        filter_group_id=_FG_EXEC_DATE_ACCT,  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         cross_dataset="SINGLE_DATASET",
         filters=[TimeRangeFilter(
             filter_id="filter-exec-date-account-summary",
@@ -681,7 +681,7 @@ def _wire_date_range_filter(
         (money_moved_sheet, "fg-exec-date-money-moved"),
     ):
         fg = analysis.add_filter_group(FilterGroup(
-            filter_group_id=fg_id,  # type: ignore[arg-type]
+            filter_group_id=fg_id,  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
             cross_dataset="SINGLE_DATASET",
             filters=[TimeRangeFilter(
                 filter_id=f"filter-{fg_id}",
@@ -780,7 +780,7 @@ def build_executives_app(
     sheets: dict[str, Sheet] = {}
     for sheet_id, name, title, description in _EXEC_SHEET_SPECS:
         sheets[sheet_id] = analysis.add_sheet(Sheet(
-            sheet_id=sheet_id,  # type: ignore[arg-type]
+            sheet_id=sheet_id,  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
             name=name,
             title=title,
             description=description,

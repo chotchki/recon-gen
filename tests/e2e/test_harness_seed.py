@@ -51,7 +51,7 @@ def _empty_scenario() -> ScenarioPlant:
             TemplateInstance(
                 template_role=Identifier("CustomerSubledger"),
                 account_id=Identifier("cust-001"),
-                name=Identifier("Customer 1"),  # type: ignore[arg-type]
+                name=Identifier("Customer 1"),  # type: ignore[arg-type]: TemplateInstance.name expects Name newtype, Identifier shape-compatible
             ),
         ),
         today=date(2030, 1, 1),

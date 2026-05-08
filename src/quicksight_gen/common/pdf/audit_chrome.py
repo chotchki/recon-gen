@@ -20,7 +20,7 @@ from quicksight_gen.common.provenance import (
 )
 
 
-def bookmarked_h1(text: str, styles):  # type: ignore[no-untyped-def]
+def bookmarked_h1(text: str, styles):  # type: ignore[no-untyped-def]: styles is reportlab StyleSheet1; returns Paragraph
     """Heading1 paragraph tagged for PDF outline + TOC at level 0.
 
     Used by every per-section heading the reader should be able to
@@ -28,15 +28,15 @@ def bookmarked_h1(text: str, styles):  # type: ignore[no-untyped-def]
     """
     from reportlab.platypus import Paragraph
     p = Paragraph(text, styles["Heading1"])
-    p._bookmark_level = 0  # type: ignore[attr-defined]
+    p._bookmark_level = 0  # type: ignore[attr-defined]: reportlab Paragraph monkey-patch for bookmark generation
     return p
 
 
-def bookmarked_h3(text: str, styles):  # type: ignore[no-untyped-def]
+def bookmarked_h3(text: str, styles):  # type: ignore[no-untyped-def]: styles is reportlab StyleSheet1; returns Paragraph
     """Heading3 paragraph tagged for PDF outline + TOC at level 1."""
     from reportlab.platypus import Paragraph
     p = Paragraph(text, styles["Heading3"])
-    p._bookmark_level = 1  # type: ignore[attr-defined]
+    p._bookmark_level = 1  # type: ignore[attr-defined]: reportlab Paragraph monkey-patch for bookmark generation
     return p
 
 
@@ -57,13 +57,13 @@ class BookmarkedDocTemplate:
     (which breaks bookmark→page refs).
     """
 
-    def __new__(  # type: ignore[no-untyped-def]
+    def __new__(  # type: ignore[no-untyped-def]: returns reportlab BaseDocTemplate, runtime-imported
         cls, *args, total_pages_holder: list | None = None, **kwargs,
     ):
         from reportlab.platypus import BaseDocTemplate
 
         class _Inner(BaseDocTemplate):
-            def afterFlowable(self, flowable) -> None:  # type: ignore[no-untyped-def]
+            def afterFlowable(self, flowable) -> None:  # type: ignore[no-untyped-def]: reportlab Flowable callback override
                 level = getattr(flowable, "_bookmark_level", None)
                 if level is None:
                     return
@@ -73,7 +73,7 @@ class BookmarkedDocTemplate:
                 self.canv.addOutlineEntry(text, key, level=level)
                 self.notify("TOCEntry", (level, text, self.page, key))
 
-            def _allSatisfied(self):  # type: ignore[no-untyped-def]
+            def _allSatisfied(self):  # type: ignore[no-untyped-def]: reportlab BaseDocTemplate hook override
                 # multiBuild calls this after each pass to decide
                 # whether to run another. We piggyback to publish the
                 # just-stabilized page count into the holder so the
@@ -87,13 +87,13 @@ class BookmarkedDocTemplate:
 
 
 def make_footer_drawer(
-    theme,  # type: ignore[no-untyped-def] # ThemePreset
+    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
     *,
     version: str,
     generated_at: datetime,
     total_pages_holder: list,
     provenance: ProvenanceFingerprint | None,
-):  # type: ignore[no-untyped-def]
+):  # type: ignore[no-untyped-def]: returns inner closure (reportlab page-template callable)
     """Build a per-page footer drawer with U.6 chrome.
 
     "Page X of Y" needs the FINAL page count, which only stabilizes
@@ -132,7 +132,7 @@ def make_footer_drawer(
         else short_fingerprint_placeholder()
     )
 
-    def _draw_footer(canvas, doc) -> None:  # type: ignore[no-untyped-def]
+    def _draw_footer(canvas, doc) -> None:  # type: ignore[no-untyped-def]: reportlab Canvas + Document signature
         canvas.saveState()
         width, _ = letter
         canvas.setFont("Helvetica", 8)

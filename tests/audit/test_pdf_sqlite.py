@@ -429,7 +429,7 @@ def test_skeleton_mode_short_circuits_against_sqlite() -> None:
     Same skeleton-mode contract the PG / Oracle audit tests verify;
     repeat here so the SQLite cell isn't blind to a regression that
     breaks skeleton mode for the local-iteration loop."""
-    cfg = _FakeCfg(demo_database_url=None)  # type: ignore[arg-type]
+    cfg = _FakeCfg(demo_database_url=None)  # type: ignore[arg-type]: _FakeCfg is a stand-in for Config in skeleton-mode tests
     assert _query_drift_violations(cfg, _INSTANCE, _PERIOD) is None
     assert _query_overdraft_violations(cfg, _INSTANCE, _PERIOD) is None
     assert _query_limit_breach_violations(cfg, _INSTANCE, _PERIOD) is None

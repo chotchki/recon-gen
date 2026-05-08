@@ -898,7 +898,7 @@ def test_date_range_filter_targets_correct_columns() -> None:
         fg = by_id[fg_id]
         flt = fg.filters[0]
         # TimeRangeFilter.column is a Column ref; .name exposes the col.
-        return flt.column.name  # type: ignore[union-attr]
+        return flt.column.name  # type: ignore[union-attr]: TimeRangeFilter always carries a Column by construction
 
     assert _column_name("fg-l1-date-drift") == "business_day_start"
     assert _column_name("fg-l1-date-ledger-drift") == "business_day_start"

@@ -331,7 +331,7 @@ def test_all_violation_dataclasses_are_frozen():
     not_frozen = [
         c.__name__ for c in classes
         if not getattr(c, "__dataclass_params__", None)
-        or not c.__dataclass_params__.frozen  # type: ignore[union-attr]
+        or not c.__dataclass_params__.frozen  # type: ignore[union-attr]: __dataclass_params__ narrowed truthy by the prior getattr check
     ]
     assert not_frozen == [], (
         f"these audit dataclasses are not frozen: {not_frozen}. "

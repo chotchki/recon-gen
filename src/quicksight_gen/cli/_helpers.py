@@ -66,7 +66,7 @@ def prune_stale_files(directory: Path, *, keep: set[str]) -> None:
 
 def resolve_l2_for_demo(
     config_path: str, l2_instance_path: str | None,
-):  # type: ignore[no-untyped-def]
+):  # type: ignore[no-untyped-def]: returns (Config, L2Instance) — both typed but tuple unpacks at every caller
     """Load config + L2 instance and stamp the per-instance prefix on cfg.
 
     Returns ``(cfg, instance)``. Mirrors the prelude every ``apply``
@@ -93,7 +93,7 @@ _DEFAULT_BROKEN_COUNT = 15
 _DEFAULT_FANOUT_MULTIPLIER = 5
 
 
-def build_full_seed_sql(cfg, instance, *, anchor=None, density: float = 1.0) -> str:  # type: ignore[no-untyped-def]
+def build_full_seed_sql(cfg, instance, *, anchor=None, density: float = 1.0) -> str:  # type: ignore[no-untyped-def]: cfg/instance/anchor untyped pending CLI-wide sweep
     """Compose the demo seed pipeline.
 
     Picks the ``l1_plus_broad`` scenario mode so the demo gets BOTH
@@ -169,7 +169,7 @@ def emit_to_target(
 
 
 def connect_and_apply(
-    cfg, sql: str, *, label: str,  # type: ignore[no-untyped-def]
+    cfg, sql: str, *, label: str,  # type: ignore[no-untyped-def]: cfg untyped pending CLI-wide sweep
 ) -> None:
     """Open the demo DB connection, run ``sql``, commit; rollback on error.
 
@@ -221,7 +221,7 @@ def connect_and_apply(
 
 # Common click options shared across artifact subcommands.
 
-def l2_instance_option():  # type: ignore[no-untyped-def]
+def l2_instance_option():  # type: ignore[no-untyped-def]: Click decorator stubs erase the function-decorator return type
     """``--l2 PATH`` — defaults to bundled spec_example."""
     return click.option(
         "--l2", "l2_instance_path",
@@ -230,7 +230,7 @@ def l2_instance_option():  # type: ignore[no-untyped-def]
     )
 
 
-def config_option(*, required_for_dialect_only: bool = False):  # type: ignore[no-untyped-def]
+def config_option(*, required_for_dialect_only: bool = False):  # type: ignore[no-untyped-def]: Click decorator stubs erase the function-decorator return type
     """``--config / -c PATH`` — config.yaml.
 
     Pass ``required_for_dialect_only=True`` for emit-only commands that
@@ -248,7 +248,7 @@ def config_option(*, required_for_dialect_only: bool = False):  # type: ignore[n
     )
 
 
-def output_option(*, default: str | None = None):  # type: ignore[no-untyped-def]
+def output_option(*, default: str | None = None):  # type: ignore[no-untyped-def]: Click decorator stubs erase the function-decorator return type
     """``-o FILE`` — output redirect.
 
     For schema/data: omit ``-o`` to emit to stdout. Pass ``-o FILE`` to
@@ -271,7 +271,7 @@ def output_option(*, default: str | None = None):  # type: ignore[no-untyped-def
     )
 
 
-def execute_option():  # type: ignore[no-untyped-def]
+def execute_option():  # type: ignore[no-untyped-def]: Click decorator stubs erase the function-decorator return type
     """``--execute`` — actually do the destructive thing.
 
     Without this flag, apply/clean commands emit the script they would

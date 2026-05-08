@@ -1128,9 +1128,9 @@ def _business_days_in_window(
     empty_holidays: set[object] = set()
     us_holidays: Container[object] = empty_holidays
     try:
-        import holidays as _holidays_pkg  # type: ignore[import-not-found,import-untyped]
+        import holidays as _holidays_pkg  # type: ignore[import-not-found,import-untyped]: optional dep, third-party library lacks PEP 561 stubs
 
-        us_holidays = _holidays_pkg.US(  # type: ignore[no-untyped-call,unused-ignore]
+        us_holidays = _holidays_pkg.US(  # type: ignore[no-untyped-call,unused-ignore]: third-party method has no type annotations
             years=range(anchor.year - 1, anchor.year + 1),
         )
     except ImportError:

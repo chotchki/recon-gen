@@ -1002,7 +1002,7 @@ def _materialize_instances(
             )),
         )
         for n in (1, 2)
-    )  # type: ignore[return-value]
+    )  # type: ignore[return-value]: tuple-of-2 narrowed at runtime; declared return is tuple[T, T]
 
 
 def _render_template_field(

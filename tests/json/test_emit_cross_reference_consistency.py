@@ -77,8 +77,8 @@ def emitted_bundle(
     via ``indirect`` to specify which generator."""
     generator_name = request.param
     generator = _GENERATORS[generator_name]
-    cfg = _write_min_config(tmp_path)  # type: ignore[arg-type]
-    out = tmp_path / "out"  # type: ignore[operator]
+    cfg = _write_min_config(tmp_path)  # type: ignore[arg-type]: tmp_path is pathlib.Path; helper takes str-or-Path
+    out = tmp_path / "out"  # type: ignore[operator]: tmp_path Path / str is Path (pyright loses inference here)
     out.mkdir()
     generator(
         str(cfg), str(out), l2_instance_path=str(_SASQUATCH_L2),

@@ -67,7 +67,7 @@ def _write_audit_pdf(
     supersession_data: SupersessionAuditData | None,
     daily_statement_walks: list[DailyStatementWalk] | None,
     singleton_ids: set[str],
-    theme,  # type: ignore[no-untyped-def] # ThemePreset
+    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
     version: str,
     l2_label: str,
     provenance: ProvenanceFingerprint | None,
@@ -192,9 +192,9 @@ def _write_audit_pdf(
         "QuickSight Generator Audit Report",
         styles["Title"],
     )
-    cover_title._bookmark_level = 0  # type: ignore[attr-defined]
+    cover_title._bookmark_level = 0  # type: ignore[attr-defined]: reportlab Paragraph monkey-patch for bookmark generation
     toc_heading = Paragraph("Table of Contents", styles["Heading1"])
-    toc_heading._bookmark_level = 0  # type: ignore[attr-defined]
+    toc_heading._bookmark_level = 0  # type: ignore[attr-defined]: reportlab Paragraph monkey-patch for bookmark generation
     # Optional: institutional logo above the title when theme.logo
     # is a loadable absolute file path.
     logo_flowable = _cover_logo_flowable(theme)
@@ -336,10 +336,10 @@ def _write_audit_pdf(
 
 def _executive_summary_story(
     summary: ExecSummary | None,
-    styles,  # type: ignore[no-untyped-def]
+    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
     period: tuple[date, date],
-    theme,  # type: ignore[no-untyped-def] # ThemePreset
-) -> list:  # type: ignore[type-arg]
+    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
+) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.2 executive summary page.
 
     Caller appends to the doc story after the cover page. Renders a
@@ -441,10 +441,10 @@ def _executive_summary_story(
 
 def _drift_story(
     rows: list[DriftViolation] | None,
-    styles,  # type: ignore[no-untyped-def]
+    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
     period: tuple[date, date],
-    theme,  # type: ignore[no-untyped-def] # ThemePreset
-) -> list:  # type: ignore[type-arg]
+    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
+) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.3.a Drift violations page.
 
     LongTable auto-paginates with the header row repeated. None = no
@@ -566,11 +566,11 @@ def _drift_story(
 
 def _overdraft_story(
     rows: list[OverdraftViolation] | None,
-    styles,  # type: ignore[no-untyped-def]
+    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
     period: tuple[date, date],
     singleton_ids: set[str],
-    theme,  # type: ignore[no-untyped-def] # ThemePreset
-) -> list:  # type: ignore[type-arg]
+    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
+) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.3.b Overdraft violations page.
 
     Renders up to TWO sub-tables:
@@ -721,11 +721,11 @@ def _overdraft_story(
 
 def _limit_breach_story(
     rows: list[LimitBreachViolation] | None,
-    styles,  # type: ignore[no-untyped-def]
+    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
     period: tuple[date, date],
     singleton_ids: set[str],
-    theme,  # type: ignore[no-untyped-def] # ThemePreset
-) -> list:  # type: ignore[type-arg]
+    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
+) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.3.c Limit breach violations page.
 
     Same parent-vs-child split as Overdraft. Children grouped by
@@ -882,10 +882,10 @@ def _limit_breach_story(
 
 def _stuck_pending_story(
     rows: list[StuckPendingViolation] | None,
-    styles,  # type: ignore[no-untyped-def]
+    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
     singleton_ids: set[str],
-    theme,  # type: ignore[no-untyped-def] # ThemePreset
-) -> list:  # type: ignore[type-arg]
+    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
+) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.3.d Stuck pending transactions page.
 
     Current-state matview: NO date filter (mirrors L1 dashboard).
@@ -1035,10 +1035,10 @@ def _stuck_pending_story(
 
 def _stuck_unbundled_story(
     rows: list[StuckUnbundledViolation] | None,
-    styles,  # type: ignore[no-untyped-def]
+    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
     singleton_ids: set[str],
-    theme,  # type: ignore[no-untyped-def] # ThemePreset
-) -> list:  # type: ignore[type-arg]
+    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
+) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.3.e Stuck unbundled transactions page.
 
     Same shape as Stuck pending; cap is ``max_unbundled_age_seconds``.
@@ -1186,10 +1186,10 @@ def _stuck_unbundled_story(
 
 def _supersession_story(
     data: SupersessionAuditData | None,
-    styles,  # type: ignore[no-untyped-def]
+    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
     period: tuple[date, date],
-    theme,  # type: ignore[no-untyped-def] # ThemePreset
-) -> list:  # type: ignore[type-arg]
+    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
+) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.3.f Supersession audit page.
 
     Aggregate table covers entire dataset; detail tables limited to
@@ -1370,9 +1370,9 @@ def _supersession_story(
 
 def _daily_statement_walks_story(
     walks: list[DailyStatementWalk] | None,
-    styles,  # type: ignore[no-untyped-def]
-    theme,  # type: ignore[no-untyped-def] # ThemePreset
-) -> list:  # type: ignore[type-arg]
+    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
+    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
+) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.4 per-account Daily Statement walk pages.
 
     Section header at level-0 outline; one sub-section per walk at
@@ -1541,8 +1541,8 @@ def _daily_statement_walks_story(
 
 
 def _signoff_story(
-    styles,  # type: ignore[no-untyped-def]
-    theme,  # type: ignore[no-untyped-def] # ThemePreset
+    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
+    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
     *,
     institution: str,
     period: tuple[date, date],
@@ -1724,7 +1724,7 @@ def _signoff_story(
 
 
 
-def _make_fillable_notes_field(  # type: ignore[no-untyped-def]
+def _make_fillable_notes_field(  # type: ignore[no-untyped-def]: returns reportlab Flowable, runtime-imported
     *,
     name: str,
     width: float,
@@ -1785,7 +1785,7 @@ def _make_fillable_notes_field(  # type: ignore[no-untyped-def]
     return _FillableNotesField()
 
 
-def _make_signature_field_placeholder(  # type: ignore[no-untyped-def]
+def _make_signature_field_placeholder(  # type: ignore[no-untyped-def]: returns reportlab Flowable, runtime-imported
     *,
     name: str,
     width: float,
@@ -1980,8 +1980,8 @@ def _build_verify_recipe_script(
 
 
 def _appendix_story(
-    styles,  # type: ignore[no-untyped-def]
-    theme,  # type: ignore[no-untyped-def] # ThemePreset
+    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
+    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
     *,
     version: str,
     l2_label: str,
@@ -2263,7 +2263,7 @@ def _appendix_story(
     ]
 
 
-def _cover_logo_flowable(theme):  # type: ignore[no-untyped-def]
+def _cover_logo_flowable(theme):  # type: ignore[no-untyped-def]: theme is ThemePreset; returns reportlab Image or None
     """Cover-page logo Image flowable (or None if no logo / can't load).
 
     Reads ``theme.logo`` (string accepting either a URL or absolute
@@ -2319,8 +2319,8 @@ def _cover_logo_flowable(theme):  # type: ignore[no-untyped-def]
 
 
 def _provenance_block_story(
-    styles,  # type: ignore[no-untyped-def]
-    theme,  # type: ignore[no-untyped-def] # ThemePreset
+    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
+    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
     *,
     version: str,
     l2_label: str,

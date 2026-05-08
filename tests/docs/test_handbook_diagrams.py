@@ -44,7 +44,7 @@ class TestL2Topology:
     )
     def test_renders_against_spec_example(self, kind: str):
         l2 = load_instance(_SPEC_EXAMPLE)
-        dot = render_l2_topology(l2, kind)  # type: ignore[arg-type]
+        dot = render_l2_topology(l2, kind)  # type: ignore[arg-type]: kind is parametrized str; Literal narrowing not inferrable
         assert _is_dot(dot), f"expected DOT source; got: {dot[:80]}"
 
     @pytest.mark.parametrize(
@@ -55,13 +55,13 @@ class TestL2Topology:
         # Sasquatch is a richer fixture — exercises union role expressions
         # + XOR-grouped chain entries that spec_example doesn't have.
         l2 = load_instance(_SASQUATCH_PR)
-        dot = render_l2_topology(l2, kind)  # type: ignore[arg-type]
+        dot = render_l2_topology(l2, kind)  # type: ignore[arg-type]: kind is parametrized str; Literal narrowing not inferrable
         assert _is_dot(dot)
 
     def test_unknown_kind_raises(self):
         l2 = load_instance(_SPEC_EXAMPLE)
         with pytest.raises(ValueError, match="unknown topology kind"):
-            render_l2_topology(l2, "bogus")  # type: ignore[arg-type]
+            render_l2_topology(l2, "bogus")  # type: ignore[arg-type]: deliberately invalid Literal value for the negative-path test
 
     def test_accounts_diagram_includes_account_names(self):
         l2 = load_instance(_SPEC_EXAMPLE)

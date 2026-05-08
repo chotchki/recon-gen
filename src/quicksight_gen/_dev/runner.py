@@ -790,12 +790,12 @@ def setup_variant(name: str) -> tuple[dict[str, str], object | None]:
         # Lazy-import: testcontainers requires Docker, which not every
         # operator has. Importing only on demand keeps non-Docker
         # invocations clean.
-        from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
+        from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
 
         # Pin to the exact PG version we run in production (Aurora 17).
         container = PostgresContainer("postgres:17-alpine")
         container.start()
-        raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]
+        raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
         return {QS_GEN_DEMO_DATABASE_URL.name: _normalize_pg_url(raw_url)}, container
     raise ValueError(f"setup_variant: unknown variant {name!r}")
 
@@ -818,7 +818,7 @@ def teardown_variant(handle: object | None) -> None:
         return
     try:
         # All testcontainers expose ``.stop()`` for shutdown + cleanup.
-        handle.stop()  # type: ignore[attr-defined]
+        handle.stop()  # type: ignore[attr-defined]: testcontainers handle is duck-typed (.stop() across all variants)
     except Exception:  # noqa: BLE001
         # Sidecar contract — never break the chain on teardown.
         pass
@@ -1276,7 +1276,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
 
     # boto3-stubs's huge per-service overload union confuses pyright
     # — Unknown branches leak through on most-cases. Suppress narrowly.
-    client: Any = boto3.client(  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+    client: Any = boto3.client(  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]: boto3-stubs huge overload union confuses pyright (X.2.o.5)
         "quicksight", region_name=cfg.aws_region,
     )
 

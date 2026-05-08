@@ -44,7 +44,7 @@ _SPEC_EXAMPLE = (
 _TODAY = date(2026, 5, 1)
 
 
-def _make_scenario(**plants) -> ScenarioPlant:  # type: ignore[no-untyped-def]
+def _make_scenario(**plants) -> ScenarioPlant:  # type: ignore[no-untyped-def]: **plants is the union of all plant kw-tuples
     """Build a minimal ScenarioPlant pinned to ``_TODAY``."""
     return ScenarioPlant(
         template_instances=(),

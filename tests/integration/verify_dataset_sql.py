@@ -272,7 +272,7 @@ def main() -> int:
     )
 
     print(
-        f"Connecting to {cfg.demo_database_url.split('@')[-1]} "  # type: ignore[union-attr]
+        f"Connecting to {cfg.demo_database_url.split('@')[-1]} "  # type: ignore[union-attr]: demo_database_url is required for this integration script
         f"({cfg.dialect.value}) — {len(all_datasets)} datasets to smoke."
     )
     conn = connect_demo_db(cfg)

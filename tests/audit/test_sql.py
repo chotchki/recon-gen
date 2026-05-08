@@ -447,7 +447,7 @@ def test_skeleton_mode_short_circuits_drift(captured_sql, patched_connect):
     never attempt a connection. If this regresses, every audit
     skeleton-mode preview suddenly requires a live DB.
     """
-    cfg = _FakeCfg(demo_database_url=None)  # type: ignore[arg-type]
+    cfg = _FakeCfg(demo_database_url=None)  # type: ignore[arg-type]: _FakeCfg is a stand-in for Config in skeleton-mode tests
     result = _query_drift_violations(cfg, _INSTANCE, _PERIOD)
     assert result is None
     assert captured_sql == []
@@ -458,7 +458,7 @@ def test_skeleton_mode_short_circuits_supersession(
 ):
     """Same skeleton-mode short-circuit as drift — repeated for the
     multi-query function to confirm no SQL leaks before the cfg check."""
-    cfg = _FakeCfg(demo_database_url=None)  # type: ignore[arg-type]
+    cfg = _FakeCfg(demo_database_url=None)  # type: ignore[arg-type]: _FakeCfg is a stand-in for Config in skeleton-mode tests
     result = _query_supersession(cfg, _INSTANCE, _PERIOD)
     assert result is None
     assert captured_sql == []

@@ -80,7 +80,7 @@ def _connect_pg(url: str) -> tuple[object, Callable[[str], int]]:
 
 
 def _connect_oracle(url: str) -> tuple[object, Callable[[str], int]]:
-    import oracledb  # type: ignore[import-untyped]
+    import oracledb  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
     conn = oracledb.connect(url)
 
     def count(table: str) -> int:

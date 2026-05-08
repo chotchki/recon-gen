@@ -75,7 +75,7 @@ _DASHBOARD_LAYOUT: dict[L1Invariant, tuple[str, str, bool]] = {
 
 
 def count_l1_invariant_rows(
-    page,  # type: ignore[no-untyped-def]  # playwright Page
+    page,  # type: ignore[no-untyped-def]: playwright Page, untyped to keep pyright off the optional dep
     invariant: L1Invariant,
     period: tuple[date, date] | None,
     *,

@@ -204,7 +204,7 @@ def test_count_invariant_table_rows_unknown_section_raises(
     from tests.audit import _pdf_extract
     original = _pdf_extract._INVARIANT_TITLES.copy()
     try:
-        _pdf_extract._INVARIANT_TITLES["drift"] = (  # type: ignore[index]
+        _pdf_extract._INVARIANT_TITLES["drift"] = (  # type: ignore[index]: deliberately mutating Final mapping for this negative-path test
             "Nonexistent Section Heading"
         )
         with pytest.raises(ValueError, match="Nonexistent Section Heading"):

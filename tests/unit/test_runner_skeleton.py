@@ -1217,8 +1217,8 @@ def _install_fake_harness_cleanup(
         return deleted or {k: len(v) for k, v in matched.items()}
 
     fake_module = types.ModuleType("_harness_cleanup")
-    fake_module._collect_resources_matching_tag = fake_collect  # type: ignore[attr-defined]
-    fake_module.sweep_qs_resources_by_tag = fake_sweep  # type: ignore[attr-defined]
+    fake_module._collect_resources_matching_tag = fake_collect  # type: ignore[attr-defined]: monkey-patching test attrs onto a fake ModuleType
+    fake_module.sweep_qs_resources_by_tag = fake_sweep  # type: ignore[attr-defined]: monkey-patching test attrs onto a fake ModuleType
     monkeypatch.setitem(sys.modules, "_harness_cleanup", fake_module)
     return collect_calls, sweep_calls
 

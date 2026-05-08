@@ -73,10 +73,10 @@ def expected_audit_counts(
     """
     start, end = period
 
-    def _eff(p) -> date:  # type: ignore[no-untyped-def]
+    def _eff(p) -> date:  # type: ignore[no-untyped-def]: p is one of the union of plant dataclasses; all carry days_ago
         return scenario.today - timedelta(days=p.days_ago)
 
-    def _in_period(p) -> bool:  # type: ignore[no-untyped-def]
+    def _in_period(p) -> bool:  # type: ignore[no-untyped-def]: p is one of the union of plant dataclasses; all carry days_ago
         eff = _eff(p)
         return start <= eff <= end
 

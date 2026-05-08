@@ -127,7 +127,7 @@ def connect_demo_db(cfg: Config) -> Any:  # typing-smell: ignore[explicit-any]: 
         return psycopg.connect(cfg.demo_database_url)
     if cfg.dialect is Dialect.ORACLE:
         try:
-            import oracledb  # type: ignore[import-untyped]
+            import oracledb  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
         except ImportError as e:
             raise ImportError(
                 "oracledb is required for Oracle connections. "
@@ -569,7 +569,7 @@ class _AsyncSqlitePool:
         import aiosqlite  # noqa: PLC0415
 
         async with aiosqlite.connect(self._path) as conn:
-            yield conn  # type: ignore[misc]  # aiosqlite Connection ⊂ AsyncConnection
+            yield conn  # type: ignore[misc]: aiosqlite Connection conforms to AsyncConnection protocol
 
     async def close(self) -> None:
         return None
@@ -626,7 +626,7 @@ async def make_connection_pool(
         return _AsyncPgPool(pool)
     if cfg.dialect is Dialect.ORACLE:
         try:
-            import oracledb  # type: ignore[import-untyped]
+            import oracledb  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
         except ImportError as e:
             raise ImportError(
                 "oracledb is required for Oracle connections. "

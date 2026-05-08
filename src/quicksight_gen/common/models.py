@@ -26,15 +26,15 @@ def _strip_nones(obj: Any) -> Any:
     that doesn't buy us anything for an internal helper.
     """
     if isinstance(obj, dict):
-        return {  # pyright: ignore[reportUnknownVariableType]
-            k: _strip_nones(v)  # pyright: ignore[reportUnknownArgumentType]
-            for k, v in obj.items()  # pyright: ignore[reportUnknownVariableType]
+        return {  # pyright: ignore[reportUnknownVariableType]: walks arbitrary QS-API JSON, recursive Any by design
+            k: _strip_nones(v)  # pyright: ignore[reportUnknownArgumentType]: walks arbitrary QS-API JSON, recursive Any by design
+            for k, v in obj.items()  # pyright: ignore[reportUnknownVariableType]: walks arbitrary QS-API JSON, recursive Any by design
             if v is not None
         }
     if isinstance(obj, list):
         return [
-            _strip_nones(v)  # pyright: ignore[reportUnknownArgumentType]
-            for v in obj  # pyright: ignore[reportUnknownVariableType]
+            _strip_nones(v)  # pyright: ignore[reportUnknownArgumentType]: walks arbitrary QS-API JSON, recursive Any by design
+            for v in obj  # pyright: ignore[reportUnknownVariableType]: walks arbitrary QS-API JSON, recursive Any by design
         ]
     if isinstance(obj, Enum):
         return obj.value

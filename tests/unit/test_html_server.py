@@ -300,7 +300,7 @@ def test_multi_dashboard_listing_and_per_dashboard_routing() -> None:
 
     fetcher_calls: dict[str, list[str]] = {"a": [], "b": []}
 
-    def make_fetcher(label: str):  # type: ignore[no-untyped-def]
+    def make_fetcher(label: str):  # type: ignore[no-untyped-def]: returns a closure with non-trivial fetch signature
         def fetch(visual_id: str, _params: dict[str, str]) -> Any:
             fetcher_calls[label].append(visual_id)
             return {"label": label}

@@ -115,8 +115,8 @@ def test_liveness_sql_resolves_per_dialect():
     pg = build_liveness_dataset(pg_cfg, app_segment="l1")
     oracle = build_liveness_dataset(oracle_cfg, app_segment="l1")
 
-    pg_sql = pg.PhysicalTableMap["app-info-liveness"].CustomSql.SqlQuery  # type: ignore[union-attr]
-    oracle_sql = oracle.PhysicalTableMap["app-info-liveness"].CustomSql.SqlQuery  # type: ignore[union-attr]
+    pg_sql = pg.PhysicalTableMap["app-info-liveness"].CustomSql.SqlQuery  # type: ignore[union-attr]: liveness physical table is always CustomSql by construction
+    oracle_sql = oracle.PhysicalTableMap["app-info-liveness"].CustomSql.SqlQuery  # type: ignore[union-attr]: liveness physical table is always CustomSql by construction
 
     assert "information_schema" in pg_sql
     assert "table_schema" in pg_sql

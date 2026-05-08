@@ -93,7 +93,7 @@ def _all_dataset_filenames(
     return names
 
 
-def _resolve_l2(l2_instance_path: str | None):  # type: ignore[no-untyped-def]
+def _resolve_l2(l2_instance_path: str | None):  # type: ignore[no-untyped-def]: returns L2Instance, untyped pending CLI-wide sweep
     """Load + return the L2 instance, defaulting to the bundled spec_example."""
     from quicksight_gen.apps.l1_dashboard._l2 import default_l2_instance
     from quicksight_gen.common.l2 import load_instance

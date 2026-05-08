@@ -482,7 +482,7 @@ def _populate_param_filter_dropdown(
         default=list(all_values),
     ))
     fg = analysis.add_filter_group(FilterGroup(
-        filter_group_id=fg_id,  # type: ignore[arg-type]
+        filter_group_id=fg_id,  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         cross_dataset=cross_dataset,
         filters=[CategoryFilter.with_parameter(
             filter_id=filter_id,
@@ -560,7 +560,7 @@ def _populate_rails_sheet(
         default=DateTimeDefaultValues(StaticValues=[_DATE_END_STATIC]),
     ))
     fg_date = analysis.add_filter_group(FilterGroup(
-        filter_group_id="fg-l2ft-rails-date",  # type: ignore[arg-type]
+        filter_group_id="fg-l2ft-rails-date",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         cross_dataset="SINGLE_DATASET",
         filters=[TimeRangeFilter(
             filter_id="filter-l2ft-rails-date",
@@ -745,7 +745,7 @@ def _populate_chains_sheet(
         default=DateTimeDefaultValues(StaticValues=[_DATE_END_STATIC]),
     ))
     fg_date = analysis.add_filter_group(FilterGroup(
-        filter_group_id="fg-l2ft-chains-date",  # type: ignore[arg-type]
+        filter_group_id="fg-l2ft-chains-date",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         cross_dataset="SINGLE_DATASET",
         filters=[TimeRangeFilter(
             filter_id="filter-l2ft-chains-date",
@@ -901,7 +901,7 @@ def _populate_transfer_templates_sheet(
         default=DateTimeDefaultValues(StaticValues=[_DATE_END_STATIC]),
     ))
     fg_date = analysis.add_filter_group(FilterGroup(
-        filter_group_id="fg-l2ft-tt-date",  # type: ignore[arg-type]
+        filter_group_id="fg-l2ft-tt-date",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         cross_dataset="ALL_DATASETS",
         filters=[TimeRangeFilter(
             filter_id="filter-l2ft-tt-date",
@@ -1100,7 +1100,7 @@ def _wire_l2ft_drill_filter_groups(
         ),
     ))
     fg_rail = analysis.add_filter_group(FilterGroup(
-        filter_group_id="fg-l2ft-drill-rail-on-postings",  # type: ignore[arg-type]
+        filter_group_id="fg-l2ft-drill-rail-on-postings",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         cross_dataset="SINGLE_DATASET",
         filters=[CategoryFilter.with_literal(
             filter_id="filter-fg-l2ft-drill-rail-on-postings",
@@ -1123,7 +1123,7 @@ def _wire_l2ft_drill_filter_groups(
         ),
     ))
     fg_chain = analysis.add_filter_group(FilterGroup(
-        filter_group_id="fg-l2ft-drill-chain-on-instances",  # type: ignore[arg-type]
+        filter_group_id="fg-l2ft-drill-chain-on-instances",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         cross_dataset="SINGLE_DATASET",
         filters=[CategoryFilter.with_literal(
             filter_id="filter-fg-l2ft-drill-chain-on-instances",
@@ -1156,7 +1156,7 @@ def _l2ft_drill(
         target_sheet=target_sheet,
         writes=full_writes,
         name=name,
-        trigger=trigger,  # type: ignore[arg-type]
+        trigger=trigger,  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
     )
 
 

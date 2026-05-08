@@ -1,6 +1,6 @@
 """X.2.o.5 — custom AST lint catching typing smells pyright doesn't flag.
 
-Three checks today, all extensible — drop a new ``Check`` into
+Four checks today, all extensible — drop a new ``Check`` into
 ``CHECKS`` and the runner picks it up:
 
 - **bare-str-id** — function parameters named like ID identifiers
@@ -25,6 +25,16 @@ Three checks today, all extensible — drop a new ``Check`` into
   validation + the operator-facing ``EnvVarRequired`` /
   ``EnvVarInvalid`` errors. Whitelist: the registry itself + its
   unit test.
+
+- **why-comment** (Y.2.gate.b.15.lint.why-comment) — bare
+  ``# type: ignore`` / ``# pyright: ignore`` /
+  ``# typing-smell: ignore`` suppressions without a one-line
+  reason. Every suppression is a small assertion that the
+  surrounding code is actually fine; future-you needs the WHY to
+  decide whether the suppression still holds. Required form:
+  ``# <kind>: ignore[<code>]: <reason — 3+ words after the colon>``.
+  Escape hatch: append ``# bare-suppression-ok`` to the same line
+  for the rare cases where the error code itself is the reason.
 
 Suppression
 -----------
@@ -343,6 +353,97 @@ class EnvVarBypassCheck(Check):
 
 
 # ---------------------------------------------------------------------------
+# Check: why-comment (Y.2.gate.b.15.lint.why-comment)
+# ---------------------------------------------------------------------------
+
+
+# Match a suppression marker: ``# <kind>: ignore[code]`` or ``# <kind>: ignore``.
+# Captures the optional ``[code]`` group + the trailing remainder of the line
+# so we can scan the remainder for a ``: <3+ words>`` reason.
+_SUPPRESSION_RE = re.compile(
+    r"#\s*(?P<kind>type|pyright|typing-smell):\s*ignore"
+    r"(?P<code>\[[^\]]+\])?(?P<rest>.*)$"
+)
+
+# A "reason" is a colon followed by 3+ whitespace-separated word-ish tokens
+# anywhere in the trailing remainder of the line. Words are letter / digit /
+# punctuation runs (what split() yields); we only care about count, not
+# semantics. 3 keeps "yes." / "fine." / "x y" from passing.
+_REASON_MIN_WORDS = 3
+
+# Magic comment that opts a single line out of the why-comment check.
+# Reserved for cases where the error code itself is self-explanatory (rare).
+_BARE_OK_RE = re.compile(r"#\s*bare-suppression-ok\b")
+
+
+def _has_reason(rest: str) -> bool:
+    """True iff ``rest`` (text after ``ignore[code]``) contains a
+    colon followed by ``_REASON_MIN_WORDS`` or more words.
+
+    Accepts forms like::
+
+        : psycopg sync cursor type
+        : third-party library lacks PEP 561 stubs (X.2.o.5)
+
+    Rejects bare ``]``-terminated suppressions and stub one-word reasons
+    like ``: ok``.
+    """
+    idx = rest.find(":")
+    if idx < 0:
+        return False
+    after = rest[idx + 1:].strip()
+    # Drop any trailing ``# bare-suppression-ok`` or other comments on the
+    # same line — they're not part of the reason text.
+    if "#" in after:
+        after = after.split("#", 1)[0].strip()
+    if not after:
+        return False
+    # Count whitespace-separated tokens. Punctuation-only tokens still count
+    # toward 3 — the rule is about there being prose, not about lexical
+    # purity.
+    return len(after.split()) >= _REASON_MIN_WORDS
+
+
+class WhyCommentCheck(Check):
+    """Comment-scan (NOT AST): every ``# *: ignore[*]`` needs a reason.
+
+    Walks each file as text — suppression markers are comments, so AST
+    walks miss them entirely. The unsuppressed-suppression test for
+    suppressions; recursive but tractable.
+    """
+
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        out: list[Smell] = []
+        for lineno, line in enumerate(src.splitlines(), start=1):
+            m = _SUPPRESSION_RE.search(line)
+            if m is None:
+                continue
+            # Per-line escape hatch: ``# bare-suppression-ok`` on the same
+            # line opts out (sparingly — error code IS the reason).
+            if _BARE_OK_RE.search(line):
+                continue
+            rest = m.group("rest") or ""
+            if _has_reason(rest):
+                continue
+            kind = m.group("kind")
+            code = m.group("code") or ""
+            out.append(Smell(
+                file=file,
+                lineno=lineno,
+                checker="why-comment",
+                message=(
+                    f"bare ``{kind}: ignore{code}`` with no WHY — append "
+                    f"``: <3+ word reason>`` after the closing ``]`` "
+                    f"explaining why the suppression is principled. "
+                    f"For the rare case where the error code itself IS "
+                    f"the reason, append ``# bare-suppression-ok`` to "
+                    f"the same line."
+                ),
+            ))
+        return out
+
+
+# ---------------------------------------------------------------------------
 # Suppression filtering
 # ---------------------------------------------------------------------------
 
@@ -419,6 +520,19 @@ def _build_checks() -> list[Check]:
         if p.name != "env_keys.py"
         and p.name != "test_env_keys.py"
     ]
+    # why-comment spans the same src/ + tests/ surface as envvar-bypass.
+    # Whitelist the lint module itself (its docstring shows example
+    # suppression syntax that would self-flag) and the env_keys test
+    # (defensive — its negative tests don't currently use suppression
+    # markers, but keep parity with envvar-bypass's exclusions).
+    why_comment_scope = [
+        p for p in (
+            _expand_paths([REPO_ROOT / "src/quicksight_gen"])
+            + _expand_paths([REPO_ROOT / "tests"])
+        )
+        if p.name != "test_typing_smells.py"
+        and p.name != "test_env_keys.py"
+    ]
     return [
         BareStrIdCheck(
             name="bare-str-id",
@@ -445,6 +559,16 @@ def _build_checks() -> list[Check]:
                 "common/env_keys.py instead"
             ),
             files=envvar_scope,
+        ),
+        WhyCommentCheck(
+            name="why-comment",
+            description=(
+                "every ``# type: ignore`` / ``# pyright: ignore`` / "
+                "``# typing-smell: ignore`` must end with ``: <3+ word "
+                "reason>`` explaining why the suppression is principled "
+                "(escape hatch: ``# bare-suppression-ok`` on the same line)"
+            ),
+            files=why_comment_scope,
         ),
     ]
 

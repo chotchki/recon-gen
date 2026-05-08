@@ -337,8 +337,8 @@ def _expand_role_expr(expr: object) -> tuple[str, ...]:
     """
     if isinstance(expr, tuple):
         return tuple(
-            str(e)  # type: ignore[reportUnknownArgumentType]
-            for e in expr  # type: ignore[reportUnknownVariableType]
+            str(e)  # type: ignore[reportUnknownArgumentType]: expr is recursive Identifier-or-tuple; e is Identifier here
+            for e in expr  # type: ignore[reportUnknownVariableType]: expr is recursive Identifier-or-tuple; e is Identifier here
         )
     return (str(expr),)
 
@@ -710,7 +710,7 @@ def _check_variable_leg_count_per_template(inst: L2Instance) -> None:
             n for n in t.leg_rails
             if isinstance(rails_by_name.get(n), SingleLegRail)
             and isinstance(rails_by_name[n], SingleLegRail)
-            and rails_by_name[n].leg_direction == "Variable"  # type: ignore[union-attr]
+            and rails_by_name[n].leg_direction == "Variable"  # type: ignore[union-attr]: narrowed by the prior isinstance(..., SingleLegRail) check
         ]
         if len(variable_legs) > 1:
             raise L2ValidationError(

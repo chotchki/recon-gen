@@ -88,7 +88,7 @@ def app2() -> None:
         "tree fetcher. More apps land at X.2.g.{3,4}."
     ),
 )
-def app2_apply(  # type: ignore[no-untyped-def]
+def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the function-decorator return type
     config,
     l2_instance_path,
     host: str,

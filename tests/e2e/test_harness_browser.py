@@ -94,7 +94,7 @@ def _patch_boto3_client(
         return fake_client
 
     monkeypatch.setattr("boto3.client", _fake_boto3_client)
-    fake_client._captured_regions = captured_regions  # type: ignore[attr-defined]
+    fake_client._captured_regions = captured_regions  # type: ignore[attr-defined]: monkey-patching test-only attr onto the fake
     return fake_client
 
 

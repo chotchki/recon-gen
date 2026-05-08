@@ -228,7 +228,7 @@ def _copy_tree(src: Path, dst: Path) -> int:
     return sum(1 for p in dst.rglob("*") if p.is_file())
 
 
-def _build_app_for_screenshots(app_slug: str, cfg, l2_instance):  # type: ignore[no-untyped-def]
+def _build_app_for_screenshots(app_slug: str, cfg, l2_instance):  # type: ignore[no-untyped-def]: cfg/l2_instance untyped pending CLI-wide sweep
     """Import + call the builder for ``app_slug``; resolve auto-IDs."""
     import importlib
     mod_path, fn_name, _subdir = SCREENSHOT_APPS[app_slug]
@@ -247,7 +247,7 @@ def _warm_db_for_screenshots(database_url: str) -> None:
     'We can't open that dashboard' on the first walk."""
     scheme = (database_url.split("://", 1)[0] or "").lower()
     if scheme.startswith("oracle"):
-        import oracledb  # type: ignore[import-untyped]
+        import oracledb  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
         try:
             conn = oracledb.connect(database_url.split("://", 1)[1])
         except Exception as exc:  # pragma: no cover — env-specific

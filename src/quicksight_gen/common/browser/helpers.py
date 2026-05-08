@@ -120,7 +120,7 @@ def generate_dashboard_embed_url(
     # an enormous Literal-overload set whose type pyright reports as
     # "partially unknown". The ignore is for THAT specific complaint;
     # the resolved RHS type is fully typed.
-    qs: QuickSightClient = boto3.client(  # pyright: ignore[reportUnknownMemberType]
+    qs: QuickSightClient = boto3.client(  # pyright: ignore[reportUnknownMemberType]: boto3-stubs huge overload union confuses pyright (X.2.o.5)
         "quicksight", region_name=aws_region,
     )
     resp = qs.generate_embed_url_for_registered_user(
@@ -261,11 +261,11 @@ def _stop_and_maybe_save_trace(context: object, *, failed: bool) -> None:
     try:
         if should_save:
             trace_dir = (
-                Path(run_dir) / "browser" / _test_id_from_pytest_env()  # type: ignore[arg-type]
+                Path(run_dir) / "browser" / _test_id_from_pytest_env()  # type: ignore[arg-type]: run_dir narrowed truthy by the bool() above
             )
             trace_dir.mkdir(parents=True, exist_ok=True)
             zip_path = trace_dir / "trace.zip"
-            context.tracing.stop(path=str(zip_path))  # type: ignore[attr-defined]
+            context.tracing.stop(path=str(zip_path))  # type: ignore[attr-defined]: Playwright duck-typed tracing API
             try:
                 # Extract for grepability — sibling "trace/" dir.
                 # ZIP slip not a concern: Playwright generates the
@@ -276,7 +276,7 @@ def _stop_and_maybe_save_trace(context: object, *, failed: bool) -> None:
             except Exception:
                 pass
         else:
-            context.tracing.stop()  # type: ignore[attr-defined]
+            context.tracing.stop()  # type: ignore[attr-defined]: Playwright duck-typed tracing API
     except Exception:
         pass
 

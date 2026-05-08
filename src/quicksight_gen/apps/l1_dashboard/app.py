@@ -1607,7 +1607,7 @@ def _wire_date_range_filter(
     ) -> None:
         ds = datasets[dataset_key]
         fg = analysis.add_filter_group(FilterGroup(
-            filter_group_id=fg_id,  # type: ignore[arg-type]
+            filter_group_id=fg_id,  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
             cross_dataset="SINGLE_DATASET",
             filters=[TimeRangeFilter(
                 filter_id=f"filter-{fg_id}",
@@ -1713,8 +1713,8 @@ def _wire_per_sheet_dropdowns(
             select_all_options="FILTER_ALL_VALUES",
         )
         fg = analysis.add_filter_group(FilterGroup(
-            filter_group_id=fg_id,  # type: ignore[arg-type]
-            cross_dataset=cross_dataset,  # type: ignore[arg-type]
+            filter_group_id=fg_id,  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
+            cross_dataset=cross_dataset,  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
             filters=[cat_filter],
         ))
         fg.scope_sheet(sheet)
@@ -1898,7 +1898,7 @@ def _wire_daily_statement_filters(
 
     # Summary dataset: account_id + business_day_start.
     summary_account_fg = analysis.add_filter_group(FilterGroup(
-        filter_group_id="fg-l1-ds-summary-account",  # type: ignore[arg-type]
+        filter_group_id="fg-l1-ds-summary-account",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         cross_dataset="SINGLE_DATASET",
         filters=[CategoryFilter.with_parameter(
             filter_id="filter-l1-ds-summary-account",
@@ -1910,7 +1910,7 @@ def _wire_daily_statement_filters(
     summary_account_fg.scope_sheet(daily_statement_sheet)
 
     summary_date_fg = analysis.add_filter_group(FilterGroup(
-        filter_group_id="fg-l1-ds-summary-date",  # type: ignore[arg-type]
+        filter_group_id="fg-l1-ds-summary-date",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         cross_dataset="SINGLE_DATASET",
         filters=[TimeEqualityFilter(
             filter_id="filter-l1-ds-summary-date",
@@ -1925,7 +1925,7 @@ def _wire_daily_statement_filters(
     # Transactions dataset: account_id + business_day (DATE_TRUNC of
     # posting); same parameter-bound shape.
     txn_account_fg = analysis.add_filter_group(FilterGroup(
-        filter_group_id="fg-l1-ds-txn-account",  # type: ignore[arg-type]
+        filter_group_id="fg-l1-ds-txn-account",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         cross_dataset="SINGLE_DATASET",
         filters=[CategoryFilter.with_parameter(
             filter_id="filter-l1-ds-txn-account",
@@ -1937,7 +1937,7 @@ def _wire_daily_statement_filters(
     txn_account_fg.scope_sheet(daily_statement_sheet)
 
     txn_date_fg = analysis.add_filter_group(FilterGroup(
-        filter_group_id="fg-l1-ds-txn-date",  # type: ignore[arg-type]
+        filter_group_id="fg-l1-ds-txn-date",  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         cross_dataset="SINGLE_DATASET",
         filters=[TimeEqualityFilter(
             filter_id="filter-l1-ds-txn-date",
@@ -2015,7 +2015,7 @@ def _l1_drill(
         target_sheet=target_sheet,
         writes=full_writes,
         name=name,
-        trigger=trigger,  # type: ignore[arg-type]
+        trigger=trigger,  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
         action_id=action_id,
     )
 
@@ -2118,7 +2118,7 @@ def _wire_drill_filter_groups(
             ),
         ))
         fg = analysis.add_filter_group(FilterGroup(
-            filter_group_id=spec.fg_id,  # type: ignore[arg-type]
+            filter_group_id=spec.fg_id,  # type: ignore[arg-type]: bare literal pending typed-ID wrap (X.2.o.3 sweep deferred)
             cross_dataset="SINGLE_DATASET",
             filters=[CategoryFilter.with_literal(
                 filter_id=f"filter-{spec.fg_id}",

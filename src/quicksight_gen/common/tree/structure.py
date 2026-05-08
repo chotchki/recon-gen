@@ -102,12 +102,12 @@ def _resolve_field_ids(
         slot: object = getattr(visual, attr, None)
         if slot is None:
             continue
-        leaves: list[object] = list(slot) if isinstance(slot, list) else [slot]  # type: ignore[arg-type]
+        leaves: list[object] = list(slot) if isinstance(slot, list) else [slot]  # type: ignore[arg-type]: list(object) is list of leaves; slot narrowed by isinstance
         for slot_idx, leaf in enumerate(leaves):
             if leaf is None:
                 continue
             if isinstance(getattr(leaf, "field_id", None), _AutoSentinel):
-                leaf.field_id = auto_id(  # type: ignore[attr-defined]
+                leaf.field_id = auto_id(  # type: ignore[attr-defined]: leaf is one of many typed visual-field shapes (CalcField/Aggregated/etc.); all carry field_id
                     f"f-{visual_kind}-s{sheet_idx}-v{visual_idx}-{role}{slot_idx}"
                 )
 
@@ -1689,7 +1689,7 @@ class App:
                     if slot is None:
                         continue
                     leaves: list[object] = (
-                        list(slot) if isinstance(slot, list)  # type: ignore[arg-type]
+                        list(slot) if isinstance(slot, list)  # type: ignore[arg-type]: list(object) is list of leaves; slot narrowed by isinstance
                         else [slot]
                     )
                     for leaf in leaves:

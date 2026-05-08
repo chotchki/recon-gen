@@ -264,7 +264,7 @@ def _load_scope(raw: object, *, path: str) -> Scope:
         raise L2LoaderError(
             f"{path}={raw!r}: scope must be 'internal' or 'external'"
         )
-    return raw  # type: ignore[return-value]
+    return raw  # type: ignore[return-value]: narrowed by the membership check above; Literal not inferrable
 
 
 def _load_leg_direction(raw: object, *, path: str) -> LegDirection:
@@ -273,7 +273,7 @@ def _load_leg_direction(raw: object, *, path: str) -> LegDirection:
             f"{path}={raw!r}: leg_direction must be 'Debit', 'Credit', "
             f"or 'Variable'"
         )
-    return raw  # type: ignore[return-value]
+    return raw  # type: ignore[return-value]: narrowed by the membership check above; Literal not inferrable
 
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")

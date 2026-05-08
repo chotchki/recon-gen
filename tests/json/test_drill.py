@@ -122,4 +122,4 @@ class TestSetDrillParametersValidators:
         well-typed code; the runtime guard catches the bypass."""
         p = self._param("pX")
         with pytest.raises(TypeError, match="Unsupported drill write value"):
-            set_drill_parameters((p, "bare string"))  # type: ignore[arg-type]
+            set_drill_parameters((p, "bare string"))  # type: ignore[arg-type]: deliberately invalid arg for the negative-path test

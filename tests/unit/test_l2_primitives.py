@@ -130,7 +130,7 @@ def test_primitives_are_frozen() -> None:
     """Frozen dataclasses prevent accidental mutation of an L2 instance."""
     inst = _example_instance()
     with pytest.raises(Exception):
-        inst.accounts[0].id = Identifier("oops")  # type: ignore[misc]
+        inst.accounts[0].id = Identifier("oops")  # type: ignore[misc]: deliberate frozen-dataclass mutation for the negative-path test
 
 
 def test_aggregating_flag_optional_on_both_rail_shapes() -> None:
