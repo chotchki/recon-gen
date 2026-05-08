@@ -114,6 +114,12 @@ For demo mode against Oracle 19c+ (requires `oracledb` thin mode — no Oracle I
 pip install "quicksight-gen[demo,demo-oracle]"
 ```
 
+For demo mode against SQLite 3.38+ (no extra install — uses stdlib `sqlite3` + the JSON1 functions that ship built-in since 3.38):
+
+```bash
+pip install quicksight-gen
+```
+
 ### Setup from source
 
 The repo uses [uv](https://docs.astral.sh/uv/) for env / lock management
@@ -172,13 +178,15 @@ extra_tags:
   Team: finance
 
 # Optional: which database family for `data apply --execute` (default: postgres)
-# dialect: "postgres"   # or "oracle"
+# dialect: "postgres"   # or "oracle" or "sqlite"
 
 # Optional: database URL for `data apply --execute` and friends
 # Postgres:
 # demo_database_url: "postgresql://user:pass@localhost:5432/quicksight_demo"
 # Oracle (Easy Connect form, no scheme prefix):
 # demo_database_url: "system/pass@localhost:1521/FREEPDB1"
+# SQLite (file or in-memory; integrator-local iteration loop, no server):
+# demo_database_url: "sqlite:///./demo.sqlite"
 ```
 
 > Theme is declared inline on the L2 institution YAML's `theme:` block, not on the deploy config. When the L2 instance carries no `theme:` block, AWS QuickSight CLASSIC takes over at deploy.
@@ -247,7 +255,7 @@ quicksight-gen audit apply  -c config.yaml --execute -o report.pdf  # regulator-
 
 `schema apply --execute` creates the per-prefix base tables + matviews via `common/l2/schema.py::emit_schema(l2_instance)`. `data apply --execute` inserts the L2-shape seed data (90-day baseline + every L1 SHOULD-violation plant + the Investigation fanout / volume / chain plants). `data refresh --execute` refreshes every dependent matview in dependency order. `json apply --execute` writes a `datasource.json` derived from the database URL (Type=`POSTGRESQL` or `ORACLE`, dispatched off `dialect`), generates all QuickSight JSON to `out/`, and deploys to AWS. `audit apply --execute` queries the per-prefix L1 invariant matviews and writes a regulator-ready PDF reconciliation report (cover, executive summary, per-invariant violation tables, per-account-day Daily Statement walks, sign-off block, cryptographic provenance fingerprint) — see the [Audit Reconciliation Report handbook](https://chotchki.github.io/Quicksight-Generator/handbook/audit/) for the full reference. The `account_type` and `transfer_type` columns discriminate which app a row belongs to. See [`Schema_v6.md`](src/quicksight_gen/docs/Schema_v6.md) for the full feed contract, canonical type values, metadata key catalog, and ETL examples.
 
-**PostgreSQL 17+ or Oracle 19c+ required** for `schema apply --execute`. Both engines support the SQL/JSON path syntax (`JSON_VALUE`, `JSON_QUERY`, `JSON_EXISTS`) the schema uses for `metadata` JSON columns. The portable subset forbids the Postgres-only `->>` / `->` / `@>` / `?` operators and JSONB; on Oracle, also no named `WINDOW` clause and no `TIMESTAMP WITH TIME ZONE` in PK columns. See `Schema_v6.md` → Forbidden SQL patterns for the full constraint matrix.
+**PostgreSQL 17+, Oracle 19c+, or SQLite 3.38+ required** for `schema apply --execute`. PG + Oracle support the SQL/JSON path syntax (`JSON_VALUE`, `JSON_QUERY`, `JSON_EXISTS`) the schema uses for `metadata` JSON columns; SQLite uses the equivalent JSON1 functions (`json_extract`, `json_valid`) routed through the dialect helpers in `common/sql/dialect.py`. The portable subset forbids the Postgres-only `->>` / `->` / `@>` / `?` operators and JSONB; on Oracle, also no named `WINDOW` clause and no `TIMESTAMP WITH TIME ZONE` in PK columns; on SQLite, matviews emit as `CREATE TABLE … AS SELECT` (refreshed by re-CREATE). See `Schema_v6.md` → Forbidden SQL patterns for the full constraint matrix.
 
 Datasets are all Direct Query (no SPICE), so seed changes show up immediately after a fresh `data apply --execute` + `data refresh --execute` — no QuickSight-side refresh needed.
 

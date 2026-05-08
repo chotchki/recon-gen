@@ -17,7 +17,7 @@ The customer doesn't know exactly what they want yet. Everything is generated fr
 - **Entry point**: `python -m quicksight_gen` or `quicksight-gen` (installed script)
 - **CLI framework**: Click
 - **Output**: JSON files in `out/` (theme, per-app analysis/dashboard, datasets, optional datasource)
-- **Dialects**: PostgreSQL 17+ and Oracle 19c+. SQL emitters branch on `Dialect` enum (`common/sql/dialect.py`).
+- **Dialects**: PostgreSQL 17+, Oracle 19c+, and SQLite 3.38+. SQL emitters branch on `Dialect` enum (`common/sql/dialect.py`); SQLite uses JSON1 functions in place of SQL/JSON `JSON_VALUE` (via the `json_value` helper) and matviews emit as `CREATE TABLE … AS SELECT` (refresh = re-CREATE).
 
 ## Commands
 
@@ -54,7 +54,23 @@ quicksight-gen data refresh -c config.yaml --execute
 quicksight-gen audit apply -c config.yaml --execute -o report.pdf
 quicksight-gen audit verify report.pdf -c config.yaml   # recompute + compare provenance
 
-# Tests
+# Tests — canonical entry is the layered chain runner (Y.2.gate.b/c).
+# Layers: unit → db → app2 → deploy → api → browser. Stops on first
+# failure; per-layer artifacts (cmd.json, stdout.log, stderr.log) land
+# under runs/<utc-ts>-<short-sha>/<layer>/. Variants run in parallel
+# via asyncio.gather — local-pg / local-oracle spin testcontainers,
+# local-sqlite is no-Docker temp file.
+./run_tests.sh up_to=unit                                  # ~20s, no DB / no AWS
+./run_tests.sh up_to=db                                    # default variant = operator's external Aurora
+./run_tests.sh up_to=db --variants=local-pg                # 17-alpine container, ~30s wall
+./run_tests.sh up_to=db --variants=local-pg,local-oracle,local-sqlite  # all three in parallel
+./run_tests.sh up_to=app2 --variants=local-pg              # App2 e2e against local Docker (b.3.impl.layer)
+./run_tests.sh up_to=db --parallel=4                       # pytest-xdist within layer
+./run_tests.sh up_to=db --skip-cheap                       # skip unit if cached green for current SHA
+./run_tests.sh sweep                                       # dry-run cleanup of orphan AWS resources
+./run_tests.sh sweep --yes                                 # actual cleanup
+
+# Legacy direct invocations (still work; runner is the new canonical path)
 pytest                              # unit + integration, fast, no AWS
 ./run_e2e.sh                        # regenerate + deploy 4 apps + e2e (pytest-xdist -n 4)
 ./run_e2e.sh --parallel 8           # override worker count (1 = serial; ceiling ~8)
