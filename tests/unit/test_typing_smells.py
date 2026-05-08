@@ -54,6 +54,13 @@ Four checks today, all extensible — drop a new ``Check`` into
   break ``cleanup``. Tests can freely use ``boto3.client`` (scope
   is src/ only).
 
+- **qs-gen-prefix** (Y.2.gate.b.15.lint.qs-gen-prefix) — hardcoded
+  ``"qs-gen-..."`` string literals in src code outside
+  ``common/config.py``. Resource IDs flow through
+  ``cfg.prefixed(name)`` which weaves in the L2 instance prefix;
+  bypassing it (``f"qs-gen-foo"`` direct) defeats multi-tenant
+  scoping. Docstrings are ignored.
+
 Suppression
 -----------
 
@@ -580,6 +587,68 @@ class Boto3DirectCheck(Check):
 
 
 # ---------------------------------------------------------------------------
+# Check: qs-gen-prefix (Y.2.gate.b.15.lint.qs-gen-prefix)
+# ---------------------------------------------------------------------------
+
+
+_QS_GEN_PREFIX_RE = re.compile(r"^qs-gen[\-_]")
+
+
+def _docstring_node_ids(tree: ast.AST) -> set[int]:
+    """Collect ``id()`` of Constant nodes that are docstrings — the
+    string at body[0] of a Module / ClassDef / FunctionDef /
+    AsyncFunctionDef. Used to skip docstrings in pure-string lints."""
+    out: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef,
+                              ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = getattr(node, "body", None)
+            if body and isinstance(body[0], ast.Expr) and \
+                    isinstance(body[0].value, ast.Constant) and \
+                    isinstance(body[0].value.value, str):
+                out.add(id(body[0].value))
+    return out
+
+
+class _QsGenPrefixVisitor(ast.NodeVisitor):
+    """Walk Constant string nodes; flag ``qs-gen-...`` literals
+    (excluding docstrings)."""
+
+    def __init__(self, file: Path, docstring_ids: set[int]) -> None:
+        self.file = file
+        self.docstring_ids = docstring_ids
+        self.smells: list[Smell] = []
+
+    def visit_Constant(self, node: ast.Constant) -> None:
+        if not isinstance(node.value, str):
+            return
+        if id(node) in self.docstring_ids:
+            return
+        if _QS_GEN_PREFIX_RE.match(node.value):
+            self.smells.append(Smell(
+                file=self.file,
+                lineno=node.lineno,
+                checker="qs-gen-prefix",
+                message=(
+                    f"hardcoded ``qs-gen-`` resource-prefix string "
+                    f"({node.value!r}) — use ``cfg.prefixed(<name>)`` "
+                    f"so the L2 instance prefix is woven in. Direct "
+                    f"``f\"qs-gen-foo\"`` defeats multi-tenant scoping. "
+                    f"Suppress with ``# typing-smell: ignore"
+                    f"[qs-gen-prefix]: <reason>`` if intentional."
+                ),
+            ))
+
+
+class QsGenPrefixCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        docstring_ids = _docstring_node_ids(tree)
+        v = _QsGenPrefixVisitor(file, docstring_ids)
+        v.visit(tree)
+        return v.smells
+
+
+# ---------------------------------------------------------------------------
 # Suppression filtering
 # ---------------------------------------------------------------------------
 
@@ -738,6 +807,20 @@ def _build_checks() -> list[Check]:
                 and p != REPO_ROOT / "src/quicksight_gen/common/cleanup.py"
                 and p != REPO_ROOT / "src/quicksight_gen/common/browser/helpers.py"
                 and p != REPO_ROOT / "src/quicksight_gen/_dev/runner.py"
+            ],
+        ),
+        QsGenPrefixCheck(
+            name="qs-gen-prefix",
+            description=(
+                "hardcoded ``qs-gen-...`` resource-prefix literal in "
+                "src code — use ``cfg.prefixed(<name>)`` so the L2 "
+                "instance prefix is woven in (multi-tenant scoping)"
+            ),
+            files=[
+                p for p in _expand_paths(
+                    [REPO_ROOT / "src/quicksight_gen"]
+                )
+                if p != REPO_ROOT / "src/quicksight_gen/common/config.py"
             ],
         ),
     ]
