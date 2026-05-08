@@ -738,9 +738,20 @@ def setup_variant(name: str) -> tuple[dict[str, str], object | None]:
         # Pin to the exact PG version we run in production (Aurora 17).
         container = PostgresContainer("postgres:17-alpine")
         container.start()
-        url: str = container.get_connection_url()  # type: ignore[no-untyped-call]
-        return {"QS_GEN_DEMO_DATABASE_URL": url}, container
+        raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]
+        return {"QS_GEN_DEMO_DATABASE_URL": _normalize_pg_url(raw_url)}, container
     raise ValueError(f"setup_variant: unknown variant {name!r}")
+
+
+def _normalize_pg_url(raw_url: str) -> str:
+    """testcontainers-python returns SQLAlchemy-style URLs
+    (``postgresql+psycopg2://...``) by default, but ``connect_demo_db``
+    uses psycopg3 directly which rejects the ``+psycopg2`` driver
+    suffix (``missing "=" after "..."`` from libpq's conninfo
+    parser). Strip the suffix so the URL is the plain libpq form
+    psycopg accepts.
+    """
+    return raw_url.replace("postgresql+psycopg2://", "postgresql://", 1)
 
 
 def teardown_variant(handle: object | None) -> None:
@@ -754,6 +765,110 @@ def teardown_variant(handle: object | None) -> None:
     except Exception:  # noqa: BLE001
         # Sidecar contract — never break the chain on teardown.
         pass
+
+
+# Y.2.gate.b.2.impl.schema — non-default variants spin up empty
+# containers; the db layer (and downstream layers) need the schema
+# applied + data seeded + matviews refreshed before tests can run.
+# Cfg discovery priority for local-pg: QS_GEN_CONFIG env override
+# wins (operator pin), else run/config.postgres.yaml (PG-dialect cfg
+# the container expects). run/config.yaml is intentionally skipped —
+# it may be Oracle-flavored, which doesn't match a Postgres container.
+_LOCAL_PG_CFG_CANDIDATES: Final = (
+    "run/config.postgres.yaml",
+)
+
+
+def _resolve_seed_config_for_local_pg() -> Path | None:
+    """Y.2.gate.b.2.impl.schema — find a postgres-dialect cfg the
+    seed CLI verbs (`schema apply` / `data apply` / `data refresh`)
+    can use against the local-pg container. Returns None if nothing
+    matches; caller surfaces the failure with operator-actionable
+    guidance.
+    """
+    explicit = os.environ.get("QS_GEN_CONFIG")
+    if explicit:
+        candidate = Path(explicit)
+        if candidate.is_absolute():
+            return candidate if candidate.exists() else None
+        resolved = REPO_ROOT / candidate
+        return resolved if resolved.exists() else None
+    for relative in _LOCAL_PG_CFG_CANDIDATES:
+        candidate = REPO_ROOT / relative
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def seed_variant(name: str, env_overrides: dict[str, str]) -> None:
+    """Y.2.gate.b.2.impl.schema — bootstrap the variant's DB so the
+    db / deploy / api / browser layers have something to query.
+
+    For ``default``: no-op (the operator's external Aurora / Oracle
+    is presumed already seeded). For ``local-pg``: spawns three CLI
+    subprocesses in dependency order against the container URL:
+
+        1. ``quicksight-gen schema apply --execute -c <cfg> [--l2 <yaml>]``
+           — creates base tables, Current* views, L1 invariant
+           matviews, Investigation matviews.
+        2. ``quicksight-gen data apply --execute -c <cfg> [--l2 <yaml>]``
+           — runs the full emit_full_seed pipeline (90-day baseline +
+           per-Rail densified plants + broken-rail plants + fanout
+           boost).
+        3. ``quicksight-gen data refresh --execute -c <cfg> [--l2 <yaml>]``
+           — REFRESH MATERIALIZED VIEW so matviews see seeded rows
+           (they don't auto-refresh — see CLAUDE.md operational
+           footguns).
+
+    ``env_overrides`` (typically ``{"QS_GEN_DEMO_DATABASE_URL":
+    "<container-url>"}``) flows to each subprocess; ``load_config``
+    in the subprocess picks up the env override (config.py:364) and
+    writes against the container instead of the cfg-file URL.
+
+    L2 instance follows the same `QS_GEN_TEST_L2_INSTANCE` env
+    override the rest of the e2e suite respects; absent that, the CLI
+    defaults to bundled spec_example.
+
+    Raises ``RuntimeError`` on cfg-discovery failure or any subprocess
+    non-zero exit. Caller (cmd_up_to) catches + maps to
+    EXIT_NEEDS_OPERATOR; teardown still runs via the surrounding
+    try/finally.
+    """
+    if name == "default":
+        return
+    if name != "local-pg":
+        raise ValueError(f"seed_variant: unknown variant {name!r}")
+
+    cfg_path = _resolve_seed_config_for_local_pg()
+    if cfg_path is None:
+        raise RuntimeError(
+            "local-pg variant: no postgres-dialect cfg found "
+            "(checked QS_GEN_CONFIG env, run/config.postgres.yaml). "
+            "Create run/config.postgres.yaml (dialect: postgres) or "
+            "set QS_GEN_CONFIG to a postgres-dialect cfg path."
+        )
+
+    env = {**os.environ, **env_overrides}
+    l2_arg: list[str] = []
+    l2_override = os.environ.get("QS_GEN_TEST_L2_INSTANCE")
+    if l2_override:
+        l2_arg = ["--l2", l2_override]
+
+    seed_steps: tuple[tuple[str, ...], ...] = (
+        ("schema", "apply"),
+        ("data", "apply"),
+        ("data", "refresh"),
+    )
+    cli = str(_VENV_BIN / "quicksight-gen")
+    for step in seed_steps:
+        cmd = [cli, *step, "--execute", "-c", str(cfg_path), *l2_arg]
+        print(f"runner: variant-seed [{name}] {' '.join(cmd)}")
+        result = subprocess.run(cmd, cwd=REPO_ROOT, env=env, check=False)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"variant-seed [{name}] failed at step {' '.join(step)!r} "
+                f"(rc={result.returncode})"
+            )
 
 
 def _is_dirty() -> bool:
@@ -910,6 +1025,20 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     final_code = EXIT_SUCCESS
     layer_results: list[LayerResult] = []
     try:
+        # Y.2.gate.b.2.impl.schema — non-default variants spin up
+        # empty containers; seed schema + data + matview refresh
+        # before the first DB-touching layer dispatches. Skipped
+        # when the chain is unit-only (saves ~30s on type-check
+        # iteration). Wrapped inside the try block so a seed failure
+        # still hits teardown_variant via the finally.
+        if variant != "default" and any(layer in DB_TOUCHING_LAYERS for layer in chain):
+            print(f"runner: variant={variant} seeding (schema apply + data apply + data refresh)...")
+            try:
+                seed_variant(variant, variant_env)
+            except RuntimeError as exc:
+                print(f"runner: variant-seed failed: {exc}", file=sys.stderr)
+                return EXIT_NEEDS_OPERATOR
+
         for layer in chain:
             # Y.2.gate.b.8.impl — `--skip-cheap` short-circuits cheap
             # layers (unit, db) when the current SHA already has a

@@ -1483,3 +1483,342 @@ def test_cache_marker_variant_aware(monkeypatch: Any, tmp_path: Any) -> None:
     assert runner.is_layer_cached_green("unit", variant="local-pg") is False
     assert runner.is_layer_cached_green("db", variant="local-pg") is True
     assert runner.is_layer_cached_green("db", variant="default") is False
+
+
+# Y.2.gate.b.2.impl.schema — seed_variant tests. The variant container
+# starts empty; seed_variant runs schema apply + data apply + data
+# refresh against the container URL before the db layer dispatches.
+
+def test_seed_variant_default_is_no_op() -> None:
+    """`default` variant means external Aurora / Oracle — already
+    seeded by the operator. seed_variant must do nothing."""
+    with patch.object(subprocess, "run") as mock_run:
+        runner.seed_variant("default", {})
+    mock_run.assert_not_called()
+
+
+def test_seed_variant_unknown_raises() -> None:
+    """Typo'd variant name fails loudly. Symmetric with
+    setup_variant's ValueError."""
+    with pytest.raises(ValueError, match="unknown variant"):
+        runner.seed_variant("local-postgress", {})
+
+
+def test_seed_variant_local_pg_runs_three_subprocesses(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    """local-pg seed runs schema apply, data apply, data refresh —
+    in that order, all three with --execute. Order matters: schema
+    creates tables + matviews, data populates source tables, refresh
+    populates matviews from source tables."""
+    cfg = tmp_path / "fake_pg_cfg.yaml"
+    cfg.write_text("dialect: postgres\n")
+    monkeypatch.setattr(
+        runner, "_resolve_seed_config_for_local_pg", lambda: cfg,
+    )
+    monkeypatch.delenv("QS_GEN_TEST_L2_INSTANCE", raising=False)
+
+    captured_cmds: list[list[str]] = []
+    fake = subprocess.CompletedProcess(args=["fake"], returncode=0)
+
+    def capture_cmd(cmd: Any, cwd: Any = None, env: Any = None, check: bool = False) -> Any:
+        captured_cmds.append(list(cmd))
+        return fake
+
+    with patch.object(subprocess, "run", side_effect=capture_cmd):
+        runner.seed_variant("local-pg", {"QS_GEN_DEMO_DATABASE_URL": "x"})
+
+    # Three subprocesses, in order.
+    assert len(captured_cmds) == 3
+    # Each is `quicksight-gen <verb> apply/refresh --execute -c <cfg>`.
+    verbs = [(c[1], c[2]) for c in captured_cmds]
+    assert verbs == [("schema", "apply"), ("data", "apply"), ("data", "refresh")]
+    for cmd in captured_cmds:
+        assert "--execute" in cmd
+        assert "-c" in cmd
+        assert str(cfg) in cmd
+
+
+def test_seed_variant_threads_env_overrides_to_subprocesses(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    """The container URL flows to each subprocess via env. load_config
+    inside the subprocess picks it up via QS_GEN_DEMO_DATABASE_URL
+    env override (config.py:364) and writes against the container."""
+    cfg = tmp_path / "fake_pg_cfg.yaml"
+    cfg.write_text("")
+    monkeypatch.setattr(
+        runner, "_resolve_seed_config_for_local_pg", lambda: cfg,
+    )
+    monkeypatch.delenv("QS_GEN_TEST_L2_INSTANCE", raising=False)
+
+    captured_envs: list[dict[str, str]] = []
+    fake = subprocess.CompletedProcess(args=["fake"], returncode=0)
+
+    def capture_env(cmd: Any, cwd: Any = None, env: Any = None, check: bool = False) -> Any:
+        captured_envs.append(dict(env or {}))
+        return fake
+
+    container_url = "postgresql+psycopg2://test:test@localhost:60455/test"
+    with patch.object(subprocess, "run", side_effect=capture_env):
+        runner.seed_variant("local-pg", {"QS_GEN_DEMO_DATABASE_URL": container_url})
+
+    # Every step sees the override.
+    assert len(captured_envs) == 3
+    for env_seen in captured_envs:
+        assert env_seen.get("QS_GEN_DEMO_DATABASE_URL") == container_url
+
+
+def test_seed_variant_honors_qs_gen_test_l2_instance(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    """`QS_GEN_TEST_L2_INSTANCE` env (already used by tests/e2e/conftest
+    fixtures) flows through as `--l2 <yaml>` so seed + db tests target
+    the same L2 instance. Without the env, the CLI defaults to
+    bundled spec_example."""
+    cfg = tmp_path / "fake_pg_cfg.yaml"
+    cfg.write_text("")
+    l2_yaml = tmp_path / "my_instance.yaml"
+    l2_yaml.write_text("")
+    monkeypatch.setattr(
+        runner, "_resolve_seed_config_for_local_pg", lambda: cfg,
+    )
+    monkeypatch.setenv("QS_GEN_TEST_L2_INSTANCE", str(l2_yaml))
+
+    captured_cmds: list[list[str]] = []
+    fake = subprocess.CompletedProcess(args=["fake"], returncode=0)
+
+    def capture(cmd: Any, cwd: Any = None, env: Any = None, check: bool = False) -> Any:
+        captured_cmds.append(list(cmd))
+        return fake
+
+    with patch.object(subprocess, "run", side_effect=capture):
+        runner.seed_variant("local-pg", {})
+
+    for cmd in captured_cmds:
+        assert "--l2" in cmd
+        assert str(l2_yaml) in cmd
+
+
+def test_seed_variant_local_pg_raises_when_no_cfg_found(
+    monkeypatch: Any,
+) -> None:
+    """No postgres-dialect cfg → operator-actionable RuntimeError, not
+    a confusing subprocess failure 3 layers deep. Surfaces the cfg
+    discovery rules so the operator can fix it in one read."""
+    monkeypatch.setattr(
+        runner, "_resolve_seed_config_for_local_pg", lambda: None,
+    )
+    with pytest.raises(RuntimeError, match="postgres-dialect cfg"):
+        runner.seed_variant("local-pg", {})
+
+
+def test_seed_variant_raises_on_subprocess_failure(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    """Any of schema/data/refresh failing → RuntimeError with the
+    failing step named. Caller (cmd_up_to) catches + maps to
+    EXIT_NEEDS_OPERATOR; teardown still runs via the surrounding
+    try/finally."""
+    cfg = tmp_path / "fake_pg_cfg.yaml"
+    cfg.write_text("")
+    monkeypatch.setattr(
+        runner, "_resolve_seed_config_for_local_pg", lambda: cfg,
+    )
+    monkeypatch.delenv("QS_GEN_TEST_L2_INSTANCE", raising=False)
+
+    fake_fail = subprocess.CompletedProcess(args=["fake"], returncode=1)
+    with patch.object(subprocess, "run", return_value=fake_fail):
+        with pytest.raises(RuntimeError, match="schema"):
+            runner.seed_variant("local-pg", {})
+
+
+def test_resolve_seed_config_explicit_env_override(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    """`QS_GEN_CONFIG` operator override wins over the cfg-candidate
+    list. Mirrors the same env override the e2e suite + cmd_sweep
+    already honor."""
+    cfg = tmp_path / "my_pg.yaml"
+    cfg.write_text("dialect: postgres\n")
+    monkeypatch.setenv("QS_GEN_CONFIG", str(cfg))
+    assert runner._resolve_seed_config_for_local_pg() == cfg
+
+
+def test_resolve_seed_config_explicit_env_missing_returns_none(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    """Operator pointed QS_GEN_CONFIG at a path that doesn't exist —
+    don't silently fall back to a candidate. The override stated
+    intent; respect it (and surface the absence)."""
+    monkeypatch.setenv("QS_GEN_CONFIG", str(tmp_path / "does-not-exist.yaml"))
+    assert runner._resolve_seed_config_for_local_pg() is None
+
+
+def test_resolve_seed_config_falls_back_to_run_postgres(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    """No env override + run/config.postgres.yaml exists at the repo
+    root → return that path. We only check run/config.postgres.yaml
+    here (not run/config.yaml) because run/config.yaml may be Oracle-
+    flavored and won't match a Postgres container."""
+    monkeypatch.delenv("QS_GEN_CONFIG", raising=False)
+    fake_repo = tmp_path / "repo"
+    (fake_repo / "run").mkdir(parents=True)
+    cfg = fake_repo / "run" / "config.postgres.yaml"
+    cfg.write_text("dialect: postgres\n")
+    monkeypatch.setattr(runner, "REPO_ROOT", fake_repo)
+    assert runner._resolve_seed_config_for_local_pg() == cfg
+
+
+def test_cmd_up_to_seeds_variant_when_db_layer_in_chain(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    """cmd_up_to fires seed_variant for non-default variants when the
+    chain includes a DB-touching layer. Parallel to the cache-marker
+    + dispatch-layer wiring — the seed step is gated on chain shape,
+    not just variant choice."""
+    monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(runner, "RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(
+        runner, "setup_variant",
+        lambda name: ({"QS_GEN_DEMO_DATABASE_URL": "x"}, object()),
+    )
+
+    seed_calls: list[tuple[str, dict[str, str]]] = []
+
+    def fake_seed(name: str, env_overrides: dict[str, str]) -> None:
+        seed_calls.append((name, env_overrides))
+
+    monkeypatch.setattr(runner, "seed_variant", fake_seed)
+    monkeypatch.setattr(runner, "teardown_variant", lambda h: None)
+
+    def fake_dispatch(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
+        return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.1)
+
+    monkeypatch.setattr(runner, "dispatch_layer", fake_dispatch)
+    monkeypatch.setattr(runner, "probe_dependencies", lambda layer: [])
+
+    parser = runner._build_parser()
+    args = parser.parse_args(["up_to", "db", "--variants", "local-pg"])
+    rc = runner.cmd_up_to(args)
+    assert rc == runner.EXIT_SUCCESS
+    assert len(seed_calls) == 1
+    assert seed_calls[0][0] == "local-pg"
+    assert seed_calls[0][1] == {"QS_GEN_DEMO_DATABASE_URL": "x"}
+
+
+def test_cmd_up_to_skips_seed_when_chain_is_unit_only(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    """unit-only chain doesn't need a seeded DB — saves ~30s on
+    type-check iteration. The variant container still spins up (so
+    the cache marker semantics stay variant-aware), but no schema /
+    data work is done."""
+    monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(runner, "RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(
+        runner, "setup_variant",
+        lambda name: ({"QS_GEN_DEMO_DATABASE_URL": "x"}, object()),
+    )
+
+    seed_calls: list[str] = []
+    monkeypatch.setattr(
+        runner, "seed_variant",
+        lambda name, env: seed_calls.append(name),
+    )
+    monkeypatch.setattr(runner, "teardown_variant", lambda h: None)
+
+    def fake_dispatch(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
+        return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.1)
+
+    monkeypatch.setattr(runner, "dispatch_layer", fake_dispatch)
+    monkeypatch.setattr(runner, "probe_dependencies", lambda layer: [])
+
+    parser = runner._build_parser()
+    args = parser.parse_args(["up_to", "unit", "--variants", "local-pg"])
+    rc = runner.cmd_up_to(args)
+    assert rc == runner.EXIT_SUCCESS
+    assert seed_calls == []  # never invoked
+
+
+def test_cmd_up_to_skips_seed_for_default_variant(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    """Default variant = external Aurora; operator already seeded.
+    Even when the chain includes db, cmd_up_to skips seed_variant —
+    we'd be double-seeding the operator's external DB otherwise."""
+    monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(runner, "RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(
+        runner, "setup_variant", lambda name: ({}, None),
+    )
+
+    seed_calls: list[str] = []
+    monkeypatch.setattr(
+        runner, "seed_variant",
+        lambda name, env: seed_calls.append(name),
+    )
+    monkeypatch.setattr(runner, "teardown_variant", lambda h: None)
+
+    def fake_dispatch(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
+        return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.1)
+
+    monkeypatch.setattr(runner, "dispatch_layer", fake_dispatch)
+    monkeypatch.setattr(runner, "probe_dependencies", lambda layer: [])
+
+    parser = runner._build_parser()
+    args = parser.parse_args(["up_to", "db"])  # default variant
+    rc = runner.cmd_up_to(args)
+    assert rc == runner.EXIT_SUCCESS
+    assert seed_calls == []
+
+
+def test_normalize_pg_url_strips_psycopg2_driver() -> None:
+    """testcontainers-python returns SQLAlchemy-style URLs
+    (`postgresql+psycopg2://...`) but psycopg3 rejects the driver
+    suffix. Strip it so the URL is plain libpq form."""
+    raw = "postgresql+psycopg2://test:test@localhost:60455/test"
+    assert runner._normalize_pg_url(raw) == "postgresql://test:test@localhost:60455/test"
+
+
+def test_normalize_pg_url_passthrough_when_already_clean() -> None:
+    """A URL that's already in plain libpq form passes through
+    unchanged — idempotent transformation."""
+    clean = "postgresql://user:pw@host:5432/db"
+    assert runner._normalize_pg_url(clean) == clean
+
+
+def test_cmd_up_to_seed_failure_still_runs_teardown(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    """If seed_variant raises, teardown_variant must still fire.
+    Otherwise a failed seed leaves a hot Docker container behind
+    (cost / port conflict / orphan). Symmetric with the existing
+    layer-failure teardown contract."""
+    monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(runner, "RUNS_DIR", tmp_path / "runs")
+    handle = object()
+    monkeypatch.setattr(
+        runner, "setup_variant",
+        lambda name: ({"QS_GEN_DEMO_DATABASE_URL": "x"}, handle),
+    )
+
+    def fail_seed(name: str, env: dict[str, str]) -> None:
+        raise RuntimeError("boom: schema apply died")
+
+    monkeypatch.setattr(runner, "seed_variant", fail_seed)
+
+    teardown_calls: list[object] = []
+    monkeypatch.setattr(
+        runner, "teardown_variant",
+        lambda h: teardown_calls.append(h),
+    )
+    monkeypatch.setattr(runner, "dispatch_layer", lambda *a, **k: None)
+    monkeypatch.setattr(runner, "probe_dependencies", lambda layer: [])
+
+    parser = runner._build_parser()
+    args = parser.parse_args(["up_to", "db", "--variants", "local-pg"])
+    rc = runner.cmd_up_to(args)
+    assert rc == runner.EXIT_NEEDS_OPERATOR
+    assert teardown_calls == [handle]
