@@ -24,4 +24,12 @@ if [ ! -x ".venv/bin/python" ]; then
   exit 1
 fi
 
+# Y.2.gate.h+i.0 — unset env vars the runner derives from cfg. Stale values
+# in the operator's shell would shadow the cfg-injected ones (or confuse
+# triage when "why is the runner using THIS user / profile / L2?" doesn't
+# match what cfg declares). Pre-existing values are never useful: the runner
+# is the sole source of truth for these, populated from cfg.auth.aws_profile,
+# the STS+ListUsers derivation, and cfg.default_l2_instance respectively.
+unset AWS_PROFILE QS_E2E_USER_ARN QS_GEN_TEST_L2_INSTANCE
+
 exec .venv/bin/python -m quicksight_gen._dev.runner "$@"
