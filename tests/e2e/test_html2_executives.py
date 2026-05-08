@@ -222,3 +222,62 @@ def test_account_coverage_sheet_does_emit_filter_form(
         page.wait_for_load_state("networkidle")
         form_count = page.locator('form#filter-form').count()
     assert form_count == 1
+
+
+# Y.2.gate.c.11.app2-server-logs — verify the full dev-log path:
+# JS in browser → POST /log → server's _DEVLOG.info → uvicorn's
+# logging chain → harness FileHandler → $QS_GEN_RUN_DIR/app2/server.log.
+
+def test_dev_log_events_land_in_server_log() -> None:
+    """Spin a separate App2 server with `dev_log=True` so the page
+    emits the `<meta name="dev-log">` tag that activates dev_log.js.
+    The script POSTs `dev-log:ready` immediately on page load (and
+    HTMX events thereafter). Assert the captured server log file
+    contains the forwarded event.
+
+    Skips when `QS_GEN_RUN_DIR` isn't set — there's no log file to
+    assert against in legacy mode (direct pytest invocation). Runs
+    under the runner (`./run_tests.sh up_to=app2 ...`).
+    """
+    import os
+    import time
+    from pathlib import Path
+    run_dir_str = os.environ.get("QS_GEN_RUN_DIR")
+    if not run_dir_str:
+        pytest.skip(
+            "QS_GEN_RUN_DIR unset — server.log capture is runner-mode only"
+        )
+    log_path = Path(run_dir_str) / "app2" / "server.log"
+
+    build_all_datasets(_TEST_CFG)
+    tree_app = build_executives_app(_TEST_CFG)
+    assert tree_app.analysis is not None
+    primary_sheet = tree_app.analysis.sheets[0]
+    with html2_server(
+        tree_app=tree_app,
+        sheet=primary_sheet,
+        data_fetcher=_exec_stub_fetcher,
+        dashboard_id=_DASHBOARD_ID,
+        dashboard_title="Executives",
+        dev_log=True,
+    ) as base_url:
+        with webkit_page() as page:
+            page.goto(f"{base_url}/dashboards/{_DASHBOARD_ID}")
+            page.wait_for_load_state("networkidle")
+            # dev_log.js sends dev-log:ready synchronously on load,
+            # and the keepalive flag means the fetch can outlive the
+            # navigation. Give the server a moment to land the POST
+            # + flush through the FileHandler.
+            page.wait_for_timeout(300)
+
+    # Server context torn down → harness has detached + closed the
+    # FileHandler. Read the log fresh.
+    contents = log_path.read_text(encoding="utf-8")
+    assert "DEV-LOG" in contents, (
+        f"Expected 'DEV-LOG' in {log_path} — got {len(contents)} bytes; "
+        f"first 500: {contents[:500]!r}"
+    )
+    assert "dev-log:ready" in contents, (
+        f"Expected the dev_log.js initial 'dev-log:ready' event in "
+        f"{log_path}; first 500: {contents[:500]!r}"
+    )

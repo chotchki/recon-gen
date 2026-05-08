@@ -75,7 +75,7 @@ from __future__ import annotations
 
 import inspect
 import json
-import sys
+import logging
 import traceback
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -90,6 +90,15 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
+
+# Y.2.gate.c.11.app2-server-logs — dedicated logger for browser-
+# forwarded dev events (POST /log payloads). Routed through Python's
+# logging module so the test harness's per-run log capture
+# (`tests/e2e/_harness_html2.py::_attach_app2_log_handler`) lands
+# the events alongside uvicorn's access log under
+# ``$QS_GEN_RUN_DIR/app2/server.log``.
+_DEVLOG = logging.getLogger("quicksight_gen.app2.devlog")
+
 
 from quicksight_gen.common.html.render import (
     FilterSpec,
@@ -339,10 +348,13 @@ def make_app(
             payload = await request.json()
         except (json.JSONDecodeError, ValueError):
             payload = {"event": "dev-log:bad-json"}
-        # Print to stderr so it interleaves cleanly with uvicorn's
-        # access log on stdout. The ``DEV-LOG`` prefix makes
-        # forwarded events grep-friendly.
-        print(f"DEV-LOG {json.dumps(payload)}", file=sys.stderr, flush=True)
+        # Y.2.gate.c.11.app2-server-logs — route through Python's
+        # logging module so the per-run log capture in the test
+        # harness (`tests/e2e/_harness_html2.py`) lands these
+        # browser-forwarded events alongside uvicorn's access log.
+        # The ``DEV-LOG`` prefix preserves the grep-friendly shape
+        # the previous stderr `print` had.
+        _DEVLOG.info("DEV-LOG %s", json.dumps(payload))
         return Response(status_code=204)
 
     # X.2.m — themed error pages for 4xx / 5xx. The handlers reuse

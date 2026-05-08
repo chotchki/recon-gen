@@ -28,10 +28,13 @@ get the dialect parity tests in the same run as the QS tests.
 
 from __future__ import annotations
 
+import logging
+import os
 import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 import uvicorn
@@ -40,6 +43,79 @@ from quicksight_gen.common.html.server import (
     DataFetcher, ServedDashboard, make_app,
 )
 from quicksight_gen.common.tree.structure import App, Sheet
+
+
+# Y.2.gate.c.11.app2-server-logs — loggers we route to the per-run
+# log file. Only the two leaf uvicorn loggers, NOT root `uvicorn`:
+# uvicorn's default LOGGING_CONFIG sets `uvicorn.error` to propagate
+# (no propagate=False), so its messages bubble up to root `uvicorn`.
+# Attaching our FileHandler to both would log every error twice.
+# `uvicorn.access` has propagate=False so we attach to it directly.
+# `quicksight_gen.app2.devlog` is the server's dev-log logger
+# (`POST /log` handler in `common/html/server.py`); attaching here
+# lands browser-forwarded events alongside uvicorn's access log
+# when `dev_log=True` is enabled on `html2_server`.
+_UVICORN_LOGGER_NAMES = (
+    "uvicorn.error",
+    "uvicorn.access",
+    "quicksight_gen.app2.devlog",
+)
+
+
+def _attach_app2_log_handler() -> tuple[logging.FileHandler | None, Path | None]:
+    """Y.2.gate.c.11.app2-server-logs — when ``QS_GEN_RUN_DIR`` is
+    set, route uvicorn's three loggers through a shared
+    ``$QS_GEN_RUN_DIR/app2/server.log`` file. Returns the handler
+    + log path so the caller can detach + report on cleanup. No-op
+    (returns ``(None, None)``) when the env var is unset (legacy
+    direct ``pytest`` invocation; nowhere to put the file).
+
+    Sidecar contract (matches c.10 / c.11 / c.12): any OSError on
+    mkdir / open is swallowed — capture failure must not break the
+    test session.
+    """
+    run_dir = os.environ.get("QS_GEN_RUN_DIR")
+    if not run_dir:
+        return None, None
+    try:
+        log_dir = Path(run_dir) / "app2"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "server.log"
+        handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s %(name)s %(levelname)s %(message)s",
+        ))
+        for name in _UVICORN_LOGGER_NAMES:
+            logger = logging.getLogger(name)
+            logger.addHandler(handler)
+            # Lift the level so request-line + traceback messages
+            # actually emit through the handler. The default config
+            # sets uvicorn loggers to INFO; uvicorn.access also at
+            # INFO. Be defensive in case some other code lowered them.
+            if logger.level == logging.NOTSET or logger.level > logging.INFO:
+                logger.setLevel(logging.INFO)
+        return handler, log_path
+    except OSError:
+        return None, None
+
+
+def _detach_app2_log_handler(handler: logging.FileHandler | None) -> None:
+    """Remove the file handler from the three uvicorn loggers and
+    close the file. No-op when ``handler`` is None. Sidecar contract:
+    swallow OSError on close (rare but possible if the FS yanked
+    out from under us)."""
+    if handler is None:
+        return
+    for name in _UVICORN_LOGGER_NAMES:
+        try:
+            logging.getLogger(name).removeHandler(handler)
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        handler.close()
+    except OSError:
+        pass
 
 
 @contextmanager
@@ -87,8 +163,19 @@ def html2_server(
         },
         dev_log=dev_log,
     )
+    # Y.2.gate.c.11.app2-server-logs — log_level lifts to "info" iff
+    # capturing (otherwise stays "error" — keeps stderr quiet during
+    # direct pytest invocations that don't set QS_GEN_RUN_DIR). The
+    # handler attaches AFTER server.started: uvicorn.Server.run()
+    # calls logging.config.dictConfig at startup which wipes any
+    # handlers added beforehand. Post-start the dictConfig has run
+    # and our addHandler sticks. Trade-off: the uvicorn startup
+    # banner doesn't reach the file (only stderr); every per-request
+    # access log + traceback after that DOES land.
+    capture_enabled = bool(os.environ.get("QS_GEN_RUN_DIR"))
+    log_level = "info" if capture_enabled else "error"
     config = uvicorn.Config(
-        asgi, host="127.0.0.1", port=0, log_level="error",
+        asgi, host="127.0.0.1", port=0, log_level=log_level,
     )
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
@@ -100,6 +187,7 @@ def html2_server(
                 f"App2 uvicorn failed to start within {startup_timeout_s}s"
             )
         time.sleep(0.05)
+    log_handler, log_path = _attach_app2_log_handler()
     sock = server.servers[0].sockets[0]
     port = sock.getsockname()[1]
     try:
@@ -107,6 +195,11 @@ def html2_server(
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+        _detach_app2_log_handler(log_handler)
+        if log_path is not None:
+            # Soft signal to the operator that the file is there;
+            # only printed when capturing actually happened.
+            print(f"app2-harness: server log -> {log_path}")
 
 
 def visual_section(page: Any, kind: str) -> Any:
