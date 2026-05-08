@@ -875,6 +875,61 @@ class TreeDataclassCheck(Check):
         return v.smells
 
 
+_QS_CREATE_FUNCS = frozenset({
+    "create_data_set",
+    "create_analysis",
+    "create_dashboard",
+    "create_theme",
+    "create_data_source",
+})
+
+
+class _CreateTagsVisitor(ast.NodeVisitor):
+    """Walk Call nodes; flag ``<x>.create_data_set/_analysis/_dashboard/
+    _theme/_data_source(...)`` calls in deploy.py that don't either pass
+    ``Tags=`` directly OR spread a payload dict via ``**name`` (where
+    Tags is expected to live in the JSON payload). Pairs with
+    ``boto3-direct`` — that lint catches new ``boto3.client()``
+    instantiations outside the allowlist; this lint catches new
+    ``client.create_X(...)`` shapes in the allowlisted boto3 files
+    that would skip the ManagedBy: quicksight-gen tagging convention."""
+
+    def __init__(self, file: Path) -> None:
+        self.file = file
+        self.smells: list[Smell] = []
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Attribute) and \
+                node.func.attr in _QS_CREATE_FUNCS:
+            kwarg_names = {kw.arg for kw in node.keywords if kw.arg}
+            has_spread = any(kw.arg is None for kw in node.keywords)
+            if "Tags" not in kwarg_names and not has_spread:
+                self.smells.append(Smell(
+                    file=self.file,
+                    lineno=node.lineno,
+                    checker="create-tags",
+                    message=(
+                        f"``{node.func.attr}(...)`` without ``Tags=`` "
+                        "or ``**payload`` spread — boto3 QuickSight "
+                        "create_* calls must carry the ``ManagedBy: "
+                        "quicksight-gen`` tag (plus per-instance + "
+                        "extra tags) so the cleanup CLI can find + "
+                        "delete the resource later. Either pass "
+                        "``Tags=[...]`` directly or build the dict "
+                        "via ``build_*`` and spread with "
+                        "``**payload``."
+                    ),
+                ))
+        self.generic_visit(node)
+
+
+class CreateTagsCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        v = _CreateTagsVisitor(file)
+        v.visit(tree)
+        return v.smells
+
+
 # ---------------------------------------------------------------------------
 # Suppression filtering
 # ---------------------------------------------------------------------------
@@ -1104,6 +1159,16 @@ def _build_checks() -> list[Check]:
                 "identity"
             ),
             files=_expand_paths([REPO_ROOT / "src/quicksight_gen/common/tree"]),
+        ),
+        CreateTagsCheck(
+            name="create-tags",
+            description=(
+                "boto3 QuickSight ``create_*`` calls must carry "
+                "the ``ManagedBy: quicksight-gen`` tag — pass "
+                "``Tags=[...]`` directly or spread a built "
+                "payload via ``**payload``"
+            ),
+            files=[REPO_ROOT / "src/quicksight_gen/common/deploy.py"],
         ),
     ]
 
