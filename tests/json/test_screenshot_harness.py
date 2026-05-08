@@ -106,7 +106,7 @@ class TestCaptureWithStateUrlConstruction:
             name=ParameterName("pSigma"), default=[2],
         ))
         analysis.add_sheet(Sheet(
-            sheet_id=SheetId("s"), name="S", title="S", description="",
+            sheet_id=SheetId("s"), name="S", title="S", description="test",
         ))
         page = MagicMock()
         h = ScreenshotHarness(
@@ -130,7 +130,7 @@ class TestCaptureWithStateUrlConstruction:
             name=ParameterName("pAnchor"),
         ))
         analysis.add_sheet(Sheet(
-            sheet_id=SheetId("s"), name="S", title="S", description="",
+            sheet_id=SheetId("s"), name="S", title="S", description="test",
         ))
         page = MagicMock()
         h = ScreenshotHarness(

@@ -154,6 +154,25 @@ def _visual_element_id(node: VisualLike) -> str:
     return node.visual_id
 
 
+def _require_non_blank_subtitle(visual: object) -> None:
+    """Raise ValueError if the visual's subtitle is missing or blank.
+
+    Enforces the project rule (CLAUDE.md): every visual carries a
+    non-blank ``subtitle``. The constructor catches the bug at the
+    call site instead of letting a blank subtitle through to a
+    silently-mis-rendered dashboard.
+    """
+    subtitle = getattr(visual, "subtitle", None)
+    if not isinstance(subtitle, str) or not subtitle.strip():
+        title = getattr(visual, "title", "<unnamed>")
+        raise ValueError(
+            f"{type(visual).__name__}(title={title!r}): subtitle is "
+            f"required and must be non-blank — every visual carries "
+            f"a one-line plain-language subtitle (CLAUDE.md tree "
+            f"convention). Got: {subtitle!r}"
+        )
+
+
 @dataclass(eq=False)
 class KPI:
     """KPI visual — single number per ``values`` entry, no grouping.
@@ -166,11 +185,14 @@ class KPI:
     emit time. Pass an explicit ``VisualId(...)`` to override.
     """
     title: str
-    subtitle: str | None = None
+    subtitle: str
     values: list[Measure] = field(default_factory=list[Measure])
     visual_id: VisualId | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "kpi"
+
+    def __post_init__(self) -> None:
+        _require_non_blank_subtitle(self)
 
     @property
     def element_id(self) -> str:
@@ -260,7 +282,7 @@ class Table:
     ``visual_id`` is optional (L.1.8.5 auto-ID).
     """
     title: str
-    subtitle: str | None = None
+    subtitle: str
     group_by: list[Dim] = field(default_factory=list[Dim])
     values: list[Measure] = field(default_factory=list[Measure])
     columns: list[Dim] = field(default_factory=list[Dim])
@@ -276,6 +298,7 @@ class Table:
     _AUTO_KIND: ClassVar[str] = "table"
 
     def __post_init__(self) -> None:
+        _require_non_blank_subtitle(self)
         # Unaggregated and aggregated modes are mutually exclusive: if
         # `columns` is set, `group_by` and `values` must be empty (and
         # vice versa). This is the same pattern as the model's
@@ -416,7 +439,7 @@ class BarChart:
     ``visual_id`` is optional (L.1.8.5 auto-ID).
     """
     title: str
-    subtitle: str | None = None
+    subtitle: str
     category: list[Dim] = field(default_factory=list[Dim])
     values: list[Measure] = field(default_factory=list[Measure])
     colors: list[Dim] = field(default_factory=list[Dim])
@@ -432,6 +455,9 @@ class BarChart:
     visual_id: VisualId | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "bar"
+
+    def __post_init__(self) -> None:
+        _require_non_blank_subtitle(self)
 
     @property
     def element_id(self) -> str:
@@ -557,7 +583,7 @@ class LineChart:
     ``visual_id`` is optional (L.1.8.5 auto-ID).
     """
     title: str
-    subtitle: str | None = None
+    subtitle: str
     category: list[Dim] = field(default_factory=list[Dim])
     values: list[Measure] = field(default_factory=list[Measure])
     colors: list[Dim] = field(default_factory=list[Dim])
@@ -569,6 +595,9 @@ class LineChart:
     visual_id: VisualId | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "line"
+
+    def __post_init__(self) -> None:
+        _require_non_blank_subtitle(self)
 
     @property
     def element_id(self) -> str:
@@ -676,7 +705,7 @@ class Sankey:
     ``visual_id`` is optional (L.1.8.5 auto-ID).
     """
     title: str
-    subtitle: str | None = None
+    subtitle: str
     source: Dim | None = None
     target: Dim | None = None
     weight: Measure | None = None
@@ -685,6 +714,9 @@ class Sankey:
     visual_id: VisualId | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "sankey"
+
+    def __post_init__(self) -> None:
+        _require_non_blank_subtitle(self)
 
     @property
     def element_id(self) -> str:
@@ -779,11 +811,14 @@ class ForceGraph:
     wells. ``visual_id`` is optional (L.1.8.5 auto-ID).
     """
     title: str
-    subtitle: str | None = None
+    subtitle: str
     actions: list[Action] = field(default_factory=list[Action])
     visual_id: VisualId | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "force-graph"
+
+    def __post_init__(self) -> None:
+        _require_non_blank_subtitle(self)
 
     @property
     def element_id(self) -> str:

@@ -50,7 +50,7 @@ def _build_app() -> tuple[App, Sheet]:
         description="x",
     ))
     sheet.visuals.append(
-        KPI(title="K", subtitle=None, visual_id=VisualId(_VISUAL_ID)),
+        KPI(title="K", subtitle="t", visual_id=VisualId(_VISUAL_ID)),
     )
     return app, sheet
 

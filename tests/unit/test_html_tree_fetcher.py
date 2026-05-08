@@ -79,7 +79,7 @@ def _ds(identifier: str = "test-ds") -> Dataset:
 def test_find_dataset_id_via_kpi_values() -> None:
     ds = _ds("kpi-ds")
     visual = KPI(
-        title="Open", subtitle=None, visual_id=VisualId("v-k"),
+        title="Open", subtitle="t", visual_id=VisualId("v-k"),
         values=[ds["count"].sum()],
     )
     assert _find_visual_dataset_identifier(visual) == "kpi-ds"
@@ -88,7 +88,7 @@ def test_find_dataset_id_via_kpi_values() -> None:
 def test_find_dataset_id_via_bar_chart_category() -> None:
     ds = _ds("bar-ds")
     visual = BarChart(
-        title="By status", subtitle=None, visual_id=VisualId("v-b"),
+        title="By status", subtitle="t", visual_id=VisualId("v-b"),
         category=[ds["status"].dim()],
         values=[ds["amount"].sum()],
     )
@@ -99,7 +99,7 @@ def test_find_dataset_id_returns_none_for_visual_without_fields() -> None:
     """KPI with no measures / no fields → no dataset → None.
     Fetcher should treat this as "return empty payload"."""
     visual = KPI(
-        title="Empty", subtitle=None, visual_id=VisualId("v-empty"),
+        title="Empty", subtitle="t", visual_id=VisualId("v-empty"),
     )
     assert _find_visual_dataset_identifier(visual) is None
 
@@ -165,13 +165,13 @@ def _build_app_with_visuals() -> tuple[App, Dataset]:
     ))
     sheet.visuals.append(
         KPI(
-            title="Total", subtitle=None, visual_id=VisualId("v-kpi"),
+            title="Total", subtitle="t", visual_id=VisualId("v-kpi"),
             values=[ds["amount"].sum()],
         ),
     )
     sheet.visuals.append(
         BarChart(
-            title="By status", subtitle=None, visual_id=VisualId("v-bar"),
+            title="By status", subtitle="t", visual_id=VisualId("v-bar"),
             category=[ds["status"].dim()],
             values=[ds["amount"].sum()],
         ),
@@ -260,7 +260,7 @@ def test_make_tree_db_fetcher_visual_without_dataset_returns_empty(
         sheet_id=SheetId("s"), name="S", title="S", description="x",
     ))
     sheet.visuals.append(
-        KPI(title="Empty", subtitle=None, visual_id=VisualId("v-x")),
+        KPI(title="Empty", subtitle="t", visual_id=VisualId("v-x")),
     )
     fetcher = make_tree_db_fetcher(
         app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
@@ -285,7 +285,7 @@ def test_make_tree_db_fetcher_fails_loudly_on_missing_sql(
         sheet_id=SheetId("s"), name="S", title="S", description="x",
     ))
     sheet.visuals.append(
-        KPI(title="X", subtitle=None, visual_id=VisualId("v-x"),
+        KPI(title="X", subtitle="t", visual_id=VisualId("v-x"),
             values=[ds["a"].sum()]),
     )
     with pytest.raises(KeyError, match="No SQL registered"):
@@ -310,7 +310,7 @@ def test_make_tree_db_fetcher_indexes_visuals_across_sheets(
         title="Home", description="x",
     ))
     s1.visuals.append(KPI(
-        title="A", subtitle=None, visual_id=VisualId("v-a"),
+        title="A", subtitle="t", visual_id=VisualId("v-a"),
         values=[ds["amount"].sum()],
     ))
     s2 = analysis.add_sheet(Sheet(
@@ -318,7 +318,7 @@ def test_make_tree_db_fetcher_indexes_visuals_across_sheets(
         title="Drift", description="x",
     ))
     s2.visuals.append(KPI(
-        title="B", subtitle=None, visual_id=VisualId("v-b"),
+        title="B", subtitle="t", visual_id=VisualId("v-b"),
         values=[ds["amount"].sum()],
     ))
     fetcher = make_tree_db_fetcher(
@@ -406,7 +406,7 @@ def test_make_tree_db_fetcher_dispatches_sankey_with_aggregation(
         title="Sk", description="x",
     ))
     sheet.visuals.append(Sankey(
-        title="Flow", subtitle=None, visual_id=VisualId("v-sk"),
+        title="Flow", subtitle="t", visual_id=VisualId("v-sk"),
         source=ds["source"].dim(),
         target=ds["target"].dim(),
         weight=ds["amount"].sum(),
@@ -458,7 +458,7 @@ def test_make_tree_db_fetcher_sankey_passthrough_without_fields(
     # ends up in the visual_index with sql=None — same code path as
     # text boxes — which returns empty payload. Verify that.
     sheet.visuals.append(Sankey(
-        title="Empty", subtitle=None, visual_id=VisualId("v-ske"),
+        title="Empty", subtitle="t", visual_id=VisualId("v-ske"),
     ))
     fetcher = make_tree_db_fetcher(
         app, _TEST_CFG_SQLITE, pool=aiosqlite_sankey_pool,

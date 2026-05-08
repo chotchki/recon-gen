@@ -208,6 +208,7 @@ def build_kitchen_app(cfg: Config) -> App:
         title="Filtered Detail",
         group_by=[Dim(ds_main, "id")],
         values=[Measure.sum(ds_main, "amount")],
+        subtitle="t",
     )
 
     # Filter wrappers — one of each kind.
@@ -296,6 +297,7 @@ def build_kitchen_app(cfg: Config) -> App:
         title="Drill Destination",
         group_by=[Dim(ds_main, "id")],
         values=[Measure.sum(ds_main, "amount")],
+        subtitle="t",
     )
 
     # ------ Drill actions -------------------------------------------

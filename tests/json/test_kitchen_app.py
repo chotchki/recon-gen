@@ -319,7 +319,7 @@ class TestValidationHooksAudit:
         # Parameter NOT registered on the analysis
         rogue_param = _IP(name=_PN("pRogue"), default=[1])
         sheet = app.analysis.add_sheet(_Sh(
-            sheet_id=_SId("s"), name="S", title="S", description="",
+            sheet_id=_SId("s"), name="S", title="S", description="test",
         ))
         sheet.add_parameter_slider(
             parameter=rogue_param,
@@ -336,10 +336,11 @@ class TestValidationHooksAudit:
         app = self._app()
         rogue_param = _IP(name=_PN("pRogue"), default=[1])
         sheet = app.analysis.add_sheet(_Sh(
-            sheet_id=_SId("s"), name="S", title="S", description="",
+            sheet_id=_SId("s"), name="S", title="S", description="test",
         ))
         kpi = sheet.layout.row(height=6).add_kpi(
             width=12, title="K", values=[],
+                subtitle="t",
         )
         from quicksight_gen.common.tree import ParameterBound as _PB
         fg = app.analysis.add_filter_group(_FG(filters=[
@@ -362,7 +363,7 @@ class TestValidationHooksAudit:
             _IP(name=_PN("pSigma"), default=[2]),
         )
         sheet = app.analysis.add_sheet(_Sh(
-            sheet_id=_SId("s"), name="S", title="S", description="",
+            sheet_id=_SId("s"), name="S", title="S", description="test",
         ))
         sheet.add_parameter_slider(
             parameter=sigma,

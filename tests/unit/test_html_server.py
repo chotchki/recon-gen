@@ -64,7 +64,7 @@ def _build_app() -> tuple[App, Sheet]:
     ))
     sheet.visuals.append(Sankey(
         title="Sankey",
-        subtitle=None,
+        subtitle="t",
         visual_id=VisualId(_VISUAL_ID),
     ))
     return app, sheet
@@ -290,7 +290,7 @@ def test_multi_dashboard_listing_and_per_dashboard_routing() -> None:
         ))
         sheet.visuals.append(Sankey(
             title=f"Sankey {name_suffix}",
-            subtitle=None,
+            subtitle="t",
             visual_id=VisualId(f"v-sankey-{name_suffix}"),
         ))
         return app, sheet

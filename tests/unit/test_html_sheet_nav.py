@@ -52,7 +52,7 @@ def _build_app_with_sheets(sheet_specs: list[tuple[str, str]]) -> tuple[App, lis
             description="x",
         ))
         sheet.visuals.append(
-            KPI(title=f"K-{sid}", subtitle=None, visual_id=VisualId(f"v-{sid}")),
+            KPI(title=f"K-{sid}", subtitle="t", visual_id=VisualId(f"v-{sid}")),
         )
         sheets.append(sheet)
     return app, sheets

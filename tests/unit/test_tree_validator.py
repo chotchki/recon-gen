@@ -45,15 +45,17 @@ def _make_app() -> App:
     ))
     sheet = analysis.add_sheet(Sheet(
         sheet_id=SheetId("s-1"), name="Sheet One",
-        title="Sheet One", description="",
+        title="Sheet One", description="test",
     ))
     row = sheet.layout.row(height=6)
-    row.add_kpi(width=8, title="Total", values=[Measure.sum(_DS, "amount")])
+    row.add_kpi(width=8, title="Total", values=[Measure.sum(_DS, "amount")], subtitle="t")
     row.add_table(
         width=8, title="Detail", group_by=[Dim(_DS, "id")], values=[],
+        subtitle="t",
     )
     row.add_bar_chart(
         width=8, title="Distribution", category=[Dim(_DS, "cat")], values=[],
+        subtitle="t",
     )
     row.add_sankey(
         width=12,
@@ -61,6 +63,7 @@ def _make_app() -> App:
         source=Dim(_DS, "source"),
         target=Dim(_DS, "target"),
         weight=Measure.sum(_DS, "weight"),
+        subtitle="t",
     )
     return app
 

@@ -135,8 +135,8 @@ def test_emit_html_resolves_auto_visual_ids() -> None:
         description="x",
     )
     # No visual_id passed — defaults to AUTO sentinel.
-    sheet.visuals.append(KPI(title="K1", subtitle=None))
-    sheet.visuals.append(KPI(title="K2", subtitle=None))
+    sheet.visuals.append(KPI(title="K1", subtitle="t"))
+    sheet.visuals.append(KPI(title="K2", subtitle="t"))
 
     out = emit_html(
         _build_app(sheet), sheet, dashboard_id="test-dashboard",
@@ -174,7 +174,7 @@ def test_emit_html_escapes_titles() -> None:
         description="A & B",
     )
     sheet.visuals.append(
-        KPI(title="<b>bold</b>", subtitle=None, visual_id=VisualId("v-x")),
+        KPI(title="<b>bold</b>", subtitle="t", visual_id=VisualId("v-x")),
     )
     out = emit_html(
         _build_app(sheet), sheet, dashboard_id="test-dashboard",
@@ -216,7 +216,7 @@ def test_emit_html_handles_empty_sheet() -> None:
 
 
 def test_emit_html_handles_visual_without_subtitle() -> None:
-    """Some visual kinds have ``subtitle=None``; the subtitle ``<p>``
+    """Some visual kinds have ``subtitle="t"``; the subtitle ``<p>``
     must be omitted when subtitle is unset (no empty paragraphs)."""
     sheet = Sheet(
         sheet_id=SheetId("no-subtitle"),
@@ -225,7 +225,7 @@ def test_emit_html_handles_visual_without_subtitle() -> None:
         description="x",
     )
     sheet.visuals.append(
-        KPI(title="Bare KPI", subtitle=None, visual_id=VisualId("v-bare")),
+        KPI(title="Bare KPI", subtitle="t", visual_id=VisualId("v-bare")),
     )
     out = emit_html(
         _build_app(sheet), sheet, dashboard_id="test-dashboard",

@@ -220,6 +220,21 @@ class Sheet:
     # it out of the dataclass constructor surface.
     _layout: "SheetLayout | None" = field(default=None, init=False, repr=False)
 
+    def __post_init__(self) -> None:
+        # b.15.invariant.sheet-description: every Sheet carries a
+        # plain-language description (CLAUDE.md tree convention).
+        # Catching a blank/missing description at construction time
+        # beats letting a silently-described sheet through to a
+        # rendered dashboard where reviewers spot it later.
+        if not self.description.strip():
+            raise ValueError(
+                f"Sheet(name={self.name!r}, sheet_id={self.sheet_id!r}): "
+                f"description is required and must be non-blank — every "
+                f"sheet carries a one-paragraph plain-language "
+                f"description (CLAUDE.md tree convention). Got: "
+                f"{self.description!r}"
+            )
+
     @property
     def layout(self) -> "SheetLayout":
         """L.1.21 — Layout namespace for grid placement.
@@ -552,7 +567,7 @@ class Row:
         width: int,
         title: str,
         values: list[Measure] | None = None,
-        subtitle: str | None = None,
+        subtitle: str,
         visual_id: VisualId | AutoResolved = AUTO,
     ) -> KPI:
         """Construct + register + place a KPI in this row."""
@@ -576,7 +591,7 @@ class Row:
         group_by: list[Dim] | None = None,
         values: list[Measure] | None = None,
         columns: list[Dim] | None = None,
-        subtitle: str | None = None,
+        subtitle: str,
         sort_by: (
             tuple[FieldRef, Literal["ASC", "DESC"]]
             | list[tuple[FieldRef, Literal["ASC", "DESC"]]]
@@ -616,7 +631,7 @@ class Row:
         category: list[Dim] | None = None,
         values: list[Measure] | None = None,
         colors: list[Dim] | None = None,
-        subtitle: str | None = None,
+        subtitle: str,
         orientation: Literal["HORIZONTAL", "VERTICAL"] | None = None,
         bars_arrangement: Literal[
             "CLUSTERED", "STACKED", "STACKED_PERCENT",
@@ -655,7 +670,7 @@ class Row:
         category: list[Dim] | None = None,
         values: list[Measure] | None = None,
         colors: list[Dim] | None = None,
-        subtitle: str | None = None,
+        subtitle: str,
         chart_type: Literal["LINE", "AREA", "STACKED_AREA"] | None = None,
         category_label: str | None = None,
         value_label: str | None = None,
@@ -689,7 +704,7 @@ class Row:
         source: Dim,
         target: Dim,
         weight: Measure,
-        subtitle: str | None = None,
+        subtitle: str,
         items_limit: int | None = None,
         actions: list[Action] | None = None,
         visual_id: VisualId | AutoResolved = AUTO,
@@ -761,7 +776,7 @@ class AbsoluteSlot:
         *,
         title: str,
         values: list[Measure] | None = None,
-        subtitle: str | None = None,
+        subtitle: str,
         visual_id: VisualId | AutoResolved = AUTO,
     ) -> KPI:
         kpi = KPI(
@@ -778,7 +793,7 @@ class AbsoluteSlot:
         group_by: list[Dim] | None = None,
         values: list[Measure] | None = None,
         columns: list[Dim] | None = None,
-        subtitle: str | None = None,
+        subtitle: str,
         sort_by: (
             tuple[FieldRef, Literal["ASC", "DESC"]]
             | list[tuple[FieldRef, Literal["ASC", "DESC"]]]
@@ -806,7 +821,7 @@ class AbsoluteSlot:
         title: str,
         category: list[Dim] | None = None,
         values: list[Measure] | None = None,
-        subtitle: str | None = None,
+        subtitle: str,
         orientation: Literal["HORIZONTAL", "VERTICAL"] | None = None,
         bars_arrangement: Literal[
             "CLUSTERED", "STACKED", "STACKED_PERCENT",
@@ -832,7 +847,7 @@ class AbsoluteSlot:
         category: list[Dim] | None = None,
         values: list[Measure] | None = None,
         colors: list[Dim] | None = None,
-        subtitle: str | None = None,
+        subtitle: str,
         chart_type: Literal["LINE", "AREA", "STACKED_AREA"] | None = None,
         category_label: str | None = None,
         value_label: str | None = None,
@@ -859,7 +874,7 @@ class AbsoluteSlot:
         source: Dim,
         target: Dim,
         weight: Measure,
-        subtitle: str | None = None,
+        subtitle: str,
         items_limit: int | None = None,
         actions: list[Action] | None = None,
         visual_id: VisualId | AutoResolved = AUTO,
