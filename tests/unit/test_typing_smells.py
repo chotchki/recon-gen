@@ -806,6 +806,75 @@ class JsonIndentCheck(Check):
         return v.smells
 
 
+class _TreeDataclassVisitor(ast.NodeVisitor):
+    """Walk ClassDef nodes; flag ``@dataclass`` (or ``@dataclass(...)``)
+    in ``common/tree/`` that doesn't specify ``frozen=True`` or
+    ``eq=False``. Tree nodes are either mutable parents in the
+    object-ref graph (``eq=False`` so identity is the equality
+    semantics — two distinct sheets with the same name are not equal)
+    or value-type leaves (``frozen=True`` — Column / formatting
+    primitives are hashable + immutable). Default ``@dataclass`` gives
+    structural equality on mutable state, which silently breaks both
+    contracts."""
+
+    def __init__(self, file: Path) -> None:
+        self.file = file
+        self.smells: list[Smell] = []
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        for dec in node.decorator_list:
+            # ``@dataclass`` (Name) — bare, no kwargs
+            if isinstance(dec, ast.Name) and dec.id == "dataclass":
+                self.smells.append(self._smell(node, "bare ``@dataclass``"))
+            # ``@dataclass(...)`` (Call)
+            elif isinstance(dec, ast.Call) and \
+                    isinstance(dec.func, ast.Name) and \
+                    dec.func.id == "dataclass":
+                kwargs = {kw.arg: kw.value for kw in dec.keywords if kw.arg}
+                if not self._has_frozen_or_eq_false(kwargs):
+                    self.smells.append(self._smell(
+                        node, "``@dataclass(...)`` missing ``frozen=True`` or ``eq=False``",
+                    ))
+        self.generic_visit(node)
+
+    def _has_frozen_or_eq_false(
+        self, kwargs: dict[str, ast.expr],
+    ) -> bool:
+        if "frozen" in kwargs:
+            v = kwargs["frozen"]
+            if isinstance(v, ast.Constant) and v.value is True:
+                return True
+        if "eq" in kwargs:
+            v = kwargs["eq"]
+            if isinstance(v, ast.Constant) and v.value is False:
+                return True
+        return False
+
+    def _smell(self, node: ast.ClassDef, what: str) -> Smell:
+        return Smell(
+            file=self.file,
+            lineno=node.lineno,
+            checker="tree-dataclass",
+            message=(
+                f"{what} on tree-pattern class ``{node.name}`` — "
+                "tree nodes are object-ref-identified (``eq=False``) "
+                "or value-type leaves (``frozen=True``); default "
+                "structural equality on a mutable tree node breaks "
+                "the cross-ref graph (two distinct sheets with the "
+                "same name would compare equal). Pick ``eq=False`` "
+                "for mutable parents or ``frozen=True`` for value "
+                "leaves."
+            ),
+        )
+
+
+class TreeDataclassCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        v = _TreeDataclassVisitor(file)
+        v.visit(tree)
+        return v.smells
+
+
 # ---------------------------------------------------------------------------
 # Suppression filtering
 # ---------------------------------------------------------------------------
@@ -1023,6 +1092,18 @@ def _build_checks() -> list[Check]:
                 REPO_ROOT / "src/quicksight_gen/cli",
                 REPO_ROOT / "src/quicksight_gen/common",
             ]),
+        ),
+        TreeDataclassCheck(
+            name="tree-dataclass",
+            description=(
+                "tree-pattern dataclasses must specify "
+                "``frozen=True`` (value-type leaves) or "
+                "``eq=False`` (mutable parents in the cross-ref "
+                "graph) — bare ``@dataclass`` gives structural "
+                "equality on mutable state, breaking object-ref "
+                "identity"
+            ),
+            files=_expand_paths([REPO_ROOT / "src/quicksight_gen/common/tree"]),
         ),
     ]
 
