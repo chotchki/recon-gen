@@ -1,5 +1,106 @@
 # Release Notes
 
+## v8.8.0a3 — Cfg-driven AWS auth + L2-instance alignment
+
+Third alpha. Folds `Y.2.gate.h+i.0` (combined spike + build) and
+`Y.2.gate.h.6` into the runner: the test-layer chain now reads
+operator-side env state (AWS profile, QuickSight embed user, L2
+institution) from the cfg yaml exactly once, and threads it into
+every layer subprocess. Eliminates three classes of operator
+friction with one pattern.
+
+### What ships
+
+- **Long-lived IAM credentials replace AWS SSO for local-dev**
+  (`Y.2.gate.h+i.0`). Combined spike
+  (`docs/audits/y_2_gate_h_i_combined_spike.md`) locked candidate
+  C: long-lived IAM access keys for a dedicated
+  `quicksight-gen-local` user (policy = mirror of the existing
+  CI role + `quicksight:ListUsers`). Multi-hour Claude-loop
+  sessions no longer hit AWS SSO browser-flow refreshes that
+  broke continuity.
+- **Auto-derived `QS_E2E_USER_ARN`** (`Y.2.gate.h.1`).
+  `_dev/runner.py::_derive_qs_user_arn` calls
+  `sts:GetCallerIdentity` → `quicksight:ListUsers` paginate →
+  matches `PrincipalId == "federated/iam/<UserId>"`. The join
+  key was validated live across IAM-user, assumed-role, and root
+  identities. `cfg.auth.quicksight_user_arn` overrides without
+  any API call (CI escape hatch).
+- **`AWS_PROFILE` injected from cfg** (`Y.2.gate.i.1`).
+  `cfg.auth.aws_profile` flows into every subprocess
+  `env_overrides`; the parent process uses the same profile for
+  boto3 derivation.
+- **`QS_GEN_TEST_L2_INSTANCE` injected from cfg** (`Y.2.gate.h.6`).
+  Same shape: new `cfg.default_l2_instance` field carries the
+  path to the L2 yaml the operator's external DB has been seeded
+  with. Runner resolves to absolute (relative to repo root) +
+  threads into env. Both the seed flow's `--l2 <yaml>` arg and
+  the dataset-SQL smoke test's L2 picker align with the DB state
+  automatically.
+- **IAM runbook** at `docs/audits/_iam/quicksight-gen-local-policy.json`
+  (drop-in for `aws iam put-user-policy`) plus the combined
+  spike's §6 step-by-step (`aws iam create-user` →
+  `put-user-policy` → `create-access-key` → `aws configure
+  --profile` → `quicksight register-user`).
+- **`AuthConfig` dataclass** in `common/config.py` mirrors the
+  existing `SigningConfig` shape; `auth:` is allowlisted in the
+  cfg loader.
+- **`_probe_qs_e2e_user_arn` is cfg-aware**: probe pre-passes
+  when cfg has either `auth.aws_profile` (derivation will work)
+  or `auth.quicksight_user_arn` (explicit override). Falls back
+  to the env-var presence check for legacy invocations.
+
+### Validated end-to-end
+
+Live derivation against account `470656905821`: runner output
+shows
+```
+runner: variant-env [AWS_PROFILE]=quicksight-gen-local
+runner: variant-env [QS_E2E_USER_ARN]=arn:aws:quicksight:us-east-1:...
+runner: variant-env [QS_GEN_TEST_L2_INSTANCE]=/.../tests/l2/sasquatch_pr.yaml
+```
+on a fresh shell with NO env-var exports. The chain progresses
+clean through the unit + db layers (37 dataset SQLs all green
+post-h.6). 1981 unit tests pass; pyright clean.
+
+### Operator action: one-time onboarding
+
+Per the IAM runbook (combined spike §6):
+
+1. `aws iam create-user --user-name quicksight-gen-local` (+ tags).
+2. `aws iam put-user-policy --policy-document
+   file://docs/audits/_iam/quicksight-gen-local-policy.json`.
+3. Console-create access key for the user (avoids the secret
+   landing in any transcript); paste into `aws configure
+   --profile quicksight-gen-local`.
+4. `aws quicksight register-user --identity-type IAM --iam-arn
+   <user-arn> --user-role ADMIN`.
+5. Add to `cfg`:
+   ```yaml
+   auth:
+     aws_profile: "quicksight-gen-local"
+   default_l2_instance: "tests/l2/sasquatch_pr.yaml"  # or your seeded L2
+   ```
+6. `./run_tests.sh up_to=db` — the runner self-derives everything.
+
+### Out of scope (queued)
+
+- **`Y.11`** — CLI shape revisit. Now that `cfg.default_l2_instance`
+  exists, every CLI's `--l2 <yaml>` arg is partially redundant.
+  Spike-before-implement comparing 4 candidate factorings; lands
+  as v9.x.0 (breaking CLI change).
+- `Y.2.gate.h.2-h.4` — DB connection strings, AWS account/region,
+  tunable defaults are mostly already in cfg; remaining cleanup.
+- `Y.2.gate.i.2-i.4` — instructions sweep + acceptance test of
+  the long-running-loop scenario.
+
+### Memory entry rewritten
+
+`project_qs_e2e_user_arn.md` shifted from "operator exports the
+env var" to "runner self-derives via cfg.auth.aws_profile" — the
+old static value is now stale automation backlog. Retained as a
+triage runbook for the three QS users in the namespace.
+
 ## v8.8.0a2 — Test-layer chain runner + SQLite as third dialect
 
 Second alpha. Two themes: a new test-layer chain runner that
