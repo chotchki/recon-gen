@@ -46,6 +46,14 @@ Four checks today, all extensible — drop a new ``Check`` into
   fuzz-seed reproducibility. Use ``rng = random.Random(<seed>);
   rng.X(...)`` instead.
 
+- **boto3-direct** (Y.2.gate.b.15.lint.boto3-direct) — direct
+  ``boto3.client(...)`` calls outside the 4 known production
+  wrappers (``common/deploy.py``, ``common/cleanup.py``,
+  ``common/browser/helpers.py``, ``_dev/runner.py``). Stray clients
+  bypass the ``ManagedBy: quicksight-gen`` tagging convention →
+  break ``cleanup``. Tests can freely use ``boto3.client`` (scope
+  is src/ only).
+
 Suppression
 -----------
 
@@ -523,6 +531,55 @@ class DeterminismCheck(Check):
 
 
 # ---------------------------------------------------------------------------
+# Check: boto3-direct (Y.2.gate.b.15.lint.boto3-direct)
+# ---------------------------------------------------------------------------
+
+
+class _Boto3DirectVisitor(ast.NodeVisitor):
+    """Walk Call nodes; flag direct ``boto3.client(...)`` calls.
+
+    Stray clients bypass the ``ManagedBy: quicksight-gen`` tagging
+    convention that all production resource creation goes through;
+    the cleanup verb relies on every resource carrying that tag to
+    find orphans."""
+
+    def __init__(self, file: Path) -> None:
+        self.file = file
+        self.smells: list[Smell] = []
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Attribute) and \
+                node.func.attr == "client" and \
+                isinstance(node.func.value, ast.Name) and \
+                node.func.value.id == "boto3":
+            self.smells.append(Smell(
+                file=self.file,
+                lineno=node.lineno,
+                checker="boto3-direct",
+                message=(
+                    "direct ``boto3.client(...)`` call — production "
+                    "AWS access goes through one of the 4 known "
+                    "wrappers (``common/deploy.py``, ``common/cleanup.py``, "
+                    "``common/browser/helpers.py``, ``_dev/runner.py``) "
+                    "so resources stay tagged ``ManagedBy: "
+                    "quicksight-gen`` and ``cleanup`` finds them. If "
+                    "this site is genuinely a new wrapper, add it to "
+                    "the lint's allowlist; otherwise route through "
+                    "an existing one. Suppress with ``# typing-smell: "
+                    "ignore[boto3-direct]: <reason>`` if intentional."
+                ),
+            ))
+        self.generic_visit(node)
+
+
+class Boto3DirectCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        v = _Boto3DirectVisitor(file)
+        v.visit(tree)
+        return v.smells
+
+
+# ---------------------------------------------------------------------------
 # Suppression filtering
 # ---------------------------------------------------------------------------
 
@@ -663,6 +720,25 @@ def _build_checks() -> list[Check]:
                 REPO_ROOT / "src/quicksight_gen/common/l2/auto_scenario.py",
                 REPO_ROOT / "src/quicksight_gen/apps",
             ]),
+        ),
+        Boto3DirectCheck(
+            name="boto3-direct",
+            description=(
+                "direct ``boto3.client(...)`` outside the 4 known "
+                "production wrappers — bypasses the ManagedBy tagging "
+                "convention; route through ``common/deploy.py``, "
+                "``common/cleanup.py``, ``common/browser/helpers.py``, "
+                "or ``_dev/runner.py`` instead"
+            ),
+            files=[
+                p for p in _expand_paths(
+                    [REPO_ROOT / "src/quicksight_gen"]
+                )
+                if p != REPO_ROOT / "src/quicksight_gen/common/deploy.py"
+                and p != REPO_ROOT / "src/quicksight_gen/common/cleanup.py"
+                and p != REPO_ROOT / "src/quicksight_gen/common/browser/helpers.py"
+                and p != REPO_ROOT / "src/quicksight_gen/_dev/runner.py"
+            ],
         ),
     ]
 
