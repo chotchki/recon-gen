@@ -1,0 +1,64 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "QuickSightResources",
+      "Effect": "Allow",
+      "Action": [
+        "quicksight:CreateTheme",
+        "quicksight:DescribeTheme",
+        "quicksight:UpdateTheme",
+        "quicksight:DeleteTheme",
+        "quicksight:ListThemes",
+        "quicksight:CreateDataSource",
+        "quicksight:DescribeDataSource",
+        "quicksight:UpdateDataSource",
+        "quicksight:DeleteDataSource",
+        "quicksight:ListDataSources",
+        "quicksight:PassDataSource",
+        "quicksight:CreateDataSet",
+        "quicksight:DescribeDataSet",
+        "quicksight:UpdateDataSet",
+        "quicksight:DeleteDataSet",
+        "quicksight:ListDataSets",
+        "quicksight:PassDataSet",
+        "quicksight:CreateAnalysis",
+        "quicksight:DescribeAnalysis",
+        "quicksight:UpdateAnalysis",
+        "quicksight:DeleteAnalysis",
+        "quicksight:ListAnalyses",
+        "quicksight:CreateDashboard",
+        "quicksight:DescribeDashboard",
+        "quicksight:UpdateDashboard",
+        "quicksight:DeleteDashboard",
+        "quicksight:ListDashboards",
+        "quicksight:CreateFolder",
+        "quicksight:DescribeFolder",
+        "quicksight:UpdateFolder",
+        "quicksight:DeleteFolder",
+        "quicksight:ListFolders"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "QuickSightTags",
+      "Effect": "Allow",
+      "Action": [
+        "quicksight:TagResource",
+        "quicksight:UntagResource",
+        "quicksight:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "QuickSightEmbedAndUsers",
+      "Effect": "Allow",
+      "Action": [
+        "quicksight:GenerateEmbedUrlForRegisteredUser",
+        "quicksight:DescribeUser",
+        "quicksight:ListUsers"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

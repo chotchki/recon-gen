@@ -41,7 +41,10 @@ from io import TextIOWrapper
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final, cast
+
+if TYPE_CHECKING:
+    from quicksight_gen.common.config import Config
 
 from quicksight_gen.common.env_keys import (
     QS_E2E_USER_ARN,
@@ -222,19 +225,48 @@ def _probe_docker() -> ProbeFailure | None:
 
 
 def _probe_qs_e2e_user_arn() -> ProbeFailure | None:
-    """Check ``QS_E2E_USER_ARN`` env var is set (required for browser e2e
-    embed-URL signing). Auto-derivation from AWS identity lands under
-    ``Y.2.gate.h.1``; for now the env var is operator-set.
+    """Check that the runner can satisfy ``QS_E2E_USER_ARN``.
+
+    Three paths are accepted (any one passes the probe):
+
+    1. **Env var set** — operator-managed (legacy / CI).
+    2. **Cfg `auth.quicksight_user_arn` set** — explicit override
+       (combined h+i.0 spike escape hatch).
+    3. **Cfg `auth.aws_profile` set** — h.1 derivation will fire
+       inside ``_run_one_variant`` via ``_derive_qs_user_arn``.
 
     Y.2.gate.b.15 — registry call also runs the IAM-ARN regex
     validator on PRESENCE, so a malformed ARN surfaces here instead
     of inside the boto embed-URL call later.
+
+    Cfg discovery uses the same default-candidate list as
+    ``_resolve_runner_cfg_path("default")`` — handles the common
+    "operator runs against external Aurora with `auth:` block in
+    `run/config.postgres.yaml`" case without per-variant context.
     """
     if QS_E2E_USER_ARN.get_or_none():
         return None
+    cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
+    if cfg_path is not None:
+        try:
+            from quicksight_gen.common.config import load_config  # noqa: PLC0415 — lazy: only load cfg when probing
+            cfg = load_config(str(cfg_path))
+        except Exception:  # noqa: BLE001 — bad cfg surfaces elsewhere; here we just want a yes/no
+            cfg = None
+        if cfg is not None and cfg.auth is not None and (
+            cfg.auth.quicksight_user_arn is not None
+            or cfg.auth.aws_profile is not None
+        ):
+            return None
     return ProbeFailure(
         kind="qs_arn_unset",
-        message="QS_E2E_USER_ARN unset — export the QuickSight user ARN for embed signing, then re-invoke",
+        message=(
+            "QS_E2E_USER_ARN unset and no cfg auth block found. "
+            "Either export the QuickSight user ARN, or add an "
+            "`auth: { aws_profile: <name> }` block to "
+            "run/config.<dialect>.yaml (combined spike: "
+            "docs/audits/y_2_gate_h_i_combined_spike.md)."
+        ),
     )
 
 
@@ -1180,6 +1212,90 @@ def _resolve_seed_config_for_variant(variant: str) -> Path | None:
     return None
 
 
+# Y.2.gate.h+i.0 — runner-side cfg discovery for AWS auth. Used by
+# ``_run_one_variant`` to load the cfg in the parent process so we can
+# inject ``AWS_PROFILE`` and derive ``QS_E2E_USER_ARN`` before
+# dispatching layers. Variant-specific cfg wins (so local-pg's auth
+# matches its dialect-flavored cfg); falls through to a generic
+# candidate list for ``default`` (the operator's external DB).
+_DEFAULT_RUNNER_CFG_CANDIDATES: Final = (
+    "run/config.yaml",
+    "run/config.postgres.yaml",
+    "run/config.oracle.yaml",
+)
+
+
+def _resolve_runner_cfg_path(variant: str) -> Path | None:
+    """Find the cfg file the runner reads for AWS auth + ARN derivation.
+
+    Per-variant first (local-pg → ``run/config.postgres.yaml``,
+    local-oracle → ``run/config.oracle.yaml``); ``default`` falls
+    through to the candidate list. Returns ``None`` when nothing
+    matches — caller skips auth wiring and the layer's own probes
+    catch any operator-action need.
+    """
+    variant_cfg = _resolve_seed_config_for_variant(variant)
+    if variant_cfg is not None:
+        return variant_cfg
+    return _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
+
+
+def _derive_qs_user_arn(cfg: "Config") -> str:
+    """Y.2.gate.h.1 — derive QS user ARN from AWS identity.
+
+    Combined h+i.0 spike (`docs/audits/y_2_gate_h_i_combined_spike.md`):
+    cfg override wins (explicit `cfg.auth.quicksight_user_arn`); else
+    derive via ``sts:GetCallerIdentity`` → ``quicksight:ListUsers``
+    filter on ``PrincipalId == "federated/iam/<UserId>"``. The join
+    key was validated live against three identity types (IAM user,
+    assumed-role, root) in account 470656905821 — all three QS users'
+    ``PrincipalId`` matched the STS UserId exactly.
+
+    Honors ``cfg.auth.aws_profile`` by passing it to ``boto3.Session``
+    so the derivation runs against the same creds the layer
+    subprocesses will use (subprocess env carries ``AWS_PROFILE``;
+    parent process needs the explicit kwarg).
+    """
+    if cfg.auth and cfg.auth.quicksight_user_arn:
+        return cfg.auth.quicksight_user_arn
+
+    # Lazy import: boto3 cold-start is ~300ms; this function only fires
+    # when the chain reaches a layer needing ``qs_arn``, not on every
+    # runner invocation.
+    import boto3  # noqa: PLC0415 — keep cold-start light when h.1 unused
+
+    profile = cfg.auth.aws_profile if cfg.auth else None
+    # boto3-stubs's huge per-service overload union confuses pyright —
+    # narrow Any suppression matches the pattern in cmd_sweep below.
+    session: Any = (  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]: boto3-stubs huge overload union confuses pyright (X.2.o.5)
+        boto3.Session(profile_name=profile)
+        if profile is not None
+        else boto3.Session()
+    )
+
+    sts: Any = session.client("sts", region_name=cfg.aws_region)
+    identity = sts.get_caller_identity()
+    user_id = str(identity["UserId"])
+    target_principal = f"federated/iam/{user_id}"
+
+    qs: Any = session.client("quicksight", region_name=cfg.aws_region)
+    paginator = qs.get_paginator("list_users")
+    for page in paginator.paginate(
+        AwsAccountId=cfg.aws_account_id, Namespace="default",
+    ):
+        for user in page["UserList"]:
+            if user["PrincipalId"] == target_principal:
+                return str(user["Arn"])
+
+    raise RuntimeError(
+        f"AWS principal UserId {user_id!r} (Arn {identity['Arn']!r}) "
+        f"does not match any QuickSight user in account "
+        f"{cfg.aws_account_id} namespace 'default'. Either authenticate "
+        f"as a registered QS user, or set 'auth.quicksight_user_arn:' "
+        f"in cfg yaml. (Spike: docs/audits/y_2_gate_h_i_combined_spike.md)"
+    )
+
+
 def seed_variant(
     name: str,
     env_overrides: dict[str, str],
@@ -1433,6 +1549,47 @@ def _run_one_variant(
     variant_cfg = _resolve_seed_config_for_variant(variant)
     if variant_cfg is not None:
         variant_env[QS_GEN_CONFIG.name] = str(variant_cfg)
+
+    # Y.2.gate.h+i.0 — AWS auth wiring. Inject AWS_PROFILE so subprocess
+    # boto3 calls + AWS CLI invocations see the long-lived IAM-user creds
+    # (combined spike candidate C). Derive QS_E2E_USER_ARN from STS+ListUsers
+    # so browser-layer embed signing works without operator-managed env vars.
+    # Cfg-load failures here downgrade to "skip auth wiring + let layer
+    # probes catch any operator-action need" — keeps unit/db layers running
+    # when AWS is unreachable.
+    runner_cfg_path = _resolve_runner_cfg_path(variant)
+    if runner_cfg_path is not None:
+        try:
+            from quicksight_gen.common.config import load_config  # noqa: PLC0415 — lazy: cfg load only when AWS-touching layers in chain
+            runner_cfg = load_config(str(runner_cfg_path))
+        except Exception as exc:  # noqa: BLE001 — cfg load failures shouldn't block unit/db layers; surface for triage
+            print(
+                f"{terminal_prefix}runner: auth-cfg load failed "
+                f"({type(exc).__name__}: {exc}); skipping AWS_PROFILE + "
+                f"QS_E2E_USER_ARN injection",
+                file=sys.stderr,
+            )
+            runner_cfg = None
+        if runner_cfg is not None and runner_cfg.auth is not None:
+            if runner_cfg.auth.aws_profile is not None:
+                variant_env["AWS_PROFILE"] = runner_cfg.auth.aws_profile
+            # Derive QS_E2E_USER_ARN only when chain reaches a layer
+            # that needs it (qs_arn dep). Avoids the boto3 import +
+            # ~1s ListUsers cost on unit-only invocations.
+            if any(
+                "qs_arn" in _LAYER_DEPS.get(layer, frozenset()) for layer in chain
+            ):
+                try:
+                    arn = _derive_qs_user_arn(runner_cfg)
+                    variant_env[QS_E2E_USER_ARN.name] = arn
+                except Exception as exc:  # noqa: BLE001 — surface as EXIT_NEEDS_OPERATOR
+                    print(
+                        f"{terminal_prefix}runner: QS_E2E_USER_ARN derivation "
+                        f"failed: {exc}",
+                        file=sys.stderr,
+                    )
+                    return variant, [], EXIT_NEEDS_OPERATOR
+
     if variant_env:
         for key, val in variant_env.items():
             display = (val[:60] + "...") if len(val) > 60 else val

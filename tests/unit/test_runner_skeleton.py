@@ -110,6 +110,8 @@ def test_layers_list_matches_audit_table() -> None:
 import io
 import subprocess
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -202,10 +204,53 @@ def test_probe_qs_arn_set(monkeypatch: Any) -> None:
 
 
 def test_probe_qs_arn_unset(monkeypatch: Any) -> None:
+    """Probe fails when env var unset AND no cfg auth fallback (h+i.0).
+
+    The cfg-discovery fallback (added in combined h+i.0 spike) lets the
+    probe pass when ``run/config.<dialect>.yaml`` carries an ``auth:``
+    block — the runner will derive the ARN later. This test monkeypatches
+    the cfg-discovery to return None so we exercise the original
+    "no env, no cfg auth" failure path.
+    """
     monkeypatch.delenv(QS_E2E_USER_ARN.name, raising=False)
+    monkeypatch.setattr(runner, "_resolve_seed_config", lambda _candidates: None)
     result = runner._probe_qs_e2e_user_arn()
     assert result is not None
     assert result.kind == "qs_arn_unset"
+
+
+def test_probe_qs_arn_passes_with_cfg_auth_profile(monkeypatch: Any) -> None:
+    """Y.2.gate.h+i.0 — cfg.auth.aws_profile presence satisfies the probe.
+
+    When operator has wired AWS_PROFILE via cfg, the runner will derive
+    QS_E2E_USER_ARN via STS+ListUsers in `_run_one_variant`. Probe should
+    pre-pass instead of demanding the env var be exported.
+    """
+    monkeypatch.delenv(QS_E2E_USER_ARN.name, raising=False)
+    fake_cfg = SimpleNamespace(
+        auth=SimpleNamespace(aws_profile="quicksight-gen-local", quicksight_user_arn=None),
+    )
+    monkeypatch.setattr(runner, "_resolve_seed_config", lambda _candidates: Path("/tmp/fake-cfg.yaml"))
+    monkeypatch.setattr(
+        "quicksight_gen.common.config.load_config", lambda _path: fake_cfg,
+    )
+    assert runner._probe_qs_e2e_user_arn() is None
+
+
+def test_probe_qs_arn_passes_with_cfg_auth_override(monkeypatch: Any) -> None:
+    """Y.2.gate.h+i.0 — explicit cfg.auth.quicksight_user_arn satisfies probe."""
+    monkeypatch.delenv(QS_E2E_USER_ARN.name, raising=False)
+    fake_cfg = SimpleNamespace(
+        auth=SimpleNamespace(
+            aws_profile=None,
+            quicksight_user_arn="arn:aws:quicksight:us-east-1:111122223333:user/default/test",
+        ),
+    )
+    monkeypatch.setattr(runner, "_resolve_seed_config", lambda _candidates: Path("/tmp/fake-cfg.yaml"))
+    monkeypatch.setattr(
+        "quicksight_gen.common.config.load_config", lambda _path: fake_cfg,
+    )
+    assert runner._probe_qs_e2e_user_arn() is None
 
 
 def test_probe_dependencies_unit_no_deps() -> None:
@@ -218,8 +263,14 @@ def test_probe_dependencies_browser_aggregates_failures(monkeypatch: Any) -> Non
     """All three deps fail → all three failures returned in one pass.
 
     Operator sees everything missing in one go; doesn't have to fix one,
-    re-run, hit the next, etc."""
+    re-run, hit the next, etc.
+
+    h+i.0 — also nulls the cfg-auth fallback so the qs_arn probe stays in
+    its env-only failure path (otherwise an operator's local cfg with an
+    `auth:` block would make the qs_arn dep silently pass).
+    """
     monkeypatch.delenv(QS_E2E_USER_ARN.name, raising=False)
+    monkeypatch.setattr(runner, "_resolve_seed_config", lambda _candidates: None)
     fake_probes = {
         "aws": lambda: runner.ProbeFailure(kind="aws_creds_expired", message="..."),
         "docker": lambda: runner.ProbeFailure(kind="docker_daemon_down", message="..."),

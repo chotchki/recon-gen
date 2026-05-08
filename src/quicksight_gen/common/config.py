@@ -29,6 +29,33 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class AuthConfig:
+    """Local-runner AWS auth + QS embed-signing identity.
+
+    Combined h+i.0 spike (2026-05-08, `docs/audits/y_2_gate_h_i_combined_spike.md`):
+    long-lived IAM access keys for a dedicated `quicksight-gen-local` user,
+    referenced from `~/.aws/credentials` via a named profile. Eliminates the
+    AWS-SSO-cache-miss browser flow that broke multi-hour Claude-loop sessions.
+    Cfg yaml carries only the profile name; the keys themselves stay in
+    `~/.aws/credentials` (out of even gitignored cfg files, standard AWS
+    pattern).
+
+    `aws_profile` — name of a profile in `~/.aws/credentials`. Runner injects
+    `AWS_PROFILE=<value>` into every subprocess it spawns. None = ambient
+    AWS env (env vars / default profile / SSO cache).
+
+    `quicksight_user_arn` — explicit override for `_derive_qs_user_arn`'s
+    auto-derivation. None = derive via `sts:GetCallerIdentity` + match on
+    `quicksight:ListUsers`'s `PrincipalId == "federated/iam/<UserId>"`. Set
+    explicitly when authed as a principal that doesn't match the desired
+    QS embed user (e.g., local-root authed but want test-user; CI's per-job
+    cfg with the secret value baked in).
+    """
+    aws_profile: str | None = None
+    quicksight_user_arn: str | None = None
+
+
+@dataclass(frozen=True)
 class SigningConfig:
     """Operator-side digital-signing material for audit PDF auto-sign (U.7.b).
 
@@ -86,6 +113,15 @@ class Config:
     # through pyHanko to apply a CMS signature. Absent = ship the
     # PDF unsigned (current behavior).
     signing: SigningConfig | None = None
+    # Y.2.gate.h+i.0 — Local-runner AWS auth + QS embed-signing identity.
+    # When set, the test-layer-chain runner injects ``AWS_PROFILE`` into
+    # subprocess envs (per ``cfg.auth.aws_profile``) and auto-derives
+    # ``QS_E2E_USER_ARN`` from STS+ListUsers (or uses
+    # ``cfg.auth.quicksight_user_arn`` when explicitly set). Absent =
+    # operator manages auth via ambient env vars (legacy behavior; CI
+    # also uses ambient via OIDC). See combined spike for the full
+    # decision + IAM runbook.
+    auth: AuthConfig | None = None
     # v8.6.11 — When True (default), every Create* boto3 call passes
     # ``Tags=[ManagedBy, ResourcePrefix, L2Instance, *extra_tags]`` so
     # ``json clean`` can fail-CLOSED scope deletion to ourselves. Set
@@ -254,7 +290,7 @@ class Config:
 _CONFIG_ALLOWED_KEYS: frozenset[str] = frozenset({
     "aws_account_id", "aws_region", "datasource_arn", "resource_prefix",
     "principal_arns", "principal_arn", "extra_tags", "demo_database_url",
-    "dialect", "signing", "tagging_enabled", "app2_db_pool_size",
+    "dialect", "signing", "tagging_enabled", "app2_db_pool_size", "auth",
 })
 
 _CONFIG_L2_ONLY_KEYS: frozenset[str] = frozenset({
@@ -471,6 +507,33 @@ def load_config(path: str | Path | None = None) -> Config:
                 f"Need both 'key_path' and 'cert_path'."
             ) from exc
 
+    # Y.2.gate.h+i.0 — optional auth block.
+    raw_auth = values.get("auth")
+    auth: AuthConfig | None = None
+    if isinstance(raw_auth, dict):
+        auth_typed = cast(dict[Any, Any], raw_auth)
+        auth_dict: dict[str, object] = {
+            str(k): v for k, v in auth_typed.items()
+        }
+        unknown_auth = set(auth_dict) - {"aws_profile", "quicksight_user_arn"}
+        if unknown_auth:
+            raise ValueError(
+                f"auth block contains unknown keys: {sorted(unknown_auth)}. "
+                f"Allowed: aws_profile, quicksight_user_arn."
+            )
+        auth = AuthConfig(
+            aws_profile=(
+                str(auth_dict["aws_profile"])
+                if auth_dict.get("aws_profile") is not None
+                else None
+            ),
+            quicksight_user_arn=(
+                str(auth_dict["quicksight_user_arn"])
+                if auth_dict.get("quicksight_user_arn") is not None
+                else None
+            ),
+        )
+
     raw_tagging = values.get("tagging_enabled", True)
     if not isinstance(raw_tagging, bool):
         raise ValueError(
@@ -505,6 +568,7 @@ def load_config(path: str | Path | None = None) -> Config:
         demo_database_url=_opt_str(values, "demo_database_url"),
         dialect=dialect,
         signing=signing,
+        auth=auth,
         tagging_enabled=raw_tagging,
         app2_db_pool_size=pool_size,
     )
