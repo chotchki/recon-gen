@@ -36,6 +36,16 @@ Four checks today, all extensible — drop a new ``Check`` into
   Escape hatch: append ``# bare-suppression-ok`` to the same line
   for the rare cases where the error code itself is the reason.
 
+- **determinism** (Y.2.gate.b.15.lint.determinism) — calls to
+  module-level random helpers (``random.random``, ``random.choice``,
+  ``random.shuffle``, etc.) OR ``random.Random()`` with no seed in
+  scope-restricted seed-generating modules
+  (``common/l2/seed.py``, ``common/l2/auto_scenario.py``, ``apps/``).
+  These use the unseeded global ``random`` state — different runs
+  produce different output, breaking hash-locked seed contracts +
+  fuzz-seed reproducibility. Use ``rng = random.Random(<seed>);
+  rng.X(...)`` instead.
+
 Suppression
 -----------
 
@@ -444,6 +454,75 @@ class WhyCommentCheck(Check):
 
 
 # ---------------------------------------------------------------------------
+# Check: determinism (Y.2.gate.b.15.lint.determinism)
+# ---------------------------------------------------------------------------
+
+
+# Module-level random helpers that pull from the unseeded global
+# state. Using any of these in seed-generating code (where output
+# must be deterministic across runs) is a silent breakage waiting
+# to happen.
+_RANDOM_NONDETERMINISTIC_FUNCS = frozenset({
+    "random", "randint", "choice", "shuffle", "uniform", "sample",
+    "randrange", "getrandbits", "choices", "triangular",
+    "betavariate", "gauss", "normalvariate", "lognormvariate",
+    "vonmisesvariate", "paretovariate", "weibullvariate",
+    "expovariate", "gammavariate",
+})
+
+
+class _DeterminismVisitor(ast.NodeVisitor):
+    """Walk Call nodes; flag bare ``random.X(...)`` and ``random.Random()``
+    (no-arg) calls. Seeded forms (``random.Random(42)``,
+    ``rng.choice(...)``) are fine — both produce reproducible output."""
+
+    def __init__(self, file: Path) -> None:
+        self.file = file
+        self.smells: list[Smell] = []
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Attribute) and \
+                isinstance(node.func.value, ast.Name) and \
+                node.func.value.id == "random":
+            attr = node.func.attr
+            if attr in _RANDOM_NONDETERMINISTIC_FUNCS:
+                self.smells.append(Smell(
+                    file=self.file,
+                    lineno=node.lineno,
+                    checker="determinism",
+                    message=(
+                        f"``random.{attr}(...)`` reads the unseeded "
+                        f"global random state — different runs produce "
+                        f"different output, breaking hash-locked seeds + "
+                        f"fuzz-seed reproducibility. Use ``rng = "
+                        f"random.Random(<seed>); rng.{attr}(...)`` "
+                        f"instead, OR add ``# typing-smell: ignore"
+                        f"[determinism]`` with a one-line reason."
+                    ),
+                ))
+            elif attr == "Random" and not node.args:
+                self.smells.append(Smell(
+                    file=self.file,
+                    lineno=node.lineno,
+                    checker="determinism",
+                    message=(
+                        f"``random.Random()`` with no seed picks a "
+                        f"random seed at construction time — different "
+                        f"runs produce different output. Pass an "
+                        f"explicit int seed: ``random.Random(<seed>)``."
+                    ),
+                ))
+        self.generic_visit(node)
+
+
+class DeterminismCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        v = _DeterminismVisitor(file)
+        v.visit(tree)
+        return v.smells
+
+
+# ---------------------------------------------------------------------------
 # Suppression filtering
 # ---------------------------------------------------------------------------
 
@@ -569,6 +648,21 @@ def _build_checks() -> list[Check]:
                 "(escape hatch: ``# bare-suppression-ok`` on the same line)"
             ),
             files=why_comment_scope,
+        ),
+        DeterminismCheck(
+            name="determinism",
+            description=(
+                "module-level ``random.X(...)`` / ``random.Random()`` "
+                "in seed-generating code reads unseeded global state; "
+                "use ``rng = random.Random(<seed>); rng.X(...)`` "
+                "instead so hash-locked seeds + fuzz reproducibility "
+                "stay deterministic"
+            ),
+            files=_expand_paths([
+                REPO_ROOT / "src/quicksight_gen/common/l2/seed.py",
+                REPO_ROOT / "src/quicksight_gen/common/l2/auto_scenario.py",
+                REPO_ROOT / "src/quicksight_gen/apps",
+            ]),
         ),
     ]
 
