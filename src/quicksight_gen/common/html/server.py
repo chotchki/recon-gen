@@ -354,7 +354,7 @@ def make_app(
         # browser-forwarded events alongside uvicorn's access log.
         # The ``DEV-LOG`` prefix preserves the grep-friendly shape
         # the previous stderr `print` had.
-        _DEVLOG.info("DEV-LOG %s", json.dumps(payload))
+        _DEVLOG.info("DEV-LOG %s", json.dumps(payload))  # typing-smell: ignore[json-indent]: log line — compact one-line JSON is grep/jq-friendly
         return Response(status_code=204)
 
     # X.2.m — themed error pages for 4xx / 5xx. The handlers reuse

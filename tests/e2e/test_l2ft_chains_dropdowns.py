@@ -105,7 +105,7 @@ def _pick_each_option_and_assert_table_nonempty(
         # ``count_table_rows`` reads DOM only (saturates ~10) which is
         # enough for "table not empty" — fast vs. the slow
         # ``count_table_total_rows`` scroll-and-count walker.
-        time.sleep(5)
+        time.sleep(5)  # typing-smell: ignore[no-sleep]: known flake — convert to wait_for_function poll (b.15.followup.l2ft-no-sleep)
         after = count_table_rows(page, "Chain Instances")
         if after <= 0:
             failures.append(option)

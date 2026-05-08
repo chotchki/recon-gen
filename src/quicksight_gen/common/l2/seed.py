@@ -471,7 +471,7 @@ class ScenarioPlant:
     rail_firing_plants: tuple[RailFiringPlant, ...] = ()
     inv_fanout_plants: tuple[InvFanoutPlant, ...] = ()
     today: date = field(
-        default_factory=lambda: datetime.now(tz=timezone.utc).date(),
+        default_factory=lambda: datetime.now(tz=timezone.utc).date(),  # typing-smell: ignore[no-datetime-now]: dataclass default for ad-hoc; locked seeds + tests always override with the pinned anchor
     )
 
 
@@ -820,7 +820,7 @@ def emit_baseline_seed(
       daily-balance rows.
     """
     if anchor is None:
-        anchor = datetime.now(tz=timezone.utc).date()
+        anchor = datetime.now(tz=timezone.utc).date()  # typing-smell: ignore[no-datetime-now]: ad-hoc-run fallback; locked seeds + tests always pass anchor=date(2030, 1, 1)
 
     prefix = instance.instance
     template_by_role = {t.role: t for t in instance.account_templates}

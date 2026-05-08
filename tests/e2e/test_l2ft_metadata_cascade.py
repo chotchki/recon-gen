@@ -116,7 +116,7 @@ def test_metadata_value_pick_does_not_empty_transactions_table(
 
         # Cascade query refreshes the Value dropdown options based on
         # pMetaKey; give QS a beat to re-fetch before reading options.
-        time.sleep(2)
+        time.sleep(2)  # typing-smell: ignore[no-sleep]: known flake — convert to wait_for_function poll (b.15.followup.l2ft-no-sleep)
 
         value_options = read_dropdown_options(
             page, "Metadata Value", timeout_ms=page_timeout,
@@ -143,7 +143,7 @@ def test_metadata_value_pick_does_not_empty_transactions_table(
         # leave the count unchanged if the picked value happens to
         # appear on every leg in the window — wait-for-change would
         # then hit a misleading TimeoutError on the passing case.
-        time.sleep(5)
+        time.sleep(5)  # typing-smell: ignore[no-sleep]: known flake — convert to wait_for_function poll (b.15.followup.l2ft-no-sleep)
         after = count_table_total_rows(
             page, "Transactions", timeout_ms=page_timeout,
         )

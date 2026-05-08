@@ -61,6 +61,26 @@ Four checks today, all extensible — drop a new ``Check`` into
   bypassing it (``f"qs-gen-foo"`` direct) defeats multi-tenant
   scoping. Docstrings are ignored.
 
+- **no-datetime-now** (Y.2.gate.b.15.lint.no-datetime-now) —
+  ``datetime.now()`` / ``datetime.utcnow()`` / ``date.today()``
+  outside the 4 allowlist files (``_dev/runner.py``,
+  ``cli/audit/``, ``common/sheets/app_info.py``,
+  ``common/provenance.py``). Determinism leak risk for any output
+  that gets compared / hash-locked / diffed.
+
+- **no-sleep** (Y.2.gate.b.15.lint.no-sleep) — ``time.sleep(...)``
+  in ``tests/e2e/``. Use ``page.wait_for_function`` /
+  ``wait_for_load_state`` polls instead — sleeps cause flakes by
+  either being too short (race) or too long (slow CI runs).
+  Allowlist the harness fixture's startup poll.
+
+- **json-indent** (Y.2.gate.b.15.lint.json-indent) — bare
+  ``json.dumps(obj)`` in ``cli/`` + ``common/`` requires either
+  ``indent=`` (human-diffable file-emit) OR ``separators=``
+  (compact format — deterministic byte-for-byte for cryptographic
+  fingerprint / log lines / embedded HTML payloads). The smell is
+  "no deliberate format choice"; either kwarg satisfies the lint.
+
 Suppression
 -----------
 
@@ -649,6 +669,144 @@ class QsGenPrefixCheck(Check):
 
 
 # ---------------------------------------------------------------------------
+# Check: no-datetime-now (Y.2.gate.b.15.lint.no-datetime-now)
+# ---------------------------------------------------------------------------
+
+
+class _NoDatetimeNowVisitor(ast.NodeVisitor):
+    """Walk Call nodes; flag ``datetime.now()`` / ``datetime.utcnow()``
+    / ``date.today()`` calls. Determinism leak risk for hash-locked
+    seed contracts + e2e diffing."""
+
+    def __init__(self, file: Path) -> None:
+        self.file = file
+        self.smells: list[Smell] = []
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Attribute) and \
+                isinstance(node.func.value, ast.Name) and \
+                node.func.value.id in ("datetime", "date") and \
+                node.func.attr in ("now", "utcnow", "today"):
+            self.smells.append(Smell(
+                file=self.file,
+                lineno=node.lineno,
+                checker="no-datetime-now",
+                message=(
+                    f"``{node.func.value.id}.{node.func.attr}()`` "
+                    f"reads wall-clock time — different runs produce "
+                    f"different output, breaking hash-locked seed "
+                    f"contracts + diff-based e2e assertions. Pin a "
+                    f"specific date / pass the anchor through, OR "
+                    f"add the file to the allowlist if it's a legit "
+                    f"timestamp source (e.g., audit cover-page, "
+                    f"deploy stamp). Suppress with ``# typing-smell: "
+                    f"ignore[no-datetime-now]: <reason>``."
+                ),
+            ))
+        self.generic_visit(node)
+
+
+class NoDatetimeNowCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        v = _NoDatetimeNowVisitor(file)
+        v.visit(tree)
+        return v.smells
+
+
+# ---------------------------------------------------------------------------
+# Check: no-sleep (Y.2.gate.b.15.lint.no-sleep)
+# ---------------------------------------------------------------------------
+
+
+class _NoSleepVisitor(ast.NodeVisitor):
+    """Walk Call nodes; flag ``time.sleep(...)``. Browser e2e should
+    poll for state changes; sleeps cause flakes (too short = race;
+    too long = slow CI)."""
+
+    def __init__(self, file: Path) -> None:
+        self.file = file
+        self.smells: list[Smell] = []
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Attribute) and \
+                node.func.attr == "sleep" and \
+                isinstance(node.func.value, ast.Name) and \
+                node.func.value.id == "time":
+            self.smells.append(Smell(
+                file=self.file,
+                lineno=node.lineno,
+                checker="no-sleep",
+                message=(
+                    "``time.sleep(...)`` in browser e2e — use "
+                    "``page.wait_for_function`` / "
+                    "``wait_for_load_state`` / "
+                    "``wait_for_response`` polls instead. Sleeps "
+                    "cause flakes (too short → race; too long → slow "
+                    "CI). If genuinely necessary (e.g., 50ms startup "
+                    "poll inside a uvicorn-spinup loop), suppress "
+                    "with ``# typing-smell: ignore[no-sleep]: "
+                    "<reason>``."
+                ),
+            ))
+        self.generic_visit(node)
+
+
+class NoSleepCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        v = _NoSleepVisitor(file)
+        v.visit(tree)
+        return v.smells
+
+
+# ---------------------------------------------------------------------------
+# Check: json-indent (Y.2.gate.b.15.lint.json-indent)
+# ---------------------------------------------------------------------------
+
+
+class _JsonIndentVisitor(ast.NodeVisitor):
+    """Walk Call nodes; flag ``json.dumps(obj)`` without ``indent=`` OR
+    ``separators=``. Either kwarg signals a deliberate format choice
+    (indent for human-diffable file emit; separators for compact
+    deterministic output). Bare ``json.dumps()`` is ambiguous."""
+
+    def __init__(self, file: Path) -> None:
+        self.file = file
+        self.smells: list[Smell] = []
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Attribute) and \
+                node.func.attr == "dumps" and \
+                isinstance(node.func.value, ast.Name) and \
+                node.func.value.id in ("json", "_json"):
+            kwarg_names = {kw.arg for kw in node.keywords if kw.arg}
+            if "indent" not in kwarg_names and "separators" not in kwarg_names:
+                self.smells.append(Smell(
+                    file=self.file,
+                    lineno=node.lineno,
+                    checker="json-indent",
+                    message=(
+                        "``json.dumps(obj)`` without ``indent=`` or "
+                        "``separators=`` — make the format choice "
+                        "deliberate. Use ``indent=2`` for human-"
+                        "diffable file emit (most CLI write paths), "
+                        "or ``separators=(\",\", \":\")`` for compact "
+                        "deterministic output (cryptographic "
+                        "fingerprints, log lines, embedded HTML "
+                        "payloads). Suppress with ``# typing-smell: "
+                        "ignore[json-indent]: <reason>`` if intentional."
+                    ),
+                ))
+        self.generic_visit(node)
+
+
+class JsonIndentCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        v = _JsonIndentVisitor(file)
+        v.visit(tree)
+        return v.smells
+
+
+# ---------------------------------------------------------------------------
 # Suppression filtering
 # ---------------------------------------------------------------------------
 
@@ -822,6 +980,49 @@ def _build_checks() -> list[Check]:
                 )
                 if p != REPO_ROOT / "src/quicksight_gen/common/config.py"
             ],
+        ),
+        NoDatetimeNowCheck(
+            name="no-datetime-now",
+            description=(
+                "``datetime.now()`` / ``date.today()`` outside the "
+                "4 allowlist files (runner, audit, app_info, "
+                "provenance) — determinism leak risk for "
+                "hash-locked / diff-based output"
+            ),
+            files=[
+                p for p in _expand_paths(
+                    [REPO_ROOT / "src/quicksight_gen"]
+                )
+                if not str(p.relative_to(REPO_ROOT)).startswith(
+                    "src/quicksight_gen/_dev/runner"
+                )
+                and not str(p.relative_to(REPO_ROOT)).startswith(
+                    "src/quicksight_gen/cli/audit/"
+                )
+                and p != REPO_ROOT / "src/quicksight_gen/common/sheets/app_info.py"
+                and p != REPO_ROOT / "src/quicksight_gen/common/provenance.py"
+            ],
+        ),
+        NoSleepCheck(
+            name="no-sleep",
+            description=(
+                "``time.sleep(...)`` in browser e2e — use Playwright "
+                "wait_* polls instead; sleeps are flake sources"
+            ),
+            files=_expand_paths([REPO_ROOT / "tests/e2e"]),
+        ),
+        JsonIndentCheck(
+            name="json-indent",
+            description=(
+                "bare ``json.dumps(obj)`` requires either "
+                "``indent=`` (human-diffable) or ``separators=`` "
+                "(compact deterministic) — make the format choice "
+                "deliberate"
+            ),
+            files=_expand_paths([
+                REPO_ROOT / "src/quicksight_gen/cli",
+                REPO_ROOT / "src/quicksight_gen/common",
+            ]),
         ),
     ]
 

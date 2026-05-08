@@ -196,7 +196,7 @@ def html2_server(
             raise RuntimeError(
                 f"App2 uvicorn failed to start within {startup_timeout_s}s"
             )
-        time.sleep(0.05)
+        time.sleep(0.05)  # typing-smell: ignore[no-sleep]: 50ms uvicorn-startup poll; server.started has no awaitable
     log_handler, log_path = _attach_app2_log_handler()
     sock = server.servers[0].sockets[0]
     port = sock.getsockname()[1]

@@ -114,7 +114,7 @@ def _pick_each_option_and_assert_table_nonempty(
         # leave the count unchanged if the picked value spans every
         # row in the window. ``count_table_rows`` reads DOM only
         # (saturates ~10) which is enough for "table not empty".
-        time.sleep(5)
+        time.sleep(5)  # typing-smell: ignore[no-sleep]: known flake — convert to wait_for_function poll (b.15.followup.l2ft-no-sleep)
         after = count_table_rows(page, "Transactions")
         if after <= 0:
             failures.append(option)

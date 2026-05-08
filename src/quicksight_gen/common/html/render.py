@@ -803,7 +803,7 @@ def emit_visual_data_fragment(visual_id: str, data: Any) -> str:
     would shape differently).
     """
     del visual_id  # reserved for future debug/diagnostic use
-    payload = json.dumps(data, default=_json_default)
+    payload = json.dumps(data, default=_json_default)  # typing-smell: ignore[json-indent]: embedded HTML script payload — compact form keeps DOM small + matches d3 hydration expectations
     return (
         f'<script type="application/json" class="chart-data">{payload}</script>'
     )

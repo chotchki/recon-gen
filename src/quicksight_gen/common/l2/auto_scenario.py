@@ -127,7 +127,7 @@ def default_scenario_for(
     materialized from this instance (e.g., no ``LimitSchedule``
     declared → no LimitBreachPlant).
     """
-    today_ref = today or datetime.now(tz=timezone.utc).date()
+    today_ref = today or datetime.now(tz=timezone.utc).date()  # typing-smell: ignore[no-datetime-now]: ad-hoc-run fallback; tests + CLI always pass today=anchor (CLAUDE.md "Anchor pinned at date(2030, 1, 1)")
     omitted: list[tuple[str, str]] = []
     include_l1 = mode in ("l1_invariants", "l1_plus_broad")
     include_broad = mode in ("broad", "l1_plus_broad")
