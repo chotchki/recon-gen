@@ -25,6 +25,7 @@ from typing import Any
 
 import pytest
 
+from quicksight_gen.common.browser.helpers import webkit_page
 from tests._test_helpers import make_test_config
 from tests.e2e._harness_html2 import (
     assert_layer2_sankey_shape,
@@ -38,6 +39,11 @@ from quicksight_gen.common.html._smoke_app import (
 )
 
 
+# Y.2.gate.c.11.app2 — `webkit_page` (from common/browser/helpers.py)
+# wraps every test in Playwright tracing + console/network capture, so
+# failures land under `$QS_GEN_RUN_DIR/browser/<test_id>/`. The
+# `pytest.importorskip` gate stays so the module skips cleanly when
+# Playwright isn't installed.
 playwright_sync_api = pytest.importorskip("playwright.sync_api")
 
 
@@ -72,9 +78,7 @@ def test_layer2_initial_load_renders_sankey(server_url: str) -> None:
     """Page loads → click Refresh → swap fires → d3 hydrates the
     Sankey from the swapped fragment. Layer 1 says 5 nodes / 4
     links → Layer 2 asserts SVG has 5 rects / 4 paths."""
-    with playwright_sync_api.sync_playwright() as p:
-        browser = p.webkit.launch(headless=True)
-        page = browser.new_page()
+    with webkit_page() as page:
         page.goto(server_url)
         trigger_initial_swap(page)
         sankey_svg = visual_svg(page, "Sankey")
@@ -84,7 +88,6 @@ def test_layer2_initial_load_renders_sankey(server_url: str) -> None:
             expected_nodes=_EXPECTED_SANKEY_NODES,
             expected_links=_EXPECTED_SANKEY_LINKS,
         )
-        browser.close()
 
 
 def test_layer2_click_pivots_sankey(server_url: str) -> None:
@@ -97,9 +100,7 @@ def test_layer2_click_pivots_sankey(server_url: str) -> None:
     COUNT change makes the assertion robust against d3-sankey's
     relative-width scaling quirks. With X.2.b's GET surface,
     anchor lands in ``?anchor=`` not the POST body."""
-    with playwright_sync_api.sync_playwright() as p:
-        browser = p.webkit.launch(headless=True)
-        page = browser.new_page()
+    with webkit_page() as page:
 
         def anchor_aware_route(route: Any) -> None:
             url = route.request.url
@@ -176,7 +177,6 @@ def test_layer2_click_pivots_sankey(server_url: str) -> None:
             timeout=5000,
         )
         after_paths = sankey_svg.locator("path").count()
-        browser.close()
 
     assert len(captured_urls) >= 2, (
         f"Expected ≥2 GETs, saw {len(captured_urls)}: "
@@ -208,9 +208,7 @@ def test_layer2_catches_missing_chart_data_bug(server_url: str) -> None:
 
     Demonstrates the dialect-comparison thesis: same Layer 2 shape
     that gates QS render bugs gates HTMX render bugs."""
-    with playwright_sync_api.sync_playwright() as p:
-        browser = p.webkit.launch(headless=True)
-        page = browser.new_page()
+    with webkit_page() as page:
 
         def intercept(route: Any) -> None:
             route.fulfill(status=200, body="")
@@ -222,4 +220,3 @@ def test_layer2_catches_missing_chart_data_bug(server_url: str) -> None:
         sankey_svg = visual_svg(page, "Sankey")
         with pytest.raises(playwright_sync_api.TimeoutError):
             sankey_svg.wait_for(state="attached", timeout=2000)
-        browser.close()

@@ -34,10 +34,15 @@ import pytest
 
 from quicksight_gen.apps.executives.app import build_executives_app
 from quicksight_gen.apps.executives.datasets import build_all_datasets
+from quicksight_gen.common.browser.helpers import webkit_page
 from tests._test_helpers import make_test_config
 from tests.e2e._harness_html2 import html2_server
 
 
+# Y.2.gate.c.11.app2 — `webkit_page` provides Playwright tracing +
+# console/network capture on failure (same lifecycle as the QS tests).
+# `pytest.importorskip` gate stays so the module skips cleanly when
+# Playwright isn't installed.
 playwright_sync_api = pytest.importorskip("playwright.sync_api")
 
 
@@ -104,9 +109,7 @@ def test_dashboard_landing_renders_with_sheet_tabs(exec_server: str) -> None:
     """Default landing (``/dashboards/exec``) shows tab strip with
     every analysis sheet — proves X.2.e tabs render for a real
     multi-sheet app."""
-    with playwright_sync_api.sync_playwright() as p:
-        browser = p.webkit.launch(headless=True)
-        page = browser.new_page()
+    with webkit_page() as page:
         page.goto(f"{exec_server}/dashboards/{_DASHBOARD_ID}")
         page.wait_for_load_state("networkidle")
         # Tab strip exists with each sheet's name.
@@ -115,16 +118,13 @@ def test_dashboard_landing_renders_with_sheet_tabs(exec_server: str) -> None:
             assert expected in nav_html, (
                 f"Sheet tab {expected!r} missing from nav — got: {nav_html[:200]}"
             )
-        browser.close()
 
 
 def test_getting_started_sheet_renders_text_boxes(exec_server: str) -> None:
     """X.2.g.1.a polish: TextBoxes render via _qs_richtext_to_html.
     Getting Started has 3 text boxes; the page should show non-empty
     content (not blank)."""
-    with playwright_sync_api.sync_playwright() as p:
-        browser = p.webkit.launch(headless=True)
-        page = browser.new_page()
+    with webkit_page() as page:
         # Default landing IS the Getting Started sheet (first in
         # the analysis order per executives/app.py).
         page.goto(f"{exec_server}/dashboards/{_DASHBOARD_ID}")
@@ -137,16 +137,13 @@ def test_getting_started_sheet_renders_text_boxes(exec_server: str) -> None:
             f"text boxes likely not rendered. Body preview: "
             f"{body_text[:200]!r}"
         )
-        browser.close()
 
 
 def test_account_coverage_visuals_auto_load(exec_server: str) -> None:
     """X.2.g.1.a polish: visuals fetch on DOMContentLoaded — no
     Refresh click required for the initial paint. Asserts the
     KPI's value appears in the DOM after the page loads."""
-    with playwright_sync_api.sync_playwright() as p:
-        browser = p.webkit.launch(headless=True)
-        page = browser.new_page()
+    with webkit_page() as page:
         page.goto(
             f"{exec_server}/dashboards/{_DASHBOARD_ID}"
             f"/sheets/exec-sheet-account-coverage"
@@ -157,7 +154,6 @@ def test_account_coverage_visuals_auto_load(exec_server: str) -> None:
             timeout=10000,
         )
         kpi_text = page.locator(".kpi-value").first.inner_text()
-        browser.close()
     # Stub fetcher returns 47 for any visual_id containing "kpi".
     assert "47" in kpi_text, (
         f"KPI didn't render the stub value — got {kpi_text!r}. "
@@ -169,9 +165,7 @@ def test_filter_change_refetches_visuals(exec_server: str) -> None:
     """Changing the date filter + clicking Refresh fires a new
     swap with date_from / date_to in the query string. Verifies
     the X.2.d filter form → visual data fetch round-trip."""
-    with playwright_sync_api.sync_playwright() as p:
-        browser = p.webkit.launch(headless=True)
-        page = browser.new_page()
+    with webkit_page() as page:
         page.goto(
             f"{exec_server}/dashboards/{_DASHBOARD_ID}"
             f"/sheets/exec-sheet-account-coverage"
@@ -188,7 +182,6 @@ def test_filter_change_refetches_visuals(exec_server: str) -> None:
         # and broadcasts as 'refresh'. No button click needed.
         # Wait past the 300ms debounce + swap settle.
         page.wait_for_timeout(800)
-        browser.close()
     # The fetcher should have been called with date_from set.
     assert any(
         params.get("date_from") == "2030-02-01"
@@ -205,14 +198,11 @@ def test_text_box_only_sheet_does_not_emit_filter_form(
     """X.2.g.1.a polish: Getting Started has no data visuals so
     the filter form (date pickers) should be suppressed. Without
     this, users see a vestigial date picker that does nothing."""
-    with playwright_sync_api.sync_playwright() as p:
-        browser = p.webkit.launch(headless=True)
-        page = browser.new_page()
+    with webkit_page() as page:
         page.goto(f"{exec_server}/dashboards/{_DASHBOARD_ID}")
         page.wait_for_load_state("networkidle")
         # No filter form on Getting Started.
         form_count = page.locator('form#filter-form').count()
-        browser.close()
     assert form_count == 0, (
         "Filter form should not render on a text-box-only sheet"
     )
@@ -224,14 +214,11 @@ def test_account_coverage_sheet_does_emit_filter_form(
     """Inverse of the previous test: sheets WITH data visuals get
     the form. Pins the suppression to the empty-visuals case
     specifically."""
-    with playwright_sync_api.sync_playwright() as p:
-        browser = p.webkit.launch(headless=True)
-        page = browser.new_page()
+    with webkit_page() as page:
         page.goto(
             f"{exec_server}/dashboards/{_DASHBOARD_ID}"
             f"/sheets/exec-sheet-account-coverage"
         )
         page.wait_for_load_state("networkidle")
         form_count = page.locator('form#filter-form').count()
-        browser.close()
     assert form_count == 1

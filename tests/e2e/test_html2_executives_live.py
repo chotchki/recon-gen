@@ -58,6 +58,7 @@ from dataclasses import dataclass
 
 from quicksight_gen.apps.executives.app import build_executives_app
 from quicksight_gen.apps.executives.datasets import build_all_datasets
+from quicksight_gen.common.browser.helpers import webkit_page
 from quicksight_gen.common.dataset_contract import get_sql
 from quicksight_gen.common.html._tree_fetcher import (
     _find_visual_dataset_identifier,
@@ -167,15 +168,12 @@ def test_account_coverage_kpi_renders_with_real_data(
     number from the live DB. Catches "wrong L2" (table doesn't
     exist → fetcher errors → no KPI), "renderer broken" (KPI value
     never appears), and "data layer empty" (KPI shows 0)."""
-    with playwright_sync_api.sync_playwright() as p:
-        browser = p.webkit.launch(headless=True)
-        page = browser.new_page()
+    with webkit_page() as page:
         page.goto(
             f"{live_db_exec_server.base_url}/dashboards/{_DASHBOARD_ID}"
             f"/sheets/exec-sheet-account-coverage"
         )
         kpi_text = wait_for_kpi_value(page, timeout_ms=15000)
-        browser.close()
     # KPI should be a number (count of accounts) — not blank, not "0",
     # not "NaN". A populated DB should have at least a few accounts.
     digits = "".join(ch for ch in kpi_text if ch.isdigit())
@@ -206,9 +204,7 @@ def test_date_filter_does_not_error_when_applied(
     pattern: ``CAST(:date_from AS DATE)`` must not error when the
     bind value is empty (the PG OR-short-circuit gotcha).
     """
-    with playwright_sync_api.sync_playwright() as p:
-        browser = p.webkit.launch(headless=True)
-        page = browser.new_page()
+    with webkit_page() as page:
         page.goto(
             f"{live_db_exec_server.base_url}/dashboards/{_DASHBOARD_ID}"
             f"/sheets/exec-sheet-account-coverage"
@@ -224,7 +220,6 @@ def test_date_filter_does_not_error_when_applied(
         # Second render with a real date — proves the bind value
         # threads through CAST(... AS DATE) without errors.
         narrowed = wait_for_kpi_value(page, timeout_ms=10000)
-        browser.close()
     # KPI re-rendered → date substitution worked at SQL execution.
     digits = "".join(ch for ch in narrowed if ch.isdigit())
     assert digits, (
@@ -375,7 +370,6 @@ def test_date_filter_narrows_every_date_sensitive_count_kpi(
                     f"narrow={narrow_text!r} ({narrow_value}). "
                     f"narrow window={narrow_from} .. {narrow_to}."
                 )
-        browser.close()
     assert not failures, (
         "Date filter did not narrow at least one count KPI. "
         "Bind is not reaching SQL or wrap_for_visual is stripping "
