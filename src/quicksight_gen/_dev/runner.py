@@ -54,6 +54,7 @@ from quicksight_gen.common.env_keys import (
     QS_GEN_FUZZ_SEED,
     QS_GEN_LAYER,
     QS_GEN_RUN_DIR,
+    QS_GEN_RUNNER_CI,
     QS_GEN_RUNNER_YES,
     QS_GEN_TEST_L2_INSTANCE,
     QS_GEN_TRACE_ALL,
@@ -1400,6 +1401,19 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
     """
     if spec.target == "aw":
         return {}, None
+    # Y.2.gate.k.1+k.6 — runner CI-mode: skip Docker for lo targets
+    # when the workflow YAML pre-provisions the DB via GHA service
+    # containers. Operator (or workflow) sets QS_GEN_RUNNER_CI=1 +
+    # QS_GEN_DEMO_DATABASE_URL=<service-container-url>; setup_variant
+    # is then a no-op and the variant URL passes through unchanged.
+    # SQLite has no container to skip — but we still honor CI mode
+    # for symmetry (the workflow can pre-create the SQLite file).
+    if QS_GEN_RUNNER_CI.get_or_none():
+        # Loud-fail if the operator set CI mode but forgot the URL —
+        # we'd otherwise silently fall back to cfg.demo_database_url
+        # and break in confusing ways downstream.
+        url = QS_GEN_DEMO_DATABASE_URL.require()
+        return {QS_GEN_DEMO_DATABASE_URL.name: url}, None
     # target == "lo" — local container or sqlite tempfile.
     if spec.dialect == "pg":
         # Lazy-import: testcontainers requires Docker, which not every

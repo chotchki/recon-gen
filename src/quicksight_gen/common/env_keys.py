@@ -339,6 +339,35 @@ QS_GEN_RUNNER_YES: Final = EnvVar(
     optional=True,
 )
 
+# Y.2.gate.k.1+k.6 — runner CI-mode opt-in. When set, ``setup_variant``
+# skips Docker container spin-up for ``lo`` targets and assumes the DB
+# is already reachable at ``QS_GEN_DEMO_DATABASE_URL``. Used by GHA
+# workflow YAMLs that pre-provision Postgres / Oracle via the
+# ``services:`` block — the runner becomes a thin orchestrator instead
+# of double-spinning Docker.
+#
+# Why this exists: the runner's local-Docker spin-up conflicts with
+# GHA service containers (port collisions, double cost, no shared
+# health-check). CI-mode lets the workflow keep its service block AND
+# still invoke the runner so the chain (unit → db → app2 → ...) is
+# the single canonical entry point.
+#
+# Contract: when set + target=lo, ``QS_GEN_DEMO_DATABASE_URL`` MUST
+# also be set; setup_variant raises ``EnvVarRequired`` otherwise. The
+# variant's URL passes through unchanged to the chain subprocesses.
+# target=aw is unaffected (always cfg-driven).
+QS_GEN_RUNNER_CI: Final = EnvVar(
+    name="QS_GEN_RUNNER_CI",
+    description=(
+        "Bool — when set, setup_variant skips Docker spin-up for lo "
+        "targets and assumes QS_GEN_DEMO_DATABASE_URL points at a "
+        "pre-provisioned DB (e.g. GHA service container). Required "
+        "for k.6 workflow rewire so CI doesn't double-spin Docker."
+    ),
+    coercer=_bool_coercer,
+    optional=True,
+)
+
 # Y.2.gate.c.9 / cmd_sweep — operator override for cfg-file
 # discovery. Absent → fall back to per-dialect candidates under
 # ``run/``.

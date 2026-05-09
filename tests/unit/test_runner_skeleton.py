@@ -1906,6 +1906,98 @@ def test_setup_variant_aw_target_is_no_op() -> None:
     assert handle is None
 
 
+# Y.2.gate.k.1+k.6 — runner CI-mode tests.
+#
+# When QS_GEN_RUNNER_CI=1 + QS_GEN_DEMO_DATABASE_URL is pre-set, the
+# runner skips Docker spin-up for `lo` targets (the workflow YAML's
+# `services:` block has already provisioned the DB). Lets CI invoke
+# `./run_tests.sh up_to=db --dialects=pg --targets=lo` so the runner
+# is the canonical entry point without double-spinning Docker.
+
+
+def test_setup_variant_ci_mode_pg_lo_skips_docker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gate.k.1+k.6 — pg/lo + CI mode: no Docker spin, just pass-through
+    the pre-set URL. Verifies handle is None (nothing to teardown) and
+    the env carries the URL the workflow set."""
+    from quicksight_gen.common.env_keys import (
+        QS_GEN_DEMO_DATABASE_URL,
+        QS_GEN_RUNNER_CI,
+    )
+    monkeypatch.setenv(QS_GEN_RUNNER_CI.name, "1")
+    monkeypatch.setenv(
+        QS_GEN_DEMO_DATABASE_URL.name,
+        "postgresql://ci:ci@localhost:5432/postgres",
+    )
+    env, handle = runner.setup_variant(_spec_pg_lo())
+    assert handle is None, (
+        "CI mode = no Docker container, so no handle to teardown"
+    )
+    assert env == {
+        QS_GEN_DEMO_DATABASE_URL.name: (
+            "postgresql://ci:ci@localhost:5432/postgres"
+        ),
+    }
+
+
+def test_setup_variant_ci_mode_or_lo_skips_docker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gate.k.1+k.6 — or/lo + CI mode: same contract as pg/lo, just
+    different URL shape. Verifies the dialect dispatch doesn't
+    short-circuit before the CI-mode check."""
+    from quicksight_gen.common.env_keys import (
+        QS_GEN_DEMO_DATABASE_URL,
+        QS_GEN_RUNNER_CI,
+    )
+    monkeypatch.setenv(QS_GEN_RUNNER_CI.name, "1")
+    monkeypatch.setenv(
+        QS_GEN_DEMO_DATABASE_URL.name,
+        "system/ci@localhost:1521/FREEPDB1",
+    )
+    env, handle = runner.setup_variant(_spec_or_lo())
+    assert handle is None
+    assert env == {
+        QS_GEN_DEMO_DATABASE_URL.name: (
+            "system/ci@localhost:1521/FREEPDB1"
+        ),
+    }
+
+
+def test_setup_variant_ci_mode_without_url_fails_loud(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gate.k.1+k.6 — CI mode requires the URL. Workflow operators who
+    forget to wire QS_GEN_DEMO_DATABASE_URL get a loud failure naming
+    the missing env var, not a silent fallback to cfg.demo_database_url
+    that confusingly breaks downstream."""
+    from quicksight_gen.common.env_keys import (
+        EnvVarRequired,
+        QS_GEN_DEMO_DATABASE_URL,
+        QS_GEN_RUNNER_CI,
+    )
+    monkeypatch.setenv(QS_GEN_RUNNER_CI.name, "1")
+    monkeypatch.delenv(QS_GEN_DEMO_DATABASE_URL.name, raising=False)
+    with pytest.raises(EnvVarRequired) as exc_info:
+        runner.setup_variant(_spec_pg_lo())
+    assert QS_GEN_DEMO_DATABASE_URL.name in str(exc_info.value)
+
+
+def test_setup_variant_ci_mode_aw_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gate.k.1+k.6 — CI mode is irrelevant for aw targets — those
+    always cfg-discover. The early `target=aw` return path runs first;
+    CI mode never gets consulted."""
+    from quicksight_gen.common.env_keys import QS_GEN_RUNNER_CI
+    monkeypatch.setenv(QS_GEN_RUNNER_CI.name, "1")
+    # Deliberately don't set QS_GEN_DEMO_DATABASE_URL — aw doesn't need it.
+    env, handle = runner.setup_variant(_spec_pg_aw())
+    assert env == {}
+    assert handle is None
+
+
 # Y.2.gate.m.4.f — per-cell layer cap (A) tests.
 
 

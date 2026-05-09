@@ -1,5 +1,63 @@
 # Release Notes
 
+## v8.8.0a15 — Y.2.gate.k.1+k.6 spike + Phase 1 wedge
+
+Fifteenth alpha. Lands the runner CI-mode unblocker for k.1 + k.6,
+plus the Phase 1 proof point that uses it.
+
+### Spike: runner CI-mode (`Y.2.gate.k.1+k.6`)
+
+`QS_GEN_RUNNER_CI` typed EnvVar. When set, `setup_variant` skips
+Docker container spin-up for `lo` targets and assumes the DB is
+already reachable via `QS_GEN_DEMO_DATABASE_URL`. Loud-fails via
+`EnvVarRequired` if CI mode is set but the URL isn't.
+
+Why: the runner's testcontainers-based Docker spin-up conflicts
+with GHA `services:` blocks (port collisions, double cost, no
+shared health-check). Without a detection mode, k.1 + k.6 (rewire
+CI workflows to invoke the runner) couldn't move forward. Audit
+doc: `docs/audits/y_2_gate_k_runner_ci_mode_spike.md`.
+
+4 unit tests cover the contract: `pg/lo + url`, `or/lo + url`,
+`pg/lo + missing url → loud fail`, `aw + ci-mode → unchanged
+passthrough`.
+
+### Phase 1 wedge: `ci.yml::integration-pg` uses the runner
+
+Replaces the prior manual `schema apply` + `data apply` + `data
+refresh` + `json apply` + `pytest test_dataset_sql_smoke.py`
+chain with a single runner invocation:
+
+```yaml
+env:
+  QS_GEN_RUNNER_CI: "1"
+  QS_GEN_DEMO_DATABASE_URL: "postgresql://..."
+  QS_GEN_CONFIG: /tmp/ci-pg.yaml
+  QS_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
+run: ./run_tests.sh up_to=db --dialects=pg --targets=lo
+```
+
+Per-cell artifacts land at
+`runs/<run-id>/sp_pg_lo/db/{cmd,stdout,stderr}.log` for triage
+parity with local invocations.
+
+`test_demo_apply_row_counts.py` + audit-PDF render/verify stay as
+separate workflow steps for now (k.1.absorb queues promoting them
+into the runner's default `db` set as Phase 2).
+
+Local verify against a transient `postgres:17` container:
+- unit layer: 2119 passed, 76 skipped in 13.45s
+- db layer (test_dataset_sql_smoke.py): 37 passed in 7.32s
+- Total wall-clock: ~25s (vs the prior chain's ~5 min).
+
+### Test isolation hotfix
+
+`tests/json/test_cli_json.py::test_apply_no_demo_database_url_skips_datasource_emit`
+was depending on `QS_GEN_DEMO_DATABASE_URL` being absent from
+the env. CI mode now sets that var globally, surfacing the
+pre-existing isolation gap. Fix: `monkeypatch.delenv` at the
+start of the test.
+
 ## v8.8.0a14 — Y.2.gate.h hotfix + Y.2.gate.k.5/k.7
 
 Fourteenth alpha. **Re-publishes a13's gate.h closeout** (a13 + a12 both
