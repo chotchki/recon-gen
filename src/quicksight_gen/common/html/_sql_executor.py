@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from quicksight_gen.common.sql.dialect import Dialect
 
@@ -205,15 +205,15 @@ async def execute_visual_sql_async(
     produces. The pure-CPU bits (placeholder rewrite + bind
     collection) stay sync; only the I/O bits await.
 
-    Cursor lifecycle is dialect-aware:
-      - psycopg: ``conn.cursor()`` returns a sync object that
-        supports ``await cur.execute(...)`` because it's actually
-        an AsyncCursor on AsyncConnection. Await-friendly throughout.
-      - oracledb async: same pattern — ``conn.cursor()`` is sync,
-        ``cur.execute()`` is awaitable.
-      - aiosqlite: ``await conn.execute(sql, params)`` returns a
-        cursor directly (``conn.cursor()`` works too; we use
-        ``conn.execute`` to keep the path tight).
+    Cursor lifecycle is dialect-aware (Y.3.f.alt.4b):
+      - psycopg: ``await conn.execute(sql, params)`` returns the
+        AsyncCursor — the documented one-shot pattern.
+      - aiosqlite: same — ``await conn.execute(...)`` returns a
+        cursor.
+      - oracledb async: ``conn.execute()`` does NOT return a cursor
+        (returns ``None``; executes against an internal cursor we
+        can't access). Must use the explicit ``cur = conn.cursor();
+        await cur.execute(sql, params)`` pattern.
 
     Returns:
         Same ``(rows, columns)`` shape as the sync version. Rows
@@ -230,15 +230,24 @@ async def execute_visual_sql_async(
     rewritten = rewrite_placeholders_for_dialect(sql, dialect)
     binds = collect_bind_params(sql, url_params)
     async with pool.acquire() as conn:
-        # aiosqlite's ``conn.execute`` returns a cursor directly and
-        # awaits the execute in one call — perfect for this shape.
-        # psycopg AsyncConnection + oracledb async also accept this
-        # pattern (psycopg's ``conn.execute(sql, params)`` is the
-        # documented one-shot for "give me a cursor with results").
-        cur = await conn.execute(rewritten, binds)
+        if dialect is Dialect.ORACLE:
+            # oracledb async: must open a cursor explicitly. The
+            # ``conn.execute(sql, params)`` shorthand returns None
+            # (executes via an internal cursor we can't read back).
+            # cast: per-driver cursor union (psycopg AsyncCursor /
+            # aiosqlite Cursor / oracledb AsyncCursor) lacks a
+            # shared Protocol for fetchall/description/close, AND
+            # `conn` is typed as psycopg AsyncConnection (the pool
+            # alias) — Oracle conn doesn't share that interface.
+            cur: Any = cast(Any, conn).cursor()  # typing-smell: ignore[explicit-any]: per-driver cursor union (psycopg/aiosqlite/oracledb) has no shared Protocol; conn typed as AsyncConnection so cursor() not exposed there either
+            await cur.execute(rewritten, binds)
+        else:
+            # psycopg AsyncConnection + aiosqlite both return a
+            # cursor from ``await conn.execute(sql, params)``.
+            cur = cast(Any, await conn.execute(rewritten, binds))  # typing-smell: ignore[explicit-any]: per-driver cursor union (psycopg/aiosqlite) has no shared Protocol for fetchall/description/close
         try:
-            rows = await cur.fetchall()
-            description = cur.description or []
+            rows: list[Any] = await cur.fetchall()  # typing-smell: ignore[explicit-any]: driver-typed row union widens to Any after Any cursor
+            description = cast(list[Any], cur.description or [])  # typing-smell: ignore[explicit-any]: per-driver column-meta tuple union — same justification as `cur` above
             columns = [str(c[0]) for c in description]
         finally:
             # aiosqlite cursors close async; psycopg / oracledb
