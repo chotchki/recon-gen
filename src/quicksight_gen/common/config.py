@@ -19,6 +19,7 @@ from quicksight_gen.common.env_keys import (
     QS_GEN_DATASOURCE_ARN,
     QS_GEN_DEMO_DATABASE_URL,
     QS_GEN_DIALECT,
+    QS_GEN_L2_INSTANCE_PREFIX,
     QS_GEN_PRINCIPAL_ARNS,
     QS_GEN_RESOURCE_PREFIX,
 )
@@ -423,6 +424,7 @@ def load_config(path: str | Path | None = None) -> Config:
         "aws_region": QS_GEN_AWS_REGION,
         "datasource_arn": QS_GEN_DATASOURCE_ARN,
         "resource_prefix": QS_GEN_RESOURCE_PREFIX,
+        "l2_instance_prefix": QS_GEN_L2_INSTANCE_PREFIX,
         "demo_database_url": QS_GEN_DEMO_DATABASE_URL,
         "dialect": QS_GEN_DIALECT,
         "app2_db_pool_size": QS_GEN_APP2_DB_POOL_SIZE,

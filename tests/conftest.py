@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
+import tempfile
 from pathlib import Path
 from typing import Any, Generator
 
@@ -21,9 +23,52 @@ import pytest
 
 from quicksight_gen.common.env_keys import (
     EnvVarInvalid,
+    QS_GEN_FUZZ_SEED,
     QS_GEN_LAYER,
     QS_GEN_RUN_DIR,
 )
+
+
+def pytest_configure(config: Any) -> None:
+    """Pin a session-stable fuzz seed + redirect runner.RUNS_DIR to a
+    session tmp dir so tests don't pollute the real ``runs/``.
+
+    **Fuzz seed pin (j.6.fix).** Without this, modules that materialize
+    a fuzz seed at import time (e.g.,
+    ``tests/data/test_l2_seed_contract.py::FUZZ_SEED``) compute a
+    fresh ``secrets.randbits(32)`` PER WORKER PROCESS — each worker
+    then collects ``[fuzz-seed-NNNNN]`` parametrize IDs with a
+    different N, and pytest-xdist refuses to start with "Different
+    tests were collected between gw0 and gwN". Fix: controller sets
+    ``QS_GEN_FUZZ_SEED`` once at session start; xdist passes env vars
+    from controller to worker subprocesses via execnet, so workers
+    inherit the same seed. Operator-pinned seeds
+    (``QS_GEN_FUZZ_SEED=12345 pytest ...``) flow through unchanged.
+
+    **runs/ isolation (#741).** Tests that call
+    ``runner.main(["up_to=..."])`` (e.g. ``test_cmd_up_to_*``)
+    create real run dirs under the operator's ``runs/`` and call
+    ``prune_old_runs``. Under matrix parallel fan-out
+    (13 cells × ~16 xdist workers = ~200 invocations) this generated
+    200+ transient run dirs and 200+ concurrent prune races; in-flight
+    cells' ``_synth_l2.yaml`` files got nuked by sibling pruners.
+    Fix: monkeypatch the runner's ``RUNS_DIR`` module attr to a
+    session-tmp dir. All in-process ``runner.main`` calls land their
+    fake runs in tmp; the operator's real ``runs/`` stays clean; prune
+    races vanish (all workers prune their own session-tmp tree).
+    Tests that explicitly override RUNS_DIR per-test (with
+    ``monkeypatch.setattr(runner, "RUNS_DIR", tmp_path)``) still win
+    by pytest fixture-scope precedence.
+    """
+    if QS_GEN_FUZZ_SEED.get_or_none() is None:
+        os.environ[QS_GEN_FUZZ_SEED.name] = str(secrets.randbits(32))
+
+    # #741 — redirect runner.RUNS_DIR so in-process runner.main calls
+    # land in session tmp instead of the operator's real runs/. Lazy
+    # import to avoid circular-import surprises at conftest load time.
+    from quicksight_gen._dev import runner  # noqa: PLC0415 — lazy: only patch when tests are actually running
+    session_runs_tmp = Path(tempfile.mkdtemp(prefix="qs-gen-test-runs-"))  # typing-smell: ignore[qs-gen-prefix]: tempdir disambiguator, not an AWS resource ID
+    runner.RUNS_DIR = session_runs_tmp  # type: ignore[misc]: patching module-level Final at session start; the Final mark documents intent for prod, tests legitimately rebind
 
 
 @pytest.hookimpl(hookwrapper=True)

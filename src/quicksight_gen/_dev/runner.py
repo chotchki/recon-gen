@@ -58,6 +58,15 @@ from quicksight_gen.common.env_keys import (
     QS_GEN_TEST_L2_INSTANCE,
     QS_GEN_TRACE_ALL,
 )
+from quicksight_gen.common.variant import (
+    DialectCode,
+    VariantSpec,
+    parse_dialects,
+    parse_scenarios,
+    parse_targets,
+    parse_variant_code,
+    partition_matrix,
+)
 
 EXIT_SUCCESS: Final = 0
 EXIT_FAILURE: Final = 1
@@ -325,9 +334,13 @@ class RunOptions:
       workers in this run via env passthrough — c.6.xdist-safety lock).
     - ``trace_all`` — Playwright capture every test (env var passthrough; consumed by c.11).
     - ``allow_dirty_deploy`` — bypass tracked-changes refusal on layer 4+ (active now per b.10).
-    - ``variants`` / ``fuzz_seeds`` — cross-variant fan-out via asyncio.gather (lands when
-      real variants exist; deploy/api/browser are stubs today). ``fuzz_seeds`` = COUNT
-      (sample size for property-testing axis) vs ``fuzz_seed_value`` = VALUE.
+    - ``scenarios`` / ``dialects`` / ``targets`` — variant matrix sub-flag narrowing (m.2.a).
+      All None → ``compose_matrix`` returns the 13-cell ``full`` default. Any specified
+      → cross-product mode where unspecified axes default per `variant.DEFAULT_*`.
+    - ``variants`` — triage escape (single/multiple ``<sc>_<di>_<ta>`` codes); mutex
+      with the sub-flag axes. None when not pinned.
+    - ``fuzz_seeds`` — kept as count knob for future m.3 wiring (currently unused;
+      fuzz cells inside ``compose_matrix`` already fan out via ``--scenarios=fuzz:N``).
     - ``skip_cheap`` — skip-if-already-green-this-SHA (active when cache lands; b.8).
     - ``keep_on_failure`` — don't tear down ephemeral state on failure (active when
       Y.2.gate.l.2 lifecycle commands land; b.14.3 / f.5).
@@ -335,7 +348,10 @@ class RunOptions:
 
     only: str | None = None
     parallel: int = 1
-    variants: str = "default"
+    scenarios: str | None = None
+    dialects: str | None = None
+    targets: str | None = None
+    variants: str | None = None
     fuzz_seeds: int = 1
     fuzz_seed_value: int | None = None
     skip_cheap: bool = False
@@ -445,8 +461,10 @@ def _layer_command(
         ]
         if opts.only:
             cmd += ["-k", opts.only]
-        if opts.parallel > 1:
-            cmd += ["-n", str(opts.parallel)]
+        # j.6 — within-layer pytest-xdist defaults to "auto" (= cpu_count
+        # workers). Operator can pin via --parallel=N (e.g., --parallel=1
+        # for serial debug). Same pattern as api/browser layers.
+        cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
         return (cmd, env_addl)
     if layer == "db":
         # 3a — DB SQL smoke (parametrized over 37 datasets). Behind QS_GEN_E2E=1.
@@ -455,8 +473,8 @@ def _layer_command(
         cmd = [str(_VENV_BIN / "pytest"), "tests/e2e/test_dataset_sql_smoke.py", "-q"]
         if opts.only:
             cmd += ["-k", opts.only]
-        if opts.parallel > 1:
-            cmd += ["-n", str(opts.parallel)]
+        # j.6 — see unit layer comment.
+        cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
         return (cmd, {**env_addl, QS_GEN_E2E.name: "1"})
     if layer == "app2":
         # b.3.impl.layer — App2 e2e (HTMX dialect, Playwright WebKit
@@ -477,8 +495,8 @@ def _layer_command(
         ]
         if opts.only:
             cmd += ["-k", opts.only]
-        if opts.parallel > 1:
-            cmd += ["-n", str(opts.parallel)]
+        # j.6 — see unit layer comment.
+        cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
         return (cmd, {**env_addl, QS_GEN_E2E.name: "1"})
     if layer == "deploy":
         # Y.2.gate.c.5.deploy — `quicksight-gen json apply --execute` against
@@ -1071,47 +1089,98 @@ def is_layer_cached_green(layer: str, *, variant: str = "default") -> bool:
     )
 
 
-# Y.2.gate.b.2.impl — variant axis (lock per b.1).
-#
-# Today's runner is single-variant by default ("default" = use whatever
-# DB the cfg resolves to, typically the operator's external Aurora /
-# Oracle SE2). Y.2.gate.b.2 locks the design for per-variant Docker
-# containers; this is the impl. ``--variants=local-pg`` spins up a
-# Postgres testcontainer, threads its connection URL via
-# ``QS_GEN_DEMO_DATABASE_URL`` env to the pytest subprocess, and tears
-# the container down at the end of the chain.
-#
-# Multi-variant fan-out (running both default + local-pg in one
-# invocation) is `c.6.async`'s job — needs `asyncio.gather` for
-# parallel per-variant subprocesses. b.2.impl scopes to the
-# single-non-default-variant case to deliver the keystone value:
-# operator can run db tests against a local container instead of
-# burning Aurora minutes.
-KNOWN_VARIANTS: Final = ("default", "local-pg", "local-oracle", "local-sqlite")
+# Y.2.gate.m.2 — variant axis. The runner expresses variants as
+# 3-axis cells `scenario × dialect × target` (`common/variant.py`);
+# operators narrow the matrix via `--scenarios` / `--dialects` /
+# `--targets` (or pin a single cell via `--variants=<sc>_<di>_<ta>`).
+# `setup_variant` dispatches on `(spec.dialect, spec.target)` to
+# spin up local testcontainers (`lo`) or wire the operator's external
+# Aurora/Oracle (`aw`).
 
-# Y.2.gate.b.2.impl — layers whose subprocess needs the variant's
-# DB connection threaded through (QS_GEN_DEMO_DATABASE_URL etc.).
-# Unit doesn't need it; deploy/api/browser would (when wired).
+# Layers whose subprocess needs the variant's DB connection threaded
+# through (QS_GEN_DEMO_DATABASE_URL etc.). Unit doesn't need it.
 # `app2` (b.3.impl.layer) reads the variant DB via the App2 fetcher
 # (`make_tree_db_fetcher`), so it lives here.
 DB_TOUCHING_LAYERS: Final = ("db", "app2", "deploy", "api", "browser")
 
+# m.4.f — layers that need an AWS-reachable datasource. Lo-target
+# cells seed a localhost container that QuickSight in AWS can't reach;
+# running deploy → api → browser against a localhost-pointed datasource
+# is a guaranteed dead pointer (deploy succeeds, but every dashboard
+# render times out because QS can't query localhost). Cap lo cells at
+# `app2` (the local-Docker terminal, locked by audit §7.10).
+AWS_TOUCHING_LAYERS: Final = ("deploy", "api", "browser")
 
-def resolve_variants(variants_arg: str) -> list[str]:
-    """Parse ``--variants=<set>`` CSV into a list. ``default`` always
-    resolves to a single ``["default"]`` (today's behavior preserved).
-    Unknown variant names raise — fail-loud so a typo doesn't silently
-    fall through to "default behavior" the operator didn't ask for.
+# Y.2.gate.j.5 — Oracle container reuse. **Per-cell** name (not single
+# shared) so two Oracle cells (e.g., sp_or_lo + sq_or_lo) running in
+# parallel don't collide on `containers.create(name=...)` with a 409
+# Conflict. Each cell's container persists across `./run_tests.sh`
+# invocations under its own name; operator stops via
+# `docker stop $(docker ps -q --filter name=quicksight-test-oracle-)`
+# (or future `./run_tests.sh down`, Y.2.gate.l.2). PG containers stay
+# ephemeral — their ~5s cold-start doesn't justify the cleanup-hygiene
+# cost, and per-cell naming would just litter the daemon.
+ORACLE_REUSE_CONTAINER_PREFIX: Final = "quicksight-test-oracle-"
+# Pinned password matches the testcontainers `OracleDbContainer`
+# behavior when `oracle_password` is explicitly set. Without pinning,
+# testcontainers randomizes per invocation (`hex(randbits(24))`) and
+# the adopt path can't predict the URL on subsequent runs.
+ORACLE_REUSE_PASSWORD: Final = "qs-gen-test-pwd-2026"  # typing-smell: ignore[qs-gen-prefix]: local Docker fixture password — not an AWS resource ID, not multi-tenant; the prefix is incidental string content, not a Config-prefixed resource name
+
+
+def _oracle_container_name_for(spec: VariantSpec) -> str:
+    """j.5 — per-cell Oracle container name. The cell suffix prevents
+    sibling Oracle cells from racing on docker `create(name=...)`.
+    Same cell across runs → same name → adopt path hits."""
+    return f"{ORACLE_REUSE_CONTAINER_PREFIX}{spec.name}"
+
+
+def cell_chain(spec: VariantSpec, requested_chain: list[str]) -> list[str]:
+    """m.4.f — filter the requested chain to layers this cell can run.
+
+    - ``target=aw`` cells run every layer the operator asked for;
+      passes ``requested_chain`` through unchanged.
+    - ``target=lo`` cells drop ``deploy`` / ``api`` / ``browser`` —
+      QuickSight can't reach the localhost container that backs the
+      cell's seeded data, so those layers would deploy a dead-pointer
+      dashboard. The natural lo terminal is ``app2`` (b.3.impl.layer
+      LOCKED that as the local-Docker fast-feedback layer).
+
+    The operator's ``up_to=<layer>`` is the *upper* cap; this function
+    further trims based on what the cell can physically support. Both
+    caps compose: ``up_to=db`` for any cell already excludes app2+.
     """
-    raw = [v.strip() for v in variants_arg.split(",") if v.strip()]
-    if not raw or raw == ["default"]:
-        return ["default"]
-    unknown = [v for v in raw if v not in KNOWN_VARIANTS]
-    if unknown:
+    if spec.target == "aw":
+        return requested_chain
+    return [layer for layer in requested_chain if layer not in AWS_TOUCHING_LAYERS]
+
+
+# m.2.a hard-cut hint — operator's old `--variants=local-pg` shape no
+# longer accepted. Map to the new sub-flag form.
+_LEGACY_VARIANT_HINTS: Final[dict[str, str]] = {
+    "local-pg": "--dialects=pg --targets=lo",
+    "local-oracle": "--dialects=or --targets=lo",
+    "local-sqlite": "--dialects=sl --targets=lo",
+    "default": "(no flags = full matrix; or --dialects=pg,or --targets=aw for the AWS subset)",
+}
+
+
+def _check_legacy_variant_names(arg: str) -> None:
+    """Surface the m.2 hard-cut migration on the legacy `--variants` shape.
+
+    The new `--variants=<sc>_<di>_<ta>` codes (`sp_pg_lo`, `f42_or_lo`)
+    pass through `parse_variant_code` unchanged; legacy values would
+    fail there with a regex error that doesn't tell the operator how
+    to fix it. Catch them here, point at the right sub-flag form.
+    """
+    raw = [v.strip() for v in arg.split(",") if v.strip()]
+    legacy_seen = [v for v in raw if v in _LEGACY_VARIANT_HINTS]
+    if legacy_seen:
+        first = legacy_seen[0]
         raise ValueError(
-            f"unknown variant(s) {unknown!r}; known: {list(KNOWN_VARIANTS)}"
+            f"--variants={first!r} is the legacy shape (Y.2.gate.m.2 hard-cut); "
+            f"use {_LEGACY_VARIANT_HINTS[first]} instead"
         )
-    return raw
 
 
 class _SqliteHandle:
@@ -1179,19 +1248,148 @@ def _setup_local_sqlite() -> tuple[dict[str, str], object | None]:
     return env, _SqliteHandle(db_path=db_path, cfg_path=cfg_path)
 
 
-def setup_variant(name: str) -> tuple[dict[str, str], object | None]:
-    """Bring up the resources a variant needs. Returns
+@dataclass(frozen=True)
+class _PersistentContainerHandle:
+    """Y.2.gate.j.5 — handle wrapper that signals "leave the container
+    running at teardown". `teardown_variant` calls `.stop()` on every
+    handle; for persistent containers that's a no-op so the container
+    survives across `./run_tests.sh` invocations and the next run can
+    adopt it via `_get_or_start_oracle_container`.
+
+    Holds the Docker container name so the operator can find / stop /
+    inspect it manually (`docker stop quicksight-test-oracle`). The
+    real container handle (the testcontainers `OracleDbContainer`
+    instance) is intentionally discarded — Docker keeps the container
+    running independently of the Python handle.
+    """
+
+    name: str
+
+    def stop(self) -> None:
+        """No-op by design — see class docstring. Operator owns the
+        lifecycle via `docker stop <name>` or future `./run_tests.sh
+        down` (Y.2.gate.l.2)."""
+
+
+def _get_or_start_oracle_container(
+    name: str, password: str,
+) -> tuple[str, _PersistentContainerHandle]:
+    """Y.2.gate.j.5 — adopt a running named Oracle container if one
+    exists, else start a fresh one with the same stable name. Either
+    way the returned handle's `.stop()` is a no-op — the container
+    persists across runs. Operator manages lifecycle via Docker.
+
+    Adopt path: `docker.from_env().containers.get(name)` succeeds AND
+    the container is running. Reconstruct the connection URL from the
+    container's host port (`NetworkSettings.Ports["1521/tcp"][0].HostPort`)
+    + the stable password the create path used. Saves ~30-60s of
+    cold-start vs. recreate.
+
+    Create path: testcontainers' `OracleDbContainer` with
+    `oracle_password=password` (pinned so the URL is deterministic on
+    next adopt) + `.with_name(name)` (so adopt can find it). The
+    started container's port + URL come back from
+    `get_connection_url()`.
+
+    Stopped-but-exists path: `existing.start()` resumes the container
+    in place (Docker keeps the data + image layers; only network +
+    process restart). Then re-extract the port mapping.
+
+    Failure modes:
+    - docker SDK not importable → fall through to testcontainers
+      create path (PostgresContainer side already lazy-imports
+      testcontainers; same shape).
+    - Inspect data shape unexpected → assume container is unhealthy,
+      recreate.
+    """
+    try:
+        import docker  # type: ignore[import-untyped]: third-party SDK lacks PEP 561 stubs  # noqa: PLC0415 — lazy: only Oracle path needs it
+        from docker.errors import NotFound  # type: ignore[import-untyped]: third-party SDK lacks PEP 561 stubs  # noqa: PLC0415
+    except ImportError:
+        return _start_fresh_oracle_container(name, password)
+
+    try:
+        client = docker.from_env()
+        existing = client.containers.get(name)
+    except NotFound:
+        return _start_fresh_oracle_container(name, password)
+    except Exception:  # noqa: BLE001 — docker daemon unreachable / socket missing → fall through
+        return _start_fresh_oracle_container(name, password)
+
+    if existing.status != "running":
+        try:
+            existing.start()
+            existing.reload()
+        except Exception:  # noqa: BLE001 — restart failed → recreate
+            try:
+                existing.remove(force=True)
+            except Exception:  # noqa: BLE001 — best-effort
+                pass
+            return _start_fresh_oracle_container(name, password)
+
+    try:
+        ports = existing.attrs["NetworkSettings"]["Ports"]
+        host_port = int(ports["1521/tcp"][0]["HostPort"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        # Inspect shape unexpected — likely a stale container from an
+        # older runner version. Recreate.
+        try:
+            existing.remove(force=True)
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+        return _start_fresh_oracle_container(name, password)
+
+    url = (
+        f"oracle+oracledb://system:{password}@localhost:{host_port}"
+        f"/?service_name=FREEPDB1"
+    )
+    return url, _PersistentContainerHandle(name=name)
+
+
+def _start_fresh_oracle_container(
+    name: str, password: str,
+) -> tuple[str, _PersistentContainerHandle]:
+    """j.5 — start a new named Oracle container with the stable
+    password. Returns the URL + a persistent handle (`.stop()` no-op
+    so the container outlives this invocation and the next run can
+    adopt it).
+    """
+    from testcontainers.oracle import OracleDbContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
+
+    # gvenzl/oracle-free:23-faststart — pre-initialized DB starts in
+    # seconds vs. the multi-minute cold-start on :slim. Image is
+    # heavier (~3 GB) but the time savings dominate test-loop
+    # economics. Service name defaults to FREEPDB1 (the oracle-free
+    # image's pluggable DB).
+    container = OracleDbContainer(
+        "gvenzl/oracle-free:23-faststart",
+        oracle_password=password,
+    ).with_name(name)
+    container.start()  # type: ignore[no-untyped-call]: testcontainers .start() lacks return-type hint
+    url: str = container.get_connection_url()
+    return url, _PersistentContainerHandle(name=name)
+
+
+def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
+    """Bring up the resources a variant cell needs. Returns
     ``(env_overrides, handle_for_teardown)``. Caller threads
     env_overrides into the pytest subprocess and passes handle to
     `teardown_variant` after.
 
-    For ``default``: no-op. For ``local-pg`` / ``local-oracle``:
-    spins up a testcontainer and returns its connection URL as a
-    ``QS_GEN_DEMO_DATABASE_URL`` override. For ``local-sqlite``:
-    no Docker — creates a temp DB file + temp cfg, returns BOTH
-    ``QS_GEN_DEMO_DATABASE_URL`` and ``QS_GEN_CONFIG`` overrides
-    (the cfg path is per-invocation, so it must be threaded
-    explicitly rather than discovered from the repo).
+    Dispatch by ``(spec.dialect, spec.target)``:
+
+    - ``target=aw`` (any dialect): no-op. Operator's external DB
+      (Aurora cluster, etc.); cfg-discovery for AWS auth happens
+      separately in ``_run_one_variant``.
+    - ``(pg, lo)``: postgres:17-alpine testcontainer; URL override.
+    - ``(or, lo)``: gvenzl/oracle-free:23-faststart testcontainer;
+      URL override.
+    - ``(sl, lo)``: per-invocation SQLite tempdir + cfg; both
+      ``QS_GEN_DEMO_DATABASE_URL`` and ``QS_GEN_CONFIG`` overrides
+      (no on-disk cfg under ``run/`` for sqlite — it's ephemeral).
+    - ``(sl, aw)``: rejected upstream by ``VariantSpec.is_valid()``
+      (sqlite is file-based; QS can't reach it remotely). Defensive
+      raise here for completeness.
 
     PG container takes ~10-15s to start. Oracle container
     (``gvenzl/oracle-free:23-faststart``) takes ~20-30s — still
@@ -1199,9 +1397,10 @@ def setup_variant(name: str) -> tuple[dict[str, str], object | None]:
     only). Lifetime is the chain (one DB / container reused across
     all layers in a single ``up_to`` invocation), not per-layer.
     """
-    if name == "default":
+    if spec.target == "aw":
         return {}, None
-    if name == "local-pg":
+    # target == "lo" — local container or sqlite tempfile.
+    if spec.dialect == "pg":
         # Lazy-import: testcontainers requires Docker, which not every
         # operator has. Importing only on demand keeps non-Docker
         # invocations clean.
@@ -1212,32 +1411,31 @@ def setup_variant(name: str) -> tuple[dict[str, str], object | None]:
         container.start()
         raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
         return {QS_GEN_DEMO_DATABASE_URL.name: _normalize_pg_url(raw_url)}, container
-    if name == "local-sqlite":
-        # Y.2.gate.b.2.impl.sqlite (2026-05-08) — no Docker, no
-        # network, no port allocation. Create a temp directory with a
-        # SQLite DB file + a minimal cfg pointing at it; both env
-        # overrides flow to layer subprocesses. Teardown unlinks both
-        # files via the ``_SqliteHandle.stop()`` duck-typed contract
-        # ``teardown_variant`` already calls.
-        return _setup_local_sqlite()
-    if name == "local-oracle":
-        from testcontainers.oracle import OracleDbContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
-
-        # gvenzl/oracle-free:23-faststart — pre-initialized DB starts
-        # in seconds vs. the multi-minute cold-start on :slim. The
-        # image is heavier (~3 GB) but the time savings dominate the
-        # test-loop economics. Service name defaults to FREEPDB1 (the
-        # oracle-free image's pluggable DB).
-        container = OracleDbContainer("gvenzl/oracle-free:23-faststart")
-        container.start()
-        raw_url = container.get_connection_url()
+    if spec.dialect == "or":
+        # Y.2.gate.j.5 — Oracle container reuse. Image cold-start is
+        # ~30-60s; recreating per chain run dominates iteration time.
+        # `_get_or_start_oracle_container` adopts the named container
+        # if it's already running (subsequent runs pay ~0s startup),
+        # else starts a fresh one with the stable name. Either way the
+        # returned handle's `.stop()` is a no-op so `teardown_variant`
+        # leaves the container running for the next run.
         # Oracle URL flows through unchanged — ``oracle_dsn()`` in
         # ``common/db.py`` already accepts the SQLAlchemy-style
-        # ``oracle+oracledb://...`` form the testcontainer returns,
-        # alongside the native ``user/pass@host:port/SVC`` form the
-        # cfg-file uses. No normalization step needed for Oracle.
-        return {QS_GEN_DEMO_DATABASE_URL.name: raw_url}, container
-    raise ValueError(f"setup_variant: unknown variant {name!r}")
+        # ``oracle+oracledb://...`` form.
+        url, handle = _get_or_start_oracle_container(
+            _oracle_container_name_for(spec), ORACLE_REUSE_PASSWORD,
+        )
+        return {QS_GEN_DEMO_DATABASE_URL.name: url}, handle
+    if spec.dialect == "sl":
+        # Y.2.gate.b.2.impl.sqlite — no Docker, no network. Create
+        # a tempdir with a SQLite DB file + minimal cfg pointing at
+        # it; both env overrides flow to layer subprocesses. Teardown
+        # unlinks both files via the ``_SqliteHandle.stop()`` duck-
+        # typed contract ``teardown_variant`` already calls.
+        return _setup_local_sqlite()
+    raise ValueError(
+        f"setup_variant: unhandled (dialect={spec.dialect!r}, target={spec.target!r})"
+    )
 
 
 def _normalize_pg_url(raw_url: str) -> str:
@@ -1316,27 +1514,22 @@ def _resolve_seed_config(candidates: tuple[str, ...]) -> Path | None:
     return None
 
 
-def _resolve_seed_config_for_local_pg() -> Path | None:
-    """Postgres flavor of `_resolve_seed_config`. See its docstring."""
-    return _resolve_seed_config(_LOCAL_PG_CFG_CANDIDATES)
+def _resolve_seed_config_for_dialect(dialect: DialectCode) -> Path | None:
+    """Per-dialect cfg dispatcher — returns the dialect-flavored cfg
+    for ``pg`` / ``or``, ``None`` for ``sl`` (the per-invocation
+    cfg is generated by ``setup_variant`` and threaded via
+    ``env_overrides[QS_GEN_CONFIG]``, not discovered on disk).
 
-
-def _resolve_seed_config_for_local_oracle() -> Path | None:
-    """Oracle flavor of `_resolve_seed_config`. See its docstring."""
-    return _resolve_seed_config(_LOCAL_ORACLE_CFG_CANDIDATES)
-
-
-def _resolve_seed_config_for_variant(variant: str) -> Path | None:
-    """Per-variant cfg dispatcher — returns the dialect-flavored cfg
-    for ``local-pg`` / ``local-oracle``, ``None`` for ``default`` (the
-    operator's external DB; cfg is whatever the test discovers on its
-    own, no override needed) and for ``local-sqlite`` (the per-
-    invocation cfg is generated by ``setup_variant`` and threaded via
-    ``env_overrides[QS_GEN_CONFIG]``, not discovered on disk)."""
-    if variant == "local-pg":
-        return _resolve_seed_config_for_local_pg()
-    if variant == "local-oracle":
-        return _resolve_seed_config_for_local_oracle()
+    For ``aw`` targets the same per-dialect cfg is also right —
+    operator's external Aurora is already addressable via
+    ``run/config.<dialect>.yaml``. ``_resolve_runner_cfg_path``
+    falls back to the ``_DEFAULT_RUNNER_CFG_CANDIDATES`` list when
+    this returns None (e.g., operator only has ``run/config.yaml``).
+    """
+    if dialect == "pg":
+        return _resolve_seed_config(_LOCAL_PG_CFG_CANDIDATES)
+    if dialect == "or":
+        return _resolve_seed_config(_LOCAL_ORACLE_CFG_CANDIDATES)
     return None
 
 
@@ -1353,18 +1546,19 @@ _DEFAULT_RUNNER_CFG_CANDIDATES: Final = (
 )
 
 
-def _resolve_runner_cfg_path(variant: str) -> Path | None:
+def _resolve_runner_cfg_path(spec: VariantSpec) -> Path | None:
     """Find the cfg file the runner reads for AWS auth + ARN derivation.
 
-    Per-variant first (local-pg → ``run/config.postgres.yaml``,
-    local-oracle → ``run/config.oracle.yaml``); ``default`` falls
-    through to the candidate list. Returns ``None`` when nothing
-    matches — caller skips auth wiring and the layer's own probes
-    catch any operator-action need.
+    Per-dialect first (``pg`` → ``run/config.postgres.yaml``,
+    ``or`` → ``run/config.oracle.yaml``); falls through to the
+    candidate list when the dialect-specific cfg isn't present
+    (operator may only have ``run/config.yaml``). Returns ``None``
+    when nothing matches — caller skips auth wiring and the layer's
+    own probes catch any operator-action need.
     """
-    variant_cfg = _resolve_seed_config_for_variant(variant)
-    if variant_cfg is not None:
-        return variant_cfg
+    dialect_cfg = _resolve_seed_config_for_dialect(spec.dialect)
+    if dialect_cfg is not None:
+        return dialect_cfg
     return _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
 
 
@@ -1425,19 +1619,24 @@ def _derive_qs_user_arn(cfg: "Config") -> str:
 
 
 def seed_variant(
-    name: str,
+    spec: VariantSpec,
     env_overrides: dict[str, str],
     *,
     run_dir: Path | None = None,
     terminal_prefix: str = "",
 ) -> None:
-    """Y.2.gate.b.2.impl.schema — bootstrap the variant's DB so the
-    db / deploy / api / browser layers have something to query.
+    """Y.2.gate.b.2.impl.schema — bootstrap the variant cell's DB so
+    the db / deploy / api / browser layers have something to query.
 
-    For ``default``: no-op (the operator's external Aurora / Oracle
-    is presumed already seeded). For ``local-pg`` / ``local-oracle``
-    / ``local-sqlite``: spawns three CLI subprocesses in dependency
-    order against the variant's URL:
+    Both ``target=aw`` and ``target=lo`` cells run the same 3-step
+    seed flow. For aw, the cfg's ``demo_database_url`` (operator's
+    external Aurora) is the target; the runner-driven seed creates
+    only the L2-prefixed tables (``<spec.name>_*``) so it never
+    touches operator-managed data under other prefixes. For lo,
+    the env-overridden URL points at the per-cell container.
+
+    Spawns three CLI subprocesses in dependency order against the
+    cell's URL:
 
         1. ``quicksight-gen schema apply --execute -c <cfg> [--l2 <yaml>]``
            — creates base tables, Current* views, L1 invariant
@@ -1456,36 +1655,37 @@ def seed_variant(
     in the subprocess picks up the env override (config.py:364) and
     writes against the container instead of the cfg-file URL.
 
-    L2 instance follows the same `QS_GEN_TEST_L2_INSTANCE` env
-    override the rest of the e2e suite respects; absent that, the CLI
-    defaults to bundled spec_example.
+    L2 instance follows ``QS_GEN_TEST_L2_INSTANCE``; ``_run_one_variant``
+    sets it per-spec from the scenario code (sp/sq/us → fixture path).
 
     Raises ``RuntimeError`` on cfg-discovery failure or any subprocess
-    non-zero exit. Caller (cmd_up_to) catches + maps to
+    non-zero exit. Caller (``_run_one_variant``) catches + maps to
     EXIT_NEEDS_OPERATOR; teardown still runs via the surrounding
     try/finally.
     """
-    if name == "default":
-        return
-    if name == "local-pg":
-        cfg_path = _resolve_seed_config_for_local_pg()
+    # Discover dialect-flavored cfg — same lookup path for both aw + lo
+    # cells. For aw, the cfg's `demo_database_url` is the operator's
+    # Aurora/Oracle (cfg-driven). For lo, the env-overridden URL flows
+    # through `load_config` and points at the per-cell container.
+    if spec.dialect == "pg":
+        cfg_path = _resolve_seed_config_for_dialect("pg")
         if cfg_path is None:
             raise RuntimeError(
-                "local-pg variant: no postgres-dialect cfg found "
-                "(checked QS_GEN_CONFIG env, run/config.postgres.yaml). "
-                "Create run/config.postgres.yaml (dialect: postgres) or "
-                "set QS_GEN_CONFIG to a postgres-dialect cfg path."
+                f"variant {spec.name}: no postgres-dialect cfg found "
+                f"(checked QS_GEN_CONFIG env, run/config.postgres.yaml). "
+                f"Create run/config.postgres.yaml (dialect: postgres) or "
+                f"set QS_GEN_CONFIG to a postgres-dialect cfg path."
             )
-    elif name == "local-oracle":
-        cfg_path = _resolve_seed_config_for_local_oracle()
+    elif spec.dialect == "or":
+        cfg_path = _resolve_seed_config_for_dialect("or")
         if cfg_path is None:
             raise RuntimeError(
-                "local-oracle variant: no oracle-dialect cfg found "
-                "(checked QS_GEN_CONFIG env, run/config.oracle.yaml). "
-                "Create run/config.oracle.yaml (dialect: oracle) or "
-                "set QS_GEN_CONFIG to an oracle-dialect cfg path."
+                f"variant {spec.name}: no oracle-dialect cfg found "
+                f"(checked QS_GEN_CONFIG env, run/config.oracle.yaml). "
+                f"Create run/config.oracle.yaml (dialect: oracle) or "
+                f"set QS_GEN_CONFIG to an oracle-dialect cfg path."
             )
-    elif name == "local-sqlite":
+    elif spec.dialect == "sl":
         # Y.2.gate.b.2.impl.sqlite — cfg path comes from
         # ``setup_variant`` (it generates the per-invocation cfg + DB
         # file under a tempdir and returns the cfg path in
@@ -1496,19 +1696,27 @@ def seed_variant(
         cfg_str = env_overrides.get(QS_GEN_CONFIG.name)
         if not cfg_str:
             raise RuntimeError(
-                "local-sqlite variant: setup_variant must set "
-                "QS_GEN_CONFIG in env_overrides (it generates the "
-                "per-invocation cfg). Did the caller skip setup_variant?"
+                f"variant {spec.name}: setup_variant must set "
+                f"QS_GEN_CONFIG in env_overrides (it generates the "
+                f"per-invocation cfg). Did the caller skip setup_variant?"
             )
         cfg_path = Path(cfg_str)
     else:
-        raise ValueError(f"seed_variant: unknown variant {name!r}")
+        raise ValueError(f"seed_variant: unhandled dialect {spec.dialect!r}")
 
     env = {**os.environ, **env_overrides}
     l2_arg: list[str] = []
-    l2_override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
-    if l2_override:
-        l2_arg = ["--l2", str(l2_override)]
+    # m.2.g hotfix — env_overrides wins over os.environ. Per-cell
+    # injection (`_run_one_variant` sets QS_GEN_TEST_L2_INSTANCE per
+    # spec) MUST flow to the seed CLI; reading os.environ directly
+    # would give every parallel cell the same L2 (or none), causing
+    # cells to seed under the wrong prefix and downstream smoke tests
+    # to fail with "table does not exist" against the right prefix.
+    l2_path_str = env_overrides.get(
+        QS_GEN_TEST_L2_INSTANCE.name,
+    ) or QS_GEN_TEST_L2_INSTANCE.get_or_none()
+    if l2_path_str:
+        l2_arg = ["--l2", str(l2_path_str)]
 
     seed_steps: tuple[tuple[str, ...], ...] = (
         ("schema", "apply"),
@@ -1518,18 +1726,15 @@ def seed_variant(
     cli = str(_VENV_BIN / "quicksight-gen")
     # Y.2.gate.c.6.async — capture per-step stdout/stderr to
     # ``<run_dir>/seed/<step>.{stdout,stderr}.log`` so multi-variant
-    # fan-out leaves a per-variant trail (the variant lives in
-    # ``run_dir`` itself, e.g., ``runs/<id>/local-pg/seed/...``).
-    # When ``run_dir`` is None (callers that don't care about the
-    # persisted trail), capture goes to ``/dev/null`` — terminal
-    # streaming still works.
+    # fan-out leaves a per-cell trail (cell lives in ``run_dir``
+    # itself, e.g., ``runs/<id>/sp_pg_lo/seed/...``).
     seed_dir: Path | None = None
     if run_dir is not None:
         seed_dir = run_dir / "seed"
         seed_dir.mkdir(parents=True, exist_ok=True)
     for step in seed_steps:
         cmd = [cli, *step, "--execute", "-c", str(cfg_path), *l2_arg]
-        print(f"{terminal_prefix}runner: variant-seed [{name}] {' '.join(cmd)}")
+        print(f"{terminal_prefix}runner: variant-seed [{spec.name}] {' '.join(cmd)}")
         step_label = "-".join(step)
         if seed_dir is not None:
             stdout_path = seed_dir / f"{step_label}.stdout.log"
@@ -1544,7 +1749,7 @@ def seed_variant(
         )
         if returncode != 0:
             raise RuntimeError(
-                f"variant-seed [{name}] failed at step {' '.join(step)!r} "
+                f"variant-seed [{spec.name}] failed at step {' '.join(step)!r} "
                 f"(rc={returncode})"
             )
 
@@ -1564,6 +1769,19 @@ def _is_dirty() -> bool:
     except FileNotFoundError:
         return False
     return result.returncode != 0
+
+
+def _rel_or_abs(p: Path) -> str:
+    """#741 — print-friendly path display. ``p`` is usually under
+    ``REPO_ROOT`` (production) but tests/conftest.py redirects
+    ``RUNS_DIR`` to a session tmp dir outside the repo, where
+    ``p.relative_to(REPO_ROOT)`` raises ValueError. Fall back to
+    the absolute path in that case.
+    """
+    try:
+        return str(p.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(p)
 
 
 def create_run_id() -> str:
@@ -1587,15 +1805,44 @@ def prune_old_runs(retain: int = RUNS_RETAIN_N, runs_dir: Path | None = None) ->
 
     Returns the list of deleted paths (for tests / future telemetry).
     Idempotent: missing runs_dir → no-op; <retain runs → no-op.
+
+    Concurrency-safe: when multi-cell fan-out runs the unit suite in
+    parallel and each unit subprocess itself calls `runner.main(...)`
+    (e.g., `test_up_to_creates_run_dir`), sibling workers can race on
+    the same `runs/` dir. ``shutil.rmtree(old)`` could see a path the
+    sibling already deleted; FileNotFoundError is benign — the work
+    is done. ``stat()`` failures during the listing pass are similarly
+    benign (entry vanished mid-iter); skip and move on.
+
+    #741 — tests no longer pollute the real ``runs/``: ``tests/
+    conftest.py::pytest_configure`` redirects ``RUNS_DIR`` to a
+    session tmp dir at pytest startup. So under matrix fan-out the
+    200+ in-process ``runner.main`` calls all prune within the
+    session-tmp tree — no operator-runs/ contention, no need for an
+    xdist-only short-circuit guard.
     """
     target = runs_dir if runs_dir is not None else RUNS_DIR
     if not target.exists():
         return []
-    candidates = [p for p in target.iterdir() if p.is_dir() and _RUN_ID_PATTERN.match(p.name)]
-    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    candidates: list[Path] = []
+    for p in target.iterdir():
+        if not (p.is_dir() and _RUN_ID_PATTERN.match(p.name)):
+            continue
+        try:
+            p.stat()
+        except FileNotFoundError:
+            continue  # sibling worker deleted it between iterdir() and stat()
+        candidates.append(p)
+    candidates.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
     to_delete = candidates[retain:]
     for old in to_delete:
-        shutil.rmtree(old)
+        # ignore_errors=True: best-effort cleanup. With multi-cell
+        # parallel fan-out (and unit tests like test_up_to_creates_run_dir
+        # that themselves call runner.main), sibling workers can race
+        # on the same runs/ dir — `os.rmdir`/`os.unlink` inside rmtree
+        # will see paths another worker just deleted. Any partial leftovers
+        # get picked up by the next prune call.
+        shutil.rmtree(old, ignore_errors=True)
     return to_delete
 
 
@@ -1623,7 +1870,10 @@ def _options_from_args(args: argparse.Namespace) -> RunOptions:
     return RunOptions(
         only=getattr(args, "only", None),
         parallel=getattr(args, "parallel", 1),
-        variants=getattr(args, "variants", "default"),
+        scenarios=getattr(args, "scenarios", None),
+        dialects=getattr(args, "dialects", None),
+        targets=getattr(args, "targets", None),
+        variants=getattr(args, "variants", None),
         fuzz_seeds=getattr(args, "fuzz_seeds", 1),
         fuzz_seed_value=resolve_fuzz_seed_value(),
         skip_cheap=getattr(args, "skip_cheap", False),
@@ -1633,40 +1883,166 @@ def _options_from_args(args: argparse.Namespace) -> RunOptions:
     )
 
 
+# m.2.b — bundled L2 fixture lookup. ``sp`` / ``sq`` resolve to the
+# package's bundled YAMLs (the same files ``docs apply --portable``
+# uses); operators don't need ``tests/`` checked out. ``us`` carries
+# ``spec.user_yaml`` directly. ``f<n>`` is m.3 territory — synthesized
+# at runtime via ``random_l2_yaml(seed)`` and written to the per-cell
+# ``run_dir`` for inspection + reproduction.
+_BUNDLED_L2_DIR: Final = REPO_ROOT / "src" / "quicksight_gen" / "_l2_fixtures"
+_NAMED_L2_FIXTURES: Final[dict[str, str]] = {
+    "sp": "spec_example.yaml",
+    "sq": "sasquatch_pr.yaml",
+}
+
+# m.3.a — fuzz module lives under tests/l2/. The runner imports it via
+# sys.path injection (matches the cmd_sweep pattern for tests/e2e/
+# helpers). Lifting random_l2_yaml into common/l2/ is a follow-up; for
+# now the runner only ever runs from a source tree, not from a wheel.
+_FUZZ_MODULE_DIR: Final = REPO_ROOT / "tests" / "l2"
+
+
+def _load_random_l2_yaml() -> Callable[[int], str]:
+    """Lazy-import ``random_l2_yaml`` from ``tests/l2/fuzz.py``.
+
+    Lazy because importing ``tests.l2.fuzz`` pulls in PyYAML + the
+    L2 primitives module — keeps the runner's cold-start light when
+    no fuzz cells are in the matrix. Same sys.path injection shape
+    as ``cmd_sweep``'s ``_harness_cleanup`` import.
+    """
+    import importlib  # noqa: PLC0415 — lazy
+    sys.path.insert(0, str(_FUZZ_MODULE_DIR.parent))
+    try:
+        fuzz_mod = importlib.import_module("l2.fuzz")
+    finally:
+        sys.path.pop(0)
+    return cast("Callable[[int], str]", fuzz_mod.random_l2_yaml)
+
+
+def _resolve_l2_yaml_for_spec(spec: VariantSpec, run_dir: Path) -> Path:
+    """Map ``spec.scenario`` → on-disk L2 YAML path. Threaded into
+    each variant's subprocess env via ``QS_GEN_TEST_L2_INSTANCE``
+    so the seed CLI + downstream e2e tests pick the right instance.
+
+    m.4.f — ALL cells get a per-cell synthesized yaml under
+    ``run_dir / "_synth_l2.yaml"``. The synthesis loads the source
+    yaml (bundled fixture for sp/sq, operator-supplied for us, fuzz
+    output for f<n>), overrides the ``instance`` field to ``spec.name``,
+    and writes the result. This means:
+
+    - DB schema prefix becomes ``<spec.name>_*`` (e.g.,
+      ``sp_pg_aw_transactions``) instead of ``spec_example_transactions``.
+      Sister cells (sp_pg_aw + sp_or_aw + sq_pg_aw + ...) deploy to
+      non-colliding tables on shared external Aurora.
+    - cfg.l2_instance_prefix derives from the synthesized instance
+      via the existing ``cfg.with_l2_instance_prefix(instance.instance)``
+      chain — no env override needed.
+    - Fuzz determinism preserved: same seed → same fuzzer output →
+      same synthesized yaml (the instance-rename is the only
+      per-cell mutation, derivable from spec.name).
+
+    Operators reproduce a failed fuzz cell with
+    ``--variants=f<seed>_<di>_<ta>`` — same spec.name → same instance
+    rename → byte-identical synthesized yaml.
+    """
+    import yaml  # noqa: PLC0415 — lazy: only needed for synthesis path
+    synth_path = run_dir / "_synth_l2.yaml"
+    synth_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if spec.scenario in _NAMED_L2_FIXTURES:
+        source_text = (_BUNDLED_L2_DIR / _NAMED_L2_FIXTURES[spec.scenario]).read_text()
+    elif spec.scenario == "us":
+        # __post_init__ guarantees user_yaml is set for us scenarios.
+        assert spec.user_yaml is not None
+        source_text = spec.user_yaml.read_text()
+    elif spec.scenario.startswith("f"):
+        # __post_init__ guarantees fuzz_seed is set + matches scenario.
+        assert spec.fuzz_seed is not None
+        random_l2_yaml = _load_random_l2_yaml()
+        source_text = random_l2_yaml(spec.fuzz_seed)
+    else:
+        raise ValueError(f"unknown scenario code {spec.scenario!r}")
+
+    # Override the instance field. yaml.safe_dump preserves insertion
+    # order with sort_keys=False (matches the fuzzer output convention).
+    parsed = cast("dict[str, Any]", yaml.safe_load(source_text))
+    parsed["instance"] = spec.name
+    synth_text = yaml.safe_dump(
+        parsed, sort_keys=False, default_flow_style=False, width=120,
+    )
+    synth_path.write_text(synth_text)
+    return synth_path
+
+
+def _write_cell_manifest(spec: VariantSpec, run_dir: Path) -> None:
+    """m.3.c — write per-cell manifest.json with spec details + repro hint.
+
+    Captures the seed value for fuzz cells so the operator can pin a
+    failing run with ``--variants=f<seed>_<di>_<ta>`` for byte-identical
+    reproduction. Written for ALL cells (not just fuzz) so the run dir's
+    shape is consistent + future tooling can rely on the file existing.
+    """
+    run_dir.mkdir(parents=True, exist_ok=True)
+    manifest: dict[str, Any] = {
+        "name": spec.name,
+        "scenario": spec.scenario,
+        "dialect": spec.dialect,
+        "target": spec.target,
+        "fuzz_seed": spec.fuzz_seed,
+        "user_yaml": str(spec.user_yaml) if spec.user_yaml is not None else None,
+    }
+    if spec.fuzz_seed is not None:
+        manifest["repro_hint"] = f"--variants={spec.name}"
+    (run_dir / "manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n",
+    )
+
+
 def _run_one_variant(
-    variant: str,
+    spec: VariantSpec,
     run_dir: Path,
     options: RunOptions,
     chain: list[str],
     *,
     terminal_prefix: str = "",
-) -> tuple[str, list[LayerResult], int]:
-    """Y.2.gate.c.6.async — run one variant's full chain end-to-end.
+) -> tuple[VariantSpec, list[LayerResult], int]:
+    """Y.2.gate.c.6.async — run one variant cell's full chain end-to-end.
 
-    Owns the variant's lifecycle: setup → seed (DB-touching layers
-    only) → dispatch chain (stop on first fail per b.9) → teardown
-    (always, via finally). Returns (variant, layer_results, exit_code)
-    so the caller (single- or multi-variant) can aggregate.
+    Owns the cell's lifecycle: setup → seed (DB-touching layers only)
+    → dispatch chain (stop on first fail per b.9) → teardown (always,
+    via finally). Returns (spec, layer_results, exit_code) so the
+    caller (single- or multi-cell) can aggregate.
 
-    ``run_dir`` is the per-variant directory: for single-variant
-    invocations this is the top-level ``runs/<id>/`` (no nesting,
-    back-compat); for multi-variant fan-out this is
-    ``runs/<id>/<variant>/`` so per-variant artifacts (cmd.json,
-    stdout.log, stderr.log, seed/) don't collide. ``terminal_prefix``
-    (e.g., ``[local-pg] ``) is prepended to every line printed by this
+    ``run_dir`` is the per-cell directory ``runs/<id>/<spec.name>/``
+    (m.2.d — `<sc>_<di>_<ta>` naming so parallel cells don't collide
+    on artifacts or AWS tags). ``terminal_prefix`` (e.g.,
+    ``[sp_pg_lo] ``) is prepended to every line printed by this
     coroutine + every line streamed from spawned subprocesses, so
     interleaved fan-out output stays attributable.
 
     Soft fast-fail per c.6.async lock: a layer failure inside this
-    variant breaks out of the layer loop but does NOT raise — the
+    cell breaks out of the layer loop but does NOT raise — the
     finally cleans up the container, the function returns the partial
     layer_results + EXIT_FAILURE. The caller's gather collects every
-    variant's return regardless of pass/fail (no exception
-    propagation kills sibling variants).
+    cell's return regardless of pass/fail (no exception propagation
+    kills sibling cells).
     """
-    if variant != "default":
-        print(f"{terminal_prefix}runner: variant={variant} (spinning up container...)")
-    variant_env, variant_handle = setup_variant(variant)
+    # m.4.f — per-cell layer cap. Lo cells naturally terminate at app2
+    # because the deploy/api/browser layers need an AWS-reachable
+    # datasource and lo cells point at localhost containers QS can't
+    # see. Aw cells run whatever the operator asked for.
+    chain = cell_chain(spec, chain)
+    if not chain:
+        print(
+            f"{terminal_prefix}runner: variant={spec.name} skipped — "
+            f"no layers run for this cell (target={spec.target} can't reach "
+            f"the requested chain)",
+        )
+        return spec, [], EXIT_SUCCESS
+
+    if spec.target == "lo":
+        print(f"{terminal_prefix}runner: variant={spec.name} (spinning up container...)")
+    variant_env, variant_handle = setup_variant(spec)
     # Y.2.gate.b.2.impl.oracle — also thread QS_GEN_CONFIG into the
     # layer subprocess env. Layers that load cfg (e.g.,
     # tests/e2e/test_dataset_sql_smoke.py reading run/config.yaml by
@@ -1674,9 +2050,9 @@ def _run_one_variant(
     # selection (cfg.dialect → psycopg vs oracledb) mismatches the
     # variant URL (env QS_GEN_DEMO_DATABASE_URL), producing
     # "invalid connection option oracle+oracledb://" from psycopg.
-    variant_cfg = _resolve_seed_config_for_variant(variant)
-    if variant_cfg is not None:
-        variant_env[QS_GEN_CONFIG.name] = str(variant_cfg)
+    dialect_cfg = _resolve_seed_config_for_dialect(spec.dialect)
+    if dialect_cfg is not None and QS_GEN_CONFIG.name not in variant_env:
+        variant_env[QS_GEN_CONFIG.name] = str(dialect_cfg)
 
     # Y.2.gate.h+i.0 — AWS auth wiring. Inject AWS_PROFILE so subprocess
     # boto3 calls + AWS CLI invocations see the long-lived IAM-user creds
@@ -1685,7 +2061,7 @@ def _run_one_variant(
     # Cfg-load failures here downgrade to "skip auth wiring + let layer
     # probes catch any operator-action need" — keeps unit/db layers running
     # when AWS is unreachable.
-    runner_cfg_path = _resolve_runner_cfg_path(variant)
+    runner_cfg_path = _resolve_runner_cfg_path(spec)
     if runner_cfg_path is not None:
         try:
             from quicksight_gen.common.config import load_config  # noqa: PLC0415 — lazy: cfg load only when AWS-touching layers in chain
@@ -1716,21 +2092,27 @@ def _run_one_variant(
                         f"failed: {exc}",
                         file=sys.stderr,
                     )
-                    return variant, [], EXIT_NEEDS_OPERATOR
+                    return spec, [], EXIT_NEEDS_OPERATOR
 
-        # Y.2.gate.h.6 — thread cfg.default_l2_instance through to subprocesses
-        # via QS_GEN_TEST_L2_INSTANCE so the seed flow + dataset-SQL smoke test
-        # both pick the L2 instance the operator's external DB has been seeded
-        # with (default `default_l2_instance()` returns spec_example, which
-        # mismatches operators who seeded sasquatch_pr or another). Same shape
-        # as cfg.auth.aws_profile → AWS_PROFILE injection. Relative paths
-        # resolve from REPO_ROOT so subprocesses with arbitrary CWD find the
-        # YAML.
-        if runner_cfg is not None and runner_cfg.default_l2_instance is not None:
-            l2_path = Path(runner_cfg.default_l2_instance)
-            if not l2_path.is_absolute():
-                l2_path = REPO_ROOT / l2_path
-            variant_env[QS_GEN_TEST_L2_INSTANCE.name] = str(l2_path)
+    # m.3.c — per-cell manifest for one-line repro of fuzz failures.
+    # Written before any subprocess fires so even a fast-fail cell
+    # leaves a manifest behind for triage.
+    _write_cell_manifest(spec, run_dir)
+
+    # m.2.b + m.3.a — per-spec L2 instance injection. Scenario code
+    # (sp/sq/us) determines which YAML the seed CLI + downstream e2e
+    # tests use; fuzz scenarios (f<n>) synthesize per-cell into
+    # run_dir/_synth_l2.yaml. Overrides cfg.default_l2_instance —
+    # the matrix axis is the source of truth, not whatever the cfg
+    # happened to default to.
+    l2_yaml = _resolve_l2_yaml_for_spec(spec, run_dir)
+    variant_env[QS_GEN_TEST_L2_INSTANCE.name] = str(l2_yaml)
+    # m.4.f — the synthesized yaml's `instance` field IS spec.name,
+    # so cfg.with_l2_instance_prefix(instance.instance) downstream
+    # produces per-cell-unique QS resource IDs naturally. The
+    # explicit QS_GEN_L2_INSTANCE_PREFIX env override is no longer
+    # set by the runner (the env var stays in env_keys/cfg as a
+    # general-purpose escape hatch, just no longer needed here).
 
     if variant_env:
         for key, val in variant_env.items():
@@ -1740,22 +2122,23 @@ def _run_one_variant(
     final_code = EXIT_SUCCESS
     layer_results: list[LayerResult] = []
     try:
-        # Y.2.gate.b.2.impl.schema — non-default variants spin up
-        # empty containers; seed schema + data + matview refresh
-        # before the first DB-touching layer dispatches. Skipped
-        # when the chain is unit-only (saves ~30s on type-check
-        # iteration). Wrapped inside the try block so a seed failure
-        # still hits teardown_variant via the finally.
-        if variant != "default" and any(layer in DB_TOUCHING_LAYERS for layer in chain):
-            print(f"{terminal_prefix}runner: variant={variant} seeding (schema apply + data apply + data refresh)...")
+        # Y.2.gate.b.2.impl.schema + m.4.f — both lo and aw cells need
+        # seeding (lo containers start empty; aw operator's external
+        # Aurora needs the per-cell <spec.name>_* tables created so
+        # downstream dataset SQL can find them). Skipped when the
+        # chain is unit-only (saves ~30s on type-check iteration).
+        # Wrapped inside the try block so a seed failure still hits
+        # teardown_variant via the finally.
+        if any(layer in DB_TOUCHING_LAYERS for layer in chain):
+            print(f"{terminal_prefix}runner: variant={spec.name} seeding (schema apply + data apply + data refresh)...")
             try:
                 seed_variant(
-                    variant, variant_env,
+                    spec, variant_env,
                     run_dir=run_dir, terminal_prefix=terminal_prefix,
                 )
             except RuntimeError as exc:
                 print(f"{terminal_prefix}runner: variant-seed failed: {exc}", file=sys.stderr)
-                return variant, layer_results, EXIT_NEEDS_OPERATOR
+                return spec, layer_results, EXIT_NEEDS_OPERATOR
 
         for layer in chain:
             # Y.2.gate.b.8.impl — `--skip-cheap` short-circuits cheap
@@ -1764,8 +2147,8 @@ def _run_one_variant(
             # / no-cache all degrade to "run normally". Cache lookup
             # is variant-aware: a green marker for variant X doesn't
             # signal green for variant Y.
-            if options.skip_cheap and is_layer_cached_green(layer, variant=variant):
-                print(f"{terminal_prefix}runner: layer-cached [{layer}] skipped (--skip-cheap, current SHA already green for variant={variant})")
+            if options.skip_cheap and is_layer_cached_green(layer, variant=spec.name):
+                print(f"{terminal_prefix}runner: layer-cached [{layer}] skipped (--skip-cheap, current SHA already green for variant={spec.name})")
                 cached_result = LayerResult(
                     layer=layer, exit_code=0, duration_seconds=0.0, skipped=True,
                 )
@@ -1786,13 +2169,13 @@ def _run_one_variant(
             # Y.2.gate.b.8.impl — record the green pass so a future
             # --skip-cheap on the same SHA + variant can short-circuit.
             if not result.skipped and result.passed:
-                write_cache_marker(layer, duration_seconds=result.duration_seconds, variant=variant)
+                write_cache_marker(layer, duration_seconds=result.duration_seconds, variant=spec.name)
     finally:
         teardown_variant(variant_handle)
         if variant_handle is not None:
-            print(f"{terminal_prefix}runner: variant={variant} container torn down")
+            print(f"{terminal_prefix}runner: variant={spec.name} container torn down")
 
-    return variant, layer_results, final_code
+    return spec, layer_results, final_code
 
 
 def cmd_up_to(args: argparse.Namespace) -> int:
@@ -1810,14 +2193,17 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     loading + variants) report skipped + pass-through so the chain doesn't
     falsely block.
 
-    Y.2.gate.c.6.async — multi-variant fan-out: when ``--variants`` resolves
-    to >1 entry, each variant runs concurrently via ``asyncio.gather`` with
-    its own nested run_dir (``runs/<id>/<variant>/``) and per-line terminal
-    prefix (``[<variant>] ``). Soft fast-fail per variant: a failure in one
-    variant doesn't kill its siblings — every variant runs to completion (or
-    its own first failure). Top-level ``timings.json`` aggregates across
-    variants with ``<variant>.<layer>`` keys so ``report_drift`` works
-    unchanged.
+    Y.2.gate.m.2 — variant matrix: ``--scenarios`` / ``--dialects`` /
+    ``--targets`` compose a list of ``VariantSpec`` cells (no flags →
+    ``compose_matrix`` returns the 13-cell ``full`` default).
+    ``--variants=<sc>_<di>_<ta>`` is the triage escape (mutex with the
+    sub-flag axes). Each cell runs concurrently via ``asyncio.gather``
+    with its own nested run_dir (``runs/<id>/<spec.name>/``) and
+    per-line terminal prefix (``[<spec.name>] ``). Soft fast-fail per
+    cell: a failure in one cell doesn't kill its siblings — every
+    cell runs to completion (or its own first failure). Top-level
+    ``timings.json`` aggregates across cells with ``<spec.name>.<layer>``
+    keys so ``report_drift`` works unchanged.
     """
     options = _options_from_args(args)
 
@@ -1840,103 +2226,154 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"runner: run_id={run_id}")
-    print(f"runner: run_dir={run_dir.relative_to(REPO_ROOT)}")
+    print(f"runner: run_dir={_rel_or_abs(run_dir)}")
     print(f"runner: up_to={args.layer}")
     if options.fuzz_seed_value is not None:
         print(f"runner: fuzz_seed={options.fuzz_seed_value} (pin via QS_GEN_FUZZ_SEED env to repro)")
 
     try:
-        variants = resolve_variants(options.variants)
+        specs, skipped_specs = _compose_specs_from_options(options)
     except ValueError as exc:
         print(f"runner: {exc}", file=sys.stderr)
+        return EXIT_NEEDS_OPERATOR
+    # m.4.b — surface invalid-cell skips so operators see the filter
+    # happen rather than silently dropped cells. The only invalid
+    # combination today is sl × aw (sqlite is file-based; QuickSight
+    # has no remote DataSource for it).
+    for skipped in skipped_specs:
+        reason = (
+            "sl × aw: sqlite is file-based; QuickSight can't reach it remotely"
+            if skipped.dialect == "sl" and skipped.target == "aw"
+            else f"unhandled invalid combination ({skipped.dialect} × {skipped.target})"
+        )
+        print(f"runner: skip [{skipped.name}] ({reason})")
+    if not specs:
+        print("runner: variant matrix narrowed to zero cells (sub-flags filtered everything out)", file=sys.stderr)
         return EXIT_NEEDS_OPERATOR
 
     chain = chain_through(args.layer)
     print(f"runner: chain={chain}")
 
-    if len(variants) == 1:
-        # Single-variant: stay synchronous; un-nested run_dir for back-compat.
-        # Tests + tooling that read ``runs/<id>/<layer>/{cmd.json,*.log}``
-        # keep working unchanged.
-        variant = variants[0]
+    if len(specs) == 1:
+        # Single-cell: stay synchronous; nested run_dir uses spec.name
+        # so artifact paths are consistent across single + multi
+        # invocations (m.2.d — every cell gets its own subdir).
+        spec = specs[0]
+        cell_dir = run_dir / spec.name
+        cell_dir.mkdir(parents=True, exist_ok=True)
         _, layer_results, final_code = _run_one_variant(
-            variant, run_dir, options, chain,
+            spec, cell_dir, options, chain,
         )
-        collect_run_outputs(run_dir, layer_results)
-        print(f"runner: wrote {(run_dir / 'timings.json').relative_to(REPO_ROOT)}")
+        collect_run_outputs(cell_dir, layer_results)
+        print(f"runner: wrote {_rel_or_abs(cell_dir / 'timings.json')}")
+        # Aggregate single cell to top-level so report_drift still
+        # works on the canonical top-level timings.json.
+        aggregated_single: list[LayerResult] = [
+            LayerResult(
+                layer=f"{spec.name}.{r.layer}",
+                exit_code=r.exit_code,
+                duration_seconds=r.duration_seconds,
+                skipped=r.skipped,
+            )
+            for r in layer_results
+        ]
+        collect_run_outputs(run_dir, aggregated_single)
+        print(f"runner: wrote {_rel_or_abs(run_dir / 'timings.json')}")
         report_drift(run_dir)
     else:
-        # Multi-variant: fan out via asyncio.gather, each variant in its own
-        # nested run_dir + with its own ``[<variant>] `` terminal prefix.
+        # Multi-cell: fan out via asyncio.gather, each cell in its own
+        # nested run_dir + with its own ``[<spec.name>] `` terminal prefix.
         # ``asyncio.to_thread`` bridges the sync ``_run_one_variant`` (which
         # blocks on subprocess + container I/O) into the event loop without
         # forcing the whole chain to be async. Per design lock: no
-        # concurrency cap (default to len(variants) — Docker is the
+        # concurrency cap (default to len(specs) — Docker is the
         # bottleneck, not the runner).
-        print(f"runner: variants={variants} (parallel fan-out)")
-        # Pre-create per-variant dirs so the post-gather
+        spec_names = [s.name for s in specs]
+        print(f"runner: variants={spec_names} (parallel fan-out)")
+        # Pre-create per-cell dirs so the post-gather
         # ``collect_run_outputs`` always has a target to write to,
-        # even if a variant was a complete no-op (e.g., probes failed
-        # inside the variant or all layers were skipped via cache).
-        for v in variants:
-            (run_dir / v).mkdir(parents=True, exist_ok=True)
+        # even if a cell was a complete no-op (e.g., probes failed
+        # inside the cell or all layers were skipped via cache).
+        for s in specs:
+            (run_dir / s.name).mkdir(parents=True, exist_ok=True)
         # Pre-warm the testcontainers Ryuk reaper singleton serially so
         # parallel ``setup_variant`` calls don't race on
         # ``Reaper._create_instance`` — otherwise both threads try to
         # create a container with the same fixed Ryuk name and the
         # second one crashes with HTTP 409 from Docker. Lazy-imported
-        # so the runner stays Docker-free for unit-only invocations.
-        if any(v != "default" for v in variants):
+        # so the runner stays Docker-free for AWS-only invocations.
+        if any(s.target == "lo" and s.dialect != "sl" for s in specs):
             try:
                 from testcontainers.core.container import Reaper  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
                 Reaper.get_instance()
             except Exception as exc:  # noqa: BLE001
-                # Reaper init failure is non-fatal — the per-variant
+                # Reaper init failure is non-fatal — the per-cell
                 # ``setup_variant`` will surface the real error with
                 # operator-actionable context. Log here so the
                 # operator sees the pre-warm attempt.
                 print(f"runner: reaper pre-warm skipped ({exc!r}); continuing")
 
-        async def _gather() -> list[tuple[str, list[LayerResult], int]]:
+        async def _gather() -> list[tuple[VariantSpec, list[LayerResult], int]]:
             tasks = [
                 asyncio.to_thread(
                     _run_one_variant,
-                    v, run_dir / v, options, chain,
-                    terminal_prefix=f"[{v}] ",
+                    s, run_dir / s.name, options, chain,
+                    terminal_prefix=f"[{s.name}] ",
                 )
-                for v in variants
+                for s in specs
             ]
-            return await asyncio.gather(*tasks)
+            # m.5.c.fix — `return_exceptions=True` so a setup_variant /
+            # teardown_variant raise in one cell doesn't cancel sibling
+            # cells (m.4 "soft fast-fail per cell" promise). Caller
+            # converts exceptions to a failed `LayerResult` entry below.
+            raw = await asyncio.gather(*tasks, return_exceptions=True)
+            results: list[tuple[VariantSpec, list[LayerResult], int]] = []
+            for spec, item in zip(specs, raw, strict=True):
+                if isinstance(item, BaseException):
+                    print(
+                        f"[{spec.name}] runner: cell crashed before any layer ran "
+                        f"({type(item).__name__}: {item})",
+                        file=sys.stderr,
+                    )
+                    crash = LayerResult(
+                        layer="setup",
+                        exit_code=EXIT_FAILURE,
+                        duration_seconds=0.0,
+                    )
+                    results.append((spec, [crash], EXIT_FAILURE))
+                else:
+                    results.append(item)
+            return results
 
         per_variant_results = asyncio.run(_gather())
 
-        # Per-variant timings.json under each variant subdir (keeps the
-        # per-variant run-dir self-contained — useful for CI artifact
-        # uploads + post-mortem of one variant).
-        for variant, layer_results, _ in per_variant_results:
-            variant_dir = run_dir / variant
+        # Per-cell timings.json under each cell subdir (keeps the
+        # per-cell run-dir self-contained — useful for CI artifact
+        # uploads + post-mortem of one cell).
+        for cell_spec, layer_results, _ in per_variant_results:
+            variant_dir = run_dir / cell_spec.name
             collect_run_outputs(variant_dir, layer_results)
-            print(f"runner: wrote {(variant_dir / 'timings.json').relative_to(REPO_ROOT)}")
+            print(f"runner: wrote {_rel_or_abs(variant_dir / 'timings.json')}")
 
-        # Aggregated top-level timings.json with ``<variant>.<layer>``
+        # Aggregated top-level timings.json with ``<spec.name>.<layer>``
         # keyed durations. ``report_drift`` reads this against the prior
         # run's top-level — so when both prior + current ran the same
-        # variants, drift fires per-variant per-layer with no special
+        # cells, drift fires per-cell per-layer with no special
         # casing in ``compute_drift``.
         aggregated_results: list[LayerResult] = []
-        for variant, layer_results, _ in per_variant_results:
+        for cell_spec, layer_results, _ in per_variant_results:
             for r in layer_results:
                 aggregated_results.append(LayerResult(
-                    layer=f"{variant}.{r.layer}",
+                    layer=f"{cell_spec.name}.{r.layer}",
                     exit_code=r.exit_code,
                     duration_seconds=r.duration_seconds,
                     skipped=r.skipped,
                 ))
         collect_run_outputs(run_dir, aggregated_results)
-        print(f"runner: wrote {(run_dir / 'timings.json').relative_to(REPO_ROOT)}")
+        print(f"runner: wrote {_rel_or_abs(run_dir / 'timings.json')}")
         report_drift(run_dir)
 
-        # Final code: any non-zero variant fails the run. EXIT_FAILURE
+        # Final code: any non-zero cell fails the run. EXIT_FAILURE
         # wins over EXIT_NEEDS_OPERATOR (real failures hide config gaps
         # — the operator should fix the failure first).
         codes = [code for _, _, code in per_variant_results if code != EXIT_SUCCESS]
@@ -1951,6 +2388,44 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     if pruned:
         print(f"runner: pruned {len(pruned)} old run(s) (retained last {RUNS_RETAIN_N})")
     return final_code
+
+
+def _compose_specs_from_options(
+    options: RunOptions,
+) -> tuple[list[VariantSpec], list[VariantSpec]]:
+    """m.2.e + m.4.b — translate RunOptions into ``(valid, skipped)``
+    spec lists. The runner logs the skipped invalid cells so operators
+    see the filter happen (per m.4.b).
+
+    Two modes:
+
+    - ``--variants`` (triage escape): each comma-separated entry is a
+      ``<sc>_<di>_<ta>`` cell code parsed via ``parse_variant_code``.
+      Mutex with the sub-flag axes — caller errors out below if both
+      are set. Legacy ``local-pg`` / etc. names raise with a hint
+      (``_check_legacy_variant_names``). Triage codes are presumed
+      valid (the operator typed them explicitly); skipped list is empty.
+    - Sub-flag composition: ``--scenarios`` / ``--dialects`` /
+      ``--targets`` feed ``partition_matrix``. All None → ``expand_full``
+      (the curated 13-cell default; skipped list is empty since
+      `expand_full` constructs only valid cells by design).
+    """
+    if options.variants is not None:
+        if any(x is not None for x in (options.scenarios, options.dialects, options.targets)):
+            raise ValueError(
+                "--variants is the triage escape and is mutex with "
+                "--scenarios / --dialects / --targets. Pick one shape."
+            )
+        _check_legacy_variant_names(options.variants)
+        codes = [c.strip() for c in options.variants.split(",") if c.strip()]
+        if not codes:
+            raise ValueError("--variants value is empty")
+        return [parse_variant_code(c) for c in codes], []
+
+    sc_specs = parse_scenarios(options.scenarios) if options.scenarios else None
+    di_codes = parse_dialects(options.dialects) if options.dialects else None
+    ta_codes = parse_targets(options.targets) if options.targets else None
+    return partition_matrix(sc_specs, di_codes, ta_codes)
 
 
 def cmd_up(args: argparse.Namespace) -> int:
@@ -2158,8 +2633,23 @@ Auth (Y.2.gate.h+i):
 Layer chain (Y.2.gate.b/c):
   unit -> db -> app2 -> deploy -> api -> browser
   ./run_tests.sh up_to=<layer>  runs the chain through that layer.
-  --variants=local-pg,local-oracle,local-sqlite  spins variant containers.
-  --variants=default  uses the operator's external Aurora (cfg-driven).
+
+Variant matrix (Y.2.gate.m):
+  No flags = full 13-cell matrix (sp/sq named scenarios × pg/or/sl × lo/aw,
+  plus 3 fuzz cells × pg/or/sl × lo). Narrow via sub-flags or pin via --variants.
+  Invalid cells (sl × aw — sqlite isn't reachable from QS) auto-skip with a log.
+
+  Examples (all assume `up_to=db` or higher):
+    --scenarios=sp,sq                       sp + sq named-scenario subset
+    --scenarios=fuzz                        1 random fuzz seed (per-dialect cell)
+    --scenarios=fuzz:5                      5 random fuzz seeds (× dialect axis)
+    --scenarios=us:run/customer.yaml        operator-supplied L2 yaml
+    --dialects=pg                           postgres only
+    --dialects=pg,or                        cross-dialect (no sqlite)
+    --targets=lo                            local containers / sqlite tempfile
+    --targets=aw                            operator's external Aurora / Oracle
+    --variants=sp_pg_lo                     triage: pin a single cell
+    --variants=f12345_pg_lo                 reproduce a fuzz failure by seed
 """
 
 
@@ -2186,13 +2676,37 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         metavar="N",
-        help="within-variant pytest-xdist worker count (default 1 = serial). Mirrors ./run_e2e.sh --parallel.",
+        help="within-variant pytest-xdist worker count. Default = `-n auto` (= cpu_count); pin via `--parallel=N` to override.",
+    )
+    # m.2.a — 3-axis matrix sub-flags. All None → compose_matrix returns full
+    # 13-cell default. Any specified → cross-product narrowing (variant.compose_matrix).
+    p_up_to.add_argument(
+        "--scenarios",
+        metavar="<csv>",
+        default=None,
+        help="scenarios axis CSV (sp / sq / fuzz / fuzz:N / us:<path>); default = sp,sq.",
     )
     p_up_to.add_argument(
+        "--dialects",
+        metavar="<csv>",
+        default=None,
+        help="dialects axis CSV (pg / or / sl); default = pg,or,sl.",
+    )
+    p_up_to.add_argument(
+        "--targets",
+        metavar="<csv>",
+        default=None,
+        help="targets axis CSV (lo / aw); default = lo,aw. sl × aw auto-skips.",
+    )
+    # m.2.a — --variants is the triage escape: each entry is a single
+    # ``<sc>_<di>_<ta>`` cell code (e.g., sp_pg_lo, f42_or_lo). Mutex with
+    # --scenarios/--dialects/--targets. The legacy local-pg/local-oracle/etc.
+    # names error with a hint pointing at the new sub-flag form.
+    p_up_to.add_argument(
         "--variants",
-        metavar="<set>",
-        default="default",
-        help="variant fan-out (dialect / l2-instance / fuzz-seed) — consumed by c.6.",
+        metavar="<csv>",
+        default=None,
+        help="triage escape: comma-separated <sc>_<di>_<ta> cell codes (mutex with sub-flag axes).",
     )
     p_up_to.add_argument(
         "--fuzz-seeds",

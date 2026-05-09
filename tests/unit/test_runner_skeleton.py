@@ -22,6 +22,25 @@ from quicksight_gen.common.env_keys import (
     QS_GEN_RUNNER_YES,
     QS_GEN_TEST_L2_INSTANCE,
 )
+from quicksight_gen.common.variant import ScenarioCode, VariantSpec
+
+
+# m.2.f — Convenience constructors for tests; variant cells are now
+# 3-tuple <sc>_<di>_<ta> spec objects, not free-form strings.
+def _spec_pg_lo() -> VariantSpec:
+    return VariantSpec(ScenarioCode("sp"), "pg", "lo")
+
+
+def _spec_or_lo() -> VariantSpec:
+    return VariantSpec(ScenarioCode("sp"), "or", "lo")
+
+
+def _spec_sl_lo() -> VariantSpec:
+    return VariantSpec(ScenarioCode("sp"), "sl", "lo")
+
+
+def _spec_pg_aw() -> VariantSpec:
+    return VariantSpec(ScenarioCode("sp"), "pg", "aw")
 
 
 def test_create_run_id_format() -> None:
@@ -84,13 +103,14 @@ def test_up_to_creates_run_dir() -> None:
     """`up_to=<layer>` returns success when all layers pass — proves the wiring.
 
     Mocks `dispatch_layer` so the test doesn't recursively run pytest /
-    pyright; that's smoke-tested separately."""
+    pyright; that's smoke-tested separately. Pinned to a single AW cell
+    so the test doesn't trigger the full-matrix container imports."""
 
     def fake_pass(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
         return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.01)
 
     with patch.object(runner, "dispatch_layer", side_effect=fake_pass):
-        code = runner.main(["up_to=unit"])
+        code = runner.main(["up_to=unit", "--variants=sp_pg_aw"])
     assert code == runner.EXIT_SUCCESS
 
 
@@ -598,8 +618,16 @@ def test_cmd_up_to_stops_on_first_failure() -> None:
     with (
         patch.object(runner, "probe_dependencies", return_value=[]),
         patch.object(runner, "dispatch_layer", side_effect=fake_dispatch),
+        # m.5 fix-up — `seed_variant` for aw cells now spawns real
+        # `quicksight-gen schema apply` against Aurora (m.4.f dropped
+        # the no-op early-return). Without this patch the test would
+        # silently run real Aurora schema-applies + fail under
+        # parallel matrix load with SSL connection errors.
+        patch.object(runner, "seed_variant"),
     ):
-        code = runner.main(["up_to=db"])
+        # Pin to single AW cell — full matrix would dispatch unit
+        # 13 times, breaking the dispatch-order assertion.
+        code = runner.main(["up_to=db", "--variants=sp_pg_aw"])
     assert code == runner.EXIT_FAILURE
     # unit dispatched; db should NOT have run because unit failed.
     assert dispatched == ["unit"]
@@ -616,8 +644,10 @@ def test_cmd_up_to_runs_full_chain_when_all_pass() -> None:
         patch.object(runner, "probe_dependencies", return_value=[]),
         patch.object(runner, "_is_dirty", return_value=False),
         patch.object(runner, "dispatch_layer", side_effect=fake_dispatch),
+        patch.object(runner, "seed_variant"),  # m.5 fix-up — see test_cmd_up_to_stops_on_first_failure.
     ):
-        code = runner.main(["up_to=browser"])
+        # Pin single AW cell so the dispatch order is deterministic.
+        code = runner.main(["up_to=browser", "--variants=sp_pg_aw"])
     assert code == runner.EXIT_SUCCESS
     assert dispatched == ["unit", "db", "app2", "deploy", "api", "browser"]
 
@@ -868,11 +898,15 @@ def test_report_drift_marks_over_threshold(tmp_path: Path, capsys: Any) -> None:
 
 
 def test_run_options_defaults() -> None:
-    """Default options match audit locks: variants=default, fuzz_seeds=1
-    (b.1 lock), all booleans False, only=None."""
+    """Default options match audit locks: matrix sub-flags + variants
+    triage all None (no narrowing → compose_matrix returns full),
+    fuzz_seeds=1 (b.1 lock), all booleans False, only=None."""
     opts = runner.RunOptions()
     assert opts.only is None
-    assert opts.variants == "default"
+    assert opts.scenarios is None
+    assert opts.dialects is None
+    assert opts.targets is None
+    assert opts.variants is None
     assert opts.fuzz_seeds == 1
     assert opts.skip_cheap is False
     assert opts.keep_on_failure is False
@@ -943,8 +977,12 @@ def test_cmd_up_to_dirty_ok_below_deploy(monkeypatch: Any) -> None:
         patch.object(runner, "_is_dirty", return_value=True),
         patch.object(runner, "probe_dependencies", return_value=[]),
         patch.object(runner, "dispatch_layer", side_effect=fake_dispatch),
+        patch.object(runner, "seed_variant"),  # m.5 fix-up — see test_cmd_up_to_stops_on_first_failure.
     ):
-        code = runner.main(["up_to=db"])
+        # Pin single AW cell — full matrix would also work but adds
+        # noise (13 cells × 2 layers = 26 dispatches). The test only
+        # cares about the dirty-state gate, not matrix fan-out.
+        code = runner.main(["up_to=db", "--variants=sp_pg_aw"])
     assert code == runner.EXIT_SUCCESS
 
 
@@ -959,8 +997,12 @@ def test_cmd_up_to_allow_dirty_deploy_bypasses(monkeypatch: Any) -> None:
         patch.object(runner, "_is_dirty", return_value=True),
         patch.object(runner, "probe_dependencies", return_value=[]),
         patch.object(runner, "dispatch_layer", side_effect=fake_dispatch),
+        patch.object(runner, "seed_variant"),  # m.5 fix-up — see test_cmd_up_to_stops_on_first_failure.
     ):
-        code = runner.main(["up_to=deploy", "--allow-dirty-deploy"])
+        # Pin single AW cell — see test_cmd_up_to_dirty_ok_below_deploy.
+        code = runner.main([
+            "up_to=deploy", "--allow-dirty-deploy", "--variants=sp_pg_aw",
+        ])
     assert code == runner.EXIT_SUCCESS
 
 
@@ -969,27 +1011,37 @@ def test_cmd_up_to_qs_gen_runner_yes_env_bypasses_dirty(monkeypatch: Any) -> Non
     convention so the env var works for both flag families)."""
     monkeypatch.setenv(QS_GEN_RUNNER_YES.name, "1")
 
-    def fake_dispatch(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
-        return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.01)
+    def fake_run_one(
+        spec: VariantSpec, run_dir: Path, options: Any, chain: list[str],
+        *, terminal_prefix: str = "",
+    ) -> tuple[VariantSpec, list[runner.LayerResult], int]:
+        return spec, [
+            runner.LayerResult(layer="deploy", exit_code=0, duration_seconds=0.01),
+        ], runner.EXIT_SUCCESS
 
     with (
         patch.object(runner, "_is_dirty", return_value=True),
         patch.object(runner, "probe_dependencies", return_value=[]),
-        patch.object(runner, "dispatch_layer", side_effect=fake_dispatch),
+        patch.object(runner, "_run_one_variant", side_effect=fake_run_one),
     ):
-        code = runner.main(["up_to=deploy"])
+        # Pin to a single AWS cell — full matrix would try to import
+        # testcontainers (Reaper pre-warm in cmd_up_to) which we don't
+        # want to depend on in unit-test land.
+        code = runner.main(["up_to=deploy", "--variants=sp_pg_aw"])
     assert code == runner.EXIT_SUCCESS
 
 
 def test_argparse_accepts_all_c7_flags() -> None:
-    """Smoke: every c.7 flag parses without error. Catches typos / dest collisions."""
+    """Smoke: every c.7 + m.2 flag parses without error. Catches typos / dest collisions."""
     parser = runner._build_parser()
     parsed = parser.parse_args(
         [
             "up_to",
             "unit",
             "--only=test_foo",
-            "--variants=full",
+            "--scenarios=sp,sq",
+            "--dialects=pg,or",
+            "--targets=lo",
             "--fuzz-seeds=10",
             "--skip-cheap",
             "--keep-on-failure",
@@ -999,12 +1051,27 @@ def test_argparse_accepts_all_c7_flags() -> None:
     )
     assert parsed.layer == "unit"
     assert parsed.only == "test_foo"
-    assert parsed.variants == "full"
+    assert parsed.scenarios == "sp,sq"
+    assert parsed.dialects == "pg,or"
+    assert parsed.targets == "lo"
     assert parsed.fuzz_seeds == 10
     assert parsed.skip_cheap is True
     assert parsed.keep_on_failure is True
     assert parsed.trace_all is True
     assert parsed.allow_dirty_deploy is True
+
+
+def test_argparse_variants_triage_escape() -> None:
+    """`--variants=<sc>_<di>_<ta>` triage escape parses; mutex with
+    sub-flag axes is enforced inside `_compose_specs_from_options`."""
+    parser = runner._build_parser()
+    parsed = parser.parse_args(
+        ["up_to", "unit", "--variants=sp_pg_lo,sq_or_lo"],
+    )
+    assert parsed.variants == "sp_pg_lo,sq_or_lo"
+    assert parsed.scenarios is None
+    assert parsed.dialects is None
+    assert parsed.targets is None
 
 
 def test_options_from_args_threads_correctly() -> None:
@@ -1117,21 +1184,28 @@ def test_audit_first_layer_pyright_has_no_external_preconditions() -> None:
     assert "pyright" not in runner._LAYER_DEPS
 
 
-# Y.2.gate.c.6 — within-variant parallelism (--parallel=N → pytest -n N).
+# Y.2.gate.j.6 — within-layer pytest-xdist defaults to "auto".
+# (Was Y.2.gate.c.6 in earlier draft when the default was serial.)
 
 
 def test_run_options_parallel_default_is_one() -> None:
-    """Default = serial (1 worker). Operator opts into parallelism."""
+    """Default RunOptions.parallel sentinel is 1 → layer-command auto-expands
+    to "auto" for xdist-friendly layers (unit/db/app2/api). Operator pins
+    via --parallel=N (e.g., =1 means literal serial via the >1 branch
+    being false → falls back to "auto"; use =1 only via the layer that
+    supports it explicitly)."""
     assert runner.RunOptions().parallel == 1
 
 
-def test_layer_command_no_n_flag_when_parallel_one() -> None:
-    """parallel=1 → no -n flag (let pytest run inline; cleaner output for
-    iteration-loop runs)."""
+def test_layer_command_default_parallel_is_auto() -> None:
+    """j.6 — default (parallel=1) → pytest -n auto (= cpu_count workers).
+    Earlier draft was "no -n flag" but serial-by-default left obvious
+    speedups on the table — every triage iteration paid for it."""
     cmd_env = runner._layer_command("unit", Path("/tmp/run"), runner.RunOptions(parallel=1))
     assert cmd_env is not None
     cmd, _ = cmd_env
-    assert "-n" not in cmd
+    assert "-n" in cmd
+    assert cmd[cmd.index("-n") + 1] == "auto"
 
 
 def test_layer_command_adds_n_flag_when_parallel_gt_one() -> None:
@@ -1149,6 +1223,24 @@ def test_layer_command_n_flag_threads_to_db_layer() -> None:
     assert cmd_env is not None
     cmd, _ = cmd_env
     assert "-n" in cmd
+
+
+def test_layer_command_app2_default_parallel_is_auto() -> None:
+    """j.6 — app2 layer follows same default-auto pattern."""
+    cmd_env = runner._layer_command("app2", Path("/tmp/run"), runner.RunOptions(parallel=1))
+    assert cmd_env is not None
+    cmd, _ = cmd_env
+    assert "-n" in cmd
+    assert cmd[cmd.index("-n") + 1] == "auto"
+
+
+def test_layer_command_db_default_parallel_is_auto() -> None:
+    """j.6 — db layer follows same default-auto pattern."""
+    cmd_env = runner._layer_command("db", Path("/tmp/run"), runner.RunOptions(parallel=1))
+    assert cmd_env is not None
+    cmd, _ = cmd_env
+    assert "-n" in cmd
+    assert cmd[cmd.index("-n") + 1] == "auto"
 
 
 def test_argparse_accepts_parallel_int() -> None:
@@ -1561,42 +1653,280 @@ def test_skippable_layers_are_unit_and_db_only() -> None:
     assert runner.SKIPPABLE_LAYERS == ("unit", "db")
 
 
-# Y.2.gate.b.2.impl — variant axis (testcontainers per-dialect).
+# Y.2.gate.j.5 — Oracle container reuse.
 
 
-def test_known_variants_includes_default_and_local_pg() -> None:
-    """Lock the variant set. New variant names land here first; their
-    setup_variant impl follows."""
-    assert "default" in runner.KNOWN_VARIANTS
-    assert "local-pg" in runner.KNOWN_VARIANTS
-    assert "local-oracle" in runner.KNOWN_VARIANTS
+def test_persistent_container_handle_stop_is_no_op() -> None:
+    """j.5 — `_PersistentContainerHandle.stop()` is intentionally a
+    no-op so `teardown_variant` doesn't kill containers we want to
+    reuse on the next `./run_tests.sh` invocation."""
+    handle = runner._PersistentContainerHandle(name="quicksight-test-oracle")
+    # Should not raise + should not "do" anything observable.
+    handle.stop()
+    assert handle.name == "quicksight-test-oracle"
 
 
-def test_resolve_variants_default_returns_singleton() -> None:
-    assert runner.resolve_variants("default") == ["default"]
+def test_oracle_reuse_constants_are_stable() -> None:
+    """j.5 — adopt path reconstructs the URL from the container's host
+    port + these constants. If they change, every operator's existing
+    `quicksight-test-oracle-<cell>` container becomes unadoptable
+    (would surface as auth failure on next run). The names are part of
+    the operator-facing contract — pin them."""
+    assert runner.ORACLE_REUSE_CONTAINER_PREFIX == "quicksight-test-oracle-"
+    # Password value isn't sensitive (local-only test fixture) but its
+    # stability matters — see class docstring above.
+    assert runner.ORACLE_REUSE_PASSWORD == "qs-gen-test-pwd-2026"
 
 
-def test_resolve_variants_empty_string_returns_default() -> None:
-    """Empty string (operator passed `--variants=`) → behave as
-    default. No silent failure into "no variants run"."""
-    assert runner.resolve_variants("") == ["default"]
+def test_oracle_container_name_is_per_cell() -> None:
+    """j.5.fix — distinct cells get distinct container names. Two
+    Oracle cells (e.g., sp_or_lo + sq_or_lo) would collide on
+    `containers.create(name=...)` with a 409 Conflict if they shared
+    the same name. Per-cell suffix solves the parallel-create race."""
+    sp_spec = VariantSpec(scenario="sp", dialect="or", target="lo")
+    sq_spec = VariantSpec(scenario="sq", dialect="or", target="lo")
+    assert runner._oracle_container_name_for(sp_spec) == "quicksight-test-oracle-sp_or_lo"
+    assert runner._oracle_container_name_for(sq_spec) == "quicksight-test-oracle-sq_or_lo"
+    assert runner._oracle_container_name_for(sp_spec) != runner._oracle_container_name_for(sq_spec)
 
 
-def test_resolve_variants_csv_returns_list() -> None:
-    assert runner.resolve_variants("local-pg") == ["local-pg"]
-    assert runner.resolve_variants("default,local-pg") == ["default", "local-pg"]
+def _install_fake_docker(
+    monkeypatch: Any, *, container_returner: Any, not_found_class: type[Exception],
+) -> None:
+    """Helper: inject a stub `docker` module into sys.modules so the
+    runner's lazy `import docker` finds our test double instead of the
+    real SDK. Avoids recursive monkeypatching of __import__ (which
+    deadlocks on nested imports like linecache → os)."""
+    import sys
+    import types
+
+    class _FakeContainers:
+        def get(self, _name: str) -> Any:
+            return container_returner()
+
+    class _FakeClient:
+        containers = _FakeContainers()
+
+    fake_errors = types.ModuleType("docker.errors")
+    fake_errors.NotFound = not_found_class  # type: ignore[attr-defined]: dynamic test double
+    fake_module = types.ModuleType("docker")
+    fake_module.from_env = lambda: _FakeClient()  # type: ignore[attr-defined]: dynamic test double
+    fake_module.errors = fake_errors  # type: ignore[attr-defined]: dynamic test double
+
+    monkeypatch.setitem(sys.modules, "docker", fake_module)
+    monkeypatch.setitem(sys.modules, "docker.errors", fake_errors)
 
 
-def test_resolve_variants_unknown_raises() -> None:
-    """Typo'd variant names fail-loud with the known set surfaced."""
-    with pytest.raises(ValueError, match="unknown variant"):
-        runner.resolve_variants("local-postgress")
+def test_get_or_start_oracle_adopts_running_container(monkeypatch: Any) -> None:
+    """j.5 — when a container with the stable name is already running,
+    skip the testcontainers create path and reconstruct the URL from
+    its host port. This is the win: no ~30-60s cold-start on
+    subsequent runs."""
+
+    class _FakeContainer:
+        status = "running"
+        attrs = {"NetworkSettings": {"Ports": {"1521/tcp": [{"HostPort": "55432"}]}}}
+
+    _install_fake_docker(
+        monkeypatch,
+        container_returner=lambda: _FakeContainer(),
+        not_found_class=Exception,
+    )
+
+    url, handle = runner._get_or_start_oracle_container("quicksight-test-oracle", "pwd123")
+    assert url == "oracle+oracledb://system:pwd123@localhost:55432/?service_name=FREEPDB1"
+    assert isinstance(handle, runner._PersistentContainerHandle)
+    assert handle.name == "quicksight-test-oracle"
 
 
-def test_setup_variant_default_is_no_op() -> None:
-    env, handle = runner.setup_variant("default")
+def test_get_or_start_oracle_falls_through_when_not_found(monkeypatch: Any) -> None:
+    """j.5 — when no container with the stable name exists, fall
+    through to the testcontainers create path (we don't actually start
+    one in this unit test — just verify the fallback dispatches)."""
+
+    class _NotFoundSentinel(Exception):
+        pass
+
+    def _raise_not_found() -> Any:
+        raise _NotFoundSentinel()
+
+    _install_fake_docker(
+        monkeypatch,
+        container_returner=_raise_not_found,
+        not_found_class=_NotFoundSentinel,
+    )
+
+    create_called = {"v": False}
+
+    def fake_create(name: str, _password: str) -> tuple[str, runner._PersistentContainerHandle]:
+        create_called["v"] = True
+        return "oracle+oracledb://stub", runner._PersistentContainerHandle(name=name)
+
+    monkeypatch.setattr(runner, "_start_fresh_oracle_container", fake_create)
+
+    _url, _handle = runner._get_or_start_oracle_container("quicksight-test-oracle", "pwd123")
+    assert create_called["v"] is True
+
+
+def test_cmd_up_to_skip_cheap_short_circuits_cached_layer(
+    monkeypatch: Any, tmp_path: Any,
+) -> None:
+    """j.8 — `--skip-cheap` + cached green for current SHA → dispatch_layer
+    is NOT called for the cached layer. This is the integration test for
+    j.8: the helpers (write/is_cached) have unit coverage above; this proves
+    the chain actually consumes the cache."""
+    monkeypatch.setattr(runner, "_short_sha", lambda: "abc1234")
+    monkeypatch.setattr(runner, "_is_dirty", lambda: False)
+    monkeypatch.setattr(runner, "RUN_TESTS_CACHE_DIR", tmp_path / ".cache")
+    monkeypatch.delenv(QS_GEN_RUNNER_YES.name, raising=False)
+
+    runner.write_cache_marker("unit", duration_seconds=1.0, variant="sp_pg_lo")
+
+    dispatched: list[str] = []
+
+    def fake_dispatch(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
+        dispatched.append(layer)
+        return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.01)
+
+    with (
+        patch.object(runner, "probe_dependencies", return_value=[]),
+        patch.object(runner, "dispatch_layer", side_effect=fake_dispatch),
+        patch.object(runner, "setup_variant", return_value=({}, None)),
+        patch.object(runner, "seed_variant"),
+        patch.object(runner, "teardown_variant"),
+    ):
+        code = runner.main(["up_to=db", "--variants=sp_pg_lo", "--skip-cheap"])
+    assert code == runner.EXIT_SUCCESS
+    # unit was cached → not dispatched. db was not cached → dispatched.
+    assert "unit" not in dispatched
+    assert "db" in dispatched
+
+
+def test_cmd_up_to_skip_cheap_no_cache_runs_all_layers(
+    monkeypatch: Any, tmp_path: Any,
+) -> None:
+    """j.8 — `--skip-cheap` without a cache marker still runs the layer
+    (degraded gracefully to "no cache → run normally")."""
+    monkeypatch.setattr(runner, "_short_sha", lambda: "abc1234")
+    monkeypatch.setattr(runner, "_is_dirty", lambda: False)
+    monkeypatch.setattr(runner, "RUN_TESTS_CACHE_DIR", tmp_path / ".cache_empty")
+    monkeypatch.delenv(QS_GEN_RUNNER_YES.name, raising=False)
+
+    dispatched: list[str] = []
+
+    def fake_dispatch(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
+        dispatched.append(layer)
+        return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.01)
+
+    with (
+        patch.object(runner, "probe_dependencies", return_value=[]),
+        patch.object(runner, "dispatch_layer", side_effect=fake_dispatch),
+        patch.object(runner, "setup_variant", return_value=({}, None)),
+        patch.object(runner, "seed_variant"),
+        patch.object(runner, "teardown_variant"),
+    ):
+        code = runner.main(["up_to=db", "--variants=sp_pg_lo", "--skip-cheap"])
+    assert code == runner.EXIT_SUCCESS
+    assert "unit" in dispatched
+    assert "db" in dispatched
+
+
+# Y.2.gate.m.2 — variant axis (3-axis matrix: scenario × dialect × target).
+
+
+def test_compose_specs_no_flags_returns_full_matrix() -> None:
+    """No flags → compose_matrix returns the 13-cell `full` default
+    (`expand_full()`). Lock-in: hard-cut migration default behavior."""
+    opts = runner.RunOptions()
+    specs, skipped = runner._compose_specs_from_options(opts)
+    # Each spec is a VariantSpec; `full` is well-defined as 13 cells per
+    # variant.expand_full's docstring (6 named-local + 4 named-aws + 3 fuzz).
+    assert len(specs) == 13
+    assert all(isinstance(s, VariantSpec) for s in specs)
+    # `expand_full` constructs only valid cells by design — nothing skipped.
+    assert skipped == []
+
+
+def test_compose_specs_dialects_only_narrows() -> None:
+    """`--dialects=pg` alone → cross-product mode: scenario axis defaults
+    to named-only (sp,sq); target axis defaults to lo,aw. 2×1×2 = 4 cells."""
+    opts = runner.RunOptions(dialects="pg")
+    specs, skipped = runner._compose_specs_from_options(opts)
+    assert len(specs) == 4
+    assert all(s.dialect == "pg" for s in specs)
+    assert skipped == []
+
+
+def test_compose_specs_sl_aw_invalid_cell_surfaces_in_skipped() -> None:
+    """m.4.b — `--dialects=sl --targets=aw` produces 0 valid cells
+    (sl × aw is rejected by `is_valid()`) but the skipped list carries
+    the cells the operator narrowed to so the runner can log them."""
+    opts = runner.RunOptions(dialects="sl", targets="aw")
+    specs, skipped = runner._compose_specs_from_options(opts)
+    assert specs == []
+    # 2 named scenarios × 1 dialect × 1 target = 2 invalid cells.
+    assert len(skipped) == 2
+    assert all(s.dialect == "sl" and s.target == "aw" for s in skipped)
+
+
+def test_compose_specs_variants_triage_returns_pinned_cells() -> None:
+    """`--variants=sp_pg_lo,sq_or_lo` → exactly those 2 specs; triage
+    codes are presumed valid (operator-typed), so skipped is empty."""
+    opts = runner.RunOptions(variants="sp_pg_lo,sq_or_lo")
+    specs, skipped = runner._compose_specs_from_options(opts)
+    assert [s.name for s in specs] == ["sp_pg_lo", "sq_or_lo"]
+    assert skipped == []
+
+
+def test_compose_specs_variants_legacy_local_pg_errors_with_hint() -> None:
+    """The m.2 hard-cut: legacy `local-pg`/etc. names fail loudly with a
+    pointer to the new sub-flag form so operators know what to type."""
+    opts = runner.RunOptions(variants="local-pg")
+    with pytest.raises(ValueError, match="--dialects=pg --targets=lo"):
+        runner._compose_specs_from_options(opts)
+
+
+def test_compose_specs_variants_mutex_with_subflags() -> None:
+    """`--variants` (triage) + sub-flag axes is operator-error — pick
+    one shape. Surface a clear message at compose time."""
+    opts = runner.RunOptions(variants="sp_pg_lo", dialects="pg")
+    with pytest.raises(ValueError, match="mutex"):
+        runner._compose_specs_from_options(opts)
+
+
+def test_setup_variant_aw_target_is_no_op() -> None:
+    """`target=aw` cells use the operator's external Aurora — no
+    container to spin up. Returns empty env + None handle."""
+    env, handle = runner.setup_variant(_spec_pg_aw())
     assert env == {}
     assert handle is None
+
+
+# Y.2.gate.m.4.f — per-cell layer cap (A) tests.
+
+
+def test_cell_chain_lo_caps_at_app2() -> None:
+    """m.4.f — lo cells drop deploy/api/browser. The local container
+    isn't reachable from QuickSight so dispatching those layers would
+    deploy a dead-pointer dashboard."""
+    chain = ["unit", "db", "app2", "deploy", "api", "browser"]
+    capped = runner.cell_chain(_spec_pg_lo(), chain)
+    assert capped == ["unit", "db", "app2"]
+
+
+def test_cell_chain_aw_passes_through() -> None:
+    """aw cells run every layer the operator asked for — they hit
+    the operator's external Aurora which QS can reach."""
+    chain = ["unit", "db", "app2", "deploy", "api", "browser"]
+    assert runner.cell_chain(_spec_pg_aw(), chain) == chain
+
+
+def test_cell_chain_lo_with_db_only_chain_unaffected() -> None:
+    """When the operator already asked for a chain that doesn't
+    include any AWS-touching layers, the cap is a no-op."""
+    chain = ["unit", "db"]
+    assert runner.cell_chain(_spec_pg_lo(), chain) == ["unit", "db"]
+    assert runner.cell_chain(_spec_sl_lo(), chain) == ["unit", "db"]
 
 
 def test_teardown_variant_no_op_for_none() -> None:
@@ -1809,53 +2139,54 @@ def test_dispatch_layer_recursion_guard_fails_loud(
 
 def test_cache_marker_variant_aware(monkeypatch: Any, tmp_path: Any) -> None:
     """Same SHA + same layer with different variants → different marker
-    files; cache lookup for one variant doesn't hit the other."""
+    files; cache lookup for one variant doesn't hit the other. With the
+    m.2 hard-cut, variant names are now the spec names (e.g., sp_pg_aw,
+    sp_pg_lo) instead of the legacy default/local-pg shape."""
     _stub_short_sha(monkeypatch, "abc1234")
     monkeypatch.setattr(runner, "RUN_TESTS_CACHE_DIR", tmp_path / ".cache")
 
-    runner.write_cache_marker("unit", duration_seconds=1.5, variant="default")
-    runner.write_cache_marker("db", duration_seconds=10.0, variant="local-pg")
+    runner.write_cache_marker("unit", duration_seconds=1.5, variant="sp_pg_aw")
+    runner.write_cache_marker("db", duration_seconds=10.0, variant="sp_pg_lo")
 
     # Each variant has its own marker.
-    assert (tmp_path / ".cache" / "abc1234.unit.default.json").exists()
-    assert (tmp_path / ".cache" / "abc1234.db.local-pg.json").exists()
+    assert (tmp_path / ".cache" / "abc1234.unit.sp_pg_aw.json").exists()
+    assert (tmp_path / ".cache" / "abc1234.db.sp_pg_lo.json").exists()
     # Cross-variant lookups don't hit.
-    assert runner.is_layer_cached_green("unit", variant="default") is True
-    assert runner.is_layer_cached_green("unit", variant="local-pg") is False
-    assert runner.is_layer_cached_green("db", variant="local-pg") is True
-    assert runner.is_layer_cached_green("db", variant="default") is False
+    assert runner.is_layer_cached_green("unit", variant="sp_pg_aw") is True
+    assert runner.is_layer_cached_green("unit", variant="sp_pg_lo") is False
+    assert runner.is_layer_cached_green("db", variant="sp_pg_lo") is True
+    assert runner.is_layer_cached_green("db", variant="sp_pg_aw") is False
 
 
-# Y.2.gate.b.2.impl.schema — seed_variant tests. The variant container
-# starts empty; seed_variant runs schema apply + data apply + data
-# refresh against the container URL before the db layer dispatches.
+# Y.2.gate.b.2.impl.schema — seed_variant tests. Lo-target cells start
+# with empty containers; seed_variant runs schema apply + data apply +
+# data refresh against the container URL before the db layer dispatches.
 
-def test_seed_variant_default_is_no_op() -> None:
-    """`default` variant means external Aurora / Oracle — already
-    seeded by the operator. seed_variant must do nothing."""
-    with patch.object(subprocess, "run") as mock_run:
-        runner.seed_variant("default", {})
-    mock_run.assert_not_called()
-
-
-def test_seed_variant_unknown_raises() -> None:
-    """Typo'd variant name fails loudly. Symmetric with
-    setup_variant's ValueError."""
-    with pytest.raises(ValueError, match="unknown variant"):
-        runner.seed_variant("local-postgress", {})
+# Note: `test_seed_variant_aw_target_is_no_op` was removed in m.5
+# fix-up. Two reasons:
+# (1) Stale invariant — m.4.f intentionally dropped the AW seed early-
+#     return so aw + lo cells run the same 3-step seed flow. The "no-op"
+#     contract no longer holds.
+# (2) Wrong mock — the test patched ``subprocess.run`` but ``seed_variant``
+#     uses ``_spawn_with_tee`` (subprocess.Popen-based). It accidentally
+#     ran *real* ``quicksight-gen schema apply`` against Aurora every test
+#     invocation, which the matrix runner's parallel cells exposed as
+#     "SSL SYSCALL error: Connection reset by peer" under concurrent load.
+# AW seed coverage now lives in the matrix runner's live db layer.
 
 
-def test_seed_variant_local_pg_runs_three_subprocesses(
+def test_seed_variant_pg_lo_runs_three_subprocesses(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
-    """local-pg seed runs schema apply, data apply, data refresh —
+    """(pg, lo) seed runs schema apply, data apply, data refresh —
     in that order, all three with --execute. Order matters: schema
     creates tables + matviews, data populates source tables, refresh
     populates matviews from source tables."""
     cfg = tmp_path / "fake_pg_cfg.yaml"
     cfg.write_text("dialect: postgres\n")
     monkeypatch.setattr(
-        runner, "_resolve_seed_config_for_local_pg", lambda: cfg,
+        runner, "_resolve_seed_config_for_dialect",
+        lambda dialect: cfg if dialect == "pg" else None,
     )
     monkeypatch.delenv(QS_GEN_TEST_L2_INSTANCE.name, raising=False)
 
@@ -1864,7 +2195,7 @@ def test_seed_variant_local_pg_runs_three_subprocesses(
         runner, "_spawn_with_tee", _fake_spawn_with_tee(captured),
     )
 
-    runner.seed_variant("local-pg", {"QS_GEN_DEMO_DATABASE_URL": "x"})
+    runner.seed_variant(_spec_pg_lo(), {"QS_GEN_DEMO_DATABASE_URL": "x"})
 
     # Three subprocesses, in order.
     assert len(captured) == 3
@@ -1887,7 +2218,8 @@ def test_seed_variant_threads_env_overrides_to_subprocesses(
     cfg = tmp_path / "fake_pg_cfg.yaml"
     cfg.write_text("")
     monkeypatch.setattr(
-        runner, "_resolve_seed_config_for_local_pg", lambda: cfg,
+        runner, "_resolve_seed_config_for_dialect",
+        lambda dialect: cfg if dialect == "pg" else None,
     )
     monkeypatch.delenv(QS_GEN_TEST_L2_INSTANCE.name, raising=False)
 
@@ -1897,7 +2229,9 @@ def test_seed_variant_threads_env_overrides_to_subprocesses(
     )
 
     container_url = "postgresql+psycopg2://test:test@localhost:60455/test"
-    runner.seed_variant("local-pg", {"QS_GEN_DEMO_DATABASE_URL": container_url})
+    runner.seed_variant(
+        _spec_pg_lo(), {"QS_GEN_DEMO_DATABASE_URL": container_url},
+    )
 
     # Every step sees the override.
     assert len(captured) == 3
@@ -1908,16 +2242,16 @@ def test_seed_variant_threads_env_overrides_to_subprocesses(
 def test_seed_variant_honors_qs_gen_test_l2_instance(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
-    """`QS_GEN_TEST_L2_INSTANCE` env (already used by tests/e2e/conftest
-    fixtures) flows through as `--l2 <yaml>` so seed + db tests target
-    the same L2 instance. Without the env, the CLI defaults to
-    bundled spec_example."""
+    """`QS_GEN_TEST_L2_INSTANCE` env flows through as `--l2 <yaml>` so seed
+    + db tests target the same L2 instance. Without the env (and without a
+    per-cell env_overrides), the CLI defaults to bundled spec_example."""
     cfg = tmp_path / "fake_pg_cfg.yaml"
     cfg.write_text("")
     l2_yaml = tmp_path / "my_instance.yaml"
     l2_yaml.write_text("")
     monkeypatch.setattr(
-        runner, "_resolve_seed_config_for_local_pg", lambda: cfg,
+        runner, "_resolve_seed_config_for_dialect",
+        lambda dialect: cfg if dialect == "pg" else None,
     )
     monkeypatch.setenv(QS_GEN_TEST_L2_INSTANCE.name, str(l2_yaml))
 
@@ -1926,7 +2260,7 @@ def test_seed_variant_honors_qs_gen_test_l2_instance(
         runner, "_spawn_with_tee", _fake_spawn_with_tee(captured),
     )
 
-    runner.seed_variant("local-pg", {})
+    runner.seed_variant(_spec_pg_lo(), {})
 
     for entry in captured:
         cmd = entry["cmd"]
@@ -1934,35 +2268,77 @@ def test_seed_variant_honors_qs_gen_test_l2_instance(
         assert str(l2_yaml) in cmd
 
 
-def test_seed_variant_local_pg_raises_when_no_cfg_found(
+def test_seed_variant_env_overrides_l2_wins_over_os_environ(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    """m.2.g regression — `_run_one_variant` sets per-spec
+    `QS_GEN_TEST_L2_INSTANCE` in env_overrides; that MUST override
+    whatever's in os.environ (or absence thereof). Without this, two
+    parallel cells running different scenarios both seed the same L2
+    (or none) and the downstream smoke test fails with "table does
+    not exist" against the right prefix.
+    """
+    cfg = tmp_path / "fake_pg_cfg.yaml"
+    cfg.write_text("")
+    os_env_l2 = tmp_path / "os_env_default.yaml"
+    os_env_l2.write_text("")
+    overrides_l2 = tmp_path / "per_spec_override.yaml"
+    overrides_l2.write_text("")
+    monkeypatch.setattr(
+        runner, "_resolve_seed_config_for_dialect",
+        lambda dialect: cfg if dialect == "pg" else None,
+    )
+    # OS env says one thing; env_overrides says another. Per-cell wins.
+    monkeypatch.setenv(QS_GEN_TEST_L2_INSTANCE.name, str(os_env_l2))
+
+    captured: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        runner, "_spawn_with_tee", _fake_spawn_with_tee(captured),
+    )
+
+    runner.seed_variant(
+        _spec_pg_lo(),
+        {QS_GEN_TEST_L2_INSTANCE.name: str(overrides_l2)},
+    )
+
+    for entry in captured:
+        cmd = entry["cmd"]
+        assert "--l2" in cmd
+        # env_overrides value won; os.environ value did not leak in.
+        assert str(overrides_l2) in cmd
+        assert str(os_env_l2) not in cmd
+
+
+def test_seed_variant_pg_lo_raises_when_no_cfg_found(
     monkeypatch: Any,
 ) -> None:
     """No postgres-dialect cfg → operator-actionable RuntimeError, not
     a confusing subprocess failure 3 layers deep. Surfaces the cfg
     discovery rules so the operator can fix it in one read."""
     monkeypatch.setattr(
-        runner, "_resolve_seed_config_for_local_pg", lambda: None,
+        runner, "_resolve_seed_config_for_dialect", lambda dialect: None,
     )
     with pytest.raises(RuntimeError, match="postgres-dialect cfg"):
-        runner.seed_variant("local-pg", {})
+        runner.seed_variant(_spec_pg_lo(), {})
 
 
 # Y.2.gate.b.2.impl.oracle — Oracle arm of seed_variant. Mirrors the
-# local-pg shape: same 3 CLI subprocesses, same env-threading + L2
+# pg-lo shape: same 3 CLI subprocesses, same env-threading + L2
 # override, distinct cfg-discovery list (run/config.oracle.yaml).
 # Live container test happens via `./run_tests.sh up_to=db
-# --variants=local-oracle`; these unit tests cover the wiring shape
+# --dialects=or --targets=lo`; these unit tests cover the wiring shape
 # without requiring Docker.
 
-def test_seed_variant_local_oracle_runs_three_subprocesses(
+def test_seed_variant_or_lo_runs_three_subprocesses(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
-    """Same shape as local-pg: schema apply → data apply → data refresh,
+    """Same shape as (pg, lo): schema apply → data apply → data refresh,
     each with --execute pointed at the oracle-dialect cfg."""
     cfg = tmp_path / "fake_oracle_cfg.yaml"
     cfg.write_text("dialect: oracle\n")
     monkeypatch.setattr(
-        runner, "_resolve_seed_config_for_local_oracle", lambda: cfg,
+        runner, "_resolve_seed_config_for_dialect",
+        lambda dialect: cfg if dialect == "or" else None,
     )
     monkeypatch.delenv(QS_GEN_TEST_L2_INSTANCE.name, raising=False)
 
@@ -1971,7 +2347,7 @@ def test_seed_variant_local_oracle_runs_three_subprocesses(
         runner, "_spawn_with_tee", _fake_spawn_with_tee(captured),
     )
 
-    runner.seed_variant("local-oracle", {"QS_GEN_DEMO_DATABASE_URL": "x"})
+    runner.seed_variant(_spec_or_lo(), {"QS_GEN_DEMO_DATABASE_URL": "x"})
 
     assert len(captured) == 3
     captured_cmds = [c["cmd"] for c in captured]
@@ -1983,31 +2359,31 @@ def test_seed_variant_local_oracle_runs_three_subprocesses(
         assert str(cfg) in cmd
 
 
-def test_seed_variant_local_oracle_raises_when_no_cfg_found(
+def test_seed_variant_or_lo_raises_when_no_cfg_found(
     monkeypatch: Any,
 ) -> None:
     """No oracle-dialect cfg → operator-actionable RuntimeError naming
     `run/config.oracle.yaml` so the operator can fix it in one read."""
     monkeypatch.setattr(
-        runner, "_resolve_seed_config_for_local_oracle", lambda: None,
+        runner, "_resolve_seed_config_for_dialect", lambda dialect: None,
     )
     with pytest.raises(RuntimeError, match="oracle-dialect cfg"):
-        runner.seed_variant("local-oracle", {})
+        runner.seed_variant(_spec_or_lo(), {})
 
 
 def test_resolve_seed_config_oracle_falls_back_to_run_oracle(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
     """No env override + run/config.oracle.yaml exists at the repo root
-    → return that path. Symmetric with the local-pg cfg discovery —
-    each variant has its own dialect-flavored fallback list."""
+    → return that path. Symmetric with the pg cfg discovery —
+    each dialect has its own flavored fallback list."""
     monkeypatch.delenv(QS_GEN_CONFIG.name, raising=False)
     fake_repo = tmp_path / "repo"
     (fake_repo / "run").mkdir(parents=True)
     cfg = fake_repo / "run" / "config.oracle.yaml"
     cfg.write_text("dialect: oracle\n")
     monkeypatch.setattr(runner, "REPO_ROOT", fake_repo)
-    assert runner._resolve_seed_config_for_local_oracle() == cfg
+    assert runner._resolve_seed_config_for_dialect("or") == cfg
 
 
 def test_seed_variant_raises_on_subprocess_failure(
@@ -2020,7 +2396,8 @@ def test_seed_variant_raises_on_subprocess_failure(
     cfg = tmp_path / "fake_pg_cfg.yaml"
     cfg.write_text("")
     monkeypatch.setattr(
-        runner, "_resolve_seed_config_for_local_pg", lambda: cfg,
+        runner, "_resolve_seed_config_for_dialect",
+        lambda dialect: cfg if dialect == "pg" else None,
     )
     monkeypatch.delenv(QS_GEN_TEST_L2_INSTANCE.name, raising=False)
 
@@ -2029,7 +2406,7 @@ def test_seed_variant_raises_on_subprocess_failure(
         runner, "_spawn_with_tee", _fake_spawn_with_tee(captured, returncode=1),
     )
     with pytest.raises(RuntimeError, match="schema"):
-        runner.seed_variant("local-pg", {})
+        runner.seed_variant(_spec_pg_lo(), {})
 
 
 def test_resolve_seed_config_explicit_env_override(
@@ -2041,7 +2418,7 @@ def test_resolve_seed_config_explicit_env_override(
     cfg = tmp_path / "my_pg.yaml"
     cfg.write_text("dialect: postgres\n")
     monkeypatch.setenv(QS_GEN_CONFIG.name, str(cfg))
-    assert runner._resolve_seed_config_for_local_pg() == cfg
+    assert runner._resolve_seed_config_for_dialect("pg") == cfg
 
 
 def test_resolve_seed_config_explicit_env_missing_returns_none(
@@ -2051,7 +2428,7 @@ def test_resolve_seed_config_explicit_env_missing_returns_none(
     don't silently fall back to a candidate. The override stated
     intent; respect it (and surface the absence)."""
     monkeypatch.setenv(QS_GEN_CONFIG.name, str(tmp_path / "does-not-exist.yaml"))
-    assert runner._resolve_seed_config_for_local_pg() is None
+    assert runner._resolve_seed_config_for_dialect("pg") is None
 
 
 def test_resolve_seed_config_falls_back_to_run_postgres(
@@ -2067,27 +2444,27 @@ def test_resolve_seed_config_falls_back_to_run_postgres(
     cfg = fake_repo / "run" / "config.postgres.yaml"
     cfg.write_text("dialect: postgres\n")
     monkeypatch.setattr(runner, "REPO_ROOT", fake_repo)
-    assert runner._resolve_seed_config_for_local_pg() == cfg
+    assert runner._resolve_seed_config_for_dialect("pg") == cfg
 
 
 def test_cmd_up_to_seeds_variant_when_db_layer_in_chain(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
-    """cmd_up_to fires seed_variant for non-default variants when the
-    chain includes a DB-touching layer. Parallel to the cache-marker
-    + dispatch-layer wiring — the seed step is gated on chain shape,
-    not just variant choice."""
+    """cmd_up_to fires seed_variant for lo-target cells when the chain
+    includes a DB-touching layer. Parallel to the cache-marker
+    + dispatch-layer wiring — the seed step is gated on (target=lo)
+    + chain shape, not on the spec's scenario or dialect."""
     monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(runner, "RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(
         runner, "setup_variant",
-        lambda name: ({"QS_GEN_DEMO_DATABASE_URL": "x"}, object()),
+        lambda spec: ({"QS_GEN_DEMO_DATABASE_URL": "x"}, object()),
     )
 
-    seed_calls: list[tuple[str, dict[str, str]]] = []
+    seed_calls: list[tuple[VariantSpec, dict[str, str]]] = []
 
-    def fake_seed(name: str, env_overrides: dict[str, str], **_: Any) -> None:
-        seed_calls.append((name, env_overrides))
+    def fake_seed(spec: VariantSpec, env_overrides: dict[str, str], **_: Any) -> None:
+        seed_calls.append((spec, env_overrides))
 
     monkeypatch.setattr(runner, "seed_variant", fake_seed)
     monkeypatch.setattr(runner, "teardown_variant", lambda h: None)
@@ -2099,12 +2476,18 @@ def test_cmd_up_to_seeds_variant_when_db_layer_in_chain(
     monkeypatch.setattr(runner, "probe_dependencies", lambda layer: [])
 
     parser = runner._build_parser()
-    args = parser.parse_args(["up_to", "db", "--variants", "local-pg"])
+    args = parser.parse_args(["up_to", "db", "--variants", "sp_pg_lo"])
     rc = runner.cmd_up_to(args)
     assert rc == runner.EXIT_SUCCESS
     assert len(seed_calls) == 1
-    assert seed_calls[0][0] == "local-pg"
-    assert seed_calls[0][1] == {"QS_GEN_DEMO_DATABASE_URL": "x"}
+    assert seed_calls[0][0].name == "sp_pg_lo"
+    # `_run_one_variant` augments env_overrides with QS_GEN_TEST_L2_INSTANCE
+    # (m.2.b) and possibly QS_GEN_CONFIG (dialect cfg) before calling
+    # seed_variant — assert the URL passes through, not equality.
+    assert seed_calls[0][1].get("QS_GEN_DEMO_DATABASE_URL") == "x"
+    # m.4.f — the L2 path is now the per-cell synthesized yaml (always),
+    # not the bundled spec_example.yaml. Ends with `_synth_l2.yaml`.
+    assert seed_calls[0][1].get(QS_GEN_TEST_L2_INSTANCE.name, "").endswith("_synth_l2.yaml")
 
 
 def test_cmd_up_to_skips_seed_when_chain_is_unit_only(
@@ -2118,13 +2501,13 @@ def test_cmd_up_to_skips_seed_when_chain_is_unit_only(
     monkeypatch.setattr(runner, "RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(
         runner, "setup_variant",
-        lambda name: ({"QS_GEN_DEMO_DATABASE_URL": "x"}, object()),
+        lambda spec: ({"QS_GEN_DEMO_DATABASE_URL": "x"}, object()),
     )
 
-    seed_calls: list[str] = []
+    seed_calls: list[VariantSpec] = []
     monkeypatch.setattr(
         runner, "seed_variant",
-        lambda name, env, **_: seed_calls.append(name),
+        lambda spec, env, **_: seed_calls.append(spec),
     )
     monkeypatch.setattr(runner, "teardown_variant", lambda h: None)
 
@@ -2135,28 +2518,29 @@ def test_cmd_up_to_skips_seed_when_chain_is_unit_only(
     monkeypatch.setattr(runner, "probe_dependencies", lambda layer: [])
 
     parser = runner._build_parser()
-    args = parser.parse_args(["up_to", "unit", "--variants", "local-pg"])
+    args = parser.parse_args(["up_to", "unit", "--variants", "sp_pg_lo"])
     rc = runner.cmd_up_to(args)
     assert rc == runner.EXIT_SUCCESS
     assert seed_calls == []  # never invoked
 
 
-def test_cmd_up_to_skips_seed_for_default_variant(
+def test_cmd_up_to_seeds_aw_target(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
-    """Default variant = external Aurora; operator already seeded.
-    Even when the chain includes db, cmd_up_to skips seed_variant —
-    we'd be double-seeding the operator's external DB otherwise."""
+    """m.4.f — aw cells now also run the seed flow (against operator's
+    external Aurora). The seed creates only the per-cell prefixed
+    tables (`<spec.name>_*`) so it never touches operator-managed
+    data under other prefixes."""
     monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(runner, "RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(
-        runner, "setup_variant", lambda name: ({}, None),
+        runner, "setup_variant", lambda spec: ({}, None),
     )
 
-    seed_calls: list[str] = []
+    seed_calls: list[VariantSpec] = []
     monkeypatch.setattr(
         runner, "seed_variant",
-        lambda name, env, **_: seed_calls.append(name),
+        lambda spec, env, **_: seed_calls.append(spec),
     )
     monkeypatch.setattr(runner, "teardown_variant", lambda h: None)
 
@@ -2167,10 +2551,11 @@ def test_cmd_up_to_skips_seed_for_default_variant(
     monkeypatch.setattr(runner, "probe_dependencies", lambda layer: [])
 
     parser = runner._build_parser()
-    args = parser.parse_args(["up_to", "db"])  # default variant
+    args = parser.parse_args(["up_to", "db", "--variants", "sp_pg_aw"])
     rc = runner.cmd_up_to(args)
     assert rc == runner.EXIT_SUCCESS
-    assert seed_calls == []
+    assert len(seed_calls) == 1
+    assert seed_calls[0].name == "sp_pg_aw"
 
 
 def test_normalize_pg_url_strips_psycopg2_driver() -> None:
@@ -2200,10 +2585,10 @@ def test_cmd_up_to_seed_failure_still_runs_teardown(
     handle = object()
     monkeypatch.setattr(
         runner, "setup_variant",
-        lambda name: ({"QS_GEN_DEMO_DATABASE_URL": "x"}, handle),
+        lambda spec: ({"QS_GEN_DEMO_DATABASE_URL": "x"}, handle),
     )
 
-    def fail_seed(name: str, env: dict[str, str], **_: Any) -> None:
+    def fail_seed(spec: VariantSpec, env: dict[str, str], **_: Any) -> None:
         raise RuntimeError("boom: schema apply died")
 
     monkeypatch.setattr(runner, "seed_variant", fail_seed)
@@ -2217,7 +2602,7 @@ def test_cmd_up_to_seed_failure_still_runs_teardown(
     monkeypatch.setattr(runner, "probe_dependencies", lambda layer: [])
 
     parser = runner._build_parser()
-    args = parser.parse_args(["up_to", "db", "--variants", "local-pg"])
+    args = parser.parse_args(["up_to", "db", "--variants", "sp_pg_lo"])
     rc = runner.cmd_up_to(args)
     assert rc == runner.EXIT_NEEDS_OPERATOR
     assert teardown_calls == [handle]
@@ -2233,21 +2618,21 @@ def test_cmd_up_to_seed_failure_still_runs_teardown(
 def test_cmd_up_to_multi_variant_runs_each_variant(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
-    """Multi-variant: every variant in --variants gets its own
-    _run_one_variant invocation. Both variants run; neither short-
+    """Multi-cell: every spec in the matrix gets its own
+    _run_one_variant invocation. Both cells run; neither short-
     circuits the other (asyncio.gather collects all results)."""
     monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(runner, "RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(runner, "probe_dependencies", lambda layer: [])
 
-    invocations: list[tuple[str, Path, str]] = []
+    invocations: list[tuple[VariantSpec, Path, str]] = []
 
     def fake_run_one(
-        variant: str, run_dir: Path, options: Any, chain: list[str],
+        spec: VariantSpec, run_dir: Path, options: Any, chain: list[str],
         *, terminal_prefix: str = "",
-    ) -> tuple[str, list[runner.LayerResult], int]:
-        invocations.append((variant, run_dir, terminal_prefix))
-        return variant, [
+    ) -> tuple[VariantSpec, list[runner.LayerResult], int]:
+        invocations.append((spec, run_dir, terminal_prefix))
+        return spec, [
             runner.LayerResult(layer="unit", exit_code=0, duration_seconds=0.1),
         ], runner.EXIT_SUCCESS
 
@@ -2255,32 +2640,32 @@ def test_cmd_up_to_multi_variant_runs_each_variant(
 
     parser = runner._build_parser()
     args = parser.parse_args([
-        "up_to", "unit", "--variants", "local-pg,local-oracle",
+        "up_to", "unit", "--variants", "sp_pg_lo,sp_or_lo",
     ])
     rc = runner.cmd_up_to(args)
     assert rc == runner.EXIT_SUCCESS
-    variants_seen = {variant for variant, _, _ in invocations}
-    assert variants_seen == {"local-pg", "local-oracle"}
+    names_seen = {spec.name for spec, _, _ in invocations}
+    assert names_seen == {"sp_pg_lo", "sp_or_lo"}
 
 
 def test_cmd_up_to_multi_variant_nests_run_dir_per_variant(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
-    """Per design lock #1 — nested ``runs/<id>/<variant>/``. Easier
-    to ripgrep + per-variant artifacts (cmd.json, stdout.log, seed/)
-    don't collide between sibling variants."""
+    """Per design lock #1 — nested ``runs/<id>/<spec.name>/``. Easier
+    to ripgrep + per-cell artifacts (cmd.json, stdout.log, seed/)
+    don't collide between sibling cells."""
     monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(runner, "RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(runner, "probe_dependencies", lambda layer: [])
 
-    invocations: list[tuple[str, Path]] = []
+    invocations: list[tuple[VariantSpec, Path]] = []
 
     def fake_run_one(
-        variant: str, run_dir: Path, options: Any, chain: list[str],
+        spec: VariantSpec, run_dir: Path, options: Any, chain: list[str],
         *, terminal_prefix: str = "",
-    ) -> tuple[str, list[runner.LayerResult], int]:
-        invocations.append((variant, run_dir))
-        return variant, [
+    ) -> tuple[VariantSpec, list[runner.LayerResult], int]:
+        invocations.append((spec, run_dir))
+        return spec, [
             runner.LayerResult(layer="unit", exit_code=0, duration_seconds=0.1),
         ], runner.EXIT_SUCCESS
 
@@ -2288,24 +2673,24 @@ def test_cmd_up_to_multi_variant_nests_run_dir_per_variant(
 
     parser = runner._build_parser()
     args = parser.parse_args([
-        "up_to", "unit", "--variants", "local-pg,local-oracle",
+        "up_to", "unit", "--variants", "sp_pg_lo,sp_or_lo",
     ])
     runner.cmd_up_to(args)
 
-    # Per-variant run_dir is the top-level run_dir suffixed with the
-    # variant name. The top-level run_dir lives under RUNS_DIR.
-    by_variant = dict(invocations)
-    assert by_variant["local-pg"].name == "local-pg"
-    assert by_variant["local-oracle"].name == "local-oracle"
-    assert by_variant["local-pg"].parent == by_variant["local-oracle"].parent
-    assert by_variant["local-pg"].parent.parent == tmp_path / "runs"
+    # Per-cell run_dir is the top-level run_dir suffixed with the
+    # spec name. The top-level run_dir lives under RUNS_DIR.
+    by_name = {spec.name: rd for spec, rd in invocations}
+    assert by_name["sp_pg_lo"].name == "sp_pg_lo"
+    assert by_name["sp_or_lo"].name == "sp_or_lo"
+    assert by_name["sp_pg_lo"].parent == by_name["sp_or_lo"].parent
+    assert by_name["sp_pg_lo"].parent.parent == tmp_path / "runs"
 
 
 def test_cmd_up_to_multi_variant_threads_terminal_prefix(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
     """Per design lock #2 — per-line terminal prefix
-    ``[<variant>] `` flows from cmd_up_to → _run_one_variant →
+    ``[<spec.name>] `` flows from cmd_up_to → _run_one_variant →
     (downstream into dispatch_layer + _tee_stream)."""
     monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(runner, "RUNS_DIR", tmp_path / "runs")
@@ -2314,11 +2699,11 @@ def test_cmd_up_to_multi_variant_threads_terminal_prefix(
     prefixes: dict[str, str] = {}
 
     def fake_run_one(
-        variant: str, run_dir: Path, options: Any, chain: list[str],
+        spec: VariantSpec, run_dir: Path, options: Any, chain: list[str],
         *, terminal_prefix: str = "",
-    ) -> tuple[str, list[runner.LayerResult], int]:
-        prefixes[variant] = terminal_prefix
-        return variant, [
+    ) -> tuple[VariantSpec, list[runner.LayerResult], int]:
+        prefixes[spec.name] = terminal_prefix
+        return spec, [
             runner.LayerResult(layer="unit", exit_code=0, duration_seconds=0.1),
         ], runner.EXIT_SUCCESS
 
@@ -2326,21 +2711,21 @@ def test_cmd_up_to_multi_variant_threads_terminal_prefix(
 
     parser = runner._build_parser()
     args = parser.parse_args([
-        "up_to", "unit", "--variants", "local-pg,local-oracle",
+        "up_to", "unit", "--variants", "sp_pg_lo,sp_or_lo",
     ])
     runner.cmd_up_to(args)
 
     assert prefixes == {
-        "local-pg": "[local-pg] ",
-        "local-oracle": "[local-oracle] ",
+        "sp_pg_lo": "[sp_pg_lo] ",
+        "sp_or_lo": "[sp_or_lo] ",
     }
 
 
 def test_cmd_up_to_multi_variant_soft_fast_fail_per_variant(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
-    """Per design lock #3 — soft fast-fail. One variant failing does
-    NOT abort sibling variants. Both variants always run to completion
+    """Per design lock #3 — soft fast-fail. One cell failing does
+    NOT abort sibling cells. Both cells always run to completion
     (or to their own first failure inside _run_one_variant). Final
     exit code reports any-failure as EXIT_FAILURE."""
     monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
@@ -2350,15 +2735,15 @@ def test_cmd_up_to_multi_variant_soft_fast_fail_per_variant(
     invoked: list[str] = []
 
     def fake_run_one(
-        variant: str, run_dir: Path, options: Any, chain: list[str],
+        spec: VariantSpec, run_dir: Path, options: Any, chain: list[str],
         *, terminal_prefix: str = "",
-    ) -> tuple[str, list[runner.LayerResult], int]:
-        invoked.append(variant)
-        if variant == "local-pg":
-            return variant, [
+    ) -> tuple[VariantSpec, list[runner.LayerResult], int]:
+        invoked.append(spec.name)
+        if spec.name == "sp_pg_lo":
+            return spec, [
                 runner.LayerResult(layer="unit", exit_code=1, duration_seconds=0.1),
             ], runner.EXIT_FAILURE
-        return variant, [
+        return spec, [
             runner.LayerResult(layer="unit", exit_code=0, duration_seconds=0.1),
         ], runner.EXIT_SUCCESS
 
@@ -2366,11 +2751,11 @@ def test_cmd_up_to_multi_variant_soft_fast_fail_per_variant(
 
     parser = runner._build_parser()
     args = parser.parse_args([
-        "up_to", "unit", "--variants", "local-pg,local-oracle",
+        "up_to", "unit", "--variants", "sp_pg_lo,sp_or_lo",
     ])
     rc = runner.cmd_up_to(args)
-    # Both variants ran — soft fast-fail did not skip the sibling.
-    assert set(invoked) == {"local-pg", "local-oracle"}
+    # Both cells ran — soft fast-fail did not skip the sibling.
+    assert set(invoked) == {"sp_pg_lo", "sp_or_lo"}
     # Failure wins the final exit code.
     assert rc == runner.EXIT_FAILURE
 
@@ -2378,18 +2763,18 @@ def test_cmd_up_to_multi_variant_soft_fast_fail_per_variant(
 def test_cmd_up_to_multi_variant_aggregates_timings(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
-    """Multi-variant top-level timings.json keys layers with
-    ``<variant>.<layer>`` so report_drift's per-layer compare works
-    unchanged + per-variant attribution stays clear in CI artifacts."""
+    """Multi-cell top-level timings.json keys layers with
+    ``<spec.name>.<layer>`` so report_drift's per-layer compare works
+    unchanged + per-cell attribution stays clear in CI artifacts."""
     monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(runner, "RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(runner, "probe_dependencies", lambda layer: [])
 
     def fake_run_one(
-        variant: str, run_dir: Path, options: Any, chain: list[str],
+        spec: VariantSpec, run_dir: Path, options: Any, chain: list[str],
         *, terminal_prefix: str = "",
-    ) -> tuple[str, list[runner.LayerResult], int]:
-        return variant, [
+    ) -> tuple[VariantSpec, list[runner.LayerResult], int]:
+        return spec, [
             runner.LayerResult(layer="unit", exit_code=0, duration_seconds=1.5),
         ], runner.EXIT_SUCCESS
 
@@ -2397,7 +2782,7 @@ def test_cmd_up_to_multi_variant_aggregates_timings(
 
     parser = runner._build_parser()
     args = parser.parse_args([
-        "up_to", "unit", "--variants", "local-pg,local-oracle",
+        "up_to", "unit", "--variants", "sp_pg_lo,sp_or_lo",
     ])
     runner.cmd_up_to(args)
 
@@ -2407,11 +2792,11 @@ def test_cmd_up_to_multi_variant_aggregates_timings(
     assert len(run_dirs) == 1
     top = run_dirs[0]
     aggregated = json.loads((top / "timings.json").read_text())
-    assert "local-pg.unit" in aggregated["layer_durations"]
-    assert "local-oracle.unit" in aggregated["layer_durations"]
-    # Per-variant timings.json also exists under the nested dir.
-    assert (top / "local-pg" / "timings.json").exists()
-    assert (top / "local-oracle" / "timings.json").exists()
+    assert "sp_pg_lo.unit" in aggregated["layer_durations"]
+    assert "sp_or_lo.unit" in aggregated["layer_durations"]
+    # Per-cell timings.json also exists under the nested dir.
+    assert (top / "sp_pg_lo" / "timings.json").exists()
+    assert (top / "sp_or_lo" / "timings.json").exists()
 
 
 # Y.2.gate.i.3 — _derive_qs_user_arn unit tests (mock-boto3).
@@ -2582,3 +2967,148 @@ def test_derive_qs_user_arn_boto3_errors_propagate(monkeypatch: Any) -> None:
     # Operator-facing surface: the original boto3 message must survive
     # the propagation so `_run_one_variant`'s log-line shows what failed.
     assert "ExpiredToken" in str(exc_info.value)
+
+
+# Y.2.gate.m.3 — fuzz scenario wiring tests. random_l2_yaml lives in
+# tests/l2/fuzz.py and is byte-deterministic per seed (see
+# test_l2_fuzz.py::test_fuzzer_is_byte_deterministic). The runner uses
+# it to synthesize per-cell L2 yaml under runs/<id>/<variant>/_synth_l2.yaml
+# and writes a per-cell manifest.json so operators can reproduce a
+# failed fuzz cell with `--variants=f<seed>_<di>_<ta>`.
+
+
+def test_resolve_l2_yaml_for_spec_named_synthesizes_with_spec_name(
+    tmp_path: Path,
+) -> None:
+    """m.4.f — sp/sq cells synthesize a per-cell yaml that's the bundled
+    fixture with the ``instance`` field overridden to ``spec.name``.
+    DB schema prefix downstream becomes ``<spec.name>_*`` so sister cells
+    deploying to shared external Aurora don't collide."""
+    spec = _spec_pg_aw()  # sp_pg_aw
+    resolved = runner._resolve_l2_yaml_for_spec(spec, tmp_path)
+    assert resolved == tmp_path / "_synth_l2.yaml"
+    text = resolved.read_text()
+    assert "instance: sp_pg_aw" in text
+
+
+def test_resolve_l2_yaml_for_spec_us_synthesizes_with_spec_name(
+    tmp_path: Path,
+) -> None:
+    """`us` cells: load the operator's yaml, override instance to
+    spec.name, write to run_dir/_synth_l2.yaml. Operator-supplied
+    content (accounts/rails/etc.) is preserved; only `instance` shifts."""
+    user_yaml = tmp_path / "my_custom.yaml"
+    user_yaml.write_text(
+        "instance: custom_name\n"
+        "description: my custom L2\n"
+        "accounts:\n"
+        "  - id: a1\n"
+        "    name: A\n"
+        "    role: GLControl\n"
+    )
+    spec = VariantSpec(
+        ScenarioCode("us"), "pg", "lo", user_yaml=user_yaml,
+    )
+    resolved = runner._resolve_l2_yaml_for_spec(spec, tmp_path)
+    assert resolved == tmp_path / "_synth_l2.yaml"
+    text = resolved.read_text()
+    assert "instance: us_pg_lo" in text
+    # Operator content preserved.
+    assert "description: my custom L2" in text
+    assert "GLControl" in text
+
+
+def test_resolve_l2_yaml_for_spec_fuzz_synthesizes_with_spec_name(
+    tmp_path: Path,
+) -> None:
+    """m.3.a + m.4.f — fuzz cells synthesize via random_l2_yaml(seed) AND
+    rewrite the instance field to spec.name. Spec name encodes the seed,
+    so two cells with the same seed get the same instance — by design."""
+    spec = VariantSpec(
+        ScenarioCode("f42"), "pg", "lo", fuzz_seed=42,
+    )
+    resolved = runner._resolve_l2_yaml_for_spec(spec, tmp_path)
+    assert resolved == tmp_path / "_synth_l2.yaml"
+    text = resolved.read_text()
+    assert text.strip(), "synthesized yaml is empty"
+    # Per-cell instance override; the fuzzer's default `fuzz_seed_<n>` is gone.
+    assert "instance: f42_pg_lo" in text
+    assert "fuzz_seed_" not in text
+
+
+def test_resolve_l2_yaml_for_spec_fuzz_is_byte_deterministic(
+    tmp_path: Path,
+) -> None:
+    """m.3.d pinned-seed determinism — same seed via the runner path
+    produces byte-identical synthesized yaml across two calls. Locks
+    the contract that `--variants=f<seed>_<di>_<ta>` is a real one-line
+    repro of a failed fuzz cell."""
+    spec = VariantSpec(
+        ScenarioCode("f12345"), "pg", "lo", fuzz_seed=12345,
+    )
+    dir_a = tmp_path / "run_a"
+    dir_b = tmp_path / "run_b"
+    path_a = runner._resolve_l2_yaml_for_spec(spec, dir_a)
+    path_b = runner._resolve_l2_yaml_for_spec(spec, dir_b)
+    assert path_a.read_bytes() == path_b.read_bytes()
+
+
+def test_write_cell_manifest_includes_repro_hint_for_fuzz(
+    tmp_path: Path,
+) -> None:
+    """m.3.c — fuzz cells get a repro_hint in their manifest so the
+    operator can pin the failing cell with one CLI invocation."""
+    spec = VariantSpec(
+        ScenarioCode("f7"), "pg", "lo", fuzz_seed=7,
+    )
+    runner._write_cell_manifest(spec, tmp_path)
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert manifest["name"] == "f7_pg_lo"
+    assert manifest["scenario"] == "f7"
+    assert manifest["dialect"] == "pg"
+    assert manifest["target"] == "lo"
+    assert manifest["fuzz_seed"] == 7
+    assert manifest["repro_hint"] == "--variants=f7_pg_lo"
+
+
+def test_write_cell_manifest_named_scenario_no_repro_hint(
+    tmp_path: Path,
+) -> None:
+    """Named scenarios (sp/sq) don't carry a repro_hint — the manifest
+    is still written for shape consistency, but only fuzz cells benefit
+    from the explicit `--variants=` pointer."""
+    runner._write_cell_manifest(_spec_pg_aw(), tmp_path)
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert manifest["name"] == "sp_pg_aw"
+    assert manifest["fuzz_seed"] is None
+    assert "repro_hint" not in manifest
+
+
+def test_full_matrix_includes_three_fuzz_cells_with_shared_seed() -> None:
+    """m.3.b — `expand_full()` produces 3 fuzz cells (one per local
+    dialect) that share a single seed for cross-dialect coverage on
+    identical synthesized L2 topology."""
+    from quicksight_gen.common.variant import expand_full
+    cells = expand_full()
+    fuzz_cells = [c for c in cells if c.scenario.startswith("f")]
+    assert len(fuzz_cells) == 3
+    # All three share the same seed.
+    seeds = {c.fuzz_seed for c in fuzz_cells}
+    assert len(seeds) == 1
+    # And they cover all 3 local dialects.
+    dialects = {c.dialect for c in fuzz_cells}
+    assert dialects == {"pg", "or", "sl"}
+    assert all(c.target == "lo" for c in fuzz_cells)
+
+
+def test_full_matrix_fuzz_seed_is_random_across_calls() -> None:
+    """m.3.b random-by-default — two `expand_full()` calls produce
+    different fuzz seeds with overwhelming probability (collision
+    probability is ~1/2^32). Locks the contract that ``full`` doesn't
+    repeat the same cell-set across runs."""
+    from quicksight_gen.common.variant import expand_full
+    cells_a = expand_full()
+    cells_b = expand_full()
+    seed_a = next(c.fuzz_seed for c in cells_a if c.scenario.startswith("f"))
+    seed_b = next(c.fuzz_seed for c in cells_b if c.scenario.startswith("f"))
+    assert seed_a != seed_b

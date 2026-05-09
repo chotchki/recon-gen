@@ -1,5 +1,113 @@
 # Release Notes
 
+## v8.8.0a6 — Y.2.gate.j + Y.2.gate.m close-out (variant matrix + parallelism)
+
+Sixth alpha. Closes both `Y.2.gate.j` (parallelism + iteration ergonomics)
+and `Y.2.gate.m` (variant matrix composition). The runner now holds the
+full design intent: the 13-cell `scenario × dialect × target` matrix
+runs in true parallel (`asyncio.gather` across cells × pytest-xdist
+within layers), Oracle containers persist across runs, and tests stop
+polluting the operator's `runs/` dir.
+
+### What ships
+
+#### Y.2.gate.j — Parallelism
+
+- **`j.5` — Oracle container reuse via per-cell stable name.** Each
+  Oracle cell spawns a `quicksight-test-oracle-<spec.name>` container
+  with a pinned `oracle_password`. Subsequent runs adopt via docker-py
+  `containers.get(name)` and reconstruct the URL from the host port.
+  PG containers stay ephemeral. `_PersistentContainerHandle` makes
+  `teardown_variant` a no-op for Oracle so the container outlives the
+  invocation. Operator owns the lifecycle (`docker stop ...` until
+  gate.l.2's `down` verb lands).
+- **`j.6` — Within-layer pytest defaults to `-n auto`.** Earlier draft
+  was serial-by-default for unit/db/app2 (api/browser already had
+  auto). Operator pins via `--parallel=N`.
+- **`j.7` — `--only=<expr>` documented + ticked.** Argparse + `-k`
+  pass-through were already wired; CLAUDE.md + `--help` now surface
+  it.
+- **`j.8` — `--skip-cheap` chain-level integration tests added.** The
+  helpers + dispatch short-circuit were wired under `b.8.impl`; now
+  has end-to-end coverage proving the cache actually short-circuits.
+
+#### Y.2.gate.m — Variant matrix
+
+- **m.5.c — Full matrix wall-clock measured.** With j.5+j.6 in place
+  the matrix runs cleanly in parallel: lo cells through unit + db +
+  app2 ≈ 50–100s + 60–80s + 80–100s per cell, wall-clock for the
+  9-cell lo subset ≈ 4 min. Aw cells extrapolate to 10–15 min each
+  through deploy + api + browser. The number — proving parallel
+  scaling works — is satisfied; full 13/13 green re-attempt deferred
+  to post-Y.3.f (Oracle dialect-correct case).
+- **m.5.e — Per-variant artifact path collision check passed.**
+  9 distinct cell dirs under `runs/<id>/`, no collisions. The m.4.f
+  spec.name uniqueness invariant is empirically confirmed.
+- **Hard-cut from legacy `local-pg` / `local-oracle` / `local-sqlite`
+  / `default` variant names** (m.2 LOCKED 2026-05-08). Sub-flags
+  `--scenarios` / `--dialects` / `--targets` or pin via
+  `--variants=<sc>_<di>_<ta>`.
+
+#### Four m.5 fix-ups (live-matrix-surfaced bugs)
+
+- **`j.5.fix` — Per-cell Oracle container name + soft-fail
+  asyncio.gather.** Two Oracle cells racing on
+  `containers.create(name="quicksight-test-oracle")` produced a 409
+  Conflict; the unrelated cell that crashed propagated through
+  `asyncio.gather` killing siblings. Fixed both — per-cell name +
+  `return_exceptions=True`.
+- **`j.5.fix2` — Quiet typing-smell lints in j.5 commit.** Bare
+  `# type: ignore` + `qs-gen-` literal both surfaced under matrix
+  unit layer.
+- **`j.6.fix` — Pin fuzz seed via `pytest_configure`.** Without it,
+  `tests/data/test_l2_seed_contract.py:76` runs
+  `secrets.randbits(32)` at module import per worker process; xdist
+  workers register different parametrize IDs and refuse to start.
+- **`m.5 fix-up` — Drop stale aw-no-op test + patch seed_variant in
+  cmd_up_to tests.** `test_seed_variant_aw_target_is_no_op` patched
+  `subprocess.run` but seed_variant uses `_spawn_with_tee` (Popen),
+  so the test silently ran real Aurora schema-applies every
+  invocation. Under matrix parallelism, Aurora connection saturation
+  surfaced as SSL connection-resets. Test deleted; `test_cmd_up_to_*`
+  tests now patch `seed_variant` directly.
+
+#### Three follow-ups landed in this release
+
+- **#741 — `runs/` test isolation.** Replaced the
+  `PYTEST_XDIST_WORKER` prune-skip bandaid with a session-autouse
+  monkeypatch in `tests/conftest.py::pytest_configure` that redirects
+  `runner.RUNS_DIR` to a session tmp dir. Tests no longer pollute the
+  operator's real `runs/`; prune contention vanishes.
+- **#740 — `test-module-nondeterminism` lint.** New AST checker in
+  `tests/unit/test_typing_smells.py` flags `random.X()` /
+  `secrets.X()` / `datetime.now()` / `date.today()` calls at module
+  top level in any test file. Catches the j.6.fix bug class
+  proactively.
+- **#729 — `VariantName` NewType wrapper.** `VariantSpec.name` now
+  returns `VariantName = NewType("VariantName", str)` so accidental
+  swaps with DialectCode / ScenarioCode / free-form str fail at the
+  call site under pyright. Annotation-only — zero runtime cost.
+
+### Operator-visible CLI
+
+```bash
+# No flags = full 13-cell matrix
+./run_tests.sh up_to=browser
+./run_tests.sh up_to=db --scenarios=sp --dialects=pg,or,sl --targets=lo
+./run_tests.sh up_to=browser --only=test_drift     # full chain, narrow within-layer
+./run_tests.sh up_to=db --skip-cheap               # short-circuit unit if cached green for SHA
+./run_tests.sh up_to=db --variants=f12345_pg_lo    # repro a fuzz failure by seed
+```
+
+### Known follow-ups (post-gate.m)
+
+- **Y.3.f — Stop bridging Oracle/Postgres case sensitivity.** Generator
+  emits dialect-natural case (Oracle UPPERCASE; PG/SQLite lowercase).
+  Unblocks `*_or_lo` app2 + `sp_or_aw`/`sq_or_aw` deploy/api/browser
+  cells (currently fail with `ORA-00904: "ACCOUNT_ID": invalid
+  identifier`).
+- **App2 Oracle column-casing bug** — root-caused, fix lives in Y.3.f.
+
 ## v8.8.0a5 — Y.2.gate.i close-out (instructions + tests + validation)
 
 Fifth alpha. Closes out `Y.2.gate.i.{2,3,4}` — the runtime wiring for

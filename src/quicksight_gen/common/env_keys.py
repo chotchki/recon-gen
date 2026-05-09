@@ -507,6 +507,19 @@ QS_GEN_RESOURCE_PREFIX: Final = EnvVar(
     optional=True,
 )
 
+QS_GEN_L2_INSTANCE_PREFIX: Final = EnvVar(
+    name="QS_GEN_L2_INSTANCE_PREFIX",
+    description=(
+        "Override cfg.l2_instance_prefix at load time — used by the "
+        "Y.2.gate.m runner to namespace per-cell aw-target deploys "
+        "so sister cells (e.g., sp_pg_aw + sp_or_aw) don't collide on "
+        "QS resource IDs. When unset, the prefix derives from the "
+        "loaded L2 yaml's `instance` field (default behavior)."
+    ),
+    coercer=str,
+    optional=True,
+)
+
 QS_GEN_DIALECT: Final = EnvVar(
     name="QS_GEN_DIALECT",
     description=(

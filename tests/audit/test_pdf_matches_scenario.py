@@ -64,7 +64,7 @@ _SPEC_EXAMPLE = _FIXTURES / "spec_example.yaml"
 # on real today keeps plant postings in the past where the matview
 # can see them. Days-ago offsets stay deterministic; only the
 # absolute calendar date varies.
-_TODAY = date.today()
+_TODAY = date.today()  # typing-smell: ignore[test-module-nondeterminism]: stuck_pending/stuck_unbundled matviews use CURRENT_TIMESTAMP — plants must be in the past relative to NOW (see WHY block above)
 _PERIOD: tuple[date, date] = (
     _TODAY - timedelta(days=7),
     _TODAY - timedelta(days=1),

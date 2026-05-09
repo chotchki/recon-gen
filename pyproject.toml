@@ -264,6 +264,7 @@ include = [
     "src/quicksight_gen/common/dataset_contract.py",
     "src/quicksight_gen/common/env_keys.py",
     "src/quicksight_gen/common/models.py",
+    "src/quicksight_gen/common/variant.py",
     # X.2.o.1 — async DB / App2 server surfaces. Added at strict
     # together because they form one cohesive subsystem (pool →
     # executor → fetcher → server route). Config gets pulled in
