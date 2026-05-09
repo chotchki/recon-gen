@@ -8,7 +8,7 @@ constraint violations. Healthy = empty.
 
 This page is the authoritative reference for what each
 `{{ l2_instance_name }}_*` view returns, the SHOULD-constraint motivation, and
-what `scripts/m2_6_verify.py` asserts against the canonical
+what the matview surfaces against the canonical
 demo seed.
 
 ## How the views are layered
@@ -65,7 +65,7 @@ ledger.
 `stored_balance`, `computed_balance`, `drift`.
 
 {% if vocab.fixture_name == "sasquatch_pr" %}
-**`m2_6_verify.py` asserts:** `bigfoot-brews +$75` planted at
+**the matview should surface:** `bigfoot-brews +$75` planted at
 `days_ago=5` surfaces with `drift=75.00`.
 {% endif %}
 
@@ -97,7 +97,7 @@ we MUST NOT overdraft *them*).
 `stored_balance`.
 
 {% if vocab.fixture_name == "sasquatch_pr" %}
-**`m2_6_verify.py` asserts:** `sasquatch-sips -$1500` planted at
+**the matview should surface:** `sasquatch-sips -$1500` planted at
 `days_ago=6` surfaces with `stored_balance=-1500.00`.
 {% endif %}
 
@@ -131,7 +131,7 @@ schema-emit time.
 `outbound_total`, `cap`.
 
 {% if vocab.fixture_name == "sasquatch_pr" %}
-**`m2_6_verify.py` asserts:** `big-meadow-dairy $22k wire`
+**the matview should surface:** `big-meadow-dairy $22k wire`
 planted at `days_ago=4` surfaces with `outbound_total > cap` for
 `transfer_type='wire'`.
 {% endif %}
@@ -153,7 +153,7 @@ without an aging watch contribute no branch and are excluded.
 `posting`, `max_pending_age_seconds`, `age_seconds`.
 
 {% if vocab.fixture_name == "sasquatch_pr" %}
-**`m2_6_verify.py` asserts:** `bigfoot-brews ACH at days_ago=2`
+**the matview should surface:** `bigfoot-brews ACH at days_ago=2`
 (172800s) surfaces with `age_seconds > max_pending_age_seconds`
 (86400s for the `CustomerInboundACH` rail's PT24H cap).
 {% endif %}
@@ -172,7 +172,7 @@ rails appearing in some AggregatingRail's `bundles_activity`.
 `max_unbundled_age_seconds` instead of `max_pending_age_seconds`.
 
 {% if vocab.fixture_name == "sasquatch_pr" %}
-**`m2_6_verify.py` asserts:** `sasquatch-sips fee accrual at
+**the matview should surface:** `sasquatch-sips fee accrual at
 days_ago=35` surfaces with `age_seconds > max_unbundled_age_seconds`
 (2,678,400s for the `CustomerFeeAccrual` rail's P31D cap).
 {% endif %}
@@ -187,7 +187,7 @@ versions (the audit trail for `TechnicalCorrection` /
 construction. See M.2b.12 dashboard for the visualization.
 
 {% if vocab.fixture_name == "sasquatch_pr" %}
-`m2_6_verify.py` asserts a planted TechnicalCorrection on
+the matview should surface a planted TechnicalCorrection on
 `bigfoot-brews` (2 entries on the same logical id at `days_ago=3`)
 surfaces with `entry_count > 1`.
 {% endif %}
