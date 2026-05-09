@@ -1644,6 +1644,109 @@ def test_skippable_layers_are_unit_and_db_only() -> None:
     assert runner.SKIPPABLE_LAYERS == ("unit", "db")
 
 
+# Y.2.gate.j.5 — Oracle container reuse.
+
+
+def test_persistent_container_handle_stop_is_no_op() -> None:
+    """j.5 — `_PersistentContainerHandle.stop()` is intentionally a
+    no-op so `teardown_variant` doesn't kill containers we want to
+    reuse on the next `./run_tests.sh` invocation."""
+    handle = runner._PersistentContainerHandle(name="quicksight-test-oracle")
+    # Should not raise + should not "do" anything observable.
+    handle.stop()
+    assert handle.name == "quicksight-test-oracle"
+
+
+def test_oracle_reuse_constants_are_stable() -> None:
+    """j.5 — adopt path reconstructs the URL from the container's host
+    port + these constants. If they change, every operator's existing
+    `quicksight-test-oracle` container becomes unadoptable (would
+    surface as auth failure on next run). The names are part of the
+    operator-facing contract — pin them."""
+    assert runner.ORACLE_REUSE_CONTAINER_NAME == "quicksight-test-oracle"
+    # Password value isn't sensitive (local-only test fixture) but its
+    # stability matters — see class docstring above.
+    assert runner.ORACLE_REUSE_PASSWORD == "qs-gen-test-pwd-2026"
+
+
+def _install_fake_docker(
+    monkeypatch: Any, *, container_returner: Any, not_found_class: type[Exception],
+) -> None:
+    """Helper: inject a stub `docker` module into sys.modules so the
+    runner's lazy `import docker` finds our test double instead of the
+    real SDK. Avoids recursive monkeypatching of __import__ (which
+    deadlocks on nested imports like linecache → os)."""
+    import sys
+    import types
+
+    class _FakeContainers:
+        def get(self, _name: str) -> Any:
+            return container_returner()
+
+    class _FakeClient:
+        containers = _FakeContainers()
+
+    fake_errors = types.ModuleType("docker.errors")
+    fake_errors.NotFound = not_found_class  # type: ignore[attr-defined]: dynamic test double
+    fake_module = types.ModuleType("docker")
+    fake_module.from_env = lambda: _FakeClient()  # type: ignore[attr-defined]: dynamic test double
+    fake_module.errors = fake_errors  # type: ignore[attr-defined]: dynamic test double
+
+    monkeypatch.setitem(sys.modules, "docker", fake_module)
+    monkeypatch.setitem(sys.modules, "docker.errors", fake_errors)
+
+
+def test_get_or_start_oracle_adopts_running_container(monkeypatch: Any) -> None:
+    """j.5 — when a container with the stable name is already running,
+    skip the testcontainers create path and reconstruct the URL from
+    its host port. This is the win: no ~30-60s cold-start on
+    subsequent runs."""
+
+    class _FakeContainer:
+        status = "running"
+        attrs = {"NetworkSettings": {"Ports": {"1521/tcp": [{"HostPort": "55432"}]}}}
+
+    _install_fake_docker(
+        monkeypatch,
+        container_returner=lambda: _FakeContainer(),
+        not_found_class=Exception,
+    )
+
+    url, handle = runner._get_or_start_oracle_container("quicksight-test-oracle", "pwd123")
+    assert url == "oracle+oracledb://system:pwd123@localhost:55432/?service_name=FREEPDB1"
+    assert isinstance(handle, runner._PersistentContainerHandle)
+    assert handle.name == "quicksight-test-oracle"
+
+
+def test_get_or_start_oracle_falls_through_when_not_found(monkeypatch: Any) -> None:
+    """j.5 — when no container with the stable name exists, fall
+    through to the testcontainers create path (we don't actually start
+    one in this unit test — just verify the fallback dispatches)."""
+
+    class _NotFoundSentinel(Exception):
+        pass
+
+    def _raise_not_found() -> Any:
+        raise _NotFoundSentinel()
+
+    _install_fake_docker(
+        monkeypatch,
+        container_returner=_raise_not_found,
+        not_found_class=_NotFoundSentinel,
+    )
+
+    create_called = {"v": False}
+
+    def fake_create(name: str, _password: str) -> tuple[str, runner._PersistentContainerHandle]:
+        create_called["v"] = True
+        return "oracle+oracledb://stub", runner._PersistentContainerHandle(name=name)
+
+    monkeypatch.setattr(runner, "_start_fresh_oracle_container", fake_create)
+
+    _url, _handle = runner._get_or_start_oracle_container("quicksight-test-oracle", "pwd123")
+    assert create_called["v"] is True
+
+
 def test_cmd_up_to_skip_cheap_short_circuits_cached_layer(
     monkeypatch: Any, tmp_path: Any,
 ) -> None:

@@ -1111,6 +1111,21 @@ DB_TOUCHING_LAYERS: Final = ("db", "app2", "deploy", "api", "browser")
 # `app2` (the local-Docker terminal, locked by audit §7.10).
 AWS_TOUCHING_LAYERS: Final = ("deploy", "api", "browser")
 
+# Y.2.gate.j.5 — Oracle container reuse. Stable name + stable password
+# so the adopt path can reconstruct the URL without inspecting the
+# container's randomized testcontainers env. The container is left
+# running across `./run_tests.sh` invocations; operator stops via
+# `docker stop quicksight-test-oracle` (or future `./run_tests.sh down`,
+# Y.2.gate.l.2). PG containers stay ephemeral — their cold-start is
+# ~5s and the cleanup hygiene wins outweigh the reuse savings there.
+ORACLE_REUSE_CONTAINER_NAME: Final = "quicksight-test-oracle"
+# Pinned password matches the testcontainers `OracleDbContainer`
+# default in the gvenzl/oracle-free image when `oracle_password` is
+# explicitly set. Without pinning, testcontainers randomizes per
+# invocation (`hex(randbits(24))`) and the adopt path can't predict
+# the URL on subsequent runs.
+ORACLE_REUSE_PASSWORD: Final = "qs-gen-test-pwd-2026"
+
 
 def cell_chain(spec: VariantSpec, requested_chain: list[str]) -> list[str]:
     """m.4.f — filter the requested chain to layers this cell can run.
@@ -1225,6 +1240,128 @@ def _setup_local_sqlite() -> tuple[dict[str, str], object | None]:
     return env, _SqliteHandle(db_path=db_path, cfg_path=cfg_path)
 
 
+@dataclass(frozen=True)
+class _PersistentContainerHandle:
+    """Y.2.gate.j.5 — handle wrapper that signals "leave the container
+    running at teardown". `teardown_variant` calls `.stop()` on every
+    handle; for persistent containers that's a no-op so the container
+    survives across `./run_tests.sh` invocations and the next run can
+    adopt it via `_get_or_start_oracle_container`.
+
+    Holds the Docker container name so the operator can find / stop /
+    inspect it manually (`docker stop quicksight-test-oracle`). The
+    real container handle (the testcontainers `OracleDbContainer`
+    instance) is intentionally discarded — Docker keeps the container
+    running independently of the Python handle.
+    """
+
+    name: str
+
+    def stop(self) -> None:
+        """No-op by design — see class docstring. Operator owns the
+        lifecycle via `docker stop <name>` or future `./run_tests.sh
+        down` (Y.2.gate.l.2)."""
+
+
+def _get_or_start_oracle_container(
+    name: str, password: str,
+) -> tuple[str, _PersistentContainerHandle]:
+    """Y.2.gate.j.5 — adopt a running named Oracle container if one
+    exists, else start a fresh one with the same stable name. Either
+    way the returned handle's `.stop()` is a no-op — the container
+    persists across runs. Operator manages lifecycle via Docker.
+
+    Adopt path: `docker.from_env().containers.get(name)` succeeds AND
+    the container is running. Reconstruct the connection URL from the
+    container's host port (`NetworkSettings.Ports["1521/tcp"][0].HostPort`)
+    + the stable password the create path used. Saves ~30-60s of
+    cold-start vs. recreate.
+
+    Create path: testcontainers' `OracleDbContainer` with
+    `oracle_password=password` (pinned so the URL is deterministic on
+    next adopt) + `.with_name(name)` (so adopt can find it). The
+    started container's port + URL come back from
+    `get_connection_url()`.
+
+    Stopped-but-exists path: `existing.start()` resumes the container
+    in place (Docker keeps the data + image layers; only network +
+    process restart). Then re-extract the port mapping.
+
+    Failure modes:
+    - docker SDK not importable → fall through to testcontainers
+      create path (PostgresContainer side already lazy-imports
+      testcontainers; same shape).
+    - Inspect data shape unexpected → assume container is unhealthy,
+      recreate.
+    """
+    try:
+        import docker  # type: ignore[import-untyped]: third-party SDK lacks PEP 561 stubs  # noqa: PLC0415 — lazy: only Oracle path needs it
+        from docker.errors import NotFound  # type: ignore[import-untyped]: see above  # noqa: PLC0415
+    except ImportError:
+        return _start_fresh_oracle_container(name, password)
+
+    try:
+        client = docker.from_env()
+        existing = client.containers.get(name)
+    except NotFound:
+        return _start_fresh_oracle_container(name, password)
+    except Exception:  # noqa: BLE001 — docker daemon unreachable / socket missing → fall through
+        return _start_fresh_oracle_container(name, password)
+
+    if existing.status != "running":
+        try:
+            existing.start()
+            existing.reload()
+        except Exception:  # noqa: BLE001 — restart failed → recreate
+            try:
+                existing.remove(force=True)
+            except Exception:  # noqa: BLE001 — best-effort
+                pass
+            return _start_fresh_oracle_container(name, password)
+
+    try:
+        ports = existing.attrs["NetworkSettings"]["Ports"]
+        host_port = int(ports["1521/tcp"][0]["HostPort"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        # Inspect shape unexpected — likely a stale container from an
+        # older runner version. Recreate.
+        try:
+            existing.remove(force=True)
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+        return _start_fresh_oracle_container(name, password)
+
+    url = (
+        f"oracle+oracledb://system:{password}@localhost:{host_port}"
+        f"/?service_name=FREEPDB1"
+    )
+    return url, _PersistentContainerHandle(name=name)
+
+
+def _start_fresh_oracle_container(
+    name: str, password: str,
+) -> tuple[str, _PersistentContainerHandle]:
+    """j.5 — start a new named Oracle container with the stable
+    password. Returns the URL + a persistent handle (`.stop()` no-op
+    so the container outlives this invocation and the next run can
+    adopt it).
+    """
+    from testcontainers.oracle import OracleDbContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
+
+    # gvenzl/oracle-free:23-faststart — pre-initialized DB starts in
+    # seconds vs. the multi-minute cold-start on :slim. Image is
+    # heavier (~3 GB) but the time savings dominate test-loop
+    # economics. Service name defaults to FREEPDB1 (the oracle-free
+    # image's pluggable DB).
+    container = OracleDbContainer(
+        "gvenzl/oracle-free:23-faststart",
+        oracle_password=password,
+    ).with_name(name)
+    container.start()  # type: ignore[no-untyped-call]: testcontainers .start() lacks return-type hint
+    url: str = container.get_connection_url()
+    return url, _PersistentContainerHandle(name=name)
+
+
 def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
     """Bring up the resources a variant cell needs. Returns
     ``(env_overrides, handle_for_teardown)``. Caller threads
@@ -1267,20 +1404,20 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
         raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
         return {QS_GEN_DEMO_DATABASE_URL.name: _normalize_pg_url(raw_url)}, container
     if spec.dialect == "or":
-        from testcontainers.oracle import OracleDbContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
-
-        # gvenzl/oracle-free:23-faststart — pre-initialized DB starts
-        # in seconds vs. the multi-minute cold-start on :slim. Image
-        # is heavier (~3 GB) but the time savings dominate the
-        # test-loop economics. Service name defaults to FREEPDB1
-        # (the oracle-free image's pluggable DB).
-        container = OracleDbContainer("gvenzl/oracle-free:23-faststart")
-        container.start()
-        raw_url = container.get_connection_url()
+        # Y.2.gate.j.5 — Oracle container reuse. Image cold-start is
+        # ~30-60s; recreating per chain run dominates iteration time.
+        # `_get_or_start_oracle_container` adopts the named container
+        # if it's already running (subsequent runs pay ~0s startup),
+        # else starts a fresh one with the stable name. Either way the
+        # returned handle's `.stop()` is a no-op so `teardown_variant`
+        # leaves the container running for the next run.
         # Oracle URL flows through unchanged — ``oracle_dsn()`` in
         # ``common/db.py`` already accepts the SQLAlchemy-style
-        # ``oracle+oracledb://...`` form the testcontainer returns.
-        return {QS_GEN_DEMO_DATABASE_URL.name: raw_url}, container
+        # ``oracle+oracledb://...`` form.
+        url, handle = _get_or_start_oracle_container(
+            ORACLE_REUSE_CONTAINER_NAME, ORACLE_REUSE_PASSWORD,
+        )
+        return {QS_GEN_DEMO_DATABASE_URL.name: url}, handle
     if spec.dialect == "sl":
         # Y.2.gate.b.2.impl.sqlite — no Docker, no network. Create
         # a tempdir with a SQLite DB file + minimal cfg pointing at
