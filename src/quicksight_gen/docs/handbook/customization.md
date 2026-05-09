@@ -204,17 +204,18 @@ quicksight-gen json apply -c run/config.yaml -o run/out
 quicksight-gen json apply -c run/config.yaml -o run/out --execute
 ```
 
-### 5. Verify with `m2_6_verify.py`
+### 5. Verify with the test runner
 
-`scripts/m2_6_verify.py` is the end-to-end smoke that applies the
-schema, plants the canonical seed scenarios, refreshes matviews,
-and asserts each L1 invariant view returns the planted scenarios.
-For your own instance, write a sibling `myorg_seed.py` declaring
-your scenarios via the
-generic plant primitives (`DriftPlant`, `OverdraftPlant`,
+The `./run_tests.sh up_to=db --variants=sp_pg_aw` chain (or `sp_or_aw`
+for Oracle) applies the schema, plants the canonical seed scenarios,
+refreshes matviews, and asserts each L1 invariant view returns rows
+for every planted scenario via the e2e harness tests. For your own
+instance, write a sibling `myorg_seed.py` declaring your scenarios
+via the generic plant primitives (`DriftPlant`, `OverdraftPlant`,
 `LimitBreachPlant`, `StuckPendingPlant`, `StuckUnbundledPlant`,
-`SupersessionPlant`). Run the verify against your DB to PASS-gate
-your customization before touching the dashboard.
+`SupersessionPlant`); register it as the L2 instance in your config,
+then run the chain to PASS-gate your customization before touching
+the dashboard.
 
 For the full L1 invariant inventory (what each `{{ l2_instance_name }}_*` view
 returns + its SHOULD-constraint motivation), see

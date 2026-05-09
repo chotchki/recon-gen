@@ -66,8 +66,9 @@ jobs:
 
   # P.7 — containerized integration job. Runs ``quicksight-gen demo
   # apply`` against a live Postgres + a live Oracle Free service
-  # container, then verifies the per-prefix matview row counts match
-  # the locked expectations in tests/integration/verify_demo_apply.py.
+  # container, then verifies per-prefix matview row counts via
+  # ``tests/e2e/test_demo_apply_row_counts.py`` (Y.2.gate.f.2 — was
+  # ``tests/integration/verify_demo_apply.py`` CLI before the sweep).
   #
   # Service-container syntax (vs. ``docker run`` inside steps) lets GHA
   # health-check the DBs before steps start, so the apply doesn't race
@@ -145,16 +146,16 @@ jobs:
           .venv/bin/quicksight-gen json apply -c /tmp/ci-pg.yaml -o /tmp/ci-pg-out
 
       - name: Verify Postgres row counts
+        # Asserts ≥1 row in every named matview without exact counts.
+        # Exact counts depend on the seed anchor (defaults to UTC today)
+        # so they drift across CI runs. Re-lock to exact counts once
+        # `demo apply --anchor` lands as a follow-up.
+        env:
+          QS_GEN_E2E: "1"
+          QS_GEN_CONFIG: /tmp/ci-pg.yaml
+          QS_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
         run: |
-          # --smoke: assert ≥1 row in every named matview without exact
-          # counts. Exact counts depend on `date.today()` (the seed
-          # anchor defaults to UTC today), so they drift across CI
-          # runs. Re-lock to exact counts once `demo apply --anchor`
-          # lands as a follow-up.
-          .venv/bin/python tests/integration/verify_demo_apply.py \
-            --dialect postgres \
-            --url "postgresql://postgres:ci_pg_password@localhost:5432/postgres" \
-            --prefix spec_example --smoke
+          .venv/bin/pytest tests/e2e/test_demo_apply_row_counts.py -v
 
       - name: Smoke every dataset's CustomSQL against Postgres
         # Walks every emitted dataset across all 4 apps, substitutes
@@ -162,10 +163,12 @@ jobs:
         # in `WHERE 1=0`, and executes against the live DB. Catches
         # the SQL bugs that previously only surfaced at browser-test
         # time (JSON path concat, USING qualifier, missing FROM dual).
+        env:
+          QS_GEN_E2E: "1"
+          QS_GEN_CONFIG: /tmp/ci-pg.yaml
+          QS_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
         run: |
-          .venv/bin/python tests/integration/verify_dataset_sql.py \
-            --config /tmp/ci-pg.yaml \
-            --l2-instance tests/l2/spec_example.yaml
+          .venv/bin/pytest tests/e2e/test_dataset_sql_smoke.py -v
 
       - name: Render + verify the audit PDF against Postgres
         # `audit apply --execute` queries every L1 invariant matview
@@ -197,12 +200,13 @@ jobs:
           .venv/bin/quicksight-gen json apply -c /tmp/ci-oracle.yaml -o /tmp/ci-oracle-out
 
       - name: Verify Oracle row counts
+        # Same rationale as the Postgres row-count verify above.
+        env:
+          QS_GEN_E2E: "1"
+          QS_GEN_CONFIG: /tmp/ci-oracle.yaml
+          QS_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
         run: |
-          # --smoke: same rationale as the Postgres verify above.
-          .venv/bin/python tests/integration/verify_demo_apply.py \
-            --dialect oracle \
-            --url "system/ci_ora_password@localhost:1521/FREEPDB1" \
-            --prefix spec_example --smoke
+          .venv/bin/pytest tests/e2e/test_demo_apply_row_counts.py -v
 
       - name: Smoke every dataset's CustomSQL against Oracle
         # Same rationale as the Postgres dataset smoke above. The
@@ -210,10 +214,12 @@ jobs:
         # path concat, ORA-00923 SELECT-without-FROM, ORA-00911
         # underscore identifier, ORA-25154 USING qualifier) only
         # break here, not against PG.
+        env:
+          QS_GEN_E2E: "1"
+          QS_GEN_CONFIG: /tmp/ci-oracle.yaml
+          QS_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
         run: |
-          .venv/bin/python tests/integration/verify_dataset_sql.py \
-            --config /tmp/ci-oracle.yaml \
-            --l2-instance tests/l2/spec_example.yaml
+          .venv/bin/pytest tests/e2e/test_dataset_sql_smoke.py -v
 
       - name: Render + verify the audit PDF against Oracle
         # Same rationale as the Postgres audit PDF step above. Catches
