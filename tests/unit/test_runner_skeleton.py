@@ -1944,6 +1944,114 @@ def test_teardown_variant_swallows_exceptions() -> None:
     runner.teardown_variant(_Throws())  # must not raise
 
 
+# --- Y.2.gate.f.5 — --keep-on-failure suppresses teardown on failed chain ---
+
+
+def _stub_runner_for_keep_test(
+    monkeypatch: Any, tmp_path: Path, *, layer_passes: bool,
+) -> list[object]:
+    """Common stub setup for the f.5 keep-on-failure tests. Returns the
+    list teardown_variant gets called with (assert empty for "left up"
+    case, or holds the handle for "torn down" case).
+
+    Stubs setup_variant to return a sentinel handle, mocks
+    seed_variant + dispatch_layer + probe_dependencies, and patches
+    teardown_variant to record invocations rather than running.
+    """
+    monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(runner, "RUNS_DIR", tmp_path / "runs")
+    sentinel_handle = object()
+    monkeypatch.setattr(
+        runner, "setup_variant",
+        lambda spec: ({"QS_GEN_DEMO_DATABASE_URL": "x"}, sentinel_handle),
+    )
+    monkeypatch.setattr(runner, "seed_variant", lambda spec, env, **_: None)
+
+    def fake_dispatch(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
+        return runner.LayerResult(
+            layer=layer, exit_code=0 if layer_passes else 1,
+            duration_seconds=0.1,
+        )
+
+    monkeypatch.setattr(runner, "dispatch_layer", fake_dispatch)
+    monkeypatch.setattr(runner, "probe_dependencies", lambda layer: [])
+    monkeypatch.setattr(runner, "_dump_top_queries_for_variant", lambda *a, **kw: None)
+
+    teardown_calls: list[object] = []
+
+    def fake_teardown(handle: object | None) -> None:
+        if handle is not None:
+            teardown_calls.append(handle)
+
+    monkeypatch.setattr(runner, "teardown_variant", fake_teardown)
+    return teardown_calls
+
+
+def test_run_one_variant_keeps_handle_on_failure_when_flag_set(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    """gate.f.5 — chain failure + --keep-on-failure leaves the variant
+    container up so the operator can poke at it. teardown_variant must
+    NOT be called."""
+    teardown_calls = _stub_runner_for_keep_test(
+        monkeypatch, tmp_path, layer_passes=False,
+    )
+
+    parser = runner._build_parser()
+    args = parser.parse_args([
+        "up_to", "db", "--variants", "sp_pg_lo", "--keep-on-failure",
+    ])
+    rc = runner.cmd_up_to(args)
+    assert rc == runner.EXIT_FAILURE
+    assert teardown_calls == [], (
+        f"teardown_variant should NOT have been called when "
+        f"--keep-on-failure + chain failed; got {teardown_calls!r}"
+    )
+
+
+def test_run_one_variant_tears_down_on_success_even_with_keep_flag(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    """gate.f.5 — --keep-on-failure ONLY suppresses teardown on
+    failure. A successful chain still tears down regardless of the
+    flag (the "leave it up" semantics are tied to the failure case).
+    """
+    teardown_calls = _stub_runner_for_keep_test(
+        monkeypatch, tmp_path, layer_passes=True,
+    )
+
+    parser = runner._build_parser()
+    args = parser.parse_args([
+        "up_to", "db", "--variants", "sp_pg_lo", "--keep-on-failure",
+    ])
+    rc = runner.cmd_up_to(args)
+    assert rc == runner.EXIT_SUCCESS
+    assert len(teardown_calls) == 1, (
+        f"teardown_variant should have been called on success even with "
+        f"--keep-on-failure; got {teardown_calls!r}"
+    )
+
+
+def test_run_one_variant_tears_down_on_failure_without_keep_flag(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    """gate.f.5 — default behavior (no --keep-on-failure flag) tears
+    down on failure as before. Locks the contract that the flag is
+    opt-in, not opt-out."""
+    teardown_calls = _stub_runner_for_keep_test(
+        monkeypatch, tmp_path, layer_passes=False,
+    )
+
+    parser = runner._build_parser()
+    args = parser.parse_args(["up_to", "db", "--variants", "sp_pg_lo"])
+    rc = runner.cmd_up_to(args)
+    assert rc == runner.EXIT_FAILURE
+    assert len(teardown_calls) == 1, (
+        f"teardown_variant should have been called on failure without "
+        f"--keep-on-failure; got {teardown_calls!r}"
+    )
+
+
 def _fake_popen_factory(captured: dict[str, Any], *, returncode: int = 0):
     """Build a Popen-shaped fake the dispatch_layer code can drive
     through the new tee-to-file machinery without spinning up a real

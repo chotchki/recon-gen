@@ -342,8 +342,9 @@ class RunOptions:
     - ``fuzz_seeds`` — kept as count knob for future m.3 wiring (currently unused;
       fuzz cells inside ``compose_matrix`` already fan out via ``--scenarios=fuzz:N``).
     - ``skip_cheap`` — skip-if-already-green-this-SHA (active when cache lands; b.8).
-    - ``keep_on_failure`` — don't tear down ephemeral state on failure (active when
-      Y.2.gate.l.2 lifecycle commands land; b.14.3 / f.5).
+    - ``keep_on_failure`` — leave the variant's ephemeral state up when the chain
+      fails (gate.f.5; consumed in ``_run_one_variant``'s finally — see also
+      gate.l.2 for the lifecycle commands that clean up afterward).
     """
 
     only: str | None = None
@@ -2305,9 +2306,27 @@ def _run_one_variant(
                     f"unexpected failure: {exc!r}",
                     file=sys.stderr,
                 )
-        teardown_variant(variant_handle)
-        if variant_handle is not None:
-            print(f"{terminal_prefix}runner: variant={spec.name} container torn down")
+        # Y.2.gate.f.5 — --keep-on-failure suppresses container teardown
+        # when the chain failed so the operator can poke at the deployed
+        # state interactively. Cleanup later via `docker stop <name>`,
+        # `./run_tests.sh sweep` (gate.f.8), or `./run_tests.sh down`
+        # (gate.l.2). Default behavior (no flag, OR chain succeeded)
+        # tears down as before.
+        if (
+            options.keep_on_failure
+            and final_code != EXIT_SUCCESS
+            and variant_handle is not None
+        ):
+            print(
+                f"{terminal_prefix}runner: variant={spec.name} container "
+                f"LEFT UP (--keep-on-failure + chain failed); clean up "
+                f"later via `docker stop <name>` or `./run_tests.sh sweep`",
+                file=sys.stderr,
+            )
+        else:
+            teardown_variant(variant_handle)
+            if variant_handle is not None:
+                print(f"{terminal_prefix}runner: variant={spec.name} container torn down")
 
     return spec, layer_results, final_code
 
@@ -2857,7 +2876,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_up_to.add_argument(
         "--keep-on-failure",
         action="store_true",
-        help="don't tear down ephemeral state on failure — consumed when lifecycle commands land (l.2 / b.14.3 / f.5).",
+        help="leave ephemeral state up when the chain fails so the operator can poke at it interactively. Default tears down. Clean up later via `docker stop <name>` or `./run_tests.sh sweep` (f.8).",
     )
     p_up_to.add_argument(
         "--trace-all",
