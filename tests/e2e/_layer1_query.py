@@ -1,11 +1,15 @@
 """X.1.d.1 — shared Layer 1 (matview presence) query helpers.
 
-The harness's `_harness_l1_assertions.py::assert_l1_matview_rows_present`
-is the canonical example of the pattern this module generalizes:
-**before** asserting that a deployed dashboard renders a row, query
-the matview directly via psycopg2 / oracledb and confirm the row is
-actually there. When Layer 1 passes but Layer 2 fails, the bug is in
+Pattern: **before** asserting that a deployed dashboard renders a row,
+query the matview directly via psycopg2 / oracledb and confirm the row
+is actually there. When Layer 1 passes but Layer 2 fails, the bug is in
 QS rendering; when Layer 1 fails, the bug is in seed / matview / refresh.
+
+This module's helpers replaced the legacy harness's
+``_harness_l1_assertions.py::assert_l1_matview_rows_present``
+(deleted in Y.2.gate.f.9); per-test asserts now live inline in
+``test_l1_*.py`` / ``test_inv_*.py`` / ``test_exec_*.py`` /
+``test_l2ft_*.py`` using these primitives directly.
 
 Why this matters for X.2: the multi-renderer thesis (QuickSight is one
 dialect, audit PDF another, HTMX a third) requires the test suite to

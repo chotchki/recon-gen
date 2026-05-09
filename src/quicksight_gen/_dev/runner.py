@@ -2025,8 +2025,7 @@ def _load_random_l2_yaml() -> Callable[[int], str]:
 
     Lazy because importing ``tests.l2.fuzz`` pulls in PyYAML + the
     L2 primitives module — keeps the runner's cold-start light when
-    no fuzz cells are in the matrix. Same sys.path injection shape
-    as ``cmd_sweep``'s ``_harness_cleanup`` import.
+    no fuzz cells are in the matrix.
     """
     import importlib  # noqa: PLC0415 — lazy
     sys.path.insert(0, str(_FUZZ_MODULE_DIR.parent))
@@ -2691,22 +2690,12 @@ def cmd_sweep(args: argparse.Namespace) -> int:
         print(f"runner: sweep — boto3 missing: {exc}", file=sys.stderr)
         return EXIT_NEEDS_OPERATOR
 
-    # Imports of harness cleanup helpers are deferred to avoid pulling
-    # in tests/ at module import time. Y.2.gate.f.8 will lift the
-    # helpers into ``quicksight_gen/_dev/cleanup.py`` and drop the
-    # ``sys.path`` + ``importlib`` dance.
-    import importlib
-
-    sys.path.insert(0, str(REPO_ROOT / "tests" / "e2e"))
-    try:
-        _harness_cleanup = importlib.import_module("_harness_cleanup")
-    finally:
-        sys.path.pop(0)
-    _collect_resources_matching_tag: Any = (
-        _harness_cleanup._collect_resources_matching_tag
-    )
-    sweep_qs_resources_by_tag: Any = (
-        _harness_cleanup.sweep_qs_resources_by_tag
+    # Y.2.gate.f.9 — sweep helpers lifted from
+    # tests/e2e/_harness_cleanup.py to quicksight_gen/_dev/cleanup.py.
+    # Direct import; no sys.path / importlib gymnastics.
+    from quicksight_gen._dev.cleanup import (
+        _collect_resources_matching_tag,
+        sweep_qs_resources_by_tag,
     )
 
     # boto3-stubs's huge per-service overload union confuses pyright
@@ -2732,12 +2721,9 @@ def cmd_sweep(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return EXIT_NEEDS_OPERATOR
-        # Cast away the Unknown type that pyright assigns to the
-        # dynamic ``_harness_cleanup`` import. The function's declared
-        # return type is ``dict[str, list[tuple[str, str]]]``; the lift
-        # to ``quicksight_gen/_dev/cleanup.py`` (Y.2.gate.f.8) drops
-        # this cast.
-        matched = cast("dict[str, list[tuple[str, str]]]", raw_matched)
+        # f.9 — direct import means pyright knows the return type;
+        # no cast needed.
+        matched = raw_matched
         print(
             f"runner: sweep DRY-RUN — would delete resources tagged "
             f"{tag_key}={tag_value} in {cfg.aws_region}:"
@@ -2765,7 +2751,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     except Exception as exc:  # noqa: BLE001
         print(f"runner: sweep — delete pass failed: {exc!r}", file=sys.stderr)
         return EXIT_NEEDS_OPERATOR
-    counts = cast("dict[str, int]", raw_counts)
+    counts = raw_counts
     print(f"runner: sweep deleted: {counts} (total={sum(counts.values())})")
     return EXIT_SUCCESS
 

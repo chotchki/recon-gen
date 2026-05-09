@@ -1394,11 +1394,13 @@ def _install_fake_harness_cleanup(
     monkeypatch: Any, *, matched: dict[str, list[tuple[str, str]]],
     deleted: dict[str, int] | None = None,
 ) -> tuple[list[Any], list[Any]]:
-    """Inject a fake `_harness_cleanup` module so cmd_sweep's runtime
-    import doesn't need the real tests/e2e/_harness_cleanup. Returns
-    (collect_calls, sweep_calls) lists that capture invocations."""
-    import sys
-    import types
+    """Patch the lifted cleanup helpers so cmd_sweep's runtime import
+    doesn't need real AWS access. Y.2.gate.f.9 — the helpers moved from
+    ``tests/e2e/_harness_cleanup`` to ``quicksight_gen._dev.cleanup``;
+    we monkeypatch the new location. Returns ``(collect_calls,
+    sweep_calls)`` lists that capture invocations.
+    """
+    from quicksight_gen._dev import cleanup as cleanup_mod
 
     collect_calls: list[Any] = []
     sweep_calls: list[Any] = []
@@ -1411,10 +1413,12 @@ def _install_fake_harness_cleanup(
         sweep_calls.append((client, account_id, tag_key, tag_value))
         return deleted or {k: len(v) for k, v in matched.items()}
 
-    fake_module = types.ModuleType("_harness_cleanup")
-    fake_module._collect_resources_matching_tag = fake_collect  # type: ignore[attr-defined]: monkey-patching test attrs onto a fake ModuleType
-    fake_module.sweep_qs_resources_by_tag = fake_sweep  # type: ignore[attr-defined]: monkey-patching test attrs onto a fake ModuleType
-    monkeypatch.setitem(sys.modules, "_harness_cleanup", fake_module)
+    monkeypatch.setattr(
+        cleanup_mod, "_collect_resources_matching_tag", fake_collect,
+    )
+    monkeypatch.setattr(
+        cleanup_mod, "sweep_qs_resources_by_tag", fake_sweep,
+    )
     return collect_calls, sweep_calls
 
 

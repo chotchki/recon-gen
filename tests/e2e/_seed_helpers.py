@@ -1,0 +1,106 @@
+"""DB-side seeding helpers for e2e tests.
+
+Lifted from ``tests/e2e/_harness_seed.py`` (Y.2.gate.f.9) so the
+non-harness e2e tests that still need a per-test schema+seed+refresh
+flow have it at a stable location after the layer-8 harness drop.
+
+Currently the only consumer is ``test_audit_dashboard_agreement.py``.
+``build_planted_manifest`` did NOT lift — it was harness-specific
+(walked plants for the harness's per-test triage manifest).
+"""
+
+from __future__ import annotations
+
+from datetime import date
+from typing import Any
+
+from quicksight_gen.common.db import execute_script
+from quicksight_gen.common.l2 import (
+    L2Instance,
+    emit_schema,
+    refresh_matviews_sql,
+)
+from quicksight_gen.common.l2.auto_scenario import (
+    ScenarioMode,
+    add_broken_rail_plants,
+    boost_inv_fanout_plants,
+    default_scenario_for,
+    densify_scenario,
+)
+from quicksight_gen.common.l2.seed import (
+    ScenarioPlant,
+    emit_full_seed,
+    emit_seed,
+)
+from quicksight_gen.common.sql import Dialect
+
+
+# Pinned reference date for hash-locked seed determinism (M.2a.8).
+DEFAULT_SEED_TODAY = date(2030, 1, 1)
+
+
+def apply_db_seed(
+    conn: Any,  # typing-smell: ignore[explicit-any]: per-driver connection union (psycopg/oracledb/sqlite3) has no shared Protocol
+    instance: L2Instance,
+    *,
+    mode: ScenarioMode = "l1_plus_broad",
+    today: date | None = None,
+    dialect: Dialect = Dialect.POSTGRES,
+    include_baseline: bool = False,
+) -> ScenarioPlant:
+    """Apply schema + seed + matview refresh against ``conn``.
+
+    Three DB-side steps in order, each committed independently so a
+    mid-flow failure leaves the prefixed objects in a known state for
+    the test teardown to drop cleanly. Routes every multi-statement
+    script through ``common/db.execute_script`` so Oracle's per-
+    statement + PL/SQL-block execution works alongside Postgres's
+    atomic-script behavior (P.9d).
+
+    Returns the ``ScenarioPlant`` so the caller can inspect what was
+    planted.
+
+    Args:
+      include_baseline (R.5.b): when True, the seed step uses
+        ``emit_full_seed`` + the densify+broken+boost pipeline that
+        the CLI's ``demo apply`` uses. Adds ~60k baseline rows on top
+        of the lean planted scenarios. Default False — fast feedback,
+        plants only.
+    """
+    today_ref = today or DEFAULT_SEED_TODAY
+
+    # 1. Schema.
+    schema_sql = emit_schema(instance, dialect=dialect)
+    with conn.cursor() as cur:
+        execute_script(cur, schema_sql, dialect=dialect)
+    conn.commit()
+
+    # 2. Seed (mode-aware via M.4.2).
+    report = default_scenario_for(instance, today=today_ref, mode=mode)
+    if include_baseline:
+        # Match what cli._apply_demo does (densify → broken-rail →
+        # boost → baseline).
+        scenario = boost_inv_fanout_plants(
+            add_broken_rail_plants(
+                densify_scenario(report.scenario, factor=5),
+                instance, broken_count=15,
+            ),
+            amount_multiplier=5,
+        )
+        seed_sql = emit_full_seed(
+            instance, scenario, anchor=today_ref, dialect=dialect,
+        )
+    else:
+        scenario = report.scenario
+        seed_sql = emit_seed(instance, scenario, dialect=dialect)
+    with conn.cursor() as cur:
+        execute_script(cur, seed_sql, dialect=dialect)
+    conn.commit()
+
+    # 3. Refresh matviews.
+    refresh_sql = refresh_matviews_sql(instance, dialect=dialect)
+    with conn.cursor() as cur:
+        execute_script(cur, refresh_sql, dialect=dialect)
+    conn.commit()
+
+    return scenario

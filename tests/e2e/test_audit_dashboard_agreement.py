@@ -254,7 +254,7 @@ def seeded_audit(dialect_cfg, tmp_path_factory):
     the dashboard walk and the PDF extraction reuse the same
     artifacts. Returns ``(pdf_path, scenario)``.
     """
-    from tests.e2e._harness_seed import apply_db_seed
+    from tests.e2e._seed_helpers import apply_db_seed
 
     cfg, cfg_path, dialect = dialect_cfg
 
