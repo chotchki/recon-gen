@@ -1,6 +1,50 @@
 # Release Notes
 
-## v8.8.0a11 — Y.2.gate.f.4+f.5+f.8: dump_top_queries fold + --keep-on-failure flag + sweep subcommand
+## v8.8.0a12 — Y.2.gate.f.9: layer 8 (harness) dropped — 5300 lines deleted
+
+Twelfth alpha. **Closes Y.2.gate.f.** ~5300 lines net deleted across
+17 harness files; the legacy "layer 8" e2e harness lane is gone, with
+its assertions now covered by the merged 6/7 layer running against
+per-cell variant deploys.
+
+### What dropped
+
+- 9 `tests/e2e/_harness_*.py` modules (`_browser`, `_cleanup`, `_deploy`,
+  `_exec_assertions`, `_failure_dump`, `_inv_assertions`,
+  `_l1_assertions`, `_l2ft_assertions`, `_seed`).
+- 8 `tests/e2e/test_harness_*.py` files including the 913-line
+  `test_harness_end_to_end.py` (THE actual layer-8 lane). 7 of the 8
+  were unit tests of the harness helpers themselves — only had value
+  while the helpers existed.
+- `tests/e2e/failures/` historical-artifact directory.
+
+### What stayed
+
+- `tests/e2e/_harness_html2.py` — App2 fixture infra (NOT layer-8;
+  3 import sites in `test_html2_*` tests).
+
+### Forced lifts (landed first so cmd_sweep + the audit test don't break)
+
+- **`quicksight_gen/_dev/cleanup.py`** — new module. Lifted
+  `sweep_qs_resources_by_tag` + `_collect_resources_matching_tag`
+  from `_harness_cleanup.py`. `cmd_sweep` rewired to import directly;
+  the `sys.path` + `importlib` dance + an unnecessary cast both gone.
+- **`tests/e2e/_seed_helpers.py`** — new module. Lifted `apply_db_seed`
+  from `_harness_seed.py` (only consumer is
+  `test_audit_dashboard_agreement.py`). `build_planted_manifest` did
+  NOT lift — harness-specific.
+
+### Net delta across the gate.f sweep (a10 → a12)
+
+`scripts/` shrunk from 8 files to 1 (`dump_top_queries.py` kept for
+CI). `tests/e2e/_harness_*.py` shrunk from 10 modules to 1 (`_html2`
+kept for App2). `tests/e2e/test_harness_*.py` shrunk from 8 files to
+0. CLI scripts that fed unique value either folded into the runner
+(`f.4` perf dump, `f.5` `--keep-on-failure` flag, `f.8` `sweep`
+subcommand) or had their helpers moved to a typed module the runner
+imports cleanly. **All 10 of `Y.2.gate.f` are ticked.**
+
+
 
 Eleventh alpha. Three more `Y.2.gate.f` subitems folded into the runner.
 9 of 10 done; only **f.9 (drop layer 8 — 18 harness files)** remains and
