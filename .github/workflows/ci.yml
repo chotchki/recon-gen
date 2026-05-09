@@ -120,7 +120,9 @@ jobs:
         # empty reviewer-signature widgets without ImportError.
         run: uv sync --frozen --extra dev --extra demo --extra audit
 
-      - name: Apply demo against Postgres
+      - name: Generate per-job config.yaml
+        # Cfg lives in /tmp so the runner picks it up via QS_GEN_CONFIG.
+        # Container URL points at the GHA service container's exposed port.
         run: |
           cat > /tmp/ci-pg.yaml <<'EOF'
           aws_account_id: "000000000000"
@@ -130,37 +132,43 @@ jobs:
           dialect: "postgres"
           demo_database_url: "postgresql://postgres:ci_pg_password@localhost:5432/postgres"
           EOF
-          # Q.3.a (v8.0.0): chain the four artifact groups explicitly
-          # in place of the legacy bundled `demo apply --all`.
-          .venv/bin/quicksight-gen schema apply -c /tmp/ci-pg.yaml --execute
-          .venv/bin/quicksight-gen data apply -c /tmp/ci-pg.yaml --execute
-          .venv/bin/quicksight-gen data refresh -c /tmp/ci-pg.yaml --execute
-          .venv/bin/quicksight-gen json apply -c /tmp/ci-pg.yaml -o /tmp/ci-pg-out
+
+      # Y.2.gate.k.1+k.6 — Phase 1 wedge (k.1.proof). Replaces the prior
+      # manual `schema apply` + `data apply` + `data refresh` + `json apply`
+      # + `pytest test_dataset_sql_smoke.py` chain with a single runner
+      # invocation. QS_GEN_RUNNER_CI=1 tells setup_variant to skip
+      # Docker spin-up (the postgres service container above is the DB);
+      # QS_GEN_DEMO_DATABASE_URL points at it.
+      #
+      # The runner does:
+      #   1. setup_variant — no-op (CI mode + URL pre-set)
+      #   2. seed_variant — schema apply + data apply + data refresh
+      #   3. dispatch_layer("db") — pytest tests/e2e/test_dataset_sql_smoke.py
+      #
+      # Per-cell artifacts land at runs/<run-id>/sp_pg_lo/db/{cmd,stdout,stderr}.log
+      # for triage parity with local invocations.
+      - name: Run runner db layer (CI-mode, no Docker spin-up)
+        env:
+          QS_GEN_RUNNER_CI: "1"
+          QS_GEN_DEMO_DATABASE_URL: "postgresql://postgres:ci_pg_password@localhost:5432/postgres"
+          QS_GEN_CONFIG: /tmp/ci-pg.yaml
+          QS_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
+        run: ./run_tests.sh up_to=db --dialects=pg --targets=lo
 
       - name: Verify Postgres row counts
         # Asserts ≥1 row in every named matview without exact counts.
         # Exact counts depend on the seed anchor (defaults to UTC today)
         # so they drift across CI runs. Re-lock to exact counts once
         # `demo apply --anchor` lands as a follow-up.
+        #
+        # NOT yet absorbed into the runner's db layer — k.1.absorb queues
+        # promoting this + the audit-PDF step into the default `db` set.
         env:
           QS_GEN_E2E: "1"
           QS_GEN_CONFIG: /tmp/ci-pg.yaml
           QS_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
         run: |
           .venv/bin/pytest tests/e2e/test_demo_apply_row_counts.py -v
-
-      - name: Smoke every dataset's CustomSQL against Postgres
-        # Walks every emitted dataset across all 4 apps, substitutes
-        # QS `<<$param>>` placeholders with declared defaults, wraps
-        # in `WHERE 1=0`, and executes against the live DB. Catches
-        # the SQL bugs that previously only surfaced at browser-test
-        # time (JSON path concat, USING qualifier, missing FROM dual).
-        env:
-          QS_GEN_E2E: "1"
-          QS_GEN_CONFIG: /tmp/ci-pg.yaml
-          QS_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
-        run: |
-          .venv/bin/pytest tests/e2e/test_dataset_sql_smoke.py -v
 
       - name: Render + verify the audit PDF against Postgres
         # `audit apply --execute` queries every L1 invariant matview

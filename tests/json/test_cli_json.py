@@ -174,6 +174,14 @@ def test_apply_no_demo_database_url_skips_datasource_emit(
     """When the integrator uses their own pre-existing datasource
     (production deploys), don't write a ``datasource.json`` —
     deploy would otherwise overwrite the customer-managed resource."""
+    # Strip the env-var fallback so the cfg yaml's missing
+    # demo_database_url is what actually drives the test. Otherwise
+    # an ambient QS_GEN_DEMO_DATABASE_URL (e.g. set by the runner in
+    # CI mode for the db layer) leaks into the loader's env-fallback
+    # path and quietly populates cfg.demo_database_url.
+    from quicksight_gen.common.env_keys import QS_GEN_DEMO_DATABASE_URL
+    monkeypatch.delenv(QS_GEN_DEMO_DATABASE_URL.name, raising=False)
+
     cfg = _make_yaml_config(tmp_path)  # no demo_database_url
     out_dir = tmp_path / "out"
     _patch_generators(monkeypatch)
