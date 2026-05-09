@@ -12,7 +12,6 @@ import pytest
 from quicksight_gen.common.config import Config
 from tests._test_helpers import make_test_config
 from quicksight_gen.common.dataset_contract import ColumnSpec, DatasetContract
-from quicksight_gen.common.sql import Dialect
 from quicksight_gen.apps.investigation import datasets as inv_datasets
 
 
@@ -70,34 +69,14 @@ class TestDatasetContract:
         ])
         assert c.column_names == ["a", "b"]
 
-    def test_to_input_columns_types_postgres(self):
+    def test_to_input_columns_types(self):
         c = DatasetContract(columns=[
             ColumnSpec("x", "INTEGER"),
         ])
-        cols = c.to_input_columns(Dialect.POSTGRES)
+        cols = c.to_input_columns()
         assert len(cols) == 1
         assert cols[0].Name == "x"
         assert cols[0].Type == "INTEGER"
-
-    def test_to_input_columns_oracle_uppercases_name(self):
-        """Y.3.f.2 — Oracle stores unquoted DDL columns in UPPERCASE; QS
-        Dataset.Columns must declare UPPERCASE so the visual-query
-        ``SELECT "<name>" FROM (<custom_sql>)`` finds the matching column.
-        Type is dialect-independent (QS-side enum)."""
-        c = DatasetContract(columns=[
-            ColumnSpec("account_id", "STRING"),
-            ColumnSpec("amount", "DECIMAL"),
-        ])
-        cols = c.to_input_columns(Dialect.ORACLE)
-        assert [col.Name for col in cols] == ["ACCOUNT_ID", "AMOUNT"]
-        assert [col.Type for col in cols] == ["STRING", "DECIMAL"]
-
-    def test_to_input_columns_sqlite_lowercases_like_postgres(self):
-        c = DatasetContract(columns=[
-            ColumnSpec("Account_Id", "STRING"),
-        ])
-        cols = c.to_input_columns(Dialect.SQLITE)
-        assert cols[0].Name == "account_id"
 
 
 # ---------------------------------------------------------------------------
@@ -105,13 +84,12 @@ class TestDatasetContract:
 # ---------------------------------------------------------------------------
 
 class TestOracleLowercaseAliasWrapper:
-    """Oracle case-folds unquoted identifiers to UPPERCASE; pre-Y.3.f
-    the wrapper aliased UPPERCASE → quoted-lowercase so QS (which
-    declared lowercase Columns) found matching aliases. Y.3.f.2
-    inverted the QS Columns side to UPPERCASE on Oracle, so the
-    wrapper aliases UPPERCASE → quoted-UPPERCASE — same case both
-    sides, the wrapper is now functionally a no-op rename. Y.3.f.4
-    drops it entirely.
+    """Oracle case-folds unquoted identifiers to UPPERCASE; QuickSight
+    quotes lowercase column names from the Columns declaration when
+    building visual queries. Without a wrapper, every Oracle visual
+    fails with ``ORA-00904: "col": invalid identifier``. ``build_dataset``
+    transparently wraps the SQL with ``SELECT qs_inner."COL" AS "col" ...``
+    on Oracle so QS's quoted-lowercase lookup resolves.
     """
 
     def _oracle_cfg(self) -> Config:
@@ -144,16 +122,13 @@ class TestOracleLowercaseAliasWrapper:
             return physical.CustomSql.SqlQuery
         raise AssertionError("no PhysicalTable")
 
-    def test_oracle_wraps_sql_with_uppercase_aliases(self):
-        """Y.3.f.2: alias side now matches QS Columns case (UPPERCASE on
-        Oracle). The wrapper SELECT is functionally a no-op rename until
-        f.4 drops it entirely."""
+    def test_oracle_wraps_sql_with_lowercase_aliases(self):
         wrapped = self._build(
             self._oracle_cfg(),
             "SELECT * FROM spec_example_drift",
         )
-        assert 'qs_inner."ACCOUNT_ID" AS "ACCOUNT_ID"' in wrapped
-        assert 'qs_inner."AMOUNT" AS "AMOUNT"' in wrapped
+        assert 'qs_inner."ACCOUNT_ID" AS "account_id"' in wrapped
+        assert 'qs_inner."AMOUNT" AS "amount"' in wrapped
         assert "FROM (\nSELECT * FROM spec_example_drift\n) qs_inner" in wrapped
 
     def test_postgres_passes_sql_through_unchanged(self):

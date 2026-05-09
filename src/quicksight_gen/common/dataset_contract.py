@@ -23,7 +23,6 @@ from quicksight_gen.common.models import (
     PhysicalTable,
     ResourcePermission,
 )
-from quicksight_gen.common.sql import Dialect, column_name
 
 
 class ColumnShape(Enum):
@@ -141,18 +140,8 @@ class ColumnSpec:
             return self.display_name
         return _smart_title(self.name)
 
-    def to_input_column(self, dialect: Dialect) -> InputColumn:
-        """Emit the ``InputColumn`` shape QuickSight reads as Dataset.Columns.
-
-        The emitted ``Name`` is the column's **dialect-natural unquoted-
-        identifier case**: lowercase on Postgres + SQLite, UPPERCASE on
-        Oracle. QuickSight quotes this name verbatim when building visual
-        queries (``SELECT "<name>" FROM (<custom_sql>)``); each engine's
-        unquoted-DDL columns are stored in that same natural case, so a
-        case-correct quoted reference finds the column without the
-        case-bridging wrapper that f.4 will drop.
-        """
-        return InputColumn(Name=column_name(self.name, dialect), Type=self.type)
+    def to_input_column(self) -> InputColumn:
+        return InputColumn(Name=self.name, Type=self.type)
 
 
 # Initialisms that should stay uppercase in the auto-derived label.
@@ -185,14 +174,8 @@ def _smart_title(snake: str) -> str:
 class DatasetContract:
     columns: list[ColumnSpec]
 
-    def to_input_columns(self, dialect: Dialect) -> list[InputColumn]:
-        """Emit the full ``Columns`` list QuickSight reads as Dataset metadata.
-
-        Forwards ``dialect`` to each ``ColumnSpec.to_input_column`` so the
-        emitted name is dialect-natural (UPPERCASE on Oracle; lowercase on
-        PG + SQLite). See ``ColumnSpec.to_input_column`` for the why.
-        """
-        return [c.to_input_column(dialect) for c in self.columns]
+    def to_input_columns(self) -> list[InputColumn]:
+        return [c.to_input_column() for c in self.columns]
 
     @property
     def column_names(self) -> list[str]:
@@ -326,37 +309,32 @@ def dataset_permissions(cfg: Config) -> list[ResourcePermission] | None:
 def _oracle_lowercase_alias_wrapper(
     sql: str, contract: DatasetContract, cfg: Config,
 ) -> str:
-    """Wrap Oracle CustomSQL with an alias-rename outer SELECT.
+    """Wrap Oracle CustomSQL with a lowercase-aliased outer SELECT.
 
-    **Pre-Y.3.f:** the wrapper bridged QuickSight's lowercase Columns
-    declaration against Oracle's UPPERCASE-stored unquoted identifiers
-    (``qs_inner."ACCOUNT_ID" AS "account_id"``). Without it every
-    Oracle visual failed with ``ORA-00904: "account_id": invalid
-    identifier``.
+    Oracle case-folds unquoted identifiers to UPPERCASE at parse time,
+    so a CustomSQL like ``SELECT * FROM <matview>`` (matview built with
+    unquoted DDL columns) returns ACCOUNT_ID, not account_id, in the
+    column metadata. QuickSight then quotes the lowercase column names
+    from its declared ``Columns`` list when building visual queries
+    (``SELECT "account_id" FROM (<custom_sql>)``), and Oracle responds
+    with ``ORA-00904: "account_id": invalid identifier`` because no
+    such case-preserved identifier exists.
 
-    **Post-Y.3.f.2 (current):** ``DatasetContract.to_input_columns``
-    now case-folds the QS Columns name to dialect-natural case
-    (UPPERCASE on Oracle), so QS quotes ``"ACCOUNT_ID"`` directly.
-    The wrapper still wraps but the alias side now matches
-    (``qs_inner."ACCOUNT_ID" AS "ACCOUNT_ID"``) — functionally a
-    no-op rename. **Y.3.f.4 drops the wrapper entirely** (the inner
-    SELECT projects UPPERCASE columns natively, QS's quoted-UPPERCASE
-    references match without an outer SELECT).
+    Fix: re-alias every projected column from its UPPERCASE
+    Oracle-stored form to a lowercase double-quoted alias matching
+    what QS expects. The wrapper is keyed off the contract column
+    names — those ARE the QS-side column names — so the alias list
+    is generated from the same source of truth that QS reads.
 
-    No-op on Postgres + SQLite (both fold unquoted identifiers to
-    lowercase; the existing SQL works without rewrapping).
+    No-op on Postgres (it folds unquoted identifiers to lowercase by
+    default; the existing SQL works without rewrapping).
     """
     from quicksight_gen.common.sql import Dialect
 
     if cfg.dialect is not Dialect.ORACLE:
         return sql
-    # Y.3.f.2: alias to dialect-natural case (UPPERCASE on Oracle) so the
-    # wrapper output matches the case-folded ``Columns`` QuickSight now
-    # declares post-f.2. f.4 drops this wrapper entirely — both sides are
-    # then a no-op and removing the outer SELECT is byte-clean.
     aliases = ", ".join(
-        f'qs_inner."{c.name.upper()}" AS "{column_name(c.name, cfg.dialect)}"'
-        for c in contract.columns
+        f'qs_inner."{c.name.upper()}" AS "{c.name}"' for c in contract.columns
     )
     return f"SELECT {aliases} FROM (\n{sql}\n) qs_inner"
 
@@ -399,7 +377,7 @@ def build_dataset(
         register_sql(visual_identifier, app2_sql)
     else:
         register_sql(visual_identifier, sql)
-    columns = contract.to_input_columns(cfg.dialect)
+    columns = contract.to_input_columns()
     # Config.__post_init__ guarantees datasource_arn is non-None
     # post-construction (raises if neither it nor demo_database_url
     # is provided). The dataclass default is None for ergonomics, but
