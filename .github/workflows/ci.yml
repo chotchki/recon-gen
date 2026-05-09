@@ -64,16 +64,26 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-  # P.7 — containerized integration job. Runs ``quicksight-gen demo
-  # apply`` against a live Postgres + a live Oracle Free service
-  # container, then verifies per-prefix matview row counts via
-  # ``tests/e2e/test_demo_apply_row_counts.py`` (Y.2.gate.f.2 — was
-  # ``tests/integration/verify_demo_apply.py`` CLI before the sweep).
+  # P.7 — containerized integration job (Postgres leg).
+  #
+  # Y.2.gate.k.3 (2026-05-09): split off from the merged PG+Oracle
+  # ``integration`` job. PR-quick mode — PG-only runs on every PR for
+  # ~2-min feedback. The Oracle leg (``integration-oracle`` below) only
+  # fires on push:main + workflow_dispatch — it costs ~3 min more
+  # (Oracle Free service container ~60-90s first-boot init + per-step
+  # apply/seed time), and dialect-divergence regressions are rare
+  # enough that catching them at merge time is acceptable.
+  #
+  # Runs ``quicksight-gen schema/data/json apply`` against a live
+  # Postgres service container, then verifies per-prefix matview row
+  # counts via ``tests/e2e/test_demo_apply_row_counts.py`` (Y.2.gate.f.2
+  # — was ``tests/integration/verify_demo_apply.py`` CLI before the
+  # sweep).
   #
   # Service-container syntax (vs. ``docker run`` inside steps) lets GHA
-  # health-check the DBs before steps start, so the apply doesn't race
-  # against Oracle's ~60-90s first-boot init.
-  integration:
+  # health-check the DB before steps start, so the apply doesn't race
+  # against the postgres init.
+  integration-pg:
     needs: test
     runs-on: ubuntu-latest
 
@@ -90,24 +100,6 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-
-      # ``gvenzl/oracle-free`` is the de-facto Oracle Free Edition image
-      # for CI (Oracle's own ``container-registry.oracle.com`` requires
-      # login). ``:latest`` is the full Oracle Free 23ai (~2GB image,
-      # ~60-90s first-boot init). ``FREEPDB1`` is the default service
-      # name; admin user is ``system`` with the password we set here.
-      oracle:
-        image: gvenzl/oracle-free:latest
-        env:
-          ORACLE_PASSWORD: ci_ora_password
-        ports:
-          - 1521:1521
-        options: >-
-          --health-cmd "healthcheck.sh"
-          --health-interval 30s
-          --health-timeout 30s
-          --health-retries 30
-          --health-start-period 90s
 
     steps:
       - uses: actions/checkout@v6
@@ -126,7 +118,7 @@ jobs:
         # `--extra audit` adds pyhanko on top of reportlab + pypdf
         # (already in [dev]) so `audit apply --execute` can land its
         # empty reviewer-signature widgets without ImportError.
-        run: uv sync --frozen --extra dev --extra demo --extra demo-oracle --extra audit
+        run: uv sync --frozen --extra dev --extra demo --extra audit
 
       - name: Apply demo against Postgres
         run: |
@@ -181,6 +173,54 @@ jobs:
             -c /tmp/ci-pg.yaml --execute -o /tmp/ci-pg-report.pdf
           .venv/bin/quicksight-gen audit verify \
             /tmp/ci-pg-report.pdf -c /tmp/ci-pg.yaml
+
+  # P.7 — containerized integration job (Oracle leg).
+  #
+  # Y.2.gate.k.3 (2026-05-09): gated to push:main + workflow_dispatch
+  # only. Oracle Free service container costs ~60-90s first-boot init,
+  # plus per-step apply time — too slow to gate every PR on. Catches
+  # dialect-divergence regressions at merge time (PG-only PRs already
+  # passed integration-pg).
+  #
+  # ``gvenzl/oracle-free`` is the de-facto Oracle Free Edition image
+  # for CI (Oracle's own ``container-registry.oracle.com`` requires
+  # login). ``:latest`` is the full Oracle Free 23ai (~2GB image,
+  # ~60-90s first-boot init). ``FREEPDB1`` is the default service
+  # name; admin user is ``system`` with the password we set here.
+  integration-oracle:
+    needs: test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    services:
+      oracle:
+        image: gvenzl/oracle-free:latest
+        env:
+          ORACLE_PASSWORD: ci_ora_password
+        ports:
+          - 1521:1521
+        options: >-
+          --health-cmd "healthcheck.sh"
+          --health-interval 30s
+          --health-timeout 30s
+          --health-retries 30
+          --health-start-period 90s
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (V.2 — uv sync from uv.lock)
+        run: uv sync --frozen --extra dev --extra demo-oracle --extra audit
 
       - name: Apply demo against Oracle Free
         run: |
