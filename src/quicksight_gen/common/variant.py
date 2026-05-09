@@ -201,3 +201,75 @@ def expand_full() -> list[VariantSpec]:
         cells.append(VariantSpec(fuzz_code, di_local, "lo", fuzz_seed=seed))
 
     return cells
+
+
+# --- sub-flag composer (m.1.c) ---------------------------------------------
+
+
+# Default axis values when one axis is specified but others aren't.
+# Named-only for scenarios — fuzz/us are special-form territory; if the
+# operator wants those they name them explicitly.
+DEFAULT_SCENARIOS_NAMED: tuple[ScenarioCode, ...] = (
+    ScenarioCode("sp"),
+    ScenarioCode("sq"),
+)
+DEFAULT_DIALECTS: tuple[DialectCode, ...] = ("pg", "or", "sl")
+DEFAULT_TARGETS: tuple[TargetCode, ...] = ("lo", "aw")
+
+
+@dataclass(frozen=True)
+class ScenarioSpec:
+    """One scenario-axis entry passed to `compose_matrix`. Carries the
+    scenario code plus the extras the corresponding `VariantSpec`
+    construction will need (fuzz_seed for fuzz cells; user_yaml for
+    us cells; both None for named scenarios)."""
+
+    scenario: ScenarioCode
+    fuzz_seed: int | None = None
+    user_yaml: Path | None = None
+
+
+def compose_matrix(
+    scenarios: list[ScenarioSpec] | None = None,
+    dialects: list[DialectCode] | None = None,
+    targets: list[TargetCode] | None = None,
+) -> list[VariantSpec]:
+    """Compose the variant matrix from sub-flag axis selections.
+
+    Two modes:
+
+    - **All None** → returns `expand_full()` directly (the curated
+      13-cell default; preserves the fuzz-on-aws + us-opt-in
+      exclusions).
+    - **Any axis specified** → cross-product mode. Each specified
+      axis takes its given values; unspecified axes default to
+      ``DEFAULT_SCENARIOS_NAMED`` / ``DEFAULT_DIALECTS`` /
+      ``DEFAULT_TARGETS``. Cross-product is filtered for `is_valid()`
+      so invalid cells (e.g., ``sl × aw``) auto-skip.
+
+    Cross-product mode means `--dialects=pg` alone produces
+    ``{sp, sq} × {pg} × {lo, aw}`` = 4 cells (no fuzz — caller would
+    pass an explicit ScenarioSpec for that). This is intentional:
+    sub-flags compose multiplicatively, not subtractively.
+    """
+    if scenarios is None and dialects is None and targets is None:
+        return expand_full()
+
+    sc_specs = scenarios if scenarios is not None else [
+        ScenarioSpec(s) for s in DEFAULT_SCENARIOS_NAMED
+    ]
+    di_codes = dialects if dialects is not None else list(DEFAULT_DIALECTS)
+    ta_codes = targets if targets is not None else list(DEFAULT_TARGETS)
+
+    cells: list[VariantSpec] = []
+    for sc in sc_specs:
+        for di in di_codes:
+            for ta in ta_codes:
+                spec = VariantSpec(
+                    sc.scenario, di, ta,
+                    fuzz_seed=sc.fuzz_seed,
+                    user_yaml=sc.user_yaml,
+                )
+                if spec.is_valid():
+                    cells.append(spec)
+    return cells

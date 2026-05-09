@@ -17,11 +17,16 @@ from pathlib import Path
 import pytest
 
 from quicksight_gen.common.variant import (
+    DEFAULT_DIALECTS,
+    DEFAULT_SCENARIOS_NAMED,
+    DEFAULT_TARGETS,
     DIALECTS,
     NAMED_SCENARIOS,
     TARGETS,
     ScenarioCode,
+    ScenarioSpec,
     VariantSpec,
+    compose_matrix,
     derive_default_fuzz_seed,
     expand_full,
 )
@@ -264,3 +269,93 @@ def test_derive_default_fuzz_seed_in_uint32_range() -> None:
     for _ in range(20):
         seed = derive_default_fuzz_seed()
         assert 0 <= seed < 2**32
+
+
+# --- m.1.c: compose_matrix() sub-flag composer ----------------------------
+
+
+def test_compose_no_args_equals_expand_full() -> None:
+    """All None → expand_full() directly. Same cell count + same shape."""
+    composed = compose_matrix()
+    full = expand_full()
+    assert len(composed) == len(full) == 13
+
+
+def test_compose_dialects_only_narrows() -> None:
+    """`--dialects=pg` alone → cross-product mode. Defaults: named
+    scenarios × pg × all targets. {sp, sq} × {pg} × {lo, aw} = 4 cells."""
+    cells = compose_matrix(dialects=["pg"])
+    assert len(cells) == 4
+    assert {c.name for c in cells} == {"sp_pg_lo", "sp_pg_aw", "sq_pg_lo", "sq_pg_aw"}
+
+
+def test_compose_targets_only_narrows() -> None:
+    """`--targets=lo` alone → {sp, sq} × all dialects × {lo} = 6 cells.
+    Note: NO fuzz cells — sub-flag mode uses DEFAULT_SCENARIOS_NAMED
+    which excludes fuzz (operator names fuzz explicitly if wanted)."""
+    cells = compose_matrix(targets=["lo"])
+    assert len(cells) == 6
+    assert all(c.target == "lo" for c in cells)
+    assert {c.scenario for c in cells} == {"sp", "sq"}
+    assert {c.dialect for c in cells} == {"pg", "or", "sl"}
+
+
+def test_compose_scenarios_only_named() -> None:
+    """`--scenarios=sp` → {sp} × all dialects × all targets, filtered
+    for is_valid(). sp × {pg, or, sl} × {lo, aw} = 6 minus invalid
+    sp_sl_aw = 5 cells."""
+    cells = compose_matrix(scenarios=[ScenarioSpec(ScenarioCode("sp"))])
+    assert len(cells) == 5
+    assert {c.name for c in cells} == {
+        "sp_pg_lo", "sp_or_lo", "sp_sl_lo", "sp_pg_aw", "sp_or_aw",
+    }
+
+
+def test_compose_invalid_cells_filtered() -> None:
+    """`is_valid()` filter applies in cross-product mode — sl × aw cells
+    auto-skip even when targets=aw includes them."""
+    cells = compose_matrix(dialects=["sl"], targets=["aw"])
+    # {sp, sq} × {sl} × {aw} would be 2 cells, but both invalid → 0
+    assert cells == []
+
+
+def test_compose_with_explicit_fuzz_scenario() -> None:
+    """Caller passes pre-built ScenarioSpec for fuzz (with fuzz_seed
+    set). Cross-product spreads it across specified axes."""
+    fuzz = ScenarioSpec(ScenarioCode("f12345"), fuzz_seed=12345)
+    cells = compose_matrix(scenarios=[fuzz], dialects=["pg", "or"], targets=["lo"])
+    assert len(cells) == 2
+    assert {c.name for c in cells} == {"f12345_pg_lo", "f12345_or_lo"}
+    assert all(c.fuzz_seed == 12345 for c in cells)
+
+
+def test_compose_with_user_supplied_scenario() -> None:
+    """`us` scenario carries user_yaml through to each cell."""
+    yaml_path = Path("/tmp/customer_acme.yaml")
+    us = ScenarioSpec(ScenarioCode("us"), user_yaml=yaml_path)
+    cells = compose_matrix(scenarios=[us], dialects=["pg"], targets=["lo"])
+    assert len(cells) == 1
+    assert cells[0].name == "us_pg_lo"
+    assert cells[0].user_yaml == yaml_path
+
+
+def test_compose_explicit_full_intent_via_sub_flags() -> None:
+    """Operator who DOES want full local matrix can spell it explicitly:
+    --scenarios=sp,sq --dialects=pg,or,sl --targets=lo = 6 cells."""
+    cells = compose_matrix(
+        scenarios=[
+            ScenarioSpec(ScenarioCode("sp")),
+            ScenarioSpec(ScenarioCode("sq")),
+        ],
+        dialects=["pg", "or", "sl"],
+        targets=["lo"],
+    )
+    assert len(cells) == 6
+
+
+def test_compose_default_constants() -> None:
+    """Sanity check on the constants referenced when sub-flag axes are
+    unspecified."""
+    assert DEFAULT_SCENARIOS_NAMED == (ScenarioCode("sp"), ScenarioCode("sq"))
+    assert DEFAULT_DIALECTS == ("pg", "or", "sl")
+    assert DEFAULT_TARGETS == ("lo", "aw")
