@@ -15,6 +15,7 @@ from quicksight_gen.common.sql import (
     analyze_table,
     boolean_type,
     cast,
+    column_name,
     create_matview,
     date_literal,
     date_minus_days,
@@ -330,6 +331,34 @@ class TestDialectEnum:
         assert Dialect("postgres") is Dialect.POSTGRES
         assert Dialect("oracle") is Dialect.ORACLE
         assert Dialect("sqlite") is Dialect.SQLITE
+
+
+# -- Identifiers (Y.3.f.1) ---------------------------------------------------
+
+
+class TestColumnName:
+    """``column_name`` returns the dialect's natural unquoted-identifier case
+    so unquoted refs in dataset SQL find the matching stored column."""
+
+    def test_postgres_lowercases(self):
+        assert column_name("account_id", PG) == "account_id"
+        assert column_name("ACCOUNT_ID", PG) == "account_id"
+        assert column_name("Account_Id", PG) == "account_id"
+
+    def test_sqlite_lowercases(self):
+        assert column_name("account_id", SQLITE) == "account_id"
+        assert column_name("ACCOUNT_ID", SQLITE) == "account_id"
+
+    def test_oracle_uppercases(self):
+        assert column_name("account_id", ORA) == "ACCOUNT_ID"
+        assert column_name("ACCOUNT_ID", ORA) == "ACCOUNT_ID"
+        assert column_name("Account_Id", ORA) == "ACCOUNT_ID"
+
+    def test_idempotent(self):
+        for d in (PG, ORA, SQLITE):
+            once = column_name("account_id", d)
+            twice = column_name(once, d)
+            assert once == twice
 
 
 # -- SQLite branches ---------------------------------------------------------
