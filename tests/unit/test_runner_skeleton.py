@@ -1981,10 +1981,9 @@ def test_seed_variant_threads_env_overrides_to_subprocesses(
 def test_seed_variant_honors_qs_gen_test_l2_instance(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
-    """`QS_GEN_TEST_L2_INSTANCE` env (set per-spec by `_run_one_variant`
-    based on scenario code) flows through as `--l2 <yaml>` so seed + db
-    tests target the same L2 instance. Without the env, the CLI defaults
-    to bundled spec_example."""
+    """`QS_GEN_TEST_L2_INSTANCE` env flows through as `--l2 <yaml>` so seed
+    + db tests target the same L2 instance. Without the env (and without a
+    per-cell env_overrides), the CLI defaults to bundled spec_example."""
     cfg = tmp_path / "fake_pg_cfg.yaml"
     cfg.write_text("")
     l2_yaml = tmp_path / "my_instance.yaml"
@@ -2006,6 +2005,47 @@ def test_seed_variant_honors_qs_gen_test_l2_instance(
         cmd = entry["cmd"]
         assert "--l2" in cmd
         assert str(l2_yaml) in cmd
+
+
+def test_seed_variant_env_overrides_l2_wins_over_os_environ(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    """m.2.g regression — `_run_one_variant` sets per-spec
+    `QS_GEN_TEST_L2_INSTANCE` in env_overrides; that MUST override
+    whatever's in os.environ (or absence thereof). Without this, two
+    parallel cells running different scenarios both seed the same L2
+    (or none) and the downstream smoke test fails with "table does
+    not exist" against the right prefix.
+    """
+    cfg = tmp_path / "fake_pg_cfg.yaml"
+    cfg.write_text("")
+    os_env_l2 = tmp_path / "os_env_default.yaml"
+    os_env_l2.write_text("")
+    overrides_l2 = tmp_path / "per_spec_override.yaml"
+    overrides_l2.write_text("")
+    monkeypatch.setattr(
+        runner, "_resolve_seed_config_for_dialect",
+        lambda dialect: cfg if dialect == "pg" else None,
+    )
+    # OS env says one thing; env_overrides says another. Per-cell wins.
+    monkeypatch.setenv(QS_GEN_TEST_L2_INSTANCE.name, str(os_env_l2))
+
+    captured: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        runner, "_spawn_with_tee", _fake_spawn_with_tee(captured),
+    )
+
+    runner.seed_variant(
+        _spec_pg_lo(),
+        {QS_GEN_TEST_L2_INSTANCE.name: str(overrides_l2)},
+    )
+
+    for entry in captured:
+        cmd = entry["cmd"]
+        assert "--l2" in cmd
+        # env_overrides value won; os.environ value did not leak in.
+        assert str(overrides_l2) in cmd
+        assert str(os_env_l2) not in cmd
 
 
 def test_seed_variant_pg_lo_raises_when_no_cfg_found(

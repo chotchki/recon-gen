@@ -1527,9 +1527,17 @@ def seed_variant(
 
     env = {**os.environ, **env_overrides}
     l2_arg: list[str] = []
-    l2_override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
-    if l2_override:
-        l2_arg = ["--l2", str(l2_override)]
+    # m.2.g hotfix — env_overrides wins over os.environ. Per-cell
+    # injection (`_run_one_variant` sets QS_GEN_TEST_L2_INSTANCE per
+    # spec) MUST flow to the seed CLI; reading os.environ directly
+    # would give every parallel cell the same L2 (or none), causing
+    # cells to seed under the wrong prefix and downstream smoke tests
+    # to fail with "table does not exist" against the right prefix.
+    l2_path_str = env_overrides.get(
+        QS_GEN_TEST_L2_INSTANCE.name,
+    ) or QS_GEN_TEST_L2_INSTANCE.get_or_none()
+    if l2_path_str:
+        l2_arg = ["--l2", str(l2_path_str)]
 
     seed_steps: tuple[tuple[str, ...], ...] = (
         ("schema", "apply"),
