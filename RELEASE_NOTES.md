@@ -1,6 +1,55 @@
 # Release Notes
 
-## v8.8.0a10 — Y.2.gate.f sweep: dead scripts deleted, CLI tests folded into pytest
+## v8.8.0a11 — Y.2.gate.f.4+f.5+f.8: dump_top_queries fold + --keep-on-failure flag + sweep subcommand
+
+Eleventh alpha. Three more `Y.2.gate.f` subitems folded into the runner.
+9 of 10 done; only **f.9 (drop layer 8 — 18 harness files)** remains and
+will land separately on a fresh slice. Pure runner-side automation; no
+behavior changes for the operator outside the new flag.
+
+### Folded into runner
+
+- **f.4 — `scripts/dump_top_queries.py` → runner per-cell auto-dump.**
+  Added `_dump_top_queries_for_variant(spec, variant_env, run_dir,
+  terminal_prefix)` to `_dev/runner.py` (sibling of `teardown_variant`).
+  Wired into `_run_one_variant`'s `finally` — fires after every chain
+  that touched a DB layer. Runs on success AND failure so triage always
+  has the perf signal. Output: `<run_dir>/<spec.name>/db-perf/top-
+  queries.md`. Best-effort throughout: connection / query / format
+  failures all degrade to a `format_skipped` marker via
+  `_dev.perf.format_skipped`. SQLite skipped cleanly. Filter narrows to
+  the L2 instance prefix so unrelated workloads on the shared DB get
+  dropped. Slimmed `scripts/dump_top_queries.py` to a thin CLI shim
+  that delegates to `_dev.perf` (~150 lines of duplicate helper code
+  dropped). Script kept for now since `e2e.yml` still calls it directly
+  (gate.k.6 retires those CI invocations when the workflows move to
+  runner).
+- **f.5 — `scripts/harness_manual_deploy.py` → DELETED + `--keep-on-
+  failure` runner flag wired.** The flag was scaffolded in `RunOptions`
+  + argparse already (since c.7) but unwired. Wired the suppression
+  into `_run_one_variant`'s `finally`: chain failure + `--keep-on-
+  failure` → skip `teardown_variant` + print operator-actionable
+  guidance ("container LEFT UP; clean up later via `docker stop
+  <name>` or `./run_tests.sh sweep`"). Default behavior (no flag, OR
+  chain succeeded) tears down as before. 3 unit tests cover the
+  contract. Deleted the standalone script — it depended on `_harness_*`
+  modules f.9 will delete; the runner flag covers the local-container
+  case; QS-deploy inspection goes through the e2e tests directly with
+  existing skip-cleanup mechanisms.
+- **f.8 — `scripts/sweep_harness_orphans.py` → DELETED.** `cmd_sweep`
+  already lives in `_dev/runner.py` (added at c.9). Standalone script
+  removed. `cmd_sweep` still imports `_harness_cleanup` helpers via
+  `sys.path` trick — the lift to `quicksight_gen/_dev/cleanup.py` is
+  forced by f.9 (which deletes the `_harness_*` modules) and lands as
+  part of that.
+
+### Net delta
+
+`scripts/` shrunk from 8 files (pre-v8.8.0a10) to 1 file (`dump_top_
+queries.py`, kept for CI). Runner now auto-captures perf data per
+cell + carries an opt-in keep-state flag.
+
+
 
 Tenth alpha. Knocks out 6 of 10 `Y.2.gate.f` "validate, then delete-or-fold"
 sweeps over `scripts/` + `tests/integration/`. Pure cleanup (no behavior
