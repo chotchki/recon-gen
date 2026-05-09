@@ -52,30 +52,51 @@ _AGG_SQL_FN = {
 }
 
 
+def _quote_col(name: str) -> str:
+    """Quote a column identifier for the wrapper SELECT.
+
+    Y.3.f.alt.1: every column reference in App2's wrapper SELECT must
+    be double-quoted so the dialect-natural case-folding rules don't
+    rewrite it. The dataset-side ``_oracle_lowercase_alias_wrapper``
+    already produces case-preserved lowercase aliases (e.g.
+    ``"account_id"``); quoting the App2-side ref preserves the same
+    case and matches.
+
+    On Postgres + SQLite the quoted-lowercase ref matches the lowercase
+    DDL columns. On Oracle without quoting, an unquoted ``account_id``
+    case-folds to ``ACCOUNT_ID`` and fails to find the wrapper's
+    quoted-lowercase ``"account_id"`` (the m.5.d ORA-00904).
+    """
+    return f'"{name}"'
+
+
 def _measure_sql(measure: Any) -> str:
     """Render one Measure as an aggregation expression.
 
     ``Measure.kind`` is "sum" / "max" / "min" / "average" / "count" /
     "distinct_count". ``Measure.column.name`` is the column to
-    aggregate.
+    aggregate (gets quoted via ``_quote_col`` — see Y.3.f.alt.1).
     """
     kind = getattr(measure, "kind", None)
     column = getattr(getattr(measure, "column", None), "name", None)
     if not kind or not column:
         return ""
+    quoted = _quote_col(column)
     fn = _AGG_SQL_FN.get(kind)
     if fn is None:
-        return f"COUNT({column})"  # safe fallback
+        return f"COUNT({quoted})"  # safe fallback
     if kind == "distinct_count":
         # _AGG_SQL_FN entry is "COUNT(DISTINCT" — needs a closing paren.
-        return f"COUNT(DISTINCT {column})"
-    return f"{fn}({column})"
+        return f"COUNT(DISTINCT {quoted})"
+    return f"{fn}({quoted})"
 
 
 def _dim_sql(dim: Any) -> str:
-    """Return the column reference for a Dim (used in GROUP BY +
-    SELECT)."""
-    return str(getattr(getattr(dim, "column", None), "name", "") or "")
+    """Return the quoted column reference for a Dim (used in GROUP BY
+    + SELECT). See ``_quote_col`` for why the quoting matters on Oracle.
+    """
+    name = str(getattr(getattr(dim, "column", None), "name", "") or "")
+    return _quote_col(name) if name else ""
 
 
 def wrap_for_visual(base_sql: str, visual: Any) -> str:

@@ -162,7 +162,7 @@ GROUP BY posted_date, transfer_type"""
         EXEC_TRANSACTION_SUMMARY_CONTRACT,
         visual_identifier=DS_EXEC_TRANSACTION_SUMMARY,
         app2_sql=sql_template.format(
-            date_filter=app2_date_filter("t.posting"),
+            date_filter=app2_date_filter("t.posting", cfg.dialect),
         ),
     )
 
@@ -222,7 +222,7 @@ LEFT JOIN activity act ON act.account_id = a.account_id"""
         EXEC_ACCOUNT_SUMMARY_CONTRACT,
         visual_identifier=DS_EXEC_ACCOUNT_SUMMARY,
         app2_sql=sql_template.format(
-            date_filter=app2_date_filter("t.posting"),
+            date_filter=app2_date_filter("t.posting", cfg.dialect),
         ),
     )
 

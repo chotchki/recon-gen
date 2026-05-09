@@ -1,5 +1,63 @@
 # Release Notes
 
+## v8.8.0a9 — Y.3.f.alt: Oracle App2 case-quoting + date-cast + cursor-pattern fixes
+
+Ninth alpha. Closes the m.5.d AW-chain blocker on the Oracle local +
+Aurora variants by fixing three independent Oracle-driver / Oracle-SQL
+quirks in the App2 (HTMX dialect) execution path. Each was a single
+narrow defect, but they stacked: fixing one surfaced the next. Chain
+runner sp_or_lo (local Oracle container) AND sp_or_aw (operator's
+Aurora Oracle) both green through the db layer.
+
+The Y.3.f umbrella ("emit dialect-correct identifier case") was
+reduced to the narrowest fix that unblocks App2; the broader case-
+folding sweep (would require ~30+ analysis-side column-ref sites) is
+deferred. See `spike/y3g/findings.md` for the SQL-builder-library
+spike that preceded this decision.
+
+### Fixes
+
+- **`common/html/_visual_sql.py::wrap_for_visual` quotes column
+  refs** (Y.3.f.alt.1). `_dim_sql` and `_measure_sql` now produce
+  `"col"` instead of bare `col`. Fixes the App2 Oracle bug where the
+  wrapper's lowercase-quoted aliases get referenced unquoted →
+  Oracle case-folds to UPPERCASE → no match → `ORA-00904: "ACCOUNT_ID":
+  invalid identifier`. KPI / BarChart / LineChart / Sankey wrap
+  branches all flow through the two helpers; one fix covers every
+  visual kind. PG and SQLite are unaffected (both case-insensitive
+  to quoted identifiers in this context). 7 unit tests in
+  `tests/unit/test_visual_sql_wrap.py`.
+- **`common/sql/app2_filters.py::app2_date_filter` is dialect-aware**
+  (Y.3.f.alt.4a). Oracle's session `NLS_DATE_FORMAT` defaults to
+  `DD-MON-RR`; `CAST(string AS DATE)` honors that and rejects ISO-8601
+  strings with `ORA-01847`. Switch Oracle to `TO_DATE(..., 'YYYY-MM-DD')`
+  with explicit format (bypasses NLS); keep PG on `CAST AS DATE`
+  (parses ISO natively); SQLite uses plain TEXT comparison (no native
+  DATE type, lex order works). 11 unit tests in
+  `tests/unit/test_sql_app2_filters.py`.
+- **`common/html/_sql_executor.py::execute_visual_sql_async` uses
+  explicit cursor on Oracle** (Y.3.f.alt.4b). oracledb async
+  `conn.execute()` returns `None` (executes against an internal
+  cursor we can't read back), unlike psycopg + aiosqlite which
+  return the cursor from the one-shot form. Add an Oracle branch
+  that calls `cur = conn.cursor(); await cur.execute(...)`.
+  Pyright-strict friendly via inline `cast(Any, ...)` with WHY
+  comments — per-driver async cursor union has no shared Protocol
+  for fetchall/description/close.
+
+### Spike
+
+- **`spike/y3g/`** — SQL builder library evaluation (SQLAlchemy Core
+  2.0.49 + sqlglot 30.7.0). Both ported the Account Network dataset;
+  per-dialect output diffed against current emitter baseline. **Decision:
+  stay on strings + `common/sql/dialect.py` helpers.** sqlglot transpile
+  was the most attractive option but Oracle JSON path is broken (emits
+  non-existent `JSON_EXTRACT`) and SQLite date arithmetic transpiles to
+  unsupported `INTERVAL`. Patching either gap reinvents `dialect.py`.
+  Re-spike if helper count grows past ~60 (currently ~40), SQLite drops
+  from the matrix, or a feature genuinely needs cross-dialect
+  transformation. Full writeup in `spike/y3g/findings.md`.
+
 ## v8.8.0a8 — Hotfix: tests/conftest.py imports _dev unconditionally
 
 Eighth alpha. Hotfix re-cut for v8.8.0a7 after the Release workflow
