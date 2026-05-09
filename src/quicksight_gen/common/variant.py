@@ -45,6 +45,11 @@ from typing import Literal, NewType
 DialectCode = Literal["pg", "or", "sl"]
 TargetCode = Literal["lo", "aw"]
 ScenarioCode = NewType("ScenarioCode", str)
+# #729 — wrap the cell-discriminator string so accidental swaps with
+# other identifier kinds (DialectCode, ScenarioCode, free-form str)
+# fail at the call site instead of producing wrong dir paths /
+# wrong AWS tags. Constructed only via ``VariantSpec.name``.
+VariantName = NewType("VariantName", str)
 
 # Scenario regex: sp | sq | us | f<digits>. Validated in `__post_init__`.
 _SCENARIO_RE = re.compile(r"^(sp|sq|us|f\d+)$")
@@ -115,11 +120,17 @@ class VariantSpec:
                 )
 
     @property
-    def name(self) -> str:
+    def name(self) -> VariantName:
         """Stable variant code: ``<sc>_<di>_<ta>``. Used as artifact dir
         name (``runs/<id>/<variant>/``), DB schema prefix discriminator,
-        and AWS resource ``L2Instance:<variant>`` tag value."""
-        return f"{self.scenario}_{self.dialect}_{self.target}"
+        and AWS resource ``L2Instance:<variant>`` tag value.
+
+        #729 — return type is ``VariantName`` (a ``NewType("VariantName",
+        str)``) so accidental swaps with DialectCode / ScenarioCode /
+        free-form str fail at the call site. NewType is identity at
+        runtime; no overhead.
+        """
+        return VariantName(f"{self.scenario}_{self.dialect}_{self.target}")
 
     def is_valid(self) -> bool:
         """Cell-level validity. Returns False for known-impossible
