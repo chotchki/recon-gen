@@ -34,6 +34,7 @@ cell-level invalid — operators can opt in via
 from __future__ import annotations
 
 import re
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, NewType
@@ -133,3 +134,70 @@ class VariantSpec:
         if self.dialect == "sl" and self.target == "aw":
             return False
         return True
+
+
+# --- matrix expanders -----------------------------------------------------
+
+
+def derive_default_fuzz_seed() -> int:
+    """Random fuzz seed for the default ``full`` matrix (and any other
+    fuzz cell that doesn't have a pinned seed).
+
+    Per audit §7.11 LOCKED + m.0 spike + m.3 PLAN direction: random
+    by default, different per chain invocation. Seed is captured in
+    each cell's manifest (m.3 wires manifest writes); operator pins
+    via ``--variants=f<seed>_<di>_<ta>`` for one-line reproduction.
+
+    `secrets.randbelow(2**32)` rather than ``random.X``: cryptographic
+    RNG, no module-level state, won't trip the
+    ``b.15.lint.determinism`` check on accidental seed-module use.
+    """
+    return secrets.randbelow(2**32)
+
+
+def expand_full() -> list[VariantSpec]:
+    """The 13-cell ``full`` default matrix (spike §"`full` matrix
+    definition", LOCKED 2026-05-08).
+
+    Cells:
+
+    - 6 named-scenario × all-dialects × local: ``{sp, sq} × {pg, or, sl} × {lo}``
+    - 4 named-scenario × non-sqlite × aws:    ``{sp, sq} × {pg, or} × {aw}``
+    - 3 fuzz-seed × all-dialects × local:    ``{f<seed>} × {pg, or, sl} × {lo}``
+
+    The fuzz cells share **one** random seed across the 3 dialect cells
+    so the same synthesized L2 topology gets exercised on PG / Oracle /
+    SQLite — cross-dialect coverage on identical input. ``--scenarios=fuzz:N``
+    (m.3 sub-flag composer territory) ramps this to N seeds × |dialect-axis|.
+
+    Excluded from default ``full`` per spike §"Invalid cells":
+
+    - ``us_*_*``: requires operator yaml; opt-in via ``--scenarios=us:<path>``.
+    - Fuzz on ``aw``: cost-control default; reachable via explicit
+      ``--scenarios=fuzz:N --targets=aw``.
+    - ``<any>_sl_aw``: invalid cell (caught by `is_valid`); never
+      constructed here.
+
+    Caller-side invariant: every returned spec satisfies ``is_valid()``.
+    """
+    cells: list[VariantSpec] = []
+
+    # Named scenarios × all dialects × local — 2 × 3 = 6 cells.
+    for sc_named in ("sp", "sq"):
+        for di_local in ("pg", "or", "sl"):
+            cells.append(VariantSpec(ScenarioCode(sc_named), di_local, "lo"))
+
+    # Named scenarios × non-sqlite dialects × aws — 2 × 2 = 4 cells.
+    # (sl × aw excluded by `is_valid`; not constructed.)
+    for sc_named in ("sp", "sq"):
+        for di_aws in ("pg", "or"):
+            cells.append(VariantSpec(ScenarioCode(sc_named), di_aws, "aw"))
+
+    # 1 random fuzz seed × all dialects × local — 3 cells.
+    # Same seed across dialects: cross-dialect coverage on identical L2.
+    seed = derive_default_fuzz_seed()
+    fuzz_code = ScenarioCode(f"f{seed}")
+    for di_local in ("pg", "or", "sl"):
+        cells.append(VariantSpec(fuzz_code, di_local, "lo", fuzz_seed=seed))
+
+    return cells
