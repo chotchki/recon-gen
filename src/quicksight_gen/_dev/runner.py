@@ -1801,18 +1801,26 @@ def prune_old_runs(retain: int = RUNS_RETAIN_N, runs_dir: Path | None = None) ->
     is done. ``stat()`` failures during the listing pass are similarly
     benign (entry vanished mid-iter); skip and move on.
 
-    m.5.fix-up: skip pruning entirely when running under a pytest-xdist
-    worker (``PYTEST_XDIST_WORKER`` env set). Without this, 13-cell ×
-    auto-xdist matrix runs spawn ~200 worker processes, each calling
-    `runner.main(...)` from a unit test creating a fresh run dir. Each
-    new dir bumps the count past 20; pruning races nuke in-flight cells'
-    dirs (synth_l2.yaml + manifest.json + per-layer logs). The runner
-    itself prunes from the controller process, which doesn't have the
-    xdist env set, so production cleanup still happens.
+    m.5.fix-up: skip pruning the *default* runs dir entirely when
+    running under a pytest-xdist worker (``PYTEST_XDIST_WORKER`` env
+    set). Without this, 13-cell × auto-xdist matrix runs spawn ~200
+    worker processes, each calling `runner.main(...)` from a unit test
+    creating a fresh run dir. Each new dir bumps the count past 20;
+    pruning races nuke in-flight cells' dirs (synth_l2.yaml +
+    manifest.json + per-layer logs). The runner itself prunes from the
+    controller process, which doesn't have the xdist env set, so
+    production cleanup still happens.
+
+    The skip applies only when ``runs_dir`` is not given — explicit-
+    arg invocations (the prune unit tests passing tmp_path) bypass
+    the guard so they still exercise real deletion behavior under
+    xdist. Follow-up #741 will make ``RUNS_DIR`` env-overridable so
+    tests stop touching the operator's real ``runs/`` dir at all and
+    this guard becomes redundant.
     """
-    if os.environ.get("PYTEST_XDIST_WORKER"):
-        return []
     target = runs_dir if runs_dir is not None else RUNS_DIR
+    if runs_dir is None and os.environ.get("PYTEST_XDIST_WORKER"):
+        return []
     if not target.exists():
         return []
     candidates: list[Path] = []
