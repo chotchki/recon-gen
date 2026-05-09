@@ -69,6 +69,38 @@ class Dialect(str, Enum):
     SQLITE = "sqlite"
 
 
+# -- Identifiers -------------------------------------------------------------
+
+
+def column_name(name: str, dialect: Dialect) -> str:
+    """Per-dialect natural case for an unquoted column identifier.
+
+    Postgres + SQLite case-fold unquoted identifiers to lowercase; Oracle
+    case-folds to UPPERCASE. Storing column names in the dialect's natural
+    case lets every reference (DDL column, dataset SQL projection, App2
+    outer-SELECT alias, QuickSight ``Columns`` declaration) use the same
+    string without quote-juggling — and lets unquoted refs in dataset SQL
+    pick up the matching column on every dialect.
+
+    Used at every site that emits a column name into either SQL output or
+    the QuickSight Dataset.Columns metadata: callers pass the canonical
+    lowercase column name from the contract, this helper folds to the
+    dialect's natural case, and the result is the string that both the
+    database and QuickSight will agree on.
+
+    The bridge this replaces (``_oracle_lowercase_alias_wrapper`` in
+    ``common/dataset_contract.py``) wrapped Oracle dataset SQL in an
+    outer alias-rename to back-port UPPERCASE → quoted-lowercase for QS.
+    The wrapper produced an asymmetry App2's ``wrap_for_visual`` couldn't
+    follow (``ORA-00904: "ACCOUNT_ID": invalid identifier``), and every
+    new dialect-port surfaced fresh case-confusion edge cases — see
+    Y.3.f for the full bridge-removal plan.
+    """
+    if dialect is Dialect.ORACLE:
+        return name.upper()
+    return name.lower()
+
+
 # -- Type names (DDL) --------------------------------------------------------
 
 
