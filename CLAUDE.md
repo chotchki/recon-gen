@@ -122,6 +122,25 @@ When `aws_profile` is set:
 
 **One-time onboarding:** runbook in `docs/audits/y_2_gate_h_i_combined_spike.md` §6. IAM policy: `docs/audits/_iam/quicksight-gen-local-policy.json` (mirror of `Github_e2e_testing` + `quicksight:ListUsers`). CI keeps OIDC unchanged.
 
+### Cfg precedence + tunable defaults (`Y.2.gate.h.2`–`h.5`)
+
+**No `export`-then-run dance.** The operator declares everything once in `run/config.<dialect>.yaml`; the runner injects per-variant overrides into subprocess env when the dialect-flavored container needs a fresh URL.
+
+**DB connection strings (h.2):** every consumer reads `cfg.demo_database_url`. For local-pg / local-oracle / local-sqlite variants, the runner spins a container and injects `QS_GEN_DEMO_DATABASE_URL=<container-url>` into that variant's subprocess env (no operator action). For aw target, `cfg.demo_database_url` from `run/config.<dialect>.yaml` is the source of truth. Precedence the cfg loader honors when present: `QS_GEN_DEMO_DATABASE_URL` env override → cfg yaml field → unset (loud-fail at `connect_demo_db`).
+
+**AWS account / region / partition (h.3):** `cfg.aws_account_id`, `cfg.aws_region`, `cfg.partition` (auto-derived from region). All read from cfg yaml; loader honors `QS_GEN_AWS_ACCOUNT_ID` / `QS_GEN_AWS_REGION` env overrides. Required fields with no defaults — loud-fail when missing.
+
+**Tunables (h.4) — sensible defaults pre-filled, env override for the rare case:**
+
+- `QS_GEN_FUZZ_SEED` — absent ⇒ runner rolls a fresh random `uint32` per invocation; pin only to repro a fuzz failure. Surfaced in runner output (`runner: fuzz_seed=<n> (pin via QS_GEN_FUZZ_SEED env to repro)`).
+- `QS_E2E_PAGE_TIMEOUT` — Playwright page-load ms. Default in helpers; override for slow CI runners.
+- `QS_E2E_VISUAL_TIMEOUT` — Playwright per-visual wait ms. Default in helpers.
+- `QS_E2E_IDENTITY_REGION` — QuickSight identity region for embed-URL signing. Default `us-east-1` (the region where QuickSight subscriptions live regardless of dashboard region).
+- `QS_GEN_TEST_L2_INSTANCE` — path to L2 yaml. Default = `cfg.default_l2_instance` (when set in cfg) else bundled `tests/l2/spec_example.yaml`.
+- `QS_GEN_RUNNER_YES` — bool; confirms destructive ops (`down`/`sweep`/dirty deploy bypass) when `--yes` flag absent. Off by default.
+
+**Loud failure on missing config (h.5):** `load_config` raises `ValueError("Missing required configuration: ...")` with the missing field names AND the env-var fallbacks (`QS_GEN_AWS_ACCOUNT_ID`, etc.). `connect_demo_db` raises with "set it in your config YAML or via QS_GEN_DEMO_DATABASE_URL." Runner catches both → `EXIT_NEEDS_OPERATOR=2` with the message bubbled to stderr. Probes (`probe_dependencies` for AWS / Docker / cfg-load) fire pre-dispatch and short-circuit the chain with the same exit code. No silent skips.
+
 ## Project Structure
 
 ```

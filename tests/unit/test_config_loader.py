@@ -185,3 +185,83 @@ def test_run_oracle_config_still_loads() -> None:
         pytest.skip(f"{p} not present")
     cfg = load_config(p)
     assert cfg.dialect.value == "oracle"
+
+
+# --- Y.2.gate.h.5 — loud failure on missing required config ---
+
+
+def test_missing_aws_account_id_fails_loud_with_env_var_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gate.h.5 — when a required field is missing from cfg yaml AND
+    the env-var fallback isn't set, the loader fails loud with a
+    message naming both the missing key and its env-var fallback so
+    the operator knows exactly what to fix.
+
+    Clear the env vars so the loader's env-fallback path can't quietly
+    fill them — we're testing the missing-everything case.
+    """
+    monkeypatch.delenv("QS_GEN_AWS_ACCOUNT_ID", raising=False)
+    monkeypatch.delenv("QS_GEN_AWS_REGION", raising=False)
+    monkeypatch.delenv("QS_GEN_DATASOURCE_ARN", raising=False)
+
+    p = _write_yaml(tmp_path, {
+        # aws_account_id deliberately absent — also missing from env.
+        "aws_region": "us-east-1",
+        "datasource_arn": "arn:aws:quicksight:us-east-1:111122223333:datasource/x",
+    })
+    with pytest.raises(ValueError) as exc_info:
+        load_config(p)
+    msg = str(exc_info.value)
+    assert "Missing required configuration" in msg, (
+        f"loud-fail message must lead with 'Missing required configuration'; "
+        f"got: {msg}"
+    )
+    assert "aws_account_id" in msg, (
+        f"loud-fail message must name the missing key; got: {msg}"
+    )
+    assert "QS_GEN_AWS_ACCOUNT_ID" in msg, (
+        f"loud-fail message must surface the env-var fallback so the "
+        f"operator knows the alternative; got: {msg}"
+    )
+
+
+def test_missing_datasource_arn_without_demo_url_fails_loud(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gate.h.5 — datasource_arn is required UNLESS demo_database_url
+    is set (the latter auto-derives the former). Without either, fail
+    loud with the missing key + env-var fallback."""
+    monkeypatch.delenv("QS_GEN_DATASOURCE_ARN", raising=False)
+    monkeypatch.delenv("QS_GEN_DEMO_DATABASE_URL", raising=False)
+
+    p = _write_yaml(tmp_path, {
+        "aws_account_id": "111122223333",
+        "aws_region": "us-east-1",
+        # neither datasource_arn nor demo_database_url
+    })
+    with pytest.raises(ValueError) as exc_info:
+        load_config(p)
+    msg = str(exc_info.value)
+    assert "datasource_arn" in msg
+    assert "QS_GEN_DATASOURCE_ARN" in msg
+
+
+def test_demo_database_url_satisfies_datasource_arn_requirement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gate.h.5 sister: when demo_database_url IS set, datasource_arn
+    is auto-derived from it — no loud-fail. Locks the contract that
+    the missing-cfg check is necessity-aware, not just a blanket key
+    list."""
+    monkeypatch.delenv("QS_GEN_DATASOURCE_ARN", raising=False)
+    p = _write_yaml(tmp_path, {
+        "aws_account_id": "111122223333",
+        "aws_region": "us-east-1",
+        "demo_database_url": "postgresql://u:p@h:5432/d",
+        "dialect": "postgres",
+    })
+    cfg = load_config(p)
+    # __post_init__ derives the datasource_arn from the URL.
+    assert cfg.datasource_arn is not None
+    assert "datasource/" in cfg.datasource_arn
