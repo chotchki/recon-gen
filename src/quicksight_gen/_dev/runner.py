@@ -1454,6 +1454,123 @@ def _normalize_pg_url(raw_url: str) -> str:
     return raw_url.replace("postgresql+psycopg2://", "postgresql://", 1)
 
 
+def _dump_top_queries_for_variant(
+    spec: VariantSpec,
+    variant_env: dict[str, str],
+    run_dir: Path,
+    terminal_prefix: str,
+) -> None:
+    """Y.2.gate.f.4 — best-effort per-cell top-queries snapshot.
+
+    Fires after every chain that touched a DB layer. Output:
+    ``<run_dir>/<spec.name>/db-perf/top-queries.md``. Cumulative across
+    everything the variant's chain ran (db smoke + app2 + e2e + browser
+    if reached); ``pg_stat_statements`` / ``v$sqlstats`` carry the totals.
+
+    Filter narrows to queries whose text contains the L2 instance prefix
+    so we drop the operator's unrelated workloads on the shared DB.
+
+    Never raises — connection / query / format failures all degrade to a
+    ``format_skipped`` marker so a flaky stats view can't break the
+    chain. SQLite has no equivalent stats view (skipped cleanly).
+    """
+    # Lazy imports keep startup fast and avoid pulling psycopg/oracledb
+    # into pyright-strict scope unless this helper actually fires.
+    from quicksight_gen._dev import perf
+    from quicksight_gen.common.config import load_config
+    from quicksight_gen.common.db import connect_demo_db
+    from quicksight_gen.common.sql import Dialect
+
+    out_dir = run_dir / spec.name / "db-perf"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "top-queries.md"
+    title = f"Top expensive queries — {spec.name}"
+
+    cfg_path = variant_env.get(QS_GEN_CONFIG.name)
+    if not cfg_path:
+        out_path.write_text(perf.format_skipped(
+            title=title, dialect="?",
+            reason=f"no {QS_GEN_CONFIG.name} in variant_env",
+        ))
+        return
+
+    try:
+        cfg = load_config(cfg_path)
+    except Exception as e:  # noqa: BLE001 — never break the chain
+        out_path.write_text(perf.format_skipped(
+            title=title, dialect="?",
+            reason=f"could not load cfg from {cfg_path!r}: {e!r}",
+        ))
+        return
+
+    dialect_str = perf.dialect_name(cfg.dialect)
+    if cfg.dialect is Dialect.SQLITE:
+        out_path.write_text(perf.format_skipped(
+            title=title, dialect=dialect_str,
+            reason="SQLite has no pg_stat_statements / v$sqlstats equivalent",
+        ))
+        print(f"{terminal_prefix}runner: db-perf [{spec.name}] skipped (sqlite)")
+        return
+
+    # Filter on the L2 instance prefix so we drop the operator's
+    # unrelated traffic on the shared DB. Falls back to spec.name if
+    # cfg's prefix isn't set (which shouldn't happen for non-default
+    # variants but stays defensive).
+    like_pattern = cfg.l2_instance_prefix or spec.name
+
+    try:
+        conn = connect_demo_db(cfg)
+    except Exception as e:  # noqa: BLE001
+        out_path.write_text(perf.format_skipped(
+            title=title, dialect=dialect_str,
+            reason=f"could not connect: {e!r}",
+        ))
+        return
+
+    try:
+        rows = perf.fetch_top_queries(
+            conn, cfg.dialect, like_pattern=like_pattern, top=50,
+        )
+    except Exception as e:  # noqa: BLE001
+        # Most likely: pg_stat_statements not installed (PG) or
+        # ORA-00942/ORA-01031 on v$sqlstats (Oracle, no privilege).
+        out_path.write_text(perf.format_skipped(
+            title=title, dialect=dialect_str,
+            reason=(
+                f"stats view unavailable: {type(e).__name__}: {e}. "
+                f"Pre-req for postgres: CREATE EXTENSION pg_stat_statements; "
+                f"for oracle: SELECT on v$sqlstats."
+            ),
+        ))
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+        return
+
+    try:
+        conn.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        out_path.write_text(perf.format_top_queries_markdown(
+            title=title, dialect=dialect_str,
+            like_pattern=like_pattern, rows=rows,
+        ))
+    except Exception as e:  # noqa: BLE001 — formatter shouldn't break chain
+        out_path.write_text(perf.format_skipped(
+            title=title, dialect=dialect_str,
+            reason=f"format failed: {type(e).__name__}: {e}",
+        ))
+        return
+
+    print(
+        f"{terminal_prefix}runner: db-perf [{spec.name}] "
+        f"wrote {len(rows)} rows to {out_path}"
+    )
+
+
 def teardown_variant(handle: object | None) -> None:
     """Stop + remove the container if one was started. No-op for
     ``default`` (handle is None)."""
@@ -2171,6 +2288,23 @@ def _run_one_variant(
             if not result.skipped and result.passed:
                 write_cache_marker(layer, duration_seconds=result.duration_seconds, variant=spec.name)
     finally:
+        # Y.2.gate.f.4 — best-effort top-queries snapshot per cell.
+        # Same gating as the seed step (only fire when the chain
+        # touched a DB layer); runs on success AND failure so triage
+        # always has the perf signal. Wrapped in try/except as
+        # additional defense in depth — the helper never raises, but
+        # if it ever does we don't want it to leak past teardown.
+        if any(layer in DB_TOUCHING_LAYERS for layer in chain):
+            try:
+                _dump_top_queries_for_variant(
+                    spec, variant_env, run_dir, terminal_prefix,
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"{terminal_prefix}runner: db-perf [{spec.name}] "
+                    f"unexpected failure: {exc!r}",
+                    file=sys.stderr,
+                )
         teardown_variant(variant_handle)
         if variant_handle is not None:
             print(f"{terminal_prefix}runner: variant={spec.name} container torn down")
