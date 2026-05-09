@@ -273,3 +273,144 @@ def compose_matrix(
                 if spec.is_valid():
                     cells.append(spec)
     return cells
+
+
+# --- special-form parsers (m.1.d) ------------------------------------------
+
+
+# `--variants=<code>` shape: <scenario>_<dialect>_<target>. The fuzz_seed
+# integer (when scenario is f<n>) is extracted from the scenario suffix.
+_VARIANT_CODE_RE = re.compile(
+    r"^(?P<scenario>sp|sq|us|f\d+)_(?P<dialect>pg|or|sl)_(?P<target>lo|aw)$"
+)
+
+
+def parse_scenarios(arg: str) -> list[ScenarioSpec]:
+    """Parse a `--scenarios=` CSV value into ScenarioSpec list.
+
+    Accepts comma-separated entries, each one of:
+
+    - ``sp`` / ``sq`` — bare named scenarios.
+    - ``fuzz`` — single random fuzz seed (1 cell on the scenario axis).
+    - ``fuzz:N`` — N random fuzz seeds (N cells on the scenario axis).
+    - ``us:<path>`` — single user-supplied yaml. The path is taken
+      verbatim (caller's responsibility to verify it exists).
+
+    Whitespace around entries is tolerated. Empty values raise.
+
+    Examples:
+        ``"sp,sq"`` → 2 named ScenarioSpecs
+        ``"fuzz:3"`` → 3 fuzz ScenarioSpecs (each with a fresh random seed)
+        ``"sp,fuzz,us:run/customer.yaml"`` → 3 ScenarioSpecs (1 named + 1 fuzz + 1 us)
+    """
+    if not arg.strip():
+        raise ValueError("--scenarios value is empty")
+    out: list[ScenarioSpec] = []
+    for entry_raw in arg.split(","):
+        entry = entry_raw.strip()
+        if not entry:
+            raise ValueError(f"--scenarios contains empty entry in {arg!r}")
+        if entry in ("sp", "sq"):
+            out.append(ScenarioSpec(ScenarioCode(entry)))
+        elif entry == "fuzz":
+            seed = derive_default_fuzz_seed()
+            out.append(ScenarioSpec(ScenarioCode(f"f{seed}"), fuzz_seed=seed))
+        elif entry.startswith("fuzz:"):
+            count_str = entry[len("fuzz:"):]
+            try:
+                count = int(count_str)
+            except ValueError as exc:
+                raise ValueError(
+                    f"--scenarios fuzz count must be an integer; got {count_str!r}"
+                ) from exc
+            if count < 1:
+                raise ValueError(
+                    f"--scenarios fuzz count must be ≥1; got {count}"
+                )
+            for _ in range(count):
+                seed = derive_default_fuzz_seed()
+                out.append(ScenarioSpec(ScenarioCode(f"f{seed}"), fuzz_seed=seed))
+        elif entry.startswith("us:"):
+            path_str = entry[len("us:"):]
+            if not path_str:
+                raise ValueError(f"--scenarios us:<path> missing path in {entry!r}")
+            out.append(ScenarioSpec(
+                ScenarioCode("us"), user_yaml=Path(path_str),
+            ))
+        else:
+            raise ValueError(
+                f"--scenarios unknown entry {entry!r}; "
+                f"expected sp, sq, fuzz, fuzz:N, or us:<path>"
+            )
+    return out
+
+
+def parse_dialects(arg: str) -> list[DialectCode]:
+    """Parse a `--dialects=` CSV value (e.g., ``"pg,or"``) into a
+    typed list. Unknown codes raise."""
+    if not arg.strip():
+        raise ValueError("--dialects value is empty")
+    out: list[DialectCode] = []
+    for entry_raw in arg.split(","):
+        entry = entry_raw.strip()
+        if entry not in DIALECTS:
+            raise ValueError(
+                f"--dialects unknown code {entry!r}; "
+                f"expected one of {sorted(DIALECTS)}"
+            )
+        # Pyright narrows entry to DialectCode via the DIALECTS membership check.
+        out.append(entry)  # pyright: ignore[reportArgumentType]: DIALECTS membership narrows entry to DialectCode
+    return out
+
+
+def parse_targets(arg: str) -> list[TargetCode]:
+    """Parse a `--targets=` CSV value (e.g., ``"lo,aw"``) into a typed
+    list. Unknown codes raise."""
+    if not arg.strip():
+        raise ValueError("--targets value is empty")
+    out: list[TargetCode] = []
+    for entry_raw in arg.split(","):
+        entry = entry_raw.strip()
+        if entry not in TARGETS:
+            raise ValueError(
+                f"--targets unknown code {entry!r}; "
+                f"expected one of {sorted(TARGETS)}"
+            )
+        out.append(entry)  # pyright: ignore[reportArgumentType]: TARGETS membership narrows entry to TargetCode
+    return out
+
+
+def parse_variant_code(code: str) -> VariantSpec:
+    """Parse a single ``<sc>_<di>_<ta>`` variant code into a VariantSpec.
+
+    Used by the `--variants=` triage escape hatch — operator copies
+    a code from a failing run's artifact path (`runs/<id>/<code>/`)
+    and re-runs just that cell.
+
+    `us_*_*` is rejected here: us cells require operator-supplied
+    yaml, which `--variants=` doesn't carry. Operator should use
+    ``--scenarios=us:<path>`` instead.
+    """
+    m = _VARIANT_CODE_RE.match(code)
+    if m is None:
+        raise ValueError(
+            f"--variants unknown code {code!r}; "
+            f"expected <sc>_<di>_<ta> (e.g., sp_pg_lo, f42_or_lo)"
+        )
+    scenario_str = m.group("scenario")
+    if scenario_str == "us":
+        raise ValueError(
+            f"--variants={code} is a us cell, but us cells require an "
+            f"operator-supplied yaml path. Use "
+            f"--scenarios=us:<path> --dialects={m.group('dialect')} "
+            f"--targets={m.group('target')} instead."
+        )
+    fuzz_seed: int | None = None
+    if scenario_str.startswith("f"):
+        fuzz_seed = int(scenario_str[1:])
+    return VariantSpec(
+        ScenarioCode(scenario_str),
+        m.group("dialect"),  # pyright: ignore[reportArgumentType]: regex group narrowed by _VARIANT_CODE_RE
+        m.group("target"),  # pyright: ignore[reportArgumentType]: regex group narrowed by _VARIANT_CODE_RE
+        fuzz_seed=fuzz_seed,
+    )

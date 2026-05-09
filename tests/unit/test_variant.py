@@ -29,6 +29,10 @@ from quicksight_gen.common.variant import (
     compose_matrix,
     derive_default_fuzz_seed,
     expand_full,
+    parse_dialects,
+    parse_scenarios,
+    parse_targets,
+    parse_variant_code,
 )
 
 
@@ -359,3 +363,171 @@ def test_compose_default_constants() -> None:
     assert DEFAULT_SCENARIOS_NAMED == (ScenarioCode("sp"), ScenarioCode("sq"))
     assert DEFAULT_DIALECTS == ("pg", "or", "sl")
     assert DEFAULT_TARGETS == ("lo", "aw")
+
+
+# --- m.1.d: special-form parsers ------------------------------------------
+
+
+# parse_scenarios — comma-separated; named + fuzz + us special-forms
+
+
+def test_parse_scenarios_named() -> None:
+    specs = parse_scenarios("sp,sq")
+    assert len(specs) == 2
+    assert specs[0] == ScenarioSpec(ScenarioCode("sp"))
+    assert specs[1] == ScenarioSpec(ScenarioCode("sq"))
+
+
+def test_parse_scenarios_fuzz_no_count() -> None:
+    """`fuzz` (no `:N`) → 1 random fuzz seed."""
+    specs = parse_scenarios("fuzz")
+    assert len(specs) == 1
+    assert specs[0].scenario.startswith("f")
+    assert specs[0].fuzz_seed is not None
+    assert specs[0].scenario == f"f{specs[0].fuzz_seed}"
+
+
+def test_parse_scenarios_fuzz_with_count() -> None:
+    """`fuzz:5` → 5 random fuzz seeds, all distinct (with high probability)."""
+    specs = parse_scenarios("fuzz:5")
+    assert len(specs) == 5
+    seeds = [s.fuzz_seed for s in specs]
+    assert all(s is not None for s in seeds)
+    # 5 random uint32s — collision probability ~5*4/2 / 2^32 ≈ 2.3e-9.
+    assert len(set(seeds)) == 5
+
+
+def test_parse_scenarios_us() -> None:
+    specs = parse_scenarios("us:run/customer.yaml")
+    assert len(specs) == 1
+    assert specs[0].scenario == "us"
+    assert specs[0].user_yaml == Path("run/customer.yaml")
+
+
+def test_parse_scenarios_mixed() -> None:
+    """Comma-separated mix of named + fuzz + us — composes."""
+    specs = parse_scenarios("sp,fuzz:2,us:foo.yaml")
+    assert len(specs) == 4  # 1 sp + 2 fuzz + 1 us
+    assert specs[0].scenario == "sp"
+    assert specs[1].scenario.startswith("f")
+    assert specs[2].scenario.startswith("f")
+    assert specs[3].scenario == "us"
+
+
+def test_parse_scenarios_whitespace_tolerated() -> None:
+    """Operators may put spaces around commas."""
+    specs = parse_scenarios(" sp , sq ")
+    assert [s.scenario for s in specs] == ["sp", "sq"]
+
+
+def test_parse_scenarios_empty_value_rejected() -> None:
+    with pytest.raises(ValueError, match="value is empty"):
+        parse_scenarios("")
+    with pytest.raises(ValueError, match="value is empty"):
+        parse_scenarios("   ")
+
+
+def test_parse_scenarios_empty_entry_rejected() -> None:
+    with pytest.raises(ValueError, match="empty entry"):
+        parse_scenarios("sp,,sq")
+
+
+def test_parse_scenarios_unknown_entry_rejected() -> None:
+    with pytest.raises(ValueError, match="unknown entry"):
+        parse_scenarios("sp,xyz")
+
+
+def test_parse_scenarios_fuzz_count_non_int() -> None:
+    with pytest.raises(ValueError, match="fuzz count must be an integer"):
+        parse_scenarios("fuzz:abc")
+
+
+def test_parse_scenarios_fuzz_count_zero_rejected() -> None:
+    with pytest.raises(ValueError, match="fuzz count must be ≥1"):
+        parse_scenarios("fuzz:0")
+
+
+def test_parse_scenarios_us_missing_path_rejected() -> None:
+    with pytest.raises(ValueError, match="us:<path> missing path"):
+        parse_scenarios("us:")
+
+
+# parse_dialects + parse_targets
+
+
+def test_parse_dialects_csv() -> None:
+    assert parse_dialects("pg,or") == ["pg", "or"]
+
+
+def test_parse_dialects_unknown_rejected() -> None:
+    with pytest.raises(ValueError, match="unknown code"):
+        parse_dialects("pg,xyz")
+
+
+def test_parse_dialects_empty_rejected() -> None:
+    with pytest.raises(ValueError, match="value is empty"):
+        parse_dialects("")
+
+
+def test_parse_targets_csv() -> None:
+    assert parse_targets("lo,aw") == ["lo", "aw"]
+
+
+def test_parse_targets_unknown_rejected() -> None:
+    with pytest.raises(ValueError, match="unknown code"):
+        parse_targets("lo,xyz")
+
+
+def test_parse_targets_empty_rejected() -> None:
+    with pytest.raises(ValueError, match="value is empty"):
+        parse_targets("")
+
+
+# parse_variant_code — single-cell triage escape hatch
+
+
+def test_parse_variant_code_named() -> None:
+    spec = parse_variant_code("sp_pg_lo")
+    assert spec.scenario == "sp"
+    assert spec.dialect == "pg"
+    assert spec.target == "lo"
+    assert spec.fuzz_seed is None
+
+
+def test_parse_variant_code_fuzz_extracts_seed() -> None:
+    """Fuzz seed integer is extracted from the scenario suffix."""
+    spec = parse_variant_code("f12345_or_lo")
+    assert spec.scenario == "f12345"
+    assert spec.fuzz_seed == 12345
+    assert spec.dialect == "or"
+
+
+def test_parse_variant_code_us_rejected() -> None:
+    """`us` cells require operator-supplied yaml; --variants= triage
+    doesn't carry that context. Error directs operator to
+    --scenarios=us:<path>."""
+    with pytest.raises(ValueError, match="us cells require an operator-supplied yaml"):
+        parse_variant_code("us_pg_lo")
+
+
+@pytest.mark.parametrize("bad", [
+    "sp_pg",       # too few components
+    "sp_pg_lo_x",  # too many components
+    "SP_PG_LO",    # uppercase rejected
+    "sp-pg-lo",    # wrong separator
+    "sp_xyz_lo",   # bad dialect
+    "sp_pg_xyz",   # bad target
+    "fa_pg_lo",    # f without digit
+    "",            # empty
+])
+def test_parse_variant_code_bad(bad: str) -> None:
+    with pytest.raises(ValueError, match="unknown code"):
+        parse_variant_code(bad)
+
+
+def test_parse_variant_code_invalid_cell_constructs() -> None:
+    """Bug guard: parse_variant_code constructs the spec, but invalid
+    cells (sl × aw) construct fine — caller checks is_valid() if it
+    cares. The triage path may want to inspect why a cell is invalid."""
+    spec = parse_variant_code("sp_sl_aw")
+    assert not spec.is_valid()
