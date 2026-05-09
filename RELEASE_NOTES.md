@@ -1,6 +1,48 @@
 # Release Notes
 
-## v8.8.0a12 — Y.2.gate.f.9: layer 8 (harness) dropped — 5300 lines deleted
+## v8.8.0a13 — Y.2.gate.h: cred auto-discovery audit + close-out
+
+Thirteenth alpha. **Closes Y.2.gate.h.** Audit found h.2-h.5 implementations
+all already landed via h.1 + h.6 + i.x scaffolding (the cfg.AuthConfig +
+EnvVar registry pattern from earlier work covers them). Remaining
+deliverable was documentation + a unit test for h.5's loud-fail contract.
+
+### Audit findings
+
+- **h.2 (DB connection strings cfg-driven)**: every consumer reads
+  `cfg.demo_database_url`. For local-pg/oracle/sqlite variants the
+  runner spins a container and injects `QS_GEN_DEMO_DATABASE_URL=
+  <container-url>` into that variant's subprocess env. For aw target,
+  cfg yaml is the source of truth.
+- **h.3 (AWS account/region/partition cfg-driven)**: `cfg.aws_account_id`,
+  `cfg.aws_region`, `cfg.partition` (auto-derived from region). Loader
+  honors `QS_GEN_AWS_ACCOUNT_ID` / `QS_GEN_AWS_REGION` env overrides.
+- **h.4 (tunables defaulted)**: every `QS_GEN_*` / `QS_E2E_*` tunable
+  EnvVar is `optional=True` with sensible defaults applied by consumers.
+  `QS_GEN_FUZZ_SEED` rolls fresh per invocation; Playwright timeouts
+  default in helpers; `QS_E2E_IDENTITY_REGION` defaults to us-east-1.
+
+### h.5 — loud-fail on missing cfg, with operator-actionable messages
+
+Implementation already landed: `load_config` raises `ValueError("Missing
+required configuration: ...")` with the missing field names AND the
+env-var fallbacks (`QS_GEN_AWS_ACCOUNT_ID`, etc.) so the operator
+knows both how to fix in YAML AND the env-override alternative.
+`connect_demo_db` raises with "set it in your config YAML or via
+QS_GEN_DEMO_DATABASE_URL." Runner catches both → `EXIT_NEEDS_OPERATOR=2`
+with the message bubbled to stderr.
+
+**3 new unit tests** in `tests/unit/test_config_loader.py` lock the
+contract: missing aws_account_id → ValueError naming key + env-var
+fallback; missing datasource_arn-without-demo_url → same shape; demo_
+database_url-set → datasource_arn auto-derived (no loud-fail).
+
+### Documentation
+
+CLAUDE.md gains a `Cfg precedence + tunable defaults` section under
+the existing Auth block covering all 4 items.
+
+
 
 Twelfth alpha. **Closes Y.2.gate.f.** ~5300 lines net deleted across
 17 harness files; the legacy "layer 8" e2e harness lane is gone, with
