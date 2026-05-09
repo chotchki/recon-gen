@@ -1,5 +1,26 @@
 # Release Notes
 
+## v8.8.0a7 — Hotfix: release.yml missing playwright install
+
+Seventh alpha. Hotfix re-cut for v8.8.0a6 after the Release workflow
+failed at the `Tests + pyright strict` gate with 58 webkit-launch
+errors (`tests/js/test_render_table.py`). Code on the v8.8.0a6 git
+tag is unchanged; what was missing was the `playwright install
+--with-deps webkit` step in `.github/workflows/release.yml::tests` —
+`ci.yml` had it (added under X.2.a.2 alongside the JS unit harness)
+but `release.yml` was never updated to mirror. Latent gap surfaced
+on the first tagged release after the JS harness landed.
+
+### Fix
+
+- **`.github/workflows/release.yml`** — added the `Install Playwright
+  WebKit browser` step right after `uv sync`, mirroring `ci.yml::ci`'s
+  step (with a WHY comment explaining the parity).
+
+The v8.8.0a6 git tag remains in place as historical record (no PyPI
+artifact, broken-release-publish-pipeline). v8.8.0a7 is the publishable
+re-cut.
+
 ## v8.8.0a6 — Y.2.gate.j + Y.2.gate.m close-out (variant matrix + parallelism)
 
 Sixth alpha. Closes both `Y.2.gate.j` (parallelism + iteration ergonomics)

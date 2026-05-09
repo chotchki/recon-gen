@@ -50,6 +50,14 @@ jobs:
         # render (empty reviewer signature widgets).
         run: uv sync --frozen --extra dev --extra audit
 
+      - name: Install Playwright WebKit browser
+        # Mirrors ci.yml's step. tests/js/test_render_table.py launches
+        # WebKit via Playwright; the browser binary is not bundled with
+        # the Python package, so CI must `playwright install` it
+        # explicitly. Otherwise pytest fails with
+        # "Executable doesn't exist at /home/runner/.cache/ms-playwright/webkit-…/pw_run.sh".
+        run: .venv/bin/playwright install --with-deps webkit
+
       - name: Run tests with coverage (pytest sessionstart runs pyright strict)
         run: .venv/bin/pytest --cov=quicksight_gen --cov-report=xml --cov-report=term
 
