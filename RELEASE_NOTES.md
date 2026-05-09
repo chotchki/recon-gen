@@ -1,6 +1,60 @@
 # Release Notes
 
-## v8.8.0a9 — Y.3.f.alt: Oracle App2 case-quoting + date-cast + cursor-pattern fixes
+## v8.8.0a10 — Y.2.gate.f sweep: dead scripts deleted, CLI tests folded into pytest
+
+Tenth alpha. Knocks out 6 of 10 `Y.2.gate.f` "validate, then delete-or-fold"
+sweeps over `scripts/` + `tests/integration/`. Pure cleanup (no behavior
+changes); the wheel + CI surface gets simpler; ~1100 lines of dead /
+duplicated infrastructure removed. f.4 (dump_top_queries fold), f.5
+(--keep-on-failure runner flag), f.8 (sweep subcommand), f.9 (drop layer 8
+harness as a distinct lane) carry into v8.8.0a11+ on the same branch.
+
+### Folded into pytest
+
+- **f.1 — `tests/integration/verify_dataset_sql.py` → DELETED.** The pytest
+  twin (`tests/e2e/test_dataset_sql_smoke.py`) was IMPORTING `_smoke_one`
+  from the CLI script, so it wasn't a clean duplicate. Lifted the helpers
+  (`_format_value`, `_resolve_default`, `_substitute_qs_params`, `_wrap_smoke`,
+  `_custom_sql`, `_smoke_one`) directly into the pytest test module, then
+  deleted the CLI. CI's 2 invocations (PG + Oracle) rewired to call pytest
+  with `QS_GEN_E2E=1` + cfg/L2 env overrides.
+- **f.2 — `tests/integration/verify_demo_apply.py` → FOLDED + DELETED.** New
+  pytest test at `tests/e2e/test_demo_apply_row_counts.py` (parametrized
+  over the 4 smoke matview suffixes). Cfg-driven dialect dispatch via
+  `connect_demo_db` so PG / Oracle / SQLite all share the same test.
+  Dropped the legacy exact-counts arm — only spec_example had locked counts
+  and CI was already calling --smoke. Empty `tests/integration/` directory
+  removed.
+
+### Deleted (dead / duplicated / unneeded)
+
+- **f.3 — `scripts/bake_sample_output.py` → DELETED.** Per user direction
+  ("unneeded") + locked redundancy: published wheel + docs site already
+  give evaluators full access to the generated JSON shape via
+  `pip install quicksight-gen && quicksight-gen json apply -c ...`.
+  Removed `release.yml::bake-sample` job (35 lines), `bake-sample` dep
+  from `publish-testpypi.needs`, the out-sample artifact download in
+  `github-release`, and `dist/out-sample.zip` from the release files list.
+  Next release won't ship out-sample.zip.
+- **f.6 — `scripts/m2_6_verify.py` + `m2_6_verify.sh` → DELETED.** The
+  deploy + plant + per-invariant assertion flow is now covered by
+  `tests/e2e/test_harness_*` (live AWS deploy + assert) plus the M.2c.* L1
+  e2e tests. Updated 6 stale references in `L1_Invariants.md` + the
+  `customization.md` "Verify with..." section now points at the test
+  runner instead of the deleted script.
+- **f.7 — `scripts/qs_substitution_probe.py` → DELETED.** Y.1.o-vintage
+  manual triage tool for QS runtime SQL behavior (inspect/snapshot/diff).
+  No callers, not in CI, doesn't gate anything. The fold-into-runner
+  option (per-run pg_stat_statements diagnostic dump) overlaps with f.4's
+  dump_top_queries future plan — re-derive there if needed.
+- **f.10 — `scripts/p9_deploy_verify.sh` + `scripts/p9_e2e.sh` → DELETED.**
+  Closes the P.9f.d "re-run 4-cell e2e matrix" task as runner-subsumed:
+  the variant matrix (`m.1+m.2+m.3` LANDED v8.8.0a6) covers all 4 cells
+  natively as `{sp,sq}_{pg,or}_aw` across api+browser layers, and the
+  per-run capture (`runs/<run-id>/<variant>/<layer>/`) carries enough
+  signal for failure triage without bespoke re-run tooling.
+
+
 
 Ninth alpha. Closes the m.5.d AW-chain blocker on the Oracle local +
 Aurora variants by fixing three independent Oracle-driver / Oracle-SQL
