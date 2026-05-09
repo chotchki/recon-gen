@@ -251,9 +251,28 @@ def compose_matrix(
     ``{sp, sq} × {pg} × {lo, aw}`` = 4 cells (no fuzz — caller would
     pass an explicit ScenarioSpec for that). This is intentional:
     sub-flags compose multiplicatively, not subtractively.
+
+    Use `partition_matrix` instead when the caller needs to surface
+    the skipped invalid cells to the operator (m.4.b log line).
+    """
+    valid, _ = partition_matrix(scenarios, dialects, targets)
+    return valid
+
+
+def partition_matrix(
+    scenarios: list[ScenarioSpec] | None = None,
+    dialects: list[DialectCode] | None = None,
+    targets: list[TargetCode] | None = None,
+) -> tuple[list[VariantSpec], list[VariantSpec]]:
+    """m.4.b — return ``(valid_cells, skipped_invalid_cells)``.
+
+    Same composition rules as `compose_matrix` but exposes the cells
+    that fail ``is_valid()`` so the runner can log them. The all-None
+    branch returns ``(expand_full(), [])`` because `expand_full()`
+    constructs only valid cells by design (no skip needed).
     """
     if scenarios is None and dialects is None and targets is None:
-        return expand_full()
+        return expand_full(), []
 
     sc_specs = scenarios if scenarios is not None else [
         ScenarioSpec(s) for s in DEFAULT_SCENARIOS_NAMED
@@ -261,7 +280,8 @@ def compose_matrix(
     di_codes = dialects if dialects is not None else list(DEFAULT_DIALECTS)
     ta_codes = targets if targets is not None else list(DEFAULT_TARGETS)
 
-    cells: list[VariantSpec] = []
+    valid: list[VariantSpec] = []
+    skipped: list[VariantSpec] = []
     for sc in sc_specs:
         for di in di_codes:
             for ta in ta_codes:
@@ -271,8 +291,10 @@ def compose_matrix(
                     user_yaml=sc.user_yaml,
                 )
                 if spec.is_valid():
-                    cells.append(spec)
-    return cells
+                    valid.append(spec)
+                else:
+                    skipped.append(spec)
+    return valid, skipped
 
 
 # --- special-form parsers (m.1.d) ------------------------------------------

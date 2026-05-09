@@ -63,26 +63,30 @@ from tests.audit._scenario_expectations import expected_audit_counts
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
-    # Y.2.gate.c.5.browser xfail (2026-05-08): module fixtures need
-    # spec_example seeded into BOTH postgres + oracle DBs in the same chain
-    # invocation (the test parametrizes across both dialects). The default
-    # variant's chain only seeds ONE L2 instance against ONE DB (per cfg.
-    # default_l2_instance), so postgres-stuck_* errors with UniqueViolation
-    # (sasquatch_pr already there) and every oracle-* errors with
-    # `Connection disconnected` (Oracle DB not reachable from default
-    # variant). This is a "different shape" test — really a multi-dialect
-    # integration test masquerading as a browser e2e. Re-enable after
-    # Y.2.gate.k.1 (multi-variant CI parity) wires both dialects into one
-    # runner invocation, OR move this file out of the browser-marked set
-    # into a dedicated `audit-agreement` layer.
-    pytest.mark.skip(
-        reason=(
-            "needs spec_example seeded into BOTH postgres + oracle DBs in "
-            "the same chain invocation; default-variant runner seeds one. "
-            "Re-enable per Y.2.gate.k.1 multi-variant CI parity."
-        ),
-    ),
 ]
+
+
+# Y.2.gate.m.4.c — per-cell dialect-mismatch skip. When the runner
+# dispatches this test inside a per-cell ``lo``-target variant (e.g.,
+# ``sp_pg_lo``), the cell's ``QS_GEN_DEMO_DATABASE_URL`` env override
+# points at ONE container — the matching dialect's. The Oracle
+# parametrization in that cell would have ``load_config`` route to a
+# PG container with ``cfg.dialect=oracle`` (env URL wins; cfg yaml's
+# dialect doesn't), driving downstream connection failures. Skip the
+# mismatched parametrization; the sibling ``sp_or_lo`` cell runs the
+# Oracle agreement check against its own container. ``aw`` cells (no
+# env URL override) run both parametrizations against the operator's
+# external Aurora + Oracle.
+def _env_demo_url_dialect() -> str | None:
+    from quicksight_gen.common.env_keys import QS_GEN_DEMO_DATABASE_URL
+    env_url = QS_GEN_DEMO_DATABASE_URL.get_or_none()
+    if env_url is None:
+        return None
+    if env_url.startswith(("postgres", "postgresql")):
+        return "postgres"
+    if env_url.startswith(("oracle", "oracle+oracledb")):
+        return "oracle"
+    return None
 
 
 _FIXTURES = Path(__file__).parent.parent / "l2"
@@ -132,6 +136,16 @@ def dialect_cfg(request):
     from quicksight_gen.common.config import load_config
 
     dialect_name: str = request.param
+    # m.4.c — per-cell dialect-mismatch skip. See docstring on
+    # `_env_demo_url_dialect` above.
+    env_url_dialect = _env_demo_url_dialect()
+    if env_url_dialect is not None and env_url_dialect != dialect_name:
+        pytest.skip(
+            f"runner cell's QS_GEN_DEMO_DATABASE_URL implies "
+            f"dialect={env_url_dialect!r}; this {dialect_name!r} "
+            f"parametrization would route to the wrong DB. The sibling "
+            f"sp_{env_url_dialect[:2]}_lo cell handles {dialect_name!r}."
+        )
     cfg_path = _DIALECT_CONFIG_PATHS[dialect_name]
     if not cfg_path.exists():
         pytest.skip(

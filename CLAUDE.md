@@ -54,17 +54,32 @@ quicksight-gen data refresh -c config.yaml --execute
 quicksight-gen audit apply -c config.yaml --execute -o report.pdf
 quicksight-gen audit verify report.pdf -c config.yaml   # recompute + compare provenance
 
-# Tests — canonical entry is the layered chain runner (Y.2.gate.b/c).
+# Tests — canonical entry is the layered chain runner (Y.2.gate.b/c/m).
 # Layers: unit → db → app2 → deploy → api → browser. Stops on first
 # failure; per-layer artifacts (cmd.json, stdout.log, stderr.log) land
-# under runs/<utc-ts>-<short-sha>/<layer>/. Variants run in parallel
-# via asyncio.gather — local-pg / local-oracle spin testcontainers,
-# local-sqlite is no-Docker temp file.
+# under runs/<utc-ts>-<short-sha>/<variant>/<layer>/.
+#
+# Variant matrix (Y.2.gate.m): 3-axis cells `scenario × dialect × target`.
+# - Scenarios: sp (spec_example), sq (sasquatch_pr), fuzz / fuzz:N (random
+#   synthesized L2 yaml — random by default; pin via --variants=f<seed>_..),
+#   us:<path> (operator-supplied yaml).
+# - Dialects: pg (postgres), or (oracle), sl (sqlite).
+# - Targets: lo (local container or sqlite tempfile), aw (operator's
+#   external Aurora / Oracle).
+# - No flags = full 13-cell matrix. Sub-flags compose multiplicatively;
+#   sl × aw auto-skips (sqlite isn't reachable from QuickSight).
+#
+# Hard-cut from the legacy `local-pg` / `local-oracle` / `local-sqlite` /
+# `default` variant names (Y.2.gate.m.2, 2026-05-08). Pass legacy names →
+# error with the new sub-flag form to use instead.
 ./run_tests.sh up_to=unit                                  # ~20s, no DB / no AWS
-./run_tests.sh up_to=db                                    # default variant = operator's external Aurora
-./run_tests.sh up_to=db --variants=local-pg                # 17-alpine container, ~30s wall
-./run_tests.sh up_to=db --variants=local-pg,local-oracle,local-sqlite  # all three in parallel
-./run_tests.sh up_to=app2 --variants=local-pg              # App2 e2e against local Docker (b.3.impl.layer)
+./run_tests.sh up_to=db                                    # full matrix (13 cells, parallel via asyncio.gather)
+./run_tests.sh up_to=db --dialects=pg --targets=lo         # pg-container only (4 cells: sp/sq × pg × lo)
+./run_tests.sh up_to=db --scenarios=sp --dialects=pg,or,sl --targets=lo  # 3-dialect spec_example local
+./run_tests.sh up_to=db --scenarios=sp --targets=aw        # AW-target only (operator's external Aurora + Oracle)
+./run_tests.sh up_to=db --scenarios=fuzz:5 --dialects=pg --targets=lo    # 5 random fuzz seeds × pg × lo
+./run_tests.sh up_to=app2 --variants=sp_pg_lo              # triage: pin a single cell (mutex w/ sub-flags)
+./run_tests.sh up_to=db --variants=f12345_pg_lo            # repro a fuzz failure by seed (m.3)
 ./run_tests.sh up_to=db --parallel=4                       # pytest-xdist within layer
 ./run_tests.sh up_to=db --skip-cheap                       # skip unit if cached green for current SHA
 ./run_tests.sh sweep                                       # dry-run cleanup of orphan AWS resources

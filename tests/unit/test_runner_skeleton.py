@@ -1626,27 +1626,44 @@ def test_compose_specs_no_flags_returns_full_matrix() -> None:
     """No flags → compose_matrix returns the 13-cell `full` default
     (`expand_full()`). Lock-in: hard-cut migration default behavior."""
     opts = runner.RunOptions()
-    specs = runner._compose_specs_from_options(opts)
+    specs, skipped = runner._compose_specs_from_options(opts)
     # Each spec is a VariantSpec; `full` is well-defined as 13 cells per
     # variant.expand_full's docstring (6 named-local + 4 named-aws + 3 fuzz).
     assert len(specs) == 13
     assert all(isinstance(s, VariantSpec) for s in specs)
+    # `expand_full` constructs only valid cells by design — nothing skipped.
+    assert skipped == []
 
 
 def test_compose_specs_dialects_only_narrows() -> None:
     """`--dialects=pg` alone → cross-product mode: scenario axis defaults
     to named-only (sp,sq); target axis defaults to lo,aw. 2×1×2 = 4 cells."""
     opts = runner.RunOptions(dialects="pg")
-    specs = runner._compose_specs_from_options(opts)
+    specs, skipped = runner._compose_specs_from_options(opts)
     assert len(specs) == 4
     assert all(s.dialect == "pg" for s in specs)
+    assert skipped == []
+
+
+def test_compose_specs_sl_aw_invalid_cell_surfaces_in_skipped() -> None:
+    """m.4.b — `--dialects=sl --targets=aw` produces 0 valid cells
+    (sl × aw is rejected by `is_valid()`) but the skipped list carries
+    the cells the operator narrowed to so the runner can log them."""
+    opts = runner.RunOptions(dialects="sl", targets="aw")
+    specs, skipped = runner._compose_specs_from_options(opts)
+    assert specs == []
+    # 2 named scenarios × 1 dialect × 1 target = 2 invalid cells.
+    assert len(skipped) == 2
+    assert all(s.dialect == "sl" and s.target == "aw" for s in skipped)
 
 
 def test_compose_specs_variants_triage_returns_pinned_cells() -> None:
-    """`--variants=sp_pg_lo,sq_or_lo` → exactly those 2 specs."""
+    """`--variants=sp_pg_lo,sq_or_lo` → exactly those 2 specs; triage
+    codes are presumed valid (operator-typed), so skipped is empty."""
     opts = runner.RunOptions(variants="sp_pg_lo,sq_or_lo")
-    specs = runner._compose_specs_from_options(opts)
+    specs, skipped = runner._compose_specs_from_options(opts)
     assert [s.name for s in specs] == ["sp_pg_lo", "sq_or_lo"]
+    assert skipped == []
 
 
 def test_compose_specs_variants_legacy_local_pg_errors_with_hint() -> None:

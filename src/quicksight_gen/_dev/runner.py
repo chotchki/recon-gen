@@ -61,11 +61,11 @@ from quicksight_gen.common.env_keys import (
 from quicksight_gen.common.variant import (
     DialectCode,
     VariantSpec,
-    compose_matrix,
     parse_dialects,
     parse_scenarios,
     parse_targets,
     parse_variant_code,
+    partition_matrix,
 )
 
 EXIT_SUCCESS: Final = 0
@@ -1987,10 +1987,21 @@ def cmd_up_to(args: argparse.Namespace) -> int:
         print(f"runner: fuzz_seed={options.fuzz_seed_value} (pin via QS_GEN_FUZZ_SEED env to repro)")
 
     try:
-        specs = _compose_specs_from_options(options)
+        specs, skipped_specs = _compose_specs_from_options(options)
     except ValueError as exc:
         print(f"runner: {exc}", file=sys.stderr)
         return EXIT_NEEDS_OPERATOR
+    # m.4.b — surface invalid-cell skips so operators see the filter
+    # happen rather than silently dropped cells. The only invalid
+    # combination today is sl × aw (sqlite is file-based; QuickSight
+    # has no remote DataSource for it).
+    for skipped in skipped_specs:
+        reason = (
+            "sl × aw: sqlite is file-based; QuickSight can't reach it remotely"
+            if skipped.dialect == "sl" and skipped.target == "aw"
+            else f"unhandled invalid combination ({skipped.dialect} × {skipped.target})"
+        )
+        print(f"runner: skip [{skipped.name}] ({reason})")
     if not specs:
         print("runner: variant matrix narrowed to zero cells (sub-flags filtered everything out)", file=sys.stderr)
         return EXIT_NEEDS_OPERATOR
@@ -2113,8 +2124,12 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     return final_code
 
 
-def _compose_specs_from_options(options: RunOptions) -> list[VariantSpec]:
-    """m.2.e — translate RunOptions into the variant matrix's spec list.
+def _compose_specs_from_options(
+    options: RunOptions,
+) -> tuple[list[VariantSpec], list[VariantSpec]]:
+    """m.2.e + m.4.b — translate RunOptions into ``(valid, skipped)``
+    spec lists. The runner logs the skipped invalid cells so operators
+    see the filter happen (per m.4.b).
 
     Two modes:
 
@@ -2122,10 +2137,12 @@ def _compose_specs_from_options(options: RunOptions) -> list[VariantSpec]:
       ``<sc>_<di>_<ta>`` cell code parsed via ``parse_variant_code``.
       Mutex with the sub-flag axes — caller errors out below if both
       are set. Legacy ``local-pg`` / etc. names raise with a hint
-      (``_check_legacy_variant_names``).
+      (``_check_legacy_variant_names``). Triage codes are presumed
+      valid (the operator typed them explicitly); skipped list is empty.
     - Sub-flag composition: ``--scenarios`` / ``--dialects`` /
-      ``--targets`` feed ``compose_matrix``. All None → ``expand_full``
-      (the curated 13-cell default).
+      ``--targets`` feed ``partition_matrix``. All None → ``expand_full``
+      (the curated 13-cell default; skipped list is empty since
+      `expand_full` constructs only valid cells by design).
     """
     if options.variants is not None:
         if any(x is not None for x in (options.scenarios, options.dialects, options.targets)):
@@ -2137,12 +2154,12 @@ def _compose_specs_from_options(options: RunOptions) -> list[VariantSpec]:
         codes = [c.strip() for c in options.variants.split(",") if c.strip()]
         if not codes:
             raise ValueError("--variants value is empty")
-        return [parse_variant_code(c) for c in codes]
+        return [parse_variant_code(c) for c in codes], []
 
     sc_specs = parse_scenarios(options.scenarios) if options.scenarios else None
     di_codes = parse_dialects(options.dialects) if options.dialects else None
     ta_codes = parse_targets(options.targets) if options.targets else None
-    return compose_matrix(sc_specs, di_codes, ta_codes)
+    return partition_matrix(sc_specs, di_codes, ta_codes)
 
 
 def cmd_up(args: argparse.Namespace) -> int:
@@ -2354,12 +2371,19 @@ Layer chain (Y.2.gate.b/c):
 Variant matrix (Y.2.gate.m):
   No flags = full 13-cell matrix (sp/sq named scenarios × pg/or/sl × lo/aw,
   plus 3 fuzz cells × pg/or/sl × lo). Narrow via sub-flags or pin via --variants.
-  --scenarios=sp,sq                CSV: sp / sq / fuzz / fuzz:N / us:<path>.
-  --dialects=pg,or                  CSV: pg / or / sl.
-  --targets=lo                       CSV: lo (local container) / aw (operator's
-                                          external DB).
-  --variants=sp_pg_lo,f42_or_lo     triage: comma-separated <sc>_<di>_<ta> codes
-                                          (mutex with the sub-flag axes).
+  Invalid cells (sl × aw — sqlite isn't reachable from QS) auto-skip with a log.
+
+  Examples (all assume `up_to=db` or higher):
+    --scenarios=sp,sq                       sp + sq named-scenario subset
+    --scenarios=fuzz                        1 random fuzz seed (per-dialect cell)
+    --scenarios=fuzz:5                      5 random fuzz seeds (× dialect axis)
+    --scenarios=us:run/customer.yaml        operator-supplied L2 yaml
+    --dialects=pg                           postgres only
+    --dialects=pg,or                        cross-dialect (no sqlite)
+    --targets=lo                            local containers / sqlite tempfile
+    --targets=aw                            operator's external Aurora / Oracle
+    --variants=sp_pg_lo                     triage: pin a single cell
+    --variants=f12345_pg_lo                 reproduce a fuzz failure by seed
 """
 
 
