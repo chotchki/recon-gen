@@ -1771,6 +1771,19 @@ def _is_dirty() -> bool:
     return result.returncode != 0
 
 
+def _rel_or_abs(p: Path) -> str:
+    """#741 — print-friendly path display. ``p`` is usually under
+    ``REPO_ROOT`` (production) but tests/conftest.py redirects
+    ``RUNS_DIR`` to a session tmp dir outside the repo, where
+    ``p.relative_to(REPO_ROOT)`` raises ValueError. Fall back to
+    the absolute path in that case.
+    """
+    try:
+        return str(p.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(p)
+
+
 def create_run_id() -> str:
     """Y.2.gate.c.1 — `<utc-ts>-<short-sha>[-dirty]`.
 
@@ -1801,26 +1814,14 @@ def prune_old_runs(retain: int = RUNS_RETAIN_N, runs_dir: Path | None = None) ->
     is done. ``stat()`` failures during the listing pass are similarly
     benign (entry vanished mid-iter); skip and move on.
 
-    m.5.fix-up: skip pruning the *default* runs dir entirely when
-    running under a pytest-xdist worker (``PYTEST_XDIST_WORKER`` env
-    set). Without this, 13-cell × auto-xdist matrix runs spawn ~200
-    worker processes, each calling `runner.main(...)` from a unit test
-    creating a fresh run dir. Each new dir bumps the count past 20;
-    pruning races nuke in-flight cells' dirs (synth_l2.yaml +
-    manifest.json + per-layer logs). The runner itself prunes from the
-    controller process, which doesn't have the xdist env set, so
-    production cleanup still happens.
-
-    The skip applies only when ``runs_dir`` is not given — explicit-
-    arg invocations (the prune unit tests passing tmp_path) bypass
-    the guard so they still exercise real deletion behavior under
-    xdist. Follow-up #741 will make ``RUNS_DIR`` env-overridable so
-    tests stop touching the operator's real ``runs/`` dir at all and
-    this guard becomes redundant.
+    #741 — tests no longer pollute the real ``runs/``: ``tests/
+    conftest.py::pytest_configure`` redirects ``RUNS_DIR`` to a
+    session tmp dir at pytest startup. So under matrix fan-out the
+    200+ in-process ``runner.main`` calls all prune within the
+    session-tmp tree — no operator-runs/ contention, no need for an
+    xdist-only short-circuit guard.
     """
     target = runs_dir if runs_dir is not None else RUNS_DIR
-    if runs_dir is None and os.environ.get("PYTEST_XDIST_WORKER"):
-        return []
     if not target.exists():
         return []
     candidates: list[Path] = []
@@ -2225,7 +2226,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"runner: run_id={run_id}")
-    print(f"runner: run_dir={run_dir.relative_to(REPO_ROOT)}")
+    print(f"runner: run_dir={_rel_or_abs(run_dir)}")
     print(f"runner: up_to={args.layer}")
     if options.fuzz_seed_value is not None:
         print(f"runner: fuzz_seed={options.fuzz_seed_value} (pin via QS_GEN_FUZZ_SEED env to repro)")
@@ -2264,7 +2265,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
             spec, cell_dir, options, chain,
         )
         collect_run_outputs(cell_dir, layer_results)
-        print(f"runner: wrote {(cell_dir / 'timings.json').relative_to(REPO_ROOT)}")
+        print(f"runner: wrote {_rel_or_abs(cell_dir / 'timings.json')}")
         # Aggregate single cell to top-level so report_drift still
         # works on the canonical top-level timings.json.
         aggregated_single: list[LayerResult] = [
@@ -2277,7 +2278,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
             for r in layer_results
         ]
         collect_run_outputs(run_dir, aggregated_single)
-        print(f"runner: wrote {(run_dir / 'timings.json').relative_to(REPO_ROOT)}")
+        print(f"runner: wrote {_rel_or_abs(run_dir / 'timings.json')}")
         report_drift(run_dir)
     else:
         # Multi-cell: fan out via asyncio.gather, each cell in its own
@@ -2352,7 +2353,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
         for cell_spec, layer_results, _ in per_variant_results:
             variant_dir = run_dir / cell_spec.name
             collect_run_outputs(variant_dir, layer_results)
-            print(f"runner: wrote {(variant_dir / 'timings.json').relative_to(REPO_ROOT)}")
+            print(f"runner: wrote {_rel_or_abs(variant_dir / 'timings.json')}")
 
         # Aggregated top-level timings.json with ``<spec.name>.<layer>``
         # keyed durations. ``report_drift`` reads this against the prior
@@ -2369,7 +2370,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
                     skipped=r.skipped,
                 ))
         collect_run_outputs(run_dir, aggregated_results)
-        print(f"runner: wrote {(run_dir / 'timings.json').relative_to(REPO_ROOT)}")
+        print(f"runner: wrote {_rel_or_abs(run_dir / 'timings.json')}")
         report_drift(run_dir)
 
         # Final code: any non-zero cell fails the run. EXIT_FAILURE
