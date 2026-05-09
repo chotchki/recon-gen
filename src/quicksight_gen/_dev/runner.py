@@ -1125,7 +1125,7 @@ ORACLE_REUSE_CONTAINER_PREFIX: Final = "quicksight-test-oracle-"
 # behavior when `oracle_password` is explicitly set. Without pinning,
 # testcontainers randomizes per invocation (`hex(randbits(24))`) and
 # the adopt path can't predict the URL on subsequent runs.
-ORACLE_REUSE_PASSWORD: Final = "qs-gen-test-pwd-2026"
+ORACLE_REUSE_PASSWORD: Final = "qs-gen-test-pwd-2026"  # typing-smell: ignore[qs-gen-prefix]: local Docker fixture password — not an AWS resource ID, not multi-tenant; the prefix is incidental string content, not a Config-prefixed resource name
 
 
 def _oracle_container_name_for(spec: VariantSpec) -> str:
@@ -1304,7 +1304,7 @@ def _get_or_start_oracle_container(
     """
     try:
         import docker  # type: ignore[import-untyped]: third-party SDK lacks PEP 561 stubs  # noqa: PLC0415 — lazy: only Oracle path needs it
-        from docker.errors import NotFound  # type: ignore[import-untyped]: see above  # noqa: PLC0415
+        from docker.errors import NotFound  # type: ignore[import-untyped]: third-party SDK lacks PEP 561 stubs  # noqa: PLC0415
     except ImportError:
         return _start_fresh_oracle_container(name, password)
 
