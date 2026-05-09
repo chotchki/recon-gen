@@ -116,7 +116,7 @@ def _l2_yaml_for_test() -> Path:
 # filter sees plants in the past. days_ago offsets stay deterministic;
 # only the absolute calendar date varies. The audit period [_TODAY - 7,
 # _TODAY - 1] then contains the plant effective dates by construction.
-_TODAY = date.today()
+_TODAY = date.today()  # typing-smell: ignore[test-module-nondeterminism]: stuck_* matviews use CURRENT_TIMESTAMP — plants must be in the past relative to NOW (see WHY block above)
 _PERIOD: tuple[date, date] = (
     _TODAY - timedelta(days=7),
     _TODAY - timedelta(days=1),

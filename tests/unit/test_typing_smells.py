@@ -751,6 +751,133 @@ class _NoSleepVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
+class _TestModuleNondeterminismVisitor:
+    """Walk Module top-level (NOT inside functions/classes); flag
+    ``random.X()`` / ``secrets.X()`` / ``datetime.X()`` calls.
+
+    Why: such calls produce a different value per pytest-xdist worker
+    process. If the result lands in a parametrize id (via
+    ``@pytest.fixture(params=...)`` over a module-level constant),
+    workers register different test IDs and pytest-xdist refuses to
+    start with "Different tests were collected between gw0 and gwN".
+    Even when not in parametrize, module-level non-determinism in
+    tests is almost always a smell — fixtures are the right tool.
+
+    Caught the m.5 fix-up bug: ``tests/data/test_l2_seed_contract.py
+    ::FUZZ_SEED = secrets.randbits(32)`` at module level (b.15.lint
+    .determinism didn't fire because that lint scopes to ``src/``).
+
+    Implementation note: we manually walk ``tree.body`` rather than
+    use ``ast.NodeVisitor.generic_visit`` so we don't descend into
+    function/class bodies. Module-level non-determinism is the smell;
+    inside-function calls are usually fine.
+    """
+
+    _STDLIB_RNG_MODULES = frozenset({"random", "secrets"})
+    _DATETIME_NOW_ATTRS = frozenset({"now", "utcnow", "today"})
+
+    def __init__(self, file: Path) -> None:
+        self.file = file
+        self.smells: list[Smell] = []
+
+    def visit_module(self, tree: ast.Module) -> None:
+        for stmt in tree.body:
+            self._visit_top_level(stmt)
+
+    def _visit_top_level(self, node: ast.AST) -> None:
+        """Top-level dispatch: function/class defs are NOT descended
+        (their bodies execute per-call, not at import) — only their
+        decorators + class attributes + function arg defaults count
+        as module-import-time evaluation."""
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for deco in node.decorator_list:
+                self._walk_expr(deco)
+            for default in node.args.defaults + node.args.kw_defaults:
+                if default is not None:
+                    self._walk_expr(default)
+            return
+        if isinstance(node, ast.ClassDef):
+            for deco in node.decorator_list:
+                self._walk_expr(deco)
+            for base in node.bases:
+                self._walk_expr(base)
+            for class_stmt in node.body:
+                # Class attribute assignments are import-time;
+                # methods (FunctionDef) are not.
+                if not isinstance(class_stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    self._walk_expr(class_stmt)
+            return
+        self._walk_expr(node)
+
+    def _walk_expr(self, node: ast.AST) -> None:
+        """Walk an expression / statement, flagging nondeterminism
+        calls. Recurses into children but bails on nested function/
+        class defs (their bodies are per-call)."""
+        if isinstance(node, ast.Call):
+            self._maybe_flag(node)
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                # Nested def — recurse via _visit_top_level which
+                # handles decorators / defaults / class attrs correctly.
+                self._visit_top_level(child)
+                continue
+            self._walk_expr(child)
+
+    def _maybe_flag(self, node: ast.Call) -> None:
+        # `random.X(...)` or `secrets.X(...)`
+        if isinstance(node.func, ast.Attribute) and \
+                isinstance(node.func.value, ast.Name) and \
+                node.func.value.id in self._STDLIB_RNG_MODULES:
+            self.smells.append(Smell(
+                file=self.file,
+                lineno=node.lineno,
+                checker="test-module-nondeterminism",
+                message=(
+                    f"``{node.func.value.id}.{node.func.attr}(...)`` at "
+                    f"module top level — produces a different value per "
+                    f"pytest-xdist worker process; if the result feeds a "
+                    f"parametrize id, xdist refuses to start with "
+                    f"'Different tests collected between gw0 and gwN'. "
+                    f"Move the call into a fixture (function- or "
+                    f"session-scoped), OR pin via env at "
+                    f"``tests/conftest.py::pytest_configure`` so all "
+                    f"workers see the same seed. Suppress with "
+                    f"``# typing-smell: ignore[test-module-"
+                    f"nondeterminism]: <reason>`` if intentional."
+                ),
+            ))
+        # `datetime.now()` / `date.today()` etc. (covered by
+        # no-datetime-now in src/, but tests/ aren't in that lint's
+        # scope, so we re-check here.)
+        elif isinstance(node.func, ast.Attribute) and \
+                isinstance(node.func.value, ast.Name) and \
+                node.func.value.id in ("datetime", "date") and \
+                node.func.attr in self._DATETIME_NOW_ATTRS:
+            self.smells.append(Smell(
+                file=self.file,
+                lineno=node.lineno,
+                checker="test-module-nondeterminism",
+                message=(
+                    f"``{node.func.value.id}.{node.func.attr}()`` at "
+                    f"module top level — wall-clock time at import is "
+                    f"unstable across runs and across xdist workers. "
+                    f"Pin a specific date / use a fixture / move to "
+                    f"conftest. Suppress with "
+                    f"``# typing-smell: ignore[test-module-"
+                    f"nondeterminism]: <reason>``."
+                ),
+            ))
+
+
+class ModuleNondeterminismCheck(Check):  # NOT prefixed "Test" — pytest collects "Test*" classes
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        if not isinstance(tree, ast.Module):
+            return []
+        v = _TestModuleNondeterminismVisitor(file)
+        v.visit_module(tree)
+        return v.smells
+
+
 class NoSleepCheck(Check):
     def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
         v = _NoSleepVisitor(file)
@@ -1134,6 +1261,20 @@ def _build_checks() -> list[Check]:
                 "wait_* polls instead; sleeps are flake sources"
             ),
             files=_expand_paths([REPO_ROOT / "tests/e2e"]),
+        ),
+        ModuleNondeterminismCheck(
+            name="test-module-nondeterminism",
+            description=(
+                "``random.X()`` / ``secrets.X()`` / "
+                "``datetime.now()`` at module top level in any "
+                "test file — produces a different value per "
+                "pytest-xdist worker process. Caught the m.5 fix-up "
+                "bug where ``test_l2_seed_contract.py`` ran "
+                "``secrets.randbits(32)`` at import → xdist workers "
+                "disagreed on parametrize ids → 'Different tests "
+                "collected between gw0 and gwN'."
+            ),
+            files=_expand_paths([REPO_ROOT / "tests"]),
         ),
         JsonIndentCheck(
             name="json-indent",
