@@ -880,19 +880,22 @@ def test_postings_dataset_uses_cascade_substitution() -> None:
     ) in sql
 
 
-def test_postings_dataset_declares_pkey_and_pvalues_parameters() -> None:
-    """Both dataset parameters declared with the right ValueType +
-    sentinel defaults — wire-shape lock per the M.3.10 spike."""
+def test_postings_dataset_declares_cascade_and_pushdown_parameters() -> None:
+    """Five dataset parameters: the metadata cascade pair (pKey /
+    pValues, both SINGLE_VALUED per Y.1.m) plus the Y.2.c category-
+    pushdown trio (pL2ftRail / pL2ftStatus / pL2ftBundle, all
+    MULTI_VALUED, defaults spanning every declared value)."""
     from quicksight_gen.apps.l2_flow_tracing.datasets import (
         build_postings_dataset, META_KEY_ALL_SENTINEL,
         META_VALUE_PLACEHOLDER_SENTINEL,
+        bundle_status_values, declared_rail_names, transaction_status_values,
     )
     inst = load_instance(SASQUATCH_PR_YAML)
     aws_ds = build_postings_dataset(_CFG, inst)
     params = aws_ds.DatasetParameters
-    assert params is not None and len(params) == 2
+    assert params is not None and len(params) == 5
     by_name = {p.StringDatasetParameter.Name: p.StringDatasetParameter for p in params}
-    assert "pKey" in by_name and "pValues" in by_name
+    # Metadata cascade pair.
     assert by_name["pKey"].ValueType == "SINGLE_VALUED"
     # Y.1.m: SINGLE_VALUED (was MULTI_VALUED until the cascade
     # diagnosis revealed the text-field control couldn't commit
@@ -902,6 +905,57 @@ def test_postings_dataset_declares_pkey_and_pvalues_parameters() -> None:
     assert by_name["pValues"].DefaultValues.StaticValues == [
         META_VALUE_PLACEHOLDER_SENTINEL,
     ]
+    # Y.2.c category-pushdown trio — multi-valued, default = all values.
+    assert by_name["pL2ftRail"].ValueType == "MULTI_VALUED"
+    assert by_name["pL2ftRail"].DefaultValues.StaticValues == declared_rail_names(inst)
+    assert by_name["pL2ftStatus"].ValueType == "MULTI_VALUED"
+    assert by_name["pL2ftStatus"].DefaultValues.StaticValues == transaction_status_values()
+    assert by_name["pL2ftBundle"].ValueType == "MULTI_VALUED"
+    assert by_name["pL2ftBundle"].DefaultValues.StaticValues == bundle_status_values()
+
+
+def test_postings_dataset_pushes_rail_status_bundle_into_sql() -> None:
+    """Y.2.c — the Rails sheet's three category filters narrow inside
+    the postings dataset SQL (multi-valued ``<<$param>>`` substitution),
+    not via analysis-level CategoryFilters. The projection wraps in a
+    subquery so the CASE-aliased ``status`` / ``bundle_status`` are
+    visible to the outer WHERE."""
+    from quicksight_gen.apps.l2_flow_tracing.datasets import (
+        build_postings_dataset,
+    )
+    inst = load_instance(SASQUATCH_PR_YAML)
+    sql = list(
+        build_postings_dataset(_CFG, inst).PhysicalTableMap.values()
+    )[0].CustomSql.SqlQuery
+    assert "rail_name IN (<<$pL2ftRail>>)" in sql
+    assert "status IN (<<$pL2ftStatus>>)" in sql
+    assert "bundle_status IN (<<$pL2ftBundle>>)" in sql
+    # The trio sits in the OUTER WHERE over a subquery (CASE-aliases).
+    assert ") postings\nWHERE rail_name IN" in sql
+
+
+def test_rails_pushdown_params_bridge_to_postings_dataset() -> None:
+    """Y.2.c — the Rail / Status / Bundle analysis params each bridge
+    to their namesake dataset parameter on the postings dataset (and
+    nothing else), and there are no ``fg-l2ft-rails-{rail,status,bundle}``
+    FilterGroups left."""
+    app = build_l2_flow_tracing_app(_CFG)
+    for pname, dsname in (
+        ("pL2ftRail", "pL2ftRail"),
+        ("pL2ftStatus", "pL2ftStatus"),
+        ("pL2ftBundle", "pL2ftBundle"),
+    ):
+        p = next(p for p in app.analysis.parameters if str(p.name) == pname)
+        assert p.mapped_dataset_params is not None
+        assert {
+            (ds.identifier, name) for ds, name in p.mapped_dataset_params
+        } == {("l2ft-postings-ds", dsname)}
+    fg_ids = {
+        str(fg.filter_group_id) for fg in app.analysis.filter_groups
+    }
+    assert not (fg_ids & {
+        "fg-l2ft-rails-rail", "fg-l2ft-rails-status", "fg-l2ft-rails-bundle",
+    })
 
 
 def test_meta_values_dataset_is_long_form_with_metadata_key_column() -> None:

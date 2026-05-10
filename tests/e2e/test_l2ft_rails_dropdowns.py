@@ -1,13 +1,17 @@
 """Browser test: L2FT Rails sheet dropdowns narrow the table after picking.
 
-X.1.g regression guard. Pre-X.1.g the Rail / Status / Bundle dropdowns
-were ``FilterDropdown(CategoryFilter(values=[], FILTER_ALL_VALUES))``,
-which forced QS to lazy-fetch the column's distinct values from the
-``tenK-sample-values-V2`` endpoint at first render — that endpoint
-404s on cold per-CI-run dashboards (one of the 4 X.1.a-traced 404s).
-The X.1.g rewrite swapped each to a parameter-bound CategoryFilter
-sourced from a StaticValues ParameterDropdown so option lists are
-known at deploy time and no runtime fetch happens.
+X.1.g + Y.2.c regression guard. Pre-X.1.g the Rail / Status / Bundle
+dropdowns were ``FilterDropdown(CategoryFilter(values=[],
+FILTER_ALL_VALUES))``, which forced QS to lazy-fetch the column's
+distinct values from the ``tenK-sample-values-V2`` endpoint at first
+render — that endpoint 404s on cold per-CI-run dashboards (one of the
+4 X.1.a-traced 404s). X.1.g swapped each to a StaticValues
+ParameterDropdown so option lists are known at deploy time; Y.2.c then
+moved the narrowing from an analysis-level CategoryFilter into the
+postings dataset SQL (multi-valued ``<<$param>>`` substitution). Either
+way the observable behaviour is the same — picking values narrows the
+Transactions table, emptying a dropdown reverts to "all" — which is
+what this test asserts.
 
 Test strategy: data-agnostic per the no-hardcoded-data rule.
 
@@ -94,7 +98,7 @@ def _pick_each_option_and_assert_table_nonempty(
     if not options:
         pytest.skip(
             f"{dropdown_title!r} dropdown empty on the deployed L2 — "
-            f"the X.1.g pick-and-narrow test has nothing to exercise."
+            f"the pick-and-narrow test has nothing to exercise."
         )
 
     before = count_table_rows(page, "Transactions")
