@@ -121,9 +121,11 @@ jobs:
         # Extras: ``deploy`` for boto3+botocore[crt], ``demo`` for
         # psycopg2, ``audit`` for the seed pipeline + audit-PDF
         # render+verify in the runner's db layer, ``e2e`` for pytest +
-        # pytest-xdist + boto3-stubs. Skip ``playwright install`` —
-        # API tests don't render anything.
-        run: uv sync --frozen --extra deploy --extra demo --extra audit --extra e2e
+        # pytest-xdist + boto3-stubs, ``serve`` for starlette +
+        # aiosqlite (the runner's `unit` layer pulls in tests/unit/
+        # test_html_*.py which import the App2 server runtime). Skip
+        # ``playwright install`` — API tests don't render anything.
+        run: uv sync --frozen --extra deploy --extra demo --extra audit --extra e2e --extra serve
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -236,7 +238,9 @@ jobs:
       - name: Install dependencies (incl. Playwright)
         # ``[e2e]`` extra brings in playwright + pytest-xdist; the
         # other extras match e2e-pg-api so the deploy steps work.
-        run: uv sync --frozen --extra deploy --extra demo --extra audit --extra e2e
+        # ``serve`` brings starlette + aiosqlite for the runner's
+        # unit layer (test_html_*.py imports App2 server runtime).
+        run: uv sync --frozen --extra deploy --extra demo --extra audit --extra e2e --extra serve
 
       - name: Install Playwright WebKit browser
         # Only WebKit — that's what ``common/browser/helpers.py``
@@ -351,7 +355,9 @@ jobs:
         # ``demo-oracle`` brings in ``oracledb>=2.0`` (thin mode, no
         # Instant Client install needed). Skip ``--extra demo`` —
         # ``psycopg2`` would just sit unused on this leg.
-        run: uv sync --frozen --extra deploy --extra demo-oracle --extra audit --extra e2e
+        # ``serve`` brings starlette + aiosqlite for the runner's
+        # unit layer (test_html_*.py imports App2 server runtime).
+        run: uv sync --frozen --extra deploy --extra demo-oracle --extra audit --extra e2e --extra serve
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
