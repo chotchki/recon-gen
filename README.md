@@ -356,7 +356,7 @@ The dataset SQL reads from two shared base tables (`<prefix>_transactions`, `<pr
 
 1. Open `apps/<app>/app.py` and find the relevant sheet's populator function.
 2. Place the visual on a layout row: `row.add_kpi(...)`, `row.add_table(...)`, `row.add_bar_chart(...)`, `row.add_sankey(...)`. Pass `title=`, `subtitle=`, and the typed `Dim`/`Measure` slots — the tree validates dataset / column references at emit time.
-3. Subtitle is required (coverage tests enforce this).
+3. Subtitle is required — enforced at construction (`Visual.__post_init__` raises on a blank subtitle), not by a separate test.
 4. Run `pytest` — typed cross-reference errors fail at the wiring site, not deep in the generated JSON.
 
 ### Add a filter

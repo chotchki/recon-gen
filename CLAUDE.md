@@ -77,7 +77,7 @@ quicksight-gen audit verify report.pdf -c config.yaml   # recompute + compare pr
 # Hard-cut from the legacy `local-pg` / `local-oracle` / `local-sqlite` /
 # `default` variant names (Y.2.gate.m.2, 2026-05-08). Pass legacy names →
 # error with the new sub-flag form to use instead.
-./run_tests.sh up_to=unit                                  # ~165s, no DB / no AWS — the variant-independent prelude only
+./run_tests.sh up_to=unit                                  # ~20s, no DB / no AWS — the variant-independent prelude only (pytest -n auto)
 ./run_tests.sh up_to=db                                    # unit prelude once, then full 13-cell matrix (parallel via asyncio.gather)
 ./run_tests.sh up_to=db --dialects=pg --targets=lo         # pg-container only (4 cells: sp/sq × pg × lo)
 ./run_tests.sh up_to=db --scenarios=sp --dialects=pg,or,sl --targets=lo  # 3-dialect spec_example local
@@ -88,6 +88,7 @@ quicksight-gen audit verify report.pdf -c config.yaml   # recompute + compare pr
 ./run_tests.sh up_to=db --parallel=4                       # pytest-xdist N=4 (default = -n auto)
 ./run_tests.sh up_to=browser --only=test_drift             # narrow every layer's pytest -k <expr>; chain still runs through deploy
 ./run_tests.sh up_to=db --skip-cheap                       # skip unit if cached green for current SHA
+./run_tests.sh up_to=db --coverage                         # emit .coverage.<variant>.<layer> under runs/<id>/ (CI's coverage job globs coverage-data-*; gate.k.1.coverage)
 ./run_tests.sh sweep                                       # dry-run cleanup of orphan AWS resources
 ./run_tests.sh sweep --yes                                 # actual cleanup
 
@@ -164,7 +165,7 @@ Then every `git push` runs `./run_tests.sh up_to=db --dialects=pg --targets=lo` 
 
 - **Per-layer artifacts:** `runs/<run-id>/<variant>/<layer>/{cmd.json,stdout.log,stderr.log,timings.json}` — same paths locally and in CI (the runner uses `RUNS_DIR=runs/` regardless of context).
 - **Top-queries dump:** `runs/<run-id>/<variant>/db-perf/top-queries.md` per cell, auto-emitted by the runner (gate.f.4). CI uploads `runs/` as a workflow artifact for triage.
-- **Coverage:** `.coverage.<py-version>` per matrix entry, combined into `coverage.md` GHA Step Summary (W.8b).
+- **Coverage:** the `test` job's `.coverage.<py-version>` + (when `--coverage` is passed — `ci.yml::integration-pg` does, gate.k.1.coverage) the runner's per-(variant, layer) `.coverage.<variant>.<layer>` files, all combined by the `coverage` aggregator into `coverage.md` GHA Step Summary (W.8b — its `coverage-data-*` glob picks both up unchanged).
 - **Timings:** `timings.json` uploaded as workflow artifact (gate.k.4); cross-CI-run drift comparable.
 - **Failure shape:** `RuntimeError` / `ValueError` from cfg / probe / boto3 paths surface as `EXIT_NEEDS_OPERATOR=2` with the actionable message bubbled to stderr; pytest failures surface as `EXIT_FAILURE=1` with the failed test names + traceback. Same exit codes locally and in CI.
 
