@@ -292,6 +292,26 @@ def l2ft_l2_prefix() -> str:
 
 
 @pytest.fixture(scope="session")
+def l2ft_l2_instance():
+    """The loaded ``L2Instance`` the e2e session targets — same resolution
+    as `l2ft_l2_prefix`, but the object, not just the prefix string. L2FT
+    browser tests that only apply to L2s with certain features (chains /
+    transfer templates) consult this to `pytest.skip` cleanly when the
+    deployed L2 doesn't declare them — a no-chains / no-templates L2 is a
+    valid configuration (spec_example, fuzz seeds without a chain): the
+    "dropdown narrow doesn't empty" guard simply has nothing to exercise,
+    and the Chains/Templates sheets rendering clean for an empty L2 is
+    covered by the render tests."""
+    from quicksight_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from quicksight_gen.common.l2 import load_instance
+
+    override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
+    if override is not None:
+        return load_instance(override)
+    return default_l2_instance()
+
+
+@pytest.fixture(scope="session")
 def l2ft_dashboard_id(resource_prefix, l2ft_l2_prefix) -> str:
     return f"{resource_prefix}-{l2ft_l2_prefix}-l2-flow-tracing"
 

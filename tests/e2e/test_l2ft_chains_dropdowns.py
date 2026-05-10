@@ -36,6 +36,30 @@ from quicksight_gen.common.browser.helpers import (
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
+@pytest.fixture(autouse=True)
+def _require_chains(l2ft_l2_instance) -> None:
+    """Skip when the deployed L2 declares no chains.
+
+    The "Chain dropdown narrow doesn't empty" guard exercises the
+    deployed Chain Instances matview rows — there's nothing to exercise
+    when the L2 has zero chains (e.g. ``spec_example``, or a fuzz seed
+    without a chain). A no-chains L2 is a valid configuration; the Chains
+    sheet rendering clean (empty table, vacuous dropdown, no QS error
+    overlay) for such an L2 is covered by the L2FT render tests. Without
+    this skip the test instead times out in ``_navigate_to_chains``
+    waiting on table cells that never appear.
+    """
+    from quicksight_gen.apps.l2_flow_tracing.datasets import (
+        declared_chain_parents,
+    )
+    if not declared_chain_parents(l2ft_l2_instance):
+        pytest.skip(
+            "deployed L2 declares no chains — the Chain narrow-doesn't-empty "
+            "guard has nothing to exercise (Chains sheet rendering clean for "
+            "an empty L2 is covered by the render tests)."
+        )
+
+
 @pytest.fixture
 def embed_url(region, account_id, l2ft_dashboard_id) -> str:
     return generate_dashboard_embed_url(

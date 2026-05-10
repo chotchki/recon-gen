@@ -40,6 +40,30 @@ from quicksight_gen.common.browser.helpers import (
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
+@pytest.fixture(autouse=True)
+def _require_templates(l2ft_l2_instance) -> None:
+    """Skip when the deployed L2 declares no transfer templates.
+
+    Same rationale as ``test_l2ft_chains_dropdowns._require_chains``: the
+    "Template dropdown narrow doesn't empty" guard exercises the deployed
+    Template Instances matview rows; a no-templates L2 is a valid config
+    (a fuzz seed without one) with nothing to exercise, and the Transfer
+    Templates sheet rendering clean for an empty L2 is covered by the
+    render tests. Without this skip the test instead times out in
+    ``_navigate_to_templates`` waiting on table cells that never appear.
+    """
+    from quicksight_gen.apps.l2_flow_tracing.datasets import (
+        declared_template_names,
+    )
+    if not declared_template_names(l2ft_l2_instance):
+        pytest.skip(
+            "deployed L2 declares no transfer templates — the Template "
+            "narrow-doesn't-empty guard has nothing to exercise (Transfer "
+            "Templates sheet rendering clean for an empty L2 is covered by "
+            "the render tests)."
+        )
+
+
 @pytest.fixture
 def embed_url(region, account_id, l2ft_dashboard_id) -> str:
     return generate_dashboard_embed_url(
