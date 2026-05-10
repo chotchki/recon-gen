@@ -408,9 +408,19 @@ jobs:
         # nightly workflow covers them; the release gate trades full
         # browser coverage for fast feedback so prod publish doesn't
         # wait an extra ~30 min.
+        #
+        # gate.l.8 — `QS_GEN_TEST_L2_INSTANCE` MUST point at the same
+        # synthesized `/tmp/release-l2.yaml` the deploy steps above used
+        # (`--l2 /tmp/release-l2.yaml`). Otherwise the conftest fixtures
+        # derive the expected QS resource IDs from `cfg.default_l2_instance`
+        # (unset → bundled `spec_example`), look for
+        # `qs-release-<tag>-spec_example-*`, find nothing, and every
+        # `test_*_deployed_resources.py` / `_dashboard_structure.py` test
+        # fails — exactly what broke v8.8.0a20's release.
         env:
           QS_GEN_E2E: "1"
           QS_GEN_CONFIG: /tmp/release-e2e.yaml
+          QS_GEN_TEST_L2_INSTANCE: /tmp/release-l2.yaml
           QS_E2E_USER_ARN: ${{ secrets.QS_E2E_USER_ARN }}
         run: |
           /tmp/qs-release-e2e/bin/pytest \
