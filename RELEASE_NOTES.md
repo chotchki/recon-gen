@@ -1,5 +1,35 @@
 # Release Notes
 
+## v8.8.0a21 — release-pipeline fix-up + post-Y.2.gate doc sweep
+
+Twenty-first alpha. No `quicksight_gen` package behavior changes vs a20 —
+this is a CI/release-pipeline fix plus documentation tidy-up. Supersedes
+v8.8.0a18, a19, a20 (all reached TestPyPI but not PyPI).
+
+- **release.yml fix** — `gate.l.8`'s per-release L2 synthesis
+  (`/tmp/release-l2.yaml`, `instance: rel_<tag>`) was threaded through
+  the *deploy* steps (`schema/data/json apply`, `data refresh`,
+  `schema/json clean`) but NOT through the `Run API e2e against TestPyPI
+  wheel` step's `QS_GEN_TEST_L2_INSTANCE` — so the conftest fixtures
+  derived expected QS resource IDs from `cfg.default_l2_instance` (unset →
+  bundled `spec_example`), looked for `qs-release-<tag>-spec_example-*`,
+  found nothing, and every `test_*_deployed_resources.py` /
+  `_dashboard_structure.py` test failed. That's what failed v8.8.0a20's
+  release run (the `e2e-against-testpypi` gate *ran* this time — the l.8
+  own-concurrency-group fix worked — it just couldn't find the
+  dashboards). Fixed: `QS_GEN_TEST_L2_INSTANCE: /tmp/release-l2.yaml` on
+  that step.
+- **Post-Y.2.gate doc sweep** — PLAN.md collapsed (983 → 688 lines): the
+  done Y.2.a–e + Y.2.app2.cde + "Resume tomorrow" block fold into a short
+  summary that keeps the pushdown pattern Y.2.g/h follow + the App2
+  executor primitives + the open pre-existing flakes; the whole
+  `### Y.2.gate` section (a–o) collapses to a 4-line "DONE — see archive"
+  pointer. PLAN_ARCHIVE.md gains a `# PLAN — Y.2.gate` close-out summary.
+  CLAUDE.md: `up_to=unit` time corrected to ~20s, `--coverage` added to
+  the test-commands block, coverage-artifacts line notes the runner's
+  `.coverage.<variant>.<layer>` files. README.md: subtitle-required note
+  → "enforced at construction" not "by a test".
+
 ## v8.8.0a20 — Y.2.gate close-out (k.1.coverage + l.8 release-pipeline fix)
 
 Twentieth alpha. Closes `Y.2.gate` (a–o all landed). Supersedes
