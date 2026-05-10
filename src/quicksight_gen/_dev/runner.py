@@ -128,9 +128,15 @@ _RUN_ID_PATTERN: Final = re.compile(r"^\d{8}T\d{6}Z-\w+(?:-dirty)?$")
 # tests/unit/test_runner_skeleton.py::test_layer_deps_match_audit (c.14).
 #
 # Probe kinds (matched to _probe_* function names):
-#   "aws"     — AWS creds present + not expired (sts:GetCallerIdentity).
-#   "docker"  — Docker daemon reachable (`docker ps`).
-#   "qs_arn"  — QS_E2E_USER_ARN set (browser e2e signs embed URLs as this user).
+#   "aws"             — AWS creds present + not expired (sts:GetCallerIdentity).
+#   "docker"          — Docker daemon reachable (`docker ps`).
+#   "qs_arn"          — QS_E2E_USER_ARN set (browser e2e signs embed URLs as this user).
+#   "aws_rds_running" — Y.2.gate.l.3 — cfg-declared RDS cluster + instance
+#                       are 'available'. Refuses dispatch BEFORE container
+#                       spin-up so a stopped cluster doesn't burn ~5min of
+#                       deploy chatter to surface "connection refused".
+#                       Skipped (passes through) when cfg fields are unset
+#                       — operator hasn't opted in to cfg-driven lifecycle.
 #
 # DB connectivity is probed via cfg-loaded URLs and lands when Y.2.gate.h.2
 # (cfg-driven DB strings) wires up. For now, layers that need DB rely on the
@@ -143,9 +149,9 @@ _LAYER_DEPS: Final[dict[str, frozenset[str]]] = {
     # only by design (audit §7.10 LOCKED — App2 = local-feedback gate;
     # QS = AWS-deploy parity cell at 6/7).
     "app2": frozenset({"docker"}),
-    "deploy": frozenset({"aws", "docker"}),
-    "api": frozenset({"aws", "docker"}),
-    "browser": frozenset({"aws", "docker", "qs_arn"}),
+    "deploy": frozenset({"aws", "docker", "aws_rds_running"}),
+    "api": frozenset({"aws", "docker", "aws_rds_running"}),
+    "browser": frozenset({"aws", "docker", "qs_arn", "aws_rds_running"}),
 }
 
 
@@ -314,11 +320,97 @@ def _probe_qs_e2e_user_arn() -> ProbeFailure | None:
     )
 
 
+def _probe_aws_rds_running() -> ProbeFailure | None:
+    """Y.2.gate.l.3 — verify cfg-declared RDS resources are 'available'
+    before dispatching deploy/api/browser layers.
+
+    Without this probe a stopped Aurora cluster surfaces as a
+    psycopg ``connection refused`` deep inside the deploy step's
+    first SQL call — operator wastes ~5 min on container spin-up +
+    boto3 chatter before seeing the actionable error. With it, the
+    chain refuses at dispatch time with "run `./run_tests.sh up aws`
+    first".
+
+    Skipped (passes through) when both ``cfg.aws_pg_cluster_id`` and
+    ``cfg.aws_oracle_instance_id`` are unset — that's the operator
+    opting out of cfg-driven lifecycle (e.g., they manage clusters
+    via console / Terraform / etc., or they're using legacy
+    pre-gate.l shape). Same opt-in shape as ``cmd_up_aws`` /
+    ``cmd_status``.
+
+    Loads cfg via the lifecycle-helper which also injects
+    ``AWS_PROFILE`` from ``cfg.auth.aws_profile`` so the boto3 RDS
+    calls hit the long-lived IAM keys (matches gate.h.1 pattern).
+    """
+    cfg = _load_runner_cfg_for_lifecycle()
+    if cfg is None:
+        # No cfg discoverable — fall through; the `aws` probe will
+        # surface the auth-or-cfg failure on its own. Layered probes
+        # don't double-fail.
+        return None
+    if cfg.aws_pg_cluster_id is None and cfg.aws_oracle_instance_id is None:
+        return None
+
+    from quicksight_gen.common.aws_rds import RdsResource, get_status  # noqa: PLC0415 — lazy
+    failures: list[str] = []
+
+    if cfg.aws_pg_cluster_id is not None:
+        resource = RdsResource(
+            kind="cluster",
+            identifier=cfg.aws_pg_cluster_id,
+            aws_region=cfg.aws_region,
+        )
+        try:
+            status = get_status(resource)
+            if status != "available":
+                failures.append(
+                    f"PG cluster {cfg.aws_pg_cluster_id!r}: {status} "
+                    f"(not 'available')"
+                )
+        except Exception as exc:  # noqa: BLE001 — surface AWS errors to operator
+            failures.append(
+                f"PG cluster {cfg.aws_pg_cluster_id!r}: ERROR — {exc}"
+            )
+
+    if cfg.aws_oracle_instance_id is not None:
+        resource = RdsResource(
+            kind="instance",
+            identifier=cfg.aws_oracle_instance_id,
+            aws_region=cfg.aws_region,
+        )
+        try:
+            status = get_status(resource)
+            if status != "available":
+                failures.append(
+                    f"Oracle instance {cfg.aws_oracle_instance_id!r}: "
+                    f"{status} (not 'available')"
+                )
+        except Exception as exc:  # noqa: BLE001
+            failures.append(
+                f"Oracle instance {cfg.aws_oracle_instance_id!r}: "
+                f"ERROR — {exc}"
+            )
+
+    if not failures:
+        return None
+
+    return ProbeFailure(
+        kind="aws_rds_not_running",
+        message=(
+            "Cfg-declared RDS resources are not all 'available':\n  "
+            + "\n  ".join(failures)
+            + "\nRun './run_tests.sh up aws' first (or bring the "
+            "resources up via console) before re-invoking."
+        ),
+    )
+
+
 _ProbeFunc = Callable[[], "ProbeFailure | None"]
 _PROBE_FUNCTIONS: Final[dict[str, _ProbeFunc]] = {
     "aws": _probe_aws,
     "docker": _probe_docker,
     "qs_arn": _probe_qs_e2e_user_arn,
+    "aws_rds_running": _probe_aws_rds_running,
 }
 
 

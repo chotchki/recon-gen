@@ -147,14 +147,15 @@ def test_layer_deps_match_audit_table() -> None:
     unit is dependency-free (in-process; pyright runs via conftest sessionstart);
     db needs docker (containers per b.2); app2 needs docker (b.3.impl.layer —
     NO aws because App2 is local-only by audit §7.10);
-    deploy/api need aws + docker; browser adds qs_arn for embed signing.
-    Edits to either side without the other should fail loudly."""
+    deploy/api need aws + docker + aws_rds_running (gate.l.3); browser adds
+    qs_arn for embed signing. Edits to either side without the other should
+    fail loudly."""
     assert runner._LAYER_DEPS["unit"] == frozenset()
     assert runner._LAYER_DEPS["db"] == frozenset({"docker"})
     assert runner._LAYER_DEPS["app2"] == frozenset({"docker"})
-    assert runner._LAYER_DEPS["deploy"] == frozenset({"aws", "docker"})
-    assert runner._LAYER_DEPS["api"] == frozenset({"aws", "docker"})
-    assert runner._LAYER_DEPS["browser"] == frozenset({"aws", "docker", "qs_arn"})
+    assert runner._LAYER_DEPS["deploy"] == frozenset({"aws", "docker", "aws_rds_running"})
+    assert runner._LAYER_DEPS["api"] == frozenset({"aws", "docker", "aws_rds_running"})
+    assert runner._LAYER_DEPS["browser"] == frozenset({"aws", "docker", "qs_arn", "aws_rds_running"})
     assert "pyright" not in runner._LAYER_DEPS
 
 
@@ -296,6 +297,9 @@ def test_probe_dependencies_browser_aggregates_failures(monkeypatch: Any) -> Non
         "aws": lambda: runner.ProbeFailure(kind="aws_creds_expired", message="..."),
         "docker": lambda: runner.ProbeFailure(kind="docker_daemon_down", message="..."),
         "qs_arn": runner._probe_qs_e2e_user_arn,
+        # gate.l.3 — passes through when no cfg discoverable (which is
+        # the state monkeypatched above via `_resolve_seed_config → None`).
+        "aws_rds_running": runner._probe_aws_rds_running,
     }
     monkeypatch.setattr(runner, "_PROBE_FUNCTIONS", fake_probes)
     failures = runner.probe_dependencies("browser")
@@ -3476,3 +3480,86 @@ def test_cmd_status_with_cost_includes_estimates(
     captured = capsys.readouterr()
     assert "rough total" in captured.out
     assert "/hr" in captured.out
+
+
+# Y.2.gate.l.3 — `aws_rds_running` probe tests. Same mocking pattern
+# as the lifecycle commands above.
+
+
+def test_probe_aws_rds_running_passes_when_no_cfg() -> None:
+    """No cfg discoverable → probe passes (the `aws` probe handles
+    the cfg-missing path; layered probes don't double-fail)."""
+    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=None):
+        assert runner._probe_aws_rds_running() is None
+
+
+def test_probe_aws_rds_running_passes_when_cfg_fields_unset() -> None:
+    """Cfg loads but neither RDS field set → operator opted out of
+    cfg-driven lifecycle. Probe passes through."""
+    cfg = _fake_cfg(pg=None, oracle=None)
+    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg):
+        assert runner._probe_aws_rds_running() is None
+
+
+def test_probe_aws_rds_running_passes_when_cluster_available() -> None:
+    """Cfg field set + cluster status='available' → probe passes."""
+    cfg = _fake_cfg(pg="my-pg", oracle=None)
+    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
+         patch("quicksight_gen.common.aws_rds.get_status", return_value="available"):
+        assert runner._probe_aws_rds_running() is None
+
+
+def test_probe_aws_rds_running_fails_when_cluster_stopped() -> None:
+    """Cluster status='stopped' → probe returns ProbeFailure with the
+    actionable 'run up aws first' message."""
+    cfg = _fake_cfg(pg="my-pg", oracle=None)
+    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
+         patch("quicksight_gen.common.aws_rds.get_status", return_value="stopped"):
+        result = runner._probe_aws_rds_running()
+    assert result is not None
+    assert result.kind == "aws_rds_not_running"
+    assert "stopped" in result.message
+    assert "up aws" in result.message
+
+
+def test_probe_aws_rds_running_fails_when_boto3_raises() -> None:
+    """boto3 raises (AccessDenied / NotFound) → probe surfaces the
+    error in the failure message instead of crashing."""
+    cfg = _fake_cfg(pg="my-pg", oracle=None)
+    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
+         patch("quicksight_gen.common.aws_rds.get_status",
+               side_effect=RuntimeError("AccessDenied: rds:DescribeDBClusters")):
+        result = runner._probe_aws_rds_running()
+    assert result is not None
+    assert result.kind == "aws_rds_not_running"
+    assert "AccessDenied" in result.message
+
+
+def test_probe_aws_rds_running_aggregates_pg_and_oracle_failures() -> None:
+    """Both cfg fields set + both not-available → both surface in one
+    failure (operator sees everything broken in one pass, not one at a time)."""
+    cfg = _fake_cfg(pg="my-pg", oracle="my-oracle")
+    statuses = iter(["stopped", "stopping"])
+    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
+         patch("quicksight_gen.common.aws_rds.get_status",
+               side_effect=lambda _r: next(statuses)):
+        result = runner._probe_aws_rds_running()
+    assert result is not None
+    assert "my-pg" in result.message
+    assert "my-oracle" in result.message
+    assert "stopped" in result.message
+    assert "stopping" in result.message
+
+
+def test_probe_aws_rds_running_registered_in_probe_functions() -> None:
+    """The new probe is wired into the runner's PROBE_FUNCTIONS map +
+    the deploy/api/browser layer deps. Locks the integration so a
+    rename / forgotten registration breaks loudly."""
+    assert "aws_rds_running" in runner._PROBE_FUNCTIONS
+    assert "aws_rds_running" in runner._LAYER_DEPS["deploy"]
+    assert "aws_rds_running" in runner._LAYER_DEPS["api"]
+    assert "aws_rds_running" in runner._LAYER_DEPS["browser"]
+    # And NOT in the local-only layers — those don't touch AWS.
+    assert "aws_rds_running" not in runner._LAYER_DEPS["unit"]
+    assert "aws_rds_running" not in runner._LAYER_DEPS["db"]
+    assert "aws_rds_running" not in runner._LAYER_DEPS["app2"]
