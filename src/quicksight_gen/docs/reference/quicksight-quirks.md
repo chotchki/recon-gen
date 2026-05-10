@@ -365,6 +365,45 @@ completes. See `wait_for_dashboard_loaded` in
 
 ---
 
+### 3.5 `MULTI_SELECT` dropdown: "Select all" is disabled when already
+all-selected, and emptying it reverts a bridged dataset param to its
+default
+
+**Observed.** A `ParameterDropDownControl` of type `MULTI_SELECT`
+sourced from `StaticValues`, bound to a parameter whose default is the
+full value set:
+
+1. The "Select all" entry in the popover renders `aria-disabled="true"`
+   `aria-selected="true"` — it can't be clicked to *de*select. To get
+   to "nothing selected" the analyst deselects values one at a time.
+2. When the analyst does empty the selection entirely, QuickSight does
+   **not** propagate an empty list to a dataset parameter the
+   analysis-level parameter is bridged to (`MappedDataSetParameters`).
+   The dataset parameter reverts to its declared default. So a dataset
+   CustomSQL predicate like `WHERE col IN (<<$p>>)` never sees `IN ()`
+   — it sees `IN (<all default values>)` instead. (Verified Y.2.c.0
+   against a deployed Aurora dashboard: deselect-all → table shows all
+   rows, no SQL error.)
+
+**Why it matters.** Pushdown-via-dataset-parameter (the Y.1/Y.2
+pattern) relies on (2): you can set the dataset param's default to
+"every value" and trust that an emptied multi-select is a safe no-op,
+not a SQL-breaking `IN ()`. You do *not* need to defensively rewrite
+the predicate to handle the empty list.
+
+**Workaround.** None needed for the SQL — declare the dataset
+parameter's default as the full closed-set of values and the empty
+case is handled. For e2e tests that want to exercise "deselect all",
+use `set_multi_select_values(page, title, [], ...)` (deselects each
+item individually) rather than `clear_dropdown` (clicks "Select all",
+which is disabled here).
+
+**Suggested fix.** Either let "Select all" toggle off when fully
+selected, or surface the empty-multi-select → dataset-param behaviour
+in the docs (today it's only discoverable by experiment).
+
+---
+
 ## 4. Data type / shape quirks
 
 ### 4.1 `DateDimensionField` vs `CategoricalDimensionField` — column

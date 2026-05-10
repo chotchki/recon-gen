@@ -124,6 +124,11 @@ META_VALUE_PLACEHOLDER_SENTINEL = "__placeholder__"
 # on every regenerate.
 _DSP_ID_PKEY = "11111111-1111-4111-8111-111111111111"
 _DSP_ID_PVALUES = "22222222-2222-4222-8222-222222222222"
+# Y.2.c — postings-dataset pushdown params (rail / status / bundle).
+# MULTI_VALUED; bridged from the Rails sheet's MULTI_SELECT dropdowns.
+_DSP_ID_PRAIL = "33333333-3333-4333-8333-333333333333"
+_DSP_ID_PSTATUS = "44444444-4444-4444-8444-444444444444"
+_DSP_ID_PBUNDLE = "55555555-5555-4555-8555-555555555555"
 
 
 # Per-ChainEntry edge — declared parent→child relationship + runtime
@@ -570,24 +575,36 @@ def build_postings_dataset(
     cfg: Config, l2_instance: L2Instance,
 ) -> DataSet:
     """One row per leg from ``<prefix>_current_transactions``,
-    parameterized on ``pKey`` + ``pValues`` so the metadata cascade
-    filters server-side via QS ``<<$param>>`` substitution.
+    parameterized so the Rails sheet's filters push down into SQL via
+    QS ``<<$param>>`` substitution.
 
-    Defaults: ``pKey = '__ALL__'`` short-circuits the metadata WHERE
-    clause to "no metadata filter" → freshly-loaded dashboard renders
-    every leg. ``pValues = '__placeholder__'`` matches no real value,
-    so picking a Key without a Value goes empty (UX hint to pick both).
+    Two parameter families, both server-side:
 
-    Other filters (date range, rail, status, bundle status) apply via
-    standard QS TimeRangeFilter + CategoryFilter on the analysis side
-    — no parameterization needed for those.
+    - **Metadata cascade** — ``pKey`` (single) + ``pValues`` (single).
+      ``pKey = '__ALL__'`` short-circuits the metadata WHERE to "no
+      filter" (freshly-loaded dashboard renders every leg);
+      ``pValues = '__placeholder__'`` matches no real value, so picking
+      a Key without a Value goes empty (UX hint to pick both). Stays in
+      the inner query's WHERE.
+    - **Category pushdown (Y.2.c)** — ``pL2ftRail`` / ``pL2ftStatus`` /
+      ``pL2ftBundle`` (all multi-valued). Defaults span every declared
+      rail / the bounded status enum / both bundle states, so a
+      freshly-loaded dashboard matches every row. Bridged from the
+      Rails sheet's MULTI_SELECT dropdowns; emptying a dropdown reverts
+      to the default (QS does not emit ``IN ()`` — verified Y.2.c.0).
+      Pushed into the OUTER WHERE because ``status`` and
+      ``bundle_status`` are CASE-aliases (not visible to a WHERE in the
+      same SELECT) so the projection wraps in a subquery.
+
+    Date range stays an analysis-level TimeRangeFilter (Y.2.f territory).
     """
     prefix = l2_instance.instance
     sql = (
-        f"SELECT\n"
-        f"  id, transfer_id, transfer_parent_id, rail_name, transfer_type,\n"
-        f"  account_id, account_name, account_role, account_scope,\n"
-        f"  posting, amount_money, amount_direction,\n"
+        f"SELECT * FROM (\n"
+        f"  SELECT\n"
+        f"    id, transfer_id, transfer_parent_id, rail_name, transfer_type,\n"
+        f"    account_id, account_name, account_role, account_scope,\n"
+        f"    posting, amount_money, amount_direction,\n"
         # X.1.i — collapse open-set `status` into the bounded set the
         # tool reasons about. Pending / Posted carry first-class meaning
         # (drives Aging, Conservation, Completion checks); every other
@@ -595,20 +612,28 @@ def build_postings_dataset(
         # 'Other' so the static dropdown enum matches what the column
         # produces and the analyst can still narrow to the unhealthy
         # tail without enumerating every possible terminal state.
-        f"  CASE WHEN status IN ('Pending', 'Posted') THEN status "
+        f"    CASE WHEN status IN ('Pending', 'Posted') THEN status "
         f"ELSE 'Other' END AS status,\n"
-        f"  bundle_id,\n"
-        f"  CASE WHEN bundle_id IS NULL THEN 'Unbundled' ELSE 'Bundled' END "
+        f"    bundle_id,\n"
+        f"    CASE WHEN bundle_id IS NULL THEN 'Unbundled' ELSE 'Bundled' END "
         f"AS bundle_status,\n"
-        f"  origin\n"
-        f"FROM {prefix}_current_transactions\n"
+        f"    origin\n"
+        f"  FROM {prefix}_current_transactions\n"
+        f"  WHERE\n"
         # The metadata cascade short-circuit: when pKey is the sentinel,
-        # the WHERE always evaluates true (no filtering); otherwise the
-        # per-key branches compare the leg's metadata against the picked
-        # values. See `metadata_filter_clause` for the per-dialect-safe
-        # WHERE shape.
-        f"WHERE\n"
+        # this sub-clause always evaluates true (no filtering); otherwise
+        # the per-key branches compare the leg's metadata against the
+        # picked values. See `metadata_filter_clause` for the
+        # per-dialect-safe WHERE shape.
         f"{metadata_filter_clause(l2_instance, 'metadata', cfg.dialect)}"
+        f") postings\n"
+        # Y.2.c — rail / status / bundle pushed into SQL via multi-valued
+        # dataset parameters. Defaults span all declared values so the
+        # freshly-loaded dashboard matches every row; emptying a dropdown
+        # reverts to the default (QS does not emit `IN ()`).
+        f"WHERE rail_name IN (<<$pL2ftRail>>)\n"
+        f"  AND status IN (<<$pL2ftStatus>>)\n"
+        f"  AND bundle_status IN (<<$pL2ftBundle>>)\n"
     )
     return build_dataset(
         cfg, cfg.prefixed("l2ft-postings-dataset"),
@@ -634,6 +659,31 @@ def build_postings_dataset(
                 ValueType="SINGLE_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
                     StaticValues=[META_VALUE_PLACEHOLDER_SENTINEL],
+                ),
+            )),
+            # Y.2.c — rail / status / bundle multi-valued pushdown.
+            DatasetParameter(StringDatasetParameter=StringDatasetParameter(
+                Id=_DSP_ID_PRAIL,
+                Name="pL2ftRail",
+                ValueType="MULTI_VALUED",
+                DefaultValues=StringDatasetParameterDefaultValues(
+                    StaticValues=declared_rail_names(l2_instance),
+                ),
+            )),
+            DatasetParameter(StringDatasetParameter=StringDatasetParameter(
+                Id=_DSP_ID_PSTATUS,
+                Name="pL2ftStatus",
+                ValueType="MULTI_VALUED",
+                DefaultValues=StringDatasetParameterDefaultValues(
+                    StaticValues=transaction_status_values(),
+                ),
+            )),
+            DatasetParameter(StringDatasetParameter=StringDatasetParameter(
+                Id=_DSP_ID_PBUNDLE,
+                Name="pL2ftBundle",
+                ValueType="MULTI_VALUED",
+                DefaultValues=StringDatasetParameterDefaultValues(
+                    StaticValues=bundle_status_values(),
                 ),
             )),
         ],

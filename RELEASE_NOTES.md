@@ -1,5 +1,46 @@
 # Release Notes
 
+## v8.8.0a18 — Y.2.c: L2FT Rails filter pushdown into dataset SQL
+
+Eighteenth alpha. Resumes the Phase Y SQL-pushdown sweep after the
+Y.2.gate runner work landed.
+
+### Y.2.c — L2FT Rails: rail / status / bundle filters → dataset SQL
+
+The Rails sheet's three category filters move from analysis-level
+parameter-bound CategoryFilters to **multi-valued dataset parameters**
+substituted into the postings dataset CustomSQL:
+
+- `build_postings_dataset` — projection wraps in a subquery so the
+  CASE-aliased `status` / `bundle_status` are visible to the outer
+  WHERE; `rail_name` joins them there for symmetry. New dataset params
+  `pL2ftRail` / `pL2ftStatus` / `pL2ftBundle` (all `MULTI_VALUED`,
+  defaults = all declared rails / the status enum / both bundle
+  states). Metadata cascade (`pKey` / `pValues`) stays in the inner
+  WHERE unchanged.
+- `apps/l2_flow_tracing/app.py` — the 3 `fg-l2ft-rails-{rail,status,
+  bundle}` FilterGroups are dropped; new `_populate_pushdown_dropdown`
+  helper wires analysis param → dataset-param bridge
+  (`MappedDataSetParameters`) + MULTI_SELECT `ParameterDropdown`
+  (reusable for the upcoming Y.2.d / Y.2.e Chains / Templates slices).
+- Spike (Y.2.c.0) proved the pattern safe: emptying a `MULTI_SELECT`
+  bound to a dataset param reverts to the param's default (= all
+  values), **not** `IN ()`. Verified against a deployed Aurora
+  dashboard — rail 859→284→859, status 859→20→859, bundle 859→74→859
+  (narrow on pick, revert to all on deselect-all, no SQL errors);
+  metadata cascade still narrows. Quirks-log §3.5 documents the
+  empty-multi-select behaviour + the disabled "Select all" toggle.
+- Tests: postings-params test now asserts 5 dataset params; two new
+  L2FT JSON tests cover the SQL pushdown shape + the param bridges /
+  absent FilterGroups.
+
+### Carried from the merge
+
+- `db: retry Oracle DDL on ORA-00054 / ORA-04021 lock timeout`
+  (exponential backoff, logs each retry to stderr) — addresses the
+  concurrent-DDL contention surfaced by the gate.m variant matrix
+  hitting the multi-tenant single-instance Oracle data dictionary.
+
 ## v8.8.0a17 — Y.2.gate.l + d/e/f/h/j/c closeouts + SQLite audit fix
 
 Seventeenth alpha. Closes Y.2.gate.l (ephemeral AWS infra), d (test

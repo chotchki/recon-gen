@@ -500,6 +500,49 @@ def _populate_param_filter_dropdown(
     )
 
 
+def _populate_pushdown_dropdown(
+    *,
+    sheet: Sheet,
+    analysis: Analysis,
+    dataset: Dataset,
+    param_name: ParameterName,
+    dataset_param: str,
+    title: str,
+    all_values: list[str],
+) -> None:
+    """Y.2.c — like ``_populate_param_filter_dropdown`` but the
+    narrowing happens in the dataset SQL, not via a CategoryFilter.
+
+    Wires two things:
+
+    1. A multi-valued ``StringParam`` (default = the full closed-set of
+       values) bridged to ``dataset``'s ``dataset_param`` via
+       ``MappedDataSetParameters``. The dataset's CustomSQL substitutes
+       ``<<$dataset_param>>`` into a ``col IN (...)`` predicate.
+    2. A ``ParameterDropdown(MULTI_SELECT, StaticValues)`` so the
+       analyst deselects values to narrow.
+
+    No FilterGroup — that's the difference from the
+    ``_populate_param_filter_dropdown`` shape. Emptying the dropdown
+    reverts the dataset param to its default (= all values); QS does
+    not emit ``IN ()`` (verified Y.2.c.0). Use this when the column is a
+    real column in the dataset's source (or a CASE-alias the dataset SQL
+    can re-reference via a subquery) so the predicate is pushable.
+    """
+    p = analysis.add_parameter(StringParam(
+        name=param_name,
+        multi_valued=True,
+        default=list(all_values),
+        mapped_dataset_params=[(dataset, dataset_param)],
+    ))
+    sheet.add_parameter_dropdown(
+        parameter=p,
+        title=title,
+        type="MULTI_SELECT",
+        selectable_values=StaticValues(values=list(all_values)),
+    )
+
+
 def _populate_rails_sheet(
     cfg: Config,
     sheet: Sheet,
@@ -576,34 +619,31 @@ def _populate_rails_sheet(
     sheet.add_parameter_datetime_picker(parameter=date_start, title="Date From")
     sheet.add_parameter_datetime_picker(parameter=date_end, title="Date To")
 
-    # 3-5. Three "default-all multi-select" CategoryFilter dropdowns
-    # (rail / status / bundle status). X.1.g — restructured from
-    # ``FilterDropdown(CategoryFilter(values=[], FILTER_ALL_VALUES))``
-    # to ``ParameterDropdown(StaticValues) + CategoryFilter.with_parameter``.
-    # The previous shape relied on QS's lazy ``tenK-sample-values-V2``
-    # fetch to populate dropdown options at render time; that endpoint
-    # 404s on cold per-CI-run dashboards (3 of the 4 X.1.a-traced
-    # 404s came from these dropdowns). The new shape sources options
-    # from StaticValues at deploy time and the parameter's default
-    # spans every value, so "no narrowing" is the analyst's starting
-    # state without QS having to query anything.
-    _populate_param_filter_dropdown(
+    # 3-5. Three "default-all multi-select" dropdowns (rail / status /
+    # bundle status). Y.2.c — the narrowing pushes into the postings
+    # dataset SQL via multi-valued dataset parameters
+    # (`<<$pL2ftRail>>` / `<<$pL2ftStatus>>` / `<<$pL2ftBundle>>`), no
+    # analysis-level CategoryFilter / FilterGroup. Predecessor (X.1.g)
+    # was `ParameterDropdown(StaticValues) + CategoryFilter.with_parameter`
+    # — itself a replacement for `FilterDropdown(CategoryFilter(values=[],
+    # FILTER_ALL_VALUES))`, which relied on QS's lazy `tenK-sample-
+    # values-V2` fetch (the X.1.a cold-CI 404 source). StaticValues
+    # options + a default spanning every value keeps "no narrowing" the
+    # analyst's starting state without QS querying anything.
+    _populate_pushdown_dropdown(
         sheet=sheet, analysis=analysis, dataset=ds_postings,
-        fg_id=FilterGroupId("fg-l2ft-rails-rail"), filter_id="filter-l2ft-rails-rail",
-        param_name=ParameterName("pL2ftRail"), col="rail_name", title="Rail",
-        all_values=declared_rail_names(l2_instance),
+        param_name=ParameterName("pL2ftRail"), dataset_param="pL2ftRail",
+        title="Rail", all_values=declared_rail_names(l2_instance),
     )
-    _populate_param_filter_dropdown(
+    _populate_pushdown_dropdown(
         sheet=sheet, analysis=analysis, dataset=ds_postings,
-        fg_id=FilterGroupId("fg-l2ft-rails-status"), filter_id="filter-l2ft-rails-status",
-        param_name=ParameterName("pL2ftStatus"), col="status", title="Status",
-        all_values=transaction_status_values(),
+        param_name=ParameterName("pL2ftStatus"), dataset_param="pL2ftStatus",
+        title="Status", all_values=transaction_status_values(),
     )
-    _populate_param_filter_dropdown(
+    _populate_pushdown_dropdown(
         sheet=sheet, analysis=analysis, dataset=ds_postings,
-        fg_id=FilterGroupId("fg-l2ft-rails-bundle"), filter_id="filter-l2ft-rails-bundle",
-        param_name=ParameterName("pL2ftBundle"), col="bundle_status", title="Bundle",
-        all_values=bundle_status_values(),
+        param_name=ParameterName("pL2ftBundle"), dataset_param="pL2ftBundle",
+        title="Bundle", all_values=bundle_status_values(),
     )
 
     # 6. Metadata cascade — the M.3.10c novelty.
