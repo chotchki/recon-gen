@@ -151,38 +151,26 @@ jobs:
       # Per-cell artifacts land at runs/<run-id>/sp_pg_lo/db/{cmd,stdout,stderr}.log
       # for triage parity with local invocations.
       - name: Run runner db layer (CI-mode, no Docker spin-up)
-        # Scoped to `sp_pg_lo` (single variant): without `--variants=`,
-        # the runner fans out to all named scenarios on the chosen
-        # dialect/target axes (sp + sq for pg/lo). Both variants would
-        # then call `schema apply --execute` against the SAME GHA
-        # postgres service container in parallel — the second to run
-        # drops the first's tables, breaking the downstream row-count
-        # check (which hardcodes `spec_example_` prefix).
+        # Multi-variant fan-out (sp + sq for pg/lo) works fine here:
+        # each variant gets its own synthesized L2 yaml with
+        # `instance: <spec.name>` (e.g. `sp_pg_lo`, `sq_pg_lo`), so
+        # their schemas live under disjoint prefixes and don't collide
+        # on the shared GHA postgres service container.
         #
-        # CI mode + shared DB = single variant per invocation. The
-        # workflow's whole point is verifying one scenario per CI cell;
-        # the variant matrix is a local-iteration concern.
+        # The runner's db layer dispatches:
+        #   - test_dataset_sql_smoke.py — substitutes QS placeholders +
+        #     runs every dataset's CustomSQL against the live DB.
+        #   - test_demo_apply_row_counts.py (k.1.absorb, Phase 2) —
+        #     asserts ≥1 row in every named matview. Reads
+        #     QS_GEN_TEST_L2_INSTANCE from the runner's per-variant env
+        #     (the synthesized yaml), so prefix discovery picks up the
+        #     `<spec.name>_*` tables the runner just seeded.
         env:
           QS_GEN_RUNNER_CI: "1"
           QS_GEN_DEMO_DATABASE_URL: "postgresql://postgres:ci_pg_password@localhost:5432/postgres"
           QS_GEN_CONFIG: /tmp/ci-pg.yaml
           QS_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
-        run: ./run_tests.sh up_to=db --variants=sp_pg_lo
-
-      - name: Verify Postgres row counts
-        # Asserts ≥1 row in every named matview without exact counts.
-        # Exact counts depend on the seed anchor (defaults to UTC today)
-        # so they drift across CI runs. Re-lock to exact counts once
-        # `demo apply --anchor` lands as a follow-up.
-        #
-        # NOT yet absorbed into the runner's db layer — k.1.absorb queues
-        # promoting this + the audit-PDF step into the default `db` set.
-        env:
-          QS_GEN_E2E: "1"
-          QS_GEN_CONFIG: /tmp/ci-pg.yaml
-          QS_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
-        run: |
-          .venv/bin/pytest tests/e2e/test_demo_apply_row_counts.py -v
+        run: ./run_tests.sh up_to=db --dialects=pg --targets=lo
 
       - name: Render + verify the audit PDF against Postgres
         # `audit apply --execute` queries every L1 invariant matview
@@ -261,6 +249,10 @@ jobs:
           .venv/bin/quicksight-gen data refresh -c /tmp/ci-oracle.yaml --execute
           .venv/bin/quicksight-gen json apply -c /tmp/ci-oracle.yaml -o /tmp/ci-oracle-out
 
+      # Note: row-count smoke for Oracle is NOT yet absorbed into a
+       # runner invocation (Oracle leg still uses the legacy direct CLI
+       # path; Phase 1 wedge migration queued for a follow-up commit so
+       # we can verify the PG path stabilizes first).
       - name: Verify Oracle row counts
         # Same rationale as the Postgres row-count verify above.
         env:

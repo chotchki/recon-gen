@@ -469,10 +469,23 @@ def _layer_command(
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
         return (cmd, env_addl)
     if layer == "db":
-        # 3a — DB SQL smoke (parametrized over 37 datasets). Behind QS_GEN_E2E=1.
+        # 3a — DB-touching pytest (behind QS_GEN_E2E=1). Two test files:
+        #   - test_dataset_sql_smoke.py: parametrized over 37 datasets;
+        #     substitutes QS `<<$param>>` placeholders with declared
+        #     defaults, wraps in `WHERE 1=0`, runs against live DB.
+        #   - test_demo_apply_row_counts.py: asserts ≥1 row in every
+        #     named matview the seed populates (k.1.absorb — Phase 2 of
+        #     Y.2.gate.k.1+k.6 spike, lifted from ci.yml workflow steps
+        #     so the variant's synthesized prefix flows naturally to
+        #     QS_GEN_TEST_L2_INSTANCE-aware test resolution).
         # Real DB connection comes from cfg; until cfg loading lands the test
         # itself fails fast if cfg is missing. That's the expected shape.
-        cmd = [str(_VENV_BIN / "pytest"), "tests/e2e/test_dataset_sql_smoke.py", "-q"]
+        cmd = [
+            str(_VENV_BIN / "pytest"),
+            "tests/e2e/test_dataset_sql_smoke.py",
+            "tests/e2e/test_demo_apply_row_counts.py",
+            "-q",
+        ]
         if opts.only:
             cmd += ["-k", opts.only]
         # j.6 — see unit layer comment.
