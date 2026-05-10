@@ -29,6 +29,7 @@ runs/
 # pytest
 .pytest_cache/
 .coverage
+.coverage.*
 coverage.xml
 
 # mkdocs

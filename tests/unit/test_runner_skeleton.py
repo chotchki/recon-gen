@@ -1030,6 +1030,7 @@ def test_run_options_defaults() -> None:
     assert opts.keep_on_failure is False
     assert opts.trace_all is False
     assert opts.allow_dirty_deploy is False
+    assert opts.coverage is False
 
 
 def test_layer_command_only_adds_pytest_k_flag() -> None:
@@ -1064,6 +1065,71 @@ def test_layer_command_no_trace_env_when_default() -> None:
     assert cmd_env is not None
     _, env_addl = cmd_env
     assert "QS_GEN_TRACE_ALL" not in env_addl
+
+
+# --- Y.2.gate.k.1.coverage — --coverage flag wiring ---
+
+
+def test_layer_command_coverage_off_by_default() -> None:
+    """Without --coverage: no --cov args, no COVERAGE_FILE env."""
+    cmd_env = runner._layer_command("unit", Path("runs/abc/_prelude"))
+    assert cmd_env is not None
+    cmd, env_addl = cmd_env
+    assert not any(c.startswith("--cov") for c in cmd)
+    assert "COVERAGE_FILE" not in env_addl
+
+
+def test_layer_command_coverage_adds_cov_args_and_per_variant_data_file() -> None:
+    """--coverage on a pytest layer appends `--cov=quicksight_gen
+    --cov-report=` and points COVERAGE_FILE at
+    `<run_dir>/.coverage.<run_dir.name>.<layer>` so each (variant, layer)
+    writes a uniquely-suffixed data file the W.8b aggregator combines."""
+    opts = runner.RunOptions(coverage=True)
+    cmd_env = runner._layer_command("unit", Path("runs/abc/_prelude"), opts)
+    assert cmd_env is not None
+    cmd, env_addl = cmd_env
+    assert "--cov=quicksight_gen" in cmd
+    assert "--cov-report=" in cmd
+    assert env_addl["COVERAGE_FILE"] == "runs/abc/_prelude/.coverage._prelude.unit"
+
+    # Per-variant cell dir → variant-coded data file name.
+    cmd_env = runner._layer_command("db", Path("runs/abc/sp_pg_lo"), opts)
+    assert cmd_env is not None
+    cmd, env_addl = cmd_env
+    assert "--cov=quicksight_gen" in cmd
+    assert env_addl["COVERAGE_FILE"] == "runs/abc/sp_pg_lo/.coverage.sp_pg_lo.db"
+    # The db layer's QS_GEN_E2E gate still rides along.
+    assert env_addl.get("QS_GEN_E2E") == "1"
+
+
+def test_layer_command_coverage_skips_non_pytest_deploy_layer(tmp_path: Path) -> None:
+    """--coverage doesn't touch the `deploy` layer — it's a
+    `quicksight-gen json apply` CLI invocation, not pytest."""
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text("dialect: postgres\n")
+    l2 = tmp_path / "l2.yaml"
+    l2.write_text("instance: x\n")
+    variant_env = {"QS_GEN_CONFIG": str(cfg), "QS_GEN_TEST_L2_INSTANCE": str(l2)}
+    opts = runner.RunOptions(coverage=True)
+    cmd_env = runner._layer_command(
+        "deploy", tmp_path / "run", opts, variant_env=variant_env,
+    )
+    assert cmd_env is not None
+    cmd, env_addl = cmd_env
+    assert not any(c.startswith("--cov") for c in cmd)
+    assert "COVERAGE_FILE" not in env_addl
+
+
+def test_argparse_coverage_flag_threads_to_options() -> None:
+    """`--coverage` on `up_to` lands in RunOptions.coverage."""
+    parser = runner._build_parser()
+    parsed = parser.parse_args(["up_to", "db", "--coverage", "--variants=sp_pg_lo"])
+    assert parsed.coverage is True
+    assert runner._options_from_args(parsed).coverage is True
+    # Absent → False.
+    parsed = parser.parse_args(["up_to", "db", "--variants=sp_pg_lo"])
+    assert parsed.coverage is False
+    assert runner._options_from_args(parsed).coverage is False
 
 
 def test_is_deploy_or_later() -> None:

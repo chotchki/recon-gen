@@ -441,6 +441,13 @@ class RunOptions:
       workers in this run via env passthrough — c.6.xdist-safety lock).
     - ``trace_all`` — Playwright capture every test (env var passthrough; consumed by c.11).
     - ``allow_dirty_deploy`` — bypass tracked-changes refusal on layer 4+ (active now per b.10).
+    - ``coverage`` — emit per-(variant, layer) ``.coverage.<variant>.<layer>`` data
+      files (Y.2.gate.k.1.coverage). When set, every pytest layer (unit/db/app2/
+      api/browser) runs with ``--cov=quicksight_gen --cov-report=`` and
+      ``COVERAGE_FILE`` pointed at ``<run_dir>/.coverage.<run_dir.name>.<layer>``.
+      The CI ``coverage`` aggregator job (W.8b) globs ``coverage-data-*`` artifacts
+      and ``coverage combine``s them with no logic change. Off by default — opt in
+      for CI; local runs don't need it.
     - ``scenarios`` / ``dialects`` / ``targets`` — variant matrix sub-flag narrowing (m.2.a).
       All None → ``compose_matrix`` returns the 13-cell ``full`` default. Any specified
       → cross-product mode where unspecified axes default per `variant.DEFAULT_*`.
@@ -466,6 +473,7 @@ class RunOptions:
     keep_on_failure: bool = False
     trace_all: bool = False
     allow_dirty_deploy: bool = False
+    coverage: bool = False
 
 
 def resolve_fuzz_seed_value() -> int:
@@ -556,6 +564,24 @@ def _layer_command(
         env_addl[QS_GEN_TRACE_ALL.name] = "1"
     if opts.fuzz_seed_value is not None:
         env_addl[QS_GEN_FUZZ_SEED.name] = str(opts.fuzz_seed_value)
+    # Y.2.gate.k.1.coverage — every pytest layer (everything except `deploy`,
+    # which is a `quicksight-gen json apply` CLI call) writes a per-(variant,
+    # layer) `.coverage.<variant>.<layer>` data file when `--coverage` is set.
+    # `run_dir` is the per-variant dir (or `runs/<id>/_prelude` for the unit
+    # prelude); `run_dir.name` is the variant code (`sp_pg_lo`) or `_prelude`.
+    # `--cov-report=` (empty) suppresses the per-layer terminal report — the
+    # CI `coverage` aggregator (W.8b) globs every `.coverage.*` artifact and
+    # `coverage combine`s them, so a per-layer report is just stdout.log clutter.
+    _is_pytest_layer = layer in ("unit", "db", "app2", "api", "browser")
+    _cov_args: list[str] = (
+        ["--cov=quicksight_gen", "--cov-report="]
+        if opts.coverage and _is_pytest_layer
+        else []
+    )
+    if opts.coverage and _is_pytest_layer:
+        # COVERAGE_FILE is coverage.py's standard env var (not a QS_GEN_*
+        # registry var); set it on the layer's subprocess env directly.
+        env_addl["COVERAGE_FILE"] = str(run_dir / f".coverage.{run_dir.name}.{layer}")
     if layer == "unit":
         cmd = [
             str(_VENV_BIN / "pytest"),
@@ -572,6 +598,7 @@ def _layer_command(
         # j.6 — within-layer pytest-xdist defaults to "auto" (= cpu_count
         # workers). Operator can pin via --parallel=N (e.g., --parallel=1
         # for serial debug). Same pattern as api/browser layers.
+        cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
         return (cmd, env_addl)
     if layer == "db":
@@ -603,6 +630,7 @@ def _layer_command(
         if opts.only:
             cmd += ["-k", opts.only]
         # j.6 — see unit layer comment.
+        cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
         return (cmd, {**env_addl, QS_GEN_E2E.name: "1"})
     if layer == "app2":
@@ -628,6 +656,7 @@ def _layer_command(
         if opts.only:
             cmd += ["-k", opts.only]
         # j.6 — see unit layer comment.
+        cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
         return (cmd, {**env_addl, QS_GEN_E2E.name: "1"})
     if layer == "deploy":
@@ -682,6 +711,7 @@ def _layer_command(
         ]
         if opts.only:
             cmd += ["-k", opts.only]
+        cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
         return (cmd, {**env_addl, QS_GEN_E2E.name: "1"})
     if layer == "browser":
@@ -695,6 +725,7 @@ def _layer_command(
         ]
         if opts.only:
             cmd += ["-k", opts.only]
+        cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "4"]
         return (cmd, {**env_addl, QS_GEN_E2E.name: "1"})
     # Fallthrough: unknown layer name. Return None so dispatch prints
@@ -2142,6 +2173,7 @@ def _options_from_args(args: argparse.Namespace) -> RunOptions:
         keep_on_failure=getattr(args, "keep_on_failure", False),
         trace_all=getattr(args, "trace_all", False),
         allow_dirty_deploy=getattr(args, "allow_dirty_deploy", False),
+        coverage=getattr(args, "coverage", False),
     )
 
 
@@ -3465,6 +3497,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--allow-dirty-deploy",
         action="store_true",
         help="bypass the tracked-changes refusal on layers >= deploy (b.10).",
+    )
+    p_up_to.add_argument(
+        "--coverage",
+        action="store_true",
+        help="emit per-(variant, layer) .coverage.<variant>.<layer> data files under runs/<id>/ (pytest layers run with --cov=quicksight_gen). CI's W.8b coverage aggregator globs coverage-data-* artifacts. Off by default (k.1.coverage).",
     )
     p_up_to.set_defaults(func=cmd_up_to)
 

@@ -170,13 +170,45 @@ jobs:
           QS_GEN_DEMO_DATABASE_URL: "postgresql://postgres:ci_pg_password@localhost:5432/postgres"
           QS_GEN_CONFIG: /tmp/ci-pg.yaml
           QS_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
-        run: ./run_tests.sh up_to=db --dialects=pg --targets=lo
+        # Y.2.gate.k.1.coverage (Phase 3) — `--coverage` makes every
+        # pytest layer (unit prelude + per-variant db) write a
+        # `.coverage.<variant>.<layer>` data file under runs/<id>/.
+        # Collected + uploaded below; the `coverage` aggregator job's
+        # `coverage-data-*` glob + `coverage combine` (W.8b) picks them
+        # up with no logic change. (Oracle leg doesn't emit coverage —
+        # `integration-oracle`'s db-layer dialect branches are already
+        # covered by tests/schema/test_sql_dialect.py in the `test` job,
+        # and wiring the conditional Oracle job into the `coverage`
+        # DAG isn't worth the marginal gain.)
+        run: ./run_tests.sh up_to=db --dialects=pg --targets=lo --coverage
 
       # Note: audit PDF render+verify is now runner-internal — handled
       # by tests/e2e/test_audit_pdf_render_verify.py in the runner's
       # db layer dispatch (k.1.absorb-audit, Phase 2.5). The variant's
       # synthesized prefix flows through QS_GEN_TEST_L2_INSTANCE so
       # audit finds the `<spec.name>_*` tables the seed populated.
+
+      - name: Collect runner coverage data
+        # The runner wrote `.coverage.<variant>.<layer>` files into the
+        # per-variant run dirs (runs/<id>/_prelude/, runs/<id>/sp_pg_lo/,
+        # runs/<id>/sq_pg_lo/). Flatten them to the repo root so the
+        # upload step's `.coverage.*` glob catches them; `coverage
+        # combine` in the aggregator scans the data-file dir. Best-effort
+        # — never fail the job over coverage collection.
+        if: always()
+        run: |
+          find runs -name '.coverage.*' 2>/dev/null | while read -r f; do cp "$f" .; done || true
+          echo "coverage data files: $(ls .coverage.* 2>/dev/null || echo '<none>')"
+
+      - name: Upload runner coverage data
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-data-pg-runner
+          path: .coverage.*
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 7
 
   # P.7 — containerized integration job (Oracle leg).
   #
@@ -275,7 +307,13 @@ jobs:
   # you want the gate later.
   coverage:
     name: Combine + report coverage
-    needs: test
+    # `integration-pg` (always-on) uploads `coverage-data-pg-runner` —
+    # the runner's per-variant db-layer coverage (Y.2.gate.k.1.coverage).
+    # Waiting on it keeps the combined report inclusive of the
+    # runner-driven workflow path. `integration-oracle` is conditional
+    # (push:main / dispatch only) and intentionally NOT a dep — see the
+    # comment on its `--coverage`-less runner step.
+    needs: [test, integration-pg]
     runs-on: ubuntu-latest
 
     steps:
