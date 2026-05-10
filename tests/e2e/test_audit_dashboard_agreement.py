@@ -166,6 +166,32 @@ def dialect_cfg(request):
             f"parametrization would route to the wrong DB. The sibling "
             f"sp_{env_url_dialect[:2]}_lo cell handles {dialect_name!r}."
         )
+    # Y.2.browser.triage — `aw`-target analogue of the skip above. An `aw`
+    # cell doesn't set QS_GEN_DEMO_DATABASE_URL (it uses the operator's
+    # external Aurora/Oracle), but the runner DOES inject QS_GEN_CONFIG =
+    # the cell's *dialect* cfg (`run/config.postgres.yaml` for the pg cell).
+    # That cell only seeded that one dialect's DB with the cell-prefixed
+    # tables, so the other dialect's parametrization would `ORA-00942` /
+    # UndefinedTable. Skip it; the sibling `sp_<other>_aw` cell runs that
+    # dialect's agreement check against its own seeded DB. When QS_GEN_CONFIG
+    # is unset (operator running pytest directly with both DBs seeded), the
+    # both-dialects flow is unchanged.
+    from quicksight_gen.common.env_keys import QS_GEN_CONFIG
+    qs_gen_cfg = QS_GEN_CONFIG.get_or_none()
+    if qs_gen_cfg:
+        low = qs_gen_cfg.lower()
+        cfg_dialect = (
+            "postgres" if "postgres" in low
+            else "oracle" if "oracle" in low
+            else None
+        )
+        if cfg_dialect is not None and cfg_dialect != dialect_name:
+            pytest.skip(
+                f"runner cell's QS_GEN_CONFIG={qs_gen_cfg!r} implies "
+                f"dialect={cfg_dialect!r}; this {dialect_name!r} cell would "
+                f"walk tables it never seeded. The sibling sp_{cfg_dialect[:2]}_<tgt> "
+                f"cell handles {dialect_name!r}."
+            )
     cfg_path = _DIALECT_CONFIG_PATHS[dialect_name]
     if not cfg_path.exists():
         pytest.skip(
