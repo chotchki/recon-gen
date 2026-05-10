@@ -177,9 +177,9 @@ def dialect_cfg(request):
     # is unset (operator running pytest directly with both DBs seeded), the
     # both-dialects flow is unchanged.
     from quicksight_gen.common.env_keys import QS_GEN_CONFIG
-    qs_gen_cfg = QS_GEN_CONFIG.get_or_none()
-    if qs_gen_cfg:
-        low = qs_gen_cfg.lower()
+    qs_gen_cfg = QS_GEN_CONFIG.get_or_none()  # Path | None — coercer=Path
+    if qs_gen_cfg is not None:
+        low = str(qs_gen_cfg).lower()
         cfg_dialect = (
             "postgres" if "postgres" in low
             else "oracle" if "oracle" in low
