@@ -141,6 +141,12 @@ _DSP_ID_PBUNDLE = "55555555-5555-4555-8555-555555555555"
 # Y.2.d — chain-instances-dataset pushdown params (chain / completion).
 _DSP_ID_PCHAINSCHAIN = "66666666-6666-4666-8666-666666666666"
 _DSP_ID_PCHAINSCOMPLETION = "77777777-7777-4777-8777-777777777777"
+# Y.2.e — Transfer Templates pushdown params (template / completion).
+# Declared on BOTH tt-instances + tt-legs (the Template/Completion
+# dropdowns narrow the Table + the Sankey together); same Id reused
+# across the two datasets is fine — IDs are unique per-dataset, not global.
+_DSP_ID_PTTTEMPLATE = "88888888-8888-4888-8888-888888888888"
+_DSP_ID_PTTCOMPLETION = "99999999-9999-4999-8999-999999999999"
 
 
 # Per-ChainEntry edge — declared parent→child relationship + runtime
@@ -1879,23 +1885,33 @@ def build_tt_instances_dataset(
         f"    ) AS xor_violations\n"
         f"  FROM firings f\n"
         f")\n"
-        f"SELECT\n"
-        f"  template_name,\n"
-        f"  transfer_id,\n"
-        f"  posting,\n"
-        f"  expected_net,\n"
-        f"  actual_net,\n"
-        f"  (actual_net - expected_net) AS net_diff,\n"
-        f"  leg_count,\n"
-        f"  CASE\n"
-        f"    WHEN ABS(actual_net - expected_net) >= 0.01 THEN 'Imbalanced'\n"
-        f"    WHEN required_fired < required_total THEN 'Orphaned'\n"
-        f"    WHEN xor_violations > 0 THEN 'Orphaned'\n"
-        f"    ELSE 'Complete'\n"
-        f"  END AS completion_status\n"
-        f"FROM firing_completion\n"
-        f"WHERE\n"
+        # Y.2.e — wrap the projection so the CASE-aliased
+        # `completion_status` is visible to the outer WHERE; `template_name`
+        # joins it there. Metadata cascade on `parent_metadata` stays inner.
+        f"SELECT * FROM (\n"
+        f"  SELECT\n"
+        f"    template_name,\n"
+        f"    transfer_id,\n"
+        f"    posting,\n"
+        f"    expected_net,\n"
+        f"    actual_net,\n"
+        f"    (actual_net - expected_net) AS net_diff,\n"
+        f"    leg_count,\n"
+        f"    CASE\n"
+        f"      WHEN ABS(actual_net - expected_net) >= 0.01 THEN 'Imbalanced'\n"
+        f"      WHEN required_fired < required_total THEN 'Orphaned'\n"
+        f"      WHEN xor_violations > 0 THEN 'Orphaned'\n"
+        f"      ELSE 'Complete'\n"
+        f"    END AS completion_status\n"
+        f"  FROM firing_completion\n"
+        f"  WHERE\n"
         f"{metadata_filter_clause(l2_instance, 'parent_metadata', cfg.dialect)}\n"
+        f") tt_instances\n"
+        # Y.2.e — template / completion pushdown via multi-valued dataset
+        # params. Defaults span all declared values; emptying a dropdown
+        # reverts to the default (QS does not emit `IN ()`).
+        f"WHERE template_name IN (<<$pL2ftTtTemplate>>)\n"
+        f"  AND completion_status IN (<<$pL2ftTtCompletion>>)\n"
         f"ORDER BY posting DESC, template_name, transfer_id"
     )
     return build_dataset(
@@ -1903,29 +1919,61 @@ def build_tt_instances_dataset(
         "L2FT TT Instances", "l2ft-tt-instances",
         sql, TT_INSTANCES_CONTRACT,
         visual_identifier=DS_TT_INSTANCES,
-        dataset_parameters=[
-            DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id=_DSP_ID_PKEY,
-                Name="pKey",
-                ValueType="SINGLE_VALUED",
-                DefaultValues=StringDatasetParameterDefaultValues(
-                    StaticValues=[META_KEY_ALL_SENTINEL],
-                ),
-            )),
-            DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id=_DSP_ID_PVALUES,
-                Name="pValues",
-                # Y.1.m: SINGLE_VALUED to match the analysis-level
-                # parameter shape (text-field control). Was MULTI_VALUED
-                # but the text-field control couldn't commit non-empty
-                # values to multi-valued params — broke the cascade.
-                ValueType="SINGLE_VALUED",
-                DefaultValues=StringDatasetParameterDefaultValues(
-                    StaticValues=[META_VALUE_PLACEHOLDER_SENTINEL],
-                ),
-            )),
-        ],
+        dataset_parameters=_tt_dataset_parameters(l2_instance),
     )
+
+
+def _tt_dataset_parameters(
+    l2_instance: L2Instance,
+) -> list[DatasetParameter]:
+    """Y.2.e — the shared dataset-parameter set for both TransferTemplates
+    datasets (tt-instances + tt-legs): the metadata cascade pair (pKey /
+    pValues) plus the template / completion pushdown pair. Same IDs in
+    both datasets is fine — dataset-parameter IDs are unique per-dataset.
+    """
+    return [
+        DatasetParameter(StringDatasetParameter=StringDatasetParameter(
+            Id=_DSP_ID_PKEY,
+            Name="pKey",
+            ValueType="SINGLE_VALUED",
+            DefaultValues=StringDatasetParameterDefaultValues(
+                StaticValues=[META_KEY_ALL_SENTINEL],
+            ),
+        )),
+        DatasetParameter(StringDatasetParameter=StringDatasetParameter(
+            Id=_DSP_ID_PVALUES,
+            Name="pValues",
+            # Y.1.m: SINGLE_VALUED to match the analysis-level
+            # parameter shape (text-field control). Was MULTI_VALUED
+            # but the text-field control couldn't commit non-empty
+            # values to multi-valued params — broke the cascade.
+            ValueType="SINGLE_VALUED",
+            DefaultValues=StringDatasetParameterDefaultValues(
+                StaticValues=[META_VALUE_PLACEHOLDER_SENTINEL],
+            ),
+        )),
+        DatasetParameter(StringDatasetParameter=StringDatasetParameter(
+            Id=_DSP_ID_PTTTEMPLATE,
+            Name="pL2ftTtTemplate",
+            ValueType="MULTI_VALUED",
+            DefaultValues=StringDatasetParameterDefaultValues(
+                # An instance with no Templates declared → empty list →
+                # `IN ()` (invalid). Sentinel keeps it valid / zero-row.
+                StaticValues=(
+                    declared_template_names(l2_instance)
+                    or [PUSHDOWN_NO_MATCH_SENTINEL]
+                ),
+            ),
+        )),
+        DatasetParameter(StringDatasetParameter=StringDatasetParameter(
+            Id=_DSP_ID_PTTCOMPLETION,
+            Name="pL2ftTtCompletion",
+            ValueType="MULTI_VALUED",
+            DefaultValues=StringDatasetParameterDefaultValues(
+                StaticValues=tt_completion_status_values(),
+            ),
+        )),
+    ]
 
 
 def build_tt_legs_dataset(
@@ -2107,19 +2155,30 @@ def build_tt_legs_dataset(
         f"  FROM parent_firings pf\n"
         f"  JOIN declared d ON d.parent_name = pf.template_name\n"
         f")\n"
-        f"SELECT template_name, transfer_id, posting, account_name, "
+        # Y.2.e — wrap the UNION so `template_name` / `completion_status`
+        # (both real columns in each branch's projection) are visible to a
+        # single outer WHERE. Metadata cascade on `metadata` stays inside
+        # each branch (the column is in the CTEs but not the projection).
+        f"SELECT * FROM (\n"
+        f"  SELECT template_name, transfer_id, posting, account_name, "
         f"account_role, amount_money, amount_direction, amount_abs, "
         f"flow_source, flow_target, edge_kind, completion_status\n"
-        f"FROM template_legs\n"
-        f"WHERE\n"
+        f"  FROM template_legs\n"
+        f"  WHERE\n"
         f"{metadata_filter_clause(l2_instance, 'metadata', cfg.dialect)}\n"
-        f"UNION ALL\n"
-        f"SELECT template_name, transfer_id, posting, account_name, "
+        f"  UNION ALL\n"
+        f"  SELECT template_name, transfer_id, posting, account_name, "
         f"account_role, amount_money, amount_direction, amount_abs, "
         f"flow_source, flow_target, edge_kind, completion_status\n"
-        f"FROM chain_edges\n"
-        f"WHERE\n"
+        f"  FROM chain_edges\n"
+        f"  WHERE\n"
         f"{metadata_filter_clause(l2_instance, 'metadata', cfg.dialect)}\n"
+        f") tt_legs\n"
+        # Y.2.e — template / completion pushdown (mirrors tt-instances so
+        # the Template / Completion dropdowns narrow the Sankey + Table
+        # together — the M.3.10k denormalization made this pair available).
+        f"WHERE template_name IN (<<$pL2ftTtTemplate>>)\n"
+        f"  AND completion_status IN (<<$pL2ftTtCompletion>>)\n"
         f"ORDER BY posting DESC, template_name, transfer_id"
     )
     return build_dataset(
@@ -2127,26 +2186,5 @@ def build_tt_legs_dataset(
         "L2FT TT Legs", "l2ft-tt-legs",
         sql, TT_LEGS_CONTRACT,
         visual_identifier=DS_TT_LEGS,
-        dataset_parameters=[
-            DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id=_DSP_ID_PKEY,
-                Name="pKey",
-                ValueType="SINGLE_VALUED",
-                DefaultValues=StringDatasetParameterDefaultValues(
-                    StaticValues=[META_KEY_ALL_SENTINEL],
-                ),
-            )),
-            DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id=_DSP_ID_PVALUES,
-                Name="pValues",
-                # Y.1.m: SINGLE_VALUED to match the analysis-level
-                # parameter shape (text-field control). Was MULTI_VALUED
-                # but the text-field control couldn't commit non-empty
-                # values to multi-valued params — broke the cascade.
-                ValueType="SINGLE_VALUED",
-                DefaultValues=StringDatasetParameterDefaultValues(
-                    StaticValues=[META_VALUE_PLACEHOLDER_SENTINEL],
-                ),
-            )),
-        ],
+        dataset_parameters=_tt_dataset_parameters(l2_instance),
     )

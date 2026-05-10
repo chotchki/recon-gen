@@ -685,6 +685,91 @@ def test_metadata_value_control_is_text_field() -> None:
     )
 
 
+def test_tt_datasets_declare_cascade_and_pushdown_parameters() -> None:
+    """Y.2.e — both TransferTemplates datasets (tt-instances + tt-legs)
+    carry the same 4 params: the metadata cascade pair (pKey / pValues)
+    plus the template / completion pushdown pair (MULTI_VALUED). The
+    template default is the declared-template list, or the no-match
+    sentinel for an instance with zero templates (keeps `IN (...)` valid
+    + zero-row, not `IN ()`)."""
+    from quicksight_gen.apps.l2_flow_tracing.datasets import (
+        PUSHDOWN_NO_MATCH_SENTINEL, build_tt_instances_dataset,
+        build_tt_legs_dataset, declared_template_names,
+        tt_completion_status_values,
+    )
+    inst = load_instance(SASQUATCH_PR_YAML)
+    for build in (build_tt_instances_dataset, build_tt_legs_dataset):
+        params = build(_CFG, inst).DatasetParameters
+        assert params is not None and len(params) == 4, build.__name__
+        by_name = {
+            p.StringDatasetParameter.Name: p.StringDatasetParameter for p in params
+        }
+        assert by_name["pKey"].ValueType == "SINGLE_VALUED"
+        assert by_name["pValues"].ValueType == "SINGLE_VALUED"
+        assert by_name["pL2ftTtTemplate"].ValueType == "MULTI_VALUED"
+        assert by_name["pL2ftTtTemplate"].DefaultValues.StaticValues == (
+            declared_template_names(inst)
+        )
+        assert by_name["pL2ftTtCompletion"].ValueType == "MULTI_VALUED"
+        assert by_name["pL2ftTtCompletion"].DefaultValues.StaticValues == (
+            tt_completion_status_values()
+        )
+    # Empty-templates instance → sentinel fallback (no empty StaticValues).
+    from dataclasses import replace
+    no_tt = replace(inst, transfer_templates=[])
+    assert not declared_template_names(no_tt)
+    params = build_tt_instances_dataset(_CFG, no_tt).DatasetParameters
+    assert params is not None
+    by_name = {
+        p.StringDatasetParameter.Name: p.StringDatasetParameter for p in params
+    }
+    assert by_name["pL2ftTtTemplate"].DefaultValues.StaticValues == [
+        PUSHDOWN_NO_MATCH_SENTINEL,
+    ]
+
+
+def test_tt_datasets_push_template_completion_into_sql() -> None:
+    """Y.2.e — both TT datasets narrow on template / completion inside
+    the dataset SQL via multi-valued `<<$param>>` substitution; the
+    final SELECT (and the UNION-ALL for tt-legs) wraps in a subquery so
+    the CASE-aliased `completion_status` is visible to the outer WHERE.
+    Metadata cascade stays inner."""
+    from quicksight_gen.apps.l2_flow_tracing.datasets import (
+        build_tt_instances_dataset, build_tt_legs_dataset,
+    )
+    inst = load_instance(SASQUATCH_PR_YAML)
+    inst_sql = list(
+        build_tt_instances_dataset(_CFG, inst).PhysicalTableMap.values()
+    )[0].CustomSql.SqlQuery
+    legs_sql = list(
+        build_tt_legs_dataset(_CFG, inst).PhysicalTableMap.values()
+    )[0].CustomSql.SqlQuery
+    for sql, alias in ((inst_sql, "tt_instances"), (legs_sql, "tt_legs")):
+        assert f") {alias}\nWHERE template_name IN (<<$pL2ftTtTemplate>>)" in sql
+        assert "completion_status IN (<<$pL2ftTtCompletion>>)" in sql
+        # Metadata cascade still present, inside the subquery.
+        assert "<<$pKey>>" in sql and "<<$pValues>>" in sql
+    # tt-legs keeps the two-branch UNION ALL inside the wrapper.
+    assert legs_sql.count("UNION ALL") >= 1
+    assert "FROM template_legs" in legs_sql and "FROM chain_edges" in legs_sql
+
+
+def test_tt_pushdown_params_bridge_to_both_datasets() -> None:
+    """Y.2.e — the Template / Completion analysis params each bridge to
+    their namesake param on BOTH tt-instances AND tt-legs (so the Table
+    and the Sankey narrow together); no `fg-l2ft-tt-{template,completion}`
+    FilterGroups remain."""
+    app = build_l2_flow_tracing_app(_CFG)
+    for pname in ("pL2ftTtTemplate", "pL2ftTtCompletion"):
+        p = next(p for p in app.analysis.parameters if str(p.name) == pname)
+        assert p.mapped_dataset_params is not None
+        assert {
+            (ds.identifier, name) for ds, name in p.mapped_dataset_params
+        } == {("l2ft-tt-instances-ds", pname), ("l2ft-tt-legs-ds", pname)}
+    fg_ids = {str(fg.filter_group_id) for fg in app.analysis.filter_groups}
+    assert not (fg_ids & {"fg-l2ft-tt-template", "fg-l2ft-tt-completion"})
+
+
 # -- L2 Exceptions sheet (M.3.7) ---------------------------------------------
 
 

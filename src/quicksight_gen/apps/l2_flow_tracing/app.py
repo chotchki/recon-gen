@@ -504,9 +504,8 @@ def _populate_pushdown_dropdown(
     *,
     sheet: Sheet,
     analysis: Analysis,
-    dataset: Dataset,
+    bridges: list[tuple[Dataset, str]],
     param_name: ParameterName,
-    dataset_param: str,
     title: str,
     all_values: list[str],
 ) -> None:
@@ -516,15 +515,18 @@ def _populate_pushdown_dropdown(
     Wires two things:
 
     1. A multi-valued ``StringParam`` (default = the full closed-set of
-       values) bridged to ``dataset``'s ``dataset_param`` via
-       ``MappedDataSetParameters``. The dataset's CustomSQL substitutes
-       ``<<$dataset_param>>`` into a ``col IN (...)`` predicate.
+       values) bridged to each ``(dataset, dataset_param)`` pair in
+       ``bridges`` via ``MappedDataSetParameters``. Each dataset's
+       CustomSQL substitutes ``<<$dataset_param>>`` into a
+       ``col IN (...)`` predicate. (Usually one bridge; the Transfer
+       Templates sheet uses two — its Template / Completion dropdowns
+       narrow both the tt-instances Table and the tt-legs Sankey.)
     2. A ``ParameterDropdown(MULTI_SELECT, StaticValues)`` so the
        analyst deselects values to narrow.
 
     No FilterGroup — that's the difference from the
     ``_populate_param_filter_dropdown`` shape. Emptying the dropdown
-    reverts the dataset param to its default (= all values); QS does
+    reverts each dataset param to its default (= all values); QS does
     not emit ``IN ()`` (verified Y.2.c.0). Use this when the column is a
     real column in the dataset's source (or a CASE-alias the dataset SQL
     can re-reference via a subquery) so the predicate is pushable.
@@ -533,7 +535,7 @@ def _populate_pushdown_dropdown(
         name=param_name,
         multi_valued=True,
         default=list(all_values),
-        mapped_dataset_params=[(dataset, dataset_param)],
+        mapped_dataset_params=list(bridges),
     ))
     sheet.add_parameter_dropdown(
         parameter=p,
@@ -631,18 +633,18 @@ def _populate_rails_sheet(
     # options + a default spanning every value keeps "no narrowing" the
     # analyst's starting state without QS querying anything.
     _populate_pushdown_dropdown(
-        sheet=sheet, analysis=analysis, dataset=ds_postings,
-        param_name=ParameterName("pL2ftRail"), dataset_param="pL2ftRail",
+        sheet=sheet, analysis=analysis, bridges=[(ds_postings, "pL2ftRail")],
+        param_name=ParameterName("pL2ftRail"),
         title="Rail", all_values=declared_rail_names(l2_instance),
     )
     _populate_pushdown_dropdown(
-        sheet=sheet, analysis=analysis, dataset=ds_postings,
-        param_name=ParameterName("pL2ftStatus"), dataset_param="pL2ftStatus",
+        sheet=sheet, analysis=analysis, bridges=[(ds_postings, "pL2ftStatus")],
+        param_name=ParameterName("pL2ftStatus"),
         title="Status", all_values=transaction_status_values(),
     )
     _populate_pushdown_dropdown(
-        sheet=sheet, analysis=analysis, dataset=ds_postings,
-        param_name=ParameterName("pL2ftBundle"), dataset_param="pL2ftBundle",
+        sheet=sheet, analysis=analysis, bridges=[(ds_postings, "pL2ftBundle")],
+        param_name=ParameterName("pL2ftBundle"),
         title="Bundle", all_values=bundle_status_values(),
     )
 
@@ -807,15 +809,15 @@ def _populate_chains_sheet(
     # was a parameter-bound CategoryFilter; before that an empty
     # FilterDropdown that forced QS's lazy dropdown-options fetch.)
     _populate_pushdown_dropdown(
-        sheet=sheet, analysis=analysis, dataset=ds_chain_instances,
+        sheet=sheet, analysis=analysis,
+        bridges=[(ds_chain_instances, "pL2ftChainsChain")],
         param_name=ParameterName("pL2ftChainsChain"),
-        dataset_param="pL2ftChainsChain",
         title="Chain", all_values=declared_chain_parents(l2_instance),
     )
     _populate_pushdown_dropdown(
-        sheet=sheet, analysis=analysis, dataset=ds_chain_instances,
+        sheet=sheet, analysis=analysis,
+        bridges=[(ds_chain_instances, "pL2ftChainsCompletion")],
         param_name=ParameterName("pL2ftChainsCompletion"),
-        dataset_param="pL2ftChainsCompletion",
         title="Completion", all_values=chain_completion_status_values(),
     )
 
@@ -955,28 +957,32 @@ def _populate_transfer_templates_sheet(
     sheet.add_parameter_datetime_picker(parameter=date_start, title="Date From")
     sheet.add_parameter_datetime_picker(parameter=date_end, title="Date To")
 
-    # 3+4. Template + Completion — X.1.g — parameter-bound
-    # CategoryFilters with StaticValues source. Both keep ALL_DATASETS
-    # so tt-legs narrows in lockstep with tt-instances; M.3.10k
-    # denormalizes the same column names onto tt-legs to make this
-    # work.
-    _populate_param_filter_dropdown(
-        sheet=sheet, analysis=analysis, dataset=ds_tt_instances,
-        fg_id=FilterGroupId("fg-l2ft-tt-template"),
-        filter_id="filter-l2ft-tt-template",
+    # 3+4. Template + Completion — Y.2.e — pushed into BOTH the
+    # tt-instances dataset SQL (the Table) AND the tt-legs dataset SQL
+    # (the Sankey) via multi-valued dataset params; no FilterGroup. The
+    # dual bridge replaces the pre-Y.2.e `cross_dataset='ALL_DATASETS'`
+    # CategoryFilter — M.3.10k already denormalized `template_name` /
+    # `completion_status` onto tt-legs so both the Table and the Sankey
+    # narrow together, and that same denormalization makes the dual SQL
+    # pushdown work. (X.1.g had a StaticValues-backed param CategoryFilter;
+    # before that an empty FilterDropdown forcing QS's lazy options fetch.)
+    _populate_pushdown_dropdown(
+        sheet=sheet, analysis=analysis,
+        bridges=[
+            (ds_tt_instances, "pL2ftTtTemplate"),
+            (ds_tt_legs, "pL2ftTtTemplate"),
+        ],
         param_name=ParameterName("pL2ftTtTemplate"),
-        col="template_name", title="Template",
-        all_values=declared_template_names(l2_instance),
-        cross_dataset="ALL_DATASETS",
+        title="Template", all_values=declared_template_names(l2_instance),
     )
-    _populate_param_filter_dropdown(
-        sheet=sheet, analysis=analysis, dataset=ds_tt_instances,
-        fg_id=FilterGroupId("fg-l2ft-tt-completion"),
-        filter_id="filter-l2ft-tt-completion",
+    _populate_pushdown_dropdown(
+        sheet=sheet, analysis=analysis,
+        bridges=[
+            (ds_tt_instances, "pL2ftTtCompletion"),
+            (ds_tt_legs, "pL2ftTtCompletion"),
+        ],
         param_name=ParameterName("pL2ftTtCompletion"),
-        col="completion_status", title="Completion",
-        all_values=tt_completion_status_values(),
-        cross_dataset="ALL_DATASETS",
+        title="Completion", all_values=tt_completion_status_values(),
     )
 
     # 5+6. Metadata cascade — same mechanism as Rails / Chains.
