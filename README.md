@@ -318,19 +318,22 @@ src/quicksight_gen/
                         # for-your-role/, scenario/, Schema_v6.md, _diagrams/, _macros/.
                         # Renders against any L2 instance via mkdocs-macros + HandbookVocabulary.
 tests/                  # Mirror the artifact split: tests/{schema,data,json,docs,unit,e2e}/
-run_e2e.sh              # One-shot: regenerate + deploy + e2e
+run_tests.sh            # Layered test chain runner (unit → db → app2 → deploy → api → browser)
 config.example.yaml
 ```
 
 ## Tests
 
 ```bash
-pytest                  # unit + integration (fast, no AWS)
-./run_e2e.sh            # regenerate + deploy all four apps + e2e (pytest-xdist -n 4)
-./run_e2e.sh --parallel 8            # override worker count (1 = serial; stable ceiling ~8)
-./run_e2e.sh --skip-deploy api       # only API e2e
-./run_e2e.sh --skip-deploy browser   # only browser e2e
+./run_tests.sh up_to=unit                                  # ~20s, no DB / no AWS
+./run_tests.sh up_to=db                                    # full matrix (13 cells, parallel)
+./run_tests.sh up_to=db --dialects=pg --targets=lo         # pg-container only
+./run_tests.sh up_to=browser                               # full chain through Playwright
+./run_tests.sh up_to=api --variants=sp_pg_aw               # single AW cell, API only
+./run_tests.sh sweep --yes                                 # cleanup orphan AWS resources
 ```
+
+The runner enforces ordering — invoking layer N runs layers 1..N-1 first. See `CLAUDE.md::Test sequencing` for the full guide.
 
 Coverage:
 

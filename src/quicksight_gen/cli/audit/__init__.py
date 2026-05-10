@@ -66,6 +66,58 @@ from quicksight_gen.common.sql.dialect import date_literal
 from quicksight_gen.common.theme import DEFAULT_PRESET, resolve_l2_theme
 
 
+def _coerce_to_date(v: object) -> date:
+    """Normalize a DB-returned date-ish value to a ``datetime.date``.
+
+    Each dialect's DB-API driver returns DATE columns differently:
+    - psycopg (PG) → ``datetime.date``
+    - oracledb (Oracle) → ``datetime.datetime`` (always carries a time)
+    - sqlite3 (SQLite) → ``str`` ISO-format (no ``detect_types``;
+      ``connect_demo_db`` opens SQLite plainly so DATEs come back as text)
+
+    Downstream code calls ``.toordinal()`` / ``+ timedelta`` /
+    ``.isoformat()`` on the result, all of which need a real ``date``.
+    The pre-2026-05-09 helper only handled the datetime→date case
+    (``v.date() if hasattr(v, "date") else v``) — a SQLite ``str`` fell
+    through unchanged and blew up in the daily-statement walk sort.
+    """
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    if isinstance(v, str):
+        # ISO date or datetime prefix — `date.fromisoformat` accepts
+        # "YYYY-MM-DD"; for "YYYY-MM-DD HH:MM:SS" take the date part.
+        return date.fromisoformat(v[:10])
+    raise TypeError(f"cannot coerce {type(v).__name__} ({v!r}) to date")
+
+
+def _coerce_to_datetime(v: object) -> datetime:
+    """Normalize a DB-returned timestamp-ish value to a ``datetime``.
+
+    Same dialect divergence as ``_coerce_to_date`` — SQLite returns
+    TIMESTAMP columns as ISO ``str`` (``connect_demo_db`` opens SQLite
+    without ``detect_types``) while PG/Oracle return real ``datetime``.
+    Downstream code calls ``.strftime(...)`` on these (the daily-
+    statement / transaction-walk tables in ``audit/markdown.py`` +
+    ``audit/pdf.py``), which needs a real ``datetime``.
+
+    Accepts ``datetime`` (passthrough), ``date`` (→ midnight), and ISO
+    strings (``datetime.fromisoformat``; tolerates a trailing ``Z``).
+    """
+    if isinstance(v, datetime):
+        return v
+    if isinstance(v, date):
+        return datetime(v.year, v.month, v.day)
+    if isinstance(v, str):
+        s = v.rstrip("Z").strip()
+        # `datetime.fromisoformat` handles "YYYY-MM-DD HH:MM:SS[.ffffff]"
+        # and a bare "YYYY-MM-DD" (→ midnight). SQLite's CURRENT_TIMESTAMP
+        # produces "YYYY-MM-DD HH:MM:SS" which is ISO-compatible.
+        return datetime.fromisoformat(s)
+    raise TypeError(f"cannot coerce {type(v).__name__} ({v!r}) to datetime")
+
+
 @click.group()
 def audit() -> None:
     """Per-instance PDF reconciliation report (cover, summary, exceptions)."""
@@ -363,7 +415,7 @@ def _query_drift_violations(
                 account_role=str(r[2] or ""),
                 account_parent_role=str(r[3] or ""),
                 business_day=(
-                    r[4].date() if hasattr(r[4], "date") else r[4]
+                    _coerce_to_date(r[4])
                 ),
                 stored_balance=Decimal(r[5] or 0),
                 computed_balance=Decimal(r[6] or 0),
@@ -438,7 +490,7 @@ def _query_overdraft_violations(
                 account_role=str(r[2] or ""),
                 account_parent_role=str(r[3] or ""),
                 business_day=(
-                    r[4].date() if hasattr(r[4], "date") else r[4]
+                    _coerce_to_date(r[4])
                 ),
                 stored_balance=Decimal(r[5] or 0),
             )
@@ -575,7 +627,7 @@ def _query_limit_breach_violations(
                 account_role=str(r[2] or ""),
                 account_parent_role=str(r[3] or ""),
                 business_day=(
-                    r[4].date() if hasattr(r[4], "date") else r[4]
+                    _coerce_to_date(r[4])
                 ),
                 transfer_type=str(r[5] or ""),
                 outbound_total=Decimal(r[6] or 0),
@@ -711,7 +763,7 @@ def _query_stuck_pending_violations(
                 account_parent_role=str(r[3] or ""),
                 transaction_id=str(r[4]),
                 transfer_type=str(r[5] or ""),
-                posting=r[6],
+                posting=_coerce_to_datetime(r[6]),
                 amount_money=Decimal(r[7] or 0),
                 age_seconds=Decimal(r[8] or 0),
                 max_pending_age_seconds=int(r[9] or 0),
@@ -851,7 +903,7 @@ def _query_stuck_unbundled_violations(
                 account_parent_role=str(r[3] or ""),
                 transaction_id=str(r[4]),
                 transfer_type=str(r[5] or ""),
-                posting=r[6],
+                posting=_coerce_to_datetime(r[6]),
                 amount_money=Decimal(r[7] or 0),
                 age_seconds=Decimal(r[8] or 0),
                 max_unbundled_age_seconds=int(r[9] or 0),
@@ -1025,7 +1077,7 @@ def _query_supersession(
                 supersedes_category=str(r[1]),
                 account_id=str(r[2]),
                 account_name=str(r[3] or ""),
-                posting=r[4],
+                posting=_coerce_to_datetime(r[4]),
                 amount_money=Decimal(r[5] or 0),
             )
             for r in cur.fetchall()
@@ -1045,7 +1097,7 @@ def _query_supersession(
                 account_id=str(r[0]),
                 account_name=str(r[1] or ""),
                 business_day=(
-                    r[2].date() if hasattr(r[2], "date") else r[2]
+                    _coerce_to_date(r[2])
                 ),
                 supersedes_category=str(r[3]),
                 money=Decimal(r[4] or 0),
@@ -1181,14 +1233,12 @@ def _query_daily_statement_walks(
             pair_map[key] = (r[1], r[2], Decimal(r[3] or 0))
         if not pair_map:
             return []
-        def _to_date(v) -> date:  # type: ignore[no-untyped-def]: local helper, accepts datetime or date duck-typed
-            return v.date() if hasattr(v, "date") else v
 
         # Sort: business_day_end DESC, |drift| DESC, account_id ASC.
         sorted_pairs = sorted(
             pair_map.items(),
             key=lambda kv: (
-                -_to_date(kv[1][1]).toordinal(),
+                -_coerce_to_date(kv[1][1]).toordinal(),
                 -abs(kv[1][2]),
                 kv[0][0],
             ),
@@ -1199,7 +1249,7 @@ def _query_daily_statement_walks(
             sorted_pairs
         ):
             day_start_date = (
-                day_start.date() if hasattr(day_start, "date") else day_start
+                _coerce_to_date(day_start)
             )
             day_start_lit = date_literal(
                 day_start_date.isoformat(), cfg.dialect,
@@ -1252,7 +1302,7 @@ def _query_daily_statement_walks(
                     amount_money=Decimal(r[3] or 0),
                     amount_direction=str(r[4] or ""),
                     status=str(r[5] or ""),
-                    posting=r[6],
+                    posting=_coerce_to_datetime(r[6]),
                 )
                 for r in cur.fetchall()
             ]
@@ -1262,10 +1312,10 @@ def _query_daily_statement_walks(
                 account_name=str(account_name or ""),
                 account_role=str(account_role or ""),
                 business_day_start=(
-                    bd_start.date() if hasattr(bd_start, "date") else bd_start
+                    _coerce_to_date(bd_start)
                 ),
                 business_day_end=(
-                    bd_end.date() if hasattr(bd_end, "date") else bd_end
+                    _coerce_to_date(bd_end)
                 ),
                 opening_balance=Decimal(opening or 0),
                 total_debits=Decimal(debits or 0),

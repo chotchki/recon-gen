@@ -1,5 +1,108 @@
 # Release Notes
 
+## v8.8.0a17 — Y.2.gate.l + d/e/f/h/j/c closeouts + SQLite audit fix
+
+Seventeenth alpha. Closes Y.2.gate.l (ephemeral AWS infra), d (test
+sequencing in CLAUDE.md), e (synthetic regression audit), f
+("validate then delete-or-fold" sweep), plus retroactive master ticks
+for h / j / c (all sub-items already landed). Y.2.gate open masters
+after this: **b** (b.14.* runner ergonomics + b.15.lint.dict-vs-mapping
+deferred) and **k** (k.1.coverage Phase 3, blocked on this merge +
+the new CI infra activating) and **n** (terminal gate).
+
+### gate.l — Ephemeral AWS infra (start/stop both ways)
+
+- `common/aws_rds.py` — thin boto3 RDS wrapper (start/stop/get_status,
+  idempotent on InvalidDB*StateFault). On the boto3-direct lint
+  allowlist (5th known wrapper). Expanded `RdsStatus` enum to cover
+  `upgrading` / `backing-up` / `configuring-*` / failure states
+  (surfaced live: Oracle in `upgrading` was showing `unknown`).
+- `_dev/runner.py` — `cmd_up` / `cmd_down` / `cmd_status` fully
+  implemented. `up aws` starts the cfg-declared cluster + instance and
+  polls until `available`; `down aws` stops them (async, no poll);
+  `status [--cost]` shows local Docker + AWS RDS state with rough
+  hourly estimates (only literal `stopped` gets storage-only price —
+  `upgrading`/`starting`/etc. bill compute). Loads cfg via the
+  existing `_resolve_seed_config` discovery + injects `AWS_PROFILE`
+  from `cfg.auth.aws_profile` so long-lived IAM keys flow through.
+- `common/config.py` + `env_keys.py` — `aws_pg_cluster_id` +
+  `aws_oracle_instance_id` cfg fields; `QS_GEN_AWS_*_ID` env overrides.
+- `_probe_aws_rds_running` (gate.l.3) — new dispatch probe wired into
+  `_LAYER_DEPS` for `deploy` / `api` / `browser`. Refuses dispatch
+  with "Run `./run_tests.sh up aws` first" when the cfg-declared
+  cluster ≠ `available`, *before* container spin-up — vs the old
+  failure mode of `psycopg.connection refused` 5 min into the deploy
+  step. Skipped when cfg fields unset (opt-in shape).
+- CI workflows (gate.l.1) — `e2e.yml::e2e-pg-{api,browser}`,
+  `e2e.yml::e2e-oracle-api`, `release.yml::e2e-against-testpypi` each
+  gain a pre-deploy `aws rds start-db-{cluster,instance}` +
+  `if: always()` post-cleanup `stop-db-{cluster,instance}` step,
+  gated `if: env.X != ''` on `secrets.QS_GEN_AWS_PG_CLUSTER_ID` /
+  `_ORACLE_INSTANCE_ID` (set → activates; unset → pre-gate.l shape).
+- Provisioning runbook at `docs/audits/y_2_gate_l_ci_aws_provisioning.md`
+  (manual `qsgen-ci-aurora` + `qsgen-ci-oracle` creation, IAM
+  additions for the OIDC role + the local IAM user, GH secret setup).
+  `docs/audits/_iam/quicksight-gen-local-policy.json` extended with
+  the `RDSLifecycle` statement.
+- 16 new unit tests (boto3 mocks). 1312 unit suite green; pyright
+  strict clean.
+
+### gate.d — Test sequencing locked in CLAUDE.md
+
+CLAUDE.md `Test sequencing + git hooks` section gained the
+prescriptive "Never invoke `pytest tests/e2e/` directly for layered
+work" rule (Y.2.b SQL bug as the cost example) + a pre-dispatch
+probes paragraph for gate.l.3. Memory mirror at
+`feedback_test_layer_chain.md`.
+
+### gate.e — Synthetic regression audit
+
+Three planted-bug experiments verified live: pyright violation → halts
+at `unit`; failing unit test → halts at `unit`; SELECT-alias-in-WHERE
+SQL bug → halts at `db` via `test_dataset_sql_smoke.py`. Audit at
+`docs/audits/y_2_gate_e_synthetic_regression.md` carries the
+planted-bug shapes, observed outputs, replay incantations, and a
+coverage matrix mapping each bug class → catch layer → mechanism.
+
+### gate.f — "Validate then delete-or-fold" closeout
+
+`run_e2e.sh` deleted — bare `pytest tests/e2e` invocation directly
+violated gate.d, plus a dead `--harness` flag (test file removed in
+f.9). README + CLAUDE.md updated to `./run_tests.sh up_to=<layer>`
+examples. `scripts/` now: 1 file (`dump_top_queries.py` thin shim,
+kept until k.6 retires CI's direct calls).
+
+### SQLite audit-PDF date handling
+
+Surfaced by the gate.e chain doing its job: the SQLite cells died at
+the db layer in `test_audit_pdf_render_verify.py` — SQLite returns
+DATE/TIMESTAMP columns as ISO strings (`connect_demo_db` opens SQLite
+without `detect_types`), but the audit module assumed `datetime`
+objects (`.toordinal()` on a str in the daily-statement sort;
+`.strftime()` on a str in the transaction-walk tables). New
+`_coerce_to_date` / `_coerce_to_datetime` helpers in
+`cli/audit/__init__.py` replace the 8 ad-hoc
+`.date() if hasattr(...) else ...` sites + wrap the 4 `posting=r[N]`
+construction sites. Not a gate.l regression — `test_audit_pdf_render_verify.py`
+landed in a16; the full matrix just runs a SQLite cell with a
+drift-heavy seed which exercises the daily-statement walk.
+
+### Known reds (pre-existing, filed as follow-ups)
+
+The first full-matrix `./run_tests.sh up_to=browser` run surfaced
+two classes of pre-existing failure unrelated to this release:
+
+- **Oracle concurrent-DDL contention** — `sq_or_lo` / `sp_or_aw` /
+  `sq_or_aw` hit `ORA-00054` / `ORA-04021` lock-timeout at
+  `schema apply` when sibling Oracle cells run DDL against the same
+  multi-tenant single-instance Oracle. Runner-side follow-up:
+  serialize Oracle cells (or retry DDL on lock-timeout).
+- **AW PG browser** — `test_l2ft_*_dropdowns` (backlog: rewrite or
+  delete the L2FT cascade test), `test_exec/inv_dashboard_structure_matches_tree`
+  (likely QS silent-failure on the shared account — usually clears on
+  redeploy), `test_audit_dashboard_agreement[postgres-supersession]`
+  (known render flake noted in m.4.f).
+
 ## v8.8.0a16 — Y.2.gate.k.1.absorb-audit + thin-wrapper + k.6 closeout
 
 Sixteenth alpha. Closes Y.2.gate.k.1.absorb-audit (Phase 2.5),

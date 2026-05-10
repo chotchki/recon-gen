@@ -131,6 +131,25 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
+      # Y.2.gate.l.1 — Bring the CI-dedicated cluster up before the
+      # test deploy, stop it in the always() teardown below. Skipped
+      # silently when the secret is unset (the pre-gate.l shape; the
+      # job runs against whatever cluster `secrets.QS_GEN_PG_URL`
+      # already points at). Once the operator provisions
+      # `qsgen-ci-aurora` per docs/audits/y_2_gate_l_ci_aws_provisioning.md
+      # and sets `secrets.QS_GEN_AWS_PG_CLUSTER_ID=qsgen-ci-aurora`,
+      # the workflow flips over without further code changes.
+      # `aws rds start-db-cluster` is idempotent (already-running →
+      # InvalidDBClusterStateFault, swallowed by `|| true`); `wait`
+      # then blocks until status hits `available`.
+      - name: Start PG cluster (gate.l.1)
+        env:
+          PG_CLUSTER_ID: ${{ secrets.QS_GEN_AWS_PG_CLUSTER_ID }}
+        if: env.PG_CLUSTER_ID != ''
+        run: |
+          aws rds start-db-cluster --db-cluster-identifier "$PG_CLUSTER_ID" || true
+          aws rds wait db-cluster-available --db-cluster-identifier "$PG_CLUSTER_ID"
+
       - name: Generate per-run config.yaml
         # ``resource_prefix`` carries the unique GHA run ID so CI runs
         # don't trample each other's QS resources. ``principal_arns``
@@ -226,6 +245,17 @@ jobs:
           .venv/bin/quicksight-gen json clean -c /tmp/ci-pg.yaml -o /tmp/empty-out --execute || true
           .venv/bin/quicksight-gen schema clean -c /tmp/ci-pg.yaml --execute || true
 
+      # Y.2.gate.l.1 — Stop the cluster after cleanup so storage cost
+      # is the only ongoing charge between runs. ``stop`` is async on
+      # the RDS side (returns once the request is accepted; status
+      # transitions through ``stopping`` → ``stopped`` over a few
+      # minutes). ``|| true`` swallows the already-stopped case.
+      - name: Stop PG cluster (gate.l.1)
+        env:
+          PG_CLUSTER_ID: ${{ secrets.QS_GEN_AWS_PG_CLUSTER_ID }}
+        if: always() && env.PG_CLUSTER_ID != ''
+        run: aws rds stop-db-cluster --db-cluster-identifier "$PG_CLUSTER_ID" || true
+
   # W.6 — browser-tier sweep. Runs the deeper Playwright e2e (sheet
   # visuals, filters, drilldown) against a deployed QS dashboard.
   #
@@ -294,6 +324,18 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
+
+      # Y.2.gate.l.1 — Mirror of e2e-pg-api start step. Same secret;
+      # browser job uses the same cluster as the API job (both gated
+      # by the e2e-pg concurrency group so they don't deploy
+      # concurrently).
+      - name: Start PG cluster (gate.l.1)
+        env:
+          PG_CLUSTER_ID: ${{ secrets.QS_GEN_AWS_PG_CLUSTER_ID }}
+        if: env.PG_CLUSTER_ID != ''
+        run: |
+          aws rds start-db-cluster --db-cluster-identifier "$PG_CLUSTER_ID" || true
+          aws rds wait db-cluster-available --db-cluster-identifier "$PG_CLUSTER_ID"
 
       - name: Generate per-run config.yaml
         run: |
@@ -381,6 +423,15 @@ jobs:
           .venv/bin/quicksight-gen json clean -c /tmp/ci-pg-browser.yaml -o /tmp/empty-out --execute || true
           .venv/bin/quicksight-gen schema clean -c /tmp/ci-pg-browser.yaml --execute || true
 
+      # Y.2.gate.l.1 — Stop the cluster after browser cleanup. The
+      # api job's identical step is independent — both can fire,
+      # boto3 stop is idempotent.
+      - name: Stop PG cluster (gate.l.1)
+        env:
+          PG_CLUSTER_ID: ${{ secrets.QS_GEN_AWS_PG_CLUSTER_ID }}
+        if: always() && env.PG_CLUSTER_ID != ''
+        run: aws rds stop-db-cluster --db-cluster-identifier "$PG_CLUSTER_ID" || true
+
   # W.5b — Oracle API leg. Mirror of ``e2e-pg-api`` against the
   # operator's external Oracle (RDS Oracle SE2 in us-east-1), pointed at
   # by the ``QS_GEN_ORACLE_URL`` secret set in W.0.b. Same 6 API test
@@ -429,6 +480,18 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
+
+      # Y.2.gate.l.1 — Oracle is a single-instance RDS, not Aurora;
+      # the boto3 verb is `start-db-instance` / `stop-db-instance`
+      # (not `*-db-cluster`). Same skip-if-secret-unset shape as PG
+      # so the job stays gate.l-ready without breaking pre-secret runs.
+      - name: Start Oracle instance (gate.l.1)
+        env:
+          ORACLE_INSTANCE_ID: ${{ secrets.QS_GEN_AWS_ORACLE_INSTANCE_ID }}
+        if: env.ORACLE_INSTANCE_ID != ''
+        run: |
+          aws rds start-db-instance --db-instance-identifier "$ORACLE_INSTANCE_ID" || true
+          aws rds wait db-instance-available --db-instance-identifier "$ORACLE_INSTANCE_ID"
 
       - name: Generate per-run config.yaml
         run: |
@@ -495,6 +558,14 @@ jobs:
           mkdir -p /tmp/empty-out
           .venv/bin/quicksight-gen json clean -c /tmp/ci-oracle.yaml -o /tmp/empty-out --execute || true
           .venv/bin/quicksight-gen schema clean -c /tmp/ci-oracle.yaml --execute || true
+
+      # Y.2.gate.l.1 — Stop the Oracle instance after cleanup. Same
+      # idempotent shape as the start step.
+      - name: Stop Oracle instance (gate.l.1)
+        env:
+          ORACLE_INSTANCE_ID: ${{ secrets.QS_GEN_AWS_ORACLE_INSTANCE_ID }}
+        if: always() && env.ORACLE_INSTANCE_ID != ''
+        run: aws rds stop-db-instance --db-instance-identifier "$ORACLE_INSTANCE_ID" || true
 
   # W.7 — workflow-level always-cleanup. Belt-and-suspenders over the
   # per-job ``Cleanup (always)`` step on ``e2e-pg-api``. The per-job

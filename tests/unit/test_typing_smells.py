@@ -47,12 +47,13 @@ Four checks today, all extensible — drop a new ``Check`` into
   rng.X(...)`` instead.
 
 - **boto3-direct** (Y.2.gate.b.15.lint.boto3-direct) — direct
-  ``boto3.client(...)`` calls outside the 4 known production
+  ``boto3.client(...)`` calls outside the 5 known production
   wrappers (``common/deploy.py``, ``common/cleanup.py``,
-  ``common/browser/helpers.py``, ``_dev/runner.py``). Stray clients
-  bypass the ``ManagedBy: quicksight-gen`` tagging convention →
-  break ``cleanup``. Tests can freely use ``boto3.client`` (scope
-  is src/ only).
+  ``common/browser/helpers.py``, ``common/aws_rds.py``,
+  ``_dev/runner.py``). Stray clients bypass the
+  ``ManagedBy: quicksight-gen`` tagging convention → break
+  ``cleanup``. Tests can freely use ``boto3.client`` (scope is
+  src/ only).
 
 - **qs-gen-prefix** (Y.2.gate.b.15.lint.qs-gen-prefix) — hardcoded
   ``"qs-gen-..."`` string literals in src code outside
@@ -585,13 +586,13 @@ class _Boto3DirectVisitor(ast.NodeVisitor):
                 checker="boto3-direct",
                 message=(
                     "direct ``boto3.client(...)`` call — production "
-                    "AWS access goes through one of the 4 known "
+                    "AWS access goes through one of the 5 known "
                     "wrappers (``common/deploy.py``, ``common/cleanup.py``, "
-                    "``common/browser/helpers.py``, ``_dev/runner.py``) "
-                    "so resources stay tagged ``ManagedBy: "
-                    "quicksight-gen`` and ``cleanup`` finds them. If "
-                    "this site is genuinely a new wrapper, add it to "
-                    "the lint's allowlist; otherwise route through "
+                    "``common/browser/helpers.py``, ``common/aws_rds.py``, "
+                    "``_dev/runner.py``) so resources stay tagged "
+                    "``ManagedBy: quicksight-gen`` and ``cleanup`` finds "
+                    "them. If this site is genuinely a new wrapper, add "
+                    "it to the lint's allowlist; otherwise route through "
                     "an existing one. Suppress with ``# typing-smell: "
                     "ignore[boto3-direct]: <reason>`` if intentional."
                 ),
@@ -1202,11 +1203,11 @@ def _build_checks() -> list[Check]:
         Boto3DirectCheck(
             name="boto3-direct",
             description=(
-                "direct ``boto3.client(...)`` outside the 4 known "
+                "direct ``boto3.client(...)`` outside the 5 known "
                 "production wrappers — bypasses the ManagedBy tagging "
                 "convention; route through ``common/deploy.py``, "
                 "``common/cleanup.py``, ``common/browser/helpers.py``, "
-                "or ``_dev/runner.py`` instead"
+                "``common/aws_rds.py``, or ``_dev/runner.py`` instead"
             ),
             files=[
                 p for p in _expand_paths(
@@ -1215,6 +1216,7 @@ def _build_checks() -> list[Check]:
                 if p != REPO_ROOT / "src/quicksight_gen/common/deploy.py"
                 and p != REPO_ROOT / "src/quicksight_gen/common/cleanup.py"
                 and p != REPO_ROOT / "src/quicksight_gen/common/browser/helpers.py"
+                and p != REPO_ROOT / "src/quicksight_gen/common/aws_rds.py"
                 and p != REPO_ROOT / "src/quicksight_gen/_dev/runner.py"
             ],
         ),

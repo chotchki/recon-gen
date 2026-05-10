@@ -128,9 +128,15 @@ _RUN_ID_PATTERN: Final = re.compile(r"^\d{8}T\d{6}Z-\w+(?:-dirty)?$")
 # tests/unit/test_runner_skeleton.py::test_layer_deps_match_audit (c.14).
 #
 # Probe kinds (matched to _probe_* function names):
-#   "aws"     — AWS creds present + not expired (sts:GetCallerIdentity).
-#   "docker"  — Docker daemon reachable (`docker ps`).
-#   "qs_arn"  — QS_E2E_USER_ARN set (browser e2e signs embed URLs as this user).
+#   "aws"             — AWS creds present + not expired (sts:GetCallerIdentity).
+#   "docker"          — Docker daemon reachable (`docker ps`).
+#   "qs_arn"          — QS_E2E_USER_ARN set (browser e2e signs embed URLs as this user).
+#   "aws_rds_running" — Y.2.gate.l.3 — cfg-declared RDS cluster + instance
+#                       are 'available'. Refuses dispatch BEFORE container
+#                       spin-up so a stopped cluster doesn't burn ~5min of
+#                       deploy chatter to surface "connection refused".
+#                       Skipped (passes through) when cfg fields are unset
+#                       — operator hasn't opted in to cfg-driven lifecycle.
 #
 # DB connectivity is probed via cfg-loaded URLs and lands when Y.2.gate.h.2
 # (cfg-driven DB strings) wires up. For now, layers that need DB rely on the
@@ -143,9 +149,9 @@ _LAYER_DEPS: Final[dict[str, frozenset[str]]] = {
     # only by design (audit §7.10 LOCKED — App2 = local-feedback gate;
     # QS = AWS-deploy parity cell at 6/7).
     "app2": frozenset({"docker"}),
-    "deploy": frozenset({"aws", "docker"}),
-    "api": frozenset({"aws", "docker"}),
-    "browser": frozenset({"aws", "docker", "qs_arn"}),
+    "deploy": frozenset({"aws", "docker", "aws_rds_running"}),
+    "api": frozenset({"aws", "docker", "aws_rds_running"}),
+    "browser": frozenset({"aws", "docker", "qs_arn", "aws_rds_running"}),
 }
 
 
@@ -314,11 +320,97 @@ def _probe_qs_e2e_user_arn() -> ProbeFailure | None:
     )
 
 
+def _probe_aws_rds_running() -> ProbeFailure | None:
+    """Y.2.gate.l.3 — verify cfg-declared RDS resources are 'available'
+    before dispatching deploy/api/browser layers.
+
+    Without this probe a stopped Aurora cluster surfaces as a
+    psycopg ``connection refused`` deep inside the deploy step's
+    first SQL call — operator wastes ~5 min on container spin-up +
+    boto3 chatter before seeing the actionable error. With it, the
+    chain refuses at dispatch time with "run `./run_tests.sh up aws`
+    first".
+
+    Skipped (passes through) when both ``cfg.aws_pg_cluster_id`` and
+    ``cfg.aws_oracle_instance_id`` are unset — that's the operator
+    opting out of cfg-driven lifecycle (e.g., they manage clusters
+    via console / Terraform / etc., or they're using legacy
+    pre-gate.l shape). Same opt-in shape as ``cmd_up_aws`` /
+    ``cmd_status``.
+
+    Loads cfg via the lifecycle-helper which also injects
+    ``AWS_PROFILE`` from ``cfg.auth.aws_profile`` so the boto3 RDS
+    calls hit the long-lived IAM keys (matches gate.h.1 pattern).
+    """
+    cfg = _load_runner_cfg_for_lifecycle()
+    if cfg is None:
+        # No cfg discoverable — fall through; the `aws` probe will
+        # surface the auth-or-cfg failure on its own. Layered probes
+        # don't double-fail.
+        return None
+    if cfg.aws_pg_cluster_id is None and cfg.aws_oracle_instance_id is None:
+        return None
+
+    from quicksight_gen.common.aws_rds import RdsResource, get_status  # noqa: PLC0415 — lazy
+    failures: list[str] = []
+
+    if cfg.aws_pg_cluster_id is not None:
+        resource = RdsResource(
+            kind="cluster",
+            identifier=cfg.aws_pg_cluster_id,
+            aws_region=cfg.aws_region,
+        )
+        try:
+            status = get_status(resource)
+            if status != "available":
+                failures.append(
+                    f"PG cluster {cfg.aws_pg_cluster_id!r}: {status} "
+                    f"(not 'available')"
+                )
+        except Exception as exc:  # noqa: BLE001 — surface AWS errors to operator
+            failures.append(
+                f"PG cluster {cfg.aws_pg_cluster_id!r}: ERROR — {exc}"
+            )
+
+    if cfg.aws_oracle_instance_id is not None:
+        resource = RdsResource(
+            kind="instance",
+            identifier=cfg.aws_oracle_instance_id,
+            aws_region=cfg.aws_region,
+        )
+        try:
+            status = get_status(resource)
+            if status != "available":
+                failures.append(
+                    f"Oracle instance {cfg.aws_oracle_instance_id!r}: "
+                    f"{status} (not 'available')"
+                )
+        except Exception as exc:  # noqa: BLE001
+            failures.append(
+                f"Oracle instance {cfg.aws_oracle_instance_id!r}: "
+                f"ERROR — {exc}"
+            )
+
+    if not failures:
+        return None
+
+    return ProbeFailure(
+        kind="aws_rds_not_running",
+        message=(
+            "Cfg-declared RDS resources are not all 'available':\n  "
+            + "\n  ".join(failures)
+            + "\nRun './run_tests.sh up aws' first (or bring the "
+            "resources up via console) before re-invoking."
+        ),
+    )
+
+
 _ProbeFunc = Callable[[], "ProbeFailure | None"]
 _PROBE_FUNCTIONS: Final[dict[str, _ProbeFunc]] = {
     "aws": _probe_aws,
     "docker": _probe_docker,
     "qs_arn": _probe_qs_e2e_user_arn,
+    "aws_rds_running": _probe_aws_rds_running,
 }
 
 
@@ -2615,27 +2707,375 @@ def _compose_specs_from_options(
     return partition_matrix(sc_specs, di_codes, ta_codes)
 
 
+# Y.2.gate.l.2 — RDS lifecycle commands. Helpers below the cmd_*
+# triple. They depend on the cfg loader (lazy import keeps cmd_pyright
+# / cmd_up_to fast paths free of cfg parse cost when not needed).
+
+
+def _load_runner_cfg_for_lifecycle() -> Config | None:
+    """Find + load the operator's cfg for the lifecycle commands. Same
+    discovery shape as ``_probe_aws_creds`` — QS_GEN_CONFIG override
+    first, then ``run/config.yaml`` / ``run/config.postgres.yaml`` /
+    ``run/config.oracle.yaml``. Returns None when none found OR when
+    the loaded cfg fails validation; caller surfaces operator-actionable
+    guidance.
+
+    Y.2.gate.l.2 — when cfg carries ``auth.aws_profile``, also injects
+    ``AWS_PROFILE`` into ``os.environ`` so the boto3 RDS client picks
+    up the operator's long-lived IAM keys (matches the per-variant
+    subprocess auth pattern from gate.h.1; lifecycle commands run in
+    the parent process so they need the env set here directly).
+    """
+    cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
+    if cfg_path is None:
+        return None
+    try:
+        from quicksight_gen.common.config import load_config  # noqa: PLC0415 — lazy
+        cfg = load_config(str(cfg_path))
+    except Exception as exc:  # noqa: BLE001 — operator-facing failure surface, not silent
+        print(
+            f"runner: failed to load cfg from {cfg_path}: {exc}",
+            file=sys.stderr,
+        )
+        return None
+    if cfg.auth is not None and cfg.auth.aws_profile is not None:
+        os.environ["AWS_PROFILE"] = cfg.auth.aws_profile
+    return cfg
+
+
+def _resolve_rds_resources(cfg: Config) -> tuple[Any, Any]:
+    """Build per-resource RdsResource objects from cfg. Returns
+    ``(pg_resource | None, oracle_resource | None)`` — None when the
+    matching cfg field is unset (operator hasn't configured that
+    resource yet). Lazy import of aws_rds so the cmd_pyright fast path
+    stays import-cheap.
+    """
+    from quicksight_gen.common.aws_rds import RdsResource  # noqa: PLC0415 — lazy: keep cmd_pyright fast path light
+
+    pg = (
+        RdsResource(kind="cluster", identifier=cfg.aws_pg_cluster_id,
+                    aws_region=cfg.aws_region)
+        if cfg.aws_pg_cluster_id is not None
+        else None
+    )
+    oracle = (
+        RdsResource(kind="instance", identifier=cfg.aws_oracle_instance_id,
+                    aws_region=cfg.aws_region)
+        if cfg.aws_oracle_instance_id is not None
+        else None
+    )
+    return pg, oracle
+
+
+def _poll_until(
+    resource: Any,
+    target_status: str,
+    *,
+    timeout_s: int = 900,
+    interval_s: int = 10,
+) -> str:
+    """Poll ``aws_rds.get_status`` until the status matches ``target_status``
+    or ``timeout_s`` elapses. Returns the final observed status. Logs
+    each poll to stdout so the operator sees progress.
+
+    Aurora cold-start is ~5-7 minutes; Oracle ~3-5 minutes. The 900s
+    (15min) cap leaves headroom for first-boot. Caller decides whether
+    a non-target final status is a failure or just a "still in flight".
+    """
+    from quicksight_gen.common.aws_rds import get_status  # noqa: PLC0415 — lazy
+    deadline = time.monotonic() + timeout_s
+    last_status: str = ""
+    while time.monotonic() < deadline:
+        status = get_status(resource)
+        if status != last_status:
+            print(f"runner: {resource.identifier} → {status}")
+            last_status = status
+        if status == target_status:
+            return status
+        time.sleep(interval_s)
+    return last_status or "timeout"
+
+
 def cmd_up(args: argparse.Namespace) -> int:
-    """Boot dependencies. scope = local | aws | all (default)."""
-    print(f"runner: up scope={args.scope} — not implemented yet (Y.2.gate.l.2)")
+    """Boot dependencies. scope = local | aws | all (default).
+
+    - **local**: no-op. Local PG / Oracle / SQLite spin on-demand
+      inside ``setup_variant`` per matrix cell — there's no shared
+      "local cluster" to start. Reported for symmetry with ``down``.
+    - **aws**: start the cfg-declared Aurora cluster + Oracle instance
+      (`cfg.aws_pg_cluster_id` / `cfg.aws_oracle_instance_id`). Polls
+      each until status hits ``available``. Idempotent — already-running
+      resources return immediately. Loud-fails when the cfg fields are
+      unset with a pointer to the gate.l provisioning runbook.
+    - **all** (default): both. Local first (fast no-op), then AWS.
+    """
+    scope = args.scope
+    if scope == "local":
+        return _cmd_up_local()
+    if scope == "aws":
+        return _cmd_up_aws()
+    if scope == "all":
+        rc_local = _cmd_up_local()
+        rc_aws = _cmd_up_aws()
+        return rc_local or rc_aws
+    print(f"runner: unknown up scope {scope!r}", file=sys.stderr)
     return EXIT_NEEDS_OPERATOR
+
+
+def _cmd_up_local() -> int:
+    """Local containers are demand-spawned by setup_variant; nothing to
+    pre-boot. Reported for symmetry — operator can `up local` and the
+    next `up_to=db --targets=lo` invocation will just work."""
+    print(
+        "runner: up local — no-op "
+        "(local containers spin on-demand per matrix cell)"
+    )
+    return EXIT_SUCCESS
+
+
+def _cmd_up_aws() -> int:
+    """Start cfg-declared RDS resources + poll until available."""
+    cfg = _load_runner_cfg_for_lifecycle()
+    if cfg is None:
+        print(
+            "runner: up aws — no cfg discoverable. Set QS_GEN_CONFIG or "
+            "place run/config.{postgres,oracle}.yaml.",
+            file=sys.stderr,
+        )
+        return EXIT_NEEDS_OPERATOR
+    pg, oracle = _resolve_rds_resources(cfg)
+    if pg is None and oracle is None:
+        print(
+            "runner: up aws — neither cfg.aws_pg_cluster_id nor "
+            "cfg.aws_oracle_instance_id set. Add them to your cfg "
+            "(see docs/audits/y_2_gate_l_ci_aws_provisioning.md) or "
+            "set QS_GEN_AWS_PG_CLUSTER_ID / QS_GEN_AWS_ORACLE_INSTANCE_ID.",
+            file=sys.stderr,
+        )
+        return EXIT_NEEDS_OPERATOR
+    from quicksight_gen.common.aws_rds import start  # noqa: PLC0415 — lazy
+    final_rc = EXIT_SUCCESS
+    for resource in (pg, oracle):
+        if resource is None:
+            continue
+        try:
+            print(f"runner: starting {resource.kind} {resource.identifier}…")
+            initial = start(resource)
+            if initial == "available":
+                print(
+                    f"runner: {resource.identifier} already available — no wait"
+                )
+                continue
+            final = _poll_until(resource, "available")
+            if final != "available":
+                print(
+                    f"runner: {resource.identifier} did not reach "
+                    f"'available' (final={final!r}) — check AWS console",
+                    file=sys.stderr,
+                )
+                final_rc = EXIT_FAILURE
+        except Exception as exc:  # noqa: BLE001 — surface AWS errors to operator
+            print(f"runner: start {resource.identifier} failed: {exc}", file=sys.stderr)
+            final_rc = EXIT_NEEDS_OPERATOR
+    return final_rc
 
 
 def cmd_down(args: argparse.Namespace) -> int:
     """Tear down dependencies. scope = local | aws | all (default).
 
-    Destructive — requires --yes (Y.2.gate.b.14.3 destructive-op opt-in)."""
+    Destructive — requires --yes (Y.2.gate.b.14.3 destructive-op
+    opt-in). For ``local``, stops the named persistent Oracle
+    containers (PG containers are ephemeral, no action needed). For
+    ``aws``, calls ``stop_db_cluster`` / ``stop_db_instance``;
+    idempotent + non-blocking (stop takes minutes; runner returns
+    after the stop request is accepted, doesn't poll).
+    """
     if not args.yes and not QS_GEN_RUNNER_YES.get_or_none():
-        print("runner: 'down' is destructive — pass --yes (or set QS_GEN_RUNNER_YES=1)", file=sys.stderr)
+        print(
+            "runner: 'down' is destructive — pass --yes "
+            "(or set QS_GEN_RUNNER_YES=1)",
+            file=sys.stderr,
+        )
         return EXIT_NEEDS_OPERATOR
-    print(f"runner: down scope={args.scope} --yes — not implemented yet (Y.2.gate.l.2)")
+    scope = args.scope
+    if scope == "local":
+        return _cmd_down_local()
+    if scope == "aws":
+        return _cmd_down_aws()
+    if scope == "all":
+        rc_local = _cmd_down_local()
+        rc_aws = _cmd_down_aws()
+        return rc_local or rc_aws
+    print(f"runner: unknown down scope {scope!r}", file=sys.stderr)
     return EXIT_NEEDS_OPERATOR
+
+
+def _cmd_down_local() -> int:
+    """Stop persistent local containers (Oracle reuse pattern from j.5).
+    PG containers are ephemeral — testcontainers tears them down per
+    test session — so no action there.
+    """
+    result = subprocess.run(
+        ["docker", "ps", "--filter",
+         f"name={ORACLE_REUSE_CONTAINER_PREFIX}", "--format", "{{.Names}}"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        print(
+            f"runner: docker ps failed (rc={result.returncode}): "
+            f"{result.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return EXIT_NEEDS_OPERATOR
+    names = [n for n in result.stdout.strip().splitlines() if n]
+    if not names:
+        print("runner: down local — no persistent local containers running")
+        return EXIT_SUCCESS
+    for name in names:
+        print(f"runner: stopping container {name}…")
+        stop_rc = subprocess.run(
+            ["docker", "stop", name], capture_output=True, text=True, check=False,
+        )
+        if stop_rc.returncode != 0:
+            print(
+                f"runner: docker stop {name} failed: {stop_rc.stderr.strip()}",
+                file=sys.stderr,
+            )
+            return EXIT_FAILURE
+    return EXIT_SUCCESS
+
+
+def _cmd_down_aws() -> int:
+    """Stop cfg-declared RDS resources. Stop is asynchronous on the
+    RDS side; runner doesn't poll for ``stopped`` (would add ~5min).
+    Operator can ``./run_tests.sh status`` to confirm.
+    """
+    cfg = _load_runner_cfg_for_lifecycle()
+    if cfg is None:
+        print(
+            "runner: down aws — no cfg discoverable. Set QS_GEN_CONFIG or "
+            "place run/config.{postgres,oracle}.yaml.",
+            file=sys.stderr,
+        )
+        return EXIT_NEEDS_OPERATOR
+    pg, oracle = _resolve_rds_resources(cfg)
+    if pg is None and oracle is None:
+        print(
+            "runner: down aws — neither cfg.aws_pg_cluster_id nor "
+            "cfg.aws_oracle_instance_id set. Nothing to stop.",
+            file=sys.stderr,
+        )
+        return EXIT_NEEDS_OPERATOR
+    from quicksight_gen.common.aws_rds import stop  # noqa: PLC0415 — lazy
+    final_rc = EXIT_SUCCESS
+    for resource in (pg, oracle):
+        if resource is None:
+            continue
+        try:
+            print(f"runner: stopping {resource.kind} {resource.identifier}…")
+            status = stop(resource)
+            print(f"runner: {resource.identifier} → {status}")
+        except Exception as exc:  # noqa: BLE001 — surface AWS errors
+            print(f"runner: stop {resource.identifier} failed: {exc}", file=sys.stderr)
+            final_rc = EXIT_NEEDS_OPERATOR
+    return final_rc
+
+
+# Y.2.gate.l.2 — rough hourly cost estimates for `status --cost`. We
+# don't query AWS pricing API; values are rounded approximations from
+# us-east-1 list prices for typical demo instance sizes (db.r5.large
+# Aurora, db.t3.small Oracle SE2). Marked "rough" in output so operator
+# isn't misled into treating these as billing-grade.
+_ROUGH_HOURLY_COSTS: Final[dict[str, float]] = {
+    "aurora-cluster-running": 0.30,    # db.r5.large compute
+    "aurora-cluster-stopped": 0.05,    # storage only (varies)
+    "oracle-instance-running": 0.10,   # db.t3.small SE2
+    "oracle-instance-stopped": 0.02,   # storage only
+}
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    """Show what's currently running. --cost for hourly cost estimate."""
-    print(f"runner: status (cost={args.cost}) — not implemented yet (Y.2.gate.l.2)")
-    return EXIT_NEEDS_OPERATOR
+    """Show what's currently running. --cost adds rough hourly
+    estimates so the operator's cost surface stays visible.
+
+    Two sections:
+
+    - **local**: docker containers matching ``ORACLE_REUSE_CONTAINER_PREFIX``
+      (the j.5 named-Oracle reuse set). Ephemeral PG containers don't
+      show up here — they live ~test-session and `docker ps` may catch
+      them in flight, but the runner doesn't manage them.
+    - **aws**: cfg-declared RDS resources via ``aws_rds.get_status``.
+      Loud-fails when neither cfg field is set.
+    """
+    print("runner: status — local containers")
+    _status_local()
+    print()
+    print("runner: status — AWS RDS resources")
+    rc = _status_aws(show_cost=bool(args.cost))
+    return rc
+
+
+def _status_local() -> None:
+    result = subprocess.run(
+        ["docker", "ps", "-a", "--filter",
+         f"name={ORACLE_REUSE_CONTAINER_PREFIX}",
+         "--format", "{{.Names}}\t{{.Status}}"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        print(f"  docker ps failed (rc={result.returncode})")
+        return
+    rows = [r for r in result.stdout.strip().splitlines() if r]
+    if not rows:
+        print("  (none — no persistent local containers)")
+        return
+    for row in rows:
+        print(f"  {row}")
+
+
+def _status_aws(*, show_cost: bool) -> int:
+    cfg = _load_runner_cfg_for_lifecycle()
+    if cfg is None:
+        print("  no cfg discoverable; skip AWS status")
+        return EXIT_NEEDS_OPERATOR
+    pg, oracle = _resolve_rds_resources(cfg)
+    if pg is None and oracle is None:
+        print(
+            "  cfg has no aws_pg_cluster_id or aws_oracle_instance_id; "
+            "nothing to query"
+        )
+        return EXIT_SUCCESS
+    from quicksight_gen.common.aws_rds import get_status  # noqa: PLC0415 — lazy
+    total_hourly = 0.0
+    for resource in (pg, oracle):
+        if resource is None:
+            continue
+        try:
+            status = get_status(resource)
+        except Exception as exc:  # noqa: BLE001 — operator-facing
+            print(f"  {resource.identifier}: ERROR — {exc}")
+            continue
+        line = f"  {resource.kind} {resource.identifier}: {status}"
+        if show_cost:
+            # Only the literal `stopped` state gets storage-only billing;
+            # everything else (available, starting, upgrading, backing-up,
+            # …) bills compute. The runner's pricing is rough by
+            # definition (no Pricing API call) but conflating
+            # transitional states with stopped underreports cost during
+            # multi-hour boots — meaningful when Oracle takes 30+ min.
+            running = status != "stopped"
+            cost_key = (
+                f"aurora-cluster-{'running' if running else 'stopped'}"
+                if resource.kind == "cluster"
+                else f"oracle-instance-{'running' if running else 'stopped'}"
+            )
+            cost = _ROUGH_HOURLY_COSTS.get(cost_key, 0.0)
+            total_hourly += cost
+            line += f"  (~${cost:.2f}/hr)"
+        print(line)
+    if show_cost:
+        print(f"  rough total: ~${total_hourly:.2f}/hr (estimates only)")
+    return EXIT_SUCCESS
 
 
 def cmd_pyright(args: argparse.Namespace) -> int:

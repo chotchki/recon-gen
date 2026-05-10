@@ -570,3 +570,36 @@ QS_GEN_APP2_DB_POOL_SIZE: Final = EnvVar(
     optional=True,
     # No validator — load_config does the int coercion + range check.
 )
+
+# Y.2.gate.l — RDS identifiers for the start/stop lifecycle commands.
+# RDS identifier rules: 1-63 chars, lowercase alphanumeric + hyphens,
+# starts with a letter, no trailing hyphen, no consecutive hyphens.
+# `cmd_up aws` / `cmd_down aws` / `cmd_status` read these to know which
+# cluster + instance to act on; CI workflows inject them as the CI-side
+# identifiers (separate from operator's local-dev ones — see gate.l.0
+# provisioning runbook).
+_RDS_IDENT_RE: Final = re.compile(r"[a-z][a-z0-9]*(-[a-z0-9]+)*")
+
+QS_GEN_AWS_PG_CLUSTER_ID: Final = EnvVar(
+    name="QS_GEN_AWS_PG_CLUSTER_ID",
+    description=(
+        "Aurora PG cluster identifier (e.g., 'database-2' or "
+        "'qsgen-ci-aurora') — overrides cfg.aws_pg_cluster_id. "
+        "Required for `./run_tests.sh up aws` / `down aws` / `status`."
+    ),
+    coercer=str,
+    optional=True,
+    validator=matches(_RDS_IDENT_RE),
+)
+
+QS_GEN_AWS_ORACLE_INSTANCE_ID: Final = EnvVar(
+    name="QS_GEN_AWS_ORACLE_INSTANCE_ID",
+    description=(
+        "Oracle RDS instance identifier (e.g., 'database-3' or "
+        "'qsgen-ci-oracle') — overrides cfg.aws_oracle_instance_id. "
+        "Required for `./run_tests.sh up aws` / `down aws` / `status`."
+    ),
+    coercer=str,
+    optional=True,
+    validator=matches(_RDS_IDENT_RE),
+)

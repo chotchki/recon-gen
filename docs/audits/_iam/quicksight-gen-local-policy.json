@@ -59,6 +59,19 @@
         "quicksight:ListUsers"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "RDSLifecycle",
+      "Effect": "Allow",
+      "Action": [
+        "rds:StartDBCluster",
+        "rds:StopDBCluster",
+        "rds:StartDBInstance",
+        "rds:StopDBInstance",
+        "rds:DescribeDBClusters",
+        "rds:DescribeDBInstances"
+      ],
+      "Resource": "*"
     }
   ]
 }

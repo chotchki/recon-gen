@@ -15,6 +15,8 @@ import yaml
 from quicksight_gen.common.env_keys import (
     QS_GEN_APP2_DB_POOL_SIZE,
     QS_GEN_AWS_ACCOUNT_ID,
+    QS_GEN_AWS_ORACLE_INSTANCE_ID,
+    QS_GEN_AWS_PG_CLUSTER_ID,
     QS_GEN_AWS_REGION,
     QS_GEN_DATASOURCE_ARN,
     QS_GEN_DEMO_DATABASE_URL,
@@ -161,6 +163,17 @@ class Config:
     # default 100 minus 3 superuser slots = ~97 budget). Oracle's
     # connection cost is higher; integrators rarely run pools >25.
     app2_db_pool_size: int = 10
+    # Y.2.gate.l — RDS identifiers for the start/stop lifecycle.
+    # `./run_tests.sh up aws` / `down aws` / `status` read these to
+    # know which Aurora cluster + Oracle instance to act on. Local
+    # operator's cfg points at the dev clusters (e.g. database-2 /
+    # database-3); CI's per-job env injects the CI-side identifiers
+    # (`qsgen-ci-aurora` / `qsgen-ci-oracle`) so the two lifecycles
+    # don't step on each other (per gate.l.0 provisioning runbook).
+    # Both optional — when unset, the lifecycle commands loud-fail
+    # at the dispatch site with the env-var fallback name.
+    aws_pg_cluster_id: str | None = None
+    aws_oracle_instance_id: str | None = None
 
     def __post_init__(self) -> None:
         # If demo_database_url is set but datasource_arn is not, derive it
@@ -305,7 +318,7 @@ _CONFIG_ALLOWED_KEYS: frozenset[str] = frozenset({
     "aws_account_id", "aws_region", "datasource_arn", "resource_prefix",
     "principal_arns", "principal_arn", "extra_tags", "demo_database_url",
     "dialect", "signing", "tagging_enabled", "app2_db_pool_size", "auth",
-    "default_l2_instance",
+    "default_l2_instance", "aws_pg_cluster_id", "aws_oracle_instance_id",
 })
 
 _CONFIG_L2_ONLY_KEYS: frozenset[str] = frozenset({
@@ -428,6 +441,8 @@ def load_config(path: str | Path | None = None) -> Config:
         "demo_database_url": QS_GEN_DEMO_DATABASE_URL,
         "dialect": QS_GEN_DIALECT,
         "app2_db_pool_size": QS_GEN_APP2_DB_POOL_SIZE,
+        "aws_pg_cluster_id": QS_GEN_AWS_PG_CLUSTER_ID,
+        "aws_oracle_instance_id": QS_GEN_AWS_ORACLE_INSTANCE_ID,
     }
     for cfg_key, spec in env_map.items():
         env_val = spec.get_or_none()
@@ -588,4 +603,6 @@ def load_config(path: str | Path | None = None) -> Config:
         default_l2_instance=_opt_str(values, "default_l2_instance"),
         tagging_enabled=raw_tagging,
         app2_db_pool_size=pool_size,
+        aws_pg_cluster_id=_opt_str(values, "aws_pg_cluster_id"),
+        aws_oracle_instance_id=_opt_str(values, "aws_oracle_instance_id"),
     )

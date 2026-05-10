@@ -323,6 +323,19 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
+      # Y.2.gate.l.1 — Bring the CI cluster up before the release
+      # e2e deploy. Same secret as e2e.yml; the release pipeline shares
+      # the e2e-pg concurrency group so it never deploys concurrently
+      # with a standalone e2e run on the same cluster. Skipped when
+      # secret unset (pre-gate.l shape).
+      - name: Start PG cluster (gate.l.1)
+        env:
+          PG_CLUSTER_ID: ${{ secrets.QS_GEN_AWS_PG_CLUSTER_ID }}
+        if: env.PG_CLUSTER_ID != ''
+        run: |
+          aws rds start-db-cluster --db-cluster-identifier "$PG_CLUSTER_ID" || true
+          aws rds wait db-cluster-available --db-cluster-identifier "$PG_CLUSTER_ID"
+
       - name: Generate per-run config.yaml
         # ``resource_prefix`` carries the release tag for traceability;
         # the ``ResourcePrefix`` AWS tag on every deployed resource
@@ -379,6 +392,13 @@ jobs:
           mkdir -p /tmp/empty-out
           /tmp/qs-release-e2e/bin/quicksight-gen json clean -c /tmp/release-e2e.yaml -o /tmp/empty-out --execute || true
           /tmp/qs-release-e2e/bin/quicksight-gen schema clean -c /tmp/release-e2e.yaml --execute || true
+
+      # Y.2.gate.l.1 — Stop the cluster after release-e2e cleanup.
+      - name: Stop PG cluster (gate.l.1)
+        env:
+          PG_CLUSTER_ID: ${{ secrets.QS_GEN_AWS_PG_CLUSTER_ID }}
+        if: always() && env.PG_CLUSTER_ID != ''
+        run: aws rds stop-db-cluster --db-cluster-identifier "$PG_CLUSTER_ID" || true
 
   # ---------------------------------------------------------------------------
   # Publish to PyPI (gated on TestPyPI install verify + e2e gate +

@@ -86,12 +86,10 @@ quicksight-gen audit verify report.pdf -c config.yaml   # recompute + compare pr
 ./run_tests.sh sweep                                       # dry-run cleanup of orphan AWS resources
 ./run_tests.sh sweep --yes                                 # actual cleanup
 
-# Legacy direct invocations (still work; runner is the new canonical path)
-pytest                              # unit + integration, fast, no AWS
-./run_e2e.sh                        # regenerate + deploy 4 apps + e2e (pytest-xdist -n 4)
-./run_e2e.sh --parallel 8           # override worker count (1 = serial; ceiling ~8)
-./run_e2e.sh --skip-deploy api      # API e2e only
-./run_e2e.sh --skip-deploy browser  # browser e2e only
+# Direct pytest is fine for one-off iteration on a single test you're
+# actively writing. For layered work (anything beyond unit tests), use
+# the runner — see "Test sequencing" section below.
+.venv/bin/pytest tests/unit/test_foo.py -k bar -v
 ```
 
 The `data apply --execute` path reads theme from the L2 institution YAML's inline `theme:` block; when omitted, deploy skips emitting a Theme resource and AWS QuickSight CLASSIC takes over (silent-fallback contract). Schema is emitted per-L2-instance via `common/l2/schema.py::emit_schema(l2_instance)` — base tables (`<prefix>_transactions`, `<prefix>_daily_balances`), Current* views, L1 invariant matviews, Investigation matviews. Seed via `emit_full_seed(l2_instance, scenario)` — composes `emit_baseline_seed` (90-day per-Rail leg generator) + `emit_seed` (planted L1/Investigation scenarios).
@@ -141,9 +139,13 @@ When `aws_profile` is set:
 
 **Loud failure on missing config (h.5):** `load_config` raises `ValueError("Missing required configuration: ...")` with the missing field names AND the env-var fallbacks (`QS_GEN_AWS_ACCOUNT_ID`, etc.). `connect_demo_db` raises with "set it in your config YAML or via QS_GEN_DEMO_DATABASE_URL." Runner catches both → `EXIT_NEEDS_OPERATOR=2` with the message bubbled to stderr. Probes (`probe_dependencies` for AWS / Docker / cfg-load) fire pre-dispatch and short-circuit the chain with the same exit code. No silent skips.
 
-### Test sequencing + git hooks (`Y.2.gate.k.5`+`k.7`)
+### Test sequencing + git hooks (`Y.2.gate.d`+`k.5`+`k.7`)
 
-**Always invoke `./run_tests.sh up_to=<layer>`** for the layer you care about. The chain runner enforces `unit → db → app2 → deploy → api → browser` ordering — invoking `pytest tests/e2e/` directly skips earlier gates and leaves layer-1 / layer-2 violations to surface at deploy time. The runner is the canonical entry point.
+**Always invoke `./run_tests.sh up_to=<layer>`** for the layer you care about. The chain runner enforces `unit → db → app2 → deploy → api → browser` ordering: invoking layer N runs layers 1..N-1 first.
+
+**Never invoke `pytest tests/e2e/` (or any direct `pytest`) for layered work.** Bare pytest skips the earlier gates entirely — a SQL bug becomes "the API e2e passed but the deployed dashboard is empty" 15 minutes after a clean test run, instead of a 30-second smoke failure. Y.2.b's SELECT-alias-in-WHERE bug shipped to a deployed dashboard for exactly this reason. Direct pytest is fine for one-off iteration on a single test you're actively writing; treat it as a smell when the chain hasn't run since.
+
+**Pre-dispatch probes (`Y.2.gate.l.3`).** Before the runner spins up containers or fires AWS calls, it probes live state for every dep the requested layer needs: `aws sts get-caller-identity` (creds), `docker ps` (daemon), `QS_E2E_USER_ARN` (browser embed), and `aws rds describe-db-{cluster,instance}` (cfg-declared cluster + instance status when set). Refuses with `EXIT_NEEDS_OPERATOR=2` and an actionable message ("Run `./run_tests.sh up aws` first") rather than burning ~5 min on container spin-up before surfacing "connection refused".
 
 **Pre-push git hook (`k.5`).** Operator opts in once per clone:
 
