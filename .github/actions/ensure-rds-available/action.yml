@@ -1,6 +1,6 @@
 name: Ensure RDS available
 description: >
-  Y.2.gate.l.5 — bring a CI-dedicated RDS cluster (Aurora) or instance to
+  Y.2.gate.l.7 — bring a CI-dedicated RDS cluster (Aurora) or instance to
   `available`, tolerating in-flight transitions. The naive
   `start-db-cluster || true; wait db-cluster-available` raced: a sibling
   job's fire-and-forget `stop` leaves the resource `stopping`, so `start`

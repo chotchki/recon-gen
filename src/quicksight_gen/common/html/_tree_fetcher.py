@@ -39,7 +39,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from quicksight_gen.common.config import Config
-from quicksight_gen.common.dataset_contract import get_sql
+from quicksight_gen.common.dataset_contract import get_dataset_params, get_sql
 from quicksight_gen.common.db import AsyncConnectionPool
 from quicksight_gen.common.html._data_shape import shape_for_kind
 from quicksight_gen.common.html._sql_executor import execute_visual_sql_async
@@ -160,7 +160,8 @@ def make_tree_db_fetcher(
     # aggregation (KPI count → SELECT COUNT, BarChart → GROUP BY
     # category, etc.). Without this, KPI visuals would render one
     # card per dataset row instead of the aggregated value QS shows.
-    visual_index: dict[VisualId, tuple[str, str | None]] = {}
+    # (kind, wrapped_sql | None, dataset_identifier | None) per visual.
+    visual_index: dict[VisualId, tuple[str, str | None, str | None]] = {}
     for sheet in tree_app.analysis.sheets:
         for visual in sheet.visuals:
             # ``visual.visual_id`` is ``VisualId | AutoResolved`` per
@@ -178,7 +179,7 @@ def make_tree_db_fetcher(
             if ds_id is not None:
                 base_sql = get_sql(ds_id)
                 sql = wrap_for_visual(base_sql, visual)
-            visual_index[vid] = (kind, sql)
+            visual_index[vid] = (kind, sql, ds_id)
 
     async def fetcher(visual_id: VisualId, params: Mapping[str, str]) -> Any:  # typing-smell: ignore[explicit-any]: per-visual-kind shape (KPI float, Sankey {nodes,links}, etc.) — JSON-serialized downstream, so a real union here would be every renderer's shape
         if visual_id not in visual_index:
@@ -186,7 +187,7 @@ def make_tree_db_fetcher(
             # cached page. Return empty so the d3 renderers paint
             # an empty visual instead of throwing.
             return {}
-        kind, sql = visual_index[visual_id]
+        kind, sql, ds_id = visual_index[visual_id]
         if sql is None:
             # Visual without a SQL-backed dataset (text box etc.).
             # Empty payload renders as a blank visual — fine for
@@ -194,6 +195,10 @@ def make_tree_db_fetcher(
             return {}
         rows, columns = await execute_visual_sql_async(
             pool, sql, params, dialect=cfg.dialect,
+            # Y.2.app2.cde — resolve `<<$paramName>>` defaults from
+            # the dataset's QS parameters when the URL doesn't supply
+            # them (keeps the freshly-loaded page consistent with QS).
+            dataset_parameters=get_dataset_params(ds_id) if ds_id else [],
         )
         # ForceGraph + Sankey have specialized projectors today
         # (_db_fetcher._topology_to_force_graph, etc.); the generic

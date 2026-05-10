@@ -323,14 +323,14 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
-      # gate.l.5 — resilient cluster bring-up. Shares the `e2e-pg`
+      # gate.l.7 — resilient cluster bring-up. Shares the `e2e-pg`
       # concurrency group with e2e.yml's PG jobs (so this never deploys
       # concurrently with a standalone e2e run), but e2e.yml's
       # `cleanup-pg` stop leaves the cluster `stopping` — so this step
       # must tolerate that (the old `start || true; wait available`
       # deadlocked there: it hit v8.8.0a18's release). No-op when the
       # secret is unset (pre-gate.l shape).
-      - name: Ensure PG cluster available (gate.l.5)
+      - name: Ensure PG cluster available (gate.l.7)
         uses: ./.github/actions/ensure-rds-available
         with:
           cluster-id: ${{ secrets.QS_GEN_AWS_PG_CLUSTER_ID }}
@@ -392,10 +392,10 @@ jobs:
           /tmp/qs-release-e2e/bin/quicksight-gen json clean -c /tmp/release-e2e.yaml -o /tmp/empty-out --execute || true
           /tmp/qs-release-e2e/bin/quicksight-gen schema clean -c /tmp/release-e2e.yaml --execute || true
 
-      # gate.l.5 — stop the cluster after release-e2e cleanup. Async on
+      # gate.l.7 — stop the cluster after release-e2e cleanup. Async on
       # the RDS side; e2e.yml's PG jobs use `ensure-rds-available` which
       # tolerates the resulting `stopping` state.
-      - name: Stop PG cluster (gate.l.5)
+      - name: Stop PG cluster (gate.l.7)
         env:
           PG_CLUSTER_ID: ${{ secrets.QS_GEN_AWS_PG_CLUSTER_ID }}
         if: always() && env.PG_CLUSTER_ID != ''

@@ -264,6 +264,40 @@ def register_sql(visual_identifier: str, sql: str) -> None:
     _SQL_REGISTRY[visual_identifier] = sql
 
 
+# Y.2.app2.cde — visual_identifier → the dataset's QS `DatasetParameter`
+# list. App2's `_sql_executor` reads this to resolve a `<<$paramName>>`
+# placeholder's *default* (string-substituted) when the URL doesn't
+# supply that param — keeping the freshly-loaded App2 page consistent
+# with how QuickSight renders the dashboard (where the dataset
+# parameter's DefaultValues apply on initial load). Empty list for
+# datasets with no parameters; populated by `build_dataset()` alongside
+# `register_sql`.
+_DSP_REGISTRY: dict[str, list[DatasetParameter]] = {}
+
+
+def register_dataset_params(
+    visual_identifier: str, params: list[DatasetParameter],
+) -> None:
+    """Register a visual_identifier → dataset-parameter list mapping.
+
+    Same overwrite-on-repeat semantics as ``register_sql``. Pass ``[]``
+    (or omit, via ``build_dataset(dataset_parameters=None)``) for a
+    dataset with no parameters — ``get_dataset_params`` then returns
+    ``[]`` and the App2 executor leaves any stray placeholder for the
+    bind-variable fallback.
+    """
+    _DSP_REGISTRY[visual_identifier] = list(params)
+
+
+def get_dataset_params(visual_identifier: str) -> list[DatasetParameter]:
+    """Look up the dataset-parameter list registered under
+    ``visual_identifier``. Returns ``[]`` if nothing was registered —
+    unlike ``get_sql`` this is not an error (most datasets have no
+    parameters; the App2 executor handles the empty case gracefully).
+    """
+    return list(_DSP_REGISTRY.get(visual_identifier, []))
+
+
 def get_sql(visual_identifier: str) -> str:
     """Look up the SQL registered under ``visual_identifier``.
 
@@ -377,6 +411,10 @@ def build_dataset(
         register_sql(visual_identifier, app2_sql)
     else:
         register_sql(visual_identifier, sql)
+    # Y.2.app2.cde — register the dataset's QS parameters too, so the
+    # App2 executor can resolve a `<<$paramName>>` placeholder's default
+    # (string-substituted) when the URL doesn't supply that param.
+    register_dataset_params(visual_identifier, dataset_parameters or [])
     columns = contract.to_input_columns()
     # Config.__post_init__ guarantees datasource_arn is non-None
     # post-construction (raises if neither it nor demo_database_url

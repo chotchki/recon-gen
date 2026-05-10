@@ -131,7 +131,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
-      # Y.2.gate.l.5 — resilient cluster bring-up. Handles a sibling
+      # Y.2.gate.l.7 — resilient cluster bring-up. Handles a sibling
       # job's in-flight `stopping` (the pre-l.4 `start || true; wait
       # available` deadlocked there) and only issues `start` when the
       # cluster is truly `stopped`. No-op when the secret is unset
@@ -139,7 +139,7 @@ jobs:
       # `secrets.QS_GEN_PG_URL` points at). Teardown moved to
       # `cleanup-pg` (runs after both PG jobs) so the cluster isn't
       # stopped between e2e-pg-api and e2e-pg-browser.
-      - name: Ensure PG cluster available (gate.l.5)
+      - name: Ensure PG cluster available (gate.l.7)
         uses: ./.github/actions/ensure-rds-available
         with:
           cluster-id: ${{ secrets.QS_GEN_AWS_PG_CLUSTER_ID }}
@@ -239,7 +239,7 @@ jobs:
           .venv/bin/quicksight-gen json clean -c /tmp/ci-pg.yaml -o /tmp/empty-out --execute || true
           .venv/bin/quicksight-gen schema clean -c /tmp/ci-pg.yaml --execute || true
 
-      # gate.l.5 — cluster teardown moved to `cleanup-pg` (runs after
+      # gate.l.7 — cluster teardown moved to `cleanup-pg` (runs after
       # BOTH e2e-pg-api and e2e-pg-browser). Stopping it here would put
       # the cluster into `stopping` just as e2e-pg-browser starts up,
       # which deadlocked the old `start || true; wait available` step.
@@ -313,11 +313,11 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
-      # gate.l.5 — resilient cluster bring-up (mirror of e2e-pg-api).
+      # gate.l.7 — resilient cluster bring-up (mirror of e2e-pg-api).
       # `needs: e2e-pg-api` means the cluster is usually already
       # `available` here (api leaves it running; teardown is in
       # `cleanup-pg`), but a fresh-start path stays robust.
-      - name: Ensure PG cluster available (gate.l.5)
+      - name: Ensure PG cluster available (gate.l.7)
         uses: ./.github/actions/ensure-rds-available
         with:
           cluster-id: ${{ secrets.QS_GEN_AWS_PG_CLUSTER_ID }}
@@ -408,7 +408,7 @@ jobs:
           .venv/bin/quicksight-gen json clean -c /tmp/ci-pg-browser.yaml -o /tmp/empty-out --execute || true
           .venv/bin/quicksight-gen schema clean -c /tmp/ci-pg-browser.yaml --execute || true
 
-      # gate.l.5 — cluster teardown moved to `cleanup-pg`.
+      # gate.l.7 — cluster teardown moved to `cleanup-pg`.
 
   # W.5b — Oracle API leg. Mirror of ``e2e-pg-api`` against the
   # operator's external Oracle (RDS Oracle SE2 in us-east-1), pointed at
@@ -459,11 +459,11 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
-      # gate.l.5 — resilient instance bring-up (Oracle is a single-
+      # gate.l.7 — resilient instance bring-up (Oracle is a single-
       # instance RDS, not Aurora — the composite action picks the
       # `*-db-instance` verbs from the `instance-id` input). Teardown
       # moved to `cleanup-oracle`.
-      - name: Ensure Oracle instance available (gate.l.5)
+      - name: Ensure Oracle instance available (gate.l.7)
         uses: ./.github/actions/ensure-rds-available
         with:
           instance-id: ${{ secrets.QS_GEN_AWS_ORACLE_INSTANCE_ID }}
@@ -534,7 +534,7 @@ jobs:
           .venv/bin/quicksight-gen json clean -c /tmp/ci-oracle.yaml -o /tmp/empty-out --execute || true
           .venv/bin/quicksight-gen schema clean -c /tmp/ci-oracle.yaml --execute || true
 
-      # gate.l.5 — instance teardown moved to `cleanup-oracle`.
+      # gate.l.7 — instance teardown moved to `cleanup-oracle`.
 
   # W.7 — workflow-level always-cleanup. Belt-and-suspenders over the
   # per-job ``Cleanup (always)`` step on ``e2e-pg-api``. The per-job
@@ -637,14 +637,14 @@ jobs:
           .venv/bin/quicksight-gen json clean -c /tmp/ci-pg-browser.yaml -o /tmp/empty-out --execute || true
           .venv/bin/quicksight-gen schema clean -c /tmp/ci-pg.yaml --execute || true
 
-      # gate.l.5 — sole cluster teardown. `cleanup-pg` `needs:` both
+      # gate.l.7 — sole cluster teardown. `cleanup-pg` `needs:` both
       # e2e-pg-api + e2e-pg-browser and is `if: always()`, so it runs
       # last regardless of how the PG jobs ended (or whether
       # e2e-pg-browser was skipped). Storage cost is the only ongoing
       # charge between runs; `|| true` swallows the already-stopped
       # case. Async on the RDS side — leaves the cluster `stopping`,
       # which the next run's `ensure-rds-available` waits out.
-      - name: Stop PG cluster (gate.l.5)
+      - name: Stop PG cluster (gate.l.7)
         env:
           PG_CLUSTER_ID: ${{ secrets.QS_GEN_AWS_PG_CLUSTER_ID }}
         if: env.PG_CLUSTER_ID != ''
@@ -709,11 +709,11 @@ jobs:
           .venv/bin/quicksight-gen json clean -c /tmp/ci-oracle.yaml -o /tmp/empty-out --execute || true
           .venv/bin/quicksight-gen schema clean -c /tmp/ci-oracle.yaml --execute || true
 
-      # gate.l.5 — sole Oracle-instance teardown (mirror of cleanup-pg's
+      # gate.l.7 — sole Oracle-instance teardown (mirror of cleanup-pg's
       # cluster stop). `cleanup-oracle` `needs: e2e-oracle-api` and is
       # `if: always()`. Async on the RDS side — leaves the instance
       # `stopping`, which the next run's `ensure-rds-available` waits out.
-      - name: Stop Oracle instance (gate.l.5)
+      - name: Stop Oracle instance (gate.l.7)
         env:
           ORACLE_INSTANCE_ID: ${{ secrets.QS_GEN_AWS_ORACLE_INSTANCE_ID }}
         if: env.ORACLE_INSTANCE_ID != ''

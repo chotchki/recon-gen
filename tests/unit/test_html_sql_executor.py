@@ -24,14 +24,56 @@ import pytest
 
 from quicksight_gen.common.db import AsyncConnectionPool, make_connection_pool
 from quicksight_gen.common.html._sql_executor import (
+    apply_dataset_param_defaults,
     collect_bind_params,
     execute_visual_sql,
     execute_visual_sql_async,
     rewrite_placeholders_for_dialect,
     translate_qs_dataset_params,
 )
+from quicksight_gen.common.models import (
+    DatasetParameter,
+    IntegerDatasetParameter,
+    IntegerDatasetParameterDefaultValues,
+    StringDatasetParameter,
+    StringDatasetParameterDefaultValues,
+)
 from quicksight_gen.common.sql.dialect import Dialect
 from tests._test_helpers import make_test_config
+
+
+def _string_dsp(
+    name: str, *, value_type: str, defaults: list[str] | None
+) -> DatasetParameter:
+    return DatasetParameter(
+        StringDatasetParameter=StringDatasetParameter(
+            Id=f"id-{name}",
+            Name=name,
+            ValueType=value_type,
+            DefaultValues=(
+                StringDatasetParameterDefaultValues(StaticValues=defaults)
+                if defaults is not None
+                else None
+            ),
+        )
+    )
+
+
+def _int_dsp(
+    name: str, *, value_type: str, defaults: list[int] | None
+) -> DatasetParameter:
+    return DatasetParameter(
+        IntegerDatasetParameter=IntegerDatasetParameter(
+            Id=f"id-{name}",
+            Name=name,
+            ValueType=value_type,
+            DefaultValues=(
+                IntegerDatasetParameterDefaultValues(StaticValues=defaults)
+                if defaults is not None
+                else None
+            ),
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +133,130 @@ def test_translate_then_rewrite_pg_yields_pyformat_binds() -> None:
     assert "%(param_pSigma)s" in out
     assert "<<$" not in out
     assert ":param_" not in out
+
+
+# ---------------------------------------------------------------------------
+# Y.2.app2.cde — dataset-parameter static-default substitution
+# ---------------------------------------------------------------------------
+
+
+def test_apply_defaults_single_string_default_splices_quoted_literal() -> None:
+    sql = "SELECT * FROM t WHERE k = '<<$pKey>>'"
+    params = [_string_dsp("pKey", value_type="SINGLE_VALUED", defaults=["__ALL__"])]
+    out = apply_dataset_param_defaults(sql, params, {})
+    assert out == "SELECT * FROM t WHERE k = '__ALL__'"
+
+
+def test_apply_defaults_bare_string_default_splices_quoted_literal() -> None:
+    """A bare ``<<$pName>>`` (no author quotes) for a string param —
+    QS would substitute a quoted literal there too."""
+    sql = "SELECT * FROM t WHERE k = <<$pKey>>"
+    params = [_string_dsp("pKey", value_type="SINGLE_VALUED", defaults=["abc"])]
+    out = apply_dataset_param_defaults(sql, params, {})
+    assert out == "SELECT * FROM t WHERE k = 'abc'"
+
+
+def test_apply_defaults_multi_string_default_comma_quoted_list() -> None:
+    sql = "SELECT * FROM t WHERE rail IN (<<$pRail>>)"
+    params = [
+        _string_dsp("pRail", value_type="MULTI_VALUED", defaults=["A", "B", "C"]),
+    ]
+    out = apply_dataset_param_defaults(sql, params, {})
+    assert out == "SELECT * FROM t WHERE rail IN ('A','B','C')"
+
+
+def test_apply_defaults_string_default_escapes_embedded_quote() -> None:
+    sql = "SELECT * FROM t WHERE n = '<<$pName>>'"
+    params = [_string_dsp("pName", value_type="SINGLE_VALUED", defaults=["O'Brien"])]
+    out = apply_dataset_param_defaults(sql, params, {})
+    assert out == "SELECT * FROM t WHERE n = 'O''Brien'"
+
+
+def test_apply_defaults_single_integer_default_unquoted() -> None:
+    sql = "SELECT * FROM t WHERE z_score >= <<$pSigma>>"
+    params = [_int_dsp("pSigma", value_type="SINGLE_VALUED", defaults=[0])]
+    out = apply_dataset_param_defaults(sql, params, {})
+    assert out == "SELECT * FROM t WHERE z_score >= 0"
+
+
+def test_apply_defaults_url_param_overrides_default_leaves_placeholder() -> None:
+    """When the URL supplies ``?param_pRail=...`` the placeholder is
+    LEFT for the bind path (``translate_qs_dataset_params`` →
+    ``:param_pRail``) — never string-spliced from untrusted input."""
+    sql = "SELECT * FROM t WHERE rail IN (<<$pRail>>)"
+    params = [
+        _string_dsp("pRail", value_type="MULTI_VALUED", defaults=["A", "B"]),
+    ]
+    out = apply_dataset_param_defaults(sql, params, {"param_pRail": "X"})
+    assert out == sql
+
+
+def test_apply_defaults_undeclared_param_left_untouched() -> None:
+    """A ``<<$pOther>>`` placeholder for a param not declared on this
+    dataset is left as-is (some other layer's concern)."""
+    sql = "SELECT * FROM t WHERE k = '<<$pOther>>'"
+    params = [_string_dsp("pKey", value_type="SINGLE_VALUED", defaults=["X"])]
+    out = apply_dataset_param_defaults(sql, params, {})
+    assert out == sql
+
+
+def test_apply_defaults_empty_static_default_left_untouched() -> None:
+    """An empty StaticValues list = nothing to splice — leave the
+    placeholder (avoids ``IN ()``; the dataset author handles this
+    via a sentinel default)."""
+    sql = "SELECT * FROM t WHERE rail IN (<<$pRail>>)"
+    params = [_string_dsp("pRail", value_type="MULTI_VALUED", defaults=[])]
+    out = apply_dataset_param_defaults(sql, params, {})
+    assert out == sql
+
+
+def test_apply_defaults_no_params_passes_through() -> None:
+    sql = "SELECT * FROM t WHERE rail IN (<<$pRail>>)"
+    assert apply_dataset_param_defaults(sql, [], {}) == sql
+
+
+def test_apply_defaults_no_placeholders_passes_through() -> None:
+    sql = "SELECT id, name FROM t ORDER BY id"
+    params = [_string_dsp("pKey", value_type="SINGLE_VALUED", defaults=["X"])]
+    assert apply_dataset_param_defaults(sql, params, {}) == sql
+
+
+def test_apply_defaults_mixed_url_and_default_in_one_query() -> None:
+    """Two placeholders, one supplied via URL and one not — the
+    supplied one stays a placeholder, the other gets its default."""
+    sql = (
+        "SELECT * FROM t "
+        "WHERE rail IN (<<$pRail>>) AND status IN (<<$pStatus>>)"
+    )
+    params = [
+        _string_dsp("pRail", value_type="MULTI_VALUED", defaults=["A"]),
+        _string_dsp("pStatus", value_type="MULTI_VALUED", defaults=["Pending", "Posted"]),
+    ]
+    out = apply_dataset_param_defaults(sql, params, {"param_pRail": "A"})
+    assert out == (
+        "SELECT * FROM t "
+        "WHERE rail IN (<<$pRail>>) AND status IN ('Pending','Posted')"
+    )
+
+
+def test_apply_defaults_then_translate_yields_clean_bound_sql() -> None:
+    """End-to-end: default-substitute (no URL params) then translate —
+    the result has no ``<<$>>`` markers and no leftover binds because
+    every placeholder resolved to a literal."""
+    sql = (
+        "SELECT * FROM t WHERE k = '<<$pKey>>' "
+        "AND rail IN (<<$pRail>>) AND z >= <<$pSigma>>"
+    )
+    params = [
+        _string_dsp("pKey", value_type="SINGLE_VALUED", defaults=["__ALL__"]),
+        _string_dsp("pRail", value_type="MULTI_VALUED", defaults=["A", "B"]),
+        _int_dsp("pSigma", value_type="SINGLE_VALUED", defaults=[2]),
+    ]
+    out = translate_qs_dataset_params(apply_dataset_param_defaults(sql, params, {}))
+    assert out == (
+        "SELECT * FROM t WHERE k = '__ALL__' "
+        "AND rail IN ('A','B') AND z >= 2"
+    )
 
 
 # ---------------------------------------------------------------------------

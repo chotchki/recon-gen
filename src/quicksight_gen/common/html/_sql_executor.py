@@ -50,6 +50,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
+from quicksight_gen.common.models import DatasetParameter
 from quicksight_gen.common.sql.dialect import Dialect
 
 if TYPE_CHECKING:
@@ -106,6 +107,100 @@ def translate_qs_dataset_params(sql: str) -> str:
     return sql
 
 
+def _dataset_param_fields(
+    dp: DatasetParameter,
+) -> tuple[str, str, str, list[object]] | None:
+    """Extract ``(name, kind, value_type, static_default_values)`` from a
+    ``DatasetParameter`` wrapper. ``kind`` ∈ ``{"string", "integer",
+    "decimal", "datetime"}``. Returns ``None`` for a DateTime param whose
+    default is a ``RollingDate`` expression (App2 can't evaluate QS
+    rolling-date expressions) or for an unrecognised/empty wrapper.
+    """
+    sp = dp.StringDatasetParameter
+    if sp is not None:
+        sv = sp.DefaultValues.StaticValues if sp.DefaultValues else []
+        return (str(sp.Name), "string", str(sp.ValueType), list(sv or []))
+    ip = dp.IntegerDatasetParameter
+    if ip is not None:
+        sv = ip.DefaultValues.StaticValues if ip.DefaultValues else []
+        return (str(ip.Name), "integer", str(ip.ValueType), list(sv or []))
+    dec = dp.DecimalDatasetParameter
+    if dec is not None:
+        sv = dec.DefaultValues.StaticValues if dec.DefaultValues else []
+        return (str(dec.Name), "decimal", str(dec.ValueType), list(sv or []))
+    dt = dp.DateTimeDatasetParameter
+    if dt is not None:
+        sv = dt.DefaultValues.StaticValues if dt.DefaultValues else None
+        if not sv:
+            # RollingDate default (or none) — App2 can't resolve it.
+            return None
+        return (str(dt.Name), "datetime", str(dt.ValueType), list(sv))
+    return None
+
+
+def _format_default_for_sql(kind: str, values: Sequence[object]) -> str:
+    """Format a dataset parameter's static default value(s) as a SQL
+    literal fragment matching how QuickSight substitutes them:
+
+    - ``integer`` / ``decimal`` → ``42`` (single) / ``1,2,3`` (multi)
+    - ``string`` / ``datetime`` → ``'a'`` (single) / ``'a','b','c'`` (multi)
+
+    These are TRUSTED values — declared in the codebase, never user
+    input — so direct string-splicing is safe (mirrors QS's substitution
+    and the dataset-SQL smoke verifier's ``_substitute_qs_params``).
+    """
+    if kind in ("integer", "decimal"):
+        return ",".join(str(v) for v in values)
+    return ",".join("'" + str(v).replace("'", "''") + "'" for v in values)
+
+
+def apply_dataset_param_defaults(
+    sql: str,
+    dataset_parameters: Sequence[DatasetParameter],
+    url_params: Mapping[str, str],
+) -> str:
+    """Y.2.app2.cde — replace ``<<$paramName>>`` placeholders with the
+    dataset parameter's STATIC DEFAULT (string-substituted) when the URL
+    doesn't supply that parameter, so a freshly-loaded App2 page matches
+    how QuickSight renders the dashboard on initial load (where each
+    dataset parameter's ``DefaultValues`` apply — analysis-param
+    ``MappedDataSetParameters`` bridges don't fire until the analyst
+    interacts; see Y.1.k).
+
+    Placeholders the URL *does* supply (``?param_pName=...``) are left
+    untouched — ``translate_qs_dataset_params`` then turns those into
+    ``:param_pName`` bind variables (safe for untrusted URL input).
+    Placeholders for params not declared on this dataset are also left
+    untouched. Both the quoted (``'<<$pName>>'``) and bare
+    (``<<$pName>>``) forms are handled — the quoted-form regex consumes
+    the author's surrounding ``'...'`` so a formatted-with-quotes string
+    default drops in cleanly.
+    """
+    by_name: dict[str, tuple[str, str, str, list[object]]] = {}
+    for dp in dataset_parameters:
+        fields = _dataset_param_fields(dp)
+        if fields is not None:
+            by_name[fields[0]] = fields
+
+    def _sub(match: re.Match[str]) -> str:
+        pname = match.group(1)
+        if f"param_{pname}" in url_params:
+            return match.group(0)  # URL supplies it — leave for the bind path.
+        fields = by_name.get(pname)
+        if fields is None:
+            return match.group(0)  # Not declared here — leave it.
+        _name, kind, _value_type, values = fields
+        if not values:
+            return match.group(0)  # Empty static default — nothing to splice.
+        return _format_default_for_sql(kind, values)
+
+    # Quoted form first (consumes the author's surrounding quotes), then
+    # the bare form on what remains — same order as translate_*.
+    sql = _QS_QUOTED_DSP_RE.sub(_sub, sql)
+    sql = _QS_UNQUOTED_DSP_RE.sub(_sub, sql)
+    return sql
+
+
 def rewrite_placeholders_for_dialect(sql: str, dialect: Dialect) -> str:
     """Convert ``:name`` placeholders to dialect-native form.
 
@@ -145,6 +240,7 @@ def execute_visual_sql(
     url_params: Mapping[str, str],
     *,
     dialect: Dialect,
+    dataset_parameters: Sequence[DatasetParameter] | None = None,
 ) -> tuple[list[tuple[Any, ...]], list[str]]:  # typing-smell: ignore[explicit-any]: row tuples are heterogeneous; per-call shape lives in the dataset SQL contract
     """Execute a Visual's dataset SQL via a sync DB-API 2.0 driver.
 
@@ -170,7 +266,12 @@ def execute_visual_sql(
         the list of column names from ``cursor.description``. The
         per-renderer shape adapter in ``_data_shape.py`` consumes
         this tuple.
+
+        dataset_parameters: optional QS ``DatasetParameter`` list — used
+            to string-substitute a ``<<$paramName>>`` placeholder's
+            static default when the URL doesn't supply it (Y.2.app2.cde).
     """
+    sql = apply_dataset_param_defaults(sql, dataset_parameters or [], url_params)
     sql = translate_qs_dataset_params(sql)
     rewritten = rewrite_placeholders_for_dialect(sql, dialect)
     binds = collect_bind_params(sql, url_params)
@@ -195,6 +296,7 @@ async def execute_visual_sql_async(
     url_params: Mapping[str, str],
     *,
     dialect: Dialect,
+    dataset_parameters: Sequence[DatasetParameter] | None = None,
 ) -> tuple[list[tuple[Any, ...]], list[str]]:  # typing-smell: ignore[explicit-any]: row tuples are heterogeneous; per-call shape lives in the dataset SQL contract
     """Async sibling of ``execute_visual_sql`` — the hot path for the
     App2 ``visual_data`` route.
@@ -225,7 +327,12 @@ async def execute_visual_sql_async(
         Whatever the underlying driver raises on bad SQL / pool
         exhaustion / connection failure. The App2 server's themed
         500 handler (X.2.m) catches it.
+
+        dataset_parameters: optional QS ``DatasetParameter`` list — used
+            to string-substitute a ``<<$paramName>>`` placeholder's
+            static default when the URL doesn't supply it (Y.2.app2.cde).
     """
+    sql = apply_dataset_param_defaults(sql, dataset_parameters or [], url_params)
     sql = translate_qs_dataset_params(sql)
     rewritten = rewrite_placeholders_for_dialect(sql, dialect)
     binds = collect_bind_params(sql, url_params)

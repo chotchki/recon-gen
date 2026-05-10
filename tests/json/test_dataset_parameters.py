@@ -183,6 +183,45 @@ def test_build_dataset_propagates_dataset_parameters_to_emitted_json() -> None:
     assert out["DatasetParameters"][0]["StringDatasetParameter"]["Name"] == "pKey"
 
 
+def test_build_dataset_registers_params_for_app2_default_substitution() -> None:
+    """Y.2.app2.cde — ``build_dataset`` populates the dataset-param
+    registry keyed by ``visual_identifier`` so App2's ``_tree_fetcher``
+    can resolve a visual's ``<<$paramName>>`` defaults at fetch time.
+    A dataset built without params registers an empty list (not a
+    missing key)."""
+    from quicksight_gen.common.dataset_contract import get_dataset_params
+
+    contract = DatasetContract(columns=[ColumnSpec("col", "STRING")])
+    params = [
+        DatasetParameter(StringDatasetParameter=StringDatasetParameter(
+            Id="id-1", Name="pKey", ValueType="SINGLE_VALUED",
+            DefaultValues=StringDatasetParameterDefaultValues(
+                StaticValues=["customer_id"],
+            ),
+        )),
+    ]
+    build_dataset(
+        _CFG, "qs-gen-registry-dataset", "Registry", "registry",
+        "SELECT JSON_VALUE(metadata, '$.' || <<$pKey>>) AS col FROM tx",
+        contract,
+        visual_identifier="registry-ds",
+        dataset_parameters=params,
+    )
+    got = get_dataset_params("registry-ds")
+    assert len(got) == 1
+    sp = got[0].StringDatasetParameter
+    assert sp is not None and sp.Name == "pKey"
+
+    build_dataset(
+        _CFG, "qs-gen-registry-noparams-dataset", "NoParams", "noparams",
+        "SELECT 1 AS col", contract,
+        visual_identifier="registry-noparams-ds",
+    )
+    assert get_dataset_params("registry-noparams-ds") == []
+    # Unknown identifier → empty list, not KeyError.
+    assert get_dataset_params("never-registered-ds") == []
+
+
 # -- Tree-level mapping wiring -----------------------------------------------
 
 
