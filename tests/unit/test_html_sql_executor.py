@@ -28,6 +28,7 @@ from quicksight_gen.common.html._sql_executor import (
     collect_bind_params,
     execute_visual_sql,
     execute_visual_sql_async,
+    expand_multivalued_dataset_params,
     rewrite_placeholders_for_dialect,
     translate_qs_dataset_params,
 )
@@ -187,7 +188,7 @@ def test_apply_defaults_url_param_overrides_default_leaves_placeholder() -> None
     params = [
         _string_dsp("pRail", value_type="MULTI_VALUED", defaults=["A", "B"]),
     ]
-    out = apply_dataset_param_defaults(sql, params, {"param_pRail": "X"})
+    out = apply_dataset_param_defaults(sql, params, {"param_pRail": ["X"]})
     assert out == sql
 
 
@@ -232,7 +233,7 @@ def test_apply_defaults_mixed_url_and_default_in_one_query() -> None:
         _string_dsp("pRail", value_type="MULTI_VALUED", defaults=["A"]),
         _string_dsp("pStatus", value_type="MULTI_VALUED", defaults=["Pending", "Posted"]),
     ]
-    out = apply_dataset_param_defaults(sql, params, {"param_pRail": "A"})
+    out = apply_dataset_param_defaults(sql, params, {"param_pRail": ["A"]})
     assert out == (
         "SELECT * FROM t "
         "WHERE rail IN (<<$pRail>>) AND status IN ('Pending','Posted')"
@@ -257,6 +258,159 @@ def test_apply_defaults_then_translate_yields_clean_bound_sql() -> None:
         "SELECT * FROM t WHERE k = '__ALL__' "
         "AND rail IN ('A','B') AND z >= 2"
     )
+
+
+# ---------------------------------------------------------------------------
+# Y.2.app2.cde.multivalued — multi-valued IN-list bind expansion
+# ---------------------------------------------------------------------------
+
+
+def test_expand_multivalued_two_values_becomes_indexed_binds() -> None:
+    sql = "SELECT * FROM t WHERE rail IN (<<$pRail>>)"
+    params = [_string_dsp("pRail", value_type="MULTI_VALUED", defaults=["A"])]
+    out_sql, extra = expand_multivalued_dataset_params(
+        sql, params, {"param_pRail": ["A", "B"]},
+    )
+    assert out_sql == "SELECT * FROM t WHERE rail IN (:param_pRail_0, :param_pRail_1)"
+    assert extra == {"param_pRail_0": "A", "param_pRail_1": "B"}
+
+
+def test_expand_multivalued_single_value_left_for_normal_bind() -> None:
+    """One URL value → leave ``<<$pRail>>`` so the normal translate /
+    collect path binds it as ``:param_pRail`` (works fine in ``IN (...)``)."""
+    sql = "SELECT * FROM t WHERE rail IN (<<$pRail>>)"
+    params = [_string_dsp("pRail", value_type="MULTI_VALUED", defaults=["A"])]
+    out_sql, extra = expand_multivalued_dataset_params(
+        sql, params, {"param_pRail": ["A"]},
+    )
+    assert out_sql == sql
+    assert extra == {}
+
+
+def test_expand_multivalued_empty_or_absent_left_alone() -> None:
+    """0 URL values (absent or emptied multi-select) → leave it; the
+    static-default substitution (`apply_dataset_param_defaults`, which
+    runs first) is responsible for that case."""
+    sql = "SELECT * FROM t WHERE rail IN (<<$pRail>>)"
+    params = [_string_dsp("pRail", value_type="MULTI_VALUED", defaults=["A"])]
+    assert expand_multivalued_dataset_params(sql, params, {}) == (sql, {})
+    assert expand_multivalued_dataset_params(
+        sql, params, {"param_pRail": [""]},
+    ) == (sql, {})
+    assert expand_multivalued_dataset_params(
+        sql, params, {"param_pRail": []},
+    ) == (sql, {})
+
+
+def test_expand_multivalued_ignores_single_valued_and_undeclared_params() -> None:
+    sql = (
+        "SELECT * FROM t WHERE k = <<$pKey>> AND rail IN (<<$pOther>>)"
+    )
+    params = [_string_dsp("pKey", value_type="SINGLE_VALUED", defaults=["x"])]
+    out_sql, extra = expand_multivalued_dataset_params(
+        sql, params, {"param_pKey": ["a", "b"], "param_pOther": ["c", "d"]},
+    )
+    # pKey is SINGLE_VALUED (last-wins bind handles it); pOther is not
+    # declared on this dataset — neither expands.
+    assert out_sql == sql
+    assert extra == {}
+
+
+def test_expand_multivalued_quoted_form_drops_author_quotes() -> None:
+    sql = "SELECT * FROM t WHERE rail IN ('<<$pRail>>')"
+    params = [_string_dsp("pRail", value_type="MULTI_VALUED", defaults=["A"])]
+    out_sql, extra = expand_multivalued_dataset_params(
+        sql, params, {"param_pRail": ["A", "B"]},
+    )
+    assert out_sql == "SELECT * FROM t WHERE rail IN (:param_pRail_0, :param_pRail_1)"
+    assert extra == {"param_pRail_0": "A", "param_pRail_1": "B"}
+
+
+def test_execute_visual_sql_expands_multivalued_in_list_against_db(
+    sqlite_factory: Any,
+) -> None:
+    """End-to-end: a MULTI_VALUED ``<<$pName>>`` in an ``IN (...)`` with
+    2 URL values filters the DB to exactly those rows — proving the
+    expansion → translate → bind → execute pipeline (and that the
+    values bind, never string-splice)."""
+    params = [_string_dsp("pName", value_type="MULTI_VALUED", defaults=["alpha"])]
+    rows, _cols = execute_visual_sql(
+        sqlite_factory,
+        "SELECT id FROM t WHERE name IN (<<$pName>>) ORDER BY id",
+        {"param_pName": ["alpha", "gamma"]},
+        dialect=Dialect.SQLITE,
+        dataset_parameters=params,
+    )
+    assert [r[0] for r in rows] == [1, 3]
+
+
+def test_execute_visual_sql_multivalued_single_value_against_db(
+    sqlite_factory: Any,
+) -> None:
+    """One URL value through the same pipeline — the non-expanded
+    ``:param_pName`` bind path still produces ``IN ('beta')``."""
+    params = [_string_dsp("pName", value_type="MULTI_VALUED", defaults=["alpha"])]
+    rows, _cols = execute_visual_sql(
+        sqlite_factory,
+        "SELECT id FROM t WHERE name IN (<<$pName>>)",
+        {"param_pName": ["beta"]},
+        dialect=Dialect.SQLITE,
+        dataset_parameters=params,
+    )
+    assert [r[0] for r in rows] == [2]
+
+
+def test_execute_visual_sql_multivalued_emptied_falls_to_default_against_db(
+    sqlite_factory: Any,
+) -> None:
+    """Emptied multi-select (``?param_pName=``) → static default applies
+    (QS reverts there too) → ``IN ('alpha')`` → only the alpha row."""
+    params = [_string_dsp("pName", value_type="MULTI_VALUED", defaults=["alpha"])]
+    rows, _cols = execute_visual_sql(
+        sqlite_factory,
+        "SELECT id FROM t WHERE name IN (<<$pName>>)",
+        {"param_pName": [""]},
+        dialect=Dialect.SQLITE,
+        dataset_parameters=params,
+    )
+    assert [r[0] for r in rows] == [1]
+
+
+def test_execute_visual_sql_pg_multivalued_pyformat_binds() -> None:
+    """Postgres rewrite: the expanded ``:param_pName_i`` binds become
+    ``%(param_pName_i)s`` and the cursor receives both bind values."""
+    received: dict[str, Any] = {}
+
+    class _SnoopCursor:
+        description = [("id",)]
+
+        def execute(self, sql: str, params: Any = None) -> None:
+            received["sql"] = sql
+            received["params"] = params
+
+        def fetchall(self) -> list[Any]:
+            return []
+
+        def close(self) -> None:
+            pass
+
+    class _SnoopConn:
+        def cursor(self) -> Any:
+            return _SnoopCursor()
+
+        def close(self) -> None:
+            pass
+
+    ds_params = [_string_dsp("pRail", value_type="MULTI_VALUED", defaults=["A"])]
+    execute_visual_sql(
+        lambda: _SnoopConn(),
+        "SELECT id FROM t WHERE rail IN (<<$pRail>>)",
+        {"param_pRail": ["A", "B"]},
+        dialect=Dialect.POSTGRES,
+        dataset_parameters=ds_params,
+    )
+    assert "IN (%(param_pRail_0)s, %(param_pRail_1)s)" in received["sql"]
+    assert received["params"] == {"param_pRail_0": "A", "param_pRail_1": "B"}
 
 
 # ---------------------------------------------------------------------------
@@ -308,27 +462,37 @@ def test_rewrite_handles_multiple_placeholders() -> None:
 def test_collect_bind_params_picks_referenced_names() -> None:
     sql = "SELECT * FROM t WHERE x = :date_from AND y = :amount"
     url_params = {
-        "date_from": "2030-01-01",
-        "amount": "100",
-        "filter_status": "open",  # not referenced — should be dropped
+        "date_from": ["2030-01-01"],
+        "amount": ["100"],
+        "filter_status": ["open"],  # not referenced — should be dropped
     }
     binds = collect_bind_params(sql, url_params)
     assert binds == {"date_from": "2030-01-01", "amount": "100"}
 
 
+def test_collect_bind_params_takes_last_value_for_repeated_key() -> None:
+    """A repeated query key (``?x=a&x=b``) collapses to its last
+    value for a single ``:name`` bind — mirrors the old
+    ``query_params.items()`` last-wins behavior."""
+    sql = "SELECT * FROM t WHERE x = :x"
+    binds = collect_bind_params(sql, {"x": ["a", "b"]})
+    assert binds == {"x": "b"}
+
+
 def test_collect_bind_params_defaults_missing_to_empty_string() -> None:
     """Dataset SQL author guards against empty filters; the executor
-    just hands back ``""`` so the bind dict is complete."""
+    just hands back ``""`` so the bind dict is complete. An empty
+    value list (key present, no values) is treated the same."""
     sql = "SELECT * FROM t WHERE x = :date_from"
-    binds = collect_bind_params(sql, {})  # nothing in URL
-    assert binds == {"date_from": ""}
+    assert collect_bind_params(sql, {}) == {"date_from": ""}
+    assert collect_bind_params(sql, {"date_from": []}) == {"date_from": ""}
 
 
 def test_collect_bind_params_drops_unreferenced_url_params() -> None:
     """Naive callers might pass the entire URL params dict; only
     the names actually in the SQL come through."""
     sql = "SELECT * FROM t"  # no placeholders
-    binds = collect_bind_params(sql, {"foo": "1", "bar": "2"})
+    binds = collect_bind_params(sql, {"foo": ["1"], "bar": ["2"]})
     assert binds == {}
 
 
@@ -387,7 +551,7 @@ def test_execute_visual_sql_substitutes_named_filter(sqlite_factory: Any) -> Non
     rows, _cols = execute_visual_sql(
         sqlite_factory,
         "SELECT id, name FROM t WHERE amount >= :min_amount ORDER BY id",
-        {"min_amount": "20"},
+        {"min_amount": ["20"]},
         dialect=Dialect.SQLITE,
     )
     assert [r[1] for r in rows] == ["beta", "gamma"]
@@ -401,7 +565,7 @@ def test_execute_visual_sql_handles_multiple_filters(sqlite_factory: Any) -> Non
             "WHERE amount >= :min_amount AND amount <= :max_amount "
             "ORDER BY id"
         ),
-        {"min_amount": "15", "max_amount": "25"},
+        {"min_amount": ["15"], "max_amount": ["25"]},
         dialect=Dialect.SQLITE,
     )
     assert [r[1] for r in rows] == ["beta"]
@@ -417,10 +581,10 @@ def test_execute_visual_sql_unreferenced_url_params_dont_break_execution(
         sqlite_factory,
         "SELECT id FROM t WHERE amount >= :min_amount",
         {
-            "min_amount": "15",
-            "filter_status": "open",      # unreferenced
-            "param_view": "summary",      # unreferenced
-            "date_from": "2030-01-01",    # unreferenced
+            "min_amount": ["15"],
+            "filter_status": ["open"],      # unreferenced
+            "param_view": ["summary"],      # unreferenced
+            "date_from": ["2030-01-01"],    # unreferenced
         },
         dialect=Dialect.SQLITE,
     )
@@ -431,7 +595,7 @@ def test_execute_visual_sql_empty_result_set(sqlite_factory: Any) -> None:
     rows, cols = execute_visual_sql(
         sqlite_factory,
         "SELECT id, name FROM t WHERE amount > :min_amount",
-        {"min_amount": "9999"},
+        {"min_amount": ["9999"]},
         dialect=Dialect.SQLITE,
     )
     assert rows == []
@@ -472,7 +636,7 @@ def test_execute_visual_sql_passes_pg_pyformat_to_cursor() -> None:
     execute_visual_sql(
         lambda: _SnoopConn(),
         "SELECT col FROM t WHERE x = :date_from",
-        {"date_from": "2030-01-01"},
+        {"date_from": ["2030-01-01"]},
         dialect=Dialect.POSTGRES,
     )
     assert "%(date_from)s" in received["sql"]
@@ -541,7 +705,7 @@ def test_execute_visual_sql_async_substitutes_named_filter(
     rows, _cols = asyncio.run(execute_visual_sql_async(
         aiosqlite_pool,
         "SELECT id, name FROM t WHERE amount >= :min_amount ORDER BY id",
-        {"min_amount": "20"},
+        {"min_amount": ["20"]},
         dialect=Dialect.SQLITE,
     ))
     assert [r[1] for r in rows] == ["beta", "gamma"]
@@ -559,10 +723,10 @@ def test_execute_visual_sql_async_unreferenced_url_params_dont_break(
         aiosqlite_pool,
         "SELECT id FROM t WHERE amount >= :min_amount",
         {
-            "min_amount": "15",
-            "filter_status": "open",
-            "param_view": "summary",
-            "date_from": "2030-01-01",
+            "min_amount": ["15"],
+            "filter_status": ["open"],
+            "param_view": ["summary"],
+            "date_from": ["2030-01-01"],
         },
         dialect=Dialect.SQLITE,
     ))
@@ -577,7 +741,7 @@ def test_execute_visual_sql_async_empty_result_set(
     rows, cols = asyncio.run(execute_visual_sql_async(
         aiosqlite_pool,
         "SELECT id, name FROM t WHERE amount > :min_amount",
-        {"min_amount": "9999"},
+        {"min_amount": ["9999"]},
         dialect=Dialect.SQLITE,
     ))
     assert rows == []
@@ -607,7 +771,7 @@ def test_async_qs_placeholder_translates_and_filters_at_db(
     rows, cols = asyncio.run(execute_visual_sql_async(
         aiosqlite_pool,
         "SELECT id, name, amount FROM t WHERE amount >= <<$pMinAmount>>",
-        {"param_pMinAmount": "20"},
+        {"param_pMinAmount": ["20"]},
         dialect=Dialect.SQLITE,
     ))
     # Threshold 20 → only beta (20.0) and gamma (30.0) match.
@@ -628,7 +792,7 @@ def test_async_qs_quoted_placeholder_string_round_trip(
     rows, _cols = asyncio.run(execute_visual_sql_async(
         aiosqlite_pool,
         "SELECT id FROM t WHERE name = '<<$pName>>'",
-        {"param_pName": "beta"},
+        {"param_pName": ["beta"]},
         dialect=Dialect.SQLITE,
     ))
     assert rows == [(2,)]

@@ -276,9 +276,11 @@ def test_server_passes_prefix_keyed_params_to_fetcher() -> None:
     delivers the entire query-param dict to the data fetcher. This is
     the server-side contract X.2.f's real fetcher will consume."""
     app, sheet = _build_app()
-    seen: dict[str, dict[str, str]] = {}
+    seen: dict[str, dict[str, list[str]]] = {}
 
-    def fetcher(visual_id: str, params: dict[str, str]) -> dict[str, list[float]]:
+    def fetcher(
+        visual_id: str, params: dict[str, list[str]],
+    ) -> dict[str, list[float]]:
         seen[visual_id] = dict(params)
         return {"values": []}
 
@@ -295,10 +297,10 @@ def test_server_passes_prefix_keyed_params_to_fetcher() -> None:
         "&min_amount=10&max_amount=100",
     )
     assert seen["v-k"] == {
-        "param_account": "acct-1",
-        "filter_status": "open,closed",
-        "min_amount": "10",
-        "max_amount": "100",
+        "param_account": ["acct-1"],
+        "filter_status": ["open,closed"],
+        "min_amount": ["10"],
+        "max_amount": ["100"],
     }
 
 

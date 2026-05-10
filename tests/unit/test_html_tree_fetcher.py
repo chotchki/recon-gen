@@ -229,7 +229,7 @@ def test_make_tree_db_fetcher_substitutes_filters(
     fetcher = make_tree_db_fetcher(
         app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
     )
-    out = asyncio.run(fetcher("v-kpi", {"param_status": "open"}))
+    out = asyncio.run(fetcher("v-kpi", {"param_status": ["open"]}))
     assert out["values"][0]["value"] == 150  # only "open" rows
 
 

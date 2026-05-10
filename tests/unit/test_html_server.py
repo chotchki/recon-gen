@@ -172,12 +172,13 @@ def test_get_visual_data_returns_swap_fragment() -> None:
 
 
 def test_filter_params_land_in_fetcher() -> None:
-    """The query-string date params are passed to the fetcher
-    callable as a flat ``dict[str, str]``."""
-    captured: dict[str, dict[str, str]] = {}
+    """The query-string params are passed to the fetcher callable as
+    a multi-dict (``dict[str, list[str]]`` — repeated keys preserved
+    so the SQL executor can expand a multi-valued ``IN``-list)."""
+    captured: dict[str, dict[str, list[str]]] = {}
 
-    def capture(_vid: str, params: dict[str, str]) -> Any:
-        captured["params"] = params
+    def capture(_vid: str, params: dict[str, list[str]]) -> Any:
+        captured["params"] = dict(params)
         return {"nodes": [], "links": []}
 
     client = _make_test_app(capture)
@@ -187,8 +188,29 @@ def test_filter_params_land_in_fetcher() -> None:
     )
     assert resp.status_code == 200
     assert captured["params"] == {
-        "date_from": "2026-01-01",
-        "date_to": "2026-05-05",
+        "date_from": ["2026-01-01"],
+        "date_to": ["2026-05-05"],
+    }
+
+
+def test_repeated_query_key_lands_as_list_in_fetcher() -> None:
+    """A repeated query key (``?param_pRail=A&param_pRail=B``) reaches
+    the fetcher as a 2-element list — proves the multi-dict plumbing
+    that backs multi-valued ``IN``-list pushdown (Y.2.app2.cde.multivalued)."""
+    captured: dict[str, dict[str, list[str]]] = {}
+
+    def capture(_vid: str, params: dict[str, list[str]]) -> Any:
+        captured["params"] = dict(params)
+        return {}
+
+    client = _make_test_app(capture)
+    resp = client.get(
+        _VISUAL_DATA_PATH + "?param_pRail=A&param_pRail=B&date_from=2026-01-01",
+    )
+    assert resp.status_code == 200
+    assert captured["params"] == {
+        "param_pRail": ["A", "B"],
+        "date_from": ["2026-01-01"],
     }
 
 
@@ -403,9 +425,9 @@ def test_query_params_change_routes_to_different_cache_keys() -> None:
     query strings → distinct cached responses. This test asserts
     the fetcher actually sees the different params, not that the
     cache itself dedupes (HTTP caches do that work)."""
-    captured_params: list[dict[str, str]] = []
+    captured_params: list[dict[str, list[str]]] = []
 
-    def capture(_vid: str, params: dict[str, str]) -> Any:
+    def capture(_vid: str, params: dict[str, list[str]]) -> Any:
         captured_params.append(dict(params))
         return {}
 
@@ -417,9 +439,9 @@ def test_query_params_change_routes_to_different_cache_keys() -> None:
         params={"date_from": "2026-01-01", "anchor": "CustomerDDA"},
     )
     assert captured_params == [
-        {"date_from": "2026-01-01"},
-        {"date_from": "2026-02-01"},
-        {"date_from": "2026-01-01", "anchor": "CustomerDDA"},
+        {"date_from": ["2026-01-01"]},
+        {"date_from": ["2026-02-01"]},
+        {"date_from": ["2026-01-01"], "anchor": ["CustomerDDA"]},
     ]
 
 

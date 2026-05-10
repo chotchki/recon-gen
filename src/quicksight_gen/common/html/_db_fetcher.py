@@ -32,7 +32,7 @@ all three.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from quicksight_gen.common.config import Config
@@ -43,7 +43,10 @@ from quicksight_gen.common.l2.primitives import (
 )
 
 
-DataFetcher = Callable[[str, dict[str, str]], Any]
+# URL params arrive as a multi-dict (a key can repeat). This legacy
+# fetcher only consumes scalar filters (date_from / date_to), so it
+# collapses each list to its last value at the top of ``fetcher``.
+DataFetcher = Callable[[str, Mapping[str, list[str]]], Any]
 
 
 def make_db_fetcher(
@@ -88,11 +91,14 @@ def make_db_fetcher(
 
         connection_factory = _default_factory
 
-    def fetcher(visual_id: str, params: dict[str, str]) -> Any:
+    def fetcher(visual_id: str, params: Mapping[str, list[str]]) -> Any:
         if visual_id == "smoke-force":
             return _topology_to_force_graph(instance)
         if visual_id == "smoke-sankey":
-            rows = _query_money_trail_edges(connection_factory, prefix, params)
+            # Collapse the multi-dict to scalar last-values — this
+            # fetcher only reads single-valued filters.
+            scalar = {k: v[-1] for k, v in params.items() if v}
+            rows = _query_money_trail_edges(connection_factory, prefix, scalar)
             return _money_trail_to_sankey(rows)
         raise ValueError(
             f"App2 DB fetcher has no case for visual_id={visual_id!r}. "

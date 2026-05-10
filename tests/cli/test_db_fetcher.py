@@ -233,7 +233,7 @@ def test_db_fetcher_sankey_passes_date_filters_as_bound_params(  # type: ignore[
         cfg_with_prefix, instance, connection_factory=lambda: conn,
     )
     fetcher("smoke-sankey", {
-        "date_from": "2026-01-01", "date_to": "2026-12-31",
+        "date_from": ["2026-01-01"], "date_to": ["2026-12-31"],
     })
     sql = cursor.executed_sql or ""
     # The where clauses use placeholders, not literals.

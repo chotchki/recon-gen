@@ -55,13 +55,16 @@ _DASHBOARD_ID = "exec"
 
 # Deterministic per-visual stub data — visual_id → response. Tests
 # don't have to write a fetcher inline; just look up by id.
-def _exec_stub_fetcher(visual_id: str, params: dict[str, str]) -> dict[str, Any]:
+def _exec_stub_fetcher(
+    visual_id: str, params: dict[str, list[str]],
+) -> dict[str, Any]:
     """Stub fetcher matching the shape adapters in ``_data_shape``.
 
     Returns enough data per Executives visual_id that the d3
     hydrators paint something the test can assert on. Records each
     call into ``_calls_log`` so filter-substitution assertions can
-    inspect what URL params landed.
+    inspect what URL params landed. ``params`` is the URL multi-dict
+    (a key can repeat); the assertions below collapse to scalar.
     """
     _calls_log.append((visual_id, dict(params)))
     if "kpi" in visual_id:
@@ -84,7 +87,7 @@ def _exec_stub_fetcher(visual_id: str, params: dict[str, str]) -> dict[str, Any]
     return {}
 
 
-_calls_log: list[tuple[str, dict[str, str]]] = []
+_calls_log: list[tuple[str, dict[str, list[str]]]] = []
 
 
 @pytest.fixture
@@ -185,7 +188,7 @@ def test_filter_change_refetches_visuals(exec_server: str) -> None:
         page.wait_for_timeout(800)
     # The fetcher should have been called with date_from set.
     assert any(
-        params.get("date_from") == "2030-02-01"
+        params.get("date_from") == ["2030-02-01"]
         for _vid, params in _calls_log
     ), (
         f"No fetch saw date_from=2030-02-01. Calls: "

@@ -154,10 +154,20 @@ def _format_default_for_sql(kind: str, values: Sequence[object]) -> str:
     return ",".join("'" + str(v).replace("'", "''") + "'" for v in values)
 
 
+def _url_has_real_value(url_params: Mapping[str, list[str]], key: str) -> bool:
+    """True iff the URL supplies ``key`` with at least one non-empty
+    value. An emptied multi-select (``?key=``) or absent key counts as
+    "no value" — callers fall back to the dataset-param default, mirroring
+    how QuickSight reverts to ``DefaultValues`` on an emptied dropdown
+    (Y.2.c.0 spike)."""
+    vals = url_params.get(key)
+    return bool(vals) and any(v != "" for v in vals)
+
+
 def apply_dataset_param_defaults(
     sql: str,
     dataset_parameters: Sequence[DatasetParameter],
-    url_params: Mapping[str, str],
+    url_params: Mapping[str, list[str]],
 ) -> str:
     """Y.2.app2.cde — replace ``<<$paramName>>`` placeholders with the
     dataset parameter's STATIC DEFAULT (string-substituted) when the URL
@@ -167,14 +177,16 @@ def apply_dataset_param_defaults(
     ``MappedDataSetParameters`` bridges don't fire until the analyst
     interacts; see Y.1.k).
 
-    Placeholders the URL *does* supply (``?param_pName=...``) are left
-    untouched — ``translate_qs_dataset_params`` then turns those into
-    ``:param_pName`` bind variables (safe for untrusted URL input).
-    Placeholders for params not declared on this dataset are also left
-    untouched. Both the quoted (``'<<$pName>>'``) and bare
-    (``<<$pName>>``) forms are handled — the quoted-form regex consumes
-    the author's surrounding ``'...'`` so a formatted-with-quotes string
-    default drops in cleanly.
+    Placeholders the URL *does* supply with a real value (``?param_pName=v``)
+    are left untouched — ``translate_qs_dataset_params`` (single value) /
+    ``expand_multivalued_dataset_params`` (2+ values) then turn those into
+    ``:param_pName`` bind variables (safe for untrusted URL input). An
+    *emptied* multi-select (``?param_pName=``) counts as "not supplied" →
+    falls back to the default (QS reverts there too — Y.2.c.0). Placeholders
+    for params not declared on this dataset are also left untouched. Both
+    the quoted (``'<<$pName>>'``) and bare (``<<$pName>>``) forms are
+    handled — the quoted-form regex consumes the author's surrounding
+    ``'...'`` so a formatted-with-quotes string default drops in cleanly.
     """
     by_name: dict[str, tuple[str, str, str, list[object]]] = {}
     for dp in dataset_parameters:
@@ -184,8 +196,8 @@ def apply_dataset_param_defaults(
 
     def _sub(match: re.Match[str]) -> str:
         pname = match.group(1)
-        if f"param_{pname}" in url_params:
-            return match.group(0)  # URL supplies it — leave for the bind path.
+        if _url_has_real_value(url_params, f"param_{pname}"):
+            return match.group(0)  # URL supplies it — leave for the bind/expand path.
         fields = by_name.get(pname)
         if fields is None:
             return match.group(0)  # Not declared here — leave it.
@@ -199,6 +211,53 @@ def apply_dataset_param_defaults(
     sql = _QS_QUOTED_DSP_RE.sub(_sub, sql)
     sql = _QS_UNQUOTED_DSP_RE.sub(_sub, sql)
     return sql
+
+
+def expand_multivalued_dataset_params(
+    sql: str,
+    dataset_parameters: Sequence[DatasetParameter],
+    url_params: Mapping[str, list[str]],
+) -> tuple[str, dict[str, str]]:
+    """Y.2.app2.cde.multivalued — for a ``MULTI_VALUED`` dataset
+    parameter whose URL supplies 2+ non-empty values, expand the
+    placeholder ``<<$pName>>`` into ``:param_pName_0, :param_pName_1, …``
+    so an ``IN (<<$pName>>)`` becomes ``IN (:param_pName_0, …)`` with one
+    bind per value — **never string-spliced** (URL values are untrusted;
+    App2 doesn't enforce the param's ``StaticValues``).
+
+    Call this AFTER ``apply_dataset_param_defaults`` (which already
+    resolved the absent / emptied case to the static default) and BEFORE
+    ``translate_qs_dataset_params`` (so the expanded ``:param_pName_i``
+    binds pass straight through translate untouched). A placeholder with
+    0 or 1 URL value is left alone — 0 was already resolved to the
+    default; 1 binds fine through the normal ``:param_pName`` path.
+
+    Returns ``(rewritten_sql, extra_binds)`` — merge ``extra_binds`` into
+    whatever ``collect_bind_params`` returns (it overwrites the empty
+    placeholders that walk would otherwise emit for the ``_i`` names).
+    """
+    multi_names: set[str] = set()
+    for dp in dataset_parameters:
+        fields = _dataset_param_fields(dp)
+        if fields is not None and fields[2] == "MULTI_VALUED":
+            multi_names.add(fields[0])
+    extra_binds: dict[str, str] = {}
+
+    def _sub(match: re.Match[str]) -> str:
+        pname = match.group(1)
+        if pname not in multi_names:
+            return match.group(0)
+        vals = [v for v in (url_params.get(f"param_{pname}") or []) if v != ""]
+        if len(vals) < 2:
+            return match.group(0)  # 0 → default already applied; 1 → normal bind.
+        names = [f"param_{pname}_{i}" for i in range(len(vals))]
+        for n, v in zip(names, vals, strict=True):
+            extra_binds[n] = v
+        return ", ".join(f":{n}" for n in names)
+
+    sql = _QS_QUOTED_DSP_RE.sub(_sub, sql)
+    sql = _QS_UNQUOTED_DSP_RE.sub(_sub, sql)
+    return sql, extra_binds
 
 
 def rewrite_placeholders_for_dialect(sql: str, dialect: Dialect) -> str:
@@ -217,27 +276,52 @@ def rewrite_placeholders_for_dialect(sql: str, dialect: Dialect) -> str:
 
 def collect_bind_params(
     sql: str,
-    url_params: Mapping[str, str],
+    url_params: Mapping[str, list[str]],
 ) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: bind dict accepted by every driver coerces values per-driver — caller passes whatever the SQL placeholder needs
     """Build the bind-param dict for the SQL string.
 
     Walks ``sql`` for ``:name`` placeholders, looks up each name in
-    ``url_params``, and returns the dict the DB driver wants. Names
-    not present in ``url_params`` get an empty string — the dataset
-    SQL author is responsible for guarding against empty filters
-    (typically ``WHERE col >= :date_from OR :date_from = ''``).
-    Names referenced in ``url_params`` but NOT in the SQL are
-    dropped (no-op in the bind dict — the DB driver would reject
-    them with "too many parameters" otherwise).
+    ``url_params`` (a multi-dict; takes the LAST value when a key
+    repeats — mirrors the old ``query_params.items()`` last-wins
+    behavior), and returns the dict the DB driver wants. Names not
+    present in ``url_params`` (or present with no values) get an
+    empty string — the dataset SQL author guards against empty
+    filters (typically ``WHERE col >= :date_from OR :date_from = ''``).
+    Names referenced in ``url_params`` but NOT in the SQL are dropped
+    (no-op — the driver would reject "too many parameters" otherwise).
+    Multi-valued ``IN``-list placeholders are handled separately by
+    ``expand_multivalued_dataset_params`` (one ``:name_i`` bind per
+    value), whose ``extra_binds`` the caller merges over this dict.
     """
     referenced = set(_NAMED_PLACEHOLDER_RE.findall(sql))
-    return {name: url_params.get(name, "") for name in referenced}
+    return {name: (url_params.get(name) or [""])[-1] for name in referenced}
+
+
+def _prepare_sql_and_binds(
+    sql: str,
+    url_params: Mapping[str, list[str]],
+    dataset_parameters: Sequence[DatasetParameter],
+    dialect: Dialect,
+) -> tuple[str, dict[str, Any]]:  # typing-smell: ignore[explicit-any]: bind dict is driver-coerced — same justification as collect_bind_params
+    """Shared pre-execute pipeline: resolve dataset-param defaults →
+    expand multi-valued ``IN``-lists → translate QS placeholders →
+    dialect-rewrite → collect binds (with the multi-valued ``_i``
+    binds merged on top). Returns ``(rewritten_sql, binds)``."""
+    sql = apply_dataset_param_defaults(sql, dataset_parameters, url_params)
+    sql, extra_binds = expand_multivalued_dataset_params(
+        sql, dataset_parameters, url_params,
+    )
+    sql = translate_qs_dataset_params(sql)
+    rewritten = rewrite_placeholders_for_dialect(sql, dialect)
+    binds = collect_bind_params(sql, url_params)
+    binds.update(extra_binds)
+    return rewritten, binds
 
 
 def execute_visual_sql(
     connection_factory: Callable[[], Any],  # typing-smell: ignore[explicit-any]: sync DB-API 2.0 connection has no shared Protocol across psycopg/oracledb/sqlite3
     sql: str,
-    url_params: Mapping[str, str],
+    url_params: Mapping[str, list[str]],
     *,
     dialect: Dialect,
     dataset_parameters: Sequence[DatasetParameter] | None = None,
@@ -255,26 +339,25 @@ def execute_visual_sql(
             Caller is responsible for pooling / sharing if relevant
             — this fn opens + closes per call.
         sql: dataset SQL with ``:name`` placeholders (any dialect).
-        url_params: the URL-keyed filter dict the App2 server
-            extracted from the request query string. Keys not
-            referenced in ``sql`` are ignored.
+        url_params: the URL-keyed filter multi-dict the App2 server
+            extracted from the request query string (``param_pName →
+            [v, …]``; repeated keys preserved). Keys not referenced
+            in ``sql`` are ignored.
         dialect: SQL dialect of the connection. Drives placeholder
             rewriting (PG → ``%(name)s``; Oracle / SQLite stay).
+        dataset_parameters: optional QS ``DatasetParameter`` list —
+            drives ``<<$paramName>>`` default substitution (Y.2.app2.cde)
+            + multi-valued ``IN``-list bind expansion (Y.2.app2.cde.multivalued).
 
     Returns:
         ``(rows, columns)``: rows is a list of tuples, columns is
         the list of column names from ``cursor.description``. The
         per-renderer shape adapter in ``_data_shape.py`` consumes
         this tuple.
-
-        dataset_parameters: optional QS ``DatasetParameter`` list — used
-            to string-substitute a ``<<$paramName>>`` placeholder's
-            static default when the URL doesn't supply it (Y.2.app2.cde).
     """
-    sql = apply_dataset_param_defaults(sql, dataset_parameters or [], url_params)
-    sql = translate_qs_dataset_params(sql)
-    rewritten = rewrite_placeholders_for_dialect(sql, dialect)
-    binds = collect_bind_params(sql, url_params)
+    rewritten, binds = _prepare_sql_and_binds(
+        sql, url_params, dataset_parameters or [], dialect,
+    )
     conn = connection_factory()
     try:
         cur = conn.cursor()
@@ -293,7 +376,7 @@ def execute_visual_sql(
 async def execute_visual_sql_async(
     pool: AsyncConnectionPool,
     sql: str,
-    url_params: Mapping[str, str],
+    url_params: Mapping[str, list[str]],
     *,
     dialect: Dialect,
     dataset_parameters: Sequence[DatasetParameter] | None = None,
@@ -328,14 +411,13 @@ async def execute_visual_sql_async(
         exhaustion / connection failure. The App2 server's themed
         500 handler (X.2.m) catches it.
 
-        dataset_parameters: optional QS ``DatasetParameter`` list — used
-            to string-substitute a ``<<$paramName>>`` placeholder's
-            static default when the URL doesn't supply it (Y.2.app2.cde).
+        dataset_parameters: optional QS ``DatasetParameter`` list —
+            drives ``<<$paramName>>`` default substitution (Y.2.app2.cde)
+            + multi-valued ``IN``-list bind expansion (Y.2.app2.cde.multivalued).
     """
-    sql = apply_dataset_param_defaults(sql, dataset_parameters or [], url_params)
-    sql = translate_qs_dataset_params(sql)
-    rewritten = rewrite_placeholders_for_dialect(sql, dialect)
-    binds = collect_bind_params(sql, url_params)
+    rewritten, binds = _prepare_sql_and_binds(
+        sql, url_params, dataset_parameters or [], dialect,
+    )
     async with pool.acquire() as conn:
         if dialect is Dialect.ORACLE:
             # oracledb async: must open a cursor explicitly. The

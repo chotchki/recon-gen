@@ -38,6 +38,15 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
+# X.2.b URL contract: query params come back as a multi-dict (a key
+# can repeat — ``?param_pRail=A&param_pRail=B``). The fetcher carries
+# the full ``list[str]`` per key; the SQL executor picks the last
+# value for single binds and expands 2+ values into an ``IN``-list
+# (Y.2.app2.cde.multivalued). ``list[str]`` (not ``Sequence[str]``)
+# on purpose — ``str`` IS a ``Sequence[str]``, so a stray ``{"x": "a"}``
+# would type-check against ``Mapping[str, Sequence[str]]`` and then
+# silently do ``"a"[-1]``; ``Mapping[str, list[str]]`` rejects it.
+
 from quicksight_gen.common.config import Config
 from quicksight_gen.common.dataset_contract import get_dataset_params, get_sql
 from quicksight_gen.common.db import AsyncConnectionPool
@@ -52,13 +61,15 @@ from quicksight_gen.common.tree.structure import App
 # get from ``make_tree_db_fetcher``. ``VisualId`` (X.2.o.3) ties the
 # fetcher to the tree's typed visual identifier — passing a SheetId
 # or DashboardId here is a type error at the call site.
-# ``Mapping[str, str]`` (not ``dict``) so callers signal "I'm not
-# going to mutate the URL params" at the type level.
-DataFetcher = Callable[[VisualId, Mapping[str, str]], Awaitable[Any]]
+# ``Mapping[str, list[str]]`` (not ``dict``) so callers signal "I'm
+# not going to mutate the URL params" at the type level; the
+# ``list[str]`` value carries the full multi-dict (a query key can
+# repeat — ``?param_pRail=A&param_pRail=B``).
+DataFetcher = Callable[[VisualId, Mapping[str, list[str]]], Awaitable[Any]]
 # Legacy sync alias, used by stub fetchers in tests + the older
 # ``_db_fetcher.py`` code paths. The server route accepts both via
 # ``inspect.iscoroutinefunction`` dispatch (X.2.n.5).
-SyncDataFetcher = Callable[[VisualId, Mapping[str, str]], Any]
+SyncDataFetcher = Callable[[VisualId, Mapping[str, list[str]]], Any]
 
 
 # Visual fields that may carry Dim/Measure references back to a
@@ -181,7 +192,7 @@ def make_tree_db_fetcher(
                 sql = wrap_for_visual(base_sql, visual)
             visual_index[vid] = (kind, sql, ds_id)
 
-    async def fetcher(visual_id: VisualId, params: Mapping[str, str]) -> Any:  # typing-smell: ignore[explicit-any]: per-visual-kind shape (KPI float, Sankey {nodes,links}, etc.) — JSON-serialized downstream, so a real union here would be every renderer's shape
+    async def fetcher(visual_id: VisualId, params: Mapping[str, list[str]]) -> Any:  # typing-smell: ignore[explicit-any]: per-visual-kind shape (KPI float, Sankey {nodes,links}, etc.) — JSON-serialized downstream, so a real union here would be every renderer's shape
         if visual_id not in visual_index:
             # Unknown visual_id — typically a stale URL from a
             # cached page. Return empty so the d3 renderers paint

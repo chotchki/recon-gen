@@ -50,7 +50,7 @@ Pluggable data fetcher
 Each ``ServedDashboard`` owns a ``DataFetcher`` callable so the
 spike + tests can run without a database:
 
-    def stub(visual_id: VisualId, params: Mapping[str, str]) -> Any:
+    def stub(visual_id: VisualId, params: Mapping[str, list[str]]) -> Any:
         return {"nodes": [...], "links": [...]}
 
     app = make_app(dashboards={
@@ -129,8 +129,8 @@ from quicksight_gen.common.tree.structure import App, Sheet
 # ``Callable[[str, ...], ...]`` remain assignable here via Callable
 # parameter contravariance (str is wider than VisualId on input).
 DataFetcher = Union[
-    Callable[[VisualId, Mapping[str, str]], Awaitable[Any]],
-    Callable[[VisualId, Mapping[str, str]], Any],
+    Callable[[VisualId, Mapping[str, list[str]]], Awaitable[Any]],
+    Callable[[VisualId, Mapping[str, list[str]]], Any],
 ]
 
 
@@ -320,12 +320,16 @@ def make_app(
         # as ``Any`` from Starlette; ``str()`` narrows then
         # ``VisualId(...)`` brands.
         visual_id = VisualId(str(request.path_params["visual_id"]))
-        # ``Mapping[str, str]`` interface — built mutable for the
-        # short construction window, then handed to the fetcher
-        # contract that promises read-only access.
-        params: dict[str, str] = {}
-        for key, value in request.query_params.items():
-            params[str(key)] = str(value)
+        # ``Mapping[str, list[str]]`` interface — built mutable for
+        # the short construction window, then handed to the fetcher
+        # contract that promises read-only access. ``multi_items()``
+        # preserves repeated keys (``?param_pRail=A&param_pRail=B`` →
+        # ``{"param_pRail": ["A", "B"]}``) so the SQL executor can
+        # expand a multi-valued ``IN``-list (Y.2.app2.cde.multivalued);
+        # single-valued params land as one-element lists.
+        params: dict[str, list[str]] = {}
+        for key, value in request.query_params.multi_items():
+            params.setdefault(str(key), []).append(str(value))
         # X.2.n.5 — dispatch async fetchers directly so the asyncio
         # loop stays free across the SQL roundtrip; only sync stub
         # fetchers (tests + legacy _db_fetcher) get the threadpool

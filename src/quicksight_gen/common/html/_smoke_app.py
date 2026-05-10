@@ -26,6 +26,7 @@ so the round-trip is visible without a database.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from quicksight_gen.common.config import Config
@@ -289,7 +290,7 @@ def _showcase_table(params: dict[str, str]) -> dict[str, Any]:
 
 
 def stub_money_trail_fetcher(
-    visual_id: str, params: dict[str, str],
+    visual_id: str, params_multi: Mapping[str, list[str]],
 ) -> dict[str, Any]:
     """Deterministic stub responsive to filter params.
 
@@ -311,6 +312,9 @@ def stub_money_trail_fetcher(
     expected params (decouples "did the swap fire?" from "did the
     Sankey shape change?").
     """
+    # Collapse the URL multi-dict to scalar last-values — the stub
+    # only reads single-valued filters.
+    params: dict[str, str] = {k: v[-1] for k, v in params_multi.items() if v}
     if visual_id == "smoke-force":
         return _stub_rails_accounts()
     if visual_id == "showcase-kpi":

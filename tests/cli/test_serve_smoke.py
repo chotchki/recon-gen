@@ -94,7 +94,7 @@ def test_smoke_app_builder_emits_html(min_config: Path) -> None:
 
 def test_stub_fetcher_returns_sankey_shape_for_default_visual() -> None:
     data = stub_money_trail_fetcher(
-        "smoke-sankey", {"date_from": "2026-01-01", "date_to": "2026-05-01"},
+        "smoke-sankey", {"date_from": ["2026-01-01"], "date_to": ["2026-05-01"]},
     )
     assert "nodes" in data and "links" in data
     assert len(data["nodes"]) == 5
