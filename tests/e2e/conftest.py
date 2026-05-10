@@ -294,14 +294,7 @@ def l2ft_l2_prefix() -> str:
 @pytest.fixture(scope="session")
 def l2ft_l2_instance():
     """The loaded ``L2Instance`` the e2e session targets — same resolution
-    as `l2ft_l2_prefix`, but the object, not just the prefix string. L2FT
-    browser tests that only apply to L2s with certain features (chains /
-    transfer templates) consult this to `pytest.skip` cleanly when the
-    deployed L2 doesn't declare them — a no-chains / no-templates L2 is a
-    valid configuration (spec_example, fuzz seeds without a chain): the
-    "dropdown narrow doesn't empty" guard simply has nothing to exercise,
-    and the Chains/Templates sheets rendering clean for an empty L2 is
-    covered by the render tests."""
+    as `l2ft_l2_prefix`, but the object, not just the prefix string."""
     from quicksight_gen.apps.l1_dashboard._l2 import default_l2_instance
     from quicksight_gen.common.l2 import load_instance
 
@@ -309,6 +302,47 @@ def l2ft_l2_instance():
     if override is not None:
         return load_instance(override)
     return default_l2_instance()
+
+
+# ---------------------------------------------------------------------------
+# L2FT optional-feature guard (Y.2.browser.triage).
+#
+# The only thing a *valid* L2 YAML requires is a single rail (which implies
+# at least one account). Everything else — chains, transfer templates,
+# arbitrary metadata cascades, … — is optional. So an L2FT browser test that
+# exercises a deployed-matview surface keyed off an optional feature should
+# `pytest.skip` cleanly when the L2 targeted by this session doesn't declare
+# that feature (spec_example declares zero chains; a fuzz seed may declare
+# neither). The no-feature case rendering clean — empty table, vacuous
+# dropdown, no QS error overlay — is already covered by the L2FT render
+# tests, so no coverage is lost.
+#
+# Note: a non-empty *declared* list is necessary but not sufficient for the
+# matview to have rows — e.g. spec_example declares a transfer template but
+# the baseline/plant seed fires no instances of it. Tests therefore ALSO
+# keep their downstream "table started empty → skip"; this just fast-exits
+# the obvious `declared zero` case (and documents the principle).
+_L2FT_FEATURE_DECLARED = {
+    "chains": "declared_chain_parents",
+    "templates": "declared_template_names",
+}
+
+
+def require_l2ft_feature(l2_instance, feature: str) -> None:
+    """`pytest.skip` if ``l2_instance`` declares zero of ``feature``
+    (``"chains"`` | ``"templates"``). Call from an autouse fixture in an
+    L2FT browser test module that only applies when that feature exists."""
+    from quicksight_gen.apps.l2_flow_tracing import datasets as _l2ft_ds
+
+    fn_name = _L2FT_FEATURE_DECLARED[feature]
+    declared = getattr(_l2ft_ds, fn_name)(l2_instance)
+    if not declared:
+        pytest.skip(
+            f"deployed L2 declares no {feature} — the L2FT {feature} "
+            f"narrow-doesn't-empty guard has nothing to exercise (the "
+            f"{feature} sheet rendering clean for an empty L2 is covered "
+            f"by the render tests)."
+        )
 
 
 @pytest.fixture(scope="session")

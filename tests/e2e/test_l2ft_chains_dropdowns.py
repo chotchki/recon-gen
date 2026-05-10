@@ -38,26 +38,11 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 @pytest.fixture(autouse=True)
 def _require_chains(l2ft_l2_instance) -> None:
-    """Skip when the deployed L2 declares no chains.
-
-    The "Chain dropdown narrow doesn't empty" guard exercises the
-    deployed Chain Instances matview rows — there's nothing to exercise
-    when the L2 has zero chains (e.g. ``spec_example``, or a fuzz seed
-    without a chain). A no-chains L2 is a valid configuration; the Chains
-    sheet rendering clean (empty table, vacuous dropdown, no QS error
-    overlay) for such an L2 is covered by the L2FT render tests. Without
-    this skip the test instead times out in ``_navigate_to_chains``
-    waiting on table cells that never appear.
-    """
-    from quicksight_gen.apps.l2_flow_tracing.datasets import (
-        declared_chain_parents,
-    )
-    if not declared_chain_parents(l2ft_l2_instance):
-        pytest.skip(
-            "deployed L2 declares no chains — the Chain narrow-doesn't-empty "
-            "guard has nothing to exercise (Chains sheet rendering clean for "
-            "an empty L2 is covered by the render tests)."
-        )
+    # Fast-exit when the deployed L2 declares zero chains (spec_example) —
+    # see `conftest.require_l2ft_feature` for the rationale + the
+    # "declared ≠ instantiated" caveat the `before <= 0` skip below covers.
+    from tests.e2e.conftest import require_l2ft_feature
+    require_l2ft_feature(l2ft_l2_instance, "chains")
 
 
 @pytest.fixture
@@ -75,11 +60,20 @@ TALL_VIEWPORT = (1600, 4000)
 
 def _navigate_to_chains(page, page_timeout: int) -> None:
     """Open dashboard, switch to Chains, wait for the Chain Instances
-    table to render its first cells."""
+    table to render its first cells (best-effort — see below)."""
     wait_for_dashboard_loaded(page, timeout_ms=page_timeout)
     click_sheet_tab(page, "Chains", timeout_ms=page_timeout)
     wait_for_visuals_present(page, min_count=1, timeout_ms=page_timeout)
-    wait_for_table_cells_present(page, timeout_ms=page_timeout)
+    # The Chain Instances matview is empty when the deployed L2 declares no
+    # chains (spec_example) OR declares them but the seed fires no instances
+    # (a non-zero `declared_chain_parents` is necessary but not sufficient).
+    # `sn-table-cell-0-0` then never appears — don't burn `page_timeout` on
+    # it; bound the wait and let the caller's `before <= 0` skip handle the
+    # empty case. A populated table renders cells in ~1-3s, so 12s is ample.
+    try:
+        wait_for_table_cells_present(page, timeout_ms=12_000)
+    except Exception:  # empty matview → caller skips on before<=0; no cells to wait for
+        pass
 
 
 def _pick_each_option_and_assert_table_nonempty(

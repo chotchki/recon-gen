@@ -42,26 +42,12 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 @pytest.fixture(autouse=True)
 def _require_templates(l2ft_l2_instance) -> None:
-    """Skip when the deployed L2 declares no transfer templates.
-
-    Same rationale as ``test_l2ft_chains_dropdowns._require_chains``: the
-    "Template dropdown narrow doesn't empty" guard exercises the deployed
-    Template Instances matview rows; a no-templates L2 is a valid config
-    (a fuzz seed without one) with nothing to exercise, and the Transfer
-    Templates sheet rendering clean for an empty L2 is covered by the
-    render tests. Without this skip the test instead times out in
-    ``_navigate_to_templates`` waiting on table cells that never appear.
-    """
-    from quicksight_gen.apps.l2_flow_tracing.datasets import (
-        declared_template_names,
-    )
-    if not declared_template_names(l2ft_l2_instance):
-        pytest.skip(
-            "deployed L2 declares no transfer templates — the Template "
-            "narrow-doesn't-empty guard has nothing to exercise (Transfer "
-            "Templates sheet rendering clean for an empty L2 is covered by "
-            "the render tests)."
-        )
+    # Fast-exit when the deployed L2 declares zero transfer templates —
+    # see `conftest.require_l2ft_feature`. Note spec_example declares one
+    # template but the seed fires no instances of it, so the real guard for
+    # that case is the `before <= 0` "table started empty → skip" below.
+    from tests.e2e.conftest import require_l2ft_feature
+    require_l2ft_feature(l2ft_l2_instance, "templates")
 
 
 @pytest.fixture
@@ -80,13 +66,22 @@ TALL_VIEWPORT = (1600, 4000)
 
 def _navigate_to_templates(page, page_timeout: int) -> None:
     """Open dashboard, switch to Transfer Templates, wait for the
-    Template Instances table to render its first cells."""
+    Template Instances table to render its first cells (best-effort)."""
     wait_for_dashboard_loaded(page, timeout_ms=page_timeout)
     click_sheet_tab(page, "Transfer Templates", timeout_ms=page_timeout)
     # Templates sheet has 2 visuals — the Sankey + the Table. Asserting
     # min_count >= 2 confirms both rendered at least the chrome.
     wait_for_visuals_present(page, min_count=2, timeout_ms=page_timeout)
-    wait_for_table_cells_present(page, timeout_ms=page_timeout)
+    # The Template Instances matview is empty whenever the seed fires no
+    # template instances — spec_example DECLARES a transfer template but
+    # the baseline/plant seed fires none, so the table renders empty and
+    # `sn-table-cell-0-0` never appears. Bound the wait; the caller's
+    # `before <= 0` skip handles the empty case. (Same pattern as
+    # `test_l2ft_chains_dropdowns._navigate_to_chains`.)
+    try:
+        wait_for_table_cells_present(page, timeout_ms=12_000)
+    except Exception:  # empty matview → caller skips on before<=0; no cells to wait for
+        pass
 
 
 def _pick_each_option_and_assert_table_nonempty(
