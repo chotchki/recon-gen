@@ -172,17 +172,13 @@ jobs:
           QS_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
         run: ./run_tests.sh up_to=db --dialects=pg --targets=lo
 
-      - name: Render + verify the audit PDF against Postgres
-        # `audit apply --execute` queries every L1 invariant matview
-        # and renders a regulator-ready PDF via reportlab. `audit
-        # verify` recomputes the embedded ProvenanceFingerprint from
-        # current sources and asserts every per-source SHA256
-        # matches what the PDF baked in.
-        run: |
-          .venv/bin/quicksight-gen audit apply \
-            -c /tmp/ci-pg.yaml --execute -o /tmp/ci-pg-report.pdf
-          .venv/bin/quicksight-gen audit verify \
-            /tmp/ci-pg-report.pdf -c /tmp/ci-pg.yaml
+      # Note: audit PDF render+verify dropped from this job — it was
+      # querying `spec_example_*` directly via cfg's L2 default, but
+      # the runner now creates tables under per-variant prefixes
+      # (`sp_pg_lo_*`, `sq_pg_lo_*`). k.1.absorb-audit (Phase 2.5)
+      # queues moving audit-PDF render+verify into the runner's `db`
+      # layer (probably wrap as a pytest first; audit isn't pytest yet).
+      # Local audit coverage: `tests/audit/`, `tests/e2e/test_audit_*`.
 
   # P.7 — containerized integration job (Oracle leg).
   #
