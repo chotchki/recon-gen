@@ -42,6 +42,7 @@ from quicksight_gen.common.sheets.app_info import (
     build_matview_status_dataset,
 )
 from quicksight_gen.common.sql import app2_date_filter, to_date
+from quicksight_gen.common.sql.dialect import Dialect
 
 
 # M.4.4.5 — Executives reads base tables only; no app-specific
@@ -68,6 +69,12 @@ def exec_matview_specs(cfg: Config) -> list[tuple[str, str | None]]:
 # Identifier strings used as the DataSetIdentifier in visuals + filters.
 DS_EXEC_TRANSACTION_SUMMARY = "exec-transaction-summary-ds"
 DS_EXEC_ACCOUNT_SUMMARY = "exec-account-summary-ds"
+# Y.2.h — second account dataset with `WHERE activity_count > 0` baked
+# into the SQL. Replaces the visual-pinned `NumericRangeFilter` (which
+# QS applied but App2 didn't), so the active-only KPI + bar narrow
+# correctly across both renderers. Same shape + columns as the base
+# `exec-account-summary-ds` so visuals can be re-pointed without changes.
+DS_EXEC_ACCOUNT_SUMMARY_ACTIVE = "exec-account-summary-active-ds"
 
 
 # ---------------------------------------------------------------------------
@@ -167,33 +174,24 @@ GROUP BY posted_date, transfer_type"""
     )
 
 
-def build_account_summary_dataset(cfg: Config) -> DataSet:
-    """One row per account that has ever appeared in ``daily_balances``.
+def _account_summary_sql_template(prefix: str, dialect: Dialect) -> str:
+    """Shared SQL template for both the base + active variants.
 
-    LEFT JOINs an activity rollup so accounts with zero activity in
-    the dataset (just opened, never moved money) still show up with
-    ``last_activity_date = NULL``, ``activity_count = 0``. The
-    Account Coverage sheet's "active accounts" KPI applies a visual-
-    scoped filter on ``activity_count > 0`` to narrow the count.
-
-    N.4.a: reads from ``<prefix>_transactions`` + ``<prefix>_daily_balances``.
-    v6 column rename: posted_at → posting; account_type → account_role
-    (output column kept as ``account_type`` so dashboard-side consumers
-    don't need to follow the rename — only the SELECT does).
+    Carries a ``{date_filter}`` slot (interpolated to ``""`` for the
+    base date-independent snapshot, or to the App2 bind-clause for
+    the active variant) and a ``{active_only}`` slot (interpolated to
+    ``""`` for the base or to ``WHERE COALESCE(act.activity_count, 0) > 0``
+    for the active variant). Single template lets both builders
+    share one body (Y.2.h split, was X.2.g.1.b dual-SQL).
     """
-    # X.2.g.1.b — single SQL template; date filter interpolates
-    # into the ``activity`` CTE (limits which transactions count
-    # toward each account's activity rollup). Same template
-    # pattern as the transaction-summary dataset.
-    p = _require_prefix(cfg)
-    last_activity_expr = to_date("t.posting", cfg.dialect)
-    sql_template = f"""\
+    last_activity_expr = to_date("t.posting", dialect)
+    return f"""\
 WITH activity AS (
     SELECT
         t.account_id,
         MAX({last_activity_expr})    AS last_activity_date,
         COUNT(*)                AS activity_count
-    FROM {p}_transactions t
+    FROM {prefix}_transactions t
     WHERE t.status = 'Posted'
       {{date_filter}}
     GROUP BY t.account_id
@@ -203,7 +201,7 @@ accounts AS (
         d.account_id,
         d.account_name,
         d.account_role          AS account_type
-    FROM {p}_daily_balances d
+    FROM {prefix}_daily_balances d
 )
 SELECT
     a.account_id,
@@ -212,18 +210,81 @@ SELECT
     act.last_activity_date,
     COALESCE(act.activity_count, 0)  AS activity_count
 FROM accounts a
-LEFT JOIN activity act ON act.account_id = a.account_id"""
+LEFT JOIN activity act ON act.account_id = a.account_id
+{{active_only}}"""
+
+
+def build_account_summary_dataset(cfg: Config) -> DataSet:
+    """One row per account that has ever appeared in ``daily_balances``.
+
+    Y.2.h — pure date-independent snapshot. Used by visuals whose
+    semantic IS "every account that exists" (Total Open Accounts KPI,
+    Open Accounts by Type bar, Account Detail table). The activity
+    rollup columns (``last_activity_date`` / ``activity_count``)
+    reflect ALL-TIME activity, NOT the date-window — that's the
+    difference vs the ``exec-account-summary-active-ds`` variant.
+
+    Without ``:date_from``, the date-sensitive count-KPI test heuristic
+    correctly skips Total Open Accounts (its expected behavior IS
+    date-independent). Active KPIs use the ``_active`` variant which
+    keeps the date filter + bakes ``WHERE activity_count > 0``.
+
+    N.4.a: reads from ``<prefix>_transactions`` + ``<prefix>_daily_balances``.
+    v6 column rename: posted_at → posting; account_type → account_role
+    (output column kept as ``account_type`` so dashboard-side consumers
+    don't need to follow the rename — only the SELECT does).
+    """
+    p = _require_prefix(cfg)
+    template = _account_summary_sql_template(p, cfg.dialect)
+    sql = template.format(date_filter="", active_only="")
     return build_dataset(
         cfg,
         cfg.prefixed("exec-account-summary-dataset"),
         "Executives Account Summary",
         "exec-account-summary",
-        sql_template.format(date_filter=""),
+        sql,
         EXEC_ACCOUNT_SUMMARY_CONTRACT,
         visual_identifier=DS_EXEC_ACCOUNT_SUMMARY,
-        app2_sql=sql_template.format(
-            date_filter=app2_date_filter("t.posting", cfg.dialect),
-        ),
+    )
+
+
+def build_account_summary_active_dataset(cfg: Config) -> DataSet:
+    """Y.2.h — same shape as ``exec-account-summary-ds`` but narrowed
+    to accounts with at least one Posted transaction in the date
+    window (``WHERE COALESCE(act.activity_count, 0) > 0`` baked into
+    the outer SELECT).
+
+    Replaces the visual-pinned ``NumericRangeFilter`` (``activity_count
+    >= 1`` scoped to the active-only KPI + bar) — that filter narrowed
+    correctly in QuickSight but App2's renderer doesn't apply
+    visual-scoped filters yet (X.2.g.4 territory). Baking the predicate
+    into a second dataset and re-pointing the visuals fixes both
+    renderers without growing App2's filter coverage.
+
+    Keeps the X.2.g.1.b dual-SQL ``{date_filter}`` pattern so the
+    Account Coverage date picker narrows this dataset on both QS
+    (via ``app2_date_filter("")`` → analysis-level FilterGroup) and
+    App2 (``:date_from`` / ``:date_to`` URL binds).
+    """
+    p = _require_prefix(cfg)
+    template = _account_summary_sql_template(p, cfg.dialect)
+    sql = template.format(
+        date_filter="",
+        active_only="WHERE COALESCE(act.activity_count, 0) > 0",
+    )
+    app2_sql = template.format(
+        date_filter=app2_date_filter("t.posting", cfg.dialect),
+        active_only="WHERE COALESCE(act.activity_count, 0) > 0",
+    )
+    return build_dataset(
+        cfg,
+        cfg.prefixed("exec-account-summary-active-dataset"),
+        "Executives Account Summary — Active",
+        "exec-account-summary-active",
+        sql,
+        EXEC_ACCOUNT_SUMMARY_CONTRACT,
+        visual_identifier=DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
+        app2_sql=app2_sql,
     )
 
 
@@ -232,6 +293,7 @@ def build_all_datasets(cfg: Config) -> list[DataSet]:
     return [
         build_transaction_summary_dataset(cfg),
         build_account_summary_dataset(cfg),
+        build_account_summary_active_dataset(cfg),
         # M.4.4.5 — App Info ("i") sheet datasets, ALWAYS LAST.
         # M.4.4.7 — per-app segment so deploy <single-app> doesn't
         # delete-then-create another app's App Info dataset.
@@ -249,6 +311,8 @@ def build_all_datasets(cfg: Config) -> list[DataSet]:
 _CONTRACT_REGISTRATIONS: tuple[tuple[str, DatasetContract], ...] = (
     (DS_EXEC_TRANSACTION_SUMMARY, EXEC_TRANSACTION_SUMMARY_CONTRACT),
     (DS_EXEC_ACCOUNT_SUMMARY, EXEC_ACCOUNT_SUMMARY_CONTRACT),
+    # Y.2.h — same shape as the base; reuses the contract.
+    (DS_EXEC_ACCOUNT_SUMMARY_ACTIVE, EXEC_ACCOUNT_SUMMARY_CONTRACT),
 )
 for _vid, _contract in _CONTRACT_REGISTRATIONS:
     register_contract(_vid, _contract)

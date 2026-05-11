@@ -289,20 +289,6 @@ def _date_sensitive_count_kpis(
     return results
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Phase Y.2 chicken-and-egg: the heuristic includes Account Coverage's "
-        "'Total Open Accounts' (snapshot count by design — date filter only "
-        "narrows the inner activity CTE, not the outer accounts CTE) and "
-        "'Active Accounts' (depends on a visual-pinned filter on "
-        "activity_count > 0 that App2 doesn't apply yet). Both narrow "
-        "correctly in QuickSight via visual-pinned filters; App2 will narrow "
-        "correctly once Y.2 pushes the predicates down into dataset SQL "
-        "(eliminating the visual-pinned-filter dependency). Re-enable as part "
-        "of Y.2.h follow-up. Other 12 date-sensitive KPIs in the suite pass."
-    ),
-    strict=False,
-)
 def test_date_filter_narrows_every_date_sensitive_count_kpi(
     live_db_exec_server: _LiveServer,
 ) -> None:

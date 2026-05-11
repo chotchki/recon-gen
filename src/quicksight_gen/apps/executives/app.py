@@ -38,7 +38,6 @@ from quicksight_gen.apps.executives import datasets as _register_contracts  # no
 # neutralized when the spec/scenario YAML split lands (Phase O candidate).
 from quicksight_gen.apps.l1_dashboard._l2 import default_l2_instance
 from quicksight_gen.common import rich_text as rt
-from quicksight_gen.common.tree._helpers import _AutoSentinel
 from quicksight_gen.common.config import Config
 from quicksight_gen.common.ids import FilterGroupId, SheetId, VisualId
 from quicksight_gen.common.l2 import L2Instance, ThemePreset
@@ -68,6 +67,7 @@ from quicksight_gen.common.tree import (
 
 from quicksight_gen.apps.executives.datasets import (
     DS_EXEC_ACCOUNT_SUMMARY,
+    DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
     DS_EXEC_TRANSACTION_SUMMARY,
     build_all_datasets,
 )
@@ -255,6 +255,8 @@ def _datasets(cfg: Config) -> dict[str, Dataset]:
     names = [
         DS_EXEC_TRANSACTION_SUMMARY,
         DS_EXEC_ACCOUNT_SUMMARY,
+        # Y.2.h — second account dataset; same shape, baked WHERE.
+        DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
         DS_APP_INFO_LIVENESS,
         DS_APP_INFO_MATVIEWS,
     ]
@@ -268,14 +270,12 @@ def _datasets(cfg: Config) -> dict[str, Dataset]:
 # Account Coverage (L.6.4) — 2 KPIs (open / active) + 2 bar charts
 # (open and active counts grouped by account_type) + detail table.
 #
-# "Active accounts" KPI scopes to a visual-pinned filter on
-# `activity_count > 0`. The bar of active counts uses the same
-# scoping pattern.
+# Y.2.h: the "Active accounts" KPI + bar source from a second dataset
+# (DS_EXEC_ACCOUNT_SUMMARY_ACTIVE) whose SQL bakes in
+# ``WHERE COALESCE(activity_count, 0) > 0`` plus the date-range filter
+# via dual-SQL — replaces the prior visual-pinned NumericRangeFilter
+# which narrowed in QS but not in App2.
 # ---------------------------------------------------------------------------
-
-# Filter group ID for the visual-scoped pinned filter narrowing the
-# "active accounts" KPI + bar to rows with activity_count > 0.
-_FG_EXEC_ACCT_ACTIVE_ONLY = "fg-exec-account-active-only"
 
 # Q.1.b — Universal date-range filter parameter names + filter group IDs.
 P_EXEC_DATE_START = "pExecDateStart"
@@ -298,6 +298,10 @@ def _populate_account_coverage(
 ) -> None:
     del cfg
     ds_acct = datasets[DS_EXEC_ACCOUNT_SUMMARY]
+    # Y.2.h — Active KPI + bar source from the narrowed dataset where
+    # `WHERE COALESCE(activity_count, 0) > 0` is baked into the SQL,
+    # so both QS + App2 narrow correctly without a visual-pinned filter.
+    ds_acct_active = datasets[DS_EXEC_ACCOUNT_SUMMARY_ACTIVE]
 
     # Row 1: two KPIs side-by-side.
     kpi_row = sheet.layout.row(height=_KPI_ROW_SPAN)
@@ -313,11 +317,13 @@ def _populate_account_coverage(
         visual_id=VisualId("exec-account-kpi-active"),
         title="Active Accounts",
         subtitle=(
-            "Accounts with at least one successful transaction "
-            "(visual-pinned filter on activity_count > 0)"
+            "Accounts with at least one successful transaction in the "
+            "selected date window"
         ),
         values=[
-            ds_acct["account_id"].count(field_id="exec-acct-active-count"),
+            ds_acct_active["account_id"].count(
+                field_id="exec-acct-active-count",
+            ),
         ],
     )
 
@@ -347,12 +353,14 @@ def _populate_account_coverage(
         visual_id=VisualId("exec-account-bar-active-by-type"),
         title="Active Accounts by Type",
         subtitle=(
-            "Accounts with activity_count > 0, grouped by account_type"
+            "Accounts with activity in the selected window, grouped by account_type"
         ),
         category=[
-            ds_acct["account_type"].dim(field_id="exec-acct-active-type-dim"),
+            ds_acct_active["account_type"].dim(
+                field_id="exec-acct-active-type-dim",
+            ),
         ],
-        values=[ds_acct["account_id"].count(
+        values=[ds_acct_active["account_id"].count(
             field_id="exec-acct-active-type-count",
         )],
         orientation="HORIZONTAL",
@@ -568,47 +576,6 @@ def _populate_money_moved(
     )
 
 
-def _wire_account_coverage_filter_groups(
-    analysis: Analysis,
-    *,
-    sheet: Sheet,
-    datasets: dict[str, Dataset],
-) -> None:
-    """Visual-scoped pinned filter for the active-only KPI + bar.
-
-    `activity_count > 0` is naturally a NumericRangeFilter, but pinning
-    a visual filter via ``CategoryFilter.with_values`` is the common
-    pattern in PR/AR. Use a NumericRangeFilter with `RangeMinimum=1`
-    and no upper bound — narrows to rows where activity_count >= 1.
-    """
-    from quicksight_gen.common.tree import NumericRangeFilter, StaticBound
-
-    ds_acct = datasets[DS_EXEC_ACCOUNT_SUMMARY]
-
-    fg = analysis.add_filter_group(FilterGroup(
-        filter_group_id=_FG_EXEC_ACCT_ACTIVE_ONLY,
-        filters=[NumericRangeFilter(
-            filter_id="filter-exec-account-active-only",
-            dataset=ds_acct,
-            column=ds_acct["activity_count"],
-            minimum=StaticBound(value=1),
-            include_minimum=True,
-            null_option="NON_NULLS_ONLY",
-        )],
-    ))
-    # Scope to the active-only KPI + the active-by-type bar (the open
-    # KPI + open-by-type bar legitimately count every row).
-    active_visuals = [
-        v for v in sheet.visuals
-        if not isinstance(v.visual_id, _AutoSentinel)
-        and v.visual_id in (
-            "exec-account-kpi-active",
-            "exec-account-bar-active-by-type",
-        )
-    ]
-    sheet.scope(fg, active_visuals)
-
-
 def _wire_date_range_filter(
     analysis: Analysis,
     *,
@@ -632,6 +599,7 @@ def _wire_date_range_filter(
     ``posted_date`` (per-(day, transfer_type) summary).
     """
     ds_acct = datasets[DS_EXEC_ACCOUNT_SUMMARY]
+    ds_acct_active = datasets[DS_EXEC_ACCOUNT_SUMMARY_ACTIVE]
     ds_txn = datasets[DS_EXEC_TRANSACTION_SUMMARY]
 
     date_start = analysis.add_parameter(DateTimeParam(
@@ -671,6 +639,26 @@ def _wire_date_range_filter(
         )],
     ))
     acct_fg.scope_sheet(account_coverage_sheet)
+
+    # Y.2.h — same TimeRangeFilter on the active variant. The dataset
+    # SQL already narrows to ``activity_count > 0``; this FG narrows to
+    # the date window so the active KPI + bar count accounts active in
+    # the SELECTED period, not all-time. NON_NULLS_ONLY because the
+    # baked WHERE guarantees activity rows exist.
+    acct_active_fg = analysis.add_filter_group(FilterGroup(
+        filter_group_id=FilterGroupId("fg-exec-date-account-summary-active"),
+        cross_dataset="SINGLE_DATASET",
+        filters=[TimeRangeFilter(
+            filter_id="filter-exec-date-account-summary-active",
+            dataset=ds_acct_active,
+            column=ds_acct_active["last_activity_date"],
+            null_option="NON_NULLS_ONLY",
+            time_granularity="DAY",
+            minimum=min_bound,
+            maximum=max_bound,
+        )],
+    ))
+    acct_active_fg.scope_sheet(account_coverage_sheet)
 
     # exec_transaction_summary — Transaction Volume + Money Moved.
     # Two FilterGroups (one per sheet) so each FG scopes narrowly;
@@ -797,12 +785,6 @@ def build_executives_app(
     )
     _populate_money_moved(
         cfg, sheets[SHEET_EXEC_MONEY_MOVED], datasets=datasets,
-    )
-
-    _wire_account_coverage_filter_groups(
-        analysis,
-        sheet=sheets[SHEET_EXEC_ACCOUNT_COVERAGE],
-        datasets=datasets,
     )
 
     # Q.1.b — Universal date-range filter across all 3 data-bearing

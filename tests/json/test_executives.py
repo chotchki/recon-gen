@@ -107,9 +107,10 @@ def test_every_sheet_has_a_description(exec_analysis):
 # ---------------------------------------------------------------------------
 
 def test_datasets_in_expected_order():
-    """2 content datasets + 2 M.4.4.5 App Info datasets, in order."""
+    """3 content datasets (Y.2.h split account into base + active) + 2
+    M.4.4.5 App Info datasets, in order."""
     datasets = build_all_datasets(_TEST_CFG)
-    assert len(datasets) == 4
+    assert len(datasets) == 5
     assert datasets[0].DataSetId == _TEST_CFG.prefixed(
         "exec-transaction-summary-dataset",
     )
@@ -117,15 +118,22 @@ def test_datasets_in_expected_order():
         "exec-account-summary-dataset",
     )
     assert datasets[2].DataSetId == _TEST_CFG.prefixed(
-        "exec-app-info-liveness-dataset",
+        "exec-account-summary-active-dataset",
     )
     assert datasets[3].DataSetId == _TEST_CFG.prefixed(
+        "exec-app-info-liveness-dataset",
+    )
+    assert datasets[4].DataSetId == _TEST_CFG.prefixed(
         "exec-app-info-matviews-dataset",
     )
 
 
 def test_datasets_declared_in_analysis(exec_analysis):
-    """2 content datasets + the 2 M.4.4.5 App Info datasets."""
+    """3 content datasets (Y.2.h split account into base + active) + the
+    2 M.4.4.5 App Info datasets."""
+    from quicksight_gen.apps.executives.datasets import (
+        DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
+    )
     from quicksight_gen.common.sheets.app_info import (
         DS_APP_INFO_LIVENESS, DS_APP_INFO_MATVIEWS,
     )
@@ -134,6 +142,7 @@ def test_datasets_declared_in_analysis(exec_analysis):
     assert [d.Identifier for d in decls] == [
         DS_EXEC_TRANSACTION_SUMMARY,
         DS_EXEC_ACCOUNT_SUMMARY,
+        DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
         DS_APP_INFO_LIVENESS,
         DS_APP_INFO_MATVIEWS,
     ]
@@ -232,21 +241,34 @@ def test_account_coverage_has_kpis_bars_and_table(exec_analysis):
     assert set(_visual_ids(sheet)) == expected
 
 
-def test_account_coverage_active_kpi_filter_pinned(exec_analysis):
-    """The visual-pinned NumericRangeFilter narrows the active KPI + bar
-    to rows with activity_count >= 1 without affecting the open-side
-    visuals on the same sheet."""
-    fg = next(
-        g for g in exec_analysis.Definition.FilterGroups
+def test_account_coverage_legacy_active_filter_dropped(exec_analysis):
+    """Y.2.h — the visual-pinned ``NumericRangeFilter`` that narrowed
+    the Active KPI + bar to ``activity_count >= 1`` is gone, replaced
+    by ``DS_EXEC_ACCOUNT_SUMMARY_ACTIVE`` whose SQL bakes the
+    predicate in. The pinned filter narrowed in QS but not in App2;
+    baking it into a second dataset fixes both renderers.
+    """
+    legacy_fg_ids = [
+        g.FilterGroupId
+        for g in exec_analysis.Definition.FilterGroups
         if g.FilterGroupId == "fg-exec-account-active-only"
+    ]
+    assert legacy_fg_ids == [], (
+        "fg-exec-account-active-only should be gone after Y.2.h dataset split"
     )
-    scope = fg.ScopeConfiguration.SelectedSheets.SheetVisualScopingConfigurations[0]
-    assert scope.SheetId == SHEET_EXEC_ACCOUNT_COVERAGE
-    visual_ids = set(scope.VisualIds or [])
-    assert visual_ids == {
-        "exec-account-kpi-active",
-        "exec-account-bar-active-by-type",
+
+
+def test_account_coverage_active_dataset_declared(exec_analysis):
+    """The Y.2.h active-only dataset is declared on the Executives
+    analysis (so the active KPI + bar can reference it)."""
+    from quicksight_gen.apps.executives.datasets import (
+        DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
+    )
+    decls = {
+        d.Identifier
+        for d in exec_analysis.Definition.DataSetIdentifierDeclarations
     }
+    assert DS_EXEC_ACCOUNT_SUMMARY_ACTIVE in decls
 
 
 # ---------------------------------------------------------------------------
