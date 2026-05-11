@@ -345,16 +345,22 @@ def test_fanout_threshold_pushed_into_dataset_sql():
     ds = build_recipient_fanout_dataset(_TEST_CFG)
     sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
     assert (
-        f"WHERE distinct_senders >= <<${P_INV_FANOUT_THRESHOLD}>>"
+        f"WHERE dpr.distinct_senders >= <<${P_INV_FANOUT_THRESHOLD}>>"
         in sql
     ), "Y.3.a — threshold WHERE missing from QS-side dataset SQL"
-    assert "COUNT(DISTINCT o.sender_account_id) OVER" in sql, (
-        "Y.3.a — distinct_senders window column missing"
+    # PG doesn't support COUNT(DISTINCT) OVER, so distinct_senders is
+    # computed via a `distinct_per_recipient` GROUP BY CTE that JOINs
+    # back to the per-leg `joined` rows. Same shape on Oracle + SQLite.
+    assert "COUNT(DISTINCT sender_account_id) AS distinct_senders" in sql, (
+        "Y.3.a — distinct_senders GROUP BY missing"
+    )
+    assert "JOIN distinct_per_recipient dpr" in sql, (
+        "Y.3.a — distinct_per_recipient JOIN missing"
     )
     # App2-side SQL is registered too (same string when no app2_sql=).
     app2_sql = get_sql("inv-recipient-fanout-ds")
     assert (
-        f"WHERE distinct_senders >= <<${P_INV_FANOUT_THRESHOLD}>>"
+        f"WHERE dpr.distinct_senders >= <<${P_INV_FANOUT_THRESHOLD}>>"
         in app2_sql
     )
 

@@ -263,15 +263,22 @@ def build_recipient_fanout_dataset(cfg: Config) -> DataSet:
     in the output projection (``_account_type``) so downstream consumers
     aren't sensitive to the source-side rename.
 
-    Y.3.a — ``distinct_senders`` window column computed at the DB
-    (``COUNT(DISTINCT sender_account_id) OVER (PARTITION BY
-    recipient_account_id)``); the analyst-facing threshold pushes down
-    via ``WHERE distinct_senders >= <<$pInvFanoutThreshold>>``. Replaces
+    Y.3.a — ``distinct_senders`` count computed at the DB and joined
+    back per recipient (PG doesn't support ``COUNT(DISTINCT) OVER``,
+    Oracle/SQLite same — see Y.3.a hotfix); the analyst-facing
+    threshold pushes down via
+    ``WHERE distinct_senders >= <<$pInvFanoutThreshold>>``. Replaces
     the pre-Y.3 analysis-level CalcField + NumericRangeFilter pair
     (which QS handled but App2 didn't apply). Both renderers now see
     one shape.
     """
     p = _require_prefix(cfg)
+    # Two-CTE pattern instead of window: PG raises
+    # "FeatureNotSupported: DISTINCT is not implemented for window
+    # functions" on `COUNT(DISTINCT col) OVER (PARTITION BY ...)`.
+    # Compute the per-recipient distinct sender count via GROUP BY in
+    # `distinct_per_recipient`, then JOIN back to keep one row per
+    # (recipient leg × sender leg).
     sql = f"""\
 WITH inflows AS (
     SELECT
@@ -307,16 +314,32 @@ joined AS (
         o.sender_account_type,
         i.transfer_id,
         i.posted_at,
-        i.amount,
-        COUNT(DISTINCT o.sender_account_id) OVER (
-            PARTITION BY i.recipient_account_id
-        ) AS distinct_senders
+        i.amount
     FROM inflows i
     JOIN outflows o ON o.transfer_id = i.transfer_id
+),
+distinct_per_recipient AS (
+    SELECT
+        recipient_account_id,
+        COUNT(DISTINCT sender_account_id) AS distinct_senders
+    FROM joined
+    GROUP BY recipient_account_id
 )
-SELECT *
-FROM joined
-WHERE distinct_senders >= <<${P_INV_FANOUT_THRESHOLD}>>"""
+SELECT
+    j.recipient_account_id,
+    j.recipient_account_name,
+    j.recipient_account_type,
+    j.sender_account_id,
+    j.sender_account_name,
+    j.sender_account_type,
+    j.transfer_id,
+    j.posted_at,
+    j.amount,
+    dpr.distinct_senders
+FROM joined j
+JOIN distinct_per_recipient dpr
+    ON dpr.recipient_account_id = j.recipient_account_id
+WHERE dpr.distinct_senders >= <<${P_INV_FANOUT_THRESHOLD}>>"""
     return build_dataset(
         cfg,
         cfg.prefixed("inv-recipient-fanout-dataset"),
