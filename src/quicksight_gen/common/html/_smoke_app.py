@@ -35,6 +35,7 @@ from quicksight_gen.common.html.render import (
     FilterSpec,
     NumericRangeSpec,
     ParameterDropdownSpec,
+    ParameterMultiSelectSpec,
 )
 from quicksight_gen.common.ids import SheetId, VisualId
 from quicksight_gen.common.tree.structure import Analysis, App, Sheet
@@ -52,19 +53,29 @@ from quicksight_gen.common.tree.visuals import (
 # is page-level, so all sheets see the same controls. Values flow
 # through the URL per X.2.b's URL-as-state contract; the stub
 # fetcher echoes them in visible labels so the user sees the
-# round-trip succeed without a database.
+# round-trip succeed without a database. One of each kind so the
+# smoke page doubles as the visual showcase for the X.2.l.4 widgets
+# (Tom Select single + multi, noUiSlider, plus the page-level
+# Flatpickr date range that every sheet gets).
 SMOKE_FILTER_SPECS: tuple[FilterSpec, ...] = (
     ParameterDropdownSpec(
         name="view",
         label="View",
         options=("summary", "detail", "drill"),
     ),
+    ParameterMultiSelectSpec(
+        name="rails",
+        label="Rails",
+        options=("ach", "wire", "check", "internal", "zba"),
+    ),
     CategoryFilterSpec(
         column="status",
         label="Status",
         options=("open", "closed", "pending", "failed"),
     ),
-    NumericRangeSpec(column="amount", label="Amount"),
+    NumericRangeSpec(
+        column="amount", label="Amount", lo=0, hi=100_000, step=500,
+    ),
 )
 
 
