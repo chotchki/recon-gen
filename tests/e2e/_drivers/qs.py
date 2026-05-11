@@ -35,12 +35,15 @@ from pathlib import Path
 from typing import Any
 
 from quicksight_gen.common.browser.helpers import (
+    click_context_menu_item,
+    click_first_row_of_visual,
     click_sheet_tab,
     generate_dashboard_embed_url,
     get_sheet_tab_names,
     get_visual_titles,
     read_kpi_value,
     read_table_rows_dom,
+    right_click_first_row_of_visual,
     scroll_visual_into_view,
     set_multi_select_values,
     set_parameter_datetime_value,
@@ -330,6 +333,33 @@ class QsEmbedDriver:
 
     def cross_link(self, label: str) -> None:
         raise NotImplementedError(_TODO + " (cross-sheet drill click)")
+
+    def drill_from_first_row(self, visual_title: str) -> None:
+        # Left-click the first row's cell-0-0 to fire a DATA_POINT_CLICK
+        # drill (typically a same-sheet param write — Account Network's
+        # walk-the-flow is the K.4.8 case). Then settle on the re-fetch.
+        click_first_row_of_visual(
+            self._page, visual_title, self._page_timeout,
+        )
+        self._settle_after_param_change()
+
+    def drill_from_first_row_via_menu(
+        self, visual_title: str, menu_item: str,
+    ) -> None:
+        # Right-click → DATA_POINT_MENU → click the entry whose visible
+        # text is ``menu_item`` (the drill action's `Name` from the
+        # Python builder appears verbatim there). Doesn't settle: the
+        # drill may navigate to a different sheet (the v8.5.7
+        # cross-sheet-drill-with-date-widening case), in which case the
+        # caller's ``wait_loaded(target_visual)`` is what knows when the
+        # destination is ready; for an in-place drill the caller still
+        # ``wait_loaded``\\s the source visual to confirm the re-render.
+        right_click_first_row_of_visual(
+            self._page, visual_title, self._page_timeout,
+        )
+        click_context_menu_item(
+            self._page, menu_item, self._page_timeout,
+        )
 
     # -- artifacts -------------------------------------------------------
 

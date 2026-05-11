@@ -134,6 +134,25 @@ class DashboardDriver(Protocol):
         destination settles."""
         ...
 
+    def drill_from_first_row(self, visual_title: str) -> None:
+        """Left-click the first data row of the named table visual to
+        fire its ``DATA_POINT_CLICK`` drill — typically writes a
+        parameter that re-renders the *same* sheet. Block until the
+        re-fetch lands. (Cross-sheet / right-click drills go through
+        ``drill_from_first_row_via_menu``.)"""
+        ...
+
+    def drill_from_first_row_via_menu(
+        self, visual_title: str, menu_item: str,
+    ) -> None:
+        """Right-click the first data row of the named table visual,
+        then click the context-menu entry whose visible text is
+        ``menu_item`` — fires a ``DATA_POINT_MENU`` drill (which can
+        navigate to a different sheet *or* write parameters in place).
+        After the click the caller typically ``wait_loaded``\\s on the
+        destination's expected visual to lock in the new sheet."""
+        ...
+
     # -- artifacts -------------------------------------------------------
 
     def screenshot(self, path: str | Path | None = None) -> bytes:

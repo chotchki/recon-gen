@@ -1099,16 +1099,14 @@ _BROWSER_PKG = "quicksight_gen.common.browser"
 # shrink; a non-empty entry is a visible "not yet migrated" TODO.
 # (Ported off the set as X.2.q.3 progresses — git history records which:
 #  exec/l1/inv dashboard_renders + sheet_visuals + tree_validator, then
-#  l1/inv filters + l2ft rails/chains/templates dropdowns, done.)
+#  l1/inv filters + l2ft rails/chains/templates dropdowns, then the drill
+#  trio (inv_drilldown / l1_cross_sheet_drill / l2ft_metadata_cascade), done.)
 _PLAYWRIGHT_LEAK_LEGACY: frozenset[str] = frozenset({
     "tests/e2e/test_audit_dashboard_agreement.py",
     "tests/e2e/test_html2_executives.py",
     "tests/e2e/test_html2_executives_live.py",
     "tests/e2e/test_html2_l2ft.py",
     "tests/e2e/test_html2_money_trail.py",
-    "tests/e2e/test_inv_drilldown.py",
-    "tests/e2e/test_l1_cross_sheet_drill_date_widening.py",
-    "tests/e2e/test_l2ft_metadata_cascade.py",
 })
 
 

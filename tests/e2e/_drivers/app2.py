@@ -298,6 +298,25 @@ class App2Driver:
             self._dashboard = m.group(1)
             self._sheet = m.group(2)
 
+    def drill_from_first_row(self, visual_title: str) -> None:
+        # App2's table renderer doesn't wire row clicks to drill actions
+        # today (cross-sheet navigation goes through ``cross_link``'s
+        # ``<a>`` clicks, not row clicks). When that lands, the impl is a
+        # ``section[data-visual-kind] table.table-data tbody tr:first-child``
+        # click + ``_wait_for_refetch``.
+        raise NotImplementedError(
+            "App2Driver.drill_from_first_row — App2's table renderer "
+            "doesn't wire row-level drill actions yet"
+        )
+
+    def drill_from_first_row_via_menu(
+        self, visual_title: str, menu_item: str,
+    ) -> None:
+        raise NotImplementedError(
+            "App2Driver.drill_from_first_row_via_menu — App2 has no "
+            "right-click context menu on table rows"
+        )
+
     # -- artifacts -------------------------------------------------------
 
     def screenshot(self, path: str | Path | None = None) -> bytes:
