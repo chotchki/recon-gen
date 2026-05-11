@@ -943,10 +943,12 @@
 
   document.addEventListener("htmx:afterSwap", (evt) => {
     hydrate(evt.detail.target);
+    wireFilterWidgets(evt.detail.target);
   });
   document.addEventListener("DOMContentLoaded", () => {
     hydrate(document.body);
     wireCategoryFilters(document);
+    wireFilterWidgets(document);
     wireFilterAutoRefresh();
   });
 
@@ -1002,6 +1004,111 @@
     });
   }
 
+  // X.2.l.4 — fancy filter widgets. The renderer (render.py) emits a
+  // plain <select>/<input> carrying a data-widget="<kind>" attribute;
+  // this enhances each one with Tom Select / Flatpickr / noUiSlider
+  // (CDN-loaded in the page shell). The enhanced widget writes back
+  // into the underlying element's .value and dispatches a bubbling
+  // `change` so wireFilterAutoRefresh's #filter-form listener picks it
+  // up — i.e. the HTMX wire shape (URL keys, form serialization) is
+  // unchanged; only the chrome differs. data-widget-wired makes the
+  // call idempotent, so it's safe to re-run after htmx:afterSwap.
+  //
+  // If a lib failed to load (offline, CDN blip), the typeof guard
+  // leaves the plain <select>/<input> in place — degraded chrome, but
+  // the filter still works. (X.2.p will bundle the libs locally so
+  // there's no CDN to miss.)
+  //
+  // Markup contract (see render.py, X.2.l.4.b):
+  //   <select  data-widget="tomselect" [multiple] ...>
+  //   <input   data-widget="flatpickr-range" ...>  — siblings
+  //       <input name="date_from"> / <input name="date_to"> get synced
+  //   <div     data-widget="nouislider"
+  //            data-min/data-max/[data-start-min]/[data-start-max]
+  //            data-min-input="min_<col>" data-max-input="max_<col>">
+  //       — those two number inputs get synced
+  function wireFilterWidgets(root) {
+    var scope = root || document;
+    scope.querySelectorAll("[data-widget]").forEach(function (el) {
+      if (el.dataset.widgetWired === "1") return;
+      var kind = el.dataset.widget;
+      if (kind === "tomselect") {
+        wireTomSelect(el);
+      } else if (kind === "flatpickr-range") {
+        wireFlatpickrRange(el, scope);
+      } else if (kind === "nouislider") {
+        wireNoUiSlider(el, scope);
+      }
+    });
+  }
+
+  function wireTomSelect(el) {
+    if (typeof TomSelect === "undefined") return;
+    el.dataset.widgetWired = "1";
+    new TomSelect(el, {
+      plugins: el.multiple ? ["remove_button"] : [],
+      // Tom Select syncs the underlying <select>'s selected options but
+      // doesn't always re-fire a native `change` on it — do it
+      // explicitly so wireFilterAutoRefresh sees the new value.
+      onChange: function () {
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      },
+    });
+  }
+
+  function wireFlatpickrRange(el, scope) {
+    if (typeof flatpickr === "undefined") return;
+    el.dataset.widgetWired = "1";
+    var fromInput = scope.querySelector('input[name="date_from"]');
+    var toInput = scope.querySelector('input[name="date_to"]');
+    flatpickr(el, {
+      mode: "range",
+      dateFormat: "Y-m-d",
+      onChange: function (selectedDates, _dateStr, instance) {
+        var lo = selectedDates[0]
+          ? instance.formatDate(selectedDates[0], "Y-m-d")
+          : "";
+        var hi = selectedDates[1]
+          ? instance.formatDate(selectedDates[1], "Y-m-d")
+          : "";
+        if (fromInput) fromInput.value = lo;
+        if (toInput) toInput.value = hi;
+        if (fromInput) {
+          fromInput.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      },
+    });
+  }
+
+  function wireNoUiSlider(el, scope) {
+    if (typeof noUiSlider === "undefined") return;
+    el.dataset.widgetWired = "1";
+    var minInput = scope.querySelector(
+      'input[name="' + el.dataset.minInput + '"]',
+    );
+    var maxInput = scope.querySelector(
+      'input[name="' + el.dataset.maxInput + '"]',
+    );
+    var rangeLo = Number(el.dataset.min);
+    var rangeHi = Number(el.dataset.max);
+    noUiSlider.create(el, {
+      start: [
+        el.dataset.startMin ? Number(el.dataset.startMin) : rangeLo,
+        el.dataset.startMax ? Number(el.dataset.startMax) : rangeHi,
+      ],
+      connect: true,
+      range: { min: rangeLo, max: rangeHi },
+      tooltips: true,
+    });
+    el.noUiSlider.on("change", function (values) {
+      if (minInput) minInput.value = values[0];
+      if (maxInput) maxInput.value = values[1];
+      if (minInput) {
+        minInput.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+  }
+
   // X.2.a.2 — test-mode export. When window.__test_mode__ is set
   // BEFORE this script runs (via Playwright's addInitScript), the
   // IIFE-scoped functions become reachable for unit tests under
@@ -1025,6 +1132,7 @@
       ensureToastContainer: ensureToastContainer,
       wireCategoryFilters: wireCategoryFilters,
       wireFilterAutoRefresh: wireFilterAutoRefresh,
+      wireFilterWidgets: wireFilterWidgets,
     };
   }
 })();

@@ -168,6 +168,54 @@ _D3_SANKEY_SRC = (
     "https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js"
 )
 
+# X.2.l.4 — filter-widget libs, CDN-loaded (same pattern as htmx / d3
+# above; X.2.p later vendors + bundles them so a `pip install` App 2
+# works offline). Each *enhances an existing* ``<select>`` / ``<input>``
+# and keeps its ``.value`` in sync — so the HTMX wire shape (URL keys,
+# form serialization) is unchanged; only the widget chrome changes.
+#
+#   - Tom Select  — multi-select chips + search (replaces the native
+#                   ``<select multiple>`` and the checkbox group; QS's
+#                   multi-select is the widget App 2 was furthest from)
+#                   and single-select with typeahead.
+#   - Flatpickr   — date-range popover + preset shortcuts (replaces the
+#                   two browser-native ``<input type="date">``).
+#   - noUiSlider  — draggable two-handle min/max slider with value
+#                   bubbles (over the native number inputs).
+_TOM_SELECT_CSS = (
+    "https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.min.css"
+)
+_TOM_SELECT_JS = (
+    "https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/"
+    "tom-select.complete.min.js"
+)
+_FLATPICKR_CSS = "https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css"
+_FLATPICKR_JS = "https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"
+_NOUISLIDER_CSS = (
+    "https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.css"
+)
+_NOUISLIDER_JS = (
+    "https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.js"
+)
+
+# Built once at import: the full ``<head>`` asset blocks. ``_VENDOR_CSS``
+# lands right after ``output.css`` (so the per-instance ``:root`` theme
+# ``<style>`` — which follows it — still wins the cascade for the
+# ``--color-*`` vars these libs read; the X.2.l.4.c override sheet then
+# maps the libs' own hooks onto those vars). ``_VENDOR_JS`` lands at the
+# bottom of ``<head>`` where htmx / d3 already loaded.
+_VENDOR_CSS = "\n".join(
+    f'  <link rel="stylesheet" href="{href}">'
+    for href in (_TOM_SELECT_CSS, _FLATPICKR_CSS, _NOUISLIDER_CSS)
+)
+_VENDOR_JS = "\n".join(
+    f'  <script src="{src}"></script>'
+    for src in (
+        _HTMX_SRC, _D3_SRC, _D3_SANKEY_SRC,
+        _TOM_SELECT_JS, _FLATPICKR_JS, _NOUISLIDER_JS,
+    )
+)
+
 # X.2.a.1 — JS lives in standalone .js files under assets/js/ so biome
 # can lint / format / minify them; render.py loads the contents at
 # module-import time + inlines them into the page shell. Standalone
@@ -199,10 +247,9 @@ _PAGE_SHELL = """\
   <title>{title}</title>
 {dev_log_meta}
   <link rel="stylesheet" href="/static/output.css">
+{vendor_css}
 {theme_style}
-  <script src="{htmx_src}"></script>
-  <script src="{d3_src}"></script>
-  <script src="{d3_sankey_src}"></script>
+{vendor_js}
 </head>
 <body class="bg-surface-bg text-primary-fg font-sans antialiased">
 {body}
@@ -460,9 +507,8 @@ def emit_dashboards_list(
     return _PAGE_SHELL.format(
         title="Dashboards",
         body="\n".join(body_parts),
-        htmx_src=_HTMX_SRC,
-        d3_src=_D3_SRC,
-        d3_sankey_src=_D3_SANKEY_SRC,
+        vendor_css=_VENDOR_CSS,
+        vendor_js=_VENDOR_JS,
         bootstrap_js=_BOOTSTRAP_JS,
         dev_log_js=_DEV_LOG_JS,
         dev_log_meta="",
@@ -538,9 +584,8 @@ def emit_error_page(
     return _PAGE_SHELL.format(
         title=html.escape(headline),
         body="\n".join(body_parts),
-        htmx_src=_HTMX_SRC,
-        d3_src=_D3_SRC,
-        d3_sankey_src=_D3_SANKEY_SRC,
+        vendor_css=_VENDOR_CSS,
+        vendor_js=_VENDOR_JS,
         bootstrap_js=_BOOTSTRAP_JS,
         dev_log_js=_DEV_LOG_JS,
         dev_log_meta="",
@@ -820,9 +865,8 @@ def emit_html(
     return _PAGE_SHELL.format(
         title=html.escape(sheet.title),
         body="\n".join(body_parts),
-        htmx_src=_HTMX_SRC,
-        d3_src=_D3_SRC,
-        d3_sankey_src=_D3_SANKEY_SRC,
+        vendor_css=_VENDOR_CSS,
+        vendor_js=_VENDOR_JS,
         bootstrap_js=_BOOTSTRAP_JS,
         dev_log_js=_DEV_LOG_JS,
         dev_log_meta=(
