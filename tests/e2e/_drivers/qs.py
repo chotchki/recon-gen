@@ -35,6 +35,7 @@ from typing import Any
 from quicksight_gen.common.browser.helpers import (
     click_sheet_tab,
     generate_dashboard_embed_url,
+    get_sheet_tab_names,
     get_visual_titles,
     read_kpi_value,
     read_table_rows_dom,
@@ -151,6 +152,9 @@ class QsEmbedDriver:
             pass
 
     # -- reads -----------------------------------------------------------
+
+    def sheet_names(self) -> list[str]:
+        return get_sheet_tab_names(self._page)
 
     def visual_titles(self) -> list[str]:
         return get_visual_titles(self._page)

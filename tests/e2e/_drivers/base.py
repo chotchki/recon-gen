@@ -56,6 +56,12 @@ class DashboardDriver(Protocol):
 
     # -- reads -----------------------------------------------------------
 
+    def sheet_names(self) -> list[str]:
+        """The dashboard's sheet-tab names, in tab order. (QS reads the
+        ``[role="tab"]`` strip; App2 the ``<nav>`` link text — both are
+        the tree's ``Sheet.name``, so the two renderers agree.)"""
+        ...
+
     def visual_titles(self) -> list[str]:
         """Titles of the visuals on the current sheet, in display order."""
         ...

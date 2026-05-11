@@ -124,6 +124,28 @@ def qs_client(region):
     return boto3.client("quicksight", region_name=region)
 
 
+@pytest.fixture
+def qs_driver(cfg, region, account_id):  # type: ignore[no-untyped-def]: return-type annotation would force a QsEmbedDriver import at module scope
+    """X.2.q — ``QsEmbedDriver`` over a fresh WebKit page, for browser
+    e2e tests that drive a deployed QuickSight dashboard through the
+    ``DashboardDriver`` protocol (``open(dashboard_id)`` mints the embed
+    URL). Skips cleanly when ``QS_E2E_USER_ARN`` is unset (the runner
+    derives it from ``cfg.auth.aws_profile``; export it for a direct
+    ``pytest`` run). Function-scoped — embed URLs are single-use.
+    """
+    from quicksight_gen.common.browser.helpers import get_user_arn
+    from tests.e2e._drivers import QsEmbedDriver
+
+    try:
+        get_user_arn()
+    except RuntimeError as exc:
+        pytest.skip(str(exc))
+    with QsEmbedDriver.embed(
+        aws_account_id=account_id, aws_region=region,
+    ) as d:
+        yield d
+
+
 def _resolve_test_l2_instance():  # type: ignore[no-untyped-def]: return-type annotation would force an L2Instance import at module scope, slowing collection
     """Resolve the L2 instance the e2e tests should mirror.
 

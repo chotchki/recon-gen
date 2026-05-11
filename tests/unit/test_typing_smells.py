@@ -1099,7 +1099,7 @@ _BROWSER_PKG = "quicksight_gen.common.browser"
 # shrink; a non-empty entry is a visible "not yet migrated" TODO.
 _PLAYWRIGHT_LEAK_LEGACY: frozenset[str] = frozenset({
     "tests/e2e/test_audit_dashboard_agreement.py",
-    "tests/e2e/test_exec_dashboard_renders.py",
+    # test_exec_dashboard_renders.py — ported onto DashboardDriver (X.2.q.3)
     "tests/e2e/test_exec_sheet_visuals.py",
     "tests/e2e/test_html2_executives.py",
     "tests/e2e/test_html2_executives_live.py",

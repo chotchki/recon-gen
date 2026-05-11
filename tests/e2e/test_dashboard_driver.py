@@ -28,30 +28,14 @@ playwright_sync_api = pytest.importorskip("playwright.sync_api")
 
 from tests.e2e._drivers import App2Driver, DashboardDriver, QsEmbedDriver
 
+# `qs_driver` lives in conftest.py — shared with the other QS browser
+# e2e tests (X.2.q.3).
+
 
 @pytest.fixture
 def driver() -> Iterator[DashboardDriver]:
     """The App 2 leg — the bundled smoke app, no DB, no AWS."""
     with App2Driver.smoke() as d:
-        yield d
-
-
-@pytest.fixture
-def qs_driver(cfg, region, account_id) -> Iterator[QsEmbedDriver]:
-    """The QuickSight leg — a WebKit page over a live QS embed.
-
-    Skips when ``QS_E2E_USER_ARN`` is unset (the test runner derives it
-    from ``cfg.auth.aws_profile``; export it for a direct ``pytest``
-    run)."""
-    from quicksight_gen.common.browser.helpers import get_user_arn
-
-    try:
-        get_user_arn()
-    except RuntimeError as exc:
-        pytest.skip(str(exc))
-    with QsEmbedDriver.embed(
-        aws_account_id=account_id, aws_region=region,
-    ) as d:
         yield d
 
 

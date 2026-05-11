@@ -1,6 +1,8 @@
 """Browser test: verify the deployed Executives dashboard loads.
 
-L.11.1 — sheet-tab assertion derives the expected set from the tree
+Ported onto the ``DashboardDriver`` protocol (X.2.q.3 — no Playwright
+in the test body; the `qs_driver` fixture lives in conftest). The
+sheet-tab assertion derives the expected set from the tree
 (`exec_app.analysis.sheets`).
 """
 
@@ -8,48 +10,36 @@ from __future__ import annotations
 
 import pytest
 
-from quicksight_gen.common.browser.helpers import (
-    generate_dashboard_embed_url,
-    get_sheet_tab_names,
-    screenshot,
-    wait_for_dashboard_loaded,
-    webkit_page,
-)
-
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
-@pytest.fixture
-def embed_url(region, account_id, exec_dashboard_id) -> str:
-    return generate_dashboard_embed_url(
-        aws_account_id=account_id,
-        aws_region=region,
-        dashboard_id=exec_dashboard_id,
+def test_exec_dashboard_opens_and_screenshots(
+    qs_driver, exec_dashboard_id, exec_app, tmp_path,
+) -> None:
+    """The deployed Executives dashboard loads, screenshots, and a data
+    sheet renders visuals. (`open()` mints + uses the embed URL — its
+    success is the "embed URL valid" check the old test had as its own
+    micro-assertion.)"""
+    qs_driver.open(exec_dashboard_id)
+    png = qs_driver.screenshot(tmp_path / "executives_initial.png")
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    qs_driver.goto_sheet("Account Coverage")
+    assert qs_driver.visual_titles(), (
+        "Executives 'Account Coverage' sheet rendered no visual titles"
     )
 
 
-class TestExecDashboardLoads:
-    def test_embed_url_generated(self, embed_url):
-        assert embed_url.startswith("https://"), (
-            f"Embed URL does not look valid: {embed_url[:80]}"
-        )
-
-    def test_dashboard_page_loads(self, embed_url, page_timeout):
-        with webkit_page(headless=True) as page:
-            page.goto(embed_url, timeout=page_timeout)
-            wait_for_dashboard_loaded(page, timeout_ms=page_timeout)
-            screenshot(page, "dashboard_initial_load", subdir="executives")
-            assert page.title(), "Page has no title — embed likely failed"
-
-    def test_all_sheet_tabs_visible(self, embed_url, page_timeout, exec_app):
-        expected = {s.name for s in exec_app.analysis.sheets}
-        with webkit_page(headless=True) as page:
-            page.goto(embed_url, timeout=page_timeout)
-            wait_for_dashboard_loaded(page, timeout_ms=page_timeout)
-            tab_names = set(get_sheet_tab_names(page))
-            missing = expected - tab_names
-            assert not missing, (
-                f"Missing Executives sheet tabs: {missing}. "
-                f"Found: {sorted(tab_names)}"
-            )
+def test_exec_dashboard_lists_all_sheet_tabs(
+    qs_driver, exec_dashboard_id, exec_app,
+) -> None:
+    """Every sheet the tree declares shows up as a tab on the deployed
+    dashboard. Switching the L2 instance changes the names but the
+    assertion stays valid."""
+    qs_driver.open(exec_dashboard_id)
+    expected = {s.name for s in exec_app.analysis.sheets}
+    tabs = set(qs_driver.sheet_names())
+    missing = expected - tabs
+    assert not missing, (
+        f"Missing Executives sheet tabs: {missing}. Found: {sorted(tabs)}"
+    )

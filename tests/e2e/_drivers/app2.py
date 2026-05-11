@@ -115,6 +115,16 @@ class App2Driver:
             f'section[data-visual-kind]:has(h2:text-is("{visual_title}"))'
         ).first
 
+    def sheet_names(self) -> list[str]:
+        # App2's sheet-tab strip is a top-level ``<nav>`` of ``<a>``s
+        # whose text is each ``Sheet.name`` (render.py ``_render_sheet_tabs``;
+        # a single-sheet dashboard renders no strip → []).
+        return [
+            t.strip()
+            for t in self._page.locator("nav > a").all_inner_texts()
+            if t.strip()
+        ]
+
     def visual_titles(self) -> list[str]:
         return [
             t.strip()
