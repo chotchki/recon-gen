@@ -1286,6 +1286,67 @@ def read_visual_column_values(
     ) or []
 
 
+def read_table_rows_dom(
+    page: Page, visual_title: str,
+) -> list[dict[str, str]]:
+    """Read the DOM-visible rows of a QuickSight Table visual as a list
+    of dicts keyed by column-header text, in display order.
+
+    QS virtualizes — only ~10 rows are in the DOM at once — so this
+    returns that window, not necessarily the whole table. Caller is
+    responsible for getting the table on screen (use
+    ``scroll_visual_into_view`` first; bump the page size if the full
+    table is needed). Returns ``[]`` if the visual isn't found or has no
+    body cells (empty table / still loading).
+
+    Column headers come from the ``[data-automation-id="sn-table-column-N"]``
+    divs (their ``.title`` span — the visible header text); body cells
+    from ``sn-table-cell-{row}-{col}``. Headers and cells are zipped by
+    *position* — the Nth header (left-to-right in the DOM) pairs with the
+    Nth cell (smallest ``col`` first) in each row — so it's robust to QS's
+    internal column-index numbering (the header's ``sn-table-column-N`` and
+    the body's ``sn-table-cell-r-c`` use different ``N``/``c`` origins).
+    """
+    return page.evaluate(
+        """(title) => {
+            const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
+            for (const v of visuals) {
+                const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
+                if (!t || t.innerText.trim() !== title) continue;
+                // Column headers, left-to-right in DOM order.
+                const headers = [];
+                v.querySelectorAll('[data-automation-id^="sn-table-column-"]').forEach(c => {
+                    if (!/sn-table-column-\\d+$/.test(c.getAttribute('data-automation-id'))) return;
+                    const titleEl = c.querySelector('.table-title .title')
+                        || c.querySelector('.title');
+                    headers.push(titleEl ? titleEl.innerText.trim() : c.innerText.trim());
+                });
+                // Body cells -> { rowIdx: { colIdx: text } }
+                const cellsByRow = {};
+                v.querySelectorAll('[data-automation-id^="sn-table-cell-"]').forEach(c => {
+                    const m = c.getAttribute('data-automation-id').match(/sn-table-cell-(\\d+)-(\\d+)/);
+                    if (!m) return;
+                    const r = parseInt(m[1], 10), col = parseInt(m[2], 10);
+                    (cellsByRow[r] = cellsByRow[r] || {})[col] = c.innerText.trim();
+                });
+                const rows = [];
+                Object.keys(cellsByRow).map(Number).sort((a, b) => a - b).forEach(r => {
+                    const ordered = Object.keys(cellsByRow[r]).map(Number).sort((a, b) => a - b)
+                        .map(col => cellsByRow[r][col]);
+                    const row = {};
+                    for (let i = 0; i < headers.length && i < ordered.length; i++) {
+                        row[headers[i]] = ordered[i];
+                    }
+                    rows.push(row);
+                });
+                return rows;
+            }
+            return [];
+        }""",
+        visual_title,
+    ) or []
+
+
 def read_kpi_value(page: Page, visual_title: str) -> str:
     """Return the displayed big-number text of a KPI visual.
 

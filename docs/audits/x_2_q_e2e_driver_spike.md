@@ -144,15 +144,28 @@ moves the stub KPI 47→74; `clear_filters` restores it; `set_date_range`
 + `set_slider` survive the re-fetch; `goto_sheet` hops sheets. 9 tests
 in the file total, all green.
 
+## Follow-on: X.2.q.2 — `QsEmbedDriver.table_rows` (done)
+
+`read_table_rows_dom` in `common/browser/helpers.py` reads a QS Table
+visual's DOM-visible window as header-keyed dicts: column headers from
+the `[data-automation-id="sn-table-column-N"]` divs (their `.title`
+span — the visible header text); body cells from `sn-table-cell-{row}-{col}`;
+**zipped by position** — the Nth header (left-to-right) pairs with the
+Nth cell (smallest `col` first) in each row. The position-zip matters
+because the header and body column-index origins differ — the screenshot
+showed "Transfer ID"'s header div is `sn-table-column-2` while its body
+cells start at `sn-table-cell-r-0` — so matching on the numeric index
+would be off-by-N. `QsEmbedDriver.table_rows` scrolls the visual into
+view, then calls it. Verified live against the deployed
+`qs-gen-postgres-sasquatch_pr-l1-dashboard` (Info → "Matview Status" →
+12 rows keyed `{View Name, Row Count, Latest Date}`, values aligned).
+
 ## Carried forward (not done yet)
 
-- **`QsEmbedDriver.table_rows`** — needs the virtualization-aware path:
-  `count_table_total_rows` (bump page size to 10000, scroll-accumulate)
-  × per-column reads (`read_visual_column_values`) × a **header-cell
-  reader**. The `sn-table-cell-{row}-{col}` automation-ids cover body
-  cells only; the header-row `data-automation-id` is unverified. Per
-  `feedback_aws_research`: confirm it against a live dashboard (or ask
-  for a UI sample) before wiring — don't guess. → **X.2.q.2 residual.**
+- **`QsEmbedDriver.table_rows` — full table.** Today it returns the
+  DOM-visible window (~10 rows; QS virtualizes). The whole-table path
+  (bump page size to 10000 + scroll-accumulate, like `count_table_total_rows`
+  does for counts) is what `X.2.j`'s 4-way agreement diff needs. → **X.2.q.3 / X.2.j.**
 - **`cross_link` real-app assertion** — it's implemented but only
   smoke-tested against the smoke app (no obvious stable cross-link
   target there); a "click the drill, land on the right sheet, the

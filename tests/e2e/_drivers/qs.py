@@ -37,6 +37,7 @@ from quicksight_gen.common.browser.helpers import (
     generate_dashboard_embed_url,
     get_visual_titles,
     read_kpi_value,
+    read_table_rows_dom,
     scroll_visual_into_view,
     wait_for_dashboard_loaded,
     wait_for_visual_titles_present,
@@ -167,15 +168,16 @@ class QsEmbedDriver:
         )
 
     def table_rows(self, visual_title: str) -> list[dict[str, str]]:
-        # The `sn-table-cell-{row}-{col}` automation-ids cover body cells
-        # only — there's no verified header-cell id, so reading a QS
-        # table as header-keyed dicts needs a new helper. Deferred to
-        # X.2.q.2 (and gated behind `feedback_aws_research` — confirm the
-        # header automation-id against a live dashboard, don't guess).
-        raise NotImplementedError(
-            "X.2.q.2 — QsEmbedDriver.table_rows needs a header-cell reader "
-            "(sn-table-cell-* ids are body-only)"
+        # Headers from the `sn-table-column-N` divs (their `.title` span),
+        # body cells from `sn-table-cell-{row}-{col}`, zipped by position.
+        # Returns the DOM-visible window only (QS virtualizes ~10 rows) —
+        # de-virtualize first by scrolling the visual on-screen. The
+        # page-size-bump-for-the-full-table path is X.2.q.3 / X.2.j.
+        scroll_visual_into_view(
+            self._page, visual_title, self._visual_timeout,
+            wait_for_cells=False,
         )
+        return read_table_rows_dom(self._page, visual_title)
 
     def kpi_value(self, visual_title: str) -> str | None:
         try:

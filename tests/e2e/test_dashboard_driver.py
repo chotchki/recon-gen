@@ -177,3 +177,21 @@ def test_qs_l1_dashboard_screenshot(
     png = qs_driver.screenshot(tmp_path / "l1_initial.png")
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
     assert (tmp_path / "l1_initial.png").exists()
+
+
+@pytest.mark.e2e
+@pytest.mark.browser
+def test_qs_table_rows_well_formed(
+    qs_driver: QsEmbedDriver, l1_dashboard_id: str,
+) -> None:
+    """QsEmbedDriver.table_rows reads a deployed table as header-keyed
+    dicts. Data is whatever's seeded against the deployed dashboard's DB
+    — assert structure; if rows came back, their keys are the column
+    headers and the dicts are non-empty."""
+    qs_driver.open(l1_dashboard_id, sheet="Info")
+    qs_driver.wait_loaded("Matview Status")
+    rows = qs_driver.table_rows("Matview Status")
+    assert isinstance(rows, list)
+    if rows:
+        assert all(isinstance(r, dict) and r for r in rows)
+        assert all(isinstance(k, str) and k for k in rows[0])
