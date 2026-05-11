@@ -102,11 +102,16 @@ serve = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
-    # Y.7-followup — the runner's browser layer passes `--reruns 1` so a
+    # The runner uses `pytest -n auto` on every layer, and conftest bumps
+    # the xdist dist mode to `loadgroup` so `@pytest.mark.xdist_group`
+    # works. xdist therefore belongs in [dev], not just [e2e] — `uv sync
+    # --extra dev && pytest -n auto` should work.
+    "pytest-xdist>=3.5",
+    # Y.7-followup — the runner's browser layer passes `--reruns 2` so a
     # genuinely-flaky live-cloud e2e (QS embed-render under -n 4 worker
     # contention occasionally drops a visual from the DOM at snapshot
-    # time — passes on re-run) auto-retries once before halting the
-    # chain. A test that's broken (not flaky) fails twice → still halts.
+    # time — passes on re-run) auto-retries before halting the chain. A
+    # test that's broken (not flaky) fails 3× → still halts.
     "pytest-rerunfailures>=14.0",
     "boto3>=1.34",
     # botocore[crt] pulls awscrt — required for the SSO / login
@@ -225,19 +230,11 @@ version = {attr = "quicksight_gen.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# Y.7-followup — ``loadgroup`` distribution so tests carrying an
-# ``xdist_group`` marker land on the SAME worker. Needed because
-# ``pytest-xdist`` re-runs module/session-scoped fixtures ONCE PER
-# WORKER: a module-scoped fixture that mutates a shared external
-# resource (e.g. ``test_audit_dashboard_agreement.py::seeded_audit``
-# re-applies the Oracle schema) races across workers — Oracle's DDL
-# auto-commits, so the second worker's ``CREATE TABLE`` hits ORA-00955
-# while the first worker's run is still in flight. Grouping pins all
-# tests sharing that fixture onto one worker so it runs exactly once.
-# Harmless for ungrouped tests (each becomes its own group = its test
-# id, distributed exactly as plain ``load`` would) and a no-op when no
-# ``-n`` workers are requested.
-addopts = "--dist loadgroup"
+# NOTE: the ``loadgroup`` xdist distribution (so ``@pytest.mark.xdist_group``
+# markers pin grouped tests to one worker — see Y.7-followup) is set in
+# ``tests/conftest.py::pytest_configure`` ONLY when xdist is active, NOT here
+# via ``addopts`` — a no-xdist env (the CI ``test`` job, the wheel-smoke job)
+# chokes on an unrecognized ``--dist``.
 markers = [
     "e2e: end-to-end tests requiring deployed AWS resources",
     "api: API-only e2e tests (no browser)",

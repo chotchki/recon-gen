@@ -64,8 +64,9 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
     # Y.7-followup — pin every test in this module onto a single
-    # pytest-xdist worker (requires ``--dist loadgroup``, set in
-    # pyproject.toml addopts). Reason: ``seeded_audit`` is module-scoped
+    # pytest-xdist worker. ``tests/conftest.py::pytest_configure`` bumps
+    # the xdist dist mode to ``loadgroup`` when xdist is active so this
+    # marker takes effect. Reason: ``seeded_audit`` is module-scoped
     # but xdist re-runs module-scoped fixtures once per worker; the
     # fixture re-applies the dialect schema (DROP + CREATE every prefixed
     # object), and on Oracle — where DDL auto-commits, so there's no

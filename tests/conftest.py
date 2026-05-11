@@ -63,6 +63,22 @@ def pytest_configure(config: Any) -> None:
     if QS_GEN_FUZZ_SEED.get_or_none() is None:
         os.environ[QS_GEN_FUZZ_SEED.name] = str(secrets.randbits(32))
 
+    # Y.7-followup — when pytest-xdist is active and `-n` workers were
+    # requested (xdist then defaults `dist` to "load"), bump to "loadgroup"
+    # so `@pytest.mark.xdist_group` markers pin grouped tests to a single
+    # worker. Needed because xdist re-runs module/session-scoped fixtures
+    # ONCE PER WORKER: a module-scoped fixture that mutates a shared
+    # external resource (e.g. test_audit_dashboard_agreement.py's
+    # seeded_audit re-applying the Oracle schema) races across workers —
+    # Oracle's DDL auto-commits, so the second worker's CREATE TABLE hits
+    # ORA-00955 while the first worker's run is still in flight. Done here,
+    # NOT via pyproject `addopts = "--dist ..."`, because a no-xdist env
+    # (the CI `test` job, the wheel-smoke job) chokes on an unrecognized
+    # `--dist`. An explicit `--dist <mode>` on the command line still wins
+    # (only the implicit "load" default — set by `-n` alone — gets bumped).
+    if config.pluginmanager.hasplugin("xdist") and getattr(config.option, "dist", "no") == "load":
+        config.option.dist = "loadgroup"
+
     # #741 — redirect runner.RUNS_DIR so in-process runner.main calls
     # land in session tmp instead of the operator's real runs/. Lazy
     # import to avoid circular-import surprises at conftest load time.
