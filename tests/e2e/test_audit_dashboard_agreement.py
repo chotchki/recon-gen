@@ -63,6 +63,17 @@ from tests.audit._scenario_expectations import expected_audit_counts
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
+    # Y.7-followup — pin every test in this module onto a single
+    # pytest-xdist worker (requires ``--dist loadgroup``, set in
+    # pyproject.toml addopts). Reason: ``seeded_audit`` is module-scoped
+    # but xdist re-runs module-scoped fixtures once per worker; the
+    # fixture re-applies the dialect schema (DROP + CREATE every prefixed
+    # object), and on Oracle — where DDL auto-commits, so there's no
+    # transactional isolation between concurrent workers — two workers
+    # racing the same ``CREATE TABLE`` produce ORA-00955 ("name already
+    # used"). Grouping forces the fixture to run exactly once. Bonus: no
+    # redundant N× re-seed of the (slow) Aurora schema.
+    pytest.mark.xdist_group("audit_dashboard_agreement_seed"),
 ]
 
 

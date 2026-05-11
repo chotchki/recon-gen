@@ -614,13 +614,32 @@ def drop_matview_if_exists(name: str, dialect: Dialect) -> str:
     drops them as ordinary tables (``DROP TABLE IF EXISTS name;``).
     Returned string is **fully terminated** — same convention as
     ``drop_table_if_exists``.
+
+    Oracle half-dropped-state hardening (Y.7-followup): a
+    ``CREATE MATERIALIZED VIEW`` interrupted mid-flight (e.g. a
+    SIGTERM-killed schema apply) can leave the matview's *container
+    table* behind without the matview metadata — ``DROP MATERIALIZED
+    VIEW`` then swallows ORA-12003 ("no such matview") while the stray
+    table survives, and the next ``CREATE MATERIALIZED VIEW`` hits
+    ORA-00955 ("name already used"). So the Oracle branch chains a
+    ``DROP TABLE`` of the same name after the matview drop (swallowing
+    ORA-00942 = nothing there, and ORA-12083 = it's a live container
+    the matview drop already handled). On a healthy matview the table
+    drop is a harmless no-op; on a half-dropped one it's the cleanup
+    that makes the re-apply idempotent.
     """
     if dialect is Dialect.POSTGRES:
         return f"DROP MATERIALIZED VIEW IF EXISTS {name};"
     if dialect is Dialect.SQLITE:
         return f"DROP TABLE IF EXISTS {name};"
-    return _oracle_drop_if_exists(
-        f"DROP MATERIALIZED VIEW {name}", ignore_codes=(-12003, -942),
+    return (
+        _oracle_drop_if_exists(
+            f"DROP MATERIALIZED VIEW {name}", ignore_codes=(-12003, -942),
+        )
+        + " "
+        + _oracle_drop_if_exists(
+            f"DROP TABLE {name} CASCADE CONSTRAINTS", ignore_codes=(-942, -12083),
+        )
     )
 
 

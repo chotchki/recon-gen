@@ -219,6 +219,19 @@ version = {attr = "quicksight_gen.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Y.7-followup — ``loadgroup`` distribution so tests carrying an
+# ``xdist_group`` marker land on the SAME worker. Needed because
+# ``pytest-xdist`` re-runs module/session-scoped fixtures ONCE PER
+# WORKER: a module-scoped fixture that mutates a shared external
+# resource (e.g. ``test_audit_dashboard_agreement.py::seeded_audit``
+# re-applies the Oracle schema) races across workers — Oracle's DDL
+# auto-commits, so the second worker's ``CREATE TABLE`` hits ORA-00955
+# while the first worker's run is still in flight. Grouping pins all
+# tests sharing that fixture onto one worker so it runs exactly once.
+# Harmless for ungrouped tests (each becomes its own group = its test
+# id, distributed exactly as plain ``load`` would) and a no-op when no
+# ``-n`` workers are requested.
+addopts = "--dist loadgroup"
 markers = [
     "e2e: end-to-end tests requiring deployed AWS resources",
     "api: API-only e2e tests (no browser)",

@@ -1070,13 +1070,18 @@ def test_l1_invariant_drops_oracle_plsql_block() -> None:
     assert "IF EXISTS" not in _strip_comments(out)
     for name in _L1_INVARIANT_DROP_NAMES:
         # The bare DROP statement is wrapped in EXECUTE IMMEDIATE — assert
-        # the wrapped form for each matview name.
+        # the wrapped form for each matview name. Y.7-followup: each drop
+        # now also chains a same-name DROP TABLE fallback to clean up a
+        # half-dropped matview's orphan container table.
         assert f"DROP MATERIALIZED VIEW orcl_{name}" in out
-    # Every drop must use the PL/SQL exception-swallowing pattern.
+        assert f"DROP TABLE orcl_{name} CASCADE CONSTRAINTS" in out
+    # Every drop must use the PL/SQL exception-swallowing pattern — two
+    # blocks per matview (the MV drop + the orphan-table fallback).
     block_count = out.count("BEGIN EXECUTE IMMEDIATE")
-    assert block_count == len(_L1_INVARIANT_DROP_NAMES)
+    assert block_count == 2 * len(_L1_INVARIANT_DROP_NAMES)
     assert "SQLCODE != -12003" in out  # ORA-12003 = matview not found
     assert "SQLCODE != -942" in out    # ORA-00942 = table not found
+    assert "SQLCODE != -12083" in out  # ORA-12083 = must use DROP MATERIALIZED VIEW
 
 
 def test_l1_invariant_drops_preserve_drop_order() -> None:
@@ -1118,4 +1123,8 @@ def test_inv_matview_drops_oracle_plsql_block() -> None:
     assert "IF EXISTS" not in _strip_comments(out)
     for name in _INV_MATVIEW_DROP_NAMES:
         assert f"DROP MATERIALIZED VIEW orcl_{name}" in out
-    assert out.count("BEGIN EXECUTE IMMEDIATE") == len(_INV_MATVIEW_DROP_NAMES)
+        # Y.7-followup — same-name DROP TABLE fallback for orphan
+        # container tables left by a killed CREATE MATERIALIZED VIEW.
+        assert f"DROP TABLE orcl_{name} CASCADE CONSTRAINTS" in out
+    # Two PL/SQL blocks per matview: the MV drop + the orphan-table fallback.
+    assert out.count("BEGIN EXECUTE IMMEDIATE") == 2 * len(_INV_MATVIEW_DROP_NAMES)
