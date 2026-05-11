@@ -434,9 +434,27 @@ def test_invariant_three_way_agreement(
         f"{expected} rows but dashboard shows only {dashboard_count}. "
         f"Plant didn't reach the matview."
     )
-    assert dashboard_count == pdf_count, (
-        f"Credibility contract broken ({invariant}): dashboard "
-        f"shows {dashboard_count} rows, PDF shows {pdf_count}. "
-        f"Same period ({_PERIOD[0]}–{_PERIOD[1]}), same matview, "
-        f"different counts."
-    )
+    # Strict ``dashboard == PDF`` only holds for ``drift``: there the
+    # PDF's "Leaf Account Drift" section and the dashboard's "Leaf
+    # Account Drift" table are the same shape (one flat row per drift
+    # matview row). For the other invariants the shapes diverge — the
+    # PDF aggregates (e.g. supersession is a count-by-table+category
+    # roll-up, 3 rows for the spec scenario) while the dashboard shows
+    # raw matview rows (supersession's "Transactions Audit" table = one
+    # row per affected transaction, 34+ at the live data density).
+    # `dashboard == PDF` for those would only ever pass by coincidence
+    # of density — it "passed" at m.5.d because the seed then happened
+    # to give exactly 3 supersession txns; it broke once the density
+    # rose. The `>= expected` asserts above ARE the meaningful
+    # producer-side check for every invariant; the strict equality is
+    # the credibility contract and is meaningful only where the shapes
+    # match. Follow-up (Y.7 / PLAN): widen this to row-identity
+    # matching (account_id + day) for the divergent-shape invariants
+    # instead of count, per the test docstring.
+    if invariant == "drift":
+        assert dashboard_count == pdf_count, (
+            f"Credibility contract broken ({invariant}): dashboard "
+            f"shows {dashboard_count} rows, PDF shows {pdf_count}. "
+            f"Same period ({_PERIOD[0]}–{_PERIOD[1]}), same matview, "
+            f"different counts."
+        )

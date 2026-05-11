@@ -1,5 +1,39 @@
 # Release Notes
 
+## v8.8.0a27 — Y.7 e2e gate (PG + SQLite clean) + two e2e-test fixes
+
+Twenty-seventh alpha. Bundles a26's content (Y.3.b + Y.5.a + Y.6) plus the
+Y.7 e2e verification pass and the two fixes it surfaced:
+
+- **`test_date_filter_narrows_every_date_sensitive_count_kpi` — fixed.**
+  Y.2.h removed this test's xfail expecting the date pushdown to make it
+  pass, but only validated against `sp_pg_aw` (which happened to). It
+  fails on every other dialect: the test picked a 2-day narrow window
+  *inside* the 90-day seed, where the baseline generator touches every
+  account every day, so the Active Accounts distinct-count KPI doesn't
+  shrink for any in-seed window. Moved the narrow window to ~400 days
+  pre-seed → every date-sensitive count KPI narrows to ~0 → still a
+  valid proof the `:date_from` bind reached the SQL.
+- **`test_invariant_three_way_agreement[postgres-supersession]` — fixed.**
+  The strict `dashboard_count == pdf_count` assert is structurally
+  invalid for supersession: the PDF's section is a count-by-table+category
+  aggregate (≈3 rows); the dashboard's "Transactions Audit" table is
+  per-row (≈34 at the live data density). It "passed" at m.5.d only
+  because the density then happened to give exactly 3 supersession txns.
+  Gated the strict-equality assert to `invariant == "drift"` (where the
+  PDF section and the dashboard table are genuinely the same shape); the
+  `>= expected` producer-side asserts still cover every invariant.
+  Follow-up tracked: widen to row-identity matching for the
+  divergent-shape invariants.
+
+**Y.7 status:** PG (`sp_pg_lo` + `sp_pg_aw`) clean unit→db→app2→deploy→api→browser;
+SQLite (`sp_sl_lo`) clean through app2; Oracle (`sp_or_lo`) clean db+app2,
+`sp_or_aw` clean db+deploy+api but the **Oracle browser layer has 7
+failures + 6 errors** (structural `*_dashboard_structure_matches_tree` +
+dropdown-narrow tests) — deferred to a focused Oracle-browser triage
+before the v9.0.0 "Phase Y done" cut. NOT in this release pipeline's
+scope (`release.yml::e2e-against-testpypi` runs PG only).
+
 ## v8.8.0a26 — Y.3.b + Y.5.a + Y.6 (Investigation calc-field pushdown, app2_date_column refactor, perf verification)
 
 Twenty-sixth alpha. Three landings on `y-3-investigation-calc-pushdown`:
