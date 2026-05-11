@@ -125,6 +125,32 @@ class App2Driver:
             if t.strip()
         ]
 
+    def filter_labels(self) -> list[str]:
+        # ``#filter-form`` is ``<label>{title} <select|input>…</label>``
+        # for dropdown / multi-select / slider / date, plus
+        # ``<div class="category-filter"><span>{title}</span>…</div>`` for
+        # a CategoryFilter. The label text is the leading text nodes (the
+        # control element itself is a child, not a text node).
+        return list(self._page.evaluate(
+            """() => {
+                const form = document.querySelector('#filter-form');
+                if (!form) return [];
+                const out = [];
+                form.querySelectorAll(':scope > label').forEach((lbl) => {
+                    const txt = Array.from(lbl.childNodes)
+                        .filter((n) => n.nodeType === 3)
+                        .map((n) => n.textContent.trim())
+                        .filter(Boolean).join(' ').trim();
+                    if (txt) out.push(txt);
+                });
+                form.querySelectorAll('.category-filter > span').forEach((sp) => {
+                    const t = sp.textContent.trim();
+                    if (t) out.push(t);
+                });
+                return out;
+            }"""
+        ))
+
     def visual_titles(self) -> list[str]:
         return [
             t.strip()

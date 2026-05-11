@@ -40,6 +40,7 @@ from quicksight_gen.common.browser.helpers import (
     read_kpi_value,
     read_table_rows_dom,
     scroll_visual_into_view,
+    sheet_control_titles,
     wait_for_dashboard_loaded,
     wait_for_visual_titles_present,
     webkit_page,
@@ -158,6 +159,9 @@ class QsEmbedDriver:
 
     def visual_titles(self) -> list[str]:
         return get_visual_titles(self._page)
+
+    def filter_labels(self) -> list[str]:
+        return sheet_control_titles(self._page)
 
     def wait_loaded(
         self, visual_title: str, *, timeout_ms: int = _DEFAULT_VISUAL_TIMEOUT_MS,

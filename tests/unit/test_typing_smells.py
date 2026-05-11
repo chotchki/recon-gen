@@ -1097,27 +1097,22 @@ _BROWSER_PKG = "quicksight_gen.common.browser"
 # this set (and the lint then enforces it stays ported). New e2e tests
 # are NOT added here — they use ``DashboardDriver``. The set can only
 # shrink; a non-empty entry is a visible "not yet migrated" TODO.
+# (Ported off the set as X.2.q.3 progresses — git history records which:
+#  exec/l1/inv dashboard_renders + sheet_visuals + tree_validator done.)
 _PLAYWRIGHT_LEAK_LEGACY: frozenset[str] = frozenset({
     "tests/e2e/test_audit_dashboard_agreement.py",
-    # test_exec_dashboard_renders.py — ported onto DashboardDriver (X.2.q.3)
-    "tests/e2e/test_exec_sheet_visuals.py",
     "tests/e2e/test_html2_executives.py",
     "tests/e2e/test_html2_executives_live.py",
     "tests/e2e/test_html2_l2ft.py",
     "tests/e2e/test_html2_money_trail.py",
-    # test_inv_dashboard_renders.py — ported onto DashboardDriver (X.2.q.3)
     "tests/e2e/test_inv_drilldown.py",
     "tests/e2e/test_inv_filters.py",
-    "tests/e2e/test_inv_sheet_visuals.py",
     "tests/e2e/test_l1_cross_sheet_drill_date_widening.py",
-    # test_l1_dashboard_renders.py — ported onto DashboardDriver (X.2.q.3)
     "tests/e2e/test_l1_filters.py",
-    "tests/e2e/test_l1_sheet_visuals.py",
     "tests/e2e/test_l2ft_chains_dropdowns.py",
     "tests/e2e/test_l2ft_metadata_cascade.py",
     "tests/e2e/test_l2ft_rails_dropdowns.py",
     "tests/e2e/test_l2ft_templates_dropdowns.py",
-    "tests/e2e/tree_validator.py",
 })
 
 

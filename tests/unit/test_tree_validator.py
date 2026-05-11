@@ -2,9 +2,10 @@
 logic, failure collection, tree walking).
 
 The full integration value comes when run against a deployed
-dashboard + Playwright Page (lands in L.1.10.6 with the kitchen-sink
-test). These unit tests exercise the dispatch + failure-handling
-surface without needing a deploy.
+dashboard via a ``DashboardDriver`` (the ``test_*_sheet_visuals.py``
+e2e tests do that). These unit tests exercise the dispatch +
+failure-handling surface with a ``MagicMock`` stand-in for the driver,
+without needing a deploy.
 """
 
 from __future__ import annotations
@@ -70,18 +71,18 @@ def _make_app() -> App:
 
 class TestFailureCollection:
     def test_no_failures_doesnt_raise(self):
-        v = TreeValidator(_make_app(), page=MagicMock())
+        v = TreeValidator(_make_app(), driver=MagicMock())
         # No _fail() calls — raise_if_failed is a no-op
         v.raise_if_failed()  # doesn't raise
 
     def test_single_failure_raises_with_message(self):
-        v = TreeValidator(_make_app(), page=MagicMock())
+        v = TreeValidator(_make_app(), driver=MagicMock())
         v._fail("Sheet 'X'", "missing visual 'Y'")
         with pytest.raises(AssertionError, match="missing visual 'Y'"):
             v.raise_if_failed()
 
     def test_multiple_failures_all_surface_at_once(self):
-        v = TreeValidator(_make_app(), page=MagicMock())
+        v = TreeValidator(_make_app(), driver=MagicMock())
         v._fail("Sheet 'A'", "first")
         v._fail("Sheet 'B'", "second")
         v._fail("Sheet 'C'", "third")
@@ -100,7 +101,7 @@ class TestFailureCollection:
 
 class TestPerKindDispatch:
     def test_kind_specific_method_invoked(self):
-        v = TreeValidator(_make_app(), page=MagicMock())
+        v = TreeValidator(_make_app(), driver=MagicMock())
         sheet = v.app.analysis.sheets[0]
         kpi = sheet.visuals[0]
         # Wrap _validate_kpi with a tracker — confirm dispatch hits it.
@@ -112,7 +113,7 @@ class TestPerKindDispatch:
     def test_unknown_kind_falls_through(self):
         """A visual without _AUTO_KIND (e.g. a hypothetical untyped node)
         doesn't crash — dispatch is best-effort."""
-        v = TreeValidator(_make_app(), page=MagicMock())
+        v = TreeValidator(_make_app(), driver=MagicMock())
         sheet = v.app.analysis.sheets[0]
         fake_visual = MagicMock(spec=[])  # no _AUTO_KIND attr
         # Doesn't raise, doesn't add a failure
@@ -126,6 +127,6 @@ class TestStructureDispatch:
 
     def test_no_analysis_fails_loud(self):
         app = App(name="empty", cfg=_TEST_CFG)
-        v = TreeValidator(app, page=MagicMock())
+        v = TreeValidator(app, driver=MagicMock())
         with pytest.raises(AssertionError, match="App has no Analysis"):
             v.validate_structure()

@@ -66,6 +66,13 @@ class DashboardDriver(Protocol):
         """Titles of the visuals on the current sheet, in display order."""
         ...
 
+    def filter_labels(self) -> list[str]:
+        """Visible labels of the filter / parameter controls on the
+        current sheet. (QS reads the ``sheet_control_name`` strip; App2
+        the ``#filter-form`` control labels — both are the tree's
+        control ``.title``.)"""
+        ...
+
     def wait_loaded(self, visual_title: str, *, timeout_ms: int = 15_000) -> None:
         """Block until the named visual has rendered content (a chart /
         table / number — not a spinner, not empty)."""
