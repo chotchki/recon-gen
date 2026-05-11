@@ -110,7 +110,41 @@ match), and `X.2.l.4.d` rides on it.
   down. A future `App2Driver.against(url)` / `QsEmbedDriver` against a
   pre-built page can be added without touching the protocol.
 
-## Carried forward (not done in the spike)
+## Follow-on: X.2.q.2 — App2Driver write verbs (done)
+
+`App2Driver` now implements all the write verbs + `goto_sheet`:
+
+- **`pick_filter` / `set_date_range` / `set_slider`** — set the
+  underlying `#filter-form` element's value + dispatch a bubbling
+  `change`. That's the same HTMX wire shape the Tom Select / Flatpickr
+  / noUiSlider widgets emit when a user drives them; widget-chrome
+  fidelity (does the chip render? does the calendar open?) is the
+  `tests/js` unit harness's concern, not a driver expressing test
+  intent.
+- **`clear_filters`** — re-loads the bare sheet URL. App 2's filter
+  state lives entirely in the URL query string, so that's the cleanest
+  "reset everything" — and it re-inits the widgets fresh, not just the
+  underlying controls.
+- **`goto_sheet`** — App 2 routing is stateless, so a sheet switch is
+  just `open(self._dashboard, sheet=name)`.
+- **`cross_link`** — clicks the `<a>` with that text, waits
+  `networkidle`, re-derives `_dashboard`/`_sheet` from the landed URL.
+- **`_wait_for_refetch`** — every write verb runs its mutation inside
+  this: block on the first `/visuals/.../data` response, then
+  `networkidle` (the remaining visuals + the synchronous bootstrap.js
+  re-hydrate on each swap). So a write verb returns only once the DOM
+  reflects the new state.
+
+Plumbing: `filter_specs` now threads through `html2_server` →
+`ServedDashboard` so `App2Driver.smoke()` surfaces the smoke app's
+`SMOKE_FILTER_SPECS` (the smoke tree has no parameter-control nodes, so
+the server's auto-derive yields nothing without this). Tests:
+`test_dashboard_driver.py` grew 4 App2 write-verb tests — `pick_filter`
+moves the stub KPI 47→74; `clear_filters` restores it; `set_date_range`
++ `set_slider` survive the re-fetch; `goto_sheet` hops sheets. 9 tests
+in the file total, all green.
+
+## Carried forward (not done yet)
 
 - **`QsEmbedDriver.table_rows`** — needs the virtualization-aware path:
   `count_table_total_rows` (bump page size to 10000, scroll-accumulate)
@@ -118,14 +152,13 @@ match), and `X.2.l.4.d` rides on it.
   reader**. The `sn-table-cell-{row}-{col}` automation-ids cover body
   cells only; the header-row `data-automation-id` is unverified. Per
   `feedback_aws_research`: confirm it against a live dashboard (or ask
-  for a UI sample) before wiring — don't guess. → **X.2.q.2.**
-- **Write verbs on both drivers** (`pick_filter` / `set_date_range` /
-  `set_slider` / `clear_filters` / `cross_link`) — the underlying QS
-  helpers exist (`set_dropdown_value` / `set_multi_select_values` /
-  `set_date_range` / `set_slider_range` / `clear_dropdown`); App 2
-  needs `data-widget` driving (Tom Select open+click, Flatpickr range
-  pick, noUiSlider). The non-trivial bit is the "block until the
-  affected visuals re-fetch" contract. → **X.2.q.2.**
+  for a UI sample) before wiring — don't guess. → **X.2.q.2 residual.**
+- **`cross_link` real-app assertion** — it's implemented but only
+  smoke-tested against the smoke app (no obvious stable cross-link
+  target there); a "click the drill, land on the right sheet, the
+  anchor changed" assertion lands with X.2.q.3.
+- **Fold in / supersede `tests/e2e/_harness_html2.py`** — the legacy
+  `test_html2_*` tests still call `html2_server` directly. → **X.2.q.3.**
 - **Parametrized `[qs, app2]` fixture on a *real* app.** The spike's
   smoke-app tests are App2-only (no QS smoke deployment); the QS-leg
   tests are QS-only (the smoke app isn't deployed to QS). The single

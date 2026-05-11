@@ -32,7 +32,7 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -40,6 +40,7 @@ from typing import Any
 import uvicorn
 
 from quicksight_gen.common.env_keys import EnvVarInvalid, QS_GEN_RUN_DIR
+from quicksight_gen.common.html.render import FilterSpec
 from quicksight_gen.common.html.server import (
     DataFetcher, ServedDashboard, make_app,
 )
@@ -131,6 +132,7 @@ def html2_server(
     data_fetcher: DataFetcher,
     dashboard_id: str = "harness",
     dashboard_title: str = "Harness",
+    filter_specs: Sequence[FilterSpec] = (),
     dev_log: bool = False,
     startup_timeout_s: float = 5.0,
 ) -> Iterator[str]:
@@ -148,6 +150,12 @@ def html2_server(
             care unless they're asserting on the path.
         dashboard_title: human-readable name on the
             ``/dashboards`` listing page.
+        filter_specs: explicit filter-form controls. When empty
+            (the default) the server auto-derives them from the
+            tree's parameter-control nodes via
+            ``make_filter_specs_for_sheet`` — pass an explicit list
+            for trees that have no controls but want the controls
+            rendered anyway (e.g. the smoke app's ``SMOKE_FILTER_SPECS``).
         dev_log: when True, the server prints HTMX + d3 click
             events forwarded from the browser. Off by default;
             harness debug runs flip it on.
@@ -164,6 +172,7 @@ def html2_server(
             dashboard_id: ServedDashboard(
                 tree_app=tree_app, sheet=sheet,
                 title=dashboard_title, data_fetcher=data_fetcher,
+                filter_specs=tuple(filter_specs),
             ),
         },
         dev_log=dev_log,

@@ -94,6 +94,58 @@ def test_showcase_lists_every_visual(driver: DashboardDriver) -> None:
         assert expected in titles, expected
 
 
+# -- App2 leg: write verbs (X.2.q.2) -----------------------------------------
+#
+# The stub fetcher echoes filter params into the visual data, so a
+# round-trip is observable without a DB: `_showcase_kpi`'s headline value
+# = 47 + (sum of ord(c) for the selected `view` value) % 50 — so picking
+# View=detail moves it 47 → 74, and clearing puts it back. The other
+# write verbs (set_date_range / set_slider / cross_link) don't feed a
+# value the protocol can read in the smoke app, so they're smoke-tested
+# for "runs + the page survives the re-fetch"; the "filter narrows
+# table_rows" assertion lands against a real app in X.2.q.3 / X.2.l.4.d.
+
+
+def test_app2_pick_filter_changes_kpi(driver: DashboardDriver) -> None:
+    driver.open("smoke", sheet="showcase")
+    driver.wait_loaded("Open Exceptions")
+    before = driver.kpi_value("Open Exceptions")
+    driver.pick_filter("View", ["detail"])
+    driver.wait_loaded("Open Exceptions")
+    after = driver.kpi_value("Open Exceptions")
+    assert before is not None and after is not None
+    assert after != before, f"KPI unchanged after pick_filter: {before!r}"
+
+
+def test_app2_clear_filters_resets_kpi(driver: DashboardDriver) -> None:
+    driver.open("smoke", sheet="showcase")
+    driver.wait_loaded("Open Exceptions")
+    base = driver.kpi_value("Open Exceptions")
+    driver.pick_filter("View", ["detail"])
+    driver.wait_loaded("Open Exceptions")
+    assert driver.kpi_value("Open Exceptions") != base
+    driver.clear_filters()
+    driver.wait_loaded("Open Exceptions")
+    assert driver.kpi_value("Open Exceptions") == base
+
+
+def test_app2_set_date_range_and_slider_survive_refetch(
+    driver: DashboardDriver,
+) -> None:
+    driver.open("smoke", sheet="showcase")
+    driver.set_date_range("2030-01-01", "2030-01-31")
+    driver.set_slider("Amount", 1000, 50_000)
+    # Both verbs block on the re-fetch; the page is still a live dashboard.
+    assert "Daily Volume" in driver.visual_titles()
+
+
+def test_app2_goto_sheet(driver: DashboardDriver) -> None:
+    driver.open("smoke", sheet="money-trail")
+    assert "Money Trail — Chain Sankey" in driver.visual_titles()
+    driver.goto_sheet("showcase")
+    assert "Account Balances" in driver.visual_titles()
+
+
 # -- QuickSight leg ----------------------------------------------------------
 #
 # Drives a *deployed* L1 dashboard through QsEmbedDriver — proves the QS
