@@ -73,6 +73,17 @@ class DashboardDriver(Protocol):
         control ``.title``.)"""
         ...
 
+    def filter_options(self, label: str) -> list[str]:
+        """The selectable values offered by the dropdown / multi-select
+        filter control labelled ``label``, in display order. Sentinel
+        entries (``"All"`` / ``"Select all"`` / blanks) are filtered
+        out, so the result is the data-derived option universe — what a
+        data-agnostic test picks from without hardcoding values. (QS
+        opens the ``ParameterDropDownControl`` popover and reads the
+        ``[role="option"]`` labels; App2 reads the ``<select>``'s
+        ``<option>`` text.)"""
+        ...
+
     def wait_loaded(self, visual_title: str, *, timeout_ms: int = 15_000) -> None:
         """Block until the named visual has rendered content (a chart /
         table / number — not a spinner, not empty)."""

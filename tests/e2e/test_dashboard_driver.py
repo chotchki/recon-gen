@@ -123,6 +123,18 @@ def test_app2_set_date_range_and_slider_survive_refetch(
     assert "Daily Volume" in driver.visual_titles()
 
 
+def test_app2_filter_options_lists_dropdown_values(
+    driver: DashboardDriver,
+) -> None:
+    driver.open("smoke", sheet="showcase")
+    # The smoke app's "View" ParameterDropdown advertises these three.
+    assert driver.filter_options("View") == ["summary", "detail", "drill"]
+    # Multi-select reads the same way.
+    assert set(driver.filter_options("Rails")) == {
+        "ach", "wire", "check", "internal", "zba",
+    }
+
+
 def test_app2_goto_sheet(driver: DashboardDriver) -> None:
     driver.open("smoke", sheet="money-trail")
     assert "Money Trail — Chain Sankey" in driver.visual_titles()

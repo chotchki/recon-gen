@@ -151,6 +151,21 @@ class App2Driver:
             }"""
         ))
 
+    def filter_options(self, label: str) -> list[str]:
+        # Read the underlying ``<select>``'s option text directly (Tom
+        # Select decorates it but the real <option>s stay in the DOM).
+        # Filter the same sentinels QS's reader drops so the two
+        # renderers' option universes line up.
+        sel = self._filter_control(label).locator("select").first
+        sel.wait_for(state="attached")
+        opts = sel.evaluate(
+            """(s) => Array.from(s.options).map((o) => (o.text || '').trim())"""
+        )
+        return [
+            o for o in opts
+            if o and o not in ("All", "Select all")
+        ]
+
     def visual_titles(self) -> list[str]:
         return [
             t.strip()

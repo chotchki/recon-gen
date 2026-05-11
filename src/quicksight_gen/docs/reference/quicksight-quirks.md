@@ -404,6 +404,37 @@ in the docs (today it's only discoverable by experiment).
 
 ---
 
+### 3.6 After a parameter write, the prior page's table rows linger in
+the DOM until the re-query lands
+
+**Observed.** Pick a value in a `ParameterDropDownControl` (or set a
+date picker) bound to a dataset parameter, and QS fires a fresh dataset
+query. But the table visual keeps showing the *previous* result's
+`sn-table-cell-*` rows until that query returns — only then does it
+briefly clear (the spinner gap) and repopulate. So a Playwright e2e
+that does "set the filter, then wait for `sn-table-cell-0-0`, then read
+the rows" returns on the **stale** rows; if it instead waits a beat and
+reads, it can catch the spinner gap (zero rows) → spurious "the filter
+emptied the table". Worse under a load-warmed Aurora where the re-query
+is slow (a warm-then-busy cluster widens the spinner gap past a 10–12s
+"wait for cells" budget). (Verified X.2.q.3 against the deployed
+`sasquatch_pr` L2FT dashboard — the L2FT dropdown e2e flaked exactly
+this way until the workaround landed.)
+
+**Workaround.** After a parameter write, don't wait for "any cells" —
+wait for the table content to *settle*: give the re-query ~1.2s to
+start clearing the old rows, then poll the table's first few cell texts
+until they hold steady across two ~0.7s-apart reads (the re-query has
+landed and stopped mutating the DOM). `QsEmbedDriver._settle_after_param_change`
+in `tests/e2e/_drivers/qs.py` does this; `pick_filter` / `set_date_range`
+call it so a read after a write sees the post-filter state, not the gap.
+
+**Suggested fix.** Expose a per-visual "query in flight / query
+complete" signal the embedding SDK (and e2e harnesses) can wait on,
+instead of forcing a content-stabilization heuristic.
+
+---
+
 ## 4. Data type / shape quirks
 
 ### 4.1 `DateDimensionField` vs `CategoricalDimensionField` — column
