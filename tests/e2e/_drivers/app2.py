@@ -201,6 +201,11 @@ class App2Driver:
             rows.append(dict(zip(headers, cells, strict=False)))
         return rows
 
+    def table_row_count(self, visual_title: str) -> int:
+        # App2 renders every row in DOM (no virtualization), so the
+        # window IS the full count — no page-size-bump needed.
+        return len(self.table_rows(visual_title))
+
     def kpi_value(self, visual_title: str) -> str | None:
         section = self._section(visual_title)
         loc = section.locator(".kpi-value").first

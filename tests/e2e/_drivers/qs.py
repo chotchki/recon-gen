@@ -38,6 +38,8 @@ from quicksight_gen.common.browser.helpers import (
     click_context_menu_item,
     click_first_row_of_visual,
     click_sheet_tab,
+    count_table_rows,
+    count_table_total_rows,
     generate_dashboard_embed_url,
     get_sheet_tab_names,
     get_visual_titles,
@@ -102,6 +104,7 @@ class QsEmbedDriver:
         aws_region: str,
         user_arn: str | None = None,
         headless: bool = True,
+        viewport: tuple[int, int] = (1600, 1000),
         page_timeout_ms: int = _DEFAULT_PAGE_TIMEOUT_MS,
         visual_timeout_ms: int = _DEFAULT_VISUAL_TIMEOUT_MS,
     ) -> Iterator["QsEmbedDriver"]:
@@ -109,8 +112,15 @@ class QsEmbedDriver:
 
         Each ``open()`` call mints its own fresh embed URL, so the
         driver is re-usable across dashboards within one ``with`` block.
+
+        Pass a tall ``viewport`` (e.g. ``(1600, 4000)``) for tests that
+        ``table_row_count`` stacked-layout sheets where the detail table
+        sits below the fold — the page-size-bump path needs the table's
+        ``.grid-container`` close enough to the viewport to scroll into,
+        and the default 1000-tall viewport sometimes leaves it parked
+        too far down for QS to mount cells.
         """
-        with webkit_page(headless=headless) as page:
+        with webkit_page(headless=headless, viewport=viewport) as page:
             yield cls(
                 page=page,
                 aws_account_id=aws_account_id,
@@ -231,6 +241,22 @@ class QsEmbedDriver:
             wait_for_cells=False,
         )
         return read_table_rows_dom(self._page, visual_title)
+
+    def table_row_count(self, visual_title: str) -> int:
+        # ``count_table_total_rows`` is the page-size-bump + scroll-
+        # accumulate dance that surfaces the post-filter total past the
+        # ~10-row rendered window. On a *small* table (no ``.grid-container``,
+        # so no pagination), it returns the sentinel ``-2`` — fall back
+        # to the DOM-cell count, which is the actual full count for a
+        # table small enough to render unpaginated. Other negative
+        # sentinels (``-1`` = no visual with that title) bubble up as
+        # 0 since callers expect a non-negative count.
+        total = count_table_total_rows(
+            self._page, visual_title, self._visual_timeout,
+        )
+        if total == -2:
+            return max(0, count_table_rows(self._page, visual_title))
+        return max(0, total)
 
     def kpi_value(self, visual_title: str) -> str | None:
         try:

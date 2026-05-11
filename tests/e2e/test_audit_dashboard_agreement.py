@@ -46,11 +46,6 @@ import pytest
 from click.testing import CliRunner
 
 from quicksight_gen.cli import main
-from quicksight_gen.common.browser.helpers import (
-    generate_dashboard_embed_url,
-    wait_for_dashboard_loaded,
-    webkit_page,
-)
 from quicksight_gen.common.db import connect_demo_db
 from quicksight_gen.common.l2 import load_instance
 from quicksight_gen.common.sql import Dialect
@@ -58,6 +53,7 @@ from quicksight_gen.common.sql import Dialect
 from tests.audit._dashboard_extract import count_l1_invariant_rows
 from tests.audit._pdf_extract import count_invariant_table_rows
 from tests.audit._scenario_expectations import expected_audit_counts
+from tests.e2e._drivers import QsEmbedDriver
 
 
 pytestmark = [
@@ -328,22 +324,41 @@ def seeded_audit(dialect_cfg, tmp_path_factory):
 
 
 @pytest.fixture
-def embed_url(
+def per_dialect_qs_driver(
     per_dialect_region,
     per_dialect_account_id,
     per_dialect_l1_dashboard_id,
     per_dialect_qs_client,
-) -> str:
-    """Function-scoped — embed URLs are single-use, fresh per test.
+):  # type: ignore[no-untyped-def]: return-type annotation would force a QsEmbedDriver import at module scope
+    """Function-scoped ``QsEmbedDriver`` aimed at this dialect's L1
+    dashboard. Embed URLs are single-use, so the driver gets a fresh
+    page per test.
 
-    Pre-flight: confirm the dashboard actually exists before
-    generating the embed URL. ``generate_dashboard_embed_url``
-    happily returns a URL pointing at a non-existent dashboard,
-    which then loads as an empty QS error page that times out the
-    "wait for sheet tabs" gate with a confusing 30s timeout. A
-    proactive ``describe_dashboard`` check turns that into an
-    immediate skip with the actual deploy command to fix it.
+    Pre-flight: confirm the dashboard actually exists before opening
+    the embed URL. ``QsEmbedDriver.open()`` (via
+    ``generate_dashboard_embed_url``) happily produces a URL that
+    points at a non-existent dashboard, which then loads as an empty
+    QS error page that times out the "wait for sheet tabs" gate with
+    a confusing 30s timeout. A proactive ``describe_dashboard`` check
+    turns that into an immediate skip with the actual deploy command
+    to fix it.
+
+    Tall viewport (1600×4000) so stacked KPI + chart + table layouts
+    (Pending Aging / Unbundled Aging / Supersession Audit) keep the
+    detail table inside the initial render area; QS lazy-renders below
+    the fold and ``table_row_count`` (the page-size-bump path) needs
+    the .grid-container close enough to the viewport to scroll into.
+
+    Skips cleanly when ``QS_E2E_USER_ARN`` is unset (the runner derives
+    it from ``cfg.auth.aws_profile``; export it for a direct ``pytest``
+    run).
     """
+    from quicksight_gen.common.browser.helpers import get_user_arn
+
+    try:
+        get_user_arn()
+    except RuntimeError as exc:
+        pytest.skip(str(exc))
     try:
         per_dialect_qs_client.describe_dashboard(
             AwsAccountId=per_dialect_account_id,
@@ -357,11 +372,12 @@ def embed_url(
             f"json apply -c <dialect-config> --execute --l2 "
             f"tests/l2/spec_example.yaml`, then re-run this test."
         )
-    return generate_dashboard_embed_url(
+    with QsEmbedDriver.embed(
         aws_account_id=per_dialect_account_id,
         aws_region=per_dialect_region,
-        dashboard_id=per_dialect_l1_dashboard_id,
-    )
+        viewport=(1600, 4000),
+    ) as driver:
+        yield driver
 
 
 # All 6 L1 invariants. The current-state invariants
@@ -386,7 +402,7 @@ _ALL_INVARIANTS: tuple[str, ...] = (
 
 @pytest.mark.parametrize("invariant", _ALL_INVARIANTS)
 def test_invariant_three_way_agreement(
-    seeded_audit, embed_url, page_timeout, visual_timeout,
+    seeded_audit, per_dialect_qs_driver, per_dialect_l1_dashboard_id,
     invariant,
 ):
     """Per-invariant: PDF count and dashboard count both >= expected
@@ -422,18 +438,14 @@ def test_invariant_three_way_agreement(
     )
     pdf_count = count_invariant_table_rows(pdf_path, invariant)
 
-    # 1600×4000 — tall viewport so stacked KPI + chart + table layouts
-    # (Pending Aging / Unbundled Aging / Supersession Audit) keep the
-    # detail table inside the initial render area. QS lazy-renders
-    # below-the-fold visuals; without the tall viewport,
-    # count_table_total_rows times out waiting for cells that never
-    # mount. Same pattern as the M.4.1.k harness.
-    with webkit_page(headless=True, viewport=(1600, 4000)) as page:
-        page.goto(embed_url, timeout=page_timeout)
-        wait_for_dashboard_loaded(page, timeout_ms=page_timeout)
-        dashboard_count = count_l1_invariant_rows(
-            page, invariant, _PERIOD, timeout_ms=visual_timeout,
-        )
+    # The driver fixture's tall viewport keeps the detail table inside
+    # the initial render area; ``count_l1_invariant_rows`` then handles
+    # the per-invariant sheet switch + date-filter application + page-
+    # size-bump-aware row count via the ``DashboardDriver`` verbs.
+    per_dialect_qs_driver.open(per_dialect_l1_dashboard_id)
+    dashboard_count = count_l1_invariant_rows(
+        per_dialect_qs_driver, invariant, _PERIOD,
+    )
 
     assert pdf_count >= expected, (
         f"Producer-side regression ({invariant}): scenario planted "

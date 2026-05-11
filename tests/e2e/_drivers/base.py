@@ -92,9 +92,20 @@ class DashboardDriver(Protocol):
     def table_rows(self, visual_title: str) -> list[dict[str, str]]:
         """Rows of a Table visual as dicts keyed by header text, in
         display order; cell values are the rendered (formatted) strings.
-        The driver handles renderer-specific quirks — QS row
-        virtualization, scroll-accumulation — transparently, so the
-        caller gets the full page-of-rows the renderer is showing."""
+        Returns the *currently-rendered* window (QS virtualizes ~10 rows;
+        App2 renders all rows in DOM). When the caller needs the
+        post-filter total row count for a table that may exceed the
+        viewport, ``table_row_count`` does the page-size-bump + scroll-
+        accumulate dance to surface the full number."""
+        ...
+
+    def table_row_count(self, visual_title: str) -> int:
+        """The full (post-filter) row count of a table visual, surfacing
+        the rows past the rendered window. On QS that's the page-size-
+        bump + scroll-accumulate path through the ``simplePagedDisplayNav_*``
+        controls (~3-5s per call vs ``len(table_rows())``'s ~0.8s, so
+        prefer the latter when you only need the window or know the
+        table is small). Returns 0 for an empty table (not a sentinel)."""
         ...
 
     def kpi_value(self, visual_title: str) -> str | None:
