@@ -16,9 +16,6 @@ tree primitives from ``common/tree/``. Sheets land one per L.2 sub-step:
 from __future__ import annotations
 
 from quicksight_gen.apps.investigation.constants import (
-    CF_INV_ANETWORK_COUNTERPARTY_DISPLAY,
-    CF_INV_ANETWORK_IS_INBOUND_EDGE,
-    CF_INV_ANETWORK_IS_OUTBOUND_EDGE,
     DS_INV_ACCOUNT_NETWORK,
     DS_INV_ANETWORK_ACCOUNTS,
     DS_INV_MONEY_TRAIL,
@@ -82,11 +79,9 @@ from quicksight_gen.common.tree import (
     Analysis,
     App,
     BarChart,
-    CalcField,
     CategoryFilter,
     Dashboard,
     Dataset,
-    Dim,
     Drill,
     DrillParam,
     FilterDateTimePicker,
@@ -851,33 +846,14 @@ def _build_account_network_sheet(
     # construction). Direction-specific calc fields below stay — they
     # partition the pre-narrowed set into per-Sankey directions; Y.3.b
     # will push them into SQL CASE expressions too.
-    is_inbound_edge = analysis.add_calc_field(CalcField(
-        name=CF_INV_ANETWORK_IS_INBOUND_EDGE,
-        dataset=ds_anet,
-        expression=(
-            "ifelse({target_display} = ${pInvANetworkAnchor}, "
-            "'yes', 'no')"
-        ),
-    ))
-    is_outbound_edge = analysis.add_calc_field(CalcField(
-        name=CF_INV_ANETWORK_IS_OUTBOUND_EDGE,
-        dataset=ds_anet,
-        expression=(
-            "ifelse({source_display} = ${pInvANetworkAnchor}, "
-            "'yes', 'no')"
-        ),
-    ))
-    # counterparty_display is shape-tagged so the table's walk-the-flow
-    # drill can derive the parameter shape from the calc-field ref.
-    counterparty_display = analysis.add_calc_field(CalcField(
-        name=CF_INV_ANETWORK_COUNTERPARTY_DISPLAY,
-        dataset=ds_anet,
-        expression=(
-            "ifelse({source_display} = ${pInvANetworkAnchor}, "
-            "{target_display}, {source_display})"
-        ),
-        shape=ColumnShape.ACCOUNT_DISPLAY,
-    ))
+    # Y.3.b — is_inbound_edge / is_outbound_edge / counterparty_display
+    # are now real dataset columns computed via CASE expressions over
+    # <<$pInvANetworkAnchor>>. Pre-Y.3 they were analysis-level
+    # CalcFields; pushdown means QS + App2 see one shape and the
+    # Sankey direction filters can target real columns directly.
+    is_inbound_edge = ds_anet["is_inbound_edge"]
+    is_outbound_edge = ds_anet["is_outbound_edge"]
+    counterparty_display = ds_anet["counterparty_display"]
 
     sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_INV_ACCOUNT_NETWORK,
@@ -941,9 +917,10 @@ def _build_account_network_sheet(
     )
 
     # Row 2: full-width touching-edges table.
-    # counterparty_display is a CalcField — Dim(ds, calc_field_ref)
-    # carries the calc-field identity through the resolver.
-    counterparty_dim = Dim(ds_anet, counterparty_display)
+    # Y.3.b — counterparty_display is now a real dataset column
+    # (CASE expression in the dataset SQL). Plain Column.dim() since
+    # there's no longer a CalcField indirection.
+    counterparty_dim = counterparty_display.dim()
     table_amount = ds_anet["hop_amount"].sum(currency=True)
     table = sheet.layout.row(height=_TABLE_ROW_SPAN).add_table(
         width=_FULL,

@@ -174,6 +174,28 @@ MONEY_TRAIL_CONTRACT = DatasetContract(columns=[
 ])
 
 
+# Y.3.b — Account Network superset of MONEY_TRAIL_CONTRACT with three
+# anchor-derived columns computed in the dataset SQL via CASE
+# expressions over ``<<$pInvANetworkAnchor>>``. Pre-Y.3 these were
+# analysis-level CalcFields (``is_inbound_edge`` /
+# ``is_outbound_edge`` / ``counterparty_display``); pushed down so QS
+# + App2 see one shape and the Sankey direction filters can target
+# real columns. Money Trail keeps using MONEY_TRAIL_CONTRACT — those
+# columns are anchor-specific and Money Trail has no anchor concept.
+ACCOUNT_NETWORK_CONTRACT = DatasetContract(columns=[
+    *MONEY_TRAIL_CONTRACT.columns,
+    # 'yes' when the edge's TARGET is the anchor (anchor is receiving).
+    ColumnSpec("is_inbound_edge", "STRING"),
+    # 'yes' when the edge's SOURCE is the anchor (anchor is sending).
+    ColumnSpec("is_outbound_edge", "STRING"),
+    # The non-anchor side of the edge — target_display when source is
+    # the anchor; source_display when target is. Drives the table's
+    # walk-the-flow drill source.
+    ColumnSpec("counterparty_display", "STRING",
+               shape=ColumnShape.ACCOUNT_DISPLAY),
+])
+
+
 # Y.2.a — companion contract for the chain-root dropdown's options
 # source. Single column ``root_transfer_id`` distinct'd over the
 # matview so the dropdown's option fetch is O(distinct chains) instead
@@ -609,12 +631,10 @@ def build_account_network_dataset(cfg: Config) -> DataSet:
     - ``pInvANetworkMinAmount`` → ``AND hop_amount >= <<$...>>``.
       Default 0 = keep all on first paint.
 
-    Per-Sankey direction partitioning continues to happen via the
-    ``is_inbound_edge`` / ``is_outbound_edge`` calc fields + their
-    SELECTED_VISUALS-scoped FilterGroups (those operate on the
-    pre-narrowed anchor-touching set; no DB pushdown needed because
-    the work is already small post-anchor-narrow). Y.3.b will push
-    those calc fields into the dataset SQL as real columns.
+    Per-Sankey direction partitioning happens via the
+    ``is_inbound_edge`` / ``is_outbound_edge`` real columns (Y.3.b
+    pushed those calc fields into the dataset SQL via CASE
+    expressions over ``<<$pInvANetworkAnchor>>``).
 
     The K.4.5 chain-root filters that pre-Y.2 lived on a separate
     dataset registration (Money Trail's chain-root context) are now
@@ -635,15 +655,28 @@ def build_account_network_dataset(cfg: Config) -> DataSet:
     # the WHERE one scope outward, where the alias IS in scope. Caught
     # by ``tests/integration/verify_dataset_sql.py`` in seconds.
     base = _money_trail_base_sql(p)
+    # Y.3.b — computed columns inline via CASE; the outer WHERE narrows
+    # by anchor + min-amount. ``base.*`` projects the MONEY_TRAIL_CONTRACT
+    # columns (incl. source_display / target_display from the inner
+    # CTE), then we add the three anchor-derived columns.
+    anchor = f"<<${P_INV_ANETWORK_ANCHOR}>>"
     sql = (
         f"WITH base AS (\n"
         f"{base}"
         f")\n"
-        f"SELECT * FROM base\n"
+        f"SELECT base.*,\n"
+        f"  CASE WHEN target_display = {anchor} "
+        f"THEN 'yes' ELSE 'no' END AS is_inbound_edge,\n"
+        f"  CASE WHEN source_display = {anchor} "
+        f"THEN 'yes' ELSE 'no' END AS is_outbound_edge,\n"
+        f"  CASE WHEN source_display = {anchor} "
+        f"THEN target_display ELSE source_display END "
+        f"AS counterparty_display\n"
+        f"FROM base\n"
         f"WHERE 1=1\n"
         f"  AND (\n"
-        f"    source_display = <<${P_INV_ANETWORK_ANCHOR}>>\n"
-        f"    OR target_display = <<${P_INV_ANETWORK_ANCHOR}>>\n"
+        f"    source_display = {anchor}\n"
+        f"    OR target_display = {anchor}\n"
         f"  )\n"
         f"  AND hop_amount >= <<${P_INV_ANETWORK_MIN_AMOUNT}>>"
     )
@@ -653,7 +686,7 @@ def build_account_network_dataset(cfg: Config) -> DataSet:
         "Investigation Account Network",
         "inv-account-network",
         sql,
-        MONEY_TRAIL_CONTRACT,
+        ACCOUNT_NETWORK_CONTRACT,
         visual_identifier=DS_INV_ACCOUNT_NETWORK,
         dataset_parameters=[
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
@@ -738,7 +771,7 @@ _CONTRACT_REGISTRATIONS: tuple[tuple[str, DatasetContract], ...] = (
     (DS_INV_VOLUME_ANOMALIES_DISTRIBUTION, VOLUME_ANOMALIES_CONTRACT),
     (DS_INV_MONEY_TRAIL, MONEY_TRAIL_CONTRACT),
     (DS_INV_MONEY_TRAIL_ROOTS, MONEY_TRAIL_ROOTS_CONTRACT),
-    (DS_INV_ACCOUNT_NETWORK, MONEY_TRAIL_CONTRACT),
+    (DS_INV_ACCOUNT_NETWORK, ACCOUNT_NETWORK_CONTRACT),
     (DS_INV_ANETWORK_ACCOUNTS, ANETWORK_ACCOUNTS_CONTRACT),
 )
 for _vid, _contract in _CONTRACT_REGISTRATIONS:

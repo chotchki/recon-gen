@@ -511,14 +511,16 @@ def test_fanout_sheet_serializes_to_aws_json():
     # in dataset SQL, threshold pushed via <<$pInvFanoutThreshold>>
     # — leaving 1 fanout window + 1 anomalies window + 1 money-trail
     # window + 2 account network directional (inbound/outbound)).
-    # 3 calc fields (Y.3.a dropped fanout distinct_senders calc — now
-    # a dataset window column; account-network is_inbound_edge +
-    # is_outbound_edge + counterparty_display remain pending Y.3.b).
+    # 0 calc fields after Y.3.a + Y.3.b: Y.3.a dropped fanout
+    # distinct_senders calc; Y.3.b dropped is_inbound_edge +
+    # is_outbound_edge + counterparty_display — all four are now
+    # dataset columns.
     # 7 parameters (fanout threshold + sigma + money-trail
     # root/hops/amount + account-network anchor/min-amount) — unchanged
-    # by Y.3.a since the threshold param still drives the slider.
+    # by Y.3.a/b since the slider/dropdown params still drive controls.
     assert len(j["Definition"]["FilterGroups"]) == 5
-    assert len(j["Definition"]["CalculatedFields"]) == 3
+    cfs = j["Definition"].get("CalculatedFields") or []
+    assert len(cfs) == 0
     assert len(j["Definition"]["ParameterDeclarations"]) == 7
 
 
@@ -1209,13 +1211,12 @@ def test_account_network_analysis_params_bridge_to_dataset_params():
 def test_anchor_calc_field_dropped_after_y2b():
     """Y.2.b — ``is_anchor_edge`` calc field removed: the broad
     anchor narrow now lives in ds_anet's SQL (every row is_anchor_edge
-    by construction), so the calc field had no remaining consumers.
-    Y.3.b will push the directional calc fields into SQL too."""
+    by construction). Y.3.b dropped the rest of the Account Network
+    calc fields too — CalculatedFields may be empty / None entirely."""
     analysis = build_analysis(_TEST_CFG)
-    calc_fields = {
-        cf["Name"]: cf for cf in analysis.Definition.CalculatedFields
-    }
-    assert "is_anchor_edge" not in calc_fields
+    cfs = analysis.Definition.CalculatedFields or []
+    cf_names = {cf["Name"] for cf in cfs}
+    assert "is_anchor_edge" not in cf_names
 
 
 def test_anetwork_inbound_filter_is_inbound_sankey_only():
@@ -1516,57 +1517,49 @@ def test_anetwork_table_columns_use_display_strings():
     assert "target_account_name" not in cols
 
 
-def test_counterparty_calc_field_picks_other_side_of_edge():
-    """K.4.8f-3: counterparty_display returns target_display when the
-    source IS the anchor, otherwise source_display. The single-action
-    table walk reads from this field so it always picks the side that
-    isn't the current anchor."""
+def test_anetwork_calc_fields_pushed_into_dataset_sql():
+    """Y.3.b — is_inbound_edge / is_outbound_edge / counterparty_display
+    are now computed in the dataset SQL via CASE expressions over
+    ``<<$pInvANetworkAnchor>>`` and projected as real columns. Pre-Y.3
+    they were analysis-level CalcFields; pushdown means QS + App2 see
+    one shape and the Sankey direction filters can target real columns."""
+    from quicksight_gen.apps.investigation.datasets import (
+        ACCOUNT_NETWORK_CONTRACT,
+        build_account_network_dataset,
+    )
+
+    # 1. Contract carries the three new columns.
+    cols = ACCOUNT_NETWORK_CONTRACT.column_names
+    assert "is_inbound_edge" in cols
+    assert "is_outbound_edge" in cols
+    assert "counterparty_display" in cols
+
+    # 2. Dataset SQL has the CASE expressions referencing the anchor.
+    ds = build_account_network_dataset(_TEST_CFG)
+    sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+    anchor = f"<<${P_INV_ANETWORK_ANCHOR}>>"
+    assert (
+        f"CASE WHEN target_display = {anchor} "
+        f"THEN 'yes' ELSE 'no' END AS is_inbound_edge" in sql
+    )
+    assert (
+        f"CASE WHEN source_display = {anchor} "
+        f"THEN 'yes' ELSE 'no' END AS is_outbound_edge" in sql
+    )
+    assert (
+        f"CASE WHEN source_display = {anchor} "
+        f"THEN target_display ELSE source_display END "
+        f"AS counterparty_display" in sql
+    )
+
+    # 3. CalcFields no longer carry these names.
     analysis = build_analysis(_TEST_CFG)
-    calc_fields = {
-        cf["Name"]: cf for cf in analysis.Definition.CalculatedFields
+    cf_names = {
+        cf["Name"] for cf in analysis.Definition.CalculatedFields or []
     }
-    counterparty = calc_fields[CF_INV_ANETWORK_COUNTERPARTY_DISPLAY]
-    assert counterparty["DataSetIdentifier"] == DS_INV_ACCOUNT_NETWORK
-    expr = counterparty["Expression"]
-    assert "ifelse" in expr
-    assert "{source_display} = ${pInvANetworkAnchor}" in expr
-    # If the source is the anchor, project the target; else the source.
-    assert "{target_display}" in expr
-    assert "{source_display}" in expr
-
-
-def test_inbound_edge_calc_field_matches_target_to_anchor():
-    """K.4.8i: is_inbound_edge = 'yes' when the edge's TARGET equals the
-    anchor (the anchor received the money). The inbound Sankey's filter
-    matches this calc field to 'yes'."""
-    analysis = build_analysis(_TEST_CFG)
-    calc_fields = {
-        cf["Name"]: cf for cf in analysis.Definition.CalculatedFields
-    }
-    inbound = calc_fields[CF_INV_ANETWORK_IS_INBOUND_EDGE]
-    assert inbound["DataSetIdentifier"] == DS_INV_ACCOUNT_NETWORK
-    expr = inbound["Expression"]
-    assert "ifelse" in expr
-    assert "{target_display} = ${pInvANetworkAnchor}" in expr
-    assert "'yes'" in expr
-    assert "'no'" in expr
-
-
-def test_outbound_edge_calc_field_matches_source_to_anchor():
-    """K.4.8i: is_outbound_edge = 'yes' when the edge's SOURCE equals
-    the anchor (the anchor sent the money). The outbound Sankey's
-    filter matches this calc field to 'yes'."""
-    analysis = build_analysis(_TEST_CFG)
-    calc_fields = {
-        cf["Name"]: cf for cf in analysis.Definition.CalculatedFields
-    }
-    outbound = calc_fields[CF_INV_ANETWORK_IS_OUTBOUND_EDGE]
-    assert outbound["DataSetIdentifier"] == DS_INV_ACCOUNT_NETWORK
-    expr = outbound["Expression"]
-    assert "ifelse" in expr
-    assert "{source_display} = ${pInvANetworkAnchor}" in expr
-    assert "'yes'" in expr
-    assert "'no'" in expr
+    assert CF_INV_ANETWORK_IS_INBOUND_EDGE not in cf_names
+    assert CF_INV_ANETWORK_IS_OUTBOUND_EDGE not in cf_names
+    assert CF_INV_ANETWORK_COUNTERPARTY_DISPLAY not in cf_names
 
 
 def test_money_trail_root_dropdown_hides_select_all():
