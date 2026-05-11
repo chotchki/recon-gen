@@ -604,17 +604,17 @@ What this anticipated: Phase X had an in-flight branch (`phase-x-2-g-investigati
 
 The new authoring pattern needs to be the canonical one for any future filter / parameter work. Docs catch up.
 
-- [ ] **Y.9.a — CLAUDE.md update.** New section "Authoring filters: SQL-level parameter pushdown is the canonical pattern" — `<<$paramName>>` in dataset SQL + `MappedDataSetParameters`; analysis-level FilterGroups deprecated for filter intent (kept only for visual highlighting if any case justifies it).
-- [ ] **Y.9.b — README sweep** for the architecture overview section.
-- [ ] **Y.9.c — Customization handbook walkthrough — "How filters work" page.** Cover the dataset-parameter pattern + cascade behavior + perf intent.
-- [ ] **Y.9.d — Migration note.** Customer L2 instance YAMLs are unaffected (this is internal architecture); flag explicitly so customers don't worry.
+- [x] **Y.9.a — CLAUDE.md update — DONE (2026-05-11).** New `## Filter authoring — SQL-level parameter pushdown is the canonical pattern` section: the three filter shapes (`{date_filter}`-slot date filter via `build_dataset(... app2_date_column=...)`; `<<$pParam>>` categorical/slider with auto-derived DataSetParameter + MappedDataSetParameters bridge + auto-derived App2 filter spec; cross-app URL-param drill + the QS control-sync caveat), and analysis-level `FilterGroup`s flagged deprecated for filter intent.
+- [x] **Y.9.b — README sweep — DONE (2026-05-11).** Rewrote the "Add a filter" customising section (it described the now-deprecated `FilterGroup.with_category_filter` / `scope_visuals` flow) onto the SQL-pushdown pattern, pointing at the CLAUDE.md "Filter authoring" section for the full version.
+- [x] **Y.9.c — Customization handbook "How filters work" — DONE (2026-05-11).** Added a `## How filters work` section to `docs/handbook/customization.md` (a section in the handbook landing page rather than a separate walkthrough page — promote to a full walkthrough card later if it earns one): filter = `<<$paramName>>` / `{date_filter}` in dataset SQL, the QS-vs-self-hosted substitution symmetry, the "keep the placeholders when swapping SQL" + "narrows at the DB" implications.
+- [x] **Y.9.d — Migration note — DONE (2026-05-11).** Stated in the customization-handbook "How filters work" section ("does not touch your config.yaml or L2 instance YAML — theme/persona/rails/chains/limit-schedules unchanged; if you carried a customization across the v9.0.0 line, your YAML didn't move, only the generated QS definitions did") and will be headlined again in the v9.0.0 RELEASE_NOTES.
 
 ### Y.10 — Cut release
 
-- [ ] **Y.10.a — Bump version (likely v9.0.0 — major architectural shift).**
-- [ ] **Y.10.b — RELEASE_NOTES entry: convergence + perf wins headlined.**
-- [ ] **Y.10.c — Tag + push.**
-- [ ] **Y.10.d — Verify release pipeline runs green** (the existing `e2e-against-testpypi` gate already covers this).
+- [x] **Y.10.a — Bumped __version__ → v9.0.0 (2026-05-11).** Major: Phase Y converged the QuickSight + self-hosted (App2) renderers on SQL-level parameter pushdown; the customer-facing artifacts (CLI, config, L2 YAML) are unchanged but the internal filter architecture is a clean break, so a major bump.
+- [x] **Y.10.b — RELEASE_NOTES v9.0.0 entry written (2026-05-11).** Headlines: dialect convergence (one `<<$param>>`/`{date_filter}` SQL per dataset, two renderers); the date-pushdown perf win (-15.3% rows on the wire, l1-transactions -92% on a narrowed view); Oracle e2e clean (Y.7-followup); the explicit-`datasource_arn` precedence fix; migration note (customer config.yaml / L2 YAML unaffected).
+- [x] **Y.10.c — Tagged v9.0.0 + pushed (2026-05-11).**
+- [x] **Y.10.d — Release pipeline verified (2026-05-11).** Tests+pyright → Build → Smoke wheel → TestPyPI publish → TestPyPI verify → e2e-against-testpypi (PG) → PyPI publish (manual approval gate) → PyPI verify.
 
 ### Q.6 — CLI shape revisit: cfg ⇄ L2 dual-yaml factoring  _(moved out of Phase Y → Phase Q continuation, 2026-05-11; v9.0.0 = "Phase Y done" cuts without it — it's CLI ergonomics, not part of the SQL-pushdown convergence; folds into the standing "Phase Q — CLI/yaml ergonomics" thread)_
 

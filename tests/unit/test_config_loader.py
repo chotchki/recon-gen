@@ -271,3 +271,55 @@ def test_demo_database_url_satisfies_datasource_arn_requirement(
     # __post_init__ derives the datasource_arn from the URL.
     assert cfg.datasource_arn is not None
     assert "datasource/" in cfg.datasource_arn
+    # ...and records that we own the datasource resource → cli/json.py
+    # emits out/datasource.json.
+    assert cfg.datasource_arn_was_derived is True
+
+
+def test_datasource_arn_was_derived_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """v9.0.0 — `datasource_arn_was_derived` distinguishes "we own the
+    QS datasource" (derived from `demo_database_url`) from "operator
+    supplied a pre-existing ARN" (leave it alone, don't emit a
+    competing datasource resource) — even when both fields are in the
+    cfg (a prod cfg that lists both a real ARN and a DB URL for the
+    seed/demo CLI). Bug before this: the explicit-ARN-plus-DB-URL case
+    still regenerated the QS datasource."""
+    monkeypatch.delenv(QS_GEN_DATASOURCE_ARN.name, raising=False)
+    monkeypatch.delenv(QS_GEN_DEMO_DATABASE_URL.name, raising=False)
+    explicit_arn = "arn:aws:quicksight:us-east-1:111122223333:datasource/customer-managed-ds"
+    dir_a = tmp_path / "a"; dir_a.mkdir()
+    dir_b = tmp_path / "b"; dir_b.mkdir()
+    dir_c = tmp_path / "c"; dir_c.mkdir()
+
+    # Explicit ARN only → not derived.
+    cfg1 = load_config(_write_yaml(dir_a, {
+        "aws_account_id": "111122223333", "aws_region": "us-east-1",
+        "datasource_arn": explicit_arn, "dialect": "postgres",
+    }))
+    assert cfg1.datasource_arn == explicit_arn
+    assert cfg1.datasource_arn_was_derived is False
+
+    # Explicit ARN AND demo_database_url → still NOT derived (the fix);
+    # the explicit ARN wins, and survives with_l2_instance_prefix.
+    cfg2 = load_config(_write_yaml(dir_b, {
+        "aws_account_id": "111122223333", "aws_region": "us-east-1",
+        "datasource_arn": explicit_arn,
+        "demo_database_url": "postgresql://u:p@h:5432/d", "dialect": "postgres",
+    }))
+    assert cfg2.datasource_arn == explicit_arn
+    assert cfg2.datasource_arn_was_derived is False
+    cfg2p = cfg2.with_l2_instance_prefix("sasquatch_pr")
+    assert cfg2p.datasource_arn == explicit_arn
+    assert cfg2p.datasource_arn_was_derived is False
+
+    # demo_database_url only → derived; survives the prefix re-derive.
+    cfg3 = load_config(_write_yaml(dir_c, {
+        "aws_account_id": "111122223333", "aws_region": "us-east-1",
+        "demo_database_url": "postgresql://u:p@h:5432/d", "dialect": "postgres",
+    }))
+    assert cfg3.datasource_arn_was_derived is True
+    cfg3p = cfg3.with_l2_instance_prefix("sasquatch_pr")
+    assert cfg3p.datasource_arn_was_derived is True
+    assert "sasquatch_pr" in (cfg3p.datasource_arn or "")

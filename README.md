@@ -361,10 +361,13 @@ The dataset SQL reads from two shared base tables (`<prefix>_transactions`, `<pr
 
 ### Add a filter
 
-1. In `apps/<app>/app.py`, build a `FilterGroup`: `fg = FilterGroup.with_category_filter(...)` (or `with_numeric_range_filter` / `with_time_range_filter`). Pass the typed `Dim` ref directly — no string IDs.
-2. Scope it: `fg.scope_sheet(sheet_obj)` for sheet-wide; `fg.scope_visuals(visual_a, visual_b)` for visual-pinned.
-3. For UI controls, attach the filter's `default_control` to a sheet via `sheet.filter_controls.append(...)`.
-4. `pytest` walks the tree and flags missing references at emit time.
+Filters push to SQL — a `<<$paramName>>` placeholder in the dataset's CustomSql, not an analysis-level `FilterGroup` (a Phase Y change that converged the QuickSight and self-hosted renderers on the same query-level narrowing). So:
+
+1. **Date filter:** write the dataset SQL with a `{date_filter}` slot in its `WHERE` and call `build_dataset(sql_template, CONTRACT, ..., app2_date_column="<table>.<col>")` — it substitutes the slot per renderer (QuickSight's universal date control narrows QS; the self-hosted renderer gets a `BETWEEN :date_from AND :date_to` bind).
+2. **Categorical / slider filter:** put `<<$pParamName>>` directly in the `WHERE`; declare the analysis parameter and wire its control (`ParameterDropDownControl` / slider) in `apps/<app>/app.py`. The dataset parameter, the analysis→dataset bridge, and the self-hosted renderer's filter spec are all auto-derived from that one control node.
+3. `pytest` walks the tree and flags missing references at emit time; the dataset's `DatasetContract` is the safety net when you edit the SQL.
+
+(See `CLAUDE.md` → "Filter authoring" for the full pattern. Analysis-level `FilterGroup`s are deprecated for filter intent — kept only for the universal date control and the rare highlight-without-narrowing case.)
 
 ### Re-skin
 

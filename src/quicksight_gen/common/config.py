@@ -125,6 +125,16 @@ class Config:
     # also uses ambient via OIDC). See combined spike for the full
     # decision + IAM runbook.
     auth: AuthConfig | None = None
+    # Set by ``__post_init__``: True iff ``datasource_arn`` was *derived*
+    # from ``demo_database_url`` (we own the QS datasource resource and
+    # emit ``out/datasource.json``), False iff the operator supplied an
+    # explicit ``datasource_arn`` (a pre-existing customer datasource —
+    # we leave it alone and DON'T emit a datasource resource), regardless
+    # of whether ``demo_database_url`` is also set. ``cli/json.py`` keys
+    # the datasource-emit on this; not an init param, not in repr/eq.
+    datasource_arn_was_derived: bool = field(
+        default=False, init=False, repr=False, compare=False,
+    )
     # Y.2.gate.h.6 — Path to the L2 institution YAML the operator's external
     # DB has been seeded with. Runner injects ``QS_GEN_TEST_L2_INSTANCE=<path>``
     # into subprocess env_overrides so both the seed flow (passes ``--l2 <yaml>``
@@ -177,12 +187,14 @@ class Config:
 
     def __post_init__(self) -> None:
         # If demo_database_url is set but datasource_arn is not, derive it
+        # — and record that we own the resulting datasource resource.
         if self.datasource_arn is None and self.demo_database_url is not None:
             ds_id = self.prefixed("demo-datasource")
             self.datasource_arn = (
                 f"arn:{self.partition}:quicksight:{self.aws_region}"
                 f":{self.aws_account_id}:datasource/{ds_id}"
             )
+            self.datasource_arn_was_derived = True
         if self.datasource_arn is None:
             raise ValueError(
                 "datasource_arn is required unless demo_database_url is set."
@@ -221,24 +233,26 @@ class Config:
     def with_l2_instance_prefix(self, prefix: str) -> "Config":
         """Return a new Config with the L2 prefix stamped in.
 
-        When ``demo_database_url`` is set, also clears ``datasource_arn``
-        so ``__post_init__`` re-derives it with the prefix in the path —
-        without this, per-app builders bake the unprefixed
-        ``qs-gen-demo-datasource`` ARN into dataset JSON and the deploy
-        fails with ``InvalidParameterValueException: Invalid dataSourceArn``
-        because the actual datasource resource carries the prefix
-        (``qs-gen-<prefix>-demo-datasource``).
+        When we *own* the datasource (``datasource_arn_was_derived`` —
+        the ARN was synthesized from ``demo_database_url``), also clears
+        ``datasource_arn`` so ``__post_init__`` re-derives it with the
+        prefix in the path — without this, per-app builders bake the
+        unprefixed ``qs-gen-demo-datasource`` ARN into dataset JSON and
+        the deploy fails with ``InvalidParameterValueException: Invalid
+        dataSourceArn`` because the actual datasource resource carries
+        the prefix (``qs-gen-<prefix>-demo-datasource``).
 
-        When ``demo_database_url`` is unset (production deploys against
-        a pre-existing customer datasource), the explicit ``datasource_arn``
-        stays as-is — re-deriving would synthesize an ARN the customer's
-        QS account doesn't have.
+        When the operator supplied an explicit ``datasource_arn`` (a
+        pre-existing customer datasource — even if ``demo_database_url``
+        is also set for the seed/demo CLI), the ARN stays as-is:
+        re-deriving would synthesize an ARN the customer's QS account
+        doesn't have.
 
         Idempotent: callers can guard with ``if cfg.l2_instance_prefix
         is None`` to skip the re-derive when the cfg is already L2-aware.
         """
         from dataclasses import replace
-        if self.demo_database_url is not None:
+        if self.datasource_arn_was_derived:
             return replace(
                 self,
                 l2_instance_prefix=prefix,

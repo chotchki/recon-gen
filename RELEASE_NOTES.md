@@ -1,5 +1,22 @@
 # Release Notes
 
+## v9.0.0 — Phase Y: SQL-level parameter pushdown (QuickSight + self-hosted renderer converge)
+
+Major version. The headline is **convergence**: the QuickSight renderer and the self-hosted (App 2 / HTMX) renderer now do filtering the same way — a `<<$paramName>>` placeholder (or a `{date_filter}` slot) in the dataset's CustomSql, substituted at fetch time. QuickSight bridges an analysis parameter into the CustomSql via `MappedDataSetParameters`; the self-hosted renderer translates the same placeholder to a `:param_name` bind. One SQL, one narrowing path, two renderers — and the rows fetched shrink at the database instead of being pulled in full and filtered in-engine. Analysis-level `FilterGroup`s are deprecated for filter intent (kept only for the universal date control and the rare highlight-without-narrowing case).
+
+This is internal renderer architecture. **Customer-facing surfaces are unchanged** — the CLI (`schema` / `data` / `json` / `audit` × `apply` / `clean` / …), `config.yaml`, and the L2 institution YAML (`theme:` / optional `persona:` / rails / chains / accounts / limit schedules) all keep their shapes. A customization carried across the v8 → v9 line needs no YAML changes; only the generated QuickSight definitions changed. The major bump reflects the clean break in how filters are authored, not a config migration.
+
+**What's in v9.0.0** (subsumes everything since v8.8.0a25 — the a26/a27 alphas were the build-up):
+
+- **Filter / parameter pushdown across all four apps** (Y.2/Y.3): every per-sheet dropdown / slider / date control narrows at the DB now. Calc fields that existed only to be filtered (Recipient Fanout distinct-senders, Account Network counterparty/amount, Volume Anomalies z-score) were pushed down to real dataset columns and the calc-field declarations dropped.
+- **Date-pushdown perf** (Y.6): on a narrowed (last-7-days) view vs. the full population, **−15.3% rows on the wire / −8.5% query time** overall; `l1-transactions` alone **−92%**. (The "wide-open" scenario — empty date binds, sentinel match-everything — reproduces pre-Y behavior exactly, so the delta is the win, not a measurement artifact.)
+- **`app2_sql=` → `app2_date_column=`** (Y.5.a): `build_dataset(sql_template, CONTRACT, ..., app2_date_column="t.posting")` does both substitutions itself; the old two-call form (`sql_template.format(date_filter=...)` + a hand-rolled `app2_sql=`) was a footgun — operators forgot the App2 half and shipped silently-broken date filters.
+- **Oracle e2e clean** (Y.7 + Y.7-followup): the e2e suite is green on all three dialects (PostgreSQL / Oracle / SQLite). Y.7-followup hardened `drop_matview_if_exists` against half-dropped Oracle matviews, pinned the audit-agreement test's module-scoped re-seed fixture to one xdist worker (`xdist_group`, so Oracle's auto-committing DDL doesn't race across workers into ORA-00955), and gave the browser e2e layer a 60s page timeout + `pytest-rerunfailures --reruns 2` so a QS-embed-render flake retries itself instead of halting the chain.
+- **Explicit `datasource_arn` wins.** If `config.yaml` carries a `datasource_arn` (a pre-existing customer datasource), the deploy uses it as-is and does **not** generate/deploy a competing QuickSight datasource — even when `demo_database_url` is also set in the cfg (for the seed/demo CLI). Previously the latter case still regenerated the datasource.
+- **Test-runner robustness** (the Y.2.gate work, plus Y.7-followup): the `loadgroup` xdist default moved into `tests/conftest.py` (activates only when xdist is loaded — a no-xdist env like the wheel-smoke job no longer chokes on `--dist`); `pytest-xdist` + `pytest-rerunfailures` in the `[dev]` extra.
+
+Docs caught up (Y.9): CLAUDE.md's new "Filter authoring" section is the canonical pattern; README's "Add a filter" rewritten; the customization handbook has a "How filters work" section with the migration note.
+
 ## v8.8.0a27 — Y.7 e2e gate (PG + SQLite clean) + two e2e-test fixes
 
 Twenty-seventh alpha. Bundles a26's content (Y.3.b + Y.5.a + Y.6) plus the

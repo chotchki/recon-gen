@@ -56,6 +56,20 @@ new persona work or dashboard redesigns:
 - **Per-sheet layout.** Sheet structure is part of the active
   product surface and may shift under integrator-driven redesigns.
 
+## How filters work
+
+A filter — a date range, a status dropdown, a sigma-threshold slider — is a **parameter substituted into the dataset's SQL `WHERE` clause**, not a UI-side filter applied after the fact. The dataset query already carries a `<<$paramName>>` placeholder (or, for the universal date range, a `{date_filter}` slot the `build_dataset` helper fills); when the analyst moves a control, the renderer substitutes the value into that query and the database returns the narrowed set. The two renderers do the same thing the same way:
+
+- **QuickSight** substitutes the literal value into the dataset's CustomSql at fetch time, bridged from an analysis-level parameter via `MappedDataSetParameters`.
+- **The self-hosted renderer** translates the same `<<$paramName>>` into a `:param_name` bind before running the query.
+
+Two consequences worth knowing if you're swapping SQL behind a dataset:
+
+1. **Keep the placeholders.** If the dataset you're replacing has a `{date_filter}` slot or a `<<$pSomething>>` in its `WHERE`, your replacement SQL needs the equivalent — that's how the date control / dropdown / slider stays wired. The `DatasetContract` still locks the *projection* (column names + types); the placeholders are the parameter contract on top of it.
+2. **It narrows at the database.** A filtered view fetches fewer rows, not "all rows then hide some" — relevant when you're sizing matview/index work for your own data volumes.
+
+This is internal QuickSight/self-hosted-renderer architecture (a Phase Y / v9.0.0 change). It does **not** touch your `config.yaml` or your L2 instance YAML — the `theme:` block, the optional `persona:` block, your rails / chains / accounts / limit schedules are all unchanged. If you carried a customization across the v9.0.0 line, your YAML didn't need to move; only the generated QuickSight definitions did.
+
 ## Setup
 
 <p class="snb-section-label">Get the dashboards landed against your data</p>

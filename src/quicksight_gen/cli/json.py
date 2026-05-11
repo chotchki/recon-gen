@@ -86,15 +86,19 @@ def json_apply(
     )
 
     # V.1.a — Auto-emit out/datasource.json when we're provisioning the
-    # QuickSight datasource ourselves (cfg.demo_database_url is set =>
-    # we own the QS datasource resource; customer-managed datasources
-    # carry their own datasource_arn and we leave them alone). Closes
-    # the U.8.b.3 manual-bridge gap that hit during spec_example
-    # deploys: the apps' datasets reference a datasource ARN that the
-    # deploy step then can't find because nobody emitted the matching
-    # out/datasource.json. common/deploy.py reads this file when it
-    # exists and skips when it doesn't.
-    if cfg.demo_database_url is not None:
+    # QuickSight datasource ourselves. "We own it" = `datasource_arn` was
+    # *derived* from `demo_database_url` (`Config.datasource_arn_was_derived`),
+    # NOT when the operator supplied an explicit `datasource_arn` — even if
+    # `demo_database_url` is also set in the cfg (e.g. a prod cfg that lists
+    # both a pre-existing datasource ARN and a DB URL for the demo/seed CLI):
+    # an explicit ARN means a customer-managed datasource, leave it alone,
+    # don't deploy a competing resource. Closes the U.8.b.3 manual-bridge
+    # gap that hit during spec_example deploys: the apps' datasets reference
+    # a datasource ARN the deploy step then can't find because nobody emitted
+    # the matching out/datasource.json. common/deploy.py reads this file when
+    # it exists and skips when it doesn't — so the absence IS the "use the
+    # operator's ARN as-is" signal.
+    if cfg.datasource_arn_was_derived:
         import json
         from quicksight_gen.common.datasource import build_datasource
         ds = build_datasource(cfg)
