@@ -82,6 +82,21 @@ Four checks today, all extensible — drop a new ``Check`` into
   fingerprint / log lines / embedded HTML payloads). The smell is
   "no deliberate format choice"; either kwarg satisfies the lint.
 
+- **no-playwright-leak** (X.2.q.5) — ``import playwright`` /
+  ``from playwright[.x] import …`` OR
+  ``from quicksight_gen.common.browser{.helpers|.screenshot} import …``
+  (the Playwright-primitives layer; the AWS-only helpers
+  ``get_user_arn`` / ``generate_dashboard_embed_url`` are exempt) in
+  any ``tests/e2e/`` file outside the driver layer
+  (``tests/e2e/_drivers/``). Playwright stays sealed behind
+  ``DashboardDriver`` — e2e tests talk driver verbs (``open`` /
+  ``goto_sheet`` / ``table_rows`` / ``pick_filter`` / ``screenshot`` /
+  …), not ``Page`` / ``webkit_page`` / ``wait_for_*``. The
+  ``_PLAYWRIGHT_LEAK_LEGACY`` set is the X.2.q.3 migration backlog —
+  it can only shrink; porting a test removes its name. ``tests/js/``
+  (the JS-unit harness, which drives Playwright directly by design)
+  isn't under ``tests/e2e/`` so it's out of scope automatically.
+
 Suppression
 -----------
 
@@ -1059,6 +1074,123 @@ class CreateTagsCheck(Check):
 
 
 # ---------------------------------------------------------------------------
+# Check: no-playwright-leak (X.2.q.5)
+# ---------------------------------------------------------------------------
+
+
+# Names that live in ``common/browser/helpers.py`` but aren't
+# Playwright-coupled — AWS plumbing that happens to share the file.
+# A test importing ONLY these is fine; importing ``webkit_page`` /
+# ``wait_for_*`` / ``screenshot`` / etc. is bypassing the driver layer.
+_NON_PLAYWRIGHT_BROWSER_HELPERS = frozenset({
+    "get_user_arn",
+    "generate_dashboard_embed_url",
+})
+
+_BROWSER_HELPERS_MOD = "quicksight_gen.common.browser.helpers"
+_BROWSER_SCREENSHOT_MOD = "quicksight_gen.common.browser.screenshot"
+_BROWSER_PKG = "quicksight_gen.common.browser"
+
+# X.2.q.3 migration backlog — ``tests/e2e/`` files that still drive
+# Playwright directly (via ``common/browser/helpers``) instead of through
+# ``DashboardDriver``. The lint excludes these; a port REMOVES a name from
+# this set (and the lint then enforces it stays ported). New e2e tests
+# are NOT added here — they use ``DashboardDriver``. The set can only
+# shrink; a non-empty entry is a visible "not yet migrated" TODO.
+_PLAYWRIGHT_LEAK_LEGACY: frozenset[str] = frozenset({
+    "tests/e2e/test_audit_dashboard_agreement.py",
+    "tests/e2e/test_exec_dashboard_renders.py",
+    "tests/e2e/test_exec_sheet_visuals.py",
+    "tests/e2e/test_html2_executives.py",
+    "tests/e2e/test_html2_executives_live.py",
+    "tests/e2e/test_html2_l2ft.py",
+    "tests/e2e/test_html2_money_trail.py",
+    "tests/e2e/test_inv_dashboard_renders.py",
+    "tests/e2e/test_inv_drilldown.py",
+    "tests/e2e/test_inv_filters.py",
+    "tests/e2e/test_inv_sheet_visuals.py",
+    "tests/e2e/test_l1_cross_sheet_drill_date_widening.py",
+    "tests/e2e/test_l1_dashboard_renders.py",
+    "tests/e2e/test_l1_filters.py",
+    "tests/e2e/test_l1_sheet_visuals.py",
+    "tests/e2e/test_l2ft_chains_dropdowns.py",
+    "tests/e2e/test_l2ft_metadata_cascade.py",
+    "tests/e2e/test_l2ft_rails_dropdowns.py",
+    "tests/e2e/test_l2ft_templates_dropdowns.py",
+    "tests/e2e/tree_validator.py",
+})
+
+
+class _NoPlaywrightLeakVisitor(ast.NodeVisitor):
+    """Flag (a) ``import playwright[...]`` / ``from playwright[...] import``
+    and (b) ``from quicksight_gen.common.browser{.helpers|.screenshot}
+    import …`` (except the AWS-only helper names) in a browser-e2e test —
+    Playwright stays sealed behind the ``DashboardDriver`` layer."""
+
+    def __init__(self, file: Path) -> None:
+        self.file = file
+        self.smells: list[Smell] = []
+
+    def _msg(self, what: str) -> str:
+        return (
+            f"{what} in a browser-e2e test — Playwright stays sealed "
+            "behind the ``DashboardDriver`` layer (``tests/e2e/_drivers/``). "
+            "e2e tests talk ``DashboardDriver`` verbs (``open`` / "
+            "``goto_sheet`` / ``table_rows`` / ``pick_filter`` / "
+            "``screenshot`` / …), not ``Page`` / ``webkit_page`` / "
+            "``wait_for_*`` — see X.2.q. If this file hasn't been ported "
+            "onto a driver fixture yet, add it to ``_PLAYWRIGHT_LEAK_LEGACY`` "
+            "in this module (the X.2.q.3 migration backlog) — but prefer "
+            "porting. Suppress a one-off with ``# typing-smell: ignore"
+            "[no-playwright-leak]: <reason>``."
+        )
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            if alias.name == "playwright" or alias.name.startswith("playwright."):
+                self.smells.append(Smell(
+                    file=self.file, lineno=node.lineno,
+                    checker="no-playwright-leak",
+                    message=self._msg(f"``import {alias.name}``"),
+                ))
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        mod = node.module or ""
+        if mod == "playwright" or mod.startswith("playwright."):
+            self.smells.append(Smell(
+                file=self.file, lineno=node.lineno,
+                checker="no-playwright-leak",
+                message=self._msg(f"``from {mod} import …``"),
+            ))
+        elif mod in (_BROWSER_SCREENSHOT_MOD, _BROWSER_PKG):
+            self.smells.append(Smell(
+                file=self.file, lineno=node.lineno,
+                checker="no-playwright-leak",
+                message=self._msg(f"``from {mod} import …``"),
+            ))
+        elif mod == _BROWSER_HELPERS_MOD:
+            imported = {a.name for a in node.names}
+            offenders = imported - _NON_PLAYWRIGHT_BROWSER_HELPERS
+            if offenders:
+                self.smells.append(Smell(
+                    file=self.file, lineno=node.lineno,
+                    checker="no-playwright-leak",
+                    message=self._msg(
+                        f"``from {mod} import {', '.join(sorted(offenders))}``"
+                    ),
+                ))
+        self.generic_visit(node)
+
+
+class NoPlaywrightLeakCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        v = _NoPlaywrightLeakVisitor(file)
+        v.visit(tree)
+        return v.smells
+
+
+# ---------------------------------------------------------------------------
 # Suppression filtering
 # ---------------------------------------------------------------------------
 
@@ -1147,6 +1279,17 @@ def _build_checks() -> list[Check]:
         )
         if p.name != "test_typing_smells.py"
         and p.name != "test_env_keys.py"
+    ]
+    # no-playwright-leak: every ``tests/e2e/`` file EXCEPT the driver layer
+    # (which legitimately wraps Playwright) and the X.2.q.3 migration
+    # backlog (``_PLAYWRIGHT_LEAK_LEGACY`` — shrinks as files get ported).
+    # ``tests/js/`` is its own JS-unit harness and isn't under ``tests/e2e/``,
+    # so it's out of scope automatically.
+    e2e_drivers_dir = REPO_ROOT / "tests/e2e/_drivers"
+    no_playwright_scope = [
+        p for p in _expand_paths([REPO_ROOT / "tests/e2e"])
+        if e2e_drivers_dir not in p.parents
+        and str(p.relative_to(REPO_ROOT)) not in _PLAYWRIGHT_LEAK_LEGACY
     ]
     return [
         BareStrIdCheck(
@@ -1312,6 +1455,20 @@ def _build_checks() -> list[Check]:
                 "payload via ``**payload``"
             ),
             files=[REPO_ROOT / "src/quicksight_gen/common/deploy.py"],
+        ),
+        NoPlaywrightLeakCheck(
+            name="no-playwright-leak",
+            description=(
+                "``import playwright`` / ``from playwright import`` / "
+                "``from common.browser.helpers|screenshot import`` (the "
+                "Playwright-primitives layer) in a ``tests/e2e/`` file "
+                "outside the driver layer (``tests/e2e/_drivers/``). "
+                "Playwright stays sealed behind ``DashboardDriver`` — "
+                "tests talk driver verbs, not ``Page`` / ``webkit_page`` "
+                "/ ``wait_for_*``. The ``_PLAYWRIGHT_LEAK_LEGACY`` set is "
+                "the X.2.q.3 migration backlog (it can only shrink)."
+            ),
+            files=no_playwright_scope,
         ),
     ]
 
