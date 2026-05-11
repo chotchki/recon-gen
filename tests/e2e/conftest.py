@@ -246,7 +246,10 @@ def l1_dataset_ids(resource_prefix, l1_l2_prefix) -> list[str]:
     todays_exceptions UNION dataset; M.2b.4 added daily_statement
     summary + transactions for the per-account-day walk; M.2b.6 added
     the 2 timeline pre-aggregations for the LineChart sheet.
-    M.2d.3 added the L2 prefix as the middle segment.
+    M.2d.3 added the L2 prefix as the middle segment. Y.2.g added 3
+    companion datasets feeding the per-sheet pushdown dropdowns'
+    LinkedValues options (account_id / transfer_id / status+origin
+    facets).
     """
     suffixes = [
         "l1-drift-dataset",
@@ -263,6 +266,10 @@ def l1_dataset_ids(resource_prefix, l1_l2_prefix) -> list[str]:
         "l1-stuck-unbundled-dataset",
         "l1-supersession-transactions-dataset",
         "l1-supersession-daily-balances-dataset",
+        # Y.2.g — companion datasets for the data-value dropdowns.
+        "l1-accounts-dataset",
+        "l1-tx-ids-dataset",
+        "l1-tx-facets-dataset",
         # M.4.4.5 / M.4.4.7 — App Info canary sheet datasets, per-app prefix.
         "l1-app-info-liveness-dataset",
         "l1-app-info-matviews-dataset",

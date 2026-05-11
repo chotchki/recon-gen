@@ -1,5 +1,21 @@
 # Release Notes
 
+## v8.8.0a23 — hotfix: l1_dataset_ids fixture catch-up for Y.2.g.0's 3 new companions
+
+Twenty-third alpha. Pure test-fixture fix; no production-code changes vs
+v8.8.0a22. v8.8.0a22 reached TestPyPI but `e2e-against-testpypi` failed
+on `test_dataset_count_matches_tree` because the `l1_dataset_ids`
+session fixture in `tests/e2e/conftest.py` didn't list the 3 new L1
+companion datasets Y.2.g.0 added (`l1-accounts-dataset`,
+`l1-tx-ids-dataset`, `l1-tx-facets-dataset`). Live tree had 19 datasets;
+fixture listed 16 → assertion `19 == 16` failed → publish-to-PyPI
+skipped. Locally the chain runner only ran `up_to=db` for Y.2.g
+verification; this test is in the API e2e layer and only fires against
+a deployed dashboard, so the fixture drift slipped past the local gate.
+
+Re-ships v8.8.0a22's content (Y.2.g L1 categorical pushdown +
+X.2.g.2.d App2 pool fix).
+
 ## v8.8.0a22 — Y.2.g (L1 per-sheet categorical filter pushdown) + App2 pool fix
 
 Twenty-second alpha. Two related landings on `y-2-gh-l1-categorical-pushdown`.
