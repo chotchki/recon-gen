@@ -1,5 +1,39 @@
 # Release Notes
 
+## v8.8.0a25 — hotfix: api-layer test catch-up for Y.2.h + Y.2.f + Y.3.a
+
+Twenty-fifth alpha. Pure test-fixture / assertion fix; no production-code
+changes vs v8.8.0a24. v8.8.0a24 reached TestPyPI but `e2e-against-testpypi`
+failed on three api-layer assertions that the local `up_to=app2` chain
+runner doesn't fire (api layer requires deployed AWS + auth):
+
+- `test_exec_deployed_resources::TestExecDatasetsExist::test_dataset_count`:
+  `assert len(exec_dataset_ids) == 2` was a stale hardcoded count;
+  Y.2.h's active-accounts dataset split made it 3 (plus 2 App Info → 5).
+  Removed (redundant — `test_all_datasets_exist` iterates the
+  derived IDs and `describe_data_set`s each, the actual meaningful check).
+
+- `test_inv_deployed_resources::TestInvDatasetsExist::test_dataset_count`:
+  `assert len(inv_dataset_ids) == 5` similarly stale (Y.2.b added the
+  money-trail-roots companion + the narrow-accounts companion already
+  existed → 9 now). Removed for the same reason.
+
+- `test_exec_dashboard_structure::TestFilterGroups::test_active_only_filter_pinned_to_active_visuals`:
+  Y.2.h dropped `fg-exec-account-active-only` (the visual-pinned
+  NumericRangeFilter was replaced by the `exec-account-summary-active-ds`
+  dataset SQL baking `WHERE COALESCE(activity_count, 0) > 0` in).
+  Pivoted to `test_active_only_filter_dropped_after_y2h` — guards
+  against regression that brings the pinned filter back.
+
+Same pattern as the v8.8.0a23 hotfix (`l1_dataset_ids` fixture lag).
+Re-ships v8.8.0a24's content (Y.2.h + Y.2.f + Y.3.a + KPI parser
+decimal handling).
+
+Process note: api-layer e2e is `QS_GEN_E2E=1`-gated and runs against
+deployed AWS, so the local chain runner doesn't fire it. Need a way
+to surface api-layer breakage at `up_to=app2` time without requiring
+AWS — followup tracked elsewhere.
+
 ## v8.8.0a24 — Y.2.h + Y.2.f + Y.3.a (closing out Y.2 + opening Y.3)
 
 Twenty-fourth alpha. Three landings on `y-2-h-executives-pushdown`:

@@ -528,25 +528,25 @@ Calc fields exist in the QS analysis layer because QS could evaluate them in its
     - **Neither library moves the needle on Y.3.f case bridging** — that's an AnalysisDefinition concern, not a SQL-emit concern.
     - **Decision: STAY on strings + helpers.** Re-narrow Y.3.f to App2-only fix (Y.3.f.alt above). Both libraries stay in the toolbox. Re-spike if dialect-helper count grows past ~60 (currently ~40), we drop SQLite from the matrix, or a future feature genuinely needs cross-dialect SQL transformation.
 
-### Y.4 — Test sweep
+### Y.4 — Test sweep — DONE (2026-05-10)
 
-Hashes shift, FilterGroup-walking tests get pruned, App2 preprocessor gets unit coverage.
+Hashes shift, FilterGroup-walking tests get pruned, App2 preprocessor gets unit coverage. Almost entirely satisfied as a side effect of Y.2 / Y.3 — re-locks happened with each touch.
 
-- [ ] **Y.4.a — Re-lock all dataset SQL hash tests.** Per-instance + per-dialect.
-- [ ] **Y.4.b — Re-lock JSON-emit hash tests for every analysis whose FilterGroups / calc fields changed.** Investigation + L1 + L2FT all shift.
-- [ ] **Y.4.c — Update `tests/integration/verify_dataset_sql.py` smoke verifier for the new placeholder shape.** Verifier currently parses + executes dataset SQL; needs to pass dataset parameter values for `<<$>>` substitution to round-trip cleanly.
-- [ ] **Y.4.d — Drop or rewrite FilterGroup-walking tests that no longer apply.** Tests that asserted "Investigation has FG_INV_ANOMALIES_SIGMA scoped to sheet X" are obsolete. Replace with tests that assert "Volume Anomalies dataset SQL contains `:param_pInvAnomaliesSigma` after preprocessor".
-- [ ] **Y.4.e — App2 unit test for `<<$paramName>>` → `:param_paramName` preprocessor.** Cover string + numeric param shapes; cover the `'<<$pName>>'` quoted case.
-- [ ] **Y.4.f — Full unit test suite green.** Pytest + pyright clean.
+- [x] **Y.4.a — Re-lock all dataset SQL hash tests — N/A (no separate hash tests exist).** Audit confirmed: `tests/data/_locked_seeds/` artifacts are SEED data (rows), unaffected by Y.2/Y.3 dataset-SQL changes. No standalone "dataset SQL hash" test exists. The functional equivalent is `tests/json/test_*.py` re-locks (Y.4.b) which assert specific SQL fragments — those got updated as I went.
+- [x] **Y.4.b — Re-lock JSON-emit hash tests — done as I went (2026-05-10).** Investigation: `test_distinct_sender_calc_field_dropped_in_y3a`, `test_anetwork_calc_fields_pushed_into_dataset_sql`, `test_anchor_calc_field_dropped_after_y2b`, `test_fanout_sheet_serializes_to_aws_json` (FG count 6→5, CF count 4→0). Executives: `test_account_coverage_legacy_active_filter_dropped`, `test_account_coverage_active_dataset_declared`. L1: `test_y2g_*` family + smoke checks. All green.
+- [x] **Y.4.c — Smoke verifier — DONE under different filename.** `tests/integration/verify_dataset_sql.py` doesn't exist. Replaced by `tests/e2e/test_dataset_sql_smoke.py` (the live PG smoke verifier). It parses + executes dataset SQL via `_smoke_one()` against a live PG connection with sentinel default substitution — proved its worth catching Y.3.a's `COUNT(DISTINCT) OVER` PG limitation.
+- [x] **Y.4.d — Drop FG-walking tests — done as I went (2026-05-10).** Each Y.2/Y.3 sub-bullet that dropped a FilterGroup (FG_INV_ANOMALIES_SIGMA in Y.1.d, FG_INV_MONEY_TRAIL_* in Y.2.a, FG_INV_ANETWORK_ANCHOR/AMOUNT in Y.2.b, FG_INV_FANOUT_THRESHOLD in Y.3.a) also dropped or rewrote its scope-walking test in the same commit.
+- [x] **Y.4.e — App2 preprocessor unit tests — DONE (Y.2.app2.cde).** `tests/unit/test_html_sql_executor.py` has 9+ tests covering `<<$paramName>>` → `:param_paramName` translation: unquoted (`test_translate_unquoted_qs_placeholder_to_bind`), quoted (`test_translate_quoted_qs_placeholder_strips_outer_quotes`), multi-placeholder, passthrough, multi-valued IN expansion (`test_rewrite_handles_multiple_placeholders`), default substitution, async round-trip. Coverage matches the spec.
+- [x] **Y.4.f — Full unit + json suite green (2026-05-10).** 1805 passed, 73 skipped. Sweep confirms no regression from Y.2 / Y.3 work.
 
-### Y.5 — App2 cleanup (drop now-redundant infrastructure)
+### Y.5 — App2 cleanup — PARTIAL (2026-05-10)
 
-The X.2.g.3 work I (the engineer) added over the past few days becomes redundant once Y.1–Y.4 land. Sweep it.
+Original framing: "X.2.g.3 helpers become redundant once Y lands." Reality after Y.2/Y.3: most helpers ARE gone, but `app2_sql=` itself is now LOAD-BEARING for the X.2.g.1.b date dual-SQL pattern (Y.2.f + Y.2.h added 9 callsites). Audit + tick:
 
-- [ ] **Y.5.a — Drop `app2_sql=` parameter from `build_dataset` signature.** All call sites converted in Y.1–Y.2.
-- [ ] **Y.5.b — Drop `app2_anchor_filter` / `app2_param_eq` / `app2_param_gte` / `app2_param_lte` helpers in `common/sql/app2_filters.py`.** Filter snippets now live in dataset SQL via `<<$>>` substitution; the App2-specific helper module shrinks to (or drops) `app2_date_filter` if Y.2.f converts it.
-- [ ] **Y.5.c — Drop `tests/unit/test_sql_app2_filters.py`** if all helpers gone; otherwise keep for what remains.
-- [ ] **Y.5.d — `_filter_specs_from_tree.py` simplifies.** ParameterControl auto-derive still walks tree controls (Y doesn't change that surface), but the LinkedValues query path may collapse if dataset parameters carry their own option lookup.
+- [~] **Y.5.a — `app2_sql=` parameter — REVISED 2026-05-10.** PLAN was wrong: this parameter is now LOAD-BEARING, not redundant. Y.2.f added it to all 8 L1 datasets that the analysis-level `TimeRangeFilter` family scopes (`app2_sql=template.format(date_filter=app2_date_filter("<col>", cfg.dialect))`); Y.2.h added it to `exec-account-summary-active-ds`. Total 9 callsites. The parameter exists specifically to support QS-no-op + App2-active dual-SQL where QS gets the date filter via the analysis-level FG and App2 gets it via the SQL `:date_from` / `:date_to` binds. Drop is BLOCKED on either (a) eliminating the analysis-level `TimeRangeFilter` and pushing all date filters into dataset params, or (b) wiring App2 to apply analysis-level FilterGroups itself. Neither is in Y. **Decision: keep `app2_sql=` — re-frame as "the date dual-SQL escape hatch", document its narrow use-case in CLAUDE.md.**
+- [x] **Y.5.b — `app2_anchor_filter` / `app2_param_eq/gte/lte` helpers — DROPPED.** All four helpers are gone from `common/sql/app2_filters.py` (X.2.g.3 helpers replaced by Y.2 dataset-SQL pushdowns: anchor narrow now in dataset SQL via `<<$pInvANetworkAnchor>>`; eq/gte/lte filters via direct `<<$pName>>` substitution). Only `app2_date_filter` remains (load-bearing per Y.5.a). Module shrunk to one function.
+- [x] **Y.5.c — `tests/unit/test_sql_app2_filters.py` kept (2026-05-10).** File still exists with focused coverage on `app2_date_filter` (the one remaining helper). 11 tests covering PG / Oracle / SQLite + empty-string-as-NULL semantics. Keep.
+- [x] **Y.5.d — `_tree_filter_specs.py` audit — NO SIMPLIFICATION OPPORTUNITY (2026-05-10).** File is 69 lines, one function (`make_filter_specs_for_sheet`). It walks tree ParameterControls to derive App2 filter specs — no LinkedValues query path that Y.2 would obsolete. The ParameterControl auto-derive surface is unaffected by SQL pushdown. Tick as audited.
 
 ### Y.6 — Performance verification (the headline result)
 

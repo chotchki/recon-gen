@@ -133,27 +133,24 @@ class TestFilterGroups:
         }
         assert deployed == expected
 
-    def test_active_only_filter_pinned_to_active_visuals(
+    def test_active_only_filter_dropped_after_y2h(
         self, exec_dashboard_definition,
     ):
-        """Visual-pinned `activity_count >= 1` filter on Account
-        Coverage's Active KPI + Active bar — guards against a
-        regression that scopes it sheet-wide (would over-narrow the
-        Open visuals) or to the wrong visuals."""
+        """Y.2.h — `fg-exec-account-active-only` is gone. The
+        `activity_count >= 1` narrowing now lives in the
+        `exec-account-summary-active-ds` SQL (`WHERE COALESCE(
+        activity_count, 0) > 0`); the Active KPI + bar source from
+        that dataset directly. No visual-pinned filter needed —
+        QS + App2 see one shape."""
         groups = exec_dashboard_definition.get("FilterGroups", [])
-        fg = next(
-            g for g in groups
+        legacy_fg_ids = [
+            g["FilterGroupId"] for g in groups
             if g["FilterGroupId"] == "fg-exec-account-active-only"
+        ]
+        assert legacy_fg_ids == [], (
+            "fg-exec-account-active-only should be gone after Y.2.h "
+            "dataset split"
         )
-        scope = (
-            fg["ScopeConfiguration"]["SelectedSheets"]
-              ["SheetVisualScopingConfigurations"][0]
-        )
-        assert scope["SheetId"] == "exec-sheet-account-coverage"
-        assert set(scope.get("VisualIds", [])) == {
-            "exec-account-kpi-active",
-            "exec-account-bar-active-by-type",
-        }
 
     def test_filter_group_ids_unique(self, exec_dashboard_definition):
         groups = exec_dashboard_definition.get("FilterGroups", [])

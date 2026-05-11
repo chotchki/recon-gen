@@ -52,8 +52,9 @@ class TestInvDatasetsExist:
                 f"Investigation dataset {ds_id} not found"
             )
 
-    def test_dataset_count(self, inv_dataset_ids):
-        # K.4.3 recipient-fanout + K.4.4 volume-anomalies + K.4.5
-        # money-trail + K.4.8 account-network + K.4.8k narrow accounts
-        # dataset = 5.
-        assert len(inv_dataset_ids) == 5
+    # test_dataset_count was redundant after v8.8.0a23 made
+    # `inv_dataset_ids` itself derive from `inv_app.datasets` —
+    # the assertion `N == hardcoded` always drifts when the dataset
+    # set changes. The remaining `test_all_datasets_exist` iterates
+    # the derived IDs and calls `describe_data_set` on each, which
+    # IS the meaningful check. Test removed 2026-05-11.

@@ -56,6 +56,11 @@ class TestExecDatasetsExist:
                 f"Executives dataset {ds_id} not found"
             )
 
-    def test_dataset_count(self, exec_dataset_ids):
-        # L.6.3 — exec_transaction_summary + exec_account_summary = 2.
-        assert len(exec_dataset_ids) == 2
+    # test_dataset_count was redundant after v8.8.0a23 made
+    # `exec_dataset_ids` itself derive from `exec_app.datasets` —
+    # the assertion `N == hardcoded` always drifts when the dataset
+    # set changes (Y.2.h added exec-account-summary-active-ds; would
+    # add 3 to the count). The remaining `test_all_datasets_exist`
+    # iterates the derived IDs and calls `describe_data_set` on each,
+    # which IS the meaningful check ("every tree-registered dataset
+    # is actually deployed in QS"). Test removed 2026-05-11.
