@@ -37,7 +37,7 @@ from quicksight_gen.common.sheets.app_info import (
     build_liveness_dataset,
     build_matview_status_dataset,
 )
-from quicksight_gen.common.sql import Dialect, date_trunc_day
+from quicksight_gen.common.sql import Dialect, app2_date_filter, date_trunc_day
 
 
 def l1_matview_specs(l2_instance: L2Instance) -> list[tuple[str, str | None]]:
@@ -541,17 +541,24 @@ def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
     ``account_id`` (data-value, sentinel-OR) + ``account_role`` (enum,
     ``IN (...)``). Same dataset-param names on ``build_ledger_drift_dataset``
     so one ALL_DATASETS dropdown narrows both.
+
+    Y.2.f — App2-side date pushdown via ``{date_filter}`` template
+    slot (X.2.g.1.b dual-SQL pattern). QS continues to filter via the
+    analysis-level ``TimeRangeFilter`` FG (zero behavior change); App2
+    binds ``:date_from`` / ``:date_to`` from the URL into
+    ``business_day_start``.
     """
     prefix = l2_instance.instance
-    sql = (
+    sql_template = (
         f"SELECT * FROM {prefix}_drift\n"
         f"WHERE {_data_value_clause('account_id', P_L1_DRIFT_ACCOUNT)}\n"
-        f"  AND account_role IN (<<${P_L1_DRIFT_ROLE}>>)"
+        f"  AND account_role IN (<<${P_L1_DRIFT_ROLE}>>)\n"
+        f"  {{date_filter}}"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-drift-dataset"),
         "L1 Drift", "l1-drift",
-        sql, DRIFT_CONTRACT,
+        sql_template.format(date_filter=""), DRIFT_CONTRACT,
         visual_identifier=DS_DRIFT,
         dataset_parameters=[
             _mv_dataset_param(_DSP_L1_DRIFT_ACCOUNT, P_L1_DRIFT_ACCOUNT,
@@ -562,6 +569,9 @@ def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
                 or [PUSHDOWN_NO_MATCH_SENTINEL],
             ),
         ],
+        app2_sql=sql_template.format(
+            date_filter=app2_date_filter("business_day_start", cfg.dialect),
+        ),
     )
 
 
@@ -574,17 +584,20 @@ def build_ledger_drift_dataset(
     (parent accounts ARE the parents — no parent_role column on this
     view). Carries the same Y.2.g dataset-param names as the leaf-drift
     dataset so the Drift sheet's ALL_DATASETS dropdowns narrow both.
+
+    Y.2.f — App2-side date pushdown matches ``build_drift_dataset``.
     """
     prefix = l2_instance.instance
-    sql = (
+    sql_template = (
         f"SELECT * FROM {prefix}_ledger_drift\n"
         f"WHERE {_data_value_clause('account_id', P_L1_DRIFT_ACCOUNT)}\n"
-        f"  AND account_role IN (<<${P_L1_DRIFT_ROLE}>>)"
+        f"  AND account_role IN (<<${P_L1_DRIFT_ROLE}>>)\n"
+        f"  {{date_filter}}"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-ledger-drift-dataset"),
         "L1 Ledger Drift", "l1-ledger-drift",
-        sql, LEDGER_DRIFT_CONTRACT,
+        sql_template.format(date_filter=""), LEDGER_DRIFT_CONTRACT,
         visual_identifier=DS_LEDGER_DRIFT,
         dataset_parameters=[
             _mv_dataset_param(_DSP_L1_DRIFT_ACCOUNT, P_L1_DRIFT_ACCOUNT,
@@ -595,6 +608,9 @@ def build_ledger_drift_dataset(
                 or [PUSHDOWN_NO_MATCH_SENTINEL],
             ),
         ],
+        app2_sql=sql_template.format(
+            date_filter=app2_date_filter("business_day_start", cfg.dialect),
+        ),
     )
 
 
@@ -620,17 +636,20 @@ def build_overdraft_dataset(
 
     Y.2.g — Account dropdown pushes down via ``account_id`` (data-value,
     sentinel-OR); Account-Role dropdown via ``account_role IN (...)``.
+
+    Y.2.f — App2-side date pushdown via ``business_day_start``.
     """
     prefix = l2_instance.instance
-    sql = (
+    sql_template = (
         f"SELECT * FROM {prefix}_overdraft\n"
         f"WHERE {_data_value_clause('account_id', P_L1_OVERDRAFT_ACCOUNT)}\n"
-        f"  AND account_role IN (<<${P_L1_OVERDRAFT_ROLE}>>)"
+        f"  AND account_role IN (<<${P_L1_OVERDRAFT_ROLE}>>)\n"
+        f"  {{date_filter}}"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-overdraft-dataset"),
         "L1 Overdraft", "l1-overdraft",
-        sql, OVERDRAFT_CONTRACT,
+        sql_template.format(date_filter=""), OVERDRAFT_CONTRACT,
         visual_identifier=DS_OVERDRAFT,
         dataset_parameters=[
             _mv_dataset_param(_DSP_L1_OVERDRAFT_ACCOUNT,
@@ -641,6 +660,9 @@ def build_overdraft_dataset(
                 or [PUSHDOWN_NO_MATCH_SENTINEL],
             ),
         ],
+        app2_sql=sql_template.format(
+            date_filter=app2_date_filter("business_day_start", cfg.dialect),
+        ),
     )
 
 
@@ -656,17 +678,20 @@ def build_limit_breach_dataset(
 
     Y.2.g — Account dropdown pushes down via ``account_id`` (data-value,
     sentinel-OR); Transfer Type dropdown via ``transfer_type IN (...)``.
+
+    Y.2.f — App2-side date pushdown via ``business_day``.
     """
     prefix = l2_instance.instance
-    sql = (
+    sql_template = (
         f"SELECT * FROM {prefix}_limit_breach\n"
         f"WHERE {_data_value_clause('account_id', P_L1_LIMIT_BREACH_ACCOUNT)}\n"
-        f"  AND transfer_type IN (<<${P_L1_LIMIT_BREACH_TYPE}>>)"
+        f"  AND transfer_type IN (<<${P_L1_LIMIT_BREACH_TYPE}>>)\n"
+        f"  {{date_filter}}"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-limit-breach-dataset"),
         "L1 Limit Breach", "l1-limit-breach",
-        sql, LIMIT_BREACH_CONTRACT,
+        sql_template.format(date_filter=""), LIMIT_BREACH_CONTRACT,
         visual_identifier=DS_LIMIT_BREACH,
         dataset_parameters=[
             _mv_dataset_param(_DSP_L1_LIMIT_BREACH_ACCOUNT,
@@ -677,6 +702,9 @@ def build_limit_breach_dataset(
                 or [PUSHDOWN_NO_MATCH_SENTINEL],
             ),
         ],
+        app2_sql=sql_template.format(
+            date_filter=app2_date_filter("business_day", cfg.dialect),
+        ),
     )
 
 
@@ -706,19 +734,22 @@ def build_todays_exceptions_dataset(
     stuck rows, so the predicate keeps the NULL-type rows on load (and
     while narrowing) — matching the FILTER_ALL_VALUES behavior it
     replaces.
+
+    Y.2.f — App2-side date pushdown via ``business_day``.
     """
     prefix = l2_instance.instance
-    sql = (
+    sql_template = (
         f"SELECT * FROM {prefix}_todays_exceptions\n"
         f"WHERE check_type IN (<<${P_L1_TODAYS_EXC_CHECK_TYPE}>>)\n"
         f"  AND {_data_value_clause('account_id', P_L1_TODAYS_EXC_ACCOUNT)}\n"
         f"  AND (transfer_type IN (<<${P_L1_TODAYS_EXC_TYPE}>>)"
-        f" OR transfer_type IS NULL)"
+        f" OR transfer_type IS NULL)\n"
+        f"  {{date_filter}}"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-todays-exceptions-dataset"),
         "L1 Today's Exceptions", "l1-todays-exceptions",
-        sql, TODAYS_EXCEPTIONS_CONTRACT,
+        sql_template.format(date_filter=""), TODAYS_EXCEPTIONS_CONTRACT,
         visual_identifier=DS_TODAYS_EXCEPTIONS,
         dataset_parameters=[
             _mv_dataset_param(_DSP_L1_TODAYS_EXC_CHECK_TYPE,
@@ -732,6 +763,9 @@ def build_todays_exceptions_dataset(
                 or [PUSHDOWN_NO_MATCH_SENTINEL],
             ),
         ],
+        app2_sql=sql_template.format(
+            date_filter=app2_date_filter("business_day", cfg.dialect),
+        ),
     )
 
 
@@ -853,9 +887,11 @@ def build_transactions_dataset(
     Y.2.g — all five dropdowns push into this SQL: account_id /
     transfer_id / status / origin via the sentinel-OR data-value guard,
     transfer_type via ``IN (...)``.
+
+    Y.2.f — App2-side date pushdown via ``posting``.
     """
     prefix = l2_instance.instance
-    sql = (
+    sql_template = (
         f"SELECT id AS transaction_id, account_id, account_name,"
         f" account_role, account_parent_role,"
         f" transfer_id, transfer_parent_id, transfer_type, rail_name,"
@@ -866,12 +902,13 @@ def build_transactions_dataset(
         f"  AND {_data_value_clause('transfer_id', P_L1_TX_TRANSFER_ID)}\n"
         f"  AND {_data_value_clause('status', P_L1_TX_STATUS)}\n"
         f"  AND {_data_value_clause('origin', P_L1_TX_ORIGIN)}\n"
-        f"  AND transfer_type IN (<<${P_L1_TX_TYPE}>>)"
+        f"  AND transfer_type IN (<<${P_L1_TX_TYPE}>>)\n"
+        f"  {{date_filter}}"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-transactions-dataset"),
         "L1 Transactions", "l1-transactions",
-        sql, TRANSACTIONS_CONTRACT,
+        sql_template.format(date_filter=""), TRANSACTIONS_CONTRACT,
         visual_identifier=DS_TRANSACTIONS,
         dataset_parameters=[
             _mv_dataset_param(_DSP_L1_TX_ACCOUNT, P_L1_TX_ACCOUNT,
@@ -888,6 +925,9 @@ def build_transactions_dataset(
                 or [PUSHDOWN_NO_MATCH_SENTINEL],
             ),
         ],
+        app2_sql=sql_template.format(
+            date_filter=app2_date_filter("posting", cfg.dialect),
+        ),
     )
 
 
@@ -903,20 +943,25 @@ def build_drift_timeline_dataset(
     Y.2.g — the Drift Timelines sheet's Account-Role dropdown narrows
     BOTH timeline datasets via the same ``pL1DriftTlRole`` dataset param;
     the predicate sits before the GROUP BY.
+
+    Y.2.f — App2-side date pushdown via ``business_day_end``; the
+    ``{date_filter}`` slot lands BEFORE the GROUP BY so the AND-clause
+    is part of the WHERE.
     """
     prefix = l2_instance.instance
-    sql = (
+    sql_template = (
         f"SELECT business_day_end,"
         f"       account_role,"
         f"       SUM(ABS(drift)) AS abs_drift"
         f" FROM {prefix}_drift"
         f" WHERE account_role IN (<<${P_L1_DRIFT_TL_ROLE}>>)"
+        f" {{date_filter}}"
         f" GROUP BY business_day_end, account_role"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-drift-timeline-dataset"),
         "L1 Drift Timeline", "l1-drift-timeline",
-        sql, DRIFT_TIMELINE_CONTRACT,
+        sql_template.format(date_filter=""), DRIFT_TIMELINE_CONTRACT,
         visual_identifier=DS_DRIFT_TIMELINE,
         dataset_parameters=[
             _mv_dataset_param(
@@ -925,6 +970,9 @@ def build_drift_timeline_dataset(
                 or [PUSHDOWN_NO_MATCH_SENTINEL],
             ),
         ],
+        app2_sql=sql_template.format(
+            date_filter=app2_date_filter("business_day_end", cfg.dialect),
+        ),
     )
 
 
@@ -937,20 +985,23 @@ def build_ledger_drift_timeline_dataset(
     drift matview. Backs the ledger-drift LineChart. Carries the same
     ``pL1DriftTlRole`` Y.2.g param so the ALL_DATASETS dropdown narrows
     both timelines.
+
+    Y.2.f — App2-side date pushdown matches ``build_drift_timeline_dataset``.
     """
     prefix = l2_instance.instance
-    sql = (
+    sql_template = (
         f"SELECT business_day_end,"
         f"       account_role,"
         f"       SUM(ABS(drift)) AS abs_drift"
         f" FROM {prefix}_ledger_drift"
         f" WHERE account_role IN (<<${P_L1_DRIFT_TL_ROLE}>>)"
+        f" {{date_filter}}"
         f" GROUP BY business_day_end, account_role"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-ledger-drift-timeline-dataset"),
         "L1 Ledger Drift Timeline", "l1-ledger-drift-timeline",
-        sql, DRIFT_TIMELINE_CONTRACT,
+        sql_template.format(date_filter=""), DRIFT_TIMELINE_CONTRACT,
         visual_identifier=DS_LEDGER_DRIFT_TIMELINE,
         dataset_parameters=[
             _mv_dataset_param(
@@ -959,6 +1010,9 @@ def build_ledger_drift_timeline_dataset(
                 or [PUSHDOWN_NO_MATCH_SENTINEL],
             ),
         ],
+        app2_sql=sql_template.format(
+            date_filter=app2_date_filter("business_day_end", cfg.dialect),
+        ),
     )
 
 
