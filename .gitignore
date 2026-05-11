@@ -47,3 +47,6 @@ tests/e2e/screenshots/
 tests/e2e/failures/
 tests/l2/fuzz_failures/
 .claude/
+
+# Y.6 perf measurement scratch (regenerate via spike/y6/measure.py)
+runs/y6/

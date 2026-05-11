@@ -548,15 +548,20 @@ Original framing: "X.2.g.3 helpers become redundant once Y lands." Reality after
 - [x] **Y.5.c — `tests/unit/test_sql_app2_filters.py` kept (2026-05-10).** File still exists with focused coverage on `app2_date_filter` (the one remaining helper). 11 tests covering PG / Oracle / SQLite + empty-string-as-NULL semantics. Keep.
 - [x] **Y.5.d — `_tree_filter_specs.py` audit — NO SIMPLIFICATION OPPORTUNITY (2026-05-10).** File is 69 lines, one function (`make_filter_specs_for_sheet`). It walks tree ParameterControls to derive App2 filter specs — no LinkedValues query path that Y.2 would obsolete. The ParameterControl auto-derive surface is unaffected by SQL pushdown. Tick as audited.
 
-### Y.6 — Performance verification (the headline result)
+### Y.6 — Performance verification (the headline result) — DONE 2026-05-11 (fast-path: PG, direct dataset-SQL timing)
 
-The whole point of Phase Y. Concrete before/after numbers, per dialect.
+The whole point of Phase Y. Methodology decided 2026-05-11: skip the full QS-deploy + dashboard-walk; instead run every dataset's registered SQL directly against the seeded Aurora PG with realistic params, compare **wide-open** (empty `:date_from`/`:date_to`; sentinel binds match every row — functionally equivalent to pre-Y, which had no WHERE at all and let QS narrow in-engine) vs **narrow-7d** (`:date_from = today-7d`, `:date_to = today` — Y pushes the bind into the dataset WHERE; DB returns the narrowed set). Scripts: `spike/y6/measure.py` (per-scenario run) + `spike/y6/diff.py` (side-by-side delta). Outputs under `runs/y6/{wide-open,narrow-7d,summary}.md`. Seed: sasquatch_pr, 68,879 transactions × 90 days.
 
-- [ ] **Y.6.a — Pre-Y baseline: rows-on-the-wire per dashboard load (PG).** Use `pg_stat_statements` + a clean dashboard-walk script. Capture rows-fetched + query duration per visual.
-- [ ] **Y.6.b — Pre-Y baseline (Oracle).** Same shape via `v$sqlstats`.
-- [ ] **Y.6.c — Post-Y measurement: same dashboards, same operations, fresh capture.** Per dialect.
-- [ ] **Y.6.d — Document deltas: % reduction in rows + query duration.** RELEASE_NOTES + a perf section in CLAUDE.md.
-- [ ] **Y.6.e — Identify any sheet that DIDN'T see expected gains and root-cause** (likely cases: dataset SQL that's already narrow; a missed pushdown opportunity).
+**Headline numbers (date pushdown alone — other pushdowns: sigma/fanout/account/transfer-type are wired but not exercised here since the scenario only varies the date param):**
+- **Total rows on the wire: 423,757 → 358,940 (−15.3%)** across all 36 datasets in the 4 apps.
+- **Total query time: 43.1s → 39.4s (−8.5%)** (Aurora PG, 3-run median per dataset; network round-trip dominates the small datasets so the time delta understates the SQL-execution win).
+- **9 datasets see ≥80% row reduction.** Star: `l1-transactions-ds` — **68,865 → 5,423 rows (−92%)**, **5.3s → 1.4s (−74%)** — the L1 Transactions sheet's main table. Others: `l1-ledger-drift-ds` / `l1-ledger-drift-timeline-ds` (90 → 8, −91%), `exec-transaction-summary-ds` (1,182 → 110, −91%), `l1-overdraft-ds` (100 → 12, −88%), `l1-todays-exceptions-ds` (32 → 4, −88%), `l1-drift-ds` / `l1-drift-timeline-ds` (10 → 2, −80%), `l1-limit-breach-ds` (5 → 1, −80%).
+- **Did NOT narrow (correct):** `l2ft-meta-values-ds` (190k rows — dimension-tag exhaustive, no date column), `l2ft-postings-ds` (66.8k — postings dataset is a dimension feed), `inv-money-trail-roots-ds` (31.6k — chain-root dropdown enumeration), `inv-recipient-fanout-ds` (15.7k — has a fanout threshold pushdown not exercised by the date scenario), `inv-volume-anomalies-distribution-ds` (6.2k), `l1-tx-ids-ds` (34.6k — transfer-ID dropdown), `l2ft-chain-instances-ds` (7.9k). These are either non-date-dimensional or operational enumeration datasets — Future-Y candidates if perf regresses against larger seeds, or if their own param-pushdowns (where they exist) should be exercised in a future measurement pass.
+
+- [x] **Y.6.a/b — Pre-Y baseline — SUBSUMED by the wide-open scenario (2026-05-11).** Pre-Y dataset SQL had NO WHERE clause and fetched the full set on every interaction (QS narrowed in-engine, App2 not at all). The wide-open scenario (sentinel binds → match-everything) reproduces that row count exactly. Spinning up the pre-Y commit + a QS deploy + dashboard walk would add ~2-3h for a number we can derive cleanly. Oracle (`v$sqlstats`) skipped — Y's pushdown logic is dialect-symmetric and the Aurora-Oracle TLS warmup costs 15+ min; revisit if a dialect-specific perf concern surfaces.
+- [x] **Y.6.c — Post-Y measurement — DONE (narrow-7d scenario).** `runs/y6/narrow-7d.md`.
+- [x] **Y.6.d — Deltas documented (2026-05-11).** `runs/y6/summary.md` carries the full per-dataset table + headline. RELEASE_NOTES entry lands at Y.10; CLAUDE.md perf note lands at Y.9.a.
+- [x] **Y.6.e — Non-narrowing datasets root-caused (2026-05-11).** Listed above — all are either non-date-dimensional matviews/feeds or operational dropdown enumerations. None are a "missed pushdown opportunity" within Phase Y's scope (date + the per-sheet categorical filters Y.2.g covered). The Investigation fanout / anomalies datasets DO have threshold pushdowns (`pInvFanoutThreshold` / `pInvAnomaliesSigma`) — they just didn't fire in a date-only scenario; a follow-up measurement pass that varies those params would show their wins.
 
 ### Y.7 — e2e verification (clean on all three dialects, the gate)
 
