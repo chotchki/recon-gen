@@ -687,7 +687,13 @@ def right_click_first_row_of_visual(
     page.locator('[data-e2e-target="1"]').first.click(
         button="right", timeout=timeout_ms,
     )
-    page.wait_for_timeout(800)
+    # Confirm the contextmenu actually popped (vs. a fixed sleep). Two
+    # wins: returns the moment the menu mounts (no fixed 800ms), and
+    # fails *here* with "waiting for [role=menu]" if no DATA_POINT_MENU
+    # drill is wired on this visual — instead of the caller's
+    # ``click_context_menu_item`` timing out 30s later on the absent
+    # menu *item*.
+    page.wait_for_selector('[role="menu"]', timeout=timeout_ms, state="visible")
     page.evaluate(
         """() => document.querySelectorAll('[data-e2e-target]').forEach(
             e => e.removeAttribute('data-e2e-target')
@@ -921,12 +927,15 @@ def expand_all_tables_on_sheet(page: Page, *, timeout_ms: int = 10_000) -> int:
         )
         if not clicked:
             continue
-        # Brief settle for the page-size dropdown to mount.
-        page.wait_for_timeout(800)
+        # Wait for the page-size dropdown to mount after the focus-click
+        # (instead of a fixed 800ms + a 1.5s wait_for_selector). The
+        # 2.5s budget = the deleted 800ms head start + the original
+        # 1.5s wait; ``wait_for_selector`` returns the moment it
+        # appears, so this is strictly faster-or-equal.
         try:
             page.wait_for_selector(
                 '[data-automation-id="simplePagedDisplayNav_dropdown_pageSize"]',
-                timeout=1500, state="visible",
+                timeout=2500, state="visible",
             )
         except Exception:
             # No pagination — KPI / chart / line / bar / sankey. Skip.
@@ -1013,17 +1022,19 @@ def count_table_total_rows(page: Page, visual_title: str, timeout_ms: int) -> in
         visual_title,
     )
     assert clicked, f"No visual with title {visual_title!r}"
-    # Brief settle — QS takes a beat to mount the paging controls after focus.
-    page.wait_for_timeout(1500)
-    # If the pagination controls mounted (focus took), bump page size to
-    # 10000 so every row lives on one page. On repeat calls the controls
-    # often don't re-mount (focus already consumed, or lost to a prior
-    # filter interaction) — skip the resize and rely on the page size
-    # set by the first successful call persisting through the session.
+    # Wait for the paging controls to mount after the focus-click
+    # (instead of a fixed 1.5s + a 3s wait_for_selector). The 4.5s
+    # budget = the deleted 1.5s head start + the original 3s wait;
+    # ``wait_for_selector`` returns the moment it appears, so this is
+    # strictly faster-or-equal. On repeat calls the controls often
+    # don't re-mount (focus already consumed, or lost to a prior
+    # filter interaction) — the ``except`` below catches that and
+    # relies on the page size set by the first successful call
+    # persisting through the session.
     try:
         page.wait_for_selector(
             '[data-automation-id="simplePagedDisplayNav_dropdown_pageSize"]',
-            timeout=3000, state="visible",
+            timeout=4500, state="visible",
         )
         page.locator(
             '[data-automation-id="simplePagedDisplayNav_dropdown_pageSize"]'
