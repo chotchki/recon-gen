@@ -976,12 +976,17 @@
     });
   }
 
-  // X.2.d — CategoryFilter sync. Each .category-filter wrapper holds
-  // a hidden input + a set of checkboxes. HTMX serializes only named
-  // inputs, so the checkboxes (intentionally unnamed) only feed the
-  // hidden input via this listener. We use ``data-wired`` to make
-  // re-binding idempotent — safe to call after htmx:afterSwap if
-  // future phases re-render the filter form.
+  // X.2.d / X.2.l.4 — CategoryFilter sync. Each .category-filter wrapper
+  // holds a hidden ``<input name="filter_<col>">`` (the wire element —
+  // HTMX serializes named inputs only) plus an un-named
+  // ``<select multiple data-category-select>`` that Tom Select enhances.
+  // This listener keeps the hidden input's value = the select's selected
+  // option values joined by comma (the ``?filter_<col>=v1,v2,v3`` shape
+  // the data fetcher consumes). The ``<select>``'s ``change`` event —
+  // re-fired by Tom Select's onChange in wireTomSelect — runs ``update``
+  // first (target phase) then bubbles to #filter-form (bubble phase),
+  // where wireFilterAutoRefresh sees the now-updated hidden input. So no
+  // extra dispatch is needed. ``data-wired`` makes this idempotent.
   function wireCategoryFilters(root) {
     var scope = root || document;
     var wrappers = scope.querySelectorAll(".category-filter");
@@ -989,17 +994,16 @@
       if (div.dataset.wired === "1") return;
       div.dataset.wired = "1";
       var hidden = div.querySelector('input[type="hidden"]');
-      var checkboxes = div.querySelectorAll('input[type="checkbox"]');
-      if (!hidden) return;
-      function update() {
-        var checked = [];
-        checkboxes.forEach(function (cb) {
-          if (cb.checked) checked.push(cb.value);
-        });
-        hidden.value = checked.join(",");
-      }
-      checkboxes.forEach(function (cb) {
-        cb.addEventListener("change", update);
+      var select = div.querySelector("select[data-category-select]");
+      if (!hidden || !select) return;
+      select.addEventListener("change", function () {
+        var vals = Array.prototype.map.call(
+          select.selectedOptions,
+          function (o) {
+            return o.value;
+          },
+        );
+        hidden.value = vals.join(",");
       });
     });
   }
@@ -1091,7 +1095,7 @@
     );
     var rangeLo = Number(el.dataset.min);
     var rangeHi = Number(el.dataset.max);
-    noUiSlider.create(el, {
+    var opts = {
       start: [
         el.dataset.startMin ? Number(el.dataset.startMin) : rangeLo,
         el.dataset.startMax ? Number(el.dataset.startMax) : rangeHi,
@@ -1099,7 +1103,9 @@
       connect: true,
       range: { min: rangeLo, max: rangeHi },
       tooltips: true,
-    });
+    };
+    if (el.dataset.step) opts.step = Number(el.dataset.step);
+    noUiSlider.create(el, opts);
     el.noUiSlider.on("change", function (values) {
       if (minInput) minInput.value = values[0];
       if (maxInput) maxInput.value = values[1];

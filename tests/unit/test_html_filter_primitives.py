@@ -15,8 +15,10 @@ the form is in the page. The data fetcher already accepts
 ``dict[str, str]`` query params (X.2.b), so prefix-keyed entries
 flow through unchanged.
 
-JS-side behavior (CategoryFilter checkbox → hidden-input sync)
-lives in ``tests/js/test_filter_primitives.py``.
+JS-side behavior (CategoryFilter ``<select multiple>`` → hidden-input
+sync) lives in ``tests/js/test_filter_primitives.py``; the fancy-widget
+markup (``data-widget`` attrs, Flatpickr date range) is checked in
+``tests/unit/test_html_filter_widgets.py``.
 """
 
 from __future__ import annotations
@@ -117,8 +119,9 @@ def test_parameter_dropdown_escapes_options() -> None:
 
 
 def test_category_filter_emits_hidden_input_with_filter_prefix() -> None:
-    """The hidden input is what HTMX actually serializes (checkboxes
-    are unnamed). Hidden name carries the ``filter_<col>`` URL key."""
+    """The hidden input is what HTMX actually serializes (the
+    ``<select>`` is un-named). Hidden name carries the ``filter_<col>``
+    URL key."""
     app, sheet = _build_app()
     spec = CategoryFilterSpec(
         column="status",
@@ -129,9 +132,11 @@ def test_category_filter_emits_hidden_input_with_filter_prefix() -> None:
     assert '<input type="hidden" name="filter_status" value="">' in out
 
 
-def test_category_filter_emits_checkbox_per_option() -> None:
-    """Each option becomes one checkbox. Checkboxes are NOT named so
-    they don't pollute the wire — the hidden input does that job."""
+def test_category_filter_emits_unnamed_select_multiple_with_options() -> None:
+    """X.2.l.4: each option becomes an ``<option>`` inside an un-named
+    ``<select multiple data-category-select>`` (Tom Select enhances it;
+    ``wireCategoryFilters`` syncs the hidden input). The select carries
+    no ``name=`` so HTMX won't serialize it directly."""
     app, sheet = _build_app()
     spec = CategoryFilterSpec(
         column="status",
@@ -139,16 +144,18 @@ def test_category_filter_emits_checkbox_per_option() -> None:
         options=("open", "closed"),
     )
     out = emit_html(app, sheet, dashboard_id="x", filter_specs=[spec])
-    assert '<input type="checkbox" value="open"' in out
-    assert '<input type="checkbox" value="closed"' in out
-    # Checkboxes shouldn't carry a name= attribute (intentional).
+    assert "<select multiple " in out
+    assert "data-category-select" in out
+    assert '<option value="open">open</option>' in out
+    assert '<option value="closed">closed</option>' in out
+    # The <select> is un-named — only the hidden filter_<col> input is.
     assert 'name="open"' not in out
     assert 'name="closed"' not in out
 
 
 def test_category_filter_wrapper_carries_class_for_js_hook() -> None:
     """``.category-filter`` is the JS selector the bootstrap script
-    uses to find these wrappers. Without it the checkbox→hidden sync
+    uses to find these wrappers. Without it the select→hidden sync
     wouldn't fire."""
     app, sheet = _build_app()
     spec = CategoryFilterSpec(

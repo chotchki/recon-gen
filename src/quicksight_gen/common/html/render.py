@@ -120,16 +120,22 @@ class CategoryFilterSpec:
 
 @dataclass(frozen=True)
 class NumericRangeSpec:
-    """Two number inputs for a numeric column.
+    """Min/max range filter for a numeric column.
 
-    Renders as two ``<input type="number">`` named
-    ``min_<column>`` + ``max_<column>``. Empty inputs serialize
-    as empty strings (the data fetcher treats either as
-    open-ended on that side). URL keys on submit:
-    ``?min_<column>=N&max_<column>=M``.
+    Renders two ``<input type="number">`` named ``min_<column>`` +
+    ``max_<column>`` (empty = open-ended on that side); URL keys on
+    submit: ``?min_<column>=N&max_<column>=M``. When ``lo`` + ``hi``
+    bounds are supplied, a noUiSlider two-handle widget is also emitted
+    over the inputs (X.2.l.4) — ``step`` is the optional snap interval.
+    Bounds are caller-supplied (a column min/max query, or sensible
+    defaults); without them the widget is number-inputs-only since a
+    slider needs a range.
     """
     column: str
     label: str
+    lo: float | None = None
+    hi: float | None = None
+    step: float | None = None
 
 
 @dataclass(frozen=True)
@@ -319,12 +325,25 @@ _DATE_INPUT_CLASS = _FORM_INPUT_CLASS + " cursor-pointer"
 _DATE_INPUT_STYLE = "min-width: 10rem;"
 
 
+# X.2.l.4 — ``data-widget="..."`` attributes mark the elements that
+# ``wireFilterWidgets`` (bootstrap.js) enhances with Tom Select /
+# Flatpickr / noUiSlider. The underlying ``<select>`` / ``<input>`` is
+# still the wire element (HTMX serializes it; the URL keys are
+# unchanged) — the widget is chrome that writes back into it. If a lib
+# fails to load the plain control stays.
+_TOM_SELECT_ATTR = ' data-widget="tomselect"'
+_TS_SELECT_CLASS = _FORM_INPUT_CLASS + " min-w-48"
+
+
 def _render_parameter_dropdown(spec: ParameterDropdownSpec) -> str:
-    """Single-select ``<select name="param_<name>">``."""
+    """Single-select ``<select name="param_<name>">`` enhanced by Tom
+    Select (search + clear). The blank leading option round-trips as
+    "no selection" (``?param_<name>=``)."""
     name = html.escape(spec.name)
     parts = [
         f'    <label class="{_FORM_LABEL_CLASS}">{html.escape(spec.label)} '
-        f'<select name="param_{name}" class="{_FORM_INPUT_CLASS}">'
+        f'<select name="param_{name}" class="{_TS_SELECT_CLASS}"'
+        f'{_TOM_SELECT_ATTR}>'
         f'<option value=""></option>'
     ]
     for opt in spec.options:
@@ -335,49 +354,49 @@ def _render_parameter_dropdown(spec: ParameterDropdownSpec) -> str:
 
 
 def _render_category_filter(spec: CategoryFilterSpec) -> str:
-    """Multi-select check group + hidden joined-input the JS keeps
-    in sync. The ``data-filter-name`` attribute lets the JS find
-    the wrapper without coupling it to a specific column name."""
+    """Multi-select column filter: a ``<select multiple>`` (Tom Select
+    chips + search) with NO ``name`` — HTMX won't serialize it — feeding
+    a hidden ``<input name="filter_<column>">`` that ``wireCategoryFilters``
+    keeps as the comma-joined selected values. URL key on submit:
+    ``?filter_<column>=v1,v2,v3``. (Distinct from ``ParameterMultiSelectSpec``,
+    whose ``<select multiple name="param_X">`` serializes as repeated keys
+    for ``_sql_executor``'s IN-bind expansion.)"""
     name = html.escape(f"filter_{spec.column}")
     wrapper_class = (
         "category-filter flex items-center gap-2 text-sm "
         "text-primary-fg flex-wrap"
     )
-    cb_label_class = "inline-flex items-center gap-1"
-    cb_class = "accent-accent"
     parts = [
         f'    <div class="{wrapper_class}" data-filter-name="{name}">'
         f'<span class="font-medium">{html.escape(spec.label)}</span>'
         f'<input type="hidden" name="{name}" value="">'
+        f'<select multiple class="{_TS_SELECT_CLASS}" data-category-select'
+        f'{_TOM_SELECT_ATTR}>'
     ]
     for opt in spec.options:
         esc = html.escape(opt)
-        parts.append(
-            f'<label class="{cb_label_class}">'
-            f'<input type="checkbox" value="{esc}" class="{cb_class}"> {esc}'
-            f'</label>'
-        )
-    parts.append('</div>')
+        parts.append(f'<option value="{esc}">{esc}</option>')
+    parts.append('</select></div>')
     return "".join(parts)
 
 
 def _render_parameter_multiselect(spec: ParameterMultiSelectSpec) -> str:
-    """Multi-select ``<select multiple name="param_<name>">``.
+    """Multi-select ``<select multiple name="param_<name>">`` enhanced by
+    Tom Select (chips + search).
 
     No blank leading option — for a multi-select, "nothing selected"
-    already means "all" (the executor's static-default fallback). The
-    ``size`` caps the visible rows so a long option list doesn't dominate
-    the filter bar. ``change`` events bubble to the form, which
-    ``wireFilterAutoRefresh`` debounces into a ``refresh`` broadcast.
+    already means "all" (the executor's static-default fallback). Each
+    selected option serializes as its own ``param_<name>=<value>`` pair
+    (repeated key — the shape ``_sql_executor``'s multi-valued
+    dataset-param expansion consumes). ``change`` events bubble to the
+    form, which ``wireFilterAutoRefresh`` debounces into a ``refresh``.
     """
     name = html.escape(spec.name)
-    size = min(max(len(spec.options), 2), 6)
-    select_class = _FORM_INPUT_CLASS + " min-w-40"
     parts = [
-        f'    <label class="{_FORM_LABEL_CLASS} items-start">'
+        f'    <label class="{_FORM_LABEL_CLASS}">'
         f'{html.escape(spec.label)} '
-        f'<select name="param_{name}" multiple size="{size}" '
-        f'class="{select_class}">'
+        f'<select name="param_{name}" multiple class="{_TS_SELECT_CLASS}"'
+        f'{_TOM_SELECT_ATTR}>'
     ]
     for opt in spec.options:
         esc = html.escape(opt)
@@ -387,16 +406,35 @@ def _render_parameter_multiselect(spec: ParameterMultiSelectSpec) -> str:
 
 
 def _render_numeric_range(spec: NumericRangeSpec) -> str:
-    """Two ``<input type="number">`` named min_<col> + max_<col>."""
+    """``min_<col>`` / ``max_<col>`` number inputs. When the spec carries
+    ``lo`` + ``hi`` bounds, also emit a noUiSlider ``<div>`` over them
+    (two draggable handles + value bubbles; ``wireNoUiSlider`` syncs the
+    number inputs on drag and vice-versa). Without bounds we can't size a
+    slider, so it's number-inputs-only — still functional, just plainer.
+    Empty inputs serialize as ``""`` (open-ended on that side)."""
     col = html.escape(spec.column)
     narrow_input = _FORM_INPUT_CLASS + " w-24"
-    return (
-        f'    <label class="{_FORM_LABEL_CLASS}">{html.escape(spec.label)} '
+    inputs = (
         f'<input type="number" step="any" name="min_{col}" '
         f'placeholder="min" class="{narrow_input}"> '
         f'<input type="number" step="any" name="max_{col}" '
         f'placeholder="max" class="{narrow_input}">'
-        f'</label>'
+    )
+    if spec.lo is None or spec.hi is None:
+        return (
+            f'    <label class="{_FORM_LABEL_CLASS}">'
+            f'{html.escape(spec.label)} {inputs}</label>'
+        )
+    step_attr = f' data-step="{spec.step}"' if spec.step is not None else ""
+    slider = (
+        f'<div data-widget="nouislider" data-min="{spec.lo}" '
+        f'data-max="{spec.hi}" data-min-input="min_{col}" '
+        f'data-max-input="max_{col}"{step_attr} '
+        f'style="width: 10rem; margin: 0 1.25rem;"></div>'
+    )
+    return (
+        f'    <label class="{_FORM_LABEL_CLASS} items-center">'
+        f'{html.escape(spec.label)} {slider} {inputs}</label>'
     )
 
 
@@ -422,15 +460,19 @@ def _render_filter_form(
         "bg-surface rounded-lg shadow-sm border border-surface-border"
     )
     parts = [f'  <form id="filter-form" class="{form_class}">']
+    # X.2.l.4 — one Flatpickr range popover (the visible, un-named text
+    # input) feeding two hidden ``date_from`` / ``date_to`` inputs (the
+    # wire-serialized ones — URL keys unchanged). ``readonly`` so the
+    # field can't take typed garbage; Flatpickr opens it on click. If
+    # Flatpickr fails to load the text input just sits inert and the
+    # hidden inputs stay empty → no date narrowing (degraded, not broken).
     parts.append(
-        f'    <label class="{_FORM_LABEL_CLASS}">From '
-        f'<input type="date" name="date_from" class="{_DATE_INPUT_CLASS}"'
+        f'    <label class="{_FORM_LABEL_CLASS}">Date range '
+        f'<input type="text" data-widget="flatpickr-range" readonly '
+        f'placeholder="All dates" class="{_DATE_INPUT_CLASS}"'
         f' style="{_DATE_INPUT_STYLE}"></label>'
-    )
-    parts.append(
-        f'    <label class="{_FORM_LABEL_CLASS}">To '
-        f'<input type="date" name="date_to" class="{_DATE_INPUT_CLASS}"'
-        f' style="{_DATE_INPUT_STYLE}"></label>'
+        f'<input type="hidden" name="date_from" value="">'
+        f'<input type="hidden" name="date_to" value="">'
     )
     for spec in filter_specs:
         if isinstance(spec, ParameterDropdownSpec):

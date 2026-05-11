@@ -1,22 +1,27 @@
-"""X.2.l.4.a — filter-widget infrastructure (page-shell CDN tags +
-``wireFilterWidgets`` init shim).
+"""X.2.l.4.a + .b — fancy filter widgets (Tom Select / Flatpickr /
+noUiSlider).
 
-This stage is infra-only: the renderer doesn't yet emit any
-``data-widget``-tagged markup (that's X.2.l.4.b), so these tests
-verify the *plumbing* —
+Covers the plumbing (a) and the markup (b):
 
-  * the page shell pulls Tom Select / Flatpickr / noUiSlider from
-    the CDN (CSS + JS), in the right cascade position (vendor CSS
-    after ``output.css`` but before the per-instance ``:root`` theme
-    ``<style>`` so the theme override still wins; vendor JS at the
-    bottom of ``<head>`` next to htmx / d3);
+  * the page shell pulls the three libs from the CDN (CSS + JS), in
+    the right cascade position — vendor CSS after ``output.css`` but
+    before the per-instance ``:root`` theme ``<style>`` so the theme
+    override still wins; vendor JS at the bottom of ``<head>`` next to
+    htmx / d3;
   * ``bootstrap.js`` defines ``wireFilterWidgets``, calls it from the
-    page-load + ``htmx:afterSwap`` hooks, and exposes it on the
-    test-mode internals export.
+    page-load + ``htmx:afterSwap`` hooks, exposes it on the test-mode
+    internals export, and guards each per-lib branch with a ``typeof``
+    check so a missing CDN lib degrades to the plain control;
+  * the renderer marks each filter control with a ``data-widget`` kind
+    — ``tomselect`` on the dropdowns / multi-selects / the category
+    ``<select multiple>``, ``flatpickr-range`` on the (un-named) date
+    text input feeding the hidden ``date_from`` / ``date_to``,
+    ``nouislider`` on the slider ``<div>`` over a bounded numeric range.
 
 Behavioural round-trips (open the widget, pick a value, assert the
 fetch re-fires with the right query param) live in the X.2.l.4.d
-Playwright suite.
+Playwright suite; the ``<select multiple>`` → hidden-input JS sync is
+in ``tests/js/test_filter_primitives.py``.
 """
 
 from __future__ import annotations
@@ -24,6 +29,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from tests._test_helpers import make_test_config
+from quicksight_gen.common.html import (
+    CategoryFilterSpec,
+    NumericRangeSpec,
+    ParameterDropdownSpec,
+    ParameterMultiSelectSpec,
+)
 from quicksight_gen.common.html.render import emit_dashboards_list, emit_html
 from quicksight_gen.common.ids import SheetId, VisualId
 from quicksight_gen.common.tree.structure import Analysis, App, Sheet
@@ -134,3 +145,106 @@ def test_bootstrap_filter_widgets_degrade_when_lib_absent() -> None:
     assert 'typeof TomSelect === "undefined"' in src
     assert 'typeof flatpickr === "undefined"' in src
     assert 'typeof noUiSlider === "undefined"' in src
+
+
+# ---------------------------------------------------------------------------
+# X.2.l.4.b — renderer marks each filter control with a data-widget kind
+# ---------------------------------------------------------------------------
+
+
+def _filter_form(out: str) -> str:
+    """Slice out just the ``<form id="filter-form">...</form>`` block —
+    the inlined bootstrap.js carries a markup-contract comment that
+    mentions every ``data-widget`` kind, so a whole-page substring
+    search would pass even if the renderer emitted nothing."""
+    start = out.index('<form id="filter-form"')
+    end = out.index("</form>", start) + len("</form>")
+    return out[start:end]
+
+
+def test_date_range_is_flatpickr_with_hidden_from_to_inputs() -> None:
+    """The visible date control is one Flatpickr-range text input (no
+    ``name`` — Flatpickr writes the range string into it); the two
+    hidden ``date_from`` / ``date_to`` inputs are the wire elements,
+    synced by ``wireFlatpickrRange``."""
+    app, sheet = _build_app()
+    form = _filter_form(emit_html(app, sheet, dashboard_id="x"))
+    assert 'data-widget="flatpickr-range"' in form
+    assert '<input type="hidden" name="date_from" value="">' in form
+    assert '<input type="hidden" name="date_to" value="">' in form
+    # No more native <input type="date" name="date_from"> — Flatpickr
+    # owns the picker now.
+    assert 'type="date" name="date_from"' not in form
+
+
+def test_parameter_dropdown_is_tomselect() -> None:
+    app, sheet = _build_app()
+    spec = ParameterDropdownSpec(
+        name="account_id", label="Account", options=("a-1", "a-2"),
+    )
+    form = _filter_form(
+        emit_html(app, sheet, dashboard_id="x", filter_specs=[spec]),
+    )
+    assert '<select name="param_account_id"' in form
+    assert 'data-widget="tomselect"' in form
+
+
+def test_parameter_multiselect_is_tomselect_no_size() -> None:
+    app, sheet = _build_app()
+    spec = ParameterMultiSelectSpec(
+        name="pRail", label="Rail", options=("ach", "wire", "check"),
+    )
+    form = _filter_form(
+        emit_html(app, sheet, dashboard_id="x", filter_specs=[spec]),
+    )
+    assert '<select name="param_pRail" multiple' in form
+    assert 'data-widget="tomselect"' in form
+    # Tom Select replaces the listbox — no `size=` cap needed.
+    assert "multiple size=" not in form
+
+
+def test_category_filter_is_tomselect_select() -> None:
+    app, sheet = _build_app()
+    spec = CategoryFilterSpec(
+        column="status", label="Status", options=("open", "closed"),
+    )
+    form = _filter_form(
+        emit_html(app, sheet, dashboard_id="x", filter_specs=[spec]),
+    )
+    assert "data-category-select" in form
+    assert 'data-widget="tomselect"' in form
+    assert '<input type="hidden" name="filter_status" value="">' in form
+
+
+def test_numeric_range_without_bounds_is_inputs_only() -> None:
+    """No ``lo``/``hi`` → can't size a slider, so it's the two number
+    inputs only (no ``data-widget``)."""
+    app, sheet = _build_app()
+    spec = NumericRangeSpec(column="amount", label="Amount")
+    form = _filter_form(
+        emit_html(app, sheet, dashboard_id="x", filter_specs=[spec]),
+    )
+    assert 'name="min_amount"' in form
+    assert 'name="max_amount"' in form
+    assert 'data-widget="nouislider"' not in form
+
+
+def test_numeric_range_with_bounds_emits_nouislider() -> None:
+    """``lo`` + ``hi`` → a noUiSlider ``<div>`` over the number inputs,
+    carrying the bounds + the names of the inputs to keep in sync."""
+    app, sheet = _build_app()
+    spec = NumericRangeSpec(
+        column="amount", label="Amount", lo=0, hi=1000, step=10,
+    )
+    form = _filter_form(
+        emit_html(app, sheet, dashboard_id="x", filter_specs=[spec]),
+    )
+    assert 'data-widget="nouislider"' in form
+    assert 'data-min="0"' in form
+    assert 'data-max="1000"' in form
+    assert 'data-step="10"' in form
+    assert 'data-min-input="min_amount"' in form
+    assert 'data-max-input="max_amount"' in form
+    # The number inputs are still there (typed-entry fallback + wire).
+    assert 'name="min_amount"' in form
+    assert 'name="max_amount"' in form
