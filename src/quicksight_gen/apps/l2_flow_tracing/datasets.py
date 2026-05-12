@@ -119,14 +119,42 @@ META_KEY_ALL_SENTINEL = "__ALL__"
 # anything the SQL accepts).
 META_VALUE_PLACEHOLDER_SENTINEL = "__placeholder__"
 
-# Y.2.c/d — fallback value for a multi-valued pushdown parameter whose
-# declared-value list is empty for this L2 instance (e.g. an instance
-# with no Chains declared → ``declared_chain_parents`` returns ``[]``).
-# An empty ``StaticValues`` default would substitute as ``IN ()`` —
-# invalid SQL on every dialect. This sentinel matches no real value, so
-# ``col IN ('__no_match__')`` is valid SQL that returns zero rows — the
-# correct outcome (nothing to show) without a syntax error.
+# Y.2.c/d — "match no real value" sentinel — ``col IN ('__no_match__')``
+# is valid SQL returning zero rows, the right outcome for a SINGLE_VALUED
+# dropdown that should start empty (Account Network anchor) or a
+# completion-status / bundle-status enum the L2 happens to have no rows
+# for. (Pre-X.2.t.2 it was also the fallback for an empty declared-value
+# list on a MULTI_VALUED enum default; those now default to
+# ``[L2FT_ALL_SENTINEL]``, never an empty list.)
 PUSHDOWN_NO_MATCH_SENTINEL = "__no_match__"
+
+# X.2.t.2 — "match everything on load" sentinel — the cap-safe (1-element)
+# static default for a MULTI_VALUED pushdown param whose declared-value
+# universe could exceed AWS's 32-element cap on
+# ``StringDatasetParameter.DefaultValues.StaticValues`` (the rail / chain /
+# template name dropdowns — an institution may declare >32 of any of
+# them). The SQL guards ``('__l2ft_all__' IN (<<$pX>>) OR col IN (<<$pX>>))``
+# (see ``_match_all_in_clause``): on load (and when the dropdown is
+# emptied, reverting the dataset param to this default) the first disjunct
+# is true so all rows pass; the bridge then maps the control's real
+# selected values in and the second disjunct narrows. The control's
+# *options* still come from the full declared list — AWS caps only the
+# dataset param's default. Fixed-schema enums (``status`` / ``bundle_status``
+# / ``completion_status``) are ≤ 3 elements by construction and keep their
+# direct value-list default.
+L2FT_ALL_SENTINEL = "__l2ft_all__"
+_L2FT_ALL_SENTINEL_SQL = f"'{L2FT_ALL_SENTINEL}'"
+
+
+def _match_all_in_clause(col: str, param_name: str) -> str:
+    """WHERE-fragment for a MULTI_VALUED pushdown dropdown whose dataset
+    param defaults to ``[L2FT_ALL_SENTINEL]``: ``('__l2ft_all__' IN
+    (<<$p>>) OR col IN (<<$p>>))``. Mirrors ``apps/l1_dashboard``'s
+    ``_data_value_clause`` (X.2.t.2)."""
+    return (
+        f"({_L2FT_ALL_SENTINEL_SQL} IN (<<${param_name}>>)"
+        f" OR {col} IN (<<${param_name}>>))"
+    )
 
 # Dataset-parameter IDs are stable UUIDs so re-deploying produces
 # byte-identical DatasetParameters JSON. QS-issued IDs would re-rotate
@@ -645,11 +673,12 @@ def build_postings_dataset(
         # per-dialect-safe WHERE shape.
         f"{metadata_filter_clause(l2_instance, 'metadata', cfg.dialect)}"
         f") postings\n"
-        # Y.2.c — rail / status / bundle pushed into SQL via multi-valued
-        # dataset parameters. Defaults span all declared values so the
-        # freshly-loaded dashboard matches every row; emptying a dropdown
-        # reverts to the default (QS does not emit `IN ()`).
-        f"WHERE rail_name IN (<<$pL2ftRail>>)\n"
+        # rail / status / bundle pushed into SQL via multi-valued dataset
+        # parameters. status / bundle (fixed ≤3-element enums) default to
+        # the full value list; rail_name (could be >32) defaults to the
+        # sentinel + match-all guard (X.2.t.2). Emptying a dropdown reverts
+        # to the default (QS does not emit `IN ()`).
+        f"WHERE {_match_all_in_clause('rail_name', 'pL2ftRail')}\n"
         f"  AND status IN (<<$pL2ftStatus>>)\n"
         f"  AND bundle_status IN (<<$pL2ftBundle>>)\n"
     )
@@ -680,12 +709,14 @@ def build_postings_dataset(
                 ),
             )),
             # Y.2.c — rail / status / bundle multi-valued pushdown.
+            # rail_name's default is the sentinel (X.2.t.2 — could be >32);
+            # the SQL `_match_all_in_clause` makes the sentinel mean "all".
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
                 Id=_DSP_ID_PRAIL,
                 Name="pL2ftRail",
                 ValueType="MULTI_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
-                    StaticValues=declared_rail_names(l2_instance),
+                    StaticValues=[L2FT_ALL_SENTINEL],
                 ),
             )),
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
@@ -992,7 +1023,7 @@ def build_chain_instances_dataset(
         # params. Defaults span all declared values so the freshly-loaded
         # dashboard matches every row; emptying a dropdown reverts to the
         # default (QS does not emit `IN ()`).
-        f"WHERE parent_chain_name IN (<<$pL2ftChainsChain>>)\n"
+        f"WHERE {_match_all_in_clause('parent_chain_name', 'pL2ftChainsChain')}\n"
         f"  AND completion_status IN (<<$pL2ftChainsCompletion>>)\n"
         f"ORDER BY parent_posting DESC"
     )
@@ -1022,19 +1053,17 @@ def build_chain_instances_dataset(
                     StaticValues=[META_VALUE_PLACEHOLDER_SENTINEL],
                 ),
             )),
-            # Y.2.d — chain / completion multi-valued pushdown.
+            # Y.2.d — chain / completion multi-valued pushdown. The chain
+            # parent default is the sentinel (X.2.t.2 — an L2 may declare
+            # >32 chains); `_match_all_in_clause` makes the sentinel mean
+            # "all" on load. An instance with no Chains declared also lands
+            # here — harmless, the chain-instances table is empty anyway.
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
                 Id=_DSP_ID_PCHAINSCHAIN,
                 Name="pL2ftChainsChain",
                 ValueType="MULTI_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
-                    # An instance with no Chains declared → empty list →
-                    # `IN ()` (invalid). Sentinel keeps the SQL valid /
-                    # zero-row. See PUSHDOWN_NO_MATCH_SENTINEL.
-                    StaticValues=(
-                        declared_chain_parents(l2_instance)
-                        or [PUSHDOWN_NO_MATCH_SENTINEL]
-                    ),
+                    StaticValues=[L2FT_ALL_SENTINEL],
                 ),
             )),
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
@@ -1910,7 +1939,7 @@ def build_tt_instances_dataset(
         # Y.2.e — template / completion pushdown via multi-valued dataset
         # params. Defaults span all declared values; emptying a dropdown
         # reverts to the default (QS does not emit `IN ()`).
-        f"WHERE template_name IN (<<$pL2ftTtTemplate>>)\n"
+        f"WHERE {_match_all_in_clause('template_name', 'pL2ftTtTemplate')}\n"
         f"  AND completion_status IN (<<$pL2ftTtCompletion>>)\n"
         f"ORDER BY posting DESC, template_name, transfer_id"
     )
@@ -1957,12 +1986,10 @@ def _tt_dataset_parameters(
             Name="pL2ftTtTemplate",
             ValueType="MULTI_VALUED",
             DefaultValues=StringDatasetParameterDefaultValues(
-                # An instance with no Templates declared → empty list →
-                # `IN ()` (invalid). Sentinel keeps it valid / zero-row.
-                StaticValues=(
-                    declared_template_names(l2_instance)
-                    or [PUSHDOWN_NO_MATCH_SENTINEL]
-                ),
+                # Sentinel default (X.2.t.2 — an L2 may declare >32
+                # templates); `_match_all_in_clause` makes it mean "all".
+                # An instance with no Templates also lands here — harmless.
+                StaticValues=[L2FT_ALL_SENTINEL],
             ),
         )),
         DatasetParameter(StringDatasetParameter=StringDatasetParameter(
@@ -2177,7 +2204,7 @@ def build_tt_legs_dataset(
         # Y.2.e — template / completion pushdown (mirrors tt-instances so
         # the Template / Completion dropdowns narrow the Sankey + Table
         # together — the M.3.10k denormalization made this pair available).
-        f"WHERE template_name IN (<<$pL2ftTtTemplate>>)\n"
+        f"WHERE {_match_all_in_clause('template_name', 'pL2ftTtTemplate')}\n"
         f"  AND completion_status IN (<<$pL2ftTtCompletion>>)\n"
         f"ORDER BY posting DESC, template_name, transfer_id"
     )

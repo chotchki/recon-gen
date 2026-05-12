@@ -8,6 +8,7 @@ that returns the exact dict shape expected by the corresponding AWS CLI command
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, asdict
 from enum import Enum
 from typing import Any, ClassVar, Literal
@@ -410,24 +411,61 @@ class DataSetUsageConfiguration:
     DisableUseAsImportedSource: bool = False
 
 
+# AWS QuickSight `create-data-set` rejects a dataset parameter whose
+# `DefaultValues.StaticValues` list has > 32 elements ("member must have
+# length less than or equal to 32" — the array length, not per-string
+# length). For a dropdown whose value universe is unbounded (rail / chain
+# / template / transfer_type / role names — an institution may declare
+# >32 of any), the default must be a short sentinel + a match-all SQL
+# guard (`apps/l1_dashboard`'s `_data_value_clause`, `apps/l2_flow_tracing`'s
+# `_match_all_in_clause`), NOT the value list (X.2.t.2). This is checked
+# at construction so it fails at the buggy emit line, not 10 min into a
+# deploy.
+_DATASET_PARAM_STATIC_VALUES_CAP = 32
+
+
+def _check_static_values_cap(
+    values: Sequence[object] | None, kind: str,
+) -> None:
+    if values is not None and len(values) > _DATASET_PARAM_STATIC_VALUES_CAP:
+        raise ValueError(
+            f"{kind}.DefaultValues.StaticValues has {len(values)} elements; "
+            f"AWS QuickSight caps it at {_DATASET_PARAM_STATIC_VALUES_CAP}. "
+            f"Use a 1-element sentinel default + a match-all SQL guard for an "
+            f"unbounded value universe (see X.2.t.2 in PLAN.md)."
+        )
+
+
 @dataclass
 class StringDatasetParameterDefaultValues:
     StaticValues: list[str] | None = None
+
+    def __post_init__(self) -> None:
+        _check_static_values_cap(self.StaticValues, "StringDatasetParameter")
 
 
 @dataclass
 class IntegerDatasetParameterDefaultValues:
     StaticValues: list[int] | None = None
 
+    def __post_init__(self) -> None:
+        _check_static_values_cap(self.StaticValues, "IntegerDatasetParameter")
+
 
 @dataclass
 class DecimalDatasetParameterDefaultValues:
     StaticValues: list[float] | None = None
 
+    def __post_init__(self) -> None:
+        _check_static_values_cap(self.StaticValues, "DecimalDatasetParameter")
+
 
 @dataclass
 class DateTimeDatasetParameterDefaultValues:
     StaticValues: list[str] | None = None  # ISO8601 datetime strings
+
+    def __post_init__(self) -> None:
+        _check_static_values_cap(self.StaticValues, "DateTimeDatasetParameter")
 
 
 @dataclass
