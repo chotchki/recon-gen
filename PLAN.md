@@ -1,6 +1,6 @@
 # QuickSight Generator — Active Plan
 
-**Where we are.** Phase Y shipped (v9.0.0 → v9.0.1, 2026-05-11) — the QuickSight + self-hosted (App 2) renderers converged on SQL-level parameter pushdown. Active work: **Phase X.2** (the self-hosted dashboard renderer — branching now); the rest of Phase X (X.3 SQLite dialect, X.4 YAML editor, X.5 ETL helper, X.6 model-driven docs) and **Phase Q (continued)** (CLI/YAML ergonomics) queue behind it. Sub-task detail for shipped phases lives in `PLAN_ARCHIVE.md`; per-release narratives in `RELEASE_NOTES.md`. This file tracks **forward-looking** work only.
+**Where we are.** Phase Y shipped (v9.0.0 → v9.0.1, 2026-05-11) — the QuickSight + self-hosted (App 2) renderers converged on SQL-level parameter pushdown. Phase X.2 close-outs since: v9.0.2 (X.2.t.2 dataset-param cap, X.2.s.1 `docs serve`, u.3.fix.demo) and v9.0.3 (X.2.p — App 2 runs offline; X.2.s.2 — handbook site follows the L2 theme). **X.2.k's hard blockers (X.2.p / X.2.s / X.2.t) are all cleared** — the "App 2 ships" v8.x/v9.0 cut can run whenever. Active work: **Phase X.2** (the self-hosted dashboard renderer); the rest of Phase X (X.3 SQLite dialect, X.4 YAML editor, X.5 ETL helper, X.6 model-driven docs) and **Phase Q (continued)** (CLI/YAML ergonomics) queue behind it. Sub-task detail for shipped phases lives in `PLAN_ARCHIVE.md`; per-release narratives in `RELEASE_NOTES.md`. This file tracks **forward-looking** work only.
 
 ## Greater Plan
 X.2 - add the non quicksight renderer
