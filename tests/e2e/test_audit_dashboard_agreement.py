@@ -433,28 +433,34 @@ def per_dialect_conn(per_dialect_cfg):  # type: ignore[no-untyped-def]: yields a
 
 
 @pytest.fixture(scope="module")
-def per_dialect_app2_driver(per_dialect_cfg, seeded_audit):  # type: ignore[no-untyped-def]: yields an App2Driver — annotating it would force the import to module scope
-    """Module-scoped ``App2Driver`` serving this dialect cell's L1
-    dashboard tree against the seeded DB — the 4th renderer leg of the
-    4-way agreement contract (X.2.j.B.1).
+def per_dialect_app2_results(per_dialect_cfg, seeded_audit):  # type: ignore[no-untyped-def]: returns a dict; annotating would force the imports below to module scope
+    """The App2 leg's data, read once up-front (X.2.j.B.1).
 
-    Depends on ``seeded_audit`` so the seed lands before the App2 server
-    starts querying (``open()`` below auto-loads the first sheet's
-    visuals → fires fetches). The live-DB fetcher only reads — riding the
-    same seed the PDF + QS legs use, never re-seeding.
+    Spins this dialect cell's L1 dashboard tree via ``App2Driver.serving``
+    against the seeded DB, walks every L1-invariant sheet, collects each
+    one's row count (+ DOM-window size + natural-key set for the
+    flat-shape invariants), then **tears the App2 server + browser down
+    before returning** — so the per-test ``per_dialect_qs_driver`` (a
+    *second* Playwright sync context) doesn't collide with App2's. Sync
+    Playwright is one-context-per-thread: two open at once → "Playwright
+    Sync API inside the asyncio loop". The original module-scoped
+    *live-driver* fixture held App2's context open across all 6 tests,
+    which blew up the QS leg on a real deploy (the leg auto-skipped
+    locally — no deployed dashboard — so it slipped through; the Aurora
+    cell caught it). Reading the App2 data up-front and yielding a plain
+    dict sidesteps it entirely.
 
-    Module-scoped: App2 embed URLs aren't single-use (unlike QS's), so
-    the 6 per-invariant tests share one server + browser. Each test's
-    ``count_l1_invariant_rows`` / ``l1_invariant_row_keys`` does its own
-    ``goto_sheet`` (which re-loads the bare sheet URL — App2 filter state
-    is URL-only, so the switch resets to no-filter), then ``set_date_range``
-    re-applies the period; no cross-test contamination.
+    Per-invariant entry: ``{"count": int}`` for the divergent-shape ones,
+    plus ``"seen": int`` (the DOM-visible row count, for the truncation
+    guard) and ``"keys": set`` (the natural-key set, for row-identity)
+    for the flat-shape ones.
 
-    Built the same way ``cli/serve.py::_build_real_app`` does: register
-    the L1 datasets in the shared SQL registry, build the tree, then a
-    live-DB ``(visual_fetcher, options_fetcher)`` pair off one pool
-    (``make_live_db_fetchers_for_app`` — the *plural*; the L1 dashboard
-    has dataset-sourced dropdowns, so the options half is needed).
+    Depends on ``seeded_audit`` so the seed lands before the reads.
+    Module-scoped — the seed + the 6-sheet walk is the expensive setup.
+    Built the same way ``cli/serve.py::_build_real_app`` does (register L1
+    datasets → build tree → live-DB ``(visual, options)`` fetcher pair off
+    one pool; ``make_live_db_fetchers_for_app`` — the *plural*, since the
+    L1 dashboard has dataset-sourced dropdowns).
     """
     _ = seeded_audit  # ordering dep only — see docstring
     from quicksight_gen.apps.l1_dashboard.app import build_l1_dashboard_app
@@ -471,13 +477,25 @@ def per_dialect_app2_driver(per_dialect_cfg, seeded_audit):  # type: ignore[no-u
     visual_fetcher, options_fetcher = make_live_db_fetchers_for_app(
         tree_app=tree_app, cfg=per_dialect_cfg,
     )
+    results: dict[str, dict[str, object]] = {}
     with App2Driver.serving(
         tree_app=tree_app, sheet=tree_app.analysis.sheets[0],
         data_fetcher=visual_fetcher, options_fetcher=options_fetcher,
         dashboard_id="l1", dashboard_title="L1 Dashboard",
     ) as driver:
         driver.open("l1")
-        yield driver
+        for inv in _ALL_INVARIANTS:
+            entry: dict[str, object] = {
+                "count": count_l1_invariant_rows(driver, inv, _PERIOD),
+            }
+            if inv in _FLAT_SHAPE:
+                entry["seen"] = l1_invariant_rows_seen(driver, inv, _PERIOD)
+                entry["keys"] = l1_invariant_row_keys(driver, inv, _PERIOD)
+            results[inv] = entry
+    # App2 server + browser torn down by the ``with`` exit — the returned
+    # dict holds everything the per-test asserts need; no live driver
+    # lingers to collide with ``per_dialect_qs_driver``.
+    return results
 
 
 # Flat-shape invariants — one matview row per (account, day[, transfer_type]),
@@ -516,7 +534,7 @@ _ALL_INVARIANTS: tuple[str, ...] = (
 def test_invariant_four_way_agreement(
     seeded_audit,
     per_dialect_qs_driver,
-    per_dialect_app2_driver,
+    per_dialect_app2_results,
     per_dialect_l1_dashboard_id,
     per_dialect_conn,
     per_dialect_matview_prefix,
@@ -594,9 +612,8 @@ def test_invariant_four_way_agreement(
 
     # --- the PDF + the two dashboard renderers ---
     pdf_count = count_invariant_table_rows(pdf_path, invariant)
-    app2_count = count_l1_invariant_rows(
-        per_dialect_app2_driver, invariant, _PERIOD,
-    )
+    app2 = per_dialect_app2_results[invariant]
+    app2_count = int(app2["count"])  # type: ignore[call-overload]: dict value is `object`; it's an int by construction in the fixture
     # The QS leg is optional — the fixture yields ``None`` when QS isn't
     # available for this dialect (SQLite cell, or QS_E2E_USER_ARN unset).
     # The QS driver fixture's tall viewport keeps the detail table inside
@@ -680,9 +697,10 @@ def test_invariant_four_way_agreement(
     # it wasn't truncated before trusting the key sets. (Plants-only seed
     # keeps these tables tiny; a denser seed that grows them past the
     # window trips this loudly rather than passing a partial comparison.)
-    app2_seen = l1_invariant_rows_seen(
-        per_dialect_app2_driver, invariant, _PERIOD,
-    )
+    # App2's ``seen`` / ``keys`` were captured up-front by
+    # ``per_dialect_app2_results`` (the App2 server + browser are torn
+    # down by the time this test runs — see that fixture's docstring).
+    app2_seen = int(app2["seen"])  # type: ignore[call-overload]: dict value is `object`; int by construction (flat-shape entry)
     assert app2_seen == direct_count, (
         f"App2 table window truncated ({invariant}): {app2_seen} of "
         f"{direct_count} rows visible — the row-identity comparison would "
@@ -694,9 +712,7 @@ def test_invariant_four_way_agreement(
         per_dialect_conn, per_dialect_matview_prefix, invariant,
         _PERIOD, per_dialect_cfg.dialect,
     )
-    app2_keys = l1_invariant_row_keys(
-        per_dialect_app2_driver, invariant, _PERIOD,
-    )
+    app2_keys = app2["keys"]  # set[tuple[...]] by construction (flat-shape entry)
     scenario_keys = set(getattr(expected_obj, f"{invariant}_account_days"))
 
     assert scenario_keys <= direct_keys, (
