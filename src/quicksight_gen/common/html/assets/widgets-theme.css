@@ -167,3 +167,44 @@ span.flatpickr-weekday {
   font-size: 0.7rem;
   padding: 1px 6px;
 }
+
+/* ---------------------------------------------------------------- */
+/* ctxmenu — row-level "⋯" / right-click drill popup                  */
+/* ---------------------------------------------------------------- */
+/* ctxmenu has no CSS file: it injects its own ``<style id="ctxmenu">``
+ * into <head> at runtime, *after* this sheet has loaded — so every
+ * colour rule here needs ``!important`` to win the cascade. (Layout /
+ * sizing rules from its injected sheet are fine; we only override the
+ * palette.) Same per-L2-theme ``--color-*`` story as the widgets above. */
+.ctxmenu {
+  background: var(--color-surface) !important;
+  border: 1px solid var(--color-surface-border) !important;
+  box-shadow: 0 4px 12px 0 rgb(0 0 0 / 0.18) !important;
+  border-radius: 0.375rem !important;
+  font-size: 0.8rem;
+}
+.ctxmenu li {
+  color: var(--color-primary-fg) !important;
+}
+.ctxmenu li a,
+.ctxmenu li span {
+  color: inherit !important;
+}
+.ctxmenu li.interactive:hover {
+  background: var(--color-link-tint) !important;
+  color: var(--color-primary-fg) !important;
+  font-weight: 600; /* a11y: not colour-only */
+}
+.ctxmenu li.disabled {
+  color: var(--color-secondary-fg) !important;
+}
+.ctxmenu li.heading {
+  color: var(--color-secondary-fg) !important;
+  font-weight: 600;
+}
+.ctxmenu li.divider {
+  border-bottom: 1px solid var(--color-surface-border) !important;
+}
+.ctxmenu li.submenu::after {
+  border-left-color: var(--color-secondary-fg) !important;
+}

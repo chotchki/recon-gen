@@ -248,6 +248,17 @@ _FLATPICKR_JS = "/static/vendor/js/flatpickr.min.js"
 _NOUISLIDER_CSS = "/static/vendor/css/nouislider.min.css"
 _NOUISLIDER_JS = "/static/vendor/js/nouislider.min.js"
 
+# X.2.u.4.e.3 — ctxMenu: a zero-dep right-click / on-demand popup menu
+# (the *standalone* build — an IIFE that sets ``window.ctxmenu``; the
+# package's other build is CommonJS, no good for a plain ``<script>``).
+# Powers App 2's row-level ``DATA_POINT_MENU`` drills: a table row that
+# carries menu-drills gets a "⋯" trigger button (and ``contextmenu`` on
+# the row, for QS-gesture parity) → ``ctxmenu`` shows the drill list. It
+# injects its own ``<style id="ctxmenu">`` at runtime, so it ships no CSS
+# file — ``widgets-theme.css`` re-skins ``.ctxmenu`` with ``!important``
+# (its injected sheet loads *after* our override sheet).
+_CTXMENU_JS = "/static/vendor/js/ctxmenu.min.js"
+
 # Built once at import: the full ``<head>`` asset blocks. ``_VENDOR_CSS``
 # lands right after ``output.css`` (so the per-instance ``:root`` theme
 # ``<style>`` — which follows it — still wins the cascade for the
@@ -262,7 +273,7 @@ _VENDOR_JS = "\n".join(
     f'  <script src="{src}"></script>'
     for src in (
         _HTMX_SRC, _D3_SRC, _D3_SANKEY_SRC,
-        _TOM_SELECT_JS, _FLATPICKR_JS, _NOUISLIDER_JS,
+        _TOM_SELECT_JS, _FLATPICKR_JS, _NOUISLIDER_JS, _CTXMENU_JS,
     )
 )
 
