@@ -111,7 +111,6 @@ from quicksight_gen.common.tree import (
     CellAccentText,
     Dataset,
     DateTimeParam,
-    Dim,
     Drill,
     DrillParam,
     DrillResetSentinel,
@@ -119,7 +118,6 @@ from quicksight_gen.common.tree import (
     FilterGroup,
     LineChart,
     LinkedValues,
-    Measure,
     Sheet,
     StaticValues,
     StringParam,
@@ -1052,45 +1050,6 @@ def _populate_limit_breach_sheet(
 # bar chart sorted correctly without an explicit sort_by override.
 # Mirrors AR's aging-bucket convention.
 
-# Pending Aging buckets — finer-grained at the short end since
-# max_pending_age caps are typically hours-to-1-day.
-_PENDING_AGING_BUCKETS: tuple[tuple[int, str], ...] = (
-    (6 * 3600,       "1: 0-6h"),
-    (24 * 3600,      "2: 6-24h"),
-    (3 * 24 * 3600,  "3: 1-3d"),
-    (7 * 24 * 3600,  "4: 3-7d"),
-)
-_PENDING_AGING_OVERFLOW = "5: >7d"
-
-# Unbundled Aging buckets — coarser at the short end since
-# max_unbundled_age is typically a day or two; finer-grained beyond
-# that to surface stale shouldn't-still-be-unbundled legs.
-_UNBUNDLED_AGING_BUCKETS: tuple[tuple[int, str], ...] = (
-    (24 * 3600,      "1: <1d"),
-    (2 * 24 * 3600,  "2: 1-2d"),
-    (7 * 24 * 3600,  "3: 2-7d"),
-)
-_UNBUNDLED_AGING_OVERFLOW = "4: >7d"
-
-
-def _aging_bucket_expression(
-    age_col: str,
-    *,
-    buckets: tuple[tuple[int, str], ...],
-    overflow_label: str,
-) -> str:
-    """Build the QS calc-field expression that buckets a numeric age
-    column (in seconds) into labelled bands.
-
-    Each ``(cutoff_seconds, label)`` defines a band; values <= cutoff
-    get that label. Anything bigger than the last cutoff falls into
-    ``overflow_label``. Builds a nested ``ifelse(...)`` chain.
-    """
-    expr = f"'{overflow_label}'"
-    for cutoff, label in reversed(buckets):
-        expr = f"ifelse({{{age_col}}} <= {cutoff}, '{label}', {expr})"
-    return expr
-
 
 def _populate_pending_aging_sheet(
     cfg: Config,
@@ -1104,25 +1063,18 @@ def _populate_pending_aging_sheet(
     """Pending Aging sheet — KPI + horizontal aging BarChart + detail.
 
     Backed by the M.2b.8 `<prefix>_stuck_pending` matview. Aging
-    buckets come from a per-dataset CalcField on `age_seconds` (5
-    bands; number-prefixed labels keep the bar chart sort stable).
+    buckets come from a CASE column in the dataset SQL (5 bands;
+    number-prefixed labels keep the bar chart sort stable; X.2.u.4.c).
     Right-click any detail-table row → Transactions narrowed to that
     transfer (M.2b.7 drill plumbing).
     """
     accent = theme.accent
     ds = datasets[DS_STUCK_PENDING]
 
-    # Aging-bucket calc field (analysis-level so the BarChart category
-    # + detail-table column read the same dim).
-    aging_bucket = analysis.add_calc_field(CalcField(
-        name="stuck_pending_aging_bucket",
-        dataset=ds,
-        expression=_aging_bucket_expression(
-            "age_seconds",
-            buckets=_PENDING_AGING_BUCKETS,
-            overflow_label=_PENDING_AGING_OVERFLOW,
-        ),
-    ))
+    # X.2.u.4.c — aging bucket is now a CASE column in the dataset SQL
+    # ('stuck_pending_aging_bucket'), so App2's column-only fetcher
+    # renders it; the BarChart category + detail-table column read it.
+    aging_bucket = ds["stuck_pending_aging_bucket"]
 
     # Row 1: total stuck count KPI.
     sheet.layout.row(height=_KPI_ROW_SPAN).add_kpi(
@@ -1146,7 +1098,7 @@ def _populate_pending_aging_sheet(
             "bands. Right-skewed (>3d, >7d) ⇒ slow drift; spike at "
             "0-6h ⇒ a recent batch failed to post."
         ),
-        category=[Dim(ds, aging_bucket)],
+        category=[aging_bucket.dim()],
         values=[ds["transaction_id"].count()],
         orientation="HORIZONTAL",
     )
@@ -1172,7 +1124,7 @@ def _populate_pending_aging_sheet(
             ds["amount_money"].numerical(currency=True),
             ds["amount_direction"].dim(),
             ds["posting"].date(),
-            Dim(ds, aging_bucket),
+            aging_bucket.dim(),
             ds["max_pending_age_seconds"].numerical(),
             ds["age_seconds"].numerical(),
         ],
@@ -1216,15 +1168,7 @@ def _populate_unbundled_aging_sheet(
     accent = theme.accent
     ds = datasets[DS_STUCK_UNBUNDLED]
 
-    aging_bucket = analysis.add_calc_field(CalcField(
-        name="stuck_unbundled_aging_bucket",
-        dataset=ds,
-        expression=_aging_bucket_expression(
-            "age_seconds",
-            buckets=_UNBUNDLED_AGING_BUCKETS,
-            overflow_label=_UNBUNDLED_AGING_OVERFLOW,
-        ),
-    ))
+    aging_bucket = ds["stuck_unbundled_aging_bucket"]  # X.2.u.4.c — dataset-SQL CASE col
 
     sheet.layout.row(height=_KPI_ROW_SPAN).add_kpi(
         width=_FULL,
@@ -1246,7 +1190,7 @@ def _populate_unbundled_aging_sheet(
             "bands. Right-skewed (>2d, >7d) ⇒ the bundler hasn't fired "
             "for those rails in a while."
         ),
-        category=[Dim(ds, aging_bucket)],
+        category=[aging_bucket.dim()],
         values=[ds["transaction_id"].count()],
         orientation="HORIZONTAL",
     )
@@ -1270,7 +1214,7 @@ def _populate_unbundled_aging_sheet(
             ds["amount_money"].numerical(currency=True),
             ds["amount_direction"].dim(),
             ds["posting"].date(),
-            Dim(ds, aging_bucket),
+            aging_bucket.dim(),
             ds["max_unbundled_age_seconds"].numerical(),
             ds["age_seconds"].numerical(),
         ],
@@ -1322,19 +1266,6 @@ def _populate_supersession_audit_sheet(
     ds_tx = datasets[DS_SUPERSESSION_TRANSACTIONS]
     ds_db = datasets[DS_SUPERSESSION_DAILY_BALANCES]
 
-    # Q.1.c — analysis-level CalcField returning 1 for higher-Entry
-    # rows with no `supersedes` reason and 0 otherwise. SUM over the
-    # dataset = count of policy-violating supersessions; healthy
-    # value is 0. Defined per-dataset (not in the SQL) so the dataset
-    # stays the audit detail surface and the KPI logic stays at the
-    # analysis layer where the rest of the L1 calc fields live.
-    no_reason_calc = analysis.add_calc_field(CalcField(
-        name="l1_supersession_no_reason",
-        dataset=ds_tx,
-        expression=(
-            "ifelse({entry} > 1 AND isNull({supersedes}), 1, 0)"
-        ),
-    ))
 
     # Row 1: two half-width KPIs — total supersessions on the left,
     # the no-reason policy-violation count on the right.
@@ -1359,7 +1290,7 @@ def _populate_supersession_audit_sheet(
             "declare its cause (Inflight / BundleAssignment / "
             "TechnicalCorrection) per the L1 SPEC."
         ),
-        values=[Measure.sum(dataset=ds_tx, column=no_reason_calc)],
+        values=[ds_tx["l1_supersession_no_reason"].sum()],
     )
 
     # Row 2: transactions audit detail — every entry of every

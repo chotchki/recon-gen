@@ -252,6 +252,48 @@ DS_L1_TX_FACETS = "l1-tx-facets-ds"
 
 
 # Contracts — column shapes the M.1a.7 views project.
+# X.2.u.4.c — aging-bucket bands, moved here from ``app.py`` when the
+# Pending / Unbundled Aging sheets' bucket logic became dataset SQL
+# (a CASE expr) instead of an analysis-level CalcField — App2's
+# column-only fetcher can't evaluate calc-field ``ifelse`` chains, so
+# the visuals 500'd on App2; pushing the CASE into the dataset SQL
+# (parallel to Y.3 for Investigation) fixes that and the QS side reads
+# the same real column.
+#
+# Each ``(cutoff_seconds, label)`` band: ``age <= cutoff`` ⇒ that label;
+# anything bigger ⇒ the overflow label. Labels are number-prefixed so
+# the BarChart category sorts the bars chronologically.
+_PENDING_AGING_BUCKETS: tuple[tuple[int, str], ...] = (
+    (6 * 3600,       "1: 0-6h"),
+    (24 * 3600,      "2: 6-24h"),
+    (3 * 24 * 3600,  "3: 1-3d"),
+    (7 * 24 * 3600,  "4: 3-7d"),
+)
+_PENDING_AGING_OVERFLOW = "5: >7d"
+_UNBUNDLED_AGING_BUCKETS: tuple[tuple[int, str], ...] = (
+    (24 * 3600,      "1: <1d"),
+    (2 * 24 * 3600,  "2: 1-2d"),
+    (7 * 24 * 3600,  "3: 2-7d"),
+)
+_UNBUNDLED_AGING_OVERFLOW = "4: >7d"
+
+
+def _aging_bucket_case_sql(
+    age_col: str,
+    *,
+    buckets: tuple[tuple[int, str], ...],
+    overflow_label: str,
+) -> str:
+    """Build a portable ``CASE`` expression bucketing a numeric age
+    column (seconds) into labelled bands — the SQL form of the old QS
+    calc-field ``ifelse`` chain (X.2.u.4.c)."""
+    whens = " ".join(
+        f"WHEN {age_col} <= {cutoff} THEN '{label}'"
+        for cutoff, label in buckets
+    )
+    return f"CASE {whens} ELSE '{overflow_label}' END"
+
+
 DRIFT_CONTRACT = DatasetContract(columns=[
     ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
     ColumnSpec("account_name", "STRING"),
@@ -435,6 +477,7 @@ STUCK_PENDING_CONTRACT = DatasetContract(columns=[
     ColumnSpec("posting", "DATETIME"),
     ColumnSpec("max_pending_age_seconds", "INTEGER"),
     ColumnSpec("age_seconds", "DECIMAL"),
+    ColumnSpec("stuck_pending_aging_bucket", "STRING"),
 ])
 
 
@@ -452,6 +495,7 @@ STUCK_UNBUNDLED_CONTRACT = DatasetContract(columns=[
     ColumnSpec("posting", "DATETIME"),
     ColumnSpec("max_unbundled_age_seconds", "INTEGER"),
     ColumnSpec("age_seconds", "DECIMAL"),
+    ColumnSpec("stuck_unbundled_aging_bucket", "STRING"),
 ])
 
 
@@ -467,6 +511,7 @@ SUPERSESSION_TRANSACTIONS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("entry", "INTEGER"),
     ColumnSpec("transaction_id", "STRING"),
     ColumnSpec("supersedes", "STRING"),
+    ColumnSpec("l1_supersession_no_reason", "INTEGER"),
     ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
     ColumnSpec("account_name", "STRING"),
     ColumnSpec("transfer_id", "STRING", shape=ColumnShape.TRANSFER_ID),
@@ -1027,7 +1072,10 @@ def build_stuck_pending_dataset(
     """
     prefix = l2_instance.instance
     sql = (
-        f"SELECT * FROM {prefix}_stuck_pending\n"
+        f"SELECT t.*,\n"
+        f"  {_aging_bucket_case_sql('age_seconds', buckets=_PENDING_AGING_BUCKETS, overflow_label=_PENDING_AGING_OVERFLOW)}"
+        f" AS stuck_pending_aging_bucket\n"
+        f"FROM {prefix}_stuck_pending t\n"
         f"WHERE {_data_value_clause('account_id', P_L1_PENDING_ACCOUNT)}\n"
         f"  AND transfer_type IN (<<${P_L1_PENDING_TYPE}>>)\n"
         f"  AND rail_name IN (<<${P_L1_PENDING_RAIL}>>)"
@@ -1066,7 +1114,10 @@ def build_stuck_unbundled_dataset(
     """
     prefix = l2_instance.instance
     sql = (
-        f"SELECT * FROM {prefix}_stuck_unbundled\n"
+        f"SELECT t.*,\n"
+        f"  {_aging_bucket_case_sql('age_seconds', buckets=_UNBUNDLED_AGING_BUCKETS, overflow_label=_UNBUNDLED_AGING_OVERFLOW)}"
+        f" AS stuck_unbundled_aging_bucket\n"
+        f"FROM {prefix}_stuck_unbundled t\n"
         f"WHERE {_data_value_clause('account_id', P_L1_UNBUNDLED_ACCOUNT)}\n"
         f"  AND transfer_type IN (<<${P_L1_UNBUNDLED_TYPE}>>)\n"
         f"  AND rail_name IN (<<${P_L1_UNBUNDLED_RAIL}>>)"
@@ -1124,6 +1175,8 @@ def build_supersession_transactions_dataset(
     prefix = l2_instance.instance
     sql = (
         f"SELECT entry, transaction_id, supersedes,"
+        f" CASE WHEN entry > 1 AND supersedes IS NULL THEN 1 ELSE 0 END"
+        f"   AS l1_supersession_no_reason,"
         f" account_id, account_name,"
         f" transfer_id, transfer_type, rail_name,"
         f" amount_money, amount_direction, status, posting, bundle_id"
