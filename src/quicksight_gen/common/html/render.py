@@ -109,12 +109,22 @@ class ParameterDropdownSpec:
     runs ``SELECT DISTINCT <col> FROM (<dataset SQL>)`` and replaces
     ``options`` before rendering). When ``options_dataset`` is None
     the static ``options`` are authoritative.
+
+    ``selected`` (u.4.e.4): when the sheet page URL carries
+    ``?param_<name>=<v>`` — a cross-sheet drill that walked an anchor,
+    or a bookmarked filter state — ``server.py::_apply_url_param_overrides``
+    sets ``selected`` to that value, so ``_render_parameter_dropdown``
+    pre-marks the matching ``<option>``. Because every visual loads via
+    ``hx-include="#filter-form"``, a pre-marked option makes the *initial*
+    fetch already narrowed (the destination renders filtered, no manual
+    re-pick). Empty string (the default) = blank leading option active.
     """
     name: str
     label: str
     options: tuple[str, ...]
     options_dataset: str | None = None
     options_column: str | None = None
+    selected: str = ""
 
 
 @dataclass(frozen=True)
@@ -170,6 +180,9 @@ class ParameterNumberSpec:
     no-narrowing position (σ≥1 / hop≥$0). Empty → no key → the executor's
     static-default fallback (= the dataset param's declared default),
     mirroring QuickSight's "slider untouched ⇒ analysis default".
+    ``server.py::_apply_url_param_overrides`` overwrites ``default`` from a
+    ``?param_<name>=<v>`` page-URL key (u.4.e.4) so a drill / bookmark
+    lands on the right slider position.
     """
     name: str
     label: str
@@ -201,12 +214,20 @@ class ParameterMultiSelectSpec:
     column instead of an inlined ``options`` list (which stays ``()``
     until ``server.py::_resolve_linked_options`` runs ``SELECT DISTINCT
     <col> FROM (<dataset SQL>)`` and replaces ``options`` pre-render).
+
+    ``selected`` (u.4.e.4): the repeated ``?param_<name>=A&param_<name>=B``
+    keys from the sheet page URL — ``server.py::_apply_url_param_overrides``
+    fills it so the matching ``<option>``s render pre-selected and the
+    visuals' ``hx-include="#filter-form"`` load fetch is already narrowed.
+    ``()`` (the default) = nothing pre-selected (= the executor's
+    static-default fallback = no narrowing).
     """
     name: str
     label: str
     options: tuple[str, ...]
     options_dataset: str | None = None
     options_column: str | None = None
+    selected: tuple[str, ...] = ()
 
 
 FilterSpec = (
@@ -397,17 +418,31 @@ _TS_SELECT_CLASS = _FORM_INPUT_CLASS + " min-w-48"
 def _render_parameter_dropdown(spec: ParameterDropdownSpec) -> str:
     """Single-select ``<select name="param_<name>">`` enhanced by Tom
     Select (search + clear). The blank leading option round-trips as
-    "no selection" (``?param_<name>=``)."""
+    "no selection" (``?param_<name>=``). ``spec.selected`` (set by the
+    server from a ``?param_<name>=<v>`` page-URL key — u.4.e.4) pre-marks
+    that ``<option>`` so the visuals' ``hx-include="#filter-form"`` load
+    fetch is already narrowed; a value not in the (resolved) option list
+    is still rendered as a selected ``<option>`` so the form submits it
+    (stale-bookmark / sibling-dataset case)."""
     name = html.escape(spec.name)
+    sel = spec.selected
     parts = [
         f'    <label class="{_FORM_LABEL_CLASS}">{html.escape(spec.label)} '
         f'<select name="param_{name}" class="{_TS_SELECT_CLASS}"'
         f'{_TOM_SELECT_ATTR}>'
         f'<option value=""></option>'
     ]
+    rendered_sel = False
     for opt in spec.options:
         esc = html.escape(opt)
-        parts.append(f'<option value="{esc}">{esc}</option>')
+        if opt == sel:
+            rendered_sel = True
+            parts.append(f'<option value="{esc}" selected>{esc}</option>')
+        else:
+            parts.append(f'<option value="{esc}">{esc}</option>')
+    if sel and not rendered_sel:
+        esc = html.escape(sel)
+        parts.append(f'<option value="{esc}" selected>{esc}</option>')
     parts.append('</select></label>')
     return "".join(parts)
 
@@ -449,17 +484,32 @@ def _render_parameter_multiselect(spec: ParameterMultiSelectSpec) -> str:
     (repeated key — the shape ``_sql_executor``'s multi-valued
     dataset-param expansion consumes). ``change`` events bubble to the
     form, which ``wireFilterAutoRefresh`` debounces into a ``refresh``.
+
+    ``spec.selected`` (set by the server from the page URL's repeated
+    ``?param_<name>=A&param_<name>=B`` keys — u.4.e.4) pre-marks those
+    ``<option>``s (any not in the resolved option list are appended as
+    selected ``<option>``s) so the load fetch is already narrowed.
     """
     name = html.escape(spec.name)
+    sel = set(spec.selected)
     parts = [
         f'    <label class="{_FORM_LABEL_CLASS}">'
         f'{html.escape(spec.label)} '
         f'<select name="param_{name}" multiple class="{_TS_SELECT_CLASS}"'
         f'{_TOM_SELECT_ATTR}>'
     ]
+    rendered: set[str] = set()
     for opt in spec.options:
         esc = html.escape(opt)
-        parts.append(f'<option value="{esc}">{esc}</option>')
+        if opt in sel:
+            rendered.add(opt)
+            parts.append(f'<option value="{esc}" selected>{esc}</option>')
+        else:
+            parts.append(f'<option value="{esc}">{esc}</option>')
+    for extra in spec.selected:
+        if extra not in rendered:
+            esc = html.escape(extra)
+            parts.append(f'<option value="{esc}" selected>{esc}</option>')
     parts.append('</select></label>')
     return "".join(parts)
 
