@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import contextlib
 import re
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -76,9 +76,17 @@ class App2Driver:
 
     dialect = "app2"
 
-    def __init__(self, *, base_url: str, page: Any) -> None:
+    def __init__(
+        self, *, base_url: str, page: Any,
+        sheet_id_by_name: Mapping[str, str],
+    ) -> None:
         self._base = base_url.rstrip("/")
         self._page = page
+        # name → SheetId, from the served tree. The protocol's `sheet`
+        # arg (open/goto_sheet) is a sheet *name* (matches the QS impl,
+        # which matches tab text); App2's route segment is the SheetId,
+        # so the driver translates here.
+        self._sheet_id_by_name = dict(sheet_id_by_name)
         self._dashboard: str | None = None
         self._sheet: str | None = None
 
@@ -129,6 +137,13 @@ class App2Driver:
         DOM probes via ``page.evaluate``) — the wire-shape kind of
         assertion that doesn't translate to renderer-agnostic verbs.
         """
+        analysis = tree_app.analysis
+        if analysis is None:
+            raise RuntimeError(
+                "App2Driver.serving() needs an emitted tree — call "
+                "tree_app.emit_analysis() first (resolves auto-IDs)."
+            )
+        sheet_id_by_name = {s.name: str(s.sheet_id) for s in analysis.sheets}
         with html2_server(
             tree_app=tree_app, sheet=sheet,
             data_fetcher=data_fetcher,
@@ -137,7 +152,9 @@ class App2Driver:
             filter_specs=filter_specs,
             dev_log=dev_log,
         ) as url, webkit_page() as page:
-            yield cls(base_url=url, page=page)
+            yield cls(
+                base_url=url, page=page, sheet_id_by_name=sheet_id_by_name,
+            )
 
     # -- raw access (escape hatch for App2-internal assertions) ---------
 
@@ -160,10 +177,19 @@ class App2Driver:
     # -- navigation ------------------------------------------------------
 
     def open(self, dashboard: str, sheet: str | None = None) -> None:
+        # `sheet` is a sheet *name* (protocol contract); App2's route
+        # segment is the SheetId — translate via the served tree's map.
         self._dashboard = dashboard
         path = f"/dashboards/{dashboard}"
         if sheet is not None:
-            path += f"/sheets/{sheet}"
+            try:
+                sheet_id = self._sheet_id_by_name[sheet]
+            except KeyError:
+                raise KeyError(
+                    f"no sheet named {sheet!r} in this dashboard — "
+                    f"have {sorted(self._sheet_id_by_name)}"
+                ) from None
+            path += f"/sheets/{sheet_id}"
         self._sheet = sheet
         self._page.goto(self._base + path)
         # Visual sections auto-load via hx-trigger="load" — those AJAX

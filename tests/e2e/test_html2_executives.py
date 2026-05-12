@@ -137,7 +137,7 @@ def test_filter_change_refetches_visuals(
     write-verb contract); the wire-shape assertion (URL key landed)
     needs the fetcher's ``_calls_log`` — App2-internal."""
     exec_driver.open(
-        _DASHBOARD_ID, sheet="exec-sheet-account-coverage",
+        _DASHBOARD_ID, sheet="Account Coverage",
     )
     _calls_log.clear()
     exec_driver.set_date_range("2030-02-01", None)
@@ -173,7 +173,7 @@ def test_account_coverage_sheet_does_emit_filter_form(
     """Inverse of the previous test: sheets WITH data visuals get the
     form. Pins the suppression to the empty-visuals case specifically."""
     exec_driver.open(
-        _DASHBOARD_ID, sheet="exec-sheet-account-coverage",
+        _DASHBOARD_ID, sheet="Account Coverage",
     )
     form_count = exec_driver.page.locator('form#filter-form').count()
     assert form_count == 1

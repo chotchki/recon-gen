@@ -82,17 +82,10 @@ def _l2ft_stub_fetcher(
     return {}
 
 
-def _sheet_id_by_name(tree_app: Any, name: str) -> str:
-    assert tree_app.analysis is not None
-    return str(next(
-        s.sheet_id for s in tree_app.analysis.sheets if s.name == name
-    ))
-
 
 @pytest.fixture
-def l2ft_driver() -> Iterator[tuple[App2Driver, Any]]:
-    """``App2Driver`` aimed at the L2FT app + the tree it was built
-    against (so tests can resolve sheet ids without rebuilding)."""
+def l2ft_driver() -> Iterator[App2Driver]:
+    """``App2Driver`` aimed at the L2FT app."""
     _calls_log.clear()
     build_all_l2_flow_tracing_datasets(_TEST_CFG, _TEST_INSTANCE)
     tree_app = build_l2_flow_tracing_app(_TEST_CFG, l2_instance=_TEST_INSTANCE)
@@ -104,13 +97,13 @@ def l2ft_driver() -> Iterator[tuple[App2Driver, Any]]:
         dashboard_id=_DASHBOARD_ID,
         dashboard_title="L2 Flow Tracing",
     ) as driver:
-        yield driver, tree_app
+        yield driver
 
 
 def test_l2ft_dashboard_landing_renders_with_sheet_tabs(
-    l2ft_driver: tuple[App2Driver, Any],
+    l2ft_driver: App2Driver,
 ) -> None:
-    driver, _ = l2ft_driver
+    driver = l2ft_driver
     driver.open(_DASHBOARD_ID)
     names = driver.sheet_names()
     for expected in ("Getting Started", "Rails", "Chains", "Transfer Templates"):
@@ -120,7 +113,7 @@ def test_l2ft_dashboard_landing_renders_with_sheet_tabs(
 
 
 def test_l2ft_rails_sheet_renders_three_multiselect_dropdowns(
-    l2ft_driver: tuple[App2Driver, Any],
+    l2ft_driver: App2Driver,
 ) -> None:
     """Y.2.app2.cde.l2ft-wiring.b — the Rails sheet's filter bar carries
     the rail / status / bundle MULTI_SELECT dropdowns the tree-walk
@@ -130,9 +123,8 @@ def test_l2ft_rails_sheet_renders_three_multiselect_dropdowns(
     ``param_X`` attribute name is the URL key the fetcher receives — not
     a user-facing label, so ``driver.filter_labels()`` doesn't help.
     ``driver.page`` for the DOM probe."""
-    driver, tree_app = l2ft_driver
-    rails_id = _sheet_id_by_name(tree_app, "Rails")
-    driver.open(_DASHBOARD_ID, sheet=rails_id)
+    driver = l2ft_driver
+    driver.open(_DASHBOARD_ID, sheet="Rails")
     page = driver.page
     for param in ("pL2ftRail", "pL2ftStatus", "pL2ftBundle"):
         sel = page.locator(f'select[name="param_{param}"]')
@@ -146,14 +138,13 @@ def test_l2ft_rails_sheet_renders_three_multiselect_dropdowns(
 
 
 def test_l2ft_chains_sheet_renders_its_dropdowns(
-    l2ft_driver: tuple[App2Driver, Any],
+    l2ft_driver: App2Driver,
 ) -> None:
     """The Chains sheet carries its own auto-derived dropdowns. spec_example
     declares no chains, so the option lists may be empty — what matters is
     the ``<select multiple>`` widgets are present (wiring proof)."""
-    driver, tree_app = l2ft_driver
-    chains_id = _sheet_id_by_name(tree_app, "Chains")
-    driver.open(_DASHBOARD_ID, sheet=chains_id)
+    driver = l2ft_driver
+    driver.open(_DASHBOARD_ID, sheet="Chains")
     page = driver.page
     for param in ("pL2ftChainsChain", "pL2ftChainsCompletion"):
         sel = page.locator(f'select[name="param_{param}"]')
@@ -162,7 +153,7 @@ def test_l2ft_chains_sheet_renders_its_dropdowns(
 
 
 def test_l2ft_rail_dropdown_selection_refetches_with_param(
-    l2ft_driver: tuple[App2Driver, Any],
+    l2ft_driver: App2Driver,
 ) -> None:
     """Selecting a value in the rail multi-select fires a debounced refresh
     that re-fetches the sheet's visuals with ``param_pL2ftRail`` in the
@@ -173,9 +164,8 @@ def test_l2ft_rail_dropdown_selection_refetches_with_param(
     ``param_X`` attr-name shape isn't reachable via
     ``driver.pick_filter(label, ...)``); asserts on ``_calls_log`` (the
     fetcher's recorded URL params) for the wire-shape proof."""
-    driver, tree_app = l2ft_driver
-    rails_id = _sheet_id_by_name(tree_app, "Rails")
-    driver.open(_DASHBOARD_ID, sheet=rails_id)
+    driver = l2ft_driver
+    driver.open(_DASHBOARD_ID, sheet="Rails")
     page = driver.page
     # Wait past the initial auto-load fetch before clearing the log.
     page.wait_for_timeout(400)

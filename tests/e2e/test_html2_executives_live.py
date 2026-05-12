@@ -155,7 +155,7 @@ def test_account_coverage_kpi_renders_with_real_data(
     errors → no KPI), "renderer broken" (KPI value never appears), and
     "data layer empty" (KPI shows 0)."""
     driver = live_db_exec_driver.driver
-    driver.open(_DASHBOARD_ID, sheet="exec-sheet-account-coverage")
+    driver.open(_DASHBOARD_ID, sheet="Account Coverage")
     # Find a KPI title on the Account Coverage sheet to ask the driver
     # for its value. Tree-walk: the first KPI on the sheet.
     sheet = next(
@@ -201,7 +201,7 @@ def test_date_filter_does_not_error_when_applied(
     value is empty (the PG OR-short-circuit gotcha).
     """
     driver = live_db_exec_driver.driver
-    driver.open(_DASHBOARD_ID, sheet="exec-sheet-account-coverage")
+    driver.open(_DASHBOARD_ID, sheet="Account Coverage")
     sheet = next(
         s for s in live_db_exec_driver.tree_app.analysis.sheets
         if str(s.sheet_id) == "exec-sheet-account-coverage"
@@ -268,7 +268,7 @@ def _kpi_text_to_int(text: str) -> int:
 def _date_sensitive_count_kpis(
     tree_app: App,
 ) -> list[tuple[str, str, str]]:
-    """Walk the tree, return ``(sheet_id, visual_id, title)`` for every
+    """Walk the tree, return ``(sheet_name, visual_id, title)`` for every
     KPI whose underlying dataset SQL references ``:date_from`` AND whose
     measure aggregation is sum/count (i.e. value MUST drop as the window
     narrows).
@@ -302,7 +302,7 @@ def _date_sensitive_count_kpis(
             if ":date_from" not in base_sql:
                 continue
             results.append((
-                str(sheet.sheet_id),
+                sheet.name,  # protocol's open(sheet=) takes the sheet *name*
                 str(getattr(visual, "visual_id", "")),
                 str(getattr(visual, "title", "") or ""),
             ))
@@ -372,8 +372,8 @@ def test_date_filter_narrows_every_date_sensitive_count_kpi(
     narrow_to = narrow_from + timedelta(days=1)
 
     failures: list[str] = []
-    for sheet_id, visual_id, title in targets:
-        driver.open(_DASHBOARD_ID, sheet=sheet_id)
+    for sheet_name, visual_id, title in targets:
+        driver.open(_DASHBOARD_ID, sheet=sheet_name)
         driver.wait_loaded(title)
         # Wide window — full seed.
         driver.set_date_range(wide_from.isoformat(), wide_to.isoformat())
@@ -383,7 +383,7 @@ def test_date_filter_narrows_every_date_sensitive_count_kpi(
         driver.set_date_range(narrow_from.isoformat(), narrow_to.isoformat())
         narrow_text = driver.kpi_value(title) or ""
         narrow_value = _kpi_text_to_int(narrow_text)
-        label = f"{title!r} ({sheet_id}/{visual_id})"
+        label = f"{title!r} ({sheet_name}/{visual_id})"
         if wide_value <= 0:
             failures.append(
                 f"{label}: wide-window value is {wide_value} "

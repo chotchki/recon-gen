@@ -43,7 +43,7 @@ def test_showcase_table_rows(driver: DashboardDriver) -> None:
     """The Showcase sheet's Account Balances table shows page 1 — 10
     rows of {account_id, account_name, balance, status}, starting at
     acct-001. (Pure assertion on wrapped data — no DOM in the test.)"""
-    driver.open("smoke", sheet="showcase")
+    driver.open("smoke", sheet="Showcase")
     driver.wait_loaded("Account Balances")
     rows = driver.table_rows("Account Balances")
     assert len(rows) == 10
@@ -55,7 +55,7 @@ def test_showcase_table_rows(driver: DashboardDriver) -> None:
 
 
 def test_showcase_kpi_renders_a_value(driver: DashboardDriver) -> None:
-    driver.open("smoke", sheet="showcase")
+    driver.open("smoke", sheet="Showcase")
     driver.wait_loaded("Open Exceptions")
     value = driver.kpi_value("Open Exceptions")
     assert value is not None
@@ -65,7 +65,7 @@ def test_showcase_kpi_renders_a_value(driver: DashboardDriver) -> None:
 def test_showcase_lists_every_visual(driver: DashboardDriver) -> None:
     """Showcase = every renderer in one place (Sankey / ForceGraph /
     KPI / BarChart / LineChart / Table)."""
-    driver.open("smoke", sheet="showcase")
+    driver.open("smoke", sheet="Showcase")
     titles = driver.visual_titles()
     for expected in (
         "Chain Sankey",
@@ -91,7 +91,7 @@ def test_showcase_lists_every_visual(driver: DashboardDriver) -> None:
 
 
 def test_app2_pick_filter_changes_kpi(driver: DashboardDriver) -> None:
-    driver.open("smoke", sheet="showcase")
+    driver.open("smoke", sheet="Showcase")
     driver.wait_loaded("Open Exceptions")
     before = driver.kpi_value("Open Exceptions")
     driver.pick_filter("View", ["detail"])
@@ -102,7 +102,7 @@ def test_app2_pick_filter_changes_kpi(driver: DashboardDriver) -> None:
 
 
 def test_app2_clear_filters_resets_kpi(driver: DashboardDriver) -> None:
-    driver.open("smoke", sheet="showcase")
+    driver.open("smoke", sheet="Showcase")
     driver.wait_loaded("Open Exceptions")
     base = driver.kpi_value("Open Exceptions")
     driver.pick_filter("View", ["detail"])
@@ -116,7 +116,7 @@ def test_app2_clear_filters_resets_kpi(driver: DashboardDriver) -> None:
 def test_app2_set_date_range_and_slider_survive_refetch(
     driver: DashboardDriver,
 ) -> None:
-    driver.open("smoke", sheet="showcase")
+    driver.open("smoke", sheet="Showcase")
     driver.set_date_range("2030-01-01", "2030-01-31")
     driver.set_slider("Amount", 1000, 50_000)
     # Both verbs block on the re-fetch; the page is still a live dashboard.
@@ -126,7 +126,7 @@ def test_app2_set_date_range_and_slider_survive_refetch(
 def test_app2_filter_options_lists_dropdown_values(
     driver: DashboardDriver,
 ) -> None:
-    driver.open("smoke", sheet="showcase")
+    driver.open("smoke", sheet="Showcase")
     # The smoke app's "View" ParameterDropdown advertises these three.
     assert driver.filter_options("View") == ["summary", "detail", "drill"]
     # Multi-select reads the same way.
@@ -136,9 +136,9 @@ def test_app2_filter_options_lists_dropdown_values(
 
 
 def test_app2_goto_sheet(driver: DashboardDriver) -> None:
-    driver.open("smoke", sheet="money-trail")
+    driver.open("smoke", sheet="MoneyTrail")
     assert "Money Trail — Chain Sankey" in driver.visual_titles()
-    driver.goto_sheet("showcase")
+    driver.goto_sheet("Showcase")
     assert "Account Balances" in driver.visual_titles()
 
 
