@@ -1579,6 +1579,34 @@ def set_parameter_datetime_value(
     page.press(picker_selector, "Enter")
 
 
+def set_parameter_slider_value(
+    page: Page, control_title: str, value: float, timeout_ms: int,
+) -> None:
+    """Set a single-value ``ParameterSliderControl`` by its title.
+
+    QS renders each ParameterSliderControl as its own ``sheet_control``
+    card scoped by ``data-automation-context`` to the control title. The
+    card carries an MUI slider (a draggable thumb — fragile to drive
+    pixel-accurately in Playwright) AND a typable text box that commits
+    the value when it *loses focus* (typing alone doesn't take effect).
+    So the reliable path: find the one non-hidden ``<input>`` in the card
+    (the MUI slider's own ``<input type="hidden">`` value carrier is the
+    other one), fill it, blur it.
+
+    ``value`` is the numeric slider position — an int for the typical
+    step-1 control; rendered without a trailing ``.0``.
+    """
+    card_selector = (
+        f'[data-automation-id="sheet_control"]'
+        f'[data-automation-context="{control_title}"]'
+    )
+    page.wait_for_selector(card_selector, timeout=timeout_ms, state="visible")
+    loc = page.locator(f'{card_selector} input:not([type="hidden"])').first
+    loc.click(timeout=timeout_ms)
+    loc.fill(f"{value:g}", timeout=timeout_ms)
+    loc.blur(timeout=timeout_ms)  # the value only commits on focus-loss
+
+
 def set_slider_range(
     page: Page, control_title: str, low: int | None, high: int | None,
     timeout_ms: int,

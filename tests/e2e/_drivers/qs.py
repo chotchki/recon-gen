@@ -57,6 +57,7 @@ from quicksight_gen.common.browser.helpers import (
     scroll_visual_into_view,
     set_multi_select_values,
     set_parameter_datetime_value,
+    set_parameter_slider_value,
     sheet_control_titles,
     wait_for_dashboard_loaded,
     wait_for_dropdown_options_present,
@@ -458,10 +459,20 @@ class QsEmbedDriver:
         self, label: str, lo: float | None, hi: float | None,
     ) -> None:
         # Investigation's sliders are single-value ParameterSliderControls
-        # (not RANGE FilterSliderControls), and there's no DOM helper to
-        # drive that widget yet — the X.2.q follow-on. Until then this
-        # raises; the one test that wants it (test_inv_filters) is skipped.
-        raise NotImplementedError(_TODO + " (ParameterSliderControl)")
+        # (not two-bound RANGE FilterSliderControls). The protocol passes
+        # the value as ``lo`` (``hi=None``) for a one-handle slider — drive
+        # it via the card's typable text box (commits on focus-loss), then
+        # block until the dataset re-query lands.
+        value = lo if lo is not None else hi
+        if value is None:
+            raise ValueError(
+                f"set_slider({label!r}): no value — pass it as ``lo`` "
+                f"(``hi`` is unused for a single-handle ParameterSlider)."
+            )
+        set_parameter_slider_value(
+            self._page, label, value, self._page_timeout,
+        )
+        self._settle_after_param_change()
 
     def clear_filters(self) -> None:
         # Re-mint the embed URL and re-navigate — QS parameter controls
