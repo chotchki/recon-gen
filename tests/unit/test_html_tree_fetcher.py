@@ -257,6 +257,37 @@ def test_make_tree_db_fetcher_paginates_table(
     assert len(out3["rows"]) == 4  # only 4 rows exist
 
 
+def test_make_tree_db_fetcher_sorts_table(
+    aiosqlite_pool: AsyncConnectionPool,
+) -> None:
+    """X.2.h.5 — the renderer sends ``sort_column=<col>:<asc|desc>`` on a
+    header click; the fetcher applies ``ORDER BY <col> [DESC], 1`` and
+    echoes the *resolved* sort back. A garbage / injection ``sort_column``
+    falls back to ``ORDER BY 1`` and echoes ``""`` (and doesn't run the
+    garbage)."""
+    register_sql("x2g-test-ds", "SELECT status, amount FROM t")
+    app, _ds_node = _build_app_with_visuals()
+    fetcher = make_tree_db_fetcher(
+        app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
+    )
+    desc = asyncio.run(fetcher("v-tbl", {"sort_column": ["amount:desc"]}))
+    assert [r[1] for r in desc["rows"]] == [200, 100, 50, 25]
+    assert desc["sort_column"] == "amount:desc"
+    asc = asyncio.run(fetcher("v-tbl", {"sort_column": ["amount:asc"]}))
+    assert [r[1] for r in asc["rows"]] == [25, 50, 100, 200]
+    assert asc["sort_column"] == "amount:asc"
+    # Injection attempt → bare-identifier guard rejects it → ORDER BY 1
+    # (status asc), echo "" — and the DROP never reaches the DB.
+    safe = asyncio.run(
+        fetcher("v-tbl", {"sort_column": ["amount); DROP TABLE t; --:desc"]})
+    )
+    assert safe["sort_column"] == ""
+    assert [r[0] for r in safe["rows"]] == ["closed", "open", "open", "pending"]
+    # Sanity: table still there.
+    again = asyncio.run(fetcher("v-tbl", {}))
+    assert again["total_rows"] == 4
+
+
 def test_make_tree_db_fetcher_substitutes_filters(
     aiosqlite_pool: AsyncConnectionPool,
 ) -> None:
