@@ -42,12 +42,27 @@ def walk_dropdown(
     sheet_label: str,
     dropdown_title: str,
     table_title: str,
+    require_all_advertised: bool = True,
 ) -> None:
     """For each advertised option of ``dropdown_title`` on the current
     sheet, pick only that value and assert ``table_title`` keeps > 0
     rows. ``pytest.skip`` if the dropdown is empty, or if the table
     starts empty (the deployed L2 has nothing in that sheet's matview to
-    exercise — the empty-sheet render is covered by the render tests)."""
+    exercise — the empty-sheet render is covered by the render tests).
+
+    ``require_all_advertised`` (default ``True``) — when every advertised
+    value *must* have backing data (L2-declared values like Rail / Chain /
+    Template names; baseline-seeded enums like Status / Bundle), a value
+    that empties the table is a regression (stale enum / missing plants /
+    pushdown break). Pass ``False`` for a **universal-outcome enum**
+    (chain/template ``completion_status`` ∈ {Complete, Imbalanced,
+    Orphaned}) where which outcomes occur depends on the L2's template /
+    chain structure — a given demo legitimately may not exercise all of
+    them (e.g. a SingleLegRail-first template only ever fires
+    'Imbalanced'). In that mode the assertion is just "the dropdown isn't
+    *entirely* dead" — ≥1 advertised value keeps the table non-empty;
+    QS would show the same gaps (parity is fine), and enriching the demo
+    so all outcomes occur is a separate demo-quality task."""
     options = driver.filter_options(dropdown_title)
     if not options:
         pytest.skip(
@@ -73,10 +88,19 @@ def walk_dropdown(
         if len(driver.table_rows(table_title)) <= 0:
             failures.append(option)
 
-    assert not failures, (
-        f"{table_title!r} went empty after picking these "
-        f"{dropdown_title!r} values: {failures}. Either the dropdown "
-        f"advertises an option with no matching seed data (stale enum / "
-        f"new YAML value missing plants / data seeding bug) or the X.1.g "
-        f"param-bound narrowing regressed."
-    )
+    if require_all_advertised:
+        assert not failures, (
+            f"{table_title!r} went empty after picking these "
+            f"{dropdown_title!r} values: {failures}. Either the dropdown "
+            f"advertises an option with no matching seed data (stale enum / "
+            f"new YAML value missing plants / data seeding bug) or the X.1.g "
+            f"param-bound narrowing regressed."
+        )
+    else:
+        assert len(failures) < len(options), (
+            f"{table_title!r} went empty after picking EVERY advertised "
+            f"{dropdown_title!r} value ({failures}) — the dropdown is "
+            f"entirely dead. (This is a universal-outcome enum so a given "
+            f"demo may not exercise all values, but it must exercise at "
+            f"least one — and the X.1.g param-bound narrowing must work.)"
+        )

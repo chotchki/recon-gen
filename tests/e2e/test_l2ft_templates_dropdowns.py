@@ -45,4 +45,9 @@ def test_templates_dropdown_narrows_does_not_empty(
         sheet_label="Transfer Templates",
         dropdown_title=dropdown_title,
         table_title="Template Instances",
+        # "Completion" is a universal-outcome enum (Complete / Imbalanced /
+        # Orphaned) — which occur depends on the template's structure (a
+        # SingleLegRail-first template only ever fires 'Imbalanced'); require
+        # ≥1, not all. "Template" is an L2-declared name → strict.
+        require_all_advertised=(dropdown_title != "Completion"),
     )

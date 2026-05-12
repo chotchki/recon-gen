@@ -42,4 +42,9 @@ def test_chains_dropdown_narrows_does_not_empty(
         sheet_label="Chains",
         dropdown_title=dropdown_title,
         table_title="Chain Instances",
+        # "Completion" is a universal-outcome enum (Completed / Incomplete /
+        # No Required Children) — which outcomes occur depends on the L2's
+        # chain structure; require ≥1, not all. "Chain" is an L2-declared
+        # parent name → every value must have data (strict).
+        require_all_advertised=(dropdown_title != "Completion"),
     )
