@@ -20,6 +20,8 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 def test_exec_dashboard_structure_matches_tree(exec_dashboard_driver, exec_app) -> None:
     driver, dashboard_arg = exec_dashboard_driver
+    # App 2 is local + fast — see test_l1_sheet_visuals for the rationale.
+    timeout_ms = 12_000 if driver.dialect == "app2" else 30_000
     driver.open(dashboard_arg)
-    TreeValidator(exec_app, driver).validate_structure()
+    TreeValidator(exec_app, driver, timeout_ms=timeout_ms).validate_structure()
     driver.screenshot()

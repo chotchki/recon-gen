@@ -32,8 +32,10 @@ L1_VISUAL_TIMEOUT_MS = 90_000
 
 def test_l1_dashboard_structure_matches_tree(l1_dashboard_driver, l1_app) -> None:
     driver, dashboard_arg = l1_dashboard_driver
+    # App 2 is a local server — anything not loaded in ~12 s is a 500 /
+    # broken visual, not a cold-start; the 90 s budget is QS-deploy-fresh
+    # only (a failing app2 cell otherwise burns 90 s × every broken visual).
+    timeout_ms = 12_000 if driver.dialect == "app2" else L1_VISUAL_TIMEOUT_MS
     driver.open(dashboard_arg)
-    TreeValidator(
-        l1_app, driver, timeout_ms=L1_VISUAL_TIMEOUT_MS,
-    ).validate_structure()
+    TreeValidator(l1_app, driver, timeout_ms=timeout_ms).validate_structure()
     driver.screenshot()
