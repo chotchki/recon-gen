@@ -1,33 +1,46 @@
-"""U.8.b — Three-way agreement test (release gate, both dialects).
+"""U.8.b / X.2.j.B — 4-way cross-tool agreement test (release gate).
 
-Per-invariant contract for U.8.b's release gate:
-    expected (from scenario) == PDF (extractor) == dashboard (Playwright)
+Per-invariant contract — the chain
 
-Parametrized over both dialects (U.8.b.5): each invariant×dialect
-cell seeds the dialect-specific DB, renders the audit PDF against
-that DB, and walks the dashboard deployed under that dialect's
-resource prefix.
+    scenario_plants  ⊆  direct_matview_SELECT  ==  QS  ==  App2
+                                   (==  PDF, drift only)
 
-Prerequisites (test skips per-dialect if missing):
-  - ``QS_GEN_E2E=1`` (matches existing browser-test gate)
-  - ``run/config.<dialect>.yaml`` exists with ``demo_database_url``
-    set; missing config OR missing DB URL skips that dialect cell
-    cleanly (the other dialect still runs)
-  - The L1 dashboard for the default L2 instance (``spec_example``)
-    is already deployed under the dialect's resource prefix:
-        Postgres: ``qs-gen-postgres-spec_example-l1-dashboard``
-        Oracle:   ``qs-gen-oracle-spec_example-l1-dashboard``
-    A missing dashboard skips the dialect's cells with the deploy
-    command needed to fix it. ``json apply --execute -c
-    run/config.<dialect>.yaml`` against ``spec_example`` is the
-    canonical pre-step; CI runs both cells in parallel via
-    separate ``-c run/config.{postgres,oracle}.yaml`` invocations.
+four renderers (the audit PDF, the deployed QuickSight dashboard, the
+self-hosted App 2 HTMX dashboard) plus a direct ``SELECT`` against the
+L1-invariant matview as the ground-truth anchor, all reading the *same*
+seeded DB. For the flat-shape invariants (drift / overdraft /
+limit_breach) the agreement tightens to row-identity — the *set* of
+natural-key tuples, not just the count. Catches "every renderer
+individually passed but they disagree on a violation row".
+
+Parametrized over both dialects (U.8.b.5): each invariant×dialect cell
+seeds the dialect-specific DB, renders the audit PDF against it, queries
+the matview straight off it, walks the QS dashboard deployed under that
+dialect's resource prefix, and serves the App 2 L1 tree against it. The
+contract shape was locked by the X.2.j.0 spike — see
+``docs/audits/x_2_j_agreement_spike.md``.
+
+**Per-leg degradation, not per-test skip (X.2.j.C):** a missing prereq
+disables one *leg*, not the whole test:
+  - ``QS_GEN_E2E=1`` gates the whole module (the existing browser-test
+    gate).
+  - ``run/config.<dialect>.yaml`` absent / no ``demo_database_url`` →
+    that dialect cell skips (the other dialect still runs).
+  - The L1 dashboard not deployed for this dialect (a SQLite cell has
+    none) OR ``QS_E2E_USER_ARN`` unset → the QS leg yields ``None``; the
+    test runs as a 3-way ``scenario ⊆ direct == App2`` + PDF. CI deploys
+    ``spec_example`` first via ``quicksight-gen json apply --execute -c
+    run/config.<dialect>.yaml --l2 tests/l2/spec_example.yaml``; the QS
+    leg parametrizes to PG only there.
+  - ``supersession`` has no clean matview (the dashboard's "Transactions
+    Audit" table + the audit PDF each query their own shape over the
+    base tables) — it gets no direct-SQL anchor; the renderers must
+    still agree with *each other*.
 
 The scenario seed runs against the real ``demo_database_url`` —
-DESTRUCTIVE for the ``spec_example_*`` prefix on each dialect's
-DB. Other prefixes (the operator's actual data) are untouched
-because the schema apply only drops + recreates the prefixed
-objects.
+DESTRUCTIVE for the ``spec_example_*`` prefix on each dialect's DB.
+Other prefixes (the operator's actual data) are untouched because the
+schema apply only drops + recreates the prefixed objects.
 
 Anchors on ``date.today()`` (not the M.2a.8 hash-lock 2030 date):
 the stuck_pending / stuck_unbundled matviews compute age via
@@ -50,10 +63,19 @@ from quicksight_gen.common.db import connect_demo_db
 from quicksight_gen.common.l2 import load_instance
 from quicksight_gen.common.sql import Dialect
 
-from tests.audit._dashboard_extract import count_l1_invariant_rows
+from tests.audit._dashboard_extract import (
+    count_l1_invariant_rows,
+    key_columns_for,
+    l1_invariant_row_keys,
+    l1_invariant_rows_seen,
+)
+from tests.audit._matview_extract import (
+    count_l1_invariant_matview_rows,
+    l1_invariant_matview_row_keys,
+)
 from tests.audit._pdf_extract import count_invariant_table_rows
 from tests.audit._scenario_expectations import expected_audit_counts
-from tests.e2e._drivers import QsEmbedDriver
+from tests.e2e._drivers import App2Driver, QsEmbedDriver
 
 
 pytestmark = [
@@ -349,35 +371,143 @@ def per_dialect_qs_driver(
     the fold and ``table_row_count`` (the page-size-bump path) needs
     the .grid-container close enough to the viewport to scroll into.
 
-    Skips cleanly when ``QS_E2E_USER_ARN`` is unset (the runner derives
-    it from ``cfg.auth.aws_profile``; export it for a direct ``pytest``
-    run).
+    **Yields ``None`` (does NOT skip the test) when the QS leg can't run**
+    — ``QS_E2E_USER_ARN`` unset (the runner derives it from
+    ``cfg.auth.aws_profile``; export it for a direct ``pytest`` run), or
+    the L1 dashboard isn't deployed for this dialect (a SQLite cell has
+    no QS dashboard by construction). The 4-way test then runs the other
+    legs — direct-SQL + App2 + PDF — as a clean 3-way. (X.2.j.C: per-leg
+    skipping, not per-test.)
     """
     from quicksight_gen.common.browser.helpers import get_user_arn
 
     try:
         get_user_arn()
-    except RuntimeError as exc:
-        pytest.skip(str(exc))
+    except RuntimeError:
+        yield None  # QS leg unavailable — test runs the other legs
+        return
     try:
         per_dialect_qs_client.describe_dashboard(
             AwsAccountId=per_dialect_account_id,
             DashboardId=per_dialect_l1_dashboard_id,
         )
     except per_dialect_qs_client.exceptions.ResourceNotFoundException:
-        pytest.skip(
-            f"L1 dashboard {per_dialect_l1_dashboard_id!r} not deployed "
-            f"in account {per_dialect_account_id} region "
-            f"{per_dialect_region}. Deploy it first: `quicksight-gen "
-            f"json apply -c <dialect-config> --execute --l2 "
-            f"tests/l2/spec_example.yaml`, then re-run this test."
-        )
+        # Not deployed for this dialect (e.g. SQLite — no QS datasource).
+        # The other legs still run; CI deploys spec_example before this
+        # test via `quicksight-gen json apply -c <dialect-config> --execute
+        # --l2 tests/l2/spec_example.yaml`.
+        yield None
+        return
     with QsEmbedDriver.embed(
         aws_account_id=per_dialect_account_id,
         aws_region=per_dialect_region,
         viewport=(1600, 4000),
     ) as driver:
         yield driver
+
+
+@pytest.fixture(scope="module")
+def per_dialect_matview_prefix() -> str:
+    """The matview-name prefix this dialect cell's DB was seeded with —
+    ``<instance.instance>`` (the L2 instance code, NOT the QS resource
+    prefix). The L1-invariant matviews are ``<prefix>_drift`` /
+    ``<prefix>_overdraft`` / ``<prefix>_limit_breach`` / etc. — the
+    direct-SQL anchor (X.2.j.B.2) queries those straight off the DB."""
+    return str(load_instance(_l2_yaml_for_test()).instance)
+
+
+@pytest.fixture
+def per_dialect_conn(per_dialect_cfg):  # type: ignore[no-untyped-def]: yields a per-driver DB connection (psycopg/oracledb/sqlite3) — no shared type
+    """Function-scoped raw DB connection to this dialect cell's seeded DB.
+
+    The direct-SQL anchor (the 5th leg in ``scenario ⊆ direct_SQL ==
+    PDF == QS == App2``) needs to ``SELECT`` from the matviews; the
+    ``seeded_audit`` fixture's own conn is closed by the time the asserts
+    run, so this opens a fresh one per test (cheap — a handful of
+    ``count(*)`` / key-set queries)."""
+    conn = connect_demo_db(per_dialect_cfg)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+@pytest.fixture(scope="module")
+def per_dialect_app2_results(per_dialect_cfg, seeded_audit):  # type: ignore[no-untyped-def]: returns a dict; annotating would force the imports below to module scope
+    """The App2 leg's data, read once up-front (X.2.j.B.1).
+
+    Spins this dialect cell's L1 dashboard tree via ``App2Driver.serving``
+    against the seeded DB, walks every L1-invariant sheet, collects each
+    one's row count (+ DOM-window size + natural-key set for the
+    flat-shape invariants), then **tears the App2 server + browser down
+    before returning** — so the per-test ``per_dialect_qs_driver`` (a
+    *second* Playwright sync context) doesn't collide with App2's. Sync
+    Playwright is one-context-per-thread: two open at once → "Playwright
+    Sync API inside the asyncio loop". The original module-scoped
+    *live-driver* fixture held App2's context open across all 6 tests,
+    which blew up the QS leg on a real deploy (the leg auto-skipped
+    locally — no deployed dashboard — so it slipped through; the Aurora
+    cell caught it). Reading the App2 data up-front and yielding a plain
+    dict sidesteps it entirely.
+
+    Per-invariant entry: ``{"count": int}`` for the divergent-shape ones,
+    plus ``"seen": int`` (the DOM-visible row count, for the truncation
+    guard) and ``"keys": set`` (the natural-key set, for row-identity)
+    for the flat-shape ones.
+
+    Depends on ``seeded_audit`` so the seed lands before the reads.
+    Module-scoped — the seed + the 6-sheet walk is the expensive setup.
+    Built the same way ``cli/serve.py::_build_real_app`` does (register L1
+    datasets → build tree → live-DB ``(visual, options)`` fetcher pair off
+    one pool; ``make_live_db_fetchers_for_app`` — the *plural*, since the
+    L1 dashboard has dataset-sourced dropdowns).
+    """
+    _ = seeded_audit  # ordering dep only — see docstring
+    from quicksight_gen.apps.l1_dashboard.app import build_l1_dashboard_app
+    from quicksight_gen.apps.l1_dashboard.datasets import (
+        build_all_l1_dashboard_datasets,
+    )
+    from tests.e2e._harness_html2 import make_live_db_fetchers_for_app
+
+    instance = load_instance(_l2_yaml_for_test())
+    build_all_l1_dashboard_datasets(per_dialect_cfg, instance)
+    tree_app = build_l1_dashboard_app(per_dialect_cfg, l2_instance=instance)
+    if tree_app.analysis is None:
+        tree_app.emit_analysis()
+    visual_fetcher, options_fetcher = make_live_db_fetchers_for_app(
+        tree_app=tree_app, cfg=per_dialect_cfg,
+    )
+    results: dict[str, dict[str, object]] = {}
+    with App2Driver.serving(
+        tree_app=tree_app, sheet=tree_app.analysis.sheets[0],
+        data_fetcher=visual_fetcher, options_fetcher=options_fetcher,
+        dashboard_id="l1", dashboard_title="L1 Dashboard",
+    ) as driver:
+        driver.open("l1")
+        for inv in _ALL_INVARIANTS:
+            entry: dict[str, object] = {
+                "count": count_l1_invariant_rows(driver, inv, _PERIOD),
+            }
+            if inv in _FLAT_SHAPE:
+                entry["seen"] = l1_invariant_rows_seen(driver, inv, _PERIOD)
+                entry["keys"] = l1_invariant_row_keys(driver, inv, _PERIOD)
+            results[inv] = entry
+    # App2 server + browser torn down by the ``with`` exit — the returned
+    # dict holds everything the per-test asserts need; no live driver
+    # lingers to collide with ``per_dialect_qs_driver``.
+    return results
+
+
+# Flat-shape invariants — one matview row per (account, day[, transfer_type]),
+# and the dashboard table + audit PDF section show that same flat row set.
+# For these the 4-way assert tightens to row-identity (the natural-key
+# set), not just a count. The rest (stuck_* / supersession) are
+# divergent-shape — the PDF aggregates into roll-up tables while the QS +
+# App2 detail tables show raw matview rows — so those stay count-level
+# (the renderers still must agree with the matview ground truth on the
+# count; only the PDF count diverges, and only `pdf_count >= expected`
+# is asserted for it there).
+_FLAT_SHAPE: frozenset[str] = frozenset({"drift", "overdraft", "limit_breach"})
 
 
 # All 6 L1 invariants. The current-state invariants
@@ -401,84 +531,220 @@ _ALL_INVARIANTS: tuple[str, ...] = (
 
 
 @pytest.mark.parametrize("invariant", _ALL_INVARIANTS)
-def test_invariant_three_way_agreement(
-    seeded_audit, per_dialect_qs_driver, per_dialect_l1_dashboard_id,
+def test_invariant_four_way_agreement(
+    seeded_audit,
+    per_dialect_qs_driver,
+    per_dialect_app2_results,
+    per_dialect_l1_dashboard_id,
+    per_dialect_conn,
+    per_dialect_matview_prefix,
+    per_dialect_cfg,
     invariant,
 ):
-    """Per-invariant: PDF count and dashboard count both >= expected
-    count, AND PDF count == dashboard count.
+    """Per-invariant 4-renderer agreement (X.2.j.B): the chain
 
-    Three asserts so a failure points at WHICH side broke:
-      - expected > PDF: producer-side regression (SQL / matview /
-        PDF rendering pipeline drifted from what the plant emitted)
-      - expected > dashboard: same producer side, different output
-        target (the dashboard reads the same matview, so unless QS
-        is doing something exotic the numbers should match)
-      - PDF != dashboard: the credibility contract broke directly —
-        regulator and operator are seeing different numbers for the
-        same matview + period
+        scenario_plants  ⊆  direct_matview_SELECT  ==  QS  ==  App2
+                                       (==  PDF, flat-shape only)
 
-    NOTE on the strict ``PDF == dashboard`` assert: this works for
-    drift because the PDF section and the dashboard's "Leaf Account
-    Drift" table both show every drift matview row in one flat
-    table. For other invariants the shapes diverge — the PDF
-    aggregates parent + child accounts into a parent-per-row table
-    + a "Child Accounts Grouped by Parent Role" table while the
-    dashboard typically shows raw matview rows on its detail
-    table. Where these counts diverge, it's a data-shape contract
-    mismatch worth investigating, not necessarily a bug. U.8.b.4
-    runs all 6 to surface every shape mismatch as concrete data;
-    U.8.b's future work then either aligns the shapes or shifts
-    the assert to row-identity matching (account_id + day) instead
-    of count.
+    plus, for the flat-shape invariants (drift / overdraft / limit_breach),
+    row-identity — the *set* of natural-key tuples, not just the count, so
+    "same count, different rows" can't slip through.
+
+    Anchors (5 of them; the 4 *renderers* + the scenario lower bound):
+
+    - **scenario plants** (`expected_audit_counts`) — a *lower bound*.
+      It's `⊆`, not `==`: a planted scenario can produce incidental
+      same-class rows as a side-effect (the X.2.j.0 spike saw
+      `drift_count=1` planted but 2 in the matview).
+    - **direct matview SELECT** (`_matview_extract`) — the ground truth.
+      Every renderer reads this matview; a renderer that shows a
+      different count/row-set than a direct `SELECT` is buggy.
+    - **audit PDF** (`_pdf_extract`) — count-only (the heuristic text
+      parse gives a count, not row keys). `pdf >= expected` for every
+      invariant; `pdf == direct` only for `drift` (the PDF section is a
+      flat one-row-per-matview-row table there; for the others the PDF
+      aggregates into parent-per-row + child-grouped roll-ups, so its
+      count legitimately differs from the matview's).
+    - **QS dashboard** (`_dashboard_extract` via `QsEmbedDriver`) — count
+      via the page-size-bump path; row-keys via `table_rows` (the
+      plants-only seed keeps these tables tiny, so the DOM window holds
+      the full set — asserted via `l1_invariant_rows_seen` before
+      trusting the key set).
+    - **App2 dashboard** (`_dashboard_extract` via `App2Driver`) — same
+      verbs (both speak `DashboardDriver`); count via `.table-pager-range`,
+      row-keys via `table_rows`.
+
+    Row-identity scope (X.2.j.B.3): flat-shape gets `scenario_keys ⊆
+    direct_keys == App2_keys`, and additionally `== QS_keys` for `drift`
+    (the QS Drift table's `business_day_start` column projection is the
+    one the X.2.j.0 spike concretely verified; extending the QS-side key
+    comparison to overdraft / limit_breach is `X.2.j.B.3-followon` — it
+    needs a deployed dashboard to confirm those tables' day-column
+    projection). Divergent-shape (stuck_* / supersession) stays
+    count-level: `direct == QS == App2` and `… >= expected`.
+
+    Skips degrade per-leg, not per-test: a missing QS deploy skips the QS
+    *driver* fixture only — the direct-SQL + App2 + PDF legs still run
+    (so e.g. a SQLite cell, which has no QS dashboard, becomes a clean
+    3-way `scenario ⊆ direct == PDF* == App2`).
     """
-    pdf_path, scenario = seeded_audit
-    expected = getattr(
-        expected_audit_counts(scenario, _PERIOD), f"{invariant}_count",
-    )
-    pdf_count = count_invariant_table_rows(pdf_path, invariant)
+    from tests.audit._matview_extract import MATVIEW_ANCHORED
 
-    # The driver fixture's tall viewport keeps the detail table inside
+    pdf_path, scenario = seeded_audit
+    expected_obj = expected_audit_counts(scenario, _PERIOD)
+    expected: int = getattr(expected_obj, f"{invariant}_count")
+    is_flat = invariant in _FLAT_SHAPE
+
+    # --- the ground-truth anchor: a direct SELECT against the matview ---
+    # Flat-shape matviews carry a day column → narrow to the audit period;
+    # stuck_* matviews have none → unfiltered. ``supersession`` has no
+    # clean matview (the dashboard's "Transactions Audit" table + the
+    # audit PDF each query their own shape over the base tables), so it
+    # gets no direct-SQL anchor — the renderers must still agree with
+    # each other (asserted below).
+    direct_count: int | None = None
+    if invariant in MATVIEW_ANCHORED:
+        period_for_matview = _PERIOD if is_flat else None
+        direct_count = count_l1_invariant_matview_rows(
+            per_dialect_conn, per_dialect_matview_prefix, invariant,
+            period_for_matview, per_dialect_cfg.dialect,
+        )
+
+    # --- the PDF + the two dashboard renderers ---
+    pdf_count = count_invariant_table_rows(pdf_path, invariant)
+    app2 = per_dialect_app2_results[invariant]
+    app2_count = int(app2["count"])  # type: ignore[call-overload]: dict value is `object`; it's an int by construction in the fixture
+    # The QS leg is optional — the fixture yields ``None`` when QS isn't
+    # available for this dialect (SQLite cell, or QS_E2E_USER_ARN unset).
+    # The QS driver fixture's tall viewport keeps the detail table inside
     # the initial render area; ``count_l1_invariant_rows`` then handles
     # the per-invariant sheet switch + date-filter application + page-
-    # size-bump-aware row count via the ``DashboardDriver`` verbs.
-    per_dialect_qs_driver.open(per_dialect_l1_dashboard_id)
-    dashboard_count = count_l1_invariant_rows(
-        per_dialect_qs_driver, invariant, _PERIOD,
-    )
+    # size-bump-aware total via the ``DashboardDriver`` verbs.
+    qs_count: int | None = None
+    if per_dialect_qs_driver is not None:
+        per_dialect_qs_driver.open(per_dialect_l1_dashboard_id)
+        qs_count = count_l1_invariant_rows(
+            per_dialect_qs_driver, invariant, _PERIOD,
+        )
 
+    # --- producer-side lower bounds (a failure here = the plant didn't
+    # reach the matview, or a renderer dropped a row the matview holds) ---
+    if direct_count is not None:
+        assert direct_count >= expected, (
+            f"Producer-side regression ({invariant}): scenario planted "
+            f"{expected} rows but the {per_dialect_matview_prefix}_{invariant} "
+            f"matview holds only {direct_count} for the period. Plant didn't "
+            f"reach the matview, or the matview SQL drifted from the plant."
+        )
     assert pdf_count >= expected, (
         f"Producer-side regression ({invariant}): scenario planted "
-        f"{expected} rows but PDF shows only {pdf_count}. Plant "
-        f"didn't reach the matview, or audit query / PDF render "
+        f"{expected} rows but the PDF shows only {pdf_count}. Plant "
+        f"didn't reach the matview, or the audit query / PDF render "
         f"dropped the row."
     )
-    assert dashboard_count >= expected, (
+    assert app2_count >= expected, (
         f"Producer-side regression ({invariant}): scenario planted "
-        f"{expected} rows but dashboard shows only {dashboard_count}. "
-        f"Plant didn't reach the matview."
+        f"{expected} rows but the App2 dashboard shows only {app2_count}."
     )
-    # Strict ``dashboard == PDF`` only holds for ``drift``: there the
-    # PDF's "Leaf Account Drift" section and the dashboard's "Leaf
-    # Account Drift" table are the same shape (one flat row per drift
-    # matview row). For the other invariants the shapes diverge — the
-    # PDF aggregates (e.g. supersession is a count-by-table+category
-    # roll-up, 3 rows for the spec scenario) while the dashboard shows
-    # raw matview rows (supersession's "Transactions Audit" table = one
-    # row per affected transaction, 34+ at the live data density).
-    # `dashboard == PDF` for those would only ever pass by coincidence
-    # of density — it "passed" at m.5.d because the seed then happened
-    # to give exactly 3 supersession txns; it broke once the density
-    # rose. The `>= expected` asserts above ARE the meaningful
-    # producer-side check for every invariant; the strict equality is
-    # the credibility contract and is meaningful only where the shapes
-    # match. Follow-up (Y.7 / PLAN): widen this to row-identity
-    # matching (account_id + day) for the divergent-shape invariants
-    # instead of count, per the test docstring.
-    if invariant == "drift":
-        assert dashboard_count == pdf_count, (
-            f"Credibility contract broken ({invariant}): dashboard "
-            f"shows {dashboard_count} rows, PDF shows {pdf_count}. "
-            f"Same period ({_PERIOD[0]}–{_PERIOD[1]}), same matview, "
-            f"different counts."
+    if qs_count is not None:
+        assert qs_count >= expected, (
+            f"Producer-side regression ({invariant}): scenario planted "
+            f"{expected} rows but the QS dashboard shows only {qs_count}."
+        )
+
+    # --- the renderers agree (with the matview ground truth, and with
+    # each other) ---
+    if direct_count is not None:
+        # QS + App2 each read the same matview; both detail tables show
+        # its raw rows, so both counts must equal a direct SELECT.
+        if qs_count is not None:
+            assert qs_count == direct_count, (
+                f"Renderer disagrees with the matview ({invariant}, QS): the "
+                f"dashboard shows {qs_count} rows, a direct SELECT against "
+                f"{per_dialect_matview_prefix}_{invariant} shows {direct_count}. "
+                f"Same period ({_PERIOD[0]}–{_PERIOD[1]}), same matview."
+            )
+        assert app2_count == direct_count, (
+            f"Renderer disagrees with the matview ({invariant}, App2): the "
+            f"dashboard shows {app2_count} rows, a direct SELECT shows "
+            f"{direct_count}. Same period, same matview."
+        )
+    elif qs_count is not None:
+        # supersession — no matview anchor, but the two renderers query
+        # the same base-table shape, so they must still agree.
+        assert qs_count == app2_count, (
+            f"Renderers disagree ({invariant}): QS shows {qs_count} rows, "
+            f"App2 shows {app2_count}. Same base tables, same query shape."
+        )
+    # The PDF section is a flat one-row-per-matview-row table only for
+    # ``drift``; for the others it aggregates (parent-per-row + child-
+    # grouped roll-ups; supersession is a count-by-table+category roll-up)
+    # so its count legitimately differs from the matview's — `pdf >=
+    # expected` above is the meaningful PDF check there.
+    if invariant == "drift" and direct_count is not None:
+        assert pdf_count == direct_count, (
+            f"Credibility contract broken ({invariant}): the audit PDF "
+            f"shows {pdf_count} rows, the matview holds {direct_count}. "
+            f"Same period ({_PERIOD[0]}–{_PERIOD[1]}). The regulator-facing "
+            f"PDF and the live matview disagree."
+        )
+
+    if not is_flat:
+        return
+
+    # --- row-identity for the flat-shape invariants (X.2.j.B.3) ---
+    # ``table_rows`` returns the renderer's DOM-visible window — confirm
+    # it wasn't truncated before trusting the key sets. (Plants-only seed
+    # keeps these tables tiny; a denser seed that grows them past the
+    # window trips this loudly rather than passing a partial comparison.)
+    # App2's ``seen`` / ``keys`` were captured up-front by
+    # ``per_dialect_app2_results`` (the App2 server + browser are torn
+    # down by the time this test runs — see that fixture's docstring).
+    app2_seen = int(app2["seen"])  # type: ignore[call-overload]: dict value is `object`; int by construction (flat-shape entry)
+    assert app2_seen == direct_count, (
+        f"App2 table window truncated ({invariant}): {app2_seen} of "
+        f"{direct_count} rows visible — the row-identity comparison would "
+        f"be partial. (A denser seed needs a read-all path.)"
+    )
+
+    key_cols = key_columns_for(invariant)
+    direct_keys = l1_invariant_matview_row_keys(
+        per_dialect_conn, per_dialect_matview_prefix, invariant,
+        _PERIOD, per_dialect_cfg.dialect,
+    )
+    app2_keys = app2["keys"]  # set[tuple[...]] by construction (flat-shape entry)
+    scenario_keys = set(getattr(expected_obj, f"{invariant}_account_days"))
+
+    assert scenario_keys <= direct_keys, (
+        f"Planted {invariant} rows missing from the matview "
+        f"({per_dialect_matview_prefix}_{invariant}): "
+        f"{sorted(scenario_keys - direct_keys)} planted but absent. "
+        f"Plant→matview gap."
+    )
+    assert direct_keys == app2_keys, (
+        f"App2 disagrees with the matview on which {invariant} rows "
+        f"({key_cols}): matview has {sorted(direct_keys)}, App2 shows "
+        f"{sorted(app2_keys)}."
+    )
+    if invariant == "drift" and per_dialect_qs_driver is not None:
+        # The QS Drift table's ``business_day_start`` projection is
+        # spike-verified; extending the QS-side row-identity comparison
+        # to overdraft / limit_breach is X.2.j.B.3-followon (needs a
+        # deployed dashboard to confirm those tables' day-column
+        # projection — the QS count + the App2 row-identity already cover
+        # the bulk).
+        qs_seen = l1_invariant_rows_seen(
+            per_dialect_qs_driver, invariant, _PERIOD,
+        )
+        assert qs_seen == direct_count, (
+            f"QS table window truncated ({invariant}): {qs_seen} of "
+            f"{direct_count} rows visible."
+        )
+        qs_keys = l1_invariant_row_keys(
+            per_dialect_qs_driver, invariant, _PERIOD,
+        )
+        assert direct_keys == qs_keys, (
+            f"QS disagrees with the matview on which {invariant} rows "
+            f"({key_cols}): matview has {sorted(direct_keys)}, QS shows "
+            f"{sorted(qs_keys)}."
         )

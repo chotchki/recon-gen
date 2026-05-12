@@ -27,7 +27,7 @@ class TestPostgres:
     def test_uses_sentinel_dates(self):
         sql = app2_date_filter("t.posting", Dialect.POSTGRES)
         assert "1900-01-01" in sql
-        assert "9999-12-31" in sql
+        assert "9999-12-30" in sql
 
     def test_leading_AND(self):
         sql = app2_date_filter("t.posting", Dialect.POSTGRES)
@@ -53,7 +53,7 @@ class TestOracle:
     def test_uses_sentinel_dates(self):
         sql = app2_date_filter("t.posting", Dialect.ORACLE)
         assert "1900-01-01" in sql
-        assert "9999-12-31" in sql
+        assert "9999-12-30" in sql
 
 
 class TestSQLite:
@@ -72,7 +72,7 @@ class TestSQLite:
     def test_uses_sentinel_dates(self):
         sql = app2_date_filter("t.posting", Dialect.SQLITE)
         assert "1900-01-01" in sql
-        assert "9999-12-31" in sql
+        assert "9999-12-30" in sql
 
 
 class TestColumnInterpolation:
@@ -80,4 +80,33 @@ class TestColumnInterpolation:
         for dialect in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.SQLITE):
             sql = app2_date_filter("t.posting", dialect)
             assert "t.posting" in sql
-            assert sql.count("t.posting") == 2  # >= and <= clauses
+            assert sql.count("t.posting") == 2  # >= lower and < upper clauses
+
+
+class TestDayInclusiveUpperBound:
+    """X.2.j.dateparity — the upper bound is exclusive-of-the-next-day
+    (``column < date_to + 1 day``), not ``column <= date_to``, so a
+    same-day non-midnight ``TIMESTAMP`` row is included — matching
+    QuickSight's DAY-granularity ``TimeRangeFilter``. Regression guard
+    against re-introducing the ``<=`` form."""
+
+    def test_upper_bound_is_strict_less_than(self):
+        for dialect in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.SQLITE):
+            sql = app2_date_filter("t.posting", dialect)
+            assert "t.posting <" in sql, sql
+            # The old buggy form.
+            assert "t.posting <=" not in sql, sql
+
+    def test_postgres_adds_one_day_interval(self):
+        sql = app2_date_filter("t.posting", Dialect.POSTGRES)
+        assert "+ INTERVAL '1 day'" in sql
+
+    def test_oracle_adds_one(self):
+        sql = app2_date_filter("t.posting", Dialect.ORACLE)
+        # ``TO_DATE(...) + 1`` adds a day on Oracle DATE arithmetic.
+        assert "'YYYY-MM-DD') + 1" in sql
+
+    def test_sqlite_uses_date_plus_one_day(self):
+        sql = app2_date_filter("t.posting", Dialect.SQLITE)
+        assert "date(" in sql
+        assert "'+1 day'" in sql

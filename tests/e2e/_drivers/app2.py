@@ -4,7 +4,10 @@ HTMX/d3 renderer.
 App 2's DOM is deliberately simple — visuals are
 ``section[data-visual-kind]`` blocks with an ``<h2>`` title and a
 ``.visual-data`` swap target; tables are plain ``<table class="table-data">``
-(no virtualization); the filter form is ``#filter-form`` with
+with a server-side-paginated page of rows + a ``.table-pager-range``
+``"X–Y of M"`` pager (``_tree_fetcher._TABLE_PAGE_SIZE`` = 50, so the DOM
+holds one page; ``table_row_count`` reads the ``M`` off the pager, not
+``len(rows)``); the filter form is ``#filter-form`` with
 ``data-widget``-marked controls. So most verbs are a direct DOM read or
 a write-into-the-underlying-element-plus-dispatch-``change`` (the same
 HTMX wire shape the Tom Select / Flatpickr / noUiSlider widgets produce
@@ -303,8 +306,20 @@ class App2Driver:
         return rows
 
     def table_row_count(self, visual_title: str) -> int:
-        # App2 renders every row in DOM (no virtualization), so the
-        # window IS the full count — no page-size-bump needed.
+        # App2's Table renderer is server-side paginated
+        # (``_tree_fetcher._TABLE_PAGE_SIZE`` = 50) — the DOM holds one
+        # page, not the full set. The true total lives in the pager's
+        # ``"X–Y of M"`` text (``.table-pager-range``; rendered even for a
+        # 0-row table as ``"0–0 of 0"``). Parse ``M`` out of it; fall back
+        # to ``len(table_rows())`` only when there's no pager at all (a
+        # tiny single-page table the renderer didn't bother paginating).
+        section = self._section(visual_title)
+        pager = section.locator(".table-pager-range").first
+        if pager.count() > 0:
+            text = pager.inner_text()
+            m = re.search(r"of\s+([\d,]+)\s*$", text.strip())
+            if m is not None:
+                return int(m.group(1).replace(",", ""))
         return len(self.table_rows(visual_title))
 
     def kpi_value(self, visual_title: str) -> str | None:
