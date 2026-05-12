@@ -1,8 +1,11 @@
 """Browser test: L2FT Chains sheet dropdowns narrow the Chain Instances table.
 
 X.1.g regression guard — see ``_l2ft_dropdown_walk`` for the shared
-mechanics and the failure modes. Ported onto the ``DashboardDriver``
-protocol (X.2.q.3 — ``qs_driver`` from conftest).
+mechanics and the failure modes. Parametrized over ``[qs, app2]``
+(X.2.u.3) via ``l2ft_dashboard_driver``. (spec_example declares zero
+chains, so the ``_require_chains`` autouse fixture skips both legs there;
+``walk_dropdown``'s "table started empty → skip" covers the seed-fires-no-
+instances case.)
 """
 
 from __future__ import annotations
@@ -27,14 +30,15 @@ def _require_chains(l2ft_l2_instance) -> None:
 
 @pytest.mark.parametrize("dropdown_title", ["Chain", "Completion"])
 def test_chains_dropdown_narrows_does_not_empty(
-    qs_driver, l2ft_dashboard_id, dropdown_title,
+    l2ft_dashboard_driver, dropdown_title,
 ) -> None:
     """Each declared Chain parent — and each Completion status
     (Completed / Incomplete / No Required Children) — must leave the
     Chain Instances table with > 0 rows when picked alone."""
-    qs_driver.open(l2ft_dashboard_id, sheet="Chains")
+    driver, dashboard_arg = l2ft_dashboard_driver
+    driver.open(dashboard_arg, sheet="Chains")
     walk_dropdown(
-        qs_driver,
+        driver,
         sheet_label="Chains",
         dropdown_title=dropdown_title,
         table_title="Chain Instances",

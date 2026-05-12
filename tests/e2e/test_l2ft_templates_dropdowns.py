@@ -5,8 +5,10 @@ case — one parameter narrows BOTH the Sankey (built from tt-legs) and
 the Template Instances table (built from tt-instances); the table is the
 more sensitive instrument (the Sankey has no row-count primitive), so
 that's what ``walk_dropdown`` asserts on. See ``_l2ft_dropdown_walk``
-for the shared mechanics. Ported onto the ``DashboardDriver`` protocol
-(X.2.q.3 — ``qs_driver`` from conftest).
+for the shared mechanics. Parametrized over ``[qs, app2]`` (X.2.u.3) via
+``l2ft_dashboard_driver``. (spec_example declares one template but the
+seed fires no instances, so ``walk_dropdown``'s "table started empty →
+skip" is the real guard there.)
 """
 
 from __future__ import annotations
@@ -31,14 +33,15 @@ def _require_templates(l2ft_l2_instance) -> None:
 
 @pytest.mark.parametrize("dropdown_title", ["Template", "Completion"])
 def test_templates_dropdown_narrows_does_not_empty(
-    qs_driver, l2ft_dashboard_id, dropdown_title,
+    l2ft_dashboard_driver, dropdown_title,
 ) -> None:
     """Each declared Template name — and each Completion status
     (Complete / Imbalanced / Orphaned) — must leave the Template
     Instances table with > 0 rows when picked alone."""
-    qs_driver.open(l2ft_dashboard_id, sheet="Transfer Templates")
+    driver, dashboard_arg = l2ft_dashboard_driver
+    driver.open(dashboard_arg, sheet="Transfer Templates")
     walk_dropdown(
-        qs_driver,
+        driver,
         sheet_label="Transfer Templates",
         dropdown_title=dropdown_title,
         table_title="Template Instances",

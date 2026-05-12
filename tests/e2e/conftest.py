@@ -405,6 +405,23 @@ def l1_app(cfg):
     return app
 
 
+@pytest.fixture(scope="session")
+def l2ft_app(cfg):
+    """Tree-built L2 Flow Tracing App (post-emit, auto-IDs resolved).
+    See ``inv_app`` for the L2-instance-honoring rationale.
+    ``build_l2_flow_tracing_app`` registers its datasets' CustomSQL +
+    contracts internally (``build_all_l2_flow_tracing_datasets``)."""
+    from quicksight_gen.apps.l2_flow_tracing.app import (
+        build_l2_flow_tracing_app,
+    )
+
+    app = build_l2_flow_tracing_app(
+        cfg, l2_instance=_resolve_test_l2_instance(),
+    )
+    app.emit_analysis()
+    return app
+
+
 # ---------------------------------------------------------------------------
 # Parametrized [qs, app2] driver fixtures (X.2.u)
 # ---------------------------------------------------------------------------
@@ -495,6 +512,14 @@ def exec_dashboard_driver(request, cfg, region, account_id, exec_dashboard_id, e
     yield from _parametrized_dashboard_driver(
         request, cfg=cfg, region=region, account_id=account_id,
         dashboard_id=exec_dashboard_id, app=exec_app, short="exec",
+    )
+
+
+@pytest.fixture(params=["qs", "app2"])
+def l2ft_dashboard_driver(request, cfg, region, account_id, l2ft_dashboard_id, l2ft_app):  # type: ignore[no-untyped-def]: return-type annotation would force a driver import at module scope
+    yield from _parametrized_dashboard_driver(
+        request, cfg=cfg, region=region, account_id=account_id,
+        dashboard_id=l2ft_dashboard_id, app=l2ft_app, short="l2ft",
     )
 
 
