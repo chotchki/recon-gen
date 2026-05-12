@@ -53,6 +53,7 @@ from quicksight_gen.common.html._smoke_app import (
     build_smoke_app,
     stub_money_trail_fetcher,
 )
+from quicksight_gen.common.html._tree_fetcher import OptionsFetcher
 from quicksight_gen.common.html.render import FilterSpec
 from quicksight_gen.common.html.server import DataFetcher
 from quicksight_gen.common.tree.structure import App, Sheet
@@ -118,6 +119,7 @@ class App2Driver:
         dashboard_id: str = "harness",
         dashboard_title: str = "Harness",
         filter_specs: Sequence[FilterSpec] = (),
+        options_fetcher: OptionsFetcher | None = None,
         dev_log: bool = False,
     ) -> Iterator["App2Driver"]:
         """Spin a local App 2 server serving any tree + fetcher and yield
@@ -150,6 +152,7 @@ class App2Driver:
             dashboard_id=dashboard_id,
             dashboard_title=dashboard_title,
             filter_specs=filter_specs,
+            options_fetcher=options_fetcher,
             dev_log=dev_log,
         ) as url, webkit_page() as page:
             yield cls(

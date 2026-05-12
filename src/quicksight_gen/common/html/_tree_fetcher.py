@@ -54,6 +54,7 @@ from quicksight_gen.common.html._data_shape import shape_for_kind
 from quicksight_gen.common.html._sql_executor import execute_visual_sql_async
 from quicksight_gen.common.html._visual_sql import wrap_for_visual
 from quicksight_gen.common.ids import VisualId
+from quicksight_gen.common.sql.dialect import Dialect, column_name
 from quicksight_gen.common.tree.structure import App
 
 
@@ -220,3 +221,54 @@ def make_tree_db_fetcher(
         return shape_for_kind(kind, rows, columns)
 
     return fetcher
+
+
+# X.2.u.4.b — resolve a dataset-sourced dropdown's option universe.
+# ``(dataset_identifier, column) -> sorted distinct values as strings``.
+# App2's filter bar carries dataset-sourced dropdowns (a tree
+# ``ParameterDropdown`` with a ``LinkedValues`` source) as ``<select>``
+# widgets with an empty ``<option>`` list (``make_filter_specs_for_sheet``);
+# the server calls this before rendering a sheet to fill them.
+OptionsFetcher = Callable[[str, str], Awaitable[tuple[str, ...]]]
+
+
+# Hard cap on a dataset-sourced dropdown's option count — a ``<select>``
+# with more than this is a UX problem, not a feature (typeahead /
+# server-side search for very large universes is a follow-on).
+_OPTIONS_CAP = 2000
+
+
+def make_options_fetcher(
+    cfg: Config,
+    *,
+    pool: AsyncConnectionPool,
+) -> OptionsFetcher:
+    """Return an async ``OptionsFetcher`` over ``pool`` (X.2.u.4.b).
+
+    Runs ``SELECT DISTINCT <col> FROM (<dataset SQL>) WHERE <col> IS NOT
+    NULL ORDER BY 1 <limit>`` via the same async executor the visual
+    fetches use, so placeholder substitution (with the source dataset's
+    QS-parameter defaults) is included — a parameterized source dataset
+    still resolves. ``<col>`` is the dialect-correct quoted ref
+    (``column_name``); ``<limit>`` is ``LIMIT n`` (PG / SQLite) or
+    ``FETCH FIRST n ROWS ONLY`` (Oracle).
+    """
+    async def fetch(dataset_identifier: str, column: str) -> tuple[str, ...]:
+        base_sql = get_sql(dataset_identifier)
+        col_ref = column_name(column, cfg.dialect)
+        limit_clause = (
+            f" FETCH FIRST {_OPTIONS_CAP} ROWS ONLY"
+            if cfg.dialect == Dialect.ORACLE
+            else f" LIMIT {_OPTIONS_CAP}"
+        )
+        options_sql = (
+            f"SELECT DISTINCT {col_ref} AS opt FROM ({base_sql}) opt_src "
+            f"WHERE {col_ref} IS NOT NULL ORDER BY 1{limit_clause}"
+        )
+        rows, _columns = await execute_visual_sql_async(
+            pool, options_sql, {}, dialect=cfg.dialect,
+            dataset_parameters=get_dataset_params(dataset_identifier),
+        )
+        return tuple(str(r[0]) for r in rows if r[0] is not None)
+
+    return fetch

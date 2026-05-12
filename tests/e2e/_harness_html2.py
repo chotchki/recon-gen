@@ -40,6 +40,7 @@ from typing import Any
 import uvicorn
 
 from quicksight_gen.common.env_keys import EnvVarInvalid, QS_GEN_RUN_DIR
+from quicksight_gen.common.html._tree_fetcher import OptionsFetcher
 from quicksight_gen.common.html.render import FilterSpec
 from quicksight_gen.common.html.server import (
     DataFetcher, ServedDashboard, make_app,
@@ -133,6 +134,7 @@ def html2_server(
     dashboard_id: str = "harness",
     dashboard_title: str = "Harness",
     filter_specs: Sequence[FilterSpec] = (),
+    options_fetcher: OptionsFetcher | None = None,
     dev_log: bool = False,
     startup_timeout_s: float = 5.0,
 ) -> Iterator[str]:
@@ -173,6 +175,7 @@ def html2_server(
                 tree_app=tree_app, sheet=sheet,
                 title=dashboard_title, data_fetcher=data_fetcher,
                 filter_specs=tuple(filter_specs),
+                options_fetcher=options_fetcher,
             ),
         },
         dev_log=dev_log,
@@ -293,49 +296,72 @@ def wait_for_table_rows(
     ))
 
 
-def make_live_db_fetcher_for_app(
+def make_live_db_fetchers_for_app(
     *,
     tree_app: App,
     cfg: Any,
-) -> DataFetcher:
-    """Construct a live-DB async ``DataFetcher`` from a built tree.
+) -> tuple[DataFetcher, OptionsFetcher]:
+    """Construct the live-DB ``(visual_fetcher, options_fetcher)`` pair
+    from a built tree, sharing one lazily-created connection pool.
 
-    Wrapper over ``make_tree_db_fetcher`` from the App2 source so
-    e2e tests don't have to reach into the implementation details.
-    Tests that want stub fetchers continue to pass their own
-    inline fetcher to ``html2_server`` — this helper is only for
-    "I want the real DB-backed fetcher this app would use in
-    production."
+    The visual fetcher resolves any visual to its dataset SQL → executes
+    → shapes (``make_tree_db_fetcher``); the options fetcher resolves a
+    dataset-sourced dropdown's option universe (``make_options_fetcher``,
+    X.2.u.4.b). Both go through ``execute_visual_sql_async`` so dialect /
+    placeholder handling is identical.
 
-    Pool lifecycle subtlety: an ``AsyncConnectionPool`` (psycopg or
-    aiosqlite) is bound to the asyncio event loop it was opened in.
-    The harness spins uvicorn in a thread with its own loop, so a
-    pool created outside that loop hangs forever on connection
-    acquire. Lazy-create the pool on the first fetcher invocation —
-    that runs inside uvicorn's loop, so the pool ends up in the
-    right place. The pool is leaked at process exit (fine for a
-    test process about to die).
+    Pool lifecycle: an ``AsyncConnectionPool`` (psycopg / aiosqlite) is
+    bound to the asyncio event loop it was opened in. The harness spins
+    uvicorn in a thread with its own loop, so a pool created outside it
+    hangs forever on acquire. The pool is lazy-created on the first
+    fetcher call (which runs inside uvicorn's loop) and shared by both;
+    leaked at process exit (fine for a test process about to die).
     """
     from quicksight_gen.common.db import (  # noqa: PLC0415
         make_connection_pool,
     )
     from quicksight_gen.common.html._tree_fetcher import (  # noqa: PLC0415
+        make_options_fetcher,
         make_tree_db_fetcher,
     )
 
     cached: dict[str, Any] = {}
 
-    async def fetcher(visual_id: str, params: Any) -> Any:
-        inner = cached.get("fn")
-        if inner is None:
+    async def _pool() -> Any:
+        pool = cached.get("pool")
+        if pool is None:
             pool = await make_connection_pool(
                 cfg, max_size=cfg.app2_db_pool_size,
             )
-            inner = make_tree_db_fetcher(tree_app, cfg, pool=pool)
-            cached["fn"] = inner
-        return await inner(visual_id, params)
+            cached["pool"] = pool
+        return pool
 
-    return fetcher
+    async def visual_fetcher(visual_id: str, params: Any) -> Any:
+        fn = cached.get("vf")
+        if fn is None:
+            fn = make_tree_db_fetcher(tree_app, cfg, pool=await _pool())
+            cached["vf"] = fn
+        return await fn(visual_id, params)
+
+    async def options_fetcher(dataset_id: str, column: str) -> tuple[str, ...]:
+        fn = cached.get("of")
+        if fn is None:
+            fn = make_options_fetcher(cfg, pool=await _pool())
+            cached["of"] = fn
+        return await fn(dataset_id, column)
+
+    return visual_fetcher, options_fetcher
+
+
+def make_live_db_fetcher_for_app(
+    *,
+    tree_app: App,
+    cfg: Any,
+) -> DataFetcher:
+    """The visual-only half of ``make_live_db_fetchers_for_app`` — kept
+    for callers that don't carry dataset-sourced dropdowns (so don't
+    need the options fetcher)."""
+    return make_live_db_fetchers_for_app(tree_app=tree_app, cfg=cfg)[0]
 
 
 def make_recording_fetcher(

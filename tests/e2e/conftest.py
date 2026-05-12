@@ -460,14 +460,16 @@ def _parametrized_dashboard_driver(  # type: ignore[no-untyped-def]: return-type
                 "the deployed dashboard does"
             )
         from tests.e2e._drivers import App2Driver
-        from tests.e2e._harness_html2 import make_live_db_fetcher_for_app
+        from tests.e2e._harness_html2 import make_live_db_fetchers_for_app
 
         assert app.analysis is not None
-        fetcher = make_live_db_fetcher_for_app(tree_app=app, cfg=cfg)
+        data_fetcher, options_fetcher = make_live_db_fetchers_for_app(
+            tree_app=app, cfg=cfg,
+        )
         with App2Driver.serving(
             tree_app=app, sheet=app.analysis.sheets[0],
-            data_fetcher=fetcher, dashboard_id=short,
-            dashboard_title=f"{short} (live)",
+            data_fetcher=data_fetcher, options_fetcher=options_fetcher,
+            dashboard_id=short, dashboard_title=f"{short} (live)",
         ) as driver:
             yield driver, short
 

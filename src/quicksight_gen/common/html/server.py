@@ -78,7 +78,7 @@ import json
 import logging
 import traceback
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Union
 
 from pathlib import Path
@@ -100,11 +100,14 @@ from starlette.staticfiles import StaticFiles
 _DEVLOG = logging.getLogger("quicksight_gen.app2.devlog")
 
 
+from quicksight_gen.common.html._tree_fetcher import OptionsFetcher
 from quicksight_gen.common.html._tree_filter_specs import (
     make_filter_specs_for_sheet,
 )
 from quicksight_gen.common.html.render import (
     FilterSpec,
+    ParameterDropdownSpec,
+    ParameterMultiSelectSpec,
     emit_dashboards_list,
     emit_error_page,
     emit_html,
@@ -176,6 +179,39 @@ class ServedDashboard:
     # non-empty tuple to override (the smoke app does this for its
     # hand-crafted demo filters).
     filter_specs: tuple[FilterSpec, ...] = ()
+    # X.2.u.4.b — resolves a dataset-sourced dropdown's option universe
+    # (a tree ``ParameterDropdown`` with a ``LinkedValues`` source). The
+    # routes call it per such spec before rendering a sheet. ``None``
+    # (stub-fetcher tests, which don't carry LinkedValues dropdowns) →
+    # those dropdowns render as empty ``<select>``s (degraded, not a crash).
+    options_fetcher: OptionsFetcher | None = None
+
+
+async def _resolve_linked_options(
+    specs: tuple[FilterSpec, ...],
+    options_fetcher: OptionsFetcher,
+) -> tuple[FilterSpec, ...]:
+    """Fill in the ``<option>`` list for any dataset-sourced dropdown
+    spec (X.2.u.4.b).
+
+    A ``ParameterDropdownSpec`` / ``ParameterMultiSelectSpec`` whose
+    ``options_dataset`` is set carries an empty ``options`` until the
+    server queries the source dataset — one small ``SELECT DISTINCT``
+    per such spec. Specs without ``options_dataset`` (static enums,
+    category filters, numeric ranges) pass through unchanged.
+    """
+    resolved: list[FilterSpec] = []
+    for spec in specs:
+        if (
+            isinstance(spec, (ParameterDropdownSpec, ParameterMultiSelectSpec))
+            and spec.options_dataset is not None
+            and spec.options_column is not None
+        ):
+            opts = await options_fetcher(spec.options_dataset, spec.options_column)
+            resolved.append(replace(spec, options=opts))
+        else:
+            resolved.append(spec)
+    return tuple(resolved)
 
 
 def make_app(
@@ -282,6 +318,12 @@ def make_app(
         filter_specs = served.filter_specs or tuple(
             make_filter_specs_for_sheet(served.sheet),
         )
+        # X.2.u.4.b — dataset-sourced dropdowns carry no <option>s until
+        # the server queries the source dataset.
+        if served.options_fetcher is not None:
+            filter_specs = await _resolve_linked_options(
+                filter_specs, served.options_fetcher,
+            )
         return HTMLResponse(emit_html(
             served.tree_app, served.sheet,
             dashboard_id=dash_id, dev_log=dev_log,
@@ -311,6 +353,10 @@ def make_app(
         filter_specs = served.filter_specs or tuple(
             make_filter_specs_for_sheet(sheet_for_dash),
         )
+        if served.options_fetcher is not None:  # X.2.u.4.b — see dashboard_view
+            filter_specs = await _resolve_linked_options(
+                filter_specs, served.options_fetcher,
+            )
         return HTMLResponse(emit_html(
             served.tree_app, sheet_for_dash,
             dashboard_id=dash_id, dev_log=dev_log,
