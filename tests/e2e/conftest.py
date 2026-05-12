@@ -405,6 +405,97 @@ def l1_app(cfg):
     return app
 
 
+# ---------------------------------------------------------------------------
+# Parametrized [qs, app2] driver fixtures (X.2.u)
+# ---------------------------------------------------------------------------
+#
+# One body × two renderers. Each `<app>_dashboard_driver` fixture is
+# parametrized over `["qs", "app2"]` and yields `(driver, dashboard_arg)`:
+#
+#   - `qs`   — drives the *deployed* dashboard (`<resource_prefix>-<l2>-
+#     <app>-...`), real data via the QS datasource. `dashboard_arg` is
+#     the deployed dashboard ID. Skips when `QS_E2E_USER_ARN` is unset
+#     (no embed signer) or the dashboard isn't deployed.
+#   - `app2` — drives a *locally-spun* App 2 server built from the same
+#     `<app>_app` tree, reading the same DB (`cfg.demo_database_url`) via
+#     `make_live_db_fetcher_for_app` — the "output" slot of the
+#     `scenario → DB → output` pipeline. `dashboard_arg` is the local
+#     slug. Skips when `cfg.demo_database_url` is unset.
+#
+# Function-scoped: the QS embed URL is single-use; the App 2 server spins
+# in ~1–2 s, acceptable. See docs/audits/x_2_u_parametrized_driver_spike.md.
+
+
+def _parametrized_dashboard_driver(  # type: ignore[no-untyped-def]: return-type annotation would force a driver import at module scope
+    request, *, cfg, region, account_id, dashboard_id, app, short,
+):
+    if request.param == "qs":
+        from quicksight_gen.common.browser.helpers import get_user_arn
+        from tests.e2e._drivers import QsEmbedDriver
+
+        try:
+            get_user_arn()
+        except RuntimeError as exc:
+            pytest.skip(str(exc))
+        import boto3
+
+        qs = boto3.client("quicksight", region_name=region)
+        try:
+            qs.describe_dashboard(
+                AwsAccountId=account_id, DashboardId=dashboard_id,
+            )
+        except qs.exceptions.ResourceNotFoundException:
+            pytest.skip(
+                f"dashboard {dashboard_id!r} not deployed in "
+                f"{account_id}/{region} — deploy it first"
+            )
+        with QsEmbedDriver.embed(
+            aws_account_id=account_id, aws_region=region,
+        ) as driver:
+            yield driver, dashboard_id
+    else:  # app2
+        if not getattr(cfg, "demo_database_url", None):
+            pytest.skip(
+                "no cfg.demo_database_url — the app2 leg reads the same DB "
+                "the deployed dashboard does"
+            )
+        from tests.e2e._drivers import App2Driver
+        from tests.e2e._harness_html2 import make_live_db_fetcher_for_app
+
+        assert app.analysis is not None
+        fetcher = make_live_db_fetcher_for_app(tree_app=app, cfg=cfg)
+        with App2Driver.serving(
+            tree_app=app, sheet=app.analysis.sheets[0],
+            data_fetcher=fetcher, dashboard_id=short,
+            dashboard_title=f"{short} (live)",
+        ) as driver:
+            yield driver, short
+
+
+@pytest.fixture(params=["qs", "app2"])
+def l1_dashboard_driver(request, cfg, region, account_id, l1_dashboard_id, l1_app):  # type: ignore[no-untyped-def]: see _parametrized_dashboard_driver
+    yield from _parametrized_dashboard_driver(
+        request, cfg=cfg, region=region, account_id=account_id,
+        dashboard_id=l1_dashboard_id, app=l1_app, short="l1",
+    )
+
+
+@pytest.fixture(params=["qs", "app2"])
+def inv_dashboard_driver(request, cfg, region, account_id, inv_dashboard_id, inv_app):  # type: ignore[no-untyped-def]: see _parametrized_dashboard_driver
+    yield from _parametrized_dashboard_driver(
+        request, cfg=cfg, region=region, account_id=account_id,
+        dashboard_id=inv_dashboard_id, app=inv_app, short="inv",
+    )
+
+
+@pytest.fixture(params=["qs", "app2"])
+def exec_dashboard_driver(request, cfg, region, account_id, exec_dashboard_id, exec_app):  # type: ignore[no-untyped-def]: see _parametrized_dashboard_driver
+    yield from _parametrized_dashboard_driver(
+        request, cfg=cfg, region=region, account_id=account_id,
+        dashboard_id=exec_dashboard_id, app=exec_app, short="exec",
+    )
+
+
 @pytest.fixture(scope="session")
 def page_timeout() -> int:
     return PAGE_TIMEOUT

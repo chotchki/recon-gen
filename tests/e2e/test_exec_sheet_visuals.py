@@ -1,10 +1,11 @@
-"""Browser test: walk every Executives sheet, verify visuals render.
+"""Browser test: walk every Executives sheet, verify visuals render — both renderers.
 
-Ported onto the ``DashboardDriver`` protocol (X.2.q.3 — no Playwright
-in the test body; `qs_driver` from conftest, `TreeValidator` speaks the
-driver). `TreeValidator(exec_app, qs_driver).validate_structure()` walks
-every sheet, asserts each declared visual title + control label is in
-the DOM; failures across sheets accumulate into one AssertionError.
+Parametrized over ``[qs, app2]`` (X.2.u.2 — the ``exec_dashboard_driver``
+fixture yields ``(driver, dashboard_arg)``: the deployed QS dashboard,
+or a locally-spun App 2 server built from the same ``exec_app`` tree
+reading the same DB). ``TreeValidator(exec_app, driver).validate_structure()``
+walks every sheet, asserts each declared visual title + control label is
+in the DOM; failures across sheets accumulate into one AssertionError.
 """
 
 from __future__ import annotations
@@ -17,9 +18,8 @@ from .tree_validator import TreeValidator
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
-def test_exec_dashboard_structure_matches_tree(
-    qs_driver, exec_dashboard_id, exec_app,
-) -> None:
-    qs_driver.open(exec_dashboard_id)
-    TreeValidator(exec_app, qs_driver).validate_structure()
-    qs_driver.screenshot()
+def test_exec_dashboard_structure_matches_tree(exec_dashboard_driver, exec_app) -> None:
+    driver, dashboard_arg = exec_dashboard_driver
+    driver.open(dashboard_arg)
+    TreeValidator(exec_app, driver).validate_structure()
+    driver.screenshot()
