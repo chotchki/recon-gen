@@ -484,6 +484,29 @@ jobs:
             tests/e2e/test_l2ft_metadata_cascade.py \
             -m browser -v -n 2
 
+      # X.2.j — the 4-way cross-tool agreement test, separate invocation
+      # (its ``seeded_audit`` fixture re-applies the prefixed schema +
+      # re-plants — can't share a worker pool with the render tests
+      # above; runs last). Against the just-published TestPyPI wheel +
+      # the release-synthesized L2 instance. The QS leg runs iff the
+      # ``<resource_prefix>-<instance>-l1-dashboard`` happens to be
+      # deployed for this run; otherwise it self-skips and the gate is
+      # the 3-way ``scenario ⊆ direct == App2`` + PDF — still a real
+      # prod-publish gate (the wheel's App2 renderer / audit PDF must
+      # agree with the matview). File list mirrors e2e.yml — keep in
+      # sync (feedback_ci_release_workflow_parity).
+      - name: Run 4-way cross-tool agreement test (re-seeds the prefixed schema)
+        env:
+          QS_GEN_E2E: "1"
+          QS_GEN_CONFIG: /tmp/release-e2e.yaml
+          QS_GEN_TEST_L2_INSTANCE: /tmp/release-l2.yaml
+          QS_E2E_USER_ARN: ${{ secrets.QS_E2E_USER_ARN }}
+          QS_E2E_PAGE_TIMEOUT: "60000"
+        run: |
+          /tmp/qs-release-e2e/bin/pytest \
+            tests/e2e/test_audit_dashboard_agreement.py \
+            -m browser -v -k postgres
+
       - name: Upload failure screenshots
         if: failure()
         uses: actions/upload-artifact@v7

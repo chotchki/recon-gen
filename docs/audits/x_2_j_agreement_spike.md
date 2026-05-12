@@ -204,24 +204,45 @@ App2) so a future `<=` re-introduction fails loudly. **Not deferred —
 flagged here per `feedback_no_silent_defer`; it's in scope for
 X.2.j.B.**
 
-## Locked contract (the shape X.2.j.B implements)
+## Locked contract (the shape X.2.j.B implemented)
+
+> **Update (X.2.j.B, 2026-05-12 — as built):** two deviations from the
+> spike's first cut, both narrower-than-locked, both flagged:
+> 1. **`supersession` has no direct-SQL anchor** — discovered there's no
+>    `<prefix>_supersession` matview (the dashboard's "Transactions
+>    Audit" table + the audit PDF each query their own shape over the
+>    base `<prefix>_transactions` / `<prefix>_daily_balances`). So
+>    supersession stays count-level: `qs_count == app2_count` (the two
+>    renderers must agree) + `pdf/qs/app2 ≥ expected`. The `MATVIEW_ANCHORED`
+>    set in `_matview_extract.py` is the served set (drift / overdraft /
+>    limit_breach / stuck_pending / stuck_unbundled).
+> 2. **QS-side row-identity is `drift`-only** for now — the QS Drift
+>    table's `business_day_start` projection is spike-verified; the QS
+>    overdraft / limit_breach tables' day-column projection isn't (needs
+>    a deployed dashboard to confirm `business_day_start` / `business_day`
+>    / `transfer_type` column names there), so those two get the QS *count*
+>    agreement + the App2 row-identity, with `X.2.j.B.3-followon` to add
+>    the QS-side key comparison.
 
 For each L1 invariant × dialect cell, against the same `seeded_audit`
 DB:
 
 | invariant kind | invariants | the assert |
 |---|---|---|
-| flat-shape | drift, ledger_drift*, overdraft, limit_breach | `set of (account_id, business_day_start) keys`: `scenario_plants ⊆ direct_SQL`; `direct_SQL == PDF == QS == App2` |
-| divergent-shape | stuck_pending, stuck_unbundled, supersession | `PDF_count >= expected`; `direct_SQL_rows == QS_rows == App2_rows` (natural key); plus the existing 3-way's `pdf >= expected` / `dashboard >= expected` lower bounds stay |
+| flat-shape | drift, overdraft, limit_breach | `set of (account_id, day[, transfer_type]) keys`: `scenario_plants ⊆ direct_SQL_keys == App2_keys` (`== QS_keys` for drift); `direct_count == qs_count == app2_count`; `pdf_count == direct_count` (drift only — the PDF aggregates for overdraft / limit_breach) |
+| divergent-shape, matview-anchored | stuck_pending, stuck_unbundled | `scenario ≤ direct_count == qs_count == app2_count`; `pdf_count ≥ expected` (the PDF roll-up shape diverges) |
+| divergent-shape, no matview | supersession | `qs_count == app2_count` (the two renderers query the same base-table shape); `pdf/qs/app2 ≥ expected` |
 
-(*`ledger_drift` is on the matview but not on the dashboard's invariant
-sheets / audit PDF sections — keep it out of the 4-way unless a future
-sheet surfaces it; not in scope for X.2.j.*)
+(`ledger_drift` is on the matview but not on the dashboard's invariant
+sheets / audit PDF sections — out of scope for X.2.j.)
 
 Existing 3-way assertions stay; the App2 leg + the direct-SQL anchor +
-the row-identity tightening are additive. CI gate = PG. Runner = {pg,
+the row-identity tightening are additive. CI gate = PG (full 4-way in
+`e2e-pg-browser`; 3-way-or-better in the release gate). Runner = {pg,
 oracle, sqlite-3way}. One module-scoped `per_dialect_app2_driver`
-fixture; `App2Driver.table_row_count` made pagination-aware first.
+fixture; `App2Driver.table_row_count` made pagination-aware first; the
+QS-driver fixture yields `None` (per-leg degrade) rather than skipping
+the whole test when QS is unavailable.
 
 ## Notes for the implementer
 

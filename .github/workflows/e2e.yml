@@ -400,6 +400,26 @@ jobs:
             tests/e2e/test_l2ft_metadata_cascade.py \
             -m browser -v -n 2
 
+      # X.2.j — the 4-way cross-tool agreement test runs in its OWN
+      # pytest invocation: its module-scoped ``seeded_audit`` fixture
+      # re-applies the ``spec_example_*`` schema (DROP + CREATE every
+      # prefixed object) + re-plants the L1-invariants scenario, so it
+      # can't share a worker pool / DB session with the dashboard-render
+      # tests above (which read the originally-seeded ``spec_example``
+      # data through the deployed dashboard). Runs last; full 4-way here
+      # — the deployed ``spec_example`` L1 dashboard supplies the QS leg.
+      # File list mirrors release.yml — keep in sync (feedback_ci_release_workflow_parity).
+      - name: Run 4-way cross-tool agreement test (re-seeds spec_example)
+        env:
+          QS_GEN_E2E: "1"
+          QS_GEN_CONFIG: /tmp/ci-pg-browser.yaml
+          QS_E2E_USER_ARN: ${{ secrets.QS_E2E_USER_ARN }}
+          QS_E2E_PAGE_TIMEOUT: "60000"
+        run: |
+          .venv/bin/pytest \
+            tests/e2e/test_audit_dashboard_agreement.py \
+            -m browser -v -k postgres
+
       - name: Upload failure screenshots
         if: failure()
         uses: actions/upload-artifact@v7
