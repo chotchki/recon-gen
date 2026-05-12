@@ -77,10 +77,13 @@ SyncDataFetcher = Callable[[VisualId, Mapping[str, list[str]]], Any]
 # Dataset. Order matters — we return the FIRST dataset found, on
 # the assumption that a visual's primary dataset is the one its
 # values / category fields point at. Walk order matches typical
-# visual construction (values are the load-bearing field for KPI /
-# Table; category for BarChart; etc.).
+# visual construction (values for KPI / group-by-Table; category for
+# BarChart; columns for a flat-dump Table — X.2.u.3.fix: a Table
+# built with `columns=[...]` and no group_by/values pointed nowhere,
+# so its App2 fetch returned `{}` → an empty 0-row 0-col table).
 _FIELDS_WITH_DATASET_REFS: tuple[str, ...] = (
     "values",
+    "columns",
     "category",
     "color",
     "source",
