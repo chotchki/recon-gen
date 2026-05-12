@@ -46,6 +46,41 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _BUNDLED_MKDOCS_YML = Path(__file__).resolve().parent.parent / "mkdocs.yml"
 
 
+def build_docs_site(
+    l2_instance_path: str | None,
+    output_dir: str | Path,
+    *,
+    strict: bool = True,
+    config: Path | None = None,
+) -> int:
+    """Run ``mkdocs build`` (the bundled config) into ``output_dir``.
+
+    Returns the mkdocs exit code (0 = success). Threads the active L2
+    instance via ``QS_DOCS_L2_INSTANCE`` and sets ``cwd`` to the bundled
+    config's directory so mkdocs-macros's ``include_dir: docs/_macros``
+    resolves (X.2.s.1 — mkdocs-macros joins ``include_dir`` against the
+    process cwd, not the config-file dir). ``config`` overrides the
+    config file (``docs apply --portable`` passes its synthesized
+    ``mkdocs.portable.yml``); the default is the bundled ``mkdocs.yml``.
+    ``output_dir`` is resolved to absolute so cwd doesn't affect where
+    the site lands.
+
+    Shared by ``docs apply`` and by ``serve app2 apply`` (which builds
+    the site into a tempdir and embeds it at ``/docs`` — X.2.i).
+    """
+    env = os.environ.copy()
+    if l2_instance_path is not None:
+        env["QS_DOCS_L2_INSTANCE"] = str(Path(l2_instance_path).resolve())
+    cmd = [
+        sys.executable, "-m", "mkdocs", "build",
+        "-f", str(config or _BUNDLED_MKDOCS_YML),
+        "-d", str(Path(output_dir).resolve()),
+    ]
+    if strict:
+        cmd.append("--strict")
+    return subprocess.call(cmd, env=env, cwd=_BUNDLED_MKDOCS_YML.parent)
+
+
 def _bake_portable_wasm(output_dir: Path) -> None:
     """Inline the wasm-graphviz module so diagrams render via file://.
 
@@ -315,14 +350,6 @@ def docs_apply(
 
     No ``--execute``: building a static site IS the operation.
     """
-    env = os.environ.copy()
-    if l2_instance_path is not None:
-        env["QS_DOCS_L2_INSTANCE"] = str(Path(l2_instance_path).resolve())
-
-    # Always pass ``-f <bundled mkdocs.yml>``. mkdocs resolves all
-    # docs paths relative to the config file's location, so cwd
-    # doesn't matter — this works the same in dev and from an
-    # installed wheel.
     config_to_use = _BUNDLED_MKDOCS_YML
     portable_yml: Path | None = None
     if portable:
@@ -352,24 +379,10 @@ def docs_apply(
         )
         config_to_use = portable_yml
 
-    cmd = [
-        sys.executable, "-m", "mkdocs", "build",
-        "-f", str(config_to_use),
-        "-d", str(Path(output).resolve()),
-    ]
-    if strict:
-        cmd.append("--strict")
-
-    # cwd is the mkdocs.yml's directory so mkdocs-macros's
-    # ``include_dir: docs/_macros`` resolves correctly. mkdocs-macros
-    # joins ``include_dir`` against cwd, NOT against the config file's
-    # directory — confirmed empirically (path-not-found error before
-    # this change). The output dir is absolute (resolved above) so cwd
-    # doesn't affect where the rendered site lands.
-    click.echo(f"$ {' '.join(cmd)}")
+    click.echo(f"$ mkdocs build -f {config_to_use} -d {output}")
     try:
-        exit_code = subprocess.call(
-            cmd, env=env, cwd=_BUNDLED_MKDOCS_YML.parent,
+        exit_code = build_docs_site(
+            l2_instance_path, output, strict=strict, config=config_to_use,
         )
     finally:
         if portable_yml is not None and portable_yml.exists():

@@ -403,11 +403,7 @@ jobs:
         run: /tmp/qs-release-e2e/bin/quicksight-gen json apply -c /tmp/release-e2e.yaml --l2 /tmp/release-l2.yaml -o /tmp/release-e2e-out --execute
 
       - name: Run API e2e against TestPyPI wheel
-        # Same 3 apps as the standalone e2e-pg-api job. Browser-tier
-        # tests are skipped here — they're slower and the standalone
-        # nightly workflow covers them; the release gate trades full
-        # browser coverage for fast feedback so prod publish doesn't
-        # wait an extra ~30 min.
+        # Same 3 apps as the standalone e2e-pg-api job.
         #
         # gate.l.8 — `QS_GEN_TEST_L2_INSTANCE` MUST point at the same
         # synthesized `/tmp/release-l2.yaml` the deploy steps above used
@@ -431,6 +427,71 @@ jobs:
             tests/e2e/test_exec_deployed_resources.py \
             tests/e2e/test_exec_dashboard_structure.py \
             -m api -v -n auto
+
+      - name: Install Playwright WebKit browser
+        # The TestPyPI install above pulls the ``e2e`` extra (playwright
+        # the Python package), but the WebKit browser binary isn't
+        # bundled with the wheel — install it explicitly into the same
+        # venv. ``--with-deps`` apt-installs the WebKit system libs on
+        # the Ubuntu runner (libsoup3 / libwebkitgtk-6.0 / …); without
+        # it every browser page-open fails with "Host system is missing
+        # dependencies to run browsers" (seen in the 2026-05-04 nightly).
+        run: /tmp/qs-release-e2e/bin/playwright install --with-deps webkit
+
+      - name: Run browser e2e against TestPyPI wheel (renders + sheet visuals + filters + drilldown)
+        # X.2.i.followon (2026-05-12): the release gate now runs the FULL
+        # browser tier (parity with e2e.yml's ``e2e-pg-browser``, which
+        # fires on every push:main). Rationale: now that App2 (the HTMX
+        # renderer) is the offline-iteration path and X.2.j's 4-way
+        # cross-tool agreement gate is landing, "the deployed QS dashboard
+        # renders every visual" is a release-blocking invariant — a prod
+        # publish should not ship past a blank-dashboard regression that
+        # the structure tests can't see. Costs ~+20 min vs the API-only
+        # gate; that's the deliberate trade for not shipping a broken
+        # dashboard. (Earlier this step was skipped "for fast feedback";
+        # that trade is reversed.) File list mirrors e2e.yml — keep in
+        # sync (see ``feedback_ci_release_workflow_parity``).
+        #
+        # The parametrized ``[qs, app2]`` files (``test_*_filters`` /
+        # ``test_*_sheet_visuals`` / ``test_l2ft_*_dropdowns`` /
+        # ``test_dashboard_driver``) run both legs: ``qs`` against the
+        # just-deployed dashboards, ``app2`` against a local server
+        # reading the same seeded release DB (``QS_GEN_CONFIG`` carries
+        # the URL). ``QS_GEN_TEST_L2_INSTANCE`` MUST stay pointed at
+        # ``/tmp/release-l2.yaml`` (same reason as the API step above).
+        env:
+          QS_GEN_E2E: "1"
+          QS_GEN_CONFIG: /tmp/release-e2e.yaml
+          QS_GEN_TEST_L2_INSTANCE: /tmp/release-l2.yaml
+          QS_E2E_USER_ARN: ${{ secrets.QS_E2E_USER_ARN }}
+          QS_E2E_PAGE_TIMEOUT: "60000"
+        run: |
+          /tmp/qs-release-e2e/bin/pytest \
+            tests/e2e/test_l1_dashboard_renders.py \
+            tests/e2e/test_l1_sheet_visuals.py \
+            tests/e2e/test_l1_filters.py \
+            tests/e2e/test_inv_dashboard_renders.py \
+            tests/e2e/test_inv_sheet_visuals.py \
+            tests/e2e/test_inv_filters.py \
+            tests/e2e/test_inv_drilldown.py \
+            tests/e2e/test_exec_dashboard_renders.py \
+            tests/e2e/test_exec_sheet_visuals.py \
+            tests/e2e/test_l2ft_rails_dropdowns.py \
+            tests/e2e/test_l2ft_chains_dropdowns.py \
+            tests/e2e/test_l2ft_templates_dropdowns.py \
+            tests/e2e/test_dashboard_driver.py \
+            tests/e2e/test_l1_cross_sheet_drill_date_widening.py \
+            tests/e2e/test_l2ft_metadata_cascade.py \
+            -m browser -v -n 2
+
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-against-testpypi-screenshots-${{ github.run_id }}
+          path: tests/e2e/screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Cleanup (always)
         if: always()

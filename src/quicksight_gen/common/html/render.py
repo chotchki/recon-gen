@@ -595,6 +595,7 @@ def emit_dashboards_list(
     dashboards: list[tuple[str, str]],
     *,
     theme: ThemePreset | None = None,
+    docs_url: str | None = None,
 ) -> str:
     """Render the ``/dashboards`` landing page.
 
@@ -607,6 +608,10 @@ def emit_dashboards_list(
     page shell. When ``None``, ``DEFAULT_PRESET`` wins via
     silent-fallback (N.4.k). Multi-dashboard servers should pass
     a single shared theme — the listing is one page, one palette.
+
+    ``docs_url`` — when the server has the handbook embedded (X.2.i,
+    ``make_app(docs_dir=...)``), pass the mount path (``"/docs/"``) and
+    a "Handbook" link renders alongside the title. ``None`` ⇒ no link.
     """
     title_class = "text-3xl font-bold mt-8 mx-8 mb-2"
     desc_class = "mx-8 mb-6 text-secondary-fg"
@@ -621,8 +626,16 @@ def emit_dashboards_list(
         f'  <p class="{desc_class}">'
         f'Pick a dashboard to view its sheets.'
         f'</p>',
-        f'  <nav class="{list_class}">',
     ]
+    if docs_url is not None:
+        body_parts.append(
+            f'  <p class="mx-8 mb-6 text-sm">'
+            f'<a href="{html.escape(docs_url)}" '
+            f'class="text-accent hover:underline font-semibold">'
+            f'📚 Handbook</a> — the same docs site `docs export` produces, '
+            f'served right here.</p>'
+        )
+    body_parts.append(f'  <nav class="{list_class}">')
     for dash_id, dash_title in dashboards:
         esc_id = html.escape(dash_id)
         esc_title = html.escape(dash_title)

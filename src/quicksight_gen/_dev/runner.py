@@ -659,6 +659,9 @@ def _layer_command(
             "tests/e2e/test_html2_executives_live.py",
             "tests/e2e/test_html2_money_trail.py",
             "tests/e2e/test_html2_l2ft.py",
+            # X.2.h.5 — Table sort + pagination round-trip (smoke app,
+            # Playwright-only, no DB / no AWS).
+            "tests/e2e/test_html2_table_pagination.py",
             "tests/e2e/test_dashboard_driver.py",
             "-q",
         ]

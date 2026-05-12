@@ -40,9 +40,10 @@ on:
     branches: [main]
   # W.6 — nightly browser-tier sweep. Cron is 6am UTC daily so the
   # browser run completes before the typical workday starts (US
-  # Eastern). The ``e2e-pg-browser`` job is gated on
-  # ``github.event_name`` so it only fires on workflow_dispatch +
-  # schedule — push:main keeps the API-only fast feedback loop.
+  # Eastern). X.2.i.followon (2026-05-12): ``e2e-pg-browser`` now ALSO
+  # fires on push:main (and release.yml's TestPyPI gate runs the same
+  # tier) — see the rationale block on the ``e2e-pg-browser`` job. The
+  # cron stays as a safety net for the "no push that day" case.
   schedule:
     - cron: '0 6 * * *'
 
@@ -251,11 +252,19 @@ jobs:
   # W.6 — browser-tier sweep. Runs the deeper Playwright e2e (sheet
   # visuals, filters, drilldown) against a deployed QS dashboard.
   #
-  # Trigger gating: ``workflow_dispatch`` (manual on-demand) +
-  # ``schedule`` (nightly cron) only. NOT push:main — these tests
-  # are CPU-saturating, run for ~30+ min, and would dominate every
-  # push. Browser tier is "we want to know overnight if something
-  # regressed", not "every commit needs this signal".
+  # Trigger gating: runs on ``push:main`` + ``workflow_dispatch`` +
+  # ``schedule`` (nightly cron). X.2.i.followon (2026-05-12) flipped
+  # this ON for push:main — rationale: now that App2 (the HTMX
+  # renderer) is the offline-iteration path AND the X.2.j 4-way
+  # cross-tool agreement gate is landing, "the deployed QS dashboard
+  # still renders every visual" is a release-blocking invariant, not
+  # an overnight nicety. The job is ~30 min and CPU-saturating, so it
+  # depends on ``e2e-pg-api`` (the fast tier) — a SQL/deploy break
+  # short-circuits there in ~10 min before the browser job spins up.
+  # The cron stays as a safety net for days with no push to main.
+  # ``release.yml::e2e-against-testpypi`` runs the same browser tier
+  # against the just-published TestPyPI wheel (CI/release parity —
+  # see ``feedback_ci_release_workflow_parity``).
   #
   # Concurrency: shares the ``e2e-pg`` group with ``e2e-pg-api`` so
   # the browser job and the API job never deploy concurrently into
@@ -263,11 +272,10 @@ jobs:
   #
   # Resource prefix: distinct ``-browser`` suffix so the browser
   # deploy and the API deploy never alias each other's QS resources
-  # (relevant when a dispatch run triggers BOTH jobs in the same
-  # workflow run — they need separate resource_prefix tags so cleanup
-  # doesn't sweep the wrong one).
+  # (relevant when a run triggers BOTH jobs in the same workflow run —
+  # they need separate resource_prefix tags so cleanup doesn't sweep
+  # the wrong one).
   e2e-pg-browser:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     # X.1.c — depend on e2e-pg-api so the two PG jobs serialize within
     # a single workflow run instead of racing for the shared
     # ``e2e-pg`` concurrency group. When pg-api is queued behind a

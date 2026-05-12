@@ -35,6 +35,7 @@ remain sync (pure CPU); only the SQL-execute roundtrip is awaited.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
@@ -71,6 +72,93 @@ DataFetcher = Callable[[VisualId, Mapping[str, list[str]]], Awaitable[Any]]
 # ``_db_fetcher.py`` code paths. The server route accepts both via
 # ``inspect.iscoroutinefunction`` dispatch (X.2.n.5).
 SyncDataFetcher = Callable[[VisualId, Mapping[str, list[str]]], Any]
+
+
+# X.2.g.5.followon + X.2.h.5 — server-side pagination + sort for Table
+# visuals. The renderer (``bootstrap.js::renderTable``) reads
+# ``page_offset`` / ``page_size`` / ``total_rows`` / ``sort_column`` off
+# the data fragment and re-fetches ``?page_offset=N&page_size=M&
+# sort_column=<col>:<asc|desc>`` on pager / header clicks; without the
+# server honoring these the fetcher returned EVERY row — a 68k-row
+# L1-transactions table → a ~20 MB JSON fragment → the browser freezes
+# building 68k <tr>s before any client-side pagination runs. Default
+# page size mirrors the renderer's "0–50 of N" pager; capped so a
+# crafted ``page_size`` can't OOM the server.
+_TABLE_PAGE_SIZE = 50
+_TABLE_PAGE_SIZE_MAX = 10_000
+# A bare SQL identifier — the ONLY thing we'll splice into ORDER BY
+# (the renderer sends ``<column-name>:<dir>``; the column name comes
+# from the shaped result columns). Anything else → fall back to the
+# stable ``ORDER BY 1``. (The worst a crafted name can do is name a
+# non-existent column → SQL error → the fragment 500s; this guard is
+# belt-and-braces, not the only line of defense — there's no untrusted
+# input path to App2 in practice.)
+_BARE_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _page_int(params: Mapping[str, list[str]], key: str, default: int) -> int:
+    """Read a non-negative int off the URL multi-dict (last value);
+    fall back to ``default`` on missing / blank / non-numeric."""
+    vals = params.get(key, [])
+    raw = vals[-1].strip() if vals else ""
+    if not raw:
+        return default
+    try:
+        n = int(raw)
+    except ValueError:
+        return default
+    return n if n >= 0 else default
+
+
+def _parse_sort(params: Mapping[str, list[str]]) -> tuple[str, bool]:
+    """Parse the renderer's ``sort_column=<name>:<asc|desc>`` URL param.
+
+    Returns ``(column_name, descending)`` — ``("", False)`` when absent,
+    malformed, or the name isn't a bare identifier (→ the table page is
+    ordered by column 1 instead).
+    """
+    vals = params.get("sort_column", [])
+    raw = vals[-1].strip() if vals else ""
+    if ":" not in raw:
+        return "", False
+    name, _, direction = raw.partition(":")
+    name = name.strip()
+    if not _BARE_IDENT_RE.match(name):
+        return "", False
+    return name, direction.strip().lower() == "desc"
+
+
+def _paginate_table_sql(
+    base_sql: str, *, offset: int, limit: int,
+    sort_col: str, sort_desc: bool, dialect: Dialect,
+) -> str:
+    """Wrap ``base_sql`` with an ORDER BY + dialect-correct OFFSET/LIMIT
+    + a ``COUNT(*) OVER ()`` total column (appended last; the fetcher
+    strips it positionally, so the alias name is cosmetic).
+
+    With a ``sort_col`` (a bare identifier — see ``_parse_sort``):
+    ``ORDER BY <case-correct ref> [DESC], 1`` (the trailing ``1`` is a
+    deterministic tiebreak so equal sort values don't shuffle page
+    boundaries). Without one: ``ORDER BY 1`` — so pagination is stable
+    across requests regardless of whether the base query's own
+    ``ORDER BY`` survives the derived-table wrap (PG/Oracle don't
+    promise it does). ``qs_page`` is letter-initial — Oracle rejects a
+    leading-underscore identifier unquoted.
+    """
+    if sort_col:
+        ref = column_name(sort_col, dialect)
+        order_by = f"ORDER BY {ref}{' DESC' if sort_desc else ''}, 1"
+    else:
+        order_by = "ORDER BY 1"
+    page_clause = (
+        f"OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY"
+        if dialect is Dialect.ORACLE
+        else f"LIMIT {limit} OFFSET {offset}"  # postgres / sqlite
+    )
+    return (
+        f"SELECT qs_page.*, COUNT(*) OVER () AS qs_row_total "
+        f"FROM ({base_sql}) qs_page {order_by} {page_clause}"
+    )
 
 
 # Visual fields that may carry Dim/Measure references back to a
@@ -208,12 +296,50 @@ def make_tree_db_fetcher(
             # Empty payload renders as a blank visual — fine for
             # the page-chrome-only case.
             return {}
+        # Y.2.app2.cde — resolve `<<$paramName>>` defaults from the
+        # dataset's QS parameters when the URL doesn't supply them
+        # (keeps the freshly-loaded page consistent with QS).
+        dataset_params = get_dataset_params(ds_id) if ds_id else []
+        if kind == "Table":
+            # X.2.g.5.followon + X.2.h.5 — page (and sort) the table
+            # SERVER-side. Without this a 68k-row dataset shipped 68k
+            # rows in one ~20 MB JSON fragment and the browser froze
+            # building the DOM. The renderer sends ``page_offset`` /
+            # ``page_size`` / ``sort_column`` on pager / header clicks.
+            offset = _page_int(params, "page_offset", 0)
+            limit = max(1, min(
+                _page_int(params, "page_size", _TABLE_PAGE_SIZE),
+                _TABLE_PAGE_SIZE_MAX,
+            ))
+            sort_col, sort_desc = _parse_sort(params)
+            paginated_sql = _paginate_table_sql(
+                sql, offset=offset, limit=limit,
+                sort_col=sort_col, sort_desc=sort_desc, dialect=cfg.dialect,
+            )
+            rows, columns = await execute_visual_sql_async(
+                pool, paginated_sql, params, dialect=cfg.dialect,
+                dataset_parameters=dataset_params,
+            )
+            # Last column is COUNT(*) OVER () — strip it positionally
+            # (the alias name varies by dialect / driver case-folding).
+            total = int(rows[0][-1]) if rows and rows[0] else 0
+            page_rows = [list(r[:-1]) for r in rows]
+            page_cols = list(columns[:-1])
+            # Echo the *resolved* sort back (not the raw URL value) so
+            # the renderer's sort badge + next-direction logic stays
+            # consistent — ``""`` when it didn't parse / wasn't given.
+            echo_sort = (
+                f"{sort_col}:{'desc' if sort_desc else 'asc'}"
+                if sort_col else ""
+            )
+            return shape_for_kind(
+                "Table", page_rows, page_cols,
+                page_offset=offset, page_size=limit, total_rows=total,
+                sort_column=echo_sort,
+            )
         rows, columns = await execute_visual_sql_async(
             pool, sql, params, dialect=cfg.dialect,
-            # Y.2.app2.cde — resolve `<<$paramName>>` defaults from
-            # the dataset's QS parameters when the URL doesn't supply
-            # them (keeps the freshly-loaded page consistent with QS).
-            dataset_parameters=get_dataset_params(ds_id) if ds_id else [],
+            dataset_parameters=dataset_params,
         )
         # ForceGraph + Sankey have specialized projectors today
         # (_db_fetcher._topology_to_force_graph, etc.); the generic

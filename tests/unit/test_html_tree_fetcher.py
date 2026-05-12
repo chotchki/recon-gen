@@ -176,6 +176,12 @@ def _build_app_with_visuals() -> tuple[App, Dataset]:
             values=[ds["amount"].sum()],
         ),
     )
+    sheet.visuals.append(
+        Table(
+            title="Rows", subtitle="t", visual_id=VisualId("v-tbl"),
+            columns=[ds["status"].dim(), ds["amount"].dim()],
+        ),
+    )
     return app, ds
 
 
@@ -213,6 +219,73 @@ def test_make_tree_db_fetcher_dispatches_bar_chart(
     # BarChart shape: {categories, values, x_label, y_label}
     assert out["categories"] == ["closed", "open", "pending"]
     assert out["values"] == [200, 150, 25]
+
+
+def test_make_tree_db_fetcher_paginates_table(
+    aiosqlite_pool: AsyncConnectionPool,
+) -> None:
+    """X.2.g.5.followon — Table visuals page SERVER-side. The renderer
+    sends ``?page_offset=N&page_size=M``; the fetcher LIMIT/OFFSETs the
+    query and returns the full ``total_rows`` via ``COUNT(*) OVER ()``.
+    A 68k-row table must NOT come back as 68k rows in one fragment
+    (that froze the browser). The COUNT(*) column is stripped from the
+    shaped output."""
+    register_sql("x2g-test-ds", "SELECT status, amount FROM t")  # 4 rows
+    app, _ds_node = _build_app_with_visuals()
+    fetcher = make_tree_db_fetcher(
+        app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
+    )
+    # No params → first page; default size > 4 ⇒ all 4 rows back.
+    out = asyncio.run(fetcher("v-tbl", {}))
+    assert len(out["rows"]) == 4
+    assert out["total_rows"] == 4
+    assert out["page_offset"] == 0
+    # The COUNT(*) OVER () column didn't leak into columns/rows.
+    assert [c["name"] for c in out["columns"]] == ["status", "amount"]
+    assert all(len(r) == 2 for r in out["rows"])
+    # Page 2 of size 2 ⇒ 2 rows, but total_rows stays 4.
+    out2 = asyncio.run(
+        fetcher("v-tbl", {"page_size": ["2"], "page_offset": ["2"]})
+    )
+    assert len(out2["rows"]) == 2
+    assert out2["total_rows"] == 4
+    assert out2["page_offset"] == 2
+    assert out2["page_size"] == 2
+    # A crafted huge page_size is clamped (no OOM).
+    out3 = asyncio.run(fetcher("v-tbl", {"page_size": ["99999999999"]}))
+    assert out3["page_size"] == 10_000  # _TABLE_PAGE_SIZE_MAX
+    assert len(out3["rows"]) == 4  # only 4 rows exist
+
+
+def test_make_tree_db_fetcher_sorts_table(
+    aiosqlite_pool: AsyncConnectionPool,
+) -> None:
+    """X.2.h.5 — the renderer sends ``sort_column=<col>:<asc|desc>`` on a
+    header click; the fetcher applies ``ORDER BY <col> [DESC], 1`` and
+    echoes the *resolved* sort back. A garbage / injection ``sort_column``
+    falls back to ``ORDER BY 1`` and echoes ``""`` (and doesn't run the
+    garbage)."""
+    register_sql("x2g-test-ds", "SELECT status, amount FROM t")
+    app, _ds_node = _build_app_with_visuals()
+    fetcher = make_tree_db_fetcher(
+        app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
+    )
+    desc = asyncio.run(fetcher("v-tbl", {"sort_column": ["amount:desc"]}))
+    assert [r[1] for r in desc["rows"]] == [200, 100, 50, 25]
+    assert desc["sort_column"] == "amount:desc"
+    asc = asyncio.run(fetcher("v-tbl", {"sort_column": ["amount:asc"]}))
+    assert [r[1] for r in asc["rows"]] == [25, 50, 100, 200]
+    assert asc["sort_column"] == "amount:asc"
+    # Injection attempt → bare-identifier guard rejects it → ORDER BY 1
+    # (status asc), echo "" — and the DROP never reaches the DB.
+    safe = asyncio.run(
+        fetcher("v-tbl", {"sort_column": ["amount); DROP TABLE t; --:desc"]})
+    )
+    assert safe["sort_column"] == ""
+    assert [r[0] for r in safe["rows"]] == ["closed", "open", "open", "pending"]
+    # Sanity: table still there.
+    again = asyncio.run(fetcher("v-tbl", {}))
+    assert again["total_rows"] == 4
 
 
 def test_make_tree_db_fetcher_substitutes_filters(
