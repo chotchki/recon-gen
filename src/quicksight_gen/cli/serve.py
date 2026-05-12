@@ -166,6 +166,20 @@ def _build_real_app(app_name: str, cfg, instance):  # type: ignore[no-untyped-de
         "the only one `--stub` applies to)."
     ),
 )
+@click.option(
+    "--docs/--no-docs",
+    "embed_docs",
+    default=True,
+    show_default=True,
+    help=(
+        "Build the mkdocs handbook (against the same `--l2`) on startup "
+        "and serve it at `/docs` (X.2.i). Best-effort: silently skipped "
+        "when mkdocs isn't installed (`pip install quicksight-gen[docs]`). "
+        "`--no-docs` skips the build for a faster startup. The standalone "
+        "`docs apply` / `docs serve` / `docs export` CLI is unaffected "
+        "either way."
+    ),
+)
 def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the function-decorator return type
     config,
     l2_instance_path,
@@ -174,6 +188,7 @@ def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the func
     dev_log: bool,
     stub: bool,
     app_name: str,
+    embed_docs: bool,
 ) -> None:
     """Start the App2 HTMX/d3 dashboard server.
 
@@ -185,7 +200,11 @@ def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the func
     when iterating). ``--app smoke`` is the DB-free spike fixture (the
     only one ``--stub`` applies to). Config + L2 instance are loaded the
     same way the json / data / audit groups do; visual data comes from
-    the configured DB; one shared connection pool serves every app.
+    the configured DB; one shared connection pool serves every app. The
+    mkdocs handbook (same ``--l2``) is built on startup and embedded at
+    ``/docs`` when the ``[docs]`` extra is installed — ``--no-docs``
+    skips it; the standalone ``docs apply`` / ``serve`` / ``export`` CLI
+    is unaffected (X.2.i — additive).
     """
     # Imported lazily so the CLI module imports cheaply (uvicorn
     # pulls a lot of asyncio + httptools bootstrap into memory) and
@@ -219,6 +238,35 @@ def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the func
     theme = resolve_l2_theme(instance)
     if theme is not None:
         click.echo(f"theme: L2-driven ({theme.theme_name})")
+
+    # X.2.i — build the mkdocs handbook into a tempdir (against the same
+    # L2) and embed it at /docs. Best-effort: needs the [docs] extra; a
+    # [serve]-only install (no mkdocs) silently skips, never a hard fail.
+    # The tempdir lives for the server's lifetime — cleaned up in the
+    # finally around asyncio.run below.
+    import importlib.util  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    docs_dir: Path | None = None
+    docs_tmp: tempfile.TemporaryDirectory[str] | None = None
+    if embed_docs and importlib.util.find_spec("mkdocs") is not None:
+        from quicksight_gen.cli.docs import build_docs_site  # noqa: PLC0415
+
+        docs_tmp = tempfile.TemporaryDirectory(prefix="qs-app2-docs-")
+        # strict=False — a stray mkdocs warning shouldn't take the server
+        # down; `docs apply --strict` is the place that gates on those.
+        rc = build_docs_site(l2_instance_path, docs_tmp.name, strict=False)
+        if rc == 0 and (Path(docs_tmp.name) / "index.html").is_file():
+            docs_dir = Path(docs_tmp.name)
+            click.echo("docs: embedded handbook at /docs/")
+        else:
+            click.echo(
+                "docs: mkdocs build failed — serving without /docs "
+                "(run `quicksight-gen docs apply` to triage)"
+            )
+            docs_tmp.cleanup()
+            docs_tmp = None
 
     # Build the real apps' trees here (sync) — ``build_*_datasets``
     # populates the shared SQL registry (per-app-prefixed IDs → no
@@ -281,13 +329,17 @@ def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the func
                 f"(prefix={cfg.l2_instance_prefix or instance.instance})"
             )
         try:
-            asgi_app = make_app(dashboards=dashboards, dev_log=dev_log)
+            asgi_app = make_app(
+                dashboards=dashboards, dev_log=dev_log, docs_dir=docs_dir,
+            )
             click.echo(f"App2 server: http://{host}:{port}/")
             if len(dashboards) > 1:
                 click.echo(
                     f"  → http://{host}:{port}/dashboards lists "
                     f"{len(dashboards)} dashboards"
                 )
+            if docs_dir is not None:
+                click.echo(f"  → http://{host}:{port}/docs/ — embedded handbook")
             if dev_log:
                 click.echo("dev-log: on (events forwarded to stderr)")
             config = uvicorn.Config(
@@ -301,4 +353,8 @@ def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the func
 
     import asyncio  # noqa: PLC0415
 
-    asyncio.run(_serve())
+    try:
+        asyncio.run(_serve())
+    finally:
+        if docs_tmp is not None:
+            docs_tmp.cleanup()

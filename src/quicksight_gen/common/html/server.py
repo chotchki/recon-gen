@@ -219,6 +219,7 @@ def make_app(
     dashboards: Mapping[str, ServedDashboard],
     dev_log: bool = False,
     visual_data_cache_max_age_s: int = 60,
+    docs_dir: Path | None = None,
 ) -> Starlette:
     """Build a Starlette ASGI app serving multiple dashboards.
 
@@ -226,6 +227,14 @@ def make_app(
         dashboards: ``{dashboard_id: ServedDashboard}`` mapping.
             One entry per dashboard. The server validates inbound
             path slugs against this mapping; unknown ids 404.
+        docs_dir: when set, the *built* mkdocs handbook site at this
+            path is mounted at ``/docs`` (``StaticFiles(html=True)`` —
+            ``/docs/handbook/l1/`` → ``…/index.html``) and the
+            dashboards-list page links it (X.2.i — "one process, one
+            place": docs + dashboards together). ``None`` (default)
+            leaves ``/docs`` unmounted. The standalone ``docs apply`` /
+            ``docs serve`` / ``docs export`` CLI is unchanged either
+            way — embedding here is purely additive.
         dev_log: when True, the page emits a ``<meta
             name="dev-log">`` tag that activates the client-side
             event forwarder + a ``POST /log`` route is registered
@@ -297,9 +306,13 @@ def make_app(
         # could shift per-user.
         return RedirectResponse("/dashboards", status_code=302)
 
+    docs_url = "/docs/" if docs_dir is not None else None
+
     async def dashboards_list(_request: Request) -> HTMLResponse:
         return HTMLResponse(
-            emit_dashboards_list(listing, theme=listing_theme),
+            emit_dashboards_list(
+                listing, theme=listing_theme, docs_url=docs_url,
+            ),
         )
 
     async def dashboard_view(request: Request) -> Response:
@@ -514,6 +527,17 @@ def make_app(
             name="static",
         ),
     ]
+    if docs_dir is not None:
+        # X.2.i — embed the *built* mkdocs handbook. ``html=True`` makes
+        # ``/docs/`` → ``…/index.html`` and ``/docs/handbook/l1/`` →
+        # ``…/handbook/l1/index.html`` (mkdocs's pretty-URL layout).
+        # Mounting at ``/docs`` (not the site root) relies on the site
+        # using relative internal links — mkdocs-material's default.
+        routes.append(Mount(
+            "/docs",
+            app=StaticFiles(directory=str(docs_dir), html=True),
+            name="docs",
+        ))
     if dev_log:
         routes.append(Route("/log", log_event, methods=["POST"]))
     # exception_handlers maps status code (HTTPException) OR exception

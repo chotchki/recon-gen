@@ -27,6 +27,7 @@ Coverage:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from starlette.testclient import TestClient
@@ -458,3 +459,56 @@ def test_dashboard_view_does_not_cache() -> None:
     # we don't want to be silently caching the chrome at the edge
     # before the X.2.l theme story lands.
     assert "cache-control" not in resp.headers
+
+
+# --- X.2.i: embedded MkDocs handbook at /docs -------------------------
+
+
+def _make_test_app_with_docs(docs_dir: Path | None) -> TestClient:
+    tree_app, sheet = _build_app()
+    asgi = make_app(
+        dashboards={
+            _DASHBOARD_ID: ServedDashboard(
+                tree_app=tree_app,
+                sheet=sheet,
+                title=_DASHBOARD_TITLE,
+                data_fetcher=lambda _v, _p: {},
+            ),
+        },
+        docs_dir=docs_dir,
+    )
+    return TestClient(asgi)
+
+
+def test_docs_mount_serves_built_site(tmp_path: Path) -> None:
+    """X.2.i — when ``make_app`` gets a ``docs_dir`` (the *built*
+    MkDocs site), it mounts at ``/docs`` with ``html=True`` so
+    directory URLs resolve to ``index.html``. The dashboards
+    listing also grows a Handbook link."""
+    site = tmp_path / "site"
+    (site / "concepts").mkdir(parents=True)
+    (site / "index.html").write_text("<h1>Handbook Home</h1>")
+    (site / "concepts" / "index.html").write_text("<h1>Concepts</h1>")
+    client = _make_test_app_with_docs(site)
+
+    # Directory URL → index.html (html=True).
+    root = client.get("/docs/")
+    assert root.status_code == 200
+    assert "Handbook Home" in root.text
+    sub = client.get("/docs/concepts/")
+    assert sub.status_code == 200
+    assert "Concepts" in sub.text
+
+    # The dashboards listing links to the embedded handbook.
+    listing = client.get("/dashboards").text
+    assert "/docs/" in listing
+    assert "Handbook" in listing
+
+
+def test_docs_mount_absent_when_docs_dir_unset() -> None:
+    """Default (no ``docs_dir``): no ``/docs`` route, and the
+    listing carries no Handbook link — the standalone ``docs``
+    CLI is the only way to get the site."""
+    client = _make_test_app_with_docs(None)
+    assert client.get("/docs/").status_code == 404
+    assert "/docs/" not in client.get("/dashboards").text
