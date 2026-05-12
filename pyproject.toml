@@ -83,9 +83,12 @@ audit = [
     "pyhanko>=0.30",
 ]
 serve = [
-    # Phase X.2 — self-hosted dashboard renderer (HTMX + d3 + Tailwind
-    # via CDN). Starlette is the ASGI framework; uvicorn[standard]
-    # bundles uvloop + httptools for the production-grade server.
+    # Phase X.2 — self-hosted dashboard renderer. The browser-side
+    # JS/CSS (htmx, d3, the filter widgets, the Tailwind output) ship
+    # *inside the wheel* and are served from /static/ — App 2 needs no
+    # internet at runtime (X.2.p). Starlette is the ASGI framework;
+    # uvicorn[standard] bundles uvloop + httptools for the
+    # production-grade server.
     # python-multipart is required for Starlette to parse HTMX form
     # POSTs (the swap-on-mutation pattern). httpx is pulled in for
     # Starlette's TestClient (tests/unit/test_html_server.py).
