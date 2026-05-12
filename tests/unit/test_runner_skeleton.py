@@ -470,9 +470,9 @@ def test_layer_command_db_sets_e2e_gate() -> None:
 
 def test_layer_command_app2_dispatches_html2_tests() -> None:
     """b.3.impl.layer — Layer 3.7 (App2 against local Docker) dispatches
-    the three test_html2_*.py files. Both stub fetcher tests and the
-    live-DB fetcher test land in this layer because all three exercise
-    the App2 Starlette server + Playwright path."""
+    the test_html2_*.py files (stub + live-DB fetcher), plus
+    test_dashboard_driver.py (X.2.u.6.followon — its App2Driver.smoke()
+    protocol-parity tests need only Playwright + the bundled smoke app)."""
     cmd_env = runner._layer_command("app2", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env_addl = cmd_env
@@ -481,6 +481,7 @@ def test_layer_command_app2_dispatches_html2_tests() -> None:
     assert "test_html2_executives_live.py" in cmd_str
     assert "test_html2_money_trail.py" in cmd_str
     assert "test_html2_l2ft.py" in cmd_str  # Y.2.app2.cde.l2ft-wiring.c
+    assert "test_dashboard_driver.py" in cmd_str  # X.2.u.6.followon
     # Behind QS_GEN_E2E=1 like every other tests/e2e/ file.
     assert env_addl["QS_GEN_E2E"] == "1"
     assert env_addl["QS_GEN_LAYER"] == "app2"

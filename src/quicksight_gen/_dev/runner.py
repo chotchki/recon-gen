@@ -646,12 +646,20 @@ def _layer_command(
         # reads `QS_GEN_DEMO_DATABASE_URL` env override (config.py:364),
         # so the variant URL flows through naturally. Behind `QS_GEN_E2E=1`
         # like every other tests/e2e/ file. NO AWS contact (audit §7.10 LOCKED).
+        #
+        # X.2.u.6.followon — `test_dashboard_driver.py` joins the list: its 8
+        # `App2Driver.smoke()` protocol-parity tests (`test_showcase_*` /
+        # `test_app2_*`) need only Playwright + the bundled smoke app (no DB,
+        # no AWS), so this is their home. Its 3 `test_qs_l1_*` tests
+        # (`@pytest.mark.browser`, deployed-dashboard) skip cleanly here
+        # (no `QS_E2E_USER_ARN`) and run in the `browser` layer / e2e.yml.
         cmd = [
             str(_VENV_BIN / "pytest"),
             "tests/e2e/test_html2_executives.py",
             "tests/e2e/test_html2_executives_live.py",
             "tests/e2e/test_html2_money_trail.py",
             "tests/e2e/test_html2_l2ft.py",
+            "tests/e2e/test_dashboard_driver.py",
             "-q",
         ]
         if opts.only:
