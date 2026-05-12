@@ -40,6 +40,78 @@ def app2() -> None:
     """App2 — self-hosted HTMX/d3 dashboards."""
 
 
+# The four real apps App2 serves (everything except the DB-free
+# ``smoke`` fixture). ``serve app2 apply`` with no ``--app`` builds all
+# four into one server — same "no-arg = all" shape as ``json apply``;
+# ``--app <one>`` narrows to a single app for iteration.
+_REAL_APPS: tuple[str, ...] = (
+    "l1_dashboard", "l2_flow_tracing", "investigation", "executives",
+)
+_APP_TITLES: dict[str, str] = {
+    "l1_dashboard": "L1 Dashboard",
+    "l2_flow_tracing": "L2 Flow Tracing",
+    "investigation": "Investigation",
+    "executives": "Executives",
+    "smoke": "Smoke",
+}
+
+
+def _build_real_app(app_name: str, cfg, instance):  # type: ignore[no-untyped-def]: cfg/l2 untyped pending CLI-wide sweep
+    """Register ``app_name``'s datasets + build its tree.
+
+    Returns ``(tree_app, first_sheet)``. ``build_*_datasets(...)``
+    populates the shared SQL registry (per-app-prefixed IDs, so the
+    four apps don't collide) which ``make_tree_db_fetcher`` reads at
+    construction time — a missing entry fails loudly here, not inside
+    a hot HTMX swap.
+    """
+    if app_name == "executives":
+        from quicksight_gen.apps.executives.app import (  # noqa: PLC0415
+            build_executives_app,
+        )
+        from quicksight_gen.apps.executives.datasets import (  # noqa: PLC0415
+            build_all_datasets as _build_datasets,
+        )
+        # Executives' build_all_datasets doesn't take l2_instance; the
+        # per-app builder does, via the kwarg below.
+        _build_datasets(cfg)
+        tree_app = build_executives_app(cfg, l2_instance=instance)
+    elif app_name == "investigation":
+        from quicksight_gen.apps.investigation.app import (  # noqa: PLC0415
+            build_investigation_app,
+        )
+        from quicksight_gen.apps.investigation.datasets import (  # noqa: PLC0415
+            build_all_datasets as _build_datasets,
+        )
+        _build_datasets(cfg, instance)
+        tree_app = build_investigation_app(cfg, l2_instance=instance)
+    elif app_name == "l2_flow_tracing":
+        from quicksight_gen.apps.l2_flow_tracing.app import (  # noqa: PLC0415
+            build_l2_flow_tracing_app,
+        )
+        from quicksight_gen.apps.l2_flow_tracing.datasets import (  # noqa: PLC0415
+            build_all_l2_flow_tracing_datasets as _build_datasets,
+        )
+        _build_datasets(cfg, instance)
+        tree_app = build_l2_flow_tracing_app(cfg, l2_instance=instance)
+    elif app_name == "l1_dashboard":
+        from quicksight_gen.apps.l1_dashboard.app import (  # noqa: PLC0415
+            build_l1_dashboard_app,
+        )
+        from quicksight_gen.apps.l1_dashboard.datasets import (  # noqa: PLC0415
+            build_all_l1_dashboard_datasets as _build_datasets,
+        )
+        _build_datasets(cfg, instance)
+        tree_app = build_l1_dashboard_app(cfg, l2_instance=instance)
+    else:  # pragma: no cover — click.Choice gates this
+        raise click.UsageError(f"Unknown App2 app: {app_name!r}")
+    if tree_app.analysis is None or not tree_app.analysis.sheets:
+        raise click.UsageError(
+            f"{app_name} app has no analysis sheets — bug in builder."
+        )
+    return tree_app, tree_app.analysis.sheets[0]
+
+
 @app2.command("apply")
 @config_option(required_for_dialect_only=True)
 @l2_instance_option()
@@ -79,16 +151,19 @@ def app2() -> None:
     "--app",
     "app_name",
     type=click.Choice(
-        ["smoke", "executives", "investigation", "l2_flow_tracing",
-         "l1_dashboard"],
+        ["all", "smoke", "l1_dashboard", "l2_flow_tracing",
+         "investigation", "executives"],
     ),
-    default="smoke",
+    default="all",
     show_default=True,
     help=(
-        "Which App2 surface to serve. ``smoke`` is the spike fixture; "
-        "``executives`` / ``investigation`` / ``l2_flow_tracing`` / "
-        "``l1_dashboard`` build the real tree + wire its datasets "
-        "through the generic tree fetcher."
+        "Which App2 surface(s) to serve. ``all`` (default) builds the "
+        "four real apps into one server — `/dashboards` lists them and "
+        "you switch between them in-process, same as `json apply` with "
+        "no `--app`. Pass a single app name to narrow to one (faster "
+        "startup when iterating). ``smoke`` is the DB-free spike fixture "
+        "(the only one that works without a configured database / and "
+        "the only one `--stub` applies to)."
     ),
 )
 def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the function-decorator return type
@@ -102,12 +177,15 @@ def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the func
 ) -> None:
     """Start the App2 HTMX/d3 dashboard server.
 
-    Loads the config + L2 instance the same way the json / data /
-    audit groups do, builds the App2 tree, and runs uvicorn. The
-    visual data comes from the configured DB by default; pass
-    ``--stub`` to swap in the deterministic stub fetcher (useful
-    when there's no populated database, or when iterating on the
-    JS / page shell only).
+    With no ``--app`` (the default ``all``), builds the four real apps
+    (``l1_dashboard`` / ``l2_flow_tracing`` / ``investigation`` /
+    ``executives``) into one server — ``/dashboards`` lists them and you
+    switch between them in-process; same "no-arg = all" shape as ``json
+    apply``. ``--app <one>`` narrows to a single app (faster startup
+    when iterating). ``--app smoke`` is the DB-free spike fixture (the
+    only one ``--stub`` applies to). Config + L2 instance are loaded the
+    same way the json / data / audit groups do; visual data comes from
+    the configured DB; one shared connection pool serves every app.
     """
     # Imported lazily so the CLI module imports cheaply (uvicorn
     # pulls a lot of asyncio + httptools bootstrap into memory) and
@@ -131,94 +209,39 @@ def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the func
         resolve_l2_theme,
     )
 
+    if stub and app_name != "smoke":
+        raise click.UsageError(
+            f"--stub only applies to --app smoke (the DB-free fixture); "
+            f"--app {app_name} needs a real database."
+        )
+
     cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
-    needs_pool = app_name != "smoke"
-    if app_name == "smoke":
-        tree_app, sheet = build_smoke_app(cfg)
-        smoke_filter_specs = SMOKE_FILTER_SPECS
-    elif app_name in (
-        "executives", "investigation", "l2_flow_tracing", "l1_dashboard",
-    ):
-        # X.2.g.{1,2} — real tree app via the generic tree fetcher.
-        # build_all_datasets(cfg, ...) populates the SQL registry (via
-        # build_dataset → register_sql); make_tree_db_fetcher reads
-        # that registry at construction time so a missing entry fails
-        # loudly here instead of inside a hot HTMX swap.
-        if stub:
-            raise click.UsageError(
-                f"--stub is only supported for --app smoke. The "
-                f"{app_name} app needs a real DB."
-            )
-        if app_name == "executives":
-            from quicksight_gen.apps.executives.app import (  # noqa: PLC0415
-                build_executives_app,
-            )
-            from quicksight_gen.apps.executives.datasets import (  # noqa: PLC0415
-                build_all_datasets as build_app_datasets,
-            )
-            # Executives doesn't take l2_instance on build_all_datasets;
-            # the per-app build_app_fn does, via the kwarg below.
-            build_app_datasets(cfg)
-            tree_app = build_executives_app(cfg, l2_instance=instance)
-        elif app_name == "investigation":
-            from quicksight_gen.apps.investigation.app import (  # noqa: PLC0415
-                build_investigation_app,
-            )
-            from quicksight_gen.apps.investigation.datasets import (  # noqa: PLC0415
-                build_all_datasets as build_inv_datasets,
-            )
-            # Investigation's build_all_datasets requires l2_instance
-            # (App Info matview names need the prefix). Mirrors L1 /
-            # L2FT signature.
-            build_inv_datasets(cfg, instance)
-            tree_app = build_investigation_app(cfg, l2_instance=instance)
-        elif app_name == "l2_flow_tracing":  # Y.2.app2.cde.l2ft-wiring
-            from quicksight_gen.apps.l2_flow_tracing.app import (  # noqa: PLC0415
-                build_l2_flow_tracing_app,
-            )
-            from quicksight_gen.apps.l2_flow_tracing.datasets import (  # noqa: PLC0415
-                build_all_l2_flow_tracing_datasets,
-            )
-            # L2FT's dataset builder requires l2_instance (App Info
-            # matview names + the Rails/Chains/Templates pushdown
-            # params' declared-value defaults are all L2-derived).
-            build_all_l2_flow_tracing_datasets(cfg, instance)
-            tree_app = build_l2_flow_tracing_app(cfg, l2_instance=instance)
-        else:  # l1_dashboard (Y.2.g)
-            from quicksight_gen.apps.l1_dashboard.app import (  # noqa: PLC0415
-                build_l1_dashboard_app,
-            )
-            from quicksight_gen.apps.l1_dashboard.datasets import (  # noqa: PLC0415
-                build_all_l1_dashboard_datasets,
-            )
-            # L1's dataset builder requires l2_instance (matview names
-            # + Y.2.g pushdown-param defaults are all L2-derived).
-            build_all_l1_dashboard_datasets(cfg, instance)
-            tree_app = build_l1_dashboard_app(cfg, l2_instance=instance)
-
-        if tree_app.analysis is None or not tree_app.analysis.sheets:
-            raise click.UsageError(
-                f"{app_name} app has no analysis sheets — bug in builder."
-            )
-        sheet = tree_app.analysis.sheets[0]
-        smoke_filter_specs = ()
-    else:
-        # click.Choice(...) above prevents this branch.
-        raise click.UsageError(f"Unknown --app value: {app_name!r}")
-
     theme = resolve_l2_theme(instance)
     if theme is not None:
         click.echo(f"theme: L2-driven ({theme.theme_name})")
 
+    # Build the real apps' trees here (sync) — ``build_*_datasets``
+    # populates the shared SQL registry (per-app-prefixed IDs → no
+    # collisions) that ``make_tree_db_fetcher`` reads in ``_serve``, so
+    # a missing entry fails loudly now, not inside a hot HTMX swap.
+    if app_name == "smoke":
+        smoke_tree, smoke_sheet = build_smoke_app(cfg)
+        real_apps: list[tuple[str, object, object]] = []
+    else:
+        names = list(_REAL_APPS) if app_name == "all" else [app_name]
+        real_apps = [
+            (name, *_build_real_app(name, cfg, instance)) for name in names
+        ]
+
     async def _serve() -> None:
-        # X.2.g.2.d — keep pool + uvicorn in ONE event loop. Previously
-        # ``asyncio.run(make_connection_pool(...))`` opened the psycopg
-        # pool in loop A and then ``uvicorn.run()`` started loop B; the
-        # pool's background filler task was bound to A and died when B
-        # tried to use it ("error connecting in 'pool-1':" on first
-        # request). Building the pool inside the same loop that runs
-        # ``uvicorn.Server.serve()`` lets the filler keep running.
+        # X.2.g.2.d — keep the DB pool + uvicorn in ONE event loop.
+        # ``asyncio.run(make_connection_pool(...))`` then ``uvicorn.run()``
+        # opens the pool in loop A and starts loop B; the pool's filler
+        # task is bound to A and dies when B uses it. Building the pool
+        # inside the loop that runs ``Server.serve()`` keeps the filler
+        # alive. One shared pool serves every app (same database).
         pool = None
+        dashboards: dict[str, ServedDashboard] = {}
         if app_name == "smoke":
             if stub:
                 fetcher = stub_money_trail_fetcher
@@ -230,6 +253,11 @@ def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the func
                     f"{cfg.l2_instance_prefix or instance.instance}"
                     f"_inv_money_trail_edges"
                 )
+            dashboards["smoke"] = ServedDashboard(
+                tree_app=smoke_tree, sheet=smoke_sheet,
+                title=_APP_TITLES["smoke"], data_fetcher=fetcher,
+                theme=theme, filter_specs=SMOKE_FILTER_SPECS,
+            )
         else:
             from quicksight_gen.common.db import (  # noqa: PLC0415
                 make_connection_pool,
@@ -240,27 +268,26 @@ def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the func
             pool = await make_connection_pool(
                 cfg, max_size=cfg.app2_db_pool_size,
             )
-            fetcher = make_tree_db_fetcher(tree_app, cfg, pool=pool)
+            for name, tree_app, sheet in real_apps:
+                dashboards[name] = ServedDashboard(
+                    tree_app=tree_app, sheet=sheet,
+                    title=_APP_TITLES.get(name, name.title()),
+                    data_fetcher=make_tree_db_fetcher(tree_app, cfg, pool=pool),
+                    theme=theme, filter_specs=(),
+                )
             click.echo(
-                f"data: DB-backed ({cfg.dialect.value}) → "
-                f"{app_name} tree fetcher "
+                f"data: DB-backed ({cfg.dialect.value}) → {len(real_apps)} "
+                f"app(s) [{', '.join(n for n, _, _ in real_apps)}] "
                 f"(prefix={cfg.l2_instance_prefix or instance.instance})"
             )
         try:
-            asgi_app = make_app(
-                dashboards={
-                    app_name: ServedDashboard(
-                        tree_app=tree_app,
-                        sheet=sheet,
-                        title=app_name.title(),
-                        data_fetcher=fetcher,
-                        theme=theme,
-                        filter_specs=smoke_filter_specs,
-                    ),
-                },
-                dev_log=dev_log,
-            )
+            asgi_app = make_app(dashboards=dashboards, dev_log=dev_log)
             click.echo(f"App2 server: http://{host}:{port}/")
+            if len(dashboards) > 1:
+                click.echo(
+                    f"  → http://{host}:{port}/dashboards lists "
+                    f"{len(dashboards)} dashboards"
+                )
             if dev_log:
                 click.echo("dev-log: on (events forwarded to stderr)")
             config = uvicorn.Config(

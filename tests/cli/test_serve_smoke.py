@@ -71,10 +71,13 @@ def test_serve_app2_apply_help_lists_options() -> None:
     runner = CliRunner()
     result = runner.invoke(main, ["serve", "app2", "apply", "--help"])
     assert result.exit_code == 0, result.output
-    for opt in ("--config", "--l2", "--host", "--port", "--dev-log"):
+    for opt in ("--config", "--l2", "--host", "--port", "--dev-log", "--app", "--stub"):
         assert opt in result.output, (
             f"serve app2 apply --help missing {opt!r}:\n{result.output}"
         )
+    # The default is ``all`` (build the four real apps into one server,
+    # same "no-arg = all" shape as ``json apply``) — not ``smoke``.
+    assert "[default: all]" in result.output, result.output
 
 
 def test_smoke_app_builder_emits_html(min_config: Path) -> None:
