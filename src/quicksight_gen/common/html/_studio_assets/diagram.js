@@ -34,10 +34,10 @@ const PREFIX_TO_KIND = {
 
 const TOGGLE_KINDS = [
   "role-internal", "role-external", "rail", "template", "chain",
-  "control_parent", "template_role",
+  "control_parent",
 ];
 const EDGE_LABEL_KINDS = [
-  "rail_bundle", "self_loop", "chain", "control_parent", "template_role",
+  "rail_bundle", "self_loop", "chain", "control_parent",
 ];
 
 function _idFromTitle(title) {
@@ -76,7 +76,6 @@ function _edgeKind(srcId, dstId) {
     return "rail_bundle";
   }
   if (srcKind === "template" && dstKind === "rail") return "template_member";
-  if (srcKind === "template" && dstKind === "role") return "template_role";
   return "chain";
 }
 
@@ -117,12 +116,12 @@ async function renderDiagram() {
   const sidecar = _readSidecar();
   const roleMeta = sidecar.role_meta || {};
 
-  // Pull engine from query string; fall back to dot.
-  const params = new URLSearchParams(window.location.search);
-  const engine = params.get("engine") || "dot";
-
+  // Layout engine is locked to dot — the per-rail rails-as-nodes model
+  // depends on dot's rank algorithm. Other engines (neato/sfdp/etc.)
+  // don't handle clusters or directed-rank semantics the way the
+  // chosen layout needs.
   const status = document.getElementById("diagram-status");
-  if (status) status.textContent = `rendering (engine: ${engine})…`;
+  if (status) status.textContent = "rendering…";
 
   let renderer;
   try {
@@ -135,13 +134,10 @@ async function renderDiagram() {
 
   let svgText;
   try {
-    svgText = renderer.layout(dot, "svg", engine);
+    svgText = renderer.layout(dot, "svg", "dot");
   } catch (err) {
     console.error("studio/diagram: layout failed", err);
-    if (status) {
-      status.textContent =
-        `layout failed (engine: ${engine}; try ?engine=neato or sfdp); see console`;
-    }
+    if (status) status.textContent = "layout failed; see console";
     return;
   }
 
@@ -155,7 +151,7 @@ async function renderDiagram() {
   // Strip the wasm-graphviz default sizing so the SVG fills the viewport.
   svg.removeAttribute("width");
   svg.removeAttribute("height");
-  svg.setAttribute("class", "topology-svg mode-default");
+  svg.setAttribute("class", "topology-svg");
 
   // Annotate every node — kind from id prefix, scope from sidecar.
   let counts = { role: 0, rail: 0, template: 0 };
@@ -176,12 +172,12 @@ async function renderDiagram() {
     if (kind in counts) counts[kind] += 1;
   }
 
-  // Annotate every edge + build incidence + adjacency for focus mode.
+  // Annotate every edge for visibility-toggle CSS. Adjacency is no
+  // longer built client-side — focus mode is server-rendered now
+  // (X.4.b focus, 2026-05-13).
   let edgeCounts = {
     rail_bundle: 0, self_loop: 0, template_member: 0, chain: 0,
   };
-  const incidentEdges = {};
-  const adjacency = {};
   for (const g of svg.querySelectorAll('g.edge')) {
     const titleEl = g.querySelector('title');
     if (!titleEl) continue;
@@ -192,43 +188,19 @@ async function renderDiagram() {
     g.setAttribute('data-target', parsed.target);
     g.setAttribute('data-kind', kind);
     if (kind in edgeCounts) edgeCounts[kind] += 1;
-    for (const id of [parsed.source, parsed.target]) {
-      if (!(id in incidentEdges)) incidentEdges[id] = new Set();
-      incidentEdges[id].add(g);
-      if (!(id in adjacency)) adjacency[id] = new Set();
-    }
-    adjacency[parsed.source].add(parsed.target);
-    adjacency[parsed.target].add(parsed.source);
   }
-
-  // Mode-stub: paint per-node fake data so the user can see how
-  // overlays would read. X.4.c.5 / X.4.c.6 replace these with real
-  // coverage / trainer data fetchers.
-  _applyModeStubs(svg);
 
   if (status) {
     const totalEdges = Object.values(edgeCounts).reduce((s, n) => s + n, 0);
     const nodes = counts.role + counts.rail + counts.template;
-    status.textContent = `engine: ${engine} · ${nodes} nodes · ${totalEdges} edges`;
+    status.textContent = `${nodes} nodes · ${totalEdges} edges`;
   }
 
   // Wire chrome interactivity now that the SVG is annotated.
   _wireToggles(svg);
   _wireEdgeLabelToggles(svg);
-  _wireMode(svg);
-  _wireLayer(svg);
-  _wireFocus(svg, incidentEdges, adjacency);
-  _wireActiveEngine(engine);
+  _wireFocus(svg);
   _wirePanZoom(svg);
-}
-
-// X.4.b chrome iteration — mark which engine link is active so the user
-// can see what they're on at a glance (default ``dot`` highlighted when
-// no ``?engine=`` is present).
-function _wireActiveEngine(engine) {
-  for (const a of document.querySelectorAll(".engine-link")) {
-    a.classList.toggle("active", a.getAttribute("data-engine") === engine);
-  }
 }
 
 // Vanilla SVG pan + wheel zoom — no library. Operates on the SVG's
@@ -332,26 +304,6 @@ function _wirePanZoom(svg) {
   });
 }
 
-function _applyModeStubs(svg) {
-  // STUB: deterministically tag every other role node "covered" / "uncovered"
-  // and every Nth rail "planted" — pure visual demo so the user can see
-  // how mode overlays would read. Real data lands in X.4.c.5 / X.4.c.6.
-  const nodes = svg.querySelectorAll('g.node');
-  nodes.forEach((node, idx) => {
-    const kind = node.getAttribute('data-kind');
-    if (kind === 'role') {
-      // 2 of every 3 covered, 1 uncovered — gives a visible mix.
-      node.setAttribute(
-        'data-coverage',
-        idx % 3 === 0 ? 'uncovered' : 'covered',
-      );
-    } else if (kind === 'rail' && idx % 4 === 0) {
-      // 1 in 4 rails carries a stub planted exception.
-      node.setAttribute('data-planted', 'drift');
-    }
-  });
-}
-
 function _setHideClass(svg, kind, hidden) {
   svg.classList.toggle(`hide-${kind}`, hidden);
 }
@@ -366,40 +318,9 @@ function _wireToggles(svg) {
     cb.addEventListener("change", apply);
     apply();  // initial sync
   }
-  const reset = document.getElementById("toggle-reset");
-  if (reset) {
-    reset.addEventListener("click", (e) => {
-      e.preventDefault();
-      for (const kind of TOGGLE_KINDS) {
-        const cb = document.getElementById(`toggle-${kind}`);
-        if (cb) {
-          cb.checked = true;
-          svg.classList.remove(`hide-${kind}`);
-        }
-      }
-      for (const kind of EDGE_LABEL_KINDS) {
-        const cb = document.getElementById(`toggle-edge-label-${kind}`);
-        if (cb) {
-          cb.checked = true;
-          svg.classList.remove(`hide-edge-label-${kind}`);
-        }
-      }
-      const modeSel = document.getElementById("mode-select");
-      if (modeSel) {
-        modeSel.value = "default";
-        for (const m of ["default", "coverage", "trainer"]) {
-          svg.classList.remove(`mode-${m}`);
-        }
-        svg.classList.add("mode-default");
-      }
-      // Reset layer stepper to L3 (full).
-      _setLayer(svg, 3);
-      svg.classList.remove("focused");
-      for (const el of svg.querySelectorAll('.dim, .focus')) {
-        el.classList.remove('dim', 'focus');
-      }
-    });
-  }
+  // Reset button is now a plain anchor (href="?") that navigates to
+  // the bare /diagram with no params. The browser handles it; nothing
+  // for JS to do here.
 }
 
 function _wireEdgeLabelToggles(svg) {
@@ -412,58 +333,32 @@ function _wireEdgeLabelToggles(svg) {
   }
 }
 
-function _wireMode(svg) {
-  const sel = document.getElementById("mode-select");
-  if (!sel) return;
-  const apply = () => {
-    for (const m of ["default", "coverage", "trainer"]) {
-      svg.classList.remove(`mode-${m}`);
+// Layer stepper is server-rendered — the chrome's `<a class="layer-btn">`
+// links carry `?layer=N` in href, server filters the topology emit and
+// dot re-lays out the smaller subset cleanly. No JS layer wiring needed
+// (the click is just a navigation).
+
+// Focus mode: click a node → navigate to ?focus=<id> so the server
+// re-emits a filtered DOT (focus + 1-hop) and dot re-lays out the
+// smaller subgraph cleanly. Click on empty SVG canvas → drop ?focus
+// to restore the full picture. Escape clears focus too.
+//
+// Why navigation instead of CSS dim: dimming kept the original layout
+// (node positions frozen, just opacity-faded). The user wanted "zoom
+// in" semantics — re-render so the focused subset gets dot's full
+// canvas. Server-side filter keeps the implementation small (no DOT
+// rewriting on the JS side).
+function _wireFocus(svg) {
+  const _navigateToFocus = (focusId) => {
+    // Preserve ?layer= so click-to-focus doesn't reset the user's
+    // chosen layer. Only ?focus= changes.
+    const url = new URL(window.location.href);
+    if (focusId) {
+      url.searchParams.set("focus", focusId);
+    } else {
+      url.searchParams.delete("focus");
     }
-    svg.classList.add(`mode-${sel.value}`);
-  };
-  sel.addEventListener("change", apply);
-  apply();
-}
-
-// X.4.b chrome iteration (per user feedback): conceptual layer stepper.
-//   Layer 1 = Roles only (the chart of accounts).
-//   Layer 2 = + Rails (the connectivity between roles).
-//   Layer 3 = + Chains & Templates (composed-on-top concepts).
-// Reads the user's mental model: roles core, rails connect, chains/templates
-// layer on top — cumulative reveal builds comprehension layer-by-layer.
-function _setLayer(svg, layer) {
-  for (const n of [1, 2, 3]) svg.classList.remove(`layer-${n}`);
-  svg.classList.add(`layer-${layer}`);
-  for (const btn of document.querySelectorAll(".layer-btn")) {
-    const n = parseInt(btn.getAttribute("data-layer"), 10);
-    btn.classList.toggle("active", n === layer);
-  }
-}
-
-function _wireLayer(svg) {
-  const buttons = document.querySelectorAll(".layer-btn");
-  if (buttons.length === 0) return;
-  for (const btn of buttons) {
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      const layer = parseInt(btn.getAttribute("data-layer"), 10);
-      if (layer >= 1 && layer <= 3) _setLayer(svg, layer);
-    });
-  }
-  // Default: full (Layer 3) — all the user's existing toggle work
-  // still composes on top.
-  _setLayer(svg, 3);
-}
-
-function _wireFocus(svg, incidentEdges, adjacency) {
-  const params = new URLSearchParams(window.location.search);
-  const focusMode = params.get("focus") || "neighbors";
-
-  const reset = () => {
-    svg.classList.remove("focused");
-    for (const el of svg.querySelectorAll('.dim, .focus')) {
-      el.classList.remove('dim', 'focus');
-    }
+    window.location.href = url.toString();
   };
 
   for (const node of svg.querySelectorAll('g.node')) {
@@ -471,44 +366,17 @@ function _wireFocus(svg, incidentEdges, adjacency) {
     node.addEventListener("click", (e) => {
       e.stopPropagation();
       const id = node.getAttribute('data-id');
-      if (!id) return;
-      const focused = new Set([id]);
-      if (focusMode === "subgraph") {
-        const queue = [id];
-        while (queue.length > 0) {
-          const cur = queue.shift();
-          for (const nbr of (adjacency[cur] || [])) {
-            if (!focused.has(nbr)) {
-              focused.add(nbr);
-              queue.push(nbr);
-            }
-          }
-        }
-      } else {
-        for (const nbr of (adjacency[id] || [])) focused.add(nbr);
-      }
-      svg.classList.add("focused");
-      for (const n of svg.querySelectorAll('g.node')) {
-        const nid = n.getAttribute('data-id');
-        n.classList.remove('dim', 'focus');
-        if (focused.has(nid)) n.classList.add('focus');
-        else n.classList.add('dim');
-      }
-      for (const eGroup of svg.querySelectorAll('g.edge')) {
-        const src = eGroup.getAttribute('data-source');
-        const dst = eGroup.getAttribute('data-target');
-        eGroup.classList.remove('dim', 'focus');
-        if (focused.has(src) && focused.has(dst)) eGroup.classList.add('focus');
-        else eGroup.classList.add('dim');
-      }
+      if (id) _navigateToFocus(id);
     });
   }
 
+  // Click on empty SVG (background) clears focus. e.target === svg
+  // means the click landed on the SVG root, not on a child element.
   svg.addEventListener("click", (e) => {
-    if (e.target === svg) reset();
+    if (e.target === svg) _navigateToFocus(null);
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") reset();
+    if (e.key === "Escape") _navigateToFocus(null);
   });
 }
 

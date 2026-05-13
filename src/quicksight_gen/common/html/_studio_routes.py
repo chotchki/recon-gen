@@ -1,4 +1,4 @@
-"""Studio route builder (X.4.a.4 + X.4.b.3 spike arm B).
+"""Studio route builder.
 
 ``make_studio_routes(cache)`` returns the ``Route``/``Mount`` list that
 ``cli.studio`` splices into ``make_app(... studio_routes=...)``. Each
@@ -9,14 +9,15 @@ Routes (current):
 
 - ``GET /`` — landing placeholder. Will become the real Studio
   landing once X.4.c (unified diagram) + X.4.e (editor list) land.
-- ``GET /diagram`` — X.4.b.3 spike arm B: the L2 topology rendered
-  via post-processed graphviz SVG. Reads the typed projection
-  (``topology_graph_for(cache.get())``), inlines the graphviz DOT
-  source, and a small JS shim does the wasm-graphviz render +
-  ``data-kind`` / ``data-id`` annotation + chrome wiring. Knobs
-  exposed via URL query params (``?engine=`` / ``?focus=`` /
-  ``?show-edge-labels=``) so the spike can be iterated against
-  ``sasquatch_pr`` without re-deploying.
+- ``GET /diagram`` — the L2 topology rendered via post-processed
+  graphviz SVG with rails as first-class nodes (the X.4.b dot pivot;
+  spike locked 2026-05-13). Reads the per-rail Digraph builder,
+  inlines its DOT source, and a small JS shim does the wasm-graphviz
+  render + ``data-kind`` / ``data-id`` annotation + chrome wiring.
+  Knobs: ``?engine=`` flips the layout binary (dot / neato / sfdp /
+  …); ``?focus=<node_id>`` filters to that node + its
+  ``_smart_focus_hops``-deep neighborhood (server-side re-render, dot
+  re-lays out the smaller subgraph cleanly).
 - ``Mount /studio/static`` — Studio-specific JS / CSS (the diagram
   shim + stylesheet). Sibling to the existing ``/static`` mount
   Dashboards owns; namespaced so a future renderer-replacement
@@ -45,51 +46,19 @@ from starlette.staticfiles import StaticFiles
 
 from quicksight_gen.common.l2.cache import L2InstanceCache
 from quicksight_gen.common.l2.topology import (
-    TopologyGraph,
-    build_topology_graph,
-    to_d3_per_rail_json,
+    build_topology_graph_per_rail,
     topology_graph_for,
-)
-from quicksight_gen.common.l2.topology import (
-    _render_to_graphviz,  # spike-grade reach into the renderer (X.4.b.3)
 )
 
 
 _STUDIO_ASSETS_DIR = Path(__file__).parent / "_studio_assets"
 # wasm-graphviz vendored once under docs/stylesheets/ for the docs site
-# (Phase T). For the X.4.b spike, Studio mounts the same dir at
-# /studio/wasm-graphviz/ so the diagram shim can ``await import()`` it
-# without a second 800KB copy. X.4.c.1 will revisit (vendor under
-# assets/vendor/ for production) once the renderer is locked.
+# (Phase T). For Studio, mounted at /studio/wasm-graphviz/ so the diagram
+# shim can ``await import()`` it without a second 800KB copy.
 _WASM_GRAPHVIZ_DIR = (
     Path(__file__).parent.parent.parent / "docs" / "stylesheets"
     / "wasm-graphviz"
 )
-
-
-def _filter_orphan_role_nodes(g: TopologyGraph) -> TopologyGraph:
-    """Drop role nodes that don't appear as the source or target of any edge.
-
-    Accounts / account templates declared in the L2 YAML but never
-    referenced by a rail / template-leg / chain are visually noise in
-    the diagram — they appear as floating boxes disconnected from the
-    main connectivity story. Filtering them at render time keeps the
-    topology projection itself unchanged (other consumers + tests stay
-    stable) while giving the diagram surface the quieter default.
-    """
-    referenced: set[str] = set()
-    for edge in g.edges:
-        referenced.add(edge.source)
-        referenced.add(edge.target)
-    filtered = tuple(
-        n for n in g.nodes
-        if n.kind != "role" or n.id in referenced
-    )
-    return TopologyGraph(
-        instance_name=g.instance_name,
-        nodes=filtered,
-        edges=g.edges,
-    )
 
 
 def _dev_log_head_snippets(dev_log: bool) -> tuple[str, str]:
@@ -141,11 +110,8 @@ def _render_landing_placeholder(cache: L2InstanceCache, dev_log: bool) -> str:
         f"<li>Chains: {chains_n}</li>\n"
         f"<li>Templates: {templates_n}</li>\n"
         "</ul>\n"
-        "<h2>Spike: diagram renderer</h2>\n"
         "<ul>\n"
-        "<li><a href=\"/diagram/d3\">→ Topology diagram (arm A — d3-force, "
-        "rails-as-nodes, Y-banded)</a></li>\n"
-        "<li><a href=\"/diagram\">→ Topology diagram (arm B — graphviz)</a>"
+        "<li><a href=\"/diagram\">→ Topology diagram</a>"
         " &nbsp; "
         "<a href=\"/diagram?engine=neato\">[neato]</a> "
         "<a href=\"/diagram?engine=sfdp\">[sfdp]</a> "
@@ -160,40 +126,50 @@ def _render_landing_placeholder(cache: L2InstanceCache, dev_log: bool) -> str:
     )
 
 
-def _render_diagram_page(cache: L2InstanceCache, dev_log: bool) -> str:
-    """X.4.b.3 — the post-processed-graphviz spike arm.
+def _render_diagram_page(
+    cache: L2InstanceCache,
+    dev_log: bool,
+    focus_node_id: str | None = None,
+    layer: int = 1,
+) -> str:
+    """Render the L2 topology diagram (per-rail / dot, X.4.b spike winner).
 
-    Strategy: build the graphviz ``Digraph`` server-side (reuses the
-    Phase Y typed projection — same walk both spike arms consume),
-    inline its ``.source`` (DOT) into a ``<template>`` block, and let
-    the JS shim do the wasm-graphviz render + post-process the SVG to
-    add ``data-kind`` / ``data-id`` attrs from the graphviz titles.
-    The shim wires the chrome (toggle checkboxes + click-to-focus)
-    by toggling CSS classes — no DOM mutation per interaction.
+    Strategy: build the graphviz ``Digraph`` server-side via
+    ``build_topology_graph_per_rail`` (rails as first-class nodes;
+    bundle nodes for parallel pure-connectivity rails; templates as
+    clusters around their leg-rails). Inline the DOT source into a
+    ``<template>`` block; a JS shim (``diagram.js``) does the
+    wasm-graphviz render + post-processes the SVG to add ``data-kind``
+    / ``data-id`` attrs. The shim wires the chrome (toggle checkboxes,
+    layer stepper, click-to-focus → URL navigation) by toggling CSS
+    classes — no DOM mutation per interaction.
 
-    Why server-side DOT, client-side render: we already have the
-    Python graphviz wrapper for DOT construction (it's in the docs
-    extra; Studio inherits via the same install). The wasm-graphviz
-    binary handles the layout + SVG emission in the browser — no
-    system ``dot`` dependency, same approach Phase T's docs use.
+    Why server-side DOT, client-side render: the Python graphviz
+    wrapper handles DOT construction (it's in the docs extra; Studio
+    inherits via the same install). The wasm-graphviz binary handles
+    layout + SVG emission in the browser — no system ``dot``
+    dependency, same approach Phase T's docs use.
+
+    ``focus_node_id`` (optional) filters the graph to the focused
+    node + its ``_smart_focus_hops``-deep neighborhood (roles/
+    templates default to 2 to cross a rail; rails/bundles default
+    to 1). Server re-emits a smaller DOT; dot re-lays out the
+    subgraph cleanly. Click-empty-canvas / Esc / Reset all drop
+    the param to restore the full picture.
     """
     instance = cache.get()
-    typed = topology_graph_for(instance)
-    # X.4.b.3 spike — drop role nodes with no incident edges. Accounts
-    # declared in YAML but never referenced by a rail / template / chain
-    # are truly disconnected in the graph (the L2's "I declared this
-    # but nobody uses it yet" surface). Filtering them out before
-    # rendering keeps the diagram focused on the connectivity story.
-    typed = _filter_orphan_role_nodes(typed)
-    # Render the *filtered* typed graph (not the original L2Instance) so
-    # the DOT we ship to wasm-graphviz reflects the chrome filter. Reach
-    # into the renderer directly since build_topology_graph(instance)
-    # always rebuilds from the L2Instance.
-    digraph = _render_to_graphviz(typed)
+    digraph = build_topology_graph_per_rail(
+        instance,
+        bundle_parallel_rails=True,
+        focus_node_id=focus_node_id,
+        layer=layer,
+    )
     dot_source: str = digraph.source
 
+    # Counts for the chrome (uses the typed projection so they reflect
+    # the underlying L2 shape, not the rendered subgraph).
+    typed = topology_graph_for(instance)
     prefix = escape(str(instance.instance))
-    # Role-scope split (X.4.b chrome iteration D — institutional perimeter).
     n_role_internal = sum(
         1 for n in typed.nodes
         if n.kind == "role" and n.scope == "internal"
@@ -208,15 +184,10 @@ def _render_diagram_page(cache: L2InstanceCache, dev_log: bool) -> str:
     n_bundle = sum(1 for e in typed.edges if e.kind == "rail_bundle")
     n_self_loop = sum(1 for e in typed.edges if e.kind == "self_loop")
     n_control_parent = sum(1 for e in typed.edges if e.kind == "control_parent")
-    n_template_role = sum(1 for e in typed.edges if e.kind == "template_role")
 
     # Sidecar metadata for the JS shim — graphviz doesn't surface
     # node-scope through the SVG, so we ship a small map the post-
-    # processor merges in (data-scope per role node). Mode-overlay stubs
-    # also hang off this sidecar — coverage / trainer modes read it for
-    # the per-node payload (X.4.b chrome iteration B — stub data is fine
-    # for the spike since the real coverage/trainer data lands in
-    # X.4.c.5 / X.4.c.6).
+    # processor merges in (data-scope per role node).
     role_meta: dict[str, dict[str, Any]] = {
         n.id: {"scope": n.scope, "templated": n.templated}
         for n in typed.nodes
@@ -227,15 +198,34 @@ def _render_diagram_page(cache: L2InstanceCache, dev_log: bool) -> str:
     )
 
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
-    # Engines exposed in the chrome — same set the legacy
-    # ``render_topology`` accepts. Hot-swappable via ?engine=. The
-    # active-state ``data-engine`` attr lets the JS shim mark the link
-    # matching ``window.location.search`` as ``.active`` on page load.
-    engines = ("dot", "neato", "sfdp", "fdp", "circo", "twopi")
-    engine_links = " ".join(
-        f'<a class="engine-link" data-engine="{e}" href="?engine={e}">{e}</a>'
-        for e in engines
+    # Build URL fragments so layer / focus links preserve the other
+    # param. Order: focus first, then layer (matches the natural read).
+    def _qs(*, layer_val: int, focus_val: str | None) -> str:
+        bits: list[str] = [f"layer={layer_val}"]
+        if focus_val:
+            bits.append(f"focus={escape(focus_val)}")
+        return "?" + "&".join(bits)
+
+    layer_links = " ".join(
+        f'<a class="layer-btn{" active" if n == layer else ""}" '
+        f'href="{_qs(layer_val=n, focus_val=focus_node_id)}">{label}</a>'
+        for n, label in (
+            (1, "1 · Roles + structure"),
+            (2, "+ Rails"),
+            (3, "+ Chains&nbsp;&amp;&nbsp;Templates"),
+        )
     )
+
+    # Focus indicator + clear link. Visible only when ?focus= is set.
+    # Clear preserves the current layer.
+    if focus_node_id is not None:
+        focus_indicator = (
+            f'<span class="knob focus-indicator">focused: '
+            f'<code>{escape(focus_node_id)}</code> '
+            f'<a class="engine-link" href="{_qs(layer_val=layer, focus_val=None)}">clear</a></span>'
+        )
+    else:
+        focus_indicator = ""
 
     return f"""<!doctype html>
 <html lang="en">
@@ -253,21 +243,11 @@ def _render_diagram_page(cache: L2InstanceCache, dev_log: bool) -> str:
   </header>
 
   <div class="diagram-chrome">
-    <label>mode:
-      <select id="mode-select">
-        <option value="default" selected>Default (integrator)</option>
-        <option value="coverage">Coverage (ETL · STUB)</option>
-        <option value="trainer">Trainer (planted · STUB)</option>
-      </select>
-    </label>
-    <span class="layer-stepper" role="radiogroup" aria-label="Conceptual layers">
-      layer:
-      <button type="button" data-layer="1" class="layer-btn">1 · Roles + structure</button>
-      <button type="button" data-layer="2" class="layer-btn">+ Rails</button>
-      <button type="button" data-layer="3" class="layer-btn active">+ Chains&nbsp;&amp;&nbsp;Templates</button>
+    <span class="layer-stepper" aria-label="Conceptual layers">
+      layer: {layer_links}
     </span>
-    <button id="toggle-reset">Reset</button>
-    <span class="knob">engine: {engine_links}</span>
+    <a id="toggle-reset" href="?">Reset</a>
+    {focus_indicator}
     <span class="status" id="diagram-status">loading…</span>
   </div>
 
@@ -297,10 +277,6 @@ def _render_diagram_page(cache: L2InstanceCache, dev_log: bool) -> str:
       <input type="checkbox" id="toggle-control_parent" checked>
       Control hierarchy <span class="count">({n_control_parent})</span>
     </label>
-    <label>
-      <input type="checkbox" id="toggle-template_role" checked>
-      Template→role links <span class="count">({n_template_role})</span>
-    </label>
     <strong class="chrome-section-label">Edge labels:</strong>
     <label>
       <input type="checkbox" id="toggle-edge-label-rail_bundle" checked>
@@ -318,10 +294,6 @@ def _render_diagram_page(cache: L2InstanceCache, dev_log: bool) -> str:
       <input type="checkbox" id="toggle-edge-label-control_parent" checked>
       Control labels
     </label>
-    <label>
-      <input type="checkbox" id="toggle-edge-label-template_role" checked>
-      Template-role labels
-    </label>
   </div>
 
   <div class="diagram-viewport">
@@ -332,286 +304,6 @@ def _render_diagram_page(cache: L2InstanceCache, dev_log: bool) -> str:
   <script id="topology-meta" type="application/json">{sidecar}</script>
 
   <script type="module" src="/studio/static/diagram.js"></script>
-</body>
-</html>
-"""
-
-
-def _render_d3_diagram_page(
-    cache: L2InstanceCache,
-    dev_log: bool,
-    bundle_parallel_rails: bool = True,
-) -> str:
-    """X.4.b.2 — spike arm A: d3-force topology renderer.
-
-    Sibling to ``_render_diagram_page`` (arm B / graphviz). Shares the
-    chrome shape (layer / mode / toggle / focus) but uses a separate
-    JSON shape (``to_d3_per_rail_json``) where every Rail is a
-    first-class node — so rails can be visually banded between roles
-    and templates and chains/templates connect to one canonical
-    rail-node instead of to a duplicated label/cluster instance.
-
-    ``bundle_parallel_rails`` (default True) groups pure-connectivity
-    rails into bundle nodes (one per topological key) — same elegance
-    graphviz used to collapse "5 rails: A, B, C..." between role pairs.
-    Anchored rails (chain endpoints / template leg-rails) always stay
-    individual since the sequencing/composition edges need them. Driven
-    by the ``?bundle=off`` URL param + the chrome checkbox.
-    """
-    instance = cache.get()
-    payload = to_d3_per_rail_json(
-        instance,
-        bundle_parallel_rails=bundle_parallel_rails,
-    )
-    sidecar = json.dumps(payload)  # typing-smell: ignore[json-indent]: inline page payload
-
-    prefix = escape(str(instance.instance))
-    nodes = payload["nodes"]
-    links = payload["links"]
-    n_role_internal = sum(
-        1 for n in nodes if n["kind"] == "role" and n.get("scope") == "internal"
-    )
-    n_role_external = sum(
-        1 for n in nodes if n["kind"] == "role" and n.get("scope") == "external"
-    )
-    n_rail = sum(1 for n in nodes if n["kind"] == "rail")
-    n_template = sum(1 for n in nodes if n["kind"] == "template")
-    n_chain = sum(1 for e in links if e["kind"] == "chain")
-    n_control_parent = sum(1 for e in links if e["kind"] == "control_parent")
-    n_template_member = sum(1 for e in links if e["kind"] == "template_member")
-    n_rail_endpoint = sum(1 for e in links if e["kind"] == "rail_endpoint")
-
-    devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
-
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Studio diagram (d3) — {prefix}</title>
-  {devlog_meta}<link rel="stylesheet" href="/studio/static/diagram.css">
-  <link rel="stylesheet" href="/studio/static/diagram_d3.css">
-  {devlog_script}</head>
-<body>
-  <header class="studio-header">
-    <h1>Studio · diagram (d3-force, arm A)</h1>
-    <span class="instance">{prefix}</span>
-    <a class="nav-link" href="/">← landing</a>
-    <a class="nav-link" href="/diagram">→ arm B (graphviz)</a>
-    <a class="nav-link" href="/dashboards">→ dashboards</a>
-  </header>
-
-  <div class="diagram-chrome">
-    <label>mode:
-      <select id="mode-select">
-        <option value="default" selected>Default (integrator)</option>
-        <option value="coverage">Coverage (ETL · STUB)</option>
-        <option value="trainer">Trainer (planted · STUB)</option>
-      </select>
-    </label>
-    <span class="layer-stepper" role="radiogroup" aria-label="Conceptual layers">
-      layer:
-      <button type="button" data-layer="1" class="layer-btn">1 · Roles + structure</button>
-      <button type="button" data-layer="2" class="layer-btn">+ Rails</button>
-      <button type="button" data-layer="3" class="layer-btn active">+ Chains&nbsp;&amp;&nbsp;Templates</button>
-    </span>
-    <button id="toggle-reset">Reset</button>
-    <label class="knob-row" title="Bundle pure-connectivity rails (those not chain-referenced or template-leg) by their (source, destination) pair. Anchored rails stay individual. Reloads the page with ?bundle=on|off.">
-      <input type="checkbox" id="toggle-bundle"{" checked" if bundle_parallel_rails else ""}>
-      bundle parallel rails
-    </label>
-    <label class="knob-row" title="Constrain every node to stay within the visible canvas viewport. Negative X/Y pulls + low repulsion can otherwise fling nodes off-screen.">
-      <input type="checkbox" id="toggle-viewport-clamp" checked>
-      constrain to viewport
-    </label>
-    <label class="knob-row" title="Show faint horizontal band-stripes">
-      <input type="checkbox" id="toggle-band-hints">
-      band hints
-    </label>
-    <span class="status" id="diagram-status">loading…</span>
-  </div>
-
-  <div class="diagram-chrome">
-    <strong class="chrome-section-label" title="Standalone roles — neither a parent_role of another role nor a child of one">Other roles:</strong>
-    <span class="knob-row" title="Y-pull on standalone Role nodes (positive = toward Y-band; negative = pushed AWAY)">
-      Y <input type="range" id="knob-y_strength_role" min="-1" max="1" step="0.05">
-      <span class="knob-value" id="knob-y_strength_role-value">0.15</span>
-    </span>
-    <span class="knob-row" title="X-pull on standalone Role nodes (positive = toward center; negative = toward edges)">
-      X <input type="range" id="knob-x_strength_role" min="-1" max="1" step="0.02">
-      <span class="knob-value" id="knob-x_strength_role-value">0.04</span>
-    </span>
-    <span class="knob-row" title="Repulsion between standalone Role nodes">
-      Repel <input type="range" id="knob-charge_role" min="-1500" max="-50" step="10">
-      <span class="knob-value" id="knob-charge_role-value">-450</span>
-    </span>
-    <span class="knob-row" title="Extra padding around each standalone Role node">
-      Pad <input type="range" id="knob-collide_role" min="2" max="60" step="1">
-      <span class="knob-value" id="knob-collide_role-value">14</span>
-    </span>
-    <strong class="chrome-section-label" title="Parent (control) roles — referenced as parent_role of another role; e.g., DDAControl, ConcentrationMaster">Parent roles:</strong>
-    <span class="knob-row" title="Y-pull on parent (control) Role nodes">
-      Y <input type="range" id="knob-y_strength_role_parent" min="-1" max="1" step="0.05">
-      <span class="knob-value" id="knob-y_strength_role_parent-value">0.15</span>
-    </span>
-    <span class="knob-row" title="X-pull on parent (control) Role nodes">
-      X <input type="range" id="knob-x_strength_role_parent" min="-1" max="1" step="0.02">
-      <span class="knob-value" id="knob-x_strength_role_parent-value">0.04</span>
-    </span>
-    <span class="knob-row" title="Repulsion between parent (control) Role nodes">
-      Repel <input type="range" id="knob-charge_role_parent" min="-1500" max="-50" step="10">
-      <span class="knob-value" id="knob-charge_role_parent-value">-450</span>
-    </span>
-    <span class="knob-row" title="Extra padding around each parent (control) Role node">
-      Pad <input type="range" id="knob-collide_role_parent" min="2" max="60" step="1">
-      <span class="knob-value" id="knob-collide_role_parent-value">14</span>
-    </span>
-    <strong class="chrome-section-label" title="Child (subledger) roles — has its own parent_role pointing at a control account; e.g., CustomerDDA, MerchantDDA">Child roles:</strong>
-    <span class="knob-row" title="Y-pull on child (subledger) Role nodes">
-      Y <input type="range" id="knob-y_strength_role_child" min="-1" max="1" step="0.05">
-      <span class="knob-value" id="knob-y_strength_role_child-value">0.15</span>
-    </span>
-    <span class="knob-row" title="X-pull on child (subledger) Role nodes">
-      X <input type="range" id="knob-x_strength_role_child" min="-1" max="1" step="0.02">
-      <span class="knob-value" id="knob-x_strength_role_child-value">0.04</span>
-    </span>
-    <span class="knob-row" title="Repulsion between child (subledger) Role nodes">
-      Repel <input type="range" id="knob-charge_role_child" min="-1500" max="-50" step="10">
-      <span class="knob-value" id="knob-charge_role_child-value">-450</span>
-    </span>
-    <span class="knob-row" title="Extra padding around each child (subledger) Role node">
-      Pad <input type="range" id="knob-collide_role_child" min="2" max="60" step="1">
-      <span class="knob-value" id="knob-collide_role_child-value">14</span>
-    </span>
-    <strong class="chrome-section-label">Rails:</strong>
-    <span class="knob-row" title="Y-pull on Rail nodes (positive = toward Y-band; negative = pushed away)">
-      Y <input type="range" id="knob-y_strength_rail" min="-1" max="1" step="0.05">
-      <span class="knob-value" id="knob-y_strength_rail-value">0.15</span>
-    </span>
-    <span class="knob-row" title="X-pull on Rail nodes (positive = toward center; negative = toward edges)">
-      X <input type="range" id="knob-x_strength_rail" min="-1" max="1" step="0.02">
-      <span class="knob-value" id="knob-x_strength_rail-value">0.04</span>
-    </span>
-    <span class="knob-row" title="Repulsion between Rail nodes">
-      Repel <input type="range" id="knob-charge_rail" min="-1500" max="-50" step="10">
-      <span class="knob-value" id="knob-charge_rail-value">-450</span>
-    </span>
-    <span class="knob-row" title="Extra padding around each Rail node">
-      Pad <input type="range" id="knob-collide_rail" min="2" max="60" step="1">
-      <span class="knob-value" id="knob-collide_rail-value">14</span>
-    </span>
-    <strong class="chrome-section-label">Templates:</strong>
-    <span class="knob-row" title="Y-pull on Template nodes (positive = toward Y-band; negative = pushed away)">
-      Y <input type="range" id="knob-y_strength_template" min="-1" max="1" step="0.05">
-      <span class="knob-value" id="knob-y_strength_template-value">0.15</span>
-    </span>
-    <span class="knob-row" title="X-pull on Template nodes (positive = toward center; negative = toward edges)">
-      X <input type="range" id="knob-x_strength_template" min="-1" max="1" step="0.02">
-      <span class="knob-value" id="knob-x_strength_template-value">0.04</span>
-    </span>
-    <span class="knob-row" title="Repulsion between Template nodes">
-      Repel <input type="range" id="knob-charge_template" min="-1500" max="-50" step="10">
-      <span class="knob-value" id="knob-charge_template-value">-450</span>
-    </span>
-    <span class="knob-row" title="Extra padding around each Template node">
-      Pad <input type="range" id="knob-collide_template" min="2" max="60" step="1">
-      <span class="knob-value" id="knob-collide_template-value">14</span>
-    </span>
-  </div>
-
-  <div class="diagram-chrome">
-    <strong class="chrome-section-label">Link bounds:</strong>
-    <span class="knob-row" title="rail → role connectivity edge length: minimum">
-      rail→role min <input type="range" id="knob-link_min_rail_endpoint" min="10" max="400" step="5">
-      <span class="knob-value" id="knob-link_min_rail_endpoint-value">60</span>
-    </span>
-    <span class="knob-row" title="rail → role connectivity edge length: maximum">
-      max <input type="range" id="knob-link_max_rail_endpoint" min="10" max="400" step="5">
-      <span class="knob-value" id="knob-link_max_rail_endpoint-value">200</span>
-    </span>
-    <span class="knob-row" title="template → leg-rail composition edge length: minimum">
-      tmpl→rail min <input type="range" id="knob-link_min_template_member" min="10" max="400" step="5">
-      <span class="knob-value" id="knob-link_min_template_member-value">60</span>
-    </span>
-    <span class="knob-row" title="template → leg-rail composition edge length: maximum">
-      max <input type="range" id="knob-link_max_template_member" min="10" max="400" step="5">
-      <span class="knob-value" id="knob-link_max_template_member-value">200</span>
-    </span>
-    <span class="knob-row" title="chain sequencing edge length: minimum">
-      chain min <input type="range" id="knob-link_min_chain" min="10" max="400" step="5">
-      <span class="knob-value" id="knob-link_min_chain-value">40</span>
-    </span>
-    <span class="knob-row" title="chain sequencing edge length: maximum">
-      max <input type="range" id="knob-link_max_chain" min="10" max="400" step="5">
-      <span class="knob-value" id="knob-link_max_chain-value">140</span>
-    </span>
-    <span class="knob-row" title="control hierarchy edge length: minimum">
-      control min <input type="range" id="knob-link_min_control_parent" min="10" max="400" step="5">
-      <span class="knob-value" id="knob-link_min_control_parent-value">30</span>
-    </span>
-    <span class="knob-row" title="control hierarchy edge length: maximum">
-      max <input type="range" id="knob-link_max_control_parent" min="10" max="400" step="5">
-      <span class="knob-value" id="knob-link_max_control_parent-value">130</span>
-    </span>
-    <span class="status" style="margin-left:auto">URL roundtrips · changes log to /dev-log</span>
-  </div>
-
-  <div class="diagram-chrome">
-    <strong class="chrome-section-label">Show:</strong>
-    <label>
-      <input type="checkbox" id="toggle-role-internal" checked>
-      Internal roles <span class="count" id="count-role-internal">({n_role_internal})</span>
-    </label>
-    <label>
-      <input type="checkbox" id="toggle-role-external" checked>
-      External roles <span class="count" id="count-role-external">({n_role_external})</span>
-    </label>
-    <label>
-      <input type="checkbox" id="toggle-rail" checked>
-      Rails <span class="count" id="count-rail">({n_rail})</span>
-    </label>
-    <label>
-      <input type="checkbox" id="toggle-template" checked>
-      Templates <span class="count" id="count-template">({n_template})</span>
-    </label>
-    <label>
-      <input type="checkbox" id="toggle-chain" checked>
-      Chains <span class="count" id="count-chain">({n_chain})</span>
-    </label>
-    <label>
-      <input type="checkbox" id="toggle-control_parent" checked>
-      Control hierarchy <span class="count" id="count-control_parent">({n_control_parent})</span>
-    </label>
-    <label>
-      <input type="checkbox" id="toggle-template_member" checked>
-      Leg-rail links <span class="count" id="count-template_member">({n_template_member})</span>
-    </label>
-    <strong class="chrome-section-label">Edge labels:</strong>
-    <label>
-      <input type="checkbox" id="toggle-edge-label-rail_endpoint">
-      Endpoint badges <span class="count" id="count-rail_endpoint">({n_rail_endpoint})</span>
-    </label>
-    <label>
-      <input type="checkbox" id="toggle-edge-label-chain" checked>
-      Chain badges
-    </label>
-    <label>
-      <input type="checkbox" id="toggle-edge-label-control_parent" checked>
-      Control labels
-    </label>
-    <label>
-      <input type="checkbox" id="toggle-edge-label-template_member">
-      Leg-rail labels
-    </label>
-  </div>
-
-  <div class="diagram-viewport">
-    <div id="diagram-target" style="height:80vh"></div>
-  </div>
-
-  <script id="topology-d3-data" type="application/json">{sidecar}</script>
-
-  <script src="/static/vendor/js/d3.min.js"></script>
-  <script src="/studio/static/diagram_d3.js"></script>
 </body>
 </html>
 """
@@ -642,17 +334,20 @@ def make_studio_routes(
     async def landing(_request: Request) -> HTMLResponse:
         return HTMLResponse(_render_landing_placeholder(cache, dev_log))
 
-    async def diagram(_request: Request) -> HTMLResponse:
-        return HTMLResponse(_render_diagram_page(cache, dev_log))
-
-    async def diagram_d3(request: Request) -> HTMLResponse:
-        bundle = request.query_params.get("bundle", "on") != "off"
-        return HTMLResponse(_render_d3_diagram_page(cache, dev_log, bundle))
+    async def diagram(request: Request) -> HTMLResponse:
+        focus_node_id = request.query_params.get("focus") or None
+        layer_raw = request.query_params.get("layer", "1")
+        try:
+            layer = max(1, min(3, int(layer_raw)))
+        except ValueError:
+            layer = 1
+        return HTMLResponse(
+            _render_diagram_page(cache, dev_log, focus_node_id, layer),
+        )
 
     routes: list[Route | Mount] = [
         Route("/", landing, methods=["GET"]),
         Route("/diagram", diagram, methods=["GET"]),
-        Route("/diagram/d3", diagram_d3, methods=["GET"]),
         Mount(
             "/studio/static",
             app=StaticFiles(directory=str(_STUDIO_ASSETS_DIR)),

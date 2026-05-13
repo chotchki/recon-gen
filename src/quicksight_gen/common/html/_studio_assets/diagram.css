@@ -158,16 +158,35 @@ body {
 
 .diagram-viewport {
   flex: 1 1 auto;
-  overflow: auto;
+  /* hidden, not auto — the SVG fits to viewBox via preserveAspectRatio.
+   * Pan/zoom modifies the viewBox, not the rendered pixel size, so we
+   * never want browser scrollbars. */
+  overflow: hidden;
   padding: 1rem;
   background: white;
+  /* min-height: 0 lets the flex item actually shrink below its content's
+   * intrinsic size — without this, flex falls back to content size and
+   * the viewport stretches taller than the window. */
+  min-height: 0;
+  display: flex;
+}
+
+#diagram-target {
+  /* Wrapper around the injected SVG; flex:1 + min-height:0 so the SVG
+   * fills the viewport in BOTH dimensions, not just width. */
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
 }
 
 .topology-svg {
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 400px;
+  /* No min-height — let preserveAspectRatio="xMidYMid meet" (SVG default)
+   * fit the viewBox inside the container, both dimensions. min-height
+   * was forcing 400px floor and breaking the height fit on short
+   * viewports. */
 }
 
 /* Chrome section labels (Show: / Edge labels:). */
@@ -207,57 +226,11 @@ body {
 .topology-svg.hide-edge-label-self_loop g.edge[data-kind="self_loop"] text { display: none; }
 .topology-svg.hide-edge-label-chain g.edge[data-kind="chain"] text { display: none; }
 
-/* Mode overlays (X.4.b chrome iteration B — STUB data; X.4.c.5 / X.4.c.6
- * replace with real coverage / trainer fetchers). All driven by a
- * mode-<X> class on the SVG root. */
-
-/* Coverage mode: green tint on covered roles, red ring on uncovered. */
-.topology-svg.mode-coverage g.node[data-kind="role"][data-coverage="covered"] polygon,
-.topology-svg.mode-coverage g.node[data-kind="role"][data-coverage="covered"] ellipse {
-  fill: #d4f4d4 !important;
-  stroke: #1a8a1a;
-}
-.topology-svg.mode-coverage g.node[data-kind="role"][data-coverage="uncovered"] polygon,
-.topology-svg.mode-coverage g.node[data-kind="role"][data-coverage="uncovered"] ellipse {
-  fill: #fde0e0 !important;
-  stroke: #c0392b;
-  stroke-width: 2px;
-}
-
-/* Trainer mode: a small badge appearance via stroke-dasharray on planted
- * rails (real impl will overlay an actual annotation). */
-.topology-svg.mode-trainer g.node[data-planted] polygon,
-.topology-svg.mode-trainer g.node[data-planted] ellipse {
-  stroke: #d97706;
-  stroke-width: 3px;
-  stroke-dasharray: 4 2;
-}
-
-/* Conceptual layer stepper (per user feedback — the user's mental model
- * is: roles core / rails connectivity / chains+templates layered on top).
- * Cumulative reveal — Layer 2 = Layer 1 + rails; Layer 3 = + chains + templates.
- *
- * Implemented via class on the SVG root (`layer-1`, `layer-2`, `layer-3`)
- * + CSS hides everything ABOVE the selected layer. Layer 3 has no hides
- * — full diagram. The visibility checkboxes still compose on top
- * (the layer dial sets the coarse default; checkboxes are the precision
- * escape hatch). */
-
-/* Layer 1 — roles + control hierarchy (chart of accounts WITH the
- * subledger→control roll-ups). Hide flow edges + composition nodes. */
-.topology-svg.layer-1 g.edge:not([data-kind="control_parent"]) { display: none; }
-.topology-svg.layer-1 g.node[data-kind="rail"],
-.topology-svg.layer-1 g.node[data-kind="template"],
-.topology-svg.layer-1 g.cluster { display: none; }
-
-/* Layer 2 — roles + rail connectivity (bundles + self-loops) + control
- * hierarchy. Hide composition (chain edges, template_member edges,
- * template + rail nodes, cluster outlines). */
-.topology-svg.layer-2 g.edge[data-kind="chain"],
-.topology-svg.layer-2 g.edge[data-kind="template_member"] { display: none; }
-.topology-svg.layer-2 g.node[data-kind="rail"],
-.topology-svg.layer-2 g.node[data-kind="template"],
-.topology-svg.layer-2 g.cluster { display: none; }
+/* Conceptual layer stepper — server-rendered. The chrome's
+ * `<a class="layer-btn" href="?layer=N">` links navigate; the server
+ * filters the topology emit and dot re-lays-out the smaller subset
+ * cleanly. No CSS visibility hides for layers — the DOT itself only
+ * contains what the layer should show. */
 
 /* Per-kind hide for control_parent edges (the chrome edge-label toggle). */
 .topology-svg.hide-control_parent g.edge[data-kind="control_parent"] {
@@ -266,19 +239,6 @@ body {
 .topology-svg.hide-edge-label-control_parent g.edge[data-kind="control_parent"] text {
   display: none;
 }
-/* template_role edges (template → role helper lines). */
-.topology-svg.hide-template_role g.edge[data-kind="template_role"] {
-  display: none;
-}
-.topology-svg.hide-edge-label-template_role g.edge[data-kind="template_role"] text {
-  display: none;
-}
-/* Hide template_role edges when templates themselves are hidden. */
-.topology-svg.hide-template g.edge[data-kind="template_role"] {
-  display: none;
-}
-
-/* Layer 3 — full diagram (no hides). */
 
 /* Layer stepper button styling — pill group inside .diagram-chrome. */
 .diagram-chrome .layer-stepper {
@@ -307,22 +267,11 @@ body {
   border-color: var(--studio-accent);
 }
 
-/* Focus mode (click-to-narrow): clicked node + its neighbors stay
- * full-color; everything else dims hard. CSS-driven so DOM mutations
- * stay zero per interaction. */
-.topology-svg.focused g.node.dim,
-.topology-svg.focused g.edge.dim {
-  opacity: 0.08;
-  transition: opacity 120ms ease;
-}
-
-.topology-svg.focused g.node.focus,
-.topology-svg.focused g.edge.focus {
-  opacity: 1;
-  transition: opacity 120ms ease;
-}
-
-/* Click affordance on nodes. */
+/* Click affordance on nodes. Hover highlight stays — click-to-focus
+ * is now URL navigation (X.4.b focus, 2026-05-13), not in-place
+ * dimming, so the .dim / .focus / .focused selectors that lived here
+ * have been dropped. The hover lift remains so the user knows nodes
+ * are interactive. */
 .topology-svg g.node:hover {
   filter: brightness(1.05) drop-shadow(0 0 3px rgba(31, 78, 121, 0.4));
 }

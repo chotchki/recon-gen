@@ -5,63 +5,38 @@
 # only the graphviz-wrapper surface is untyped, and the SVG output is
 # the verifiable contract. Suppressing graphviz noise here keeps the
 # rest of the L2 module under strict pyright without per-line ignores.
-"""Topology projection of an ``L2Instance`` — typed value object + renderers.
+"""Topology projection of an ``L2Instance`` — typed value object + renderer.
 
 Two layers:
 
 1. **The typed projection** (``TopologyGraph`` + ``TopologyNode`` +
    ``TopologyEdge``, built by ``topology_graph_for``). Pure data — one
-   walk over an ``L2Instance``, no rendering. Both the X.4.b spike arms
-   consume this: arm A (D3 + d3-force) reads it via ``to_d3_force_json``;
-   arm B (post-processed graphviz) reads it via ``_render_to_graphviz``
-   that re-emits a ``graphviz.Digraph``. One topology walk, two
-   renderers — no duplicated traversal logic between the spike arms.
-2. **The graphviz renderer** (``build_topology_graph`` +
-   ``render_topology``). The pre-X.4 surface, preserved bit-for-bit:
-   ``build_topology_graph(instance)`` returns the same ``graphviz.Digraph``
-   shape it always has (now via ``_render_to_graphviz`` under the hood),
-   and ``render_topology`` writes the same SVG. The handbook-diagram
-   pipeline (``common/handbook/diagrams.py``) and the existing topology
-   tests are unaffected.
+   walk over an ``L2Instance``, no rendering. Studio's diagram chrome
+   reads this for entity counts (rails / chains / templates / role
+   scopes); the per-rail emitter also reuses it for role-node
+   iteration so the typed walk isn't duplicated.
+2. **The graphviz renderer** (``build_topology_graph_per_rail``).
+   Builds a ``graphviz.Digraph`` with rails as first-class nodes
+   (``src_role → rail → dst_role`` becomes a 3-rank chain dot can
+   lay out deterministically). Bundle nodes consolidate parallel
+   pure-connectivity rails (anchored rails — chain endpoints / template
+   leg-rails — stay individual). Templates render as clusters around
+   their leg-rails. Chains as dashed edges between rail/template
+   nodes. Control_parent (subledger → control role) as dashed gray
+   edges. Optional focus filter (``focus_node_id`` + smart-default
+   hops) for click-to-zoom-in re-render.
 
-The diagram surfaces (same in both renderer paths):
-
-- **Roles** (nodes): every Role declared on an Account or
-  AccountTemplate is one node. Internal vs external scope is styled
-  visually (color + shape) so the analyst sees the institutional
-  perimeter at a glance. Template-declared roles use a third style.
-- **TwoLegRail** (directed edge): ``source_role -> destination_role``.
-  Multiple rails between the same (source, destination) pair collapse
-  into one bundled edge with a count + comma-joined rail-name label —
-  keeps dense instances legible without losing per-rail names.
-- **SingleLegRail** (self-loop): a single-leg rail attaches to its
-  ``leg_role`` as a self-loop, with the leg direction in the label.
-- **TransferTemplate** (cluster + node): each template renders as a
-  subgraph cluster grouping the template's ``leg_rails`` (visually as
-  template-name node + dotted membership edges to each leg-rail's
-  endpoints), so the analyst sees "these N rails fire together as
-  one shared Transfer".
-- **Chain** (dashed edge): ``parent`` → ``child`` rendered as a dashed
-  edge between rail/template nodes with ``required`` + ``xor_group``
-  badged in the label.
-
-Bundling rationale: real-world L2 instances easily declare 8+ rails
-between the same (FRB, Customer DDA) pair. Drawing each as its own
-edge clutters the graph; collapsing to one labeled edge with the rail
-names + count keeps the institutional skeleton readable.
-
-Engines (graphviz renderer): ``dot`` (default; hierarchical layout —
-good for chain DAGs); ``neato`` / ``sfdp`` / ``fdp`` / ``twopi`` /
-``circo`` available as fallbacks for force-directed layouts when the
-graph has many cycles (common for instances with bidirectional rails
-between counterparties).
+The X.4.b spike (locked 2026-05-13) chose this rails-as-nodes /
+graphviz-dot model over the d3-force alternative. The dot pivot
+makes the user's mental "roles → rails → roles" reading fall out of
+dot's rank algorithm with zero knobs; force-directed layouts required
+extensive per-graph tuning. See ``docs/audits/x_4_b_diagram_renderer_spike.md``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
 from .primitives import (
@@ -78,18 +53,13 @@ from .primitives import (
 )
 
 
-# Engines accepted by --engine. Map directly onto Graphviz's bundled
-# layout binaries; the dot driver picks the binary based on this name.
-_VALID_ENGINES = ("dot", "neato", "sfdp", "fdp", "twopi", "circo")
-
-
-# -- Typed projection (the X.4.b.1 adapter) ---------------------------------
+# -- Typed projection -------------------------------------------------------
 
 
 NodeKind: TypeAlias = Literal["role", "rail", "template"]
 EdgeKind: TypeAlias = Literal[
     "rail_bundle", "self_loop", "template_member", "chain",
-    "control_parent", "template_role",
+    "control_parent",
 ]
 
 
@@ -152,14 +122,6 @@ class TopologyEdge:
       the renderer can style differently. When the parent role also
       carries one or more ``LimitSchedule`` entries, ``has_limits=true``
       flags it for cap-badge rendering.
-    - ``template_role`` — a TransferTemplate → role visual link, emitted
-      for every role any of the template's ``leg_rails`` touches (source
-      / destination / leg_role). Surfaces "this template uses this
-      role's edges" so the user can visually trace from a rail name in
-      a bundle/self-loop label to the template that composes it.
-      ``metadata`` carries ``rail_names`` (comma-joined) — the leg-rails
-      that connect this template ↔ this role.
-
     ``label`` is the human-readable display label (may be empty for
     membership edges; the graphviz renderer suppresses labels on those).
     """
@@ -222,7 +184,6 @@ _CHAIN_EDGE_COLOR = "#5a5a5a"
 _BUNDLE_EDGE_COLOR = "#1f4e79"
 _SELF_LOOP_COLOR = "#7f6000"
 _CONTROL_PARENT_COLOR = "#888888"
-_TEMPLATE_ROLE_COLOR = "#a6622c"  # match the TransferTemplate border tone
 
 
 @dataclass(frozen=True, slots=True)
@@ -398,16 +359,19 @@ def _chain_label(entry: ChainEntry) -> str:
 
 
 def _template_inner_label(template: TransferTemplate) -> str:
-    """The template node's inner display label (kept stable for tests)."""
-    return f"{template.name}\nkeys: " + ", ".join(template.transfer_key)
+    """The template node's inner display label.
+
+    Just the name. ``transfer_key`` and ``transfer_type`` previously
+    inflated the label with infrastructure-only info; the cluster
+    border carries the same name so the template is identifiable
+    without doubling up.
+    """
+    return str(template.name)
 
 
 def _template_cluster_label(template: TransferTemplate) -> str:
-    """The cluster's outer header text (graphviz-renderer-specific)."""
-    return (
-        f"TransferTemplate: {template.name}\n"
-        f"({template.transfer_type})"
-    )
+    """The cluster's outer header text — name only, see _template_inner_label."""
+    return str(template.name)
 
 
 def topology_graph_for(instance: L2Instance) -> TopologyGraph:
@@ -539,40 +503,6 @@ def topology_graph_for(instance: L2Instance) -> TopologyGraph:
                 label="",
             ))
 
-    # 4c.6 Template→role edges. Surface "this template's rails touch
-    # this role" as a dotted helper edge — lets the user trace from a
-    # rail name surfacing in a bundle/self-loop label up to the
-    # TransferTemplate that composes it. graphviz can't connect an
-    # edge-label to a node, so we emit role-as-endpoint helpers
-    # instead. One edge per (template, role) pair, with the
-    # responsible leg-rail names in metadata for tooltips.
-    rails_by_name: dict[Identifier, Rail] = {r.name: r for r in instance.rails}
-    for template in instance.transfer_templates:
-        # template → set[role] mapping, plus which rails contributed.
-        role_to_rails: dict[Identifier, list[Identifier]] = {}
-        for rail_name in template.leg_rails:
-            rail = rails_by_name.get(rail_name)
-            if rail is None:
-                continue
-            if isinstance(rail, TwoLegRail):
-                touched_roles: set[Identifier] = set()
-                touched_roles.update(rail.source_role)
-                touched_roles.update(rail.destination_role)
-            else:
-                touched_roles = set(rail.leg_role)
-            for role in touched_roles:
-                role_to_rails.setdefault(role, []).append(rail_name)
-        for role, contributing_rails in sorted(role_to_rails.items()):
-            edges.append(TopologyEdge(
-                source=_template_id(template.name),
-                target=_role_id(role),
-                kind="template_role",
-                label="uses",
-                metadata={
-                    "rail_names": ", ".join(contributing_rails),
-                },
-            ))
-
     # 4c.5 Control-parent edges (Account.parent_role + AccountTemplate.parent_role).
     # Structural hierarchy (subledger → control), not flow connectivity. Maps
     # cleanly to the user's "Layer 1" (chart-of-accounts) mental model — these
@@ -639,129 +569,149 @@ def topology_graph_for(instance: L2Instance) -> TopologyGraph:
     )
 
 
-def to_d3_per_rail_json(
+def _focus_set(
+    focus_node_id: str,
+    adjacency: Mapping[str, set[str]],
+) -> set[str]:
+    """Compute the focus set: direct neighbors + complete rails.
+
+    "Direct connections + complete rail" semantics (X.4.b polish,
+    2026-05-13):
+
+    1. Start with the focus node.
+    2. Add all 1-hop neighbors (any edge kind).
+    3. For any rail or bundle in the resulting set, also add its
+       endpoint roles — so a rail you can see is always shown with
+       BOTH its endpoint roles (no dangling half-edges).
+
+    Avoids the "hops=2" expansion that previously picked up templates
+    that own the touching rails, chain neighbors of those rails, and
+    control_parents of the other-side roles. Those extras are
+    semantically interesting in their own right but they're not what
+    "show me this node and what touches it" should mean — they're a
+    second click away (focus on the template, focus on the chain
+    neighbor) when the user actually wants them.
+    """
+    focused: set[str] = {focus_node_id}
+    # 1-hop direct neighbors.
+    focused.update(adjacency.get(focus_node_id, ()))
+    # Rail completion: pull in the OTHER endpoint role of any rail/
+    # bundle in the set. ``rail__`` prefix covers both individual rails
+    # (``rail__Foo``) and bundles (``rail__bundle_N``).
+    to_add: set[str] = set()
+    for node_id in focused:
+        if not node_id.startswith("rail__"):
+            continue
+        for nbr in adjacency.get(node_id, ()):
+            if nbr.startswith("role__"):
+                to_add.add(nbr)
+    focused |= to_add
+    return focused
+
+
+def build_topology_graph_per_rail(
     instance: L2Instance,
     *,
     bundle_parallel_rails: bool = True,
-) -> dict[str, Any]:
-    """Emit the rails-as-first-class-nodes JSON shape for d3-force (X.4.b.2).
+    focus_node_id: str | None = None,
+    layer: int = 3,
+) -> Any:
+    """Build a Graphviz Digraph with Rails as first-class nodes (X.4.b dot pivot).
 
-    Different shape from ``to_d3_force_json``: every Rail becomes its own
-    node (instead of being inlined as a bundle/self-loop edge label or
-    a chain-anchor pseudo-node). The d3-force renderer can then place
-    rails in their own visual band — exactly the user's mental model
-    (roles core, rails connecting, chains/templates layered on top) —
-    and connect each rail to its endpoint roles + the templates it's a
-    leg of + the chains it parents/children, all from one canonical
-    rail-node.
+    Sibling to ``build_topology_graph`` (which models rails as edges
+    between roles + clusters them inside templates). This view promotes
+    every Rail to its own node + connects it to its endpoint roles via
+    directed edges (``src_role → rail → dst_role`` for TwoLegRail;
+    ``leg_role → rail`` or ``rail → leg_role`` for SingleLegRail by
+    direction). The dot algorithm can then rank-layout the result —
+    the user's mental "roles → rails → roles" 3-rank reading falls
+    out of dot's DAG ranking deterministically, no force tuning, no
+    knobs.
 
-    Why a separate emitter: ``to_d3_force_json`` faithfully mirrors the
-    typed graph's bundle / self-loop / template-member edge model
-    (which graphviz consumes). The arm-A renderer wants a different
-    composition where rails are nodes, not edge labels — and that
-    expansion can't be done losslessly on the JS side because it
-    needs per-rail source/destination role info.
+    The d3-force arm A's per-rail emit (``to_d3_per_rail_json``) drove
+    the same model insight; this is the graphviz analog so the dot
+    renderer can be re-evaluated against the layered reading the user
+    wanted. Both emits share the bundling rule: pure-connectivity rails
+    (TwoLegRails sharing exact source/destination role expressions AND
+    SingleLegRails sharing leg_role/direction, with NEITHER referenced
+    by any chain or template) collapse into one bundle node per group.
+    Anchored rails (chain endpoints / template leg-rails) always stay
+    individual since the sequencing/composition edges need stable
+    rail identity.
 
-    ``bundle_parallel_rails`` (default True) collapses pure-connectivity
-    rails — TwoLegRails sharing exact (source_role, destination_role)
-    AND SingleLegRails sharing (leg_role, leg_direction), with NEITHER
-    referenced by any chain or template — into one bundle node per
-    group. Anchored rails (chain endpoints / template leg-rails) always
-    stay as individual nodes since the chain/template edges need to
-    attach to a stable rail identity. Set to False to render every
-    rail individually (the v0 shape).
+    Templates render as clusters containing their leg-rail nodes;
+    chains as dashed edges between rail/template nodes; control_parent
+    as dashed edges between roles. Orphan roles (declared but
+    unreferenced) are filtered at emit time so the dot layout stays
+    focused on the connectivity story.
 
-    Output shape:
-    ```
-    {
-      "instance": "<prefix>",
-      "nodes": [
-        {"id": "role__X",  "kind": "role", "label": "X", "scope": "internal"|"external"},
-        {"id": "rail__R",  "kind": "rail", "label": "R\\n(transfer_type)",
-         "rail_subtype": "two_leg"|"single_leg",
-         "leg_direction": "Debit"|"Credit"|"Variable" (single_leg only)},
-        {"id": "tmpl__T",  "kind": "template", "label": "T\\nkeys: a, b"},
-      ],
-      "links": [
-        # Per-rail role connectivity. For TwoLegRail: source + destination.
-        # For SingleLegRail: leg_role (one entry per role in the leg expr).
-        {"source": "rail__R", "target": "role__X", "kind": "rail_endpoint",
-         "endpoint": "source"|"destination"|"leg"},
-        # template → leg-rail (one per leg_rail).
-        {"source": "tmpl__T", "target": "rail__R", "kind": "template_member"},
-        # chain (rail|template → rail|template).
-        {"source": "rail__P", "target": "rail__C", "kind": "chain",
-         "required": true|false, "xor_group": "<grp>"|null},
-        # control_parent (subledger → control role).
-        {"source": "role__X", "target": "role__Y", "kind": "control_parent",
-         "child_kind": "account"|"template", "has_limits": true|false},
-      ]
-    }
-    ```
+    ``bundle_parallel_rails`` (default True) is the bundling switch;
+    set False to render every rail as its own node (denser graph,
+    occasionally clearer for low-rail-count instances).
 
-    No bundling, no self-loop fold-in, no chain-anchor pseudo-rails.
-    Every rail is one node; every relationship is one edge to that node.
+    ``focus_node_id`` (optional) — when set, filter the diagram to
+    that node's "direct connections + complete rail" neighborhood
+    (see ``_focus_set``). Adjacency is computed over the FULL graph
+    (so bundle IDs stay stable across full-vs-focused renders).
+    Nodes / edges outside the focus set are skipped at emit time;
+    dot re-lays out the smaller subgraph cleanly. Click-away in the
+    chrome navigates back to the no-focus URL to restore the full
+    picture.
+
+    ``layer`` (1 / 2 / 3, default 3) — conceptual progressive disclosure
+    of the model:
+
+    - ``1`` — roles + control hierarchy only (chart of accounts).
+    - ``2`` — adds rails + their endpoint connectivity.
+    - ``3`` — adds chains + transfer templates (the full diagram).
+
+    Implemented as a server-side filter so dot re-lays-out the smaller
+    subset cleanly per layer (the same "click to zoom in, get a fresh
+    layout" pattern the focus filter uses). Default 3 keeps Python
+    callers (tests, etc.) seeing the full diagram unless they ask
+    otherwise.
+
+    Returns a ``graphviz.Digraph`` ready for ``.render()`` or
+    ``.source`` inspection. Typed as ``Any`` because the ``graphviz``
+    package ships without type stubs.
     """
-    nodes: list[dict[str, Any]] = []
-    links: list[dict[str, Any]] = []
+    import graphviz
 
-    # Pre-compute role role_subkind classification so the d3 renderer can
-    # split force-knob behavior between parent (control), child
-    # (subledger), and standalone roles.
-    parent_role_set: set[Identifier] = set()
-    child_role_set: set[Identifier] = set()
-    for account in instance.accounts:
-        if account.parent_role is not None and account.role is not None:
-            child_role_set.add(account.role)
-            parent_role_set.add(account.parent_role)
-    for tmpl in instance.account_templates:
-        if tmpl.parent_role is not None:
-            child_role_set.add(tmpl.role)
-            parent_role_set.add(tmpl.parent_role)
-
-    # 1. Role nodes (with scope + templated + role_subkind). Reuse the
-    # typed walker's role-collection logic so we stay consistent with
-    # the canonical view.
-    typed = topology_graph_for(instance)
-    for n in typed.nodes:
-        if n.kind != "role":
-            continue
-        # Recover the bare role identifier from the prefix.
-        role_name = Identifier(n.id.removeprefix("role__"))
-        # role_subkind precedence: child wins if a role is both (a templated
-        # subledger that is itself parent_role of something else is rare
-        # but possible — render as child since it's the more-constrained
-        # state).
-        if role_name in child_role_set:
-            role_subkind = "child"
-        elif role_name in parent_role_set:
-            role_subkind = "parent"
-        else:
-            role_subkind = "standalone"
-        role_dict: dict[str, Any] = {
-            "id": n.id,
-            "kind": "role",
-            "label": n.label,
-            "role_subkind": role_subkind,
-        }
-        if n.scope is not None:
-            role_dict["scope"] = n.scope
-        if n.templated:
-            role_dict["templated"] = True
-        nodes.append(role_dict)
-
-    # 2. Rail nodes. Bundling rule (when ``bundle_parallel_rails=True``):
-    # group rails by their topological key, then within each group emit
-    # individual nodes for "anchored" rails (chain endpoints / template
-    # leg-rails — they need stable identity for those edges to attach)
-    # and ONE bundle node for the remaining 2+ "pure connectivity" rails.
-    # A group with 0 or 1 unanchored rails emits individuals only — no
-    # synthetic bundle of one.
+    g: Any = graphviz.Digraph(
+        name=f"l2_topology_per_rail_{instance.instance}",
+        comment=(
+            f"L2 topology (rails as nodes) for instance "
+            f"'{instance.instance}'"
+        ),
+    )
+    # Compactness pass: tighter node/rank spacing, higher mclimit (more
+    # iterations spent reducing edge crossings), concentrate=true (merge
+    # parallel edges with same src/dst), splines=polyline (straight
+    # segments with bends — at-least-as-good as spline at small graphs,
+    # ~30% smaller PNG and faster on dense real-world ones), 10pt node
+    # fontsize (free compaction; default 14pt was too large for typical
+    # rail names). Trades CPU for visual density — sasquatch_pr-scale
+    # lays out under 200ms.
+    g.attr(
+        rankdir="LR",
+        splines="polyline",
+        overlap="false",
+        nodesep="0.15",
+        ranksep="0.35",
+        mclimit="2.0",
+        concentrate="true",
+    )
+    g.attr("node", style="filled,rounded", fontname="Helvetica", fontsize="10")
+    g.attr("edge", fontname="Helvetica", fontsize="9")
 
     rail_names_set: set[Identifier] = {r.name for r in instance.rails}
     template_names_set: set[Identifier] = {
         t.name for t in instance.transfer_templates
     }
+    rails_by_name: dict[Identifier, Rail] = {r.name: r for r in instance.rails}
+
+    # Anchored = referenced by a chain or a template's leg_rails. These
+    # never bundle since chain/template edges need stable rail identity.
     anchored_rails: set[Identifier] = set()
     for chain in instance.chains:
         if chain.parent in rail_names_set:
@@ -773,56 +723,17 @@ def to_d3_per_rail_json(
             if rn in rail_names_set:
                 anchored_rails.add(rn)
 
-    def _emit_individual_rail(rail: Rail) -> None:
-        if isinstance(rail, TwoLegRail):
-            nodes.append({
-                "id": _rail_id(rail.name),
-                "kind": "rail",
-                "label": f"{rail.name}\n({rail.transfer_type})",
-                "rail_subtype": "two_leg",
-                "transfer_type": rail.transfer_type,
-            })
-            for src_role in rail.source_role:
-                links.append({
-                    "source": _rail_id(rail.name),
-                    "target": _role_id(src_role),
-                    "kind": "rail_endpoint",
-                    "endpoint": "source",
-                })
-            for dst_role in rail.destination_role:
-                links.append({
-                    "source": _rail_id(rail.name),
-                    "target": _role_id(dst_role),
-                    "kind": "rail_endpoint",
-                    "endpoint": "destination",
-                })
-        else:
-            nodes.append({
-                "id": _rail_id(rail.name),
-                "kind": "rail",
-                "label": f"{rail.name}\n({rail.transfer_type}, {rail.leg_direction})",
-                "rail_subtype": "single_leg",
-                "transfer_type": rail.transfer_type,
-                "leg_direction": rail.leg_direction,
-            })
-            for leg_role in rail.leg_role:
-                links.append({
-                    "source": _rail_id(rail.name),
-                    "target": _role_id(leg_role),
-                    "kind": "rail_endpoint",
-                    "endpoint": "leg",
-                })
-
-    if not bundle_parallel_rails:
-        for rail in instance.rails:
-            _emit_individual_rail(rail)
-    else:
-        # Group by topological key (same source/destination tuple for
-        # two-leg, same leg_role/direction for single-leg). transfer_type
-        # is NOT in the key — bundles can mix transfer_types just like
-        # graphviz's "5 rails: A, B (ach, wire)" labels did.
-        # Key shape: ("twoleg", source_tuple, destination_tuple) OR
-        #            ("singleleg", leg_tuple, leg_direction).
+    # Compute bundling. rail_to_bundle[name] -> bundle_id (when bundled).
+    # bundles: list of (bundle_id, label, key) emit-ordered.
+    rail_to_bundle: dict[Identifier, str] = {}
+    bundles: list[
+        tuple[
+            str,
+            str,
+            tuple[str, tuple[Identifier, ...], tuple[Identifier, ...] | str],
+        ]
+    ] = []
+    if bundle_parallel_rails:
         groups: dict[
             tuple[str, tuple[Identifier, ...], tuple[Identifier, ...] | str],
             list[Rail],
@@ -842,203 +753,402 @@ def to_d3_per_rail_json(
 
         bundle_idx = 0
         for key, rails_in_group in groups.items():
-            anchored = [r for r in rails_in_group if r.name in anchored_rails]
-            unanchored = [r for r in rails_in_group if r.name not in anchored_rails]
-            for rail in anchored:
-                _emit_individual_rail(rail)
-            if len(unanchored) >= 2:
-                bundle_id = f"rail__bundle_{bundle_idx}"
-                bundle_idx += 1
-                names_sorted = sorted(str(r.name) for r in unanchored)
-                types_sorted = sorted({r.transfer_type for r in unanchored})
-                # One rail per line so the d3 size-to-fit renderer
-                # sizes the bundle node tall instead of stretched-wide.
-                if key[0] == "twoleg":
-                    bundle_label = (
-                        f"{len(unanchored)} rails:\n"
-                        + "\n".join(names_sorted)
-                        + "\n(" + ", ".join(types_sorted) + ")"
+            unanchored = [
+                r for r in rails_in_group if r.name not in anchored_rails
+            ]
+            if len(unanchored) < 2:
+                continue
+            bundle_id = f"rail__bundle_{bundle_idx}"
+            bundle_idx += 1
+            names_sorted = sorted(str(r.name) for r in unanchored)
+            # Names only — transfer_type / leg_direction were on a
+            # trailing line but added noise. Direction's still implicit
+            # in the bundle's edge arrowheads.
+            bundle_label = (
+                f"{len(unanchored)} rails:\n"
+                + "\n".join(names_sorted)
+            )
+            for r in unanchored:
+                rail_to_bundle[r.name] = bundle_id
+            bundles.append((bundle_id, bundle_label, key))
+
+    # Roles referenced by anything we'll emit (rails or control_parent).
+    # Filters orphans the same way _filter_orphan_role_nodes does for
+    # the bundled view — declared-but-unused accounts stay out of the
+    # diagram so dot's rank focuses on the connectivity story.
+    referenced_roles: set[Identifier] = set()
+    for rail in instance.rails:
+        if isinstance(rail, TwoLegRail):
+            referenced_roles.update(rail.source_role)
+            referenced_roles.update(rail.destination_role)
+        else:
+            referenced_roles.update(rail.leg_role)
+    for account in instance.accounts:
+        if account.parent_role is not None and account.role is not None:
+            referenced_roles.add(account.role)
+            referenced_roles.add(account.parent_role)
+    for tmpl_acc in instance.account_templates:
+        if tmpl_acc.parent_role is not None:
+            referenced_roles.add(tmpl_acc.role)
+            referenced_roles.add(tmpl_acc.parent_role)
+
+    # Focus filter: BFS from focus_node_id over the FULL adjacency, then
+    # only emit nodes/edges in the resulting set. Adjacency walk uses the
+    # same node IDs the rest of the function emits (role__/rail__/tmpl__/
+    # rail__bundle_N). Bundle IDs are deterministic from instance.rails
+    # iteration order, so they stay stable across full-vs-focused renders.
+    focus_set: set[str] | None = None
+    if focus_node_id is not None:
+        adjacency: dict[str, set[str]] = {}
+
+        def _add_adj(a: str, b: str) -> None:
+            adjacency.setdefault(a, set()).add(b)
+            adjacency.setdefault(b, set()).add(a)
+
+        # Rail/bundle ↔ role endpoints.
+        for rail in instance.rails:
+            anchor_id = rail_to_bundle.get(rail.name) or _rail_id(rail.name)
+            if isinstance(rail, TwoLegRail):
+                for src_role in rail.source_role:
+                    _add_adj(anchor_id, _role_id(src_role))
+                for dst_role in rail.destination_role:
+                    _add_adj(anchor_id, _role_id(dst_role))
+            else:
+                for leg_role in rail.leg_role:
+                    _add_adj(anchor_id, _role_id(leg_role))
+
+        # Template ↔ leg-rail membership.
+        for tmpl in instance.transfer_templates:
+            for rn in tmpl.leg_rails:
+                if rn not in rail_names_set:
+                    continue
+                rail_anchor = rail_to_bundle.get(rn) or _rail_id(rn)
+                _add_adj(_template_id(tmpl.name), rail_anchor)
+
+        # Chain edges (rail/template ↔ rail/template).
+        for chain in instance.chains:
+            parent_id = (
+                _template_id(chain.parent)
+                if chain.parent in template_names_set
+                else _rail_id(chain.parent)
+            )
+            child_id = (
+                _template_id(chain.child)
+                if chain.child in template_names_set
+                else _rail_id(chain.child)
+            )
+            _add_adj(parent_id, child_id)
+
+        # Control-parent edges (subledger ↔ control role).
+        for account in instance.accounts:
+            if account.parent_role is not None and account.role is not None:
+                _add_adj(
+                    _role_id(account.role),
+                    _role_id(account.parent_role),
+                )
+        for tmpl_acc in instance.account_templates:
+            if tmpl_acc.parent_role is not None:
+                _add_adj(
+                    _role_id(tmpl_acc.role),
+                    _role_id(tmpl_acc.parent_role),
+                )
+
+        # "Direct connections + complete rail" — see ``_focus_set``.
+        focus_set = _focus_set(focus_node_id, adjacency)
+
+    def _in_focus(node_id: str) -> bool:
+        return focus_set is None or node_id in focus_set
+
+    # Layer thresholds. Layer 1 = roles + control_parent only. Layer 2
+    # = + rails + their endpoint connectivity. Layer 3 = + chains +
+    # transfer-template clusters. Server-side filter so dot re-lays-out
+    # the smaller subset cleanly per layer.
+    show_rails = layer >= 2
+    show_chains_and_templates = layer >= 3
+
+    # Phase A — Role nodes (top-level, referenced only, in focus).
+    typed = topology_graph_for(instance)
+    for n in typed.nodes:
+        if n.kind != "role":
+            continue
+        role_name = Identifier(n.id.removeprefix("role__"))
+        if role_name not in referenced_roles:
+            continue
+        if not _in_focus(n.id):
+            continue
+        style = _style_for(n.scope, n.templated)
+        g.node(
+            n.id,
+            label=n.label,
+            shape=style.shape,
+            fillcolor=style.fill,
+            color=style.border,
+            fontcolor=style.font,
+        )
+
+    def _emit_rail_node(g_or_sub: Any, rail: Rail) -> None:
+        # Rail name only — transfer_type was on a second line but added
+        # noise that made every rail visually dominant. Direction for
+        # single-leg rails is conveyed by the arrowhead direction
+        # (rail → leg_role for Credit, leg_role → rail for Debit).
+        g_or_sub.node(
+            _rail_id(rail.name),
+            label=str(rail.name),
+            shape="ellipse",
+            fillcolor=_RAIL_NODE_FILL,
+            color=_RAIL_NODE_BORDER,
+            fontcolor=_RAIL_NODE_BORDER,
+            style="filled",
+        )
+
+    # Phase B — Templates as clusters with their leg-rail nodes inside.
+    # Cluster only emits if either the template itself OR any of its
+    # leg-rails are in focus. Inside the cluster, each leg-rail is
+    # emitted only if in focus. Layer-gated: clusters only show at L3.
+    rails_in_clusters: set[Identifier] = set()
+    template_iter = (
+        instance.transfer_templates if show_chains_and_templates else ()
+    )
+    for template in template_iter:
+        tmpl_id = _template_id(template.name)
+        in_template_legs = [
+            rn for rn in template.leg_rails
+            if rn in rail_names_set and _in_focus(_rail_id(rn))
+        ]
+        if not _in_focus(tmpl_id) and not in_template_legs:
+            continue
+        cluster_name = f"cluster_tmpl_{template.name}"
+        cluster_label = _template_cluster_label(template)
+        with g.subgraph(name=cluster_name) as sub:
+            assert sub is not None
+            sub.attr(
+                label=cluster_label,
+                style="dashed,rounded",
+                color=_TRANSFER_TEMPLATE_BORDER,
+                fontcolor=_TRANSFER_TEMPLATE_BORDER,
+                fontname="Helvetica",
+                fontsize="11",
+            )
+            if _in_focus(tmpl_id):
+                sub.node(
+                    tmpl_id,
+                    label=_template_inner_label(template),
+                    shape="component",
+                    fillcolor=_TRANSFER_TEMPLATE_FILL,
+                    color=_TRANSFER_TEMPLATE_BORDER,
+                    fontcolor=_TRANSFER_TEMPLATE_BORDER,
+                    style="filled",
+                )
+            for rail_name in template.leg_rails:
+                if rail_name not in rail_names_set:
+                    continue
+                if not _in_focus(_rail_id(rail_name)):
+                    continue
+                rail = rails_by_name[rail_name]
+                _emit_rail_node(sub, rail)
+                rails_in_clusters.add(rail_name)
+                if _in_focus(tmpl_id):
+                    sub.edge(
+                        tmpl_id,
+                        _rail_id(rail_name),
+                        style="dotted",
+                        color=_TRANSFER_TEMPLATE_BORDER,
+                        arrowhead="none",
+                    )
+
+    # Phase C — Top-level individual rails (not bundled, not in a cluster).
+    # Layer-gated: rail nodes only show at L2+.
+    for rail in instance.rails:
+        if not show_rails:
+            break
+        if rail.name in rail_to_bundle:
+            continue
+        if rail.name in rails_in_clusters:
+            continue
+        if not _in_focus(_rail_id(rail.name)):
+            continue
+        _emit_rail_node(g, rail)
+
+    # Phase D — Bundle nodes (top-level). Layer-gated.
+    for bundle_id, bundle_label, _key in bundles:
+        if not show_rails:
+            break
+        if not _in_focus(bundle_id):
+            continue
+        g.node(
+            bundle_id,
+            label=bundle_label,
+            shape="ellipse",
+            fillcolor="#e8e8e8",
+            color=_BUNDLE_EDGE_COLOR,
+            fontcolor=_RAIL_NODE_BORDER,
+            style="filled",
+            penwidth="1.5",
+        )
+
+    # Phase E — Endpoint edges. Individual rails: src→rail→dst as 2 edges.
+    # Bundles: same shape but consolidated onto the bundle node.
+    # Each edge requires both endpoints in focus. Layer-gated.
+    for rail in instance.rails:
+        if not show_rails:
+            break
+        if rail.name in rail_to_bundle:
+            continue
+        rail_node_id = _rail_id(rail.name)
+        if not _in_focus(rail_node_id):
+            continue
+        if isinstance(rail, TwoLegRail):
+            for src_role in rail.source_role:
+                if not _in_focus(_role_id(src_role)):
+                    continue
+                g.edge(
+                    _role_id(src_role), rail_node_id,
+                    color=_BUNDLE_EDGE_COLOR,
+                    arrowhead="none",
+                )
+            for dst_role in rail.destination_role:
+                if not _in_focus(_role_id(dst_role)):
+                    continue
+                g.edge(
+                    rail_node_id, _role_id(dst_role),
+                    color=_BUNDLE_EDGE_COLOR,
+                    arrowhead="open",
+                )
+        else:
+            for leg_role in rail.leg_role:
+                if not _in_focus(_role_id(leg_role)):
+                    continue
+                if rail.leg_direction == "Credit":
+                    g.edge(
+                        rail_node_id, _role_id(leg_role),
+                        color=_SELF_LOOP_COLOR,
+                        arrowhead="open",
                     )
                 else:
-                    direction = str(key[2])
-                    bundle_label = (
-                        f"{len(unanchored)} rails:\n"
-                        + "\n".join(names_sorted)
-                        + f"\n({', '.join(types_sorted)}, {direction})"
+                    g.edge(
+                        _role_id(leg_role), rail_node_id,
+                        color=_SELF_LOOP_COLOR,
+                        arrowhead="none",
                     )
-                nodes.append({
-                    "id": bundle_id,
-                    "kind": "rail",
-                    "label": bundle_label,
-                    "rail_subtype": "bundle",
-                    "rail_count": len(unanchored),
-                    "rail_names": ", ".join(names_sorted),
-                    "transfer_types": ", ".join(types_sorted),
-                })
-                # Wire rail_endpoint edges from the bundle node to every
-                # role the group touches.
-                if key[0] == "twoleg":
-                    src_tuple = key[1]
-                    dst_tuple = key[2]
-                    assert isinstance(dst_tuple, tuple)  # twoleg invariant
-                    for src_role in src_tuple:
-                        links.append({
-                            "source": bundle_id,
-                            "target": _role_id(src_role),
-                            "kind": "rail_endpoint",
-                            "endpoint": "source",
-                        })
-                    for dst_role in dst_tuple:
-                        links.append({
-                            "source": bundle_id,
-                            "target": _role_id(dst_role),
-                            "kind": "rail_endpoint",
-                            "endpoint": "destination",
-                        })
+
+    for bundle_id, _label, key in bundles:
+        if not show_rails:
+            break
+        if not _in_focus(bundle_id):
+            continue
+        if key[0] == "twoleg":
+            src_tuple = key[1]
+            dst_tuple = key[2]
+            assert isinstance(dst_tuple, tuple)
+            penwidth = str(min(1.0 + 0.3 * len([
+                r for r in instance.rails if rail_to_bundle.get(r.name) == bundle_id
+            ]), 3.0))
+            for src_role in src_tuple:
+                if not _in_focus(_role_id(src_role)):
+                    continue
+                g.edge(
+                    _role_id(src_role), bundle_id,
+                    color=_BUNDLE_EDGE_COLOR,
+                    arrowhead="none",
+                    penwidth=penwidth,
+                )
+            for dst_role in dst_tuple:
+                if not _in_focus(_role_id(dst_role)):
+                    continue
+                g.edge(
+                    bundle_id, _role_id(dst_role),
+                    color=_BUNDLE_EDGE_COLOR,
+                    arrowhead="open",
+                    penwidth=penwidth,
+                )
+        else:
+            leg_tuple = key[1]
+            direction = str(key[2])
+            for leg_role in leg_tuple:
+                if not _in_focus(_role_id(leg_role)):
+                    continue
+                if direction == "Credit":
+                    g.edge(
+                        bundle_id, _role_id(leg_role),
+                        color=_SELF_LOOP_COLOR,
+                        arrowhead="open",
+                        penwidth="1.5",
+                    )
                 else:
-                    leg_tuple = key[1]
-                    for leg_role in leg_tuple:
-                        links.append({
-                            "source": bundle_id,
-                            "target": _role_id(leg_role),
-                            "kind": "rail_endpoint",
-                            "endpoint": "leg",
-                        })
-            elif len(unanchored) == 1:
-                _emit_individual_rail(unanchored[0])
-            # else: 0 unanchored — only anchored rails in this group, all
-            # already emitted above.
+                    g.edge(
+                        _role_id(leg_role), bundle_id,
+                        color=_SELF_LOOP_COLOR,
+                        arrowhead="none",
+                        penwidth="1.5",
+                    )
 
-    # Re-derive template_names from set we built earlier (kept for the
-    # chain-edge resolution below).
-    template_names = template_names_set
-
-    # 3. Template nodes + template_member edges + template_role helpers.
-    for template in instance.transfer_templates:
-        nodes.append({
-            "id": _template_id(template.name),
-            "kind": "template",
-            "label": _template_inner_label(template),
-            "transfer_type": template.transfer_type,
-            "transfer_key": ", ".join(template.transfer_key),
-        })
-        for rail_name in template.leg_rails:
-            links.append({
-                "source": _template_id(template.name),
-                "target": _rail_id(rail_name),
-                "kind": "template_member",
-            })
-
-    # 4. Chain edges. Source / target may be a Rail name OR a Template name.
+    # Phase F — Chain edges (rail → rail or template → template).
+    # Layer-gated: chains only show at L3.
     for chain in instance.chains:
+        if not show_chains_and_templates:
+            break
         parent_id = (
             _template_id(chain.parent)
-            if chain.parent in template_names
+            if chain.parent in template_names_set
             else _rail_id(chain.parent)
         )
         child_id = (
             _template_id(chain.child)
-            if chain.child in template_names
+            if chain.child in template_names_set
             else _rail_id(chain.child)
         )
-        chain_link: dict[str, Any] = {
-            "source": parent_id,
-            "target": child_id,
-            "kind": "chain",
-            "required": chain.required,
-        }
-        if chain.xor_group is not None:
-            chain_link["xor_group"] = str(chain.xor_group)
-        links.append(chain_link)
+        if not (_in_focus(parent_id) and _in_focus(child_id)):
+            continue
+        g.edge(
+            parent_id, child_id,
+            label=_chain_label(chain),
+            color=_CHAIN_EDGE_COLOR,
+            style="dashed",
+            fontcolor=_CHAIN_EDGE_COLOR,
+        )
 
-    # 5. Control-parent edges (subledger → control role).
+    # Phase G — Control-parent edges (subledger → control role).
     parents_with_limits: set[Identifier] = {
         ls.parent_role for ls in instance.limit_schedules
     }
     for account in instance.accounts:
         if account.parent_role is None or account.role is None:
             continue
-        cp_link: dict[str, Any] = {
-            "source": _role_id(account.role),
-            "target": _role_id(account.parent_role),
-            "kind": "control_parent",
-            "child_kind": "account",
-        }
-        if account.parent_role in parents_with_limits:
-            cp_link["has_limits"] = True
-        links.append(cp_link)
-    for template in instance.account_templates:
-        if template.parent_role is None:
+        src = _role_id(account.role)
+        dst = _role_id(account.parent_role)
+        if not (_in_focus(src) and _in_focus(dst)):
             continue
-        cp_link = {
-            "source": _role_id(template.role),
-            "target": _role_id(template.parent_role),
-            "kind": "control_parent",
-            "child_kind": "template",
-        }
-        if template.parent_role in parents_with_limits:
-            cp_link["has_limits"] = True
-        links.append(cp_link)
+        cp_label = "controls"
+        if account.parent_role in parents_with_limits:
+            cp_label = "controls\n($ caps)"
+        g.edge(
+            src, dst,
+            label=cp_label,
+            color=_CONTROL_PARENT_COLOR,
+            style="dashed",
+            fontcolor=_CONTROL_PARENT_COLOR,
+            arrowhead="onormal",
+        )
+    for tmpl_acc in instance.account_templates:
+        if tmpl_acc.parent_role is None:
+            continue
+        src = _role_id(tmpl_acc.role)
+        dst = _role_id(tmpl_acc.parent_role)
+        if not (_in_focus(src) and _in_focus(dst)):
+            continue
+        cp_label = "controls"
+        if tmpl_acc.parent_role in parents_with_limits:
+            cp_label = "controls\n($ caps)"
+        g.edge(
+            src, dst,
+            label=cp_label,
+            color=_CONTROL_PARENT_COLOR,
+            style="dashed",
+            fontcolor=_CONTROL_PARENT_COLOR,
+            arrowhead="onormal",
+        )
 
-    return {
-        "instance": str(instance.instance),
-        "nodes": nodes,
-        "links": links,
-    }
-
-
-def to_d3_force_json(graph: TopologyGraph) -> dict[str, Any]:
-    """Serialize a TopologyGraph for d3-force consumption.
-
-    Output shape is the d3-force convention (``{"nodes": [...],
-    "links": [...]}``) plus a top-level ``instance`` for the rendering
-    page's title bar. Every value is JSON-serializable (str / int / bool
-    / None / dict-of-strs).
-
-    Each link's ``source`` / ``target`` are the string node IDs (d3 will
-    resolve them to node references by ID on first tick) — same shape
-    arm A's renderer expects without further massaging.
-
-    ``metadata`` is preserved as a sub-object so arm A's renderer can
-    surface rail counts / chain flags / direction hints in tooltips
-    without a second fetch. Empty metadata is dropped to keep the JSON
-    payload tight.
-    """
-    json_nodes: list[dict[str, Any]] = []
-    for n in graph.nodes:
-        node_dict: dict[str, Any] = {
-            "id": n.id,
-            "kind": n.kind,
-            "label": n.label,
-        }
-        if n.scope is not None:
-            node_dict["scope"] = n.scope
-        if n.templated:
-            node_dict["templated"] = True
-        if n.metadata:
-            node_dict["metadata"] = dict(n.metadata)
-        json_nodes.append(node_dict)
-
-    json_links: list[dict[str, Any]] = []
-    for e in graph.edges:
-        link_dict: dict[str, Any] = {
-            "source": e.source,
-            "target": e.target,
-            "kind": e.kind,
-            "label": e.label,
-        }
-        if e.metadata:
-            link_dict["metadata"] = dict(e.metadata)
-        json_links.append(link_dict)
-
-    return {
-        "instance": graph.instance_name,
-        "nodes": json_nodes,
-        "links": json_links,
-    }
-
-
-# -- Graphviz renderer (consumes the typed projection) ----------------------
+    return g
 
 
 def _style_for(scope: Scope | None, templated: bool) -> _RoleStyle:
@@ -1055,301 +1165,13 @@ def _style_for(scope: Scope | None, templated: bool) -> _RoleStyle:
     return _INTERNAL_STYLE
 
 
-def _render_to_graphviz(graph: TopologyGraph) -> Any:
-    """Render a TopologyGraph as a ``graphviz.Digraph``.
-
-    Preserves the legacy ``build_topology_graph`` walk order so the
-    emitted DOT (and the rendered SVG, by extension) stays stable for
-    the docs-site diagram pipeline + the property assertions in
-    ``tests/unit/test_l2_topology.py``.
-    """
-    import graphviz
-
-    g: Any = graphviz.Digraph(
-        name=f"l2_topology_{graph.instance_name}",
-        comment=f"L2 topology for instance '{graph.instance_name}'",
-    )
-    g.attr(rankdir="LR", splines="true", overlap="false")
-    g.attr("node", style="filled,rounded", fontname="Helvetica")
-    g.attr("edge", fontname="Helvetica", fontsize="10")
-
-    # Group nodes by kind for the cluster reconstruction below.
-    role_nodes = [n for n in graph.nodes if n.kind == "role"]
-    template_nodes = [n for n in graph.nodes if n.kind == "template"]
-    rail_nodes = {n.id: n for n in graph.nodes if n.kind == "rail"}
-
-    # Build template_id → list-of-child-rail-ids from template_member edges.
-    template_children: dict[str, list[str]] = {}
-    for edge in graph.edges:
-        if edge.kind == "template_member":
-            template_children.setdefault(edge.source, []).append(edge.target)
-
-    # 1. Role nodes (top-level, in projection order = sorted).
-    for node in role_nodes:
-        style = _style_for(node.scope, node.templated)
-        g.node(
-            node.id,
-            label=node.label,
-            shape=style.shape,
-            fillcolor=style.fill,
-            color=style.border,
-            fontcolor=style.font,
-        )
-
-    # 2. Bundle edges (placed after role nodes, before clusters — matches
-    # the legacy walk order for DOT stability).
-    for edge in graph.edges:
-        if edge.kind != "rail_bundle":
-            continue
-        rail_count = int(edge.metadata.get("rail_count", "1"))
-        g.edge(
-            edge.source,
-            edge.target,
-            label=edge.label,
-            color=_BUNDLE_EDGE_COLOR,
-            penwidth=str(min(1.0 + 0.5 * rail_count, 4.0)),
-        )
-
-    # 3. Self-loop edges.
-    for edge in graph.edges:
-        if edge.kind != "self_loop":
-            continue
-        g.edge(
-            edge.source,
-            edge.target,
-            label=edge.label,
-            color=_SELF_LOOP_COLOR,
-            style="solid",
-        )
-
-    # 4. Template clusters — each template node + its leg-rail children
-    # + the dotted membership edges all live inside the cluster subgraph.
-    rails_in_clusters: set[str] = set()
-    for tmpl_node in template_nodes:
-        cluster_name = f"cluster_tmpl_{tmpl_node.id.removeprefix('tmpl__')}"
-        cluster_label = tmpl_node.metadata.get(
-            "cluster_label", tmpl_node.label,
-        )
-        with g.subgraph(name=cluster_name) as sub:
-            assert sub is not None  # graphviz returns subgraph in `with` form
-            sub.attr(
-                label=cluster_label,
-                style="dashed,rounded",
-                color=_TRANSFER_TEMPLATE_BORDER,
-                fontcolor=_TRANSFER_TEMPLATE_BORDER,
-                fontname="Helvetica",
-                fontsize="11",
-            )
-            sub.node(
-                tmpl_node.id,
-                label=tmpl_node.label,
-                shape="component",
-                fillcolor=_TRANSFER_TEMPLATE_FILL,
-                color=_TRANSFER_TEMPLATE_BORDER,
-                fontcolor=_TRANSFER_TEMPLATE_BORDER,
-                style="filled",
-            )
-            for child_rail_id in template_children.get(tmpl_node.id, ()):
-                rails_in_clusters.add(child_rail_id)
-                child_rail_node = rail_nodes.get(child_rail_id)
-                if child_rail_node is None:
-                    # Defensive: a template_member edge points at a rail
-                    # node we didn't emit. Shouldn't happen — but if it
-                    # does, skip rather than crash.
-                    continue
-                sub.node(
-                    child_rail_id,
-                    label=child_rail_node.label,
-                    shape="ellipse",
-                    fillcolor=_RAIL_NODE_FILL,
-                    color=_RAIL_NODE_BORDER,
-                    fontcolor=_RAIL_NODE_BORDER,
-                    style="filled",
-                )
-                sub.edge(
-                    tmpl_node.id,
-                    child_rail_id,
-                    style="dotted",
-                    color=_TRANSFER_TEMPLATE_BORDER,
-                    arrowhead="none",
-                )
-
-    # 5. Stand-alone rail nodes (referenced only by chain edges, not in
-    # any template cluster). Style them as ``plaintext`` (no border, no
-    # fill) so they read as chain-endpoint *labels*, not as first-class
-    # entities — per user feedback "chain should be a dashed line, not
-    # a separate entity". The chain dashed edge becomes the prominent
-    # visual; the rail name is just the anchor text it terminates at.
-    for rail_node in rail_nodes.values():
-        if rail_node.id in rails_in_clusters:
-            continue
-        g.node(
-            rail_node.id,
-            label=rail_node.label,
-            shape="plaintext",
-            fontcolor=_RAIL_NODE_BORDER,
-            fontsize="10",
-        )
-
-    # 6. Chain edges (declaration order).
-    for edge in graph.edges:
-        if edge.kind != "chain":
-            continue
-        g.edge(
-            edge.source,
-            edge.target,
-            label=edge.label,
-            color=_CHAIN_EDGE_COLOR,
-            style="dashed",
-            fontcolor=_CHAIN_EDGE_COLOR,
-        )
-
-    # 7. Control-parent edges (subledger → control). Distinct visual:
-    # dashed gray with a small "controls" label + an open arrowhead so it
-    # reads as a structural roll-up, not a flow direction. Add a $-cap
-    # annotation when the parent role carries any LimitSchedule entries.
-    for edge in graph.edges:
-        if edge.kind != "control_parent":
-            continue
-        label = edge.label
-        if edge.metadata.get("has_limits") == "true":
-            label = "controls\n($ caps)"
-        g.edge(
-            edge.source,
-            edge.target,
-            label=label,
-            color=_CONTROL_PARENT_COLOR,
-            style="dashed",
-            fontcolor=_CONTROL_PARENT_COLOR,
-            arrowhead="onormal",
-            penwidth="1.0",
-        )
-
-    # 8. Template→role helper edges — dotted, "uses" tag, no arrowhead.
-    # Visually links each TransferTemplate to the roles its leg-rails
-    # touch so the user can trace a rail name in a bundle/self-loop
-    # label up to the template that composes it.
-    for edge in graph.edges:
-        if edge.kind != "template_role":
-            continue
-        g.edge(
-            edge.source,
-            edge.target,
-            label=edge.label,
-            color=_TEMPLATE_ROLE_COLOR,
-            style="dotted",
-            fontcolor=_TEMPLATE_ROLE_COLOR,
-            arrowhead="none",
-            penwidth="0.8",
-            tooltip=f"Leg rails: {edge.metadata.get('rail_names', '')}",
-        )
-
-    return g
-
-
-def build_topology_graph(instance: L2Instance) -> Any:
-    """Build a Graphviz directed graph capturing the L2 topology.
-
-    Pure construction — no rendering, no I/O. Returns a
-    ``graphviz.Digraph`` ready for the caller to ``.render()`` or
-    ``.source`` inspect. Typed as ``Any`` because the ``graphviz``
-    package ships without type stubs; callers should treat the return
-    value as opaque and use ``.render()`` / ``.source`` only.
-
-    Internally walks the ``L2Instance`` once into a typed
-    ``TopologyGraph`` (``topology_graph_for``) and renders that — so the
-    same projection feeds the X.4.b spike's d3 arm without a second
-    walk.
-
-    Raises ``ImportError`` if the ``graphviz`` Python package isn't
-    installed; ``render_topology`` surfaces this as a friendly CLI
-    error.
-    """
-    return _render_to_graphviz(topology_graph_for(instance))
-
-
-def render_topology(
-    instance: L2Instance,
-    output_path: Path,
-    *,
-    engine: str = "dot",
-) -> Path:
-    """Render an L2 topology diagram to an SVG file.
-
-    Returns the actual on-disk path of the rendered SVG (Graphviz
-    appends the format suffix when missing). Surfaces a friendly
-    ``RuntimeError`` when the system ``dot`` binary isn't installed —
-    the Python ``graphviz`` package is a wrapper, not a renderer, so
-    the binary is the actual dependency that makes/breaks rendering.
-
-    ``engine`` defaults to ``dot`` (hierarchical layout — good for
-    chains). Force-directed alternatives ``neato`` / ``sfdp`` / ``fdp``
-    / ``twopi`` / ``circo`` are accepted for instances where the
-    hierarchical layout reads poorly (lots of bidirectional edges
-    between counterparties).
-
-    Raises:
-        ImportError: the ``graphviz`` Python package isn't installed.
-        ValueError: ``engine`` isn't one of the supported names.
-        RuntimeError: the system ``dot`` binary is missing or fails.
-    """
-    if engine not in _VALID_ENGINES:
-        raise ValueError(
-            f"engine={engine!r} not supported; pick one of "
-            f"{_VALID_ENGINES}"
-        )
-    try:
-        import graphviz
-    except ImportError as exc:
-        raise ImportError(
-            "The 'graphviz' Python package is required for L2 topology "
-            "rendering. Install it with: pip install graphviz"
-        ) from exc
-
-    graph: Any = build_topology_graph(instance)
-    graph.engine = engine
-
-    # graphviz.render() appends the format suffix when the path doesn't
-    # already carry it. Strip the suffix from the user-supplied path
-    # before passing in, then put it back when reporting the actual
-    # output path. This dance avoids the wrapper writing
-    # "topology.svg.svg" when the caller passes a path already ending
-    # in .svg.
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    stem_path = output_path.with_suffix("")
-
-    try:
-        rendered: Any = graph.render(
-            filename=str(stem_path),
-            format="svg",
-            cleanup=True,
-            quiet=True,
-        )
-    except graphviz.ExecutableNotFound as exc:
-        raise RuntimeError(
-            "Graphviz 'dot' binary not found on PATH. Install it with "
-            "your system package manager (Homebrew: 'brew install "
-            "graphviz'; Debian/Ubuntu: 'apt install graphviz'; "
-            "Fedora: 'dnf install graphviz')."
-        ) from exc
-    except graphviz.CalledProcessError as exc:
-        raise RuntimeError(
-            f"Graphviz '{engine}' failed to render the L2 topology: {exc}"
-        ) from exc
-
-    return Path(rendered)
-
-
 __all__ = [
     "EdgeKind",
     "NodeKind",
     "TopologyEdge",
     "TopologyGraph",
     "TopologyNode",
-    "build_topology_graph",
-    "render_topology",
-    "to_d3_force_json",
-    "to_d3_per_rail_json",
+    "build_topology_graph_per_rail",
     "topology_graph_for",
 ]
+

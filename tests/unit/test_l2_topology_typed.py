@@ -1,17 +1,8 @@
-"""Typed topology projection tests (X.4.b.1).
+"""Typed topology projection tests.
 
-Covers:
-
-1. ``topology_graph_for`` builds a TopologyGraph with the right node /
-   edge shape against handwritten + shipped fixtures (spec_example,
-   sasquatch_pr).
-2. ``to_d3_force_json`` emits the d3-force convention shape (nodes +
-   links, JSON-serializable) without losing kind / metadata fields.
-3. The legacy ``build_topology_graph`` round-trips through the typed
-   projection — i.e., the typed nodes/edges cover everything the DOT
-   walks (covered indirectly: the existing test_l2_topology.py keeps
-   passing through the refactor; this file's assertions key off the
-   typed shape directly).
+Covers ``topology_graph_for`` — builds a ``TopologyGraph`` with the
+right node / edge shape against handwritten + shipped fixtures
+(spec_example, sasquatch_pr).
 
 Designed to NOT depend on the system ``dot`` binary or the Python
 ``graphviz`` package — the typed projection is pure walk / pure data,
@@ -20,11 +11,8 @@ so it runs everywhere CI does.
 
 from __future__ import annotations
 
-import json
 from decimal import Decimal
 from pathlib import Path
-
-from typing import Any, cast
 
 from quicksight_gen.common.l2 import (
     Account,
@@ -42,7 +30,6 @@ from quicksight_gen.common.l2.topology import (
     TopologyEdge,
     TopologyGraph,
     TopologyNode,
-    to_d3_force_json,
     topology_graph_for,
 )
 
@@ -163,13 +150,14 @@ def test_topology_graph_template_node_has_inner_label_and_metadata() -> None:
     g = topology_graph_for(_kitchen_instance())
     tmpl = next(n for n in g.nodes if n.kind == "template")
     assert tmpl.id == "tmpl__SettlementCycle"
-    # Inner label carries name + keys (matches existing renderer's text).
-    assert tmpl.label == "SettlementCycle\nkeys: merchant_id"
-    # Metadata carries fields the graphviz renderer needs for its
-    # cluster outer label, plus the source data the d3 side can show.
+    # Inner label is just the name now — transfer_type/key labels were
+    # dropped to keep nodes compact (the key is infrastructure-only).
+    assert tmpl.label == "SettlementCycle"
+    # Metadata still carries the full source data for tooltips / future
+    # editor surfaces; the cluster_label matches the inner label.
     assert tmpl.metadata["transfer_type"] == "settlement"
     assert tmpl.metadata["transfer_key"] == "merchant_id"
-    assert "TransferTemplate: SettlementCycle" in tmpl.metadata["cluster_label"]
+    assert tmpl.metadata["cluster_label"] == "SettlementCycle"
 
 
 def test_topology_graph_rail_nodes_for_template_legs_and_chain_refs() -> None:
@@ -351,98 +339,10 @@ def test_topology_graph_for_sasquatch_pr_meets_richness_bar() -> None:
     assert "template_member" in edge_kinds
     assert "chain" in edge_kinds
     assert "control_parent" in edge_kinds
-    assert "template_role" in edge_kinds
-
-
-# -- d3-force JSON serializer -----------------------------------------------
-
-
-def test_to_d3_force_json_shape() -> None:
-    g = topology_graph_for(_kitchen_instance())
-    payload = to_d3_force_json(g)
-    # Top-level shape matches d3-force convention + carries instance name.
-    assert payload["instance"] == "kitchen"
-    assert isinstance(payload["nodes"], list)
-    assert isinstance(payload["links"], list)
-    # Every node has the load-bearing fields.
-    nodes_list = cast(list[dict[str, Any]], payload["nodes"])
-    links_list = cast(list[dict[str, Any]], payload["links"])
-    for node in nodes_list:
-        assert "id" in node
-        assert "kind" in node
-        assert "label" in node
-        assert node["kind"] in ("role", "rail", "template")
-    # Every link has source / target as strings (matching node IDs).
-    node_ids = {n["id"] for n in nodes_list}
-    for link in links_list:
-        assert isinstance(link["source"], str)
-        assert isinstance(link["target"], str)
-        assert link["source"] in node_ids, (
-            f"link source {link['source']} not in node IDs"
-        )
-        assert link["target"] in node_ids, (
-            f"link target {link['target']} not in node IDs"
-        )
-        assert link["kind"] in (
-            "rail_bundle", "self_loop", "template_member", "chain",
-            "control_parent", "template_role",
-        )
-
-
-def test_to_d3_force_json_is_json_serializable() -> None:
-    """The whole payload round-trips through json.dumps without TypeError."""
-    g = topology_graph_for(_kitchen_instance())
-    payload = to_d3_force_json(g)
-    text = json.dumps(payload)
-    reloaded = json.loads(text)
-    assert reloaded == payload
-
-
-def test_to_d3_force_json_promotes_role_scope_and_templated() -> None:
-    g = topology_graph_for(_kitchen_instance())
-    payload = to_d3_force_json(g)
-    by_id = {n["id"]: n for n in payload["nodes"]}
-    # Internal role: scope present, templated absent (False is dropped).
-    internal = by_id["role__InternalRole"]
-    assert internal["scope"] == "internal"
-    assert "templated" not in internal
-    # Templated role: both fields present.
-    tmpld = by_id["role__CustomerSubledger"]
-    assert tmpld["scope"] == "internal"
-    assert tmpld["templated"] is True
-    # Rail node: no scope (it's not a role).
-    fee_rail = by_id["rail__FeeCharge"]
-    assert "scope" not in fee_rail
-    assert "templated" not in fee_rail
-
-
-def test_to_d3_force_json_preserves_link_metadata() -> None:
-    g = topology_graph_for(_kitchen_instance())
-    payload = to_d3_force_json(g)
-    chain_links = [link for link in payload["links"] if link["kind"] == "chain"]
-    assert len(chain_links) == 1
-    assert chain_links[0]["metadata"]["required"] == "true"
-    self_loops = [link for link in payload["links"] if link["kind"] == "self_loop"]
-    assert len(self_loops) == 1
-    assert self_loops[0]["metadata"]["direction"] == "Debit"
-
-
-def test_to_d3_force_json_for_sasquatch_pr_serializes_under_1mb() -> None:
-    """Sanity: even the meatiest shipped fixture's JSON stays small.
-
-    The d3-force page inlines the JSON in a <script> tag at /diagram —
-    if the payload bloats past ~1MB, that's a smell that demands paging
-    or a separate fetch route. sasquatch_pr is the largest L2 we ship,
-    so it caps the worry.
-    """
-    inst = load_instance(FIXTURES / "sasquatch_pr.yaml")
-    g = topology_graph_for(inst)
-    payload = to_d3_force_json(g)
-    text = json.dumps(payload)
-    assert len(text) < 1_000_000, (
-        f"d3-force JSON for sasquatch_pr is {len(text)} bytes "
-        f"(>= 1MB); inline-in-script approach won't scale"
-    )
+    # template_role edges were dropped (X.4.b dot pivot, 2026-05-13).
+    # Templates point only to rails — the user's mental model + the only
+    # connection that survives the per-rail layout cleanly.
+    assert "template_role" not in edge_kinds
 
 
 # -- Frozen-dataclass invariants --------------------------------------------
