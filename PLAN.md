@@ -82,7 +82,7 @@ Third supported dialect alongside Postgres + Oracle. Schema emit, matview-as-tab
 
 #### X.4.b — Diagram renderer spike (timeboxed, gates X.4.c)
 
-- [ ] **X.4.b.1** — Adapter that emits the d3-force JSON shape from `common/l2/topology.py`'s graph model — full graph (roles + scope, rails bundled, SingleLeg self-loops, templates, chains).
+- [x] **X.4.b.1** — Adapter that emits the d3-force JSON shape from `common/l2/topology.py`'s graph model — full graph (roles + scope, rails bundled, SingleLeg self-loops, templates, chains). Shipped as a typed value object (`TopologyGraph` / `TopologyNode` / `TopologyEdge`) BOTH spike arms consume — `topology_graph_for(instance)` walks the L2 once; `to_d3_force_json(graph)` serializes for arm A; the existing `build_topology_graph` (graphviz `Digraph`) refactored to consume the same value object via `_render_to_graphviz` so docs-site diagrams + the 17 existing topology tests stay byte-stable through the refactor (verified). 16 unit tests in `tests/unit/test_l2_topology_typed.py`; pyright clean.
 - [ ] **X.4.b.2** — **Spike arm A: D3 + d3-force** tuned against `sasquatch_pr` — try parents-above-children, edge bundling, spread-to-fill, toggles, focus.
 - [ ] **X.4.b.3** — **Spike arm B: enhanced graphviz** — post-process `dot`'s SVG with data-attrs per node + edge + JS handlers for click-to-focus + type-toggle.
 - [ ] **X.4.b.4** — Compare on the SPEC's "good enough" criteria (legible on `sasquatch_pr`, all four entity-type toggles work, click-focus works, coverage tint works). Capture the judgment call in a short spike doc under `docs/audits/`.
