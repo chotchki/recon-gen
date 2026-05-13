@@ -39,28 +39,16 @@ _FIXTURE = (
 
 def _load_harness(page: Any) -> None:
     """Load the bootstrap harness fixture and wait for the test-mode
-    export. d3 is bundled into the harness via the fixture's own
-    script load (the CDN URLs are baked into the page shell, but
-    the fixture is a plain file:// page — we need to ensure d3 is
-    available)."""
+    export. d3 is loaded by the fixture HTML's own <script src> ahead
+    of bootstrap.js — the *vendored* copy (X.2.p), not a CDN, so the
+    JS unit harness runs offline like the shipped runtime."""
     page.goto(f"file://{_FIXTURE.resolve()}")
     page.wait_for_function(
         "() => window.__bootstrap_internals__ != null", timeout=5000,
     )
-    # The fixture doesn't load d3; renderKPI uses d3.select. Inject
-    # a minimal d3 stub via CDN if not present. Easier: just inject
-    # the real d3 script tag.
-    page.evaluate("""() => {
-        if (typeof window.d3 !== 'undefined') return null;
-        return new Promise((resolve, reject) => {
-            var s = document.createElement('script');
-            s.src = 'https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js';
-            s.onload = () => resolve(null);
-            s.onerror = reject;
-            document.head.appendChild(s);
-        });
-    }""")
-    page.wait_for_function("() => typeof window.d3 !== 'undefined'", timeout=10000)
+    page.wait_for_function(
+        "() => typeof window.d3 !== 'undefined'", timeout=5000,
+    )
 
 
 def _render_into_target(page: Any, data: dict[str, Any]) -> None:

@@ -35,18 +35,11 @@ def _load_harness(page: Any) -> None:
     page.wait_for_function(
         "() => window.__bootstrap_internals__ != null", timeout=5000,
     )
-    page.evaluate("""() => {
-        if (typeof window.d3 !== 'undefined') return null;
-        return new Promise((resolve, reject) => {
-            var s = document.createElement('script');
-            s.src = 'https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js';
-            s.onload = () => resolve(null);
-            s.onerror = reject;
-            document.head.appendChild(s);
-        });
-    }""")
+    # d3 is loaded by the fixture HTML's own <script src> (the vendored
+    # copy — X.2.p — not a CDN), ahead of bootstrap.js; this is just a
+    # defensive wait that it landed.
     page.wait_for_function(
-        "() => typeof window.d3 !== 'undefined'", timeout=10000,
+        "() => typeof window.d3 !== 'undefined'", timeout=5000,
     )
 
 

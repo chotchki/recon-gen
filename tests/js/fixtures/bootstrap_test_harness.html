@@ -44,10 +44,17 @@
       data-fetch-url="/dashboards/test/sheets/money-trail/visuals/viz-money-trail/data"
     ></section>
     <!--
-      Path is relative to THIS file. file:// URLs resolve <script src>
+      Paths are relative to THIS file. file:// URLs resolve <script src>
       relative to the loaded document, not pytest's cwd, so this works
       regardless of where pytest is invoked from.
+
+      d3 first (the renderXxx hydrators use d3.select / d3.scale*) — the
+      *vendored* copy (X.2.p), not a CDN, so the JS unit harness runs
+      offline like the shipped runtime does. Plain <script src> blocks +
+      runs in order, so by the time bootstrap.js's IIFE finishes,
+      window.d3 is already defined.
     -->
+    <script src="../../../src/quicksight_gen/common/html/assets/vendor/js/d3.min.js"></script>
     <script src="../../../src/quicksight_gen/common/html/assets/js/bootstrap.js"></script>
   </body>
 </html>

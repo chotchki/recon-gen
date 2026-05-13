@@ -33,23 +33,15 @@ _FIXTURE = (
 
 def _load_harness(page: Any) -> None:
     """Same shape as test_render_kpi._load_harness — load fixture +
-    inject d3 from CDN since the fixture's own page shell doesn't
-    pre-load it."""
+    wait for the test-mode export. d3 is loaded by the fixture HTML's
+    own <script src> (the vendored copy — X.2.p — not a CDN)."""
     page.goto(f"file://{_FIXTURE.resolve()}")
     page.wait_for_function(
         "() => window.__bootstrap_internals__ != null", timeout=5000,
     )
-    page.evaluate("""() => {
-        if (typeof window.d3 !== 'undefined') return null;
-        return new Promise((resolve, reject) => {
-            var s = document.createElement('script');
-            s.src = 'https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js';
-            s.onload = () => resolve(null);
-            s.onerror = reject;
-            document.head.appendChild(s);
-        });
-    }""")
-    page.wait_for_function("() => typeof window.d3 !== 'undefined'", timeout=10000)
+    page.wait_for_function(
+        "() => typeof window.d3 !== 'undefined'", timeout=5000,
+    )
 
 
 def _render_into_target(
