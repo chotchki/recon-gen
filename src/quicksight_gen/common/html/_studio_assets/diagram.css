@@ -1,0 +1,190 @@
+/* X.4.b.3 — Studio diagram chrome + SVG dim/focus styles.
+ *
+ * No Tailwind here (the spike doesn't ship CSS through the
+ * Tailwind build pipeline yet — that's a Phase X.4.c decision).
+ * Plain CSS keeps the spike self-contained.
+ */
+
+:root {
+  --studio-bg: #f8fafc;
+  --studio-fg: #1e293b;
+  --studio-muted: #64748b;
+  --studio-border: #cbd5e1;
+  --studio-accent: #1f4e79;
+  --studio-tint: #e0e7f0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+    sans-serif;
+  background: var(--studio-bg);
+  color: var(--studio-fg);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.studio-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--studio-border);
+  background: white;
+  flex: 0 0 auto;
+}
+
+.studio-header h1 {
+  font-size: 1rem;
+  margin: 0;
+  font-weight: 600;
+  color: var(--studio-accent);
+}
+
+.studio-header .instance {
+  color: var(--studio-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875rem;
+}
+
+.studio-header .nav-link {
+  color: var(--studio-accent);
+  text-decoration: none;
+  font-size: 0.875rem;
+}
+
+.studio-header .nav-link:hover {
+  text-decoration: underline;
+}
+
+.diagram-chrome {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--studio-border);
+  background: white;
+  flex: 0 0 auto;
+}
+
+.diagram-chrome label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  user-select: none;
+}
+
+.diagram-chrome .count {
+  color: var(--studio-muted);
+  font-size: 0.75rem;
+}
+
+.diagram-chrome button {
+  background: var(--studio-tint);
+  color: var(--studio-accent);
+  border: 1px solid var(--studio-border);
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.diagram-chrome button:hover {
+  background: var(--studio-accent);
+  color: white;
+}
+
+.diagram-chrome .status {
+  margin-left: auto;
+  color: var(--studio-muted);
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.diagram-chrome .knob {
+  font-size: 0.75rem;
+  color: var(--studio-muted);
+}
+
+.diagram-chrome .knob a {
+  color: var(--studio-accent);
+  text-decoration: none;
+  margin-right: 0.5rem;
+}
+
+.diagram-chrome .knob a.active {
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.diagram-viewport {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 1rem;
+  background: white;
+}
+
+.topology-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 400px;
+}
+
+/* Toggle hides — driven by checkboxes via JS adding hide-<kind> classes. */
+.topology-svg.hide-role g.node[data-kind="role"] { display: none; }
+.topology-svg.hide-rail g.node[data-kind="rail"] { display: none; }
+.topology-svg.hide-template g.node[data-kind="template"] { display: none; }
+.topology-svg.hide-chain g.edge[data-kind="chain"] { display: none; }
+
+/* When roles or rails are hidden, hide the bundle / self-loop edges
+ * that depend on them — otherwise dangling lines float around. */
+.topology-svg.hide-role g.edge[data-kind="rail_bundle"],
+.topology-svg.hide-role g.edge[data-kind="self_loop"] {
+  display: none;
+}
+
+/* When templates are hidden, hide their member edges + the template
+ * cluster boundary. */
+.topology-svg.hide-template g.edge[data-kind="template_member"] {
+  display: none;
+}
+
+/* Edge label toggle. */
+.topology-svg.hide-edge-labels g.edge text {
+  display: none;
+}
+
+/* Focus mode: clicked node + its neighbors stay full-color; everything
+ * else dims to 0.15 opacity. CSS-driven so DOM mutations stay zero per
+ * interaction. */
+.topology-svg.focused g.node.dim,
+.topology-svg.focused g.edge.dim {
+  opacity: 0.12;
+  transition: opacity 120ms ease;
+}
+
+.topology-svg.focused g.node.focus,
+.topology-svg.focused g.edge.focus {
+  opacity: 1;
+  transition: opacity 120ms ease;
+}
+
+/* Click affordance on nodes. */
+.topology-svg g.node:hover {
+  filter: brightness(1.05) drop-shadow(0 0 3px rgba(31, 78, 121, 0.4));
+}
+
+/* Selection-prevention on the SVG so click-to-focus doesn't accidentally
+ * highlight text. */
+.topology-svg text {
+  user-select: none;
+}
