@@ -550,7 +550,25 @@ function _stampTrainer(svg, tr) {
   }
 }
 
-if (document.readyState === "loading") {
+// X.4.c.7 — Test-mode export. When window.__test_mode__ is set
+// BEFORE this script loads, expose the per-feature helpers on
+// window.__diagram_internals__ so tests/js/test_diagram_*.py can
+// drive them in isolation against a fixture SVG. Mirrors bootstrap.js's
+// pattern (X.2.a.2). Production pages never set the flag → zero
+// surface bleed; test mode also short-circuits the auto-renderDiagram
+// invocation below so the fixture doesn't trigger the wasm-graphviz
+// dynamic import (which fails over file:// CORS).
+if (typeof window !== "undefined" && window.__test_mode__) {
+  window.__diagram_internals__ = {
+    _stampCoverage,
+    _stampTrainer,
+    _kindFromTitle,
+    _idFromTitle,
+    _parseEdgeTitle,
+    _edgeKind,
+    _stripIdPrefix,
+  };
+} else if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", renderDiagram);
 } else {
   renderDiagram();

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>diagram.js unit harness (X.4.c.7)</title>
+    <script>
+      // Test-mode flag must be set BEFORE diagram.js loads so its
+      // bottom-of-file conditional installs the internals on
+      // window.__diagram_internals__. Mirrors bootstrap.js's pattern.
+      window.__test_mode__ = true;
+    </script>
+  </head>
+  <body>
+    <!--
+      A hand-built SVG mimicking what wasm-graphviz emits after dot
+      has laid out the topology. Three nodes with the prefix-discriminated
+      `<title>` text + the `data-id` attr the diagram.js post-processor
+      stamps. One chain edge to exercise edge-coverage stamping.
+
+      Production graphviz emits one <title> per <g.node>/<g.edge>
+      carrying the unprefixed name (e.g. "role__CustomerLedger"); the
+      diagram.js renderDiagram hot-loop normally stamps `data-id` from
+      that. We pre-stamp here so _stampCoverage / _stampTrainer can run
+      directly without rerunning the renderDiagram pipeline.
+    -->
+    <svg id="topology-svg" class="topology-svg" viewBox="0 0 100 100" role="img" aria-label="diagram test fixture">
+      <title>diagram test fixture</title>
+      <g class="node" data-id="role__CustomerLedger" data-display-id="CustomerLedger">
+        <title>role__CustomerLedger</title>
+        <polygon points="0,0 10,0 10,10 0,10" />
+        <text>CustomerLedger</text>
+      </g>
+      <g class="node" data-id="role__CustomerSubledger" data-display-id="CustomerSubledger">
+        <title>role__CustomerSubledger</title>
+        <polygon points="20,0 30,0 30,10 20,10" />
+        <text>CustomerSubledger</text>
+      </g>
+      <g class="node" data-id="rail__ExternalRailInbound" data-display-id="ExternalRailInbound">
+        <title>rail__ExternalRailInbound</title>
+        <polygon points="40,0 50,0 50,10 40,10" />
+        <text>ExternalRailInbound</text>
+      </g>
+      <g
+        class="edge"
+        data-kind="chain"
+        data-source="rail__ExternalRailInbound"
+        data-target="tmpl__MerchantSettlementCycle"
+      >
+        <title>rail__ExternalRailInbound-&gt;tmpl__MerchantSettlementCycle</title>
+        <path d="M0,0 L10,10" />
+      </g>
+    </svg>
+    <!--
+      Path is relative to this file. file:// URLs resolve <script src>
+      against the loaded document, so this works regardless of where
+      pytest is invoked from. diagram.js is `type="module"` in production
+      because it does `await import("/studio/wasm-graphviz/index.js")`,
+      but the test-mode export is set at file end UNCONDITIONALLY of any
+      DOM-ready / wasm-graphviz I/O — for the unit tier we read the
+      internals before renderDiagram resolves anything, so a plain
+      <script> tag (skipping the module path that fails offline) works.
+      The renderDiagram() bottom-of-file invocation will throw on the
+      missing wasm import, but tests check the test-mode export which
+      lands first, in module-top execution order.
+    -->
+    <script src="../../../src/quicksight_gen/common/html/_studio_assets/diagram.js"></script>
+  </body>
+</html>
