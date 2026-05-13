@@ -33,6 +33,12 @@ from typing import Any
 from starlette.testclient import TestClient
 
 from tests._test_helpers import make_test_config
+from quicksight_gen.common.html import (
+    FilterSpec,
+    ParameterDropdownSpec,
+    ParameterMultiSelectSpec,
+    ParameterNumberSpec,
+)
 from quicksight_gen.common.html.server import ServedDashboard, make_app
 from quicksight_gen.common.ids import SheetId, VisualId
 from quicksight_gen.common.tree.structure import Analysis, App, Sheet
@@ -512,3 +518,105 @@ def test_docs_mount_absent_when_docs_dir_unset() -> None:
     client = _make_test_app_with_docs(None)
     assert client.get("/docs/").status_code == 404
     assert "/docs/" not in client.get("/dashboards").text
+
+
+# ---------------------------------------------------------------------------
+# u.4.e.4 — ?param_<name>=<v> page-URL keys pre-select the filter widgets
+# (cross-sheet drills that walked an anchor + bookmarkable filter state).
+# ---------------------------------------------------------------------------
+
+
+_SHEET_PATH = f"/dashboards/{_DASHBOARD_ID}/sheets/{_SHEET_ID}"
+
+
+def _make_app_with_filter_specs(specs: tuple[FilterSpec, ...]) -> TestClient:
+    tree_app, sheet = _build_app()
+    asgi = make_app(
+        dashboards={
+            _DASHBOARD_ID: ServedDashboard(
+                tree_app=tree_app,
+                sheet=sheet,
+                title=_DASHBOARD_TITLE,
+                data_fetcher=lambda _v, _p: {},
+                filter_specs=specs,
+            ),
+        },
+    )
+    return TestClient(asgi)
+
+
+def test_url_param_preselects_dropdown_option_on_dashboard_and_sheet_route() -> None:
+    """``?param_<name>=<v>`` on either the dashboard root route or the
+    explicit sheet route pre-marks the matching ``<option>`` so the
+    visuals' ``hx-include="#filter-form"`` load fetch is already narrowed."""
+    client = _make_app_with_filter_specs((
+        ParameterDropdownSpec(name="pX", label="X", options=("a", "b", "c")),
+    ))
+    for base in (_DASHBOARD_PATH, _SHEET_PATH):
+        body = client.get(base, params={"param_pX": "b"}).text
+        assert '<option value="b" selected>b</option>' in body
+        assert '<option value="a">a</option>' in body
+
+
+def test_url_param_absent_leaves_dropdown_blank() -> None:
+    """No ``param_<name>`` key → no ``<option>`` carries ``selected`` (the
+    blank leading option is what the form submits = no narrowing)."""
+    client = _make_app_with_filter_specs((
+        ParameterDropdownSpec(name="pX", label="X", options=("a", "b")),
+    ))
+    body = client.get(_SHEET_PATH).text
+    form_start = body.index('<form id="filter-form"')
+    form_end = body.index('</form>', form_start)
+    assert " selected>" not in body[form_start:form_end]
+
+
+def test_url_param_preselects_multiselect_options() -> None:
+    """Repeated ``?param_<name>=A&param_<name>=B`` → both ``<option>``s
+    pre-selected (the multi-valued IN-list pushdown shape)."""
+    client = _make_app_with_filter_specs((
+        ParameterMultiSelectSpec(
+            name="pY", label="Y", options=("a", "b", "c"),
+        ),
+    ))
+    body = client.get(_SHEET_PATH + "?param_pY=a&param_pY=c").text
+    assert '<option value="a" selected>a</option>' in body
+    assert '<option value="c" selected>c</option>' in body
+    assert '<option value="b">b</option>' in body
+
+
+def test_url_param_overrides_number_spec_default() -> None:
+    """``?param_<name>=<v>`` overwrites a ``ParameterNumberSpec``'s
+    ``default`` so the slider lands on that value (drill / bookmark)."""
+    client = _make_app_with_filter_specs((
+        ParameterNumberSpec(
+            name="pZ", label="Z", minimum=1, maximum=4, step=1, default=1,
+        ),
+    ))
+    body = client.get(_SHEET_PATH, params={"param_pZ": "3"}).text
+    assert 'name="param_pZ"' in body
+    assert 'value="3"' in body
+    assert 'data-start-min="3"' in body
+
+
+def test_url_param_bad_number_value_keeps_declared_default() -> None:
+    """An un-parseable ``param_<name>`` value for a numeric spec is
+    ignored — the spec keeps its declared default rather than crashing."""
+    client = _make_app_with_filter_specs((
+        ParameterNumberSpec(
+            name="pZ", label="Z", minimum=1, maximum=4, step=1, default=2,
+        ),
+    ))
+    body = client.get(_SHEET_PATH, params={"param_pZ": "not-a-number"}).text
+    assert 'value="2"' in body
+
+
+def test_url_filter_prefix_key_does_not_touch_param_specs() -> None:
+    """A ``filter_<col>`` / ``min_<col>`` key (the category / numeric-range
+    URL shape) is not a ``param_<name>`` key → no spec is rewritten."""
+    client = _make_app_with_filter_specs((
+        ParameterDropdownSpec(name="pX", label="X", options=("a", "b")),
+    ))
+    body = client.get(_SHEET_PATH, params={"filter_pX": "a", "min_pX": "1"}).text
+    form_start = body.index('<form id="filter-form"')
+    form_end = body.index('</form>', form_start)
+    assert " selected>" not in body[form_start:form_end]

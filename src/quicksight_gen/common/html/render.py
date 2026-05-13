@@ -74,6 +74,9 @@ from quicksight_gen.common.theme import DEFAULT_PRESET
 from quicksight_gen.common.l2.theme import ThemePreset
 from quicksight_gen.common.tree._helpers import _AutoSentinel
 from quicksight_gen.common.tree.structure import App, Sheet
+from quicksight_gen.common.tree.actions import Drill
+from quicksight_gen.common.tree.fields import Dim, Measure
+from quicksight_gen.common.tree.calc_fields import resolve_column
 
 
 # X.2.d — filter primitives beyond the date-range form. All values
@@ -106,12 +109,22 @@ class ParameterDropdownSpec:
     runs ``SELECT DISTINCT <col> FROM (<dataset SQL>)`` and replaces
     ``options`` before rendering). When ``options_dataset`` is None
     the static ``options`` are authoritative.
+
+    ``selected`` (u.4.e.4): when the sheet page URL carries
+    ``?param_<name>=<v>`` — a cross-sheet drill that walked an anchor,
+    or a bookmarked filter state — ``server.py::_apply_url_param_overrides``
+    sets ``selected`` to that value, so ``_render_parameter_dropdown``
+    pre-marks the matching ``<option>``. Because every visual loads via
+    ``hx-include="#filter-form"``, a pre-marked option makes the *initial*
+    fetch already narrowed (the destination renders filtered, no manual
+    re-pick). Empty string (the default) = blank leading option active.
     """
     name: str
     label: str
     options: tuple[str, ...]
     options_dataset: str | None = None
     options_column: str | None = None
+    selected: str = ""
 
 
 @dataclass(frozen=True)
@@ -167,6 +180,9 @@ class ParameterNumberSpec:
     no-narrowing position (σ≥1 / hop≥$0). Empty → no key → the executor's
     static-default fallback (= the dataset param's declared default),
     mirroring QuickSight's "slider untouched ⇒ analysis default".
+    ``server.py::_apply_url_param_overrides`` overwrites ``default`` from a
+    ``?param_<name>=<v>`` page-URL key (u.4.e.4) so a drill / bookmark
+    lands on the right slider position.
     """
     name: str
     label: str
@@ -198,12 +214,20 @@ class ParameterMultiSelectSpec:
     column instead of an inlined ``options`` list (which stays ``()``
     until ``server.py::_resolve_linked_options`` runs ``SELECT DISTINCT
     <col> FROM (<dataset SQL>)`` and replaces ``options`` pre-render).
+
+    ``selected`` (u.4.e.4): the repeated ``?param_<name>=A&param_<name>=B``
+    keys from the sheet page URL — ``server.py::_apply_url_param_overrides``
+    fills it so the matching ``<option>``s render pre-selected and the
+    visuals' ``hx-include="#filter-form"`` load fetch is already narrowed.
+    ``()`` (the default) = nothing pre-selected (= the executor's
+    static-default fallback = no narrowing).
     """
     name: str
     label: str
     options: tuple[str, ...]
     options_dataset: str | None = None
     options_column: str | None = None
+    selected: tuple[str, ...] = ()
 
 
 FilterSpec = (
@@ -248,6 +272,17 @@ _FLATPICKR_JS = "/static/vendor/js/flatpickr.min.js"
 _NOUISLIDER_CSS = "/static/vendor/css/nouislider.min.css"
 _NOUISLIDER_JS = "/static/vendor/js/nouislider.min.js"
 
+# X.2.u.4.e.3 — ctxMenu: a zero-dep right-click / on-demand popup menu
+# (the *standalone* build — an IIFE that sets ``window.ctxmenu``; the
+# package's other build is CommonJS, no good for a plain ``<script>``).
+# Powers App 2's row-level ``DATA_POINT_MENU`` drills: a table row that
+# carries menu-drills gets a "⋯" trigger button (and ``contextmenu`` on
+# the row, for QS-gesture parity) → ``ctxmenu`` shows the drill list. It
+# injects its own ``<style id="ctxmenu">`` at runtime, so it ships no CSS
+# file — ``widgets-theme.css`` re-skins ``.ctxmenu`` with ``!important``
+# (its injected sheet loads *after* our override sheet).
+_CTXMENU_JS = "/static/vendor/js/ctxmenu.min.js"
+
 # Built once at import: the full ``<head>`` asset blocks. ``_VENDOR_CSS``
 # lands right after ``output.css`` (so the per-instance ``:root`` theme
 # ``<style>`` — which follows it — still wins the cascade for the
@@ -262,7 +297,7 @@ _VENDOR_JS = "\n".join(
     f'  <script src="{src}"></script>'
     for src in (
         _HTMX_SRC, _D3_SRC, _D3_SANKEY_SRC,
-        _TOM_SELECT_JS, _FLATPICKR_JS, _NOUISLIDER_JS,
+        _TOM_SELECT_JS, _FLATPICKR_JS, _NOUISLIDER_JS, _CTXMENU_JS,
     )
 )
 
@@ -383,17 +418,31 @@ _TS_SELECT_CLASS = _FORM_INPUT_CLASS + " min-w-48"
 def _render_parameter_dropdown(spec: ParameterDropdownSpec) -> str:
     """Single-select ``<select name="param_<name>">`` enhanced by Tom
     Select (search + clear). The blank leading option round-trips as
-    "no selection" (``?param_<name>=``)."""
+    "no selection" (``?param_<name>=``). ``spec.selected`` (set by the
+    server from a ``?param_<name>=<v>`` page-URL key — u.4.e.4) pre-marks
+    that ``<option>`` so the visuals' ``hx-include="#filter-form"`` load
+    fetch is already narrowed; a value not in the (resolved) option list
+    is still rendered as a selected ``<option>`` so the form submits it
+    (stale-bookmark / sibling-dataset case)."""
     name = html.escape(spec.name)
+    sel = spec.selected
     parts = [
         f'    <label class="{_FORM_LABEL_CLASS}">{html.escape(spec.label)} '
         f'<select name="param_{name}" class="{_TS_SELECT_CLASS}"'
         f'{_TOM_SELECT_ATTR}>'
         f'<option value=""></option>'
     ]
+    rendered_sel = False
     for opt in spec.options:
         esc = html.escape(opt)
-        parts.append(f'<option value="{esc}">{esc}</option>')
+        if opt == sel:
+            rendered_sel = True
+            parts.append(f'<option value="{esc}" selected>{esc}</option>')
+        else:
+            parts.append(f'<option value="{esc}">{esc}</option>')
+    if sel and not rendered_sel:
+        esc = html.escape(sel)
+        parts.append(f'<option value="{esc}" selected>{esc}</option>')
     parts.append('</select></label>')
     return "".join(parts)
 
@@ -435,17 +484,32 @@ def _render_parameter_multiselect(spec: ParameterMultiSelectSpec) -> str:
     (repeated key — the shape ``_sql_executor``'s multi-valued
     dataset-param expansion consumes). ``change`` events bubble to the
     form, which ``wireFilterAutoRefresh`` debounces into a ``refresh``.
+
+    ``spec.selected`` (set by the server from the page URL's repeated
+    ``?param_<name>=A&param_<name>=B`` keys — u.4.e.4) pre-marks those
+    ``<option>``s (any not in the resolved option list are appended as
+    selected ``<option>``s) so the load fetch is already narrowed.
     """
     name = html.escape(spec.name)
+    sel = set(spec.selected)
     parts = [
         f'    <label class="{_FORM_LABEL_CLASS}">'
         f'{html.escape(spec.label)} '
         f'<select name="param_{name}" multiple class="{_TS_SELECT_CLASS}"'
         f'{_TOM_SELECT_ATTR}>'
     ]
+    rendered: set[str] = set()
     for opt in spec.options:
         esc = html.escape(opt)
-        parts.append(f'<option value="{esc}">{esc}</option>')
+        if opt in sel:
+            rendered.add(opt)
+            parts.append(f'<option value="{esc}" selected>{esc}</option>')
+        else:
+            parts.append(f'<option value="{esc}">{esc}</option>')
+    for extra in spec.selected:
+        if extra not in rendered:
+            esc = html.escape(extra)
+            parts.append(f'<option value="{esc}" selected>{esc}</option>')
     parts.append('</select></label>')
     return "".join(parts)
 
@@ -1048,6 +1112,70 @@ def emit_visual_data_fragment(visual_id: str, data: Any) -> str:
     )
 
 
+def _row_drill_source_column(source: Any) -> str | None:
+    """Column name a row-level drill reads its parameter value from.
+
+    Only ``Dim`` / ``Measure`` object refs carry a column the App2 table
+    renderer can resolve against the row's cells. ``DrillStaticDateTime``
+    / ``DrillResetSentinel`` writes are QuickSight-isms (date-window
+    widening, sentinel reset) with no App2 equivalent — App2's date
+    filter defaults to "all rows" and there's no calc-field-backed
+    sentinel param — so they're dropped; the bare ``DrillSourceField``
+    escape hatch carries no column name, so it's dropped too.
+    """
+    if isinstance(source, (Dim, Measure)):
+        return resolve_column(source.column)
+    return None
+
+
+def _serialize_table_row_drills(visual: Any, dashboard_id: str) -> str:
+    """Serialize a Table visual's row-level ``Drill`` actions to the
+    ``data-row-drills`` attribute JSON (``""`` when there are none).
+
+    Shape — a JSON array, one entry per drill::
+
+        [{"label": "View Transactions for this transfer",
+          "trigger": "DATA_POINT_MENU",
+          "target_path": "/dashboards/<dash>/sheets/<target-sheet>",
+          "params": [{"name": "pL1TxTransfer", "column": "transfer_id"}]}]
+
+    ``bootstrap.js::wireRowDrills`` reads it: a ``DATA_POINT_CLICK`` drill
+    makes each ``<tr>`` left-clickable (navigates to ``target_path`` with
+    ``?param_<name>=<row cell value>`` for each ``params`` entry); a
+    ``DATA_POINT_MENU`` drill adds a trailing "⋯" button per row that
+    opens a ``ctxmenu`` popover listing the drill label(s) (and binds the
+    same menu on the row's ``contextmenu`` for QS-gesture parity). All
+    drills in one table point into the same analysis (= the same App2
+    dashboard), so ``target_path`` uses ``dashboard_id``. ``SameSheetFilter``
+    actions are skipped — they're a highlight-without-narrowing
+    QS-only construct.
+    """
+    drills = [a for a in getattr(visual, "actions", ()) if isinstance(a, Drill)]
+    if not drills:
+        return ""
+    out: list[dict[str, Any]] = []
+    for d in drills:
+        target_sheet = d.target_sheet
+        if isinstance(target_sheet, _AutoSentinel):
+            continue  # not resolved — App.resolve_auto_ids() didn't run
+        params: list[dict[str, str]] = []
+        for param, source in d.writes:
+            col = _row_drill_source_column(source)
+            if col is not None:
+                params.append({"name": str(param.name), "column": col})
+        out.append({
+            "label": d.name,
+            "trigger": d.trigger,
+            "target_path": (
+                f"/dashboards/{dashboard_id}/sheets/{target_sheet.sheet_id}"
+            ),
+            "params": params,
+        })
+    if not out:
+        return ""
+    return json.dumps(out, default=_json_default)  # typing-smell: ignore[json-indent]: compact HTML-attribute payload, parsed client-side by wireRowDrills
+
+
 def _render_visual(
     visual: Any, dashboard_id: str, sheet_id: str,
     *,
@@ -1097,11 +1225,25 @@ def _render_visual(
         f' style="grid-column: span {col_span};"' if col_span else ""
     )
 
+    # u.4.e.3 — row-level drills (Table only). The serialized drill list
+    # rides a ``data-row-drills`` JSON attribute; ``bootstrap.js``'s
+    # ``wireRowDrills`` decorates each rendered ``<tr>`` after the table
+    # paints (left-click for ``DATA_POINT_CLICK`` drills, a "⋯" ctxmenu
+    # button for ``DATA_POINT_MENU`` drills).
+    row_drills_attr = ""
+    if kind == "Table":
+        row_drills = _serialize_table_row_drills(visual, dashboard_id)
+        if row_drills:
+            row_drills_attr = (
+                f' data-row-drills="{html.escape(row_drills, quote=True)}"'
+            )
+
     parts: list[str] = []
     parts.append(
         f'  <section data-visual-kind="{html.escape(kind)}"'
         f' data-visual-id="{esc_id}"'
         f' data-fetch-url="{esc_url}"'
+        f'{row_drills_attr}'
         f' class="{section_class}"{grid_style}>'
     )
     parts.append(f'    <h2 class="{h2_class}">{html.escape(title)}</h2>')

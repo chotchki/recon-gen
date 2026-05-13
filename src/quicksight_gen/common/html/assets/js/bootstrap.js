@@ -92,6 +92,7 @@
         break;
       case "Table":
         renderTable(target, data, visualId);
+        wireRowDrills(section, target, data);
         break;
       case "BarChart":
         renderBarChart(target, data, visualId);
@@ -387,6 +388,144 @@
     if (typeof htmx !== "undefined" && htmx.process) {
       htmx.process(target);
     }
+  }
+
+  // u.4.e.3 — row-level drills on Table visuals. The server stamps a
+  // `data-row-drills` JSON attribute on the visual's outer section
+  // element (see render.py::_serialize_table_row_drills); after
+  // `renderTable` paints the rows we decorate each table row:
+  //   - left-click navigates via the *primary* drill (a DATA_POINT_CLICK
+  //     drill if there is one, else the first drill) — the "click a row
+  //     to go where it points" gesture, mirroring QS's data-point click;
+  //   - if any drill is DATA_POINT_MENU, a trailing "⋯" `<button>` per
+  //     row opens a `ctxmenu` popover listing every drill's label, and
+  //     the same menu binds on the row's `contextmenu` (right-click —
+  //     QS-gesture parity). Picking an item navigates to its URL.
+  // The URL is `target_path` + `?param_<name>=<row cell value>` for each
+  // declared param; params whose source column isn't in the rendered
+  // table are skipped (so a drill with only static-date / sentinel
+  // writes — App2 has no equivalent — just navigates to the sheet).
+  function rowDrillUrl(drill, row, colIndex) {
+    var qs = [];
+    var params = drill.params || [];
+    params.forEach(function (p) {
+      var i = colIndex[String(p.column).toLowerCase()];
+      var v;
+      if (i === undefined || i === null) return;
+      v = row[i];
+      if (v === undefined || v === null) v = "";
+      qs.push(
+        "param_" +
+          encodeURIComponent(p.name) +
+          "=" +
+          encodeURIComponent(String(v)),
+      );
+    });
+    return drill.target_path + (qs.length ? "?" + qs.join("&") : "");
+  }
+
+  function openRowMenu(eventOrEl, drills, row, colIndex) {
+    if (typeof ctxmenu === "undefined" || !ctxmenu || !ctxmenu.show) return;
+    var items = drills.map(function (d) {
+      var url = rowDrillUrl(d, row, colIndex);
+      return {
+        text: d.label,
+        action: function () {
+          window.location.href = url;
+        },
+      };
+    });
+    // ctxmenu.show stops propagation / prevents the browser menu itself;
+    // passing the originating event anchors the popover at the cursor,
+    // passing the button element anchors it to the button.
+    ctxmenu.show(items, eventOrEl);
+  }
+
+  function wireRowDrills(section, target, data) {
+    var raw = section && section.getAttribute("data-row-drills");
+    if (!raw) return;
+    var drills;
+    var columns;
+    var rows;
+    var tbody;
+    var colIndex;
+    var hasMenu;
+    var clickDrill;
+    var headTr;
+    var th;
+    try {
+      drills = JSON.parse(raw);
+    } catch (e) {
+      console.error("bad data-row-drills", e);
+      return;
+    }
+    if (!Array.isArray(drills) || drills.length === 0) return;
+    columns = (data && data.columns) || [];
+    rows = (data && data.rows) || [];
+    tbody = target.querySelector("tbody");
+    if (!tbody) return;
+    colIndex = {};
+    columns.forEach(function (c, i) {
+      if (c && c.name != null) colIndex[String(c.name).toLowerCase()] = i;
+    });
+    hasMenu = false;
+    clickDrill = null;
+    drills.forEach(function (d) {
+      if (d.trigger === "DATA_POINT_MENU") hasMenu = true;
+      if (!clickDrill && d.trigger === "DATA_POINT_CLICK") clickDrill = d;
+    });
+    if (!clickDrill) clickDrill = drills[0];
+    if (hasMenu) {
+      headTr = target.querySelector("thead tr");
+      if (headTr && !headTr.querySelector("th.row-drill-col")) {
+        th = document.createElement("th");
+        th.className =
+          "row-drill-col px-3 py-2 text-left border-b border-surface-border";
+        th.setAttribute("aria-label", "Row actions");
+        headTr.appendChild(th);
+      }
+    }
+    tbody.querySelectorAll("tr").forEach(function (tr, ri) {
+      var row = rows[ri];
+      var url;
+      var td;
+      var btn;
+      if (!row) return;
+      url = rowDrillUrl(clickDrill, row, colIndex);
+      tr.classList.add("row-drillable");
+      tr.style.cursor = "pointer";
+      tr.setAttribute("data-row-drill", "1");
+      tr.setAttribute("tabindex", "0");
+      tr.addEventListener("click", function () {
+        window.location.href = url;
+      });
+      tr.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          window.location.href = url;
+        }
+      });
+      if (hasMenu) {
+        tr.addEventListener("contextmenu", function (e) {
+          openRowMenu(e, drills, row, colIndex);
+        });
+        td = document.createElement("td");
+        td.className =
+          "row-drill-col px-3 py-2 border-b border-surface-border text-right";
+        btn = document.createElement("button");
+        btn.type = "button";
+        btn.className =
+          "row-drill-menu-btn text-secondary-fg hover:text-primary-fg px-1 leading-none";
+        btn.textContent = "⋯";
+        btn.setAttribute("aria-label", "Row actions");
+        btn.setAttribute("aria-haspopup", "menu");
+        btn.addEventListener("click", function (e) {
+          openRowMenu(e, drills, row, colIndex);
+        });
+        td.appendChild(btn);
+        tr.appendChild(td);
+      }
+    });
   }
 
   // BarChart — vertical bars with x/y axes + axis labels. Data shape:
@@ -1166,6 +1305,9 @@
       wireCategoryFilters: wireCategoryFilters,
       wireFilterAutoRefresh: wireFilterAutoRefresh,
       wireFilterWidgets: wireFilterWidgets,
+      wireRowDrills: wireRowDrills,
+      rowDrillUrl: rowDrillUrl,
+      openRowMenu: openRowMenu,
     };
   }
 })();

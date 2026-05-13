@@ -85,6 +85,7 @@ from pathlib import Path
 
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import QueryParams
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
@@ -108,6 +109,7 @@ from quicksight_gen.common.html.render import (
     FilterSpec,
     ParameterDropdownSpec,
     ParameterMultiSelectSpec,
+    ParameterNumberSpec,
     emit_dashboards_list,
     emit_error_page,
     emit_html,
@@ -212,6 +214,63 @@ async def _resolve_linked_options(
         else:
             resolved.append(spec)
     return tuple(resolved)
+
+
+def _apply_url_param_overrides(
+    specs: tuple[FilterSpec, ...],
+    query_params: QueryParams,
+) -> tuple[FilterSpec, ...]:
+    """Pre-fill each parameter-bound filter spec from the page URL's
+    ``?param_<name>=<v>`` keys (u.4.e.4 — cross-sheet drills + bookmarkable
+    filter state).
+
+    Every visual section loads via ``hx-get`` + ``hx-include="#filter-form"``,
+    so the form's *current DOM state* at fire time is what narrows the first
+    fetch. When a sheet is opened with ``?param_<name>=<v>`` — a row drill
+    that walked an anchor onto a new sheet, or a bookmarked URL — pre-marking
+    the matching ``<option>`` (dropdowns) / ``<input>`` value (numeric
+    sliders) makes that initial fetch already carry the value, so the
+    destination renders narrowed instead of needing a manual re-pick.
+
+    - ``ParameterDropdownSpec`` → ``selected`` = the (last) URL value for
+      its name.
+    - ``ParameterMultiSelectSpec`` → ``selected`` = every URL value for its
+      name (repeated key → tuple).
+    - ``ParameterNumberSpec`` → ``default`` = the (last) URL value parsed as
+      float; un-parseable input is ignored (the spec keeps its declared
+      default).
+
+    Specs whose name has no matching ``param_<name>`` key — and the
+    non-parameter spec kinds (``CategoryFilterSpec`` / ``NumericRangeSpec``,
+    which key off ``filter_<col>`` / ``min_<col>`` / ``max_<col>``, not
+    ``param_<name>``) — pass through unchanged.
+    """
+    by_name: dict[str, list[str]] = {}
+    for key, value in query_params.multi_items():
+        if key.startswith("param_"):
+            by_name.setdefault(key[len("param_"):], []).append(value)
+    if not by_name:
+        return specs
+    out: list[FilterSpec] = []
+    for spec in specs:
+        if isinstance(spec, ParameterDropdownSpec):
+            vals = by_name.get(spec.name)
+            out.append(replace(spec, selected=vals[-1]) if vals else spec)
+        elif isinstance(spec, ParameterMultiSelectSpec):
+            vals = by_name.get(spec.name)
+            out.append(replace(spec, selected=tuple(vals)) if vals else spec)
+        elif isinstance(spec, ParameterNumberSpec):
+            vals = by_name.get(spec.name)
+            if vals:
+                try:
+                    out.append(replace(spec, default=float(vals[-1])))
+                except ValueError:
+                    out.append(spec)
+            else:
+                out.append(spec)
+        else:
+            out.append(spec)
+    return tuple(out)
 
 
 def make_app(
@@ -337,6 +396,12 @@ def make_app(
             filter_specs = await _resolve_linked_options(
                 filter_specs, served.options_fetcher,
             )
+        # u.4.e.4 — ?param_<name>=<v> in the page URL (a drill that walked
+        # an anchor, or a bookmark) pre-selects the matching widget so the
+        # visuals' hx-include="#filter-form" load fetch is already narrowed.
+        filter_specs = _apply_url_param_overrides(
+            filter_specs, request.query_params,
+        )
         return HTMLResponse(emit_html(
             served.tree_app, served.sheet,
             dashboard_id=dash_id, dev_log=dev_log,
@@ -370,6 +435,11 @@ def make_app(
             filter_specs = await _resolve_linked_options(
                 filter_specs, served.options_fetcher,
             )
+        # u.4.e.4 — see dashboard_view; a ?param_<name>=<v> in the URL
+        # pre-selects the matching widget so the load fetch is narrowed.
+        filter_specs = _apply_url_param_overrides(
+            filter_specs, request.query_params,
+        )
         return HTMLResponse(emit_html(
             served.tree_app, sheet_for_dash,
             dashboard_id=dash_id, dev_log=dev_log,

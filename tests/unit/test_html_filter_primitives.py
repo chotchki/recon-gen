@@ -113,6 +113,45 @@ def test_parameter_dropdown_escapes_options() -> None:
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in out
 
 
+def test_parameter_dropdown_marks_selected_option() -> None:
+    """u.4.e.4 — ``selected`` (set by the server from a ``?param_<name>=<v>``
+    page-URL key) pre-marks the matching ``<option>`` so the visuals'
+    ``hx-include="#filter-form"`` load fetch is already narrowed."""
+    app, sheet = _build_app()
+    spec = ParameterDropdownSpec(
+        name="x", label="X", options=("a", "b", "c"), selected="b",
+    )
+    out = emit_html(app, sheet, dashboard_id="x", filter_specs=[spec])
+    assert '<option value="b" selected>b</option>' in out
+    assert '<option value="a">a</option>' in out
+    assert '<option value="c">c</option>' in out
+    # The blank "clear" option is still there.
+    assert '<option value=""></option>' in out
+
+
+def test_parameter_dropdown_selected_not_in_options_still_rendered() -> None:
+    """A stale bookmark / sibling-dataset value the (resolved) option list
+    doesn't contain is still emitted as a selected ``<option>`` so the form
+    submits it (the data fetch narrows on it regardless)."""
+    app, sheet = _build_app()
+    spec = ParameterDropdownSpec(
+        name="x", label="X", options=("a", "b"), selected="zzz",
+    )
+    out = emit_html(app, sheet, dashboard_id="x", filter_specs=[spec])
+    assert '<option value="zzz" selected>zzz</option>' in out
+
+
+def test_parameter_dropdown_no_selected_attr_when_blank() -> None:
+    """Default ``selected=""`` → no ``<option>`` carries the attribute;
+    the blank leading option is what the form submits (= no narrowing)."""
+    app, sheet = _build_app()
+    spec = ParameterDropdownSpec(name="x", label="X", options=("a", "b"))
+    out = emit_html(app, sheet, dashboard_id="x", filter_specs=[spec])
+    form_start = out.index('<form id="filter-form"')
+    form_end = out.index('</form>', form_start)
+    assert " selected>" not in out[form_start:form_end]
+
+
 # ---------------------------------------------------------------------------
 # CategoryFilter
 # ---------------------------------------------------------------------------
@@ -260,6 +299,32 @@ def test_parameter_multiselect_lives_inside_filter_form() -> None:
     form_start = out.index('<form id="filter-form"')
     form_end = out.index('</form>', form_start)
     assert 'name="param_pX"' in out[form_start:form_end]
+
+
+def test_parameter_multiselect_marks_selected_options() -> None:
+    """u.4.e.4 — ``selected`` (filled by the server from the page URL's
+    repeated ``?param_<name>=A&param_<name>=B`` keys) pre-marks those
+    ``<option>``s; the unselected ones stay bare."""
+    app, sheet = _build_app()
+    spec = ParameterMultiSelectSpec(
+        name="pX", label="X", options=("a", "b", "c"), selected=("a", "c"),
+    )
+    out = emit_html(app, sheet, dashboard_id="x", filter_specs=[spec])
+    assert '<option value="a" selected>a</option>' in out
+    assert '<option value="c" selected>c</option>' in out
+    assert '<option value="b">b</option>' in out
+
+
+def test_parameter_multiselect_selected_not_in_options_appended() -> None:
+    """Selected values absent from the resolved option list are appended
+    as selected ``<option>``s (stale-bookmark / sibling-dataset case)."""
+    app, sheet = _build_app()
+    spec = ParameterMultiSelectSpec(
+        name="pX", label="X", options=("a", "b"), selected=("a", "zzz"),
+    )
+    out = emit_html(app, sheet, dashboard_id="x", filter_specs=[spec])
+    assert '<option value="a" selected>a</option>' in out
+    assert '<option value="zzz" selected>zzz</option>' in out
 
 
 # ---------------------------------------------------------------------------

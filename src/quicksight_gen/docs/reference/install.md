@@ -94,6 +94,22 @@ uv sync --frozen --extra dev --extra audit
 for. `--frozen` fails if `uv.lock` is out of date — drop it locally if
 you're iterating on `pyproject.toml`.)
 
+Two non-Python tools the test session uses (the `pytest` sessionstart
+hook gates on both): `pyright` (a `[dev]` dep — `uv sync` brings it) and
+`biome` (the App 2 JS linter). Biome isn't pip-installable here — the
+`biome-js` PyPI wrapper ships only a linux-x86_64 wheel — so install it
+your platform's way:
+
+```bash
+brew install biome          # macOS / Linuxbrew
+# or: see https://biomejs.dev/guides/getting-started/ for npm / scoop /
+# nix / mise / standalone-binary options
+```
+
+If `biome` isn't on `PATH` the JS-lint gate just skips locally (CI
+always runs it via the `biomejs/setup-biome` action) — your tests still
+pass, you just won't catch a JS-lint regression before pushing.
+
 ## Quoting note
 
 The square brackets in `quicksight-gen[demo,audit]` are shell

@@ -44,7 +44,18 @@ jobs:
         # — same install used by the e2e workflow's browser job.
         run: .venv/bin/playwright install --with-deps webkit
 
-      - name: Run tests with coverage (pytest sessionstart runs pyright strict)
+      - name: Set up biome
+        # biome is a standalone Rust binary (no Node / npm — setup-biome
+        # downloads the prebuilt binary). The pytest sessionstart hook
+        # (conftest.py) runs `biome check` as a gate when `biome` is on
+        # PATH, alongside pyright — so this step is what makes the JS
+        # lint gate fire in CI. Version pinned to match the schema in
+        # biome.jsonc; bump both together.
+        uses: biomejs/setup-biome@v2
+        with:
+          version: 2.4.14
+
+      - name: Run tests with coverage (pytest sessionstart runs pyright strict + biome)
         # W.8b — drop ``--cov-report=xml --cov-report=term`` from this
         # job: the coverage aggregator job below downloads the data
         # file and produces the combined report. ``COVERAGE_FILE`` is

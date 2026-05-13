@@ -94,12 +94,13 @@ LAYERS: Final[tuple[str, ...]] = (
 # Locked by audit §7.10 (App2 promotion: ~80% of bug classes
 # catchable in App2 against local Docker).
 # Y.2.gate.c.7-followup (2026-05-07) — `pyright` collapsed into the `unit`
-# layer. The repo-root ``conftest.py::pytest_sessionstart`` (M.1.9c contract)
-# runs pyright on session start; on failure ``pytest.exit(returncode=2)``
+# layer (and `biome check` joined it, the X.2.l.4 follow-on). The repo-root
+# ``conftest.py::pytest_sessionstart`` runs pyright strict + (when `biome` is
+# on PATH) `biome check` on session start; on failure ``pytest.exit(returncode=2)``
 # fires before any test collects. So bare ``pytest tests/`` AND the runner
-# both type-check, with no double-pyright bookkeeping. Trade-off: pyright
-# duration folds into the unit layer's wall-clock instead of being its own
-# entry in `timings.json`. Acceptable because pyright is ~2s.
+# both type-check + JS-lint, with no double-bookkeeping. Trade-off: both
+# tools' duration folds into the unit layer's wall-clock instead of being
+# their own `timings.json` entries. Acceptable — pyright ~2s, biome ~30ms.
 
 REPO_ROOT: Final = Path(__file__).resolve().parents[3]
 RUNS_DIR: Final = REPO_ROOT / "runs"

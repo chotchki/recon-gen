@@ -64,6 +64,7 @@ def test_render_module_vendor_constants_are_local() -> None:
         "_FLATPICKR_JS": render._FLATPICKR_JS,
         "_NOUISLIDER_CSS": render._NOUISLIDER_CSS,
         "_NOUISLIDER_JS": render._NOUISLIDER_JS,
+        "_CTXMENU_JS": render._CTXMENU_JS,
     }
     vendored_dests = {d["dest"] for d in _DEPS}
     for name, url in consts.items():

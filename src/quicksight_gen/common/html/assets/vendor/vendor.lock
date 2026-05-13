@@ -61,6 +61,13 @@
       "dest": "js/nouislider.min.js"
     },
     {
+      "name": "ctxmenu",
+      "version": "2.1.0",
+      "source_url": "https://cdn.jsdelivr.net/npm/ctxmenu@2.1.0/standalone/ctxmenu.min.js",
+      "sha256": "00dd49473c5e8cf821841805ea0b46b851105ea13c96b14d8c7c6ed83ee9b5a4",
+      "dest": "js/ctxmenu.min.js"
+    },
+    {
       "name": "tom-select-css",
       "version": "2.3.1",
       "source_url": "https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.min.css",

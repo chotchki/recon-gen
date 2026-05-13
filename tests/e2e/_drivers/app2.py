@@ -433,11 +433,10 @@ class App2Driver:
             raise RuntimeError("App2Driver.clear_filters() called before open()")
         self.open(self._dashboard, sheet=self._sheet)
 
-    def cross_link(self, label: str) -> None:
-        self._page.locator("a", has_text=label).first.click()
-        self._page.wait_for_load_state("networkidle")
-        # Re-derive nav state from the landed URL so a subsequent
-        # goto_sheet() works.
+    def _sync_nav_from_url(self) -> None:
+        """Re-derive ``_dashboard`` / ``_sheet`` from the landed URL after
+        a navigation (cross_link / row drill) so a subsequent
+        ``goto_sheet`` works."""
         m = re.search(
             r"/dashboards/([^/?#]+)(?:/sheets/([^/?#]+))?", self._page.url,
         )
@@ -445,24 +444,55 @@ class App2Driver:
             self._dashboard = m.group(1)
             self._sheet = m.group(2)
 
+    def cross_link(self, label: str) -> None:
+        self._page.locator("a", has_text=label).first.click()
+        self._page.wait_for_load_state("networkidle")
+        self._sync_nav_from_url()
+
     def drill_from_first_row(self, visual_title: str) -> None:
-        # App2's table renderer doesn't wire row clicks to drill actions
-        # today (cross-sheet navigation goes through ``cross_link``'s
-        # ``<a>`` clicks, not row clicks). When that lands, the impl is a
-        # ``section[data-visual-kind] table.table-data tbody tr:first-child``
-        # click + ``_wait_for_refetch``.
-        raise NotImplementedError(
-            "App2Driver.drill_from_first_row — App2's table renderer "
-            "doesn't wire row-level drill actions yet"
-        )
+        # u.4.e.3 — App2's Table renderer makes every row with a row-level
+        # drill clickable (``<tr data-row-drill>``); the click navigates
+        # via the visual's *primary* drill (a ``DATA_POINT_CLICK`` one if
+        # declared, else the first). It's a full-page ``location.href``
+        # navigation, not an in-place swap (App2 cross-sheet drills =
+        # ``location.href``, same as ``cross_link``'s ``<a>``s).
+        section = self._section(visual_title)
+        first_row = section.locator(
+            "table.table-data tbody tr[data-row-drill]",
+        ).first
+        if first_row.count() == 0:
+            raise NotImplementedError(
+                f"App2Driver.drill_from_first_row — table {visual_title!r} "
+                f"declares no row-level drill (no <tr data-row-drill>)"
+            )
+        first_row.click()
+        self._page.wait_for_load_state("networkidle")
+        self._sync_nav_from_url()
 
     def drill_from_first_row_via_menu(
         self, visual_title: str, menu_item: str,
     ) -> None:
-        raise NotImplementedError(
-            "App2Driver.drill_from_first_row_via_menu — App2 has no "
-            "right-click context menu on table rows"
-        )
+        # u.4.e.3 — open the first row's "⋯" button (a ``ctxmenu`` popover;
+        # the same menu is bound on the row's ``contextmenu`` for QS-gesture
+        # parity) and click the ``<li>`` whose label is ``menu_item``.
+        section = self._section(visual_title)
+        first_row = section.locator("table.table-data tbody tr").first
+        first_row.wait_for(state="visible")
+        btn = first_row.locator(".row-drill-menu-btn").first
+        if btn.count() == 0:
+            raise NotImplementedError(
+                f"App2Driver.drill_from_first_row_via_menu — table "
+                f"{visual_title!r} has no DATA_POINT_MENU row drill "
+                f'(no "⋯" button)'
+            )
+        btn.click()
+        item = self._page.locator(
+            "ul.ctxmenu li", has_text=menu_item,
+        ).first
+        item.wait_for(state="visible", timeout=5_000)
+        item.click()
+        self._page.wait_for_load_state("networkidle")
+        self._sync_nav_from_url()
 
     # -- artifacts -------------------------------------------------------
 

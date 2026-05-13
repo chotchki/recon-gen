@@ -143,6 +143,17 @@ dev = [
     "build>=1.0",
     "twine>=5.0",
     "pyright>=1.1.380",
+    # NB: biome (the JS linter, gated alongside pyright in the pytest
+    # sessionstart hook — conftest.py) is NOT pip-installable here yet. The
+    # Biome project hasn't published an *official* PyPI package (in flight:
+    # biomejs/biome#8818); the unofficial `biome-js` wrapper ships only a
+    # `manylinux_2_28_x86_64` wheel (no macOS / arm64 / sdist) and is a
+    # stale single release on Biome 2.3.x — adding it would break
+    # `uv sync --extra dev` off linux-x86_64. So biome stays a system
+    # binary — brew locally, `biomejs/setup-biome` in CI — and the conftest
+    # gate skips cleanly when it isn't on PATH. **Revisit when biomejs/biome#8818
+    # lands**: add the official package to `[dev]`, drop the `setup-biome` CI
+    # step + the system-binary fallback comment in conftest / install.md.
     # v8.5.2 — pulled into [dev] so pyright (in the pytest sessionstart
     # gate) can resolve Playwright's PEP 561 inline stubs when type-
     # checking ``common/browser/helpers.py``. The Python package alone
