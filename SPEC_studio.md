@@ -100,9 +100,12 @@ One button in Studio, available in every mode (editor / data-shaping / coverage)
 [Deploy changes]
     │
     ▼
-1. (if etl_hook set)        → run shell command, stream stdout/stderr to /dev_log
-2. (if etl_datasource set)  → copy rows ≤ end_date into demo_database_url
-3. (if test_generator.enabled) → run generator with shaping knobs
+1. (if etl_hook set)  → run shell command  [GATE — non-zero halts; demo DB untouched]
+    │ (gate passes)
+    ▼
+2. WIPE demo_database_url base tables (unconditional once we reach this step)
+   (if etl_datasource set)  → copy rows ≤ end_date from etl_datasource
+3. (if test_generator.enabled) → emit_full_seed (always additive — wipe was step 2)
 4. refresh matviews
 5. ping Dashboards: data-generation-id bumped
                    ↓
@@ -110,21 +113,36 @@ One button in Studio, available in every mode (editor / data-shaping / coverage)
               (URL-driven → state mostly survives the swap)
 ```
 
-Each step is conditional and ordered. A failure halts the chain (safe-fail; demo DB is left in whatever consistent-ish state the failing step produced).
+**Step 1 is a gate.** If `etl_hook` is set and exits non-zero, the pipeline halts BEFORE step 2 — the demo DB is never wiped, the previous successful Deploy's data is preserved, and the user fixes their hook and clicks Deploy again. If `etl_hook` is unset, there's no failure to gate on and the pipeline proceeds straight to step 2.
 
-### Step 1 — etl_hook
+Once we're past the gate: step 2's wipe is unconditional ("always" in the sense of "always when we reach this step"). Step 2's pull and step 3 are conditional on their respective config keys. A failure inside steps 2-5 halts the chain (safe-fail; demo DB is left in whatever consistent-ish state the failing step produced — possibly wiped + partial pull, or wiped + partial generation).
 
-If `etl_hook` is set, Studio executes it as a shell command. Stdout/stderr stream to Studio's `/dev_log` so the user sees the ETL pipeline's output live. The hook's exit code gates the pipeline — non-zero halts.
+### Step 1 — etl_hook (the gate)
 
-### Step 2 — etl_datasource pull
+If `etl_hook` is set, Studio executes it as a shell command. Stdout/stderr stream to Studio's `/dev_log` so the user sees the ETL pipeline's output live.
 
-If `etl_datasource` is set, Studio opens it as a separate connection (read-only) and copies rows from `transactions` and `daily_balances` (filtered to `posted_at ≤ end_date` / `balance_date ≤ end_date`) into `demo_database_url`. The pull is **cross-dialect**: the ETL DB may be PostgreSQL or Oracle, the demo DB may be SQLite. Reuses the existing dialect machinery (`common/sql/dialect.py`) and the Oracle INSERT-ALL batcher (`common/db.py::batch_oracle_inserts`).
+**The hook's exit code gates the entire downstream pipeline.** Non-zero exit → halt **before** step 2 fires. The demo DB is *never touched* on a hook failure: no wipe, no pull, no generator, no matview refresh, no Dashboards reload. The previous successful Deploy's data is preserved as-is, the user sees the hook's stderr in `/dev_log`, fixes their command, and clicks Deploy again. (If `etl_hook` is unset, there's no failure to gate on; the pipeline proceeds to step 2.)
 
-The pull is **additive**: it INSERTs rows. It does NOT wipe the demo DB first — that's the generator's job (or the integrator's via `data apply --execute` outside Studio).
+This gate is the safety floor: a broken ETL pipeline can never wipe out a working demo DB.
 
-### Step 3 — generator
+### Step 2 — wipe demo DB + (optional) etl_datasource pull
 
-If `test_generator.enabled`, Studio runs the generator (the existing `emit_full_seed` pipeline) with the current `test_generator:` shaping params, writing into `demo_database_url`. **Wipe-then-emit semantics IF `etl_datasource` is NOT set; additive-on-top-of-pulled-rows IF `etl_datasource` IS set** (the generator's `scope` knob picks how — see "Data-shaping model").
+Studio **always wipes** `<prefix>_transactions` + `<prefix>_daily_balances` in `demo_database_url` at this step (via the existing `wipe_demo_data_sql(l2_instance, dialect)` primitive in `common/l2/seed.py`). The wipe is unconditional because **Studio owns the refresh of `demo_database_url`** — every Deploy starts from a clean base.
+
+Then, **if `etl_datasource` is set**, Studio opens it as a separate read-only connection and copies rows from its `transactions` + `daily_balances` (filtered to `posted_at ≤ end_date` / `balance_date ≤ end_date`) into `demo_database_url`. The pull is **cross-dialect**: the ETL DB may be PostgreSQL or Oracle, the demo DB may be SQLite. Reuses the existing dialect machinery (`common/sql/dialect.py`) and the Oracle INSERT-ALL batcher (`common/db.py::batch_oracle_inserts`).
+
+**Ownership boundary:** the `etl_hook` is in charge of refreshing the *`etl_datasource`* (the ETL engineer's pipeline owns its own DB). Studio owns the refresh of *`demo_database_url`* — that's why the wipe is unconditional and at the top of step 2. After step 2, the demo DB is either empty (no `etl_datasource`) or a clean snapshot of the `etl_datasource` rows (filtered to `≤ end_date`). Whatever the generator does in step 3 layers cleanly on top of that known starting point.
+
+### Step 3 — generator (always additive)
+
+If `test_generator.enabled`, Studio runs the generator (`emit_full_seed`) with the current `test_generator:` shaping params, writing into `demo_database_url`. **Always additive** — the generator does NOT wipe; the wipe was step 2's job. The generator's `scope` knob (see "Data-shaping model") picks what it adds:
+
+- `scope: full` on top of an empty demo DB (no `etl_datasource`) = today's `data apply --execute` output, byte-identical to the locked seeds.
+- `scope: full` on top of an `etl_datasource` snapshot = the full 90-day baseline + plants layered over real data (probably redundant; `uncovered_rails` or `exceptions_only` is the natural pick when ETL data is present).
+- `scope: uncovered_rails` = inspects what step 2 put in the demo DB and only generates baseline rows for rails that don't already have data.
+- `scope: exceptions_only` = no baseline, just the planted violations.
+
+(Note: today's CLI `data apply --execute` keeps its existing wipe-then-emit behavior — that lives in `cli/data.py`, not in `emit_full_seed`. The "always additive" rule above is Studio's pipeline composition, not a behavior change to `emit_full_seed` itself.)
 
 ### Step 4 — refresh matviews
 
@@ -139,7 +157,7 @@ The **killer demo:** trainer changes `end_date` from day 12 to day 13 in Studio,
 ### Edge cases (when we hit them)
 
 - **A rail/account that the open Dashboards page references just got deleted** — refresh will show "no data" for that visual. Acceptable; we'll handle it specifically when it bites.
-- **etl_hook failure** — pipeline halts at step 1; Studio shows the error in `/dev_log`; demo DB is untouched. Safe-fail.
+- **etl_hook failure** — pipeline halts at the step 1 gate; Studio surfaces the hook's stderr in `/dev_log`; **demo DB is never touched** (no wipe, no pull, no generator, no matview refresh, no Dashboards reload). The previous successful Deploy's data is preserved.
 - **PK collisions** between real `etl_datasource` `transaction_id`s and generator-synthetic ones — deferred. Natural fix when it bites: exclude the colliding accounts from generation (= `scope: uncovered_rails`).
 
 ## Data-shaping model
