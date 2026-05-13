@@ -1,14 +1,13 @@
 # QuickSight Generator — Active Plan
 
-**Where we are.** **Phase X.2 — the self-hosted "App 2" dashboard renderer — is complete** (shipped v9.0.0 → v9.3.0; full plan archived in `PLAN_ARCHIVE.md`). The four apps now render two ways off one L2 instance: AWS QuickSight (the stable `json apply` path) and App 2 (a self-hosted HTMX/d3 page server, offline-capable, all three SQL dialects), with a 4-way cross-tool agreement test gating the release. **Phase X.3 — SQLite as a database dialect — is complete** (a–d landed 2026-05-08; X.3.g — the SQLite column of the X.2 matrix — added the `e2e-sqlite` CI cell on top of the existing Layer-1 + Audit-PDF SQLite unit suites; X.3.e's dispatch-by-dialect arm shipped, the `--sqlite` CLI shorthand and X.3.f's "integrator's local loop" walkthrough were **cut** — superseded by X.4, which makes the YAML editor the integrator's local front door). Active work moves to the rest of Phase X — **X.4** (YAML editor), **X.5** (ETL helper), **X.6** (model-driven docs / README positioning sweep) — and **Phase Q (continued)** (CLI/YAML ergonomics). Sub-task detail for shipped phases lives in `PLAN_ARCHIVE.md`; per-release narratives in `RELEASE_NOTES.md`. This file tracks **forward-looking** work only.
+**Where we are.** **Phase X.2 — the self-hosted dashboard renderer (now named "Dashboards", was "App 2") — is complete** (shipped v9.0.0 → v9.3.0; full plan archived in `PLAN_ARCHIVE.md`). The four apps render two ways off one L2 instance: AWS QuickSight (`json apply`) and Dashboards (HTMX/d3 page server, offline-capable, all three SQL dialects), with a 4-way cross-tool agreement test gating the release. **Phase X.3 — SQLite as a database dialect — is complete** (a–d landed 2026-05-08; X.3.g added the `e2e-sqlite` CI cell on top of the existing Layer-1 + Audit-PDF SQLite unit suites). Active work is **X.4 — Studio**: implementation tools for the integrator / trainer / ETL engineer, designed in [`SPEC_studio.md`](SPEC_studio.md) on `x-4-5-spec-studio` (the original X.4 + X.5 folded into one phase — Studio is the YAML editor + unified diagram + data-shaping orchestrator + ETL coverage, all reached via `quicksight-gen studio`). Then **X.6** (model-driven docs — partly superseded by Studio's interactive surface; what survives is auto-reference + a positioning sweep) and **Phase Q (continued)** (CLI/YAML ergonomics). Sub-task detail for shipped phases lives in `PLAN_ARCHIVE.md`; per-release narratives in `RELEASE_NOTES.md`. This file tracks **forward-looking** work only.
 
 ## Greater Plan
 X.2 - add the non quicksight renderer
   - Solves testing limitations
 X.3 - add sqlite as a database dialect
   - Does not support materialized views but shouldn’t matter due to the local nature of the db
-X.4 - yaml editor - How do you handle the yaml? Aka the shape of the institution?
-X.5 - etl helper
+X.4 - Studio: implementation tools (yaml editor + unified diagram + data-shaping orchestrator + ETL coverage). Folds in the original X.5 (etl helper). See SPEC_studio.md.
 X.6 - Stop the documentation lying.
 - [ ] Make the core domain model the source of the documentation site just as the yaml for the shape today. No duplication, use it to build the doc from the models.
 X.7 Cloud cost optimization
@@ -58,7 +57,7 @@ Phase X has tracks that genuinely don't touch each other. Identifying them up fr
 
 3. **X.2.c per-visual renderers** (KPI / Table / BarChart / LineChart). Each is one `case` arm in bootstrap + one JS function. All touch one file (`render.py`) so either sequence them or have agents open per-renderer PRs the human merges in order. The merge cost per renderer is small — sequencing is probably easier than coordinating.
 
-4. **X.5 backend** (`etl.yaml` schema + loader + `--end-date` CLI) can start parallel to X.4 — the UI piece blocks on App 1 existing but the data plumbing doesn't.
+4. ~~**X.5 backend**~~ **OBSOLETE** — X.5 is folded into X.4 (Studio); see X.4's sub-task tree for the actual parallel candidates inside Studio (`X.4.f` editor forms, `X.4.h` shaping panel, `X.4.g` pipeline, all branching off `X.4.a`+`X.4.d` foundations).
 
 **Integration pain mitigations (because integration IS always pain):**
 - **Frequent merges back to the integration branch (X.2 main-line) — don't let parallel tracks drift for more than 2-3 days.** Long-lived branches accumulate conflict surface logarithmically.
@@ -148,48 +147,127 @@ Shipped per sub-phase: **v9.0.0** (Phase Y filter convergence) → **v9.0.2** (X
 - **Window functions.** SQLite supports them since 3.25; matview refresh queries port.
 - **Date arithmetic.** SQLite uses `date()` / `datetime()` functions. Already dialect-aware in `common/sql/dialect.py` per Phase P.
 
-### X.4 — App 1: YAML editor (the institution-shape helper)
+### X.4 — Studio: implementation tools (integrator + trainer + ETL engineer)
 
-**What.** Per `docs/x_2_design_thoughts.md`: a web-based editor for the L2 institution YAML. Top-of-page force-directed view of the L2 + click-to-filter + filter toggles + cards for editing each L2 entity. Hitting save on a card PUTs the entity, server applies + cascades; affected scope reloads via `HX-Trigger: l2-cascade-reload`.
+**SPEC.** [`SPEC_studio.md`](SPEC_studio.md) — drafted on `x-4-5-spec-studio` from `docs/x_4_5_design_thoughts.md`. Read it first; the PLAN below derives from the SPEC, not the other way around. **The X.4 / X.5 split from the original plan is folded:** Studio is one phase covering both the editor (was X.4) and the ETL helper (was X.5). The persona reframe ("implementation tools") and the orchestrator pipeline (one Deploy button, one process) make them the same surface.
 
-**Why.** Hand-editing the L2 YAML is the integrator's primary friction. The validator is strict (good) but the feedback loop is "edit YAML → run schema apply → maybe see error → fix → repeat." A live editor with the L2 force-directed map + form-based entity editing collapses that loop.
+**Three personas, one front door.** The integrator (YAML editor + unified diagram), the trainer (plant-toggle + day-stepper + plant-timeline), the ETL engineer (`etl_hook` + `etl_datasource` pull + `scope: uncovered_rails` + coverage overlay) all reach Studio via `quicksight-gen studio`. Dashboards (the X.2 wrap surface, renamed from "App 2") is mounted under Studio and is also independently runnable via `quicksight-gen dashboards`.
 
-**Persona match.** The integrator. Local iteration loop, paired with X.3 SQLite for "edit YAML, see it apply against local data, see the dashboard render in App 2."
+**Shape of the work.**
+- **Hard sequential bottleneck:** the diagram-renderer spike (`X.4.b`). The renderer choice (D3 + d3-force vs enhanced graphviz) gates everything that touches the unified diagram. Spike, judge, lock, then proceed.
+- **Parallelizable once foundations land:** editor forms (`X.4.f` — "trivial agent-worthy work" per user), shaping panel (`X.4.h`), pipeline orchestration (`X.4.g`) all branch off the cascade primitives + Deploy endpoint.
+- **CLI rename is a clean cut:** `serve app2 apply` → `dashboards` (no deprecation alias); the `serve` Click group goes away. v10.0.0 ships when Studio MVP is usable.
+- **Testing scope is narrowed** vs X.2 (per SPEC's "Testing scope"): the cross-dialect pull is a small targeted matrix (PG → SQLite primary; Oracle → SQLite + SQLite → SQLite secondary), not the X.2-era 13-cell `scenario × dialect × target` fan-out. The codebase keeps the dialect support; we just don't extend the matrix to Studio's surface.
 
-**Architecture (per design doc):**
-- Same Starlette process as App 2 OR separate process — TBD when X.4 starts. Same-process for the dev tool (X.4 era); split when phase.2 auth lands (App 1 has writes, needs different auth posture than App 2's read-only).
-- REST shape: `/l2_shape` (force-directed view), `/l2_shape/accounts`, `/l2_shape/rails`, `/l2_shape/chains`, `/l2_shape/transfer_templates`, `/l2_shape/theme` — CRUD per entity type.
-- Cascade mechanism: PUT entity, server returns 200 + new body. When the change rippled (rename rewrites references, etc.) the response ALSO emits `HX-Trigger: l2-cascade-reload`. Client-side the L2-shape view + force-directed canvas listen for that event and `hx-get` themselves. No client-side cascade computation.
-- Force-directed visual is the **shared primitive** with App 2 — already in `common/tree/visuals.py::ForceGraph` from the X.2 spike. App 1's editor canvas + App 2's dashboard visual + App 1 ETL coverage overlay are three uses of the same renderer.
+**Process discipline (carried from CLAUDE.md):** ticking goes inline. When work expands beyond a checkbox, split it: tick what landed, add a new unchecked item for what's left. When a gap surfaces, add it. When a task turns out to be wrong, mark + replace. Phases exit only when every box is ticked + e2e green + docs updated, then summarize + sweep to PLAN_ARCHIVE.md.
 
-**Scope (placeholder — fill in detail after X.2 lands):**
+#### X.4.a — Foundations: process model + the severable mount
 
-- [ ] **X.4.a — Read-only L2 viewer.** `/l2_shape` GETs the L2, renders the force-directed map. Click a node → filter to the connected subgraph. Filter toggles for entity categories. Reset filters button. No edits yet — viewer first to confirm the visualization carries the L2 model.
-- [ ] **X.4.b — Per-entity card view.** GET `/l2_shape/accounts/:id` returns one entity's card (read-only). All fields visible. **Discipline (pre-X.6):** card field labels + helper text come from `common/l2/primitives.py` field docstrings, NOT hand-written in the editor template. Same source X.6's mkdocstrings expansion will eventually consume — keeps editor + docs aligned by construction.
-- [ ] **X.4.c — Edit + PUT + cascade.** Card flips to edit mode, save PUTs. Server applies + recomputes references + writes back the YAML. Response carries `HX-Trigger: l2-cascade-reload` when the change rippled.
-- [ ] **X.4.d — Live validation feedback.** PUT validates against the existing strict L2 validator; failure returns 400 + the validator error inline as a swap fragment under the form.
-- [ ] **X.4.e — Force-directed integration.** Editor canvas at the top stays in sync with edits via the same cascade-reload event.
-- [ ] **X.4.f — CLI integration.** `quicksight-gen edit -c config.yaml --l2 path/to/L2.yaml` opens the local server + browser tab.
-- [ ] **X.4.g — Layer 2 e2e.** Playwright tests covering the edit-cascade flow + force-directed canvas updates.
-- [ ] **X.4.h — Hot reload / rebuild button.** Integrator's loop is "edit YAML → see it in App 2." Today: change YAML → re-run `data apply --execute` → restart App 2. Painful. App 1 surfaces a "Rebuild" button that: (1) kills the App 2 process, (2) re-runs `data apply -c config.yaml --execute` (whichever backing DB the config.yaml points at — SQLite for the integrator-local persona, Postgres or Oracle when the operator runs against a remote DB), (3) restarts App 2, (4) reloads App 2's open tab once it's back up. UX shape will be obvious once the editor + ETL pieces land — defer detailed spec to when X.4 starts. Note for that future moment: the user can keep reading the YAML in App 1 while the rebuild runs, so the perceived downtime is small.
+- [ ] **X.4.a.1** — `quicksight-gen studio` Click command in `cli/`; Starlette app mounts Dashboards routes + Studio routes.
+- [ ] **X.4.a.2** — `quicksight-gen dashboards` Click command (replaces `serve app2 apply`); same app mounts Dashboards routes only.
+- [ ] **X.4.a.3** — Severability test: `dashboards` runs cleanly with Studio routes absent (no shared in-memory cache that Dashboards reads).
+- [ ] **X.4.a.4** — Studio landing route (`GET /`) — minimal placeholder; asserts the mount + routes resolve.
+- [ ] **X.4.a.5** — `serve app2 apply` and the `serve` Click group removed; usage swept across `tests/` + `docs/` + `CLAUDE.md` + `README.md`.
+- [ ] **X.4.a.6** — In-memory `L2Instance` cache on the server; `save_l2(path, instance)` writer (atomic: write to temp, fsync, rename). Reload-on-file-change is OUT OF SCOPE (Studio writes; nobody else writes).
 
-### X.5 — App 1 ETL helper
+#### X.4.b — Diagram renderer spike (timeboxed, gates X.4.c)
 
-**What.** Per `docs/x_2_design_thoughts.md`: data-loading helper inside App 1. Two paths:
-1. Build up SQL load steps (saved to `etl.yaml`, NOT `config.yaml` — preserves the V.1.b allowlist boundary).
-2. Run the synthetic data generator (existing `data apply` pipeline, exposed via the App 1 UI).
+- [ ] **X.4.b.1** — Adapter that emits the d3-force JSON shape from `common/l2/topology.py`'s graph model — full graph (roles + scope, rails bundled, SingleLeg self-loops, templates, chains).
+- [ ] **X.4.b.2** — **Spike arm A: D3 + d3-force** tuned against `sasquatch_pr` — try parents-above-children, edge bundling, spread-to-fill, toggles, focus.
+- [ ] **X.4.b.3** — **Spike arm B: enhanced graphviz** — post-process `dot`'s SVG with data-attrs per node + edge + JS handlers for click-to-focus + type-toggle.
+- [ ] **X.4.b.4** — Compare on the SPEC's "good enough" criteria (legible on `sasquatch_pr`, all four entity-type toggles work, click-focus works, coverage tint works). Capture the judgment call in a short spike doc under `docs/audits/`.
+- [ ] **X.4.b.5** — Lock the renderer for the X.4.c work; record the choice in `SPEC_studio.md`.
 
-Plus: load repeatedly up to a defined date for time-travel simulations of business-over-time. View the force-directed L2 with data-coverage overlay (color/saturation by whether rows exist for each L2 primitive).
+#### X.4.c — The unified diagram (build against the renderer that won)
 
-**Why.** Closes the loop for the ETL engineer persona: "did I load all the data I expected to?" The data-coverage overlay on the force-directed view is the integrator's answer to "what's covered?"
+- [ ] **X.4.c.1** — Studio route serving the chosen diagram for the current L2.
+- [ ] **X.4.c.2** — Toggle-by-entity-type chrome (Accounts / Rails / Chains / Templates checkboxes).
+- [ ] **X.4.c.3** — Click-a-node → focus connected subgraph (everything not directly connected dims).
+- [ ] **X.4.c.4** — Reset filters → back to the full graph, all types visible.
+- [ ] **X.4.c.5** — Coverage-tint overlay: `coverage_for(connection, prefix, l2_instance)` data fetcher (binary presence per L2 primitive, row-count on hover).
+- [ ] **X.4.c.6** — Trainer-mode overlay: planted exceptions visually annotated on their host entities (reads the same scenario object the plant-timeline view consumes).
+- [ ] **X.4.c.7** — JS unit tests in `tests/js/` shape (one harness per feature; renderer-specific).
 
-**Scope (placeholder — fill in detail after X.4 lands):**
+#### X.4.d — Editor primitives: server-owned cascade
 
-- [ ] **X.5.a — `etl.yaml` schema + loader.** New file alongside `config.yaml`, separate strict allowlist. Holds list of SQL load steps with `--end-date` parameter support.
-- [ ] **X.5.b — `data apply --end-date <ISO date>`.** Trivial in `emit_full_seed`: skip records past the cutoff. Punt on `--density-factor` for perf testing — note in PLAN, ship when needed.
-- [ ] **X.5.c — App 1 ETL UI.** SQL step builder cards, run button, progress feedback, link to view results in App 2.
-- [ ] **X.5.d — Force-directed coverage overlay.** Color/saturation by row-count per L2 primitive. Shared force-directed visual from X.2 + a second data fetcher that returns coverage stats.
-- [ ] **X.5.e — Time-travel re-loads.** Run loader repeatedly with advancing `--end-date` to simulate business-over-time. UI exposes the date stepper.
+- [ ] **X.4.d.1** — `mutate_l2(instance, kind, id, fields) → L2Instance` — applies a single-entity mutation to the in-memory model, returns the new instance.
+- [ ] **X.4.d.2** — `rename_identifier(instance, kind, old, new) → L2Instance` — walks every reference and rewrites; uses the typed Identifier wrappers (`common/ids.py` + `common/l2/primitives.py`).
+- [ ] **X.4.d.3** — `serialize_l2(instance) → str` — re-serializes the YAML from the model (drops freeform `# comments`, preserves `description:`).
+- [ ] **X.4.d.4** — `validate(instance)` hook on every save: validator raise → 400 + inline error fragment (no save).
+- [ ] **X.4.d.5** — Delete primitive: subject to validator's reject-on-structural-break rule (a structural-break delete returns 400; user fixes the dependent first).
+- [ ] **X.4.d.6** — Unit tests: mutate-round-trip (mutate → validate → serialize → load → assert equal), rename-touches-every-expected-reference, delete-rejected-when-dependent.
+
+#### X.4.e — Editor: HTMX form discipline + cascade trigger
+
+- [ ] **X.4.e.1** — Form template scaffolding (one Jinja partial per entity kind; field labels + helper text come from `common/l2/primitives.py` field docstrings — the X.6.a discipline laid down early so it doesn't need a sweep).
+- [ ] **X.4.e.2** — `GET /l2_shape/<kind>/` — list view (rows, click to expand).
+- [ ] **X.4.e.3** — `GET /l2_shape/<kind>/<id>` (read-only card) + `GET /l2_shape/<kind>/<id>/edit` (editable fragment).
+- [ ] **X.4.e.4** — `PUT /l2_shape/<kind>/<id>` — the cascade flow: validate → mutate → save → respond with the new fragment + (if rippled) `HX-Trigger: l2-cascade-reload`.
+- [ ] **X.4.e.5** — Validation-failure path: 400 + inline error fragment, targeted swap, preserves the user's typed content.
+- [ ] **X.4.e.6** — `POST /l2_shape/<kind>/` create + `DELETE /l2_shape/<kind>/<id>`.
+- [ ] **X.4.e.7** — Diagram + entity list listen for `l2-cascade-reload` and `hx-get` themselves.
+
+#### X.4.f — Editor forms (additive build order — parallelizable per entity)
+
+- [ ] **X.4.f.1** — Account form (flat — first; proves the per-entity pattern).
+- [ ] **X.4.f.2** — Rail form — TwoLegRail subtype.
+- [ ] **X.4.f.3** — Rail form — SingleLegRail subtype.
+- [ ] **X.4.f.4** — Theme form (flat).
+- [ ] **X.4.f.5** — Chain form (sub-list editor: required/xor-group children).
+- [ ] **X.4.f.6** — TransferTemplate form (sub-list editor: leg-rail composition).
+
+#### X.4.g — The "Deploy changes" pipeline
+
+- [ ] **X.4.g.1** — `etl_hook` config field + V.1.b allowlist entry.
+- [ ] **X.4.g.2** — `etl_datasource` config block (URL + `transactions` / `daily_balances` table allowlist) + V.1.b allowlist entry.
+- [ ] **X.4.g.3** — `test_generator:` config block (`enabled` / `scope` / `end_date` / `seed` / `plants` / `only_template` / `derive_balances`) + V.1.b allowlist entry. Defaults preserve byte-identical-to-locked-seeds output.
+- [ ] **X.4.g.4** — Step 1 (`etl_hook` gate): subprocess run; stream stdout/stderr to `/dev_log`; exit-code halts BEFORE step 2 if non-zero (demo DB never touched).
+- [ ] **X.4.g.5** — Step 2 wipe: call `wipe_demo_data_sql(instance, dialect)` against `demo_database_url`, always (when we reach this step).
+- [ ] **X.4.g.6** — Step 2 pull: cross-dialect copy from `etl_datasource` to `demo_database_url`, filtered to `≤ end_date`. Reuse `common/sql/dialect.py` + Oracle batcher.
+- [ ] **X.4.g.7** — Step 3 generator: `emit_full_seed` against the current `test_generator:` knobs; always additive (the wipe was step 2).
+- [ ] **X.4.g.8** — Step 3 — `scope: full` mode (today's behavior; byte-matches locked seeds when no `etl_datasource`).
+- [ ] **X.4.g.9** — Step 3 — `scope: exceptions_only` mode (skip baseline, plants only on top of whatever step 2 produced).
+- [ ] **X.4.g.10** — Step 3 — `scope: uncovered_rails` mode (inspect `demo_database_url` post-step-2, fill baseline only for rails without rows).
+- [ ] **X.4.g.11** — Step 4 matview refresh: existing `refresh_matviews_sql(instance)`.
+- [ ] **X.4.g.12** — Step 5 reload: bump a process-local `data_generation_id`; Dashboards' open page polls (or subscribes to) the counter and reloads its current URL on bump.
+- [ ] **X.4.g.13** — `POST /deploy` orchestration endpoint that runs steps 1-5; returns a structured progress stream.
+- [ ] **X.4.g.14** — Studio "Deploy changes" button (global, in the Studio header); calls `POST /deploy`; surfaces step progress + errors via `/dev_log`.
+- [ ] **X.4.g.15** — Pipeline orchestration tests (one per shape: hook-fail-halt, no-etl path, etl-only path, etl-then-generator path, etl-then-`uncovered_rails` path).
+
+#### X.4.h — Data-shaping panel UI
+
+- [ ] **X.4.h.1** — Panel layout (which knobs are visible; how it sits alongside the diagram + the global Deploy button).
+- [ ] **X.4.h.2** — Plant-toggle checkboxes (one per exception kind: drift / overdraft / limit_breach / stuck_pending / stuck_unbundled / supersession).
+- [ ] **X.4.h.3** — Day stepper UI for `end_date` (← prev / next →; jump-to-day input).
+- [ ] **X.4.h.4** — Random-seed input (number entry + "roll" button to randomize; pin/save current).
+- [ ] **X.4.h.5** — `scope` selector (full / uncovered_rails / exceptions_only).
+- [ ] **X.4.h.6** — Plant-timeline view: vertical day column, planted exceptions annotated per day under the *current* shaping config; click a day → `end_date` jumps + Deploy.
+- [ ] **X.4.h.7** — Knob changes persist back to `config.yaml`'s `test_generator:` block (debounced); reloaded on next startup.
+- [ ] **X.4.h.8** — Unit tests for plant-timeline derivation (given a scenario + scope + seed, which days hit?).
+
+#### X.4.i — Additive knobs (ship later — not gating Studio MVP)
+
+- [ ] **X.4.i.1** — `only_template` mode: scoped baseline = template + dependency closure (its leg-rails + the accounts those touch); rest of the L2 left empty.
+- [ ] **X.4.i.2** — `derive_balances` mode: from subledger transactions in `demo_database_url`, derive control-account daily balances satisfying double-entry (the drift invariant run forward).
+- [ ] **X.4.i.3** — UI controls for both in the data-shaping panel.
+
+#### X.4.j — Testing scope (per SPEC's "Testing scope" section)
+
+- [ ] **X.4.j.1** — Cross-dialect pull tests: PG → SQLite (primary), Oracle → SQLite, SQLite → SQLite (degenerate). NOT a full matrix — the codebase keeps the dialect support; we just don't fan it out for Studio's tests.
+- [ ] **X.4.j.2** — Browser e2e: Studio + Dashboards integrated loop on `sasquatch_pr` + SQLite (edit YAML in Studio → Deploy → Dashboards reloads with the new data). Single test, NOT parametrized over `[qs, app2]`.
+- [ ] **X.4.j.3** — Verify the existing X.2 13-cell `scenario × dialect × target` matrix + 4-way agreement test still pass unchanged.
+- [ ] **X.4.j.4** — Verify the locked-seed determinism test stays green (default `test_generator:` knobs = today's output, byte-for-byte).
+
+#### X.4.k — Wrap + release (v10.0.0)
+
+- [ ] **X.4.k.1** — Update CLAUDE.md "Quick Reference" + Commands section: add `studio` / `dashboards`; remove all `serve app2 apply` references.
+- [ ] **X.4.k.2** — README: add a "Studio" section near the top; rename "Self-hosted renderer (App 2)" → "Self-hosted renderer (Dashboards)".
+- [ ] **X.4.k.3** — Update `docs/reference/self-host.md` for the rename.
+- [ ] **X.4.k.4** — RELEASE_NOTES v10.0.0 entry (major: CLI verbs renamed, `serve app2 apply` removed, Studio shipped).
+- [ ] **X.4.k.5** — Bump `__version__` to 10.0.0.
+- [ ] **X.4.k.6** — End-of-phase verify: `./run_tests.sh up_to=app2` green; full pytest sweep green; one live AWS deploy still green.
+- [ ] **X.4.k.7** — Tag v10.0.0; merge to main; push.
+- [ ] **X.4.k.8** — Sweep X.4 detail to PLAN_ARCHIVE.md; collapse the in-PLAN entry to a one-line done summary.
 
 ### X.6 — Model-driven docs (drift reduction)
 
