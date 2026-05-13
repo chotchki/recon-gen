@@ -1,11 +1,9 @@
 """Browser e2e: parameter-anchored sheets surface their anchor control
 identically on QuickSight and App 2 (u.4.e.4).
 
-Four sheets across three apps render *blank-until-you-pick* on default
-load — each is driven by a single value the analyst sets first:
+Three sheets across two apps render *blank-until-you-pick* on default
+load — each is driven by a value the analyst sets first:
 
-- **L1 Daily Statement** — ``Account`` (single-select dropdown, options
-  from the accounts companion dataset).
 - **Investigation Money Trail** — ``Chain root transfer`` (single-select
   dropdown, options from the chain-roots companion).
 - **Investigation Account Network** — ``Anchor account`` (single-select
@@ -19,6 +17,17 @@ declares none — so the parity invariant this test guards is structural:
 the anchor control is present in the filter bar with a non-empty option
 universe, populated from its dataset, the same on both renderers
 (parametrised ``[qs, app2]`` via the ``<app>_dashboard_driver`` fixtures).
+
+**L1 Daily Statement** (``Account`` single-select, options from the
+accounts companion) is the fourth such sheet but is *not* exercised here:
+every visual on that sheet is account-AND-date scoped, so it renders
+nothing on default load, and there's no always-rendering visual to
+``wait_loaded`` on as a "the sheet is ready" signal (and getting a
+non-blank render needs picking both an account and a known-good
+``balance_date`` — out of scope for a structural parity test). Its
+``Account`` control's shape — a ``ParameterDropdownSpec`` with
+``options_dataset=DS_L1_ACCOUNTS[…]`` — is covered by ``test_tree_filter_specs``;
+its render parity by ``test_l1_sheet_visuals::test_l1_dashboard_structure_matches_tree[app2]``.
 
 What's *not* asserted here (verb / quirk gaps, covered elsewhere):
 
@@ -81,16 +90,6 @@ def test_inv_anchor_control_present_and_populated(
     _assert_anchor_present_and_populated(
         driver, dashboard_arg, sheet_name=sheet_name,
         anchor_label=anchor_label, visual_title=visual_title,
-    )
-
-
-def test_l1_daily_statement_anchor_control_present_and_populated(
-    l1_dashboard_driver,
-) -> None:
-    driver, dashboard_arg = l1_dashboard_driver
-    _assert_anchor_present_and_populated(
-        driver, dashboard_arg, sheet_name="Daily Statement",
-        anchor_label="Account", visual_title="Opening Balance",
     )
 
 
