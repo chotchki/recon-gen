@@ -77,7 +77,7 @@ import inspect
 import json
 import logging
 import traceback
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Union
 
@@ -279,6 +279,7 @@ def make_app(
     dev_log: bool = False,
     visual_data_cache_max_age_s: int = 60,
     docs_dir: Path | None = None,
+    studio_routes: Sequence[Route | Mount] | None = None,
 ) -> Starlette:
     """Build a Starlette ASGI app serving multiple dashboards.
 
@@ -311,6 +312,16 @@ def make_app(
             since matviews refresh on ETL cycles (minutes-to-
             hours); production can dial up. Ignored when
             ``dev_log=True`` (cache is bypassed for dev runs).
+        studio_routes: X.4.a.4 — when set, splice these routes in
+            BEFORE the Dashboards routes, AND skip the default
+            ``GET / → /dashboards`` redirect (since the Studio mount
+            owns ``GET /`` as its landing page). ``None`` is the
+            Dashboards-only mount: keep the redirect, no Studio
+            routes. ``cli.dashboards`` always passes ``None``;
+            ``cli.studio`` passes the list ``make_studio_routes``
+            built. Severability contract: ``make_app`` does not
+            import ``_studio_routes`` — Studio routes are constructed
+            externally and injected.
 
     Returns:
         A ``starlette.Starlette`` ASGI application.
@@ -574,8 +585,15 @@ def make_app(
     # without forcing the user to build CSS first.
     assets_dir = Path(__file__).parent / "assets"
 
-    routes: list[Route | Mount] = [
-        Route("/", index, methods=["GET"]),
+    routes: list[Route | Mount] = []
+    if studio_routes is not None:
+        # X.4.a.4 — Studio mount owns ``GET /`` (its landing page);
+        # skip the Dashboards-only redirect. Splice Studio routes
+        # first so a Studio-defined ``GET /`` wins on the route table.
+        routes.extend(studio_routes)
+    else:
+        routes.append(Route("/", index, methods=["GET"]))
+    routes += [
         Route("/dashboards", dashboards_list, methods=["GET"]),
         Route(
             "/dashboards/{dashboard_id}",

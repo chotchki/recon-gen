@@ -12,8 +12,8 @@ Two guards:
 2. **No external runtime asset** — the page shell loads every
    ``<script>`` / ``<link>`` from a local ``/static/...`` path; nothing
    is fetched from a CDN at runtime. This *is* the offline guarantee
-   for ``pip install quicksight-gen[serve] && quicksight-gen serve app2
-   apply`` — as a fast unit test (the CI ``docs-portable-install`` job
+   for ``pip install quicksight-gen[serve] && quicksight-gen
+   dashboards`` — as a fast unit test (the CI ``docs-portable-install`` job
    adds the "the vendored files actually land in the installed wheel"
    half).
 """

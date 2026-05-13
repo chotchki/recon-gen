@@ -257,9 +257,9 @@ def test_db_fetcher_unknown_visual_id_raises(cfg_with_prefix) -> None:  # type: 
 # ---------------------------------------------------------------------------
 
 
-def test_serve_app2_apply_help_lists_stub_flag() -> None:
+def test_dashboards_help_lists_stub_flag() -> None:
     runner = CliRunner()
-    result = runner.invoke(main, ["serve", "app2", "apply", "--help"])
+    result = runner.invoke(main, ["dashboards", "--help"])
     assert result.exit_code == 0, result.output
     assert "--stub" in result.output
     assert "--no-stub" in result.output

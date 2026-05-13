@@ -457,7 +457,7 @@ def per_dialect_app2_results(per_dialect_cfg, seeded_audit):  # type: ignore[no-
 
     Depends on ``seeded_audit`` so the seed lands before the reads.
     Module-scoped — the seed + the 6-sheet walk is the expensive setup.
-    Built the same way ``cli/serve.py::_build_real_app`` does (register L1
+    Built the same way ``cli/_html_serve.py::build_real_app`` does (register L1
     datasets → build tree → live-DB ``(visual, options)`` fetcher pair off
     one pool; ``make_live_db_fetchers_for_app`` — the *plural*, since the
     L1 dashboard has dataset-sourced dropdowns).

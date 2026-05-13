@@ -1,53 +1,55 @@
-"""``quicksight-gen serve`` — self-hosted dashboards (App 2).
+"""Shared internals for ``quicksight-gen dashboards`` + ``... studio``.
 
-The serve group ships HTMX/d3 dashboards as a third dialect alongside
-QuickSight JSON (``json``) and the audit PDF (``audit``). Each
-sub-app hangs off a sub-group:
+Both Click commands ride the same Starlette app (descendant of
+``common/html/server.py``) and need the same DB-fetcher / dashboard-tree
+/ pool / uvicorn dance. This module owns that body; the two CLI files
+are thin Click wrappers calling ``run_html_server(...)``.
 
-  app2 apply — start the App2 (HTMX dashboard) server.
-
-X.4 will add ``app1`` (the YAML editor) under the same group.
-
-App2 is a *server*, not a static artifact, so there is no ``--execute``
-flag here — starting the server IS the operation, mirroring the
-``docs serve`` shape (the ``apply`` verb is kept for surface symmetry
-with the other artifact groups).
-
-By default ``apply`` wires the real DB-backed fetcher (X.2.a.4) which
-hits the configured Postgres / Oracle / SQLite. Pass ``--stub`` to
-swap in the deterministic stub from ``_smoke_app.py`` — useful when
-iterating on the JS / page shell without a populated database.
+Per the SPEC (severability contract): ``dashboards`` MUST keep working
+when Studio routes are absent. ``studio_routes_factory=None`` is the
+Dashboards-only path; passing a non-None factory mounts Studio on the
+same Starlette app.
 """
 
 from __future__ import annotations
 
+import asyncio
+import importlib.util
+import tempfile
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
 import click
+import uvicorn
 
-from quicksight_gen.cli._helpers import (
-    config_option,
-    l2_instance_option,
-    resolve_l2_for_demo,
+from quicksight_gen.common.html._smoke_app import (
+    SMOKE_FILTER_SPECS,
+    build_smoke_app,
+    stub_money_trail_fetcher,
 )
+from quicksight_gen.common.html.server import (
+    ServedDashboard,
+    make_app,
+)
+from quicksight_gen.common.l2.cache import L2InstanceCache
+from quicksight_gen.common.theme import resolve_l2_theme
+
+# Starlette types only used for the studio_routes_factory contract;
+# imported under TYPE_CHECKING would force a quoted alias everywhere
+# the factory is referenced. They're cheap modules — direct import.
+from starlette.routing import Mount, Route
 
 
-@click.group()
-def serve() -> None:
-    """Self-hosted dashboard servers (App2 = HTMX/d3 renderer)."""
-
-
-@serve.group("app2")
-def app2() -> None:
-    """App2 — self-hosted HTMX/d3 dashboards."""
-
-
-# The four real apps App2 serves (everything except the DB-free
-# ``smoke`` fixture). ``serve app2 apply`` with no ``--app`` builds all
-# four into one server — same "no-arg = all" shape as ``json apply``;
-# ``--app <one>`` narrows to a single app for iteration.
-_REAL_APPS: tuple[str, ...] = (
+# The four real apps. Dashboards + Studio both serve them; Studio
+# additionally edits the L2 they're built from. ``smoke`` is the
+# dashboards-only DB-free fixture (the trainer / spike target);
+# Studio's CLI deliberately omits it (Studio's whole point is to edit
+# a real L2, and smoke doesn't have one).
+REAL_APPS: tuple[str, ...] = (
     "l1_dashboard", "l2_flow_tracing", "investigation", "executives",
 )
-_APP_TITLES: dict[str, str] = {
+APP_TITLES: dict[str, str] = {
     "l1_dashboard": "L1 Dashboard",
     "l2_flow_tracing": "L2 Flow Tracing",
     "investigation": "Investigation",
@@ -56,7 +58,7 @@ _APP_TITLES: dict[str, str] = {
 }
 
 
-def _build_real_app(app_name: str, cfg, instance):  # type: ignore[no-untyped-def]: cfg/l2 untyped pending CLI-wide sweep
+def build_real_app(app_name: str, cfg: Any, instance: Any) -> tuple[Any, Any]:  # type: ignore[no-untyped-def]: cfg/l2 untyped pending CLI-wide sweep
     """Register ``app_name``'s datasets + build its tree.
 
     Returns ``(tree_app, first_sheet)``. ``build_*_datasets(...)``
@@ -104,7 +106,7 @@ def _build_real_app(app_name: str, cfg, instance):  # type: ignore[no-untyped-de
         _build_datasets(cfg, instance)
         tree_app = build_l1_dashboard_app(cfg, l2_instance=instance)
     else:  # pragma: no cover — click.Choice gates this
-        raise click.UsageError(f"Unknown App2 app: {app_name!r}")
+        raise click.UsageError(f"Unknown dashboard app: {app_name!r}")
     if tree_app.analysis is None or not tree_app.analysis.sheets:
         raise click.UsageError(
             f"{app_name} app has no analysis sheets — bug in builder."
@@ -112,129 +114,41 @@ def _build_real_app(app_name: str, cfg, instance):  # type: ignore[no-untyped-de
     return tree_app, tree_app.analysis.sheets[0]
 
 
-@app2.command("apply")
-@config_option(required_for_dialect_only=True)
-@l2_instance_option()
-@click.option(
-    "--host",
-    default="127.0.0.1",
-    show_default=True,
-    help="Bind address. Use 0.0.0.0 to expose on the network.",
-)
-@click.option(
-    "--port",
-    type=int,
-    default=8765,
-    show_default=True,
-    help="TCP port to listen on.",
-)
-@click.option(
-    "--dev-log/--no-dev-log",
-    default=False,
-    show_default=True,
-    help=(
-        "Forward HTMX + d3 click events to stderr for live debugging. "
-        "Default off so production deploys stay silent."
-    ),
-)
-@click.option(
-    "--stub/--no-stub",
-    default=False,
-    show_default=True,
-    help=(
-        "Use the deterministic stub fetcher instead of querying the "
-        "configured DB. Useful for iterating on the JS / page shell "
-        "without a populated database."
-    ),
-)
-@click.option(
-    "--app",
-    "app_name",
-    type=click.Choice(
-        ["all", "smoke", "l1_dashboard", "l2_flow_tracing",
-         "investigation", "executives"],
-    ),
-    default="all",
-    show_default=True,
-    help=(
-        "Which App2 surface(s) to serve. ``all`` (default) builds the "
-        "four real apps into one server — `/dashboards` lists them and "
-        "you switch between them in-process, same as `json apply` with "
-        "no `--app`. Pass a single app name to narrow to one (faster "
-        "startup when iterating). ``smoke`` is the DB-free spike fixture "
-        "(the only one that works without a configured database / and "
-        "the only one `--stub` applies to)."
-    ),
-)
-@click.option(
-    "--docs/--no-docs",
-    "embed_docs",
-    default=True,
-    show_default=True,
-    help=(
-        "Build the mkdocs handbook (against the same `--l2`) on startup "
-        "and serve it at `/docs` (X.2.i). Best-effort: silently skipped "
-        "when mkdocs isn't installed (`pip install quicksight-gen[docs]`). "
-        "`--no-docs` skips the build for a faster startup. The standalone "
-        "`docs apply` / `docs serve` / `docs export` CLI is unaffected "
-        "either way."
-    ),
-)
-def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the function-decorator return type
-    config,
-    l2_instance_path,
+# Studio-routes factory contract: a callable that takes the cache and
+# returns a list of routes. ``cli.dashboards`` passes ``None``;
+# ``cli.studio`` passes ``make_studio_routes``. The seam keeps
+# ``_html_serve`` ignorant of Studio internals.
+StudioRoutesFactory = Callable[[L2InstanceCache], list[Route | Mount]]
+
+
+def run_html_server(
+    *,
+    cfg: Any,  # type: ignore[no-untyped-def]: cfg untyped pending CLI-wide sweep
+    instance: Any,  # type: ignore[no-untyped-def]: l2 untyped pending CLI-wide sweep
+    l2_instance_path: Path | None,
     host: str,
     port: int,
     dev_log: bool,
-    stub: bool,
     app_name: str,
+    stub: bool,
     embed_docs: bool,
+    studio_routes_factory: StudioRoutesFactory | None = None,
 ) -> None:
-    """Start the App2 HTMX/d3 dashboard server.
+    """Boot the Starlette + uvicorn HTML server (dashboards or studio).
 
-    With no ``--app`` (the default ``all``), builds the four real apps
-    (``l1_dashboard`` / ``l2_flow_tracing`` / ``investigation`` /
-    ``executives``) into one server — ``/dashboards`` lists them and you
-    switch between them in-process; same "no-arg = all" shape as ``json
-    apply``. ``--app <one>`` narrows to a single app (faster startup
-    when iterating). ``--app smoke`` is the DB-free spike fixture (the
-    only one ``--stub`` applies to). Config + L2 instance are loaded the
-    same way the json / data / audit groups do; visual data comes from
-    the configured DB; one shared connection pool serves every app. The
-    mkdocs handbook (same ``--l2``) is built on startup and embedded at
-    ``/docs`` when the ``[docs]`` extra is installed — ``--no-docs``
-    skips it; the standalone ``docs apply`` / ``serve`` / ``export`` CLI
-    is unaffected (X.2.i — additive).
+    ``studio_routes_factory=None`` is the Dashboards-only mount;
+    a non-None factory builds an ``L2InstanceCache`` from
+    ``l2_instance_path`` and splices its routes into ``make_app``.
+
+    The `--stub` / `--app smoke` paths are dashboards-only — Studio
+    callers must pass ``stub=False`` and ``app_name != "smoke"``.
     """
-    # Imported lazily so the CLI module imports cheaply (uvicorn
-    # pulls a lot of asyncio + httptools bootstrap into memory) and
-    # so a `--help` invocation works without `serve` extras
-    # installed.
-    import uvicorn  # noqa: PLC0415
-
-    from quicksight_gen.common.html._db_fetcher import (  # noqa: PLC0415
-        make_db_fetcher,
-    )
-    from quicksight_gen.common.html._smoke_app import (  # noqa: PLC0415
-        SMOKE_FILTER_SPECS,
-        build_smoke_app,
-        stub_money_trail_fetcher,
-    )
-    from quicksight_gen.common.html.server import (  # noqa: PLC0415
-        ServedDashboard,
-        make_app,
-    )
-    from quicksight_gen.common.theme import (  # noqa: PLC0415
-        resolve_l2_theme,
-    )
-
     if stub and app_name != "smoke":
         raise click.UsageError(
             f"--stub only applies to --app smoke (the DB-free fixture); "
             f"--app {app_name} needs a real database."
         )
 
-    cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
     theme = resolve_l2_theme(instance)
     if theme is not None:
         click.echo(f"theme: L2-driven ({theme.theme_name})")
@@ -242,18 +156,16 @@ def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the func
     # X.2.i — build the mkdocs handbook into a tempdir (against the same
     # L2) and embed it at /docs. Best-effort: needs the [docs] extra; a
     # [serve]-only install (no mkdocs) silently skips, never a hard fail.
-    # The tempdir lives for the server's lifetime — cleaned up in the
-    # finally around asyncio.run below.
-    import importlib.util  # noqa: PLC0415
-    import tempfile  # noqa: PLC0415
-    from pathlib import Path  # noqa: PLC0415
-
     docs_dir: Path | None = None
     docs_tmp: tempfile.TemporaryDirectory[str] | None = None
-    if embed_docs and importlib.util.find_spec("mkdocs") is not None:
+    if (
+        embed_docs
+        and importlib.util.find_spec("mkdocs") is not None
+        and l2_instance_path is not None
+    ):
         from quicksight_gen.cli.docs import build_docs_site  # noqa: PLC0415
 
-        docs_tmp = tempfile.TemporaryDirectory(prefix="qs-app2-docs-")
+        docs_tmp = tempfile.TemporaryDirectory(prefix="qs-html-docs-")
         # strict=False — a stray mkdocs warning shouldn't take the server
         # down; `docs apply --strict` is the place that gates on those.
         rc = build_docs_site(l2_instance_path, docs_tmp.name, strict=False)
@@ -274,12 +186,27 @@ def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the func
     # a missing entry fails loudly now, not inside a hot HTMX swap.
     if app_name == "smoke":
         smoke_tree, smoke_sheet = build_smoke_app(cfg)
-        real_apps: list[tuple[str, object, object]] = []
+        real_apps: list[tuple[str, Any, Any]] = []
     else:
-        names = list(_REAL_APPS) if app_name == "all" else [app_name]
+        names = list(REAL_APPS) if app_name == "all" else [app_name]
         real_apps = [
-            (name, *_build_real_app(name, cfg, instance)) for name in names
+            (name, *build_real_app(name, cfg, instance)) for name in names
         ]
+
+    # Studio: build the in-memory L2 cache + the routes that own ``GET /``
+    # (the Studio landing page, replacing the dashboards redirect).
+    studio_routes: list[Route | Mount] | None = None
+    if studio_routes_factory is not None:
+        if l2_instance_path is None:  # pragma: no cover — Studio CLI requires --l2
+            raise click.UsageError(
+                "studio requires an L2 instance (--l2)."
+            )
+        cache = L2InstanceCache.from_path(l2_instance_path)
+        studio_routes = studio_routes_factory(cache)
+        click.echo(
+            f"studio: cached L2 instance "
+            f"{cache.get().instance!s} from {cache.path}"
+        )
 
     async def _serve() -> None:
         # X.2.g.2.d — keep the DB pool + uvicorn in ONE event loop.
@@ -291,6 +218,9 @@ def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the func
         pool = None
         dashboards: dict[str, ServedDashboard] = {}
         if app_name == "smoke":
+            from quicksight_gen.common.html._db_fetcher import (  # noqa: PLC0415
+                make_db_fetcher,
+            )
             if stub:
                 fetcher = stub_money_trail_fetcher
                 click.echo("data: stub fetcher (deterministic)")
@@ -303,7 +233,7 @@ def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the func
                 )
             dashboards["smoke"] = ServedDashboard(
                 tree_app=smoke_tree, sheet=smoke_sheet,
-                title=_APP_TITLES["smoke"], data_fetcher=fetcher,
+                title=APP_TITLES["smoke"], data_fetcher=fetcher,
                 theme=theme, filter_specs=SMOKE_FILTER_SPECS,
             )
         else:
@@ -319,7 +249,7 @@ def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the func
             for name, tree_app, sheet in real_apps:
                 dashboards[name] = ServedDashboard(
                     tree_app=tree_app, sheet=sheet,
-                    title=_APP_TITLES.get(name, name.title()),
+                    title=APP_TITLES.get(name, name.title()),
                     data_fetcher=make_tree_db_fetcher(tree_app, cfg, pool=pool),
                     theme=theme, filter_specs=(),
                 )
@@ -331,8 +261,11 @@ def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the func
         try:
             asgi_app = make_app(
                 dashboards=dashboards, dev_log=dev_log, docs_dir=docs_dir,
+                studio_routes=studio_routes,
             )
-            click.echo(f"App2 server: http://{host}:{port}/")
+            click.echo(f"server: http://{host}:{port}/")
+            if studio_routes is not None:
+                click.echo(f"  → http://{host}:{port}/ — Studio")
             if len(dashboards) > 1:
                 click.echo(
                     f"  → http://{host}:{port}/dashboards lists "
@@ -342,16 +275,14 @@ def app2_apply(  # type: ignore[no-untyped-def]: Click decorator strips the func
                 click.echo(f"  → http://{host}:{port}/docs/ — embedded handbook")
             if dev_log:
                 click.echo("dev-log: on (events forwarded to stderr)")
-            config = uvicorn.Config(
+            uv_config = uvicorn.Config(
                 asgi_app, host=host, port=port, log_level="info",
             )
-            server = uvicorn.Server(config)
+            server = uvicorn.Server(uv_config)
             await server.serve()
         finally:
             if pool is not None:
                 await pool.close()
-
-    import asyncio  # noqa: PLC0415
 
     try:
         asyncio.run(_serve())

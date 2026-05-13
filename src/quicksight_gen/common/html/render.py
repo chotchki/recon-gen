@@ -243,7 +243,7 @@ FilterSpec = (
 # existing ``assets/`` static mount), NOT a CDN. The dist files are
 # committed under ``common/html/assets/vendor/{js,css}/`` and shipped via
 # ``package-data`` so ``pip install quicksight-gen[serve] && quicksight-gen
-# serve app2 apply`` works with zero internet (X.2.p). Provenance + the
+# dashboards`` works with zero internet (X.2.p). Provenance + the
 # refresh recipe live in ``assets/vendor/vendor.lock`` +
 # ``scripts/vendor_js_deps.py``; ``tests/unit/test_vendor_assets.py``
 # asserts the committed bytes match the lock AND that no ``<script>`` /

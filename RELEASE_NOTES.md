@@ -1,5 +1,31 @@
 # Release Notes
 
+## v10.0.0a2 — Phase X.4.a (Studio foundations): the severable mount + the `studio` / `dashboards` Click commands
+
+Pre-release / alpha tag. **Internal CLI surface change**: the X.2-era `serve app2 apply` is removed (no deprecation alias — the operator was the only user), replaced by two top-level commands. The four-app behavior + every `--app` / `--stub` / `--docs` / `--dev-log` / `--host` / `--port` flag round-trip identically through the rename; the only visible move is the verb itself. **Customer-facing artifacts (the stable `schema` / `data` / `json` / `audit` groups, `config.yaml`, the L2 institution YAML)** are unchanged.
+
+The work in this tag (X.4.a, all six sub-tasks ticked):
+
+- **`quicksight-gen dashboards`** — the renamed `serve app2 apply`. Same Click options, same default behavior (no-arg = serve all four real apps + the embedded handbook on the same Starlette process). Lifted the cfg-load / theme / docs-embed / pool / uvicorn dance out of `cli/serve.py` into `cli/_html_serve.py::run_html_server` so the next command can reuse it without copy-pasting.
+- **`quicksight-gen studio`** — new top-level command. Same Starlette app as `dashboards`, but with Studio routes spliced in: the X.4.a.4 landing placeholder owns `GET /` (replacing the dashboards-only redirect), and an in-memory `L2InstanceCache` is wired through to every Studio request handler. The unified diagram (X.4.c), editor (X.4.e), data-shaping panel (X.4.h), and Deploy orchestration (X.4.g) hang off `common/html/_studio_routes.py::make_studio_routes(cache)` in subsequent X.4 sub-phases. Studio always requires `--l2`; deliberately omits `--app smoke` and `--stub` (Studio's whole point is editing real L2 YAML).
+- **Severability contract enforced two ways.** Runtime: `tests/unit/test_studio_severability.py` asserts `make_app(... studio_routes=None)` keeps the X.2 `GET / → /dashboards` redirect + the four Dashboards routes resolve, and `make_app(... studio_routes=...)` overrides `GET /` while every Dashboards route still resolves alongside. Code-time: an AST-grep test in the same file flags any Studio-side import (`_studio_routes`, `make_studio_routes`, `L2InstanceCache`, `cli.studio`) that ever reaches into `cli/dashboards.py`, and pins the `_html_serve.py` cache-construction guard inside the `studio_routes_factory is not None` branch — so the regression class ("someone wired Studio into Dashboards") fails CI before the runtime degradation lands.
+- **`L2InstanceCache` + `save_yaml_atomic`.** Studio-owned, read-side: `from_path(p)` loads + caches; `get()` returns the cached instance (object-identity-stable, no per-call re-parse); `replace(new_instance)` swaps the cached value without touching disk (X.4.d's mutators land on top). The atomic-write primitive does temp-in-same-dir + fsync + rename: on POSIX, a crash between fsync and rename leaves the prior YAML intact; cleanup-on-failure suppresses any temp leftover. Lives in `common/l2/cache.py`. The `cache.save()` method that composes `serialize_l2` + `save_yaml_atomic` + `replace` lands at X.4.d.3 alongside the serializer.
+- **`make_app` gains an optional `studio_routes` kwarg.** When set, the routes are spliced in BEFORE the Dashboards routes so a Studio-defined `GET /` wins on the route table; the default `/ → /dashboards` redirect is skipped. `cli.dashboards` always passes `None`; `cli.studio` passes the list `make_studio_routes(cache)` built. Backward-compatible — every X.2-era `make_app(...)` call site stays unchanged (the kwarg defaults to `None`).
+- **Sweep.** `cli/serve.py` and `tests/cli/test_serve_smoke.py` deleted; `tests/cli/test_dashboards_smoke.py` is the same test surface under the new verb. References swept across `README.md` (the "Self-hosted renderer" section now reads "(Dashboards)" — and nudges integrators toward `quicksight-gen studio` for the editor / data-shaping loops as those land), the in-tree `docs/reference/self-host.md`, and the module docstrings in `cli/docs.py` / `common/html/__main__.py` / `common/html/_smoke_app.py` / `common/html/render.py`. The intentional historical pointers — `cli/__init__.py`'s comment "(rename of `serve app2 apply`)" and `cli/dashboards.py`'s docstring "Replaces the X.2-era `serve app2 apply`" — stay; they're orientation for someone who knew the old verb.
+
+The CLI surface that lands at v10.0.0 GA after the rest of X.4 ships:
+
+```bash
+quicksight-gen studio -c config.yaml --l2 inst.yaml      # Studio + Dashboards (the implementation-tools surface)
+quicksight-gen dashboards -c config.yaml --l2 inst.yaml  # Dashboards alone (the read-only renderer)
+```
+
+Both commands' defaults serve the four real apps on `localhost:8765`. `--port`, `--host`, `--app`, `--docs` work the same on both; `--stub` is `dashboards`-only.
+
+What does NOT land in this tag: the unified diagram (X.4.b spike + X.4.c build), the editor primitives (X.4.d) + forms (X.4.e/f), the Deploy-changes pipeline (X.4.g), the data-shaping panel UI (X.4.h). The Studio landing page is a placeholder: it renders the L2 instance prefix + entity counts so a deploy mistake (wrong YAML wired) is visible in the page body, and links to `/dashboards`. Everything else is "coming in X.4.b through X.4.k".
+
+Test impact: `tests/unit/` gains `test_l2_cache.py` (7 tests) + `test_studio_severability.py` (6 tests); `tests/cli/test_dashboards_smoke.py` replaces the deleted serve-smoke test with the same coverage shape. Full unit suite stays green at 1439 passed / 73 skipped (no new skips, no regressions).
+
 ## v10.0.0a1 — Phase X.4 (Studio) plan locked; design + PLAN landed (no code change yet)
 
 Pre-release / alpha tag. **No code change** — the wheel is byte-equivalent to v9.4.0 in user-visible behavior. This tag marks the SPEC + PLAN landing for **Phase X.4 — Studio** (the implementation-tools surface; original X.4 + X.5 folded into one phase).
