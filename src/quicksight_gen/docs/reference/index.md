@@ -30,6 +30,10 @@ produces the rows the dashboard expects.
 - [Install](install.md) — which PyPI extras to pick for your use
   case (emit-only / deploy / demo DB / audit PDF / docs build / full
   dev environment).
+- [Self-hosting the dashboards (App 2)](self-host.md) — running the
+  four apps as a self-hosted HTMX page server (no AWS account), what
+  browser-side assets ship in the wheel, and the maintainer recipes
+  for bumping a vendored dep or rebuilding the Tailwind stylesheet.
 - [ETL — Data Integration](../handbook/etl.md) — for the engineer
   populating the two base tables from upstream systems.
 - [Customization](../handbook/customization.md) — for the developer
