@@ -71,11 +71,19 @@ const KNOBS = {
   collide_role:     { def: 14, min: 2, max: 60, step: 1 },
   collide_rail:     { def: 14, min: 2, max: 60, step: 1 },
   collide_template: { def: 14, min: 2, max: 60, step: 1 },
-  // Per-edge-kind preferred link distance.
-  link_rail_endpoint:   { def: 130, min: 40, max: 300, step: 5 },
-  link_template_member: { def: 130, min: 40, max: 300, step: 5 },
-  link_chain:           { def: 90,  min: 40, max: 300, step: 5 },
-  link_control_parent:  { def: 80,  min: 40, max: 300, step: 5 },
+  // Per-edge-kind link length BOUNDS (custom force enforces both).
+  // The d3.forceLink.distance is set to (min+max)/2 with weak (0.1)
+  // strength as a soft attractor toward the midpoint; the custom
+  // boundedLinkForce runs per tick to push apart edges that fell
+  // below ``min`` and pull together edges that grew past ``max``.
+  link_min_rail_endpoint:   { def: 60,  min: 10, max: 400, step: 5 },
+  link_max_rail_endpoint:   { def: 200, min: 10, max: 400, step: 5 },
+  link_min_template_member: { def: 60,  min: 10, max: 400, step: 5 },
+  link_max_template_member: { def: 200, min: 10, max: 400, step: 5 },
+  link_min_chain:           { def: 40,  min: 10, max: 400, step: 5 },
+  link_max_chain:           { def: 140, min: 10, max: 400, step: 5 },
+  link_min_control_parent:  { def: 30,  min: 10, max: 400, step: 5 },
+  link_max_control_parent:  { def: 130, min: 10, max: 400, step: 5 },
 };
 
 function _readKnobs() {
@@ -318,9 +326,15 @@ async function renderDiagram() {
   // Force simulation — current knob values from URL or defaults.
   // Per-kind force accessors close over ``knobs`` so re-binding picks
   // up the latest slider values when the user iterates.
+  // ``forceLink`` is kept at low (0.1) strength as a soft midpoint
+  // attractor + the canonical mechanism for resolving link.source /
+  // link.target from string IDs to node refs; the custom
+  // ``boundedLinkForce`` (added below) enforces the per-kind
+  // ``[min, max]`` bounds each tick.
   const knobs = _readKnobs();
   const sim = d3.forceSimulation(nodes)
-    .force("link", d3.forceLink(links).id((d) => d.id).strength(0.35))
+    .force("link", d3.forceLink(links).id((d) => d.id).strength(0.1))
+    .force("link_bounds", _boundedLinkForce(links, knobs))
     .force("charge", d3.forceManyBody())
     .force("collide", d3.forceCollide().strength(0.95))
     .force("y", d3.forceY((d) => Y_BAND[d.kind] || height / 2))
@@ -388,12 +402,11 @@ function _bindForces(sim, knobs) {
     if (d.kind === "template") return base + knobs.collide_template;
     return base + 14;
   });
+  // forceLink target = (min+max)/2 — the soft pull's "preferred" length.
+  // Bounds enforcement happens in boundedLinkForce per tick.
   sim.force("link").distance((d) => {
-    if (d.kind === "rail_endpoint") return knobs.link_rail_endpoint;
-    if (d.kind === "template_member") return knobs.link_template_member;
-    if (d.kind === "chain") return knobs.link_chain;
-    if (d.kind === "control_parent") return knobs.link_control_parent;
-    return 90;
+    const [lo, hi] = _linkBounds(d.kind, knobs);
+    return (lo + hi) / 2;
   });
   sim.force("x").strength((d) => {
     if (d.kind === "role") return knobs.x_strength_role;
@@ -401,6 +414,74 @@ function _bindForces(sim, knobs) {
     if (d.kind === "template") return knobs.x_strength_template;
     return 0.04;
   });
+}
+
+function _linkBounds(kind, knobs) {
+  if (kind === "rail_endpoint") {
+    return [knobs.link_min_rail_endpoint, knobs.link_max_rail_endpoint];
+  }
+  if (kind === "template_member") {
+    return [knobs.link_min_template_member, knobs.link_max_template_member];
+  }
+  if (kind === "chain") {
+    return [knobs.link_min_chain, knobs.link_max_chain];
+  }
+  if (kind === "control_parent") {
+    return [knobs.link_min_control_parent, knobs.link_max_control_parent];
+  }
+  return [50, 150];
+}
+
+// Custom d3-force: enforce per-link [min, max] length bounds. Inside
+// the bounds = no force; outside = velocity nudge toward / away from the
+// other endpoint. Uses ``vx``/``vy`` (Verlet velocity) per d3-force
+// convention, so it composes cleanly with charge / collide / x / y.
+function _boundedLinkForce(linksArg, knobsRef) {
+  function force(alpha) {
+    const k = 0.7;  // bound-enforcement strength scalar
+    for (const link of linksArg) {
+      // d3.forceLink resolves source/target from id-strings to nodes
+      // during its own initialize phase; if it hasn't run yet (first
+      // tick race), skip — next tick will catch up.
+      if (typeof link.source !== "object" || typeof link.target !== "object") {
+        continue;
+      }
+      const [lo, hi] = _linkBounds(link.kind, knobsRef);
+      const dx = link.target.x - link.source.x;
+      const dy = link.target.y - link.source.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1e-6;
+      let direction = 0;
+      let amount = 0;
+      if (dist > hi) {
+        // Pull together: source += (target-source) * frac, target -= same.
+        amount = (dist - hi) / dist;
+        direction = +1;
+      } else if (dist < lo) {
+        // Push apart: source -= (target-source) * frac, target += same.
+        amount = (lo - dist) / dist;
+        direction = -1;
+      } else {
+        continue;
+      }
+      const dvx = dx * amount * k * alpha * direction;
+      const dvy = dy * amount * k * alpha * direction;
+      // Half-half on the velocity nudge; pinned endpoints (fx/fy set
+      // during drag) don't accept velocity changes.
+      if (link.source.fx == null) {
+        link.source.vx = (link.source.vx || 0) + dvx / 2;
+        link.source.vy = (link.source.vy || 0) + dvy / 2;
+      }
+      if (link.target.fx == null) {
+        link.target.vx = (link.target.vx || 0) - dvx / 2;
+        link.target.vy = (link.target.vy || 0) - dvy / 2;
+      }
+    }
+  }
+  // d3.forceSimulation calls .initialize on each force with the node
+  // array; we don't need it (linksArg is closed over) but the API
+  // expects the property to be defined.
+  force.initialize = function () {};
+  return force;
 }
 
 function _wireKnobs(sim, knobs) {

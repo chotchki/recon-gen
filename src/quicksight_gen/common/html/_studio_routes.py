@@ -481,22 +481,38 @@ def _render_d3_diagram_page(
   </div>
 
   <div class="diagram-chrome">
-    <strong class="chrome-section-label">Link distances:</strong>
-    <span class="knob-row" title="Rail → role connectivity edges">
-      rail→role <input type="range" id="knob-link_rail_endpoint" min="40" max="300" step="5">
-      <span class="knob-value" id="knob-link_rail_endpoint-value">130</span>
+    <strong class="chrome-section-label">Link bounds:</strong>
+    <span class="knob-row" title="rail → role connectivity edge length: minimum">
+      rail→role min <input type="range" id="knob-link_min_rail_endpoint" min="10" max="400" step="5">
+      <span class="knob-value" id="knob-link_min_rail_endpoint-value">60</span>
     </span>
-    <span class="knob-row" title="Template → leg-rail composition edges">
-      tmpl→rail <input type="range" id="knob-link_template_member" min="40" max="300" step="5">
-      <span class="knob-value" id="knob-link_template_member-value">130</span>
+    <span class="knob-row" title="rail → role connectivity edge length: maximum">
+      max <input type="range" id="knob-link_max_rail_endpoint" min="10" max="400" step="5">
+      <span class="knob-value" id="knob-link_max_rail_endpoint-value">200</span>
     </span>
-    <span class="knob-row" title="Chain sequencing edges">
-      chain <input type="range" id="knob-link_chain" min="40" max="300" step="5">
-      <span class="knob-value" id="knob-link_chain-value">90</span>
+    <span class="knob-row" title="template → leg-rail composition edge length: minimum">
+      tmpl→rail min <input type="range" id="knob-link_min_template_member" min="10" max="400" step="5">
+      <span class="knob-value" id="knob-link_min_template_member-value">60</span>
     </span>
-    <span class="knob-row" title="Control hierarchy (subledger → control role) edges">
-      control <input type="range" id="knob-link_control_parent" min="40" max="300" step="5">
-      <span class="knob-value" id="knob-link_control_parent-value">80</span>
+    <span class="knob-row" title="template → leg-rail composition edge length: maximum">
+      max <input type="range" id="knob-link_max_template_member" min="10" max="400" step="5">
+      <span class="knob-value" id="knob-link_max_template_member-value">200</span>
+    </span>
+    <span class="knob-row" title="chain sequencing edge length: minimum">
+      chain min <input type="range" id="knob-link_min_chain" min="10" max="400" step="5">
+      <span class="knob-value" id="knob-link_min_chain-value">40</span>
+    </span>
+    <span class="knob-row" title="chain sequencing edge length: maximum">
+      max <input type="range" id="knob-link_max_chain" min="10" max="400" step="5">
+      <span class="knob-value" id="knob-link_max_chain-value">140</span>
+    </span>
+    <span class="knob-row" title="control hierarchy edge length: minimum">
+      control min <input type="range" id="knob-link_min_control_parent" min="10" max="400" step="5">
+      <span class="knob-value" id="knob-link_min_control_parent-value">30</span>
+    </span>
+    <span class="knob-row" title="control hierarchy edge length: maximum">
+      max <input type="range" id="knob-link_max_control_parent" min="10" max="400" step="5">
+      <span class="knob-value" id="knob-link_max_control_parent-value">130</span>
     </span>
     <span class="status" style="margin-left:auto">URL roundtrips · changes log to /dev-log</span>
   </div>
