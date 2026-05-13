@@ -431,22 +431,56 @@ def _render_d3_diagram_page(
   </div>
 
   <div class="diagram-chrome">
-    <strong class="chrome-section-label">Roles:</strong>
-    <span class="knob-row" title="Y-pull on Role nodes. Positive = toward Y-band home; negative = pushed AWAY (e.g. -1 = pushed off-band)">
+    <strong class="chrome-section-label" title="Standalone roles — neither a parent_role of another role nor a child of one">Other roles:</strong>
+    <span class="knob-row" title="Y-pull on standalone Role nodes (positive = toward Y-band; negative = pushed AWAY)">
       Y <input type="range" id="knob-y_strength_role" min="-1" max="1" step="0.05">
       <span class="knob-value" id="knob-y_strength_role-value">0.15</span>
     </span>
-    <span class="knob-row" title="X-pull on Role nodes. Positive = toward canvas center; negative = pushed toward the edges">
+    <span class="knob-row" title="X-pull on standalone Role nodes (positive = toward center; negative = toward edges)">
       X <input type="range" id="knob-x_strength_role" min="-1" max="1" step="0.02">
       <span class="knob-value" id="knob-x_strength_role-value">0.04</span>
     </span>
-    <span class="knob-row" title="Repulsion between Role nodes (more negative = harder push)">
+    <span class="knob-row" title="Repulsion between standalone Role nodes">
       Repel <input type="range" id="knob-charge_role" min="-1500" max="-50" step="10">
       <span class="knob-value" id="knob-charge_role-value">-450</span>
     </span>
-    <span class="knob-row" title="Extra padding around each Role node">
+    <span class="knob-row" title="Extra padding around each standalone Role node">
       Pad <input type="range" id="knob-collide_role" min="2" max="60" step="1">
       <span class="knob-value" id="knob-collide_role-value">14</span>
+    </span>
+    <strong class="chrome-section-label" title="Parent (control) roles — referenced as parent_role of another role; e.g., DDAControl, ConcentrationMaster">Parent roles:</strong>
+    <span class="knob-row" title="Y-pull on parent (control) Role nodes">
+      Y <input type="range" id="knob-y_strength_role_parent" min="-1" max="1" step="0.05">
+      <span class="knob-value" id="knob-y_strength_role_parent-value">0.15</span>
+    </span>
+    <span class="knob-row" title="X-pull on parent (control) Role nodes">
+      X <input type="range" id="knob-x_strength_role_parent" min="-1" max="1" step="0.02">
+      <span class="knob-value" id="knob-x_strength_role_parent-value">0.04</span>
+    </span>
+    <span class="knob-row" title="Repulsion between parent (control) Role nodes">
+      Repel <input type="range" id="knob-charge_role_parent" min="-1500" max="-50" step="10">
+      <span class="knob-value" id="knob-charge_role_parent-value">-450</span>
+    </span>
+    <span class="knob-row" title="Extra padding around each parent (control) Role node">
+      Pad <input type="range" id="knob-collide_role_parent" min="2" max="60" step="1">
+      <span class="knob-value" id="knob-collide_role_parent-value">14</span>
+    </span>
+    <strong class="chrome-section-label" title="Child (subledger) roles — has its own parent_role pointing at a control account; e.g., CustomerDDA, MerchantDDA">Child roles:</strong>
+    <span class="knob-row" title="Y-pull on child (subledger) Role nodes">
+      Y <input type="range" id="knob-y_strength_role_child" min="-1" max="1" step="0.05">
+      <span class="knob-value" id="knob-y_strength_role_child-value">0.15</span>
+    </span>
+    <span class="knob-row" title="X-pull on child (subledger) Role nodes">
+      X <input type="range" id="knob-x_strength_role_child" min="-1" max="1" step="0.02">
+      <span class="knob-value" id="knob-x_strength_role_child-value">0.04</span>
+    </span>
+    <span class="knob-row" title="Repulsion between child (subledger) Role nodes">
+      Repel <input type="range" id="knob-charge_role_child" min="-1500" max="-50" step="10">
+      <span class="knob-value" id="knob-charge_role_child-value">-450</span>
+    </span>
+    <span class="knob-row" title="Extra padding around each child (subledger) Role node">
+      Pad <input type="range" id="knob-collide_role_child" min="2" max="60" step="1">
+      <span class="knob-value" id="knob-collide_role_child-value">14</span>
     </span>
     <strong class="chrome-section-label">Rails:</strong>
     <span class="knob-row" title="Y-pull on Rail nodes (positive = toward Y-band; negative = pushed away)">

@@ -53,24 +53,33 @@ const NODE_RADIUS = {
 // since their labels are longer).
 const KNOBS = {
   // Per-node-kind Y-pull. Positive = toward Y-band home; negative =
-  // pushed AWAY from it (e.g., negative Y on templates pushes them
-  // downward instead of upward).
-  y_strength_role:     { def: 0.15, min: -1.0, max: 1.0, step: 0.05 },
-  y_strength_rail:     { def: 0.15, min: -1.0, max: 1.0, step: 0.05 },
-  y_strength_template: { def: 0.15, min: -1.0, max: 1.0, step: 0.05 },
+  // pushed AWAY from it. Roles split by role_subkind ("parent" =
+  // control accounts, "child" = subledger accounts that point at a
+  // parent_role, "standalone" = neither — uses the bare ``role`` knob).
+  y_strength_role:          { def: 0.15, min: -1.0, max: 1.0, step: 0.05 },
+  y_strength_role_parent:   { def: 0.15, min: -1.0, max: 1.0, step: 0.05 },
+  y_strength_role_child:    { def: 0.15, min: -1.0, max: 1.0, step: 0.05 },
+  y_strength_rail:          { def: 0.15, min: -1.0, max: 1.0, step: 0.05 },
+  y_strength_template:      { def: 0.15, min: -1.0, max: 1.0, step: 0.05 },
   // Per-node-kind X-pull. Positive = toward canvas center; negative =
   // pushed away from center (toward the edges).
-  x_strength_role:     { def: 0.04, min: -1.0, max: 1.0, step: 0.02 },
-  x_strength_rail:     { def: 0.04, min: -1.0, max: 1.0, step: 0.02 },
-  x_strength_template: { def: 0.04, min: -1.0, max: 1.0, step: 0.02 },
+  x_strength_role:          { def: 0.04, min: -1.0, max: 1.0, step: 0.02 },
+  x_strength_role_parent:   { def: 0.04, min: -1.0, max: 1.0, step: 0.02 },
+  x_strength_role_child:    { def: 0.04, min: -1.0, max: 1.0, step: 0.02 },
+  x_strength_rail:          { def: 0.04, min: -1.0, max: 1.0, step: 0.02 },
+  x_strength_template:      { def: 0.04, min: -1.0, max: 1.0, step: 0.02 },
   // Per-node-kind repulsion (negative; more negative = harder push).
-  charge_role:     { def: -450, min: -1500, max: -50, step: 10 },
-  charge_rail:     { def: -450, min: -1500, max: -50, step: 10 },
-  charge_template: { def: -450, min: -1500, max: -50, step: 10 },
+  charge_role:          { def: -450, min: -1500, max: -50, step: 10 },
+  charge_role_parent:   { def: -450, min: -1500, max: -50, step: 10 },
+  charge_role_child:    { def: -450, min: -1500, max: -50, step: 10 },
+  charge_rail:          { def: -450, min: -1500, max: -50, step: 10 },
+  charge_template:      { def: -450, min: -1500, max: -50, step: 10 },
   // Per-node-kind collide padding (extra px around the base radius).
-  collide_role:     { def: 14, min: 2, max: 60, step: 1 },
-  collide_rail:     { def: 14, min: 2, max: 60, step: 1 },
-  collide_template: { def: 14, min: 2, max: 60, step: 1 },
+  collide_role:          { def: 14, min: 2, max: 60, step: 1 },
+  collide_role_parent:   { def: 14, min: 2, max: 60, step: 1 },
+  collide_role_child:    { def: 14, min: 2, max: 60, step: 1 },
+  collide_rail:          { def: 14, min: 2, max: 60, step: 1 },
+  collide_template:      { def: 14, min: 2, max: 60, step: 1 },
   // Per-edge-kind link length BOUNDS (custom force enforces both).
   // The d3.forceLink.distance is set to (min+max)/2 with weak (0.1)
   // strength as a soft attractor toward the midpoint; the custom
@@ -388,13 +397,13 @@ function _bindForces(sim, knobs) {
   // knob values. d3 caches per-node force results until you call the
   // accessor again, so we re-call on every knob change.
   sim.force("y").strength((d) => {
-    if (d.kind === "role") return knobs.y_strength_role;
+    if (d.kind === "role") return _roleKnob(knobs, "y_strength", d);
     if (d.kind === "rail") return knobs.y_strength_rail;
     if (d.kind === "template") return knobs.y_strength_template;
     return 0.15;
   });
   sim.force("charge").strength((d) => {
-    if (d.kind === "role") return knobs.charge_role;
+    if (d.kind === "role") return _roleKnob(knobs, "charge", d);
     if (d.kind === "rail") return knobs.charge_rail;
     if (d.kind === "template") return knobs.charge_template;
     return -260;
@@ -403,7 +412,7 @@ function _bindForces(sim, knobs) {
     // Prefer the actual rendered footprint (set by node.each above)
     // over the NODE_RADIUS fallback so size-to-fit nodes don't overlap.
     const base = d.measuredRadius || NODE_RADIUS[d.kind] || 30;
-    if (d.kind === "role") return base + knobs.collide_role;
+    if (d.kind === "role") return base + _roleKnob(knobs, "collide", d);
     if (d.kind === "rail") return base + knobs.collide_rail;
     if (d.kind === "template") return base + knobs.collide_template;
     return base + 14;
@@ -415,11 +424,25 @@ function _bindForces(sim, knobs) {
     return (lo + hi) / 2;
   });
   sim.force("x").strength((d) => {
-    if (d.kind === "role") return knobs.x_strength_role;
+    if (d.kind === "role") return _roleKnob(knobs, "x_strength", d);
     if (d.kind === "rail") return knobs.x_strength_rail;
     if (d.kind === "template") return knobs.x_strength_template;
     return 0.04;
   });
+}
+
+// Resolve a per-role-subkind knob: parent / child / standalone fall
+// back to the base "role" knob if the sub-suffix isn't defined (defensive).
+function _roleKnob(knobs, prefix, d) {
+  const sub = d.role_subkind;
+  if (sub === "parent") {
+    const v = knobs[`${prefix}_role_parent`];
+    if (v !== undefined) return v;
+  } else if (sub === "child") {
+    const v = knobs[`${prefix}_role_child`];
+    if (v !== undefined) return v;
+  }
+  return knobs[`${prefix}_role`];
 }
 
 function _linkBounds(kind, knobs) {

@@ -705,16 +705,44 @@ def to_d3_per_rail_json(
     nodes: list[dict[str, Any]] = []
     links: list[dict[str, Any]] = []
 
-    # 1. Role nodes (with scope + templated). Reuse the typed walker's
-    # role-collection logic so we stay consistent with the canonical view.
+    # Pre-compute role role_subkind classification so the d3 renderer can
+    # split force-knob behavior between parent (control), child
+    # (subledger), and standalone roles.
+    parent_role_set: set[Identifier] = set()
+    child_role_set: set[Identifier] = set()
+    for account in instance.accounts:
+        if account.parent_role is not None and account.role is not None:
+            child_role_set.add(account.role)
+            parent_role_set.add(account.parent_role)
+    for tmpl in instance.account_templates:
+        if tmpl.parent_role is not None:
+            child_role_set.add(tmpl.role)
+            parent_role_set.add(tmpl.parent_role)
+
+    # 1. Role nodes (with scope + templated + role_subkind). Reuse the
+    # typed walker's role-collection logic so we stay consistent with
+    # the canonical view.
     typed = topology_graph_for(instance)
     for n in typed.nodes:
         if n.kind != "role":
             continue
+        # Recover the bare role identifier from the prefix.
+        role_name = Identifier(n.id.removeprefix("role__"))
+        # role_subkind precedence: child wins if a role is both (a templated
+        # subledger that is itself parent_role of something else is rare
+        # but possible — render as child since it's the more-constrained
+        # state).
+        if role_name in child_role_set:
+            role_subkind = "child"
+        elif role_name in parent_role_set:
+            role_subkind = "parent"
+        else:
+            role_subkind = "standalone"
         role_dict: dict[str, Any] = {
             "id": n.id,
             "kind": "role",
             "label": n.label,
+            "role_subkind": role_subkind,
         }
         if n.scope is not None:
             role_dict["scope"] = n.scope
