@@ -33,7 +33,6 @@ const Y_BAND = {
   rail: 320,
   role: 540,
 };
-const Y_BAND_STRENGTH = 0.4;
 
 // Per-kind sizing (drives forceCollide radius + visual sizing).
 const NODE_RADIUS = {
@@ -41,6 +40,33 @@ const NODE_RADIUS = {
   rail: 22,
   template: 32,
 };
+
+// Tunable knobs — each is a (default, min, max, step) range plus a
+// URL-param name. _readKnobs() reads URL overrides; _wireKnobs() binds
+// sliders + logs every change to /log so the user can copy good configs
+// out of the studio process stderr (dev-log forwarder).
+const KNOBS = {
+  y_strength:    { def: 0.15, min: 0,    max: 1.0,  step: 0.05, label: "Y-band pull" },
+  charge:        { def: -450, min: -1500, max: -50,  step: 10,   label: "Repulsion" },
+  link_distance: { def: 110,  min: 40,   max: 250,  step: 5,    label: "Link distance" },
+  collide_pad:   { def: 14,   min: 2,    max: 40,   step: 1,    label: "Collide padding" },
+  x_strength:    { def: 0.04, min: 0,    max: 0.3,  step: 0.01, label: "X-center pull" },
+};
+
+function _readKnobs() {
+  const params = new URLSearchParams(window.location.search);
+  const out = {};
+  for (const [name, spec] of Object.entries(KNOBS)) {
+    const raw = params.get(name);
+    if (raw !== null) {
+      const parsed = parseFloat(raw);
+      out[name] = Number.isFinite(parsed) ? parsed : spec.def;
+    } else {
+      out[name] = spec.def;
+    }
+  }
+  return out;
+}
 
 function _readData() {
   const el = document.getElementById("topology-d3-data");
@@ -247,22 +273,25 @@ async function renderDiagram() {
     if (e.key === "Escape") resetFocus();
   });
 
-  // Force simulation.
+  // Force simulation — current knob values from URL or defaults.
+  const knobs = _readKnobs();
   const sim = d3.forceSimulation(nodes)
     .force("link", d3.forceLink(links).id((d) => d.id)
       .distance((d) => {
-        // Cross-band edges want longer links; intra-band shorter.
-        if (d.kind === "rail_endpoint" || d.kind === "template_member") return 110;
-        return 80;
+        // Cross-band edges get +20% over the slider; intra-band default.
+        if (d.kind === "rail_endpoint" || d.kind === "template_member") {
+          return knobs.link_distance * 1.2;
+        }
+        return knobs.link_distance;
       })
       .strength(0.35))
-    .force("charge", d3.forceManyBody().strength(-260))
+    .force("charge", d3.forceManyBody().strength(knobs.charge))
     .force("collide", d3.forceCollide()
-      .radius((d) => (NODE_RADIUS[d.kind] || 30) + 4)
-      .strength(0.9))
+      .radius((d) => (NODE_RADIUS[d.kind] || 30) + knobs.collide_pad)
+      .strength(0.95))
     .force("y", d3.forceY((d) => Y_BAND[d.kind] || height / 2)
-      .strength(Y_BAND_STRENGTH))
-    .force("x", d3.forceX(width / 2).strength(0.04))
+      .strength(knobs.y_strength))
+    .force("x", d3.forceX(width / 2).strength(knobs.x_strength))
     .on("tick", () => {});
 
   // Wire drag now that sim exists in closure.
@@ -295,6 +324,73 @@ async function renderDiagram() {
   _wireMode(svg);
   _wireLayer(svg);
   _wireReset(svg, resetFocus);
+  _wireKnobs(sim, knobs);
+  _wireBandHints(target);
+}
+
+function _wireKnobs(sim, knobs) {
+  // Bind each slider; on input, update the corresponding force, restart
+  // the alpha (gentle), and log the new value + the FULL knob set to
+  // /log so the user can grep their dev-log to find a good config.
+  const apply = (name, value) => {
+    knobs[name] = value;
+    if (name === "y_strength") {
+      sim.force("y").strength(value);
+    } else if (name === "charge") {
+      sim.force("charge").strength(value);
+    } else if (name === "link_distance") {
+      sim.force("link").distance((d) =>
+        (d.kind === "rail_endpoint" || d.kind === "template_member")
+          ? value * 1.2 : value);
+    } else if (name === "collide_pad") {
+      sim.force("collide").radius((d) => (NODE_RADIUS[d.kind] || 30) + value);
+    } else if (name === "x_strength") {
+      sim.force("x").strength(value);
+    }
+    sim.alpha(0.5).restart();
+    _logKnobs(knobs, name, value);
+    _updateUrlForKnobs(knobs);
+  };
+  for (const [name, _spec] of Object.entries(KNOBS)) {
+    const input = document.getElementById(`knob-${name}`);
+    const display = document.getElementById(`knob-${name}-value`);
+    if (!input) continue;
+    input.value = String(knobs[name]);
+    if (display) display.textContent = String(knobs[name]);
+    input.addEventListener("input", () => {
+      const v = parseFloat(input.value);
+      if (display) display.textContent = String(v);
+      apply(name, v);
+    });
+  }
+}
+
+function _logKnobs(knobs, changedName, changedValue) {
+  // Use the dev-log forwarder if available; otherwise a console.log line
+  // (which the dev-log shim ALSO captures via its console.* hook).
+  console.log(
+    `studio/diagram_d3 knob ${changedName}=${changedValue}`,
+    Object.assign({}, knobs),
+  );
+}
+
+function _updateUrlForKnobs(knobs) {
+  // Reflect the current knob set in the URL so the user can bookmark /
+  // share a tuning. ``replaceState`` so we don't pollute history.
+  const params = new URLSearchParams(window.location.search);
+  for (const [name, value] of Object.entries(knobs)) {
+    params.set(name, String(value));
+  }
+  const newUrl = `${window.location.pathname}?${params.toString()}`;
+  window.history.replaceState({}, "", newUrl);
+}
+
+function _wireBandHints(target) {
+  const cb = document.getElementById("toggle-band-hints");
+  if (!cb) return;
+  const apply = () => target.classList.toggle("show-bands", cb.checked);
+  cb.addEventListener("change", apply);
+  apply();
 }
 
 function _setCount(id, n) {

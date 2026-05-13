@@ -401,10 +401,36 @@ def _render_d3_diagram_page(cache: L2InstanceCache, dev_log: bool) -> str:
       <button type="button" data-layer="3" class="layer-btn active">+ Chains&nbsp;&amp;&nbsp;Templates</button>
     </span>
     <button id="toggle-reset">Reset</button>
-    <span class="band-key"><span class="swatch swatch-template"></span>Templates (top)</span>
-    <span class="band-key"><span class="swatch swatch-rail"></span>Rails (mid)</span>
-    <span class="band-key"><span class="swatch swatch-role"></span>Roles (foundation)</span>
+    <label class="knob-row" title="Show faint horizontal band-stripes">
+      <input type="checkbox" id="toggle-band-hints">
+      band hints
+    </label>
     <span class="status" id="diagram-status">loading…</span>
+  </div>
+
+  <div class="diagram-chrome">
+    <strong class="chrome-section-label">Force knobs:</strong>
+    <span class="knob-row" title="How strongly nodes are pulled to their kind's Y-band (0 = no banding, 1 = locked)">
+      Y-band <input type="range" id="knob-y_strength" min="0" max="1" step="0.05">
+      <span class="knob-value" id="knob-y_strength-value">0.15</span>
+    </span>
+    <span class="knob-row" title="Node-node repulsion (more negative = nodes push each other harder)">
+      Repulsion <input type="range" id="knob-charge" min="-1500" max="-50" step="10">
+      <span class="knob-value" id="knob-charge-value">-450</span>
+    </span>
+    <span class="knob-row" title="Preferred edge length (cross-band edges get +20%)">
+      Link dist <input type="range" id="knob-link_distance" min="40" max="250" step="5">
+      <span class="knob-value" id="knob-link_distance-value">110</span>
+    </span>
+    <span class="knob-row" title="Extra padding around each node before it overlaps its neighbors">
+      Collide pad <input type="range" id="knob-collide_pad" min="2" max="40" step="1">
+      <span class="knob-value" id="knob-collide_pad-value">14</span>
+    </span>
+    <span class="knob-row" title="Horizontal centering pull (low = nodes spread out wider)">
+      X-center <input type="range" id="knob-x_strength" min="0" max="0.3" step="0.01">
+      <span class="knob-value" id="knob-x_strength-value">0.04</span>
+    </span>
+    <span class="status" style="margin-left:auto">URL roundtrips · changes log to /dev-log</span>
   </div>
 
   <div class="diagram-chrome">
