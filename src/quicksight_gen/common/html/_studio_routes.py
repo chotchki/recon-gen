@@ -116,17 +116,19 @@ def _render_landing_placeholder(cache: L2InstanceCache, dev_log: bool) -> str:
         f"<li>Templates: {templates_n}</li>\n"
         "</ul>\n"
         "<ul>\n"
-        "<li><a href=\"/diagram\">→ Topology diagram</a>"
-        " &nbsp; "
-        "<a href=\"/diagram?engine=neato\">[neato]</a> "
-        "<a href=\"/diagram?engine=sfdp\">[sfdp]</a> "
-        "<a href=\"/diagram?engine=fdp\">[fdp]</a> "
-        "<a href=\"/diagram?engine=circo\">[circo]</a> "
-        "<a href=\"/diagram?engine=twopi\">[twopi]</a></li>\n"
+        "<li><a href=\"/diagram\">→ Topology diagram</a></li>\n"
         "<li><a href=\"/dashboards\">→ Dashboards</a></li>\n"
         "</ul>\n"
-        "<p><em>Studio is in spike phase; the editor + Deploy pipeline "
-        "land in X.4.c through X.4.g.</em></p>\n"
+        "<h2>Edit L2 entities</h2>\n"
+        "<ul>\n"
+        "<li><a href=\"/l2_shape/account/\">Accounts</a></li>\n"
+        "<li><a href=\"/l2_shape/account_template/\">Account templates</a></li>\n"
+        "<li><a href=\"/l2_shape/rail/\">Rails</a></li>\n"
+        "<li><a href=\"/l2_shape/transfer_template/\">Transfer templates</a></li>\n"
+        "<li><a href=\"/l2_shape/chain/\">Chains</a></li>\n"
+        "<li><a href=\"/l2_shape/limit_schedule/\">Limit schedules</a></li>\n"
+        "</ul>\n"
+        "<p><em>Editor lands in X.4.e/f; Deploy pipeline in X.4.g.</em></p>\n"
         "</body></html>\n"
     )
 
@@ -423,6 +425,14 @@ def make_studio_routes(
             name="studio_wasm_graphviz",
         ),
     ]
+
+    # X.4.e + X.4.f — editor routes (list / read / edit / save / delete
+    # for every entity kind). Pure scenario over the cached L2 — no
+    # pool needed, always mounted alongside the diagram.
+    from quicksight_gen.common.html._studio_editor_routes import (  # noqa: PLC0415
+        make_editor_routes,
+    )
+    routes.extend(make_editor_routes(cache))
 
     # X.4.c.6 — trainer JSON route. Always mounted (no DB needed —
     # the scenario walk is pure Python over the cached L2).

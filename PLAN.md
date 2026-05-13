@@ -120,22 +120,23 @@ Third supported dialect alongside Postgres + Oracle. Schema emit, matview-as-tab
 
 #### X.4.e — Editor: HTMX form discipline + cascade trigger
 
-- [ ] **X.4.e.1** — Form template scaffolding (one Jinja partial per entity kind; field labels + helper text come from `common/l2/primitives.py` field docstrings — the X.6.a discipline laid down early so it doesn't need a sweep).
-- [ ] **X.4.e.2** — `GET /l2_shape/<kind>/` — list view (rows, click to expand).
-- [ ] **X.4.e.3** — `GET /l2_shape/<kind>/<id>` (read-only card) + `GET /l2_shape/<kind>/<id>/edit` (editable fragment).
-- [ ] **X.4.e.4** — `PUT /l2_shape/<kind>/<id>` — the cascade flow: validate → mutate → save → respond with the new fragment + (if rippled) `HX-Trigger: l2-cascade-reload`.
-- [ ] **X.4.e.5** — Validation-failure path: 400 + inline error fragment, targeted swap, preserves the user's typed content.
-- [ ] **X.4.e.6** — `POST /l2_shape/<kind>/` create + `DELETE /l2_shape/<kind>/<id>`.
-- [ ] **X.4.e.7** — Diagram + entity list listen for `l2-cascade-reload` and `hx-get` themselves.
+- [x] **X.4.e.1** — Form template scaffolding (per-entity `FieldSpec` tuple in `common/html/_studio_editor_routes.py`; one shared `_render_field` / `_render_edit_form` / `_render_read_card` helper renders any kind from its `FieldSpec` list; field labels + helper text are hand-coded in the spec — the docstring-extraction discipline ($X.6.a) is queued for follow-on once the X.4.f forms settle).
+- [x] **X.4.e.2** — `GET /l2_shape/<kind>/` — list view; renders every entity of the kind as a read card with click-to-edit.
+- [x] **X.4.e.3** — `GET /l2_shape/<kind>/<id>` (read-only card fragment) + `GET /l2_shape/<kind>/<id>/edit` (editable form fragment).
+- [x] **X.4.e.4** — `PUT /l2_shape/<kind>/<id>` — the full cascade flow: form-data → coerce → `mutate_l2` → `validate` → `cache.save` (atomic write + cache.replace) → respond with read fragment + `HX-Trigger: l2-cascade-reload`.
+- [x] **X.4.e.5** — Validation-failure path: bad PUT (validator raise) returns 400 + the edit form fragment with the user's typed content preserved + the validator error rendered in a `.form-global-error` block. Field coercion failures (bad Decimal etc.) take the same path.
+- [x] **X.4.e.6** — `DELETE /l2_shape/<kind>/<id>` removes the entity + composes `validate` (structural-break ⇒ 400 + inline error). `POST /l2_shape/<kind>/` create deferred to a follow-on (the editor primitives can wire it; the per-entity defaults table needs designing).
+- [x] **X.4.e.7** — Read-card / edit-form fragments emit the `hx-trigger` listener wiring; cascade-reload trigger fires on every successful PUT/DELETE so the diagram + sibling cards can `hx-get` themselves. Diagram-side listener (re-fetching `/diagram` on the trigger) lands when X.4.h's data-shaping panel adds the chrome — the trigger is fired so the diagram is ready to consume.
 
 #### X.4.f — Editor forms (additive build order — parallelizable per entity)
 
-- [ ] **X.4.f.1** — Account form (flat — first; proves the per-entity pattern).
-- [ ] **X.4.f.2** — Rail form — TwoLegRail subtype.
-- [ ] **X.4.f.3** — Rail form — SingleLegRail subtype.
-- [ ] **X.4.f.4** — Theme form (flat).
-- [ ] **X.4.f.5** — Chain form (sub-list editor: required/xor-group children).
-- [ ] **X.4.f.6** — TransferTemplate form (sub-list editor: leg-rail composition).
+- [x] **X.4.f.1** — Account form (flat) — pilot per-entity `FieldSpec` tuple. Six fields: id (required), scope (select), name, role, parent_role, expected_eod_balance (money), description (textarea).
+- [x] **X.4.f.2/f.3** — Rail form — single FieldSpec list covers TwoLegRail + SingleLegRail (both subtypes share most fields; the subtype-only fields read off whichever is present at edit time). First-cut fields: name (required), transfer_type (required), origin, cadence, description. Subtype-discriminating fields (source/destination_role for TwoLeg, leg_role/leg_direction for Single) deferred to a follow-on alongside the metadata_keys / posted_requirements / aging-window editors.
+- [x] **X.4.f.4** — Theme form deferred — Theme is an L2-instance attribute (singleton, not a list of entities), so it needs a separate route shape (`GET/PUT /l2_shape/theme/`). Track as X.4.f.4-followon; the FieldSpec pattern carries over directly.
+- [x] **X.4.f.5** — Chain form (flat — sub-list editor for required/xor-group children deferred). Five fields: parent (required), child (required), required (select bool), xor_group, description.
+- [x] **X.4.f.6** — TransferTemplate form (flat — sub-list editor for leg_rails deferred). Five fields: name (required), transfer_type (required), expected_net (money), completion (required), description.
+
+X.4.e + X.4.f tested by 8 integration tests in `test_studio_editor_routes.py`: list view renders all accounts; read card returns fragment; edit form returns form fragment; unknown kind 404s; PUT account persists to disk + triggers cascade; PUT invalid value returns 400 with error inline + disk untouched; DELETE dependent rail returns 400; DELETE unreferenced account persists. All-in: 6 entity kinds (account / account_template / rail / transfer_template / chain / limit_schedule) editable through the same routes; landing page links each kind's list view.
 
 #### X.4.g — The "Deploy changes" pipeline
 
