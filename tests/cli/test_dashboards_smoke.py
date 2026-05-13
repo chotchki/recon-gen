@@ -1,15 +1,15 @@
-"""CLI smoke for ``quicksight-gen serve`` — registration + help only.
+"""CLI smoke for ``quicksight-gen dashboards`` — registration + help only.
 
-X.2.a.3 acceptance net: asserts the ``serve`` group is registered on
-``main``, ``serve --help`` lists the ``app2`` subgroup, ``serve app2
-apply --help`` lists every CLI option (``--config`` / ``--l2`` /
-``--host`` / ``--port`` / ``--dev-log``), and the smoke-app builder
-+ stub fetcher round-trip cleanly without uvicorn binding a port.
+X.4.a.2 acceptance net (renamed from the X.2.a.3-era ``test_serve_smoke``):
+asserts ``dashboards`` is registered on ``main``, ``dashboards --help``
+lists every CLI option (``--config`` / ``--l2`` / ``--host`` / ``--port``
+/ ``--dev-log`` / ``--app`` / ``--stub`` / ``--docs``), and the smoke-app
+builder + stub fetcher round-trip cleanly without uvicorn binding a
+port.
 
 We don't actually start the server in unit tests — that's covered
-by ``tests/spike/test_html_layer2.py`` (and X.2.a.5's harness
-lift). The point here is to lock the CLI surface so adding new
-options / renaming sub-apps trips a fast unit-level test.
+by the layer-2 e2e harness. The point here is to lock the CLI surface
+so adding new options / renaming sub-apps trips a fast unit-level test.
 """
 
 from __future__ import annotations
@@ -44,39 +44,25 @@ def min_config(tmp_path: Path) -> Path:
     return cfg
 
 
-def test_serve_group_registered() -> None:
+def test_dashboards_command_registered() -> None:
     runner = CliRunner()
     result = runner.invoke(main, ["--help"])
     assert result.exit_code == 0, result.output
-    assert "serve" in result.output, (
-        f"main --help did not list 'serve':\n{result.output}"
+    assert "dashboards" in result.output, (
+        f"main --help did not list 'dashboards':\n{result.output}"
     )
 
 
-def test_serve_help_lists_app2() -> None:
+def test_dashboards_help_lists_options() -> None:
     runner = CliRunner()
-    result = runner.invoke(main, ["serve", "--help"])
-    assert result.exit_code == 0, result.output
-    assert "app2" in result.output
-
-
-def test_serve_app2_help_lists_apply() -> None:
-    runner = CliRunner()
-    result = runner.invoke(main, ["serve", "app2", "--help"])
-    assert result.exit_code == 0, result.output
-    assert "apply" in result.output
-
-
-def test_serve_app2_apply_help_lists_options() -> None:
-    runner = CliRunner()
-    result = runner.invoke(main, ["serve", "app2", "apply", "--help"])
+    result = runner.invoke(main, ["dashboards", "--help"])
     assert result.exit_code == 0, result.output
     for opt in (
         "--config", "--l2", "--host", "--port", "--dev-log", "--app",
         "--stub", "--docs",
     ):
         assert opt in result.output, (
-            f"serve app2 apply --help missing {opt!r}:\n{result.output}"
+            f"dashboards --help missing {opt!r}:\n{result.output}"
         )
     # The default is ``all`` (build the four real apps into one server,
     # same "no-arg = all" shape as ``json apply``) — not ``smoke``.
@@ -84,10 +70,11 @@ def test_serve_app2_apply_help_lists_options() -> None:
 
 
 def test_smoke_app_builder_emits_html(min_config: Path) -> None:
-    """X.2.a.3 wiring proof: the same builder the CLI uses produces
-    a Sheet that emit_html accepts. Catches a regression where the
-    Sheet isn't a member of the App's analysis (the
-    auto-ID-resolution path in emit_html raises ValueError)."""
+    """X.2.a.3 wiring proof, kept under the X.4.a.2 rename: the same
+    builder the CLI uses produces a Sheet that emit_html accepts.
+    Catches a regression where the Sheet isn't a member of the App's
+    analysis (the auto-ID-resolution path in emit_html raises ValueError).
+    """
     from quicksight_gen.common.config import load_config
 
     cfg = load_config(str(min_config))

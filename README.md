@@ -268,19 +268,19 @@ Two L2 institution YAMLs ship in `tests/l2/`:
 
 Pass `--l2 tests/l2/sasquatch_pr.yaml` (or your own) to switch the rendered handbook + demo data narrative without touching dashboard code.
 
-## Self-hosted renderer (App 2)
+## Self-hosted renderer (Dashboards)
 
-The four apps render two ways off the same L2 instance. The default is **AWS QuickSight** — `json apply --execute` pushes the JSON resource graph (above). The second is **App 2**: a small self-hosted HTMX + d3 page server that reads the same database directly, with no AWS account involved.
+The four apps render two ways off the same L2 instance. The default is **AWS QuickSight** — `json apply --execute` pushes the JSON resource graph (above). The second is **Dashboards** (formerly "App 2"): a small self-hosted HTMX + d3 page server that reads the same database directly, with no AWS account involved.
 
 ```bash
 pip install 'quicksight-gen[serve]'
-quicksight-gen serve app2 apply -c config.yaml          # one process, all 4 apps + the handbook at /docs
-# → http://127.0.0.1:8000/dashboards
+quicksight-gen dashboards -c config.yaml                # one process, all 4 apps + the handbook at /docs
+# → http://127.0.0.1:8765/dashboards
 ```
 
-It speaks all three SQL dialects (PostgreSQL / Oracle / SQLite); point `demo_database_url` at any of them. The schema + seed have to already be applied (`schema apply --execute`, `data apply --execute`, `data refresh --execute`) — App 2 only reads. It's stateless: every GET re-runs the query, filter state round-trips as `?param_X=…` query params (so the URL is the cache key), no auth/sessions — put it behind your own auth front on a network. All browser-side assets (htmx, d3, the filter widgets) ship inside the wheel — it runs offline.
+It speaks all three SQL dialects (PostgreSQL / Oracle / SQLite); point `demo_database_url` at any of them. The schema + seed have to already be applied (`schema apply --execute`, `data apply --execute`, `data refresh --execute`) — Dashboards only reads. It's stateless: every GET re-runs the query, filter state round-trips as `?param_X=…` query params (so the URL is the cache key), no auth/sessions — put it behind your own auth front on a network. All browser-side assets (htmx, d3, the filter widgets) ship inside the wheel — it runs offline.
 
-Why two renderers: App 2 is the offline-iteration loop (edit the L2 YAML / dataset SQL, refresh the page — no deploy cycle) and the renderer the in-progress YAML editor and ETL helper build on. A 4-way cross-tool agreement test (`scenario plants ⊆ direct matview SELECT == QuickSight == App 2`, `== audit PDF` where it applies) gates the release, so "feature parity with QuickSight, minus the QuickSight bugs" is enforced, not just claimed. Full reference — what ships in the wheel, the maintainer recipes for bumping a vendored asset — in the handbook's *Self-hosting the dashboards (App 2)* page.
+Why two renderers: Dashboards is the offline-iteration loop (edit the L2 YAML / dataset SQL, refresh the page — no deploy cycle) and the renderer the in-progress Studio (`quicksight-gen studio`, the YAML editor + diagram + data-shaping orchestrator + ETL coverage) builds on. A 4-way cross-tool agreement test (`scenario plants ⊆ direct matview SELECT == QuickSight == Dashboards`, `== audit PDF` where it applies) gates the release, so "feature parity with QuickSight, minus the QuickSight bugs" is enforced, not just claimed. Full reference — what ships in the wheel, the maintainer recipes for bumping a vendored asset — in the handbook's *Self-hosting the dashboards* page.
 
 ## Theming
 

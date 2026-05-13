@@ -6,7 +6,7 @@ The four bundled apps render two ways. The default is **QuickSight** — `quicks
 
 ```bash
 pip install 'quicksight-gen[serve]'
-quicksight-gen serve app2 apply -c config.yaml          # one process, all 4 apps
+quicksight-gen dashboards -c config.yaml                # one process, all 4 apps
 # → http://127.0.0.1:8000/dashboards
 ```
 

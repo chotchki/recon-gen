@@ -1,7 +1,7 @@
 """X.2.a — smoke App2 builder + stub Money-Trail fetcher.
 
 Lifted out of ``__main__.py`` so both the direct ``python -m`` smoke
-runner and the ``quicksight-gen serve app2 apply`` CLI can share one
+runner and the ``quicksight-gen dashboards`` CLI can share one
 implementation. X.2.a.4 will introduce a real config + L2 driven
 builder; until then the stub ships the same Money-Trail-shaped tree
 both entry points used.
@@ -17,7 +17,7 @@ Showcase sheet (X.2.d / X.2.e demo)
 A second sheet ``"showcase"`` exercises every filter primitive
 landed in X.2.d (ParameterDropdown / CategoryFilter / NumericRange)
 plus the d3 renderers from X.2.c (KPI / Table / BarChart /
-LineChart). It exists so ``quicksight-gen serve app2 apply --stub``
+LineChart). It exists so ``quicksight-gen dashboards --stub``
 shows off the full feature surface — sheet tabs (X.2.e), themed
 chrome (X.2.l), filter form (X.2.d), and the renderer set — in one
 launch. The stub fetcher echoes filter values into the visual data

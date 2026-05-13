@@ -1,6 +1,6 @@
 """``python -m quicksight_gen.common.html`` — direct smoke runner.
 
-Equivalent to ``quicksight-gen serve app2 apply --port 8765``, but
+Equivalent to ``quicksight-gen dashboards --port 8765``, but
 without going through the Click CLI — no config.yaml required, no
 ``--l2`` resolution. Useful when iterating on the renderer / JS
 without a checked-out config (the ``tests._test_helpers`` shim
@@ -8,7 +8,7 @@ fabricates one).
 
 For anything operator-facing prefer the CLI subcommand:
 
-    quicksight-gen serve app2 apply -c config.yaml --l2 run/sasquatch_pr.yaml
+    quicksight-gen dashboards -c config.yaml --l2 run/sasquatch_pr.yaml
 
 The CLI version takes a real config + L2 instance, so the Sheet's
 ``app.cfg.l2_instance_prefix`` matches the prefix the X.2.a.4

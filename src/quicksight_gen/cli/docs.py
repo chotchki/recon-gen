@@ -65,7 +65,7 @@ def build_docs_site(
     ``output_dir`` is resolved to absolute so cwd doesn't affect where
     the site lands.
 
-    Shared by ``docs apply`` and by ``serve app2 apply`` (which builds
+    Shared by ``docs apply`` and by ``dashboards`` / ``studio`` (which builds
     the site into a tempdir and embeds it at ``/docs`` — X.2.i).
     """
     env = os.environ.copy()
