@@ -1,0 +1,90 @@
+"""Round-trip tests for ``common.l2.serializer.serialize_l2`` (X.4.d.3).
+
+Contract: ``load(write(serialize_l2(load(yaml))))`` is field-equal to
+the original ``L2Instance`` for every bundled fixture. This is the
+foundation the X.4.d editor primitives + X.4.e cascade flow stand on —
+without round-trip stability, every PUT mutates the wrong shape.
+
+We round-trip every YAML fixture in ``tests/l2/`` (spec_example +
+sasquatch_pr — the two hand-authored institutions). Validator runs by
+default, so the emitted YAML also has to pass cross-entity validation.
+"""
+
+from __future__ import annotations
+
+import os
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from quicksight_gen.common.l2.loader import load_instance
+from quicksight_gen.common.l2.serializer import serialize_l2
+
+
+_FIXTURES_DIR = Path(__file__).resolve().parent.parent / "l2"
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    ["spec_example.yaml", "sasquatch_pr.yaml"],
+)
+def test_load_serialize_load_round_trip_preserves_model(
+    fixture_name: str,
+) -> None:
+    """The serializer's contract: a load → serialize → load round-trip
+    yields a field-equal L2Instance.
+
+    Both bundled fixtures (the SPEC-shape spec_example and the
+    persona-rich sasquatch_pr) are exercised so any field a
+    persona-rich L2 sets that spec_example doesn't is also covered.
+    """
+    fixture_path = _FIXTURES_DIR / fixture_name
+    original = load_instance(fixture_path)
+
+    yaml_text = serialize_l2(original)
+
+    fd, tmp_path_str = tempfile.mkstemp(suffix=".yaml")
+    os.close(fd)
+    tmp_path = Path(tmp_path_str)
+    try:
+        tmp_path.write_text(yaml_text)
+        round_tripped = load_instance(tmp_path)
+    finally:
+        tmp_path.unlink()
+
+    # Frozen dataclass __eq__ walks every field recursively — this one
+    # assert covers every primitive's every field.
+    assert round_tripped == original, (
+        f"round-trip diverged on {fixture_name}; first divergent field "
+        f"is wherever frozen-dataclass __eq__ landed (re-run with "
+        f"a per-field dataclass-walk if you need locator detail)."
+    )
+
+
+def test_serialize_l2_emits_valid_yaml() -> None:
+    """The emitted text MUST be valid YAML (not just JSON-shaped)."""
+    import yaml as _yaml
+
+    instance = load_instance(_FIXTURES_DIR / "spec_example.yaml")
+    text = serialize_l2(instance)
+    parsed = _yaml.safe_load(text)
+    assert isinstance(parsed, dict)
+    assert parsed["instance"] == "spec_example"
+    assert isinstance(parsed["accounts"], list)
+
+
+def test_serialize_l2_skips_default_optional_fields() -> None:
+    """Optional fields with default values shouldn't bloat the emitted
+    YAML — match the hand-authored fixture style of "only what's set"."""
+    instance = load_instance(_FIXTURES_DIR / "spec_example.yaml")
+    text = serialize_l2(instance)
+    # spec_example has no role_business_day_offsets — should be absent.
+    assert "role_business_day_offsets" not in text
+    # spec_example has no persona block — should be absent.
+    assert "persona:" not in text
+    # spec_example has rails with empty bundles_activity / no posted_requirements
+    # on most rails — those defaults shouldn't bloat per-rail YAML.
+    # (Just spot-check that we don't emit empty `posted_requirements: []`)
+    assert "posted_requirements: []" not in text
+    assert "bundles_activity: []" not in text
