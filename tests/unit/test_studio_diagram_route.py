@@ -66,9 +66,19 @@ def test_studio_diagram_route_renders_with_dot_source() -> None:
         assert "<title>Studio diagram — spec_example</title>" in body
         assert 'id="topology-dot"' in body
         assert 'id="diagram-target"' in body
-        # The chrome carries all four entity-type checkboxes.
-        for kind in ("toggle-role", "toggle-rail", "toggle-template", "toggle-chain"):
+        # The chrome carries the visibility checkboxes (X.4.b.3 chrome iteration:
+        # roles split into internal/external + edge-label sub-toggles).
+        for kind in (
+            "toggle-role-internal", "toggle-role-external",
+            "toggle-rail", "toggle-template", "toggle-chain",
+            "toggle-edge-label-rail_bundle",
+            "toggle-edge-label-self_loop",
+            "toggle-edge-label-chain",
+        ):
             assert f'id="{kind}"' in body, f"missing checkbox {kind}"
+        # Layer stepper + mode dropdown landed.
+        assert 'class="layer-btn"' in body
+        assert 'id="mode-select"' in body
         # The engine knob hot-swap links are present.
         for engine in ("dot", "neato", "sfdp"):
             assert f"?engine={engine}" in body

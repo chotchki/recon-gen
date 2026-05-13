@@ -118,7 +118,7 @@ def build_real_app(app_name: str, cfg: Any, instance: Any) -> tuple[Any, Any]:  
 # PEP 695 ``type`` statement defers evaluation — Route/Mount only get
 # resolved when a type-checker walks the alias, never at module load.
 # That keeps the no-``[serve]`` install paths importable.
-type StudioRoutesFactory = Callable[[L2InstanceCache], list[Route | Mount]]
+type StudioRoutesFactory = Callable[[L2InstanceCache, bool], list[Route | Mount]]
 
 
 def run_html_server(
@@ -220,7 +220,7 @@ def run_html_server(
                 "studio requires an L2 instance (--l2)."
             )
         cache = L2InstanceCache.from_path(l2_instance_path)
-        studio_routes = studio_routes_factory(cache)
+        studio_routes = studio_routes_factory(cache, dev_log)
         click.echo(
             f"studio: cached L2 instance "
             f"{cache.get().instance!s} from {cache.path}"

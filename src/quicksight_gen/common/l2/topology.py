@@ -89,6 +89,7 @@ _VALID_ENGINES = ("dot", "neato", "sfdp", "fdp", "twopi", "circo")
 NodeKind: TypeAlias = Literal["role", "rail", "template"]
 EdgeKind: TypeAlias = Literal[
     "rail_bundle", "self_loop", "template_member", "chain",
+    "control_parent", "template_role",
 ]
 
 
@@ -129,7 +130,7 @@ class TopologyNode:
 class TopologyEdge:
     """An edge in the L2 topology projection.
 
-    ``kind`` discriminates the four edge flavors:
+    ``kind`` discriminates the five edge flavors:
 
     - ``rail_bundle`` — one or more parallel TwoLegRails between the
       same ``(source, destination)`` role pair. ``metadata`` carries
@@ -143,6 +144,21 @@ class TopologyEdge:
       renderer wraps these inside the template's cluster.
     - ``chain`` — a ChainEntry parent → child relationship. ``metadata``
       carries ``required`` (str-bool) and optionally ``xor_group``.
+    - ``control_parent`` — an Account / AccountTemplate's ``parent_role``
+      relationship (subledger rolls up to control account). Structural,
+      not flow — the chart-of-accounts hierarchy that explains why a
+      "control" account exists even when no rail terminates on it.
+      ``metadata`` carries ``child_kind`` ("account" / "template") so
+      the renderer can style differently. When the parent role also
+      carries one or more ``LimitSchedule`` entries, ``has_limits=true``
+      flags it for cap-badge rendering.
+    - ``template_role`` — a TransferTemplate → role visual link, emitted
+      for every role any of the template's ``leg_rails`` touches (source
+      / destination / leg_role). Surfaces "this template uses this
+      role's edges" so the user can visually trace from a rail name in
+      a bundle/self-loop label to the template that composes it.
+      ``metadata`` carries ``rail_names`` (comma-joined) — the leg-rails
+      that connect this template ↔ this role.
 
     ``label`` is the human-readable display label (may be empty for
     membership edges; the graphviz renderer suppresses labels on those).
@@ -205,6 +221,8 @@ _TRANSFER_TEMPLATE_BORDER = "#a6622c"
 _CHAIN_EDGE_COLOR = "#5a5a5a"
 _BUNDLE_EDGE_COLOR = "#1f4e79"
 _SELF_LOOP_COLOR = "#7f6000"
+_CONTROL_PARENT_COLOR = "#888888"
+_TEMPLATE_ROLE_COLOR = "#a6622c"  # match the TransferTemplate border tone
 
 
 @dataclass(frozen=True, slots=True)
@@ -521,6 +539,74 @@ def topology_graph_for(instance: L2Instance) -> TopologyGraph:
                 label="",
             ))
 
+    # 4c.6 Template→role edges. Surface "this template's rails touch
+    # this role" as a dotted helper edge — lets the user trace from a
+    # rail name surfacing in a bundle/self-loop label up to the
+    # TransferTemplate that composes it. graphviz can't connect an
+    # edge-label to a node, so we emit role-as-endpoint helpers
+    # instead. One edge per (template, role) pair, with the
+    # responsible leg-rail names in metadata for tooltips.
+    rails_by_name: dict[Identifier, Rail] = {r.name: r for r in instance.rails}
+    for template in instance.transfer_templates:
+        # template → set[role] mapping, plus which rails contributed.
+        role_to_rails: dict[Identifier, list[Identifier]] = {}
+        for rail_name in template.leg_rails:
+            rail = rails_by_name.get(rail_name)
+            if rail is None:
+                continue
+            if isinstance(rail, TwoLegRail):
+                touched_roles: set[Identifier] = set()
+                touched_roles.update(rail.source_role)
+                touched_roles.update(rail.destination_role)
+            else:
+                touched_roles = set(rail.leg_role)
+            for role in touched_roles:
+                role_to_rails.setdefault(role, []).append(rail_name)
+        for role, contributing_rails in sorted(role_to_rails.items()):
+            edges.append(TopologyEdge(
+                source=_template_id(template.name),
+                target=_role_id(role),
+                kind="template_role",
+                label="uses",
+                metadata={
+                    "rail_names": ", ".join(contributing_rails),
+                },
+            ))
+
+    # 4c.5 Control-parent edges (Account.parent_role + AccountTemplate.parent_role).
+    # Structural hierarchy (subledger → control), not flow connectivity. Maps
+    # cleanly to the user's "Layer 1" (chart-of-accounts) mental model — these
+    # are the GL roll-up relationships the institution's reconciliation rests on.
+    parents_with_limits: set[Identifier] = {
+        ls.parent_role for ls in instance.limit_schedules
+    }
+    for account in instance.accounts:
+        if account.parent_role is None or account.role is None:
+            continue
+        cp_metadata: dict[str, str] = {"child_kind": "account"}
+        if account.parent_role in parents_with_limits:
+            cp_metadata["has_limits"] = "true"
+        edges.append(TopologyEdge(
+            source=_role_id(account.role),
+            target=_role_id(account.parent_role),
+            kind="control_parent",
+            label="controls",
+            metadata=cp_metadata,
+        ))
+    for template in instance.account_templates:
+        if template.parent_role is None:
+            continue
+        cp_metadata = {"child_kind": "template"}
+        if template.parent_role in parents_with_limits:
+            cp_metadata["has_limits"] = "true"
+        edges.append(TopologyEdge(
+            source=_role_id(template.role),
+            target=_role_id(template.parent_role),
+            kind="control_parent",
+            label="controls",
+            metadata=cp_metadata,
+        ))
+
     # 4d. Chain edges (declaration order).
     for chain in instance.chains:
         parent_id = (
@@ -741,18 +827,20 @@ def _render_to_graphviz(graph: TopologyGraph) -> Any:
                 )
 
     # 5. Stand-alone rail nodes (referenced only by chain edges, not in
-    # any template cluster).
+    # any template cluster). Style them as ``plaintext`` (no border, no
+    # fill) so they read as chain-endpoint *labels*, not as first-class
+    # entities — per user feedback "chain should be a dashed line, not
+    # a separate entity". The chain dashed edge becomes the prominent
+    # visual; the rail name is just the anchor text it terminates at.
     for rail_node in rail_nodes.values():
         if rail_node.id in rails_in_clusters:
             continue
         g.node(
             rail_node.id,
             label=rail_node.label,
-            shape="ellipse",
-            fillcolor=_RAIL_NODE_FILL,
-            color=_RAIL_NODE_BORDER,
+            shape="plaintext",
             fontcolor=_RAIL_NODE_BORDER,
-            style="filled",
+            fontsize="10",
         )
 
     # 6. Chain edges (declaration order).
@@ -766,6 +854,46 @@ def _render_to_graphviz(graph: TopologyGraph) -> Any:
             color=_CHAIN_EDGE_COLOR,
             style="dashed",
             fontcolor=_CHAIN_EDGE_COLOR,
+        )
+
+    # 7. Control-parent edges (subledger → control). Distinct visual:
+    # dashed gray with a small "controls" label + an open arrowhead so it
+    # reads as a structural roll-up, not a flow direction. Add a $-cap
+    # annotation when the parent role carries any LimitSchedule entries.
+    for edge in graph.edges:
+        if edge.kind != "control_parent":
+            continue
+        label = edge.label
+        if edge.metadata.get("has_limits") == "true":
+            label = "controls\n($ caps)"
+        g.edge(
+            edge.source,
+            edge.target,
+            label=label,
+            color=_CONTROL_PARENT_COLOR,
+            style="dashed",
+            fontcolor=_CONTROL_PARENT_COLOR,
+            arrowhead="onormal",
+            penwidth="1.0",
+        )
+
+    # 8. Template→role helper edges — dotted, "uses" tag, no arrowhead.
+    # Visually links each TransferTemplate to the roles its leg-rails
+    # touch so the user can trace a rail name in a bundle/self-loop
+    # label up to the template that composes it.
+    for edge in graph.edges:
+        if edge.kind != "template_role":
+            continue
+        g.edge(
+            edge.source,
+            edge.target,
+            label=edge.label,
+            color=_TEMPLATE_ROLE_COLOR,
+            style="dotted",
+            fontcolor=_TEMPLATE_ROLE_COLOR,
+            arrowhead="none",
+            penwidth="0.8",
+            tooltip=f"Leg rails: {edge.metadata.get('rail_names', '')}",
         )
 
     return g

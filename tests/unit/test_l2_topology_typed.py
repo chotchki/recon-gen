@@ -236,6 +236,22 @@ def test_topology_graph_template_member_edges() -> None:
     assert member.target == "rail__FeeCharge"
 
 
+def test_topology_graph_emits_control_parent_for_template_parent_role() -> None:
+    """A templated role with parent_role gets a control_parent edge."""
+    g = topology_graph_for(_kitchen_instance())
+    cp_edges = [e for e in g.edges if e.kind == "control_parent"]
+    # CustomerSubledger has parent_role=InternalRole in the kitchen fixture.
+    assert any(
+        e.source == "role__CustomerSubledger" and e.target == "role__InternalRole"
+        for e in cp_edges
+    )
+    cp_for_subledger = next(
+        e for e in cp_edges if e.source == "role__CustomerSubledger"
+    )
+    assert cp_for_subledger.metadata["child_kind"] == "template"
+    assert cp_for_subledger.label == "controls"
+
+
 def test_topology_graph_chain_edge_carries_required_metadata() -> None:
     g = topology_graph_for(_kitchen_instance())
     chains = [e for e in g.edges if e.kind == "chain"]
@@ -325,13 +341,17 @@ def test_topology_graph_for_sasquatch_pr_meets_richness_bar() -> None:
     # Rail nodes are emitted only for chain-refs + template legs;
     # sasquatch_pr has both → expect at least a handful.
     assert rail_count >= 5, f"expected >=5 rail nodes; got {rail_count}"
-    # All four edge kinds present — the legibility bar is meaningless
-    # if the fixture loses one of them.
+    # All five edge kinds present — the legibility bar is meaningless
+    # if the fixture loses one of them. control_parent surfaces the
+    # subledger→control hierarchy (X.4.b.3 follow-up: roles whose only
+    # appearance is via parent_role were silently dropped pre-fix).
     edge_kinds = {e.kind for e in g.edges}
     assert "rail_bundle" in edge_kinds
     assert "self_loop" in edge_kinds
     assert "template_member" in edge_kinds
     assert "chain" in edge_kinds
+    assert "control_parent" in edge_kinds
+    assert "template_role" in edge_kinds
 
 
 # -- d3-force JSON serializer -----------------------------------------------
@@ -365,6 +385,7 @@ def test_to_d3_force_json_shape() -> None:
         )
         assert link["kind"] in (
             "rail_bundle", "self_loop", "template_member", "chain",
+            "control_parent", "template_role",
         )
 
 
