@@ -1,5 +1,19 @@
 # Release Notes
 
+## v10.0.0a1 — Phase X.4 (Studio) plan locked; design + PLAN landed (no code change yet)
+
+Pre-release / alpha tag. **No code change** — the wheel is byte-equivalent to v9.4.0 in user-visible behavior. This tag marks the SPEC + PLAN landing for **Phase X.4 — Studio** (the implementation-tools surface; original X.4 + X.5 folded into one phase).
+
+What landed in the repo (design artifacts only — Studio code starts after this tag):
+
+- **`SPEC_studio.md`** (333 lines, sibling to the L2-model spec material in `docs/Schema_v6.md`). Goal / non-goals / 3 personas + their loops / architecture (process model, severability, source-of-truth, cascade discipline, allowlist expansion) / the 5-step "Deploy changes" pipeline (etl_hook gate → wipe + optional ETL pull → generator → matview refresh → Dashboards reload) / data-shaping model (`test_generator:` block: `enabled` / `scope` (full|uncovered_rails|exceptions_only) / `end_date` / `seed` / `plants` / `only_template` / `derive_balances`) / plant-timeline view / unified diagram (D3+d3-force vs enhanced graphviz spike — ELK out as a JVM-dep tier) / editor primitives + forms (Account/Rail/Theme/Chain/TransferTemplate, additive build) / CLI surface / testing scope (narrowed vs the X.2-era 13-cell matrix — Studio gets PG→SQLite primary + Oracle→SQLite + SQLite→SQLite secondary, NOT a full fan-out) / open-deferred / reuse inventory / hard invariants.
+- **`docs/x_4_5_design_thoughts.md`** — the iteration log that produced the SPEC. The user's problem statement + persona reframe + the back-and-forth that converged on the 5-step pipeline, the renamed surfaces (Studio + Dashboards), the Generator scopes, the etl_hook ownership boundary, the editor cascade discipline.
+- **`PLAN.md`** re-cut: one Phase X.4 (Studio) replacing the original X.4 + X.5 split. ~70 sub-task checkboxes across X.4.a (foundations) → X.4.b (renderer spike) → X.4.c (diagram) → X.4.d/e/f (editor) → X.4.g (Deploy pipeline, 15 sub-items) → X.4.h (shaping panel UI) → X.4.i (additive knobs) → X.4.j (testing scope) → X.4.k (wrap to v10.0.0). Phase X.1 + X.3 also swept to `PLAN_ARCHIVE.md` (both shipped); the stale "Parallelism map" historical section trimmed.
+
+**CLI rename ahead of v10.0.0 GA:** `serve app2 apply` becomes `dashboards`, plus a new `studio` verb that mounts both. Removed outright when Studio MVP ships — no deprecation alias (the only user is the developer wielding it).
+
+**No customer-facing change in this tag.** v9.4.0 → v10.0.0a1 = SPEC + PLAN landing, period. Code starts on the next commits in the X.4 sub-tree.
+
 ## v9.4.0 — Phase X.3 wrap: SQLite is a first-class database dialect; `e2e-sqlite` CI cell
 
 Minor release — the **Phase X.3 wrap**. **No customer-facing change**: the CLI's stable surface (`schema` / `data` / `json` / `audit` × `apply` / `clean` / …), `config.yaml`, and the L2 institution YAML keep their shapes; a customization carried across v9.3.0 → v9.4.0 needs no edits. SQLite-as-a-dialect (`Dialect.SQLITE` — connection plumbing, schema emit, matview-as-table refresh, seed pipeline, locked seed file) landed incrementally on 2026-05-08; this release closes the phase out.

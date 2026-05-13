@@ -352,6 +352,15 @@ jobs:
         # not psycopg.
         run: uv sync --frozen --extra dev --extra serve --extra audit --extra e2e
 
+      - name: Install Playwright WebKit browser
+        # The `app2` chain layer runs `tests/e2e/test_html2_*` which
+        # spawns Playwright (WebKit) against the in-process App2 server.
+        # Same pattern the `test` job uses for `tests/js/`. v9.4.0
+        # regression: this step was missing in the e2e-sqlite job's
+        # original wiring, so every run failed with "Executable doesn't
+        # exist at /home/runner/.cache/ms-playwright/webkit-…/pw_run.sh".
+        run: .venv/bin/playwright install --with-deps webkit
+
       # The runner's `app2` chain layer fans `unit → db → app2` over
       # the `--dialects=sl --targets=lo` cells (sp + sq scenarios, same
       # default fan-out as `integration-pg`). `setup_variant` for `sl`
