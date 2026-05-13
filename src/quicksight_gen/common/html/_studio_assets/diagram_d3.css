@@ -1,0 +1,185 @@
+/* X.4.b.2 — Studio diagram (d3-force, arm A).
+ *
+ * Reuses chrome chrome from arm B's diagram.css; this file layers
+ * in the SVG-shape styling specific to d3 + the per-band visual
+ * hints. Loaded ALONGSIDE diagram.css on the d3 page.
+ */
+
+.topology-d3-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 600px;
+  background:
+    /* Three faint horizontal bands as visual hints for the user's
+     * mental layers (bottom = roles "core foundation",
+     * middle = rails connecting, top = templates layered on). */
+    linear-gradient(
+      to bottom,
+      rgba(252, 228, 214, 0.18) 0%,
+      rgba(252, 228, 214, 0.18) 22%,
+      transparent 22%,
+      transparent 35%,
+      rgba(245, 245, 245, 0.5) 35%,
+      rgba(245, 245, 245, 0.5) 65%,
+      transparent 65%,
+      transparent 78%,
+      rgba(219, 233, 246, 0.25) 78%,
+      rgba(219, 233, 246, 0.25) 100%
+    );
+  cursor: grab;
+}
+.topology-d3-svg:active { cursor: grabbing; }
+
+/* Per-kind node shape colors. */
+.topology-d3-svg .role-rect {
+  fill: #dbe9f6;
+  stroke: #1f4e79;
+  stroke-width: 1.5;
+}
+.topology-d3-svg .node-role[data-scope="external"] .role-rect {
+  fill: #fff2cc;
+  stroke: #7f6000;
+}
+.topology-d3-svg .rail-pill {
+  fill: #f5f5f5;
+  stroke: #666666;
+  stroke-width: 1;
+}
+.topology-d3-svg .template-rect {
+  fill: #fce4d6;
+  stroke: #a6622c;
+  stroke-width: 1.5;
+}
+
+/* Node labels. */
+.topology-d3-svg .node-label {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif;
+  font-weight: 500;
+  user-select: none;
+  fill: #1e293b;
+  pointer-events: none;
+}
+.topology-d3-svg .node-rail .node-label { fill: #424242; }
+.topology-d3-svg .node-template .node-label { fill: #7a4520; }
+
+/* Per-kind edge styles. */
+.topology-d3-svg .link {
+  fill: none;
+  stroke-width: 1.2;
+}
+.topology-d3-svg .link-rail_endpoint {
+  stroke: #1f4e79;
+  stroke-opacity: 0.55;
+}
+.topology-d3-svg .link-template_member {
+  stroke: #a6622c;
+  stroke-dasharray: 4 3;
+  stroke-opacity: 0.7;
+}
+.topology-d3-svg .link-chain {
+  stroke: #5a5a5a;
+  stroke-dasharray: 6 3;
+  stroke-width: 1.4;
+}
+.topology-d3-svg .link-control_parent {
+  stroke: #888888;
+  stroke-dasharray: 3 3;
+  stroke-opacity: 0.7;
+}
+
+/* Arrow marker fills (one per edge kind to match line color). */
+.topology-d3-svg .arrow-rail_endpoint path { fill: #1f4e79; }
+.topology-d3-svg .arrow-template_member path { fill: #a6622c; }
+.topology-d3-svg .arrow-chain path { fill: #5a5a5a; }
+.topology-d3-svg .arrow-control_parent path { fill: #888888; }
+
+/* Edge labels. */
+.topology-d3-svg .link-label {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif;
+  font-size: 9px;
+  fill: #64748b;
+  pointer-events: none;
+  user-select: none;
+}
+.topology-d3-svg .link-label-chain { fill: #5a5a5a; font-weight: 500; }
+.topology-d3-svg .link-label-control_parent { fill: #888888; }
+.topology-d3-svg .link-label-template_member { fill: #a6622c; }
+
+/* Visibility toggles — driven by checkboxes via JS adding hide-<kind>
+ * classes on the SVG root. Same shape as arm B but adapted to d3
+ * (rails are nodes here, not edge labels). */
+.topology-d3-svg.hide-role-internal .node-role[data-scope="internal"] { display: none; }
+.topology-d3-svg.hide-role-external .node-role[data-scope="external"] { display: none; }
+.topology-d3-svg.hide-rail .node-rail { display: none; }
+.topology-d3-svg.hide-template .node-template { display: none; }
+.topology-d3-svg.hide-chain .link-chain,
+.topology-d3-svg.hide-chain .link-label-chain { display: none; }
+.topology-d3-svg.hide-control_parent .link-control_parent,
+.topology-d3-svg.hide-control_parent .link-label-control_parent { display: none; }
+.topology-d3-svg.hide-template_member .link-template_member,
+.topology-d3-svg.hide-template_member .link-label-template_member { display: none; }
+/* Hiding a role-scope OR rail also hides the connectivity edges that
+ * dangle. */
+.topology-d3-svg.hide-rail .link-rail_endpoint { display: none; }
+.topology-d3-svg.hide-template .link-template_member,
+.topology-d3-svg.hide-template .link-label-template_member { display: none; }
+
+/* Per-kind edge-label toggles (text only). */
+.topology-d3-svg.hide-edge-label-rail_endpoint .link-label-rail_endpoint { display: none; }
+.topology-d3-svg.hide-edge-label-chain .link-label-chain { display: none; }
+.topology-d3-svg.hide-edge-label-control_parent .link-label-control_parent { display: none; }
+.topology-d3-svg.hide-edge-label-template_member .link-label-template_member { display: none; }
+
+/* Layer stepper — cumulative reveal. */
+.topology-d3-svg.layer-1 .link:not(.link-control_parent) { display: none; }
+.topology-d3-svg.layer-1 .link-label:not(.link-label-control_parent) { display: none; }
+.topology-d3-svg.layer-1 .node-rail,
+.topology-d3-svg.layer-1 .node-template { display: none; }
+
+.topology-d3-svg.layer-2 .link-chain,
+.topology-d3-svg.layer-2 .link-label-chain,
+.topology-d3-svg.layer-2 .link-template_member,
+.topology-d3-svg.layer-2 .link-label-template_member { display: none; }
+.topology-d3-svg.layer-2 .node-template { display: none; }
+
+/* Mode overlays — STUB data (X.4.c.5 / X.4.c.6 wire real fetchers). */
+/* Coverage stub: deterministic by node index — every 3rd role uncovered. */
+/* (Stub-data application happens JS-side; real fetcher is X.4.c.) */
+
+/* Focus mode dim/highlight. */
+.topology-d3-svg.focused .node.dim,
+.topology-d3-svg.focused .link.dim,
+.topology-d3-svg.focused .link-label.dim {
+  opacity: 0.12;
+  transition: opacity 120ms ease;
+}
+.topology-d3-svg.focused .node.focus,
+.topology-d3-svg.focused .link.focus,
+.topology-d3-svg.focused .link-label.focus {
+  opacity: 1;
+  transition: opacity 120ms ease;
+}
+
+/* Hover affordance. */
+.topology-d3-svg .node:hover .shape {
+  filter: brightness(1.05) drop-shadow(0 0 3px rgba(31, 78, 121, 0.4));
+}
+
+/* Floating "Y-band" labels in the chrome — visual key for the user. */
+.diagram-chrome .band-key {
+  font-size: 0.7rem;
+  color: var(--studio-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.diagram-chrome .band-key .swatch {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 0.1rem;
+}
+.diagram-chrome .band-key .swatch-template { background: rgba(252, 228, 214, 0.6); border: 1px solid #a6622c; }
+.diagram-chrome .band-key .swatch-rail { background: rgba(245, 245, 245, 1); border: 1px solid #666; }
+.diagram-chrome .band-key .swatch-role { background: rgba(219, 233, 246, 0.8); border: 1px solid #1f4e79; }

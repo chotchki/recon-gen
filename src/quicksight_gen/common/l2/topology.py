@@ -639,6 +639,195 @@ def topology_graph_for(instance: L2Instance) -> TopologyGraph:
     )
 
 
+def to_d3_per_rail_json(instance: L2Instance) -> dict[str, Any]:
+    """Emit the rails-as-first-class-nodes JSON shape for d3-force (X.4.b.2).
+
+    Different shape from ``to_d3_force_json``: every Rail becomes its own
+    node (instead of being inlined as a bundle/self-loop edge label or
+    a chain-anchor pseudo-node). The d3-force renderer can then place
+    rails in their own visual band — exactly the user's mental model
+    (roles core, rails connecting, chains/templates layered on top) —
+    and connect each rail to its endpoint roles + the templates it's a
+    leg of + the chains it parents/children, all from one canonical
+    rail-node.
+
+    Why a separate emitter: ``to_d3_force_json`` faithfully mirrors the
+    typed graph's bundle / self-loop / template-member edge model
+    (which graphviz consumes). The arm-A renderer wants a different
+    composition where rails are nodes, not edge labels — and that
+    expansion can't be done losslessly on the JS side because it
+    needs per-rail source/destination role info.
+
+    Output shape:
+    ```
+    {
+      "instance": "<prefix>",
+      "nodes": [
+        {"id": "role__X",  "kind": "role", "label": "X", "scope": "internal"|"external"},
+        {"id": "rail__R",  "kind": "rail", "label": "R\\n(transfer_type)",
+         "rail_subtype": "two_leg"|"single_leg",
+         "leg_direction": "Debit"|"Credit"|"Variable" (single_leg only)},
+        {"id": "tmpl__T",  "kind": "template", "label": "T\\nkeys: a, b"},
+      ],
+      "links": [
+        # Per-rail role connectivity. For TwoLegRail: source + destination.
+        # For SingleLegRail: leg_role (one entry per role in the leg expr).
+        {"source": "rail__R", "target": "role__X", "kind": "rail_endpoint",
+         "endpoint": "source"|"destination"|"leg"},
+        # template → leg-rail (one per leg_rail).
+        {"source": "tmpl__T", "target": "rail__R", "kind": "template_member"},
+        # chain (rail|template → rail|template).
+        {"source": "rail__P", "target": "rail__C", "kind": "chain",
+         "required": true|false, "xor_group": "<grp>"|null},
+        # control_parent (subledger → control role).
+        {"source": "role__X", "target": "role__Y", "kind": "control_parent",
+         "child_kind": "account"|"template", "has_limits": true|false},
+      ]
+    }
+    ```
+
+    No bundling, no self-loop fold-in, no chain-anchor pseudo-rails.
+    Every rail is one node; every relationship is one edge to that node.
+    """
+    nodes: list[dict[str, Any]] = []
+    links: list[dict[str, Any]] = []
+
+    # 1. Role nodes (with scope + templated). Reuse the typed walker's
+    # role-collection logic so we stay consistent with the canonical view.
+    typed = topology_graph_for(instance)
+    for n in typed.nodes:
+        if n.kind != "role":
+            continue
+        role_dict: dict[str, Any] = {
+            "id": n.id,
+            "kind": "role",
+            "label": n.label,
+        }
+        if n.scope is not None:
+            role_dict["scope"] = n.scope
+        if n.templated:
+            role_dict["templated"] = True
+        nodes.append(role_dict)
+
+    # 2. Rail nodes — one per rail, ALWAYS (not just chain-refs / template-legs).
+    for rail in instance.rails:
+        if isinstance(rail, TwoLegRail):
+            rail_dict: dict[str, Any] = {
+                "id": _rail_id(rail.name),
+                "kind": "rail",
+                "label": f"{rail.name}\n({rail.transfer_type})",
+                "rail_subtype": "two_leg",
+                "transfer_type": rail.transfer_type,
+            }
+            nodes.append(rail_dict)
+            for src_role in rail.source_role:
+                links.append({
+                    "source": _rail_id(rail.name),
+                    "target": _role_id(src_role),
+                    "kind": "rail_endpoint",
+                    "endpoint": "source",
+                })
+            for dst_role in rail.destination_role:
+                links.append({
+                    "source": _rail_id(rail.name),
+                    "target": _role_id(dst_role),
+                    "kind": "rail_endpoint",
+                    "endpoint": "destination",
+                })
+        else:
+            # SingleLegRail — leg_role(s), one direction.
+            rail_dict = {
+                "id": _rail_id(rail.name),
+                "kind": "rail",
+                "label": f"{rail.name}\n({rail.transfer_type}, {rail.leg_direction})",
+                "rail_subtype": "single_leg",
+                "transfer_type": rail.transfer_type,
+                "leg_direction": rail.leg_direction,
+            }
+            nodes.append(rail_dict)
+            for leg_role in rail.leg_role:
+                links.append({
+                    "source": _rail_id(rail.name),
+                    "target": _role_id(leg_role),
+                    "kind": "rail_endpoint",
+                    "endpoint": "leg",
+                })
+
+    # 3. Template nodes + template_member edges + template_role helpers.
+    template_names: set[Identifier] = {t.name for t in instance.transfer_templates}
+    for template in instance.transfer_templates:
+        nodes.append({
+            "id": _template_id(template.name),
+            "kind": "template",
+            "label": _template_inner_label(template),
+            "transfer_type": template.transfer_type,
+            "transfer_key": ", ".join(template.transfer_key),
+        })
+        for rail_name in template.leg_rails:
+            links.append({
+                "source": _template_id(template.name),
+                "target": _rail_id(rail_name),
+                "kind": "template_member",
+            })
+
+    # 4. Chain edges. Source / target may be a Rail name OR a Template name.
+    for chain in instance.chains:
+        parent_id = (
+            _template_id(chain.parent)
+            if chain.parent in template_names
+            else _rail_id(chain.parent)
+        )
+        child_id = (
+            _template_id(chain.child)
+            if chain.child in template_names
+            else _rail_id(chain.child)
+        )
+        chain_link: dict[str, Any] = {
+            "source": parent_id,
+            "target": child_id,
+            "kind": "chain",
+            "required": chain.required,
+        }
+        if chain.xor_group is not None:
+            chain_link["xor_group"] = str(chain.xor_group)
+        links.append(chain_link)
+
+    # 5. Control-parent edges (subledger → control role).
+    parents_with_limits: set[Identifier] = {
+        ls.parent_role for ls in instance.limit_schedules
+    }
+    for account in instance.accounts:
+        if account.parent_role is None or account.role is None:
+            continue
+        cp_link: dict[str, Any] = {
+            "source": _role_id(account.role),
+            "target": _role_id(account.parent_role),
+            "kind": "control_parent",
+            "child_kind": "account",
+        }
+        if account.parent_role in parents_with_limits:
+            cp_link["has_limits"] = True
+        links.append(cp_link)
+    for template in instance.account_templates:
+        if template.parent_role is None:
+            continue
+        cp_link = {
+            "source": _role_id(template.role),
+            "target": _role_id(template.parent_role),
+            "kind": "control_parent",
+            "child_kind": "template",
+        }
+        if template.parent_role in parents_with_limits:
+            cp_link["has_limits"] = True
+        links.append(cp_link)
+
+    return {
+        "instance": str(instance.instance),
+        "nodes": nodes,
+        "links": links,
+    }
+
+
 def to_d3_force_json(graph: TopologyGraph) -> dict[str, Any]:
     """Serialize a TopologyGraph for d3-force consumption.
 
@@ -1002,5 +1191,6 @@ __all__ = [
     "build_topology_graph",
     "render_topology",
     "to_d3_force_json",
+    "to_d3_per_rail_json",
     "topology_graph_for",
 ]

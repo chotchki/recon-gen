@@ -47,6 +47,7 @@ from quicksight_gen.common.l2.cache import L2InstanceCache
 from quicksight_gen.common.l2.topology import (
     TopologyGraph,
     build_topology_graph,
+    to_d3_per_rail_json,
     topology_graph_for,
 )
 from quicksight_gen.common.l2.topology import (
@@ -142,6 +143,8 @@ def _render_landing_placeholder(cache: L2InstanceCache, dev_log: bool) -> str:
         "</ul>\n"
         "<h2>Spike: diagram renderer</h2>\n"
         "<ul>\n"
+        "<li><a href=\"/diagram/d3\">→ Topology diagram (arm A — d3-force, "
+        "rails-as-nodes, Y-banded)</a></li>\n"
         "<li><a href=\"/diagram\">→ Topology diagram (arm B — graphviz)</a>"
         " &nbsp; "
         "<a href=\"/diagram?engine=neato\">[neato]</a> "
@@ -334,6 +337,138 @@ def _render_diagram_page(cache: L2InstanceCache, dev_log: bool) -> str:
 """
 
 
+def _render_d3_diagram_page(cache: L2InstanceCache, dev_log: bool) -> str:
+    """X.4.b.2 — spike arm A: d3-force topology renderer.
+
+    Sibling to ``_render_diagram_page`` (arm B / graphviz). Shares the
+    chrome shape (layer / mode / toggle / focus) but uses a separate
+    JSON shape (``to_d3_per_rail_json``) where every Rail is a
+    first-class node — so rails can be visually banded between roles
+    and templates and chains/templates connect to one canonical
+    rail-node instead of to a duplicated label/cluster instance.
+    """
+    instance = cache.get()
+    payload = to_d3_per_rail_json(instance)
+    sidecar = json.dumps(payload)  # typing-smell: ignore[json-indent]: inline page payload
+
+    prefix = escape(str(instance.instance))
+    nodes = payload["nodes"]
+    links = payload["links"]
+    n_role_internal = sum(
+        1 for n in nodes if n["kind"] == "role" and n.get("scope") == "internal"
+    )
+    n_role_external = sum(
+        1 for n in nodes if n["kind"] == "role" and n.get("scope") == "external"
+    )
+    n_rail = sum(1 for n in nodes if n["kind"] == "rail")
+    n_template = sum(1 for n in nodes if n["kind"] == "template")
+    n_chain = sum(1 for e in links if e["kind"] == "chain")
+    n_control_parent = sum(1 for e in links if e["kind"] == "control_parent")
+    n_template_member = sum(1 for e in links if e["kind"] == "template_member")
+    n_rail_endpoint = sum(1 for e in links if e["kind"] == "rail_endpoint")
+
+    devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Studio diagram (d3) — {prefix}</title>
+  {devlog_meta}<link rel="stylesheet" href="/studio/static/diagram.css">
+  <link rel="stylesheet" href="/studio/static/diagram_d3.css">
+  {devlog_script}</head>
+<body>
+  <header class="studio-header">
+    <h1>Studio · diagram (d3-force, arm A)</h1>
+    <span class="instance">{prefix}</span>
+    <a class="nav-link" href="/">← landing</a>
+    <a class="nav-link" href="/diagram">→ arm B (graphviz)</a>
+    <a class="nav-link" href="/dashboards">→ dashboards</a>
+  </header>
+
+  <div class="diagram-chrome">
+    <label>mode:
+      <select id="mode-select">
+        <option value="default" selected>Default (integrator)</option>
+        <option value="coverage">Coverage (ETL · STUB)</option>
+        <option value="trainer">Trainer (planted · STUB)</option>
+      </select>
+    </label>
+    <span class="layer-stepper" role="radiogroup" aria-label="Conceptual layers">
+      layer:
+      <button type="button" data-layer="1" class="layer-btn">1 · Roles + structure</button>
+      <button type="button" data-layer="2" class="layer-btn">+ Rails</button>
+      <button type="button" data-layer="3" class="layer-btn active">+ Chains&nbsp;&amp;&nbsp;Templates</button>
+    </span>
+    <button id="toggle-reset">Reset</button>
+    <span class="band-key"><span class="swatch swatch-template"></span>Templates (top)</span>
+    <span class="band-key"><span class="swatch swatch-rail"></span>Rails (mid)</span>
+    <span class="band-key"><span class="swatch swatch-role"></span>Roles (foundation)</span>
+    <span class="status" id="diagram-status">loading…</span>
+  </div>
+
+  <div class="diagram-chrome">
+    <strong class="chrome-section-label">Show:</strong>
+    <label>
+      <input type="checkbox" id="toggle-role-internal" checked>
+      Internal roles <span class="count" id="count-role-internal">({n_role_internal})</span>
+    </label>
+    <label>
+      <input type="checkbox" id="toggle-role-external" checked>
+      External roles <span class="count" id="count-role-external">({n_role_external})</span>
+    </label>
+    <label>
+      <input type="checkbox" id="toggle-rail" checked>
+      Rails <span class="count" id="count-rail">({n_rail})</span>
+    </label>
+    <label>
+      <input type="checkbox" id="toggle-template" checked>
+      Templates <span class="count" id="count-template">({n_template})</span>
+    </label>
+    <label>
+      <input type="checkbox" id="toggle-chain" checked>
+      Chains <span class="count" id="count-chain">({n_chain})</span>
+    </label>
+    <label>
+      <input type="checkbox" id="toggle-control_parent" checked>
+      Control hierarchy <span class="count" id="count-control_parent">({n_control_parent})</span>
+    </label>
+    <label>
+      <input type="checkbox" id="toggle-template_member" checked>
+      Leg-rail links <span class="count" id="count-template_member">({n_template_member})</span>
+    </label>
+    <strong class="chrome-section-label">Edge labels:</strong>
+    <label>
+      <input type="checkbox" id="toggle-edge-label-rail_endpoint">
+      Endpoint badges <span class="count" id="count-rail_endpoint">({n_rail_endpoint})</span>
+    </label>
+    <label>
+      <input type="checkbox" id="toggle-edge-label-chain" checked>
+      Chain badges
+    </label>
+    <label>
+      <input type="checkbox" id="toggle-edge-label-control_parent" checked>
+      Control labels
+    </label>
+    <label>
+      <input type="checkbox" id="toggle-edge-label-template_member">
+      Leg-rail labels
+    </label>
+  </div>
+
+  <div class="diagram-viewport">
+    <div id="diagram-target" style="height:80vh"></div>
+  </div>
+
+  <script id="topology-d3-data" type="application/json">{sidecar}</script>
+
+  <script src="/static/vendor/js/d3.min.js"></script>
+  <script src="/studio/static/diagram_d3.js"></script>
+</body>
+</html>
+"""
+
+
 def make_studio_routes(
     cache: L2InstanceCache,
     dev_log: bool = False,
@@ -362,9 +497,13 @@ def make_studio_routes(
     async def diagram(_request: Request) -> HTMLResponse:
         return HTMLResponse(_render_diagram_page(cache, dev_log))
 
+    async def diagram_d3(_request: Request) -> HTMLResponse:
+        return HTMLResponse(_render_d3_diagram_page(cache, dev_log))
+
     routes: list[Route | Mount] = [
         Route("/", landing, methods=["GET"]),
         Route("/diagram", diagram, methods=["GET"]),
+        Route("/diagram/d3", diagram_d3, methods=["GET"]),
         Mount(
             "/studio/static",
             app=StaticFiles(directory=str(_STUDIO_ASSETS_DIR)),
