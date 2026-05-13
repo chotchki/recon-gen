@@ -255,7 +255,7 @@ Diagram surface "good enough" criteria, all met:
 - `sasquatch_pr` renders without overlap or unreadable label collisions ✅ (deterministic dot layout).
 - All four entity-type toggles (Roles / Rails / Chains / Templates) ✅ (CSS-class visibility toggles via `data-kind` post-processing in `diagram.js`).
 - Click-a-node → focus-subgraph ✅ (server-side filter + `?focus=<node_id>` URL navigation; dot re-lays out the focused subset cleanly. Click-empty-canvas / Esc / Reset drop the param. Smart-default hops by node kind: roles/templates default to 2 to cross a rail; rails/bundles default to 1).
-- Coverage-tint mode hook ✅ (mode-stub overlay wired; real fetcher is X.4.c.5 work).
+- Coverage-tint mode hook — mode-stub dropped during X.4.b.cleanup; the real fetcher + chrome surface is X.4.c.5 work.
 
 The d3 ForceGraph in `common/tree/visuals.py` is unrelated and stays for any future sheet-visual use; the diagram surface is dot-only.
 

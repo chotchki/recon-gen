@@ -109,11 +109,21 @@ def studio(  # type: ignore[no-untyped-def]: Click decorator strips the function
     (X.4.c), editor (X.4.e), and Deploy pipeline (X.4.g) land in
     sub-phases. The CLI surface is stable from this commit forward.
     """
+    import functools  # noqa: PLC0415
+
     from quicksight_gen.common.html._studio_routes import (  # noqa: PLC0415
         make_studio_routes,
     )
 
     cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
+    # Bind dialect + prefix at the CLI layer (X.4.c.5.c — coverage
+    # fetcher needs both, but threading them through ``_html_serve``
+    # would couple Studio internals to a Studio-ignorant module).
+    studio_factory = functools.partial(
+        make_studio_routes,
+        dialect=cfg.dialect,
+        prefix_override=cfg.l2_instance_prefix,
+    )
     run_html_server(
         cfg=cfg,
         instance=instance,
@@ -122,5 +132,5 @@ def studio(  # type: ignore[no-untyped-def]: Click decorator strips the function
         app_name=app_name,
         stub=False,            # Studio always reads the real DB.
         embed_docs=embed_docs,
-        studio_routes_factory=make_studio_routes,
+        studio_routes_factory=studio_factory,
     )

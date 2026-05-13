@@ -363,6 +363,6 @@ def test_topology_dataclasses_are_frozen() -> None:
     # Frozen → AttributeError on any setattr.
     import pytest
     with pytest.raises(dataclasses.FrozenInstanceError):
-        g.nodes = ()  # pyright: ignore[reportAttributeAccessIssue]
+        g.nodes = ()  # pyright: ignore[reportAttributeAccessIssue]: testing the frozen-dataclass mutation rejection itself
     with pytest.raises(dataclasses.FrozenInstanceError):
-        node.label = "x"  # pyright: ignore[reportAttributeAccessIssue]
+        node.label = "x"  # pyright: ignore[reportAttributeAccessIssue]: testing the frozen-dataclass mutation rejection itself

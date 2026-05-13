@@ -76,12 +76,9 @@ def test_studio_diagram_route_renders_with_dot_source() -> None:
             "toggle-edge-label-chain",
         ):
             assert f'id="{kind}"' in body, f"missing checkbox {kind}"
-        # Layer stepper + mode dropdown landed.
-        assert 'class="layer-btn"' in body
-        assert 'id="mode-select"' in body
-        # The engine knob hot-swap links are present.
-        for engine in ("dot", "neato", "sfdp"):
-            assert f"?engine={engine}" in body
+        # Layer stepper landed (the mode dropdown + engine pills were
+        # dropped in X.4.b.cleanup once dot won the spike).
+        assert 'class="layer-btn' in body
         # The DOT source carries an L2 identifier (proves the typed
         # walk is running, not just an empty digraph).
         assert "ClearingSuspense" in body or "role__" in body
@@ -103,8 +100,10 @@ def test_studio_diagram_route_uses_sasquatch_pr_when_loaded() -> None:
         assert "CashDueFRB" in sas_body
         assert "CashDueFRB" not in spec_body
         # And the sasquatch DOT block should be substantially larger
-        # (it has dozens more rails / templates / chains).
-        assert len(sas_body) > len(spec_body) * 1.5
+        # (it has dozens more rails / templates / chains). Ratio is
+        # gentler post-X.4.b.cleanup because the page chrome shrunk
+        # — the DOT block itself still grows with the L2's size.
+        assert len(sas_body) > len(spec_body) * 1.3
 
 
 def test_studio_static_serves_diagram_js() -> None:
@@ -124,9 +123,12 @@ def test_studio_static_serves_diagram_css() -> None:
         resp = client.get("/studio/static/diagram.css")
         assert resp.status_code == 200
         body = resp.text
-        # Sanity: the focus-mode dimming class the JS toggles.
-        assert ".topology-svg.focused" in body
-        assert ".dim" in body
+        # Sanity: a chrome class the page actually uses. (Pre-X.4.b
+        # cleanup this checked .topology-svg.focused / .dim — both
+        # CSS classes were dropped when click-to-focus moved to URL
+        # navigation.)
+        assert ".diagram-chrome" in body
+        assert ".layer-btn" in body
 
 
 def test_studio_wasm_graphviz_mount_serves_index_js() -> None:

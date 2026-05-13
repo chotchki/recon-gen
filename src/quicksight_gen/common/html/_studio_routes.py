@@ -35,20 +35,24 @@ Severability: this module is Studio-only. ``cli.dashboards`` calls
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from html import escape
 from pathlib import Path
 from typing import Any
 
 from starlette.requests import Request
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from quicksight_gen.common.db import AsyncConnectionPool
 from quicksight_gen.common.l2.cache import L2InstanceCache
+from quicksight_gen.common.l2.coverage import CoverageEntry, coverage_for
 from quicksight_gen.common.l2.topology import (
     build_topology_graph_per_rail,
     topology_graph_for,
 )
+from quicksight_gen.common.sql.dialect import Dialect
 
 
 _STUDIO_ASSETS_DIR = Path(__file__).parent / "_studio_assets"
@@ -131,6 +135,8 @@ def _render_diagram_page(
     dev_log: bool,
     focus_node_id: str | None = None,
     layer: int = 1,
+    *,
+    coverage_available: bool = False,
 ) -> str:
     """Render the L2 topology diagram (per-rail / dot, X.4.b spike winner).
 
@@ -198,6 +204,14 @@ def _render_diagram_page(
     )
 
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
+    # X.4.c.5.b — surface pool availability to the JS shim. The chrome
+    # toggle (X.4.c.5.d) reads this meta tag to decide whether to mount
+    # the Coverage checkbox; absent ⇒ no toggle (graceful degrade).
+    coverage_meta = (
+        '<meta name="diagram-coverage-available" content="1">\n'
+        if coverage_available
+        else ""
+    )
     # Build URL fragments so layer / focus links preserve the other
     # param. Order: focus first, then layer (matches the natural read).
     def _qs(*, layer_val: int, focus_val: str | None) -> str:
@@ -232,7 +246,7 @@ def _render_diagram_page(
 <head>
   <meta charset="utf-8">
   <title>Studio diagram — {prefix}</title>
-  {devlog_meta}<link rel="stylesheet" href="/studio/static/diagram.css">
+  {devlog_meta}{coverage_meta}<link rel="stylesheet" href="/studio/static/diagram.css">
   {devlog_script}</head>
 <body>
   <header class="studio-header">
@@ -312,6 +326,10 @@ def _render_diagram_page(
 def make_studio_routes(
     cache: L2InstanceCache,
     dev_log: bool = False,
+    db_pool: AsyncConnectionPool | None = None,
+    *,
+    dialect: Dialect | None = None,
+    prefix_override: str | None = None,
 ) -> list[Route | Mount]:
     """Build the Studio route list bound to ``cache``.
 
@@ -330,6 +348,21 @@ def make_studio_routes(
             ``/log`` (which ``make_app`` mounts when ``dev_log=True``).
             Default False so a production-style ``quicksight-gen
             studio`` invocation stays silent.
+        db_pool: Optional ``AsyncConnectionPool`` against the demo DB.
+            When set, X.4.c.5's ``GET /diagram/coverage`` route mounts
+            and the diagram chrome surfaces a Coverage toggle. When
+            None, coverage is silently absent — the only UX impact is
+            the missing chrome toggle, no broken behavior. Studio's
+            CLI always provides a pool (``cli/studio.py`` rejects
+            ``--stub`` / smoke); ``None`` is the unit-test surface.
+        dialect: SQL dialect; required when ``db_pool`` is set
+            (the coverage fetcher's column-name case folds via
+            ``column_name(...)``). When ``db_pool`` is None, this is
+            ignored.
+        prefix_override: Optional override for the ``<prefix>_transactions``
+            schema prefix; usually omitted (defaults to the L2
+            instance's own ``instance`` field). Equivalent to
+            ``cfg.l2_instance_prefix`` in the demo CLI flow.
     """
     async def landing(_request: Request) -> HTMLResponse:
         return HTMLResponse(_render_landing_placeholder(cache, dev_log))
@@ -342,7 +375,10 @@ def make_studio_routes(
         except ValueError:
             layer = 1
         return HTMLResponse(
-            _render_diagram_page(cache, dev_log, focus_node_id, layer),
+            _render_diagram_page(
+                cache, dev_log, focus_node_id, layer,
+                coverage_available=db_pool is not None,
+            ),
         )
 
     routes: list[Route | Mount] = [
@@ -359,4 +395,51 @@ def make_studio_routes(
             name="studio_wasm_graphviz",
         ),
     ]
+
+    # X.4.c.5.c — coverage JSON route. Mounted only when a pool exists
+    # (Studio CLI always provides one; the unit-test surface skips this).
+    if db_pool is not None:
+        if dialect is None:
+            raise ValueError(
+                "make_studio_routes: db_pool requires dialect "
+                "(coverage_for needs column_name() to case-fold per dialect)."
+            )
+        # Capture pool + dialect by closure for the route handler.
+        bound_pool = db_pool
+        bound_dialect = dialect
+        bound_prefix_override = prefix_override
+
+        async def coverage(_request: Request) -> JSONResponse:
+            instance = cache.get()
+            prefix = bound_prefix_override or str(instance.instance)
+            cov = await coverage_for(
+                bound_pool, prefix, instance, dialect=bound_dialect,
+            )
+            return JSONResponse(_coverage_to_json(cov.by_node_id, cov.by_chain_edge_id))
+
+        routes.append(Route("/diagram/coverage", coverage, methods=["GET"]))
+
     return routes
+
+
+def _coverage_to_json(
+    by_node_id: "Mapping[str, CoverageEntry]",
+    by_chain_edge_id: "Mapping[str, CoverageEntry]",
+) -> dict[str, Any]:
+    """Shape the JSON payload the diagram chrome consumes.
+
+    Top-level keys ``nodes`` and ``chain_edges`` so the JS shim can
+    paint nodes vs edges separately. Each value is a flat
+    ``{id: {present, count}}`` map — boolean `present` keeps the JSON
+    payload trivially debug-printable.
+    """
+    return {
+        "nodes": {
+            node_id: {"present": e.present, "count": e.count}
+            for node_id, e in by_node_id.items()
+        },
+        "chain_edges": {
+            edge_id: {"present": e.present, "count": e.count}
+            for edge_id, e in by_chain_edge_id.items()
+        },
+    }
