@@ -150,5 +150,5 @@ Trainer path: no `etl_hook`, no `etl_datasource`, SQLite `demo_database_url` →
 - **CLI verbs:**
   - `quicksight-gen studio -c config.yaml --l2 <yaml>` → launches Studio (with Dashboards mounted under it). The combined-process front door for the integrator / trainer / ETL engineer.
   - `quicksight-gen dashboards -c config.yaml --l2 <yaml>` → launches Dashboards alone (read-only). The standalone "I just want the dashboards" entry point.
-  - `serve app2 apply` is kept as a **deprecated alias** of `dashboards` for one minor (v9.5) → removed at the next major (v10). Same flags, prints a deprecation warning. No hard break for anyone scripting against today's CLI.
+  - `serve app2 apply` is **removed outright** when `dashboards` lands — no deprecation window, no alias. The user is the only one who ever saw it; the deprecation cycle is pure cost. The `serve` Click group goes away with it.
 - **Vocabulary going forward:** the SPEC + the PLAN re-cut + commits / RELEASE_NOTES / docs use Studio + Dashboards; the App 1 / App 2 references in the iteration log above stay (they're history) — anything else gets the new names.

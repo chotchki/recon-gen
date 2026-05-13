@@ -309,11 +309,11 @@ $ quicksight-gen dashboards -c config.yaml --l2 inst.yaml
    → opens browser to http://localhost:8765/dashboards/
 ```
 
-### Deprecation: serve app2 apply → dashboards
+### Replaces: serve app2 apply → dashboards
 
-`serve app2 apply` becomes a deprecated alias of `dashboards`. Same flags. Prints a deprecation warning to stderr. Kept for one minor (v9.5) → removed at v10. No hard break.
+`serve app2 apply` is **removed outright** when `dashboards` lands — no deprecation window, no alias. The user is the only one who ever saw it; there's no third-party scripting to protect, so the deprecation cycle is pure cost.
 
-The `serve` Click group goes away as part of v10 — the only thing under it was `app2 apply`. Top-level verbs (`schema apply`, `data apply`, `json apply`, `audit apply`, `studio`, `dashboards`) are the going-forward shape.
+The `serve` Click group goes away with it (the only thing under it was `app2 apply`). Top-level verbs (`schema apply`, `data apply`, `json apply`, `audit apply`, `studio`, `dashboards`) are the going-forward shape.
 
 ## Open / deferred
 
