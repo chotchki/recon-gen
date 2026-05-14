@@ -40,14 +40,16 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from quicksight_gen.common.html._studio_routes import asset_url
+from quicksight_gen.common.html._studio_routes import asset_url, studio_theme_head
 from quicksight_gen.common.l2.cache import L2InstanceCache
 from quicksight_gen.common.l2.editor import (
+    SINGLETON_KINDS,
     EntityKind,
     create_l2_entity,
     delete_l2_entity,
     mutate_l2,
     rename_identifier,
+    singleton_save_l2,
 )
 from quicksight_gen.common.l2.primitives import (
     Account,
@@ -64,8 +66,13 @@ from quicksight_gen.common.l2.validate import L2ValidationError, validate
 
 
 FieldKind: TypeAlias = Literal[
-    "text", "select", "money", "textarea", "multi_select",
+    "text", "select", "money", "textarea", "multi_select", "yaml_block",
 ]
+
+# X.4.f.11 — Rail is a discriminated union (TwoLegRail | SingleLegRail).
+# A FieldSpec marked with one of these subtypes only renders / coerces
+# when the entity matches; cross-subtype fields stay None.
+RailSubtype: TypeAlias = Literal["two_leg", "single_leg"]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -88,6 +95,14 @@ class FieldSpec:
     ``TransferTemplate.leg_rails``. The operator's selection IS the
     new value; an empty selection clears the field (and the validator
     decides whether that's acceptable per the L2 invariants).
+
+    ``subtype_only`` (X.4.f.11) gates Rail fields that only exist on
+    one arm of the discriminated union — e.g., TwoLegRail's
+    ``source_role`` / ``destination_role`` vs SingleLegRail's
+    ``leg_role`` / ``leg_direction``. The renderer skips fields whose
+    ``subtype_only`` doesn't match the rail's actual subtype at edit
+    time; on the create page, the subtype picker (X.4.f.11.5)
+    determines which fields to show.
     """
 
     name: str
@@ -97,6 +112,7 @@ class FieldSpec:
     options: tuple[str, ...] = ()
     select_from: str | None = None
     required: bool = False
+    subtype_only: RailSubtype | None = None
 
 
 _ACCOUNT_FIELDS: tuple[FieldSpec, ...] = (
@@ -207,9 +223,11 @@ _ACCOUNT_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
 
 # X.4.f.2/f.3 — Rail form. Single FieldSpec list covers BOTH TwoLegRail
 # and SingleLegRail; the dataclasses share most fields and the
-# editor's mutate_l2 dispatches on `dataclasses.replace`. Subtype-only
-# fields (source_role/destination_role vs leg_role/leg_direction)
-# render only when present on the entity.
+# editor's mutate_l2 dispatches on `dataclasses.replace`. X.4.f.11
+# adds the load-bearing subtype-discriminating fields (source_role /
+# destination_role on TwoLeg; leg_role / leg_direction on Single)
+# gated by FieldSpec.subtype_only — the renderer + read card filter
+# them based on the rail entity's actual subtype at edit time.
 _RAIL_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec(
         name="name",
@@ -225,17 +243,190 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         kind="text",
         required=True,
     ),
+    # X.4.f.11.2 — TwoLegRail per-leg roles. RoleExpression is
+    # tuple[Identifier, ...]; multi-select renders the list as a
+    # union ("any of these roles is admissible at posting time").
+    # Single-role rails select one option; the loader normalizes.
+    FieldSpec(
+        name="source_role",
+        label="Source role",
+        helper=(
+            "Role of the account the debit leg posts to. Multi-select "
+            "for unioned roles. Required on TwoLegRail."
+        ),
+        kind="multi_select",
+        select_from="roles",
+        required=True,
+        subtype_only="two_leg",
+    ),
+    FieldSpec(
+        name="destination_role",
+        label="Destination role",
+        helper=(
+            "Role of the account the credit leg posts to. Multi-select "
+            "for unioned roles. Required on TwoLegRail."
+        ),
+        kind="multi_select",
+        select_from="roles",
+        required=True,
+        subtype_only="two_leg",
+    ),
+    # X.4.f.11.3 — SingleLegRail leg fields. leg_role is the same
+    # RoleExpression shape; leg_direction picks the static enum.
+    FieldSpec(
+        name="leg_role",
+        label="Leg role",
+        helper=(
+            "Role of the account the single leg posts to. Required "
+            "on SingleLegRail."
+        ),
+        kind="multi_select",
+        select_from="roles",
+        required=True,
+        subtype_only="single_leg",
+    ),
+    FieldSpec(
+        name="leg_direction",
+        label="Leg direction",
+        helper=(
+            "Debit (money out) / Credit (money in) / Variable "
+            "(direction + amount determined by enclosing template's "
+            "ExpectedNet at posting time). Required on SingleLegRail."
+        ),
+        kind="select",
+        options=("Debit", "Credit", "Variable"),
+        required=True,
+        subtype_only="single_leg",
+    ),
     FieldSpec(
         name="origin",
         label="Origin",
         helper="ExternalForcePosted / InternalInitiated. See SPEC's Origin table.",
         kind="text",
     ),
+    # X.4.f.11.8 — TwoLeg per-leg Origin overrides + expected_net.
+    # When the rail's two legs touch different Origin classes (e.g.,
+    # external counterparty leg is ExternalForcePosted while internal
+    # leg is InternalInitiated), set per-leg overrides. expected_net
+    # is the standalone-firing balance contract (typically 0); leave
+    # blank when this rail is only used as a TransferTemplate leg.
+    FieldSpec(
+        name="source_origin",
+        label="Source origin (override)",
+        helper="Per-leg override. Blank ⇒ use the rail-level Origin for both legs.",
+        kind="text",
+        subtype_only="two_leg",
+    ),
+    FieldSpec(
+        name="destination_origin",
+        label="Destination origin (override)",
+        helper="Per-leg override. Blank ⇒ use the rail-level Origin for both legs.",
+        kind="text",
+        subtype_only="two_leg",
+    ),
+    FieldSpec(
+        name="expected_net",
+        label="Expected net (standalone firing)",
+        helper=(
+            "L1 Conservation contract for standalone firings (typically 0). "
+            "Leave blank when this rail is only used as a TransferTemplate leg "
+            "— the template owns the bundle's ExpectedNet."
+        ),
+        kind="money",
+        subtype_only="two_leg",
+    ),
+    # X.4.f.11.4 — aggregating gate flag. When true, rail sweeps on
+    # cadence and bundles_activity matters; when false (default), it
+    # fires per-Transfer.
+    FieldSpec(
+        name="aggregating",
+        label="Aggregating",
+        helper=(
+            "true ⇒ rail fires on cadence (sweep / batch) and the "
+            "bundles_activity / cadence fields apply. false ⇒ fires "
+            "per-Transfer."
+        ),
+        kind="select",
+        options=("false", "true"),
+    ),
     FieldSpec(
         name="cadence",
         label="Cadence",
         helper="For aggregating rails (e.g. intraday-2h / daily-eod).",
         kind="text",
+    ),
+    # X.4.f.11.6 — metadata_keys + posted_requirements (both subtypes).
+    # tuple[Identifier, ...] — operator types one key per line; coerce
+    # splits on \n + comma, strips blanks. Empty textarea ⇒ empty tuple.
+    FieldSpec(
+        name="metadata_keys",
+        label="Metadata keys",
+        helper=(
+            "One per line (or comma-separated). Identifies the metadata "
+            "keys this rail's transactions carry (e.g. ach_trace_number, "
+            "wire_imad)."
+        ),
+        kind="textarea",
+    ),
+    FieldSpec(
+        name="posted_requirements",
+        label="Posted requirements",
+        helper=(
+            "One per line. Rail-specific fields the L1 PostedRequirements "
+            "view requires beyond the auto-derived TransferKey + chain-Required "
+            "fields (see derived.posted_requirements_for)."
+        ),
+        kind="textarea",
+    ),
+    # X.4.f.11.7 — aging windows (Duration | None). ISO 8601 literal;
+    # empty ⇒ None (no aging watch).
+    FieldSpec(
+        name="max_pending_age",
+        label="Max pending age",
+        helper=(
+            "ISO 8601 duration (e.g. PT24H, PT4H, P1D). L1 Pending Aging "
+            "flags any pending Transaction older than this. Empty ⇒ no watch."
+        ),
+        kind="text",
+    ),
+    FieldSpec(
+        name="max_unbundled_age",
+        label="Max unbundled age",
+        helper=(
+            "ISO 8601 duration (e.g. P3D). L1 Unbundled Aging flags any "
+            "Transaction older than this without a bundling parent. "
+            "Empty ⇒ no watch."
+        ),
+        kind="text",
+    ),
+    # X.4.f.11.9 — bundles_activity (aggregating rails only).
+    # tuple[BundlesActivityRef = Identifier, ...] — multi-select from
+    # rails + templates; matches by name OR transfer_type.
+    FieldSpec(
+        name="bundles_activity",
+        label="Bundles activity",
+        helper=(
+            "For aggregating rails only. Names the rails / templates / "
+            "transfer_types whose Transactions this rail bundles. Multi-select."
+        ),
+        kind="multi_select",
+        select_from="rails_or_templates",
+    ),
+    # X.4.f.11.6.5 — Tier-3 metadata_value_examples as a YAML block.
+    # tuple[(Identifier, tuple[str, ...]), ...] — operator types/edits
+    # the per-key example map directly in YAML (the same shape the L2
+    # YAML carries). Empty ⇒ demo seed falls back to the synthetic
+    # `<rail>-firing-<seq>` placeholder.
+    FieldSpec(
+        name="metadata_value_examples",
+        label="Metadata value examples",
+        helper=(
+            "Per-key example values the demo seed cycles through. "
+            "YAML map: each metadata key → list of example strings. "
+            "Empty ⇒ uses synthetic per-rail fallback. Example: "
+            "ach_trace_number: [\"12345-001\", \"12345-002\"]"
+        ),
+        kind="yaml_block",
     ),
     FieldSpec(
         name="description",
@@ -422,6 +613,55 @@ def _coerce_field(spec: FieldSpec, raw: str, kind: EntityKind) -> object:
     # Booleans coming from a select dropdown of "true"/"false".
     if spec.name == "required" and kind == "chain":
         return raw.lower() == "true"
+    # X.4.f.11.4 — Rail.aggregating gate flag.
+    if spec.name == "aggregating" and kind == "rail":
+        return raw.lower() == "true"
+    # X.4.f.11.6 — Rail.metadata_keys + posted_requirements: textarea
+    # one-per-line (or comma-separated). tuple[Identifier, ...].
+    if spec.name in ("metadata_keys", "posted_requirements") and kind == "rail":
+        parts = [
+            p.strip()
+            for line in raw.splitlines()
+            for p in line.split(",")
+            if p.strip()
+        ]
+        return tuple(Identifier(p) for p in parts)
+    # X.4.f.11.7 — Rail aging windows: Duration | None. Reuse the
+    # loader's ISO 8601 parser; empty handled above by the early return.
+    if spec.name in ("max_pending_age", "max_unbundled_age") and kind == "rail":
+        from quicksight_gen.common.l2.loader import (  # noqa: PLC0415 — lazy to dodge cycle
+            _load_duration,
+        )
+        return _load_duration(raw, path=spec.name)
+    # X.4.f.11.6.5 — yaml_block coerce. Parse the operator's YAML,
+    # validate the shape (dict[str, list[str]]), wrap to the nested
+    # tuple-of-tuples. Bad YAML / wrong shape → ValueError → form
+    # re-renders with operator's typed content + inline error.
+    if spec.kind == "yaml_block":
+        import yaml  # noqa: PLC0415 — lazy
+        try:
+            parsed = yaml.safe_load(raw)
+        except yaml.YAMLError as exc:
+            raise ValueError(f"Invalid YAML: {exc}") from exc
+        if parsed is None or parsed == {}:
+            return ()
+        if not isinstance(parsed, dict):
+            raise ValueError(
+                f"Expected a YAML map (key → [list of strings]); "
+                f"got {type(parsed).__name__}",
+            )
+        result: list[tuple[Identifier, tuple[str, ...]]] = []
+        for k, v in parsed.items():  # pyright: ignore[reportUnknownVariableType]  # WHY: yaml.safe_load returns Any-typed dict
+            if not isinstance(v, list):
+                raise ValueError(
+                    f"Key {k!r}: expected a list of strings, "
+                    f"got {type(v).__name__}",
+                )
+            result.append((
+                Identifier(str(k)),
+                tuple(str(item) for item in v),  # pyright: ignore[reportUnknownVariableType]  # WHY: list element type from yaml is Any
+            ))
+        return tuple(result)
     if spec.name in ("id", "role", "parent_role", "parent", "child", "xor_group", "name"):
         # Account.name is Name; everything else identifier-shaped is Identifier.
         # Both are runtime str, so the choice is annotation-only.
@@ -523,6 +763,46 @@ def _hidden_fields_for_entity(
     if role and _role_is_used_as_parent(instance, role):
         return frozenset({"parent_role"})
     return frozenset()
+
+
+def _rail_subtype_of(entity: object) -> RailSubtype | None:
+    """Derive a rail entity's subtype for FieldSpec.subtype_only filtering.
+
+    Returns ``"two_leg"`` for ``TwoLegRail``, ``"single_leg"`` for
+    ``SingleLegRail``, ``None`` for any other entity (caller skips the
+    subtype filter when None).
+    """
+    from quicksight_gen.common.l2.primitives import (  # noqa: PLC0415 — lazy to dodge cycle
+        SingleLegRail,
+        TwoLegRail,
+    )
+    if isinstance(entity, TwoLegRail):
+        return "two_leg"
+    if isinstance(entity, SingleLegRail):
+        return "single_leg"
+    return None
+
+
+def _filter_specs_by_subtype(
+    specs: tuple[FieldSpec, ...], subtype: RailSubtype | None,
+) -> tuple[FieldSpec, ...]:
+    """Drop FieldSpecs whose ``subtype_only`` doesn't match the given
+    subtype. ``subtype=None`` means "show only subtype-agnostic
+    fields" (the safe default for non-rail entities)."""
+    if subtype is None:
+        return tuple(s for s in specs if s.subtype_only is None)
+    return tuple(
+        s for s in specs
+        if s.subtype_only is None or s.subtype_only == subtype
+    )
+
+
+def _filter_specs_for_entity(
+    specs: tuple[FieldSpec, ...], entity: object,
+) -> tuple[FieldSpec, ...]:
+    """Drop FieldSpecs whose ``subtype_only`` doesn't match this entity's
+    actual rail subtype. Non-rail entities pass through untouched."""
+    return _filter_specs_by_subtype(specs, _rail_subtype_of(entity))
 
 
 def _resolve_select_options(
@@ -678,6 +958,20 @@ def _render_field(
             f'<textarea id="field-{spec.name}" name="{escape(spec.name)}" '
             f'rows="3">{escape(val_str)}</textarea>'
         )
+    elif spec.kind == "yaml_block":
+        # X.4.f.11.6.5 — Tier-3 YAML escape hatch for the
+        # nested-shape field (metadata_value_examples). Same wire as
+        # textarea but mono-font + tall + wraps disabled, matching
+        # the operator's mental model (they already know the L2 yaml
+        # shape). Coerce in _coerce_field parses with yaml.safe_load
+        # and validates dict[str, list[str]]; display via
+        # _value_to_input_str dumps the tuple-of-tuples back to YAML.
+        val_str = _value_to_input_str(value)
+        input_html = (
+            f'<textarea id="field-{spec.name}" name="{escape(spec.name)}" '
+            f'rows="10" class="yaml-block" spellcheck="false">'
+            f'{escape(val_str)}</textarea>'
+        )
     else:
         # text + money both render as <input type="text"> — the loader's
         # _load_money handles numeric strings either way.
@@ -702,16 +996,61 @@ def _multi_value_as_strs(value: object) -> tuple[str, ...]:
     if value is None:
         return ()
     if isinstance(value, (list, tuple)):
-        return tuple(str(v) for v in value if str(v))
+        return tuple(
+            str(v)  # pyright: ignore[reportUnknownArgumentType]  # WHY: tuple element type isn't narrowed by isinstance; values stringify safely
+            for v in value  # pyright: ignore[reportUnknownVariableType]  # WHY: same
+            if str(v)  # pyright: ignore[reportUnknownArgumentType]  # WHY: same
+        )
     s = str(value)
     return (s,) if s else ()
 
 
 def _value_to_input_str(value: object) -> str:
-    """Stringify a dataclass field value for the form input's `value=`."""
+    """Stringify a dataclass field value for the form input's `value=`.
+
+    bool → ``"true"`` / ``"false"`` (lowercase) so a yaml-shaped
+    ``options=("true", "false")`` select preselects correctly. tuple
+    (RoleExpression / leg_rails / etc.) → comma-separated for the
+    read card; the multi_select renderer reaches for the tuple
+    directly via ``_multi_value_as_strs``. The ``metadata_value_examples``
+    nested shape (tuple-of-(key, tuple-of-values)) renders as a YAML
+    map for the yaml_block kind — see ``_metadata_value_examples_to_yaml``.
+    """
     if value is None:
         return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    # X.4.f.11.6.5 — metadata_value_examples is the only field whose
+    # tuple shape is nested (tuple[(key, tuple[str, ...]), ...]). Match
+    # on tuple-of-2-tuples-with-tuple-second specifically and dump as
+    # YAML; flat tuples fall through to the comma-join below.
+    if isinstance(value, tuple) and value and all(
+        isinstance(item, tuple) and len(item) == 2 and isinstance(item[1], tuple)  # pyright: ignore[reportUnknownArgumentType]  # WHY: tuple element type isn't narrowed
+        for item in value  # pyright: ignore[reportUnknownVariableType]  # WHY: same
+    ):
+        return _metadata_value_examples_to_yaml(value)  # pyright: ignore[reportUnknownArgumentType]  # WHY: shape narrowed by the all() above
+    if isinstance(value, tuple):
+        return ", ".join(
+            str(v)  # pyright: ignore[reportUnknownArgumentType]  # WHY: tuple element type isn't narrowed by isinstance
+            for v in value  # pyright: ignore[reportUnknownVariableType]  # WHY: same
+        )
     return str(value)
+
+
+def _metadata_value_examples_to_yaml(
+    value: tuple[tuple[object, tuple[str, ...]], ...],
+) -> str:
+    """Dump the tuple-of-tuples nested shape as a YAML map.
+
+    Each (key, values-tuple) pair becomes ``key: [v1, v2, ...]`` (block
+    or flow style — yaml.safe_dump picks based on length). Round-trips
+    cleanly through yaml.safe_load on the way back.
+    """
+    import yaml  # noqa: PLC0415 — lazy to dodge import-time cost
+    as_dict: dict[str, list[str]] = {
+        str(k): list(v) for k, v in value
+    }
+    return yaml.safe_dump(as_dict, default_flow_style=False, sort_keys=False).rstrip() + "\n"
 
 
 def _render_read_card(
@@ -721,7 +1060,7 @@ def _render_read_card(
     """Read-only card — the post-PUT response + the click-to-expand
     target for the list view.
     """
-    specs = _FIELD_SPECS_BY_KIND[kind]
+    specs = _filter_specs_for_entity(_FIELD_SPECS_BY_KIND[kind], entity)
     entity_id = _entity_id(kind, entity)
     hidden = _hidden_fields_for_entity(kind, entity, instance)
     rows = "".join(
@@ -738,14 +1077,24 @@ def _render_read_card(
     # the entity has no natural diagram target (e.g., an Account with no
     # role) so the JS falls through to a plain-text title.
     focus_node = _focus_node_for_entity(kind, entity, instance)
+    # X.4.f.11 — surface rail subtype as a small badge on the read
+    # card so the operator can tell a TwoLeg apart from a SingleLeg
+    # at a glance. Non-rail entities don't get a badge.
+    subtype_badge = ""
+    rail_subtype = _rail_subtype_of(entity)
+    if rail_subtype is not None:
+        subtype_label = "two-leg" if rail_subtype == "two_leg" else "single-leg"
+        subtype_badge = (
+            f' <span class="entity-subtype-badge">{escape(subtype_label)}</span>'
+        )
     if focus_node is None:
-        title_html = f"<h3>{escape(entity_id)}</h3>"
+        title_html = f"<h3>{escape(entity_id)}{subtype_badge}</h3>"
     else:
         title_html = (
             f'<h3 class="entity-card-title" tabindex="0" role="button" '
             f'data-focus-node="{escape(focus_node)}" '
             f'title="Focus the diagram on this entity">'
-            f"{escape(entity_id)}</h3>"
+            f"{escape(entity_id)}{subtype_badge}</h3>"
         )
     # CSS-safe id slug — composite-keyed kinds use ``::`` in their
     # addressing string, which CSS parses as pseudo-element syntax in a
@@ -833,7 +1182,7 @@ def _render_edit_form(
     """Editable form fragment. ``form_overrides`` lets the validation-
     failure path re-render with the user's typed-but-invalid values
     (X.4.e.5)."""
-    specs = _FIELD_SPECS_BY_KIND[kind]
+    specs = _filter_specs_for_entity(_FIELD_SPECS_BY_KIND[kind], entity)
     entity_id = _entity_id(kind, entity)
     field_errors = field_errors or {}
     overrides = form_overrides or {}
@@ -854,9 +1203,19 @@ def _render_edit_form(
         if global_error else ""
     )
     html_id = f"entity-{kind}-{escape(_html_id_slug(entity_id))}"
+    # X.4.f.11 — surface rail subtype in the edit form header so the
+    # operator can see which subtype's fields they're editing (matches
+    # the create page's "Create new rail (two-leg)" pattern).
+    rail_subtype = _rail_subtype_of(entity)
+    edit_subtype_badge = ""
+    if rail_subtype is not None:
+        subtype_label = "two-leg" if rail_subtype == "two_leg" else "single-leg"
+        edit_subtype_badge = (
+            f' <span class="entity-subtype-badge">{escape(subtype_label)}</span>'
+        )
     return (
         f'<article class="entity-card editing" id="{html_id}">'
-        f"<header><h3>Editing: {escape(entity_id)}</h3></header>"
+        f"<header><h3>Editing: {escape(entity_id)}{edit_subtype_badge}</h3></header>"
         f'<form hx-put="/l2_shape/{kind}/{escape(entity_id)}" '
         f'hx-target="#{html_id}" '
         f'hx-swap="outerHTML">'
@@ -982,11 +1341,78 @@ _CREATE_INTRO_BY_KIND: Mapping[EntityKind, str] = {
 }
 
 
+# X.4.f.11.5 — Rail create flow is a 2-step picker → form, because
+# Rail is a discriminated union (TwoLegRail | SingleLegRail) with
+# different load-bearing fields per subtype. Step 1 is a picker page
+# (no form fields, two big buttons); step 2 is the create form
+# filtered to the chosen subtype's fields plus a hidden subtype input
+# the POST handler reads to dispatch the right constructor.
+_RAIL_SUBTYPE_PICKER_INTRO: str = (
+    "<p><strong>Pick the rail subtype first.</strong> A Rail is one of "
+    "two shapes — they have different fields, so we need to know which "
+    "before showing the form.</p>"
+    "<ul>"
+    "<li><strong>Two-leg rail</strong> — produces two transaction legs "
+    "(debit + credit) per firing. Use this for transfers between two "
+    "accounts (ACH, wire, internal transfer, settlement sweep).</li>"
+    "<li><strong>Single-leg rail</strong> — produces one transaction "
+    "leg per firing. Use this for fees, charges, single-sided postings, "
+    "or rails reconciled by a containing TransferTemplate's "
+    "ExpectedNet.</li>"
+    "</ul>"
+)
+
+
+def _render_rail_subtype_picker(
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed to thread the L2 theme override into the page <head>
+) -> str:
+    """The Rail-only subtype picker landing page.
+
+    Step 1 of the 2-step create flow. Two big buttons, each linking to
+    ``/l2_shape/rail/new?subtype=<two_leg|single_leg>`` so the picked
+    subtype shows up as a query param on step 2 (back button works).
+    """
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Create new rail — pick subtype — Studio</title>
+  {studio_theme_head(instance)}
+  <link rel="stylesheet" href="{asset_url("diagram.css")}">
+  <link rel="stylesheet" href="{asset_url("editor.css")}">
+</head>
+<body class="create-page">
+  <header class="studio-header">
+    <h1>Create new rail</h1>
+    <a class="nav-link" href="/">← back to Studio</a>
+    <a class="nav-link" href="/l2_shape/rail/">→ list all rails</a>
+  </header>
+  <main class="create-page-main">
+    <section class="create-intro">{_RAIL_SUBTYPE_PICKER_INTRO}</section>
+    <section class="create-form-wrap">
+      <div class="rail-subtype-picker">
+        <a class="rail-subtype-button" href="/l2_shape/rail/new?subtype=two_leg">
+          <strong>Two-leg rail →</strong>
+          <small>Debit + credit per firing (ACH, wire, internal, settlement)</small>
+        </a>
+        <a class="rail-subtype-button" href="/l2_shape/rail/new?subtype=single_leg">
+          <strong>Single-leg rail →</strong>
+          <small>One leg per firing (fee, charge, sub-template leg)</small>
+        </a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
+"""
+
+
 def _render_create_page(
     kind: EntityKind,
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed for select_from option resolution
     form_overrides: Mapping[str, str | tuple[str, ...]] | None = None,
     global_error: str | None = None,
+    subtype: RailSubtype | None = None,
 ) -> str:
     """X.4.f.9.create-page — full HTML page for creating a new entity.
 
@@ -999,29 +1425,50 @@ def _render_create_page(
     success → 303 redirect to the home page; validation failure →
     re-render this same page with the operator's typed values + the
     error inline so they can fix it without losing input.
+
+    ``subtype`` (X.4.f.11.5) gates the field set when ``kind="rail"``:
+    the picker page (rendered separately by ``_render_rail_subtype_picker``)
+    routes the operator to ``?subtype=two_leg`` or ``?subtype=single_leg``,
+    and that subtype is woven through here as a hidden form input the
+    POST handler reads to dispatch ``create_l2_entity`` to the right
+    constructor. For non-rail kinds, ``subtype`` is ignored.
     """
-    specs = _FIELD_SPECS_BY_KIND[kind]
+    specs = _filter_specs_by_subtype(_FIELD_SPECS_BY_KIND[kind], subtype)
     overrides = form_overrides or {}
     fields_html = "".join(
         _render_field(s, overrides.get(s.name, ""), instance)
         for s in specs
+    )
+    # Hidden subtype input — POST handler picks it up via _coerce_form's
+    # passthrough on form keys not in the FieldSpec list (the create
+    # branch in create_l2_entity reads fields["subtype"] directly).
+    subtype_html = (
+        f'<input type="hidden" name="subtype" value="{escape(subtype)}">'
+        if subtype is not None else ""
     )
     global_err_html = (
         f'<div class="form-global-error">{escape(global_error)}</div>'
         if global_error else ""
     )
     intro_html = _CREATE_INTRO_BY_KIND.get(kind, "")
+    # When a Rail subtype is picked, surface it in the page title so the
+    # operator can see they're filling in the right form.
+    title_suffix = (
+        f" ({'two-leg' if subtype == 'two_leg' else 'single-leg'})"
+        if subtype is not None else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Create new {escape(kind)} — Studio</title>
+  <title>Create new {escape(kind)}{escape(title_suffix)} — Studio</title>
+  {studio_theme_head(instance)}
   <link rel="stylesheet" href="{asset_url("diagram.css")}">
   <link rel="stylesheet" href="{asset_url("editor.css")}">
 </head>
 <body class="create-page">
   <header class="studio-header">
-    <h1>Create new {escape(kind)}</h1>
+    <h1>Create new {escape(kind)}{escape(title_suffix)}</h1>
     <a class="nav-link" href="/">← back to Studio</a>
     <a class="nav-link" href="/l2_shape/{escape(kind)}/">→ list all {escape(kind)}s</a>
   </header>
@@ -1030,9 +1477,124 @@ def _render_create_page(
     <section class="create-form-wrap">
       <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form">
         {global_err_html}
+        {subtype_html}
         {fields_html}
         <div class="form-actions">
           <button type="submit">Create</button>
+          <a class="cancel-link" href="/">Cancel</a>
+        </div>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
+"""
+
+
+# X.4.f.12 — singleton intro prose + helpers.
+_SINGLETON_INTRO_BY_KIND: Mapping[EntityKind, tuple[str, str]] = {
+    "theme": (
+        "Theme",
+        "<p><strong>Theme</strong> is the institution's brand palette — the "
+        "colors that drive every dashboard, the studio chrome, and the "
+        "audit PDF cover. Edit the YAML below; an empty block clears the "
+        "theme and the bundled DEFAULT_PRESET takes over.</p>"
+        "<p>The shape mirrors <code>ThemePreset</code> in "
+        "<code>common/l2/theme.py</code> — every field is required when "
+        "the block is set: <code>theme_name</code>, "
+        "<code>version_description</code>, "
+        "<code>analysis_name_prefix</code> (or null), "
+        "<code>data_colors</code> (≥1 hex), <code>empty_fill_color</code>, "
+        "<code>gradient</code> ([light, dark] hex pair), plus the UI "
+        "palette (<code>accent</code>, <code>primary_fg</code>, etc.).</p>"
+    ),
+    "persona": (
+        "Persona",
+        "<p><strong>Persona</strong> is the institution's flavor strings "
+        "— name, acronym, upstream stakeholders, GL chart, merchant names, "
+        "free-form prose. The handbook templates read these to render "
+        "branded prose; an empty block falls back to neutral "
+        "L2-primitive-derived language.</p>"
+        "<p>The shape mirrors <code>DemoPersona</code> in "
+        "<code>common/persona.py</code>. Each top-level key is optional; "
+        "omit the keys you don't want to populate. <code>gl_accounts</code> "
+        "items are <code>{code, name, note}</code> sub-maps — see the "
+        "bundled <code>tests/l2/sasquatch_pr.yaml</code> for a reference "
+        "shape.</p>"
+    ),
+}
+
+
+def _singleton_yaml_text(instance: object, kind: EntityKind) -> str:
+    """Dump the singleton attribute as a YAML map for the textarea.
+
+    None / unset ⇒ empty string (operator sees a blank textarea +
+    intro prose explaining what an empty block means).
+    """
+    import dataclasses as dc  # noqa: PLC0415 — lazy
+    import yaml  # noqa: PLC0415 — lazy
+
+    attr = "theme" if kind == "theme" else "persona"
+    value = getattr(instance, attr, None)
+    if value is None:
+        return ""
+    # Walk the dataclass to a plain dict that yaml.safe_dump can handle.
+    # The L2 loader's per-kind helper round-trips this cleanly.
+    as_dict = dc.asdict(value)  # pyright: ignore[reportUnknownArgumentType,reportUnknownVariableType]  # WHY: ThemePreset/DemoPersona are dataclasses; asdict returns plain dict[str, Any]
+    return yaml.safe_dump(as_dict, default_flow_style=False, sort_keys=False).rstrip() + "\n"
+
+
+def _render_singleton_page(
+    kind: EntityKind,
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — read attribute + theme head
+    yaml_text: str | None = None,
+    global_error: str | None = None,
+) -> str:
+    """X.4.f.12 — singleton edit page (Theme / Persona).
+
+    Single textarea carrying the entire YAML subtree. The operator's
+    mental model is "this is the YAML block in the L2 file" — match
+    that exactly. v1 has no per-field color pickers / nested editors;
+    polish lands as a follow-on if the cosmetic-edit frequency turns
+    out high enough to warrant it.
+    """
+    label, intro_html = _SINGLETON_INTRO_BY_KIND[kind]
+    current_yaml = yaml_text if yaml_text is not None else _singleton_yaml_text(instance, kind)
+    global_err_html = (
+        f'<div class="form-global-error">{escape(global_error)}</div>'
+        if global_error else ""
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{escape(label)} — Studio</title>
+  {studio_theme_head(instance)}
+  <link rel="stylesheet" href="{asset_url("diagram.css")}">
+  <link rel="stylesheet" href="{asset_url("editor.css")}">
+</head>
+<body class="create-page">
+  <header class="studio-header">
+    <h1>{escape(label)}</h1>
+    <a class="nav-link" href="/">← back to Studio</a>
+  </header>
+  <main class="create-page-main">
+    <section class="create-intro">{intro_html}</section>
+    <section class="create-form-wrap">
+      <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form">
+        <input type="hidden" name="_method" value="PUT">
+        {global_err_html}
+        <div class="field-row">
+          <label for="field-yaml">YAML</label>
+          <textarea id="field-yaml" name="yaml" rows="22" class="yaml-block" spellcheck="false">{escape(current_yaml)}</textarea>
+          <small class="field-helper">
+            Empty block ⇒ clears the {escape(kind)} (silent-fallback).
+            Bad YAML or missing required fields ⇒ form re-renders with
+            your typed content + the validator error inline.
+          </small>
+        </div>
+        <div class="form-actions">
+          <button type="submit">Save</button>
           <a class="cancel-link" href="/">Cancel</a>
         </div>
       </form>
@@ -1065,6 +1627,7 @@ def _render_list_page(
 <head>
   <meta charset="utf-8">
   <title>Studio editor — {escape(kind)}</title>
+  {studio_theme_head(instance)}
   <link rel="stylesheet" href="{asset_url("diagram.css")}">
   <link rel="stylesheet" href="{asset_url("editor.css")}">
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
@@ -1157,7 +1720,18 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
 
     async def list_view(request: Request) -> HTMLResponse:
         kind = _kind_from_path(request.path_params["kind"])
-        if kind is None or kind not in _FIELD_SPECS_BY_KIND:
+        if kind is None:
+            return HTMLResponse(
+                f"<h1>404</h1><p>{escape(request.path_params['kind'])} "
+                f"is not an editable entity kind (yet).</p>",
+                status_code=404,
+            )
+        # X.4.f.12 — singletons (theme, persona) skip the list view
+        # entirely; GET /l2_shape/<singleton-kind>/ renders the
+        # singleton edit page directly.
+        if kind in SINGLETON_KINDS:
+            return HTMLResponse(_render_singleton_page(kind, cache.get()))
+        if kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse(
                 f"<h1>404</h1><p>{escape(request.path_params['kind'])} "
                 f"is not an editable entity kind (yet).</p>",
@@ -1303,6 +1877,28 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
         kind = _kind_from_path(request.path_params["kind"])
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
+        # X.4.f.11.5 — Rail is a discriminated union; the create flow
+        # is 2-step. Step 1 (no ?subtype=) is the picker page; step 2
+        # (?subtype=two_leg|single_leg) renders the create form
+        # filtered to that subtype's fields. Other kinds skip both
+        # branches and render the form directly.
+        if kind == "rail":
+            raw_subtype = request.query_params.get("subtype")
+            subtype: RailSubtype | None
+            if raw_subtype == "two_leg":
+                subtype = "two_leg"
+            elif raw_subtype == "single_leg":
+                subtype = "single_leg"
+            elif raw_subtype is None:
+                return HTMLResponse(_render_rail_subtype_picker(cache.get()))
+            else:
+                return HTMLResponse(
+                    f"unknown rail subtype: {escape(raw_subtype)}",
+                    status_code=400,
+                )
+            return HTMLResponse(
+                _render_create_page(kind, cache.get(), subtype=subtype),
+            )
         return HTMLResponse(_render_create_page(kind, cache.get()))
 
     async def create(request: Request) -> Response:
@@ -1312,12 +1908,75 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
         → save → 303-redirect back to home. Failure re-renders the
         create page with the error inline + the operator's typed
         values preserved.
+
+        X.4.f.11.5: Rail-only — reads the hidden ``subtype`` form key
+        the picker injected and threads it through both
+        ``create_l2_entity`` (so the constructor dispatches to TwoLeg
+        vs SingleLeg) AND the error re-render path (so the
+        validation-failure page stays on the right filtered form
+        instead of bouncing back to the picker).
         """
         kind = _kind_from_path(request.path_params["kind"])
-        if kind is None or kind not in _FIELD_SPECS_BY_KIND:
+        if kind is None:
             return HTMLResponse("not editable", status_code=404)
 
         form = await request.form()
+
+        # X.4.f.12 — singleton POST (Theme / Persona). The form's
+        # hidden ``_method=PUT`` confirms intent (browser form-method
+        # is POST; the route table can't distinguish a singleton-save
+        # from a list-create POST otherwise). The yaml field carries
+        # the raw text; singleton_save_l2 parses + dispatches.
+        if kind in SINGLETON_KINDS:
+            yaml_text = str(form.get("yaml", ""))
+            try:
+                new_inst = singleton_save_l2(cache.get(), kind, yaml_text)
+            except ValueError as exc:
+                return HTMLResponse(
+                    _render_singleton_page(
+                        kind, cache.get(),
+                        yaml_text=yaml_text,
+                        global_error=str(exc),
+                    ),
+                    status_code=400,
+                )
+            try:
+                validate(new_inst)
+            except L2ValidationError as exc:
+                return HTMLResponse(
+                    _render_singleton_page(
+                        kind, cache.get(),
+                        yaml_text=yaml_text,
+                        global_error=str(exc),
+                    ),
+                    status_code=400,
+                )
+            cache.save(new_inst)
+            return RedirectResponse("/", status_code=303)
+
+        if kind not in _FIELD_SPECS_BY_KIND:
+            return HTMLResponse("not editable", status_code=404)
+
+        # Pull the hidden subtype field for rails. It's not in any
+        # FieldSpec — the create handler reads it directly from form
+        # and threads it through create_l2_entity + the re-render path.
+        rail_subtype: RailSubtype | None = None
+        if kind == "rail":
+            raw = form.get("subtype")
+            raw_str = str(raw) if raw is not None else ""
+            if raw_str == "two_leg":
+                rail_subtype = "two_leg"
+            elif raw_str == "single_leg":
+                rail_subtype = "single_leg"
+            else:
+                # Missing subtype on a rail POST means the operator
+                # bypassed the picker (or a bug stripped the hidden
+                # field). Bounce to the picker — the operator can
+                # restart cleanly.
+                return RedirectResponse(
+                    "/l2_shape/rail/new", status_code=303,
+                )
+
         try:
             new_fields, coerced_overrides = _coerce_form(kind, form)
         except (ValueError, TypeError) as exc:
@@ -1327,9 +1986,16 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
                     kind, cache.get(),
                     form_overrides=best_effort,
                     global_error=f"Field coercion failed: {exc}",
+                    subtype=rail_subtype,
                 ),
                 status_code=400,
             )
+
+        # Thread subtype into the typed fields dict so create_l2_entity
+        # can dispatch on it. Treat as object for the heterogeneous
+        # fields-mapping value type.
+        if rail_subtype is not None:
+            new_fields["subtype"] = rail_subtype
 
         try:
             new_inst = create_l2_entity(cache.get(), kind, new_fields)
@@ -1339,6 +2005,7 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
                     kind, cache.get(),
                     form_overrides=coerced_overrides,
                     global_error=str(exc),
+                    subtype=rail_subtype,
                 ),
                 status_code=400,
             )
@@ -1351,6 +2018,7 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
                     kind, cache.get(),
                     form_overrides=coerced_overrides,
                     global_error=str(exc),
+                    subtype=rail_subtype,
                 ),
                 status_code=400,
             )
@@ -1406,7 +2074,11 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
 
 _VALID_KINDS: frozenset[str] = frozenset(
     ("account", "account_template", "rail", "transfer_template", "chain",
-     "limit_schedule"),
+     "limit_schedule",
+     # X.4.f.12 — singletons (theme, persona) are valid kinds for the
+     # URL path; the route handlers branch on SINGLETON_KINDS to use
+     # the singleton form/save flow instead of list/CRUD.
+     "theme", "persona"),
 )
 
 

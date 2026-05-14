@@ -41,6 +41,7 @@ from quicksight_gen.common.l2.primitives import (
     Money,
     Name,
     Rail,
+    SingleLegRail,
     TransferTemplate,
     TwoLegRail,
 )
@@ -53,7 +54,21 @@ EntityKind: TypeAlias = Literal[
     "transfer_template",
     "chain",
     "limit_schedule",
+    # X.4.f.12 — singletons (one per L2 instance, not a list).
+    # Routes mount at ``/l2_shape/<kind>/`` (no entity_id); each
+    # renders a single edit form. v1 ships as a yaml_block escape
+    # hatch — operator edits the entire ``theme:`` / ``persona:`` YAML
+    # subtree as text. Per-field color pickers / nested GLAccount
+    # editor are a polish follow-on.
+    "theme",
+    "persona",
 ]
+
+
+# X.4.f.12 — kinds that exist as a single optional attribute on
+# L2Instance rather than a tuple. Routes / handlers branch on this
+# to skip list view, create page, delete, and per-id addressing.
+SINGLETON_KINDS: frozenset[EntityKind] = frozenset({"theme", "persona"})
 
 
 # ---------------------------------------------------------------------------
@@ -219,18 +234,107 @@ def create_l2_entity(
             raise ValueError(f"Rail name {new_name!r} already exists")
         if not fields.get("transfer_type"):
             raise ValueError("Rail.transfer_type is required")
-        # First-cut: blank TwoLegRail with empty endpoint roles. The
-        # validator will reject this until the operator adds the roles
-        # via a follow-on edit (TwoLeg vs SingleLeg subtype + endpoint
-        # editing UI is X.4.f.6.followon).
-        new_r = TwoLegRail(
-            name=Identifier(str(new_name)),
-            transfer_type=str(fields["transfer_type"]),
-            source_role=(),
-            destination_role=(),
-            metadata_keys=(),
-            description=fields.get("description"),
-        )
+        # X.4.f.11.5 — subtype dispatch. The studio editor's create
+        # page is 2-step: a picker page routes the operator to
+        # ``?subtype=two_leg|single_leg``, the form filters to that
+        # subtype's FieldSpecs, and the hidden ``subtype`` form input
+        # arrives here as a fields key. Construct the right
+        # discriminated-union arm. ``aggregating`` is shared; the
+        # form coerces "true"/"false" to bool.
+        subtype = fields.get("subtype")
+        aggregating = bool(fields.get("aggregating") or False)
+        new_r: Rail
+        # X.4.f.11.6/.7/.9 — coerce already-typed Tier-2 fields through.
+        # metadata_keys / posted_requirements / bundles_activity arrive
+        # as tuples (textarea-coerce / multi_select). aging Durations
+        # arrive as datetime.timedelta (loader's _load_duration).
+        metadata_keys_v = fields.get("metadata_keys") or ()
+        posted_requirements_v = fields.get("posted_requirements") or ()
+        bundles_activity_v = fields.get("bundles_activity") or ()
+        max_pending_age_v = fields.get("max_pending_age")
+        max_unbundled_age_v = fields.get("max_unbundled_age")
+        metadata_value_examples_v = fields.get("metadata_value_examples") or ()
+        if subtype == "single_leg":
+            leg_role_raw: object = fields.get("leg_role") or ()
+            leg_role: tuple[Identifier, ...] = (
+                tuple(
+                    Identifier(str(x))  # pyright: ignore[reportUnknownArgumentType]  # WHY: form-data tuple elements are untyped Any per Mapping[str, Any] contract; str() is the safe coerce boundary
+                    for x in leg_role_raw  # pyright: ignore[reportUnknownVariableType]  # WHY: same untyped-Any per-element issue
+                )
+                if isinstance(leg_role_raw, (list, tuple))
+                else ()
+            )
+            leg_direction = fields.get("leg_direction")
+            if not leg_direction:
+                raise ValueError(
+                    "SingleLegRail.leg_direction is required",
+                )
+            new_r = SingleLegRail(
+                name=Identifier(str(new_name)),
+                transfer_type=str(fields["transfer_type"]),
+                metadata_keys=metadata_keys_v,  # pyright: ignore[reportArgumentType]  # WHY: form-typed tuple[Identifier, ...] from coerce path
+                leg_role=leg_role,
+                leg_direction=leg_direction,  # pyright: ignore[reportArgumentType]  # WHY: form-coerced str; LegDirection is Literal["Debit","Credit","Variable"] — value validated by FieldSpec options + the enclosing validator
+                origin=(
+                    str(fields["origin"]) if fields.get("origin") else None
+                ),
+                posted_requirements=posted_requirements_v,  # pyright: ignore[reportArgumentType]  # WHY: form-typed tuple[Identifier, ...]
+                max_pending_age=max_pending_age_v,  # pyright: ignore[reportArgumentType]  # WHY: form-coerced via _load_duration → timedelta or None
+                max_unbundled_age=max_unbundled_age_v,  # pyright: ignore[reportArgumentType]  # WHY: same
+                aggregating=aggregating,
+                bundles_activity=bundles_activity_v,  # pyright: ignore[reportArgumentType]  # WHY: form-typed tuple[Identifier, ...]
+                description=fields.get("description"),
+                metadata_value_examples=metadata_value_examples_v,  # pyright: ignore[reportArgumentType]  # WHY: form-typed nested tuple from yaml_block coerce
+            )
+        else:
+            # Default to two_leg when subtype is missing — caller is
+            # expected to set it for new rail creates, but keeping the
+            # default lets the legacy code path (no subtype provided)
+            # behave identically: an empty TwoLegRail validator rejects.
+            src_raw: object = fields.get("source_role") or ()
+            dst_raw: object = fields.get("destination_role") or ()
+            source_role: tuple[Identifier, ...] = (
+                tuple(
+                    Identifier(str(x))  # pyright: ignore[reportUnknownArgumentType]  # WHY: form-data tuple elements are untyped Any per Mapping[str, Any] contract
+                    for x in src_raw  # pyright: ignore[reportUnknownVariableType]  # WHY: same
+                )
+                if isinstance(src_raw, (list, tuple))
+                else ()
+            )
+            destination_role: tuple[Identifier, ...] = (
+                tuple(
+                    Identifier(str(x))  # pyright: ignore[reportUnknownArgumentType]  # WHY: form-data tuple elements are untyped Any per Mapping[str, Any] contract
+                    for x in dst_raw  # pyright: ignore[reportUnknownVariableType]  # WHY: same
+                )
+                if isinstance(dst_raw, (list, tuple))
+                else ()
+            )
+            new_r = TwoLegRail(
+                name=Identifier(str(new_name)),
+                transfer_type=str(fields["transfer_type"]),
+                metadata_keys=metadata_keys_v,  # pyright: ignore[reportArgumentType]  # WHY: form-typed tuple[Identifier, ...] from coerce path
+                source_role=source_role,
+                destination_role=destination_role,
+                origin=(
+                    str(fields["origin"]) if fields.get("origin") else None
+                ),
+                source_origin=(
+                    str(fields["source_origin"])
+                    if fields.get("source_origin") else None
+                ),
+                destination_origin=(
+                    str(fields["destination_origin"])
+                    if fields.get("destination_origin") else None
+                ),
+                expected_net=fields.get("expected_net"),  # pyright: ignore[reportArgumentType]  # WHY: form-coerced Decimal via money kind, or None
+                posted_requirements=posted_requirements_v,  # pyright: ignore[reportArgumentType]  # WHY: form-typed tuple[Identifier, ...]
+                max_pending_age=max_pending_age_v,  # pyright: ignore[reportArgumentType]  # WHY: form-coerced via _load_duration → timedelta or None
+                max_unbundled_age=max_unbundled_age_v,  # pyright: ignore[reportArgumentType]  # WHY: same
+                aggregating=aggregating,
+                bundles_activity=bundles_activity_v,  # pyright: ignore[reportArgumentType]  # WHY: form-typed tuple[Identifier, ...]
+                description=fields.get("description"),
+                metadata_value_examples=metadata_value_examples_v,  # pyright: ignore[reportArgumentType]  # WHY: form-typed nested tuple from yaml_block coerce
+            )
         return dataclasses.replace(instance, rails=(*instance.rails, new_r))
     if kind == "transfer_template":
         new_name = fields.get("name")
@@ -330,6 +434,61 @@ def create_l2_entity(
             instance, limit_schedules=(*instance.limit_schedules, new_ls),
         )
     raise ValueError(f"Unknown entity kind: {kind!r}")
+
+
+def singleton_save_l2(
+    instance: L2Instance,
+    kind: EntityKind,
+    yaml_text: str,
+) -> L2Instance:
+    """X.4.f.12 — write a singleton attribute (``theme`` / ``persona``)
+    from a raw YAML block.
+
+    The studio's singleton form is a single ``yaml_block`` field — the
+    operator types/edits the entire ``theme:`` or ``persona:`` subtree
+    as text. We parse with ``yaml.safe_load``, then dispatch to the
+    loader's per-kind helper to produce the typed dataclass and use
+    ``dataclasses.replace`` to swap it in. Empty / blank YAML clears
+    the attribute back to ``None`` (silent-fallback contract — N.4.k
+    for theme, equivalent for persona).
+
+    Bad YAML / wrong shape raises ``ValueError`` (loader's own
+    exceptions inherit ``L2LoaderError`` which carries an actionable
+    message). The studio handler catches both and re-renders the form
+    with the operator's typed content + the inline error.
+    """
+    if kind not in SINGLETON_KINDS:
+        raise ValueError(
+            f"singleton_save_l2: kind {kind!r} is not a singleton kind",
+        )
+    import yaml  # noqa: PLC0415 — lazy
+    from quicksight_gen.common.l2.loader import (  # noqa: PLC0415 — lazy to dodge cycle
+        L2LoaderError,
+        _load_persona,
+        _load_theme,
+    )
+    raw = yaml_text.strip()
+    if not raw:
+        # Empty ⇒ clear the singleton; silent-fallback takes over.
+        if kind == "theme":
+            return dataclasses.replace(instance, theme=None)
+        return dataclasses.replace(instance, persona=None)
+    try:
+        parsed = yaml.safe_load(raw)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid YAML: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            f"Expected a YAML map; got {type(parsed).__name__}",
+        )
+    try:
+        if kind == "theme":
+            new_theme = _load_theme(parsed, path=kind)  # pyright: ignore[reportUnknownArgumentType]  # WHY: yaml.safe_load returns Any-typed dict; the loader validates the shape
+            return dataclasses.replace(instance, theme=new_theme)
+        new_persona = _load_persona(parsed, path=kind)  # pyright: ignore[reportUnknownArgumentType]  # WHY: same
+        return dataclasses.replace(instance, persona=new_persona)
+    except L2LoaderError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def delete_l2_entity(

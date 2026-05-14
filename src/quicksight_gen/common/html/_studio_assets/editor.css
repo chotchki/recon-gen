@@ -146,6 +146,49 @@ body.create-page {
   margin-top: 1rem;
 }
 
+/* X.4.f.11.5 — Rail subtype picker (step 1 of the 2-step rail
+ * create flow). Two big tappable buttons stacked vertically (or
+ * side-by-side on wider screens), each with a strong title +
+ * one-line example.
+ */
+.rail-subtype-picker {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+}
+@media (min-width: 36rem) {
+  .rail-subtype-picker {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.rail-subtype-button {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1.25rem 1.25rem;
+  border: 2px solid var(--studio-border);
+  border-radius: 0.4rem;
+  background: white;
+  color: var(--studio-fg);
+  text-decoration: none;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: border-color 0.1s ease-in-out, background 0.1s ease-in-out;
+}
+.rail-subtype-button:hover {
+  border-color: var(--studio-accent);
+  background: var(--studio-tint);
+}
+.rail-subtype-button strong {
+  color: var(--studio-accent);
+  font-size: 1.05rem;
+}
+.rail-subtype-button small {
+  color: var(--studio-muted);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
 /* X.4.f.8.reverse — clickable card title → diagram focus. */
 .entity-card-title {
   cursor: pointer;
@@ -189,6 +232,23 @@ body.create-page {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+/* X.4.f.11 — Rail subtype badge in the read card title + edit form
+ * header. Compact pill so it doesn't overwhelm the entity name; uses
+ * tint background + accent foreground for theme consistency.
+ */
+.entity-subtype-badge {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 500;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  color: var(--studio-accent);
+  background: var(--studio-tint);
+  border-radius: 0.25rem;
+  vertical-align: middle;
+  letter-spacing: 0.02em;
+}
+
 .entity-card .edit-link,
 .entity-card .cancel-link,
 .entity-card .delete-link {
@@ -202,7 +262,7 @@ body.create-page {
   text-decoration: underline;
 }
 .entity-card .delete-link {
-  color: #c62828;
+  color: var(--color-danger, #c62828);
 }
 .entity-card .delete-link:hover {
   text-decoration: underline;
@@ -320,7 +380,7 @@ body.create-page {
 
 .field-error {
   font-size: 0.75rem;
-  color: #c62828;
+  color: var(--color-danger, #c62828);
   background: #fef2f2;
   padding: 0.25rem 0.5rem;
   border-radius: 0.2rem;
@@ -328,7 +388,7 @@ body.create-page {
 
 .form-global-error {
   background: #fef2f2;
-  color: #c62828;
+  color: var(--color-danger, #c62828);
   border: 1px solid #fecaca;
   padding: 0.5rem 0.75rem;
   border-radius: 0.25rem;
@@ -345,7 +405,7 @@ body.create-page {
 
 .form-actions button {
   background: var(--studio-accent);
-  color: white;
+  color: var(--color-accent-fg, white);
   border: 1px solid var(--studio-accent);
   padding: 0.4rem 1rem;
   border-radius: 0.25rem;
@@ -354,5 +414,7 @@ body.create-page {
 }
 
 .form-actions button:hover {
-  background: #163d61;
+  /* Slight darken via opacity rather than a separate token —
+   * matches App2's accent-hover convention (input.css comments). */
+  opacity: 0.85;
 }

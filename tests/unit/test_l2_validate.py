@@ -1096,3 +1096,49 @@ def test_c4_chain_with_no_xor_group_unaffected() -> None:
     )
     ok = _replace(inst, chains=(regular,))
     validate(ok)
+
+
+def test_c4_1_required_xor_member_rejected() -> None:
+    """C4.1 (X.4.f.10.followup): a ChainEntry with both ``required=true``
+    AND ``xor_group`` set is contradictory — XOR's "exactly one of N
+    fires" can't coexist with "this specific one MUST fire" (a required
+    member would force itself to fire AND forbid the others).
+    """
+    inst = _baseline_instance()
+    bad_required = ChainEntry(
+        parent=Identifier("MerchantSettlementCycle"),
+        child=Identifier("ExtInbound"),
+        required=True,
+        xor_group=Identifier("Pair"),
+    )
+    other = ChainEntry(
+        parent=Identifier("MerchantSettlementCycle"),
+        child=Identifier("SubledgerCharge"),
+        required=False,
+        xor_group=Identifier("Pair"),
+    )
+    bad = _replace(inst, chains=(bad_required, other))
+    with pytest.raises(
+        L2ValidationError,
+        match=r"required=true is incompatible with xor_group='Pair'",
+    ):
+        validate(bad)
+
+
+def test_c4_1_optional_xor_member_accepted() -> None:
+    """C4.1 negative: xor_group with all-optional members validates."""
+    inst = _baseline_instance()
+    a = ChainEntry(
+        parent=Identifier("MerchantSettlementCycle"),
+        child=Identifier("ExtInbound"),
+        required=False,
+        xor_group=Identifier("Pair"),
+    )
+    b = ChainEntry(
+        parent=Identifier("MerchantSettlementCycle"),
+        child=Identifier("SubledgerCharge"),
+        required=False,
+        xor_group=Identifier("Pair"),
+    )
+    ok = _replace(inst, chains=(a, b))
+    validate(ok)

@@ -712,6 +712,257 @@ def _escape_html_attr(s: str) -> str:
 escape_html = _escape_html_attr
 
 
+def test_two_leg_rail_edit_form_renders_subtype_fields(
+    writable_l2_yaml: Path,
+) -> None:
+    """X.4.f.11 — a TwoLegRail's edit form surfaces source_role +
+    destination_role + aggregating, and HIDES the SingleLegRail-only
+    leg_role + leg_direction fields. ExternalRailInbound is a TwoLeg
+    in spec_example."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/rail/ExternalRailInbound/edit")
+    assert resp.status_code == 200, resp.text
+    body = resp.text
+    # TwoLeg-only fields render.
+    assert 'name="source_role"' in body, "source_role multi-select missing"
+    assert 'name="destination_role"' in body, "destination_role missing"
+    # The currently-set source_role value is checked in the multi-select.
+    assert 'value="ExternalCounterparty" checked' in body
+    # aggregating select renders (both subtypes).
+    assert '<select id="field-aggregating" name="aggregating">' in body
+    # SingleLeg-only fields are filtered out.
+    assert 'name="leg_role"' not in body
+    assert 'name="leg_direction"' not in body
+
+
+def test_single_leg_rail_edit_form_renders_subtype_fields(
+    writable_l2_yaml: Path,
+) -> None:
+    """X.4.f.11 — a SingleLegRail's edit form surfaces leg_role +
+    leg_direction (with the Debit/Credit/Variable enum) + aggregating,
+    and HIDES the TwoLegRail-only source_role / destination_role
+    fields. SubledgerCharge is a SingleLeg in spec_example."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/rail/SubledgerCharge/edit")
+    assert resp.status_code == 200, resp.text
+    body = resp.text
+    # SingleLeg-only fields render.
+    assert 'name="leg_role"' in body, "leg_role multi-select missing"
+    assert '<select id="field-leg_direction" name="leg_direction">' in body
+    # The Debit/Credit/Variable enum options surface.
+    assert 'value="Debit"' in body
+    assert 'value="Credit"' in body
+    assert 'value="Variable"' in body
+    # aggregating select renders (both subtypes).
+    assert '<select id="field-aggregating" name="aggregating">' in body
+    # TwoLeg-only fields are filtered out.
+    assert 'name="source_role"' not in body
+    assert 'name="destination_role"' not in body
+
+
+def test_two_leg_rail_read_card_renders_subtype_fields(
+    writable_l2_yaml: Path,
+) -> None:
+    """X.4.f.11 — TwoLegRail read card shows the source_role +
+    destination_role values (and not the SingleLeg-only fields)."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/rail/ExternalRailInbound")
+    assert resp.status_code == 200, resp.text
+    body = resp.text
+    # source_role / destination_role labels surface in the read card.
+    assert "Source role" in body
+    assert "Destination role" in body
+    # Single-leg-only labels are hidden.
+    assert "Leg role" not in body
+    assert "Leg direction" not in body
+
+
+def test_put_two_leg_rail_round_trips_subtype_fields(
+    writable_l2_yaml: Path,
+) -> None:
+    """X.4.f.11.2 — full PUT round-trip for TwoLegRail's source_role +
+    destination_role. Submits the same values back (rather than
+    changing them) so the test asserts the wire shape — multi_select
+    coerce + Identifier wrap + dataclasses.replace round-trip — without
+    tripping cross-entity validator rules that constrain which role a
+    template's leg_rails can hit. The invariant "subtype fields arrive
+    intact through PUT" is what matters here."""
+    app = _build_app(writable_l2_yaml)
+    pre = load_instance(writable_l2_yaml)
+    rail = next(
+        r for r in pre.rails if str(r.name) == "ExternalRailInbound"
+    )
+    src_roles = [str(x) for x in getattr(rail, "source_role")]
+    dst_roles = [str(x) for x in getattr(rail, "destination_role")]
+    data = {
+        "name": str(rail.name),
+        "transfer_type": str(rail.transfer_type),
+        "source_role__present": "1",
+        "source_role": src_roles,
+        "destination_role__present": "1",
+        "destination_role": dst_roles,
+        "aggregating": "true" if getattr(rail, "aggregating") else "false",
+    }
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(f"/l2_shape/rail/{rail.name}", data=data)
+    assert resp.status_code == 200, resp.text
+
+    reloaded = load_instance(writable_l2_yaml)
+    saved = next(
+        r for r in reloaded.rails if str(r.name) == str(rail.name)
+    )
+    assert [str(x) for x in getattr(saved, "source_role")] == src_roles
+    assert [str(x) for x in getattr(saved, "destination_role")] == dst_roles
+
+
+def test_rail_metadata_value_examples_yaml_block_round_trip(
+    writable_l2_yaml: Path,
+) -> None:
+    """X.4.f.11.6.5 — Tier-3 yaml_block FieldKind. Operator types a
+    YAML map; coerce parses + wraps to tuple-of-tuples; PUT persists;
+    re-load round-trips the same shape. ExternalRailInbound is a
+    TwoLeg in spec_example."""
+    app = _build_app(writable_l2_yaml)
+    pre = load_instance(writable_l2_yaml)
+    rail = next(
+        r for r in pre.rails if str(r.name) == "ExternalRailInbound"
+    )
+    # Use a metadata_key already declared on this rail (validator R13:
+    # metadata_value_examples keys must be a subset of metadata_keys).
+    # ExternalRailInbound declares metadata_keys=['external_reference'].
+    yaml_block = (
+        "external_reference:\n"
+        "  - 'EXT-12345-001'\n"
+        "  - 'EXT-12345-002'\n"
+        "  - 'EXT-12345-003'\n"
+    )
+    src_roles = [str(x) for x in getattr(rail, "source_role")]
+    dst_roles = [str(x) for x in getattr(rail, "destination_role")]
+    data = {
+        "name": str(rail.name),
+        "transfer_type": str(rail.transfer_type),
+        "source_role__present": "1",
+        "source_role": src_roles,
+        "destination_role__present": "1",
+        "destination_role": dst_roles,
+        "aggregating": "true" if getattr(rail, "aggregating") else "false",
+        "metadata_value_examples": yaml_block,
+    }
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(f"/l2_shape/rail/{rail.name}", data=data)
+    assert resp.status_code == 200, resp.text
+
+    reloaded = load_instance(writable_l2_yaml)
+    saved = next(
+        r for r in reloaded.rails if str(r.name) == str(rail.name)
+    )
+    examples = getattr(saved, "metadata_value_examples")
+    keys_to_values = {str(k): list(v) for k, v in examples}
+    assert keys_to_values == {
+        "external_reference": ["EXT-12345-001", "EXT-12345-002", "EXT-12345-003"],
+    }
+
+
+def test_rail_metadata_value_examples_bad_yaml_returns_400(
+    writable_l2_yaml: Path,
+) -> None:
+    """X.4.f.11.6.5 — bad YAML in the yaml_block triggers a 400 +
+    form re-render with the error inline + the typed content
+    preserved (for the operator to fix)."""
+    app = _build_app(writable_l2_yaml)
+    pre = load_instance(writable_l2_yaml)
+    rail = next(
+        r for r in pre.rails if str(r.name) == "ExternalRailInbound"
+    )
+    bad_yaml = "ach_trace_number:\n  - '12345-001\n   missing-quote"
+    src_roles = [str(x) for x in getattr(rail, "source_role")]
+    dst_roles = [str(x) for x in getattr(rail, "destination_role")]
+    data = {
+        "name": str(rail.name),
+        "transfer_type": str(rail.transfer_type),
+        "source_role__present": "1",
+        "source_role": src_roles,
+        "destination_role__present": "1",
+        "destination_role": dst_roles,
+        "aggregating": "true" if getattr(rail, "aggregating") else "false",
+        "metadata_value_examples": bad_yaml,
+    }
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(f"/l2_shape/rail/{rail.name}", data=data)
+    assert resp.status_code == 400, resp.text
+    assert "Invalid YAML" in resp.text or "Field coercion failed" in resp.text
+
+
+def test_singleton_theme_get_renders_yaml_block(
+    writable_l2_yaml: Path,
+) -> None:
+    """X.4.f.12 — GET /l2_shape/theme/ renders the singleton edit page
+    with the existing theme dumped as YAML in the textarea (or empty
+    when the L2 has no theme block declared)."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/theme/")
+    assert resp.status_code == 200, resp.text
+    assert 'name="yaml"' in resp.text
+    assert "yaml-block" in resp.text
+
+
+def test_singleton_persona_save_round_trips(
+    writable_l2_yaml: Path,
+) -> None:
+    """X.4.f.12 — POST /l2_shape/persona/ with a YAML map updates
+    L2Instance.persona and the round-trip survives reload. Spec_example
+    has no persona by default, so this exercises the create path."""
+    app = _build_app(writable_l2_yaml)
+    yaml_text = (
+        "institution:\n"
+        "  - 'Test Bank'\n"
+        "  - 'TB'\n"
+        "stakeholders:\n"
+        "  - 'Federal Reserve Bank'\n"
+        "merchants:\n"
+        "  - 'Acme Coffee'\n"
+        "  - 'Beta Bakery'\n"
+    )
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/persona/",
+            data={"yaml": yaml_text},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+
+    reloaded = load_instance(writable_l2_yaml)
+    persona = reloaded.persona
+    assert persona is not None
+    assert list(persona.institution) == ["Test Bank", "TB"]
+    assert list(persona.stakeholders) == ["Federal Reserve Bank"]
+    assert list(persona.merchants) == ["Acme Coffee", "Beta Bakery"]
+
+
+def test_singleton_theme_bad_yaml_returns_400(
+    writable_l2_yaml: Path,
+) -> None:
+    """X.4.f.12 — bad YAML in the singleton form returns 400 + the
+    operator's typed content preserved + the validator error inline."""
+    app = _build_app(writable_l2_yaml)
+    bad_yaml = "theme_name: 'unclosed\n  data_colors:\n    - '#abc'"
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/theme/",
+            data={"yaml": bad_yaml},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 400, resp.text
+    # The form re-renders with a global-error block (either "Invalid
+    # YAML" if the parser choked, or a loader/validator error if the
+    # YAML parsed but the shape is wrong).
+    assert 'class="form-global-error"' in resp.text
+
+
 def test_delete_unreferenced_account_persists(writable_l2_yaml: Path) -> None:
     """Deleting cust-002 succeeds — no rail / template references it
     by id; the role CustomerSubledger is still satisfied by cust-001."""

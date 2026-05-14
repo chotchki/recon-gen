@@ -145,6 +145,52 @@ Third supported dialect alongside Postgres + Oracle. Schema emit, matview-as-tab
 
 X.4.e + X.4.f tested by 17 integration tests across `test_studio_editor_routes.py` (10) + `test_studio_home_route.py` (7): list view renders all accounts; read card returns fragment; edit form returns form fragment; unknown kind 404s; PUT account persists to disk + triggers cascade; PUT invalid value returns 400 with error inline + disk untouched; DELETE dependent rail returns 400; DELETE unreferenced account persists; parent_role renders as role dropdown for child accounts; parent_role hidden when the account is already a parent; home page renders diagram iframe + 6 entity sections; first section open by default; sections wire lazy-load + cascade trigger; iframe cascade-reload listener present; embed mode returns cards-only fragment; non-embed keeps full page; PUT emits cascade trigger header. All-in: 6 entity kinds (account / account_template / rail / transfer_template / chain / limit_schedule) editable through the same routes; the unified `/` home page composes them with the diagram on top.
 
+#### X.4.f.11 — Rail editor field gaps (subtype-discriminating + load-bearing)
+
+The X.4.f.2/.3 first-cut Rail editor covers cosmetic fields (`name` / `transfer_type` / `origin` / `cadence` / `description`) but not the subtype-discriminating fields (TwoLegRail's `source_role` / `destination_role`; SingleLegRail's `leg_role` / `leg_direction`) nor the load-bearing per-leg / aging / `bundles_activity` / `metadata_keys` fields. Without these, an operator onboarding a new rail in the studio editor can configure the cosmetic fields but **cannot wire the actual money-movement endpoints** — they still have to drop to yaml. ETL/Training blocker.
+
+**Approach:** add `subtype_only: Literal["two_leg", "single_leg"] | None` flag to `FieldSpec`; renderer filters fields based on the rail's actual subtype at edit time. Create form gets a subtype radio first that dispatches to the right constructor. Three tiers, shipping load-bearing first.
+
+**Tier 1 — load-bearing wiring (top priority):**
+- [ ] **X.4.f.11.1** — `FieldSpec.subtype_only` flag + renderer filter (skip fields whose `subtype_only` doesn't match the entity's actual subtype). Current rail's subtype derived via `isinstance(rail, TwoLegRail)`.
+- [ ] **X.4.f.11.2** — TwoLegRail: `source_role` + `destination_role` (`multi_select` from `roles`; `RoleExpression` is `tuple[Identifier, ...]`, single role becomes 1-tuple).
+- [ ] **X.4.f.11.3** — SingleLegRail: `leg_role` (`multi_select` from `roles`) + `leg_direction` (`select` Debit / Credit / Variable).
+- [ ] **X.4.f.11.4** — Both subtypes: `aggregating` (`select` true / false). `cadence` already in editor; this is the gate flag.
+- [ ] **X.4.f.11.5** — Create form subtype picker for new rails: radio Two-leg / Single-leg → constructor dispatch in `create_l2_entity`.
+
+**Tier 2 — frequently-touched:**
+- [ ] **X.4.f.11.6** — `metadata_keys` + `posted_requirements` (`textarea`, one-per-line, comma-tolerant; coerced to `tuple[Identifier, ...]`).
+- [ ] **X.4.f.11.7** — `max_pending_age` + `max_unbundled_age` (`text` with ISO 8601 format hint `PT24H` / `P1D`; parsed via existing loader's Duration helper; empty = `None`).
+- [ ] **X.4.f.11.8** — TwoLegRail: `source_origin` + `destination_origin` (`text` — Origin is open enum) + `expected_net` (`money`).
+- [ ] **X.4.f.11.9** — `bundles_activity` (`multi_select` from `rails_or_templates` for v1; gains `transfer_types` membership after Z.B lands).
+
+**Tier 3 — `metadata_value_examples` as a YAML-block textarea (locked 2026-05-13):**
+
+The field is `tuple[tuple[Identifier, tuple[str, ...]], ...]` — a list of (metadata-key → list-of-example-values) pairs. A custom nested-row editor (per-key text input + values textarea + add/remove buttons + JSON wire shape) is materially more work than the rest of the rail editor combined. Operator preference: **simple YAML block is fine** — the L2 yaml shape is what the operator already knows, so the editor just exposes it.
+
+- [ ] **X.4.f.11.6.5** — `yaml_block` FieldKind: renders a `<textarea>` (mono font, ~10 rows). Coerce parses with `yaml.safe_load`, validates the result is `dict[str, list[str]]` (or empty), then wraps to `tuple[(Identifier(k), tuple(map(str, vals))), ...]`. Bad YAML → `ValueError("Invalid YAML: ...")` → form re-render with operator's typed content + inline error. Display side: `_value_to_input_str` for the metadata_value_examples field uses `yaml.safe_dump({k: list(vals) for k, vals in tuple_of_tuples})` so round-trip is exact.
+- [ ] **X.4.f.11.6.6** — Wire on the Rail FieldSpec (both subtypes; no `subtype_only`). Helper text: "YAML map — keys are metadata field names, values are example strings the demo seed cycles through. Empty ⇒ uses synthetic per-rail fallback." Example block in placeholder.
+- [ ] **X.4.f.11.6.7** — Create-form constructor: thread `metadata_value_examples` from `fields.get("metadata_value_examples") or ()` into both TwoLeg + SingleLeg constructors (mirrors the other Tier-2 fields landed in X.4.f.11.6).
+- [ ] **X.4.f.11.6.8** — Test: edit form renders existing example map as YAML; PUT round-trips a 2-key/3-values-each example without dropping/reordering; bad-YAML PUT returns 400 + inline error + typed content preserved.
+
+**Verify:**
+- [ ] **X.4.f.11.10** — Tests in `test_studio_editor_routes.py`: subtype filter (TwoLeg form hides leg_role; SingleLeg form hides source_role); create form subtype picker; PUT round-trip per new field.
+- [ ] **X.4.f.11.11** — Live verify against `sasquatch_pr.yaml`: load → edit a rail end-to-end via the studio editor → save → assert yaml diff matches the form changes.
+- [ ] **X.4.f.11.12** — pyright + commit + tick PLAN.
+
+#### X.4.f.12 — Theme + Persona singleton editors
+
+Theme + Persona are L2-instance attributes (singletons, not lists). They need a different route shape: `GET/PUT /l2_shape/<kind>/` (no `<id>` path param). The home page surfaces them as one card each (current values + Edit button).
+
+**Approach:** parameterize the existing route handlers on `is_singleton: bool`; reuse the FieldSpec / coerce / render machinery. Add a `color` FieldKind for `<input type="color">` hex inputs. Defer the `GLAccount` sub-form editor — v1 uses a textarea of `code|name|note` rows.
+
+- [ ] **X.4.f.12.1** — Singleton route handlers (`GET /l2_shape/<kind>/` form / `PUT /l2_shape/<kind>/` save) — pattern mirrors per-id but no path param. Add `singleton_save_l2(kind, fields)` to `editor.py` that does `dataclasses.replace(instance, theme=…)` / `…persona=…)`.
+- [ ] **X.4.f.12.2** — `color` FieldKind: renders `<input type="color" value="#…">`; coerces 6-char hex. Validator at FieldSpec level rejects non-hex strings.
+- [ ] **X.4.f.12.3** — Theme FieldSpec list (~25 fields). Single-color fields use `color`; list-of-color fields (`data_colors`, `gradient`) use `textarea` (one hex per line) for v1; `logo` / `favicon` use `text` (URL or path).
+- [ ] **X.4.f.12.4** — Persona FieldSpec list (5 fields). `institution` / `stakeholders` / `merchants` / `flavor` use `textarea` (one entry per line). `gl_accounts` uses `textarea` of `code|name|note` pipe-separated rows for v1.
+- [ ] **X.4.f.12.5** — Home page: 2 new sections (Theme / Persona) above the diagram or below the existing 6 sections (decision: below, since they're cosmetic / less-frequently-edited). Each shows the current value preview + Edit link landing on `/l2_shape/theme/` or `/l2_shape/persona/`.
+- [ ] **X.4.f.12.6** — Tests + verify + commit.
+
 #### X.4.g — The "Deploy changes" pipeline
 
 - [ ] **X.4.g.1** — `etl_hook` config field + V.1.b allowlist entry.
@@ -251,6 +297,88 @@ The per-cell chain `unit → seed_variant → db → app2 → deploy → api →
 - [ ] **X.10.c — Decide failure semantics for in-flight `deploy` (the one real wrinkle).** If `db` fails while `deploy` is mid-flight, boto3 `create_data_set` calls aren't cleanly cancellable — cancelling orphans a half-deployed QS graph (the next `json clean` sweeps it, but it's messier than today's "halt at the failed layer, nothing downstream started" guarantee). Default: let the in-flight `deploy` finish, report the `db` failure, skip `api`/`browser`. Document the choice; preserve the `EXIT_FAILURE` / `EXIT_NEEDS_OPERATOR` exit-code contract.
 - [ ] **X.10.d — Unit tests for the DAG dispatch** (`tests/unit/test_runner_skeleton.py`): topo order, sibling-gather, truncation, failure-skips-downstream. Mock the layer dispatch (no live DB/AWS).
 - [ ] **X.10.e — Live wall-clock check + pyright + commit.** Run `--variants=sp_pg_aw` (or `sp_or_aw`) before/after; record the delta in this entry. CLAUDE.md "Commands" section: update the chain description (`unit → seed → {db | app2 | deploy} → {api | browser}`).
+
+---
+
+## Phase Z — L2 grammar cleanup: chain collapse + transfer_type promotion
+
+Two distinct grammar reshapes that share the migration cost (fixture rewrites + seed re-lock + editor UI + docs sweep), bundled here so the operator yaml grammar settles in one motion before the next public release.
+
+**Sequencing — Z is a P.10 prerequisite, NOT an X.4 prerequisite (locked 2026-05-13).** X.4 (studio editor) and ETL/Training work proceed first on the current grammar; Phase Z lands immediately before P.10 cuts. Bounded rework when Z lands: ~half-day on the studio editor's chain card UI (replace per-row `required` / `xor_group` form fields with a children-checkbox-group), ~hour on the rail card's transfer_type field (free text → dropdown sourced from declared TransferTypes), ~hour on `topology.py::_chain_label` + chain-edge metadata. Everything else in X.4 is grammar-agnostic. The P.10 gate is hard because once a tagged release ships the old `chains:` shape, migrating customer yamls becomes a versioning headache.
+
+### Z.A — Chain grammar collapse (singleton = required, multi = XOR)
+
+Surfaced 2026-05-13 during the `X.4.f.10.followup` C4.1 validator add (the "required + xor_group on the same row is a contradiction" rule). The user noticed a deeper redundancy: today's `ChainEntry(parent, child, required, xor_group)` encodes firing semantics across **two flags** that always contradict in one combination (C4.1 just rejected it) and overlap in another (a `required=true` child is structurally a singleton xor_group). The cleaner shape is **`Chain(parent, children: tuple[Identifier, ...])`** — list cardinality carries the entire firing semantic: **singleton ⇒ required, multi ⇒ XOR**. The xor_group **name** was never load-bearing — it only grouped rows by string match; the list IS the group.
+
+**Why now (vs deferring):** the X.4.f studio editor just shipped with row-per-link chain UI (X.4.f.10), and P.10 is the next public release. Once a published version carries the `chains:` row-per-link grammar, migrating the yaml shape becomes a versioning headache (operator yaml files in the wild). Cleaning the grammar before P.10 ships avoids that.
+
+**Why this isn't TransferTemplate's problem:** TransferTemplate's `leg_rails` is composition (all legs fire as one Transfer). Chain's `children` is a firing rule (singleton fires or one-of-N fires). Same list-of-identifiers shape, opposite semantics. They coexist; a Chain with `children=[some_template]` still atomically fires the named template.
+
+**What disappears (the payoff):**
+- C2 (`xor_group members share parent`) — impossible to violate; every Chain row IS one parent.
+- C4 (`xor_group ≥ 2 members`) — gone; singleton means "required", not "degenerate XOR".
+- C4.1 (`required + xor_group contradict`) — unrepresentable in the new shape.
+- The `xor_group: <name>` field on ChainEntry + the dedupe-by-name code in 5+ call sites.
+- Studio editor's `_html_id_slug` `parent::child` composite + the per-row required/xor_group form fields.
+
+**What needs adding:**
+- New uniqueness rule: "no child appears in two Chain rows for the same parent" (catches the previously-unrepresentable "required AND in xor_group" overlap).
+
+- [ ] **Z.1 — Per-child descriptions: dropped (locked 2026-05-13).** sasquatch_pr's 6 chain rows each carry a per-child description ("ACH payout option in the PayoutVehicle XOR group" vs "Wire payout option ..." vs "Paper-check payout option ..."), but each child IS a Rail or TransferTemplate that carries its own `description` field. The per-child copy in chain rows was re-narrating the rail — copy-pasta, not load-bearing. New shape carries **one `Chain.description` per firing rule** that describes the rule itself ("PayoutVehicle: exactly one settlement vehicle fires per merchant payout cycle"), and per-child copy moves into (or stays in) the rail's own `description`. No sub-primitive needed.
+- [ ] **Z.2 — `primitives.py`: replace `ChainEntry` with `Chain`.** Drop `child` / `required` / `xor_group`; add `children: tuple[Identifier, ...]`. Keep `parent`, `description`. The `chains: tuple[ChainEntry, ...]` field on `L2Instance` becomes `chains: tuple[Chain, ...]`.
+- [ ] **Z.3 — `loader.py`: rewrite `_load_chain_entry` → `_load_chain`.** New yaml grammar:
+  ```yaml
+  chains:
+    - parent: ACHOriginationDailySweep
+      children: [ConcentrationToFRBSweep]   # singleton = required
+      description: |
+        Required: every daily ACH origination sweep should be followed by …
+    - parent: MerchantSettlementCycle
+      children: [MerchantPayoutACH, MerchantPayoutWire, MerchantPayoutCheck]  # multi = XOR
+      description: |
+        PayoutVehicle: exactly one settlement vehicle fires per merchant payout cycle.
+  ```
+  Pyright-strict on the loader path; reject legacy keys (`required` / `xor_group` / `child`) with an actionable error pointing at this section.
+- [ ] **Z.4 — `validate.py`: drop C2 / C4 / C4.1; rewrite C5; add new uniqueness rule.** C5 becomes "every chain parent has ≥1 chain row whose children list is non-empty" (the only remaining failure mode). New rule (call it C6): "for any given parent, no child appears in two Chain rows."
+- [ ] **Z.5 — `serializer.py`: rewrite `_dump_chain_entry` → `_dump_chain`.** Round-trip stable for the new grammar.
+- [ ] **Z.6 — `editor.py`: rewrite `mutate` / `delete` / `rename` / `create_l2_entity` for Chain.** The composite-key addressing (`parent::child`) goes away — Chain rows now address by `parent::<position>` or `parent::<children-csv>` (pick the cleaner one). `rename_identifier` walks `Chain.parent` + each `Chain.children[i]` (or `Chain.children[i].name` for Option A).
+- [ ] **Z.7 — `seed.py`: chain firings (R.2.d) read the new shape.** `len(children) == 1` ⇒ that child fires; `len(children) > 1` ⇒ deterministic-pick from the list (use the same RNG as today's xor_group resolution).
+- [ ] **Z.8 — `auto_scenario.py` + `derived.py` + `topology.py`: update chain consumers.** Topology's per-edge `chain_metadata` ("required: true" / "xor_group: PayoutVehicle") becomes ("required: true" if singleton else "xor_group: <position>" or just rendered as "exactly one of N").
+- [ ] **Z.9 — `fuzz.py`: rewrite chain emit.** Drop `xor_group` name invention; emit `Chain(parent, children=[c1])` for required, `Chain(parent, children=[c1, c2, ...])` for XOR. Drop the "every parent gets a required-or-xor child" coverage logic (now implicit — a Chain row IS a firing rule).
+- [ ] **Z.10 — Studio editor (X.4.f.10) chain UI rewrite.** Per-row form: parent dropdown + children checkbox-group (sources from rails+templates, same as TransferTemplate.leg_rails). The `_html_id_slug` for `parent::child` composite goes away; new id is `parent::<row-index>` or `parent::<sorted-children-hash>`. Drop the per-row `required` / `xor_group` form fields entirely.
+- [ ] **Z.11 — Migrate fixture yamls** (`tests/l2/{sasquatch_pr, spec_example, _kitchen}.yaml` + `tests/l2/fuzz_failures/*.yaml`). Mechanical translation: group rows by `(parent, xor_group)` → one new Chain row each; preserve descriptions per Z.1 choice.
+- [ ] **Z.12 — Rewrite chain tests.** `test_l2_validate.py` (drop C2/C4/C4.1 tests, add C6 test); `test_l2_loader.py` (new grammar fixtures); `test_l2_pr_primitives.py`; `test_l2_editor.py`; `test_studio_editor_routes.py` (chain composite-id swap); `test_studio_home_route.py` (chain entity-card shape changes).
+- [ ] **Z.13 — SPEC + Schema_v6 + walkthroughs prose.** Update the chain section of `docs/Schema_v6.md`; update any handbook walkthrough that mentions `xor_group` by name.
+- [ ] **Z.14 — Re-lock seeds.** Chain firing-rule iteration order may shift baseline seed bytes — re-lock spec_example + sasquatch_pr per-dialect (`quicksight-gen data lock -c run/config.<pg|oracle|sqlite>.yaml --l2 …`). If unchanged, byte-equality test passes; if changed, document the shift in the commit message. (Verify + commit moves to Z.C.)
+
+### Z.B — Promote transfer_type to a first-class declared entity
+
+Surfaced 2026-05-13 during the chain-grammar discussion. The user has been having a hard time explaining the difference between `Rail.name` and `Rail.transfer_type` to people, and that pain is the design signal: today `transfer_type` is a bare snake_case string declared inline-by-mention on every Rail, with no central vocabulary or descriptions. sasquatch_pr declares 21 rails covering ~17 distinct transfer_types (`internal` shared by ZBASweep + InternalTransferSuspenseClose; `settlement` shared by ACHOriginationDailySweep + CustomerFeeMonthlySettlement; etc.) and there is **no place** that documents what each transfer_type means as a vocabulary item. The "many operational rails per money-movement kind" expressiveness is real and load-bearing (the validator's uniqueness key is `(transfer_type, role)`, NOT `name`), but the bare-string shape obscures it.
+
+**The promotion:** lift `transfer_type` to a top-level declared entity (`transfer_types:` block, name + description), so:
+- Rail.transfer_type / LimitSchedule.transfer_type / bundles_activity-by-type all reference a declared thing instead of matching strings by coincidence.
+- The audit PDF, handbook, and studio editor get a real list of "what kinds of money movement does this institution handle" with operator-authored descriptions.
+- The Rail.name vs Rail.transfer_type distinction becomes visually obvious in the yaml: `name` is a Rail's identity, `transfer_type:` references a top-level declaration.
+
+**What's NOT in scope for Z.B:** splitting `bundles_activity`'s "matches Rail.name OR Rail.transfer_type" OR-of-two-resolutions into explicit `bundles_rail` / `bundles_type` kinds. That's a separate cleanup; flagging here so it doesn't accidentally land in this phase.
+
+- [ ] **Z.B.1 — Audit: per-fixture `(distinct transfer_type count, rails-per-type histogram)`.** Output the per-fixture distinct count + which transfer_types are shared across multiple Rails — concrete shape for the new top-level block.
+- [ ] **Z.B.2 — `primitives.py`: add `TransferTypeDecl(name: TransferType, description: str | None)`.** Add `transfer_types: tuple[TransferTypeDecl, ...]` to `L2Instance`. Keep `Rail.transfer_type: TransferType` as-is (the field still references by name; the change is that the loader now requires the name to resolve).
+- [ ] **Z.B.3 — `loader.py`: parse top-level `transfer_types:` block.** Hard-cut (loader rejects yaml without the block with an actionable error pointing at this section). Reject any `Rail.transfer_type` value whose name doesn't appear in the declared list — surface as `L2ValidationError` with the missing name + the closest declared neighbors.
+- [ ] **Z.B.4 — `validate.py`: tighten existing rules + add new R-rule.** New R-rule: "every `Rail.transfer_type` resolves to some `TransferTypeDecl.name`" (loader-side belt-and-suspenders). R10 (`LimitSchedule.transfer_type` matches some `Rail.transfer_type`) becomes "matches some declared `TransferTypeDecl.name`" — strictly more permissive sources, but cleaner: a cap declared against an undeclared type is caught at the type level, not via the rail-emit transitive lookup. R7 (`bundles_activity` matches `Rail.name` OR `Rail.transfer_type`) updates its "OR transfer_type" leg to "OR declared `TransferTypeDecl.name`" with the same pattern.
+- [ ] **Z.B.5 — `serializer.py`: dump `transfer_types:` block.** Symmetric with Z.B.3 loader; round-trip stable for spec_example + sasquatch_pr.
+- [ ] **Z.B.6 — `editor.py` + studio editor home page: TransferTypeDecl gets create / edit / delete + a home-page section.** Mirrors the existing per-kind UI from X.4.f. Fields: `name` (read-only after create — renaming a transfer_type cascades to every Rail / LimitSchedule / bundles_activity reference; defer the rename UI to a follow-on if it complicates this) + `description` (textarea). `delete_l2_entity` rejects via validator if any Rail still references the type — same pattern as the existing rail-deletion-with-dependent-template guard.
+- [ ] **Z.B.7 — Migrate fixture yamls.** Add `transfer_types:` block to all L2 yamls (`tests/l2/{sasquatch_pr, spec_example, _kitchen}.yaml` + `tests/l2/fuzz_failures/*`). Auto-extract names from existing Rail rows. **Descriptions are stub-then-polish:** the migration script writes `description: TODO — what is this transfer_type` per declared name; the user (operator) replaces stubs with real prose in a follow-on commit since the descriptions reflect institutional knowledge, not codebase mechanics.
+- [ ] **Z.B.8 — `fuzz.py`: emit `transfer_types:` in random L2 yamls.** Generate a deterministic per-seed list of N transfer_types (snake_case names + stub descriptions); each random Rail picks its `transfer_type` from this list. Drop the previous "invent transfer_type strings inline per rail" code path.
+- [ ] **Z.B.9 — Topology + diagram: TransferType is NOT a node.** Confirm the diagram doesn't try to render TransferTypeDecls — they're labels on rails, not topology entities. The home-page section IS a card list (so operators can see / edit them); the diagram stays unchanged.
+- [ ] **Z.B.10 — Audit PDF + handbook callouts.** The audit PDF's per-account-day Daily Statement walk currently shows `transfer_type` as a bare column value; cross-reference it against the new TransferTypeDecl.description (one extra column or hover/footnote — design call during Z.B.10). `docs/Schema_v6.md` gets a "Transfer Type vocabulary" section explaining the name-vs-type distinction with a worked example (the explanation pain the user has been hitting).
+- [ ] **Z.B.11 — Tests: TransferTypeDecl in `test_l2_validate.py` + `test_l2_loader.py` + `test_l2_editor.py` + `test_studio_*.py`.** Coverage: (a) loader rejects yaml missing `transfer_types:` block; (b) loader rejects Rail referencing an undeclared transfer_type; (c) editor delete rejects when a Rail still references the type; (d) studio home page renders the TransferTypes section.
+- [ ] **Z.B.12 — Re-lock seeds (folds into Z.14).** Seed bytes likely unchanged (transfer_types: declaration doesn't reach the SQL emitter — the values flow through Rail.transfer_type as today), but verify byte-equality before declaring "no shift."
+
+### Z.C — End-of-phase
+
+- [ ] **Z.C.1 — Verify (unit + db layer + AW probe).** Subsumes Z.15; runs after both Z.A and Z.B land. Same matrix as Z.15.
+- [ ] **Z.C.2 — Commit, tick PLAN, push.** ci.yml runs the full chain. Plan archive sweep + summary line.
 
 ---
 

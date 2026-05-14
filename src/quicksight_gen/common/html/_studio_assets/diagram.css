@@ -1,17 +1,22 @@
 /* X.4.b.3 — Studio diagram chrome + SVG dim/focus styles.
  *
- * No Tailwind here (the spike doesn't ship CSS through the
- * Tailwind build pipeline yet — that's a Phase X.4.c decision).
- * Plain CSS keeps the spike self-contained.
+ * X.4.f.13 — ``--studio-*`` tokens now alias App2's ``--color-*``
+ * Tailwind tokens (``input.css``'s ``@theme`` block). The studio
+ * HTML chrome links App2's compiled ``output.css`` AND injects the
+ * per-L2-instance ``:root { --color-accent: ...; }`` override block
+ * via ``render._emit_theme_style``, so the studio inherits the
+ * active L2 institution's brand palette. Hardcoded fallbacks here
+ * cover the standalone-CSS-load case (e.g., a screenshot harness
+ * loading just diagram.css without the page chrome).
  */
 
 :root {
-  --studio-bg: #f8fafc;
-  --studio-fg: #1e293b;
-  --studio-muted: #64748b;
-  --studio-border: #cbd5e1;
-  --studio-accent: #1f4e79;
-  --studio-tint: #e0e7f0;
+  --studio-bg: var(--color-surface-bg, #f8fafc);
+  --studio-fg: var(--color-primary-fg, #1e293b);
+  --studio-muted: var(--color-secondary-fg, #64748b);
+  --studio-border: var(--color-surface-border, #cbd5e1);
+  --studio-accent: var(--color-accent, #1f4e79);
+  --studio-tint: var(--color-link-tint, #e0e7f0);
 }
 
 * {

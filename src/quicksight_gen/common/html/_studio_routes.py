@@ -82,6 +82,30 @@ from quicksight_gen.common.l2.topology import (
 )
 from quicksight_gen.common.l2.trainer import plants_per_node
 from quicksight_gen.common.sql.dialect import Dialect
+from quicksight_gen.common.html.render import _emit_theme_style
+
+
+def studio_theme_head(instance: object) -> str:
+    """X.4.f.13 — App2 Tailwind output.css link + L2 theme override block.
+
+    Every studio HTML page links App2's compiled Tailwind sheet (which
+    declares ``--color-accent`` / ``--color-surface`` / etc. with
+    build-time defaults via ``input.css``'s ``@theme`` block) AND
+    injects a per-L2-instance ``:root { --color-accent: ...; }``
+    override so the studio inherits the active institution's brand
+    palette. ``_studio_assets/diagram.css``'s ``--studio-*`` tokens
+    alias the ``--color-*`` tokens (X.4.f.13) so the existing editor
+    CSS picks up the override automatically.
+
+    Pass the L2Instance (``cache.get()``) — its optional ``theme``
+    attribute drives the override. ``None`` falls back to
+    ``DEFAULT_PRESET`` per the silent-fallback contract (N.4.k).
+    """
+    theme = getattr(instance, "theme", None)
+    return (
+        f'<link rel="stylesheet" href="/static/output.css?cb={_BOOT_ID}">\n'
+        f'  {_emit_theme_style(theme)}'
+    )
 
 
 _STUDIO_ASSETS_DIR = Path(__file__).parent / "_studio_assets"
@@ -117,6 +141,14 @@ _HOME_SECTIONS: tuple[tuple[str, str, str], ...] = (
     ("transfer_template", "Transfer templates", "transfer_templates"),
     ("chain", "Chains", "chains"),
     ("limit_schedule", "Limit schedules", "limit_schedules"),
+)
+
+# X.4.f.12 — singleton kinds get their own home-page section format
+# (no list, no +Add — just an Edit link landing on the singleton form).
+_HOME_SINGLETONS: tuple[tuple[str, str, str], ...] = (
+    # (kind, label, attr on L2Instance — None means "not set yet")
+    ("theme", "Theme", "theme"),
+    ("persona", "Persona", "persona"),
 )
 
 
@@ -177,6 +209,30 @@ def _render_home_page(cache: L2InstanceCache, dev_log: bool) -> str:
             f"</div>"
             f"</details>"
         )
+    # X.4.f.12 — singleton sections at the bottom of the home page
+    # (cosmetic / less-frequently-edited than the entity collections).
+    # No list, no +Add — just an Edit link to the singleton form.
+    for kind, label, attr in _HOME_SINGLETONS:
+        is_set = getattr(instance, attr, None) is not None
+        status = "set" if is_set else "not set"
+        section_blocks.append(
+            f'<details class="home-section" data-kind="{escape(kind)}">'
+            f'<summary>{escape(label)} '
+            f'<span class="count">({escape(status)})</span> '
+            f'<a class="home-section-add" '
+            f'href="/l2_shape/{kind}/" '
+            f'onclick="event.stopPropagation()" '
+            f'title="Edit {escape(label)} (single YAML block)">'
+            f"Edit</a>"
+            f"</summary>"
+            f'<div class="home-section-body">'
+            f'<p class="home-section-loading">'
+            f'{escape(label)} is a single YAML block — '
+            f'click <strong>Edit</strong> to view / change it.'
+            f"</p>"
+            f"</div>"
+            f"</details>"
+        )
     sections_html = "\n    ".join(section_blocks)
 
     return f"""<!doctype html>
@@ -184,7 +240,8 @@ def _render_home_page(cache: L2InstanceCache, dev_log: bool) -> str:
 <head>
   <meta charset="utf-8">
   <title>Studio — {prefix}</title>
-  {devlog_meta}<link rel="stylesheet" href="{asset_url("diagram.css")}">
+  {devlog_meta}{studio_theme_head(instance)}
+  <link rel="stylesheet" href="{asset_url("diagram.css")}">
   <link rel="stylesheet" href="{asset_url("editor.css")}">
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <script>
@@ -486,7 +543,8 @@ def _render_diagram_page(
 <head>
   <meta charset="utf-8">
   <title>Studio diagram — {prefix}</title>
-  {devlog_meta}{coverage_meta}{trainer_meta}<link rel="stylesheet" href="{asset_url("diagram.css")}">
+  {devlog_meta}{coverage_meta}{trainer_meta}{studio_theme_head(instance)}
+  <link rel="stylesheet" href="{asset_url("diagram.css")}">
   {devlog_script}</head>
 <body class="{"diagram-embed" if embed else ""}">
   {("" if embed else (
