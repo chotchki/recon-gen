@@ -160,4 +160,10 @@ cat <<EOF
 
 EOF
 
-exec "$QSGEN" studio -c "$STUDIO_CFG" --l2 "$L2_YAML_ABS"
+# NOT `exec` — exec replaces bash with the studio process, which
+# defeats the EXIT trap (no bash means no trap to fire when studio
+# exits). Run as a child with wait so SIGINT/SIGTERM/normal-exit
+# all reach our trap and tear the postgres container down.
+"$QSGEN" studio -c "$STUDIO_CFG" --l2 "$L2_YAML_ABS" &
+STUDIO_PID=$!
+wait "$STUDIO_PID"

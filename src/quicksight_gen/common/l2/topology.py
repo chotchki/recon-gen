@@ -685,13 +685,19 @@ def build_topology_graph_per_rail(
         ),
     )
     # Compactness pass: tighter node/rank spacing, higher mclimit (more
-    # iterations spent reducing edge crossings), concentrate=true (merge
-    # parallel edges with same src/dst), splines=polyline (straight
-    # segments with bends — at-least-as-good as spline at small graphs,
-    # ~30% smaller PNG and faster on dense real-world ones), 10pt node
-    # fontsize (free compaction; default 14pt was too large for typical
-    # rail names). Trades CPU for visual density — sasquatch_pr-scale
-    # lays out under 200ms.
+    # iterations spent reducing edge crossings), splines=polyline
+    # (straight segments with bends — at-least-as-good as spline at
+    # small graphs, ~30% smaller PNG and faster on dense real-world
+    # ones), 10pt node fontsize (free compaction; default 14pt was too
+    # large for typical rail names). Trades CPU for visual density —
+    # sasquatch_pr-scale lays out under 200ms.
+    #
+    # WHY no `concentrate=true`: at L3 (clusters + cross-cluster chain
+    # edges) graphviz emits `Error: rebuild_vlists: lead is null for
+    # rank 3 / concentrate=true may not work correctly` and produces
+    # NaN coordinates → 8x8 viewBox, all paths `Mnan,-nan…`. Dropping
+    # the option costs minor parallel-edge consolidation we never
+    # really benefited from (rail edges are 1:1 src→dst by construction).
     g.attr(
         rankdir="LR",
         splines="polyline",
@@ -699,7 +705,6 @@ def build_topology_graph_per_rail(
         nodesep="0.15",
         ranksep="0.35",
         mclimit="2.0",
-        concentrate="true",
     )
     g.attr("node", style="filled,rounded", fontname="Helvetica", fontsize="10")
     g.attr("edge", fontname="Helvetica", fontsize="9")
