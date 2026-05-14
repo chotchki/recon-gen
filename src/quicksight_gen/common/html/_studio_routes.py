@@ -72,11 +72,12 @@ from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from quicksight_gen.common.config import Config
+from quicksight_gen.common.config import Config, PlantKind
 from quicksight_gen.common.db import AsyncConnectionPool
 from quicksight_gen.common.l2.cache import L2InstanceCache
 from quicksight_gen.common.l2.coverage import CoverageEntry, coverage_for
 from quicksight_gen.common.l2.deploy_pipeline import run_deploy_pipeline
+from quicksight_gen.common.l2.tg_cache import TestGeneratorCache
 from quicksight_gen.common.l2.topology import (
     build_topology_graph_per_rail,
     topology_graph_for,
@@ -671,14 +672,72 @@ def _render_diagram_page(
 """
 
 
-def _render_data_page(cache: L2InstanceCache, dev_log: bool) -> str:
+_PLANT_LABELS: tuple[tuple[PlantKind, str], ...] = (
+    ("drift", "Drift"),
+    ("overdraft", "Overdraft"),
+    ("limit_breach", "Limit breach"),
+    ("stuck_pending", "Stuck pending"),
+    ("stuck_unbundled", "Stuck unbundled"),
+    ("supersession", "Supersession"),
+)
+
+
+def _render_plants_strip(
+    selected: tuple[PlantKind, ...] | None,
+) -> str:
+    """X.4.h.2 — render the plant-toggle checkbox strip.
+
+    ``selected`` is the current ``cfg.test_generator.plants``. Empty
+    tuple = "all kinds" per the SPEC (matches the
+    ``filter_scenario_plants(plants=None or ())`` short-circuit), so
+    every checkbox renders checked when the tuple is empty.
+
+    Wired with HTMX: each toggle ``hx-put``s the full new selection
+    to ``/data/knobs/plants`` (whole-form serialization, server is
+    the source of truth for the new state). The form's
+    ``hx-swap="outerHTML"`` re-paints the strip from the response so
+    the on-screen state always reflects what the server holds.
+    """
+    select_all = not selected  # None or empty tuple = "all kinds"
+    items: list[str] = []
+    for kind, label in _PLANT_LABELS:
+        checked = "checked " if (select_all or kind in (selected or ())) else ""
+        items.append(
+            f'<label class="plant-toggle">'
+            f'<input type="checkbox" name="plant" value="{kind}" {checked}/>'
+            f' {escape(label)}'
+            f"</label>"
+        )
+    body = "".join(items)
+    return (
+        f'<form id="data-knob-plants" class="data-knob data-knob-plants" '
+        f'hx-put="/data/knobs/plants" '
+        f'hx-trigger="change" '
+        f'hx-target="#data-knob-plants" '
+        f'hx-swap="outerHTML">'
+        f'<span class="data-knob-label">plants:</span>'
+        f"{body}"
+        f"</form>"
+    )
+
+
+def _render_data_page(
+    cache: L2InstanceCache,
+    dev_log: bool,
+    *,
+    tg_cache: TestGeneratorCache | None = None,
+) -> str:
     """X.4.h.1 — Studio "trainer mode" data-shaping panel shell.
 
-    Empty page-shell at this gate: chrome + knob-strip placeholder +
-    two-column main (timeline + training pane). Knob widgets land in
-    h.2-h.5; timeline derivation + render in h.6; training-pane
-    content in h.9. Tests assert the layout landmarks are present so
-    later wiring has stable selectors to bind to.
+    Page-shell + h.2 plant-toggle checkboxes wired through the
+    ``TestGeneratorCache``. h.3-h.5 layer the day-stepper, seed
+    input, and scope selector into the same knob strip. Timeline +
+    training pane stay placeholders here (h.6 / h.9).
+
+    ``tg_cache`` is None for the unit-test surface that exercises the
+    page shell without the full studio cfg wiring; in that mode the
+    plant-toggle strip renders from the SPEC default ("all kinds")
+    and the PUT route is absent (h.2's tests cover both modes).
 
     The same Deploy button + status span the home page surfaces are
     spliced in so the trainer can re-deploy without bouncing back to
@@ -688,6 +747,10 @@ def _render_data_page(cache: L2InstanceCache, dev_log: bool) -> str:
     instance = cache.get()
     prefix = escape(str(instance.instance))
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
+    selected_plants = (
+        tg_cache.get().plants if tg_cache is not None else ()
+    )
+    plants_strip = _render_plants_strip(selected_plants)
 
     return f"""<!doctype html>
 <html lang="en">
@@ -749,8 +812,10 @@ def _render_data_page(cache: L2InstanceCache, dev_log: bool) -> str:
     }}
   </script>
 
+  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <div class="data-knobs" id="data-knobs">
-    <span class="knob-placeholder">scope · end_date · seed · plants — wired in X.4.h.2-h.5</span>
+    <span class="knob-placeholder">scope · end_date · seed — wired in X.4.h.3-h.5</span>
+    {plants_strip}
   </div>
 
   <main class="data-main">
@@ -774,6 +839,7 @@ def make_studio_routes(
     dialect: Dialect | None = None,
     prefix_override: str | None = None,
     cfg: Config | None = None,
+    tg_cache: TestGeneratorCache | None = None,
 ) -> list[Route | Mount]:
     """Build the Studio route list bound to ``cache``.
 
@@ -818,7 +884,7 @@ def make_studio_routes(
         return HTMLResponse(_render_home_page(cache, dev_log))
 
     async def data(_request: Request) -> HTMLResponse:
-        return HTMLResponse(_render_data_page(cache, dev_log))
+        return HTMLResponse(_render_data_page(cache, dev_log, tg_cache=tg_cache))
 
     async def diagram(request: Request) -> HTMLResponse:
         focus_node_id = request.query_params.get("focus") or None
@@ -887,6 +953,34 @@ def make_studio_routes(
 
     routes.append(Route("/diagram/visible", visible, methods=["GET"]))
 
+    # X.4.h.2 — plant-toggle PUT route. Mounted only when the
+    # TestGeneratorCache is wired (which Studio CLI always provides;
+    # the unit-test surface that omits tg_cache also omits this route,
+    # which is correct — without the cache there's nothing to mutate).
+    if tg_cache is not None:
+        bound_tg = tg_cache
+
+        async def put_plants(request: Request) -> HTMLResponse:
+            from typing import cast as _cast  # noqa: PLC0415
+            form = await request.form()
+            # The form serializes only checked checkboxes (HTML form
+            # default — `unchecked` boxes don't appear in the payload),
+            # so the incoming list IS the new selection. Filter to
+            # known PlantKind values to ignore any junk a curl test
+            # might send; bad values silently drop rather than 500.
+            known: set[PlantKind] = {kind for kind, _ in _PLANT_LABELS}
+            new_plants_set: set[PlantKind] = set()
+            for raw in form.getlist("plant"):
+                if isinstance(raw, str) and raw in known:
+                    new_plants_set.add(_cast(PlantKind, raw))
+            new_plants = tuple(
+                kind for kind, _ in _PLANT_LABELS if kind in new_plants_set
+            )
+            bound_tg.update(plants=new_plants)
+            return HTMLResponse(_render_plants_strip(new_plants))
+
+        routes.append(Route("/data/knobs/plants", put_plants, methods=["PUT"]))
+
     # X.4.c.5.c — coverage JSON route. Mounted only when a pool exists
     # (Studio CLI always provides one; the unit-test surface skips this).
     if db_pool is not None:
@@ -916,11 +1010,21 @@ def make_studio_routes(
     # bare-cache unit-test surface omits it).
     if cfg is not None:
         bound_cfg = cfg
+        # X.4.h.2 — if a TestGeneratorCache is wired, patch each deploy
+        # invocation with the latest knob state. Absent cache (unit
+        # surface) ⇒ deploy reads the startup-time cfg.test_generator
+        # unchanged, preserving today's behavior.
+        bound_tg_for_deploy = tg_cache
 
         async def deploy(_request: Request) -> JSONResponse:
             instance = cache.get()
+            effective_cfg = (
+                bound_tg_for_deploy.patched_config(bound_cfg)
+                if bound_tg_for_deploy is not None
+                else bound_cfg
+            )
             summary = await run_deploy_pipeline(
-                bound_cfg, instance, dev_log=None,
+                effective_cfg, instance, dev_log=None,
             )
             status = 503 if summary.halted else 200
             return JSONResponse(summary.to_json(), status_code=status)

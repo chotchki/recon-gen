@@ -32,6 +32,36 @@ body.data-page {
   font-style: italic;
 }
 
+.data-knob {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--studio-border);
+  border-radius: 0.25rem;
+  background: var(--studio-bg);
+}
+
+.data-knob-label {
+  font-size: 0.875rem;
+  color: var(--studio-muted);
+  font-weight: 500;
+}
+
+.plant-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.plant-toggle input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
 .data-main {
   display: grid;
   grid-template-columns: minmax(20rem, 1fr) minmax(24rem, 1.5fr);
