@@ -388,7 +388,49 @@ def _render_home_page(cache: L2InstanceCache, dev_log: bool) -> str:
     <span class="instance">{prefix}</span>
     <a class="nav-link" href="/diagram">→ diagram (full)</a>
     <a class="nav-link" href="/dashboards">→ dashboards</a>
+    <button id="deploy-btn" class="deploy-btn" type="button"
+            onclick="quicksightDeploy()">Deploy changes</button>
+    <span id="deploy-status" class="deploy-status" aria-live="polite"></span>
   </header>
+  <script>
+    // X.4.g.14 — Studio "Deploy changes" button. POSTs /deploy, swaps
+    // the deploy-status span to reflect the result.
+    function quicksightDeploy() {{
+      var btn = document.getElementById('deploy-btn');
+      var status = document.getElementById('deploy-status');
+      btn.disabled = true;
+      status.className = 'deploy-status deploy-status--running';
+      status.textContent = 'Deploying…';
+      fetch('/deploy', {{ method: 'POST' }})
+        .then(function(resp) {{
+          return resp.json().then(function(body) {{
+            return {{ ok: resp.ok, status: resp.status, body: body }};
+          }});
+        }})
+        .then(function(result) {{
+          btn.disabled = false;
+          if (result.body.halted) {{
+            status.className = 'deploy-status deploy-status--halted';
+            status.textContent = 'Halted: ' + result.body.halt_reason;
+          }} else if (result.ok) {{
+            var s3 = result.body.step3_generator;
+            status.className = 'deploy-status deploy-status--ok';
+            status.textContent = (
+              'Deployed (gen ' + result.body.step5_data_generation_id +
+              ', ' + s3.transactions_after + ' tx)'
+            );
+          }} else {{
+            status.className = 'deploy-status deploy-status--error';
+            status.textContent = 'Failed: HTTP ' + result.status;
+          }}
+        }})
+        .catch(function(err) {{
+          btn.disabled = false;
+          status.className = 'deploy-status deploy-status--error';
+          status.textContent = 'Failed: ' + (err && err.message || err);
+        }});
+    }}
+  </script>
 
   <section class="home-diagram">
     <iframe id="diagram-frame" src="/diagram?layer=1&amp;embed=1"

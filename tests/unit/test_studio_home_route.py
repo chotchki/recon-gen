@@ -120,6 +120,32 @@ def test_home_page_each_section_carries_add_button(
     assert "event.stopPropagation()" in body
 
 
+def test_home_page_renders_deploy_button_in_header(
+    writable_l2_yaml: Path,
+) -> None:
+    """X.4.g.14 — header carries the global "Deploy changes" button +
+    a status indicator for surfacing deploy-pipeline outcomes."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/").text
+
+    # Button + status indicator land in the studio-header (not buried
+    # in an entity section).
+    header_start = body.index('<header class="studio-header">')
+    header_end = body.index('</header>', header_start)
+    header_html = body[header_start:header_end]
+    assert 'id="deploy-btn"' in header_html
+    assert 'class="deploy-btn"' in header_html
+    assert 'onclick="quicksightDeploy()"' in header_html
+    assert 'id="deploy-status"' in header_html
+
+    # JS handler is wired to POST /deploy + branches on halted vs ok.
+    assert "function quicksightDeploy()" in body
+    assert "fetch('/deploy', { method: 'POST' })" in body
+    assert "halted" in body
+    assert "step5_data_generation_id" in body
+
+
 def test_home_page_first_section_open_default_others_collapsed(
     writable_l2_yaml: Path,
 ) -> None:

@@ -67,6 +67,47 @@ body {
   text-decoration: underline;
 }
 
+/* X.4.g.14 — Deploy changes button + status indicator. */
+.studio-header .deploy-btn {
+  margin-left: auto;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  background: var(--studio-accent);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.studio-header .deploy-btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.studio-header .deploy-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.studio-header .deploy-status {
+  font-size: 0.875rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  min-width: 0;
+}
+
+.studio-header .deploy-status--running {
+  color: var(--studio-muted);
+}
+
+.studio-header .deploy-status--ok {
+  color: #2f7a3a;
+}
+
+.studio-header .deploy-status--halted,
+.studio-header .deploy-status--error {
+  color: #b1231f;
+}
+
 .diagram-chrome {
   display: flex;
   align-items: center;
