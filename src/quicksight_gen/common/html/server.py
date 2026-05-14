@@ -88,7 +88,9 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import QueryParams
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, RedirectResponse, Response
+from starlette.responses import (
+    HTMLResponse, JSONResponse, RedirectResponse, Response,
+)
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -578,6 +580,16 @@ def make_app(
             status_code=500,
         )
 
+    # X.4.g.12 — Step 5 reload counter endpoint. Open Dashboards pages
+    # (well, future ones — JS poller lands with X.4.g.14) read this to
+    # decide whether to reload after a Studio deploy bumped the counter.
+    # Always mounted; safe under both Studio + Dashboards-only modes.
+    async def data_generation_id_route(_request: Request) -> JSONResponse:
+        from quicksight_gen.common.l2.deploy_pipeline import (  # noqa: PLC0415
+            get_data_generation_id,
+        )
+        return JSONResponse({"data_generation_id": get_data_generation_id()})
+
     # Tailwind CSS lives next to this module in assets/; built by
     # ``.venv/bin/tailwindcss -i .../assets/input.css -o
     # .../assets/output.css``. Page shell links it as
@@ -613,6 +625,10 @@ def make_app(
             "/static",
             app=StaticFiles(directory=str(assets_dir)),
             name="static",
+        ),
+        Route(
+            "/data_generation_id",
+            data_generation_id_route, methods=["GET"],
         ),
     ]
     if docs_dir is not None:

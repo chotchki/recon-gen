@@ -603,3 +603,42 @@ async def step_4_matviews(
     await _emit(dev_log, {
         "event": "deploy:step4:matviews:done",
     })
+
+
+# X.4.g.12 — Step 5: bump a process-local generation counter so any
+# Dashboards page open in another tab knows to reload itself.
+#
+# The counter starts at 0 on process boot. ``step_5_reload`` bumps it
+# by 1 each call. Open Dashboards pages poll ``GET /data_generation_id``
+# (or subscribe via SSE in a future iteration) and reload when the
+# server-reported value differs from what they last observed. Lives at
+# module scope so a fresh import sees the same value across requests
+# inside one process. Cross-process invalidation is out of scope —
+# Studio + Dashboards run in the same uvicorn worker by design.
+_data_generation_id: int = 0
+
+
+def get_data_generation_id() -> int:
+    """Read the current generation counter — used by the
+    ``GET /data_generation_id`` endpoint Dashboards polls."""
+    return _data_generation_id
+
+
+async def step_5_reload(
+    *, dev_log: DevLogWriter | None = None,
+) -> int:
+    """Bump ``_data_generation_id`` by one and emit the new value.
+
+    Returns the post-bump value so the deploy summary can surface
+    "data_generation_id: 7". This is the cheapest pipeline step — no
+    DB access, no I/O, just an integer increment under the asyncio
+    event loop's single-threaded guarantee.
+    """
+    global _data_generation_id
+    _data_generation_id += 1
+    new = _data_generation_id
+    await _emit(dev_log, {
+        "event": "deploy:step5:reload:bump",
+        "data_generation_id": new,
+    })
+    return new

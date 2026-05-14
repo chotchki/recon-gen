@@ -26,11 +26,13 @@ from quicksight_gen.common.config import (
     TestGeneratorConfig,
 )
 from quicksight_gen.common.l2.deploy_pipeline import (
+    get_data_generation_id,
     step_1_etl_hook,
     step_2_pull,
     step_2_wipe,
     step_3_generator,
     step_4_matviews,
+    step_5_reload,
 )
 from quicksight_gen.common.l2.loader import load_instance
 from quicksight_gen.common.l2.primitives import L2Instance
@@ -1107,3 +1109,35 @@ def test_step_4_matviews_picks_up_new_rows(
             cur.close()
     finally:
         conn.close()
+
+
+# =====================================================================
+# X.4.g.12 — Step 5 reload (data_generation_id bump)
+# =====================================================================
+
+def test_step_5_reload_bumps_counter_by_one() -> None:
+    """The contract: each step_5_reload call returns get + 1.
+    Asserting relative deltas (not absolute values) keeps the test
+    stable regardless of how many other tests bumped the counter
+    earlier in the run."""
+    before = get_data_generation_id()
+    after = asyncio.run(step_5_reload(dev_log=None))
+    assert after == before + 1
+    assert get_data_generation_id() == after
+
+
+def test_step_5_reload_emits_bump_event_with_new_value() -> None:
+    sink = _EventCollector()
+    new = asyncio.run(step_5_reload(dev_log=sink))
+    assert sink.kinds() == ["deploy:step5:reload:bump"]
+    assert sink.events[0]["data_generation_id"] == new
+
+
+def test_step_5_reload_repeated_calls_increment_monotonically() -> None:
+    """Successive calls always increase by one — the only contract
+    Dashboards' poller relies on for deciding "should I reload?"."""
+    before = get_data_generation_id()
+    for i in range(3):
+        new = asyncio.run(step_5_reload(dev_log=None))
+        assert new == before + i + 1
+

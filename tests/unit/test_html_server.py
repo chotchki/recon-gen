@@ -620,3 +620,28 @@ def test_url_filter_prefix_key_does_not_touch_param_specs() -> None:
     form_start = body.index('<form id="filter-form"')
     form_end = body.index('</form>', form_start)
     assert " selected>" not in body[form_start:form_end]
+
+
+# X.4.g.12 — /data_generation_id route exposes the deploy-pipeline counter.
+
+def test_data_generation_id_route_returns_current_counter() -> None:
+    """The route reads ``get_data_generation_id()`` lazily on each call —
+    a pipeline-side ``step_5_reload`` bump is visible to the next
+    ``GET /data_generation_id`` without restarting the server."""
+    import asyncio
+
+    from quicksight_gen.common.l2.deploy_pipeline import (
+        get_data_generation_id, step_5_reload,
+    )
+    client = _make_test_app()
+
+    initial_counter = get_data_generation_id()
+    resp = client.get("/data_generation_id")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload == {"data_generation_id": initial_counter}
+
+    # Bump and re-read — the route MUST surface the new value.
+    new = asyncio.run(step_5_reload(dev_log=None))
+    resp2 = client.get("/data_generation_id")
+    assert resp2.json() == {"data_generation_id": new}
