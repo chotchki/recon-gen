@@ -72,9 +72,11 @@ from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from quicksight_gen.common.config import Config
 from quicksight_gen.common.db import AsyncConnectionPool
 from quicksight_gen.common.l2.cache import L2InstanceCache
 from quicksight_gen.common.l2.coverage import CoverageEntry, coverage_for
+from quicksight_gen.common.l2.deploy_pipeline import run_deploy_pipeline
 from quicksight_gen.common.l2.topology import (
     build_topology_graph_per_rail,
     topology_graph_for,
@@ -632,6 +634,7 @@ def make_studio_routes(
     *,
     dialect: Dialect | None = None,
     prefix_override: str | None = None,
+    cfg: Config | None = None,
 ) -> list[Route | Mount]:
     """Build the Studio route list bound to ``cache``.
 
@@ -665,6 +668,12 @@ def make_studio_routes(
             schema prefix; usually omitted (defaults to the L2
             instance's own ``instance`` field). Equivalent to
             ``cfg.l2_instance_prefix`` in the demo CLI flow.
+        cfg: Full Config dataclass; required for the X.4.g.13
+            ``POST /deploy`` route (the deploy pipeline reads
+            ``cfg.etl_hook`` / ``cfg.etl_datasource`` /
+            ``cfg.test_generator`` plus DB connection knobs).
+            None ⇒ POST /deploy is silently omitted (unit-test
+            surface that doesn't exercise the pipeline).
     """
     async def landing(_request: Request) -> HTMLResponse:
         return HTMLResponse(_render_home_page(cache, dev_log))
@@ -757,6 +766,23 @@ def make_studio_routes(
             return JSONResponse(_coverage_to_json(cov.by_node_id, cov.by_chain_edge_id))
 
         routes.append(Route("/diagram/coverage", coverage, methods=["GET"]))
+
+    # X.4.g.13 — POST /deploy: orchestrate steps 1→5 of the deploy
+    # pipeline against the cached L2 + the operator-supplied cfg.
+    # Mounted only when cfg is wired (Studio CLI passes it; the
+    # bare-cache unit-test surface omits it).
+    if cfg is not None:
+        bound_cfg = cfg
+
+        async def deploy(_request: Request) -> JSONResponse:
+            instance = cache.get()
+            summary = await run_deploy_pipeline(
+                bound_cfg, instance, dev_log=None,
+            )
+            status = 503 if summary.halted else 200
+            return JSONResponse(summary.to_json(), status_code=status)
+
+        routes.append(Route("/deploy", deploy, methods=["POST"]))
 
     return routes
 

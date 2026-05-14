@@ -26,7 +26,9 @@ from quicksight_gen.common.config import (
     TestGeneratorConfig,
 )
 from quicksight_gen.common.l2.deploy_pipeline import (
+    DeploySummary,
     get_data_generation_id,
+    run_deploy_pipeline,
     step_1_etl_hook,
     step_2_pull,
     step_2_wipe,
@@ -1140,4 +1142,98 @@ def test_step_5_reload_repeated_calls_increment_monotonically() -> None:
     for i in range(3):
         new = asyncio.run(step_5_reload(dev_log=None))
         assert new == before + i + 1
+
+
+# =====================================================================
+# X.4.g.13 — run_deploy_pipeline orchestration (5 steps + halt contract)
+# =====================================================================
+
+def test_run_deploy_pipeline_no_etl_runs_all_steps(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """No etl_hook configured: step 1 skips, steps 2-5 run, summary
+    reports per-step counts + the post-bump data_generation_id."""
+    cfg = _sqlite_cfg(tmp_path)
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    sink = _EventCollector()
+    summary = asyncio.run(
+        run_deploy_pipeline(cfg, spec_example_instance, dev_log=sink),
+    )
+    assert isinstance(summary, DeploySummary)
+    assert summary.halted is False
+    assert summary.halt_reason is None
+    assert summary.step1_etl_hook_exit_code == 0
+    # Empty DB pre-pipeline → step 2 wipe deletes 0 rows; step 3
+    # generator (full scope, default) populates both base tables.
+    assert summary.step3_generator_transactions_after > 0
+    assert summary.step3_generator_daily_balances_after > 0
+    assert summary.step4_matviews_done is True
+    assert summary.step5_data_generation_id > 0
+    # Event ordering — step 1's skip event must precede step 5's bump.
+    kinds = sink.kinds()
+    assert kinds[0] == "deploy:step1:skip"
+    assert kinds[-1] == "deploy:step5:reload:bump"
+    # Captured events on the summary include every dev_log event too.
+    assert len(summary.events) == len(sink.events)
+
+
+def test_run_deploy_pipeline_halts_on_etl_failure(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """etl_hook returns non-zero exit ⇒ halt BEFORE step 2 wipes the
+    demo DB. Summary.halted=True, halt_reason populated, downstream
+    step counts at zero defaults."""
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        etl_hook="false",  # POSIX `false` exits 1 — universally available
+    )
+    _apply_schema_and_plant_two_rows(cfg, spec_example_instance)
+    pre_tx, pre_bal = _row_counts(cfg, spec_example_instance)
+    assert (pre_tx, pre_bal) == (1, 1)
+
+    summary = asyncio.run(
+        run_deploy_pipeline(cfg, spec_example_instance, dev_log=None),
+    )
+    assert summary.halted is True
+    assert summary.halt_reason is not None
+    assert "etl_hook returned exit_code=1" in summary.halt_reason
+    assert summary.step1_etl_hook_exit_code == 1
+    # CRITICAL: step 2's wipe MUST NOT have run — pre-existing rows
+    # are still there.
+    post_tx, post_bal = _row_counts(cfg, spec_example_instance)
+    assert (post_tx, post_bal) == (1, 1), (
+        "etl_hook failure must NOT touch the demo DB — operator's "
+        "pre-pipeline state is preserved"
+    )
+    # Default zeros for downstream steps.
+    assert summary.step2_wipe_transactions_deleted == 0
+    assert summary.step3_generator_transactions_after == 0
+    assert summary.step4_matviews_done is False
+
+
+def test_deploy_summary_to_json_serializes_every_field(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """``DeploySummary.to_json`` produces a flat dict with no
+    dataclass-shaped values left over — POST /deploy serializes
+    straight from this and Starlette's JSONResponse rejects nested
+    dataclass instances."""
+    cfg = _sqlite_cfg(tmp_path)
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    summary = asyncio.run(
+        run_deploy_pipeline(cfg, spec_example_instance, dev_log=None),
+    )
+    payload = summary.to_json()
+    # Top-level keys the studio + button rely on.
+    assert payload["halted"] is False
+    assert payload["halt_reason"] is None
+    assert "step2_wipe" in payload
+    assert "step3_generator" in payload
+    assert payload["step4_matviews_done"] is True
+    assert payload["step5_data_generation_id"] > 0
+    assert isinstance(payload["events"], list)
+    # Every event entry MUST be a plain dict (json-safe), not a Mapping
+    # subclass that JSONResponse can't serialize.
+    for evt in payload["events"]:
+        assert isinstance(evt, dict)
 

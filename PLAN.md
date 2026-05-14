@@ -205,7 +205,7 @@ Theme + Persona are L2-instance attributes (singletons, not lists). They need a 
 - [x] **X.4.g.10** — Step 3 — `scope: uncovered_rails` mode (inspect `demo_database_url` post-step-2, fill baseline only for rails without rows).
 - [x] **X.4.g.11** — Step 4 matview refresh: existing `refresh_matviews_sql(instance)`.
 - [x] **X.4.g.12** — Step 5 reload: bump a process-local `data_generation_id`; Dashboards' open page polls (or subscribes to) the counter and reloads its current URL on bump.
-- [ ] **X.4.g.13** — `POST /deploy` orchestration endpoint that runs steps 1-5; returns a structured progress stream.
+- [x] **X.4.g.13** — `POST /deploy` orchestration endpoint that runs steps 1-5; returns a structured progress stream.
 - [ ] **X.4.g.14** — Studio "Deploy changes" button (global, in the Studio header); calls `POST /deploy`; surfaces step progress + errors via `/dev_log`.
 - [ ] **X.4.g.15** — Pipeline orchestration tests (one per shape: hook-fail-halt, no-etl path, etl-only path, etl-then-generator path, etl-then-`uncovered_rails` path).
 

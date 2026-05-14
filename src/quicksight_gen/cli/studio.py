@@ -123,6 +123,7 @@ def studio(  # type: ignore[no-untyped-def]: Click decorator strips the function
         make_studio_routes,
         dialect=cfg.dialect,
         prefix_override=cfg.l2_instance_prefix,
+        cfg=cfg,
     )
     run_html_server(
         cfg=cfg,

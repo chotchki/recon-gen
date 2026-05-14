@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import shlex
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
@@ -642,3 +643,133 @@ async def step_5_reload(
         "data_generation_id": new,
     })
     return new
+
+
+# X.4.g.13 — Run the full pipeline: orchestrate steps 1→5 with the
+# halt-on-etl-failure contract baked in.
+
+@dataclass(frozen=True)
+class DeploySummary:
+    """Structured per-step outcome of a ``run_deploy_pipeline`` call.
+
+    Wraps the raw event stream the studio + tests collect. The studio's
+    POST /deploy serializes this dataclass straight to JSON; tests
+    assert against the typed fields without re-parsing event payloads.
+
+    ``halted`` flips when step 1's etl_hook returns non-zero exit (the
+    only halt point — every other step runs unconditionally once we're
+    past step 1). Any halted summary leaves later steps' fields at
+    their default (zeros / False) — read ``halted`` first.
+    """
+
+    halted: bool = False
+    halt_reason: str | None = None
+    step1_etl_hook_exit_code: int = 0
+    step2_wipe_transactions_deleted: int = 0
+    step2_wipe_daily_balances_deleted: int = 0
+    step2_pull_transactions_pulled: int = 0
+    step2_pull_daily_balances_pulled: int = 0
+    step3_generator_transactions_after: int = 0
+    step3_generator_daily_balances_after: int = 0
+    step4_matviews_done: bool = False
+    step5_data_generation_id: int = 0
+    events: tuple[Mapping[str, object], ...] = field(default_factory=tuple)
+
+    def to_json(self) -> dict[str, object]:
+        """Serialize to a JSON-safe dict for ``POST /deploy`` responses."""
+        return {
+            "halted": self.halted,
+            "halt_reason": self.halt_reason,
+            "step1_etl_hook_exit_code": self.step1_etl_hook_exit_code,
+            "step2_wipe": {
+                "transactions_deleted": self.step2_wipe_transactions_deleted,
+                "daily_balances_deleted": (
+                    self.step2_wipe_daily_balances_deleted
+                ),
+            },
+            "step2_pull": {
+                "transactions_pulled": self.step2_pull_transactions_pulled,
+                "daily_balances_pulled": (
+                    self.step2_pull_daily_balances_pulled
+                ),
+            },
+            "step3_generator": {
+                "transactions_after": self.step3_generator_transactions_after,
+                "daily_balances_after": (
+                    self.step3_generator_daily_balances_after
+                ),
+            },
+            "step4_matviews_done": self.step4_matviews_done,
+            "step5_data_generation_id": self.step5_data_generation_id,
+            "events": [dict(e) for e in self.events],
+        }
+
+
+async def run_deploy_pipeline(
+    cfg: Config,
+    instance: L2Instance,
+    *,
+    dev_log: DevLogWriter | None = None,
+) -> DeploySummary:
+    """Orchestrate steps 1→5 of the X.4.g pipeline.
+
+    Halt contract: step 1's ``etl_hook`` exit code gates everything
+    downstream. Non-zero ⇒ stop BEFORE step 2's wipe, return a
+    ``DeploySummary(halted=True, halt_reason=...)``. The whole point
+    of declaring an etl_hook is that the demo DB MUST NOT be touched
+    when the operator's ETL refresh failed (their data isn't where
+    they expect it).
+
+    Every step shares one event-collecting writer that fans out to the
+    caller's ``dev_log`` AND captures the events on the returned
+    ``DeploySummary.events`` tuple — so the studio's POST /deploy can
+    render a "what happened" timeline even if dev_log is off.
+    """
+    captured: list[Mapping[str, object]] = []
+
+    async def _tee(payload: Mapping[str, object]) -> None:
+        captured.append(dict(payload))
+        if dev_log is not None:
+            await dev_log(payload)
+
+    rc = await step_1_etl_hook(cfg, dev_log=_tee)
+    if rc != 0:
+        await _emit(_tee, {
+            "event": "deploy:halt",
+            "reason": (
+                f"etl_hook returned exit_code={rc}; "
+                "demo DB not touched"
+            ),
+        })
+        return DeploySummary(
+            halted=True,
+            halt_reason=(
+                f"etl_hook returned exit_code={rc}; "
+                "demo DB not touched"
+            ),
+            step1_etl_hook_exit_code=rc,
+            events=tuple(captured),
+        )
+
+    tx_del, bal_del = await step_2_wipe(cfg, instance, dev_log=_tee)
+    tx_pull, bal_pull = await step_2_pull(cfg, instance, dev_log=_tee)
+    tx_after, bal_after = await step_3_generator(
+        cfg, instance, dev_log=_tee,
+    )
+    await step_4_matviews(cfg, instance, dev_log=_tee)
+    new_gen_id = await step_5_reload(dev_log=_tee)
+
+    return DeploySummary(
+        halted=False,
+        halt_reason=None,
+        step1_etl_hook_exit_code=rc,
+        step2_wipe_transactions_deleted=tx_del,
+        step2_wipe_daily_balances_deleted=bal_del,
+        step2_pull_transactions_pulled=tx_pull,
+        step2_pull_daily_balances_pulled=bal_pull,
+        step3_generator_transactions_after=tx_after,
+        step3_generator_daily_balances_after=bal_after,
+        step4_matviews_done=True,
+        step5_data_generation_id=new_gen_id,
+        events=tuple(captured),
+    )
