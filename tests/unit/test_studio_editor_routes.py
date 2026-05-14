@@ -625,6 +625,36 @@ def test_put_transfer_template_with_empty_leg_rails_returns_400(
     assert saved.leg_rails == tmpl.leg_rails
 
 
+def test_chain_card_id_replaces_double_colon_to_avoid_css_pseudo_element(
+    writable_l2_yaml: Path,
+) -> None:
+    """X.4.f.10.fix — chain composite addressing uses ``::`` which CSS
+    parses as pseudo-element syntax in selectors. ``hx-target`` runs
+    through CSS-selector parsing, so an id ``entity-chain-Foo::Bar``
+    can't be targeted (selector ``#entity-chain-Foo::Bar`` interprets
+    ``::Bar`` as a pseudo-element). The card's HTML id swaps ``::``
+    for ``__`` while the URL-side path keeps ``::`` (matches the L2
+    API key contract). This was the actual root cause of "chain edit
+    doesn't work" — Edit click → broken hx-target → silent swap miss."""
+    app = _build_app(writable_l2_yaml)
+    pre = load_instance(writable_l2_yaml)
+    if not pre.chains:
+        return
+    chain = pre.chains[0]
+    composite = f"{chain.parent}::{chain.child}"
+    slug = composite.replace("::", "__")
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get(f"/l2_shape/chain/{composite}").text
+    # CSS-safe id.
+    assert f'id="entity-chain-{slug}"' in body
+    # NO raw ``::`` in the id attr.
+    assert f'id="entity-chain-{composite}"' not in body
+    # hx-target uses the slug too.
+    assert f'hx-target="#entity-chain-{slug}"' in body
+    # URL path KEEPS the original ``::``.
+    assert f'hx-get="/l2_shape/chain/{composite}/edit"' in body
+
+
 def test_put_chain_edit_renders_card_after_save(
     writable_l2_yaml: Path,
 ) -> None:

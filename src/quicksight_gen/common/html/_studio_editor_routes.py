@@ -747,20 +747,25 @@ def _render_read_card(
             f'title="Focus the diagram on this entity">'
             f"{escape(entity_id)}</h3>"
         )
+    # CSS-safe id slug — composite-keyed kinds use ``::`` in their
+    # addressing string, which CSS parses as pseudo-element syntax in a
+    # selector like ``#entity-chain-Foo::Bar``. The URL-side path stays
+    # ``::`` (matches the L2 API key contract); only the HTML id swaps.
+    html_id = f"entity-{kind}-{escape(_html_id_slug(entity_id))}"
     return (
-        f'<article class="entity-card" id="entity-{kind}-{escape(entity_id)}" '
+        f'<article class="entity-card" id="{html_id}" '
         f'data-kind="{escape(kind)}" data-entity-id="{escape(entity_id)}">'
         f"<header>"
         f"{title_html}"
         f'<div class="entity-card-actions">'
         f'<a class="edit-link" hx-get="/l2_shape/{kind}/{escape(entity_id)}/edit" '
-        f'hx-target="#entity-{kind}-{escape(entity_id)}" hx-swap="outerHTML">Edit</a>'
+        f'hx-target="#{html_id}" hx-swap="outerHTML">Edit</a>'
         # X.4.f.9.delete — DELETE on success returns empty (card disappears
         # via outerHTML swap); on validator-rejected structural break
         # returns 400 + the error fragment which swaps in place. No
         # cascade — the operator clears the dependent reference first.
         f'<a class="delete-link" hx-delete="/l2_shape/{kind}/{escape(entity_id)}" '
-        f'hx-target="#entity-{kind}-{escape(entity_id)}" hx-swap="outerHTML" '
+        f'hx-target="#{html_id}" hx-swap="outerHTML" '
         f'hx-confirm="Delete this entity? References that block deletion '
         f'will be reported inline.">Delete</a>'
         f"</div>"
@@ -848,19 +853,19 @@ def _render_edit_form(
         f'<div class="form-global-error">{escape(global_error)}</div>'
         if global_error else ""
     )
+    html_id = f"entity-{kind}-{escape(_html_id_slug(entity_id))}"
     return (
-        f'<article class="entity-card editing" '
-        f'id="entity-{kind}-{escape(entity_id)}">'
+        f'<article class="entity-card editing" id="{html_id}">'
         f"<header><h3>Editing: {escape(entity_id)}</h3></header>"
         f'<form hx-put="/l2_shape/{kind}/{escape(entity_id)}" '
-        f'hx-target="#entity-{kind}-{escape(entity_id)}" '
+        f'hx-target="#{html_id}" '
         f'hx-swap="outerHTML">'
         f"{global_err_html}"
         f"{fields_html}"
         f'<div class="form-actions">'
         f'<button type="submit">Save</button>'
         f'<a class="cancel-link" hx-get="/l2_shape/{kind}/{escape(entity_id)}" '
-        f'hx-target="#entity-{kind}-{escape(entity_id)}" hx-swap="outerHTML">'
+        f'hx-target="#{html_id}" hx-swap="outerHTML">'
         f"Cancel</a>"
         f"</div>"
         f"</form>"
@@ -1109,6 +1114,20 @@ def _entity_id(kind: EntityKind, entity: object) -> str:
         return f"{getattr(entity, 'parent')}::{getattr(entity, 'child')}"
     # limit_schedule
     return f"{getattr(entity, 'parent_role')}::{getattr(entity, 'transfer_type')}"
+
+
+def _html_id_slug(entity_id: str) -> str:
+    """Sanitize an entity_id for use in an HTML ``id`` attribute.
+
+    Composite-keyed kinds (chain / limit_schedule) use ``::`` as the
+    separator in their addressing string. CSS treats ``::`` as
+    pseudo-element syntax, so an ``hx-target="#entity-chain-Foo::Bar"``
+    targets nothing — chain edit / delete / save would silently miss
+    the card and the swap would fail with no surface error. Replacing
+    ``::`` with ``__`` keeps the id CSS-selectable while leaving the
+    URL-side addressing (``/l2_shape/chain/Foo::Bar``) untouched.
+    """
+    return entity_id.replace("::", "__")
 
 
 def _entities_for_kind(
