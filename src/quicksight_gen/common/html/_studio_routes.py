@@ -80,6 +80,11 @@ from quicksight_gen.common.l2.cache import L2InstanceCache
 from quicksight_gen.common.l2.coverage import CoverageEntry, coverage_for
 from quicksight_gen.common.l2.deploy_pipeline import run_deploy_pipeline
 from quicksight_gen.common.l2.tg_cache import TestGeneratorCache
+from quicksight_gen.common.l2.trainer_timeline import (
+    TimelineDay,
+    compute_plant_timeline,
+    hits_by_kind,
+)
 from quicksight_gen.common.l2.topology import (
     build_topology_graph_per_rail,
     topology_graph_for,
@@ -891,6 +896,132 @@ def _render_scope_strip(selected: ScopeKind) -> str:
     )
 
 
+_PLANT_KIND_ABBRV: tuple[tuple[PlantKind, str], ...] = (
+    # 2-3 char abbreviation for the per-day chip — keeps the column
+    # visually scannable when 6+ plant kinds land on the same day.
+    ("drift", "DR"),
+    ("overdraft", "OD"),
+    ("limit_breach", "LB"),
+    ("stuck_pending", "SP"),
+    ("stuck_unbundled", "SU"),
+    ("supersession", "SS"),
+)
+_PLANT_KIND_LABELS: Mapping[PlantKind, str] = {
+    kind: label for kind, label in _PLANT_LABELS
+}
+
+
+def _render_timeline_section(
+    instance: object,
+    tg_cache: TestGeneratorCache | None,
+) -> str:
+    """X.4.h.6.b/c — render the vertical plant-timeline column.
+
+    Returns the entire ``<section id="data-timeline">`` block so the
+    HTMX refresh (``hx-get="/data/timeline"`` triggered by every knob
+    PUT via ``HX-Trigger: trainer-knobs-changed``) can swap it as one
+    unit with ``hx-swap="outerHTML"``.
+
+    Each TimelineDay row carries an ``hx-put`` to
+    ``/data/knobs/end_date`` so a click on the date jumps the
+    end_date knob there + auto-Deploy. The full-row click target
+    keeps the chip layout undisturbed (chips don't fight the
+    primary action).
+
+    ``tg_cache=None`` ⇒ the panel renders the locked-default
+    (TestGeneratorConfig()) timeline; that's the unit-test surface
+    for the page shell + the dashboards-only mode that omits Studio's
+    knob mutation routes.
+    """
+    tg = tg_cache.get() if tg_cache is not None else None
+    from quicksight_gen.common.config import (  # noqa: PLC0415
+        TestGeneratorConfig,
+    )
+    effective_tg = tg or TestGeneratorConfig()
+    timeline = compute_plant_timeline(instance, effective_tg)  # type: ignore[arg-type]: instance shape from L2InstanceCache.get is Any-ish, but compute_plant_timeline narrows internally
+
+    if not timeline:
+        empty_msg = (
+            "No plants in this scope. "
+            "Switch to <code>full</code> or <code>exceptions_only</code> "
+            "to see the planted exceptions."
+            if effective_tg.scope == "uncovered_rails"
+            else "No plants matched the current toggle subset."
+        )
+        body = f'<p class="data-empty">{empty_msg}</p>'
+    else:
+        kind_counts = hits_by_kind(timeline)
+        # Header summary: "12 hits across 5 days · drift 6, overdraft 2 …"
+        total = sum(kind_counts.values())
+        kind_summary_parts = [
+            f"{_PLANT_KIND_LABELS.get(k, k)} {n}"
+            for k, n in kind_counts.items()
+        ]
+        kind_summary = " · ".join(kind_summary_parts) if kind_summary_parts else "—"
+        header_html = (
+            f'<header class="timeline-header">'
+            f'<span class="timeline-total">{total} '
+            f'plant{"" if total == 1 else "s"} across '
+            f'{len(timeline)} day{"" if len(timeline) == 1 else "s"}</span>'
+            f'<span class="timeline-kinds">{escape(kind_summary)}</span>'
+            f"</header>"
+        )
+
+        rows: list[str] = []
+        for td in timeline:
+            iso = td.day.isoformat()
+            # Per-day chips: one per kind that hit (with count when >1).
+            day_kinds: dict[PlantKind, int] = {}
+            for hit in td.hits:
+                day_kinds[hit.kind] = day_kinds.get(hit.kind, 0) + 1
+            chip_html: list[str] = []
+            for kind, abbrv in _PLANT_KIND_ABBRV:
+                if kind not in day_kinds:
+                    continue
+                n = day_kinds[kind]
+                count_suffix = f" {n}" if n > 1 else ""
+                title = _PLANT_KIND_LABELS.get(kind, kind)
+                chip_html.append(
+                    f'<span class="timeline-chip timeline-chip--{kind}" '
+                    f'title="{escape(title)} ×{n}">'
+                    f"{escape(abbrv)}{escape(count_suffix)}"
+                    f"</span>"
+                )
+            chips = "".join(chip_html)
+            # The whole row is a button — clicking it sets end_date to
+            # this day. hx-vals carries the day; the existing PUT
+            # handler accepts an absolute end_date payload.
+            put_attrs = (
+                'hx-put="/data/knobs/end_date" '
+                'hx-target="#data-knob-end-date" '
+                'hx-swap="outerHTML"'
+            )
+            rows.append(
+                f'<button type="button" class="timeline-day" '
+                f'title="Click to set end_date = {escape(iso)}" '
+                f"{put_attrs} "
+                f"hx-vals='{{\"end_date\": \"{escape(iso)}\"}}'>"
+                f'<span class="timeline-day-date">{escape(iso)}</span>'
+                f'<span class="timeline-day-chips">{chips}</span>'
+                f"</button>"
+            )
+        rows_html = "".join(rows)
+        body = (
+            f"{header_html}"
+            f'<div class="timeline-rows">{rows_html}</div>'
+        )
+
+    return (
+        f'<section class="data-timeline" id="data-timeline" '
+        f'aria-label="Plant timeline" '
+        f'hx-get="/data/timeline" '
+        f'hx-trigger="trainer-knobs-changed from:body" '
+        f'hx-swap="outerHTML">'
+        f"{body}"
+        f"</section>"
+    )
+
+
 def _render_data_page(
     cache: L2InstanceCache,
     dev_log: bool,
@@ -900,8 +1031,9 @@ def _render_data_page(
     """X.4.h.1 — Studio "trainer mode" data-shaping panel shell.
 
     Page-shell + h.2 plant-toggle + h.3 day-stepper + h.4 seed input
-    + h.5 scope selector wired through the ``TestGeneratorCache``.
-    Timeline + training pane stay placeholders here (h.6 / h.9).
+    + h.5 scope selector + h.6 plant-timeline column wired through
+    the ``TestGeneratorCache``. Training pane stays placeholder
+    here (h.9).
 
     ``tg_cache`` is None for the unit-test surface that exercises the
     page shell without the full studio cfg wiring; in that mode the
@@ -932,6 +1064,7 @@ def _render_data_page(
         tg_cache.get().scope if tg_cache is not None else "full"
     )
     scope_strip = _render_scope_strip(selected_scope)
+    timeline_section = _render_timeline_section(instance, tg_cache)
 
     return f"""<!doctype html>
 <html lang="en">
@@ -1002,9 +1135,7 @@ def _render_data_page(
   </div>
 
   <main class="data-main">
-    <section class="data-timeline" id="data-timeline" aria-label="Plant timeline">
-      <p class="data-empty">timeline lands in X.4.h.6</p>
-    </section>
+    {timeline_section}
     <section class="data-training" id="data-training" aria-label="Training pane">
       <p class="data-empty">training pane lands in X.4.h.9</p>
     </section>
@@ -1069,6 +1200,17 @@ def make_studio_routes(
     async def data(_request: Request) -> HTMLResponse:
         return HTMLResponse(_render_data_page(cache, dev_log, tg_cache=tg_cache))
 
+    async def data_timeline(_request: Request) -> HTMLResponse:
+        """X.4.h.6.c — refresh just the timeline section.
+
+        Triggered by HTMX when any knob PUT response carries
+        ``HX-Trigger: trainer-knobs-changed`` (the ``hx-trigger`` on
+        the timeline section listens via ``from:body``). Returns the
+        full ``<section id="data-timeline">`` block; the section's
+        own ``hx-swap="outerHTML"`` swaps it.
+        """
+        return HTMLResponse(_render_timeline_section(cache.get(), tg_cache))
+
     async def diagram(request: Request) -> HTMLResponse:
         focus_node_id = request.query_params.get("focus") or None
         layer_raw = request.query_params.get("layer", "1")
@@ -1091,6 +1233,7 @@ def make_studio_routes(
     routes: list[Route | Mount] = [
         Route("/", landing, methods=["GET"]),
         Route("/data", data, methods=["GET"]),
+        Route("/data/timeline", data_timeline, methods=["GET"]),
         Route("/diagram", diagram, methods=["GET"]),
         Mount(
             "/studio/static",
@@ -1160,7 +1303,10 @@ def make_studio_routes(
                 kind for kind, _ in _PLANT_LABELS if kind in new_plants_set
             )
             bound_tg.update(plants=new_plants)
-            return HTMLResponse(_render_plants_strip(new_plants))
+            return HTMLResponse(
+                _render_plants_strip(new_plants),
+                headers={"HX-Trigger": "trainer-knobs-changed"},
+            )
 
         routes.append(Route("/data/knobs/plants", put_plants, methods=["PUT"]))
 
@@ -1203,7 +1349,10 @@ def make_studio_routes(
                         except ValueError:
                             new_end_date = current  # silent drop
             bound_tg.update(end_date=new_end_date)
-            return HTMLResponse(_render_end_date_strip(new_end_date))
+            return HTMLResponse(
+                _render_end_date_strip(new_end_date),
+                headers={"HX-Trigger": "trainer-knobs-changed"},
+            )
 
         routes.append(
             Route("/data/knobs/end_date", put_end_date, methods=["PUT"]),
@@ -1245,7 +1394,10 @@ def make_studio_routes(
                         except ValueError:
                             new_seed = current  # silent drop
             bound_tg.update(seed=new_seed)
-            return HTMLResponse(_render_seed_strip(new_seed))
+            return HTMLResponse(
+                _render_seed_strip(new_seed),
+                headers={"HX-Trigger": "trainer-knobs-changed"},
+            )
 
         routes.append(
             Route("/data/knobs/seed", put_seed, methods=["PUT"]),
@@ -1275,7 +1427,10 @@ def make_studio_routes(
             if isinstance(scope_raw, str) and scope_raw in known:
                 new_scope = _cast(ScopeKind, scope_raw)
             bound_tg.update(scope=new_scope)
-            return HTMLResponse(_render_scope_strip(new_scope))
+            return HTMLResponse(
+                _render_scope_strip(new_scope),
+                headers={"HX-Trigger": "trainer-knobs-changed"},
+            )
 
         routes.append(
             Route("/data/knobs/scope", put_scope, methods=["PUT"]),

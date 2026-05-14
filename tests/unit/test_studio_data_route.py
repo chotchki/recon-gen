@@ -373,8 +373,13 @@ def test_end_date_strip_form_targets_put_route(
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/data").text
 
-    # Three buttons + one input all carry the PUT URL.
-    assert body.count('hx-put="/data/knobs/end_date"') == 4
+    # The end_date strip itself carries 4 PUT URLs (← / date input / → /
+    # today). The timeline section (h.6) ALSO writes /data/knobs/end_date
+    # — one PUT URL per timeline-day button — so we narrow this assertion
+    # to the strip's own form by asserting at least 4 (instead of an
+    # exact count) and verifying the form's identity around them.
+    assert body.count('hx-put="/data/knobs/end_date"') >= 4
+    assert 'id="data-knob-end-date"' in body
     assert 'hx-target="#data-knob-end-date"' in body
     assert 'hx-swap="outerHTML"' in body
     # Prev / next buttons send delta payload via hx-vals (single-quoted
@@ -783,3 +788,115 @@ def test_put_scope_route_absent_without_cache(
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = _put_form(c, "/data/knobs/scope", [("scope", "full")])
     assert resp.status_code in (404, 405)  # type: ignore[attr-defined]: TestClient stub return is Any
+
+
+# ---------------------------------------------------------------------------
+# X.4.h.6.b/c — plant-timeline section + HX-Trigger refresh wiring
+# ---------------------------------------------------------------------------
+
+
+def test_data_page_renders_timeline_section(
+    writable_l2_yaml: Path,
+) -> None:
+    """The /data page emits a populated timeline section (replacing
+    the h.1 placeholder). Header summarizes total + per-kind, rows
+    carry per-day chips."""
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(end_date=date(2026, 5, 14), scope="full"),
+    )
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+
+    # Section landmark (the h.1 placeholder is replaced).
+    assert 'id="data-timeline"' in body
+    # Timeline header surfaces total count + at least one chip kind.
+    assert 'class="timeline-header"' in body
+    # spec_example yields plants ⇒ at least one row with hx-put writing
+    # end_date (the click-to-jump-day affordance).
+    assert 'class="timeline-day"' in body
+    # Each row's chips carry a per-kind class.
+    assert "timeline-chip--" in body
+
+
+def test_data_page_timeline_empty_when_uncovered_rails(
+    writable_l2_yaml: Path,
+) -> None:
+    """uncovered_rails scope ⇒ no plants ⇒ the timeline section
+    surfaces an explanatory empty-state instead of rows."""
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(scope="uncovered_rails"),
+    )
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+
+    assert "No plants in this scope" in body
+    assert 'class="timeline-day"' not in body
+
+
+def test_get_data_timeline_returns_section_fragment(
+    writable_l2_yaml: Path,
+) -> None:
+    """GET /data/timeline returns the rendered section as a fragment
+    (the HTMX hx-get target). Same shape as the inline render — same
+    test selectors apply."""
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(end_date=date(2026, 5, 14)),
+    )
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/data/timeline")
+    assert resp.status_code == 200
+    body = resp.text
+    assert 'id="data-timeline"' in body
+    assert 'hx-get="/data/timeline"' in body  # self-rebinds for next refresh
+    assert 'hx-trigger="trainer-knobs-changed from:body"' in body
+
+
+def test_knob_puts_emit_hx_trigger_header(
+    writable_l2_yaml: Path,
+) -> None:
+    """Every knob PUT carries HX-Trigger: trainer-knobs-changed so the
+    timeline section's hx-trigger="...from:body" listener fires + the
+    section auto-refetches with the new state. Without this header,
+    knob mutations would orphan the timeline (UI shows old plant set)."""
+    tg_cache = TestGeneratorCache(TestGeneratorConfig())
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp_p = _put_form(c, "/data/knobs/plants", [("plant", "drift")])
+        resp_d = _put_form(c, "/data/knobs/end_date", [("end_date", "2026-05-14")])
+        resp_s = _put_form(c, "/data/knobs/seed", [("seed", "42")])
+        resp_c = _put_form(c, "/data/knobs/scope", [("scope", "full")])
+
+    for resp, name in [
+        (resp_p, "plants"), (resp_d, "end_date"),
+        (resp_s, "seed"), (resp_c, "scope"),
+    ]:
+        assert resp.headers.get("HX-Trigger") == "trainer-knobs-changed", (  # type: ignore[attr-defined]: TestClient stub return is Any
+            f"PUT /data/knobs/{name} missing HX-Trigger header"
+        )
+
+
+def test_timeline_day_button_writes_end_date(
+    writable_l2_yaml: Path,
+) -> None:
+    """Each timeline-day button uses hx-put + hx-vals to write the
+    clicked day's ISO into /data/knobs/end_date. The button targets
+    #data-knob-end-date so the on-screen end_date strip refreshes
+    (and the end_date PUT in turn fires the trainer-knobs-changed
+    trigger that re-renders the timeline)."""
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(end_date=date(2026, 5, 14), scope="full"),
+    )
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+
+    # Some specific timeline day in spec_example's plant set falls on
+    # an ISO date matching this regex; the timeline-day button carries
+    # the hx-vals end_date payload + targets the end_date strip.
+    assert 'class="timeline-day"' in body
+    assert "hx-target=\"#data-knob-end-date\"" in body
+    # hx-vals end_date payload — the JSON structure we emit.
+    assert 'hx-vals=\'{"end_date": "' in body

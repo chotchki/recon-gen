@@ -171,6 +171,109 @@ body.data-page {
   cursor: pointer;
 }
 
+/* X.4.h.6 — vertical plant-timeline column. Header summarizes
+ * total + per-kind; rows are ghost-buttons (clicking jumps end_date).
+ * Per-kind chip colors lift from the L2 theme so the trainer's
+ * institution branding flows through. */
+.timeline-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--studio-border);
+}
+
+.timeline-total {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--studio-fg, var(--studio-primary-fg));
+}
+
+.timeline-kinds {
+  font-size: 0.75rem;
+  color: var(--studio-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.timeline-day {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--studio-border);
+  border-radius: 0.25rem;
+  background: white;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: background-color 0.1s ease;
+}
+
+.timeline-day:hover {
+  background: var(--studio-bg);
+  border-color: var(--studio-accent, var(--studio-border));
+}
+
+.timeline-day-date {
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  min-width: 6.5rem;
+}
+
+.timeline-day-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.timeline-chip {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.025em;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.1875rem;
+  background: var(--studio-bg);
+  color: var(--studio-muted);
+  border: 1px solid var(--studio-border);
+}
+
+/* Per-kind tints — kept generic / theme-aware. The accent variants
+ * use the institution's L2 theme color via --color-accent. */
+.timeline-chip--drift {
+  background: color-mix(in srgb, var(--color-accent) 12%, white);
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+.timeline-chip--overdraft,
+.timeline-chip--limit_breach {
+  background: color-mix(in srgb, var(--color-danger, crimson) 12%, white);
+  color: var(--color-danger, crimson);
+  border-color: color-mix(in srgb, var(--color-danger, crimson) 25%, transparent);
+}
+
+.timeline-chip--stuck_pending,
+.timeline-chip--stuck_unbundled {
+  background: color-mix(in srgb, var(--color-warning, darkorange) 12%, white);
+  color: var(--color-warning, darkorange);
+  border-color: color-mix(in srgb, var(--color-warning, darkorange) 25%, transparent);
+}
+
+.timeline-chip--supersession {
+  background: color-mix(in srgb, var(--color-success, seagreen) 12%, white);
+  color: var(--color-success, seagreen);
+  border-color: color-mix(in srgb, var(--color-success, seagreen) 25%, transparent);
+}
+
 .data-main {
   display: grid;
   grid-template-columns: minmax(20rem, 1fr) minmax(24rem, 1.5fr);
