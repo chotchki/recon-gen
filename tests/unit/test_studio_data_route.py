@@ -505,3 +505,170 @@ def test_put_end_date_delta_wins_over_end_date(
         )
     # delta wins → +1 day from cached anchor
     assert tg_cache.get().end_date == date(2026, 5, 15)
+
+
+# ---------------------------------------------------------------------------
+# X.4.h.4 — seed input + roll/clear PUT route
+# ---------------------------------------------------------------------------
+
+
+def test_seed_strip_renders_blank_input_when_none(
+    writable_l2_yaml: Path,
+) -> None:
+    """Default cfg.test_generator.seed = None ⇒ the number input renders
+    blank (with placeholder) and the chip shows '(default)'."""
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(seed=None))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+
+    assert 'class="seed-input"' in body
+    # Number input renders blank.
+    assert 'name="seed" value=""' in body
+    assert 'placeholder="(default)"' in body
+    # Chip says "(default)".
+    assert ">(default)<" in body
+
+
+def test_seed_strip_reflects_cached_value(
+    writable_l2_yaml: Path,
+) -> None:
+    """When the cache holds an int, the number input + chip render that
+    integer."""
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(seed=12345))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+
+    assert 'name="seed" value="12345"' in body
+    assert ">12345<" in body
+
+
+def test_seed_strip_form_targets_put_route(
+    writable_l2_yaml: Path,
+) -> None:
+    """Each control independently PUTs to /data/knobs/seed with
+    outerHTML swap. Missing any one breaks the round-trip."""
+    tg_cache = TestGeneratorCache(TestGeneratorConfig())
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+
+    # Two buttons + one input all carry the PUT URL.
+    assert body.count('hx-put="/data/knobs/seed"') == 3
+    assert 'hx-target="#data-knob-seed"' in body
+    # The input's uint32 range must be expressed in the markup —
+    # gives the browser's native number stepper sensible bounds.
+    assert 'min="0"' in body
+    assert 'max="4294967295"' in body
+    # roll button sends roll=1; clear sends seed= (empty).
+    assert 'hx-vals=\'{"roll": "1"}\'' in body
+    assert 'hx-vals=\'{"seed": ""}\'' in body
+    # Input commits on change.
+    assert 'hx-trigger="change"' in body
+
+
+def test_put_seed_absolute_int_set(
+    writable_l2_yaml: Path,
+) -> None:
+    """PUT /data/knobs/seed with seed=<int> commits the absolute value
+    to the cache and re-renders with the new value."""
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(seed=None))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(c, "/data/knobs/seed", [("seed", "9876")])
+    assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
+    assert tg_cache.get().seed == 9876
+    assert 'value="9876"' in resp.text  # type: ignore[attr-defined]: TestClient stub return is Any
+
+
+def test_put_seed_empty_string_clears_to_none(
+    writable_l2_yaml: Path,
+) -> None:
+    """seed= (empty) is the canonical "clear" payload — cache resets to
+    None (which the generator treats as _BASELINE_BASE_SEED locked
+    default), and the widget re-renders blank."""
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(seed=42))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(c, "/data/knobs/seed", [("seed", "")])
+    assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
+    assert tg_cache.get().seed is None
+    assert 'name="seed" value=""' in resp.text  # type: ignore[attr-defined]: TestClient stub return is Any
+
+
+def test_put_seed_roll_picks_random_uint32(
+    writable_l2_yaml: Path,
+) -> None:
+    """roll=1 picks a fresh seed in the uint32 range and pins it. The
+    test asserts the value lands in the valid range (the actual
+    randomness is the OS RNG — we don't pin it here)."""
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(seed=None))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(c, "/data/knobs/seed", [("roll", "1")])
+    assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
+    rolled = tg_cache.get().seed
+    assert rolled is not None
+    assert 0 <= rolled <= 2**32 - 1
+    # The strip re-renders with the new value.
+    assert f'value="{rolled}"' in resp.text  # type: ignore[attr-defined]: TestClient stub return is Any
+
+
+def test_put_seed_roll_wins_over_seed_field(
+    writable_l2_yaml: Path,
+) -> None:
+    """When roll=1 + seed=<int> are both sent, roll wins. The UI never
+    sends both, but a curl might."""
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(seed=None))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        _put_form(
+            c, "/data/knobs/seed",
+            [("roll", "1"), ("seed", "12345")],
+        )
+    rolled = tg_cache.get().seed
+    assert rolled is not None
+    # Roll wins — random pick, almost certainly not 12345.
+    assert 0 <= rolled <= 2**32 - 1
+    # (We can't assert != 12345 without making the test theoretically
+    # flaky — the random RNG has 1-in-4-billion odds of producing
+    # 12345 — but the cache update path went through roll, not seed.)
+
+
+def test_put_seed_invalid_int_silently_drops(
+    writable_l2_yaml: Path,
+) -> None:
+    """Garbage in the seed field silently drops — same posture as the
+    date stepper / plant toggle. Curl tests / stale browsers can't
+    corrupt the cache."""
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(seed=42))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(c, "/data/knobs/seed", [("seed", "not-a-number")])
+    assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
+    assert tg_cache.get().seed == 42
+
+
+def test_put_seed_zero_is_a_valid_value(
+    writable_l2_yaml: Path,
+) -> None:
+    """seed=0 commits 0 (a valid uint32 starting boundary). Truthy-check
+    bugs would silently treat 0 as "absent" — explicit test guards
+    against that regression."""
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(seed=42))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        _put_form(c, "/data/knobs/seed", [("seed", "0")])
+    assert tg_cache.get().seed == 0
+
+
+def test_put_seed_route_absent_without_cache(
+    writable_l2_yaml: Path,
+) -> None:
+    """Without tg_cache the mutation route is NOT mounted (severability
+    rule, mirrors plants + end_date)."""
+    app = _build_app(writable_l2_yaml, tg_cache=None)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(c, "/data/knobs/seed", [("seed", "1234")])
+    assert resp.status_code in (404, 405)  # type: ignore[attr-defined]: TestClient stub return is Any

@@ -103,6 +103,53 @@ body.data-page {
   margin-left: 0.25rem;
 }
 
+/* X.4.h.4 — random-seed input. Wider input than the date picker
+ * since uint32 can be 10 chars; "roll" is the primary action chip
+ * (accent border so it pops); "clear" matches the date stepper's
+ * "today" reset visual. */
+.data-knob-seed {
+  gap: 0.25rem;
+}
+
+.seed-input {
+  font-size: 0.875rem;
+  padding: 0.125rem 0.25rem;
+  border: 1px solid var(--studio-border);
+  border-radius: 0.25rem;
+  background: white;
+  color: inherit;
+  width: 9ch;
+  font-variant-numeric: tabular-nums;
+}
+
+.seed-roll,
+.seed-clear {
+  appearance: none;
+  background: white;
+  border: 1px solid var(--studio-border);
+  border-radius: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+  color: inherit;
+}
+
+.seed-roll {
+  border-color: var(--studio-accent, var(--studio-border));
+}
+
+.seed-roll:hover,
+.seed-clear:hover {
+  background: var(--studio-bg);
+}
+
+.seed-current {
+  font-size: 0.75rem;
+  color: var(--studio-muted);
+  font-variant-numeric: tabular-nums;
+  margin-left: 0.25rem;
+}
+
 .data-main {
   display: grid;
   grid-template-columns: minmax(20rem, 1fr) minmax(24rem, 1.5fr);

@@ -779,6 +779,54 @@ def _render_end_date_strip(selected: date | None) -> str:
     )
 
 
+def _render_seed_strip(selected: int | None) -> str:
+    """X.4.h.4 — render the random-seed input + roll/clear buttons.
+
+    UI: ``[number input] [roll] [clear]``. The number input commits
+    on change; "roll" asks the server for a fresh random uint32 and
+    pins it; "clear" resets to None (the locked-default sentinel —
+    generator side falls back to ``_BASELINE_BASE_SEED = 42``).
+
+    Wired with HTMX: the input PUTs ``seed=<int>``; "roll" sends
+    ``roll=1`` (server picks the random value, returns the rendered
+    strip with the new value showing); "clear" sends ``seed=`` (empty
+    string → clear to None — same form-encoding the date stepper uses
+    for its "today" reset).
+
+    The trailing chip surfaces the current value so the operator
+    sees the cached state at a glance even when typing into the input.
+    """
+    val_str = str(selected) if selected is not None else ""
+    pretty = str(selected) if selected is not None else "(default)"
+    common_attrs = (
+        'hx-put="/data/knobs/seed" '
+        'hx-target="#data-knob-seed" '
+        'hx-swap="outerHTML"'
+    )
+    return (
+        f'<form id="data-knob-seed" class="data-knob data-knob-seed">'
+        f'<span class="data-knob-label">seed:</span>'
+        f'<input type="number" name="seed" value="{escape(val_str)}" '
+        f'min="0" max="4294967295" '
+        f'class="seed-input" '
+        f'aria-label="Pin a random seed (uint32)" '
+        f'placeholder="(default)" '
+        f'hx-trigger="change" '
+        f"{common_attrs}/>"
+        f'<button type="button" class="seed-roll" '
+        f'title="Pick a fresh random seed" '
+        f"{common_attrs} "
+        f"hx-vals='{{\"roll\": \"1\"}}'>roll</button>"
+        f'<button type="button" class="seed-clear" '
+        f'title="Clear to default (None ⇒ locked _BASELINE_BASE_SEED)" '
+        f"{common_attrs} "
+        f"hx-vals='{{\"seed\": \"\"}}'>clear</button>"
+        f'<span class="seed-current" '
+        f'aria-label="Current seed">{escape(pretty)}</span>'
+        f"</form>"
+    )
+
+
 def _render_data_page(
     cache: L2InstanceCache,
     dev_log: bool,
@@ -787,10 +835,10 @@ def _render_data_page(
 ) -> str:
     """X.4.h.1 — Studio "trainer mode" data-shaping panel shell.
 
-    Page-shell + h.2 plant-toggle checkboxes + h.3 day-stepper wired
-    through the ``TestGeneratorCache``. h.4-h.5 layer the seed input
-    and scope selector into the same knob strip. Timeline + training
-    pane stay placeholders here (h.6 / h.9).
+    Page-shell + h.2 plant-toggle + h.3 day-stepper + h.4 seed input
+    wired through the ``TestGeneratorCache``. h.5 layers the scope
+    selector into the same knob strip. Timeline + training pane stay
+    placeholders here (h.6 / h.9).
 
     ``tg_cache`` is None for the unit-test surface that exercises the
     page shell without the full studio cfg wiring; in that mode the
@@ -813,6 +861,10 @@ def _render_data_page(
         tg_cache.get().end_date if tg_cache is not None else None
     )
     end_date_strip = _render_end_date_strip(selected_end_date)
+    selected_seed = (
+        tg_cache.get().seed if tg_cache is not None else None
+    )
+    seed_strip = _render_seed_strip(selected_seed)
 
     return f"""<!doctype html>
 <html lang="en">
@@ -876,8 +928,9 @@ def _render_data_page(
 
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <div class="data-knobs" id="data-knobs">
-    <span class="knob-placeholder">scope · seed — wired in X.4.h.4-h.5</span>
+    <span class="knob-placeholder">scope — wired in X.4.h.5</span>
     {end_date_strip}
+    {seed_strip}
     {plants_strip}
   </div>
 
@@ -1087,6 +1140,48 @@ def make_studio_routes(
 
         routes.append(
             Route("/data/knobs/end_date", put_end_date, methods=["PUT"]),
+        )
+
+        async def put_seed(request: Request) -> HTMLResponse:
+            """X.4.h.4 — set / roll / clear the random-seed knob.
+
+            Form contract:
+                - ``roll=1`` → server picks a fresh ``random.randint(0,
+                  2**32 - 1)`` and pins it. Wins over ``seed=`` when
+                  both present (defensive — UI never sends both).
+                - ``seed=<int>`` → set absolute value. Empty string
+                  clears to None ("clear" reset).
+                - Invalid int (non-digit string): silently drop —
+                  same posture as the date stepper / plant toggle.
+            """
+            import random  # noqa: PLC0415
+
+            form = await request.form()
+            current = bound_tg.get().seed
+            new_seed: int | None = current
+
+            roll_raw = form.get("roll")
+            if isinstance(roll_raw, str) and roll_raw.strip():
+                # uint32 range matches QS_GEN_FUZZ_SEED's contract
+                # (CLAUDE.md: "runner rolls a fresh random uint32 per
+                # invocation"). Trainer-mode UI is not a determinism
+                # path, so an unseeded random call is honest here.
+                new_seed = random.randint(0, 2**32 - 1)
+            else:
+                seed_raw = form.get("seed")
+                if isinstance(seed_raw, str):
+                    if seed_raw == "":
+                        new_seed = None
+                    else:
+                        try:
+                            new_seed = int(seed_raw)
+                        except ValueError:
+                            new_seed = current  # silent drop
+            bound_tg.update(seed=new_seed)
+            return HTMLResponse(_render_seed_strip(new_seed))
+
+        routes.append(
+            Route("/data/knobs/seed", put_seed, methods=["PUT"]),
         )
 
     # X.4.c.5.c — coverage JSON route. Mounted only when a pool exists
