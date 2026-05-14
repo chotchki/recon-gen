@@ -778,6 +778,83 @@ def test_step_3_generator_full_emits_start_then_done(
     assert done["daily_balances_written"] == bal
 
 
+def test_step_3_generator_full_with_cutoff_truncates_emission(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """X.4.h trainer cutoff — when cfg.test_generator.cutoff_date is
+    set, deploy emits the full scenario then DELETEs rows past cutoff.
+    Plants land at fixed calendar positions (anchor=end_date), the
+    cutoff just truncates the deployed dataset.
+
+    Verifies: rows past cutoff get deleted; rows on/before stay.
+    The trainer's "scrub head" model relies on this — clicking an
+    earlier day in the timeline should leave plant calendar positions
+    untouched and cut off the dataset.
+    """
+    from datetime import date
+
+    no_cutoff_dir = tmp_path / "no_cutoff"
+    no_cutoff_dir.mkdir()
+    with_cutoff_dir = tmp_path / "with_cutoff"
+    with_cutoff_dir.mkdir()
+    cfg_no_cutoff = replace(
+        _sqlite_cfg(no_cutoff_dir),
+        test_generator=TestGeneratorConfig(end_date=date(2030, 1, 31)),
+    )
+    cfg_with_cutoff = replace(
+        _sqlite_cfg(with_cutoff_dir),
+        test_generator=TestGeneratorConfig(
+            end_date=date(2030, 1, 31),
+            cutoff_date=date(2030, 1, 15),  # truncate mid-month
+        ),
+    )
+    _apply_demo_schema_only(cfg_no_cutoff, spec_example_instance)
+    _apply_demo_schema_only(cfg_with_cutoff, spec_example_instance)
+    full_tx, full_bal = asyncio.run(
+        step_3_generator(cfg_no_cutoff, spec_example_instance, dev_log=None),
+    )
+    cut_tx, cut_bal = asyncio.run(
+        step_3_generator(cfg_with_cutoff, spec_example_instance, dev_log=None),
+    )
+
+    # Cutoff version has strictly fewer rows (truncates ~half the
+    # 90-day window — we picked 1/15 inside a window ending 1/31).
+    assert cut_tx > 0, "cutoff version should retain rows on/before cutoff"
+    assert cut_tx < full_tx, (
+        "cutoff version should have strictly fewer transactions than "
+        f"non-cutoff (got cut={cut_tx}, full={full_tx})"
+    )
+    assert cut_bal < full_bal, (
+        "cutoff version should have strictly fewer daily_balances than "
+        f"non-cutoff (got cut={cut_bal}, full={full_bal})"
+    )
+
+
+def test_step_3_generator_no_cutoff_emits_unchanged(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """When cutoff_date is None (CLI default + Studio when up_to ==
+    window_end), no DELETE statements are appended — emission is
+    byte-identical to legacy. Two runs with identical knobs and no
+    cutoff produce the same row counts (the existing determinism test
+    confirms this — this one just guards the cutoff_date=None path
+    explicitly)."""
+    from datetime import date
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        test_generator=TestGeneratorConfig(
+            end_date=date(2030, 1, 31),
+            cutoff_date=None,  # explicit — test the None path
+        ),
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    tx, bal = asyncio.run(
+        step_3_generator(cfg, spec_example_instance, dev_log=None),
+    )
+    assert tx > 0
+    assert bal > 0
+
+
 def test_step_3_generator_full_anchor_determinism(
     tmp_path: Path, spec_example_instance: L2Instance,
 ) -> None:

@@ -690,6 +690,13 @@ def emit_seed(
 # when one Rail is renamed.
 _BASELINE_BASE_SEED = 42
 
+# X.4.h.6 — the rolling-window length (in calendar days) the baseline
+# generator emits legs for, anchored at ``today``. Public so consumers
+# (the Studio trainer-mode timeline UI) can render the same window the
+# generator uses without duplicating the literal. ``emit_baseline_seed``
+# accepts a ``window_days`` override; this is the default.
+DEFAULT_BASELINE_WINDOW_DAYS = 90
+
 
 def _seed_for_rail(
     rail_name: Identifier | str,

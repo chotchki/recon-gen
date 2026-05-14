@@ -367,17 +367,21 @@ def test_end_date_strip_form_targets_put_route(
     writable_l2_yaml: Path,
 ) -> None:
     """Each control independently PUTs to /data/knobs/end_date with
-    outerHTML swap. Missing any one breaks the round-trip."""
-    tg_cache = TestGeneratorCache(TestGeneratorConfig())
+    outerHTML swap. The strip is now labeled "up to" since it's the
+    scrub head within the trainer's scenario window (h.3.window)."""
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(end_date=date(2026, 5, 14)),
+        window_start=date(2026, 4, 1),
+        window_end=date(2026, 5, 31),
+    )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/data").text
 
-    # The end_date strip itself carries 4 PUT URLs (← / date input / → /
-    # today). The timeline section (h.6) ALSO writes /data/knobs/end_date
-    # — one PUT URL per timeline-day button — so we narrow this assertion
-    # to the strip's own form by asserting at least 4 (instead of an
-    # exact count) and verifying the form's identity around them.
+    # The up_to strip itself carries 4 PUT URLs (← / date input / → /
+    # snap-to-end). The timeline section (h.6) ALSO writes
+    # /data/knobs/end_date — one PUT URL per timeline-day button — so
+    # we narrow to the strip's own form by asserting at least 4.
     assert body.count('hx-put="/data/knobs/end_date"') >= 4
     assert 'id="data-knob-end-date"' in body
     assert 'hx-target="#data-knob-end-date"' in body
@@ -386,18 +390,30 @@ def test_end_date_strip_form_targets_put_route(
     # attribute → literal " chars inside JSON, no HTML-escape).
     assert 'hx-vals=\'{"delta": "-1"}\'' in body
     assert 'hx-vals=\'{"delta": "1"}\'' in body
-    # "today" button sends an empty end_date to reset.
-    assert 'hx-vals=\'{"end_date": ""}\'' in body
+    # "snap to end" button sends end_date = window_end (not empty —
+    # the empty-string semantic is now "snap to window_end" handled
+    # server-side, but the button skips the round-trip and sends the
+    # explicit value for the snap action).
+    assert 'hx-vals=\'{"end_date": "2026-05-31"}\'' in body
     # Date input commits on change.
     assert 'hx-trigger="change"' in body
+    # Date input has min/max bounds matching the window so the
+    # browser-native picker can't pick outside it.
+    assert 'min="2026-04-01"' in body
+    assert 'max="2026-05-31"' in body
 
 
 def test_put_end_date_absolute_date_set(
     writable_l2_yaml: Path,
 ) -> None:
     """PUT /data/knobs/end_date with end_date=ISO commits the absolute
-    date to the cache and re-renders the strip with the new value."""
-    tg_cache = TestGeneratorCache(TestGeneratorConfig(end_date=None))
+    date to the cache (clamped to window) and re-renders the strip
+    with the new value."""
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(end_date=None),
+        window_start=date(2026, 5, 1),
+        window_end=date(2026, 6, 30),
+    )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = _put_form(
@@ -409,29 +425,55 @@ def test_put_end_date_absolute_date_set(
     assert 'value="2026-06-01"' in resp.text  # type: ignore[attr-defined]: TestClient stub return is Any
 
 
-def test_put_end_date_empty_string_clears_to_none(
+def test_put_end_date_clamps_to_window(
     writable_l2_yaml: Path,
 ) -> None:
-    """end_date= (empty) is the canonical "today reset" payload — the
-    cache clears to None and the widget re-renders with a blank input."""
+    """An absolute end_date outside the window clamps to the nearest
+    window edge — the up_to scrubber is bounded by the trainer's
+    scenario window, not the wide-open calendar."""
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(end_date=date(2026, 5, 14)),
+        window_start=date(2026, 5, 1),
+        window_end=date(2026, 5, 31),
+    )
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        # Above window: clamps to window_end.
+        _put_form(c, "/data/knobs/end_date", [("end_date", "2030-01-01")])
+        assert tg_cache.get().end_date == date(2026, 5, 31)
+        # Below window: clamps to window_start.
+        _put_form(c, "/data/knobs/end_date", [("end_date", "2020-01-01")])
+        assert tg_cache.get().end_date == date(2026, 5, 1)
+
+
+def test_put_end_date_empty_string_snaps_to_window_end(
+    writable_l2_yaml: Path,
+) -> None:
+    """end_date= (empty) is the canonical "snap to end" payload —
+    the cache holds window_end explicitly so subsequent reads stay
+    stable even if the window moves later."""
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(end_date=date(2026, 5, 14)),
+        window_start=date(2026, 5, 1),
+        window_end=date(2026, 5, 31),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = _put_form(c, "/data/knobs/end_date", [("end_date", "")])
     assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
-    assert tg_cache.get().end_date is None
-    assert 'value=""' in resp.text  # type: ignore[attr-defined]: TestClient stub return is Any
+    assert tg_cache.get().end_date == date(2026, 5, 31)
+    assert 'value="2026-05-31"' in resp.text  # type: ignore[attr-defined]: TestClient stub return is Any
 
 
 def test_put_end_date_delta_steps_from_cached_value(
     writable_l2_yaml: Path,
 ) -> None:
     """delta=1 with a cached date applies +1 day, delta=-1 applies -1.
-    The cache's stored date is the anchor, not today's date."""
+    The cache's stored date is the anchor; results clamp to the window."""
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(end_date=date(2026, 5, 14)),
+        window_start=date(2026, 5, 1),
+        window_end=date(2026, 5, 31),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -443,22 +485,25 @@ def test_put_end_date_delta_steps_from_cached_value(
         assert tg_cache.get().end_date == date(2026, 5, 14)
 
 
-def test_put_end_date_delta_anchors_on_today_when_cache_none(
+def test_put_end_date_delta_anchors_on_window_end_when_cache_none(
     writable_l2_yaml: Path,
 ) -> None:
-    """delta from a None cache anchors on the system today's date so
-    the operator can step from "today's data" without first picking a
-    starting date. No determinism guarantee here — the trainer mode
-    is a UI surface, not a hash-locked seed path."""
-    tg_cache = TestGeneratorCache(TestGeneratorConfig(end_date=None))
+    """delta from a None cache resolves up_to via cache.get_up_to()
+    which falls back to window_end. delta+1 from window_end clamps
+    back to window_end (since up_to can't exceed it)."""
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(end_date=None),
+        window_start=date(2026, 5, 1),
+        window_end=date(2026, 5, 31),
+    )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        # +1 from window_end → clamps back to window_end.
         _put_form(c, "/data/knobs/end_date", [("delta", "1")])
-    new = tg_cache.get().end_date
-    assert new is not None
-    today = date.today()  # typing-smell: ignore[no-datetime-now]: trainer-mode test must compare against the same wall-clock anchor the route uses
-    # Tomorrow — modulo a hypothetical midnight crossing during the test.
-    assert new in {today + timedelta(days=1), today + timedelta(days=2)}
+        assert tg_cache.get().end_date == date(2026, 5, 31)
+        # -1 from window_end → 2026-05-30 (in window).
+        _put_form(c, "/data/knobs/end_date", [("delta", "-1")])
+        assert tg_cache.get().end_date == date(2026, 5, 30)
 
 
 def test_put_end_date_invalid_iso_silently_drops(
@@ -501,6 +546,8 @@ def test_put_end_date_delta_wins_over_end_date(
     explicit avoids ambiguous behavior."""
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(end_date=date(2026, 5, 14)),
+        window_start=date(2026, 5, 1),
+        window_end=date(2026, 5, 31),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -819,20 +866,31 @@ def test_data_page_renders_timeline_section(
     assert "timeline-chip--" in body
 
 
-def test_data_page_timeline_empty_when_uncovered_rails(
+def test_data_page_timeline_uncovered_rails_renders_dense_window(
     writable_l2_yaml: Path,
 ) -> None:
-    """uncovered_rails scope ⇒ no plants ⇒ the timeline section
-    surfaces an explanatory empty-state instead of rows."""
+    """uncovered_rails scope ⇒ no plants emitted but the dense 90-day
+    window still renders so the operator sees the timeline context.
+    The header carries a hint that no plants are in this scope; every
+    row renders as `--empty` (no chips) including the anchor."""
     tg_cache = TestGeneratorCache(
-        TestGeneratorConfig(scope="uncovered_rails"),
+        TestGeneratorConfig(
+            end_date=date(2026, 5, 14),
+            scope="uncovered_rails",
+        ),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/data").text
 
-    assert "No plants in this scope" in body
-    assert 'class="timeline-day"' not in body
+    # Header surfaces the no-plants hint.
+    assert "scope=uncovered_rails" in body
+    # Dense window: 90 rows still render.
+    assert body.count('<button type="button" class="timeline-day') == 90
+    # Anchor row exists (= end_date).
+    assert 'id="timeline-anchor-row"' in body
+    # No chips because no plants emitted.
+    assert "timeline-chip--" not in body
 
 
 def test_get_data_timeline_returns_section_fragment(
@@ -876,6 +934,54 @@ def test_knob_puts_emit_hx_trigger_header(
         assert resp.headers.get("HX-Trigger") == "trainer-knobs-changed", (  # type: ignore[attr-defined]: TestClient stub return is Any
             f"PUT /data/knobs/{name} missing HX-Trigger header"
         )
+
+
+def test_timeline_dense_window_renders_anchor_and_full_window(
+    writable_l2_yaml: Path,
+) -> None:
+    """The timeline dense-renders the full baseline window (90 days
+    by default, sourced from seed.DEFAULT_BASELINE_WINDOW_DAYS) with
+    the anchor row highlighted via .timeline-day--anchor + a stable
+    id for scrollIntoView."""
+    from quicksight_gen.common.l2.seed import DEFAULT_BASELINE_WINDOW_DAYS
+
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(end_date=date(2026, 5, 14), scope="full"),
+    )
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+
+    # One row per day in the window.
+    assert body.count('<button type="button" class="timeline-day') == DEFAULT_BASELINE_WINDOW_DAYS
+    # The anchor row gets a stable id so the scrollIntoView script can
+    # find it after every HTMX swap.
+    assert 'id="timeline-anchor-row"' in body
+    assert "timeline-day--anchor" in body
+    # Anchor row's date is the cached end_date.
+    assert 'value="2026-05-14"' in body  # end_date strip
+    # Inline script wires the scrollIntoView call.
+    assert "scrollIntoView" in body
+    # First (oldest) row is window_days - 1 days back from anchor.
+    earliest = date(2026, 5, 14) - timedelta(days=DEFAULT_BASELINE_WINDOW_DAYS - 1)
+    assert f'>{earliest.isoformat()}<' in body
+
+
+def test_timeline_anchors_on_today_when_end_date_none(
+    writable_l2_yaml: Path,
+) -> None:
+    """When end_date is None the timeline anchors on the system today
+    (matching what the generator does when tg.end_date is None at
+    Deploy time). Trainer-mode UI is not a determinism path."""
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(end_date=None))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+
+    today = date.today()  # typing-smell: ignore[no-datetime-now]: trainer-mode test must use the same wall-clock anchor the renderer uses
+    # The anchor row's date label is today's ISO.
+    assert f'>{today.isoformat()}<' in body
+    assert 'id="timeline-anchor-row"' in body
 
 
 def test_timeline_day_button_writes_end_date(

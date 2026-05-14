@@ -79,8 +79,10 @@ from quicksight_gen.common.db import AsyncConnectionPool
 from quicksight_gen.common.l2.cache import L2InstanceCache
 from quicksight_gen.common.l2.coverage import CoverageEntry, coverage_for
 from quicksight_gen.common.l2.deploy_pipeline import run_deploy_pipeline
+from quicksight_gen.common.l2.seed import DEFAULT_BASELINE_WINDOW_DAYS
 from quicksight_gen.common.l2.tg_cache import TestGeneratorCache
 from quicksight_gen.common.l2.trainer_timeline import (
+    PlantHit,
     TimelineDay,
     compute_plant_timeline,
     hits_by_kind,
@@ -751,58 +753,100 @@ def _render_plants_strip(
     )
 
 
-def _render_end_date_strip(selected: date | None) -> str:
-    """X.4.h.3 — render the end_date day-stepper widget.
+def _render_window_strip(window_start: date, window_end: date) -> str:
+    """X.4.h.3.window — render the scenario-window picker.
 
-    UI: ``[←] [date input] [→] [today]``. ``←`` / ``→`` step ±1 day;
-    the date input commits on change; ``today`` clears back to ``None``
-    (the locked-default sentinel — generator side falls back to the
-    system date or the locked-seed anchor depending on context).
+    Two date inputs (start / end) plus a "last 90 days" reset.
+    Defines the trainer's scenario bounds — purely a UI concept
+    (does NOT round-trip through the generator). The timeline panel
+    renders one row per day in ``[window_start, window_end]``; the
+    operator scrubs ``up_to`` (= ``tg.end_date``) within those bounds.
 
-    Wired with HTMX: each control independently PUTs to
-    ``/data/knobs/end_date``. The form is a pure container — no
-    ``hx-put`` on the form itself — because each control sends a
-    different payload shape:
-
-    - Prev / next buttons send ``delta=-1`` / ``delta=1`` via
-      ``hx-vals``; the server reads the cached state and applies the
-      delta (anchoring on today when the cache holds None).
-    - The date input sends ``end_date=<YYYY-MM-DD>`` via its own name.
-    - The "today" reset sends ``end_date=`` (empty) — the canonical
-      "clear to None" form-encoding.
-
-    All controls target ``#data-knob-end-date`` with ``outerHTML``
-    swap so the on-screen state always reflects the cache.
+    Both inputs PUT to ``/data/knobs/window``; the route accepts
+    ``window_start=<ISO>`` and/or ``window_end=<ISO>`` (either or
+    both). The "reset" button sends ``reset=1`` to snap back to the
+    default (last 90 days from today).
     """
-    iso = selected.isoformat() if selected is not None else ""
-    pretty = selected.isoformat() if selected is not None else "(default)"
+    common_attrs = (
+        'hx-put="/data/knobs/window" '
+        'hx-target="#data-knob-window" '
+        'hx-swap="outerHTML"'
+    )
+    return (
+        f'<form id="data-knob-window" class="data-knob data-knob-window">'
+        f'<span class="data-knob-label">window:</span>'
+        f'<input type="date" name="window_start" '
+        f'value="{escape(window_start.isoformat())}" '
+        f'class="window-input" '
+        f'aria-label="Window start date" '
+        f'hx-trigger="change" '
+        f"{common_attrs}/>"
+        f'<span class="window-sep">→</span>'
+        f'<input type="date" name="window_end" '
+        f'value="{escape(window_end.isoformat())}" '
+        f'class="window-input" '
+        f'aria-label="Window end date" '
+        f'hx-trigger="change" '
+        f"{common_attrs}/>"
+        f'<button type="button" class="window-reset" '
+        f'title="Reset to last 90 days from today" '
+        f"{common_attrs} "
+        f"hx-vals='{{\"reset\": \"1\"}}'>last 90 days</button>"
+        f"</form>"
+    )
+
+
+def _render_up_to_strip(
+    up_to: date,
+    window_start: date,
+    window_end: date,
+) -> str:
+    """X.4.h.3 — render the "up to" scrub-head day-stepper.
+
+    UI: ``[←] [date input] [→] [snap to end]``. ``←`` / ``→`` step
+    ±1 day (clamped to the window); the date input commits on change;
+    "snap to end" sets up_to = window_end (the most-data position).
+
+    The cache stores up_to as ``tg.end_date``; the renderer always
+    receives a concrete date (None resolves to window_end before
+    arriving here).
+
+    Wired with HTMX: each control PUTs to ``/data/knobs/end_date``
+    (kept the legacy URL — internal-only rename to "up_to" in the UI;
+    the generator field stays ``end_date``). Server-side delta
+    handler clamps results to ``[window_start, window_end]``.
+    """
+    iso = up_to.isoformat()
     common_attrs = (
         'hx-put="/data/knobs/end_date" '
         'hx-target="#data-knob-end-date" '
         'hx-swap="outerHTML"'
     )
+    snap_payload = f'{{"end_date": "{escape(window_end.isoformat())}"}}'
     return (
         f'<form id="data-knob-end-date" class="data-knob data-knob-end-date">'
-        f'<span class="data-knob-label">end_date:</span>'
+        f'<span class="data-knob-label">up to:</span>'
         f'<button type="button" class="end-date-step" '
-        f'title="Step back 1 day" '
+        f'title="Step back 1 day (within window)" '
         f"{common_attrs} "
         f"hx-vals='{{\"delta\": \"-1\"}}'>←</button>"
         f'<input type="date" name="end_date" value="{escape(iso)}" '
+        f'min="{escape(window_start.isoformat())}" '
+        f'max="{escape(window_end.isoformat())}" '
         f'class="end-date-input" '
-        f'aria-label="Pick end date" '
+        f'aria-label="Pick simulation cutoff date" '
         f'hx-trigger="change" '
         f"{common_attrs}/>"
         f'<button type="button" class="end-date-step" '
-        f'title="Step forward 1 day" '
+        f'title="Step forward 1 day (within window)" '
         f"{common_attrs} "
         f"hx-vals='{{\"delta\": \"1\"}}'>→</button>"
         f'<button type="button" class="end-date-reset" '
-        f'title="Clear to default (None)" '
+        f'title="Snap to window end ({escape(window_end.isoformat())})" '
         f"{common_attrs} "
-        f"hx-vals='{{\"end_date\": \"\"}}'>today</button>"
+        f"hx-vals='{snap_payload}'>snap to end</button>"
         f'<span class="end-date-current" '
-        f'aria-label="Current end_date">{escape(pretty)}</span>'
+        f'aria-label="Current up_to">{escape(iso)}</span>'
         f"</form>"
     )
 
@@ -917,99 +961,193 @@ def _render_timeline_section(
 ) -> str:
     """X.4.h.6.b/c — render the vertical plant-timeline column.
 
+    Dense-render every day in the trainer's scenario window
+    (``[window_start, window_end]``, oldest→newest). Days
+    ``<= up_to`` are "data" days — show chips for plants that hit
+    them. Days ``> up_to`` are "future" — dimmed, no chips, but still
+    clickable to advance the scrub head. The ``up_to`` row carries
+    ``.timeline-day--anchor`` + auto-scrolls into view on render.
+
     Returns the entire ``<section id="data-timeline">`` block so the
     HTMX refresh (``hx-get="/data/timeline"`` triggered by every knob
     PUT via ``HX-Trigger: trainer-knobs-changed``) can swap it as one
     unit with ``hx-swap="outerHTML"``.
 
-    Each TimelineDay row carries an ``hx-put`` to
-    ``/data/knobs/end_date`` so a click on the date jumps the
-    end_date knob there + auto-Deploy. The full-row click target
-    keeps the chip layout undisturbed (chips don't fight the
-    primary action).
+    Each row carries ``hx-put`` to ``/data/knobs/end_date`` so a click
+    jumps up_to there (without touching the window). The PUT then fires
+    the same ``trainer-knobs-changed`` trigger which re-renders the
+    timeline (closing the loop).
 
-    ``tg_cache=None`` ⇒ the panel renders the locked-default
-    (TestGeneratorConfig()) timeline; that's the unit-test surface
-    for the page shell + the dashboards-only mode that omits Studio's
-    knob mutation routes.
+    ``tg_cache=None`` ⇒ renders against TestGeneratorConfig() defaults
+    + a default last-90-days window; that's the unit-test page-shell
+    surface that omits Studio's knob mutation routes.
     """
-    tg = tg_cache.get() if tg_cache is not None else None
-    from quicksight_gen.common.config import (  # noqa: PLC0415
-        TestGeneratorConfig,
-    )
-    effective_tg = tg or TestGeneratorConfig()
-    timeline = compute_plant_timeline(instance, effective_tg)  # type: ignore[arg-type]: instance shape from L2InstanceCache.get is Any-ish, but compute_plant_timeline narrows internally
-
-    if not timeline:
-        empty_msg = (
-            "No plants in this scope. "
-            "Switch to <code>full</code> or <code>exceptions_only</code> "
-            "to see the planted exceptions."
-            if effective_tg.scope == "uncovered_rails"
-            else "No plants matched the current toggle subset."
-        )
-        body = f'<p class="data-empty">{empty_msg}</p>'
+    if tg_cache is not None:
+        effective_tg = tg_cache.get()
+        window_start, window_end = tg_cache.get_window()
+        up_to = tg_cache.get_up_to()
     else:
-        kind_counts = hits_by_kind(timeline)
-        # Header summary: "12 hits across 5 days · drift 6, overdraft 2 …"
-        total = sum(kind_counts.values())
-        kind_summary_parts = [
+        from quicksight_gen.common.config import (  # noqa: PLC0415
+            TestGeneratorConfig,
+        )
+        effective_tg = TestGeneratorConfig()
+        window_end = date.today()  # typing-smell: ignore[no-datetime-now]: trainer-mode page-shell default — wall-clock today is the operator-friendly anchor for "last 90 days"; not a determinism path
+        window_start = window_end - timedelta(
+            days=DEFAULT_BASELINE_WINDOW_DAYS - 1,
+        )
+        up_to = window_end
+
+    # Anchor the plant projection on window_end, NOT up_to. Plants
+    # stay at fixed calendar positions while the scrub head slides
+    # within the window — the trainer's mental model is "scenario is
+    # fixed, I'm choosing how far through it to view". Without this,
+    # `default_scenario_for(today=up_to)` would shift every plant
+    # backward as up_to moves earlier, which the trainer experiences
+    # as "plants move backwards when I click an earlier day" — the
+    # bug the user reported.
+    #
+    # KNOWN MISMATCH: Deploy still anchors at tg.end_date (= up_to)
+    # via deploy_pipeline.py. Until Deploy gets a separate (anchor,
+    # cutoff) split, the dashboards Deploy emits will NOT match this
+    # preview when up_to < window_end. Tracking as a follow-up — the
+    # generator needs an "anchor at window_end, truncate emission at
+    # cutoff" mode for full end-to-end alignment.
+    import dataclasses as _dc  # noqa: PLC0415
+
+    plant_projection_tg = _dc.replace(
+        effective_tg, end_date=window_end,
+    )
+    sparse_timeline = compute_plant_timeline(instance, plant_projection_tg)  # type: ignore[arg-type]: instance shape from L2InstanceCache.get is Any-ish, but compute_plant_timeline narrows internally
+    hits_by_day: dict[date, tuple[PlantHit, ...]] = {
+        td.day: td.hits for td in sparse_timeline
+    }
+
+    # Dense window: window_start … window_end inclusive.
+    n_days = (window_end - window_start).days + 1
+    window_days: list[date] = [
+        window_start + timedelta(days=i) for i in range(n_days)
+    ]
+    n_data_days = sum(1 for d in window_days if d <= up_to)
+    n_future_days = n_days - n_data_days
+
+    # Header: total plants across the FULL window — what's "available"
+    # in the scenario, regardless of where the scrub head sits. The
+    # trainer needs to know "12 plants are in this window" so they
+    # know what they can scrub forward to find. Filtering by up_to
+    # would shrink/grow the count as they click around, which is
+    # disorienting.
+    kind_counts = hits_by_kind(sparse_timeline)
+    total = sum(kind_counts.values())
+    n_hit_days = len(sparse_timeline)
+    if effective_tg.scope == "uncovered_rails":
+        kind_summary = "(scope=uncovered_rails ⇒ no plants emitted)"
+    elif total == 0:
+        kind_summary = "(no plants in current scenario)"
+    else:
+        kind_summary = " · ".join(
             f"{_PLANT_KIND_LABELS.get(k, k)} {n}"
             for k, n in kind_counts.items()
-        ]
-        kind_summary = " · ".join(kind_summary_parts) if kind_summary_parts else "—"
-        header_html = (
-            f'<header class="timeline-header">'
-            f'<span class="timeline-total">{total} '
-            f'plant{"" if total == 1 else "s"} across '
-            f'{len(timeline)} day{"" if len(timeline) == 1 else "s"}</span>'
-            f'<span class="timeline-kinds">{escape(kind_summary)}</span>'
-            f"</header>"
         )
+    header_html = (
+        f'<header class="timeline-header">'
+        f'<span class="timeline-total">{total} '
+        f'plant{"" if total == 1 else "s"} across '
+        f'{n_hit_days} day{"" if n_hit_days == 1 else "s"} '
+        f'<span class="timeline-window-note">'
+        f"(window: {escape(window_start.isoformat())} → "
+        f"{escape(window_end.isoformat())} · "
+        f"{n_data_days} day{'' if n_data_days == 1 else 's'} of data, "
+        f"{n_future_days} future)"
+        f"</span></span>"
+        f'<span class="timeline-kinds">{escape(kind_summary)}</span>'
+        f"</header>"
+    )
 
-        rows: list[str] = []
-        for td in timeline:
-            iso = td.day.isoformat()
-            # Per-day chips: one per kind that hit (with count when >1).
-            day_kinds: dict[PlantKind, int] = {}
-            for hit in td.hits:
-                day_kinds[hit.kind] = day_kinds.get(hit.kind, 0) + 1
-            chip_html: list[str] = []
-            for kind, abbrv in _PLANT_KIND_ABBRV:
-                if kind not in day_kinds:
-                    continue
-                n = day_kinds[kind]
-                count_suffix = f" {n}" if n > 1 else ""
-                title = _PLANT_KIND_LABELS.get(kind, kind)
-                chip_html.append(
-                    f'<span class="timeline-chip timeline-chip--{kind}" '
-                    f'title="{escape(title)} ×{n}">'
-                    f"{escape(abbrv)}{escape(count_suffix)}"
-                    f"</span>"
-                )
-            chips = "".join(chip_html)
-            # The whole row is a button — clicking it sets end_date to
-            # this day. hx-vals carries the day; the existing PUT
-            # handler accepts an absolute end_date payload.
-            put_attrs = (
-                'hx-put="/data/knobs/end_date" '
-                'hx-target="#data-knob-end-date" '
-                'hx-swap="outerHTML"'
+    rows: list[str] = []
+    put_attrs = (
+        'hx-put="/data/knobs/end_date" '
+        'hx-target="#data-knob-end-date" '
+        'hx-swap="outerHTML"'
+    )
+    for day in window_days:
+        iso = day.isoformat()
+        is_anchor = day == up_to
+        is_future = day > up_to
+        hits = hits_by_day.get(day, ())
+        # Per-day chips: ALWAYS render at their calendar position so
+        # the trainer sees the full plant set across the window —
+        # answers "what can I scrub to?" without depending on where
+        # the scrub head currently sits. Plants past up_to are still
+        # legitimate parts of the scenario; they just haven't been
+        # emitted yet at the current cutoff.
+        day_kinds: dict[PlantKind, int] = {}
+        for hit in hits:
+            day_kinds[hit.kind] = day_kinds.get(hit.kind, 0) + 1
+        chip_html: list[str] = []
+        for kind, abbrv in _PLANT_KIND_ABBRV:
+            if kind not in day_kinds:
+                continue
+            n = day_kinds[kind]
+            count_suffix = f" {n}" if n > 1 else ""
+            title = _PLANT_KIND_LABELS.get(kind, kind)
+            chip_html.append(
+                f'<span class="timeline-chip timeline-chip--{kind}" '
+                f'title="{escape(title)} ×{n}">'
+                f"{escape(abbrv)}{escape(count_suffix)}"
+                f"</span>"
             )
-            rows.append(
-                f'<button type="button" class="timeline-day" '
-                f'title="Click to set end_date = {escape(iso)}" '
-                f"{put_attrs} "
-                f"hx-vals='{{\"end_date\": \"{escape(iso)}\"}}'>"
-                f'<span class="timeline-day-date">{escape(iso)}</span>'
-                f'<span class="timeline-day-chips">{chips}</span>'
-                f"</button>"
-            )
-        rows_html = "".join(rows)
-        body = (
-            f"{header_html}"
-            f'<div class="timeline-rows">{rows_html}</div>'
+        chips = "".join(chip_html)
+
+        classes = ["timeline-day"]
+        if is_future:
+            classes.append("timeline-day--future")
+        elif not hits:
+            classes.append("timeline-day--empty")
+        if is_anchor:
+            classes.append("timeline-day--anchor")
+        cls_attr = " ".join(classes)
+        # Anchor row gets a stable id so the JS scrollIntoView can find
+        # it after every HTMX swap.
+        id_attr = ' id="timeline-anchor-row"' if is_anchor else ""
+        if is_anchor:
+            title_text = f"up to = {iso} (current scrub head)"
+        elif is_future:
+            title_text = f"Click to advance up_to → {iso}"
+        else:
+            title_text = f"Click to rewind up_to → {iso}"
+        rows.append(
+            f'<button type="button" class="{cls_attr}"{id_attr} '
+            f'title="{escape(title_text)}" '
+            f"{put_attrs} "
+            f"hx-vals='{{\"end_date\": \"{escape(iso)}\"}}'>"
+            f'<span class="timeline-day-date">{escape(iso)}</span>'
+            f'<span class="timeline-day-chips">{chips}</span>'
+            f"</button>"
         )
+    rows_html = "".join(rows)
+    body = (
+        f"{header_html}"
+        f'<div class="timeline-rows">{rows_html}</div>'
+        # Scroll the anchor row into view ONLY when it's not already
+        # visible. On initial /data load the anchor is at the bottom of
+        # a 90-row column so we need to scroll it in. On a click swap
+        # the anchor is almost always already in view (operator clicked
+        # a visible row) — scrolling would jump the viewport jarringly,
+        # so skip it. The check uses the row + scroll container's
+        # rects; htmx executes inline <script> in swapped fragments so
+        # this runs after every render.
+        f'<script>(function() {{'
+        f'var a = document.getElementById("timeline-anchor-row");'
+        f'if (!a) return;'
+        f'var c = a.closest(".timeline-rows");'
+        f'if (!c) return;'
+        f'var ar = a.getBoundingClientRect();'
+        f'var cr = c.getBoundingClientRect();'
+        f'if (ar.top < cr.top || ar.bottom > cr.bottom) {{'
+        f'  a.scrollIntoView({{block: "center", behavior: "auto"}});'
+        f'}}'
+        f'}})();</script>'
+    )
 
     return (
         f'<section class="data-timeline" id="data-timeline" '
@@ -1052,10 +1190,21 @@ def _render_data_page(
         tg_cache.get().plants if tg_cache is not None else ()
     )
     plants_strip = _render_plants_strip(selected_plants)
-    selected_end_date = (
-        tg_cache.get().end_date if tg_cache is not None else None
-    )
-    end_date_strip = _render_end_date_strip(selected_end_date)
+    if tg_cache is not None:
+        window_start, window_end = tg_cache.get_window()
+        up_to = tg_cache.get_up_to()
+    else:
+        # Unit-test page-shell surface — no cache wired. Materialize
+        # the same defaults from_config would use so the strips render
+        # something sensible (operator-friendly date pickers, not
+        # blank slots that look broken).
+        from datetime import timedelta as _td  # noqa: PLC0415
+
+        window_end = date.today()  # typing-smell: ignore[no-datetime-now]: trainer-mode page-shell default — wall-clock today is the operator-friendly anchor for "last 90 days"; not a determinism path
+        window_start = window_end - _td(days=DEFAULT_BASELINE_WINDOW_DAYS - 1)
+        up_to = window_end
+    window_strip = _render_window_strip(window_start, window_end)
+    end_date_strip = _render_up_to_strip(up_to, window_start, window_end)
     selected_seed = (
         tg_cache.get().seed if tg_cache is not None else None
     )
@@ -1129,6 +1278,7 @@ def _render_data_page(
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <div class="data-knobs" id="data-knobs">
     {scope_strip}
+    {window_strip}
     {end_date_strip}
     {seed_strip}
     {plants_strip}
@@ -1311,51 +1461,112 @@ def make_studio_routes(
         routes.append(Route("/data/knobs/plants", put_plants, methods=["PUT"]))
 
         async def put_end_date(request: Request) -> HTMLResponse:
-            """X.4.h.3 — apply a delta or absolute date to the end_date knob.
+            """X.4.h.3 — apply a delta or absolute date to the up_to knob.
+
+            "up_to" is the simulation cutoff (= ``tg.end_date`` in the
+            generator's vocabulary). Always clamped to the current
+            scenario window so the trainer can't accidentally scrub
+            outside its bounds. Window changes don't touch up_to —
+            the trainer redefines bounds, the next click re-anchors.
 
             Form contract:
-                - ``delta=<int>`` → step relative to current cached date
-                  (anchors on today when the cache holds None).
-                - ``end_date=<YYYY-MM-DD>`` → set absolute date; empty
-                  string clears to None ("today" reset).
-                - Both present: ``delta`` wins (defensive — the UI never
-                  sends both, but a hand-rolled curl might).
-                - Neither present: no-op (return current strip).
-                - Invalid date string: silently drop (return current
-                  strip) — same posture as ``put_plants`` for unknown
-                  plant names.
+                - ``delta=<int>`` → step relative to current up_to
+                  (clamped to ``[window_start, window_end]``).
+                - ``end_date=<YYYY-MM-DD>`` → set absolute (clamped).
+                  Empty string snaps to ``window_end`` (the most-data
+                  position).
+                - Both present: ``delta`` wins (defensive).
+                - Invalid date string: silently drop (cache holds prior).
             """
             form = await request.form()
-            current = bound_tg.get().end_date
+            window_start, window_end = bound_tg.get_window()
+            current = bound_tg.get_up_to()
 
             delta_raw = form.get("delta")
-            new_end_date: date | None = current
+            new_up_to: date = current
             if isinstance(delta_raw, str) and delta_raw.strip():
                 try:
                     delta_days = int(delta_raw)
                 except ValueError:
                     delta_days = 0
                 if delta_days:
-                    anchor = current or date.today()  # typing-smell: ignore[no-datetime-now]: trainer-mode UI anchor — wall-clock today is the operator-friendly reference for "step from where we are now"; not a determinism path
-                    new_end_date = anchor + timedelta(days=delta_days)
+                    new_up_to = current + timedelta(days=delta_days)
             else:
                 date_raw = form.get("end_date")
                 if isinstance(date_raw, str):
                     if date_raw == "":
-                        new_end_date = None
+                        # Snap to window_end (the canonical "most data"
+                        # position). Stored as window_end explicitly so
+                        # subsequent reads stay stable even if the
+                        # window shifts.
+                        new_up_to = window_end
                     else:
                         try:
-                            new_end_date = date.fromisoformat(date_raw)
+                            new_up_to = date.fromisoformat(date_raw)
                         except ValueError:
-                            new_end_date = current  # silent drop
-            bound_tg.update(end_date=new_end_date)
+                            new_up_to = current  # silent drop
+            # Clamp to window bounds.
+            if new_up_to < window_start:
+                new_up_to = window_start
+            elif new_up_to > window_end:
+                new_up_to = window_end
+            bound_tg.update(end_date=new_up_to)
             return HTMLResponse(
-                _render_end_date_strip(new_end_date),
+                _render_up_to_strip(new_up_to, window_start, window_end),
                 headers={"HX-Trigger": "trainer-knobs-changed"},
             )
 
         routes.append(
             Route("/data/knobs/end_date", put_end_date, methods=["PUT"]),
+        )
+
+        async def put_window(request: Request) -> HTMLResponse:
+            """X.4.h.3.window — set the trainer's scenario window.
+
+            Form contract:
+                - ``reset=1`` → snap to last 90 days from today.
+                - ``window_start=<YYYY-MM-DD>`` and/or
+                  ``window_end=<YYYY-MM-DD>`` → set either bound;
+                  the other is preserved. Invalid ISO silently drops.
+                - Window-end < window-start: ``update_window`` swaps
+                  them (preserves intent over rejection).
+
+            Window changes do NOT touch up_to. If the new window
+            excludes the current up_to, the renderer + the next
+            put_end_date call will clamp.
+            """
+            form = await request.form()
+            cur_start, cur_end = bound_tg.get_window()
+
+            reset_raw = form.get("reset")
+            if isinstance(reset_raw, str) and reset_raw.strip():
+                end = date.today()  # typing-smell: ignore[no-datetime-now]: trainer-mode reset — wall-clock today is the "last 90 days" anchor; not a determinism path
+                start = end - timedelta(days=DEFAULT_BASELINE_WINDOW_DAYS - 1)
+                bound_tg.update_window(start=start, end=end)
+            else:
+                new_start: date | object = cur_start
+                new_end: date | object = cur_end
+                start_raw = form.get("window_start")
+                end_raw = form.get("window_end")
+                if isinstance(start_raw, str) and start_raw:
+                    try:
+                        new_start = date.fromisoformat(start_raw)
+                    except ValueError:
+                        pass  # silent drop
+                if isinstance(end_raw, str) and end_raw:
+                    try:
+                        new_end = date.fromisoformat(end_raw)
+                    except ValueError:
+                        pass  # silent drop
+                bound_tg.update_window(start=new_start, end=new_end)
+            new_window_start, new_window_end = bound_tg.get_window()
+            return HTMLResponse(
+                _render_window_strip(new_window_start, new_window_end),
+                headers={"HX-Trigger": "trainer-knobs-changed"},
+            )
+
+        routes.append(
+            Route("/data/knobs/window", put_window, methods=["PUT"]),
         )
 
         async def put_seed(request: Request) -> HTMLResponse:

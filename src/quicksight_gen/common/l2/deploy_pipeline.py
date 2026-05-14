@@ -27,7 +27,7 @@ import asyncio
 import shlex
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
 
 from quicksight_gen.common.db import (
@@ -519,6 +519,39 @@ def _build_generator_sql(cfg: Config, instance: L2Instance) -> str:
 
     Split out so unit tests can exercise the dispatch + the NotImplemented
     fences without going through ``connect_demo_db``.
+
+    When ``cfg.test_generator.cutoff_date`` is set (Studio trainer mode
+    via ``cache.patched_config``), append DELETE statements after the
+    generator's emit so rows past the cutoff get pruned. Lets the
+    trainer scrub a cutoff inside a fixed scenario window without
+    perturbing plant calendar positions. Default None (CLI invocations
+    + Studio when up_to == window_end) ⇒ no truncation, byte-identical
+    to legacy emit.
+    """
+    sql = _emit_scope_sql(cfg, instance)
+    cutoff = cfg.test_generator.cutoff_date
+    if cutoff is not None:
+        # Trim to date <= cutoff. transactions.posting is TIMESTAMP,
+        # daily_balances.business_day_start is DATE — same `>= next_day`
+        # predicate works for both via the midnight-of-next-day bound
+        # (avoids dialect-specific DATE() / TRUNC() function calls; ISO
+        # strings sort lexicographically the way we want).
+        prefix = cfg.l2_instance_prefix or str(instance.instance)
+        next_day = (cutoff + timedelta(days=1)).isoformat()
+        sql += (
+            f"\n-- X.4.h trainer cutoff: prune rows past {cutoff.isoformat()}\n"
+            f"DELETE FROM {prefix}_transactions "
+            f"WHERE posting >= '{next_day}';\n"
+            f"DELETE FROM {prefix}_daily_balances "
+            f"WHERE business_day_start >= '{next_day}';\n"
+        )
+    return sql
+
+
+def _emit_scope_sql(cfg: Config, instance: L2Instance) -> str:
+    """Inner dispatch — picks the per-scope SQL emitter without the
+    cutoff post-processing. Split from ``_build_generator_sql`` so the
+    cutoff truncation lives in exactly one place regardless of scope.
     """
     scope = cfg.test_generator.scope
     if scope == "full":

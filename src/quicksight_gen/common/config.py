@@ -133,6 +133,16 @@ class TestGeneratorConfig:
     plants: tuple[PlantKind, ...] = ()
     only_template: str | None = None
     derive_balances: bool = False
+    # X.4.h.6.fix — Studio trainer's "up_to" cutoff. When set, deploy
+    # appends DELETE statements after the generator emits to truncate
+    # rows past this date. Lets the trainer scrub a cutoff inside a
+    # fixed scenario window: ``end_date`` (the anchor) defines plant
+    # calendar positions; ``cutoff_date`` defines how far through the
+    # scenario to actually emit. Studio sets this from
+    # ``cache.get_up_to()`` when up_to < window_end; CLI invocations
+    # leave it None (full emission). Studio-only knob — no UI for it
+    # outside the trainer panel.
+    cutoff_date: date | None = None
 
 
 @dataclass
@@ -701,7 +711,7 @@ def load_config(path: str | Path | None = None) -> Config:
         }
         allowed_tgen = {
             "enabled", "scope", "end_date", "seed", "plants",
-            "only_template", "derive_balances",
+            "only_template", "derive_balances", "cutoff_date",
         }
         unknown_tgen = set(tgen_dict) - allowed_tgen
         if unknown_tgen:
@@ -777,6 +787,25 @@ def load_config(path: str | Path | None = None) -> Config:
         only_template_val: str | None = (
             str(only_template_raw) if only_template_raw is not None else None
         )
+        cutoff_date_raw = tgen_dict.get("cutoff_date")
+        cutoff_date_val: date | None
+        if cutoff_date_raw is None:
+            cutoff_date_val = None
+        elif isinstance(cutoff_date_raw, date):
+            cutoff_date_val = cutoff_date_raw
+        elif isinstance(cutoff_date_raw, str):
+            try:
+                cutoff_date_val = date.fromisoformat(cutoff_date_raw)
+            except ValueError as exc:
+                raise ValueError(
+                    f"test_generator.cutoff_date must be ISO 8601 (YYYY-MM-DD); "
+                    f"got {cutoff_date_raw!r}."
+                ) from exc
+        else:
+            raise ValueError(
+                f"test_generator.cutoff_date must be a date or ISO string; "
+                f"got {type(cutoff_date_raw).__name__} ({cutoff_date_raw!r})."
+            )
         # cast() narrows the Literal type from runtime-validated str values.
         test_generator = TestGeneratorConfig(
             enabled=enabled_raw,
@@ -786,6 +815,7 @@ def load_config(path: str | Path | None = None) -> Config:
             plants=cast(tuple[PlantKind, ...], plants_seq),
             only_template=only_template_val,
             derive_balances=derive_raw,
+            cutoff_date=cutoff_date_val,
         )
     elif raw_tgen is not None:
         raise ValueError(
