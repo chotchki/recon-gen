@@ -3,11 +3,86 @@
  * editor list page sits visually next to the diagram page.
  */
 
-#entity-list {
+#entity-list,
+.entity-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(28rem, 1fr));
   gap: 1rem;
   padding: 1rem;
+}
+
+/* X.4.f.7 — home-page layout overrides. The diagram pane and editor
+ * pages both lock body to viewport height; the home page composes
+ * both and needs to scroll past the iframe + every entity section.
+ */
+body.home-page {
+  height: auto;
+  min-height: 100vh;
+  display: block;
+}
+
+.home-diagram {
+  border-bottom: 1px solid var(--studio-border);
+  background: white;
+  height: 50vh;
+  min-height: 24rem;
+}
+
+.home-diagram iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.home-entities {
+  padding: 0.5rem 1rem 2rem;
+}
+
+.home-section {
+  background: white;
+  border: 1px solid var(--studio-border);
+  border-radius: 0.4rem;
+  margin-bottom: 0.75rem;
+  overflow: hidden;
+}
+
+.home-section > summary {
+  cursor: pointer;
+  padding: 0.6rem 1rem;
+  font-weight: 600;
+  color: var(--studio-accent);
+  background: var(--studio-bg);
+  user-select: none;
+}
+
+.home-section > summary:hover {
+  background: var(--studio-tint);
+}
+
+.home-section > summary .count {
+  color: var(--studio-muted);
+  font-weight: 400;
+  margin-left: 0.25rem;
+}
+
+.home-section > summary .home-section-link {
+  margin-left: 0.5rem;
+  color: var(--studio-accent);
+  text-decoration: none;
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+
+.home-section > summary .home-section-link:hover {
+  text-decoration: underline;
+}
+
+.home-section-loading {
+  padding: 1rem;
+  color: var(--studio-muted);
+  font-style: italic;
+  margin: 0;
 }
 
 .entity-card {

@@ -7,8 +7,11 @@ read/write paths share one in-memory instance per server.
 
 Routes (current):
 
-- ``GET /`` — landing placeholder. Will become the real Studio
-  landing once X.4.c (unified diagram) + X.4.e (editor list) land.
+- ``GET /`` — unified Studio home page (X.4.f.7). Diagram pane on
+  top (iframe of ``/diagram``) + per-kind ``<details>`` sections
+  below, each lazy-loaded via ``hx-get`` of the editor route's
+  ``?embed=1`` fragment. HX-Trigger ``l2-cascade-reload`` fans
+  out to refresh the diagram + every section after any save/delete.
 - ``GET /diagram`` — the L2 topology rendered via post-processed
   graphviz SVG with rails as first-class nodes (the X.4.b dot pivot;
   spike locked 2026-05-13). Reads the per-rail Digraph builder,
@@ -35,10 +38,34 @@ Severability: this module is Studio-only. ``cli.dashboards`` calls
 from __future__ import annotations
 
 import json
+import secrets
 from collections.abc import Mapping
 from html import escape
 from pathlib import Path
 from typing import Any
+
+
+# X.4.e cache-bust — boot-time random hex appended as `?cb=…` to every
+# Studio asset URL the rendered pages emit. Stays stable for the
+# lifetime of the process; restart the server to force every browser
+# to refetch (no `Cmd+Shift+R` needed). Static-asset cache headers
+# (Starlette's StaticFiles ETag/Last-Modified) still revalidate
+# between server restarts; this just guarantees a fresh URL when the
+# server itself bumps.
+_BOOT_ID: str = secrets.token_hex(4)
+
+
+def asset_url(path: str) -> str:
+    """Versioned URL for a Studio asset.
+
+    ``asset_url("diagram.css")`` → ``/studio/static/diagram.css?cb=<boot>``
+    ``asset_url("/studio/wasm-graphviz/index.js")`` →
+        ``/studio/wasm-graphviz/index.js?cb=<boot>`` (absolute path
+    passes through unchanged except for the cb suffix).
+    """
+    if path.startswith("/"):
+        return f"{path}?cb={_BOOT_ID}"
+    return f"/studio/static/{path}?cb={_BOOT_ID}"
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
@@ -77,60 +104,118 @@ def _dev_log_head_snippets(dev_log: bool) -> tuple[str, str]:
         return ("", "")
     return (
         '<meta name="dev-log">\n',
-        '<script src="/static/js/dev_log.js" defer></script>\n',
+        f'<script src="{asset_url("/static/js/dev_log.js")}" defer></script>\n',
     )
 
 
-def _render_landing_placeholder(cache: L2InstanceCache, dev_log: bool) -> str:
-    """Minimal landing page proving the mount + cache wiring resolve.
+_HOME_SECTIONS: tuple[tuple[str, str, str], ...] = (
+    # (kind, label, accessor on L2Instance)
+    ("account", "Accounts", "accounts"),
+    ("account_template", "Account templates", "account_templates"),
+    ("rail", "Rails", "rails"),
+    ("transfer_template", "Transfer templates", "transfer_templates"),
+    ("chain", "Chains", "chains"),
+    ("limit_schedule", "Limit schedules", "limit_schedules"),
+)
 
-    Replaced by the real Studio landing once X.4.c (unified diagram)
-    + X.4.e (editor list) land. Carries the L2 instance prefix so a
-    deploy mistake (wrong YAML wired) is visible in the page body.
+
+def _render_home_page(cache: L2InstanceCache, dev_log: bool) -> str:
+    """X.4.f.7 — unified Studio home page (diagram + every entity kind).
+
+    Composes one page with:
+
+    - Header (matching the chrome on ``/diagram`` and ``/l2_shape/<kind>/``).
+    - Diagram pane — ``<iframe src="/diagram?layer=1">`` so the
+      wasm-graphviz render stays self-contained (its own document
+      context; no double-load of the module script when the cascade
+      forces a refresh).
+    - Per-kind entity sections — ``<details>`` with lazy-loaded
+      ``hx-get`` content (the editor route's ``?embed=1`` fragment).
+      First section open; the rest collapsed so a 7-rail / 30-account
+      L2 isn't an unbroken wall on first paint. Each section also
+      links out (``↗``) to the dedicated per-kind page (deep-link
+      target preserved from X.4.e — handy for sharing a URL).
+
+    Cascade fan-out: every editor save/delete returns
+    ``HX-Trigger: l2-cascade-reload``. Each section's inner ``<div>``
+    declares ``hx-trigger="load, l2-cascade-reload from:body"`` so it
+    refetches its fragment. The iframe is in its own document context
+    and HTMX doesn't forward HX-Trigger events across that boundary;
+    a small parent-page JS listener catches the same custom event and
+    bumps ``iframe.src = iframe.src`` to force a reload.
     """
     instance = cache.get()
     prefix = escape(str(instance.instance))
-    accounts_n = len(instance.accounts)
-    rails_n = len(instance.rails)
-    chains_n = len(instance.chains)
-    templates_n = len(instance.transfer_templates)
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
-    return (
-        "<!doctype html>\n"
-        "<html lang=\"en\"><head>\n"
-        f"<title>Studio — {prefix}</title>\n"
-        "<meta charset=\"utf-8\">\n"
-        f"{devlog_meta}"
-        "<style>body{font-family:system-ui;max-width:48rem;"
-        "margin:2rem auto;padding:0 1rem;color:#1e293b}"
-        "h1{color:#1f4e79}a{color:#1f4e79}code{background:#e0e7f0;"
-        "padding:1px 4px;border-radius:3px}</style>"
-        f"{devlog_script}"
-        "</head><body>\n"
-        f"<h1>Studio</h1>\n"
-        f"<p>L2 instance: <code>{prefix}</code></p>\n"
-        "<ul>\n"
-        f"<li>Accounts: {accounts_n}</li>\n"
-        f"<li>Rails: {rails_n}</li>\n"
-        f"<li>Chains: {chains_n}</li>\n"
-        f"<li>Templates: {templates_n}</li>\n"
-        "</ul>\n"
-        "<ul>\n"
-        "<li><a href=\"/diagram\">→ Topology diagram</a></li>\n"
-        "<li><a href=\"/dashboards\">→ Dashboards</a></li>\n"
-        "</ul>\n"
-        "<h2>Edit L2 entities</h2>\n"
-        "<ul>\n"
-        "<li><a href=\"/l2_shape/account/\">Accounts</a></li>\n"
-        "<li><a href=\"/l2_shape/account_template/\">Account templates</a></li>\n"
-        "<li><a href=\"/l2_shape/rail/\">Rails</a></li>\n"
-        "<li><a href=\"/l2_shape/transfer_template/\">Transfer templates</a></li>\n"
-        "<li><a href=\"/l2_shape/chain/\">Chains</a></li>\n"
-        "<li><a href=\"/l2_shape/limit_schedule/\">Limit schedules</a></li>\n"
-        "</ul>\n"
-        "<p><em>Editor lands in X.4.e/f; Deploy pipeline in X.4.g.</em></p>\n"
-        "</body></html>\n"
-    )
+
+    section_blocks: list[str] = []
+    for idx, (kind, label, accessor) in enumerate(_HOME_SECTIONS):
+        n = len(getattr(instance, accessor))
+        open_attr = " open" if idx == 0 else ""
+        section_blocks.append(
+            f'<details class="home-section" data-kind="{escape(kind)}"{open_attr}>'
+            f"<summary>{escape(label)} "
+            f'<span class="count">({n})</span> '
+            f'<a class="home-section-link" href="/l2_shape/{kind}/" '
+            f'title="Open in dedicated page">↗</a>'
+            f"</summary>"
+            f'<div class="home-section-body" '
+            f'hx-get="/l2_shape/{kind}/?embed=1" '
+            f'hx-trigger="load, l2-cascade-reload from:body" '
+            f'hx-swap="innerHTML">'
+            f'<p class="home-section-loading">loading…</p>'
+            f"</div>"
+            f"</details>"
+        )
+    sections_html = "\n    ".join(section_blocks)
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Studio — {prefix}</title>
+  {devlog_meta}<link rel="stylesheet" href="{asset_url("diagram.css")}">
+  <link rel="stylesheet" href="{asset_url("editor.css")}">
+  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+  <script>
+    // X.4.e.5 — swap 4xx response bodies (validator returns 400 + the
+    // re-rendered form fragment). 5xx still treated as errors.
+    document.addEventListener('htmx:beforeSwap', function(evt) {{
+      var status = evt.detail.xhr.status;
+      if (status >= 400 && status < 500) {{
+        evt.detail.shouldSwap = true;
+        evt.detail.isError = false;
+      }}
+    }});
+    // X.4.f.7 — HX-Trigger fires `l2-cascade-reload` on document.body
+    // (bubbles to document). The diagram iframe is its own document
+    // context and HTMX doesn't forward triggers across that boundary;
+    // reassign iframe.src to force a same-origin reload.
+    document.addEventListener('l2-cascade-reload', function() {{
+      var f = document.getElementById('diagram-frame');
+      if (f) {{ f.src = f.src; }}
+    }});
+  </script>
+  {devlog_script}</head>
+<body class="home-page">
+  <header class="studio-header">
+    <h1>Studio</h1>
+    <span class="instance">{prefix}</span>
+    <a class="nav-link" href="/diagram">→ diagram (full)</a>
+    <a class="nav-link" href="/dashboards">→ dashboards</a>
+  </header>
+
+  <section class="home-diagram">
+    <iframe id="diagram-frame" src="/diagram?layer=1"
+            title="L2 topology diagram"></iframe>
+  </section>
+
+  <section class="home-entities">
+    {sections_html}
+  </section>
+</body>
+</html>
+"""
 
 
 def _render_diagram_page(
@@ -274,7 +359,7 @@ def _render_diagram_page(
 <head>
   <meta charset="utf-8">
   <title>Studio diagram — {prefix}</title>
-  {devlog_meta}{coverage_meta}{trainer_meta}<link rel="stylesheet" href="/studio/static/diagram.css">
+  {devlog_meta}{coverage_meta}{trainer_meta}<link rel="stylesheet" href="{asset_url("diagram.css")}">
   {devlog_script}</head>
 <body>
   <header class="studio-header">
@@ -347,7 +432,7 @@ def _render_diagram_page(
   <template id="topology-dot">{escape(dot_source)}</template>
   <script id="topology-meta" type="application/json">{sidecar}</script>
 
-  <script type="module" src="/studio/static/diagram.js"></script>
+  <script type="module" src="{asset_url("diagram.js")}"></script>
 </body>
 </html>
 """
@@ -395,7 +480,7 @@ def make_studio_routes(
             ``cfg.l2_instance_prefix`` in the demo CLI flow.
     """
     async def landing(_request: Request) -> HTMLResponse:
-        return HTMLResponse(_render_landing_placeholder(cache, dev_log))
+        return HTMLResponse(_render_home_page(cache, dev_log))
 
     async def diagram(request: Request) -> HTMLResponse:
         focus_node_id = request.query_params.get("focus") or None

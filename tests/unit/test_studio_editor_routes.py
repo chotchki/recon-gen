@@ -214,6 +214,60 @@ def test_delete_dependent_rail_returns_400(writable_l2_yaml: Path) -> None:
     )
 
 
+def test_parent_role_renders_as_role_dropdown_for_child(
+    writable_l2_yaml: Path,
+) -> None:
+    """X.4.f role dropdown — Account.parent_role is a <select> populated
+    from the union of Account.role + AccountTemplate.role values, with
+    an empty option for clearing. The current value renders selected;
+    typing a free-form invalid role is no longer possible (the input
+    type is select, not text). Only renders when the account is NOT
+    already a parent (two-layer rule — see the parent test below)."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/account/cust-001/edit")
+        assert resp.status_code == 200, resp.text
+        body = resp.text
+
+    # cust-001 is a child (parent_role=CustomerLedger), not a parent —
+    # the dropdown renders.
+    assert 'name="parent_role"' in body
+    sel_start = body.index('<select id="field-parent_role"')
+    sel_end = body.index("</select>", sel_start) + len("</select>")
+    block = body[sel_start:sel_end]
+    assert "— none —" in block
+    # CustomerLedger is the existing parent_role on cust-001 — selected.
+    assert 'value="CustomerLedger" selected' in block
+    # CustomerSubledger is another role in the instance — must appear
+    # as an option even if not currently selected.
+    assert 'value="CustomerSubledger"' in block
+
+
+def test_parent_role_hidden_when_account_is_already_a_parent(
+    writable_l2_yaml: Path,
+) -> None:
+    """Two-layer rule (X.4.f) — if an Account.role is referenced as some
+    other Account.parent_role (or AccountTemplate.parent_role), THIS
+    account is already a parent and giving it its own parent_role
+    would create a 3-layer hierarchy. Hide the field entirely (both
+    in the edit form and the read card) — there's no "clear" or
+    "select" UI to confuse the operator."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        # customer-ledger is referenced by cust-001 / cust-002 as
+        # parent_role=CustomerLedger.
+        edit_resp = c.get("/l2_shape/account/customer-ledger/edit")
+        assert edit_resp.status_code == 200
+        # No parent_role input rendered at all on the edit form.
+        assert 'name="parent_role"' not in edit_resp.text
+
+        # Same omission on the read card — the row would otherwise show
+        # "—" and confuse the operator about whether they should pick one.
+        card_resp = c.get("/l2_shape/account/customer-ledger")
+        assert card_resp.status_code == 200
+        assert "Parent role" not in card_resp.text
+
+
 def test_delete_unreferenced_account_persists(writable_l2_yaml: Path) -> None:
     """Deleting cust-002 succeeds — no rail / template references it
     by id; the role CustomerSubledger is still satisfied by cust-001."""

@@ -40,6 +40,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse
 from starlette.routing import Route
 
+from quicksight_gen.common.html._studio_routes import asset_url
 from quicksight_gen.common.l2.cache import L2InstanceCache
 from quicksight_gen.common.l2.editor import (
     EntityKind,
@@ -71,7 +72,11 @@ class FieldSpec:
     ``fields`` dict key). ``label`` is what the operator sees;
     ``helper`` is a one-line hint shown under the input. ``kind``
     drives the input type — text / select / money / textarea.
-    ``options`` only matters for ``kind="select"``.
+    ``options`` is the static option list for ``kind="select"``.
+    ``select_from`` is the dynamic alternative — names a well-known
+    cross-entity collection (``"roles"``) that the renderer resolves
+    from the current L2 instance. Mutually exclusive with ``options``;
+    pick the right one for the field's source-of-truth.
     """
 
     name: str
@@ -79,6 +84,7 @@ class FieldSpec:
     helper: str
     kind: FieldKind
     options: tuple[str, ...] = ()
+    select_from: str | None = None
     required: bool = False
 
 
@@ -120,7 +126,8 @@ _ACCOUNT_FIELDS: tuple[FieldSpec, ...] = (
             "When this is a subledger account, names its singleton parent's "
             "Role. Used by L1 limit-breach views."
         ),
-        kind="text",
+        kind="select",
+        select_from="roles",
     ),
     FieldSpec(
         name="expected_eod_balance",
@@ -157,7 +164,8 @@ _ACCOUNT_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         name="parent_role",
         label="Parent role",
         helper="Singleton parent's Role (e.g. CustomerLedger).",
-        kind="text",
+        kind="select",
+        select_from="roles",
     ),
     FieldSpec(
         name="expected_eod_balance",
@@ -313,7 +321,8 @@ _LIMIT_SCHEDULE_FIELDS: tuple[FieldSpec, ...] = (
         name="parent_role",
         label="Parent role",
         helper="The role whose outbound flow is capped.",
-        kind="text",
+        kind="select",
+        select_from="roles",
         required=True,
     ),
     FieldSpec(
@@ -406,8 +415,86 @@ def _coerce_form(
 # ---------------------------------------------------------------------------
 
 
+def _role_is_used_as_parent(
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — Any to dodge import-cycle pyright noise
+    role: str,
+) -> bool:
+    """Is this role referenced as some entity's parent_role?
+
+    Two-layer rule (X.4.f): an entity whose role is already someone's
+    parent shouldn't itself carry a parent_role. Walks Account /
+    AccountTemplate / LimitSchedule for parent_role references.
+    """
+    if not role:
+        return False
+    for a in getattr(instance, "accounts", ()):
+        if str(getattr(a, "parent_role", "") or "") == role:
+            return True
+    for t in getattr(instance, "account_templates", ()):
+        if str(getattr(t, "parent_role", "") or "") == role:
+            return True
+    for ls in getattr(instance, "limit_schedules", ()):
+        if str(getattr(ls, "parent_role", "") or "") == role:
+            return True
+    return False
+
+
+def _hidden_fields_for_entity(
+    kind: EntityKind,
+    entity: object,
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — Any to dodge import-cycle pyright noise
+) -> frozenset[str]:
+    """Which FieldSpec names should be omitted from this entity's form
+    + read card given the current L2 state.
+
+    Currently only one rule: ``parent_role`` is omitted on Account /
+    AccountTemplate when this entity's own role is already used as
+    someone's parent_role (two-layer rule).
+    """
+    if kind not in ("account", "account_template"):
+        return frozenset()
+    role = str(getattr(entity, "role", "") or "")
+    if role and _role_is_used_as_parent(instance, role):
+        return frozenset({"parent_role"})
+    return frozenset()
+
+
+def _resolve_select_options(
+    select_from: str,
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — Any to dodge import-cycle pyright noise
+    current_value: str,
+) -> tuple[tuple[str, ...], bool]:
+    """Resolve dynamic dropdown options against the current L2 instance.
+
+    Returns (options, allow_empty). ``current_value`` is appended as a
+    stale option (and ``allow_empty`` falls through) when it would
+    otherwise be missing — the user can see + correct an out-of-sync
+    field instead of having it silently swap to the first option.
+    """
+    if select_from == "roles":
+        # Union of Account.role + AccountTemplate.role; sorted, deduped,
+        # blanks dropped. The empty option is always offered because
+        # Account.parent_role is optional (subledger marker).
+        roles: set[str] = set()
+        for a in getattr(instance, "accounts", ()):
+            r = getattr(a, "role", None)
+            if r is not None and str(r):
+                roles.add(str(r))
+        for t in getattr(instance, "account_templates", ()):
+            r = getattr(t, "role", None)
+            if r is not None and str(r):
+                roles.add(str(r))
+        opts = tuple(sorted(roles))
+        if current_value and current_value not in opts:
+            opts = (*opts, current_value)
+        return opts, True
+    raise ValueError(f"Unknown select_from source: {select_from!r}")
+
+
 def _render_field(
-    spec: FieldSpec, value: object, error: str | None = None,
+    spec: FieldSpec, value: object,
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed to resolve select_from at render time
+    error: str | None = None,
 ) -> str:
     """One form-field <div> with label + input + helper + (optional) error.
 
@@ -430,14 +517,26 @@ def _render_field(
     )
 
     if spec.kind == "select":
-        opts = "".join(
+        if spec.select_from is not None:
+            options, allow_empty = _resolve_select_options(
+                spec.select_from, instance, val_str,
+            )
+        else:
+            options, allow_empty = spec.options, False
+        opt_blocks: list[str] = []
+        if allow_empty:
+            opt_blocks.append(
+                f'<option value=""{" selected" if val_str == "" else ""}>'
+                f"— none —</option>"
+            )
+        opt_blocks.extend(
             f'<option value="{escape(o)}"{" selected" if o == val_str else ""}>'
             f"{escape(o)}</option>"
-            for o in spec.options
+            for o in options
         )
         input_html = (
             f'<select id="field-{spec.name}" name="{escape(spec.name)}">'
-            f'{opts}</select>'
+            f'{"".join(opt_blocks)}</select>'
         )
     elif spec.kind == "textarea":
         input_html = (
@@ -464,17 +563,22 @@ def _value_to_input_str(value: object) -> str:
     return str(value)
 
 
-def _render_read_card(kind: EntityKind, entity: object) -> str:
+def _render_read_card(
+    kind: EntityKind, entity: object,
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed to suppress fields hidden by the two-layer rule
+) -> str:
     """Read-only card — the post-PUT response + the click-to-expand
     target for the list view.
     """
     specs = _FIELD_SPECS_BY_KIND[kind]
     entity_id = _entity_id(kind, entity)
+    hidden = _hidden_fields_for_entity(kind, entity, instance)
     rows = "".join(
         f'<dt>{escape(s.label)}</dt><dd>'
         f"{escape(_value_to_input_str(getattr(entity, s.name, None))) or '—'}"
         f"</dd>"
         for s in specs
+        if s.name not in hidden
     )
     return (
         f'<article class="entity-card" id="entity-{kind}-{escape(entity_id)}">'
@@ -491,6 +595,7 @@ def _render_read_card(kind: EntityKind, entity: object) -> str:
 def _render_edit_form(
     kind: EntityKind,
     entity: object,
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed for dynamic select_from resolution
     form_overrides: Mapping[str, str] | None = None,
     field_errors: Mapping[str, str] | None = None,
     global_error: str | None = None,
@@ -503,13 +608,16 @@ def _render_edit_form(
     field_errors = field_errors or {}
     overrides = form_overrides or {}
 
+    hidden = _hidden_fields_for_entity(kind, entity, instance)
     fields_html = "".join(
         _render_field(
             s,
             overrides.get(s.name, getattr(entity, s.name, None)),
+            instance,
             error=field_errors.get(s.name),
         )
         for s in specs
+        if s.name not in hidden
     )
     global_err_html = (
         f'<div class="form-global-error">{escape(global_error)}</div>'
@@ -535,17 +643,49 @@ def _render_edit_form(
     )
 
 
-def _render_list_page(kind: EntityKind, entities: tuple[object, ...]) -> str:
-    """Full HTML page — every entity of the kind rendered as a read card."""
-    cards = "\n".join(_render_read_card(kind, e) for e in entities)
+def _render_list_page(
+    kind: EntityKind, entities: tuple[object, ...],
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — passed through to per-card hide logic
+    *,
+    embed: bool = False,
+) -> str:
+    """Full HTML page — every entity of the kind rendered as a read card.
+
+    ``embed=True`` returns just the cards container (no html/head/body)
+    so the X.4.f.7 home page can ``hx-get`` it into a section without
+    nesting full documents. The home page's own <head> already loads
+    htmx + the editor CSS + the htmx:beforeSwap fix, so the embed
+    fragment doesn't need to redeclare them.
+    """
+    cards = "\n".join(_render_read_card(kind, e, instance) for e in entities)
+    if embed:
+        return f'<div class="entity-list" data-kind="{escape(kind)}">{cards}</div>'
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>Studio editor — {escape(kind)}</title>
-  <link rel="stylesheet" href="/studio/static/diagram.css">
-  <link rel="stylesheet" href="/studio/static/editor.css">
+  <link rel="stylesheet" href="{asset_url("diagram.css")}">
+  <link rel="stylesheet" href="{asset_url("editor.css")}">
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+  <script>
+    // X.4.e.5 fix — HTMX defaults to NOT swapping 4xx response bodies
+    // (treats them as errors). The validator returns 400 + an inline
+    // error fragment; we WANT that fragment swapped in so the user
+    // sees the error + their typed-but-invalid form content. Enable
+    // 4xx swaps explicitly. (5xx still treated as errors.)
+    // Attach to `document`, not `document.body` — this script runs in
+    // <head> before <body> is parsed, so document.body is null and
+    // .addEventListener would throw a TypeError. HTMX events bubble
+    // all the way up to document, so this catches them just the same.
+    document.addEventListener('htmx:beforeSwap', function(evt) {{
+      var status = evt.detail.xhr.status;
+      if (status >= 400 && status < 500) {{
+        evt.detail.shouldSwap = true;
+        evt.detail.isError = false;
+      }}
+    }});
+  </script>
 </head>
 <body>
   <header class="studio-header">
@@ -609,28 +749,37 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
                 f"is not an editable entity kind (yet).</p>",
                 status_code=404,
             )
-        entities = _entities_for_kind(cache.get(), kind)
-        return HTMLResponse(_render_list_page(kind, entities))
+        inst = cache.get()
+        entities = _entities_for_kind(inst, kind)
+        # X.4.f.7 — ?embed=1 returns the cards fragment only (no html/head/
+        # body) so the home page can hx-get it into a <details> section
+        # without nesting full documents.
+        embed = request.query_params.get("embed") == "1"
+        return HTMLResponse(
+            _render_list_page(kind, entities, inst, embed=embed),
+        )
 
     async def read_card(request: Request) -> HTMLResponse:
         kind = _kind_from_path(request.path_params["kind"])
         entity_id = request.path_params["entity_id"]
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
-        entity = _find_entity_or_none(cache.get(), kind, entity_id)
+        inst = cache.get()
+        entity = _find_entity_or_none(inst, kind, entity_id)
         if entity is None:
             return HTMLResponse("not found", status_code=404)
-        return HTMLResponse(_render_read_card(kind, entity))
+        return HTMLResponse(_render_read_card(kind, entity, inst))
 
     async def edit_form(request: Request) -> HTMLResponse:
         kind = _kind_from_path(request.path_params["kind"])
         entity_id = request.path_params["entity_id"]
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
-        entity = _find_entity_or_none(cache.get(), kind, entity_id)
+        inst = cache.get()
+        entity = _find_entity_or_none(inst, kind, entity_id)
         if entity is None:
             return HTMLResponse("not found", status_code=404)
-        return HTMLResponse(_render_edit_form(kind, entity))
+        return HTMLResponse(_render_edit_form(kind, entity, inst))
 
     async def save(request: Request) -> HTMLResponse:
         """X.4.e.4 — the cascade flow: validate → mutate → save → respond.
@@ -651,10 +800,12 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
         try:
             new_fields = _coerce_form(kind, coerced)
         except (ValueError, TypeError) as exc:
-            entity = _find_entity_or_none(cache.get(), kind, entity_id)
+            inst = cache.get()
+            entity = _find_entity_or_none(inst, kind, entity_id)
             return HTMLResponse(
                 _render_edit_form(
                     kind, entity if entity is not None else _placeholder(kind),
+                    inst,
                     form_overrides=coerced,
                     global_error=f"Field coercion failed: {exc}",
                 ),
@@ -669,10 +820,12 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
         try:
             validate(new_inst)
         except L2ValidationError as exc:
-            entity = _find_entity_or_none(cache.get(), kind, entity_id)
+            inst = cache.get()
+            entity = _find_entity_or_none(inst, kind, entity_id)
             return HTMLResponse(
                 _render_edit_form(
                     kind, entity if entity is not None else _placeholder(kind),
+                    inst,
                     form_overrides=coerced,
                     global_error=str(exc),
                 ),
@@ -687,7 +840,7 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
             str(new_fields.get(_addressing_field(kind), entity_id)),
         )
         resp = HTMLResponse(
-            _render_read_card(kind, new_entity)
+            _render_read_card(kind, new_entity, new_inst)
             if new_entity is not None else "saved",
         )
         # X.4.e.7 — diagram + entity list listen for this trigger and
