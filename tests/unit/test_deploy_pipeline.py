@@ -1237,3 +1237,104 @@ def test_deploy_summary_to_json_serializes_every_field(
     for evt in payload["events"]:
         assert isinstance(evt, dict)
 
+
+# =====================================================================
+# X.4.g.15 — pipeline orchestration shapes (per the PLAN bullet's
+# enumeration). Two shapes (hook-fail-halt + no-etl) are covered by
+# the X.4.g.13 tests above; the three remaining shapes land here.
+# =====================================================================
+
+def test_orchestration_etl_only_path(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """etl_hook present (succeeds) + no etl_datasource: step 1 runs +
+    succeeds, step 2 pull skips, step 3 generator (full scope)
+    populates the demo DB on its own."""
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        etl_hook="true",  # POSIX `true` exits 0
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    sink = _EventCollector()
+    summary = asyncio.run(
+        run_deploy_pipeline(cfg, spec_example_instance, dev_log=sink),
+    )
+    assert summary.halted is False
+    assert summary.step1_etl_hook_exit_code == 0
+    # Step 2 pull skipped (no etl_datasource).
+    assert summary.step2_pull_transactions_pulled == 0
+    assert summary.step2_pull_daily_balances_pulled == 0
+    # Step 3 generator (full scope) carried the load.
+    assert summary.step3_generator_transactions_after > 0
+    assert summary.step3_generator_daily_balances_after > 0
+    assert summary.step4_matviews_done is True
+    # Step 1 actually ran (start + done events) — not the skip path.
+    kinds = sink.kinds()
+    assert "deploy:step1:start" in kinds
+    assert "deploy:step1:done" in kinds
+    assert "deploy:step1:skip" not in kinds
+
+
+def test_orchestration_etl_then_generator_path(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """etl_datasource set + scope:full generator: step 2's pull copies
+    rows from the source, then step 3 layers full-scope plants on top.
+    Final transactions count = pulled + generated."""
+    src_path = tmp_path / "source.sqlite"
+    _build_etl_source_sqlite(src_path, txn_rows=4, bal_rows=3)
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        etl_datasource=EtlDatasourceConfig(
+            url=f"sqlite:///{src_path}",
+            transactions_table="etl_txns",
+            daily_balances_table="etl_balances",
+        ),
+        test_generator=TestGeneratorConfig(scope="full"),
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    summary = asyncio.run(
+        run_deploy_pipeline(cfg, spec_example_instance, dev_log=None),
+    )
+    assert summary.halted is False
+    # Step 2's pull moved the 4+3 rows from the source.
+    assert summary.step2_pull_transactions_pulled == 4
+    assert summary.step2_pull_daily_balances_pulled == 3
+    # Step 3 added more on top of those — final count strictly greater
+    # than the pulled row count.
+    assert summary.step3_generator_transactions_after > 4
+    assert summary.step3_generator_daily_balances_after > 3
+    assert summary.step4_matviews_done is True
+
+
+def test_orchestration_etl_then_uncovered_rails_path(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """etl_datasource set + scope:uncovered_rails: step 2 pulls, then
+    step 3 only fills baseline for rails the source DIDN'T cover.
+    The pipeline composition matters here, not the exact row count —
+    the per-rail skip semantics are covered by the step 3 unit tests."""
+    src_path = tmp_path / "source.sqlite"
+    _build_etl_source_sqlite(src_path, txn_rows=2, bal_rows=2)
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        etl_datasource=EtlDatasourceConfig(
+            url=f"sqlite:///{src_path}",
+            transactions_table="etl_txns",
+            daily_balances_table="etl_balances",
+        ),
+        test_generator=TestGeneratorConfig(scope="uncovered_rails"),
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    summary = asyncio.run(
+        run_deploy_pipeline(cfg, spec_example_instance, dev_log=None),
+    )
+    assert summary.halted is False
+    assert summary.step2_pull_transactions_pulled == 2
+    assert summary.step2_pull_daily_balances_pulled == 2
+    # uncovered_rails still emits baseline for the (many) uncovered
+    # rails in spec_example — totals are >= the 2 pulled rows.
+    assert summary.step3_generator_transactions_after >= 2
+    assert summary.step4_matviews_done is True
+    assert summary.step5_data_generation_id > 0
+
