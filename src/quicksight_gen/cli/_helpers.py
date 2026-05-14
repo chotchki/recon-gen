@@ -146,7 +146,7 @@ def build_default_scenario(instance, *, anchor=None, density: float = 1.0, plant
     return filter_scenario_plants(boosted, plants)
 
 
-def build_full_seed_sql(cfg, instance, *, anchor=None, density: float = 1.0, plants=None) -> str:  # type: ignore[no-untyped-def]: cfg/instance/anchor/plants untyped pending CLI-wide sweep
+def build_full_seed_sql(cfg, instance, *, anchor=None, density: float = 1.0, plants=None, base_seed=None) -> str:  # type: ignore[no-untyped-def]: cfg/instance/anchor/plants/base_seed untyped pending CLI-wide sweep
     """Compose the demo seed pipeline (90-day baseline + plant overlays).
 
     ``anchor`` pins the calendar date used by both ``default_scenario_for``
@@ -155,6 +155,12 @@ def build_full_seed_sql(cfg, instance, *, anchor=None, density: float = 1.0, pla
     pick today from the wall clock. ``data lock`` passes a canonical
     ``date(2030, 1, 1)`` so the locked SQL is deterministic across
     machines and run dates.
+
+    ``base_seed`` (X.4.h.0.b) — root RNG seed for the baseline emitter.
+    ``None`` (default) preserves byte-identity with the locked seeds
+    (uses ``_BASELINE_BASE_SEED = 42``). Studio's data-shaping panel
+    writes ``cfg.test_generator.seed`` here when the trainer scrubs
+    to a different layout.
 
     See ``build_default_scenario`` for the scenario construction +
     density + plants-filter semantics.
@@ -165,7 +171,7 @@ def build_full_seed_sql(cfg, instance, *, anchor=None, density: float = 1.0, pla
         instance, anchor=anchor, density=density, plants=plants,
     )
     return emit_full_seed(
-        instance, final, dialect=cfg.dialect, anchor=anchor,
+        instance, final, dialect=cfg.dialect, anchor=anchor, base_seed=base_seed,
     )
 
 

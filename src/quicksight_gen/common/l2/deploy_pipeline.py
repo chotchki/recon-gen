@@ -535,6 +535,7 @@ def _build_generator_sql(cfg: Config, instance: L2Instance) -> str:
             cfg, instance,
             anchor=cfg.test_generator.end_date,
             plants=cfg.test_generator.plants or None,  # X.4.h.0.a — None ⇒ all kinds (locked-seed default)
+            base_seed=cfg.test_generator.seed,  # X.4.h.0.b — None ⇒ _BASELINE_BASE_SEED (locked-seed default)
         )
     if scope == "exceptions_only":
         # X.4.g.9 — plants only, no baseline. The integrator's external
@@ -566,6 +567,7 @@ def _build_generator_sql(cfg: Config, instance: L2Instance) -> str:
             anchor=cfg.test_generator.end_date,
             dialect=cfg.dialect,
             skip_rails=covered,
+            base_seed=cfg.test_generator.seed,  # X.4.h.0.b — None ⇒ _BASELINE_BASE_SEED
         )
     # Defensive — Literal[ScopeKind] should make this unreachable.
     raise ValueError(f"Unknown test_generator.scope: {scope!r}")
