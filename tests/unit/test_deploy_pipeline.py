@@ -21,11 +21,15 @@ import pytest
 
 from quicksight_gen.common.config import Config
 from quicksight_gen.common.db import connect_demo_db, execute_script
-from quicksight_gen.common.config import EtlDatasourceConfig
+from quicksight_gen.common.config import (
+    EtlDatasourceConfig,
+    TestGeneratorConfig,
+)
 from quicksight_gen.common.l2.deploy_pipeline import (
     step_1_etl_hook,
     step_2_pull,
     step_2_wipe,
+    step_3_generator,
 )
 from quicksight_gen.common.l2.loader import load_instance
 from quicksight_gen.common.l2.primitives import L2Instance
@@ -687,3 +691,166 @@ def test_dialect_from_url_unknown_rejects() -> None:
     from quicksight_gen.common.l2.deploy_pipeline import _dialect_from_url
     with pytest.raises(ValueError, match="Cannot infer dialect"):
         _dialect_from_url("mysql://u:p@h:3306/d")
+
+
+# ============================================================
+# step_3_generator (X.4.g.7+8)
+# ============================================================
+
+
+# ---------- skip path ----------
+
+def test_step_3_generator_skip_when_disabled(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        test_generator=TestGeneratorConfig(enabled=False),
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    sink = _EventCollector()
+    tx, bal = asyncio.run(
+        step_3_generator(cfg, spec_example_instance, dev_log=sink),
+    )
+    assert (tx, bal) == (0, 0)
+    assert sink.kinds() == ["deploy:step3:generator:skip"]
+    assert sink.events[0]["reason"] == (
+        "test_generator.enabled is False"
+    )
+    # And the demo DB stayed empty.
+    assert _row_counts(cfg, spec_example_instance) == (0, 0)
+
+
+# ---------- happy path: scope=full ----------
+
+def test_step_3_generator_full_writes_rows(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """scope=full at defaults runs the standard build_full_seed_sql
+    pipeline and lands rows in both base tables."""
+    from datetime import date
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        test_generator=TestGeneratorConfig(end_date=date(2030, 1, 1)),
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    sink = _EventCollector()
+    tx, bal = asyncio.run(
+        step_3_generator(cfg, spec_example_instance, dev_log=sink),
+    )
+    assert tx > 0, "spec_example baseline should write transactions"
+    assert bal > 0, "spec_example baseline should write daily_balances"
+    actual_tx, actual_bal = _row_counts(cfg, spec_example_instance)
+    assert (actual_tx, actual_bal) == (tx, bal)
+
+
+def test_step_3_generator_full_emits_start_then_done(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    from datetime import date
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        test_generator=TestGeneratorConfig(
+            end_date=date(2030, 1, 1), seed=12345,
+        ),
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    sink = _EventCollector()
+    tx, bal = asyncio.run(
+        step_3_generator(cfg, spec_example_instance, dev_log=sink),
+    )
+    kinds = sink.kinds()
+    assert kinds == [
+        "deploy:step3:generator:start",
+        "deploy:step3:generator:done",
+    ]
+    start = sink.by_kind("deploy:step3:generator:start")[0]
+    assert start["scope"] == "full"
+    assert start["end_date"] == "2030-01-01"
+    assert start["seed"] == 12345
+    done = sink.by_kind("deploy:step3:generator:done")[0]
+    assert done["transactions_written"] == tx
+    assert done["daily_balances_written"] == bal
+
+
+def test_step_3_generator_full_anchor_determinism(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """Same anchor + fresh DB ⇒ same row counts. Sanity for the
+    deterministic-when-knobs-at-defaults contract."""
+    from datetime import date
+
+    def _run(label: str) -> tuple[int, int]:
+        # Each run gets its own SQLite tempfile (same dir, distinct
+        # file) so we don't carry state across runs.
+        sub = tmp_path / label
+        sub.mkdir()
+        cfg = replace(
+            _sqlite_cfg(sub),
+            test_generator=TestGeneratorConfig(end_date=date(2030, 1, 1)),
+        )
+        _apply_demo_schema_only(cfg, spec_example_instance)
+        return asyncio.run(
+            step_3_generator(cfg, spec_example_instance, dev_log=None),
+        )
+
+    first = _run("a")
+    second = _run("b")
+    assert first == second, (
+        "scope=full at defaults must be deterministic across runs"
+    )
+
+
+# ---------- not-yet-implemented modes ----------
+
+def test_step_3_generator_exceptions_only_not_implemented(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        test_generator=TestGeneratorConfig(scope="exceptions_only"),
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    with pytest.raises(NotImplementedError, match="X.4.g.9"):
+        asyncio.run(
+            step_3_generator(cfg, spec_example_instance, dev_log=None),
+        )
+
+
+def test_step_3_generator_uncovered_rails_not_implemented(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        test_generator=TestGeneratorConfig(scope="uncovered_rails"),
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    with pytest.raises(NotImplementedError, match="X.4.g.10"):
+        asyncio.run(
+            step_3_generator(cfg, spec_example_instance, dev_log=None),
+        )
+
+
+# ---------- additive contract ----------
+
+def test_step_3_generator_full_adds_to_existing_rows(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """Step 3 is always additive — runs after step 2's wipe + optional
+    pull. Verify by planting one row before, then running step 3, and
+    confirming the count is `1 + generator_output`."""
+    from datetime import date
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        test_generator=TestGeneratorConfig(end_date=date(2030, 1, 1)),
+    )
+    _apply_schema_and_plant_two_rows(cfg, spec_example_instance)
+    pre_tx, pre_bal = _row_counts(cfg, spec_example_instance)
+    assert (pre_tx, pre_bal) == (1, 1)
+    tx, bal = asyncio.run(
+        step_3_generator(cfg, spec_example_instance, dev_log=None),
+    )
+    # tx / bal are the post-step-3 totals (per the contract).
+    # Generator's contribution = total - 1 plant row already present.
+    assert tx > 1
+    assert bal > 1

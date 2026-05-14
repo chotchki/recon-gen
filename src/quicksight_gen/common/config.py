@@ -119,6 +119,13 @@ PlantKind = Literal[
 # pipeline modes ship later (X.4.i.1 / X.4.i.2).
 @dataclass(frozen=True)
 class TestGeneratorConfig:
+    # Class name starts with "Test" so pytest collection emits a
+    # PytestCollectionWarning by default ("cannot collect: has
+    # __init__ constructor"). The convention pytest documents is the
+    # __test__ = False class attribute, which suppresses collection
+    # without renaming the class.
+    __test__ = False
+
     enabled: bool = True
     scope: ScopeKind = "full"
     end_date: date | None = None

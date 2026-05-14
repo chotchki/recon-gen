@@ -401,3 +401,104 @@ def _pull_table(
             dest_cur.close()
     finally:
         src_cur.close()
+
+
+# X.4.g.7+8 — Step 3 generator: synthetic data overlay.
+
+async def step_3_generator(
+    cfg: Config,
+    instance: L2Instance,
+    *,
+    dev_log: DevLogWriter | None = None,
+) -> tuple[int, int]:
+    """Run the synthetic-data generator, execute its SQL against the
+    demo DB, return per-base-table row counts.
+
+    X.4.g.7 — scaffolding. Honors ``cfg.test_generator``:
+      - ``enabled = False`` ⇒ skip event + return ``(0, 0)``.
+      - ``scope = "full"`` ⇒ X.4.g.8 — `build_full_seed_sql` (today's
+        behavior). Byte-identical to the locked seeds when no
+        ``etl_datasource`` AND knobs at defaults.
+      - ``scope = "exceptions_only"`` ⇒ ships in X.4.g.9.
+      - ``scope = "uncovered_rails"`` ⇒ ships in X.4.g.10.
+
+    Always *additive* — runs after step 2's wipe + optional pull, so
+    the generator's INSERTs land on top of whatever step 2 left in the
+    base tables. The returned counts are the *post-step-3* totals
+    (not the delta), so the deploy summary can report "ended with
+    12,345 transactions".
+    """
+    tg = cfg.test_generator
+    if not tg.enabled:
+        await _emit(dev_log, {
+            "event": "deploy:step3:generator:skip",
+            "reason": "test_generator.enabled is False",
+        })
+        return 0, 0
+
+    await _emit(dev_log, {
+        "event": "deploy:step3:generator:start",
+        "scope": tg.scope,
+        "end_date": tg.end_date.isoformat() if tg.end_date else None,
+        "seed": tg.seed,
+    })
+
+    sql = _build_generator_sql(cfg, instance)
+
+    def _run_apply() -> tuple[int, int]:
+        conn = connect_demo_db(cfg)
+        try:
+            cur = conn.cursor()
+            try:
+                execute_script(cur, sql, dialect=cfg.dialect)
+                conn.commit()
+                p = instance.instance
+                cur.execute(f"SELECT COUNT(*) FROM {p}_transactions")
+                tx = int(cur.fetchone()[0])
+                cur.execute(f"SELECT COUNT(*) FROM {p}_daily_balances")
+                bal = int(cur.fetchone()[0])
+                return tx, bal
+            finally:
+                cur.close()
+        finally:
+            conn.close()
+
+    tx, bal = await asyncio.to_thread(_run_apply)
+    await _emit(dev_log, {
+        "event": "deploy:step3:generator:done",
+        "transactions_written": tx,
+        "daily_balances_written": bal,
+    })
+    return tx, bal
+
+
+def _build_generator_sql(cfg: Config, instance: L2Instance) -> str:
+    """Pick the SQL builder for ``cfg.test_generator.scope``.
+
+    Split out so unit tests can exercise the dispatch + the NotImplemented
+    fences without going through ``connect_demo_db``.
+    """
+    scope = cfg.test_generator.scope
+    if scope == "full":
+        # X.4.g.8 — full scope. ``build_full_seed_sql`` is the same
+        # entry point ``data apply --execute`` already uses, so the
+        # locked-seed determinism contract carries over: no
+        # ``etl_datasource`` + default test_generator knobs ⇒
+        # byte-identical to ``tests/data/_locked_seeds/<inst>.<dialect>.sql``.
+        # build_full_seed_sql still carries a no-untyped-def waiver
+        # (CLI-wide typing sweep is a separate task per its own
+        # ignore comment); the call is still by-position-correct.
+        from quicksight_gen.cli._helpers import build_full_seed_sql  # pyright: ignore[reportUnknownVariableType]  # WHY: helper has pending untyped-def waiver in cli/_helpers.py
+        return build_full_seed_sql(  # pyright: ignore[reportUnknownVariableType]  # WHY: same helper-untyped waiver propagates to the call expression
+            cfg, instance, anchor=cfg.test_generator.end_date,
+        )
+    if scope == "exceptions_only":
+        raise NotImplementedError(
+            "test_generator.scope='exceptions_only' lands in X.4.g.9"
+        )
+    if scope == "uncovered_rails":
+        raise NotImplementedError(
+            "test_generator.scope='uncovered_rails' lands in X.4.g.10"
+        )
+    # Defensive — Literal[ScopeKind] should make this unreachable.
+    raise ValueError(f"Unknown test_generator.scope: {scope!r}")
