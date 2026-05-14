@@ -62,6 +62,47 @@ body.data-page {
   cursor: pointer;
 }
 
+/* X.4.h.3 — end_date day-stepper. ←/→ are square ghost buttons; date
+ * input is a compact picker; "today" is a reset chip; current value
+ * trails as a muted aria-label-equivalent (so the widget is glanceable
+ * even when the date input UA-styling hides the picked value). */
+.data-knob-end-date {
+  gap: 0.25rem;
+}
+
+.end-date-step,
+.end-date-reset {
+  appearance: none;
+  background: white;
+  border: 1px solid var(--studio-border);
+  border-radius: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+  color: inherit;
+}
+
+.end-date-step:hover,
+.end-date-reset:hover {
+  background: var(--studio-bg);
+}
+
+.end-date-input {
+  font-size: 0.875rem;
+  padding: 0.125rem 0.25rem;
+  border: 1px solid var(--studio-border);
+  border-radius: 0.25rem;
+  background: white;
+  color: inherit;
+}
+
+.end-date-current {
+  font-size: 0.75rem;
+  color: var(--studio-muted);
+  font-variant-numeric: tabular-nums;
+  margin-left: 0.25rem;
+}
+
 .data-main {
   display: grid;
   grid-template-columns: minmax(20rem, 1fr) minmax(24rem, 1.5fr);

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Iterator
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -321,3 +322,186 @@ def test_put_plants_preserves_kind_order(
         )
     # Canonical order: drift / limit_breach / supersession.
     assert tg_cache.get().plants == ("drift", "limit_breach", "supersession")
+
+
+# ---------------------------------------------------------------------------
+# X.4.h.3 — end_date day-stepper widget + PUT route
+# ---------------------------------------------------------------------------
+
+
+def test_end_date_strip_renders_blank_input_when_none(
+    writable_l2_yaml: Path,
+) -> None:
+    """Default cfg.test_generator.end_date = None ⇒ the date input
+    renders empty (blank value) and the trailing current-value chip
+    shows '(default)'."""
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(end_date=None))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+
+    assert 'class="end-date-input"' in body
+    assert 'value=""' in body  # blank value
+    assert "(default)" in body  # current-value chip
+
+
+def test_end_date_strip_reflects_cached_value(
+    writable_l2_yaml: Path,
+) -> None:
+    """When the cache holds a date, the input + chip render that ISO
+    string."""
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(end_date=date(2026, 5, 14)),
+    )
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+
+    assert 'value="2026-05-14"' in body
+    # The trailing chip shows the same ISO so the operator sees the
+    # current state without depending on the date-input's UA styling.
+    assert ">2026-05-14<" in body
+
+
+def test_end_date_strip_form_targets_put_route(
+    writable_l2_yaml: Path,
+) -> None:
+    """Each control independently PUTs to /data/knobs/end_date with
+    outerHTML swap. Missing any one breaks the round-trip."""
+    tg_cache = TestGeneratorCache(TestGeneratorConfig())
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+
+    # Three buttons + one input all carry the PUT URL.
+    assert body.count('hx-put="/data/knobs/end_date"') == 4
+    assert 'hx-target="#data-knob-end-date"' in body
+    assert 'hx-swap="outerHTML"' in body
+    # Prev / next buttons send delta payload via hx-vals (single-quoted
+    # attribute → literal " chars inside JSON, no HTML-escape).
+    assert 'hx-vals=\'{"delta": "-1"}\'' in body
+    assert 'hx-vals=\'{"delta": "1"}\'' in body
+    # "today" button sends an empty end_date to reset.
+    assert 'hx-vals=\'{"end_date": ""}\'' in body
+    # Date input commits on change.
+    assert 'hx-trigger="change"' in body
+
+
+def test_put_end_date_absolute_date_set(
+    writable_l2_yaml: Path,
+) -> None:
+    """PUT /data/knobs/end_date with end_date=ISO commits the absolute
+    date to the cache and re-renders the strip with the new value."""
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(end_date=None))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(
+            c, "/data/knobs/end_date",
+            [("end_date", "2026-06-01")],
+        )
+    assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
+    assert tg_cache.get().end_date == date(2026, 6, 1)
+    assert 'value="2026-06-01"' in resp.text  # type: ignore[attr-defined]: TestClient stub return is Any
+
+
+def test_put_end_date_empty_string_clears_to_none(
+    writable_l2_yaml: Path,
+) -> None:
+    """end_date= (empty) is the canonical "today reset" payload — the
+    cache clears to None and the widget re-renders with a blank input."""
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(end_date=date(2026, 5, 14)),
+    )
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(c, "/data/knobs/end_date", [("end_date", "")])
+    assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
+    assert tg_cache.get().end_date is None
+    assert 'value=""' in resp.text  # type: ignore[attr-defined]: TestClient stub return is Any
+
+
+def test_put_end_date_delta_steps_from_cached_value(
+    writable_l2_yaml: Path,
+) -> None:
+    """delta=1 with a cached date applies +1 day, delta=-1 applies -1.
+    The cache's stored date is the anchor, not today's date."""
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(end_date=date(2026, 5, 14)),
+    )
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        # +1 day
+        _put_form(c, "/data/knobs/end_date", [("delta", "1")])
+        assert tg_cache.get().end_date == date(2026, 5, 15)
+        # -1 day from new state
+        _put_form(c, "/data/knobs/end_date", [("delta", "-1")])
+        assert tg_cache.get().end_date == date(2026, 5, 14)
+
+
+def test_put_end_date_delta_anchors_on_today_when_cache_none(
+    writable_l2_yaml: Path,
+) -> None:
+    """delta from a None cache anchors on the system today's date so
+    the operator can step from "today's data" without first picking a
+    starting date. No determinism guarantee here — the trainer mode
+    is a UI surface, not a hash-locked seed path."""
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(end_date=None))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        _put_form(c, "/data/knobs/end_date", [("delta", "1")])
+    new = tg_cache.get().end_date
+    assert new is not None
+    today = date.today()  # typing-smell: ignore[no-datetime-now]: trainer-mode test must compare against the same wall-clock anchor the route uses
+    # Tomorrow — modulo a hypothetical midnight crossing during the test.
+    assert new in {today + timedelta(days=1), today + timedelta(days=2)}
+
+
+def test_put_end_date_invalid_iso_silently_drops(
+    writable_l2_yaml: Path,
+) -> None:
+    """Garbage in the end_date field is silently dropped (the cache
+    holds its prior value) — same posture as put_plants: a curl test
+    or stale browser shouldn't be able to corrupt cache state."""
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(end_date=date(2026, 5, 14)),
+    )
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(
+            c, "/data/knobs/end_date",
+            [("end_date", "not-a-date")],
+        )
+    assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
+    assert tg_cache.get().end_date == date(2026, 5, 14)
+
+
+def test_put_end_date_route_absent_without_cache(
+    writable_l2_yaml: Path,
+) -> None:
+    """Without a tg_cache the mutation route is NOT mounted — same
+    severability rule as plants."""
+    app = _build_app(writable_l2_yaml, tg_cache=None)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(
+            c, "/data/knobs/end_date", [("end_date", "2026-05-14")],
+        )
+    assert resp.status_code in (404, 405)  # type: ignore[attr-defined]: TestClient stub return is Any
+
+
+def test_put_end_date_delta_wins_over_end_date(
+    writable_l2_yaml: Path,
+) -> None:
+    """When both delta and end_date are sent, delta wins. The UI never
+    sends both, but a hand-rolled curl might — making the priority
+    explicit avoids ambiguous behavior."""
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(end_date=date(2026, 5, 14)),
+    )
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        _put_form(
+            c, "/data/knobs/end_date",
+            [("delta", "1"), ("end_date", "2030-01-01")],
+        )
+    # delta wins → +1 day from cached anchor
+    assert tg_cache.get().end_date == date(2026, 5, 15)

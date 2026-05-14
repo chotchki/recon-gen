@@ -67,6 +67,8 @@ def asset_url(path: str) -> str:
         return f"{path}?cb={_BOOT_ID}"
     return f"/studio/static/{path}?cb={_BOOT_ID}"
 
+from datetime import date, timedelta
+
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Mount, Route
@@ -721,6 +723,62 @@ def _render_plants_strip(
     )
 
 
+def _render_end_date_strip(selected: date | None) -> str:
+    """X.4.h.3 — render the end_date day-stepper widget.
+
+    UI: ``[←] [date input] [→] [today]``. ``←`` / ``→`` step ±1 day;
+    the date input commits on change; ``today`` clears back to ``None``
+    (the locked-default sentinel — generator side falls back to the
+    system date or the locked-seed anchor depending on context).
+
+    Wired with HTMX: each control independently PUTs to
+    ``/data/knobs/end_date``. The form is a pure container — no
+    ``hx-put`` on the form itself — because each control sends a
+    different payload shape:
+
+    - Prev / next buttons send ``delta=-1`` / ``delta=1`` via
+      ``hx-vals``; the server reads the cached state and applies the
+      delta (anchoring on today when the cache holds None).
+    - The date input sends ``end_date=<YYYY-MM-DD>`` via its own name.
+    - The "today" reset sends ``end_date=`` (empty) — the canonical
+      "clear to None" form-encoding.
+
+    All controls target ``#data-knob-end-date`` with ``outerHTML``
+    swap so the on-screen state always reflects the cache.
+    """
+    iso = selected.isoformat() if selected is not None else ""
+    pretty = selected.isoformat() if selected is not None else "(default)"
+    common_attrs = (
+        'hx-put="/data/knobs/end_date" '
+        'hx-target="#data-knob-end-date" '
+        'hx-swap="outerHTML"'
+    )
+    return (
+        f'<form id="data-knob-end-date" class="data-knob data-knob-end-date">'
+        f'<span class="data-knob-label">end_date:</span>'
+        f'<button type="button" class="end-date-step" '
+        f'title="Step back 1 day" '
+        f"{common_attrs} "
+        f"hx-vals='{{\"delta\": \"-1\"}}'>←</button>"
+        f'<input type="date" name="end_date" value="{escape(iso)}" '
+        f'class="end-date-input" '
+        f'aria-label="Pick end date" '
+        f'hx-trigger="change" '
+        f"{common_attrs}/>"
+        f'<button type="button" class="end-date-step" '
+        f'title="Step forward 1 day" '
+        f"{common_attrs} "
+        f"hx-vals='{{\"delta\": \"1\"}}'>→</button>"
+        f'<button type="button" class="end-date-reset" '
+        f'title="Clear to default (None)" '
+        f"{common_attrs} "
+        f"hx-vals='{{\"end_date\": \"\"}}'>today</button>"
+        f'<span class="end-date-current" '
+        f'aria-label="Current end_date">{escape(pretty)}</span>'
+        f"</form>"
+    )
+
+
 def _render_data_page(
     cache: L2InstanceCache,
     dev_log: bool,
@@ -729,10 +787,10 @@ def _render_data_page(
 ) -> str:
     """X.4.h.1 — Studio "trainer mode" data-shaping panel shell.
 
-    Page-shell + h.2 plant-toggle checkboxes wired through the
-    ``TestGeneratorCache``. h.3-h.5 layer the day-stepper, seed
-    input, and scope selector into the same knob strip. Timeline +
-    training pane stay placeholders here (h.6 / h.9).
+    Page-shell + h.2 plant-toggle checkboxes + h.3 day-stepper wired
+    through the ``TestGeneratorCache``. h.4-h.5 layer the seed input
+    and scope selector into the same knob strip. Timeline + training
+    pane stay placeholders here (h.6 / h.9).
 
     ``tg_cache`` is None for the unit-test surface that exercises the
     page shell without the full studio cfg wiring; in that mode the
@@ -751,6 +809,10 @@ def _render_data_page(
         tg_cache.get().plants if tg_cache is not None else ()
     )
     plants_strip = _render_plants_strip(selected_plants)
+    selected_end_date = (
+        tg_cache.get().end_date if tg_cache is not None else None
+    )
+    end_date_strip = _render_end_date_strip(selected_end_date)
 
     return f"""<!doctype html>
 <html lang="en">
@@ -814,7 +876,8 @@ def _render_data_page(
 
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <div class="data-knobs" id="data-knobs">
-    <span class="knob-placeholder">scope · end_date · seed — wired in X.4.h.3-h.5</span>
+    <span class="knob-placeholder">scope · seed — wired in X.4.h.4-h.5</span>
+    {end_date_strip}
     {plants_strip}
   </div>
 
@@ -980,6 +1043,51 @@ def make_studio_routes(
             return HTMLResponse(_render_plants_strip(new_plants))
 
         routes.append(Route("/data/knobs/plants", put_plants, methods=["PUT"]))
+
+        async def put_end_date(request: Request) -> HTMLResponse:
+            """X.4.h.3 — apply a delta or absolute date to the end_date knob.
+
+            Form contract:
+                - ``delta=<int>`` → step relative to current cached date
+                  (anchors on today when the cache holds None).
+                - ``end_date=<YYYY-MM-DD>`` → set absolute date; empty
+                  string clears to None ("today" reset).
+                - Both present: ``delta`` wins (defensive — the UI never
+                  sends both, but a hand-rolled curl might).
+                - Neither present: no-op (return current strip).
+                - Invalid date string: silently drop (return current
+                  strip) — same posture as ``put_plants`` for unknown
+                  plant names.
+            """
+            form = await request.form()
+            current = bound_tg.get().end_date
+
+            delta_raw = form.get("delta")
+            new_end_date: date | None = current
+            if isinstance(delta_raw, str) and delta_raw.strip():
+                try:
+                    delta_days = int(delta_raw)
+                except ValueError:
+                    delta_days = 0
+                if delta_days:
+                    anchor = current or date.today()  # typing-smell: ignore[no-datetime-now]: trainer-mode UI anchor — wall-clock today is the operator-friendly reference for "step from where we are now"; not a determinism path
+                    new_end_date = anchor + timedelta(days=delta_days)
+            else:
+                date_raw = form.get("end_date")
+                if isinstance(date_raw, str):
+                    if date_raw == "":
+                        new_end_date = None
+                    else:
+                        try:
+                            new_end_date = date.fromisoformat(date_raw)
+                        except ValueError:
+                            new_end_date = current  # silent drop
+            bound_tg.update(end_date=new_end_date)
+            return HTMLResponse(_render_end_date_strip(new_end_date))
+
+        routes.append(
+            Route("/data/knobs/end_date", put_end_date, methods=["PUT"]),
+        )
 
     # X.4.c.5.c — coverage JSON route. Mounted only when a pool exists
     # (Studio CLI always provides one; the unit-test surface skips this).
