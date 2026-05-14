@@ -582,7 +582,8 @@ def _render_read_card(
         if s.name not in hidden
     )
     return (
-        f'<article class="entity-card" id="entity-{kind}-{escape(entity_id)}">'
+        f'<article class="entity-card" id="entity-{kind}-{escape(entity_id)}" '
+        f'data-kind="{escape(kind)}" data-entity-id="{escape(entity_id)}">'
         f"<header>"
         f'<h3>{escape(entity_id)}</h3>'
         f'<a class="edit-link" hx-get="/l2_shape/{kind}/{escape(entity_id)}/edit" '

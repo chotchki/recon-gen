@@ -1165,6 +1165,167 @@ def _style_for(scope: Scope | None, templated: bool) -> _RoleStyle:
     return _INTERNAL_STYLE
 
 
+def visible_entities_for(
+    instance: L2Instance,
+    focus_node_id: str | None,
+) -> Mapping[str, frozenset[str]]:
+    """Return the L2 entity IDs visible in a focused diagram subgraph.
+
+    Used by Studio's home page (X.4.f.8) to filter the entity-card
+    sections when the operator clicks a node in the diagram. The keys
+    are the editor-route entity-kind slugs (``account``,
+    ``account_template``, ``rail``, ``transfer_template``, ``chain``,
+    ``limit_schedule``); the values are frozen sets of entity IDs in
+    the same shape Studio's ``/l2_shape/<kind>/<id>`` URLs use:
+
+    - ``account.id``, ``account_template.role``, ``rail.name``,
+      ``transfer_template.name``;
+    - ``"<parent>::<child>"`` composite for chains and
+      ``"<parent_role>::<transfer_type>"`` composite for
+      limit_schedules (matches ``_entity_id`` in
+      ``_studio_editor_routes``).
+
+    When ``focus_node_id`` is None or the node ID is unrecognized
+    (typo / stale URL / synthetic bundle id like ``rail__bundle_3``
+    that doesn't have a matching individual rail), returns the FULL
+    set per kind so the home page un-filters cleanly.
+
+    Adjacency is built directly from ``instance`` (rather than from
+    ``topology_graph_for``'s typed projection) so each Rail keeps its
+    own role↔rail edges instead of being collapsed into a bundle
+    edge — focusing on a single Rail must still pull in its endpoint
+    roles even when several parallel rails share those roles.
+    """
+    all_entities = _all_entities_per_kind(instance)
+    if focus_node_id is None:
+        return all_entities
+
+    adjacency: dict[str, set[str]] = {}
+
+    def _add(a: str, b: str) -> None:
+        adjacency.setdefault(a, set()).add(b)
+        adjacency.setdefault(b, set()).add(a)
+
+    # Rail ↔ role endpoints (per individual rail, not the bundle aggregate).
+    for rail in instance.rails:
+        rail_id = _rail_id(rail.name)
+        if isinstance(rail, TwoLegRail):
+            for r in rail.source_role:
+                _add(rail_id, _role_id(r))
+            for r in rail.destination_role:
+                _add(rail_id, _role_id(r))
+        else:
+            for r in rail.leg_role:
+                _add(rail_id, _role_id(r))
+
+    # Template ↔ leg-rail membership.
+    for tmpl in instance.transfer_templates:
+        for rn in tmpl.leg_rails:
+            _add(_template_id(tmpl.name), _rail_id(rn))
+
+    # Chain edges (rail/template ↔ rail/template).
+    template_names_set = {t.name for t in instance.transfer_templates}
+    for chain in instance.chains:
+        parent_id = (
+            _template_id(chain.parent)
+            if chain.parent in template_names_set
+            else _rail_id(chain.parent)
+        )
+        child_id = (
+            _template_id(chain.child)
+            if chain.child in template_names_set
+            else _rail_id(chain.child)
+        )
+        _add(parent_id, child_id)
+
+    # Control-parent edges (role ↔ role).
+    for account in instance.accounts:
+        if account.parent_role is not None and account.role is not None:
+            _add(_role_id(account.role), _role_id(account.parent_role))
+    for tmpl_acc in instance.account_templates:
+        if tmpl_acc.parent_role is not None:
+            _add(_role_id(tmpl_acc.role), _role_id(tmpl_acc.parent_role))
+
+    if focus_node_id not in adjacency:
+        # Unknown / synthetic node (e.g., rail__bundle_N) — un-filter.
+        return all_entities
+
+    focus_set = _focus_set(focus_node_id, adjacency)
+    visible_roles: set[str] = {
+        n.removeprefix("role__") for n in focus_set
+        if n.startswith("role__")
+    }
+    visible_rail_names: set[str] = {
+        n.removeprefix("rail__") for n in focus_set
+        if n.startswith("rail__") and not n.startswith("rail__bundle_")
+    }
+    visible_template_names: set[str] = {
+        n.removeprefix("tmpl__") for n in focus_set
+        if n.startswith("tmpl__")
+    }
+    rail_or_tmpl = visible_rail_names | visible_template_names
+
+    accounts = frozenset(
+        str(a.id) for a in instance.accounts
+        if (a.role is not None and str(a.role) in visible_roles)
+        or (a.parent_role is not None and str(a.parent_role) in visible_roles)
+    )
+    account_templates = frozenset(
+        str(t.role) for t in instance.account_templates
+        if str(t.role) in visible_roles
+        or (t.parent_role is not None and str(t.parent_role) in visible_roles)
+    )
+    rails = frozenset(
+        str(r.name) for r in instance.rails
+        if str(r.name) in visible_rail_names
+    )
+    transfer_templates = frozenset(
+        str(t.name) for t in instance.transfer_templates
+        if str(t.name) in visible_template_names
+    )
+    chains = frozenset(
+        f"{c.parent}::{c.child}" for c in instance.chains
+        if str(c.parent) in rail_or_tmpl or str(c.child) in rail_or_tmpl
+    )
+    limit_schedules = frozenset(
+        f"{ls.parent_role}::{ls.transfer_type}"
+        for ls in instance.limit_schedules
+        if str(ls.parent_role) in visible_roles
+    )
+    return {
+        "account": accounts,
+        "account_template": account_templates,
+        "rail": rails,
+        "transfer_template": transfer_templates,
+        "chain": chains,
+        "limit_schedule": limit_schedules,
+    }
+
+
+def _all_entities_per_kind(
+    instance: L2Instance,
+) -> Mapping[str, frozenset[str]]:
+    """Full entity-id set per kind — used as the no-focus / unknown-focus
+    return value of ``visible_entities_for``."""
+    return {
+        "account": frozenset(str(a.id) for a in instance.accounts),
+        "account_template": frozenset(
+            str(t.role) for t in instance.account_templates
+        ),
+        "rail": frozenset(str(r.name) for r in instance.rails),
+        "transfer_template": frozenset(
+            str(t.name) for t in instance.transfer_templates
+        ),
+        "chain": frozenset(
+            f"{c.parent}::{c.child}" for c in instance.chains
+        ),
+        "limit_schedule": frozenset(
+            f"{ls.parent_role}::{ls.transfer_type}"
+            for ls in instance.limit_schedules
+        ),
+    }
+
+
 __all__ = [
     "EdgeKind",
     "NodeKind",
@@ -1173,5 +1334,6 @@ __all__ = [
     "TopologyNode",
     "build_topology_graph_per_rail",
     "topology_graph_for",
+    "visible_entities_for",
 ]
 

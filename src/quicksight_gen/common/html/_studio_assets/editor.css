@@ -85,6 +85,17 @@ body.home-page {
   margin: 0;
 }
 
+/* X.4.f.8 — diagram-driven card filter. */
+.entity-card.is-hidden-by-focus {
+  display: none;
+}
+
+.focus-filter-indicator {
+  color: var(--studio-muted);
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+
 .entity-card {
   background: white;
   border: 1px solid var(--studio-border);

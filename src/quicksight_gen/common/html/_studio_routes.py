@@ -78,6 +78,7 @@ from quicksight_gen.common.l2.coverage import CoverageEntry, coverage_for
 from quicksight_gen.common.l2.topology import (
     build_topology_graph_per_rail,
     topology_graph_for,
+    visible_entities_for,
 )
 from quicksight_gen.common.l2.trainer import plants_per_node
 from quicksight_gen.common.sql.dialect import Dialect
@@ -195,6 +196,82 @@ def _render_home_page(cache: L2InstanceCache, dev_log: bool) -> str:
       var f = document.getElementById('diagram-frame');
       if (f) {{ f.src = f.src; }}
     }});
+
+    // X.4.f.8 — diagram-click → entity-card filter. The diagram page
+    // already navigates its own URL to ?focus=<node_id> when a node is
+    // clicked. The iframe is same-origin, so we read its location on
+    // load, fetch the visible-entity set from the server, and toggle a
+    // CSS class on cards whose id isn't in the set. Re-applied on
+    // htmx:afterSettle so cascade-reload doesn't drop the filter.
+    var lastVisibleByKind = null;  // null = no filter
+    var lastFocus = null;
+    function applyFocusFilter() {{
+      var cards = document.querySelectorAll(
+        '#home-entities .entity-card[data-kind][data-entity-id]'
+      );
+      cards.forEach(function(card) {{
+        var hidden = false;
+        if (lastVisibleByKind !== null) {{
+          var k = card.dataset.kind;
+          var id = card.dataset.entityId;
+          var ids = lastVisibleByKind[k];
+          hidden = !ids || ids.indexOf(id) === -1;
+        }}
+        card.classList.toggle('is-hidden-by-focus', hidden);
+      }});
+      // Per-section "(N shown)" indicator update.
+      document.querySelectorAll('details.home-section').forEach(function(d) {{
+        var visible = d.querySelectorAll(
+          '.entity-card:not(.is-hidden-by-focus)'
+        ).length;
+        var total = d.querySelectorAll('.entity-card').length;
+        var summary = d.querySelector('summary');
+        if (!summary) return;
+        var ind = summary.querySelector('.focus-filter-indicator');
+        if (lastVisibleByKind === null || total === 0 || visible === total) {{
+          if (ind) ind.remove();
+        }} else {{
+          if (!ind) {{
+            ind = document.createElement('span');
+            ind.className = 'focus-filter-indicator';
+            summary.appendChild(ind);
+          }}
+          ind.textContent = ' · ' + visible + ' shown';
+        }}
+      }});
+    }}
+    function refreshFocusFromIframe() {{
+      var f = document.getElementById('diagram-frame');
+      if (!f || !f.contentWindow) return;
+      var sp;
+      try {{
+        sp = new URLSearchParams(f.contentWindow.location.search);
+      }} catch (e) {{
+        return;  // cross-origin (shouldn't happen — iframe is same-origin)
+      }}
+      var focus = sp.get('focus') || null;
+      if (focus === lastFocus) {{ applyFocusFilter(); return; }}
+      lastFocus = focus;
+      if (!focus) {{
+        lastVisibleByKind = null;
+        applyFocusFilter();
+        return;
+      }}
+      fetch('/diagram/visible?focus=' + encodeURIComponent(focus))
+        .then(function(r) {{ return r.json(); }})
+        .then(function(j) {{
+          lastVisibleByKind = j;
+          applyFocusFilter();
+        }})
+        .catch(function() {{}});
+    }}
+    document.addEventListener('DOMContentLoaded', function() {{
+      var f = document.getElementById('diagram-frame');
+      if (f) f.addEventListener('load', refreshFocusFromIframe);
+    }});
+    // Re-apply after every HTMX swap (section refetch on cascade-reload
+    // brings back fresh cards without our hide class).
+    document.addEventListener('htmx:afterSettle', applyFocusFilter);
   </script>
   {devlog_script}</head>
 <body class="home-page">
@@ -210,7 +287,7 @@ def _render_home_page(cache: L2InstanceCache, dev_log: bool) -> str:
             title="L2 topology diagram"></iframe>
   </section>
 
-  <section class="home-entities">
+  <section class="home-entities" id="home-entities">
     {sections_html}
   </section>
 </body>
@@ -529,6 +606,19 @@ def make_studio_routes(
         )
 
     routes.append(Route("/diagram/trainer", trainer, methods=["GET"]))
+
+    # X.4.f.8 — visible-entities map for the home page's diagram-click
+    # filter. ``?focus=<node_id>`` returns the entity IDs reachable from
+    # that focus subgraph; absent / unknown focus returns the full set.
+    async def visible(request: Request) -> JSONResponse:
+        focus = request.query_params.get("focus") or None
+        instance = cache.get()
+        by_kind = visible_entities_for(instance, focus)
+        return JSONResponse(
+            {kind: sorted(ids) for kind, ids in by_kind.items()},
+        )
+
+    routes.append(Route("/diagram/visible", visible, methods=["GET"]))
 
     # X.4.c.5.c — coverage JSON route. Mounted only when a pool exists
     # (Studio CLI always provides one; the unit-test surface skips this).

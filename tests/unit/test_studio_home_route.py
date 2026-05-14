@@ -210,6 +210,81 @@ def test_l2_shape_no_embed_query_returns_full_page(
     assert "cust-001" in body
 
 
+def test_diagram_visible_route_returns_full_set_when_no_focus(
+    writable_l2_yaml: Path,
+) -> None:
+    """X.4.f.8 — GET /diagram/visible (no ?focus=) returns every entity
+    of every kind, sorted, as JSON. The home page treats this as the
+    "no filter" baseline."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/diagram/visible")
+        assert resp.status_code == 200
+        body = resp.json()
+
+    # Every kind key present; account list includes spec_example's known IDs.
+    assert set(body.keys()) == {
+        "account", "account_template", "rail",
+        "transfer_template", "chain", "limit_schedule",
+    }
+    assert "cust-001" in body["account"]
+    assert "ExternalRailInbound" in body["rail"]
+
+
+def test_diagram_visible_route_filters_by_focus(
+    writable_l2_yaml: Path,
+) -> None:
+    """?focus=role__CustomerSubledger narrows to entities reachable
+    from that node (rails touching the role + sibling subledger
+    accounts + the AccountTemplate)."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/diagram/visible?focus=role__CustomerSubledger")
+        assert resp.status_code == 200
+        body = resp.json()
+
+    accounts = set(body["account"])
+    rails = set(body["rail"])
+    assert "cust-001" in accounts
+    assert "cust-002" in accounts
+    assert "ExternalRailInbound" in rails
+    # NorthPool isn't connected to CustomerSubledger.
+    assert "north-pool" not in accounts
+
+
+def test_home_page_carries_diagram_filter_listener(
+    writable_l2_yaml: Path,
+) -> None:
+    """The home page's inline JS must wire iframe-load → fetch
+    /diagram/visible → toggle .is-hidden-by-focus on cards."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/").text
+
+    # Iframe load listener present.
+    assert "addEventListener('load', refreshFocusFromIframe)" in body
+    # The fetch URL points at the new route.
+    assert "/diagram/visible?focus=" in body
+    # Hide-class application is in the script.
+    assert "is-hidden-by-focus" in body
+    # Re-apply on cascade-driven HTMX swap so the filter survives refetch.
+    assert "addEventListener('htmx:afterSettle', applyFocusFilter)" in body
+
+
+def test_home_page_cards_carry_data_attributes_for_filter(
+    writable_l2_yaml: Path,
+) -> None:
+    """Cards in the home-page sections must expose data-kind +
+    data-entity-id so the JS filter can target them."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        # The embed fragment is what each section actually loads.
+        body = c.get("/l2_shape/account/?embed=1").text
+
+    assert 'data-kind="account"' in body
+    assert 'data-entity-id="cust-001"' in body
+
+
 def test_put_from_home_page_emits_cascade_trigger_for_diagram_and_sections(
     writable_l2_yaml: Path,
 ) -> None:
