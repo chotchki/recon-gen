@@ -251,7 +251,7 @@ Theme + Persona are L2-instance attributes (singletons, not lists). They need a 
   - [x] **X.4.j.2.shared** — Helpers extracted to `tests/e2e/_studio_deploy_helpers.py` (apply_schema_to / write_pg_etl_cfg / write_etl_hook_script / make_studio_cfg / build_studio_app / studio_server / row_count). Both j.1 and j.2 import from here; fixtures stay per-test-file.
 - [ ] **X.4.j.3** — Verify the existing X.2 13-cell `scenario × dialect × target` matrix + 4-way agreement test still pass unchanged.
 - [ ] **X.4.j.4** — Operator live-drive runbook + helper script: `scripts/studio-with-pg-source.sh` spins postgres-in-docker, writes a generated `cfg.studio-demo.yaml` (etl_datasource=docker, demo_database_url=sqlite tempfile, etl_hook=script-from-X.4.j.1.b), prints the studio URL. One-line invocation for spot-checking the Deploy button after edits to the pipeline. `docs/walkthroughs/studio-deploy-spike.md` captures the screenshot trail (cluster up → seed runs → click Deploy → dashboard re-renders).
-- [ ] **X.4.j.4** — Verify the locked-seed determinism test stays green (default `test_generator:` knobs = today's output, byte-for-byte).
+- [ ] **X.4.j.5** — Verify the locked-seed determinism test stays green (default `test_generator:` knobs = today's output, byte-for-byte).
 
 #### X.4.k — Wrap + release (v10.0.0)
 

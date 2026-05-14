@@ -26,7 +26,7 @@ import subprocess
 import sysconfig
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
@@ -206,7 +206,7 @@ def build_studio_app(
 
 
 @contextlib.contextmanager
-def studio_server(cfg: Config) -> Iterator[str]:
+def studio_server(cfg: Config) -> Generator[str, None, None]:
     """Spin a uvicorn server in a thread serving the full studio app
     against ``cfg``. Yields the bound base URL.
 

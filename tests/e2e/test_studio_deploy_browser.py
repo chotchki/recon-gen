@@ -19,10 +19,8 @@ Dashboards-auto-reload loop works as designed.
 """
 from __future__ import annotations
 
-import contextlib
 import re
 import stat
-import time
 import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
@@ -34,7 +32,13 @@ pytest.importorskip("testcontainers.postgres")
 pytest.importorskip("playwright.sync_api")
 pytest.importorskip("aiosqlite")
 
-from playwright.sync_api import sync_playwright
+# Studio chrome (Deploy button + status indicator + framenavigated reload
+# detection) is operator-app UI distinct from the DashboardDriver verb
+# set (open / goto_sheet / table_rows / pick_filter), which targets
+# renderer-agnostic *dashboard* operations. Playwright is the right
+# level for chrome-driven assertions; ported tests still go through
+# DashboardDriver.
+from playwright.sync_api import sync_playwright  # typing-smell: ignore[no-playwright-leak]: studio chrome is not a dashboard verb
 from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
 
 from quicksight_gen.cli._html_serve import REAL_APPS
