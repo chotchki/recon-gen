@@ -153,24 +153,23 @@ def _render_home_page(cache: L2InstanceCache, dev_log: bool) -> str:
     for idx, (kind, label, accessor) in enumerate(_HOME_SECTIONS):
         n = len(getattr(instance, accessor))
         open_attr = " open" if idx == 0 else ""
+        body_id = f"home-section-body-{kind}"
         section_blocks.append(
             f'<details class="home-section" data-kind="{escape(kind)}"{open_attr}>'
             f"<summary>{escape(label)} "
             f'<span class="count">({n})</span> '
             f'<a class="home-section-add" '
-            f'hx-get="/l2_shape/{kind}/new" '
-            f'hx-target="next .home-section-body" '
-            f'hx-swap="afterbegin" '
-            # Stop the click from toggling the surrounding <details>
-            # (it would close on a second click); also force-open it
-            # so the inserted form is visible.
-            f'onclick="event.stopPropagation(); '
-            f'this.closest(\'details\').open = true;" '
+            f'href="/l2_shape/{kind}/new" '
+            # Stop the click from triggering the surrounding <details>
+            # toggle (preventDefault). The browser still follows the
+            # href so the operator lands on the dedicated create page.
+            f'onclick="event.stopPropagation()" '
             f'title="Create a new {escape(kind)}">+ Add</a>'
             f'<a class="home-section-link" href="/l2_shape/{kind}/" '
+            f'onclick="event.stopPropagation()" '
             f'title="Open in dedicated page">↗</a>'
             f"</summary>"
-            f'<div class="home-section-body" '
+            f'<div class="home-section-body" id="{body_id}" '
             f'hx-get="/l2_shape/{kind}/?embed=1" '
             f'hx-trigger="load, l2-cascade-reload from:body" '
             f'hx-swap="innerHTML">'

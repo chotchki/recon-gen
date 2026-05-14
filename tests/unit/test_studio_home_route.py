@@ -108,10 +108,15 @@ def test_home_page_each_section_carries_add_button(
         "account", "account_template", "rail",
         "transfer_template", "chain", "limit_schedule",
     ):
-        assert f'hx-get="/l2_shape/{kind}/new"' in body, (
+        # Plain navigation to the dedicated create page — the create
+        # page has room for per-kind training prose explaining what
+        # this entity is + field-level guidance, which a cramped
+        # inline form couldn't carry.
+        assert f'href="/l2_shape/{kind}/new"' in body, (
             f"missing + Add for {kind}"
         )
-    # stopPropagation prevents the click from toggling <details> closed.
+    # stopPropagation prevents the click from toggling the surrounding
+    # <details> closed (browser still follows the href).
     assert "event.stopPropagation()" in body
 
 

@@ -37,7 +37,7 @@ from html import escape
 from typing import Any, Literal, TypeAlias
 
 from starlette.requests import Request
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from quicksight_gen.common.html._studio_routes import asset_url
@@ -719,19 +719,96 @@ def _render_edit_form(
     )
 
 
-def _render_create_form(
+_CREATE_INTRO_BY_KIND: Mapping[EntityKind, str] = {
+    "account": (
+        "<p><strong>An Account</strong> is one row in the institution's "
+        "chart of accounts — a singleton ledger position the institution "
+        "either owns (<em>internal</em>) or counterparty-owns "
+        "(<em>external</em>). Every money-movement leg posts to one Account "
+        "by ID. Accounts that share a <em>role</em> are interchangeable "
+        "from the rest of the L2 model's perspective; rails / templates / "
+        "limit-schedules reference accounts by role, not by id.</p>"
+        "<p>Required: <code>id</code> (the addressing key — used in "
+        "URLs and on every transaction row's <code>account_id</code>). "
+        "Strongly recommended: <code>role</code> (without it the account "
+        "isn't reachable by any rail) and <code>name</code> (what shows "
+        "up in dashboards).</p>"
+    ),
+    "account_template": (
+        "<p><strong>An AccountTemplate</strong> declares a Role that "
+        "exists as <em>multiple instances</em> — typically the customer "
+        "subledger pattern, where every customer is its own Account but "
+        "they all play the same Role. Templates let rails reference "
+        "the role without naming each instance.</p>"
+        "<p>Required: <code>role</code> (the role name materialized "
+        "instances will share) and <code>scope</code>. The "
+        "<code>parent_role</code> wires the template's accounts under a "
+        "control account for L1 limit-breach roll-ups.</p>"
+    ),
+    "rail": (
+        "<p><strong>A Rail</strong> is a money-movement contract — one "
+        "well-known way value flows between roles. ACH origination, wire "
+        "settlement, intra-day pool balancing, fee debits all live as "
+        "Rails. Every transaction must match a rail by "
+        "<code>(transfer_type, source_role, destination_role)</code>.</p>"
+        "<p>Required: <code>name</code> (unique identifier; chains and "
+        "templates reference rails by name) and <code>transfer_type</code> "
+        "(e.g. <code>ach</code>, <code>wire</code>, <code>charge</code>, "
+        "<code>settlement</code>). Endpoint roles "
+        "(<code>source_role</code> / <code>destination_role</code>) are "
+        "edited on the rail itself after it's created — required for the "
+        "validator to accept the rail as connected.</p>"
+    ),
+    "transfer_template": (
+        "<p><strong>A TransferTemplate</strong> is a multi-leg event — "
+        "several Rail firings that the L1 layer expects to balance to "
+        "<code>expected_net</code> by <code>completion</code>. Settlement "
+        "cycles, return-bundle reconciliations, anything that's not just "
+        "one rail firing on its own.</p>"
+        "<p>Required: <code>name</code>, <code>transfer_type</code>, "
+        "<code>expected_net</code> (often 0 for fully-balanced cycles; "
+        "fees may sum to a non-zero target), <code>completion</code> "
+        "(the deadline expression like <code>business_day_end+1d</code>). "
+        "<code>leg_rails</code> is edited after creation.</p>"
+    ),
+    "chain": (
+        "<p><strong>A ChainEntry</strong> says: when this <em>parent</em> "
+        "rail or template fires, the L1 layer expects this <em>child</em> "
+        "to follow within the SLA. A required chain whose child doesn't "
+        "fire surfaces as a stuck-pending invariant violation.</p>"
+        "<p>Required: <code>parent</code> + <code>child</code> "
+        "(rail or template names) and <code>required</code> (true = MUST "
+        "follow; false = optional). <code>xor_group</code> wires "
+        "exactly-one-of branching (e.g. ACH return reasons).</p>"
+    ),
+    "limit_schedule": (
+        "<p><strong>A LimitSchedule</strong> is a daily $-cap on outbound "
+        "flow from a parent role for a given transfer_type. Any day "
+        "exceeding the cap surfaces as an L1 limit-breach violation.</p>"
+        "<p>Required: <code>parent_role</code> (the role whose outbound "
+        "flow is capped), <code>transfer_type</code>, and <code>cap</code> "
+        "(the $ ceiling).</p>"
+    ),
+}
+
+
+def _render_create_page(
     kind: EntityKind,
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed for select_from option resolution
     form_overrides: Mapping[str, str] | None = None,
     global_error: str | None = None,
 ) -> str:
-    """X.4.f.9.create — blank form for a new entity. POST target is
-    the kind's collection root (``/l2_shape/<kind>/``); on success the
-    response is the new card + ``HX-Trigger: l2-cascade-reload``.
+    """X.4.f.9.create-page — full HTML page for creating a new entity.
 
-    Validation-failure path mirrors edit: 400 + this same form
-    re-rendered with the operator's typed values + the validator
-    error in ``global_error``.
+    Wraps the field form in chrome (header + back link) and a per-kind
+    intro paragraph that explains what this entity kind IS — the
+    operator landing here for the first time gets the "what" + "why"
+    before the "how".
+
+    Form is a plain HTML POST to ``/l2_shape/<kind>/`` (no HTMX);
+    success → 303 redirect to the home page; validation failure →
+    re-render this same page with the operator's typed values + the
+    error inline so they can fix it without losing input.
     """
     specs = _FIELD_SPECS_BY_KIND[kind]
     overrides = form_overrides or {}
@@ -743,21 +820,37 @@ def _render_create_form(
         f'<div class="form-global-error">{escape(global_error)}</div>'
         if global_error else ""
     )
-    return (
-        f'<article class="entity-card editing" id="entity-{kind}-new">'
-        f"<header><h3>New {escape(kind)}</h3></header>"
-        f'<form hx-post="/l2_shape/{kind}/" '
-        f'hx-target="#entity-{kind}-new" hx-swap="outerHTML">'
-        f"{global_err_html}"
-        f"{fields_html}"
-        f'<div class="form-actions">'
-        f'<button type="submit">Create</button>'
-        f'<a class="cancel-link" hx-get="/l2_shape/{kind}/?embed=1" '
-        f'hx-target="closest .entity-list" hx-swap="outerHTML">Cancel</a>'
-        f"</div>"
-        f"</form>"
-        f"</article>"
-    )
+    intro_html = _CREATE_INTRO_BY_KIND.get(kind, "")
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Create new {escape(kind)} — Studio</title>
+  <link rel="stylesheet" href="{asset_url("diagram.css")}">
+  <link rel="stylesheet" href="{asset_url("editor.css")}">
+</head>
+<body class="create-page">
+  <header class="studio-header">
+    <h1>Create new {escape(kind)}</h1>
+    <a class="nav-link" href="/">← back to Studio</a>
+    <a class="nav-link" href="/l2_shape/{escape(kind)}/">→ list all {escape(kind)}s</a>
+  </header>
+  <main class="create-page-main">
+    <section class="create-intro">{intro_html}</section>
+    <section class="create-form-wrap">
+      <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form">
+        {global_err_html}
+        {fields_html}
+        <div class="form-actions">
+          <button type="submit">Create</button>
+          <a class="cancel-link" href="/">Cancel</a>
+        </div>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
+"""
 
 
 def _render_list_page(
@@ -1004,14 +1097,15 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
         kind = _kind_from_path(request.path_params["kind"])
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
-        return HTMLResponse(_render_create_form(kind, cache.get()))
+        return HTMLResponse(_render_create_page(kind, cache.get()))
 
-    async def create(request: Request) -> HTMLResponse:
+    async def create(request: Request) -> Response:
         """X.4.f.9.create — POST a new entity into the kind's collection.
 
         Coerce → construct (catches required-field errors) → validate
-        → save → respond with the new card + cascade trigger. Failure
-        re-renders the create form with the error inline.
+        → save → 303-redirect back to home. Failure re-renders the
+        create page with the error inline + the operator's typed
+        values preserved.
         """
         kind = _kind_from_path(request.path_params["kind"])
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
@@ -1023,7 +1117,7 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
             new_fields = _coerce_form(kind, coerced)
         except (ValueError, TypeError) as exc:
             return HTMLResponse(
-                _render_create_form(
+                _render_create_page(
                     kind, cache.get(),
                     form_overrides=coerced,
                     global_error=f"Field coercion failed: {exc}",
@@ -1035,7 +1129,7 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
             new_inst = create_l2_entity(cache.get(), kind, new_fields)
         except ValueError as exc:
             return HTMLResponse(
-                _render_create_form(
+                _render_create_page(
                     kind, cache.get(),
                     form_overrides=coerced,
                     global_error=str(exc),
@@ -1047,7 +1141,7 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
             validate(new_inst)
         except L2ValidationError as exc:
             return HTMLResponse(
-                _render_create_form(
+                _render_create_page(
                     kind, cache.get(),
                     form_overrides=coerced,
                     global_error=str(exc),
@@ -1056,17 +1150,11 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
             )
 
         cache.save(new_inst)
-        # Find the just-created entity to render its card.
-        addr = _addressing_field(kind)
-        entity_id = str(new_fields.get(addr, ""))
-        new_entity = _find_entity_or_none(new_inst, kind, entity_id)
-        body = (
-            _render_read_card(kind, new_entity, new_inst)
-            if new_entity is not None else "created"
-        )
-        resp = HTMLResponse(body)
-        resp.headers["HX-Trigger"] = "l2-cascade-reload"
-        return resp
+        # Plain-form POST → 303 redirect back to home. Browser navigates;
+        # the operator sees the new entity in its section. No HTMX
+        # involvement here (the create page is full-page nav, not an
+        # in-place swap).
+        return RedirectResponse("/", status_code=303)
 
     async def delete_handler(request: Request) -> HTMLResponse:
         kind = _kind_from_path(request.path_params["kind"])

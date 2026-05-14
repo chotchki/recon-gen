@@ -282,28 +282,43 @@ def test_card_renders_delete_link_with_confirm(
     assert "hx-confirm=" in body
 
 
-def test_get_new_form_returns_blank_create_form(
+def test_get_new_form_returns_full_page_with_intro_prose(
     writable_l2_yaml: Path,
 ) -> None:
-    """X.4.f.9.create — GET /l2_shape/<kind>/new returns an empty
-    form that POSTs to /l2_shape/<kind>/."""
+    """X.4.f.9.create-page — GET /l2_shape/<kind>/new returns a full
+    HTML page (chrome + back link + per-kind intro prose explaining
+    what this entity is) wrapping the form. The form posts plain
+    HTML (not htmx) so the browser navigates after submit."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.get("/l2_shape/account/new")
     assert resp.status_code == 200
     body = resp.text
-    assert "<form" in body
-    assert 'hx-post="/l2_shape/account/"' in body
-    # No prefilled values.
+    # Full HTML page chrome.
+    assert "<!doctype" in body.lower()
+    assert "<html" in body
+    assert 'class="studio-header"' in body
+    # Back nav to home.
+    assert 'href="/"' in body
+    # Per-kind intro prose explaining what an Account is.
+    assert "An Account" in body
+    assert "chart of accounts" in body
+    # Form is plain HTML POST (no hx-post, no hx-target).
+    assert 'method="post"' in body
+    assert 'action="/l2_shape/account/"' in body
+    assert "hx-post" not in body
+    # No prefilled values on a blank form.
     assert 'value=""' in body
 
 
-def test_post_create_account_persists_and_triggers_cascade(
+def test_post_create_account_redirects_to_home_on_success(
     writable_l2_yaml: Path,
 ) -> None:
-    """POST a brand-new Account; reload disk + assert it lands."""
+    """Successful create returns 303 → /; the operator's browser
+    navigates back to home where the new entity appears in its
+    section. (TestClient default doesn't follow redirects.)"""
     app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+    with TestClient(app, follow_redirects=False) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.post(
             "/l2_shape/account/",
             data={
@@ -314,19 +329,19 @@ def test_post_create_account_persists_and_triggers_cascade(
                 "parent_role": "CustomerLedger",
             },
         )
-    assert resp.status_code == 200, resp.text
-    assert resp.headers.get("HX-Trigger") == "l2-cascade-reload"
-    assert "cust-999-new" in resp.text
+    assert resp.status_code == 303, resp.text
+    assert resp.headers.get("location") == "/"
 
     reloaded = load_instance(writable_l2_yaml)
     assert any(str(a.id) == "cust-999-new" for a in reloaded.accounts)
 
 
-def test_post_create_with_duplicate_id_returns_400_inline(
+def test_post_create_with_duplicate_id_returns_400_full_page(
     writable_l2_yaml: Path,
 ) -> None:
-    """ID collision → 400 + form re-rendered with the error inline +
-    user's typed values preserved."""
+    """ID collision → 400 + the full create page re-rendered with the
+    error inline + the operator's typed values preserved (so they
+    can fix the id without losing input)."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.post(
@@ -339,8 +354,13 @@ def test_post_create_with_duplicate_id_returns_400_inline(
             },
         )
     assert resp.status_code == 400, resp.text
-    assert "already exists" in resp.text
-    assert "<form" in resp.text  # form re-rendered
+    body = resp.text
+    assert "already exists" in body
+    # Full page re-rendered (chrome + intro stays).
+    assert 'class="studio-header"' in body
+    assert "An Account" in body
+    # User's typed name preserved so they can fix just the id.
+    assert 'value="Conflicting"' in body
 
 
 def test_put_account_role_rename_cascades_to_rails_and_templates(

@@ -96,6 +96,56 @@ body.home-page {
   font-size: 0.85rem;
 }
 
+/* X.4.f.9.create-page — full-page Create New <kind> screen. */
+body.create-page {
+  height: auto;
+  min-height: 100vh;
+  display: block;
+}
+.create-page-main {
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+}
+@media (min-width: 56rem) {
+  .create-page-main {
+    grid-template-columns: 22rem 1fr;
+  }
+}
+.create-intro {
+  background: white;
+  border: 1px solid var(--studio-border);
+  border-radius: 0.4rem;
+  padding: 1rem 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--studio-fg);
+}
+.create-intro p {
+  margin: 0 0 0.75rem;
+}
+.create-intro p:last-child {
+  margin-bottom: 0;
+}
+.create-intro code {
+  background: var(--studio-tint);
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.2rem;
+  font-size: 0.85em;
+}
+.create-form-wrap {
+  background: white;
+  border: 1px solid var(--studio-border);
+  border-radius: 0.4rem;
+  padding: 1.25rem;
+}
+.create-form .form-actions {
+  margin-top: 1rem;
+}
+
 /* X.4.f.8.reverse — clickable card title → diagram focus. */
 .entity-card-title {
   cursor: pointer;
