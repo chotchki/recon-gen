@@ -1009,7 +1009,19 @@ def emit_html(
 
     title_class = "text-3xl font-bold mt-8 mx-8 mb-2"
     desc_class = "mx-8 mb-6 text-secondary-fg"
+    nav_class = "px-8 py-2 border-b border-surface-border text-sm bg-surface"
+    nav_link_class = "text-accent hover:underline no-underline font-medium"
+    # Back-to-list nav strip — symmetric with the studio's diagram-page
+    # chrome (``← landing`` / ``→ dashboards``). Without it, a dashboard
+    # sheet is a dead end: tabs walk you between sheets within the
+    # current dashboard, but there's no way back to the listing or to
+    # the other 3 dashboards. Link target is constant whether the
+    # server runs standalone (``quicksight-gen dashboards``) or under
+    # studio — both expose the listing at ``/dashboards``.
     body_parts: list[str] = [
+        f'  <nav class="{nav_class}">'
+        f'<a href="/dashboards" class="{nav_link_class}">← Dashboards</a>'
+        f'</nav>',
         f'  <h1 class="{title_class}">{html.escape(sheet.title)}</h1>',
     ]
     if sheet.description:
