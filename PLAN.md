@@ -213,22 +213,82 @@ Theme + Persona are L2-instance attributes (singletons, not lists). They need a 
 - [x] **X.4.g.14** — Studio "Deploy changes" button (global, in the Studio header); calls `POST /deploy`; surfaces step progress + errors via `/dev_log`.
 - [x] **X.4.g.15** — Pipeline orchestration tests (one per shape: hook-fail-halt, no-etl path, etl-only path, etl-then-generator path, etl-then-`uncovered_rails` path).
 
-#### X.4.h — Data-shaping panel UI
+#### X.4.h — Data-shaping panel (Studio's "trainer mode")
 
-- [ ] **X.4.h.1** — Panel layout (which knobs are visible; how it sits alongside the diagram + the global Deploy button).
-- [ ] **X.4.h.2** — Plant-toggle checkboxes (one per exception kind: drift / overdraft / limit_breach / stuck_pending / stuck_unbundled / supersession).
-- [ ] **X.4.h.3** — Day stepper UI for `end_date` (← prev / next →; jump-to-day input).
-- [ ] **X.4.h.4** — Random-seed input (number entry + "roll" button to randomize; pin/save current).
+**Layout decision (locked 2026-05-14).** A *new top-level Studio mode* on `/data` — not a side rail on the home page. Cards aren't part of this view. Centerpiece is the vertical plant-timeline; right pane is space for "training on the errors" (per-exception explanatory content); knobs at the top:
+
+```
+┌────────────────────────────────────────────────────┐
+│ Studio · data shaping        [← landing] [Deploy]  │  chrome
+├────────────────────────────────────────────────────┤
+│ scope: [full ▼]  end_date: [< Jan 12 >] [today]    │
+│ seed: [_____] [🎲]                                 │
+│ plants: ☑drift ☑overdraft ☑limit_breach ...       │
+├─────────────────────┬──────────────────────────────┤
+│ TIMELINE            │ TRAINING                     │
+│ Jan 01              │ (Hover/select a day's        │
+│ Jan 02 · drift×1    │  annotation → explain        │
+│ Jan 03              │  what kind of exception      │
+│ Jan 04 · overdraft  │  it is, what the trainee     │
+│ ...                 │  should look for, link       │
+│ Jan 12 · drift×2    │  to the relevant dashboard   │
+│ Jan 90              │  sheet. Initial source of    │
+│                     │  text: docs/walkthroughs/l1) │
+└─────────────────────┴──────────────────────────────┘
+```
+
+**Sequencing:** chunk h.0 (backend wiring) lands first — without it, the UI knobs are no-ops. Then chunk h.1+ (the panel itself). Then X.4.i layers in once h ships and the trainer flow is validated. Per-chunk live verification through `scripts/studio-with-pg-source.sh`.
+
+##### h.0 — Backend wiring (no UI yet)
+
+Today: `cfg.test_generator.plants` and `.seed` are read into the orchestration log but the generator IGNORES them — `_build_generator_sql` calls `build_default_scenario(instance, anchor=…)` / `build_full_seed_sql(cfg, instance, anchor=…)` with no plants / no seed forwarded. h.0 closes that gap so the UI in h.1+ has something to drive.
+
+- [ ] **X.4.h.0.a** — Thread `tg.plants` filter into `build_default_scenario` + `build_full_seed_sql`. Empty/None tuple = today's behavior (all plants — the locked-seed default). Non-empty = subset filter.
+- [ ] **X.4.h.0.b** — Thread `tg.seed` into the scenario randomizer. None = today's deterministic anchor (locked-seed default). Int = override the RNG seed before plant placement.
+- [ ] **X.4.h.0.c** — Locked-seed determinism still holds with defaults: `tests/data/test_locked_seeds.py::test_locked_seed_matches_fresh_emit` stays green (the byte-identity guarantee from the SPEC's hard constraint).
+- [ ] **X.4.h.0.d** — Unit tests: per-plant filter (e.g. `plants=("drift",)` → only drift rows in the scenario), seed propagation (different seeds → different plant placements, same seed → same).
+
+##### h.1 — `/data` route + chrome shell (no knobs wired yet)
+
+- [ ] **X.4.h.1.a** — `make_studio_routes` adds `GET /data` + an empty page-shell with the layout above (chrome bar, knob strip placeholder, two-column main with timeline + training panes empty).
+- [ ] **X.4.h.1.b** — Studio chrome on `/` and `/diagram` adds a `→ data` nav link so the new mode is reachable.
+- [ ] **X.4.h.1.c** — Tests: route returns 200 + landmark elements (knob strip, timeline column, training column) present.
+
+##### h.2-h.5 — Knob widgets
+
+- [ ] **X.4.h.2** — Plant-toggle checkboxes (one per exception kind: drift / overdraft / limit_breach / stuck_pending / stuck_unbundled / supersession). Mutates `cfg.test_generator.plants`. Empty selection = "all" (matches SPEC).
+- [ ] **X.4.h.3** — Day stepper UI for `end_date` (← prev / next →; jump-to-day input + "today" reset).
+- [ ] **X.4.h.4** — Random-seed input (number entry + "roll" button to randomize; pin/save current). None / blank = locked-seed default.
 - [ ] **X.4.h.5** — `scope` selector (full / uncovered_rails / exceptions_only).
-- [ ] **X.4.h.6** — Plant-timeline view: vertical day column, planted exceptions annotated per day under the *current* shaping config; click a day → `end_date` jumps + Deploy.
-- [ ] **X.4.h.7** — Knob changes persist back to `config.yaml`'s `test_generator:` block (debounced); reloaded on next startup.
-- [ ] **X.4.h.8** — Unit tests for plant-timeline derivation (given a scenario + scope + seed, which days hit?).
 
-#### X.4.i — Additive knobs (ship later — not gating Studio MVP)
+##### h.6 — Plant-timeline view
+
+- [ ] **X.4.h.6.a** — Derivation primitive `compute_plant_timeline(instance, tg) -> list[(date, list[PlantHit])]` in `common/l2/auto_scenario.py` (or a sibling). Given the L2 instance + the current `TestGeneratorConfig`, walks the scenario object and returns one entry per day in the window with the plants that hit. The scenario object already encodes "this plant hits day N" (per SPEC), so this is a *projection*, not new generator logic.
+- [ ] **X.4.h.6.b** — Render the timeline as a vertical column, one row per day, annotated with planted exceptions (kind + count). Click a day → `end_date` jumps + auto-Deploy.
+- [ ] **X.4.h.6.c** — Re-renders via HTMX `hx-get` when any knob changes (debounced) — no full-page reload.
+
+##### h.7 — Persistence
+
+- [ ] **X.4.h.7** — Knob changes persist back to `config.yaml`'s `test_generator:` block (debounced ~500ms after last change); reloaded on next startup. Atomic write through the same primitive `L2InstanceCache.save_l2` uses (X.4.a.6).
+
+##### h.8 — Tests
+
+- [ ] **X.4.h.8.a** — Unit tests for plant-timeline derivation (given a scenario + scope + seed, which days hit?).
+- [ ] **X.4.h.8.b** — Integration: knob change → cfg.yaml updated → next page-load reflects the saved state.
+- [ ] **X.4.h.8.c** — Browser e2e: open `/data`, toggle a plant off, click a timeline day, assert the deploy fires + status flips ok. (Live-drive equivalent: `scripts/studio-with-pg-source.sh` → `/data` → click around.)
+
+##### h.9 — Training pane content (per-exception explanation)
+
+- [ ] **X.4.h.9.a** — Source the per-exception text from `src/quicksight_gen/docs/walkthroughs/l1/{drift,overdraft,limit-breach,…}.md` (already written for the L1 dashboard handbook). Lift the first prose section per file as the "what to look for" pane.
+- [ ] **X.4.h.9.b** — Hover/select a timeline annotation → right pane swaps to that exception kind's explanation. Link out to the corresponding dashboard sheet (`/dashboards/l1_dashboard/sheets/l1-sheet-drift` etc.).
+
+#### X.4.i — Additive knobs (ships AFTER X.4.h — separate phase)
+
+Queued AFTER X.4.h ships and the trainer flow is operator-validated. These are pipeline-side fixtures that compose into h.1's existing UI surface (h.2-h.5 widgets get extended with two more controls in i.3); they don't gate the MVP trainer demo per SPEC.
 
 - [ ] **X.4.i.1** — `only_template` mode: scoped baseline = template + dependency closure (its leg-rails + the accounts those touch); rest of the L2 left empty.
 - [ ] **X.4.i.2** — `derive_balances` mode: from subledger transactions in `demo_database_url`, derive control-account daily balances satisfying double-entry (the drift invariant run forward).
-- [ ] **X.4.i.3** — UI controls for both in the data-shaping panel.
+- [ ] **X.4.i.3** — UI controls for both in the data-shaping panel (extend the h.1 chrome-strip).
 
 #### X.4.j — Testing scope (per SPEC's "Testing scope" section)
 
