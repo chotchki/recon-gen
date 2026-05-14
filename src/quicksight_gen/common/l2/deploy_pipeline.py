@@ -386,6 +386,7 @@ def _pull_table(
         select_sql += f" WHERE {filter_col} <= '{end_date.isoformat()}'"
 
     insert_sql = _insert_paramstyle_sql(dest_table, columns, dest_dialect)
+    coerce_row = _row_coercer_for(dest_dialect)
 
     src_cur = src_conn.cursor()
     try:
@@ -397,13 +398,51 @@ def _pull_table(
                 batch = src_cur.fetchmany(batch_size)
                 if not batch:
                     break
-                dest_cur.executemany(insert_sql, batch)
+                dest_cur.executemany(insert_sql, [coerce_row(r) for r in batch])
                 total += len(batch)
             return total
         finally:
             dest_cur.close()
     finally:
         src_cur.close()
+
+
+def _row_coercer_for(
+    dest_dialect: Dialect,
+) -> Callable[[tuple[Any, ...]], tuple[Any, ...]]:  # pyright: ignore[reportExplicitAny]  # WHY: row tuple values are arbitrary DB-driver types
+    """Return a function that coerces source-row values to types the
+    destination DB driver accepts.
+
+    The cross-dialect pull path is the only place this matters: psycopg
+    returns ``decimal.Decimal`` for NUMERIC columns and stdlib
+    ``datetime.datetime`` for TIMESTAMP. sqlite3 (PEP 249) doesn't
+    register Decimal as a recognized parameter type — the executemany
+    raises ``ProgrammingError: type 'decimal.Decimal' is not
+    supported``. Convert on the way in so the source can be any dialect.
+
+    PG / Oracle destinations: identity. Their drivers accept Decimal +
+    datetime natively, so the per-row clone is wasted work but stays
+    correct.
+    """
+    if dest_dialect is not Dialect.SQLITE:
+        return lambda row: row
+    # Lazy decimal import — keep the cost off the hot PG path.
+    from decimal import Decimal
+
+    def _coerce(row: tuple[Any, ...]) -> tuple[Any, ...]:  # pyright: ignore[reportExplicitAny]  # WHY: see _row_coercer_for docstring
+        out: list[Any] = []  # pyright: ignore[reportExplicitAny]  # WHY: see _row_coercer_for docstring
+        for v in row:
+            if isinstance(v, Decimal):
+                # str preserves arbitrary precision; sqlite stores it
+                # in the TEXT affinity that the schema declares for
+                # money fields anyway (the JSON1 / SQL/JSON path
+                # contract per Schema_v6).
+                out.append(str(v))
+            else:
+                out.append(v)
+        return tuple(out)
+
+    return _coerce
 
 
 # X.4.g.7+8 — Step 3 generator: synthetic data overlay.
