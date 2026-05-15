@@ -4,11 +4,11 @@
 
 ## What the sheet shows
 
-Per-(account, day, transfer_type) cells where the cumulative outbound
+Per-(account, day, rail_name) cells where the cumulative outbound
 debit exceeded the L2-configured cap. Caps come from the L2
 instance's LimitSchedules and are inlined into the underlying view at
 schema-emit time as CASE branches keyed on `(parent_role,
-transfer_type)`.
+rail_name)`.
 
 Each row is one violation. The `outbound_total` and `cap` columns sit
 side-by-side so the magnitude of the breach is readable in-line.
@@ -26,14 +26,14 @@ threshold.
 ## Visuals
 
 - **Configured Caps** (TextBox) — bullet list of every L2
-  LimitSchedule rendered as `parent_role × transfer_type: $cap/day`
+  LimitSchedule rendered as `parent_role × rail_name: $cap/day`
   with the L2-supplied prose. Shows the analyst what's configured
   *before* what got breached.
 - **Limit Breach Cells** (KPI) — count of (account, day,
-  transfer_type) violations.
+  rail_name) violations.
 - **Limit Breach Detail** (Table) — one row per breach. Carries
   `account_id`, `account_name`, `account_role`, `account_parent_role`,
-  `business_day`, `transfer_type`, `outbound_total`, `cap`.
+  `business_day`, `rail_name`, `outbound_total`, `cap`.
 
 ## Drills
 
@@ -45,4 +45,4 @@ threshold.
 
 - **Date From / Date To** — universal date-range pickers.
 - **Account** — multi-select dropdown over `account_id`.
-- **Transfer Type** — multi-select dropdown over `transfer_type`.
+- **Transfer Type** — multi-select dropdown over `rail_name`.

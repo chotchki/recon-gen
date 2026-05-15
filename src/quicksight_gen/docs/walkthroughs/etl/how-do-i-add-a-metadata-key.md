@@ -5,11 +5,11 @@
 ## The story
 
 The 11-column `{{ l2_instance_name }}_transactions` contract intentionally
-doesn't carry every per-`transfer_type` attribute as its own column
+doesn't carry every per-`rail_name` attribute as its own column
 — `card_brand` belongs on sales but is meaningless on internal
 transfers; `settlement_type` matters on settlements but not on
 payments; `statement_line_id` belongs on Fed force-posts only. The
-schema's answer is the `metadata` JSON column: each `transfer_type`
+schema's answer is the `metadata` JSON column: each `rail_name`
 carries its own grab-bag of typed extras inside JSON, and dataset
 SQL extracts via `JSON_VALUE(metadata, '$.your_key')`.
 
@@ -37,7 +37,7 @@ dashboards or the portability of the SQL?"
 Three reference points:
 
 - **`docs/Schema_v6.md` → metadata catalog tables** — the existing
-  per-`transfer_type` key inventory. New keys should slot into the
+  per-`rail_name` key inventory. New keys should slot into the
   same shape (key name, type, what it drives).
 - **`src/quicksight_gen/apps/<app>/datasets.py`** — the SQL
   patterns. Every metadata extraction looks like
@@ -93,7 +93,7 @@ The contract for any new metadata key has four parts:
    The `->>` operator is PostgreSQL-only; `JSON_VALUE` is the
    SQL/JSON standard form.
 4. **Document the new key in `Schema_v6.md`'s metadata catalog
-   for that `transfer_type`**. Otherwise the schema-doc drift
+   for that `rail_name`**. Otherwise the schema-doc drift
    tests fail the next time anyone touches the catalog.
 
 A subtle constraint on dataset visuals: if a visual *expects* the
@@ -138,7 +138,7 @@ SELECT
     -- existing columns ...
     JSON_VALUE(metadata, '$.originating_branch') AS originating_branch
 FROM {{ l2_instance_name }}_transactions
-WHERE transfer_type = 'sale';
+WHERE rail_name = 'sale';
 ```
 
 Update the matching `DatasetContract` to add `("originating_branch",
@@ -188,5 +188,5 @@ Once the key is producing, consuming, and rendering:
   the "visual shows N/A" symptom in the debug recipes is usually
   a metadata-key contract violation.
 - [Schema_v6 → metadata catalog](../../Schema_v6.md#metadata-json-columns) —
-  the per-`transfer_type` key inventory and its forbidden-syntax
+  the per-`rail_name` key inventory and its forbidden-syntax
   rules.

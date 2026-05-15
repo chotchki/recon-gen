@@ -44,5 +44,5 @@ overnight that should have.
 - **Date From / Date To** — universal date-range pickers (scoped on
   `posting`, the original transaction posting timestamp).
 - **Account** — multi-select dropdown over `account_id`.
-- **Transfer Type** — multi-select dropdown over `transfer_type`.
+- **Transfer Type** — multi-select dropdown over `rail_name`.
 - **Rail** — multi-select dropdown over `rail_name`.

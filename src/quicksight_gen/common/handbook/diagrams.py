@@ -260,7 +260,7 @@ def render_l2_chain_focus(l2_instance: L2Instance) -> str | None:
 
 
 def render_l2_limit_schedule_focus(l2_instance: L2Instance) -> str | None:
-    """Render the first LimitSchedule as a (parent_role, transfer_type) → cap.
+    """Render the first LimitSchedule as a (parent_role, rail) → cap.
 
     Visual: a parent-role node on the left with a labeled edge to a
     "cap" node showing the daily flow ceiling. Conceptual rather than
@@ -274,7 +274,7 @@ def render_l2_limit_schedule_focus(l2_instance: L2Instance) -> str | None:
     g.attr("node", fontsize="11", style="filled")
 
     role_node = f"role_{sched.parent_role}"
-    cap_node = f"cap_{sched.parent_role}_{sched.transfer_type}"
+    cap_node = f"cap_{sched.parent_role}_{sched.rail}"
     g.node(
         role_node, f"role: {sched.parent_role}",
         shape="box", fillcolor="#bbdefb",
@@ -285,7 +285,7 @@ def render_l2_limit_schedule_focus(l2_instance: L2Instance) -> str | None:
     )
     g.edge(
         role_node, cap_node,
-        label=f"transfer_type:\n{sched.transfer_type}",
+        label=f"rail:\n{sched.rail}",
         fontsize="9", color="#666666",
     )
     return g.source
@@ -458,10 +458,10 @@ def _build_transfer_template_graph(
 
     # Template node — distinguished shape (double-bordered rounded box)
     # so it reads as "this is the bundle, the rails below are its legs".
+    # Z.B (2026-05-15): the template's `name` IS the type identifier.
     template_id = f"tt__{template.name}"
     template_label_lines = [
         f"<b>{template.name}</b>",
-        f"<i>{template.transfer_type}</i>",
         f"expected_net = {template.expected_net}",
         f"completion = {template.completion}",
     ]
@@ -822,7 +822,7 @@ def _add_rail_edges(
                 g.edge(
                     str(src_acc.id),
                     str(dst_acc.id),
-                    label=f"{rail.name}\n({rail.transfer_type})",
+                    label=str(rail.name),
                     fontsize="9",
                     color="#1976d2",
                 )
@@ -834,7 +834,7 @@ def _add_rail_edges(
             g.edge(
                 str(acc.id),
                 str(acc.id),
-                label=f"{rail.name}\n({rail.transfer_type})",
+                label=str(rail.name),
                 fontsize="9",
                 style="dashed",
                 color="#7b1fa2",
@@ -923,7 +923,7 @@ def _add_template_rail_edges(
                 g.edge(
                     src_id,
                     dst_id,
-                    label=f"{rail.name}\n({rail.transfer_type})",
+                    label=str(rail.name),
                     fontsize="9",
                     color="#1976d2",
                 )
@@ -936,7 +936,7 @@ def _add_template_rail_edges(
             g.edge(
                 node_id,
                 node_id,
-                label=f"{rail.name}\n({rail.transfer_type})",
+                label=str(rail.name),
                 fontsize="9",
                 style="dashed",
                 color="#7b1fa2",

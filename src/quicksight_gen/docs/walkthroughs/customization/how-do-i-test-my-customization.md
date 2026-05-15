@@ -6,7 +6,7 @@
 
 You've customized — swapped a dataset's SQL to read from your
 warehouse view, added an `originating_branch` metadata key,
-extended `transfer_type` with `repo`. Each customization is a
+extended `rail_name` with `repo`. Each customization is a
 small mutation to a small surface (one SQL function, one
 ColumnSpec, one L2 declaration). The shipped test suite covers
 the contract layer: do the dataset SQL projections still emit
@@ -116,13 +116,13 @@ output, plus per-scenario coverage assertions
 (`TestScenarioCoverage`).
 
 If you customized the demo generator (added a new
-`transfer_type` value's seed branch, planted a new exception
+`rail_name` value's seed branch, planted a new exception
 scenario), the hash test fails — that's the prompt to re-lock
 the hash by pasting the new value into the assertion. See
 CLAUDE.md "Demo Data Conventions" for the re-lock pattern.
 
 If you customized the L2 instance to add a new
-`transfer_type` value, the demo seed should also be updated
+`rail_name` value, the demo seed should also be updated
 to plant ≥1 row of the new type, so the e2e tests have
 something to render. The `TestScenarioCoverage` pattern
 makes this a one-line assertion.
@@ -216,7 +216,7 @@ warehouse isn't available (CI gates this).
 ### Add an e2e test for a customization-specific scenario
 
 If your customization adds a new exception check (or extends
-an existing one to fire on a new `transfer_type`), add an e2e
+an existing one to fire on a new `rail_name`), add an e2e
 test that verifies the visual layer surfaces it. Pattern:
 
 ```python
@@ -288,7 +288,7 @@ Once you have a test plan in place:
    drift) in seconds.
 2. **Add at least one customization-specific test per
    customization commit.** A custom dataset SQL gets a row-count
-   or fixture-row assertion. A new `transfer_type` gets a
+   or fixture-row assertion. A new `rail_name` gets a
    `TestScenarioCoverage` assertion in the demo data tests.
    A new metadata key gets a `JSON_EXISTS` assertion in the
    relevant dataset's column projection.

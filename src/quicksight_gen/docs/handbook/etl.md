@@ -24,7 +24,7 @@ reads. Their attitude, in their own words:
 
 That attitude drives the whole schema. The contract is
 deliberately small — two tables, ~11 mandatory columns,
-JSON-string metadata for per-`transfer_type` extras — so the
+JSON-string metadata for per-`rail_name` extras — so the
 team can spend their effort on projection correctness instead of
 wrangling a sprawling normalized schema. The fancy queries
 (drift, rollups, transfer net-zero) live in computed views the
@@ -42,7 +42,7 @@ Two tables feed everything:
 
 Every shipped dashboard (L1, L2 Flow Tracing, Investigation,
 Executives) reads from these two tables. `account_type` and
-`transfer_type` discriminate which slice each app cares about;
+`rail_name` discriminate which slice each app cares about;
 the schema itself is shared. Full column contract, per-column
 failure modes, metadata catalog, and ETL examples:
 
@@ -135,7 +135,7 @@ full refresh contract.
 <div class="snb-card-grid">
   <a class="snb-card" href="../../walkthroughs/etl/what-do-i-do-when-demo-passes-but-prod-fails/">
     <h3>What do I do when the demo passes but my prod data fails?</h3>
-    <p>Six symptom-organized debug recipes (date filter, transfer_type filter, missing metadata key, drift KPI spike, broken parent chain, status enum drift).</p>
+    <p>Six symptom-organized debug recipes (date filter, rail_name filter, missing metadata key, drift KPI spike, broken parent chain, status enum drift).</p>
   </a>
 </div>
 

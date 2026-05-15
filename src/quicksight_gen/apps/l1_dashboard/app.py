@@ -416,7 +416,7 @@ def _l2_limit_schedule_lines(l2_instance: L2Instance) -> list[str]:
     for ls in l2_instance.limit_schedules:
         # Money is a Decimal; format with thousands separators + 2dp.
         cap_str = f"${ls.cap:,.2f}/day"
-        head = f"{ls.parent_role} × {ls.transfer_type}: {cap_str}"
+        head = f"{ls.parent_role} × {ls.rail}: {cap_str}"
         if ls.description:
             lines.append(f"{head} — {ls.description}")
         else:

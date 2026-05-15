@@ -370,25 +370,17 @@ A Variable-direction leg MUST be the LAST leg posted on its Transfer — all sib
 #### Union roles
 `(RoleA | RoleB)` — a Role field MAY express that the rail can target accounts of more than one role. Each firing still resolves to one concrete role per leg; the union is about which roles are admissible, not about firing multiple legs at once.
 
-#### Rail uniqueness *(per-leg `(TransferType, Role)` discriminator)*
+#### Rail uniqueness *(`Rail.name` is the type identifier)*
 
-Every Rail contributes one or more `(TransferType, Role)` discriminators to the L2 instance, one per leg:
+Z.B (2026-05-15): under the symmetric grammar collapse, **`Rail.name` IS the type identifier**. The legacy `transfer_type` field on Rails / TransferTemplates is gone, and `<prefix>_transactions.transfer_type` follows it; the table now keys on `rail_name` alone for the Rail-to-Transaction binding. Per-direction families (e.g., `CustomerInboundACH` + `CustomerOutboundACH`) are simply two distinct rail names — no separate discriminator to collide.
 
-- A two-leg Rail contributes two — `(TransferType, SourceRole)` and `(TransferType, DestinationRole)`.
-- A single-leg Rail contributes one — `(TransferType, LegRole)`.
-- Union role expressions contribute one discriminator per role in the union.
+The L2 validator enforces:
 
-These discriminators MUST be unique across rails. The Rail-to-Transaction binding is implicit: the `(transfer_type, account_role)` tuple of a posted Transaction identifies which Rail produced it. Two rails sharing a discriminator make a candidate Transaction match both with no defined tiebreak — the runtime can't tell which rail's invariants (ExpectedNet, PostedRequirements, MaxPendingAge, etc.) to apply.
+- **U3** — `Rail.name` is unique across the L2 instance. (Implicitly subsumes the legacy U6 per-leg `(TransferType, Role)` uniqueness rule, which is unrepresentable in the new grammar.)
+- **R10** — every `LimitSchedule.rail` resolves to a declared `Rail.name`.
+- **R11** — every bare `bundles_activity` selector on an aggregating rail resolves to a declared `Rail.name` (or a `Template.LegRail` dotted form per R9).
 
-Direction is intentionally NOT in the discriminator. A Rail named `CustomerInboundACH` (source: ExternalCounterparty, destination: CustomerDDA, transfer_type: `ach`) and a Rail named `CustomerOutboundACH` (source: CustomerDDA, destination: ExternalCounterparty, transfer_type: `ach`) both contribute `(ach, ExternalCounterparty)` and `(ach, CustomerDDA)` — they collide.
-
-When the integrator's chart of accounts genuinely has direction-specific rails, resolve the collision by:
-
-- **(a) Distinct directional `TransferType`s** — e.g. `ach_inbound` + `ach_outbound`. Each rail's discriminators stay unique. Recommended when the two directions have different LimitSchedule caps, PostedRequirements, or aging tolerances.
-- **(b) Merge into one bidirectional rail** — collapse Inbound + Outbound into a single Rail; treat direction as a Metadata field. Recommended when the two directions are mirror images of each other.
-- **(c) Chain via TransferTemplate** — model the back-and-forth as a multi-leg shared Transfer. Appropriate when the two directions belong to one logical financial event.
-
-**Rationale**: forcing this resolution at load time prevents the silent ambiguity of two rails matching the same Transaction. Within a single rail, both legs sharing a Role (e.g., a pool-balancing rail with source = destination = same control account) is fine — the legs share a `transfer_id` so the binding remains unambiguous.
+When the integrator's chart of accounts genuinely has direction-specific rails, declare them as distinct named Rails — the type identifier IS the name, and inbound + outbound are unambiguously different rails because they have unambiguously different names.
 
 ---
 
@@ -704,7 +696,6 @@ Every rule below is enforced at YAML load time — `load_instance(path)` runs th
 ### Two-leg standalone rail (shared Origin)
 ```yaml
 - name: InternalSweep
-  transfer_type: sweep
   source_role: ClearingSuspense
   destination_role: NorthPool
   expected_net: 0
@@ -715,7 +706,6 @@ Every rule below is enforced at YAML load time — `load_instance(path)` runs th
 ### Two-leg rail with per-leg Origin
 ```yaml
 - name: ExternalRailInbound
-  transfer_type: ach
   source_role: ExternalCounterparty
   destination_role: ClearingSuspense
   expected_net: 0
@@ -729,7 +719,6 @@ Every rule below is enforced at YAML load time — `load_instance(path)` runs th
 ### Two-leg rail with union destination role
 ```yaml
 - name: InternalPayout
-  transfer_type: internal_transfer
   source_role: MerchantLedger
   destination_role: (MerchantLedger | CustomerSubledger)   # union — either is admissible
   expected_net: 0
@@ -741,7 +730,6 @@ Every rule below is enforced at YAML load time — `load_instance(path)` runs th
 ### Single-leg debit rail
 ```yaml
 - name: SubledgerCharge
-  transfer_type: charge
   leg_role: CustomerSubledger
   leg_direction: Debit
   origin: InternalInitiated
@@ -754,7 +742,6 @@ Every rule below is enforced at YAML load time — `load_instance(path)` runs th
 ### Single-leg credit rail (mirror)
 ```yaml
 - name: SubledgerRefund
-  transfer_type: refund
   leg_role: CustomerSubledger
   leg_direction: Credit
   origin: InternalInitiated
@@ -766,7 +753,6 @@ Every rule below is enforced at YAML load time — `load_instance(path)` runs th
 ### Single-leg variable-direction rail
 ```yaml
 - name: SettlementClose
-  transfer_type: settlement
   leg_role: MerchantLedger
   leg_direction: Variable
   origin: InternalInitiated
@@ -778,7 +764,6 @@ Every rule below is enforced at YAML load time — `load_instance(path)` runs th
 ### Transfer template
 ```yaml
 - name: MerchantSettlementCycle
-  transfer_type: settlement_cycle
   expected_net: 0
   transfer_key: [merchant_id, settlement_period]
   completion: metadata.settlement_period_end
@@ -791,7 +776,6 @@ Every rule below is enforced at YAML load time — `load_instance(path)` runs th
 ### Aggregating rail (two-leg, intraday) — demonstrating BundleSelector forms
 ```yaml
 - name: PoolBalancingNorthToSouth
-  transfer_type: pool_balancing
   source_role: NorthPool
   destination_role: SouthPool
   expected_net: 0
@@ -813,7 +797,6 @@ Every rule below is enforced at YAML load time — `load_instance(path)` runs th
 ### Aggregating rail (single-leg, monthly)
 ```yaml
 - name: ExternalFeeAssessment
-  transfer_type: fee
   leg_role: ExternalCounterparty
   leg_direction: Debit
   origin: ExternalForcePosted
@@ -849,7 +832,6 @@ Every rule below is enforced at YAML load time — `load_instance(path)` runs th
 ### Limit schedule
 ```yaml
 - parent_role: NorthPool
-  transfer_type: ach
   cap: 5000.00
 ```
 
@@ -894,7 +876,6 @@ rails:
   # ===== Leg patterns of MerchantSettlementCycle (single-leg) =================
 
   - name: SubledgerCharge
-    transfer_type: charge
     leg_role: CustomerSubledger
     leg_direction: Debit
     origin: InternalInitiated
@@ -903,7 +884,6 @@ rails:
     max_unbundled_age: PT4H      # PoolBalancing should sweep within 4h
 
   - name: SubledgerRefund
-    transfer_type: refund
     leg_role: CustomerSubledger
     leg_direction: Credit
     origin: InternalInitiated
@@ -912,7 +892,6 @@ rails:
     max_unbundled_age: PT4H
 
   - name: SettlementClose
-    transfer_type: settlement
     leg_role: MerchantLedger
     leg_direction: Variable      # amount + direction set by Transfer's net-zero
     origin: InternalInitiated
@@ -923,7 +902,6 @@ rails:
 
   # Vehicle 1: outbound ACH — per-leg Origin (internal sweep + external landing)
   - name: MerchantPayoutACH
-    transfer_type: ach
     source_role: MerchantLedger
     destination_role: ExternalCounterparty
     expected_net: 0
@@ -935,7 +913,6 @@ rails:
 
   # Vehicle 2: internal payout — union destination role
   - name: MerchantPayoutInternal
-    transfer_type: internal_transfer
     source_role: MerchantLedger
     destination_role: (MerchantLedger | CustomerSubledger)   # could be either
     expected_net: 0
@@ -946,7 +923,6 @@ rails:
   # ===== Aggregating rail (closes pool drift) ================================
 
   - name: PoolBalancingSouthToNorth
-    transfer_type: pool_balancing
     source_role: SouthPool
     destination_role: NorthPool
     expected_net: 0
@@ -963,7 +939,6 @@ rails:
 # ---- Transfer template ------------------------------------------------------
 transfer_templates:
   - name: MerchantSettlementCycle
-    transfer_type: settlement_cycle
     expected_net: 0
     transfer_key: [merchant_id, settlement_period]
     completion: metadata.settlement_period_end
@@ -984,7 +959,6 @@ chains:
 # ---- Limit schedules --------------------------------------------------------
 limit_schedules:
   - parent_role: SouthPool
-    transfer_type: charge
     cap: 5000.00       # per-customer daily charge cap
 ```
 

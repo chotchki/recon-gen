@@ -406,21 +406,21 @@ def define_env(env: Any) -> None:
         def _breach(p: Any) -> str:
             return (
                 f"account_id={p.account_id} amount={p.amount} "
-                f"transfer_type={p.transfer_type} rail={p.rail_name} "
+                f"rail={p.rail_name} "
                 f"days_ago={p.days_ago}"
             )
 
         def _stuck_pending(p: Any) -> str:
             return (
                 f"account_id={p.account_id} amount={p.amount} "
-                f"transfer_type={p.transfer_type} rail={p.rail_name} "
+                f"rail={p.rail_name} "
                 f"days_ago={p.days_ago}"
             )
 
         def _stuck_unbundled(p: Any) -> str:
             return (
                 f"account_id={p.account_id} amount={p.amount} "
-                f"transfer_type={p.transfer_type} rail={p.rail_name} "
+                f"rail={p.rail_name} "
                 f"days_ago={p.days_ago}"
             )
 
@@ -428,7 +428,7 @@ def define_env(env: Any) -> None:
             return (
                 f"account_id={p.account_id} "
                 f"original={p.original_amount} corrected={p.corrected_amount} "
-                f"transfer_type={p.transfer_type} rail={p.rail_name} "
+                f"rail={p.rail_name} "
                 f"days_ago={p.days_ago}"
             )
 

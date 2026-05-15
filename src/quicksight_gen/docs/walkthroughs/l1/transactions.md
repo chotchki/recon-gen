@@ -28,7 +28,7 @@ transfer) or browsed manually with the dropdown filters.
 - **Posting Ledger** (Table) — every leg from the
   `{{ l2_instance_name }}_current_transactions` matview. Columns:
     - `account_id`, `account_name`, `account_role` — who got posted
-    - `transfer_id`, `transfer_type`, `rail_name` — what kind of
+    - `transfer_id`, `rail_name`, `rail_name` — what kind of
       transfer
     - `amount_money`, `amount_direction` — the signed amount + Debit
       / Credit label
@@ -58,7 +58,7 @@ opening the sheet from the tab bar) restores the full ledger.
   when chasing a multi-leg transfer's full set.
 - **Status** — Pending / Posted / Failed.
 - **Origin** — InternalInitiated / ExternalForcePosted / ExternalAggregated.
-- **Transfer Type** — narrow by `transfer_type` (ach / wire / fee /
+- **Transfer Type** — narrow by `rail_name` (ach / wire / fee /
   internal / etc).
 
 No date-range pickers — the supersession-aware ledger is small

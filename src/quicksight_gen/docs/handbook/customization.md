@@ -107,7 +107,7 @@ This is internal QuickSight/self-hosted-renderer architecture (a Phase Y / v9.0.
     <p>Reading metadata from dataset SQL, when to surface a key as a column vs. a filter, cross-link to the ETL-side walkthrough for the write path.</p>
   </a>
   <a class="snb-card" href="../../walkthroughs/customization/how-do-i-extend-canonical-values/">
-    <h3>How do I extend the schema with a new transfer_type or account_type?</h3>
+    <h3>How do I extend the schema with a new rail_name or account_type?</h3>
     <p>Adding to the canonical value lists, downstream impact on filter dropdowns, why no new tables are needed.</p>
   </a>
   <a class="snb-card" href="../../walkthroughs/customization/how-do-i-brand-my-handbook-prose/">
@@ -167,7 +167,7 @@ Mirror `tests/l2/{{ l2_instance_name }}.yaml` for shape. The L2 declares:
   (`max_pending_age`, `max_unbundled_age`)
 - **Transfer templates** — multi-leg shared transfers with closure
 - **Chains** — transfer-of-transfers ordered flows; XOR groups
-- **LimitSchedules** — per-`(parent_role × transfer_type)` daily caps
+- **LimitSchedules** — per-`(parent_role × rail_name)` daily caps
 - A `description` field on every primitive (surfaces as TextBox
   prose on the dashboard)
 

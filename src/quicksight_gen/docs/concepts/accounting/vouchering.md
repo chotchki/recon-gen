@@ -56,7 +56,7 @@ L1 invariants then catch:
 - **Stuck Unbundled** — a voucher leg posted but no matching ACH
   legs joined the bundle past the rail's `max_unbundled_age`.
 - **Limit Breach** — voucher-driven outflow on a
-  `(parent_role, transfer_type)` cell exceeds its cap.
+  `(parent_role, rail_name)` cell exceeds its cap.
 
 See [L1 Reconciliation Dashboard](../../handbook/l1.md) for the visual
 surface.

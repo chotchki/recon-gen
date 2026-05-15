@@ -66,7 +66,7 @@ Transfer Template / Limit Schedule *is*. Five short reads:
 - [Chain](../concepts/l2/chain.md) — the parent / child firing
   relationship across transfers.
 - [Limit schedule](../concepts/l2/limit-schedule.md) — declared
-  caps per (parent_role, transfer_type).
+  caps per (parent_role, rail_name).
 
 Then:
 

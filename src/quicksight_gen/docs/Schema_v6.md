@@ -129,7 +129,6 @@ Every row identifies its parent transfer via `transfer_id`.
 | `status` | `VARCHAR(20) NOT NULL` | `'Pending'`, `'Posted'`, `'Failed'`. Drives stuck_pending + non-zero-transfer math. |
 | `posting` | `TIMESTAMP NOT NULL` (TZ-naive) | When the leg posted to the underlying ledger. |
 | `transfer_id` | `VARCHAR(100) NOT NULL` | Groups legs of one financial event. Conservation invariant: `Σ amount_money` over non-Failed legs of one transfer = expected_net (typically 0 for two-leg, ExpectedNet for templates). |
-| `transfer_type` | `VARCHAR(50) NOT NULL` | The L2 TransferType (`'ach'`, `'wire'`, `'fee'`, `'internal'`, etc). |
 | `transfer_completion` | `TIMESTAMP` (TZ-naive) | When the transfer finished its full lifecycle (last leg posted). NULL while in flight. |
 | `transfer_parent_id` | `VARCHAR(100)` | Recursive parent — links a transfer to its parent (PR pattern: `external_txn → payment → settlement → sale`). |
 | `rail_name` | `VARCHAR(100) NOT NULL` | Which Rail produced this leg. Drives stuck_pending / stuck_unbundled per-rail caps. |
@@ -170,7 +169,7 @@ load independently.
 ```sql
 CREATE INDEX idx_{{ l2_instance_name }}_transactions_account_posting ON {{ l2_instance_name }}_transactions (account_id, posting);
 CREATE INDEX idx_{{ l2_instance_name }}_transactions_transfer        ON {{ l2_instance_name }}_transactions (transfer_id);
-CREATE INDEX idx_{{ l2_instance_name }}_transactions_type_status     ON {{ l2_instance_name }}_transactions (transfer_type, status);
+CREATE INDEX idx_{{ l2_instance_name }}_transactions_rail_status     ON {{ l2_instance_name }}_transactions (rail_name, status);
 CREATE INDEX idx_{{ l2_instance_name }}_transactions_parent          ON {{ l2_instance_name }}_transactions (transfer_parent_id);
 
 -- Bundler eligibility hot-path: AggregatingRails query for Posted,
@@ -365,7 +364,7 @@ To see *something* on the dashboard, populate these columns on every row:
 
 `entry` (auto), `id`, `account_id`, `account_name`, `account_role`,
 `account_scope`, `amount_money`, `amount_direction`, `status`,
-`posting`, `transfer_id`, `transfer_type`, `rail_name`, `origin`.
+`posting`, `transfer_id`, `rail_name`, `origin`.
 
 Optional on day 1; populate when a downstream check needs them:
 

@@ -53,7 +53,7 @@ same anchor convention as the legacy plant emitter.
 
 Each Rail is classified into one of 12 `_RailKind` values by
 `_classify_rail(rail)`, which inspects the rail's `aggregating` flag,
-`cadence`, and `transfer_type` substring. The classifier is heuristic
+`cadence`, and `rail_name` substring. The classifier is heuristic
 (falls back to `OTHER` for anything novel) — calibrated against the
 bundled L2 instances ({{ l2_instance_name }} included).
 
@@ -373,7 +373,7 @@ contract Phase R locked in alongside the realistic baseline:
 - **Per TransferTemplate.** `assert sum(actual_net) == declared expected_net`
   for ≥ 80% of template instances (some plants intentionally violate
   to surface on the L2 Exceptions sheet).
-- **Per LimitSchedule.** `assert max_daily_outbound(parent_role, transfer_type) <= cap`
+- **Per LimitSchedule.** `assert max_daily_outbound(parent_role, rail_name) <= cap`
   for the baseline (plants intentionally breach to populate the Limit
   Breach sheet).
 - **Volume Anomalies signal.** `assert z_score(planted_spike, baseline) >= 3.0` —
