@@ -652,9 +652,21 @@ def _layer_command(
         # X.2.u.6.followon — `test_dashboard_driver.py` joins the list: its 8
         # `App2Driver.smoke()` protocol-parity tests (`test_showcase_*` /
         # `test_app2_*`) need only Playwright + the bundled smoke app (no DB,
-        # no AWS), so this is their home. Its 3 `test_qs_l1_*` tests
-        # (`@pytest.mark.browser`, deployed-dashboard) skip cleanly here
-        # (no `QS_E2E_USER_ARN`) and run in the `browser` layer / e2e.yml.
+        # no AWS), so this is their home.
+        #
+        # Z.B.14 (2026-05-15) — `-m "not browser"` deselects the 3
+        # `@pytest.mark.browser` tests in `test_dashboard_driver.py`
+        # (`test_qs_l1_*`). Earlier reasoning that they "skip cleanly here
+        # (no `QS_E2E_USER_ARN`)" is no longer true: Y.2.gate.h.1 made the
+        # runner auto-derive `QS_E2E_USER_ARN` from `cfg.auth.aws_profile`,
+        # so the QS-bound tests now actually try to run pre-deploy and probe
+        # whatever dashboard happens to be left in QS from a prior run
+        # (cross-cell coupling). The Z.B.12 verification matrix surfaced
+        # this on `sq_or_aw`: 3 timeouts on `[role="tab"]` against a stale
+        # spec_example dashboard. The browser layer already picks these up
+        # via `-m browser` against `tests/e2e/`, so no parallel addition
+        # needed there. The other html2 files in this list carry no marks
+        # (verified) so `-m "not browser"` keeps them in.
         cmd = [
             str(_VENV_BIN / "pytest"),
             "tests/e2e/test_html2_executives.py",
@@ -665,6 +677,7 @@ def _layer_command(
             # Playwright-only, no DB / no AWS).
             "tests/e2e/test_html2_table_pagination.py",
             "tests/e2e/test_dashboard_driver.py",
+            "-m", "not browser",
             "-q",
         ]
         if opts.only:

@@ -472,7 +472,17 @@ def test_layer_command_app2_dispatches_html2_tests() -> None:
     """b.3.impl.layer — Layer 3.7 (App2 against local Docker) dispatches
     the test_html2_*.py files (stub + live-DB fetcher), plus
     test_dashboard_driver.py (X.2.u.6.followon — its App2Driver.smoke()
-    protocol-parity tests need only Playwright + the bundled smoke app)."""
+    protocol-parity tests need only Playwright + the bundled smoke app).
+
+    Z.B.14 — the dispatch carries ``-m "not browser"`` so the 3
+    ``@pytest.mark.browser`` tests in test_dashboard_driver.py
+    (``test_qs_l1_*``) are deselected at collection time. Earlier
+    reasoning that they "skip cleanly here" stopped holding once
+    Y.2.gate.h.1 made the runner auto-derive ``QS_E2E_USER_ARN``; the
+    QS-bound tests then actually try to run pre-deploy and probe a stale
+    cross-cell dashboard. Browser layer picks them up via its own
+    ``-m browser`` selector — no parallel addition needed there.
+    """
     cmd_env = runner._layer_command("app2", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env_addl = cmd_env
@@ -482,6 +492,14 @@ def test_layer_command_app2_dispatches_html2_tests() -> None:
     assert "test_html2_money_trail.py" in cmd_str
     assert "test_html2_l2ft.py" in cmd_str  # Y.2.app2.cde.l2ft-wiring.c
     assert "test_dashboard_driver.py" in cmd_str  # X.2.u.6.followon
+    # Z.B.14 — the deselect of QS-marked tests must show up as
+    # consecutive ``-m`` and ``not browser`` argv elements (no shell
+    # quoting in this codepath — argv is delivered directly to
+    # subprocess, so the args are list-literal).
+    assert "-m" in cmd
+    assert "not browser" in cmd
+    m_idx = cmd.index("-m")
+    assert cmd[m_idx + 1] == "not browser"
     # Behind QS_GEN_E2E=1 like every other tests/e2e/ file.
     assert env_addl["QS_GEN_E2E"] == "1"
     assert env_addl["QS_GEN_LAYER"] == "app2"
