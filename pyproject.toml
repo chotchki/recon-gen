@@ -260,6 +260,13 @@ quicksight_gen = [
     "common/html/assets/vendor/js/*.js",
     "common/html/assets/vendor/css/*.css",
     "common/html/assets/vendor/vendor.lock",
+    # X.4.b/f/h — Studio chrome assets (diagram.css/diagram.js/editor.css
+    # and the X.4.h.1 data.css) the ``/studio/static`` mount serves.
+    # Loaded at runtime via ``Path(__file__).parent / "_studio_assets"``;
+    # without this glob the wheel ships an empty directory and the studio
+    # 404s on its own CSS / JS.
+    "common/html/_studio_assets/*.css",
+    "common/html/_studio_assets/*.js",
 ]
 
 [tool.setuptools.dynamic]

@@ -9,6 +9,7 @@ pointer at where the field actually belongs.
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -323,3 +324,193 @@ def test_datasource_arn_was_derived_flag(
     cfg3p = cfg3.with_l2_instance_prefix("sasquatch_pr")
     assert cfg3p.datasource_arn_was_derived is True
     assert "sasquatch_pr" in (cfg3p.datasource_arn or "")
+
+
+# X.4.g.1+2+3 — Deploy-pipeline config schema. Three new fields on Config:
+# `etl_hook` (top-level optional str), `etl_datasource` (nested block,
+# Optional), `test_generator` (nested block, default-factory so the
+# pipeline never None-checks). All three are V.1.b-allowlisted.
+
+def _base_cfg(extras: dict[str, object]) -> dict[str, object]:
+    body: dict[str, object] = {
+        "aws_account_id": "111122223333",
+        "aws_region": "us-east-1",
+        "datasource_arn": "arn:aws:quicksight:us-east-1:111122223333:datasource/x",
+    }
+    body.update(extras)
+    return body
+
+
+def test_etl_hook_defaults_none(tmp_path: Path) -> None:
+    cfg = load_config(_write_yaml(tmp_path, _base_cfg({})))
+    assert cfg.etl_hook is None
+
+
+def test_etl_hook_passthrough(tmp_path: Path) -> None:
+    cfg = load_config(_write_yaml(tmp_path, _base_cfg({
+        "etl_hook": "/usr/local/bin/refresh-demo --etl-only",
+    })))
+    assert cfg.etl_hook == "/usr/local/bin/refresh-demo --etl-only"
+
+
+def test_etl_datasource_defaults_none(tmp_path: Path) -> None:
+    cfg = load_config(_write_yaml(tmp_path, _base_cfg({})))
+    assert cfg.etl_datasource is None
+
+
+def test_etl_datasource_full_block_loads(tmp_path: Path) -> None:
+    cfg = load_config(_write_yaml(tmp_path, _base_cfg({
+        "etl_datasource": {
+            "url": "postgresql://prod-replica:5432/ledger",
+            "transactions_table": "ledger.txns",
+            "daily_balances_table": "ledger.balances_eod",
+        },
+    })))
+    assert cfg.etl_datasource is not None
+    assert cfg.etl_datasource.url == "postgresql://prod-replica:5432/ledger"
+    assert cfg.etl_datasource.transactions_table == "ledger.txns"
+    assert cfg.etl_datasource.daily_balances_table == "ledger.balances_eod"
+
+
+def test_etl_datasource_missing_required_field_rejects(tmp_path: Path) -> None:
+    p = _write_yaml(tmp_path, _base_cfg({
+        "etl_datasource": {
+            "url": "postgresql://x:5432/y",
+            "transactions_table": "txns",
+            # daily_balances_table missing
+        },
+    }))
+    with pytest.raises(ValueError, match="missing required field"):
+        load_config(p)
+
+
+def test_etl_datasource_unknown_subkey_rejects(tmp_path: Path) -> None:
+    p = _write_yaml(tmp_path, _base_cfg({
+        "etl_datasource": {
+            "url": "postgresql://x:5432/y",
+            "transactions_table": "txns",
+            "daily_balances_table": "balances",
+            "schema": "ledger",  # not in the allowlist
+        },
+    }))
+    with pytest.raises(ValueError, match="unknown keys"):
+        load_config(p)
+
+
+def test_etl_datasource_non_mapping_rejects(tmp_path: Path) -> None:
+    p = _write_yaml(tmp_path, _base_cfg({
+        "etl_datasource": "postgresql://x:5432/y",
+    }))
+    with pytest.raises(ValueError, match="must be a mapping"):
+        load_config(p)
+
+
+def test_test_generator_defaults_to_empty_block(tmp_path: Path) -> None:
+    """Absent block resolves to TestGeneratorConfig() — byte-identical
+    to today's locked-seed output. The pipeline never None-checks."""
+    cfg = load_config(_write_yaml(tmp_path, _base_cfg({})))
+    assert cfg.test_generator.enabled is True
+    assert cfg.test_generator.scope == "full"
+    assert cfg.test_generator.end_date is None
+    assert cfg.test_generator.seed is None
+    assert cfg.test_generator.plants == ()
+    assert cfg.test_generator.only_template is None
+    assert cfg.test_generator.derive_balances is False
+
+
+def test_test_generator_full_block_loads(tmp_path: Path) -> None:
+    cfg = load_config(_write_yaml(tmp_path, _base_cfg({
+        "test_generator": {
+            "enabled": True,
+            "scope": "exceptions_only",
+            "end_date": "2030-06-15",
+            "seed": 42,
+            "plants": ["drift", "overdraft"],
+            "only_template": "PayoutCheck",
+            "derive_balances": True,
+        },
+    })))
+    tg = cfg.test_generator
+    assert tg.enabled is True
+    assert tg.scope == "exceptions_only"
+    assert tg.end_date == date(2030, 6, 15)
+    assert tg.seed == 42
+    assert tg.plants == ("drift", "overdraft")
+    assert tg.only_template == "PayoutCheck"
+    assert tg.derive_balances is True
+
+
+def test_test_generator_native_yaml_date(tmp_path: Path) -> None:
+    """YAML's native date scalar (`2030-01-01` unquoted) parses to
+    datetime.date — accept it as well as ISO strings."""
+    body = _base_cfg({})
+    body["test_generator"] = {"end_date": date(2030, 1, 1)}
+    p = tmp_path / "config.yaml"
+    p.write_text(yaml.safe_dump(body), encoding="utf-8")
+    cfg = load_config(p)
+    assert cfg.test_generator.end_date == date(2030, 1, 1)
+
+
+def test_test_generator_unknown_subkey_rejects(tmp_path: Path) -> None:
+    p = _write_yaml(tmp_path, _base_cfg({
+        "test_generator": {"density": 5.0},  # X.4.h proposed a knob; not landed
+    }))
+    with pytest.raises(ValueError, match="unknown keys"):
+        load_config(p)
+
+
+def test_test_generator_invalid_scope_rejects(tmp_path: Path) -> None:
+    p = _write_yaml(tmp_path, _base_cfg({
+        "test_generator": {"scope": "everything"},
+    }))
+    with pytest.raises(ValueError, match="scope must be one of"):
+        load_config(p)
+
+
+def test_test_generator_invalid_plant_rejects(tmp_path: Path) -> None:
+    p = _write_yaml(tmp_path, _base_cfg({
+        "test_generator": {"plants": ["fraud"]},  # not a known plant kind
+    }))
+    with pytest.raises(ValueError, match="contains unknown values"):
+        load_config(p)
+
+
+def test_test_generator_bad_date_rejects(tmp_path: Path) -> None:
+    p = _write_yaml(tmp_path, _base_cfg({
+        "test_generator": {"end_date": "not-a-date"},
+    }))
+    with pytest.raises(ValueError, match="must be ISO 8601"):
+        load_config(p)
+
+
+def test_test_generator_bad_seed_type_rejects(tmp_path: Path) -> None:
+    p = _write_yaml(tmp_path, _base_cfg({
+        "test_generator": {"seed": "abc"},
+    }))
+    with pytest.raises(ValueError, match="seed must be an integer"):
+        load_config(p)
+
+
+def test_test_generator_non_mapping_rejects(tmp_path: Path) -> None:
+    p = _write_yaml(tmp_path, _base_cfg({
+        "test_generator": "full",
+    }))
+    with pytest.raises(ValueError, match="must be a mapping"):
+        load_config(p)
+
+
+def test_v1b_allowlist_includes_three_pipeline_keys(tmp_path: Path) -> None:
+    """Smoke: the three new keys + a base config load cleanly together —
+    proves the V.1.b allowlist actually carries them."""
+    cfg = load_config(_write_yaml(tmp_path, _base_cfg({
+        "etl_hook": "./etl.sh",
+        "etl_datasource": {
+            "url": "postgresql://x:5432/y",
+            "transactions_table": "txns",
+            "daily_balances_table": "balances",
+        },
+        "test_generator": {"scope": "full"},
+    })))
+    assert cfg.etl_hook == "./etl.sh"
+    assert cfg.etl_datasource is not None
+    assert cfg.test_generator.scope == "full"

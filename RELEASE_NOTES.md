@@ -1,5 +1,36 @@
 # Release Notes
 
+## v10.0.0a4 — Studio etl_hook UI toggle + SQLite Deploy 10× faster (binds-not-literals)
+
+Pre-release / alpha tag. Two pieces, both Studio-trainer ergonomics:
+
+**X.4.h.etl-toggle — UI toggle for the upstream-re-seed pair.** Studio data-shaping panel gains a top-row strip showing `cfg.etl_hook` + a checkbox to disable it for the next Deploy. Disabling clears BOTH `cfg.etl_hook` (step 1) and `cfg.etl_datasource` (step 2 pull) on the patched cfg — they're a coupled "upstream re-seed" pair, and decoupling them produces 500s when the operator's `etl_datasource` only exists *because* the hook started it (e.g. the local postgres the hook brings up). Original cfg's stored fields are untouched — re-enable + re-deploy restores both.
+
+Three render states surface honestly:
+
+- configured + enabled (checked + `<code>` showing the command),
+- configured + disabled (unchecked + greyed-out + line-through),
+- not configured (disabled + "(not configured)" italic).
+
+`PUT /data/knobs/etl_hook` + URL-state restore follow the same `HX-Trigger` / `HX-Push-Url` contract every other knob uses. Default state (enabled) keeps the URL clean — `?etl_hook=disabled` only appears when explicitly off.
+
+17 new tests (6 cache + 11 route) covering all three render states, the PUT round-trip, the URL state restore, the severability rule (route absent without `tg_cache`), and the patched-cfg pair semantic.
+
+**X.4.j.sqlite-binds — coalesce same-shape INSERTs into `executemany`.** SQLite Studio Deploy (sasquatch_pr, ~72k single-row INSERTs across 2 tables) drops from **~68s to ~7s end-to-end** — about a 10× speedup. The `step3_generator` insert phase alone goes from ~33–47s to ~0.5s.
+
+Fast path (added to `common/db.py::execute_script`'s SQLite branch):
+
+- Walk the script statement-by-statement; splitter respects single-quoted strings + `--` line comments.
+- Consecutive INSERTs against the same `(table, cols)` accumulate into a buffer that flushes as one `cur.executemany` call. The literal parser handles `'string'`, `NULL`, int, float; anything fancier (function call, `''` escape, hex literal, etc.) returns `None` and the statement falls through to per-statement `cur.execute`.
+- Non-INSERT statements (`CREATE` / `DELETE` / `REFRESH` / comments-only) flush the pending buffer first, then run via `cur.execute`. Order is strictly preserved.
+- Caller's commit semantic is unchanged — helper does NOT commit; the connection's transaction stays open across the whole call.
+
+Postgres + Oracle paths untouched (PG already does one `cur.execute` of the multi-statement string; Oracle has its own `INSERT ALL` batcher in `batch_oracle_inserts`). The optimization only affects SQLite, which is the Studio default for the trainer's local-iteration loop.
+
+5 new tests cover: bind fast path with mixed literal types (string / NULL / int / float / JSON-quoted), grouping change flushes the buffer, non-INSERT pass-through preserves order, header comments dropped (not executed), caller owns commit (rollback wipes inserts).
+
+**No customer-facing change** beyond Studio iteration speed. The `schema` / `data` / `json` / `audit` artifact groups, `config.yaml`, and L2 institution YAML are untouched. Test impact: full unit suite stays green at 1699 passed / 73 skipped (+22 from v10.0.0a3 baseline).
+
 ## v10.0.0a3 — hotfix: restore the lazy-import discipline for `[serve]`-extra deps in the CLI shell
 
 Hotfix for v10.0.0a2. Caught by the v10.0.0a2 push pipeline:

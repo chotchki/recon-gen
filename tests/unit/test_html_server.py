@@ -620,3 +620,101 @@ def test_url_filter_prefix_key_does_not_touch_param_specs() -> None:
     form_start = body.index('<form id="filter-form"')
     form_end = body.index('</form>', form_start)
     assert " selected>" not in body[form_start:form_end]
+
+
+# X.4.g.12 — /data_generation_id route exposes the deploy-pipeline counter.
+
+def test_data_generation_id_route_returns_current_counter() -> None:
+    """The route reads ``get_data_generation_id()`` lazily on each call —
+    a pipeline-side ``step_5_reload`` bump is visible to the next
+    ``GET /data_generation_id`` without restarting the server."""
+    import asyncio
+
+    from quicksight_gen.common.l2.deploy_pipeline import (
+        get_data_generation_id, step_5_reload,
+    )
+    client = _make_test_app()
+
+    initial_counter = get_data_generation_id()
+    resp = client.get("/data_generation_id")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload == {"data_generation_id": initial_counter}
+
+    # Bump and re-read — the route MUST surface the new value.
+    new = asyncio.run(step_5_reload(dev_log=None))
+    resp2 = client.get("/data_generation_id")
+    assert resp2.json() == {"data_generation_id": new}
+
+
+# X.4.g.12.b — dashboard pages emit the data-generation-id meta so the
+# bootstrap.js poller has a baseline. Other surfaces (the listing, error
+# pages) deliberately omit it.
+
+def test_dashboard_page_emits_data_generation_id_meta() -> None:
+    """GET /dashboards/<id> embeds <meta name="data-generation-id"
+    content="N"> capturing the server's counter at render time."""
+    from quicksight_gen.common.l2.deploy_pipeline import get_data_generation_id
+    expected = get_data_generation_id()
+    client = _make_test_app()
+    body = client.get(_DASHBOARD_PATH).text
+    assert (
+        f'<meta name="data-generation-id" content="{expected}">' in body
+    ), "dashboard page must emit data-generation-id meta for the poller"
+
+
+def test_sheet_page_emits_data_generation_id_meta() -> None:
+    """GET /dashboards/<id>/sheets/<sheet_id> emits the same meta —
+    sheet-tab navigation is a full page reload, so each sheet page
+    needs its own baseline for the poller to compare against."""
+    from quicksight_gen.common.l2.deploy_pipeline import get_data_generation_id
+    expected = get_data_generation_id()
+    client = _make_test_app()
+    body = client.get(
+        f"{_DASHBOARD_PATH}/sheets/{_SHEET_ID}",
+    ).text
+    assert (
+        f'<meta name="data-generation-id" content="{expected}">' in body
+    )
+
+
+def test_dashboards_listing_omits_data_generation_id_meta() -> None:
+    """GET /dashboards has no per-deploy data; reloading it on every
+    bump would be churn for no signal. The <meta> tag MUST be absent.
+
+    (The bootstrap.js poller code is still bundled into every page —
+    it's a single script — but it no-ops without the baseline meta,
+    so the listing page's poller observably does nothing.)"""
+    client = _make_test_app()
+    body = client.get("/dashboards").text
+    assert '<meta name="data-generation-id"' not in body
+
+
+def test_dashboard_meta_advances_when_counter_bumps() -> None:
+    """Two successive renders see two different baselines if a deploy
+    fires between them — the poller's reload contract relies on the
+    server-side render time being ground truth."""
+    import asyncio
+
+    from quicksight_gen.common.l2.deploy_pipeline import (
+        get_data_generation_id, step_5_reload,
+    )
+    client = _make_test_app()
+
+    before = get_data_generation_id()
+    body_before = client.get(_DASHBOARD_PATH).text
+    assert (
+        f'<meta name="data-generation-id" content="{before}">' in body_before
+    )
+
+    asyncio.run(step_5_reload(dev_log=None))
+    after = get_data_generation_id()
+    assert after == before + 1
+    body_after = client.get(_DASHBOARD_PATH).text
+    assert (
+        f'<meta name="data-generation-id" content="{after}">' in body_after
+    )
+    assert (
+        f'<meta name="data-generation-id" content="{before}">'
+        not in body_after
+    )

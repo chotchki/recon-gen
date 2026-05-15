@@ -690,17 +690,30 @@ def emit_seed(
 # when one Rail is renamed.
 _BASELINE_BASE_SEED = 42
 
+# X.4.h.6 — the rolling-window length (in calendar days) the baseline
+# generator emits legs for, anchored at ``today``. Public so consumers
+# (the Studio trainer-mode timeline UI) can render the same window the
+# generator uses without duplicating the literal. ``emit_baseline_seed``
+# accepts a ``window_days`` override; this is the default.
+DEFAULT_BASELINE_WINDOW_DAYS = 90
 
-def _seed_for_rail(rail_name: Identifier | str) -> int:
+
+def _seed_for_rail(
+    rail_name: Identifier | str,
+    base_seed: int = _BASELINE_BASE_SEED,
+) -> int:
     """Return the per-Rail RNG seed for the baseline emitter (R.1.f §4).
 
     Threading one ``random.Random(_seed_for_rail(rail.name))`` instance
     through every helper that touches a given Rail keeps the per-Rail
     streams isolated — renaming or removing one Rail can't perturb another
     Rail's emitted bytes. Cross-Rail randomness (account picks, starting
-    balances) uses a separate ``random.Random(_BASELINE_BASE_SEED)`` instance.
+    balances) uses a separate ``random.Random(base_seed)`` instance.
+
+    ``base_seed`` (X.4.h.0.b) lets the data-shaping panel override the
+    root seed; default keeps the legacy hash-lock continuity.
     """
-    return _BASELINE_BASE_SEED ^ (
+    return base_seed ^ (
         zlib.crc32(str(rail_name).encode("utf-8")) & 0xFFFFFFFF
     )
 
@@ -795,6 +808,8 @@ def emit_baseline_seed(
     window_days: int = 90,
     anchor: date | None = None,
     dialect: Dialect = Dialect.POSTGRES,
+    skip_rails: frozenset[Identifier] = frozenset(),
+    base_seed: int | None = None,
 ) -> str:
     """Emit a 3-month healthy-baseline INSERT script for the L2 instance.
 
@@ -813,12 +828,30 @@ def emit_baseline_seed(
         tests to keep the SHA256 hash-lock deterministic across runs.
       dialect: SQL dialect for timestamp literals + INSERT shape (PG vs
         Oracle). Same flag the legacy ``emit_seed`` accepts.
+      skip_rails: X.4.g.10 — rail names to skip in the per-rail leg
+        loop. Used by the deploy pipeline's `scope: uncovered_rails`
+        mode to fill baseline only for rails the operator's external
+        DB hasn't already populated. Default empty (no rails skipped)
+        keeps byte-identical-to-locked-seeds output.
+      base_seed: X.4.h.0.b — root RNG seed for the baseline emitter.
+        ``None`` (default) uses ``_BASELINE_BASE_SEED = 42`` — the
+        legacy constant the locked seeds were generated against, so
+        the absent-arg case stays byte-identical. Studio's data-shaping
+        panel writes ``cfg.test_generator.seed`` here when the trainer
+        scrubs to a different layout (different seed → different plant
+        positions across days, same seed → byte-identical output).
+        Per-rail RNGs derive from this via the existing
+        ``_seed_for_rail(rail) = base_seed ^ crc32(rail_name)`` rule
+        (rename-resilient per-rail isolation preserved).
 
     Returns:
       A SQL script string. R.2.a (this commit) returns a valid header +
       empty INSERT bodies; R.2.b–e fill in the per-Rail legs, chains, and
       daily-balance rows.
     """
+    effective_base_seed = (
+        _BASELINE_BASE_SEED if base_seed is None else int(base_seed)
+    )
     if anchor is None:
         anchor = datetime.now(tz=timezone.utc).date()  # typing-smell: ignore[no-datetime-now]: ad-hoc-run fallback; locked seeds + tests always pass anchor=date(2030, 1, 1)
 
@@ -853,7 +886,7 @@ def emit_baseline_seed(
     # daily_balances output to avoid false-positive drifts. The lognormal
     # starting balances live on for any future feature that wants them
     # (e.g., overdraft thresholds keyed off starting balance).
-    init_rng = random.Random(_BASELINE_BASE_SEED)
+    init_rng = random.Random(effective_base_seed)
     _initialize_starting_balances(state, instance, template_by_role, init_rng)
 
     # Pre-compute the bundle map (R.2.c). For every aggregating Rail,
@@ -884,7 +917,14 @@ def emit_baseline_seed(
     txn_rows: list[str] = list(opening_rows)
     txn_counter = _Counter(start=1)
     for rail in sorted(instance.rails, key=lambda r: str(r.name)):
-        rail_rng = random.Random(_seed_for_rail(rail.name))
+        # X.4.g.10 — operator's external data already covers this rail;
+        # skip its baseline emit so we don't duplicate transactions.
+        # state.firings stays empty for this rail, so chains / cascade
+        # credits / daily balances naturally produce nothing for it
+        # downstream too.
+        if rail.name in skip_rails:
+            continue
+        rail_rng = random.Random(_seed_for_rail(rail.name, effective_base_seed))
         if rail.aggregating:
             rail_rows = _emit_baseline_for_aggregating_rail(
                 rail, instance, state, template_by_role,
@@ -901,6 +941,7 @@ def emit_baseline_seed(
     # emit matching parent + child legs at the declared completion rate.
     chain_rows = _emit_baseline_chains(
         instance, state, template_by_role, txn_counter, dialect,
+        base_seed=effective_base_seed,
     )
     txn_rows.extend(chain_rows)
 
@@ -915,6 +956,7 @@ def emit_baseline_seed(
     # picks up the cascade credits.
     cascade_rows = _emit_baseline_cascade_credits(
         instance, state, txn_counter, dialect,
+        base_seed=effective_base_seed,
     )
     txn_rows.extend(cascade_rows)
 
@@ -1059,6 +1101,7 @@ def emit_full_seed(
     baseline_window_days: int = 90,
     anchor: date | None = None,
     dialect: Dialect = Dialect.POSTGRES,
+    base_seed: int | None = None,
 ) -> str:
     """Emit baseline + plants concatenated as a single SQL script.
 
@@ -1078,6 +1121,12 @@ def emit_full_seed(
         ``scenarios.today`` and may differ — both anchors should
         normally be the same, set by the caller.
       dialect: SQL dialect for both layers.
+      base_seed: X.4.h.0.b — root RNG seed for the baseline emitter.
+        ``None`` (default) preserves byte-identity with the locked
+        seeds (uses ``_BASELINE_BASE_SEED = 42``). Plants are built
+        from deterministic per-kind fixed seeds inside the scenario
+        builder so they're unaffected; only the 90-day baseline
+        leg / chain / cascade RNGs reseed.
 
     Returns:
       A SQL script string: baseline INSERTs followed by plant INSERTs,
@@ -1089,6 +1138,7 @@ def emit_full_seed(
         window_days=baseline_window_days,
         anchor=anchor,
         dialect=dialect,
+        base_seed=base_seed,
     )
     plants_sql = emit_seed(instance, scenarios, dialect=dialect)
     body = f"{baseline_sql}\n\n{plants_sql}"
@@ -2281,6 +2331,8 @@ def _emit_baseline_chains(
     template_by_role: dict[Identifier, AccountTemplate],
     counter: _Counter,
     dialect: Dialect,
+    *,
+    base_seed: int = _BASELINE_BASE_SEED,
 ) -> list[str]:
     """Emit chain-firing rows (parent → child) for every declared Chain.
 
@@ -2303,7 +2355,7 @@ def _emit_baseline_chains(
         return []
 
     rails_by_name = {r.name: r for r in instance.rails}
-    rng = random.Random(_BASELINE_BASE_SEED ^ 0xCC11A)
+    rng = random.Random(base_seed ^ 0xCC11A)
     rows: list[str] = []
 
     # Group entries by (parent, xor_group) so siblings can pick one
@@ -2589,6 +2641,8 @@ def _emit_baseline_cascade_credits(
     state: _BaselineState,
     counter: _Counter,
     dialect: Dialect,
+    *,
+    base_seed: int = _BASELINE_BASE_SEED,
 ) -> list[str]:
     """V.5.b — emit paired credit legs for cascade-debit patterns.
 
@@ -2629,7 +2683,7 @@ def _emit_baseline_cascade_credits(
     MerchantPayout rails, and no ConcentrationMaster-parented
     template instances). Helper returns ``[]`` cleanly.
     """
-    rng = random.Random(_BASELINE_BASE_SEED ^ 0xCA5CAD)
+    rng = random.Random(base_seed ^ 0xCA5CAD)
     rows: list[str] = []
 
     # Pick a default external counterparty for the counter-leg side.

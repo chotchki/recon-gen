@@ -93,18 +93,61 @@ _DEFAULT_BROKEN_COUNT = 15
 _DEFAULT_FANOUT_MULTIPLIER = 5
 
 
-def build_full_seed_sql(cfg, instance, *, anchor=None, density: float = 1.0) -> str:  # type: ignore[no-untyped-def]: cfg/instance/anchor untyped pending CLI-wide sweep
-    """Compose the demo seed pipeline.
+def build_default_scenario(instance, *, anchor=None, density: float = 1.0, plants=None):  # type: ignore[no-untyped-def]: instance/anchor/plants untyped pending CLI-wide sweep
+    """Build the densified+broken+boosted default scenario.
 
-    Picks the ``l1_plus_broad`` scenario mode so the demo gets BOTH
+    Shared by ``build_full_seed_sql`` (X.4.g.8 scope:full) and
+    ``deploy_pipeline.step_3_generator`` for the X.4.g.9
+    scope:exceptions_only mode. ``l1_plus_broad`` mode covers BOTH
     L1 SHOULD-violation plants (drift / overdraft / etc.) AND broad
     L2-shape plants (per-rail RailFiringPlant + per-template
-    TransferTemplatePlant) — the L2 Flow Tracing dashboard's Rails /
-    Chains / Transfer Templates sheets need the broad layer to render
-    non-empty in the demo. Then densifies per-kind plants (×5 default),
-    adds 15 broken-rail stuck_pending plants on one rail (default),
-    boosts inv_fanout amounts (×5 default). Returns the concatenated
-    SQL of the 90-day baseline + plant overlays.
+    TransferTemplatePlant) so the L2 Flow Tracing dashboard's Rails /
+    Chains / Transfer Templates sheets render non-empty.
+
+    Density (Y.2.gate.c.13.1) is a scalar multiplier on the three
+    plant-density knobs (densify factor, broken-rail count, fanout
+    amount multiplier). ``density=1.0`` (default) is byte-identical
+    to the pre-c.13 behavior — locked SQL files stay valid.
+    ``density=2.0`` doubles; ``density=0.5`` halves. Multiplications
+    use ``int(...)`` so values stay deterministic.
+
+    ``plants`` (X.4.h.0.a) — optional subset of ``PlantKind`` strings
+    selecting which L1 SHOULD-violation kinds to keep. ``None`` or
+    empty ⇒ all 6 kinds (today's behavior, byte-identical to the
+    locked seeds). Non-empty ⇒ only the named kinds; the others are
+    zeroed out at the very end of the pipeline (after densify / broken
+    / boost so the in-flight seed numbers don't shift between the
+    "all" and "subset" paths). L2-shape fixtures (rail firings,
+    template plants, fanout) always pass through.
+
+    Returned scenario is ready to feed either ``emit_full_seed`` (for
+    baseline + plants) or ``emit_seed`` (plants only).
+    """
+    from quicksight_gen.common.l2.auto_scenario import (
+        add_broken_rail_plants,
+        boost_inv_fanout_plants,
+        default_scenario_for,
+        densify_scenario,
+        filter_scenario_plants,
+    )
+
+    base = default_scenario_for(
+        instance, mode="l1_plus_broad", today=anchor,
+    ).scenario
+    dense = densify_scenario(
+        base, factor=int(_DEFAULT_DENSIFY_FACTOR * density),
+    )
+    broken = add_broken_rail_plants(
+        dense, instance, broken_count=int(_DEFAULT_BROKEN_COUNT * density),
+    )
+    boosted = boost_inv_fanout_plants(
+        broken, amount_multiplier=int(_DEFAULT_FANOUT_MULTIPLIER * density),
+    )
+    return filter_scenario_plants(boosted, plants)
+
+
+def build_full_seed_sql(cfg, instance, *, anchor=None, density: float = 1.0, plants=None, base_seed=None) -> str:  # type: ignore[no-untyped-def]: cfg/instance/anchor/plants/base_seed untyped pending CLI-wide sweep
+    """Compose the demo seed pipeline (90-day baseline + plant overlays).
 
     ``anchor`` pins the calendar date used by both ``default_scenario_for``
     (plants' ``today``) and ``emit_full_seed`` (baseline window end).
@@ -113,35 +156,22 @@ def build_full_seed_sql(cfg, instance, *, anchor=None, density: float = 1.0) -> 
     ``date(2030, 1, 1)`` so the locked SQL is deterministic across
     machines and run dates.
 
-    Y.2.gate.c.13.1 — ``density`` is a scalar multiplier on the three
-    plant-density knobs (densify factor, broken-rail count, fanout
-    amount multiplier). ``density=1.0`` (default) is byte-identical to
-    the pre-c.13 behavior — locked SQL files (`_locked_seeds/*.sql`)
-    stay valid. ``density=2.0`` doubles plant counts; ``density=0.5``
-    halves them. Multiplications use ``int(...)`` so values stay
-    deterministic; densities below ~0.07 collapse to factor=0 which
-    `densify_scenario` should reject upstream.
+    ``base_seed`` (X.4.h.0.b) — root RNG seed for the baseline emitter.
+    ``None`` (default) preserves byte-identity with the locked seeds
+    (uses ``_BASELINE_BASE_SEED = 42``). Studio's data-shaping panel
+    writes ``cfg.test_generator.seed`` here when the trainer scrubs
+    to a different layout.
+
+    See ``build_default_scenario`` for the scenario construction +
+    density + plants-filter semantics.
     """
-    from quicksight_gen.common.l2.auto_scenario import (
-        add_broken_rail_plants,
-        boost_inv_fanout_plants,
-        default_scenario_for,
-        densify_scenario,
-    )
     from quicksight_gen.common.l2.seed import emit_full_seed
 
-    base = default_scenario_for(
-        instance, mode="l1_plus_broad", today=anchor,
-    ).scenario
-    dense = densify_scenario(base, factor=int(_DEFAULT_DENSIFY_FACTOR * density))
-    broken = add_broken_rail_plants(
-        dense, instance, broken_count=int(_DEFAULT_BROKEN_COUNT * density),
-    )
-    final = boost_inv_fanout_plants(
-        broken, amount_multiplier=int(_DEFAULT_FANOUT_MULTIPLIER * density),
+    final = build_default_scenario(
+        instance, anchor=anchor, density=density, plants=plants,
     )
     return emit_full_seed(
-        instance, final, dialect=cfg.dialect, anchor=anchor,
+        instance, final, dialect=cfg.dialect, anchor=anchor, base_seed=base_seed,
     )
 
 

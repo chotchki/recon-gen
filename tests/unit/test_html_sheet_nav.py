@@ -65,10 +65,17 @@ def _build_app_with_sheets(sheet_specs: list[tuple[str, str]]) -> tuple[App, lis
 
 def test_emit_html_renders_no_tabs_when_all_sheets_omitted() -> None:
     """Default ``all_sheets=()`` keeps the existing single-sheet
-    behavior — no tab strip, callers that haven't migrated stay green."""
+    behavior — no *tab strip*, callers that haven't migrated stay green.
+
+    The page still emits the global ``← Dashboards`` back-link nav
+    (X.4.j post-merge, see test_html_render.py); this test only cares
+    that the per-sheet tab nav doesn't appear when ``all_sheets`` is
+    empty."""
     app, sheets = _build_app_with_sheets([("s1", "Solo")])
     out = emit_html(app, sheets[0], dashboard_id="x")
-    assert "<nav" not in out
+    # Tab links carry the unique ``rounded-t-md`` class (per
+    # _render_sheet_tabs); nothing else on the page uses it.
+    assert "rounded-t-md" not in out
 
 
 def test_emit_html_renders_no_tabs_for_single_sheet_analysis() -> None:
@@ -79,7 +86,11 @@ def test_emit_html_renders_no_tabs_for_single_sheet_analysis() -> None:
     out = emit_html(
         app, sheets[0], dashboard_id="x", all_sheets=sheets,
     )
-    assert "<nav" not in out
+    # Tab links carry the unique ``rounded-t-md`` class (per
+    # _render_sheet_tabs); nothing else on the page uses it. Absence
+    # proves the tab strip didn't render. The always-on ``← Dashboards``
+    # back-link nav uses different classes, so it doesn't trip this.
+    assert "rounded-t-md" not in out
 
 
 def test_emit_html_renders_tab_per_sheet_when_multiple() -> None:
@@ -274,4 +285,8 @@ def test_dashboard_view_with_single_sheet_renders_no_tabs() -> None:
     })
     client = TestClient(asgi)
     out = client.get("/dashboards/L1").text
-    assert "<nav" not in out
+    # Tab links carry the unique ``rounded-t-md`` class (per
+    # _render_sheet_tabs); nothing else on the page uses it. Absence
+    # proves the tab strip didn't render. The always-on ``← Dashboards``
+    # back-link nav uses different classes, so it doesn't trip this.
+    assert "rounded-t-md" not in out

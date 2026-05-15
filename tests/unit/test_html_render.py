@@ -82,6 +82,18 @@ def test_emit_html_includes_sheet_description() -> None:
     assert "A short description." in out
 
 
+def test_emit_html_includes_back_to_dashboards_link() -> None:
+    """Sheet pages must surface a way back to the listing — without it,
+    a dashboard tab is a dead end (sheet tabs only walk within the
+    current dashboard, not back to the list of all dashboards)."""
+    sheet = _minimal_sheet()
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
+    assert 'href="/dashboards"' in out
+    assert "← Dashboards" in out
+
+
 def test_emit_html_emits_one_section_per_visual() -> None:
     sheet = _minimal_sheet()
     out = emit_html(

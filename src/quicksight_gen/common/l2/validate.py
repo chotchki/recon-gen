@@ -210,6 +210,7 @@ def validate(instance: L2Instance) -> None:
         instance, account_roles, template_roles,
     )
     _check_template_leg_rails_exist(instance, rail_names)
+    _check_template_has_at_least_one_leg_rail(instance)
     _check_chain_endpoints_exist(instance, rail_names, template_names)
     _check_limit_schedule_parent_role_resolves(instance, all_roles)
     _check_template_leg_rails_are_non_aggregating(instance, rails_by_name)
@@ -224,6 +225,7 @@ def validate(instance: L2Instance) -> None:
     _check_chain_xor_group_consistency(instance)
     _check_variable_single_leg_in_some_template(instance, rails_by_name)
     _check_xor_group_min_members(instance)
+    _check_xor_group_member_not_required(instance)
     _check_chain_parent_has_required_or_xor(instance)
 
     _check_two_leg_expected_net_consistency(instance)
@@ -448,6 +450,24 @@ def _check_template_leg_rails_exist(
             raise L2ValidationError(
                 f"TransferTemplate {t.name!r}.leg_rails: rails {missing!r} "
                 f"are not declared in rails"
+            )
+
+
+def _check_template_has_at_least_one_leg_rail(inst: L2Instance) -> None:
+    """R4.1 (X.4.f.10): every TransferTemplate must declare at least one
+    leg_rail. A template with zero leg_rails has no rail firings to
+    bundle into a transfer event — there's nothing for the L1 layer to
+    measure ``expected_net`` or ``completion`` against. The Studio
+    editor surfaces this as the inline error when the operator
+    de-selects the last rail in the multi_select; the L1 layer would
+    silently ignore the template otherwise.
+    """
+    for t in inst.transfer_templates:
+        if len(t.leg_rails) == 0:
+            raise L2ValidationError(
+                f"TransferTemplate {t.name!r}.leg_rails is empty — "
+                f"a template must declare at least one leg_rail. Either "
+                f"add a replacement rail or delete the whole template."
             )
 
 
@@ -794,6 +814,44 @@ def _check_xor_group_min_members(inst: L2Instance) -> None:
                 f"group is degenerate — 'exactly one of one option' "
                 f"trivially holds)"
             )
+
+
+def _check_xor_group_member_not_required(inst: L2Instance) -> None:
+    """C4.1 (X.4.f.10.followup): a ChainEntry that's a member of an
+    xor_group MUST NOT also have ``required=true``. The two flags
+    contradict each other:
+
+    - ``xor_group`` says: "exactly one member of this group fires per
+      parent firing." Each member is conditionally chosen, not
+      individually required.
+    - ``required=true`` says: "this specific child MUST fire every
+      time the parent fires."
+
+    If a required member fires every time, the OTHER xor_group members
+    must NEVER fire (else two members fire and XOR is violated). That
+    silently degenerates the group into "this one must fire, others
+    must not" — at which point the operator should have just declared
+    one ``required=true`` child and dropped the xor_group entirely.
+
+    In practice this is a misconfig: the operator copy-pasted a row
+    and didn't flip ``required`` to false, or they wanted "exactly one
+    of these is required to fire" (which is what xor_group already
+    means — without the per-member ``required`` flag).
+    """
+    for c in inst.chains:
+        if c.xor_group is None:
+            continue
+        if not c.required:
+            continue
+        raise L2ValidationError(
+            f"Chain {c.parent!r}->{c.child!r}: required=true is "
+            f"incompatible with xor_group={c.xor_group!r}. xor_group "
+            f"means exactly one member fires per parent — a "
+            f"required=true member would force itself to fire AND "
+            f"forbid the others, collapsing the group. Either drop "
+            f"required (use xor_group's exactly-one semantics) or drop "
+            f"xor_group (use a single required child) — not both."
+        )
 
 
 def _check_chain_parent_has_required_or_xor(inst: L2Instance) -> None:

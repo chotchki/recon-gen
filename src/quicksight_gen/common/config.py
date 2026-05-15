@@ -7,8 +7,9 @@ resources reference the datasource and account specified here.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
 import yaml
 
@@ -83,6 +84,65 @@ class SigningConfig:
     cert_path: str
     passphrase_env: str | None = None
     signer_name: str | None = None
+
+
+# X.4.g.2 — Read-only source database the deploy pipeline pulls from
+# in step 2 (after wiping the demo DB). Step 2 copies `transactions` +
+# `daily_balances` rows filtered to `<= test_generator.end_date` from
+# this datasource into `demo_database_url`. The two table names are
+# REQUIRED — the operator's external system rarely uses our
+# `<prefix>_transactions` / `<prefix>_daily_balances` naming, so they
+# declare the actual table names verbatim. When the cfg block is
+# absent, step 2 is skipped entirely (per X.4.g.10's no-etl path).
+@dataclass(frozen=True)
+class EtlDatasourceConfig:
+    url: str
+    transactions_table: str
+    daily_balances_table: str
+
+
+# X.4.g.3 — Step-3 synthetic-data overlay knobs.
+ScopeKind = Literal["full", "exceptions_only", "uncovered_rails"]
+PlantKind = Literal[
+    "drift", "overdraft", "limit_breach",
+    "stuck_pending", "stuck_unbundled", "supersession",
+]
+
+
+# X.4.g.3 — Step 3 of the deploy pipeline (synthetic data overlay) reads
+# its knobs from this block. Defaults preserve byte-identical-to-locked-
+# seeds output: with `etl_datasource` unset and these knobs at defaults,
+# `emit_full_seed` produces today's locked seed unchanged. The cfg-level
+# `seed` is the persistent baseline; `QS_GEN_FUZZ_SEED` env or the studio
+# data-shaping panel's "Roll" button (X.4.h.4) can override per-deploy.
+# `only_template` and `derive_balances` are declared here but their
+# pipeline modes ship later (X.4.i.1 / X.4.i.2).
+@dataclass(frozen=True)
+class TestGeneratorConfig:
+    # Class name starts with "Test" so pytest collection emits a
+    # PytestCollectionWarning by default ("cannot collect: has
+    # __init__ constructor"). The convention pytest documents is the
+    # __test__ = False class attribute, which suppresses collection
+    # without renaming the class.
+    __test__ = False
+
+    enabled: bool = True
+    scope: ScopeKind = "full"
+    end_date: date | None = None
+    seed: int | None = None
+    plants: tuple[PlantKind, ...] = ()
+    only_template: str | None = None
+    derive_balances: bool = False
+    # X.4.h.6.fix — Studio trainer's "up_to" cutoff. When set, deploy
+    # appends DELETE statements after the generator emits to truncate
+    # rows past this date. Lets the trainer scrub a cutoff inside a
+    # fixed scenario window: ``end_date`` (the anchor) defines plant
+    # calendar positions; ``cutoff_date`` defines how far through the
+    # scenario to actually emit. Studio sets this from
+    # ``cache.get_up_to()`` when up_to < window_end; CLI invocations
+    # leave it None (full emission). Studio-only knob — no UI for it
+    # outside the trainer panel.
+    cutoff_date: date | None = None
 
 
 @dataclass
@@ -184,6 +244,24 @@ class Config:
     # at the dispatch site with the env-var fallback name.
     aws_pg_cluster_id: str | None = None
     aws_oracle_instance_id: str | None = None
+    # X.4.g.1 — Optional shell command run as step 1 of the deploy
+    # pipeline, BEFORE step 2 wipes the demo DB. Non-zero exit halts
+    # the pipeline (the demo DB is never touched). When unset, step 1
+    # is a no-op. Parsed via `shlex.split`, run with `shell=False`;
+    # stdout/stderr stream to `/dev_log` (X.4.g.4 wires the runner).
+    etl_hook: str | None = None
+    # X.4.g.2 — When set, step 2 of the deploy pipeline pulls from
+    # this datasource into the demo DB after the wipe. When None, the
+    # pipeline runs etl-free (step 2 wipe still happens, then jumps
+    # to step 3 generator).
+    etl_datasource: EtlDatasourceConfig | None = None
+    # X.4.g.3 — Step 3 (synthetic data overlay) knobs. Non-Optional
+    # default-factory so the pipeline never None-checks; an absent
+    # block in the cfg yaml resolves to `TestGeneratorConfig()`
+    # (byte-identical-to-locked-seeds output).
+    test_generator: TestGeneratorConfig = field(
+        default_factory=TestGeneratorConfig,
+    )
 
     def __post_init__(self) -> None:
         # If demo_database_url is set but datasource_arn is not, derive it
@@ -333,6 +411,8 @@ _CONFIG_ALLOWED_KEYS: frozenset[str] = frozenset({
     "principal_arns", "principal_arn", "extra_tags", "demo_database_url",
     "dialect", "signing", "tagging_enabled", "app2_db_pool_size", "auth",
     "default_l2_instance", "aws_pg_cluster_id", "aws_oracle_instance_id",
+    # X.4.g.1-3 — deploy pipeline knobs.
+    "etl_hook", "etl_datasource", "test_generator",
 })
 
 _CONFIG_L2_ONLY_KEYS: frozenset[str] = frozenset({
@@ -585,6 +665,164 @@ def load_config(path: str | Path | None = None) -> Config:
             f"tagging_enabled must be a bool; got {raw_tagging!r}."
         )
 
+    # X.4.g.2 — optional etl_datasource block.
+    raw_etl_ds = values.get("etl_datasource")
+    etl_datasource: EtlDatasourceConfig | None = None
+    if isinstance(raw_etl_ds, dict):
+        etl_typed = cast(dict[Any, Any], raw_etl_ds)
+        etl_dict: dict[str, object] = {
+            str(k): v for k, v in etl_typed.items()
+        }
+        unknown_etl = set(etl_dict) - {
+            "url", "transactions_table", "daily_balances_table",
+        }
+        if unknown_etl:
+            raise ValueError(
+                f"etl_datasource block contains unknown keys: "
+                f"{sorted(unknown_etl)}. Allowed: url, "
+                f"transactions_table, daily_balances_table."
+            )
+        try:
+            etl_datasource = EtlDatasourceConfig(
+                url=str(etl_dict["url"]),
+                transactions_table=str(etl_dict["transactions_table"]),
+                daily_balances_table=str(etl_dict["daily_balances_table"]),
+            )
+        except KeyError as exc:
+            raise ValueError(
+                f"etl_datasource block is missing required field: {exc}. "
+                f"Need url, transactions_table, daily_balances_table."
+            ) from exc
+    elif raw_etl_ds is not None:
+        raise ValueError(
+            f"etl_datasource must be a mapping; got "
+            f"{type(raw_etl_ds).__name__} ({raw_etl_ds!r})."
+        )
+
+    # X.4.g.3 — optional test_generator block. Absent or None resolves
+    # to TestGeneratorConfig() (byte-identical-to-locked-seeds output);
+    # explicit dict parses + validates.
+    raw_tgen = values.get("test_generator")
+    test_generator = TestGeneratorConfig()
+    if isinstance(raw_tgen, dict):
+        tgen_typed = cast(dict[Any, Any], raw_tgen)
+        tgen_dict: dict[str, object] = {
+            str(k): v for k, v in tgen_typed.items()
+        }
+        allowed_tgen = {
+            "enabled", "scope", "end_date", "seed", "plants",
+            "only_template", "derive_balances", "cutoff_date",
+        }
+        unknown_tgen = set(tgen_dict) - allowed_tgen
+        if unknown_tgen:
+            raise ValueError(
+                f"test_generator block contains unknown keys: "
+                f"{sorted(unknown_tgen)}. Allowed: {sorted(allowed_tgen)}."
+            )
+        scope_val = tgen_dict.get("scope", "full")
+        scope_allowed = get_args(ScopeKind)
+        if scope_val not in scope_allowed:
+            raise ValueError(
+                f"test_generator.scope must be one of {list(scope_allowed)}; "
+                f"got {scope_val!r}."
+            )
+        plants_raw = tgen_dict.get("plants", ())
+        if isinstance(plants_raw, (list, tuple)):
+            plants_iter = cast(list[Any] | tuple[Any, ...], plants_raw)
+            plants_seq = tuple(str(p) for p in plants_iter)
+        else:
+            raise ValueError(
+                f"test_generator.plants must be a list of strings; "
+                f"got {type(plants_raw).__name__} ({plants_raw!r})."
+            )
+        plants_allowed = get_args(PlantKind)
+        bad_plants = [p for p in plants_seq if p not in plants_allowed]
+        if bad_plants:
+            raise ValueError(
+                f"test_generator.plants contains unknown values "
+                f"{bad_plants}; allowed: {list(plants_allowed)}."
+            )
+        end_date_raw = tgen_dict.get("end_date")
+        end_date_val: date | None
+        if end_date_raw is None:
+            end_date_val = None
+        elif isinstance(end_date_raw, date):
+            end_date_val = end_date_raw
+        elif isinstance(end_date_raw, str):
+            try:
+                end_date_val = date.fromisoformat(end_date_raw)
+            except ValueError as exc:
+                raise ValueError(
+                    f"test_generator.end_date must be ISO 8601 (YYYY-MM-DD); "
+                    f"got {end_date_raw!r}."
+                ) from exc
+        else:
+            raise ValueError(
+                f"test_generator.end_date must be a date or ISO string; "
+                f"got {type(end_date_raw).__name__} ({end_date_raw!r})."
+            )
+        seed_raw = tgen_dict.get("seed")
+        seed_val: int | None
+        if seed_raw is None:
+            seed_val = None
+        elif isinstance(seed_raw, int) and not isinstance(seed_raw, bool):
+            seed_val = seed_raw
+        else:
+            raise ValueError(
+                f"test_generator.seed must be an integer; "
+                f"got {type(seed_raw).__name__} ({seed_raw!r})."
+            )
+        enabled_raw = tgen_dict.get("enabled", True)
+        if not isinstance(enabled_raw, bool):
+            raise ValueError(
+                f"test_generator.enabled must be a bool; got {enabled_raw!r}."
+            )
+        derive_raw = tgen_dict.get("derive_balances", False)
+        if not isinstance(derive_raw, bool):
+            raise ValueError(
+                f"test_generator.derive_balances must be a bool; "
+                f"got {derive_raw!r}."
+            )
+        only_template_raw = tgen_dict.get("only_template")
+        only_template_val: str | None = (
+            str(only_template_raw) if only_template_raw is not None else None
+        )
+        cutoff_date_raw = tgen_dict.get("cutoff_date")
+        cutoff_date_val: date | None
+        if cutoff_date_raw is None:
+            cutoff_date_val = None
+        elif isinstance(cutoff_date_raw, date):
+            cutoff_date_val = cutoff_date_raw
+        elif isinstance(cutoff_date_raw, str):
+            try:
+                cutoff_date_val = date.fromisoformat(cutoff_date_raw)
+            except ValueError as exc:
+                raise ValueError(
+                    f"test_generator.cutoff_date must be ISO 8601 (YYYY-MM-DD); "
+                    f"got {cutoff_date_raw!r}."
+                ) from exc
+        else:
+            raise ValueError(
+                f"test_generator.cutoff_date must be a date or ISO string; "
+                f"got {type(cutoff_date_raw).__name__} ({cutoff_date_raw!r})."
+            )
+        # cast() narrows the Literal type from runtime-validated str values.
+        test_generator = TestGeneratorConfig(
+            enabled=enabled_raw,
+            scope=cast(ScopeKind, scope_val),
+            end_date=end_date_val,
+            seed=seed_val,
+            plants=cast(tuple[PlantKind, ...], plants_seq),
+            only_template=only_template_val,
+            derive_balances=derive_raw,
+            cutoff_date=cutoff_date_val,
+        )
+    elif raw_tgen is not None:
+        raise ValueError(
+            f"test_generator must be a mapping; got "
+            f"{type(raw_tgen).__name__} ({raw_tgen!r})."
+        )
+
     raw_pool_size = values.get("app2_db_pool_size", 10)
     if not isinstance(raw_pool_size, (int, str)):
         raise ValueError(
@@ -619,4 +857,7 @@ def load_config(path: str | Path | None = None) -> Config:
         app2_db_pool_size=pool_size,
         aws_pg_cluster_id=_opt_str(values, "aws_pg_cluster_id"),
         aws_oracle_instance_id=_opt_str(values, "aws_oracle_instance_id"),
+        etl_hook=_opt_str(values, "etl_hook"),
+        etl_datasource=etl_datasource,
+        test_generator=test_generator,
     )

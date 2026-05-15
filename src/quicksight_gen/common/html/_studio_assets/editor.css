@@ -1,0 +1,420 @@
+/* X.4.e + X.4.f — Studio editor styles. Pairs with diagram.css's
+ * shared chrome tokens (--studio-bg / --studio-fg / etc.) so the
+ * editor list page sits visually next to the diagram page.
+ */
+
+#entity-list,
+.entity-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(28rem, 1fr));
+  gap: 1rem;
+  padding: 1rem;
+}
+
+/* X.4.f.7 — home-page layout overrides. The diagram pane and editor
+ * pages both lock body to viewport height; the home page composes
+ * both and needs to scroll past the iframe + every entity section.
+ */
+body.home-page {
+  height: auto;
+  min-height: 100vh;
+  display: block;
+}
+
+.home-diagram {
+  border-bottom: 1px solid var(--studio-border);
+  background: white;
+  height: 50vh;
+  min-height: 24rem;
+}
+
+.home-diagram iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.home-entities {
+  padding: 0.5rem 1rem 2rem;
+}
+
+.home-section {
+  background: white;
+  border: 1px solid var(--studio-border);
+  border-radius: 0.4rem;
+  margin-bottom: 0.75rem;
+  overflow: hidden;
+}
+
+.home-section > summary {
+  cursor: pointer;
+  padding: 0.6rem 1rem;
+  font-weight: 600;
+  color: var(--studio-accent);
+  background: var(--studio-bg);
+  user-select: none;
+}
+
+.home-section > summary:hover {
+  background: var(--studio-tint);
+}
+
+.home-section > summary .count {
+  color: var(--studio-muted);
+  font-weight: 400;
+  margin-left: 0.25rem;
+}
+
+.home-section > summary .home-section-link {
+  margin-left: 0.5rem;
+  color: var(--studio-accent);
+  text-decoration: none;
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+
+.home-section > summary .home-section-link:hover {
+  text-decoration: underline;
+}
+
+.home-section-loading {
+  padding: 1rem;
+  color: var(--studio-muted);
+  font-style: italic;
+  margin: 0;
+}
+
+/* X.4.f.8 — diagram-driven card filter. */
+.entity-card.is-hidden-by-focus {
+  display: none;
+}
+
+.focus-filter-indicator {
+  color: var(--studio-muted);
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+
+/* X.4.f.9.create-page — full-page Create New <kind> screen. */
+body.create-page {
+  height: auto;
+  min-height: 100vh;
+  display: block;
+}
+.create-page-main {
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+}
+@media (min-width: 56rem) {
+  .create-page-main {
+    grid-template-columns: 22rem 1fr;
+  }
+}
+.create-intro {
+  background: white;
+  border: 1px solid var(--studio-border);
+  border-radius: 0.4rem;
+  padding: 1rem 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--studio-fg);
+}
+.create-intro p {
+  margin: 0 0 0.75rem;
+}
+.create-intro p:last-child {
+  margin-bottom: 0;
+}
+.create-intro code {
+  background: var(--studio-tint);
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.2rem;
+  font-size: 0.85em;
+}
+.create-form-wrap {
+  background: white;
+  border: 1px solid var(--studio-border);
+  border-radius: 0.4rem;
+  padding: 1.25rem;
+}
+.create-form .form-actions {
+  margin-top: 1rem;
+}
+
+/* X.4.f.11.5 — Rail subtype picker (step 1 of the 2-step rail
+ * create flow). Two big tappable buttons stacked vertically (or
+ * side-by-side on wider screens), each with a strong title +
+ * one-line example.
+ */
+.rail-subtype-picker {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+}
+@media (min-width: 36rem) {
+  .rail-subtype-picker {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.rail-subtype-button {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1.25rem 1.25rem;
+  border: 2px solid var(--studio-border);
+  border-radius: 0.4rem;
+  background: white;
+  color: var(--studio-fg);
+  text-decoration: none;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: border-color 0.1s ease-in-out, background 0.1s ease-in-out;
+}
+.rail-subtype-button:hover {
+  border-color: var(--studio-accent);
+  background: var(--studio-tint);
+}
+.rail-subtype-button strong {
+  color: var(--studio-accent);
+  font-size: 1.05rem;
+}
+.rail-subtype-button small {
+  color: var(--studio-muted);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+/* X.4.f.8.reverse — clickable card title → diagram focus. */
+.entity-card-title {
+  cursor: pointer;
+  user-select: none;
+}
+.entity-card-title:hover {
+  text-decoration: underline;
+}
+.entity-card-title:focus {
+  outline: 2px solid var(--studio-accent);
+  outline-offset: 2px;
+  border-radius: 0.2rem;
+}
+
+.entity-card {
+  background: white;
+  border: 1px solid var(--studio-border);
+  border-radius: 0.4rem;
+  padding: 1rem;
+  font-size: 0.875rem;
+}
+
+.entity-card.editing {
+  border-color: var(--studio-accent);
+  box-shadow: 0 0 0 2px rgba(31, 78, 121, 0.15);
+}
+
+.entity-card header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--studio-border);
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.entity-card h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--studio-accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* X.4.f.11 — Rail subtype badge in the read card title + edit form
+ * header. Compact pill so it doesn't overwhelm the entity name; uses
+ * tint background + accent foreground for theme consistency.
+ */
+.entity-subtype-badge {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 500;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  color: var(--studio-accent);
+  background: var(--studio-tint);
+  border-radius: 0.25rem;
+  vertical-align: middle;
+  letter-spacing: 0.02em;
+}
+
+.entity-card .edit-link,
+.entity-card .cancel-link,
+.entity-card .delete-link {
+  color: var(--studio-accent);
+  text-decoration: none;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.entity-card .edit-link:hover,
+.entity-card .cancel-link:hover {
+  text-decoration: underline;
+}
+.entity-card .delete-link {
+  color: var(--color-danger, #c62828);
+}
+.entity-card .delete-link:hover {
+  text-decoration: underline;
+}
+.entity-card-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+/* X.4.f.9 — section-header "Add" button (peer of the ↗ deep-link). */
+.home-section-add {
+  margin-left: 0.5rem;
+  color: var(--studio-accent);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.home-section-add:hover {
+  text-decoration: underline;
+}
+
+.entity-card dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 9rem 1fr;
+  gap: 0.4rem 0.75rem;
+}
+.entity-card dt {
+  color: var(--studio-muted);
+  font-weight: 500;
+}
+.entity-card dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.75rem;
+}
+
+.field-row label {
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--studio-fg);
+}
+
+.field-row label .required {
+  color: #c62828;
+}
+
+.field-row input[type="text"],
+.field-row select,
+.field-row textarea {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--studio-border);
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+  font-family: inherit;
+  background: white;
+}
+
+.field-row input[type="text"]:focus,
+.field-row select:focus,
+.field-row textarea:focus {
+  outline: 2px solid var(--studio-accent);
+  outline-offset: -1px;
+  border-color: var(--studio-accent);
+}
+
+.field-row textarea {
+  resize: vertical;
+  min-height: 4rem;
+}
+
+/* X.4.f.10 — multi_select renders a checkbox group (easier than
+ * Cmd/Ctrl-click on <select multiple>). Two-column layout when there
+ * are many options; collapses to one column on narrow screens.
+ */
+.multi-select-group {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.3rem 0.75rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--studio-border);
+  border-radius: 0.25rem;
+  background: white;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+@media (min-width: 28rem) {
+  .multi-select-group {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.multi-select-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 400;
+  font-size: 0.875rem;
+  cursor: pointer;
+  color: var(--studio-fg);
+}
+.multi-select-item input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.field-helper {
+  font-size: 0.75rem;
+  color: var(--studio-muted);
+}
+
+.field-error {
+  font-size: 0.75rem;
+  color: var(--color-danger, #c62828);
+  background: #fef2f2;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.2rem;
+}
+
+.form-global-error {
+  background: #fef2f2;
+  color: var(--color-danger, #c62828);
+  border: 1px solid #fecaca;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.25rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.form-actions button {
+  background: var(--studio-accent);
+  color: var(--color-accent-fg, white);
+  border: 1px solid var(--studio-accent);
+  padding: 0.4rem 1rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.form-actions button:hover {
+  /* Slight darken via opacity rather than a separate token —
+   * matches App2's accent-hover convention (input.css comments). */
+  opacity: 0.85;
+}

@@ -36,6 +36,8 @@ from quicksight_gen.common.l2.cache import L2InstanceCache
 if TYPE_CHECKING:
     from starlette.routing import Mount, Route
 
+    from quicksight_gen.common.db import AsyncConnectionPool
+
 
 # The four real apps. Dashboards + Studio both serve them; Studio
 # additionally edits the L2 they're built from. ``smoke`` is the
@@ -110,15 +112,24 @@ def build_real_app(app_name: str, cfg: Any, instance: Any) -> tuple[Any, Any]:  
     return tree_app, tree_app.analysis.sheets[0]
 
 
-# Studio-routes factory contract: a callable that takes the cache and
-# returns a list of routes. ``cli.dashboards`` passes ``None``;
-# ``cli.studio`` passes ``make_studio_routes``. The seam keeps
-# ``_html_serve`` ignorant of Studio internals.
+# Studio-routes factory contract: a callable that takes the cache, a
+# dev-log flag, and the demo-DB pool (None = no pool, e.g. unit tests
+# or stub-mode dashboards) and returns a list of routes.
+# ``cli.dashboards`` passes ``None``; ``cli.studio`` passes
+# ``make_studio_routes``. The seam keeps ``_html_serve`` ignorant of
+# Studio internals.
 #
 # PEP 695 ``type`` statement defers evaluation — Route/Mount only get
 # resolved when a type-checker walks the alias, never at module load.
 # That keeps the no-``[serve]`` install paths importable.
-type StudioRoutesFactory = Callable[[L2InstanceCache], list[Route | Mount]]
+#
+# X.4.c.5.b: the pool is the third positional arg so X.4.c.5.c's
+# ``GET /diagram/coverage`` route can mount and the chrome toggle
+# (X.4.c.5.d) can light up.
+type StudioRoutesFactory = Callable[
+    [L2InstanceCache, bool, "AsyncConnectionPool | None"],
+    list[Route | Mount],
+]
 
 
 def run_html_server(
@@ -211,16 +222,16 @@ def run_html_server(
             (name, *build_real_app(name, cfg, instance)) for name in names
         ]
 
-    # Studio: build the in-memory L2 cache + the routes that own ``GET /``
-    # (the Studio landing page, replacing the dashboards redirect).
-    studio_routes: list[Route | Mount] | None = None
+    # Studio: build the in-memory L2 cache here (no event loop needed);
+    # routes are built INSIDE ``_serve()`` so the factory can take the
+    # demo-DB pool (X.4.c.5.b — coverage fetcher needs the pool).
+    cache: L2InstanceCache | None = None
     if studio_routes_factory is not None:
         if l2_instance_path is None:  # pragma: no cover — Studio CLI requires --l2
             raise click.UsageError(
                 "studio requires an L2 instance (--l2)."
             )
         cache = L2InstanceCache.from_path(l2_instance_path)
-        studio_routes = studio_routes_factory(cache)
         click.echo(
             f"studio: cached L2 instance "
             f"{cache.get().instance!s} from {cache.path}"
@@ -276,6 +287,12 @@ def run_html_server(
                 f"app(s) [{', '.join(n for n, _, _ in real_apps)}] "
                 f"(prefix={cfg.l2_instance_prefix or instance.instance})"
             )
+        # X.4.c.5.b — build studio_routes here, after the pool exists,
+        # so the diagram chrome can light up the Coverage toggle. None
+        # pool ⇒ chrome silently omits the toggle (graceful degrade).
+        studio_routes: list[Route | Mount] | None = None
+        if studio_routes_factory is not None and cache is not None:
+            studio_routes = studio_routes_factory(cache, dev_log, pool)
         try:
             asgi_app = make_app(
                 dashboards=dashboards, dev_log=dev_log, docs_dir=docs_dir,

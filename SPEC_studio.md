@@ -240,33 +240,29 @@ Studio's defining visual: ONE interactive diagram of the L2 — replaces the sta
 
 ONE renderer, mode-switched overlays. The exact UI shape "falls out of the implementation" — we're not over-planning the mode-switching machinery.
 
-### The graph model — already exists
+### The graph model — typed projection + per-rail dot renderer
 
-`common/l2/topology.py::build_topology_graph` already walks an `L2Instance` and produces the full relationship graph: roles + internal/external scope styling, TwoLegRail edges (bundled across same-direction rails for legibility), SingleLegRail self-loops, TransferTemplate clusters, Chain dashed edges (with required/xor-group badges). It currently renders to static Graphviz; that's the only thing that changes per renderer choice.
+`common/l2/topology.py::topology_graph_for(instance)` walks an `L2Instance` once into a typed `TopologyGraph` (frozen value object). `build_topology_graph_per_rail(instance, *, focus_node_id=None)` then emits a `graphviz.Digraph` where every Rail is a first-class node — `src_role → rail → dst_role` becomes a 3-rank chain dot lays out deterministically. Bundle nodes consolidate parallel pure-connectivity rails (anchored rails — chain endpoints / template leg-rails — stay individual). Templates render as `cluster_*` subgraphs around their leg-rails. Chains as dashed edges between rail/template nodes. Control-parent (subledger → control role) as dashed gray edges with `arrowhead="onormal"`.
 
-### The renderer-choice spike — first task in X.4
+Compactness defaults baked in: `nodesep=0.15`, `ranksep=0.35`, `mclimit=2.0` (more crossing-reduction iterations), `concentrate=true`. Trades CPU for visual density; sasquatch_pr lays out under 100ms.
 
-The current `common/tree/visuals.py::ForceGraph` is "barely a tech demo" (user). A force-directed view of `sasquatch_pr` (meatier than `spec_example`: dozens of accounts/rails, templates, chains) that's actually *legible* is the riskiest piece of X.4. So X.4 starts with a **timeboxed diagram spike** that compares two approaches:
+### Renderer locked: graphviz dot, rails-as-nodes (X.4.b spike, 2026-05-13)
 
-1. **D3 + d3-force** — the existing primitive, tuned. Maximum flexibility, hardest to get to "legible" without fighting the layout. Stays inside the existing JS-only stack (vendored d3 in the wheel).
-2. **Enhanced graphviz** — the existing graphviz output is a perfectly legible static SVG; the existing training diagrams are graphviz-rendered and the user has called them "amazing." Add click-to-focus / type-toggle on a post-processed SVG (data-attrs per node + JS event handlers) and you get interactivity without losing the layout quality `dot` already delivers.
+The X.4.b spike compared D3 + d3-force against post-processed graphviz. Dot won: the rails-as-first-class-nodes model insight let dot's deterministic rank algorithm produce the user's mental "roles → rails → roles" reading with zero knobs, while d3-force required per-graph manual tuning that never converged (28 chrome sliders accumulated before the user named the treadmill). Full judgment in `docs/audits/x_4_b_diagram_renderer_spike.md`.
 
-(ELK was the third candidate but it's out: it's a large Java library, which would drag a JVM dependency / build step into the runtime — a whole new complexity tier that doesn't fit a Python+JS tool. Mermaid was already out from the Phase S spike. So the spike is genuinely D3 vs graphviz, no third arm.)
+Diagram surface "good enough" criteria, all met:
 
-Spike deliverable = a **judgment call**, not a finished feature: which renderer gets us to "legible on `sasquatch_pr` with toggles + focus working."
+- `sasquatch_pr` renders without overlap or unreadable label collisions ✅ (deterministic dot layout).
+- All four entity-type toggles (Roles / Rails / Chains / Templates) ✅ (CSS-class visibility toggles via `data-kind` post-processing in `diagram.js`).
+- Click-a-node → focus-subgraph ✅ (server-side filter + `?focus=<node_id>` URL navigation; dot re-lays out the focused subset cleanly. Click-empty-canvas / Esc / Reset drop the param. Smart-default hops by node kind: roles/templates default to 2 to cross a rail; rails/bundles default to 1).
+- Coverage-tint mode hook — mode-stub dropped during X.4.b.cleanup; the real fetcher + chrome surface is X.4.c.5 work.
 
-**"Good enough" defined up front** to prevent the polish-forever trap (X.2's "took way too long" risk):
-- `sasquatch_pr` renders without overlap or unreadable label collisions.
-- All four entity-type toggles (Accounts / Rails / Chains / Templates) work.
-- Click-a-node → focus-subgraph works.
-- Coverage-tint mode works (a separate data fetcher feeds row-counts).
-
-Past that bar: ship and move on. No graphviz↔d3 parity requirement — if d3 wins, graphviz can be cut later ("go look in the tool", not a static render). If enhanced graphviz wins, the d3 ForceGraph stays as it is for any future sheet-visual use; the diagram surface uses graphviz.
+The d3 ForceGraph in `common/tree/visuals.py` is unrelated and stays for any future sheet-visual use; the diagram surface is dot-only.
 
 ### What the diagram lets you do
 
-- **Toggle entity types** on/off — Accounts, Rails, Chains, Templates each get a checkbox in the diagram chrome.
-- **Click a node** → focus its connected subgraph (everything not directly connected dims).
+- **Toggle entity types** on/off — Roles (Internal / External), Rails, Chains, Templates, Control hierarchy each get a checkbox in the diagram chrome.
+- **Click a node** → re-renders the focused subset (focus + smart-default hops; roles/templates cross one rail, rails/bundles show endpoints). Click-empty-canvas / Esc / Reset all clear focus.
 - **Reset filters** — back to the full graph, all types visible.
 - **(Coverage mode)** — nodes/edges tinted by data presence; row-count on hover.
 - **(Trainer mode)** — planted exceptions visually located on their host entities.

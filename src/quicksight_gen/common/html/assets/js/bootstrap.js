@@ -408,7 +408,7 @@
   function rowDrillUrl(drill, row, colIndex) {
     var qs = [];
     var params = drill.params || [];
-    params.forEach(function (p) {
+    params.forEach((p) => {
       var i = colIndex[String(p.column).toLowerCase()];
       var v;
       if (i === undefined || i === null) return;
@@ -426,11 +426,11 @@
 
   function openRowMenu(eventOrEl, drills, row, colIndex) {
     if (typeof ctxmenu === "undefined" || !ctxmenu || !ctxmenu.show) return;
-    var items = drills.map(function (d) {
+    var items = drills.map((d) => {
       var url = rowDrillUrl(d, row, colIndex);
       return {
         text: d.label,
-        action: function () {
+        action: () => {
           window.location.href = url;
         },
       };
@@ -465,12 +465,12 @@
     tbody = target.querySelector("tbody");
     if (!tbody) return;
     colIndex = {};
-    columns.forEach(function (c, i) {
+    columns.forEach((c, i) => {
       if (c && c.name != null) colIndex[String(c.name).toLowerCase()] = i;
     });
     hasMenu = false;
     clickDrill = null;
-    drills.forEach(function (d) {
+    drills.forEach((d) => {
       if (d.trigger === "DATA_POINT_MENU") hasMenu = true;
       if (!clickDrill && d.trigger === "DATA_POINT_CLICK") clickDrill = d;
     });
@@ -485,7 +485,7 @@
         headTr.appendChild(th);
       }
     }
-    tbody.querySelectorAll("tr").forEach(function (tr, ri) {
+    tbody.querySelectorAll("tr").forEach((tr, ri) => {
       var row = rows[ri];
       var url;
       var td;
@@ -496,17 +496,17 @@
       tr.style.cursor = "pointer";
       tr.setAttribute("data-row-drill", "1");
       tr.setAttribute("tabindex", "0");
-      tr.addEventListener("click", function () {
+      tr.addEventListener("click", () => {
         window.location.href = url;
       });
-      tr.addEventListener("keydown", function (e) {
+      tr.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           window.location.href = url;
         }
       });
       if (hasMenu) {
-        tr.addEventListener("contextmenu", function (e) {
+        tr.addEventListener("contextmenu", (e) => {
           openRowMenu(e, drills, row, colIndex);
         });
         td = document.createElement("td");
@@ -519,7 +519,7 @@
         btn.textContent = "⋯";
         btn.setAttribute("aria-label", "Row actions");
         btn.setAttribute("aria-haspopup", "menu");
-        btn.addEventListener("click", function (e) {
+        btn.addEventListener("click", (e) => {
           openRowMenu(e, drills, row, colIndex);
         });
         td.appendChild(btn);
@@ -1089,7 +1089,62 @@
     wireCategoryFilters(document);
     wireFilterWidgets(document);
     wireFilterAutoRefresh();
+    wireDataGenerationPoller();
   });
+
+  // X.4.g.12.b — poll /data_generation_id; reload when the server-
+  // reported value differs from what this page captured at first load.
+  //
+  // Captured baseline = meta[name="data-generation-id"] content (the
+  // server's value at the moment this page rendered). Polling cadence
+  // 3s is a UX/CPU sweet spot — short enough that "I clicked Deploy"
+  // feels live (≤ 3s perceived staleness), long enough that a tab
+  // open all day doesn't burn meaningful battery.
+  //
+  // Visible-tab-only via the Page Visibility API: a backgrounded tab
+  // skips polls (saves battery + bandwidth) and immediately checks on
+  // visibilitychange → "visible" so re-foregrounding catches up
+  // without waiting for the next tick.
+  //
+  // No baseline meta = no-op. Lets dashboards pages opt in via the
+  // server emitting the meta; other surfaces (the dashboards listing
+  // page, error pages) stay quiet.
+  function wireDataGenerationPoller() {
+    var meta = document.querySelector('meta[name="data-generation-id"]');
+    if (!meta) return;
+    var baselineRaw = meta.getAttribute("content");
+    var baseline = parseInt(baselineRaw, 10);
+    if (Number.isNaN(baseline)) return;
+
+    function pollOnce() {
+      if (document.visibilityState !== "visible") return;
+      fetch("/data_generation_id", { cache: "no-store" })
+        .then((resp) => (resp.ok ? resp.json() : null))
+        .then((body) => {
+          if (!body) return;
+          var current = parseInt(body.data_generation_id, 10);
+          if (Number.isNaN(current)) return;
+          if (current !== baseline) {
+            // Update baseline before reloading so a slow reload + bumped
+            // counter mid-flight doesn't double-fire. The reload will
+            // re-read the meta tag from the freshly-rendered page.
+            baseline = current;
+            window.location.reload();
+          }
+        })
+        .catch(() => {
+          /* swallow — next tick retries */
+        });
+    }
+    // Fire once immediately on load (catches "deploy happened in the
+    // 200ms between page render + DOMContentLoaded"), then poll on a
+    // 3s interval, AND re-poll when the tab regains focus.
+    pollOnce();
+    setInterval(pollOnce, 3000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") pollOnce();
+    });
+  }
 
   // X.2.g.1.e — auto-refresh visuals on filter change. Listens for
   // ``change`` events on the #filter-form and broadcasts a
@@ -1105,9 +1160,9 @@
     var form = document.getElementById("filter-form");
     if (!form) return;
     var timer = null;
-    form.addEventListener("change", function () {
+    form.addEventListener("change", () => {
       clearTimeout(timer);
-      timer = setTimeout(function () {
+      timer = setTimeout(() => {
         if (typeof htmx !== "undefined") {
           htmx.trigger(document.body, "refresh");
         }
@@ -1129,18 +1184,16 @@
   function wireCategoryFilters(root) {
     var scope = root || document;
     var wrappers = scope.querySelectorAll(".category-filter");
-    wrappers.forEach(function (div) {
+    wrappers.forEach((div) => {
       if (div.dataset.wired === "1") return;
       div.dataset.wired = "1";
       var hidden = div.querySelector('input[type="hidden"]');
       var select = div.querySelector("select[data-category-select]");
       if (!hidden || !select) return;
-      select.addEventListener("change", function () {
+      select.addEventListener("change", () => {
         var vals = Array.prototype.map.call(
           select.selectedOptions,
-          function (o) {
-            return o.value;
-          },
+          (o) => o.value,
         );
         hidden.value = vals.join(",");
       });
@@ -1177,7 +1230,7 @@
   //         <input name="param_<name>"> gets synced
   function wireFilterWidgets(root) {
     var scope = root || document;
-    scope.querySelectorAll("[data-widget]").forEach(function (el) {
+    scope.querySelectorAll("[data-widget]").forEach((el) => {
       if (el.dataset.widgetWired === "1") return;
       var kind = el.dataset.widget;
       if (kind === "tomselect") {
@@ -1198,7 +1251,7 @@
       // Tom Select syncs the underlying <select>'s selected options but
       // doesn't always re-fire a native `change` on it — do it
       // explicitly so wireFilterAutoRefresh sees the new value.
-      onChange: function () {
+      onChange: () => {
         el.dispatchEvent(new Event("change", { bubbles: true }));
       },
     });
@@ -1212,7 +1265,7 @@
     flatpickr(el, {
       mode: "range",
       dateFormat: "Y-m-d",
-      onChange: function (selectedDates, _dateStr, instance) {
+      onChange: (selectedDates, _dateStr, instance) => {
         var lo = selectedDates[0]
           ? instance.formatDate(selectedDates[0], "Y-m-d")
           : "";
@@ -1251,7 +1304,7 @@
     if (el.dataset.step) sopts.step = Number(el.dataset.step);
     if (valueInput) {
       noUiSlider.create(el, sopts);
-      el.noUiSlider.on("change", function (values) {
+      el.noUiSlider.on("change", (values) => {
         valueInput.value = values[0];
         valueInput.dispatchEvent(new Event("change", { bubbles: true }));
       });
@@ -1272,7 +1325,7 @@
     };
     if (el.dataset.step) opts.step = Number(el.dataset.step);
     noUiSlider.create(el, opts);
-    el.noUiSlider.on("change", function (values) {
+    el.noUiSlider.on("change", (values) => {
       if (minInput) minInput.value = values[0];
       if (maxInput) maxInput.value = values[1];
       if (minInput) {
@@ -1303,6 +1356,7 @@
       showErrorToast: showErrorToast,
       ensureToastContainer: ensureToastContainer,
       wireCategoryFilters: wireCategoryFilters,
+      wireDataGenerationPoller: wireDataGenerationPoller,
       wireFilterAutoRefresh: wireFilterAutoRefresh,
       wireFilterWidgets: wireFilterWidgets,
       wireRowDrills: wireRowDrills,

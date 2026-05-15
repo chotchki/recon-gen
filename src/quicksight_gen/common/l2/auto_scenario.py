@@ -746,6 +746,53 @@ def add_broken_rail_plants(
     )
 
 
+# -- X.4.h.0.a — Plant-kind filter (data-shaping panel knob) ----------------
+
+
+def filter_scenario_plants(
+    base: ScenarioPlant,
+    kinds: tuple[str, ...] | None,
+) -> ScenarioPlant:
+    """Return a copy of ``base`` keeping only the requested L1 plant kinds.
+
+    The data-shaping panel's plant-toggle checkboxes (X.4.h.2) write a
+    subset of the ``PlantKind`` enum into ``cfg.test_generator.plants``;
+    this is the projection that consumes that subset. Per SPEC's
+    "Data-shaping model / plants" section: ``None`` or empty tuple
+    ⇒ "all kinds" (today's behavior), so the absent-block case stays
+    byte-identical to the locked seeds.
+
+    Only the 6 L1-invariant plant kinds in ``PlantKind`` are gated:
+    drift / overdraft / limit_breach / stuck_pending / stuck_unbundled
+    / supersession. The other plant tuples on ``ScenarioPlant`` —
+    ``failed_transaction_plants`` (X.1.i — separate Failed-status
+    fixture), ``transfer_template_plants``, ``rail_firing_plants``,
+    ``inv_fanout_plants`` — are L2-shape / Investigation fixtures, not
+    L1 SHOULD-violations, and pass through unchanged. Same with
+    ``template_instances`` (the customer materialization, needed by
+    every plant kind that references customer-side accounts) and
+    ``today`` (the reference date).
+    """
+    if not kinds:
+        return base
+    selected = frozenset(kinds)
+
+    return ScenarioPlant(
+        template_instances=base.template_instances,
+        drift_plants=base.drift_plants if "drift" in selected else (),
+        overdraft_plants=base.overdraft_plants if "overdraft" in selected else (),
+        limit_breach_plants=base.limit_breach_plants if "limit_breach" in selected else (),
+        stuck_pending_plants=base.stuck_pending_plants if "stuck_pending" in selected else (),
+        failed_transaction_plants=base.failed_transaction_plants,
+        stuck_unbundled_plants=base.stuck_unbundled_plants if "stuck_unbundled" in selected else (),
+        supersession_plants=base.supersession_plants if "supersession" in selected else (),
+        transfer_template_plants=base.transfer_template_plants,
+        rail_firing_plants=base.rail_firing_plants,
+        inv_fanout_plants=base.inv_fanout_plants,
+        today=base.today,
+    )
+
+
 # -- Picker helpers ----------------------------------------------------------
 
 

@@ -110,7 +110,26 @@ class L2InstanceCache:
         X.4.d's mutators (``mutate_l2`` / ``rename_identifier``)
         produce a new ``L2Instance`` from the old one; ``replace``
         installs it. Pairing this with a disk write happens in
-        X.4.d.3's ``save()`` (which composes ``serialize_l2`` +
+        ``save()`` below (which composes ``serialize_l2`` +
         ``save_yaml_atomic`` + ``replace``).
         """
+        self._instance = new_instance
+
+    def save(self, new_instance: L2Instance) -> None:
+        """Persist + swap: serialize ``new_instance`` to YAML, atomically
+        write it to ``self.path``, then ``replace`` the cached instance.
+
+        The X.4.e PUT handler composes
+        ``mutate_l2 → validate → save`` — every successful mutation
+        lands on disk + in cache atomically (within one event loop
+        tick). A crash mid-write leaves the prior YAML intact (per
+        ``save_yaml_atomic``'s POSIX rename guarantee).
+
+        Caller is responsible for validating ``new_instance`` BEFORE
+        calling ``save`` — a structural-break delete that re-raises
+        ``L2ValidationError`` should never reach disk.
+        """
+        from .serializer import serialize_l2
+
+        save_yaml_atomic(serialize_l2(new_instance), self._path)
         self._instance = new_instance

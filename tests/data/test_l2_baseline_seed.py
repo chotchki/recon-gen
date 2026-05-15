@@ -443,3 +443,72 @@ class TestEmitFullSeed:
             f"Expected ≥5 distinct account_ids touched by R.2.b leg loop; "
             f"got {len(account_ids)}: {account_ids}"
         )
+
+
+class TestBaseSeedKnob:
+    """X.4.h.0.b — `base_seed` flows through emit_full_seed → emit_baseline_seed.
+
+    Studio's data-shaping panel writes ``cfg.test_generator.seed`` into
+    this knob. ``None`` (default) preserves byte-identity with the
+    locked seeds; non-None reseeds the baseline so plant positions
+    rotate across the 90-day window.
+    """
+
+    def test_base_seed_none_matches_default_baseline(self) -> None:
+        # Absent base_seed must equal _BASELINE_BASE_SEED — that's how
+        # the locked-seed determinism contract stays intact.
+        instance = load_instance(_SPEC_EXAMPLE)
+        without = emit_baseline_seed(instance, anchor=_ANCHOR)
+        with_default = emit_baseline_seed(
+            instance, anchor=_ANCHOR, base_seed=_BASELINE_BASE_SEED,
+        )
+        assert without == with_default
+
+    def test_base_seed_int_changes_baseline(self) -> None:
+        instance = load_instance(_SPEC_EXAMPLE)
+        a = emit_baseline_seed(instance, anchor=_ANCHOR, base_seed=1)
+        b = emit_baseline_seed(instance, anchor=_ANCHOR, base_seed=2)
+        assert a != b
+
+    def test_base_seed_same_int_is_deterministic(self) -> None:
+        instance = load_instance(_SPEC_EXAMPLE)
+        a = emit_baseline_seed(instance, anchor=_ANCHOR, base_seed=12345)
+        b = emit_baseline_seed(instance, anchor=_ANCHOR, base_seed=12345)
+        assert a == b
+
+    def test_base_seed_propagates_through_emit_full_seed(self) -> None:
+        # emit_full_seed must thread base_seed into the baseline layer
+        # so plants stay deterministic but baseline rotates.
+        instance = load_instance(_SPEC_EXAMPLE)
+        scenario = default_scenario_for(instance, today=_ANCHOR).scenario
+        a = emit_full_seed(
+            instance, scenario, anchor=_ANCHOR, base_seed=999,
+        )
+        b = emit_full_seed(
+            instance, scenario, anchor=_ANCHOR, base_seed=1000,
+        )
+        assert a != b
+
+    def test_base_seed_none_full_matches_default_full(self) -> None:
+        # The combined emit_full_seed path also preserves byte-identity
+        # when base_seed is omitted.
+        instance = load_instance(_SPEC_EXAMPLE)
+        scenario = default_scenario_for(instance, today=_ANCHOR).scenario
+        absent = emit_full_seed(instance, scenario, anchor=_ANCHOR)
+        explicit = emit_full_seed(
+            instance, scenario, anchor=_ANCHOR,
+            base_seed=_BASELINE_BASE_SEED,
+        )
+        assert absent == explicit
+
+    def test_base_seed_per_rail_isolation_preserved(self) -> None:
+        # The per-rail RNG sub-stream rule (_seed_for_rail) must use the
+        # caller-supplied base_seed, not the legacy constant.
+        a = _seed_for_rail("CustomerInboundACH", base_seed=42)
+        b = _seed_for_rail("CustomerInboundACH", base_seed=43)
+        assert a != b
+        # Same base_seed → identical sub-stream.
+        assert a == _seed_for_rail("CustomerInboundACH", base_seed=42)
+        # Different rail → different sub-stream even with same base_seed.
+        c = _seed_for_rail("MerchantOutboundACH", base_seed=42)
+        assert a != c

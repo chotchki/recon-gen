@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>data-generation-id poller unit harness</title>
+    <!-- X.4.g.12.b — bootstrap.js's wireDataGenerationPoller polls
+         /data_generation_id every ~3s + reloads when the server's
+         counter differs from the captured baseline. This harness
+         stubs fetch so the test can drive the poller deterministically.
+         location.reload CAN'T be overridden in WebKit (Location.reload
+         is non-configurable per spec); tests detect reload via
+         Playwright's framenavigated event instead. -->
+    <meta name="data-generation-id" content="3" />
+    <script>
+      window.__test_mode__ = true;
+      window.__fetch_calls__ = [];
+      // Tests reassign this to control the next pollOnce() outcome.
+      window.__next_fetch_body__ = { data_generation_id: 3 };
+      window.fetch = (url, opts) => {
+        window.__fetch_calls__.push({ url: url, opts: opts });
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(window.__next_fetch_body__),
+        });
+      };
+    </script>
+  </head>
+  <body>
+    <!-- The poller wakes on DOMContentLoaded — bootstrap.js's listener
+         calls wireDataGenerationPoller() once. Tests call it again
+         via __bootstrap_internals__ to drive subsequent polls under
+         test-controlled fetch responses. -->
+    <script src="../../../src/quicksight_gen/common/html/assets/vendor/js/d3.min.js"></script>
+    <script src="../../../src/quicksight_gen/common/html/assets/js/bootstrap.js"></script>
+  </body>
+</html>
