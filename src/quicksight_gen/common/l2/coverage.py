@@ -174,19 +174,25 @@ async def coverage_for(
             rail_counts.get(str(ch.parent), 0)
             + tmpl_counts.get(str(ch.parent), 0)
         )
-        child_count = (
-            rail_counts.get(str(ch.child), 0)
-            + tmpl_counts.get(str(ch.child), 0)
-        )
-        present = parent_count > 0 and child_count > 0
-        # Upper bound on actual chain firings — one parent txn can host
-        # at most one matching child slot, so min(parent, child) is the
-        # tightest count we can report without joining transfer_parent_id.
-        # Approximate but informative on hover.
-        count = min(parent_count, child_count) if present else 0
-        by_chain_edge_id[chain_edge_id(str(ch.parent), str(ch.child))] = (
-            CoverageEntry(present=present, count=count)
-        )
+        # Z.A: emit one coverage entry per child in the row. The
+        # diagram chrome paints one chain edge per child (singleton =
+        # 1 edge, multi/XOR = N edges), so the coverage map needs to
+        # match 1:1.
+        for child_name in ch.children:
+            child_count = (
+                rail_counts.get(str(child_name), 0)
+                + tmpl_counts.get(str(child_name), 0)
+            )
+            present = parent_count > 0 and child_count > 0
+            # Upper bound on actual chain firings — one parent txn can
+            # host at most one matching child slot, so min(parent,
+            # child) is the tightest count we can report without
+            # joining transfer_parent_id. Approximate but informative
+            # on hover.
+            count = min(parent_count, child_count) if present else 0
+            by_chain_edge_id[chain_edge_id(str(ch.parent), str(child_name))] = (
+                CoverageEntry(present=present, count=count)
+            )
 
     return CoverageMap(by_node_id=by_node_id, by_chain_edge_id=by_chain_edge_id)
 

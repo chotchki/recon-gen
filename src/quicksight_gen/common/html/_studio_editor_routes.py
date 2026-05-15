@@ -849,8 +849,8 @@ def _resolve_select_options(
         return opts, False
     if select_from == "rails_or_templates":
         # Union of Rail.name + TransferTemplate.name — used by
-        # ChainEntry.parent / .child. ChainEntries reference either a
-        # rail (e.g. "ACHReturnLeg") or a template (e.g.
+        # Chain.parent / .children entries. A Chain row references
+        # either a rail (e.g. "ACHReturnLeg") or a template (e.g.
         # "ExternalReconciliationCycle") interchangeably; the typed L2
         # graph disambiguates by membership in either collection.
         rails: set[str] = set()
@@ -1321,13 +1321,16 @@ _CREATE_INTRO_BY_KIND: Mapping[EntityKind, str] = {
         "<code>leg_rails</code> is edited after creation.</p>"
     ),
     "chain": (
-        "<p><strong>A ChainEntry</strong> says: when this <em>parent</em> "
-        "rail or template fires, the L1 layer expects this <em>child</em> "
-        "to follow within the SLA. A required chain whose child doesn't "
-        "fire surfaces as a stuck-pending invariant violation.</p>"
-        "<p>Required: <code>parent</code> + <code>child</code> "
-        "(rail or template names) and <code>required</code> (true = MUST "
-        "follow; false = optional). <code>xor_group</code> wires "
+        "<p><strong>A Chain row</strong> says: when this <em>parent</em> "
+        "rail or template fires, the L1 layer expects one of the listed "
+        "<em>children</em> to follow within the SLA. A row with one "
+        "child encodes a required relationship; a row with two or more "
+        "children encodes an XOR (exactly-one-of) branch. Either way, a "
+        "parent firing without a matching child surfaces as a "
+        "stuck-pending invariant violation.</p>"
+        "<p>Required: <code>parent</code> (rail or template name) and "
+        "<code>children</code> (a list of one or more rail / template "
+        "names). One name in the list = required; multiple names = "
         "exactly-one-of branching (e.g. ACH return reasons).</p>"
     ),
     "limit_schedule": (
@@ -1674,7 +1677,11 @@ def _entity_id(kind: EntityKind, entity: object) -> str:
     if kind in ("rail", "transfer_template"):
         return str(getattr(entity, "name"))
     if kind == "chain":
-        return f"{getattr(entity, 'parent')}::{getattr(entity, 'child')}"
+        # Z.A: composite key = "parent::sorted-children-csv" — same
+        # shape editor.py's _find_entity uses to address Chain rows.
+        children = getattr(entity, "children")
+        children_csv = ",".join(sorted(str(c) for c in children))
+        return f"{getattr(entity, 'parent')}::{children_csv}"
     # limit_schedule
     return f"{getattr(entity, 'parent_role')}::{getattr(entity, 'transfer_type')}"
 
@@ -1821,7 +1828,7 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
         # and rewrite every reference to the old value (Rail roles,
         # AccountTemplate.parent_role, LimitSchedule.parent_role for a
         # role rename; TransferTemplate.leg_rails / Rail.bundles_activity
-        # / ChainEntry.parent|child for a rail/template name rename).
+        # / Chain.parent / Chain.children for a rail/template name rename).
         # Skip when emptying a value or the trigger didn't change —
         # cascading an empty value would wipe references.
         if trigger is not None and trigger in new_fields:
@@ -2148,7 +2155,7 @@ def _rename_trigger_field(kind: EntityKind) -> str | None:
       …). Account.id is addressing-only — no incoming references.
     - rail / transfer_template — ``name`` is both the addressing key
       AND the reference target (TransferTemplate.leg_rails,
-      Rail.bundles_activity, ChainEntry.parent/child).
+      Rail.bundles_activity, Chain.parent / Chain.children entries).
     - chain / limit_schedule — leaf consumers; nothing references
       them. Returns None → no cascade.
     """

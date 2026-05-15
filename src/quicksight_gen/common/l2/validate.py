@@ -35,8 +35,8 @@ Rules enforced (numbered for cross-reference with the test file):
       Account.role (NOT an AccountTemplate.role) — per the SPEC's
       "Singleton parent only" rule on AccountTemplate.
   R4. Every RailName in a TransferTemplate.leg_rails exists in ``rails``.
-  R5. Every Chain.parent and Chain.child resolves to a Rail name OR
-      TransferTemplate name.
+  R5. Every Chain.parent and every Chain.children entry resolves to a
+      Rail name OR TransferTemplate name.
   R6. Every LimitSchedule.parent_role resolves to some declared Role.
   R7. Every TransferTemplate.leg_rails entry references a NON-aggregating
       Rail (M.1a — aggregating rails sweep on a cadence and don't carry
@@ -105,7 +105,7 @@ Rules enforced (numbered for cross-reference with the test file):
       Aggregating single-leg rails are exempt — they ARE the
       reconciliation mechanism (per SPEC's "single-leg sweep that lands
       in an external counterparty" example).
-  S4. Aggregating Rails MUST NOT appear as Chain.child.
+  S4. Aggregating Rails MUST NOT appear in any Chain.children.
   S5. Aggregating Rails MUST declare both ``cadence`` and
       ``bundles_activity``.
   S6. Non-aggregating Rails MUST NOT declare ``cadence`` or
@@ -130,7 +130,6 @@ from collections import Counter
 from collections.abc import Iterable
 
 from .primitives import (
-    Chain,
     Identifier,
     L2Instance,
     Rail,
@@ -480,7 +479,7 @@ def _check_chain_endpoints_exist(
     rail_names: set[Identifier],
     template_names: set[Identifier],
 ) -> None:
-    """R5: every Chain.parent and Chain.child resolves to a Rail or Template."""
+    """R5: every Chain.parent and every Chain.children entry resolves to a Rail or Template."""
     valid = rail_names | template_names
     for i, c in enumerate(inst.chains):
         if c.parent not in valid:
@@ -488,11 +487,12 @@ def _check_chain_endpoints_exist(
                 f"chains[{i}].parent={c.parent!r}: not a declared Rail "
                 f"or TransferTemplate name"
             )
-        if c.child not in valid:
-            raise L2ValidationError(
-                f"chains[{i}].child={c.child!r}: not a declared Rail "
-                f"or TransferTemplate name"
-            )
+        for j, child in enumerate(c.children):
+            if child not in valid:
+                raise L2ValidationError(
+                    f"chains[{i}].children[{j}]={child!r}: not a declared "
+                    f"Rail or TransferTemplate name"
+                )
 
 
 def _check_limit_schedule_parent_role_resolves(
@@ -904,15 +904,16 @@ def _check_single_leg_reconciliation(inst: L2Instance) -> None:
 
 
 def _check_chain_aggregating_not_child(inst: L2Instance) -> None:
-    """S4: aggregating Rails MUST NOT appear as Chain.child."""
+    """S4: aggregating Rails MUST NOT appear in any Chain.children."""
     aggregating_names = {r.name for r in inst.rails if r.aggregating}
     for i, c in enumerate(inst.chains):
-        if c.child in aggregating_names:
-            raise L2ValidationError(
-                f"chains[{i}].child={c.child!r}: aggregating Rails MUST NOT "
-                f"appear as Chain.child (they sweep on cadence, not on a "
-                f"per-Transfer parent trigger)"
-            )
+        for j, child in enumerate(c.children):
+            if child in aggregating_names:
+                raise L2ValidationError(
+                    f"chains[{i}].children[{j}]={child!r}: aggregating Rails "
+                    f"MUST NOT appear in Chain.children (they sweep on "
+                    f"cadence, not on a per-Transfer parent trigger)"
+                )
 
 
 def _check_aggregating_rail_required_fields(inst: L2Instance) -> None:

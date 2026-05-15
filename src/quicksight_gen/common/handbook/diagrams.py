@@ -34,7 +34,7 @@ import graphviz
 from quicksight_gen.common.l2.primitives import (
     Account,
     AccountTemplate,
-    ChainEntry,
+    Chain,
     L2Instance,
     Rail,
     SingleLegRail,
@@ -225,11 +225,13 @@ def render_l2_transfer_template_focus(l2_instance: L2Instance) -> str | None:
 
 
 def render_l2_chain_focus(l2_instance: L2Instance) -> str | None:
-    """Render the first ChainEntry with both endpoints labeled.
+    """Render the first Chain row with parent + every child labeled.
 
     Endpoint nodes are coloured by kind (rail vs template vs unresolved).
     Edge style + label match the same conventions as the full chains
-    diagram (solid=required, dashed=optional, xor group label).
+    diagram (solid=required for singleton-children rows, dashed=xor
+    for multi-children rows). Z.A: a multi-children row produces N
+    edges from the same parent.
     """
     if not l2_instance.chains:
         return None
@@ -251,7 +253,8 @@ def render_l2_chain_focus(l2_instance: L2Instance) -> str | None:
             g.node(ref_id, ref_id, fillcolor="#f5f5f5")
 
     _add_endpoint(chain.parent)
-    _add_endpoint(chain.child)
+    for child in chain.children:
+        _add_endpoint(child)
     _add_chain_edge(g, chain)
     return g.source
 
@@ -535,7 +538,8 @@ def _build_chains_graph(l2_instance: L2Instance) -> graphviz.Digraph:
     referenced_ids: set[str] = set()
     for chain in l2_instance.chains:
         referenced_ids.add(str(chain.parent))
-        referenced_ids.add(str(chain.child))
+        for child in chain.children:
+            referenced_ids.add(str(child))
 
     rails_by_name = {str(r.name): r for r in l2_instance.rails}
     templates_by_name = {str(t.name): t for t in l2_instance.transfer_templates}
@@ -577,7 +581,8 @@ def _build_layered_graph(l2_instance: L2Instance) -> graphviz.Digraph:
         templates_by_name = {str(t.name) for t in l2_instance.transfer_templates}
         seen: set[str] = set()
         for chain in l2_instance.chains:
-            for ref in (chain.parent, chain.child):
+            endpoints: list[object] = [chain.parent, *chain.children]
+            for ref in endpoints:
                 ref_id = str(ref)
                 if ref_id in seen:
                     continue
@@ -593,15 +598,19 @@ def _build_layered_graph(l2_instance: L2Instance) -> graphviz.Digraph:
                 else:
                     c.node(f"chain::{ref_id}", ref_id, fillcolor="#f5f5f5")
         for chain in l2_instance.chains:
-            style = "solid" if chain.required else "dashed"
-            label = chain.xor_group and f"xor: {chain.xor_group}" or ""
-            c.edge(
-                f"chain::{chain.parent}",
-                f"chain::{chain.child}",
-                label=label,
-                style=style,
-                color="#666666",
-            )
+            # Z.A: singleton-children = required (solid); multi-children
+            # = XOR alternation (dashed). One edge per child.
+            is_required = len(chain.children) == 1
+            style = "solid" if is_required else "dashed"
+            label = "" if is_required else "xor"
+            for child in chain.children:
+                c.edge(
+                    f"chain::{chain.parent}",
+                    f"chain::{child}",
+                    label=label,
+                    style=style,
+                    color="#666666",
+                )
     return g
 
 
@@ -976,22 +985,23 @@ def _expand_role_expression(expr: object) -> tuple[str, ...]:
     return (str(expr),)
 
 
-def _add_chain_edge(g: graphviz.Digraph, chain: ChainEntry) -> None:
-    style = "solid" if chain.required else "dashed"
-    parts: list[str] = []
-    if chain.required:
-        parts.append("required")
-    if chain.xor_group is not None:
-        parts.append(f"xor:{chain.xor_group}")
-    label = " · ".join(parts)
-    g.edge(
-        str(chain.parent),
-        str(chain.child),
-        label=label,
-        fontsize="9",
-        style=style,
-        color="#666666",
-    )
+def _add_chain_edge(g: graphviz.Digraph, chain: Chain) -> None:
+    """Z.A: emit one edge per child in the row. Singleton-children
+    rows render as solid ``required`` edges; multi-children rows
+    render as dashed ``xor`` edges (one per sibling).
+    """
+    is_required = len(chain.children) == 1
+    style = "solid" if is_required else "dashed"
+    label = "required" if is_required else "xor"
+    for child in chain.children:
+        g.edge(
+            str(chain.parent),
+            str(child),
+            label=label,
+            fontsize="9",
+            style=style,
+            color="#666666",
+        )
 
 
 # -- App tree builder dispatch -----------------------------------------------

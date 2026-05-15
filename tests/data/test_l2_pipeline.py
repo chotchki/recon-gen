@@ -250,7 +250,8 @@ def test_pipeline_transfer_template_each_completion_form(
 
 
 def test_pipeline_chain_xor_group(tmp_path: Path) -> None:
-    """XOR group with three child Rails sharing the same parent template."""
+    """Z.A: a multi-children Chain row encodes XOR alternation —
+    three children listed under one parent in a single row."""
     inst, _ = _pipeline(dedent("""\
         instance: t8
         accounts:
@@ -297,25 +298,19 @@ def test_pipeline_chain_xor_group(tmp_path: Path) -> None:
             leg_rails: [SettlementClose]
         chains:
           - parent: SettlementCycle
-            child: PayoutACH
-            required: false
-            xor_group: PayoutVehicle
-          - parent: SettlementCycle
-            child: PayoutVoucher
-            required: false
-            xor_group: PayoutVehicle
-          - parent: SettlementCycle
-            child: PayoutInternal
-            required: false
-            xor_group: PayoutVehicle
+            children:
+              - PayoutACH
+              - PayoutVoucher
+              - PayoutInternal
         """), tmp_path)
-    assert len(inst.chains) == 3
-    assert all(c.xor_group == "PayoutVehicle" for c in inst.chains)
-    assert {c.parent for c in inst.chains} == {"SettlementCycle"}
+    assert len(inst.chains) == 1
+    chain = inst.chains[0]
+    assert chain.parent == "SettlementCycle"
+    assert set(chain.children) == {"PayoutACH", "PayoutVoucher", "PayoutInternal"}
 
 
 def test_pipeline_chain_fan_out(tmp_path: Path) -> None:
-    """One parent → many children (no xor_group, required=true)."""
+    """Z.A: singleton-children Chain row = required parent→child link."""
     inst, _ = _pipeline(dedent("""\
         instance: t9
         accounts:
@@ -342,11 +337,12 @@ def test_pipeline_chain_fan_out(tmp_path: Path) -> None:
             metadata_keys: []
         chains:
           - parent: BatchInbound
-            child: PerRecipientCredit
-            required: true
+            children:
+              - PerRecipientCredit
         """), tmp_path)
-    assert inst.chains[0].required is True
-    assert inst.chains[0].xor_group is None
+    chain = inst.chains[0]
+    assert chain.children == ("PerRecipientCredit",)
+    assert len(chain.children) == 1  # singleton = required semantics
 
 
 def test_pipeline_limit_schedule(tmp_path: Path) -> None:
@@ -565,11 +561,12 @@ def test_kitchen_sink_covers_every_primitive_kind() -> None:
     assert len(completion_forms) >= 2, \
         "kitchen fixture should exercise >1 Completion form"
 
-    # XOR + non-XOR chains both present.
-    assert any(c.xor_group is not None for c in inst.chains), \
-        "kitchen fixture missing an XOR-group chain entry"
-    assert any(c.xor_group is None for c in inst.chains), \
-        "kitchen fixture missing a non-XOR chain entry"
+    # Z.A: both grammar shapes present — singleton-children (required)
+    # AND multi-children (XOR alternation).
+    assert any(len(c.children) >= 2 for c in inst.chains), \
+        "kitchen fixture missing a multi-children (XOR) Chain row"
+    assert any(len(c.children) == 1 for c in inst.chains), \
+        "kitchen fixture missing a singleton-children (required) Chain row"
 
     # N.1.i — inline brand theme exercises the loader's _load_theme path.
     assert inst.theme is not None, \
@@ -664,8 +661,8 @@ def test_pipeline_full_merchant_acquirer_end_to_end(tmp_path: Path) -> None:
 
         chains:
           - parent: MerchantSettlementCycle
-            child: MerchantPayoutACH
-            required: true
+            children:
+              - MerchantPayoutACH
 
         limit_schedules:
           - parent_role: SouthPool

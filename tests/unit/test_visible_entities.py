@@ -45,8 +45,12 @@ def test_no_focus_returns_all_entities() -> None:
     assert v["transfer_template"] == frozenset(
         str(t.name) for t in inst.transfer_templates
     )
+    # Z.A: chain composite key = "parent::sorted-children-csv" so the
+    # editor + topology + visibility surfaces all address chain rows
+    # the same way.
     assert v["chain"] == frozenset(
-        f"{c.parent}::{c.child}" for c in inst.chains
+        f"{c.parent}::{','.join(sorted(str(ch) for ch in c.children))}"
+        for c in inst.chains
     )
     assert v["limit_schedule"] == frozenset(
         f"{ls.parent_role}::{ls.transfer_type}"

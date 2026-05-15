@@ -161,10 +161,12 @@ chains:
   # First (and only) chain on spec_example — makes the L2FT Chains
   # sheet non-empty and exercises both completion_status values
   # ('Completed' when the closing leg fires, 'Incomplete' when it
-  # doesn't). C5 satisfied by the single Required child.
+  # doesn't). Z.A: a single-element ``children`` list encodes
+  # "required" semantics — every parent firing must invoke this
+  # child.
   - parent: ExternalReconciliationCycle
-    child: ReconciliationClosing
-    required: true
+    children:
+      - ReconciliationClosing
     description: |
       Every reconciliation cycle SHOULD be closed by a matching
       ReconciliationClosing leg; an unmatched cycle surfaces as an

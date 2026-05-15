@@ -188,55 +188,48 @@ class TestVariableClosure:
 
 
 class TestXorGroupEnforcement:
-    """Chain xor_group semantics: members share a parent and represent
-    'exactly one fires per parent firing.' SPEC §Chains."""
+    """Chain XOR semantics under Z.A: a multi-children Chain row
+    encodes 'exactly one fires per parent firing.' Each row IS one
+    parent, so cross-parent contradictions are unrepresentable in the
+    new grammar."""
 
-    def test_xor_group_members_share_parent(self) -> None:
-        """C2 — already validator-enforced; mirror here as a runtime-
-        invariant guard. If a SPEC loosening introduces multi-parent
-        groups, this surfaces alongside the validator change."""
-        inst = _instance()
-        members_by_group: dict[str, list[str]] = {}
-        for c in inst.chains:
-            if c.xor_group is None:
-                continue
-            members_by_group.setdefault(str(c.xor_group), []).append(str(c.parent))
-        for group, parents in members_by_group.items():
-            assert len(set(parents)) == 1, (
-                f"xor_group {group!r}: members reference different parents "
-                f"{sorted(set(parents))!r}; XOR semantics require exactly one "
-                f"shared parent."
-            )
-
-    def test_xor_group_members_are_non_aggregating(self) -> None:
-        """S4: aggregating rails MUST NOT appear as Chain.child (they
-        sweep on a cadence, not on per-Transfer parent triggers).
-        XOR-grouped chain entries are the typical pattern; the implication
-        is that XOR-group members must be non-aggregating."""
+    def test_multi_children_rows_are_non_aggregating(self) -> None:
+        """S4: aggregating rails MUST NOT appear in any Chain.children
+        (they sweep on a cadence, not on per-Transfer parent triggers).
+        Multi-children (XOR) rows are the most common case — they MUST
+        target non-aggregating rails or templates."""
         inst = _instance()
         aggregating_names = {str(r.name) for r in inst.rails if r.aggregating}
         for c in inst.chains:
-            if c.xor_group is None:
+            if len(c.children) < 2:
                 continue
-            assert str(c.child) not in aggregating_names, (
-                f"xor_group {c.xor_group!r} child={c.child!r} is aggregating; "
-                f"XOR groups can only target non-aggregating rails or templates."
-            )
+            for child in c.children:
+                assert str(child) not in aggregating_names, (
+                    f"Chain row parent={c.parent!r} children={list(c.children)!r}: "
+                    f"{child!r} is aggregating — XOR groups can only target "
+                    f"non-aggregating rails or templates."
+                )
 
-    def test_payout_vehicle_xor_group_has_three_alternatives(self) -> None:
-        """sasquatch_pr's PayoutVehicle XOR group should have exactly the
-        three documented payout alternatives (ACH, Wire, Check)."""
+    def test_payout_vehicle_xor_chain_has_three_alternatives(self) -> None:
+        """sasquatch_pr's merchant payout Chain row should list exactly
+        the three documented payout alternatives (ACH, Wire, Check) as
+        XOR siblings under MerchantSettlementCycle."""
         inst = _instance()
-        payout = [c for c in inst.chains if str(c.xor_group or "") == "PayoutVehicle"]
-        children = sorted(str(c.child) for c in payout)
+        payout = next(
+            (
+                c for c in inst.chains
+                if str(c.parent) == "MerchantSettlementCycle"
+                and len(c.children) >= 2
+            ),
+            None,
+        )
+        assert payout is not None, (
+            "Expected the merchant payout XOR row under MerchantSettlementCycle"
+        )
+        children = sorted(str(ch) for ch in payout.children)
         assert children == [
             "MerchantPayoutACH", "MerchantPayoutCheck", "MerchantPayoutWire",
         ]
-        # All three are required:false per XOR semantics (exactly one
-        # fires; "required" would force ALL to fire, contradicting XOR).
-        assert all(c.required is False for c in payout), (
-            "PayoutVehicle XOR members must be required=false"
-        )
 
 
 # ---------------------------------------------------------------------------

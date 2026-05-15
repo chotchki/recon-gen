@@ -16,7 +16,7 @@ import pytest
 from quicksight_gen.common.l2 import (
     Account,
     AccountTemplate,
-    ChainEntry,
+    Chain,
     Identifier,
     L2Instance,
     LimitSchedule,
@@ -81,11 +81,9 @@ def _example_instance() -> L2Instance:
             ),
         ),
         chains=(
-            ChainEntry(
+            Chain(
                 parent=Identifier("MerchantSettlementCycle"),
-                child=Identifier("MerchantPayoutACH"),
-                required=True,
-                xor_group=Identifier("PayoutVehicle"),
+                children=(Identifier("MerchantPayoutACH"),),
             ),
         ),
         limit_schedules=(

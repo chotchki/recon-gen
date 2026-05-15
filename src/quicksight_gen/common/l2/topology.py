@@ -42,7 +42,7 @@ from typing import Any, Literal, TypeAlias
 from .primitives import (
     Account,
     AccountTemplate,
-    ChainEntry,
+    Chain,
     Identifier,
     L2Instance,
     Rail,
@@ -112,8 +112,12 @@ class TopologyEdge:
     - ``template_member`` — a dotted membership edge from a
       TransferTemplate's node to one of its ``leg_rails``. The graphviz
       renderer wraps these inside the template's cluster.
-    - ``chain`` — a ChainEntry parent → child relationship. ``metadata``
-      carries ``required`` (str-bool) and optionally ``xor_group``.
+    - ``chain`` — a Chain row's parent → child relationship. One edge
+      per child in ``chain.children`` (singleton row = 1 edge,
+      multi-children row = N edges). ``metadata`` carries ``cardinality``
+      (``"required"`` for singleton-children rows, ``"xor"`` for
+      multi-children rows) and, for ``"xor"`` edges, ``xor_siblings``
+      (the comma-joined sibling names so the renderer can group them).
     - ``control_parent`` — an Account / AccountTemplate's ``parent_role``
       relationship (subledger rolls up to control account). Structural,
       not flow — the chart-of-accounts hierarchy that explains why a
@@ -346,16 +350,17 @@ def _self_loop_label(rail: SingleLegRail) -> str:
     )
 
 
-def _chain_label(entry: ChainEntry) -> str:
-    """Pretty label for a chain edge — required / xor flagged."""
-    parts: list[str] = []
-    if entry.required:
-        parts.append("required")
-    if entry.xor_group is not None:
-        parts.append(f"xor: {entry.xor_group}")
-    if parts:
-        return "chain\n(" + ", ".join(parts) + ")"
-    return "chain"
+def _chain_label(chain: Chain, *, cardinality: Literal["required", "xor"]) -> str:
+    """Pretty label for a chain edge — required (singleton) / xor (multi).
+
+    For an ``xor`` edge the label calls out the sibling set so the
+    renderer makes the alternation visible alongside any one
+    individual edge.
+    """
+    if cardinality == "required":
+        return "chain\n(required)"
+    siblings = ", ".join(str(c) for c in chain.children)
+    return f"chain\n(xor: {siblings})"
 
 
 def _template_inner_label(template: TransferTemplate) -> str:
@@ -426,7 +431,8 @@ def topology_graph_for(instance: L2Instance) -> TopologyGraph:
     chain_referenced: set[Identifier] = set()
     for chain in instance.chains:
         chain_referenced.add(chain.parent)
-        chain_referenced.add(chain.child)
+        for child in chain.children:
+            chain_referenced.add(child)
     template_names: set[Identifier] = {
         t.name for t in instance.transfer_templates
     }
@@ -537,30 +543,37 @@ def topology_graph_for(instance: L2Instance) -> TopologyGraph:
             metadata=cp_metadata,
         ))
 
-    # 4d. Chain edges (declaration order).
+    # 4d. Chain edges (declaration order). Z.A: every chain row emits
+    # one edge per child — singleton-children rows produce a single
+    # ``required`` edge; multi-children rows produce N ``xor`` edges
+    # whose ``xor_siblings`` metadata names the alternation set so the
+    # renderer can group them.
     for chain in instance.chains:
         parent_id = (
             _template_id(chain.parent)
             if chain.parent in template_names
             else _rail_id(chain.parent)
         )
-        child_id = (
-            _template_id(chain.child)
-            if chain.child in template_names
-            else _rail_id(chain.child)
+        cardinality: Literal["required", "xor"] = (
+            "required" if len(chain.children) == 1 else "xor"
         )
-        chain_metadata: dict[str, str] = {
-            "required": "true" if chain.required else "false",
-        }
-        if chain.xor_group is not None:
-            chain_metadata["xor_group"] = str(chain.xor_group)
-        edges.append(TopologyEdge(
-            source=parent_id,
-            target=child_id,
-            kind="chain",
-            label=_chain_label(chain),
-            metadata=chain_metadata,
-        ))
+        siblings_str = ",".join(str(c) for c in chain.children)
+        for child_name in chain.children:
+            child_id = (
+                _template_id(child_name)
+                if child_name in template_names
+                else _rail_id(child_name)
+            )
+            chain_metadata: dict[str, str] = {"cardinality": cardinality}
+            if cardinality == "xor":
+                chain_metadata["xor_siblings"] = siblings_str
+            edges.append(TopologyEdge(
+                source=parent_id,
+                target=child_id,
+                kind="chain",
+                label=_chain_label(chain, cardinality=cardinality),
+                metadata=chain_metadata,
+            ))
 
     return TopologyGraph(
         instance_name=str(instance.instance),
@@ -721,8 +734,9 @@ def build_topology_graph_per_rail(
     for chain in instance.chains:
         if chain.parent in rail_names_set:
             anchored_rails.add(chain.parent)
-        if chain.child in rail_names_set:
-            anchored_rails.add(chain.child)
+        for child in chain.children:
+            if child in rail_names_set:
+                anchored_rails.add(child)
     for tmpl in instance.transfer_templates:
         for rn in tmpl.leg_rails:
             if rn in rail_names_set:
@@ -830,19 +844,21 @@ def build_topology_graph_per_rail(
                 rail_anchor = rail_to_bundle.get(rn) or _rail_id(rn)
                 _add_adj(_template_id(tmpl.name), rail_anchor)
 
-        # Chain edges (rail/template ↔ rail/template).
+        # Chain edges (rail/template ↔ rail/template) — one edge per
+        # child in the row.
         for chain in instance.chains:
             parent_id = (
                 _template_id(chain.parent)
                 if chain.parent in template_names_set
                 else _rail_id(chain.parent)
             )
-            child_id = (
-                _template_id(chain.child)
-                if chain.child in template_names_set
-                else _rail_id(chain.child)
-            )
-            _add_adj(parent_id, child_id)
+            for child_name in chain.children:
+                child_id = (
+                    _template_id(child_name)
+                    if child_name in template_names_set
+                    else _rail_id(child_name)
+                )
+                _add_adj(parent_id, child_id)
 
         # Control-parent edges (subledger ↔ control role).
         for account in instance.accounts:
@@ -1088,7 +1104,8 @@ def build_topology_graph_per_rail(
                     )
 
     # Phase F — Chain edges (rail → rail or template → template).
-    # Layer-gated: chains only show at L3.
+    # Layer-gated: chains only show at L3. Z.A: emit one edge per
+    # child in the row.
     for chain in instance.chains:
         if not show_chains_and_templates:
             break
@@ -1097,20 +1114,24 @@ def build_topology_graph_per_rail(
             if chain.parent in template_names_set
             else _rail_id(chain.parent)
         )
-        child_id = (
-            _template_id(chain.child)
-            if chain.child in template_names_set
-            else _rail_id(chain.child)
+        cardinality: Literal["required", "xor"] = (
+            "required" if len(chain.children) == 1 else "xor"
         )
-        if not (_in_focus(parent_id) and _in_focus(child_id)):
-            continue
-        g.edge(
-            parent_id, child_id,
-            label=_chain_label(chain),
-            color=_CHAIN_EDGE_COLOR,
-            style="dashed",
-            fontcolor=_CHAIN_EDGE_COLOR,
-        )
+        for child_name in chain.children:
+            child_id = (
+                _template_id(child_name)
+                if child_name in template_names_set
+                else _rail_id(child_name)
+            )
+            if not (_in_focus(parent_id) and _in_focus(child_id)):
+                continue
+            g.edge(
+                parent_id, child_id,
+                label=_chain_label(chain, cardinality=cardinality),
+                color=_CHAIN_EDGE_COLOR,
+                style="dashed",
+                fontcolor=_CHAIN_EDGE_COLOR,
+            )
 
     # Phase G — Control-parent edges (subledger → control role).
     parents_with_limits: set[Identifier] = {
@@ -1228,7 +1249,8 @@ def visible_entities_for(
         for rn in tmpl.leg_rails:
             _add(_template_id(tmpl.name), _rail_id(rn))
 
-    # Chain edges (rail/template ↔ rail/template).
+    # Chain edges (rail/template ↔ rail/template) — one edge per
+    # child in the row.
     template_names_set = {t.name for t in instance.transfer_templates}
     for chain in instance.chains:
         parent_id = (
@@ -1236,12 +1258,13 @@ def visible_entities_for(
             if chain.parent in template_names_set
             else _rail_id(chain.parent)
         )
-        child_id = (
-            _template_id(chain.child)
-            if chain.child in template_names_set
-            else _rail_id(chain.child)
-        )
-        _add(parent_id, child_id)
+        for child_name in chain.children:
+            child_id = (
+                _template_id(child_name)
+                if child_name in template_names_set
+                else _rail_id(child_name)
+            )
+            _add(parent_id, child_id)
 
     # Control-parent edges (role ↔ role).
     for account in instance.accounts:
@@ -1288,9 +1311,13 @@ def visible_entities_for(
         str(t.name) for t in instance.transfer_templates
         if str(t.name) in visible_template_names
     )
+    # Z.A: chain composite key = "parent::sorted-children-csv" — the
+    # same shape the editor's _find_entity uses to address Chain rows.
     chains = frozenset(
-        f"{c.parent}::{c.child}" for c in instance.chains
-        if str(c.parent) in rail_or_tmpl or str(c.child) in rail_or_tmpl
+        f"{c.parent}::{','.join(sorted(str(ch) for ch in c.children))}"
+        for c in instance.chains
+        if str(c.parent) in rail_or_tmpl
+        or any(str(ch) in rail_or_tmpl for ch in c.children)
     )
     limit_schedules = frozenset(
         f"{ls.parent_role}::{ls.transfer_type}"
@@ -1322,7 +1349,8 @@ def _all_entities_per_kind(
             str(t.name) for t in instance.transfer_templates
         ),
         "chain": frozenset(
-            f"{c.parent}::{c.child}" for c in instance.chains
+            f"{c.parent}::{','.join(sorted(str(ch) for ch in c.children))}"
+            for c in instance.chains
         ),
         "limit_schedule": frozenset(
             f"{ls.parent_role}::{ls.transfer_type}"

@@ -74,7 +74,6 @@ from quicksight_gen.common.sql import Dialect
 from .primitives import (
     Account,
     AccountTemplate,
-    ChainEntry,
     Identifier,
     L2Instance,
     Name,
@@ -2351,16 +2350,20 @@ def _emit_baseline_chains(
 ) -> list[str]:
     """Emit chain-firing rows (parent → child) for every declared Chain.
 
-    R.2.d implementation:
-      - For each Chain entry, look up the parent's firings from
-        ``state.firings``. For each parent firing, roll a completion
-        check (Required ≈95%, Optional ≈50%) and emit a child leg
-        with ``transfer_parent_id = parent_transfer_id``.
-      - xor_group siblings (multiple chains sharing parent + xor_group):
-        pick exactly one entry per parent firing via deterministic
-        hash of the parent's transfer_id.
-      - Child leg amount sampled from the child rail's lognormal kind;
-        time-of-day shifts to one hour after the parent's posting band.
+    R.2.d implementation, post-Z.A grammar collapse:
+      - For each Chain row, look up the parent's firings from
+        ``state.firings``. For each parent firing, deterministically
+        pick one child from ``chain.children`` (hash of the parent's
+        transfer_id); singleton-children rows always pick that one
+        child.
+      - Roll a completion check: singleton ≈95% (Z.A "required"
+        semantics — parent firing always invokes this child), multi
+        ≈50% (Z.A "XOR" semantics — exactly one sibling fires per
+        parent invocation, but optional in the failure-injection
+        sense).
+      - Emit a child leg with ``transfer_parent_id = parent_transfer_id``,
+        sampled from the child rail's lognormal kind; time-of-day
+        shifts to one hour after the parent's posting band.
 
     Children whose rail isn't in ``instance.rails`` (Chain may also
     name a TransferTemplate) are skipped — full TransferTemplate
@@ -2373,38 +2376,36 @@ def _emit_baseline_chains(
     rng = random.Random(base_seed ^ 0xCC11A)
     rows: list[str] = []
 
-    # Group entries by (parent, xor_group) so siblings can pick one
-    # winner per parent firing.
-    grouped: dict[
-        tuple[Identifier, Identifier | None], list[ChainEntry]
-    ] = {}
-    for entry in instance.chains:
-        key = (entry.parent, entry.xor_group)
-        grouped.setdefault(key, []).append(entry)
-
-    for (parent_name, _xor_group), entries in sorted(
-        grouped.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1] or "")),
+    # Iterate Chains in deterministic order. Under Z.A multiple Chain
+    # rows MAY share a parent (disjoint XOR groups), so the secondary
+    # sort key is the sorted-children CSV — same composite key the
+    # editor uses to address chain rows.
+    for chain in sorted(
+        instance.chains,
+        key=lambda c: (str(c.parent), ",".join(sorted(str(ch) for ch in c.children))),
     ):
-        parent_firings = state.firings.get(parent_name, [])
+        parent_firings = state.firings.get(chain.parent, [])
         if not parent_firings:
             continue
 
+        is_required = len(chain.children) == 1
+
         for parent_transfer_id, parent_day, parent_amount in parent_firings:
-            # Pick which xor sibling fires (if multiple). Deterministic
-            # via hash of parent transfer_id so reruns produce identical
-            # output.
-            sibling_idx = (
+            # Pick which child fires. Deterministic via hash of parent
+            # transfer_id so reruns produce identical output. Singleton
+            # children always picks the lone child (modulo 1).
+            child_idx = (
                 zlib.crc32(parent_transfer_id.encode("utf-8"))
                 & 0x7FFFFFFF
-            ) % len(entries)
-            entry = entries[sibling_idx]
+            ) % len(chain.children)
+            child_name = chain.children[child_idx]
 
-            # Completion roll: Required ≈95%, Optional ≈50%.
-            completion_threshold = 0.95 if entry.required else 0.50
+            # Completion roll: singleton ≈95% (Z.A required), multi ≈50% (XOR).
+            completion_threshold = 0.95 if is_required else 0.50
             if rng.random() > completion_threshold:
                 continue  # parent fired but child did not — orphan exception
 
-            child_rail = rails_by_name.get(entry.child)
+            child_rail = rails_by_name.get(child_name)
             if child_rail is None:
                 # Chain references a TransferTemplate or unknown name —
                 # skip for R.2.d's first land.

@@ -108,7 +108,11 @@ def test_transfer_template_counts_pinned() -> None:
 
 def test_chain_counts_pinned() -> None:
     inst = _instance()
-    assert len(inst.chains) == 6
+    # Z.A grammar: 1 singleton-children row (ACH→FRB sweep, required)
+    # + 1 multi-children row (ACH return reasons, XOR) + 1 multi
+    # (merchant payout vehicles, XOR). Per-(parent,child) rows became
+    # parent-grouped Chain rows.
+    assert len(inst.chains) == 3
 
 
 def test_limit_schedule_counts_pinned() -> None:
@@ -302,22 +306,23 @@ def test_pr_transfer_key_grouping_template_present() -> None:
 
 
 def test_pr_payout_vehicle_xor_chain_present() -> None:
-    """PR adds the `PayoutVehicle` XOR chain group — three children
-    under MerchantSettlementCycle, all sharing the same xor_group."""
+    """PR adds the merchant payout XOR chain — three children under
+    MerchantSettlementCycle in a single Z.A multi-children Chain row."""
     inst = _instance()
-    payout_group = [
-        c for c in inst.chains
-        if str(c.xor_group or "") == "PayoutVehicle"
-    ]
-    assert len(payout_group) == 3, (
-        f"PayoutVehicle XOR group must have 3 members (ACH, Wire, Check); "
-        f"got {len(payout_group)}"
+    # Locate the multi-children chain under MerchantSettlementCycle
+    # whose children are the three payout vehicles.
+    payout_chain = next(
+        (
+            c for c in inst.chains
+            if str(c.parent) == "MerchantSettlementCycle"
+            and len(c.children) >= 2
+        ),
+        None,
     )
-    parents = {str(c.parent) for c in payout_group}
-    assert parents == {"MerchantSettlementCycle"}, (
-        "All PayoutVehicle members must share parent MerchantSettlementCycle"
+    assert payout_chain is not None, (
+        "Expected a multi-children Chain row under MerchantSettlementCycle"
     )
-    children = {str(c.child) for c in payout_group}
+    children = {str(ch) for ch in payout_chain.children}
     assert children == {
         "MerchantPayoutACH", "MerchantPayoutWire", "MerchantPayoutCheck",
     }
@@ -364,7 +369,8 @@ def test_every_primitive_has_a_description() -> None:
             missing.append(f"transfer_template {tt.name!r}")
     for c in inst.chains:
         if not c.description:
-            missing.append(f"chain {c.parent}->{c.child}")
+            children_str = ",".join(str(ch) for ch in c.children)
+            missing.append(f"chain {c.parent}->[{children_str}]")
     for ls in inst.limit_schedules:
         if not ls.description:
             missing.append(

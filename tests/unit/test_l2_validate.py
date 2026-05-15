@@ -19,7 +19,7 @@ import pytest
 from quicksight_gen.common.l2 import (
     Account,
     AccountTemplate,
-    ChainEntry,
+    Chain,
     Identifier,
     L2Instance,
     L2ValidationError,
@@ -252,13 +252,12 @@ def test_r4_template_leg_rails_must_exist() -> None:
 
 def test_r5_chain_endpoints_must_exist() -> None:
     inst = _baseline_instance()
-    bad_chain = ChainEntry(
+    bad_chain = Chain(
         parent=Identifier("MerchantSettlementCycle"),
-        child=Identifier("NonexistentRail"),
-        required=True,
+        children=(Identifier("NonexistentRail"),),
     )
     bad = _replace(inst, chains=(bad_chain,))
-    with pytest.raises(L2ValidationError, match="chains\\[0\\].child"):
+    with pytest.raises(L2ValidationError, match=r"chains\[0\]\.children\[0\]"):
         validate(bad)
 
 
@@ -314,30 +313,9 @@ def test_c1_at_most_one_variable_leg_per_template() -> None:
         validate(bad)
 
 
-def test_c2_xor_group_members_must_share_parent() -> None:
-    inst = _baseline_instance()
-    # Two ChainEntries in the same xor_group but with different parents.
-    a = ChainEntry(
-        parent=Identifier("MerchantSettlementCycle"),
-        child=Identifier("ExtInbound"),
-        required=False,
-        xor_group=Identifier("Vehicle"),
-    )
-    b = ChainEntry(
-        parent=Identifier("ExtInbound"),
-        child=Identifier("PoolBalancing"),
-        required=False,
-        xor_group=Identifier("Vehicle"),
-    )
-    bad = _replace(inst, chains=(a, b))
-    # Note: also trips S4 (PoolBalancing is aggregating), but C2 fires
-    # earlier in the validate() sequence so this is the message we expect.
-    # If validate() ever reorders, this test surfaces the change.
-    with pytest.raises(
-        L2ValidationError,
-        match="(reference different.*parents|aggregating Rails MUST NOT)",
-    ):
-        validate(bad)
+# C2 (xor_group members share parent) is gone under Z.A — every Chain
+# row IS one parent, so the cross-parent failure mode is unrepresentable
+# in the new grammar.
 
 
 # -- State-dependent (S1-S6) -------------------------------------------------
@@ -435,15 +413,14 @@ def test_s3_unreconciled_single_leg_rejected() -> None:
 
 def test_s4_aggregating_rail_rejected_as_chain_child() -> None:
     inst = _baseline_instance()
-    bad_chain = ChainEntry(
+    bad_chain = Chain(
         parent=Identifier("MerchantSettlementCycle"),
-        child=Identifier("PoolBalancing"),  # aggregating rail
-        required=True,
+        children=(Identifier("PoolBalancing"),),  # aggregating rail
     )
     bad = _replace(inst, chains=(bad_chain,))
     with pytest.raises(
         L2ValidationError,
-        match="aggregating Rails MUST NOT appear as Chain.child",
+        match="aggregating Rails MUST NOT appear in Chain.children",
     ):
         validate(bad)
 
@@ -1045,100 +1022,50 @@ def test_c3_variable_single_leg_in_some_template_accepted() -> None:
     validate(ok)
 
 
-def test_c4_xor_group_with_one_member_rejected() -> None:
-    """C4: a singleton xor_group is degenerate — 'exactly one of one
-    option' trivially holds. Catches a deletion-leftover or typo'd
-    xor_group string.
+# C4 / C4.1 (xor_group ≥ 2 members; required + xor_group contradiction)
+# are gone under Z.A — singleton-children encodes "required" and
+# multi-children encodes "XOR" cleanly; the legacy contradictions
+# can't be expressed.
+
+
+def test_c5_chain_row_with_empty_children_rejected() -> None:
+    """C5 (Z.A): a Chain row with an empty children list is degenerate —
+    no firing rule. The loader rejects empty lists with a more
+    actionable error; this validator rule is defense-in-depth for
+    in-memory L2 instances built outside the loader.
     """
     inst = _baseline_instance()
-    lonely = ChainEntry(
+    # Build a Chain row with no children. The dataclass accepts an
+    # empty tuple; validate() should reject it.
+    empty_chain = Chain(
         parent=Identifier("MerchantSettlementCycle"),
-        child=Identifier("ExtInbound"),
-        required=False,
-        xor_group=Identifier("LonelyGroup"),
+        children=(),
     )
-    bad = _replace(inst, chains=(lonely,))
-    with pytest.raises(
-        L2ValidationError,
-        match=r"xor_group 'LonelyGroup'.*has only 1 member",
-    ):
+    bad = _replace(inst, chains=(empty_chain,))
+    with pytest.raises(L2ValidationError, match="children list is empty"):
         validate(bad)
 
 
-def test_c4_xor_group_with_two_members_accepted() -> None:
-    """C4 negative: a 2-member XOR group is valid (smallest meaningful
-    group — 'exactly one of two options')."""
-    inst = _baseline_instance()
-    a = ChainEntry(
-        parent=Identifier("MerchantSettlementCycle"),
-        child=Identifier("ExtInbound"),
-        required=False,
-        xor_group=Identifier("Pair"),
-    )
-    b = ChainEntry(
-        parent=Identifier("MerchantSettlementCycle"),
-        child=Identifier("SubledgerCharge"),
-        required=False,
-        xor_group=Identifier("Pair"),
-    )
-    ok = _replace(inst, chains=(a, b))
-    validate(ok)
-
-
-def test_c4_chain_with_no_xor_group_unaffected() -> None:
-    """C4 negative: a regular ChainEntry without xor_group is unaffected
-    (the rule only fires on entries with xor_group set)."""
-    inst = _baseline_instance()
-    regular = ChainEntry(
-        parent=Identifier("MerchantSettlementCycle"),
-        child=Identifier("ExtInbound"),
-        required=True,
-    )
-    ok = _replace(inst, chains=(regular,))
-    validate(ok)
-
-
-def test_c4_1_required_xor_member_rejected() -> None:
-    """C4.1 (X.4.f.10.followup): a ChainEntry with both ``required=true``
-    AND ``xor_group`` set is contradictory — XOR's "exactly one of N
-    fires" can't coexist with "this specific one MUST fire" (a required
-    member would force itself to fire AND forbid the others).
+def test_c6_duplicate_child_under_same_parent_rejected() -> None:
+    """C6 (Z.A): for any given Chain parent, no child appears in two
+    Chain rows. Catches a contradiction like "Foo is required" plus
+    "Foo is one of [Foo, Bar]" — the two rows would either narrate
+    the same firing twice or contradict each other.
     """
     inst = _baseline_instance()
-    bad_required = ChainEntry(
+    a = Chain(
         parent=Identifier("MerchantSettlementCycle"),
-        child=Identifier("ExtInbound"),
-        required=True,
-        xor_group=Identifier("Pair"),
+        children=(Identifier("ExtInbound"),),
     )
-    other = ChainEntry(
+    # Same parent, ExtInbound listed in this row's XOR siblings as
+    # well — duplicates the child reference under the same parent.
+    b = Chain(
         parent=Identifier("MerchantSettlementCycle"),
-        child=Identifier("SubledgerCharge"),
-        required=False,
-        xor_group=Identifier("Pair"),
+        children=(Identifier("ExtInbound"), Identifier("SubledgerCharge")),
     )
-    bad = _replace(inst, chains=(bad_required, other))
+    bad = _replace(inst, chains=(a, b))
     with pytest.raises(
         L2ValidationError,
-        match=r"required=true is incompatible with xor_group='Pair'",
+        match=r"Chain parent 'MerchantSettlementCycle'.*ExtInbound",
     ):
         validate(bad)
-
-
-def test_c4_1_optional_xor_member_accepted() -> None:
-    """C4.1 negative: xor_group with all-optional members validates."""
-    inst = _baseline_instance()
-    a = ChainEntry(
-        parent=Identifier("MerchantSettlementCycle"),
-        child=Identifier("ExtInbound"),
-        required=False,
-        xor_group=Identifier("Pair"),
-    )
-    b = ChainEntry(
-        parent=Identifier("MerchantSettlementCycle"),
-        child=Identifier("SubledgerCharge"),
-        required=False,
-        xor_group=Identifier("Pair"),
-    )
-    ok = _replace(inst, chains=(a, b))
-    validate(ok)

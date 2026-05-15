@@ -236,23 +236,24 @@ transfer_templates:
 # Chains — both XOR and non-XOR; required + optional.
 # ---------------------------------------------------------------------
 chains:
-  # XOR group — exactly one payout vehicle per settlement cycle.
+  # Z.A: multi-children list = XOR alternation (exactly one fires).
   - parent: MerchantSettlementCycle
-    child: MerchantPayoutACH
-    required: false
-    xor_group: PayoutVehicle
-    description: ACH path for the payout. Mutually exclusive with the voucher path below.
+    children:
+      - MerchantPayoutACH
+      - MerchantPayoutVoucher
+    description: |
+      Payout-vehicle XOR — exactly one of these fires per settled
+      MerchantSettlementCycle. ACH for SNB-banking merchants;
+      voucher (paper) for everyone else.
 
-  - parent: MerchantSettlementCycle
-    child: MerchantPayoutVoucher
-    required: false
-    xor_group: PayoutVehicle
-
-  # Non-XOR fan-out: every clearing cycle MUST have at least one
-  # ExternalRailInbound child.
+  # Z.A: singleton-children list = "required" semantics (always fires).
   - parent: DailyClearingCycle
-    child: ExternalRailInbound
-    required: true
+    children:
+      - ExternalRailInbound
+    description: |
+      Every clearing cycle MUST have at least one ExternalRailInbound
+      child — the in-cycle reconciliation pulls inbound activity that
+      offsets the outbound sweep.
 
 # ---------------------------------------------------------------------
 # Limit Schedules across the three pool/template parent roles.

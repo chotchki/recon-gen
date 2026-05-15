@@ -419,36 +419,45 @@ def test_chains_dataset_inlines_l2_chain_entries() -> None:
     inst = load_instance(SASQUATCH_PR_YAML)
     sql = _chains_dataset_sql_against(SASQUATCH_PR_YAML)
     assert "WITH declared AS" in sql
+    # Z.A: each Chain row contributes one CTE row per child; assert
+    # both endpoints serialize.
+    total_rows = 0
     for c in inst.chains:
         assert f"'{c.parent}'" in sql
-        assert f"'{c.child}'" in sql
-    assert sql.count("UNION ALL") == max(0, len(inst.chains) - 1)
+        for child in c.children:
+            assert f"'{child}'" in sql
+        total_rows += len(c.children)
+    # UNION ALL count = (per-child rows) - 1.
+    assert sql.count("UNION ALL") == max(0, total_rows - 1)
 
 
 def test_chains_dataset_emits_required_optional_labels() -> None:
     """The 'required' column in the dataset is emitted as the
     display-friendly 'Required' / 'Optional' labels (not boolean
-    literals) so the visual reads cleanly."""
+    literals) so the visual reads cleanly. Z.A: singleton-children
+    rows render as 'Required'; multi-children siblings render as
+    'Optional'."""
     sql = _chains_dataset_sql_against(SASQUATCH_PR_YAML)
     inst = load_instance(SASQUATCH_PR_YAML)
-    has_required = any(c.required for c in inst.chains)
-    has_optional = any(not c.required for c in inst.chains)
-    if has_required:
+    has_singleton = any(len(c.children) == 1 for c in inst.chains)
+    has_multi = any(len(c.children) >= 2 for c in inst.chains)
+    if has_singleton:
         assert "'Required'" in sql
-    if has_optional:
+    if has_multi:
         assert "'Optional'" in sql
 
 
-def test_chains_dataset_xor_group_emits_null_for_no_group() -> None:
-    """ChainEntries without an xor_group serialize as NULL in the
-    CTE, not as an empty string. Visuals can then treat NULL as
-    'no XOR group' explicitly."""
+def test_chains_dataset_xor_group_emits_null_for_singleton_rows() -> None:
+    """Z.A: singleton-children Chain rows serialize NULL in the
+    xor_group slot (no XOR alternation); multi-children rows
+    serialize the row's composite key as the group identifier.
+    Visuals can then treat NULL as 'no XOR group' explicitly."""
     inst = load_instance(SASQUATCH_PR_YAML)
-    has_no_group = any(c.xor_group is None for c in inst.chains)
-    assert has_no_group, "test fixture lost its no-xor-group rows"
+    has_singleton = any(len(c.children) == 1 for c in inst.chains)
+    assert has_singleton, "test fixture lost its singleton-children rows"
     sql = _chains_dataset_sql_against(SASQUATCH_PR_YAML)
     # At least one CTE row must have NULL in the xor_group slot.
-    assert " NULL AS xor_group" in sql
+    assert "NULL AS xor_group" in sql
 
 
 def test_chains_dataset_orphan_rate_clamps_at_zero() -> None:

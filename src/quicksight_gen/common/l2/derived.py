@@ -45,10 +45,14 @@ def posted_requirements_for(
        appears in ``leg_rails`` (auto-derived from the template's
        grouping rule — a leg can't be Posted without naming the
        grouping values).
-    3. ``parent_transfer_id`` if this rail is the child of any
-       ``Required: true`` Chain entry, OR if a TransferTemplate
-       containing this rail is the child of any ``Required: true``
-       Chain entry.
+    3. ``parent_transfer_id`` if this rail is the singleton child of
+       any Chain row, OR if a TransferTemplate containing this rail is
+       the singleton child of any Chain row. Under the Z.A grammar
+       collapse, a singleton-children row encodes "required" semantics
+       (parent firing always invokes this child) — every firing IS a
+       chain firing, so parent_transfer_id is always populated. A
+       multi-children (XOR) row makes parent_transfer_id optional —
+       only one of the siblings fires per parent invocation.
 
     Output is deduped and sorted lexicographically — deterministic
     across runs, integrator-declared overlap with TransferKey
@@ -68,12 +72,13 @@ def posted_requirements_for(
     for t in containing_templates:
         fields.update(t.transfer_key)
 
-    # (3) parent_transfer_id if any Required-true chain entry's child
-    # is either this rail OR a TransferTemplate that contains this rail.
+    # (3) parent_transfer_id when this rail (or a containing template)
+    # is the singleton child of any chain — singleton-children encodes
+    # Z.A's "required" semantics, so every firing is a chain firing.
     chain_targets: set[Identifier] = {rail_name}
     chain_targets.update(t.name for t in containing_templates)
     for c in instance.chains:
-        if c.required and c.child in chain_targets:
+        if len(c.children) == 1 and c.children[0] in chain_targets:
             fields.add(PARENT_TRANSFER_ID)
             break  # a single match is enough; the field is added at most once.
 

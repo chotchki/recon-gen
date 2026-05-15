@@ -736,8 +736,14 @@ def _finalize_two_leg_expected_net(
 
 
 def _build_chains(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
-    """Chain entries with parent + child from declared rails/templates,
-    excluding aggregating rails as children (S4).
+    """Chain rows: each row is one parent + a children list (Z.A
+    grammar collapse). Singleton-children rows encode "required";
+    multi-children rows encode XOR alternation. Aggregating rails are
+    excluded from the children pool (S4).
+
+    The fuzzer mixes both shapes so the meta-guard surfaces both
+    kinds across the seed pool — without that variety, downstream
+    XOR-handling code goes untested.
     """
     chains: list[dict[str, Any]] = []
     valid_endpoints = state.rail_names + state.transfer_template_names
@@ -747,55 +753,37 @@ def _build_chains(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
     if not valid_endpoints or not valid_children:
         return chains
 
-    # XOR group construction: pick a parent first, generate 2-3 children
-    # under that parent for the same xor_group (C2).
-    n_xor = rng.randint(0, 1)  # 0 or 1 XOR group per fuzz instance
-    # Plain (non-XOR) chain entries.
-    n_plain = state.plan.n_chains
-    if n_xor:
-        n_plain = max(0, n_plain - 2)  # XOR group consumes some budget
+    # n_chains rows total. Reserve up to 1 multi-children (XOR) row
+    # when the children pool is wide enough. C6 forbids any child
+    # appearing in two rows under the same parent — easiest way to
+    # uphold this is "every parent gets at most one row this pass".
+    want_xor = rng.randint(0, 1) == 1 and len(valid_children) >= 2
+    used_parents: set[str] = set()
 
-    # Plain entries.
-    for i in range(n_plain):
-        parent = rng.choice(valid_endpoints)
+    # Singleton-children (required) rows.
+    n_singleton = state.plan.n_chains
+    if want_xor:
+        n_singleton = max(0, n_singleton - 1)  # XOR row consumes one slot
+
+    for _ in range(n_singleton):
+        # Pick a fresh parent so we don't collide with later rows.
+        candidates = [p for p in valid_endpoints if p not in used_parents]
+        if not candidates:
+            break
+        parent = rng.choice(candidates)
+        used_parents.add(parent)
         child = rng.choice(valid_children)
-        chains.append({
-            "parent": parent,
-            "child": child,
-            "required": rng.random() < 0.5,
-        })
+        chains.append({"parent": parent, "children": [child]})
 
-    # XOR group.
-    xor_parents: set[str] = set()
-    if n_xor and len(valid_children) >= 2:
-        parent = rng.choice(valid_endpoints)
-        xor_parents.add(parent)
-        n_children = rng.randint(2, min(3, len(valid_children)))
-        children = rng.sample(valid_children, n_children)
-        xor_name = "FuzzXorGroup"
-        for c in children:
-            chains.append({
-                "parent": parent,
-                "child": c,
-                "required": False,
-                "xor_group": xor_name,
-            })
-
-    # X.1.j — every chain parent MUST have at least one required child OR
-    # at least one xor_group child. The plain-entry block flips
-    # ``required`` on a 50/50 coin per row, so a parent with one or two
-    # all-tails entries (and no XOR group attached) violates C5. Pin the
-    # first plain entry per parent to ``required=True`` unless the parent
-    # already has an XOR group covering it.
-    seen_required_parents: set[str] = set(xor_parents)
-    for entry in chains:
-        parent_name = entry["parent"]
-        if entry.get("xor_group") is not None:
-            continue
-        if parent_name in seen_required_parents:
-            continue
-        entry["required"] = True
-        seen_required_parents.add(parent_name)
+    # Multi-children (XOR) row.
+    if want_xor:
+        candidates = [p for p in valid_endpoints if p not in used_parents]
+        if candidates:
+            parent = rng.choice(candidates)
+            used_parents.add(parent)
+            n_children = rng.randint(2, min(3, len(valid_children)))
+            children = rng.sample(valid_children, n_children)
+            chains.append({"parent": parent, "children": children})
     return chains
 
 

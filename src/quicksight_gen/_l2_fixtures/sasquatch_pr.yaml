@@ -814,11 +814,17 @@ transfer_templates:
 #     three alternatives (ACH, wire, check); exactly one per cycle.
 # ---------------------------------------------------------------------
 chains:
+  # Z.A grammar: each row is one parent + a children list. A
+  # singleton-children row encodes "required" semantics (parent
+  # firing always invokes that child). A multi-children row encodes
+  # XOR alternation (exactly one of the listed children fires per
+  # parent invocation).
+
   # ----- Required (treasury) ------------------------------------------
 
   - parent: ACHOriginationDailySweep
-    child: ConcentrationToFRBSweep
-    required: true
+    children:
+      - ConcentrationToFRBSweep
     description: |
       Required: every daily ACH origination sweep should be followed
       by a Concentration→FRB sweep that rolls the consolidated balance
@@ -829,57 +835,32 @@ chains:
   # ----- XOR group: ACH return reasons (treasury) ---------------------
 
   - parent: CustomerInboundACH
-    child: CustomerInboundACHReturnNSF
-    required: false
-    xor_group: ACHReturnReason
+    children:
+      - CustomerInboundACHReturnNSF
+      - CustomerInboundACHReturnStopPay
     description: |
-      Optional NSF return path (NACHA reason R01). At most one
-      member of the `ACHReturnReason` XOR group fires per inbound
-      ACH — most inbound ACHs aren't returned at all. If both NSF
-      and StopPay returns fire on the same original, that's an
-      exception (the validator's C2 rule wouldn't catch it — runtime
-      check at posting time).
-
-  - parent: CustomerInboundACH
-    child: CustomerInboundACHReturnStopPay
-    required: false
-    xor_group: ACHReturnReason
-    description: |
-      Optional stop-pay return path (NACHA reason R08). Same XOR
-      group as the NSF return — at most one return reason per original
-      inbound ACH.
+      Return-reason XOR group on inbound ACH (NACHA codes). At most
+      one of these returns fires per inbound original — most inbound
+      ACHs aren't returned at all. NSF (R01) covers insufficient
+      funds; StopPay (R08) covers the customer's stop-payment
+      instruction. If both fire on the same original that's a runtime
+      anomaly (post-time check, not catchable at validation).
 
   # ----- XOR group: merchant payout vehicles (PR-side) ---------------
 
   - parent: MerchantSettlementCycle
-    child: MerchantPayoutACH
-    required: false
-    xor_group: PayoutVehicle
+    children:
+      - MerchantPayoutACH
+      - MerchantPayoutWire
+      - MerchantPayoutCheck
     description: |
-      ACH payout option in the `PayoutVehicle` XOR group. Fires when
-      the merchant holds an SNB DDA (lowest-friction path; preferred
-      default). Exactly one of the three `PayoutVehicle` members
-      fires per settled MerchantSettlementCycle.
-
-  - parent: MerchantSettlementCycle
-    child: MerchantPayoutWire
-    required: false
-    xor_group: PayoutVehicle
-    description: |
-      Wire payout option in the `PayoutVehicle` XOR group. Fires
-      when the merchant banks elsewhere AND has opted into wire
-      delivery (faster but Fedwire fees apply). Real-time settlement
-      via Fedwire.
-
-  - parent: MerchantSettlementCycle
-    child: MerchantPayoutCheck
-    required: false
-    xor_group: PayoutVehicle
-    description: |
-      Paper-check payout option in the `PayoutVehicle` XOR group.
-      Legacy path for merchants who haven't yet enrolled in ACH or
-      wire delivery. Slowest path (paper check + clearing latency);
-      `MerchantPayoutCheck`'s `max_pending_age: P7D` reflects this.
+      Merchant payout vehicle — exactly one of three options fires
+      per settled MerchantSettlementCycle. ACH (preferred default,
+      lowest friction; merchant holds an SNB DDA). Wire (faster but
+      Fedwire fees apply; merchant banks elsewhere and opts into
+      wire delivery). Check (legacy paper path for merchants not yet
+      enrolled in ACH or wire — slowest, hence
+      `MerchantPayoutCheck`'s `max_pending_age: P7D`).
 
 # ---------------------------------------------------------------------
 # Limit schedules — daily outbound caps per (parent role, transfer type).

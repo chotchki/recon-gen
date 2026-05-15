@@ -936,15 +936,20 @@ def _build_broad_rail_firings(
 
     # Required chain children — pair child firings to parent firings.
     # The picker walks chains in declaration order; for each
-    # Required chain whose parent fired (rail_to_transfer_seq_starts
-    # has an entry) AND whose child fired, plant ONE additional child
-    # firing whose transfer_parent_id matches the FIRST parent
-    # firing's transfer_id. The transfer_id pattern is
-    # ``tr-rail-<seq:04d>`` per the seed.py emit helper's convention.
+    # singleton-children chain (Z.A "required" semantics) whose parent
+    # fired (rail_to_transfer_seq_starts has an entry) AND whose child
+    # fired, plant ONE additional child firing whose
+    # transfer_parent_id matches the FIRST parent firing's
+    # transfer_id. The transfer_id pattern is ``tr-rail-<seq:04d>``
+    # per the seed.py emit helper's convention. Multi-children
+    # (XOR) chains are skipped here — the seed.py XOR picker chooses
+    # one sibling per parent firing via hash, which the planted
+    # plants can't pre-resolve deterministically without recomputing
+    # that hash.
     chain_seq_offset = seq_counter
     chain_link_count = 0
     for chain in instance.chains:
-        if not chain.required:
+        if len(chain.children) != 1:
             continue
         parent_starts = rail_to_transfer_seq_starts.get(
             Identifier(str(chain.parent)),
@@ -952,7 +957,7 @@ def _build_broad_rail_firings(
         if parent_starts is None:
             continue  # parent didn't fire
         child_rail = _resolve_rail_by_name(
-            Identifier(str(chain.child)), instance,
+            Identifier(str(chain.children[0])), instance,
         )
         if child_rail is None or child_rail.aggregating:
             continue
@@ -1174,10 +1179,11 @@ def _pick_chain_children_for_template(
     """Pre-resolve chain-child (rail_name, account_id) pairs for a TT
     plant's first firing (M.3.10h).
 
-    For each declared ChainEntry whose parent matches the template
-    name, resolve the child rail (must exist in instance.rails) and
-    pick an account by the child rail's role expression. Aggregating
-    rails are skipped — they don't have per-Transfer parents.
+    For each declared Chain row whose parent matches the template
+    name, resolve every child rail in ``chain.children`` (must exist
+    in instance.rails) and pick an account by the child rail's role
+    expression. Aggregating rails are skipped — they don't have
+    per-Transfer parents.
 
     Returns the pairs in declaration order; entries that can't resolve
     to a rail or an account are silently skipped (the chain
@@ -1188,37 +1194,44 @@ def _pick_chain_children_for_template(
     for chain in instance.chains:
         if chain.parent != template_name:
             continue
-        child_rail = _resolve_rail_by_name(chain.child, instance)
-        if child_rail is None:
-            continue
-        # Aggregating rails sweep on cadence, not per-Transfer — they
-        # MUST NOT appear as chain children per SPEC. The validator
-        # enforces this at L2 load time, but a defensive skip here
-        # also avoids planting a chain child that can't legitimately
-        # exist in the data.
-        if child_rail.aggregating:
-            continue
-        # Pick the role expression from the child rail's leg side
-        # most likely to surface in the data. For a TwoLegRail use
-        # destination_role (where money lands — the receiving party's
-        # account); for a SingleLegRail use leg_role.
-        if isinstance(child_rail, TwoLegRail):
-            role_expr = child_rail.destination_role
-        else:
-            role_expr = child_rail.leg_role
-        account_id = _pick_account_id_for_role_expr(
-            role_expr, instance, template, customer_instance,
-        )
-        if account_id is None:
-            # Fallback: child rail's role might be an unmaterialized
-            # account-template role (e.g. MerchantDDA when only
-            # CustomerDDA is materialized). The chain detection SQL
-            # only checks rail_name + transfer_parent_id, not
-            # account roles, so any account works for the test.
-            # Land the leg on the customer instance so it's at least
-            # observable in the data.
-            account_id = customer_instance.account_id
-        pairs.append((chain.child, account_id))
+        # Z.A: walk every child in the row (singleton OR XOR sibling).
+        # The chain-detection SQL just checks rail_name + matching
+        # transfer_parent_id, so over-listing XOR siblings is fine —
+        # the assertion is "any one of these landed", not "exactly
+        # this one".
+        for child_name in chain.children:
+            child_rail = _resolve_rail_by_name(child_name, instance)
+            if child_rail is None:
+                continue
+            # Aggregating rails sweep on cadence, not per-Transfer —
+            # they MUST NOT appear as chain children per SPEC. The
+            # validator enforces this at L2 load time, but a
+            # defensive skip here also avoids planting a chain child
+            # that can't legitimately exist in the data.
+            if child_rail.aggregating:
+                continue
+            # Pick the role expression from the child rail's leg side
+            # most likely to surface in the data. For a TwoLegRail use
+            # destination_role (where money lands — the receiving
+            # party's account); for a SingleLegRail use leg_role.
+            if isinstance(child_rail, TwoLegRail):
+                role_expr = child_rail.destination_role
+            else:
+                role_expr = child_rail.leg_role
+            account_id = _pick_account_id_for_role_expr(
+                role_expr, instance, template, customer_instance,
+            )
+            if account_id is None:
+                # Fallback: child rail's role might be an
+                # unmaterialized account-template role (e.g.
+                # MerchantDDA when only CustomerDDA is materialized).
+                # The chain detection SQL only checks rail_name +
+                # transfer_parent_id, not account roles, so any
+                # account works for the test. Land the leg on the
+                # customer instance so it's at least observable in
+                # the data.
+                account_id = customer_instance.account_id
+            pairs.append((child_name, account_id))
     return tuple(pairs)
 
 

@@ -177,9 +177,10 @@ _DSP_ID_PTTTEMPLATE = "88888888-8888-4888-8888-888888888888"
 _DSP_ID_PTTCOMPLETION = "99999999-9999-4999-8999-999999999999"
 
 
-# Per-ChainEntry edge — declared parent→child relationship + runtime
-# parent firing counts + matched-child counts + orphan rate. A row IS
-# one Sankey edge in the Chains visual.
+# Per-Chain-row-child edge — declared parent→child relationship +
+# runtime parent firing counts + matched-child counts + orphan rate.
+# A row IS one Sankey edge in the Chains visual; a multi-children
+# Chain row contributes N rows.
 #
 # M.3.10d: no longer wired into the Chains sheet (the Sankey + edge
 # details moved out in favor of a per-instance explorer); kept in the
@@ -603,7 +604,7 @@ def metadata_filter_clause(
 
 
 def declared_chain_parents(l2_instance: L2Instance) -> list[str]:
-    """Sorted list of distinct ChainEntry parent names. Drives the
+    """Sorted list of distinct Chain row parent names. Drives the
     Chain dropdown's selectable values on the Chains sheet (M.3.10d).
     """
     return sorted({str(c.parent) for c in l2_instance.chains})
@@ -802,8 +803,9 @@ def build_meta_values_dataset(
 
 
 def build_chains_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
-    """One row per declared ChainEntry — the L2's parent→child topology
-    joined to runtime parent firing counts + matched-child counts.
+    """One row per declared Chain-row child (Z.A: a multi-children
+    row contributes N rows) — the L2's parent→child topology joined
+    to runtime parent firing counts + matched-child counts.
 
     A row IS one Sankey edge in the Chains visual. Counts come from
     ``<prefix>_current_transactions`` matched on the parent's name
@@ -1559,8 +1561,17 @@ def _declared_rails_cte(l2_instance: L2Instance, dialect: Dialect) -> str:
 
 
 def _declared_chains_cte(l2_instance: L2Instance, dialect: Dialect) -> str:
-    """Render the L2-declared ChainEntry list as a UNION ALL of
-    SELECT-literal rows.
+    """Render the L2-declared Chain rows as a UNION ALL of SELECT-literal rows.
+
+    Z.A grammar collapse: each Chain row contributes one CTE row per
+    child (singleton row = 1 row, multi-children row = N rows). The
+    ``required`` column reports ``Required`` for singleton-children
+    rows (Z.A's "always fires when parent fires" semantics) and
+    ``Optional`` for multi-children siblings. The ``xor_group``
+    column is the row's composite key
+    (``parent::sorted-children-csv``) for multi-children rows, NULL
+    for singletons — keeping the existing downstream
+    "GROUP BY xor_group" semantics intact.
 
     ``source_node`` / ``target_node`` are the display strings the
     Sankey reads — currently identical to the parent / child name,
@@ -1586,23 +1597,26 @@ def _declared_chains_cte(l2_instance: L2Instance, dialect: Dialect) -> str:
         )
     rows: list[str] = []
     for c in l2_instance.chains:
-        required_label = "Required" if c.required else "Optional"
-        xor_group = str(c.xor_group) if c.xor_group is not None else None
-        # Source / target node display strings — same as the names today;
-        # M.3.6+ may suffix with required / xor info if visual readability
-        # demands. Keeping the seam so the SQL stays stable.
-        source_node = str(c.parent)
-        target_node = str(c.child)
-        rows.append(
-            "  SELECT "
-            f"{_sql_str(str(c.parent))} AS parent_name, "
-            f"{_sql_str(str(c.child))} AS child_name, "
-            f"{_sql_str(required_label)} AS required, "
-            f"{_sql_nullable_str(xor_group)} AS xor_group, "
-            f"{_sql_str(source_node)} AS source_node, "
-            f"{_sql_str(target_node)} AS target_node"
-            f"{df}"
+        is_required = len(c.children) == 1
+        required_label = "Required" if is_required else "Optional"
+        xor_group: str | None = (
+            None
+            if is_required
+            else f"{c.parent}::{','.join(sorted(str(ch) for ch in c.children))}"
         )
+        for child in c.children:
+            source_node = str(c.parent)
+            target_node = str(child)
+            rows.append(
+                "  SELECT "
+                f"{_sql_str(str(c.parent))} AS parent_name, "
+                f"{_sql_str(str(child))} AS child_name, "
+                f"{_sql_str(required_label)} AS required, "
+                f"{_sql_nullable_str(xor_group)} AS xor_group, "
+                f"{_sql_str(source_node)} AS source_node, "
+                f"{_sql_str(target_node)} AS target_node"
+                f"{df}"
+            )
     return "\n  UNION ALL\n".join(rows)
 
 

@@ -15,7 +15,7 @@ import pytest
 
 from quicksight_gen.common.l2 import (
     Account,
-    ChainEntry,
+    Chain,
     Identifier,
     L2Instance,
     PARENT_TRANSFER_ID,
@@ -154,14 +154,14 @@ def test_unions_transfer_keys_across_multiple_containing_templates() -> None:
 # -- Source 3: parent_transfer_id from Required-true chain --------------------
 
 
-def test_required_true_chain_child_adds_parent_transfer_id() -> None:
-    """Rail directly named as a Required:true Chain.child gets parent_transfer_id."""
+def test_singleton_children_chain_adds_parent_transfer_id() -> None:
+    """Rail named as a singleton-children Chain (Z.A "required" semantics)
+    gets parent_transfer_id."""
     parent = _two_leg("ParentRail")
     child = _two_leg("ChildRail")
-    chain = ChainEntry(
+    chain = Chain(
         parent=Identifier("ParentRail"),
-        child=Identifier("ChildRail"),
-        required=True,
+        children=(Identifier("ChildRail"),),
     )
     inst = _make_instance(rails=(parent, child), chains=(chain,))
     assert posted_requirements_for(inst, Identifier("ChildRail")) == (
@@ -169,23 +169,25 @@ def test_required_true_chain_child_adds_parent_transfer_id() -> None:
     )
 
 
-def test_required_false_chain_does_not_add_parent_transfer_id() -> None:
-    """Required:false means the parent is genuinely optional — field stays NULL OK."""
+def test_multi_children_xor_does_not_add_parent_transfer_id() -> None:
+    """Multi-children (XOR) chain — only one sibling fires per parent
+    invocation, so parent_transfer_id is optional, not a hard requirement."""
     parent = _two_leg("ParentRail")
-    child = _two_leg("ChildRail")
-    chain = ChainEntry(
+    child_a = _two_leg("ChildA")
+    child_b = _two_leg("ChildB")
+    chain = Chain(
         parent=Identifier("ParentRail"),
-        child=Identifier("ChildRail"),
-        required=False,
+        children=(Identifier("ChildA"), Identifier("ChildB")),
     )
-    inst = _make_instance(rails=(parent, child), chains=(chain,))
-    assert posted_requirements_for(inst, Identifier("ChildRail")) == ()
+    inst = _make_instance(rails=(parent, child_a, child_b), chains=(chain,))
+    assert posted_requirements_for(inst, Identifier("ChildA")) == ()
+    assert posted_requirements_for(inst, Identifier("ChildB")) == ()
 
 
-def test_required_true_chain_via_containing_template() -> None:
-    """Rail's containing TEMPLATE is the chain child (not the rail directly).
-    Per SPEC: when a TransferTemplate is the chain.child, every leg of that
-    template inherits the parent_transfer_id PostedRequirement."""
+def test_singleton_children_chain_via_containing_template() -> None:
+    """Rail's containing TEMPLATE is a singleton-children chain target.
+    Per SPEC: when a TransferTemplate is the singleton chain child, every
+    leg of that template inherits the parent_transfer_id PostedRequirement."""
     rail = _single_leg("Leg")
     template = TransferTemplate(
         name=Identifier("MyTemplate"),
@@ -196,10 +198,9 @@ def test_required_true_chain_via_containing_template() -> None:
         leg_rails=(Identifier("Leg"),),
     )
     parent = _two_leg("Parent")
-    chain = ChainEntry(
+    chain = Chain(
         parent=Identifier("Parent"),
-        child=Identifier("MyTemplate"),
-        required=True,
+        children=(Identifier("MyTemplate"),),
     )
     inst = _make_instance(
         rails=(rail, parent),
@@ -230,10 +231,9 @@ def test_unions_all_three_sources_together() -> None:
         leg_rails=(Identifier("BigLeg"),),
     )
     parent = _two_leg("Parent")
-    chain = ChainEntry(
+    chain = Chain(
         parent=Identifier("Parent"),
-        child=Identifier("BigLeg"),
-        required=True,
+        children=(Identifier("BigLeg"),),
     )
     inst = _make_instance(
         rails=(rail, parent),
@@ -313,10 +313,9 @@ def test_chain_parent_does_not_inherit_parent_transfer_id() -> None:
     chain doesn't itself need a parent_transfer_id."""
     parent = _two_leg("Parent")
     child = _two_leg("Child")
-    chain = ChainEntry(
+    chain = Chain(
         parent=Identifier("Parent"),
-        child=Identifier("Child"),
-        required=True,
+        children=(Identifier("Child"),),
     )
     inst = _make_instance(rails=(parent, child), chains=(chain,))
     assert posted_requirements_for(inst, Identifier("Parent")) == ()

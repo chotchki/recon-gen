@@ -22,10 +22,11 @@ What this file checks:
 4. Metadata generation — values respect the rail's declared
    metadata_keys; per-(rail, firing) unique so the L2 Flow Tracing
    metadata cascade reads distinct values.
-5. Required chain linkage — for a Required ChainEntry whose parent
-   AND child both have materialized accounts, broad mode plants an
-   additional child firing whose ``transfer_parent_id`` points at
-   the parent's first firing.
+5. Required chain linkage — for a singleton-children Chain row
+   (Z.A "required" semantics) whose parent AND child both have
+   materialized accounts, broad mode plants an additional child
+   firing whose ``transfer_parent_id`` points at the parent's first
+   firing.
 6. Determinism — two runs of the same `(instance, mode)` produce
    byte-identical SQL.
 7. emit_seed integration — the new plants flow through emit_seed

@@ -93,15 +93,17 @@ def test_mutate_rail_replaces_field(spec_example: L2Instance) -> None:
 
 
 def test_mutate_chain_uses_composite_key(spec_example: L2Instance) -> None:
-    """Chains have no .id — addressing uses ``<parent>::<child>``."""
+    """Chains have no .id — addressing uses
+    ``<parent>::<sorted-children-csv>``. Z.A grammar.
+    """
     new_inst = mutate_l2(
         spec_example,
         kind="chain",
         entity_id="ExternalReconciliationCycle::ReconciliationClosing",
-        fields={"required": False},
+        fields={"description": "edited"},
     )
     chain = new_inst.chains[0]
-    assert chain.required is False
+    assert chain.description == "edited"
 
 
 def test_mutate_unknown_id_raises_keyerror(
@@ -202,7 +204,7 @@ def test_rename_rail_walks_template_leg_rails_and_chains(
     """Renaming a Rail should rewrite:
     - the Rail.name itself,
     - any TransferTemplate.leg_rails containing it,
-    - any ChainEntry.parent / .child equal to it,
+    - any Chain.parent / Chain.children entry equal to it,
     - any Rail.bundles_activity entry equal to it.
     """
     new_name = Identifier("ReconciliationLegRenamed")
@@ -231,7 +233,7 @@ def test_rename_rail_walks_template_leg_rails_and_chains(
 def test_rename_transfer_template_walks_chain_endpoints(
     spec_example: L2Instance,
 ) -> None:
-    """Renaming a TransferTemplate should rewrite ChainEntry.parent
+    """Renaming a TransferTemplate should rewrite Chain.parent
     or .child references."""
     new_name = Identifier("ExternalReconciliationCycleRenamed")
     new_inst = rename_identifier(
@@ -244,10 +246,10 @@ def test_rename_transfer_template_walks_chain_endpoints(
     # Template renamed.
     assert any(tt.name == new_name for tt in new_inst.transfer_templates)
 
-    # ChainEntry parent/child updated.
+    # Chain parent/children entries updated.
     for c in new_inst.chains:
         if c.parent == Identifier("ExternalReconciliationCycle"):
-            pytest.fail("ChainEntry.parent still references the old name")
+            pytest.fail("Chain.parent still references the old name")
 
 
 def test_rename_chain_is_noop(spec_example: L2Instance) -> None:

@@ -199,8 +199,8 @@ def test_chain_entry_description_loads(tmp_path: Path) -> None:
         "    origin: InternalInitiated\n"
         "chains:\n"
         "  - parent: Parent\n"
-        "    child: Child\n"
-        "    required: true\n"
+        "    children:\n"
+        "      - Child\n"
         "    description: Every Parent firing should trigger a Child.\n"
     )
     inst = load_instance(p)

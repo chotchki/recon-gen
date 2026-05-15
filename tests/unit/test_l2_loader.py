@@ -3,7 +3,7 @@
 Coverage split:
 - Inline kitchen-sink YAML covering every primitive shape — including
   AccountTemplate, both rail shapes, aggregating rails, TransferTemplate,
-  ChainEntry with XOR group, LimitSchedule.
+  Chain with multi-children (XOR), LimitSchedule.
 - Per-helper rejection tests: F4 Money coercion, F5 InstancePrefix regex
   + length cap, Rail discrimination, missing-required-field paths.
 
@@ -96,9 +96,9 @@ def test_loads_kitchen_sink_yaml_inline(tmp_path: Path) -> None:
 
         chains:
           - parent: MerchantSettlementCycle
-            child: MerchantPayoutACH
-            required: true
-            xor_group: PayoutVehicle
+            children:
+              - MerchantPayoutACH
+              - MerchantPayoutWire
 
         limit_schedules:
           - parent_role: ControlAccount
@@ -145,10 +145,11 @@ def test_loads_kitchen_sink_yaml_inline(tmp_path: Path) -> None:
     assert template.expected_net == Decimal("0")
     assert inst.limit_schedules[0].cap == Decimal("5000.00")
 
-    # Optional fields default cleanly
+    # Z.A: chain rows carry parent + a children tuple. The above
+    # fixture is multi-children (XOR semantics).
     chain = inst.chains[0]
-    assert chain.required is True
-    assert chain.xor_group == "PayoutVehicle"
+    assert chain.parent == "MerchantSettlementCycle"
+    assert chain.children == ("MerchantPayoutACH", "MerchantPayoutWire")
 
     # AccountTemplate Money coercion (the float-precision case for F4)
     merchant_tmpl = inst.account_templates[1]

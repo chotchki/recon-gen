@@ -17,7 +17,7 @@ from pathlib import Path
 from quicksight_gen.common.l2 import (
     Account,
     AccountTemplate,
-    ChainEntry,
+    Chain,
     Identifier,
     L2Instance,
     Name,
@@ -106,10 +106,9 @@ def _kitchen_instance() -> L2Instance:
             ),
         ),
         chains=(
-            ChainEntry(
+            Chain(
                 parent=Identifier("InboundRail"),
-                child=Identifier("SettlementCycle"),
-                required=True,
+                children=(Identifier("SettlementCycle"),),
             ),
         ),
         limit_schedules=(),
@@ -166,7 +165,7 @@ def test_topology_graph_rail_nodes_for_template_legs_and_chain_refs() -> None:
     # FeeCharge is a leg of SettlementCycle template → emitted as rail node.
     assert "rail__FeeCharge" in rail_ids
     # InboundRail is referenced by a chain edge (chain.parent).
-    # SettlementCycle is the chain.child but it's a template, not a rail.
+    # SettlementCycle is in chain.children but it's a template, not a rail.
     assert "rail__InboundRail" in rail_ids
     # OutboundRail isn't in any template, isn't in any chain → no rail node.
     # (It still produces a bundle edge between roles; the rail itself
@@ -248,8 +247,9 @@ def test_topology_graph_chain_edge_carries_required_metadata() -> None:
     assert chain.source == "rail__InboundRail"
     # Child resolves to a template (SettlementCycle is a template name).
     assert chain.target == "tmpl__SettlementCycle"
-    assert chain.metadata["required"] == "true"
-    assert "xor_group" not in chain.metadata
+    # Z.A: singleton-children rows carry cardinality="required".
+    assert chain.metadata["cardinality"] == "required"
+    assert "xor_siblings" not in chain.metadata
     assert "required" in chain.label
 
 
@@ -269,27 +269,22 @@ def test_topology_graph_chain_edge_carries_xor_group_metadata() -> None:
         ),
         transfer_templates=(),
         chains=(
-            ChainEntry(
+            Chain(
                 parent=Identifier("Parent"),
-                child=Identifier("ChildA"),
-                required=False,
-                xor_group=Identifier("payouts"),
-            ),
-            ChainEntry(
-                parent=Identifier("Parent"),
-                child=Identifier("ChildB"),
-                required=False,
-                xor_group=Identifier("payouts"),
+                children=(Identifier("ChildA"), Identifier("ChildB")),
             ),
         ),
         limit_schedules=(),
     )
     g = topology_graph_for(inst)
     chain_edges = [e for e in g.edges if e.kind == "chain"]
+    # Z.A: a multi-children chain row produces one edge per child.
     assert len(chain_edges) == 2
     for ce in chain_edges:
-        assert ce.metadata["required"] == "false"
-        assert ce.metadata["xor_group"] == "payouts"
+        assert ce.metadata["cardinality"] == "xor"
+        # xor_siblings names the alternation set so the renderer can
+        # group them visually.
+        assert ce.metadata["xor_siblings"] == "ChildA,ChildB"
 
 
 # -- Typed projection against shipped fixtures ------------------------------

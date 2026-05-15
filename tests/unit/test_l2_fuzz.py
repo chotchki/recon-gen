@@ -83,7 +83,7 @@ def test_fuzzer_exercises_every_primitive_kind_across_seeds(
         "aggregating_rail": False,
         "rail_with_max_pending_age": False,
         "rail_with_max_unbundled_age": False,
-        "chain_with_xor_group": False,
+        "chain_with_multiple_children": False,
     }
     for seed in META_GUARD_SEEDS:
         yaml_text = random_l2_yaml(seed)
@@ -115,8 +115,9 @@ def test_fuzzer_exercises_every_primitive_kind_across_seeds(
             if r.max_unbundled_age is not None:
                 saw["rail_with_max_unbundled_age"] = True
         for c in inst.chains:
-            if c.xor_group is not None:
-                saw["chain_with_xor_group"] = True
+            # Z.A: a multi-children Chain row encodes XOR alternation.
+            if len(c.children) >= 2:
+                saw["chain_with_multiple_children"] = True
         if all(saw.values()):
             return  # short-circuit on full coverage
     missing = [k for k, v in saw.items() if not v]
