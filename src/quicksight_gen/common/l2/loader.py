@@ -61,11 +61,11 @@ from .primitives import (
     Name,
     Origin,
     Rail,
+    RailName,
     RoleExpression,
     Scope,
     SingleLegRail,
     TransferTemplate,
-    TransferType,
     TwoLegRail,
 )
 from .theme import ThemePreset
@@ -735,6 +735,16 @@ def _load_instance_template(raw: object | None, *, path: str) -> str | None:
     return raw
 
 
+_LEGACY_TRANSFER_TYPE_REJECT_MSG = (
+    "Z.B grammar collapse (PLAN.md §Z.B): the `transfer_type:` field on "
+    "Rail / TransferTemplate has been removed — the rail's / template's "
+    "`name` IS the type identifier across L1 + L2. Drop the "
+    "`transfer_type:` line entirely. On LimitSchedule, replace "
+    "`transfer_type: <RailName>` with `rail: <RailName>` (same value, "
+    "renamed field)."
+)
+
+
 def _load_rail(raw: object, *, path: str) -> Rail:
     """Discriminate two-leg vs single-leg by which keys are present.
 
@@ -742,14 +752,20 @@ def _load_rail(raw: object, *, path: str) -> Rail:
     (per-leg ``source_origin`` / ``destination_origin`` may cover both
     legs on a two-leg rail; the validator's O1 rule checks resolution).
     Per-leg overrides on a single-leg rail are a hard load-time error.
+
+    Z.B (2026-05-15) drops the legacy ``transfer_type:`` key — the
+    rail's ``name`` IS the type. Presence raises with an actionable
+    error pointing at PLAN §Z.B.
     """
     raw_d = _as_mapping(raw, path=path, what="rail")
 
+    if "transfer_type" in raw_d:
+        raise L2LoaderError(
+            f"{path}.transfer_type: legacy field no longer supported. "
+            f"{_LEGACY_TRANSFER_TYPE_REJECT_MSG}",
+        )
+
     name = _load_identifier(_require(raw_d, "name", path=path), path=f"{path}.name")
-    transfer_type: TransferType = _load_string(
-        _require(raw_d, "transfer_type", path=path),
-        path=f"{path}.transfer_type",
-    )
     origin_raw = raw_d.get("origin")
     origin: Origin | None = (
         _load_string(origin_raw, path=f"{path}.origin")
@@ -841,7 +857,6 @@ def _load_rail(raw: object, *, path: str) -> Rail:
         )
         return TwoLegRail(
             name=name,
-            transfer_type=transfer_type,
             metadata_keys=metadata_keys,
             source_role=_load_role_expression(
                 raw_d["source_role"], path=f"{path}.source_role",
@@ -880,7 +895,6 @@ def _load_rail(raw: object, *, path: str) -> Rail:
             )
     return SingleLegRail(
         name=name,
-        transfer_type=transfer_type,
         metadata_keys=metadata_keys,
         leg_role=_load_role_expression(
             raw_d["leg_role"], path=f"{path}.leg_role",
@@ -945,16 +959,17 @@ def _load_metadata_value_examples(
 
 def _load_transfer_template(raw: object, *, path: str) -> TransferTemplate:
     raw_d = _as_mapping(raw, path=path, what="transfer_template")
+    if "transfer_type" in raw_d:
+        raise L2LoaderError(
+            f"{path}.transfer_type: legacy field no longer supported. "
+            f"{_LEGACY_TRANSFER_TYPE_REJECT_MSG}",
+        )
     completion: CompletionExpression = _load_string(
         _require(raw_d, "completion", path=path), path=f"{path}.completion",
     )
     return TransferTemplate(
         name=_load_identifier(
             _require(raw_d, "name", path=path), path=f"{path}.name",
-        ),
-        transfer_type=_load_string(
-            _require(raw_d, "transfer_type", path=path),
-            path=f"{path}.transfer_type",
         ),
         expected_net=_load_money(
             _require(raw_d, "expected_net", path=path),
@@ -1023,15 +1038,20 @@ def _load_chain(raw: object, *, path: str) -> Chain:
 
 def _load_limit_schedule(raw: object, *, path: str) -> LimitSchedule:
     raw_d = _as_mapping(raw, path=path, what="limit_schedule")
+    if "transfer_type" in raw_d:
+        raise L2LoaderError(
+            f"{path}.transfer_type: legacy field renamed to `rail`. "
+            f"{_LEGACY_TRANSFER_TYPE_REJECT_MSG}",
+        )
     return LimitSchedule(
         parent_role=_load_identifier(
             _require(raw_d, "parent_role", path=path),
             path=f"{path}.parent_role",
         ),
-        transfer_type=_load_string(
-            _require(raw_d, "transfer_type", path=path),
-            path=f"{path}.transfer_type",
-        ),
+        rail=RailName(_load_string(
+            _require(raw_d, "rail", path=path),
+            path=f"{path}.rail",
+        )),
         cap=_load_money(_require(raw_d, "cap", path=path), path=f"{path}.cap"),
         description=_load_description(
             raw_d.get("description"), path=f"{path}.description",

@@ -20,12 +20,15 @@ Rules enforced (numbered for cross-reference with the test file):
   U2. AccountTemplate.role values are unique within ``account_templates``.
   U3. Rail.name values are unique within ``rails``.
   U4. TransferTemplate.name values are unique within ``transfer_templates``.
-  U5. LimitSchedule (parent_role, transfer_type) combinations are unique
+  U5. LimitSchedule (parent_role, rail) combinations are unique
       (M.1a — duplicate combinations are a configuration error).
-  U6. Rail per-leg ``(transfer_type, role)`` discriminators are unique
-      across rails (P.9b — the Rail-to-Transaction binding is implicit
-      via this tuple; two rails contributing the same discriminator make
-      the binding ambiguous). Direction is intentionally NOT in the key.
+      Z.B (2026-05-15): renamed from (parent_role, transfer_type) when
+      the symmetric transfer_type collapse landed.
+
+  Removed under Z.B grammar collapse (PLAN.md §Z.B — locked 2026-05-15):
+  - U6 (Rail per-leg ``(transfer_type, role)`` discriminators unique) —
+    transfer_type is gone; rail-to-transaction binding is now `rail_name`
+    directly, which U3 already enforces unique.
 
   R1. Every Role referenced by a Rail (source_role / destination_role /
       leg_role) resolves to some Account.role OR AccountTemplate.role.
@@ -47,16 +50,17 @@ Rules enforced (numbered for cross-reference with the test file):
   R9. Every dotted-form BundleSelector (``Template.LegRail``) references
       a rail that is actually in that template's ``leg_rails`` (M.1a —
       catches typos + leg-rail cross-references at load).
-  R10. Every ``LimitSchedule.transfer_type`` matches some declared
-      ``Rail.transfer_type`` (M.2d.1 — a cap declared against a
-      transfer_type no Rail emits is a no-op; catches typos).
+  R10. Every ``LimitSchedule.rail`` matches some declared ``Rail.name``
+      (M.2d.1 — a cap declared against a rail no L2 declares is a
+      no-op; catches typos). Z.B (2026-05-15): formerly checked
+      transfer_type alignment; under collapse the cap binds directly
+      to a rail name.
   R11. Every bare-form (``<name>``, not ``Template.LegRail``) entry in
-      an AggregatingRail's ``bundles_activity`` resolves to either a
-      declared ``Rail.name`` OR some declared ``Rail.transfer_type``
-      (M.2d.1 — catches typos that would silently make the bundler
-      match nothing). Companion to R8 (which checks the inverse: any
-      rail with ``max_unbundled_age`` set must appear in *some*
-      bundles_activity).
+      an AggregatingRail's ``bundles_activity`` resolves to a declared
+      ``Rail.name`` (Z.B 2026-05-15: formerly also matched
+      Rail.transfer_type, dropped under the symmetric collapse).
+      Companion to R8 (which checks the inverse: any rail with
+      ``max_unbundled_age`` set must appear in *some* bundles_activity).
   R12. Every ``TransferKey`` field name MUST appear in
       ``metadata_keys`` of every Rail in the template's ``leg_rails``
       (M.3.13 — a TransferKey field is auto-derived as a
@@ -101,10 +105,11 @@ Rules enforced (numbered for cross-reference with the test file):
       ``expected_net`` set (the template owns the bundle's ExpectedNet).
   S3. Every NON-aggregating single-leg Rail MUST be reconciled — appears
       in some TransferTemplate.leg_rails OR some aggregating Rail's
-      bundles_activity (matched by Rail.name OR Rail.transfer_type).
-      Aggregating single-leg rails are exempt — they ARE the
-      reconciliation mechanism (per SPEC's "single-leg sweep that lands
-      in an external counterparty" example).
+      bundles_activity (matched by Rail.name; Z.B 2026-05-15 dropped
+      the legacy Rail.transfer_type alternative). Aggregating single-leg
+      rails are exempt — they ARE the reconciliation mechanism (per
+      SPEC's "single-leg sweep that lands in an external counterparty"
+      example).
   S4. Aggregating Rails MUST NOT appear in any Chain.children.
   S5. Aggregating Rails MUST declare both ``cadence`` and
       ``bundles_activity``.
@@ -198,7 +203,6 @@ def validate(instance: L2Instance) -> None:
     _check_unique_account_ids(instance)
     _check_unique_account_template_roles(instance)
     _check_unique_rail_names(instance)
-    _check_unique_rail_discriminators(instance)
     _check_unique_transfer_template_names(instance)
     _check_unique_limit_schedule_combinations(instance)
 
@@ -221,7 +225,7 @@ def validate(instance: L2Instance) -> None:
     _check_template_leg_rails_are_non_aggregating(instance, rails_by_name)
     _check_max_unbundled_age_only_on_bundled_rails(instance)
     _check_dotted_bundle_selectors_resolve(instance)
-    _check_limit_schedule_transfer_type_has_rail(instance)
+    _check_limit_schedule_rail_resolves(instance, rail_names)
     _check_bare_bundles_activity_selectors_resolve(instance)
     _check_transfer_key_in_leg_rail_metadata_keys(instance, rails_by_name)
     _check_metadata_value_example_keys_resolve(instance)
@@ -276,93 +280,22 @@ def _check_unique_transfer_template_names(inst: L2Instance) -> None:
     )
 
 
-def _check_unique_rail_discriminators(inst: L2Instance) -> None:
-    """P.9b — Rail uniqueness on the per-leg ``(transfer_type, role)``
-    discriminator.
-
-    The Rail-to-Transaction binding is implicit: a posted Transaction's
-    ``(transfer_type, account_role)`` tuple identifies which Rail
-    produced it. Two rails sharing the same discriminator for any leg
-    are silently ambiguous — a candidate Transaction matches both with
-    no defined tiebreak.
-
-    Per-leg discriminator:
-    - ``TwoLegRail``: contributes two — ``(transfer_type, source_role)``
-      and ``(transfer_type, destination_role)``.
-    - ``SingleLegRail``: contributes one — ``(transfer_type, leg_role)``.
-
-    Role expressions that are tuples (rail can fan out to multiple
-    accounts of the same role) contribute one discriminator per role.
-
-    Direction is intentionally NOT in the discriminator: forcing
-    uniqueness on ``(transfer_type, role)`` alone surfaces two-rail-
-    per-direction patterns (e.g. CustomerInboundACH + CustomerOutboundACH
-    sharing ``ach`` + ``CustomerDDA`` with swapped source/destination),
-    which the SPEC says should be modeled as either one bidirectional
-    rail or two distinct transfer_types.
-    """
-    seen: dict[tuple[str, str], str] = {}
-    for rail in inst.rails:
-        rail_name = str(rail.name)
-        transfer_type = str(rail.transfer_type)
-        match rail:
-            case TwoLegRail(source_role=src, destination_role=dst):
-                roles: tuple[str, ...] = (
-                    *_expand_role_expr(src),
-                    *_expand_role_expr(dst),
-                )
-            case SingleLegRail(leg_role=leg):
-                roles = _expand_role_expr(leg)
-        # Dedupe within-rail repetitions: a rail with the same role on
-        # both legs (or a union with duplicates) is fine — both legs of
-        # one Transfer share a transfer_id, no cross-rail ambiguity.
-        for role in set(roles):
-            key = (transfer_type, role)
-            if key in seen and seen[key] != rail_name:
-                raise L2ValidationError(
-                    f"Rail uniqueness violation: rail {rail_name!r} and "
-                    f"rail {seen[key]!r} both contribute discriminator "
-                    f"(transfer_type={transfer_type!r}, role={role!r}). "
-                    f"A posted Transaction matching this discriminator "
-                    f"would be ambiguous between the two rails.\n"
-                    f"Resolve by either (a) using distinct transfer_type "
-                    f"values per direction (e.g. ach_inbound / ach_outbound), "
-                    f"(b) merging into a single bidirectional rail, or "
-                    f"(c) chaining the two via a TransferTemplate."
-                )
-            seen[key] = rail_name
-
-
-def _expand_role_expr(expr: object) -> tuple[str, ...]:
-    """Normalize a RoleExpression into a tuple of role-name strings.
-
-    RoleExpression is either an Identifier (single role) or a tuple
-    of Identifiers (union of roles, e.g. a rail that fans out to
-    multiple destination accounts of the same role family).
-    """
-    if isinstance(expr, tuple):
-        return tuple(
-            str(e)  # type: ignore[reportUnknownArgumentType]: expr is recursive Identifier-or-tuple; e is Identifier here
-            for e in expr  # type: ignore[reportUnknownVariableType]: expr is recursive Identifier-or-tuple; e is Identifier here
-        )
-    return (str(expr),)
-
-
 def _check_unique_limit_schedule_combinations(inst: L2Instance) -> None:
-    """U5: each (parent_role, transfer_type) pair appears at most once.
+    """U5: each (parent_role, rail) pair appears at most once.
 
     Per SPEC: duplicate combinations are a load-time configuration error
     (the projection into ``StoredBalance.Limits`` would be ambiguous —
-    which cap wins?).
+    which cap wins?). Z.B (2026-05-15): renamed from
+    (parent_role, transfer_type) under the symmetric collapse.
     """
     seen: dict[tuple[Identifier, str], int] = {}
     for i, ls in enumerate(inst.limit_schedules):
-        key = (ls.parent_role, ls.transfer_type)
+        key = (ls.parent_role, ls.rail)
         if key in seen:
             raise L2ValidationError(
                 f"limit_schedules[{i}]: duplicate "
                 f"(parent_role={ls.parent_role!r}, "
-                f"transfer_type={ls.transfer_type!r}) — also declared at "
+                f"rail={ls.rail!r}) — also declared at "
                 f"limit_schedules[{seen[key]}]"
             )
         seen[key] = i
@@ -538,9 +471,12 @@ def _check_max_unbundled_age_only_on_bundled_rails(inst: L2Instance) -> None:
     Per SPEC: the watch fires when a Posted-and-eligible-for-bundling row
     sits unassigned past the threshold. If nothing bundles this rail, the
     watch can never fire — declaring it is a configuration error.
+
+    Z.B (2026-05-15): bundles_activity matches Rail.name (or template-leg
+    name in the dotted form) only — the legacy transfer_type fallback is
+    gone with the symmetric collapse.
     """
     bundled: set[Identifier] = set()
-    bundled_transfer_types: set[str] = set()
     for r in inst.rails:
         if not r.aggregating:
             continue
@@ -552,39 +488,38 @@ def _check_max_unbundled_age_only_on_bundled_rails(inst: L2Instance) -> None:
                 _, _, leg = sel_str.partition(".")
                 bundled.add(Identifier(leg))
             else:
-                # Bare identifier — could be a TransferType, RailName, or
-                # TransferTemplateName at runtime. Match all 3 here so the
-                # watch is "satisfied" by any plausible resolution.
+                # Bare identifier — Rail.name or TransferTemplate.name.
                 bundled.add(Identifier(sel_str))
-                bundled_transfer_types.add(sel_str)
     for r in inst.rails:
         if r.max_unbundled_age is None:
             continue
-        if r.name in bundled or r.transfer_type in bundled_transfer_types:
+        if r.name in bundled:
             continue
         raise L2ValidationError(
             f"Rail {r.name!r}: max_unbundled_age is set but no aggregating "
-            f"Rail bundles this rail (neither the rail name {r.name!r} nor "
-            f"its transfer_type {r.transfer_type!r} appears in any "
-            f"bundles_activity); the watch can never fire"
+            f"Rail bundles this rail (rail name {r.name!r} does not appear "
+            f"in any bundles_activity); the watch can never fire"
         )
 
 
-def _check_limit_schedule_transfer_type_has_rail(inst: L2Instance) -> None:
-    """R10: every LimitSchedule.transfer_type matches some Rail.transfer_type.
+def _check_limit_schedule_rail_resolves(
+    inst: L2Instance, rail_names: set[Identifier],
+) -> None:
+    """R10: every LimitSchedule.rail matches some declared Rail.name.
 
-    Per M.2d.1: a cap declared against a transfer_type that no Rail
-    emits is a no-op — the limit-breach matview's CASE branches key
-    off the rail's transfer_type, so a typo'd cap never fires. Caught
-    at YAML load.
+    Per M.2d.1: a cap declared against a rail that no L2 emits is a
+    no-op — the limit-breach matview keys off the rail name, so a
+    typo'd cap never fires. Caught at YAML load.
+
+    Z.B (2026-05-15): formerly checked transfer_type alignment; under
+    the symmetric collapse the cap binds directly to a rail name.
     """
-    rail_transfer_types = {r.transfer_type for r in inst.rails}
     for i, ls in enumerate(inst.limit_schedules):
-        if ls.transfer_type not in rail_transfer_types:
+        if ls.rail not in rail_names:
             raise L2ValidationError(
-                f"limit_schedules[{i}].transfer_type={ls.transfer_type!r}: "
-                f"no declared Rail emits this transfer_type "
-                f"(declared: {sorted(rail_transfer_types)!r}). The cap "
+                f"limit_schedules[{i}].rail={ls.rail!r}: "
+                f"no declared Rail with this name "
+                f"(declared: {sorted(rail_names)!r}). The cap "
                 f"would silently never fire."
             )
 
@@ -593,15 +528,16 @@ def _check_bare_bundles_activity_selectors_resolve(inst: L2Instance) -> None:
     """R11: every bare-form bundles_activity selector resolves.
 
     Per M.2d.1: a bare-form selector (``<name>``, not ``Template.LegRail``)
-    must match either a declared Rail.name OR some declared
-    Rail.transfer_type. Otherwise the bundler matches nothing and the
-    aggregating rail silently never sweeps. R8 (max_unbundled_age set
-    ⇒ rail must be bundled) and R9 (dotted form ⇒ template + leg
-    actually exist) cover the inverse and the dotted form respectively;
-    this rule catches typos in the bare form.
+    must match a declared Rail.name. Otherwise the bundler matches
+    nothing and the aggregating rail silently never sweeps. R8
+    (max_unbundled_age set ⇒ rail must be bundled) and R9 (dotted form
+    ⇒ template + leg actually exist) cover the inverse and the dotted
+    form respectively; this rule catches typos in the bare form.
+
+    Z.B (2026-05-15): formerly accepted Rail.transfer_type as a fallback
+    match; transfer_type is gone with the symmetric collapse.
     """
     rail_names = {r.name for r in inst.rails}
-    rail_transfer_types = {r.transfer_type for r in inst.rails}
     for r in inst.rails:
         if not r.aggregating:
             continue
@@ -612,15 +548,11 @@ def _check_bare_bundles_activity_selectors_resolve(inst: L2Instance) -> None:
                 continue
             if sel_str in rail_names:
                 continue
-            if sel_str in rail_transfer_types:
-                continue
             raise L2ValidationError(
                 f"Rail {r.name!r}.bundles_activity: bare selector "
-                f"{sel_str!r} resolves to neither a declared Rail.name "
-                f"nor any declared Rail.transfer_type "
-                f"(rail names: {sorted(rail_names)!r}; transfer_types: "
-                f"{sorted(rail_transfer_types)!r}). The bundler would "
-                f"silently match nothing."
+                f"{sel_str!r} resolves to no declared Rail.name "
+                f"(rail names: {sorted(rail_names)!r}). The bundler "
+                f"would silently match nothing."
             )
 
 
@@ -889,17 +821,14 @@ def _check_single_leg_reconciliation(inst: L2Instance) -> None:
             # Self-reconciling per the exemption above.
             continue
         in_template = r.name in template_leg_names
-        in_aggregating = (
-            r.name in aggregating_bundles
-            or r.transfer_type in aggregating_bundles
-        )
+        in_aggregating = r.name in aggregating_bundles
         if not (in_template or in_aggregating):
             raise L2ValidationError(
                 f"Rail {r.name!r}: single-leg rail is not reconciled "
                 f"(not listed in any TransferTemplate.leg_rails AND "
-                f"its name + transfer_type {r.transfer_type!r} not "
-                f"matched by any aggregating Rail's bundles_activity); "
-                f"the drift it introduces would persist forever"
+                f"its name does not appear in any aggregating Rail's "
+                f"bundles_activity); the drift it introduces would "
+                f"persist forever"
             )
 
 

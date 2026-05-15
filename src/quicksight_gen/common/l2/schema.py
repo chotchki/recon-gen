@@ -94,7 +94,7 @@ def emit_schema(
        surface; rows in these views are the constraint violations.
        Caps for ``<prefix>_limit_breach`` are embedded inline from
        ``instance.limit_schedules`` at view-emit time (CASE branches
-       per declared (parent_role, transfer_type) pair) so the view DDL
+       per declared (parent_role, rail) pair) so the view DDL
        stays JSON-path-portable.
 
     Idempotent: every CREATE is preceded by a DROP IF EXISTS so
@@ -198,7 +198,7 @@ BASE_TRANSACTIONS_COLUMNS: tuple[str, ...] = (
     "id", "account_id", "account_name", "account_role",
     "account_scope", "account_parent_role", "amount_money",
     "amount_direction", "status", "posting", "transfer_id",
-    "transfer_type", "transfer_completion", "transfer_parent_id",
+    "transfer_completion", "transfer_parent_id",
     "rail_name", "template_name", "bundle_id", "supersedes",
     "origin", "metadata",
 )
@@ -406,8 +406,8 @@ def _emit_sqlite_current_matview_creates(p: str) -> str:
         f"CREATE INDEX idx_{p}_curr_tx_transfer ON {p}_current_transactions (transfer_id);\n"
         f"CREATE INDEX idx_{p}_curr_tx_id ON {p}_current_transactions (id);\n"
         f"CREATE INDEX idx_{p}_curr_tx_status ON {p}_current_transactions (status);\n"
-        f"CREATE INDEX idx_{p}_curr_tx_posting_transfer_type\n"
-        f"    ON {p}_current_transactions (posting, transfer_type);\n"
+        f"CREATE INDEX idx_{p}_curr_tx_posting_rail_name\n"
+        f"    ON {p}_current_transactions (posting, rail_name);\n"
         f"CREATE INDEX idx_{p}_curr_tx_template_name\n"
         f"    ON {p}_current_transactions (template_name);\n"
         f"CREATE INDEX idx_{p}_curr_tx_parent\n"
@@ -466,13 +466,15 @@ def _emit_l1_invariant_views(
             "CURRENT_TIMESTAMP", "ct.posting", dialect,
         ),
         posting_to_date=to_date("posting", dialect),
-        # Typed NULL for the UNION ALL transfer_type column. Oracle
+        # Typed NULL for the UNION ALL rail_name column. Oracle
         # rejects ``CAST(NULL AS CLOB)`` here (ORA-00932) because the
-        # subsequent UNION branches' transfer_type values are
-        # VARCHAR2(50) — Oracle won't UNION CLOB with VARCHAR2. Bind
+        # subsequent UNION branches' rail_name values are
+        # VARCHAR2(100) — Oracle won't UNION CLOB with VARCHAR2. Bind
         # to a VARCHAR-shaped NULL so the UNION column type matches
-        # the actual data in every branch on both dialects.
-        null_text=cast("NULL", varchar_type(50, dialect), dialect),
+        # the actual data in every branch on both dialects. Z.B
+        # (2026-05-15) renamed from transfer_type under the symmetric
+        # collapse.
+        null_text=cast("NULL", varchar_type(100, dialect), dialect),
     )
 
 
@@ -480,7 +482,7 @@ def _render_limit_breach_cases(
     instance: L2Instance, *, p: str, dialect: Dialect = Dialect.POSTGRES,
 ) -> str:
     """Build the CASE-WHEN body that the limit_breach view uses to look
-    up a (parent_role, transfer_type) cap from L2's LimitSchedules.
+    up a (parent_role, rail) cap from L2's LimitSchedules.
 
     Inline at view-emit time (not via JSON_VALUE on daily_balances.limits)
     because dynamic-key JSON path syntax isn't portable across the SQL
@@ -488,22 +490,25 @@ def _render_limit_breach_cases(
     schema-emit time anyway — re-emitting the schema picks up changes.
 
     Returns a multi-line SQL CASE expression. References ``tx.``-prefixed
-    columns since the view reads parent_role + transfer_type directly
-    from the transaction row (denormalized in v6) — no JOIN to
-    daily_balances needed. If the instance has no LimitSchedules,
-    returns ``NULL::numeric`` (typed NULL) so the column has a concrete
-    type — bare NULL infers as text in PostgreSQL and breaks the outer
+    columns since the view reads parent_role + rail_name directly from
+    the transaction row (denormalized in v6) — no JOIN to daily_balances
+    needed. If the instance has no LimitSchedules, returns
+    ``NULL::numeric`` (typed NULL) so the column has a concrete type —
+    bare NULL infers as text in PostgreSQL and breaks the outer
     ``outbound_total > cap`` comparison with `numeric > text`.
+
+    Z.B (2026-05-15): formerly matched on ``tx.transfer_type``; under
+    the symmetric collapse the cap binds to a rail name directly.
     """
     if not instance.limit_schedules:
         return typed_null("numeric", dialect)
     branches: list[str] = []
     for ls in instance.limit_schedules:
-        # Each LimitSchedule is keyed on (parent_role, transfer_type) per
+        # Each LimitSchedule is keyed on (parent_role, rail) per
         # validator U5; the cap is the threshold value.
         branches.append(
             f"WHEN tx.account_parent_role = '{ls.parent_role}' "
-            f"AND tx.transfer_type = '{ls.transfer_type}' "
+            f"AND tx.rail_name = '{ls.rail}' "
             f"THEN {ls.cap}"
         )
     branches_sql = "\n        ".join(branches)
@@ -964,7 +969,6 @@ CREATE TABLE {p}_transactions (
     status               {vc50}    NOT NULL,
     posting              {ts}    NOT NULL,
     transfer_id          {vc100}   NOT NULL,
-    transfer_type        {vc50}    NOT NULL,
     transfer_completion  {ts},
     transfer_parent_id   {vc100},
     rail_name            {vc100}   NOT NULL,
@@ -1028,7 +1032,7 @@ CREATE TABLE {p}_daily_balances (
 -- TEXT/JSON columns per the SPEC's portability constraint.
 CREATE INDEX idx_{p}_transactions_account_posting ON {p}_transactions (account_id, posting);
 CREATE INDEX idx_{p}_transactions_transfer        ON {p}_transactions (transfer_id);
-CREATE INDEX idx_{p}_transactions_type_status     ON {p}_transactions (transfer_type, status);
+CREATE INDEX idx_{p}_transactions_rail_status     ON {p}_transactions (rail_name, status);
 CREATE INDEX idx_{p}_transactions_parent          ON {p}_transactions (transfer_parent_id);
 -- Bundler eligibility: AggregatingRails query for Posted, unbundled rows
 -- by rail_name (matching their BundlesActivity selectors). Partial index
@@ -1079,17 +1083,18 @@ CREATE INDEX idx_{p}_curr_tx_account_posting
 CREATE INDEX idx_{p}_curr_tx_transfer ON {p}_current_transactions (transfer_id);
 CREATE INDEX idx_{p}_curr_tx_id ON {p}_current_transactions (id);
 CREATE INDEX idx_{p}_curr_tx_status ON {p}_current_transactions (status);
--- v8.5.6: date-leading composite for the Transactions sheet's
--- ``transfer_type`` filter dropdown. The dropdown's
--- ``SELECT DISTINCT transfer_type WHERE posting BETWEEN start AND end``
+-- v8.5.6: date-leading composite for the Transactions sheet's filter
+-- dropdown. Z.B (2026-05-15) renamed transfer_type → rail_name under the
+-- symmetric collapse; this index moved with it. The dropdown's
+-- ``SELECT DISTINCT rail_name WHERE posting BETWEEN start AND end``
 -- query had no useful index — full scan of the matview, visible as a
 -- spinning dropdown. Mirrors the v8.4.0 Drift dropdown fix
 -- (``idx_<prefix>_drift_day_account_role``). Other per-sheet dropdowns
 -- (account / transfer / status / origin) either already have an index
 -- or land in a small enough cardinality bucket; revisit if the next
 -- round of testing flags more.
-CREATE INDEX idx_{p}_curr_tx_posting_transfer_type
-    ON {p}_current_transactions (posting, transfer_type);
+CREATE INDEX idx_{p}_curr_tx_posting_rail_name
+    ON {p}_current_transactions (posting, rail_name);
 -- v8.6.8: tt-instances dataset SQL JOINs ``current_transactions`` ON
 -- ``ct.template_name = t.template_name`` and runs EXISTS subqueries
 -- keyed on ``transfer_parent_id`` for chain-child detection. Without
@@ -1403,7 +1408,7 @@ FROM (
         tx.account_role,
         tx.account_parent_role,
         {date_trunc_tx_posting} AS business_day,
-        tx.transfer_type,
+        tx.rail_name,
         SUM(ABS(tx.amount_money)) AS outbound_total,
         {limit_cases} AS cap
     FROM {p}_current_transactions tx
@@ -1415,13 +1420,13 @@ FROM (
         tx.account_id, tx.account_name, tx.account_role,
         tx.account_parent_role,
         {date_trunc_tx_posting},
-        tx.transfer_type
+        tx.rail_name
 ) outbound_with_cap
 WHERE cap IS NOT NULL
   AND outbound_total > cap;
 CREATE INDEX idx_{p}_lb_account_day
     ON {p}_limit_breach (account_id, business_day);
-CREATE INDEX idx_{p}_lb_type ON {p}_limit_breach (transfer_type);
+CREATE INDEX idx_{p}_lb_rail ON {p}_limit_breach (rail_name);
 
 -- ---------------------------------------------------------------------
 -- L1 invariant: Stuck Pending (M.2b.8).
@@ -1450,7 +1455,6 @@ SELECT * FROM (
         ct.account_role,
         ct.account_parent_role,
         ct.transfer_id,
-        ct.transfer_type,
         ct.rail_name,
         ct.amount_money,
         ct.amount_direction,
@@ -1473,7 +1477,7 @@ CREATE INDEX idx_{p}_sp_transfer ON {p}_stuck_pending (transfer_id);
 -- SPEC-derived: every Rail with `max_unbundled_age` SHOULD see its
 -- Posted legs picked up by a bundler before `posting + max_unbundled_age`.
 -- Per validator R8, `max_unbundled_age` is only meaningful on rails
--- whose `transfer_type` / `rail_name` appears in some AggregatingRail's
+-- whose `rail_name` appears in some AggregatingRail's
 -- `bundles_activity`. Rows here are the violations: bundle_id IS NULL
 -- AND status = 'Posted' AND posting age exceeds the per-rail cap.
 --
@@ -1496,7 +1500,6 @@ SELECT * FROM (
         ct.account_role,
         ct.account_parent_role,
         ct.transfer_id,
-        ct.transfer_type,
         ct.rail_name,
         ct.amount_money,
         ct.amount_direction,
@@ -1596,7 +1599,7 @@ WITH latest_day AS (
 SELECT 'drift' AS check_type, account_id, account_name,
        account_role, account_parent_role,
        business_day_start AS business_day,
-       {null_text} AS transfer_type,
+       {null_text} AS rail_name,
        ABS(drift) AS magnitude
 FROM {p}_drift, latest_day
 WHERE business_day_start = latest_day.day
@@ -1613,7 +1616,7 @@ FROM {p}_overdraft, latest_day
 WHERE business_day_start = latest_day.day
 UNION ALL
 SELECT 'limit_breach', account_id, account_name, account_role,
-       account_parent_role, business_day, transfer_type,
+       account_parent_role, business_day, rail_name,
        (outbound_total - cap)
 FROM {p}_limit_breach, latest_day
 WHERE business_day = latest_day.day
@@ -1629,19 +1632,19 @@ WHERE business_day_start = latest_day.day
 UNION ALL
 SELECT 'stuck_pending', account_id, account_name, account_role,
        account_parent_role, {posting_to_date} AS business_day,
-       transfer_type, amount_money AS magnitude
+       rail_name, amount_money AS magnitude
 FROM {p}_stuck_pending
 UNION ALL
 SELECT 'stuck_unbundled', account_id, account_name, account_role,
        account_parent_role, {posting_to_date} AS business_day,
-       transfer_type, amount_money AS magnitude
+       rail_name, amount_money AS magnitude
 FROM {p}_stuck_unbundled;
 -- Today's Exceptions sheet has 3 dropdowns (check_type, account,
--- transfer_type); each WHERE filter benefits from its own index.
+-- rail_name); each WHERE filter benefits from its own index.
 CREATE INDEX idx_{p}_te_check_type
     ON {p}_todays_exceptions (check_type);
 CREATE INDEX idx_{p}_te_account ON {p}_todays_exceptions (account_id);
-CREATE INDEX idx_{p}_te_type ON {p}_todays_exceptions (transfer_type);
+CREATE INDEX idx_{p}_te_rail ON {p}_todays_exceptions (rail_name);
 """
 
 
@@ -1891,7 +1894,7 @@ SELECT
     tgt.account_role         AS target_account_type,
     tgt.amount_money         AS hop_amount,
     tgt.posting              AS posted_at,
-    tgt.transfer_type        AS transfer_type
+    tgt.rail_name            AS rail_name
 FROM chain c
 JOIN {p}_transactions tgt
   ON tgt.transfer_id = c.transfer_id
