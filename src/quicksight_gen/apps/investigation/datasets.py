@@ -162,7 +162,7 @@ MONEY_TRAIL_CONTRACT = DatasetContract(columns=[
     ColumnSpec("target_account_type", "STRING"),
     ColumnSpec("hop_amount", "DECIMAL"),
     ColumnSpec("posted_at", "DATETIME"),
-    ColumnSpec("transfer_type", "STRING"),
+    ColumnSpec("rail_name", "STRING"),
     # Concatenated display labels, computed in the dataset SQL (see
     # ``_money_trail_base_sql``). Used by the Account Network sheet as the
     # walk-the-flow anchor — they're both human-readable AND uniquely

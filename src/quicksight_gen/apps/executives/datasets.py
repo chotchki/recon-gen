@@ -3,7 +3,7 @@
 Two datasets, both reading the shared base tables:
 
 - ``exec_transaction_summary`` — one row per ``(posted_date,
-  transfer_type)`` aggregated from ``transactions``. Drives the
+  rail_name)`` aggregated from ``transactions``. Drives the
   Transaction Volume Over Time + Money Moved sheets.
 - ``exec_account_summary`` — one row per ``account_id`` joined
   against an activity rollup over ``transactions``. Drives the
@@ -83,7 +83,7 @@ DS_EXEC_ACCOUNT_SUMMARY_ACTIVE = "exec-account-summary-active-ds"
 
 EXEC_TRANSACTION_SUMMARY_CONTRACT = DatasetContract(columns=[
     ColumnSpec("posted_date", "DATETIME"),
-    ColumnSpec("transfer_type", "STRING", shape=ColumnShape.TRANSFER_TYPE),
+    ColumnSpec("rail_name", "STRING", shape=ColumnShape.TRANSFER_TYPE),
     ColumnSpec("transfer_count", "INTEGER"),
     ColumnSpec("gross_amount", "DECIMAL"),
     ColumnSpec("net_amount", "DECIMAL"),
@@ -120,7 +120,7 @@ def _require_prefix(cfg: Config) -> str:
 
 
 def build_transaction_summary_dataset(cfg: Config) -> DataSet:
-    """Per-(date, transfer_type) aggregates: transfer count, gross + net dollars.
+    """Per-(date, rail_name) aggregates: transfer count, gross + net dollars.
 
     Aggregates per ``transfer_id`` first so multi-leg transfers are
     counted once, not once per leg. ``gross_amount`` is the per-transfer
@@ -144,22 +144,22 @@ WITH per_transfer AS (
     SELECT
         {posted_date_expr}     AS posted_date,
         t.transfer_id,
-        t.transfer_type,
+        t.rail_name,
         MAX(ABS(t.amount_money)) AS transfer_amount,
         SUM(t.amount_money)      AS transfer_net
     FROM {p}_transactions t
     WHERE t.status = 'Posted'
       {{date_filter}}
-    GROUP BY t.transfer_id, t.transfer_type
+    GROUP BY t.transfer_id, t.rail_name
 )
 SELECT
     posted_date,
-    transfer_type,
+    rail_name,
     COUNT(*)                   AS transfer_count,
     SUM(transfer_amount)       AS gross_amount,
     SUM(transfer_net)          AS net_amount
 FROM per_transfer
-GROUP BY posted_date, transfer_type"""
+GROUP BY posted_date, rail_name"""
     return build_dataset(
         cfg,
         cfg.prefixed("exec-transaction-summary-dataset"),

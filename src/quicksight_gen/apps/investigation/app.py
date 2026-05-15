@@ -676,7 +676,7 @@ def _build_money_trail_sheet(
         group_by=[
             depth_dim,
             ds_money_trail["transfer_id"].dim(),
-            ds_money_trail["transfer_type"].dim(),
+            ds_money_trail["rail_name"].dim(),
             ds_money_trail["source_account_name"].dim(),
             ds_money_trail["target_account_name"].dim(),
             ds_money_trail["posted_at"].date(),
@@ -937,7 +937,7 @@ def _build_account_network_sheet(
         ),
         group_by=[
             ds_anet["transfer_id"].dim(),
-            ds_anet["transfer_type"].dim(),
+            ds_anet["rail_name"].dim(),
             ds_anet["source_display"].dim(),
             ds_anet["target_display"].dim(),
             counterparty_dim,

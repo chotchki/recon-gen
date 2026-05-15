@@ -308,7 +308,7 @@ def _render_limit_breach_markdown(
     """Limit breach violations section in Markdown form.
 
     Same parent-vs-child split as Overdraft. Children grouped by
-    (parent_role, transfer_type) since the LimitSchedule cap is
+    (parent_role, rail_name) since the LimitSchedule cap is
     keyed on that pair.
     """
     header = (
@@ -317,7 +317,7 @@ def _render_limit_breach_markdown(
         "\n"
         "## Limit Breach Violations\n"
         "\n"
-        "_Account-day-transfer_type cells where cumulative outbound "
+        "_Account-day-rail_name cells where cumulative outbound "
         "exceeded the L2-configured cap. Parent accounts shown "
         "per-row; child accounts grouped by (parent role, transfer "
         "type) — the LimitSchedule key shape._\n"
@@ -349,7 +349,7 @@ def _render_limit_breach_markdown(
             out += (
                 f"| `{r.account_id}` | {r.account_name} | "
                 f"{r.account_role} | {r.business_day.isoformat()} | "
-                f"{r.transfer_type} | ${r.outbound_total:,.2f} "
+                f"{r.rail_name} | ${r.outbound_total:,.2f} "
                 f"| ${r.cap:,.2f} | ${r.overshoot:,.2f} |\n"
             )
     if child_groups:
@@ -363,7 +363,7 @@ def _render_limit_breach_markdown(
         )
         for s in child_groups:
             out += (
-                f"| {s.parent_role} | {s.transfer_type} "
+                f"| {s.parent_role} | {s.rail_name} "
                 f"| {s.distinct_children_breaching} "
                 f"| ${s.total_overshoot:,.2f} |\n"
             )
@@ -379,7 +379,7 @@ def _render_stuck_pending_markdown(
     Current-state matview: NO date filter, shows every transaction
     currently stuck in Pending past its aging cap regardless of when
     posted. Same parent/child split; child summary keys on
-    (parent_role, transfer_type) since the cap is per transfer type.
+    (parent_role, rail_name) since the cap is per transfer type.
     """
     header = (
         "\n"
@@ -419,7 +419,7 @@ def _render_stuck_pending_markdown(
         for r in parent_rows:
             out += (
                 f"| `{r.account_id}` | {r.account_name} | "
-                f"{r.transfer_type} | "
+                f"{r.rail_name} | "
                 f"{r.posting.strftime('%Y-%m-%d %H:%M')} | "
                 f"${r.amount_money:,.2f} | "
                 f"{_format_age(r.age_seconds)} | "
@@ -436,7 +436,7 @@ def _render_stuck_pending_markdown(
         )
         for s in child_groups:
             out += (
-                f"| {s.parent_role} | {s.transfer_type} "
+                f"| {s.parent_role} | {s.rail_name} "
                 f"| {s.distinct_children_affected} "
                 f"| {s.stuck_transaction_count} "
                 f"| ${s.total_stuck_amount:,.2f} |\n"
@@ -491,7 +491,7 @@ def _render_stuck_unbundled_markdown(
         for r in parent_rows:
             out += (
                 f"| `{r.account_id}` | {r.account_name} | "
-                f"{r.transfer_type} | "
+                f"{r.rail_name} | "
                 f"{r.posting.strftime('%Y-%m-%d %H:%M')} | "
                 f"${r.amount_money:,.2f} | "
                 f"{_format_age(r.age_seconds)} | "
@@ -508,7 +508,7 @@ def _render_stuck_unbundled_markdown(
         )
         for s in child_groups:
             out += (
-                f"| {s.parent_role} | {s.transfer_type} "
+                f"| {s.parent_role} | {s.rail_name} "
                 f"| {s.distinct_children_affected} "
                 f"| {s.stuck_transaction_count} "
                 f"| ${s.total_stuck_amount:,.2f} |\n"
@@ -675,7 +675,7 @@ def _render_daily_statement_walks_markdown(
                 out += (
                     f"| {t.posting.strftime('%H:%M')} "
                     f"| `{t.transaction_id}` "
-                    f"| {t.transfer_type} "
+                    f"| {t.rail_name} "
                     f"| {t.amount_direction} "
                     f"| ${t.amount_money:,.2f} "
                     f"| {t.status} |\n"
