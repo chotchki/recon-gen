@@ -87,7 +87,6 @@ rails:
   # because the per-leg overrides cover both legs (validator's O1 rule).
   # PostedRequirements + max_pending_age also exercise the new fields.
   - name: ExternalRailInbound
-    transfer_type: ach_inbound
     source_role: ExternalCounterparty
     destination_role: ClearingSuspense
     expected_net: 0
@@ -105,7 +104,6 @@ rails:
 
   # Two-leg in MerchantSettlementCycle.leg_rails — no expected_net (S2)
   - name: SettlementSweepLeg
-    transfer_type: settlement_sweep
     source_role: SouthPool
     destination_role: NorthPool
     origin: InternalInitiated
@@ -116,7 +114,6 @@ rails:
   # rail's transfer_type is matched by PoolBalancingNorthToSouth's
   # bundles_activity, so the watch is meaningful (R8 OK).
   - name: SubledgerCharge
-    transfer_type: charge
     leg_role: CustomerSubledger
     leg_direction: Debit
     origin: InternalInitiated
@@ -124,7 +121,6 @@ rails:
     max_unbundled_age: PT4H
 
   - name: SubledgerRefund
-    transfer_type: refund
     leg_role: CustomerSubledger
     leg_direction: Credit
     origin: InternalInitiated
@@ -132,7 +128,6 @@ rails:
 
   # Single-leg Variable closing leg of the template
   - name: SettlementClose
-    transfer_type: settlement
     leg_role: MerchantLedger
     leg_direction: Variable
     origin: InternalInitiated
@@ -144,7 +139,6 @@ rails:
   # this rail's role is to exercise S3 path B (aggregating reconciliation),
   # which works the same for any non-Variable direction.
   - name: WatchlistAdjustment
-    transfer_type: adjustment
     leg_role: WatchlistAccount
     leg_direction: Debit
     origin: InternalInitiated
@@ -152,7 +146,6 @@ rails:
 
   # Standalone payout — XOR group target
   - name: MerchantPayoutACH
-    transfer_type: ach_outbound
     source_role: MerchantLedger
     destination_role: ExternalCounterparty
     expected_net: 0
@@ -160,7 +153,6 @@ rails:
     metadata_keys: [merchant_id, settlement_period]
 
   - name: MerchantPayoutVoucher
-    transfer_type: voucher
     source_role: MerchantLedger
     destination_role: ExternalCounterparty
     expected_net: 0
@@ -169,7 +161,6 @@ rails:
 
   # Two-leg aggregating, intraday-2h
   - name: PoolBalancingNorthToSouth
-    transfer_type: pool_balancing
     source_role: NorthPool
     destination_role: SouthPool
     expected_net: 0
@@ -181,18 +172,16 @@ rails:
 
   # Single-leg aggregating, daily-eod cadence — sweeps WatchlistAdjustment activity
   - name: WatchlistDailySweep
-    transfer_type: watchlist_sweep
     leg_role: ExternalCounterparty
     leg_direction: Credit
     origin: InternalInitiated
     metadata_keys: [bundled_transfer_type, business_day]
     aggregating: true
-    bundles_activity: [adjustment]
+    bundles_activity: [WatchlistAdjustment]
     cadence: daily-eod
 
   # Two-leg standalone with union source_role
   - name: BatchInbound
-    transfer_type: batch
     source_role: [ExternalCounterparty, ClearingSuspense]
     destination_role: SouthPool
     expected_net: 0
@@ -202,7 +191,6 @@ rails:
   # Single-leg in DailyClearingCycle.leg_rails — provides the leg
   # the template needs (and exercises a different Completion form).
   - name: ClearingPosting
-    transfer_type: clearing_post
     leg_role: ClearingSuspense
     leg_direction: Variable
     origin: InternalInitiated
@@ -215,7 +203,6 @@ rails:
 # ---------------------------------------------------------------------
 transfer_templates:
   - name: MerchantSettlementCycle
-    transfer_type: settlement_cycle
     expected_net: 0
     transfer_key: [merchant_id, settlement_period]
     completion: metadata.settlement_period_end
@@ -226,7 +213,6 @@ transfer_templates:
       brings the bundle to zero at period end.
 
   - name: DailyClearingCycle
-    transfer_type: clearing_cycle
     expected_net: 0
     transfer_key: [batch_id]
     completion: business_day_end
@@ -260,18 +246,18 @@ chains:
 # ---------------------------------------------------------------------
 limit_schedules:
   - parent_role: SouthPool
-    transfer_type: charge
+    rail: SubledgerCharge
     cap: 5000.00
     description: |
       Per-customer daily charge cap. Each child sub-ledger is evaluated
       independently against this cap; not aggregated across siblings.
 
   - parent_role: NorthPool
-    transfer_type: ach_outbound
+    rail: MerchantPayoutACH
     cap: 25000.00
 
   - parent_role: ControlAccount
-    transfer_type: adjustment
+    rail: WatchlistAdjustment
     cap: 1000.00
 
 # ---------------------------------------------------------------------
