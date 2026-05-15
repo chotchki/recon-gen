@@ -34,7 +34,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Mapping
 from html import escape
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal, TypeAlias, cast
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
@@ -446,38 +446,29 @@ _CHAIN_FIELDS: tuple[FieldSpec, ...] = (
         name="parent",
         label="Parent",
         helper=(
-            "Rail or TransferTemplate that this chain entry's parent is. "
-            "When this entity fires, the L1 layer expects the child to follow."
+            "Rail or TransferTemplate this chain row attaches to. When the "
+            "parent fires, the L1 layer expects one of the children below "
+            "to follow."
         ),
         kind="select",
         select_from="rails_or_templates",
         required=True,
     ),
     FieldSpec(
-        name="child",
-        label="Child",
+        name="children",
+        label="Children",
         helper=(
-            "Rail or TransferTemplate expected to follow the parent within "
-            "the SLA window. Required + missing child surfaces as a "
-            "stuck-pending invariant violation."
+            "Rails / templates that may follow the parent. "
+            "Cmd/Ctrl-click to multi-select. Z.A grammar: one selected "
+            "child = required (every parent firing MUST invoke it; "
+            "missing surfaces as a stuck-pending invariant violation). "
+            "Two or more selected = XOR alternation (exactly one of the "
+            "selected children MUST fire per parent firing). Empty "
+            "selection is rejected by the validator."
         ),
-        kind="select",
+        kind="multi_select",
         select_from="rails_or_templates",
         required=True,
-    ),
-    FieldSpec(
-        name="required",
-        label="Required",
-        helper="`true` (every parent firing MUST have a child) or `false`.",
-        kind="select",
-        options=("true", "false"),
-        required=True,
-    ),
-    FieldSpec(
-        name="xor_group",
-        label="XOR group",
-        helper="When several entries share parent + xor_group, exactly one MUST fire.",
-        kind="text",
     ),
     FieldSpec(
         name="description",
@@ -601,8 +592,8 @@ def _coerce_field(spec: FieldSpec, raw: str, kind: EntityKind) -> object:
     "field cleared" intent on the model). NewType-of-str fields
     (Identifier / Name) are runtime str, so plain str passes through
     cleanly via ``dataclasses.replace`` — we only branch where the
-    field type is non-trivial (Decimal for money; bool for the chain
-    required select).
+    field type is non-trivial (Decimal for money; bool for true/false
+    selects).
     """
     raw = raw.strip()
     if raw == "":
@@ -610,9 +601,6 @@ def _coerce_field(spec: FieldSpec, raw: str, kind: EntityKind) -> object:
     if spec.kind == "money":
         from decimal import Decimal
         return Money(Decimal(raw))
-    # Booleans coming from a select dropdown of "true"/"false".
-    if spec.name == "required" and kind == "chain":
-        return raw.lower() == "true"
     # X.4.f.11.4 — Rail.aggregating gate flag.
     if spec.name == "aggregating" and kind == "rail":
         return raw.lower() == "true"
@@ -662,7 +650,7 @@ def _coerce_field(spec: FieldSpec, raw: str, kind: EntityKind) -> object:
                 tuple(str(item) for item in v),  # pyright: ignore[reportUnknownVariableType]  # WHY: list element type from yaml is Any
             ))
         return tuple(result)
-    if spec.name in ("id", "role", "parent_role", "parent", "child", "xor_group", "name"):
+    if spec.name in ("id", "role", "parent_role", "parent", "name"):
         # Account.name is Name; everything else identifier-shaped is Identifier.
         # Both are runtime str, so the choice is annotation-only.
         if kind == "account" and spec.name == "name":
@@ -2128,10 +2116,21 @@ def _post_mutate_entity_id(
     half against the composite and miss).
     """
     if kind == "chain":
-        old_parent, _, old_child = old_entity_id.partition("::")
+        # Z.A: composite = "parent::sorted-children-csv". When the form
+        # touched `children`, fields["children"] is a tuple of
+        # Identifiers; otherwise fall back to the old children half.
+        old_parent, _, old_children_csv = old_entity_id.partition("::")
         parent = str(new_fields.get("parent", old_parent) or old_parent)
-        child = str(new_fields.get("child", old_child) or old_child)
-        return f"{parent}::{child}"
+        new_children = new_fields.get("children")
+        if isinstance(new_children, (list, tuple)) and new_children:
+            # WHY: cast — Mapping[str, object] narrows isinstance to
+            # list[Unknown]/tuple[Unknown,...]; rebrand the source so
+            # pyright tracks element type as object, not Unknown.
+            items = cast("tuple[object, ...]", new_children)
+            children_csv = ",".join(sorted(str(c) for c in items))
+        else:
+            children_csv = old_children_csv
+        return f"{parent}::{children_csv}"
     if kind == "limit_schedule":
         old_parent_role, _, old_tt = old_entity_id.partition("::")
         parent_role = str(

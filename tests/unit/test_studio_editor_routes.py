@@ -659,35 +659,61 @@ def test_chain_card_id_replaces_double_colon_to_avoid_css_pseudo_element(
     assert f'hx-get="/l2_shape/chain/{composite}/edit"' in body
 
 
-@pytest.mark.skip(
-    reason=(
-        "Z.A grammar collapse: editor PUT/save form needs reshape to "
-        "post `parent` + `children` (was `parent` + `child` + "
-        "`required`). Tracked separately — see Studio chain UI rewrite."
-    ),
-)
 def test_put_chain_edit_renders_card_after_save(
     writable_l2_yaml: Path,
 ) -> None:
-    """X.4.f.10 + Z.A — Studio chain UI form needs a rewrite to post
-    grouped-children fields. Skipped until that ships."""
-    pass
+    """Z.A.f1 — chain PUT/save round-trips a `parent` + multi-valued
+    `children` form payload through the editor's multi_select coerce
+    path and writes the resulting Chain row back to disk. Mirrors the
+    leg_rails round-trip pattern: re-post the existing values so the
+    invariant tested here is wire shape, not validator-traversal logic.
+    """
+    app = _build_app(writable_l2_yaml)
+    pre = load_instance(writable_l2_yaml)
+    if not pre.chains:
+        return  # spec_example has at least one
+    chain = pre.chains[0]
+    children = [str(c) for c in chain.children]
+    children_csv = ",".join(sorted(children))
+    composite = f"{chain.parent}::{children_csv}"
+    data = {
+        "parent": str(chain.parent),
+        "children__present": "1",
+        "children": children,
+        "description": str(chain.description or ""),
+    }
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(f"/l2_shape/chain/{composite}", data=data)
+    assert resp.status_code == 200, resp.text
+
+    reloaded = load_instance(writable_l2_yaml)
+    saved = next(
+        ch for ch in reloaded.chains
+        if str(ch.parent) == str(chain.parent)
+        and sorted(str(c) for c in ch.children) == sorted(children)
+    )
+    assert sorted(str(c) for c in saved.children) == sorted(children)
 
 
-@pytest.mark.skip(
-    reason=(
-        "Z.A grammar collapse: chain create form needs reshape to "
-        "use a multi_select for `children` (was a single-select "
-        "`child` dropdown). Tracked separately — Studio chain UI "
-        "rewrite."
-    ),
-)
 def test_chain_create_form_renders_parent_child_dropdowns(
     writable_l2_yaml: Path,
 ) -> None:
-    """X.4.f.10 + Z.A — Studio chain create form needs a rewrite to
-    render `children` as a multi-select. Skipped until that ships."""
-    pass
+    """Z.A.f1 — chain create form renders `parent` as a single-select
+    and `children` as a multi_select checkbox group (one input per
+    available rail / template). NO single-select `child` dropdown
+    (that was the pre-Z.A shape) and NO `required` boolean field
+    (that semantic moved into "list length == 1")."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/chain/new")
+    assert resp.status_code == 200, resp.text
+    body = resp.text
+    assert '<select id="field-parent" name="parent">' in body
+    assert 'class="multi-select-group"' in body
+    assert 'name="children__present"' in body
+    assert 'name="child"' not in body
+    assert 'name="required"' not in body
+    assert 'name="xor_group"' not in body
 
 
 def _escape_html_attr(s: str) -> str:

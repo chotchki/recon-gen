@@ -996,7 +996,7 @@ What this composes:
   - **MerchantPayoutACH** — outbound ACH; per-leg Origin distinguishes the internal merchant-debit (`InternalInitiated`) from the external bank landing (`ExternalForcePosted`). Requires a bank trace number (`external_reference`) before it can be Posted.
   - **MerchantPayoutInternal** — same-system payout to either another merchant OR a customer subledger (union destination role). The integrator's ETL must tag `receiving_party_kind` so the destination role resolves unambiguously.
 - **Aging watches** catch operational failures distinctly from structural ones: `MaxPendingAge` flags ETL stuck-Pending; `MaxUnbundledAge` flags bundler-stuck-Posted. Both are operational health checks, not structural exceptions.
-- **Auto-derived PostedRequirements** ensure structural integrity: TransferKey fields can't be NULL on leg postings; `parent_transfer_id` can't be NULL on a `required: true` chained child. Integrators add their own (e.g., `external_reference` on the ACH payout, `receiving_party_kind` on the internal payout) for domain-specific completeness.
+- **Auto-derived PostedRequirements** ensure structural integrity: TransferKey fields can't be NULL on leg postings; `parent_transfer_id` can't be NULL on the singleton-children child of a Chain row. Integrators add their own (e.g., `external_reference` on the ACH payout, `receiving_party_kind` on the internal payout) for domain-specific completeness.
 
 ---
 

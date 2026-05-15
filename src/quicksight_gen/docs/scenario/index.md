@@ -82,7 +82,7 @@ Pick a primitive to walk its full inventory + descriptions:
 - [Rails](rails.md) — every money-movement primitive with shape, aging
   caps, posted requirements, metadata keys.
 - [Transfer templates](transfer-templates.md) — multi-rail bundles.
-- [Chains](chains.md) — required + optional firings.
+- [Chains](chains.md) — required (singleton-children) + XOR (multi-children) firings.
 - [Limit schedules](limit-schedules.md) — daily flow caps.
 
 ---

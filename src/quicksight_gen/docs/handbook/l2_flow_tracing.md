@@ -58,7 +58,7 @@ Every row in the L2 Exceptions sheet's detail table carries a
 
 | `check_type` | What it catches |
 |---|---|
-| **Chain Orphans** | A `Required: true` chain edge whose parent fired more times than its child. Per-edge `orphan_count` = parent firings minus matched-child firings (clamped at zero). |
+| **Chain Orphans** | A chain edge whose parent fired more times than its expected child(ren). Per-edge `orphan_count` = parent firings minus matched-child firings (clamped at zero). For a singleton-children chain the expected child is unique; for a multi-children (XOR) chain any of the listed children counts as a match. |
 | **Unmatched Transfer Type** | A `transactions` row whose `transfer_type` doesn't match any declared `Rail.transfer_type`. Catches new feeds emitting types the L2 doesn't yet know about. |
 | **Dead Rails** | A declared `Rail` with zero `current_transactions` postings in the entire data window. Either the rail is genuinely unused (→ delete the declaration) or ETL stopped feeding it. |
 | **Dead Bundles Activity** | An aggregating Rail's `BundlesActivity` selector that never matches any actual rail name or transfer_type in the data. The bundler silently bundles nothing. |

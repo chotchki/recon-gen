@@ -365,9 +365,11 @@ contract Phase R locked in alongside the realistic baseline:
   actual count) AND no rail produces fewer than 5 legs (proves the rail
   isn't dead).
 - **Per Chain.** `assert N_completed_pairs(chain) >= 1` — every declared
-  chain has at least one parent + child fire. For Required chains
-  additionally: `assert completion_rate(chain) >= 0.80` (allowing some
-  exception slack from plant overlays).
+  chain has at least one parent + child fire. For singleton-children
+  chains (the required case) additionally:
+  `assert completion_rate(chain) >= 0.80` (allowing some exception
+  slack from plant overlays). Multi-children (XOR) chains check that
+  exactly one of the listed children fired per parent invocation.
 - **Per TransferTemplate.** `assert sum(actual_net) == declared expected_net`
   for ≥ 80% of template instances (some plants intentionally violate
   to surface on the L2 Exceptions sheet).

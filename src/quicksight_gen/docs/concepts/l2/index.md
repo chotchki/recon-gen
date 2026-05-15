@@ -22,8 +22,9 @@ type yet).
   template or aggregating rail).
 - [Transfer template](transfer-template.md) — multi-rail bundle
   with an ``expected_net`` close-out (e.g. "ACH origination cycle").
-- [Chain](chain.md) — required or optional parent → child firing
-  rule; XOR groups encode "exactly one of these MUST fire".
+- [Chain](chain.md) — parent → child firing rule. A row with one
+  child = required; two or more children = XOR alternation
+  ("exactly one of these MUST fire").
 - [Limit schedule](limit-schedule.md) — daily outbound-flow cap
   per (parent_role, transfer_type).
 
