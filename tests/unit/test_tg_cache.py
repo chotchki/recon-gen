@@ -16,10 +16,18 @@ from __future__ import annotations
 
 from datetime import date
 
+from pathlib import Path
+
 from quicksight_gen.common.config import (
     EtlDatasourceConfig,
     PlantKind,
     TestGeneratorConfig,
+)
+from quicksight_gen.common.l2.studio_state import (
+    SIDEFILE_NAME,
+    StudioState,
+    load_studio_state,
+    save_studio_state,
 )
 from quicksight_gen.common.l2.tg_cache import TestGeneratorCache
 from tests._test_helpers import make_test_config
@@ -196,3 +204,151 @@ def test_patched_config_disable_with_no_pair_is_noop() -> None:
     patched = cache.patched_config(cfg)
     assert patched.etl_hook is None
     assert patched.etl_datasource is None
+
+
+# ----- X.4.h.7 — sidefile persistence wiring -----
+
+
+def test_from_cfg_with_state_no_sidefile_uses_cfg_defaults(
+    tmp_path: Path,
+) -> None:
+    """First-run: no sidefile yet ⇒ cache state matches cfg.test_generator."""
+    cfg = make_test_config(
+        test_generator=TestGeneratorConfig(scope="full", seed=42),
+    )
+    cfg_path = tmp_path / "config.yaml"
+    cache = TestGeneratorCache.from_cfg_with_state(cfg, cfg_path)
+    assert cache.get() == cfg.test_generator
+    assert cache.is_etl_hook_enabled() is True
+
+
+def test_from_cfg_with_state_sidefile_overrides_cfg(tmp_path: Path) -> None:
+    """Sidefile field set ⇒ wins over cfg.test_generator."""
+    cfg = make_test_config(
+        test_generator=TestGeneratorConfig(scope="full", seed=42),
+    )
+    cfg_path = tmp_path / "config.yaml"
+    sidefile = tmp_path / SIDEFILE_NAME
+    save_studio_state(
+        StudioState(
+            scope="exceptions_only",
+            seed=99999,
+            plants=("drift", "overdraft"),
+            etl_hook_enabled=False,
+        ),
+        sidefile,
+    )
+    cache = TestGeneratorCache.from_cfg_with_state(cfg, cfg_path)
+    assert cache.get().scope == "exceptions_only"
+    assert cache.get().seed == 99999
+    assert cache.get().plants == ("drift", "overdraft")
+    assert cache.is_etl_hook_enabled() is False
+
+
+def test_from_cfg_with_state_sidefile_window_used(tmp_path: Path) -> None:
+    """Window dates from sidefile take precedence over the today-anchored
+    default the constructor would otherwise compute."""
+    cfg = make_test_config()
+    cfg_path = tmp_path / "config.yaml"
+    sidefile = tmp_path / SIDEFILE_NAME
+    save_studio_state(
+        StudioState(
+            window_start=date(2025, 12, 1),
+            window_end=date(2026, 3, 1),
+        ),
+        sidefile,
+    )
+    cache = TestGeneratorCache.from_cfg_with_state(cfg, cfg_path)
+    assert cache.get_window() == (date(2025, 12, 1), date(2026, 3, 1))
+
+
+def test_from_cfg_with_state_sidefile_no_etl_field_keeps_default(
+    tmp_path: Path,
+) -> None:
+    """A sidefile without etl_hook_enabled set still defaults to True."""
+    cfg = make_test_config()
+    cfg_path = tmp_path / "config.yaml"
+    sidefile = tmp_path / SIDEFILE_NAME
+    save_studio_state(StudioState(scope="full"), sidefile)
+    cache = TestGeneratorCache.from_cfg_with_state(cfg, cfg_path)
+    assert cache.is_etl_hook_enabled() is True
+
+
+def test_update_persists_to_sidefile(tmp_path: Path) -> None:
+    """Mutation through update() writes the snapshot to the sidefile."""
+    cfg = make_test_config()
+    cfg_path = tmp_path / "config.yaml"
+    cache = TestGeneratorCache.from_cfg_with_state(cfg, cfg_path)
+    cache.update(scope="exceptions_only", plants=("drift",))
+    reloaded = load_studio_state(tmp_path / SIDEFILE_NAME)
+    assert reloaded is not None
+    assert reloaded.scope == "exceptions_only"
+    assert reloaded.plants == ("drift",)
+
+
+def test_replace_persists_to_sidefile(tmp_path: Path) -> None:
+    cfg = make_test_config()
+    cfg_path = tmp_path / "config.yaml"
+    cache = TestGeneratorCache.from_cfg_with_state(cfg, cfg_path)
+    cache.replace(TestGeneratorConfig(scope="exceptions_only", seed=12345))
+    reloaded = load_studio_state(tmp_path / SIDEFILE_NAME)
+    assert reloaded is not None
+    assert reloaded.scope == "exceptions_only"
+    assert reloaded.seed == 12345
+
+
+def test_update_window_persists_to_sidefile(tmp_path: Path) -> None:
+    cfg = make_test_config()
+    cfg_path = tmp_path / "config.yaml"
+    cache = TestGeneratorCache.from_cfg_with_state(cfg, cfg_path)
+    cache.update_window(start=date(2026, 1, 1), end=date(2026, 4, 1))
+    reloaded = load_studio_state(tmp_path / SIDEFILE_NAME)
+    assert reloaded is not None
+    assert reloaded.window_start == date(2026, 1, 1)
+    assert reloaded.window_end == date(2026, 4, 1)
+
+
+def test_set_etl_hook_enabled_persists_to_sidefile(tmp_path: Path) -> None:
+    cfg = make_test_config()
+    cfg_path = tmp_path / "config.yaml"
+    cache = TestGeneratorCache.from_cfg_with_state(cfg, cfg_path)
+    cache.set_etl_hook_enabled(False)
+    reloaded = load_studio_state(tmp_path / SIDEFILE_NAME)
+    assert reloaded is not None
+    assert reloaded.etl_hook_enabled is False
+
+
+def test_from_config_does_not_persist_on_mutation(tmp_path: Path) -> None:
+    """The legacy factory wires no state_path — mutations stay in-memory.
+    Lets unit tests construct caches without touching disk."""
+    cfg = make_test_config()
+    cache = TestGeneratorCache.from_config(cfg)
+    cache.update(scope="exceptions_only")
+    cache.set_etl_hook_enabled(False)
+    # No sidefile written anywhere.
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_full_round_trip_via_two_cache_instances(tmp_path: Path) -> None:
+    """Mutate the first cache → close it → load a second cache from the
+    same cfg + path → the second cache reflects the persisted state.
+    Simulates a Studio restart."""
+    cfg = make_test_config(
+        test_generator=TestGeneratorConfig(scope="full"),
+    )
+    cfg_path = tmp_path / "config.yaml"
+    cache_a = TestGeneratorCache.from_cfg_with_state(cfg, cfg_path)
+    cache_a.update(
+        scope="exceptions_only",
+        seed=99,
+        plants=("limit_breach",),
+    )
+    cache_a.update_window(start=date(2026, 2, 1), end=date(2026, 5, 14))
+    cache_a.set_etl_hook_enabled(False)
+    # Restart simulation — fresh cache from disk.
+    cache_b = TestGeneratorCache.from_cfg_with_state(cfg, cfg_path)
+    assert cache_b.get().scope == "exceptions_only"
+    assert cache_b.get().seed == 99
+    assert cache_b.get().plants == ("limit_breach",)
+    assert cache_b.get_window() == (date(2026, 2, 1), date(2026, 5, 14))
+    assert cache_b.is_etl_hook_enabled() is False

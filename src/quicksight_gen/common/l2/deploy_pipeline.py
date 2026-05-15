@@ -602,8 +602,80 @@ def _emit_scope_sql(cfg: Config, instance: L2Instance) -> str:
             skip_rails=covered,
             base_seed=cfg.test_generator.seed,  # X.4.h.0.b — None ⇒ _BASELINE_BASE_SEED
         )
+    if scope == "only_template":
+        # X.4.i.1 — emit baseline restricted to a single TransferTemplate's
+        # leg-rails dependency closure. Per the closure-scope decision:
+        # closure = template.leg_rails (no LimitSchedule pull-in, no Chain
+        # pull-in). Template name comes from cfg.test_generator.only_template
+        # — required field for this scope; loud-fail when missing.
+        from quicksight_gen.common.l2.seed import emit_baseline_seed
+        template_name = cfg.test_generator.only_template
+        if not template_name:
+            raise ValueError(
+                "scope='only_template' requires "
+                "cfg.test_generator.only_template to name a TransferTemplate "
+                "in the L2 instance.",
+            )
+        only_rails = _only_template_rails(template_name, instance)
+        baseline = emit_baseline_seed(
+            instance,
+            anchor=cfg.test_generator.end_date,
+            dialect=cfg.dialect,
+            only_rails=only_rails,
+            base_seed=cfg.test_generator.seed,
+        )
+        # Plants: respect cfg.test_generator.plants (operator-set tuple).
+        # Default `()` → no plants (preserves locked-seed determinism on
+        # a fresh only_template deploy). When the trainer flips plants on,
+        # the scenario primitive plants for ALL kinds (filtered by the
+        # tuple) but the SCENARIO's per-plant rail_name lookup naturally
+        # narrows to in-closure plants — out-of-closure rails won't have
+        # baseline rows for the planted scenario to attach to.
+        plants_tuple = cfg.test_generator.plants
+        if not plants_tuple:
+            return baseline
+        # Compose: baseline closure + plants. emit_seed appends to the
+        # same INSERT script — concatenation is the same shape
+        # `emit_full_seed` uses internally.
+        from quicksight_gen.cli._helpers import build_default_scenario  # pyright: ignore[reportUnknownVariableType]  # WHY: helper has pending untyped-def waiver in cli/_helpers.py
+        from quicksight_gen.common.l2.seed import emit_seed
+        scenario = build_default_scenario(  # pyright: ignore[reportUnknownVariableType]  # WHY: same helper-untyped waiver propagates to the call expression
+            instance,
+            anchor=cfg.test_generator.end_date,
+            plants=plants_tuple,
+        )
+        plants_sql = emit_seed(instance, scenario, dialect=cfg.dialect)  # pyright: ignore[reportUnknownArgumentType]  # WHY: build_default_scenario returns untyped-def ScenarioPlant per the same waiver
+        return baseline + "\n" + plants_sql
     # Defensive — Literal[ScopeKind] should make this unreachable.
     raise ValueError(f"Unknown test_generator.scope: {scope!r}")
+
+
+def _only_template_rails(
+    template_name: str, instance: L2Instance,
+) -> frozenset[Identifier]:
+    """X.4.i.1 — return the leg_rails closure for the named template.
+
+    Closure = template.leg_rails (per design decision: leg-rails + their
+    accounts only, no LimitSchedule pull-in, no Chain pull-in). The
+    AccountTemplate roles those rails name don't need explicit pull-in:
+    `_materialize_baseline_template_instances` always materializes the
+    full per-template instance set, and `emit_baseline_seed`'s per-rail
+    loop only consults the templates whose roles its rails reference.
+    Loud-fail when the template name doesn't exist in the L2 — better
+    to halt the deploy than silently emit an empty closure.
+    """
+    template = next(
+        (t for t in instance.transfer_templates if str(t.name) == template_name),
+        None,
+    )
+    if template is None:
+        declared = sorted(str(t.name) for t in instance.transfer_templates)
+        raise ValueError(
+            f"only_template={template_name!r} not found in L2 instance "
+            f"{str(instance.instance)!r}. Declared TransferTemplates: "
+            f"{declared}",
+        )
+    return frozenset(template.leg_rails)
 
 
 def _covered_rail_names(
@@ -634,6 +706,140 @@ def _covered_rail_names(
             cur.close()
     finally:
         conn.close()
+
+
+# X.4.i.2 — Default account-role set for derive_balances. Control accounts
+# are bank-bookkeeping accounts where `money = SUM(amount_money)` holds by
+# construction (the drift invariant run forward). DDA / external account
+# balances come from upstream statements; deriving them masks
+# reconciliation gaps the bank wants to see, so they're opt-in only.
+_DERIVE_BALANCES_DEFAULT_ACCOUNT_ROLES: frozenset[str] = frozenset(
+    {"gl_control", "concentration_master", "funds_pool"},
+)
+
+
+async def step_3_5_derive_balances(
+    cfg: Config,
+    instance: L2Instance,
+    *,
+    dev_log: DevLogWriter | None = None,
+) -> int:
+    """X.4.i.2 — re-derive ``<prefix>_daily_balances`` from
+    ``<prefix>_transactions`` for the configured account roles.
+
+    No-op when ``cfg.test_generator.derive_balances`` is False (the default).
+    When enabled, computes ``money = SUM(amount_money)`` per
+    (account_id, business_day_end) for accounts whose ``account_role``
+    matches ``cfg.test_generator.derive_balances_account_roles`` (or the
+    default control-account set when None) and UPSERTs into the
+    daily_balances table. Existing rows for those roles are overwritten
+    in-place; rows for other roles are untouched.
+
+    The drift invariant is what this is "running forward": auditing
+    `money == SUM(amount_money)` would always pass for derived rows
+    since they were just computed that way. That's the point — operators
+    use this when they want planted scenarios to reconcile cleanly
+    against derived balances (e.g. test the dashboard renders against
+    a known-clean control set), or when their ETL provides only
+    transactions and balances must be back-filled.
+
+    Returns the number of (account_id, business_day) rows inserted /
+    updated. ``dev_log`` receives lifecycle events
+    ``deploy:step3_5:derive:start`` and ``deploy:step3_5:derive:done``
+    (with ``rows`` count + ``account_roles`` for visibility).
+    """
+    if not cfg.test_generator.derive_balances:
+        return 0
+
+    p = instance.instance
+    account_roles = (
+        cfg.test_generator.derive_balances_account_roles
+        if cfg.test_generator.derive_balances_account_roles is not None
+        else tuple(sorted(_DERIVE_BALANCES_DEFAULT_ACCOUNT_ROLES))
+    )
+    await _emit(dev_log, {
+        "event": "deploy:step3_5:derive:start",
+        "account_roles": list(account_roles),
+    })
+
+    # Build ('a', 'b', ...) literal — account_role values come from the
+    # canonical role strings declared in the L2 model; this cfg field is
+    # a tuple[str, ...] validated at load time. Quoting them inline is
+    # safe (no user-controlled SQL) and matches the dialect-portable
+    # style the rest of the matview SQL uses.
+    roles_clause = ", ".join(f"'{r}'" for r in account_roles)
+
+    # Sum amount_money per (account_id, business_day_end). Use a CAST
+    # of posting to DATE to derive the business-day grouping key; the
+    # resulting (start, end) span the operator's local-day window.
+    # SQLite needs DATE() function; PG / Oracle use CAST(posting AS DATE).
+    if cfg.dialect == Dialect.SQLITE:
+        date_expr = "DATE(posting)"
+        bday_start = (
+            "DATETIME(DATE(posting) || ' 00:00:00')"
+        )
+        bday_end = "DATETIME(DATE(posting, '+1 day') || ' 00:00:00')"
+    else:
+        date_expr = "CAST(posting AS DATE)"
+        bday_start = "CAST(CAST(posting AS DATE) AS TIMESTAMP)"
+        # +1 day for the half-open business-day window.
+        if cfg.dialect == Dialect.ORACLE:
+            bday_end = "CAST(CAST(posting AS DATE) AS TIMESTAMP) + INTERVAL '1' DAY"
+        else:
+            bday_end = "CAST(CAST(posting AS DATE) AS TIMESTAMP) + INTERVAL '1 day'"
+
+    conn = connect_demo_db(cfg)
+    rows_written = 0
+    try:
+        cur = conn.cursor()
+        try:
+            # Two-pass UPSERT for dialect portability:
+            #   1. DELETE existing rows for these account roles.
+            #   2. INSERT the freshly-computed rows.
+            # Cleaner than dialect-specific INSERT ... ON CONFLICT /
+            # MERGE — we already wipe + rebuild for scope=full, so this
+            # is a focused sub-wipe.
+            cur.execute(
+                f"DELETE FROM {p}_daily_balances "
+                f"WHERE account_role IN ({roles_clause})",
+            )
+            cur.execute(
+                f"INSERT INTO {p}_daily_balances ("
+                f"account_id, account_name, account_role, "
+                f"account_scope, account_parent_role, "
+                f"expected_eod_balance, business_day_start, "
+                f"business_day_end, money, limits, supersedes"
+                f") "
+                f"SELECT "
+                f"  account_id, "
+                f"  MAX(account_name), "
+                f"  MAX(account_role), "
+                f"  MAX(account_scope), "
+                f"  MAX(account_parent_role), "
+                f"  SUM(amount_money), "  # expected = derived (drift = 0)
+                f"  {bday_start}, "
+                f"  {bday_end}, "
+                f"  SUM(amount_money), "
+                f"  NULL, "
+                f"  NULL "
+                f"FROM {p}_transactions "
+                f"WHERE account_role IN ({roles_clause}) "
+                f"  AND status <> 'failed' "
+                f"GROUP BY account_id, {date_expr}",
+            )
+            rows_written = cur.rowcount or 0
+            conn.commit()
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+
+    await _emit(dev_log, {
+        "event": "deploy:step3_5:derive:done",
+        "rows": rows_written,
+        "account_roles": list(account_roles),
+    })
+    return rows_written
 
 
 # X.4.g.11 — Step 4: refresh L1 invariant + Investigation matviews so
@@ -749,6 +955,9 @@ class DeploySummary:
     step2_pull_daily_balances_pulled: int = 0
     step3_generator_transactions_after: int = 0
     step3_generator_daily_balances_after: int = 0
+    # X.4.i.2 — number of (account_id, balance_date) rows the
+    # post-step-3 derive_balances pass wrote. Zero when the flag is off.
+    step3_5_derived_balance_rows: int = 0
     step4_matviews_done: bool = False
     step5_data_generation_id: int = 0
     events: tuple[Mapping[str, object], ...] = field(default_factory=tuple)
@@ -777,6 +986,9 @@ class DeploySummary:
                     self.step3_generator_daily_balances_after
                 ),
             },
+            "step3_5_derived_balance_rows": (
+                self.step3_5_derived_balance_rows
+            ),
             "step4_matviews_done": self.step4_matviews_done,
             "step5_data_generation_id": self.step5_data_generation_id,
             "events": [dict(e) for e in self.events],
@@ -834,6 +1046,9 @@ async def run_deploy_pipeline(
     tx_after, bal_after = await step_3_generator(
         cfg, instance, dev_log=_tee,
     )
+    derived_rows = await step_3_5_derive_balances(
+        cfg, instance, dev_log=_tee,
+    )
     await step_4_matviews(cfg, instance, dev_log=_tee)
     new_gen_id = await step_5_reload(dev_log=_tee)
 
@@ -847,6 +1062,7 @@ async def run_deploy_pipeline(
         step2_pull_daily_balances_pulled=bal_pull,
         step3_generator_transactions_after=tx_after,
         step3_generator_daily_balances_after=bal_after,
+        step3_5_derived_balance_rows=derived_rows,
         step4_matviews_done=True,
         step5_data_generation_id=new_gen_id,
         events=tuple(captured),

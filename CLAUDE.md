@@ -22,11 +22,15 @@ The customer doesn't know exactly what they want yet. Everything is generated fr
 ## Commands
 
 The CLI is organized around the five artifacts the tool produces:
-**schema** | **data** | **json** | **docs** | **audit**. Each
-artifact has at minimum `apply`/`clean`/`test`; the `audit` group
-also carries `verify`. Everything destructive defaults to emit
-(print SQL, write JSON to `out/`, render Markdown to stdout) and
-only runs against the DB / AWS / disk when you pass `--execute`.
+**schema** | **data** | **json** | **docs** | **audit**, plus two
+HTTP-server commands for self-hosted iteration: **studio** (the
+implementation tools — diagram + L2 editor + data-shaping panel +
+Deploy-changes orchestration; X.4) and **dashboards** (the four real
+apps served via the HTMX renderer; X.2). Each artifact has at minimum
+`apply`/`clean`/`test`; the `audit` group also carries `verify`.
+Everything destructive defaults to emit (print SQL, write JSON to
+`out/`, render Markdown to stdout) and only runs against the DB / AWS
+/ disk when you pass `--execute`.
 
 ```bash
 # Install (uv handles env + lock; add extras as needed)
@@ -53,6 +57,26 @@ quicksight-gen data refresh -c config.yaml --execute
 # Audit PDF: query L1 invariant matviews + emit regulator-ready PDF
 quicksight-gen audit apply -c config.yaml --execute -o report.pdf
 quicksight-gen audit verify report.pdf -c config.yaml   # recompute + compare provenance
+
+# Studio (X.4) — implementation-tools surface for the integrator + trainer
+# + ETL engineer. One Starlette process serves: unified diagram (`/diagram`),
+# L2 editor (`/l2_shape/...`), data-shaping panel (`/data`), Deploy-changes
+# (`POST /deploy`), and the four dashboards under `/dashboards/...`. The
+# data-shaping panel persists trainer knob mutations to a sibling
+# `<cfg.parent>/.studio-state.yaml` sidefile (X.4.h.7) so the cfg.yaml's
+# operator-authored comments survive every Studio restart. Trainer knobs:
+# scope (full / uncovered_rails / exceptions_only / only_template — X.4.i.1),
+# plants subset, end_date scrub head, seed pin, only_template name (when
+# scope=only_template), derive_balances toggle (X.4.i.2 — re-derives
+# control-account balances from posted transactions for the configured
+# account_role set, default gl_control / concentration_master / funds_pool).
+quicksight-gen studio -c run/config.yaml --l2 run/sasquatch_pr.yaml
+quicksight-gen studio --port 8765 --no-docs   # narrow surface for fast iteration
+
+# Dashboards (X.2) — just the dashboards, no Studio chrome. The HTMX
+# renderer alternative to QuickSight; same tree, two backends.
+quicksight-gen dashboards -c run/config.yaml --l2 run/sasquatch_pr.yaml
+quicksight-gen dashboards --app investigation   # narrow to one app for triage
 
 # Tests — canonical entry is the layered chain runner (Y.2.gate.b/c/m/n).
 # Layers: unit → db → app2 → deploy → api → browser. Stops on first

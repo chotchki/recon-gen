@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 from datetime import date, timedelta
+from pathlib import Path
 
 from quicksight_gen.common.config import (
     Config,
@@ -30,6 +31,13 @@ from quicksight_gen.common.config import (
     TestGeneratorConfig,
 )
 from quicksight_gen.common.l2.seed import DEFAULT_BASELINE_WINDOW_DAYS
+from quicksight_gen.common.l2.studio_state import (
+    StudioState,
+    load_studio_state,
+    merge_into_test_generator,
+    save_studio_state,
+    sidefile_path_for,
+)
 
 
 _UNSET: object = object()
@@ -67,6 +75,7 @@ class TestGeneratorCache:
 
     __slots__ = (
         "_state", "_window_start", "_window_end", "_etl_hook_enabled",
+        "_state_path",
     )
 
     def __init__(
@@ -76,6 +85,7 @@ class TestGeneratorCache:
         window_end: date | None = None,
         *,
         etl_hook_enabled: bool = True,
+        state_path: Path | None = None,
     ) -> None:
         if window_end is None:
             window_end = date.today()  # typing-smell: ignore[no-datetime-now]: trainer-mode default window — wall-clock today is the operator-friendly anchor for "last 90 days"; not a determinism path
@@ -92,6 +102,12 @@ class TestGeneratorCache:
         # iterative deploys (faster) while preserving the YAML config
         # for the next "fresh start" deploy.
         self._etl_hook_enabled = etl_hook_enabled
+        # X.4.h.7 — when set, every mutation method writes the cache's
+        # persistent state to this sidefile (atomic, single-file). When
+        # None (unit-test surface, plain `from_config` flow), no
+        # persistence happens. Studio CLI sets this via
+        # `from_cfg_with_state`.
+        self._state_path = state_path
 
     @classmethod
     def from_config(cls, cfg: Config) -> TestGeneratorCache:
@@ -100,8 +116,62 @@ class TestGeneratorCache:
         Window default = ``[today - (DEFAULT_BASELINE_WINDOW_DAYS - 1),
         today]`` — the last 90 days. Trainer-mode UI is not a
         determinism path, so the wall-clock anchor is honest here.
+
+        No sidefile persistence — see ``from_cfg_with_state`` for the
+        Studio-CLI flow that loads + saves to disk.
         """
         return cls(cfg.test_generator)
+
+    @classmethod
+    def from_cfg_with_state(
+        cls, cfg: Config, cfg_path: Path | str,
+    ) -> TestGeneratorCache:
+        """X.4.h.7 — Studio-CLI factory. Load the sidefile if present,
+        merge its overrides on top of cfg.test_generator defaults, wire
+        the cache to write to that sidefile on every mutation.
+
+        Sidefile path is ``<cfg_path.parent>/.studio-state.yaml``
+        (sibling of cfg.yaml). Missing sidefile ⇒ pristine cfg defaults
+        + empty Studio state. Malformed sidefile ⇒ same fallback with
+        a warning to stderr (per ``load_studio_state``).
+        """
+        path = sidefile_path_for(cfg_path)
+        sidefile = load_studio_state(path)
+        merged = merge_into_test_generator(cfg.test_generator, sidefile)
+        if sidefile is None:
+            return cls(merged, state_path=path)
+        return cls(
+            merged,
+            window_start=sidefile.window_start,
+            window_end=sidefile.window_end,
+            etl_hook_enabled=(
+                sidefile.etl_hook_enabled
+                if sidefile.etl_hook_enabled is not None else True
+            ),
+            state_path=path,
+        )
+
+    def _persist(self) -> None:
+        """Write the current state to the sidefile when wired.
+
+        Called by every mutation method. No-op when ``_state_path is
+        None`` (the unit-test surface). All trainer-mutable fields
+        flow through here — the sidefile is the snapshot, not a diff.
+        """
+        if self._state_path is None:
+            return
+        snapshot = StudioState(
+            scope=self._state.scope,
+            end_date=self._state.end_date,
+            seed=self._state.seed,
+            plants=self._state.plants,
+            only_template=self._state.only_template,
+            derive_balances=self._state.derive_balances,
+            window_start=self._window_start,
+            window_end=self._window_end,
+            etl_hook_enabled=self._etl_hook_enabled,
+        )
+        save_studio_state(snapshot, self._state_path)
 
     def get(self) -> TestGeneratorConfig:
         """Return the current generator state.
@@ -128,6 +198,7 @@ class TestGeneratorCache:
     def set_etl_hook_enabled(self, enabled: bool) -> None:
         """Toggle ``cfg.etl_hook`` execution on the next Deploy."""
         self._etl_hook_enabled = enabled
+        self._persist()
 
     def get_up_to(self) -> date:
         """Resolve the "up to" / scrub-head date.
@@ -141,6 +212,25 @@ class TestGeneratorCache:
     def replace(self, new_state: TestGeneratorConfig) -> None:
         """Swap the cached generator state (window untouched)."""
         self._state = new_state
+        self._persist()
+
+    def update_only_template(self, value: str | None) -> None:
+        """X.4.i.3 — set the only_template name (template-scope target).
+
+        ``None`` clears the field. Validation against the L2 instance's
+        actual templates happens at deploy time in
+        `_only_template_rails`, not here — the UI accepts any string
+        so the trainer can hold an inconsistent state mid-edit.
+        """
+        self._state = dataclasses.replace(self._state, only_template=value)
+        self._persist()
+
+    def update_derive_balances(self, enabled: bool) -> None:
+        """X.4.i.3 — toggle the derive_balances post-step-3 flag."""
+        self._state = dataclasses.replace(
+            self._state, derive_balances=enabled,
+        )
+        self._persist()
 
     def update(
         self,
@@ -168,6 +258,7 @@ class TestGeneratorCache:
             kwargs["plants"] = plants
         new_state = dataclasses.replace(self._state, **kwargs)
         self._state = new_state
+        self._persist()
         return new_state
 
     def update_window(
@@ -196,6 +287,7 @@ class TestGeneratorCache:
             new_start, new_end = new_end, new_start
         self._window_start = new_start
         self._window_end = new_end
+        self._persist()
         return (new_start, new_end)
 
     def patched_config(self, cfg: Config) -> Config:

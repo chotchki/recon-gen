@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,7 @@ from quicksight_gen.common.l2.deploy_pipeline import (
     step_1_etl_hook,
     step_2_pull,
     step_2_wipe,
+    step_3_5_derive_balances,
     step_3_generator,
     step_4_matviews,
     step_5_reload,
@@ -1098,6 +1100,463 @@ def test_step_3_generator_full_adds_to_existing_rows(
     # Generator's contribution = total - 1 plant row already present.
     assert tx > 1
     assert bal > 1
+
+
+# =====================================================================
+# X.4.i.1 — only_template scope mode
+# =====================================================================
+
+
+def test_only_template_rails_returns_template_leg_rails(
+    spec_example_instance: L2Instance,
+) -> None:
+    """The closure for a known template = its declared leg_rails set."""
+    from quicksight_gen.common.l2.deploy_pipeline import _only_template_rails
+
+    closure = _only_template_rails(
+        "MerchantSettlementCycle", spec_example_instance,
+    )
+    # spec_example fixture: MerchantSettlementCycle has leg_rails: [SubledgerCharge]
+    assert {str(r) for r in closure} == {"SubledgerCharge"}
+
+
+def test_only_template_rails_unknown_name_loud_fails(
+    spec_example_instance: L2Instance,
+) -> None:
+    """Unknown template name halts the deploy with a useful error
+    listing the declared templates so the operator can see the typo."""
+    from quicksight_gen.common.l2.deploy_pipeline import _only_template_rails
+
+    with pytest.raises(ValueError, match="MadeUpName"):
+        _only_template_rails("MadeUpName", spec_example_instance)
+
+
+def test_step_3_generator_only_template_requires_template_name(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """scope='only_template' with cfg.test_generator.only_template unset
+    must loud-fail rather than silently degrade to scope=full."""
+    from datetime import date
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        test_generator=TestGeneratorConfig(
+            scope="only_template", end_date=date(2030, 1, 1),
+            only_template=None,
+        ),
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    with pytest.raises(ValueError, match="only_template"):
+        asyncio.run(
+            step_3_generator(cfg, spec_example_instance, dev_log=None),
+        )
+
+
+def test_step_3_generator_only_template_emits_closure_baseline(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """scope='only_template' against MerchantSettlementCycle should emit
+    baseline rows for SubledgerCharge (its leg-rail). Chain firings that
+    fan out from SubledgerCharge as parent are emitted too — that's the
+    intended training surface (operator wants to see the full transfer
+    flow rooted at the chosen template). Narrowness against scope=full
+    is proven by the strictly-fewer-than-full sibling test."""
+    from datetime import date
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        test_generator=TestGeneratorConfig(
+            scope="only_template", end_date=date(2030, 1, 1),
+            only_template="MerchantSettlementCycle",
+        ),
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    tx, _bal = asyncio.run(
+        step_3_generator(cfg, spec_example_instance, dev_log=None),
+    )
+    assert tx > 0, "only_template should emit baseline for the closure rail"
+    # Closure rail must be present.
+    p = spec_example_instance.instance
+    conn = connect_demo_db(cfg)
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                f"SELECT DISTINCT rail_name FROM {p}_transactions "
+                "WHERE rail_name IS NOT NULL",
+            )
+            rail_names = {str(r[0]) for r in cur.fetchall()}
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+    assert "SubledgerCharge" in rail_names, (
+        f"only_template should emit baseline for the closure rail, "
+        f"got rail_names={rail_names}"
+    )
+    # And it should NOT touch rails that are unreachable from this template
+    # (no chain or template links). ReconciliationLeg is in the OTHER
+    # template (ExternalReconciliationCycle) — proves narrowness.
+    assert "ReconciliationLeg" not in rail_names, (
+        f"only_template={'MerchantSettlementCycle'!r} should NOT emit "
+        f"rails from sibling templates; got rail_names={rail_names}"
+    )
+
+
+def test_step_3_generator_only_template_writes_strictly_fewer_than_full(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """Closure of one TransferTemplate's leg_rails is a subset of all
+    rails ⇒ only_template emits strictly fewer transactions than full
+    against the same anchor."""
+    from datetime import date
+
+    def _run(scope: str, label: str, only_template: str | None) -> int:
+        sub = tmp_path / label
+        sub.mkdir()
+        cfg = replace(
+            _sqlite_cfg(sub),
+            test_generator=TestGeneratorConfig(
+                scope=scope,  # pyright: ignore[reportArgumentType]  # WHY: parametrized over Literal at the call site
+                end_date=date(2030, 1, 1),
+                only_template=only_template,
+            ),
+        )
+        _apply_demo_schema_only(cfg, spec_example_instance)
+        tx, _bal = asyncio.run(
+            step_3_generator(cfg, spec_example_instance, dev_log=None),
+        )
+        return tx
+
+    full_tx = _run("full", "full", None)
+    only_tx = _run("only_template", "only", "MerchantSettlementCycle")
+    assert only_tx < full_tx, (
+        f"only_template={only_tx} should be strictly less than full={full_tx}"
+    )
+
+
+# =====================================================================
+# X.4.i.2 — derive_balances composing flag (post-step-3 hook)
+# =====================================================================
+
+
+def _insert_test_transaction(
+    cur: object,  # sqlite3.Cursor
+    p: str,
+    *,
+    tid: str,
+    account_id: str,
+    account_role: str,
+    amount_money: float,
+    posting: str,
+    status: str = "posted",
+) -> None:
+    """Insert a row into <prefix>_transactions matching the v6 schema.
+    `amount_money` is signed (per the L1 Amount invariant CHECK constraint)."""
+    direction = "Credit" if amount_money >= 0 else "Debit"
+    cur.execute(  # type: ignore[attr-defined]: cur is typed `object` so DB-API call site is by-attr — the helper accepts any cursor (sqlite3 / psycopg / oracledb)
+        f"INSERT INTO {p}_transactions ("
+        "id, account_id, account_name, account_role, "
+        "account_scope, account_parent_role, amount_money, "
+        "amount_direction, status, posting, transfer_id, "
+        "transfer_type, rail_name, origin"
+        ") VALUES ("
+        "?, ?, 'Acct', ?, "
+        "'internal', NULL, ?, "
+        "?, ?, ?, 'tr-d', "
+        "'cash_withdrawal', 'TestRail', 'inbound')",
+        (tid, account_id, account_role, amount_money,
+         direction, status, posting),
+    )
+
+
+def _seed_two_account_roles_with_transactions(
+    cfg: Config, instance: L2Instance, anchor_date: date,
+) -> None:
+    """Populate <prefix>_transactions with rows for ONE control account
+    (gl_control) AND one DDA so we can assert the derive narrows to
+    control-by-default."""
+    p = instance.instance
+    conn = connect_demo_db(cfg)
+    try:
+        cur = conn.cursor()
+        try:
+            ts = anchor_date.isoformat() + " 12:00:00"
+            # 3 control rows: +100 + +200 + -50 = 250 net for day.
+            # 2 DDA rows: +75 + +25 = 100 net same day.
+            for tid, acct, role, amt in [
+                ("c1", "gl-1", "gl_control", 100.0),
+                ("c2", "gl-1", "gl_control", 200.0),
+                ("c3", "gl-1", "gl_control", -50.0),
+                ("d1", "dda-1", "dda", 75.0),
+                ("d2", "dda-1", "dda", 25.0),
+            ]:
+                _insert_test_transaction(
+                    cur, p,
+                    tid=tid, account_id=acct, account_role=role,
+                    amount_money=amt, posting=ts,
+                )
+            conn.commit()
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+
+
+def test_derive_balances_no_op_when_disabled(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """When cfg.test_generator.derive_balances=False, the pass returns
+    0 and writes nothing."""
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        test_generator=TestGeneratorConfig(derive_balances=False),
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    _seed_two_account_roles_with_transactions(
+        cfg, spec_example_instance, date(2030, 1, 1),
+    )
+    rows = asyncio.run(
+        step_3_5_derive_balances(
+            cfg, spec_example_instance, dev_log=None,
+        ),
+    )
+    assert rows == 0
+    # daily_balances stays empty.
+    bal_count = _row_counts(cfg, spec_example_instance)[1]
+    assert bal_count == 0
+
+
+def test_derive_balances_default_account_roles_writes_control_only(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """Default account-role set is control accounts only — DDA
+    transactions are NOT derived into balances."""
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        test_generator=TestGeneratorConfig(derive_balances=True),
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    _seed_two_account_roles_with_transactions(
+        cfg, spec_example_instance, date(2030, 1, 1),
+    )
+    rows = asyncio.run(
+        step_3_5_derive_balances(
+            cfg, spec_example_instance, dev_log=None,
+        ),
+    )
+    # 1 (gl-1, 2030-01-01) row written; the DDA's row was skipped.
+    assert rows == 1
+    p = spec_example_instance.instance
+    conn = connect_demo_db(cfg)
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                f"SELECT account_id, account_role, money "
+                f"FROM {p}_daily_balances",
+            )
+            rows_seen = [
+                (str(r[0]), str(r[1]), float(r[2]))
+                for r in cur.fetchall()
+            ]
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+    assert rows_seen == [("gl-1", "gl_control", 250.0)], (
+        f"derive_balances default should write only the control-account "
+        f"sum (gl-1 = 100+200-50 = 250.0); got {rows_seen}"
+    )
+
+
+def test_derive_balances_account_roles_override_widens_set(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """Operator can opt DDA balances in via the override field — both
+    control AND DDA rows get derived."""
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        test_generator=TestGeneratorConfig(
+            derive_balances=True,
+            derive_balances_account_roles=("gl_control", "dda"),
+        ),
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    _seed_two_account_roles_with_transactions(
+        cfg, spec_example_instance, date(2030, 1, 1),
+    )
+    rows = asyncio.run(
+        step_3_5_derive_balances(
+            cfg, spec_example_instance, dev_log=None,
+        ),
+    )
+    assert rows == 2  # gl-1 + dda-1
+    p = spec_example_instance.instance
+    conn = connect_demo_db(cfg)
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                f"SELECT account_id, money FROM {p}_daily_balances "
+                f"ORDER BY account_id",
+            )
+            balances = {str(r[0]): float(r[1]) for r in cur.fetchall()}
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+    assert balances == {"gl-1": 250.0, "dda-1": 100.0}
+
+
+def test_derive_balances_failed_transactions_excluded(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """Transactions in status='failed' don't contribute to derived
+    balances — they never posted."""
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        test_generator=TestGeneratorConfig(derive_balances=True),
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    p = spec_example_instance.instance
+    conn = connect_demo_db(cfg)
+    try:
+        cur = conn.cursor()
+        try:
+            ts = "2030-01-01 12:00:00"
+            for tid, amt, status in [
+                ("c1", 100.0, "posted"),
+                ("c2", 999.0, "failed"),  # excluded
+                ("c3", 50.0, "posted"),
+            ]:
+                _insert_test_transaction(
+                    cur, p,
+                    tid=tid, account_id="gl-1",
+                    account_role="gl_control",
+                    amount_money=amt, posting=ts, status=status,
+                )
+            conn.commit()
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+    rows = asyncio.run(
+        step_3_5_derive_balances(
+            cfg, spec_example_instance, dev_log=None,
+        ),
+    )
+    assert rows == 1
+    conn = connect_demo_db(cfg)
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                f"SELECT money FROM {p}_daily_balances "
+                f"WHERE account_id = 'gl-1'",
+            )
+            money = float(cur.fetchone()[0])
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+    assert money == 150.0, (
+        f"failed transactions must be excluded; got money={money} "
+        f"(expected 100 + 50 = 150)"
+    )
+
+
+def test_derive_balances_overwrites_existing_rows(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """Re-running the derive overwrites existing daily_balances rows for
+    the same (account, business_day) — operator can iteratively scrub."""
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        test_generator=TestGeneratorConfig(derive_balances=True),
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    _seed_two_account_roles_with_transactions(
+        cfg, spec_example_instance, date(2030, 1, 1),
+    )
+    # Run once.
+    asyncio.run(
+        step_3_5_derive_balances(
+            cfg, spec_example_instance, dev_log=None,
+        ),
+    )
+    # Add another posted control transaction the same day.
+    p = spec_example_instance.instance
+    conn = connect_demo_db(cfg)
+    try:
+        cur = conn.cursor()
+        try:
+            _insert_test_transaction(
+                cur, p,
+                tid="c4", account_id="gl-1",
+                account_role="gl_control",
+                amount_money=1000.0, posting="2030-01-01 13:00:00",
+            )
+            conn.commit()
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+    # Re-derive.
+    asyncio.run(
+        step_3_5_derive_balances(
+            cfg, spec_example_instance, dev_log=None,
+        ),
+    )
+    conn = connect_demo_db(cfg)
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                f"SELECT COUNT(*), MAX(money) "
+                f"FROM {p}_daily_balances WHERE account_id = 'gl-1'",
+            )
+            count, money = cur.fetchone()
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+    assert count == 1, "re-derive should replace, not duplicate, the row"
+    assert float(money) == 1250.0, (
+        f"second derive should reflect the new transaction; "
+        f"got {money} (expected 100+200-50+1000=1250)"
+    )
+
+
+def test_derive_balances_emits_lifecycle_events(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """When enabled, derive emits start + done events with the
+    account_roles in the payload for visibility."""
+    cfg = replace(
+        _sqlite_cfg(tmp_path),
+        test_generator=TestGeneratorConfig(
+            derive_balances=True,
+            derive_balances_account_roles=("gl_control",),
+        ),
+    )
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    _seed_two_account_roles_with_transactions(
+        cfg, spec_example_instance, date(2030, 1, 1),
+    )
+    sink = _EventCollector()
+    asyncio.run(
+        step_3_5_derive_balances(
+            cfg, spec_example_instance, dev_log=sink,
+        ),
+    )
+    events = [e["event"] for e in sink.events]
+    assert "deploy:step3_5:derive:start" in events
+    assert "deploy:step3_5:derive:done" in events
+    done = [
+        e for e in sink.events
+        if e["event"] == "deploy:step3_5:derive:done"
+    ][0]
+    assert done["account_roles"] == ["gl_control"]
+    assert done["rows"] == 1
 
 
 # =====================================================================

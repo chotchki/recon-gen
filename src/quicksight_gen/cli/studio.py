@@ -121,9 +121,11 @@ def studio(  # type: ignore[no-untyped-def]: Click decorator strips the function
     cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
     # X.4.h.2 — instantiate the data-shaping panel's knob cache here
     # (cfg is in scope; the factory just gets a kwarg). Initial state =
-    # cfg.test_generator snapshot, so the first deploy after studio
-    # starts behaves identically to a no-studio CLI invocation.
-    tg_cache = TestGeneratorCache.from_config(cfg)
+    # cfg.test_generator snapshot merged with sidefile overrides
+    # (X.4.h.7 — `<cfg.parent>/.studio-state.yaml` survives Studio
+    # restarts without polluting the operator-authored cfg.yaml).
+    from pathlib import Path as _Path  # noqa: PLC0415
+    tg_cache = TestGeneratorCache.from_cfg_with_state(cfg, _Path(config))
     # Bind dialect + prefix at the CLI layer (X.4.c.5.c — coverage
     # fetcher needs both, but threading them through ``_html_serve``
     # would couple Studio internals to a Studio-ignorant module).

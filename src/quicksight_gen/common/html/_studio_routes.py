@@ -853,6 +853,13 @@ _SCOPE_LABELS: tuple[tuple[ScopeKind, str, str], ...] = (
         "Plants only, no baseline. Layers L1/Investigation scenarios "
         "on top of the operator's external data.",
     ),
+    (
+        "only_template",
+        "only template",
+        "Emit baseline restricted to one TransferTemplate's leg-rails "
+        "closure. Useful when iterating on a single template's "
+        "lifecycle. Requires the template name in the field below.",
+    ),
 )
 
 
@@ -1148,6 +1155,83 @@ def _render_scope_strip(selected: ScopeKind) -> str:
     )
 
 
+def _render_only_template_strip(selected: str | None) -> str:
+    """X.4.i.3 — text input for ``cfg.test_generator.only_template``.
+
+    Wires ``cfg.test_generator.scope = "only_template"`` to a concrete
+    TransferTemplate name. Operator types the template name into the
+    input; commit-on-change PUTs the value. Empty string clears to None
+    (which the only_template scope arm rejects with a loud-fail at
+    deploy time — surfacing the "you selected only_template but haven't
+    picked one" footgun loudly is intentional).
+    """
+    val_str = selected if selected is not None else ""
+    pretty = selected if selected else "(none)"
+    common_attrs = (
+        'hx-put="/data/knobs/only_template" '
+        'hx-target="#data-knob-only-template" '
+        'hx-swap="outerHTML"'
+    )
+    return (
+        f'<form id="data-knob-only-template" '
+        f'class="data-knob data-knob-only-template">'
+        f'<span class="data-knob-label">only_template:</span>'
+        f'<input type="text" name="only_template" '
+        f'value="{escape(val_str)}" '
+        f'class="only-template-input" '
+        f'aria-label="TransferTemplate name to scope to" '
+        f'placeholder="(none — required for scope=only_template)" '
+        f'hx-trigger="change" '
+        f"{common_attrs}/>"
+        f'<span class="only-template-current" '
+        f'aria-label="Current only_template">{escape(pretty)}</span>'
+        f"</form>"
+    )
+
+
+def _render_derive_balances_strip(
+    enabled: bool, roles: tuple[str, ...] | None,
+) -> str:
+    """X.4.i.3 — derive_balances flag + per-account-role narrowing.
+
+    UI: checkbox + read-only chip showing the active role set. The
+    role list is operator-configurable per L2 in cfg.yaml, but Studio
+    today surfaces just the on/off toggle — the narrowing field stays
+    yaml-driven (rarely tweaked per-deploy, and editing it in the
+    panel would crowd the chrome strip). When the toggle is on, the
+    chip shows the resolved role set so the trainer sees what's
+    being derived; when off, the chip is empty.
+    """
+    checked = "checked " if enabled else ""
+    if enabled:
+        if roles is None:
+            chip = "control accounts (default)"
+        else:
+            chip = ", ".join(roles)
+    else:
+        chip = "(disabled)"
+    common_attrs = (
+        'hx-put="/data/knobs/derive_balances" '
+        'hx-target="#data-knob-derive-balances" '
+        'hx-swap="outerHTML" '
+        'hx-trigger="change"'
+    )
+    return (
+        f'<form id="data-knob-derive-balances" '
+        f'class="data-knob data-knob-derive-balances">'
+        f'<label class="data-knob-label">'
+        f'<input type="checkbox" name="enabled" '
+        f'{checked}{common_attrs}/>'
+        f' derive_balances'
+        f"</label>"
+        f'<span class="derive-balances-current" '
+        f'title="Account roles being derived; configure per-L2 via '
+        f'test_generator.derive_balances_account_roles" '
+        f'aria-label="Derive scope">{escape(chip)}</span>'
+        f"</form>"
+    )
+
+
 _PLANT_KIND_ABBRV: tuple[tuple[PlantKind, str], ...] = (
     # 2-3 char abbreviation for the per-day chip — keeps the column
     # visually scannable when 6+ plant kinds land on the same day.
@@ -1422,6 +1506,20 @@ def _render_data_page(
         tg_cache.get().scope if tg_cache is not None else "full"
     )
     scope_strip = _render_scope_strip(selected_scope)
+    selected_only_template = (
+        tg_cache.get().only_template if tg_cache is not None else None
+    )
+    only_template_strip = _render_only_template_strip(selected_only_template)
+    derive_enabled = (
+        tg_cache.get().derive_balances if tg_cache is not None else False
+    )
+    derive_roles = (
+        tg_cache.get().derive_balances_account_roles
+        if tg_cache is not None else None
+    )
+    derive_balances_strip = _render_derive_balances_strip(
+        derive_enabled, derive_roles,
+    )
     etl_hook_enabled = (
         tg_cache.is_etl_hook_enabled() if tg_cache is not None else True
     )
@@ -1494,6 +1592,8 @@ def _render_data_page(
   <div class="data-knobs" id="data-knobs">
     {etl_hook_strip}
     {scope_strip}
+    {only_template_strip}
+    {derive_balances_strip}
     {window_strip}
     {end_date_strip}
     {seed_strip}
@@ -1920,6 +2020,83 @@ def make_studio_routes(
 
         routes.append(
             Route("/data/knobs/etl_hook", put_etl_hook, methods=["PUT"]),
+        )
+
+        async def put_only_template(request: Request) -> HTMLResponse:
+            """X.4.i.3 — set the test_generator.only_template knob.
+
+            Form contract:
+                - ``only_template=<name>`` → set the template name.
+                - ``only_template=`` (empty string) → clear to None.
+
+            No validation against the L2's actual TransferTemplates
+            here — the deploy-time `_only_template_rails` lookup
+            loud-fails with the declared list when the operator typed
+            a name that doesn't exist. UI is forgiving so the
+            in-progress trainer can hold the cfg in an inconsistent
+            state without each keystroke kicking back an error.
+            """
+            form = await request.form()
+            raw = form.get("only_template")
+            new_value: str | None = None
+            if isinstance(raw, str):
+                stripped = raw.strip()
+                new_value = stripped if stripped else None
+            bound_tg.update_only_template(new_value)
+            return HTMLResponse(
+                _render_only_template_strip(new_value),
+                headers={
+                    "HX-Trigger": "trainer-knobs-changed",
+                    "HX-Push-Url": _build_state_url(bound_tg),
+                },
+            )
+
+        routes.append(
+            Route(
+                "/data/knobs/only_template",
+                put_only_template,
+                methods=["PUT"],
+            ),
+        )
+
+        async def put_derive_balances(
+            request: Request,
+        ) -> HTMLResponse:
+            """X.4.i.3 — flip the test_generator.derive_balances flag.
+
+            Form contract:
+                - ``enabled=on`` (HTML form default for checked
+                  checkboxes) → enable.
+                - Absence → disable.
+
+            The role-narrowing field
+            (``derive_balances_account_roles``) stays cfg-yaml-only —
+            edited per-L2, not per-deploy. Surface in the chip so the
+            operator sees what's currently in scope.
+            """
+            form = await request.form()
+            enabled_raw = form.get("enabled")
+            new_enabled = (
+                isinstance(enabled_raw, str) and enabled_raw == "on"
+            )
+            bound_tg.update_derive_balances(new_enabled)
+            roles = (
+                bound_tg.get().derive_balances_account_roles
+            )
+            return HTMLResponse(
+                _render_derive_balances_strip(new_enabled, roles),
+                headers={
+                    "HX-Trigger": "trainer-knobs-changed",
+                    "HX-Push-Url": _build_state_url(bound_tg),
+                },
+            )
+
+        routes.append(
+            Route(
+                "/data/knobs/derive_balances",
+                put_derive_balances,
+                methods=["PUT"],
+            ),
         )
 
     # X.4.c.5.c — coverage JSON route. Mounted only when a pool exists

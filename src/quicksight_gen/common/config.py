@@ -102,7 +102,12 @@ class EtlDatasourceConfig:
 
 
 # X.4.g.3 — Step-3 synthetic-data overlay knobs.
-ScopeKind = Literal["full", "exceptions_only", "uncovered_rails"]
+# X.4.i.1 added "only_template" — emit baseline restricted to a single
+# TransferTemplate's leg-rails dependency closure, with the template name
+# read from cfg.test_generator.only_template.
+ScopeKind = Literal[
+    "full", "exceptions_only", "uncovered_rails", "only_template",
+]
 PlantKind = Literal[
     "drift", "overdraft", "limit_breach",
     "stuck_pending", "stuck_unbundled", "supersession",
@@ -133,6 +138,19 @@ class TestGeneratorConfig:
     plants: tuple[PlantKind, ...] = ()
     only_template: str | None = None
     derive_balances: bool = False
+    # X.4.i.2 — when derive_balances=True, this controls which account
+    # roles get derived. None ⇒ the conservative default of control
+    # accounts only (gl_control / concentration_master / funds_pool) —
+    # bank-bookkeeping accounts where the drift invariant
+    # `money = SUM(amount_money)` holds by construction. DDA / external
+    # account balances come from upstream statements; deriving them
+    # masks reconciliation gaps the bank wants to see. Operators can
+    # override per-L2 (e.g. ('gl_control', 'dda') to also derive
+    # customer DDAs) for trainer scenarios that don't depend on
+    # stated-vs-derived drift. Field name matches the schema column
+    # ``<prefix>_transactions.account_role`` rather than the legacy
+    # "account_type" wording.
+    derive_balances_account_roles: tuple[str, ...] | None = None
     # X.4.h.6.fix — Studio trainer's "up_to" cutoff. When set, deploy
     # appends DELETE statements after the generator emits to truncate
     # rows past this date. Lets the trainer scrub a cutoff inside a
@@ -711,7 +729,8 @@ def load_config(path: str | Path | None = None) -> Config:
         }
         allowed_tgen = {
             "enabled", "scope", "end_date", "seed", "plants",
-            "only_template", "derive_balances", "cutoff_date",
+            "only_template", "derive_balances",
+            "derive_balances_account_roles", "cutoff_date",
         }
         unknown_tgen = set(tgen_dict) - allowed_tgen
         if unknown_tgen:
@@ -783,6 +802,23 @@ def load_config(path: str | Path | None = None) -> Config:
                 f"test_generator.derive_balances must be a bool; "
                 f"got {derive_raw!r}."
             )
+        # X.4.i.2 — optional per-account-role narrowing for the derive pass.
+        # None ⇒ default control-account set inside derive_balances.
+        deriv_ar_raw = tgen_dict.get("derive_balances_account_roles")
+        deriv_ar_val: tuple[str, ...] | None
+        if deriv_ar_raw is None:
+            deriv_ar_val = None
+        elif isinstance(deriv_ar_raw, (list, tuple)):
+            deriv_ar_iter = cast(
+                list[Any] | tuple[Any, ...], deriv_ar_raw,
+            )
+            deriv_ar_val = tuple(str(t) for t in deriv_ar_iter)
+        else:
+            raise ValueError(
+                f"test_generator.derive_balances_account_roles must be a "
+                f"list of strings or null; got "
+                f"{type(deriv_ar_raw).__name__} ({deriv_ar_raw!r}).",
+            )
         only_template_raw = tgen_dict.get("only_template")
         only_template_val: str | None = (
             str(only_template_raw) if only_template_raw is not None else None
@@ -815,6 +851,7 @@ def load_config(path: str | Path | None = None) -> Config:
             plants=cast(tuple[PlantKind, ...], plants_seq),
             only_template=only_template_val,
             derive_balances=derive_raw,
+            derive_balances_account_roles=deriv_ar_val,
             cutoff_date=cutoff_date_val,
         )
     elif raw_tgen is not None:

@@ -809,6 +809,7 @@ def emit_baseline_seed(
     anchor: date | None = None,
     dialect: Dialect = Dialect.POSTGRES,
     skip_rails: frozenset[Identifier] = frozenset(),
+    only_rails: frozenset[Identifier] | None = None,
     base_seed: int | None = None,
 ) -> str:
     """Emit a 3-month healthy-baseline INSERT script for the L2 instance.
@@ -833,6 +834,15 @@ def emit_baseline_seed(
         mode to fill baseline only for rails the operator's external
         DB hasn't already populated. Default empty (no rails skipped)
         keeps byte-identical-to-locked-seeds output.
+      only_rails: X.4.i.1 — inverse of ``skip_rails``. When set, ONLY
+        rails whose name appears in the set are emitted; everything
+        else is silently skipped. Used by the deploy pipeline's
+        ``scope: only_template`` mode to emit baseline restricted to
+        the template's leg-rails dependency closure. ``None`` (default)
+        means "no narrowing" (preserves locked-seed byte-identity).
+        Mutually exclusive with ``skip_rails`` in spirit but tested
+        independently — if the caller passes both, the rail must
+        survive both filters (in ``only_rails`` AND not in ``skip_rails``).
       base_seed: X.4.h.0.b — root RNG seed for the baseline emitter.
         ``None`` (default) uses ``_BASELINE_BASE_SEED = 42`` — the
         legacy constant the locked seeds were generated against, so
@@ -923,6 +933,11 @@ def emit_baseline_seed(
         # credits / daily balances naturally produce nothing for it
         # downstream too.
         if rail.name in skip_rails:
+            continue
+        # X.4.i.1 — only_template mode narrows the per-rail loop to the
+        # template's dependency closure. Same downstream zero-firings
+        # behavior for excluded rails as the skip_rails branch above.
+        if only_rails is not None and rail.name not in only_rails:
             continue
         rail_rng = random.Random(_seed_for_rail(rail.name, effective_base_seed))
         if rail.aggregating:

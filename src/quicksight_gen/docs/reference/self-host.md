@@ -1,6 +1,6 @@
-# Self-hosting the dashboards (App 2)
+# Self-hosting the dashboards
 
-The four bundled apps render two ways. The default is **QuickSight** — `quicksight-gen json apply --execute` pushes a JSON resource graph (theme, datasource, datasets, analyses, dashboards) to AWS. The second is **App 2**: a small self-hosted HTMX + d3 page server that reads the same L2 instance and the same database, with no AWS account involved. It's the offline-iteration path (edit the L2 YAML / dataset SQL, refresh the page) and the renderer the X.4 editor and X.5 ETL helper build on.
+The four bundled apps render two ways. The default is **QuickSight** — `quicksight-gen json apply --execute` pushes a JSON resource graph (theme, datasource, datasets, analyses, dashboards) to AWS. The second is **Dashboards**: a small self-hosted HTMX + d3 page server that reads the same L2 instance and the same database, with no AWS account involved. (Internally still called "App 2" in some module names; the user-facing CLI is `quicksight-gen dashboards`.) It's the offline-iteration path (edit the L2 YAML / dataset SQL, refresh the page) and the renderer **Studio** (`quicksight-gen studio` — X.4 implementation tools: unified diagram, L2 editor, data-shaping panel, Deploy-changes orchestration) builds on.
 
 ## Running it
 
@@ -10,13 +10,13 @@ quicksight-gen dashboards -c config.yaml                # one process, all 4 app
 # → http://127.0.0.1:8000/dashboards
 ```
 
-`config.yaml` points at a database (`demo_database_url`) — PostgreSQL, Oracle, or a SQLite file; App 2 supports all three (the same dialect-aware SQL the QuickSight datasets use). The schema + seed have to already be applied (`quicksight-gen schema apply --execute`, `data apply --execute`, `data refresh --execute`) — App 2 only reads.
+`config.yaml` points at a database (`demo_database_url`) — PostgreSQL, Oracle, or a SQLite file; Dashboards supports all three (the same dialect-aware SQL the QuickSight datasets use). The schema + seed have to already be applied (`quicksight-gen schema apply --execute`, `data apply --execute`, `data refresh --execute`) — Dashboards only reads.
 
 It's stateless on purpose: no auth, no sessions, no in-process cache. Every GET re-runs the query; the URL *is* the cache key (filter state round-trips as `?param_X=…` query params), so an edge / browser cache layer Just Works. Embed it behind your own auth front when you put it on a network.
 
-## What gets bundled in the wheel — App 2 runs offline
+## What gets bundled in the wheel — Dashboards runs offline
 
-App 2 needs a few browser-side libraries (HTMX for the swaps, d3 + d3-sankey for the charts, the filter-widget libs, a context-menu lib for row drills). Rather than CDN-load them — which would break `pip install` + `serve` with no internet — the **pre-built minified dist files are committed inside the package** and served from `/static/vendor/…` off the package's own static mount. The wheel ships everything; nothing is fetched at runtime.
+Dashboards needs a few browser-side libraries (HTMX for the swaps, d3 + d3-sankey for the charts, the filter-widget libs, a context-menu lib for row drills). Rather than CDN-load them — which would break `pip install` + the dashboards/studio servers with no internet — the **pre-built minified dist files are committed inside the package** and served from `/static/vendor/…` off the package's own static mount. The wheel ships everything; nothing is fetched at runtime.
 
 The full vendored set lives in `src/quicksight_gen/common/html/assets/vendor/` with provenance pinned in `assets/vendor/vendor.lock` (`{name, version, source_url, sha256, dest}` per dep). Today:
 
@@ -67,4 +67,4 @@ python scripts/build_app2_css.py --check    # rebuild to a temp file and diff
 
 ### The docs site ships in the wheel too
 
-This handbook is bundled inside the package (`<site-packages>/quicksight_gen/docs/`) and rebuilt with `quicksight-gen docs apply --portable` — `--portable` inlines the Graphviz WASM renderer so the site itself is offline-capable. Same offline-by-default posture as App 2; covered under [Customization → How do I publish docs against my L2?](../walkthroughs/customization/how-do-i-publish-docs-against-my-l2.md).
+This handbook is bundled inside the package (`<site-packages>/quicksight_gen/docs/`) and rebuilt with `quicksight-gen docs apply --portable` — `--portable` inlines the Graphviz WASM renderer so the site itself is offline-capable. Same offline-by-default posture as Dashboards; covered under [Customization → How do I publish docs against my L2?](../walkthroughs/customization/how-do-i-publish-docs-against-my-l2.md).

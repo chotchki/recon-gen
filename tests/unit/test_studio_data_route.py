@@ -742,18 +742,21 @@ def test_put_seed_route_absent_without_cache(
 # ---------------------------------------------------------------------------
 
 
-def test_scope_strip_renders_three_radios_full_default(
+def test_scope_strip_renders_four_radios_full_default(
     writable_l2_yaml: Path,
 ) -> None:
     """Default cfg.test_generator.scope = 'full' ⇒ that radio renders
-    pre-checked; the other two unchecked. Renders all three so the
-    operator can switch without a dropdown click."""
+    pre-checked; the other three unchecked. Renders all four so the
+    operator can switch without a dropdown click. (X.4.i.1 added
+    'only_template' as the fourth scope.)"""
     tg_cache = TestGeneratorCache(TestGeneratorConfig(scope="full"))
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/data").text
 
-    for value in ("full", "uncovered_rails", "exceptions_only"):
+    for value in (
+        "full", "uncovered_rails", "exceptions_only", "only_template",
+    ):
         assert f'name="scope" value="{value}"' in body, (
             f"missing radio for {value}"
         )
@@ -762,8 +765,9 @@ def test_scope_strip_renders_three_radios_full_default(
     # The others render unchecked.
     assert 'value="uncovered_rails" hx-put' in body
     assert 'value="exceptions_only" hx-put' in body
-    # Exactly one checked across the three.
-    assert body.count('name="scope"') == 3
+    assert 'value="only_template" hx-put' in body
+    # Exactly one checked across the four.
+    assert body.count('name="scope"') == 4
     assert body.count('value="full" checked') == 1
 
 
@@ -793,14 +797,15 @@ def test_scope_strip_form_targets_put_route(
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/data").text
 
-    assert body.count('hx-put="/data/knobs/scope"') == 3
+    assert body.count('hx-put="/data/knobs/scope"') == 4
     assert 'hx-target="#data-knob-scope"' in body
     assert 'hx-trigger="change"' in body
     # Hover hint title= attrs render so the operator can discover
-    # the difference between the three modes.
+    # the difference between the four modes.
     assert "Wipe + emit baseline" in body  # full hint
     assert "patch the gaps" in body  # uncovered_rails hint
     assert "Plants only, no baseline" in body  # exceptions_only hint
+    assert "leg-rails closure" in body  # only_template hint
 
 
 def test_put_scope_changes_cached_value(
@@ -1053,8 +1058,17 @@ def test_timeline_dense_window_renders_anchor_and_full_window(
     id for scrollIntoView."""
     from quicksight_gen.common.l2.seed import DEFAULT_BASELINE_WINDOW_DAYS
 
+    # Pin window_end too — the timeline window anchors on window_end
+    # (which defaults to date.today()), NOT cfg.end_date. Without this
+    # pin the test rolls a day every midnight.
+    window_end = date(2026, 5, 14)
+    window_start = window_end - timedelta(
+        days=DEFAULT_BASELINE_WINDOW_DAYS - 1,
+    )
     tg_cache = TestGeneratorCache(
-        TestGeneratorConfig(end_date=date(2026, 5, 14), scope="full"),
+        TestGeneratorConfig(end_date=window_end, scope="full"),
+        window_start=window_start,
+        window_end=window_end,
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -1071,8 +1085,7 @@ def test_timeline_dense_window_renders_anchor_and_full_window(
     # Inline script wires the scrollIntoView call.
     assert "scrollIntoView" in body
     # First (oldest) row is window_days - 1 days back from anchor.
-    earliest = date(2026, 5, 14) - timedelta(days=DEFAULT_BASELINE_WINDOW_DAYS - 1)
-    assert f'>{earliest.isoformat()}<' in body
+    assert f'>{window_start.isoformat()}<' in body
 
 
 def test_timeline_anchors_on_today_when_end_date_none(
@@ -1305,3 +1318,354 @@ def test_put_etl_hook_route_absent_without_cache(
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = _put_form(c, "/data/knobs/etl_hook", [("enabled", "on")])
     assert resp.status_code in (404, 405)  # type: ignore[attr-defined]: TestClient stub return is Any
+
+
+# ----- X.4.h.8.b/c — knob change → sidefile updated → next page-load reflects -----
+#
+# These run against the route layer (not Playwright) because the
+# sidefile-write is the contract under test, not the JS chrome. The
+# fast loop also lets us cover all five knob routes; full Playwright
+# would multiply 2-3 minutes per test which is wasteful for a
+# server-side persistence check.
+
+
+def _cache_with_sidefile(
+    cfg_path: Path,
+) -> TestGeneratorCache:
+    """Construct a cache wired to a sidefile next to ``cfg_path`` —
+    same factory the studio CLI uses."""
+    return TestGeneratorCache.from_cfg_with_state(
+        make_test_config(), cfg_path,
+    )
+
+
+def test_put_plants_writes_sidefile(
+    writable_l2_yaml: Path, tmp_path: Path,
+) -> None:
+    """A real PUT through the route mutates the cache AND persists to
+    the sibling sidefile so the next Studio launch sees the picked
+    subset."""
+    from quicksight_gen.common.l2.studio_state import (  # noqa: PLC0415
+        SIDEFILE_NAME,
+        load_studio_state,
+    )
+
+    cfg_path = tmp_path / "config.yaml"
+    tg_cache = _cache_with_sidefile(cfg_path)
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(
+            c, "/data/knobs/plants",
+            [("plant", "drift"), ("plant", "overdraft")],
+        )
+    assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
+    sidefile = load_studio_state(tmp_path / SIDEFILE_NAME)
+    assert sidefile is not None
+    assert sidefile.plants == ("drift", "overdraft")
+
+
+def test_put_seed_writes_sidefile(
+    writable_l2_yaml: Path, tmp_path: Path,
+) -> None:
+    from quicksight_gen.common.l2.studio_state import (  # noqa: PLC0415
+        SIDEFILE_NAME,
+        load_studio_state,
+    )
+
+    cfg_path = tmp_path / "config.yaml"
+    tg_cache = _cache_with_sidefile(cfg_path)
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(c, "/data/knobs/seed", [("seed", "12345")])
+    assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
+    sidefile = load_studio_state(tmp_path / SIDEFILE_NAME)
+    assert sidefile is not None
+    assert sidefile.seed == 12345
+
+
+def test_put_scope_writes_sidefile(
+    writable_l2_yaml: Path, tmp_path: Path,
+) -> None:
+    from quicksight_gen.common.l2.studio_state import (  # noqa: PLC0415
+        SIDEFILE_NAME,
+        load_studio_state,
+    )
+
+    cfg_path = tmp_path / "config.yaml"
+    tg_cache = _cache_with_sidefile(cfg_path)
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(
+            c, "/data/knobs/scope", [("scope", "exceptions_only")],
+        )
+    assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
+    sidefile = load_studio_state(tmp_path / SIDEFILE_NAME)
+    assert sidefile is not None
+    assert sidefile.scope == "exceptions_only"
+
+
+def test_put_end_date_writes_sidefile(
+    writable_l2_yaml: Path, tmp_path: Path,
+) -> None:
+    from quicksight_gen.common.l2.studio_state import (  # noqa: PLC0415
+        SIDEFILE_NAME,
+        load_studio_state,
+    )
+
+    cfg_path = tmp_path / "config.yaml"
+    tg_cache = _cache_with_sidefile(cfg_path)
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        # Pick a date inside the cache's default window (today-89..today).
+        within_window = (date.today() - timedelta(days=10)).isoformat()  # typing-smell: ignore[no-datetime-now]: test mirrors the trainer-mode default-window anchor; not a determinism-sensitive path
+        resp = _put_form(
+            c, "/data/knobs/end_date", [("end_date", within_window)],
+        )
+    assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
+    sidefile = load_studio_state(tmp_path / SIDEFILE_NAME)
+    assert sidefile is not None
+    assert sidefile.end_date == date.fromisoformat(within_window)
+
+
+def test_put_etl_hook_writes_sidefile(
+    writable_l2_yaml: Path, tmp_path: Path,
+) -> None:
+    from quicksight_gen.common.l2.studio_state import (  # noqa: PLC0415
+        SIDEFILE_NAME,
+        load_studio_state,
+    )
+
+    cfg_path = tmp_path / "config.yaml"
+    tg_cache = TestGeneratorCache.from_cfg_with_state(
+        make_test_config(etl_hook="echo x"), cfg_path,
+    )
+    app = _build_app(
+        writable_l2_yaml,
+        tg_cache=tg_cache,
+        cfg=make_test_config(etl_hook="echo x"),
+    )
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        # Empty body = checkbox unchecked = "disabled".
+        resp = _put_form(c, "/data/knobs/etl_hook", [])
+    assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
+    sidefile = load_studio_state(tmp_path / SIDEFILE_NAME)
+    assert sidefile is not None
+    assert sidefile.etl_hook_enabled is False
+
+
+# ----- X.4.i.3 — only_template + derive_balances UI controls -----
+
+
+def test_only_template_strip_renders_blank_when_none(
+    writable_l2_yaml: Path,
+) -> None:
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(only_template=None))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+    assert 'id="data-knob-only-template"' in body
+    assert 'value=""' in body  # input empty
+    assert "(none)" in body
+
+
+def test_only_template_strip_reflects_cached_value(
+    writable_l2_yaml: Path,
+) -> None:
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(only_template="MerchantSettlementCycle"),
+    )
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+    assert 'value="MerchantSettlementCycle"' in body
+
+
+def test_put_only_template_sets_value(
+    writable_l2_yaml: Path,
+) -> None:
+    tg_cache = TestGeneratorCache(TestGeneratorConfig())
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(
+            c, "/data/knobs/only_template",
+            [("only_template", "MerchantSettlementCycle")],
+        )
+    assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
+    assert tg_cache.get().only_template == "MerchantSettlementCycle"
+
+
+def test_put_only_template_empty_clears_to_none(
+    writable_l2_yaml: Path,
+) -> None:
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(only_template="MerchantSettlementCycle"),
+    )
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(c, "/data/knobs/only_template",
+                         [("only_template", "")])
+    assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
+    assert tg_cache.get().only_template is None
+
+
+def test_put_only_template_route_absent_without_cache(
+    writable_l2_yaml: Path,
+) -> None:
+    """Severability — without tg_cache the route doesn't mount."""
+    app = _build_app(writable_l2_yaml, tg_cache=None)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(c, "/data/knobs/only_template",
+                         [("only_template", "X")])
+    assert resp.status_code in (404, 405)  # type: ignore[attr-defined]: TestClient stub return is Any
+
+
+def test_derive_balances_strip_renders_unchecked_by_default(
+    writable_l2_yaml: Path,
+) -> None:
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(derive_balances=False))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+    assert 'id="data-knob-derive-balances"' in body
+    assert "(disabled)" in body
+    assert 'name="enabled"' in body
+    assert "checked" not in (
+        body.split('id="data-knob-derive-balances"', 1)[1]
+        .split("</form>", 1)[0]
+    )
+
+
+def test_derive_balances_strip_renders_checked_when_enabled(
+    writable_l2_yaml: Path,
+) -> None:
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(derive_balances=True))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+    section = (
+        body.split('id="data-knob-derive-balances"', 1)[1]
+        .split("</form>", 1)[0]
+    )
+    assert "checked" in section
+    assert "control accounts (default)" in section
+
+
+def test_derive_balances_strip_reflects_role_override(
+    writable_l2_yaml: Path,
+) -> None:
+    tg_cache = TestGeneratorCache(
+        TestGeneratorConfig(
+            derive_balances=True,
+            derive_balances_account_roles=("gl_control", "dda"),
+        ),
+    )
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+    assert "gl_control, dda" in body
+
+
+def test_put_derive_balances_enable(
+    writable_l2_yaml: Path,
+) -> None:
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(derive_balances=False))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(
+            c, "/data/knobs/derive_balances", [("enabled", "on")],
+        )
+    assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
+    assert tg_cache.get().derive_balances is True
+
+
+def test_put_derive_balances_disable(
+    writable_l2_yaml: Path,
+) -> None:
+    tg_cache = TestGeneratorCache(TestGeneratorConfig(derive_balances=True))
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        # Empty body = unchecked checkbox.
+        resp = _put_form(c, "/data/knobs/derive_balances", [])
+    assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
+    assert tg_cache.get().derive_balances is False
+
+
+def test_put_derive_balances_route_absent_without_cache(
+    writable_l2_yaml: Path,
+) -> None:
+    app = _build_app(writable_l2_yaml, tg_cache=None)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = _put_form(c, "/data/knobs/derive_balances", [("enabled", "on")])
+    assert resp.status_code in (404, 405)  # type: ignore[attr-defined]: TestClient stub return is Any
+
+
+def test_put_only_template_persists_to_sidefile(
+    writable_l2_yaml: Path, tmp_path: Path,
+) -> None:
+    """The sidefile mirror — same contract as the other knob routes
+    (tested in detail in the X.4.h.7 sidefile-integration block)."""
+    cfg_path = tmp_path / "config.yaml"
+    tg_cache = _cache_with_sidefile(cfg_path)
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        _put_form(
+            c, "/data/knobs/only_template",
+            [("only_template", "MerchantSettlementCycle")],
+        )
+    # Reload from disk via a second cache.
+    tg_b = _cache_with_sidefile(cfg_path)
+    assert tg_b.get().only_template == "MerchantSettlementCycle"
+
+
+def test_put_derive_balances_persists_to_sidefile(
+    writable_l2_yaml: Path, tmp_path: Path,
+) -> None:
+    cfg_path = tmp_path / "config.yaml"
+    tg_cache = _cache_with_sidefile(cfg_path)
+    app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        _put_form(
+            c, "/data/knobs/derive_balances", [("enabled", "on")],
+        )
+    tg_b = _cache_with_sidefile(cfg_path)
+    assert tg_b.get().derive_balances is True
+
+
+def test_studio_restart_reflects_persisted_state(
+    writable_l2_yaml: Path, tmp_path: Path,
+) -> None:
+    """Full restart loop: PUT a knob → sidefile written → second cache
+    constructed via from_cfg_with_state on the same cfg path → second
+    app's GET /data renders the persisted selection. This is the
+    h.8.b "next page-load reflects the saved state" contract."""
+    cfg_path = tmp_path / "config.yaml"
+
+    # Studio-1 — operator picks a non-default scope + a plant subset.
+    tg_a = _cache_with_sidefile(cfg_path)
+    app_a = _build_app(writable_l2_yaml, tg_cache=tg_a)
+    with TestClient(app_a) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        c.put(
+            "/data/knobs/scope",
+            content="scope=exceptions_only",
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
+        _put_form(
+            c, "/data/knobs/plants",
+            [("plant", "drift"), ("plant", "overdraft")],
+        )
+
+    # Studio-2 — fresh cache from the same cfg path. The sidefile lands.
+    tg_b = _cache_with_sidefile(cfg_path)
+    assert tg_b.get().scope == "exceptions_only"
+    assert tg_b.get().plants == ("drift", "overdraft")
+
+    # And the second app's GET /data shows the picked plants checked.
+    app_b = _build_app(writable_l2_yaml, tg_cache=tg_b)
+    with TestClient(app_b) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+    assert 'value="drift" checked' in body
+    assert 'value="overdraft" checked' in body
+    # Other plants are NOT checked.
+    assert 'value="limit_breach" />' in body
