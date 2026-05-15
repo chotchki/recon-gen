@@ -162,7 +162,7 @@ The X.4.f.2/.3 first-cut Rail editor covers cosmetic fields (`name` / `transfer_
 - [x] **X.4.f.11.6** — `metadata_keys` + `posted_requirements` (`textarea`, one-per-line, comma-tolerant; coerced to `tuple[Identifier, ...]`).
 - [x] **X.4.f.11.7** — `max_pending_age` + `max_unbundled_age` (`text` with ISO 8601 format hint `PT24H` / `P1D`; parsed via existing loader's Duration helper; empty = `None`).
 - [x] **X.4.f.11.8** — TwoLegRail: `source_origin` + `destination_origin` (`text` — Origin is open enum) + `expected_net` (`money`).
-- [x] **X.4.f.11.9** — `bundles_activity` (`multi_select` from `rails_or_templates` for v1; gains `transfer_types` membership after Z.B lands).
+- [x] **X.4.f.11.9** — `bundles_activity` (`multi_select` from `rails_or_templates`). [Stale forward reference removed 2026-05-15: the original "gains `transfer_types` membership after Z.B lands" promise is obsolete — the redesigned Z.B subsumes `transfer_type` into `rail_name`, so `rails_or_templates` IS the final shape.]
 
 **Tier 3 — `metadata_value_examples` as a YAML-block textarea (locked 2026-05-13):** *(all shipped in commit 9e2447f)*
 
@@ -380,11 +380,76 @@ The per-cell chain `unit → seed_variant → db → app2 → deploy → api →
 
 ---
 
-## Phase Z — L2 grammar cleanup: chain collapse + transfer_type promotion
+## Phase AA — Dashboard UX + exception literacy (no yaml impact)
+
+Bundles operator-feedback UX work that surfaced during X.4 trainer use. **No yaml grammar touched** — orthogonal to Phase Z's P.10 gate, can ship before / after / interleaved with Z. Four sub-phases parallelizable.
+
+**Sequencing context.** The "QS multiselect dropdowns suck — no select-none / pick-one" pain (originating thread, 2026-05-14) traces to the X.2.t.2 sentinel-guard pattern (forced by AWS's 32-element dataset-parameter default cap). User feedback confirmed analyst workflow is "drill to one value" 99% of the time, not multi-select. Single-select collapses the whole problem space — sentinel-guard SQL becomes `('ALL' = <<$pX>>) OR (col = <<$pX>>)`, the 32-cap is a non-issue, Y parity (parameter pushdown both renderers) stays intact. This is the load-bearing change in AA.A; the rest are operator-asked nits piling on the same UX-pass.
+
+### AA.A — Dropdown-control flip (multi → single-select)
+
+The originating thread. Every "pick one rail / chain / template" dropdown across L1 / L2FT / Inv flips from multi-select to single-select. Compare-N keepers (if any) stay multi.
+
+- [ ] **AA.A.1 — Audit existing multi-select dropdowns.** Walk L1 / L2FT / Inv ParameterDropDown nodes; mark each as "drill-to-one" (flip) vs "compare-N keeper" (stay). Output a one-page table to `docs/audits/aa_a_dropdown_audit.md`. The X.2.u.4.e App2Driver `set_dropdown` verb makes this scriptable — but the workflow classification is operator judgment, not derivable from the tree.
+- [ ] **AA.A.2 — Single-select primitive + sentinel-guard variant.** Extend `ParameterDropDownControl` (or add a `single_select=True` flag) so the tree node carries the intent. SQL helper: `app2_param_eq` already handles `=` binding; add `app2_param_eq_with_all_sentinel` for the "preserve show-all default" case. QS side: `MappedDataSetParameters` bridge stays unchanged (parameter is now scalar string, not multi-value list).
+- [ ] **AA.A.3 — Flip the audited dropdowns.** Per AA.A.1's table. Mechanical change per sheet: `multiselect=True` → `single_select=True`, dataset SQL `IN (<<$pX>>)` → `('ALL' = <<$pX>>) OR (col = <<$pX>>)` (or bare `= <<$pX>>` if no all-default), parameter declaration scalar instead of list.
+- [ ] **AA.A.4 — Browser e2e parity.** Existing X.2.u.4.e drill tests cover single-select round-trips already; extend `test_l1_filters.py` / `test_inv_filters.py` / `test_l2ft_filters.py` to walk the flipped dropdowns ([qs, app2] both renderers).
+- [ ] **AA.A.5 — Live verify + commit.** Aurora deploy (`json apply --execute`), browser-walk a few flipped sheets, confirm "show all on load" still works, confirm pick-one is one click.
+
+### AA.B — Daily Statement fixes
+
+Two operator-asked changes on the same sheet. Pair them.
+
+- [ ] **AA.B.1 — Add account_role dropdown filter to Daily Statement.** Single-select (per AA.A pattern) sourcing from `<prefix>_daily_balances.account_role`. Default to "ALL" sentinel. Wire the SQL pushdown through.
+- [ ] **AA.B.2 — Filter accounts we don't track balances for off Daily Statement.** Unconditional, not toggleable. The shape of the filter matters: the right test is "does this account have `<prefix>_daily_balances` rows?" — not a blanket `account_scope = 'internal'` (an external clearing account that we DO track would over-filter). Likely fix: ensure the Daily Statement dataset reads from `daily_balances` as its anchor and joins out to transactions, instead of reading from transactions and pulling counterparty legs. Verify the actual misbehavior shape in Studio first; the fix shape follows.
+- [ ] **AA.B.3 — Sheet description tweak.** Subtitle / sheet description gains a one-line note: "Internal accounts only. Filter by role to narrow further."
+- [ ] **AA.B.4 — Browser e2e + commit.** Extend Daily Statement test (or add one if missing) to (a) assert no `external` rows, (b) round-trip the new role dropdown.
+
+### AA.C — Exception literacy (sticky on-sheet panel + trainer pane)
+
+Operators don't crack open the manual. The exception-type vocabulary + remediation guidance has to live where they're already looking. Source of truth is `src/quicksight_gen/docs/L1_Invariants.md` (already structured per-invariant under `### N. <name>` headings) — the panel content reads from there at generate time, not net-new prose.
+
+- [ ] **AA.C.1 — Spike: rich-text panel placement on QS sheets.** Find the QS pattern for a sheet-bottom rich-text box that scrolls below the visuals (not modal, not tooltip — sticky-at-bottom or end-of-canvas). The existing Getting Started sheets use `SheetTextBox` with `common/rich_text.py` markup; verify the same primitive works at sheet-bottom and survives QS's auto-layout. Output: 1-page audit doc, schema for the panel.
+- [ ] **AA.C.2 — `L1_Invariants.md` per-invariant section parser.** Helper that walks `### N. <name>` headings + body prose, returns `dict[invariant_kind, str]`. Lives in `common/handbook/` (Phase O.1 vocabulary infrastructure already nearby). Source-of-truth single-file pattern — the docs handbook keeps the long form; the dashboard panel pulls a clipped/excerpted version. Pin: which invariant kind maps to which sheet (Drift, Overdraft, Limit Breach, Pending Aging, Unbundled Aging, Supersession Audit, Today's Exceptions; plus L2FT Hygiene Exceptions if it has its own vocabulary).
+- [ ] **AA.C.3 — Wire each L1 invariant sheet's bottom panel.** Drift / Overdraft / Limit Breach / Pending Aging / Unbundled Aging / Supersession Audit / Today's Exceptions. Each gets a SheetTextBox at sheet-bottom with the L1_Invariants.md excerpt for that invariant + a "what to do" line. App2 renderer mirrors the QS placement.
+- [ ] **AA.C.4 — Wire L2FT Hygiene Exceptions panel.** L2FT has its own exception vocabulary (cascade-broken rails, MerchantPayoutCheck, etc.). Source content from existing handbook sections; if no canonical doc, author one in `src/quicksight_gen/docs/L2FT_Exceptions.md` first, then mirror the AA.C.3 wiring.
+- [ ] **AA.C.5 — Studio trainer pane (X.4.h.9 placeholder).** The X.4.h trainer page has a `<section class="data-training">` with a "training pane lands in X.4.h.9" placeholder. Wire it: scroll-through list of exception kinds, each entry shows `(kind, plain-English description, what-to-do, link to dashboard sheet)`. Same source as AA.C.3 — the L1_Invariants.md parser. Closes the X.4.h.9 placeholder properly. **Deep-link target = Dashboards (App2)**, not the QS embed — the URL-param/control-sync defect (`project_qs_url_parameter_no_control_sync` quirk) breaks initial-load filter narrowing on the QS leg, so trainer → trainee deep-linking only works cleanly on Dashboards. The trainer pane's link href points at App2 routes.
+- [ ] **AA.C.6 — Browser e2e + commit.** Per-sheet test asserts the bottom panel is present + carries a non-empty body for each invariant kind. Trainer-pane test asserts every L1 invariant kind appears in the list.
+
+### AA.D — Label hygiene
+
+- [ ] **AA.D.1 — Rename "magnitude" → "count" on L2FT Exceptions.** Surface the audit doc / pyright errors first to know if this is a column rename (matview), measure rename (analysis-only), or visual label (one-line). Cascade through any test assertions that reference the old name. Re-deploy + browser-verify.
+
+### AA.E — Search by name AND id
+
+- [ ] **AA.E.1 — Decide pattern (concat calc field vs two-column table vs smart input).** Today the Account Network anchor dropdown shows `name (id)` from a dedicated dataset; other sheets show one or the other. Operator wants both visible AND searchable across all sheets that show accounts. Pick one of: (a) calc field concatenating `name || ' (' || id || ')'` everywhere, (b) split into two adjacent columns sortable independently, (c) single-search input that matches either field. Output decision in commit message.
+- [ ] **AA.E.2 — Wire across affected sheets.** Likely Daily Statement, Today's Exceptions, Transactions, plus L2FT exception tables. Per-sheet judgment on which form fits the visual layout.
+- [ ] **AA.E.3 — Browser e2e + commit.** Sortability + searchability of the new column form, per renderer.
+
+### AA.G — Dependabot fixes
+
+Two open high-severity Dependabot alerts on default branch (2026-05-15), both urllib3 in `uv.lock`, both fixed by bumping to ≥ 2.7.0:
+
+- GHSA-mf9v-mfxr-j63j — decompression-bomb safeguards bypassed in streaming API (vulnerable: `>= 2.6.0, < 2.7.0`)
+- GHSA-qccp-gfcp-xxvc — sensitive headers forwarded across origins on proxied low-level redirects (vulnerable: `>= 1.23, < 2.7.0`)
+
+- [ ] **AA.G.1 — Bump urllib3 to ≥ 2.7.0.** `uv lock --upgrade-package urllib3` (or pin in `pyproject.toml` if a transitive dep is holding the old range). Verify the new version actually lands in `uv.lock`.
+- [ ] **AA.G.2 — Verify suite stays green.** Full unit pass + a smoke through the runner's `up_to=db` chain (urllib3 sits under boto3 + httpx + requests — anything that hits AWS or App2 walks it). Tag any new urllib3-2.7-flagged behavior in tests; nothing in the changelog suggests breaking changes for our usage shape.
+- [ ] **AA.G.3 — Confirm Dependabot closes the alerts.** After push, the alerts should auto-resolve on the next default-branch advance. If they don't, file Dependabot dismissals with a "fixed" reason pointing at the AA.G.1 commit.
+
+### AA.F — End-of-phase
+
+- [ ] **AA.F.1 — Verify chain (unit + db + browser).** Full `./run_tests.sh up_to=browser` passes against the deployed dashboards.
+- [ ] **AA.F.2 — Tag v10.1.0a1 + RELEASE_NOTES + push.** Or fold into Phase Z if Z lands close behind — single tag covers both. Decide at end-of-phase based on Z timing.
+- [ ] **AA.F.3 — PLAN_ARCHIVE sweep + summary line.**
+
+---
+
+## Phase Z — L2 grammar cleanup: chain collapse + transfer_type subsumption
 
 Two distinct grammar reshapes that share the migration cost (fixture rewrites + seed re-lock + editor UI + docs sweep), bundled here so the operator yaml grammar settles in one motion before the next public release.
 
-**Sequencing — Z is a P.10 prerequisite, NOT an X.4 prerequisite (locked 2026-05-13).** X.4 (studio editor) and ETL/Training work proceed first on the current grammar; Phase Z lands immediately before P.10 cuts. Bounded rework when Z lands: ~half-day on the studio editor's chain card UI (replace per-row `required` / `xor_group` form fields with a children-checkbox-group), ~hour on the rail card's transfer_type field (free text → dropdown sourced from declared TransferTypes), ~hour on `topology.py::_chain_label` + chain-edge metadata. Everything else in X.4 is grammar-agnostic. The P.10 gate is hard because once a tagged release ships the old `chains:` shape, migrating customer yamls becomes a versioning headache.
+**Sequencing — Z is a P.10 prerequisite, NOT an X.4 prerequisite (locked 2026-05-13).** X.4 (studio editor) and ETL/Training work proceed first on the current grammar; Phase Z lands immediately before P.10 cuts. Bounded rework when Z lands: ~half-day on the studio editor's chain card UI (replace per-row `required` / `xor_group` form fields with a children-checkbox-group), ~30 min dropping the rail card's `transfer_type` field + renaming the LimitSchedule card's `transfer_type` field to `rail`, ~hour on `topology.py::_chain_label` + chain-edge metadata. Everything else in X.4 is grammar-agnostic. The P.10 gate is hard because once a tagged release ships the old `chains:` shape, migrating customer yamls becomes a versioning headache.
 
 ### Z.A — Chain grammar collapse (singleton = required, multi = XOR)
 
@@ -431,29 +496,41 @@ Surfaced 2026-05-13 during the `X.4.f.10.followup` C4.1 validator add (the "requ
 - [ ] **Z.13 — SPEC + Schema_v6 + walkthroughs prose.** Update the chain section of `docs/Schema_v6.md`; update any handbook walkthrough that mentions `xor_group` by name.
 - [ ] **Z.14 — Re-lock seeds.** Chain firing-rule iteration order may shift baseline seed bytes — re-lock spec_example + sasquatch_pr per-dialect (`quicksight-gen data lock -c run/config.<pg|oracle|sqlite>.yaml --l2 …`). If unchanged, byte-equality test passes; if changed, document the shift in the commit message. (Verify + commit moves to Z.C.)
 
-### Z.B — Promote transfer_type to a first-class declared entity
+### Z.B — Subsume transfer_type into rail (drop the redundant L1 axis)
 
-Surfaced 2026-05-13 during the chain-grammar discussion. The user has been having a hard time explaining the difference between `Rail.name` and `Rail.transfer_type` to people, and that pain is the design signal: today `transfer_type` is a bare snake_case string declared inline-by-mention on every Rail, with no central vocabulary or descriptions. sasquatch_pr declares 21 rails covering ~17 distinct transfer_types (`internal` shared by ZBASweep + InternalTransferSuspenseClose; `settlement` shared by ACHOriginationDailySweep + CustomerFeeMonthlySettlement; etc.) and there is **no place** that documents what each transfer_type means as a vocabulary item. The "many operational rails per money-movement kind" expressiveness is real and load-bearing (the validator's uniqueness key is `(transfer_type, role)`, NOT `name`), but the bare-string shape obscures it.
+**Replaces the previous Z.B "promote transfer_type to first-class entity" direction (locked 2026-05-13 → unlocked + redesigned 2026-05-15 after real-world integrator audit).** The promotion direction was scoped on the assumption that `Rail.transfer_type` and `Rail.name` carry distinct semantic load — a stable L1 vocabulary distinct from L2-specific names. Real-world audit reversed that:
 
-**The promotion:** lift `transfer_type` to a top-level declared entity (`transfer_types:` block, name + description), so:
-- Rail.transfer_type / LimitSchedule.transfer_type / bundles_activity-by-type all reference a declared thing instead of matching strings by coincidence.
-- The audit PDF, handbook, and studio editor get a real list of "what kinds of money movement does this institution handle" with operator-authored descriptions.
-- The Rail.name vs Rail.transfer_type distinction becomes visually obvious in the yaml: `name` is a Rail's identity, `transfer_type:` references a top-level declaration.
+- **transfer_type ↔ rail name is always 1-1 in practice.** Integrators dutifully invent both strings per rail, near-identical, and the type axis carries no information rail name doesn't. sasquatch_pr's shared-type pattern (e.g. `internal` shared by ZBASweep + InternalTransferSuspenseClose; `settlement` shared by ACHOriginationDailySweep + CustomerFeeMonthlySettlement) was a fixture artifact that doesn't reflect real-world idiom.
+- **The "L1 universality" framing was already conceded in implementation.** `<prefix>_transactions.rail_name` is REQUIRED on every leg (per `schema.py:924` doc comment) and `template_name` is also persisted. The "L1 has no L2 references" purity was never achieved at the data layer; `transfer_type` ended up as a *redundant* column alongside `rail_name`.
+- **Templated-leg footgun.** A leg rail inside a TransferTemplate fires Transactions whose `transfer_type` carries the *template's* type, not the leg rail's. So `LimitSchedule on transfer_type: <leg_rail_type>` doesn't fire for templated transactions. BundleSelector's "TransferType form vs RailName form" duality reveals this — they behave differently for templated rails because they're identifiers at different granularities. **The collapse fixes this implicitly**: LimitSchedule keys on `rail_name` (which IS the leg rail's name on leg-transactions, per existing emit semantics), so the cap fires correctly for templated legs.
+- **Integrator confusion is the trigger.** The user's stated pain ("hard time explaining the difference between Rail.name and Rail.transfer_type to people") is the design signal that the duality has no payoff matching its cognitive cost.
 
-**What's NOT in scope for Z.B:** splitting `bundles_activity`'s "matches Rail.name OR Rail.transfer_type" OR-of-two-resolutions into explicit `bundles_rail` / `bundles_type` kinds. That's a separate cleanup; flagging here so it doesn't accidentally land in this phase.
+**The collapse:** drop `Rail.transfer_type` field, drop `<prefix>_transactions.transfer_type` column, rename `LimitSchedule.transfer_type` → `LimitSchedule.rail`, simplify validator + bundles_activity to single-resolution, simplify auto_scenario's plant constructors. `rail_name` stays the canonical "what kind of money movement" identifier — already a required column, already the rail-side entity name, already what every dashboard groups by.
 
-- [ ] **Z.B.1 — Audit: per-fixture `(distinct transfer_type count, rails-per-type histogram)`.** Output the per-fixture distinct count + which transfer_types are shared across multiple Rails — concrete shape for the new top-level block.
-- [ ] **Z.B.2 — `primitives.py`: add `TransferTypeDecl(name: TransferType, description: str | None)`.** Add `transfer_types: tuple[TransferTypeDecl, ...]` to `L2Instance`. Keep `Rail.transfer_type: TransferType` as-is (the field still references by name; the change is that the loader now requires the name to resolve).
-- [ ] **Z.B.3 — `loader.py`: parse top-level `transfer_types:` block.** Hard-cut (loader rejects yaml without the block with an actionable error pointing at this section). Reject any `Rail.transfer_type` value whose name doesn't appear in the declared list — surface as `L2ValidationError` with the missing name + the closest declared neighbors.
-- [ ] **Z.B.4 — `validate.py`: tighten existing rules + add new R-rule.** New R-rule: "every `Rail.transfer_type` resolves to some `TransferTypeDecl.name`" (loader-side belt-and-suspenders). R10 (`LimitSchedule.transfer_type` matches some `Rail.transfer_type`) becomes "matches some declared `TransferTypeDecl.name`" — strictly more permissive sources, but cleaner: a cap declared against an undeclared type is caught at the type level, not via the rail-emit transitive lookup. R7 (`bundles_activity` matches `Rail.name` OR `Rail.transfer_type`) updates its "OR transfer_type" leg to "OR declared `TransferTypeDecl.name`" with the same pattern.
-- [ ] **Z.B.5 — `serializer.py`: dump `transfer_types:` block.** Symmetric with Z.B.3 loader; round-trip stable for spec_example + sasquatch_pr.
-- [ ] **Z.B.6 — `editor.py` + studio editor home page: TransferTypeDecl gets create / edit / delete + a home-page section.** Mirrors the existing per-kind UI from X.4.f. Fields: `name` (read-only after create — renaming a transfer_type cascades to every Rail / LimitSchedule / bundles_activity reference; defer the rename UI to a follow-on if it complicates this) + `description` (textarea). `delete_l2_entity` rejects via validator if any Rail still references the type — same pattern as the existing rail-deletion-with-dependent-template guard.
-- [ ] **Z.B.7 — Migrate fixture yamls.** Add `transfer_types:` block to all L2 yamls (`tests/l2/{sasquatch_pr, spec_example, _kitchen}.yaml` + `tests/l2/fuzz_failures/*`). Auto-extract names from existing Rail rows. **Descriptions are stub-then-polish:** the migration script writes `description: TODO — what is this transfer_type` per declared name; the user (operator) replaces stubs with real prose in a follow-on commit since the descriptions reflect institutional knowledge, not codebase mechanics.
-- [ ] **Z.B.8 — `fuzz.py`: emit `transfer_types:` in random L2 yamls.** Generate a deterministic per-seed list of N transfer_types (snake_case names + stub descriptions); each random Rail picks its `transfer_type` from this list. Drop the previous "invent transfer_type strings inline per rail" code path.
-- [ ] **Z.B.9 — Topology + diagram: TransferType is NOT a node.** Confirm the diagram doesn't try to render TransferTypeDecls — they're labels on rails, not topology entities. The home-page section IS a card list (so operators can see / edit them); the diagram stays unchanged.
-- [ ] **Z.B.10 — Audit PDF + handbook callouts.** The audit PDF's per-account-day Daily Statement walk currently shows `transfer_type` as a bare column value; cross-reference it against the new TransferTypeDecl.description (one extra column or hover/footnote — design call during Z.B.10). `docs/Schema_v6.md` gets a "Transfer Type vocabulary" section explaining the name-vs-type distinction with a worked example (the explanation pain the user has been hitting).
-- [ ] **Z.B.11 — Tests: TransferTypeDecl in `test_l2_validate.py` + `test_l2_loader.py` + `test_l2_editor.py` + `test_studio_*.py`.** Coverage: (a) loader rejects yaml missing `transfer_types:` block; (b) loader rejects Rail referencing an undeclared transfer_type; (c) editor delete rejects when a Rail still references the type; (d) studio home page renders the TransferTypes section.
-- [ ] **Z.B.12 — Re-lock seeds (folds into Z.14).** Seed bytes likely unchanged (transfer_types: declaration doesn't reach the SQL emitter — the values flow through Rail.transfer_type as today), but verify byte-equality before declaring "no shift."
+**What disappears (the payoff):**
+- `Rail.transfer_type` field on the primitive.
+- `<prefix>_transactions.transfer_type` column + `idx_{p}_curr_tx_posting_transfer_type` index.
+- Validator U6 (`Rail` per-leg `(transfer_type, role)` uniqueness — degenerate after collapse since rail name is already globally unique).
+- Validator R10 (`LimitSchedule.transfer_type` matches some `Rail.transfer_type` — folds into U5's rail-name match).
+- bundles_activity's "matches `Rail.name` OR `Rail.transfer_type`" OR-of-two-resolutions (now just rail name; the cleanup the previous Z.B explicitly punted is now free).
+- `(TransferType, Role)` discriminator dance in M.3.13 / SPEC theorems — Transaction has `rail_name` directly.
+- Per-leg `transfer_type` ambiguity for templated legs (implicit fix).
+
+**What needs adding:** nothing. Pure deletion + one rename. Closes pending task #498 (LimitSchedule uniqueness on `(parent_role, transfer_type)`) trivially — becomes `(parent_role, rail)`.
+
+- [ ] **Z.B.1 — `primitives.py`: drop `Rail.transfer_type`. Rename `LimitSchedule.transfer_type` → `LimitSchedule.rail`** (typed `RailName` NewType, matching the existing rail-name vocabulary). Keep `Rail.name` as the sole identifier.
+- [ ] **Z.B.2 — `loader.py`: reject legacy keys with actionable error.** Reject `transfer_type:` on Rail (legacy field gone) and `transfer_type:` on LimitSchedule (renamed to `rail:`) — surface `L2ValidationError` pointing at this PLAN section. Same actionable-error pattern as Z.A.3.
+- [ ] **Z.B.3 — `validate.py`: drop U6 + R10; rewrite U5; simplify R7.** U5 becomes `(parent_role, rail)` pair uniqueness on LimitSchedule. U6 (`Rail` per-leg `(transfer_type, role)`) is degenerate post-collapse — drop. R10 (LimitSchedule transfer_type matches some Rail's transfer_type) becomes "LimitSchedule.rail matches some Rail.name" — strictly simpler. R7 (bundles_activity matches Rail.name OR Rail.transfer_type) drops the OR-of-two leg.
+- [ ] **Z.B.4 — `schema.py`: drop `transfer_type` column + index from `<prefix>_transactions` + `<prefix>_current_transactions`.** The column at `schema.py:201`, the index `idx_{p}_curr_tx_posting_transfer_type` at line 409. Rewrite the LimitSchedule cap-view emit (line 506) to filter `tx.rail_name = '{ls.rail}'` instead of `tx.transfer_type = '{ls.transfer_type}'`. Sweep any other matview / dataset SQL that reads `transfer_type` (per `grep transfer_type src/quicksight_gen/`) → rewrite to read `rail_name`.
+- [ ] **Z.B.5 — `seed.py` + `auto_scenario.py`: drop `transfer_type=...` from plant constructors.** The ~15 sites in `auto_scenario.py` constructing planted Transactions / Rails with `transfer_type=p.transfer_type` lose that argument; the constructed Transaction's `rail_name` already carries the identification. The seed emitter (`seed.py`) drops the `transfer_type` column from its INSERT statement.
+- [ ] **Z.B.6 — `serializer.py`: drop `transfer_type:` dump on Rail; rename to `rail:` on LimitSchedule.** Symmetric with Z.B.2 loader; round-trip stable for spec_example + sasquatch_pr.
+- [ ] **Z.B.7 — `editor.py` + studio editor cards.** Rail card: drop the `transfer_type` field row entirely. LimitSchedule card: rename the field display from `transfer_type` → `rail`, keep the dropdown (was probably already sourcing from declared rails).
+- [ ] **Z.B.8 — `fuzz.py`: drop `transfer_type` invention.** Rails generated by the fuzzer no longer pick a `transfer_type:` per rail. LimitSchedules reference rail names directly.
+- [ ] **Z.B.9 — Migrate fixture yamls.** Mechanical: drop `transfer_type:` line from every Rail in `tests/l2/{sasquatch_pr, spec_example, _kitchen}.yaml` + `tests/l2/fuzz_failures/*`; rename `transfer_type:` → `rail:` on every LimitSchedule. Audit `bundles_activity:` strings — anything that today resolves via the OR-of-two transfer_type leg (rather than rail name) needs the matching rail name substituted in. Likely zero in practice (per the 1-1 audit), verify per fixture.
+- [ ] **Z.B.10 — Tests update.** `test_l2_validate.py` (drop U6 + R10 tests; update U5 + R7); `test_l2_loader.py` (drop transfer_type fixtures, add legacy-key rejection tests); `test_l2_pr_primitives.py`; `test_l2_editor.py`; `test_studio_editor_routes.py` (Rail card drops transfer_type field; LimitSchedule card field rename).
+- [ ] **Z.B.11 — SPEC + Schema_v6 + handbook prose.** Drop the transfer_type vocabulary section entirely from `docs/Schema_v6.md` (was net-add in Z.B.original; now net-remove). Update SPEC L1 theorems that reference `transfer_type` to reference `rail_name`. The "name vs type" distinction handbook section the Z.B.original would have authored becomes a "rail name is the identifier" callout instead.
+- [ ] **Z.B.12 — Drop degenerate `transfer_type` filter controls in dashboards.** Under collapse, a `transfer_type` ParameterDropDown is fully redundant with a `rail_name` dropdown — same selectable values, same narrowing semantic. Sweep `apps/l1_dashboard/`, `apps/l2_flow_tracing/`, `apps/investigation/` for ParameterDropDownControls bound to a `pTransferType` (or similar) parameter and either drop them entirely or merge into the rail_name dropdown. Touches dataset SQL too — `WHERE transfer_type IN (<<$pTransferType>>)` clauses get dropped or rewritten as `rail_name`. Coordinate with AA.A so we don't touch the same control twice (Z.B.12 lands first; AA.A doesn't see those dropdowns).
+- [ ] **Z.B.13 — Re-lock seeds (folds into Z.C).** Column drop changes seed bytes (every transactions INSERT loses one column). Re-lock spec_example + sasquatch_pr per-dialect via `quicksight-gen data lock -c run/config.<pg|oracle|sqlite>.yaml --l2 …`.
 
 ### Z.C — End-of-phase
 
