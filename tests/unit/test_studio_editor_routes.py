@@ -463,7 +463,6 @@ def test_put_rail_name_rename_cascades_to_templates_and_chains(
             f"/l2_shape/rail/{referenced_rail_name}",
             data={
                 "name": new_name,
-                "transfer_type": str(pre_rail.transfer_type),
             },
         )
         assert resp.status_code == 200, resp.text
@@ -573,7 +572,6 @@ def test_put_transfer_template_updates_leg_rails(
     # which is what the browser submits for <select multiple>.
     data = {
         "name": tmpl_name,
-        "transfer_type": str(tmpl.transfer_type),
         "expected_net": str(tmpl.expected_net),
         "completion": str(tmpl.completion),
         "leg_rails__present": "1",
@@ -607,7 +605,6 @@ def test_put_transfer_template_with_empty_leg_rails_returns_400(
     # save handler this is an intentional clear (vs "field absent").
     data = {
         "name": tmpl_name,
-        "transfer_type": str(tmpl.transfer_type),
         "expected_net": str(tmpl.expected_net),
         "completion": str(tmpl.completion),
         "leg_rails__present": "1",
@@ -812,7 +809,6 @@ def test_put_two_leg_rail_round_trips_subtype_fields(
     dst_roles = [str(x) for x in getattr(rail, "destination_role")]
     data = {
         "name": str(rail.name),
-        "transfer_type": str(rail.transfer_type),
         "source_role__present": "1",
         "source_role": src_roles,
         "destination_role__present": "1",
@@ -856,7 +852,6 @@ def test_rail_metadata_value_examples_yaml_block_round_trip(
     dst_roles = [str(x) for x in getattr(rail, "destination_role")]
     data = {
         "name": str(rail.name),
-        "transfer_type": str(rail.transfer_type),
         "source_role__present": "1",
         "source_role": src_roles,
         "destination_role__present": "1",
@@ -895,7 +890,6 @@ def test_rail_metadata_value_examples_bad_yaml_returns_400(
     dst_roles = [str(x) for x in getattr(rail, "destination_role")]
     data = {
         "name": str(rail.name),
-        "transfer_type": str(rail.transfer_type),
         "source_role__present": "1",
         "source_role": src_roles,
         "destination_role__present": "1",

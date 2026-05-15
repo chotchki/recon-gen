@@ -104,7 +104,6 @@ def test_two_leg_rail_description_loads(tmp_path: Path) -> None:
         "    scope: external\n"
         "rails:\n"
         "  - name: ExtRail\n"
-        "    transfer_type: ach\n"
         "    source_role: B\n"
         "    destination_role: A\n"
         "    expected_net: 0\n"
@@ -125,7 +124,6 @@ def test_single_leg_rail_description_loads(tmp_path: Path) -> None:
         "    scope: internal\n"
         "rails:\n"
         "  - name: Charge\n"
-        "    transfer_type: charge\n"
         "    leg_role: A\n"
         "    leg_direction: Debit\n"
         "    origin: InternalInitiated\n"
@@ -133,7 +131,6 @@ def test_single_leg_rail_description_loads(tmp_path: Path) -> None:
         "    description: Per-customer charge leg.\n"
         "transfer_templates:\n"
         "  - name: Cycle\n"
-        "    transfer_type: cycle\n"
         "    expected_net: 0\n"
         "    transfer_key: [k]\n"
         "    completion: business_day_end\n"
@@ -153,14 +150,12 @@ def test_transfer_template_description_loads(tmp_path: Path) -> None:
         "    scope: internal\n"
         "rails:\n"
         "  - name: Charge\n"
-        "    transfer_type: charge\n"
         "    leg_role: A\n"
         "    leg_direction: Debit\n"
         "    origin: InternalInitiated\n"
         "    metadata_keys: [k]\n"
         "transfer_templates:\n"
         "  - name: Cycle\n"
-        "    transfer_type: cycle\n"
         "    expected_net: 0\n"
         "    transfer_key: [k]\n"
         "    completion: business_day_end\n"
@@ -186,13 +181,11 @@ def test_chain_entry_description_loads(tmp_path: Path) -> None:
         "    scope: external\n"
         "rails:\n"
         "  - name: Parent\n"
-        "    transfer_type: t1\n"
         "    source_role: B\n"
         "    destination_role: A\n"
         "    expected_net: 0\n"
         "    origin: InternalInitiated\n"
         "  - name: Child\n"
-        "    transfer_type: t2\n"
         "    source_role: A\n"
         "    destination_role: B\n"
         "    expected_net: 0\n"
@@ -219,13 +212,13 @@ def test_limit_schedule_description_loads(tmp_path: Path) -> None:
         "    scope: internal\n"
         "limit_schedules:\n"
         "  - parent_role: ParentRole\n"
-        "    transfer_type: charge\n"
+        "    rail: NonexistentRail\n"
         "    cap: 5000.00\n"
         "    description: Per-child daily cap mandated by policy.\n"
     )
     # validate=False: narrow per-primitive description test — the
-    # fixture has no Rail emitting transfer_type='charge' (R10 would
-    # reject), but this test only asserts the description field round-trips.
+    # fixture has no Rail with name 'NonexistentRail' (R10 would reject),
+    # but this test only asserts the description field round-trips.
     inst = load_instance(p, validate=False)
     assert inst.limit_schedules[0].description == (
         "Per-child daily cap mandated by policy."

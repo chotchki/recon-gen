@@ -92,11 +92,11 @@ def _apply_schema_and_plant_two_rows(
         f"INSERT INTO {p}_transactions ("
         "id, account_id, account_scope, "
         "amount_money, amount_direction, status, posting, "
-        "transfer_id, transfer_type, rail_name, origin"
+        "transfer_id, rail_name, origin"
         ") VALUES ("
         "'t1', 'a1', 'internal', "
         "100.00, 'Credit', 'posted', '2030-01-01 00:00:00', "
-        "'g1', 'cash_withdrawal', 'r1', 'inbound'"
+        "'g1', 'r1', 'inbound'"
         ");"
     )
     plant_bal = (
@@ -414,7 +414,7 @@ def _build_etl_source_sqlite(
             row = [
                 f"t{i}", f"a{i}", f"Acct {i}", "role",
                 "internal", None, "100.00", "Credit", "posted",
-                posting, f"g{i}", "cash_withdrawal", None, None,
+                posting, f"g{i}", None, None,
                 "r1", None, None, None, "inbound", None,
             ]
             cur.execute(
@@ -1014,11 +1014,11 @@ def test_step_3_generator_uncovered_rails_skips_covered(
                 f"INSERT INTO {p}_transactions ("
                 "id, account_id, account_scope, amount_money, "
                 "amount_direction, status, posting, transfer_id, "
-                "transfer_type, rail_name, origin"
+                "rail_name, origin"
                 ") VALUES ("
                 "'op-1', 'op-acct', 'internal', 50.00, 'Credit', "
                 "'posted', '2030-01-01 00:00:00', 'op-tr', "
-                "'cash_withdrawal', ?, 'inbound')",
+                "?, 'inbound')",
                 (covered_rail_name,),
             )
             conn.commit()
@@ -1062,10 +1062,10 @@ def test_covered_rail_names_distinct_set(
                     f"INSERT INTO {p}_transactions ("
                     "id, account_id, account_scope, amount_money, "
                     "amount_direction, status, posting, transfer_id, "
-                    "transfer_type, rail_name, origin"
+                    "rail_name, origin"
                     ") VALUES ("
                     f"'t{i}', 'a', 'internal', 1.00, 'Credit', 'posted', "
-                    f"'2030-01-01', 'g{i}', 'cash_withdrawal', ?, 'inbound')",
+                    f"'2030-01-01', 'g{i}', ?, 'inbound')",
                     (rail,),
                 )
             conn.commit()
@@ -1257,12 +1257,12 @@ def _insert_test_transaction(
         "id, account_id, account_name, account_role, "
         "account_scope, account_parent_role, amount_money, "
         "amount_direction, status, posting, transfer_id, "
-        "transfer_type, rail_name, origin"
+        "rail_name, origin"
         ") VALUES ("
         "?, ?, 'Acct', ?, "
         "'internal', NULL, ?, "
         "?, ?, ?, 'tr-d', "
-        "'cash_withdrawal', 'TestRail', 'inbound')",
+        "'TestRail', 'inbound')",
         (tid, account_id, account_role, amount_money,
          direction, status, posting),
     )

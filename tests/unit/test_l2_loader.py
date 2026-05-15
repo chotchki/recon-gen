@@ -61,14 +61,12 @@ def test_loads_kitchen_sink_yaml_inline(tmp_path: Path) -> None:
 
         rails:
           - name: SubledgerCharge
-            transfer_type: charge
             origin: InternalInitiated
             metadata_keys: [merchant_id, settlement_period]
             leg_role: CustomerSubledger
             leg_direction: Debit
 
           - name: ExtInbound
-            transfer_type: ach
             origin: ExternalForcePosted
             metadata_keys: [external_reference]
             source_role: [ExternalCounterparty, MerchantLedger]
@@ -76,19 +74,17 @@ def test_loads_kitchen_sink_yaml_inline(tmp_path: Path) -> None:
             expected_net: 0
 
           - name: PoolBalancing
-            transfer_type: pool_balancing
             origin: InternalInitiated
             metadata_keys: []
             source_role: ControlAccount
             destination_role: ControlAccount
             expected_net: 0
             aggregating: true
-            bundles_activity: [SubledgerCharge, ach]
+            bundles_activity: [SubledgerCharge, ExtInbound]
             cadence: intraday-2h
 
         transfer_templates:
           - name: MerchantSettlementCycle
-            transfer_type: settlement_cycle
             expected_net: 0
             transfer_key: [merchant_id, settlement_period]
             completion: metadata.settlement_period_end
@@ -102,7 +98,7 @@ def test_loads_kitchen_sink_yaml_inline(tmp_path: Path) -> None:
 
         limit_schedules:
           - parent_role: ControlAccount
-            transfer_type: ach
+            rail: ExtInbound
             cap: 5000.00
         """)
     p = tmp_path / "kitchen.yaml"
@@ -137,7 +133,7 @@ def test_loads_kitchen_sink_yaml_inline(tmp_path: Path) -> None:
     pool = by_name["PoolBalancing"]
     assert isinstance(pool, TwoLegRail)
     assert pool.aggregating is True
-    assert pool.bundles_activity == ("SubledgerCharge", "ach")
+    assert pool.bundles_activity == ("SubledgerCharge", "ExtInbound")
     assert pool.cadence == "intraday-2h"
 
     # Money coercion
@@ -170,7 +166,6 @@ def test_money_coercion_dodges_float_precision(tmp_path: Path) -> None:
             expected_eod_balance: 0.1
         rails:
           - name: R
-            transfer_type: t
             origin: o
             source_role: A
             destination_role: A
@@ -253,7 +248,6 @@ def test_rail_rejects_both_two_leg_and_single_leg(tmp_path: Path) -> None:
             role: R
         rails:
           - name: BadRail
-            transfer_type: t
             origin: o
             source_role: R
             destination_role: R
@@ -274,7 +268,6 @@ def test_rail_rejects_neither_shape(tmp_path: Path) -> None:
         accounts: []
         rails:
           - name: BadRail
-            transfer_type: t
             origin: o
         """)
     p = tmp_path / "neither.yaml"
@@ -290,7 +283,6 @@ def test_two_leg_rail_requires_both_role_fields(tmp_path: Path) -> None:
         accounts: []
         rails:
           - name: BadRail
-            transfer_type: t
             origin: o
             source_role: R
             expected_net: 0
@@ -362,7 +354,6 @@ def test_two_leg_rail_loads_per_leg_origin_overrides(tmp_path: Path) -> None:
     """Per-leg origin overrides land as fields on the loaded TwoLegRail."""
     p = _write_rail_yaml(tmp_path, """\
   - name: ExtInbound
-    transfer_type: ach
     source_role: B
     destination_role: A
     expected_net: 0
@@ -383,7 +374,6 @@ def test_single_leg_rail_rejects_per_leg_origin_overrides(tmp_path: Path) -> Non
     on a single-leg rail is a load-time configuration error."""
     p = _write_rail_yaml(tmp_path, """\
   - name: BadSingle
-    transfer_type: ach
     leg_role: A
     leg_direction: Debit
     origin: InternalInitiated
@@ -399,7 +389,6 @@ def test_single_leg_rail_rejects_per_leg_origin_overrides(tmp_path: Path) -> Non
 def test_single_leg_rail_rejects_destination_origin(tmp_path: Path) -> None:
     p = _write_rail_yaml(tmp_path, """\
   - name: BadSingle
-    transfer_type: ach
     leg_role: A
     leg_direction: Debit
     origin: InternalInitiated
@@ -418,7 +407,6 @@ def test_two_leg_rail_origin_now_optional(tmp_path: Path) -> None:
     behavior dropped in M.1a)."""
     p = _write_rail_yaml(tmp_path, """\
   - name: ExtInbound
-    transfer_type: ach
     source_role: B
     destination_role: A
     expected_net: 0
@@ -434,7 +422,6 @@ def test_rail_loads_posted_requirements(tmp_path: Path) -> None:
     """Integrator-declared PostedRequirements list loads as a tuple of Identifiers."""
     p = _write_rail_yaml(tmp_path, """\
   - name: ExtRail
-    transfer_type: ach
     leg_role: A
     leg_direction: Debit
     origin: ExternalForcePosted
@@ -452,7 +439,6 @@ def test_rail_loads_aging_durations(tmp_path: Path) -> None:
     from datetime import timedelta
     p = _write_rail_yaml(tmp_path, """\
   - name: AgingRail
-    transfer_type: ach
     leg_role: A
     leg_direction: Debit
     origin: InternalInitiated
@@ -484,7 +470,6 @@ def test_duration_literal_accepted(
     that names the components (used to make the parametrize labels readable)."""
     p = _write_rail_yaml(tmp_path, f"""\
   - name: R
-    transfer_type: t
     leg_role: A
     leg_direction: Debit
     origin: InternalInitiated
@@ -510,7 +495,6 @@ def test_duration_literal_accepted(
 def test_duration_literal_rejected(bad: str, tmp_path: Path) -> None:
     p = _write_rail_yaml(tmp_path, f"""\
   - name: R
-    transfer_type: t
     leg_role: A
     leg_direction: Debit
     origin: InternalInitiated
@@ -524,7 +508,6 @@ def test_duration_rejects_non_string(tmp_path: Path) -> None:
     """A YAML numeric like ``86400`` is a plausible mistake — explicitly reject."""
     p = _write_rail_yaml(tmp_path, """\
   - name: R
-    transfer_type: t
     leg_role: A
     leg_direction: Debit
     origin: InternalInitiated
@@ -532,6 +515,89 @@ def test_duration_rejects_non_string(tmp_path: Path) -> None:
 """)
     with pytest.raises(L2LoaderError, match="expected ISO 8601 duration string"):
         load_instance(p)
+
+
+# -- Z.B (2026-05-15) legacy `transfer_type:` rejection ----------------------
+
+
+def test_rail_rejects_legacy_transfer_type_key(tmp_path: Path) -> None:
+    """Z.B: rail's `name` IS the type — `transfer_type:` is a load-time error."""
+    p = _write_rail_yaml(tmp_path, """\
+  - name: R
+    transfer_type: charge
+    leg_role: A
+    leg_direction: Debit
+    origin: InternalInitiated
+""")
+    with pytest.raises(
+        L2LoaderError,
+        match=r"transfer_type: legacy field no longer supported.*Z\.B",
+    ):
+        load_instance(p, validate=False)
+
+
+def test_transfer_template_rejects_legacy_transfer_type_key(tmp_path: Path) -> None:
+    """Z.B: TransferTemplate's `name` IS the type identifier."""
+    yaml_text = dedent("""\
+        instance: zbtt
+
+        accounts:
+          - id: gl-1
+            role: Control
+            scope: internal
+
+        rails:
+          - name: SubCharge
+            origin: InternalInitiated
+            leg_role: Control
+            leg_direction: Debit
+
+        transfer_templates:
+          - name: ChargeBatch
+            transfer_type: charge
+            expected_net: 0
+            transfer_key: [batch_id]
+            completion: business_day_end
+            leg_rails: [SubCharge]
+        """)
+    p = tmp_path / "tt_legacy.yaml"
+    p.write_text(yaml_text)
+    with pytest.raises(
+        L2LoaderError,
+        match=r"transfer_type: legacy field no longer supported.*Z\.B",
+    ):
+        load_instance(p, validate=False)
+
+
+def test_limit_schedule_rejects_legacy_transfer_type_key(tmp_path: Path) -> None:
+    """Z.B: LimitSchedule's discriminator renamed `transfer_type` → `rail`."""
+    yaml_text = dedent("""\
+        instance: zbls
+
+        accounts:
+          - id: gl-1
+            role: Control
+            scope: internal
+
+        rails:
+          - name: SubCharge
+            origin: InternalInitiated
+            leg_role: Control
+            leg_direction: Debit
+
+        limit_schedules:
+          - parent_role: Control
+            transfer_type: charge
+            cap: 1000.00
+        """)
+    p = tmp_path / "ls_legacy.yaml"
+    p.write_text(yaml_text)
+    with pytest.raises(
+        L2LoaderError,
+        match=r"transfer_type: legacy field renamed to `rail`.*Z\.B",
+    ):
+        load_instance(p, validate=False)
+
 
 # -- M.2d.2 parse-time validation enforcement -------------------------------
 
@@ -541,8 +607,8 @@ def test_load_instance_runs_validate_by_default(tmp_path: Path) -> None:
 
     Per M.2d.2 — every SHOULD-constraint in the SPEC's Validation Rules
     section is a YAML parse-time error. The fixture below has duplicate
-    LimitSchedule (parent_role, transfer_type) which violates U5; the
-    loader MUST raise on it without the caller having to know to call
+    LimitSchedule (parent_role, rail) which violates U5; the loader
+    MUST raise on it without the caller having to know to call
     ``validate()`` separately.
     """
     yaml_text = dedent("""\
@@ -561,14 +627,12 @@ def test_load_instance_runs_validate_by_default(tmp_path: Path) -> None:
 
         rails:
           - name: SubCharge
-            transfer_type: charge
             origin: InternalInitiated
             leg_role: Sub
             leg_direction: Debit
 
         transfer_templates:
           - name: ChargeBatch
-            transfer_type: charge
             expected_net: 0
             transfer_key: [batch_id]
             completion: business_day_end
@@ -576,10 +640,10 @@ def test_load_instance_runs_validate_by_default(tmp_path: Path) -> None:
 
         limit_schedules:
           - parent_role: Control
-            transfer_type: charge
+            rail: SubCharge
             cap: 1000.00
           - parent_role: Control
-            transfer_type: charge
+            rail: SubCharge
             cap: 5000.00
         """)
     p = tmp_path / "dup_limit.yaml"
@@ -609,17 +673,16 @@ def test_load_instance_validate_false_skips_cross_entity_pass(
 
         rails:
           - name: SubCharge
-            transfer_type: charge
             origin: InternalInitiated
             leg_role: Control
             leg_direction: Debit
 
         limit_schedules:
           - parent_role: Control
-            transfer_type: charge
+            rail: SubCharge
             cap: 1000.00
           - parent_role: Control
-            transfer_type: charge
+            rail: SubCharge
             cap: 5000.00
         """)
     p = tmp_path / "dup_limit_skip.yaml"
@@ -642,7 +705,6 @@ _MINIMAL_YAML = dedent("""\
 
     rails:
       - name: SubCharge
-        transfer_type: charge
         origin: InternalInitiated
         leg_role: Control
         leg_direction: Debit

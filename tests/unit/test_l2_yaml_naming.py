@@ -77,14 +77,12 @@ def test_instance_templates_load_when_set(tmp_path: Path) -> None:
             instance_name_template: "Bigfoot Customer {n}"
         rails:
           - name: Charge
-            transfer_type: charge
             leg_role: CustomerSubledger
             leg_direction: Debit
             origin: InternalInitiated
             metadata_keys: [k]
         transfer_templates:
           - name: Cycle
-            transfer_type: cycle
             expected_net: 0
             transfer_key: [k]
             completion: business_day_end
@@ -111,14 +109,12 @@ def test_instance_templates_default_to_none(tmp_path: Path) -> None:
             parent_role: Ledger
         rails:
           - name: Charge
-            transfer_type: charge
             leg_role: CustomerSubledger
             leg_direction: Debit
             origin: InternalInitiated
             metadata_keys: [k]
         transfer_templates:
           - name: Cycle
-            transfer_type: cycle
             expected_net: 0
             transfer_key: [k]
             completion: business_day_end
@@ -187,14 +183,12 @@ def test_materialize_instances_uses_templates_when_set(tmp_path: Path) -> None:
             instance_name_template: "Bigfoot {role} {n}"
         rails:
           - name: Charge
-            transfer_type: charge
             leg_role: CustomerSubledger
             leg_direction: Debit
             origin: InternalInitiated
             metadata_keys: [k]
         transfer_templates:
           - name: Cycle
-            transfer_type: cycle
             expected_net: 0
             transfer_key: [k]
             completion: business_day_end
@@ -224,14 +218,12 @@ def test_materialize_instances_falls_back_when_unset(tmp_path: Path) -> None:
             parent_role: Ledger
         rails:
           - name: Charge
-            transfer_type: charge
             leg_role: CustomerSubledger
             leg_direction: Debit
             origin: InternalInitiated
             metadata_keys: [k]
         transfer_templates:
           - name: Cycle
-            transfer_type: cycle
             expected_net: 0
             transfer_key: [k]
             completion: business_day_end
@@ -263,7 +255,6 @@ def test_metadata_value_examples_load(tmp_path: Path) -> None:
             scope: external
         rails:
           - name: ExternalRail
-            transfer_type: ach
             origin: InternalInitiated
             source_role: Ledger
             destination_role: ExternalCounterparty
@@ -295,7 +286,6 @@ def test_metadata_value_examples_default_empty(tmp_path: Path) -> None:
             scope: external
         rails:
           - name: ExternalRail
-            transfer_type: ach
             origin: InternalInitiated
             source_role: Ledger
             destination_role: ExternalCounterparty
@@ -319,7 +309,6 @@ def test_metadata_value_examples_loader_rejects_empty_list(
             scope: internal
         rails:
           - name: Rail
-            transfer_type: charge
             origin: InternalInitiated
             leg_role: Ledger
             leg_direction: Debit
@@ -344,7 +333,6 @@ def test_metadata_value_examples_loader_rejects_non_string_value(
             scope: internal
         rails:
           - name: Rail
-            transfer_type: charge
             origin: InternalInitiated
             leg_role: Ledger
             leg_direction: Debit
@@ -369,7 +357,6 @@ def test_validator_r13_rejects_example_key_not_in_metadata_keys(
             scope: internal
         rails:
           - name: Rail
-            transfer_type: charge
             origin: InternalInitiated
             leg_role: Ledger
             leg_direction: Debit
@@ -378,7 +365,6 @@ def test_validator_r13_rejects_example_key_not_in_metadata_keys(
               merchant_idx: ["a", "b"]
         transfer_templates:
           - name: Cycle
-            transfer_type: cycle
             expected_net: 0
             transfer_key: [merchant_id]
             completion: business_day_end
@@ -421,7 +407,6 @@ def test_broad_mode_uses_metadata_examples_when_set(tmp_path: Path) -> None:
             parent_role: Ledger
         rails:
           - name: ExternalRail
-            transfer_type: ach
             origin: InternalInitiated
             source_role: Ledger
             destination_role: ExternalCounterparty
@@ -464,7 +449,6 @@ def test_broad_mode_falls_back_when_examples_not_set(tmp_path: Path) -> None:
             parent_role: Ledger
         rails:
           - name: ExternalRail
-            transfer_type: ach
             origin: InternalInitiated
             source_role: Ledger
             destination_role: ExternalCounterparty

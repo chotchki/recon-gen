@@ -128,27 +128,26 @@ def test_limit_schedule_counts_pinned() -> None:
 # YAML edits surfaces here, not silently in CI.
 
 
-def test_encompasses_ar_transfer_types() -> None:
-    """All AR transfer-type families must remain declared in PR's rail set
-    (so the L1 invariant matchers + LimitSchedule R10 still cover them).
+def test_encompasses_ar_transfer_type_families_via_rail_names() -> None:
+    """All AR transfer-type families must remain represented in PR's rail set.
 
-    P.9b — Per-direction families replace the original undifferentiated
-    transfer_types (ach → ach_inbound + ach_outbound, etc.) to satisfy
-    Rail uniqueness on (transfer_type, role). The semantic coverage is
-    preserved: every AR family is still represented by ≥1 declared rail
-    transfer_type that prefixes it.
+    Z.B (2026-05-15): Rail.name IS the type identifier under the
+    symmetric collapse. The semantic coverage check now scans rail
+    names for each AR family substring (case-insensitive) — rail
+    names like ``CustomerOutboundACH`` cover the ``ach`` family,
+    ``CustomerCashWithdrawal`` covers ``cash``, etc.
     """
     inst = _instance()
-    declared = {r.transfer_type for r in inst.rails}
+    declared_lower = {str(r.name).lower() for r in inst.rails}
     ar_families = ["ach", "wire", "cash", "internal", "fee", "settlement", "return"]
     missing_families = [
         fam for fam in ar_families
-        if not any(t == fam or t.startswith(f"{fam}_") for t in declared)
+        if not any(fam in n for n in declared_lower)
     ]
     assert not missing_families, (
         f"sasquatch_pr must encompass sasquatch_ar's transfer-type families "
-        f"(family names or family-prefixed types); "
-        f"missing: {sorted(missing_families)!r}; declared: {sorted(declared)!r}"
+        f"(via rail-name substring match under Z.B); "
+        f"missing: {sorted(missing_families)!r}; declared: {sorted(declared_lower)!r}"
     )
 
 
@@ -233,19 +232,18 @@ def test_encompasses_ar_aggregating_with_max_unbundled_age() -> None:
 
 
 def test_encompasses_ar_limit_schedule_coverage() -> None:
-    """AR's three DDAControl × {ach, wire, cash} caps must remain (the L1
+    """AR's three DDAControl × {ACH, wire, cash} caps must remain (the L1
     Limit Breach invariant against customer-DDA outbound flow).
 
-    P.9b — Caps now reference the directional outbound transfer_types
-    (e.g. ach_outbound) since the rails were split per-direction to
-    satisfy Rail uniqueness on (transfer_type, role).
+    Z.B (2026-05-15): Caps now reference rail names directly under the
+    symmetric collapse (the rail's ``name`` IS the type identifier).
     """
     inst = _instance()
-    pairs = {(str(ls.parent_role), ls.transfer_type) for ls in inst.limit_schedules}
+    pairs = {(str(ls.parent_role), str(ls.rail)) for ls in inst.limit_schedules}
     ar_required = {
-        ("DDAControl", "ach_outbound"),
-        ("DDAControl", "wire_outbound"),
-        ("DDAControl", "cash_withdrawal"),
+        ("DDAControl", "CustomerOutboundACH"),
+        ("DDAControl", "CustomerOutboundWire"),
+        ("DDAControl", "CustomerCashWithdrawal"),
     }
     missing = ar_required - pairs
     assert not missing, (

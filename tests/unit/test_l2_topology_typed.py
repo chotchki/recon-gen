@@ -41,12 +41,9 @@ def _make_two_leg(
     name: str,
     src: str,
     dst: str,
-    *,
-    transfer_type: str = "ach",
 ) -> TwoLegRail:
     return TwoLegRail(
         name=Identifier(name),
-        transfer_type=transfer_type,
         metadata_keys=(),
         source_role=(Identifier(src),),
         destination_role=(Identifier(dst),),
@@ -84,11 +81,9 @@ def _kitchen_instance() -> L2Instance:
             _make_two_leg("InboundRail", "ExternalRole", "CustomerSubledger"),
             _make_two_leg(
                 "OutboundRail", "CustomerSubledger", "ExternalRole",
-                transfer_type="wire",
             ),
             SingleLegRail(
                 name=Identifier("FeeCharge"),
-                transfer_type="fee",
                 metadata_keys=(),
                 leg_role=(Identifier("CustomerSubledger"),),
                 leg_direction="Debit",
@@ -98,7 +93,6 @@ def _kitchen_instance() -> L2Instance:
         transfer_templates=(
             TransferTemplate(
                 name=Identifier("SettlementCycle"),
-                transfer_type="settlement",
                 expected_net=Decimal("0"),
                 transfer_key=(Identifier("merchant_id"),),
                 completion="business_day_end",
@@ -149,12 +143,12 @@ def test_topology_graph_template_node_has_inner_label_and_metadata() -> None:
     g = topology_graph_for(_kitchen_instance())
     tmpl = next(n for n in g.nodes if n.kind == "template")
     assert tmpl.id == "tmpl__SettlementCycle"
-    # Inner label is just the name now — transfer_type/key labels were
-    # dropped to keep nodes compact (the key is infrastructure-only).
+    # Inner label is just the name now — the per-key labels were dropped
+    # to keep nodes compact (the key is infrastructure-only).
     assert tmpl.label == "SettlementCycle"
     # Metadata still carries the full source data for tooltips / future
     # editor surfaces; the cluster_label matches the inner label.
-    assert tmpl.metadata["transfer_type"] == "settlement"
+    # Z.B (2026-05-15): transfer_type metadata key dropped (no field).
     assert tmpl.metadata["transfer_key"] == "merchant_id"
     assert tmpl.metadata["cluster_label"] == "SettlementCycle"
 
@@ -176,7 +170,7 @@ def test_topology_graph_rail_nodes_for_template_legs_and_chain_refs() -> None:
 def test_topology_graph_bundle_edge_collapses_parallel_rails() -> None:
     rails = (
         _make_two_leg("RailA", "X", "Y"),
-        _make_two_leg("RailB", "X", "Y", transfer_type="wire"),
+        _make_two_leg("RailB", "X", "Y"),
     )
     inst = L2Instance(
         instance=Identifier("bun"),
@@ -265,7 +259,7 @@ def test_topology_graph_chain_edge_carries_xor_group_metadata() -> None:
         rails=(
             _make_two_leg("Parent", "X", "Y"),
             _make_two_leg("ChildA", "Y", "Z"),
-            _make_two_leg("ChildB", "Y", "Z", transfer_type="wire"),
+            _make_two_leg("ChildB", "Y", "Z"),
         ),
         transfer_templates=(),
         chains=(

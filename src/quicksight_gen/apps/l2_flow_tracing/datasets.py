@@ -1547,7 +1547,10 @@ def _declared_rails_cte(l2_instance: L2Instance, dialect: Dialect) -> str:
         rows.append(
             "  SELECT "
             f"{_sql_str(str(r.name))} AS rail_name, "
-            f"{_sql_str(str(r.transfer_type))} AS transfer_type, "
+            # Z.B (2026-05-15): rail.name IS the type identifier — emit
+            # it under the legacy column alias for downstream SQL until
+            # Z.B.12 retires the alias entirely.
+            f"{_sql_str(str(r.name))} AS transfer_type, "
             f"{_sql_str(leg_shape)} AS leg_shape, "
             f"{_sql_nullable_str(source_role)} AS source_role, "
             f"{_sql_nullable_str(destination_role)} AS destination_role, "
@@ -1683,15 +1686,19 @@ def _sql_nullable_str(value: str | None) -> str:
 def _declared_transfer_types_cte(
     l2_instance: L2Instance, dialect: Dialect,
 ) -> str:
-    """Distinct ``Rail.transfer_type`` values, one per SELECT row.
+    """Distinct rail-type identifiers, one per SELECT row.
 
-    Distinct because multiple Rails MAY share a transfer_type (the
-    M.2d.1-deferred validator rule); the L2.2 'Unmatched transfer_type'
-    check just wants the SET of declared types so it can find what's
-    NOT in it.
+    Z.B (2026-05-15): under the symmetric collapse, ``Rail.name`` IS
+    the type identifier (the legacy ``Rail.transfer_type`` field is
+    gone). Z.B.12 will rewrite the L2.2 / L2.6 dataset SQL strings
+    that key off the dropped ``transactions.transfer_type`` column;
+    until then this helper emits the rail-name set under the legacy
+    ``transfer_type`` column alias so the tree builder doesn't crash
+    at SQL-string-emit time. The dashboard SQL itself can't execute
+    against a real DB until Z.B.12 lands.
     """
     df = dual_from(dialect)
-    types = sorted({str(r.transfer_type) for r in l2_instance.rails})
+    types = sorted({str(r.name) for r in l2_instance.rails})
     if not types:
         return (
             f"  SELECT {typed_null('varchar(4000)', dialect)} AS transfer_type"
@@ -1787,7 +1794,10 @@ def _declared_limit_schedules_cte(
     for ls in l2_instance.limit_schedules:
         rows.append(
             f"  SELECT {_sql_str(str(ls.parent_role))} AS parent_role, "
-            f"{_sql_str(str(ls.transfer_type))} AS transfer_type, "
+            # Z.B (2026-05-15): LimitSchedule.transfer_type → .rail under
+            # the symmetric collapse; emit the rail name under the legacy
+            # transfer_type column alias until Z.B.12 retires the alias.
+            f"{_sql_str(str(ls.rail))} AS transfer_type, "
             # Cap is a Decimal; render as a SQL numeric literal.
             f"CAST({ls.cap} AS DECIMAL(20,2)) AS cap{df}"
         )
