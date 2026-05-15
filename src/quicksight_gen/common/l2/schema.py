@@ -829,11 +829,21 @@ def _emit_base_schema(
         "db_pk_decl": _pk_decl(
             ("account_id", "business_day_start", "entry"), dialect,
         ),
-        # Partial-index WHERE clause — PG only. Oracle + SQLite get
-        # the full index.
-        "bundler_partial_where": (
-            "\n    WHERE bundle_id IS NULL"
-            if dialect is Dialect.POSTGRES else ""
+        # Bundler index declaration — PG only emits a partial-WHERE
+        # `(rail_name, status) WHERE bundle_id IS NULL` index that's
+        # distinct from the full `(rail_name, status)` rail_status
+        # index above. Oracle + SQLite (no partial-index support) get
+        # nothing here (the full rail_status index above covers the
+        # same lookup; ORA-01408 fires if we emit a duplicate). Z.B
+        # (2026-05-15) made this matter — pre-Z.B the rail_status
+        # index keyed on `transfer_type`, so the bundler index's
+        # `(rail_name, status)` was unique on every dialect.
+        "bundler_index_decl": (
+            "CREATE INDEX idx_{p}_transactions_bundler_eligibility\n"
+            "    ON {p}_transactions (rail_name, status)"
+            "\n    WHERE bundle_id IS NULL;"
+        ).replace("{p}", p) if dialect is Dialect.POSTGRES else (
+            "-- Bundler index skipped on this dialect — see comment above."
         ),
         # Current* matview drops.
         "drop_curr_db": drop_matview_if_exists(
@@ -1037,8 +1047,15 @@ CREATE INDEX idx_{p}_transactions_parent          ON {p}_transactions (transfer_
 -- Bundler eligibility: AggregatingRails query for Posted, unbundled rows
 -- by rail_name (matching their BundlesActivity selectors). Partial index
 -- on `bundle_id IS NULL` keeps the index small as bundled-row count grows.
-CREATE INDEX idx_{p}_transactions_bundler_eligibility
-    ON {p}_transactions (rail_name, status){bundler_partial_where};
+--
+-- Z.B (2026-05-15): the column list `(rail_name, status)` now matches
+-- idx_{p}_transactions_rail_status above (pre-Z.B the rail_status index
+-- keyed on `transfer_type`, so the bundler-specific `(rail_name, status)`
+-- was distinct). On dialects without partial-index support (Oracle,
+-- SQLite < 3.8) the bundler index is degenerate — emit it ONLY when the
+-- partial WHERE is non-empty (PG), otherwise the rail_status index above
+-- covers the lookup (without the small-index optimization).
+{bundler_index_decl}
 -- V.3 — Standalone single-column posting index. The composite
 -- (account_id, posting) above is account-leading, so MAX(posting)
 -- against the whole table can't single-leaf scan it; the planner

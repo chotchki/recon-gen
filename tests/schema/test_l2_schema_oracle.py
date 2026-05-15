@@ -214,17 +214,21 @@ class TestOracleScriptShape:
         )
         assert oracle_sql_nocomments[next_with:next_with + 5] == "WITH\n"
 
-    def test_partial_index_dropped_for_oracle(
+    def test_partial_index_skipped_for_oracle(
         self, oracle_sql_nocomments: str,
     ) -> None:
-        """The Postgres bundler-eligibility partial index ``WHERE
-        bundle_id IS NULL`` is dropped on Oracle (full index instead).
-        The CREATE INDEX still exists; just no WHERE clause."""
-        assert "CREATE INDEX idx_orcl_transactions_bundler_eligibility" in (
-            oracle_sql_nocomments
+        """Z.B (2026-05-15): the bundler-eligibility index's column list
+        ``(rail_name, status)`` now matches the rail_status index. On
+        dialects without partial-index support (Oracle, SQLite < 3.8)
+        emitting both triggers ORA-01408 ("such column list already
+        indexed"). Oracle skips the bundler CREATE INDEX entirely; the
+        full rail_status index above covers the same lookup. No
+        ``WHERE bundle_id IS NULL`` appears anywhere in the non-comment
+        Oracle SQL either."""
+        assert (
+            "CREATE INDEX idx_orcl_transactions_bundler_eligibility"
+            not in oracle_sql_nocomments
         )
-        # The ``WHERE bundle_id IS NULL`` substring should NOT appear
-        # after any CREATE INDEX line in non-comment SQL.
         for line in oracle_sql_nocomments.split("\n"):
             assert "WHERE bundle_id IS NULL" not in line
 
