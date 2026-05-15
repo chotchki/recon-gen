@@ -204,11 +204,11 @@ class OverdraftPlant:
 
 @dataclass(frozen=True, slots=True)
 class LimitBreachPlant:
-    """A planted (account, business_day, transfer_type) cell where the
-    daily outbound flow exceeds the configured ``LimitSchedule.cap``.
+    """A planted (account, business_day, rail) cell where the daily
+    outbound flow exceeds the configured ``LimitSchedule.cap``.
 
     Surfaces in L1's Limit Breach SHOULD-constraint when
-    ``OutboundFlow(account, transfer_type, day) > limit``.
+    ``OutboundFlow(account, rail, day) > limit``.
 
     The breaching debit posts on the customer side; the counter-leg
     uses ``counter_account_id`` (must be a declared external Account
@@ -218,7 +218,6 @@ class LimitBreachPlant:
 
     account_id: Identifier
     days_ago: int
-    transfer_type: str
     rail_name: Identifier
     amount: Decimal             # absolute value; must exceed the cap
     counter_account_id: Identifier
@@ -236,7 +235,6 @@ class StuckPendingPlant:
 
     account_id: Identifier
     days_ago: int
-    transfer_type: str
     rail_name: Identifier
     amount: Decimal
 
@@ -262,7 +260,6 @@ class FailedTransactionPlant:
 
     account_id: Identifier
     days_ago: int
-    transfer_type: str
     rail_name: Identifier
     amount: Decimal
 
@@ -280,7 +277,6 @@ class StuckUnbundledPlant:
 
     account_id: Identifier
     days_ago: int
-    transfer_type: str
     rail_name: Identifier
     amount: Decimal
 
@@ -300,7 +296,6 @@ class SupersessionPlant:
 
     account_id: Identifier
     days_ago: int
-    transfer_type: str
     rail_name: Identifier
     original_amount: Decimal
     corrected_amount: Decimal
@@ -431,8 +426,8 @@ class InvFanoutPlant:
     Each "transfer" is a 2-leg multi-leg event (debit on sender +
     credit on recipient summing to zero) so the matview's
     ``signed_amount`` JOIN finds matched legs. ``rail_name`` is one
-    declared rail; ``transfer_type`` mirrors the rail's
-    ``transfer_type``.
+    declared rail (Z.B 2026-05-15: rail name IS the type identifier
+    after the symmetric collapse).
 
     Recipient MUST resolve to a leaf-internal account (a
     ``TemplateInstance`` materialized from an ``AccountTemplate`` with
@@ -445,7 +440,6 @@ class InvFanoutPlant:
     recipient_account_id: Identifier
     sender_account_ids: tuple[Identifier, ...]
     days_ago: int
-    transfer_type: str
     rail_name: Identifier
     amount_per_transfer: Decimal
 
@@ -614,7 +608,7 @@ def emit_seed(
     txn_cols = (
         "(id, account_id, account_name, account_role, account_scope, "
         "account_parent_role, amount_money, amount_direction, status, "
-        "posting, transfer_id, transfer_type, transfer_completion, "
+        "posting, transfer_id, transfer_completion, "
         "transfer_parent_id, rail_name, template_name, bundle_id, "
         "supersedes, origin, metadata)"
     )
@@ -986,7 +980,7 @@ def emit_baseline_seed(
     txn_cols = (
         "(id, account_id, account_name, account_role, account_scope, "
         "account_parent_role, amount_money, amount_direction, status, "
-        "posting, transfer_id, transfer_type, transfer_completion, "
+        "posting, transfer_id, transfer_completion, "
         "transfer_parent_id, rail_name, template_name, bundle_id, "
         "supersedes, origin, metadata)"
     )
@@ -1333,7 +1327,9 @@ def _classify_rail(rail: Rail) -> _RailKind:
         # daily-eod, daily-bod, weekly-* → all bucket to daily.
         return _RailKind.AGGREGATING_DAILY
 
-    tt = str(rail.transfer_type).lower()
+    # Z.B (2026-05-15): rail.name IS the type identifier under the
+    # symmetric collapse. Heuristic falls back to OTHER on mismatch.
+    tt = str(rail.name).lower()
     if tt == "wire_concentration":
         return _RailKind.CONCENTRATION
     if tt == "sale":
@@ -1752,7 +1748,7 @@ def _emit_baseline_for_rail(
                 and str(src.account_scope) == "internal"
                 and src.account_parent_role is not None
             ):
-                cap_key = (src.account_id, str(rail.transfer_type), day)
+                cap_key = (src.account_id, str(rail.name), day)
                 cap_accumulated = state.daily_outbound_by_account_type.get(
                     cap_key, Decimal(0),
                 )
@@ -1787,7 +1783,6 @@ def _emit_baseline_for_rail(
                     direction="Debit",
                     posting=posting,
                     transfer_id=transfer_id,
-                    transfer_type=rail.transfer_type,
                     rail_name=rail.name,
                     origin=src_origin,
                     metadata=metadata,
@@ -1805,7 +1800,6 @@ def _emit_baseline_for_rail(
                     direction="Credit",
                     posting=posting,
                     transfer_id=transfer_id,
-                    transfer_type=rail.transfer_type,
                     rail_name=rail.name,
                     origin=dst_origin,
                     metadata=metadata,
@@ -1842,7 +1836,6 @@ def _emit_baseline_for_rail(
                     direction=direction,
                     posting=posting,
                     transfer_id=transfer_id,
-                    transfer_type=rail.transfer_type,
                     rail_name=rail.name,
                     origin=src_origin,
                     metadata=metadata,
@@ -1983,7 +1976,6 @@ def _emit_opening_balance_rows(
             direction="Debit",
             posting=opening_ts,
             transfer_id=transfer_id,
-            transfer_type=rail.transfer_type,
             rail_name=rail.name,
             origin=src_origin,
             metadata=metadata,
@@ -2000,7 +1992,6 @@ def _emit_opening_balance_rows(
             direction="Credit",
             posting=opening_ts,
             transfer_id=transfer_id,
-            transfer_type=rail.transfer_type,
             rail_name=rail.name,
             origin=dst_origin,
             metadata=metadata,
@@ -2203,7 +2194,6 @@ def _emit_baseline_for_aggregating_rail(
                 direction="Debit",
                 posting=posting,
                 transfer_id=bundle_transfer_id,
-                transfer_type=rail.transfer_type,
                 rail_name=rail.name,
                 origin=src_origin,
                 metadata=metadata,
@@ -2220,7 +2210,6 @@ def _emit_baseline_for_aggregating_rail(
                 direction="Credit",
                 posting=posting,
                 transfer_id=bundle_transfer_id,
-                transfer_type=rail.transfer_type,
                 rail_name=rail.name,
                 origin=dst_origin,
                 metadata=metadata,
@@ -2250,7 +2239,6 @@ def _emit_baseline_for_aggregating_rail(
                 direction=direction,
                 posting=posting,
                 transfer_id=bundle_transfer_id,
-                transfer_type=rail.transfer_type,
                 rail_name=rail.name,
                 origin=src_origin,
                 metadata=metadata,
@@ -2287,7 +2275,7 @@ def _baseline_cap_lookup(
     """
     out: dict[str, Decimal] = {}
     for ls in instance.limit_schedules:
-        if str(ls.transfer_type) == str(rail.transfer_type):
+        if str(ls.rail) == str(rail.name):
             out[str(ls.parent_role)] = ls.cap
     return out
 
@@ -2489,7 +2477,7 @@ def _emit_chain_child_leg(
         and str(src.account_scope) == "internal"
         and src.account_parent_role is not None
     ):
-        cap_key = (src.account_id, str(child_rail.transfer_type), parent_day)
+        cap_key = (src.account_id, str(child_rail.name), parent_day)
         cap_accumulated = state.daily_outbound_by_account_type.get(
             cap_key, Decimal(0),
         )
@@ -2528,7 +2516,6 @@ def _emit_chain_child_leg(
                 direction="Debit",
                 posting=posting,
                 transfer_id=transfer_id,
-                transfer_type=child_rail.transfer_type,
                 rail_name=child_rail.name,
                 origin=src_origin,
                 metadata=metadata,
@@ -2546,7 +2533,6 @@ def _emit_chain_child_leg(
                 direction="Credit",
                 posting=posting,
                 transfer_id=transfer_id,
-                transfer_type=child_rail.transfer_type,
                 rail_name=child_rail.name,
                 origin=dst_origin,
                 metadata=metadata,
@@ -2585,7 +2571,6 @@ def _emit_chain_child_leg(
             direction=direction,
             posting=posting,
             transfer_id=transfer_id,
-            transfer_type=child_rail.transfer_type,
             rail_name=child_rail.name,
             origin=leg_origin,
             metadata=metadata,
@@ -2726,7 +2711,7 @@ def _emit_baseline_cascade_credits(
     # the bundled rail's firings already in state.firings. Each firing
     # gets a paired credit on the aggregating rail's source_role.
     agg_cascade_targets: list[
-        tuple[Identifier, _ResolvedAccount, str, Identifier]
+        tuple[Identifier, _ResolvedAccount, Identifier]
     ] = []
     for agg_rail in sorted(instance.rails, key=lambda r: str(r.name)):
         if not agg_rail.aggregating:
@@ -2748,11 +2733,10 @@ def _emit_baseline_cascade_credits(
             agg_cascade_targets.append((
                 child_rail_name,
                 target,
-                str(agg_rail.transfer_type),
                 agg_rail.name,
             ))
 
-    for child_rail_name, target, transfer_type, label_rail in (
+    for child_rail_name, target, label_rail in (
         agg_cascade_targets
     ):
         firings = sorted(
@@ -2768,7 +2752,6 @@ def _emit_baseline_cascade_credits(
                 day=day,
                 source_transfer_id=parent_transfer_id,
                 cascade_label=label_rail,
-                transfer_type=transfer_type,
                 counter=counter,
                 rng=rng,
                 dialect=dialect,
@@ -2814,7 +2797,6 @@ def _emit_baseline_cascade_credits(
                 day=day,
                 source_transfer_id=parent_transfer_id,
                 cascade_label=rail.name,
-                transfer_type=str(rail.transfer_type),
                 counter=counter,
                 rng=rng,
                 dialect=dialect,
@@ -2848,7 +2830,6 @@ def _emit_baseline_cascade_credits(
                 day=day,
                 source_transfer_id=parent_transfer_id,
                 cascade_label=Identifier("CardSaleDailySettlement"),
-                transfer_type="card_settlement",
                 counter=counter,
                 rng=rng,
                 dialect=dialect,
@@ -2951,7 +2932,6 @@ def _emit_baseline_cascade_credits(
                     day=day,
                     source_transfer_id=parent_transfer_id,
                     cascade_label=Identifier("ZBAFundingInbound"),
-                    transfer_type=str(rail.transfer_type),
                     counter=counter,
                     rng=rng,
                     dialect=dialect,
@@ -2969,7 +2949,6 @@ def _emit_cascade_pair(
     day: date,
     source_transfer_id: str,
     cascade_label: Identifier,
-    transfer_type: str,
     counter: _Counter,
     rng: random.Random,
     dialect: Dialect,
@@ -3023,7 +3002,6 @@ def _emit_cascade_pair(
             direction="Debit",
             posting=posting,
             transfer_id=transfer_id,
-            transfer_type=transfer_type,
             rail_name=cascade_label,
             origin="ExternalForcePosted",
             metadata=metadata,
@@ -3041,7 +3019,6 @@ def _emit_cascade_pair(
             direction="Credit",
             posting=posting,
             transfer_id=transfer_id,
-            transfer_type=transfer_type,
             rail_name=cascade_label,
             origin="InternalInitiated",
             metadata=metadata,
@@ -3267,23 +3244,23 @@ def _overdraft_key(p: OverdraftPlant) -> tuple[str, int]:
 
 
 def _breach_key(p: LimitBreachPlant) -> tuple[str, int, str]:
-    return (str(p.account_id), p.days_ago, p.transfer_type)
+    return (str(p.account_id), p.days_ago, str(p.rail_name))
 
 
 def _stuck_pending_key(p: StuckPendingPlant) -> tuple[str, int, str]:
-    return (str(p.account_id), p.days_ago, p.transfer_type)
+    return (str(p.account_id), p.days_ago, str(p.rail_name))
 
 
 def _failed_transaction_key(p: FailedTransactionPlant) -> tuple[str, int, str]:
-    return (str(p.account_id), p.days_ago, p.transfer_type)
+    return (str(p.account_id), p.days_ago, str(p.rail_name))
 
 
 def _stuck_unbundled_key(p: StuckUnbundledPlant) -> tuple[str, int, str]:
-    return (str(p.account_id), p.days_ago, p.transfer_type)
+    return (str(p.account_id), p.days_ago, str(p.rail_name))
 
 
 def _supersession_key(p: SupersessionPlant) -> tuple[str, int, str]:
-    return (str(p.account_id), p.days_ago, p.transfer_type)
+    return (str(p.account_id), p.days_ago, str(p.rail_name))
 
 
 def _tt_key(p: TransferTemplatePlant) -> tuple[str, int, int]:
@@ -3295,7 +3272,7 @@ def _rail_firing_key(p: RailFiringPlant) -> tuple[str, int, int]:
 
 
 def _inv_fanout_key(p: InvFanoutPlant) -> tuple[str, int, str]:
-    return (str(p.recipient_account_id), p.days_ago, p.transfer_type)
+    return (str(p.recipient_account_id), p.days_ago, str(p.rail_name))
 
 
 def _parent_singletons(instance: L2Instance) -> dict[Identifier, Account]:
@@ -3387,7 +3364,6 @@ def _emit_limit_breach_rows(
             direction="Debit",
             posting=posting_ts,
             transfer_id=transfer_id,
-            transfer_type=p.transfer_type,
             rail_name=p.rail_name,
             origin="InternalInitiated",
             metadata={"customer_id": str(ti.account_id)},
@@ -3406,7 +3382,6 @@ def _emit_limit_breach_rows(
             direction="Credit",
             posting=posting_ts,
             transfer_id=transfer_id,
-            transfer_type=p.transfer_type,
             rail_name=p.rail_name,
             origin="InternalInitiated",
             metadata={"customer_id": str(ti.account_id)},
@@ -3465,7 +3440,6 @@ def _emit_drift_background_rows(
                 direction="Debit",
                 posting=posting_ts,
                 transfer_id=transfer_id,
-                transfer_type=rail.transfer_type,
                 rail_name=p.rail_name,
                 origin=counter_origin,
                 metadata={"customer_id": str(ti.account_id),
@@ -3485,7 +3459,6 @@ def _emit_drift_background_rows(
                 direction="Credit",
                 posting=posting_ts,
                 transfer_id=transfer_id,
-                transfer_type=rail.transfer_type,
                 rail_name=p.rail_name,
                 origin=customer_origin,
                 metadata={"customer_id": str(ti.account_id),
@@ -3641,7 +3614,6 @@ def _emit_stuck_pending_rows(
             direction="Debit",
             posting=posting_ts,
             transfer_id=f"tr-pending-{n:04d}",
-            transfer_type=p.transfer_type,
             rail_name=p.rail_name,
             origin="InternalInitiated",
             metadata={"customer_id": str(ti.account_id)},
@@ -3686,7 +3658,6 @@ def _emit_failed_transaction_rows(
             direction="Debit",
             posting=posting_ts,
             transfer_id=f"tr-failed-{n:04d}",
-            transfer_type=p.transfer_type,
             rail_name=p.rail_name,
             origin="InternalInitiated",
             metadata={"customer_id": str(ti.account_id)},
@@ -3729,7 +3700,6 @@ def _emit_stuck_unbundled_rows(
             direction="Debit",
             posting=posting_ts,
             transfer_id=f"tr-unbundled-{n:04d}",
-            transfer_type=p.transfer_type,
             rail_name=p.rail_name,
             origin="InternalInitiated",
             metadata={"customer_id": str(ti.account_id)},
@@ -3777,7 +3747,6 @@ def _emit_supersession_rows(
             direction="Debit",
             posting=f"{plant_day.isoformat()}T09:00:00+00:00",
             transfer_id=transfer_id,
-            transfer_type=p.transfer_type,
             rail_name=p.rail_name,
             origin="InternalInitiated",
             metadata=metadata,
@@ -3797,7 +3766,6 @@ def _emit_supersession_rows(
             direction="Debit",
             posting=f"{plant_day.isoformat()}T09:30:00+00:00",
             transfer_id=transfer_id,
-            transfer_type=p.transfer_type,
             rail_name=p.rail_name,
             origin="InternalInitiated",
             metadata=metadata,
@@ -3961,7 +3929,6 @@ def _emit_transfer_template_rows(
                 direction="Debit",
                 posting=posting_ts,
                 transfer_id=transfer_id,
-                transfer_type=template.transfer_type,
                 rail_name=rail.name,
                 origin=src_origin,
                 metadata=metadata,
@@ -3981,7 +3948,6 @@ def _emit_transfer_template_rows(
                 direction="Credit",
                 posting=posting_ts,
                 transfer_id=transfer_id,
-                transfer_type=template.transfer_type,
                 rail_name=rail.name,
                 origin=dst_origin,
                 metadata=metadata,
@@ -4021,7 +3987,6 @@ def _emit_transfer_template_rows(
                 direction=direction,
                 posting=posting_ts,
                 transfer_id=transfer_id,
-                transfer_type=template.transfer_type,
                 rail_name=rail.name,
                 origin=leg_origin,
                 metadata=metadata,
@@ -4065,7 +4030,6 @@ def _emit_transfer_template_rows(
                 direction="Credit",
                 posting=child_posting_ts,
                 transfer_id=child_transfer_id,
-                transfer_type=child_rail.transfer_type,
                 rail_name=child_rail.name,
                 origin=child_origin,
                 metadata=metadata,
@@ -4171,7 +4135,6 @@ def _emit_rail_firing_rows(
                 direction="Debit",
                 posting=posting_ts,
                 transfer_id=transfer_id,
-                transfer_type=rail.transfer_type,
                 rail_name=rail.name,
                 origin=src_origin,
                 metadata=metadata,
@@ -4191,7 +4154,6 @@ def _emit_rail_firing_rows(
                 direction="Credit",
                 posting=posting_ts,
                 transfer_id=transfer_id,
-                transfer_type=rail.transfer_type,
                 rail_name=rail.name,
                 origin=dst_origin,
                 metadata=metadata,
@@ -4228,7 +4190,6 @@ def _emit_rail_firing_rows(
             direction=direction,
             posting=posting_ts,
             transfer_id=transfer_id,
-            transfer_type=rail.transfer_type,
             rail_name=rail.name,
             origin=leg_origin,
             metadata=metadata,
@@ -4298,7 +4259,6 @@ def _emit_inv_fanout_rows(
                 direction="Debit",
                 posting=posting_ts,
                 transfer_id=transfer_id,
-                transfer_type=p.transfer_type,
                 rail_name=p.rail_name,
                 origin="ExternalInitiated",
                 metadata={
@@ -4320,7 +4280,6 @@ def _emit_inv_fanout_rows(
                 direction="Credit",
                 posting=posting_ts,
                 transfer_id=transfer_id,
-                transfer_type=p.transfer_type,
                 rail_name=p.rail_name,
                 origin="ExternalInitiated",
                 metadata={
@@ -4346,7 +4305,6 @@ def _txn_row(
     direction: str,
     posting: str,
     transfer_id: str,
-    transfer_type: str,
     rail_name: Identifier,
     origin: str,
     metadata: dict[str, str],
@@ -4398,7 +4356,7 @@ def _txn_row(
         f"{money}, {_sql_str(direction)}, {_sql_str(status)}, "
         f"{_sql_timestamp_literal(posting, dialect)}, "
         f"{_sql_str(transfer_id)}, "
-        f"{_sql_str(transfer_type)}, NULL, {transfer_parent_lit}, "
+        f"NULL, {transfer_parent_lit}, "
         f"{_sql_str(rail_name)}, {template_lit}, "
         f"{bundle_lit}, {supersedes_lit}, "
         f"{_sql_str(origin)}, {_sql_str(metadata_json)})"

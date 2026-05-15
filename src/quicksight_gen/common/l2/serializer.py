@@ -136,7 +136,6 @@ def _dump_rail(r: Rail) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]
 def _dump_two_leg_rail(r: TwoLegRail) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
     out: dict[str, Any] = {  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
         "name": str(r.name),
-        "transfer_type": r.transfer_type,
         "source_role": _dump_role_expression(r.source_role),
         "destination_role": _dump_role_expression(r.destination_role),
     }
@@ -174,7 +173,6 @@ def _dump_two_leg_rail(r: TwoLegRail) -> dict[str, Any]:  # typing-smell: ignore
 def _dump_single_leg_rail(r: SingleLegRail) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
     out: dict[str, Any] = {  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
         "name": str(r.name),
-        "transfer_type": r.transfer_type,
         "leg_role": _dump_role_expression(r.leg_role),
         "leg_direction": r.leg_direction,
     }
@@ -206,7 +204,6 @@ def _dump_single_leg_rail(r: SingleLegRail) -> dict[str, Any]:  # typing-smell: 
 def _dump_transfer_template(t: TransferTemplate) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
     out: dict[str, Any] = {  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
         "name": str(t.name),
-        "transfer_type": t.transfer_type,
         "expected_net": _dump_money(t.expected_net),
         "transfer_key": [str(k) for k in t.transfer_key],
         "completion": t.completion,
@@ -230,7 +227,7 @@ def _dump_chain(c: Chain) -> dict[str, Any]:  # typing-smell: ignore[explicit-an
 def _dump_limit_schedule(ls: LimitSchedule) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
     out: dict[str, Any] = {  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
         "parent_role": str(ls.parent_role),
-        "transfer_type": ls.transfer_type,
+        "rail": str(ls.rail),
         "cap": _dump_money(ls.cap),
     }
     if ls.description is not None:

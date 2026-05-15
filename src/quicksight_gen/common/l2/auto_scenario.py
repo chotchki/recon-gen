@@ -216,7 +216,6 @@ def default_scenario_for(
             LimitBreachPlant(
                 account_id=cust1.account_id,
                 days_ago=4,
-                transfer_type=ls.transfer_type,
                 rail_name=breach_rail.name,
                 amount=breach_amount,
                 counter_account_id=breach_counter.id,
@@ -241,7 +240,6 @@ def default_scenario_for(
             StuckPendingPlant(
                 account_id=cust1.account_id,
                 days_ago=cap_days,
-                transfer_type=pending_rail.transfer_type,
                 rail_name=pending_rail.name,
                 amount=Decimal("450.00"),
             ),
@@ -258,7 +256,6 @@ def default_scenario_for(
             FailedTransactionPlant(
                 account_id=cust1.account_id,
                 days_ago=2,
-                transfer_type=pending_rail.transfer_type,
                 rail_name=pending_rail.name,
                 amount=Decimal("75.00"),
             ),
@@ -281,7 +278,6 @@ def default_scenario_for(
             StuckUnbundledPlant(
                 account_id=cust2.account_id,
                 days_ago=cap_days,
-                transfer_type=unbundled_rail.transfer_type,
                 rail_name=unbundled_rail.name,
                 amount=Decimal("12.50"),
             ),
@@ -293,7 +289,6 @@ def default_scenario_for(
             SupersessionPlant(
                 account_id=cust1.account_id,
                 days_ago=3,
-                transfer_type=super_rail.transfer_type,
                 rail_name=super_rail.name,
                 original_amount=Decimal("250.00"),
                 corrected_amount=Decimal("275.00"),
@@ -311,7 +306,6 @@ def default_scenario_for(
                 recipient_account_id=cust1.account_id,
                 sender_account_ids=tuple(s.id for s in senders),
                 days_ago=2,
-                transfer_type=fanout_rail.transfer_type,
                 rail_name=fanout_rail.name,
                 amount_per_transfer=Decimal("500.00"),
             ),
@@ -527,7 +521,6 @@ def densify_scenario(
             LimitBreachPlant(
                 account_id=p.account_id,
                 days_ago=p.days_ago + i * day_stride,
-                transfer_type=p.transfer_type,
                 rail_name=p.rail_name,
                 amount=p.amount,
                 counter_account_id=p.counter_account_id,
@@ -542,7 +535,6 @@ def densify_scenario(
             StuckPendingPlant(
                 account_id=p.account_id,
                 days_ago=p.days_ago + i * day_stride,
-                transfer_type=p.transfer_type,
                 rail_name=p.rail_name,
                 amount=p.amount,
             )
@@ -556,7 +548,6 @@ def densify_scenario(
             StuckUnbundledPlant(
                 account_id=p.account_id,
                 days_ago=p.days_ago + i * day_stride,
-                transfer_type=p.transfer_type,
                 rail_name=p.rail_name,
                 amount=p.amount,
             )
@@ -570,7 +561,6 @@ def densify_scenario(
             SupersessionPlant(
                 account_id=p.account_id,
                 days_ago=p.days_ago + i * day_stride,
-                transfer_type=p.transfer_type,
                 rail_name=p.rail_name,
                 original_amount=p.original_amount,
                 corrected_amount=p.corrected_amount,
@@ -645,7 +635,6 @@ def boost_inv_fanout_plants(
             recipient_account_id=p.recipient_account_id,
             sender_account_ids=p.sender_account_ids,
             days_ago=p.days_ago,
-            transfer_type=p.transfer_type,
             rail_name=p.rail_name,
             amount_per_transfer=p.amount_per_transfer * amount_multiplier,
         )
@@ -722,7 +711,6 @@ def add_broken_rail_plants(
                 i % len(base.template_instances)
             ].account_id,
             days_ago=cap_days + (i * 2),  # spread across the window
-            transfer_type=broken_rail.transfer_type,
             rail_name=broken_rail.name,
             amount=Decimal("450.00") + Decimal(str(i * 25)),
         )
@@ -1111,16 +1099,20 @@ def _pick_inbound_2leg_rail(
 def _pick_outbound_2leg_rail(
     instance: L2Instance,
     template_role: Identifier,
-    transfer_type: str,
+    rail_name: Identifier,
 ) -> TwoLegRail | None:
     """First TwoLegRail (sorted by name) with source_role=template AND
-    matching transfer_type AND a destination role that resolves to an
-    external Account."""
+    matching rail name AND a destination role that resolves to an
+    external Account.
+
+    Z.B (2026-05-15): formerly matched on transfer_type; under the
+    symmetric collapse a rail's name IS its type identifier.
+    """
     external_roles = {a.role for a in instance.accounts if a.scope == "external"}
     for r in sorted(instance.rails, key=lambda r: str(r.name)):
         if not isinstance(r, TwoLegRail):
             continue
-        if r.transfer_type != transfer_type:
+        if r.name != rail_name:
             continue
         if template_role not in r.source_role:
             continue
@@ -1273,9 +1265,9 @@ def _pick_breach_inputs(
     suitable for a LimitBreachPlant. Sorted by LimitSchedule key."""
     for ls in sorted(
         instance.limit_schedules,
-        key=lambda ls: (str(ls.parent_role), ls.transfer_type),
+        key=lambda ls: (str(ls.parent_role), str(ls.rail)),
     ):
-        rail = _pick_outbound_2leg_rail(instance, template_role, ls.transfer_type)
+        rail = _pick_outbound_2leg_rail(instance, template_role, Identifier(str(ls.rail)))
         if rail is None:
             continue
         counter = _pick_external_counter_for_outbound(instance, rail)

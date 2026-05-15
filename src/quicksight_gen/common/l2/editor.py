@@ -41,6 +41,7 @@ from quicksight_gen.common.l2.primitives import (
     Money,
     Name,
     Rail,
+    RailName,
     SingleLegRail,
     TransferTemplate,
     TwoLegRail,
@@ -91,7 +92,7 @@ def mutate_l2(
         entity_id: The entity's identity key — Account.id, Rail.name,
             TransferTemplate.name, AccountTemplate.role,
             Chain's "<parent>::<sorted-children-csv>" composite, or
-            LimitSchedule's "<parent_role>::<transfer_type>" composite.
+            LimitSchedule's "<parent_role>::<rail>" composite.
         fields: New field values, applied via ``dataclasses.replace``.
             Keys MUST match the dataclass field names; unknown keys
             raise ``ValueError``.
@@ -232,8 +233,6 @@ def create_l2_entity(
             raise ValueError("Rail.name is required")
         if any(str(r.name) == str(new_name) for r in instance.rails):
             raise ValueError(f"Rail name {new_name!r} already exists")
-        if not fields.get("transfer_type"):
-            raise ValueError("Rail.transfer_type is required")
         # X.4.f.11.5 — subtype dispatch. The studio editor's create
         # page is 2-step: a picker page routes the operator to
         # ``?subtype=two_leg|single_leg``, the form filters to that
@@ -271,7 +270,6 @@ def create_l2_entity(
                 )
             new_r = SingleLegRail(
                 name=Identifier(str(new_name)),
-                transfer_type=str(fields["transfer_type"]),
                 metadata_keys=metadata_keys_v,  # pyright: ignore[reportArgumentType]  # WHY: form-typed tuple[Identifier, ...] from coerce path
                 leg_role=leg_role,
                 leg_direction=leg_direction,  # pyright: ignore[reportArgumentType]  # WHY: form-coerced str; LegDirection is Literal["Debit","Credit","Variable"] — value validated by FieldSpec options + the enclosing validator
@@ -311,7 +309,6 @@ def create_l2_entity(
             )
             new_r = TwoLegRail(
                 name=Identifier(str(new_name)),
-                transfer_type=str(fields["transfer_type"]),
                 metadata_keys=metadata_keys_v,  # pyright: ignore[reportArgumentType]  # WHY: form-typed tuple[Identifier, ...] from coerce path
                 source_role=source_role,
                 destination_role=destination_role,
@@ -347,8 +344,6 @@ def create_l2_entity(
             raise ValueError(
                 f"TransferTemplate name {new_name!r} already exists",
             )
-        if not fields.get("transfer_type"):
-            raise ValueError("TransferTemplate.transfer_type is required")
         if not fields.get("completion"):
             raise ValueError("TransferTemplate.completion is required")
         if fields.get("expected_net") is None:
@@ -367,7 +362,6 @@ def create_l2_entity(
             leg_rails = (Identifier(str(leg_rails_raw)),)
         new_tt = TransferTemplate(
             name=Identifier(str(new_name)),
-            transfer_type=str(fields["transfer_type"]),
             expected_net=Money(fields["expected_net"]),
             completion=str(fields["completion"]),
             leg_rails=leg_rails,
@@ -422,25 +416,25 @@ def create_l2_entity(
         )
     if kind == "limit_schedule":
         parent_role = fields.get("parent_role")
-        transfer_type = fields.get("transfer_type")
+        rail = fields.get("rail")
         cap = fields.get("cap")
-        if not parent_role or not transfer_type or cap is None:
+        if not parent_role or not rail or cap is None:
             raise ValueError(
-                "LimitSchedule.parent_role / .transfer_type / .cap "
+                "LimitSchedule.parent_role / .rail / .cap "
                 "are required",
             )
         if any(
             str(ls.parent_role) == str(parent_role)
-            and ls.transfer_type == str(transfer_type)
+            and str(ls.rail) == str(rail)
             for ls in instance.limit_schedules
         ):
             raise ValueError(
-                f"LimitSchedule {parent_role}::{transfer_type} "
+                f"LimitSchedule {parent_role}::{rail} "
                 f"already exists",
             )
         new_ls = LimitSchedule(
             parent_role=Identifier(str(parent_role)),
-            transfer_type=str(transfer_type),
+            rail=RailName(str(rail)),
             cap=Money(cap),
             description=fields.get("description"),
         )
@@ -568,9 +562,9 @@ def _find_entity(
             if f"{ch.parent}::{children_csv}" == entity_id:
                 return ch, i, instance.chains
     elif kind == "limit_schedule":
-        # Composite key: "<parent_role>::<transfer_type>"
+        # Composite key: "<parent_role>::<rail>"
         for i, ls in enumerate(instance.limit_schedules):
-            if f"{ls.parent_role}::{ls.transfer_type}" == entity_id:
+            if f"{ls.parent_role}::{ls.rail}" == entity_id:
                 return ls, i, instance.limit_schedules
     raise KeyError(f"{kind} {entity_id!r} not found in instance")
 
