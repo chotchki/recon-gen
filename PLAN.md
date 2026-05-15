@@ -162,7 +162,7 @@ The X.4.f.2/.3 first-cut Rail editor covers cosmetic fields (`name` / `transfer_
 - [x] **X.4.f.11.6** — `metadata_keys` + `posted_requirements` (`textarea`, one-per-line, comma-tolerant; coerced to `tuple[Identifier, ...]`).
 - [x] **X.4.f.11.7** — `max_pending_age` + `max_unbundled_age` (`text` with ISO 8601 format hint `PT24H` / `P1D`; parsed via existing loader's Duration helper; empty = `None`).
 - [x] **X.4.f.11.8** — TwoLegRail: `source_origin` + `destination_origin` (`text` — Origin is open enum) + `expected_net` (`money`).
-- [x] **X.4.f.11.9** — `bundles_activity` (`multi_select` from `rails_or_templates` for v1; gains `transfer_types` membership after Z.B lands).
+- [x] **X.4.f.11.9** — `bundles_activity` (`multi_select` from `rails_or_templates`). [Stale forward reference removed 2026-05-15: the original "gains `transfer_types` membership after Z.B lands" promise is obsolete — the redesigned Z.B subsumes `transfer_type` into `rail_name`, so `rails_or_templates` IS the final shape.]
 
 **Tier 3 — `metadata_value_examples` as a YAML-block textarea (locked 2026-05-13):** *(all shipped in commit 9e2447f)*
 
@@ -529,7 +529,8 @@ Surfaced 2026-05-13 during the `X.4.f.10.followup` C4.1 validator add (the "requ
 - [ ] **Z.B.9 — Migrate fixture yamls.** Mechanical: drop `transfer_type:` line from every Rail in `tests/l2/{sasquatch_pr, spec_example, _kitchen}.yaml` + `tests/l2/fuzz_failures/*`; rename `transfer_type:` → `rail:` on every LimitSchedule. Audit `bundles_activity:` strings — anything that today resolves via the OR-of-two transfer_type leg (rather than rail name) needs the matching rail name substituted in. Likely zero in practice (per the 1-1 audit), verify per fixture.
 - [ ] **Z.B.10 — Tests update.** `test_l2_validate.py` (drop U6 + R10 tests; update U5 + R7); `test_l2_loader.py` (drop transfer_type fixtures, add legacy-key rejection tests); `test_l2_pr_primitives.py`; `test_l2_editor.py`; `test_studio_editor_routes.py` (Rail card drops transfer_type field; LimitSchedule card field rename).
 - [ ] **Z.B.11 — SPEC + Schema_v6 + handbook prose.** Drop the transfer_type vocabulary section entirely from `docs/Schema_v6.md` (was net-add in Z.B.original; now net-remove). Update SPEC L1 theorems that reference `transfer_type` to reference `rail_name`. The "name vs type" distinction handbook section the Z.B.original would have authored becomes a "rail name is the identifier" callout instead.
-- [ ] **Z.B.12 — Re-lock seeds (folds into Z.C).** Column drop changes seed bytes (every transactions INSERT loses one column). Re-lock spec_example + sasquatch_pr per-dialect via `quicksight-gen data lock -c run/config.<pg|oracle|sqlite>.yaml --l2 …`.
+- [ ] **Z.B.12 — Drop degenerate `transfer_type` filter controls in dashboards.** Under collapse, a `transfer_type` ParameterDropDown is fully redundant with a `rail_name` dropdown — same selectable values, same narrowing semantic. Sweep `apps/l1_dashboard/`, `apps/l2_flow_tracing/`, `apps/investigation/` for ParameterDropDownControls bound to a `pTransferType` (or similar) parameter and either drop them entirely or merge into the rail_name dropdown. Touches dataset SQL too — `WHERE transfer_type IN (<<$pTransferType>>)` clauses get dropped or rewritten as `rail_name`. Coordinate with AA.A so we don't touch the same control twice (Z.B.12 lands first; AA.A doesn't see those dropdowns).
+- [ ] **Z.B.13 — Re-lock seeds (folds into Z.C).** Column drop changes seed bytes (every transactions INSERT loses one column). Re-lock spec_example + sasquatch_pr per-dialect via `quicksight-gen data lock -c run/config.<pg|oracle|sqlite>.yaml --l2 …`.
 
 ### Z.C — End-of-phase
 
