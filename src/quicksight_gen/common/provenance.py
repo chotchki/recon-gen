@@ -306,7 +306,7 @@ def compute_provenance(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()

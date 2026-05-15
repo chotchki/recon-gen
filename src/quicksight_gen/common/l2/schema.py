@@ -71,7 +71,7 @@ from .primitives import L2Instance
 
 
 def emit_schema(
-    instance: L2Instance, *, dialect: Dialect = Dialect.POSTGRES,
+    instance: L2Instance, *, prefix: str, dialect: Dialect = Dialect.POSTGRES,
 ) -> str:
     """Emit the full DDL script for an L2 instance's prefixed L1 schema.
 
@@ -107,8 +107,11 @@ def emit_schema(
     are now first-class. New dialects would need a new ``Dialect``
     enum value plus per-helper Oracle/Postgres-style branches in
     ``common.sql.dialect``.
+
+    Z.C — ``prefix`` is the cfg.db_table_prefix (formerly read off
+    the dropped ``L2Instance.instance`` field).
     """
-    p = instance.instance
+    p = prefix
     # L1 invariant view DROPs MUST run before base DROPs — the L1 views
     # depend on the Current* views (which depend on the base tables),
     # so dropping current_* first would error with "dependent objects
@@ -122,8 +125,8 @@ def emit_schema(
     l1_drops = _emit_l1_invariant_drops(p, dialect)
     inv_drops = _emit_inv_matview_drops(p, dialect)
     base = _emit_base_schema(p, dialect, instance)
-    invariants = _emit_l1_invariant_views(instance, dialect=dialect)
-    inv_views = _emit_inv_views(instance, dialect=dialect)
+    invariants = _emit_l1_invariant_views(instance, prefix=p, dialect=dialect)
+    inv_views = _emit_inv_views(instance, prefix=p, dialect=dialect)
     return (
         l1_drops + "\n" + inv_drops + "\n" + base + "\n\n"
         + invariants + "\n\n" + inv_views
@@ -133,7 +136,7 @@ def emit_schema(
 
 
 def emit_schema_drop_sql(
-    instance: L2Instance, *, dialect: Dialect = Dialect.POSTGRES,
+    instance: L2Instance, *, prefix: str, dialect: Dialect = Dialect.POSTGRES,
 ) -> str:
     """Emit DROP statements for every per-prefix object ``emit_schema`` creates.
 
@@ -150,8 +153,10 @@ def emit_schema_drop_sql(
     splitting + executing per-statement. Idempotent — every DROP is
     ``IF EXISTS`` (or a swallow-already-gone PL/SQL block on Oracle).
     Use ``schema clean -o FILE`` for the CLI surface.
+
+    Z.C — ``prefix`` is the cfg.db_table_prefix.
     """
-    p = instance.instance
+    p = prefix
     l1_drops = _emit_l1_invariant_drops(p, dialect)
     inv_drops = _emit_inv_matview_drops(p, dialect)
     # Base layer: Current* matviews → indexes → base tables.
@@ -211,7 +216,7 @@ BASE_DAILY_BALANCES_COLUMNS: tuple[str, ...] = (
 
 
 def wipe_demo_data_sql(
-    instance: L2Instance, *, dialect: Dialect = Dialect.POSTGRES,
+    instance: L2Instance, *, prefix: str, dialect: Dialect = Dialect.POSTGRES,
 ) -> str:
     """Emit DELETE statements that empty the per-prefix base tables.
 
@@ -229,8 +234,10 @@ def wipe_demo_data_sql(
     Returns one SQL string for ``execute_script(cur, sql, dialect=…)``.
     No FK between the two base tables (per Schema_v6), so order is
     irrelevant; daily_balances first matches the schema-emit order.
+
+    Z.C — ``prefix`` is the cfg.db_table_prefix.
     """
-    p = instance.instance
+    p = prefix
     return (
         f"-- =====================================================================\n"
         f"-- L2 instance: {p} — base-table data wipe (step 2 of deploy pipeline)\n"
@@ -244,7 +251,7 @@ def wipe_demo_data_sql(
 
 
 def refresh_matviews_sql(
-    instance: L2Instance, *, dialect: Dialect = Dialect.POSTGRES,
+    instance: L2Instance, *, prefix: str, dialect: Dialect = Dialect.POSTGRES,
 ) -> str:
     """Emit `REFRESH MATERIALIZED VIEW` commands in dependency order.
 
@@ -267,8 +274,10 @@ def refresh_matviews_sql(
     Caller splits + executes (psycopg2's cursor.execute can't run
     multiple statements separated by `;` reliably; the verify script
     splits on `;\\n` and runs each per-statement).
+
+    Z.C — ``prefix`` is the cfg.db_table_prefix.
     """
-    p = instance.instance
+    p = prefix
     names = [
         # Leaves: reads from base tables only.
         f"{p}_current_transactions",
@@ -301,7 +310,7 @@ def refresh_matviews_sql(
         # the matview-as-table CREATE. We re-run the schema
         # template, but only the matview block (drops + creates),
         # since the base tables stay untouched by a refresh.
-        return _emit_sqlite_matview_refresh(instance)
+        return _emit_sqlite_matview_refresh(instance, prefix=p)
     # REFRESH first, then ANALYZE — ANALYZE updates planner stats so
     # subsequent SELECTs use the indexes we ship on each matview
     # (without ANALYZE the planner doesn't know the post-REFRESH row
@@ -311,7 +320,7 @@ def refresh_matviews_sql(
     return f"{refreshes}\n{analyzes}"
 
 
-def _emit_sqlite_matview_refresh(instance: L2Instance) -> str:
+def _emit_sqlite_matview_refresh(instance: L2Instance, *, prefix: str) -> str:
     """X.3.c — SQLite refresh: tear down + re-emit every matview-as-table.
 
     The matview bodies live in the schema templates. Rather than
@@ -331,8 +340,10 @@ def _emit_sqlite_matview_refresh(instance: L2Instance) -> str:
 
     Returns one SQL string. ANALYZE follows the rebuild so the
     planner picks up post-refresh row counts.
+
+    Z.C — ``prefix`` is the cfg.db_table_prefix.
     """
-    p = instance.instance
+    p = prefix
     drops_l1 = _emit_l1_invariant_drops(p, Dialect.SQLITE)
     drops_inv = _emit_inv_matview_drops(p, Dialect.SQLITE)
     drops_curr_tx = drop_matview_if_exists(
@@ -347,8 +358,8 @@ def _emit_sqlite_matview_refresh(instance: L2Instance) -> str:
     # current_*) plus the Current* matview CREATEs from the base
     # template.
     current_creates = _emit_sqlite_current_matview_creates(p)
-    invariants = _emit_l1_invariant_views(instance, dialect=Dialect.SQLITE)
-    inv_views = _emit_inv_views(instance, dialect=Dialect.SQLITE)
+    invariants = _emit_l1_invariant_views(instance, prefix=p, dialect=Dialect.SQLITE)
+    inv_views = _emit_inv_views(instance, prefix=p, dialect=Dialect.SQLITE)
     names = [
         f"{p}_current_transactions",
         f"{p}_current_daily_balances",
@@ -429,7 +440,7 @@ def _emit_sqlite_current_matview_creates(p: str) -> str:
 
 
 def _emit_l1_invariant_views(
-    instance: L2Instance, *, dialect: Dialect = Dialect.POSTGRES,
+    instance: L2Instance, *, prefix: str, dialect: Dialect = Dialect.POSTGRES,
 ) -> str:
     """Render the M.1a.7 L1-invariant view block for ``instance``.
 
@@ -450,7 +461,7 @@ def _emit_l1_invariant_views(
       Oracle (the typed NULL preserves the UNION ALL column type
       across mixed-NULL branches).
     """
-    p = instance.instance
+    p = prefix
     limit_cases = _render_limit_breach_cases(instance, p=p, dialect=dialect)
     pending_age_cases = _render_pending_age_cases(instance, dialect=dialect)
     unbundled_age_cases = _render_unbundled_age_cases(instance, dialect=dialect)
@@ -548,7 +559,7 @@ def _render_pending_age_cases(
 
 
 def _emit_inv_views(
-    instance: L2Instance, *, dialect: Dialect = Dialect.POSTGRES,
+    instance: L2Instance, *, prefix: str, dialect: Dialect = Dialect.POSTGRES,
 ) -> str:
     """Render the N.3.b Investigation matview block for ``instance``.
 
@@ -588,8 +599,10 @@ def _emit_inv_views(
     ``demo apply`` runs ``REFRESH MATERIALIZED VIEW`` (Postgres) or
     ``DBMS_MVIEW.REFRESH`` (Oracle, via ``refresh_matview`` helper)
     after seed inserts.
+
+    Z.C — ``prefix`` is the cfg.db_table_prefix.
     """
-    p = instance.instance
+    p = prefix
     # Inline the rolling-2-day window definition. Oracle 19c doesn't
     # support the named ``WINDOW w AS (...)`` clause (added in 21c),
     # so each ``OVER (...)`` substitutes the full definition. PG accepts

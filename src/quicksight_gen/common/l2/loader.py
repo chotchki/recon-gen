@@ -79,37 +79,14 @@ class L2LoaderError(ValueError):
     """Raised when an L2 YAML fails to load or fails per-entity validation."""
 
 
-# -- Identifier validation (F5) ----------------------------------------------
-
-
-# Per SPEC's Instance Prefix Format rule (F5 amendment):
-#   MUST match ^[a-z][a-z0-9_]*$, max 30 characters.
-# Lowercase-only avoids Postgres' quoted-vs-unquoted hazard;
-# 30-char cap leaves room for the longest table-name suffix within
-# Postgres' 63-char identifier limit.
-_INSTANCE_PREFIX_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-_INSTANCE_PREFIX_MAX = 30
-
-
-def _load_instance_prefix(raw: object, *, path: str) -> Identifier:
-    """Validate and return an InstancePrefix per SPEC's F5 rules."""
-    if not isinstance(raw, str):
-        raise L2LoaderError(
-            f"{path}: expected a string instance prefix, "
-            f"got {type(raw).__name__}"
-        )
-    if not _INSTANCE_PREFIX_RE.match(raw):
-        raise L2LoaderError(
-            f"{path}={raw!r}: must match {_INSTANCE_PREFIX_RE.pattern!r} "
-            f"(SQL-identifier-safe; lowercase start; alphanumeric or "
-            f"underscore thereafter)"
-        )
-    if len(raw) > _INSTANCE_PREFIX_MAX:
-        raise L2LoaderError(
-            f"{path}={raw!r}: max {_INSTANCE_PREFIX_MAX} characters "
-            f"(got {len(raw)})"
-        )
-    return Identifier(raw)
+# -- Legacy ``instance:`` rejection (Z.C, 2026-05-15) -----------------------
+#
+# The legacy ``instance:`` YAML key — formerly the InstancePrefix per SPEC
+# F5 — has been retired. The DB-table prefix lives on the cfg as
+# ``cfg.db_table_prefix``; the QS-resource-ID prefix lives as
+# ``cfg.deployment_name``. The loader hard-fails on any L2 YAML that
+# carries a top-level ``instance:`` key so legacy fixtures get an
+# actionable migration pointer instead of silently degrading.
 
 
 def _load_identifier(raw: object, *, path: str) -> Identifier:
@@ -1062,17 +1039,21 @@ def _load_limit_schedule(raw: object, *, path: str) -> LimitSchedule:
 # -- Public API --------------------------------------------------------------
 
 
-def _capture_to_run_dir(raw_text: str, instance_prefix: str) -> None:
+def _capture_to_run_dir(raw_text: str, slug: str) -> None:
     """Y.2.gate.c.12 — copy every loaded L2 YAML into ``$QS_GEN_RUN_DIR/l2/``.
 
     No-op when ``QS_GEN_RUN_DIR`` is unset (direct ``pytest`` /
     ``quicksight-gen`` invocations are unchanged). When set, writes
-    the raw YAML bytes to ``<run-dir>/l2/<instance-prefix>.yaml`` so
-    the runner's per-run snapshot captures every L2 the test session
-    touched — fuzzed AND static (the fuzzer constructs a YAML on disk
-    and feeds the path through ``load_instance``, same code path).
+    the raw YAML bytes to ``<run-dir>/l2/<slug>.yaml`` so the runner's
+    per-run snapshot captures every L2 the test session touched —
+    fuzzed AND static (the fuzzer constructs a YAML on disk and feeds
+    the path through ``load_instance``, same code path).
 
-    Idempotent: same prefix loaded twice in one session writes the
+    Z.C — the slug is now the YAML file basename (formerly the
+    ``instance:`` field) since the L2 yaml no longer carries a
+    deployment identifier of its own.
+
+    Idempotent: same slug loaded twice in one session writes the
     same bytes to the same file (cheap overwrite). Capture failures
     (disk full, permission denied, registry validator rejecting a
     bad path) are swallowed — the YAML load must never fail because
@@ -1091,7 +1072,7 @@ def _capture_to_run_dir(raw_text: str, instance_prefix: str) -> None:
     try:
         target_dir = run_dir / "l2"
         target_dir.mkdir(parents=True, exist_ok=True)
-        target = target_dir / f"{instance_prefix}.yaml"
+        target = target_dir / f"{slug}.yaml"
         target.write_text(raw_text)
     except OSError:
         # Sidecar — never break the load.
@@ -1139,10 +1120,24 @@ def load_instance(path: Path | str, *, validate: bool = True) -> L2Instance:
         raise L2LoaderError(f"{yaml_path}: file is empty")
     raw_d = _as_mapping(raw, path=str(yaml_path), what="top-level")
 
-    instance = _load_instance_prefix(
-        _require(raw_d, "instance", path="instance"), path="instance",
-    )
-    _capture_to_run_dir(raw_text, str(instance))
+    # Z.C — the legacy ``instance:`` YAML key has been retired. The
+    # DB-table prefix lives on the cfg yaml as ``cfg.db_table_prefix``;
+    # the QS-resource-ID prefix lives as ``cfg.deployment_name``. Reject
+    # any L2 yaml that still carries an ``instance:`` key with an
+    # actionable migration pointer rather than silently ignoring it.
+    if "instance" in raw_d:
+        raise L2LoaderError(
+            f"{yaml_path}: top-level 'instance:' key is no longer "
+            "supported (Z.C, 2026-05-15). Move the DB-table prefix to "
+            "your cfg.yaml under 'db_table_prefix:' and the "
+            "QS-resource-ID prefix to 'deployment_name:'. The L2 yaml "
+            "is now pure topology + persona + theme — no deployment "
+            "identifiers."
+        )
+
+    # Per-run debug capture (Y.2.gate.c.12) keys off the yaml basename
+    # since there's no longer a per-instance identifier in the L2 yaml.
+    _capture_to_run_dir(raw_text, yaml_path.stem)
 
     accounts = tuple(
         _load_account(item, path=f"accounts[{i}]")
@@ -1176,7 +1171,6 @@ def load_instance(path: Path | str, *, validate: bool = True) -> L2Instance:
     )
 
     inst = L2Instance(
-        instance=instance,
         accounts=accounts,
         account_templates=account_templates,
         rails=rails,

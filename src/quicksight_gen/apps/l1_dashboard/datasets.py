@@ -38,7 +38,7 @@ from quicksight_gen.common.sheets.app_info import (
 from quicksight_gen.common.sql import Dialect, date_trunc_day
 
 
-def l1_matview_specs(l2_instance: L2Instance) -> list[tuple[str, str | None]]:
+def l1_matview_specs(cfg: Config) -> list[tuple[str, str | None]]:
     """The L2-prefixed matviews + base tables the L1 dashboard reads,
     paired with the date column the App Info ``latest_date`` KPI takes
     its MAX from.
@@ -51,8 +51,11 @@ def l1_matview_specs(l2_instance: L2Instance) -> list[tuple[str, str | None]]:
         → ``business_day_start``
       - drift / ledger_drift / overdraft → ``business_day_end``
       - limit_breach / todays_exceptions → ``business_day``
+
+    Z.C — was ``l1_matview_specs(l2_instance)`` reading
+    ``l2_instance.instance``; now reads ``cfg.db_table_prefix``.
     """
-    p = str(l2_instance.instance)
+    p = cfg.db_table_prefix
     return [
         (f"{p}_transactions", "posting"),
         (f"{p}_daily_balances", "business_day_start"),
@@ -615,7 +618,7 @@ def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
     binds ``:date_from`` / ``:date_to`` from the URL into
     ``business_day_start``.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql_template = (
         f"SELECT * FROM {prefix}_drift\n"
         f"WHERE {_data_value_clause('account_id', P_L1_DRIFT_ACCOUNT)}\n"
@@ -647,7 +650,7 @@ def build_ledger_drift_dataset(
 
     Y.2.f — App2-side date pushdown matches ``build_drift_dataset``.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql_template = (
         f"SELECT * FROM {prefix}_ledger_drift\n"
         f"WHERE {_data_value_clause('account_id', P_L1_DRIFT_ACCOUNT)}\n"
@@ -692,7 +695,7 @@ def build_overdraft_dataset(
 
     Y.2.f — App2-side date pushdown via ``business_day_start``.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql_template = (
         f"SELECT * FROM {prefix}_overdraft\n"
         f"WHERE {_data_value_clause('account_id', P_L1_OVERDRAFT_ACCOUNT)}\n"
@@ -728,7 +731,7 @@ def build_limit_breach_dataset(
 
     Y.2.f — App2-side date pushdown via ``business_day``.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql_template = (
         f"SELECT * FROM {prefix}_limit_breach\n"
         f"WHERE {_data_value_clause('account_id', P_L1_LIMIT_BREACH_ACCOUNT)}\n"
@@ -779,7 +782,7 @@ def build_todays_exceptions_dataset(
 
     Y.2.f — App2-side date pushdown via ``business_day``.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql_template = (
         f"SELECT * FROM {prefix}_todays_exceptions\n"
         f"WHERE check_type IN (<<${P_L1_TODAYS_EXC_CHECK_TYPE}>>)\n"
@@ -834,7 +837,7 @@ def build_daily_statement_summary_dataset(
     sheet's account dropdown reads its options from the ``DS_L1_ACCOUNTS``
     companion (not this parameterized dataset).
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql = (
         f"SELECT * FROM {prefix}_daily_statement_summary\n"
         f"WHERE account_id = <<${P_L1_DS_ACCOUNT_DSP}>>"
@@ -881,7 +884,7 @@ def build_daily_statement_transactions_dataset(
     cfg: Config, l2_instance: L2Instance,
 ) -> DataSet:
     """Wrap the per-leg ledger feed for Daily Statement detail rows."""
-    sql = _daily_statement_transactions_sql(l2_instance.instance, cfg.dialect)
+    sql = _daily_statement_transactions_sql(cfg.db_table_prefix, cfg.dialect)
     return build_dataset(
         cfg, cfg.prefixed("l1-daily-statement-transactions-dataset"),
         "L1 Daily Statement Transactions",
@@ -929,7 +932,7 @@ def build_transactions_dataset(
 
     Y.2.f — App2-side date pushdown via ``posting``.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql_template = (
         f"SELECT id AS transaction_id, account_id, account_name,"
         f" account_role, account_parent_role,"
@@ -977,7 +980,7 @@ def build_drift_timeline_dataset(
     ``{date_filter}`` slot lands BEFORE the GROUP BY so the AND-clause
     is part of the WHERE.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql_template = (
         f"SELECT business_day_end,"
         f"       account_role,"
@@ -1011,7 +1014,7 @@ def build_ledger_drift_timeline_dataset(
 
     Y.2.f — App2-side date pushdown matches ``build_drift_timeline_dataset``.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql_template = (
         f"SELECT business_day_end,"
         f"       account_role,"
@@ -1060,7 +1063,7 @@ def build_stuck_pending_dataset(
     stays a thin SELECT * passthrough plus the Y.2.g pushdown WHERE
     (account_id data-value + rail_name / rail_name enums).
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql = (
         f"SELECT t.*,\n"
         f"  {_aging_bucket_case_sql('age_seconds', buckets=_PENDING_AGING_BUCKETS, overflow_label=_PENDING_AGING_OVERFLOW)}"
@@ -1094,7 +1097,7 @@ def build_stuck_unbundled_dataset(
     Aging sheet. Same Y.2.g pushdown vectors as the Pending Aging
     dataset.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql = (
         f"SELECT t.*,\n"
         f"  {_aging_bucket_case_sql('age_seconds', buckets=_UNBUNDLED_AGING_BUCKETS, overflow_label=_UNBUNDLED_AGING_OVERFLOW)}"
@@ -1146,7 +1149,7 @@ def build_supersession_transactions_dataset(
     Y.2.g — the Supersedes-Reason dropdown pushes down via
     ``(supersedes IN (<<$pL1SupersedeReason>>) OR supersedes IS NULL)``.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql = (
         f"SELECT entry, transaction_id, supersedes,"
         f" CASE WHEN entry > 1 AND supersedes IS NULL THEN 1 ELSE 0 END"
@@ -1190,7 +1193,7 @@ def build_supersession_daily_balances_dataset(
     — `COUNT(*) OVER (PARTITION BY account_id, business_day_start)`
     + outer `WHERE > 1` filter. Sort handled by the dashboard.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql = (
         f"SELECT entry,"
         f" account_id, account_name, account_role, supersedes,"
@@ -1228,7 +1231,7 @@ def build_l1_accounts_dataset(
     ``build_account_network_accounts_dataset`` (K.4.8k) — keeps the
     dropdown's option fetch cheap as the matview grows.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql = f"SELECT DISTINCT account_id FROM {prefix}_current_daily_balances"
     return build_dataset(
         cfg, cfg.prefixed("l1-accounts-dataset"),
@@ -1245,7 +1248,7 @@ def build_l1_tx_ids_dataset(
     ledger. Feeds the Transactions sheet's Transfer dropdown via
     ``LinkedValues``.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql = (
         f"SELECT DISTINCT transfer_id FROM {prefix}_current_transactions"
         f" WHERE transfer_id IS NOT NULL"
@@ -1267,7 +1270,7 @@ def build_l1_tx_facets_dataset(
     companion (cheap, well-formed query) replaces the StaticValues path
     used for the bounded enum columns.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql = f"SELECT DISTINCT status, origin FROM {prefix}_current_transactions"
     return build_dataset(
         cfg, cfg.prefixed("l1-tx-facets-dataset"),
@@ -1283,13 +1286,11 @@ def build_all_l1_dashboard_datasets(
     """Return every dataset the L1 dashboard's sheets reference.
 
     `build_l1_dashboard_app` calls this and registers each result on the
-    App tree. Per M.2d.3, derives an L2-aware ``cfg`` (so dataset IDs
-    carry the L2 instance prefix as their middle segment) when the
-    caller hasn't pre-stamped it. Idempotent — re-deriving an already-
-    L2-aware cfg is a no-op.
+    App tree. Per Z.C, the cfg arrives fully populated (``deployment_name``
+    + ``db_table_prefix`` are required cfg fields), so dataset IDs carry
+    the deployment prefix via ``cfg.prefixed(...)`` directly — no auto-
+    stamping dance.
     """
-    if cfg.l2_instance_prefix is None:
-        cfg = cfg.with_l2_instance_prefix(str(l2_instance.instance))
     return [
         build_drift_dataset(cfg, l2_instance),
         build_ledger_drift_dataset(cfg, l2_instance),
@@ -1315,6 +1316,6 @@ def build_all_l1_dashboard_datasets(
         build_liveness_dataset(cfg, app_segment="l1"),
         build_matview_status_dataset(
             cfg, app_segment="l1",
-            view_specs=l1_matview_specs(l2_instance),
+            view_specs=l1_matview_specs(cfg),
         ),
     ]

@@ -373,7 +373,7 @@ _TRANSACTIONS_DESCRIPTION = (
 
 def _analysis_name(cfg: Config, l2_instance: L2Instance) -> str:
     """Title shown on the deployed QuickSight Analysis."""
-    return f"L1 Reconciliation Dashboard ({l2_instance.instance})"
+    return f"L1 Reconciliation Dashboard ({cfg.deployment_name})"
 
 
 # -- L2-prose helpers --------------------------------------------------------
@@ -2207,21 +2207,15 @@ def build_l1_dashboard_app(
     (Overdraft, Limit Breach, Today's Exceptions). Each sheet IS one
     L1 SHOULD-constraint visualized via the M.1a.7 invariant views.
 
-    Dashboard ID convention: ``<resource_prefix>-<l2_prefix>-l1-dashboard``
-    (M.2d.3) — the L2 instance prefix becomes the middle segment so N
-    apps (L1, PR, Exec) can deploy against the same L2 instance, AND
-    the same app can deploy against N L2 instances, all in one QS
-    account without collision. The L2 instance prefix is derived
-    automatically from ``l2_instance.instance`` here so callers don't
-    have to pre-stamp ``cfg.l2_instance_prefix``; if the caller HAS
-    pre-set it (e.g. an integrator running a custom build), that
-    value is preserved.
+    Dashboard ID convention: ``<deployment_name>-l1-dashboard`` (Z.C) —
+    ``cfg.deployment_name`` is the operator-set per-deployment namespace
+    that lets N apps (L1, PR, Exec) deploy against the same L2 instance,
+    AND the same app deploy against N L2 instances, all in one QS account
+    without collision. The cfg arrives fully populated (``deployment_name``
+    + ``db_table_prefix`` are required cfg fields); no auto-stamping dance.
     """
     if l2_instance is None:
         l2_instance = default_l2_instance()
-
-    if cfg.l2_instance_prefix is None:
-        cfg = cfg.with_l2_instance_prefix(str(l2_instance.instance))
 
     # N.1.e / N.4.k — resolve theme once from the L2 instance, coerced
     # to the registry default for in-canvas accent colors when the

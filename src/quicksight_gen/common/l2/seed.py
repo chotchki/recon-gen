@@ -475,6 +475,7 @@ def emit_seed(
     instance: L2Instance,
     scenarios: ScenarioPlant,
     *,
+    prefix: str,
     dialect: Dialect = Dialect.POSTGRES,
 ) -> str:
     """Emit the full SQL INSERT script for the planted scenarios.
@@ -492,8 +493,9 @@ def emit_seed(
     Oracle (which uses ``INSERT ALL`` instead); per-row INSERT is
     the simpler portability choice and the perf cost is negligible
     for the demo's ~few-hundred-row scale.
+
+    Z.C — ``prefix`` is the cfg.db_table_prefix.
     """
-    prefix = instance.instance
     template_by_role = {t.role: t for t in instance.account_templates}
     parent_singleton_by_role = _parent_singletons(instance)
 
@@ -798,6 +800,7 @@ class _BaselineState:
 def emit_baseline_seed(
     instance: L2Instance,
     *,
+    prefix: str,
     window_days: int = 90,
     anchor: date | None = None,
     dialect: Dialect = Dialect.POSTGRES,
@@ -858,7 +861,6 @@ def emit_baseline_seed(
     if anchor is None:
         anchor = datetime.now(tz=timezone.utc).date()  # typing-smell: ignore[no-datetime-now]: ad-hoc-run fallback; locked seeds + tests always pass anchor=date(2030, 1, 1)
 
-    prefix = instance.instance
     template_by_role = {t.role: t for t in instance.account_templates}
 
     business_days = _business_days_in_window(anchor, window_days)
@@ -1031,7 +1033,7 @@ def emit_baseline_seed(
 
 
 def emit_truncate_sql(
-    instance: L2Instance, *, dialect: Dialect = Dialect.POSTGRES,
+    instance: L2Instance, *, prefix: str, dialect: Dialect = Dialect.POSTGRES,
 ) -> str:
     """Emit TRUNCATE statements for the per-prefix base + matview tables.
 
@@ -1060,8 +1062,10 @@ def emit_truncate_sql(
 
     Returns one SQL string. Idempotent — TRUNCATE on an empty table
     is a no-op. Use ``data clean -o FILE`` for the CLI surface.
+
+    Z.C — ``prefix`` is the cfg.db_table_prefix.
     """
-    p = instance.instance
+    p = prefix
     if dialect is Dialect.POSTGRES:
         body = (
             f"TRUNCATE TABLE {p}_transactions RESTART IDENTITY CASCADE;\n"
@@ -1106,6 +1110,7 @@ def emit_full_seed(
     instance: L2Instance,
     scenarios: ScenarioPlant,
     *,
+    prefix: str,
     baseline_window_days: int = 90,
     anchor: date | None = None,
     dialect: Dialect = Dialect.POSTGRES,
@@ -1143,12 +1148,13 @@ def emit_full_seed(
     """
     baseline_sql = emit_baseline_seed(
         instance,
+        prefix=prefix,
         window_days=baseline_window_days,
         anchor=anchor,
         dialect=dialect,
         base_seed=base_seed,
     )
-    plants_sql = emit_seed(instance, scenarios, dialect=dialect)
+    plants_sql = emit_seed(instance, scenarios, prefix=prefix, dialect=dialect)
     body = f"{baseline_sql}\n\n{plants_sql}"
     # X.1.k — stamp a SHA256 header on every emit so any saved-to-disk
     # SQL output identifies itself. The hash is deterministic against

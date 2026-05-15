@@ -67,7 +67,7 @@ from quicksight_gen.common.tree import Dataset
 
 
 def l2ft_matview_specs(
-    l2_instance: L2Instance,
+    cfg: Config,
 ) -> list[tuple[str, str | None]]:
     """Matviews + base tables the L2 Flow Tracing dashboard reads,
     paired with the date column for App Info's ``latest_date`` KPI.
@@ -76,7 +76,7 @@ def l2ft_matview_specs(
     operator can spot stale matviews against fresh ETL loads at a
     glance. Mirrors ``l1_matview_specs`` / ``inv_matview_specs``.
     """
-    p = str(l2_instance.instance)
+    p = cfg.db_table_prefix
     return [
         (f"{p}_transactions", "posting"),
         (f"{p}_daily_balances", "business_day_start"),
@@ -462,8 +462,6 @@ def build_all_l2_flow_tracing_datasets(
     with one unified UNION-ALL dataset (mirrors L1's todays-exceptions
     pattern — single KPI + bar chart + detail table).
     """
-    if cfg.l2_instance_prefix is None:
-        cfg = cfg.with_l2_instance_prefix(str(l2_instance.instance))
     return [
         build_postings_dataset(cfg, l2_instance),
         build_meta_values_dataset(cfg, l2_instance),
@@ -477,7 +475,7 @@ def build_all_l2_flow_tracing_datasets(
         build_liveness_dataset(cfg, app_segment="l2ft"),
         build_matview_status_dataset(
             cfg, app_segment="l2ft",
-            view_specs=l2ft_matview_specs(l2_instance),
+            view_specs=l2ft_matview_specs(cfg),
         ),
     ]
 
@@ -643,7 +641,7 @@ def build_postings_dataset(
 
     Date range stays an analysis-level TimeRangeFilter (Y.2.f territory).
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql = (
         f"SELECT * FROM (\n"
         f"  SELECT\n"
@@ -762,7 +760,7 @@ def build_meta_values_dataset(
     is replaced with `WHERE FALSE` so the dataset emits valid SQL
     that returns no rows.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     keys = declared_metadata_keys(l2_instance)
     if not keys:
         nt = typed_null("varchar(4000)", cfg.dialect)
@@ -822,7 +820,7 @@ def build_chains_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
     ARRAY_AGG (PG-only) to keep the SQL portable. The chains table is
     small (typically tens of entries), so the cost is bounded.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared = _declared_chains_cte(l2_instance, cfg.dialect)
     sql = (
         f"WITH declared AS (\n{declared}\n),\n"
@@ -922,7 +920,7 @@ def build_chain_instances_dataset(
     in practice. The chains table is bounded by L2 declarations
     (typically tens of entries) so the cost stays predictable.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared = _declared_chains_cte(l2_instance, cfg.dialect)
     sql = (
         f"WITH declared AS (\n{declared}\n),\n"
@@ -1093,7 +1091,7 @@ def build_exc_chain_orphans_dataset(
     substep — a precise XOR check needs per-Transfer-id grouping that
     the simpler aggregate doesn't capture.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared = _declared_chains_cte(l2_instance, cfg.dialect)
     sql = (
         f"WITH declared AS (\n{declared}\n),\n"
@@ -1152,7 +1150,7 @@ def build_exc_unmatched_transfer_type_dataset(
     Output is per-transfer-type with a count of postings carrying
     that type — the table reveals what's leaking past the L2's rails.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared = _declared_transfer_types_cte(l2_instance, cfg.dialect)
     sql = (
         f"WITH declared_types AS (\n{declared}\n)\n"
@@ -1184,7 +1182,7 @@ def build_exc_dead_rails_dataset(
     the detail table lists the dead rails so the integrator can
     decide whether to retire the declaration or fix the ETL.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared = _declared_rails_cte(l2_instance, cfg.dialect)
     sql = (
         f"WITH declared AS (\n{declared}\n),\n"
@@ -1220,7 +1218,7 @@ def build_exc_dead_bundles_activity_dataset(
     is one (aggregating_rail, target) pair the L2 declared but the
     runtime never realized.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared = _declared_bundles_activity_cte(l2_instance, cfg.dialect)
     sql = (
         f"WITH declared_bundles AS (\n{declared}\n)\n"
@@ -1255,7 +1253,7 @@ def build_exc_dead_metadata_dataset(
     accept dynamic JSONPath arguments to ``JSON_VALUE`` — keeps the
     SQL portable per the project's no-JSONB constraint.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     fragments = _dead_metadata_check_fragments(l2_instance, prefix, cfg.dialect)
     if not fragments:
         # No rails declare metadata_keys — empty result, valid SQL.
@@ -1288,7 +1286,7 @@ def build_exc_dead_limit_schedules_dataset(
     against. NOT EXISTS over the prefixed transactions matview keeps
     the query bounded by the (small) limit-schedule count.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared = _declared_limit_schedules_cte(l2_instance, cfg.dialect)
     sql = (
         f"WITH declared_limits AS (\n{declared}\n)\n"
@@ -1334,7 +1332,7 @@ def build_unified_l2_exceptions_dataset(
     `build_exc_*` queries, just projected to the unified shape via
     CASTs + literal `check_type` labels.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared_chains = _declared_chains_cte(l2_instance, cfg.dialect)
     declared_types = _declared_transfer_types_cte(l2_instance, cfg.dialect)
     declared_rails = _declared_rails_cte(l2_instance, cfg.dialect)
@@ -1851,7 +1849,7 @@ def build_tt_instances_dataset(
 
     Parameterized on pKey + pValues for the metadata cascade.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared_tt = _declared_templates_cte(l2_instance, cfg.dialect)
     declared_ch = _declared_chains_cte(l2_instance, cfg.dialect)
     sql = (
@@ -2057,7 +2055,7 @@ def build_tt_legs_dataset(
 
     Parameterized on pKey + pValues for the metadata cascade.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared_tt = _declared_templates_cte(l2_instance, cfg.dialect)
     declared_ch = _declared_chains_cte(l2_instance, cfg.dialect)
     sql = (

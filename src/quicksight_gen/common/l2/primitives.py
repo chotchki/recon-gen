@@ -20,9 +20,13 @@ Per F4: Money values are ``Decimal``; the YAML loader (M.1.2) is
 responsible for the ``Decimal(str(value))`` coercion that dodges YAML
 float precision.
 
-Per F5: ``InstancePrefix`` (the ``L2Instance.instance`` field) MUST
-match ``^[a-z][a-z0-9_]*$`` with max 30 characters — enforced by the
-loader's identifier validator (M.1.2).
+Z.C (2026-05-15) — the legacy ``L2Instance.instance`` field has been
+dropped. The DB-table prefix (formerly enforced via SPEC F5's
+``^[a-z][a-z0-9_]*$``/30-char cap on the ``instance:`` YAML key) now
+lives on the cfg as ``cfg.db_table_prefix``; the same regex/cap is
+enforced by ``common/config.py``'s loader at cfg-load time. The
+QS-resource-ID prefix lives as ``cfg.deployment_name`` (replaces the
+former ``cfg.resource_prefix`` + ``cfg.l2_instance_prefix`` pair).
 
 Per F1 + SPEC's load-time validation list: every Role referenced by a
 Rail or AccountTemplate MUST resolve to either a declared ``Account``
@@ -380,13 +384,13 @@ class LimitSchedule:
 class L2Instance:
     """A loaded + parsed L2 institutional model.
 
-    The ``instance`` field is the InstancePrefix per SPEC's storage
-    isolation rule — propagates onto every generated DB object and
-    QuickSight resource ID. Validator enforces the
-    ``^[a-z][a-z0-9_]*$`` regex + 30-char cap (F5).
+    Z.C (2026-05-15) — the legacy ``instance`` field has been dropped.
+    The DB-table prefix lives on the cfg as ``cfg.db_table_prefix``;
+    the QS-resource-ID prefix lives as ``cfg.deployment_name``. Each
+    L2 YAML is pure topology + persona + theme; the cfg yaml carries
+    the deployment-specific identifiers.
     """
 
-    instance: Identifier
     accounts: tuple[Account, ...]
     account_templates: tuple[AccountTemplate, ...]
     rails: tuple[Rail, ...]

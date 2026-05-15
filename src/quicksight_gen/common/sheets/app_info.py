@@ -309,7 +309,7 @@ def populate_app_info_sheet(
     accent = theme.accent
     version, sha, ts = _deploy_stamp()
     dialect = cfg.dialect.value
-    prefix = cfg.l2_instance_prefix or "(none)"
+    prefix = cfg.deployment_name
 
     # Row 1: liveness KPI (left half) + matview status table (right half).
     top = sheet.layout.row(height=_TABLE_HEIGHT)

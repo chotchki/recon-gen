@@ -667,10 +667,9 @@ def docs_screenshot(
     for slug in apps_to_capture:
         click.echo(f"== {slug} ==")
         app_obj = _build_app_for_screenshots(slug, cfg, l2_instance)
-        # Dashboard ID convention: cfg.prefixed(<dashboard_id_suffix>).
-        # MUST use app_obj.cfg, not the outer cfg — the builders auto-
-        # derive cfg.l2_instance_prefix from l2_instance.instance and
-        # store the updated cfg on the app.
+        # Dashboard ID convention: cfg.prefixed(<dashboard_id_suffix>) —
+        # Z.C: the cfg arrives fully-populated with cfg.deployment_name,
+        # so app_obj.cfg and the outer cfg agree on the namespace.
         dashboard_suffix = app_obj.dashboard.dashboard_id_suffix
         dashboard_id = app_obj.cfg.prefixed(dashboard_suffix)
         click.echo(

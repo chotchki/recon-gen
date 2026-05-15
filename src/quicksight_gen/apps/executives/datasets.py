@@ -48,18 +48,14 @@ from quicksight_gen.common.sql.dialect import Dialect
 # M.4.4.5 — Executives reads base tables only; no app-specific
 # matviews. V.3 — but we still surface the base tables themselves on
 # the App Info sheet so the operator can see ETL freshness at a
-# glance. Sourced from cfg.l2_instance_prefix (always set when the
-# Executives app is built via resolve_l2_for_demo); empty list when
-# the prefix is None (legacy single-tenant mode that doesn't use
-# this app).
+# glance. Z.C — sourced from cfg.db_table_prefix (now a required cfg
+# field; loud-fails at load time when unset).
 def exec_matview_specs(cfg: Config) -> list[tuple[str, str | None]]:
     """Tables Executives reads, paired with their date columns for
     App Info's ``latest_date`` KPI. No app-specific matviews — just
     the base tables (which is what the Executives sheets aggregate
     over)."""
-    p = cfg.l2_instance_prefix
-    if not p:
-        return []
+    p = cfg.db_table_prefix
     return [
         (f"{p}_transactions", "posting"),
         (f"{p}_daily_balances", "business_day_start"),
@@ -103,22 +99,6 @@ EXEC_ACCOUNT_SUMMARY_CONTRACT = DatasetContract(columns=[
 # Builders
 # ---------------------------------------------------------------------------
 
-def _require_prefix(cfg: Config) -> str:
-    """Return ``cfg.l2_instance_prefix`` or raise.
-
-    Executives under L2-fed (N.4) requires ``build_executives_app`` to
-    have set ``cfg.l2_instance_prefix`` before any dataset SQL is
-    rendered. Build entry points either pre-stamp the field on the cfg
-    or auto-derive it from ``l2_instance.instance``.
-    """
-    if cfg.l2_instance_prefix is None:
-        raise ValueError(
-            "Executives datasets require cfg.l2_instance_prefix to be "
-            "set; build_executives_app derives it from the L2 instance."
-        )
-    return cfg.l2_instance_prefix
-
-
 def build_transaction_summary_dataset(cfg: Config) -> DataSet:
     """Per-(date, rail_name) aggregates: transfer count, gross + net dollars.
 
@@ -137,7 +117,7 @@ def build_transaction_summary_dataset(cfg: Config) -> DataSet:
     # filter comes from the analysis-level FilterGroup); App2 gets
     # the bind-clause snippet from ``app2_date_filter`` so X.2.d's
     # filter form actually narrows the query.
-    p = _require_prefix(cfg)
+    p = cfg.db_table_prefix
     posted_date_expr = to_date("MIN(t.posting)", cfg.dialect)
     sql_template = f"""\
 WITH per_transfer AS (
@@ -232,7 +212,7 @@ def build_account_summary_dataset(cfg: Config) -> DataSet:
     (output column kept as ``account_type`` so dashboard-side consumers
     don't need to follow the rename — only the SELECT does).
     """
-    p = _require_prefix(cfg)
+    p = cfg.db_table_prefix
     template = _account_summary_sql_template(p, cfg.dialect)
     sql = template.format(date_filter="", active_only="")
     return build_dataset(
@@ -264,7 +244,7 @@ def build_account_summary_active_dataset(cfg: Config) -> DataSet:
     (via ``app2_date_filter("")`` → analysis-level FilterGroup) and
     App2 (``:date_from`` / ``:date_to`` URL binds).
     """
-    p = _require_prefix(cfg)
+    p = cfg.db_table_prefix
     # Pre-substitute the {active_only} slot (identical on both QS + App2
     # sides), leaving {date_filter} for build_dataset's app2_date_column
     # path to fill in per dialect. .replace (not .format) — leaves the

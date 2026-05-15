@@ -370,7 +370,9 @@ def _template_cluster_label(template: TransferTemplate) -> str:
     return str(template.name)
 
 
-def topology_graph_for(instance: L2Instance) -> TopologyGraph:
+def topology_graph_for(
+    instance: L2Instance, *, db_table_prefix: str,
+) -> TopologyGraph:
     """Walk an L2Instance and return its typed topology projection.
 
     Pure construction — no graphviz import, no rendering, no I/O. Both
@@ -381,6 +383,11 @@ def topology_graph_for(instance: L2Instance) -> TopologyGraph:
     (roles sorted; templates in declaration order; chains in
     declaration order) so the graphviz renderer that consumes it
     produces the same DOT shape it always did.
+
+    Z.C — ``db_table_prefix`` is the cfg.db_table_prefix (formerly read
+    off the dropped ``L2Instance.instance`` field) and surfaces as
+    ``TopologyGraph.instance_name`` so the rendered diagram still
+    carries the operator-facing prefix label.
     """
     nodes: list[TopologyNode] = []
     edges: list[TopologyEdge] = []
@@ -564,7 +571,7 @@ def topology_graph_for(instance: L2Instance) -> TopologyGraph:
             ))
 
     return TopologyGraph(
-        instance_name=str(instance.instance),
+        instance_name=db_table_prefix,  # Z.C — was str(instance.instance)
         nodes=tuple(nodes),
         edges=tuple(edges),
     )
@@ -613,6 +620,7 @@ def _focus_set(
 def build_topology_graph_per_rail(
     instance: L2Instance,
     *,
+    db_table_prefix: str,
     bundle_parallel_rails: bool = True,
     focus_node_id: str | None = None,
     layer: int = 3,
@@ -679,10 +687,10 @@ def build_topology_graph_per_rail(
     import graphviz
 
     g: Any = graphviz.Digraph(
-        name=f"l2_topology_per_rail_{instance.instance}",
+        name=f"l2_topology_per_rail_{db_table_prefix}",  # Z.C — was instance.instance
         comment=(
             f"L2 topology (rails as nodes) for instance "
-            f"'{instance.instance}'"
+            f"'{db_table_prefix}'"
         ),
     )
     # Compactness pass: tighter node/rank spacing, higher mclimit (more
@@ -876,7 +884,7 @@ def build_topology_graph_per_rail(
     show_chains_and_templates = layer >= 3
 
     # Phase A — Role nodes (top-level, referenced only, in focus).
-    typed = topology_graph_for(instance)
+    typed = topology_graph_for(instance, db_table_prefix=db_table_prefix)
     for n in typed.nodes:
         if n.kind != "role":
             continue

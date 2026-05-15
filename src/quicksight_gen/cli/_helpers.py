@@ -67,13 +67,13 @@ def prune_stale_files(directory: Path, *, keep: set[str]) -> None:
 def resolve_l2_for_demo(
     config_path: str, l2_instance_path: str | None,
 ):  # type: ignore[no-untyped-def]: returns (Config, L2Instance) — both typed but tuple unpacks at every caller
-    """Load config + L2 instance and stamp the per-instance prefix on cfg.
+    """Load config + L2 instance.
 
     Returns ``(cfg, instance)``. Mirrors the prelude every ``apply``
     operation needs: load YAML, resolve to either the bundled
-    spec_example or the integrator's own L2, stamp
-    ``cfg.l2_instance_prefix`` so downstream SQL (REFRESH MATERIALIZED
-    VIEW, dataset IDs) lands on the right per-prefix objects.
+    spec_example or the integrator's own L2. Z.C — cfg already carries
+    ``cfg.deployment_name`` (QS resource-ID prefix) +
+    ``cfg.db_table_prefix`` (DB-table prefix); no auto-stamping needed.
     """
     from quicksight_gen.apps.l1_dashboard._l2 import default_l2_instance
 
@@ -83,8 +83,6 @@ def resolve_l2_for_demo(
         instance = load_instance(Path(l2_instance_path))
     else:
         instance = default_l2_instance()
-    if cfg.l2_instance_prefix is None:
-        cfg = cfg.with_l2_instance_prefix(str(instance.instance))
     return cfg, instance
 
 
@@ -171,7 +169,8 @@ def build_full_seed_sql(cfg, instance, *, anchor=None, density: float = 1.0, pla
         instance, anchor=anchor, density=density, plants=plants,
     )
     return emit_full_seed(
-        instance, final, dialect=cfg.dialect, anchor=anchor, base_seed=base_seed,
+        instance, final, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+        anchor=anchor, base_seed=base_seed,
     )
 
 

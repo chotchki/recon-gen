@@ -11,7 +11,7 @@ For anything operator-facing prefer the CLI subcommand:
     quicksight-gen dashboards -c config.yaml --l2 run/sasquatch_pr.yaml
 
 The CLI version takes a real config + L2 instance, so the Sheet's
-``app.cfg.l2_instance_prefix`` matches the prefix the X.2.a.4
+``app.cfg.db_table_prefix`` matches the prefix the X.2.a.4
 DataFetcher will key the SQL off.
 """
 

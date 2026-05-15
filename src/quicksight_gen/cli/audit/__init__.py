@@ -166,16 +166,16 @@ def _resolve_period(
     return start, end
 
 
-def _institution_name(instance) -> str:  # type: ignore[no-untyped-def]: instance is L2Instance, untyped pending audit-CLI sweep
+def _institution_name(instance, cfg) -> str:  # type: ignore[no-untyped-def]: instance is L2Instance, cfg is Config — untyped pending audit-CLI sweep
     """Pull the institution display name from the L2 persona block.
 
-    Falls back to the L2 instance identifier when no persona block is
+    Falls back to the cfg's deployment name when no persona block is
     declared — the report still renders cleanly against any L2 YAML.
     """
     persona = getattr(instance, "persona", None)
     if persona is not None and persona.institution:
         return str(persona.institution[0])
-    return str(instance.instance)
+    return str(cfg.deployment_name)
 
 
 def _singleton_account_ids(instance) -> set[str]:  # type: ignore[no-untyped-def]: instance is L2Instance, untyped pending audit-CLI sweep
@@ -264,7 +264,7 @@ def _query_executive_summary(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     start, end = period
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
@@ -388,7 +388,7 @@ def _query_drift_violations(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     start, end = period
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
@@ -463,7 +463,7 @@ def _query_overdraft_violations(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     start, end = period
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
@@ -600,7 +600,7 @@ def _query_limit_breach_violations(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     start, end = period
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
@@ -743,7 +743,7 @@ def _query_stuck_pending_violations(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -883,7 +883,7 @@ def _query_stuck_unbundled_violations(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1029,7 +1029,7 @@ def _query_supersession(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     start, end = period
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
@@ -1188,7 +1188,7 @@ def _query_daily_statement_walks(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     start, end = period
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
@@ -1383,7 +1383,7 @@ def _query_matview_evidence(
     from quicksight_gen.common.db import connect_demo_db
     from quicksight_gen.common.provenance import hash_matview_rows
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     out: list[MatviewEvidence] = []
     conn = connect_demo_db(cfg)
     try:
@@ -1438,12 +1438,12 @@ def audit_apply(
 
     _cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
     start, end = _resolve_period(period_from, period_to)
-    institution = _institution_name(instance)
+    institution = _institution_name(instance, _cfg)
     generated_at = datetime.now()
     l2_label = (
         Path(l2_instance_path).name
         if l2_instance_path is not None
-        else f"{instance.instance} (bundled)"
+        else f"{_cfg.deployment_name} (bundled)"
     )
     exec_summary = _query_executive_summary(_cfg, instance, (start, end))
     drift_rows = _query_drift_violations(_cfg, instance, (start, end))
@@ -1656,7 +1656,7 @@ def audit_verify(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()

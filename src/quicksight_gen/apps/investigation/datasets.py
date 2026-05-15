@@ -73,16 +73,16 @@ _INV_MATVIEW_BARE_SPECS: list[tuple[str, str | None]] = [
 
 
 def inv_matview_specs(
-    l2_instance: L2Instance,
+    cfg: Config,
 ) -> list[tuple[str, str | None]]:
-    """The L2-prefixed Inv matviews + base tables the dashboard reads,
+    """The deployment-prefixed Inv matviews + base tables the dashboard reads,
     paired with the date column for App Info's ``latest_date`` KPI.
 
     Includes the base tables (transactions / daily_balances) so the
     operator can spot stale matviews against fresh ETL loads at a
     glance. Mirrors ``l1_matview_specs`` / ``l2ft_matview_specs``.
     """
-    p = str(l2_instance.instance)
+    p = cfg.db_table_prefix
     return [
         (f"{p}_transactions", "posting"),
         (f"{p}_daily_balances", "business_day_start"),
@@ -247,22 +247,6 @@ def _anetwork_accounts_sql(prefix: str) -> str:
     )
 
 
-def _require_prefix(cfg: Config) -> str:
-    """Return ``cfg.l2_instance_prefix`` or raise.
-
-    Investigation under L2-fed (N.3) requires ``build_investigation_app``
-    to have set ``cfg.l2_instance_prefix`` before any dataset SQL is
-    rendered. Build entry points either pre-stamp the field on the cfg
-    or auto-derive it from ``l2_instance.instance``.
-    """
-    if cfg.l2_instance_prefix is None:
-        raise ValueError(
-            "Investigation datasets require cfg.l2_instance_prefix to be "
-            "set; build_investigation_app derives it from the L2 instance."
-        )
-    return cfg.l2_instance_prefix
-
-
 _DEFAULT_FANOUT_THRESHOLD_DSP = 5
 
 # Y.3.a — dataset parameter id for the threshold pushdown. The PARAMETER
@@ -294,7 +278,7 @@ def build_recipient_fanout_dataset(cfg: Config) -> DataSet:
     (which QS handled but App2 didn't apply). Both renderers now see
     one shape.
     """
-    p = _require_prefix(cfg)
+    p = cfg.db_table_prefix
     # Two-CTE pattern instead of window: PG raises
     # "FeatureNotSupported: DISTINCT is not implemented for window
     # functions" on `COUNT(DISTINCT col) OVER (PARTITION BY ...)`.
@@ -417,7 +401,7 @@ def build_volume_anomalies_dataset(cfg: Config) -> DataSet:
     via ``MappedDataSetParameters`` declared on the parameter
     declaration in ``apps/investigation/app.py``.
     """
-    p = _require_prefix(cfg)
+    p = cfg.db_table_prefix
     sql = (
         f"SELECT * FROM {p}_inv_pair_rolling_anomalies "
         f"WHERE 1=1 AND z_score >= <<${P_INV_ANOMALIES_SIGMA}>>"
@@ -465,7 +449,7 @@ def build_volume_anomalies_distribution_dataset(cfg: Config) -> DataSet:
     Y.2 will reuse this pattern wherever a FilterGroup with
     SELECTED_VISUALS scope gets pushed to dataset SQL.
     """
-    p = _require_prefix(cfg)
+    p = cfg.db_table_prefix
     sql = f"SELECT * FROM {p}_inv_pair_rolling_anomalies"
     return build_dataset(
         cfg,
@@ -527,7 +511,7 @@ def build_money_trail_dataset(cfg: Config) -> DataSet:
     ``translate_qs_dataset_params`` preprocessor in ``_sql_executor``
     rewrites ``<<$pName>>`` → ``:param_pName`` bind variables.
     """
-    p = _require_prefix(cfg)
+    p = cfg.db_table_prefix
     base = _money_trail_base_sql(p)
     sql = (
         f"{base}WHERE 1=1\n"
@@ -585,7 +569,7 @@ def build_money_trail_roots_dataset(cfg: Config) -> DataSet:
     (Y.1.b.companion) and ``build_account_network_accounts_dataset``
     (K.4.8k).
     """
-    p = _require_prefix(cfg)
+    p = cfg.db_table_prefix
     sql = (
         f"SELECT DISTINCT root_transfer_id\n"
         f"FROM {p}_inv_money_trail_edges"
@@ -646,7 +630,7 @@ def build_account_network_dataset(cfg: Config) -> DataSet:
     (K.4.8k) — already an unfiltered companion shape. No new
     companion dataset needed for Y.2.b.
     """
-    p = _require_prefix(cfg)
+    p = cfg.db_table_prefix
     # CTE wrap: ``source_display`` / ``target_display`` are SELECT-list
     # aliases over concat expressions, not real matview columns. PG /
     # Oracle / SQLite all evaluate WHERE before SELECT, so the aliases
@@ -728,7 +712,7 @@ def build_account_network_accounts_dataset(cfg: Config) -> DataSet:
         cfg.prefixed("inv-anetwork-accounts-dataset"),
         "Investigation Account Network — Accounts",
         "inv-anetwork-accounts",
-        _anetwork_accounts_sql(_require_prefix(cfg)),
+        _anetwork_accounts_sql(cfg.db_table_prefix),
         ANETWORK_ACCOUNTS_CONTRACT,
         visual_identifier=DS_INV_ANETWORK_ACCOUNTS,
     )
@@ -739,10 +723,12 @@ def build_all_datasets(
 ) -> list[DataSet]:
     """Return every dataset Investigation's sheets reference.
 
-    ``l2_instance`` is required for App Info matview names (which need
-    the L2 prefix). Mirrors the L1 / L2FT / Exec ``build_all_datasets``
-    signatures — every L2-fed app threads the instance explicitly.
+    Z.C: ``l2_instance`` is no longer load-bearing for the prefix —
+    that comes from ``cfg.db_table_prefix`` now — but the parameter
+    stays for signature parity with the L1 / L2FT / Exec
+    ``build_all_datasets`` callers.
     """
+    del l2_instance  # Z.C — prefix comes from cfg.db_table_prefix
     return [
         build_recipient_fanout_dataset(cfg),
         build_volume_anomalies_dataset(cfg),
@@ -757,7 +743,7 @@ def build_all_datasets(
         build_liveness_dataset(cfg, app_segment="inv"),
         build_matview_status_dataset(
             cfg, app_segment="inv",
-            view_specs=inv_matview_specs(l2_instance),
+            view_specs=inv_matview_specs(cfg),
         ),
     ]
 

@@ -2317,9 +2317,9 @@ def _resolve_l2_yaml_for_spec(spec: VariantSpec, run_dir: Path) -> Path:
       ``sp_pg_aw_transactions``) instead of ``spec_example_transactions``.
       Sister cells (sp_pg_aw + sp_or_aw + sq_pg_aw + ...) deploy to
       non-colliding tables on shared external Aurora.
-    - cfg.l2_instance_prefix derives from the synthesized instance
-      via the existing ``cfg.with_l2_instance_prefix(instance.instance)``
-      chain — no env override needed.
+    - cfg.db_table_prefix is set per-cell to the synthesized instance
+      name (Z.C — formerly derived via cfg.l2_instance_prefix /
+      cfg.with_l2_instance_prefix(instance.instance)).
     - Fuzz determinism preserved: same seed → same fuzzer output →
       same synthesized yaml (the instance-rename is the only
       per-cell mutation, derivable from spec.name).
@@ -2491,11 +2491,12 @@ def _run_one_variant(
     l2_yaml = _resolve_l2_yaml_for_spec(spec, run_dir)
     variant_env[QS_GEN_TEST_L2_INSTANCE.name] = str(l2_yaml)
     # m.4.f — the synthesized yaml's `instance` field IS spec.name,
-    # so cfg.with_l2_instance_prefix(instance.instance) downstream
-    # produces per-cell-unique QS resource IDs naturally. The
-    # explicit QS_GEN_L2_INSTANCE_PREFIX env override is no longer
-    # set by the runner (the env var stays in env_keys/cfg as a
-    # general-purpose escape hatch, just no longer needed here).
+    # so cfg.db_table_prefix downstream (Z.C — formerly
+    # cfg.with_l2_instance_prefix(instance.instance)) produces per-cell-
+    # unique QS resource IDs naturally. The explicit
+    # QS_GEN_L2_INSTANCE_PREFIX env override is no longer set by the
+    # runner (the env var stays in env_keys/cfg as a general-purpose
+    # escape hatch, just no longer needed here).
 
     if variant_env:
         for key, val in variant_env.items():

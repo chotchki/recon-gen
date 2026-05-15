@@ -698,11 +698,11 @@ def _wire_date_range_filter(
 # App entry points
 # ---------------------------------------------------------------------------
 
-def _analysis_name(l2_instance: L2Instance) -> str:
-    """Title shown in QuickSight — matches L1/L2FT's ``Name (instance)``
-    shape so multi-instance deployments are visually distinguishable
-    in the dashboard list."""
-    return f"Executives ({l2_instance.instance})"
+def _analysis_name(cfg: Config) -> str:
+    """Title shown in QuickSight — matches L1/L2FT's ``Name (deployment)``
+    shape so multi-deployment runs are visually distinguishable in the
+    dashboard list."""
+    return f"Executives ({cfg.deployment_name})"
 
 
 # Sheet display order. Pre-register-all-shells pattern (mirrors
@@ -731,20 +731,17 @@ def build_executives_app(
     """Construct the Executives App as a tree (N.4.b — L2-fed).
 
     Per the N.2 audit, Executives is fed by the same institution YAML
-    that drives L1 / L2FT / Investigation. The L2 instance prefix is
-    auto-derived from ``l2_instance.instance`` here so callers don't
-    have to pre-stamp ``cfg.l2_instance_prefix``; if the caller HAS
-    pre-set it, that value is preserved. Defaults to the
-    persona-neutral ``spec_example`` instance.
+    that drives L1 / L2FT / Investigation. Z.C: the deployment +
+    DB-table prefixes are required cfg fields — both come from
+    ``cfg.deployment_name`` (QS-resource segment) and
+    ``cfg.db_table_prefix`` (DB table-name prefix). Defaults to the
+    persona-neutral ``spec_example`` L2 instance.
 
-    Executives reads from ``<prefix>_transactions`` +
-    ``<prefix>_daily_balances``. No app-specific matviews.
+    Executives reads from ``<db_table_prefix>_transactions`` +
+    ``<db_table_prefix>_daily_balances``. No app-specific matviews.
     """
     if l2_instance is None:
         l2_instance = default_l2_instance()
-
-    if cfg.l2_instance_prefix is None:
-        cfg = cfg.with_l2_instance_prefix(str(l2_instance.instance))
 
     # N.4.c / N.4.k: theme from the L2 instance, coerced to the
     # registry default for in-canvas accent colors when the instance
@@ -754,7 +751,7 @@ def build_executives_app(
     from quicksight_gen.common.theme import DEFAULT_PRESET
     theme = resolve_l2_theme(l2_instance) or DEFAULT_PRESET
 
-    analysis_name = _analysis_name(l2_instance)
+    analysis_name = _analysis_name(cfg)
     app = App(name="executives", cfg=cfg)
     analysis = app.set_analysis(Analysis(
         analysis_id_suffix="executives-analysis",

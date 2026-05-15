@@ -53,9 +53,10 @@ def serialize_l2(instance: L2Instance) -> str:
     a `git diff` against the original is a clean per-field move when
     fields shift, not a wholesale re-sort.
     """
-    out: dict[str, Any] = {  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload — every value is something safe_dump can write
-        "instance": str(instance.instance),
-    }
+    # Z.C — the legacy ``instance:`` field is gone; the deployment
+    # identifier lives on cfg.yaml (``deployment_name`` /
+    # ``db_table_prefix``), not on the L2 yaml.
+    out: dict[str, Any] = {}  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload — every value is something safe_dump can write
     if instance.description is not None:
         out["description"] = instance.description
     if instance.accounts:
