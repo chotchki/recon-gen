@@ -548,18 +548,35 @@ def test_layer_command_browser_dispatches_pytest_marked_browser(monkeypatch: Any
     `./run_e2e.sh` pattern). QS_E2E_USER_ARN comes through from the h.1
     derivation in `_run_one_variant`'s variant_env. Y.7-followup: the
     browser layer also gets `--reruns` (flaky live-cloud e2e auto-retry)
-    and a 60 s `QS_E2E_PAGE_TIMEOUT` default (operator override wins)."""
+    and a 60 s `QS_E2E_PAGE_TIMEOUT` default (operator override wins).
+
+    Z.B.12-followup (2026-05-15): the layer dispatches via a ``bash -c``
+    shell wrapper that chains TWO sequential pytest invocations — the
+    main browser tier with ``-n 4`` (excluding the audit-dashboard
+    agreement file via ``--ignore``) followed by the agreement file
+    with ``-n 1`` (its module-scoped ``seeded_audit`` fixture races
+    multiple workers on persistent Aurora schema applies). So we
+    assert against the joined shell string, not the argv list."""
     monkeypatch.delenv(QS_E2E_PAGE_TIMEOUT.name, raising=False)
     cmd_env = runner._layer_command("browser", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env = cmd_env
-    assert cmd[0].endswith("/pytest")
-    assert "-m" in cmd and "browser" in cmd
-    assert "tests/e2e/" in cmd
+    # bash -c '<chained pytests>'
+    assert cmd[0] == "bash"
+    assert cmd[1] == "-c"
+    chained = cmd[2]
+    assert "/pytest" in chained
+    assert "-m browser" in chained
+    assert "tests/e2e/" in chained
+    assert "--ignore=tests/e2e/test_audit_dashboard_agreement.py" in chained
+    assert "tests/e2e/test_audit_dashboard_agreement.py" in chained
+    # Two -n flags: the main tier (-n 4) AND the agreement tier (-n 1).
+    assert chained.count("-n ") >= 2
+    assert "-n 4" in chained
+    assert "-n 1" in chained
     assert env.get(QS_GEN_E2E.name) == "1"
-    assert "-n" in cmd and "4" in cmd
     # Y.7-followup — flaky-e2e retry + per-page timeout bump.
-    assert "--reruns" in cmd
+    assert "--reruns" in chained
     assert env.get(QS_E2E_PAGE_TIMEOUT.name) == "60000"
     # ...but an operator-set value wins (no env entry → subprocess
     # inherits the operator's).

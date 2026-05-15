@@ -35,6 +35,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -733,27 +734,68 @@ def _layer_command(
         # `./run_e2e.sh` pattern (browser tier is heavy enough that 8+
         # workers thrash QS embed limits). Behind `QS_GEN_E2E=1`.
         # `QS_E2E_USER_ARN` already in subprocess env via h.1 derivation.
-        cmd = [
-            str(_VENV_BIN / "pytest"), "tests/e2e/", "-m", "browser", "-q",
+        #
+        # Z.B.12-followup (2026-05-15) — split into two sequential pytest
+        # invocations via a shell wrapper:
+        #   1. The main browser tier with `-n 4` workers, ignoring the
+        #      audit-dashboard-agreement file.
+        #   2. ONLY ``test_audit_dashboard_agreement.py`` with ``-n 1`` —
+        #      its module-scoped ``seeded_audit`` fixture re-applies the
+        #      dialect schema (DROP MATERIALIZED VIEW + CREATE …); on
+        #      ``aw`` target with persistent Aurora the conftest's
+        #      ``--dist loadgroup`` bump has been observed not to pin
+        #      both parametrizations onto a single worker, so multiple
+        #      workers race the schema apply (Oracle DDL auto-commits;
+        #      ORA-12006 fires when worker B's CREATE collides with
+        #      worker A's). Forcing a single worker is the only race-free
+        #      way; the test only contributes a few minutes total so the
+        #      sequential run isn't a meaningful wall-clock cost. CI's
+        #      ``e2e-pg-browser`` job already follows this pattern (the
+        #      file runs as a separate step).
+        nworkers = str(opts.parallel) if opts.parallel > 1 else "4"
+        only = ["-k", opts.only] if opts.only else []
+        agree_file = "tests/e2e/test_audit_dashboard_agreement.py"
+        main_cmd = [
+            str(_VENV_BIN / "pytest"), "tests/e2e/",
+            f"--ignore={agree_file}",
+            "-m", "browser", "-q",
+            *only, *_cov_args,
+            "-n", nworkers,
+            # Y.7-followup — auto-retry a flaky browser test
+            # (``pytest-rerunfailures``, in the [dev] extra) instead of
+            # failing the whole chain on it. The browser tier walks a
+            # live QuickSight embed under ``-n 4`` worker contention;
+            # the structure tests ("every visual rendered, one snapshot
+            # budget") occasionally lose a visual from the DOM when QS
+            # is rate-limiting under the concurrent load (Oracle-`aw`
+            # worst: slower per-query latency = workers hold QS sessions
+            # longer = more concurrent pressure — the underlying queries
+            # are ~8 ms and the data returns; it's a render-timing
+            # flake, passes on re-run / in isolation). The rerun happens
+            # INSIDE this same pytest invocation (xdist re-runs on the
+            # same worker), not by restarting the chain — so a flake
+            # costs ~one test re-run, not a whole ``unit→…→browser``
+            # cycle. A test that's genuinely broken fails 3× → still
+            # halts.
+            "--reruns", "2", "--reruns-delay", "10",
         ]
-        if opts.only:
-            cmd += ["-k", opts.only]
-        cmd += _cov_args
-        cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "4"]
-        # Y.7-followup — auto-retry a flaky browser test (`pytest-rerunfailures`,
-        # in the [dev] extra) instead of failing the whole chain on it. The
-        # browser tier walks a live QuickSight embed under `-n 4` worker
-        # contention; the structure tests ("every visual rendered, one
-        # snapshot budget") occasionally lose a visual from the DOM when QS
-        # is rate-limiting under the concurrent load (Oracle-`aw` worst:
-        # slower per-query latency = workers hold QS sessions longer = more
-        # concurrent pressure — the underlying queries are ~8 ms and the
-        # data returns; it's a render-timing flake, passes on re-run / in
-        # isolation). The rerun happens INSIDE this same pytest invocation
-        # (xdist re-runs on the same worker), not by restarting the chain —
-        # so a flake costs ~one test re-run, not a whole `unit→…→browser`
-        # cycle. A test that's genuinely broken fails 3× → still halts.
-        cmd += ["--reruns", "2", "--reruns-delay", "10"]
+        agree_cmd = [
+            str(_VENV_BIN / "pytest"), agree_file, "-q",
+            *only, *_cov_args,
+            "-n", "1",
+            "--reruns", "2", "--reruns-delay", "10",
+        ]
+        # ``bash -c '… && …'`` chains the two pytest invocations
+        # sequentially; the shell exits non-zero if EITHER fails, which
+        # is what dispatch_layer's stop-on-first-failure honors. Quote
+        # each argv element so paths/args with spaces survive (none in
+        # practice but defensive).
+        chained = (
+            " ".join(shlex.quote(a) for a in main_cmd)
+            + " && "
+            + " ".join(shlex.quote(a) for a in agree_cmd)
+        )
+        cmd = ["bash", "-c", chained]
         # Bump the per-page Playwright timeout for the browser layer to 60 s
         # (matches the CI `e2e-pg-browser` job). The default 30 s
         # (tests/e2e/conftest.py) is fine for a local-pg container but too

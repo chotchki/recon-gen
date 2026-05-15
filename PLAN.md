@@ -532,12 +532,25 @@ Surfaced 2026-05-13 during the `X.4.f.10.followup` C4.1 validator add (the "requ
 - [x] **Z.B.10 — Tests update.** `test_l2_validate.py` (drop U6 + R10 tests; update U5 + R7); `test_l2_loader.py` (drop transfer_type fixtures, add legacy-key rejection tests); `test_l2_pr_primitives.py`; `test_l2_editor.py`; `test_studio_editor_routes.py` (Rail card drops transfer_type field; LimitSchedule card field rename).
 - [x] **Z.B.11 — SPEC + Schema_v6 + handbook prose.** Drop the transfer_type vocabulary section entirely from `docs/Schema_v6.md` (was net-add in Z.B.original; now net-remove). Update SPEC L1 theorems that reference `transfer_type` to reference `rail_name`. The "name vs type" distinction handbook section the Z.B.original would have authored becomes a "rail name is the identifier" callout instead.
 - [x] **Z.B.12 — Drop degenerate `transfer_type` filter controls in dashboards.** Under collapse, a `transfer_type` ParameterDropDown is fully redundant with a `rail_name` dropdown — same selectable values, same narrowing semantic. Sweep `apps/l1_dashboard/`, `apps/l2_flow_tracing/`, `apps/investigation/` for ParameterDropDownControls bound to a `pTransferType` (or similar) parameter and either drop them entirely or merge into the rail_name dropdown. Touches dataset SQL too — `WHERE transfer_type IN (<<$pTransferType>>)` clauses get dropped or rewritten as `rail_name`. Coordinate with AA.A so we don't touch the same control twice (Z.B.12 lands first; AA.A doesn't see those dropdowns).
-- [ ] **Z.B.13 — Re-lock seeds (folds into Z.C).** Column drop changes seed bytes (every transactions INSERT loses one column). Re-lock spec_example + sasquatch_pr per-dialect via `quicksight-gen data lock -c run/config.<pg|oracle|sqlite>.yaml --l2 …`.
+- [ ] **Z.B.13 — Re-lock seeds (folds into Z.D).** Column drop changes seed bytes (every transactions INSERT loses one column). Re-lock spec_example + sasquatch_pr per-dialect via `quicksight-gen data lock -c run/config.<pg|oracle|sqlite>.yaml --l2 …`.
 
-### Z.C — End-of-phase
+### Z.C — Split `instance` into separate display name + DB prefix, move to cfg.yaml
 
-- [ ] **Z.C.1 — Verify (unit + db layer + AW probe).** Subsumes Z.15; runs after both Z.A and Z.B land. Same matrix as Z.15.
-- [ ] **Z.C.2 — Commit, tick PLAN, push.** ci.yml runs the full chain. Plan archive sweep + summary line.
+Surfaced 2026-05-15 during the Z.B browser-layer matrix run. Today an L2 yaml's `instance:` field does double duty: it's BOTH the human-facing QuickSight resource name (analysis title, dashboard ID, theme name) AND the database table-prefix on every emitted matview / table. Multiple deployments of the same L2 against one shared DB collide because they all want the same prefix. Multiple deployments against the same QS account collide because they all want the same dashboard ID.
+
+The right shape: split the two concerns and move BOTH to `config.yaml` (the deployment-target file), leaving the L2 yaml as a pure topology declaration.
+
+- [ ] **Z.C.1 — Spike: cfg ⇄ L2 separation.** Sketch the new shape: `cfg.deployment_name` (QS resource prefix, e.g. `sasquatch-prod-uk` / `sasquatch-staging`) + `cfg.db_table_prefix` (the `<prefix>_transactions` etc., e.g. `snb_uk_prod`). L2 yaml drops `instance:` entirely OR keeps it as a structural-only id with no operational meaning. Confirm none of the QS / app / matview emit logic conflates the two concerns silently.
+- [ ] **Z.C.2 — Cfg loader + validator.** Add the two fields to `Config`; loud-fail on missing; allowlist via `_FIELDS`; loader-test coverage. Decide migration: do existing yamls auto-default `cfg.deployment_name = cfg.db_table_prefix = l2.instance` for backwards compat, or hard cut?
+- [ ] **Z.C.3 — Sweep `cfg.prefixed()` callers + `<prefix>_*` SQL emit.** Every site that today reads `l2.instance` either as QS-name source or DB-prefix source needs to pick the right cfg field. Audit `apps/*` (QS resource IDs), `common/l2/schema.py` (DB prefixes), `common/handbook/vocabulary.py` (handbook copy), audit PDF chrome, etc.
+- [ ] **Z.C.4 — Tests + fixture migration.** Update test fixtures + `seeded_audit` + the runner's per-cell `_synth_l2.yaml` template to reflect the new shape. Per-cell variants need DISTINCT `cfg.deployment_name` AND `cfg.db_table_prefix` so multiple matrix cells against the same persistent Aurora don't collide on either axis.
+- [ ] **Z.C.5 — Docs sweep.** README + handbook + walkthroughs explaining how to deploy the same L2 to multiple environments (dev / staging / prod) by overriding cfg without touching the L2.
+- [ ] **Z.C.6 — Verify (unit + db layer + AW probe), commit, tick PLAN, push.**
+
+### Z.D — End-of-phase
+
+- [ ] **Z.D.1 — Verify (unit + db layer + AW probe).** Subsumes Z.15; runs after Z.A, Z.B, AND Z.C land. Same matrix as Z.15.
+- [ ] **Z.D.2 — Commit, tick PLAN, push.** ci.yml runs the full chain. Plan archive sweep + summary line.
 
 ---
 
