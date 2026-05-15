@@ -324,26 +324,22 @@ class TransferTemplate:
 
 
 @dataclass(frozen=True, slots=True)
-class ChainEntry:
-    """A parent → child relationship between Rails or TransferTemplates.
+class Chain:
+    """A firing rule: one parent + one list of candidate children.
 
-    Per SPEC: ``required = True`` means every parent firing SHOULD
-    eventually have at least one matching child firing — a missing child
-    surfaces as an orphan exception.
+    Per SPEC: list cardinality carries the entire firing semantic —
+    **singleton ⇒ required** (the child SHOULD fire; missing surfaces
+    as an orphan exception); **multi ⇒ XOR** (exactly one of the listed
+    children SHOULD fire per parent instance). The legacy
+    ``required`` / ``xor_group`` flags collapse into ``len(children)``
+    (Z.A — locked 2026-05-13).
 
-    When several entries share the same ``parent`` AND ``xor_group``,
-    exactly one of them SHOULD fire per parent instance. Without
-    ``xor_group``, multiple ``required = False`` children allow any
-    combination including none.
-
-    Aggregating rails MUST NOT appear as ``child`` (they don't have
+    Aggregating rails MUST NOT appear in ``children`` (they don't have
     per-Transfer parents — they sweep on cadence). Validator enforces.
     """
 
     parent: Identifier
-    child: Identifier
-    required: bool
-    xor_group: Identifier | None = None
+    children: tuple[Identifier, ...]
     description: str | None = None
 
 
@@ -384,7 +380,7 @@ class L2Instance:
     account_templates: tuple[AccountTemplate, ...]
     rails: tuple[Rail, ...]
     transfer_templates: tuple[TransferTemplate, ...]
-    chains: tuple[ChainEntry, ...]
+    chains: tuple[Chain, ...]
     limit_schedules: tuple[LimitSchedule, ...]
     # Top-level institution-level prose. Read by handbook templates as
     # the "what is this institution" introductory paragraph.

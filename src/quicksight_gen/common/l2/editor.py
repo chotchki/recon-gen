@@ -34,7 +34,7 @@ from typing import Any, Literal, TypeAlias
 from quicksight_gen.common.l2.primitives import (
     Account,
     AccountTemplate,
-    ChainEntry,
+    Chain,
     Identifier,
     L2Instance,
     LimitSchedule,
@@ -90,7 +90,7 @@ def mutate_l2(
         kind: Which collection the entity lives in.
         entity_id: The entity's identity key — Account.id, Rail.name,
             TransferTemplate.name, AccountTemplate.role,
-            ChainEntry's "<parent>::<child>" composite, or
+            Chain's "<parent>::<sorted-children-csv>" composite, or
             LimitSchedule's "<parent_role>::<transfer_type>" composite.
         fields: New field values, applied via ``dataclasses.replace``.
             Keys MUST match the dataclass field names; unknown keys
@@ -132,9 +132,9 @@ def rename_identifier(
       ``role`` / ``parent_role`` / ``source_role`` / ``destination_role``
       / ``leg_role`` field; rewrites RoleExpression tuples element-wise.
     - **rail** (ID = name): rewrites ``leg_rails`` (TransferTemplate),
-      ``bundles_activity`` (Rail), ``parent`` / ``child`` (ChainEntry).
+      ``bundles_activity`` (Rail), ``parent`` / ``children`` (Chain).
     - **transfer_template** (ID = name): rewrites
-      ``bundles_activity`` (Rail), ``parent`` / ``child`` (ChainEntry).
+      ``bundles_activity`` (Rail), ``parent`` / ``children`` (Chain).
     - **chain / limit_schedule**: have no incoming references — rename
       is a no-op (chains/limit_schedules are leaf consumers).
 
@@ -379,28 +379,42 @@ def create_l2_entity(
             transfer_templates=(*instance.transfer_templates, new_tt),
         )
     if kind == "chain":
+        # Z.A grammar collapse — a chain row is now (parent, children, description?).
+        # No required / xor_group flags. The studio editor's create form
+        # supplies a children-checkbox-group → fields["children"] is a list[str].
         parent = fields.get("parent")
-        child = fields.get("child")
-        if not parent or not child:
-            raise ValueError("ChainEntry.parent and .child are required")
-        if any(
-            str(c.parent) == str(parent) and str(c.child) == str(child)
-            for c in instance.chains
-        ):
+        children_raw = fields.get("children")
+        if not parent:
+            raise ValueError("Chain.parent is required")
+        if not isinstance(children_raw, (list, tuple)):
             raise ValueError(
-                f"ChainEntry {parent}::{child} already exists",
+                "Chain.children must be a non-empty list of "
+                "rail / template names (singleton ⇒ required, "
+                "multi ⇒ XOR per Z.A grammar).",
             )
-        required_val = fields.get("required")
-        if required_val is None:
-            raise ValueError("ChainEntry.required is required")
-        new_ce = ChainEntry(
+        children: tuple[Identifier, ...] = tuple(
+            Identifier(str(c)) for c in children_raw  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]  # WHY: fields[] dict comes back Any-typed; per-item str() narrows safely
+        )
+        if not children:
+            raise ValueError(
+                "Chain.children must be non-empty (singleton ⇒ required, "
+                "multi ⇒ XOR per Z.A grammar).",
+            )
+        # Check for duplicate row by (parent, sorted-children-tuple).
+        new_key = (str(parent), tuple(sorted(str(c) for c in children)))
+        for c in instance.chains:
+            existing_key = (
+                str(c.parent),
+                tuple(sorted(str(ch) for ch in c.children)),
+            )
+            if existing_key == new_key:
+                raise ValueError(
+                    f"Chain row for parent={parent!r} with "
+                    f"children={list(children)!r} already exists.",
+                )
+        new_ce = Chain(
             parent=Identifier(str(parent)),
-            child=Identifier(str(child)),
-            required=bool(required_val),
-            xor_group=(
-                Identifier(str(fields["xor_group"]))
-                if fields.get("xor_group") else None
-            ),
+            children=children,
             description=fields.get("description"),
         )
         return dataclasses.replace(
@@ -546,9 +560,12 @@ def _find_entity(
             if str(tt.name) == entity_id:
                 return tt, i, instance.transfer_templates
     elif kind == "chain":
-        # Composite key: "<parent>::<child>"
+        # Z.A grammar collapse — composite key now "<parent>::<sorted-children-csv>".
+        # Sorted so the address is stable across yaml round-trips even
+        # if the children list got re-ordered during an edit.
         for i, ch in enumerate(instance.chains):
-            if f"{ch.parent}::{ch.child}" == entity_id:
+            children_csv = ",".join(sorted(str(c) for c in ch.children))
+            if f"{ch.parent}::{children_csv}" == entity_id:
                 return ch, i, instance.chains
     elif kind == "limit_schedule":
         # Composite key: "<parent_role>::<transfer_type>"
@@ -662,7 +679,7 @@ def _rename_rail(
     instance: L2Instance, old: Identifier, new: Identifier,
 ) -> L2Instance:
     """Rewrite every Rail-name reference: TransferTemplate.leg_rails,
-    Rail.bundles_activity, ChainEntry.parent / .child. Also bumps the
+    Rail.bundles_activity, Chain.parent / .children[i]. Also bumps the
     Rail's own .name (the rename's anchor target).
     """
     rails = tuple(
@@ -702,20 +719,23 @@ def _rename_template_leg_rails(
 
 
 def _rename_chain_endpoint(
-    c: ChainEntry, old: Identifier, new: Identifier,
-) -> ChainEntry:
+    c: Chain, old: Identifier, new: Identifier,
+) -> Chain:
+    """Rewrite Chain.parent + each Chain.children[i] when they match
+    old. Z.A grammar collapse — children is a tuple now, not a single
+    field, so per-item rewrite."""
     parent = new if c.parent == old else c.parent
-    child = new if c.child == old else c.child
-    if parent is c.parent and child is c.child:
+    children = tuple(new if ch == old else ch for ch in c.children)
+    if parent is c.parent and children == c.children:
         return c
-    return dataclasses.replace(c, parent=parent, child=child)
+    return dataclasses.replace(c, parent=parent, children=children)
 
 
 def _rename_transfer_template(
     instance: L2Instance, old: Identifier, new: Identifier,
 ) -> L2Instance:
     """Rewrite every TransferTemplate-name reference: Rail.bundles_activity,
-    ChainEntry.parent / .child. Plus the template's own .name.
+    Chain.parent / .children[i]. Plus the template's own .name.
     """
     transfer_templates = tuple(
         dataclasses.replace(tt, name=new) if tt.name == old else tt

@@ -50,7 +50,7 @@ from .primitives import (
     AccountTemplate,
     BundlesActivityRef,
     CadenceExpression,
-    ChainEntry,
+    Chain,
     CompletionExpression,
     Duration,
     Identifier,
@@ -977,18 +977,44 @@ def _load_transfer_template(raw: object, *, path: str) -> TransferTemplate:
     )
 
 
-def _load_chain_entry(raw: object, *, path: str) -> ChainEntry:
-    raw_d = _as_mapping(raw, path=path, what="chain entry")
-    return ChainEntry(
+_LEGACY_CHAIN_KEYS_REJECT_MSG = (
+    "Z.A grammar collapse (PLAN.md §Z.A): the legacy `child` / `required` / "
+    "`xor_group` keys on chain rows have been replaced by a single "
+    "`children: [name1, name2, ...]` list. Singleton list = required; "
+    "multi-item list = XOR. Update your yaml: replace each "
+    "`{parent, child, required: true}` with "
+    "`{parent, children: [child]}`, and group rows that shared an "
+    "`xor_group:` value into one row with all the children listed."
+)
+
+
+def _load_chain(raw: object, *, path: str) -> Chain:
+    raw_d = _as_mapping(raw, path=path, what="chain")
+    # Reject legacy keys with an actionable error pointing at the PLAN.
+    legacy = [k for k in ("child", "required", "xor_group") if k in raw_d]
+    if legacy:
+        raise L2LoaderError(
+            f"{path}: legacy chain key(s) {legacy} no longer supported. "
+            f"{_LEGACY_CHAIN_KEYS_REJECT_MSG}",
+        )
+    children_raw = _as_list(
+        _require(raw_d, "children", path=path),
+        path=f"{path}.children",
+    )
+    if not children_raw:
+        raise L2LoaderError(
+            f"{path}.children: must be a non-empty list (singleton ⇒ "
+            f"required, multi ⇒ XOR per Z.A grammar). Got [].",
+        )
+    children = tuple(
+        _load_identifier(item, path=f"{path}.children[{i}]")
+        for i, item in enumerate(children_raw)
+    )
+    return Chain(
         parent=_load_identifier(
             _require(raw_d, "parent", path=path), path=f"{path}.parent",
         ),
-        child=_load_identifier(
-            _require(raw_d, "child", path=path), path=f"{path}.child",
-        ),
-        required=bool(_require(raw_d, "required", path=path)),
-        xor_group=_load_identifier(raw_d["xor_group"], path=f"{path}.xor_group")
-        if "xor_group" in raw_d else None,
+        children=children,
         description=_load_description(
             raw_d.get("description"), path=f"{path}.description",
         ),
@@ -1119,7 +1145,7 @@ def load_instance(path: Path | str, *, validate: bool = True) -> L2Instance:
         )
     )
     chains = tuple(
-        _load_chain_entry(item, path=f"chains[{i}]")
+        _load_chain(item, path=f"chains[{i}]")
         for i, item in enumerate(_as_list(raw_d.get("chains"), path="chains"))
     )
     limit_schedules = tuple(

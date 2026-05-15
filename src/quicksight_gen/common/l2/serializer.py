@@ -27,7 +27,7 @@ import yaml
 from quicksight_gen.common.l2.primitives import (
     Account,
     AccountTemplate,
-    ChainEntry,
+    Chain,
     L2Instance,
     LimitSchedule,
     Rail,
@@ -71,7 +71,7 @@ def serialize_l2(instance: L2Instance) -> str:
             _dump_transfer_template(t) for t in instance.transfer_templates
         ]
     if instance.chains:
-        out["chains"] = [_dump_chain_entry(c) for c in instance.chains]
+        out["chains"] = [_dump_chain(c) for c in instance.chains]
     if instance.limit_schedules:
         out["limit_schedules"] = [
             _dump_limit_schedule(ls) for ls in instance.limit_schedules
@@ -217,14 +217,11 @@ def _dump_transfer_template(t: TransferTemplate) -> dict[str, Any]:  # typing-sm
     return out
 
 
-def _dump_chain_entry(c: ChainEntry) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
+def _dump_chain(c: Chain) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
     out: dict[str, Any] = {  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
         "parent": str(c.parent),
-        "child": str(c.child),
-        "required": c.required,
+        "children": [str(child) for child in c.children],
     }
-    if c.xor_group is not None:
-        out["xor_group"] = str(c.xor_group)
     if c.description is not None:
         out["description"] = c.description
     return out

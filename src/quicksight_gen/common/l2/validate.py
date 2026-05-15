@@ -70,24 +70,30 @@ Rules enforced (numbered for cross-reference with the test file):
       catch it at load).
 
   C1. Every TransferTemplate contains at most one Variable-direction leg.
-  C2. Every Chain.xor_group's members share the same Chain.parent.
   C3. Every Variable-direction SingleLegRail MUST appear in some
       ``TransferTemplate.leg_rails`` (M.3.13 — Variable closure
       semantics require a containing template's ``ExpectedNet`` to
       compute the leg's amount + direction; a Variable rail
       reconciled only by an AggregatingRail has no closure target).
-  C4. Every Chain.xor_group MUST have at least 2 members (M.3.13 — a
-      single-member XOR group is degenerate: "exactly one of one
-      option happens" trivially holds, so the declaration is a typo
-      or leftover from a deletion).
-  C5. Every Chain parent MUST have at least one ``required=True`` child
-      OR at least one ``xor_group``-tagged child (X.1.j — an
-      all-optional chain encodes no enforceable obligation; the chain
-      mechanism's whole point is "if X fires, Y must follow", and an
-      all-optional declaration makes Y's firing unobservable as a
-      constraint. Surfaces as a "No Required Children" branch in the
-      L2FT Chains dashboard's completion_status — caught at load so the
-      dashboard never has to advertise a meaningless filter value).
+  C5. Every Chain row's ``children`` list is non-empty (Z.A grammar
+      collapse — singleton ⇒ required, multi ⇒ XOR; an empty list is
+      a degenerate row that encodes no firing rule. Defense-in-depth
+      against in-memory L2 instances built outside the loader; loader
+      rejects empty lists earlier with a more actionable error.)
+  C6. For any given Chain parent, no child appears in two Chain rows
+      (Z.A grammar collapse — the new failure mode the collapsed shape
+      introduces. E.g. one row says "Foo is required" plus another
+      says "Foo is one of [Foo, Bar]" — the two rows contradict so
+      reject at load.)
+
+  Removed under Z.A grammar collapse (PLAN.md §Z.A — locked 2026-05-13):
+  - C2 (xor_group members share parent) — every Chain row IS one
+    parent, so the cross-parent failure mode is unrepresentable.
+  - C4 (xor_group ≥ 2 members) — singleton means "required", not
+    "degenerate XOR". The cardinality-1 case is now a meaningful row
+    shape, not an error.
+  - C4.1 (required + xor_group contradiction) — the two flags are
+    gone; the contradiction is unrepresentable.
 
   S1. A two-leg Rail that is NOT a TransferTemplate leg MUST have
       ``expected_net`` set.
@@ -124,7 +130,7 @@ from collections import Counter
 from collections.abc import Iterable
 
 from .primitives import (
-    ChainEntry,
+    Chain,
     Identifier,
     L2Instance,
     Rail,
@@ -222,11 +228,9 @@ def validate(instance: L2Instance) -> None:
     _check_metadata_value_example_keys_resolve(instance)
 
     _check_variable_leg_count_per_template(instance)
-    _check_chain_xor_group_consistency(instance)
     _check_variable_single_leg_in_some_template(instance, rails_by_name)
-    _check_xor_group_min_members(instance)
-    _check_xor_group_member_not_required(instance)
-    _check_chain_parent_has_required_or_xor(instance)
+    _check_chain_parent_has_non_empty_children(instance)
+    _check_chain_no_duplicate_child_per_parent(instance)
 
     _check_two_leg_expected_net_consistency(instance)
     _check_single_leg_reconciliation(instance)
@@ -740,22 +744,6 @@ def _check_variable_leg_count_per_template(inst: L2Instance) -> None:
             )
 
 
-def _check_chain_xor_group_consistency(inst: L2Instance) -> None:
-    """C2: every XorGroup's members share the same Chain.parent."""
-    parents_by_xor: dict[str, set[str]] = {}
-    for c in inst.chains:
-        if c.xor_group is None:
-            continue
-        parents_by_xor.setdefault(c.xor_group, set()).add(c.parent)
-    for xor_group, parents in parents_by_xor.items():
-        if len(parents) > 1:
-            raise L2ValidationError(
-                f"xor_group {xor_group!r}: members reference different "
-                f"parents {sorted(parents)!r}; all members of an XOR "
-                f"group MUST share the same parent"
-            )
-
-
 def _check_variable_single_leg_in_some_template(
     inst: L2Instance, rails_by_name: dict[Identifier, Rail],
 ) -> None:
@@ -790,97 +778,55 @@ def _check_variable_single_leg_in_some_template(
         )
 
 
-def _check_xor_group_min_members(inst: L2Instance) -> None:
-    """C4: every Chain.xor_group MUST have at least 2 members.
+def _check_chain_no_duplicate_child_per_parent(inst: L2Instance) -> None:
+    """C6 (Z.A grammar collapse): for any given parent, no child appears
+    in two Chain rows.
 
-    A single-member XOR group is degenerate — "exactly one of one
-    option happens" trivially holds whenever the parent fires, so the
-    declaration adds no constraint. In practice this is a typo (the
-    second member was deleted, or its xor_group string disagrees) or
-    a leftover from an editing pass. Caught at load so the misconfig
-    can't silently weaken the dashboard's XOR-violation detection.
+    Pre-collapse, this failure mode was unrepresentable in code (the
+    `required` + `xor_group` combination silently overlapped). Post-
+    collapse, the collapsed shape lets the operator accidentally list
+    the same child in two rows for the same parent — e.g. one row
+    saying "Foo is required" plus another saying "Foo is one of [Foo,
+    Bar]". The two rows contradict (Foo is required ⇒ Bar can't fire
+    in the XOR; XOR ⇒ Foo doesn't have to fire), so reject at load.
     """
-    member_count_by_group: dict[str, int] = {}
-    for c in inst.chains:
-        if c.xor_group is None:
-            continue
-        key = str(c.xor_group)
-        member_count_by_group[key] = member_count_by_group.get(key, 0) + 1
-    for group, count in member_count_by_group.items():
-        if count < 2:
+    for parent in {c.parent for c in inst.chains}:
+        seen: dict[Identifier, int] = {}
+        for c in inst.chains:
+            if c.parent != parent:
+                continue
+            for child in c.children:
+                seen[child] = seen.get(child, 0) + 1
+        dupes = [name for name, count in seen.items() if count > 1]
+        if dupes:
             raise L2ValidationError(
-                f"xor_group {group!r}: has only {count} member; XOR "
-                f"groups MUST have at least 2 members (a single-member "
-                f"group is degenerate — 'exactly one of one option' "
-                f"trivially holds)"
+                f"Chain parent {str(parent)!r}: child(ren) {sorted(str(d) for d in dupes)!r} "
+                f"appear in more than one chain row. Each child must "
+                f"appear in exactly one row per parent — singleton row "
+                f"= required, multi-item row = XOR among the listed "
+                f"children. (PLAN.md §Z.A C6.)"
             )
 
 
-def _check_xor_group_member_not_required(inst: L2Instance) -> None:
-    """C4.1 (X.4.f.10.followup): a ChainEntry that's a member of an
-    xor_group MUST NOT also have ``required=true``. The two flags
-    contradict each other:
+def _check_chain_parent_has_non_empty_children(inst: L2Instance) -> None:
+    """C5 (rewritten under Z.A): every chain row's ``children`` list is
+    non-empty.
 
-    - ``xor_group`` says: "exactly one member of this group fires per
-      parent firing." Each member is conditionally chosen, not
-      individually required.
-    - ``required=true`` says: "this specific child MUST fire every
-      time the parent fires."
-
-    If a required member fires every time, the OTHER xor_group members
-    must NEVER fire (else two members fire and XOR is violated). That
-    silently degenerates the group into "this one must fire, others
-    must not" — at which point the operator should have just declared
-    one ``required=true`` child and dropped the xor_group entirely.
-
-    In practice this is a misconfig: the operator copy-pasted a row
-    and didn't flip ``required`` to false, or they wanted "exactly one
-    of these is required to fire" (which is what xor_group already
-    means — without the per-member ``required`` flag).
+    Pre-collapse, C5 caught the "all-optional chain" mode (no required
+    child, no XOR group). Post-collapse there's no all-optional mode —
+    every row IS a firing rule (singleton ⇒ required, multi ⇒ XOR), so
+    the only remaining failure mode is an empty children list. Loader
+    rejects it earlier (Z.A.3), but keep this as a defense-in-depth
+    check for in-memory L2 instances built outside the loader (tests,
+    fuzz fixtures, editor mutations).
     """
     for c in inst.chains:
-        if c.xor_group is None:
-            continue
-        if not c.required:
-            continue
-        raise L2ValidationError(
-            f"Chain {c.parent!r}->{c.child!r}: required=true is "
-            f"incompatible with xor_group={c.xor_group!r}. xor_group "
-            f"means exactly one member fires per parent — a "
-            f"required=true member would force itself to fire AND "
-            f"forbid the others, collapsing the group. Either drop "
-            f"required (use xor_group's exactly-one semantics) or drop "
-            f"xor_group (use a single required child) — not both."
-        )
-
-
-def _check_chain_parent_has_required_or_xor(inst: L2Instance) -> None:
-    """C5: every chain parent MUST have at least one Required child OR
-    at least one xor_group-tagged child.
-
-    The chain mechanism encodes "if X fires, Y must follow" — an
-    all-optional chain (no required children, no XOR groups) makes Y's
-    firing unobservable as a constraint, so the declaration adds
-    nothing the dashboard can surface as a violation. In practice this
-    is a typo or a leftover from an editing pass that flipped every
-    child to ``required = False`` without re-reading the implied
-    contract. Caught at load so the L2FT Chains dashboard never has to
-    advertise a meaningless 'No Required Children' filter value.
-    """
-    children_by_parent: dict[str, list[ChainEntry]] = {}
-    for c in inst.chains:
-        children_by_parent.setdefault(str(c.parent), []).append(c)
-    for parent, children in children_by_parent.items():
-        any_required = any(c.required for c in children)
-        any_xor = any(c.xor_group is not None for c in children)
-        if not any_required and not any_xor:
+        if not c.children:
             raise L2ValidationError(
-                f"Chain parent {parent!r}: declares {len(children)} "
-                f"children, none required and none in an xor_group. The "
-                f"chain encodes no enforceable obligation — flag at "
-                f"least one child ``required = True`` or group two or "
-                f"more children with an ``xor_group`` to make the "
-                f"chain mean something."
+                f"Chain parent {str(c.parent)!r}: children list is empty. "
+                f"Each chain row must list at least one child (singleton "
+                f"= required, multi = XOR). Drop the row entirely if no "
+                f"children apply. (PLAN.md §Z.A C5.)"
             )
 
 
