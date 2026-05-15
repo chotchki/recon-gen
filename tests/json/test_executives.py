@@ -152,7 +152,7 @@ def test_transaction_summary_contract_columns():
     names = EXEC_TRANSACTION_SUMMARY_CONTRACT.column_names
     assert {
         "posted_date",
-        "transfer_type",
+        "rail_name",
         "transfer_count",
         "gross_amount",
         "net_amount",

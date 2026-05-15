@@ -54,7 +54,6 @@ def _full_instance(prefix: str) -> L2Instance:
             SingleLegRail(
                 name=Identifier("SettlementRail"),
                 description="Settlement rail with aging",
-                transfer_type=Identifier("settle"),
                 metadata_keys=(),
                 leg_role=RoleExpression(Identifier("gl_control")),
                 leg_direction="Debit",
@@ -69,7 +68,7 @@ def _full_instance(prefix: str) -> L2Instance:
             LimitSchedule(
                 description="cap on settle from gl_control",
                 parent_role=Identifier("gl_control"),
-                transfer_type=Identifier("settle"),
+                rail=Identifier("SettlementRail"),
                 cap=10000,
             ),
         ),
@@ -257,10 +256,10 @@ class TestSqliteSchemaActuallyRuns:
                 "INSERT INTO sqlt_transactions "
                 "(id, account_id, account_scope, amount_money, "
                 "amount_direction, status, posting, transfer_id, "
-                "transfer_type, rail_name, origin) "
+                "rail_name, origin) "
                 "VALUES ('tx-1', 'acct-a', 'internal', 100.0, "
                 "'Credit', 'Posted', '2030-01-01 00:00:00', 'tr-1', "
-                "'settle', 'SettlementRail', 'InternalInitiated')"
+                "'SettlementRail', 'InternalInitiated')"
             )
             cur.execute("SELECT entry FROM sqlt_transactions WHERE id='tx-1'")
             entry, = cur.fetchone()

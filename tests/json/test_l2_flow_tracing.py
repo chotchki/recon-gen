@@ -878,11 +878,11 @@ def test_exc_unmatched_transfer_type_excludes_declared_types() -> None:
         "build_exc_unmatched_transfer_type_dataset", SASQUATCH_PR_YAML,
     )
     inst = load_instance(SASQUATCH_PR_YAML)
-    declared_types = {str(r.transfer_type) for r in inst.rails}
+    declared_types = {str(r.name) for r in inst.rails}
     for t in declared_types:
         assert f"'{t}'" in sql
     assert "LEFT JOIN declared_types" in sql
-    assert "WHERE d.transfer_type IS NULL" in sql
+    assert "WHERE d.rail_name IS NULL" in sql
 
 
 def test_exc_dead_rails_filters_zero_postings_only() -> None:
@@ -902,7 +902,7 @@ def test_exc_dead_bundles_activity_checks_both_attributions() -> None:
         "build_exc_dead_bundles_activity_dataset", SASQUATCH_PR_YAML,
     )
     assert "t.rail_name = db.bundle_target" in sql
-    assert "t.transfer_type = db.bundle_target" in sql
+    assert "t.rail_name = db.bundle_target" in sql
 
 
 def test_exc_dead_metadata_uses_static_json_paths() -> None:

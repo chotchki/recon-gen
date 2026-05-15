@@ -314,12 +314,11 @@ class TestL2CoverageAssertions:
     def test_every_limit_schedule_has_a_matching_rail(
         self, demo_db_conn: Any, sasquatch_instance: L2Instance,
     ) -> None:
-        # R.5.d: every LimitSchedule.transfer_type should match some
-        # rail's transfer_type (otherwise the cap never fires). This
-        # check is structural (L2 model), not runtime — the existing
-        # validator's R10 covers it. Test here is the runtime
-        # confirmation that legs exist for every rail+transfer_type
-        # the LimitSchedule covers.
+        # R.5.d: every LimitSchedule.rail should resolve to a Rail.name
+        # that has runtime legs (otherwise the cap never fires). The
+        # validator's R10 covers the structural binding; this runtime
+        # check confirms legs actually exist for every rail the
+        # LimitSchedule covers.
         prefix = sasquatch_instance.instance
         view = f"{prefix}_current_transactions"
         if not _matview_has_rows(demo_db_conn, view):
@@ -330,16 +329,16 @@ class TestL2CoverageAssertions:
             with demo_db_conn.cursor() as cur:
                 cur.execute(
                     f"""SELECT COUNT(*) FROM {view}
-                       WHERE transfer_type = %s""",
-                    (str(ls.transfer_type),),
+                       WHERE rail_name = %s""",
+                    (str(ls.rail),),
                 )
                 count = cur.fetchone()[0]
             if count == 0:
                 no_legs.append(
-                    f"transfer_type={ls.transfer_type} "
+                    f"rail={ls.rail} "
                     f"(parent_role={ls.parent_role}, cap=${ls.cap})"
                 )
         assert not no_legs, (
-            f"R.5.d — LimitSchedules whose transfer_type has zero legs "
-            f"in the runtime data (cap can never fire): {no_legs}"
+            f"R.5.d — LimitSchedules whose rail has zero legs in the "
+            f"runtime data (cap can never fire): {no_legs}"
         )

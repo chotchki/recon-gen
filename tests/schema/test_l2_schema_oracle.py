@@ -58,7 +58,6 @@ def _full_instance(prefix: str) -> L2Instance:
             SingleLegRail(
                 name=Identifier("SettlementRail"),
                 description="Settlement rail with aging",
-                transfer_type=Identifier("settle"),
                 metadata_keys=(),
                 leg_role=RoleExpression(Identifier("gl_control")),
                 leg_direction="Debit",
@@ -73,7 +72,7 @@ def _full_instance(prefix: str) -> L2Instance:
             LimitSchedule(
                 description="cap on settle from gl_control",
                 parent_role=Identifier("gl_control"),
-                transfer_type=Identifier("settle"),
+                rail=Identifier("SettlementRail"),
                 cap=10000,
             ),
         ),
@@ -171,10 +170,6 @@ class TestOracleConstructsPresent:
         # Interval arithmetic
         "INTERVAL '1' DAY",        # interval_days(1, Oracle)
         # Casts
-        # P.5.b — todays_exceptions UNION ALL needs VARCHAR2-shaped
-        # NULL for the transfer_type column (Oracle ORA-00932 rejects
-        # CLOB-vs-VARCHAR2 in UNION ALL). Asserted as VARCHAR2(50).
-        "CAST(NULL AS VARCHAR2(50))",
         "CAST(AVG(window_sum) AS NUMBER)",
         "CAST((pw.posted_day - 1) AS TIMESTAMP)",
         "CAST(pw.posted_day AS TIMESTAMP)",

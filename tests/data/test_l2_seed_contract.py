@@ -456,8 +456,8 @@ def test_seed_transfer_types_resolve_to_instance(
     separate declaration from any leg_rail's transfer_type per SPEC).
     Catches drift where the auto-scenario or seed code emits a
     transfer_type the L2 doesn't actually declare."""
-    declared = {r.transfer_type for r in instance.rails}
-    declared.update(t.transfer_type for t in instance.transfer_templates)
+    declared = {r.name for r in instance.rails}
+    declared.update(t.name for t in instance.transfer_templates)
     txn_cols = _columns_in_insert(auto_seed_sql, "transactions")
     if "transfer_type" not in txn_cols:
         pytest.skip("transactions INSERT doesn't include transfer_type column")

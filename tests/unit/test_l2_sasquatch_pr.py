@@ -372,7 +372,7 @@ def test_every_primitive_has_a_description() -> None:
     for ls in inst.limit_schedules:
         if not ls.description:
             missing.append(
-                f"limit_schedule ({ls.parent_role}, {ls.transfer_type})"
+                f"limit_schedule ({ls.parent_role}, {ls.rail})"
             )
     assert not missing, (
         f"Primitives without description (breaks the prose seam):\n"

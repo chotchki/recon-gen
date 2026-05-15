@@ -103,7 +103,7 @@ def expected_audit_counts(
             (p.account_id, _eff(p)) for p in overdraft
         ),
         limit_breach_account_days=tuple(
-            (p.account_id, _eff(p), p.transfer_type) for p in breach
+            (p.account_id, _eff(p), p.rail_name) for p in breach
         ),
         stuck_pending_accounts=tuple(
             p.account_id for p in scenario.stuck_pending_plants

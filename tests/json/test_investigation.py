@@ -782,7 +782,7 @@ def test_money_trail_contract_exposes_chain_columns():
     # Edge measures + hop metadata
     assert "hop_amount" in names
     assert "posted_at" in names
-    assert "transfer_type" in names
+    assert "rail_name" in names
     # K.4.8f walking-friendly display labels: name (id) — both human-
     # readable AND uniquely keyed.
     assert "source_display" in names
@@ -1064,7 +1064,7 @@ def test_money_trail_table_sorted_by_depth_asc_with_full_chain_grain():
     assert group_by_cols == [
         "depth",
         "transfer_id",
-        "transfer_type",
+        "rail_name",
         "source_account_name",
         "target_account_name",
         "posted_at",

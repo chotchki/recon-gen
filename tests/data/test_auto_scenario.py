@@ -123,7 +123,6 @@ def test_auto_scenario_reports_omissions_for_minimal_yaml(tmp_path: Path) -> Non
         "rails:\n"
         # Two-leg inbound — supports drift + supersession picks
         "  - name: Inbound\n"
-        "    transfer_type: ach\n"
         "    source_role: ExternalParty\n"
         "    destination_role: CustomerSub\n"
         "    expected_net: 0\n"
@@ -216,7 +215,7 @@ def test_auto_scenario_breach_amount_exceeds_cap(spec_instance) -> None:
     breach = report.scenario.limit_breach_plants[0]
     matching = next(
         ls for ls in spec_instance.limit_schedules
-        if ls.transfer_type == breach.transfer_type
+        if ls.rail == breach.rail_name
     )
     assert breach.amount > matching.cap
 

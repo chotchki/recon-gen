@@ -150,11 +150,20 @@ def test_transactions_status_is_open_enum() -> None:
     assert "status IN" not in sql
 
 
-def test_transactions_transfer_type_is_open_enum() -> None:
-    """L1 SPEC: TransferType ⊇ {Sale}; integrators add their rails. No CHECK."""
+def test_transactions_rail_name_is_open_enum() -> None:
+    """Z.B (2026-05-15): rail_name carries the per-leg type identifier
+    (Rail.transfer_type and the legacy column collapsed away). The
+    column stays open-set — integrators add new rails by extending the
+    L2 instance, no CHECK constraint."""
     sql = emit_schema(_instance("tt"))
-    assert "transfer_type        VARCHAR(50)    NOT NULL" in sql
-    # No CHECK on transfer_type (v5 had one; v6 drops it for L2 extensibility).
+    assert "rail_name            VARCHAR(100)   NOT NULL" in sql
+    # No CHECK on rail_name — keeps the column extensible.
+    assert "rail_name IN" not in sql
+    # Z.B: no transfer_type column at all (collapsed into rail_name).
+    # Narrative SQL comments may still reference the old name historically;
+    # the column declaration is what matters.
+    assert "transfer_type        VARCHAR" not in sql
+    assert "transfer_type INTEGER" not in sql
     assert "transfer_type IN" not in sql
 
 
@@ -426,7 +435,7 @@ def _instance_with_limits(prefix: str) -> L2Instance:
         limit_schedules=(
             LimitSchedule(
                 parent_role=Identifier("DDAControl"),
-                transfer_type="ach",
+                rail=Identifier("ach"),
                 cap=Decimal("12000.00"),
             ),
         ),
@@ -557,13 +566,13 @@ def test_expected_eod_balance_breach_excludes_null_expectations() -> None:
 def test_limit_breach_embeds_limit_schedule_caps_inline() -> None:
     """L2's LimitSchedules become CASE branches in the limit_breach view;
     JSON-path-portable across SQL targets. Branches reference `tx.`
-    aliases since the view reads parent_role + transfer_type from the
+    aliases since the view reads parent_role + rail_name from the
     transaction row directly (no JOIN to daily_balances needed —
     parent_role is denormalized on every v6 transaction)."""
     sql = emit_schema(_instance_with_limits("lb"))
     assert (
         "WHEN tx.account_parent_role = 'DDAControl' "
-        "AND tx.transfer_type = 'ach' THEN 12000"
+        "AND tx.rail_name = 'ach' THEN 12000"
     ) in sql
 
 
@@ -622,7 +631,6 @@ def _instance_with_pending_age(prefix: str) -> L2Instance:
         rails=(
             SingleLegRail(
                 name=Identifier("ach-credit"),
-                transfer_type="ach",
                 metadata_keys=(),
                 leg_role="DDAControl",
                 leg_direction="Credit",
@@ -711,7 +719,6 @@ def _instance_with_unbundled_age(prefix: str) -> L2Instance:
         rails=(
             SingleLegRail(
                 name=Identifier("ach-orig"),
-                transfer_type="ach",
                 metadata_keys=(),
                 leg_role="DDAControl",
                 leg_direction="Credit",

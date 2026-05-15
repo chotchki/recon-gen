@@ -1458,8 +1458,8 @@ def test_y2g_enum_value_helpers_reflect_l2_instance() -> None:
     assert set(l1_rail_values(instance)) == rail_names
     assert l1_rail_values(instance) == sorted(rail_names)
 
-    declared_types = {str(r.transfer_type) for r in instance.rails}
-    declared_types |= {str(ls.transfer_type) for ls in instance.limit_schedules}
+    declared_types = {str(r.name) for r in instance.rails}
+    declared_types |= {str(ls.rail) for ls in instance.limit_schedules}
     assert set(l1_transfer_type_values(instance)) == declared_types
 
     declared_roles = {str(a.role) for a in instance.accounts if a.role}
