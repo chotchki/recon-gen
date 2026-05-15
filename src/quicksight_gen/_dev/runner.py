@@ -1778,11 +1778,11 @@ def _dump_top_queries_for_variant(
         print(f"{terminal_prefix}runner: db-perf [{spec.name}] skipped (sqlite)")
         return
 
-    # Filter on the L2 instance prefix so we drop the operator's
-    # unrelated traffic on the shared DB. Falls back to spec.name if
-    # cfg's prefix isn't set (which shouldn't happen for non-default
-    # variants but stays defensive).
-    like_pattern = cfg.l2_instance_prefix or spec.name
+    # Filter on the DB-table prefix so we drop the operator's
+    # unrelated traffic on the shared DB. Z.C: was cfg.l2_instance_prefix;
+    # cfg.db_table_prefix is the direct replacement (same wire shape —
+    # the LIKE pattern matches `<prefix>_*` table refs in the query log).
+    like_pattern = cfg.db_table_prefix
 
     try:
         conn = connect_demo_db(cfg)

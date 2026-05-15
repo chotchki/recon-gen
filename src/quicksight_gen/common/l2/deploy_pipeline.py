@@ -536,7 +536,10 @@ def _build_generator_sql(cfg: Config, instance: L2Instance) -> str:
         # predicate works for both via the midnight-of-next-day bound
         # (avoids dialect-specific DATE() / TRUNC() function calls; ISO
         # strings sort lexicographically the way we want).
-        prefix = cfg.l2_instance_prefix or str(instance.instance)
+        # Z.C: cfg.db_table_prefix is the direct replacement for the
+        # legacy `cfg.l2_instance_prefix or str(instance.instance)` —
+        # the cfg field is always set (loud-fail in load_config).
+        prefix = cfg.db_table_prefix
         next_day = (cutoff + timedelta(days=1)).isoformat()
         sql += (
             f"\n-- X.4.h trainer cutoff: prune rows past {cutoff.isoformat()}\n"

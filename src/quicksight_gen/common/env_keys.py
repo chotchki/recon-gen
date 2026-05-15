@@ -526,24 +526,28 @@ QS_GEN_DATASOURCE_ARN: Final = EnvVar(
     validator=matches(_IAM_ARN_RE),
 )
 
-QS_GEN_RESOURCE_PREFIX: Final = EnvVar(
-    name="QS_GEN_RESOURCE_PREFIX",
+QS_GEN_DEPLOYMENT_NAME: Final = EnvVar(
+    name="QS_GEN_DEPLOYMENT_NAME",
     description=(
-        "Resource ID prefix (kebab-case) — overrides "
-        "cfg.resource_prefix. Default in cfg is 'qs-gen'."
+        "Per-deploy QS namespace (kebab-case) — overrides "
+        "cfg.deployment_name. Z.C: replaces v8.x's QS_GEN_RESOURCE_PREFIX "
+        "+ QS_GEN_L2_INSTANCE_PREFIX (those collapsed into one field). "
+        "Used by the Y.2.gate.m runner to namespace per-cell aw-target "
+        "deploys so sister cells (e.g., sp_pg_aw + sp_or_aw) don't "
+        "collide on QS resource IDs."
     ),
     coercer=str,
     optional=True,
 )
 
-QS_GEN_L2_INSTANCE_PREFIX: Final = EnvVar(
-    name="QS_GEN_L2_INSTANCE_PREFIX",
+QS_GEN_DB_TABLE_PREFIX: Final = EnvVar(
+    name="QS_GEN_DB_TABLE_PREFIX",
     description=(
-        "Override cfg.l2_instance_prefix at load time — used by the "
-        "Y.2.gate.m runner to namespace per-cell aw-target deploys "
-        "so sister cells (e.g., sp_pg_aw + sp_or_aw) don't collide on "
-        "QS resource IDs. When unset, the prefix derives from the "
-        "loaded L2 yaml's `instance` field (default behavior)."
+        "Per-deploy DB table-name prefix (snake_case, ≤30 chars) — "
+        "overrides cfg.db_table_prefix. Z.C: replaces direct reads of "
+        "L2Instance.instance in schema/seed/datasets emit paths. "
+        "Used by the Y.2.gate.m runner to namespace per-cell aw-target "
+        "deploys so sister cells don't collide on shared-DB tables."
     ),
     coercer=str,
     optional=True,
