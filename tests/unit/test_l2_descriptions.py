@@ -27,7 +27,6 @@ def test_omitted_description_defaults_to_none(tmp_path: Path) -> None:
     """When YAML omits `description:`, the loaded primitive carries None."""
     p = tmp_path / "instance.yaml"
     p.write_text(
-        "instance: spk\n"
         "accounts:\n"
         "  - id: int-001\n"
         "    role: A\n"
@@ -44,7 +43,6 @@ def test_omitted_description_defaults_to_none(tmp_path: Path) -> None:
 def test_top_level_instance_description_loads(tmp_path: Path) -> None:
     p = tmp_path / "instance.yaml"
     p.write_text(
-        "instance: spk\n"
         "description: Sasquatch National Bank — alignment-only test instance.\n"
         "accounts:\n"
         "  - id: int-001\n"
@@ -60,7 +58,6 @@ def test_top_level_instance_description_loads(tmp_path: Path) -> None:
 def test_account_description_loads(tmp_path: Path) -> None:
     p = tmp_path / "instance.yaml"
     p.write_text(
-        "instance: spk\n"
         "accounts:\n"
         "  - id: int-001\n"
         "    role: A\n"
@@ -74,7 +71,6 @@ def test_account_description_loads(tmp_path: Path) -> None:
 def test_account_template_description_loads(tmp_path: Path) -> None:
     p = tmp_path / "instance.yaml"
     p.write_text(
-        "instance: spk\n"
         "accounts:\n"
         "  - id: int-001\n"
         "    role: ParentRole\n"
@@ -94,7 +90,6 @@ def test_account_template_description_loads(tmp_path: Path) -> None:
 def test_two_leg_rail_description_loads(tmp_path: Path) -> None:
     p = tmp_path / "instance.yaml"
     p.write_text(
-        "instance: spk\n"
         "accounts:\n"
         "  - id: int-001\n"
         "    role: A\n"
@@ -117,7 +112,6 @@ def test_two_leg_rail_description_loads(tmp_path: Path) -> None:
 def test_single_leg_rail_description_loads(tmp_path: Path) -> None:
     p = tmp_path / "instance.yaml"
     p.write_text(
-        "instance: spk\n"
         "accounts:\n"
         "  - id: int-001\n"
         "    role: A\n"
@@ -143,7 +137,6 @@ def test_single_leg_rail_description_loads(tmp_path: Path) -> None:
 def test_transfer_template_description_loads(tmp_path: Path) -> None:
     p = tmp_path / "instance.yaml"
     p.write_text(
-        "instance: spk\n"
         "accounts:\n"
         "  - id: int-001\n"
         "    role: A\n"
@@ -171,7 +164,6 @@ def test_transfer_template_description_loads(tmp_path: Path) -> None:
 def test_chain_entry_description_loads(tmp_path: Path) -> None:
     p = tmp_path / "instance.yaml"
     p.write_text(
-        "instance: spk\n"
         "accounts:\n"
         "  - id: int-001\n"
         "    role: A\n"
@@ -205,7 +197,6 @@ def test_chain_entry_description_loads(tmp_path: Path) -> None:
 def test_limit_schedule_description_loads(tmp_path: Path) -> None:
     p = tmp_path / "instance.yaml"
     p.write_text(
-        "instance: spk\n"
         "accounts:\n"
         "  - id: int-001\n"
         "    role: ParentRole\n"
@@ -232,7 +223,6 @@ def test_blank_description_rejected(tmp_path: Path) -> None:
     """Empty string description is a configuration smell — reject vs accept-as-None."""
     p = tmp_path / "instance.yaml"
     p.write_text(
-        "instance: spk\n"
         "accounts:\n"
         "  - id: int-001\n"
         "    role: A\n"
@@ -246,7 +236,6 @@ def test_blank_description_rejected(tmp_path: Path) -> None:
 def test_whitespace_only_description_rejected(tmp_path: Path) -> None:
     p = tmp_path / "instance.yaml"
     p.write_text(
-        "instance: spk\n"
         "accounts:\n"
         "  - id: int-001\n"
         "    role: A\n"
@@ -262,7 +251,6 @@ def test_non_string_description_rejected(tmp_path: Path) -> None:
     a key collision — fail loudly rather than silently coerce."""
     p = tmp_path / "instance.yaml"
     p.write_text(
-        "instance: spk\n"
         "accounts:\n"
         "  - id: int-001\n"
         "    role: A\n"
@@ -283,7 +271,6 @@ def test_multiline_markdown_description_preserved(tmp_path: Path) -> None:
     templates verbatim, including paragraph breaks."""
     p = tmp_path / "instance.yaml"
     p.write_text(
-        "instance: spk\n"
         "accounts:\n"
         "  - id: int-001\n"
         "    role: A\n"

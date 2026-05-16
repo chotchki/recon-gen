@@ -51,7 +51,6 @@ def test_loads_and_validates_cleanly() -> None:
     """The fixture passes the full validator suite (every U/R/C/S/V/O rule)."""
     inst = _instance()
     validate(inst)
-    assert inst.instance == "sasquatch_pr"
 
 
 def test_top_level_description_present() -> None:

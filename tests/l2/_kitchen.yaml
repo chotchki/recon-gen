@@ -10,7 +10,6 @@
 # Loaded by `tests/test_l2_pipeline.py::test_kitchen_sink_*` — if a new
 # primitive lands without coverage here, the test count check fires.
 
-instance: kitchen
 description: |
   Kitchen-sink L2 instance — exercises every L2 primitive and every
   variant flag. Used as the regression harness for "did anything stop

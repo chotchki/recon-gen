@@ -17,10 +17,13 @@ from quicksight_gen.apps.investigation import datasets as inv_datasets
 
 @pytest.fixture()
 def cfg() -> Config:
-    # N.3.f: Investigation builders require an L2 instance prefix.
+    # N.3.f: Investigation builders require the cfg to carry a
+    # db_table_prefix matching the seeded DB. Z.C — replaces the prior
+    # auto-stamped l2_instance_prefix; pin to spec_example since the
+    # builders default to that L2 fixture.
     return make_test_config(
         aws_region="us-east-2",
-        l2_instance_prefix="spec_example",
+        db_table_prefix="spec_example",
     )
 
 
@@ -96,14 +99,14 @@ class TestOracleLowercaseAliasWrapper:
         from quicksight_gen.common.sql import Dialect
         return make_test_config(
             aws_region="us-east-2",
-            l2_instance_prefix="spec_example",
+            db_table_prefix="spec_example",
             dialect=Dialect.ORACLE,
         )
 
     def _pg_cfg(self) -> Config:
         return make_test_config(
             aws_region="us-east-2",
-            l2_instance_prefix="spec_example",
+            db_table_prefix="spec_example",
         )
 
     def _build(self, cfg: Config, sql: str) -> str:

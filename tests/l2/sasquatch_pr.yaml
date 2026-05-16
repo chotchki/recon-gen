@@ -33,8 +33,6 @@
 # Keep them concise, plain-English, focused on WHAT this entity is and
 # WHY it exists in SNB's chart of accounts. Markdown OK.
 
-instance: sasquatch_pr
-
 description: |
   Sasquatch National Bank's combined treasury + merchant-acquiring
   view. SNB runs a Cash Management Suite (CMS) for commercial customer

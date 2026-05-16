@@ -102,12 +102,14 @@ def test_build_signature_l2_instance_is_kwarg_only() -> None:
 # -- Analysis + Dashboard registration ---------------------------------------
 
 
-def test_analysis_registered_with_l2_aware_name() -> None:
-    """The Analysis title surfaces the L2 prefix so multi-instance
-    deployments are distinguishable in the QuickSight UI."""
+def test_analysis_registered_with_deployment_aware_name() -> None:
+    """Z.C — the Analysis title surfaces ``cfg.deployment_name`` so
+    multi-deploy QS accounts are distinguishable in the UI. Replaces
+    the prior L2-prefix-derived name (which was auto-stamped from the
+    L2 yaml's `instance:` field, dropped in Z.C)."""
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
-    assert "spec_example" in app.analysis.name
+    assert _CFG.deployment_name in app.analysis.name
 
 
 def test_dashboard_registered() -> None:
@@ -229,7 +231,7 @@ def test_drift_dataset_sql_targets_prefixed_l1_views() -> None:
     )
 
     instance = default_l2_instance()
-    prefix = instance.instance
+    prefix = _CFG.db_table_prefix  # Z.C — was instance.instance
 
     drift_ds = build_drift_dataset(_CFG, instance)
     ledger_ds = build_ledger_drift_dataset(_CFG, instance)
@@ -305,7 +307,7 @@ def test_drift_timeline_datasets_registered_and_aggregate_in_sql() -> None:
     assert DS_LEDGER_DRIFT_TIMELINE in registered_ids
 
     instance = default_l2_instance()
-    prefix = instance.instance
+    prefix = _CFG.db_table_prefix  # Z.C — was instance.instance
 
     drift_tl_ds = build_drift_timeline_dataset(_CFG, instance)
     ledger_tl_ds = build_ledger_drift_timeline_dataset(_CFG, instance)
@@ -367,7 +369,7 @@ def test_overdraft_dataset_registered_and_targets_l1_view() -> None:
     sql = next(iter(overdraft_ds.PhysicalTableMap.values())).CustomSql
     assert sql is not None
     # Y.2.g — SQL also carries the Account / Account-Role pushdown WHERE.
-    assert sql.SqlQuery.startswith(f"SELECT * FROM {instance.instance}_overdraft")
+    assert sql.SqlQuery.startswith(f"SELECT * FROM {_CFG.db_table_prefix}_overdraft")
 
 
 # -- Limit Breach sheet (M.2a.5) ---------------------------------------------
@@ -406,7 +408,7 @@ def test_limit_breach_dataset_registered_and_targets_l1_view() -> None:
     lb_ds = build_limit_breach_dataset(_CFG, instance)
     sql = next(iter(lb_ds.PhysicalTableMap.values())).CustomSql
     assert sql is not None
-    assert sql.SqlQuery.startswith(f"SELECT * FROM {instance.instance}_limit_breach")
+    assert sql.SqlQuery.startswith(f"SELECT * FROM {_CFG.db_table_prefix}_limit_breach")
 
 
 # -- Today's Exceptions sheet (M.2a.6) ---------------------------------------
@@ -454,7 +456,7 @@ def test_todays_exceptions_dataset_reads_matview() -> None:
     assert sql_obj is not None
     sql = sql_obj.SqlQuery
     # SQL is now just a SELECT * from the prefixed matview.
-    assert sql.startswith(f"SELECT * FROM {instance.instance}_todays_exceptions")
+    assert sql.startswith(f"SELECT * FROM {_CFG.db_table_prefix}_todays_exceptions")
 
 
 # -- Transactions sheet (M.2b.5) ---------------------------------------------
@@ -494,7 +496,7 @@ def test_transactions_dataset_registered_and_targets_matview() -> None:
     sql_obj = next(iter(tx_ds.PhysicalTableMap.values())).CustomSql
     assert sql_obj is not None
     assert (
-        f"FROM {instance.instance}_current_transactions"
+        f"FROM {_CFG.db_table_prefix}_current_transactions"
         in sql_obj.SqlQuery
     )
 
@@ -594,9 +596,9 @@ def test_daily_statement_datasets_registered() -> None:
     # projects per-leg from current_transactions (which IS itself a
     # matview, so cheap).
     assert summary_sql.SqlQuery.startswith(
-        f"SELECT * FROM {instance.instance}_daily_statement_summary"
+        f"SELECT * FROM {_CFG.db_table_prefix}_daily_statement_summary"
     )
-    assert f"FROM {instance.instance}_current_transactions" in txn_sql.SqlQuery
+    assert f"FROM {_CFG.db_table_prefix}_current_transactions" in txn_sql.SqlQuery
 
 
 def test_daily_statement_transactions_business_day_is_dialect_aware() -> None:
@@ -1010,7 +1012,7 @@ def test_pending_aging_dataset_registered() -> None:
     assert sql_obj is not None
     sql = sql_obj.SqlQuery
     assert sql.startswith("SELECT t.*,")
-    assert f"FROM {instance.instance}_stuck_pending t" in sql
+    assert f"FROM {_CFG.db_table_prefix}_stuck_pending t" in sql
     assert "<<$pL1PendingType>>" in sql and "<<$pL1PendingRail>>" in sql
     assert sp_ds.DatasetParameters  # the pushdown dataset params are wired
 
@@ -1100,7 +1102,7 @@ def test_unbundled_aging_dataset_registered() -> None:
     assert sql_obj is not None
     sql = sql_obj.SqlQuery
     assert sql.startswith("SELECT t.*,")
-    assert f"FROM {instance.instance}_stuck_unbundled t" in sql
+    assert f"FROM {_CFG.db_table_prefix}_stuck_unbundled t" in sql
     assert "<<$pL1UnbundledType>>" in sql and "<<$pL1UnbundledRail>>" in sql
     assert su_ds.DatasetParameters
 
@@ -1153,7 +1155,7 @@ def test_supersession_datasets_registered_and_target_base_tables() -> None:
     assert DS_SUPERSESSION_DAILY_BALANCES in registered_ids
 
     instance = default_l2_instance()
-    prefix = instance.instance
+    prefix = _CFG.db_table_prefix  # Z.C — was instance.instance
 
     tx_ds = build_supersession_transactions_dataset(_CFG, instance)
     db_ds = build_supersession_daily_balances_dataset(_CFG, instance)
@@ -1373,18 +1375,18 @@ def test_analysis_emits_with_expected_id_suffix() -> None:
 
 
 def test_dashboard_emits_with_expected_id_suffix() -> None:
-    """Per the M.2d.3 naming: `<resource_prefix>-<l2_prefix>-l1-dashboard`.
+    """Z.C — `<deployment_name>-l1-dashboard`.
 
-    The L2 instance prefix becomes the middle segment so multiple L2
-    instances coexist in one QS account. The default L2 instance is
-    `spec_example` (M.3.2 repointed from sasquatch_ar to a
-    persona-neutral default for production library code), so the
-    full DashboardId is `qs-gen-spec_example-l1-dashboard`.
+    The cfg's deployment_name is the single per-deploy prefix (was
+    previously two-segment `<resource_prefix>-<l2_prefix>` per M.2d.3,
+    auto-stamped from the L2 yaml). With the test cfg's default
+    deployment_name=`qsgen-test`, the full DashboardId is
+    `qsgen-test-l1-dashboard`.
     """
     app = build_l1_dashboard_app(_CFG)
     dashboard = app.emit_dashboard()
     assert dashboard.DashboardId.endswith("-l1-dashboard")
-    assert dashboard.DashboardId == "qs-gen-spec_example-l1-dashboard"
+    assert dashboard.DashboardId == f"{_CFG.deployment_name}-l1-dashboard"
 
 
 # -- CLI smoke (M.2a.9) ------------------------------------------------------
@@ -1400,6 +1402,11 @@ class TestCli:
         p.write_text(
             "aws_account_id: '111122223333'\n"
             "aws_region: us-west-2\n"
+            # Z.C — required cfg fields; pin a deployment_name so the
+            # rendered IDs are predictable in the file-existence asserts
+            # below.
+            "deployment_name: qsgen-cli-l1\n"
+            "db_table_prefix: spec_example\n"
             "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
             ":datasource/ds\n"
         )
@@ -1418,18 +1425,19 @@ class TestCli:
         assert result.exit_code == 0, result.output
         assert (out / "l1-dashboard-analysis.json").exists()
         assert (out / "l1-dashboard-dashboard.json").exists()
-        # Datasets land in out/datasets/ with the M.2d.3 L2-instance
-        # middle segment in their IDs (`<resource_prefix>-<l2_prefix>-...`).
+        # Datasets land in out/datasets/ with the Z.C deployment_name as
+        # the single ID prefix (replaces the M.2d.3 two-segment shape
+        # `<resource_prefix>-<l2_prefix>-...`).
         ds_dir = out / "datasets"
         for name in (
-            "qs-gen-spec_example-l1-drift-dataset.json",
-            "qs-gen-spec_example-l1-ledger-drift-dataset.json",
-            "qs-gen-spec_example-l1-overdraft-dataset.json",
-            "qs-gen-spec_example-l1-limit-breach-dataset.json",
-            "qs-gen-spec_example-l1-todays-exceptions-dataset.json",
-            "qs-gen-spec_example-l1-daily-statement-summary-dataset.json",
-            "qs-gen-spec_example-l1-daily-statement-transactions-dataset.json",
-            "qs-gen-spec_example-l1-transactions-dataset.json",
+            "qsgen-cli-l1-l1-drift-dataset.json",
+            "qsgen-cli-l1-l1-ledger-drift-dataset.json",
+            "qsgen-cli-l1-l1-overdraft-dataset.json",
+            "qsgen-cli-l1-l1-limit-breach-dataset.json",
+            "qsgen-cli-l1-l1-todays-exceptions-dataset.json",
+            "qsgen-cli-l1-l1-daily-statement-summary-dataset.json",
+            "qsgen-cli-l1-l1-daily-statement-transactions-dataset.json",
+            "qsgen-cli-l1-l1-transactions-dataset.json",
         ):
             assert (ds_dir / name).exists(), f"missing {name}"
 

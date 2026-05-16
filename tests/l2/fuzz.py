@@ -145,9 +145,10 @@ class _BuildState:
 def _build_instance(rng: Random, plan: _FuzzPlan) -> dict[str, Any]:
     state = _BuildState(plan=plan)
 
-    # The instance prefix gets baked from the seed so multiple fuzz
-    # YAMLs in the same DB don't collide on table names.
-    inst_prefix = f"fuzz_seed_{plan.seed % 10000:04d}"
+    # Z.C (2026-05-15) — the legacy `instance:` YAML key is gone; the
+    # DB-table prefix lives on cfg.db_table_prefix. The seed-derived
+    # identity (when needed for triage) lives in the YAML *filename*
+    # written by the caller, not inside the YAML body.
 
     accounts = _build_accounts(rng, state)
     account_templates = _build_account_templates(rng, state)
@@ -176,7 +177,6 @@ def _build_instance(rng: Random, plan: _FuzzPlan) -> dict[str, Any]:
     role_business_day_offsets = _build_role_business_day_offsets(rng, state)
 
     out: dict[str, Any] = {
-        "instance": inst_prefix,
         "description": _maybe_description(rng, state, "fuzz instance"),
         "accounts": accounts,
         "account_templates": account_templates,

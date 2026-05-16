@@ -294,9 +294,12 @@ class TestValidationHooksAudit:
     common/tree/__init__.py. If a rule fires for the wrong reason
     (or stops firing), the failure surfaces here."""
 
+    # Z.C — deployment_name + db_table_prefix are required cfg fields.
     _CFG = _Cfg(
         aws_account_id="111122223333",
         aws_region="us-west-2",
+        deployment_name="qsgen-kitchen",
+        db_table_prefix="kitchen",
         datasource_arn=(
             "arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds"
         ),

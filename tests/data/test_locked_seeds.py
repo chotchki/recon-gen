@@ -85,9 +85,13 @@ def test_locked_seed_matches_fresh_emit(
         f"Either rename the lock file or restore the YAML."
     )
     instance = load_instance(yaml_path)
+    # Z.C — db_table_prefix is now a required cfg field; pin to the
+    # locked-seed instance name (was previously stamped via
+    # `with_l2_instance_prefix(instance_name)`).
     cfg = make_test_config(
         dialect=Dialect(dialect_name),
-    ).with_l2_instance_prefix(instance_name)
+        db_table_prefix=instance_name,
+    )
     fresh = build_full_seed_sql(cfg, instance, anchor=_CANONICAL_ANCHOR)
 
     on_disk = locked_path.read_text()
@@ -141,7 +145,8 @@ def _emit_at(density: float, *, dialect_name: str = "postgres") -> str:
     instance = load_instance(_L2_DIR / "spec_example.yaml")
     cfg = make_test_config(
         dialect=Dialect(dialect_name),
-    ).with_l2_instance_prefix("spec_example")
+        db_table_prefix="spec_example",
+    )
     return build_full_seed_sql(
         cfg, instance, anchor=_CANONICAL_ANCHOR, density=density,
     )
@@ -155,7 +160,8 @@ def test_density_default_is_one_byte_identical_to_no_arg() -> None:
     instance = load_instance(_L2_DIR / "spec_example.yaml")
     cfg = make_test_config(
         dialect=Dialect.POSTGRES,
-    ).with_l2_instance_prefix("spec_example")
+        db_table_prefix="spec_example",
+    )
 
     no_arg = build_full_seed_sql(cfg, instance, anchor=_CANONICAL_ANCHOR)
     explicit_one = build_full_seed_sql(

@@ -282,8 +282,8 @@ def test_audit_verify_pins_to_embedded_hwm_against_newer_rows(
     implementations.
     """
     pdf_path, _ = seeded_pdf
-    instance = load_instance(_SPEC_EXAMPLE)
-    prefix = instance.instance
+    # Z.C — db_table_prefix lives on cfg now (was l2_instance.instance).
+    prefix = db_cfg.db_table_prefix
     sentinel_id = "verify-test-pinning-row"
     dialect = (
         Dialect.ORACLE

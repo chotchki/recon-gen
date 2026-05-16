@@ -64,7 +64,6 @@ def test_instance_templates_load_when_set(tmp_path: Path) -> None:
     """Both optional fields parse from YAML and land on the
     AccountTemplate dataclass."""
     p = _write_yaml(tmp_path, """\
-        instance: tmpl_test
         accounts:
           - id: gl
             role: Ledger
@@ -98,7 +97,6 @@ def test_instance_templates_default_to_none(tmp_path: Path) -> None:
     """When the YAML omits both fields, AccountTemplate carries None
     for each — the seed's fallback pattern triggers downstream."""
     p = _write_yaml(tmp_path, """\
-        instance: tmpl_default
         accounts:
           - id: gl
             role: Ledger
@@ -130,7 +128,6 @@ def test_instance_template_rejects_unknown_placeholder(tmp_path: Path) -> None:
     """Loader rejects any placeholder other than {role} + {n} — catches
     integrator typos like {customer_id} or {prefix}."""
     p = _write_yaml(tmp_path, """\
-        instance: tmpl_bad
         accounts:
           - id: gl
             role: Ledger
@@ -150,7 +147,6 @@ def test_instance_template_rejects_non_string(tmp_path: Path) -> None:
     """Loader rejects non-string values — catches accidental YAML
     object/list shapes."""
     p = _write_yaml(tmp_path, """\
-        instance: tmpl_bad
         accounts:
           - id: gl
             role: Ledger
@@ -170,7 +166,6 @@ def test_materialize_instances_uses_templates_when_set(tmp_path: Path) -> None:
     """Seed's _materialize_instances renders persona-aware ids + names
     when the YAML opts in."""
     p = _write_yaml(tmp_path, """\
-        instance: tmpl_seed
         accounts:
           - id: gl
             role: Ledger
@@ -207,7 +202,6 @@ def test_materialize_instances_falls_back_when_unset(tmp_path: Path) -> None:
     `cust-{n:03d}` + `Customer {n}` patterns — preserves existing
     fixture seed_hash."""
     p = _write_yaml(tmp_path, """\
-        instance: tmpl_default_seed
         accounts:
           - id: gl
             role: Ledger
@@ -245,7 +239,6 @@ def test_materialize_instances_falls_back_when_unset(tmp_path: Path) -> None:
 def test_metadata_value_examples_load(tmp_path: Path) -> None:
     """Loader parses the YAML mapping into a tuple-of-tuples on the rail."""
     p = _write_yaml(tmp_path, """\
-        instance: meta_test
         accounts:
           - id: gl
             role: Ledger
@@ -276,7 +269,6 @@ def test_metadata_value_examples_default_empty(tmp_path: Path) -> None:
     """Without the field, the rail carries an empty tuple — preserves
     legacy seed behavior (no opt-in needed)."""
     p = _write_yaml(tmp_path, """\
-        instance: meta_default
         accounts:
           - id: gl
             role: Ledger
@@ -302,7 +294,6 @@ def test_metadata_value_examples_loader_rejects_empty_list(
     """An empty value list is a typo (the integrator forgot to fill it
     in); reject at load."""
     p = _write_yaml(tmp_path, """\
-        instance: meta_bad_empty
         accounts:
           - id: gl
             role: Ledger
@@ -326,7 +317,6 @@ def test_metadata_value_examples_loader_rejects_non_string_value(
     """Example values must be strings — catches numeric / null typos
     where YAML auto-coerces."""
     p = _write_yaml(tmp_path, """\
-        instance: meta_bad_type
         accounts:
           - id: gl
             role: Ledger
@@ -350,7 +340,6 @@ def test_validator_r13_rejects_example_key_not_in_metadata_keys(
     """R13: an example key not in metadata_keys is a typo that would
     silently never be used — caught at validate."""
     p = _write_yaml(tmp_path, """\
-        instance: meta_typo
         accounts:
           - id: gl
             role: Ledger
@@ -393,7 +382,6 @@ def test_broad_mode_uses_metadata_examples_when_set(tmp_path: Path) -> None:
     early-returns with no plants regardless of mode.
     """
     p = _write_yaml(tmp_path, """\
-        instance: meta_broad
         accounts:
           - id: gl
             role: Ledger
@@ -419,7 +407,7 @@ def test_broad_mode_uses_metadata_examples_when_set(tmp_path: Path) -> None:
     report = default_scenario_for(
         inst, today=CANONICAL_TODAY, mode="broad",
     )
-    sql = emit_seed(inst, report.scenario)
+    sql = emit_seed(inst, report.scenario, prefix="test")
     # All three example values should appear in the seed SQL (one per
     # firing of ExternalRail).
     assert "bigfoot-001" in sql
@@ -435,7 +423,6 @@ def test_broad_mode_falls_back_when_examples_not_set(tmp_path: Path) -> None:
     legacy `<rail>-firing-<seq>` pattern. Mixing opt-in keys with
     non-opt-in keys works naturally."""
     p = _write_yaml(tmp_path, """\
-        instance: meta_mixed
         accounts:
           - id: gl
             role: Ledger
@@ -462,6 +449,6 @@ def test_broad_mode_falls_back_when_examples_not_set(tmp_path: Path) -> None:
     report = default_scenario_for(
         inst, today=CANONICAL_TODAY, mode="broad",
     )
-    sql = emit_seed(inst, report.scenario)
+    sql = emit_seed(inst, report.scenario, prefix="test")
     assert "bigfoot-001" in sql
     assert "ExternalRail-firing-0001" in sql  # batch_id fallback

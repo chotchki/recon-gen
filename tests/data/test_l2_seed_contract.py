@@ -143,14 +143,23 @@ def instance(l2_yaml: Path) -> L2Instance:
 
 
 @pytest.fixture
-def auto_seed_sql(instance: L2Instance) -> str:
+def db_prefix(l2_yaml: Path) -> str:
+    """Z.C — the DB-table prefix for this L2 instance. The yaml file
+    stem stands in for the dropped ``L2Instance.instance`` field; the
+    operator's cfg.yaml would set ``db_table_prefix`` to the same value
+    when seeding the L2 into a real DB."""
+    return l2_yaml.stem
+
+
+@pytest.fixture
+def auto_seed_sql(instance: L2Instance, db_prefix: str) -> str:
     """Auto-derived seed SQL for the parameterized instance.
 
     Uses the canonical reference date so the SQL is stable across days
     (matches the YAML's seed_hash semantics).
     """
     report = default_scenario_for(instance, today=CANONICAL_TODAY)
-    return emit_seed(instance, report.scenario)
+    return emit_seed(instance, report.scenario, prefix=db_prefix)
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -176,12 +185,15 @@ def _fuzz_repro_hint() -> str:
     )
 
 
-def _is_fuzz_instance(instance: L2Instance) -> bool:
-    return str(instance.instance).startswith("fuzz_seed_")
+def _is_fuzz_db_prefix(db_prefix: str) -> bool:
+    """Z.C — was `_is_fuzz_instance(instance.instance)`; the L2's
+    `instance` field is gone, so we key off the yaml file stem (which
+    the `db_prefix` fixture exposes) instead."""
+    return db_prefix.startswith("fuzz_seed_")
 
 
-def _hint_if_fuzz(instance: L2Instance) -> str:
-    return _fuzz_repro_hint() if _is_fuzz_instance(instance) else ""
+def _hint_if_fuzz(db_prefix: str) -> str:
+    return _fuzz_repro_hint() if _is_fuzz_db_prefix(db_prefix) else ""
 
 
 # -- SQL parsing helpers ----------------------------------------------------
@@ -311,22 +323,26 @@ def _columns_documented_for(table_suffix: str) -> set[str]:
 # -- Determinism ------------------------------------------------------------
 
 
-def test_auto_seed_is_byte_deterministic(instance, auto_seed_sql) -> None:
+def test_auto_seed_is_byte_deterministic(
+    instance, db_prefix, auto_seed_sql,
+) -> None:
     """Two emit_seed runs with the same instance + canonical today =
     byte-identical output. The YAML's seed_hash assumes this."""
     report_a = default_scenario_for(instance, today=CANONICAL_TODAY)
     report_b = default_scenario_for(instance, today=CANONICAL_TODAY)
-    assert emit_seed(instance, report_a.scenario) == emit_seed(
-        instance, report_b.scenario,
+    assert emit_seed(instance, report_a.scenario, prefix=db_prefix) == emit_seed(
+        instance, report_b.scenario, prefix=db_prefix,
     )
-    assert emit_seed(instance, report_a.scenario) == auto_seed_sql
+    assert emit_seed(
+        instance, report_a.scenario, prefix=db_prefix,
+    ) == auto_seed_sql
 
 
 # -- Account contract -------------------------------------------------------
 
 
 def test_seed_account_roles_resolve_to_instance(
-    instance: L2Instance, auto_seed_sql: str,
+    instance: L2Instance, auto_seed_sql: str, db_prefix: str,
 ) -> None:
     """Every account_role literal in the seed comes from a declared
     Account.role or AccountTemplate.role."""
@@ -362,14 +378,14 @@ def test_seed_account_roles_resolve_to_instance(
 
     undeclared = seen_roles - declared_roles
     assert not undeclared, (
-        f"Auto-seed for {instance.instance!r} emitted account_role values "
+        f"Auto-seed for {db_prefix!r} emitted account_role values "
         f"not declared in instance.accounts/account_templates: {sorted(undeclared)!r}"
-        + _hint_if_fuzz(instance)
+        + _hint_if_fuzz(db_prefix)
     )
 
 
 def test_seed_account_ids_resolve_to_instance_or_synthetic_template(
-    instance: L2Instance, auto_seed_sql: str,
+    instance: L2Instance, auto_seed_sql: str, db_prefix: str,
 ) -> None:
     """Every account_id literal in the seed is either a declared singleton
     Account.id OR a synthetic template-instance id the auto-scenario
@@ -408,10 +424,10 @@ def test_seed_account_ids_resolve_to_instance_or_synthetic_template(
 
     undeclared = seen_ids - allowed
     assert not undeclared, (
-        f"Auto-seed for {instance.instance!r} emitted account_id values "
+        f"Auto-seed for {db_prefix!r} emitted account_id values "
         f"that are neither declared singletons nor synthetic "
         f"template-instances: {sorted(undeclared)!r}"
-        + _hint_if_fuzz(instance)
+        + _hint_if_fuzz(db_prefix)
     )
 
 
@@ -419,7 +435,7 @@ def test_seed_account_ids_resolve_to_instance_or_synthetic_template(
 
 
 def test_seed_rail_names_resolve_to_instance(
-    instance: L2Instance, auto_seed_sql: str,
+    instance: L2Instance, auto_seed_sql: str, db_prefix: str,
 ) -> None:
     """Every rail_name literal in the seed = a declared Rail.name."""
     declared = {str(r.name) for r in instance.rails}
@@ -441,14 +457,14 @@ def test_seed_rail_names_resolve_to_instance(
                     seen.add(lit.strip("'"))
     undeclared = seen - declared
     assert not undeclared, (
-        f"Auto-seed for {instance.instance!r} emitted rail_name values "
+        f"Auto-seed for {db_prefix!r} emitted rail_name values "
         f"not declared in instance.rails: {sorted(undeclared)!r}"
-        + _hint_if_fuzz(instance)
+        + _hint_if_fuzz(db_prefix)
     )
 
 
 def test_seed_transfer_types_resolve_to_instance(
-    instance: L2Instance, auto_seed_sql: str,
+    instance: L2Instance, auto_seed_sql: str, db_prefix: str,
 ) -> None:
     """Every transfer_type literal in the seed = a declared
     Rail.transfer_type OR TransferTemplate.transfer_type (M.3.10g —
@@ -474,9 +490,9 @@ def test_seed_transfer_types_resolve_to_instance(
                 seen.add(parts[idx].strip("'"))
     undeclared = seen - declared
     assert not undeclared, (
-        f"Auto-seed for {instance.instance!r} emitted transfer_type values "
+        f"Auto-seed for {db_prefix!r} emitted transfer_type values "
         f"not declared on any Rail.transfer_type: {sorted(undeclared)!r}"
-        + _hint_if_fuzz(instance)
+        + _hint_if_fuzz(db_prefix)
     )
 
 
@@ -495,7 +511,7 @@ _INFRA_METADATA_KEYS = {
 
 
 def test_seed_metadata_keys_subset_of_rail_declarations(
-    instance: L2Instance, auto_seed_sql: str,
+    instance: L2Instance, auto_seed_sql: str, db_prefix: str,
 ) -> None:
     """Every JSON metadata key in the seed comes from one of:
     a Rail.metadata_keys entry, a TransferTemplate.transfer_key entry
@@ -517,13 +533,13 @@ def test_seed_metadata_keys_subset_of_rail_declarations(
 
     undeclared = seen_keys - declared
     assert not undeclared, (
-        f"Auto-seed for {instance.instance!r} emitted metadata keys "
+        f"Auto-seed for {db_prefix!r} emitted metadata keys "
         f"not declared on any Rail.metadata_keys / TransferTemplate."
         f"transfer_key (and not infra-keys): "
         f"{sorted(undeclared)!r}. Either add them to the relevant "
         f"rail's metadata_keys, or add them to _INFRA_METADATA_KEYS "
         f"in this test."
-        + _hint_if_fuzz(instance)
+        + _hint_if_fuzz(db_prefix)
     )
 
 
@@ -531,7 +547,7 @@ def test_seed_metadata_keys_subset_of_rail_declarations(
 
 
 def test_seed_columns_match_schema_v6_documented_set(
-    instance: L2Instance, auto_seed_sql: str,
+    instance: L2Instance, auto_seed_sql: str, db_prefix: str,
 ) -> None:
     """Every column referenced in the seed's INSERT lists is documented
     in Schema_v6.md's `<prefix>_<table>` ### Columns table."""
@@ -542,12 +558,12 @@ def test_seed_columns_match_schema_v6_documented_set(
         documented = _columns_documented_for(table)
         undocumented = emitted - documented
         assert not undocumented, (
-            f"Auto-seed for {instance.instance!r} INSERT INTO "
+            f"Auto-seed for {db_prefix!r} INSERT INTO "
             f"<prefix>_{table} references columns missing from "
             f"Schema_v6.md's `<prefix>_{table}` documentation: "
             f"{sorted(undocumented)!r}. Update the doc OR drop the "
             f"columns from the seed."
-            + _hint_if_fuzz(instance)
+            + _hint_if_fuzz(db_prefix)
         )
 
 

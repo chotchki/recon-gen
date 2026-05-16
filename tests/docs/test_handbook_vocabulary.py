@@ -22,7 +22,7 @@ from quicksight_gen.common.handbook.vocabulary import (
     _institution_acronym,
 )
 from quicksight_gen.common.l2.loader import load_instance
-from quicksight_gen.common.l2.primitives import Identifier, L2Instance
+from quicksight_gen.common.l2.primitives import L2Instance
 
 
 _FIXTURES = Path(__file__).parent.parent / "l2"
@@ -35,12 +35,13 @@ def _load(name: str) -> L2Instance:
     return load_instance(_FIXTURES / f"{name}.yaml")
 
 
-def _minimal_instance(
-    *, instance: str = "acme_treasury", description: str | None = None
-) -> L2Instance:
-    """Empty-tuples-everywhere L2Instance for the synthetic-minimal test."""
+def _minimal_instance(*, description: str | None = None) -> L2Instance:
+    """Empty-tuples-everywhere L2Instance for the synthetic-minimal test.
+
+    Z.C — the legacy ``instance`` field is dropped from L2Instance; the
+    deployment identifier lives on cfg now, not the L2.
+    """
     return L2Instance(
-        instance=Identifier(instance),
         accounts=(),
         account_templates=(),
         rails=(),
@@ -230,13 +231,13 @@ class TestVocabularyForDispatch:
             vocab = vocabulary_for(_load(name))
             assert isinstance(vocab, HandbookVocabulary)
 
-    @pytest.mark.parametrize(
-        "instance_name", ["acme_treasury", "first_national", "anything_else"]
-    )
-    def test_unknown_instance_uses_neutral_branch(self, instance_name: str):
-        # Any non-sasquatch_pr instance routes to the neutral fallback —
-        # zero persona leakage by construction.
-        vocab = vocabulary_for(_minimal_instance(instance=instance_name))
+    def test_unknown_instance_uses_neutral_branch(self):
+        # An L2 with no SNB-persona block routes to the neutral fallback —
+        # zero persona leakage by construction. Z.C — the previous
+        # gate sniffed `l2_instance.instance == "sasquatch_pr"`; the
+        # new gate checks the persona acronym (`SNB`), so a synthetic
+        # L2 with no persona block trivially falls through.
+        vocab = vocabulary_for(_minimal_instance())
         assert vocab.stakeholders == ()
         assert vocab.merchants == ()
         assert vocab.investigation_personas == ()
@@ -246,16 +247,29 @@ class TestVocabularyForDispatch:
 
 
 class TestFixtureName:
-    def test_bundled_fixtures_carry_their_name(self):
-        for name in ("sasquatch_pr", "spec_example"):
-            vocab = vocabulary_for(_load(name))
-            assert vocab.fixture_name == name
+    def test_sasquatch_persona_yaml_carries_fixture_name(self):
+        # Z.C — `_bundled_fixture_name` now keys off the persona block
+        # rather than the dropped `l2_instance.instance` db-prefix
+        # field. The sasquatch_pr fixture's persona acronym is "SNB",
+        # which is the only signal the helper exposes for the
+        # bundled-vs-integrator distinction.
+        vocab = vocabulary_for(_load("sasquatch_pr"))
+        assert vocab.fixture_name == "sasquatch_pr"
+
+    def test_spec_example_has_no_fixture_name(self):
+        # Z.C — spec_example has no persona block, so the SNB-acronym
+        # gate misses and `fixture_name` reads None. Handbook prose that
+        # gates on `{% if vocab.fixture_name %}` simply suppresses the
+        # "the bundled X fixture" sentence — matches spec_example's
+        # actual unflavored shape.
+        vocab = vocabulary_for(_load("spec_example"))
+        assert vocab.fixture_name is None
 
     def test_integrator_fixture_is_unnamed(self):
         # An L2 the project doesn't bundle reads as fixture_name=None,
         # so handbook prose like "the bundled X fixture" can fall back
         # to a generic phrasing via {% if vocab.fixture_name %}.
-        vocab = vocabulary_for(_minimal_instance(instance="acme_bank"))
+        vocab = vocabulary_for(_minimal_instance())
         assert vocab.fixture_name is None
 
 
@@ -313,7 +327,7 @@ class TestDemoScenarioVocabulary:
         # Use the existing minimal-instance helper which has no rails /
         # accounts, so default_scenario_for returns no plants.
         from quicksight_gen.common.l2.auto_scenario import default_scenario_for
-        l2 = _minimal_instance(instance="empty_demo")
+        l2 = _minimal_instance()
         plant = default_scenario_for(l2).scenario
         assume_no_plants = (
             not plant.drift_plants

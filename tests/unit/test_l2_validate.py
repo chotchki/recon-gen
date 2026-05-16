@@ -44,7 +44,6 @@ def _baseline_instance() -> L2Instance:
     a regression on the baseline means the validator drifted.
     """
     return L2Instance(
-        instance=Identifier("base"),
         accounts=(
             Account(
                 id=Identifier("gl-control"),

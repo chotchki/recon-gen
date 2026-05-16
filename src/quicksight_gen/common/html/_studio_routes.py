@@ -192,7 +192,7 @@ def _render_home_page(
     bumps ``iframe.src = iframe.src`` to force a reload.
     """
     instance = cache.get()
-    prefix = escape(cfg.deployment_name if cfg is not None else "(unbound)")
+    prefix = escape(cfg.deployment_name if cfg is not None else cache.path.stem)
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
 
     section_blocks: list[str] = []
@@ -494,8 +494,16 @@ def _render_diagram_page(
     the param to restore the full picture.
     """
     instance = cache.get()
+    # Z.C — topology helpers require db_table_prefix as a keyword. Use
+    # cfg.db_table_prefix when available; fall back to the deployment
+    # name (or `"unbound"` sentinel) when the studio is rendering
+    # topology without an attached cfg.
+    db_prefix = (
+        cfg.db_table_prefix if cfg is not None else "unbound"
+    )
     digraph = build_topology_graph_per_rail(
         instance,
+        db_table_prefix=db_prefix,
         bundle_parallel_rails=True,
         focus_node_id=focus_node_id,
         layer=layer,
@@ -504,8 +512,8 @@ def _render_diagram_page(
 
     # Counts for the chrome (uses the typed projection so they reflect
     # the underlying L2 shape, not the rendered subgraph).
-    typed = topology_graph_for(instance)
-    prefix = escape(cfg.deployment_name if cfg is not None else "(unbound)")
+    typed = topology_graph_for(instance, db_table_prefix=db_prefix)
+    prefix = escape(cfg.deployment_name if cfg is not None else cache.path.stem)
     n_role_internal = sum(
         1 for n in typed.nodes
         if n.kind == "role" and n.scope == "internal"
@@ -1481,7 +1489,7 @@ def _render_data_page(
     ``quicksightDeploy()`` JS helper bound to the button's onclick.
     """
     instance = cache.get()
-    prefix = escape(cfg.deployment_name if cfg is not None else "(unbound)")
+    prefix = escape(cfg.deployment_name if cfg is not None else cache.path.stem)
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
     selected_plants = (
         tg_cache.get().plants if tg_cache is not None else ()
@@ -2122,15 +2130,16 @@ def make_studio_routes(
 
         async def coverage(_request: Request) -> JSONResponse:
             instance = cache.get()
-            prefix = bound_prefix_override or (
-                cfg.db_table_prefix if cfg is not None else None
+            # Z.C — prefix resolution order:
+            # 1) explicit prefix_override (operator wires per-call)
+            # 2) cfg.db_table_prefix (cfg-bound studio session)
+            # 3) cache.path.stem (yaml file basename — fallback for
+            #    studio sessions wired without a cfg, e.g. unit tests)
+            prefix = (
+                bound_prefix_override
+                or (cfg.db_table_prefix if cfg is not None else None)
+                or cache.path.stem
             )
-            if prefix is None:
-                raise RuntimeError(
-                    "coverage route mounted without a prefix source — "
-                    "pass cfg=Config(...) or prefix_override=... to "
-                    "make_studio_routes when db_pool is set."
-                )
             cov = await coverage_for(
                 bound_pool, prefix, instance, dialect=bound_dialect,
             )

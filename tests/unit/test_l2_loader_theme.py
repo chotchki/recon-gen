@@ -19,7 +19,6 @@ from quicksight_gen.common.l2 import L2LoaderError, ThemePreset, load_instance
 # A minimal happy-path L2 YAML — single account + zero rails — used as
 # the substrate that every theme test prepends a theme block onto.
 _BASE_INSTANCE_YAML = dedent("""\
-    instance: thm
     accounts:
       - id: int-1
         role: Internal

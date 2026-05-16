@@ -55,7 +55,9 @@ from quicksight_gen.common.env_keys import (
     QS_E2E_PAGE_TIMEOUT,
     QS_E2E_USER_ARN,
     QS_GEN_CONFIG,
+    QS_GEN_DB_TABLE_PREFIX,
     QS_GEN_DEMO_DATABASE_URL,
+    QS_GEN_DEPLOYMENT_NAME,
     QS_GEN_E2E,
     QS_GEN_FUZZ_SEED,
     QS_GEN_LAYER,
@@ -1487,12 +1489,19 @@ def _setup_local_sqlite() -> tuple[dict[str, str], object | None]:
     tmp_dir = Path(tempfile.mkdtemp(prefix="qs-gen-sqlite-"))  # typing-smell: ignore[qs-gen-prefix]: tempfile dir name only — not an AWS resource ID, just disambiguates per-invocation runner-managed temp dirs from other tools' tempfiles for operator-visible cleanup
     db_path = tmp_dir / "demo.sqlite"
     cfg_path = tmp_dir / "config.sqlite.yaml"
+    # Z.C — synth cfg uses ``deployment_name`` + ``db_table_prefix``
+    # (Z.C.2 collapse). The runner injects per-cell overrides via
+    # QS_GEN_DEPLOYMENT_NAME / QS_GEN_DB_TABLE_PREFIX env vars in
+    # ``_run_one_variant`` so multi-cell parallel runs don't collide
+    # — the values written here are the per-invocation defaults that
+    # apply when a cell doesn't override.
     cfg_path.write_text(
         f"aws_account_id: \"111122223333\"\n"
         f"aws_region: \"us-east-1\"\n"
         f"dialect: sqlite\n"
         f"demo_database_url: \"sqlite:///{db_path}\"\n"
-        f"resource_prefix: \"qs-gen-sqlite\"\n"
+        f"deployment_name: \"qsgen-sqlite\"\n"
+        f"db_table_prefix: \"qsgen_sqlite\"\n"
     )
     env: dict[str, str] = {
         QS_GEN_DEMO_DATABASE_URL.name: f"sqlite:///{db_path}",
@@ -2436,6 +2445,27 @@ def _run_one_variant(
     dialect_cfg = _resolve_seed_config_for_dialect(spec.dialect)
     if dialect_cfg is not None and QS_GEN_CONFIG.name not in variant_env:
         variant_env[QS_GEN_CONFIG.name] = str(dialect_cfg)
+
+    # Z.C.4 — per-cell ``deployment_name`` + ``db_table_prefix`` overrides
+    # so multi-cell parallel runs (sp_pg_lo / sq_pg_lo / fuzz cells) don't
+    # collide on AWS resource IDs (``deployment_name`` weaves into every
+    # qs-gen-* ID via ``Config.prefixed``) or DB table prefixes
+    # (``db_table_prefix`` is the per-instance schema prefix every
+    # `<prefix>_transactions`/etc. read keys off). Operator's
+    # ``run/config.<dialect>.yaml`` carries STATIC values
+    # (e.g. ``qsgen-postgres``) that're fine for single-cell runs but
+    # collide the moment two cells share a target. The cfg loader
+    # (Z.C.2) honors these env vars over yaml fields.
+    #
+    # ``spec.name`` is ``<sc>_<di>_<ta>`` (e.g. ``sp_pg_lo``) — already
+    # snake_case, max 17 chars (well under cfg.db_table_prefix's 30-char
+    # cap). DB prefix joins with `_`; QS-resource-ID prefix joins with
+    # `-` (DB identifiers reject hyphens unquoted; QS resource IDs are
+    # kebab-case). Use `qsgen` (no hyphen) as the literal prefix on both.
+    if QS_GEN_DEPLOYMENT_NAME.name not in variant_env:
+        variant_env[QS_GEN_DEPLOYMENT_NAME.name] = f"qsgen-{spec.name}"
+    if QS_GEN_DB_TABLE_PREFIX.name not in variant_env:
+        variant_env[QS_GEN_DB_TABLE_PREFIX.name] = f"qsgen_{spec.name}"
 
     # Y.2.gate.h+i.0 — AWS auth wiring. Inject AWS_PROFILE so subprocess
     # boto3 calls + AWS CLI invocations see the long-lived IAM-user creds

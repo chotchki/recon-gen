@@ -34,7 +34,6 @@ def _make_instance(
 ) -> L2Instance:
     """Minimal L2Instance for isolating one derivation source at a time."""
     return L2Instance(
-        instance=Identifier("der"),
         accounts=(
             Account(id=Identifier("a"), scope="internal", role=Identifier("A")),
             Account(id=Identifier("b"), scope="internal", role=Identifier("B")),

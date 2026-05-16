@@ -29,10 +29,10 @@ from quicksight_gen.common.html._tree_fetcher import make_tree_db_fetcher
 from tests._test_helpers import make_test_config
 
 
-# build_all_datasets requires the L2 prefix to be set on cfg. The CLI
-# does this via resolve_l2_for_demo; the unit test sets it explicitly
+# build_all_datasets requires the DB-table prefix to be set on cfg.
+# The CLI threads this in via cfg yaml; the unit test sets it explicitly
 # so the test doesn't depend on disk-resident config files.
-_TEST_CFG = make_test_config().with_l2_instance_prefix("spec_example")
+_TEST_CFG = make_test_config(db_table_prefix="spec_example")
 
 
 class _NoConnectPool:

@@ -829,7 +829,6 @@ def test_computed_ledger_balance_unions_children_plus_direct_postings() -> None:
 def _baseline_instance() -> L2Instance:
     """Minimum L2Instance fixture for refresh-helper tests."""
     return L2Instance(
-        instance=Identifier("re"),
         accounts=(),
         account_templates=(),
         rails=(),

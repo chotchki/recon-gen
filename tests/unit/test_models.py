@@ -384,14 +384,16 @@ class TestTagSerialization:
 
 
 class TestConfigTags:
-    def test_default_emits_managed_and_resource_prefix_tags(self):
-        """v8.4.0 — every deploy stamps both ManagedBy + ResourcePrefix
-        so cleanup can scope per-deploy (not just per-account)."""
+    def test_default_emits_managed_and_deployment_tags(self):
+        """Z.C — every deploy stamps both ManagedBy + Deployment so
+        cleanup can scope per-deploy (not just per-account). Replaces
+        the v8.4.0 two-tag scheme (ManagedBy + ResourcePrefix +
+        optional L2Instance) with a single Deployment tag."""
         cfg = make_test_config()
         tags_by_key = {t.Key: t.Value for t in cfg.tags()}
         assert tags_by_key == {
             "ManagedBy": "quicksight-gen",
-            "ResourcePrefix": "qs-gen",
+            "Deployment": "qsgen-test",
         }
 
     def test_extra_tags_merged(self):
@@ -399,11 +401,11 @@ class TestConfigTags:
             extra_tags={"Environment": "prod", "Team": "finance"},
         )
         tags = cfg.tags()
-        # ManagedBy + ResourcePrefix (always emitted) + Environment + Team
+        # ManagedBy + Deployment (always emitted) + Environment + Team
         assert len(tags) == 4
         keys = [t.Key for t in tags]
         assert "ManagedBy" in keys
-        assert "ResourcePrefix" in keys
+        assert "Deployment" in keys
         assert "Environment" in keys
         assert "Team" in keys
 
@@ -412,50 +414,26 @@ class TestConfigTags:
         tags = cfg.tags()
         assert tags[0].Key == "ManagedBy"
 
-    def test_resource_prefix_tag_carries_cfg_value(self):
-        """v8.4.0 — ResourcePrefix tag value mirrors cfg.resource_prefix
-        so cleanup's per-deploy filter has something to match against."""
-        cfg = make_test_config(resource_prefix="qs-ci-12345-pg")
+    def test_deployment_tag_carries_cfg_value(self):
+        """Z.C — Deployment tag value mirrors cfg.deployment_name so
+        cleanup's per-deploy filter has something to match against."""
+        cfg = make_test_config(deployment_name="qs-ci-12345-pg")
         tags_by_key = {t.Key: t.Value for t in cfg.tags()}
-        assert tags_by_key["ResourcePrefix"] == "qs-ci-12345-pg"
-
-    def test_l2_instance_tag_added_when_prefix_set(self):
-        """M.2d.3 — when l2_instance_prefix is set, an L2Instance tag
-        is added so cleanup can scope per-instance. Stacks with the
-        v8.4.0 ResourcePrefix tag (both are emitted)."""
-        cfg = make_test_config(l2_instance_prefix="sasquatch_ar")
-        tags = cfg.tags()
-        assert {t.Key: t.Value for t in tags} == {
-            "ManagedBy": "quicksight-gen",
-            "ResourcePrefix": "qs-gen",
-            "L2Instance": "sasquatch_ar",
-        }
-
-    def test_l2_instance_tag_omitted_when_prefix_unset(self):
-        """M.2d.3 — legacy single-tenant deploys don't carry the L2Instance
-        tag. (ResourcePrefix is always present, however — added in v8.4.0.)"""
-        cfg = make_test_config()
-        tag_keys = [t.Key for t in cfg.tags()]
-        assert "L2Instance" not in tag_keys
-        # But ResourcePrefix IS present.
-        assert "ResourcePrefix" in tag_keys
+        assert tags_by_key["Deployment"] == "qs-ci-12345-pg"
 
 
 class TestConfigPrefixed:
-    """M.2d.3 — cfg.prefixed() incorporates l2_instance_prefix when set."""
+    """Z.C — cfg.prefixed() uses deployment_name as the single prefix
+    segment (replaces v8.x's <resource_prefix>-<l2_instance_prefix>-...)."""
 
-    def test_prefixed_without_l2_prefix_legacy_shape(self):
-        cfg = make_test_config()
-        assert cfg.prefixed("l1-dashboard") == "qs-gen-l1-dashboard"
+    def test_prefixed_uses_deployment_name(self):
+        cfg = make_test_config(deployment_name="qsgen-prod")
+        assert cfg.prefixed("l1-dashboard") == "qsgen-prod-l1-dashboard"
 
-    def test_prefixed_with_l2_prefix_inserts_middle_segment(self):
-        cfg = make_test_config(l2_instance_prefix="sasquatch_ar")
-        assert cfg.prefixed("l1-dashboard") == "qs-gen-sasquatch_ar-l1-dashboard"
-
-    def test_prefixed_lets_two_l2_instances_coexist(self):
-        """M.2d.3's headline use case: same dashboard kind, different L2."""
-        cfg_a = make_test_config(l2_instance_prefix="sasquatch_ar")
-        cfg_b = make_test_config(l2_instance_prefix="wonkawash")
+    def test_prefixed_lets_two_deployments_coexist(self):
+        """The headline use case: same dashboard kind, different deployment."""
+        cfg_a = make_test_config(deployment_name="qsgen-sasquatch")
+        cfg_b = make_test_config(deployment_name="qsgen-wonkawash")
         assert cfg_a.prefixed("l1-dashboard") != cfg_b.prefixed("l1-dashboard")
 
 
@@ -582,7 +560,9 @@ class TestBuildDatasource:
 
     def test_datasource_id_uses_prefix(self):
         ds = build_datasource(_DEMO_CFG)
-        assert ds.DataSourceId == "qs-gen-demo-datasource"
+        # Z.C — `<deployment_name>-demo-datasource` (was the historical
+        # `qs-gen-demo-datasource` from the v8.x default resource_prefix).
+        assert ds.DataSourceId == f"{_DEMO_CFG.deployment_name}-demo-datasource"
 
     def test_raises_without_demo_url(self):
         cfg = make_test_config()
@@ -644,16 +624,22 @@ class TestConfigDatasourceArnDerivation:
         cfg = Config(
             aws_account_id="111122223333",
             aws_region="us-west-2",
+            # Z.C — required cfg fields.
+            deployment_name="qsgen-derived",
+            db_table_prefix="derived",
             demo_database_url="postgresql://u:p@h:5432/db",
         )
         assert cfg.datasource_arn == (
-            "arn:aws:quicksight:us-west-2:111122223333:datasource/qs-gen-demo-datasource"
+            "arn:aws:quicksight:us-west-2:111122223333:datasource/"
+            f"{cfg.deployment_name}-demo-datasource"
         )
 
     def test_explicit_arn_takes_precedence(self):
         cfg = Config(
             aws_account_id="111122223333",
             aws_region="us-west-2",
+            deployment_name="qsgen-explicit",
+            db_table_prefix="explicit",
             datasource_arn="arn:aws:quicksight:us-west-2:111122223333:datasource/custom",
             demo_database_url="postgresql://u:p@h:5432/db",
         )
@@ -665,4 +651,6 @@ class TestConfigDatasourceArnDerivation:
             Config(
                 aws_account_id="123",
                 aws_region="us-east-1",
+                deployment_name="qsgen-fail-test",
+                db_table_prefix="fail_test",
             )

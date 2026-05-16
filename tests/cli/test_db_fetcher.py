@@ -165,19 +165,19 @@ class _FakeConnection:
 
 
 @pytest.fixture
-def cfg_with_prefix(tmp_path: Path):  # type: ignore[no-untyped-def]: returns Config with l2_instance_prefix stamped on it
+def cfg_with_prefix(tmp_path: Path):  # type: ignore[no-untyped-def]: returns Config with the Z.C deployment_name + db_table_prefix stamped on it
     from quicksight_gen.common.config import load_config
 
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(
         "aws_account_id: '111122223333'\n"
         "aws_region: us-west-2\n"
+        "deployment_name: qsgen-test-inst\n"
+        "db_table_prefix: test_inst\n"
         "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
         ":datasource/ds\n"
     )
-    cfg = load_config(str(cfg_file))
-    cfg.l2_instance_prefix = "test_inst"
-    return cfg
+    return load_config(str(cfg_file))
 
 
 def test_db_fetcher_force_branch_skips_db(cfg_with_prefix) -> None:  # type: ignore[no-untyped-def]: cfg_with_prefix is the fixture above (Config)

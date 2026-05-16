@@ -178,7 +178,7 @@ class TestApp:
         app = self._make_app_with_one_sheet()
         analysis = app.emit_analysis()
         assert analysis.AwsAccountId == "111122223333"
-        assert analysis.AnalysisId.startswith("qs-gen-")
+        assert analysis.AnalysisId.startswith("qsgen-test-")
         assert analysis.AnalysisId.endswith("test-analysis")
         assert analysis.Name == "Test Analysis"
         assert analysis.ThemeArn  # non-empty
@@ -210,7 +210,7 @@ class TestApp:
         )
         dashboard = app.emit_dashboard()
         assert dashboard.AwsAccountId == "111122223333"
-        assert dashboard.DashboardId.startswith("qs-gen-")
+        assert dashboard.DashboardId.startswith("qsgen-test-")
         assert dashboard.DashboardId.endswith("test-dashboard")
         assert dashboard.Name == "Test Dashboard"
         assert dashboard.Definition is not None

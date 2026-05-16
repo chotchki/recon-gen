@@ -145,8 +145,8 @@ def test_pg_to_sqlite_deploy_pipeline_full_loop(
         etl_datasource_url=pg_container_url,
     )
     apply_schema_to(cfg)
-    instance = load_instance(SASQUATCH_YAML)
-    prefix = str(instance.instance)
+    # Z.C — DB-table prefix lives on cfg now (was instance.instance).
+    prefix = cfg.db_table_prefix
 
     async def _drive() -> None:
         pool = await make_connection_pool(cfg, max_size=4)
@@ -224,16 +224,19 @@ def test_pg_to_sqlite_halt_on_failed_etl_hook(
     proves the halt prevents the demo DB from being touched when the
     operator's ETL refresh failed).
     """
-    instance = load_instance(SASQUATCH_YAML)
     sqlite_path = tmp_path / "demo.sqlite"
 
     bad_hook = tmp_path / "bad_etl_hook.sh"
     bad_hook.write_text("#!/bin/bash\nexit 1\n")
     bad_hook.chmod(bad_hook.stat().st_mode | stat.S_IEXEC)
 
+    # Z.C — deployment_name + db_table_prefix are required cfg fields.
+    db_prefix = "sasquatch_pr"
     cfg = Config(
         aws_account_id="111122223333",
         aws_region="us-east-1",
+        deployment_name="qsgen-halt-test",
+        db_table_prefix=db_prefix,
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),
@@ -242,12 +245,12 @@ def test_pg_to_sqlite_halt_on_failed_etl_hook(
         etl_hook=str(bad_hook),
         etl_datasource=EtlDatasourceConfig(
             url=pg_container_url,
-            transactions_table=f"{instance.instance}_transactions",
-            daily_balances_table=f"{instance.instance}_daily_balances",
+            transactions_table=f"{db_prefix}_transactions",
+            daily_balances_table=f"{db_prefix}_daily_balances",
         ),
     )
     apply_schema_to(cfg)
-    prefix = str(instance.instance)
+    prefix = db_prefix
 
     async def _drive() -> None:
         pool = await make_connection_pool(cfg, max_size=4)

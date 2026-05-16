@@ -32,11 +32,11 @@ from quicksight_gen.cli import main
 from tests._test_helpers import make_test_config
 
 
-# N.4.b: Executives is now L2-fed and requires ``l2_instance_prefix``
-# to render its dataset SQL. Tests pin spec_example (matches what
-# ``build_executives_app`` auto-derives from
-# ``default_l2_instance().instance``).
-_TEST_CFG = make_test_config(l2_instance_prefix="spec_example")
+# N.4.b: Executives is now L2-fed and requires the cfg's db_table_prefix
+# to render its dataset SQL. Z.C — db_table_prefix replaces the prior
+# auto-stamped l2_instance_prefix; pin to spec_example since
+# ``build_executives_app`` defaults to the spec_example L2 fixture.
+_TEST_CFG = make_test_config(db_table_prefix="spec_example")
 
 
 @pytest.fixture(scope="module")
@@ -71,10 +71,12 @@ def test_analysis_has_five_sheets_in_expected_order(exec_analysis):
 
 
 def test_analysis_name_is_executives(exec_analysis):
-    # N.4 normalization: every L2-fed app's analysis name follows the
-    # ``Name (instance)`` shape so multi-instance deployments are
-    # visually distinguishable in the QS dashboard list.
-    assert exec_analysis.Name == "Executives (spec_example)"
+    # Z.C — every L2-fed app's analysis name follows the
+    # ``Name (deployment_name)`` shape so multi-deploy QS accounts are
+    # visually distinguishable in the dashboard list. Replaces the
+    # prior ``(instance)`` shape (instance was auto-stamped from the
+    # L2 yaml; now lives on cfg.deployment_name).
+    assert exec_analysis.Name == f"Executives ({_TEST_CFG.deployment_name})"
 
 
 def test_analysis_serializes_to_aws_json(exec_analysis):
@@ -313,6 +315,9 @@ class TestCli:
         p.write_text(
             "aws_account_id: '111122223333'\n"
             "aws_region: us-west-2\n"
+            # Z.C — required cfg fields.
+            "deployment_name: qsgen-exec-cli\n"
+            "db_table_prefix: spec_example\n"
             "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
             ":datasource/ds\n"
         )

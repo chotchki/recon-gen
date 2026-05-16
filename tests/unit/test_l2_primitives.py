@@ -30,7 +30,6 @@ from quicksight_gen.common.l2 import (
 def _example_instance() -> L2Instance:
     """Build a minimal L2Instance using every primitive at least once."""
     return L2Instance(
-        instance=Identifier("spk"),
         accounts=(
             Account(
                 id=Identifier("int-001"),
@@ -97,7 +96,6 @@ def _example_instance() -> L2Instance:
 def test_l2instance_constructs_with_every_primitive() -> None:
     """Every primitive is reachable from L2Instance and constructs cleanly."""
     inst = _example_instance()
-    assert inst.instance == "spk"
     assert len(inst.accounts) == 1
     assert len(inst.account_templates) == 1
     assert len(inst.rails) == 2

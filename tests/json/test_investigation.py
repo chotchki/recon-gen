@@ -74,11 +74,12 @@ from quicksight_gen.common.models import (
 from tests._test_helpers import make_test_config
 
 
-# N.3.f: Investigation is now L2-fed and requires ``l2_instance_prefix``
-# to render its dataset SQL. Tests pin spec_example (matches what
-# ``build_investigation_app`` auto-derives from
-# ``default_l2_instance().instance``).
-_TEST_CFG = make_test_config(l2_instance_prefix="spec_example")
+# N.3.f: Investigation is now L2-fed and requires the cfg to carry
+# the matching DB-table prefix so its dataset SQL renders the right
+# matview names. Z.C — db_table_prefix replaces the prior auto-stamped
+# l2_instance_prefix; pin to spec_example since
+# ``build_investigation_app`` defaults to the spec_example L2 fixture.
+_TEST_CFG = make_test_config(db_table_prefix="spec_example")
 
 # Investigation's ``build_all_datasets`` requires an L2Instance for
 # the App Info matview names (P.9f.f — dropped silent fallback). Tests
@@ -191,12 +192,12 @@ def test_analysis_has_six_sheets_in_expected_order():
     ]
 
 
-def test_analysis_name_carries_l2_instance():
-    # N.4 normalization: every L2-fed app's analysis name follows the
-    # ``Name (instance)`` shape so multi-instance deployments are
-    # visually distinguishable in the QS dashboard list.
+def test_analysis_name_carries_deployment_name():
+    # Z.C — every L2-fed app's analysis name follows the
+    # ``Name (deployment_name)`` shape so multi-deploy QS accounts are
+    # visually distinguishable in the dashboard list.
     analysis = build_analysis(_TEST_CFG)
-    assert analysis.Name == "Investigation (spec_example)"
+    assert analysis.Name == f"Investigation ({_TEST_CFG.deployment_name})"
 
 
 def test_dashboard_mirrors_analysis_definition():
@@ -1581,9 +1582,12 @@ def test_money_trail_root_dropdown_hides_select_all():
 
 def _write_min_config(tmp_path: Path) -> Path:
     cfg_path = tmp_path / "config.yaml"
+    # Z.C — required cfg fields.
     cfg_path.write_text(
         "aws_account_id: '111122223333'\n"
         "aws_region: us-west-2\n"
+        "deployment_name: qsgen-inv-cli\n"
+        "db_table_prefix: spec_example\n"
         "datasource_arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/x'\n",
         encoding="utf-8",
     )
@@ -1606,8 +1610,10 @@ def test_json_apply_writes_investigation_files(tmp_path: Path):
     assert (out_dir / "investigation-analysis.json").is_file()
     assert (out_dir / "investigation-dashboard.json").is_file()
     # K.4.3 — recipient-fanout dataset JSON must be written too.
+    # Z.C — deployment_name from _write_min_config (qsgen-inv-cli) is
+    # the single ID prefix.
     fanout_ds = out_dir / "datasets" / (
-        _TEST_CFG.prefixed("inv-recipient-fanout-dataset") + ".json"
+        "qsgen-inv-cli-inv-recipient-fanout-dataset.json"
     )
     assert fanout_ds.is_file()
 

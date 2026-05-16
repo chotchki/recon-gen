@@ -47,7 +47,9 @@ from tests.e2e._drivers import App2Driver
 
 
 _TEST_INSTANCE = default_l2_instance()
-_TEST_CFG = make_test_config().with_l2_instance_prefix(str(_TEST_INSTANCE.instance))
+# Z.C — db_table_prefix is required on cfg. Pin to "spec_example" since
+# default_l2_instance() returns the spec_example fixture.
+_TEST_CFG = make_test_config(db_table_prefix="spec_example")
 _DASHBOARD_ID = "l2ft"
 
 

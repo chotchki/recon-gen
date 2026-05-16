@@ -21,7 +21,9 @@ from quicksight_gen.common.env_keys import (
     QS_GEN_AWS_ACCOUNT_ID,
     QS_GEN_AWS_REGION,
     QS_GEN_DATASOURCE_ARN,
+    QS_GEN_DB_TABLE_PREFIX,
     QS_GEN_DEMO_DATABASE_URL,
+    QS_GEN_DEPLOYMENT_NAME,
 )
 
 
@@ -400,8 +402,8 @@ def test_zc_field_env_overrides_yaml(
     """Z.C: env var override path covers both fields (the runner relies
     on this to inject per-cell deployment_name + db_table_prefix without
     rewriting the operator's cfg yaml)."""
-    monkeypatch.setenv("QS_GEN_DEPLOYMENT_NAME", "qsgen-from-env")
-    monkeypatch.setenv("QS_GEN_DB_TABLE_PREFIX", "from_env")
+    monkeypatch.setenv(QS_GEN_DEPLOYMENT_NAME.name, "qsgen-from-env")
+    monkeypatch.setenv(QS_GEN_DB_TABLE_PREFIX.name, "from_env")
     body = dict(_REQUIRED)
     # Leave the yaml fields in place to confirm env wins.
     body["deployment_name"] = "qsgen-from-yaml"

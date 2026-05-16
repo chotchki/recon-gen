@@ -55,7 +55,6 @@ def _make_two_leg(
 def _kitchen_instance() -> L2Instance:
     """Topologically rich instance — every primitive kind exercised."""
     return L2Instance(
-        instance=Identifier("kitchen"),
         accounts=(
             Account(
                 id=Identifier("acc-internal"),
@@ -113,7 +112,7 @@ def _kitchen_instance() -> L2Instance:
 
 
 def test_topology_graph_has_role_nodes_for_every_declared_role() -> None:
-    g = topology_graph_for(_kitchen_instance())
+    g = topology_graph_for(_kitchen_instance(), db_table_prefix="test")
     role_ids = {n.id for n in g.nodes if n.kind == "role"}
     assert role_ids == {
         "role__InternalRole",
@@ -123,7 +122,7 @@ def test_topology_graph_has_role_nodes_for_every_declared_role() -> None:
 
 
 def test_topology_graph_role_carries_scope_and_templated() -> None:
-    g = topology_graph_for(_kitchen_instance())
+    g = topology_graph_for(_kitchen_instance(), db_table_prefix="test")
     nodes_by_id = {n.id: n for n in g.nodes}
     # Internal singleton: scope=internal, templated=False
     internal = nodes_by_id["role__InternalRole"]
@@ -140,7 +139,7 @@ def test_topology_graph_role_carries_scope_and_templated() -> None:
 
 
 def test_topology_graph_template_node_has_inner_label_and_metadata() -> None:
-    g = topology_graph_for(_kitchen_instance())
+    g = topology_graph_for(_kitchen_instance(), db_table_prefix="test")
     tmpl = next(n for n in g.nodes if n.kind == "template")
     assert tmpl.id == "tmpl__SettlementCycle"
     # Inner label is just the name now — the per-key labels were dropped
@@ -154,7 +153,7 @@ def test_topology_graph_template_node_has_inner_label_and_metadata() -> None:
 
 
 def test_topology_graph_rail_nodes_for_template_legs_and_chain_refs() -> None:
-    g = topology_graph_for(_kitchen_instance())
+    g = topology_graph_for(_kitchen_instance(), db_table_prefix="test")
     rail_ids = {n.id for n in g.nodes if n.kind == "rail"}
     # FeeCharge is a leg of SettlementCycle template → emitted as rail node.
     assert "rail__FeeCharge" in rail_ids
@@ -173,7 +172,6 @@ def test_topology_graph_bundle_edge_collapses_parallel_rails() -> None:
         _make_two_leg("RailB", "X", "Y"),
     )
     inst = L2Instance(
-        instance=Identifier("bun"),
         accounts=(
             Account(id=Identifier("a"), role=Identifier("X"), scope="internal"),
             Account(id=Identifier("b"), role=Identifier("Y"), scope="internal"),
@@ -184,7 +182,7 @@ def test_topology_graph_bundle_edge_collapses_parallel_rails() -> None:
         chains=(),
         limit_schedules=(),
     )
-    g = topology_graph_for(inst)
+    g = topology_graph_for(inst, db_table_prefix="test")
     bundles = [e for e in g.edges if e.kind == "rail_bundle"]
     assert len(bundles) == 1
     bundle = bundles[0]
@@ -198,7 +196,7 @@ def test_topology_graph_bundle_edge_collapses_parallel_rails() -> None:
 
 
 def test_topology_graph_self_loop_for_single_leg_rail() -> None:
-    g = topology_graph_for(_kitchen_instance())
+    g = topology_graph_for(_kitchen_instance(), db_table_prefix="test")
     self_loops = [e for e in g.edges if e.kind == "self_loop"]
     assert len(self_loops) == 1
     loop = self_loops[0]
@@ -209,7 +207,7 @@ def test_topology_graph_self_loop_for_single_leg_rail() -> None:
 
 
 def test_topology_graph_template_member_edges() -> None:
-    g = topology_graph_for(_kitchen_instance())
+    g = topology_graph_for(_kitchen_instance(), db_table_prefix="test")
     members = [e for e in g.edges if e.kind == "template_member"]
     assert len(members) == 1
     member = members[0]
@@ -219,7 +217,7 @@ def test_topology_graph_template_member_edges() -> None:
 
 def test_topology_graph_emits_control_parent_for_template_parent_role() -> None:
     """A templated role with parent_role gets a control_parent edge."""
-    g = topology_graph_for(_kitchen_instance())
+    g = topology_graph_for(_kitchen_instance(), db_table_prefix="test")
     cp_edges = [e for e in g.edges if e.kind == "control_parent"]
     # CustomerSubledger has parent_role=InternalRole in the kitchen fixture.
     assert any(
@@ -234,7 +232,7 @@ def test_topology_graph_emits_control_parent_for_template_parent_role() -> None:
 
 
 def test_topology_graph_chain_edge_carries_required_metadata() -> None:
-    g = topology_graph_for(_kitchen_instance())
+    g = topology_graph_for(_kitchen_instance(), db_table_prefix="test")
     chains = [e for e in g.edges if e.kind == "chain"]
     assert len(chains) == 1
     chain = chains[0]
@@ -249,7 +247,6 @@ def test_topology_graph_chain_edge_carries_required_metadata() -> None:
 
 def test_topology_graph_chain_edge_carries_xor_group_metadata() -> None:
     inst = L2Instance(
-        instance=Identifier("xor"),
         accounts=(
             Account(id=Identifier("a"), role=Identifier("X"), scope="internal"),
             Account(id=Identifier("b"), role=Identifier("Y"), scope="internal"),
@@ -270,7 +267,7 @@ def test_topology_graph_chain_edge_carries_xor_group_metadata() -> None:
         ),
         limit_schedules=(),
     )
-    g = topology_graph_for(inst)
+    g = topology_graph_for(inst, db_table_prefix="test")
     chain_edges = [e for e in g.edges if e.kind == "chain"]
     # Z.A: a multi-children chain row produces one edge per child.
     assert len(chain_edges) == 2
@@ -286,7 +283,7 @@ def test_topology_graph_chain_edge_carries_xor_group_metadata() -> None:
 
 def test_topology_graph_for_spec_example_smoke() -> None:
     inst = load_instance(FIXTURES / "spec_example.yaml")
-    g = topology_graph_for(inst)
+    g = topology_graph_for(inst, db_table_prefix="spec_example")
     # Carries the instance name for page titles + JSON output.
     assert g.instance_name == "spec_example"
     role_labels = {n.label for n in g.nodes if n.kind == "role"}
@@ -305,7 +302,7 @@ def test_topology_graph_for_sasquatch_pr_meets_richness_bar() -> None:
     edges / multiple kinds" assertion.
     """
     inst = load_instance(FIXTURES / "sasquatch_pr.yaml")
-    g = topology_graph_for(inst)
+    g = topology_graph_for(inst, db_table_prefix="sasquatch_pr")
     assert g.instance_name == "sasquatch_pr"
     # Per-kind cardinality bar — sized to the actual fixture so it
     # catches both "the projection broke" (counts crash) and "the
@@ -341,7 +338,7 @@ def test_topology_dataclasses_are_frozen() -> None:
     """TopologyGraph / Node / Edge are frozen value objects — neither
     spike arm should mutate them.
     """
-    g = topology_graph_for(_kitchen_instance())
+    g = topology_graph_for(_kitchen_instance(), db_table_prefix="test")
     import dataclasses
     assert dataclasses.is_dataclass(TopologyGraph)
     assert dataclasses.is_dataclass(TopologyNode)

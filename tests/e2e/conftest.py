@@ -113,8 +113,10 @@ def region(cfg) -> str:
 
 
 @pytest.fixture(scope="session")
-def resource_prefix(cfg) -> str:
-    return cfg.resource_prefix
+def deployment_name(cfg) -> str:
+    """Z.C — replaces the prior ``resource_prefix`` fixture; the
+    deployment_name IS the single per-deploy QS-resource-ID prefix."""
+    return cfg.deployment_name
 
 
 @pytest.fixture(scope="session")
@@ -167,21 +169,15 @@ def _resolve_test_l2_instance():  # type: ignore[no-untyped-def]: return-type an
 
 
 @pytest.fixture(scope="session")
-def inv_l2_prefix() -> str:
-    """The default L2 instance's prefix — the middle segment of every
-    Investigation resource ID under N.3.f (Investigation became L2-fed,
-    same default-institution YAML the L1 dashboard uses)."""
-    return str(_resolve_test_l2_instance().instance)
+def inv_dashboard_id(deployment_name) -> str:
+    """Z.C — single-prefix ``<deployment_name>-investigation-dashboard``
+    (was M.2d.3's two-segment ``<resource_prefix>-<l2_prefix>-...``)."""
+    return f"{deployment_name}-investigation-dashboard"
 
 
 @pytest.fixture(scope="session")
-def inv_dashboard_id(resource_prefix, inv_l2_prefix) -> str:
-    return f"{resource_prefix}-{inv_l2_prefix}-investigation-dashboard"
-
-
-@pytest.fixture(scope="session")
-def inv_analysis_id(resource_prefix, inv_l2_prefix) -> str:
-    return f"{resource_prefix}-{inv_l2_prefix}-investigation-analysis"
+def inv_analysis_id(deployment_name) -> str:
+    return f"{deployment_name}-investigation-analysis"
 
 
 @pytest.fixture(scope="session")
@@ -199,21 +195,14 @@ def inv_dataset_ids(inv_app) -> list[str]:
 
 
 @pytest.fixture(scope="session")
-def exec_l2_prefix() -> str:
-    """The default L2 instance's prefix — the middle segment of every
-    Executives resource ID under N.4.b (Executives became L2-fed,
-    same default-institution YAML the L1 dashboard uses)."""
-    return str(_resolve_test_l2_instance().instance)
+def exec_dashboard_id(deployment_name) -> str:
+    """Z.C — single-prefix; see ``inv_dashboard_id`` rationale."""
+    return f"{deployment_name}-executives-dashboard"
 
 
 @pytest.fixture(scope="session")
-def exec_dashboard_id(resource_prefix, exec_l2_prefix) -> str:
-    return f"{resource_prefix}-{exec_l2_prefix}-executives-dashboard"
-
-
-@pytest.fixture(scope="session")
-def exec_analysis_id(resource_prefix, exec_l2_prefix) -> str:
-    return f"{resource_prefix}-{exec_l2_prefix}-executives-analysis"
+def exec_analysis_id(deployment_name) -> str:
+    return f"{deployment_name}-executives-analysis"
 
 
 @pytest.fixture(scope="session")
@@ -224,28 +213,19 @@ def exec_dataset_ids(exec_app) -> list[str]:
 
 # -- L1 dashboard fixtures (M.2c) --------------------------------------------
 #
-# IDs derive from the resource_prefix + the L2 instance's prefix per the
-# M.2d.3 convention: `<resource_prefix>-<l2_prefix>-l1-<thing>`. The L2
-# prefix is queried from the same default L2 instance the
-# CLI/build_l1_dashboard_app uses, so no hardcoded "sasquatch_ar"
-# string lives in the e2e fixtures.
+# Z.C — IDs are now `<deployment_name>-l1-<thing>`; the prior M.2d.3
+# two-segment form (`<resource_prefix>-<l2_prefix>-...`) collapsed to
+# one segment when deployment_name absorbed both roles.
 
 
 @pytest.fixture(scope="session")
-def l1_l2_prefix() -> str:
-    """The default L2 instance's prefix — the middle segment of every
-    L1 resource ID per M.2d.3."""
-    return str(_resolve_test_l2_instance().instance)
+def l1_dashboard_id(deployment_name) -> str:
+    return f"{deployment_name}-l1-dashboard"
 
 
 @pytest.fixture(scope="session")
-def l1_dashboard_id(resource_prefix, l1_l2_prefix) -> str:
-    return f"{resource_prefix}-{l1_l2_prefix}-l1-dashboard"
-
-
-@pytest.fixture(scope="session")
-def l1_analysis_id(resource_prefix, l1_l2_prefix) -> str:
-    return f"{resource_prefix}-{l1_l2_prefix}-l1-dashboard-analysis"
+def l1_analysis_id(deployment_name) -> str:
+    return f"{deployment_name}-l1-dashboard-analysis"
 
 
 @pytest.fixture(scope="session")
@@ -262,23 +242,9 @@ def l1_dataset_ids(l1_app) -> list[str]:
 
 # -- L2 Flow Tracing dashboard fixtures --------------------------------------
 #
-# IDs derive from the resource_prefix + the L2 instance's prefix per the
-# M.2d.3 convention. L2FT's dashboard ID lacks the trailing ``-dashboard``
-# segment that L1 / Inv / Exec carry — the App's name is the suffix.
-
-
-@pytest.fixture(scope="session")
-def l2ft_l2_prefix() -> str:
-    """The default L2 instance's prefix — the middle segment of every
-    L2FT resource ID. Matches the same default the L2FT CLI uses
-    (``spec_example``)."""
-    from quicksight_gen.apps.l1_dashboard._l2 import default_l2_instance
-    from quicksight_gen.common.l2 import load_instance
-
-    override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
-    if override is not None:
-        return str(load_instance(override).instance)
-    return str(default_l2_instance().instance)
+# Z.C — IDs are now `<deployment_name>-l2-flow-tracing[-analysis]`. L2FT's
+# dashboard ID lacks the trailing ``-dashboard`` segment that L1 / Inv /
+# Exec carry — the App's name is the suffix.
 
 
 @pytest.fixture(scope="session")
@@ -336,13 +302,13 @@ def require_l2ft_feature(l2_instance, feature: str) -> None:
 
 
 @pytest.fixture(scope="session")
-def l2ft_dashboard_id(resource_prefix, l2ft_l2_prefix) -> str:
-    return f"{resource_prefix}-{l2ft_l2_prefix}-l2-flow-tracing"
+def l2ft_dashboard_id(deployment_name) -> str:
+    return f"{deployment_name}-l2-flow-tracing"
 
 
 @pytest.fixture(scope="session")
-def l2ft_analysis_id(resource_prefix, l2ft_l2_prefix) -> str:
-    return f"{resource_prefix}-{l2ft_l2_prefix}-l2-flow-tracing-analysis"
+def l2ft_analysis_id(deployment_name) -> str:
+    return f"{deployment_name}-l2-flow-tracing-analysis"
 
 
 # ---------------------------------------------------------------------------
@@ -429,7 +395,7 @@ def l2ft_app(cfg):
 # One body × two renderers. Each `<app>_dashboard_driver` fixture is
 # parametrized over `["qs", "app2"]` and yields `(driver, dashboard_arg)`:
 #
-#   - `qs`   — drives the *deployed* dashboard (`<resource_prefix>-<l2>-
+#   - `qs`   — drives the *deployed* dashboard (`<deployment_name>-
 #     <app>-...`), real data via the QS datasource. `dashboard_arg` is
 #     the deployed dashboard ID. Skips when `QS_E2E_USER_ARN` is unset
 #     (no embed signer) or the dashboard isn't deployed.
@@ -622,10 +588,10 @@ def capture_top_queries(cfg, request):
     stats-view query, and writes a markdown table. SQLite is silently
     skipped (no equivalent stats view).
 
-    The like-pattern defaults to the L2 instance prefix the test
-    session targeted (``QS_GEN_TEST_L2_INSTANCE`` env override → its
-    instance prefix; else ``cfg.l2_instance_prefix`` if set; else the
-    string ``spec_example`` for the demo). That keeps multi-tenant
+    The like-pattern defaults to the cfg's ``db_table_prefix`` (Z.C —
+    was previously ``cfg.l2_instance_prefix`` or the loaded L2's
+    ``instance`` field; both are gone). Falls back to ``spec_example``
+    when cfg.db_table_prefix is somehow absent. That keeps multi-tenant
     shared-DB output narrowed to OUR queries.
     """
     yield
@@ -671,18 +637,10 @@ def capture_top_queries(cfg, request):
             pass
         return
 
-    # Pick the substring filter — prefer the explicit L2 instance the
-    # test session targeted, else the cfg's stamp, else the demo prefix.
-    like_pattern = "spec_example"
-    override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
-    if override is not None:
-        try:
-            from quicksight_gen.common.l2 import load_instance
-            like_pattern = str(load_instance(override).instance)
-        except Exception:
-            pass
-    elif cfg.l2_instance_prefix:
-        like_pattern = str(cfg.l2_instance_prefix)
+    # Z.C — the substring filter is just cfg.db_table_prefix (the DB-
+    # table-name prefix every emitted matview / table carries). Falls
+    # back to the demo prefix only if cfg somehow has no value.
+    like_pattern = cfg.db_table_prefix or "spec_example"
 
     try:
         target_dir.mkdir(parents=True, exist_ok=True)

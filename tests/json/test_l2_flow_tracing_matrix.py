@@ -123,34 +123,35 @@ def test_dataset_count_is_eight_per_instance(
     assert len(app.datasets) == 8
 
 
-def test_every_dataset_id_carries_l2_prefix(
+def test_every_dataset_id_carries_deployment_prefix(
     l2_instance: L2Instance,
 ) -> None:
-    """Per M.2d.3 — every dataset ID middle segment is the L2 instance
-    prefix so multi-instance deploys don't collide in the same QS
-    account. Mirrors `test_l1_dashboard_structure.py`'s prefix check."""
+    """Z.C — every dataset ID is prefixed by ``cfg.deployment_name``
+    so multiple deploys (dev/staging/prod, or co-tenanted L2s with
+    distinct cfg.yaml) don't collide in the same QS account. Mirrors
+    `test_l1_dashboard_structure.py`'s prefix check."""
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
-    expected_prefix = f"qs-gen-{l2_instance.instance}-"
+    expected_prefix = f"{_CFG.deployment_name}-"
     for ds in app.datasets:
         # The arn carries the dataset ID; pull it out of the ARN's
         # `:dataset/<id>` suffix.
         ds_id = ds.arn.rsplit("/", 1)[-1]
         assert ds_id.startswith(expected_prefix), (
             f"dataset {ds.identifier!r} ID {ds_id!r} doesn't carry "
-            f"the L2 prefix {expected_prefix!r}"
+            f"the deployment prefix {expected_prefix!r}"
         )
 
 
-def test_analysis_and_dashboard_ids_carry_l2_prefix(
+def test_analysis_and_dashboard_ids_carry_deployment_prefix(
     l2_instance: L2Instance,
 ) -> None:
-    """Mirror — analysis + dashboard IDs both use the same per-instance
+    """Mirror — analysis + dashboard IDs both use the same deployment
     prefix shape so deploys don't collide and cleanup-by-tag scopes
     correctly."""
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
     analysis = app.emit_analysis()
     dashboard = app.emit_dashboard()
-    expected_prefix = f"qs-gen-{l2_instance.instance}-"
+    expected_prefix = f"{_CFG.deployment_name}-"
     assert analysis.AnalysisId.startswith(expected_prefix)
     assert dashboard.DashboardId.startswith(expected_prefix)
 
@@ -210,29 +211,30 @@ def test_metadata_key_dropdown_options_scale_with_declared_keys(
 # -- Cross-instance differentiation ------------------------------------------
 
 
-def test_instances_produce_different_dataset_id_namespaces() -> None:
-    """Sanity: building the app against any two distinct L2 instances
-    produces non-overlapping dataset ID sets — so a multi-instance
-    QuickSight account can host both deploys without collision.
+def test_deployments_produce_different_dataset_id_namespaces() -> None:
+    """Sanity: building the same app against two distinct cfgs (different
+    ``deployment_name``) produces non-overlapping dataset ID sets — so a
+    multi-deploy QuickSight account can host both without collision.
 
-    This isn't parameterized — it cross-walks two specific instances
-    to confirm the prefix isolation is real (not just one-instance
-    coincidence)."""
+    Z.C — the per-deployment namespace lives on cfg.deployment_name (was
+    previously auto-stamped from ``L2Instance.instance``), so the test
+    swaps the cfg per build, not the L2 instance. Two integrators
+    pointing at the same L2 yaml MUST still get isolated namespaces by
+    setting different deployment_names in their cfg.yamls."""
     from pathlib import Path
     from quicksight_gen.common.l2 import load_instance
 
-    spec = load_instance(
-        Path(__file__).parent.parent / "l2" / "spec_example.yaml"
-    )
     sasq = load_instance(
         Path(__file__).parent.parent / "l2" / "sasquatch_pr.yaml"
     )
-    spec_app = build_l2_flow_tracing_app(_CFG, l2_instance=spec)
-    sasq_app = build_l2_flow_tracing_app(_CFG, l2_instance=sasq)
+    cfg_a = make_test_config(deployment_name="qsgen-deploy-a")
+    cfg_b = make_test_config(deployment_name="qsgen-deploy-b")
+    a_app = build_l2_flow_tracing_app(cfg_a, l2_instance=sasq)
+    b_app = build_l2_flow_tracing_app(cfg_b, l2_instance=sasq)
 
-    spec_ds_ids = {ds.arn.rsplit("/", 1)[-1] for ds in spec_app.datasets}
-    sasq_ds_ids = {ds.arn.rsplit("/", 1)[-1] for ds in sasq_app.datasets}
-    assert spec_ds_ids.isdisjoint(sasq_ds_ids), (
-        "L2 prefix isolation broken — dataset IDs overlap between "
-        "spec_example and sasquatch_pr"
+    a_ds_ids = {ds.arn.rsplit("/", 1)[-1] for ds in a_app.datasets}
+    b_ds_ids = {ds.arn.rsplit("/", 1)[-1] for ds in b_app.datasets}
+    assert a_ds_ids.isdisjoint(b_ds_ids), (
+        "Deployment-prefix isolation broken — dataset IDs overlap "
+        "between two cfgs with distinct deployment_name values"
     )

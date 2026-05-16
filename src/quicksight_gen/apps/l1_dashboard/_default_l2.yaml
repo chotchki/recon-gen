@@ -8,7 +8,6 @@
 # the seed accidentally hardcodes a Sasquatch identifier, the
 # persona-clean test catches it.
 
-instance: spec_example
 description: |
   Generic SPEC-shaped instance for cleanliness testing of the lifted
   common.l2.seed primitives.

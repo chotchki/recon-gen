@@ -26,6 +26,8 @@ def _cfg(**overrides) -> Config:
         aws_account_id="111122223333",
         aws_region="us-east-1",
         datasource_arn="arn:aws:quicksight:us-east-1:111122223333:datasource/x",
+        deployment_name="qsgen-test",
+        db_table_prefix="test",
     )
     base.update(overrides)
     return Config(**base)
@@ -37,6 +39,8 @@ def test_partition_defaults_to_aws_with_no_arn_sources() -> None:
         aws_account_id="111122223333",
         aws_region="us-east-1",
         demo_database_url="postgresql://example",
+        deployment_name="qsgen-test",
+        db_table_prefix="test",
     )
     assert cfg.partition == "aws"
 
@@ -60,6 +64,8 @@ def test_partition_from_principal_arn_when_no_datasource_set() -> None:
         aws_account_id="111122223333",
         aws_region="us-gov-east-1",
         demo_database_url="postgresql://example",
+        deployment_name="qsgen-test",
+        db_table_prefix="test",
         principal_arns=[
             "arn:aws-us-gov:iam::111122223333:user/operator",
         ],
@@ -129,6 +135,8 @@ def test_bare_string_principal_falls_through_to_default() -> None:
         aws_account_id="111122223333",
         aws_region="us-east-1",
         demo_database_url="postgresql://example",
+        deployment_name="qsgen-test",
+        db_table_prefix="test",
         principal_arns=["not-an-arn"],
     )
     assert cfg.partition == "aws"
@@ -141,6 +149,8 @@ def test_empty_partition_segment_falls_through() -> None:
         aws_account_id="111122223333",
         aws_region="us-east-1",
         demo_database_url="postgresql://example",
+        deployment_name="qsgen-test",
+        db_table_prefix="test",
         principal_arns=["arn::iam::111122223333:user/operator"],
     )
     assert cfg.partition == "aws"

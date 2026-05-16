@@ -43,9 +43,10 @@ from tests._test_helpers import make_test_config
 from tests.e2e._drivers import App2Driver
 
 
-# Test cfg with the L2 prefix set explicitly (matches what
-# resolve_l2_for_demo would do at CLI time).
-_TEST_CFG = make_test_config().with_l2_instance_prefix("spec_example")
+# Test cfg with the DB-table prefix set explicitly. Z.C — replaces
+# the v8.x `with_l2_instance_prefix` pipe; db_table_prefix lives on
+# cfg now (was previously stamped from L2Instance.instance).
+_TEST_CFG = make_test_config(db_table_prefix="spec_example")
 _DASHBOARD_ID = "exec"
 
 
