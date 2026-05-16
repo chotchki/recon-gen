@@ -127,13 +127,17 @@ def qs_client(region):
 
 
 @pytest.fixture
-def qs_driver(cfg, region, account_id):  # type: ignore[no-untyped-def]: return-type annotation would force a QsEmbedDriver import at module scope
+def qs_driver(request, cfg, region, account_id):  # type: ignore[no-untyped-def]: return-type annotation would force a QsEmbedDriver import at module scope
     """X.2.q — ``QsEmbedDriver`` over a fresh WebKit page, for browser
     e2e tests that drive a deployed QuickSight dashboard through the
     ``DashboardDriver`` protocol (``open(dashboard_id)`` mints the embed
     URL). Skips cleanly when ``QS_E2E_USER_ARN`` is unset (the runner
     derives it from ``cfg.auth.aws_profile``; export it for a direct
     ``pytest`` run). Function-scoped — embed URLs are single-use.
+
+    AA.H.10 — wires the post-yield ``_maybe_capture_on_failure`` hook
+    so a test-body failure drops the 6 diagnostic artifacts (was
+    missing pre-AA.H.10; only ``_parametrized_dashboard_driver`` had it).
     """
     from quicksight_gen.common.browser.helpers import get_user_arn
     from tests.e2e._drivers import QsEmbedDriver
@@ -146,6 +150,8 @@ def qs_driver(cfg, region, account_id):  # type: ignore[no-untyped-def]: return-
         aws_account_id=account_id, aws_region=region,
     ) as d:
         yield d
+        # AA.H.10 — bridge fixture-teardown capture for test-body failures.
+        _maybe_capture_on_failure(request, d)
 
 
 def _resolve_test_l2_instance():  # type: ignore[no-untyped-def]: return-type annotation would force an L2Instance import at module scope, slowing collection
@@ -409,51 +415,15 @@ def l2ft_app(cfg):
 # in ~1–2 s, acceptable. See docs/audits/x_2_u_parametrized_driver_spike.md.
 
 
-def _maybe_capture_on_failure(request, driver) -> None:  # type: ignore[no-untyped-def]: pytest types + driver duck-typing
-    """AA.H.6 — bridge the pytest yield-fixture gap.
-
-    Pytest's yield-fixture semantics don't re-throw the test-body
-    exception back into the fixture's generator (the fixture's
-    teardown code runs as if the test passed). That means
-    ``webkit_page``'s ``except BaseException:`` never fires for the
-    normal pytest e2e path, and the 6 capture artifacts never land.
-
-    This helper closes the gap: invoked from fixture teardown (after
-    ``yield``), it consults ``request.node.rep_call`` (set by the
-    ``pytest_runtest_makereport`` hook above) and triggers
-    ``trigger_failure_capture`` when the test body actually failed.
-    No-op on pass / skip / fixture-setup-failure.
-
-    Driver duck-typing: ``QsEmbedDriver`` exposes ``._page``,
-    ``App2Driver`` exposes ``.page``. Try both; if neither resolves to
-    a Playwright Page, the capture is silently skipped (a non-browser
-    driver has nothing to dump).
-    """
-    rep = getattr(request.node, "rep_call", None)
-    if rep is None or not rep.failed:
-        return
-    page = getattr(driver, "_page", None) or getattr(driver, "page", None)
-    if page is None:
-        return
-    # typing-smell: ignore[no-playwright-leak]: this is the dedicated
-    # bridge from pytest's makereport hook to the capture pipeline; it
-    # ISN'T an e2e test reaching into Playwright, it's the conftest
-    # gluing the fixture-yield-semantics gap. trigger_failure_capture
-    # IS the DashboardDriver-friendly verb — it takes the Page from
-    # ``driver._page`` / ``driver.page`` and writes 6 artifacts. There's
-    # nowhere else to invoke it from.
-    from quicksight_gen.common.browser.helpers import (  # typing-smell: ignore[no-playwright-leak]: conftest glue bridges pytest-makereport hook to capture pipeline
-        _sanitize_test_id,
-        trigger_failure_capture,
-    )
-
-    # Pin to the failing test's nodeid (parametrized form), not the
-    # ambient PYTEST_CURRENT_TEST that might have rolled to the next
-    # test's setup phase by the time fixture teardown runs.
-    test_id = _sanitize_test_id(
-        request.node.nodeid.replace("/", "_").replace("::", "__").replace(".py", "")
-    )
-    trigger_failure_capture(page, test_id=test_id)
+# AA.H.10 — moved to tests/e2e/_capture.py so the three QS-driver
+# fixtures (qs_driver here, _parametrized_dashboard_driver here,
+# per_dialect_qs_driver in test_audit_dashboard_agreement.py) can all
+# import a single hook. Originally lived inline here and was wired
+# only into _parametrized_dashboard_driver — the other two fixtures
+# silently dropped failure-capture artifacts. Today's chain
+# (20260516T203824Z) lost all 4 audit-agreement failures' artifacts
+# for exactly that reason.
+from tests.e2e._capture import maybe_capture_on_failure as _maybe_capture_on_failure  # noqa: E402
 
 
 def _parametrized_dashboard_driver(  # type: ignore[no-untyped-def]: return-type annotation would force a driver import at module scope

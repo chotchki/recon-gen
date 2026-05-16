@@ -342,6 +342,7 @@ def seeded_audit(dialect_cfg, tmp_path_factory):
 
 @pytest.fixture
 def per_dialect_qs_driver(
+    request,
     per_dialect_region,
     per_dialect_account_id,
     per_dialect_l1_dashboard_id,
@@ -393,12 +394,21 @@ def per_dialect_qs_driver(
         # --l2 tests/l2/spec_example.yaml`.
         yield None
         return
+    from tests.e2e._capture import maybe_capture_on_failure
+
     with QsEmbedDriver.embed(
         aws_account_id=per_dialect_account_id,
         aws_region=per_dialect_region,
         viewport=(1600, 4000),
     ) as driver:
         yield driver
+        # AA.H.10 — bridge fixture-teardown capture for test-body
+        # failures. Pre-AA.H.10 this fixture silently dropped artifacts
+        # (today's chain's 4 audit-agreement failures had no DOM /
+        # screenshot / trace). All three QS-driver fixtures now share
+        # the ``maybe_capture_on_failure`` hook from
+        # ``tests/e2e/_capture.py``.
+        maybe_capture_on_failure(request, driver)
 
 
 @pytest.fixture(scope="module")
