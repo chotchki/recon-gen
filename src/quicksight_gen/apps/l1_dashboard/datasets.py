@@ -72,7 +72,7 @@ def l1_matview_specs(cfg: Config) -> list[tuple[str, str | None]]:
     ]
 
 
-# -- Y.2.g pushdown sentinels + enum-value helpers ---------------------------
+# -- Y.2.g + AA.A.3 pushdown sentinels + enum-value helpers -----------------
 #
 # Y.2.g converts the L1 dashboard's ~22 per-sheet category-filter
 # dropdowns from ``CategoryFilter.with_values(values=[], FILTER_ALL_VALUES)``
@@ -80,40 +80,33 @@ def l1_matview_specs(cfg: Config) -> list[tuple[str, str | None]]:
 # values from QS's ``tenK-sample-values-V2`` endpoint, which 404s on cold
 # per-CI-run dashboards) to dataset-SQL pushdown.
 #
-# Every MULTI_VALUED pushdown dropdown uses ONE shape (X.2.t.2): the
-# dataset param's ``StaticValues`` default is ``[L1_ALL_SENTINEL]`` (one
-# element — AWS caps ``StringDatasetParameter.DefaultValues.StaticValues``
-# at 32 elements, so a full-value-list default blows up an L2 with >32
-# rails / transfer_types / roles), and the SQL guards
-# ``('__l1_all__' IN (<<$pX>>)) OR (col IN (<<$pX>>))`` — on load (and
-# when the dropdown is emptied, which reverts the dataset param to its
-# default) the first disjunct is true so all rows pass; once the analyst
-# selects real values the bridge maps them in and the second disjunct
-# narrows. (Pre-X.2.t.2 the "bounded enum" dropdowns — rail_name /
-# rail_name / account_role — defaulted to the full declared universe;
-# "bounded" still meant ">32 possible", so they joined the sentinel
-# shape.) The two **fixed-schema** enums that can't grow past 32 by L2
-# config — ``check_type`` (7 matview discriminators) and the
-# ``SupersedeReason`` vocabulary (3) — keep their direct StaticValues
-# default; they're not at risk.
+# AA.A.3 flipped every pushdown dropdown from MULTI to SINGLE (audit at
+# ``docs/audits/aa_a_dropdown_audit.md``): the SQL guards
+# ``('__l1_all__' = <<$pX>> OR col = <<$pX>>)`` (see ``_data_value_clause``)
+# and the dataset param is SINGLE_VALUED with the bare ``L1_ALL_SENTINEL``
+# default (1-element list per the dataclass shape). On load the sentinel
+# passes the first disjunct so all rows pass; once the analyst picks a
+# real value the second disjunct narrows to that single value. The
+# pre-AA.A.3 MULTI shape (sentinel-IN-list guard from X.2.t.2) lacked a
+# one-click "pick this value and clear the rest" gesture — operators
+# pivot drill-to-one 99% of the time, so SINGLE is the right default and
+# every dropdown opted into it.
 #
-# Dropdown OPTIONS are separate from the dataset-param default: enum
-# dropdowns get their options from the control's ``StaticValues`` (the
-# full declared list — AWS does NOT cap that), data-value dropdowns
+# Dropdown OPTIONS are still separate from the dataset-param default:
+# enum dropdowns get their options from the control's ``StaticValues``
+# (the full declared list — AWS doesn't cap that), data-value dropdowns
 # (``account_id`` / ``transfer_id`` / ``status`` / ``origin``) from a
-# companion DISTINCT-over-matview dataset via ``LinkedValues``. The
-# 32-element cap is *only* on the dataset param's default.
+# companion DISTINCT-over-matview dataset via ``LinkedValues``.
 
 # ``col IN ('__no_match__')`` is valid SQL returning zero rows — the
 # right outcome for a SINGLE_VALUED dropdown that should start empty
-# (Daily Statement account, Account Network anchor). The MULTI_VALUED
-# dropdowns never need it: their default is ``[L1_ALL_SENTINEL]``, never
-# an empty list (which would substitute as ``IN ()``, invalid SQL).
+# (Daily Statement account). All other pushdown dropdowns default to
+# the show-all sentinel L1_ALL_SENTINEL instead — see the block above.
 PUSHDOWN_NO_MATCH_SENTINEL = "__no_match__"
 
-# "Show everything" sentinel — the static default for every MULTI_VALUED
-# pushdown dataset param. See the block comment above for the SQL-guard
-# shape (``_data_value_clause``).
+# "Show everything" sentinel — the static default for every SINGLE_VALUED
+# pushdown dataset param post-AA.A.3. See the block comment above for the
+# SQL-guard shape (``_data_value_clause``).
 L1_ALL_SENTINEL = "__l1_all__"
 # Pre-quoted form for splicing into SQL (the sentinel is alnum +
 # underscores only, so f-string quoting is safe — no escaping needed).
@@ -199,13 +192,13 @@ def _mv_dataset_param(
 ) -> DatasetParameter:
     """A MULTI_VALUED string dataset parameter. ``default`` must be
     non-empty (an empty default substitutes as ``IN ()``, invalid SQL)
-    AND ≤ 32 elements (AWS caps ``DefaultValues.StaticValues``). For a
-    pushdown dropdown that should match all rows on load, pass
-    ``[L1_ALL_SENTINEL]`` (see ``_all_sentinel_mv_param``) — the SQL
-    guard (``_data_value_clause``) turns the sentinel into a "match
-    everything" predicate. Only the two fixed-schema enums
-    (``check_type``, ``SupersedeReason``) pass a real value list, and
-    those are ≤ 7 elements by construction.
+    AND ≤ 32 elements (AWS caps ``DefaultValues.StaticValues``).
+
+    Post-AA.A.3 no L1 dropdown uses this shape — every pushdown flipped
+    to SINGLE_VALUED with ``_sv_dataset_param`` / ``_all_sentinel_sv_param``.
+    Kept in the module for the helper-completeness invariant and as the
+    documented shape for any future genuinely-multi keeper (none in L1
+    today).
     """
     return DatasetParameter(StringDatasetParameter=StringDatasetParameter(
         Id=dsp_id, Name=name, ValueType="MULTI_VALUED",
@@ -215,21 +208,28 @@ def _mv_dataset_param(
     ))
 
 
-def _all_sentinel_mv_param(dsp_id: str, name: str) -> DatasetParameter:
-    """A MULTI_VALUED string dataset param whose static default is
-    ``[L1_ALL_SENTINEL]`` — the cap-safe (1-element) "match everything
-    on load" default for every pushdown dropdown whose WHERE uses
-    ``_data_value_clause``. The dropdown's *options* come from
-    elsewhere (the control's ``StaticValues`` for enum dropdowns; a
-    companion ``LinkedValues`` dataset for data-value dropdowns)."""
-    return _mv_dataset_param(dsp_id, name, [L1_ALL_SENTINEL])
+def _all_sentinel_sv_param(dsp_id: str, name: str) -> DatasetParameter:
+    """AA.A.3 — a SINGLE_VALUED string dataset param whose static default
+    is the bare ``L1_ALL_SENTINEL`` (wrapped in a 1-element list per the
+    ``StringDatasetParameterDefaultValues`` dataclass shape; the
+    ``ValueType="SINGLE_VALUED"`` is the semantic flip). On load the
+    bridged scalar dropdown reverts to this default and ``_data_value_clause``
+    turns it into a "match everything" predicate.
+
+    Renamed from ``_all_sentinel_mv_param`` in AA.A.3 when every pushdown
+    dropdown flipped from MULTI to SINGLE. The dropdown's *options* still
+    come from elsewhere (the control's ``StaticValues`` for enum
+    dropdowns; a companion ``LinkedValues`` dataset for data-value
+    dropdowns)."""
+    return _sv_dataset_param(dsp_id, name, L1_ALL_SENTINEL)
 
 
 def _sv_dataset_param(
     dsp_id: str, name: str, default: str,
 ) -> DatasetParameter:
     """A SINGLE_VALUED string dataset parameter with a sentinel default
-    (Daily Statement's per-account narrow)."""
+    (AA.A.3 — every pushdown dropdown uses this shape; pre-AA.A only the
+    Daily Statement per-account narrow did)."""
     return DatasetParameter(StringDatasetParameter=StringDatasetParameter(
         Id=dsp_id, Name=name, ValueType="SINGLE_VALUED",
         DefaultValues=StringDatasetParameterDefaultValues(
@@ -239,34 +239,26 @@ def _sv_dataset_param(
 
 
 def _data_value_clause(col: str, param_name: str) -> str:
-    """WHERE-fragment for a MULTI_VALUED pushdown dropdown: ``('__l1_all__'
-    IN (<<$p>>) OR col IN (<<$p>>))``. On load (and when the dropdown is
-    emptied, reverting the dataset param to its ``[L1_ALL_SENTINEL]``
-    default — see ``_all_sentinel_mv_param``) the first disjunct is true
-    so every row passes; once the analyst selects real values the second
-    disjunct narrows. Used for *both* the data-value dropdowns
+    """WHERE-fragment for a SINGLE_VALUED pushdown dropdown: ``('__l1_all__'
+    = <<$p>> OR col = <<$p>>)``. On load (and when the dropdown is emptied,
+    reverting the bridged dataset param to its ``L1_ALL_SENTINEL`` default
+    — see ``_all_sentinel_sv_param``) the first disjunct is true so every
+    row passes; once the analyst picks a real value the second disjunct
+    narrows to that single value. Used for *both* the data-value dropdowns
     (``account_id`` / ``transfer_id`` / ``status`` / ``origin``, options
     from a companion dataset) and the enum dropdowns (``rail_name`` /
-    ``rail_name`` / ``account_role``, options from the control's
-    ``StaticValues``) — the only difference is where the options come
-    from, not the WHERE shape (X.2.t.2)."""
-    return (
-        f"({_L1_ALL_SENTINEL_SQL} IN (<<${param_name}>>)"
-        f" OR {col} IN (<<${param_name}>>))"
-    )
+    ``account_role`` / ``check_type`` / ``supersedes``, options from the
+    control's ``StaticValues``) — the only difference is where the options
+    come from, not the WHERE shape.
 
-
-def _single_value_clause(col: str, param_name: str) -> str:
-    """WHERE-fragment for a SINGLE_VALUED pushdown dropdown (AA.A flip):
-    ``('__l1_all__' = <<$p>> OR col = <<$p>>)``. Same sentinel-guard shape
-    as ``_data_value_clause`` but with scalar ``=`` instead of list ``IN``
-    — the dropdown's dataset param is a scalar ``StringParameter`` with a
-    bare ``L1_ALL_SENTINEL`` default (not a 1-element list).
-
-    On load the sentinel passes the first disjunct; once the analyst picks
-    a real value the second disjunct narrows to that single value. The
-    drill-to-one workflow is the default per AA.A; multi-select dropdowns
-    were the legacy shape (X.2.t.2) flipped to single in AA.A.3."""
+    AA.A.3 collapsed the prior multi-value form (``IN (...)``) into this
+    single-value scalar form when drill-to-one became the default
+    operator workflow (X.2.t.2's MULTI sentinel-guard pattern lacked a
+    one-click value picker; analysts deselected every other value to
+    drill — see ``docs/audits/aa_a_dropdown_audit.md``). The name
+    ``_data_value_clause`` carried over from the dual-purpose helper
+    days; the function emits the value-anchored pushdown shape (was
+    always a misnomer for "value-anchored pushdown")."""
     return (
         f"({_L1_ALL_SENTINEL_SQL} = <<${param_name}>>"
         f" OR {col} = <<${param_name}>>)"
@@ -648,8 +640,8 @@ def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
         sql_template, DRIFT_CONTRACT,
         visual_identifier=DS_DRIFT,
         dataset_parameters=[
-            _all_sentinel_mv_param(_DSP_L1_DRIFT_ACCOUNT, P_L1_DRIFT_ACCOUNT),
-            _all_sentinel_mv_param(_DSP_L1_DRIFT_ROLE, P_L1_DRIFT_ROLE),
+            _all_sentinel_sv_param(_DSP_L1_DRIFT_ACCOUNT, P_L1_DRIFT_ACCOUNT),
+            _all_sentinel_sv_param(_DSP_L1_DRIFT_ROLE, P_L1_DRIFT_ROLE),
         ],
         app2_date_column="business_day_start",
     )
@@ -680,8 +672,8 @@ def build_ledger_drift_dataset(
         sql_template, LEDGER_DRIFT_CONTRACT,
         visual_identifier=DS_LEDGER_DRIFT,
         dataset_parameters=[
-            _all_sentinel_mv_param(_DSP_L1_DRIFT_ACCOUNT, P_L1_DRIFT_ACCOUNT),
-            _all_sentinel_mv_param(_DSP_L1_DRIFT_ROLE, P_L1_DRIFT_ROLE),
+            _all_sentinel_sv_param(_DSP_L1_DRIFT_ACCOUNT, P_L1_DRIFT_ACCOUNT),
+            _all_sentinel_sv_param(_DSP_L1_DRIFT_ROLE, P_L1_DRIFT_ROLE),
         ],
         app2_date_column="business_day_start",
     )
@@ -725,9 +717,9 @@ def build_overdraft_dataset(
         sql_template, OVERDRAFT_CONTRACT,
         visual_identifier=DS_OVERDRAFT,
         dataset_parameters=[
-            _all_sentinel_mv_param(_DSP_L1_OVERDRAFT_ACCOUNT,
+            _all_sentinel_sv_param(_DSP_L1_OVERDRAFT_ACCOUNT,
                                    P_L1_OVERDRAFT_ACCOUNT),
-            _all_sentinel_mv_param(_DSP_L1_OVERDRAFT_ROLE, P_L1_OVERDRAFT_ROLE),
+            _all_sentinel_sv_param(_DSP_L1_OVERDRAFT_ROLE, P_L1_OVERDRAFT_ROLE),
         ],
         app2_date_column="business_day_start",
     )
@@ -761,9 +753,9 @@ def build_limit_breach_dataset(
         sql_template, LIMIT_BREACH_CONTRACT,
         visual_identifier=DS_LIMIT_BREACH,
         dataset_parameters=[
-            _all_sentinel_mv_param(_DSP_L1_LIMIT_BREACH_ACCOUNT,
+            _all_sentinel_sv_param(_DSP_L1_LIMIT_BREACH_ACCOUNT,
                                    P_L1_LIMIT_BREACH_ACCOUNT),
-            _all_sentinel_mv_param(_DSP_L1_LIMIT_BREACH_TYPE,
+            _all_sentinel_sv_param(_DSP_L1_LIMIT_BREACH_TYPE,
                                    P_L1_LIMIT_BREACH_TYPE),
         ],
         app2_date_column="business_day",
@@ -790,11 +782,11 @@ def build_todays_exceptions_dataset(
     Refresh contract: integrators MUST call `refresh_matviews_sql()`
     after every batch insert into the base tables.
 
-    Y.2.g — three dropdowns push down: ``check_type`` (enum, ``IN (...)``),
-    ``account_id`` (data-value, sentinel-OR), and ``rail_name``
-    (enum). ``rail_name`` is NULL for every branch except limit /
-    stuck rows, so the predicate keeps the NULL-type rows on load (and
-    while narrowing) — matching the FILTER_ALL_VALUES behavior it
+    Y.2.g + AA.A.3 — three dropdowns push down, all SINGLE_VALUED post-AA.A.3
+    sentinel-guard form: ``check_type`` (enum), ``account_id`` (data-value),
+    and ``rail_name`` (enum). ``rail_name`` is NULL for every branch except
+    limit / stuck rows, so the predicate keeps the NULL-type rows on load
+    (and while narrowing) — matching the FILTER_ALL_VALUES behavior it
     replaces.
 
     Y.2.f — App2-side date pushdown via ``business_day``.
@@ -802,7 +794,7 @@ def build_todays_exceptions_dataset(
     prefix = cfg.db_table_prefix
     sql_template = (
         f"SELECT * FROM {prefix}_todays_exceptions\n"
-        f"WHERE check_type IN (<<${P_L1_TODAYS_EXC_CHECK_TYPE}>>)\n"
+        f"WHERE {_data_value_clause('check_type', P_L1_TODAYS_EXC_CHECK_TYPE)}\n"
         f"  AND {_data_value_clause('account_id', P_L1_TODAYS_EXC_ACCOUNT)}\n"
         f"  AND ({_data_value_clause('rail_name', P_L1_TODAYS_EXC_TYPE)}"
         f" OR rail_name IS NULL)\n"
@@ -814,14 +806,16 @@ def build_todays_exceptions_dataset(
         sql_template, TODAYS_EXCEPTIONS_CONTRACT,
         visual_identifier=DS_TODAYS_EXCEPTIONS,
         dataset_parameters=[
-            # check_type is a 7-element fixed-schema enum — can't grow
-            # past 32 by L2 config — so its default stays the value list.
-            _mv_dataset_param(_DSP_L1_TODAYS_EXC_CHECK_TYPE,
-                              P_L1_TODAYS_EXC_CHECK_TYPE,
-                              l1_check_type_values()),
-            _all_sentinel_mv_param(_DSP_L1_TODAYS_EXC_ACCOUNT,
+            # AA.A.3 — all three dropdowns flipped from MULTI to SINGLE per
+            # the drill-to-one default (audit row pL1TodaysExcCheckType +
+            # pL1TodaysExcAccount + pL1TodaysExcType). check_type was the
+            # one fixed enum that kept its value-list default pre-flip; now
+            # uses the sentinel-default + match-all guard like the others.
+            _all_sentinel_sv_param(_DSP_L1_TODAYS_EXC_CHECK_TYPE,
+                                   P_L1_TODAYS_EXC_CHECK_TYPE),
+            _all_sentinel_sv_param(_DSP_L1_TODAYS_EXC_ACCOUNT,
                                    P_L1_TODAYS_EXC_ACCOUNT),
-            _all_sentinel_mv_param(_DSP_L1_TODAYS_EXC_TYPE,
+            _all_sentinel_sv_param(_DSP_L1_TODAYS_EXC_TYPE,
                                    P_L1_TODAYS_EXC_TYPE),
         ],
         app2_date_column="business_day",
@@ -970,11 +964,11 @@ def build_transactions_dataset(
         sql_template, TRANSACTIONS_CONTRACT,
         visual_identifier=DS_TRANSACTIONS,
         dataset_parameters=[
-            _all_sentinel_mv_param(_DSP_L1_TX_ACCOUNT, P_L1_TX_ACCOUNT),
-            _all_sentinel_mv_param(_DSP_L1_TX_TRANSFER_ID, P_L1_TX_TRANSFER_ID),
-            _all_sentinel_mv_param(_DSP_L1_TX_STATUS, P_L1_TX_STATUS),
-            _all_sentinel_mv_param(_DSP_L1_TX_ORIGIN, P_L1_TX_ORIGIN),
-            _all_sentinel_mv_param(_DSP_L1_TX_TYPE, P_L1_TX_TYPE),
+            _all_sentinel_sv_param(_DSP_L1_TX_ACCOUNT, P_L1_TX_ACCOUNT),
+            _all_sentinel_sv_param(_DSP_L1_TX_TRANSFER_ID, P_L1_TX_TRANSFER_ID),
+            _all_sentinel_sv_param(_DSP_L1_TX_STATUS, P_L1_TX_STATUS),
+            _all_sentinel_sv_param(_DSP_L1_TX_ORIGIN, P_L1_TX_ORIGIN),
+            _all_sentinel_sv_param(_DSP_L1_TX_TYPE, P_L1_TX_TYPE),
         ],
         app2_date_column="posting",
     )
@@ -1013,7 +1007,7 @@ def build_drift_timeline_dataset(
         sql_template, DRIFT_TIMELINE_CONTRACT,
         visual_identifier=DS_DRIFT_TIMELINE,
         dataset_parameters=[
-            _all_sentinel_mv_param(_DSP_L1_DRIFT_TL_ROLE, P_L1_DRIFT_TL_ROLE),
+            _all_sentinel_sv_param(_DSP_L1_DRIFT_TL_ROLE, P_L1_DRIFT_TL_ROLE),
         ],
         app2_date_column="business_day_end",
     )
@@ -1047,7 +1041,7 @@ def build_ledger_drift_timeline_dataset(
         sql_template, DRIFT_TIMELINE_CONTRACT,
         visual_identifier=DS_LEDGER_DRIFT_TIMELINE,
         dataset_parameters=[
-            _all_sentinel_mv_param(_DSP_L1_DRIFT_TL_ROLE, P_L1_DRIFT_TL_ROLE),
+            _all_sentinel_sv_param(_DSP_L1_DRIFT_TL_ROLE, P_L1_DRIFT_TL_ROLE),
         ],
         app2_date_column="business_day_end",
     )
@@ -1096,10 +1090,10 @@ def build_stuck_pending_dataset(
         sql, STUCK_PENDING_CONTRACT,
         visual_identifier=DS_STUCK_PENDING,
         dataset_parameters=[
-            _all_sentinel_mv_param(_DSP_L1_PENDING_ACCOUNT,
+            _all_sentinel_sv_param(_DSP_L1_PENDING_ACCOUNT,
                                    P_L1_PENDING_ACCOUNT),
-            _all_sentinel_mv_param(_DSP_L1_PENDING_TYPE, P_L1_PENDING_TYPE),
-            _all_sentinel_mv_param(_DSP_L1_PENDING_RAIL, P_L1_PENDING_RAIL),
+            _all_sentinel_sv_param(_DSP_L1_PENDING_TYPE, P_L1_PENDING_TYPE),
+            _all_sentinel_sv_param(_DSP_L1_PENDING_RAIL, P_L1_PENDING_RAIL),
         ],
     )
 
@@ -1130,10 +1124,10 @@ def build_stuck_unbundled_dataset(
         sql, STUCK_UNBUNDLED_CONTRACT,
         visual_identifier=DS_STUCK_UNBUNDLED,
         dataset_parameters=[
-            _all_sentinel_mv_param(_DSP_L1_UNBUNDLED_ACCOUNT,
+            _all_sentinel_sv_param(_DSP_L1_UNBUNDLED_ACCOUNT,
                                    P_L1_UNBUNDLED_ACCOUNT),
-            _all_sentinel_mv_param(_DSP_L1_UNBUNDLED_TYPE, P_L1_UNBUNDLED_TYPE),
-            _all_sentinel_mv_param(_DSP_L1_UNBUNDLED_RAIL, P_L1_UNBUNDLED_RAIL),
+            _all_sentinel_sv_param(_DSP_L1_UNBUNDLED_TYPE, P_L1_UNBUNDLED_TYPE),
+            _all_sentinel_sv_param(_DSP_L1_UNBUNDLED_RAIL, P_L1_UNBUNDLED_RAIL),
         ],
     )
 
@@ -1163,8 +1157,13 @@ def build_supersession_transactions_dataset(
     `ORDER BY` combo). Sort handled by the dashboard, not the
     dataset.
 
-    Y.2.g — the Supersedes-Reason dropdown pushes down via
-    ``(supersedes IN (<<$pL1SupersedeReason>>) OR supersedes IS NULL)``.
+    Y.2.g + AA.A.3 — the Supersedes-Reason dropdown pushes down via
+    ``((sentinel = <<$p>> OR supersedes = <<$p>>) OR supersedes IS NULL)``.
+    AA.A.3 flipped it from MULTI to SINGLE per the drill-to-one default
+    (audit row pL1SupersedeReason); the ``OR supersedes IS NULL`` keeps
+    the entry-1 rows of every audit trail visible on load and while
+    narrowing (you always see the trail, the dropdown narrows which
+    cause class you're auditing).
     """
     prefix = cfg.db_table_prefix
     sql = (
@@ -1183,7 +1182,7 @@ def build_supersession_transactions_dataset(
         f"   FROM {prefix}_transactions"
         f" ) sub"
         f" WHERE entry_count > 1"
-        f" AND (supersedes IN (<<${P_L1_SUPERSEDE_REASON}>>)"
+        f" AND ({_data_value_clause('supersedes', P_L1_SUPERSEDE_REASON)}"
         f" OR supersedes IS NULL)"
     )
     return build_dataset(
@@ -1193,9 +1192,8 @@ def build_supersession_transactions_dataset(
         sql, SUPERSESSION_TRANSACTIONS_CONTRACT,
         visual_identifier=DS_SUPERSESSION_TRANSACTIONS,
         dataset_parameters=[
-            _mv_dataset_param(_DSP_L1_SUPERSEDE_REASON,
-                              P_L1_SUPERSEDE_REASON,
-                              l1_supersede_reason_values()),
+            _all_sentinel_sv_param(_DSP_L1_SUPERSEDE_REASON,
+                                   P_L1_SUPERSEDE_REASON),
         ],
     )
 

@@ -1606,7 +1606,9 @@ def test_y2g_drift_dropdowns_bridge_to_both_drift_datasets() -> None:
     cross-dataset (one control narrows both the leaf-drift and
     ledger-drift tables). After Y.2.g that means each analysis param
     bridges to a same-named dataset param on BOTH the drift and
-    ledger-drift datasets."""
+    ledger-drift datasets. AA.A.3 — both dropdowns are SINGLE_VALUED
+    (drill-to-one default; multi-select pre-AA.A.3 lacked a one-click
+    pick-this-value gesture)."""
     from quicksight_gen.common.tree import StringParam
 
     app = build_l1_dashboard_app(_CFG)
@@ -1615,7 +1617,9 @@ def test_y2g_drift_dropdowns_bridge_to_both_drift_datasets() -> None:
     for pname in ("pL1DriftAccount", "pL1DriftRole"):
         param = by_name[pname]
         assert isinstance(param, StringParam)
-        assert param.multi_valued
+        assert not param.multi_valued, (
+            f"{pname}: post-AA.A.3 every L1 pushdown dropdown is SINGLE_VALUED"
+        )
         bridged_ds_ids = {ds.identifier for ds, _ in (param.mapped_dataset_params or [])}
         from quicksight_gen.apps.l1_dashboard.datasets import (
             DS_DRIFT, DS_LEDGER_DRIFT,

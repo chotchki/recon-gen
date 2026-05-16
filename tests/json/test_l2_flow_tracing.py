@@ -603,18 +603,17 @@ def test_chains_metadata_params_are_chain_scoped() -> None:
 
 
 def test_chain_instances_dataset_declares_cascade_and_pushdown_parameters() -> None:
-    """Y.2.d — four dataset params: the metadata cascade pair (pKey /
-    pValues) plus the chain / completion pushdown pair (pL2ftChainsChain
-    / pL2ftChainsCompletion, MULTI_VALUED). X.2.t.2 — the chain-parent
-    default is the 1-element ``[L2FT_ALL_SENTINEL]`` (AWS caps the
-    dataset-param default at 32 elements; an L2 may declare >32 chains),
-    NOT the declared-parent list; the SQL ``_match_all_in_clause`` turns
-    the sentinel into "match all". Completion (a fixed ≤3-element enum)
-    keeps its value-list default. An instance with zero chains lands on
-    the same sentinel default — harmless, the table is empty anyway."""
+    """Y.2.d + AA.A.3 — four dataset params: the metadata cascade pair
+    (pKey / pValues) plus the chain / completion pushdown pair
+    (pL2ftChainsChain / pL2ftChainsCompletion). AA.A.3 flipped both
+    pushdown params from MULTI to SINGLE per the drill-to-one default;
+    both now default to ``[L2FT_ALL_SENTINEL]`` and the SQL
+    ``_match_all_in_clause`` turns the sentinel into "match all" on
+    load. An instance with zero chains lands on the same sentinel
+    default — harmless, the chain-instances table is empty anyway."""
     from quicksight_gen.apps.l2_flow_tracing.datasets import (
         L2FT_ALL_SENTINEL, build_chain_instances_dataset,
-        chain_completion_status_values, declared_chain_parents,
+        declared_chain_parents,
     )
     # Instance WITH chains.
     inst = load_instance(SASQUATCH_PR_YAML)
@@ -624,12 +623,12 @@ def test_chain_instances_dataset_declares_cascade_and_pushdown_parameters() -> N
     by_name = {p.StringDatasetParameter.Name: p.StringDatasetParameter for p in params}
     assert by_name["pKey"].ValueType == "SINGLE_VALUED"
     assert by_name["pValues"].ValueType == "SINGLE_VALUED"
-    assert by_name["pL2ftChainsChain"].ValueType == "MULTI_VALUED"
+    assert by_name["pL2ftChainsChain"].ValueType == "SINGLE_VALUED"
     assert by_name["pL2ftChainsChain"].DefaultValues.StaticValues == [L2FT_ALL_SENTINEL]
-    assert by_name["pL2ftChainsCompletion"].ValueType == "MULTI_VALUED"
-    assert by_name["pL2ftChainsCompletion"].DefaultValues.StaticValues == (
-        chain_completion_status_values()
-    )
+    assert by_name["pL2ftChainsCompletion"].ValueType == "SINGLE_VALUED"
+    assert by_name["pL2ftChainsCompletion"].DefaultValues.StaticValues == [
+        L2FT_ALL_SENTINEL,
+    ]
     # Instance WITHOUT chains → same sentinel default.
     from dataclasses import replace
     no_chains = replace(load_instance(SASQUATCH_PR_YAML), chains=())
@@ -645,11 +644,11 @@ def test_chain_instances_dataset_declares_cascade_and_pushdown_parameters() -> N
 
 
 def test_chain_instances_dataset_pushes_chain_completion_into_sql() -> None:
-    """Y.2.d — chain + completion narrow inside the chain-instances
-    dataset SQL via multi-valued `<<$param>>` substitution; the
-    projection wraps in a subquery so the CASE-aliased
-    `completion_status` is visible to the outer WHERE. Metadata cascade
-    on `parent_metadata` stays inner."""
+    """Y.2.d + AA.A.3 — chain + completion narrow inside the
+    chain-instances dataset SQL via single-valued `<<$param>>`
+    substitution (post-AA.A.3 SINGLE_SELECT form); the projection wraps
+    in a subquery so the CASE-aliased `completion_status` is visible to
+    the outer WHERE. Metadata cascade on `parent_metadata` stays inner."""
     from quicksight_gen.apps.l2_flow_tracing.datasets import (
         build_chain_instances_dataset,
     )
@@ -657,13 +656,13 @@ def test_chain_instances_dataset_pushes_chain_completion_into_sql() -> None:
         build_chain_instances_dataset(_CFG, load_instance(SASQUATCH_PR_YAML))
         .PhysicalTableMap.values()
     )[0].CustomSql.SqlQuery
-    assert "parent_chain_name IN (<<$pL2ftChainsChain>>)" in sql
-    assert "completion_status IN (<<$pL2ftChainsCompletion>>)" in sql
-    # X.2.t.2 — the chain predicate is the sentinel-guarded form
-    # (`('__l2ft_all__' IN (<<$p>>) OR parent_chain_name IN (<<$p>>))`)
-    # in the OUTER WHERE over the CASE-aliased subquery.
+    assert "parent_chain_name = <<$pL2ftChainsChain>>" in sql
+    assert "completion_status = <<$pL2ftChainsCompletion>>" in sql
+    # AA.A.3 — chain predicate is the SINGLE_VALUED sentinel-guarded form
+    # (`('__l2ft_all__' = <<$p>> OR parent_chain_name = <<$p>>)`) in the
+    # OUTER WHERE over the CASE-aliased subquery.
     assert (
-        ") chain_instances\nWHERE ('__l2ft_all__' IN (<<$pL2ftChainsChain>>)"
+        ") chain_instances\nWHERE ('__l2ft_all__' = <<$pL2ftChainsChain>>"
         in sql
     )
     # Metadata cascade still present on parent_metadata, inside the subquery.
@@ -733,18 +732,16 @@ def test_metadata_value_control_is_text_field() -> None:
 
 
 def test_tt_datasets_declare_cascade_and_pushdown_parameters() -> None:
-    """Y.2.e — both TransferTemplates datasets (tt-instances + tt-legs)
-    carry the same 4 params: the metadata cascade pair (pKey / pValues)
-    plus the template / completion pushdown pair (MULTI_VALUED). X.2.t.2 —
-    the template default is the 1-element ``[L2FT_ALL_SENTINEL]`` (AWS
-    caps the dataset-param default at 32; an L2 may declare >32
-    templates), turned into "match all" by the SQL ``_match_all_in_clause``.
-    Completion (a fixed ≤3-element enum) keeps its value-list default. An
-    instance with zero templates lands on the same sentinel default."""
+    """Y.2.e + AA.A.3 — both TransferTemplates datasets (tt-instances +
+    tt-legs) carry the same 4 params: the metadata cascade pair (pKey /
+    pValues) plus the template / completion pushdown pair (both
+    SINGLE_VALUED post-AA.A.3). Template / completion both default to
+    ``[L2FT_ALL_SENTINEL]`` turned into "match all" by the SQL
+    ``_match_all_in_clause``. An instance with zero templates lands on
+    the same sentinel default."""
     from quicksight_gen.apps.l2_flow_tracing.datasets import (
         L2FT_ALL_SENTINEL, build_tt_instances_dataset,
         build_tt_legs_dataset, declared_template_names,
-        tt_completion_status_values,
     )
     inst = load_instance(SASQUATCH_PR_YAML)
     for build in (build_tt_instances_dataset, build_tt_legs_dataset):
@@ -755,14 +752,14 @@ def test_tt_datasets_declare_cascade_and_pushdown_parameters() -> None:
         }
         assert by_name["pKey"].ValueType == "SINGLE_VALUED"
         assert by_name["pValues"].ValueType == "SINGLE_VALUED"
-        assert by_name["pL2ftTtTemplate"].ValueType == "MULTI_VALUED"
+        assert by_name["pL2ftTtTemplate"].ValueType == "SINGLE_VALUED"
         assert by_name["pL2ftTtTemplate"].DefaultValues.StaticValues == [
             L2FT_ALL_SENTINEL,
         ]
-        assert by_name["pL2ftTtCompletion"].ValueType == "MULTI_VALUED"
-        assert by_name["pL2ftTtCompletion"].DefaultValues.StaticValues == (
-            tt_completion_status_values()
-        )
+        assert by_name["pL2ftTtCompletion"].ValueType == "SINGLE_VALUED"
+        assert by_name["pL2ftTtCompletion"].DefaultValues.StaticValues == [
+            L2FT_ALL_SENTINEL,
+        ]
     # Empty-templates instance → same sentinel default.
     from dataclasses import replace
     no_tt = replace(inst, transfer_templates=[])
@@ -778,11 +775,12 @@ def test_tt_datasets_declare_cascade_and_pushdown_parameters() -> None:
 
 
 def test_tt_datasets_push_template_completion_into_sql() -> None:
-    """Y.2.e — both TT datasets narrow on template / completion inside
-    the dataset SQL via multi-valued `<<$param>>` substitution; the
-    final SELECT (and the UNION-ALL for tt-legs) wraps in a subquery so
-    the CASE-aliased `completion_status` is visible to the outer WHERE.
-    Metadata cascade stays inner."""
+    """Y.2.e + AA.A.3 — both TT datasets narrow on template / completion
+    inside the dataset SQL via single-valued `<<$param>>` substitution
+    (post-AA.A.3 SINGLE_SELECT form); the final SELECT (and the UNION-ALL
+    for tt-legs) wraps in a subquery so the CASE-aliased
+    `completion_status` is visible to the outer WHERE. Metadata cascade
+    stays inner."""
     from quicksight_gen.apps.l2_flow_tracing.datasets import (
         build_tt_instances_dataset, build_tt_legs_dataset,
     )
@@ -794,14 +792,14 @@ def test_tt_datasets_push_template_completion_into_sql() -> None:
         build_tt_legs_dataset(_CFG, inst).PhysicalTableMap.values()
     )[0].CustomSql.SqlQuery
     for sql, alias in ((inst_sql, "tt_instances"), (legs_sql, "tt_legs")):
-        # X.2.t.2 — template predicate is the sentinel-guarded form in
-        # the OUTER WHERE over the CASE-aliased subquery.
+        # AA.A.3 — template predicate is the SINGLE_VALUED sentinel-guarded
+        # form in the OUTER WHERE over the CASE-aliased subquery.
         assert (
-            f") {alias}\nWHERE ('__l2ft_all__' IN (<<$pL2ftTtTemplate>>)"
+            f") {alias}\nWHERE ('__l2ft_all__' = <<$pL2ftTtTemplate>>"
             in sql
         )
-        assert "template_name IN (<<$pL2ftTtTemplate>>)" in sql
-        assert "completion_status IN (<<$pL2ftTtCompletion>>)" in sql
+        assert "template_name = <<$pL2ftTtTemplate>>" in sql
+        assert "completion_status = <<$pL2ftTtCompletion>>" in sql
         # Metadata cascade still present, inside the subquery.
         assert "<<$pKey>>" in sql and "<<$pValues>>" in sql
     # tt-legs keeps the two-branch UNION ALL inside the wrapper.
@@ -1109,17 +1107,16 @@ def test_postings_dataset_uses_cascade_substitution() -> None:
 
 def test_postings_dataset_declares_cascade_and_pushdown_parameters() -> None:
     """Five dataset parameters: the metadata cascade pair (pKey /
-    pValues, both SINGLE_VALUED per Y.1.m) plus the Y.2.c category-
-    pushdown trio (pL2ftRail / pL2ftStatus / pL2ftBundle, all
-    MULTI_VALUED). X.2.t.2 — pL2ftRail's default is the 1-element
-    ``[L2FT_ALL_SENTINEL]`` (AWS caps the dataset-param default at 32;
-    an L2 may declare >32 rails) turned into "match all" by the SQL
-    guard; pL2ftStatus / pL2ftBundle (fixed ≤3-element enums) keep their
-    value-list defaults."""
+    pValues, both SINGLE_VALUED per Y.1.m) plus the AA.A.3 pushdown
+    trio (pL2ftRail / pL2ftStatus / pL2ftBundle, all SINGLE_VALUED
+    post-AA.A.3). All three pushdown params default to the 1-element
+    ``[L2FT_ALL_SENTINEL]`` (the SQL guard turns it into "match all");
+    pre-AA.A.3 status / bundle had value-list defaults and rail had the
+    sentinel-list default (X.2.t.2). AA.A.3 unified all three on the
+    SINGLE shape per the drill-to-one default."""
     from quicksight_gen.apps.l2_flow_tracing.datasets import (
         L2FT_ALL_SENTINEL, build_postings_dataset, META_KEY_ALL_SENTINEL,
         META_VALUE_PLACEHOLDER_SENTINEL,
-        bundle_status_values, transaction_status_values,
     )
     inst = load_instance(SASQUATCH_PR_YAML)
     aws_ds = build_postings_dataset(_CFG, inst)
@@ -1136,21 +1133,22 @@ def test_postings_dataset_declares_cascade_and_pushdown_parameters() -> None:
     assert by_name["pValues"].DefaultValues.StaticValues == [
         META_VALUE_PLACEHOLDER_SENTINEL,
     ]
-    # Y.2.c category-pushdown trio.
-    assert by_name["pL2ftRail"].ValueType == "MULTI_VALUED"
+    # AA.A.3 — rail / status / bundle all SINGLE_VALUED with the
+    # L2FT_ALL_SENTINEL default.
+    assert by_name["pL2ftRail"].ValueType == "SINGLE_VALUED"
     assert by_name["pL2ftRail"].DefaultValues.StaticValues == [L2FT_ALL_SENTINEL]
-    assert by_name["pL2ftStatus"].ValueType == "MULTI_VALUED"
-    assert by_name["pL2ftStatus"].DefaultValues.StaticValues == transaction_status_values()
-    assert by_name["pL2ftBundle"].ValueType == "MULTI_VALUED"
-    assert by_name["pL2ftBundle"].DefaultValues.StaticValues == bundle_status_values()
+    assert by_name["pL2ftStatus"].ValueType == "SINGLE_VALUED"
+    assert by_name["pL2ftStatus"].DefaultValues.StaticValues == [L2FT_ALL_SENTINEL]
+    assert by_name["pL2ftBundle"].ValueType == "SINGLE_VALUED"
+    assert by_name["pL2ftBundle"].DefaultValues.StaticValues == [L2FT_ALL_SENTINEL]
 
 
 def test_postings_dataset_pushes_rail_status_bundle_into_sql() -> None:
-    """Y.2.c — the Rails sheet's three category filters narrow inside
-    the postings dataset SQL (multi-valued ``<<$param>>`` substitution),
-    not via analysis-level CategoryFilters. The projection wraps in a
-    subquery so the CASE-aliased ``status`` / ``bundle_status`` are
-    visible to the outer WHERE."""
+    """Y.2.c + AA.A.3 — the Rails sheet's three pushdown dropdowns
+    narrow inside the postings dataset SQL (single-valued ``<<$param>>``
+    substitution post-AA.A.3), not via analysis-level CategoryFilters.
+    The projection wraps in a subquery so the CASE-aliased ``status`` /
+    ``bundle_status`` are visible to the outer WHERE."""
     from quicksight_gen.apps.l2_flow_tracing.datasets import (
         build_postings_dataset,
     )
@@ -1158,12 +1156,12 @@ def test_postings_dataset_pushes_rail_status_bundle_into_sql() -> None:
     sql = list(
         build_postings_dataset(_CFG, inst).PhysicalTableMap.values()
     )[0].CustomSql.SqlQuery
-    assert "rail_name IN (<<$pL2ftRail>>)" in sql
-    assert "status IN (<<$pL2ftStatus>>)" in sql
-    assert "bundle_status IN (<<$pL2ftBundle>>)" in sql
+    assert "rail_name = <<$pL2ftRail>>" in sql
+    assert "status = <<$pL2ftStatus>>" in sql
+    assert "bundle_status = <<$pL2ftBundle>>" in sql
     # The trio sits in the OUTER WHERE over a subquery (CASE-aliases);
-    # rail_name uses the X.2.t.2 sentinel-guarded form.
-    assert ") postings\nWHERE ('__l2ft_all__' IN (<<$pL2ftRail>>)" in sql
+    # rail_name uses the AA.A.3 SINGLE_VALUED sentinel-guarded form.
+    assert ") postings\nWHERE ('__l2ft_all__' = <<$pL2ftRail>>" in sql
 
 
 def test_rails_pushdown_params_bridge_to_postings_dataset() -> None:

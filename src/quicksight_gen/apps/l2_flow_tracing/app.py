@@ -40,6 +40,7 @@ from quicksight_gen.apps.l2_flow_tracing.datasets import (
     DS_TT_INSTANCES,
     DS_TT_LEGS,
     DS_UNIFIED_L2_EXCEPTIONS,
+    L2FT_ALL_SENTINEL,
     META_KEY_ALL_SENTINEL,
     META_VALUE_PLACEHOLDER_SENTINEL,
     build_all_l2_flow_tracing_datasets,
@@ -505,38 +506,39 @@ def _populate_pushdown_dropdown(
     title: str,
     all_values: list[str],
 ) -> None:
-    """Y.2.c — like ``_populate_param_filter_dropdown`` but the
+    """Y.2.c + AA.A.3 — like ``_populate_param_filter_dropdown`` but the
     narrowing happens in the dataset SQL, not via a CategoryFilter.
 
     Wires two things:
 
-    1. A multi-valued ``StringParam`` (default = the full closed-set of
-       values) bridged to each ``(dataset, dataset_param)`` pair in
-       ``bridges`` via ``MappedDataSetParameters``. Each dataset's
-       CustomSQL substitutes ``<<$dataset_param>>`` into a
-       ``col IN (...)`` predicate. (Usually one bridge; the Transfer
-       Templates sheet uses two — its Template / Completion dropdowns
-       narrow both the tt-instances Table and the tt-legs Sankey.)
-    2. A ``ParameterDropdown(MULTI_SELECT, StaticValues)`` so the
-       analyst deselects values to narrow.
+    1. A single-valued ``StringParam`` (default = ``L2FT_ALL_SENTINEL``,
+       which the dataset SQL's ``_match_all_in_clause`` resolves to
+       "match all rows") bridged to each ``(dataset, dataset_param)``
+       pair in ``bridges`` via ``MappedDataSetParameters``. Each
+       dataset's CustomSQL substitutes ``<<$dataset_param>>`` into the
+       ``('sentinel' = <<$p>> OR col = <<$p>>)`` predicate. (Usually one
+       bridge; the Transfer Templates sheet uses two — its Template /
+       Completion dropdowns narrow both the tt-instances Table and the
+       tt-legs Sankey.)
+    2. A ``ParameterDropdown(SINGLE_SELECT, StaticValues)`` so the
+       analyst picks one value with one click.
 
     No FilterGroup — that's the difference from the
-    ``_populate_param_filter_dropdown`` shape. Emptying the dropdown
-    reverts each dataset param to its default (= all values); QS does
-    not emit ``IN ()`` (verified Y.2.c.0). Use this when the column is a
-    real column in the dataset's source (or a CASE-alias the dataset SQL
-    can re-reference via a subquery) so the predicate is pushable.
+    ``_populate_param_filter_dropdown`` shape. Clearing the dropdown
+    reverts each dataset param to the sentinel default (= all rows
+    match). AA.A.3 flipped this from MULTI to SINGLE per the
+    drill-to-one default (audit at
+    ``docs/audits/aa_a_dropdown_audit.md``).
     """
     p = analysis.add_parameter(StringParam(
         name=param_name,
-        multi_valued=True,
-        default=list(all_values),
+        multi_valued=False,
+        default=[L2FT_ALL_SENTINEL],
         mapped_dataset_params=list(bridges),
     ))
     sheet.add_parameter_dropdown(
         parameter=p,
         title=title,
-        type="MULTI_SELECT",
         selectable_values=StaticValues(values=list(all_values)),
     )
 

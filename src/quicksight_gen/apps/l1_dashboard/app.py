@@ -55,6 +55,7 @@ from quicksight_gen.apps.l1_dashboard.datasets import (
     DS_SUPERSESSION_TRANSACTIONS,
     DS_TODAYS_EXCEPTIONS,
     DS_TRANSACTIONS,
+    L1_ALL_SENTINEL,
     P_L1_DRIFT_ACCOUNT,
     P_L1_DRIFT_ROLE,
     P_L1_DRIFT_TL_ROLE,
@@ -1645,34 +1646,38 @@ def _populate_pushdown_enum_dropdown(
     title: str,
     all_values: list[str],
 ) -> None:
-    """Y.2.g — multi-select dropdown whose narrowing pushes into the
-    consuming dataset(s)' SQL via ``<<$dataset_param>>`` substitution (a
-    ``col IN (...)`` predicate). Mirrors
+    """Y.2.g + AA.A.3 — single-select dropdown whose narrowing pushes
+    into the consuming dataset(s)' SQL via ``<<$dataset_param>>``
+    substitution (a ``col = <<$p>>`` predicate guarded by the sentinel-OR
+    shape — see ``datasets.py::_data_value_clause``). Mirrors
     ``apps/l2_flow_tracing/app.py::_populate_pushdown_dropdown``.
 
-    A multi-valued ``StringParam`` whose default is the full closed
-    value set (so a freshly-loaded dashboard matches every row) is
-    bridged to each ``(dataset, dataset_param)`` pair — usually one;
-    ALL_DATASETS dropdowns pass two (the Drift / Drift Timelines sheets'
-    controls narrow both the leaf-drift and ledger-drift datasets). A
-    ``ParameterDropdown(MULTI_SELECT, StaticValues)`` lets the analyst
-    deselect to narrow. No analysis-level FilterGroup — emptying the
-    dropdown reverts each dataset param to its default (= all values);
-    QS does not emit ``IN ()``. Use for bounded enum columns
-    (``rail_name`` / ``rail_name`` / ``account_role`` / ``supersedes``
-    / ``check_type``); for data-value columns use
+    A single-valued ``StringParam`` whose default is ``L1_ALL_SENTINEL``
+    (so a freshly-loaded dashboard matches every row via the sentinel
+    disjunct) is bridged to each ``(dataset, dataset_param)`` pair —
+    usually one; ALL_DATASETS dropdowns pass two (the Drift / Drift
+    Timelines sheets' controls narrow both the leaf-drift and
+    ledger-drift datasets). A ``ParameterDropdown(SINGLE_SELECT,
+    StaticValues)`` lets the analyst pick one value to narrow with one
+    click. No analysis-level FilterGroup — picking the value writes the
+    bridged dataset param; clearing the dropdown reverts to the sentinel
+    default (= all rows match). AA.A.3 flipped this from MULTI to SINGLE
+    per the drill-to-one default (audit at
+    ``docs/audits/aa_a_dropdown_audit.md``).
+
+    Use for bounded enum columns (``rail_name`` / ``account_role`` /
+    ``check_type`` / ``supersedes``); for data-value columns use
     ``_populate_pushdown_value_dropdown``.
     """
     p = analysis.add_parameter(StringParam(
         name=param_name,
-        multi_valued=True,
-        default=list(all_values),
+        multi_valued=False,
+        default=[L1_ALL_SENTINEL],
         mapped_dataset_params=list(bridges),
     ))
     sheet.add_parameter_dropdown(
         parameter=p,
         title=title,
-        type="MULTI_SELECT",
         selectable_values=StaticValues(values=list(all_values)),
     )
 
@@ -1687,33 +1692,32 @@ def _populate_pushdown_value_dropdown(
     options_dataset: Dataset,
     options_column: str,
 ) -> None:
-    """Y.2.g — like ``_populate_pushdown_enum_dropdown`` but for
+    """Y.2.g + AA.A.3 — like ``_populate_pushdown_enum_dropdown`` but for
     data-value columns (``account_id`` / ``transfer_id`` / open-set
     ``status`` / ``origin``) whose value universe isn't enumerable at
     deploy time.
 
-    The analysis ``StringParam`` carries no default (nothing pre-selected
-    on load); the bridged dataset param's static default is
-    ``[L1_ALL_SENTINEL]`` and the consuming SQL guards
-    ``('__l1_all__' IN (<<$p>>)) OR (col IN (<<$p>>))`` (see
+    The single-valued analysis ``StringParam`` defaults to ``L1_ALL_SENTINEL``;
+    the bridged dataset param's static default is the same sentinel and the
+    consuming SQL guards ``('__l1_all__' = <<$p>> OR col = <<$p>>)`` (see
     ``datasets.py::_data_value_clause``), so a freshly-loaded dashboard
     (bridge un-fired → dataset param at its static default) matches every
-    row, and emptying the dropdown (which reverts the dataset param to
-    that default) restores "all". The dropdown's options come from
-    ``options_dataset[options_column]`` via ``LinkedValues`` — a
-    well-formed ``SELECT DISTINCT`` query, not the lazy
-    ``tenK-sample-values-V2`` fetch the old empty-CategoryFilter pattern
-    triggered (the X.1.g cold-CI 404 source).
+    row, and clearing the dropdown (which reverts the dataset param to that
+    default) restores "all". The dropdown's options come from
+    ``options_dataset[options_column]`` via ``LinkedValues`` — a well-formed
+    ``SELECT DISTINCT`` query, not the lazy ``tenK-sample-values-V2`` fetch
+    the old empty-CategoryFilter pattern triggered (the X.1.g cold-CI 404
+    source). AA.A.3 flipped from MULTI to SINGLE per the drill-to-one default.
     """
     p = analysis.add_parameter(StringParam(
         name=param_name,
-        multi_valued=True,
+        multi_valued=False,
+        default=[L1_ALL_SENTINEL],
         mapped_dataset_params=list(bridges),
     ))
     sheet.add_parameter_dropdown(
         parameter=p,
         title=title,
-        type="MULTI_SELECT",
         selectable_values=LinkedValues.from_column(
             options_dataset[options_column],
         ),
@@ -1735,13 +1739,16 @@ def _wire_per_sheet_dropdowns(
     todays_exceptions_sheet: Sheet,
     transactions_sheet: Sheet,
 ) -> None:
-    """Y.2.g — per-sheet filter dropdowns, all pushed into dataset SQL.
+    """Y.2.g + AA.A.3 — per-sheet filter dropdowns, all pushed into
+    dataset SQL.
 
     Replaces the M.2b.3 ``CategoryFilter.with_values(values=[],
     FILTER_ALL_VALUES)`` per-sheet dropdowns (the X.1.g cold-fetch
     footgun — those lazy-fetch the column's distinct values from QS's
     ``tenK-sample-values-V2`` endpoint, which 404s on cold per-CI-run
-    dashboards). Each dropdown is now a parameter-backed MULTI_SELECT
+    dashboards). Each dropdown is now a parameter-backed SINGLE_SELECT
+    (AA.A.3 — was MULTI_SELECT pre-flip; the drill-to-one default
+    collapsed the sentinel-IN-list guard into a scalar ``=`` form)
     bridged to a dataset parameter substituted into the dataset's
     CustomSql, so QS does the narrowing in the database — no
     analysis-level FilterGroup, no lazy fetch. Bounded enum columns use

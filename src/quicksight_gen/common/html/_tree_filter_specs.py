@@ -1,38 +1,47 @@
-"""Y.2.app2.cde.l2ft-wiring.b — derive App2 filter-form specs from a tree
-``Sheet``'s parameter-control nodes.
+"""Y.2.app2.cde.l2ft-wiring.b + AA.A.3 — derive App2 filter-form specs
+from a tree ``Sheet``'s parameter-control nodes.
 
 App2's filter form (``render._render_filter_form``) renders the universal
 date pickers plus an explicit ``FilterSpec`` list. Until now every tree app
 passed ``filter_specs=()``, so a sheet's QuickSight ``ParameterDropdown``
-controls (e.g. L2FT's Rail / Status / Bundle multi-selects) rendered as
-nothing in App2 — the dataset SQL still applied the declared-value default
-(Y.2.app2.cde.core), so visuals showed every row, but the analyst couldn't
-narrow.
+controls rendered as nothing in App2 — the dataset SQL still applied the
+declared-value default (Y.2.app2.cde.core), so visuals showed every row,
+but the analyst couldn't narrow.
 
-This walk closes that gap for the **MULTI_SELECT + StaticValues** case: a
-``ParameterDropdown(type="MULTI_SELECT", selectable_values=StaticValues(...))``
-node becomes a ``ParameterMultiSelectSpec`` → a ``<select multiple
-name="param_<name>">``. The selected options serialise as repeated
-``?param_<name>=A&param_<name>=B`` query keys, which is exactly the shape
-``_sql_executor.expand_multivalued_dataset_params`` consumes (it reads
-``url_params.get(f"param_{name}")`` as a list and expands ``<<$name>>`` to
-``:param_name_0, :param_name_1, …``). Nothing selected → no key → the
-executor's static-default fallback kicks in (= no narrowing), mirroring
-QuickSight's "empty the dropdown reverts to default" behaviour.
+This walk closes that gap for four control shapes:
 
-``ParameterSlider`` controls join the supported set in X.2.u.4.e — they
-become a ``ParameterNumberSpec`` → an ``<input type="number"
-name="param_<name>">`` + a one-handle noUiSlider (single-value scalar
-bind, the same ``<<$param>>`` narrowing QS does).
+- **MULTI_SELECT + StaticValues** → ``ParameterMultiSelectSpec`` → a
+  ``<select multiple name="param_<name>">``. The selected options
+  serialise as repeated ``?param_<name>=A&param_<name>=B`` query keys,
+  which is exactly the shape
+  ``_sql_executor.expand_multivalued_dataset_params`` consumes (it reads
+  ``url_params.get(f"param_{name}")`` as a list and expands
+  ``<<$name>>`` to ``:param_name_0, :param_name_1, …``). Nothing
+  selected → no key → the executor's static-default fallback kicks in
+  (= no narrowing), mirroring QuickSight's "empty the dropdown reverts
+  to default" behaviour.
+- **SINGLE_SELECT + StaticValues** → ``ParameterDropdownSpec`` → a
+  ``<select name="param_<name>">`` with a blank leading option. Single
+  value submits as ``?param_<name>=<v>``, which ``_sql_executor``
+  translates to a scalar ``:param_<name>`` bind for the dataset SQL's
+  ``<<$pName>>`` placeholder (the same narrowing QS does). AA.A.3
+  flipped every L1 + L2FT pushdown dropdown to this shape per the
+  drill-to-one default; the deriver case was added in the same phase so
+  App2 keeps the filter widgets it gained in Y.2.app2.cde.l2ft-wiring.b.
+- **SINGLE_SELECT + LinkedValues** → ``ParameterDropdownSpec`` with
+  ``options_dataset`` / ``options_column`` (X.2.u.4.b — Daily
+  Statement's Account picker, L1 Account / Transfer / Status / Origin
+  data-value dropdowns post-AA.A.3); the server resolves the option
+  list by querying the source dataset before rendering.
+- **``ParameterSlider``** → ``ParameterNumberSpec`` → an ``<input
+  type="number" name="param_<name>">`` + a one-handle noUiSlider
+  (single-value scalar bind, the same ``<<$param>>`` narrowing QS does).
 
-Out of scope (for now): SINGLE_SELECT dropdowns (L2FT's metadata-cascade
-key dropdowns — App2 can't replicate the QS cascade-refresh-options
-behaviour, so a static single-select would be a half-truth); ``LinkedValues``
-dropdowns (App2 would have to query the linked dataset to enumerate options
-— deferred); ``ParameterTextField`` / ``ParameterDateTimePicker`` controls
-(a different shape — text-field parity not yet needed; date-control parity
-is the universal date range, handled separately). Those controls are
-silently skipped — the form just won't carry a widget for them.
+Out of scope: ``ParameterTextField`` / ``ParameterDateTimePicker``
+controls (a different shape — text-field parity not yet needed;
+date-control parity is the universal date range, handled separately).
+Those controls are silently skipped — the form just won't carry a
+widget for them.
 """
 
 from __future__ import annotations
@@ -68,14 +77,22 @@ def make_filter_specs_for_sheet(sheet: "Sheet") -> list[FilterSpec]:
     Coverage:
 
     - **MULTI_SELECT + StaticValues** → ``ParameterMultiSelectSpec`` with
-      inlined ``options`` (Y.2.app2.cde.l2ft-wiring.b — L2FT Rail / Status /
-      Bundle, L1 Account-Role / Transfer-Type / Rail enums, …).
+      inlined ``options`` (Y.2.app2.cde.l2ft-wiring.b — pre-AA.A.3 L2FT
+      Rail / Status / Bundle + L1 Account-Role / Transfer-Type / Rail
+      enums; AA.A.3 flipped these to SINGLE_SELECT, so the MULTI case
+      handles only future genuinely-multi keepers).
     - **MULTI_SELECT + LinkedValues** → ``ParameterMultiSelectSpec`` carrying
-      ``options_dataset`` / ``options_column`` (X.2.u.4.b — L1 Account /
-      Transfer / Status / Origin data-value dropdowns); the server resolves
-      the option list by querying the source dataset before rendering.
+      ``options_dataset`` / ``options_column`` (X.2.u.4.b — pre-AA.A.3 L1
+      Account / Transfer / Status / Origin data-value dropdowns; same
+      AA.A.3 flip caveat as above).
+    - **SINGLE_SELECT + StaticValues** → ``ParameterDropdownSpec`` with
+      inlined ``options`` (AA.A.3 — post-flip L1 + L2FT enum dropdowns:
+      Rail / Status / Bundle / Completion / Transfer-Type / Account-Role /
+      Check-Type / Supersede-Reason; also the L2FT metadata-cascade key
+      dropdowns picked up a widget in App2 as a side benefit).
     - **SINGLE_SELECT + LinkedValues** → ``ParameterDropdownSpec`` likewise
-      (X.2.u.4.b — Daily Statement's Account picker).
+      (X.2.u.4.b — Daily Statement's Account picker; AA.A.3 — post-flip
+      L1 data-value dropdowns for Account / Transfer / Status / Origin).
     - **``ParameterSlider``** → ``ParameterNumberSpec`` (X.2.u.4.e —
       Investigation's σ / max-hops / min-amount threshold knobs); the
       number input is the wire element, with a one-handle noUiSlider over
@@ -83,13 +100,10 @@ def make_filter_specs_for_sheet(sheet: "Sheet") -> list[FilterSpec]:
       declared (so it matches the dataset SQL's static-default literal),
       else the slider minimum.
 
-    Still skipped: SINGLE_SELECT + StaticValues (L2FT's metadata-cascade key
-    dropdowns — App2 can't replicate the QS cascade-refresh-options behaviour,
-    so a static single-select would be a half-truth); ``ParameterTextField``
-    controls (a different shape — text-field parity not yet needed);
-    ``add_parameter_datetime_picker`` controls (date-control parity is the
-    universal date range, handled separately). Skipped controls just don't
-    get a widget.
+    Still skipped: ``ParameterTextField`` controls (a different shape —
+    text-field parity not yet needed); ``add_parameter_datetime_picker``
+    controls (date-control parity is the universal date range, handled
+    separately). Skipped controls just don't get a widget.
     """
     specs: list[FilterSpec] = []
     for ctrl in sheet.parameter_controls:
@@ -126,6 +140,16 @@ def make_filter_specs_for_sheet(sheet: "Sheet") -> list[FilterSpec]:
                 name=name, label=ctrl.title, options=(),
                 options_dataset=sv.dataset.identifier,
                 options_column=sv.column_name,
+            ))
+        elif ctrl.type == "SINGLE_SELECT" and isinstance(sv, StaticValues):
+            # AA.A.3 — the post-flip enum dropdowns (Rail / Status /
+            # Bundle / Completion / Transfer-Type / Account-Role / …).
+            # Inlined options come from the control's StaticValues; the
+            # blank leading option (rendered by _render_parameter_dropdown)
+            # is the "clear" affordance — empty submit reverts the bridged
+            # dataset param to its sentinel default (= all rows).
+            specs.append(ParameterDropdownSpec(
+                name=name, label=ctrl.title, options=tuple(sv.values),
             ))
         elif ctrl.type == "SINGLE_SELECT" and isinstance(sv, LinkedValues):
             specs.append(ParameterDropdownSpec(
