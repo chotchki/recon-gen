@@ -1549,23 +1549,31 @@ def test_y2g_datasets_declare_pushdown_params() -> None:
 
 
 def test_y2g_companion_datasets_registered_and_unparameterized() -> None:
-    """The three Y.2.g companion datasets (accounts / transfer ids /
-    tx facets) register on the App + are themselves unparameterized
-    DISTINCT projections — so the dropdowns reading their options via
-    LinkedValues see the full universe, not a narrowed slice."""
+    """The Y.2.g companion datasets register on the App + are themselves
+    unparameterized DISTINCT projections — so the dropdowns reading
+    their options via LinkedValues see the full universe, not a
+    narrowed slice.
+
+    AA.B.1 carve-out: ``DS_L1_ACCOUNTS`` is now *cascade*-parameterized
+    by ``pL1DsRole`` (the Daily Statement Role dropdown narrows the
+    account picker's options by role). It's covered by the AA.B.1
+    cascade assertion below, not the legacy unparameterized contract.
+    Other consumers of ``DS_L1_ACCOUNTS`` (every L1 sheet's Account
+    dropdown) leave ``pL1DsRole`` at its show-all sentinel default, so
+    they still see every account."""
     from quicksight_gen.apps.l1_dashboard.datasets import (
-        DS_L1_ACCOUNTS, DS_L1_TX_FACETS, DS_L1_TX_IDS,
-        build_l1_accounts_dataset, build_l1_tx_facets_dataset,
+        DS_L1_ACCOUNTS, DS_L1_DS_ROLES, DS_L1_TX_FACETS, DS_L1_TX_IDS,
+        build_l1_ds_roles_dataset, build_l1_tx_facets_dataset,
         build_l1_tx_ids_dataset,
     )
 
     app = build_l1_dashboard_app(_CFG)
     registered = {ds.identifier for ds in app.datasets}
-    assert {DS_L1_ACCOUNTS, DS_L1_TX_IDS, DS_L1_TX_FACETS}.issubset(registered)
+    assert {DS_L1_ACCOUNTS, DS_L1_DS_ROLES, DS_L1_TX_IDS, DS_L1_TX_FACETS}.issubset(registered)
 
     inst = default_l2_instance()
     for builder, frag in (
-        (build_l1_accounts_dataset, "SELECT DISTINCT account_id"),
+        (build_l1_ds_roles_dataset, "SELECT DISTINCT account_role"),
         (build_l1_tx_ids_dataset, "SELECT DISTINCT transfer_id"),
         (build_l1_tx_facets_dataset, "SELECT DISTINCT status, origin"),
     ):
@@ -1574,6 +1582,42 @@ def test_y2g_companion_datasets_registered_and_unparameterized() -> None:
         sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
         assert sql.startswith(frag)
         assert "<<$" not in sql
+
+
+def test_aa_b_1_l1_accounts_dataset_is_role_cascaded() -> None:
+    """AA.B.1 — ``DS_L1_ACCOUNTS`` carries a ``pL1DsRole`` SINGLE_VALUED
+    dataset param that the Daily Statement Role dropdown bridges into.
+    Default value is the show-all sentinel (``L1_ALL_SENTINEL``), so
+    every L1 sheet that re-uses the companion for its Account dropdown
+    keeps seeing every account on first load; the Daily Statement sheet
+    overrides the param when the analyst picks a role.
+
+    The SQL's WHERE clause is the standard ``_data_value_clause`` shape:
+    ``('__l1_all__' = <<$pL1DsRole>>) OR (account_role = <<$pL1DsRole>>)``.
+    """
+    from quicksight_gen.apps.l1_dashboard.datasets import (
+        L1_ALL_SENTINEL, P_L1_DS_ROLE_DSP, build_l1_accounts_dataset,
+    )
+
+    inst = default_l2_instance()
+    ds = build_l1_accounts_dataset(_CFG, inst)
+    sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+    assert "SELECT DISTINCT account_id, account_role" in sql
+    assert f"<<${P_L1_DS_ROLE_DSP}>>" in sql
+    # Sentinel-OR pushdown shape — both disjuncts present.
+    assert "'__l1_all__'" in sql or f"'{L1_ALL_SENTINEL}'" in sql
+    # Dataset param declared with show-all default.
+    assert ds.DatasetParameters
+    role_params = [
+        p for p in ds.DatasetParameters
+        if p.StringDatasetParameter
+        and p.StringDatasetParameter.Name == P_L1_DS_ROLE_DSP
+    ]
+    assert len(role_params) == 1
+    rp = role_params[0].StringDatasetParameter
+    assert rp is not None
+    assert rp.ValueType == "SINGLE_VALUED"
+    assert rp.DefaultValues.StaticValues == [L1_ALL_SENTINEL]
 
 
 def test_y2g_no_per_sheet_category_filter_groups_remain() -> None:

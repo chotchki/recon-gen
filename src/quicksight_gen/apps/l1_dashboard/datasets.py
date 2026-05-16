@@ -289,6 +289,11 @@ DS_SUPERSESSION_DAILY_BALANCES = "l1-supersession-daily-balances-ds"
 DS_L1_ACCOUNTS = "l1-accounts-ds"
 DS_L1_TX_IDS = "l1-tx-ids-ds"
 DS_L1_TX_FACETS = "l1-tx-facets-ds"
+# AA.B.1 — Daily Statement Role cascade: distinct ``account_role`` over
+# the daily-balances universe. Feeds the new Role dropdown on Daily
+# Statement, which cascades into ``DS_L1_ACCOUNTS`` via the
+# ``pL1DsRole`` dataset parameter (role-narrowed account picker).
+DS_L1_DS_ROLES = "l1-ds-roles-ds"
 
 
 # Contracts — column shapes the M.1a.7 views project.
@@ -578,6 +583,16 @@ SUPERSESSION_DAILY_BALANCES_CONTRACT = DatasetContract(columns=[
 # the selected id(s) into the consuming dataset's ``col IN (...)``.
 L1_ACCOUNTS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
+    # AA.B.1 — account_role threads through so the Daily Statement Role
+    # cascade can narrow the account picker via the ``pL1DsRole`` dataset
+    # param. The column isn't surfaced in the dropdown (which still
+    # renders ``account_id``); it just enables the WHERE-clause filter.
+    ColumnSpec("account_role", "STRING"),
+])
+
+# AA.B.1 — distinct account_role for the Daily Statement Role dropdown.
+L1_DS_ROLES_CONTRACT = DatasetContract(columns=[
+    ColumnSpec("account_role", "STRING"),
 ])
 
 L1_TX_IDS_CONTRACT = DatasetContract(columns=[
@@ -829,6 +844,14 @@ def build_todays_exceptions_dataset(
 # analysis-level TimeEqualityFilter (Y.2.f territory).
 _DSP_L1_DS_ACCOUNT = "dsp-l1-ds-account"
 P_L1_DS_ACCOUNT_DSP = "pL1DsAccount"
+
+# AA.B.1 — Role cascade dataset param. Lives on the DS_L1_ACCOUNTS
+# companion (the account-picker's option source) so picking a role
+# narrows the account dropdown to that role's accounts; the bridged
+# analysis param is ``pL1DsRole`` and reverts to ``L1_ALL_SENTINEL``
+# (the "show all roles" default) on load.
+_DSP_L1_DS_ROLE = "dsp-l1-ds-role"
+P_L1_DS_ROLE_DSP = "pL1DsRole"
 
 
 def build_daily_statement_summary_dataset(
@@ -1235,9 +1258,10 @@ def build_supersession_daily_balances_dataset(
 def build_l1_accounts_dataset(
     cfg: Config, l2_instance: L2Instance,
 ) -> DataSet:
-    """Y.2.g companion — distinct ``account_id`` over the universe of
-    accounts. Feeds every L1 sheet's Account dropdown via ``LinkedValues``
-    (the Daily Statement sheet's account dropdown re-points here too).
+    """Y.2.g companion — distinct ``(account_id, account_role)`` over
+    the universe of accounts. Feeds every L1 sheet's Account dropdown
+    via ``LinkedValues`` (the Daily Statement sheet's account dropdown
+    re-points here too).
 
     Reads ``<prefix>_current_daily_balances`` (one row per account-day,
     so every account is present) rather than ``current_transactions``
@@ -1245,14 +1269,53 @@ def build_l1_accounts_dataset(
     DISTINCT-inside-SELECT shape as Investigation's
     ``build_account_network_accounts_dataset`` (K.4.8k) — keeps the
     dropdown's option fetch cheap as the matview grows.
+
+    AA.B.1 — carries ``account_role`` so the Daily Statement Role
+    cascade can narrow the account picker via the ``pL1DsRole``
+    dataset param. Default = ``L1_ALL_SENTINEL`` (show every account
+    regardless of role); picking a role in the Role dropdown narrows
+    the account dropdown to that role's accounts. The companion stays
+    used by *every* L1 sheet's Account dropdown — sheets that don't
+    bridge a role param into ``pL1DsRole`` get the sentinel default
+    and see every account, preserving today's behaviour.
     """
     prefix = cfg.db_table_prefix
-    sql = f"SELECT DISTINCT account_id FROM {prefix}_current_daily_balances"
+    sql = (
+        f"SELECT DISTINCT account_id, account_role"
+        f" FROM {prefix}_current_daily_balances"
+        f" WHERE {_data_value_clause('account_role', P_L1_DS_ROLE_DSP)}"
+    )
     return build_dataset(
         cfg, cfg.prefixed("l1-accounts-dataset"),
         "L1 Accounts", "l1-accounts",
         sql, L1_ACCOUNTS_CONTRACT,
         visual_identifier=DS_L1_ACCOUNTS,
+        dataset_parameters=[
+            _all_sentinel_sv_param(_DSP_L1_DS_ROLE, P_L1_DS_ROLE_DSP),
+        ],
+    )
+
+
+def build_l1_ds_roles_dataset(
+    cfg: Config, l2_instance: L2Instance,
+) -> DataSet:
+    """AA.B.1 — distinct ``account_role`` over the daily-balances
+    universe. Feeds the Daily Statement Role dropdown (the new
+    cascade source) via ``LinkedValues``. Unparameterized — every
+    role the deployed institution actually uses shows up.
+
+    Same shape as ``build_l1_accounts_dataset``: cheap DISTINCT over
+    ``current_daily_balances``; the matview's per-account-day
+    granularity guarantees every role with at least one tracked
+    account appears.
+    """
+    prefix = cfg.db_table_prefix
+    sql = f"SELECT DISTINCT account_role FROM {prefix}_current_daily_balances"
+    return build_dataset(
+        cfg, cfg.prefixed("l1-ds-roles-dataset"),
+        "L1 Daily Statement Roles", "l1-ds-roles",
+        sql, L1_DS_ROLES_CONTRACT,
+        visual_identifier=DS_L1_DS_ROLES,
     )
 
 
@@ -1323,6 +1386,7 @@ def build_all_l1_dashboard_datasets(
         build_supersession_daily_balances_dataset(cfg, l2_instance),
         # Y.2.g — companion datasets for the data-value dropdowns.
         build_l1_accounts_dataset(cfg, l2_instance),
+        build_l1_ds_roles_dataset(cfg, l2_instance),
         build_l1_tx_ids_dataset(cfg, l2_instance),
         build_l1_tx_facets_dataset(cfg, l2_instance),
         # M.4.4.5 — App Info ("i") sheet datasets, ALWAYS LAST.

@@ -43,6 +43,7 @@ from quicksight_gen.apps.l1_dashboard.datasets import (
     DS_DRIFT,
     DS_DRIFT_TIMELINE,
     DS_L1_ACCOUNTS,
+    DS_L1_DS_ROLES,
     DS_L1_TX_FACETS,
     DS_L1_TX_IDS,
     DS_LEDGER_DRIFT,
@@ -60,6 +61,7 @@ from quicksight_gen.apps.l1_dashboard.datasets import (
     P_L1_DRIFT_ROLE,
     P_L1_DRIFT_TL_ROLE,
     P_L1_DS_ACCOUNT_DSP,
+    P_L1_DS_ROLE_DSP,
     P_L1_LIMIT_BREACH_ACCOUNT,
     P_L1_LIMIT_BREACH_TYPE,
     P_L1_OVERDRAFT_ACCOUNT,
@@ -166,6 +168,11 @@ P_L1_DATE_END = ParameterName("pL1DateEnd")
 # both the summary KPIs and the transactions detail table.
 P_L1_DS_ACCOUNT = ParameterName("pL1DsAccount")
 P_L1_DS_BALANCE_DATE = ParameterName("pL1DsBalanceDate")
+# AA.B.1 — Daily Statement Role cascade. The role dropdown narrows the
+# Account dropdown's options via the ``pL1DsRole`` dataset param on
+# ``DS_L1_ACCOUNTS``. Default = ``L1_ALL_SENTINEL`` (show every account
+# regardless of role on first load).
+P_L1_DS_ROLE = ParameterName("pL1DsRole")
 
 # M.2b.7 — Drill-target parameters (sentinel-pattern, mirror of AR).
 # These never appear as visible sheet controls — they're only written
@@ -473,7 +480,7 @@ def _l1_datasets(
         DS_DRIFT_TIMELINE, DS_LEDGER_DRIFT_TIMELINE,
         DS_STUCK_PENDING, DS_STUCK_UNBUNDLED,
         DS_SUPERSESSION_TRANSACTIONS, DS_SUPERSESSION_DAILY_BALANCES,
-        DS_L1_ACCOUNTS, DS_L1_TX_IDS, DS_L1_TX_FACETS,
+        DS_L1_ACCOUNTS, DS_L1_DS_ROLES, DS_L1_TX_IDS, DS_L1_TX_FACETS,
         DS_APP_INFO_LIVENESS, DS_APP_INFO_MATVIEWS,
     ]
     return {
@@ -1972,6 +1979,17 @@ def _wire_daily_statement_filters(
             (datasets[DS_DAILY_STATEMENT_TRANSACTIONS], P_L1_DS_ACCOUNT_DSP),
         ],
     ))
+    # AA.B.1 — Role cascade. The role dropdown's value bridges into
+    # the ``DS_L1_ACCOUNTS`` companion's ``pL1DsRole`` dataset param,
+    # narrowing the Account dropdown's options. Sentinel default
+    # (``L1_ALL_SENTINEL``) means "show every account regardless of
+    # role" — preserves the un-picked behaviour exactly.
+    ds_role = analysis.add_parameter(StringParam(
+        name=P_L1_DS_ROLE,
+        mapped_dataset_params=[
+            (datasets[DS_L1_ACCOUNTS], P_L1_DS_ROLE_DSP),
+        ],
+    ))
     ds_balance_date = analysis.add_parameter(DateTimeParam(
         name=P_L1_DS_BALANCE_DATE,
         time_granularity="DAY",
@@ -2021,13 +2039,25 @@ def _wire_daily_statement_filters(
     ))
     txn_date_fg.scope_sheet(daily_statement_sheet)
 
-    # Sheet controls — single-select dropdown + datetime picker bound
-    # to the params. The dropdown's options come from the DS_L1_ACCOUNTS
-    # companion (an unparameterized DISTINCT-accounts dataset), so the
-    # analyst sees the institution's actual accounts even though the
-    # summary/transactions datasets are now narrowed by the bridged
-    # `pL1DsAccount` param. `hidden_select_all=True` because SINGLE_SELECT
-    # semantically requires picking exactly one — "All" doesn't apply.
+    # Sheet controls — Role → Account → Business Day. AA.B.1 added the
+    # Role dropdown above Account so the cascade direction is visually
+    # explicit (left/top narrows the right/bottom). The Account dropdown's
+    # options come from the DS_L1_ACCOUNTS companion, which now carries
+    # a ``pL1DsRole`` dataset param; picking a role re-fetches the
+    # account options narrowed to that role.
+    #
+    # Role dropdown is SINGLE_SELECT with the show-all sentinel default
+    # (the standard AA.A pattern), so first-load lists every account
+    # exactly like before AA.B.1. ``hidden_select_all=True`` on Account
+    # mirrors pre-AA.B.1 behaviour: SINGLE_SELECT semantically requires
+    # picking exactly one — "All" doesn't apply.
+    daily_statement_sheet.add_parameter_dropdown(
+        parameter=ds_role, title="Role",
+        type="SINGLE_SELECT",
+        selectable_values=LinkedValues.from_column(
+            datasets[DS_L1_DS_ROLES]["account_role"],
+        ),
+    )
     daily_statement_sheet.add_parameter_dropdown(
         parameter=ds_account, title="Account",
         type="SINGLE_SELECT",
