@@ -1775,7 +1775,16 @@ def set_parameter_slider_value(
     loc = page.locator(f'{card_selector} input:not([type="hidden"])').first
     loc.click(timeout=timeout_ms)
     loc.fill(f"{value:g}", timeout=timeout_ms)
-    loc.blur(timeout=timeout_ms)  # the value only commits on focus-loss
+    # AA.H.10 — `el.blur()` alone fires the JS blur event but doesn't satisfy
+    # MUI's controlled-text-input commit path; the React onChange wiring waits
+    # for an Enter key OR a Tab key (which simulates the user moving focus off
+    # the field). Without this, the input shows value=4 in the DOM but QS's
+    # analysis-param state never updates → no MappedDataSetParameters bridge
+    # fire → dashboard re-fetches with the default σ. Verified against the
+    # σ-slider DOM dump where the input had value=4 but the KPI stayed at the
+    # default-σ count.
+    loc.press("Enter", timeout=timeout_ms)
+    loc.blur(timeout=timeout_ms)
 
 
 def set_slider_range(
