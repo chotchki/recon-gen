@@ -156,6 +156,22 @@ def _match_all_in_clause(col: str, param_name: str) -> str:
         f" OR {col} IN (<<${param_name}>>))"
     )
 
+
+def _single_value_clause(col: str, param_name: str) -> str:
+    """WHERE-fragment for a SINGLE_VALUED pushdown dropdown (AA.A flip):
+    ``('__l2ft_all__' = <<$p>> OR col = <<$p>>)``. Same sentinel-guard
+    shape as ``_match_all_in_clause`` but with scalar ``=`` instead of
+    list ``IN`` — the dropdown's dataset param is a scalar
+    ``StringParameter`` with a bare ``L2FT_ALL_SENTINEL`` default.
+
+    Mirrors ``apps/l1_dashboard``'s ``_single_value_clause``. Drill-to-one
+    is the post-AA.A default; multi-select was the legacy shape (X.2.t.2)
+    flipped to single in AA.A.3."""
+    return (
+        f"({_L2FT_ALL_SENTINEL_SQL} = <<${param_name}>>"
+        f" OR {col} = <<${param_name}>>)"
+    )
+
 # Dataset-parameter IDs are stable UUIDs so re-deploying produces
 # byte-identical DatasetParameters JSON. QS-issued IDs would re-rotate
 # on every regenerate.

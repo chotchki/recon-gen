@@ -256,6 +256,23 @@ def _data_value_clause(col: str, param_name: str) -> str:
     )
 
 
+def _single_value_clause(col: str, param_name: str) -> str:
+    """WHERE-fragment for a SINGLE_VALUED pushdown dropdown (AA.A flip):
+    ``('__l1_all__' = <<$p>> OR col = <<$p>>)``. Same sentinel-guard shape
+    as ``_data_value_clause`` but with scalar ``=`` instead of list ``IN``
+    — the dropdown's dataset param is a scalar ``StringParameter`` with a
+    bare ``L1_ALL_SENTINEL`` default (not a 1-element list).
+
+    On load the sentinel passes the first disjunct; once the analyst picks
+    a real value the second disjunct narrows to that single value. The
+    drill-to-one workflow is the default per AA.A; multi-select dropdowns
+    were the legacy shape (X.2.t.2) flipped to single in AA.A.3."""
+    return (
+        f"({_L1_ALL_SENTINEL_SQL} = <<${param_name}>>"
+        f" OR {col} = <<${param_name}>>)"
+    )
+
+
 # Visual identifiers — keys for the Dataset registry on App.
 DS_DRIFT = "l1-drift-ds"
 DS_LEDGER_DRIFT = "l1-ledger-drift-ds"
