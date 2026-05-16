@@ -1378,53 +1378,6 @@ def read_chart_categories(page: Page, visual_title: str) -> list[str]:
     )
 
 
-def click_chart_bar(
-    page: Page, visual_title: str, index: int, timeout_ms: int,
-) -> None:
-    """Select the bar at ``index`` in a bar-chart visual via keyboard nav.
-
-    QS renders charts to ``<canvas>``, so there's no DOM bar to click.
-    The keyboard-accessible path (bar charts only — pie/donut don't
-    expose it):
-
-    1. Click the visual's container to give it focus.
-    2. Tab 5 times to move focus into the inner bar group.
-    3. Enter to highlight a bar.
-    4. Right-arrow ``index`` times to cycle to the target bar.
-    5. Enter to select (fires the same-sheet filter action).
-
-    The visual must already be rendered and on-screen. Category order
-    matches ``read_chart_categories``.
-    """
-    card = page.locator(
-        f'[data-automation-id="analysis_visual"]:has('
-        f'[data-automation-id="analysis_visual_title_label"]:text-is("{visual_title}"))'
-    ).first
-    card.wait_for(state="visible", timeout=timeout_ms)
-    box = card.bounding_box()
-    assert box, f"No bounding box for {visual_title!r}"
-    # Click whitespace inside the card (just under the title) to focus
-    # the visual without landing on the canvas / title / axis labels.
-    page.mouse.click(
-        box["x"] + box["width"] / 2,
-        box["y"] + 30,
-    )
-    page.wait_for_timeout(300)
-    for _ in range(5):
-        page.keyboard.press("Tab")
-        page.wait_for_timeout(100)
-    page.keyboard.press("Enter")
-    page.wait_for_timeout(300)
-    # Horizontal bar charts navigate with ArrowDown; try both to be
-    # orientation-agnostic (extra presses on the wrong axis no-op).
-    for _ in range(index):
-        page.keyboard.press("ArrowDown")
-        page.wait_for_timeout(120)
-        page.keyboard.press("ArrowRight")
-        page.wait_for_timeout(120)
-    page.keyboard.press("Enter")
-    page.wait_for_timeout(500)
-
 
 def read_visual_column_values(
     page: Page, visual_title: str, col_index: int,
@@ -1554,19 +1507,6 @@ def read_kpi_value(page: Page, visual_title: str) -> str:
     assert value is not None, f"No KPI value found for {visual_title!r}"
     return value
 
-
-def parse_kpi_number(text: str) -> float:
-    """Strip ``$``, ``%``, ``,`` and ``K``/``M``/``B`` suffixes; return float.
-
-    Handles QS's compact-number formatting: ``$1.2K`` -> 1200.0,
-    ``45.3M`` -> 45_300_000.0. Unsuffixed strings parse straight.
-    """
-    s = text.strip().replace("$", "").replace(",", "").replace("%", "").strip()
-    multiplier = 1.0
-    if s and s[-1] in "KMB":
-        multiplier = {"K": 1e3, "M": 1e6, "B": 1e9}[s[-1]]
-        s = s[:-1]
-    return float(s) * multiplier
 
 
 def wait_for_kpi_text_nonempty(
@@ -1782,35 +1722,6 @@ def set_parameter_slider_value(
     loc.press("Enter", timeout=timeout_ms)
     loc.blur(timeout=timeout_ms)
 
-
-def set_slider_range(
-    page: Page, control_title: str, low: int | None, high: int | None,
-    timeout_ms: int,
-) -> None:
-    """Set a RANGE FilterSliderControl's min/max via its backing text inputs.
-
-    QS renders each range slider with two MUI text inputs
-    (``sheet_control_range_slider_min`` / ``_max``) wired to React state.
-    Dragging the thumbs is fragile in Playwright, but filling the inputs
-    and blurring them commits the value reliably. Pass ``None`` to leave
-    a bound untouched.
-    """
-    card_selector = (
-        f'[data-automation-id="sheet_control"]'
-        f'[data-automation-context="{control_title}"]'
-    )
-    page.wait_for_selector(card_selector, timeout=timeout_ms, state="visible")
-    for bound, value in (("min", low), ("max", high)):
-        if value is None:
-            continue
-        selector = (
-            f'{card_selector} '
-            f'[data-automation-id="sheet_control_range_slider_{bound}"]'
-        )
-        loc = page.locator(selector).first
-        loc.click(timeout=timeout_ms)
-        loc.fill(str(value), timeout=timeout_ms)
-        loc.press("Enter", timeout=timeout_ms)
 
 
 # MUI v4 renders some FilterControl options inside ``[role="listbox"]``
