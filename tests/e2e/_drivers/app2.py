@@ -358,10 +358,38 @@ class App2Driver:
         ).first
 
     def pick_filter(self, label: str, values: Sequence[str]) -> None:
+        # Prefer TomSelect's setValue API when the widget is wired
+        # (`select.tomselect` is the instance set by `new TomSelect(el)`).
+        # Mutating `option.selected` directly + dispatching `change` on
+        # the underlying <select> looks like it should work — and does
+        # transiently — but TomSelect's internal `Sync` runs in
+        # response to the change and overwrites the selection with its
+        # own (empty) items store. Net effect: pick disappears, form
+        # serializes `param_X=` empty, visuals re-query unfiltered.
+        # `setValue` updates both items + underlying <select> and fires
+        # its own bubbling change (per wireTomSelect's onChange), so
+        # wireFilterAutoRefresh sees the new state. Fallback to the
+        # direct-mutation path covers the offline-CDN degraded case
+        # where TomSelect failed to load (typeof TomSelect ===
+        # "undefined" in wireTomSelect).
         sel = self._filter_control(label).locator("select").first
         vals = list(values)
         self._wait_for_refetch(lambda: sel.evaluate(
             """(s, vals) => {
+                if (s.tomselect) {
+                    // Resolve text → value (filter_options returns
+                    // option.text; setValue keys on option.value).
+                    const byText = new Map();
+                    for (const o of s.options) {
+                        byText.set(o.text, o.value);
+                    }
+                    const resolved = vals.map((v) => byText.has(v)
+                        ? byText.get(v) : v);
+                    s.tomselect.setValue(s.multiple
+                        ? resolved
+                        : (resolved[0] !== undefined ? resolved[0] : ''));
+                    return;
+                }
                 for (const o of s.options) {
                     o.selected = vals.includes(o.value) || vals.includes(o.text);
                 }
