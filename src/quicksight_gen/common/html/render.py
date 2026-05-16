@@ -1281,11 +1281,24 @@ def _render_visual(
     # X.2.g.1.d — also listen for the global ``refresh`` event the
     # single Refresh button broadcasts via htmx.trigger(body, 'refresh').
     # That replaces the per-visual Refresh buttons we used to emit.
+    # AA.B.4.followon — ``hx-sync="this:replace"`` so a ``refresh``
+    # event mid-load CANCELS the in-flight initial fetch and re-issues
+    # with the new form state. HTMX's default sync strategy is ``drop``:
+    # if the user picks a filter while the initial-load GET is still
+    # in flight, the refresh trigger gets SILENTLY DROPPED and the
+    # visual completes with its empty-param result, then sits there
+    # ignoring the user's pick. Chain @ d70987f hit this on the Daily
+    # Statement Posted Money Records table (slow query, still in flight
+    # when the test picked Account → table never re-fetched with the
+    # picked-account WHERE clause → 0 rows). ``replace`` aborts the
+    # old request and starts a new one — the right semantics for "the
+    # user wants fresh data NOW".
     parts.append(
         f'    <div id="visual-data-{esc_id}" class="visual-data"'
         f' hx-get="{esc_url}"'
         f' hx-trigger="load, refresh from:body"'
         f' hx-include="#filter-form"'
+        f' hx-sync="this:replace"'
         f' hx-swap="innerHTML">'
         f'<!-- HTMX swap target; auto-fetches on DOMContentLoaded -->'
         f'</div>'
