@@ -1891,21 +1891,32 @@ def _open_control_dropdown(page: Page, control_title: str, timeout_ms: int) -> N
         f'[data-automation-id="sheet_control_search_results_dropdown-menu"]'
         f'[data-automation-context="{control_title}"]'
     )
-    # Step 1: wait for whichever popover container the variant rendered.
-    page.locator(f'{popover_simple}, {popover_search}').first.wait_for(
-        state="visible", timeout=timeout_ms,
+    # Search-variant only — MUI Autocomplete inside the popover
+    # lazy-mounts its listbox; type or ArrowDown forces it to render.
+    # Probe globally (not gated on the popover container being visible
+    # by automation-id, because the simple-variant menu container
+    # doesn't always carry the ``data-automation-context`` attribute
+    # and the gate misfires there; AA.H.8 regression observed for the
+    # Account Network anchor). Short, non-fatal: if no search input
+    # mounts within 500 ms, this is the simple variant and ArrowDown
+    # is unnecessary.
+    from playwright.sync_api import TimeoutError as _PWTimeout
+    search_input_selector = (
+        '[data-automation-id="sheet_control_search_results_dropdown-menu"] input'
     )
-    # Step 2: search-variant only — MUI Autocomplete inside the popover
-    # lazy-mounts its listbox. Focus the input + ArrowDown to render
-    # options. ``count()`` is a fast DOM-only check; simple-variant
-    # popovers don't contain this input so the block no-ops there.
-    search_input = page.locator(f'{popover_search} input').first
-    if search_input.count() > 0:
-        search_input.click(timeout=timeout_ms)
+    try:
+        page.wait_for_selector(
+            search_input_selector, timeout=1_000, state="visible",
+        )
+        page.locator(search_input_selector).first.click(timeout=timeout_ms)
         page.keyboard.press("ArrowDown")
-    # Step 3: wait for at least one ``[role="option"]`` under either
-    # popover shape OR loose in a ``[role="listbox"]`` (some controls
-    # put options directly under the popover without listbox role).
+    except _PWTimeout:
+        pass  # Simple variant — no search input to focus.
+    # Wait for at least one ``[role="option"]`` under either popover
+    # shape OR loose in a ``[role="listbox"]`` (some controls put
+    # options directly under the popover without listbox role). The
+    # global ``[role="listbox"]`` clause is the safety net when the
+    # popover container omits ``data-automation-context``.
     page.wait_for_selector(
         f'{popover_simple} [role="option"], '
         f'{popover_search} [role="option"], '
