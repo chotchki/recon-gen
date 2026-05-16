@@ -72,15 +72,21 @@ _DASHBOARD_LAYOUT: dict[L1Invariant, tuple[str, str, bool]] = {
 
 # Natural-key columns per invariant — the same row-identity the scenario
 # plants expose (``_scenario_expectations.ExpectedAuditCounts``): flat-shape
-# invariants key on ``(account_id, day)`` (limit_breach adds ``transfer_type``);
+# invariants key on ``(account_id, day)`` (limit_breach adds ``rail_name``);
 # the divergent-shape ones (stuck_* / supersession) key on ``transaction_id``.
 # Day column matches the dashboard table's column name. Used by
 # ``l1_invariant_row_keys`` for the X.2.j 4-way agreement test's
 # row-identity asserts (flat-shape) — count-only suffices for the rest.
+#
+# Z.B (2026-05-15) subsumed ``transfer_type`` into the rail; the limit_breach
+# matview projects ``rail_name`` from the Z.B rewrite of the cap view.
+# The dashboard's Limit Breach Detail table reads
+# ``ds_lb["rail_name"].dim()`` (apps/l1_dashboard/app.py:1043), so the
+# row-identity key must match.
 _KEY_COLS: dict[L1Invariant, tuple[str, ...]] = {
     "drift": ("account_id", "business_day_start"),
     "overdraft": ("account_id", "business_day_start"),
-    "limit_breach": ("account_id", "business_day", "transfer_type"),
+    "limit_breach": ("account_id", "business_day", "rail_name"),
     "stuck_pending": ("transaction_id",),
     "stuck_unbundled": ("transaction_id",),
     "supersession": ("transaction_id",),

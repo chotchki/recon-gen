@@ -306,12 +306,12 @@ def test_audit_verify_pins_to_embedded_hwm_against_newer_rows(
             f"INSERT INTO {prefix}_transactions ("
             f"  id, account_id, account_scope, amount_money,"
             f"  amount_direction, status, posting, transfer_id,"
-            f"  transfer_type, rail_name, origin"
+            f"  rail_name, origin"
             f") "
             f"SELECT "
             f"  '{sentinel_id}', account_id, account_scope, amount_money,"
             f"  amount_direction, status, posting, transfer_id,"
-            f"  transfer_type, rail_name, origin "
+            f"  rail_name, origin "
             f"FROM {prefix}_transactions {limit_clause}"
         )
         conn.commit()
