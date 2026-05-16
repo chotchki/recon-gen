@@ -453,6 +453,111 @@ Z.A (Chain grammar collapse: singleton ⇒ required, multi ⇒ XOR) + Z.B (subsu
 
 ---
 
+## Phase AB — SPEC enhancements for real-system gaps (inbound caps + template-as-chain-child + multi-Variable templates + N:1 chain fan-in)
+
+Queues after Phase AA. Source: `SPEC_gap_feedback.md` (4 enhancements surfaced during integrator-side real-system modeling). All four are SPEC-level expressivity gaps — patterns integrators meet in real flows that the current L2 grammar either silently misroutes (Enhancement 4 — inbound caps drop from the L1 dashboard) or rejects outright (Enhancements 1, 2, 3 — multi-Variable per template, N:1 fan-in chains, template-as-chain-child). Each is additive in the operator yaml (new optional field or relaxed constraint), so the cohort fits within `v10.x` alphas — no second major-bump after Phase Z.
+
+**Staging order** (per gap-doc §"How these proposals interrelate"): AB.1 first (inbound caps — independent, no chain/template plumbing). AB.2 (template-as-child) next — small, well-scoped, unlocks AB.4's preferred shape. AB.3 (multi-Variable + leg_rail XOR) third — self-contained. AB.4 (N:1 fan-in) last — biggest conceptual change, gated on a spike (see AB.4.spike).
+
+**Cross-cutting contract per sub-phase.** Every enhancement below MUST land with all five legs of the demo-quality bar — none of them are optional. The phase ratchets the bar; partial landings push the gap forward, not close it.
+
+1. **Primitives + loader + validator + serializer + Studio editor field** — the L2 yaml surface change end-to-end. Loader rejects malformed shapes with an actionable error pointing at this PLAN section. Round-trip stable through `serialize_l2 → load_instance`.
+2. **Schema + matview emit** — the per-prefix DDL covers the new shape so violations land in a queryable surface. Existing matview tests get a new parametrized case; no new matview tests pass unless schema apply succeeds against pg / oracle / sqlite.
+3. **Exception tracking on the L1 dashboard** — every new violation kind lands on an existing or new sheet, with description text the CPA can read and a drill back to the offending Transactions row. New plant kinds MUST surface ≥1 row in the demo dashboard so the visual canary is non-empty (per CLAUDE.md "Every visual should have non-empty data in the demo").
+4. **Error plants** — `auto_scenario.py` gets a new `Plant` dataclass + `emit_seed` integration for each violation kind, deterministic per seed. `TestScenarioCoverage` assertion guarantees ≥N rows of the new shape land in the matview. `sasquatch_pr.yaml` adds 1-2 instances of the new pattern (real-world flavored) so the demo dashboards have non-empty cells.
+5. **Tests** — unit (validator + emit + plant-coverage) + db layer (matview row counts) + audit PDF (new violation appears in the appropriate per-invariant table) + 4-way agreement (scenario plants ⊆ direct matview SELECT == QS == App2 == PDF). Pyright strict-scope keeps holding across the changed files.
+
+Plus the standard cuts: `Schema_v6.md` updated; handbook walkthroughs author one worked example per enhancement; seeds re-locked per dialect; PLAN sub-task ticks; quirks log entries when QS surfaces something the SPEC didn't predict.
+
+**Decisions locked before implementation** (gap doc + user ratification, 2026-05-15):
+
+- **AB.1 dashboard surface**: Inbound + Outbound on the **same Limit Breach sheet**, table gains a new "Direction" column. CPAs read both as "cap breach" semantically; splitting would be gap-doc copy mistaken for design. Baked into AB.1.8 below.
+- **AB.2 two-template chain Parent disagreement**: gap doc §3 Tradeoffs locks **(a) reject as L1 Conservation-style violation** — surfaces the ETL bug rather than hiding it. Baked into AB.2.3 below.
+- **AB.3 multi-Variable XOR resolution evidence**: gap doc §1 Tradeoffs locks **implicit-from-firing-existence** — no separate `variant_selector` MetadataKey; validation reads the leg_rail rows that landed. Baked into AB.3.3 below.
+- **AB.4 N:1 fan-in chains**: ship **(B) build the primitive** — `fan_in: bool` on Chain + multi-parent matview + new L1 invariant. User judgment: worth it given the consolidated-payout / multi-source-batch-settlement patterns that show up beyond the merchant-payout case. AB.4 ships its full ~12 sub-tasks; docs-only fallback dropped.
+- **AB.4 multi-parent storage shape**: **matview, not base-table change.** ETL already writes leg rows into `<prefix>_transactions` with `parent_transfer_id` in JSON metadata (existing per-leg convention). Multi-parent set for a fan_in child Transfer is derivable: `SELECT DISTINCT JSON_VALUE(metadata, '$.parent_transfer_id') GROUP BY transfer_id`. Pure matview territory — no base-table schema change, no ETL contract change. Baked into AB.4.3 below.
+
+### AB.1 — Enhancement 4: Limit Breach inbound caps
+
+Today's `OutboundFlow` theorem filters on `Amount.Direction = Debit`. Real-world AML / KYC policies frequently impose inbound caps (per-customer-DDA daily inbound ACH, new-account inbound caps until verification, counterparty inbound caps for source diligence, merchant inbound settlement caps for unusual-volume flagging). The integrator can't express any of these declaratively today — they enforce upstream at the ETL boundary (invisible to the L1 dashboard) or omit them from the model entirely.
+
+**Preferred shape** (gap doc §4(A)): new optional `direction: {Outbound, Inbound}` field on `LimitSchedule` (default `Outbound` for backward compat); new `InboundFlow` theorem mirroring `OutboundFlow` but filtering on `Amount.Direction = Credit`; `<prefix>_limit_breach` matview's CASE branches handle both directions.
+
+- [ ] **AB.1.1 — SPEC + theorem.** Add `InboundFlow` to L1 SPEC (mirroring `OutboundFlow`). Document the `direction` field on LimitSchedule and the matching theorem-selection rule. Update Schema_v6's Limit Breach section.
+- [ ] **AB.1.2 — `primitives.py`: `direction: Direction = Direction.OUTBOUND` on LimitSchedule.** Backward-compatible default. `Direction` enum already exists (Debit/Credit on Amount — but check; may need a parallel `LimitDirection` enum to avoid `Debit` ⇄ `Outbound` cognitive load).
+- [ ] **AB.1.3 — Loader + serializer + validator.** Loader accepts `direction: Inbound` / `Outbound` / unset (default). Validator: U5 / R7 unchanged (parent_role + rail uniqueness still holds across direction); new rule: `direction` value must be one of the two literals.
+- [ ] **AB.1.4 — `schema.py`: `<prefix>_limit_breach` matview branches on direction.** CASE on `tx.amount_direction = 'Credit'` for Inbound LimitSchedules vs `= 'Debit'` for Outbound. SUM-window unchanged otherwise; per-day aggregation primitive doesn't shift.
+- [ ] **AB.1.5 — `auto_scenario.py`: new `InboundCapBreachPlant`.** Mirror existing `LimitBreachPlant` but plants a day of inbound credits exceeding cap. `emit_seed` wires it. `TestScenarioCoverage` asserts ≥1 plant row lands in the inbound matview rows.
+- [ ] **AB.1.6 — `sasquatch_pr.yaml` real-world flavor.** Add 1 inbound cap (the gap-doc's "daily inbound ACH cap of $20K per customer DDA" — AML-flag threshold). Plants seed inbound days at $25K so the dashboard shows the violation.
+- [ ] **AB.1.7 — `editor.py` + Studio LimitSchedule card.** Add `direction` dropdown (Outbound / Inbound, default Outbound).
+- [ ] **AB.1.8 — Dashboard wiring.** Limit Breach sheet's table gains a "Direction" column (Inbound / Outbound) — same sheet, no split. Today's Exceptions inherits the new rows automatically (it reads the same matview).
+- [ ] **AB.1.9 — Tests.** Validator (direction enum), schema (matview shape per dialect — pg + oracle + sqlite), seed (`InboundCapBreachPlant` deterministic + plant-coverage ≥1 row), audit PDF (limit_breach table includes inbound), 4-way agreement.
+- [ ] **AB.1.10 — Docs + handbook walkthrough.** `concepts/l2/index.md` documents the field. New `walkthroughs/customization/how-do-i-add-an-aml-inbound-cap.md` worked-example walkthrough. `Schema_v6.md`'s LimitSchedule section gains the direction note.
+- [ ] **AB.1.11 — Re-lock seeds, verify (unit + db + AW probe), commit.**
+
+### AB.2 — Enhancement 3: Template-as-chain-child (symmetric with template-as-chain-parent)
+
+Today's chain `child:` field accepts Rail only. Two-template chains (e.g. `InternalTransferCycle → InternalTransferBatch`) force an awkward "pick one of the child template's leg_rails" workaround.
+
+**Preferred shape** (gap doc §3): allow `child: TransferTemplate` symmetric to `parent: TransferTemplate`. Semantics: first leg_rail firing of the child template sets the shared Transfer's `Parent` via the firing's `parent_transfer_id` metadata; subsequent firings join via lookup-or-create without rewriting Parent.
+
+- [ ] **AB.2.1 — `loader.py`: chain `child:` accepts TransferTemplate identifier.** Currently rejects (or silently accepts and breaks downstream — verify). Loader resolves the identifier against rails + templates.
+- [ ] **AB.2.2 — `validate.py`: new rule** — if `child` is a TransferTemplate, every leg_rail of that template MUST accept `parent_transfer_id` as a posted metadata key (auto-derived from the chain relationship). Catches the ETL contract at load time.
+- [ ] **AB.2.3 — `schema.py` + new matview: "Chain Parent Disagreement" L1 invariant.** Gap doc §3 locked: when subsequent leg_rail firings claim a *different* `parent_transfer_id` than the first-firing-wins Parent, **reject as L1 Conservation-style violation** — surface the ETL bug rather than hiding it. New matview `<prefix>_chain_parent_disagreement` (or fold into an existing Conservation-shape matview) flags any child Transfer where the set of `parent_transfer_id`s across its leg_rail firings has cardinality > 1.
+- [ ] **AB.2.4 — `schema.py`: chain-firing matview handles template-as-child.** The first-firing-wins Parent assignment lands here; AB.2.3 catches the disagreement case.
+- [ ] **AB.2.5 — `seed.py`: two-template chain firings.** Chain firing where child is a template: emits leg_rail firings against the child template's lookup-or-create with `parent_transfer_id` resolved to the parent's Transfer.
+- [ ] **AB.2.6 — `auto_scenario.py`: new `TwoTemplateChainPlant` + `ChainParentDisagreementPlant` (per AB.2.3).** Coverage assertions per pattern.
+- [ ] **AB.2.7 — `sasquatch_pr.yaml` real-world flavor.** Add the `InternalTransferCycle → InternalTransferBatch` chain from the gap doc, or a similar two-template chain that shows up natural in the merchant-acquiring flow. Plants demonstrate both the healthy case + the chain-Parent-disagreement violation case.
+- [ ] **AB.2.8 — `topology.py` + Studio diagram + chain UI.** Chain edges with template children render with a distinct visual treatment (template box vs rail box). Studio chain card's children multi_select sources both rails AND templates (was rails-only).
+- [ ] **AB.2.9 — Dashboard wiring.** Existing chain-aware sheets (PostedRequirements panel on L1; L2 Flow Tracing's Chains sheet) handle template children gracefully. Chain-Parent-disagreement violations (AB.2.3 matview) surface as a new row category on Today's Exceptions, alongside Conservation-shape violations.
+- [ ] **AB.2.10 — Tests.** Validator (template-as-child accepts; legacy-style rejects appropriately), schema (chain matview shape), seed (chained-template firings produce expected parent linkage), L1 invariants (PostedRequirements still apply per child leg_rail), 4-way agreement.
+- [ ] **AB.2.11 — Docs + handbook walkthrough.** Update `concepts/chain.md` to document the symmetric semantics. New `walkthroughs/customization/how-do-i-chain-two-templates.md`. `Schema_v6.md` chain section updated.
+- [ ] **AB.2.12 — Re-lock seeds, verify, commit.**
+
+### AB.3 — Enhancement 1: TransferTemplate multi-Variable + leg_rails XOR
+
+Today's C1 ("at most one Variable-direction leg per template") blocks the natural model for per-mode operating variants (e.g. `MerchantCardSaleAutoSettle` / `StandardSettle` / `SlowSettle` as Variable closing legs, exactly one firing per cycle based on merchant config).
+
+**Preferred shape** (gap doc §1): restate C1 as "per *firing* across XOR-grouped legs"; add `leg_rail_xor_groups: [[v1, v2, v3]]` field on TransferTemplate, mirroring the chain XOR pattern. Validator rule: members must all appear in the template's leg_rails.
+
+- [ ] **AB.3.1 — `primitives.py`: `leg_rail_xor_groups: tuple[tuple[Identifier, ...], ...] = ()` on TransferTemplate.**
+- [ ] **AB.3.2 — Loader + serializer + validator.** Loader parses the new field; validator: members ⊆ leg_rails; rewrite C1 as "at most one Variable-direction leg fires per Transfer (XOR-grouped Variables resolve to one firing per group; non-grouped Variables: still at most one)."
+- [ ] **AB.3.3 — Schema + XOR resolution evidence (gap doc §1 locked).** Gap doc §1 locked: XOR resolution evidence is **implicit-from-firing-existence** — validation reads the leg_rail rows that actually posted; no separate `variant_selector` MetadataKey is added. Concretely: no new column on `<prefix>_transactions`, no schema-level grouping marker; the existing `transfer_type` / `rail_name` per leg already identifies which variant fired. C1's enforcement matview (`<prefix>_xor_group_violation` or fold into existing PostedRequirements matview) counts rows per (Transfer, XOR group) and flags >1 (overlap) or =0 once the template's Completion deadline has passed (missed firing — the AB.3.5 plant case).
+- [ ] **AB.3.4 — `seed.py`: per-firing variant resolution.** For each cycle the chain fires, deterministically pick one variant from each XOR group (seeded RNG, same shape as today's chain-XOR resolution).
+- [ ] **AB.3.5 — `auto_scenario.py`: new `XorVariantMissedFiringPlant`** — XOR group has zero firings ⇒ surfaces as stuck_unbundled-shape (Transfer never closes because no Variable variant fired). Plant primitive + coverage assertion.
+- [ ] **AB.3.6 — `sasquatch_pr.yaml` real-world flavor.** Add the gap-doc's three settlement-timing variants (`MerchantCardSaleAutoSettle` / `StandardSettle` / `SlowSettle`) to `MerchantSettlementCycle.leg_rails` + the matching XOR group. Per-merchant config picks the variant; demo plants show all three firing across the merchant population.
+- [ ] **AB.3.7 — Studio editor: TransferTemplate card.** New `leg_rail_xor_groups` UI — list of multi_selects, each sourcing the template's own leg_rails.
+- [ ] **AB.3.8 — Topology + dashboard.** Topology diagram renders XOR-grouped leg_rails with a visual hint (dashed grouping?). PostedRequirements / Pending Aging / Unbundled Aging gain "per variant" rollups.
+- [ ] **AB.3.9 — Tests.** Validator (XOR rule, C1 rewrite), schema (matview shape unchanged but verify with multi-Variable fixture), seed (per-cycle variant resolution deterministic), L1 invariants (PostedRequirements per variant, stuck_unbundled fires when XOR misses), 4-way agreement.
+- [ ] **AB.3.10 — Docs + handbook walkthrough.** `concepts/transfer-template.md` documents the XOR pattern. New `walkthroughs/customization/how-do-i-add-multi-mode-settlement.md`. `Schema_v6.md` TransferTemplate section updated.
+- [ ] **AB.3.11 — Re-lock seeds, verify, commit.**
+
+### AB.4 — Enhancement 2: N:1 chain fan-in
+
+Today's `Transfer.Parent` is single-valued. Chains where N parent firings want to share one child Transfer (the batched-payout pattern) can't be expressed structurally — integrators fall back to metadata-only correlation (`batch_id` on each leg + ETL discipline).
+
+**Preferred shape** (gap doc §2(B), user-ratified): new `fan_in: true` flag on Chain. Chains marked `fan_in` allow N parent firings to share one child Transfer; ETL writes each child leg with its contributing parent's id in JSON metadata (the existing per-leg `parent_transfer_id` convention); a new matview derives the multi-parent set per child Transfer.
+
+- [ ] **AB.4.1 — `primitives.py`: `fan_in: bool = False` on Chain.** Backward-compat default.
+- [ ] **AB.4.2 — Loader + serializer + validator.** Loader parses; validator: if `fan_in=true`, child must be TransferTemplate (gap doc §2 footnotes — "what if fan_in child is a Rail" is undefined; close that door). A fan_in chain MAY have multiple chains writing into one child — that's the whole point; validator allows.
+- [ ] **AB.4.3 — Schema: `<prefix>_transfer_parents` matview (long form).** Derived from `<prefix>_transactions` — one row per `(child_transfer_id, parent_transfer_id)` pair, computed via `SELECT DISTINCT JSON_VALUE(metadata, '$.parent_transfer_id'), transfer_id FROM <prefix>_transactions WHERE metadata IS JSON AND JSON_EXISTS(metadata, '$.parent_transfer_id')`. No base-table schema change; no `<prefix>_transactions` column added; no ETL contract change. Wired into `refresh_matviews_sql(l2_instance)` alongside the existing L1 invariant matviews. SQLite emits as `CREATE TABLE … AS SELECT` per the existing dialect pattern.
+- [ ] **AB.4.4 — `seed.py`: fan_in chain firings.** Multiple parent firings each write child-template legs with their contributing `parent_transfer_id` in metadata; the AB.4.3 matview derives the multi-parent set on refresh.
+- [ ] **AB.4.5 — `auto_scenario.py`: `FanInChainPlant` + `FanInChainMissingParentPlant` (orphan child — parent set incomplete) + `FanInChainExtraParentPlant` (parent set includes a Transfer that shouldn't be in the batch).**
+- [ ] **AB.4.6 — `sasquatch_pr.yaml`: add batched-payout flow** (gap doc §2's `MerchantPayoutBatch` example). Demo plants show healthy batching + the two violation cases.
+- [ ] **AB.4.7 — Schema matview: new L1 invariant** — "every fan_in child Transfer's contributions match its expected parent set" (the gap-doc audit-trail use case). New matview `<prefix>_fan_in_disagreement` joins `<prefix>_transfer_parents` (AB.4.3) against the per-chain expected-parent-set rule and flags mismatches.
+- [ ] **AB.4.8 — Dashboard + audit PDF: new violation kind** — fan-in disagreement on Today's Exceptions + a new per-invariant table on the audit PDF.
+- [ ] **AB.4.9 — Studio chain card + topology.** `fan_in` checkbox on Chain card; topology renders fan-in edges with a distinct visual treatment.
+- [ ] **AB.4.10 — Tests.** Validator (fan_in implies template-as-child), schema (`<prefix>_transfer_parents` matview shape per dialect — pg + oracle + sqlite), seed (deterministic fan-in firings + multi-parent metadata), L1 invariants (fan_in_disagreement fires when plants violate), 4-way agreement.
+- [ ] **AB.4.11 — Docs + walkthrough.** New `concepts/chain-fan-in.md` documenting the semantics + when to use fan_in. New `walkthroughs/customization/how-do-i-model-batched-payouts.md`. Schema_v6 chain section updated.
+- [ ] **AB.4.12 — Re-lock seeds, verify, commit.**
+
+### AB.5 — End-of-phase
+
+- [ ] **AB.5.1 — Verify (full 13-cell db matrix + browser canary).** Same shape as Z.D.1 (`./run_tests.sh up_to=db` no-flags + a thin browser-layer `--scenarios=sp --dialects=pg --targets=aw` canary). Deterministic cells must all be green; fuzz-cell instability tracked separately.
+- [ ] **AB.5.2 — Commit, archive Phase AB to PLAN_ARCHIVE.md, push.** Add Phase AB one-liner to the Phase history section. Cut a release tag (likely `v10.0.0a8` or later in the alpha train).
+
+---
+
 ## Phase Q (continued) — CLI / YAML ergonomics
 
 The standing "Phase Q" thread (Q.1–Q.5 + Q.3.a shipped; see Phase history). What's still open: the CLI-shape revisit below, plus the older "schema ergonomics around the L2 yaml" item (task #488 — fold into Q.6's spike or its own sub-item when scoped). Queues behind Phase X.
