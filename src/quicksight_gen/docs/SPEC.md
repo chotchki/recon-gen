@@ -213,17 +213,19 @@ Per primitive's type signature below, `Description?` is shown as an optional las
 
 ---
 
-### Instance Prefix *(required)*
+### Deployment prefix *(declared in cfg.yaml, not in the L2 instance)*
 
-A short SQL-identifier-safe string declared once at the top of the L2 instance. Applied to every generated database object and dashboard resource ID.
+The L2 instance does NOT carry a prefix (Z.C, 2026-05-15 — the legacy `InstancePrefix: Identifier` field at the top of the L2 YAML was dropped). Prefixing is a deployment concern, not a model concern, and lives in `cfg.yaml`:
 
+```yaml
+# cfg.yaml — both required, no defaults
+deployment_name: "qsgen-prod"   # prefixes every QS resource ID
+db_table_prefix: "qsgen_prod"   # prefixes every DB table / matview / dataset name
 ```
-InstancePrefix: Identifier
-```
 
-**Format**: MUST match `^[a-z][a-z0-9_]*$` (lowercase start, alphanumeric or underscore thereafter), max 30 characters. The lowercase-only constraint avoids Postgres' quoted-vs-unquoted-identifier hazard; the 30-character cap leaves room for the longest table-name suffix within Postgres' 63-character identifier limit.
+**`db_table_prefix` format**: MUST match `^[a-z][a-z0-9_]*$` (lowercase start, alphanumeric or underscore thereafter), max 30 characters. The lowercase-only constraint avoids Postgres' quoted-vs-unquoted-identifier hazard; the 30-character cap leaves room for the longest table-name suffix within Postgres' 63-character identifier limit.
 
-Two L2 instances coexist in one database by using distinct prefixes; cross-instance JOINs are not supported.
+Two deployments of the same L2 instance coexist in one database by using distinct `db_table_prefix` values (and distinct `deployment_name` values to avoid colliding QS resource IDs); cross-deployment JOINs are not supported.
 
 Prefix-based isolation (over Postgres schemas) is the default because not all deployment environments grant `CREATE SCHEMA` rights to the library's runtime; bare table/view name prefixing works everywhere.
 
@@ -642,8 +644,8 @@ The longest acceptable interval between a Transaction becoming Posted-and-eligib
 
 ## Implementation notes
 
-- Each L2 instance is fully isolated by its `InstancePrefix`. Every generated database object and every dashboard resource ID is prefixed.
-- Production integrators typically run one L2 instance under a stable production prefix. Demo and test runs use ephemeral or fixture-specific prefixes so they never collide.
+- Each *deployment* of an L2 instance is fully isolated by its cfg-level `deployment_name` (QS resources) and `db_table_prefix` (DB objects). Every generated database object and every dashboard resource ID is prefixed.
+- Production integrators typically run one L2 instance under a stable production deployment_name + db_table_prefix pair. Demo and test runs use ephemeral or fixture-specific prefixes so they never collide.
 - The library validates the L2 instance at load time. Configuration errors are reported at load, not at posting time.
 
 ### Validation rules

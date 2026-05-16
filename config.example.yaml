@@ -14,11 +14,14 @@ aws_account_id: "123456789012"
 aws_region: "us-east-1"
 
 # ARN of the pre-existing QuickSight datasource to query against.
-# Not required when demo_database_url is set (auto-derived from account/region/prefix).
+# Not required when demo_database_url is set (auto-derived from account/region/deployment_name).
 datasource_arn: "arn:aws:quicksight:us-east-1:123456789012:datasource/your-datasource-id"
 
-# Prefix for all generated resource IDs (optional, default: qs-gen)
-resource_prefix: "qs-gen"
+# Z.C — Deployment identity (both required, no defaults, loud-fail at load).
+# `deployment_name` prefixes every QS resource ID; `db_table_prefix`
+# prefixes every emitted DB table / matview / dataset name.
+deployment_name: "qsgen-prod"
+db_table_prefix: "qsgen_prod"
 
 # Theme: declared on the L2 institution YAML's inline `theme:` block,
 # NOT here. Each institution carries its own brand palette so swapping
@@ -43,7 +46,7 @@ resource_prefix: "qs-gen"
 
 # Database connection URL for the demo apply command (optional).
 # Required for: `data apply --execute`, `audit apply --execute`.
-# When set, datasource_arn auto-derives from account/region/prefix
+# When set, datasource_arn auto-derives from account/region/deployment_name
 # (Postgres + Oracle only — SQLite rejects datasource derivation).
 # demo_database_url: "postgresql://user:pass@localhost:5432/quicksight_demo"
 # demo_database_url: "oracle+oracledb://user:pass@host:1521/?service_name=ORCL"

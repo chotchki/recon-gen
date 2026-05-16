@@ -47,7 +47,6 @@ def _full_instance(prefix: str) -> L2Instance:
     """An L2 instance with a rail + a limit schedule so every L1
     invariant view's CASE branches get populated."""
     return L2Instance(
-        instance=Identifier(prefix),
         accounts=(),
         account_templates=(),
         rails=(
@@ -79,7 +78,7 @@ def _full_instance(prefix: str) -> L2Instance:
 def sqlite_sql() -> str:
     """One SQLite DDL emission per module — every assertion runs
     against the same string."""
-    return emit_schema(_full_instance("sqlt"), dialect=Dialect.SQLITE)
+    return emit_schema(_full_instance("sqlt"), prefix="sqlt", dialect=Dialect.SQLITE)
 
 
 @pytest.fixture(scope="module")
@@ -236,8 +235,7 @@ class TestSqliteSchemaActuallyRuns:
         _register_sqlite_aggregates(conn)
         try:
             conn.executescript(sqlite_sql)
-            refresh_sql = refresh_matviews_sql(
-                _full_instance("sqlt"), dialect=Dialect.SQLITE,
+            refresh_sql = refresh_matviews_sql(_full_instance("sqlt"), prefix="sqlt", dialect=Dialect.SQLITE,
             )
             conn.executescript(refresh_sql)
         finally:

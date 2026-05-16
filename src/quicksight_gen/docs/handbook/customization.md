@@ -182,7 +182,7 @@ the prose without touching dashboard code.
 from quicksight_gen.common.l2 import emit_schema, load_instance
 
 instance = load_instance("path/to/myorg.yaml")
-sql = emit_schema(instance)
+sql = emit_schema(instance, prefix="myorg")  # Z.C — prefix is now a kwarg
 # Pipe to psql, or:
 import psycopg2
 conn = psycopg2.connect(your_db_url)
@@ -191,9 +191,10 @@ with conn.cursor() as cur:
 ```
 
 Every table, view, and matview in the emitted DDL is prefixed by
-`instance.instance` (e.g. `myorg_transactions`, `myorg_drift`,
-`myorg_stuck_pending`). Multiple L2 instances coexist in one
-database via prefix isolation.
+the `prefix=` value you pass (typically `cfg.db_table_prefix` — Z.C),
+producing e.g. `myorg_transactions`, `myorg_drift`,
+`myorg_stuck_pending`. Multiple deployments of the same L2 instance
+coexist in one database via distinct prefixes.
 
 ### 3. Refresh the matviews after every load
 

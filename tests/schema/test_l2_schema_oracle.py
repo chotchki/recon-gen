@@ -51,7 +51,6 @@ def _full_instance(prefix: str) -> L2Instance:
     empty-rail instance.
     """
     return L2Instance(
-        instance=Identifier(prefix),
         accounts=(),
         account_templates=(),
         rails=(
@@ -86,7 +85,7 @@ def _full_instance(prefix: str) -> L2Instance:
 def oracle_sql() -> str:
     """One Oracle DDL emission per module — every assertion runs
     against the same string so pytest output stays small."""
-    return emit_schema(_full_instance("orcl"), dialect=Dialect.ORACLE)
+    return emit_schema(_full_instance("orcl"), prefix="orcl", dialect=Dialect.ORACLE)
 
 
 @pytest.fixture(scope="module")
@@ -240,7 +239,7 @@ def test_refresh_matviews_sql_oracle_uses_dbms_mview() -> None:
     """REFRESH MATERIALIZED VIEW (PG) translates to DBMS_MVIEW.REFRESH
     on Oracle, wrapped in a PL/SQL block that's safe to run from
     either oracledb's cursor.execute or SQL*Plus."""
-    sql = refresh_matviews_sql(_full_instance("orcl"), dialect=Dialect.ORACLE)
+    sql = refresh_matviews_sql(_full_instance("orcl"), prefix="orcl", dialect=Dialect.ORACLE)
     assert ";;" not in sql
     assert "REFRESH MATERIALIZED VIEW" not in sql  # the PG verb
     # 15 matviews refresh in dependency order: 2 current_* + 2 helpers

@@ -45,7 +45,8 @@ Three reference points:
   order.
 - **The QuickSight console** (`https://quicksight.aws.amazon.com`)
   — the visual target. After deploy, your analyses + dashboards
-  appear here under the configured prefix (default `qs-gen-*`).
+  appear here under the configured `cfg.deployment_name` (Z.C —
+  required cfg field, no default).
 
 ## What you'll see in the demo
 
@@ -69,7 +70,7 @@ The output stream has two phases. First, the per-app emit:
 Generating JSON for all four apps into out/...
 Investigation: account=111122223333, region=us-east-2, l2_instance=spec_example
   wrote out/theme.json
-  wrote out/datasets/qs-gen-spec_example-inv-recipient-fanout-dataset.json
+  wrote out/datasets/qsgen-prod-inv-recipient-fanout-dataset.json
   ... (~7 datasets)
   wrote out/investigation-analysis.json
   wrote out/investigation-dashboard.json
@@ -91,7 +92,7 @@ Deploying QuickSight resources from out
   Account: 111122223333
   Region:  us-east-2
 
-==> Dashboard: qs-gen-spec_example-l1-dashboard
+==> Dashboard: qsgen-prod-l1-dashboard
     Deleting existing dashboard...
 ... (per dashboard, then analyses, then datasets, then theme,
      then datasource — all delete first)
@@ -99,17 +100,17 @@ Deploying QuickSight resources from out
 --- Recreating all resources ---
 
 ==> Datasource: ...
-==> Theme: qs-gen-spec_example-theme
-==> Dataset: qs-gen-spec_example-l1-todays-exceptions-dataset
+==> Theme: qsgen-prod-theme
+==> Dataset: qsgen-prod-l1-todays-exceptions-dataset
 ... (~27 datasets total across all four apps)
-==> Analysis: qs-gen-spec_example-l1-dashboard-analysis
+==> Analysis: qsgen-prod-l1-dashboard-analysis
 ... (one per app)
-==> Dashboard: qs-gen-spec_example-l1-dashboard
+==> Dashboard: qsgen-prod-l1-dashboard
 ... (one per app)
 
 --- Waiting for async resources ---
 
-==> Checking Analysis: qs-gen-spec_example-l1-dashboard-analysis
+==> Checking Analysis: qsgen-prod-l1-dashboard-analysis
     Status: CREATION_SUCCESSFUL
 ... (one per analysis + dashboard)
 
@@ -248,7 +249,8 @@ Once your first deploy completes with all
 `CREATION_SUCCESSFUL`:
 
 1. **Open the dashboard in QuickSight.** Console → Dashboards
-   → `qs-gen-{{ l2_instance_name }}-l1-dashboard` (or your custom prefix).
+   → `<deployment_name>-l1-dashboard` (where `<deployment_name>`
+   is your `cfg.deployment_name` value).
    Click through the tabs. KPIs should populate; tables should
    render rows. Empty visuals usually mean the underlying
    dataset's SQL returned zero rows against your data — open

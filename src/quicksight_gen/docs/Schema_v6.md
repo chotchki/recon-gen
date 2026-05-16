@@ -74,9 +74,10 @@ prefix-namespaced DDL.
 
 ## Per-instance prefix isolation
 
-Every CREATE in the emitted DDL is prefixed by `instance.instance`
-(an `Identifier` from the L2 YAML). For an instance named
-`{{ l2_instance_name }}`:
+Every CREATE in the emitted DDL is prefixed by `cfg.db_table_prefix`
+(Z.C — required cfg field; the legacy `instance.instance` field on the
+L2 YAML was dropped). For a deployment with `db_table_prefix:
+{{ l2_instance_name }}`:
 
 | Layer | Object name |
 |---|---|
