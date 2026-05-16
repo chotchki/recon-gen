@@ -1824,35 +1824,75 @@ _SELECTED_OPTION_SELECTOR = (
 def _open_control_dropdown(page: Page, control_title: str, timeout_ms: int) -> None:
     """Open the FilterControl popover for the named sheet control.
 
-    QuickSight renders each control as
+    Each control renders as
     ``[data-automation-id="sheet_control"][data-automation-context="<title>"]``
-    with the value picker at ``sheet_control_value`` (a Material-UI Select
-    combobox). Opens the popover and waits for the listbox to be visible.
+    but QuickSight uses **two different DOM shapes** for the value
+    picker depending on the dropdown's option-count:
+
+    - **Simple variant** (small option universe, e.g. Account Network's
+      25-account picker): the trigger is
+      ``[data-automation-id="sheet_control_value"]``, the popover lands
+      at ``[data-automation-id="sheet_control_value-menu"][data-automation-context="<title>"]``
+      with options as ``[role="option"]`` children.
+    - **Search-enabled variant** (large option universe, e.g. Money
+      Trail's 8080-root-transfer picker): QS swaps to a Material-UI
+      Select with a built-in search input. Trigger is
+      ``[data-automation-id="sheet_control_search_results_dropdown"]``;
+      ``sheet_control_value`` is **not in the DOM at all**. Popover
+      lands at ``[data-automation-id="sheet_control_menu_dropdown"]``
+      (different attribute, same ``[role="option"]`` children).
+
+    AA.B.2-era triage discovered this divergence via the AA.H+H.6 DOM
+    dump (the Money Trail anchor failure persisted across 4 chains
+    because the driver only knew about the simple variant). Cardinality
+    threshold isn't documented; QS picks the variant client-side based
+    on declared values count. We dispatch on selector presence: try the
+    simple-variant trigger first, fall back to search-variant if absent.
     """
     card_selector = (
         f'[data-automation-id="sheet_control"]'
         f'[data-automation-context="{control_title}"]'
     )
     page.wait_for_selector(card_selector, timeout=timeout_ms, state="visible")
+    # Dispatch on whichever trigger this control rendered (small option
+    # universe vs large + search-enabled). Both render the popover
+    # contents lazily on first click; the next wait_for_selector handles
+    # whichever container ended up in the DOM.
+    simple_trigger = (
+        f'{card_selector} [data-automation-id="sheet_control_value"]'
+    )
+    search_trigger = (
+        f'{card_selector} [data-automation-id="sheet_control_search_results_dropdown"]'
+    )
+    # ``count()`` is a fast DOM-only check (no event loop wait). Pick the
+    # variant that's actually rendered. If both somehow match, prefer
+    # the simple variant — that's the click target the historical helpers
+    # were written against.
+    if page.locator(simple_trigger).count() > 0:
+        trigger = simple_trigger
+    else:
+        trigger = search_trigger
     # MUI mounts the listbox in a portal; aria-haspopup="listbox" expands.
     # The first click sometimes no-ops if the sheet just mounted and the
     # combobox's onClick handler hasn't attached — retry until the listbox
     # appears or timeout.
-    value_selector = (
-        f'{card_selector} [data-automation-id="sheet_control_value"]'
-    )
-    page.locator(value_selector).first.click(timeout=timeout_ms)
-    # MUI v4 sometimes renders options under role="listbox" inside the menu
-    # popover, but some control instances skip the listbox role and put
-    # options directly in the popover. Match either shape, but scope to
-    # the just-opened control's popover so other (stale) popovers don't
-    # pollute the option set.
-    popover_selector = (
+    page.locator(trigger).first.click(timeout=timeout_ms)
+    # Wait for ANY ``[role="option"]`` to appear under either popover
+    # container shape OR loose in a ``[role="listbox"]``. Some control
+    # instances skip the listbox role and put options directly under the
+    # popover — match all three.
+    popover_simple = (
         f'[data-automation-id="sheet_control_value-menu"]'
         f'[data-automation-context="{control_title}"]'
     )
+    popover_search = (
+        f'[data-automation-id="sheet_control_menu_dropdown"]'
+        f'[data-automation-context="{control_title}"]'
+    )
     page.wait_for_selector(
-        f'{popover_selector} [role="option"], [role="listbox"] [role="option"]',
+        f'{popover_simple} [role="option"], '
+        f'{popover_search} [role="option"], '
+        f'[role="listbox"] [role="option"]',
         timeout=timeout_ms, state="visible",
     )
 

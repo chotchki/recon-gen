@@ -454,6 +454,48 @@ embedding SDK), so callers don't have to reverse-engineer `START_VIS` /
 
 ---
 
+### 3.7 `ParameterDropDownControl` DOM shape diverges by option count
+(simple ↔ search-enabled variants — different `sheet_control_*`
+automation-ids)
+
+**Observed.** QuickSight renders the same `ParameterDropDownControl`
+with two different DOM trees depending on how many distinct values
+the linked column produces. Small option-universe (Account Network's
+~25 accounts) → the **simple variant**: trigger at
+`[data-automation-id="sheet_control_value"]`, popover at
+`[data-automation-id="sheet_control_value-menu"]`. Large option-
+universe (Money Trail's ~8080 chain roots) → the **search-enabled
+variant**: trigger at
+`[data-automation-id="sheet_control_search_results_dropdown"]` —
+**`sheet_control_value` is not in the DOM at all** — popover at
+`[data-automation-id="sheet_control_menu_dropdown"]`. Both popovers
+contain `[role="option"]` children.
+
+The cardinality threshold isn't documented; QS appears to pick the
+variant client-side based on the dataset's value count. The same
+`ParameterDropDownControl` JSON produces either shape depending on
+how many rows the `LinkedValues.from_column(...)` companion returns
+at render time.
+
+**Workaround.** `_open_control_dropdown` in
+`src/quicksight_gen/common/browser/helpers.py` now dispatches on
+selector presence: it counts `sheet_control_value` matches inside
+the card; if zero, falls back to `sheet_control_search_results_dropdown`.
+The wait-for-popover step accepts either popover-container
+automation-id, so `[role="option"]` children are discovered the same
+way for both variants. (Verified AA.H.6+B.1 era against
+`qsgen-sp_pg_aw-investigation-dashboard` — the Money Trail
+"Chain root transfer" dropdown failed for 4 consecutive chains
+because the driver only knew about the simple variant; the AA.H+H.6
+DOM-dump capture surfaced the divergence in one look.)
+
+**Suggested fix.** Document the cardinality threshold (or expose a
+stable variant-agnostic automation-id like
+`sheet_control_trigger`), so dashboard authors don't need to write
+DOM dispatchers per option-count tier.
+
+---
+
 ## 4. Data type / shape quirks
 
 ### 4.1 `DateDimensionField` vs `CategoricalDimensionField` — column
