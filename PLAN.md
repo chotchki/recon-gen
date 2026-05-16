@@ -407,7 +407,9 @@ Two operator-asked changes on the same sheet. Pair them.
 - [ ] **AA.B.3 — Sheet description tweak.** Subtitle / sheet description gains a one-line note: "Internal accounts only. Filter by role to narrow further."
 - [ ] **AA.B.4 — Browser e2e + commit.** Extend Daily Statement test (or add one if missing) to (a) assert no `external` rows, (b) round-trip the new role dropdown.
 
-### AA.C — Exception literacy (sticky on-sheet panel + trainer pane)
+### AA.C — Exception literacy (sticky on-sheet panel + trainer pane) *(independent sub-phase — can land on its own branch/commits + timeline; doesn't gate on AA.A/B/D/E/H)*
+
+The L1_Invariants.md parser + sheet-bottom panels + Studio trainer pane are orthogonal to the dropdown flips (AA.A), Daily Statement fixes (AA.B), label renames (AA.D), and account search (AA.E). Can branch off `main` (or off `phase-aa` after AA.A.5 closes) and ship independently — AA.F end-of-phase tag will bundle whatever's landed by then, and missing AA.C work would just slip into the next tag.
 
 Operators don't crack open the manual. The exception-type vocabulary + remediation guidance has to live where they're already looking. Source of truth is `src/quicksight_gen/docs/L1_Invariants.md` (already structured per-invariant under `### N. <name>` headings) — the panel content reads from there at generate time, not net-new prose.
 
