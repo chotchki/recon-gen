@@ -966,6 +966,42 @@ def get_visual_titles(page: Page) -> list[str]:
     return [t.inner_text().strip() for t in titles if t.inner_text().strip()]
 
 
+def visual_is_empty(page: Page, visual_title: str) -> bool:
+    """Cheap DOM probe — does this visual show QS's empty-state overlay?
+
+    QS mounts a ``[data-automation-id="visual-overlay-title"]`` element
+    with ``data-automation-context="No data"`` inside any visual whose
+    backing dataset returned zero rows (table / Sankey / chart / KPI).
+    The overlay mounts at the same time the visual's frame renders —
+    typically within a few hundred ms of the sheet load — so a positive
+    return from this probe is high-signal: the visual is mounted AND
+    confirmed empty, no row-fetch race to wait out.
+
+    Use this BEFORE ``scroll_visual_into_view`` to short-circuit empty
+    cases. ``scroll_visual_into_view``'s ``wait_for_cells=True`` mode
+    waits for ``sn-table-cell-0-0`` to appear, which empty tables never
+    mount — without this probe the helper times out at ``timeout_ms``
+    on every empty visual. Returns False if the visual isn't found
+    (let downstream selectors raise the "no visual" error with their
+    own context).
+    """
+    return page.evaluate(
+        """(title) => {
+            const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
+            for (const v of visuals) {
+                const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
+                if (!t || t.innerText.trim() !== title) continue;
+                return v.querySelector(
+                    '[data-automation-id="visual-overlay-title"]'
+                    + '[data-automation-context="No data"]'
+                ) !== null;
+            }
+            return false;
+        }""",
+        visual_title,
+    )
+
+
 def scroll_visual_into_view(
     page: Page, visual_title: str, timeout_ms: int, *, wait_for_cells: bool = True,
 ) -> None:
@@ -996,13 +1032,29 @@ def scroll_visual_into_view(
     if not wait_for_cells:
         page.wait_for_timeout(800)
         return
+    # Settle on EITHER a populated visual (sn-table-cell-0-0 mounted) OR
+    # the QS empty-state overlay ([data-automation-id="visual-overlay-title"]
+    # with data-automation-context="No data") — both are positive
+    # signals that the visual finished resolving its data state.
+    # Pre-AA.H.11.followon: only waited for cells, so empty tables timed
+    # out at `timeout_ms` even though QS had rendered the empty overlay
+    # within ~200 ms. Adding the overlay branch makes empty-visual
+    # detection ~75× faster (200 ms vs 15 s default timeout) and turns
+    # a "test dies on timeout" into "caller probes visual_is_empty and
+    # short-circuits". The race is safe — a visual either has cells or
+    # an empty overlay, never both.
     page.wait_for_function(
         """(title) => {
             const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
             for (const v of visuals) {
                 const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
                 if (!t || t.innerText.trim() !== title) continue;
-                return v.querySelector('[data-automation-id="sn-table-cell-0-0"]') !== null;
+                if (v.querySelector('[data-automation-id="sn-table-cell-0-0"]')) return true;
+                if (v.querySelector(
+                    '[data-automation-id="visual-overlay-title"]'
+                    + '[data-automation-context="No data"]'
+                )) return true;
+                return false;
             }
             return false;
         }""",

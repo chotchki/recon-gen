@@ -362,6 +362,26 @@ settle in between. The 500 ms time-based wait is gone — user
 direction: time-based waits are a major smell, replace with
 event-driven settles.
 
+**AA.H.11 followon — empty-visual short-circuit** (fixed
+2026-05-16). The AA.H.11 split moved `scroll_visual_into_view`
+into the orchestration without the pre-AA.H.11 try/except
+fallback. `scroll_visual_into_view` waits for
+`sn-table-cell-0-0` to mount; empty tables never mount one, so
+the helper timed out at `self._visual_timeout` (15 s) and 3
+previously-green tests died (`test_parameter_anchored_sheets`
+across Money Trail + Account Network qs). The proper fix uses
+the *positive signal* QS already emits for empty visuals:
+inside any visual whose backing dataset returned zero rows, QS
+mounts `[data-automation-id="visual-overlay-title"]
+[data-automation-context="No data"]` (the "No data"
+placeholder) at render time — typically within 200 ms of the
+sheet load. `scroll_visual_into_view` now races
+`sn-table-cell-0-0` vs the empty-overlay marker — whichever
+mounts first wins, no timeout. `QsEmbedDriver.table_row_count`
+then probes `visual_is_empty` (cheap DOM read) and
+short-circuits to 0 for the empty case. Same shape for Sankey,
+KPI, chart visuals — the overlay is generic across visual types.
+
 **Suggested fix.** Either document the virtualization behavior or
 expose a "snapshot total row count" property the client can read
 without scrolling.

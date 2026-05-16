@@ -44,6 +44,7 @@ from typing import Any
 
 from quicksight_gen.common.browser.helpers import (
     bump_table_page_size_to_10000,
+    visual_is_empty,
     click_context_menu_item,
     click_first_row_of_visual,
     click_sheet_tab,
@@ -358,22 +359,26 @@ class QsEmbedDriver:
         #    waits are a major smell), then scroll-accumulate the now-
         #    fully-paginated table.
         #
-        # AA.H.11.followon — `scroll_visual_into_view` waits for
-        # ``.grid-container`` to mount. Empty tables (matview returned
-        # zero rows) never mount one, so the helper raises TimeoutError
-        # at the full visual_timeout (15s by default) and the test dies
-        # instead of cleanly reporting 0. Pre-AA.H.11 the bundled helper
-        # wrapped this in try/except with a plain JS scrollIntoView
-        # fallback; the AA.H.11 split dropped the fallback. Restore the
-        # same shape with a tight 5s window — on timeout, fall through
-        # to ``count_table_rows`` (returns 0 for empty tables, which is
-        # the correct answer — `test_parameter_anchored_sheets`'s
-        # `_assert_anchor_present_and_populated` calls this exactly to
-        # decide whether to ``pytest.skip`` on an empty source).
-        try:
-            scroll_visual_into_view(self._page, visual_title, timeout_ms=5_000)
-        except Exception:
-            return max(0, count_table_rows(self._page, visual_title))
+        # AA.H.11.followon — `scroll_visual_into_view` now waits for
+        # EITHER table cells (`sn-table-cell-0-0`) OR the QS empty-state
+        # overlay (`visual-overlay-title[data-automation-context="No
+        # data"]`) — both are positive signals that the visual finished
+        # resolving. Pre-followon: only waited for cells, so empty
+        # tables timed out at `self._visual_timeout` (15s) and the test
+        # died. Now both populated AND empty visuals settle in their
+        # natural render time (typically <1s for empty, a few s for
+        # populated). The user direction: "is there something we could
+        # do to avoid those timeouts? something to watch on?" → yes,
+        # watch the overlay marker QS already mounts on empty visuals.
+        scroll_visual_into_view(
+            self._page, visual_title, self._visual_timeout,
+        )
+        # `visual_is_empty` is a cheap DOM read (no waits) — short-
+        # circuits the empty case at 0 without paying any pagination/
+        # bump cost. Test callers like `_assert_anchor_present_and_populated`
+        # rely on this returning 0 to decide whether to `pytest.skip`.
+        if visual_is_empty(self._page, visual_title):
+            return 0
         if not table_is_paginated(self._page, visual_title):
             return max(0, count_table_rows(self._page, visual_title))
         if bump_table_page_size_to_10000(
