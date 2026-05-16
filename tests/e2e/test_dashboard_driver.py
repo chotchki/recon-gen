@@ -145,7 +145,7 @@ def test_app2_pick_filter_persists_in_underlying_select(
     driver.wait_loaded("Open Exceptions")
     driver.pick_filter("View", ["detail"])
     driver.wait_loaded("Open Exceptions")
-    page = driver.page  # type: ignore[attr-defined]
+    page = driver.page  # type: ignore[attr-defined]  # WHY: DashboardDriver protocol doesn't expose `page` -- this test reaches into the App2Driver escape hatch (smoke-only) to assert against the underlying DOM
     value = page.evaluate(
         """() => {
             const s = document.querySelector('select[name="param_view"]');
