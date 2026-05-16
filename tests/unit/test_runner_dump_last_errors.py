@@ -56,11 +56,11 @@ def _dump(runs_dir: Path, *, run: str | None = None, variant: str | None = None)
     saved = r.RUNS_DIR
     try:
         # type: ignore[attr-defined]: Final hint is a hint, not a runtime lock
-        r.RUNS_DIR = runs_dir  # type: ignore[misc, assignment]
+        r.RUNS_DIR = runs_dir  # type: ignore[misc, assignment]: Final hint isn't a runtime lock — monkey-patch for the test
         with redirect_stdout(buf):
             rc = r.cmd_dump_last_errors(args)
     finally:
-        r.RUNS_DIR = saved  # type: ignore[misc, assignment]
+        r.RUNS_DIR = saved  # type: ignore[misc, assignment]: restore the original Final-typed runs_dir
     assert rc == r.EXIT_SUCCESS, "dump-last-errors should always exit 0"
     return buf.getvalue()
 
@@ -292,10 +292,10 @@ def test_dump_missing_run_arg_returns_needs_operator(runs_dir: Path) -> None:
     args = argparse.Namespace(run="nope", variant=None)
     saved = r.RUNS_DIR
     try:
-        r.RUNS_DIR = runs_dir_arg  # type: ignore[misc, assignment]
+        r.RUNS_DIR = runs_dir_arg  # type: ignore[misc, assignment]: Final hint isn't a runtime lock — monkey-patch for the test
         rc = r.cmd_dump_last_errors(args)
     finally:
-        r.RUNS_DIR = saved  # type: ignore[misc, assignment]
+        r.RUNS_DIR = saved  # type: ignore[misc, assignment]: restore the original Final-typed runs_dir
     assert rc == r.EXIT_NEEDS_OPERATOR
 
 
