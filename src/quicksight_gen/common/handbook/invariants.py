@@ -77,13 +77,23 @@ class InvariantSection:
 
     body: str
     """Prose paragraphs after the blockquote (or the heading, for
-    sections without one). ``**Columns:** ...`` line stays inline --
-    the dashboard panel renders it as-is alongside the body."""
+    sections without one). The ``**What to do:** ...`` line is
+    *extracted* into :attr:`what_to_do` and dropped from ``body`` so
+    the dashboard panel can render the remediation in its own styled
+    block. The ``**Columns:** ...`` line stays inline."""
 
     columns: tuple[str, ...]
     """Parsed column names from the ``**Columns:** ...`` line.
     Empty tuple when the section doesn't declare columns (the
     Supersession Audit section, for instance)."""
+
+    what_to_do: str
+    """The operator-facing remediation paragraph parsed from the
+    ``**What to do:** ...`` line. One-paragraph guidance: what does
+    a row in this matview mean for the integrator, and what should
+    they do about it. Empty string when the section omits the line
+    (a soft contract -- AA.C.2 added the line to all 8 sections in
+    ``L1_Invariants.md`` and AA.C.3.f tests pin every kind has one)."""
 
 
 _HEADING_NUMBERED = re.compile(
@@ -118,6 +128,14 @@ _COLUMNS_LINE = re.compile(
 """Match the ``**Columns:** ...`` block until the next blank line. The
 columns line is wrapped across multiple physical lines in the doc."""
 
+_WHAT_TO_DO_LINE = re.compile(
+    r"^\*\*What to do:\*\*\s+(?P<rest>.+?)(?=^\s*$|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
+"""Match the ``**What to do:** ...`` paragraph until the next blank
+line. AA.C.2 added one per section to drive the dashboard-panel
+remediation block."""
+
 _COLUMN_TOKEN = re.compile(r"`([^`]+)`")
 """Each column is fenced in backticks inside the Columns block."""
 
@@ -145,6 +163,28 @@ def _parse_columns(body: str) -> tuple[str, ...]:
     if not match:
         return ()
     return tuple(_COLUMN_TOKEN.findall(match.group("rest")))
+
+
+def _extract_what_to_do(body: str) -> tuple[str, str]:
+    """Pull the ``**What to do:** ...`` paragraph out of ``body``.
+
+    Returns ``(stripped_body, what_to_do)`` -- ``stripped_body`` is
+    the input minus the matched block + any blank line left behind,
+    ``what_to_do`` is the paragraph text with internal newlines
+    collapsed to single spaces (the doc wraps long lines for readability;
+    the dashboard panel wants one continuous sentence). Returns
+    ``(body, "")`` when no match."""
+    match = _WHAT_TO_DO_LINE.search(body)
+    if not match:
+        return body, ""
+    raw = match.group("rest").strip()
+    paragraph = " ".join(line.strip() for line in raw.splitlines() if line.strip())
+    span_start, span_end = match.span()
+    stripped = (body[:span_start] + body[span_end:]).strip()
+    # Drop the blank-line gap the strip can leave behind.
+    while "\n\n\n" in stripped:
+        stripped = stripped.replace("\n\n\n", "\n\n")
+    return stripped, paragraph
 
 
 def _split_short_statement_and_body(raw_section: str) -> tuple[str, str]:
@@ -228,11 +268,17 @@ def parse_l1_invariants(
         if strip_jinja:
             raw_section = _strip_jinja(raw_section).strip("\n")
         short, body = _split_short_statement_and_body(raw_section)
+        # Order matters: parse columns (which leaves the line in body
+        # for panel rendering), then extract what_to_do (which lifts
+        # the line OUT of body into its own field so the panel can
+        # style the remediation separately).
         columns = _parse_columns(body)
+        body, what_to_do = _extract_what_to_do(body)
 
         sections[kind] = InvariantSection(
             kind=kind, title=title,
             short_statement=short, body=body, columns=columns,
+            what_to_do=what_to_do,
         )
         i = j
 
@@ -254,3 +300,33 @@ def load_bundled_invariants(
         .read_text(encoding="utf-8")
     )
     return parse_l1_invariants(md_text, strip_jinja=strip_jinja)
+
+
+def panel_markdown(section: InvariantSection) -> str:
+    """Compose a sheet-bottom panel for an :class:`InvariantSection`.
+
+    Returns a markdown string suitable for passing through
+    ``rich_text.markdown(...)`` and into a ``SheetTextBox`` content
+    block. The shape, top-to-bottom:
+
+    1. Bold title (the section's human heading).
+    2. The SHOULD-constraint as a blockquote (omitted for the
+       descriptive Supersession Audit section).
+    3. The body prose (with the ``**Columns:** ...`` line
+       inline, since the column list is useful context for
+       operators reading the panel).
+    4. A bold ``Action.`` line carrying :attr:`what_to_do`.
+
+    AA.C.3 wires one of these per L1 invariant sheet via
+    ``apps/l1_dashboard/app.py``. The Today's Exceptions sheet
+    composes its own intro panel (AA.C.3.e) rather than stacking
+    seven of these.
+    """
+    parts = [f"**{section.title}**"]
+    if section.short_statement:
+        parts.append(f"> {section.short_statement}")
+    if section.body:
+        parts.append(section.body)
+    if section.what_to_do:
+        parts.append(f"**Action.** {section.what_to_do}")
+    return "\n\n".join(parts)

@@ -90,6 +90,10 @@ from quicksight_gen.apps.l1_dashboard.datasets import (
 )
 from quicksight_gen.common import rich_text as rt
 from quicksight_gen.common.config import Config
+from quicksight_gen.common.handbook.invariants import (
+    load_bundled_invariants,
+    panel_markdown,
+)
 from quicksight_gen.common.ids import FilterGroupId, ParameterName, SheetId
 from quicksight_gen.common.l2 import L2Instance
 from quicksight_gen.common.models import DateTimeDefaultValues
@@ -2234,6 +2238,114 @@ def _wire_drill_filter_groups(
         fg.scope_sheet(sheets[spec.sheet_id])
 
 
+# AA.C.3 — Exception-literacy panel wiring. Pulls per-invariant prose
+# (SHOULD-constraint + body + remediation) from L1_Invariants.md via
+# the AA.C.2 parser and lands a SheetTextBox at the bottom of each
+# invariant sheet. Today's Exceptions gets a generic intro panel
+# instead of per-kind prose (it aggregates every kind, and a stack of
+# seven panels would crowd the sheet).
+_PANEL_LAYOUT_HEIGHT = 6
+
+# Per-sheet ordered list of invariant kinds whose prose lands as
+# stacked panels at the sheet bottom. Drift sheet hosts BOTH the
+# leaf-level (`drift`) and parent-rollup (`ledger_drift`) panels --
+# operators get the formal SHOULD + remediation for each
+# without having to drill out to the docs site.
+_PER_SHEET_PANELS: dict[str, tuple[str, ...]] = {
+    "drift": ("drift", "ledger_drift"),
+    "overdraft": ("overdraft",),
+    "limit_breach": ("limit_breach",),
+    "pending_aging": ("stuck_pending",),
+    "unbundled_aging": ("stuck_unbundled",),
+    "supersession_audit": ("supersession_audit",),
+}
+
+# AA.C.3.e — Today's Exceptions intro panel. Hand-authored vs
+# parser-driven because the sheet doesn't map to a single
+# invariant kind; instead it aggregates rows from every L1
+# SHOULD-constraint matview. The bullet list points operators at
+# the per-kind sheets where they'll find the formal SHOULD +
+# remediation, keeping THIS sheet focused on "today's surfaces"
+# rather than re-printing every kind's prose.
+_TODAYS_EXCEPTIONS_PANEL = """\
+**About this sheet**
+
+Today's Exceptions aggregates every L1 SHOULD-constraint violation
+that landed on the most recent business day. One row per violation,
+across all kinds -- drift, overdraft, limit breach, expected EOD
+balance breach, pending aging, unbundled aging.
+
+Drill from a row to the source sheet for that kind to see the
+formal SHOULD-constraint, the full column shape, and the
+remediation guidance specific to that violation:
+
+- **Drift** -- internal sub-ledger doesn't match the bank's
+  cumulative net.
+- **Overdraft** -- internal account went negative.
+- **Limit Breach** -- outbound flow exceeded the rail's cap.
+- **Pending Aging** -- transaction stuck in Pending past its
+  rail's max.
+- **Unbundled Aging** -- posted leg not bundled into an
+  AggregatingRail past the cap.
+- **Expected EOD Balance Breach** -- an account day declared an
+  expected EOD balance the stored balance didn't match.
+
+For supersession-audit diagnostics (which are not SHOULD-violations
+themselves), see the Supersession Audit sheet."""
+
+
+def _wire_invariant_panels(
+    *,
+    drift_sheet: Sheet,
+    overdraft_sheet: Sheet,
+    limit_breach_sheet: Sheet,
+    pending_aging_sheet: Sheet,
+    unbundled_aging_sheet: Sheet,
+    supersession_audit_sheet: Sheet,
+    todays_exceptions_sheet: Sheet,
+) -> None:
+    """AA.C.3 -- land per-invariant prose panels at the bottom of the
+    L1 dashboard sheets.
+
+    Six invariant sheets get one or more :class:`TextBox` panels
+    composed from the L1_Invariants.md sections (AA.C.2 parser +
+    :func:`panel_markdown`). Today's Exceptions gets a single
+    hand-authored intro panel that points at the per-kind sheets
+    (AA.C.3.e -- avoiding a seven-panel stack here)."""
+    sections = load_bundled_invariants()
+    sheet_targets = {
+        "drift": drift_sheet,
+        "overdraft": overdraft_sheet,
+        "limit_breach": limit_breach_sheet,
+        "pending_aging": pending_aging_sheet,
+        "unbundled_aging": unbundled_aging_sheet,
+        "supersession_audit": supersession_audit_sheet,
+    }
+    for sheet_key, kinds in _PER_SHEET_PANELS.items():
+        sheet = sheet_targets[sheet_key]
+        for kind in kinds:
+            section = sections[kind]
+            sheet.layout.row(height=_PANEL_LAYOUT_HEIGHT).add_text_box(
+                TextBox(
+                    text_box_id=f"l1-{kind}-panel",
+                    content=rt.text_box(
+                        rt.markdown(panel_markdown(section)),
+                    ),
+                ),
+                width=_FULL,
+            )
+    # Today's Exceptions hand-authored intro panel.
+    todays_exceptions_sheet.layout.row(
+        height=_PANEL_LAYOUT_HEIGHT,
+    ).add_text_box(
+        TextBox(
+            text_box_id="l1-todays-exceptions-panel",
+            content=rt.text_box(rt.markdown(_TODAYS_EXCEPTIONS_PANEL)),
+        ),
+        width=_FULL,
+    )
+
+
 def build_l1_dashboard_app(
     cfg: Config,
     *,
@@ -2459,6 +2571,19 @@ def build_l1_dashboard_app(
             SHEET_LIMIT_BREACH: limit_breach_sheet,
             SHEET_TRANSACTIONS: transactions_sheet,
         },
+    )
+
+    # AA.C.3 — exception-literacy panels (sheet-bottom rich-text from
+    # L1_Invariants.md). Per-kind on the 6 invariant sheets, generic
+    # intro on Today's Exceptions.
+    _wire_invariant_panels(
+        drift_sheet=drift_sheet,
+        overdraft_sheet=overdraft_sheet,
+        limit_breach_sheet=limit_breach_sheet,
+        pending_aging_sheet=pending_aging_sheet,
+        unbundled_aging_sheet=unbundled_aging_sheet,
+        supersession_audit_sheet=supersession_audit_sheet,
+        todays_exceptions_sheet=todays_exceptions_sheet,
     )
 
     app.create_dashboard(

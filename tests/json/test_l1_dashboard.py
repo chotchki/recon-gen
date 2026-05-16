@@ -652,14 +652,27 @@ def test_getting_started_coverage_lists_l2_inventory() -> None:
     assert "limit schedules" in coverage_xml
 
 
+def _text_box_by_id(sheet, text_box_id: str):
+    """Lookup helper — find one TextBox on ``sheet`` by its id. AA.C.3
+    added per-invariant panels at sheet bottom, so tests can no longer
+    rely on a sheet having exactly one TextBox; key off the specific
+    intro / config / footer id instead."""
+    for tb in sheet.text_boxes:
+        if tb.text_box_id == text_box_id:
+            return tb
+    raise AssertionError(
+        f"no TextBox with id {text_box_id!r}; sheet has "
+        f"{[tb.text_box_id for tb in sheet.text_boxes]!r}"
+    )
+
+
 def test_drift_sheet_lists_internal_accounts_from_l2() -> None:
     """M.2a.7: Drift sheet's top TextBox enumerates internal accounts
     + roles from the L2 instance — analysts see the universe drift can
     surface against without leaving the sheet."""
     app = build_l1_dashboard_app(_CFG)
     drift = app.analysis.sheets[1]
-    assert len(drift.text_boxes) == 1
-    accounts_xml = drift.text_boxes[0].content
+    accounts_xml = _text_box_by_id(drift, "l1-drift-accounts").content
     assert "Internal Accounts in Scope" in accounts_xml
     # Sasquatch fixture has at least one GL control + one DDA template;
     # both should appear.
@@ -681,8 +694,7 @@ def test_limit_breach_sheet_lists_l2_caps() -> None:
     configured" before "what got breached"."""
     app = build_l1_dashboard_app(_CFG)
     lb = _sheet_by_name(app, "Limit Breach")
-    assert len(lb.text_boxes) == 1
-    config_xml = lb.text_boxes[0].content
+    config_xml = _text_box_by_id(lb, "l1-lb-config").content
     assert "Configured Caps" in config_xml
     # Each LimitSchedule renders a `parent_role × transfer_type: $cap`
     # line; the multiplication-sign separator is a structural marker
@@ -698,12 +710,72 @@ def test_todays_exceptions_footer_carries_l2_description() -> None:
     welcome, anchored at the bottom of the unified-view landing page."""
     app = build_l1_dashboard_app(_CFG)
     te = _sheet_by_name(app, "Today's Exceptions")
-    assert len(te.text_boxes) == 1
-    footer_xml = te.text_boxes[0].content
+    footer_xml = _text_box_by_id(te, "l1-te-l2-footer").content
     assert "Institution Context" in footer_xml
     # Same fixture string the Getting Started welcome uses (M.3.2:
     # default L2 instance is spec_example).
     assert "Generic SPEC-shaped instance" in footer_xml
+
+
+# -- AA.C.3 exception-literacy panels ---------------------------------------
+
+
+def test_aa_c_3_invariant_sheets_carry_per_kind_panels() -> None:
+    """AA.C.3.d: each L1 invariant sheet has a sheet-bottom panel
+    carrying the L1_Invariants.md prose for its kind(s). Drift sheet
+    carries TWO panels (drift + ledger_drift) since both invariants
+    surface on the same sheet."""
+    app = build_l1_dashboard_app(_CFG)
+    # (sheet_name, panel_text_box_id, title_marker_in_content).
+    # title_marker = the human title from L1_Invariants.md heading;
+    # panel_markdown leads with `**<title>**` so it lands in the
+    # rendered xml.
+    cases = [
+        ("Drift", "l1-drift-panel", "Sub-ledger drift"),
+        ("Drift", "l1-ledger_drift-panel", "Parent-account roll-up drift"),
+        ("Overdraft", "l1-overdraft-panel", "Non-negative balance"),
+        ("Limit Breach", "l1-limit_breach-panel", "Outbound flow cap"),
+        ("Pending Aging", "l1-stuck_pending-panel",
+         "Per-rail pending aging"),
+        ("Unbundled Aging", "l1-stuck_unbundled-panel",
+         "Per-rail unbundled aging"),
+        ("Supersession Audit", "l1-supersession_audit-panel",
+         "Supersession Audit"),
+    ]
+    for sheet_name, panel_id, title_marker in cases:
+        sheet = _sheet_by_name(app, sheet_name)
+        panel = _text_box_by_id(sheet, panel_id)
+        assert title_marker in panel.content, (
+            f"{sheet_name!r}.{panel_id!r}: missing title marker "
+            f"{title_marker!r}"
+        )
+        # Every panel must carry the remediation block.
+        assert "Action." in panel.content, (
+            f"{sheet_name!r}.{panel_id!r}: missing **Action.** "
+            f"remediation block"
+        )
+
+
+def test_aa_c_3_e_todays_exceptions_intro_panel_lists_every_kind() -> None:
+    """AA.C.3.e: Today's Exceptions gets a generic intro panel pointing
+    at the per-kind sheets — not seven stacked per-kind panels. The
+    intro names every invariant kind so analysts know where to drill."""
+    app = build_l1_dashboard_app(_CFG)
+    te = _sheet_by_name(app, "Today's Exceptions")
+    intro = _text_box_by_id(te, "l1-todays-exceptions-panel")
+    # Every L1 invariant the dashboard surfaces gets a mention so
+    # analysts know which kinds the aggregated table covers.
+    for label in (
+        "Drift", "Overdraft", "Limit Breach",
+        "Pending Aging", "Unbundled Aging",
+        "Expected EOD Balance Breach",
+    ):
+        assert label in intro.content, (
+            f"intro panel missing kind {label!r}"
+        )
+    # Supersession Audit is referenced as "not a SHOULD" and pointed
+    # at its own sheet — verify the cross-reference is present.
+    assert "Supersession Audit" in intro.content
 
 
 # -- Per-sheet filter controls (M.2b.3) --------------------------------------

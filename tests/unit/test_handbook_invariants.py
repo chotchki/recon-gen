@@ -17,6 +17,7 @@ from quicksight_gen.common.handbook.invariants import (
     INVARIANT_KIND_TO_SHEET,
     InvariantSection,
     load_bundled_invariants,
+    panel_markdown,
     parse_l1_invariants,
 )
 
@@ -260,3 +261,136 @@ def test_bundled_invariants_drift_carries_the_expected_columns() -> None:
     assert "account_id" in drift.columns
     assert "drift" in drift.columns
     assert "business_day_start" in drift.columns
+
+
+# -- what_to_do extraction tests --------------------------------------------
+
+
+def test_parse_l1_invariants_extracts_what_to_do_and_strips_from_body() -> None:
+    md = """\
+### 1. `{{ l2_instance_name }}_drift` — Sub-ledger drift
+
+> Drift SHOULD equal 0.
+
+Drift body prose.
+
+**Columns:** `account_id`, `drift`.
+
+**What to do:** Diff the day's transactions for `account_id`
+and re-load the source feed.
+"""
+    drift = parse_l1_invariants(md)["drift"]
+    # Extracted as its own field with the wrapped lines collapsed to
+    # a single sentence for panel display.
+    assert drift.what_to_do == (
+        "Diff the day's transactions for `account_id` and re-load the "
+        "source feed."
+    )
+    # And dropped from body so the panel can style the action separately.
+    assert "**What to do:**" not in drift.body
+    assert "Diff the day's transactions" not in drift.body
+    # But the rest of body is intact.
+    assert "Drift body prose." in drift.body
+    assert "**Columns:**" in drift.body
+
+
+def test_parse_l1_invariants_no_what_to_do_returns_empty_string() -> None:
+    md = """\
+### 1. `{{ l2_instance_name }}_drift` — Sub-ledger drift
+
+> Drift SHOULD equal 0.
+
+Body without remediation.
+"""
+    drift = parse_l1_invariants(md)["drift"]
+    # Soft contract — empty string when the section omits the line.
+    assert drift.what_to_do == ""
+    # Body unchanged.
+    assert drift.body == "Body without remediation."
+
+
+def test_bundled_invariants_every_kind_has_what_to_do() -> None:
+    # AA.C.2 added a **What to do:** line to every section in the
+    # bundled doc. Losing one here would orphan a sheet panel's
+    # remediation block — fail loudly when a doc edit drops one.
+    sections = load_bundled_invariants()
+    for kind, section in sections.items():
+        assert section.what_to_do, (
+            f"{kind!r}: bundled section is missing the **What to do:** "
+            f"line — AA.C.3's panel wiring expects one per kind"
+        )
+
+
+def test_bundled_invariants_what_to_do_stripped_from_body() -> None:
+    # Body must NOT carry the **What to do:** line — the panel
+    # helper composes body + what_to_do separately, so a leftover
+    # in body would duplicate the remediation on screen.
+    sections = load_bundled_invariants()
+    for kind, section in sections.items():
+        assert "**What to do:**" not in section.body, (
+            f"{kind!r}: body still contains the What to do marker"
+        )
+
+
+# -- panel_markdown shape tests ---------------------------------------------
+
+
+def test_panel_markdown_composes_title_blockquote_body_action() -> None:
+    section = InvariantSection(
+        kind="drift",
+        title="Sub-ledger drift",
+        short_statement="Drift SHOULD equal 0.",
+        body="Drift body prose.\n\n**Columns:** `account_id`.",
+        columns=("account_id",),
+        what_to_do="Re-load the source feed.",
+    )
+    md = panel_markdown(section)
+    assert md == (
+        "**Sub-ledger drift**\n\n"
+        "> Drift SHOULD equal 0.\n\n"
+        "Drift body prose.\n\n**Columns:** `account_id`.\n\n"
+        "**Action.** Re-load the source feed."
+    )
+
+
+def test_panel_markdown_omits_blockquote_for_descriptive_section() -> None:
+    # Supersession Audit has no SHOULD-constraint blockquote — the
+    # panel skips that section instead of rendering an empty `>`.
+    section = InvariantSection(
+        kind="supersession_audit",
+        title="Supersession Audit",
+        short_statement="",
+        body="Diagnostic view body.",
+        columns=(),
+        what_to_do="Diff entries when count is unusually high.",
+    )
+    md = panel_markdown(section)
+    assert "> " not in md, "empty short_statement should not render as a blockquote"
+    assert md == (
+        "**Supersession Audit**\n\n"
+        "Diagnostic view body.\n\n"
+        "**Action.** Diff entries when count is unusually high."
+    )
+
+
+def test_panel_markdown_omits_action_when_what_to_do_missing() -> None:
+    # Defensive: a section without remediation still renders cleanly.
+    section = InvariantSection(
+        kind="x", title="X", short_statement="X SHOULD hold.",
+        body="X body.", columns=(), what_to_do="",
+    )
+    md = panel_markdown(section)
+    assert "**Action.**" not in md
+    assert md == "**X**\n\n> X SHOULD hold.\n\nX body."
+
+
+def test_panel_markdown_renders_for_every_bundled_kind() -> None:
+    # End-to-end: every bundled section composes a non-empty panel.
+    sections = load_bundled_invariants()
+    for kind, section in sections.items():
+        md = panel_markdown(section)
+        assert md, f"{kind!r}: panel_markdown returned empty string"
+        # Title + Action lines are mandatory; short_statement is
+        # optional for supersession_audit.
+        assert f"**{section.title}**" in md
+        assert "**Action.**" in md
