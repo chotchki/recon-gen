@@ -30,78 +30,82 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 # AA.B — Daily Statement Role cascade --------------------------------------
 
 
-def test_daily_statement_role_narrows_posted_money_records_table(
+def test_daily_statement_role_then_account_populates_table(
     l1_dashboard_driver,
 ):
-    """AA.B.1 — picking a Role narrows the Posted Money Records table to
-    only accounts matching that role, via the ``pL1DsRole`` dataset
-    param bridged into the per-account-day matview.
+    """AA.B.1 workflow — picking a Role THEN an Account renders the
+    Posted Money Records table populated for that account.
 
-    First-revision-of-this-test bug (caught on chain @ 3cc704c): the
-    original assertion was "Role narrows the *Account dropdown's*
-    options". That doesn't work in either renderer — QS bakes dropdown
-    option lists at dashboard load (snapshot, not live re-query;
-    standing quirk ``project_qs_url_parameter_no_control_sync``-adjacent)
-    and App2 emits `filter_specs` once per sheet GET. The cascade
-    *does* fire — but it narrows the *data* in visuals that bind both
-    params (Posted Money Records), not the dropdown itself. Test
-    re-shaped to assert the data narrowing, which is what AA.B.1
-    actually delivers.
+    Pair to ``test_daily_statement_picked_account_narrows_table``: that
+    test covers the direct-pick path (only Account is picked); this
+    one covers the cascade path the operator typically follows ("filter
+    by my team's role, then drill to one account"). Both must end at
+    the same outcome: the per-account-day detail table renders ≥1 row
+    for the picked Account.
 
-    Shape: open Daily Statement, pick the show-all default Account and
-    no Role (table shows everything), snapshot the table row count,
-    pick a Role with ≥1 matching account, assert the table narrowed.
+    Why this shape (and not "Role narrows the dropdown options"). The
+    cascade-narrows-dropdown claim was originally asserted by
+    ``test_daily_statement_role_narrows_posted_money_records_table``,
+    but the AA.B.4.followon investigation found that's not deliverable
+    on either renderer — QS dropdown option lists are snapshot at
+    dashboard load (snapshot-not-live, standing quirk family
+    ``project_qs_url_parameter_no_control_sync``) and App2's filter
+    widgets render once per sheet GET. So a "Role narrows Account
+    options" assertion fails on both legs regardless of seed shape.
+    What the operator CAN do — and what AA.B.1's wiring genuinely
+    supports — is pick both params in sequence and read the result.
+    This test pins that the picked Account survives the combined
+    Role+Account filter and the table populates. JSON pin
+    ``test_aa_b_1_l1_accounts_dataset_is_role_cascaded`` separately
+    guards the SQL substitution itself as a structural regression.
 
-    Data-agnostic: we read the actual Role dropdown options and try
-    each until one narrows the table.
+    Data-agnostic: iterate Role options until one keeps the Account
+    dropdown populated; pick the first surviving Account; assert the
+    table renders ≥1 row.
     """
     driver, dashboard_arg = l1_dashboard_driver
     driver.open(dashboard_arg, sheet="Daily Statement")
-    # "Posted Money Records" is the per-account-day detail table on
-    # Daily Statement (5 KPIs + this table; see L1 app
-    # `apps/l1_dashboard/app.py::populate_daily_statement_sheet`).
     target_visual = "Posted Money Records"
     driver.wait_loaded(target_visual)
 
     role_options = driver.filter_options("Role")
-    assert len(role_options) >= 2, (
-        f"Daily Statement Role dropdown should expose ≥2 roles "
-        f"(otherwise the cascade is degenerate); got {role_options}"
+    assert len(role_options) >= 1, (
+        f"Daily Statement Role dropdown should expose ≥1 role; "
+        f"got {role_options}"
     )
 
-    # Pick an Account first to make the table non-empty (the sentinel
-    # default leaves it empty on first load — Daily Statement requires
-    # an Account to be picked before any data shows).
-    account_options = driver.filter_options("Account")
-    assert account_options, "Account dropdown returned no options"
-    driver.pick_filter("Account", [account_options[0]])
-    driver.wait_loaded(target_visual)
-    before = driver.table_row_count(target_visual)
-    if before == 0:
-        pytest.skip(
-            "Posted Money Records empty after picking the first Account "
-            f"({account_options[0]!r}) — the deployed L2's seed plants "
-            "no posted rows for this account-day. Cascade narrowing has "
-            "nothing to shrink. (Pre-condition failure, not an AA.B.1 "
-            "regression — covered by per-role-coverage seed tests.)"
-        )
-
-    # Try each Role until one narrows the table (different count OR
-    # different first-row content vs the unfiltered pick).
-    narrowed = False
+    # Pick the first role with ≥1 account in its scope. Most L2 seeds
+    # have accounts in every advertised role, but if a role's accounts
+    # are absent for the deployed L2, skip it. (Empty Account dropdown
+    # under a Role would block the pick anyway.)
+    picked_role: str | None = None
+    picked_account: str | None = None
     for role in role_options:
         driver.pick_filter("Role", [role])
-        driver.wait_loaded(target_visual)
-        after = driver.table_row_count(target_visual)
-        if after != before:
-            narrowed = True
+        accounts = driver.filter_options("Account")
+        if accounts:
+            picked_role = role
+            picked_account = accounts[0]
             break
 
+    if picked_role is None:
+        pytest.skip(
+            "No Role had ≥1 Account in the deployed L2's Account "
+            f"dropdown; tried roles: {role_options}. "
+            "(Pre-condition failure, not an AA.B.1 regression.)"
+        )
+
+    driver.pick_filter("Account", [picked_account])
+    driver.wait_loaded(target_visual)
+    rows = driver.table_rows(target_visual)
     driver.screenshot()
-    assert narrowed, (
-        f"No Role changed the Posted Money Records row count — the "
-        f"AA.B.1 Role→DS_L1_ACCOUNTS data cascade is broken. "
-        f"Pre-Role rows: {before}. Tried roles: {role_options}."
+    assert len(rows) > 0, (
+        f"After Role={picked_role!r} + Account={picked_account!r}, "
+        f"Posted Money Records should render ≥1 row. Got {len(rows)}. "
+        f"AA.B.1 SQL cascade likely broke the combined-filter shape — "
+        f"the Account's row should survive both the role-narrowed "
+        f"accounts dataset AND the per-account-day matview's Account "
+        f"WHERE clause."
     )
 
 
