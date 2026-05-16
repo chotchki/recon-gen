@@ -10,7 +10,7 @@ Total: **{{ l2.rails|length }}** rails declared on
 labeled edge.
 
 {% for r in l2.rails %}
-## {{ r.name }} — `{{ r.transfer_type }}`
+## {{ r.name }} — `{{ r.rail_name }}`
 
 {{ r.description or "_(no description on the L2 YAML)_" }}
 

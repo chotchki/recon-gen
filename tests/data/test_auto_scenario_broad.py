@@ -56,8 +56,20 @@ L2_FIXTURES = [
 
 
 @pytest.fixture(params=L2_FIXTURES)
-def instance(request) -> L2Instance:
-    return load_instance(request.param)
+def _l2_yaml_path(request) -> Path:
+    return request.param
+
+
+@pytest.fixture
+def instance(_l2_yaml_path: Path) -> L2Instance:
+    return load_instance(_l2_yaml_path)
+
+
+@pytest.fixture
+def db_prefix(_l2_yaml_path: Path) -> str:
+    """Z.C — DB-table prefix for the parameterized L2. The yaml file
+    stem stands in for the dropped ``L2Instance.instance`` field."""
+    return _l2_yaml_path.stem
 
 
 # ---------------------------------------------------------------------------
@@ -324,17 +336,19 @@ def test_broad_mode_is_deterministic(instance: L2Instance) -> None:
     assert a.scenario == b.scenario
 
 
-def test_emit_seed_accepts_broad_mode_plants(instance: L2Instance) -> None:
+def test_emit_seed_accepts_broad_mode_plants(
+    instance: L2Instance, db_prefix: str,
+) -> None:
     """The new RailFiringPlant flows through emit_seed without raising
     and produces well-formed SQL (contains INSERT INTO ... and
     references the broad mode plant rows)."""
     report = default_scenario_for(
         instance, today=CANONICAL_TODAY, mode="broad",
     )
-    sql = emit_seed(instance, report.scenario)
+    sql = emit_seed(instance, report.scenario, prefix=db_prefix)
     # Sanity: SQL is non-empty, references the prefix, and the
     # rail-firing tx_id pattern (tx-rail-NNNN) appears.
     assert sql
-    assert f"INSERT INTO {instance.instance}_transactions" in sql
+    assert f"INSERT INTO {db_prefix}_transactions" in sql
     if report.scenario.rail_firing_plants:
         assert "tx-rail-" in sql

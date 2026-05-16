@@ -37,6 +37,8 @@ def min_config(tmp_path: Path) -> Path:
         "aws_region: us-west-2\n"
         "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
         ":datasource/ds\n"
+        "deployment_name: qsgen-test\n"
+        "db_table_prefix: test\n"
     )
     return cfg
 
@@ -72,8 +74,8 @@ def test_schema_apply_emits_ddl_to_stdout(min_config: Path):
     )
     assert result.exit_code == 0, result.output
     assert "CREATE TABLE" in result.output
-    assert "spec_example_transactions" in result.output
-    assert "spec_example_daily_balances" in result.output
+    assert "test_transactions" in result.output
+    assert "test_daily_balances" in result.output
 
 
 def test_schema_apply_emits_to_file(min_config: Path, tmp_path: Path):
@@ -93,7 +95,7 @@ def test_schema_apply_emits_to_file(min_config: Path, tmp_path: Path):
     assert out.is_file()
     sql = out.read_text()
     assert "CREATE TABLE" in sql
-    assert "spec_example_transactions" in sql
+    assert "test_transactions" in sql
 
 
 def test_schema_clean_emits_drops_to_stdout(min_config: Path):
@@ -110,4 +112,4 @@ def test_schema_clean_emits_drops_to_stdout(min_config: Path):
     )
     assert result.exit_code == 0, result.output
     assert "DROP" in result.output
-    assert "spec_example_transactions" in result.output
+    assert "test_transactions" in result.output

@@ -63,15 +63,19 @@ class _FakeCfg:
     """Minimal cfg surface the query functions touch.
 
     They check ``demo_database_url`` (truthy → run; None → early
-    return) and ``dialect`` (the latter dispatches the per-dialect
-    date literal in ``date_literal``). The patched ``connect_demo_db``
+    return), ``dialect`` (the latter dispatches the per-dialect
+    date literal in ``date_literal``), and ``db_table_prefix``
+    (Z.C — used as the matview name prefix; was previously read
+    off the L2 instance). The patched ``connect_demo_db``
     ignores ``demo_database_url`` so any truthy string suffices; the
     ``dialect`` value, in contrast, IS load-bearing — it picks which
     SQL form ``date_literal`` returns. Default is ``POSTGRES`` so the
-    locked snapshots match the PG/Oracle form.
+    locked snapshots match the PG/Oracle form. ``db_table_prefix``
+    defaults to ``ut`` to match the locked SQL string literals.
     """
     demo_database_url: str = "postgresql://stub/stub"
     dialect: Dialect = Dialect.POSTGRES
+    db_table_prefix: str = "ut"
 
 
 @dataclass
@@ -218,7 +222,7 @@ _OVERDRAFT_SQL = (
 _LIMIT_BREACH_SQL = (
     "SELECT account_id, account_name, account_role,"
     "       account_parent_role, business_day,"
-    "       transfer_type, outbound_total, cap"
+    "       rail_name, outbound_total, cap"
     "  FROM ut_limit_breach"
     " WHERE business_day >= DATE '2030-01-01'"
     "   AND business_day < DATE '2030-01-08'"
@@ -229,7 +233,7 @@ _LIMIT_BREACH_SQL = (
 _STUCK_PENDING_SQL = (
     "SELECT account_id, account_name, account_role,"
     "       account_parent_role, transaction_id,"
-    "       transfer_type, posting, amount_money,"
+    "       rail_name, posting, amount_money,"
     "       age_seconds, max_pending_age_seconds"
     "  FROM ut_stuck_pending"
     " ORDER BY age_seconds DESC, account_id"
@@ -238,7 +242,7 @@ _STUCK_PENDING_SQL = (
 _STUCK_UNBUNDLED_SQL = (
     "SELECT account_id, account_name, account_role,"
     "       account_parent_role, transaction_id,"
-    "       transfer_type, posting, amount_money,"
+    "       rail_name, posting, amount_money,"
     "       age_seconds, max_unbundled_age_seconds"
     "  FROM ut_stuck_unbundled"
     " ORDER BY age_seconds DESC, account_id"

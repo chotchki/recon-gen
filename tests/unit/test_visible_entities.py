@@ -53,7 +53,7 @@ def test_no_focus_returns_all_entities() -> None:
         for c in inst.chains
     )
     assert v["limit_schedule"] == frozenset(
-        f"{ls.parent_role}::{ls.transfer_type}"
+        f"{ls.parent_role}::{ls.rail}"
         for ls in inst.limit_schedules
     )
 

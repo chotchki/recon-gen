@@ -104,7 +104,7 @@ walkthrough has the full SQL projection.
 Your card processor sends a daily settlement file. Each row is
 the processor's view of money landing in your account. These
 become `{{ l2_instance_name }}_transactions` rows with
-`transfer_type = 'external_txn'`,
+`rail_name = 'external_txn'`,
 `origin = 'ExternalForcePosted'`, and a populated
 `external_system` (e.g., `BankSync`, `PaymentHub`).
 

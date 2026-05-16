@@ -373,7 +373,7 @@ _TRANSACTIONS_DESCRIPTION = (
 
 def _analysis_name(cfg: Config, l2_instance: L2Instance) -> str:
     """Title shown on the deployed QuickSight Analysis."""
-    return f"L1 Reconciliation Dashboard ({l2_instance.instance})"
+    return f"L1 Reconciliation Dashboard ({cfg.deployment_name})"
 
 
 # -- L2-prose helpers --------------------------------------------------------
@@ -416,7 +416,7 @@ def _l2_limit_schedule_lines(l2_instance: L2Instance) -> list[str]:
     for ls in l2_instance.limit_schedules:
         # Money is a Decimal; format with thousands separators + 2dp.
         cap_str = f"${ls.cap:,.2f}/day"
-        head = f"{ls.parent_role} × {ls.transfer_type}: {cap_str}"
+        head = f"{ls.parent_role} × {ls.rail}: {cap_str}"
         if ls.description:
             lines.append(f"{head} — {ls.description}")
         else:
@@ -908,7 +908,7 @@ def _populate_todays_exceptions_sheet(
             ds["account_role"].dim(),
             ds["account_parent_role"].dim(),
             business_day_col,
-            ds["transfer_type"].dim(),
+            ds["rail_name"].dim(),
             magnitude_col,
         ],
         sort_by=(magnitude_col, "DESC"),
@@ -968,13 +968,13 @@ def _populate_limit_breach_sheet(
     """Limit Breach sheet — KPI + per-(account, day, type) breach table.
 
     Single dataset (`<prefix>_limit_breach`). Each row is one cell where
-    cumulative outbound debit on that (account, day, transfer_type)
+    cumulative outbound debit on that (account, day, rail_name)
     exceeded the L2-configured cap. The cap column lives next to the
     outbound_total so analysts can read both numbers at once. Right-click
     any row → Daily Statement for that account-day (M.2b.7).
 
     M.2a.7: top-of-sheet TextBox enumerates the L2 LimitSchedules
-    (parent_role × transfer_type → cap, plus L2-supplied prose) so
+    (parent_role × rail_name → cap, plus L2-supplied prose) so
     analysts see "what's configured" before "what got breached" —
     description-driven, not hardcoded.
     """
@@ -1002,7 +1002,7 @@ def _populate_limit_breach_sheet(
         width=_FULL,
         title="Limit Breach Cells",
         subtitle=(
-            "Count of (account, day, transfer_type) cells where the "
+            "Count of (account, day, rail_name) cells where the "
             "outbound total exceeded the L2-configured cap."
         ),
         values=[ds_lb["account_id"].count()],
@@ -1014,7 +1014,7 @@ def _populate_limit_breach_sheet(
         width=_FULL,
         title="Limit Breach Detail",
         subtitle=(
-            "Each (account, day, transfer_type) cell where outbound "
+            "Each (account, day, rail_name) cell where outbound "
             "debit > cap. `outbound_total` and `cap` shown side-by-side "
             "so the magnitude of the breach is readable in-line. "
             "Right-click any row → View Daily Statement."
@@ -1025,7 +1025,7 @@ def _populate_limit_breach_sheet(
             ds_lb["account_role"].dim(),
             ds_lb["account_parent_role"].dim(),
             day_col,
-            ds_lb["transfer_type"].dim(),
+            ds_lb["rail_name"].dim(),
             ds_lb["outbound_total"].numerical(currency=True),
             ds_lb["cap"].numerical(currency=True),
         ],
@@ -1119,7 +1119,7 @@ def _populate_pending_aging_sheet(
             ds["account_id"].dim(),
             ds["account_name"].dim(),
             transfer_col,
-            ds["transfer_type"].dim(),
+            ds["rail_name"].dim(),
             ds["rail_name"].dim(),
             ds["amount_money"].numerical(currency=True),
             ds["amount_direction"].dim(),
@@ -1209,7 +1209,7 @@ def _populate_unbundled_aging_sheet(
             ds["account_id"].dim(),
             ds["account_name"].dim(),
             transfer_col,
-            ds["transfer_type"].dim(),
+            ds["rail_name"].dim(),
             ds["rail_name"].dim(),
             ds["amount_money"].numerical(currency=True),
             ds["amount_direction"].dim(),
@@ -1313,7 +1313,7 @@ def _populate_supersession_audit_sheet(
             ds_tx["account_id"].dim(),
             ds_tx["account_name"].dim(),
             ds_tx["transfer_id"].dim(),
-            ds_tx["transfer_type"].dim(),
+            ds_tx["rail_name"].dim(),
             ds_tx["rail_name"].dim(),
             ds_tx["amount_money"].numerical(currency=True),
             ds_tx["amount_direction"].dim(),
@@ -1366,7 +1366,7 @@ def _populate_transactions_sheet(
     No KPIs above the table — the value of this sheet is "show me every
     leg + filter to the slice I care about." Filter dropdowns (wired in
     `_wire_per_sheet_dropdowns`) cover account / transfer / status /
-    origin / transfer_type. M.2b.2 link tint on `account_id` +
+    origin / rail_name. M.2b.2 link tint on `account_id` +
     `transfer_id` cues the M.2b.7 drill plumbing.
     """
     accent = theme.accent
@@ -1389,7 +1389,7 @@ def _populate_transactions_sheet(
             ds_tx["account_name"].dim(),
             ds_tx["account_role"].dim(),
             transfer_col,
-            ds_tx["transfer_type"].dim(),
+            ds_tx["rail_name"].dim(),
             ds_tx["rail_name"].dim(),
             ds_tx["amount_money"].numerical(currency=True),
             ds_tx["amount_direction"].dim(),
@@ -1479,7 +1479,7 @@ def _populate_daily_statement_sheet(
         columns=[
             ds_txn["transaction_id"].dim(),
             transfer_col,
-            ds_txn["transfer_type"].dim(),
+            ds_txn["rail_name"].dim(),
             ds_txn["amount_money"].numerical(currency=True),
             ds_txn["amount_direction"].dim(),
             ds_txn["status"].dim(),
@@ -1659,7 +1659,7 @@ def _populate_pushdown_enum_dropdown(
     deselect to narrow. No analysis-level FilterGroup — emptying the
     dropdown reverts each dataset param to its default (= all values);
     QS does not emit ``IN ()``. Use for bounded enum columns
-    (``transfer_type`` / ``rail_name`` / ``account_role`` / ``supersedes``
+    (``rail_name`` / ``rail_name`` / ``account_role`` / ``supersedes``
     / ``check_type``); for data-value columns use
     ``_populate_pushdown_value_dropdown``.
     """
@@ -2207,21 +2207,15 @@ def build_l1_dashboard_app(
     (Overdraft, Limit Breach, Today's Exceptions). Each sheet IS one
     L1 SHOULD-constraint visualized via the M.1a.7 invariant views.
 
-    Dashboard ID convention: ``<resource_prefix>-<l2_prefix>-l1-dashboard``
-    (M.2d.3) — the L2 instance prefix becomes the middle segment so N
-    apps (L1, PR, Exec) can deploy against the same L2 instance, AND
-    the same app can deploy against N L2 instances, all in one QS
-    account without collision. The L2 instance prefix is derived
-    automatically from ``l2_instance.instance`` here so callers don't
-    have to pre-stamp ``cfg.l2_instance_prefix``; if the caller HAS
-    pre-set it (e.g. an integrator running a custom build), that
-    value is preserved.
+    Dashboard ID convention: ``<deployment_name>-l1-dashboard`` (Z.C) —
+    ``cfg.deployment_name`` is the operator-set per-deployment namespace
+    that lets N apps (L1, PR, Exec) deploy against the same L2 instance,
+    AND the same app deploy against N L2 instances, all in one QS account
+    without collision. The cfg arrives fully populated (``deployment_name``
+    + ``db_table_prefix`` are required cfg fields); no auto-stamping dance.
     """
     if l2_instance is None:
         l2_instance = default_l2_instance()
-
-    if cfg.l2_instance_prefix is None:
-        cfg = cfg.with_l2_instance_prefix(str(l2_instance.instance))
 
     # N.1.e / N.4.k — resolve theme once from the L2 instance, coerced
     # to the registry default for in-canvas accent colors when the
@@ -2390,7 +2384,7 @@ def build_l1_dashboard_app(
     )
 
     # M.2b.3 + M.2b.5 + M.2b.10 + M.2b.11 + M.2b.12 — Per-sheet
-    # category filter dropdowns (account / role / transfer_type /
+    # category filter dropdowns (account / role / rail_name /
     # check_type / status / origin / rail_name / supersedes as
     # appropriate per sheet).
     _wire_per_sheet_dropdowns(

@@ -3,7 +3,7 @@
 Two datasets, both reading the shared base tables:
 
 - ``exec_transaction_summary`` — one row per ``(posted_date,
-  transfer_type)`` aggregated from ``transactions``. Drives the
+  rail_name)`` aggregated from ``transactions``. Drives the
   Transaction Volume Over Time + Money Moved sheets.
 - ``exec_account_summary`` — one row per ``account_id`` joined
   against an activity rollup over ``transactions``. Drives the
@@ -48,18 +48,14 @@ from quicksight_gen.common.sql.dialect import Dialect
 # M.4.4.5 — Executives reads base tables only; no app-specific
 # matviews. V.3 — but we still surface the base tables themselves on
 # the App Info sheet so the operator can see ETL freshness at a
-# glance. Sourced from cfg.l2_instance_prefix (always set when the
-# Executives app is built via resolve_l2_for_demo); empty list when
-# the prefix is None (legacy single-tenant mode that doesn't use
-# this app).
+# glance. Z.C — sourced from cfg.db_table_prefix (now a required cfg
+# field; loud-fails at load time when unset).
 def exec_matview_specs(cfg: Config) -> list[tuple[str, str | None]]:
     """Tables Executives reads, paired with their date columns for
     App Info's ``latest_date`` KPI. No app-specific matviews — just
     the base tables (which is what the Executives sheets aggregate
     over)."""
-    p = cfg.l2_instance_prefix
-    if not p:
-        return []
+    p = cfg.db_table_prefix
     return [
         (f"{p}_transactions", "posting"),
         (f"{p}_daily_balances", "business_day_start"),
@@ -83,7 +79,7 @@ DS_EXEC_ACCOUNT_SUMMARY_ACTIVE = "exec-account-summary-active-ds"
 
 EXEC_TRANSACTION_SUMMARY_CONTRACT = DatasetContract(columns=[
     ColumnSpec("posted_date", "DATETIME"),
-    ColumnSpec("transfer_type", "STRING", shape=ColumnShape.TRANSFER_TYPE),
+    ColumnSpec("rail_name", "STRING", shape=ColumnShape.TRANSFER_TYPE),
     ColumnSpec("transfer_count", "INTEGER"),
     ColumnSpec("gross_amount", "DECIMAL"),
     ColumnSpec("net_amount", "DECIMAL"),
@@ -103,24 +99,8 @@ EXEC_ACCOUNT_SUMMARY_CONTRACT = DatasetContract(columns=[
 # Builders
 # ---------------------------------------------------------------------------
 
-def _require_prefix(cfg: Config) -> str:
-    """Return ``cfg.l2_instance_prefix`` or raise.
-
-    Executives under L2-fed (N.4) requires ``build_executives_app`` to
-    have set ``cfg.l2_instance_prefix`` before any dataset SQL is
-    rendered. Build entry points either pre-stamp the field on the cfg
-    or auto-derive it from ``l2_instance.instance``.
-    """
-    if cfg.l2_instance_prefix is None:
-        raise ValueError(
-            "Executives datasets require cfg.l2_instance_prefix to be "
-            "set; build_executives_app derives it from the L2 instance."
-        )
-    return cfg.l2_instance_prefix
-
-
 def build_transaction_summary_dataset(cfg: Config) -> DataSet:
-    """Per-(date, transfer_type) aggregates: transfer count, gross + net dollars.
+    """Per-(date, rail_name) aggregates: transfer count, gross + net dollars.
 
     Aggregates per ``transfer_id`` first so multi-leg transfers are
     counted once, not once per leg. ``gross_amount`` is the per-transfer
@@ -137,29 +117,29 @@ def build_transaction_summary_dataset(cfg: Config) -> DataSet:
     # filter comes from the analysis-level FilterGroup); App2 gets
     # the bind-clause snippet from ``app2_date_filter`` so X.2.d's
     # filter form actually narrows the query.
-    p = _require_prefix(cfg)
+    p = cfg.db_table_prefix
     posted_date_expr = to_date("MIN(t.posting)", cfg.dialect)
     sql_template = f"""\
 WITH per_transfer AS (
     SELECT
         {posted_date_expr}     AS posted_date,
         t.transfer_id,
-        t.transfer_type,
+        t.rail_name,
         MAX(ABS(t.amount_money)) AS transfer_amount,
         SUM(t.amount_money)      AS transfer_net
     FROM {p}_transactions t
     WHERE t.status = 'Posted'
       {{date_filter}}
-    GROUP BY t.transfer_id, t.transfer_type
+    GROUP BY t.transfer_id, t.rail_name
 )
 SELECT
     posted_date,
-    transfer_type,
+    rail_name,
     COUNT(*)                   AS transfer_count,
     SUM(transfer_amount)       AS gross_amount,
     SUM(transfer_net)          AS net_amount
 FROM per_transfer
-GROUP BY posted_date, transfer_type"""
+GROUP BY posted_date, rail_name"""
     return build_dataset(
         cfg,
         cfg.prefixed("exec-transaction-summary-dataset"),
@@ -232,7 +212,7 @@ def build_account_summary_dataset(cfg: Config) -> DataSet:
     (output column kept as ``account_type`` so dashboard-side consumers
     don't need to follow the rename — only the SELECT does).
     """
-    p = _require_prefix(cfg)
+    p = cfg.db_table_prefix
     template = _account_summary_sql_template(p, cfg.dialect)
     sql = template.format(date_filter="", active_only="")
     return build_dataset(
@@ -264,7 +244,7 @@ def build_account_summary_active_dataset(cfg: Config) -> DataSet:
     (via ``app2_date_filter("")`` → analysis-level FilterGroup) and
     App2 (``:date_from`` / ``:date_to`` URL binds).
     """
-    p = _require_prefix(cfg)
+    p = cfg.db_table_prefix
     # Pre-substitute the {active_only} slot (identical on both QS + App2
     # sides), leaving {date_filter} for build_dataset's app2_date_column
     # path to fill in per dialect. .replace (not .format) — leaves the

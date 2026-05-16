@@ -92,7 +92,6 @@ def test_custom_scenario_routes_plants_to_correct_nodes(
             SupersessionPlant(
                 account_id=drift_account.id,
                 days_ago=3,
-                transfer_type="ach",
                 rail_name=Identifier("ExternalRailInbound"),
                 original_amount=Decimal("100.00"),
                 corrected_amount=Decimal("90.00"),

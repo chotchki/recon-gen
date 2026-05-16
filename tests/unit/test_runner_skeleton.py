@@ -472,7 +472,17 @@ def test_layer_command_app2_dispatches_html2_tests() -> None:
     """b.3.impl.layer — Layer 3.7 (App2 against local Docker) dispatches
     the test_html2_*.py files (stub + live-DB fetcher), plus
     test_dashboard_driver.py (X.2.u.6.followon — its App2Driver.smoke()
-    protocol-parity tests need only Playwright + the bundled smoke app)."""
+    protocol-parity tests need only Playwright + the bundled smoke app).
+
+    Z.B.14 — the dispatch carries ``-m "not browser"`` so the 3
+    ``@pytest.mark.browser`` tests in test_dashboard_driver.py
+    (``test_qs_l1_*``) are deselected at collection time. Earlier
+    reasoning that they "skip cleanly here" stopped holding once
+    Y.2.gate.h.1 made the runner auto-derive ``QS_E2E_USER_ARN``; the
+    QS-bound tests then actually try to run pre-deploy and probe a stale
+    cross-cell dashboard. Browser layer picks them up via its own
+    ``-m browser`` selector — no parallel addition needed there.
+    """
     cmd_env = runner._layer_command("app2", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env_addl = cmd_env
@@ -482,6 +492,14 @@ def test_layer_command_app2_dispatches_html2_tests() -> None:
     assert "test_html2_money_trail.py" in cmd_str
     assert "test_html2_l2ft.py" in cmd_str  # Y.2.app2.cde.l2ft-wiring.c
     assert "test_dashboard_driver.py" in cmd_str  # X.2.u.6.followon
+    # Z.B.14 — the deselect of QS-marked tests must show up as
+    # consecutive ``-m`` and ``not browser`` argv elements (no shell
+    # quoting in this codepath — argv is delivered directly to
+    # subprocess, so the args are list-literal).
+    assert "-m" in cmd
+    assert "not browser" in cmd
+    m_idx = cmd.index("-m")
+    assert cmd[m_idx + 1] == "not browser"
     # Behind QS_GEN_E2E=1 like every other tests/e2e/ file.
     assert env_addl["QS_GEN_E2E"] == "1"
     assert env_addl["QS_GEN_LAYER"] == "app2"
@@ -548,18 +566,35 @@ def test_layer_command_browser_dispatches_pytest_marked_browser(monkeypatch: Any
     `./run_e2e.sh` pattern). QS_E2E_USER_ARN comes through from the h.1
     derivation in `_run_one_variant`'s variant_env. Y.7-followup: the
     browser layer also gets `--reruns` (flaky live-cloud e2e auto-retry)
-    and a 60 s `QS_E2E_PAGE_TIMEOUT` default (operator override wins)."""
+    and a 60 s `QS_E2E_PAGE_TIMEOUT` default (operator override wins).
+
+    Z.B.12-followup (2026-05-15): the layer dispatches via a ``bash -c``
+    shell wrapper that chains TWO sequential pytest invocations — the
+    main browser tier with ``-n 4`` (excluding the audit-dashboard
+    agreement file via ``--ignore``) followed by the agreement file
+    with ``-n 1`` (its module-scoped ``seeded_audit`` fixture races
+    multiple workers on persistent Aurora schema applies). So we
+    assert against the joined shell string, not the argv list."""
     monkeypatch.delenv(QS_E2E_PAGE_TIMEOUT.name, raising=False)
     cmd_env = runner._layer_command("browser", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env = cmd_env
-    assert cmd[0].endswith("/pytest")
-    assert "-m" in cmd and "browser" in cmd
-    assert "tests/e2e/" in cmd
+    # bash -c '<chained pytests>'
+    assert cmd[0] == "bash"
+    assert cmd[1] == "-c"
+    chained = cmd[2]
+    assert "/pytest" in chained
+    assert "-m browser" in chained
+    assert "tests/e2e/" in chained
+    assert "--ignore=tests/e2e/test_audit_dashboard_agreement.py" in chained
+    assert "tests/e2e/test_audit_dashboard_agreement.py" in chained
+    # Two -n flags: the main tier (-n 4) AND the agreement tier (-n 1).
+    assert chained.count("-n ") >= 2
+    assert "-n 4" in chained
+    assert "-n 1" in chained
     assert env.get(QS_GEN_E2E.name) == "1"
-    assert "-n" in cmd and "4" in cmd
     # Y.7-followup — flaky-e2e retry + per-page timeout bump.
-    assert "--reruns" in cmd
+    assert "--reruns" in chained
     assert env.get(QS_E2E_PAGE_TIMEOUT.name) == "60000"
     # ...but an operator-set value wins (no env entry → subprocess
     # inherits the operator's).
@@ -3442,23 +3477,27 @@ def test_derive_qs_user_arn_boto3_errors_propagate(monkeypatch: Any) -> None:
 def test_resolve_l2_yaml_for_spec_named_synthesizes_with_spec_name(
     tmp_path: Path,
 ) -> None:
-    """m.4.f — sp/sq cells synthesize a per-cell yaml that's the bundled
-    fixture with the ``instance`` field overridden to ``spec.name``.
-    DB schema prefix downstream becomes ``<spec.name>_*`` so sister cells
-    deploying to shared external Aurora don't collide."""
+    """m.4.f + Z.C.9 — sp/sq cells synthesize a per-cell yaml that's the
+    bundled fixture with any legacy ``instance:`` key stripped (the L2
+    loader hard-rejects it post-Z.C). The per-cell DB-table prefix moves
+    to ``cfg.db_table_prefix`` via the ``QS_GEN_DB_TABLE_PREFIX`` env
+    override that ``_run_one_variant`` injects per cell — not via the
+    L2 yaml anymore."""
     spec = _spec_pg_aw()  # sp_pg_aw
     resolved = runner._resolve_l2_yaml_for_spec(spec, tmp_path)
     assert resolved == tmp_path / "_synth_l2.yaml"
     text = resolved.read_text()
-    assert "instance: sp_pg_aw" in text
+    # Z.C: instance: must NOT be in the synthesized yaml (loader rejects it).
+    assert "instance:" not in text
 
 
 def test_resolve_l2_yaml_for_spec_us_synthesizes_with_spec_name(
     tmp_path: Path,
 ) -> None:
-    """`us` cells: load the operator's yaml, override instance to
-    spec.name, write to run_dir/_synth_l2.yaml. Operator-supplied
-    content (accounts/rails/etc.) is preserved; only `instance` shifts."""
+    """`us` cells: load the operator's yaml, defensively pop any legacy
+    ``instance:`` key, write to run_dir/_synth_l2.yaml. Operator-supplied
+    content (accounts/rails/etc.) is preserved; the per-cell DB-table
+    prefix is set via env (Z.C.9)."""
     user_yaml = tmp_path / "my_custom.yaml"
     user_yaml.write_text(
         "instance: custom_name\n"
@@ -3474,7 +3513,8 @@ def test_resolve_l2_yaml_for_spec_us_synthesizes_with_spec_name(
     resolved = runner._resolve_l2_yaml_for_spec(spec, tmp_path)
     assert resolved == tmp_path / "_synth_l2.yaml"
     text = resolved.read_text()
-    assert "instance: us_pg_lo" in text
+    # Z.C: instance: stripped from operator yaml (loader rejects it).
+    assert "instance:" not in text
     # Operator content preserved.
     assert "description: my custom L2" in text
     assert "GLControl" in text
@@ -3483,9 +3523,10 @@ def test_resolve_l2_yaml_for_spec_us_synthesizes_with_spec_name(
 def test_resolve_l2_yaml_for_spec_fuzz_synthesizes_with_spec_name(
     tmp_path: Path,
 ) -> None:
-    """m.3.a + m.4.f — fuzz cells synthesize via random_l2_yaml(seed) AND
-    rewrite the instance field to spec.name. Spec name encodes the seed,
-    so two cells with the same seed get the same instance — by design."""
+    """m.3.a + m.4.f + Z.C.9 — fuzz cells synthesize via random_l2_yaml(seed)
+    and defensively strip any legacy ``instance:`` key. Per-cell prefix
+    moves to env override; the L2 yaml itself is byte-identical to the
+    fuzzer output (modulo the defensive strip)."""
     spec = VariantSpec(
         ScenarioCode("f42"), "pg", "lo", fuzz_seed=42,
     )
@@ -3493,9 +3534,8 @@ def test_resolve_l2_yaml_for_spec_fuzz_synthesizes_with_spec_name(
     assert resolved == tmp_path / "_synth_l2.yaml"
     text = resolved.read_text()
     assert text.strip(), "synthesized yaml is empty"
-    # Per-cell instance override; the fuzzer's default `fuzz_seed_<n>` is gone.
-    assert "instance: f42_pg_lo" in text
-    assert "fuzz_seed_" not in text
+    # Z.C: instance: stripped from fuzz output (loader rejects it).
+    assert "instance:" not in text
 
 
 def test_resolve_l2_yaml_for_spec_fuzz_is_byte_deterministic(

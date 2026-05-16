@@ -98,6 +98,16 @@ def sasquatch_instance() -> L2Instance:
     return load_instance(_SASQUATCH_PR_YAML)
 
 
+@pytest.fixture(scope="module")
+def sasquatch_db_prefix() -> str:
+    """Z.C — the DB-table prefix the operator's ``run/config.postgres.yaml``
+    would have set under ``db_table_prefix:`` when seeding the sasquatch_pr
+    L2. The L2 yaml's previous ``instance:`` field doubled as this prefix;
+    Z.C dropped it, but the prefix convention itself is unchanged.
+    """
+    return "sasquatch_pr"
+
+
 def _matview_has_rows(conn: Any, name: str) -> bool:
     """True iff the matview/table exists AND has > 0 rows."""
     with conn.cursor() as cur:
@@ -120,8 +130,9 @@ class TestVolumeAnomaliesSignal:
 
     def test_matview_populated(
         self, demo_db_conn: Any, sasquatch_instance: L2Instance,
+        sasquatch_db_prefix: str,
     ) -> None:
-        prefix = sasquatch_instance.instance
+        prefix = sasquatch_db_prefix
         view = f"{prefix}_inv_pair_rolling_anomalies"
         if not _matview_has_rows(demo_db_conn, view):
             pytest.skip(
@@ -138,13 +149,14 @@ class TestVolumeAnomaliesSignal:
 
     def test_at_least_5_anomalies_clear_3sigma(
         self, demo_db_conn: Any, sasquatch_instance: L2Instance,
+        sasquatch_db_prefix: str,
     ) -> None:
         # R.5.c bar: with 90 days of baseline, the rolling-2-day-stddev
         # signal must produce at least 5 anomalies in the dashboard's
         # "high" coloring band (z >= 3). Without baseline, the matview
         # produces near-zero rows because every pair has 1-2 windows
         # only — stddev computation is meaningless.
-        prefix = sasquatch_instance.instance
+        prefix = sasquatch_db_prefix
         view = f"{prefix}_inv_pair_rolling_anomalies"
         if not _matview_has_rows(demo_db_conn, view):
             pytest.skip(f"{view} empty — apply the demo seed first.")
@@ -160,13 +172,14 @@ class TestVolumeAnomaliesSignal:
 
     def test_planted_recipient_appears_in_matview(
         self, demo_db_conn: Any, sasquatch_instance: L2Instance,
+        sasquatch_db_prefix: str,
     ) -> None:
         # R.5.d adjacent — even if the planted InvFanoutPlant doesn't
         # personally clear 3σ (the population is dominated by big
         # merchant card sales), the planted recipient SHOULD have at
         # least one window in the matview. Catches "fanout plant got
         # filtered out" regressions.
-        prefix = sasquatch_instance.instance
+        prefix = sasquatch_db_prefix
         view = f"{prefix}_inv_pair_rolling_anomalies"
         if not _matview_has_rows(demo_db_conn, view):
             pytest.skip(f"{view} empty — apply the demo seed first.")
@@ -194,6 +207,7 @@ class TestL2CoverageAssertions:
 
     def test_every_rail_has_legs(
         self, demo_db_conn: Any, sasquatch_instance: L2Instance,
+        sasquatch_db_prefix: str,
     ) -> None:
         # Per R.5.d: for every Rail in the L2 instance, assert N >= M
         # legs in <prefix>_current_transactions. Catches dead Rails
@@ -203,7 +217,7 @@ class TestL2CoverageAssertions:
         # times over 90 days so M=2 there; daily/intraday/non-aggregating
         # rails should comfortably clear M=5. Rails that can't (e.g.,
         # misconfigured roles in the L2 YAML) surface here.
-        prefix = sasquatch_instance.instance
+        prefix = sasquatch_db_prefix
         view = f"{prefix}_current_transactions"
         if not _matview_has_rows(demo_db_conn, view):
             pytest.skip(f"{view} empty — apply the demo seed first.")
@@ -227,6 +241,7 @@ class TestL2CoverageAssertions:
 
     def test_every_chain_has_a_completed_pair(
         self, demo_db_conn: Any, sasquatch_instance: L2Instance,
+        sasquatch_db_prefix: str,
     ) -> None:
         # R.5.d: every Chain must have at least one parent firing
         # whose transfer_id appears as transfer_parent_id on at least
@@ -236,7 +251,7 @@ class TestL2CoverageAssertions:
         # the baseline only emits chain children for Rail-parented
         # chains (per R.2.d's first land — TransferTemplate firings
         # are tracked separately).
-        prefix = sasquatch_instance.instance
+        prefix = sasquatch_db_prefix
         view = f"{prefix}_current_transactions"
         if not _matview_has_rows(demo_db_conn, view):
             pytest.skip(f"{view} empty — apply the demo seed first.")
@@ -271,12 +286,13 @@ class TestL2CoverageAssertions:
 
     def test_every_transfer_template_legs_net_to_expected(
         self, demo_db_conn: Any, sasquatch_instance: L2Instance,
+        sasquatch_db_prefix: str,
     ) -> None:
         # R.5.d: per TransferTemplate with expected_net=0, assert that
         # >= 80% of template instances actually net to zero. R.3 plants
         # intentionally violate to surface on the L2 Exceptions sheet,
         # so we allow some slack.
-        prefix = sasquatch_instance.instance
+        prefix = sasquatch_db_prefix
         view = f"{prefix}_current_transactions"
         if not _matview_has_rows(demo_db_conn, view):
             pytest.skip(f"{view} empty — apply the demo seed first.")
@@ -313,14 +329,14 @@ class TestL2CoverageAssertions:
 
     def test_every_limit_schedule_has_a_matching_rail(
         self, demo_db_conn: Any, sasquatch_instance: L2Instance,
+        sasquatch_db_prefix: str,
     ) -> None:
-        # R.5.d: every LimitSchedule.transfer_type should match some
-        # rail's transfer_type (otherwise the cap never fires). This
-        # check is structural (L2 model), not runtime — the existing
-        # validator's R10 covers it. Test here is the runtime
-        # confirmation that legs exist for every rail+transfer_type
-        # the LimitSchedule covers.
-        prefix = sasquatch_instance.instance
+        # R.5.d: every LimitSchedule.rail should resolve to a Rail.name
+        # that has runtime legs (otherwise the cap never fires). The
+        # validator's R10 covers the structural binding; this runtime
+        # check confirms legs actually exist for every rail the
+        # LimitSchedule covers.
+        prefix = sasquatch_db_prefix
         view = f"{prefix}_current_transactions"
         if not _matview_has_rows(demo_db_conn, view):
             pytest.skip(f"{view} empty — apply the demo seed first.")
@@ -330,16 +346,16 @@ class TestL2CoverageAssertions:
             with demo_db_conn.cursor() as cur:
                 cur.execute(
                     f"""SELECT COUNT(*) FROM {view}
-                       WHERE transfer_type = %s""",
-                    (str(ls.transfer_type),),
+                       WHERE rail_name = %s""",
+                    (str(ls.rail),),
                 )
                 count = cur.fetchone()[0]
             if count == 0:
                 no_legs.append(
-                    f"transfer_type={ls.transfer_type} "
+                    f"rail={ls.rail} "
                     f"(parent_role={ls.parent_role}, cap=${ls.cap})"
                 )
         assert not no_legs, (
-            f"R.5.d — LimitSchedules whose transfer_type has zero legs "
-            f"in the runtime data (cap can never fire): {no_legs}"
+            f"R.5.d — LimitSchedules whose rail has zero legs in the "
+            f"runtime data (cap can never fire): {no_legs}"
         )

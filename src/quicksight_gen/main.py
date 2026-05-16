@@ -156,7 +156,10 @@ def define_env(env: Any) -> None:
     )
     default_l2 = load_instance(default_l2_path)
     env.variables["vocab"] = vocabulary_for(default_l2)
-    env.variables["l2_instance_name"] = str(default_l2.instance)
+    # Z.C — L2Instance no longer carries an ``instance`` field; derive
+    # the display name from the YAML filename (the operator-facing
+    # identity for the docs handbook is the file the operator passed).
+    env.variables["l2_instance_name"] = default_l2_path.stem
     # Expose the full ``L2Instance`` so generated pages
     # (e.g. ``Training_Story.md``) can iterate accounts / rails /
     # chains / templates / limit_schedules and render their
@@ -237,7 +240,7 @@ def define_env(env: Any) -> None:
             # instead so the page tells the reader why the diagram is
             # absent.
             if _is_empty_dot(dot):
-                instance_name = str(l2.instance)
+                instance_name = l2_path.stem
                 hint = _empty_topology_hint(kind)
                 return (
                     f'!!! info "No {kind} declared in '
@@ -269,7 +272,7 @@ def define_env(env: Any) -> None:
 
     def _l2_focus(render_fn, *, primitive: str, alt: str) -> str:
         """Try active → spec_example → sasquatch_pr; wrap with fallback note."""
-        active_name = str(default_l2.instance)
+        active_name = default_l2_path.stem
         for candidate, label in (
             (default_l2, active_name),
             (_spec_example_l2, "spec_example"),
@@ -406,21 +409,21 @@ def define_env(env: Any) -> None:
         def _breach(p: Any) -> str:
             return (
                 f"account_id={p.account_id} amount={p.amount} "
-                f"transfer_type={p.transfer_type} rail={p.rail_name} "
+                f"rail={p.rail_name} "
                 f"days_ago={p.days_ago}"
             )
 
         def _stuck_pending(p: Any) -> str:
             return (
                 f"account_id={p.account_id} amount={p.amount} "
-                f"transfer_type={p.transfer_type} rail={p.rail_name} "
+                f"rail={p.rail_name} "
                 f"days_ago={p.days_ago}"
             )
 
         def _stuck_unbundled(p: Any) -> str:
             return (
                 f"account_id={p.account_id} amount={p.amount} "
-                f"transfer_type={p.transfer_type} rail={p.rail_name} "
+                f"rail={p.rail_name} "
                 f"days_ago={p.days_ago}"
             )
 
@@ -428,7 +431,7 @@ def define_env(env: Any) -> None:
             return (
                 f"account_id={p.account_id} "
                 f"original={p.original_amount} corrected={p.corrected_amount} "
-                f"transfer_type={p.transfer_type} rail={p.rail_name} "
+                f"rail={p.rail_name} "
                 f"days_ago={p.days_ago}"
             )
 
@@ -498,7 +501,7 @@ def define_env(env: Any) -> None:
 
         return {
             "mode": mode,
-            "instance": str(default_l2.instance),
+            "instance": default_l2_path.stem,
             "today": s.today.isoformat(),
             "plants": plants_out,
             "omitted": [

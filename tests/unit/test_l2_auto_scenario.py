@@ -60,7 +60,6 @@ def _full_scenario() -> ScenarioPlant:
             LimitBreachPlant(
                 account_id=Identifier("cust-001"),
                 days_ago=2,
-                transfer_type="ach_outbound",
                 rail_name=Identifier("CustomerOutboundACH"),
                 amount=Decimal("18000.00"),
                 counter_account_id=Identifier("ext-001"),
@@ -70,7 +69,6 @@ def _full_scenario() -> ScenarioPlant:
             StuckPendingPlant(
                 account_id=Identifier("cust-001"),
                 days_ago=10,
-                transfer_type="ach_outbound",
                 rail_name=Identifier("CustomerOutboundACH"),
                 amount=Decimal("100.00"),
             ),
@@ -79,7 +77,6 @@ def _full_scenario() -> ScenarioPlant:
             FailedTransactionPlant(
                 account_id=Identifier("cust-001"),
                 days_ago=4,
-                transfer_type="ach_outbound",
                 rail_name=Identifier("CustomerOutboundACH"),
                 amount=Decimal("25.00"),
             ),
@@ -88,7 +85,6 @@ def _full_scenario() -> ScenarioPlant:
             StuckUnbundledPlant(
                 account_id=Identifier("cust-001"),
                 days_ago=8,
-                transfer_type="card_sale",
                 rail_name=Identifier("MerchantCardSale"),
                 amount=Decimal("250.00"),
             ),
@@ -97,7 +93,6 @@ def _full_scenario() -> ScenarioPlant:
             SupersessionPlant(
                 account_id=Identifier("cust-001"),
                 days_ago=1,
-                transfer_type="ach_outbound",
                 rail_name=Identifier("CustomerOutboundACH"),
                 original_amount=Decimal("100.00"),
                 corrected_amount=Decimal("90.00"),
@@ -166,7 +161,6 @@ def test_filter_passes_through_non_l1_fixtures() -> None:
             FailedTransactionPlant(
                 account_id=Identifier("cust-001"),
                 days_ago=4,
-                transfer_type="ach_outbound",
                 rail_name=Identifier("CustomerOutboundACH"),
                 amount=Decimal("25.00"),
             ),
@@ -198,7 +192,6 @@ def test_filter_passes_through_non_l1_fixtures() -> None:
                     Identifier("cust-003"),
                 ),
                 days_ago=2,
-                transfer_type="ach_inbound",
                 rail_name=Identifier("CustomerInboundACH"),
                 amount_per_transfer=Decimal("100.00"),
             ),

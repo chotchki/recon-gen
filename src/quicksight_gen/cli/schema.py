@@ -57,7 +57,9 @@ def schema_apply(
     from quicksight_gen.common.l2.schema import emit_schema
 
     cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
-    sql = emit_schema(instance, dialect=cfg.dialect)
+    sql = emit_schema(
+        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+    )
 
     if execute:
         connect_and_apply(cfg, sql, label="schema DDL")
@@ -87,7 +89,9 @@ def schema_clean(
     from quicksight_gen.common.l2.schema import emit_schema_drop_sql
 
     cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
-    sql = emit_schema_drop_sql(instance, dialect=cfg.dialect)
+    sql = emit_schema_drop_sql(
+        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+    )
 
     if execute:
         connect_and_apply(cfg, sql, label="schema DROP")

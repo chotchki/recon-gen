@@ -158,7 +158,7 @@ def seeded_pdf(db_cfg, db_cfg_path, tmp_path_factory) -> tuple[Path, object]:
     Returns ``(pdf_path, scenario)`` — the scenario carries the
     plant tuples U.8.a's expected_audit_counts needs.
     """
-    from tests.e2e._harness_seed import apply_db_seed
+    from tests.e2e._seed_helpers import apply_db_seed
 
     instance = load_instance(_SPEC_EXAMPLE)
 
@@ -172,6 +172,7 @@ def seeded_pdf(db_cfg, db_cfg_path, tmp_path_factory) -> tuple[Path, object]:
     try:
         scenario = apply_db_seed(
             conn, instance,
+            prefix=db_cfg.db_table_prefix,
             mode="l1_invariants",
             today=_TODAY,
             dialect=dialect,
@@ -282,8 +283,8 @@ def test_audit_verify_pins_to_embedded_hwm_against_newer_rows(
     implementations.
     """
     pdf_path, _ = seeded_pdf
-    instance = load_instance(_SPEC_EXAMPLE)
-    prefix = instance.instance
+    # Z.C — db_table_prefix lives on cfg now (was l2_instance.instance).
+    prefix = db_cfg.db_table_prefix
     sentinel_id = "verify-test-pinning-row"
     dialect = (
         Dialect.ORACLE

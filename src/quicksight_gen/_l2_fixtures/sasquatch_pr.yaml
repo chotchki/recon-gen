@@ -33,8 +33,6 @@
 # Keep them concise, plain-English, focused on WHAT this entity is and
 # WHY it exists in SNB's chart of accounts. Markdown OK.
 
-instance: sasquatch_pr
-
 description: |
   Sasquatch National Bank's combined treasury + merchant-acquiring
   view. SNB runs a Cash Management Suite (CMS) for commercial customer
@@ -330,7 +328,6 @@ rails:
   # ----- Customer DDA <-> External --- ACH ----------------------------
 
   - name: CustomerInboundACH
-    transfer_type: ach_inbound
     source_role: ExternalCounterparty
     destination_role: CustomerDDA
     expected_net: 0
@@ -348,7 +345,6 @@ rails:
       Fed-statement view.
 
   - name: CustomerOutboundACH
-    transfer_type: ach_outbound
     source_role: CustomerDDA
     destination_role: ExternalCounterparty
     expected_net: 0
@@ -366,7 +362,6 @@ rails:
   # ----- Customer DDA <-> External --- Wire ---------------------------
 
   - name: CustomerInboundWire
-    transfer_type: wire_inbound
     source_role: ExternalCounterparty
     destination_role: CustomerDDA
     expected_net: 0
@@ -382,7 +377,6 @@ rails:
       mandatory for wire reconciliation and audit.
 
   - name: CustomerOutboundWire
-    transfer_type: wire_outbound
     source_role: CustomerDDA
     destination_role: ExternalCounterparty
     expected_net: 0
@@ -399,7 +393,6 @@ rails:
   # ----- Customer DDA <-> External --- Cash ---------------------------
 
   - name: CustomerCashDeposit
-    transfer_type: cash_deposit
     source_role: ExternalCounterparty
     destination_role: CustomerDDA
     expected_net: 0
@@ -418,7 +411,6 @@ rails:
       audit context.
 
   - name: CustomerCashWithdrawal
-    transfer_type: cash_withdrawal
     source_role: CustomerDDA
     destination_role: ExternalCounterparty
     expected_net: 0
@@ -439,7 +431,6 @@ rails:
   # whatever the other two legs require for closure.
 
   - name: InternalTransferDebit
-    transfer_type: internal_debit
     leg_role: CustomerDDA
     leg_direction: Debit
     origin: InternalInitiated
@@ -454,7 +445,6 @@ rails:
       from the template's `transfer_key`).
 
   - name: InternalTransferCredit
-    transfer_type: internal_credit
     leg_role: CustomerDDA
     leg_direction: Credit
     origin: InternalInitiated
@@ -466,7 +456,6 @@ rails:
       debit and suspense-close legs share its ID.
 
   - name: InternalTransferSuspenseClose
-    transfer_type: internal
     leg_role: InternalTransferSuspense
     leg_direction: Variable
     origin: InternalInitiated
@@ -490,7 +479,6 @@ rails:
   # account state.
 
   - name: CustomerFeeAccrual
-    transfer_type: fee
     leg_role: [CustomerDDA, InternalSuspenseRecon]
     leg_direction: Debit
     origin: InternalInitiated
@@ -511,7 +499,6 @@ rails:
   # ----- ZBA sweep (operational pool consolidation) -------------------
 
   - name: ZBASweep
-    transfer_type: internal
     source_role: ZBASubAccount
     destination_role: ConcentrationMaster
     expected_net: 0
@@ -528,7 +515,6 @@ rails:
   # ----- Concentration → Fed sweep ------------------------------------
 
   - name: ConcentrationToFRBSweep
-    transfer_type: wire_concentration
     source_role: ConcentrationMaster
     destination_role: ExternalCounterparty
     expected_net: 0
@@ -555,7 +541,6 @@ rails:
   # per SPEC ("single-leg sweep that lands in an external counterparty").
 
   - name: ACHOriginationDailySweep
-    transfer_type: settlement
     source_role: ACHOrigSettlement
     destination_role: CashDueFRB
     expected_net: 0
@@ -572,7 +557,6 @@ rails:
       unbundled leg of that rail.
 
   - name: CustomerFeeMonthlySettlement
-    transfer_type: settlement
     leg_role: ExternalCounterparty
     leg_direction: Debit
     origin: InternalInitiated
@@ -595,7 +579,6 @@ rails:
   # original `CustomerInboundACH`. Modeled as a Chain XOR group below.
 
   - name: CustomerInboundACHReturnNSF
-    transfer_type: return_nsf
     source_role: CustomerDDA
     destination_role: ExternalCounterparty
     expected_net: 0
@@ -612,7 +595,6 @@ rails:
       same-day or next-business-day after the original posting.
 
   - name: CustomerInboundACHReturnStopPay
-    transfer_type: return_stoppay
     source_role: CustomerDDA
     destination_role: ExternalCounterparty
     expected_net: 0
@@ -646,7 +628,6 @@ rails:
   #      back to the card network.
 
   - name: MerchantCardSale
-    transfer_type: sale
     source_role: ExternalCardNetwork
     destination_role: MerchantPayableClearing
     source_origin: ExternalForcePosted
@@ -673,7 +654,6 @@ rails:
       carry expected_net).
 
   - name: MerchantPayoutACH
-    transfer_type: payout_ach
     source_role: MerchantPayableClearing
     destination_role: MerchantDDA
     expected_net: 0
@@ -690,7 +670,6 @@ rails:
       for SNB-banking merchants.
 
   - name: MerchantPayoutWire
-    transfer_type: payout_wire
     source_role: MerchantPayableClearing
     destination_role: ExternalCounterparty
     expected_net: 0
@@ -707,7 +686,6 @@ rails:
       external-counterparty leg when Fedwire confirms.
 
   - name: MerchantPayoutCheck
-    transfer_type: payout_check
     source_role: MerchantPayableClearing
     destination_role: ExternalCounterparty
     expected_net: 0
@@ -727,7 +705,6 @@ rails:
   # ----- External card-network aggregation (PR-side) ------------------
 
   - name: ExternalCardSettlement
-    transfer_type: card_settlement
     leg_role: ExternalCardNetwork
     leg_direction: Credit
     origin: ExternalForcePosted
@@ -768,7 +745,6 @@ rails:
 # ---------------------------------------------------------------------
 transfer_templates:
   - name: InternalTransferCycle
-    transfer_type: internal_transfer_cycle
     expected_net: 0
     transfer_key: [internal_transfer_id]
     completion: business_day_end+1d
@@ -786,7 +762,6 @@ transfer_templates:
       first or last.
 
   - name: MerchantSettlementCycle
-    transfer_type: merchant_settlement_cycle
     expected_net: 0
     transfer_key: [merchant_id, settlement_period]
     completion: business_day_end
@@ -879,7 +854,7 @@ limit_schedules:
   # ----- Customer DDA caps (treasury) ---------------------------------
 
   - parent_role: DDAControl
-    transfer_type: ach_outbound
+    rail: CustomerOutboundACH
     cap: 12000.00
     description: |
       $12,000 daily ACH outbound cap per customer DDA. Mirrors the
@@ -887,7 +862,7 @@ limit_schedules:
       sheet's Limit Breach check.
 
   - parent_role: DDAControl
-    transfer_type: wire_outbound
+    rail: CustomerOutboundWire
     cap: 15000.00
     description: |
       $15,000 daily wire outbound cap per customer DDA. Higher than
@@ -895,7 +870,7 @@ limit_schedules:
       and higher-friction (Fedwire fees, real-time settlement).
 
   - parent_role: DDAControl
-    transfer_type: cash_withdrawal
+    rail: CustomerCashWithdrawal
     cap: 10000.00
     description: |
       $10,000 daily cash withdrawal cap per customer DDA. Aligns with
@@ -906,7 +881,7 @@ limit_schedules:
   # ----- Merchant DDA caps (PR-side) ----------------------------------
 
   - parent_role: MerchantDDAControl
-    transfer_type: payout_ach
+    rail: MerchantPayoutACH
     cap: 50000.00
     description: |
       $50,000 daily ACH payout cap per merchant DDA. Sized to
@@ -915,7 +890,7 @@ limit_schedules:
       negotiate elevated caps via SNB onboarding.
 
   - parent_role: MerchantDDAControl
-    transfer_type: payout_wire
+    rail: MerchantPayoutWire
     cap: 100000.00
     description: |
       $100,000 daily wire payout cap per merchant DDA. Sized higher
@@ -924,7 +899,7 @@ limit_schedules:
       Fedwire cost is justified.
 
   - parent_role: MerchantDDAControl
-    transfer_type: payout_check
+    rail: MerchantPayoutCheck
     cap: 25000.00
     description: |
       $25,000 daily check payout cap per merchant DDA. Lower than the

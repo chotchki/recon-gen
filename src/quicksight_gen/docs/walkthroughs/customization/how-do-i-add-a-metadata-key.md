@@ -45,7 +45,7 @@ Three reference points:
   for the one you're adding. Grep for `JSON_VALUE(metadata` to
   see them.
 - **[Schema_v6.md → metadata text column contract](../../Schema_v6.md#metadata-json-columns)** —
-  the cataloged keys, their per-`transfer_type` placement, and
+  the cataloged keys, their per-`rail_name` placement, and
   the forbidden-syntax list (`->>`, `->`, `@>`, `?` are all
   out — only `JSON_VALUE` / `JSON_QUERY` / `JSON_EXISTS`).
 
@@ -65,7 +65,7 @@ SELECT
     JSON_VALUE(metadata, '$.cashier')         AS cashier,
     JSON_VALUE(metadata, '$.payment_method')  AS payment_method
 FROM {{ l2_instance_name }}_transactions
-WHERE transfer_type = 'sale'
+WHERE rail_name = 'sale'
 ```
 
 The matching `DatasetContract` declares each extracted column:
@@ -100,7 +100,7 @@ SELECT
     -- existing columns ...
     JSON_VALUE(metadata, '$.originating_branch') AS originating_branch
 FROM {{ l2_instance_name }}_transactions
-WHERE transfer_type = 'sale';
+WHERE rail_name = 'sale';
 ```
 
 `JSON_VALUE` returns NULL for rows that don't carry the key.
@@ -249,6 +249,6 @@ Once the new column is reading and rendering:
   column is a contract change; the swap walkthrough explains
   why that's not free and what the test catches.
 - [Schema_v6 → metadata text column contract](../../Schema_v6.md#metadata-json-columns) —
-  the canonical per-`transfer_type` metadata key inventory and
+  the canonical per-`rail_name` metadata key inventory and
   the forbidden-syntax list (no `->>`, no JSONB, no
   Postgres-specific operators).

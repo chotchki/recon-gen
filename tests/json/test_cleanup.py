@@ -1,14 +1,14 @@
-"""Cleanup-scope tests for ``common.cleanup`` (M.2d.3).
+"""Cleanup-scope tests for ``common.cleanup``.
 
 The cleanup module talks to boto3, so these tests stub the QuickSight
-client. The unit-level surface here is the per-instance scoping
-introduced by M.2d.3:
+client. The unit-level surface here is the per-deploy scoping (Z.C
+collapsed M.2d.3's per-instance scope and v8.4.0's per-deploy scope
+into a single ``Deployment`` tag keyed off ``cfg.deployment_name``):
 
 - ``_read_managed_tags`` returns the full tag map for ManagedBy
   resources (None for unmanaged).
-- ``_collect_stale`` with ``l2_instance_prefix`` set only sweeps
-  resources whose ``L2Instance`` tag matches; without it, falls back
-  to the legacy "any ManagedBy resource" pass.
+- ``_collect_stale`` only sweeps resources whose ``Deployment`` tag
+  matches the supplied ``deployment_name``.
 """
 
 from __future__ import annotations
@@ -92,13 +92,13 @@ def test_read_managed_tags_returns_map_for_managed_resource():
         tags_by_arn={
             "arn:dash:1": [
                 _mk_tag("ManagedBy", "quicksight-gen"),
-                _mk_tag("L2Instance", "sasquatch_ar"),
+                _mk_tag("Deployment", "qsgen-test"),
             ],
         },
         summaries_by_kind={},
     )
     tags = _read_managed_tags(client, "arn:dash:1")
-    assert tags == {"ManagedBy": "quicksight-gen", "L2Instance": "sasquatch_ar"}
+    assert tags == {"ManagedBy": "quicksight-gen", "Deployment": "qsgen-test"}
 
 
 def test_read_managed_tags_returns_none_for_unmanaged():
@@ -114,123 +114,25 @@ def test_read_managed_tags_returns_none_when_arn_unknown():
     assert _read_managed_tags(client, "arn:missing") is None
 
 
-# -- _collect_stale: legacy (no l2_instance_prefix) ---------------------------
-
-
-def test_collect_stale_legacy_sweeps_all_managed_resources():
-    """Without l2_instance_prefix, cleanup behaves as it did before
-    M.2d.3 — any ManagedBy resource not in `expected` is stale,
-    regardless of L2Instance tag."""
-    client = _StubClient(
-        summaries_by_kind={
-            "dashboard": [
-                ("legacy-dash", "arn:legacy"),
-                ("instance-a-dash", "arn:a"),
-                ("instance-b-dash", "arn:b"),
-            ],
-        },
-        tags_by_arn={
-            "arn:legacy": [_mk_tag("ManagedBy", "quicksight-gen")],
-            "arn:a": [
-                _mk_tag("ManagedBy", "quicksight-gen"),
-                _mk_tag("L2Instance", "sasquatch_ar"),
-            ],
-            "arn:b": [
-                _mk_tag("ManagedBy", "quicksight-gen"),
-                _mk_tag("L2Instance", "wonkawash"),
-            ],
-        },
-    )
-    stale = _collect_stale(client, "111", _empty_expected())
-    stale_dash_ids = {rid for rid, _ in stale["dashboard"]}
-    assert stale_dash_ids == {"legacy-dash", "instance-a-dash", "instance-b-dash"}
-
-
-# -- _collect_stale: per-instance scope (l2_instance_prefix set) -------------
-
-
-def test_collect_stale_scoped_only_sweeps_matching_l2_instance_tag():
-    """With l2_instance_prefix='sasquatch_ar', only sweep matching-tag
-    resources. Other-instance resources + untagged-legacy resources
-    are owned by a different scope and skipped."""
-    client = _StubClient(
-        summaries_by_kind={
-            "dashboard": [
-                ("legacy-dash", "arn:legacy"),
-                ("instance-a-dash", "arn:a"),
-                ("instance-b-dash", "arn:b"),
-                ("third-party", "arn:other"),
-            ],
-        },
-        tags_by_arn={
-            "arn:legacy": [_mk_tag("ManagedBy", "quicksight-gen")],
-            "arn:a": [
-                _mk_tag("ManagedBy", "quicksight-gen"),
-                _mk_tag("L2Instance", "sasquatch_ar"),
-            ],
-            "arn:b": [
-                _mk_tag("ManagedBy", "quicksight-gen"),
-                _mk_tag("L2Instance", "wonkawash"),
-            ],
-            "arn:other": [_mk_tag("Owner", "data-eng-team")],
-        },
-    )
-    stale = _collect_stale(
-        client, "111", _empty_expected(), l2_instance_prefix="sasquatch_ar",
-    )
-    stale_dash_ids = {rid for rid, _ in stale["dashboard"]}
-    assert stale_dash_ids == {"instance-a-dash"}
-
-
-def test_collect_stale_scoped_skips_resources_in_expected_set():
-    """Even matching-tag resources are skipped if they're in `expected`."""
-    client = _StubClient(
-        summaries_by_kind={
-            "dashboard": [
-                ("instance-a-dash", "arn:a"),
-                ("instance-a-dash-stale", "arn:a-stale"),
-            ],
-        },
-        tags_by_arn={
-            "arn:a": [
-                _mk_tag("ManagedBy", "quicksight-gen"),
-                _mk_tag("L2Instance", "sasquatch_ar"),
-            ],
-            "arn:a-stale": [
-                _mk_tag("ManagedBy", "quicksight-gen"),
-                _mk_tag("L2Instance", "sasquatch_ar"),
-            ],
-        },
-    )
-    expected = _empty_expected()
-    expected["dashboard"].add("instance-a-dash")
-    stale = _collect_stale(
-        client, "111", expected, l2_instance_prefix="sasquatch_ar",
-    )
-    stale_dash_ids = {rid for rid, _ in stale["dashboard"]}
-    assert stale_dash_ids == {"instance-a-dash-stale"}
-
-
-# -- _collect_stale: per-deploy ResourcePrefix scope (v8.4.0) ----------------
+# -- _collect_stale: per-deploy Deployment-tag scope (Z.C) -------------------
 #
-# v8.4.0 hotfix for the W.3 cleanup-collision class. Three cases this
-# test class locks down:
+# Z.C collapsed v8.4.0's two-tag scheme (ResourcePrefix + L2Instance) into
+# a single ``Deployment`` tag. Three cases this test class locks down:
 #
-# 1. ResourcePrefix-scoped cleanup ONLY sweeps resources whose
-#    ResourcePrefix tag matches. (Previously L2Instance-scoped only;
-#    a CI run sharing the spec_example L2 with a local deploy would
-#    sweep both.)
-# 2. Resources with NO ResourcePrefix tag (pre-v8.4.0 deploys) are
-#    fail-CLOSED — skipped, NOT swept. Forces operators to opt into
-#    the new scope by re-deploying so resources gain the tag.
-# 3. ResourcePrefix + L2Instance compose: BOTH must match for a
-#    resource to be eligible.
+# 1. Deployment-scoped cleanup ONLY sweeps resources whose Deployment
+#    tag matches.
+# 2. Resources with NO Deployment tag (pre-Z.C deploys) are fail-CLOSED
+#    — skipped, NOT swept. Operator must redeploy to opt into the new
+#    scope (the resources gain the tag on next ``Create*``).
+# 3. The single tag is enough; multi-axis identity (CI run id +
+#    scenario + dialect) lives encoded in the deployment_name string,
+#    not in separate tags.
 
 
-def test_collect_stale_resource_prefix_only_sweeps_matching():
-    """v8.4.0 — with resource_prefix='qs-ci-12345-pg', only sweep
-    resources whose ResourcePrefix tag matches that exact value.
-    Other-prefix resources (concurrent CI run, local deploy) skipped."""
+def test_collect_stale_deployment_only_sweeps_matching():
+    """Z.C — with deployment_name='qs-ci-12345-pg', only sweep resources
+    whose Deployment tag matches that exact value. Other-deploy
+    resources (concurrent CI run, local deploy) skipped."""
     client = _StubClient(
         summaries_by_kind={
             "dashboard": [
@@ -243,96 +145,83 @@ def test_collect_stale_resource_prefix_only_sweeps_matching():
         tags_by_arn={
             "arn:ci-12345": [
                 _mk_tag("ManagedBy", "quicksight-gen"),
-                _mk_tag("ResourcePrefix", "qs-ci-12345-pg"),
+                _mk_tag("Deployment", "qs-ci-12345-pg"),
             ],
             "arn:ci-67890": [
                 _mk_tag("ManagedBy", "quicksight-gen"),
-                _mk_tag("ResourcePrefix", "qs-ci-67890-pg"),
+                _mk_tag("Deployment", "qs-ci-67890-pg"),
             ],
             "arn:local": [
                 _mk_tag("ManagedBy", "quicksight-gen"),
-                _mk_tag("ResourcePrefix", "qs-gen-postgres"),
+                _mk_tag("Deployment", "qsgen-postgres"),
             ],
-            # Pre-v8.4.0 deploy: no ResourcePrefix tag at all.
+            # Pre-Z.C deploy: no Deployment tag at all.
             "arn:legacy": [_mk_tag("ManagedBy", "quicksight-gen")],
         },
     )
     stale = _collect_stale(
         client, "111", _empty_expected(),
-        resource_prefix="qs-ci-12345-pg",
+        deployment_name="qs-ci-12345-pg",
     )
     stale_dash_ids = {rid for rid, _ in stale["dashboard"]}
-    # Only the matching prefix is swept; other-prefix + legacy-untagged
+    # Only the matching deploy is swept; other-deploy + legacy-untagged
     # are skipped (different scope / pre-tag opt-in respectively).
     assert stale_dash_ids == {"ci-run-12345-dash"}
 
 
-def test_collect_stale_resource_prefix_fails_closed_on_missing_tag():
-    """v8.4.0 — resources without a ResourcePrefix tag are NEVER
-    swept by a prefix-scoped cleanup. Operators must re-deploy
-    (which adds the tag) before prefix-scoped cleanup can touch them.
-    Belt-and-suspenders against the W.3 incident: even if a CI run's
-    cleanup misfires somehow, pre-tag local deploys are immune."""
+def test_collect_stale_deployment_fails_closed_on_missing_tag():
+    """Z.C — resources without a Deployment tag are NEVER swept by a
+    deploy-scoped cleanup. Operators must re-deploy (which adds the
+    tag) before deploy-scoped cleanup can touch them."""
     client = _StubClient(
         summaries_by_kind={
             "dashboard": [("untagged", "arn:untagged")],
         },
         tags_by_arn={
-            # Only ManagedBy — no ResourcePrefix tag.
+            # Only ManagedBy — no Deployment tag.
             "arn:untagged": [_mk_tag("ManagedBy", "quicksight-gen")],
         },
     )
     stale = _collect_stale(
         client, "111", _empty_expected(),
-        resource_prefix="qs-ci-12345-pg",
+        deployment_name="qs-ci-12345-pg",
     )
     stale_dash_ids = {rid for rid, _ in stale["dashboard"]}
     assert stale_dash_ids == set(), (
-        "Pre-v8.4.0 untagged resources must NOT be swept by a "
-        "prefix-scoped cleanup. The operator's local deploy of "
-        "spec_example shouldn't be wiped by a CI run's cleanup just "
-        "because the operator hasn't redeployed since v8.4.0."
+        "Pre-Z.C untagged resources must NOT be swept by a deploy-scoped "
+        "cleanup. The operator's local deploy shouldn't be wiped by a "
+        "CI run's cleanup just because the operator hasn't redeployed since Z.C."
     )
 
 
-def test_collect_stale_resource_prefix_and_l2_instance_compose():
-    """v8.4.0 — when both resource_prefix AND l2_instance_prefix are
-    set, BOTH tags must match for a resource to be eligible. This is
-    the production CI shape (per-run prefix + per-L2-instance scope)."""
+def test_collect_stale_skips_resources_in_expected_set():
+    """Even matching-Deployment resources are skipped if they're in
+    ``expected`` (the carve-out for the live deploy's own resources)."""
     client = _StubClient(
         summaries_by_kind={
             "dashboard": [
-                ("right-prefix-right-l2", "arn:right-right"),
-                ("right-prefix-wrong-l2", "arn:right-wrong"),
-                ("wrong-prefix-right-l2", "arn:wrong-right"),
+                ("live-dash", "arn:live"),
+                ("stale-dash", "arn:stale"),
             ],
         },
         tags_by_arn={
-            "arn:right-right": [
+            "arn:live": [
                 _mk_tag("ManagedBy", "quicksight-gen"),
-                _mk_tag("ResourcePrefix", "qs-ci-12345-pg"),
-                _mk_tag("L2Instance", "spec_example"),
+                _mk_tag("Deployment", "qsgen-test"),
             ],
-            "arn:right-wrong": [
+            "arn:stale": [
                 _mk_tag("ManagedBy", "quicksight-gen"),
-                _mk_tag("ResourcePrefix", "qs-ci-12345-pg"),
-                _mk_tag("L2Instance", "sasquatch_pr"),
-            ],
-            "arn:wrong-right": [
-                _mk_tag("ManagedBy", "quicksight-gen"),
-                _mk_tag("ResourcePrefix", "qs-ci-67890-pg"),
-                _mk_tag("L2Instance", "spec_example"),
+                _mk_tag("Deployment", "qsgen-test"),
             ],
         },
     )
+    expected = _empty_expected()
+    expected["dashboard"].add("live-dash")
     stale = _collect_stale(
-        client, "111", _empty_expected(),
-        resource_prefix="qs-ci-12345-pg",
-        l2_instance_prefix="spec_example",
+        client, "111", expected, deployment_name="qsgen-test",
     )
     stale_dash_ids = {rid for rid, _ in stale["dashboard"]}
-    # Only the resource matching BOTH gets swept.
-    assert stale_dash_ids == {"right-prefix-right-l2"}
+    assert stale_dash_ids == {"stale-dash"}
 
 
 # -- _collect_stale: tagging_enabled=False (v8.6.11) ------------------------
@@ -359,7 +248,7 @@ def test_collect_stale_no_tagging_matches_by_id_prefix():
     )
     stale = _collect_stale(
         client, "111", _empty_expected(),
-        resource_prefix="qs-ci-12345-pg",
+        deployment_name="qs-ci-12345-pg",
         tagging_enabled=False,
     )
     stale_dash_ids = {rid for rid, _ in stale["dashboard"]}
@@ -385,24 +274,11 @@ def test_collect_stale_no_tagging_skips_id_in_expected():
     expected["dashboard"].add("qs-ci-12345-pg-live")
     stale = _collect_stale(
         client, "111", expected,
-        resource_prefix="qs-ci-12345-pg",
+        deployment_name="qs-ci-12345-pg",
         tagging_enabled=False,
     )
     stale_dash_ids = {rid for rid, _ in stale["dashboard"]}
     assert stale_dash_ids == {"qs-ci-12345-pg-stale"}
-
-
-def test_collect_stale_no_tagging_requires_resource_prefix():
-    """Without either tags OR an ID-prefix scope there's no way to
-    distinguish our resources from anyone else's. Refuse to run rather
-    than risk sweeping unrelated dashboards."""
-    import pytest as _pytest
-    client = _StubClient(summaries_by_kind={}, tags_by_arn={})
-    with _pytest.raises(ValueError, match="requires resource_prefix"):
-        _collect_stale(
-            client, "111", _empty_expected(),
-            tagging_enabled=False,
-        )
 
 
 # -- _delete_stale -----------------------------------------------------------
@@ -505,11 +381,13 @@ def _patched_boto3_client(monkeypatch, stub) -> None:
 
 def _make_cfg(tagging_enabled: bool = True):
     from quicksight_gen.common.config import Config
+    # Z.C — deployment_name + db_table_prefix are now required cfg fields.
     return Config(
         aws_account_id="111",
         aws_region="us-east-1",
+        deployment_name="qs-test",
+        db_table_prefix="test",
         datasource_arn="arn:aws:quicksight:us-east-1:111:datasource/x",
-        resource_prefix="qs-test",
         tagging_enabled=tagging_enabled,
     )
 

@@ -159,7 +159,8 @@ jobs:
           cat > /tmp/ci-pg.yaml <<EOF
           aws_account_id: "470656905821"
           aws_region: "us-east-1"
-          resource_prefix: "qs-ci-${{ github.run_id }}-pg"
+          deployment_name: "qs-ci-${{ github.run_id }}-pg"
+          db_table_prefix: "qs_ci_${{ github.run_id }}_pg"
           dialect: "postgres"
           demo_database_url: "${{ secrets.QS_GEN_PG_URL }}"
           principal_arns:
@@ -339,7 +340,8 @@ jobs:
           cat > /tmp/ci-pg-browser.yaml <<EOF
           aws_account_id: "470656905821"
           aws_region: "us-east-1"
-          resource_prefix: "qs-ci-${{ github.run_id }}-pg-browser"
+          deployment_name: "qs-ci-${{ github.run_id }}-pg-browser"
+          db_table_prefix: "qs_ci_${{ github.run_id }}_pg_browser"
           dialect: "postgres"
           demo_database_url: "${{ secrets.QS_GEN_PG_URL }}"
           principal_arns:
@@ -521,7 +523,8 @@ jobs:
           cat > /tmp/ci-oracle.yaml <<EOF
           aws_account_id: "470656905821"
           aws_region: "us-east-1"
-          resource_prefix: "qs-ci-${{ github.run_id }}-oracle"
+          deployment_name: "qs-ci-${{ github.run_id }}-oracle"
+          db_table_prefix: "qs_ci_${{ github.run_id }}_oracle"
           dialect: "oracle"
           demo_database_url: "${{ secrets.QS_GEN_ORACLE_URL }}"
           principal_arns:
@@ -651,16 +654,17 @@ jobs:
 
       - name: Regenerate per-run config.yamls
         # Same shape as the e2e jobs' configs — each carries the
-        # matching ``resource_prefix`` so ``json clean`` filters to
-        # this run's QS resources (post-v8.4.0 ResourcePrefix-tag
+        # matching ``deployment_name`` so ``json clean`` filters to
+        # this run's QS resources (Z.C — single-axis ``Deployment`` tag
         # isolation). One config per source job (api + browser) —
         # ``json clean`` only sweeps resources tagged with the exact
-        # ResourcePrefix the config carries.
+        # ``Deployment`` value the config carries.
         run: |
           cat > /tmp/ci-pg.yaml <<EOF
           aws_account_id: "470656905821"
           aws_region: "us-east-1"
-          resource_prefix: "qs-ci-${{ github.run_id }}-pg"
+          deployment_name: "qs-ci-${{ github.run_id }}-pg"
+          db_table_prefix: "qs_ci_${{ github.run_id }}_pg"
           dialect: "postgres"
           demo_database_url: "${{ secrets.QS_GEN_PG_URL }}"
           principal_arns:
@@ -669,7 +673,8 @@ jobs:
           cat > /tmp/ci-pg-browser.yaml <<EOF
           aws_account_id: "470656905821"
           aws_region: "us-east-1"
-          resource_prefix: "qs-ci-${{ github.run_id }}-pg-browser"
+          deployment_name: "qs-ci-${{ github.run_id }}-pg-browser"
+          db_table_prefix: "qs_ci_${{ github.run_id }}_pg_browser"
           dialect: "postgres"
           demo_database_url: "${{ secrets.QS_GEN_PG_URL }}"
           principal_arns:
@@ -762,7 +767,8 @@ jobs:
           cat > /tmp/ci-oracle.yaml <<EOF
           aws_account_id: "470656905821"
           aws_region: "us-east-1"
-          resource_prefix: "qs-ci-${{ github.run_id }}-oracle"
+          deployment_name: "qs-ci-${{ github.run_id }}-oracle"
+          db_table_prefix: "qs_ci_${{ github.run_id }}_oracle"
           dialect: "oracle"
           demo_database_url: "${{ secrets.QS_GEN_ORACLE_URL }}"
           principal_arns:

@@ -47,14 +47,12 @@ def _full_instance(prefix: str) -> L2Instance:
     """An L2 instance with a rail + a limit schedule so every L1
     invariant view's CASE branches get populated."""
     return L2Instance(
-        instance=Identifier(prefix),
         accounts=(),
         account_templates=(),
         rails=(
             SingleLegRail(
                 name=Identifier("SettlementRail"),
                 description="Settlement rail with aging",
-                transfer_type=Identifier("settle"),
                 metadata_keys=(),
                 leg_role=RoleExpression(Identifier("gl_control")),
                 leg_direction="Debit",
@@ -69,7 +67,7 @@ def _full_instance(prefix: str) -> L2Instance:
             LimitSchedule(
                 description="cap on settle from gl_control",
                 parent_role=Identifier("gl_control"),
-                transfer_type=Identifier("settle"),
+                rail=Identifier("SettlementRail"),
                 cap=10000,
             ),
         ),
@@ -80,7 +78,7 @@ def _full_instance(prefix: str) -> L2Instance:
 def sqlite_sql() -> str:
     """One SQLite DDL emission per module — every assertion runs
     against the same string."""
-    return emit_schema(_full_instance("sqlt"), dialect=Dialect.SQLITE)
+    return emit_schema(_full_instance("sqlt"), prefix="sqlt", dialect=Dialect.SQLITE)
 
 
 @pytest.fixture(scope="module")
@@ -237,8 +235,7 @@ class TestSqliteSchemaActuallyRuns:
         _register_sqlite_aggregates(conn)
         try:
             conn.executescript(sqlite_sql)
-            refresh_sql = refresh_matviews_sql(
-                _full_instance("sqlt"), dialect=Dialect.SQLITE,
+            refresh_sql = refresh_matviews_sql(_full_instance("sqlt"), prefix="sqlt", dialect=Dialect.SQLITE,
             )
             conn.executescript(refresh_sql)
         finally:
@@ -257,10 +254,10 @@ class TestSqliteSchemaActuallyRuns:
                 "INSERT INTO sqlt_transactions "
                 "(id, account_id, account_scope, amount_money, "
                 "amount_direction, status, posting, transfer_id, "
-                "transfer_type, rail_name, origin) "
+                "rail_name, origin) "
                 "VALUES ('tx-1', 'acct-a', 'internal', 100.0, "
                 "'Credit', 'Posted', '2030-01-01 00:00:00', 'tr-1', "
-                "'settle', 'SettlementRail', 'InternalInitiated')"
+                "'SettlementRail', 'InternalInitiated')"
             )
             cur.execute("SELECT entry FROM sqlt_transactions WHERE id='tx-1'")
             entry, = cur.fetchone()

@@ -280,7 +280,7 @@ class TestAggregatingRailBundling:
                 continue
             assert (
                 str(r.name) in bundled_names
-                or r.transfer_type in bundled_transfer_types
+                or r.name in bundled_transfer_types
             ), (
                 f"Rail {r.name!r} has max_unbundled_age but isn't bundled by "
                 f"any aggregating rail; the watch will never fire"

@@ -52,6 +52,8 @@ def _sqlite_cfg(tmp_path: Path, **overrides: object) -> Config:
     base = Config(
         aws_account_id="111122223333",
         aws_region="us-east-1",
+        deployment_name="qsgen-test",
+        db_table_prefix="test",
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),
@@ -65,7 +67,7 @@ def _sqlite_cfg(tmp_path: Path, **overrides: object) -> Config:
 
 def _apply_schema(cfg: Config, yaml_path: Path) -> None:
     instance = load_instance(yaml_path)
-    schema_sql = emit_schema(instance, dialect=cfg.dialect)
+    schema_sql = emit_schema(instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect)
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()

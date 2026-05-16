@@ -154,8 +154,7 @@ def test_limit_breach_carries_transfer_type_in_identity():
             LimitBreachPlant(
                 account_id="b1",
                 days_ago=4,
-                transfer_type="ACH",
-                rail_name="r",
+                rail_name="ACH",
                 amount=Decimal("999"),
                 counter_account_id="ext-1",
             ),
@@ -176,15 +175,13 @@ def test_stuck_pending_skips_period_filter():
             StuckPendingPlant(
                 account_id="a",
                 days_ago=100,  # far older than any plausible period
-                transfer_type="t",
-                rail_name="r",
+                rail_name="t",
                 amount=Decimal("1"),
             ),
             StuckPendingPlant(
                 account_id="b",
                 days_ago=0,
-                transfer_type="t",
-                rail_name="r",
+                rail_name="t",
                 amount=Decimal("1"),
             ),
         ),
@@ -203,8 +200,7 @@ def test_stuck_unbundled_skips_period_filter():
             StuckUnbundledPlant(
                 account_id="u1",
                 days_ago=100,
-                transfer_type="t",
-                rail_name="r",
+                rail_name="t",
                 amount=Decimal("1"),
             ),
         ),
@@ -221,16 +217,14 @@ def test_supersession_in_period_counts_as_correcting_tx():
             SupersessionPlant(
                 account_id="s1",
                 days_ago=2,
-                transfer_type="t",
-                rail_name="r",
+                rail_name="t",
                 original_amount=Decimal("100"),
                 corrected_amount=Decimal("110"),
             ),
             SupersessionPlant(
                 account_id="s2",
                 days_ago=50,  # outside period
-                transfer_type="t",
-                rail_name="r",
+                rail_name="t",
                 original_amount=Decimal("100"),
                 corrected_amount=Decimal("110"),
             ),

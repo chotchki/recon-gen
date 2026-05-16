@@ -166,16 +166,16 @@ def _resolve_period(
     return start, end
 
 
-def _institution_name(instance) -> str:  # type: ignore[no-untyped-def]: instance is L2Instance, untyped pending audit-CLI sweep
+def _institution_name(instance, cfg) -> str:  # type: ignore[no-untyped-def]: instance is L2Instance, cfg is Config — untyped pending audit-CLI sweep
     """Pull the institution display name from the L2 persona block.
 
-    Falls back to the L2 instance identifier when no persona block is
+    Falls back to the cfg's deployment name when no persona block is
     declared — the report still renders cleanly against any L2 YAML.
     """
     persona = getattr(instance, "persona", None)
     if persona is not None and persona.institution:
         return str(persona.institution[0])
-    return str(instance.instance)
+    return str(cfg.deployment_name)
 
 
 def _singleton_account_ids(instance) -> set[str]:  # type: ignore[no-untyped-def]: instance is L2Instance, untyped pending audit-CLI sweep
@@ -264,7 +264,7 @@ def _query_executive_summary(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     start, end = period
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
@@ -388,7 +388,7 @@ def _query_drift_violations(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     start, end = period
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
@@ -463,7 +463,7 @@ def _query_overdraft_violations(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     start, end = period
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
@@ -569,7 +569,7 @@ def _split_overdraft_by_account_class(
 class LimitBreachViolation:
     """One row of the ``<prefix>_limit_breach`` matview, audit-shaped.
 
-    Each row is one (account, day, transfer_type) cell where the
+    Each row is one (account, day, rail_name) cell where the
     cumulative outbound debit total exceeded the L2-configured cap.
     Magnitude = ``outbound_total - cap`` (always positive).
     """
@@ -578,7 +578,7 @@ class LimitBreachViolation:
     account_role: str
     account_parent_role: str
     business_day: date
-    transfer_type: str
+    rail_name: str
     outbound_total: Decimal
     cap: Decimal
 
@@ -600,7 +600,7 @@ def _query_limit_breach_violations(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     start, end = period
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
@@ -613,7 +613,7 @@ def _query_limit_breach_violations(
         cur.execute(
             f"SELECT account_id, account_name, account_role,"
             f"       account_parent_role, business_day,"
-            f"       transfer_type, outbound_total, cap"
+            f"       rail_name, outbound_total, cap"
             f"  FROM {prefix}_limit_breach"
             f" WHERE business_day >= {start_lit}"
             f"   AND business_day < {end_excl_lit}"
@@ -629,7 +629,7 @@ def _query_limit_breach_violations(
                 business_day=(
                     _coerce_to_date(r[4])
                 ),
-                transfer_type=str(r[5] or ""),
+                rail_name=str(r[5] or ""),
                 outbound_total=Decimal(r[6] or 0),
                 cap=Decimal(r[7] or 0),
             )
@@ -641,15 +641,15 @@ def _query_limit_breach_violations(
 
 @dataclass(frozen=True)
 class LimitBreachChildGroupSummary:
-    """Per (parent_role, transfer_type) roll-up of breaching children.
+    """Per (parent_role, rail_name) roll-up of breaching children.
 
-    LimitSchedule caps are keyed on (parent_role, transfer_type) per
+    LimitSchedule caps are keyed on (parent_role, rail_name) per
     SPEC, so the natural child summary keys both too. Auditor sees:
     "5 customers breached the ACH outbound cap under DDAControl this
     period, total overshoot $X".
     """
     parent_role: str
-    transfer_type: str
+    rail_name: str
     distinct_children_breaching: int
     total_overshoot: Decimal
 
@@ -663,7 +663,7 @@ def _split_limit_breach_by_account_class(
 ]:
     """Bucket rows into (parent per-row, child grouped by parent+type).
 
-    Children grouped by (parent_role, transfer_type) since that's
+    Children grouped by (parent_role, rail_name) since that's
     the cap dimension; total_overshoot sums each child's worst-day
     overshoot in the period.
     """
@@ -677,7 +677,7 @@ def _split_limit_breach_by_account_class(
         else:
             key = (
                 r.account_parent_role or "(no parent)",
-                r.transfer_type,
+                r.rail_name,
             )
             by_group.setdefault(key, {}).setdefault(
                 r.account_id, [],
@@ -686,7 +686,7 @@ def _split_limit_breach_by_account_class(
         (
             LimitBreachChildGroupSummary(
                 parent_role=key[0],
-                transfer_type=key[1],
+                rail_name=key[1],
                 distinct_children_breaching=len(children),
                 total_overshoot=sum(
                     (
@@ -699,7 +699,7 @@ def _split_limit_breach_by_account_class(
             for key, children in by_group.items()
         ),
         # Biggest overshoot first.
-        key=lambda s: (-s.total_overshoot, s.parent_role, s.transfer_type),
+        key=lambda s: (-s.total_overshoot, s.parent_role, s.rail_name),
     )
     return parent_rows, child_summaries
 
@@ -721,7 +721,7 @@ class StuckPendingViolation:
     account_role: str
     account_parent_role: str
     transaction_id: str
-    transfer_type: str
+    rail_name: str
     posting: datetime
     amount_money: Decimal
     age_seconds: Decimal
@@ -743,14 +743,14 @@ def _query_stuck_pending_violations(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
         cur.execute(
             f"SELECT account_id, account_name, account_role,"
             f"       account_parent_role, transaction_id,"
-            f"       transfer_type, posting, amount_money,"
+            f"       rail_name, posting, amount_money,"
             f"       age_seconds, max_pending_age_seconds"
             f"  FROM {prefix}_stuck_pending"
             f" ORDER BY age_seconds DESC, account_id"
@@ -762,7 +762,7 @@ def _query_stuck_pending_violations(
                 account_role=str(r[2] or ""),
                 account_parent_role=str(r[3] or ""),
                 transaction_id=str(r[4]),
-                transfer_type=str(r[5] or ""),
+                rail_name=str(r[5] or ""),
                 posting=_coerce_to_datetime(r[6]),
                 amount_money=Decimal(r[7] or 0),
                 age_seconds=Decimal(r[8] or 0),
@@ -776,7 +776,7 @@ def _query_stuck_pending_violations(
 
 @dataclass(frozen=True)
 class StuckPendingChildGroupSummary:
-    """Per (parent_role, transfer_type) roll-up of stuck child txns.
+    """Per (parent_role, rail_name) roll-up of stuck child txns.
 
     Counts both distinct affected accounts and total stuck txns:
     "5 customers under DDAControl have 12 stuck wire_concentration
@@ -785,7 +785,7 @@ class StuckPendingChildGroupSummary:
     spread.
     """
     parent_role: str
-    transfer_type: str
+    rail_name: str
     distinct_children_affected: int
     stuck_transaction_count: int
     total_stuck_amount: Decimal
@@ -809,14 +809,14 @@ def _split_stuck_pending_by_account_class(
         else:
             key = (
                 r.account_parent_role or "(no parent)",
-                r.transfer_type,
+                r.rail_name,
             )
             by_group.setdefault(key, []).append(r)
     child_summaries = sorted(
         (
             StuckPendingChildGroupSummary(
                 parent_role=key[0],
-                transfer_type=key[1],
+                rail_name=key[1],
                 distinct_children_affected=len({r.account_id for r in group}),
                 stuck_transaction_count=len(group),
                 total_stuck_amount=sum(
@@ -828,7 +828,7 @@ def _split_stuck_pending_by_account_class(
         ),
         # Biggest dollar pile first.
         key=lambda s: (
-            -s.total_stuck_amount, s.parent_role, s.transfer_type,
+            -s.total_stuck_amount, s.parent_role, s.rail_name,
         ),
     )
     return parent_rows, child_summaries
@@ -862,7 +862,7 @@ class StuckUnbundledViolation:
     account_role: str
     account_parent_role: str
     transaction_id: str
-    transfer_type: str
+    rail_name: str
     posting: datetime
     amount_money: Decimal
     age_seconds: Decimal
@@ -883,14 +883,14 @@ def _query_stuck_unbundled_violations(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
         cur.execute(
             f"SELECT account_id, account_name, account_role,"
             f"       account_parent_role, transaction_id,"
-            f"       transfer_type, posting, amount_money,"
+            f"       rail_name, posting, amount_money,"
             f"       age_seconds, max_unbundled_age_seconds"
             f"  FROM {prefix}_stuck_unbundled"
             f" ORDER BY age_seconds DESC, account_id"
@@ -902,7 +902,7 @@ def _query_stuck_unbundled_violations(
                 account_role=str(r[2] or ""),
                 account_parent_role=str(r[3] or ""),
                 transaction_id=str(r[4]),
-                transfer_type=str(r[5] or ""),
+                rail_name=str(r[5] or ""),
                 posting=_coerce_to_datetime(r[6]),
                 amount_money=Decimal(r[7] or 0),
                 age_seconds=Decimal(r[8] or 0),
@@ -916,9 +916,9 @@ def _query_stuck_unbundled_violations(
 
 @dataclass(frozen=True)
 class StuckUnbundledChildGroupSummary:
-    """Per (parent_role, transfer_type) roll-up of unbundled child txns."""
+    """Per (parent_role, rail_name) roll-up of unbundled child txns."""
     parent_role: str
-    transfer_type: str
+    rail_name: str
     distinct_children_affected: int
     stuck_transaction_count: int
     total_stuck_amount: Decimal
@@ -942,14 +942,14 @@ def _split_stuck_unbundled_by_account_class(
         else:
             key = (
                 r.account_parent_role or "(no parent)",
-                r.transfer_type,
+                r.rail_name,
             )
             by_group.setdefault(key, []).append(r)
     child_summaries = sorted(
         (
             StuckUnbundledChildGroupSummary(
                 parent_role=key[0],
-                transfer_type=key[1],
+                rail_name=key[1],
                 distinct_children_affected=len({r.account_id for r in group}),
                 stuck_transaction_count=len(group),
                 total_stuck_amount=sum(
@@ -960,7 +960,7 @@ def _split_stuck_unbundled_by_account_class(
             for key, group in by_group.items()
         ),
         key=lambda s: (
-            -s.total_stuck_amount, s.parent_role, s.transfer_type,
+            -s.total_stuck_amount, s.parent_role, s.rail_name,
         ),
     )
     return parent_rows, child_summaries
@@ -1029,7 +1029,7 @@ def _query_supersession(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     start, end = period
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
@@ -1127,7 +1127,7 @@ class DailyStatementTransaction:
     """
     transaction_id: str
     transfer_id: str
-    transfer_type: str
+    rail_name: str
     amount_money: Decimal
     amount_direction: str
     status: str
@@ -1188,7 +1188,7 @@ def _query_daily_statement_walks(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     start, end = period
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
@@ -1286,7 +1286,7 @@ def _query_daily_statement_walks(
 
             # 3) Day's transactions from current_transactions matview.
             cur.execute(
-                f"SELECT id, transfer_id, transfer_type,"
+                f"SELECT id, transfer_id, rail_name,"
                 f"       amount_money, amount_direction, status, posting"
                 f"  FROM {prefix}_current_transactions"
                 f" WHERE account_id = '{account_id}'"
@@ -1298,7 +1298,7 @@ def _query_daily_statement_walks(
                 DailyStatementTransaction(
                     transaction_id=str(r[0]),
                     transfer_id=str(r[1] or ""),
-                    transfer_type=str(r[2] or ""),
+                    rail_name=str(r[2] or ""),
                     amount_money=Decimal(r[3] or 0),
                     amount_direction=str(r[4] or ""),
                     status=str(r[5] or ""),
@@ -1383,7 +1383,7 @@ def _query_matview_evidence(
     from quicksight_gen.common.db import connect_demo_db
     from quicksight_gen.common.provenance import hash_matview_rows
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     out: list[MatviewEvidence] = []
     conn = connect_demo_db(cfg)
     try:
@@ -1438,12 +1438,12 @@ def audit_apply(
 
     _cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
     start, end = _resolve_period(period_from, period_to)
-    institution = _institution_name(instance)
+    institution = _institution_name(instance, _cfg)
     generated_at = datetime.now()
     l2_label = (
         Path(l2_instance_path).name
         if l2_instance_path is not None
-        else f"{instance.instance} (bundled)"
+        else f"{_cfg.deployment_name} (bundled)"
     )
     exec_summary = _query_executive_summary(_cfg, instance, (start, end))
     drift_rows = _query_drift_violations(_cfg, instance, (start, end))
@@ -1656,7 +1656,7 @@ def audit_verify(
 
     from quicksight_gen.common.db import connect_demo_db
 
-    prefix = instance.instance
+    prefix = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()

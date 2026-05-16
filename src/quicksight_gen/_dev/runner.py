@@ -35,6 +35,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -54,7 +55,9 @@ from quicksight_gen.common.env_keys import (
     QS_E2E_PAGE_TIMEOUT,
     QS_E2E_USER_ARN,
     QS_GEN_CONFIG,
+    QS_GEN_DB_TABLE_PREFIX,
     QS_GEN_DEMO_DATABASE_URL,
+    QS_GEN_DEPLOYMENT_NAME,
     QS_GEN_E2E,
     QS_GEN_FUZZ_SEED,
     QS_GEN_LAYER,
@@ -651,9 +654,21 @@ def _layer_command(
         # X.2.u.6.followon — `test_dashboard_driver.py` joins the list: its 8
         # `App2Driver.smoke()` protocol-parity tests (`test_showcase_*` /
         # `test_app2_*`) need only Playwright + the bundled smoke app (no DB,
-        # no AWS), so this is their home. Its 3 `test_qs_l1_*` tests
-        # (`@pytest.mark.browser`, deployed-dashboard) skip cleanly here
-        # (no `QS_E2E_USER_ARN`) and run in the `browser` layer / e2e.yml.
+        # no AWS), so this is their home.
+        #
+        # Z.B.14 (2026-05-15) — `-m "not browser"` deselects the 3
+        # `@pytest.mark.browser` tests in `test_dashboard_driver.py`
+        # (`test_qs_l1_*`). Earlier reasoning that they "skip cleanly here
+        # (no `QS_E2E_USER_ARN`)" is no longer true: Y.2.gate.h.1 made the
+        # runner auto-derive `QS_E2E_USER_ARN` from `cfg.auth.aws_profile`,
+        # so the QS-bound tests now actually try to run pre-deploy and probe
+        # whatever dashboard happens to be left in QS from a prior run
+        # (cross-cell coupling). The Z.B.12 verification matrix surfaced
+        # this on `sq_or_aw`: 3 timeouts on `[role="tab"]` against a stale
+        # spec_example dashboard. The browser layer already picks these up
+        # via `-m browser` against `tests/e2e/`, so no parallel addition
+        # needed there. The other html2 files in this list carry no marks
+        # (verified) so `-m "not browser"` keeps them in.
         cmd = [
             str(_VENV_BIN / "pytest"),
             "tests/e2e/test_html2_executives.py",
@@ -664,6 +679,7 @@ def _layer_command(
             # Playwright-only, no DB / no AWS).
             "tests/e2e/test_html2_table_pagination.py",
             "tests/e2e/test_dashboard_driver.py",
+            "-m", "not browser",
             "-q",
         ]
         if opts.only:
@@ -733,27 +749,68 @@ def _layer_command(
         # `./run_e2e.sh` pattern (browser tier is heavy enough that 8+
         # workers thrash QS embed limits). Behind `QS_GEN_E2E=1`.
         # `QS_E2E_USER_ARN` already in subprocess env via h.1 derivation.
-        cmd = [
-            str(_VENV_BIN / "pytest"), "tests/e2e/", "-m", "browser", "-q",
+        #
+        # Z.B.12-followup (2026-05-15) — split into two sequential pytest
+        # invocations via a shell wrapper:
+        #   1. The main browser tier with `-n 4` workers, ignoring the
+        #      audit-dashboard-agreement file.
+        #   2. ONLY ``test_audit_dashboard_agreement.py`` with ``-n 1`` —
+        #      its module-scoped ``seeded_audit`` fixture re-applies the
+        #      dialect schema (DROP MATERIALIZED VIEW + CREATE …); on
+        #      ``aw`` target with persistent Aurora the conftest's
+        #      ``--dist loadgroup`` bump has been observed not to pin
+        #      both parametrizations onto a single worker, so multiple
+        #      workers race the schema apply (Oracle DDL auto-commits;
+        #      ORA-12006 fires when worker B's CREATE collides with
+        #      worker A's). Forcing a single worker is the only race-free
+        #      way; the test only contributes a few minutes total so the
+        #      sequential run isn't a meaningful wall-clock cost. CI's
+        #      ``e2e-pg-browser`` job already follows this pattern (the
+        #      file runs as a separate step).
+        nworkers = str(opts.parallel) if opts.parallel > 1 else "4"
+        only = ["-k", opts.only] if opts.only else []
+        agree_file = "tests/e2e/test_audit_dashboard_agreement.py"
+        main_cmd = [
+            str(_VENV_BIN / "pytest"), "tests/e2e/",
+            f"--ignore={agree_file}",
+            "-m", "browser", "-q",
+            *only, *_cov_args,
+            "-n", nworkers,
+            # Y.7-followup — auto-retry a flaky browser test
+            # (``pytest-rerunfailures``, in the [dev] extra) instead of
+            # failing the whole chain on it. The browser tier walks a
+            # live QuickSight embed under ``-n 4`` worker contention;
+            # the structure tests ("every visual rendered, one snapshot
+            # budget") occasionally lose a visual from the DOM when QS
+            # is rate-limiting under the concurrent load (Oracle-`aw`
+            # worst: slower per-query latency = workers hold QS sessions
+            # longer = more concurrent pressure — the underlying queries
+            # are ~8 ms and the data returns; it's a render-timing
+            # flake, passes on re-run / in isolation). The rerun happens
+            # INSIDE this same pytest invocation (xdist re-runs on the
+            # same worker), not by restarting the chain — so a flake
+            # costs ~one test re-run, not a whole ``unit→…→browser``
+            # cycle. A test that's genuinely broken fails 3× → still
+            # halts.
+            "--reruns", "2", "--reruns-delay", "10",
         ]
-        if opts.only:
-            cmd += ["-k", opts.only]
-        cmd += _cov_args
-        cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "4"]
-        # Y.7-followup — auto-retry a flaky browser test (`pytest-rerunfailures`,
-        # in the [dev] extra) instead of failing the whole chain on it. The
-        # browser tier walks a live QuickSight embed under `-n 4` worker
-        # contention; the structure tests ("every visual rendered, one
-        # snapshot budget") occasionally lose a visual from the DOM when QS
-        # is rate-limiting under the concurrent load (Oracle-`aw` worst:
-        # slower per-query latency = workers hold QS sessions longer = more
-        # concurrent pressure — the underlying queries are ~8 ms and the
-        # data returns; it's a render-timing flake, passes on re-run / in
-        # isolation). The rerun happens INSIDE this same pytest invocation
-        # (xdist re-runs on the same worker), not by restarting the chain —
-        # so a flake costs ~one test re-run, not a whole `unit→…→browser`
-        # cycle. A test that's genuinely broken fails 3× → still halts.
-        cmd += ["--reruns", "2", "--reruns-delay", "10"]
+        agree_cmd = [
+            str(_VENV_BIN / "pytest"), agree_file, "-q",
+            *only, *_cov_args,
+            "-n", "1",
+            "--reruns", "2", "--reruns-delay", "10",
+        ]
+        # ``bash -c '… && …'`` chains the two pytest invocations
+        # sequentially; the shell exits non-zero if EITHER fails, which
+        # is what dispatch_layer's stop-on-first-failure honors. Quote
+        # each argv element so paths/args with spaces survive (none in
+        # practice but defensive).
+        chained = (
+            " ".join(shlex.quote(a) for a in main_cmd)
+            + " && "
+            + " ".join(shlex.quote(a) for a in agree_cmd)
+        )
+        cmd = ["bash", "-c", chained]
         # Bump the per-page Playwright timeout for the browser layer to 60 s
         # (matches the CI `e2e-pg-browser` job). The default 30 s
         # (tests/e2e/conftest.py) is fine for a local-pg container but too
@@ -1432,12 +1489,19 @@ def _setup_local_sqlite() -> tuple[dict[str, str], object | None]:
     tmp_dir = Path(tempfile.mkdtemp(prefix="qs-gen-sqlite-"))  # typing-smell: ignore[qs-gen-prefix]: tempfile dir name only — not an AWS resource ID, just disambiguates per-invocation runner-managed temp dirs from other tools' tempfiles for operator-visible cleanup
     db_path = tmp_dir / "demo.sqlite"
     cfg_path = tmp_dir / "config.sqlite.yaml"
+    # Z.C — synth cfg uses ``deployment_name`` + ``db_table_prefix``
+    # (Z.C.2 collapse). The runner injects per-cell overrides via
+    # QS_GEN_DEPLOYMENT_NAME / QS_GEN_DB_TABLE_PREFIX env vars in
+    # ``_run_one_variant`` so multi-cell parallel runs don't collide
+    # — the values written here are the per-invocation defaults that
+    # apply when a cell doesn't override.
     cfg_path.write_text(
         f"aws_account_id: \"111122223333\"\n"
         f"aws_region: \"us-east-1\"\n"
         f"dialect: sqlite\n"
         f"demo_database_url: \"sqlite:///{db_path}\"\n"
-        f"resource_prefix: \"qs-gen-sqlite\"\n"
+        f"deployment_name: \"qsgen-sqlite\"\n"
+        f"db_table_prefix: \"qsgen_sqlite\"\n"
     )
     env: dict[str, str] = {
         QS_GEN_DEMO_DATABASE_URL.name: f"sqlite:///{db_path}",
@@ -1723,11 +1787,11 @@ def _dump_top_queries_for_variant(
         print(f"{terminal_prefix}runner: db-perf [{spec.name}] skipped (sqlite)")
         return
 
-    # Filter on the L2 instance prefix so we drop the operator's
-    # unrelated traffic on the shared DB. Falls back to spec.name if
-    # cfg's prefix isn't set (which shouldn't happen for non-default
-    # variants but stays defensive).
-    like_pattern = cfg.l2_instance_prefix or spec.name
+    # Filter on the DB-table prefix so we drop the operator's
+    # unrelated traffic on the shared DB. Z.C: was cfg.l2_instance_prefix;
+    # cfg.db_table_prefix is the direct replacement (same wire shape —
+    # the LIKE pattern matches `<prefix>_*` table refs in the query log).
+    like_pattern = cfg.db_table_prefix
 
     try:
         conn = connect_demo_db(cfg)
@@ -2255,23 +2319,30 @@ def _resolve_l2_yaml_for_spec(spec: VariantSpec, run_dir: Path) -> Path:
     m.4.f — ALL cells get a per-cell synthesized yaml under
     ``run_dir / "_synth_l2.yaml"``. The synthesis loads the source
     yaml (bundled fixture for sp/sq, operator-supplied for us, fuzz
-    output for f<n>), overrides the ``instance`` field to ``spec.name``,
-    and writes the result. This means:
+    output for f<n>) and writes it back as-is.
 
-    - DB schema prefix becomes ``<spec.name>_*`` (e.g.,
-      ``sp_pg_aw_transactions``) instead of ``spec_example_transactions``.
-      Sister cells (sp_pg_aw + sp_or_aw + sq_pg_aw + ...) deploy to
-      non-colliding tables on shared external Aurora.
-    - cfg.l2_instance_prefix derives from the synthesized instance
-      via the existing ``cfg.with_l2_instance_prefix(instance.instance)``
-      chain — no env override needed.
+    Z.C.9 (2026-05-15) follow-on: pre-Z.C this step also injected
+    ``parsed["instance"] = spec.name`` so each cell got a unique
+    ``<spec.name>_*`` DB-table prefix. Z.C dropped the L2 yaml's
+    ``instance:`` field entirely (loader now hard-rejects it) — the
+    per-cell DB-table prefix moves to ``cfg.db_table_prefix`` via the
+    ``QS_GEN_DB_TABLE_PREFIX=qsgen_<spec.name>`` env override that
+    ``_run_one_variant`` injects per cell. Defensively pop any stray
+    ``instance:`` key from the source (older fuzz output, hand-edited
+    user yamls); the loader would reject it anyway.
+
+    - DB schema prefix becomes ``qsgen_<spec.name>_*`` (e.g.,
+      ``qsgen_sp_pg_aw_transactions``) — set via the per-cell env var
+      override. Sister cells (sp_pg_aw + sp_or_aw + sq_pg_aw + ...)
+      deploy to non-colliding tables on shared external Aurora.
+    - QS resource ID prefix becomes ``qsgen-<spec.name>`` via the
+      ``QS_GEN_DEPLOYMENT_NAME`` env override.
     - Fuzz determinism preserved: same seed → same fuzzer output →
-      same synthesized yaml (the instance-rename is the only
-      per-cell mutation, derivable from spec.name).
+      same synthesized yaml (it's now byte-identical to the source).
 
     Operators reproduce a failed fuzz cell with
-    ``--variants=f<seed>_<di>_<ta>`` — same spec.name → same instance
-    rename → byte-identical synthesized yaml.
+    ``--variants=f<seed>_<di>_<ta>`` — same spec.name → same env
+    overrides → byte-identical deploy.
     """
     import yaml  # noqa: PLC0415 — lazy: only needed for synthesis path
     synth_path = run_dir / "_synth_l2.yaml"
@@ -2291,10 +2362,11 @@ def _resolve_l2_yaml_for_spec(spec: VariantSpec, run_dir: Path) -> Path:
     else:
         raise ValueError(f"unknown scenario code {spec.scenario!r}")
 
-    # Override the instance field. yaml.safe_dump preserves insertion
-    # order with sort_keys=False (matches the fuzzer output convention).
+    # Defensive: pop any legacy `instance:` key that may slip in via
+    # older fuzz output or operator-edited user yaml. yaml.safe_dump
+    # preserves insertion order with sort_keys=False.
     parsed = cast("dict[str, Any]", yaml.safe_load(source_text))
-    parsed["instance"] = spec.name
+    parsed.pop("instance", None)
     synth_text = yaml.safe_dump(
         parsed, sort_keys=False, default_flow_style=False, width=120,
     )
@@ -2382,6 +2454,27 @@ def _run_one_variant(
     if dialect_cfg is not None and QS_GEN_CONFIG.name not in variant_env:
         variant_env[QS_GEN_CONFIG.name] = str(dialect_cfg)
 
+    # Z.C.4 — per-cell ``deployment_name`` + ``db_table_prefix`` overrides
+    # so multi-cell parallel runs (sp_pg_lo / sq_pg_lo / fuzz cells) don't
+    # collide on AWS resource IDs (``deployment_name`` weaves into every
+    # qs-gen-* ID via ``Config.prefixed``) or DB table prefixes
+    # (``db_table_prefix`` is the per-instance schema prefix every
+    # `<prefix>_transactions`/etc. read keys off). Operator's
+    # ``run/config.<dialect>.yaml`` carries STATIC values
+    # (e.g. ``qsgen-postgres``) that're fine for single-cell runs but
+    # collide the moment two cells share a target. The cfg loader
+    # (Z.C.2) honors these env vars over yaml fields.
+    #
+    # ``spec.name`` is ``<sc>_<di>_<ta>`` (e.g. ``sp_pg_lo``) — already
+    # snake_case, max 17 chars (well under cfg.db_table_prefix's 30-char
+    # cap). DB prefix joins with `_`; QS-resource-ID prefix joins with
+    # `-` (DB identifiers reject hyphens unquoted; QS resource IDs are
+    # kebab-case). Use `qsgen` (no hyphen) as the literal prefix on both.
+    if QS_GEN_DEPLOYMENT_NAME.name not in variant_env:
+        variant_env[QS_GEN_DEPLOYMENT_NAME.name] = f"qsgen-{spec.name}"
+    if QS_GEN_DB_TABLE_PREFIX.name not in variant_env:
+        variant_env[QS_GEN_DB_TABLE_PREFIX.name] = f"qsgen_{spec.name}"
+
     # Y.2.gate.h+i.0 — AWS auth wiring. Inject AWS_PROFILE so subprocess
     # boto3 calls + AWS CLI invocations see the long-lived IAM-user creds
     # (combined spike candidate C). Derive QS_E2E_USER_ARN from STS+ListUsers
@@ -2436,11 +2529,12 @@ def _run_one_variant(
     l2_yaml = _resolve_l2_yaml_for_spec(spec, run_dir)
     variant_env[QS_GEN_TEST_L2_INSTANCE.name] = str(l2_yaml)
     # m.4.f — the synthesized yaml's `instance` field IS spec.name,
-    # so cfg.with_l2_instance_prefix(instance.instance) downstream
-    # produces per-cell-unique QS resource IDs naturally. The
-    # explicit QS_GEN_L2_INSTANCE_PREFIX env override is no longer
-    # set by the runner (the env var stays in env_keys/cfg as a
-    # general-purpose escape hatch, just no longer needed here).
+    # so cfg.db_table_prefix downstream (Z.C — formerly
+    # cfg.with_l2_instance_prefix(instance.instance)) produces per-cell-
+    # unique QS resource IDs naturally. The explicit
+    # QS_GEN_L2_INSTANCE_PREFIX env override is no longer set by the
+    # runner (the env var stays in env_keys/cfg as a general-purpose
+    # escape hatch, just no longer needed here).
 
     if variant_env:
         for key, val in variant_env.items():

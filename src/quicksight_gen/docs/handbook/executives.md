@@ -34,7 +34,7 @@ COO asking "is the GL chart growing?"
 ### Transaction Volume Over Time
 
 Aggregate transaction counts per day, optionally split by
-`transfer_type` or `origin`. Surfaces volume trends — sudden drops
+`rail_name` or `origin`. Surfaces volume trends — sudden drops
 indicate ETL outages; sudden spikes indicate either real growth or
 duplicate-loading bugs.
 
@@ -43,7 +43,7 @@ contribution.
 
 ### Money Moved
 
-Aggregate money-moved totals per day, broken down by `transfer_type`
+Aggregate money-moved totals per day, broken down by `rail_name`
 (ACH origination, wire settlement, internal transfer, etc.). Sums
 absolute `amount` values across all postings in the window.
 

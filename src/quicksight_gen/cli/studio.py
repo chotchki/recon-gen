@@ -132,7 +132,7 @@ def studio(  # type: ignore[no-untyped-def]: Click decorator strips the function
     studio_factory = functools.partial(
         make_studio_routes,
         dialect=cfg.dialect,
-        prefix_override=cfg.l2_instance_prefix,
+        prefix_override=cfg.db_table_prefix,
         cfg=cfg,
         tg_cache=tg_cache,
     )

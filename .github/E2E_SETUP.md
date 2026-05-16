@@ -188,8 +188,9 @@ typically `PassDataSource` for the resource type shown).
 
 The `Resource: "*"` is QS's standard pattern — QuickSight resource
 ARNs aren't well-supported as IAM resource constraints. The trust
-policy + the per-run `resource_prefix: qs-ci-${{ github.run_id }}`
-provide isolation, not the IAM resource scope.
+policy + the per-run `deployment_name: qs-ci-${{ github.run_id }}`
+(Z.C — `resource_prefix` was renamed) provide isolation, not the IAM
+resource scope.
 
 After both policies attach, copy the role ARN
 (`arn:aws:iam::ACCOUNT:role/qs-gen-ci`) into the `AWS_ROLE_ARN`

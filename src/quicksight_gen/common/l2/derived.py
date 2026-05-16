@@ -91,6 +91,6 @@ def _find_rail(instance: L2Instance, rail_name: Identifier) -> Rail:
         if r.name == rail_name:
             return r
     raise KeyError(
-        f"Rail {rail_name!r} not found in L2 instance "
-        f"{instance.instance!r}"
+        f"Rail {rail_name!r} not found among instance.rails "
+        f"({len(instance.rails)} declared)"
     )

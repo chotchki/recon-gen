@@ -37,12 +37,11 @@ from tests._test_helpers import make_test_config
 
 
 # L2FT's build_all_l2_flow_tracing_datasets needs both cfg + L2 instance
-# (the App Info matview names + the Rails/Chains/Templates pushdown
-# params' declared-value defaults are all L2-derived).
+# (the App Info matview names use cfg.db_table_prefix; the
+# Rails/Chains/Templates pushdown params' declared-value defaults are
+# L2-derived).
 _TEST_INSTANCE = default_l2_instance()
-_TEST_CFG = make_test_config().with_l2_instance_prefix(
-    str(_TEST_INSTANCE.instance),
-)
+_TEST_CFG = make_test_config(db_table_prefix="spec_example")
 
 
 class _NoConnectPool:

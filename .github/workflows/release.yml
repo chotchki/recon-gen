@@ -302,9 +302,9 @@ jobs:
     # With its own group, this job is never the evictable pending run.
     # Trade-off: it can now run concurrently with e2e.yml's `e2e-pg-api`
     # / `cleanup-pg`. Safe because (a) it deploys to a unique table
-    # prefix (the synthesized per-release L2 instance below — disjoint
-    # from e2e.yml's `sp_pg_aw_*` and `cleanup-pg`'s `spec_example_*`)
-    # and a unique QS `resource_prefix` (`qs-release-<tag>`); (b) the
+    # prefix (cfg.db_table_prefix = `rel_<safe-tag>` — disjoint from
+    # e2e.yml's `sp_pg_aw_*` and `cleanup-pg`'s `spec_example_*`) and a
+    # unique QS `deployment_name` (`qs-release-<tag>`); (b) the
     # only shared resource left is the Aurora cluster's running state,
     # which the "last one stops the cluster" guard on the Stop step
     # handles (a residual few-second TOCTOU window remains — acceptable).
@@ -358,32 +358,35 @@ jobs:
         with:
           cluster-id: ${{ secrets.QS_GEN_AWS_PG_CLUSTER_ID }}
 
-      - name: Synthesize a per-release L2 instance (gate.l.8 — unique table prefix)
-        # gate.l.8 — this job is in its own concurrency group now, so it
-        # can run alongside e2e.yml's `e2e-pg-api` (tables `sp_pg_aw_*`)
-        # and `cleanup-pg::schema clean` (drops `spec_example_*`). Rename
-        # the bundled `spec_example` instance to `rel_<safe-tag>` so this
-        # release's tables (`rel_<safe-tag>_*`) are disjoint from both —
-        # nothing else creates or drops them. (Same L2 *shape* as what CI
-        # already exercises; only the instance name changes.)
+      - name: Use bundled L2 instance directly (Z.C — L2 no longer carries a prefix)
+        # gate.l.8 + Z.C — this job is in its own concurrency group, so
+        # it can run alongside e2e.yml's `e2e-pg-api` and
+        # `cleanup-pg::schema clean`. Pre-Z.C this step rewrote the L2
+        # yaml's `instance:` field to `rel_<safe-tag>`; under Z.C the L2
+        # yaml has no `instance:` field at all (rejected at load), so
+        # disjointness comes from the per-run cfg's `db_table_prefix`
+        # below.
         run: |
-          SAFE_TAG="${GITHUB_REF_NAME//[.\/-]/_}"   # v8.8.0a20 -> v8_8_0a20
-          sed "s/^instance:.*/instance: rel_${SAFE_TAG}/" tests/l2/spec_example.yaml > /tmp/release-l2.yaml
-          echo "release L2 instance: rel_${SAFE_TAG}"
+          cp tests/l2/spec_example.yaml /tmp/release-l2.yaml
           head -3 /tmp/release-l2.yaml
 
       - name: Generate per-run config.yaml
-        # ``resource_prefix`` carries the release tag for traceability;
-        # the ``ResourcePrefix`` AWS tag on every deployed resource
-        # makes ``json clean`` scope-safe (post-v8.4.0). AWS QS
-        # dashboard IDs match ``[\w\-]+`` (no dots), so collapse the
-        # tag's ``v8.6.4`` → ``v8-6-4`` before injecting.
+        # Z.C — `deployment_name` (QS resource ID prefix) carries the
+        # release tag for traceability; the `Deployment` AWS tag on every
+        # deployed resource makes `json clean` scope-safe.
+        # `db_table_prefix` (DB-table prefix) carries an underscored
+        # variant so this release's tables are disjoint from
+        # `spec_example_*` and any concurrent CI cells. AWS QS dashboard
+        # IDs match `[\w\-]+` (no dots), so collapse `v8.6.4` → `v8-6-4`
+        # for deployment_name and `v8_6_4` for db_table_prefix.
         run: |
           SAFE_TAG="${GITHUB_REF_NAME//./-}"
+          DB_SAFE_TAG="${GITHUB_REF_NAME//[.\/-]/_}"   # v8.8.0a20 -> v8_8_0a20
           cat > /tmp/release-e2e.yaml <<EOF
           aws_account_id: "470656905821"
           aws_region: "us-east-1"
-          resource_prefix: "qs-release-${SAFE_TAG}"
+          deployment_name: "qs-release-${SAFE_TAG}"
+          db_table_prefix: "rel_${DB_SAFE_TAG}"
           dialect: "postgres"
           demo_database_url: "${{ secrets.QS_GEN_PG_URL }}"
           principal_arns:
@@ -489,7 +492,7 @@ jobs:
       # re-plants — can't share a worker pool with the render tests
       # above; runs last). Against the just-published TestPyPI wheel +
       # the release-synthesized L2 instance. The QS leg runs iff the
-      # ``<resource_prefix>-<instance>-l1-dashboard`` happens to be
+      # ``<deployment_name>-l1-dashboard`` happens to be
       # deployed for this run; otherwise it self-skips and the gate is
       # the 3-way ``scenario ⊆ direct == App2`` + PDF — still a real
       # prod-publish gate (the wheel's App2 renderer / audit PDF must

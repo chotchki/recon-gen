@@ -107,7 +107,6 @@ def test_auto_scenario_reports_omissions_for_minimal_yaml(tmp_path: Path) -> Non
     derivable plants and lists the rest as omitted."""
     minimal = tmp_path / "minimal.yaml"
     minimal.write_text(
-        "instance: minimal_yaml\n"
         "accounts:\n"
         "  - id: control\n"
         "    role: ControlAccount\n"
@@ -123,7 +122,6 @@ def test_auto_scenario_reports_omissions_for_minimal_yaml(tmp_path: Path) -> Non
         "rails:\n"
         # Two-leg inbound — supports drift + supersession picks
         "  - name: Inbound\n"
-        "    transfer_type: ach\n"
         "    source_role: ExternalParty\n"
         "    destination_role: CustomerSub\n"
         "    expected_net: 0\n"
@@ -152,7 +150,6 @@ def test_auto_scenario_with_no_template_omits_everything(tmp_path: Path) -> None
     auto-scenario reports 'ALL' as omitted and returns an empty plant."""
     bare = tmp_path / "bare.yaml"
     bare.write_text(
-        "instance: bare_yaml\n"
         "accounts:\n"
         "  - id: only\n"
         "    role: Only\n"
@@ -173,8 +170,8 @@ def test_auto_scenario_emit_is_byte_deterministic(spec_instance) -> None:
     instance with the same canonical today produce byte-identical SQL."""
     report_a = default_scenario_for(spec_instance, today=CANONICAL_TODAY)
     report_b = default_scenario_for(spec_instance, today=CANONICAL_TODAY)
-    sql_a = emit_seed(spec_instance, report_a.scenario)
-    sql_b = emit_seed(spec_instance, report_b.scenario)
+    sql_a = emit_seed(spec_instance, report_a.scenario, prefix="spec_example")
+    sql_b = emit_seed(spec_instance, report_b.scenario, prefix="spec_example")
     assert sql_a == sql_b
 
 
@@ -185,7 +182,9 @@ def test_auto_seed_against_spec_example_has_zero_persona_leaks(spec_instance) ->
     """The auto-scenario itself is persona-blind: against spec_example.yaml,
     the generated SQL contains no Sasquatch / SNB / FRB / etc. literals."""
     report = default_scenario_for(spec_instance, today=CANONICAL_TODAY)
-    sql = emit_seed(spec_instance, report.scenario).lower()
+    sql = emit_seed(
+        spec_instance, report.scenario, prefix="spec_example",
+    ).lower()
     blocklist = ("sasquatch", "bigfoot", "yeti", "snb", "frb",
                  "cascadia", "juniper", "farmers exchange")
     leaks = [w for w in blocklist if w in sql]
@@ -216,7 +215,7 @@ def test_auto_scenario_breach_amount_exceeds_cap(spec_instance) -> None:
     breach = report.scenario.limit_breach_plants[0]
     matching = next(
         ls for ls in spec_instance.limit_schedules
-        if ls.transfer_type == breach.transfer_type
+        if ls.rail == breach.rail_name
     )
     assert breach.amount > matching.cap
 

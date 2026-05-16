@@ -3,8 +3,8 @@
 !!! danger "This setting weakens cleanup safety. Read this page in full before opting in."
 
 The deploy pipeline tags every QuickSight resource it creates with
-``ManagedBy=quicksight-gen`` plus a ``ResourcePrefix={{ l2_instance_name }}`` and
-(when an L2 instance is set) ``L2Instance={{ l2_instance_name }}``. ``json clean``
+``ManagedBy=quicksight-gen`` plus a ``Deployment={{ l2_instance_name }}``
+tag (Z.C — value comes from ``cfg.deployment_name``). ``json clean``
 uses those tags to fail-CLOSED-scope deletion to resources we
 deployed — anything untagged or wrongly tagged stays safe.
 
@@ -16,27 +16,27 @@ system and your deploy role is locked to "no Tag* actions").
 
 ## Default behavior — `tagging_enabled: true`
 
-Every ``Create*`` call carries a ``Tags=[…]`` kwarg with three
+Every ``Create*`` call carries a ``Tags=[…]`` kwarg with two
 machine-readable tags plus anything in ``extra_tags``:
 
 | Tag | Value | Purpose |
 | --- | --- | --- |
 | ``ManagedBy`` | ``quicksight-gen`` | Marks the resource as ours; ``json clean`` ignores anything missing this tag. |
-| ``ResourcePrefix`` | the cfg's ``resource_prefix`` (e.g. ``qs-ci-12345-pg``) | Per-deploy isolation. Cleanup only sweeps resources whose tag matches our prefix. |
-| ``L2Instance`` | the L2 instance prefix (when set) | Per-institution scope. Narrower than ``ResourcePrefix``. |
+| ``Deployment`` | the cfg's ``deployment_name`` (e.g. ``qsgen-myorg-prod``) | Per-deploy isolation. Cleanup only sweeps resources whose tag matches this deployment. |
 
 Cleanup is fail-CLOSED: a resource without the right ``ManagedBy``
-+ ``ResourcePrefix`` tag combination is **never** swept, even when
-its ID happens to start with our prefix. Concurrent CI runs and
-local deploys with the same ID prefix coexist safely because each
-deploy stamps its own ``ResourcePrefix`` tag value.
++ ``Deployment`` tag combination is **never** swept, even when its
+ID happens to start with our deployment_name. Concurrent CI runs
+and local deploys with the same ID prefix coexist safely because
+each deploy stamps its own ``Deployment`` tag value.
 
 ## Override behavior — `tagging_enabled: false`
 
 ```yaml
 # config.yaml
-tagging_enabled: false   # ⚠ weakens cleanup isolation; see warning below
-resource_prefix: "qs-myorg-prod"   # MUST be unique to your deploy scope
+tagging_enabled: false             # ⚠ weakens cleanup isolation; see warning below
+deployment_name: "qsgen-myorg-prod"   # MUST be unique to your deploy scope
+db_table_prefix: "qsgen_myorg_prod"   # required cfg field; not used by cleanup
 ```
 
 What changes:
@@ -47,11 +47,10 @@ What changes:
 2. **``json clean`` matches by ID prefix instead.** A resource
    counts as ours if its ``DashboardId`` / ``AnalysisId`` /
    ``DataSetId`` / ``ThemeId`` / ``DataSourceId`` starts with
-   ``<resource_prefix>-`` (note the trailing hyphen).
-3. **``resource_prefix`` becomes mandatory for cleanup.** Without
-   either tags or a prefix scope the cleaner refuses to run rather
-   than risk sweeping unrelated resources. ``json clean`` raises a
-   ``ValueError`` at startup.
+   ``<deployment_name>-`` (note the trailing hyphen).
+3. **``deployment_name`` is already required (Z.C, no default), so
+   the cleaner always has a scope value** — no "missing prefix"
+   pre-check is needed beyond the existing cfg-load loud-fail.
 
 ## Why this is unwise
 
@@ -59,30 +58,30 @@ The fail-CLOSED tag check is the only protection against
 **ID-collision sweeps**. With tagging disabled:
 
 - A QuickSight dashboard a colleague hand-built and named
-  ``qs-myorg-prod-revenue`` would be eligible for deletion the
+  ``qsgen-myorg-prod-revenue`` would be eligible for deletion the
   next time you ran ``json clean`` — its ID matches the prefix,
   and the cleaner has no other way to tell it apart from a stale
   generator output.
 - A renamed-from-other-system asset that happened to land in the
   prefix's namespace would similarly disappear.
-- Concurrent deploys that share the same ``resource_prefix``
+- Concurrent deploys that share the same ``deployment_name``
   cannot coexist safely — they'll see each other's resources as
   stale on every cleanup pass. (With tagging on, they'd be
-  separated by a ``ResourcePrefix`` tag value match. Without
-  tagging, the IDs alone are the identity.)
+  separated by a ``Deployment`` tag value match. Without tagging,
+  the IDs alone are the identity.)
 
 Mitigations:
 
-- Pick a ``resource_prefix`` that is **highly unlikely to collide**
+- Pick a ``deployment_name`` that is **highly unlikely to collide**
   with anything else in your QS account. Embedding the team /
-  service / environment name (``qs-treasury-prod``) is safer than
-  the bare default (``qs-gen``).
+  service / environment name (``qsgen-treasury-prod``) gives you a
+  meaningful, unambiguous namespace.
 - **Run ``json clean --dry-run`` first** every time. It prints the
   full list of resources it would delete; visually verify before
   passing ``--execute``.
 - Treat the QS account as effectively single-tenant for this
-  prefix. Don't deploy two ``tagging_enabled: false`` configs with
-  overlapping ``resource_prefix`` values into the same account.
+  deployment_name. Don't deploy two ``tagging_enabled: false`` configs with
+  overlapping ``deployment_name`` values into the same account.
 
 ## When you should not use this
 
@@ -92,7 +91,7 @@ Mitigations:
 - **You're running concurrent deploys (CI matrix, multi-team).**
   The ID-prefix path can't disambiguate two deploys with the same
   prefix. Keep tagging on; let each deploy stamp its own
-  ``ResourcePrefix`` tag.
+  ``Deployment`` tag.
 - **Your QuickSight account hosts assets created by other tools
   or hand-builders.** Any of them with an ID matching your prefix
   will be swept by cleanup.
@@ -120,7 +119,7 @@ back to the tagged path, you have to either:
 | Aspect | ``tagging_enabled: true`` (default) | ``tagging_enabled: false`` |
 | --- | --- | --- |
 | IAM permissions needed | ``quicksight:TagResource``, ``quicksight:UntagResource`` | None for tagging |
-| Cleanup match basis | Tag values (``ManagedBy``, ``ResourcePrefix``, ``L2Instance``) | ID prefix |
-| Coexistence with other deploys | Safe (per-prefix tag values) | Unsafe (same prefix → same scope) |
+| Cleanup match basis | Tag values (``ManagedBy``, ``Deployment``) | ID prefix (``deployment_name``) |
+| Coexistence with other deploys | Safe (per-deployment tag values) | Unsafe (same prefix → same scope) |
 | Coexistence with hand-built assets | Safe (untagged stays untouched) | Unsafe (matching ID prefix gets swept) |
 | Recommended for production | ✓ | Only when forced by IAM policy |

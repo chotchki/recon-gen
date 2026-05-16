@@ -180,26 +180,57 @@ class HandbookVocabulary:
 # -- Public entry point ------------------------------------------------------
 
 
-_BUNDLED_FIXTURE_NAMES = frozenset({"sasquatch_pr", "spec_example"})
+_SASQUATCH_PERSONA_ACRONYM = "SNB"
 
 
 def vocabulary_for(l2_instance: L2Instance) -> HandbookVocabulary:
     """Return the handbook vocabulary appropriate for ``l2_instance``.
 
-    Built-in vocabularies take precedence (currently ``sasquatch_pr``).
-    Anything else falls back to a neutral vocabulary derived from the
-    L2 instance's own fields — institution name from the description,
-    GL accounts + merchants from the account roster, no flavor leaks.
+    Built-in vocabularies take precedence (currently the Sasquatch
+    flavor — gated on the L2's persona acronym so any L2 yaml that
+    declares the SNB persona block routes here, not on db-prefix
+    sniffing). Anything else falls back to a neutral vocabulary
+    derived from the L2 instance's own fields — institution name
+    from the description, GL accounts + merchants from the account
+    roster, no flavor leaks.
     """
-    if l2_instance.instance == "sasquatch_pr":
+    if _has_sasquatch_persona(l2_instance):
         return _sasquatch_pr_vocabulary(l2_instance)
     return _neutral_vocabulary_for(l2_instance)
 
 
-def _is_bundled_fixture(l2_instance: L2Instance) -> str | None:
-    """Return the fixture name when ``l2_instance`` is bundled; else None."""
-    name = str(l2_instance.instance)
-    return name if name in _BUNDLED_FIXTURE_NAMES else None
+def _has_sasquatch_persona(l2_instance: L2Instance) -> bool:
+    """True iff the L2 yaml's persona block identifies as the SNB flavor.
+
+    Z.C — replaces the prior db-prefix sniff (``l2_instance.instance ==
+    "sasquatch_pr"``) with a persona-aware check. The L2 yaml's
+    ``persona.institution`` tuple is ``(name, acronym, ...)``; we
+    discriminate on the acronym slot because that's the stable
+    operator-chosen string a curated vocabulary keys off.
+    """
+    persona = l2_instance.persona
+    if persona is None or len(persona.institution) < 2:
+        return False
+    return persona.institution[1] == _SASQUATCH_PERSONA_ACRONYM
+
+
+def _bundled_fixture_name(l2_instance: L2Instance) -> str | None:
+    """Return the bundled-fixture name when the L2 looks like a bundled
+    fixture; else None.
+
+    Z.C — the prior implementation read ``l2_instance.instance`` (the
+    db-table prefix) and matched against a hardcoded fixture-name set.
+    With ``instance`` gone, the only remaining persona-derived signal
+    for "is this the bundled Sasquatch fixture" is the persona acronym
+    itself. ``spec_example`` (the other bundled fixture) carries no
+    persona block, so it returns None — handbook prose that gates on
+    ``vocab.fixture_name`` simply suppresses its "the bundled X
+    fixture" sentence for spec_example, matching its actual unflavored
+    shape.
+    """
+    if _has_sasquatch_persona(l2_instance):
+        return "sasquatch_pr"
+    return None
 
 
 def _build_demo_scenario(
@@ -410,7 +441,7 @@ def _sasquatch_pr_vocabulary(l2_instance: L2Instance) -> HandbookVocabulary:
         ),
         flavor=persona.flavor,
         investigation_personas=investigation_personas,
-        fixture_name=_is_bundled_fixture(l2_instance),
+        fixture_name=_bundled_fixture_name(l2_instance),
         demo=_build_demo_scenario(
             l2_instance, investigation_personas=investigation_personas,
         ),
@@ -463,7 +494,7 @@ def _neutral_vocabulary_for(l2_instance: L2Instance) -> HandbookVocabulary:
         merchants=(),
         flavor=(),
         investigation_personas=(),
-        fixture_name=_is_bundled_fixture(l2_instance),
+        fixture_name=_bundled_fixture_name(l2_instance),
         demo=_build_demo_scenario(l2_instance),
     )
 

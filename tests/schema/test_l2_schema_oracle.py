@@ -51,14 +51,12 @@ def _full_instance(prefix: str) -> L2Instance:
     empty-rail instance.
     """
     return L2Instance(
-        instance=Identifier(prefix),
         accounts=(),
         account_templates=(),
         rails=(
             SingleLegRail(
                 name=Identifier("SettlementRail"),
                 description="Settlement rail with aging",
-                transfer_type=Identifier("settle"),
                 metadata_keys=(),
                 leg_role=RoleExpression(Identifier("gl_control")),
                 leg_direction="Debit",
@@ -73,7 +71,7 @@ def _full_instance(prefix: str) -> L2Instance:
             LimitSchedule(
                 description="cap on settle from gl_control",
                 parent_role=Identifier("gl_control"),
-                transfer_type=Identifier("settle"),
+                rail=Identifier("SettlementRail"),
                 cap=10000,
             ),
         ),
@@ -87,7 +85,7 @@ def _full_instance(prefix: str) -> L2Instance:
 def oracle_sql() -> str:
     """One Oracle DDL emission per module — every assertion runs
     against the same string so pytest output stays small."""
-    return emit_schema(_full_instance("orcl"), dialect=Dialect.ORACLE)
+    return emit_schema(_full_instance("orcl"), prefix="orcl", dialect=Dialect.ORACLE)
 
 
 @pytest.fixture(scope="module")
@@ -171,10 +169,6 @@ class TestOracleConstructsPresent:
         # Interval arithmetic
         "INTERVAL '1' DAY",        # interval_days(1, Oracle)
         # Casts
-        # P.5.b — todays_exceptions UNION ALL needs VARCHAR2-shaped
-        # NULL for the transfer_type column (Oracle ORA-00932 rejects
-        # CLOB-vs-VARCHAR2 in UNION ALL). Asserted as VARCHAR2(50).
-        "CAST(NULL AS VARCHAR2(50))",
         "CAST(AVG(window_sum) AS NUMBER)",
         "CAST((pw.posted_day - 1) AS TIMESTAMP)",
         "CAST(pw.posted_day AS TIMESTAMP)",
@@ -219,17 +213,21 @@ class TestOracleScriptShape:
         )
         assert oracle_sql_nocomments[next_with:next_with + 5] == "WITH\n"
 
-    def test_partial_index_dropped_for_oracle(
+    def test_partial_index_skipped_for_oracle(
         self, oracle_sql_nocomments: str,
     ) -> None:
-        """The Postgres bundler-eligibility partial index ``WHERE
-        bundle_id IS NULL`` is dropped on Oracle (full index instead).
-        The CREATE INDEX still exists; just no WHERE clause."""
-        assert "CREATE INDEX idx_orcl_transactions_bundler_eligibility" in (
-            oracle_sql_nocomments
+        """Z.B (2026-05-15): the bundler-eligibility index's column list
+        ``(rail_name, status)`` now matches the rail_status index. On
+        dialects without partial-index support (Oracle, SQLite < 3.8)
+        emitting both triggers ORA-01408 ("such column list already
+        indexed"). Oracle skips the bundler CREATE INDEX entirely; the
+        full rail_status index above covers the same lookup. No
+        ``WHERE bundle_id IS NULL`` appears anywhere in the non-comment
+        Oracle SQL either."""
+        assert (
+            "CREATE INDEX idx_orcl_transactions_bundler_eligibility"
+            not in oracle_sql_nocomments
         )
-        # The ``WHERE bundle_id IS NULL`` substring should NOT appear
-        # after any CREATE INDEX line in non-comment SQL.
         for line in oracle_sql_nocomments.split("\n"):
             assert "WHERE bundle_id IS NULL" not in line
 
@@ -241,7 +239,7 @@ def test_refresh_matviews_sql_oracle_uses_dbms_mview() -> None:
     """REFRESH MATERIALIZED VIEW (PG) translates to DBMS_MVIEW.REFRESH
     on Oracle, wrapped in a PL/SQL block that's safe to run from
     either oracledb's cursor.execute or SQL*Plus."""
-    sql = refresh_matviews_sql(_full_instance("orcl"), dialect=Dialect.ORACLE)
+    sql = refresh_matviews_sql(_full_instance("orcl"), prefix="orcl", dialect=Dialect.ORACLE)
     assert ";;" not in sql
     assert "REFRESH MATERIALIZED VIEW" not in sql  # the PG verb
     # 15 matviews refresh in dependency order: 2 current_* + 2 helpers

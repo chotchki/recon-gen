@@ -8,7 +8,6 @@
 # the seed accidentally hardcodes a Sasquatch identifier, the
 # persona-clean test catches it.
 
-instance: spec_example
 description: |
   Generic SPEC-shaped instance for cleanliness testing of the lifted
   common.l2.seed primitives.
@@ -63,7 +62,6 @@ rails:
   # Two-leg with per-leg origin — used by drift plant background postings
   # AND stuck_pending plant (carries max_pending_age).
   - name: ExternalRailInbound
-    transfer_type: ach
     source_role: ExternalCounterparty
     destination_role: CustomerSubledger
     expected_net: 0
@@ -75,7 +73,6 @@ rails:
 
   # Two-leg standalone outbound — used by limit-breach plant.
   - name: ExternalRailOutbound
-    transfer_type: wire
     source_role: CustomerSubledger
     destination_role: ExternalCounterparty
     expected_net: 0
@@ -87,7 +84,6 @@ rails:
   # only meaningful on rails appearing in some bundles_activity, satisfied
   # by PoolBalancing below).
   - name: SubledgerCharge
-    transfer_type: charge
     leg_role: CustomerSubledger
     leg_direction: Debit
     origin: InternalInitiated
@@ -96,7 +92,6 @@ rails:
 
   # Aggregating two-leg that bundles SubledgerCharge → satisfies R8 + R11.
   - name: PoolBalancing
-    transfer_type: pool_balancing
     source_role: NorthPool
     destination_role: SouthPool
     expected_net: 0
@@ -116,7 +111,6 @@ rails:
   # (single-leg → every firing 'Imbalanced'). Together they give the
   # L2FT Transfer Templates "Completion" dropdown all three values.
   - name: ReconciliationLeg
-    transfer_type: recon_inbound
     source_role: ExternalCounterparty
     destination_role: CustomerSubledger
     source_origin: ExternalForcePosted
@@ -127,7 +121,6 @@ rails:
   # chain child of ExternalReconciliationCycle. Distinct transfer_type
   # so it never overlaps the other rails' Transaction binding (U6).
   - name: ReconciliationClosing
-    transfer_type: recon_closing
     source_role: CustomerSubledger
     destination_role: ExternalCounterparty
     expected_net: 0
@@ -137,7 +130,6 @@ rails:
 
 transfer_templates:
   - name: MerchantSettlementCycle
-    transfer_type: settlement_cycle
     expected_net: 0
     transfer_key: [merchant_id, settlement_period]
     completion: business_day_end+1d
@@ -150,7 +142,6 @@ transfer_templates:
   # the template instances. Paired with the chain below (Required child
   # ReconciliationClosing) so firing 2 (no child) is an orphan.
   - name: ExternalReconciliationCycle
-    transfer_type: recon_cycle
     expected_net: 0
     transfer_key: [external_reference]
     completion: business_day_end+1d
@@ -173,9 +164,9 @@ chains:
       orphan in the L2FT Chains explorer.
 
 limit_schedules:
-  # Cap matches ExternalRailOutbound.transfer_type='wire' (R10 satisfied).
+  # Cap matches ExternalRailOutbound (Z.B 2026-05-15: rail name IS the type).
   - parent_role: CustomerLedger
-    transfer_type: wire
+    rail: ExternalRailOutbound
     cap: 5000.00
 theme:
   theme_name: "QuickSight Gen Theme"

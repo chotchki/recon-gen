@@ -50,15 +50,18 @@ _ANCHOR = date(2030, 1, 1)
 
 def _sqlite_cfg(db_path: Path) -> Config:
     """Build a Config keyed for SQLite with a file-backed URL."""
+    # Z.C — deployment_name + db_table_prefix are required cfg fields.
     return Config(
         aws_account_id="111122223333",
         aws_region="us-west-2",
+        deployment_name="qsgen-sqlite-loop",
+        db_table_prefix="spec_example",
         datasource_arn=(
             "arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds"
         ),
         dialect=Dialect.SQLITE,
         demo_database_url=f"sqlite:///{db_path.as_posix()}",
-    ).with_l2_instance_prefix("spec_example")
+    )
 
 
 # -- connect_demo_db SQLite path --------------------------------------------
@@ -133,7 +136,7 @@ class TestSqliteFullLocalLoop:
 
         # Step 1: schema apply via connect_and_apply (CLI surface).
         connect_and_apply(
-            cfg, emit_schema(instance, dialect=Dialect.SQLITE),
+            cfg, emit_schema(instance, prefix=cfg.db_table_prefix, dialect=Dialect.SQLITE),
             label="schema",
         )
 
@@ -146,7 +149,7 @@ class TestSqliteFullLocalLoop:
 
         # Step 3: data refresh — re-runs every matview-as-table CREATE.
         connect_and_apply(
-            cfg, refresh_matviews_sql(instance, dialect=Dialect.SQLITE),
+            cfg, refresh_matviews_sql(instance, prefix=cfg.db_table_prefix, dialect=Dialect.SQLITE),
             label="matview refresh",
         )
 
@@ -200,7 +203,7 @@ class TestSqliteFullLocalLoop:
         instance = load_instance(_SPEC_EXAMPLE)
 
         connect_and_apply(
-            cfg, emit_schema(instance, dialect=Dialect.SQLITE),
+            cfg, emit_schema(instance, prefix=cfg.db_table_prefix, dialect=Dialect.SQLITE),
             label="schema",
         )
         connect_and_apply(
@@ -208,7 +211,7 @@ class TestSqliteFullLocalLoop:
             label="seed data",
         )
         connect_and_apply(
-            cfg, refresh_matviews_sql(instance, dialect=Dialect.SQLITE),
+            cfg, refresh_matviews_sql(instance, prefix=cfg.db_table_prefix, dialect=Dialect.SQLITE),
             label="matview refresh",
         )
 
@@ -239,7 +242,7 @@ class TestSqliteFullLocalLoop:
         instance = load_instance(_SPEC_EXAMPLE)
 
         connect_and_apply(
-            cfg, emit_schema(instance, dialect=Dialect.SQLITE),
+            cfg, emit_schema(instance, prefix=cfg.db_table_prefix, dialect=Dialect.SQLITE),
             label="schema",
         )
         connect_and_apply(
@@ -249,7 +252,7 @@ class TestSqliteFullLocalLoop:
         # The refresh re-runs the CREATE TABLE AS SELECT for the
         # anomaly matview; STDDEV_SAMP is in the SELECT body.
         connect_and_apply(
-            cfg, refresh_matviews_sql(instance, dialect=Dialect.SQLITE),
+            cfg, refresh_matviews_sql(instance, prefix=cfg.db_table_prefix, dialect=Dialect.SQLITE),
             label="matview refresh",
         )
 

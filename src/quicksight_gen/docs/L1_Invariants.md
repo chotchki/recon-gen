@@ -117,23 +117,24 @@ clean up to their expected zero / target by end-of-day.
 ### 5. `{{ l2_instance_name }}_limit_breach` — Outbound flow cap
 
 > For every CurrentStoredBalance where `Limits` is set, for every
-> `(TransferType, limit)` in `Limits`, for every child Account whose
+> `(Rail, limit)` in `Limits`, for every child Account whose
 > `Parent = this account`,
-> `OutboundFlow(child, type, businessDay)` SHOULD be ≤ `limit`.
+> `OutboundFlow(child, rail, businessDay)` SHOULD be ≤ `limit`.
 
-Per-`(account, day, transfer_type)` cells where cumulative
-outbound debit exceeded the cap. Caps come from the L2 instance's
+Per-`(account, day, rail_name)` cells where cumulative outbound
+debit exceeded the cap. Caps come from the L2 instance's
 LimitSchedules and are inlined into the view as CASE branches at
-schema-emit time.
+schema-emit time. (Z.B 2026-05-15: keyed on `rail_name` now —
+previously `transfer_type` — under the symmetric grammar collapse.)
 
 **Columns:** `account_id`, `account_name`, `account_role`,
-`account_parent_role`, `business_day`, `transfer_type`,
+`account_parent_role`, `business_day`, `rail_name`,
 `outbound_total`, `cap`.
 
 {% if vocab.fixture_name == "sasquatch_pr" %}
 **the matview should surface:** `big-meadow-dairy $22k wire`
 planted at `days_ago=4` surfaces with `outbound_total > cap` for
-`transfer_type='wire'`.
+`rail_name='CustomerOutboundWire'`.
 {% endif %}
 
 ### 6. `{{ l2_instance_name }}_stuck_pending` — Per-rail pending aging (M.2b.8)
@@ -149,7 +150,7 @@ without an aging watch contribute no branch and are excluded.
 
 **Columns:** `transaction_id`, `account_id`, `account_name`,
 `account_role`, `account_parent_role`, `transfer_id`,
-`transfer_type`, `rail_name`, `amount_money`, `amount_direction`,
+`rail_name`, `amount_money`, `amount_direction`,
 `posting`, `max_pending_age_seconds`, `age_seconds`.
 
 {% if vocab.fixture_name == "sasquatch_pr" %}

@@ -102,12 +102,12 @@ def test_build_signature_l2_instance_is_kwarg_only() -> None:
 # -- Analysis + Dashboard registration ---------------------------------------
 
 
-def test_analysis_registered_with_l2_aware_name() -> None:
-    """The Analysis title surfaces the L2 prefix so multi-instance
-    deployments are distinguishable in the QuickSight UI."""
+def test_analysis_registered_with_deployment_aware_name() -> None:
+    """Z.C — the Analysis title surfaces ``cfg.deployment_name`` so
+    multi-deploy QS accounts are distinguishable in the UI."""
     app = build_l2_flow_tracing_app(_CFG)
     assert app.analysis is not None
-    assert "spec_example" in app.analysis.name
+    assert _CFG.deployment_name in app.analysis.name
     assert "L2 Flow Tracing" in app.analysis.name
 
 
@@ -125,38 +125,41 @@ def test_emit_analysis_and_dashboard_succeed() -> None:
     assert dashboard is not None
 
 
-def test_analysis_id_uses_l2_instance_prefix() -> None:
-    """M.2d.3 prefix pattern: ``<resource_prefix>-<l2_prefix>-l2-flow-tracing-analysis``.
-    Default L2 instance is spec_example."""
+def test_analysis_id_uses_deployment_prefix() -> None:
+    """Z.C — `<deployment_name>-l2-flow-tracing-analysis`. Default
+    deployment_name is whatever ``make_test_config`` defaulted to
+    (``qsgen-test``)."""
     app = build_l2_flow_tracing_app(_CFG)
     analysis = app.emit_analysis()
     assert analysis.AnalysisId == (
-        "qs-gen-spec_example-l2-flow-tracing-analysis"
+        f"{_CFG.deployment_name}-l2-flow-tracing-analysis"
     )
 
 
-def test_dashboard_id_uses_l2_instance_prefix() -> None:
+def test_dashboard_id_uses_deployment_prefix() -> None:
     app = build_l2_flow_tracing_app(_CFG)
     dashboard = app.emit_dashboard()
     assert dashboard.DashboardId == (
-        "qs-gen-spec_example-l2-flow-tracing"
+        f"{_CFG.deployment_name}-l2-flow-tracing"
     )
 
 
-def test_per_instance_prefix_isolates_resource_ids() -> None:
-    """Two L2 instances → two non-colliding analysis IDs. Prevents
-    multi-instance deploy collisions in the same QS account."""
-    spec_inst = default_l2_instance()
-    sasquatch_pr_inst = load_instance(SASQUATCH_PR_YAML)
-
-    spec_app = build_l2_flow_tracing_app(_CFG, l2_instance=spec_inst)
-    sasq_app = build_l2_flow_tracing_app(_CFG, l2_instance=sasquatch_pr_inst)
-
-    spec_analysis_id = spec_app.emit_analysis().AnalysisId
-    sasq_analysis_id = sasq_app.emit_analysis().AnalysisId
-    assert spec_analysis_id != sasq_analysis_id
-    assert "spec_example" in spec_analysis_id
-    assert "sasquatch_pr" in sasq_analysis_id
+def test_per_deployment_prefix_isolates_resource_ids() -> None:
+    """Z.C — two cfgs with distinct deployment_name → two non-colliding
+    analysis IDs. Prevents multi-deploy collisions in the same QS account
+    (replaces the prior per-L2-instance prefix isolation; deployments are
+    now the per-tenant axis on cfg, not on the L2 yaml)."""
+    cfg_a = make_test_config(deployment_name="qsgen-spec")
+    cfg_b = make_test_config(deployment_name="qsgen-sasq")
+    a_app = build_l2_flow_tracing_app(cfg_a, l2_instance=default_l2_instance())
+    b_app = build_l2_flow_tracing_app(
+        cfg_b, l2_instance=load_instance(SASQUATCH_PR_YAML),
+    )
+    a_id = a_app.emit_analysis().AnalysisId
+    b_id = b_app.emit_analysis().AnalysisId
+    assert a_id != b_id
+    assert "qsgen-spec" in a_id
+    assert "qsgen-sasq" in b_id
 
 
 # -- Sheet structure (M.3.4 — 4 sheets) --------------------------------------
@@ -266,13 +269,17 @@ def test_l2_flow_tracing_in_apps_tuple() -> None:
 
 
 def test_cli_json_apply_l2_instance_flag(tmp_path: Path) -> None:
-    """M.3.9 CLI surface (Q.3.a renamed): ``--l2 PATH`` overrides the
-    default spec_example fixture. Generated dataset filenames carry the
-    overridden prefix."""
+    """Z.C — `--l2 PATH` selects the L2 topology. The generated
+    dataset filenames carry the cfg's deployment_name as the single
+    prefix segment (collapsed from M.2d.3's
+    `<resource_prefix>-<l2_prefix>-...` shape — the L2-instance
+    segment is gone; deployment_name is operator-set per cfg)."""
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(
         "aws_account_id: '111122223333'\n"
         "aws_region: us-west-2\n"
+        "deployment_name: qsgen-l2ft-l2flag\n"
+        "db_table_prefix: sasquatch_pr\n"
         "datasource_arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds'\n"
     )
     out_dir = tmp_path / "out"
@@ -287,17 +294,13 @@ def test_cli_json_apply_l2_instance_flag(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0, result.output
-    # Dataset filenames carry the sasquatch_pr prefix, not spec_example.
-    sasq_chain_inst = (
+    # Dataset filenames carry the deployment_name from cfg, not the
+    # L2 yaml stem.
+    chain_inst = (
         out_dir / "datasets"
-        / "qs-gen-sasquatch_pr-l2ft-chain-instances-dataset.json"
+        / "qsgen-l2ft-l2flag-l2ft-chain-instances-dataset.json"
     )
-    assert sasq_chain_inst.exists()
-    spec_chain_inst = (
-        out_dir / "datasets"
-        / "qs-gen-spec_example-l2ft-chain-instances-dataset.json"
-    )
-    assert not spec_chain_inst.exists()
+    assert chain_inst.exists()
 
 
 def test_cli_json_apply_l2_flow_tracing_writes_files(tmp_path: Path) -> None:
@@ -309,6 +312,9 @@ def test_cli_json_apply_l2_flow_tracing_writes_files(tmp_path: Path) -> None:
     cfg_path.write_text(
         "aws_account_id: '111122223333'\n"
         "aws_region: us-west-2\n"
+        # Z.C — required cfg fields.
+        "deployment_name: qsgen-l2ft-cli\n"
+        "db_table_prefix: spec_example\n"
         "datasource_arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds'\n"
     )
     out_dir = tmp_path / "out"
@@ -325,13 +331,14 @@ def test_cli_json_apply_l2_flow_tracing_writes_files(tmp_path: Path) -> None:
     assert (out_dir / "theme.json").exists()
     assert (out_dir / "l2-flow-tracing-analysis.json").exists()
     assert (out_dir / "l2-flow-tracing-dashboard.json").exists()
-    # M.3.10c — postings + meta-values dataset JSONs land under datasets/
+    # Z.C — dataset JSONs use the deployment_name single-prefix shape
+    # (was `qs-gen-<l2_prefix>-l2ft-...`).
     assert (
-        out_dir / "datasets" / "qs-gen-spec_example-l2ft-postings-dataset.json"
+        out_dir / "datasets" / "qsgen-l2ft-cli-l2ft-postings-dataset.json"
     ).exists()
     assert (
         out_dir / "datasets"
-        / "qs-gen-spec_example-l2ft-meta-values-dataset.json"
+        / "qsgen-l2ft-cli-l2ft-meta-values-dataset.json"
     ).exists()
 
 
@@ -394,12 +401,20 @@ def _chains_dataset_sql_against(yaml_path: Path) -> str:
     L2 instance. Used by tests that want to assert non-empty CTEs
     (sasquatch_pr.yaml has 6 chains; spec_example has 1). The
     empty-chains CTE path is exercised separately with a synthesized
-    chains-stripped instance."""
+    chains-stripped instance.
+
+    Z.C — the dataset SQL's matview names come from cfg.db_table_prefix
+    (was previously stamped from the L2's `instance` field). Pin the
+    cfg's prefix to the yaml stem so the assertions still find
+    `<yaml_stem>_current_transactions` in the rendered SQL.
+    """
     from quicksight_gen.apps.l2_flow_tracing.datasets import (
         build_chains_dataset,
     )
+    from dataclasses import replace
     inst = load_instance(yaml_path)
-    aws_ds = build_chains_dataset(_CFG, inst)
+    cfg = replace(_CFG, db_table_prefix=yaml_path.stem)
+    aws_ds = build_chains_dataset(cfg, inst)
     table = list(aws_ds.PhysicalTableMap.values())[0]
     return table.CustomSql.SqlQuery
 
@@ -506,16 +521,21 @@ def test_chains_dataset_handles_empty_chains_list() -> None:
     assert "WITH declared AS" in sql
 
 
-def test_chains_dataset_id_uses_l2_instance_prefix() -> None:
-    """Per M.2d.3 — dataset ID middle segment is the L2 instance
-    prefix so multi-instance deploys don't collide."""
+def test_chains_dataset_id_uses_deployment_prefix() -> None:
+    """Z.C — dataset ID is prefixed by `cfg.deployment_name`. Was
+    previously the M.2d.3 two-segment shape with the L2 instance
+    prefix as the middle segment; now collapsed to one prefix."""
     from quicksight_gen.apps.l2_flow_tracing.datasets import (
         build_chains_dataset,
     )
     from dataclasses import replace
-    cfg = replace(_CFG, l2_instance_prefix="sasquatch_pr")
+    cfg = replace(
+        _CFG,
+        deployment_name="qsgen-sasq",
+        db_table_prefix="sasquatch_pr",
+    )
     ds = build_chains_dataset(cfg, load_instance(SASQUATCH_PR_YAML))
-    assert ds.DataSetId == "qs-gen-sasquatch_pr-l2ft-chains-dataset"
+    assert ds.DataSetId == "qsgen-sasq-l2ft-chains-dataset"
 
 
 # -- Chains sheet — M.3.10d per-instance explorer ---------------------------
@@ -822,10 +842,14 @@ _EXC_DATASETS = (
 
 
 def _exc_dataset_sql(builder_name: str, yaml_path: Path) -> str:
+    """Z.C — pin cfg.db_table_prefix to the yaml stem so the rendered
+    SQL references `<yaml_stem>_current_transactions`."""
     import quicksight_gen.apps.l2_flow_tracing.datasets as ds_mod
+    from dataclasses import replace
     inst = load_instance(yaml_path)
+    cfg = replace(_CFG, db_table_prefix=yaml_path.stem)
     builder = getattr(ds_mod, builder_name)
-    aws_ds = builder(_CFG, inst)
+    aws_ds = builder(cfg, inst)
     table = list(aws_ds.PhysicalTableMap.values())[0]
     return table.CustomSql.SqlQuery
 
@@ -845,17 +869,22 @@ def test_exc_dataset_targets_prefixed_current_transactions(
 
 
 @pytest.mark.parametrize("ds_id,builder_name", _EXC_DATASETS)
-def test_exc_dataset_id_uses_l2_instance_prefix(
+def test_exc_dataset_id_uses_deployment_prefix(
     ds_id: str, builder_name: str,
 ) -> None:
-    """Per M.2d.3 — every exception dataset's ID middle segment is
-    the L2 instance prefix so multi-instance deploys don't collide."""
+    """Z.C — every exception dataset's ID is prefixed by
+    ``cfg.deployment_name`` so multi-deploy collisions don't happen
+    in the same QS account."""
     import quicksight_gen.apps.l2_flow_tracing.datasets as ds_mod
     from dataclasses import replace
-    cfg = replace(_CFG, l2_instance_prefix="sasquatch_pr")
+    cfg = replace(
+        _CFG,
+        deployment_name="qsgen-sasq",
+        db_table_prefix="sasquatch_pr",
+    )
     builder = getattr(ds_mod, builder_name)
     aws_ds = builder(cfg, load_instance(SASQUATCH_PR_YAML))
-    assert aws_ds.DataSetId.startswith("qs-gen-sasquatch_pr-l2ft-exc-"), (
+    assert aws_ds.DataSetId.startswith("qsgen-sasq-l2ft-exc-"), (
         f"{builder_name} dataset ID lacks prefix: {aws_ds.DataSetId}"
     )
 
@@ -878,11 +907,11 @@ def test_exc_unmatched_transfer_type_excludes_declared_types() -> None:
         "build_exc_unmatched_transfer_type_dataset", SASQUATCH_PR_YAML,
     )
     inst = load_instance(SASQUATCH_PR_YAML)
-    declared_types = {str(r.transfer_type) for r in inst.rails}
+    declared_types = {str(r.name) for r in inst.rails}
     for t in declared_types:
         assert f"'{t}'" in sql
     assert "LEFT JOIN declared_types" in sql
-    assert "WHERE d.transfer_type IS NULL" in sql
+    assert "WHERE d.rail_name IS NULL" in sql
 
 
 def test_exc_dead_rails_filters_zero_postings_only() -> None:
@@ -902,7 +931,7 @@ def test_exc_dead_bundles_activity_checks_both_attributions() -> None:
         "build_exc_dead_bundles_activity_dataset", SASQUATCH_PR_YAML,
     )
     assert "t.rail_name = db.bundle_target" in sql
-    assert "t.transfer_type = db.bundle_target" in sql
+    assert "t.rail_name = db.bundle_target" in sql
 
 
 def test_exc_dead_metadata_uses_static_json_paths() -> None:
@@ -1045,12 +1074,15 @@ def test_declared_metadata_keys_walks_union_across_rails() -> None:
 
 
 def test_postings_dataset_targets_prefixed_current_transactions() -> None:
-    """Postings reads from `<prefix>_current_transactions`."""
+    """Postings reads from `<prefix>_current_transactions` (Z.C —
+    where prefix = cfg.db_table_prefix)."""
     from quicksight_gen.apps.l2_flow_tracing.datasets import (
         build_postings_dataset,
     )
+    from dataclasses import replace
     inst = load_instance(SASQUATCH_PR_YAML)
-    aws_ds = build_postings_dataset(_CFG, inst)
+    cfg = replace(_CFG, db_table_prefix="sasquatch_pr")
+    aws_ds = build_postings_dataset(cfg, inst)
     sql = list(aws_ds.PhysicalTableMap.values())[0].CustomSql.SqlQuery
     assert "FROM sasquatch_pr_current_transactions" in sql
 
@@ -1262,12 +1294,12 @@ def test_unified_l2_exceptions_empty_metadata_branch_is_dialect_aware() -> None:
     from quicksight_gen.apps.l2_flow_tracing.datasets import (
         build_unified_l2_exceptions_dataset,
     )
-    from quicksight_gen.common.l2 import Identifier, L2Instance
+    from quicksight_gen.common.l2 import L2Instance
     from quicksight_gen.common.sql import Dialect
 
     # Empty-rails instance — every CTE helper hits its fallback branch.
+    # Z.C — L2Instance no longer carries an `instance` field.
     empty = L2Instance(
-        instance=Identifier("empty"),
         accounts=(), account_templates=(),
         rails=(), transfer_templates=(), chains=(),
         limit_schedules=(),

@@ -676,7 +676,7 @@ def _build_money_trail_sheet(
         group_by=[
             depth_dim,
             ds_money_trail["transfer_id"].dim(),
-            ds_money_trail["transfer_type"].dim(),
+            ds_money_trail["rail_name"].dim(),
             ds_money_trail["source_account_name"].dim(),
             ds_money_trail["target_account_name"].dim(),
             ds_money_trail["posted_at"].date(),
@@ -937,7 +937,7 @@ def _build_account_network_sheet(
         ),
         group_by=[
             ds_anet["transfer_id"].dim(),
-            ds_anet["transfer_type"].dim(),
+            ds_anet["rail_name"].dim(),
             ds_anet["source_display"].dim(),
             ds_anet["target_display"].dim(),
             counterparty_dim,
@@ -1034,21 +1034,18 @@ def build_investigation_app(
     ``build_analysis`` / ``build_investigation_dashboard`` shims below.
 
     Per the N.2 audit, Investigation is fed by the same institution
-    YAML that drives L1 + L2FT. The L2 instance prefix is auto-derived
-    from ``l2_instance.instance`` here so callers don't have to
-    pre-stamp ``cfg.l2_instance_prefix``; if the caller HAS pre-set
-    it (e.g. an integrator running a custom build), that value is
-    preserved. Defaults to the persona-neutral ``spec_example``
-    instance — the same default L1 uses.
+    YAML that drives L1 + L2FT. Z.C: the deployment + DB-table
+    prefixes are required cfg fields — both come from
+    ``cfg.deployment_name`` (QS-resource segment) and
+    ``cfg.db_table_prefix`` (DB table-name prefix). Defaults to the
+    persona-neutral ``spec_example`` L2 instance — the same default
+    L1 uses.
 
-    Investigation-specific tables read from ``<prefix>_inv_*``
-    matviews (N.3.b); base-table reads use ``<prefix>_transactions``.
+    Investigation-specific tables read from ``<db_table_prefix>_inv_*``
+    matviews (N.3.b); base-table reads use ``<db_table_prefix>_transactions``.
     """
     if l2_instance is None:
         l2_instance = default_l2_instance()
-
-    if cfg.l2_instance_prefix is None:
-        cfg = cfg.with_l2_instance_prefix(str(l2_instance.instance))
 
     # Register every dataset's CustomSQL + contract in the SQL registry
     # (matches build_l1_dashboard_app / build_executives_app, which call
@@ -1069,7 +1066,7 @@ def build_investigation_app(
     from quicksight_gen.common.theme import DEFAULT_PRESET
     theme = resolve_l2_theme(l2_instance) or DEFAULT_PRESET
 
-    analysis_name = _analysis_name(l2_instance)
+    analysis_name = _analysis_name(cfg)
     app = App(name="investigation", cfg=cfg)
     analysis = app.set_analysis(Analysis(
         analysis_id_suffix="investigation-analysis",
@@ -1080,7 +1077,7 @@ def build_investigation_app(
     _build_volume_anomalies_sheet(cfg, app, analysis)
     _build_money_trail_sheet(cfg, app, analysis)
     _build_account_network_sheet(cfg, app, analysis)
-    _build_app_info_sheet(cfg, app, analysis, l2_instance=l2_instance, theme=theme)
+    _build_app_info_sheet(cfg, app, analysis, theme=theme)
     app.create_dashboard(
         dashboard_id_suffix="investigation-dashboard",
         name=analysis_name,
@@ -1090,7 +1087,7 @@ def build_investigation_app(
 
 def _build_app_info_sheet(
     cfg: Config, app: App, analysis: Analysis,
-    *, l2_instance: L2Instance, theme: ThemePreset,
+    *, theme: ThemePreset,
 ) -> None:
     """M.4.4.5 — App Info ("i") sheet, ALWAYS LAST. Diagnostic canary;
     see common/sheets/app_info.py.
@@ -1116,7 +1113,7 @@ def _build_app_info_sheet(
     # the dataset's CustomSQL until QS rendered the visual.
     liveness_aws = build_liveness_dataset(cfg, app_segment="inv")
     matviews_aws = build_matview_status_dataset(
-        cfg, app_segment="inv", view_specs=inv_matview_specs(l2_instance),
+        cfg, app_segment="inv", view_specs=inv_matview_specs(cfg),
     )
     liveness_ds = app.add_dataset(Dataset(
         identifier=DS_APP_INFO_LIVENESS,
@@ -1139,11 +1136,11 @@ def _build_app_info_sheet(
     )
 
 
-def _analysis_name(l2_instance: L2Instance) -> str:
-    """Title shown in QuickSight — matches L1/L2FT's ``Name (instance)``
-    shape so multi-instance deployments are visually distinguishable
-    in the dashboard list."""
-    return f"Investigation ({l2_instance.instance})"
+def _analysis_name(cfg: Config) -> str:
+    """Title shown in QuickSight — matches L1/L2FT's ``Name (deployment)``
+    shape so multi-deployment runs are visually distinguishable in the
+    dashboard list."""
+    return f"Investigation ({cfg.deployment_name})"
 
 
 # ---------------------------------------------------------------------------

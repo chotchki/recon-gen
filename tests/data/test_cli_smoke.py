@@ -31,13 +31,21 @@ _SPEC_EXAMPLE = _FIXTURES / "spec_example.yaml"
 def min_config(tmp_path: Path) -> Path:
     """Minimal config.yaml — no demo_database_url; emit-only paths
     don't need a live DB. ``data apply`` / ``refresh`` / ``clean``
-    only read the dialect setting from cfg when emitting SQL."""
+    only read the dialect setting from cfg when emitting SQL.
+
+    Z.C — adds ``deployment_name`` + ``db_table_prefix`` (Config
+    loud-fails when either is missing). ``db_table_prefix`` matches
+    the bundled spec_example.yaml so the per-prefix table assertions
+    (``spec_example_transactions``, etc.) below stay valid.
+    """
     cfg = tmp_path / "config.yaml"
     cfg.write_text(
         "aws_account_id: '111122223333'\n"
         "aws_region: us-west-2\n"
         "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
         ":datasource/ds\n"
+        "deployment_name: qsgen-test\n"
+        "db_table_prefix: spec_example\n"
     )
     return cfg
 

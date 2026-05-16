@@ -163,10 +163,10 @@ async def step_2_wipe(
     otherwise stalls all other requests for the wipe duration on
     a multi-million-row demo DB.
     """
-    sql = wipe_demo_data_sql(instance, dialect=cfg.dialect)
+    sql = wipe_demo_data_sql(instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect)
     await _emit(dev_log, {
         "event": "deploy:step2:wipe:start",
-        "instance": instance.instance,
+        "db_table_prefix": cfg.db_table_prefix,
         "dialect": cfg.dialect.value,
     })
 
@@ -176,7 +176,7 @@ async def step_2_wipe(
             cur = conn.cursor()
             try:
                 # Count first so the dev_log can report what was wiped.
-                p = instance.instance
+                p = cfg.db_table_prefix  # Z.C — was instance.instance
                 cur.execute(f"SELECT COUNT(*) FROM {p}_transactions")
                 tx_count = int(cur.fetchone()[0])
                 cur.execute(f"SELECT COUNT(*) FROM {p}_daily_balances")
@@ -305,13 +305,13 @@ async def step_2_pull(
     src_cfg = cfg.etl_datasource
     src_dialect = _dialect_from_url(src_cfg.url)
     end_date = cfg.test_generator.end_date
-    p = instance.instance
+    p = cfg.db_table_prefix  # Z.C — was instance.instance
 
     await _emit(dev_log, {
         "event": "deploy:step2:pull:start",
         "source_dialect": src_dialect.value,
         "dest_dialect": cfg.dialect.value,
-        "instance": p,
+        "db_table_prefix": p,
         "end_date": end_date.isoformat() if end_date else None,
     })
 
@@ -494,7 +494,7 @@ async def step_3_generator(
             try:
                 execute_script(cur, sql, dialect=cfg.dialect)
                 conn.commit()
-                p = instance.instance
+                p = cfg.db_table_prefix  # Z.C — was instance.instance
                 cur.execute(f"SELECT COUNT(*) FROM {p}_transactions")
                 tx = int(cur.fetchone()[0])
                 cur.execute(f"SELECT COUNT(*) FROM {p}_daily_balances")
@@ -536,7 +536,7 @@ def _build_generator_sql(cfg: Config, instance: L2Instance) -> str:
         # predicate works for both via the midnight-of-next-day bound
         # (avoids dialect-specific DATE() / TRUNC() function calls; ISO
         # strings sort lexicographically the way we want).
-        prefix = cfg.l2_instance_prefix or str(instance.instance)
+        prefix = cfg.db_table_prefix
         next_day = (cutoff + timedelta(days=1)).isoformat()
         sql += (
             f"\n-- X.4.h trainer cutoff: prune rows past {cutoff.isoformat()}\n"
@@ -585,7 +585,7 @@ def _emit_scope_sql(cfg: Config, instance: L2Instance) -> str:
             anchor=cfg.test_generator.end_date,
             plants=cfg.test_generator.plants or None,  # X.4.h.0.a — None ⇒ all kinds
         )
-        return emit_seed(instance, scenario, dialect=cfg.dialect)  # pyright: ignore[reportUnknownArgumentType]  # WHY: build_default_scenario returns untyped-def ScenarioPlant per the same waiver
+        return emit_seed(instance, scenario, prefix=cfg.db_table_prefix, dialect=cfg.dialect)  # pyright: ignore[reportUnknownArgumentType]  # WHY: build_default_scenario returns untyped-def ScenarioPlant per the same waiver
     if scope == "uncovered_rails":
         # X.4.g.10 — fill baseline only for rails the operator's
         # external DB hasn't already populated (via step 2's pull).
@@ -597,6 +597,7 @@ def _emit_scope_sql(cfg: Config, instance: L2Instance) -> str:
         covered = _covered_rail_names(cfg, instance)
         return emit_baseline_seed(
             instance,
+            prefix=cfg.db_table_prefix,
             anchor=cfg.test_generator.end_date,
             dialect=cfg.dialect,
             skip_rails=covered,
@@ -616,9 +617,10 @@ def _emit_scope_sql(cfg: Config, instance: L2Instance) -> str:
                 "cfg.test_generator.only_template to name a TransferTemplate "
                 "in the L2 instance.",
             )
-        only_rails = _only_template_rails(template_name, instance)
+        only_rails = _only_template_rails(template_name, instance, cfg=cfg)
         baseline = emit_baseline_seed(
             instance,
+            prefix=cfg.db_table_prefix,
             anchor=cfg.test_generator.end_date,
             dialect=cfg.dialect,
             only_rails=only_rails,
@@ -644,14 +646,14 @@ def _emit_scope_sql(cfg: Config, instance: L2Instance) -> str:
             anchor=cfg.test_generator.end_date,
             plants=plants_tuple,
         )
-        plants_sql = emit_seed(instance, scenario, dialect=cfg.dialect)  # pyright: ignore[reportUnknownArgumentType]  # WHY: build_default_scenario returns untyped-def ScenarioPlant per the same waiver
+        plants_sql = emit_seed(instance, scenario, prefix=cfg.db_table_prefix, dialect=cfg.dialect)  # pyright: ignore[reportUnknownArgumentType]  # WHY: build_default_scenario returns untyped-def ScenarioPlant per the same waiver
         return baseline + "\n" + plants_sql
     # Defensive — Literal[ScopeKind] should make this unreachable.
     raise ValueError(f"Unknown test_generator.scope: {scope!r}")
 
 
 def _only_template_rails(
-    template_name: str, instance: L2Instance,
+    template_name: str, instance: L2Instance, *, cfg: Config,
 ) -> frozenset[Identifier]:
     """X.4.i.1 — return the leg_rails closure for the named template.
 
@@ -672,8 +674,8 @@ def _only_template_rails(
         declared = sorted(str(t.name) for t in instance.transfer_templates)
         raise ValueError(
             f"only_template={template_name!r} not found in L2 instance "
-            f"{str(instance.instance)!r}. Declared TransferTemplates: "
-            f"{declared}",
+            f"(db_table_prefix={cfg.db_table_prefix!r}). "
+            f"Declared TransferTemplates: {declared}",
         )
     return frozenset(template.leg_rails)
 
@@ -689,7 +691,7 @@ def _covered_rail_names(
     populated this rail (via step 2's etl_datasource pull)";
     uncovered = "no rows yet, fill the gap with baseline".
     """
-    p = instance.instance
+    p = cfg.db_table_prefix  # Z.C — was instance.instance
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -751,7 +753,7 @@ async def step_3_5_derive_balances(
     if not cfg.test_generator.derive_balances:
         return 0
 
-    p = instance.instance
+    p = cfg.db_table_prefix  # Z.C — was instance.instance
     account_roles = (
         cfg.test_generator.derive_balances_account_roles
         if cfg.test_generator.derive_balances_account_roles is not None
@@ -865,10 +867,10 @@ async def step_4_matviews(
     duration (matview refresh is the slowest pipeline step on a
     multi-million-row demo).
     """
-    sql = refresh_matviews_sql(instance, dialect=cfg.dialect)
+    sql = refresh_matviews_sql(instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect)
     await _emit(dev_log, {
         "event": "deploy:step4:matviews:start",
-        "instance": instance.instance,
+        "db_table_prefix": cfg.db_table_prefix,
         "dialect": cfg.dialect.value,
     })
 

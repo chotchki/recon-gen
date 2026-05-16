@@ -79,17 +79,17 @@ def test_mutate_account_replaces_field_returns_new_instance(
 
 
 def test_mutate_rail_replaces_field(spec_example: L2Instance) -> None:
-    """Mutate a Rail.transfer_type; only the matched rail changes."""
+    """Mutate a Rail field; only the matched rail changes."""
     new_inst = mutate_l2(
         spec_example,
         kind="rail",
         entity_id="ExternalRailInbound",
-        fields={"transfer_type": "ach_v2"},
+        fields={"origin": "InternalInitiated"},
     )
     new_rail = next(
         r for r in new_inst.rails if str(r.name) == "ExternalRailInbound"
     )
-    assert new_rail.transfer_type == "ach_v2"
+    assert new_rail.origin == "InternalInitiated"
 
 
 def test_mutate_chain_uses_composite_key(spec_example: L2Instance) -> None:

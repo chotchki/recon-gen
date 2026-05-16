@@ -61,11 +61,11 @@ from .primitives import (
     Name,
     Origin,
     Rail,
+    RailName,
     RoleExpression,
     Scope,
     SingleLegRail,
     TransferTemplate,
-    TransferType,
     TwoLegRail,
 )
 from .theme import ThemePreset
@@ -79,37 +79,14 @@ class L2LoaderError(ValueError):
     """Raised when an L2 YAML fails to load or fails per-entity validation."""
 
 
-# -- Identifier validation (F5) ----------------------------------------------
-
-
-# Per SPEC's Instance Prefix Format rule (F5 amendment):
-#   MUST match ^[a-z][a-z0-9_]*$, max 30 characters.
-# Lowercase-only avoids Postgres' quoted-vs-unquoted hazard;
-# 30-char cap leaves room for the longest table-name suffix within
-# Postgres' 63-char identifier limit.
-_INSTANCE_PREFIX_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-_INSTANCE_PREFIX_MAX = 30
-
-
-def _load_instance_prefix(raw: object, *, path: str) -> Identifier:
-    """Validate and return an InstancePrefix per SPEC's F5 rules."""
-    if not isinstance(raw, str):
-        raise L2LoaderError(
-            f"{path}: expected a string instance prefix, "
-            f"got {type(raw).__name__}"
-        )
-    if not _INSTANCE_PREFIX_RE.match(raw):
-        raise L2LoaderError(
-            f"{path}={raw!r}: must match {_INSTANCE_PREFIX_RE.pattern!r} "
-            f"(SQL-identifier-safe; lowercase start; alphanumeric or "
-            f"underscore thereafter)"
-        )
-    if len(raw) > _INSTANCE_PREFIX_MAX:
-        raise L2LoaderError(
-            f"{path}={raw!r}: max {_INSTANCE_PREFIX_MAX} characters "
-            f"(got {len(raw)})"
-        )
-    return Identifier(raw)
+# -- Legacy ``instance:`` rejection (Z.C, 2026-05-15) -----------------------
+#
+# The legacy ``instance:`` YAML key — formerly the InstancePrefix per SPEC
+# F5 — has been retired. The DB-table prefix lives on the cfg as
+# ``cfg.db_table_prefix``; the QS-resource-ID prefix lives as
+# ``cfg.deployment_name``. The loader hard-fails on any L2 YAML that
+# carries a top-level ``instance:`` key so legacy fixtures get an
+# actionable migration pointer instead of silently degrading.
 
 
 def _load_identifier(raw: object, *, path: str) -> Identifier:
@@ -735,6 +712,16 @@ def _load_instance_template(raw: object | None, *, path: str) -> str | None:
     return raw
 
 
+_LEGACY_TRANSFER_TYPE_REJECT_MSG = (
+    "Z.B grammar collapse (PLAN.md §Z.B): the `transfer_type:` field on "
+    "Rail / TransferTemplate has been removed — the rail's / template's "
+    "`name` IS the type identifier across L1 + L2. Drop the "
+    "`transfer_type:` line entirely. On LimitSchedule, replace "
+    "`transfer_type: <RailName>` with `rail: <RailName>` (same value, "
+    "renamed field)."
+)
+
+
 def _load_rail(raw: object, *, path: str) -> Rail:
     """Discriminate two-leg vs single-leg by which keys are present.
 
@@ -742,14 +729,20 @@ def _load_rail(raw: object, *, path: str) -> Rail:
     (per-leg ``source_origin`` / ``destination_origin`` may cover both
     legs on a two-leg rail; the validator's O1 rule checks resolution).
     Per-leg overrides on a single-leg rail are a hard load-time error.
+
+    Z.B (2026-05-15) drops the legacy ``transfer_type:`` key — the
+    rail's ``name`` IS the type. Presence raises with an actionable
+    error pointing at PLAN §Z.B.
     """
     raw_d = _as_mapping(raw, path=path, what="rail")
 
+    if "transfer_type" in raw_d:
+        raise L2LoaderError(
+            f"{path}.transfer_type: legacy field no longer supported. "
+            f"{_LEGACY_TRANSFER_TYPE_REJECT_MSG}",
+        )
+
     name = _load_identifier(_require(raw_d, "name", path=path), path=f"{path}.name")
-    transfer_type: TransferType = _load_string(
-        _require(raw_d, "transfer_type", path=path),
-        path=f"{path}.transfer_type",
-    )
     origin_raw = raw_d.get("origin")
     origin: Origin | None = (
         _load_string(origin_raw, path=f"{path}.origin")
@@ -841,7 +834,6 @@ def _load_rail(raw: object, *, path: str) -> Rail:
         )
         return TwoLegRail(
             name=name,
-            transfer_type=transfer_type,
             metadata_keys=metadata_keys,
             source_role=_load_role_expression(
                 raw_d["source_role"], path=f"{path}.source_role",
@@ -880,7 +872,6 @@ def _load_rail(raw: object, *, path: str) -> Rail:
             )
     return SingleLegRail(
         name=name,
-        transfer_type=transfer_type,
         metadata_keys=metadata_keys,
         leg_role=_load_role_expression(
             raw_d["leg_role"], path=f"{path}.leg_role",
@@ -945,16 +936,17 @@ def _load_metadata_value_examples(
 
 def _load_transfer_template(raw: object, *, path: str) -> TransferTemplate:
     raw_d = _as_mapping(raw, path=path, what="transfer_template")
+    if "transfer_type" in raw_d:
+        raise L2LoaderError(
+            f"{path}.transfer_type: legacy field no longer supported. "
+            f"{_LEGACY_TRANSFER_TYPE_REJECT_MSG}",
+        )
     completion: CompletionExpression = _load_string(
         _require(raw_d, "completion", path=path), path=f"{path}.completion",
     )
     return TransferTemplate(
         name=_load_identifier(
             _require(raw_d, "name", path=path), path=f"{path}.name",
-        ),
-        transfer_type=_load_string(
-            _require(raw_d, "transfer_type", path=path),
-            path=f"{path}.transfer_type",
         ),
         expected_net=_load_money(
             _require(raw_d, "expected_net", path=path),
@@ -1023,15 +1015,20 @@ def _load_chain(raw: object, *, path: str) -> Chain:
 
 def _load_limit_schedule(raw: object, *, path: str) -> LimitSchedule:
     raw_d = _as_mapping(raw, path=path, what="limit_schedule")
+    if "transfer_type" in raw_d:
+        raise L2LoaderError(
+            f"{path}.transfer_type: legacy field renamed to `rail`. "
+            f"{_LEGACY_TRANSFER_TYPE_REJECT_MSG}",
+        )
     return LimitSchedule(
         parent_role=_load_identifier(
             _require(raw_d, "parent_role", path=path),
             path=f"{path}.parent_role",
         ),
-        transfer_type=_load_string(
-            _require(raw_d, "transfer_type", path=path),
-            path=f"{path}.transfer_type",
-        ),
+        rail=RailName(_load_string(
+            _require(raw_d, "rail", path=path),
+            path=f"{path}.rail",
+        )),
         cap=_load_money(_require(raw_d, "cap", path=path), path=f"{path}.cap"),
         description=_load_description(
             raw_d.get("description"), path=f"{path}.description",
@@ -1042,17 +1039,21 @@ def _load_limit_schedule(raw: object, *, path: str) -> LimitSchedule:
 # -- Public API --------------------------------------------------------------
 
 
-def _capture_to_run_dir(raw_text: str, instance_prefix: str) -> None:
+def _capture_to_run_dir(raw_text: str, slug: str) -> None:
     """Y.2.gate.c.12 — copy every loaded L2 YAML into ``$QS_GEN_RUN_DIR/l2/``.
 
     No-op when ``QS_GEN_RUN_DIR`` is unset (direct ``pytest`` /
     ``quicksight-gen`` invocations are unchanged). When set, writes
-    the raw YAML bytes to ``<run-dir>/l2/<instance-prefix>.yaml`` so
-    the runner's per-run snapshot captures every L2 the test session
-    touched — fuzzed AND static (the fuzzer constructs a YAML on disk
-    and feeds the path through ``load_instance``, same code path).
+    the raw YAML bytes to ``<run-dir>/l2/<slug>.yaml`` so the runner's
+    per-run snapshot captures every L2 the test session touched —
+    fuzzed AND static (the fuzzer constructs a YAML on disk and feeds
+    the path through ``load_instance``, same code path).
 
-    Idempotent: same prefix loaded twice in one session writes the
+    Z.C — the slug is now the YAML file basename (formerly the
+    ``instance:`` field) since the L2 yaml no longer carries a
+    deployment identifier of its own.
+
+    Idempotent: same slug loaded twice in one session writes the
     same bytes to the same file (cheap overwrite). Capture failures
     (disk full, permission denied, registry validator rejecting a
     bad path) are swallowed — the YAML load must never fail because
@@ -1071,7 +1072,7 @@ def _capture_to_run_dir(raw_text: str, instance_prefix: str) -> None:
     try:
         target_dir = run_dir / "l2"
         target_dir.mkdir(parents=True, exist_ok=True)
-        target = target_dir / f"{instance_prefix}.yaml"
+        target = target_dir / f"{slug}.yaml"
         target.write_text(raw_text)
     except OSError:
         # Sidecar — never break the load.
@@ -1119,10 +1120,24 @@ def load_instance(path: Path | str, *, validate: bool = True) -> L2Instance:
         raise L2LoaderError(f"{yaml_path}: file is empty")
     raw_d = _as_mapping(raw, path=str(yaml_path), what="top-level")
 
-    instance = _load_instance_prefix(
-        _require(raw_d, "instance", path="instance"), path="instance",
-    )
-    _capture_to_run_dir(raw_text, str(instance))
+    # Z.C — the legacy ``instance:`` YAML key has been retired. The
+    # DB-table prefix lives on the cfg yaml as ``cfg.db_table_prefix``;
+    # the QS-resource-ID prefix lives as ``cfg.deployment_name``. Reject
+    # any L2 yaml that still carries an ``instance:`` key with an
+    # actionable migration pointer rather than silently ignoring it.
+    if "instance" in raw_d:
+        raise L2LoaderError(
+            f"{yaml_path}: top-level 'instance:' key is no longer "
+            "supported (Z.C, 2026-05-15). Move the DB-table prefix to "
+            "your cfg.yaml under 'db_table_prefix:' and the "
+            "QS-resource-ID prefix to 'deployment_name:'. The L2 yaml "
+            "is now pure topology + persona + theme — no deployment "
+            "identifiers."
+        )
+
+    # Per-run debug capture (Y.2.gate.c.12) keys off the yaml basename
+    # since there's no longer a per-instance identifier in the L2 yaml.
+    _capture_to_run_dir(raw_text, yaml_path.stem)
 
     accounts = tuple(
         _load_account(item, path=f"accounts[{i}]")
@@ -1156,7 +1171,6 @@ def load_instance(path: Path | str, *, validate: bool = True) -> L2Instance:
     )
 
     inst = L2Instance(
-        instance=instance,
         accounts=accounts,
         account_templates=account_templates,
         rails=rails,

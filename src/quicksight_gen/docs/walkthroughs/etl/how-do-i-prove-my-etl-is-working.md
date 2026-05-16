@@ -79,7 +79,7 @@ SELECT
     COUNT(*)          AS leg_count
 FROM {{ l2_instance_name }}_transactions
 WHERE status = 'Posted'
-  AND transfer_type NOT IN ('external_txn', 'sale')   -- single-leg types
+  AND rail_name NOT IN ('external_txn', 'sale')   -- single-leg types
 GROUP BY transfer_id
 HAVING SUM(amount_money) <> 0;
 ```
@@ -135,7 +135,7 @@ account drifting persistently if the gap survives multiple days.
 -- transfer_id that doesn't exist in our base table.
 SELECT DISTINCT
     t.transfer_id,
-    t.transfer_type,
+    t.rail_name,
     t.transfer_parent_id   AS missing_parent
 FROM {{ l2_instance_name }}_transactions t
 WHERE t.transfer_parent_id IS NOT NULL

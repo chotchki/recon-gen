@@ -26,14 +26,21 @@ def make_test_config(**overrides: Any) -> Config:
 
     - ``aws_region="us-east-2"`` — pin the region to match a fixture
       (e.g. tests asserting on rendered ARNs).
-    - ``l2_instance_prefix="spec_example"`` — match the prefix the L2
-      instance default would stamp at runtime, so app builders that
-      require ``cfg.l2_instance_prefix`` succeed in unit tests.
+    - ``deployment_name="qsgen-spec-example"`` — pin the QS resource
+      prefix (Z.C). Default ``qsgen-test`` works for most tests; pin
+      to a real deployment name when the test asserts on rendered IDs.
+    - ``db_table_prefix="spec_example"`` — pin the DB table prefix
+      (Z.C). Default ``test`` works when the test doesn't touch
+      generated DB DDL; pin to a real prefix when it does.
     - ``dialect=Dialect.ORACLE`` — exercise the Oracle SQL branch.
     """
     base: dict[str, Any] = {
         "aws_account_id": _TEST_ACCOUNT,
         "aws_region": _TEST_REGION,
+        # Z.C: required Config fields. Tests that don't assert on
+        # rendered resource IDs / DB DDL accept these as no-op defaults.
+        "deployment_name": "qsgen-test",
+        "db_table_prefix": "test",
         "datasource_arn": _TEST_DATASOURCE_ARN,
     }
     # Region overrides cascade into the ARN unless the caller also

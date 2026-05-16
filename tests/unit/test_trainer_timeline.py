@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from quicksight_gen.common.config import TestGeneratorConfig
+from quicksight_gen.common.l2 import Identifier
 from quicksight_gen.common.l2.loader import load_instance
 from quicksight_gen.common.l2.seed import (
     DriftPlant,
@@ -109,7 +110,7 @@ def test_supersession_uses_corrected_amount() -> None:
         supersession_plants=(
             SupersessionPlant(
                 account_id="cust-1", days_ago=3,
-                transfer_type="ach", rail_name="rail-X",
+                rail_name=Identifier("ExternalRailInbound"),
                 original_amount=Decimal("250.00"),
                 corrected_amount=Decimal("275.00"),
             ),
@@ -189,7 +190,7 @@ def test_zero_day_plants_omitted_from_timeline() -> None:
         stuck_pending_plants=(
             StuckPendingPlant(
                 account_id="c", days_ago=10,
-                transfer_type="ach", rail_name="r",
+                rail_name=Identifier("ExternalRailInbound"),
                 amount=Decimal("100"),
             ),
         ),

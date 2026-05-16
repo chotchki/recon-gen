@@ -43,7 +43,6 @@ def _strip_comments(sql: str) -> str:
 def _instance(prefix: str) -> L2Instance:
     """A minimal L2Instance — schema emit doesn't read the entity lists."""
     return L2Instance(
-        instance=Identifier(prefix),
         accounts=(),
         account_templates=(),
         rails=(),
@@ -58,7 +57,7 @@ def _instance(prefix: str) -> L2Instance:
 
 def test_uses_l2_instance_prefix() -> None:
     """Tables + indexes carry the instance prefix per F10 isolation rule."""
-    sql = emit_schema(_instance("ksk"))
+    sql = emit_schema(_instance("ksk"), prefix="ksk")
     assert "CREATE TABLE ksk_transactions" in sql
     assert "CREATE TABLE ksk_daily_balances" in sql
     assert "CREATE INDEX idx_ksk_transactions_account_posting" in sql
@@ -67,8 +66,8 @@ def test_uses_l2_instance_prefix() -> None:
 
 def test_two_instances_emit_isolated_table_names() -> None:
     """Two L2 instances coexist in one DB by using distinct prefixes."""
-    a = emit_schema(_instance("aaa"))
-    b = emit_schema(_instance("bbb"))
+    a = emit_schema(_instance("aaa"), prefix="aaa")
+    b = emit_schema(_instance("bbb"), prefix="bbb")
     assert "aaa_transactions" in a and "aaa_transactions" not in b
     assert "bbb_transactions" in b and "bbb_transactions" not in a
 
@@ -78,7 +77,7 @@ def test_two_instances_emit_isolated_table_names() -> None:
 
 def test_emits_drop_before_create() -> None:
     """Every CREATE has a DROP IF EXISTS for the same object before it."""
-    sql = emit_schema(_instance("idem"))
+    sql = emit_schema(_instance("idem"), prefix="idem")
     drop_idx = sql.index("DROP TABLE IF EXISTS idem_transactions")
     create_idx = sql.index("CREATE TABLE idem_transactions")
     assert drop_idx < create_idx, "DROP must precede CREATE"
@@ -91,7 +90,7 @@ def test_emits_drop_before_create() -> None:
 def test_drops_daily_balances_before_transactions_for_fk_safety() -> None:
     """Drop daily_balances first so any future FKs from it to transactions
     don't block the drop. Order matters in idempotent DDL."""
-    sql = emit_schema(_instance("ord"))
+    sql = emit_schema(_instance("ord"), prefix="ord")
     db_drop = sql.index("DROP TABLE IF EXISTS ord_daily_balances")
     tx_drop = sql.index("DROP TABLE IF EXISTS ord_transactions ")
     assert db_drop < tx_drop
@@ -102,7 +101,7 @@ def test_drops_daily_balances_before_transactions_for_fk_safety() -> None:
 
 def test_emits_entry_column_on_both_tables() -> None:
     """L1 F's Entry primitive — BIGSERIAL on both transactions + daily_balances."""
-    sql = emit_schema(_instance("ent"))
+    sql = emit_schema(_instance("ent"), prefix="ent")
     # Both tables have entry BIGSERIAL
     assert "entry                BIGSERIAL      NOT NULL" in sql
     assert "entry                  BIGSERIAL      NOT NULL" in sql
@@ -110,7 +109,7 @@ def test_emits_entry_column_on_both_tables() -> None:
 
 def test_transactions_includes_amount_money_and_direction() -> None:
     """Per L1 SPEC: Amount = (Money, Direction); both columns present."""
-    sql = emit_schema(_instance("amt"))
+    sql = emit_schema(_instance("amt"), prefix="amt")
     assert "amount_money         DECIMAL(20,2)  NOT NULL" in sql
     assert "amount_direction     VARCHAR(20)    NOT NULL" in sql
     assert "amount_direction IN ('Debit', 'Credit')" in sql
@@ -122,20 +121,20 @@ def test_transactions_includes_amount_invariant_check() -> None:
     money ≥ 0 if direction = Credit; money ≤ 0 if direction = Debit.
     Encoded as a Postgres CHECK so the DB rejects rows that violate it.
     """
-    sql = emit_schema(_instance("inv"))
+    sql = emit_schema(_instance("inv"), prefix="inv")
     assert "amount_direction = 'Credit' AND amount_money >= 0" in sql
     assert "amount_direction = 'Debit'  AND amount_money <= 0" in sql
 
 
 def test_transactions_includes_transfer_parent_id() -> None:
     """L1 SPEC: Transfer.Parent recursive chain (Phase L addition)."""
-    sql = emit_schema(_instance("tp"))
+    sql = emit_schema(_instance("tp"), prefix="tp")
     assert "transfer_parent_id   VARCHAR(100)" in sql
 
 
 def test_transactions_includes_transfer_completion_and_origin() -> None:
     """L1 SPEC: Transfer.Completion + Transaction.Origin both denormalized."""
-    sql = emit_schema(_instance("co"))
+    sql = emit_schema(_instance("co"), prefix="co")
     assert "transfer_completion  TIMESTAMP" in sql
     assert "origin               VARCHAR(50)    NOT NULL" in sql
     # Origin is open enum — no CHECK so integrators can extend.
@@ -144,23 +143,32 @@ def test_transactions_includes_transfer_completion_and_origin() -> None:
 
 def test_transactions_status_is_open_enum() -> None:
     """L1 SPEC says Status ⊇ {Posted}. No closed CHECK on status."""
-    sql = emit_schema(_instance("st"))
+    sql = emit_schema(_instance("st"), prefix="st")
     assert "status               VARCHAR(50)    NOT NULL" in sql
     # No CHECK constraint on status (would close the enum).
     assert "status IN" not in sql
 
 
-def test_transactions_transfer_type_is_open_enum() -> None:
-    """L1 SPEC: TransferType ⊇ {Sale}; integrators add their rails. No CHECK."""
-    sql = emit_schema(_instance("tt"))
-    assert "transfer_type        VARCHAR(50)    NOT NULL" in sql
-    # No CHECK on transfer_type (v5 had one; v6 drops it for L2 extensibility).
+def test_transactions_rail_name_is_open_enum() -> None:
+    """Z.B (2026-05-15): rail_name carries the per-leg type identifier
+    (Rail.transfer_type and the legacy column collapsed away). The
+    column stays open-set — integrators add new rails by extending the
+    L2 instance, no CHECK constraint."""
+    sql = emit_schema(_instance("tt"), prefix="tt")
+    assert "rail_name            VARCHAR(100)   NOT NULL" in sql
+    # No CHECK on rail_name — keeps the column extensible.
+    assert "rail_name IN" not in sql
+    # Z.B: no transfer_type column at all (collapsed into rail_name).
+    # Narrative SQL comments may still reference the old name historically;
+    # the column declaration is what matters.
+    assert "transfer_type        VARCHAR" not in sql
+    assert "transfer_type INTEGER" not in sql
     assert "transfer_type IN" not in sql
 
 
 def test_daily_balances_includes_expected_eod_and_limits() -> None:
     """L1 SPEC: ExpectedEODBalance + Limits map both denormalized onto the row."""
-    sql = emit_schema(_instance("eb"))
+    sql = emit_schema(_instance("eb"), prefix="eb")
     assert "expected_eod_balance   DECIMAL(20,2)" in sql
     # Limits is the Map[TransferType, Money] serialized as JSON, bounded
     # so the column behaves like a string on both dialects (CLOB
@@ -181,7 +189,7 @@ def test_daily_balances_money_is_signed() -> None:
     looks for a CHECK on the bare ``money`` column inside the
     daily_balances CREATE TABLE block, NOT any usage in a downstream view.
     """
-    sql = emit_schema(_instance("sg"))
+    sql = emit_schema(_instance("sg"), prefix="sg")
     assert "money                  DECIMAL(20,2)  NOT NULL" in sql
     # Find the daily_balances CREATE TABLE block specifically.
     db_block_match = re.search(
@@ -198,7 +206,7 @@ def test_daily_balances_money_is_signed() -> None:
 
 def test_daily_balances_business_day_window_check() -> None:
     """A BusinessDay's end MUST be after its start."""
-    sql = emit_schema(_instance("bd"))
+    sql = emit_schema(_instance("bd"), prefix="bd")
     assert "business_day_end > business_day_start" in sql
 
 
@@ -213,7 +221,7 @@ def test_metadata_uses_text_with_is_json_check() -> None:
     literals (ORA-00932). 4000 chars covers every JSON metadata
     document the L2 schema emits in practice.
     """
-    sql = emit_schema(_instance("p"))
+    sql = emit_schema(_instance("p"), prefix="p")
     assert "metadata             VARCHAR(4000)" in sql
     assert "metadata IS NULL OR metadata IS JSON" in sql
     # Limits column same pattern
@@ -230,7 +238,7 @@ def test_no_gin_indexes_per_portability_constraint() -> None:
     the bare substring 'GIN' — which would match ``ORIGIN`` (the
     Transaction.Origin column name) and produce false positives.
     """
-    sql = emit_schema(_instance("g"))
+    sql = emit_schema(_instance("g"), prefix="g")
     no_comments = _strip_comments(sql)
     assert "USING GIN" not in no_comments.upper()
     # B-tree is the default and only allowed; assert at least one B-tree
@@ -243,13 +251,13 @@ def test_no_gin_indexes_per_portability_constraint() -> None:
 
 def test_transactions_pk_includes_entry() -> None:
     """Per L1 F: physical row key is (id, entry); logical key is id."""
-    sql = emit_schema(_instance("pk1"))
+    sql = emit_schema(_instance("pk1"), prefix="pk1")
     assert "PRIMARY KEY (id, entry)" in sql
 
 
 def test_daily_balances_pk_includes_entry() -> None:
     """Per L1 F: physical row key is (account_id, business_day_start, entry)."""
-    sql = emit_schema(_instance("pk2"))
+    sql = emit_schema(_instance("pk2"), prefix="pk2")
     assert "PRIMARY KEY (account_id, business_day_start, entry)" in sql
 
 
@@ -262,7 +270,7 @@ def test_daily_balances_pk_includes_entry() -> None:
 ])
 def test_transactions_denormalizes_account(col: str) -> None:
     """SPEC's StoredTransaction = Transaction + Transfer + Account fields."""
-    sql = emit_schema(_instance("a"))
+    sql = emit_schema(_instance("a"), prefix="a")
     # Both tables carry the account fields.
     assert f"  {col}" in sql or f"  {col} " in sql
 
@@ -273,7 +281,7 @@ def test_transactions_denormalizes_account(col: str) -> None:
 ])
 def test_daily_balances_denormalizes_account(col: str) -> None:
     """SPEC's DailyBalance = StoredBalance + Account fields."""
-    sql = emit_schema(_instance("a"))
+    sql = emit_schema(_instance("a"), prefix="a")
     # Just verify the column name appears (we already assert on transactions
     # via the same parametrize; here we trust same-string-in-template).
     assert col in sql
@@ -284,7 +292,7 @@ def test_daily_balances_denormalizes_account(col: str) -> None:
 
 def test_emits_current_transactions_view() -> None:
     """L1 CurrentTransaction theorem materialized as max-Entry-per-ID view."""
-    sql = emit_schema(_instance("v"))
+    sql = emit_schema(_instance("v"), prefix="v")
     assert "CREATE MATERIALIZED VIEW v_current_transactions AS" in sql
     # Per L1 CurrentTransaction set-comprehension definition: the view
     # selects rows whose entry equals the max entry for the same logical id.
@@ -294,7 +302,7 @@ def test_emits_current_transactions_view() -> None:
 
 def test_emits_current_daily_balances_view() -> None:
     """L1 CurrentStoredBalance theorem materialized as max-Entry-per-(account,day) view."""
-    sql = emit_schema(_instance("v"))
+    sql = emit_schema(_instance("v"), prefix="v")
     assert "CREATE MATERIALIZED VIEW v_current_daily_balances AS" in sql
     # Per L1 CurrentStoredBalance: max-Entry per (Account, BusinessDay).
     assert "WHERE sb.entry = (" in sql
@@ -304,7 +312,7 @@ def test_emits_current_daily_balances_view() -> None:
 
 def test_view_drops_precede_table_drops() -> None:
     """Views must drop before tables they depend on (Postgres dependency)."""
-    sql = emit_schema(_instance("ord"))
+    sql = emit_schema(_instance("ord"), prefix="ord")
     view_drop = sql.index("DROP MATERIALIZED VIEW IF EXISTS ord_current_transactions")
     table_drop = sql.index("DROP TABLE IF EXISTS ord_transactions ")
     assert view_drop < table_drop
@@ -312,7 +320,7 @@ def test_view_drops_precede_table_drops() -> None:
 
 def test_view_creates_after_table_creates() -> None:
     """Views must be created after the tables they reference."""
-    sql = emit_schema(_instance("ord"))
+    sql = emit_schema(_instance("ord"), prefix="ord")
     table_create = sql.index("CREATE TABLE ord_transactions")
     view_create = sql.index("CREATE MATERIALIZED VIEW ord_current_transactions")
     assert table_create < view_create
@@ -320,7 +328,7 @@ def test_view_creates_after_table_creates() -> None:
 
 def test_views_use_l2_instance_prefix() -> None:
     """View names + their referenced base tables share the prefix."""
-    sql = emit_schema(_instance("aaa"))
+    sql = emit_schema(_instance("aaa"), prefix="aaa")
     assert "aaa_current_transactions" in sql
     assert "aaa_current_daily_balances" in sql
     # The view's body references the prefixed base tables, not bare names.
@@ -334,13 +342,13 @@ def test_views_use_l2_instance_prefix() -> None:
 def test_transactions_includes_rail_name_not_null() -> None:
     """SPEC: every leg's L2 Rail name denormalized so BundleSelector by
     RailName resolves to a simple WHERE without a transfer→rail join."""
-    sql = emit_schema(_instance("v11"))
+    sql = emit_schema(_instance("v11"), prefix="v11")
     assert "rail_name            VARCHAR(100)   NOT NULL" in sql
 
 
 def test_transactions_includes_template_name_nullable() -> None:
     """SPEC: TransferTemplate name; NULL when the leg posts standalone."""
-    sql = emit_schema(_instance("v11"))
+    sql = emit_schema(_instance("v11"), prefix="v11")
     # NULL allowed: just the column declaration, no NOT NULL.
     assert re.search(
         r"\btemplate_name\s+VARCHAR\(100\)(?!\s+NOT NULL)",
@@ -350,7 +358,7 @@ def test_transactions_includes_template_name_nullable() -> None:
 
 def test_transactions_includes_bundle_id_nullable() -> None:
     """SPEC: L1 Transaction.BundleId — populated by AggregatingRail bundlers."""
-    sql = emit_schema(_instance("v11"))
+    sql = emit_schema(_instance("v11"), prefix="v11")
     assert re.search(
         r"\bbundle_id\s+VARCHAR\(100\)(?!\s+NOT NULL)",
         sql,
@@ -360,7 +368,7 @@ def test_transactions_includes_bundle_id_nullable() -> None:
 def test_transactions_includes_supersedes_open_enum() -> None:
     """SPEC: L1 Transaction.Supersedes — open enum, no CHECK so integrators
     may extend the v1 set (Inflight / BundleAssignment / TechnicalCorrection)."""
-    sql = emit_schema(_instance("v11"))
+    sql = emit_schema(_instance("v11"), prefix="v11")
     assert re.search(
         r"\bsupersedes\s+VARCHAR\(50\)(?!\s+NOT NULL)",
         sql,
@@ -375,7 +383,7 @@ def test_transactions_includes_supersedes_open_enum() -> None:
 def test_daily_balances_includes_supersedes_open_enum() -> None:
     """SPEC: L1 StoredBalance.Supersedes — only TechnicalCorrection applies
     in practice but the column is open enum to match the transactions side."""
-    sql = emit_schema(_instance("v11"))
+    sql = emit_schema(_instance("v11"), prefix="v11")
     # Find the daily_balances CREATE TABLE block specifically.
     db_block_match = re.search(
         r"CREATE TABLE v11_daily_balances\s*\((.*?)\);",
@@ -393,7 +401,7 @@ def test_daily_balances_includes_supersedes_open_enum() -> None:
 def test_emits_bundler_eligibility_index() -> None:
     """SPEC: AggregatingRails query for Posted, unbundled rows by rail_name.
     Partial index on `bundle_id IS NULL` keeps it small as bundled count grows."""
-    sql = emit_schema(_instance("be"))
+    sql = emit_schema(_instance("be"), prefix="be")
     assert "CREATE INDEX idx_be_transactions_bundler_eligibility" in sql
     assert "ON be_transactions (rail_name, status)" in sql
     assert "WHERE bundle_id IS NULL" in sql
@@ -402,7 +410,7 @@ def test_emits_bundler_eligibility_index() -> None:
 def test_bundler_eligibility_index_drops_before_create() -> None:
     """The new bundler index participates in the same DROP-before-CREATE
     idempotency the other indexes follow."""
-    sql = emit_schema(_instance("be"))
+    sql = emit_schema(_instance("be"), prefix="be")
     drop_idx = sql.index("DROP INDEX IF EXISTS idx_be_transactions_bundler_eligibility")
     create_idx = sql.index("CREATE INDEX idx_be_transactions_bundler_eligibility")
     assert drop_idx < create_idx
@@ -417,7 +425,6 @@ def _instance_with_limits(prefix: str) -> L2Instance:
     from decimal import Decimal
     from quicksight_gen.common.l2 import LimitSchedule
     return L2Instance(
-        instance=Identifier(prefix),
         accounts=(),
         account_templates=(),
         rails=(),
@@ -426,7 +433,7 @@ def _instance_with_limits(prefix: str) -> L2Instance:
         limit_schedules=(
             LimitSchedule(
                 parent_role=Identifier("DDAControl"),
-                transfer_type="ach",
+                rail=Identifier("ach"),
                 cap=Decimal("12000.00"),
             ),
         ),
@@ -450,7 +457,7 @@ _L1_VIEW_NAMES = (
 def test_l1_invariant_view_emitted_per_instance(view: str) -> None:
     """Every L1 invariant view appears in the emit_schema output, prefixed
     by the L2 instance name."""
-    sql = emit_schema(_instance("v6"))
+    sql = emit_schema(_instance("v6"), prefix="v6")
     assert f"CREATE MATERIALIZED VIEW v6_{view}" in sql
     assert f"DROP MATERIALIZED VIEW IF EXISTS v6_{view}" in sql
 
@@ -458,7 +465,7 @@ def test_l1_invariant_view_emitted_per_instance(view: str) -> None:
 @pytest.mark.parametrize("view", _L1_VIEW_NAMES)
 def test_l1_invariant_view_drops_before_creates(view: str) -> None:
     """Drop precedes create — idempotency holds for the L1 invariant view block."""
-    sql = emit_schema(_instance("v6"))
+    sql = emit_schema(_instance("v6"), prefix="v6")
     drop_idx = sql.index(f"DROP MATERIALIZED VIEW IF EXISTS v6_{view}")
     create_idx = sql.index(f"CREATE MATERIALIZED VIEW v6_{view}")
     assert drop_idx < create_idx
@@ -470,7 +477,7 @@ def test_l1_invariant_views_drop_before_base_table_drops() -> None:
     objects still exist" on a re-run, so L1 view drops MUST emit
     before the base block's drops. Surfaced by M.2.6's first run
     against real Postgres."""
-    sql = emit_schema(_instance("ord"))
+    sql = emit_schema(_instance("ord"), prefix="ord")
     # All L1 view drops emit before the base block's first DROP VIEW.
     overdraft_drop = sql.index("DROP MATERIALIZED VIEW IF EXISTS ord_overdraft")
     current_drop = sql.index(
@@ -483,7 +490,7 @@ def test_l1_invariant_view_drops_emit_at_top_of_script() -> None:
     """Catches the regression — every L1 view drop happens before any
     base-block CREATE (the base block contains the Current* drops + all
     base creates as a single chunk)."""
-    sql = emit_schema(_instance("top"))
+    sql = emit_schema(_instance("top"), prefix="top")
     first_create = sql.index("CREATE TABLE top_transactions")
     for view in _L1_VIEW_NAMES:
         drop_idx = sql.index(f"DROP MATERIALIZED VIEW IF EXISTS top_{view}")
@@ -495,7 +502,7 @@ def test_l1_invariant_view_drops_emit_at_top_of_script() -> None:
 def test_drift_view_filters_to_leaf_accounts_with_nonzero_drift() -> None:
     """`<prefix>_drift` is a leaf-account view (account_parent_role IS NOT NULL)
     that returns only rows where stored ≠ computed."""
-    sql = emit_schema(_instance("dr"))
+    sql = emit_schema(_instance("dr"), prefix="dr")
     drift_match = re.search(
         r"CREATE MATERIALIZED VIEW dr_drift AS(.*?);",
         sql,
@@ -512,7 +519,7 @@ def test_ledger_drift_view_filters_to_parent_accounts() -> None:
     """`<prefix>_ledger_drift` returns rows where stored ≠ computed at the
     parent-account level (uses computed_ledger_balance helper which itself
     is gated to accounts whose role IS a parent_role)."""
-    sql = emit_schema(_instance("ld"))
+    sql = emit_schema(_instance("ld"), prefix="ld")
     body_match = re.search(
         r"CREATE MATERIALIZED VIEW ld_ledger_drift AS(.*?);",
         sql,
@@ -526,7 +533,7 @@ def test_ledger_drift_view_filters_to_parent_accounts() -> None:
 
 def test_overdraft_view_filters_internal_money_lt_zero() -> None:
     """`<prefix>_overdraft` returns internal accounts × days where money < 0."""
-    sql = emit_schema(_instance("ov"))
+    sql = emit_schema(_instance("ov"), prefix="ov")
     body_match = re.search(
         r"CREATE MATERIALIZED VIEW ov_overdraft AS(.*?);",
         sql,
@@ -542,7 +549,7 @@ def test_expected_eod_balance_breach_excludes_null_expectations() -> None:
     """Accounts without expected_eod_balance set MUST NOT appear — the
     SHOULD-constraint is only meaningful for accounts the L2 declared
     an expectation for."""
-    sql = emit_schema(_instance("eod"))
+    sql = emit_schema(_instance("eod"), prefix="eod")
     body_match = re.search(
         r"CREATE MATERIALIZED VIEW eod_expected_eod_balance_breach AS(.*?);",
         sql,
@@ -557,13 +564,13 @@ def test_expected_eod_balance_breach_excludes_null_expectations() -> None:
 def test_limit_breach_embeds_limit_schedule_caps_inline() -> None:
     """L2's LimitSchedules become CASE branches in the limit_breach view;
     JSON-path-portable across SQL targets. Branches reference `tx.`
-    aliases since the view reads parent_role + transfer_type from the
+    aliases since the view reads parent_role + rail_name from the
     transaction row directly (no JOIN to daily_balances needed —
     parent_role is denormalized on every v6 transaction)."""
-    sql = emit_schema(_instance_with_limits("lb"))
+    sql = emit_schema(_instance_with_limits("lb"), prefix="lb")
     assert (
         "WHEN tx.account_parent_role = 'DDAControl' "
-        "AND tx.transfer_type = 'ach' THEN 12000"
+        "AND tx.rail_name = 'ach' THEN 12000"
     ) in sql
 
 
@@ -571,7 +578,7 @@ def test_limit_breach_view_with_no_limit_schedules_is_inert() -> None:
     """An L2 instance with no LimitSchedules emits a syntactically valid
     limit_breach view that surfaces no rows (cap is NULL → outer WHERE
     `cap IS NOT NULL` excludes everything)."""
-    sql = emit_schema(_instance("nolim"))  # _instance has no limit_schedules
+    sql = emit_schema(_instance("nolim"), prefix="nolim")  # _instance has no limit_schedules
     assert "CREATE MATERIALIZED VIEW nolim_limit_breach" in sql
     body_match = re.search(
         r"CREATE MATERIALIZED VIEW nolim_limit_breach AS(.*?);",
@@ -595,7 +602,7 @@ def test_limit_breach_view_does_not_join_daily_balances() -> None:
     to daily_balances. Catches the bug M.2.6's first run surfaced:
     a JOIN-based view fails when no daily_balance row exists for the
     breach business_day."""
-    sql = emit_schema(_instance_with_limits("nojoin"))
+    sql = emit_schema(_instance_with_limits("nojoin"), prefix="nojoin")
     body_match = re.search(
         r"CREATE MATERIALIZED VIEW nojoin_limit_breach AS(.*?);",
         sql,
@@ -616,13 +623,11 @@ def _instance_with_pending_age(prefix: str) -> L2Instance:
     from datetime import timedelta
     from quicksight_gen.common.l2 import SingleLegRail
     return L2Instance(
-        instance=Identifier(prefix),
         accounts=(),
         account_templates=(),
         rails=(
             SingleLegRail(
                 name=Identifier("ach-credit"),
-                transfer_type="ach",
                 metadata_keys=(),
                 leg_role="DDAControl",
                 leg_direction="Credit",
@@ -640,7 +645,7 @@ def test_stuck_pending_emits_with_status_and_age_filter() -> None:
     """`<prefix>_stuck_pending` returns transactions where status is
     Pending AND the live age exceeds the rail's `max_pending_age` cap.
     Both filters live in the view body."""
-    sql = emit_schema(_instance_with_pending_age("sp"))
+    sql = emit_schema(_instance_with_pending_age("sp"), prefix="sp")
     body_match = re.search(
         r"CREATE MATERIALIZED VIEW sp_stuck_pending AS(.*?);",
         sql,
@@ -659,7 +664,7 @@ def test_stuck_pending_embeds_rail_max_pending_age_inline() -> None:
     """Each Rail with `max_pending_age` becomes one CASE branch keyed
     on `ct.rail_name`. Cap renders as integer seconds (timedelta
     → total_seconds())."""
-    sql = emit_schema(_instance_with_pending_age("sp2"))
+    sql = emit_schema(_instance_with_pending_age("sp2"), prefix="sp2")
     # 24 hours = 86400 seconds.
     assert (
         "WHEN ct.rail_name = 'ach-credit' THEN 86400"
@@ -671,7 +676,7 @@ def test_stuck_pending_view_with_no_aging_rails_is_inert() -> None:
     emits a syntactically valid stuck_pending view that surfaces no
     rows (max_pending_age_seconds is NULL → outer WHERE excludes
     everything)."""
-    sql = emit_schema(_instance("noage"))
+    sql = emit_schema(_instance("noage"), prefix="noage")
     assert "CREATE MATERIALIZED VIEW noage_stuck_pending" in sql
     body_match = re.search(
         r"CREATE MATERIALIZED VIEW noage_stuck_pending AS(.*?);",
@@ -691,7 +696,7 @@ def test_stuck_pending_view_with_no_aging_rails_is_inert() -> None:
 def test_stuck_pending_view_indexes_emit() -> None:
     """Dashboard hot-path indexes on rail_name / account_id / transfer_id
     — same shape as the other L1 invariant matviews."""
-    sql = emit_schema(_instance_with_pending_age("idx"))
+    sql = emit_schema(_instance_with_pending_age("idx"), prefix="idx")
     assert "CREATE INDEX idx_idx_sp_rail ON idx_stuck_pending (rail_name);" in sql
     assert "CREATE INDEX idx_idx_sp_account ON idx_stuck_pending (account_id);" in sql
     assert "CREATE INDEX idx_idx_sp_transfer ON idx_stuck_pending (transfer_id);" in sql
@@ -705,13 +710,11 @@ def _instance_with_unbundled_age(prefix: str) -> L2Instance:
     from datetime import timedelta
     from quicksight_gen.common.l2 import SingleLegRail
     return L2Instance(
-        instance=Identifier(prefix),
         accounts=(),
         account_templates=(),
         rails=(
             SingleLegRail(
                 name=Identifier("ach-orig"),
-                transfer_type="ach",
                 metadata_keys=(),
                 leg_role="DDAControl",
                 leg_direction="Credit",
@@ -730,7 +733,7 @@ def test_stuck_unbundled_emits_with_bundle_status_and_age_filter() -> None:
     bundle_id IS NULL AND the live age exceeds the rail's
     `max_unbundled_age` cap. Status filter is 'Posted' (vs 'Pending'
     for stuck_pending) since AggregatingRails only bundle posted legs."""
-    sql = emit_schema(_instance_with_unbundled_age("su"))
+    sql = emit_schema(_instance_with_unbundled_age("su"), prefix="su")
     body_match = re.search(
         r"CREATE MATERIALIZED VIEW su_stuck_unbundled AS(.*?);",
         sql,
@@ -749,7 +752,7 @@ def test_stuck_unbundled_embeds_rail_max_unbundled_age_inline() -> None:
     """Each Rail with `max_unbundled_age` becomes one CASE branch keyed
     on `ct.rail_name`. Cap renders as integer seconds (timedelta
     → total_seconds())."""
-    sql = emit_schema(_instance_with_unbundled_age("su2"))
+    sql = emit_schema(_instance_with_unbundled_age("su2"), prefix="su2")
     # 1 day = 86400 seconds.
     assert (
         "WHEN ct.rail_name = 'ach-orig' THEN 86400"
@@ -760,7 +763,7 @@ def test_stuck_unbundled_view_with_no_bundling_rails_is_inert() -> None:
     """An L2 instance whose Rails all leave `max_unbundled_age` unset
     emits a syntactically valid stuck_unbundled view that surfaces no
     rows."""
-    sql = emit_schema(_instance("nobun"))
+    sql = emit_schema(_instance("nobun"), prefix="nobun")
     assert "CREATE MATERIALIZED VIEW nobun_stuck_unbundled" in sql
     body_match = re.search(
         r"CREATE MATERIALIZED VIEW nobun_stuck_unbundled AS(.*?);",
@@ -777,7 +780,7 @@ def test_stuck_unbundled_view_indexes_emit() -> None:
     """Same hot-path indexes (rail_name / account_id / transfer_id) as
     stuck_pending — the M.2b.11 Unbundled Aging sheet uses the same
     filter dropdowns."""
-    sql = emit_schema(_instance_with_unbundled_age("ix"))
+    sql = emit_schema(_instance_with_unbundled_age("ix"), prefix="ix")
     assert "CREATE INDEX idx_ix_su_rail ON ix_stuck_unbundled (rail_name);" in sql
     assert "CREATE INDEX idx_ix_su_account ON ix_stuck_unbundled (account_id);" in sql
     assert "CREATE INDEX idx_ix_su_transfer ON ix_stuck_unbundled (transfer_id);" in sql
@@ -786,7 +789,7 @@ def test_stuck_unbundled_view_indexes_emit() -> None:
 def test_computed_subledger_balance_uses_current_transactions_view() -> None:
     """The helper view reads from Current* (technical-error supersession
     transparent) rather than the raw transactions base table."""
-    sql = emit_schema(_instance("h"))
+    sql = emit_schema(_instance("h"), prefix="h")
     body_match = re.search(
         r"CREATE MATERIALIZED VIEW h_computed_subledger_balance AS(.*?);",
         sql,
@@ -801,7 +804,7 @@ def test_computed_subledger_balance_uses_current_transactions_view() -> None:
 def test_computed_ledger_balance_unions_children_plus_direct_postings() -> None:
     """Per SPEC LedgerDrift: parent computed = Σ children stored + Σ
     direct ledger postings."""
-    sql = emit_schema(_instance("clb"))
+    sql = emit_schema(_instance("clb"), prefix="clb")
     body_match = re.search(
         r"CREATE MATERIALIZED VIEW clb_computed_ledger_balance AS(.*?);",
         sql,
@@ -822,7 +825,6 @@ def test_computed_ledger_balance_unions_children_plus_direct_postings() -> None:
 def _baseline_instance() -> L2Instance:
     """Minimum L2Instance fixture for refresh-helper tests."""
     return L2Instance(
-        instance=Identifier("re"),
         accounts=(),
         account_templates=(),
         rails=(),
@@ -840,7 +842,7 @@ def test_refresh_matviews_sql_emits_one_per_view() -> None:
     (daily_statement_summary + todays_exceptions) + 2 Investigation
     matviews (inv_pair_rolling_anomalies + inv_money_trail_edges,
     added in N.3.b) = 15 matviews × 2 statements each = 30 total."""
-    sql = refresh_matviews_sql(_baseline_instance())
+    sql = refresh_matviews_sql(_baseline_instance(), prefix="re")
     statements = [s.strip() for s in sql.split(";") if s.strip()]
     refreshes = [s for s in statements if s.startswith("REFRESH ")]
     analyzes = [s for s in statements if s.startswith("ANALYZE ")]
@@ -856,7 +858,7 @@ def test_refresh_matviews_sql_dependency_order() -> None:
     """current_* must REFRESH before computed_*; computed_* before
     L1 invariants. PostgreSQL refuses to refresh a downstream matview
     before its upstream is fresh, so order is load-bearing."""
-    sql = refresh_matviews_sql(_baseline_instance())
+    sql = refresh_matviews_sql(_baseline_instance(), prefix="re")
 
     def _idx(name: str) -> int:
         return sql.index(f"REFRESH MATERIALIZED VIEW re_{name};")
@@ -880,17 +882,13 @@ def test_refresh_matviews_sql_dependency_order() -> None:
 
 
 def test_refresh_matviews_sql_uses_instance_prefix() -> None:
-    """Prefix is per-L2-instance; switching instances switches prefixes."""
-    inst_a = L2Instance(
-        instance=Identifier("alpha"), accounts=(), account_templates=(),
+    """Prefix is per-deployment (Z.C — cfg.db_table_prefix); switching prefixes switches table names."""
+    inst = L2Instance(
+        accounts=(), account_templates=(),
         rails=(), transfer_templates=(), chains=(), limit_schedules=(),
     )
-    inst_b = L2Instance(
-        instance=Identifier("beta"), accounts=(), account_templates=(),
-        rails=(), transfer_templates=(), chains=(), limit_schedules=(),
-    )
-    sql_a = refresh_matviews_sql(inst_a)
-    sql_b = refresh_matviews_sql(inst_b)
+    sql_a = refresh_matviews_sql(inst, prefix="alpha")
+    sql_b = refresh_matviews_sql(inst, prefix="beta")
     assert "alpha_current_transactions" in sql_a
     assert "alpha_" in sql_a and "beta_" not in sql_a
     assert "beta_current_transactions" in sql_b
@@ -917,7 +915,7 @@ _INV_VIEW_NAMES = (
 def test_inv_matview_emitted_per_instance(view: str) -> None:
     """Both Investigation matviews appear in emit_schema output, prefixed
     by the L2 instance name."""
-    sql = emit_schema(_instance("v6"))
+    sql = emit_schema(_instance("v6"), prefix="v6")
     assert f"CREATE MATERIALIZED VIEW v6_{view} AS" in sql
     assert f"DROP MATERIALIZED VIEW IF EXISTS v6_{view}" in sql
 
@@ -925,7 +923,7 @@ def test_inv_matview_emitted_per_instance(view: str) -> None:
 @pytest.mark.parametrize("view", _INV_VIEW_NAMES)
 def test_inv_matview_drops_before_creates(view: str) -> None:
     """Drop precedes create — idempotency holds for the inv matview block."""
-    sql = emit_schema(_instance("v6"))
+    sql = emit_schema(_instance("v6"), prefix="v6")
     drop_idx = sql.index(f"DROP MATERIALIZED VIEW IF EXISTS v6_{view}")
     create_idx = sql.index(f"CREATE MATERIALIZED VIEW v6_{view}")
     assert drop_idx < create_idx
@@ -938,7 +936,7 @@ def test_inv_matview_drops_emit_before_base_table_create(view: str) -> None:
     Otherwise re-running ``apply schema`` against an existing instance
     would error because the matview depends on the base table.
     """
-    sql = emit_schema(_instance("ord"))
+    sql = emit_schema(_instance("ord"), prefix="ord")
     first_create = sql.index("CREATE TABLE ord_transactions")
     drop_idx = sql.index(f"DROP MATERIALIZED VIEW IF EXISTS ord_{view}")
     assert drop_idx < first_create
@@ -948,7 +946,7 @@ def test_inv_pair_rolling_anomalies_uses_prefixed_transactions() -> None:
     """The pair-rolling matview body reads from the prefixed base table
     everywhere — no flat ``transactions`` refs leak through the
     substitution."""
-    sql = emit_schema(_instance("ipra"))
+    sql = emit_schema(_instance("ipra"), prefix="ipra")
     body_match = re.search(
         r"CREATE MATERIALIZED VIEW ipra_inv_pair_rolling_anomalies AS(.*?);",
         sql,
@@ -969,7 +967,7 @@ def test_inv_money_trail_edges_uses_prefixed_transactions() -> None:
     chain CTE + final SELECT — all prefix-substituted. Also verifies
     the v6 column rename: parent linkage is ``transfer_parent_id``,
     not v5's ``parent_transfer_id``."""
-    sql = emit_schema(_instance("imte"))
+    sql = emit_schema(_instance("imte"), prefix="imte")
     body_match = re.search(
         r"CREATE MATERIALIZED VIEW imte_inv_money_trail_edges AS(.*?);",
         sql,
@@ -999,7 +997,7 @@ def test_inv_matviews_independent_of_each_other() -> None:
     """Neither inv matview references the other — safe to refresh in
     any relative order. (L1 invariants have inter-view dependencies;
     inv matviews don't.)"""
-    sql = emit_schema(_instance("ind"))
+    sql = emit_schema(_instance("ind"), prefix="ind")
     pair_match = re.search(
         r"CREATE MATERIALIZED VIEW ind_inv_pair_rolling_anomalies AS(.*?);",
         sql,
@@ -1019,8 +1017,8 @@ def test_inv_matviews_independent_of_each_other() -> None:
 def test_inv_matviews_isolated_per_instance() -> None:
     """Two instances emit non-overlapping inv matview names — the
     storage-isolation contract holds for inv views same as L1 views."""
-    sql_a = emit_schema(_instance("alpha"))
-    sql_b = emit_schema(_instance("beta"))
+    sql_a = emit_schema(_instance("alpha"), prefix="alpha")
+    sql_b = emit_schema(_instance("beta"), prefix="beta")
     assert "alpha_inv_pair_rolling_anomalies" in sql_a
     assert "alpha_inv_money_trail_edges" in sql_a
     assert "beta_" not in sql_a

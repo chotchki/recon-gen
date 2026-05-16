@@ -59,11 +59,11 @@ Every row in the L2 Exceptions sheet's detail table carries a
 | `check_type` | What it catches |
 |---|---|
 | **Chain Orphans** | A chain edge whose parent fired more times than its expected child(ren). Per-edge `orphan_count` = parent firings minus matched-child firings (clamped at zero). For a singleton-children chain the expected child is unique; for a multi-children (XOR) chain any of the listed children counts as a match. |
-| **Unmatched Transfer Type** | A `transactions` row whose `transfer_type` doesn't match any declared `Rail.transfer_type`. Catches new feeds emitting types the L2 doesn't yet know about. |
+| **Unmatched Transfer Type** | A `transactions` row whose `rail_name` doesn't match any declared `Rail.rail_name`. Catches new feeds emitting types the L2 doesn't yet know about. |
 | **Dead Rails** | A declared `Rail` with zero `current_transactions` postings in the entire data window. Either the rail is genuinely unused (→ delete the declaration) or ETL stopped feeding it. |
-| **Dead Bundles Activity** | An aggregating Rail's `BundlesActivity` selector that never matches any actual rail name or transfer_type in the data. The bundler silently bundles nothing. |
+| **Dead Bundles Activity** | An aggregating Rail's `BundlesActivity` selector that never matches any actual rail name or rail_name in the data. The bundler silently bundles nothing. |
 | **Dead Metadata Declarations** | A declared `Rail.metadata_keys` field name that no leg of that rail ever carries a non-NULL value for. Either the field was mis-declared or ETL is dropping it. |
-| **Dead Limit Schedules** | A declared `LimitSchedule` whose `(parent_role, transfer_type)` combination has no matching rail+account-role pair in the data — the cap can never bind. |
+| **Dead Limit Schedules** | A declared `LimitSchedule` whose `(parent_role, rail_name)` combination has no matching rail+account-role pair in the data — the cap can never bind. |
 
 Healthy = empty across all six. The bar chart's job is to surface "which
 check_type kind dominates today" so analysts know whether they're
@@ -113,7 +113,7 @@ YAML the L1 dashboard reads. The instance declares:
 - Transfer templates (multi-leg shared transfers with TransferKey
   grouping + ExpectedNet closure)
 - Chains (parent → child relationships, XOR groups)
-- LimitSchedules (per-(parent_role × transfer_type) daily caps)
+- LimitSchedules (per-(parent_role × rail_name) daily caps)
 
 The same `common.l2.emit_schema(instance)` that powers L1 also powers
 L2 Flow Tracing — the per-instance prefixed PostgreSQL DDL produces
@@ -131,11 +131,11 @@ six check_types; the data populates per-instance.
 L1 and L2 Flow Tracing are sibling dashboards over one L2 instance,
 not layered ones. Per the M.2d.3 prefix-isolation pattern, they share
 the same `{{ l2_instance_name }}_*` matviews on the same Aurora schema and produce
-their dashboard IDs as `qs-gen-<l2_prefix>-l1-dashboard` and
-`qs-gen-<l2_prefix>-l2-flow-tracing` respectively — the prefix carries
-the L2 instance, so an integrator deploying both apps against the
-same L2 instance (the typical case) gets clean, non-colliding QS
-resource IDs.
+their dashboard IDs as `<deployment_name>-l1-dashboard` and
+`<deployment_name>-l2-flow-tracing` respectively — `cfg.deployment_name`
+namespaces both apps under one stable prefix, so an integrator deploying
+both apps against the same L2 instance (the typical case) gets clean,
+non-colliding QS resource IDs.
 
 The natural workflow: **L2 Flow Tracing first to confirm the L2
 declaration is alive**; **L1 second to confirm the postings are

@@ -28,13 +28,13 @@ from quicksight_gen.common.l2 import (
 )
 
 
-def _pipeline(yaml_text: str, tmp_path: Path):
+def _pipeline(yaml_text: str, tmp_path: Path, *, prefix: str):
     """load → validate → emit_schema; return (instance, sql) on success."""
     p = tmp_path / "inst.yaml"
     p.write_text(yaml_text)
     inst = load_instance(p)
     validate(inst)
-    sql = emit_schema(inst)
+    sql = emit_schema(inst, prefix=prefix)
     return inst, sql
 
 
@@ -44,7 +44,6 @@ def _pipeline(yaml_text: str, tmp_path: Path):
 def test_pipeline_singleton_account(tmp_path: Path) -> None:
     """One singleton Account with every optional field set."""
     inst, sql = _pipeline(dedent("""\
-        instance: t1
         accounts:
           - id: clearing-suspense
             name: Clearing Suspense
@@ -52,7 +51,7 @@ def test_pipeline_singleton_account(tmp_path: Path) -> None:
             scope: internal
             expected_eod_balance: 0
         rails: []
-        """), tmp_path)
+        """), tmp_path, prefix="t1")
     a = inst.accounts[0]
     assert a.id == "clearing-suspense"
     assert a.role == "ClearingSuspense"
@@ -63,7 +62,6 @@ def test_pipeline_singleton_account(tmp_path: Path) -> None:
 def test_pipeline_account_template(tmp_path: Path) -> None:
     """AccountTemplate + the singleton Account it parents under."""
     inst, sql = _pipeline(dedent("""\
-        instance: t2
         accounts:
           - id: gl-control
             role: ControlAccount
@@ -73,7 +71,7 @@ def test_pipeline_account_template(tmp_path: Path) -> None:
             scope: internal
             parent_role: ControlAccount
         rails: []
-        """), tmp_path)
+        """), tmp_path, prefix="t2")
     assert len(inst.account_templates) == 1
     assert inst.account_templates[0].role == "CustomerSubledger"
     assert inst.account_templates[0].parent_role == "ControlAccount"
@@ -82,7 +80,6 @@ def test_pipeline_account_template(tmp_path: Path) -> None:
 def test_pipeline_two_leg_standalone_rail(tmp_path: Path) -> None:
     """Standalone two-leg Rail with expected_net=0 and metadata keys."""
     inst, _ = _pipeline(dedent("""\
-        instance: t3
         accounts:
           - id: a-int
             role: InternalDDA
@@ -92,13 +89,12 @@ def test_pipeline_two_leg_standalone_rail(tmp_path: Path) -> None:
             scope: external
         rails:
           - name: ExternalRailInbound
-            transfer_type: ach
             source_role: ExternalCounterparty
             destination_role: InternalDDA
             expected_net: 0
             origin: ExternalForcePosted
             metadata_keys: [external_reference, originator_id]
-        """), tmp_path)
+        """), tmp_path, prefix="t3")
     rail = inst.rails[0]
     assert isinstance(rail, TwoLegRail)
     assert rail.metadata_keys == ("external_reference", "originator_id")
@@ -108,7 +104,6 @@ def test_pipeline_two_leg_standalone_rail(tmp_path: Path) -> None:
 def test_pipeline_single_leg_rail_in_transfer_template(tmp_path: Path) -> None:
     """Single-leg rail reconciled by being in a TransferTemplate.leg_rails."""
     inst, _ = _pipeline(dedent("""\
-        instance: t4
         accounts:
           - id: gl
             role: ControlAccount
@@ -119,19 +114,17 @@ def test_pipeline_single_leg_rail_in_transfer_template(tmp_path: Path) -> None:
             parent_role: ControlAccount
         rails:
           - name: SubledgerCharge
-            transfer_type: charge
             leg_role: CustomerSubledger
             leg_direction: Debit
             origin: InternalInitiated
             metadata_keys: [merchant_id, settlement_period]
         transfer_templates:
           - name: ChargeCycle
-            transfer_type: charge_cycle
             expected_net: 0
             transfer_key: [merchant_id, settlement_period]
             completion: business_day_end+3d
             leg_rails: [SubledgerCharge]
-        """), tmp_path)
+        """), tmp_path, prefix="t4")
     rail = inst.rails[0]
     assert isinstance(rail, SingleLegRail)
     assert rail.leg_direction == "Debit"
@@ -140,7 +133,6 @@ def test_pipeline_single_leg_rail_in_transfer_template(tmp_path: Path) -> None:
 def test_pipeline_single_leg_variable_direction_rail(tmp_path: Path) -> None:
     """Variable-direction closing leg of a TransferTemplate."""
     inst, _ = _pipeline(dedent("""\
-        instance: t5
         accounts:
           - id: gl
             role: MerchantLedger
@@ -151,25 +143,22 @@ def test_pipeline_single_leg_variable_direction_rail(tmp_path: Path) -> None:
             parent_role: MerchantLedger
         rails:
           - name: SubledgerCharge
-            transfer_type: charge
             leg_role: CustomerSubledger
             leg_direction: Debit
             origin: InternalInitiated
             metadata_keys: [merchant_id, settlement_period]
           - name: SettlementClose
-            transfer_type: settlement
             leg_role: MerchantLedger
             leg_direction: Variable
             origin: InternalInitiated
             metadata_keys: [merchant_id, settlement_period]
         transfer_templates:
           - name: MerchantSettlementCycle
-            transfer_type: settlement_cycle
             expected_net: 0
             transfer_key: [merchant_id, settlement_period]
             completion: month_end
             leg_rails: [SubledgerCharge, SettlementClose]
-        """), tmp_path)
+        """), tmp_path, prefix="t5")
     settlement = next(r for r in inst.rails if r.name == "SettlementClose")
     assert isinstance(settlement, SingleLegRail)
     assert settlement.leg_direction == "Variable"
@@ -178,7 +167,6 @@ def test_pipeline_single_leg_variable_direction_rail(tmp_path: Path) -> None:
 def test_pipeline_aggregating_rail(tmp_path: Path) -> None:
     """Aggregating two-leg rail with cadence + bundles_activity."""
     inst, _ = _pipeline(dedent("""\
-        instance: t6
         accounts:
           - id: north
             role: NorthPool
@@ -188,27 +176,25 @@ def test_pipeline_aggregating_rail(tmp_path: Path) -> None:
             scope: internal
         rails:
           - name: ChargeRail
-            transfer_type: charge
             leg_role: NorthPool
             leg_direction: Debit
             origin: InternalInitiated
             metadata_keys: []
           - name: PoolBalancingNorthToSouth
-            transfer_type: pool_balancing
             source_role: NorthPool
             destination_role: SouthPool
             expected_net: 0
             origin: InternalInitiated
             metadata_keys: [bundled_transfer_type, business_day]
             aggregating: true
-            bundles_activity: [ChargeRail, charge]
+            bundles_activity: [ChargeRail]
             cadence: intraday-2h
-        """), tmp_path)
+        """), tmp_path, prefix="t6")
     pool = next(r for r in inst.rails if r.name == "PoolBalancingNorthToSouth")
     assert isinstance(pool, TwoLegRail)
     assert pool.aggregating is True
     assert pool.cadence == "intraday-2h"
-    assert pool.bundles_activity == ("ChargeRail", "charge")
+    assert pool.bundles_activity == ("ChargeRail",)
 
 
 @pytest.mark.parametrize("completion_expr", [
@@ -222,7 +208,6 @@ def test_pipeline_transfer_template_each_completion_form(
 ) -> None:
     """Every CompletionExpression vocabulary form parses + validates."""
     inst, _ = _pipeline(dedent(f"""\
-        instance: t7
         accounts:
           - id: a
             role: A
@@ -233,19 +218,17 @@ def test_pipeline_transfer_template_each_completion_form(
             parent_role: A
         rails:
           - name: ChargeLeg
-            transfer_type: charge
             leg_role: CustomerSubledger
             leg_direction: Debit
             origin: InternalInitiated
             metadata_keys: [merchant_id, deadline]
         transfer_templates:
           - name: T
-            transfer_type: cycle
             expected_net: 0
             transfer_key: [merchant_id]
             completion: {completion_expr}
             leg_rails: [ChargeLeg]
-        """), tmp_path)
+        """), tmp_path, prefix="t7")
     assert inst.transfer_templates[0].completion == completion_expr
 
 
@@ -253,7 +236,6 @@ def test_pipeline_chain_xor_group(tmp_path: Path) -> None:
     """Z.A: a multi-children Chain row encodes XOR alternation —
     three children listed under one parent in a single row."""
     inst, _ = _pipeline(dedent("""\
-        instance: t8
         accounts:
           - id: m
             role: MerchantLedger
@@ -263,27 +245,23 @@ def test_pipeline_chain_xor_group(tmp_path: Path) -> None:
             scope: external
         rails:
           - name: SettlementClose
-            transfer_type: settlement
             leg_role: MerchantLedger
             leg_direction: Variable
             origin: InternalInitiated
             metadata_keys: [merchant_id]
           - name: PayoutACH
-            transfer_type: ach
             source_role: MerchantLedger
             destination_role: ExternalCounterparty
             expected_net: 0
             origin: InternalInitiated
             metadata_keys: [merchant_id]
           - name: PayoutVoucher
-            transfer_type: voucher
             source_role: MerchantLedger
             destination_role: ExternalCounterparty
             expected_net: 0
             origin: InternalInitiated
             metadata_keys: [merchant_id]
           - name: PayoutInternal
-            transfer_type: internal_transfer
             source_role: MerchantLedger
             destination_role: MerchantLedger
             expected_net: 0
@@ -291,7 +269,6 @@ def test_pipeline_chain_xor_group(tmp_path: Path) -> None:
             metadata_keys: [merchant_id]
         transfer_templates:
           - name: SettlementCycle
-            transfer_type: cycle
             expected_net: 0
             transfer_key: [merchant_id]
             completion: business_day_end
@@ -302,7 +279,7 @@ def test_pipeline_chain_xor_group(tmp_path: Path) -> None:
               - PayoutACH
               - PayoutVoucher
               - PayoutInternal
-        """), tmp_path)
+        """), tmp_path, prefix="t8")
     assert len(inst.chains) == 1
     chain = inst.chains[0]
     assert chain.parent == "SettlementCycle"
@@ -312,7 +289,6 @@ def test_pipeline_chain_xor_group(tmp_path: Path) -> None:
 def test_pipeline_chain_fan_out(tmp_path: Path) -> None:
     """Z.A: singleton-children Chain row = required parent→child link."""
     inst, _ = _pipeline(dedent("""\
-        instance: t9
         accounts:
           - id: pool
             role: Pool
@@ -322,14 +298,12 @@ def test_pipeline_chain_fan_out(tmp_path: Path) -> None:
             scope: external
         rails:
           - name: BatchInbound
-            transfer_type: batch
             source_role: ExternalCounterparty
             destination_role: Pool
             expected_net: 0
             origin: ExternalForcePosted
             metadata_keys: []
           - name: PerRecipientCredit
-            transfer_type: credit
             source_role: Pool
             destination_role: Pool
             expected_net: 0
@@ -339,16 +313,15 @@ def test_pipeline_chain_fan_out(tmp_path: Path) -> None:
           - parent: BatchInbound
             children:
               - PerRecipientCredit
-        """), tmp_path)
+        """), tmp_path, prefix="t9")
     chain = inst.chains[0]
     assert chain.children == ("PerRecipientCredit",)
     assert len(chain.children) == 1  # singleton = required semantics
 
 
 def test_pipeline_limit_schedule(tmp_path: Path) -> None:
-    """LimitSchedule with parent_role + transfer_type + cap."""
+    """LimitSchedule with parent_role + rail + cap."""
     inst, _ = _pipeline(dedent("""\
-        instance: t10
         accounts:
           - id: north
             role: NorthPool
@@ -358,9 +331,8 @@ def test_pipeline_limit_schedule(tmp_path: Path) -> None:
             scope: internal
             parent_role: NorthPool
         rails:
-          # R10: every LimitSchedule.transfer_type must match some Rail.
+          # R10: every LimitSchedule.rail must match some Rail.
           - name: ChildAch
-            transfer_type: ach
             origin: InternalInitiated
             leg_role: ChildPool
             leg_direction: Debit
@@ -368,16 +340,15 @@ def test_pipeline_limit_schedule(tmp_path: Path) -> None:
         transfer_templates:
           # S3: single-leg ChildAch needs reconciliation.
           - name: AchCycle
-            transfer_type: ach_cycle
             expected_net: 0
             transfer_key: [batch_id]
             completion: business_day_end
             leg_rails: [ChildAch]
         limit_schedules:
           - parent_role: NorthPool
-            transfer_type: ach
+            rail: ChildAch
             cap: 5000.00
-        """), tmp_path)
+        """), tmp_path, prefix="t10")
     ls = inst.limit_schedules[0]
     assert ls.parent_role == "NorthPool"
     assert ls.cap == 5000
@@ -399,7 +370,7 @@ def test_kitchen_sink_loads_validates_emits() -> None:
     """
     inst = load_instance(KITCHEN_YAML)
     validate(inst)
-    sql = emit_schema(inst)
+    sql = emit_schema(inst, prefix="kitchen")
     assert "CREATE TABLE kitchen_transactions" in sql
     assert "CREATE MATERIALIZED VIEW kitchen_current_transactions AS" in sql
 
@@ -424,7 +395,7 @@ def test_drift_matview_carries_v840_perf_indexes() -> None:
     indexes (``account_day``, ``role``) are also asserted so a
     refactor doesn't accidentally narrow the index footprint."""
     inst = load_instance(KITCHEN_YAML)
-    sql = emit_schema(inst)
+    sql = emit_schema(inst, prefix="kitchen")
     p = "kitchen"
 
     # Drift matview indexes — pre-v8.4.0 indexes still present.
@@ -478,7 +449,7 @@ def test_current_transactions_matview_carries_v856_perf_index() -> None:
     indexes are also re-asserted so a refactor doesn't accidentally
     narrow the index footprint."""
     inst = load_instance(KITCHEN_YAML)
-    sql = emit_schema(inst)
+    sql = emit_schema(inst, prefix="kitchen")
     p = "kitchen"
 
     # Pre-v8.5.6 indexes still present.
@@ -498,11 +469,11 @@ def test_current_transactions_matview_carries_v856_perf_index() -> None:
         f"CREATE INDEX idx_{p}_curr_tx_status "
         f"ON {p}_current_transactions (status);"
     ) in sql
-    # v8.5.6 — new date-leading composite for the transfer_type
-    # dropdown.
+    # v8.5.6 — new date-leading composite for the rail_name
+    # dropdown (formerly transfer_type pre-Z.B grammar collapse).
     assert (
-        f"CREATE INDEX idx_{p}_curr_tx_posting_transfer_type\n"
-        f"    ON {p}_current_transactions (posting, transfer_type);"
+        f"CREATE INDEX idx_{p}_curr_tx_posting_rail_name\n"
+        f"    ON {p}_current_transactions (posting, rail_name);"
     ) in sql
 
 
@@ -585,8 +556,6 @@ def test_pipeline_full_merchant_acquirer_end_to_end(tmp_path: Path) -> None:
     If this stops working, the SPEC's example needs updating too.
     """
     inst, sql = _pipeline(dedent("""\
-        instance: ex_acq
-
         accounts:
           - id: north-pool
             role: NorthPool
@@ -612,28 +581,24 @@ def test_pipeline_full_merchant_acquirer_end_to_end(tmp_path: Path) -> None:
 
         rails:
           - name: SubledgerCharge
-            transfer_type: charge
             leg_role: CustomerSubledger
             leg_direction: Debit
             origin: InternalInitiated
             metadata_keys: [merchant_id, customer_id, settlement_period, settlement_period_end]
 
           - name: SubledgerRefund
-            transfer_type: refund
             leg_role: CustomerSubledger
             leg_direction: Credit
             origin: InternalInitiated
             metadata_keys: [merchant_id, customer_id, settlement_period, settlement_period_end]
 
           - name: SettlementClose
-            transfer_type: settlement
             leg_role: MerchantLedger
             leg_direction: Variable
             origin: InternalInitiated
             metadata_keys: [merchant_id, settlement_period, settlement_period_end]
 
           - name: MerchantPayoutACH
-            transfer_type: ach
             source_role: MerchantLedger
             destination_role: ExternalCounterparty
             expected_net: 0
@@ -641,7 +606,6 @@ def test_pipeline_full_merchant_acquirer_end_to_end(tmp_path: Path) -> None:
             metadata_keys: [merchant_id, settlement_period]
 
           - name: PoolBalancingSouthToNorth
-            transfer_type: pool_balancing
             source_role: SouthPool
             destination_role: NorthPool
             expected_net: 0
@@ -653,7 +617,6 @@ def test_pipeline_full_merchant_acquirer_end_to_end(tmp_path: Path) -> None:
 
         transfer_templates:
           - name: MerchantSettlementCycle
-            transfer_type: settlement_cycle
             expected_net: 0
             transfer_key: [merchant_id, settlement_period]
             completion: metadata.settlement_period_end
@@ -666,9 +629,9 @@ def test_pipeline_full_merchant_acquirer_end_to_end(tmp_path: Path) -> None:
 
         limit_schedules:
           - parent_role: SouthPool
-            transfer_type: charge
+            rail: SubledgerCharge
             cap: 5000.00
-        """), tmp_path)
+        """), tmp_path, prefix="ex_acq")
 
     # Every primitive present
     assert len(inst.accounts) == 4

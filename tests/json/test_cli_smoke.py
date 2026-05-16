@@ -38,11 +38,15 @@ _SPEC_EXAMPLE = _FIXTURES / "spec_example.yaml"
 def min_config(tmp_path: Path) -> Path:
     """Minimal config.yaml — no demo_database_url; the ``apply``
     emit-only path doesn't need a DB. The four-app builders read
-    aws_account_id / aws_region / datasource_arn / dialect off cfg."""
+    aws_account_id / aws_region / deployment_name / db_table_prefix /
+    datasource_arn / dialect off cfg."""
     cfg = tmp_path / "config.yaml"
     cfg.write_text(
         "aws_account_id: '111122223333'\n"
         "aws_region: us-west-2\n"
+        # Z.C — required cfg fields.
+        "deployment_name: qsgen-cli-smoke\n"
+        "db_table_prefix: spec_example\n"
         "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
         ":datasource/ds\n"
     )

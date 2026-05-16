@@ -35,7 +35,9 @@ X.7 Cloud cost optimization
 - **Phase Y** (v8.8.0aN cumulative → v9.0.0 → v9.0.1) — SQL-level parameter pushdown: the QuickSight + self-hosted (App 2) renderers converged on one filter mechanism — `<<$paramName>>` / `{date_filter}` placeholders in the dataset CustomSql, substituted per-renderer (QS via `MappedDataSetParameters`; App 2 via `:param_<name>` binds). Analysis-level `FilterGroup`s deprecated for filter intent; calc fields that existed only to be filtered pushed down to real dataset columns. Date-pushdown perf: −15.3% rows on the wire / −8.5% query time overall, `l1-transactions` −92%. Built `./run_tests.sh` — the layered chain runner (`unit → db → app2 → deploy → api → browser`, variant matrix) CI now wraps (Y.2.gate). e2e clean on PG + SQLite + Oracle. Customer-facing artifacts (CLI / config.yaml / L2 YAML) unchanged — the major bump is the internal filter-architecture clean break. Full detail: `PLAN_ARCHIVE.md` `# PLAN — Phase Y` + `# PLAN — Y.2.gate`.
 - **Phase X.2** (v9.0.2 → v9.0.3 → v9.1.0 → v9.2.0 → v9.3.0 cumulative) — App 2: the four apps render two ways off one L2 instance — AWS QuickSight (the stable `json apply` path) and a self-hosted HTMX/d3 page server (`quicksight-gen serve app2 apply`) reading the same DB directly (no AWS account; all three SQL dialects; offline-capable — browser-side assets vendored in the wheel; `/docs` handbook embedded). Built on Phase Y's shared dataset SQL; a 4-way cross-tool agreement test (`scenario plants ⊆ direct matview SELECT == QuickSight == App 2`, `== audit PDF` where it applies) gates the release. Dialect-aware `DashboardDriver` e2e protocol with parametrized `[qs, app2]` bodies; L2-theme-driven Tailwind + Tom Select / Flatpickr / noUiSlider widgets; vendored offline asset bundle; row-level table drills + cross-sheet URL-param threading; `biome check` folded into the pytest sessionstart gate. No customer-facing change (the `serve` group is a dev/iteration surface, not the stable CLI). Full detail: `PLAN_ARCHIVE.md` `# PLAN — Phase X.2`.
 
-_Phase S / T / U / V / W / Y / X.2 sub-task detail in `PLAN_ARCHIVE.md`. RELEASE_NOTES `v8.{1,2,3,4,5,6,8}.x` / `v9.x` carry the per-phase + per-release narratives._
+- **Phase Z** (next release — branch `phase-z-b`) — L2 grammar cleanup: chain collapse + transfer_type subsumption + cfg deployment-namespace collapse. Z.A: `Chain(parent, children: tuple[Identifier, ...])` — singleton ⇒ required, multi ⇒ XOR (drops `ChainEntry`'s `required` / `xor_group` flags + 3 validators C2/C4/C4.1). Z.B: drop `Rail.transfer_type` + `TransferTemplate.transfer_type` + `<prefix>_transactions.transfer_type` column; rename `LimitSchedule.transfer_type` → `LimitSchedule.rail` (closes pending task #498). Z.C: collapse `cfg.resource_prefix` + `cfg.l2_instance_prefix` + `l2.instance` into two cfg fields `cfg.deployment_name` (QS resource ID prefix, required) + `cfg.db_table_prefix` (DB-table prefix, required); cleanup tag pair `ResourcePrefix` + `L2Instance` collapses to single `Deployment`; L2 yaml's `instance:` field dropped entirely (loader hard-rejects with actionable migration error). End-of-phase verify: 11/11 deterministic db-matrix cells green across sp/sq × pg/or/sl × lo + sp/sq × pg/or × aw; 3 fuzz cells failed on a known fuzz-shape instability (todays_exceptions matview empty for seed 3313442831 — tracked as a fuzz-contract follow-up, not a Z regression). Full detail: `PLAN_ARCHIVE.md` `# PLAN — Phase Z`.
+
+_Phase S / T / U / V / W / Y / X.2 / Z sub-task detail in `PLAN_ARCHIVE.md`. RELEASE_NOTES `v8.{1,2,3,4,5,6,8}.x` / `v9.x` carry the per-phase + per-release narratives._
 
 ---
 
@@ -445,99 +447,9 @@ Two open high-severity Dependabot alerts on default branch (2026-05-15), both ur
 
 ---
 
-## Phase Z — L2 grammar cleanup: chain collapse + transfer_type subsumption
+## Phase Z — L2 grammar cleanup *(COMPLETE — chain collapse + transfer_type subsumption + cfg deployment-namespace collapse; full plan archived in `PLAN_ARCHIVE.md` → "Phase Z")*
 
-Two distinct grammar reshapes that share the migration cost (fixture rewrites + seed re-lock + editor UI + docs sweep), bundled here so the operator yaml grammar settles in one motion before the next public release.
-
-**Sequencing — Z is a P.10 prerequisite, NOT an X.4 prerequisite (locked 2026-05-13).** X.4 (studio editor) and ETL/Training work proceed first on the current grammar; Phase Z lands immediately before P.10 cuts. Bounded rework when Z lands: ~half-day on the studio editor's chain card UI (replace per-row `required` / `xor_group` form fields with a children-checkbox-group), ~30 min dropping the rail card's `transfer_type` field + renaming the LimitSchedule card's `transfer_type` field to `rail`, ~hour on `topology.py::_chain_label` + chain-edge metadata. Everything else in X.4 is grammar-agnostic. The P.10 gate is hard because once a tagged release ships the old `chains:` shape, migrating customer yamls becomes a versioning headache.
-
-### Z.A — Chain grammar collapse (singleton = required, multi = XOR)
-
-Surfaced 2026-05-13 during the `X.4.f.10.followup` C4.1 validator add (the "required + xor_group on the same row is a contradiction" rule). The user noticed a deeper redundancy: today's `ChainEntry(parent, child, required, xor_group)` encodes firing semantics across **two flags** that always contradict in one combination (C4.1 just rejected it) and overlap in another (a `required=true` child is structurally a singleton xor_group). The cleaner shape is **`Chain(parent, children: tuple[Identifier, ...])`** — list cardinality carries the entire firing semantic: **singleton ⇒ required, multi ⇒ XOR**. The xor_group **name** was never load-bearing — it only grouped rows by string match; the list IS the group.
-
-**Why now (vs deferring):** the X.4.f studio editor just shipped with row-per-link chain UI (X.4.f.10), and P.10 is the next public release. Once a published version carries the `chains:` row-per-link grammar, migrating the yaml shape becomes a versioning headache (operator yaml files in the wild). Cleaning the grammar before P.10 ships avoids that.
-
-**Why this isn't TransferTemplate's problem:** TransferTemplate's `leg_rails` is composition (all legs fire as one Transfer). Chain's `children` is a firing rule (singleton fires or one-of-N fires). Same list-of-identifiers shape, opposite semantics. They coexist; a Chain with `children=[some_template]` still atomically fires the named template.
-
-**What disappears (the payoff):**
-- C2 (`xor_group members share parent`) — impossible to violate; every Chain row IS one parent.
-- C4 (`xor_group ≥ 2 members`) — gone; singleton means "required", not "degenerate XOR".
-- C4.1 (`required + xor_group contradict`) — unrepresentable in the new shape.
-- The `xor_group: <name>` field on ChainEntry + the dedupe-by-name code in 5+ call sites.
-- Studio editor's `_html_id_slug` `parent::child` composite + the per-row required/xor_group form fields.
-
-**What needs adding:**
-- New uniqueness rule: "no child appears in two Chain rows for the same parent" (catches the previously-unrepresentable "required AND in xor_group" overlap).
-
-- [ ] **Z.1 — Per-child descriptions: dropped (locked 2026-05-13).** sasquatch_pr's 6 chain rows each carry a per-child description ("ACH payout option in the PayoutVehicle XOR group" vs "Wire payout option ..." vs "Paper-check payout option ..."), but each child IS a Rail or TransferTemplate that carries its own `description` field. The per-child copy in chain rows was re-narrating the rail — copy-pasta, not load-bearing. New shape carries **one `Chain.description` per firing rule** that describes the rule itself ("PayoutVehicle: exactly one settlement vehicle fires per merchant payout cycle"), and per-child copy moves into (or stays in) the rail's own `description`. No sub-primitive needed.
-- [ ] **Z.2 — `primitives.py`: replace `ChainEntry` with `Chain`.** Drop `child` / `required` / `xor_group`; add `children: tuple[Identifier, ...]`. Keep `parent`, `description`. The `chains: tuple[ChainEntry, ...]` field on `L2Instance` becomes `chains: tuple[Chain, ...]`.
-- [ ] **Z.3 — `loader.py`: rewrite `_load_chain_entry` → `_load_chain`.** New yaml grammar:
-  ```yaml
-  chains:
-    - parent: ACHOriginationDailySweep
-      children: [ConcentrationToFRBSweep]   # singleton = required
-      description: |
-        Required: every daily ACH origination sweep should be followed by …
-    - parent: MerchantSettlementCycle
-      children: [MerchantPayoutACH, MerchantPayoutWire, MerchantPayoutCheck]  # multi = XOR
-      description: |
-        PayoutVehicle: exactly one settlement vehicle fires per merchant payout cycle.
-  ```
-  Pyright-strict on the loader path; reject legacy keys (`required` / `xor_group` / `child`) with an actionable error pointing at this section.
-- [ ] **Z.4 — `validate.py`: drop C2 / C4 / C4.1; rewrite C5; add new uniqueness rule.** C5 becomes "every chain parent has ≥1 chain row whose children list is non-empty" (the only remaining failure mode). New rule (call it C6): "for any given parent, no child appears in two Chain rows."
-- [ ] **Z.5 — `serializer.py`: rewrite `_dump_chain_entry` → `_dump_chain`.** Round-trip stable for the new grammar.
-- [ ] **Z.6 — `editor.py`: rewrite `mutate` / `delete` / `rename` / `create_l2_entity` for Chain.** The composite-key addressing (`parent::child`) goes away — Chain rows now address by `parent::<position>` or `parent::<children-csv>` (pick the cleaner one). `rename_identifier` walks `Chain.parent` + each `Chain.children[i]` (or `Chain.children[i].name` for Option A).
-- [ ] **Z.7 — `seed.py`: chain firings (R.2.d) read the new shape.** `len(children) == 1` ⇒ that child fires; `len(children) > 1` ⇒ deterministic-pick from the list (use the same RNG as today's xor_group resolution).
-- [ ] **Z.8 — `auto_scenario.py` + `derived.py` + `topology.py`: update chain consumers.** Topology's per-edge `chain_metadata` ("required: true" / "xor_group: PayoutVehicle") becomes ("required: true" if singleton else "xor_group: <position>" or just rendered as "exactly one of N").
-- [ ] **Z.9 — `fuzz.py`: rewrite chain emit.** Drop `xor_group` name invention; emit `Chain(parent, children=[c1])` for required, `Chain(parent, children=[c1, c2, ...])` for XOR. Drop the "every parent gets a required-or-xor child" coverage logic (now implicit — a Chain row IS a firing rule).
-- [ ] **Z.10 — Studio editor (X.4.f.10) chain UI rewrite.** Per-row form: parent dropdown + children checkbox-group (sources from rails+templates, same as TransferTemplate.leg_rails). The `_html_id_slug` for `parent::child` composite goes away; new id is `parent::<row-index>` or `parent::<sorted-children-hash>`. Drop the per-row `required` / `xor_group` form fields entirely.
-- [ ] **Z.11 — Migrate fixture yamls** (`tests/l2/{sasquatch_pr, spec_example, _kitchen}.yaml` + `tests/l2/fuzz_failures/*.yaml`). Mechanical translation: group rows by `(parent, xor_group)` → one new Chain row each; preserve descriptions per Z.1 choice.
-- [ ] **Z.12 — Rewrite chain tests.** `test_l2_validate.py` (drop C2/C4/C4.1 tests, add C6 test); `test_l2_loader.py` (new grammar fixtures); `test_l2_pr_primitives.py`; `test_l2_editor.py`; `test_studio_editor_routes.py` (chain composite-id swap); `test_studio_home_route.py` (chain entity-card shape changes).
-- [ ] **Z.13 — SPEC + Schema_v6 + walkthroughs prose.** Update the chain section of `docs/Schema_v6.md`; update any handbook walkthrough that mentions `xor_group` by name.
-- [ ] **Z.14 — Re-lock seeds.** Chain firing-rule iteration order may shift baseline seed bytes — re-lock spec_example + sasquatch_pr per-dialect (`quicksight-gen data lock -c run/config.<pg|oracle|sqlite>.yaml --l2 …`). If unchanged, byte-equality test passes; if changed, document the shift in the commit message. (Verify + commit moves to Z.C.)
-- [x] **Z.A.f1 — Studio chain create/edit form rewrite.** `_CHAIN_FIELDS` carries `parent` (single-select) + `children` (multi_select via rails_or_templates) + `description` only — `child` / `required` / `xor_group` form fields removed. `_post_mutate_entity_id` rebuilds the composite from `parent::sorted-children-csv`. `_coerce_field`'s `required` boolean coercion arm + `child` / `xor_group` identifier-coercion arms dropped. The 2 unit tests skipped during the Z.6 cascade (`test_chain_create_form_renders_parent_child_dropdowns`, `test_put_chain_edit_renders_card_after_save`) are re-enabled and asserting the new form shape. Pyright back to its pre-edit 6-error baseline.
-- [x] **Z.A.f2 — Doc prose sweep.** Stale `xor_group` / `required: true` / `optional` chain language updated in `handbook/l2_flow_tracing.md`, `handbook/seed-generator.md`, `scenario/index.md`, `concepts/l2/index.md`, `SPEC.md` §1003 (PostedRequirements). User's local `run/sasquatch_pr.yaml` carried legacy chain shape → migrated inline to match the bundled fixture. `mkdocs build --strict` clean.
-
-### Z.B — Subsume transfer_type into rail (drop the redundant L1 axis)
-
-**Replaces the previous Z.B "promote transfer_type to first-class entity" direction (locked 2026-05-13 → unlocked + redesigned 2026-05-15 after real-world integrator audit).** The promotion direction was scoped on the assumption that `Rail.transfer_type` and `Rail.name` carry distinct semantic load — a stable L1 vocabulary distinct from L2-specific names. Real-world audit reversed that:
-
-- **transfer_type ↔ rail name is always 1-1 in practice.** Integrators dutifully invent both strings per rail, near-identical, and the type axis carries no information rail name doesn't. sasquatch_pr's shared-type pattern (e.g. `internal` shared by ZBASweep + InternalTransferSuspenseClose; `settlement` shared by ACHOriginationDailySweep + CustomerFeeMonthlySettlement) was a fixture artifact that doesn't reflect real-world idiom.
-- **The "L1 universality" framing was already conceded in implementation.** `<prefix>_transactions.rail_name` is REQUIRED on every leg (per `schema.py:924` doc comment) and `template_name` is also persisted. The "L1 has no L2 references" purity was never achieved at the data layer; `transfer_type` ended up as a *redundant* column alongside `rail_name`.
-- **Templated-leg footgun.** A leg rail inside a TransferTemplate fires Transactions whose `transfer_type` carries the *template's* type, not the leg rail's. So `LimitSchedule on transfer_type: <leg_rail_type>` doesn't fire for templated transactions. BundleSelector's "TransferType form vs RailName form" duality reveals this — they behave differently for templated rails because they're identifiers at different granularities. **The collapse fixes this implicitly**: LimitSchedule keys on `rail_name` (which IS the leg rail's name on leg-transactions, per existing emit semantics), so the cap fires correctly for templated legs.
-- **Integrator confusion is the trigger.** The user's stated pain ("hard time explaining the difference between Rail.name and Rail.transfer_type to people") is the design signal that the duality has no payoff matching its cognitive cost.
-
-**The collapse:** drop `Rail.transfer_type` field, drop `<prefix>_transactions.transfer_type` column, rename `LimitSchedule.transfer_type` → `LimitSchedule.rail`, simplify validator + bundles_activity to single-resolution, simplify auto_scenario's plant constructors. `rail_name` stays the canonical "what kind of money movement" identifier — already a required column, already the rail-side entity name, already what every dashboard groups by.
-
-**What disappears (the payoff):**
-- `Rail.transfer_type` field on the primitive.
-- `<prefix>_transactions.transfer_type` column + `idx_{p}_curr_tx_posting_transfer_type` index.
-- Validator U6 (`Rail` per-leg `(transfer_type, role)` uniqueness — degenerate after collapse since rail name is already globally unique).
-- Validator R10 (`LimitSchedule.transfer_type` matches some `Rail.transfer_type` — folds into U5's rail-name match).
-- bundles_activity's "matches `Rail.name` OR `Rail.transfer_type`" OR-of-two-resolutions (now just rail name; the cleanup the previous Z.B explicitly punted is now free).
-- `(TransferType, Role)` discriminator dance in M.3.13 / SPEC theorems — Transaction has `rail_name` directly.
-- Per-leg `transfer_type` ambiguity for templated legs (implicit fix).
-
-**What needs adding:** nothing. Pure deletion + one rename. Closes pending task #498 (LimitSchedule uniqueness on `(parent_role, transfer_type)`) trivially — becomes `(parent_role, rail)`.
-
-- [ ] **Z.B.1 — `primitives.py`: drop `Rail.transfer_type`. Rename `LimitSchedule.transfer_type` → `LimitSchedule.rail`** (typed `RailName` NewType, matching the existing rail-name vocabulary). Keep `Rail.name` as the sole identifier.
-- [ ] **Z.B.2 — `loader.py`: reject legacy keys with actionable error.** Reject `transfer_type:` on Rail (legacy field gone) and `transfer_type:` on LimitSchedule (renamed to `rail:`) — surface `L2ValidationError` pointing at this PLAN section. Same actionable-error pattern as Z.A.3.
-- [ ] **Z.B.3 — `validate.py`: drop U6 + R10; rewrite U5; simplify R7.** U5 becomes `(parent_role, rail)` pair uniqueness on LimitSchedule. U6 (`Rail` per-leg `(transfer_type, role)`) is degenerate post-collapse — drop. R10 (LimitSchedule transfer_type matches some Rail's transfer_type) becomes "LimitSchedule.rail matches some Rail.name" — strictly simpler. R7 (bundles_activity matches Rail.name OR Rail.transfer_type) drops the OR-of-two leg.
-- [ ] **Z.B.4 — `schema.py`: drop `transfer_type` column + index from `<prefix>_transactions` + `<prefix>_current_transactions`.** The column at `schema.py:201`, the index `idx_{p}_curr_tx_posting_transfer_type` at line 409. Rewrite the LimitSchedule cap-view emit (line 506) to filter `tx.rail_name = '{ls.rail}'` instead of `tx.transfer_type = '{ls.transfer_type}'`. Sweep any other matview / dataset SQL that reads `transfer_type` (per `grep transfer_type src/quicksight_gen/`) → rewrite to read `rail_name`.
-- [ ] **Z.B.5 — `seed.py` + `auto_scenario.py`: drop `transfer_type=...` from plant constructors.** The ~15 sites in `auto_scenario.py` constructing planted Transactions / Rails with `transfer_type=p.transfer_type` lose that argument; the constructed Transaction's `rail_name` already carries the identification. The seed emitter (`seed.py`) drops the `transfer_type` column from its INSERT statement.
-- [ ] **Z.B.6 — `serializer.py`: drop `transfer_type:` dump on Rail; rename to `rail:` on LimitSchedule.** Symmetric with Z.B.2 loader; round-trip stable for spec_example + sasquatch_pr.
-- [ ] **Z.B.7 — `editor.py` + studio editor cards.** Rail card: drop the `transfer_type` field row entirely. LimitSchedule card: rename the field display from `transfer_type` → `rail`, keep the dropdown (was probably already sourcing from declared rails).
-- [ ] **Z.B.8 — `fuzz.py`: drop `transfer_type` invention.** Rails generated by the fuzzer no longer pick a `transfer_type:` per rail. LimitSchedules reference rail names directly.
-- [ ] **Z.B.9 — Migrate fixture yamls.** Mechanical: drop `transfer_type:` line from every Rail in `tests/l2/{sasquatch_pr, spec_example, _kitchen}.yaml` + `tests/l2/fuzz_failures/*`; rename `transfer_type:` → `rail:` on every LimitSchedule. Audit `bundles_activity:` strings — anything that today resolves via the OR-of-two transfer_type leg (rather than rail name) needs the matching rail name substituted in. Likely zero in practice (per the 1-1 audit), verify per fixture.
-- [ ] **Z.B.10 — Tests update.** `test_l2_validate.py` (drop U6 + R10 tests; update U5 + R7); `test_l2_loader.py` (drop transfer_type fixtures, add legacy-key rejection tests); `test_l2_pr_primitives.py`; `test_l2_editor.py`; `test_studio_editor_routes.py` (Rail card drops transfer_type field; LimitSchedule card field rename).
-- [ ] **Z.B.11 — SPEC + Schema_v6 + handbook prose.** Drop the transfer_type vocabulary section entirely from `docs/Schema_v6.md` (was net-add in Z.B.original; now net-remove). Update SPEC L1 theorems that reference `transfer_type` to reference `rail_name`. The "name vs type" distinction handbook section the Z.B.original would have authored becomes a "rail name is the identifier" callout instead.
-- [ ] **Z.B.12 — Drop degenerate `transfer_type` filter controls in dashboards.** Under collapse, a `transfer_type` ParameterDropDown is fully redundant with a `rail_name` dropdown — same selectable values, same narrowing semantic. Sweep `apps/l1_dashboard/`, `apps/l2_flow_tracing/`, `apps/investigation/` for ParameterDropDownControls bound to a `pTransferType` (or similar) parameter and either drop them entirely or merge into the rail_name dropdown. Touches dataset SQL too — `WHERE transfer_type IN (<<$pTransferType>>)` clauses get dropped or rewritten as `rail_name`. Coordinate with AA.A so we don't touch the same control twice (Z.B.12 lands first; AA.A doesn't see those dropdowns).
-- [ ] **Z.B.13 — Re-lock seeds (folds into Z.C).** Column drop changes seed bytes (every transactions INSERT loses one column). Re-lock spec_example + sasquatch_pr per-dialect via `quicksight-gen data lock -c run/config.<pg|oracle|sqlite>.yaml --l2 …`.
-
-### Z.C — End-of-phase
-
-- [ ] **Z.C.1 — Verify (unit + db layer + AW probe).** Subsumes Z.15; runs after both Z.A and Z.B land. Same matrix as Z.15.
-- [ ] **Z.C.2 — Commit, tick PLAN, push.** ci.yml runs the full chain. Plan archive sweep + summary line.
+Z.A (Chain grammar collapse: singleton ⇒ required, multi ⇒ XOR) + Z.B (subsume transfer_type into rail) + Z.C (collapse `resource_prefix` + `l2_instance_prefix` + `l2.instance` into `cfg.deployment_name` + `cfg.db_table_prefix`) shipped together as one grammar settle. End-of-phase verify: 11/11 deterministic db-matrix cells green (sp/sq × pg/or/sl × lo + sp/sq × pg/or × aw); 3 fuzz cells failed on a known fuzz-shape instability (todays_exceptions matview empty for seed 3313442831 — NOT a Z regression; tracked as a fuzz-contract follow-up).
 
 ---
 

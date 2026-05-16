@@ -50,6 +50,8 @@ def min_config(tmp_path: Path) -> Path:
     cfg.write_text(
         "aws_account_id: '111122223333'\n"
         "aws_region: us-west-2\n"
+        "deployment_name: qsgen-test\n"
+        "db_table_prefix: spec_example\n"
         "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
         ":datasource/ds\n"
     )

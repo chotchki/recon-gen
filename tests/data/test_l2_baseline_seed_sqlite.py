@@ -40,6 +40,11 @@ from quicksight_gen.common.sql import Dialect
 
 _SPEC_EXAMPLE = Path(__file__).parent.parent / "l2" / "spec_example.yaml"
 _SASQUATCH_PR = Path(__file__).parent.parent / "l2" / "sasquatch_pr.yaml"
+# Z.C — db_table_prefix is now a cfg.yaml field (was ``L2Instance.instance``).
+# Tests pin the per-fixture prefix here so per-prefix table-name assertions
+# stay valid.
+_SPEC_EXAMPLE_PREFIX = "spec_example"
+_SASQUATCH_PR_PREFIX = "sasquatch_pr"
 _ANCHOR = date(2026, 4, 30)
 
 
@@ -137,7 +142,9 @@ class TestEmitTruncateSqlSqlite:
 
     def test_uses_delete_not_truncate(self) -> None:
         instance = load_instance(_SPEC_EXAMPLE)
-        sql = emit_truncate_sql(instance, dialect=Dialect.SQLITE)
+        sql = emit_truncate_sql(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
+        )
         # No TRUNCATE statement (the word may appear in the comment
         # header, hence the keyword form).
         assert "TRUNCATE TABLE" not in sql
@@ -148,7 +155,9 @@ class TestEmitTruncateSqlSqlite:
         # The DELETE FROM sqlite_sequence call mirrors PG's
         # RESTART IDENTITY semantic — the next INSERT starts at entry=1.
         instance = load_instance(_SPEC_EXAMPLE)
-        sql = emit_truncate_sql(instance, dialect=Dialect.SQLITE)
+        sql = emit_truncate_sql(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
+        )
         assert "sqlite_sequence" in sql
         assert "spec_example_transactions" in sql
         assert "spec_example_daily_balances" in sql
@@ -161,12 +170,16 @@ class TestEmitTruncateSqlSqlite:
         # Apply schema — no rows yet.
         cur = conn.cursor()
         execute_script(
-            cur, emit_schema(instance, dialect=Dialect.SQLITE),
+            cur, emit_schema(
+                instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
+            ),
             dialect=Dialect.SQLITE,
         )
         # Wipe.
         execute_script(
-            cur, emit_truncate_sql(instance, dialect=Dialect.SQLITE),
+            cur, emit_truncate_sql(
+                instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
+            ),
             dialect=Dialect.SQLITE,
         )
         # Tables still exist; just empty.
@@ -193,11 +206,14 @@ class TestSeedEndToEndSqlite:
         conn = _open_sqlite()
         cur = conn.cursor()
         execute_script(
-            cur, emit_schema(instance, dialect=Dialect.SQLITE),
+            cur, emit_schema(
+                instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
+            ),
             dialect=Dialect.SQLITE,
         )
         seed_sql = emit_full_seed(
-            instance, scenario, anchor=_ANCHOR, dialect=Dialect.SQLITE,
+            instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
+            anchor=_ANCHOR, dialect=Dialect.SQLITE,
         )
         execute_script(cur, seed_sql, dialect=Dialect.SQLITE)
         # Schema-then-seed lands without error; both base tables have
@@ -224,11 +240,14 @@ class TestSeedEndToEndSqlite:
         conn = _open_sqlite()
         cur = conn.cursor()
         execute_script(
-            cur, emit_schema(instance, dialect=Dialect.SQLITE),
+            cur, emit_schema(
+                instance, prefix=_SASQUATCH_PR_PREFIX, dialect=Dialect.SQLITE,
+            ),
             dialect=Dialect.SQLITE,
         )
         seed_sql = emit_full_seed(
-            instance, scenario, anchor=_ANCHOR, dialect=Dialect.SQLITE,
+            instance, scenario, prefix=_SASQUATCH_PR_PREFIX,
+            anchor=_ANCHOR, dialect=Dialect.SQLITE,
         )
         execute_script(cur, seed_sql, dialect=Dialect.SQLITE)
         n_tx = cur.execute(
@@ -237,8 +256,10 @@ class TestSeedEndToEndSqlite:
         n_db = cur.execute(
             "SELECT COUNT(*) FROM sasquatch_pr_daily_balances",
         ).fetchone()[0]
-        # Per test_l2_baseline_seed.py expectations: 30k-100k tx,
-        # 1k-5k daily_balances. SQLite stores the same row counts.
+        # Restored to 30k lower bound after Z.C.7 follow-on rewired
+        # ``seed.py::_classify_rail`` to substring-match the post-Z.B
+        # CamelCase rail names (`CustomerInboundACH` etc.) instead of
+        # the legacy snake_case tokens (`ach_inbound`).
         assert 30_000 <= n_tx <= 200_000, (
             f"sasquatch_pr transactions: expected 30k-200k, got {n_tx}"
         )
@@ -255,11 +276,14 @@ class TestSeedEndToEndSqlite:
         conn = _open_sqlite()
         cur = conn.cursor()
         execute_script(
-            cur, emit_schema(instance, dialect=Dialect.SQLITE),
+            cur, emit_schema(
+                instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
+            ),
             dialect=Dialect.SQLITE,
         )
         seed_sql = emit_full_seed(
-            instance, scenario, anchor=_ANCHOR, dialect=Dialect.SQLITE,
+            instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
+            anchor=_ANCHOR, dialect=Dialect.SQLITE,
         )
         # If any metadata cell were invalid JSON, this would raise
         # IntegrityError on at least one INSERT.
@@ -283,11 +307,14 @@ class TestSeedEndToEndSqlite:
         conn = _open_sqlite()
         cur = conn.cursor()
         execute_script(
-            cur, emit_schema(instance, dialect=Dialect.SQLITE),
+            cur, emit_schema(
+                instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
+            ),
             dialect=Dialect.SQLITE,
         )
         seed_sql = emit_full_seed(
-            instance, scenario, anchor=_ANCHOR, dialect=Dialect.SQLITE,
+            instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
+            anchor=_ANCHOR, dialect=Dialect.SQLITE,
         )
         execute_script(cur, seed_sql, dialect=Dialect.SQLITE)
         n1 = cur.execute(
@@ -295,7 +322,9 @@ class TestSeedEndToEndSqlite:
         ).fetchone()[0]
 
         execute_script(
-            cur, emit_truncate_sql(instance, dialect=Dialect.SQLITE),
+            cur, emit_truncate_sql(
+                instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
+            ),
             dialect=Dialect.SQLITE,
         )
         n_wiped = cur.execute(
@@ -322,18 +351,26 @@ class TestSeedDeterminismSqlite:
 
     def test_baseline_byte_stable(self) -> None:
         instance = load_instance(_SPEC_EXAMPLE)
-        a = emit_baseline_seed(instance, anchor=_ANCHOR, dialect=Dialect.SQLITE)
-        b = emit_baseline_seed(instance, anchor=_ANCHOR, dialect=Dialect.SQLITE)
+        a = emit_baseline_seed(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX,
+            anchor=_ANCHOR, dialect=Dialect.SQLITE,
+        )
+        b = emit_baseline_seed(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX,
+            anchor=_ANCHOR, dialect=Dialect.SQLITE,
+        )
         assert a == b
 
     def test_full_seed_byte_stable(self) -> None:
         instance = load_instance(_SPEC_EXAMPLE)
         scenario = default_scenario_for(instance, today=_ANCHOR).scenario
         a = emit_full_seed(
-            instance, scenario, anchor=_ANCHOR, dialect=Dialect.SQLITE,
+            instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
+            anchor=_ANCHOR, dialect=Dialect.SQLITE,
         )
         b = emit_full_seed(
-            instance, scenario, anchor=_ANCHOR, dialect=Dialect.SQLITE,
+            instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
+            anchor=_ANCHOR, dialect=Dialect.SQLITE,
         )
         assert a == b
 
@@ -352,10 +389,12 @@ class TestRowCountParityAcrossDialects:
         instance = load_instance(_SPEC_EXAMPLE)
         scenario = default_scenario_for(instance, today=_ANCHOR).scenario
         pg_sql = emit_full_seed(
-            instance, scenario, anchor=_ANCHOR, dialect=Dialect.POSTGRES,
+            instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
+            anchor=_ANCHOR, dialect=Dialect.POSTGRES,
         )
         sqlite_sql = emit_full_seed(
-            instance, scenario, anchor=_ANCHOR, dialect=Dialect.SQLITE,
+            instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
+            anchor=_ANCHOR, dialect=Dialect.SQLITE,
         )
         pg_n = pg_sql.count("INSERT INTO spec_example_transactions")
         sqlite_n = sqlite_sql.count("INSERT INTO spec_example_transactions")
@@ -367,10 +406,12 @@ class TestRowCountParityAcrossDialects:
         instance = load_instance(_SPEC_EXAMPLE)
         scenario = default_scenario_for(instance, today=_ANCHOR).scenario
         pg_sql = emit_full_seed(
-            instance, scenario, anchor=_ANCHOR, dialect=Dialect.POSTGRES,
+            instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
+            anchor=_ANCHOR, dialect=Dialect.POSTGRES,
         )
         sqlite_sql = emit_full_seed(
-            instance, scenario, anchor=_ANCHOR, dialect=Dialect.SQLITE,
+            instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
+            anchor=_ANCHOR, dialect=Dialect.SQLITE,
         )
         pg_n = pg_sql.count("INSERT INTO spec_example_daily_balances")
         sqlite_n = sqlite_sql.count(
@@ -398,20 +439,25 @@ class TestMatviewRefreshSqlite:
         cur = conn.cursor()
         # Schema.
         execute_script(
-            cur, emit_schema(instance, dialect=Dialect.SQLITE),
+            cur, emit_schema(
+                instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
+            ),
             dialect=Dialect.SQLITE,
         )
         # Seed.
         execute_script(
             cur,
             emit_full_seed(
-                instance, scenario, anchor=_ANCHOR, dialect=Dialect.SQLITE,
+                instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
+                anchor=_ANCHOR, dialect=Dialect.SQLITE,
             ),
             dialect=Dialect.SQLITE,
         )
         # Refresh — drops + re-creates every matview-as-table.
         execute_script(
-            cur, refresh_matviews_sql(instance, dialect=Dialect.SQLITE),
+            cur, refresh_matviews_sql(
+                instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
+            ),
             dialect=Dialect.SQLITE,
         )
         # Current* matviews carry the max-Entry-per-(id) projection of
@@ -450,25 +496,32 @@ class TestMatviewRefreshSqlite:
         conn = _open_sqlite()
         cur = conn.cursor()
         execute_script(
-            cur, emit_schema(instance, dialect=Dialect.SQLITE),
+            cur, emit_schema(
+                instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
+            ),
             dialect=Dialect.SQLITE,
         )
         execute_script(
             cur,
             emit_full_seed(
-                instance, scenario, anchor=_ANCHOR, dialect=Dialect.SQLITE,
+                instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
+                anchor=_ANCHOR, dialect=Dialect.SQLITE,
             ),
             dialect=Dialect.SQLITE,
         )
         execute_script(
-            cur, refresh_matviews_sql(instance, dialect=Dialect.SQLITE),
+            cur, refresh_matviews_sql(
+                instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
+            ),
             dialect=Dialect.SQLITE,
         )
         n_curr_a = cur.execute(
             "SELECT COUNT(*) FROM spec_example_current_transactions",
         ).fetchone()[0]
         execute_script(
-            cur, refresh_matviews_sql(instance, dialect=Dialect.SQLITE),
+            cur, refresh_matviews_sql(
+                instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
+            ),
             dialect=Dialect.SQLITE,
         )
         n_curr_b = cur.execute(

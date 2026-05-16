@@ -35,7 +35,7 @@ the top.
   check kind. Spikes in one kind point at a recurring error class
   to investigate first.
 - **Exception Detail** (Table) — every violation on today, sorted
-  by magnitude DESC. `transfer_type` and `account_parent_role` are
+  by magnitude DESC. `rail_name` and `account_parent_role` are
   NULL for branches that don't carry them.
 - **Institution Context** (TextBox) — footer with the L2 instance's
   top-level description. Mirrors the Getting Started welcome at the
@@ -58,4 +58,4 @@ the top.
   on `business_day`).
 - **Check Type** — multi-select dropdown over the 5 check kinds.
 - **Account** — multi-select dropdown over `account_id`.
-- **Transfer Type** — multi-select dropdown over `transfer_type`.
+- **Transfer Type** — multi-select dropdown over `rail_name`.

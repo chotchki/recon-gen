@@ -36,10 +36,10 @@ class TestDefaultPreset:
         assert len(DEFAULT_PRESET.data_colors) == 8
 
     def test_serializes_to_valid_theme(self):
-        # X.1.f — build_theme requires l2_instance_prefix to be stamped
-        # so the theme id matches the dashboard's ThemeArn (which always
-        # includes the L2 segment).
-        cfg = make_test_config().with_l2_instance_prefix("test_l2")
+        # Z.C — build_theme uses cfg.deployment_name as the single
+        # prefix segment so the theme id matches the dashboard's
+        # ThemeArn (no separate L2 segment any more).
+        cfg = make_test_config(deployment_name="qsgen-test-l2")
         theme = build_theme(cfg, DEFAULT_PRESET)
         assert theme is not None
         data = theme.to_aws_json()

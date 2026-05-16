@@ -10,10 +10,13 @@ points to the id ``theme.json`` actually declares; every
 
 X.1.f shipped a fix for a bug class where ``_generate_l1_dashboard``
 and ``_generate_l2_flow_tracing`` called ``build_theme(cfg, ...)``
-before stamping ``cfg.l2_instance_prefix``. Result: ``theme.json``
+before the deployment-prefix was woven in. Result: ``theme.json``
 got the un-prefixed id, but the dashboard's ``ThemeArn`` (set by
 the App tree, which DOES stamp internally) included the prefix —
-dangling binding → ``GetThemeForDashboard`` 404 at runtime.
+dangling binding → ``GetThemeForDashboard`` 404 at runtime. (Z.C
+collapsed the prior two-segment ``resource_prefix`` +
+``l2_instance_prefix`` shape into a single ``deployment_name``;
+the consistency invariant the test guards is unchanged.)
 
 This module runs each generator in its own tmpdir with a sasquatch_pr
 L2 (which declares a ``theme:`` block) and asserts the bundle each
@@ -59,6 +62,10 @@ def _write_min_config(tmp_path: Path) -> Path:
     body = {
         "aws_account_id": "111122223333",
         "aws_region": "us-east-1",
+        # Z.C — both required cfg fields. db_table_prefix matches
+        # sasquatch_pr because that's the L2 yaml the bundle reads.
+        "deployment_name": "qsgen-cross-ref",
+        "db_table_prefix": "sasquatch_pr",
         "datasource_arn": (
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),

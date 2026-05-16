@@ -82,9 +82,8 @@ class TopologyNode:
     renderer may need but the typed model doesn't promote to first-class
     fields:
 
-    - On a ``template`` node: ``transfer_type`` (str) + ``transfer_key``
-      (comma-joined str) — both used by the graphviz renderer to build
-      the cluster header text.
+    - On a ``template`` node: ``transfer_key`` (comma-joined str) — used
+      by the graphviz renderer to build the cluster header text.
     - Open for future use (e.g., row-counts for the X.4.c.5 coverage tint).
     """
 
@@ -197,7 +196,6 @@ class _BundledEdge:
     source: Identifier
     destination: Identifier
     rail_names: tuple[Identifier, ...]
-    transfer_types: tuple[str, ...]
 
 
 def _role_id(role: Identifier) -> str:
@@ -302,7 +300,7 @@ def _bundle_two_leg_rails(
     """
     pairs: dict[
         tuple[Identifier, Identifier],
-        list[tuple[Identifier, str]],
+        list[Identifier],
     ] = {}
     for rail in rails:
         if not isinstance(rail, TwoLegRail):
@@ -311,43 +309,36 @@ def _bundle_two_leg_rails(
             for destination in rail.destination_role:
                 pairs.setdefault(
                     (source, destination), [],
-                ).append((rail.name, rail.transfer_type))
+                ).append(rail.name)
     bundled: list[_BundledEdge] = []
-    for (source, destination), entries in sorted(pairs.items()):
-        sorted_entries = sorted(entries)
+    for (source, destination), names in sorted(pairs.items()):
         bundled.append(
             _BundledEdge(
                 source=source,
                 destination=destination,
-                rail_names=tuple(name for name, _ in sorted_entries),
-                transfer_types=tuple(tt for _, tt in sorted_entries),
+                rail_names=tuple(sorted(names)),
             )
         )
     return tuple(bundled)
 
 
 def _bundle_label(bundle: _BundledEdge) -> str:
-    """Pretty label for a bundled edge — count + rail names + types.
+    """Pretty label for a bundled edge — count + rail names.
 
-    When only one rail backs the edge, drop the count prefix to avoid
-    "1 rail: Foo (ach)" noise. Multi-rail bundles get the count up
-    front so visual scan picks out the high-traffic edges.
+    When only one rail backs the edge, drop the count prefix. Multi-rail
+    bundles get the count up front so visual scan picks out the
+    high-traffic edges.
     """
     rail_count = len(bundle.rail_names)
-    type_set = sorted(set(bundle.transfer_types))
-    types_str = ", ".join(type_set)
     if rail_count == 1:
-        return f"{bundle.rail_names[0]}\n({types_str})"
+        return str(bundle.rail_names[0])
     rail_str = ", ".join(bundle.rail_names)
-    return f"{rail_count} rails: {rail_str}\n({types_str})"
+    return f"{rail_count} rails: {rail_str}"
 
 
 def _self_loop_label(rail: SingleLegRail) -> str:
     """Pretty label for a single-leg rail self-loop."""
-    return (
-        f"{rail.name}\n"
-        f"({rail.transfer_type}, {rail.leg_direction})"
-    )
+    return f"{rail.name}\n({rail.leg_direction})"
 
 
 def _chain_label(chain: Chain, *, cardinality: Literal["required", "xor"]) -> str:
@@ -379,7 +370,9 @@ def _template_cluster_label(template: TransferTemplate) -> str:
     return str(template.name)
 
 
-def topology_graph_for(instance: L2Instance) -> TopologyGraph:
+def topology_graph_for(
+    instance: L2Instance, *, db_table_prefix: str,
+) -> TopologyGraph:
     """Walk an L2Instance and return its typed topology projection.
 
     Pure construction — no graphviz import, no rendering, no I/O. Both
@@ -390,6 +383,11 @@ def topology_graph_for(instance: L2Instance) -> TopologyGraph:
     (roles sorted; templates in declaration order; chains in
     declaration order) so the graphviz renderer that consumes it
     produces the same DOT shape it always did.
+
+    Z.C — ``db_table_prefix`` is the cfg.db_table_prefix (formerly read
+    off the dropped ``L2Instance.instance`` field) and surfaces as
+    ``TopologyGraph.instance_name`` so the rendered diagram still
+    carries the operator-facing prefix label.
     """
     nodes: list[TopologyNode] = []
     edges: list[TopologyEdge] = []
@@ -415,7 +413,6 @@ def topology_graph_for(instance: L2Instance) -> TopologyGraph:
             kind="template",
             label=_template_inner_label(template),
             metadata={
-                "transfer_type": template.transfer_type,
                 "transfer_key": ", ".join(template.transfer_key),
                 "cluster_label": _template_cluster_label(template),
             },
@@ -478,7 +475,6 @@ def topology_graph_for(instance: L2Instance) -> TopologyGraph:
             metadata={
                 "rail_count": str(len(bundle.rail_names)),
                 "rail_names": ", ".join(bundle.rail_names),
-                "transfer_types": ", ".join(sorted(set(bundle.transfer_types))),
             },
         ))
 
@@ -494,7 +490,6 @@ def topology_graph_for(instance: L2Instance) -> TopologyGraph:
                 label=_self_loop_label(rail),
                 metadata={
                     "rail_name": str(rail.name),
-                    "transfer_type": rail.transfer_type,
                     "direction": rail.leg_direction,
                 },
             ))
@@ -576,7 +571,7 @@ def topology_graph_for(instance: L2Instance) -> TopologyGraph:
             ))
 
     return TopologyGraph(
-        instance_name=str(instance.instance),
+        instance_name=db_table_prefix,  # Z.C — was str(instance.instance)
         nodes=tuple(nodes),
         edges=tuple(edges),
     )
@@ -625,6 +620,7 @@ def _focus_set(
 def build_topology_graph_per_rail(
     instance: L2Instance,
     *,
+    db_table_prefix: str,
     bundle_parallel_rails: bool = True,
     focus_node_id: str | None = None,
     layer: int = 3,
@@ -691,10 +687,10 @@ def build_topology_graph_per_rail(
     import graphviz
 
     g: Any = graphviz.Digraph(
-        name=f"l2_topology_per_rail_{instance.instance}",
+        name=f"l2_topology_per_rail_{db_table_prefix}",  # Z.C — was instance.instance
         comment=(
             f"L2 topology (rails as nodes) for instance "
-            f"'{instance.instance}'"
+            f"'{db_table_prefix}'"
         ),
     )
     # Compactness pass: tighter node/rank spacing, higher mclimit (more
@@ -888,7 +884,7 @@ def build_topology_graph_per_rail(
     show_chains_and_templates = layer >= 3
 
     # Phase A — Role nodes (top-level, referenced only, in focus).
-    typed = topology_graph_for(instance)
+    typed = topology_graph_for(instance, db_table_prefix=db_table_prefix)
     for n in typed.nodes:
         if n.kind != "role":
             continue
@@ -1207,7 +1203,7 @@ def visible_entities_for(
     - ``account.id``, ``account_template.role``, ``rail.name``,
       ``transfer_template.name``;
     - ``"<parent>::<child>"`` composite for chains and
-      ``"<parent_role>::<transfer_type>"`` composite for
+      ``"<parent_role>::<rail>"`` composite for
       limit_schedules (matches ``_entity_id`` in
       ``_studio_editor_routes``).
 
@@ -1320,7 +1316,7 @@ def visible_entities_for(
         or any(str(ch) in rail_or_tmpl for ch in c.children)
     )
     limit_schedules = frozenset(
-        f"{ls.parent_role}::{ls.transfer_type}"
+        f"{ls.parent_role}::{ls.rail}"
         for ls in instance.limit_schedules
         if str(ls.parent_role) in visible_roles
     )
@@ -1353,7 +1349,7 @@ def _all_entities_per_kind(
             for c in instance.chains
         ),
         "limit_schedule": frozenset(
-            f"{ls.parent_role}::{ls.transfer_type}"
+            f"{ls.parent_role}::{ls.rail}"
             for ls in instance.limit_schedules
         ),
     }

@@ -41,7 +41,7 @@ _FIXTURES_DIR = "tests/l2"
 def _layout_l3_svg(instance_name: str) -> str:
     """Render the L3 diagram for ``<fixture>.yaml`` to SVG via dot."""
     instance = load_instance(f"{_FIXTURES_DIR}/{instance_name}.yaml")
-    g = build_topology_graph_per_rail(instance, layer=3)
+    g = build_topology_graph_per_rail(instance, db_table_prefix="test", layer=3)
     # ``pipe`` runs the configured engine (default ``dot``) and returns
     # the bytes — no on-disk file required.
     return g.pipe(format="svg").decode("utf-8")

@@ -126,16 +126,13 @@ def live_db_exec_driver(cfg: Any) -> Iterator[_LiveDriver]:
     if not ok:
         pytest.skip(f"live-DB e2e skipped: {reason}")
     instance = _load_l2_instance()
-    cfg_with_prefix = cfg
-    if cfg_with_prefix.l2_instance_prefix is None:
-        cfg_with_prefix = cfg_with_prefix.with_l2_instance_prefix(
-            str(instance.instance),
-        )
-    build_all_datasets(cfg_with_prefix)
-    tree_app = build_executives_app(cfg_with_prefix, l2_instance=instance)
+    # Z.C — db_table_prefix is now a required cfg field stamped at
+    # load time; the prior `with_l2_instance_prefix` pipe is gone.
+    build_all_datasets(cfg)
+    tree_app = build_executives_app(cfg, l2_instance=instance)
     assert tree_app.analysis is not None
     fetcher = make_live_db_fetcher_for_app(
-        tree_app=tree_app, cfg=cfg_with_prefix,
+        tree_app=tree_app, cfg=cfg,
     )
     primary_sheet = tree_app.analysis.sheets[0]
     with App2Driver.serving(

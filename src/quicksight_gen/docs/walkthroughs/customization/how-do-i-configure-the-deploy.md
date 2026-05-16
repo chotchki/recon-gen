@@ -47,7 +47,8 @@ aws_region: "us-east-1"
 
 datasource_arn: "arn:aws:quicksight:us-east-1:111122223333:datasource/example-datasource"
 
-resource_prefix: "qs-gen"
+deployment_name: "qsgen-prod"
+db_table_prefix: "qsgen_prod"
 
 # Theme is declared inline on the L2 institution YAML, not here
 # (N.4.j). When the L2 instance carries no ``theme:`` block, AWS
@@ -61,9 +62,10 @@ principal_arns:
 # demo_database_url: "user/password@host:1521/SERVICE"  # Oracle Easy Connect form
 ```
 
-Five required fields (account, region, datasource ARN, prefix,
-at least one principal) and two optional demo fields (`dialect`,
-`demo_database_url`). That's the entire deploy contract.
+Six required fields (account, region, datasource ARN,
+`deployment_name`, `db_table_prefix`, at least one principal) and two
+optional demo fields (`dialect`, `demo_database_url`). That's the
+entire deploy contract.
 
 ## What it means
 
@@ -103,14 +105,20 @@ Each field, what it controls, and what breaks if you set it wrong:
 
 ### Common knobs
 
-- **`resource_prefix`** (default `qs-gen`) — prefix prepended to
-  every resource ID. Useful for multi-tenant deploys (one
+- **`deployment_name`** (required, no default — Z.C) — prefix prepended to
+  every QS resource ID. Useful for multi-tenant deploys (one
   account hosting dashboards for multiple business units —
-  `team-a-` / `team-b-` prefixes keep them visually separable
-  in the QuickSight console). The cleanup command uses the
-  `ManagedBy` tag, not the prefix, so changing the prefix is
-  safe — it doesn't orphan old resources, just shifts where
-  new ones land.
+  `qsgen-team-a` / `qsgen-team-b` namespaces keep them visually
+  separable in the QuickSight console). The cleanup command uses the
+  `ManagedBy` + `Deployment` tag pair (not the ID prefix), so
+  changing `deployment_name` is safe — it doesn't orphan old
+  resources, just shifts where new ones land.
+- **`db_table_prefix`** (required, no default — Z.C) — prefix prepended
+  to every emitted DB table / matview / dataset name. Pick a value
+  that's a valid SQL identifier (lowercase, alphanumeric + underscore,
+  ≤30 chars). Typically tracks `deployment_name` (e.g.
+  `deployment_name: qsgen-myorg-prod` + `db_table_prefix:
+  qsgen_myorg_prod`).
 - **`extra_tags`** — dict of extra AWS tags to apply to every
   resource alongside the always-on `ManagedBy:quicksight-gen`
   tag. Use for cost allocation (`CostCenter: treasury`),
@@ -146,7 +154,7 @@ Each field, what it controls, and what breaks if you set it wrong:
 
   When set and `datasource_arn` is omitted, the generator derives the
   ARN automatically
-  (`{aws_region}:{aws_account_id}:datasource/{resource_prefix}-{l2_instance_prefix}-demo-datasource`).
+  (`{aws_region}:{aws_account_id}:datasource/{deployment_name}-demo-datasource`).
   In production, leave this unset and provide the explicit
   `datasource_arn`.
 
@@ -185,7 +193,8 @@ The mapping (from `config.py:90-98`):
 | `aws_account_id`    | `QS_GEN_AWS_ACCOUNT_ID`          |
 | `aws_region`        | `QS_GEN_AWS_REGION`              |
 | `datasource_arn`    | `QS_GEN_DATASOURCE_ARN`          |
-| `resource_prefix`   | `QS_GEN_RESOURCE_PREFIX`         |
+| `deployment_name`   | `QS_GEN_DEPLOYMENT_NAME`         |
+| `db_table_prefix`   | `QS_GEN_DB_TABLE_PREFIX`         |
 | `principal_arns`    | `QS_GEN_PRINCIPAL_ARNS` (CSV)    |
 | `demo_database_url` | `QS_GEN_DEMO_DATABASE_URL`       |
 | `dialect`           | (YAML only — see Demo-only)      |

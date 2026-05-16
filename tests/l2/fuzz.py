@@ -118,7 +118,7 @@ class _BuildState:
     # Rails by name; we track which are aggregating + their leg
     # categorization for downstream constraint satisfaction.
     rail_names: list[str] = field(default_factory=list)
-    rail_transfer_types: list[str] = field(default_factory=list)
+    # Z.B (2026-05-15): rail.transfer_type collapsed; rail names alone identify rails.
     aggregating_rail_names: set[str] = field(default_factory=set)
     non_aggregating_rail_names: list[str] = field(default_factory=list)
     single_leg_rail_names: list[str] = field(default_factory=list)
@@ -145,9 +145,10 @@ class _BuildState:
 def _build_instance(rng: Random, plan: _FuzzPlan) -> dict[str, Any]:
     state = _BuildState(plan=plan)
 
-    # The instance prefix gets baked from the seed so multiple fuzz
-    # YAMLs in the same DB don't collide on table names.
-    inst_prefix = f"fuzz_seed_{plan.seed % 10000:04d}"
+    # Z.C (2026-05-15) — the legacy `instance:` YAML key is gone; the
+    # DB-table prefix lives on cfg.db_table_prefix. The seed-derived
+    # identity (when needed for triage) lives in the YAML *filename*
+    # written by the caller, not inside the YAML body.
 
     accounts = _build_accounts(rng, state)
     account_templates = _build_account_templates(rng, state)
@@ -176,7 +177,6 @@ def _build_instance(rng: Random, plan: _FuzzPlan) -> dict[str, Any]:
     role_business_day_offsets = _build_role_business_day_offsets(rng, state)
 
     out: dict[str, Any] = {
-        "instance": inst_prefix,
         "description": _maybe_description(rng, state, "fuzz instance"),
         "accounts": accounts,
         "account_templates": account_templates,
@@ -306,12 +306,6 @@ def _build_account_templates(
 # Layer 3 — Rails (the big one)
 # ---------------------------------------------------------------------------
 
-# Transfer-type vocabulary the fuzzer draws from. Keeps the surface
-# realistic without trying to enumerate every possible string.
-_TRANSFER_TYPES = (
-    "ach", "wire", "internal", "fee", "card", "cash",
-    "settlement", "return", "sweep", "pool_balancing",
-)
 _ORIGINS = ("InternalInitiated", "ExternalForcePosted", "ExternalAggregated")
 _METADATA_KEY_BANK = (
     "external_reference", "originator_id", "merchant_id",
@@ -345,9 +339,7 @@ def _build_rails(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
             or rng.random() < state.plan.two_leg_ratio
         )
         name = f"Rail_{i:02d}"
-        transfer_type = rng.choice(_TRANSFER_TYPES)
         state.rail_names.append(name)
-        state.rail_transfer_types.append(transfer_type)
         if is_aggregating:
             state.aggregating_rail_names.add(name)
         else:
@@ -355,7 +347,6 @@ def _build_rails(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
 
         rail: dict[str, Any] = {
             "name": name,
-            "transfer_type": transfer_type,
         }
 
         # Metadata keys: random subset of the bank.
@@ -383,45 +374,9 @@ def _build_rails(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
 
         rails.append(rail)
 
-    # P.9b — Rail discriminator uniqueness (transfer_type, role) is now
-    # a load-time invariant (validate.py::_check_unique_rail_discriminators).
-    # The fuzzer picks transfer_type uniformly from a small bank, so
-    # collisions on (transfer_type, role) happen often when two rails
-    # touch the same role. Walk the generated rails; for any colliding
-    # rail, suffix its transfer_type with the rail index so the
-    # discriminator becomes unique without disturbing the role layout.
-    _resolve_rail_discriminator_collisions(rails, state)
+    # Z.B (2026-05-15): U6 (per-leg discriminator uniqueness) is gone.
+    # Rail.name uniqueness (U3) is enforced by the f"Rail_{i:02d}" pattern.
     return rails
-
-
-def _resolve_rail_discriminator_collisions(
-    rails: list[dict[str, Any]], state: _BuildState,
-) -> None:
-    """Make every (transfer_type, role) pair unique by suffixing
-    transfer_type with the rail index when needed. Mutates ``rails`` in
-    place + keeps ``state.rail_transfer_types`` aligned."""
-    seen: dict[tuple[str, str], int] = {}
-    for idx, rail in enumerate(rails):
-        roles = _rail_role_set(rail)
-        original = rail["transfer_type"]
-        # Rename if any role on this rail collides with a discriminator
-        # already claimed by an earlier rail.
-        if any((original, r) in seen for r in roles):
-            new = f"{original}_r{idx:02d}"
-            rail["transfer_type"] = new
-            state.rail_transfer_types[idx] = new
-            for r in roles:
-                seen[(new, r)] = idx
-        else:
-            for r in roles:
-                seen[(original, r)] = idx
-
-
-def _rail_role_set(rail: dict[str, Any]) -> tuple[str, ...]:
-    """The (source_role, destination_role) or (leg_role,) of a rail."""
-    if "leg_role" in rail:
-        return (str(rail["leg_role"]),)
-    return (str(rail["source_role"]), str(rail["destination_role"]))
 
 
 def _populate_two_leg_rail(
@@ -548,10 +503,6 @@ def _build_transfer_templates(
 
         name = f"TransferTemplate_{i:02d}"
         state.transfer_template_names.append(name)
-        # Use a transfer_type distinct from any rail's transfer_type
-        # to make it clear this is the template's identity, not a
-        # leg-rail's type.
-        template_transfer_type = f"template_type_{i:02d}"
         # transfer_key needs at least one non-empty identifier.
         n_keys = rng.randint(1, 2)
         keys = [f"key_{j}" for j in range(n_keys)]
@@ -564,7 +515,6 @@ def _build_transfer_templates(
 
         tt: dict[str, Any] = {
             "name": name,
-            "transfer_type": template_transfer_type,
             "expected_net": 0,
             "transfer_key": keys,
             "completion": _random_completion(rng),
@@ -647,7 +597,6 @@ def _ensure_single_leg_reconciliation(
     fallback_keys = ["fuzz_reconcile_key"]
     transfer_templates.append({
         "name": name,
-        "transfer_type": "fuzz_reconcile_type",
         "expected_net": 0,
         "transfer_key": fallback_keys,
         "completion": "business_day_end",
@@ -690,15 +639,13 @@ def _wire_max_unbundled_age(
     """Set max_unbundled_age only on rails confirmed to be in some
     aggregating rail's bundles_activity (R8)."""
     bundled_rail_names: set[str] = set()
-    bundled_transfer_types: set[str] = set()
     for r in rails:
         if r["name"] not in state.aggregating_rail_names:
             continue
         for sel in r.get("bundles_activity", []):
             bundled_rail_names.add(sel)
-            bundled_transfer_types.add(sel)
     for r in rails:
-        if r["name"] not in bundled_rail_names and r["transfer_type"] not in bundled_transfer_types:
+        if r["name"] not in bundled_rail_names:
             continue
         # Deterministic dice roll per rail.
         if rng.random() < 0.4:
@@ -795,30 +742,32 @@ def _build_chains(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
 def _build_limit_schedules(
     rng: Random, state: _BuildState,
 ) -> list[dict[str, Any]]:
-    """LimitSchedule entries — unique (parent_role, transfer_type) pairs
-    (U5) with transfer_type sampled from declared Rail.transfer_types
-    (R10).
+    """LimitSchedule entries — unique (parent_role, rail) pairs (U5)
+    with rail sampled from declared Rail.name (R10).
+
+    Z.B (2026-05-15): formerly sampled from rail_transfer_types; under
+    the symmetric collapse the cap binds directly to a rail name.
     """
     schedules: list[dict[str, Any]] = []
-    if not state.all_role_names or not state.rail_transfer_types:
+    if not state.all_role_names or not state.rail_names:
         return schedules
 
     # Build candidate pairs and sample without replacement (U5).
     candidate_pairs: list[tuple[str, str]] = []
-    declared_transfer_types = sorted(set(state.rail_transfer_types))
+    declared_rails = sorted(set(state.rail_names))
     for r in state.all_role_names:
-        for t in declared_transfer_types:
-            candidate_pairs.append((r, t))
+        for rail in declared_rails:
+            candidate_pairs.append((r, rail))
     if not candidate_pairs:
         return schedules
 
     n = min(state.plan.n_limit_schedules, len(candidate_pairs))
     chosen = rng.sample(candidate_pairs, n)
-    for parent_role, transfer_type in chosen:
+    for parent_role, rail in chosen:
         cap = rng.choice([1000, 5000, 10000, 50000, 100000])
         ls: dict[str, Any] = {
             "parent_role": parent_role,
-            "transfer_type": transfer_type,
+            "rail": rail,
             "cap": cap,
         }
         d = _maybe_description(rng, state, "limit schedule")

@@ -126,7 +126,7 @@ def test_l2ft_rails_sheet_auto_derives_three_multiselect_specs() -> None:
     )
 
     inst = default_l2_instance()
-    cfg = make_test_config().with_l2_instance_prefix(str(inst.instance))
+    cfg = make_test_config(db_table_prefix="spec_example")
     build_all_l2_flow_tracing_datasets(cfg, inst)
     tree_app = build_l2_flow_tracing_app(cfg, l2_instance=inst)
     assert tree_app.analysis is not None

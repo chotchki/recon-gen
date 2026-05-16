@@ -129,9 +129,10 @@ def build_datasource(cfg: Config) -> DataSource:
       config raises ``ValueError`` with a pointer to the local-loop
       docs.
 
-    The DataSource ID derives from ``cfg.prefixed("demo-datasource")`` so
-    when ``cfg.l2_instance_prefix`` is set (per-test harness, multi-tenant
-    deploys) each gets its own unique ID. Credentials come from the
+    The DataSource ID derives from ``cfg.prefixed("demo-datasource")``
+    (i.e. ``<deployment_name>-demo-datasource``) so each per-deploy
+    ``deployment_name`` gets its own unique ID — per-test harness +
+    multi-tenant deploys are isolated. Credentials come from the
     parsed URL; SSL is enabled by default; principal_arns from cfg
     become QS Permissions.
 
@@ -185,7 +186,7 @@ def build_datasource(cfg: Config) -> DataSource:
     return DataSource(
         AwsAccountId=cfg.aws_account_id,
         DataSourceId=ds_id,
-        Name=f"{cfg.resource_prefix} Demo DataSource",
+        Name=f"{cfg.deployment_name} Demo DataSource",
         Type=ds_type,
         DataSourceParameters=params,
         Credentials=DataSourceCredentials(

@@ -66,9 +66,9 @@ def make_db_fetcher(
 
     Args:
         cfg: loaded config; supplies dialect + connection url +
-          per-instance prefix.
-        instance: L2 instance the App2 is rendering (for topology +
-          prefix derivation when cfg.l2_instance_prefix is unset).
+          ``db_table_prefix`` (the per-deploy DB schema prefix).
+        instance: L2 instance the App2 is rendering (for topology
+          projection — accounts + rails).
         connection_factory: callable returning a fresh DB-API 2.0
           connection. Defaults to ``connect_demo_db(cfg)``. Tests
           inject a fake; production opens the real DB.
@@ -79,7 +79,7 @@ def make_db_fetcher(
         currently-supported pair (callers add cases as new visuals
         land — keeps the dispatch table the single source of truth).
     """
-    prefix = cfg.l2_instance_prefix or instance.instance
+    prefix = cfg.db_table_prefix
     if connection_factory is None:
         # Lazy import — connect_demo_db pulls psycopg2 / oracledb
         # which are optional extras. Tests that pass a stub

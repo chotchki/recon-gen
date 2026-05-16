@@ -67,7 +67,7 @@ from quicksight_gen.common.tree import Dataset
 
 
 def l2ft_matview_specs(
-    l2_instance: L2Instance,
+    cfg: Config,
 ) -> list[tuple[str, str | None]]:
     """Matviews + base tables the L2 Flow Tracing dashboard reads,
     paired with the date column for App Info's ``latest_date`` KPI.
@@ -76,7 +76,7 @@ def l2ft_matview_specs(
     operator can spot stale matviews against fresh ETL loads at a
     glance. Mirrors ``l1_matview_specs`` / ``inv_matview_specs``.
     """
-    p = str(l2_instance.instance)
+    p = cfg.db_table_prefix
     return [
         (f"{p}_transactions", "posting"),
         (f"{p}_daily_balances", "business_day_start"),
@@ -316,10 +316,10 @@ EXC_CHAIN_ORPHANS_CONTRACT = DatasetContract(columns=[
 ])
 
 
-# L2.2 — Posted Transactions whose transfer_type doesn't match any
-# declared Rail.transfer_type.
+# L2.2 — Posted Transactions whose rail_name doesn't match any
+# declared Rail.rail_name.
 EXC_UNMATCHED_TRANSFER_TYPE_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("transfer_type", "STRING"),
+    ColumnSpec("rail_name", "STRING"),
     ColumnSpec("posting_count", "INTEGER"),
 ])
 
@@ -327,15 +327,14 @@ EXC_UNMATCHED_TRANSFER_TYPE_CONTRACT = DatasetContract(columns=[
 # L2.3 — Rails declared in L2 with zero postings in the window.
 EXC_DEAD_RAILS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("rail_name", "STRING"),
-    ColumnSpec("transfer_type", "STRING"),
     ColumnSpec("leg_shape", "STRING"),
 ])
 
 
 # L2.4 — Aggregating-rail bundles_activity targets with zero matching
 # activity in the window. Bundles_activity refs are Identifiers that
-# the SPEC says match either rail_name OR transfer_type — the SQL
-# checks both attributions.
+# the SPEC says match a Rail.name — the SQL checks the rail_name
+# attribution.
 EXC_DEAD_BUNDLES_ACTIVITY_CONTRACT = DatasetContract(columns=[
     ColumnSpec("aggregating_rail", "STRING"),
     ColumnSpec("bundle_target", "STRING"),
@@ -351,13 +350,13 @@ EXC_DEAD_METADATA_CONTRACT = DatasetContract(columns=[
 ])
 
 
-# L2.6 — LimitSchedule (parent_role, transfer_type) cells with zero
+# L2.6 — LimitSchedule (parent_role, rail_name) cells with zero
 # outbound debit flow in the window. Means the cap is effectively dead
 # — either nobody routes that role/type combination, or the L2 declared
 # a cap nobody enforces against.
 EXC_DEAD_LIMIT_SCHEDULES_CONTRACT = DatasetContract(columns=[
     ColumnSpec("parent_role", "STRING"),
-    ColumnSpec("transfer_type", "STRING"),
+    ColumnSpec("rail_name", "STRING"),
     ColumnSpec("cap", "DECIMAL"),
 ])
 
@@ -371,7 +370,7 @@ EXC_DEAD_LIMIT_SCHEDULES_CONTRACT = DatasetContract(columns=[
 # - check_type: which L2 hygiene check produced the row.
 # - entity_a / entity_b: the primary and secondary subject of the
 #   violation (e.g., parent rail + child rail for Chain Orphans;
-#   rail_name + metadata_key for Dead Metadata; transfer_type alone
+#   rail_name + metadata_key for Dead Metadata; rail_name alone
 #   for Unmatched Transfer Type with entity_b NULL).
 # - detail: optional extra context (leg_shape, cap, etc.) — STRING
 #   regardless of source type so the unified projection works.
@@ -384,7 +383,7 @@ EXC_DEAD_LIMIT_SCHEDULES_CONTRACT = DatasetContract(columns=[
 UNIFIED_L2_EXCEPTIONS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("check_type", "STRING"),
     # entity_a holds the L2-declared name relevant to each row's
-    # check_type — rail/template name for 4 of 6 checks, transfer_type
+    # check_type — rail/template name for 4 of 6 checks, rail_name
     # for L2.2, parent_role for L2.6. The shape lets the L2 Exceptions
     # table's right-click drills wire entity_a → Rails sheet / Chains
     # sheet filter parameters; the destination filters return zero
@@ -410,7 +409,6 @@ POSTINGS_CONTRACT = DatasetContract(columns=[
     # rail_name is a drill destination for the L2 Exceptions table's
     # "View in Rails" right-click — see UNIFIED_L2_EXCEPTIONS_CONTRACT.
     ColumnSpec("rail_name", "STRING", shape=ColumnShape.L2_DECLARED_NAME),
-    ColumnSpec("transfer_type", "STRING"),
     ColumnSpec("account_id", "STRING"),
     ColumnSpec("account_name", "STRING"),
     ColumnSpec("account_role", "STRING"),
@@ -464,8 +462,6 @@ def build_all_l2_flow_tracing_datasets(
     with one unified UNION-ALL dataset (mirrors L1's todays-exceptions
     pattern — single KPI + bar chart + detail table).
     """
-    if cfg.l2_instance_prefix is None:
-        cfg = cfg.with_l2_instance_prefix(str(l2_instance.instance))
     return [
         build_postings_dataset(cfg, l2_instance),
         build_meta_values_dataset(cfg, l2_instance),
@@ -479,7 +475,7 @@ def build_all_l2_flow_tracing_datasets(
         build_liveness_dataset(cfg, app_segment="l2ft"),
         build_matview_status_dataset(
             cfg, app_segment="l2ft",
-            view_specs=l2ft_matview_specs(l2_instance),
+            view_specs=l2ft_matview_specs(cfg),
         ),
     ]
 
@@ -645,11 +641,11 @@ def build_postings_dataset(
 
     Date range stays an analysis-level TimeRangeFilter (Y.2.f territory).
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     sql = (
         f"SELECT * FROM (\n"
         f"  SELECT\n"
-        f"    id, transfer_id, transfer_parent_id, rail_name, transfer_type,\n"
+        f"    id, transfer_id, transfer_parent_id, rail_name,\n"
         f"    account_id, account_name, account_role, account_scope,\n"
         f"    posting, amount_money, amount_direction,\n"
         # X.1.i — collapse open-set `status` into the bounded set the
@@ -764,7 +760,7 @@ def build_meta_values_dataset(
     is replaced with `WHERE FALSE` so the dataset emits valid SQL
     that returns no rows.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     keys = declared_metadata_keys(l2_instance)
     if not keys:
         nt = typed_null("varchar(4000)", cfg.dialect)
@@ -824,7 +820,7 @@ def build_chains_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
     ARRAY_AGG (PG-only) to keep the SQL portable. The chains table is
     small (typically tens of entries), so the cost is bounded.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared = _declared_chains_cte(l2_instance, cfg.dialect)
     sql = (
         f"WITH declared AS (\n{declared}\n),\n"
@@ -924,7 +920,7 @@ def build_chain_instances_dataset(
     in practice. The chains table is bounded by L2 declarations
     (typically tens of entries) so the cost stays predictable.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared = _declared_chains_cte(l2_instance, cfg.dialect)
     sql = (
         f"WITH declared AS (\n{declared}\n),\n"
@@ -1095,7 +1091,7 @@ def build_exc_chain_orphans_dataset(
     substep — a precise XOR check needs per-Transfer-id grouping that
     the simpler aggregate doesn't capture.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared = _declared_chains_cte(l2_instance, cfg.dialect)
     sql = (
         f"WITH declared AS (\n{declared}\n),\n"
@@ -1145,8 +1141,8 @@ def build_exc_chain_orphans_dataset(
 def build_exc_unmatched_transfer_type_dataset(
     cfg: Config, l2_instance: L2Instance,
 ) -> DataSet:
-    """L2.2 — Posted Transactions whose ``transfer_type`` doesn't
-    match any declared ``Rail.transfer_type``.
+    """L2.2 — Posted Transactions whose ``rail_name`` doesn't
+    match any declared ``Rail.rail_name``.
 
     The runtime version of M.2d.1's deferred validator check
     ('every Transfer MUST match a Rail'). LEFT JOIN to a CTE of
@@ -1154,18 +1150,18 @@ def build_exc_unmatched_transfer_type_dataset(
     Output is per-transfer-type with a count of postings carrying
     that type — the table reveals what's leaking past the L2's rails.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared = _declared_transfer_types_cte(l2_instance, cfg.dialect)
     sql = (
         f"WITH declared_types AS (\n{declared}\n)\n"
         f"SELECT\n"
-        f"  t.transfer_type,\n"
+        f"  t.rail_name,\n"
         f"  COUNT(*) AS posting_count\n"
         f"FROM {prefix}_current_transactions t\n"
-        f"LEFT JOIN declared_types d ON d.transfer_type = t.transfer_type\n"
-        f"WHERE d.transfer_type IS NULL\n"
-        f"GROUP BY t.transfer_type\n"
-        f"ORDER BY posting_count DESC, t.transfer_type"
+        f"LEFT JOIN declared_types d ON d.rail_name = t.rail_name\n"
+        f"WHERE d.rail_name IS NULL\n"
+        f"GROUP BY t.rail_name\n"
+        f"ORDER BY posting_count DESC, t.rail_name"
     )
     return build_dataset(
         cfg, cfg.prefixed("l2ft-exc-unmatched-transfer-type-dataset"),
@@ -1186,7 +1182,7 @@ def build_exc_dead_rails_dataset(
     the detail table lists the dead rails so the integrator can
     decide whether to retire the declaration or fix the ETL.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared = _declared_rails_cte(l2_instance, cfg.dialect)
     sql = (
         f"WITH declared AS (\n{declared}\n),\n"
@@ -1197,7 +1193,6 @@ def build_exc_dead_rails_dataset(
         f")\n"
         f"SELECT\n"
         f"  d.rail_name,\n"
-        f"  d.transfer_type,\n"
         f"  d.leg_shape\n"
         f"FROM declared d\n"
         f"LEFT JOIN runtime r ON r.rail_name = d.rail_name\n"
@@ -1216,15 +1211,14 @@ def build_exc_dead_bundles_activity_dataset(
     cfg: Config, l2_instance: L2Instance,
 ) -> DataSet:
     """L2.4 — Aggregating-rail bundles_activity targets that no
-    posting matched (by either ``rail_name`` OR ``transfer_type``)
-    in the window.
+    posting matched in the window.
 
-    Per SPEC: a bundles_activity ref MAY name either a rail or a
-    transfer_type; the SQL checks both attributions to avoid
-    false positives. Each row is one (aggregating_rail, target)
-    pair the L2 declared but the runtime never realized.
+    Per Z.B (2026-05-15): bundles_activity refs are Identifier rail
+    names; the SQL checks ``t.rail_name = db.bundle_target``. Each row
+    is one (aggregating_rail, target) pair the L2 declared but the
+    runtime never realized.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared = _declared_bundles_activity_cte(l2_instance, cfg.dialect)
     sql = (
         f"WITH declared_bundles AS (\n{declared}\n)\n"
@@ -1236,7 +1230,6 @@ def build_exc_dead_bundles_activity_dataset(
         f"  SELECT 1\n"
         f"  FROM {prefix}_current_transactions t\n"
         f"  WHERE t.rail_name = db.bundle_target\n"
-        f"     OR t.transfer_type = db.bundle_target\n"
         f")\n"
         f"ORDER BY db.aggregating_rail, db.bundle_target"
     )
@@ -1260,7 +1253,7 @@ def build_exc_dead_metadata_dataset(
     accept dynamic JSONPath arguments to ``JSON_VALUE`` — keeps the
     SQL portable per the project's no-JSONB constraint.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     fragments = _dead_metadata_check_fragments(l2_instance, prefix, cfg.dialect)
     if not fragments:
         # No rails declare metadata_keys — empty result, valid SQL.
@@ -1285,7 +1278,7 @@ def build_exc_dead_metadata_dataset(
 def build_exc_dead_limit_schedules_dataset(
     cfg: Config, l2_instance: L2Instance,
 ) -> DataSet:
-    """L2.6 — LimitSchedule (parent_role, transfer_type) cells with
+    """L2.6 — LimitSchedule (parent_role, rail_name) cells with
     zero outbound debit flow in the window.
 
     Means the cap is effectively dead — either nobody routes that
@@ -1293,23 +1286,23 @@ def build_exc_dead_limit_schedules_dataset(
     against. NOT EXISTS over the prefixed transactions matview keeps
     the query bounded by the (small) limit-schedule count.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared = _declared_limit_schedules_cte(l2_instance, cfg.dialect)
     sql = (
         f"WITH declared_limits AS (\n{declared}\n)\n"
         f"SELECT\n"
         f"  dl.parent_role,\n"
-        f"  dl.transfer_type,\n"
+        f"  dl.rail_name,\n"
         f"  dl.cap\n"
         f"FROM declared_limits dl\n"
         f"WHERE NOT EXISTS (\n"
         f"  SELECT 1\n"
         f"  FROM {prefix}_current_transactions t\n"
         f"  WHERE t.account_parent_role = dl.parent_role\n"
-        f"    AND t.transfer_type = dl.transfer_type\n"
+        f"    AND t.rail_name = dl.rail_name\n"
         f"    AND t.amount_direction = 'Debit'\n"
         f")\n"
-        f"ORDER BY dl.parent_role, dl.transfer_type"
+        f"ORDER BY dl.parent_role, dl.rail_name"
     )
     return build_dataset(
         cfg, cfg.prefixed("l2ft-exc-dead-limit-schedules-dataset"),
@@ -1339,7 +1332,7 @@ def build_unified_l2_exceptions_dataset(
     `build_exc_*` queries, just projected to the unified shape via
     CASTs + literal `check_type` labels.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared_chains = _declared_chains_cte(l2_instance, cfg.dialect)
     declared_types = _declared_transfer_types_cte(l2_instance, cfg.dialect)
     declared_rails = _declared_rails_cte(l2_instance, cfg.dialect)
@@ -1401,25 +1394,25 @@ def build_unified_l2_exceptions_dataset(
         f"UNION ALL\n"
         f"SELECT\n"
         f"  CAST('Unmatched Transfer Type' AS VARCHAR(50)),\n"
-        f"  CAST(transfer_type AS VARCHAR(255)),\n"
+        f"  CAST(rail_name AS VARCHAR(255)),\n"
         f"  CAST(NULL AS VARCHAR(255)),\n"
         f"  CAST(NULL AS VARCHAR(255)),\n"
         f"  CAST(posting_count AS INTEGER)\n"
         f"FROM (\n"
         f"  WITH declared_types AS (\n{declared_types}\n)\n"
-        f"  SELECT t.transfer_type, COUNT(*) AS posting_count\n"
+        f"  SELECT t.rail_name, COUNT(*) AS posting_count\n"
         f"  FROM {prefix}_current_transactions t\n"
         f"  LEFT JOIN declared_types d "
-        f"ON d.transfer_type = t.transfer_type\n"
-        f"  WHERE d.transfer_type IS NULL\n"
-        f"  GROUP BY t.transfer_type\n"
+        f"ON d.rail_name = t.rail_name\n"
+        f"  WHERE d.rail_name IS NULL\n"
+        f"  GROUP BY t.rail_name\n"
         f") sub_unmatched\n"
         # Branch 3: Dead Rails
         f"UNION ALL\n"
         f"SELECT\n"
         f"  CAST('Dead Rails' AS VARCHAR(50)),\n"
         f"  CAST(rail_name AS VARCHAR(255)),\n"
-        f"  CAST(transfer_type AS VARCHAR(255)),\n"
+        f"  CAST(NULL AS VARCHAR(255)),\n"
         f"  CAST(leg_shape AS VARCHAR(255)),\n"
         f"  1\n"
         f"FROM (\n"
@@ -1428,7 +1421,7 @@ def build_unified_l2_exceptions_dataset(
         f"    SELECT rail_name, COUNT(*) AS total_postings\n"
         f"    FROM {prefix}_current_transactions GROUP BY rail_name\n"
         f"  )\n"
-        f"  SELECT d.rail_name, d.transfer_type, d.leg_shape\n"
+        f"  SELECT d.rail_name, d.leg_shape\n"
         f"  FROM declared d\n"
         f"  LEFT JOIN runtime r ON r.rail_name = d.rail_name\n"
         f"  WHERE COALESCE(r.total_postings, 0) = 0\n"
@@ -1448,7 +1441,7 @@ def build_unified_l2_exceptions_dataset(
         f"  WHERE NOT EXISTS (\n"
         f"    SELECT 1 FROM {prefix}_current_transactions t\n"
         f"    WHERE t.rail_name = db.bundle_target "
-        f"OR t.transfer_type = db.bundle_target\n"
+        f"OR t.rail_name = db.bundle_target\n"
         f"  )\n"
         f") sub_dead_bundles\n"
         # Branch 5: Dead Metadata Declarations
@@ -1465,17 +1458,17 @@ def build_unified_l2_exceptions_dataset(
         f"SELECT\n"
         f"  CAST('Dead Limit Schedules' AS VARCHAR(50)),\n"
         f"  CAST(parent_role AS VARCHAR(255)),\n"
-        f"  CAST(transfer_type AS VARCHAR(255)),\n"
+        f"  CAST(rail_name AS VARCHAR(255)),\n"
         f"  CAST(cap AS VARCHAR(255)),\n"
         f"  1\n"
         f"FROM (\n"
         f"  WITH declared_limits AS (\n{declared_limits}\n)\n"
-        f"  SELECT dl.parent_role, dl.transfer_type, dl.cap\n"
+        f"  SELECT dl.parent_role, dl.rail_name, dl.cap\n"
         f"  FROM declared_limits dl\n"
         f"  WHERE NOT EXISTS (\n"
         f"    SELECT 1 FROM {prefix}_current_transactions t\n"
         f"    WHERE t.account_parent_role = dl.parent_role\n"
-        f"      AND t.transfer_type = dl.transfer_type\n"
+        f"      AND t.rail_name = dl.rail_name\n"
         f"      AND t.amount_direction = 'Debit'\n"
         f"  )\n"
         f") sub_dead_limits\n"
@@ -1517,7 +1510,6 @@ def _declared_rails_cte(l2_instance: L2Instance, dialect: Dialect) -> str:
         return (
             "  SELECT\n"
             f"    {nt} AS rail_name,\n"
-            f"    {nt} AS transfer_type,\n"
             f"    {nt} AS leg_shape,\n"
             f"    {nt} AS source_role,\n"
             f"    {nt} AS destination_role,\n"
@@ -1547,7 +1539,6 @@ def _declared_rails_cte(l2_instance: L2Instance, dialect: Dialect) -> str:
         rows.append(
             "  SELECT "
             f"{_sql_str(str(r.name))} AS rail_name, "
-            f"{_sql_str(str(r.transfer_type))} AS transfer_type, "
             f"{_sql_str(leg_shape)} AS leg_shape, "
             f"{_sql_nullable_str(source_role)} AS source_role, "
             f"{_sql_nullable_str(destination_role)} AS destination_role, "
@@ -1683,22 +1674,26 @@ def _sql_nullable_str(value: str | None) -> str:
 def _declared_transfer_types_cte(
     l2_instance: L2Instance, dialect: Dialect,
 ) -> str:
-    """Distinct ``Rail.transfer_type`` values, one per SELECT row.
+    """Distinct rail-type identifiers, one per SELECT row.
 
-    Distinct because multiple Rails MAY share a transfer_type (the
-    M.2d.1-deferred validator rule); the L2.2 'Unmatched transfer_type'
-    check just wants the SET of declared types so it can find what's
-    NOT in it.
+    Z.B (2026-05-15): under the symmetric collapse, ``Rail.name`` IS
+    the type identifier (the legacy ``Rail.rail_name`` field is
+    gone). Z.B.12 will rewrite the L2.2 / L2.6 dataset SQL strings
+    that key off the dropped ``transactions.rail_name`` column;
+    until then this helper emits the rail-name set under the legacy
+    ``rail_name`` column alias so the tree builder doesn't crash
+    at SQL-string-emit time. The dashboard SQL itself can't execute
+    against a real DB until Z.B.12 lands.
     """
     df = dual_from(dialect)
-    types = sorted({str(r.transfer_type) for r in l2_instance.rails})
+    types = sorted({str(r.name) for r in l2_instance.rails})
     if not types:
         return (
-            f"  SELECT {typed_null('varchar(4000)', dialect)} AS transfer_type"
+            f"  SELECT {typed_null('varchar(4000)', dialect)} AS rail_name"
             f"{df} WHERE 1=0"
         )
     rows = [
-        f"  SELECT {_sql_str(t)} AS transfer_type{df}"
+        f"  SELECT {_sql_str(t)} AS rail_name{df}"
         for t in types
     ]
     return "\n  UNION ALL\n".join(rows)
@@ -1711,7 +1706,7 @@ def _declared_bundles_activity_cte(
 
     bundle_target is whatever Identifier the rail's
     ``bundles_activity`` lists — per SPEC, that resolves to either a
-    rail_name or a transfer_type at runtime.
+    rail_name or a rail_name at runtime.
     """
     pairs: list[tuple[str, str]] = []
     for r in l2_instance.rails:
@@ -1772,7 +1767,7 @@ def _declared_limit_schedules_cte(
     l2_instance: L2Instance, dialect: Dialect,
 ) -> str:
     """One SELECT row per LimitSchedule entry. The cap stays as a
-    numeric literal; the parent_role + transfer_type are quoted
+    numeric literal; the parent_role + rail_name are quoted
     string literals (they're Identifiers in the L2 model)."""
     df = dual_from(dialect)
     if not l2_instance.limit_schedules:
@@ -1780,14 +1775,17 @@ def _declared_limit_schedules_cte(
         nn = typed_null("numeric", dialect)
         return (
             f"  SELECT {nt} AS parent_role, "
-            f"{nt} AS transfer_type, "
+            f"{nt} AS rail_name, "
             f"{nn} AS cap{df} WHERE 1=0"
         )
     rows: list[str] = []
     for ls in l2_instance.limit_schedules:
         rows.append(
             f"  SELECT {_sql_str(str(ls.parent_role))} AS parent_role, "
-            f"{_sql_str(str(ls.transfer_type))} AS transfer_type, "
+            # Z.B (2026-05-15): LimitSchedule.rail_name → .rail under
+            # the symmetric collapse; emit the rail name under the legacy
+            # rail_name column alias until Z.B.12 retires the alias.
+            f"{_sql_str(str(ls.rail))} AS rail_name, "
             # Cap is a Decimal; render as a SQL numeric literal.
             f"CAST({ls.cap} AS DECIMAL(20,2)) AS cap{df}"
         )
@@ -1851,7 +1849,7 @@ def build_tt_instances_dataset(
 
     Parameterized on pKey + pValues for the metadata cascade.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared_tt = _declared_templates_cte(l2_instance, cfg.dialect)
     declared_ch = _declared_chains_cte(l2_instance, cfg.dialect)
     sql = (
@@ -2057,7 +2055,7 @@ def build_tt_legs_dataset(
 
     Parameterized on pKey + pValues for the metadata cascade.
     """
-    prefix = l2_instance.instance
+    prefix = cfg.db_table_prefix
     declared_tt = _declared_templates_cte(l2_instance, cfg.dialect)
     declared_ch = _declared_chains_cte(l2_instance, cfg.dialect)
     sql = (

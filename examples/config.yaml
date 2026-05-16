@@ -29,8 +29,11 @@ aws_region: "us-east-1"
 # (placeholders work fine).
 datasource_arn: "arn:aws:quicksight:us-east-1:111122223333:datasource/example-datasource"
 
-# Prefix for all generated resource IDs (default: qs-gen).
-resource_prefix: "qs-gen"
+# Z.C — Deployment identity (both required, no defaults, loud-fail at load).
+# `deployment_name` prefixes every QS resource ID; `db_table_prefix`
+# prefixes every emitted DB table / matview / dataset name.
+deployment_name: "qsgen-prod"
+db_table_prefix: "qsgen_prod"
 
 # Theme: declared inline on the L2 institution YAML's `theme:` block,
 # NOT here. Each L2 carries its own brand palette so swapping the L2

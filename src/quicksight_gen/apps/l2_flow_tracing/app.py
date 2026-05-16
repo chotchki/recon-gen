@@ -6,10 +6,9 @@ prose on the other three. M.3.5+ populates each tab with its real
 visuals + datasets.
 
 The app is L2-instance-fed via the same M.2d.3 prefix pattern the L1
-dashboard uses: ``cfg.l2_instance_prefix`` is auto-derived from the L2
-instance's ``instance`` field at build time, so dashboard ID, analysis
-ID, dataset IDs, and tag-based cleanup all key off the per-instance
-prefix without callers needing to pre-stamp the field.
+dashboard uses: ``cfg.db_table_prefix`` is set on the cfg yaml directly
+(no auto-derivation needed), so dashboard ID, analysis ID, dataset IDs,
+and tag-based cleanup all key off the per-deploy prefix.
 
 Build pipeline::
 
@@ -183,7 +182,7 @@ def _analysis_name(cfg: Config, l2_instance: L2Instance) -> str:
     """Title shown in QuickSight — matches L1's `Name (prefix)` shape so
     the two apps' QS asset names are visually consistent in the
     dashboard list."""
-    return f"L2 Flow Tracing ({l2_instance.instance})"
+    return f"L2 Flow Tracing ({cfg.deployment_name})"
 
 
 def build_l2_flow_tracing_app(
@@ -198,18 +197,15 @@ def build_l2_flow_tracing_app(
     no visuals beyond the description prose. M.3.5+ populates each
     placeholder one substep at a time.
 
-    Dashboard ID convention: ``<resource_prefix>-<l2_prefix>-l2-flow-tracing``
-    (M.2d.3) — same prefix pattern the L1 dashboard uses, so N apps
-    can deploy against the same L2 instance AND the same app can deploy
-    against N L2 instances without QS resource collisions. Auto-derives
-    ``cfg.l2_instance_prefix`` from ``l2_instance.instance`` if the
-    caller hasn't pre-stamped it.
+    Dashboard ID convention: ``<deployment_name>-l2-flow-tracing`` —
+    the per-deploy prefix the L1 dashboard also uses, so N apps can
+    deploy against the same L2 instance AND the same app can deploy
+    against N L2 instances without QS resource collisions.
+    ``cfg.deployment_name`` is set on the cfg yaml directly, no
+    auto-derivation from the L2 yaml.
     """
     if l2_instance is None:
         l2_instance = _default_l2_instance()
-
-    if cfg.l2_instance_prefix is None:
-        cfg = cfg.with_l2_instance_prefix(str(l2_instance.instance))
 
     # N.1.f / N.4.k — resolve theme once from the L2 instance, coerced
     # to the registry default for in-canvas accent colors when the

@@ -164,7 +164,9 @@ _HOME_SINGLETONS: tuple[tuple[str, str, str], ...] = (
 )
 
 
-def _render_home_page(cache: L2InstanceCache, dev_log: bool) -> str:
+def _render_home_page(
+    cache: L2InstanceCache, dev_log: bool, *, cfg: Config | None = None,
+) -> str:
     """X.4.f.7 — unified Studio home page (diagram + every entity kind).
 
     Composes one page with:
@@ -190,7 +192,7 @@ def _render_home_page(cache: L2InstanceCache, dev_log: bool) -> str:
     bumps ``iframe.src = iframe.src`` to force a reload.
     """
     instance = cache.get()
-    prefix = escape(str(instance.instance))
+    prefix = escape(cfg.deployment_name if cfg is not None else cache.path.stem)
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
 
     section_blocks: list[str] = []
@@ -464,6 +466,7 @@ def _render_diagram_page(
     *,
     coverage_available: bool = False,
     embed: bool = False,
+    cfg: Config | None = None,
 ) -> str:
     """Render the L2 topology diagram (per-rail / dot, X.4.b spike winner).
 
@@ -491,8 +494,16 @@ def _render_diagram_page(
     the param to restore the full picture.
     """
     instance = cache.get()
+    # Z.C — topology helpers require db_table_prefix as a keyword. Use
+    # cfg.db_table_prefix when available; fall back to the deployment
+    # name (or `"unbound"` sentinel) when the studio is rendering
+    # topology without an attached cfg.
+    db_prefix = (
+        cfg.db_table_prefix if cfg is not None else "unbound"
+    )
     digraph = build_topology_graph_per_rail(
         instance,
+        db_table_prefix=db_prefix,
         bundle_parallel_rails=True,
         focus_node_id=focus_node_id,
         layer=layer,
@@ -501,8 +512,8 @@ def _render_diagram_page(
 
     # Counts for the chrome (uses the typed projection so they reflect
     # the underlying L2 shape, not the rendered subgraph).
-    typed = topology_graph_for(instance)
-    prefix = escape(str(instance.instance))
+    typed = topology_graph_for(instance, db_table_prefix=db_prefix)
+    prefix = escape(cfg.deployment_name if cfg is not None else cache.path.stem)
     n_role_internal = sum(
         1 for n in typed.nodes
         if n.kind == "role" and n.scope == "internal"
@@ -1458,6 +1469,7 @@ def _render_data_page(
     *,
     tg_cache: TestGeneratorCache | None = None,
     etl_hook_command: str | None = None,
+    cfg: Config | None = None,
 ) -> str:
     """X.4.h.1 — Studio "trainer mode" data-shaping panel shell.
 
@@ -1477,7 +1489,7 @@ def _render_data_page(
     ``quicksightDeploy()`` JS helper bound to the button's onclick.
     """
     instance = cache.get()
-    prefix = escape(str(instance.instance))
+    prefix = escape(cfg.deployment_name if cfg is not None else cache.path.stem)
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
     selected_plants = (
         tg_cache.get().plants if tg_cache is not None else ()
@@ -1650,9 +1662,11 @@ def make_studio_routes(
             ``column_name(...)``). When ``db_pool`` is None, this is
             ignored.
         prefix_override: Optional override for the ``<prefix>_transactions``
-            schema prefix; usually omitted (defaults to the L2
-            instance's own ``instance`` field). Equivalent to
-            ``cfg.l2_instance_prefix`` in the demo CLI flow.
+            schema prefix; usually omitted (defaults to ``cfg.db_table_prefix``).
+            When ``cfg`` is also None and the override is omitted, the
+            coverage route's prefix-resolve raises — that combination
+            is only valid for the unit-test surface that doesn't mount
+            the coverage route (``db_pool=None``).
         cfg: Full Config dataclass; required for the X.4.g.13
             ``POST /deploy`` route (the deploy pipeline reads
             ``cfg.etl_hook`` / ``cfg.etl_datasource`` /
@@ -1661,7 +1675,7 @@ def make_studio_routes(
             surface that doesn't exercise the pipeline).
     """
     async def landing(_request: Request) -> HTMLResponse:
-        return HTMLResponse(_render_home_page(cache, dev_log))
+        return HTMLResponse(_render_home_page(cache, dev_log, cfg=cfg))
 
     async def data(request: Request) -> HTMLResponse:
         # X.4.h.url — read URL query params into the cache so a
@@ -1675,6 +1689,7 @@ def make_studio_routes(
             cache, dev_log,
             tg_cache=tg_cache,
             etl_hook_command=etl_hook_command,
+            cfg=cfg,
         ))
 
     async def data_timeline(_request: Request) -> HTMLResponse:
@@ -1704,6 +1719,7 @@ def make_studio_routes(
                 cache, dev_log, focus_node_id, layer,
                 coverage_available=db_pool is not None,
                 embed=embed,
+                cfg=cfg,
             ),
         )
 
@@ -2114,7 +2130,16 @@ def make_studio_routes(
 
         async def coverage(_request: Request) -> JSONResponse:
             instance = cache.get()
-            prefix = bound_prefix_override or str(instance.instance)
+            # Z.C — prefix resolution order:
+            # 1) explicit prefix_override (operator wires per-call)
+            # 2) cfg.db_table_prefix (cfg-bound studio session)
+            # 3) cache.path.stem (yaml file basename — fallback for
+            #    studio sessions wired without a cfg, e.g. unit tests)
+            prefix = (
+                bound_prefix_override
+                or (cfg.db_table_prefix if cfg is not None else None)
+                or cache.path.stem
+            )
             cov = await coverage_for(
                 bound_pool, prefix, instance, dialect=bound_dialect,
             )

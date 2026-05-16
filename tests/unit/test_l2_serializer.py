@@ -70,7 +70,8 @@ def test_serialize_l2_emits_valid_yaml() -> None:
     text = serialize_l2(instance)
     parsed = _yaml.safe_load(text)
     assert isinstance(parsed, dict)
-    assert parsed["instance"] == "spec_example"
+    # Z.C — serializer no longer emits `instance:` (the field is gone).
+    assert "instance" not in parsed
     assert isinstance(parsed["accounts"], list)
 
 

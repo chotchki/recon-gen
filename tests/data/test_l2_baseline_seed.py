@@ -25,7 +25,27 @@ from quicksight_gen.common.l2.seed import (
 
 _SPEC_EXAMPLE = Path(__file__).parent.parent / "l2" / "spec_example.yaml"
 _SASQUATCH_PR = Path(__file__).parent.parent / "l2" / "sasquatch_pr.yaml"
+# Z.C — the db_table_prefix used to be an L2-yaml field (``instance:``)
+# but is now a cfg.yaml field. Tests pre-Z.C derived the prefix from
+# ``instance.instance``; post-Z.C they hardcode it here matching each
+# fixture's pre-Z.C ``instance:`` value so the per-prefix table names
+# (``spec_example_transactions``, etc.) in test assertions stay valid.
+_SPEC_EXAMPLE_PREFIX = "spec_example"
+_SASQUATCH_PR_PREFIX = "sasquatch_pr"
 _ANCHOR = date(2026, 4, 30)
+
+
+def _prefix_for(path: Path) -> str:
+    """Map an L2 yaml path to its Z.C db_table_prefix.
+
+    Tests pass paths to fixtures and need to know the matching cfg-side
+    db_table_prefix. Pre-Z.C the prefix lived inside the yaml at
+    ``instance:``; post-Z.C tests pin the mapping here.
+    """
+    return {
+        _SPEC_EXAMPLE: _SPEC_EXAMPLE_PREFIX,
+        _SASQUATCH_PR: _SASQUATCH_PR_PREFIX,
+    }[path]
 
 
 class TestSeedForRail:
@@ -80,48 +100,67 @@ class TestEmitBaselineSeedSkeleton:
     @pytest.mark.parametrize("yaml_path", [_SPEC_EXAMPLE, _SASQUATCH_PR])
     def test_emit_returns_string(self, yaml_path: Path) -> None:
         instance = load_instance(yaml_path)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_prefix_for(yaml_path), anchor=_ANCHOR,
+        )
         assert isinstance(sql, str)
         assert len(sql) > 0
 
     def test_header_carries_instance_prefix(self) -> None:
         instance = load_instance(_SPEC_EXAMPLE)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR,
+        )
         assert "L2 instance: spec_example" in sql
 
     def test_header_carries_anchor(self) -> None:
         instance = load_instance(_SPEC_EXAMPLE)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR,
+        )
         assert _ANCHOR.isoformat() in sql
 
     def test_header_reports_rail_and_chain_counts(self) -> None:
         instance = load_instance(_SASQUATCH_PR)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
         assert f"Rails declared: {len(instance.rails)}" in sql
         assert f"Chains declared: {len(instance.chains)}" in sql
 
     def test_window_days_default_is_90(self) -> None:
         instance = load_instance(_SPEC_EXAMPLE)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR,
+        )
         assert "90-day rolling window" in sql
 
     def test_window_days_override(self) -> None:
         instance = load_instance(_SPEC_EXAMPLE)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR, window_days=30)
+        sql = emit_baseline_seed(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR,
+            window_days=30,
+        )
         assert "30-day rolling window" in sql
 
     def test_no_remaining_stub_markers(self) -> None:
         # R.2.a-e all complete — no "in progress" markers should remain.
         instance = load_instance(_SPEC_EXAMPLE)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR,
+        )
         assert "in progress" not in sql, (
             "R.2.a-e all complete; no stub markers should remain in output"
         )
 
     def test_emit_is_deterministic_for_fixed_anchor(self) -> None:
         instance = load_instance(_SASQUATCH_PR)
-        a = emit_baseline_seed(instance, anchor=_ANCHOR)
-        b = emit_baseline_seed(instance, anchor=_ANCHOR)
+        a = emit_baseline_seed(
+            instance, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
+        b = emit_baseline_seed(
+            instance, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
         assert a == b
 
 
@@ -130,7 +169,9 @@ class TestBaselineLegLoop:
 
     def test_spec_example_emits_thousands_of_legs(self) -> None:
         instance = load_instance(_SPEC_EXAMPLE)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR,
+        )
         n = sql.count("INSERT INTO spec_example_transactions")
         # spec_example has 4 non-aggregating rails over 65 business days.
         # Per R.1.f §1 the heuristic targets 5k-10k legs total; we may
@@ -142,12 +183,15 @@ class TestBaselineLegLoop:
 
     def test_sasquatch_pr_lands_in_target_band(self) -> None:
         instance = load_instance(_SASQUATCH_PR)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
         n = sql.count("INSERT INTO sasquatch_pr_transactions")
-        # R.1.f §1: total expected ~50k-80k legs over 90 days for
-        # sasquatch_pr. R.2.b skips aggregating rails so a lower bound
-        # of 30k is reasonable; aggregating rails will lift this to
-        # the spec target in R.2.c.
+        # R.1.f §1: total expected ~30k-100k legs over 90 days for
+        # sasquatch_pr. Restored to 30k lower bound after Z.C.7 follow-on
+        # rewired ``seed.py::_classify_rail`` to substring-match the
+        # post-Z.B CamelCase rail names (`CustomerInboundACH` etc.)
+        # instead of the legacy snake_case tokens (`ach_inbound`).
         assert 30_000 <= n <= 100_000, (
             f"R.2.b should emit 30k-100k baseline legs for sasquatch_pr; "
             f"got {n}"
@@ -158,7 +202,9 @@ class TestBaselineLegLoop:
         # eligible accounts should emit at least one EOD/EOM parent leg
         # over the window.
         instance = load_instance(_SASQUATCH_PR)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
         missing: list[str] = []
         for rail in instance.rails:
             if not rail.aggregating:
@@ -174,7 +220,9 @@ class TestBaselineLegLoop:
         # Every non-aggregating rail with eligible accounts should emit
         # at least some firings.
         instance = load_instance(_SASQUATCH_PR)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
         missing: list[str] = []
         for rail in instance.rails:
             if rail.aggregating:
@@ -191,7 +239,9 @@ class TestBaselineLegLoop:
         # of each month. Over a 90-day window that's ~3 firings, much
         # fewer than a daily_eod rail's ~65.
         instance = load_instance(_SASQUATCH_PR)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
         monthly_count = sql.count("'CustomerFeeMonthlySettlement'")
         daily_count = sql.count("'ACHOriginationDailySweep'")
         assert monthly_count <= 5, (
@@ -206,7 +256,9 @@ class TestBaselineLegLoop:
         # at emit time. The bundle_id format is
         # ``tr-base-bundle-<agg_rail_slug>-<seq:04d>``.
         instance = load_instance(_SASQUATCH_PR)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
         # ACHOriginationDailySweep bundles CustomerOutboundACH; both
         # the parent legs (transfer_id) and child legs (bundle_id) carry
         # ``bundle-achoriginationdailysweep`` in their identifier.
@@ -220,7 +272,9 @@ class TestBaselineLegLoop:
         # TransferTemplate) and which fires at the configured completion
         # rate should emit child legs with transfer_parent_id set.
         instance = load_instance(_SASQUATCH_PR)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
         # Chain children carry the "tr-base-chain-" prefix in their
         # transfer_id; the count should be substantial across all
         # Rail-parented chain entries.
@@ -237,7 +291,9 @@ class TestBaselineLegLoop:
         # firing count (~63 over 90d). Optional chains hit fewer because
         # they share an xor_group and complete probabilistically.
         instance = load_instance(_SASQUATCH_PR)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
 
         required_chain_children = sql.count(
             "tr-base-chain-concentrationtofrbsweep",
@@ -254,7 +310,9 @@ class TestBaselineLegLoop:
         # via the child rail's lognormal — not a constant value.
         import re
         instance = load_instance(_SASQUATCH_PR)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
         # Pull the money column from chain child rows.
         chain_amounts = re.findall(
             r"tx-base-chain-[a-z-]+-\d+',[^,]+,[^,]+,[^,]+,[^,]+,[^,]+,\s*"
@@ -273,7 +331,9 @@ class TestBaselineLegLoop:
         # yields ~1,500-3,000 daily balance rows after the picker's
         # uneven account selection.
         instance = load_instance(_SASQUATCH_PR)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
         n = sql.count("INSERT INTO sasquatch_pr_daily_balances")
         assert 1_000 <= n <= 5_000, (
             f"R.2.e should emit 1k-5k daily_balances rows for sasquatch_pr; "
@@ -284,8 +344,12 @@ class TestBaselineLegLoop:
         # R.2.e iteration is sorted by (account_id, day). Two runs at
         # the same anchor must produce byte-identical output.
         instance = load_instance(_SPEC_EXAMPLE)
-        a = emit_baseline_seed(instance, anchor=_ANCHOR)
-        b = emit_baseline_seed(instance, anchor=_ANCHOR)
+        a = emit_baseline_seed(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR,
+        )
+        b = emit_baseline_seed(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR,
+        )
         assert a == b, "R.2.e daily_balances must be deterministic"
 
     def test_balances_state_machine_updates(self) -> None:
@@ -297,7 +361,9 @@ class TestEmitFullSeed:
     def test_full_seed_includes_baseline_markers(self) -> None:
         instance = load_instance(_SASQUATCH_PR)
         scenario = default_scenario_for(instance, today=_ANCHOR).scenario
-        sql = emit_full_seed(instance, scenario, anchor=_ANCHOR)
+        sql = emit_full_seed(
+            instance, scenario, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
         # Baseline header + per-rail tx prefix.
         assert "Phase R healthy baseline seed" in sql
         assert "tr-base-" in sql
@@ -305,7 +371,9 @@ class TestEmitFullSeed:
     def test_full_seed_includes_plant_markers(self) -> None:
         instance = load_instance(_SASQUATCH_PR)
         scenario = default_scenario_for(instance, today=_ANCHOR).scenario
-        sql = emit_full_seed(instance, scenario, anchor=_ANCHOR)
+        sql = emit_full_seed(
+            instance, scenario, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
         # Plant SQL header from emit_seed.
         assert "demo seed" in sql
 
@@ -313,8 +381,12 @@ class TestEmitFullSeed:
         # Full seed has more rows than baseline alone.
         instance = load_instance(_SASQUATCH_PR)
         scenario = default_scenario_for(instance, today=_ANCHOR).scenario
-        baseline_only = emit_baseline_seed(instance, anchor=_ANCHOR)
-        full = emit_full_seed(instance, scenario, anchor=_ANCHOR)
+        baseline_only = emit_baseline_seed(
+            instance, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
+        full = emit_full_seed(
+            instance, scenario, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
         baseline_n = baseline_only.count("INSERT INTO sasquatch_pr_transactions")
         full_n = full.count("INSERT INTO sasquatch_pr_transactions")
         assert full_n > baseline_n, (
@@ -325,8 +397,12 @@ class TestEmitFullSeed:
     def test_full_seed_deterministic(self) -> None:
         instance = load_instance(_SASQUATCH_PR)
         scenario = default_scenario_for(instance, today=_ANCHOR).scenario
-        a = emit_full_seed(instance, scenario, anchor=_ANCHOR)
-        b = emit_full_seed(instance, scenario, anchor=_ANCHOR)
+        a = emit_full_seed(
+            instance, scenario, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
+        b = emit_full_seed(
+            instance, scenario, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
         assert a == b
 
     def test_densified_scenario_multiplies_plants(self) -> None:
@@ -415,7 +491,9 @@ class TestEmitFullSeed:
         import re
         instance = load_instance(_SASQUATCH_PR)
         scenario = default_scenario_for(instance, today=_ANCHOR).scenario
-        sql = emit_full_seed(instance, scenario, anchor=_ANCHOR)
+        sql = emit_full_seed(
+            instance, scenario, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
+        )
         baseline_ids = set(re.findall(r"'(tr-base[a-z0-9-]*)',", sql))
         plant_ids = set(re.findall(
             r"'(tr-(?:drift|overdraft|breach|stuck|tt|inv|rail|"
@@ -434,7 +512,9 @@ class TestEmitFullSeed:
         # non-zero EOD balances by counting distinct account_ids in SQL.
         import re
         instance = load_instance(_SPEC_EXAMPLE)
-        sql = emit_baseline_seed(instance, anchor=_ANCHOR)
+        sql = emit_baseline_seed(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR,
+        )
         # Account_id is the second value in each row.
         account_ids = set(re.findall(
             r"VALUES\n  \('[^']+', '([^']+)',", sql,
@@ -458,22 +538,35 @@ class TestBaseSeedKnob:
         # Absent base_seed must equal _BASELINE_BASE_SEED — that's how
         # the locked-seed determinism contract stays intact.
         instance = load_instance(_SPEC_EXAMPLE)
-        without = emit_baseline_seed(instance, anchor=_ANCHOR)
+        without = emit_baseline_seed(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR,
+        )
         with_default = emit_baseline_seed(
-            instance, anchor=_ANCHOR, base_seed=_BASELINE_BASE_SEED,
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR,
+            base_seed=_BASELINE_BASE_SEED,
         )
         assert without == with_default
 
     def test_base_seed_int_changes_baseline(self) -> None:
         instance = load_instance(_SPEC_EXAMPLE)
-        a = emit_baseline_seed(instance, anchor=_ANCHOR, base_seed=1)
-        b = emit_baseline_seed(instance, anchor=_ANCHOR, base_seed=2)
+        a = emit_baseline_seed(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR, base_seed=1,
+        )
+        b = emit_baseline_seed(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR, base_seed=2,
+        )
         assert a != b
 
     def test_base_seed_same_int_is_deterministic(self) -> None:
         instance = load_instance(_SPEC_EXAMPLE)
-        a = emit_baseline_seed(instance, anchor=_ANCHOR, base_seed=12345)
-        b = emit_baseline_seed(instance, anchor=_ANCHOR, base_seed=12345)
+        a = emit_baseline_seed(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR,
+            base_seed=12345,
+        )
+        b = emit_baseline_seed(
+            instance, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR,
+            base_seed=12345,
+        )
         assert a == b
 
     def test_base_seed_propagates_through_emit_full_seed(self) -> None:
@@ -482,10 +575,12 @@ class TestBaseSeedKnob:
         instance = load_instance(_SPEC_EXAMPLE)
         scenario = default_scenario_for(instance, today=_ANCHOR).scenario
         a = emit_full_seed(
-            instance, scenario, anchor=_ANCHOR, base_seed=999,
+            instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
+            anchor=_ANCHOR, base_seed=999,
         )
         b = emit_full_seed(
-            instance, scenario, anchor=_ANCHOR, base_seed=1000,
+            instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
+            anchor=_ANCHOR, base_seed=1000,
         )
         assert a != b
 
@@ -494,9 +589,11 @@ class TestBaseSeedKnob:
         # when base_seed is omitted.
         instance = load_instance(_SPEC_EXAMPLE)
         scenario = default_scenario_for(instance, today=_ANCHOR).scenario
-        absent = emit_full_seed(instance, scenario, anchor=_ANCHOR)
+        absent = emit_full_seed(
+            instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR,
+        )
         explicit = emit_full_seed(
-            instance, scenario, anchor=_ANCHOR,
+            instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX, anchor=_ANCHOR,
             base_seed=_BASELINE_BASE_SEED,
         )
         assert absent == explicit

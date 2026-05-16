@@ -236,13 +236,6 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         kind="text",
         required=True,
     ),
-    FieldSpec(
-        name="transfer_type",
-        label="Transfer type",
-        helper="e.g. ach / wire / charge / settlement.",
-        kind="text",
-        required=True,
-    ),
     # X.4.f.11.2 — TwoLegRail per-leg roles. RoleExpression is
     # tuple[Identifier, ...]; multi-select renders the list as a
     # union ("any of these roles is admissible at posting time").
@@ -493,13 +486,6 @@ _TRANSFER_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         required=True,
     ),
     FieldSpec(
-        name="transfer_type",
-        label="Transfer type",
-        helper="e.g. settlement_cycle / recon_cycle.",
-        kind="text",
-        required=True,
-    ),
-    FieldSpec(
         name="expected_net",
         label="Expected net",
         helper="L1 Conservation flags any firing whose legs don't sum to this.",
@@ -546,10 +532,11 @@ _LIMIT_SCHEDULE_FIELDS: tuple[FieldSpec, ...] = (
         required=True,
     ),
     FieldSpec(
-        name="transfer_type",
-        label="Transfer type",
-        helper="The transfer type the cap applies to.",
-        kind="text",
+        name="rail",
+        label="Rail",
+        helper="The rail the cap applies to.",
+        kind="select",
+        select_from="rails",
         required=True,
     ),
     FieldSpec(
@@ -1671,7 +1658,7 @@ def _entity_id(kind: EntityKind, entity: object) -> str:
         children_csv = ",".join(sorted(str(c) for c in children))
         return f"{getattr(entity, 'parent')}::{children_csv}"
     # limit_schedule
-    return f"{getattr(entity, 'parent_role')}::{getattr(entity, 'transfer_type')}"
+    return f"{getattr(entity, 'parent_role')}::{getattr(entity, 'rail')}"
 
 
 def _html_id_slug(entity_id: str) -> str:
@@ -2132,14 +2119,14 @@ def _post_mutate_entity_id(
             children_csv = old_children_csv
         return f"{parent}::{children_csv}"
     if kind == "limit_schedule":
-        old_parent_role, _, old_tt = old_entity_id.partition("::")
+        old_parent_role, _, old_rail = old_entity_id.partition("::")
         parent_role = str(
             new_fields.get("parent_role", old_parent_role) or old_parent_role,
         )
-        transfer_type = str(
-            new_fields.get("transfer_type", old_tt) or old_tt,
+        rail = str(
+            new_fields.get("rail", old_rail) or old_rail,
         )
-        return f"{parent_role}::{transfer_type}"
+        return f"{parent_role}::{rail}"
     addr = _addressing_field(kind)
     return str(new_fields.get(addr, old_entity_id) or old_entity_id)
 

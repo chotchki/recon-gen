@@ -115,14 +115,14 @@ _LIMIT_BREACH_VIOLATION_FIELDS = (
     ("account_role", "str"),
     ("account_parent_role", "str"),
     ("business_day", "date"),
-    ("transfer_type", "str"),
+    ("rail_name", "str"),
     ("outbound_total", "Decimal"),
     ("cap", "Decimal"),
 )
 
 _LIMIT_BREACH_CHILD_GROUP_SUMMARY_FIELDS = (
     ("parent_role", "str"),
-    ("transfer_type", "str"),
+    ("rail_name", "str"),
     ("distinct_children_breaching", "int"),
     ("total_overshoot", "Decimal"),
 )
@@ -133,7 +133,7 @@ _STUCK_PENDING_VIOLATION_FIELDS = (
     ("account_role", "str"),
     ("account_parent_role", "str"),
     ("transaction_id", "str"),
-    ("transfer_type", "str"),
+    ("rail_name", "str"),
     ("posting", "datetime"),
     ("amount_money", "Decimal"),
     ("age_seconds", "Decimal"),
@@ -142,7 +142,7 @@ _STUCK_PENDING_VIOLATION_FIELDS = (
 
 _STUCK_PENDING_CHILD_GROUP_SUMMARY_FIELDS = (
     ("parent_role", "str"),
-    ("transfer_type", "str"),
+    ("rail_name", "str"),
     ("distinct_children_affected", "int"),
     ("stuck_transaction_count", "int"),
     ("total_stuck_amount", "Decimal"),
@@ -154,7 +154,7 @@ _STUCK_UNBUNDLED_VIOLATION_FIELDS = (
     ("account_role", "str"),
     ("account_parent_role", "str"),
     ("transaction_id", "str"),
-    ("transfer_type", "str"),
+    ("rail_name", "str"),
     ("posting", "datetime"),
     ("amount_money", "Decimal"),
     ("age_seconds", "Decimal"),
@@ -163,7 +163,7 @@ _STUCK_UNBUNDLED_VIOLATION_FIELDS = (
 
 _STUCK_UNBUNDLED_CHILD_GROUP_SUMMARY_FIELDS = (
     ("parent_role", "str"),
-    ("transfer_type", "str"),
+    ("rail_name", "str"),
     ("distinct_children_affected", "int"),
     ("stuck_transaction_count", "int"),
     ("total_stuck_amount", "Decimal"),

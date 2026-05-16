@@ -55,7 +55,10 @@ def themed_l2(tmp_path: Path) -> Path:
     import yaml
 
     inst = yaml.safe_load(_SPEC_EXAMPLE.read_text())
-    inst["instance"] = "theme_probe"
+    # Z.C — top-level `instance:` key is no longer accepted on L2 yamls;
+    # the deployment identifiers live on cfg.yaml. Strip it if the bundled
+    # spec_example happens to still carry one (defensive).
+    inst.pop("instance", None)
     inst["theme"]["accent"] = _ACCENT
     inst["theme"]["accent_fg"] = "#FFFFFF"
     inst["theme"]["dimension"] = "#FF66DD"

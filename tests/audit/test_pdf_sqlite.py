@@ -69,15 +69,19 @@ class _FakeCfg:
     """Minimal cfg surface the audit query helpers touch.
 
     They check ``demo_database_url`` (truthy → run the SQL; None →
-    early-return None for skeleton mode) and read ``dialect`` to pick
-    the right ``date_literal`` SQL form. The patched ``connect_demo_db``
-    ignores ``demo_database_url`` so any truthy string suffices; the
-    ``dialect`` is load-bearing — ``SQLITE`` causes ``date_literal`` to
-    emit ``'YYYY-MM-DD'`` (plain text), which is the only form SQLite
-    accepts for date comparisons against TEXT-stored ISO dates.
+    early-return None for skeleton mode), read ``dialect`` to pick
+    the right ``date_literal`` SQL form, and read ``db_table_prefix``
+    (Z.C — formerly read off the L2 instance). The patched
+    ``connect_demo_db`` ignores ``demo_database_url`` so any truthy
+    string suffices; the ``dialect`` is load-bearing — ``SQLITE``
+    causes ``date_literal`` to emit ``'YYYY-MM-DD'`` (plain text),
+    which is the only form SQLite accepts for date comparisons
+    against TEXT-stored ISO dates. ``db_table_prefix`` defaults to
+    ``ut`` to match the planted-schema table names.
     """
     demo_database_url: str = "sqlite:///:memory:"
     dialect: Dialect = Dialect.SQLITE
+    db_table_prefix: str = "ut"
 
 
 @dataclass
@@ -138,7 +142,7 @@ def _create_audit_schema(conn: sqlite3.Connection) -> None:
             account_role TEXT,
             account_parent_role TEXT,
             business_day TEXT NOT NULL,
-            transfer_type TEXT,
+            rail_name TEXT,
             outbound_total REAL NOT NULL,
             cap REAL NOT NULL
         );
@@ -148,7 +152,7 @@ def _create_audit_schema(conn: sqlite3.Connection) -> None:
             account_role TEXT,
             account_parent_role TEXT,
             transaction_id TEXT NOT NULL,
-            transfer_type TEXT,
+            rail_name TEXT,
             posting TEXT NOT NULL,
             amount_money REAL NOT NULL,
             age_seconds REAL NOT NULL,
@@ -160,7 +164,7 @@ def _create_audit_schema(conn: sqlite3.Connection) -> None:
             account_role TEXT,
             account_parent_role TEXT,
             transaction_id TEXT NOT NULL,
-            transfer_type TEXT,
+            rail_name TEXT,
             posting TEXT NOT NULL,
             amount_money REAL NOT NULL,
             age_seconds REAL NOT NULL,

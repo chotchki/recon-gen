@@ -103,7 +103,7 @@ _ACCOUNT_COVERAGE_DESCRIPTION = (
 )
 
 _TRANSACTION_VOLUME_DESCRIPTION = (
-    "Transaction throughput over time, sliced by transfer_type so you "
+    "Transaction throughput over time, sliced by rail_name so you "
     "can see which rails are growing or contracting. The line chart is "
     "the trend; the bar chart is the period total per type."
 )
@@ -125,14 +125,14 @@ _ACCOUNT_COVERAGE_BULLETS = [
 
 _TRANSACTION_VOLUME_BULLETS = [
     "KPIs: total transactions + average daily volume",
-    "Daily transaction count, coloured by transfer_type",
-    "Period total per transfer_type",
+    "Daily transaction count, coloured by rail_name",
+    "Period total per rail_name",
 ]
 
 _MONEY_MOVED_BULLETS = [
     "KPIs: net money moved (Σ signed) + gross money moved (Σ |signed|)",
-    "Daily gross money moved, coloured by transfer_type",
-    "Period total per transfer_type",
+    "Daily gross money moved, coloured by rail_name",
+    "Period total per rail_name",
 ]
 
 
@@ -395,14 +395,14 @@ def _populate_account_coverage(
 
 # ---------------------------------------------------------------------------
 # Transaction Volume Over Time (L.6.5) — 2 KPIs (period total +
-# average daily count) + daily stacked bar by transfer_type +
+# average daily count) + daily stacked bar by rail_name +
 # per-type clustered bar.
 #
 # **L.6.12 friction note** — original design called for a line chart
-# of daily counts coloured by transfer_type. The tree has no
+# of daily counts coloured by rail_name. The tree has no
 # LineChart primitive yet (PR/AR/Inv didn't need one). Substituted
 # a vertical STACKED BarChart with `posted_date` on Category +
-# `transfer_count` on Values + `transfer_type` on Colors — same
+# `transfer_count` on Values + `rail_name` on Colors — same
 # trend signal, different visual shape. Adding a `LineChart` typed
 # Visual subtype + an `add_line_chart` layout DSL helper is queued
 # for the L.6.12 iteration gate.
@@ -444,21 +444,21 @@ def _populate_transaction_volume(
     )
 
     # Row 2: full-width vertical STACKED bar — daily transfer count,
-    # stacked by transfer_type. The trend over time PLUS the
+    # stacked by rail_name. The trend over time PLUS the
     # composition signal in one visual.
     sheet.layout.row(height=_CHART_ROW_SPAN).add_bar_chart(
         width=_FULL,
         visual_id=VisualId("exec-txn-bar-daily-stacked"),
         title="Daily Transaction Count by Type",
         subtitle=(
-            "Each day's transfer count, stacked by transfer_type so "
+            "Each day's transfer count, stacked by rail_name so "
             "rail composition + trend show together"
         ),
         category=[ds_txn["posted_date"].date(field_id="exec-txn-daily-date")],
         values=[ds_txn["transfer_count"].sum(
             field_id="exec-txn-daily-count",
         )],
-        colors=[ds_txn["transfer_type"].dim(field_id="exec-txn-daily-type")],
+        colors=[ds_txn["rail_name"].dim(field_id="exec-txn-daily-type")],
         orientation="VERTICAL",
         bars_arrangement="STACKED",
         category_label="Posted Date",
@@ -467,15 +467,15 @@ def _populate_transaction_volume(
     )
 
     # Row 3: full-width vertical clustered bar — period total per
-    # transfer_type. Reads the same dataset, aggregates across the
+    # rail_name. Reads the same dataset, aggregates across the
     # date axis to give the "where did the volume come from" snapshot.
     sheet.layout.row(height=_CHART_ROW_SPAN).add_bar_chart(
         width=_FULL,
         visual_id=VisualId("exec-txn-bar-by-type"),
         title="Period Total by Type",
-        subtitle="Total transfer count over the selected period, per transfer_type",
+        subtitle="Total transfer count over the selected period, per rail_name",
         category=[
-            ds_txn["transfer_type"].dim(field_id="exec-txn-type-dim"),
+            ds_txn["rail_name"].dim(field_id="exec-txn-type-dim"),
         ],
         values=[ds_txn["transfer_count"].sum(field_id="exec-txn-type-count")],
         orientation="VERTICAL",
@@ -528,14 +528,14 @@ def _populate_money_moved(
     )
 
     # Row 2: full-width vertical stacked bar — daily gross dollars,
-    # stacked by transfer_type. Same friction note as L.6.5 — would
+    # stacked by rail_name. Same friction note as L.6.5 — would
     # be a line chart if the tree had one.
     sheet.layout.row(height=_CHART_ROW_SPAN).add_bar_chart(
         width=_FULL,
         visual_id=VisualId("exec-money-bar-daily-stacked"),
         title="Daily Gross Dollars Moved by Type",
         subtitle=(
-            "Each day's gross dollar volume, stacked by transfer_type"
+            "Each day's gross dollar volume, stacked by rail_name"
         ),
         category=[
             ds_txn["posted_date"].date(field_id="exec-money-daily-date"),
@@ -543,7 +543,7 @@ def _populate_money_moved(
         values=[ds_txn["gross_amount"].sum(
             field_id="exec-money-daily-gross", currency=True,
         )],
-        colors=[ds_txn["transfer_type"].dim(
+        colors=[ds_txn["rail_name"].dim(
             field_id="exec-money-daily-type",
         )],
         orientation="VERTICAL",
@@ -554,17 +554,17 @@ def _populate_money_moved(
     )
 
     # Row 3: full-width vertical clustered bar — period total per
-    # transfer_type.
+    # rail_name.
     sheet.layout.row(height=_CHART_ROW_SPAN).add_bar_chart(
         width=_FULL,
         visual_id=VisualId("exec-money-bar-by-type"),
         title="Period Total Gross Dollars by Type",
         subtitle=(
             "Total gross dollar volume over the period, per "
-            "transfer_type"
+            "rail_name"
         ),
         category=[
-            ds_txn["transfer_type"].dim(field_id="exec-money-type-dim"),
+            ds_txn["rail_name"].dim(field_id="exec-money-type-dim"),
         ],
         values=[ds_txn["gross_amount"].sum(
             field_id="exec-money-type-gross", currency=True,
@@ -596,7 +596,7 @@ def _wire_date_range_filter(
     Account Coverage filters on ``last_activity_date`` (one row per
     account, NULL when never-active). Transaction Volume + Money Moved
     both read from ``exec_transaction_summary`` and filter on
-    ``posted_date`` (per-(day, transfer_type) summary).
+    ``posted_date`` (per-(day, rail_name) summary).
     """
     ds_acct = datasets[DS_EXEC_ACCOUNT_SUMMARY]
     ds_acct_active = datasets[DS_EXEC_ACCOUNT_SUMMARY_ACTIVE]
@@ -698,11 +698,11 @@ def _wire_date_range_filter(
 # App entry points
 # ---------------------------------------------------------------------------
 
-def _analysis_name(l2_instance: L2Instance) -> str:
-    """Title shown in QuickSight — matches L1/L2FT's ``Name (instance)``
-    shape so multi-instance deployments are visually distinguishable
-    in the dashboard list."""
-    return f"Executives ({l2_instance.instance})"
+def _analysis_name(cfg: Config) -> str:
+    """Title shown in QuickSight — matches L1/L2FT's ``Name (deployment)``
+    shape so multi-deployment runs are visually distinguishable in the
+    dashboard list."""
+    return f"Executives ({cfg.deployment_name})"
 
 
 # Sheet display order. Pre-register-all-shells pattern (mirrors
@@ -731,20 +731,17 @@ def build_executives_app(
     """Construct the Executives App as a tree (N.4.b — L2-fed).
 
     Per the N.2 audit, Executives is fed by the same institution YAML
-    that drives L1 / L2FT / Investigation. The L2 instance prefix is
-    auto-derived from ``l2_instance.instance`` here so callers don't
-    have to pre-stamp ``cfg.l2_instance_prefix``; if the caller HAS
-    pre-set it, that value is preserved. Defaults to the
-    persona-neutral ``spec_example`` instance.
+    that drives L1 / L2FT / Investigation. Z.C: the deployment +
+    DB-table prefixes are required cfg fields — both come from
+    ``cfg.deployment_name`` (QS-resource segment) and
+    ``cfg.db_table_prefix`` (DB table-name prefix). Defaults to the
+    persona-neutral ``spec_example`` L2 instance.
 
-    Executives reads from ``<prefix>_transactions`` +
-    ``<prefix>_daily_balances``. No app-specific matviews.
+    Executives reads from ``<db_table_prefix>_transactions`` +
+    ``<db_table_prefix>_daily_balances``. No app-specific matviews.
     """
     if l2_instance is None:
         l2_instance = default_l2_instance()
-
-    if cfg.l2_instance_prefix is None:
-        cfg = cfg.with_l2_instance_prefix(str(l2_instance.instance))
 
     # N.4.c / N.4.k: theme from the L2 instance, coerced to the
     # registry default for in-canvas accent colors when the instance
@@ -754,7 +751,7 @@ def build_executives_app(
     from quicksight_gen.common.theme import DEFAULT_PRESET
     theme = resolve_l2_theme(l2_instance) or DEFAULT_PRESET
 
-    analysis_name = _analysis_name(l2_instance)
+    analysis_name = _analysis_name(cfg)
     app = App(name="executives", cfg=cfg)
     analysis = app.set_analysis(Analysis(
         analysis_id_suffix="executives-analysis",

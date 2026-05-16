@@ -112,7 +112,6 @@ def spec_scenario(spec_instance) -> ScenarioPlant:
             LimitBreachPlant(
                 account_id=Identifier("cust-001"),
                 days_ago=4,
-                transfer_type="wire",
                 rail_name=Identifier("ExternalRailOutbound"),
                 amount=Decimal("9000.00"),  # > $5k wire cap
                 counter_account_id=Identifier("external-counterparty-one"),
@@ -122,7 +121,6 @@ def spec_scenario(spec_instance) -> ScenarioPlant:
             StuckPendingPlant(
                 account_id=Identifier("cust-001"),
                 days_ago=2,
-                transfer_type="ach",
                 rail_name=Identifier("ExternalRailInbound"),
                 amount=Decimal("450.00"),
             ),
@@ -131,7 +129,6 @@ def spec_scenario(spec_instance) -> ScenarioPlant:
             StuckUnbundledPlant(
                 account_id=Identifier("cust-002"),
                 days_ago=1,
-                transfer_type="charge",
                 rail_name=Identifier("SubledgerCharge"),
                 amount=Decimal("12.50"),
             ),
@@ -140,7 +137,6 @@ def spec_scenario(spec_instance) -> ScenarioPlant:
             SupersessionPlant(
                 account_id=Identifier("cust-001"),
                 days_ago=3,
-                transfer_type="charge",
                 rail_name=Identifier("SubledgerCharge"),
                 original_amount=Decimal("250.00"),
                 corrected_amount=Decimal("275.00"),
@@ -152,7 +148,7 @@ def spec_scenario(spec_instance) -> ScenarioPlant:
 
 @pytest.fixture(scope="module")
 def spec_seed_sql(spec_instance, spec_scenario) -> str:
-    return emit_seed(spec_instance, spec_scenario)
+    return emit_seed(spec_instance, spec_scenario, prefix="spec_example")
 
 
 def test_seed_emits_against_spec_example_yaml(spec_seed_sql) -> None:

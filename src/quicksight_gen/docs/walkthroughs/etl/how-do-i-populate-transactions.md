@@ -85,7 +85,7 @@ For every row your ETL writes, you're committing to a contract:
    under-fire).
 4. **`metadata` JSON** — the universal extras container. Skip it
    on day 1 if your downstream consumer doesn't need it; populate
-   it in priority order (`source` first, then per-`transfer_type`
+   it in priority order (`source` first, then per-`rail_name`
    keys per the catalog). The catalog tables in Schema_v6 list the
    keys + what each one drives.
 
@@ -99,7 +99,7 @@ The mapping pattern looks like this for a customer-DDA posting
 
 ```sql
 INSERT INTO {{ l2_instance_name }}_transactions (
-    transaction_id, transfer_id, transfer_type, origin,
+    transaction_id, transfer_id, rail_name, origin,
     account_id, account_name, account_parent_role, account_role,
     account_scope, amount_money, amount, status,
     posting, business_day_start, memo, metadata
@@ -107,7 +107,7 @@ INSERT INTO {{ l2_instance_name }}_transactions (
 SELECT
     p.posting_id,                                      -- your PK
     p.transfer_id,                                     -- your transfer grouping
-    p.transfer_type,                                   -- map your enum to ours
+    p.rail_name,                                   -- map your enum to ours
     'InternalInitiated'                  AS origin,    -- or ExternalForcePosted for Fed
     p.account_number                     AS account_id,
     a.account_name,
@@ -166,7 +166,7 @@ Once your projection is wired up:
    [What do I do when the demo passes but my prod data fails?](what-do-i-do-when-demo-passes-but-prod-fails.md)
    for the symptom-organized debug recipes.
 4. **Iterate on metadata** — once the minimum feed is stable,
-   layer in `transfer_parent_id` and the per-`transfer_type`
+   layer in `transfer_parent_id` and the per-`rail_name`
    metadata keys per the
    [Metadata JSON columns](../../Schema_v6.md#metadata-json-columns)
    contract.

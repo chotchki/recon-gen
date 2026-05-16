@@ -17,8 +17,6 @@ hit a "no visual with title 'X'" assertion deep in CI.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from tests.audit._dashboard_extract import (
@@ -28,19 +26,29 @@ from tests.audit._dashboard_extract import (
 )
 
 
-# Set env vars here (not in a fixture) because the L1 app's tree is
-# session-scoped and constructed at module import in the fixture
-# below — it needs cfg-shaped env vars before the first call.
-# Direct os.environ.setdefault is intentional here (vs. EnvVar.serialize):
-# setdefault preserves any operator-set value, and validate-on-set
-# would reject the test placeholders against the real IAM-ARN regex
-# in the wrong direction (the test deliberately uses a fake account).
-os.environ.setdefault("QS_GEN_AWS_ACCOUNT_ID", "111122223333")  # typing-smell: ignore[envvar-bypass]: test fixture sets env BEFORE load_config; setdefault semantics
-os.environ.setdefault("QS_GEN_AWS_REGION", "us-west-2")  # typing-smell: ignore[envvar-bypass]: test fixture sets env BEFORE load_config
-os.environ.setdefault(  # typing-smell: ignore[envvar-bypass]: test fixture sets env BEFORE load_config
-    "QS_GEN_DATASOURCE_ARN",
-    "arn:aws:quicksight:us-west-2:111122223333:datasource/ds",
-)
+@pytest.fixture(scope="module", autouse=True)
+def _cfg_env(monkeypatch_module: pytest.MonkeyPatch):
+    """Stamp the cfg-shaped env vars `load_config(None)` needs in the
+    `l1_app` fixture below. Module-scoped so the env doesn't leak into
+    other test modules (pre-Z.C.7 this was module-level
+    `os.environ.setdefault`, which polluted `tests/unit/test_config_loader.py`).
+    """
+    monkeypatch_module.setenv("QS_GEN_AWS_ACCOUNT_ID", "111122223333")
+    monkeypatch_module.setenv("QS_GEN_AWS_REGION", "us-west-2")
+    monkeypatch_module.setenv(
+        "QS_GEN_DATASOURCE_ARN",
+        "arn:aws:quicksight:us-west-2:111122223333:datasource/ds",
+    )
+    monkeypatch_module.setenv("QS_GEN_DEPLOYMENT_NAME", "spec_example")
+    monkeypatch_module.setenv("QS_GEN_DB_TABLE_PREFIX", "spec_example")
+
+
+@pytest.fixture(scope="module")
+def monkeypatch_module():
+    """Module-scoped monkeypatch — pytest's built-in is function-scoped."""
+    mp = pytest.MonkeyPatch()
+    yield mp
+    mp.undo()
 
 
 @pytest.fixture(scope="module")

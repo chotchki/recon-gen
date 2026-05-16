@@ -74,21 +74,17 @@ def _all_dataset_filenames(
     )
 
     active_l2 = l2_instance if l2_instance is not None else default_l2_instance()
-    cfg_with_prefix = (
-        cfg if cfg.l2_instance_prefix is not None
-        else cfg.with_l2_instance_prefix(str(active_l2.instance))
-    )
 
     names: set[str] = {f"{ds.DataSetId}.json" for ds in keep_current}
-    names.update(f"{ds.DataSetId}.json" for ds in _inv(cfg_with_prefix, active_l2))
-    names.update(f"{ds.DataSetId}.json" for ds in _exec(cfg_with_prefix))
+    names.update(f"{ds.DataSetId}.json" for ds in _inv(cfg, active_l2))
+    names.update(f"{ds.DataSetId}.json" for ds in _exec(cfg))
     names.update(
         f"{ds.DataSetId}.json"
-        for ds in _l1(cfg_with_prefix, active_l2)
+        for ds in _l1(cfg, active_l2)
     )
     names.update(
         f"{ds.DataSetId}.json"
-        for ds in _l2ft(cfg_with_prefix, active_l2)
+        for ds in _l2ft(cfg, active_l2)
     )
     return names
 
@@ -117,12 +113,10 @@ def _generate_investigation(
     cfg = load_config(config_path)
     out = Path(output_dir)
     l2_instance = _resolve_l2(l2_instance_path)
-    if cfg.l2_instance_prefix is None:
-        cfg = cfg.with_l2_instance_prefix(str(l2_instance.instance))
 
     click.echo(
         f"Investigation: account={cfg.aws_account_id}, "
-        f"region={cfg.aws_region}, l2_instance={l2_instance.instance}"
+        f"region={cfg.aws_region}, deployment={cfg.deployment_name}"
     )
 
     theme = build_theme(cfg, resolve_l2_theme(l2_instance))
@@ -166,12 +160,10 @@ def _generate_executives(
     cfg = load_config(config_path)
     out = Path(output_dir)
     l2_instance = _resolve_l2(l2_instance_path)
-    if cfg.l2_instance_prefix is None:
-        cfg = cfg.with_l2_instance_prefix(str(l2_instance.instance))
 
     click.echo(
         f"Executives: account={cfg.aws_account_id}, "
-        f"region={cfg.aws_region}, l2_instance={l2_instance.instance}"
+        f"region={cfg.aws_region}, deployment={cfg.deployment_name}"
     )
 
     theme = build_theme(cfg, resolve_l2_theme(l2_instance))
@@ -217,20 +209,10 @@ def _generate_l1_dashboard(
     cfg = load_config(config_path)
     out = Path(output_dir)
     l2_instance = _resolve_l2(l2_instance_path)
-    # X.1.f — stamp cfg with the L2 prefix BEFORE building the theme.
-    # Without this, ``build_theme`` calls ``cfg.prefixed("theme")``
-    # without the L2 segment and emits ``theme.json`` with id
-    # ``<resource_prefix>-theme`` while the dashboard's ThemeArn (built
-    # downstream by ``build_l1_dashboard_app`` which DOES stamp the
-    # prefix) references ``<resource_prefix>-<l2>-theme``. Result: the
-    # deployed dashboard has a dangling ThemeArn → QS's
-    # ``GetThemeForDashboard`` API call 404s on every embed session.
-    if cfg.l2_instance_prefix is None:
-        cfg = cfg.with_l2_instance_prefix(str(l2_instance.instance))
 
     click.echo(
         f"L1 Dashboard: account={cfg.aws_account_id}, "
-        f"region={cfg.aws_region}, l2_instance={l2_instance.instance}"
+        f"region={cfg.aws_region}, deployment={cfg.deployment_name}"
     )
 
     theme = build_theme(cfg, resolve_l2_theme(l2_instance))
@@ -276,13 +258,10 @@ def _generate_l2_flow_tracing(
     cfg = load_config(config_path)
     out = Path(output_dir)
     l2_instance = _resolve_l2(l2_instance_path)
-    # X.1.f — see L1 Dashboard generator for the full rationale.
-    if cfg.l2_instance_prefix is None:
-        cfg = cfg.with_l2_instance_prefix(str(l2_instance.instance))
 
     click.echo(
         f"L2 Flow Tracing: account={cfg.aws_account_id}, "
-        f"region={cfg.aws_region}, l2_instance={l2_instance.instance}"
+        f"region={cfg.aws_region}, deployment={cfg.deployment_name}"
     )
 
     theme = build_theme(cfg, resolve_l2_theme(l2_instance))

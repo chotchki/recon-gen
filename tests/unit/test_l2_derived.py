@@ -34,7 +34,6 @@ def _make_instance(
 ) -> L2Instance:
     """Minimal L2Instance for isolating one derivation source at a time."""
     return L2Instance(
-        instance=Identifier("der"),
         accounts=(
             Account(id=Identifier("a"), scope="internal", role=Identifier("A")),
             Account(id=Identifier("b"), scope="internal", role=Identifier("B")),
@@ -51,7 +50,6 @@ def _two_leg(name: str, **kwargs) -> TwoLegRail:
     """Helper: TwoLegRail with sane defaults; override via kwargs."""
     defaults = dict(
         name=Identifier(name),
-        transfer_type="t",
         metadata_keys=(),
         source_role=(Identifier("A"),),
         destination_role=(Identifier("B"),),
@@ -66,7 +64,6 @@ def _single_leg(name: str, **kwargs) -> SingleLegRail:
     """Helper: SingleLegRail with sane defaults; override via kwargs."""
     defaults = dict(
         name=Identifier(name),
-        transfer_type="t",
         metadata_keys=(),
         leg_role=(Identifier("A"),),
         leg_direction="Debit",
@@ -109,7 +106,6 @@ def test_unions_in_transfer_key_when_rail_in_template_leg_rails() -> None:
     ))
     template = TransferTemplate(
         name=Identifier("MerchantSettlementCycle"),
-        transfer_type="settlement_cycle",
         expected_net=Decimal("0"),
         transfer_key=(
             Identifier("merchant_id"),
@@ -130,7 +126,6 @@ def test_unions_transfer_keys_across_multiple_containing_templates() -> None:
     rail = _single_leg("SharedLeg")
     t1 = TransferTemplate(
         name=Identifier("T1"),
-        transfer_type="t1",
         expected_net=Decimal("0"),
         transfer_key=(Identifier("k1"),),
         completion="business_day_end",
@@ -138,7 +133,6 @@ def test_unions_transfer_keys_across_multiple_containing_templates() -> None:
     )
     t2 = TransferTemplate(
         name=Identifier("T2"),
-        transfer_type="t2",
         expected_net=Decimal("0"),
         transfer_key=(Identifier("k2"),),
         completion="business_day_end",
@@ -191,7 +185,6 @@ def test_singleton_children_chain_via_containing_template() -> None:
     rail = _single_leg("Leg")
     template = TransferTemplate(
         name=Identifier("MyTemplate"),
-        transfer_type="t",
         expected_net=Decimal("0"),
         transfer_key=(Identifier("k"),),
         completion="business_day_end",
@@ -224,7 +217,6 @@ def test_unions_all_three_sources_together() -> None:
     )
     template = TransferTemplate(
         name=Identifier("Template"),
-        transfer_type="t",
         expected_net=Decimal("0"),
         transfer_key=(Identifier("template_key"),),
         completion="business_day_end",
@@ -259,7 +251,6 @@ def test_dedups_overlap_between_integrator_declared_and_transfer_key() -> None:
     )
     template = TransferTemplate(
         name=Identifier("T"),
-        transfer_type="t",
         expected_net=Decimal("0"),
         transfer_key=(
             Identifier("merchant_id"),

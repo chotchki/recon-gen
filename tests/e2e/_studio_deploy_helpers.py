@@ -84,7 +84,9 @@ def apply_schema_to(cfg: Config) -> None:
     DB. Idempotent enough for test setup — schema CREATE IF NOT EXISTS
     handles re-runs."""
     instance = load_instance(SASQUATCH_YAML)
-    schema_sql = emit_schema(instance, dialect=cfg.dialect)
+    schema_sql = emit_schema(
+        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+    )
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -102,9 +104,12 @@ def write_pg_etl_cfg(pg_url: str, tmp_path: Path) -> tuple[Config, Path]:
     The etl_hook script invokes `quicksight-gen` against this yaml so
     `data apply` can re-seed the postgres on each pipeline run."""
     pg_cfg_path = tmp_path / "pg_etl_cfg.yaml"
+    # Z.C — deployment_name + db_table_prefix are required cfg fields.
     pg_cfg_dict = {
         "aws_account_id": "111122223333",
         "aws_region": "us-east-1",
+        "deployment_name": "qsgen-pg-etl",
+        "db_table_prefix": "sasquatch_pr",
         "datasource_arn": (
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),
@@ -115,6 +120,8 @@ def write_pg_etl_cfg(pg_url: str, tmp_path: Path) -> tuple[Config, Path]:
     cfg = Config(
         aws_account_id="111122223333",
         aws_region="us-east-1",
+        deployment_name="qsgen-pg-etl",
+        db_table_prefix="sasquatch_pr",
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),
@@ -148,11 +155,14 @@ def make_studio_cfg(
 ) -> tuple[Config, Path]:
     """Studio cfg: demo_database_url=sqlite tempfile under ``tmp_path``,
     optional etl_hook + etl_datasource. Returns ``(cfg, sqlite_path)``."""
-    instance = load_instance(SASQUATCH_YAML)
     sqlite_path = tmp_path / "demo.sqlite"
+    # Z.C — deployment_name + db_table_prefix are required cfg fields.
+    db_prefix = "sasquatch_pr"
     cfg_kwargs: dict[str, Any] = {  # noqa: ANN401
         "aws_account_id": "111122223333",
         "aws_region": "us-east-1",
+        "deployment_name": "qsgen-studio",
+        "db_table_prefix": db_prefix,
         "datasource_arn": (
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),
@@ -165,8 +175,8 @@ def make_studio_cfg(
     if etl_datasource_url is not None:
         cfg_kwargs["etl_datasource"] = EtlDatasourceConfig(
             url=etl_datasource_url,
-            transactions_table=f"{instance.instance}_transactions",
-            daily_balances_table=f"{instance.instance}_daily_balances",
+            transactions_table=f"{db_prefix}_transactions",
+            daily_balances_table=f"{db_prefix}_daily_balances",
         )
     return Config(**cfg_kwargs), sqlite_path
 
@@ -178,8 +188,6 @@ def build_studio_app(
     + ``pool`` (async sqlite pool against same DB). Mirrors the
     ``cli/_html_serve.py::_serve`` composition but in-process."""
     instance = load_instance(SASQUATCH_YAML)
-    if cfg.l2_instance_prefix is None:
-        cfg = cfg.with_l2_instance_prefix(str(instance.instance))
     cache = L2InstanceCache(SASQUATCH_YAML, instance)
 
     dashboards: dict[str, ServedDashboard] = {}
@@ -194,12 +202,15 @@ def build_studio_app(
             filter_specs=(),
         )
 
+    # Z.C — make_studio_routes' prefix_override is the legacy L2-segment
+    # override. Pass cfg.db_table_prefix so SQL emitters key off the
+    # right tables; the override path itself is being phased out.
     studio_routes = make_studio_routes(
         cache,
         dev_log=False,
         db_pool=pool,
         dialect=cfg.dialect,
-        prefix_override=cfg.l2_instance_prefix,
+        prefix_override=cfg.db_table_prefix,
         cfg=cfg,
     )
     return make_app(dashboards=dashboards, studio_routes=studio_routes)

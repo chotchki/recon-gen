@@ -74,9 +74,10 @@ def _load_l2() -> L2Instance:
 
 _CFG = _load_cfg()
 _L2 = _load_l2()
-# Resolve the L2 prefix from cfg if set, else from the L2 instance.
-# Mirrors the auto-derive contract on ``Config.l2_instance_prefix``.
-_PREFIX = _CFG.l2_instance_prefix or str(_L2.instance)
+# Z.C — db_table_prefix is a required cfg field; the operator's cfg.yaml
+# carries the prefix that matches the seeded DB. (Was previously derived
+# from cfg.l2_instance_prefix or l2_instance.instance, both gone.)
+_PREFIX = _CFG.db_table_prefix
 
 
 @pytest.fixture(scope="module")

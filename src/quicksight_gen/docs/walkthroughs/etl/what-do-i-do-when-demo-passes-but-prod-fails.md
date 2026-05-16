@@ -58,7 +58,7 @@ window.
 
 ### Symptom 2 — "An L1 KPI shows 0 but I know exceptions exist in my data"
 
-**Most likely**: a `transfer_type` value in your data isn't in the
+**Most likely**: a `rail_name` value in your data isn't in the
 canonical L2 vocabulary, so dataset SQL filters reject it — or, for
 the L1 net-zero classification specifically, the row is a single-
 leg type (`sale` or `external_txn`), which the schema flags as
@@ -68,16 +68,16 @@ intent.
 **Check 1 — values in your data vs the L2 vocabulary**:
 
 ```sql
-SELECT transfer_type, COUNT(*)
+SELECT rail_name, COUNT(*)
 FROM {{ l2_instance_name }}_transactions
 WHERE -- your scope filter
-GROUP BY transfer_type
+GROUP BY rail_name
 ORDER BY COUNT(*) DESC;
 ```
 
-Compare against the `transfer_type` values your L2 instance
+Compare against the `rail_name` values your L2 instance
 declares (open the L2 instance YAML's `transfer_templates:` and
-`rails:` blocks; the union of declared `transfer_type` values is
+`rails:` blocks; the union of declared `rail_name` values is
 your canonical set). Anything not in that set surfaces unfiltered
 in raw views like the L1 Transactions sheet, but type-scoped
 checks (drift split, limit breach, aging) won't fire on it.
@@ -95,7 +95,7 @@ ORDER BY ABS(drift) DESC;
 The drift view subtracts `recomputed` (cumulative SUM of
 `amount_money`) from `money` (stored EOD value). A non-zero row
 here is a real drift; an empty result on data you know is broken
-usually means your `transfer_type` slipped through the canonical
+usually means your `rail_name` slipped through the canonical
 set and the matview filter dropped it.
 
 ### Symptom 3 — "A visual cell shows N/A or a column is blank"
@@ -111,7 +111,7 @@ populates an optional key.
 ```sql
 SELECT COUNT(*) AS rows_missing_key
 FROM {{ l2_instance_name }}_transactions
-WHERE transfer_type = 'sale'
+WHERE rail_name = 'sale'
   AND -- your scope filter
   AND NOT JSON_EXISTS(metadata, '$.card_brand');
 ```
@@ -182,11 +182,11 @@ the trace stops short.
 to your subset:
 
 ```sql
-SELECT t.transfer_id, t.transfer_type, t.transfer_parent_id
+SELECT t.transfer_id, t.rail_name, t.transfer_parent_id
 FROM {{ l2_instance_name }}_transactions t
 WHERE -- your scope filter, e.g., a merchant_id metadata key
       JSON_VALUE(t.metadata, '$.merchant_id') = 'your-merchant-id'
-  AND t.transfer_type IN ('payment', 'settlement', 'sale')
+  AND t.rail_name IN ('payment', 'settlement', 'sale')
   AND (
       t.transfer_parent_id IS NULL
       OR NOT EXISTS (

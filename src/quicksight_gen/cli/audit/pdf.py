@@ -729,10 +729,10 @@ def _limit_breach_story(
     """Platypus elements for the U.3.c Limit breach violations page.
 
     Same parent-vs-child split as Overdraft. Children grouped by
-    (parent_role, transfer_type) since the LimitSchedule cap is
+    (parent_role, rail_name) since the LimitSchedule cap is
     keyed on that pair. Parent table carries 8 columns (account,
-    role, day, transfer_type, outbound, cap, overshoot); child
-    summary 4 columns (parent_role, transfer_type, count, total
+    role, day, rail_name, outbound, cap, overshoot); child
+    summary 4 columns (parent_role, rail_name, count, total
     overshoot).
     """
     from reportlab.lib import colors
@@ -756,7 +756,7 @@ def _limit_breach_story(
             styles["BodyText"],
         ),
         Paragraph(
-            "<i>Account-day-transfer_type cells where cumulative "
+            "<i>Account-day-rail_name cells where cumulative "
             "outbound exceeded the L2-configured cap. Parent accounts "
             "shown per-row; child accounts grouped by (parent role, "
             "transfer type) &mdash; the LimitSchedule key shape.</i>",
@@ -827,7 +827,7 @@ def _limit_breach_story(
                 Paragraph(r.account_name, cell_style),
                 Paragraph(r.account_role, cell_style),
                 r.business_day.isoformat(),
-                Paragraph(r.transfer_type, cell_style),
+                Paragraph(r.rail_name, cell_style),
                 f"${r.outbound_total:,.2f}",
                 f"${r.cap:,.2f}",
                 f"${r.overshoot:,.2f}",
@@ -862,7 +862,7 @@ def _limit_breach_story(
         for s in child_groups:
             group_data.append([
                 Paragraph(s.parent_role, cell_style),
-                Paragraph(s.transfer_type, cell_style),
+                Paragraph(s.rail_name, cell_style),
                 f"{s.distinct_children_breaching}",
                 f"${s.total_overshoot:,.2f}",
             ])
@@ -979,7 +979,7 @@ def _stuck_pending_story(
             detail_data.append([
                 Paragraph(r.account_id, cell_style),
                 Paragraph(r.account_name, cell_style),
-                Paragraph(r.transfer_type, cell_style),
+                Paragraph(r.rail_name, cell_style),
                 r.posting.strftime("%Y-%m-%d %H:%M"),
                 f"${r.amount_money:,.2f}",
                 _format_age(r.age_seconds),
@@ -1014,7 +1014,7 @@ def _stuck_pending_story(
         for s in child_groups:
             group_data.append([
                 Paragraph(s.parent_role, cell_style),
-                Paragraph(s.transfer_type, cell_style),
+                Paragraph(s.rail_name, cell_style),
                 f"{s.distinct_children_affected}",
                 f"{s.stuck_transaction_count}",
                 f"${s.total_stuck_amount:,.2f}",
@@ -1130,7 +1130,7 @@ def _stuck_unbundled_story(
             detail_data.append([
                 Paragraph(r.account_id, cell_style),
                 Paragraph(r.account_name, cell_style),
-                Paragraph(r.transfer_type, cell_style),
+                Paragraph(r.rail_name, cell_style),
                 r.posting.strftime("%Y-%m-%d %H:%M"),
                 f"${r.amount_money:,.2f}",
                 _format_age(r.age_seconds),
@@ -1165,7 +1165,7 @@ def _stuck_unbundled_story(
         for s in child_groups:
             group_data.append([
                 Paragraph(s.parent_role, cell_style),
-                Paragraph(s.transfer_type, cell_style),
+                Paragraph(s.rail_name, cell_style),
                 f"{s.distinct_children_affected}",
                 f"{s.stuck_transaction_count}",
                 f"${s.total_stuck_amount:,.2f}",
@@ -1516,7 +1516,7 @@ def _daily_statement_walks_story(
                 txn_data.append([
                     t.posting.strftime("%H:%M"),
                     Paragraph(t.transaction_id, cell_style),
-                    Paragraph(t.transfer_type, cell_style),
+                    Paragraph(t.rail_name, cell_style),
                     t.amount_direction,
                     f"${t.amount_money:,.2f}",
                     t.status,

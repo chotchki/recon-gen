@@ -36,8 +36,6 @@ from quicksight_gen.common.env_keys import QS_GEN_RUN_DIR
 def test_loads_kitchen_sink_yaml_inline(tmp_path: Path) -> None:
     """Every primitive at least once + aggregating + xor + union role."""
     yaml_text = dedent("""\
-        instance: ksk
-
         accounts:
           - id: gl-control
             name: Control Account
@@ -61,14 +59,12 @@ def test_loads_kitchen_sink_yaml_inline(tmp_path: Path) -> None:
 
         rails:
           - name: SubledgerCharge
-            transfer_type: charge
             origin: InternalInitiated
             metadata_keys: [merchant_id, settlement_period]
             leg_role: CustomerSubledger
             leg_direction: Debit
 
           - name: ExtInbound
-            transfer_type: ach
             origin: ExternalForcePosted
             metadata_keys: [external_reference]
             source_role: [ExternalCounterparty, MerchantLedger]
@@ -76,19 +72,17 @@ def test_loads_kitchen_sink_yaml_inline(tmp_path: Path) -> None:
             expected_net: 0
 
           - name: PoolBalancing
-            transfer_type: pool_balancing
             origin: InternalInitiated
             metadata_keys: []
             source_role: ControlAccount
             destination_role: ControlAccount
             expected_net: 0
             aggregating: true
-            bundles_activity: [SubledgerCharge, ach]
+            bundles_activity: [SubledgerCharge, ExtInbound]
             cadence: intraday-2h
 
         transfer_templates:
           - name: MerchantSettlementCycle
-            transfer_type: settlement_cycle
             expected_net: 0
             transfer_key: [merchant_id, settlement_period]
             completion: metadata.settlement_period_end
@@ -102,7 +96,7 @@ def test_loads_kitchen_sink_yaml_inline(tmp_path: Path) -> None:
 
         limit_schedules:
           - parent_role: ControlAccount
-            transfer_type: ach
+            rail: ExtInbound
             cap: 5000.00
         """)
     p = tmp_path / "kitchen.yaml"
@@ -112,7 +106,6 @@ def test_loads_kitchen_sink_yaml_inline(tmp_path: Path) -> None:
     # references a template not declared in transfer_templates so the
     # cross-entity validator (M.2d.2) would reject it. Loader-only test.
     inst = load_instance(p, validate=False)
-    assert inst.instance == "ksk"
     assert len(inst.accounts) == 2
     assert len(inst.account_templates) == 2
     assert len(inst.rails) == 3
@@ -137,7 +130,7 @@ def test_loads_kitchen_sink_yaml_inline(tmp_path: Path) -> None:
     pool = by_name["PoolBalancing"]
     assert isinstance(pool, TwoLegRail)
     assert pool.aggregating is True
-    assert pool.bundles_activity == ("SubledgerCharge", "ach")
+    assert pool.bundles_activity == ("SubledgerCharge", "ExtInbound")
     assert pool.cadence == "intraday-2h"
 
     # Money coercion
@@ -162,7 +155,6 @@ def test_loads_kitchen_sink_yaml_inline(tmp_path: Path) -> None:
 def test_money_coercion_dodges_float_precision(tmp_path: Path) -> None:
     """Per F4: Decimal(str(value)) instead of Decimal(value) — preserves '0.1'."""
     yaml_text = dedent("""\
-        instance: pre
         accounts:
           - id: a1
             scope: internal
@@ -170,7 +162,6 @@ def test_money_coercion_dodges_float_precision(tmp_path: Path) -> None:
             expected_eod_balance: 0.1
         rails:
           - name: R
-            transfer_type: t
             origin: o
             source_role: A
             destination_role: A
@@ -192,7 +183,6 @@ def test_money_coercion_dodges_float_precision(tmp_path: Path) -> None:
 def test_money_rejects_non_numeric(tmp_path: Path) -> None:
     """Money fields reject obvious garbage."""
     yaml_text = dedent("""\
-        instance: pre
         accounts:
           - id: a1
             scope: internal
@@ -206,38 +196,11 @@ def test_money_rejects_non_numeric(tmp_path: Path) -> None:
 
 
 # -- F5 InstancePrefix regex + length cap -------------------------------------
-
-
-@pytest.mark.parametrize("bad_prefix", [
-    "Sasq",        # uppercase
-    "1bank",       # leading digit
-    "my-bank",     # hyphen not allowed
-    "my bank",     # space
-    "",            # empty string
-])
-def test_instance_prefix_regex_rejects(bad_prefix: str, tmp_path: Path) -> None:
-    """Per F5: InstancePrefix MUST match ^[a-z][a-z0-9_]*$."""
-    p = tmp_path / "bad_prefix.yaml"
-    p.write_text(f'instance: "{bad_prefix}"\naccounts: []\nrails: []\n')
-    with pytest.raises(L2LoaderError):
-        load_instance(p)
-
-
-def test_instance_prefix_30_char_cap(tmp_path: Path) -> None:
-    """Per F5: max 30 characters."""
-    long_prefix = "a" * 31
-    p = tmp_path / "long.yaml"
-    p.write_text(f'instance: "{long_prefix}"\naccounts: []\nrails: []\n')
-    with pytest.raises(L2LoaderError, match="max 30 characters"):
-        load_instance(p)
-
-
-def test_instance_prefix_accepts_max_length(tmp_path: Path) -> None:
-    """Exactly 30 chars works."""
-    p = tmp_path / "max.yaml"
-    p.write_text(f'instance: "{"a" * 30}"\naccounts: []\nrails: []\n')
-    inst = load_instance(p)
-    assert len(inst.instance) == 30
+#
+# The F5 regex + 30-char cap moved to ``cfg.db_table_prefix`` (Z.C,
+# 2026-05-15). Coverage lives in ``tests/unit/test_config_loader.py``.
+# The L2 yaml side no longer carries an ``instance:`` field at all —
+# loader rejection coverage lives in ``test_legacy_instance_key_rejected``.
 
 
 # -- Rail discrimination ------------------------------------------------------
@@ -246,14 +209,12 @@ def test_instance_prefix_accepts_max_length(tmp_path: Path) -> None:
 def test_rail_rejects_both_two_leg_and_single_leg(tmp_path: Path) -> None:
     """A Rail cannot declare both shape's fields."""
     yaml_text = dedent("""\
-        instance: pre
         accounts:
           - id: a
             scope: internal
             role: R
         rails:
           - name: BadRail
-            transfer_type: t
             origin: o
             source_role: R
             destination_role: R
@@ -270,11 +231,9 @@ def test_rail_rejects_both_two_leg_and_single_leg(tmp_path: Path) -> None:
 def test_rail_rejects_neither_shape(tmp_path: Path) -> None:
     """A Rail must declare at least one shape."""
     yaml_text = dedent("""\
-        instance: pre
         accounts: []
         rails:
           - name: BadRail
-            transfer_type: t
             origin: o
         """)
     p = tmp_path / "neither.yaml"
@@ -286,11 +245,9 @@ def test_rail_rejects_neither_shape(tmp_path: Path) -> None:
 def test_two_leg_rail_requires_both_role_fields(tmp_path: Path) -> None:
     """Source-only or destination-only is rejected."""
     yaml_text = dedent("""\
-        instance: pre
         accounts: []
         rails:
           - name: BadRail
-            transfer_type: t
             origin: o
             source_role: R
             expected_net: 0
@@ -302,13 +259,6 @@ def test_two_leg_rail_requires_both_role_fields(tmp_path: Path) -> None:
 
 
 # -- Top-level shape ---------------------------------------------------------
-
-
-def test_missing_instance_field_rejected(tmp_path: Path) -> None:
-    p = tmp_path / "no_instance.yaml"
-    p.write_text("accounts: []\nrails: []\n")
-    with pytest.raises(L2LoaderError, match="missing required field 'instance'"):
-        load_instance(p)
 
 
 def test_empty_yaml_rejected(tmp_path: Path) -> None:
@@ -344,7 +294,6 @@ def _write_rail_yaml(tmp_path: Path, body: str) -> Path:
     """Helper: dump a minimal L2 instance with the given rail body."""
     p = tmp_path / "instance.yaml"
     p.write_text(
-        "instance: spk\n"
         "accounts:\n"
         "  - id: int-001\n"
         "    role: A\n"
@@ -362,7 +311,6 @@ def test_two_leg_rail_loads_per_leg_origin_overrides(tmp_path: Path) -> None:
     """Per-leg origin overrides land as fields on the loaded TwoLegRail."""
     p = _write_rail_yaml(tmp_path, """\
   - name: ExtInbound
-    transfer_type: ach
     source_role: B
     destination_role: A
     expected_net: 0
@@ -383,7 +331,6 @@ def test_single_leg_rail_rejects_per_leg_origin_overrides(tmp_path: Path) -> Non
     on a single-leg rail is a load-time configuration error."""
     p = _write_rail_yaml(tmp_path, """\
   - name: BadSingle
-    transfer_type: ach
     leg_role: A
     leg_direction: Debit
     origin: InternalInitiated
@@ -399,7 +346,6 @@ def test_single_leg_rail_rejects_per_leg_origin_overrides(tmp_path: Path) -> Non
 def test_single_leg_rail_rejects_destination_origin(tmp_path: Path) -> None:
     p = _write_rail_yaml(tmp_path, """\
   - name: BadSingle
-    transfer_type: ach
     leg_role: A
     leg_direction: Debit
     origin: InternalInitiated
@@ -418,7 +364,6 @@ def test_two_leg_rail_origin_now_optional(tmp_path: Path) -> None:
     behavior dropped in M.1a)."""
     p = _write_rail_yaml(tmp_path, """\
   - name: ExtInbound
-    transfer_type: ach
     source_role: B
     destination_role: A
     expected_net: 0
@@ -434,7 +379,6 @@ def test_rail_loads_posted_requirements(tmp_path: Path) -> None:
     """Integrator-declared PostedRequirements list loads as a tuple of Identifiers."""
     p = _write_rail_yaml(tmp_path, """\
   - name: ExtRail
-    transfer_type: ach
     leg_role: A
     leg_direction: Debit
     origin: ExternalForcePosted
@@ -452,7 +396,6 @@ def test_rail_loads_aging_durations(tmp_path: Path) -> None:
     from datetime import timedelta
     p = _write_rail_yaml(tmp_path, """\
   - name: AgingRail
-    transfer_type: ach
     leg_role: A
     leg_direction: Debit
     origin: InternalInitiated
@@ -484,7 +427,6 @@ def test_duration_literal_accepted(
     that names the components (used to make the parametrize labels readable)."""
     p = _write_rail_yaml(tmp_path, f"""\
   - name: R
-    transfer_type: t
     leg_role: A
     leg_direction: Debit
     origin: InternalInitiated
@@ -510,7 +452,6 @@ def test_duration_literal_accepted(
 def test_duration_literal_rejected(bad: str, tmp_path: Path) -> None:
     p = _write_rail_yaml(tmp_path, f"""\
   - name: R
-    transfer_type: t
     leg_role: A
     leg_direction: Debit
     origin: InternalInitiated
@@ -524,7 +465,6 @@ def test_duration_rejects_non_string(tmp_path: Path) -> None:
     """A YAML numeric like ``86400`` is a plausible mistake — explicitly reject."""
     p = _write_rail_yaml(tmp_path, """\
   - name: R
-    transfer_type: t
     leg_role: A
     leg_direction: Debit
     origin: InternalInitiated
@@ -532,6 +472,85 @@ def test_duration_rejects_non_string(tmp_path: Path) -> None:
 """)
     with pytest.raises(L2LoaderError, match="expected ISO 8601 duration string"):
         load_instance(p)
+
+
+# -- Z.B (2026-05-15) legacy `transfer_type:` rejection ----------------------
+
+
+def test_rail_rejects_legacy_transfer_type_key(tmp_path: Path) -> None:
+    """Z.B: rail's `name` IS the type — `transfer_type:` is a load-time error."""
+    p = _write_rail_yaml(tmp_path, """\
+  - name: R
+    transfer_type: charge
+    leg_role: A
+    leg_direction: Debit
+    origin: InternalInitiated
+""")
+    with pytest.raises(
+        L2LoaderError,
+        match=r"transfer_type: legacy field no longer supported.*Z\.B",
+    ):
+        load_instance(p, validate=False)
+
+
+def test_transfer_template_rejects_legacy_transfer_type_key(tmp_path: Path) -> None:
+    """Z.B: TransferTemplate's `name` IS the type identifier."""
+    yaml_text = dedent("""\
+        accounts:
+          - id: gl-1
+            role: Control
+            scope: internal
+
+        rails:
+          - name: SubCharge
+            origin: InternalInitiated
+            leg_role: Control
+            leg_direction: Debit
+
+        transfer_templates:
+          - name: ChargeBatch
+            transfer_type: charge
+            expected_net: 0
+            transfer_key: [batch_id]
+            completion: business_day_end
+            leg_rails: [SubCharge]
+        """)
+    p = tmp_path / "tt_legacy.yaml"
+    p.write_text(yaml_text)
+    with pytest.raises(
+        L2LoaderError,
+        match=r"transfer_type: legacy field no longer supported.*Z\.B",
+    ):
+        load_instance(p, validate=False)
+
+
+def test_limit_schedule_rejects_legacy_transfer_type_key(tmp_path: Path) -> None:
+    """Z.B: LimitSchedule's discriminator renamed `transfer_type` → `rail`."""
+    yaml_text = dedent("""\
+        accounts:
+          - id: gl-1
+            role: Control
+            scope: internal
+
+        rails:
+          - name: SubCharge
+            origin: InternalInitiated
+            leg_role: Control
+            leg_direction: Debit
+
+        limit_schedules:
+          - parent_role: Control
+            transfer_type: charge
+            cap: 1000.00
+        """)
+    p = tmp_path / "ls_legacy.yaml"
+    p.write_text(yaml_text)
+    with pytest.raises(
+        L2LoaderError,
+        match=r"transfer_type: legacy field renamed to `rail`.*Z\.B",
+    ):
+        load_instance(p, validate=False)
+
 
 # -- M.2d.2 parse-time validation enforcement -------------------------------
 
@@ -541,13 +560,11 @@ def test_load_instance_runs_validate_by_default(tmp_path: Path) -> None:
 
     Per M.2d.2 — every SHOULD-constraint in the SPEC's Validation Rules
     section is a YAML parse-time error. The fixture below has duplicate
-    LimitSchedule (parent_role, transfer_type) which violates U5; the
-    loader MUST raise on it without the caller having to know to call
+    LimitSchedule (parent_role, rail) which violates U5; the loader
+    MUST raise on it without the caller having to know to call
     ``validate()`` separately.
     """
     yaml_text = dedent("""\
-        instance: ldp
-
         accounts:
           - id: gl-1
             role: Control
@@ -561,14 +578,12 @@ def test_load_instance_runs_validate_by_default(tmp_path: Path) -> None:
 
         rails:
           - name: SubCharge
-            transfer_type: charge
             origin: InternalInitiated
             leg_role: Sub
             leg_direction: Debit
 
         transfer_templates:
           - name: ChargeBatch
-            transfer_type: charge
             expected_net: 0
             transfer_key: [batch_id]
             completion: business_day_end
@@ -576,10 +591,10 @@ def test_load_instance_runs_validate_by_default(tmp_path: Path) -> None:
 
         limit_schedules:
           - parent_role: Control
-            transfer_type: charge
+            rail: SubCharge
             cap: 1000.00
           - parent_role: Control
-            transfer_type: charge
+            rail: SubCharge
             cap: 5000.00
         """)
     p = tmp_path / "dup_limit.yaml"
@@ -600,8 +615,6 @@ def test_load_instance_validate_false_skips_cross_entity_pass(
     loader tests that intentionally exercise partial fixtures.
     """
     yaml_text = dedent("""\
-        instance: ldp
-
         accounts:
           - id: gl-1
             role: Control
@@ -609,17 +622,16 @@ def test_load_instance_validate_false_skips_cross_entity_pass(
 
         rails:
           - name: SubCharge
-            transfer_type: charge
             origin: InternalInitiated
             leg_role: Control
             leg_direction: Debit
 
         limit_schedules:
           - parent_role: Control
-            transfer_type: charge
+            rail: SubCharge
             cap: 1000.00
           - parent_role: Control
-            transfer_type: charge
+            rail: SubCharge
             cap: 5000.00
         """)
     p = tmp_path / "dup_limit_skip.yaml"
@@ -633,8 +645,6 @@ def test_load_instance_validate_false_skips_cross_entity_pass(
 
 
 _MINIMAL_YAML = dedent("""\
-    instance: cap_test
-
     accounts:
       - id: gl-1
         role: Control
@@ -642,7 +652,6 @@ _MINIMAL_YAML = dedent("""\
 
     rails:
       - name: SubCharge
-        transfer_type: charge
         origin: InternalInitiated
         leg_role: Control
         leg_direction: Debit
@@ -666,8 +675,14 @@ def test_capture_no_op_when_run_dir_unset(
 def test_capture_writes_yaml_when_run_dir_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Y.2.gate.c.12 — env set → ``<run-dir>/l2/<instance-prefix>.yaml``
-    written with the same bytes as the source."""
+    """Y.2.gate.c.12 — env set → ``<run-dir>/l2/<source-basename>.yaml``
+    written with the same bytes as the source.
+
+    Z.C (2026-05-15): the sidecar filename now derives from the source
+    yaml's basename (``yaml_path.stem``), since the L2 yaml no longer
+    carries an ``instance:`` field. Multiple yaml files in one run dir
+    must therefore use distinct basenames to avoid collision.
+    """
     # Y.2.gate.b.15 — must_be_dir validator requires the path to
     # exist; the sidecar's _capture_to_run_dir swallows
     # EnvVarInvalid, so without mkdir the capture would soft-fall
@@ -680,29 +695,9 @@ def test_capture_writes_yaml_when_run_dir_set(
 
     load_instance(p, validate=False)
 
-    target = run_dir / "l2" / "cap_test.yaml"
+    target = run_dir / "l2" / "src.yaml"
     assert target.exists()
     assert target.read_text() == _MINIMAL_YAML
-
-
-def test_capture_filename_is_instance_prefix_not_source_basename(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The destination filename always uses the YAML's own
-    ``instance:`` field, not the source basename. This deduplicates
-    across any path the operator might pass and matches the
-    spec's ``<instance-or-seed>`` naming convention."""
-    # See test_capture_writes_yaml_when_run_dir_set for why mkdir is needed.
-    run_dir = tmp_path / "run"
-    run_dir.mkdir(parents=True)
-    monkeypatch.setenv(QS_GEN_RUN_DIR.name, str(run_dir))
-    p = tmp_path / "totally_unrelated_name.yaml"
-    p.write_text(_MINIMAL_YAML)
-
-    load_instance(p, validate=False)
-
-    assert (run_dir / "l2" / "cap_test.yaml").exists()
-    assert not (run_dir / "l2" / "totally_unrelated_name.yaml").exists()
 
 
 def test_capture_overwrites_on_repeat_load(
@@ -724,7 +719,7 @@ def test_capture_overwrites_on_repeat_load(
     p.write_text(_MINIMAL_YAML + "\n# trailing comment\n")
     load_instance(p, validate=False)
 
-    target = run_dir / "l2" / "cap_test.yaml"
+    target = run_dir / "l2" / "src.yaml"
     assert target.read_text().endswith("# trailing comment\n")
 
 
@@ -737,11 +732,12 @@ def test_capture_sidecar_failure_doesnt_break_load(
     sitting where a directory should be)."""
     blocker = tmp_path / "blocker"
     blocker.write_text("I am a file, not a directory.")
-    # /<blocker>/l2/<prefix>.yaml — mkdir(blocker/l2) fails because
+    # /<blocker>/l2/<basename>.yaml — mkdir(blocker/l2) fails because
     # blocker is a file, but load_instance must still succeed.
     monkeypatch.setenv(QS_GEN_RUN_DIR.name, str(blocker))
     p = tmp_path / "src.yaml"
     p.write_text(_MINIMAL_YAML)
 
     inst = load_instance(p, validate=False)
-    assert str(inst.instance) == "cap_test"
+    # Smoke: load returned a usable instance despite the sidecar failure.
+    assert inst.accounts

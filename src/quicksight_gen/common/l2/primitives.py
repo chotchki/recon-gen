@@ -20,9 +20,13 @@ Per F4: Money values are ``Decimal``; the YAML loader (M.1.2) is
 responsible for the ``Decimal(str(value))`` coercion that dodges YAML
 float precision.
 
-Per F5: ``InstancePrefix`` (the ``L2Instance.instance`` field) MUST
-match ``^[a-z][a-z0-9_]*$`` with max 30 characters — enforced by the
-loader's identifier validator (M.1.2).
+Z.C (2026-05-15) — the legacy ``L2Instance.instance`` field has been
+dropped. The DB-table prefix (formerly enforced via SPEC F5's
+``^[a-z][a-z0-9_]*$``/30-char cap on the ``instance:`` YAML key) now
+lives on the cfg as ``cfg.db_table_prefix``; the same regex/cap is
+enforced by ``common/config.py``'s loader at cfg-load time. The
+QS-resource-ID prefix lives as ``cfg.deployment_name`` (replaces the
+former ``cfg.resource_prefix`` + ``cfg.l2_instance_prefix`` pair).
 
 Per F1 + SPEC's load-time validation list: every Role referenced by a
 Rail or AccountTemplate MUST resolve to either a declared ``Account``
@@ -75,9 +79,19 @@ Origin: TypeAlias = str
 # TransferTemplate's ExpectedNet at posting time.
 LegDirection: TypeAlias = Literal["Debit", "Credit", "Variable"]
 
+# A Rail's name. Distinct NewType from Identifier so pyright catches
+# kind-swap bugs at the call site (passing a Role / TransferTemplateName
+# where a RailName is expected). Z.B (2026-05-15) collapsed the legacy
+# `Rail.transfer_type` field into the rail name itself — the rail name
+# IS the "what kind of money movement" identifier across L1 + L2.
+RailName = NewType("RailName", str)
+
 # A Rail's TransferType extends L1's open enum (``Sale`` is the L1 default
-# and need not be redeclared). Strings here are validated only against the
-# rail's own declarations — there's no closed master list at L2.
+# and need not be redeclared). Z.B (2026-05-15) collapsed `Rail.transfer_type`
+# and `TransferTemplate.transfer_type` into rail / template names — this
+# alias is retained for legacy comments + cross-module imports that the
+# follow-on Z.B.5 sweep will untangle. New code SHOULD reach for `RailName`
+# instead.
 TransferType: TypeAlias = str
 
 # A SPEC-vocabulary expression for a TransferTemplate's Completion derivation.
@@ -205,7 +219,6 @@ class TwoLegRail:
     """
 
     name: Identifier
-    transfer_type: TransferType
     metadata_keys: tuple[Identifier, ...]
     source_role: RoleExpression
     destination_role: RoleExpression
@@ -248,8 +261,8 @@ class SingleLegRail:
     Per SPEC: single-leg rails MUST be reconciled by EITHER a
     ``TransferTemplate`` whose ``leg_rails`` includes this rail OR an
     aggregating rail whose ``bundles_activity`` includes this rail's
-    ``transfer_type``. A single-leg rail without either reconciliation
-    path is a configuration error (validator catches at load).
+    ``name``. A single-leg rail without either reconciliation path is
+    a configuration error (validator catches at load).
 
     ``leg_direction = Variable`` means the leg's amount AND direction are
     determined at posting time by a containing TransferTemplate's
@@ -263,7 +276,6 @@ class SingleLegRail:
     """
 
     name: Identifier
-    transfer_type: TransferType
     metadata_keys: tuple[Identifier, ...]
     leg_role: RoleExpression
     leg_direction: LegDirection
@@ -312,7 +324,6 @@ class TransferTemplate:
     """
 
     name: Identifier
-    transfer_type: TransferType
     expected_net: Money
     transfer_key: tuple[Identifier, ...]
     completion: CompletionExpression
@@ -348,16 +359,20 @@ class Chain:
 
 @dataclass(frozen=True, slots=True)
 class LimitSchedule:
-    """A daily cap on outbound flow per (parent role, transfer type).
+    """A daily cap on outbound flow per (parent role, rail).
 
     Per SPEC: time-invariant in v1. The library projects each entry into
     the relevant ``StoredBalance.Limits`` map; L1's Limit Breach
     invariant evaluates per child individually (the cap is per-child,
-    not aggregated across siblings of the parent).
+    not aggregated across siblings of the parent). Z.B (2026-05-15)
+    renamed ``transfer_type`` → ``rail`` — the field now references a
+    Rail name directly, eliminating the templated-leg footgun where a
+    `LimitSchedule on transfer_type=<leg_rail_type>` failed to fire on
+    transactions tagged with the *template*'s transfer_type instead.
     """
 
     parent_role: Identifier
-    transfer_type: TransferType
+    rail: RailName
     cap: Money
     description: str | None = None
 
@@ -369,13 +384,13 @@ class LimitSchedule:
 class L2Instance:
     """A loaded + parsed L2 institutional model.
 
-    The ``instance`` field is the InstancePrefix per SPEC's storage
-    isolation rule — propagates onto every generated DB object and
-    QuickSight resource ID. Validator enforces the
-    ``^[a-z][a-z0-9_]*$`` regex + 30-char cap (F5).
+    Z.C (2026-05-15) — the legacy ``instance`` field has been dropped.
+    The DB-table prefix lives on the cfg as ``cfg.db_table_prefix``;
+    the QS-resource-ID prefix lives as ``cfg.deployment_name``. Each
+    L2 YAML is pure topology + persona + theme; the cfg yaml carries
+    the deployment-specific identifiers.
     """
 
-    instance: Identifier
     accounts: tuple[Account, ...]
     account_templates: tuple[AccountTemplate, ...]
     rails: tuple[Rail, ...]

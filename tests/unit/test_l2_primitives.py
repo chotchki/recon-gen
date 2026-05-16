@@ -20,6 +20,7 @@ from quicksight_gen.common.l2 import (
     Identifier,
     L2Instance,
     LimitSchedule,
+    RailName,
     SingleLegRail,
     TransferTemplate,
     TwoLegRail,
@@ -29,7 +30,6 @@ from quicksight_gen.common.l2 import (
 def _example_instance() -> L2Instance:
     """Build a minimal L2Instance using every primitive at least once."""
     return L2Instance(
-        instance=Identifier("spk"),
         accounts=(
             Account(
                 id=Identifier("int-001"),
@@ -48,7 +48,6 @@ def _example_instance() -> L2Instance:
         rails=(
             TwoLegRail(
                 name=Identifier("ExtInbound"),
-                transfer_type="ach",
                 origin="ExternalForcePosted",
                 metadata_keys=(Identifier("external_reference"),),
                 source_role=(Identifier("ExternalCounterparty"),),
@@ -57,7 +56,6 @@ def _example_instance() -> L2Instance:
             ),
             SingleLegRail(
                 name=Identifier("SubledgerCharge"),
-                transfer_type="charge",
                 origin="InternalInitiated",
                 metadata_keys=(
                     Identifier("merchant_id"),
@@ -70,7 +68,6 @@ def _example_instance() -> L2Instance:
         transfer_templates=(
             TransferTemplate(
                 name=Identifier("MerchantSettlementCycle"),
-                transfer_type="settlement_cycle",
                 expected_net=Decimal("0"),
                 transfer_key=(
                     Identifier("merchant_id"),
@@ -89,7 +86,7 @@ def _example_instance() -> L2Instance:
         limit_schedules=(
             LimitSchedule(
                 parent_role=Identifier("SouthPool"),
-                transfer_type="ach",
+                rail=RailName("SubledgerCharge"),
                 cap=Decimal("5000.00"),
             ),
         ),
@@ -99,7 +96,6 @@ def _example_instance() -> L2Instance:
 def test_l2instance_constructs_with_every_primitive() -> None:
     """Every primitive is reachable from L2Instance and constructs cleanly."""
     inst = _example_instance()
-    assert inst.instance == "spk"
     assert len(inst.accounts) == 1
     assert len(inst.account_templates) == 1
     assert len(inst.rails) == 2
@@ -135,7 +131,6 @@ def test_aggregating_flag_optional_on_both_rail_shapes() -> None:
     """Per SPEC: aggregating MAY be true on either two-leg or single-leg."""
     two = TwoLegRail(
         name=Identifier("PoolBalancing"),
-        transfer_type="pool_balancing",
         origin="InternalInitiated",
         metadata_keys=(),
         source_role=(Identifier("NorthPool"),),
@@ -150,7 +145,6 @@ def test_aggregating_flag_optional_on_both_rail_shapes() -> None:
 
     single = SingleLegRail(
         name=Identifier("ExternalSweep"),
-        transfer_type="sweep",
         origin="InternalInitiated",
         metadata_keys=(),
         leg_role=(Identifier("ExternalCounterparty"),),
@@ -174,7 +168,6 @@ def test_two_leg_rail_accepts_per_leg_origin_overrides() -> None:
     an external counterparty often differs from its internal counterpart)."""
     rail = TwoLegRail(
         name=Identifier("ExtRailInbound"),
-        transfer_type="ach",
         metadata_keys=(),
         source_role=(Identifier("ExternalCounterparty"),),
         destination_role=(Identifier("ClearingSuspense"),),
@@ -191,7 +184,6 @@ def test_two_leg_rail_origin_optional_when_per_leg_set() -> None:
     """Rail-level origin can be None when both per-leg overrides are set."""
     rail = TwoLegRail(
         name=Identifier("R"),
-        transfer_type="ach",
         metadata_keys=(),
         source_role=(Identifier("A"),),
         destination_role=(Identifier("B"),),
@@ -213,7 +205,6 @@ def test_rails_carry_posted_requirements() -> None:
     """Per SPEC: integrator-declared PostedRequirements list lives on the Rail."""
     rail = SingleLegRail(
         name=Identifier("ExtRail"),
-        transfer_type="ach",
         metadata_keys=(Identifier("external_reference"),),
         leg_role=(Identifier("InternalDDA"),),
         leg_direction="Credit",
@@ -227,7 +218,6 @@ def test_rails_carry_aging_thresholds() -> None:
     """Per SPEC: max_pending_age + max_unbundled_age are Duration-typed."""
     rail = TwoLegRail(
         name=Identifier("R"),
-        transfer_type="ach",
         metadata_keys=(),
         source_role=(Identifier("A"),),
         destination_role=(Identifier("B"),),
@@ -245,7 +235,6 @@ def test_rails_default_to_no_aging_or_posted_requirements() -> None:
     that don't supply them keep working."""
     rail = SingleLegRail(
         name=Identifier("R"),
-        transfer_type="t",
         metadata_keys=(),
         leg_role=(Identifier("A"),),
         leg_direction="Debit",

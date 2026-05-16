@@ -26,7 +26,7 @@ type yet).
   child = required; two or more children = XOR alternation
   ("exactly one of these MUST fire").
 - [Limit schedule](limit-schedule.md) — daily outbound-flow cap
-  per (parent_role, transfer_type).
+  per (parent_role, rail_name).
 
 For the broader institution-tour view that walks every entity at
 once, see [Training Story](../../scenario/index.md). For the data-

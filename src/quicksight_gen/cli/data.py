@@ -121,7 +121,9 @@ def data_refresh(
     from quicksight_gen.common.l2.schema import refresh_matviews_sql
 
     cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
-    sql = refresh_matviews_sql(instance, dialect=cfg.dialect)
+    sql = refresh_matviews_sql(
+        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+    )
 
     if execute:
         connect_and_apply(cfg, sql, label="matview refresh")
@@ -152,7 +154,9 @@ def data_clean(
     from quicksight_gen.common.l2.seed import emit_truncate_sql
 
     cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
-    sql = emit_truncate_sql(instance, dialect=cfg.dialect)
+    sql = emit_truncate_sql(
+        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+    )
 
     if execute:
         connect_and_apply(cfg, sql, label="data TRUNCATE")
@@ -196,7 +200,7 @@ def data_lock(
     fresh = build_full_seed_sql(cfg, instance, anchor=_CANONICAL_LOCK_ANCHOR)
 
     locked_path = (
-        _LOCKED_SEEDS_DIR / f"{instance.instance}.{cfg.dialect.value}.sql"
+        _LOCKED_SEEDS_DIR / f"{cfg.db_table_prefix}.{cfg.dialect.value}.sql"
     )
 
     if check_only:

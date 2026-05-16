@@ -25,6 +25,7 @@ from quicksight_gen.common.l2 import (
     L2ValidationError,
     LimitSchedule,
     Name,
+    RailName,
     SingleLegRail,
     TransferTemplate,
     TwoLegRail,
@@ -43,7 +44,6 @@ def _baseline_instance() -> L2Instance:
     a regression on the baseline means the validator drifted.
     """
     return L2Instance(
-        instance=Identifier("base"),
         accounts=(
             Account(
                 id=Identifier("gl-control"),
@@ -68,7 +68,6 @@ def _baseline_instance() -> L2Instance:
             # Standalone two-leg with expected_net (S1).
             TwoLegRail(
                 name=Identifier("ExtInbound"),
-                transfer_type="ach",
                 origin="ExternalForcePosted",
                 metadata_keys=(Identifier("external_reference"),),
                 source_role=(Identifier("ExternalCounterparty"),),
@@ -78,7 +77,6 @@ def _baseline_instance() -> L2Instance:
             # Single-leg, reconciled by the TransferTemplate below (S3).
             SingleLegRail(
                 name=Identifier("SubledgerCharge"),
-                transfer_type="charge",
                 origin="InternalInitiated",
                 metadata_keys=(
                     Identifier("merchant_id"),
@@ -90,21 +88,19 @@ def _baseline_instance() -> L2Instance:
             # Aggregating rail (two-leg) with cadence + bundles_activity (S5).
             TwoLegRail(
                 name=Identifier("PoolBalancing"),
-                transfer_type="pool_balancing",
                 origin="InternalInitiated",
                 metadata_keys=(),
                 source_role=(Identifier("ControlAccount"),),
                 destination_role=(Identifier("ControlAccount"),),
                 expected_net=Decimal("0"),
                 aggregating=True,
-                bundles_activity=(Identifier("ach"),),
+                bundles_activity=(Identifier("ExtInbound"),),
                 cadence="intraday-2h",
             ),
         ),
         transfer_templates=(
             TransferTemplate(
                 name=Identifier("MerchantSettlementCycle"),
-                transfer_type="settlement_cycle",
                 expected_net=Decimal("0"),
                 transfer_key=(
                     Identifier("merchant_id"),
@@ -118,7 +114,7 @@ def _baseline_instance() -> L2Instance:
         limit_schedules=(
             LimitSchedule(
                 parent_role=Identifier("ControlAccount"),
-                transfer_type="ach",
+                rail=RailName("ExtInbound"),
                 cap=Decimal("5000.00"),
             ),
         ),
@@ -265,7 +261,7 @@ def test_r6_limit_schedule_parent_role_must_resolve() -> None:
     inst = _baseline_instance()
     bad_limit = LimitSchedule(
         parent_role=Identifier("UndeclaredRole"),
-        transfer_type="ach",
+        rail=RailName("ExtInbound"),
         cap=Decimal("100"),
     )
     bad = _replace(inst, limit_schedules=(bad_limit,))
@@ -285,7 +281,6 @@ def test_c1_at_most_one_variable_leg_per_template() -> None:
     # settlement_period.
     second_var = SingleLegRail(
         name=Identifier("SettlementCloseB"),
-        transfer_type="settlement",
         origin="InternalInitiated",
         metadata_keys=(
             Identifier("merchant_id"),
@@ -340,7 +335,6 @@ def test_s2_template_leg_must_not_have_expected_net() -> None:
     # fields appear in every leg_rail's metadata_keys.
     closing = TwoLegRail(
         name=Identifier("ClosingLeg"),
-        transfer_type="closing",
         origin="InternalInitiated",
         metadata_keys=(
             Identifier("merchant_id"),
@@ -376,13 +370,12 @@ def test_s3_aggregating_single_leg_exempt_from_reconciliation() -> None:
     inst = _baseline_instance()
     sweep = SingleLegRail(
         name=Identifier("DailySweepToExternal"),
-        transfer_type="external_sweep",
         origin="InternalInitiated",
         metadata_keys=(),
         leg_role=(Identifier("ExternalCounterparty"),),
         leg_direction="Credit",
         aggregating=True,
-        bundles_activity=(Identifier("ach"),),
+        bundles_activity=(Identifier("ExtInbound"),),
         cadence="daily-eod",
     )
     # NOT in any TransferTemplate.leg_rails AND not in any other
@@ -397,7 +390,6 @@ def test_s3_unreconciled_single_leg_rejected() -> None:
     # aggregating bundles_activity.
     orphan = SingleLegRail(
         name=Identifier("OrphanLeg"),
-        transfer_type="orphan_type",
         origin="InternalInitiated",
         metadata_keys=(),
         leg_role=(Identifier("ControlAccount"),),
@@ -542,11 +534,14 @@ def test_v2_cadence_vocabulary_rejects_invalid(bad_cadence: str) -> None:
 
 
 def test_u5_duplicate_limit_schedule_combination_rejected() -> None:
-    """U5: (parent_role, transfer_type) MUST be unique across LimitSchedule."""
+    """U5: (parent_role, rail) MUST be unique across LimitSchedule.
+
+    Z.B (2026-05-15): keyed on the rail name now (was transfer_type).
+    """
     inst = _baseline_instance()
     dup = LimitSchedule(
         parent_role=inst.limit_schedules[0].parent_role,
-        transfer_type=inst.limit_schedules[0].transfer_type,
+        rail=inst.limit_schedules[0].rail,
         cap=Decimal("999.00"),
     )
     bad = _replace(inst, limit_schedules=(*inst.limit_schedules, dup))
@@ -554,110 +549,24 @@ def test_u5_duplicate_limit_schedule_combination_rejected() -> None:
         validate(bad)
 
 
-def test_u5_same_role_different_transfer_type_allowed() -> None:
-    """U5 negative: same parent_role with different transfer_type is fine."""
+def test_u5_same_role_different_rail_allowed() -> None:
+    """U5 negative: same parent_role with different rail is fine."""
     inst = _baseline_instance()
     extra = LimitSchedule(
         parent_role=inst.limit_schedules[0].parent_role,  # same role
-        transfer_type="charge",  # different type
+        rail=RailName("SubledgerCharge"),  # different rail
         cap=Decimal("100.00"),
     )
     ok = _replace(inst, limit_schedules=(*inst.limit_schedules, extra))
     validate(ok)
 
 
-def test_u6_duplicate_rail_discriminator_two_leg_rejected() -> None:
-    """U6 (P.9b): two TwoLegRails sharing a (transfer_type, role) tuple
-    on any leg are rejected — the Rail-to-Transaction binding would be
-    ambiguous between them.
-    """
-    inst = _baseline_instance()
-    # ExtInbound is (ach, source=ExternalCounterparty, dest=ControlAccount).
-    # Add a sibling rail with swapped roles — same transfer_type, both
-    # roles still present in some leg of each. Collision on both
-    # (ach, ExternalCounterparty) and (ach, ControlAccount).
-    sibling = TwoLegRail(
-        name=Identifier("ExtOutbound"),
-        transfer_type="ach",
-        origin="InternalInitiated",
-        metadata_keys=(Identifier("external_reference"),),
-        source_role=(Identifier("ControlAccount"),),
-        destination_role=(Identifier("ExternalCounterparty"),),
-        expected_net=Decimal("0"),
-    )
-    bad = _replace(inst, rails=(*inst.rails, sibling))
-    with pytest.raises(
-        L2ValidationError,
-        match=r"Rail uniqueness violation.*ExtOutbound.*ExtInbound.*ach",
-    ):
-        validate(bad)
-
-
-def test_u6_duplicate_rail_discriminator_single_leg_rejected() -> None:
-    """U6 (P.9b): a SingleLegRail sharing (transfer_type, role) with a
-    TwoLegRail's leg is rejected.
-    """
-    inst = _baseline_instance()
-    # ExtInbound has (ach, ControlAccount) on its destination leg.
-    # Add a single-leg rail on (ach, ControlAccount) — same key.
-    sibling = SingleLegRail(
-        name=Identifier("AchAdjustment"),
-        transfer_type="ach",
-        origin="InternalInitiated",
-        metadata_keys=(),
-        leg_role=(Identifier("ControlAccount"),),
-        leg_direction="Debit",
-    )
-    bad = _replace(inst, rails=(*inst.rails, sibling))
-    with pytest.raises(
-        L2ValidationError,
-        match=r"Rail uniqueness violation.*AchAdjustment.*ExtInbound",
-    ):
-        validate(bad)
-
-
-def test_u6_distinct_transfer_types_per_direction_allowed() -> None:
-    """U6 negative: the resolution path (a) — using directional
-    transfer_types (e.g. ach_inbound + ach_outbound) lifts the
-    collision. The two rails coexist cleanly.
-    """
-    inst = _baseline_instance()
-    # Replace ExtInbound's transfer_type with a directional name so the
-    # sibling Outbound rail can occupy the same role pair without
-    # colliding.
-    inbound = dataclasses.replace(inst.rails[0], transfer_type="ach_inbound")
-    outbound = TwoLegRail(
-        name=Identifier("ExtOutbound"),
-        transfer_type="ach_outbound",
-        origin="InternalInitiated",
-        metadata_keys=(Identifier("external_reference"),),
-        source_role=(Identifier("ControlAccount"),),
-        destination_role=(Identifier("ExternalCounterparty"),),
-        expected_net=Decimal("0"),
-    )
-    # Update the limit_schedule + bundler so R10/R11 still resolve.
-    new_ls = dataclasses.replace(inst.limit_schedules[0], transfer_type="ach_inbound")
-    new_agg = dataclasses.replace(
-        inst.rails[2], bundles_activity=(Identifier("ach_inbound"),),
-    )
-    ok = _replace(
-        inst,
-        rails=(inbound, inst.rails[1], new_agg, outbound),
-        limit_schedules=(new_ls,),
-    )
-    validate(ok)
-
-
-def test_u6_two_legs_same_role_within_one_rail_allowed() -> None:
-    """U6 negative: a single rail whose two legs land on the same role
-    (or whose union role expression repeats) does NOT trip U6 — both
-    legs share one transfer_id, no cross-rail ambiguity. This is the
-    behavior the fuzzer relies on (PoolBalancing has source=destination
-    =ControlAccount).
-    """
-    # _baseline_instance includes PoolBalancing with source=destination
-    # =ControlAccount; the baseline must validate cleanly.
-    validate(_baseline_instance())
+# Z.B (2026-05-15): U6 (Rail discriminator uniqueness on (transfer_type,
+# role) tuples) is GONE under the symmetric collapse — `transfer_type` no
+# longer exists, and U3 already enforces `Rail.name` uniqueness across the
+# instance, which is the single discriminator now. The legacy U6
+# collisions (two rails with same transfer_type sharing a role) cannot
+# be expressed in the new grammar.
 
 
 def test_r7_template_leg_rails_must_be_non_aggregating() -> None:
@@ -666,13 +575,12 @@ def test_r7_template_leg_rails_must_be_non_aggregating() -> None:
     # Add an aggregating rail and reference it from the template's leg_rails.
     agg = SingleLegRail(
         name=Identifier("AggLeg"),
-        transfer_type="adj",
         origin="InternalInitiated",
         metadata_keys=(),
         leg_role=(Identifier("ControlAccount"),),
         leg_direction="Variable",
         aggregating=True,
-        bundles_activity=(Identifier("charge"),),
+        bundles_activity=(Identifier("SubledgerCharge"),),
         cadence="daily-eod",
     )
     bad_template = dataclasses.replace(
@@ -712,11 +620,16 @@ def test_r8_max_unbundled_age_requires_a_bundling_rail() -> None:
         validate(bad)
 
 
-def test_r8_max_unbundled_age_satisfied_by_transfer_type_match() -> None:
-    """R8 negative: a bare-identifier selector matching transfer_type satisfies the watch."""
+def test_r8_max_unbundled_age_satisfied_by_rail_name_match() -> None:
+    """R8 negative: a bare selector matching the rail's name satisfies the watch.
+
+    Z.B (2026-05-15): bundles_activity entries match Rail.name (the
+    transfer_type fallback was dropped with the symmetric collapse).
+    The baseline's PoolBalancing bundles ``ExtInbound`` by name; setting
+    ``max_unbundled_age`` on ExtInbound itself validates cleanly because
+    its name appears in some aggregating rail's bundles_activity.
+    """
     inst = _baseline_instance()
-    # The baseline's PoolBalancing bundles "ach". Add max_unbundled_age
-    # to ExtInbound (whose transfer_type IS "ach"); should validate cleanly.
     from datetime import timedelta
     ok_rail = dataclasses.replace(
         inst.rails[0],
@@ -841,59 +754,48 @@ def test_o1_two_leg_rail_both_per_leg_overrides_accepted() -> None:
 # -- M.2d.1: New SPEC rules (R10, R11) --------------------------------------
 
 
-def test_r10_limit_schedule_transfer_type_must_match_some_rail() -> None:
-    """R10: a LimitSchedule.transfer_type with no matching Rail is rejected.
+def test_r10_limit_schedule_rail_must_match_some_rail() -> None:
+    """R10: a LimitSchedule.rail with no matching Rail.name is rejected.
 
-    The baseline declares Rails with transfer_types {ach, charge,
-    pool_balancing}. A cap on transfer_type='wire' (no Rail emits
-    that) would silently never fire — load-time error.
+    Z.B (2026-05-15): the cap binds directly to a rail name now (was
+    transfer_type). A cap on rail='WireOutbound' (no Rail with that
+    name) would silently never fire — load-time error.
     """
     inst = _baseline_instance()
     bad = LimitSchedule(
         parent_role=Identifier("ControlAccount"),
-        transfer_type="wire",  # no Rail emits this
+        rail=RailName("WireOutbound"),  # no Rail with this name
         cap=Decimal("1000.00"),
     )
     inst = _replace(inst, limit_schedules=(*inst.limit_schedules, bad))
-    with pytest.raises(L2ValidationError, match="no declared Rail emits"):
+    with pytest.raises(L2ValidationError, match="no declared Rail with this name"):
         validate(inst)
 
 
-def test_r10_typo_in_existing_transfer_type_rejected() -> None:
-    """R10: typo'd transfer_type ('acch' for 'ach') is the canonical bug."""
+def test_r10_typo_in_existing_rail_name_rejected() -> None:
+    """R10: typo'd rail name ('ExtInboundd' for 'ExtInbound') is the canonical bug."""
     inst = _baseline_instance()
-    typo = dataclasses.replace(inst.limit_schedules[0], transfer_type="acch")
+    typo = dataclasses.replace(inst.limit_schedules[0], rail=RailName("ExtInboundd"))
     inst = _replace(inst, limit_schedules=(typo,))
-    with pytest.raises(L2ValidationError, match=r"transfer_type='acch'"):
+    with pytest.raises(L2ValidationError, match=r"rail='ExtInboundd'"):
         validate(inst)
 
 
-def test_r11_bare_bundles_activity_selector_resolving_by_transfer_type_accepted() -> None:
-    """R11 negative: a bare selector matching a Rail.transfer_type is fine.
+def test_r11_bare_bundles_activity_selector_resolving_by_rail_name_accepted() -> None:
+    """R11 negative: a bare selector matching a Rail.name is fine.
 
-    The baseline's PoolBalancing rail bundles 'ach' which IS a
-    declared Rail.transfer_type (on ExtInbound). Validates without
-    raising.
+    Z.B (2026-05-15): only Rail.name matches now (the transfer_type
+    fallback was dropped with the symmetric collapse). The baseline's
+    PoolBalancing bundles 'ExtInbound' which IS a declared Rail.name.
     """
     validate(_baseline_instance())
 
 
-def test_r11_bare_bundles_activity_selector_resolving_by_rail_name_accepted() -> None:
-    """R11 negative: a bare selector matching a Rail.name is fine."""
-    inst = _baseline_instance()
-    # Swap PoolBalancing to bundle by Rail.name instead of transfer_type.
-    pool = dataclasses.replace(
-        inst.rails[2], bundles_activity=(Identifier("ExtInbound"),),
-    )
-    inst = _replace(inst, rails=(*inst.rails[:2], pool))
-    validate(inst)
-
-
 def test_r11_unresolvable_bare_bundles_activity_selector_rejected() -> None:
-    """R11: a bare selector matching neither a Rail.name nor a transfer_type rejects.
+    """R11: a bare selector matching no declared Rail.name rejects.
 
-    'CustomerOutboundACHTypo' isn't a declared rail name AND no rail
-    emits that transfer_type — bundler would silently match nothing.
+    'CustomerOutboundACHTypo' isn't a declared rail name — bundler
+    would silently match nothing.
     """
     inst = _baseline_instance()
     typo = dataclasses.replace(
@@ -903,7 +805,7 @@ def test_r11_unresolvable_bare_bundles_activity_selector_rejected() -> None:
     inst = _replace(inst, rails=(*inst.rails[:2], typo))
     with pytest.raises(
         L2ValidationError,
-        match=r"bare selector 'CustomerOutboundACHTypo' resolves to neither",
+        match=r"bare selector 'CustomerOutboundACHTypo' resolves to no declared Rail.name",
     ):
         validate(inst)
 
@@ -991,16 +893,21 @@ def test_c3_variable_single_leg_not_in_any_template_rejected() -> None:
     # Add a Variable single-leg rail that's bundled by the existing
     # PoolBalancing aggregator (so S3 reconciliation passes), but NOT
     # in any TransferTemplate.leg_rails — should trip C3.
-    # Use leg_role=CustomerSubledger to avoid the P.9b discriminator
-    # collision with ExtInbound (transfer_type='ach', dest=ControlAccount).
     var_rail = SingleLegRail(
         name=Identifier("OrphanVariable"),
-        transfer_type="ach",  # PoolBalancing bundles 'ach' (S3 path B OK)
         origin="InternalInitiated",
         metadata_keys=(),
         leg_role=(Identifier("CustomerSubledger"),),
         leg_direction="Variable",
     )
+    # PoolBalancing now bundles "OrphanVariable" by name so S3 path B
+    # holds; without this the rail also trips S3-unreconciled before
+    # C3 fires.
+    bundler = dataclasses.replace(
+        inst.rails[2],
+        bundles_activity=(Identifier("OrphanVariable"),),
+    )
+    inst = _replace(inst, rails=(*inst.rails[:2], bundler))
     bad = _replace(inst, rails=(*inst.rails, var_rail))
     with pytest.raises(
         L2ValidationError,

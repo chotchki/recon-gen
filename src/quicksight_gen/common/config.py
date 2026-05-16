@@ -20,11 +20,11 @@ from quicksight_gen.common.env_keys import (
     QS_GEN_AWS_PG_CLUSTER_ID,
     QS_GEN_AWS_REGION,
     QS_GEN_DATASOURCE_ARN,
+    QS_GEN_DB_TABLE_PREFIX,
     QS_GEN_DEMO_DATABASE_URL,
+    QS_GEN_DEPLOYMENT_NAME,
     QS_GEN_DIALECT,
-    QS_GEN_L2_INSTANCE_PREFIX,
     QS_GEN_PRINCIPAL_ARNS,
-    QS_GEN_RESOURCE_PREFIX,
 )
 from quicksight_gen.common.sql import Dialect
 
@@ -167,21 +167,36 @@ class TestGeneratorConfig:
 class Config:
     aws_account_id: str
     aws_region: str
+    # Z.C — Per-deploy QS namespace. Replaces v8.x's ``resource_prefix``
+    # (defaulted ``qs-gen``) + ``l2_instance_prefix`` (stamped from the
+    # L2 yaml's ``instance:`` field) — those were the same concept,
+    # historically split because ``resource_prefix`` started life as a
+    # hardcoded tool-signature. Tool identity now lives solely in the
+    # ``ManagedBy=quicksight-gen`` tag (cleanup gate). ``deployment_name``
+    # is the SINGLE QS resource-ID prefix: ``cfg.prefixed("foo")`` →
+    # ``<deployment_name>-foo``, also surfaces as the ``Deployment``
+    # cleanup tag value. Required (loud-fail when unset) — same pattern
+    # as ``aws_account_id``. Multiple deployments of the same L2
+    # (dev/staging/prod) live as multiple cfg.yaml files with distinct
+    # ``deployment_name`` values pointing at the same L2 yaml. Operator
+    # may encode multiple identity axes (CI run id, scenario, dialect)
+    # into the value — that's fine; the cleanup gate is exact-match.
+    deployment_name: str
+    # Z.C — Per-deploy DB table-name prefix. Replaces direct reads of
+    # ``L2Instance.instance`` in ``common/l2/schema.py`` /
+    # ``common/l2/seed.py`` / ``apps/*/datasets.py``. Used in
+    # ``f"{db_table_prefix}_transactions"`` etc. KEPT SEPARATE from
+    # ``deployment_name`` because DB tables don't take hyphens cleanly
+    # (esp. Oracle), have a 30-char limit, and integrators may have
+    # established pre-existing table-prefix conventions distinct from
+    # their QS naming. Required (loud-fail when unset). An advanced
+    # user MAY set this equal to ``deployment_name`` (lower-case +
+    # hyphens-to-underscores).
+    db_table_prefix: str
     datasource_arn: str | None = None
-    resource_prefix: str = "qs-gen"
     principal_arns: list[str] = field(default_factory=list[str])
     extra_tags: dict[str, str] = field(default_factory=dict[str, str])
     demo_database_url: str | None = None
-    # Per M.2d.3: when set, the L2 instance prefix becomes the middle
-    # segment of every resource ID generated via ``cfg.prefixed(name)``,
-    # producing IDs like ``qs-gen-sasquatch_ar-l1-dashboard``. Lets N
-    # apps (L1, PR, Exec) deploy against the same L2 instance without
-    # collision, AND lets the same app deploy against N L2 instances
-    # in the same QS account. Apps set this at build time (e.g.
-    # ``build_l1_dashboard_app`` derives it from the L2 instance).
-    # Also surfaces as an ``L2Instance`` resource tag for cleanup
-    # scoping. Unset = legacy single-tenant flat-prefix behavior.
-    l2_instance_prefix: str | None = None
     # P.6.a — SQL dialect for emitted DDL + dataset SQL + demo apply.
     # ``postgres`` (default, current behavior) or ``oracle`` (Phase P).
     # The dialect is tied to the datasource: a Postgres datasource_arn
@@ -326,50 +341,18 @@ class Config:
                     return parts[1]
         return "aws"
 
-    def with_l2_instance_prefix(self, prefix: str) -> "Config":
-        """Return a new Config with the L2 prefix stamped in.
-
-        When we *own* the datasource (``datasource_arn_was_derived`` —
-        the ARN was synthesized from ``demo_database_url``), also clears
-        ``datasource_arn`` so ``__post_init__`` re-derives it with the
-        prefix in the path — without this, per-app builders bake the
-        unprefixed ``qs-gen-demo-datasource`` ARN into dataset JSON and
-        the deploy fails with ``InvalidParameterValueException: Invalid
-        dataSourceArn`` because the actual datasource resource carries
-        the prefix (``qs-gen-<prefix>-demo-datasource``).
-
-        When the operator supplied an explicit ``datasource_arn`` (a
-        pre-existing customer datasource — even if ``demo_database_url``
-        is also set for the seed/demo CLI), the ARN stays as-is:
-        re-deriving would synthesize an ARN the customer's QS account
-        doesn't have.
-
-        Idempotent: callers can guard with ``if cfg.l2_instance_prefix
-        is None`` to skip the re-derive when the cfg is already L2-aware.
-        """
-        from dataclasses import replace
-        if self.datasource_arn_was_derived:
-            return replace(
-                self,
-                l2_instance_prefix=prefix,
-                datasource_arn=None,
-            )
-        return replace(self, l2_instance_prefix=prefix)
-
     # Derived helpers
     def tags(self) -> "list[Tag] | None":
         """Return common + extra tags as the AWS Tag list format.
 
-        Three tags are always emitted (when ``tagging_enabled``):
+        Two tags are always emitted (when ``tagging_enabled``):
 
-        - ``ManagedBy=quicksight-gen`` — gates cleanup eligibility.
-        - ``ResourcePrefix=<resource_prefix>`` — per-deploy scope. v8.4.0
-          isolation: lets cleanup sweep only the deployer's own
-          resources (e.g. ``qs-ci-<run_id>-pg``), so concurrent CI
-          runs + local deploys don't trample each other.
-        - ``L2Instance=<l2_instance_prefix>`` — only when the prefix is
-          set (M.2d.3). Per-institution scope, narrower than
-          ``ResourcePrefix``.
+        - ``ManagedBy=quicksight-gen`` — gates cleanup eligibility (the
+          tool-identity signal; never varies).
+        - ``Deployment=<deployment_name>`` — per-deploy scope. ``json
+          clean`` requires both tags to match before deleting, so
+          concurrent deploys (CI + local, dev + staging) never trample
+          each other.
 
         Returns ``None`` when ``tagging_enabled=False`` so the caller's
         ``Tags=cfg.tags()`` field assignment goes to the dataclass's
@@ -384,10 +367,8 @@ class Config:
 
         all_tags = [
             Tag(Key="ManagedBy", Value="quicksight-gen"),
-            Tag(Key="ResourcePrefix", Value=self.resource_prefix),
+            Tag(Key="Deployment", Value=self.deployment_name),
         ]
-        if self.l2_instance_prefix is not None:
-            all_tags.append(Tag(Key="L2Instance", Value=self.l2_instance_prefix))
         for key, value in self.extra_tags.items():
             all_tags.append(Tag(Key=key, Value=value))
         return all_tags
@@ -405,27 +386,25 @@ class Config:
         )
 
     def prefixed(self, name: str) -> str:
-        """Return a resource ID with the configured prefix.
+        """Return a resource ID with the configured deployment prefix.
 
-        When ``l2_instance_prefix`` is set, that prefix becomes the
-        middle segment so multiple L2 instances coexist in one QS
-        account (M.2d.3): ``qs-gen-<l2_instance>-<name>``.
+        Z.C: single-segment prefix replaces v8.x's
+        ``<resource_prefix>-<l2_instance_prefix>-<name>``. The
+        ``deployment_name`` is the operator's per-deployment
+        namespace, set explicitly in cfg.yaml (no default).
         """
-        if self.l2_instance_prefix is not None:
-            return f"{self.resource_prefix}-{self.l2_instance_prefix}-{name}"
-        return f"{self.resource_prefix}-{name}"
+        return f"{self.deployment_name}-{name}"
 
 
 # V.1.b — Strict config-key allowlist. config.yaml is environment-only:
-# AWS account / region / dialect / DB connection / signing material.
-# Institution-only fields (theme, persona, accounts, rails, chains,
-# transfer_templates, account_templates, limit_schedules, instance,
-# description) live in the L2 institution YAML — putting them in
-# config.yaml is a sign the user has the wrong file open.
-# ``l2_instance_prefix`` is derived from the L2 instance at runtime
-# (cli/_helpers.py::resolve_l2_for_demo) and must not be hand-set here.
+# AWS account / region / dialect / DB connection / signing material /
+# Z.C deployment + DB-prefix names. Institution-only fields (theme,
+# persona, accounts, rails, chains, transfer_templates, account_templates,
+# limit_schedules, description) live in the L2 institution YAML —
+# putting them in config.yaml is a sign the user has the wrong file open.
 _CONFIG_ALLOWED_KEYS: frozenset[str] = frozenset({
-    "aws_account_id", "aws_region", "datasource_arn", "resource_prefix",
+    "aws_account_id", "aws_region", "datasource_arn",
+    "deployment_name", "db_table_prefix",
     "principal_arns", "principal_arn", "extra_tags", "demo_database_url",
     "dialect", "signing", "tagging_enabled", "app2_db_pool_size", "auth",
     "default_l2_instance", "aws_pg_cluster_id", "aws_oracle_instance_id",
@@ -433,11 +412,37 @@ _CONFIG_ALLOWED_KEYS: frozenset[str] = frozenset({
     "etl_hook", "etl_datasource", "test_generator",
 })
 
+# Z.C — `instance` removed: the L2 yaml no longer has an `instance:` field
+# at all (use cfg.deployment_name + cfg.db_table_prefix instead).
 _CONFIG_L2_ONLY_KEYS: frozenset[str] = frozenset({
-    "instance", "description", "accounts", "account_templates",
+    "description", "accounts", "account_templates",
     "rails", "transfer_templates", "chains", "limit_schedules",
     "persona", "theme",
 })
+
+# Z.C — Legacy keys that USED to be valid in cfg.yaml but no longer are.
+# Each maps to an actionable migration message pointing the operator at
+# the new shape. Surfaced by `_reject_unknown_config_keys` so the loud-
+# fail message is specific instead of just "unknown key".
+_CONFIG_LEGACY_KEYS: dict[str, str] = {
+    "resource_prefix": (
+        "merged with l2_instance_prefix into 'deployment_name' (Z.C). "
+        "Set 'deployment_name: <your-deployment-id>' (e.g. 'qsgen-prod'). "
+        "Replaces both the v8.x default 'qs-gen' tool prefix AND the "
+        "auto-stamped L2 segment."
+    ),
+    "l2_instance_prefix": (
+        "merged with resource_prefix into 'deployment_name' (Z.C). "
+        "Set 'deployment_name: <your-deployment-id>' in cfg.yaml. The "
+        "auto-stamping from L2 yaml's 'instance:' is gone."
+    ),
+    "instance": (
+        "the L2 yaml's top-level 'instance:' field was dropped in Z.C. "
+        "Set 'deployment_name' AND 'db_table_prefix' in cfg.yaml — "
+        "they replace 'instance' (which previously did double duty as "
+        "QS-resource segment + DB-table prefix)."
+    ),
+}
 
 
 def _require_str(
@@ -475,9 +480,9 @@ def _reject_unknown_config_keys(raw: dict[str, object], path: Path) -> None:
     """Raise if config.yaml contains keys outside the env-only allowlist.
 
     V.1.b: catches the two common mis-edits — dropping an L2 institution
-    block (theme, persona, rails, …) into config.yaml, and hand-setting
-    ``l2_instance_prefix`` instead of letting the CLI derive it from the
-    L2 instance.
+    block (theme, persona, rails, …) into config.yaml, and the Z.C-removed
+    legacy ``resource_prefix`` / ``l2_instance_prefix`` / ``instance`` keys
+    (each gets a specific migration pointer).
     """
     leaked_l2 = sorted(set(raw) & _CONFIG_L2_ONLY_KEYS)
     if leaked_l2:
@@ -487,15 +492,15 @@ def _reject_unknown_config_keys(raw: dict[str, object], path: Path) -> None:
             f"environment-only values (account / region / dialect / DB "
             f"connection / signing); institution shape (theme / persona / "
             f"rails / accounts / chains / transfer_templates / account_"
-            f"templates / limit_schedules / instance / description) "
+            f"templates / limit_schedules / description) "
             f"lives in the L2 YAML."
         )
-    if "l2_instance_prefix" in raw:
-        raise ValueError(
-            f"{path}: 'l2_instance_prefix' must not be set in config.yaml "
-            f"— it is derived from the L2 institution YAML's 'instance:' "
-            f"field at CLI time. Drop the key and pass --l2 <institution>."
-        )
+    legacy_present = sorted(set(raw) & set(_CONFIG_LEGACY_KEYS))
+    if legacy_present:
+        msg_lines = [f"{path}: legacy config keys removed in Z.C:"]
+        for key in legacy_present:
+            msg_lines.append(f"  - '{key}': {_CONFIG_LEGACY_KEYS[key]}")
+        raise ValueError("\n".join(msg_lines))
     unknown = sorted(set(raw) - _CONFIG_ALLOWED_KEYS)
     if unknown:
         raise ValueError(
@@ -548,8 +553,8 @@ def load_config(path: str | Path | None = None) -> Config:
         "aws_account_id": QS_GEN_AWS_ACCOUNT_ID,
         "aws_region": QS_GEN_AWS_REGION,
         "datasource_arn": QS_GEN_DATASOURCE_ARN,
-        "resource_prefix": QS_GEN_RESOURCE_PREFIX,
-        "l2_instance_prefix": QS_GEN_L2_INSTANCE_PREFIX,
+        "deployment_name": QS_GEN_DEPLOYMENT_NAME,
+        "db_table_prefix": QS_GEN_DB_TABLE_PREFIX,
         "demo_database_url": QS_GEN_DEMO_DATABASE_URL,
         "dialect": QS_GEN_DIALECT,
         "app2_db_pool_size": QS_GEN_APP2_DB_POOL_SIZE,
@@ -567,8 +572,9 @@ def load_config(path: str | Path | None = None) -> Config:
             p.strip() for p in env_principals.split(",") if p.strip()
         ]
 
-    # Validate required fields (datasource_arn not required when demo_database_url is set)
-    required = ["aws_account_id", "aws_region"]
+    # Validate required fields (datasource_arn not required when demo_database_url is set).
+    # Z.C: deployment_name + db_table_prefix join the required-fields list.
+    required = ["aws_account_id", "aws_region", "deployment_name", "db_table_prefix"]
     if "demo_database_url" not in values:
         required.append("datasource_arn")
     missing = [k for k in required if k not in values]
@@ -577,6 +583,8 @@ def load_config(path: str | Path | None = None) -> Config:
             "aws_account_id": "QS_GEN_AWS_ACCOUNT_ID",
             "aws_region": "QS_GEN_AWS_REGION",
             "datasource_arn": "QS_GEN_DATASOURCE_ARN",
+            "deployment_name": "QS_GEN_DEPLOYMENT_NAME",
+            "db_table_prefix": "QS_GEN_DB_TABLE_PREFIX",
         }
         raise ValueError(
             f"Missing required configuration: {', '.join(missing)}. "
@@ -881,8 +889,9 @@ def load_config(path: str | Path | None = None) -> Config:
     return Config(
         aws_account_id=_require_str(values, "aws_account_id"),
         aws_region=_require_str(values, "aws_region"),
+        deployment_name=_require_str(values, "deployment_name"),
+        db_table_prefix=_require_str(values, "db_table_prefix"),
         datasource_arn=_opt_str(values, "datasource_arn"),
-        resource_prefix=_require_str(values, "resource_prefix", default="qs-gen"),
         principal_arns=principal_arns,
         extra_tags=extra_tags,
         demo_database_url=_opt_str(values, "demo_database_url"),

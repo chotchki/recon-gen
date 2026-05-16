@@ -126,15 +126,16 @@ _SPEC_EXAMPLE_BUNDLED = _FIXTURES / "spec_example.yaml"
 def _l2_yaml_for_test() -> Path:
     """m.4.f — honor the runner's per-cell synthesized yaml when set.
 
-    The Y.2.gate.m runner sets ``QS_GEN_TEST_L2_INSTANCE`` to a
-    per-cell synthesized yaml whose ``instance`` field is the cell
-    code (e.g., ``sp_pg_aw``). DB tables seeded under that prefix.
-    Computed dashboard ID also derives from that instance via
-    ``cfg.with_l2_instance_prefix(instance.instance)``.
+    Z.C — the Y.2.gate.m runner used to set
+    ``QS_GEN_TEST_L2_INSTANCE`` to a per-cell synthesized yaml whose
+    dropped ``instance`` field encoded the cell code (e.g.,
+    ``sp_pg_aw``). With the field gone, the DB-table prefix lives on
+    cfg.db_table_prefix and the QS-resource prefix lives on
+    cfg.deployment_name; this fixture only resolves the L2 yaml
+    itself.
 
     Outside the runner (operator running pytest directly), the env
-    var is unset; fall back to the bundled spec_example fixture
-    (the historical operator-driven shape).
+    var is unset; fall back to the bundled spec_example fixture.
     """
     from quicksight_gen.common.env_keys import QS_GEN_TEST_L2_INSTANCE
     env_val = QS_GEN_TEST_L2_INSTANCE.get_or_none()
@@ -285,20 +286,13 @@ def per_dialect_qs_client(per_dialect_region):
 
 @pytest.fixture(scope="module")
 def per_dialect_l1_dashboard_id(per_dialect_cfg) -> str:
-    """L1 dashboard ID under this dialect's resource prefix.
+    """L1 dashboard ID under this dialect's deployment_name prefix.
 
-    Derives the same way the L1 app's deploy does: ``<resource_prefix>-
-    <l2_prefix>-l1-dashboard``. l2_prefix is taken from the bundled
-    ``spec_example`` (the default L2 instance) since this test is
-    pinned to that instance.
+    Z.C — derives the same way the L1 app's deploy does:
+    ``<deployment_name>-l1-dashboard`` (collapsed from the prior
+    M.2d.3 two-segment ``<resource_prefix>-<l2_prefix>-`` shape).
     """
-    instance = load_instance(_l2_yaml_for_test())
-    cfg_with_prefix = (
-        per_dialect_cfg
-        if per_dialect_cfg.l2_instance_prefix is not None
-        else per_dialect_cfg.with_l2_instance_prefix(str(instance.instance))
-    )
-    return cfg_with_prefix.prefixed("l1-dashboard")
+    return per_dialect_cfg.prefixed("l1-dashboard")
 
 
 @pytest.fixture(scope="module")
@@ -319,6 +313,7 @@ def seeded_audit(dialect_cfg, tmp_path_factory):
     try:
         scenario = apply_db_seed(
             conn, instance,
+            prefix=cfg.db_table_prefix,
             mode="l1_invariants",
             today=_TODAY,
             dialect=dialect,
@@ -407,13 +402,14 @@ def per_dialect_qs_driver(
 
 
 @pytest.fixture(scope="module")
-def per_dialect_matview_prefix() -> str:
+def per_dialect_matview_prefix(per_dialect_cfg) -> str:
     """The matview-name prefix this dialect cell's DB was seeded with —
-    ``<instance.instance>`` (the L2 instance code, NOT the QS resource
-    prefix). The L1-invariant matviews are ``<prefix>_drift`` /
+    ``cfg.db_table_prefix`` (Z.C: replaces the prior
+    ``L2Instance.instance`` field, which doubled as the DB-table prefix).
+    The L1-invariant matviews are ``<prefix>_drift`` /
     ``<prefix>_overdraft`` / ``<prefix>_limit_breach`` / etc. — the
     direct-SQL anchor (X.2.j.B.2) queries those straight off the DB."""
-    return str(load_instance(_l2_yaml_for_test()).instance)
+    return per_dialect_cfg.db_table_prefix
 
 
 @pytest.fixture

@@ -43,6 +43,7 @@ def apply_db_seed(
     conn: Any,  # typing-smell: ignore[explicit-any]: per-driver connection union (psycopg/oracledb/sqlite3) has no shared Protocol
     instance: L2Instance,
     *,
+    prefix: str,
     mode: ScenarioMode = "l1_plus_broad",
     today: date | None = None,
     dialect: Dialect = Dialect.POSTGRES,
@@ -61,6 +62,10 @@ def apply_db_seed(
     planted.
 
     Args:
+      prefix (Z.C): the table-prefix the schema/seed/refresh SQL keys
+        off (pass ``cfg.db_table_prefix``). The L2 yaml no longer
+        carries an ``instance:`` field, so the prefix is a required
+        kwarg.
       include_baseline (R.5.b): when True, the seed step uses
         ``emit_full_seed`` + the densify+broken+boost pipeline that
         the CLI's ``demo apply`` uses. Adds ~60k baseline rows on top
@@ -70,7 +75,7 @@ def apply_db_seed(
     today_ref = today or DEFAULT_SEED_TODAY
 
     # 1. Schema.
-    schema_sql = emit_schema(instance, dialect=dialect)
+    schema_sql = emit_schema(instance, prefix=prefix, dialect=dialect)
     with conn.cursor() as cur:
         execute_script(cur, schema_sql, dialect=dialect)
     conn.commit()
@@ -88,17 +93,17 @@ def apply_db_seed(
             amount_multiplier=5,
         )
         seed_sql = emit_full_seed(
-            instance, scenario, anchor=today_ref, dialect=dialect,
+            instance, scenario, prefix=prefix, anchor=today_ref, dialect=dialect,
         )
     else:
         scenario = report.scenario
-        seed_sql = emit_seed(instance, scenario, dialect=dialect)
+        seed_sql = emit_seed(instance, scenario, prefix=prefix, dialect=dialect)
     with conn.cursor() as cur:
         execute_script(cur, seed_sql, dialect=dialect)
     conn.commit()
 
     # 3. Refresh matviews.
-    refresh_sql = refresh_matviews_sql(instance, dialect=dialect)
+    refresh_sql = refresh_matviews_sql(instance, prefix=prefix, dialect=dialect)
     with conn.cursor() as cur:
         execute_script(cur, refresh_sql, dialect=dialect)
     conn.commit()

@@ -103,8 +103,13 @@ def test_studio_mount_overrides_root_with_landing() -> None:
     assert r.status_code == 200, r.text
     body = r.text
     assert "Studio" in body, body
-    # Cache wired through: instance prefix appears in the placeholder body.
-    assert str(cache.get().instance) in body, body
+    # Cache wired through: the per-section counts on the home page are
+    # read off the cached L2Instance, so the spec_example's account
+    # count surfaces verbatim in the rendered HTML. Z.C — replaces the
+    # prior `str(cache.get().instance) in body` check (the L2Instance
+    # `instance` field is gone; identity now lives on cfg, not the L2).
+    instance = cache.get()
+    assert f'<span class="count">({len(instance.accounts)})</span>' in body, body
 
 
 def test_studio_mount_keeps_dashboards_routes_alive() -> None:

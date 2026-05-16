@@ -45,11 +45,9 @@ def test_fuzzer_output_loads_and_validates(seed: int, tmp_path: Path) -> None:
     # exercises both the loader's per-entity rules AND the
     # cross-entity validator.
     inst = load_instance(yaml_path)
-    # Sanity: instance prefix carries the seed.
-    assert str(inst.instance).startswith("fuzz_seed_"), (
-        f"seed={seed}: instance prefix doesn't carry the seed marker; "
-        f"got {inst.instance!r}"
-    )
+    # Z.C: the L2 yaml no longer carries an instance: key; per-seed
+    # identity (when needed) lives in the caller-chosen yaml basename.
+    assert inst.accounts, f"seed={seed}: fuzzer emitted no accounts"
 
 
 @pytest.mark.parametrize("seed", [0, 7, 42, 999, 12345])

@@ -142,7 +142,8 @@ jobs:
           aws_account_id: "000000000000"
           aws_region: "us-east-1"
           datasource_arn: "arn:aws:quicksight:us-east-1:000000000000:datasource/ci"
-          resource_prefix: "qs-ci-pg"
+          deployment_name: "qs-ci-pg"
+          db_table_prefix: "qs_ci_pg"
           dialect: "postgres"
           demo_database_url: "postgresql://postgres:ci_pg_password@localhost:5432/postgres"
           EOF
@@ -277,7 +278,8 @@ jobs:
           aws_account_id: "000000000000"
           aws_region: "us-east-1"
           datasource_arn: "arn:aws:quicksight:us-east-1:000000000000:datasource/ci"
-          resource_prefix: "qs-ci-oracle"
+          deployment_name: "qs-ci-oracle"
+          db_table_prefix: "qs_ci_oracle"
           dialect: "oracle"
           demo_database_url: "system/ci_ora_password@localhost:1521/FREEPDB1"
           EOF

@@ -53,6 +53,10 @@ def _base_cfg() -> Config:
     return Config(
         aws_account_id="111122223333",
         aws_region="us-east-1",
+        # Z.C — Config requires deployment_name + db_table_prefix.
+        # spec_example matches the bundled L2 fixture used downstream.
+        deployment_name="qsgen-spec-example",
+        db_table_prefix="spec_example",
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),
@@ -71,6 +75,10 @@ def _sqlite_cfg(tmp_path: Path) -> Config:
     return Config(
         aws_account_id="111122223333",
         aws_region="us-east-1",
+        # Z.C — Config requires deployment_name + db_table_prefix.
+        # spec_example matches the bundled L2 fixture used downstream.
+        deployment_name="qsgen-spec-example",
+        db_table_prefix="spec_example",
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),
@@ -86,17 +94,19 @@ def _apply_schema_and_plant_two_rows(
     so the wipe has something to delete. Plants conform to the L2 v6
     schema's CHECK constraints (amount_direction enum, sign-direction
     agreement, account_scope enum)."""
-    schema_sql = emit_schema(instance, dialect=cfg.dialect)
-    p = instance.instance
+    schema_sql = emit_schema(
+        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+    )
+    p = cfg.db_table_prefix
     plant_tx = (
         f"INSERT INTO {p}_transactions ("
         "id, account_id, account_scope, "
         "amount_money, amount_direction, status, posting, "
-        "transfer_id, transfer_type, rail_name, origin"
+        "transfer_id, rail_name, origin"
         ") VALUES ("
         "'t1', 'a1', 'internal', "
         "100.00, 'Credit', 'posted', '2030-01-01 00:00:00', "
-        "'g1', 'cash_withdrawal', 'r1', 'inbound'"
+        "'g1', 'r1', 'inbound'"
         ");"
     )
     plant_bal = (
@@ -124,7 +134,7 @@ def _apply_schema_and_plant_two_rows(
 
 
 def _row_counts(cfg: Config, instance: L2Instance) -> tuple[int, int]:
-    p = instance.instance
+    p = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -270,10 +280,10 @@ def test_etl_hook_missing_binary_propagates() -> None:
 def test_wipe_demo_data_sql_postgres_format(
     spec_example_instance: L2Instance,
 ) -> None:
+    p = "spec_example"
     sql = wipe_demo_data_sql(
-        spec_example_instance, dialect=Dialect.POSTGRES,
+        spec_example_instance, prefix=p, dialect=Dialect.POSTGRES,
     )
-    p = spec_example_instance.instance
     assert f"DELETE FROM {p}_daily_balances;" in sql
     assert f"DELETE FROM {p}_transactions;" in sql
 
@@ -283,10 +293,10 @@ def test_wipe_demo_data_sql_oracle_format(
 ) -> None:
     """Oracle accepts the same DELETE statements (case-folds the
     unquoted identifiers to uppercase to match the schema)."""
+    p = "spec_example"
     sql = wipe_demo_data_sql(
-        spec_example_instance, dialect=Dialect.ORACLE,
+        spec_example_instance, prefix=p, dialect=Dialect.ORACLE,
     )
-    p = spec_example_instance.instance
     assert f"DELETE FROM {p}_daily_balances;" in sql
     assert f"DELETE FROM {p}_transactions;" in sql
 
@@ -294,10 +304,10 @@ def test_wipe_demo_data_sql_oracle_format(
 def test_wipe_demo_data_sql_sqlite_format(
     spec_example_instance: L2Instance,
 ) -> None:
+    p = "spec_example"
     sql = wipe_demo_data_sql(
-        spec_example_instance, dialect=Dialect.SQLITE,
+        spec_example_instance, prefix=p, dialect=Dialect.SQLITE,
     )
-    p = spec_example_instance.instance
     assert f"DELETE FROM {p}_daily_balances;" in sql
     assert f"DELETE FROM {p}_transactions;" in sql
 
@@ -339,7 +349,7 @@ def test_step_2_wipe_emits_start_then_done_events(
         "deploy:step2:wipe:done",
     ]
     start = sink.by_kind("deploy:step2:wipe:start")[0]
-    assert start["instance"] == spec_example_instance.instance
+    assert start["db_table_prefix"] == cfg.db_table_prefix
     assert start["dialect"] == "sqlite"
     done = sink.by_kind("deploy:step2:wipe:done")[0]
     assert done["transactions_deleted"] == 1
@@ -414,7 +424,7 @@ def _build_etl_source_sqlite(
             row = [
                 f"t{i}", f"a{i}", f"Acct {i}", "role",
                 "internal", None, "100.00", "Credit", "posted",
-                posting, f"g{i}", "cash_withdrawal", None, None,
+                posting, f"g{i}", None, None,
                 "r1", None, None, None, "inbound", None,
             ]
             cur.execute(
@@ -449,7 +459,9 @@ def _apply_demo_schema_only(
 ) -> None:
     """Apply the demo schema without planting any rows — the pull is
     what fills the base tables."""
-    schema_sql = emit_schema(instance, dialect=cfg.dialect)
+    schema_sql = emit_schema(
+        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+    )
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -646,7 +658,7 @@ def test_base_columns_match_emitted_schema(
     the auto-generated ``entry`` column the pull intentionally drops)."""
     cfg = _sqlite_cfg(tmp_path)
     _apply_demo_schema_only(cfg, spec_example_instance)
-    p = spec_example_instance.instance
+    p = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1005,7 +1017,7 @@ def test_step_3_generator_uncovered_rails_skips_covered(
     # Pick the first rail in the L2 to "cover" — its baseline should
     # be skipped on the next emit.
     covered_rail_name = str(spec_example_instance.rails[0].name)
-    p = spec_example_instance.instance
+    p = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1014,11 +1026,11 @@ def test_step_3_generator_uncovered_rails_skips_covered(
                 f"INSERT INTO {p}_transactions ("
                 "id, account_id, account_scope, amount_money, "
                 "amount_direction, status, posting, transfer_id, "
-                "transfer_type, rail_name, origin"
+                "rail_name, origin"
                 ") VALUES ("
                 "'op-1', 'op-acct', 'internal', 50.00, 'Credit', "
                 "'posted', '2030-01-01 00:00:00', 'op-tr', "
-                "'cash_withdrawal', ?, 'inbound')",
+                "?, 'inbound')",
                 (covered_rail_name,),
             )
             conn.commit()
@@ -1052,7 +1064,7 @@ def test_covered_rail_names_distinct_set(
     # Empty table → empty set.
     assert _covered_rail_names(cfg, spec_example_instance) == frozenset()
     # Plant 3 rows with 2 distinct rail_names.
-    p = spec_example_instance.instance
+    p = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1062,10 +1074,10 @@ def test_covered_rail_names_distinct_set(
                     f"INSERT INTO {p}_transactions ("
                     "id, account_id, account_scope, amount_money, "
                     "amount_direction, status, posting, transfer_id, "
-                    "transfer_type, rail_name, origin"
+                    "rail_name, origin"
                     ") VALUES ("
                     f"'t{i}', 'a', 'internal', 1.00, 'Credit', 'posted', "
-                    f"'2030-01-01', 'g{i}', 'cash_withdrawal', ?, 'inbound')",
+                    f"'2030-01-01', 'g{i}', ?, 'inbound')",
                     (rail,),
                 )
             conn.commit()
@@ -1114,7 +1126,7 @@ def test_only_template_rails_returns_template_leg_rails(
     from quicksight_gen.common.l2.deploy_pipeline import _only_template_rails
 
     closure = _only_template_rails(
-        "MerchantSettlementCycle", spec_example_instance,
+        "MerchantSettlementCycle", spec_example_instance, cfg=_base_cfg(),
     )
     # spec_example fixture: MerchantSettlementCycle has leg_rails: [SubledgerCharge]
     assert {str(r) for r in closure} == {"SubledgerCharge"}
@@ -1128,7 +1140,9 @@ def test_only_template_rails_unknown_name_loud_fails(
     from quicksight_gen.common.l2.deploy_pipeline import _only_template_rails
 
     with pytest.raises(ValueError, match="MadeUpName"):
-        _only_template_rails("MadeUpName", spec_example_instance)
+        _only_template_rails(
+            "MadeUpName", spec_example_instance, cfg=_base_cfg(),
+        )
 
 
 def test_step_3_generator_only_template_requires_template_name(
@@ -1174,7 +1188,7 @@ def test_step_3_generator_only_template_emits_closure_baseline(
     )
     assert tx > 0, "only_template should emit baseline for the closure rail"
     # Closure rail must be present.
-    p = spec_example_instance.instance
+    p = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1257,12 +1271,12 @@ def _insert_test_transaction(
         "id, account_id, account_name, account_role, "
         "account_scope, account_parent_role, amount_money, "
         "amount_direction, status, posting, transfer_id, "
-        "transfer_type, rail_name, origin"
+        "rail_name, origin"
         ") VALUES ("
         "?, ?, 'Acct', ?, "
         "'internal', NULL, ?, "
         "?, ?, ?, 'tr-d', "
-        "'cash_withdrawal', 'TestRail', 'inbound')",
+        "'TestRail', 'inbound')",
         (tid, account_id, account_role, amount_money,
          direction, status, posting),
     )
@@ -1274,7 +1288,7 @@ def _seed_two_account_roles_with_transactions(
     """Populate <prefix>_transactions with rows for ONE control account
     (gl_control) AND one DDA so we can assert the derive narrows to
     control-by-default."""
-    p = instance.instance
+    p = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1345,7 +1359,7 @@ def test_derive_balances_default_account_roles_writes_control_only(
     )
     # 1 (gl-1, 2030-01-01) row written; the DDA's row was skipped.
     assert rows == 1
-    p = spec_example_instance.instance
+    p = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1390,7 +1404,7 @@ def test_derive_balances_account_roles_override_widens_set(
         ),
     )
     assert rows == 2  # gl-1 + dda-1
-    p = spec_example_instance.instance
+    p = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1417,7 +1431,7 @@ def test_derive_balances_failed_transactions_excluded(
         test_generator=TestGeneratorConfig(derive_balances=True),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
-    p = spec_example_instance.instance
+    p = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1484,7 +1498,7 @@ def test_derive_balances_overwrites_existing_rows(
         ),
     )
     # Add another posted control transaction the same day.
-    p = spec_example_instance.instance
+    p = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1579,7 +1593,7 @@ def test_step_4_matviews_refresh_emits_lifecycle_events(
         "deploy:step4:matviews:done",
     ]
     start = sink.by_kind("deploy:step4:matviews:start")[0]
-    assert start["instance"] == spec_example_instance.instance
+    assert start["db_table_prefix"] == cfg.db_table_prefix
     assert start["dialect"] == cfg.dialect.value
 
 
@@ -1599,7 +1613,7 @@ def test_step_4_matviews_idempotent_on_empty_db(
         step_4_matviews(cfg, spec_example_instance, dev_log=None),
     )
     # And every matview still exists (and is empty).
-    p = spec_example_instance.instance
+    p = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1632,7 +1646,7 @@ def test_step_4_matviews_picks_up_new_rows(
     asyncio.run(
         step_4_matviews(cfg, spec_example_instance, dev_log=None),
     )
-    p = spec_example_instance.instance
+    p = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
