@@ -200,7 +200,7 @@ sweep_region() {
 
 bold "==================================================================="
 bold "  QuickSight mass-nuke"
-bold "  Account:  $AWS_ACCOUNT   Profile: $AWS_PROFILE"
+bold "  Account:  $AWS_ACCOUNT   Profile: ${AWS_PROFILE:-<env-creds (OIDC)>}"
 bold "  Regions:  $REGIONS"
 if [[ $EXECUTE -eq 1 ]]; then
     red  "  Mode:     EXECUTE (irreversible)"
