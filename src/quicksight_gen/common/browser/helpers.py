@@ -472,22 +472,31 @@ def _attach_console_capture(page: Page, sink: list[str]) -> None:
 
 def _attach_network_capture(page: Page, sink: list[str]) -> None:
     """Register ``page.on("response")`` so every non-2xx HTTP
-    response during the page lifecycle accumulates into ``sink``.
-    Format: ``<status> <method> <url>`` per response.
+    response — plus every App2 ``/visuals/*/data`` response regardless
+    of status — accumulates into ``sink``. Format:
+    ``<status> <method> <url>`` per response.
 
-    Filters to non-2xx because QS dashboards make hundreds of
-    requests; capturing only the failures keeps the dump readable.
+    Non-2xx by default because QS dashboards make hundreds of requests
+    and the surfaced failures (4xx / 5xx / network errors) are usually
+    enough. ``/visuals/*/data`` is the App2 per-visual data endpoint —
+    a 200 with empty rows looks identical to "no request fired" in the
+    default-filtered log, so AA.B.5.followon's class of bug (pick
+    fires URL but server returns 0 because the pick value never made
+    it into the right request) goes invisible. Capturing every visual-
+    data request keeps the per-pick request fan-out reconstructable
+    from the artifact alone — no need to re-deploy with extra logging.
     Listener is wrapped in broad ``except`` so a misbehaving handler
     can't abort the page lifecycle.
     """
     def _on_response(response: object) -> None:
         try:
             status = getattr(response, "status", 0)
-            if 200 <= status < 300:
-                return
             request = getattr(response, "request", None)
             method = getattr(request, "method", "?") if request else "?"
             url = getattr(response, "url", "")
+            is_visual_data = "/visuals/" in url and "/data" in url
+            if 200 <= status < 300 and not is_visual_data:
+                return
             sink.append(f"{status} {method} {url}")
         except Exception:
             pass
