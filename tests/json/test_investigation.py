@@ -1586,7 +1586,7 @@ def _write_min_config(tmp_path: Path) -> Path:
     cfg_path.write_text(
         "aws_account_id: '111122223333'\n"
         "aws_region: us-west-2\n"
-        "deployment_name: qsgen-inv-cli\n"
+        "deployment_name: recon-inv-cli\n"
         "db_table_prefix: spec_example\n"
         "datasource_arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/x'\n",
         encoding="utf-8",
@@ -1610,10 +1610,10 @@ def test_json_apply_writes_investigation_files(tmp_path: Path):
     assert (out_dir / "investigation-analysis.json").is_file()
     assert (out_dir / "investigation-dashboard.json").is_file()
     # K.4.3 — recipient-fanout dataset JSON must be written too.
-    # Z.C — deployment_name from _write_min_config (qsgen-inv-cli) is
+    # Z.C — deployment_name from _write_min_config (recon-inv-cli) is
     # the single ID prefix.
     fanout_ds = out_dir / "datasets" / (
-        "qsgen-inv-cli-inv-recipient-fanout-dataset.json"
+        "recon-inv-cli-inv-recipient-fanout-dataset.json"
     )
     assert fanout_ds.is_file()
 

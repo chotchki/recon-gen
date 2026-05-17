@@ -534,7 +534,7 @@ fires. `set_dropdown_value` likewise types the requested value
 into the search input before clicking, so `pick_filter` works
 transparently against both variants from a test author's
 perspective. (Verified AA.H.6+B.1 / AA.H.8 against
-`qsgen-sp_pg_aw-investigation-dashboard` — the Money Trail
+`recon-sp_pg_aw-investigation-dashboard` — the Money Trail
 "Chain root transfer" dropdown failed across multiple chains
 before the AA.H.8 fix landed; the DOM-dump capture surfaced both
 the wrong popover-id assumption *and* the lazy-render quirk in one

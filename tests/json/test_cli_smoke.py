@@ -45,7 +45,7 @@ def min_config(tmp_path: Path) -> Path:
         "aws_account_id: '111122223333'\n"
         "aws_region: us-west-2\n"
         # Z.C — required cfg fields.
-        "deployment_name: qsgen-cli-smoke\n"
+        "deployment_name: recon-cli-smoke\n"
         "db_table_prefix: spec_example\n"
         "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
         ":datasource/ds\n"

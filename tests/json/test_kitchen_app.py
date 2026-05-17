@@ -298,7 +298,7 @@ class TestValidationHooksAudit:
     _CFG = _Cfg(
         aws_account_id="111122223333",
         aws_region="us-west-2",
-        deployment_name="qsgen-kitchen",
+        deployment_name="recon-kitchen",
         db_table_prefix="kitchen",
         datasource_arn=(
             "arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds"

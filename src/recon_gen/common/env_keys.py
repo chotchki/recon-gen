@@ -588,7 +588,7 @@ QS_GEN_AWS_PG_CLUSTER_ID: Final = EnvVar(
     name="QS_GEN_AWS_PG_CLUSTER_ID",
     description=(
         "Aurora PG cluster identifier (e.g., 'database-2' or "
-        "'qsgen-ci-aurora') — overrides cfg.aws_pg_cluster_id. "
+        "'recon-ci-aurora') — overrides cfg.aws_pg_cluster_id. "
         "Required for `./run_tests.sh up aws` / `down aws` / `status`."
     ),
     coercer=str,
@@ -600,7 +600,7 @@ QS_GEN_AWS_ORACLE_INSTANCE_ID: Final = EnvVar(
     name="QS_GEN_AWS_ORACLE_INSTANCE_ID",
     description=(
         "Oracle RDS instance identifier (e.g., 'database-3' or "
-        "'qsgen-ci-oracle') — overrides cfg.aws_oracle_instance_id. "
+        "'recon-ci-oracle') — overrides cfg.aws_oracle_instance_id. "
         "Required for `./run_tests.sh up aws` / `down aws` / `status`."
     ),
     coercer=str,

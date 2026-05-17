@@ -20,8 +20,8 @@ datasource_arn: "arn:aws:quicksight:us-east-1:123456789012:datasource/your-datas
 # Z.C — Deployment identity (both required, no defaults, loud-fail at load).
 # `deployment_name` prefixes every QS resource ID; `db_table_prefix`
 # prefixes every emitted DB table / matview / dataset name.
-deployment_name: "qsgen-prod"
-db_table_prefix: "qsgen_prod"
+deployment_name: "recon-prod"
+db_table_prefix: "recon_prod"
 
 # Theme: declared on the L2 institution YAML's inline `theme:` block,
 # NOT here. Each institution carries its own brand palette so swapping

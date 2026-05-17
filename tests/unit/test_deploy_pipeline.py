@@ -55,7 +55,7 @@ def _base_cfg() -> Config:
         aws_region="us-east-1",
         # Z.C — Config requires deployment_name + db_table_prefix.
         # spec_example matches the bundled L2 fixture used downstream.
-        deployment_name="qsgen-spec-example",
+        deployment_name="recon-spec-example",
         db_table_prefix="spec_example",
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
@@ -77,7 +77,7 @@ def _sqlite_cfg(tmp_path: Path) -> Config:
         aws_region="us-east-1",
         # Z.C — Config requires deployment_name + db_table_prefix.
         # spec_example matches the bundled L2 fixture used downstream.
-        deployment_name="qsgen-spec-example",
+        deployment_name="recon-spec-example",
         db_table_prefix="spec_example",
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"

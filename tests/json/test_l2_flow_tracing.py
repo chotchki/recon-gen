@@ -128,7 +128,7 @@ def test_emit_analysis_and_dashboard_succeed() -> None:
 def test_analysis_id_uses_deployment_prefix() -> None:
     """Z.C — `<deployment_name>-l2-flow-tracing-analysis`. Default
     deployment_name is whatever ``make_test_config`` defaulted to
-    (``qsgen-test``)."""
+    (``recon-test``)."""
     app = build_l2_flow_tracing_app(_CFG)
     analysis = app.emit_analysis()
     assert analysis.AnalysisId == (
@@ -149,8 +149,8 @@ def test_per_deployment_prefix_isolates_resource_ids() -> None:
     analysis IDs. Prevents multi-deploy collisions in the same QS account
     (replaces the prior per-L2-instance prefix isolation; deployments are
     now the per-tenant axis on cfg, not on the L2 yaml)."""
-    cfg_a = make_test_config(deployment_name="qsgen-spec")
-    cfg_b = make_test_config(deployment_name="qsgen-sasq")
+    cfg_a = make_test_config(deployment_name="recon-spec")
+    cfg_b = make_test_config(deployment_name="recon-sasq")
     a_app = build_l2_flow_tracing_app(cfg_a, l2_instance=default_l2_instance())
     b_app = build_l2_flow_tracing_app(
         cfg_b, l2_instance=load_instance(SASQUATCH_PR_YAML),
@@ -158,8 +158,8 @@ def test_per_deployment_prefix_isolates_resource_ids() -> None:
     a_id = a_app.emit_analysis().AnalysisId
     b_id = b_app.emit_analysis().AnalysisId
     assert a_id != b_id
-    assert "qsgen-spec" in a_id
-    assert "qsgen-sasq" in b_id
+    assert "recon-spec" in a_id
+    assert "recon-sasq" in b_id
 
 
 # -- Sheet structure (M.3.4 — 4 sheets) --------------------------------------
@@ -278,7 +278,7 @@ def test_cli_json_apply_l2_instance_flag(tmp_path: Path) -> None:
     cfg_path.write_text(
         "aws_account_id: '111122223333'\n"
         "aws_region: us-west-2\n"
-        "deployment_name: qsgen-l2ft-l2flag\n"
+        "deployment_name: recon-l2ft-l2flag\n"
         "db_table_prefix: sasquatch_pr\n"
         "datasource_arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds'\n"
     )
@@ -298,7 +298,7 @@ def test_cli_json_apply_l2_instance_flag(tmp_path: Path) -> None:
     # L2 yaml stem.
     chain_inst = (
         out_dir / "datasets"
-        / "qsgen-l2ft-l2flag-l2ft-chain-instances-dataset.json"
+        / "recon-l2ft-l2flag-l2ft-chain-instances-dataset.json"
     )
     assert chain_inst.exists()
 
@@ -313,7 +313,7 @@ def test_cli_json_apply_l2_flow_tracing_writes_files(tmp_path: Path) -> None:
         "aws_account_id: '111122223333'\n"
         "aws_region: us-west-2\n"
         # Z.C — required cfg fields.
-        "deployment_name: qsgen-l2ft-cli\n"
+        "deployment_name: recon-l2ft-cli\n"
         "db_table_prefix: spec_example\n"
         "datasource_arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds'\n"
     )
@@ -334,11 +334,11 @@ def test_cli_json_apply_l2_flow_tracing_writes_files(tmp_path: Path) -> None:
     # Z.C — dataset JSONs use the deployment_name single-prefix shape
     # (was `qs-gen-<l2_prefix>-l2ft-...`).
     assert (
-        out_dir / "datasets" / "qsgen-l2ft-cli-l2ft-postings-dataset.json"
+        out_dir / "datasets" / "recon-l2ft-cli-l2ft-postings-dataset.json"
     ).exists()
     assert (
         out_dir / "datasets"
-        / "qsgen-l2ft-cli-l2ft-meta-values-dataset.json"
+        / "recon-l2ft-cli-l2ft-meta-values-dataset.json"
     ).exists()
 
 
@@ -531,11 +531,11 @@ def test_chains_dataset_id_uses_deployment_prefix() -> None:
     from dataclasses import replace
     cfg = replace(
         _CFG,
-        deployment_name="qsgen-sasq",
+        deployment_name="recon-sasq",
         db_table_prefix="sasquatch_pr",
     )
     ds = build_chains_dataset(cfg, load_instance(SASQUATCH_PR_YAML))
-    assert ds.DataSetId == "qsgen-sasq-l2ft-chains-dataset"
+    assert ds.DataSetId == "recon-sasq-l2ft-chains-dataset"
 
 
 # -- Chains sheet — M.3.10d per-instance explorer ---------------------------
@@ -877,12 +877,12 @@ def test_exc_dataset_id_uses_deployment_prefix(
     from dataclasses import replace
     cfg = replace(
         _CFG,
-        deployment_name="qsgen-sasq",
+        deployment_name="recon-sasq",
         db_table_prefix="sasquatch_pr",
     )
     builder = getattr(ds_mod, builder_name)
     aws_ds = builder(cfg, load_instance(SASQUATCH_PR_YAML))
-    assert aws_ds.DataSetId.startswith("qsgen-sasq-l2ft-exc-"), (
+    assert aws_ds.DataSetId.startswith("recon-sasq-l2ft-exc-"), (
         f"{builder_name} dataset ID lacks prefix: {aws_ds.DataSetId}"
     )
 

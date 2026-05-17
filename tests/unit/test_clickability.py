@@ -50,7 +50,7 @@ class TestLinkTextFormat:
         assert expr.endswith('"')
         # Sentinel string itself is opaque from the caller's POV but
         # must not be a value any real row could carry.
-        assert "qsgen_never_matches" in expr
+        assert "recon_never_matches" in expr
 
 
 class TestMenuLinkTextFormat:

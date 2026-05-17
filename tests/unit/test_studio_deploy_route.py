@@ -52,7 +52,7 @@ def _sqlite_cfg(tmp_path: Path, **overrides: object) -> Config:
     base = Config(
         aws_account_id="111122223333",
         aws_region="us-east-1",
-        deployment_name="qsgen-test",
+        deployment_name="recon-test",
         db_table_prefix="test",
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"

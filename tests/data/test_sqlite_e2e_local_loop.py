@@ -54,7 +54,7 @@ def _sqlite_cfg(db_path: Path) -> Config:
     return Config(
         aws_account_id="111122223333",
         aws_region="us-west-2",
-        deployment_name="qsgen-sqlite-loop",
+        deployment_name="recon-sqlite-loop",
         db_table_prefix="spec_example",
         datasource_arn=(
             "arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds"

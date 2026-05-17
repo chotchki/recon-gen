@@ -235,7 +235,7 @@ def test_pg_to_sqlite_halt_on_failed_etl_hook(
     cfg = Config(
         aws_account_id="111122223333",
         aws_region="us-east-1",
-        deployment_name="qsgen-halt-test",
+        deployment_name="recon-halt-test",
         db_table_prefix=db_prefix,
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"

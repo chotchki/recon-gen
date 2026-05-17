@@ -18,7 +18,7 @@ holds. Literal booleans, ``1 = 1``, and self-equality are all rejected.
 from __future__ import annotations
 
 
-_SENTINEL = "__qsgen_never_matches__"
+_SENTINEL = "__recon_never_matches__"
 
 
 def _always_true(column_name: str) -> str:

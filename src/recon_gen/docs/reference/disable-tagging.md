@@ -22,7 +22,7 @@ machine-readable tags plus anything in ``extra_tags``:
 | Tag | Value | Purpose |
 | --- | --- | --- |
 | ``ManagedBy`` | ``recon-gen`` | Marks the resource as ours; ``json clean`` ignores anything missing this tag. |
-| ``Deployment`` | the cfg's ``deployment_name`` (e.g. ``qsgen-myorg-prod``) | Per-deploy isolation. Cleanup only sweeps resources whose tag matches this deployment. |
+| ``Deployment`` | the cfg's ``deployment_name`` (e.g. ``recon-myorg-prod``) | Per-deploy isolation. Cleanup only sweeps resources whose tag matches this deployment. |
 
 Cleanup is fail-CLOSED: a resource without the right ``ManagedBy``
 + ``Deployment`` tag combination is **never** swept, even when its
@@ -35,8 +35,8 @@ each deploy stamps its own ``Deployment`` tag value.
 ```yaml
 # config.yaml
 tagging_enabled: false             # ⚠ weakens cleanup isolation; see warning below
-deployment_name: "qsgen-myorg-prod"   # MUST be unique to your deploy scope
-db_table_prefix: "qsgen_myorg_prod"   # required cfg field; not used by cleanup
+deployment_name: "recon-myorg-prod"   # MUST be unique to your deploy scope
+db_table_prefix: "recon_myorg_prod"   # required cfg field; not used by cleanup
 ```
 
 What changes:
@@ -58,7 +58,7 @@ The fail-CLOSED tag check is the only protection against
 **ID-collision sweeps**. With tagging disabled:
 
 - A QuickSight dashboard a colleague hand-built and named
-  ``qsgen-myorg-prod-revenue`` would be eligible for deletion the
+  ``recon-myorg-prod-revenue`` would be eligible for deletion the
   next time you ran ``json clean`` — its ID matches the prefix,
   and the cleaner has no other way to tell it apart from a stale
   generator output.
@@ -74,7 +74,7 @@ Mitigations:
 
 - Pick a ``deployment_name`` that is **highly unlikely to collide**
   with anything else in your QS account. Embedding the team /
-  service / environment name (``qsgen-treasury-prod``) gives you a
+  service / environment name (``recon-treasury-prod``) gives you a
   meaningful, unambiguous namespace.
 - **Run ``json clean --dry-run`` first** every time. It prints the
   full list of resources it would delete; visually verify before

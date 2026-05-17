@@ -44,7 +44,7 @@ def min_config(tmp_path: Path) -> Path:
         "aws_region: us-west-2\n"
         "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
         ":datasource/ds\n"
-        "deployment_name: qsgen-test\n"
+        "deployment_name: recon-test\n"
         "db_table_prefix: spec_example\n"
     )
     return cfg

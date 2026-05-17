@@ -34,7 +34,7 @@ _REQUIRED = {
     # Z.C: required cfg fields. Defaults pinned for the assertion-light
     # tests below; tests that exercise the resource-ID shape override
     # ``deployment_name`` explicitly.
-    "deployment_name": "qsgen-test",
+    "deployment_name": "recon-test",
     "db_table_prefix": "test",
 }
 
@@ -60,7 +60,7 @@ def _write_yaml(tmp_path: Path, body: dict) -> Path:
 def test_minimal_valid_config_loads(tmp_path: Path) -> None:
     cfg = load_config(_write_yaml(tmp_path, _required_yaml()))
     assert cfg.aws_account_id == "111122223333"
-    assert cfg.deployment_name == "qsgen-test"
+    assert cfg.deployment_name == "recon-test"
     assert cfg.db_table_prefix == "test"
 
 
@@ -70,7 +70,7 @@ def test_full_valid_config_loads(tmp_path: Path) -> None:
     p = _write_yaml(tmp_path, _required_yaml({
         "aws_region": "us-east-2",
         "datasource_arn": "arn:aws:quicksight:us-east-2:111122223333:datasource/x",
-        "deployment_name": "qsgen-test-full",
+        "deployment_name": "recon-test-full",
         "db_table_prefix": "test_full",
         "principal_arns": ["arn:aws:iam::111122223333:user/u"],
         "extra_tags": {"Owner": "team"},
@@ -86,7 +86,7 @@ def test_full_valid_config_loads(tmp_path: Path) -> None:
     assert cfg.signing is not None
     assert cfg.dialect.value == "postgres"
     assert cfg.tagging_enabled is False
-    assert cfg.deployment_name == "qsgen-test-full"
+    assert cfg.deployment_name == "recon-test-full"
     assert cfg.db_table_prefix == "test_full"
 
 
@@ -112,7 +112,7 @@ def test_tagging_enabled_true_populates_tags_kwarg(tmp_path: Path) -> None:
     """Z.C: cfg.tags() emits a single ``Deployment=<name>`` tag instead of
     the v8.x two-tag (ResourcePrefix + L2Instance) pair."""
     cfg = load_config(_write_yaml(tmp_path, _required_yaml({
-        "deployment_name": "qsgen-customprefix",
+        "deployment_name": "recon-customprefix",
         "extra_tags": {"Owner": "team"},
     })))
     tags = cfg.tags()
@@ -123,7 +123,7 @@ def test_tagging_enabled_true_populates_tags_kwarg(tmp_path: Path) -> None:
     assert "ResourcePrefix" not in keys
     assert "L2Instance" not in keys
     by_key = {tag.Key: tag.Value for tag in tags}
-    assert by_key["Deployment"] == "qsgen-customprefix"
+    assert by_key["Deployment"] == "recon-customprefix"
 
 
 def test_tagging_enabled_non_bool_rejected(tmp_path: Path) -> None:
@@ -342,20 +342,20 @@ def test_datasource_arn_was_derived_flag(
     # demo_database_url only → derived; ARN carries the deployment_name
     # in the path (per Config.prefixed and __post_init__).
     cfg3 = load_config(_write_yaml(dir_c, _required_yaml({
-        "deployment_name": "qsgen-sasquatch-pr",
+        "deployment_name": "recon-sasquatch-pr",
         "demo_database_url": "postgresql://u:p@h:5432/d", "dialect": "postgres",
     })))
     # Drop the explicit datasource_arn from _required_yaml so __post_init__
     # actually does the derive (otherwise the explicit ARN wins).
     cfg3 = load_config(_write_yaml(dir_c, {
         k: v for k, v in _required_yaml({
-            "deployment_name": "qsgen-sasquatch-pr",
+            "deployment_name": "recon-sasquatch-pr",
             "demo_database_url": "postgresql://u:p@h:5432/d",
             "dialect": "postgres",
         }).items() if k != "datasource_arn"
     }))
     assert cfg3.datasource_arn_was_derived is True
-    assert "qsgen-sasquatch-pr" in (cfg3.datasource_arn or "")
+    assert "recon-sasquatch-pr" in (cfg3.datasource_arn or "")
 
 
 # X.4.g.1+2+3 — Deploy-pipeline config schema. Three new fields on Config:
@@ -402,17 +402,17 @@ def test_zc_field_env_overrides_yaml(
     """Z.C: env var override path covers both fields (the runner relies
     on this to inject per-cell deployment_name + db_table_prefix without
     rewriting the operator's cfg yaml)."""
-    monkeypatch.setenv(QS_GEN_DEPLOYMENT_NAME.name, "qsgen-from-env")
+    monkeypatch.setenv(QS_GEN_DEPLOYMENT_NAME.name, "recon-from-env")
     monkeypatch.setenv(QS_GEN_DB_TABLE_PREFIX.name, "from_env")
     body = dict(_REQUIRED)
     # Leave the yaml fields in place to confirm env wins.
-    body["deployment_name"] = "qsgen-from-yaml"
+    body["deployment_name"] = "recon-from-yaml"
     body["db_table_prefix"] = "from_yaml"
     cfg = load_config(_write_yaml(tmp_path, body))
-    assert cfg.deployment_name == "qsgen-from-env"
+    assert cfg.deployment_name == "recon-from-env"
     assert cfg.db_table_prefix == "from_env"
     # And cfg.prefixed picks the env value up.
-    assert cfg.prefixed("foo") == "qsgen-from-env-foo"
+    assert cfg.prefixed("foo") == "recon-from-env-foo"
 
 
 def test_etl_hook_defaults_none(tmp_path: Path) -> None:

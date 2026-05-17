@@ -271,7 +271,7 @@ class Config:
     # know which Aurora cluster + Oracle instance to act on. Local
     # operator's cfg points at the dev clusters (e.g. database-2 /
     # database-3); CI's per-job env injects the CI-side identifiers
-    # (`qsgen-ci-aurora` / `qsgen-ci-oracle`) so the two lifecycles
+    # (`recon-ci-aurora` / `recon-ci-oracle`) so the two lifecycles
     # don't step on each other (per gate.l.0 provisioning runbook).
     # Both optional — when unset, the lifecycle commands loud-fail
     # at the dispatch site with the env-var fallback name.
@@ -427,7 +427,7 @@ _CONFIG_L2_ONLY_KEYS: frozenset[str] = frozenset({
 _CONFIG_LEGACY_KEYS: dict[str, str] = {
     "resource_prefix": (
         "merged with l2_instance_prefix into 'deployment_name' (Z.C). "
-        "Set 'deployment_name: <your-deployment-id>' (e.g. 'qsgen-prod'). "
+        "Set 'deployment_name: <your-deployment-id>' (e.g. 'recon-prod'). "
         "Replaces both the v8.x default 'qs-gen' tool prefix AND the "
         "auto-stamped L2 segment."
     ),

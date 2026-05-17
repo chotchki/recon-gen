@@ -70,7 +70,7 @@ The output stream has two phases. First, the per-app emit:
 Generating JSON for all four apps into out/...
 Investigation: account=111122223333, region=us-east-2, l2_instance=spec_example
   wrote out/theme.json
-  wrote out/datasets/qsgen-prod-inv-recipient-fanout-dataset.json
+  wrote out/datasets/recon-prod-inv-recipient-fanout-dataset.json
   ... (~7 datasets)
   wrote out/investigation-analysis.json
   wrote out/investigation-dashboard.json
@@ -92,7 +92,7 @@ Deploying QuickSight resources from out
   Account: 111122223333
   Region:  us-east-2
 
-==> Dashboard: qsgen-prod-l1-dashboard
+==> Dashboard: recon-prod-l1-dashboard
     Deleting existing dashboard...
 ... (per dashboard, then analyses, then datasets, then theme,
      then datasource — all delete first)
@@ -100,17 +100,17 @@ Deploying QuickSight resources from out
 --- Recreating all resources ---
 
 ==> Datasource: ...
-==> Theme: qsgen-prod-theme
-==> Dataset: qsgen-prod-l1-todays-exceptions-dataset
+==> Theme: recon-prod-theme
+==> Dataset: recon-prod-l1-todays-exceptions-dataset
 ... (~27 datasets total across all four apps)
-==> Analysis: qsgen-prod-l1-dashboard-analysis
+==> Analysis: recon-prod-l1-dashboard-analysis
 ... (one per app)
-==> Dashboard: qsgen-prod-l1-dashboard
+==> Dashboard: recon-prod-l1-dashboard
 ... (one per app)
 
 --- Waiting for async resources ---
 
-==> Checking Analysis: qsgen-prod-l1-dashboard-analysis
+==> Checking Analysis: recon-prod-l1-dashboard-analysis
     Status: CREATION_SUCCESSFUL
 ... (one per analysis + dashboard)
 

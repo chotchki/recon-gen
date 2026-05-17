@@ -26,8 +26,8 @@ def make_test_config(**overrides: Any) -> Config:
 
     - ``aws_region="us-east-2"`` — pin the region to match a fixture
       (e.g. tests asserting on rendered ARNs).
-    - ``deployment_name="qsgen-spec-example"`` — pin the QS resource
-      prefix (Z.C). Default ``qsgen-test`` works for most tests; pin
+    - ``deployment_name="recon-spec-example"`` — pin the QS resource
+      prefix (Z.C). Default ``recon-test`` works for most tests; pin
       to a real deployment name when the test asserts on rendered IDs.
     - ``db_table_prefix="spec_example"`` — pin the DB table prefix
       (Z.C). Default ``test`` works when the test doesn't touch
@@ -39,7 +39,7 @@ def make_test_config(**overrides: Any) -> Config:
         "aws_region": _TEST_REGION,
         # Z.C: required Config fields. Tests that don't assert on
         # rendered resource IDs / DB DDL accept these as no-op defaults.
-        "deployment_name": "qsgen-test",
+        "deployment_name": "recon-test",
         "db_table_prefix": "test",
         "datasource_arn": _TEST_DATASOURCE_ARN,
     }

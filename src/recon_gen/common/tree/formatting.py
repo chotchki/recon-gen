@@ -33,7 +33,7 @@ from recon_gen.common.tree.fields import Dim
 # The idiomatic always-true guard (confirmed by UI round-trip) is
 # ``{col} <> "<sentinel>"`` — compare the column to a value no row ever
 # holds. Literal booleans, ``1 = 1``, and self-equality are all rejected.
-_SENTINEL = "__qsgen_never_matches__"
+_SENTINEL = "__recon_never_matches__"
 
 
 def _always_true(column_name: str) -> str:

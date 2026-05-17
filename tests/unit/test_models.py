@@ -393,7 +393,7 @@ class TestConfigTags:
         tags_by_key = {t.Key: t.Value for t in cfg.tags()}
         assert tags_by_key == {
             "ManagedBy": "recon-gen",
-            "Deployment": "qsgen-test",
+            "Deployment": "recon-test",
         }
 
     def test_extra_tags_merged(self):
@@ -427,13 +427,13 @@ class TestConfigPrefixed:
     segment (replaces v8.x's <resource_prefix>-<l2_instance_prefix>-...)."""
 
     def test_prefixed_uses_deployment_name(self):
-        cfg = make_test_config(deployment_name="qsgen-prod")
-        assert cfg.prefixed("l1-dashboard") == "qsgen-prod-l1-dashboard"
+        cfg = make_test_config(deployment_name="recon-prod")
+        assert cfg.prefixed("l1-dashboard") == "recon-prod-l1-dashboard"
 
     def test_prefixed_lets_two_deployments_coexist(self):
         """The headline use case: same dashboard kind, different deployment."""
-        cfg_a = make_test_config(deployment_name="qsgen-sasquatch")
-        cfg_b = make_test_config(deployment_name="qsgen-wonkawash")
+        cfg_a = make_test_config(deployment_name="recon-sasquatch")
+        cfg_b = make_test_config(deployment_name="recon-wonkawash")
         assert cfg_a.prefixed("l1-dashboard") != cfg_b.prefixed("l1-dashboard")
 
 
@@ -625,7 +625,7 @@ class TestConfigDatasourceArnDerivation:
             aws_account_id="111122223333",
             aws_region="us-west-2",
             # Z.C — required cfg fields.
-            deployment_name="qsgen-derived",
+            deployment_name="recon-derived",
             db_table_prefix="derived",
             demo_database_url="postgresql://u:p@h:5432/db",
         )
@@ -638,7 +638,7 @@ class TestConfigDatasourceArnDerivation:
         cfg = Config(
             aws_account_id="111122223333",
             aws_region="us-west-2",
-            deployment_name="qsgen-explicit",
+            deployment_name="recon-explicit",
             db_table_prefix="explicit",
             datasource_arn="arn:aws:quicksight:us-west-2:111122223333:datasource/custom",
             demo_database_url="postgresql://u:p@h:5432/db",
@@ -651,6 +651,6 @@ class TestConfigDatasourceArnDerivation:
             Config(
                 aws_account_id="123",
                 aws_region="us-east-1",
-                deployment_name="qsgen-fail-test",
+                deployment_name="recon-fail-test",
                 db_table_prefix="fail_test",
             )

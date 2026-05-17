@@ -55,12 +55,15 @@ Four checks today, all extensible — drop a new ``Check`` into
   ``cleanup``. Tests can freely use ``boto3.client`` (scope is
   src/ only).
 
-- **qs-gen-prefix** (Y.2.gate.b.15.lint.qs-gen-prefix) — hardcoded
-  ``"qs-gen-..."`` string literals in src code outside
-  ``common/config.py``. Resource IDs flow through
-  ``cfg.prefixed(name)`` which weaves in the L2 instance prefix;
-  bypassing it (``f"qs-gen-foo"`` direct) defeats multi-tenant
-  scoping. Docstrings are ignored.
+- **recon-prefix** (Y.2.gate.b.15.lint.recon-prefix, originally
+  ``qs-gen-prefix`` — renamed at AC.B.1) — hardcoded
+  ``"recon-<env>-..."`` deployment-prefix string literals in src
+  code outside ``common/config.py``. Resource IDs flow through
+  ``cfg.prefixed(name)`` which weaves in the operator's
+  ``deployment_name``; bypassing it (``f"recon-prod-foo"`` direct)
+  defeats multi-tenant scoping. Bare ``recon-gen`` (package /
+  CLI binary mentions) is allowed — the regex requires
+  ``recon-<env>-`` with a trailing dash. Docstrings are ignored.
 
 - **no-datetime-now** (Y.2.gate.b.15.lint.no-datetime-now) —
   ``datetime.now()`` / ``datetime.utcnow()`` / ``date.today()``
@@ -623,11 +626,18 @@ class Boto3DirectCheck(Check):
 
 
 # ---------------------------------------------------------------------------
-# Check: qs-gen-prefix (Y.2.gate.b.15.lint.qs-gen-prefix)
+# Check: recon-prefix (Y.2.gate.b.15.lint.recon-prefix, originally
+# qs-gen-prefix; renamed at AC.B.1 alongside the qsgen- → recon-
+# deployment prefix sweep)
 # ---------------------------------------------------------------------------
 
 
-_QS_GEN_PREFIX_RE = re.compile(r"^qs-gen[\-_]")
+# Match deployment-style prefixes like ``recon-prod-foo`` / ``recon-myorg-prod-bar``
+# — recon, followed by an env-name segment, followed by a resource segment.
+# Deliberately does NOT match ``recon-gen`` (the package / CLI binary name)
+# or bare ``recon-`` mentions: the trailing ``-`` after the env segment is
+# the discriminator.
+_RECON_PREFIX_RE = re.compile(r"^recon-[a-z]+-")
 
 
 def _docstring_node_ids(tree: ast.AST) -> set[int]:
@@ -646,9 +656,10 @@ def _docstring_node_ids(tree: ast.AST) -> set[int]:
     return out
 
 
-class _QsGenPrefixVisitor(ast.NodeVisitor):
-    """Walk Constant string nodes; flag ``qs-gen-...`` literals
-    (excluding docstrings)."""
+class _ReconPrefixVisitor(ast.NodeVisitor):
+    """Walk Constant string nodes; flag ``recon-<env>-...`` literals
+    (deployment-prefix style; excludes docstrings + bare
+    ``recon-gen`` package/binary mentions)."""
 
     def __init__(self, file: Path, docstring_ids: set[int]) -> None:
         self.file = file
@@ -660,26 +671,26 @@ class _QsGenPrefixVisitor(ast.NodeVisitor):
             return
         if id(node) in self.docstring_ids:
             return
-        if _QS_GEN_PREFIX_RE.match(node.value):
+        if _RECON_PREFIX_RE.match(node.value):
             self.smells.append(Smell(
                 file=self.file,
                 lineno=node.lineno,
-                checker="qs-gen-prefix",
+                checker="recon-prefix",
                 message=(
-                    f"hardcoded ``qs-gen-`` resource-prefix string "
+                    f"hardcoded ``recon-<env>-`` deployment-prefix string "
                     f"({node.value!r}) — use ``cfg.prefixed(<name>)`` "
-                    f"so the L2 instance prefix is woven in. Direct "
-                    f"``f\"qs-gen-foo\"`` defeats multi-tenant scoping. "
-                    f"Suppress with ``# typing-smell: ignore"
-                    f"[qs-gen-prefix]: <reason>`` if intentional."
+                    f"so the operator's deployment_name is woven in. "
+                    f"Direct ``f\"recon-prod-foo\"`` defeats multi-tenant "
+                    f"scoping. Suppress with ``# typing-smell: ignore"
+                    f"[recon-prefix]: <reason>`` if intentional."
                 ),
             ))
 
 
-class QsGenPrefixCheck(Check):
+class ReconPrefixCheck(Check):
     def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
         docstring_ids = _docstring_node_ids(tree)
-        v = _QsGenPrefixVisitor(file, docstring_ids)
+        v = _ReconPrefixVisitor(file, docstring_ids)
         v.visit(tree)
         return v.smells
 
@@ -1346,12 +1357,13 @@ def _build_checks() -> list[Check]:
                 and p != REPO_ROOT / "src/recon_gen/_dev/runner.py"
             ],
         ),
-        QsGenPrefixCheck(
-            name="qs-gen-prefix",
+        ReconPrefixCheck(
+            name="recon-prefix",
             description=(
-                "hardcoded ``qs-gen-...`` resource-prefix literal in "
-                "src code — use ``cfg.prefixed(<name>)`` so the L2 "
-                "instance prefix is woven in (multi-tenant scoping)"
+                "hardcoded ``recon-<env>-...`` deployment-prefix literal "
+                "in src code — use ``cfg.prefixed(<name>)`` so the "
+                "operator's deployment_name is woven in (multi-tenant "
+                "scoping). Bare ``recon-gen`` (package/CLI) is allowed."
             ),
             files=[
                 p for p in _expand_paths(

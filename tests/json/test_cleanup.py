@@ -92,13 +92,13 @@ def test_read_managed_tags_returns_map_for_managed_resource():
         tags_by_arn={
             "arn:dash:1": [
                 _mk_tag("ManagedBy", "recon-gen"),
-                _mk_tag("Deployment", "qsgen-test"),
+                _mk_tag("Deployment", "recon-test"),
             ],
         },
         summaries_by_kind={},
     )
     tags = _read_managed_tags(client, "arn:dash:1")
-    assert tags == {"ManagedBy": "recon-gen", "Deployment": "qsgen-test"}
+    assert tags == {"ManagedBy": "recon-gen", "Deployment": "recon-test"}
 
 
 def test_read_managed_tags_returns_none_for_unmanaged():
@@ -153,7 +153,7 @@ def test_collect_stale_deployment_only_sweeps_matching():
             ],
             "arn:local": [
                 _mk_tag("ManagedBy", "recon-gen"),
-                _mk_tag("Deployment", "qsgen-postgres"),
+                _mk_tag("Deployment", "recon-postgres"),
             ],
             # Pre-Z.C deploy: no Deployment tag at all.
             "arn:legacy": [_mk_tag("ManagedBy", "recon-gen")],
@@ -207,18 +207,18 @@ def test_collect_stale_skips_resources_in_expected_set():
         tags_by_arn={
             "arn:live": [
                 _mk_tag("ManagedBy", "recon-gen"),
-                _mk_tag("Deployment", "qsgen-test"),
+                _mk_tag("Deployment", "recon-test"),
             ],
             "arn:stale": [
                 _mk_tag("ManagedBy", "recon-gen"),
-                _mk_tag("Deployment", "qsgen-test"),
+                _mk_tag("Deployment", "recon-test"),
             ],
         },
     )
     expected = _empty_expected()
     expected["dashboard"].add("live-dash")
     stale = _collect_stale(
-        client, "111", expected, deployment_name="qsgen-test",
+        client, "111", expected, deployment_name="recon-test",
     )
     stale_dash_ids = {rid for rid, _ in stale["dashboard"]}
     assert stale_dash_ids == {"stale-dash"}

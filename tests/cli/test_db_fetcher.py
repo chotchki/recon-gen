@@ -172,7 +172,7 @@ def cfg_with_prefix(tmp_path: Path):  # type: ignore[no-untyped-def]: returns Co
     cfg_file.write_text(
         "aws_account_id: '111122223333'\n"
         "aws_region: us-west-2\n"
-        "deployment_name: qsgen-test-inst\n"
+        "deployment_name: recon-test-inst\n"
         "db_table_prefix: test_inst\n"
         "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
         ":datasource/ds\n"

@@ -142,7 +142,7 @@ def _collect_stale(
     are eligible for deletion. This is what makes parallel CI runs +
     coexisting local deploys safe — each deploy stamps its own
     ``Deployment`` value (e.g. ``qs-ci-<run_id>-pg`` for CI,
-    ``qsgen-prod`` for a local deploy) and cleanup only ever sweeps
+    ``recon-prod`` for a local deploy) and cleanup only ever sweeps
     its own scope. Resources tagged with a different ``Deployment``
     value AND resources with no ``Deployment`` tag at all (pre-Z.C
     deploys) are skipped.

@@ -227,8 +227,8 @@ def test_deployments_produce_different_dataset_id_namespaces() -> None:
     sasq = load_instance(
         Path(__file__).parent.parent / "l2" / "sasquatch_pr.yaml"
     )
-    cfg_a = make_test_config(deployment_name="qsgen-deploy-a")
-    cfg_b = make_test_config(deployment_name="qsgen-deploy-b")
+    cfg_a = make_test_config(deployment_name="recon-deploy-a")
+    cfg_b = make_test_config(deployment_name="recon-deploy-b")
     a_app = build_l2_flow_tracing_app(cfg_a, l2_instance=sasq)
     b_app = build_l2_flow_tracing_app(cfg_b, l2_instance=sasq)
 

@@ -47,8 +47,8 @@ aws_region: "us-east-1"
 
 datasource_arn: "arn:aws:quicksight:us-east-1:111122223333:datasource/example-datasource"
 
-deployment_name: "qsgen-prod"
-db_table_prefix: "qsgen_prod"
+deployment_name: "recon-prod"
+db_table_prefix: "recon_prod"
 
 # Theme is declared inline on the L2 institution YAML, not here
 # (N.4.j). When the L2 instance carries no ``theme:`` block, AWS
@@ -108,7 +108,7 @@ Each field, what it controls, and what breaks if you set it wrong:
 - **`deployment_name`** (required, no default — Z.C) — prefix prepended to
   every QS resource ID. Useful for multi-tenant deploys (one
   account hosting dashboards for multiple business units —
-  `qsgen-team-a` / `qsgen-team-b` namespaces keep them visually
+  `recon-team-a` / `recon-team-b` namespaces keep them visually
   separable in the QuickSight console). The cleanup command uses the
   `ManagedBy` + `Deployment` tag pair (not the ID prefix), so
   changing `deployment_name` is safe — it doesn't orphan old
@@ -117,8 +117,8 @@ Each field, what it controls, and what breaks if you set it wrong:
   to every emitted DB table / matview / dataset name. Pick a value
   that's a valid SQL identifier (lowercase, alphanumeric + underscore,
   ≤30 chars). Typically tracks `deployment_name` (e.g.
-  `deployment_name: qsgen-myorg-prod` + `db_table_prefix:
-  qsgen_myorg_prod`).
+  `deployment_name: recon-myorg-prod` + `db_table_prefix:
+  recon_myorg_prod`).
 - **`extra_tags`** — dict of extra AWS tags to apply to every
   resource alongside the always-on `ManagedBy:recon-gen`
   tag. Use for cost allocation (`CostCenter: treasury`),

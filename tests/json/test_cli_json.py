@@ -27,7 +27,7 @@ def _make_yaml_config(tmp_path: Path) -> Path:
     body = {
         "aws_account_id": "111122223333",
         "aws_region": "us-east-1",
-        "deployment_name": "qsgen-cli-test",
+        "deployment_name": "recon-cli-test",
         "db_table_prefix": "test",
         "datasource_arn": (
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
@@ -44,7 +44,7 @@ def _make_demo_yaml_config(tmp_path: Path) -> Path:
     body = {
         "aws_account_id": "111122223333",
         "aws_region": "us-east-1",
-        "deployment_name": "qsgen-cli-demo",
+        "deployment_name": "recon-cli-demo",
         "db_table_prefix": "test",
         "demo_database_url": "postgresql://u:p@h:5432/d",
     }

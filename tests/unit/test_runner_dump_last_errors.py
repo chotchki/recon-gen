@@ -155,14 +155,14 @@ def test_dump_failing_layer_surfaces_header_env_and_traceback(
         exit_code=1, duration=12.5,
         stdout=_PYTEST_STDOUT_WITH_FAILURE,
         env={
-            "QS_GEN_DEPLOYMENT_NAME": "qsgen-sp_pg_aw",
+            "QS_GEN_DEPLOYMENT_NAME": "recon-sp_pg_aw",
             "QS_GEN_FUZZ_SEED": "42",
             "QS_GEN_TEST_L2_INSTANCE": "/x/y.yaml",
         },
     )
     out = _dump(runs_dir)
     assert "[sp_pg_aw/browser] exit=1 duration=12.5s" in out
-    assert "QS_GEN_DEPLOYMENT_NAME=qsgen-sp_pg_aw" in out
+    assert "QS_GEN_DEPLOYMENT_NAME=recon-sp_pg_aw" in out
     assert "QS_GEN_FUZZ_SEED=42" in out
     assert "1 FAILED test(s)" in out
     assert "tests/e2e/test_x.py::test_b" in out

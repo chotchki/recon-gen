@@ -1452,8 +1452,8 @@ def test_dashboard_emits_with_expected_id_suffix() -> None:
     The cfg's deployment_name is the single per-deploy prefix (was
     previously two-segment `<resource_prefix>-<l2_prefix>` per M.2d.3,
     auto-stamped from the L2 yaml). With the test cfg's default
-    deployment_name=`qsgen-test`, the full DashboardId is
-    `qsgen-test-l1-dashboard`.
+    deployment_name=`recon-test`, the full DashboardId is
+    `recon-test-l1-dashboard`.
     """
     app = build_l1_dashboard_app(_CFG)
     dashboard = app.emit_dashboard()
@@ -1477,7 +1477,7 @@ class TestCli:
             # Z.C — required cfg fields; pin a deployment_name so the
             # rendered IDs are predictable in the file-existence asserts
             # below.
-            "deployment_name: qsgen-cli-l1\n"
+            "deployment_name: recon-cli-l1\n"
             "db_table_prefix: spec_example\n"
             "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
             ":datasource/ds\n"
@@ -1502,14 +1502,14 @@ class TestCli:
         # `<resource_prefix>-<l2_prefix>-...`).
         ds_dir = out / "datasets"
         for name in (
-            "qsgen-cli-l1-l1-drift-dataset.json",
-            "qsgen-cli-l1-l1-ledger-drift-dataset.json",
-            "qsgen-cli-l1-l1-overdraft-dataset.json",
-            "qsgen-cli-l1-l1-limit-breach-dataset.json",
-            "qsgen-cli-l1-l1-todays-exceptions-dataset.json",
-            "qsgen-cli-l1-l1-daily-statement-summary-dataset.json",
-            "qsgen-cli-l1-l1-daily-statement-transactions-dataset.json",
-            "qsgen-cli-l1-l1-transactions-dataset.json",
+            "recon-cli-l1-l1-drift-dataset.json",
+            "recon-cli-l1-l1-ledger-drift-dataset.json",
+            "recon-cli-l1-l1-overdraft-dataset.json",
+            "recon-cli-l1-l1-limit-breach-dataset.json",
+            "recon-cli-l1-l1-todays-exceptions-dataset.json",
+            "recon-cli-l1-l1-daily-statement-summary-dataset.json",
+            "recon-cli-l1-l1-daily-statement-transactions-dataset.json",
+            "recon-cli-l1-l1-transactions-dataset.json",
         ):
             assert (ds_dir / name).exists(), f"missing {name}"
 

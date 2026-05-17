@@ -108,7 +108,7 @@ def write_pg_etl_cfg(pg_url: str, tmp_path: Path) -> tuple[Config, Path]:
     pg_cfg_dict = {
         "aws_account_id": "111122223333",
         "aws_region": "us-east-1",
-        "deployment_name": "qsgen-pg-etl",
+        "deployment_name": "recon-pg-etl",
         "db_table_prefix": "sasquatch_pr",
         "datasource_arn": (
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
@@ -120,7 +120,7 @@ def write_pg_etl_cfg(pg_url: str, tmp_path: Path) -> tuple[Config, Path]:
     cfg = Config(
         aws_account_id="111122223333",
         aws_region="us-east-1",
-        deployment_name="qsgen-pg-etl",
+        deployment_name="recon-pg-etl",
         db_table_prefix="sasquatch_pr",
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
@@ -161,7 +161,7 @@ def make_studio_cfg(
     cfg_kwargs: dict[str, Any] = {  # noqa: ANN401
         "aws_account_id": "111122223333",
         "aws_region": "us-east-1",
-        "deployment_name": "qsgen-studio",
+        "deployment_name": "recon-studio",
         "db_table_prefix": db_prefix,
         "datasource_arn": (
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"

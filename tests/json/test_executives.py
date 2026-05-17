@@ -316,7 +316,7 @@ class TestCli:
             "aws_account_id: '111122223333'\n"
             "aws_region: us-west-2\n"
             # Z.C — required cfg fields.
-            "deployment_name: qsgen-exec-cli\n"
+            "deployment_name: recon-exec-cli\n"
             "db_table_prefix: spec_example\n"
             "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
             ":datasource/ds\n"

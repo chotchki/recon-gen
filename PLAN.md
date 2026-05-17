@@ -610,13 +610,13 @@ The tool still talks to AWS QuickSight as a target system, so technical referenc
 
 ### AC.B — CLI + ID prefix rename
 
-- [ ] **AC.B.1 — ID prefix flip.** Current: `Config.prefixed("foo")` → `qsgen-prod-foo` (per `deployment_name = "qsgen-prod"`). Post-rename: `recon-prod-foo` (default `deployment_name` in cfg templates flips from `qsgen-prod` to `recon-prod`). Sweep `b.15.lint.qs-gen-prefix` AST lint rule (and rename it to `b.15.lint.recon-prefix`) to enforce the new prefix.
-- [ ] **AC.B.2 — Smoke test against a synthetic deploy (no AWS).** Emit JSON via `recon-gen json apply -c <test-cfg>` (no `--execute`), assert generated IDs all start with `recon-prod-`. Inspect tag block: `ManagedBy: recon-gen`, `Deployment: recon-prod`.
+- [x] **AC.B.1 — ID prefix flip.** Token sweep `qsgen-` → `recon-` (113 hits) + `qsgen_` → `recon_` (9 hits incl. internal sentinel `__qsgen_never_matches__` → `__recon_never_matches__`) across operational scope (`src/recon_gen/`, `tests/`, `pyproject.toml`, `examples/config.yaml`, `config.example.yaml`, `_dev/runner.py` per-cell-cfg synthesis). `run/config.{postgres,oracle}.yaml` left alone (gitignored operator-local data). AST lint rule rewritten: `qs-gen-prefix` → `recon-prefix`; regex changed from `^qs-gen[\-_]` (caught historical v8.x literals) to `^recon-[a-z]+-` (catches deployment-style `recon-prod-foo` literals while allowing bare `recon-gen` package/CLI mentions). Class `QsGenPrefixCheck` → `ReconPrefixCheck`, visitor + constant + check-name + messages all flipped. Module-doc rule entry updated.
+- [x] **AC.B.2 — Smoke test against a synthetic deploy (no AWS).** Synth `/tmp/ac-smoke-cfg.yaml` with `deployment_name: recon-prod` + `db_table_prefix: recon_prod` + placeholder AWS account/region/datasource_arn. `recon-gen json apply -c <cfg> -o /tmp/ac-smoke` (no `--execute`) emitted 11 JSON files. All generated IDs start with `recon-prod-*` (verified via `grep -roh 'recon-prod-[a-zA-Z0-9_-]*'`); zero `qsgen-` residuals in output. Tag block: `[{'Key': 'ManagedBy', 'Value': 'recon-gen'}, {'Key': 'Deployment', 'Value': 'recon-prod'}]`. AC.C.2 (cleanup probe filter) confirmed in same pass: `common/cleanup.py` `MANAGED_TAG_VALUE = "recon-gen"` (subsumed by A.4 sweep + verified). Unit prelude post-changes: 2664 passed / 0 failed.
 
 ### AC.C — Resource tag rename (clean cut)
 
-- [ ] **AC.C.1 — Stamp `ManagedBy: recon-gen` on new deploys.** Update `Config.tags()`. Single change site. (No dual-scan back-compat needed per AC.locked — zero live legacy resources.)
-- [ ] **AC.C.2 — Cleanup probe filters on new tag only.** `apps/*/cleanup.py` + `common/cleanup.py` scan for `ManagedBy: recon-gen` exclusively. Tests verify the post-rename single-tag form.
+- [x] **AC.C.1 — Stamp `ManagedBy: recon-gen` on new deploys.** Subsumed by AC.A.4's hyphen-form sweep — `Config.tags()` already stamps the new value; verified via AC.B.2 smoke output (`{'Key': 'ManagedBy', 'Value': 'recon-gen'}` in dashboard JSON tags).
+- [x] **AC.C.2 — Cleanup probe filters on new tag only.** `common/cleanup.py::MANAGED_TAG_VALUE = "recon-gen"` (subsumed by A.4 sweep); no dual-scan back-compat path needed per AC.locked. Verified via grep — module docstring + filter constant + helper docstrings all reference `recon-gen` only.
 
 ### AC.D — Branding + docs sweep
 
