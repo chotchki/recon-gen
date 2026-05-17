@@ -1435,10 +1435,11 @@ def test_audit_first_layer_pyright_has_no_external_preconditions() -> None:
 
 def test_run_options_parallel_default_is_one() -> None:
     """Default RunOptions.parallel sentinel is 1 → layer-command auto-expands
-    to "auto" for xdist-friendly layers (unit/db/app2/api). Operator pins
-    via --parallel=N (e.g., =1 means literal serial via the >1 branch
-    being false → falls back to "auto"; use =1 only via the layer that
-    supports it explicitly)."""
+    to "auto" for xdist-friendly layers (unit/db/app2). api caps at "4"
+    + browser caps at "4" — both hit AWS-side rate limits past that.
+    Operator pins via --parallel=N (e.g., =1 means literal serial via
+    the >1 branch being false → falls back to the layer's default; use
+    =1 only via the layer that supports it explicitly)."""
     assert runner.RunOptions().parallel == 1
 
 

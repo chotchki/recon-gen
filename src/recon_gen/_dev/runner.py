@@ -733,15 +733,25 @@ def _layer_command(
         # resources via `describe_*` calls. Pytest mark `api` (set by
         # pytestmark in every e2e file) selects the right files; no
         # hardcoded test-file list to drift. Behind `RECON_GEN_E2E=1`.
-        # Default `-n auto` for AWS-bound parallelism speed-up; operator
-        # can override via `--parallel`.
+        #
+        # Default `-n 4` (capped) — pre-cap (2026-05-17), this layer
+        # ran ``-n auto`` (= cpu_count, ~10-12 workers on a beefy Mac)
+        # and produced flaky ``ThrottlingException`` on
+        # ``DescribeDashboardDefinition`` because 12 workers × 4 apps
+        # × multiple describe calls each hit QuickSight's per-account
+        # API rate ceiling (~100 req/s). Same logic as the browser
+        # layer's existing -n 4 cap ("browser tier heavy enough that
+        # 8+ workers thrash QS embed limits") — boto3 fan-out hammers
+        # the same backend, just with a different protocol. Operator
+        # can still override via ``--parallel=N`` for serial debug or
+        # explicit bump.
         cmd = [
             str(_VENV_BIN / "pytest"), "tests/e2e/", "-m", "api", "-q",
         ]
         if opts.only:
             cmd += ["-k", opts.only]
         cmd += _cov_args
-        cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
+        cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "4"]
         return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
     if layer == "browser":
         # Y.2.gate.c.5.browser — Playwright WebKit e2e against deployed QS
