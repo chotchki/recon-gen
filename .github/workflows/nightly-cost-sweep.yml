@@ -1,0 +1,155 @@
+name: Nightly cost sweep
+
+# AD.A.7 belt-and-suspenders: catches the tail-event where a CI job
+# failed mid-run and left an RDS cluster running or QuickSight
+# resources deployed. Runs once daily; idempotent (no-ops if
+# everything's already off / cleaned).
+#
+# Cron: `0 10 * * *` UTC = 3am PDT / 2am PST. Picked PDT because we
+# spend more of the year in DST and the goal is "fires while operator
+# is asleep, not while CI is most active". Adjust if the time bites.
+#
+# Scope:
+#   - Stops EVERY running RDS cluster + instance in the account
+#     (this account is dev/CI only; the customer's prod runs in their
+#     own AWS account)
+#   - Mass-deletes EVERY QuickSight content resource (dashboards,
+#     analyses, datasets, datasources, themes, topics) in us-east-1
+#     via scripts/nuke_quicksight.sh
+#
+# Manual trigger: workflow_dispatch (run it whenever, not just at 3am).
+
+on:
+  schedule:
+    - cron: "0 10 * * *"  # 3am PDT / 2am PST
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write  # OIDC
+  contents: read   # checkout
+
+concurrency:
+  # Don't double-sweep if a manual trigger races the cron.
+  group: nightly-cost-sweep
+  cancel-in-progress: false
+
+jobs:
+  stop-rds:
+    name: Stop all running RDS clusters + instances
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Confirm role assumption
+        run: aws sts get-caller-identity
+
+      - name: Stop every running RDS cluster
+        run: |
+          set -eo pipefail
+          clusters=$(aws rds describe-db-clusters \
+            --region us-east-1 \
+            --query 'DBClusters[?Status==`available`].DBClusterIdentifier' \
+            --output text)
+          if [[ -z "$clusters" ]]; then
+            echo "No running clusters."
+            exit 0
+          fi
+          for c in $clusters; do
+            echo "Stopping cluster: $c"
+            aws rds stop-db-cluster \
+              --db-cluster-identifier "$c" \
+              --region us-east-1 \
+              --query 'DBCluster.{Id:DBClusterIdentifier,Status:Status}' \
+              --output text || echo "  (already stopping / stopped)"
+          done
+
+      - name: Stop every standalone running RDS instance
+        # Aurora instances stop with their cluster; this catches
+        # non-cluster instances (e.g. the Oracle db.t3.small).
+        run: |
+          set -eo pipefail
+          # `Engine !~= aurora` excludes Aurora instances (which stop
+          # with their cluster above). Match anything that's NOT aurora.
+          instances=$(aws rds describe-db-instances \
+            --region us-east-1 \
+            --query 'DBInstances[?DBInstanceStatus==`available` && !contains(Engine, `aurora`)].DBInstanceIdentifier' \
+            --output text)
+          if [[ -z "$instances" ]]; then
+            echo "No non-Aurora running instances."
+            exit 0
+          fi
+          for i in $instances; do
+            echo "Stopping instance: $i"
+            aws rds stop-db-instance \
+              --db-instance-identifier "$i" \
+              --region us-east-1 \
+              --query 'DBInstance.{Id:DBInstanceIdentifier,Status:DBInstanceStatus}' \
+              --output text || echo "  (already stopping / stopped)"
+          done
+
+      - name: Report post-sweep RDS state
+        if: always()
+        run: |
+          echo "::group::Clusters"
+          aws rds describe-db-clusters --region us-east-1 \
+            --query 'DBClusters[].{Id:DBClusterIdentifier,Status:Status,Engine:Engine}' \
+            --output table
+          echo "::endgroup::"
+          echo "::group::Instances"
+          aws rds describe-db-instances --region us-east-1 \
+            --query 'DBInstances[].{Id:DBInstanceIdentifier,Status:DBInstanceStatus,Engine:Engine}' \
+            --output table
+          echo "::endgroup::"
+
+  nuke-qs:
+    name: Nuke all QuickSight resources (us-east-1)
+    runs-on: ubuntu-latest
+    needs: stop-rds  # No data dependency; just keeps the log readable.
+    if: always()     # Run even if RDS step failed; both are cleanup.
+    steps:
+      - name: Checkout repo (for scripts/nuke_quicksight.sh)
+        uses: actions/checkout@v6
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Confirm role assumption
+        run: aws sts get-caller-identity
+
+      - name: Nuke QuickSight (us-east-1 only)
+        env:
+          AWS_ACCOUNT: "470656905821"
+          REGIONS: "us-east-1"
+        run: |
+          # AWS_PROFILE unset here — OIDC creds are in the env directly.
+          # The script honors AWS_ACCOUNT + REGIONS env overrides.
+          unset AWS_PROFILE
+          chmod +x scripts/nuke_quicksight.sh
+          ./scripts/nuke_quicksight.sh --execute --yes
+
+      - name: Report post-nuke QuickSight state
+        if: always()
+        run: |
+          echo "::group::Dashboards"
+          aws quicksight list-dashboards --aws-account-id 470656905821 --region us-east-1 \
+            --query 'length(DashboardSummaryList)' --output text
+          echo "::endgroup::"
+          echo "::group::Analyses"
+          aws quicksight list-analyses --aws-account-id 470656905821 --region us-east-1 \
+            --query 'length(AnalysisSummaryList)' --output text
+          echo "::endgroup::"
+          echo "::group::Datasets"
+          aws quicksight list-data-sets --aws-account-id 470656905821 --region us-east-1 \
+            --query 'length(DataSetSummaries)' --output text
+          echo "::endgroup::"
+          echo "::group::Datasources"
+          aws quicksight list-data-sources --aws-account-id 470656905821 --region us-east-1 \
+            --query 'length(DataSources)' --output text
+          echo "::endgroup::"

@@ -658,6 +658,65 @@ The tool still talks to AWS QuickSight as a target system, so technical referenc
 
 ---
 
+## Phase AD — QuickSight Standard edition migration + cost containment
+
+Surfaced 2026-05-17 by a "nasty fee" alert from AWS. Cost audit (root profile) decoded the Generative BI burn that triggered it: `USE1-QuickSuite-Index` line item ran $107.71 across the first 17 days of May (7.5× the $14.28 April rate), credit-offset to ~$0 but accelerating fast. Operator's same-day fix landed the 4 GenBI opt-outs (Pro=0, Topics=0, indexing=DISABLED, Dashboard Q&A=DISABLED — all confirmed via `scripts/disable_quicksight_genai.sh audit` against the root profile). With GenBI off, the durable QuickSight cost surface is the **Enterprise edition subscription itself** (~$72/mo for 3 Author/Admin users at ~$24 each). Standard edition (~$9/Author/mo) would cut that ~3× — but Standard has no `generate_dashboard_embed_url` API, which means the `QsEmbedDriver` (and every browser e2e cell that routes through it) breaks.
+
+**Staging decision (user-confirmed 2026-05-17):** AD.A executes now while AA's remaining work + AB are still being validated against QS Enterprise. AD.B-F (code refactor + downgrade ceremony) is gated on AA + AB close — those phases need a working QS validation path, which Standard would remove. Once AB ships clean against Enterprise, the project no longer depends on the Enterprise-only embed API and can downgrade.
+
+**Scope of "nasty fee" diagnostic artifacts** (already in repo, not part of any AD task):
+- `scripts/disable_quicksight_genai.sh` — 9-step audit (4 GenBI surfaces + Users / VPC / SPICE / Resource Sprawl / Cost Trend). Reusable for future cost drift detection.
+- `cli/audit` paths in this conversation surfaced the resource sprawl count (146 dashboards / 147 analyses / ~1700 datasets / 63 datasources across 3 tag generations: `quicksight-gen` pre-rename CI, `recon-gen` current CI, untagged manual).
+
+### AD.A — Pre-migration resource cleanup *(active — Enterprise-time work)*
+
+The 1700-dataset / 146-dashboard sprawl is a cost lever regardless of edition (Enterprise + Standard both bill per-resource for some surfaces). The `recon-gen json clean --execute` sweep gates on `Deployment == cfg.deployment_name` and only touches resources tagged with the current cfg's deployment name — it won't touch CI residue from past chain runs or pre-rename `quicksight-gen` tagged work. Need a broader sweep before the downgrade.
+
+- [ ] **AD.A.1 — Audit the three tag generations + categorize.** Walk every dashboard / analysis / dataset / datasource; bucket by `ManagedBy` tag (`recon-gen` / `quicksight-gen` / untagged) + by `Deployment` tag (current cfg's vs. anything else vs. none). Output: a count matrix + a target list of "deletable: yes/no" per resource. Untagged dashboards (the `test dashboard` shape) need manual review — could be intentional manual artifacts.
+- [ ] **AD.A.2 — Extend `recon-gen json clean` to sweep historical tag values.** Add `--include-managed-by="quicksight-gen,recon-gen"` flag (default current = `recon-gen` only) so the pre-rename CI residue can be swept in one pass. Add `--all-deployments` flag (gated on `--execute` + explicit `--yes` confirmation) for the AD.A scope. Unit-test the tag-match logic; do NOT test against live AWS in unit suite (the existing `tests/e2e/test_cleanup.py` shape covers that).
+- [ ] **AD.A.3 — Dry-run sweep against the AD.A.1 audit; confirm targets.** `recon-gen json clean --all-deployments --include-managed-by=quicksight-gen,recon-gen` (no `--execute`) should list every CI-residue resource. Cross-check against the audit list; reconcile any unexpected keeps/excludes.
+- [ ] **AD.A.4 — Execute the sweep.** Same command + `--execute --yes`. Expect ~140 dashboards / ~140 analyses / ~1500 datasets to delete. Datasources are shared across deployments — preserve any used by surviving resources (sweep logic must check ref-count before delete).
+- [ ] **AD.A.5 — Re-run `disable_quicksight_genai.sh audit`; capture post-sweep baseline.** Should show ~6 dashboards (the 4 apps + manual + ci-bot baseline) / similar analyses / ~50 datasets / ~3 datasources. Save the output to `docs/audits/ad_a_post_sweep_baseline.md` as the reference point for future drift detection.
+- [ ] **AD.A.6 — Grant `recon-gen-local` the QS perms the audit script needs.** The IAM user's policy (`docs/audits/_iam/recon-gen-local-policy.json`) is missing `quicksight:ListTopics`, `quicksight:DescribeQuickSightQSearchConfiguration`, `quicksight:DescribeDashboardsQAConfiguration`. Add them so the script runs without needing root. Stays narrow — read-only audit perms, no Update/Delete.
+- [ ] **AD.A.7 — Wire weekly cost-audit GHA cron.** New `.github/workflows/quicksight-cost-audit.yml` running `scripts/disable_quicksight_genai.sh audit` on cron (weekly Sunday 06:00 UTC). Posts to Step Summary; on detection of any Generative BI signal flip (Pro user added, Topic created, indexing re-enabled, Q&A re-enabled) opens an issue. Uses the `recon-gen-local` IAM user post-AD.A.6 perm grant.
+- [ ] **AD.A.8 — AWS Budget alert at $20/mo for QuickSight.** Boto3 `budgets:CreateBudget` script — one-shot, not recurring. Notification email = `chris@hotchkiss.io`. Threshold = 75% of $20 (alert before bill arrives). Commit the script to `scripts/` so the budget can be re-created if blown away.
+- [ ] **AD.A.9 — Commit + verify chain (unit only — no AWS in unit layer).** Standard chain shape; the live cleanup happens in AD.A.4 manually (not in CI).
+
+### AD.B — DashboardDriver decoupling from embed API *(blocked on AB.5.* close)*
+
+Enterprise → Standard breaks `generate_dashboard_embed_url`. Either drop the QS browser leg entirely (lose validation coverage; rely on App2 + boto3 API tier) or implement web-UI login flow (clunkier, but preserves QS coverage). Decide after AB ships, when we know what visual-validation footprint we actually need going forward.
+
+- [ ] **AD.B.1 — Spike: web-UI login flow on a sandbox Standard subscription.** Verify Playwright can drive the IAM federation / SSO flow + persist storage_state across tests. Decision: Path A (clunky-but-real QS coverage) vs Path B (drop QS browser leg).
+- [ ] **AD.B.2 — Gate `QsEmbedDriver` behind cfg `quicksight_edition: enterprise|standard`.** Enterprise = current embed flow; Standard = either web-UI flow (if AD.B.1 picked Path A) or `NotImplementedError` (Path B). `_parametrized_dashboard_driver` skips the [qs] param when edition=standard + Path B.
+- [ ] **AD.B.3 — `test_audit_dashboard_agreement.py` 4-way → 3-way fallback.** When the QS leg is unavailable, the cross-tool agreement test runs `scenario_plants ⊆ direct_matview_SELECT == App2 (== PDF for drift)` — drops the QS column without failing.
+
+### AD.C — CI workflow adjustments *(blocked on AD.B)*
+
+- [ ] **AD.C.1 — Drop / convert `e2e-pg-browser` job in `e2e.yml`.** If AD.B picked Path A, swap to the web-UI login fixture; if Path B, delete the job + `needs:` references.
+- [ ] **AD.C.2 — `release.yml::e2e-against-testpypi` browser tier handling.** Same decision shape; prod-publish gate stays load-bearing, but its QS leg follows the AD.B path.
+- [ ] **AD.C.3 — Per-PR cleanup verification.** Assert all CI-created QS resources are tag-swept post-run (no orphans). New `tests/e2e/test_cleanup_completeness.py` shape: after a deploy → teardown cycle, `list-{dashboards,analyses,data-sets}` should return zero resources tagged with the test run's deployment_name.
+
+### AD.D — Documentation sweep *(blocked on AD.B-C)*
+
+- [ ] **AD.D.1 — README + CLAUDE.md: Standard is the supported tier.** Drop references to embed-only flows. Document the cfg edition flag.
+- [ ] **AD.D.2 — Quirks log: prune embed-iframe quirks; add Standard-specific ones.** The `QsEmbedDriver`-specific entries (data-automation-id selectors, START_VIS/STOP_VIS WS frames, parameter-control URL-write quirk) shift to "Enterprise-only — kept for historical operators".
+- [ ] **AD.D.3 — Operator runbook: self-host with Standard.** No per-tenant namespacing (Standard has one namespace). No row-level security. Document the workarounds.
+
+### AD.E — The downgrade ceremony *(blocked on AD.A-D close)*
+
+- [ ] **AD.E.1 — Pre-flight checklist** (re-run AD.A's audit script; confirm Pro=0, Topics=0, VPC=0, indexing=DISABLED, Q&A=DISABLED — these are already true today per the 2026-05-17 audit, just re-verify before the irreversible step).
+- [ ] **AD.E.2 — Console downgrade Enterprise → Standard.** No CLI for this; AWS Console only. Operator action; document the exact navigation path in the runbook.
+- [ ] **AD.E.3 — Verify subscription edition = STANDARD** via `describe-account-subscription`.
+- [ ] **AD.E.4 — Full CI rerun on Standard subscription** to confirm nothing depends on Enterprise APIs.
+- [ ] **AD.E.5 — Tag v11.1.0 (or v12.0.0 if Standard-specific breakages forced an API-surface change).** RELEASE_NOTES entry covers the migration.
+
+### AD.F — Long-tail cost monitoring *(carries forward; no close gate)*
+
+- [ ] **AD.F.1 — Monthly review of `disable_quicksight_genai.sh audit` step-summary output.** First-of-month task; if any drift, action immediately.
+- [ ] **AD.F.2 — Quarterly resource-sprawl audit.** Even tag-gated cleanup can miss things; quarterly count check catches drift.
+
+---
+
 ## Phase Q (continued) — CLI / YAML ergonomics
 
 The standing "Phase Q" thread (Q.1–Q.5 + Q.3.a shipped; see Phase history). What's still open: the CLI-shape revisit below, plus the older "schema ergonomics around the L2 yaml" item (task #488 — fold into Q.6's spike or its own sub-item when scoped). Queues behind Phase X.
