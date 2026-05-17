@@ -40,7 +40,18 @@
 
 set -euo pipefail
 
-AWS_PROFILE="${AWS_PROFILE:-default}"
+# CI vs local: when OIDC creds are in env (GHA configure-aws-credentials
+# action exports AWS_ACCESS_KEY_ID + AWS_SESSION_TOKEN), DON'T set
+# AWS_PROFILE — the aws cli would then try to read a non-existent
+# credentials file and fail with an empty error message (the symptom
+# that bit the 2026-05-17 workflow smoke test). Local: default to
+# `default` profile.
+if [[ -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_SESSION_TOKEN:-}" ]]; then
+    # CI / OIDC: env creds present, no profile lookup
+    unset AWS_PROFILE 2>/dev/null || true
+else
+    AWS_PROFILE="${AWS_PROFILE:-default}"
+fi
 AWS_ACCOUNT="${AWS_ACCOUNT:-470656905821}"
 # us-west-1 + us-west-2 added per user instruction 2026-05-17 — they
 # consolidated to us-east-1 but want a defensive sweep across every
@@ -68,7 +79,8 @@ if [[ $EXECUTE -eq 1 && $YES -ne 1 ]]; then
     exit 2
 fi
 
-export AWS_PROFILE
+# Only export AWS_PROFILE when set (CI/OIDC path leaves it unset above).
+[[ -n "${AWS_PROFILE:-}" ]] && export AWS_PROFILE
 
 bold()   { printf '\033[1m%s\033[0m\n' "$*"; }
 green()  { printf '\033[32m%s\033[0m\n' "$*"; }
