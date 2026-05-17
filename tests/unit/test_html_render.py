@@ -132,6 +132,35 @@ def test_emit_html_carries_visual_id_attribute() -> None:
     assert 'data-visual-id="v-test-kpi"' in out
 
 
+def test_emit_html_visual_div_uses_queue_last_hx_sync() -> None:
+    """AA.B.5.followon — the visual-data div must declare
+    ``hx-sync="this:queue last"``, not ``this:replace``.
+
+    Why this pin matters: chain bqaak83tb proved that under
+    parallel-initial-load + mid-load filter pick, ``this:replace`` lost
+    the new request on the 3 slowest-rendering visuals (Closing Stored
+    / Drift / Posted Money Records — the bottom 3 of 6 in DOM order).
+    The data-bound-params diagnostic captured this: those 3 visuals'
+    params stayed on the initial empty values while the top 3 picked
+    up the new account. ``queue last`` queues the new trigger until
+    the in-flight completes, then fires it — minor flicker, full
+    correctness. A regression to ``this:replace`` (or any other
+    strategy) would re-introduce the partial-refetch bug. Pin the
+    string so a careless edit fails here, not in a brittle 5-min chain.
+    """
+    sheet = _minimal_sheet()
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
+    assert 'hx-sync="this:queue last"' in out, (
+        "visual-data div must use queue-last sync — see "
+        "AA.B.5.followon for the bug class that 'this:replace' allowed"
+    )
+    assert 'hx-sync="this:replace"' not in out, (
+        "regression: this:replace dropped refresh on slow visuals"
+    )
+
+
 def test_emit_html_resolves_auto_visual_ids() -> None:
     """Regression for the spike.1 footgun: visuals built with the
     default ``visual_id=AUTO`` must have IDs resolved before they

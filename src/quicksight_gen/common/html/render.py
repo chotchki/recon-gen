@@ -1316,24 +1316,28 @@ def _render_visual(
     # X.2.g.1.d — also listen for the global ``refresh`` event the
     # single Refresh button broadcasts via htmx.trigger(body, 'refresh').
     # That replaces the per-visual Refresh buttons we used to emit.
-    # AA.B.4.followon — ``hx-sync="this:replace"`` so a ``refresh``
-    # event mid-load CANCELS the in-flight initial fetch and re-issues
-    # with the new form state. HTMX's default sync strategy is ``drop``:
-    # if the user picks a filter while the initial-load GET is still
-    # in flight, the refresh trigger gets SILENTLY DROPPED and the
-    # visual completes with its empty-param result, then sits there
-    # ignoring the user's pick. Chain @ d70987f hit this on the Daily
-    # Statement Posted Money Records table (slow query, still in flight
-    # when the test picked Account → table never re-fetched with the
-    # picked-account WHERE clause → 0 rows). ``replace`` aborts the
-    # old request and starts a new one — the right semantics for "the
-    # user wants fresh data NOW".
+    # AA.B.5.followon — ``hx-sync="this:queue last"`` so a ``refresh``
+    # event mid-load **queues** the new request and fires it when the
+    # in-flight completes. Prior strategies left visuals stale:
+    #   - default ``drop``: refresh silently dropped if mid-load
+    #     (AA.B.4.followon).
+    #   - ``this:replace``: aborts in-flight + issues new — but the new
+    #     request observably never fires under chain conditions (3 of
+    #     the slowest 6 visuals stay on the initial-load empty result
+    #     while the pick value visibly never reaches their URL). The
+    #     ``data-bound-params`` diagnostic + per-visual network capture
+    #     proved this: Posted Money Records consistently in the
+    #     never-refetches group.
+    # ``queue last`` keeps the in-flight, waits for it to complete,
+    # then issues exactly one queued request with the latest form
+    # state. The visual briefly shows the empty-param result then
+    # swaps in the filtered one — minor flicker, full correctness.
     parts.append(
         f'    <div id="visual-data-{esc_id}" class="visual-data"'
         f' hx-get="{esc_url}"'
         f' hx-trigger="load, refresh from:body"'
         f' hx-include="#filter-form"'
-        f' hx-sync="this:replace"'
+        f' hx-sync="this:queue last"'
         f' hx-swap="innerHTML">'
         f'<!-- HTMX swap target; auto-fetches on DOMContentLoaded -->'
         f'</div>'
