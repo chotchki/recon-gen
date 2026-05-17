@@ -57,4 +57,15 @@ def maybe_capture_on_failure(request, driver) -> None:  # type: ignore[no-untype
     test_id = _sanitize_test_id(
         request.node.nodeid.replace("/", "_").replace("::", "__").replace(".py", "")
     )
-    trigger_failure_capture(page, test_id=test_id)
+    # Resolve cfg from the fixture so trigger_failure_capture can also
+    # dump db_counts.txt (per-table row counts) — the first answer
+    # every "visual rendered blank" triage needs. Soft-fall: missing
+    # cfg fixture (e.g. non-conftest test) just skips the DB dump;
+    # other artifacts still land. Sidecar contract applies — capture
+    # failure must never mask the original test failure.
+    cfg: object | None
+    try:
+        cfg = request.getfixturevalue("cfg")
+    except Exception:
+        cfg = None
+    trigger_failure_capture(page, test_id=test_id, cfg=cfg)
