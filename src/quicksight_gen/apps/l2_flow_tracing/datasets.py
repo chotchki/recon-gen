@@ -95,7 +95,7 @@ DS_TT_LEGS = "l2ft-tt-legs-ds"
 DS_UNIFIED_L2_EXCEPTIONS = "l2ft-unified-exceptions-ds"
 # M.3.7 — six L2 exception sections, each backed by its own narrow dataset.
 DS_EXC_CHAIN_ORPHANS = "l2ft-exc-chain-orphans-ds"
-DS_EXC_UNMATCHED_TRANSFER_TYPE = "l2ft-exc-unmatched-transfer-type-ds"
+DS_EXC_UNMATCHED_RAIL_NAME = "l2ft-exc-unmatched-rail-name-ds"
 DS_EXC_DEAD_RAILS = "l2ft-exc-dead-rails-ds"
 DS_EXC_DEAD_BUNDLES_ACTIVITY = "l2ft-exc-dead-bundles-activity-ds"
 DS_EXC_DEAD_METADATA = "l2ft-exc-dead-metadata-ds"
@@ -128,32 +128,46 @@ META_VALUE_PLACEHOLDER_SENTINEL = "__placeholder__"
 # ``[L2FT_ALL_SENTINEL]``, never an empty list.)
 PUSHDOWN_NO_MATCH_SENTINEL = "__no_match__"
 
-# X.2.t.2 — "match everything on load" sentinel — the cap-safe (1-element)
-# static default for a MULTI_VALUED pushdown param whose declared-value
-# universe could exceed AWS's 32-element cap on
-# ``StringDatasetParameter.DefaultValues.StaticValues`` (the rail / chain /
+# X.2.t.2 + AA.A.3 — "match everything on load" sentinel — the static
+# default for every SINGLE_VALUED pushdown dataset param post-AA.A.3.
+# Pre-AA.A.3 the pushdown params were MULTI_VALUED with a sentinel
+# 1-element-list default (the X.2.t.2 cap dodge for the rail / chain /
 # template name dropdowns — an institution may declare >32 of any of
-# them). The SQL guards ``('__l2ft_all__' IN (<<$pX>>) OR col IN (<<$pX>>))``
-# (see ``_match_all_in_clause``): on load (and when the dropdown is
-# emptied, reverting the dataset param to this default) the first disjunct
-# is true so all rows pass; the bridge then maps the control's real
-# selected values in and the second disjunct narrows. The control's
-# *options* still come from the full declared list — AWS caps only the
-# dataset param's default. Fixed-schema enums (``status`` / ``bundle_status``
-# / ``completion_status``) are ≤ 3 elements by construction and keep their
-# direct value-list default.
+# them, and AWS caps ``StringDatasetParameter.DefaultValues.StaticValues``
+# at 32). AA.A.3 flipped to SINGLE_VALUED per the drill-to-one default
+# (operator workflow on these dashboards is pick-one-value 99% of the
+# time; the MULTI shape had no one-click "pick this value and clear the
+# rest" gesture — see ``docs/audits/aa_a_dropdown_audit.md``).
+#
+# The SQL guards ``('__l2ft_all__' = <<$pX>> OR col = <<$pX>>)`` (see
+# ``_match_all_in_clause``): on load (and when the dropdown is cleared,
+# reverting the dataset param to this default) the first disjunct is
+# true so all rows pass; the bridge then maps the control's picked value
+# in and the second disjunct narrows to that single value. The control's
+# *options* still come from the full declared list — AWS doesn't cap that.
+# Fixed-schema enums (``status`` / ``bundle_status`` /
+# ``completion_status``, ≤ 3 elements by construction) also flipped to
+# the same SINGLE shape per the AA.A.3 universal flip.
 L2FT_ALL_SENTINEL = "__l2ft_all__"
 _L2FT_ALL_SENTINEL_SQL = f"'{L2FT_ALL_SENTINEL}'"
 
 
 def _match_all_in_clause(col: str, param_name: str) -> str:
-    """WHERE-fragment for a MULTI_VALUED pushdown dropdown whose dataset
-    param defaults to ``[L2FT_ALL_SENTINEL]``: ``('__l2ft_all__' IN
-    (<<$p>>) OR col IN (<<$p>>))``. Mirrors ``apps/l1_dashboard``'s
-    ``_data_value_clause`` (X.2.t.2)."""
+    """WHERE-fragment for a SINGLE_VALUED pushdown dropdown whose dataset
+    param defaults to the bare ``L2FT_ALL_SENTINEL``: ``('__l2ft_all__' =
+    <<$p>> OR col = <<$p>>)``. Mirrors ``apps/l1_dashboard``'s
+    ``_data_value_clause``.
+
+    AA.A.3 collapsed the prior multi-value form (``IN (...)``) into this
+    single-value scalar form when drill-to-one became the default
+    operator workflow (audit at ``docs/audits/aa_a_dropdown_audit.md``);
+    the function name carries over from the X.2.t.2 multi shape — at
+    call sites it still reads as "match-all guard for this column +
+    param", which is the load-time semantic regardless of the predicate
+    operator."""
     return (
-        f"({_L2FT_ALL_SENTINEL_SQL} IN (<<${param_name}>>)"
-        f" OR {col} IN (<<${param_name}>>))"
+        f"({_L2FT_ALL_SENTINEL_SQL} = <<${param_name}>>"
+        f" OR {col} = <<${param_name}>>)"
     )
 
 # Dataset-parameter IDs are stable UUIDs so re-deploying produces
@@ -161,8 +175,9 @@ def _match_all_in_clause(col: str, param_name: str) -> str:
 # on every regenerate.
 _DSP_ID_PKEY = "11111111-1111-4111-8111-111111111111"
 _DSP_ID_PVALUES = "22222222-2222-4222-8222-222222222222"
-# Y.2.c — postings-dataset pushdown params (rail / status / bundle).
-# MULTI_VALUED; bridged from the Rails sheet's MULTI_SELECT dropdowns.
+# Y.2.c + AA.A.3 — postings-dataset pushdown params (rail / status /
+# bundle). SINGLE_VALUED post-AA.A.3 (was MULTI_VALUED pre-flip);
+# bridged from the Rails sheet's SINGLE_SELECT dropdowns.
 _DSP_ID_PRAIL = "33333333-3333-4333-8333-333333333333"
 _DSP_ID_PSTATUS = "44444444-4444-4444-8444-444444444444"
 _DSP_ID_PBUNDLE = "55555555-5555-4555-8555-555555555555"
@@ -318,7 +333,7 @@ EXC_CHAIN_ORPHANS_CONTRACT = DatasetContract(columns=[
 
 # L2.2 — Posted Transactions whose rail_name doesn't match any
 # declared Rail.rail_name.
-EXC_UNMATCHED_TRANSFER_TYPE_CONTRACT = DatasetContract(columns=[
+EXC_UNMATCHED_RAIL_NAME_CONTRACT = DatasetContract(columns=[
     ColumnSpec("rail_name", "STRING"),
     ColumnSpec("posting_count", "INTEGER"),
 ])
@@ -374,12 +389,15 @@ EXC_DEAD_LIMIT_SCHEDULES_CONTRACT = DatasetContract(columns=[
 #   for Unmatched Transfer Type with entity_b NULL).
 # - detail: optional extra context (leg_shape, cap, etc.) — STRING
 #   regardless of source type so the unified projection works.
-# - magnitude: "how bad is it", used for the bar chart's count
-#   weighting + the table's sort order. Per check:
+# - count: "how many violation rows of this kind", used for the bar
+#   chart's stacking + the detail table's sort order. Per check:
 #     * Chain Orphans → orphan_count (parent firings without a child)
 #     * Unmatched Transfer Type → posting_count (count of leaking legs)
 #     * Dead Rails / Dead Bundles / Dead Metadata / Dead Limit
 #       Schedules → 1 (each row IS one dead declaration)
+#   (AA.D.1: renamed from `magnitude`, which falsely implied a
+#   continuous-magnitude measure and was being rendered with
+#   currency=True. These are integer counts, not money amounts.)
 UNIFIED_L2_EXCEPTIONS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("check_type", "STRING"),
     # entity_a holds the L2-declared name relevant to each row's
@@ -392,7 +410,7 @@ UNIFIED_L2_EXCEPTIONS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("entity_a", "STRING", shape=ColumnShape.L2_DECLARED_NAME),
     ColumnSpec("entity_b", "STRING"),
     ColumnSpec("detail", "STRING"),
-    ColumnSpec("magnitude", "INTEGER"),
+    ColumnSpec("count", "INTEGER"),
 ])
 
 
@@ -629,15 +647,15 @@ def build_postings_dataset(
       ``pValues = '__placeholder__'`` matches no real value, so picking
       a Key without a Value goes empty (UX hint to pick both). Stays in
       the inner query's WHERE.
-    - **Category pushdown (Y.2.c)** — ``pL2ftRail`` / ``pL2ftStatus`` /
-      ``pL2ftBundle`` (all multi-valued). Defaults span every declared
-      rail / the bounded status enum / both bundle states, so a
-      freshly-loaded dashboard matches every row. Bridged from the
-      Rails sheet's MULTI_SELECT dropdowns; emptying a dropdown reverts
-      to the default (QS does not emit ``IN ()`` — verified Y.2.c.0).
-      Pushed into the OUTER WHERE because ``status`` and
-      ``bundle_status`` are CASE-aliases (not visible to a WHERE in the
-      same SELECT) so the projection wraps in a subquery.
+    - **Category pushdown (Y.2.c + AA.A.3)** — ``pL2ftRail`` /
+      ``pL2ftStatus`` / ``pL2ftBundle`` (all SINGLE_VALUED post-AA.A.3;
+      was MULTI_VALUED pre-flip). Defaults to the L2FT_ALL_SENTINEL so a
+      freshly-loaded dashboard matches every row via the sentinel
+      disjunct in ``_match_all_in_clause``. Bridged from the Rails
+      sheet's SINGLE_SELECT dropdowns; clearing a dropdown reverts to
+      the sentinel default. Pushed into the OUTER WHERE because
+      ``status`` and ``bundle_status`` are CASE-aliases (not visible to
+      a WHERE in the same SELECT) so the projection wraps in a subquery.
 
     Date range stays an analysis-level TimeRangeFilter (Y.2.f territory).
     """
@@ -670,14 +688,15 @@ def build_postings_dataset(
         # per-dialect-safe WHERE shape.
         f"{metadata_filter_clause(l2_instance, 'metadata', cfg.dialect)}"
         f") postings\n"
-        # rail / status / bundle pushed into SQL via multi-valued dataset
-        # parameters. status / bundle (fixed ≤3-element enums) default to
-        # the full value list; rail_name (could be >32) defaults to the
-        # sentinel + match-all guard (X.2.t.2). Emptying a dropdown reverts
-        # to the default (QS does not emit `IN ()`).
+        # AA.A.3 — rail / status / bundle all pushed into SQL via the
+        # single-valued sentinel-guard form (`('sentinel' = <<$p>> OR col
+        # = <<$p>>)`). Pre-AA.A.3 status / bundle (fixed ≤3-element enums)
+        # had a multi-valued value-list default; AA.A.3 flipped every
+        # pushdown dropdown to SINGLE per the drill-to-one default.
+        # Clearing a dropdown reverts to the sentinel default (= all rows).
         f"WHERE {_match_all_in_clause('rail_name', 'pL2ftRail')}\n"
-        f"  AND status IN (<<$pL2ftStatus>>)\n"
-        f"  AND bundle_status IN (<<$pL2ftBundle>>)\n"
+        f"  AND {_match_all_in_clause('status', 'pL2ftStatus')}\n"
+        f"  AND {_match_all_in_clause('bundle_status', 'pL2ftBundle')}\n"
     )
     return build_dataset(
         cfg, cfg.prefixed("l2ft-postings-dataset"),
@@ -705,13 +724,16 @@ def build_postings_dataset(
                     StaticValues=[META_VALUE_PLACEHOLDER_SENTINEL],
                 ),
             )),
-            # Y.2.c — rail / status / bundle multi-valued pushdown.
-            # rail_name's default is the sentinel (X.2.t.2 — could be >32);
-            # the SQL `_match_all_in_clause` makes the sentinel mean "all".
+            # AA.A.3 — rail / status / bundle SINGLE_VALUED pushdown.
+            # All three default to the L2FT_ALL_SENTINEL (the SQL
+            # `_match_all_in_clause` makes the sentinel mean "all" on
+            # load). Pre-AA.A.3 status / bundle had value-list defaults
+            # and rail_name had the sentinel-1-element-list default
+            # (X.2.t.2). AA.A.3 unified all three on the SINGLE shape.
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
                 Id=_DSP_ID_PRAIL,
                 Name="pL2ftRail",
-                ValueType="MULTI_VALUED",
+                ValueType="SINGLE_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
                     StaticValues=[L2FT_ALL_SENTINEL],
                 ),
@@ -719,17 +741,17 @@ def build_postings_dataset(
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
                 Id=_DSP_ID_PSTATUS,
                 Name="pL2ftStatus",
-                ValueType="MULTI_VALUED",
+                ValueType="SINGLE_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
-                    StaticValues=transaction_status_values(),
+                    StaticValues=[L2FT_ALL_SENTINEL],
                 ),
             )),
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
                 Id=_DSP_ID_PBUNDLE,
                 Name="pL2ftBundle",
-                ValueType="MULTI_VALUED",
+                ValueType="SINGLE_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
-                    StaticValues=bundle_status_values(),
+                    StaticValues=[L2FT_ALL_SENTINEL],
                 ),
             )),
         ],
@@ -1017,12 +1039,13 @@ def build_chain_instances_dataset(
         f"  WHERE\n"
         f"{metadata_filter_clause(l2_instance, 'parent_metadata', cfg.dialect)}\n"
         f") chain_instances\n"
-        # Y.2.d — chain / completion pushed into SQL via multi-valued dataset
-        # params. Defaults span all declared values so the freshly-loaded
-        # dashboard matches every row; emptying a dropdown reverts to the
-        # default (QS does not emit `IN ()`).
+        # AA.A.3 — chain / completion SINGLE_VALUED pushdown via the
+        # sentinel-guard form. Pre-AA.A.3 completion had a value-list
+        # default; AA.A.3 flipped every pushdown to SINGLE per the
+        # drill-to-one default. Clearing a dropdown reverts to the
+        # sentinel default (= all rows match).
         f"WHERE {_match_all_in_clause('parent_chain_name', 'pL2ftChainsChain')}\n"
-        f"  AND completion_status IN (<<$pL2ftChainsCompletion>>)\n"
+        f"  AND {_match_all_in_clause('completion_status', 'pL2ftChainsCompletion')}\n"
         f"ORDER BY parent_posting DESC"
     )
     return build_dataset(
@@ -1051,15 +1074,15 @@ def build_chain_instances_dataset(
                     StaticValues=[META_VALUE_PLACEHOLDER_SENTINEL],
                 ),
             )),
-            # Y.2.d — chain / completion multi-valued pushdown. The chain
-            # parent default is the sentinel (X.2.t.2 — an L2 may declare
-            # >32 chains); `_match_all_in_clause` makes the sentinel mean
-            # "all" on load. An instance with no Chains declared also lands
-            # here — harmless, the chain-instances table is empty anyway.
+            # AA.A.3 — chain / completion SINGLE_VALUED pushdown. Both
+            # default to the L2FT_ALL_SENTINEL (`_match_all_in_clause`
+            # makes the sentinel mean "all" on load). An instance with
+            # no Chains declared lands on the same sentinel default —
+            # harmless, the chain-instances table is empty anyway.
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
                 Id=_DSP_ID_PCHAINSCHAIN,
                 Name="pL2ftChainsChain",
-                ValueType="MULTI_VALUED",
+                ValueType="SINGLE_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
                     StaticValues=[L2FT_ALL_SENTINEL],
                 ),
@@ -1067,9 +1090,9 @@ def build_chain_instances_dataset(
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
                 Id=_DSP_ID_PCHAINSCOMPLETION,
                 Name="pL2ftChainsCompletion",
-                ValueType="MULTI_VALUED",
+                ValueType="SINGLE_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
-                    StaticValues=chain_completion_status_values(),
+                    StaticValues=[L2FT_ALL_SENTINEL],
                 ),
             )),
         ],
@@ -1138,7 +1161,7 @@ def build_exc_chain_orphans_dataset(
     )
 
 
-def build_exc_unmatched_transfer_type_dataset(
+def build_exc_unmatched_rail_name_dataset(
     cfg: Config, l2_instance: L2Instance,
 ) -> DataSet:
     """L2.2 — Posted Transactions whose ``rail_name`` doesn't
@@ -1151,7 +1174,7 @@ def build_exc_unmatched_transfer_type_dataset(
     that type — the table reveals what's leaking past the L2's rails.
     """
     prefix = cfg.db_table_prefix
-    declared = _declared_transfer_types_cte(l2_instance, cfg.dialect)
+    declared = _declared_rail_names_cte(l2_instance, cfg.dialect)
     sql = (
         f"WITH declared_types AS (\n{declared}\n)\n"
         f"SELECT\n"
@@ -1164,11 +1187,11 @@ def build_exc_unmatched_transfer_type_dataset(
         f"ORDER BY posting_count DESC, t.rail_name"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l2ft-exc-unmatched-transfer-type-dataset"),
-        "L2 Exc — Unmatched Transfer Type",
-        "l2ft-exc-unmatched-transfer-type",
-        sql, EXC_UNMATCHED_TRANSFER_TYPE_CONTRACT,
-        visual_identifier=DS_EXC_UNMATCHED_TRANSFER_TYPE,
+        cfg, cfg.prefixed("l2ft-exc-unmatched-rail-name-dataset"),
+        "L2 Exc — Unmatched Rail Name",
+        "l2ft-exc-unmatched-rail-name",
+        sql, EXC_UNMATCHED_RAIL_NAME_CONTRACT,
+        visual_identifier=DS_EXC_UNMATCHED_RAIL_NAME,
     )
 
 
@@ -1323,10 +1346,10 @@ def build_unified_l2_exceptions_dataset(
     violation dataset (M.3.10l).
 
     Mirrors L1's `todays_exceptions` pattern: one row = one violation;
-    `check_type` is the discriminator; `magnitude` is the
-    "how-bad-is-it" metric used for sort + bar weighting. Each branch
-    inlines its own CTEs as a subquery so the outer SELECT can do
-    consistent typing across branches without colliding CTE names.
+    `check_type` is the discriminator; `count` is the per-violation row
+    count used for sort + bar stacking. Each branch inlines its own
+    CTEs as a subquery so the outer SELECT can do consistent typing
+    across branches without colliding CTE names.
 
     Each branch is functionally equivalent to one of the 6 retired
     `build_exc_*` queries, just projected to the unified shape via
@@ -1334,7 +1357,7 @@ def build_unified_l2_exceptions_dataset(
     """
     prefix = cfg.db_table_prefix
     declared_chains = _declared_chains_cte(l2_instance, cfg.dialect)
-    declared_types = _declared_transfer_types_cte(l2_instance, cfg.dialect)
+    declared_types = _declared_rail_names_cte(l2_instance, cfg.dialect)
     declared_rails = _declared_rails_cte(l2_instance, cfg.dialect)
     declared_bundles = _declared_bundles_activity_cte(l2_instance, cfg.dialect)
     declared_limits = _declared_limit_schedules_cte(l2_instance, cfg.dialect)
@@ -1357,7 +1380,7 @@ def build_unified_l2_exceptions_dataset(
         f"  parent_name AS entity_a,\n"
         f"  child_name AS entity_b,\n"
         f"  CAST(NULL AS VARCHAR(255)) AS detail,\n"
-        f"  CAST(orphan_count AS INTEGER) AS magnitude\n"
+        f"  CAST(orphan_count AS INTEGER) AS count\n"
         f"FROM (\n"
         f"  WITH declared AS (\n{declared_chains}\n),\n"
         f"  edge_runtime AS (\n"
@@ -1390,10 +1413,12 @@ def build_unified_l2_exceptions_dataset(
         f"  WHERE required = 'Required'\n"
         f"    AND parent_firing_count > child_firing_count\n"
         f") sub_chain_orphans\n"
-        # Branch 2: Unmatched Transfer Type
+        # Branch 2: Unmatched Rail Name (Z.B renamed from
+        # "Unmatched Transfer Type"; the check itself was always
+        # rail-keyed — only the label was stale).
         f"UNION ALL\n"
         f"SELECT\n"
-        f"  CAST('Unmatched Transfer Type' AS VARCHAR(50)),\n"
+        f"  CAST('Unmatched Rail Name' AS VARCHAR(50)),\n"
         f"  CAST(rail_name AS VARCHAR(255)),\n"
         f"  CAST(NULL AS VARCHAR(255)),\n"
         f"  CAST(NULL AS VARCHAR(255)),\n"
@@ -1474,7 +1499,7 @@ def build_unified_l2_exceptions_dataset(
         f") sub_dead_limits\n"
         # Position-based — Oracle's ORDER BY after UNION ALL doesn't
         # recognize aliases when each branch carries WITH+CTE subqueries.
-        # Columns: 1=check_type, 2=entity_a, 3=entity_b, 4=detail, 5=magnitude.
+        # Columns: 1=check_type, 2=entity_a, 3=entity_b, 4=detail, 5=count.
         f"ORDER BY 5 DESC, 1, 2, 3"
     )
     return build_dataset(
@@ -1671,7 +1696,7 @@ def _sql_nullable_str(value: str | None) -> str:
 # -- M.3.7 CTE helpers -------------------------------------------------------
 
 
-def _declared_transfer_types_cte(
+def _declared_rail_names_cte(
     l2_instance: L2Instance, dialect: Dialect,
 ) -> str:
     """Distinct rail-type identifiers, one per SELECT row.
@@ -1948,11 +1973,13 @@ def build_tt_instances_dataset(
         f"  WHERE\n"
         f"{metadata_filter_clause(l2_instance, 'parent_metadata', cfg.dialect)}\n"
         f") tt_instances\n"
-        # Y.2.e — template / completion pushdown via multi-valued dataset
-        # params. Defaults span all declared values; emptying a dropdown
-        # reverts to the default (QS does not emit `IN ()`).
+        # AA.A.3 — template / completion SINGLE_VALUED pushdown via the
+        # sentinel-guard form. Pre-AA.A.3 completion had a value-list
+        # default; AA.A.3 flipped every pushdown to SINGLE per the
+        # drill-to-one default. Clearing a dropdown reverts to the
+        # sentinel default (= all rows match).
         f"WHERE {_match_all_in_clause('template_name', 'pL2ftTtTemplate')}\n"
-        f"  AND completion_status IN (<<$pL2ftTtCompletion>>)\n"
+        f"  AND {_match_all_in_clause('completion_status', 'pL2ftTtCompletion')}\n"
         f"ORDER BY posting DESC, template_name, transfer_id"
     )
     return build_dataset(
@@ -1967,10 +1994,11 @@ def build_tt_instances_dataset(
 def _tt_dataset_parameters(
     l2_instance: L2Instance,
 ) -> list[DatasetParameter]:
-    """Y.2.e — the shared dataset-parameter set for both TransferTemplates
-    datasets (tt-instances + tt-legs): the metadata cascade pair (pKey /
-    pValues) plus the template / completion pushdown pair. Same IDs in
-    both datasets is fine — dataset-parameter IDs are unique per-dataset.
+    """Y.2.e + AA.A.3 — the shared dataset-parameter set for both
+    TransferTemplates datasets (tt-instances + tt-legs): the metadata
+    cascade pair (pKey / pValues) plus the template / completion pushdown
+    pair (both SINGLE_VALUED post-AA.A.3). Same IDs in both datasets is
+    fine — dataset-parameter IDs are unique per-dataset.
     """
     return [
         DatasetParameter(StringDatasetParameter=StringDatasetParameter(
@@ -1993,23 +2021,25 @@ def _tt_dataset_parameters(
                 StaticValues=[META_VALUE_PLACEHOLDER_SENTINEL],
             ),
         )),
+        # AA.A.3 — template / completion SINGLE_VALUED pushdown pair.
+        # Both default to the L2FT_ALL_SENTINEL (`_match_all_in_clause`
+        # makes the sentinel mean "all" on load). An instance with no
+        # Templates declared lands on the same sentinel default —
+        # harmless, the tt-instances / tt-legs tables are empty anyway.
         DatasetParameter(StringDatasetParameter=StringDatasetParameter(
             Id=_DSP_ID_PTTTEMPLATE,
             Name="pL2ftTtTemplate",
-            ValueType="MULTI_VALUED",
+            ValueType="SINGLE_VALUED",
             DefaultValues=StringDatasetParameterDefaultValues(
-                # Sentinel default (X.2.t.2 — an L2 may declare >32
-                # templates); `_match_all_in_clause` makes it mean "all".
-                # An instance with no Templates also lands here — harmless.
                 StaticValues=[L2FT_ALL_SENTINEL],
             ),
         )),
         DatasetParameter(StringDatasetParameter=StringDatasetParameter(
             Id=_DSP_ID_PTTCOMPLETION,
             Name="pL2ftTtCompletion",
-            ValueType="MULTI_VALUED",
+            ValueType="SINGLE_VALUED",
             DefaultValues=StringDatasetParameterDefaultValues(
-                StaticValues=tt_completion_status_values(),
+                StaticValues=[L2FT_ALL_SENTINEL],
             ),
         )),
     ]
@@ -2213,11 +2243,12 @@ def build_tt_legs_dataset(
         f"  WHERE\n"
         f"{metadata_filter_clause(l2_instance, 'metadata', cfg.dialect)}\n"
         f") tt_legs\n"
-        # Y.2.e — template / completion pushdown (mirrors tt-instances so
-        # the Template / Completion dropdowns narrow the Sankey + Table
-        # together — the M.3.10k denormalization made this pair available).
+        # AA.A.3 — template / completion SINGLE_VALUED pushdown (mirrors
+        # tt-instances so the Template / Completion dropdowns narrow the
+        # Sankey + Table together — the M.3.10k denormalization made this
+        # pair available).
         f"WHERE {_match_all_in_clause('template_name', 'pL2ftTtTemplate')}\n"
-        f"  AND completion_status IN (<<$pL2ftTtCompletion>>)\n"
+        f"  AND {_match_all_in_clause('completion_status', 'pL2ftTtCompletion')}\n"
         f"ORDER BY posting DESC, template_name, transfer_id"
     )
     return build_dataset(

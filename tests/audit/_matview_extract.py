@@ -11,8 +11,8 @@ Two reads per invariant:
 
 - ``l1_invariant_matview_row_keys`` — the set of natural-key tuples for
   the flat-shape invariants (drift / overdraft → ``(account_id, day)``;
-  limit_breach → ``(account_id, day, transfer_type)``). The ``day`` is
-  the matview's day column (``business_day_start`` for drift/overdraft,
+  limit_breach → ``(account_id, day, rail_name)`` post-Z.B). The ``day``
+  is the matview's day column (``business_day_start`` for drift/overdraft,
   ``business_day`` for limit_breach), date-truncated — matching the
   scenario's ``_eff(p)`` semantics and the audit's
   ``>= start AND < (end + 1 day)`` window.
@@ -67,8 +67,15 @@ _MATVIEW: dict[L1Invariant, tuple[str, str | None, tuple[str, ...]]] = {
         "overdraft", "business_day_start", ("account_id", "business_day_start"),
     ),
     "limit_breach": (
+        # Z.B (2026-05-15) — ``transfer_type`` subsumed into ``rail_name`` on
+        # the limit_breach matview (the cap view's CASE-WHEN now keys on
+        # ``tx.rail_name`` per common/l2/schema.py::_render_limit_breach_cases).
+        # The scenario-plant identity tuple is ``(account_id, day, rail_name)``
+        # — see tests/audit/test_scenario_expectations.py::
+        # test_limit_breach_carries_transfer_type_in_identity (kept the test
+        # name from before the Z.B rename so the historical context survives).
         "limit_breach", "business_day",
-        ("account_id", "business_day", "transfer_type"),
+        ("account_id", "business_day", "rail_name"),
     ),
     "stuck_pending": ("stuck_pending", None, ("transaction_id",)),
     "stuck_unbundled": ("stuck_unbundled", None, ("transaction_id",)),
@@ -138,8 +145,9 @@ def l1_invariant_matview_row_keys(
     narrowed to ``period`` (when applicable).
 
     Keys mirror the scenario's row-identity tuples: ``(account_id, day)``
-    for drift / overdraft, ``(account_id, day, transfer_type)`` for
-    limit_breach, ``(transaction_id,)`` for the divergent-shape ones.
+    for drift / overdraft, ``(account_id, day, rail_name)`` for
+    limit_breach (Z.B subsumed ``transfer_type`` into the rail),
+    ``(transaction_id,)`` for the divergent-shape ones.
     Day values are normalised to a ``date`` (the cursor returns a
     ``datetime`` for PG/Oracle TIMESTAMP cols, a ``str`` for SQLite TEXT)
     so they compare against the scenario's ``date``-typed ``_eff(p)``.
@@ -163,7 +171,7 @@ def _normalise_key_cell(value: object, col_name: str) -> str | date:
 
     Day columns come back as ``datetime`` (PG/Oracle TIMESTAMP), ``date``,
     or an ISO ``str`` (SQLite TEXT). Everything else (account_id,
-    transfer_type, transaction_id) → ``str``."""
+    rail_name, transaction_id) → ``str``."""
     if col_name in ("business_day_start", "business_day_end", "business_day"):
         if isinstance(value, datetime):  # check before date — datetime IS a date
             return value.date()

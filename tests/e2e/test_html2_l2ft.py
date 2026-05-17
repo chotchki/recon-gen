@@ -114,25 +114,25 @@ def test_l2ft_dashboard_landing_renders_with_sheet_tabs(
         )
 
 
-def test_l2ft_rails_sheet_renders_three_multiselect_dropdowns(
+def test_l2ft_rails_sheet_renders_three_single_select_dropdowns(
     l2ft_driver: App2Driver,
 ) -> None:
-    """Y.2.app2.cde.l2ft-wiring.b — the Rails sheet's filter bar carries
-    the rail / status / bundle MULTI_SELECT dropdowns the tree-walk
-    auto-derived, each rendered as a ``<select multiple>`` with options.
+    """AA.A.3 — the Rails sheet's filter bar carries the rail / status /
+    bundle SINGLE_SELECT dropdowns the tree-walk auto-derived, each
+    rendered as a ``<select>`` (no ``multiple`` attr) with options.
 
-    App2-internal wire shape: ``<select name="param_X" multiple>``. The
-    ``param_X`` attribute name is the URL key the fetcher receives — not
-    a user-facing label, so ``driver.filter_labels()`` doesn't help.
-    ``driver.page`` for the DOM probe."""
+    Pre-AA.A these were multi-select on the back of X.2.t.2's
+    sentinel-guard pattern (forced by AWS's 32-element default cap);
+    AA.A.3 flipped them to scalar-default + ``= <<$p>>`` push down,
+    so the App2 widget renders single-select."""
     driver = l2ft_driver
     driver.open(_DASHBOARD_ID, sheet="Rails")
     page = driver.page
     for param in ("pL2ftRail", "pL2ftStatus", "pL2ftBundle"):
         sel = page.locator(f'select[name="param_{param}"]')
         assert sel.count() == 1, f"missing <select name=param_{param}>"
-        assert sel.first.evaluate("el => el.multiple") is True, (
-            f"param_{param} should be a multi-select"
+        assert sel.first.evaluate("el => el.multiple") is False, (
+            f"param_{param} should be a single-select post-AA.A.3"
         )
         assert sel.locator("option").count() >= 1, (
             f"param_{param} has no options"
@@ -144,25 +144,26 @@ def test_l2ft_chains_sheet_renders_its_dropdowns(
 ) -> None:
     """The Chains sheet carries its own auto-derived dropdowns. spec_example
     declares no chains, so the option lists may be empty — what matters is
-    the ``<select multiple>`` widgets are present (wiring proof)."""
+    the ``<select>`` widgets are present (wiring proof) and rendered as
+    single-select post-AA.A.3."""
     driver = l2ft_driver
     driver.open(_DASHBOARD_ID, sheet="Chains")
     page = driver.page
     for param in ("pL2ftChainsChain", "pL2ftChainsCompletion"):
         sel = page.locator(f'select[name="param_{param}"]')
         assert sel.count() == 1, f"missing <select name=param_{param}>"
-        assert sel.first.evaluate("el => el.multiple") is True
+        assert sel.first.evaluate("el => el.multiple") is False
 
 
 def test_l2ft_rail_dropdown_selection_refetches_with_param(
     l2ft_driver: App2Driver,
 ) -> None:
-    """Selecting a value in the rail multi-select fires a debounced refresh
-    that re-fetches the sheet's visuals with ``param_pL2ftRail`` in the
-    query string — the repeated-key wire shape the multi-valued executor
-    consumes.
+    """Selecting a value in the rail single-select fires a debounced
+    refresh that re-fetches the sheet's visuals with ``param_pL2ftRail``
+    in the query string — post-AA.A.3 the wire shape is a SINGLE value
+    (not the repeated-key list form the multi-valued executor consumed).
 
-    Drives the multi-select via ``driver.page.select_option`` (the
+    Drives the single-select via ``driver.page.select_option`` (the
     ``param_X`` attr-name shape isn't reachable via
     ``driver.pick_filter(label, ...)``); asserts on ``_calls_log`` (the
     fetcher's recorded URL params) for the wire-shape proof."""
@@ -172,9 +173,10 @@ def test_l2ft_rail_dropdown_selection_refetches_with_param(
     # Wait past the initial auto-load fetch before clearing the log.
     page.wait_for_timeout(400)
     _calls_log.clear()
-    # Select the first rail option. ``select_option`` fires a change event
-    # that the form's debounced listener broadcasts as refresh.
-    page.select_option('select[name="param_pL2ftRail"]', index=0)
+    # Select the first non-default option. ``select_option`` fires a
+    # change event that the form's debounced listener broadcasts as
+    # refresh.
+    page.select_option('select[name="param_pL2ftRail"]', index=1)
     page.wait_for_timeout(900)  # 300ms debounce + swap settle
     saw_rail_param = [
         params for _vid, params in _calls_log
@@ -184,5 +186,6 @@ def test_l2ft_rail_dropdown_selection_refetches_with_param(
         f"no fetch carried param_pL2ftRail after selecting a rail. "
         f"Calls: {[(v, dict(p)) for v, p in _calls_log[:8]]}"
     )
-    # The selected value flows through as a single-element list.
-    assert all(len(p["param_pL2ftRail"]) >= 1 for p in saw_rail_param)
+    # Post-AA.A.3 the wire still carries a list (URL params always
+    # parse as lists), but with exactly one element — the picked value.
+    assert all(len(p["param_pL2ftRail"]) == 1 for p in saw_rail_param)

@@ -652,14 +652,27 @@ def test_getting_started_coverage_lists_l2_inventory() -> None:
     assert "limit schedules" in coverage_xml
 
 
+def _text_box_by_id(sheet, text_box_id: str):
+    """Lookup helper — find one TextBox on ``sheet`` by its id. AA.C.3
+    added per-invariant panels at sheet bottom, so tests can no longer
+    rely on a sheet having exactly one TextBox; key off the specific
+    intro / config / footer id instead."""
+    for tb in sheet.text_boxes:
+        if tb.text_box_id == text_box_id:
+            return tb
+    raise AssertionError(
+        f"no TextBox with id {text_box_id!r}; sheet has "
+        f"{[tb.text_box_id for tb in sheet.text_boxes]!r}"
+    )
+
+
 def test_drift_sheet_lists_internal_accounts_from_l2() -> None:
     """M.2a.7: Drift sheet's top TextBox enumerates internal accounts
     + roles from the L2 instance — analysts see the universe drift can
     surface against without leaving the sheet."""
     app = build_l1_dashboard_app(_CFG)
     drift = app.analysis.sheets[1]
-    assert len(drift.text_boxes) == 1
-    accounts_xml = drift.text_boxes[0].content
+    accounts_xml = _text_box_by_id(drift, "l1-drift-accounts").content
     assert "Internal Accounts in Scope" in accounts_xml
     # Sasquatch fixture has at least one GL control + one DDA template;
     # both should appear.
@@ -681,8 +694,7 @@ def test_limit_breach_sheet_lists_l2_caps() -> None:
     configured" before "what got breached"."""
     app = build_l1_dashboard_app(_CFG)
     lb = _sheet_by_name(app, "Limit Breach")
-    assert len(lb.text_boxes) == 1
-    config_xml = lb.text_boxes[0].content
+    config_xml = _text_box_by_id(lb, "l1-lb-config").content
     assert "Configured Caps" in config_xml
     # Each LimitSchedule renders a `parent_role × transfer_type: $cap`
     # line; the multiplication-sign separator is a structural marker
@@ -698,12 +710,72 @@ def test_todays_exceptions_footer_carries_l2_description() -> None:
     welcome, anchored at the bottom of the unified-view landing page."""
     app = build_l1_dashboard_app(_CFG)
     te = _sheet_by_name(app, "Today's Exceptions")
-    assert len(te.text_boxes) == 1
-    footer_xml = te.text_boxes[0].content
+    footer_xml = _text_box_by_id(te, "l1-te-l2-footer").content
     assert "Institution Context" in footer_xml
     # Same fixture string the Getting Started welcome uses (M.3.2:
     # default L2 instance is spec_example).
     assert "Generic SPEC-shaped instance" in footer_xml
+
+
+# -- AA.C.3 exception-literacy panels ---------------------------------------
+
+
+def test_aa_c_3_invariant_sheets_carry_per_kind_panels() -> None:
+    """AA.C.3.d: each L1 invariant sheet has a sheet-bottom panel
+    carrying the L1_Invariants.md prose for its kind(s). Drift sheet
+    carries TWO panels (drift + ledger_drift) since both invariants
+    surface on the same sheet."""
+    app = build_l1_dashboard_app(_CFG)
+    # (sheet_name, panel_text_box_id, title_marker_in_content).
+    # title_marker = the human title from L1_Invariants.md heading;
+    # panel_markdown leads with `**<title>**` so it lands in the
+    # rendered xml.
+    cases = [
+        ("Drift", "l1-drift-panel", "Sub-ledger drift"),
+        ("Drift", "l1-ledger_drift-panel", "Parent-account roll-up drift"),
+        ("Overdraft", "l1-overdraft-panel", "Non-negative balance"),
+        ("Limit Breach", "l1-limit_breach-panel", "Outbound flow cap"),
+        ("Pending Aging", "l1-stuck_pending-panel",
+         "Per-rail pending aging"),
+        ("Unbundled Aging", "l1-stuck_unbundled-panel",
+         "Per-rail unbundled aging"),
+        ("Supersession Audit", "l1-supersession_audit-panel",
+         "Supersession Audit"),
+    ]
+    for sheet_name, panel_id, title_marker in cases:
+        sheet = _sheet_by_name(app, sheet_name)
+        panel = _text_box_by_id(sheet, panel_id)
+        assert title_marker in panel.content, (
+            f"{sheet_name!r}.{panel_id!r}: missing title marker "
+            f"{title_marker!r}"
+        )
+        # Every panel must carry the remediation block.
+        assert "Action." in panel.content, (
+            f"{sheet_name!r}.{panel_id!r}: missing **Action.** "
+            f"remediation block"
+        )
+
+
+def test_aa_c_3_e_todays_exceptions_intro_panel_lists_every_kind() -> None:
+    """AA.C.3.e: Today's Exceptions gets a generic intro panel pointing
+    at the per-kind sheets — not seven stacked per-kind panels. The
+    intro names every invariant kind so analysts know where to drill."""
+    app = build_l1_dashboard_app(_CFG)
+    te = _sheet_by_name(app, "Today's Exceptions")
+    intro = _text_box_by_id(te, "l1-todays-exceptions-panel")
+    # Every L1 invariant the dashboard surfaces gets a mention so
+    # analysts know which kinds the aggregated table covers.
+    for label in (
+        "Drift", "Overdraft", "Limit Breach",
+        "Pending Aging", "Unbundled Aging",
+        "Expected EOD Balance Breach",
+    ):
+        assert label in intro.content, (
+            f"intro panel missing kind {label!r}"
+        )
+    # Supersession Audit is referenced as "not a SHOULD" and pointed
+    # at its own sheet — verify the cross-reference is present.
+    assert "Supersession Audit" in intro.content
 
 
 # -- Per-sheet filter controls (M.2b.3) --------------------------------------
@@ -1457,7 +1529,7 @@ def test_y2g_enum_value_helpers_reflect_l2_instance() -> None:
         l1_check_type_values,
         l1_rail_values,
         l1_supersede_reason_values,
-        l1_transfer_type_values,
+        l1_rail_universe_values,
     )
 
     instance = default_l2_instance()
@@ -1468,7 +1540,7 @@ def test_y2g_enum_value_helpers_reflect_l2_instance() -> None:
 
     declared_types = {str(r.name) for r in instance.rails}
     declared_types |= {str(ls.rail) for ls in instance.limit_schedules}
-    assert set(l1_transfer_type_values(instance)) == declared_types
+    assert set(l1_rail_universe_values(instance)) == declared_types
 
     declared_roles = {str(a.role) for a in instance.accounts if a.role}
     declared_roles |= {str(t.role) for t in instance.account_templates}
@@ -1549,23 +1621,31 @@ def test_y2g_datasets_declare_pushdown_params() -> None:
 
 
 def test_y2g_companion_datasets_registered_and_unparameterized() -> None:
-    """The three Y.2.g companion datasets (accounts / transfer ids /
-    tx facets) register on the App + are themselves unparameterized
-    DISTINCT projections — so the dropdowns reading their options via
-    LinkedValues see the full universe, not a narrowed slice."""
+    """The Y.2.g companion datasets register on the App + are themselves
+    unparameterized DISTINCT projections — so the dropdowns reading
+    their options via LinkedValues see the full universe, not a
+    narrowed slice.
+
+    AA.B.1 carve-out: ``DS_L1_ACCOUNTS`` is now *cascade*-parameterized
+    by ``pL1DsRole`` (the Daily Statement Role dropdown narrows the
+    account picker's options by role). It's covered by the AA.B.1
+    cascade assertion below, not the legacy unparameterized contract.
+    Other consumers of ``DS_L1_ACCOUNTS`` (every L1 sheet's Account
+    dropdown) leave ``pL1DsRole`` at its show-all sentinel default, so
+    they still see every account."""
     from quicksight_gen.apps.l1_dashboard.datasets import (
-        DS_L1_ACCOUNTS, DS_L1_TX_FACETS, DS_L1_TX_IDS,
-        build_l1_accounts_dataset, build_l1_tx_facets_dataset,
+        DS_L1_ACCOUNTS, DS_L1_DS_ROLES, DS_L1_TX_FACETS, DS_L1_TX_IDS,
+        build_l1_ds_roles_dataset, build_l1_tx_facets_dataset,
         build_l1_tx_ids_dataset,
     )
 
     app = build_l1_dashboard_app(_CFG)
     registered = {ds.identifier for ds in app.datasets}
-    assert {DS_L1_ACCOUNTS, DS_L1_TX_IDS, DS_L1_TX_FACETS}.issubset(registered)
+    assert {DS_L1_ACCOUNTS, DS_L1_DS_ROLES, DS_L1_TX_IDS, DS_L1_TX_FACETS}.issubset(registered)
 
     inst = default_l2_instance()
     for builder, frag in (
-        (build_l1_accounts_dataset, "SELECT DISTINCT account_id"),
+        (build_l1_ds_roles_dataset, "SELECT DISTINCT account_role"),
         (build_l1_tx_ids_dataset, "SELECT DISTINCT transfer_id"),
         (build_l1_tx_facets_dataset, "SELECT DISTINCT status, origin"),
     ):
@@ -1574,6 +1654,87 @@ def test_y2g_companion_datasets_registered_and_unparameterized() -> None:
         sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
         assert sql.startswith(frag)
         assert "<<$" not in sql
+
+
+def test_aa_b_1_l1_accounts_dataset_is_role_cascaded() -> None:
+    """AA.B.1 — ``DS_L1_ACCOUNTS`` carries a ``pL1DsRole`` SINGLE_VALUED
+    dataset param that the Daily Statement Role dropdown bridges into.
+    Default value is the show-all sentinel (``L1_ALL_SENTINEL``), so
+    every L1 sheet that re-uses the companion for its Account dropdown
+    keeps seeing every account on first load; the Daily Statement sheet
+    overrides the param when the analyst picks a role.
+
+    The SQL's WHERE clause is the standard ``_data_value_clause`` shape:
+    ``('__l1_all__' = <<$pL1DsRole>>) OR (account_role = <<$pL1DsRole>>)``.
+    """
+    from quicksight_gen.apps.l1_dashboard.datasets import (
+        L1_ALL_SENTINEL, P_L1_DS_ROLE_DSP, build_l1_accounts_dataset,
+    )
+
+    inst = default_l2_instance()
+    ds = build_l1_accounts_dataset(_CFG, inst)
+    sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+    assert "SELECT DISTINCT account_id, account_role" in sql
+    assert f"<<${P_L1_DS_ROLE_DSP}>>" in sql
+    # Sentinel-OR pushdown shape — both disjuncts present.
+    assert "'__l1_all__'" in sql or f"'{L1_ALL_SENTINEL}'" in sql
+    # Dataset param declared with show-all default.
+    assert ds.DatasetParameters
+    role_params = [
+        p for p in ds.DatasetParameters
+        if p.StringDatasetParameter
+        and p.StringDatasetParameter.Name == P_L1_DS_ROLE_DSP
+    ]
+    assert len(role_params) == 1
+    rp = role_params[0].StringDatasetParameter
+    assert rp is not None
+    assert rp.ValueType == "SINGLE_VALUED"
+    assert rp.DefaultValues.StaticValues == [L1_ALL_SENTINEL]
+
+
+def test_aa_e_2_daily_statement_account_dropdown_binds_display_column() -> None:
+    """AA.E.2 fix (caught by AA.E.3): the Daily Statement Account
+    dropdown's ``LinkedValues`` must bind to ``account_display`` so the
+    picked value matches the dataset SQL's display-format WHERE
+    (``(account_name || ' (' || account_id || ')') = <<$pL1DsAccount>>``).
+
+    The original AA.E.2 sweep flipped 7 dropdowns via the
+    ``_populate_pushdown_*`` helpers but missed this direct
+    ``add_parameter_dropdown`` callsite — picking an account left the
+    Daily Statement page silently empty (bound bare id never matched
+    display-format WHERE). This test pins the fix so the regression
+    can't recur.
+    """
+    app = build_l1_dashboard_app(_CFG)
+    assert app.analysis is not None
+    daily_statement = _sheet_by_name(app, "Daily Statement")
+    # Find the Account ParameterDropdown control.
+    accountish = [
+        c for c in daily_statement.parameter_controls
+        if hasattr(c, "title") and c.title == "Account"
+    ]
+    assert len(accountish) == 1, (
+        f"Daily Statement should have exactly one 'Account' control; "
+        f"found {len(accountish)}: {[c.title for c in daily_statement.controls if hasattr(c, 'title')]}"
+    )
+    account_ctrl = accountish[0]
+    # The Account dropdown's selectable_values must read account_display
+    # — see the AA.E.2 fix comment in apps/l1_dashboard/app.py.
+    assert hasattr(account_ctrl, "selectable_values"), (
+        f"Account control should carry selectable_values; got "
+        f"{type(account_ctrl).__name__}"
+    )
+    linked = account_ctrl.selectable_values
+    assert linked is not None, "Account dropdown must have LinkedValues"
+    # LinkedValues carries ``dataset`` + ``column_name`` — assert the
+    # name is account_display, not account_id (QS's single-column
+    # LinkToDataSetColumn means the bound value IS the displayed string).
+    assert linked.column_name == "account_display", (
+        f"Daily Statement Account dropdown must bind 'account_display' "
+        f"(matches the display-format WHERE clause); bound "
+        f"{linked.column_name!r} instead — that's the AA.E.2 miss "
+        f"that left Daily Statement silently empty post-pick."
+    )
 
 
 def test_y2g_no_per_sheet_category_filter_groups_remain() -> None:
@@ -1606,7 +1767,9 @@ def test_y2g_drift_dropdowns_bridge_to_both_drift_datasets() -> None:
     cross-dataset (one control narrows both the leaf-drift and
     ledger-drift tables). After Y.2.g that means each analysis param
     bridges to a same-named dataset param on BOTH the drift and
-    ledger-drift datasets."""
+    ledger-drift datasets. AA.A.3 — both dropdowns are SINGLE_VALUED
+    (drill-to-one default; multi-select pre-AA.A.3 lacked a one-click
+    pick-this-value gesture)."""
     from quicksight_gen.common.tree import StringParam
 
     app = build_l1_dashboard_app(_CFG)
@@ -1615,7 +1778,9 @@ def test_y2g_drift_dropdowns_bridge_to_both_drift_datasets() -> None:
     for pname in ("pL1DriftAccount", "pL1DriftRole"):
         param = by_name[pname]
         assert isinstance(param, StringParam)
-        assert param.multi_valued
+        assert not param.multi_valued, (
+            f"{pname}: post-AA.A.3 every L1 pushdown dropdown is SINGLE_VALUED"
+        )
         bridged_ds_ids = {ds.identifier for ds, _ in (param.mapped_dataset_params or [])}
         from quicksight_gen.apps.l1_dashboard.datasets import (
             DS_DRIFT, DS_LEDGER_DRIFT,

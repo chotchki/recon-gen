@@ -19,6 +19,7 @@ from quicksight_gen.common.browser.helpers import (
     SCREENSHOT_DIR,
     _capture_dir_for,
     _capture_path,
+    _sanitize_test_id,
     _test_id_from_pytest_env,
     get_user_arn,
 )
@@ -80,11 +81,37 @@ class TestTestIdFromPytestEnv:
 
     def test_handles_parametrized_test(self):
         # Parametrization brackets ``[case_x]`` stay in the filename —
-        # they're filename-safe on Linux/macOS and disambiguate
+        # they're filename-safe on every target FS we care about
+        # (macOS APFS, ext4, NTFS, GHA artifact zip) and disambiguate
         # different parameter sets that fail in the same run.
         assert _test_id_from_pytest_env(
             "tests/e2e/test_foo.py::test_bar[case_x] (call)"
         ) == "tests_e2e_test_foo__test_bar[case_x]"
+
+    def test_sanitizes_parametrize_id_with_spaces_and_emdash(self):
+        # The real-world failure that bit us: an [qs, app2]-parametrized
+        # test whose parametrize ID interpolates sheet titles and visual
+        # names that contain spaces and em-dashes. The filename can land
+        # OK on macOS APFS, but downstream consumers (GHA artifact zip,
+        # Windows, shell-glob patterns, ``zipfile`` round-trips) break
+        # on the special chars. Sanitize them to ``_`` here so the
+        # captured artifact name is portable everywhere.
+        raw = (
+            "tests/e2e/test_parameter_anchored_sheets.py::"
+            "test_inv_anchor_control_present_and_populated"
+            "[qs-Money Trail-Chain root transfer-Money Trail — Hop-by-Hop] (call)"
+        )
+        out = _test_id_from_pytest_env(raw)
+        # Every char in the result is in the portable charset
+        # ``[A-Za-z0-9_\-\[\].]``.
+        assert re.fullmatch(r"[A-Za-z0-9_\-\[\].]+", out), (
+            f"sanitized id leaked non-portable chars: {out!r}"
+        )
+        # Brackets stay (disambiguates parametrize IDs).
+        assert "[" in out and "]" in out
+        # Spaces / em-dash / parens are gone.
+        assert " " not in out and "—" not in out
+        assert "(" not in out and ")" not in out
 
     def test_handles_class_based_test(self):
         assert _test_id_from_pytest_env(
@@ -171,6 +198,37 @@ class TestCaptureDirAndPath:
         assert _capture_path("qs_errors.txt", test_id) == (
             SCREENSHOT_DIR / "_failures" / f"{test_id}_qs_errors.txt"
         )
+
+
+class TestSanitizeTestId:
+    """``_sanitize_test_id`` is the gate that keeps the test_id portable
+    after pytest hands us a parametrized ID with arbitrary user-content
+    interpolations (sheet titles, visual names, error messages — any of
+    which can carry spaces / em-dashes / colons / brackets nested inside
+    brackets / etc.). Each non-portable char in the input collapses to a
+    single ``_``; a run of N non-portable chars also collapses to one
+    ``_`` (no double-underscore explosions)."""
+
+    def test_keeps_alphanumerics_underscores_hyphens_brackets_dots(self):
+        # All portable chars survive untouched.
+        assert _sanitize_test_id("test_foo-bar[qs-Rail].py") == "test_foo-bar[qs-Rail].py"
+
+    def test_collapses_space_to_underscore(self):
+        assert _sanitize_test_id("foo bar") == "foo_bar"
+
+    def test_collapses_emdash_to_underscore(self):
+        assert _sanitize_test_id("foo — bar") == "foo_bar"
+
+    def test_collapses_run_of_special_chars_to_single_underscore(self):
+        # 3 specials in a row → 1 underscore, not 3. Keeps filenames short
+        # and predictable.
+        assert _sanitize_test_id("foo   bar") == "foo_bar"
+        assert _sanitize_test_id("foo — — bar") == "foo_bar"
+
+    def test_strips_parens_colons_quotes(self):
+        assert _sanitize_test_id("foo(bar)") == "foo_bar_"
+        assert _sanitize_test_id("foo:bar") == "foo_bar"
+        assert _sanitize_test_id("foo'bar\"") == "foo_bar_"
 
 
 class TestNoHardcodedArnInSource:

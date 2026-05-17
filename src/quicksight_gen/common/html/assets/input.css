@@ -75,3 +75,52 @@
  * date picker is Flatpickr now, styled in that sheet.)
  */
 
+/*
+ * AA.B.5.followon.skeleton — per-visual loading skeleton.
+ *
+ * render.py emits ``.visual-loading`` inside every ``.visual-data``
+ * swap target; bootstrap.js re-injects it on htmx:beforeRequest so
+ * refresh loads also show the skeleton. The 300ms transition-delay
+ * keeps fast loads (KPIs off a warm matview) from flashing a spinner;
+ * only slow loads (table over 349 rows, cold connection) show the
+ * shimmer.
+ *
+ * Detection signal for "done loading": absence of ``.visual-loading``
+ * in DOM. After HTMX swaps the response into ``.visual-data``, the
+ * skeleton element is gone — tests can poll
+ * ``.visual-data:not(:has(.visual-loading))`` to know when the visual
+ * has settled (parallel to QuickSight's analysis_visual readiness
+ * check; gives App2 a comparable spec).
+ */
+.visual-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 80px;
+  width: 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+.visual-data.htmx-request .visual-loading {
+  opacity: 1;
+  transition: opacity 200ms ease-in-out;
+  transition-delay: 300ms;
+}
+.skeleton-block {
+  width: 70%;
+  height: 60px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-border) 0%,
+    var(--color-link-tint) 50%,
+    var(--color-surface-border) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+

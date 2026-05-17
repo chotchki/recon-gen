@@ -94,6 +94,7 @@ from quicksight_gen.common.l2.topology import (
 )
 from quicksight_gen.common.l2.trainer import plants_per_node
 from quicksight_gen.common.sql.dialect import Dialect
+from quicksight_gen.common.html._studio_training import render_training_pane
 from quicksight_gen.common.html.render import _emit_theme_style
 
 
@@ -1539,6 +1540,7 @@ def _render_data_page(
         etl_hook_command, etl_hook_enabled,
     )
     timeline_section = _render_timeline_section(instance, tg_cache)
+    training_pane = render_training_pane()
 
     return f"""<!doctype html>
 <html lang="en">
@@ -1615,7 +1617,7 @@ def _render_data_page(
   <main class="data-main">
     {timeline_section}
     <section class="data-training" id="data-training" aria-label="Training pane">
-      <p class="data-empty">training pane lands in X.4.h.9</p>
+{training_pane}
     </section>
   </main>
 </body>

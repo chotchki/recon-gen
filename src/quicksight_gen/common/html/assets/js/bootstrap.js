@@ -81,6 +81,15 @@
     }
     var target = section.querySelector(".visual-data");
     if (!target) return;
+    // WHY: copy data-bound-params from the (about-to-be-wiped) script
+    // tag onto the persistent section element so failure-capture's
+    // dom.html snapshot reveals what params each visual was queried
+    // with. The server-rendered attr lives on the script which we
+    // clear below.
+    var boundParams = dataScript.getAttribute("data-bound-params");
+    if (boundParams !== null) {
+      section.setAttribute("data-bound-params", boundParams);
+    }
     // Clear any prior render — chart-data script tag included. The
     // script already gave us the data; the renderXxx below paints
     // fresh into a clean target. Without this, repeat hydrates
@@ -1080,6 +1089,26 @@
     showErrorToast("Network error. Check your connection.", null);
   });
 
+  // AA.B.5.followon.skeleton — re-inject the loading skeleton into
+  // every visual-data div whose request is about to fire. The
+  // render.py initial markup includes a skeleton inside ``.visual-data``,
+  // but the first htmx:beforeSwap wipes innerHTML before the response
+  // paints; refresh requests on already-loaded visuals have stale
+  // content in the swap target instead of a skeleton. This hook puts
+  // the skeleton back ahead of EVERY request so the loading state is
+  // always present + the "is loading?" signal (presence of
+  // ``.visual-loading``) stays accurate across initial + refresh.
+  // CSS opacity-with-300ms-delay keeps fast loads from flashing.
+  document.addEventListener("htmx:beforeRequest", (evt) => {
+    var elt = evt.detail.elt;
+    if (elt && elt.classList && elt.classList.contains("visual-data")) {
+      elt.innerHTML =
+        '<div class="visual-loading" aria-hidden="true">' +
+        '<div class="skeleton-block"></div>' +
+        "</div>";
+    }
+  });
+
   document.addEventListener("htmx:afterSwap", (evt) => {
     hydrate(evt.detail.target);
     wireFilterWidgets(evt.detail.target);
@@ -1163,9 +1192,24 @@
     form.addEventListener("change", () => {
       clearTimeout(timer);
       timer = setTimeout(() => {
-        if (typeof htmx !== "undefined") {
-          htmx.trigger(document.body, "refresh");
-        }
+        if (typeof htmx === "undefined") return;
+        // AA.B.5.followon — iterate visuals explicitly instead of
+        // broadcasting a body-level ``refresh`` event. The broadcast
+        // pattern was unreliable: under parallel-initial-load + mid-load
+        // filter pick, the bottom 2-3 visuals in DOM order silently
+        // dropped the trigger (proved by data-bound-params + per-visual
+        // network capture — chain bqaak83tb / chain 11c02b0). Why an
+        // explicit loop fixes it: HTMX's body-level event dispatch
+        // appears to short-circuit on some condition involving the
+        // in-flight requests of earlier visuals. Triggering each visual
+        // directly bypasses the cross-element ordering entirely; each
+        // visual independently consults its own ``hx-sync`` policy
+        // (``this:queue last``) and either fires immediately or queues
+        // for after its current request lands.
+        var visuals = document.querySelectorAll(".visual-data[hx-get]");
+        visuals.forEach((div) => {
+          htmx.trigger(div, "refresh");
+        });
       }, 300);
     });
   }

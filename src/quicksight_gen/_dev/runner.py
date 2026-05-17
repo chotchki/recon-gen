@@ -3378,6 +3378,244 @@ def cmd_pyright(args: argparse.Namespace) -> int:
     return EXIT_SUCCESS if result.returncode == 0 else EXIT_FAILURE
 
 
+def cmd_dump_last_errors(args: argparse.Namespace) -> int:
+    """Surface failing-layer assertions + missing-capture warnings
+    from the most-recent run dir.
+
+    Triage shortcut: instead of ``find runs/ → grep stdout → reconstruct
+    pytest output``, walk the latest ``runs/<utc-ts>-<sha>/`` and dump
+    a structured report — per failing (variant, layer) cell, with the
+    pytest FAILED summary, the assertion text per failing test, and a
+    pointer to (or warning about missing) AA.H.6 capture artifacts.
+
+    Surfaces:
+
+    - **Per failing layer**: layer name + exit code + duration +
+      cell-level env (cmd.json fields: ``QS_GEN_DEPLOYMENT_NAME``,
+      ``QS_GEN_FUZZ_SEED``, ``QS_GEN_TEST_L2_INSTANCE``).
+    - **Per failing test**: the ``FAILED ...`` summary line + the
+      matched ``____ <test_id> ____`` traceback block from
+      ``stdout.log`` (truncated at the next ``____`` / ``=====``).
+    - **Capture-artifact pointer**: ``$QS_GEN_RUN_DIR/browser/<sanitized
+      test_id>/`` paths, with a loud warning if AA.H.6's 6 files
+      (screenshot.png / dom.html / console.txt / network.txt /
+      qs_errors.txt / trace.zip) are missing — AA.H.10 wired the hook
+      to all three QS-driver fixtures, so a missing capture is a
+      regression worth flagging.
+
+    Use ``--run <run-id>`` to pick a specific run (e.g.
+    ``20260516T203824Z-914fc4c``); default = latest by mtime. Use
+    ``--variant <name>`` to narrow to one cell.
+
+    Exit code: always ``EXIT_SUCCESS`` — this is a triage tool, not a
+    gate. The caller cares about the chain's exit; this just helps
+    them read it faster.
+    """
+    runs_dir = RUNS_DIR
+    if not runs_dir.exists():
+        print("runner: no runs/ dir — no chain has been run yet.",
+              file=sys.stderr)
+        return EXIT_SUCCESS
+
+    # Resolve target run dir.
+    if args.run:
+        run_dir = runs_dir / args.run
+        if not run_dir.is_dir():
+            print(
+                f"runner: --run {args.run!r} not found under {runs_dir}",
+                file=sys.stderr,
+            )
+            return EXIT_NEEDS_OPERATOR
+    else:
+        candidates = [
+            p for p in runs_dir.iterdir()
+            if p.is_dir() and _RUN_ID_PATTERN.match(p.name)
+        ]
+        if not candidates:
+            print(
+                "runner: no runs found under runs/ (looked for "
+                "<utc-ts>-<sha>[-dirty] dirs).",
+                file=sys.stderr,
+            )
+            return EXIT_SUCCESS
+        candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        run_dir = candidates[0]
+
+    print(f"# Failing layers in {run_dir.name}")
+    print()
+
+    # Walk cells (variant subdirs). Skip the unit-prelude dir specially
+    # — it's `_prelude/unit/`, not a variant.
+    cells: list[tuple[str, Path]] = []
+    prelude = run_dir / "_prelude"
+    if prelude.is_dir():
+        cells.append(("_prelude", prelude))
+    for sub in sorted(run_dir.iterdir()):
+        if not sub.is_dir() or sub.name == "_prelude":
+            continue
+        if args.variant and sub.name != args.variant:
+            continue
+        cells.append((sub.name, sub))
+
+    found_any_failure = False
+    for cell_name, cell_dir in cells:
+        for layer_dir in sorted(cell_dir.iterdir()):
+            if not layer_dir.is_dir():
+                continue
+            layer = layer_dir.name
+            if layer in ("timings", "db-perf", "l2", "seed"):
+                # Auxiliary subdirs, not chain layers.
+                continue
+            cmd_json_path = layer_dir / "cmd.json"
+            if not cmd_json_path.is_file():
+                continue
+            cmd_json = json.loads(cmd_json_path.read_text())
+            exit_code = int(cmd_json.get("exit_code", 0) or 0)
+            if exit_code == 0:
+                continue
+            found_any_failure = True
+            duration = cmd_json.get("duration_seconds")
+            duration_str = f"{duration:.1f}s" if duration else "?"
+            print(f"## [{cell_name}/{layer}] exit={exit_code} duration={duration_str}")
+            print()
+            env = cmd_json.get("env_overrides", {})
+            # Surface the high-signal env values — operator can derive
+            # rest from the run-id + cmd.json directly.
+            for key in (
+                "QS_GEN_DEPLOYMENT_NAME", "QS_GEN_FUZZ_SEED",
+                "QS_GEN_TEST_L2_INSTANCE",
+            ):
+                if key in env:
+                    print(f"- `{key}={env[key]}`")
+            print()
+            stdout_log = layer_dir / "stdout.log"
+            if not stdout_log.is_file():
+                print("(no stdout.log)")
+                print()
+                continue
+            stdout = stdout_log.read_text(errors="replace")
+            _dump_pytest_failures(stdout)
+            _dump_capture_status(cell_dir, layer_dir, stdout)
+    if not found_any_failure:
+        print("(no failing layers in this run — all clean)")
+    return EXIT_SUCCESS
+
+
+_FAILED_LINE_RE: Final = re.compile(r"^FAILED (?P<nodeid>\S+)(?: - (?P<reason>.+))?$", re.MULTILINE)
+"""Matches pytest's ``FAILED tests/e2e/test_X.py::test_Y[param] - reason``
+summary lines (one per failure, emitted at end of run)."""
+
+_FAILURE_BLOCK_RE: Final = re.compile(
+    r"^_+\s+(?P<name>\S+)\s+_+\s*$\n(?P<body>.*?)(?=^_+\s+\S+\s+_+\s*$|^=+\s|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
+"""Matches pytest's ``______ test_name ______`` block headers and
+captures everything until the next block header or a summary divider."""
+
+
+def _dump_pytest_failures(stdout: str) -> None:
+    """Extract + print every FAILED test's name + traceback block."""
+    failed = list(_FAILED_LINE_RE.finditer(stdout))
+    if not failed:
+        # Layer failed but pytest didn't surface FAILED lines — show
+        # the tail (likely a non-pytest crash: docker-compose error,
+        # AWS API exception, etc.).
+        tail = "\n".join(stdout.splitlines()[-30:])
+        print("### Non-pytest failure — stdout tail (30 lines)")
+        print()
+        print("```")
+        print(tail)
+        print("```")
+        print()
+        return
+
+    # Index per-test bodies by the unparametrized test name (which is
+    # what the block header carries — pytest's parametrize shows the
+    # full ``test[param]`` in FAILED but the section header uses just
+    # the param fragment).
+    blocks: dict[str, str] = {}
+    for m in _FAILURE_BLOCK_RE.finditer(stdout):
+        blocks[m.group("name")] = m.group("body").strip()
+
+    print(f"### {len(failed)} FAILED test(s)")
+    print()
+    for m in failed:
+        nodeid = m.group("nodeid")
+        reason = (m.group("reason") or "").strip()
+        # The block header drops the file prefix + `::` and renders
+        # the parametrized form as ``test_name[param]`` (matching the
+        # nodeid's tail). Walk both candidates.
+        short = nodeid.split("::")[-1]
+        body = blocks.get(short) or blocks.get(nodeid.split("/")[-1].replace(".py::", " "))
+        print(f"#### `{nodeid}`")
+        if reason:
+            print(f"- **reason:** {reason}")
+        print()
+        if body:
+            # Truncate to ~50 lines — full traceback is in stdout.log.
+            lines = body.splitlines()
+            shown = "\n".join(lines[:50])
+            print("```")
+            print(shown)
+            print("```")
+            if len(lines) > 50:
+                print(
+                    f"_(truncated; {len(lines) - 50} more lines in "
+                    "stdout.log)_"
+                )
+        print()
+
+
+def _dump_capture_status(cell_dir: Path, layer_dir: Path, stdout: str) -> None:
+    """For a failing browser layer, check whether AA.H.6 capture
+    artifacts landed for each failed test. Print a warning if any
+    failed test has no matching capture dir — that's an AA.H.10
+    regression worth investigating."""
+    if layer_dir.name != "browser":
+        return
+    browser_capture_root = cell_dir / "browser"
+    failed = list(_FAILED_LINE_RE.finditer(stdout))
+    if not failed:
+        return
+    expected_files = {
+        "screenshot.png", "dom.html", "console.txt",
+        "network.txt", "qs_errors.txt", "trace.zip",
+    }
+    missing_captures: list[str] = []
+    for m in failed:
+        nodeid = m.group("nodeid")
+        # Sanitization mirrors common.browser.helpers._sanitize_test_id —
+        # ``/`` and ``::`` collapse to ``_``, ``.py`` strips, then any
+        # non-[A-Za-z0-9_\-\[\].] char collapses to ``_``. Reproducing
+        # the sanitizer's exact behavior here avoids a runner-side
+        # import of the browser-helpers module (which would drag
+        # Playwright into the runner's import graph).
+        slug = re.sub(
+            r"[^A-Za-z0-9_\-\[\].]+", "_",
+            nodeid.replace("/", "_").replace("::", "__").replace(".py", ""),
+        )
+        candidate = browser_capture_root / slug
+        if not candidate.is_dir():
+            missing_captures.append(nodeid)
+            continue
+        present = {p.name for p in candidate.iterdir()}
+        if not (expected_files & present):
+            missing_captures.append(nodeid)
+    if missing_captures:
+        print("### ⚠ AA.H.6 capture artifacts missing")
+        print()
+        print(
+            "These failed tests have NO capture dir under "
+            f"`{browser_capture_root}/<test_id>/`. AA.H.10 wired the "
+            "hook into all three QS-driver fixtures; a missing capture "
+            "is a regression — check the fixture wiring."
+        )
+        print()
+        for nodeid in missing_captures:
+            print(f"- `{nodeid}`")
+        print()
+
+
 def cmd_sweep(args: argparse.Namespace) -> int:
     """Y.2.gate.c.9 — clean orphan QuickSight resources tagged
     ``Harness:e2e``.
@@ -3661,6 +3899,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="optional file/dir paths; defaults to the strict-include set in pyproject.toml",
     )
     p_pyright.set_defaults(func=cmd_pyright)
+
+    p_dump = subs.add_parser(
+        "dump-last-errors",
+        help=(
+            "Surface failing-layer assertions + missing-capture "
+            "warnings from the most-recent run dir (triage shortcut)."
+        ),
+    )
+    p_dump.add_argument(
+        "--run",
+        default=None,
+        metavar="RUN_ID",
+        help=(
+            "specific run-id (e.g. 20260516T203824Z-914fc4c); "
+            "default = latest by mtime."
+        ),
+    )
+    p_dump.add_argument(
+        "--variant",
+        default=None,
+        metavar="NAME",
+        help=(
+            "narrow to a single variant cell (e.g. sp_pg_aw); "
+            "default = all cells in the run."
+        ),
+    )
+    p_dump.set_defaults(func=cmd_dump_last_errors)
 
     return parser
 

@@ -123,6 +123,57 @@ def test_data_route_carries_back_to_landing_link(
     assert '<a class="nav-link" href="/diagram">→ diagram</a>' in body
 
 
+def test_data_route_training_pane_replaces_x4_h9_placeholder(
+    writable_l2_yaml: Path,
+) -> None:
+    """AA.C.5 — the X.4.h.9 placeholder is gone and the trainer pane
+    rendered the per-kind catalogue from L1_Invariants.md instead. The
+    pane lands inside ``<section id="data-training">``."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+
+    # Placeholder string is gone (would have been the only "X.4.h.9"
+    # ref on the page).
+    assert "training pane lands in X.4.h.9" not in body
+    # Catalogue intro + at least one card landed.
+    assert 'data-training__heading' in body
+    assert 'data-training__list' in body
+    assert 'data-training__entry' in body
+    # Every L1 invariant kind has a card (mirrors the unit-test pin in
+    # test_studio_training_pane, but at the integrated /data response).
+    for kind in (
+        "drift", "ledger_drift", "overdraft", "limit_breach",
+        "expected_eod_balance_breach", "stuck_pending",
+        "stuck_unbundled", "supersession_audit",
+    ):
+        assert f'data-kind="{kind}"' in body, (
+            f"/data trainer pane missing card for kind={kind!r}"
+        )
+
+
+def test_data_route_training_pane_links_to_app2_l1_dashboard(
+    writable_l2_yaml: Path,
+) -> None:
+    """The trainer pane's per-kind links target the App2 L1 dashboard
+    (not the QS embed). Pin one specific link to catch a future
+    refactor that, for instance, accidentally rebuilds the link map
+    around the QS dashboard URL pattern."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+
+    # Drift card links to the L1 Drift sheet on App2.
+    assert (
+        'href="/dashboards/l1_dashboard/sheets/l1-sheet-drift"' in body
+    ), "drift card should deep-link to App2 L1 Drift sheet"
+    # Supersession Audit links to its dedicated sheet.
+    assert (
+        'href="/dashboards/l1_dashboard/sheets/l1-sheet-supersession-audit"'
+        in body
+    ), "supersession_audit card should deep-link to App2 sheet"
+
+
 def test_home_chrome_links_to_data(writable_l2_yaml: Path) -> None:
     """X.4.h.1.b — landing page chrome carries a `→ data` link."""
     app = _build_app(writable_l2_yaml)

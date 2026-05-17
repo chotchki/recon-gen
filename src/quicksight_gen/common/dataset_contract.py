@@ -73,7 +73,10 @@ class ColumnShape(Enum):
 
     # Transfer identifiers
     TRANSFER_ID = "transfer_id"
-    TRANSFER_TYPE = "transfer_type"
+    # Rail name — the L2-declared Rail.name (Z.B subsumed
+    # ``transfer_type`` into ``rail_name`` 2026-05-15; the
+    # ``<prefix>_transactions.rail_name`` column carries the value).
+    RAIL_NAME = "rail_name"
 
     # PR identifiers
     SETTLEMENT_ID = "settlement_id"

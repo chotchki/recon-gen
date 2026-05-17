@@ -1020,9 +1020,11 @@ CREATE TABLE {p}_transactions (
 --                 wins; older entries stay for audit.
 -- expected_eod_balance — L1 ExpectedEODBalance. NULL means "no
 --                 expectation" (the constraint doesn't apply).
--- limits        — JSON map of TransferType → cap, projected from L2's
---                 LimitSchedule entries by the integrator's ETL. NULL
---                 means no limit enforcement on this account-day.
+-- limits        — JSON map of Rail name → cap, projected from L2's
+--                 LimitSchedule entries by the integrator's ETL (the
+--                 key matches LimitSchedule.rail per Z.B's symmetric
+--                 collapse — formerly TransferType). NULL means no
+--                 limit enforcement on this account-day.
 -- money         — signed; CAN go negative (overdraft is observable per
 --                 L1's Non-negative Stored Balance SHOULD constraint).
 -- supersedes    — L1 StoredBalance.Supersedes; open enum per SPEC

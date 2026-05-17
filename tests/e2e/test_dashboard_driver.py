@@ -123,6 +123,43 @@ def test_app2_set_date_range_and_slider_survive_refetch(
     assert "Daily Volume" in driver.visual_titles()
 
 
+def test_app2_pick_filter_persists_in_underlying_select(
+    driver: DashboardDriver,
+) -> None:
+    """Regression — after ``pick_filter``, the underlying
+    ``<select name="param_view">``'s ``.value`` matches the pick.
+
+    Tom Select's MutationObserver/Sync re-runs when we touch the
+    underlying ``<select>``'s options, and (pre-fix) would overwrite a
+    manual ``option.selected = true`` with its own (empty) ``items``
+    store. Net effect: the pick disappeared, the form serialised
+    ``param_X=`` empty, and visuals re-queried unfiltered. Fixed by
+    routing through ``select.tomselect.setValue(...)`` when the widget
+    is wired. This test pins the contract directly against the
+    underlying form element — ``pick_filter`` must leave
+    ``select.value`` equal to the picked value, full stop. (The KPI-
+    delta assertion in ``test_app2_pick_filter_changes_kpi`` proves
+    the round-trip; this proves the form element itself.)
+    """
+    driver.open("smoke", sheet="Showcase")
+    driver.wait_loaded("Open Exceptions")
+    driver.pick_filter("View", ["detail"])
+    driver.wait_loaded("Open Exceptions")
+    page = driver.page  # type: ignore[attr-defined]  # WHY: DashboardDriver protocol doesn't expose `page` -- this test reaches into the App2Driver escape hatch (smoke-only) to assert against the underlying DOM
+    value = page.evaluate(
+        """() => {
+            const s = document.querySelector('select[name="param_view"]');
+            return s ? s.value : null;
+        }"""
+    )
+    assert value == "detail", (
+        f"After pick_filter('View', ['detail']), the underlying "
+        f"select.value should be 'detail'; got {value!r}. TomSelect "
+        f"sync likely overwrote the manual selection — see "
+        f"App2Driver.pick_filter's setValue fallback comment."
+    )
+
+
 def test_app2_filter_options_lists_dropdown_values(
     driver: DashboardDriver,
 ) -> None:

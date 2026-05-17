@@ -335,10 +335,52 @@ a bug per se, but it's surprising to anyone treating the table as
 "all rows in the DOM" for assertion purposes.
 
 **Workaround.** `count_table_rows` returns DOM-visible (saturates
-at ~10). For accurate post-filter counts, use
-`count_table_total_rows` which scrolls + accumulates the true
-total. Slower; bumps page size to 10000 and walks the inner
-`.grid-container`.
+at ~10). For accurate post-filter counts on tables with
+pagination overflow, the `QsEmbedDriver.table_row_count`
+orchestration does the right thing: it pre-checks
+`table_is_paginated`, skips the page-size bump entirely for small
+tables (DOM count IS the total), and on big tables bumps page
+size to 10000 → settles the WebSocket re-fetch via
+`_settle_after_param_change` (NOT a fixed `wait_for_timeout` —
+see AA.H.11 below) → scroll-accumulates via
+`count_table_total_rows`.
+
+**AA.H.11 race** (fixed 2026-05-16). Pre-fix, the bundled
+`count_table_total_rows` always clicked the page-size dropdown
+even on small tables, then waited a fixed `500 ms` for the QS
+re-fetch to land before scroll-counting. On cold sheets the 500
+ms wasn't enough — `getMaxRow` scanned an empty container and
+returned 0, so the audit-agreement test reported `qs_count=0`
+for tables that actually had 2+ rows (verified via screenshot +
+DOM capture: the table was rendered correctly by the time the
+failure-capture fired). The fix split the bundled helper into
+three primitives — `table_is_paginated` (cheap probe),
+`bump_table_page_size_to_10000` (just the clicks),
+`count_table_total_rows` (just the scroll) — and the
+`QsEmbedDriver` orchestration chains them with the WebSocket
+settle in between. The 500 ms time-based wait is gone — user
+direction: time-based waits are a major smell, replace with
+event-driven settles.
+
+**AA.H.11 followon — empty-visual short-circuit** (fixed
+2026-05-16). The AA.H.11 split moved `scroll_visual_into_view`
+into the orchestration without the pre-AA.H.11 try/except
+fallback. `scroll_visual_into_view` waits for
+`sn-table-cell-0-0` to mount; empty tables never mount one, so
+the helper timed out at `self._visual_timeout` (15 s) and 3
+previously-green tests died (`test_parameter_anchored_sheets`
+across Money Trail + Account Network qs). The proper fix uses
+the *positive signal* QS already emits for empty visuals:
+inside any visual whose backing dataset returned zero rows, QS
+mounts `[data-automation-id="visual-overlay-title"]
+[data-automation-context="No data"]` (the "No data"
+placeholder) at render time — typically within 200 ms of the
+sheet load. `scroll_visual_into_view` now races
+`sn-table-cell-0-0` vs the empty-overlay marker — whichever
+mounts first wins, no timeout. `QsEmbedDriver.table_row_count`
+then probes `visual_is_empty` (cheap DOM read) and
+short-circuits to 0 for the empty case. Same shape for Sankey,
+KPI, chart visuals — the overlay is generic across visual types.
 
 **Suggested fix.** Either document the virtualization behavior or
 expose a "snapshot total row count" property the client can read
@@ -451,6 +493,57 @@ wouldn't tear down a visual without having processed its response.
 expose a per-visual "query in flight / query complete" event on the
 embedding SDK), so callers don't have to reverse-engineer `START_VIS` /
 `STOP_VIS` frame semantics.
+
+---
+
+### 3.7 `ParameterDropDownControl` DOM shape diverges by option count
+(simple ↔ search-enabled variants — different `sheet_control_*`
+automation-ids)
+
+**Observed.** QuickSight renders the same `ParameterDropDownControl`
+with two different DOM trees depending on how many distinct values
+the linked column produces. Small option-universe (Account Network's
+~25 accounts) → the **simple variant**: trigger at
+`[data-automation-id="sheet_control_value"]`, popover at
+`[data-automation-id="sheet_control_value-menu"]`, listbox renders
+all options on open. Large option-universe (Money Trail's ~8080
+chain roots) → the **search-enabled variant**: trigger at
+`[data-automation-id="sheet_control_search_results_dropdown"]` —
+**`sheet_control_value` is not in the DOM at all** — popover at
+`[data-automation-id="sheet_control_search_results_dropdown-menu"]`
+(suffix `-menu`, NOT `sheet_control_menu_dropdown` — that was an
+earlier wrong guess corrected via DOM dump in AA.H.8). The popover
+holds a **MUI Autocomplete** widget whose `[role="option"]` items
+are virtualized and **don't render on open** — the autocomplete
+input must take typed input (or ArrowDown) before the listbox
+mounts.
+
+The cardinality threshold isn't documented; QS appears to pick the
+variant client-side based on the dataset's value count. The same
+`ParameterDropDownControl` JSON produces either shape depending on
+how many rows the `LinkedValues.from_column(...)` companion returns
+at render time.
+
+**Workaround.** `_open_control_dropdown` in
+`src/quicksight_gen/common/browser/helpers.py` dispatches in two
+steps: (1) counts `sheet_control_value` matches inside the card to
+pick simple-vs-search trigger; (2) after click, if the popover
+contains a search input (MUI Autocomplete), focuses it + presses
+ArrowDown to force the listbox to render before the option-wait
+fires. `set_dropdown_value` likewise types the requested value
+into the search input before clicking, so `pick_filter` works
+transparently against both variants from a test author's
+perspective. (Verified AA.H.6+B.1 / AA.H.8 against
+`qsgen-sp_pg_aw-investigation-dashboard` — the Money Trail
+"Chain root transfer" dropdown failed across multiple chains
+before the AA.H.8 fix landed; the DOM-dump capture surfaced both
+the wrong popover-id assumption *and* the lazy-render quirk in one
+artifact.)
+
+**Suggested fix.** Document the cardinality threshold (or expose a
+stable variant-agnostic automation-id like
+`sheet_control_trigger`), so dashboard authors don't need to write
+DOM dispatchers per option-count tier.
 
 ---
 

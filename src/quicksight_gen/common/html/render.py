@@ -48,7 +48,7 @@ from __future__ import annotations
 import datetime as _dt
 import html
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -1106,7 +1106,12 @@ def emit_html(
     )
 
 
-def emit_visual_data_fragment(visual_id: str, data: Any) -> str:
+def emit_visual_data_fragment(
+    visual_id: str,
+    data: Any,
+    *,
+    url_params: Mapping[str, list[str]] | None = None,
+) -> str:
     """Server-side fragment HTMX swaps into ``#visual-data-<visual_id>``.
 
     Carries the d3-shaped chart data as a ``<script
@@ -1125,6 +1130,19 @@ def emit_visual_data_fragment(visual_id: str, data: Any) -> str:
     but kept in the signature so future callers can attach it as
     a ``data-`` attribute on the script tag if needed.
 
+    ``url_params`` (AA.B.5.followon.diag) — the URL query params
+    that drove this fetch. When supplied, the rendered ``param_*``
+    and ``filter_*`` / date entries (everything that influences the
+    SQL bind) get stamped as ``data-bound-params='<json>'`` on the
+    script tag. That makes failure-capture ``dom.html`` self-
+    describing: instead of inferring "did the right param reach the
+    server?" from the network log (which already showed 200s with
+    empty rows looking identical to no-request-fired), the test
+    artifact carries the actual params each visual was queried with.
+    The same flow that returns 0 rows for "user picked something
+    that matches nothing" can be told apart from "the picked value
+    never arrived" by reading one attribute on the script tag.
+
     JSON serialization uses ``json.dumps`` — caller is responsible
     for shaping the payload (d3-sankey wants
     ``{"nodes": [...], "links": [...]}``; a future TimeSeries kind
@@ -1132,8 +1150,25 @@ def emit_visual_data_fragment(visual_id: str, data: Any) -> str:
     """
     del visual_id  # reserved for future debug/diagnostic use
     payload = json.dumps(data, default=_json_default)  # typing-smell: ignore[json-indent]: embedded HTML script payload — compact form keeps DOM small + matches d3 hydration expectations
+    bound_attr = ""
+    if url_params is not None:
+        relevant = {
+            k: (vs if len(vs) > 1 else vs[0]) if vs else ""
+            for k, vs in url_params.items()
+            if (
+                k.startswith("param_") or k.startswith("filter_")
+                or k in ("date_from", "date_to")
+            )
+        }
+        if relevant:
+            bound_json = html.escape(
+                json.dumps(relevant, sort_keys=True),  # typing-smell: ignore[json-indent]: compact embedded attr value — must fit on one line
+                quote=True,
+            )
+            bound_attr = f' data-bound-params="{bound_json}"'
     return (
-        f'<script type="application/json" class="chart-data">{payload}</script>'
+        f'<script type="application/json" class="chart-data"'
+        f'{bound_attr}>{payload}</script>'
     )
 
 
@@ -1281,13 +1316,41 @@ def _render_visual(
     # X.2.g.1.d — also listen for the global ``refresh`` event the
     # single Refresh button broadcasts via htmx.trigger(body, 'refresh').
     # That replaces the per-visual Refresh buttons we used to emit.
+    # AA.B.5.followon — ``hx-sync="this:queue last"`` so a ``refresh``
+    # event mid-load **queues** the new request and fires it when the
+    # in-flight completes. Prior strategies left visuals stale:
+    #   - default ``drop``: refresh silently dropped if mid-load
+    #     (AA.B.4.followon).
+    #   - ``this:replace``: aborts in-flight + issues new — but the new
+    #     request observably never fires under chain conditions (3 of
+    #     the slowest 6 visuals stay on the initial-load empty result
+    #     while the pick value visibly never reaches their URL). The
+    #     ``data-bound-params`` diagnostic + per-visual network capture
+    #     proved this: Posted Money Records consistently in the
+    #     never-refetches group.
+    # ``queue last`` keeps the in-flight, waits for it to complete,
+    # then issues exactly one queued request with the latest form
+    # state. The visual briefly shows the empty-param result then
+    # swaps in the filtered one — minor flicker, full correctness.
     parts.append(
         f'    <div id="visual-data-{esc_id}" class="visual-data"'
         f' hx-get="{esc_url}"'
         f' hx-trigger="load, refresh from:body"'
         f' hx-include="#filter-form"'
+        f' hx-sync="this:queue last"'
         f' hx-swap="innerHTML">'
-        f'<!-- HTMX swap target; auto-fetches on DOMContentLoaded -->'
+        # AA.B.5.followon.skeleton — initial-load placeholder. Sits as
+        # a child of the swap target so the first HTMX response wipes
+        # it. Refresh requests re-inject via bootstrap.js's
+        # htmx:beforeRequest hook so refetches show the skeleton too.
+        # Presence/absence of ``.visual-loading`` is the "is this
+        # visual still loading?" signal — tests + drivers can poll
+        # ``.visual-data:not(:has(.visual-loading))`` for "done".
+        # CSS keeps it at opacity 0 with a 300ms transition delay so
+        # fast loads (<300ms) never flash the skeleton.
+        f'<div class="visual-loading" aria-hidden="true">'
+        f'<div class="skeleton-block"></div>'
+        f'</div>'
         f'</div>'
     )
     parts.append("  </section>")

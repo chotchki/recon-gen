@@ -64,6 +64,13 @@ def walk_dropdown(
     QS would show the same gaps (parity is fine), and enriching the demo
     so all outcomes occur is a separate demo-quality task."""
     options = driver.filter_options(dropdown_title)
+    # AA.A.3 flipped these from MULTI to SINGLE-select. The SINGLE-select
+    # controls render the show-all sentinel (``__l1_all__`` / ``__l2ft_all__``)
+    # as an option in the listbox — picking it is "show everything" not
+    # "narrow to one value", so the narrowing assertion below would fail
+    # spuriously. Strip the sentinels here; the walk only iterates real
+    # values.
+    options = [opt for opt in options if not (opt.startswith("__") and opt.endswith("__"))]
     if not options:
         pytest.skip(
             f"{dropdown_title!r} dropdown empty on the deployed L2 — the "

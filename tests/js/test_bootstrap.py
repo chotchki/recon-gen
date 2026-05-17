@@ -144,6 +144,71 @@ def test_fire_anchor_request_works_without_filter_form() -> None:
     assert htmx_calls[0]["opts"]["values"] == {"anchor": "NodeA"}
 
 
+def test_hydrate_copies_data_bound_params_to_section() -> None:
+    """``hydrateSection`` must copy the chart-data script tag's
+    ``data-bound-params`` attribute onto the persistent ``<section>``
+    before clearing the script.
+
+    The render.py-stamped attr (server-side diagnostic of what URL
+    params each visual was queried with) lives on the script tag
+    that hydrateSection wipes via ``target.innerHTML = ""``. Without
+    this copy, failure-capture's ``dom.html`` snapshot loses the
+    attr — diagnostic confirmed empty in chain bqaak83tb. Copying
+    onto ``<section>`` (which persists across HTMX swaps + visual
+    re-hydrates) keeps it visible in captured DOM.
+    """
+    fixture_url = f"file://{_FIXTURE.resolve()}"
+
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        page.goto(fixture_url)
+        page.wait_for_function(
+            "() => window.__bootstrap_internals__ != null",
+            timeout=5000,
+        )
+        # Inject a Table section + child chart-data script with the
+        # attr stamped. Table is the simplest hydrate path.
+        page.evaluate(
+            """() => {
+                var sec = document.createElement('section');
+                sec.setAttribute('data-visual-kind', 'Table');
+                sec.setAttribute('data-visual-id', 'viz-test');
+                var inner = document.createElement('div');
+                inner.className = 'visual-data';
+                var s = document.createElement('script');
+                s.type = 'application/json';
+                s.className = 'chart-data';
+                s.setAttribute(
+                    'data-bound-params',
+                    '{"param_pL1DsAccount": "Customer 11 (cust-011)"}'
+                );
+                s.textContent = JSON.stringify({
+                    columns: [{name: 'a', kind: 'text'}],
+                    rows: [['x']],
+                    pagination: {page: 1, page_size: 50, total_rows: 1}
+                });
+                inner.appendChild(s);
+                sec.appendChild(inner);
+                document.body.appendChild(sec);
+                window.__bootstrap_internals__.hydrateSection(sec);
+            }""",
+        )
+        bound = page.evaluate(
+            "() => document.querySelector("
+            "'section[data-visual-id=\"viz-test\"]')"
+            ".getAttribute('data-bound-params')",
+        )
+        browser.close()
+
+    assert bound == (
+        '{"param_pL1DsAccount": "Customer 11 (cust-011)"}'
+    ), (
+        f"data-bound-params should be copied verbatim onto section; "
+        f"got {bound!r}"
+    )
+
+
 def test_fire_anchor_request_logs_when_section_missing() -> None:
     """If the section disappeared from the DOM (or the page shell
     never rendered with X.2.b's data-fetch-url attribute),

@@ -515,7 +515,13 @@ def make_app(
                 served.data_fetcher, visual_id, params,
             )
         return HTMLResponse(
-            emit_visual_data_fragment(visual_id, data),
+            # AA.B.5.followon.diag — pass URL params through so the
+            # fragment stamps them as ``data-bound-params`` on the
+            # script tag. Failure-capture ``dom.html`` then carries
+            # per-visual evidence of what each fetch was queried with
+            # (distinguishes "valid pick, no matching rows" from
+            # "pick value never made it to the server").
+            emit_visual_data_fragment(visual_id, data, url_params=params),
             headers={"Cache-Control": visual_data_cache_header},
         )
 

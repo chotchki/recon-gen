@@ -127,6 +127,25 @@ class DashboardDriver(Protocol):
         re-fetch."""
         ...
 
+    def set_date(self, label: str, iso: str | None) -> None:
+        """Set the single-value DateTime picker control labelled ``label``
+        to ``iso`` (``YYYY-MM-DD``) and block until re-fetch. ``None``
+        is a no-op.
+
+        Distinct from ``set_date_range`` (two-bound universal date
+        pickers on data-bearing sheets). Used for the per-sheet
+        single-day equality pickers — currently only L1's Daily
+        Statement (Business Day picker, bound to a
+        ``TimeEqualityFilter``).
+
+        Renderers that don't render the widget (App2 today: skips
+        ``add_parameter_datetime_picker`` during filter-spec
+        derivation — see ``_tree_filter_specs.py``) implement this as
+        a no-op. Tests can call it unconditionally; the date narrowing
+        only matters on the renderer that actually applies it.
+        """
+        ...
+
     def set_slider(
         self, label: str, lo: float | None, hi: float | None,
     ) -> None:

@@ -127,25 +127,28 @@ def qs_client(region):
 
 
 @pytest.fixture
-def qs_driver(cfg, region, account_id):  # type: ignore[no-untyped-def]: return-type annotation would force a QsEmbedDriver import at module scope
+def qs_driver(request, cfg, region, account_id):  # type: ignore[no-untyped-def]: return-type annotation would force a QsEmbedDriver import at module scope
     """X.2.q — ``QsEmbedDriver`` over a fresh WebKit page, for browser
     e2e tests that drive a deployed QuickSight dashboard through the
     ``DashboardDriver`` protocol (``open(dashboard_id)`` mints the embed
     URL). Skips cleanly when ``QS_E2E_USER_ARN`` is unset (the runner
     derives it from ``cfg.auth.aws_profile``; export it for a direct
     ``pytest`` run). Function-scoped — embed URLs are single-use.
-    """
-    from quicksight_gen.common.browser.helpers import get_user_arn
-    from tests.e2e._drivers import QsEmbedDriver
 
-    try:
-        get_user_arn()
-    except RuntimeError as exc:
-        pytest.skip(str(exc))
-    with QsEmbedDriver.embed(
-        aws_account_id=account_id, aws_region=region,
-    ) as d:
-        yield d
+    AA.H.12 — thin wrapper around ``qs_driver_or_none`` (the shared
+    lifecycle primitive that bundles get_user_arn gate + embed +
+    capture hook). This fixture's only distinguishing policy: skip the
+    test when QS is unavailable (single-renderer tests can't run
+    without it).
+    """
+    from tests.e2e._drivers._lifecycle import qs_driver_or_none
+
+    with qs_driver_or_none(
+        request, account_id=account_id, region=region,
+    ) as driver:
+        if driver is None:
+            pytest.skip("QS_E2E_USER_ARN unavailable — cannot derive QS user ARN")
+        yield driver
 
 
 def _resolve_test_l2_instance():  # type: ignore[no-untyped-def]: return-type annotation would force an L2Instance import at module scope, slowing collection
@@ -409,18 +412,24 @@ def l2ft_app(cfg):
 # in ~1–2 s, acceptable. See docs/audits/x_2_u_parametrized_driver_spike.md.
 
 
+# AA.H.10 — moved to tests/e2e/_capture.py so the three QS-driver
+# fixtures (qs_driver here, _parametrized_dashboard_driver here,
+# per_dialect_qs_driver in test_audit_dashboard_agreement.py) can all
+# import a single hook. Originally lived inline here and was wired
+# only into _parametrized_dashboard_driver — the other two fixtures
+# silently dropped failure-capture artifacts. Today's chain
+# (20260516T203824Z) lost all 4 audit-agreement failures' artifacts
+# for exactly that reason.
+from tests.e2e._capture import maybe_capture_on_failure as _maybe_capture_on_failure  # noqa: E402
+
+
 def _parametrized_dashboard_driver(  # type: ignore[no-untyped-def]: return-type annotation would force a driver import at module scope
     request, *, cfg, region, account_id, dashboard_id, app, short,
 ):
     if request.param == "qs":
-        from quicksight_gen.common.browser.helpers import get_user_arn
-        from tests.e2e._drivers import QsEmbedDriver
-
-        try:
-            get_user_arn()
-        except RuntimeError as exc:
-            pytest.skip(str(exc))
         import boto3
+
+        from tests.e2e._drivers._lifecycle import qs_driver_or_none
 
         qs = boto3.client("quicksight", region_name=region)
         try:
@@ -432,9 +441,15 @@ def _parametrized_dashboard_driver(  # type: ignore[no-untyped-def]: return-type
                 f"dashboard {dashboard_id!r} not deployed in "
                 f"{account_id}/{region} — deploy it first"
             )
-        with QsEmbedDriver.embed(
-            aws_account_id=account_id, aws_region=region,
+        # AA.H.12 — shared lifecycle: get_user_arn gate + QsEmbedDriver
+        # embed + AA.H.10 capture-hook. Skip-on-None policy because
+        # the [qs, app2] parametrize already covers the App2 leg
+        # separately; the qs branch needs a real QS embed.
+        with qs_driver_or_none(
+            request, account_id=account_id, region=region,
         ) as driver:
+            if driver is None:
+                pytest.skip("QS_E2E_USER_ARN unavailable — cannot derive QS user ARN")
             yield driver, dashboard_id
     else:  # app2
         if not getattr(cfg, "demo_database_url", None):
@@ -455,6 +470,8 @@ def _parametrized_dashboard_driver(  # type: ignore[no-untyped-def]: return-type
             dashboard_id=short, dashboard_title=f"{short} (live)",
         ) as driver:
             yield driver, short
+            # AA.H.6 — see QS branch above.
+            _maybe_capture_on_failure(request, driver)
 
 
 @pytest.fixture(params=["qs", "app2"])

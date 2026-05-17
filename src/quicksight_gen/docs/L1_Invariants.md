@@ -64,6 +64,11 @@ ledger.
 `account_parent_role`, `business_day_start`, `business_day_end`,
 `stored_balance`, `computed_balance`, `drift`.
 
+**What to do:** Diff the day's transactions for `account_id`
+against the stored balance — the gap is missing or duplicated
+postings on that account-day. Re-load the source feed for the
+account-day and refresh matviews.
+
 {% if vocab.fixture_name == "sasquatch_pr" %}
 **the matview should surface:** `bigfoot-brews +$75` planted at
 `days_ago=5` surfaces with `drift=75.00`.
@@ -82,6 +87,12 @@ posting that didn't roll up correctly to its parent.
 **Columns:** same as `_drift` minus `account_parent_role`
 (parents ARE the parents).
 
+**What to do:** Sum the child accounts of `account_id` on
+`business_day_start` and compare to the parent's stored balance.
+The gap is a child posting that didn't propagate to the parent —
+usually a missing FK in the feed. Fix the parent link upstream,
+re-load, refresh.
+
 ### 3. `{{ l2_instance_name }}_overdraft` — Non-negative balance
 
 > For every CurrentStoredBalance,
@@ -95,6 +106,11 @@ we MUST NOT overdraft *them*).
 **Columns:** `account_id`, `account_name`, `account_role`,
 `account_parent_role`, `business_day_start`, `business_day_end`,
 `stored_balance`.
+
+**What to do:** Trace `account_id`'s posting sequence on
+`business_day_end` to find the over-debit — usually a missing
+inbound credit or an over-issued debit. Reconcile against the
+source system and post a correction.
 
 {% if vocab.fixture_name == "sasquatch_pr" %}
 **the matview should surface:** `sasquatch-sips -$1500` planted at
@@ -114,6 +130,11 @@ clean up to their expected zero / target by end-of-day.
 `business_day_start`, `business_day_end`, `stored_balance`,
 `expected_eod_balance`, `variance`.
 
+**What to do:** Compare `stored_balance` against
+`expected_eod_balance` for the gap size — typically a delayed
+posting that should have landed before EOD. Verify the
+source-system posting time and re-time the posting if needed.
+
 ### 5. `{{ l2_instance_name }}_limit_breach` — Outbound flow cap
 
 > For every CurrentStoredBalance where `Limits` is set, for every
@@ -130,6 +151,11 @@ previously `transfer_type` — under the symmetric grammar collapse.)
 **Columns:** `account_id`, `account_name`, `account_role`,
 `account_parent_role`, `business_day`, `rail_name`,
 `outbound_total`, `cap`.
+
+**What to do:** Either the LimitSchedule cap is too low (raise it
+after confirming the day's volume is legitimate) or an upstream
+control failed (audit the feed for over-sent volume). Downstream
+beneficiaries may be undercredited until reconciled.
 
 {% if vocab.fixture_name == "sasquatch_pr" %}
 **the matview should surface:** `big-meadow-dairy $22k wire`
@@ -153,6 +179,11 @@ without an aging watch contribute no branch and are excluded.
 `rail_name`, `amount_money`, `amount_direction`,
 `posting`, `max_pending_age_seconds`, `age_seconds`.
 
+**What to do:** Either re-poke the source-system integration to
+transition the transaction, or raise the rail's `max_pending_age`
+if the cap is too aggressive for normal volume. Escalate to ops
+when `age_seconds` is in days rather than hours.
+
 {% if vocab.fixture_name == "sasquatch_pr" %}
 **the matview should surface:** `bigfoot-brews ACH at days_ago=2`
 (172800s) surfaces with `age_seconds > max_pending_age_seconds`
@@ -172,6 +203,11 @@ rails appearing in some AggregatingRail's `bundles_activity`.
 **Columns:** same shape as `_stuck_pending` with
 `max_unbundled_age_seconds` instead of `max_pending_age_seconds`.
 
+**What to do:** Verify the AggregatingRail's `bundles_activity`
+still names this rail — the bundler may be silently
+mis-configured. For high `age_seconds`, run the bundle process
+manually and investigate why the regular cycle missed it.
+
 {% if vocab.fixture_name == "sasquatch_pr" %}
 **the matview should surface:** `sasquatch-sips fee accrual at
 days_ago=35` surfaces with `age_seconds > max_unbundled_age_seconds`
@@ -186,6 +222,11 @@ versions (the audit trail for `TechnicalCorrection` /
 `BundleAssignment` / `Inflight` rewrites). Reads from BASE tables
 (not Current*) since Current* hides superseded entries by
 construction. See M.2b.12 dashboard for the visualization.
+
+**What to do:** Diagnostic only — supersession is expected for
+normal corrections. Investigate when `entry_count` is unusually
+high for the row's age, or when the rewrite reason is missing.
+Diff the entries to see what actually changed across versions.
 
 {% if vocab.fixture_name == "sasquatch_pr" %}
 the matview should surface a planted TechnicalCorrection on

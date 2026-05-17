@@ -14,6 +14,8 @@ itself is deployed in another region.
 from __future__ import annotations
 
 import os
+import re
+import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -141,11 +143,16 @@ def webkit_page(
 ) -> Generator[Page, None, None]:
     """Yield a Playwright WebKit page; tears down browser on exit.
 
-    On exception inside the ``with`` body, captures five diagnostics
+    On exception inside the ``with`` body, captures six diagnostics
     per failing test:
 
     - ``screenshot.png`` (or ``<test_id>.png`` in legacy mode) —
       full-page screenshot of the failure state
+    - ``dom.html`` — serialized DOM of the top-level frame at failure
+      moment (``page.content()``). Pairs with the screenshot: the
+      pixels show what's visually there, the DOM shows what the
+      test's selectors were actually looking at. Critical for
+      "click target not found" / "control didn't mount" failures.
     - ``console.txt`` — every JS console message + uncaught
       ``pageerror`` accumulated since page creation (M.4.4.11 pattern,
       lifted from ``_harness_browser._attach_console_capture``)
@@ -160,18 +167,25 @@ def webkit_page(
     - ``trace.zip`` (Y.2.gate.c.11) — Playwright trace bundle:
       full action timeline, DOM snapshots per action, screenshots,
       network, and console. Open with ``playwright show-trace
-      trace.zip``.
+      trace.zip``. Plain-text artifacts (``dom.html``) cover the
+      grep-able path; trace.zip is for full-UI replay.
 
     Output destination depends on ``QS_GEN_RUN_DIR``:
 
     - **Set** (running under the test layer chain runner):
-      ``$QS_GEN_RUN_DIR/browser/<test_id>/{screenshot.png,console.txt,
-      qs_errors.txt,network.txt,trace.zip}`` — per-test directory so
-      artifacts cluster cleanly.
+      ``$QS_GEN_RUN_DIR/browser/<test_id>/{screenshot.png,dom.html,
+      console.txt,qs_errors.txt,network.txt,trace.zip}`` — per-test
+      directory so artifacts cluster cleanly.
     - **Unset** (legacy ``./run_e2e.sh`` / direct ``pytest`` invocation):
       ``tests/e2e/screenshots/_failures/<test_id>.png`` etc., flat
       directory with per-file ``<test_id>_`` prefix to disambiguate.
       Trace.zip is NOT written in legacy mode (no run-dir to put it in).
+
+    The test_id is snapshotted at ``webkit_page`` entry (when pytest's
+    ``PYTEST_CURRENT_TEST`` env var is reliably set inside the test body)
+    rather than re-read inside the ``except`` handler — that handler
+    can run during fixture teardown after pytest has cleared the var,
+    which would silently demote captures to ``unknown/``.
 
     Trace capture policy:
     - On exception → trace always written (under the run-dir mode).
@@ -179,8 +193,12 @@ def webkit_page(
       (operator opt-in for "I want the full trace even on green tests";
       flag plumbed by ``Y.2.gate.c.7``).
 
-    All capture is best-effort — exceptions inside the dump path are
-    swallowed so the original assertion bubbles up unchanged.
+    Capture is best-effort: each capture function catches its own
+    exceptions and emits a ``[CAPTURE FAILURE] <artifact>: <type>: <msg>``
+    line to stderr (loud-fail). The original assertion still bubbles
+    up unmasked — but a regression in the capture path is visible in
+    the layer's ``stderr.log`` instead of being invisible until the
+    next forensic session.
     """
     from playwright.sync_api import sync_playwright
 
@@ -207,23 +225,113 @@ def webkit_page(
         network_responses: list[str] = []
         _attach_console_capture(page, console_messages)
         _attach_network_capture(page, network_responses)
+        # Snapshot the test ID at entry — pytest sets PYTEST_CURRENT_TEST
+        # for the duration of the test body, but it can be cleared by the
+        # time fixture teardown runs the ``except`` handler. Resolving
+        # the test_id once here pins each capture to the right
+        # ``browser/<test_id>/`` dir regardless of when the exception
+        # actually surfaces.
+        test_id = _test_id_from_pytest_env()
+        # Attach sinks to the page so ``trigger_failure_capture`` can read
+        # them from outside the ``with`` block. This bridges the pytest
+        # fixture-vs-direct-raise gap: pytest's yield-fixture semantics
+        # don't re-throw test-body exceptions back into the fixture's
+        # generator, so the ``except BaseException:`` below never fires
+        # for a typical e2e test failure. The fixture's teardown (or
+        # ``pytest_runtest_makereport`` hook) reaches in via these attrs
+        # and calls ``trigger_failure_capture(page)`` directly.
+        page._qs_gen_console_sink = console_messages  # type: ignore[attr-defined]: monkey-attach sink for trigger_failure_capture
+        page._qs_gen_network_sink = network_responses  # type: ignore[attr-defined]: see _qs_gen_console_sink above
+        page._qs_gen_test_id = test_id  # type: ignore[attr-defined]: see _qs_gen_console_sink above
         failed = False
         try:
             yield page
         except BaseException:
+            # Direct-raise path (eg unit tests that `raise` inside the
+            # ``with`` block — see ``tests/unit/test_browser_trace_smoke``).
+            # Pytest e2e fixtures take the explicit-trigger path instead;
+            # see ``trigger_failure_capture``.
             failed = True
-            _capture_failure_screenshot(page)
-            _capture_failure_console(console_messages)
-            _capture_failure_qs_errors(page)
-            _capture_failure_network(network_responses)
+            _capture_failure_screenshot(page, test_id)
+            _capture_failure_dom(page, test_id)
+            _capture_failure_console(console_messages, test_id)
+            _capture_failure_qs_errors(page, test_id)
+            _capture_failure_network(network_responses, test_id)
             raise
         finally:
-            _stop_and_maybe_save_trace(context, failed=failed)
+            # Track "did the fixture caller already trigger capture
+            # explicitly" so we don't double-emit trace.zip (and so the
+            # trace-saving decision matches the actual outcome). The
+            # explicit trigger sets ``page._qs_gen_capture_triggered``.
+            triggered_externally = bool(
+                getattr(page, "_qs_gen_capture_triggered", False),
+            )
+            # Trigger may have rewritten the test_id (so all 6 artifacts
+            # cluster under one dir even when the trigger passes an
+            # override). Read the latest value back from the page.
+            final_test_id: str = getattr(page, "_qs_gen_test_id", None) or test_id
+            _stop_and_maybe_save_trace(
+                context,
+                failed=failed or triggered_externally,
+                test_id=final_test_id,
+            )
             context.close()
             browser.close()
 
 
-def _stop_and_maybe_save_trace(context: object, *, failed: bool) -> None:
+def trigger_failure_capture(page: Page, *, test_id: str | None = None) -> None:
+    """Public-API capture trigger for the pytest-fixture path.
+
+    Pytest's yield-fixture semantics don't re-throw test-body exceptions
+    back into the fixture's generator — so ``webkit_page``'s
+    ``except BaseException:`` handler never fires for a typical e2e
+    test failure. The fixture's teardown (post-yield code, after
+    consulting ``request.node.rep_call.failed`` via the standard
+    ``pytest_runtest_makereport`` hook) calls this function instead to
+    drop the same six artifacts.
+
+    Reads the sinks ``webkit_page`` attached to the page
+    (``_qs_gen_console_sink``, ``_qs_gen_network_sink``,
+    ``_qs_gen_test_id``). Falls back to ``_test_id_from_pytest_env()``
+    when no test_id is passed and no page-attached default exists.
+
+    Sets ``page._qs_gen_capture_triggered = True`` so ``webkit_page``'s
+    ``finally`` block knows to save the trace.zip (otherwise the trace
+    would only land when the exception bubbled through the
+    ``except``).
+
+    Idempotent — calling twice with the same test_id just overwrites
+    the artifacts (last call wins).
+    """
+    resolved_test_id: str
+    if test_id is not None:
+        resolved_test_id = test_id
+    else:
+        resolved_test_id = (
+            getattr(page, "_qs_gen_test_id", None) or _test_id_from_pytest_env()
+        )
+    # Sinks are list[str] attached by ``webkit_page``; cast through the
+    # ``getattr`` Any to satisfy strict pyright without an explicit Any.
+    console_messages: list[str] = getattr(page, "_qs_gen_console_sink", None) or []
+    network_responses: list[str] = getattr(page, "_qs_gen_network_sink", None) or []
+    # Signal to webkit_page's finally block: trace.zip should land
+    # alongside the other artifacts. We also overwrite the page-attached
+    # test_id so the finally block's trace-save uses the same dir as the
+    # 5 artifacts we just wrote (otherwise trace would orphan to the
+    # webkit_page-entry test_id while screenshot/dom/etc go to the
+    # override-passed test_id — a confusing split).
+    page._qs_gen_capture_triggered = True  # type: ignore[attr-defined]: signal trace-save to webkit_page finally
+    page._qs_gen_test_id = resolved_test_id  # type: ignore[attr-defined]: align trace dir with artifact dir
+    _capture_failure_screenshot(page, resolved_test_id)
+    _capture_failure_dom(page, resolved_test_id)
+    _capture_failure_console(console_messages, resolved_test_id)
+    _capture_failure_qs_errors(page, resolved_test_id)
+    _capture_failure_network(network_responses, resolved_test_id)
+
+
+def _stop_and_maybe_save_trace(
+    context: object, *, failed: bool, test_id: str,
+) -> None:
     """Y.2.gate.c.11 — finalize the Playwright trace.
 
     Saves + unpacks to ``$QS_GEN_RUN_DIR/browser/<test_id>/`` when:
@@ -244,7 +352,12 @@ def _stop_and_maybe_save_trace(context: object, *, failed: bool) -> None:
       trace viewer — operator-friendly for "what did this test
       actually do" inspection.
 
-    All errors swallowed (sidecar contract; matches c.2 / c.10 / c.12).
+    ``test_id`` is passed in (snapshotted by the caller at ``webkit_page``
+    entry) rather than re-derived here — pytest may have cleared
+    ``PYTEST_CURRENT_TEST`` by the time fixture teardown runs.
+
+    Errors emit a loud-fail ``[CAPTURE FAILURE]`` line to stderr;
+    they don't re-raise (sidecar contract).
     """
     import zipfile
 
@@ -262,7 +375,7 @@ def _stop_and_maybe_save_trace(context: object, *, failed: bool) -> None:
     try:
         if should_save:
             trace_dir = (
-                Path(run_dir) / "browser" / _test_id_from_pytest_env()  # type: ignore[arg-type]: run_dir narrowed truthy by the bool() above
+                Path(run_dir) / "browser" / test_id  # type: ignore[arg-type]: run_dir narrowed truthy by the bool() above
             )
             trace_dir.mkdir(parents=True, exist_ok=True)
             zip_path = trace_dir / "trace.zip"
@@ -274,12 +387,12 @@ def _stop_and_maybe_save_trace(context: object, *, failed: bool) -> None:
                 extract_dir = trace_dir / "trace"
                 with zipfile.ZipFile(zip_path) as zf:
                     zf.extractall(extract_dir)
-            except Exception:
-                pass
+            except Exception as exc:
+                _warn_capture_failure("trace/", exc)
         else:
             context.tracing.stop()  # type: ignore[attr-defined]: Playwright duck-typed tracing API
-    except Exception:
-        pass
+    except Exception as exc:
+        _warn_capture_failure("trace.zip", exc)
 
 
 def _capture_dir_for(test_id: str) -> Path:
@@ -359,27 +472,49 @@ def _attach_console_capture(page: Page, sink: list[str]) -> None:
 
 def _attach_network_capture(page: Page, sink: list[str]) -> None:
     """Register ``page.on("response")`` so every non-2xx HTTP
-    response during the page lifecycle accumulates into ``sink``.
-    Format: ``<status> <method> <url>`` per response.
+    response — plus every App2 ``/visuals/*/data`` response regardless
+    of status — accumulates into ``sink``. Format:
+    ``<status> <method> <url>`` per response.
 
-    Filters to non-2xx because QS dashboards make hundreds of
-    requests; capturing only the failures keeps the dump readable.
+    Non-2xx by default because QS dashboards make hundreds of requests
+    and the surfaced failures (4xx / 5xx / network errors) are usually
+    enough. ``/visuals/*/data`` is the App2 per-visual data endpoint —
+    a 200 with empty rows looks identical to "no request fired" in the
+    default-filtered log, so AA.B.5.followon's class of bug (pick
+    fires URL but server returns 0 because the pick value never made
+    it into the right request) goes invisible. Capturing every visual-
+    data request keeps the per-pick request fan-out reconstructable
+    from the artifact alone — no need to re-deploy with extra logging.
     Listener is wrapped in broad ``except`` so a misbehaving handler
     can't abort the page lifecycle.
     """
     def _on_response(response: object) -> None:
         try:
             status = getattr(response, "status", 0)
-            if 200 <= status < 300:
-                return
             request = getattr(response, "request", None)
             method = getattr(request, "method", "?") if request else "?"
             url = getattr(response, "url", "")
+            is_visual_data = "/visuals/" in url and "/data" in url
+            if 200 <= status < 300 and not is_visual_data:
+                return
             sink.append(f"{status} {method} {url}")
         except Exception:
             pass
 
     page.on("response", _on_response)
+
+
+# Filename-portable charset: ASCII alphanumerics + `_`, `-`, `[`, `]`, `.`.
+# Brackets stay so parametrized IDs disambiguate (`[qs-Rail]` vs `[qs-Bundle]`);
+# everything else (spaces, em-dashes, parens, colons, slashes, etc.) collapses
+# to `_` so the resulting filename works on every filesystem the artifact
+# bundle has to traverse (macOS APFS, ext4, NTFS, GHA artifact upload, zip).
+_TEST_ID_SAFE_CHARS_RE = re.compile(r"[^A-Za-z0-9_\-\[\].]+")
+
+
+def _sanitize_test_id(raw: str) -> str:
+    """Collapse runs of non-portable chars in a test ID to a single ``_``."""
+    return _TEST_ID_SAFE_CHARS_RE.sub("_", raw)
 
 
 def _test_id_from_pytest_env(raw: str | None = None) -> str:
@@ -388,40 +523,88 @@ def _test_id_from_pytest_env(raw: str | None = None) -> str:
     pytest sets the env var to a string like
     ``"tests/e2e/test_foo.py::test_bar (call)"`` (or with a class
     segment + parametrization brackets). Strip the trailing
-    ``(setup|call|teardown)`` phase suffix and convert ``/`` + ``::``
-    to underscores so the result is a valid filename. ``"unknown"``
-    when the env var is unset — covers running outside pytest or
-    after pytest cleared the var on test exit.
+    ``(setup|call|teardown)`` phase suffix, convert ``/`` + ``::``
+    to underscores, then sanitize remaining non-portable chars via
+    ``_sanitize_test_id`` so the result works on every filesystem.
+    ``"unknown"`` when the env var is unset — covers running outside
+    pytest or after pytest cleared the var on test exit.
     """
     if raw is None:
         raw = os.environ.get("PYTEST_CURRENT_TEST", "")
     if not raw:
         return "unknown"
-    return (
+    after_basics = (
         raw.split(" (")[0]
         .replace("/", "_")
         .replace("::", "__")
         .replace(".py", "")
     )
+    # Parametrized IDs from pytest carry spaces / em-dashes / parens inside
+    # `[…]` (e.g. `[qs-Money Trail — Hop-by-Hop]`). The basic replace chain
+    # above only strips the path separators; the inner-bracket content can
+    # still be unfriendly to downstream consumers (GHA artifact zips, Windows,
+    # shell-glob patterns). Sanitize here so the test_id is portable across
+    # ALL the places the captured artifact has to land.
+    return _sanitize_test_id(after_basics)
 
 
-def _capture_failure_screenshot(page: Page) -> None:
+def _warn_capture_failure(artifact_name: str, exc: BaseException) -> None:
+    """Loud-fail sidecar for capture functions.
+
+    Capture must NEVER mask the original test failure (closed page,
+    missing env var, full disk, OS quota, etc.) — historically each
+    `_capture_failure_*` swallowed exceptions silently. That
+    bit us when the dump path quietly stopped producing artifacts and
+    the next failure had no diagnostics. New contract: still don't
+    raise (test failure stays the surfaced one), but emit a `[CAPTURE
+    FAILURE]` line to stderr so a future regression is visible in the
+    test layer's `stderr.log` instead of being invisible until the
+    next forensic session.
+    """
+    print(
+        f"[CAPTURE FAILURE] {artifact_name}: {type(exc).__name__}: {exc}",
+        file=sys.stderr,
+    )
+
+
+def _capture_failure_screenshot(page: Page, test_id: str) -> None:
     """Best-effort failure screenshot. Writes to
     ``<capture_dir>/screenshot.png`` (or legacy ``<test_id>.png``).
-    All errors swallowed — a screenshot-capture exception must never
-    mask the original test failure (closed page, missing env var,
-    full disk, etc.).
+    Exceptions are caught + logged to stderr (loud-fail) so the
+    original assertion still bubbles up unmasked, but capture
+    regressions are visible in the layer's stderr.log.
     """
     try:
-        test_id = _test_id_from_pytest_env()
         path = _capture_path("screenshot.png", test_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(path), full_page=True)
-    except Exception:
-        pass
+    except Exception as exc:
+        _warn_capture_failure("screenshot.png", exc)
 
 
-def _capture_failure_console(messages: list[str]) -> None:
+def _capture_failure_dom(page: Page, test_id: str) -> None:
+    """Dump the live DOM to ``<capture_dir>/dom.html`` (or legacy
+    ``<test_id>_dom.html``).
+
+    Single most-useful diagnostic for "click target not found" /
+    "control didn't mount" failures — the screenshot shows what's
+    visually there, the DOM shows what the test's selectors were
+    actually looking at. ``page.content()`` returns the serialized
+    HTML of the top-level document; iframe contents aren't inlined
+    (QS embeds the dashboard in a same-origin iframe — the iframe's
+    DOM is captured in the trace.zip's snapshot stream, but for a
+    grep-able plain-text artifact the top-level frame is the start
+    of the trail).
+    """
+    try:
+        path = _capture_path("dom.html", test_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(page.content(), encoding="utf-8")
+    except Exception as exc:
+        _warn_capture_failure("dom.html", exc)
+
+
+def _capture_failure_console(messages: list[str], test_id: str) -> None:
     """Dump accumulated JS console + pageerror messages to
     ``<capture_dir>/console.txt`` (or legacy ``<test_id>_console.txt``).
     Empty file when nothing was logged (so the artifact bundle
@@ -429,15 +612,14 @@ def _capture_failure_console(messages: list[str]) -> None:
     a signal).
     """
     try:
-        test_id = _test_id_from_pytest_env()
         path = _capture_path("console.txt", test_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("\n".join(messages), encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as exc:
+        _warn_capture_failure("console.txt", exc)
 
 
-def _capture_failure_network(responses: list[str]) -> None:
+def _capture_failure_network(responses: list[str], test_id: str) -> None:
     """Dump the captured non-2xx HTTP responses to
     ``<capture_dir>/network.txt`` (or legacy ``<test_id>_network.txt``).
     Empty file when every request succeeded (so the artifact bundle
@@ -445,15 +627,14 @@ def _capture_failure_network(responses: list[str]) -> None:
     a signal).
     """
     try:
-        test_id = _test_id_from_pytest_env()
         path = _capture_path("network.txt", test_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("\n".join(responses), encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as exc:
+        _warn_capture_failure("network.txt", exc)
 
 
-def _capture_failure_qs_errors(page: Page) -> None:
+def _capture_failure_qs_errors(page: Page, test_id: str) -> None:
     """Dump the text of any QuickSight error overlays visible on the
     page to ``<capture_dir>/qs_errors.txt`` (or legacy
     ``<test_id>_qs_errors.txt``). Targets the well-known QS error
@@ -462,7 +643,6 @@ def _capture_failure_qs_errors(page: Page) -> None:
     nothing matched.
     """
     try:
-        test_id = _test_id_from_pytest_env()
         path = _capture_path("qs_errors.txt", test_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         # JS-side scan: collect text from any DOM nodes whose
@@ -493,8 +673,8 @@ def _capture_failure_qs_errors(page: Page) -> None:
             }"""
         )
         path.write_text("\n".join(errors or []), encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as exc:
+        _warn_capture_failure("qs_errors.txt", exc)
 
 
 def wait_for_dashboard_loaded(page: Page, timeout_ms: int) -> None:
@@ -510,23 +690,6 @@ def wait_for_dashboard_loaded(page: Page, timeout_ms: int) -> None:
     """
     page.wait_for_selector('[role="tab"]', timeout=timeout_ms, state="attached")
 
-
-def wait_for_visuals_rendered(page: Page, timeout_ms: int, min_visuals: int = 1) -> None:
-    """Wait for visual containers to finish their loading state.
-
-    QuickSight visuals show a loading skeleton while data fetches. We
-    poll for the absence of skeleton/loading classes within visual cells.
-    """
-    page.wait_for_function(
-        f"""() => {{
-            const cells = document.querySelectorAll('[data-automation-id*="visual"], [class*="visual-container"]');
-            if (cells.length < {min_visuals}) return false;
-            // No element should still be in a loading state
-            const loading = document.querySelectorAll('[class*="loading"], [class*="Loading"], [aria-busy="true"]');
-            return loading.length === 0;
-        }}""",
-        timeout=timeout_ms,
-    )
 
 
 def get_sheet_tab_names(page: Page) -> list[str]:
@@ -576,48 +739,8 @@ def click_sheet_tab(page: Page, name: str, timeout_ms: int) -> None:
         )
 
 
-def selected_sheet_name(page: Page) -> str:
-    """Return the label of the currently active sheet tab, or empty string."""
-    el = page.query_selector('[data-automation-id="selectedTab_sheet_name"]')
-    return el.inner_text().strip() if el else ""
 
 
-def wait_for_sheet_tab(page: Page, name: str, timeout_ms: int) -> None:
-    """Block until the active sheet tab's label equals ``name``.
-
-    Used after a drill-down click to confirm navigation landed on the
-    expected sheet. For deliberate tab switches use ``click_sheet_tab``
-    which also waits for prior-sheet visuals to tear down.
-    """
-    page.wait_for_function(
-        f"""() => {{
-            const el = document.querySelector('[data-automation-id="selectedTab_sheet_name"]');
-            return el && el.innerText.trim() === {name!r};
-        }}""",
-        timeout=timeout_ms,
-    )
-
-
-def wait_for_table_cells_present(page: Page, timeout_ms: int) -> None:
-    """Wait until at least one table cell (row 0, col 0) renders on the
-    active sheet. Useful after tab switches before asserting on row content.
-    """
-    page.wait_for_selector(
-        '[data-automation-id^="sn-table-cell-0-0"]',
-        timeout=timeout_ms,
-        state="attached",
-    )
-
-
-def first_table_cell_text(page: Page, row: int, col: int) -> str:
-    """Return the text of cell ``(row, col)`` in the first detail table on
-    the active sheet. Targets the global ``sn-table-cell-{row}-{col}``
-    automation id — use ``click_first_row_of_visual`` when multiple tables
-    are on the same sheet.
-    """
-    cell = page.query_selector(f'[data-automation-id="sn-table-cell-{row}-{col}"]')
-    assert cell is not None, f"No cell at row={row} col={col}"
-    return cell.inner_text().strip()
 
 
 def click_first_row_of_visual(
@@ -724,14 +847,6 @@ def sheet_control_titles(page: Page) -> list[str]:
     return [e.inner_text().strip() for e in els if e.inner_text().strip()]
 
 
-def wait_for_sheet_controls_present(page: Page, timeout_ms: int) -> None:
-    """Wait until at least one filter control is attached on the active sheet."""
-    page.wait_for_selector(
-        '[data-automation-id="sheet_control_name"]',
-        timeout=timeout_ms,
-        state="attached",
-    )
-
 
 def _retry_on_playwright_timeout(
     call: Callable[[], T], *, timeout_ms: int,
@@ -795,6 +910,42 @@ def get_visual_titles(page: Page) -> list[str]:
     return [t.inner_text().strip() for t in titles if t.inner_text().strip()]
 
 
+def visual_is_empty(page: Page, visual_title: str) -> bool:
+    """Cheap DOM probe — does this visual show QS's empty-state overlay?
+
+    QS mounts a ``[data-automation-id="visual-overlay-title"]`` element
+    with ``data-automation-context="No data"`` inside any visual whose
+    backing dataset returned zero rows (table / Sankey / chart / KPI).
+    The overlay mounts at the same time the visual's frame renders —
+    typically within a few hundred ms of the sheet load — so a positive
+    return from this probe is high-signal: the visual is mounted AND
+    confirmed empty, no row-fetch race to wait out.
+
+    Use this BEFORE ``scroll_visual_into_view`` to short-circuit empty
+    cases. ``scroll_visual_into_view``'s ``wait_for_cells=True`` mode
+    waits for ``sn-table-cell-0-0`` to appear, which empty tables never
+    mount — without this probe the helper times out at ``timeout_ms``
+    on every empty visual. Returns False if the visual isn't found
+    (let downstream selectors raise the "no visual" error with their
+    own context).
+    """
+    return page.evaluate(
+        """(title) => {
+            const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
+            for (const v of visuals) {
+                const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
+                if (!t || t.innerText.trim() !== title) continue;
+                return v.querySelector(
+                    '[data-automation-id="visual-overlay-title"]'
+                    + '[data-automation-context="No data"]'
+                ) !== null;
+            }
+            return false;
+        }""",
+        visual_title,
+    )
+
+
 def scroll_visual_into_view(
     page: Page, visual_title: str, timeout_ms: int, *, wait_for_cells: bool = True,
 ) -> None:
@@ -825,13 +976,29 @@ def scroll_visual_into_view(
     if not wait_for_cells:
         page.wait_for_timeout(800)
         return
+    # Settle on EITHER a populated visual (sn-table-cell-0-0 mounted) OR
+    # the QS empty-state overlay ([data-automation-id="visual-overlay-title"]
+    # with data-automation-context="No data") — both are positive
+    # signals that the visual finished resolving its data state.
+    # Pre-AA.H.11.followon: only waited for cells, so empty tables timed
+    # out at `timeout_ms` even though QS had rendered the empty overlay
+    # within ~200 ms. Adding the overlay branch makes empty-visual
+    # detection ~75× faster (200 ms vs 15 s default timeout) and turns
+    # a "test dies on timeout" into "caller probes visual_is_empty and
+    # short-circuits". The race is safe — a visual either has cells or
+    # an empty overlay, never both.
     page.wait_for_function(
         """(title) => {
             const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
             for (const v of visuals) {
                 const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
                 if (!t || t.innerText.trim() !== title) continue;
-                return v.querySelector('[data-automation-id="sn-table-cell-0-0"]') !== null;
+                if (v.querySelector('[data-automation-id="sn-table-cell-0-0"]')) return true;
+                if (v.querySelector(
+                    '[data-automation-id="visual-overlay-title"]'
+                    + '[data-automation-context="No data"]'
+                )) return true;
+                return false;
             }
             return false;
         }""",
@@ -867,146 +1034,60 @@ def count_table_rows(page: Page, visual_title: str) -> int:
     )
 
 
-def expand_all_tables_on_sheet(page: Page, *, timeout_ms: int = 10_000) -> int:
-    """Bump every paged table visual on the active sheet to page-size 10000.
+def table_is_paginated(page: Page, visual_title: str) -> bool:
+    """Cheap DOM probe — does this visual have a QS pagination control?
 
-    X.1.c — QS tables virtualize at ~10 DOM rows. Assertions that read
-    ``inner_text()`` of a table to check whether a specific row is
-    present (e.g. the harness ``assert_l1_plants_visible`` walking the
-    sheet text for a planted account_id) silently miss any row outside
-    the rendered window. This is deterministic — not a flake — and
-    surfaces only when the seed is dense enough to push the target row
-    below the first ~10. (Spec_example passes; sasquatch_pr fails on
-    the same assertion code, same dashboard, because it has more
-    transactions hence more breach rows hence more table rows.)
+    Returns True iff a ``simplePagedDisplayNav_dropdown_pageSize`` element
+    exists in the DOM, scoped to the visual whose title matches. Small
+    tables (≤ QS default page size, typically ~10–15 rows) render without
+    pagination — the DOM holds every row, so ``count_table_rows`` is the
+    exact total and no bump is needed.
 
-    This helper finds every visual on the active sheet that exposes
-    QS's ``simplePagedDisplayNav_dropdown_pageSize`` control, focuses
-    it, and bumps the page size to 10000 so all rows mount in DOM.
-    Visuals without pagination (KPIs, charts, line/bar) are silently
-    skipped — the helper detects pagination by attempting the
-    ``wait_for_selector`` lookup with a short per-visual timeout.
-
-    Returns the number of table visuals that were successfully
-    expanded. Caller can use the return for sanity checks but the
-    helper is best-effort by design — a sheet with zero paged tables
-    returns 0 and is not an error.
-
-    Cost: ~1.5–3s per table visual (focus dance + dropdown click +
-    settle). Acceptable for assertion paths that need correctness over
-    speed; not appropriate for inner loops where ``count_table_rows``
-    suffices.
+    This is a pure read — no clicks, no timeouts, no re-render risk.
+    Critical for callers that previously triggered a spurious re-fetch
+    by clicking the page-size dropdown on small tables that didn't need
+    it (the AA.H.11 root cause: the click → re-fetch → ``getMaxRow`` read
+    the empty container mid-refetch → returned 0 even though cells were
+    about to mount).
     """
-    expanded = 0
-    visuals = page.query_selector_all('[data-automation-id="analysis_visual"]')
-    for visual in visuals:
-        title_el = visual.query_selector(
-            '[data-automation-id="analysis_visual_title_label"]'
-        )
-        if title_el is None:
-            continue
-        title = title_el.inner_text().strip()
-        if not title:
-            continue
-        # Focus the visual to surface the page-size control. Use a JS
-        # click on the title so we dodge Playwright's actionability
-        # checks (which race against QS's re-render churn).
-        clicked = page.evaluate(
-            """(t) => {
-                const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
-                for (const v of visuals) {
-                    const lbl = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
-                    if (lbl && lbl.innerText.trim() === t) {
-                        lbl.click();
-                        return true;
-                    }
-                }
-                return false;
-            }""",
-            title,
-        )
-        if not clicked:
-            continue
-        # Wait for the page-size dropdown to mount after the focus-click
-        # (instead of a fixed 800ms + a 1.5s wait_for_selector). The
-        # 2.5s budget = the deleted 800ms head start + the original
-        # 1.5s wait; ``wait_for_selector`` returns the moment it
-        # appears, so this is strictly faster-or-equal.
-        try:
-            page.wait_for_selector(
-                '[data-automation-id="simplePagedDisplayNav_dropdown_pageSize"]',
-                timeout=2500, state="visible",
-            )
-        except Exception:
-            # No pagination — KPI / chart / line / bar / sankey. Skip.
-            continue
-        try:
-            page.locator(
-                '[data-automation-id="simplePagedDisplayNav_dropdown_pageSize"]'
-            ).first.click()
-            page.wait_for_selector(
-                '[data-automation-id="simplePagedDisplayNav_menuItem_pageSize_10000"]',
-                timeout=timeout_ms, state="visible",
-            )
-            page.locator(
-                '[data-automation-id="simplePagedDisplayNav_menuItem_pageSize_10000"]'
-            ).first.click()
-            page.wait_for_timeout(500)
-            expanded += 1
-        except Exception:
-            # Pagination existed but the bump failed — leave the table
-            # at its existing page size and let the caller's assertion
-            # decide if the partial-DOM read is enough.
-            continue
-    return expanded
+    return page.evaluate(
+        """(title) => {
+            const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
+            for (const v of visuals) {
+                const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
+                if (!t || t.innerText.trim() !== title) continue;
+                return v.querySelector(
+                    '[data-automation-id="simplePagedDisplayNav_dropdown_pageSize"]'
+                ) !== null;
+            }
+            return false;
+        }""",
+        visual_title,
+    )
 
 
-def count_table_total_rows(page: Page, visual_title: str, timeout_ms: int) -> int:
-    """Return the full (post-filter) row count of a QS table visual.
+def bump_table_page_size_to_10000(
+    page: Page, visual_title: str, timeout_ms: int,
+) -> bool:
+    """Click the visual's page-size dropdown → 10000, no scrolling or
+    counting. Returns True if the click sequence completed; False if the
+    pagination dropdown never appeared (table isn't actually paginated —
+    use ``table_is_paginated`` to pre-check and skip the call entirely).
 
-    QS tables virtualize — ``count_table_rows`` only sees the ~10 rows
-    currently mounted in the DOM. For filter-narrowing assertions where
-    both pre and post totals exceed the viewport, DOM counts stay flat
-    and the assertion silently passes. This helper:
+    **Does not wait for the post-bump re-fetch.** QS fires a fresh data
+    query when page size changes; caller must settle that re-fetch
+    separately (via ``QsEmbedDriver._settle_after_param_change``, which
+    keys off the WebSocket START/STOP frames — *not* a fixed
+    ``wait_for_timeout``). The original implementation's
+    ``wait_for_timeout(500)`` here was the AA.H.11 race trigger: 500 ms
+    wasn't enough for the re-fetch to land on cold visuals, and the
+    follow-up scroll-accumulate dance read the empty container.
 
-    1. Focuses the visual (click title) to reveal ``simplePagedDisplayNav_*``.
-    2. Sets page size to 10000 so all rows fit on one page.
-    3. Scrolls the inner ``.grid-container`` to the bottom, tracking the
-       highest ``sn-table-cell-N-*`` index seen.
-
-    Use this helper when the table's row count may exceed ~10 and you need
-    a precise total. Prefer ``count_table_rows`` when you already know the
-    table fits in the viewport — it's much faster.
-
-    Raises a timeout if the pagination controls never appear (i.e. the
-    visual isn't actually a paged table).
+    The focus-click on the visual title (required to reveal the
+    pagination control) is the same JS-dispatched ``.click()`` pattern
+    used elsewhere — bypasses Playwright's actionability checks that
+    race against QS's re-render churn.
     """
-    # Scroll the visual into view. Use scroll_visual_into_view when the
-    # table has data (cells present); otherwise fall back to a plain
-    # element.scrollIntoView, which still positions QS's inner scroll
-    # container correctly even when cells haven't mounted.
-    try:
-        scroll_visual_into_view(page, visual_title, timeout_ms=5000)
-    except Exception:
-        page.evaluate(
-            """(title) => {
-                const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
-                for (const v of visuals) {
-                    const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
-                    if (t && t.innerText.trim() === title) {
-                        v.scrollIntoView({block: 'center'});
-                        return;
-                    }
-                }
-            }""",
-            visual_title,
-        )
-        page.wait_for_timeout(2000)
-    # Focus the visual via a JS click dispatched directly on the title
-    # element. Playwright's locator.click() runs actionability checks that
-    # trigger auto-scroll within QS's re-rendering content and race against
-    # "element detached" errors — a raw DOM click avoids all of that and
-    # still reliably reveals simplePagedDisplayNav_*.
     clicked = page.evaluate(
         """(title) => {
             const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
@@ -1021,16 +1102,8 @@ def count_table_total_rows(page: Page, visual_title: str, timeout_ms: int) -> in
         }""",
         visual_title,
     )
-    assert clicked, f"No visual with title {visual_title!r}"
-    # Wait for the paging controls to mount after the focus-click
-    # (instead of a fixed 1.5s + a 3s wait_for_selector). The 4.5s
-    # budget = the deleted 1.5s head start + the original 3s wait;
-    # ``wait_for_selector`` returns the moment it appears, so this is
-    # strictly faster-or-equal. On repeat calls the controls often
-    # don't re-mount (focus already consumed, or lost to a prior
-    # filter interaction) — the ``except`` below catches that and
-    # relies on the page size set by the first successful call
-    # persisting through the session.
+    if not clicked:
+        return False
     try:
         page.wait_for_selector(
             '[data-automation-id="simplePagedDisplayNav_dropdown_pageSize"]',
@@ -1046,10 +1119,48 @@ def count_table_total_rows(page: Page, visual_title: str, timeout_ms: int) -> in
         page.locator(
             '[data-automation-id="simplePagedDisplayNav_menuItem_pageSize_10000"]'
         ).first.click()
-        page.wait_for_timeout(500)
+        return True
     except Exception:
-        pass
+        return False
 
+
+def count_table_total_rows(page: Page, visual_title: str, timeout_ms: int) -> int:
+    """Return the full (post-filter) row count of a QS table visual via
+    the scroll-accumulate dance.
+
+    QS tables virtualize — ``count_table_rows`` only sees the ~10 rows
+    currently mounted in the DOM. For filter-narrowing assertions where
+    both pre and post totals exceed the viewport, DOM counts stay flat
+    and the assertion silently passes. This helper:
+
+    1. Scrolls the inner ``.grid-container`` to the bottom, tracking the
+       highest ``sn-table-cell-N-*`` index seen.
+
+    Returns:
+        ``-1`` if the visual isn't on the page.
+        ``-2`` if the visual is present but has no ``.grid-container``
+        (e.g. a one-row table that QS renders without a scroll container).
+        The post-bump count otherwise (``max + 1``, or ``0`` if no cells).
+
+    **Caller must page-size-bump first** for tables exceeding the QS
+    default page size (~10–15 rows) — this helper only scrolls,
+    no longer bumps (the bump was extracted to
+    ``bump_table_page_size_to_10000``). For small tables (no pagination
+    control), ``count_table_rows`` is the exact total — pre-check via
+    ``table_is_paginated`` and skip the bump + scroll entirely.
+
+    Pre-AA.H.11 this helper bundled the focus-click + page-size-bump +
+    scroll into one call with a fixed ``wait_for_timeout(500)`` after
+    the bump. The 500 ms wasn't enough for the post-bump re-fetch to
+    land, so the scroll read an empty container and returned 0 —
+    causing the audit-agreement test to report ``qs_count=0`` on cold
+    sheets where the table actually had 2+ rows (verified via screenshot
+    + DOM capture). The fix split the orchestration so callers can:
+
+    1. Cheap-path-skip via ``table_is_paginated`` (no clicks, no risk).
+    2. Bump + WS-settle deterministically when overflow is real.
+    3. Read via the scroll-accumulate dance below.
+    """
     return page.evaluate(
         """async (title) => {
             const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
@@ -1094,28 +1205,6 @@ def count_table_total_rows(page: Page, visual_title: str, timeout_ms: int) -> in
     )
 
 
-def wait_for_table_total_rows_to_change(
-    page: Page, visual_title: str, before: int, timeout_ms: int,
-) -> int:
-    """Poll a table's total row count (via ``count_table_total_rows``) until
-    it differs from ``before``. Returns the new total.
-
-    Unlike ``wait_for_table_rows_to_change``, this compares *post-filter*
-    totals, not DOM-visible rows — use it when the table may exceed the
-    virtualization window.
-    """
-    import time
-    deadline = time.monotonic() + timeout_ms / 1000.0
-    while time.monotonic() < deadline:
-        current = count_table_total_rows(page, visual_title, timeout_ms=timeout_ms)
-        if current != before:
-            return current
-        page.wait_for_timeout(500)
-    raise TimeoutError(
-        f"{visual_title!r} total row count never changed from {before} "
-        f"within {timeout_ms}ms"
-    )
-
 
 def count_chart_categories(page: Page, visual_title: str) -> int:
     """Count distinct categorical entries (bars / slices) in a chart.
@@ -1157,24 +1246,6 @@ def count_chart_categories(page: Page, visual_title: str) -> int:
     )
 
 
-def wait_for_chart_categories_to_change(
-    page: Page, visual_title: str, before: int, timeout_ms: int,
-) -> int:
-    """Poll ``count_chart_categories`` until the value differs from ``before``.
-    Returns the new count. Mirrors ``wait_for_table_rows_to_change``.
-    """
-    import time
-    deadline = time.monotonic() + timeout_ms / 1000
-    while time.monotonic() < deadline:
-        current = count_chart_categories(page, visual_title)
-        if current != before and current >= 0:
-            return current
-        page.wait_for_timeout(250)
-    raise TimeoutError(
-        f"{visual_title!r} chart category count never changed from {before} "
-        f"within {timeout_ms}ms"
-    )
-
 
 def read_chart_categories(page: Page, visual_title: str) -> list[str]:
     """Return the ordered category labels (bar names / slice names) of a
@@ -1211,90 +1282,6 @@ def read_chart_categories(page: Page, visual_title: str) -> list[str]:
     )
 
 
-def click_chart_bar(
-    page: Page, visual_title: str, index: int, timeout_ms: int,
-) -> None:
-    """Select the bar at ``index`` in a bar-chart visual via keyboard nav.
-
-    QS renders charts to ``<canvas>``, so there's no DOM bar to click.
-    The keyboard-accessible path (bar charts only — pie/donut don't
-    expose it):
-
-    1. Click the visual's container to give it focus.
-    2. Tab 5 times to move focus into the inner bar group.
-    3. Enter to highlight a bar.
-    4. Right-arrow ``index`` times to cycle to the target bar.
-    5. Enter to select (fires the same-sheet filter action).
-
-    The visual must already be rendered and on-screen. Category order
-    matches ``read_chart_categories``.
-    """
-    card = page.locator(
-        f'[data-automation-id="analysis_visual"]:has('
-        f'[data-automation-id="analysis_visual_title_label"]:text-is("{visual_title}"))'
-    ).first
-    card.wait_for(state="visible", timeout=timeout_ms)
-    box = card.bounding_box()
-    assert box, f"No bounding box for {visual_title!r}"
-    # Click whitespace inside the card (just under the title) to focus
-    # the visual without landing on the canvas / title / axis labels.
-    page.mouse.click(
-        box["x"] + box["width"] / 2,
-        box["y"] + 30,
-    )
-    page.wait_for_timeout(300)
-    for _ in range(5):
-        page.keyboard.press("Tab")
-        page.wait_for_timeout(100)
-    page.keyboard.press("Enter")
-    page.wait_for_timeout(300)
-    # Horizontal bar charts navigate with ArrowDown; try both to be
-    # orientation-agnostic (extra presses on the wrong axis no-op).
-    for _ in range(index):
-        page.keyboard.press("ArrowDown")
-        page.wait_for_timeout(120)
-        page.keyboard.press("ArrowRight")
-        page.wait_for_timeout(120)
-    page.keyboard.press("Enter")
-    page.wait_for_timeout(500)
-
-
-def read_visual_column_values(
-    page: Page, visual_title: str, col_index: int,
-) -> list[str]:
-    """Return the text of every visible cell in column ``col_index`` within
-    the table visual whose title matches ``visual_title``.
-
-    Scoped to the specific visual (unlike the global ``sn-table-cell-{r}-{c}``
-    lookup) so sibling tables can't contaminate the result. Caller is
-    responsible for ensuring the visual is hydrated (use
-    ``scroll_visual_into_view`` or ``count_table_total_rows`` first if the
-    table is below-the-fold or paginated beyond the ~10-row viewport).
-    """
-    return page.evaluate(
-        """({title, col}) => {
-            const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
-            for (const v of visuals) {
-                const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
-                if (!t || t.innerText.trim() !== title) continue;
-                const out = [];
-                v.querySelectorAll(
-                    `[data-automation-id^="sn-table-cell-"]`
-                ).forEach(c => {
-                    const m = c.getAttribute('data-automation-id').match(
-                        /sn-table-cell-(\\d+)-(\\d+)/
-                    );
-                    if (m && parseInt(m[2]) === col) {
-                        out.push({row: parseInt(m[1]), text: c.innerText.trim()});
-                    }
-                });
-                out.sort((a, b) => a.row - b.row);
-                return out.map(o => o.text);
-            }
-            return null;
-        }""",
-        {"title": visual_title, "col": col_index},
-    ) or []
 
 
 def read_table_rows_dom(
@@ -1388,93 +1375,8 @@ def read_kpi_value(page: Page, visual_title: str) -> str:
     return value
 
 
-def parse_kpi_number(text: str) -> float:
-    """Strip ``$``, ``%``, ``,`` and ``K``/``M``/``B`` suffixes; return float.
-
-    Handles QS's compact-number formatting: ``$1.2K`` -> 1200.0,
-    ``45.3M`` -> 45_300_000.0. Unsuffixed strings parse straight.
-    """
-    s = text.strip().replace("$", "").replace(",", "").replace("%", "").strip()
-    multiplier = 1.0
-    if s and s[-1] in "KMB":
-        multiplier = {"K": 1e3, "M": 1e6, "B": 1e9}[s[-1]]
-        s = s[:-1]
-    return float(s) * multiplier
 
 
-def wait_for_kpi_text_nonempty(
-    page: Page, visual_title: str, timeout_ms: int,
-) -> str:
-    """Poll ``read_kpi_value`` until the KPI is readable, returning its
-    text. Useful pre-filter when the KPI hydrates after the visual
-    mounts but before the test wants to baseline its value.
-    """
-    import time
-    deadline = time.monotonic() + timeout_ms / 1000
-    while time.monotonic() < deadline:
-        try:
-            value = read_kpi_value(page, visual_title)
-            if value:
-                return value
-        except AssertionError:
-            pass
-        page.wait_for_timeout(250)
-    raise TimeoutError(
-        f"{visual_title!r} KPI never became readable within {timeout_ms}ms"
-    )
-
-
-def wait_for_kpi_value_to_change(
-    page: Page, visual_title: str, before: str, timeout_ms: int,
-) -> str:
-    """Poll ``read_kpi_value`` until the displayed text differs from ``before``.
-    Returns the new value. Raw string comparison — caller parses if needed.
-    """
-    import time
-    deadline = time.monotonic() + timeout_ms / 1000
-    while time.monotonic() < deadline:
-        current = read_kpi_value(page, visual_title)
-        if current != before:
-            return current
-        page.wait_for_timeout(250)
-    raise TimeoutError(
-        f"{visual_title!r} KPI value never changed from {before!r} "
-        f"within {timeout_ms}ms"
-    )
-
-
-def wait_for_table_nonzero(
-    page: Page, visual_title: str, timeout_ms: int,
-) -> int:
-    """Poll a table visual's row count until it's > 0 (or timeout).
-
-    Returns the new row count. Use this after triggering a filter /
-    dropdown pick when the assertion is "table not empty" rather than
-    "count changed" — the change-based wait would false-timeout when
-    the picked value happens to leave the count unchanged (e.g., an
-    L2FT cascade pick where the value covers every row in the
-    window). The "must remain non-empty" semantic is the actual
-    regression guard for those tests.
-    """
-    page.wait_for_function(
-        """({title}) => {
-            const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
-            for (const v of visuals) {
-                const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
-                if (!t || t.innerText.trim() !== title) continue;
-                const rows = new Set();
-                v.querySelectorAll('[data-automation-id^="sn-table-cell-"]').forEach(c => {
-                    const m = c.getAttribute('data-automation-id').match(/sn-table-cell-(\\d+)-/);
-                    if (m) rows.add(m[1]);
-                });
-                return rows.size > 0;
-            }
-            return false;
-        }""",
-        arg={"title": visual_title},
-        timeout=timeout_ms,
-    )
-    return count_table_rows(page, visual_title)
 
 
 def wait_for_dropdown_options_present(
@@ -1604,37 +1506,17 @@ def set_parameter_slider_value(
     loc = page.locator(f'{card_selector} input:not([type="hidden"])').first
     loc.click(timeout=timeout_ms)
     loc.fill(f"{value:g}", timeout=timeout_ms)
-    loc.blur(timeout=timeout_ms)  # the value only commits on focus-loss
+    # AA.H.10 — `el.blur()` alone fires the JS blur event but doesn't satisfy
+    # MUI's controlled-text-input commit path; the React onChange wiring waits
+    # for an Enter key OR a Tab key (which simulates the user moving focus off
+    # the field). Without this, the input shows value=4 in the DOM but QS's
+    # analysis-param state never updates → no MappedDataSetParameters bridge
+    # fire → dashboard re-fetches with the default σ. Verified against the
+    # σ-slider DOM dump where the input had value=4 but the KPI stayed at the
+    # default-σ count.
+    loc.press("Enter", timeout=timeout_ms)
+    loc.blur(timeout=timeout_ms)
 
-
-def set_slider_range(
-    page: Page, control_title: str, low: int | None, high: int | None,
-    timeout_ms: int,
-) -> None:
-    """Set a RANGE FilterSliderControl's min/max via its backing text inputs.
-
-    QS renders each range slider with two MUI text inputs
-    (``sheet_control_range_slider_min`` / ``_max``) wired to React state.
-    Dragging the thumbs is fragile in Playwright, but filling the inputs
-    and blurring them commits the value reliably. Pass ``None`` to leave
-    a bound untouched.
-    """
-    card_selector = (
-        f'[data-automation-id="sheet_control"]'
-        f'[data-automation-context="{control_title}"]'
-    )
-    page.wait_for_selector(card_selector, timeout=timeout_ms, state="visible")
-    for bound, value in (("min", low), ("max", high)):
-        if value is None:
-            continue
-        selector = (
-            f'{card_selector} '
-            f'[data-automation-id="sheet_control_range_slider_{bound}"]'
-        )
-        loc = page.locator(selector).first
-        loc.click(timeout=timeout_ms)
-        loc.fill(str(value), timeout=timeout_ms)
-        loc.press("Enter", timeout=timeout_ms)
 
 
 # MUI v4 renders some FilterControl options inside ``[role="listbox"]``
@@ -1653,35 +1535,114 @@ _SELECTED_OPTION_SELECTOR = (
 def _open_control_dropdown(page: Page, control_title: str, timeout_ms: int) -> None:
     """Open the FilterControl popover for the named sheet control.
 
-    QuickSight renders each control as
+    Each control renders as
     ``[data-automation-id="sheet_control"][data-automation-context="<title>"]``
-    with the value picker at ``sheet_control_value`` (a Material-UI Select
-    combobox). Opens the popover and waits for the listbox to be visible.
+    but QuickSight uses **two different DOM shapes** for the value
+    picker depending on the dropdown's option-count:
+
+    - **Simple variant** (small option universe, e.g. Account Network's
+      25-account picker): the trigger is
+      ``[data-automation-id="sheet_control_value"]``, the popover lands
+      at ``[data-automation-id="sheet_control_value-menu"][data-automation-context="<title>"]``
+      with options as ``[role="option"]`` children.
+    - **Search-enabled variant** (large option universe, e.g. Money
+      Trail's 8080-root-transfer picker): QS swaps to a Material-UI
+      Autocomplete with a built-in search input. Trigger is
+      ``[data-automation-id="sheet_control_search_results_dropdown"]``;
+      ``sheet_control_value`` is **not in the DOM at all**. Popover
+      lands at
+      ``[data-automation-id="sheet_control_search_results_dropdown-menu"]``
+      (suffix ``-menu``, NOT ``sheet_control_menu_dropdown`` — that
+      was an earlier wrong guess from AA.H.7), and the popover holds
+      a ``MuiAutocomplete`` widget whose ``[role="option"]`` items are
+      **not rendered on open**. The widget lazy-mounts the listbox
+      only after the search input receives focus + an ArrowDown press
+      (or typed input). Per AA.H.8 (DOM dump verified 2026-05-16), we
+      detect the search-variant popover after the trigger click and
+      focus its input + press ArrowDown to force the listbox to
+      render before the option-wait fires.
+
+    Cardinality threshold isn't documented; QS picks the variant
+    client-side based on declared values count. Dispatch on selector
+    presence: simple trigger first, fall back to search trigger.
     """
     card_selector = (
         f'[data-automation-id="sheet_control"]'
         f'[data-automation-context="{control_title}"]'
     )
     page.wait_for_selector(card_selector, timeout=timeout_ms, state="visible")
+    # Dispatch on whichever trigger this control rendered (small option
+    # universe vs large + search-enabled). Both render the popover
+    # contents lazily on first click; the next wait_for_selector handles
+    # whichever container ended up in the DOM.
+    simple_trigger = (
+        f'{card_selector} [data-automation-id="sheet_control_value"]'
+    )
+    search_trigger = (
+        f'{card_selector} [data-automation-id="sheet_control_search_results_dropdown"]'
+    )
+    # ``count()`` is a fast DOM-only check (no event loop wait). Pick the
+    # variant that's actually rendered. If both somehow match, prefer
+    # the simple variant — that's the click target the historical helpers
+    # were written against.
+    if page.locator(simple_trigger).count() > 0:
+        trigger = simple_trigger
+    else:
+        trigger = search_trigger
     # MUI mounts the listbox in a portal; aria-haspopup="listbox" expands.
     # The first click sometimes no-ops if the sheet just mounted and the
     # combobox's onClick handler hasn't attached — retry until the listbox
     # appears or timeout.
-    value_selector = (
-        f'{card_selector} [data-automation-id="sheet_control_value"]'
-    )
-    page.locator(value_selector).first.click(timeout=timeout_ms)
-    # MUI v4 sometimes renders options under role="listbox" inside the menu
-    # popover, but some control instances skip the listbox role and put
-    # options directly in the popover. Match either shape, but scope to
-    # the just-opened control's popover so other (stale) popovers don't
-    # pollute the option set.
-    popover_selector = (
+    page.locator(trigger).first.click(timeout=timeout_ms)
+    popover_simple = (
         f'[data-automation-id="sheet_control_value-menu"]'
         f'[data-automation-context="{control_title}"]'
     )
+    popover_search = (
+        f'[data-automation-id="sheet_control_search_results_dropdown-menu"]'
+        f'[data-automation-context="{control_title}"]'
+    )
+    # Search-variant only — MUI Autocomplete inside the popover
+    # lazy-mounts its listbox; type or ArrowDown forces it to render.
+    # Probe globally (not gated on the popover container being visible
+    # by automation-id, because the simple-variant menu container
+    # doesn't always carry the ``data-automation-context`` attribute
+    # and the gate misfires there; AA.H.8 regression observed for the
+    # Account Network anchor). Short, non-fatal: if no search input
+    # mounts within 500 ms, this is the simple variant and ArrowDown
+    # is unnecessary.
+    from playwright.sync_api import TimeoutError as _PWTimeout
+    search_input_selector = (
+        '[data-automation-id="sheet_control_search_results_dropdown-menu"] input'
+    )
+    try:
+        page.wait_for_selector(
+            search_input_selector, timeout=1_000, state="visible",
+        )
+        page.locator(search_input_selector).first.click(timeout=timeout_ms)
+        page.keyboard.press("ArrowDown")
+    except _PWTimeout:
+        pass  # Simple variant — no search input to focus.
+    # Wait for at least one ``[role="option"]`` under either popover
+    # shape OR loose in a ``[role="listbox"]`` (some controls put
+    # options directly under the popover without listbox role). The
+    # global ``[role="listbox"]`` clause is the safety net when the
+    # popover container omits ``data-automation-context``.
+    #
+    # AA.H.10.followon — also accept the MUI Autocomplete's
+    # ``.MuiAutocomplete-noOptions`` empty-state element. An empty
+    # dropdown (the dataset returned zero rows for the deployed L2)
+    # surfaces that element instead of any ``[role="option"]``; without
+    # this branch the wait times out with an unhelpful "click target not
+    # found" instead of letting ``read_dropdown_options`` return ``[]``
+    # so the caller can ``pytest.skip`` cleanly. Caught on the L2FT
+    # Bundle dropdown + Money Trail Chain-root-transfer anchor against
+    # the ``spec_example`` deploy.
     page.wait_for_selector(
-        f'{popover_selector} [role="option"], [role="listbox"] [role="option"]',
+        f'{popover_simple} [role="option"], '
+        f'{popover_search} [role="option"], '
+        f'[role="listbox"] [role="option"], '
+        f'.MuiAutocomplete-noOptions',
         timeout=timeout_ms, state="visible",
     )
 
@@ -1691,12 +1652,42 @@ def set_dropdown_value(
 ) -> None:
     """Pick a single value from a SINGLE_SELECT FilterControl by title.
 
-    Opens the dropdown for ``control_title`` and clicks the option whose
-    text equals ``value``. Use ``clear_dropdown`` to reset to "All".
-    Dismisses the popover with Escape so subsequent visual interactions
-    aren't blocked by the listbox overlay.
+    Opens the dropdown for ``control_title`` and clicks the option
+    whose text equals ``value``. Use ``clear_dropdown`` to reset to
+    "All". Dismisses the popover with Escape so subsequent visual
+    interactions aren't blocked by the listbox overlay.
+
+    Handles both ``_open_control_dropdown`` variants transparently:
+
+    - **Simple variant** — listbox is fully rendered on open;
+      ``has_text`` finds the option directly.
+    - **Search-enabled variant** (MUI Autocomplete) — options are
+      virtualized and ``value`` may live outside the rendered window.
+      Type ``value`` into the autocomplete search input first so the
+      Autocomplete narrows to the matching subset, then click. This
+      is the operator's actual flow for an 8000-option dropdown
+      (you can't scroll to your target — you type to find it). Per
+      AA.H.8 the driver carries this dance so every ``pick_filter``
+      / ``set_dropdown_value`` caller works against both variants
+      without renderer-specific code in the test.
     """
     _open_control_dropdown(page, control_title, timeout_ms)
+    popover_search = (
+        f'[data-automation-id="sheet_control_search_results_dropdown-menu"]'
+        f'[data-automation-context="{control_title}"]'
+    )
+    search_input = page.locator(f'{popover_search} input').first
+    if search_input.count() > 0:
+        # MUI Autocomplete: narrow the listbox via the search input.
+        # ``fill`` debounces + repaints the option list; wait for the
+        # filtered ``[role="option"]`` to appear before clicking so
+        # we don't race a stale option from the pre-filter listbox.
+        search_input.fill(value, timeout=timeout_ms)
+        page.wait_for_selector(
+            f'{popover_search} [role="option"], '
+            f'[role="listbox"] [role="option"]',
+            timeout=timeout_ms, state="visible",
+        )
     page.locator(
         _OPTION_SELECTOR, has_text=value,
     ).first.click(timeout=timeout_ms)

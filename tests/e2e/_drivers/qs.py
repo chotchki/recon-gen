@@ -43,6 +43,8 @@ from pathlib import Path
 from typing import Any
 
 from quicksight_gen.common.browser.helpers import (
+    bump_table_page_size_to_10000,
+    visual_is_empty,
     click_context_menu_item,
     click_first_row_of_visual,
     click_sheet_tab,
@@ -55,7 +57,9 @@ from quicksight_gen.common.browser.helpers import (
     read_table_rows_dom,
     right_click_first_row_of_visual,
     scroll_visual_into_view,
+    set_dropdown_value,
     set_multi_select_values,
+    table_is_paginated,
     set_parameter_datetime_value,
     set_parameter_slider_value,
     sheet_control_titles,
@@ -337,18 +341,56 @@ class QsEmbedDriver:
         return read_table_rows_dom(self._page, visual_title)
 
     def table_row_count(self, visual_title: str) -> int:
-        # ``count_table_total_rows`` is the page-size-bump + scroll-
-        # accumulate dance that surfaces the post-filter total past the
-        # ~10-row rendered window. On a *small* table (no ``.grid-container``,
-        # so no pagination), it returns the sentinel ``-2`` — fall back
-        # to the DOM-cell count, which is the actual full count for a
-        # table small enough to render unpaginated. Other negative
-        # sentinels (``-1`` = no visual with that title) bubble up as
-        # 0 since callers expect a non-negative count.
+        # AA.H.11 — orchestrate {scroll-into-view → detect pagination → bump
+        # + WS-settle on overflow → count}. Pre-AA.H.11, a bundled helper
+        # ALWAYS did the bump + a fixed 500 ms wait, which raced the
+        # post-bump re-fetch on cold sheets and returned 0 for tables
+        # that actually had 2+ rows (the audit-agreement
+        # ``qs_count=0`` failure). The fix:
+        #
+        # 1. Scroll the visual into view so cells mount.
+        # 2. Cheap path: read DOM cells via ``count_table_rows`` —
+        #    correct for small tables (no pagination overflow). No
+        #    clicks, no re-render risk.
+        # 3. Bump path: if ``table_is_paginated`` returns True, the
+        #    table has more rows than fit on the current page — bump
+        #    page-size to 10000, ``_settle_after_param_change`` (WS
+        #    frames, NOT a fixed wait — user direction: time-based
+        #    waits are a major smell), then scroll-accumulate the now-
+        #    fully-paginated table.
+        #
+        # AA.H.11.followon — `scroll_visual_into_view` now waits for
+        # EITHER table cells (`sn-table-cell-0-0`) OR the QS empty-state
+        # overlay (`visual-overlay-title[data-automation-context="No
+        # data"]`) — both are positive signals that the visual finished
+        # resolving. Pre-followon: only waited for cells, so empty
+        # tables timed out at `self._visual_timeout` (15s) and the test
+        # died. Now both populated AND empty visuals settle in their
+        # natural render time (typically <1s for empty, a few s for
+        # populated). The user direction: "is there something we could
+        # do to avoid those timeouts? something to watch on?" → yes,
+        # watch the overlay marker QS already mounts on empty visuals.
+        scroll_visual_into_view(
+            self._page, visual_title, self._visual_timeout,
+        )
+        # `visual_is_empty` is a cheap DOM read (no waits) — short-
+        # circuits the empty case at 0 without paying any pagination/
+        # bump cost. Test callers like `_assert_anchor_present_and_populated`
+        # rely on this returning 0 to decide whether to `pytest.skip`.
+        if visual_is_empty(self._page, visual_title):
+            return 0
+        if not table_is_paginated(self._page, visual_title):
+            return max(0, count_table_rows(self._page, visual_title))
+        if bump_table_page_size_to_10000(
+            self._page, visual_title, self._visual_timeout,
+        ):
+            self._settle_after_param_change()
         total = count_table_total_rows(
             self._page, visual_title, self._visual_timeout,
         )
         if total == -2:
+            # ``.grid-container`` absent — single-row table, DOM-cell count
+            # IS the full set (same fallback as pre-AA.H.11).
             return max(0, count_table_rows(self._page, visual_title))
         return max(0, total)
 
@@ -424,16 +466,29 @@ class QsEmbedDriver:
             self._page.wait_for_timeout(80)
 
     def pick_filter(self, label: str, values: Sequence[str]) -> None:
-        # Post-Y.2.g the L1 / L2FT dropdowns are multi-select
-        # ParameterDropDownControls — set_multi_select_values deselects
-        # whatever's checked then ticks exactly ``values`` (a one-element
-        # list for a single-select pick), which is the protocol's
-        # "set the control to ``values``" semantics. Then block until the
-        # dataset re-query lands (per the protocol's "block until the
-        # affected visuals re-fetch").
-        set_multi_select_values(
-            self._page, label, list(values), self._page_timeout,
-        )
+        # Post-AA.A.3 the L1 / L2FT dropdowns are single-select
+        # ParameterDropDownControls (pre-AA.A.3 they were multi-select on
+        # the back of the X.2.t.2 sentinel-guard pattern). The protocol's
+        # "set the control to ``values``" semantics collapse to a single
+        # ``set_dropdown_value`` for ``len(values) == 1``; multi-element
+        # callers fall through to ``set_multi_select_values`` for the
+        # remaining genuine MULTI_SELECT controls (none in L1/L2FT after
+        # AA.A but the verb stays general for future compare-N keepers).
+        # Then block until the dataset re-query lands (per the protocol's
+        # "block until the affected visuals re-fetch").
+        # ``set_dropdown_value`` transparently handles both the simple
+        # and search-enabled (MUI Autocomplete) variants — the driver
+        # encapsulates the typing dance so tests stay renderer-agnostic
+        # (AA.H.8).
+        vals = list(values)
+        if len(vals) == 1:
+            set_dropdown_value(
+                self._page, label, vals[0], self._page_timeout,
+            )
+        else:
+            set_multi_select_values(
+                self._page, label, vals, self._page_timeout,
+            )
         self._settle_after_param_change()
 
     def set_date_range(self, from_: str | None, to: str | None) -> None:
@@ -454,6 +509,20 @@ class QsEmbedDriver:
             touched = True
         if touched:
             self._settle_after_param_change()
+
+    def set_date(self, label: str, iso: str | None) -> None:
+        # AA.B.5.followon — single-value DateTimePicker control (currently
+        # only L1 Daily Statement's "Business Day"). Reuses
+        # ``set_parameter_datetime_value`` (the same helper the universal
+        # date-range pickers use, just card-scoped by title instead of
+        # bare-id). QS accepts ``YYYY/MM/DD`` text; translate the ISO
+        # form. Block until the dataset re-query lands.
+        if iso is None:
+            return
+        set_parameter_datetime_value(
+            self._page, label, iso.replace("-", "/"), self._page_timeout,
+        )
+        self._settle_after_param_change()
 
     def set_slider(
         self, label: str, lo: float | None, hi: float | None,

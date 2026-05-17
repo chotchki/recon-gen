@@ -394,13 +394,13 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
     ),
     # X.4.f.11.9 — bundles_activity (aggregating rails only).
     # tuple[BundlesActivityRef = Identifier, ...] — multi-select from
-    # rails + templates; matches by name OR transfer_type.
+    # rails + templates; matches by Rail.name or TransferTemplate.name.
     FieldSpec(
         name="bundles_activity",
         label="Bundles activity",
         helper=(
-            "For aggregating rails only. Names the rails / templates / "
-            "transfer_types whose Transactions this rail bundles. Multi-select."
+            "For aggregating rails only. Names the rails / templates "
+            "whose Transactions this rail bundles. Multi-select."
         ),
         kind="multi_select",
         select_from="rails_or_templates",
@@ -1274,14 +1274,14 @@ _CREATE_INTRO_BY_KIND: Mapping[EntityKind, str] = {
         "well-known way value flows between roles. ACH origination, wire "
         "settlement, intra-day pool balancing, fee debits all live as "
         "Rails. Every transaction must match a rail by "
-        "<code>(transfer_type, source_role, destination_role)</code>.</p>"
-        "<p>Required: <code>name</code> (unique identifier; chains and "
-        "templates reference rails by name) and <code>transfer_type</code> "
-        "(e.g. <code>ach</code>, <code>wire</code>, <code>charge</code>, "
-        "<code>settlement</code>). Endpoint roles "
-        "(<code>source_role</code> / <code>destination_role</code>) are "
-        "edited on the rail itself after it's created — required for the "
-        "validator to accept the rail as connected.</p>"
+        "<code>(rail_name, source_role, destination_role)</code>.</p>"
+        "<p>Required: <code>name</code> (unique identifier; chains, "
+        "templates, and limit schedules all reference rails by this "
+        "name — it doubles as the L1 matview's <code>rail_name</code> "
+        "column value). Endpoint roles (<code>source_role</code> / "
+        "<code>destination_role</code>) are edited on the rail itself "
+        "after it's created — required for the validator to accept the "
+        "rail as connected.</p>"
     ),
     "transfer_template": (
         "<p><strong>A TransferTemplate</strong> is a multi-leg event — "
@@ -1289,11 +1289,11 @@ _CREATE_INTRO_BY_KIND: Mapping[EntityKind, str] = {
         "<code>expected_net</code> by <code>completion</code>. Settlement "
         "cycles, return-bundle reconciliations, anything that's not just "
         "one rail firing on its own.</p>"
-        "<p>Required: <code>name</code>, <code>transfer_type</code>, "
-        "<code>expected_net</code> (often 0 for fully-balanced cycles; "
-        "fees may sum to a non-zero target), <code>completion</code> "
-        "(the deadline expression like <code>business_day_end+1d</code>). "
-        "<code>leg_rails</code> is edited after creation.</p>"
+        "<p>Required: <code>name</code>, <code>expected_net</code> "
+        "(often 0 for fully-balanced cycles; fees may sum to a non-zero "
+        "target), <code>completion</code> (the deadline expression like "
+        "<code>business_day_end+1d</code>). <code>leg_rails</code> is "
+        "edited after creation.</p>"
     ),
     "chain": (
         "<p><strong>A Chain row</strong> says: when this <em>parent</em> "
@@ -1310,11 +1310,11 @@ _CREATE_INTRO_BY_KIND: Mapping[EntityKind, str] = {
     ),
     "limit_schedule": (
         "<p><strong>A LimitSchedule</strong> is a daily $-cap on outbound "
-        "flow from a parent role for a given transfer_type. Any day "
-        "exceeding the cap surfaces as an L1 limit-breach violation.</p>"
+        "flow from a parent role for a given rail. Any day exceeding the "
+        "cap surfaces as an L1 limit-breach violation.</p>"
         "<p>Required: <code>parent_role</code> (the role whose outbound "
-        "flow is capped), <code>transfer_type</code>, and <code>cap</code> "
-        "(the $ ceiling).</p>"
+        "flow is capped), <code>rail</code> (the Rail name the cap "
+        "applies to), and <code>cap</code> (the $ ceiling).</p>"
     ),
 }
 

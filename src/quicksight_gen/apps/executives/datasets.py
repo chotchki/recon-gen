@@ -79,7 +79,7 @@ DS_EXEC_ACCOUNT_SUMMARY_ACTIVE = "exec-account-summary-active-ds"
 
 EXEC_TRANSACTION_SUMMARY_CONTRACT = DatasetContract(columns=[
     ColumnSpec("posted_date", "DATETIME"),
-    ColumnSpec("rail_name", "STRING", shape=ColumnShape.TRANSFER_TYPE),
+    ColumnSpec("rail_name", "STRING", shape=ColumnShape.RAIL_NAME),
     ColumnSpec("transfer_count", "INTEGER"),
     ColumnSpec("gross_amount", "DECIMAL"),
     ColumnSpec("net_amount", "DECIMAL"),

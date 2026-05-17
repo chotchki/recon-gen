@@ -43,6 +43,7 @@ from quicksight_gen.apps.l1_dashboard.datasets import (
     DS_DRIFT,
     DS_DRIFT_TIMELINE,
     DS_L1_ACCOUNTS,
+    DS_L1_DS_ROLES,
     DS_L1_TX_FACETS,
     DS_L1_TX_IDS,
     DS_LEDGER_DRIFT,
@@ -55,10 +56,12 @@ from quicksight_gen.apps.l1_dashboard.datasets import (
     DS_SUPERSESSION_TRANSACTIONS,
     DS_TODAYS_EXCEPTIONS,
     DS_TRANSACTIONS,
+    L1_ALL_SENTINEL,
     P_L1_DRIFT_ACCOUNT,
     P_L1_DRIFT_ROLE,
     P_L1_DRIFT_TL_ROLE,
     P_L1_DS_ACCOUNT_DSP,
+    P_L1_DS_ROLE_DSP,
     P_L1_LIMIT_BREACH_ACCOUNT,
     P_L1_LIMIT_BREACH_TYPE,
     P_L1_OVERDRAFT_ACCOUNT,
@@ -83,10 +86,14 @@ from quicksight_gen.apps.l1_dashboard.datasets import (
     l1_check_type_values,
     l1_rail_values,
     l1_supersede_reason_values,
-    l1_transfer_type_values,
+    l1_rail_universe_values,
 )
 from quicksight_gen.common import rich_text as rt
 from quicksight_gen.common.config import Config
+from quicksight_gen.common.handbook.invariants import (
+    load_bundled_invariants,
+    panel_markdown,
+)
 from quicksight_gen.common.ids import FilterGroupId, ParameterName, SheetId
 from quicksight_gen.common.l2 import L2Instance
 from quicksight_gen.common.models import DateTimeDefaultValues
@@ -165,6 +172,11 @@ P_L1_DATE_END = ParameterName("pL1DateEnd")
 # both the summary KPIs and the transactions detail table.
 P_L1_DS_ACCOUNT = ParameterName("pL1DsAccount")
 P_L1_DS_BALANCE_DATE = ParameterName("pL1DsBalanceDate")
+# AA.B.1 — Daily Statement Role cascade. The role dropdown narrows the
+# Account dropdown's options via the ``pL1DsRole`` dataset param on
+# ``DS_L1_ACCOUNTS``. Default = ``L1_ALL_SENTINEL`` (show every account
+# regardless of role on first load).
+P_L1_DS_ROLE = ParameterName("pL1DsRole")
 
 # M.2b.7 — Drill-target parameters (sentinel-pattern, mirror of AR).
 # These never appear as visible sheet controls — they're only written
@@ -354,7 +366,10 @@ _DAILY_STATEMENT_DESCRIPTION = (
     "Drift = stored closing − (opening + signed-net flow); on a healthy "
     "feed it's exactly zero, so non-zero drift here is the single "
     "visual cue the underlying ledger doesn't reconcile for that "
-    "account-day. Mirrors AR's Daily Statement pattern."
+    "account-day. Mirrors AR's Daily Statement pattern. "
+    "Account picker lists accounts with stored daily balances only "
+    "(L2 control-account stubs that lack their own balance row are "
+    "filtered out); pick a Role first to narrow the Account list."
 )
 
 
@@ -472,7 +487,7 @@ def _l1_datasets(
         DS_DRIFT_TIMELINE, DS_LEDGER_DRIFT_TIMELINE,
         DS_STUCK_PENDING, DS_STUCK_UNBUNDLED,
         DS_SUPERSESSION_TRANSACTIONS, DS_SUPERSESSION_DAILY_BALANCES,
-        DS_L1_ACCOUNTS, DS_L1_TX_IDS, DS_L1_TX_FACETS,
+        DS_L1_ACCOUNTS, DS_L1_DS_ROLES, DS_L1_TX_IDS, DS_L1_TX_FACETS,
         DS_APP_INFO_LIVENESS, DS_APP_INFO_MATVIEWS,
     ]
     return {
@@ -1645,34 +1660,38 @@ def _populate_pushdown_enum_dropdown(
     title: str,
     all_values: list[str],
 ) -> None:
-    """Y.2.g — multi-select dropdown whose narrowing pushes into the
-    consuming dataset(s)' SQL via ``<<$dataset_param>>`` substitution (a
-    ``col IN (...)`` predicate). Mirrors
+    """Y.2.g + AA.A.3 — single-select dropdown whose narrowing pushes
+    into the consuming dataset(s)' SQL via ``<<$dataset_param>>``
+    substitution (a ``col = <<$p>>`` predicate guarded by the sentinel-OR
+    shape — see ``datasets.py::_data_value_clause``). Mirrors
     ``apps/l2_flow_tracing/app.py::_populate_pushdown_dropdown``.
 
-    A multi-valued ``StringParam`` whose default is the full closed
-    value set (so a freshly-loaded dashboard matches every row) is
-    bridged to each ``(dataset, dataset_param)`` pair — usually one;
-    ALL_DATASETS dropdowns pass two (the Drift / Drift Timelines sheets'
-    controls narrow both the leaf-drift and ledger-drift datasets). A
-    ``ParameterDropdown(MULTI_SELECT, StaticValues)`` lets the analyst
-    deselect to narrow. No analysis-level FilterGroup — emptying the
-    dropdown reverts each dataset param to its default (= all values);
-    QS does not emit ``IN ()``. Use for bounded enum columns
-    (``rail_name`` / ``rail_name`` / ``account_role`` / ``supersedes``
-    / ``check_type``); for data-value columns use
+    A single-valued ``StringParam`` whose default is ``L1_ALL_SENTINEL``
+    (so a freshly-loaded dashboard matches every row via the sentinel
+    disjunct) is bridged to each ``(dataset, dataset_param)`` pair —
+    usually one; ALL_DATASETS dropdowns pass two (the Drift / Drift
+    Timelines sheets' controls narrow both the leaf-drift and
+    ledger-drift datasets). A ``ParameterDropdown(SINGLE_SELECT,
+    StaticValues)`` lets the analyst pick one value to narrow with one
+    click. No analysis-level FilterGroup — picking the value writes the
+    bridged dataset param; clearing the dropdown reverts to the sentinel
+    default (= all rows match). AA.A.3 flipped this from MULTI to SINGLE
+    per the drill-to-one default (audit at
+    ``docs/audits/aa_a_dropdown_audit.md``).
+
+    Use for bounded enum columns (``rail_name`` / ``account_role`` /
+    ``check_type`` / ``supersedes``); for data-value columns use
     ``_populate_pushdown_value_dropdown``.
     """
     p = analysis.add_parameter(StringParam(
         name=param_name,
-        multi_valued=True,
-        default=list(all_values),
+        multi_valued=False,
+        default=[L1_ALL_SENTINEL],
         mapped_dataset_params=list(bridges),
     ))
     sheet.add_parameter_dropdown(
         parameter=p,
         title=title,
-        type="MULTI_SELECT",
         selectable_values=StaticValues(values=list(all_values)),
     )
 
@@ -1687,33 +1706,32 @@ def _populate_pushdown_value_dropdown(
     options_dataset: Dataset,
     options_column: str,
 ) -> None:
-    """Y.2.g — like ``_populate_pushdown_enum_dropdown`` but for
+    """Y.2.g + AA.A.3 — like ``_populate_pushdown_enum_dropdown`` but for
     data-value columns (``account_id`` / ``transfer_id`` / open-set
     ``status`` / ``origin``) whose value universe isn't enumerable at
     deploy time.
 
-    The analysis ``StringParam`` carries no default (nothing pre-selected
-    on load); the bridged dataset param's static default is
-    ``[L1_ALL_SENTINEL]`` and the consuming SQL guards
-    ``('__l1_all__' IN (<<$p>>)) OR (col IN (<<$p>>))`` (see
+    The single-valued analysis ``StringParam`` defaults to ``L1_ALL_SENTINEL``;
+    the bridged dataset param's static default is the same sentinel and the
+    consuming SQL guards ``('__l1_all__' = <<$p>> OR col = <<$p>>)`` (see
     ``datasets.py::_data_value_clause``), so a freshly-loaded dashboard
     (bridge un-fired → dataset param at its static default) matches every
-    row, and emptying the dropdown (which reverts the dataset param to
-    that default) restores "all". The dropdown's options come from
-    ``options_dataset[options_column]`` via ``LinkedValues`` — a
-    well-formed ``SELECT DISTINCT`` query, not the lazy
-    ``tenK-sample-values-V2`` fetch the old empty-CategoryFilter pattern
-    triggered (the X.1.g cold-CI 404 source).
+    row, and clearing the dropdown (which reverts the dataset param to that
+    default) restores "all". The dropdown's options come from
+    ``options_dataset[options_column]`` via ``LinkedValues`` — a well-formed
+    ``SELECT DISTINCT`` query, not the lazy ``tenK-sample-values-V2`` fetch
+    the old empty-CategoryFilter pattern triggered (the X.1.g cold-CI 404
+    source). AA.A.3 flipped from MULTI to SINGLE per the drill-to-one default.
     """
     p = analysis.add_parameter(StringParam(
         name=param_name,
-        multi_valued=True,
+        multi_valued=False,
+        default=[L1_ALL_SENTINEL],
         mapped_dataset_params=list(bridges),
     ))
     sheet.add_parameter_dropdown(
         parameter=p,
         title=title,
-        type="MULTI_SELECT",
         selectable_values=LinkedValues.from_column(
             options_dataset[options_column],
         ),
@@ -1735,13 +1753,16 @@ def _wire_per_sheet_dropdowns(
     todays_exceptions_sheet: Sheet,
     transactions_sheet: Sheet,
 ) -> None:
-    """Y.2.g — per-sheet filter dropdowns, all pushed into dataset SQL.
+    """Y.2.g + AA.A.3 — per-sheet filter dropdowns, all pushed into
+    dataset SQL.
 
     Replaces the M.2b.3 ``CategoryFilter.with_values(values=[],
     FILTER_ALL_VALUES)`` per-sheet dropdowns (the X.1.g cold-fetch
     footgun — those lazy-fetch the column's distinct values from QS's
     ``tenK-sample-values-V2`` endpoint, which 404s on cold per-CI-run
-    dashboards). Each dropdown is now a parameter-backed MULTI_SELECT
+    dashboards). Each dropdown is now a parameter-backed SINGLE_SELECT
+    (AA.A.3 — was MULTI_SELECT pre-flip; the drill-to-one default
+    collapsed the sentinel-IN-list guard into a scalar ``=`` form)
     bridged to a dataset parameter substituted into the dataset's
     CustomSql, so QS does the narrowing in the database — no
     analysis-level FilterGroup, no lazy fetch. Bounded enum columns use
@@ -1767,7 +1788,7 @@ def _wire_per_sheet_dropdowns(
     ds_tx_facets = datasets[DS_L1_TX_FACETS]
 
     role_values = l1_account_role_values(l2_instance)
-    type_values = l1_transfer_type_values(l2_instance)
+    type_values = l1_rail_universe_values(l2_instance)
     rail_values = l1_rail_values(l2_instance)
 
     # --- Drift sheet — Account (data-value) + Account Role (enum),
@@ -1777,7 +1798,7 @@ def _wire_per_sheet_dropdowns(
         bridges=[(ds_drift, P_L1_DRIFT_ACCOUNT),
                  (ds_ledger_drift, P_L1_DRIFT_ACCOUNT)],
         param_name=ParameterName(P_L1_DRIFT_ACCOUNT), title="Account",
-        options_dataset=ds_accounts, options_column="account_id",
+        options_dataset=ds_accounts, options_column="account_display",
     )
     _populate_pushdown_enum_dropdown(
         sheet=drift_sheet, analysis=analysis,
@@ -1802,7 +1823,7 @@ def _wire_per_sheet_dropdowns(
         sheet=overdraft_sheet, analysis=analysis,
         bridges=[(ds_overdraft, P_L1_OVERDRAFT_ACCOUNT)],
         param_name=ParameterName(P_L1_OVERDRAFT_ACCOUNT), title="Account",
-        options_dataset=ds_accounts, options_column="account_id",
+        options_dataset=ds_accounts, options_column="account_display",
     )
     _populate_pushdown_enum_dropdown(
         sheet=overdraft_sheet, analysis=analysis,
@@ -1816,7 +1837,7 @@ def _wire_per_sheet_dropdowns(
         sheet=limit_breach_sheet, analysis=analysis,
         bridges=[(ds_lb, P_L1_LIMIT_BREACH_ACCOUNT)],
         param_name=ParameterName(P_L1_LIMIT_BREACH_ACCOUNT), title="Account",
-        options_dataset=ds_accounts, options_column="account_id",
+        options_dataset=ds_accounts, options_column="account_display",
     )
     _populate_pushdown_enum_dropdown(
         sheet=limit_breach_sheet, analysis=analysis,
@@ -1831,7 +1852,7 @@ def _wire_per_sheet_dropdowns(
         sheet=pending_aging_sheet, analysis=analysis,
         bridges=[(ds_sp, P_L1_PENDING_ACCOUNT)],
         param_name=ParameterName(P_L1_PENDING_ACCOUNT), title="Account",
-        options_dataset=ds_accounts, options_column="account_id",
+        options_dataset=ds_accounts, options_column="account_display",
     )
     _populate_pushdown_enum_dropdown(
         sheet=pending_aging_sheet, analysis=analysis,
@@ -1852,7 +1873,7 @@ def _wire_per_sheet_dropdowns(
         sheet=unbundled_aging_sheet, analysis=analysis,
         bridges=[(ds_su, P_L1_UNBUNDLED_ACCOUNT)],
         param_name=ParameterName(P_L1_UNBUNDLED_ACCOUNT), title="Account",
-        options_dataset=ds_accounts, options_column="account_id",
+        options_dataset=ds_accounts, options_column="account_display",
     )
     _populate_pushdown_enum_dropdown(
         sheet=unbundled_aging_sheet, analysis=analysis,
@@ -1888,7 +1909,7 @@ def _wire_per_sheet_dropdowns(
         sheet=todays_exceptions_sheet, analysis=analysis,
         bridges=[(ds_te, P_L1_TODAYS_EXC_ACCOUNT)],
         param_name=ParameterName(P_L1_TODAYS_EXC_ACCOUNT), title="Account",
-        options_dataset=ds_accounts, options_column="account_id",
+        options_dataset=ds_accounts, options_column="account_display",
     )
     _populate_pushdown_enum_dropdown(
         sheet=todays_exceptions_sheet, analysis=analysis,
@@ -1904,7 +1925,7 @@ def _wire_per_sheet_dropdowns(
         sheet=transactions_sheet, analysis=analysis,
         bridges=[(ds_tx, P_L1_TX_ACCOUNT)],
         param_name=ParameterName(P_L1_TX_ACCOUNT), title="Account",
-        options_dataset=ds_accounts, options_column="account_id",
+        options_dataset=ds_accounts, options_column="account_display",
     )
     _populate_pushdown_value_dropdown(
         sheet=transactions_sheet, analysis=analysis,
@@ -1965,6 +1986,17 @@ def _wire_daily_statement_filters(
             (datasets[DS_DAILY_STATEMENT_TRANSACTIONS], P_L1_DS_ACCOUNT_DSP),
         ],
     ))
+    # AA.B.1 — Role cascade. The role dropdown's value bridges into
+    # the ``DS_L1_ACCOUNTS`` companion's ``pL1DsRole`` dataset param,
+    # narrowing the Account dropdown's options. Sentinel default
+    # (``L1_ALL_SENTINEL``) means "show every account regardless of
+    # role" — preserves the un-picked behaviour exactly.
+    ds_role = analysis.add_parameter(StringParam(
+        name=P_L1_DS_ROLE,
+        mapped_dataset_params=[
+            (datasets[DS_L1_ACCOUNTS], P_L1_DS_ROLE_DSP),
+        ],
+    ))
     ds_balance_date = analysis.add_parameter(DateTimeParam(
         name=P_L1_DS_BALANCE_DATE,
         time_granularity="DAY",
@@ -2014,18 +2046,38 @@ def _wire_daily_statement_filters(
     ))
     txn_date_fg.scope_sheet(daily_statement_sheet)
 
-    # Sheet controls — single-select dropdown + datetime picker bound
-    # to the params. The dropdown's options come from the DS_L1_ACCOUNTS
-    # companion (an unparameterized DISTINCT-accounts dataset), so the
-    # analyst sees the institution's actual accounts even though the
-    # summary/transactions datasets are now narrowed by the bridged
-    # `pL1DsAccount` param. `hidden_select_all=True` because SINGLE_SELECT
-    # semantically requires picking exactly one — "All" doesn't apply.
+    # Sheet controls — Role → Account → Business Day. AA.B.1 added the
+    # Role dropdown above Account so the cascade direction is visually
+    # explicit (left/top narrows the right/bottom). The Account dropdown's
+    # options come from the DS_L1_ACCOUNTS companion, which now carries
+    # a ``pL1DsRole`` dataset param; picking a role re-fetches the
+    # account options narrowed to that role.
+    #
+    # Role dropdown is SINGLE_SELECT with the show-all sentinel default
+    # (the standard AA.A pattern), so first-load lists every account
+    # exactly like before AA.B.1. ``hidden_select_all=True`` on Account
+    # mirrors pre-AA.B.1 behaviour: SINGLE_SELECT semantically requires
+    # picking exactly one — "All" doesn't apply.
+    daily_statement_sheet.add_parameter_dropdown(
+        parameter=ds_role, title="Role",
+        type="SINGLE_SELECT",
+        selectable_values=LinkedValues.from_column(
+            datasets[DS_L1_DS_ROLES]["account_role"],
+        ),
+    )
     daily_statement_sheet.add_parameter_dropdown(
         parameter=ds_account, title="Account",
         type="SINGLE_SELECT",
         selectable_values=LinkedValues.from_column(
-            datasets[DS_L1_ACCOUNTS]["account_id"],
+            # AA.E.2 fix: bind to ``account_display`` so the picker's
+            # bound value matches the dataset SQL's display-format
+            # WHERE clause (``(account_name || ' (' || account_id || ')')
+            # = <<$pL1DsAccount>>``). AA.E.2 flipped 7 dropdowns via
+            # ``_populate_pushdown_*`` helpers but missed this direct
+            # ``add_parameter_dropdown`` call — Daily Statement stayed
+            # silently broken (account picked → page empty) until
+            # AA.E.3's browser test caught it.
+            datasets[DS_L1_ACCOUNTS]["account_display"],
         ),
         hidden_select_all=True,
     )
@@ -2192,6 +2244,114 @@ def _wire_drill_filter_groups(
             )],
         ))
         fg.scope_sheet(sheets[spec.sheet_id])
+
+
+# AA.C.3 — Exception-literacy panel wiring. Pulls per-invariant prose
+# (SHOULD-constraint + body + remediation) from L1_Invariants.md via
+# the AA.C.2 parser and lands a SheetTextBox at the bottom of each
+# invariant sheet. Today's Exceptions gets a generic intro panel
+# instead of per-kind prose (it aggregates every kind, and a stack of
+# seven panels would crowd the sheet).
+_PANEL_LAYOUT_HEIGHT = 6
+
+# Per-sheet ordered list of invariant kinds whose prose lands as
+# stacked panels at the sheet bottom. Drift sheet hosts BOTH the
+# leaf-level (`drift`) and parent-rollup (`ledger_drift`) panels --
+# operators get the formal SHOULD + remediation for each
+# without having to drill out to the docs site.
+_PER_SHEET_PANELS: dict[str, tuple[str, ...]] = {
+    "drift": ("drift", "ledger_drift"),
+    "overdraft": ("overdraft",),
+    "limit_breach": ("limit_breach",),
+    "pending_aging": ("stuck_pending",),
+    "unbundled_aging": ("stuck_unbundled",),
+    "supersession_audit": ("supersession_audit",),
+}
+
+# AA.C.3.e — Today's Exceptions intro panel. Hand-authored vs
+# parser-driven because the sheet doesn't map to a single
+# invariant kind; instead it aggregates rows from every L1
+# SHOULD-constraint matview. The bullet list points operators at
+# the per-kind sheets where they'll find the formal SHOULD +
+# remediation, keeping THIS sheet focused on "today's surfaces"
+# rather than re-printing every kind's prose.
+_TODAYS_EXCEPTIONS_PANEL = """\
+**About this sheet**
+
+Today's Exceptions aggregates every L1 SHOULD-constraint violation
+that landed on the most recent business day. One row per violation,
+across all kinds -- drift, overdraft, limit breach, expected EOD
+balance breach, pending aging, unbundled aging.
+
+Drill from a row to the source sheet for that kind to see the
+formal SHOULD-constraint, the full column shape, and the
+remediation guidance specific to that violation:
+
+- **Drift** -- internal sub-ledger doesn't match the bank's
+  cumulative net.
+- **Overdraft** -- internal account went negative.
+- **Limit Breach** -- outbound flow exceeded the rail's cap.
+- **Pending Aging** -- transaction stuck in Pending past its
+  rail's max.
+- **Unbundled Aging** -- posted leg not bundled into an
+  AggregatingRail past the cap.
+- **Expected EOD Balance Breach** -- an account day declared an
+  expected EOD balance the stored balance didn't match.
+
+For supersession-audit diagnostics (which are not SHOULD-violations
+themselves), see the Supersession Audit sheet."""
+
+
+def _wire_invariant_panels(
+    *,
+    drift_sheet: Sheet,
+    overdraft_sheet: Sheet,
+    limit_breach_sheet: Sheet,
+    pending_aging_sheet: Sheet,
+    unbundled_aging_sheet: Sheet,
+    supersession_audit_sheet: Sheet,
+    todays_exceptions_sheet: Sheet,
+) -> None:
+    """AA.C.3 -- land per-invariant prose panels at the bottom of the
+    L1 dashboard sheets.
+
+    Six invariant sheets get one or more :class:`TextBox` panels
+    composed from the L1_Invariants.md sections (AA.C.2 parser +
+    :func:`panel_markdown`). Today's Exceptions gets a single
+    hand-authored intro panel that points at the per-kind sheets
+    (AA.C.3.e -- avoiding a seven-panel stack here)."""
+    sections = load_bundled_invariants()
+    sheet_targets = {
+        "drift": drift_sheet,
+        "overdraft": overdraft_sheet,
+        "limit_breach": limit_breach_sheet,
+        "pending_aging": pending_aging_sheet,
+        "unbundled_aging": unbundled_aging_sheet,
+        "supersession_audit": supersession_audit_sheet,
+    }
+    for sheet_key, kinds in _PER_SHEET_PANELS.items():
+        sheet = sheet_targets[sheet_key]
+        for kind in kinds:
+            section = sections[kind]
+            sheet.layout.row(height=_PANEL_LAYOUT_HEIGHT).add_text_box(
+                TextBox(
+                    text_box_id=f"l1-{kind}-panel",
+                    content=rt.text_box(
+                        rt.markdown(panel_markdown(section)),
+                    ),
+                ),
+                width=_FULL,
+            )
+    # Today's Exceptions hand-authored intro panel.
+    todays_exceptions_sheet.layout.row(
+        height=_PANEL_LAYOUT_HEIGHT,
+    ).add_text_box(
+        TextBox(
+            text_box_id="l1-todays-exceptions-panel",
+            content=rt.text_box(rt.markdown(_TODAYS_EXCEPTIONS_PANEL)),
+        ),
+        width=_FULL,
+    )
 
 
 def build_l1_dashboard_app(
@@ -2419,6 +2579,19 @@ def build_l1_dashboard_app(
             SHEET_LIMIT_BREACH: limit_breach_sheet,
             SHEET_TRANSACTIONS: transactions_sheet,
         },
+    )
+
+    # AA.C.3 — exception-literacy panels (sheet-bottom rich-text from
+    # L1_Invariants.md). Per-kind on the 6 invariant sheets, generic
+    # intro on Today's Exceptions.
+    _wire_invariant_panels(
+        drift_sheet=drift_sheet,
+        overdraft_sheet=overdraft_sheet,
+        limit_breach_sheet=limit_breach_sheet,
+        pending_aging_sheet=pending_aging_sheet,
+        unbundled_aging_sheet=unbundled_aging_sheet,
+        supersession_audit_sheet=supersession_audit_sheet,
+        todays_exceptions_sheet=todays_exceptions_sheet,
     )
 
     app.create_dashboard(

@@ -65,7 +65,7 @@ _PATTERN_SINGLE_LEG_POSTED = """\
 INSERT INTO <prefix>_transactions (
     id, account_id, account_name, account_role, account_scope,
     account_parent_role, amount_money, amount_direction, status,
-    posting, transfer_id, transfer_type, rail_name, origin, metadata
+    posting, transfer_id, rail_name, origin, metadata
 ) VALUES (
     'tx-EXAMPLE-001',
     'acct-EXAMPLE-cust-0001',
@@ -78,7 +78,6 @@ INSERT INTO <prefix>_transactions (
     'Posted',
     '2030-01-15T10:30:00',
     'tr-EXAMPLE-001',
-    'fee_accrual',
     'CustomerFeeAccrual',
     'InternalInitiated',
     NULL                         -- metadata is optional
@@ -101,7 +100,7 @@ _PATTERN_TWO_LEG_PAIRED = """\
 INSERT INTO <prefix>_transactions (
     id, account_id, account_name, account_role, account_scope,
     account_parent_role, amount_money, amount_direction, status,
-    posting, transfer_id, transfer_type, rail_name, origin, metadata
+    posting, transfer_id, rail_name, origin, metadata
 ) VALUES
     (
         'tx-EXAMPLE-002-debit',
@@ -109,7 +108,7 @@ INSERT INTO <prefix>_transactions (
         'internal', 'DDAControl',
         -100.00, 'Debit', 'Posted',
         '2030-01-15T11:00:00',
-        'tr-EXAMPLE-002', 'internal_transfer',
+        'tr-EXAMPLE-002',
         'InternalTransferDebit', 'InternalInitiated',
         '{"counterparty_id": "acct-EXAMPLE-cust-0002"}'
     ),
@@ -119,7 +118,7 @@ INSERT INTO <prefix>_transactions (
         'internal', 'DDAControl',
         100.00, 'Credit', 'Posted',
         '2030-01-15T11:00:00',
-        'tr-EXAMPLE-002', 'internal_transfer',
+        'tr-EXAMPLE-002',
         'InternalTransferCredit', 'InternalInitiated',
         '{"counterparty_id": "acct-EXAMPLE-cust-0001"}'
     );
@@ -142,7 +141,7 @@ _PATTERN_FORCE_POSTED = """\
 INSERT INTO <prefix>_transactions (
     id, account_id, account_name, account_role, account_scope,
     account_parent_role, amount_money, amount_direction, status,
-    posting, transfer_id, transfer_type, rail_name, origin, metadata
+    posting, transfer_id, rail_name, origin, metadata
 ) VALUES (
     'tx-EXAMPLE-003',
     'acct-EXAMPLE-frb-master',
@@ -155,7 +154,6 @@ INSERT INTO <prefix>_transactions (
     'Posted',
     '2030-01-15T16:45:00',
     'tr-EXAMPLE-003',
-    'wire_settlement',
     'ConcentrationToFRBSweep',
     'ExternalForcePosted',        -- THIS is the contract
     '{"fed_reference": "20300115B1Q9X9X9X9X9000001"}'
@@ -183,14 +181,14 @@ _PATTERN_PENDING_THEN_POSTED = """\
 INSERT INTO <prefix>_transactions (
     id, account_id, account_name, account_role, account_scope,
     account_parent_role, amount_money, amount_direction, status,
-    posting, transfer_id, transfer_type, rail_name, origin, metadata
+    posting, transfer_id, rail_name, origin, metadata
 ) VALUES (
     'tx-EXAMPLE-004',
     'acct-EXAMPLE-cust-0001', 'Customer #0001', 'CustomerDDA',
     'internal', 'DDAControl',
     -750.00, 'Debit', 'Pending',
     '2030-01-15T09:00:00',
-    'tr-EXAMPLE-004', 'ach_outbound',
+    'tr-EXAMPLE-004',
     'CustomerOutboundACH', 'InternalInitiated',
     '{"customer_id": "cust-0001"}'
 );
@@ -200,7 +198,7 @@ INSERT INTO <prefix>_transactions (
 INSERT INTO <prefix>_transactions (
     id, account_id, account_name, account_role, account_scope,
     account_parent_role, amount_money, amount_direction, status,
-    posting, transfer_id, transfer_type, rail_name, origin,
+    posting, transfer_id, rail_name, origin,
     supersedes, metadata
 ) VALUES (
     'tx-EXAMPLE-004',                  -- same logical id
@@ -208,7 +206,7 @@ INSERT INTO <prefix>_transactions (
     'internal', 'DDAControl',
     -750.00, 'Debit', 'Posted',        -- status advances
     '2030-01-17T14:30:00',             -- posting advances
-    'tr-EXAMPLE-004', 'ach_outbound',
+    'tr-EXAMPLE-004',
     'CustomerOutboundACH', 'InternalInitiated',
     'Lifecycle',
     '{"customer_id": "cust-0001"}'
@@ -231,7 +229,7 @@ _PATTERN_TECHNICAL_CORRECTION = """\
 INSERT INTO <prefix>_transactions (
     id, account_id, account_name, account_role, account_scope,
     account_parent_role, amount_money, amount_direction, status,
-    posting, transfer_id, transfer_type, rail_name, origin,
+    posting, transfer_id, rail_name, origin,
     supersedes, metadata
 ) VALUES (
     'tx-EXAMPLE-005',                  -- same logical id as the original
@@ -240,7 +238,7 @@ INSERT INTO <prefix>_transactions (
     -125.00,                           -- corrected amount (was -1250.00)
     'Debit', 'Posted',
     '2030-01-15T13:00:00',             -- posting unchanged from original
-    'tr-EXAMPLE-005', 'fee_accrual',
+    'tr-EXAMPLE-005',
     'CustomerFeeAccrual', 'InternalInitiated',
     'TechnicalCorrection',
     '{"correction_reason": "amount_typo"}'
@@ -265,7 +263,7 @@ _PATTERN_BUNDLED = """\
 INSERT INTO <prefix>_transactions (
     id, account_id, account_name, account_role, account_scope,
     account_parent_role, amount_money, amount_direction, status,
-    posting, transfer_id, transfer_type, rail_name, bundle_id,
+    posting, transfer_id, rail_name, bundle_id,
     origin, metadata
 ) VALUES
     (
@@ -274,7 +272,7 @@ INSERT INTO <prefix>_transactions (
         'internal', 'MerchantDDAControl',
         4.25, 'Credit', 'Posted',
         '2030-01-15T08:15:00',
-        'tr-EXAMPLE-006-auth-1', 'card_authorization',
+        'tr-EXAMPLE-006-auth-1',
         'MerchantCardSettlement',
         'bundle-EXAMPLE-001',          -- shared with the settlement leg
         'ExternalRailFeed', NULL
@@ -285,7 +283,7 @@ INSERT INTO <prefix>_transactions (
         'internal', 'MerchantDDAControl',
         7.75, 'Credit', 'Posted',
         '2030-01-15T08:42:00',
-        'tr-EXAMPLE-006-auth-2', 'card_authorization',
+        'tr-EXAMPLE-006-auth-2',
         'MerchantCardSettlement',
         'bundle-EXAMPLE-001',          -- same bundle as above
         'ExternalRailFeed', NULL
@@ -309,7 +307,7 @@ _PATTERN_CHAINED = """\
 INSERT INTO <prefix>_transactions (
     id, account_id, account_name, account_role, account_scope,
     account_parent_role, amount_money, amount_direction, status,
-    posting, transfer_id, transfer_type, transfer_parent_id,
+    posting, transfer_id, transfer_parent_id,
     rail_name, origin, metadata
 ) VALUES (
     'tx-EXAMPLE-007',
@@ -317,7 +315,7 @@ INSERT INTO <prefix>_transactions (
     'internal', 'DDAControl',
     -50.00, 'Debit', 'Posted',
     '2030-01-16T10:00:00',
-    'tr-EXAMPLE-007-child', 'fee_accrual',
+    'tr-EXAMPLE-007-child',
     'tr-EXAMPLE-002',                  -- parent: the Pattern 2 transfer
     'CustomerFeeAccrual', 'InternalInitiated',
     '{"reason": "wire_outbound_fee"}'
@@ -364,9 +362,11 @@ _PATTERN_DAILY_BALANCE_WITH_LIMITS = """\
 -- ------------------------------------------------------------------------
 -- WHY: When an L2 declares a LimitSchedule (e.g. ACH outbound capped
 --   at $10k/day per DDA), the ETL projects the cap into the
---   account-day's ``limits`` JSON map keyed by ``transfer_type``.
---   L1's Limit Breach view sums same-day outbound legs and fires
---   when the running total exceeds the cap stored here.
+--   account-day's ``limits`` JSON map keyed by ``rail_name`` (the
+--   LimitSchedule's ``rail`` field per Z.B's symmetric-collapse —
+--   formerly ``transfer_type``). L1's Limit Breach view sums same-day
+--   outbound legs and fires when the running total exceeds the cap
+--   stored here.
 -- Consumed by: L1 Limit Breach sheet; Audit PDF limit-breach table.
 
 INSERT INTO <prefix>_daily_balances (
@@ -384,8 +384,8 @@ INSERT INTO <prefix>_daily_balances (
     '2030-01-16T00:00:00',
     1875.00,
     -- One entry per LimitSchedule that applies to this account's
-    -- parent_role — same shape the L1 view reads.
-    '{"ach_outbound": 10000.00, "wire_outbound": 25000.00}'
+    -- parent_role; keys are L2 Rail names (LimitSchedule.rail).
+    '{"CustomerOutboundACH": 10000.00, "CustomerOutboundWire": 25000.00}'
 );
 """
 
@@ -409,14 +409,14 @@ _PATTERN_METADATA_EXTENSION = """\
 INSERT INTO <prefix>_transactions (
     id, account_id, account_name, account_role, account_scope,
     account_parent_role, amount_money, amount_direction, status,
-    posting, transfer_id, transfer_type, rail_name, origin, metadata
+    posting, transfer_id, rail_name, origin, metadata
 ) VALUES (
     'tx-EXAMPLE-010',
     'acct-EXAMPLE-cust-0001', 'Customer #0001', 'CustomerDDA',
     'internal', 'DDAControl',
     -200.00, 'Debit', 'Posted',
     '2030-01-15T15:30:00',
-    'tr-EXAMPLE-010', 'ach_outbound',
+    'tr-EXAMPLE-010',
     'CustomerOutboundACH', 'InternalInitiated',
     '{"customer_id": "cust-0001", "originating_branch": "BR-DENVER", "fraud_score": 0.02}'
 );

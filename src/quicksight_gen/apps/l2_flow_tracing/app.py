@@ -40,6 +40,7 @@ from quicksight_gen.apps.l2_flow_tracing.datasets import (
     DS_TT_INSTANCES,
     DS_TT_LEGS,
     DS_UNIFIED_L2_EXCEPTIONS,
+    L2FT_ALL_SENTINEL,
     META_KEY_ALL_SENTINEL,
     META_VALUE_PLACEHOLDER_SENTINEL,
     build_all_l2_flow_tracing_datasets,
@@ -55,6 +56,10 @@ from quicksight_gen.apps.l2_flow_tracing.datasets import (
 from quicksight_gen.common import rich_text as rt
 from quicksight_gen.common.config import Config
 from quicksight_gen.common.dataset_contract import ColumnShape
+from quicksight_gen.common.handbook.l2ft_exceptions import (
+    load_bundled_l2ft_exceptions,
+    panel_markdown as l2ft_panel_markdown,
+)
 from quicksight_gen.common.ids import FilterGroupId, ParameterName, SheetId
 from quicksight_gen.common.l2 import L2Instance, load_instance
 from quicksight_gen.common.models import DateTimeDefaultValues
@@ -169,7 +174,7 @@ _L2_EXCEPTIONS_DESCRIPTION = (
     "All six L2 hygiene checks unified into one row-per-violation "
     "view. KPI = total open violations; bar chart breaks down by "
     "check_type so you see which check kind dominates today; the "
-    "detail table sorts by magnitude (descending) so the worst "
+    "detail table sorts by count (descending) so the worst "
     "offenders surface first. Each check_type captures a "
     "'declaration vs runtime' mismatch the L1 dashboard doesn't "
     "catch — Chain Orphans, Unmatched Transfer Type, Dead Rails, "
@@ -505,38 +510,39 @@ def _populate_pushdown_dropdown(
     title: str,
     all_values: list[str],
 ) -> None:
-    """Y.2.c — like ``_populate_param_filter_dropdown`` but the
+    """Y.2.c + AA.A.3 — like ``_populate_param_filter_dropdown`` but the
     narrowing happens in the dataset SQL, not via a CategoryFilter.
 
     Wires two things:
 
-    1. A multi-valued ``StringParam`` (default = the full closed-set of
-       values) bridged to each ``(dataset, dataset_param)`` pair in
-       ``bridges`` via ``MappedDataSetParameters``. Each dataset's
-       CustomSQL substitutes ``<<$dataset_param>>`` into a
-       ``col IN (...)`` predicate. (Usually one bridge; the Transfer
-       Templates sheet uses two — its Template / Completion dropdowns
-       narrow both the tt-instances Table and the tt-legs Sankey.)
-    2. A ``ParameterDropdown(MULTI_SELECT, StaticValues)`` so the
-       analyst deselects values to narrow.
+    1. A single-valued ``StringParam`` (default = ``L2FT_ALL_SENTINEL``,
+       which the dataset SQL's ``_match_all_in_clause`` resolves to
+       "match all rows") bridged to each ``(dataset, dataset_param)``
+       pair in ``bridges`` via ``MappedDataSetParameters``. Each
+       dataset's CustomSQL substitutes ``<<$dataset_param>>`` into the
+       ``('sentinel' = <<$p>> OR col = <<$p>>)`` predicate. (Usually one
+       bridge; the Transfer Templates sheet uses two — its Template /
+       Completion dropdowns narrow both the tt-instances Table and the
+       tt-legs Sankey.)
+    2. A ``ParameterDropdown(SINGLE_SELECT, StaticValues)`` so the
+       analyst picks one value with one click.
 
     No FilterGroup — that's the difference from the
-    ``_populate_param_filter_dropdown`` shape. Emptying the dropdown
-    reverts each dataset param to its default (= all values); QS does
-    not emit ``IN ()`` (verified Y.2.c.0). Use this when the column is a
-    real column in the dataset's source (or a CASE-alias the dataset SQL
-    can re-reference via a subquery) so the predicate is pushable.
+    ``_populate_param_filter_dropdown`` shape. Clearing the dropdown
+    reverts each dataset param to the sentinel default (= all rows
+    match). AA.A.3 flipped this from MULTI to SINGLE per the
+    drill-to-one default (audit at
+    ``docs/audits/aa_a_dropdown_audit.md``).
     """
     p = analysis.add_parameter(StringParam(
         name=param_name,
-        multi_valued=True,
-        default=list(all_values),
+        multi_valued=False,
+        default=[L2FT_ALL_SENTINEL],
         mapped_dataset_params=list(bridges),
     ))
     sheet.add_parameter_dropdown(
         parameter=p,
         title=title,
-        type="MULTI_SELECT",
         selectable_values=StaticValues(values=list(all_values)),
     )
 
@@ -1200,6 +1206,13 @@ def _l2ft_drill(
     )
 
 
+# AA.C.4 — height of the sheet-bottom hygiene-exceptions panel.
+# Mirrors L1's _PANEL_LAYOUT_HEIGHT (apps/l1_dashboard/app.py); kept
+# slightly taller because the L2FT panel is a 6-bullet roll-up
+# rather than per-kind, so the prose runs longer per row.
+_L2FT_PANEL_LAYOUT_HEIGHT = 8
+
+
 def _populate_l2_exceptions_sheet(
     cfg: Config,
     sheet: Sheet,
@@ -1214,12 +1227,19 @@ def _populate_l2_exceptions_sheet(
 
     Mirrors L1's Today's Exceptions pattern: one KPI (total count),
     one bar chart (by check_type), one detail table (sorted by
-    magnitude DESC). All six L2 hygiene checks (Chain Orphans,
-    Unmatched Transfer Type, Dead Rails, Dead Bundles Activity,
+    count DESC). All six L2 hygiene checks (Chain Orphans,
+    Unmatched Rail Name, Dead Rails, Dead Bundles Activity,
     Dead Metadata, Dead Limit Schedules) UNION into one
     `unified-exceptions` dataset; the `check_type` discriminator
     column drives the bar chart breakout + the table's left-most
     grouping column.
+
+    AA.C.4 appends a sheet-bottom panel sourced from
+    ``src/quicksight_gen/docs/L2FT_Exceptions.md`` — one bullet per
+    check kind, each carrying the parser-extracted ``**What to do:**``
+    paragraph. Mirrors the AA.C.3 L1 panels but in roll-up form
+    (every L2FT kind lives on this one sheet) rather than per-kind
+    stacked.
 
     Pre-M.3.10l this sheet had 6 vertically-stacked sections
     (header text-box + 2 KPIs + table per check) that totaled ~144
@@ -1267,14 +1287,16 @@ def _populate_l2_exceptions_sheet(
     # or chain parent (Unmatched Transfer Type, Dead Limit Schedules)
     # land an empty destination — clear "this drill doesn't apply"
     # signal.
-    magnitude_col = ds["magnitude"].numerical(currency=True)
+    # AA.D.1: dropped currency=True — this is an INTEGER count
+    # (orphan rows / dead-declaration rows), not a money amount.
+    count_col = ds["count"].numerical()
     entity_a_col = ds["entity_a"].dim()
     sheet.layout.row(height=14).add_table(
         width=36,
         title="L2 Violation Detail",
         subtitle=(
             "Every row is one detected L2 violation. Sorted by "
-            "magnitude (largest first). Right-click any row to drill "
+            "count (largest first). Right-click any row to drill "
             "into Rails (entity_a → Rail filter) or Chains (entity_a → "
             "Chain filter). Read entity_a / entity_b / detail in the "
             "context of the row's check_type — see the sheet "
@@ -1285,9 +1307,9 @@ def _populate_l2_exceptions_sheet(
             entity_a_col,
             ds["entity_b"].dim(),
             ds["detail"].dim(),
-            magnitude_col,
+            count_col,
         ],
-        sort_by=(magnitude_col, "DESC"),
+        sort_by=(count_col, "DESC"),
         actions=[
             _l2ft_drill(
                 target_sheet=rails_sheet,
@@ -1302,6 +1324,20 @@ def _populate_l2_exceptions_sheet(
                 trigger="DATA_POINT_MENU",
             ),
         ],
+    )
+
+    # AA.C.4 — sheet-bottom panel sourced from L2FT_Exceptions.md.
+    # All six L2FT hygiene checks roll up onto this one sheet (the
+    # M.3.10l unified-exceptions view), so the panel is a roll-up
+    # bullet list, not per-kind stacked. Mirrors L1's Today's
+    # Exceptions intro panel shape (AA.C.3.e).
+    sections = load_bundled_l2ft_exceptions()
+    sheet.layout.row(height=_L2FT_PANEL_LAYOUT_HEIGHT).add_text_box(
+        TextBox(
+            text_box_id="l2ft-hygiene-panel",
+            content=rt.text_box(rt.markdown(l2ft_panel_markdown(sections))),
+        ),
+        width=36,
     )
 
 
