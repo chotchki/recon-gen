@@ -217,7 +217,7 @@ def connect_and_apply(
     if not cfg.demo_database_url:
         raise click.ClickException(
             "demo_database_url is required. "
-            "Set it in your config YAML or via QS_GEN_DEMO_DATABASE_URL."
+            "Set it in your config YAML or via RECON_GEN_DEMO_DATABASE_URL."
         )
 
     click.echo(f"Connecting to {cfg.demo_database_url.split('@')[-1]}...")

@@ -1576,7 +1576,7 @@ def audit_test(pytest_args: str) -> None:
     PDF/dashboard extractors, PDF-matches-scenario, persona-clean,
     and smoke. Defers the browser matrix
     (``tests/e2e/test_audit_dashboard_agreement.py``) to
-    ``QS_GEN_E2E=1`` — not run here.
+    ``RECON_GEN_E2E=1`` — not run here.
 
     Pyright covers the audit package (``cli/audit/``).
     """

@@ -1,17 +1,17 @@
 """Shared fixtures for end-to-end tests.
 
-All e2e tests are skipped unless QS_GEN_E2E=1 is set. This keeps
+All e2e tests are skipped unless RECON_GEN_E2E=1 is set. This keeps
 `pytest` fast and free of AWS dependencies by default.
 
 Required env vars (or config.yaml):
-    QS_GEN_AWS_ACCOUNT_ID
-    QS_GEN_AWS_REGION
-    QS_GEN_DATASOURCE_ARN (or QS_GEN_DEMO_DATABASE_URL)
+    RECON_GEN_AWS_ACCOUNT_ID
+    RECON_GEN_AWS_REGION
+    RECON_GEN_DATASOURCE_ARN (or RECON_GEN_DEMO_DATABASE_URL)
 
 Optional env vars for tuning:
-    QS_E2E_PAGE_TIMEOUT   — page load timeout in ms (default 30000)
-    QS_E2E_VISUAL_TIMEOUT — per-visual render timeout in ms (default 10000)
-    QS_E2E_IDENTITY_REGION — QuickSight identity region (default us-east-1)
+    RECON_E2E_PAGE_TIMEOUT   — page load timeout in ms (default 30000)
+    RECON_E2E_VISUAL_TIMEOUT — per-visual render timeout in ms (default 10000)
+    RECON_E2E_IDENTITY_REGION — QuickSight identity region (default us-east-1)
 """
 
 from __future__ import annotations
@@ -23,21 +23,21 @@ import pytest
 
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
-    QS_E2E_IDENTITY_REGION,
-    QS_E2E_PAGE_TIMEOUT,
-    QS_E2E_VISUAL_TIMEOUT,
-    QS_GEN_CONFIG,
-    QS_GEN_E2E,
-    QS_GEN_RUN_DIR,
-    QS_GEN_TEST_L2_INSTANCE,
+    RECON_E2E_IDENTITY_REGION,
+    RECON_E2E_PAGE_TIMEOUT,
+    RECON_E2E_VISUAL_TIMEOUT,
+    RECON_GEN_CONFIG,
+    RECON_GEN_E2E,
+    RECON_GEN_RUN_DIR,
+    RECON_GEN_TEST_L2_INSTANCE,
 )
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip all e2e tests unless QS_GEN_E2E=1."""
-    if QS_GEN_E2E.get_or_none():
+    """Skip all e2e tests unless RECON_GEN_E2E=1."""
+    if RECON_GEN_E2E.get_or_none():
         return
-    skip = pytest.mark.skip(reason="e2e tests disabled (set QS_GEN_E2E=1)")
+    skip = pytest.mark.skip(reason="e2e tests disabled (set RECON_GEN_E2E=1)")
     for item in items:
         if "e2e" in str(item.fspath):
             item.add_marker(skip)
@@ -60,9 +60,9 @@ def pytest_runtest_makereport(item, call):
 # Timeout configuration
 # ---------------------------------------------------------------------------
 
-PAGE_TIMEOUT = QS_E2E_PAGE_TIMEOUT.get_or_none() or 30000
-VISUAL_TIMEOUT = QS_E2E_VISUAL_TIMEOUT.get_or_none() or 10000
-IDENTITY_REGION = QS_E2E_IDENTITY_REGION.get_or_none() or "us-east-1"
+PAGE_TIMEOUT = RECON_E2E_PAGE_TIMEOUT.get_or_none() or 30000
+VISUAL_TIMEOUT = RECON_E2E_VISUAL_TIMEOUT.get_or_none() or 10000
+IDENTITY_REGION = RECON_E2E_IDENTITY_REGION.get_or_none() or "us-east-1"
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ def cfg():
 
     The candidate order favors the explicit single-file config before
     falling back to the dialect-specific files. Override with the
-    ``QS_GEN_CONFIG`` env var when both per-dialect files exist and
+    ``RECON_GEN_CONFIG`` env var when both per-dialect files exist and
     you need to pin to one.
     """
     from recon_gen.common.config import load_config
@@ -84,7 +84,7 @@ def cfg():
     # Soft-fall: registry's must_be_file validator would raise on a
     # bad pin; the discovery loop below has fallback candidates.
     try:
-        explicit = QS_GEN_CONFIG.get_or_none()
+        explicit = RECON_GEN_CONFIG.get_or_none()
     except EnvVarInvalid:
         explicit = None
     if explicit is not None:
@@ -131,7 +131,7 @@ def qs_driver(request, cfg, region, account_id):  # type: ignore[no-untyped-def]
     """X.2.q — ``QsEmbedDriver`` over a fresh WebKit page, for browser
     e2e tests that drive a deployed QuickSight dashboard through the
     ``DashboardDriver`` protocol (``open(dashboard_id)`` mints the embed
-    URL). Skips cleanly when ``QS_E2E_USER_ARN`` is unset (the runner
+    URL). Skips cleanly when ``RECON_E2E_USER_ARN`` is unset (the runner
     derives it from ``cfg.auth.aws_profile``; export it for a direct
     ``pytest`` run). Function-scoped — embed URLs are single-use.
 
@@ -147,14 +147,14 @@ def qs_driver(request, cfg, region, account_id):  # type: ignore[no-untyped-def]
         request, account_id=account_id, region=region,
     ) as driver:
         if driver is None:
-            pytest.skip("QS_E2E_USER_ARN unavailable — cannot derive QS user ARN")
+            pytest.skip("RECON_E2E_USER_ARN unavailable — cannot derive QS user ARN")
         yield driver
 
 
 def _resolve_test_l2_instance():  # type: ignore[no-untyped-def]: return-type annotation would force an L2Instance import at module scope, slowing collection
     """Resolve the L2 instance the e2e tests should mirror.
 
-    Honors ``QS_GEN_TEST_L2_INSTANCE`` (the runner / release.yml inject
+    Honors ``RECON_GEN_TEST_L2_INSTANCE`` (the runner / release.yml inject
     it per-variant / per-release); falls back to the bundled
     ``default_l2_instance()`` (`spec_example`) when unset.
 
@@ -165,7 +165,7 @@ def _resolve_test_l2_instance():  # type: ignore[no-untyped-def]: return-type an
     from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
     from recon_gen.common.l2 import load_instance
 
-    override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
+    override = RECON_GEN_TEST_L2_INSTANCE.get_or_none()
     if override is not None:
         return load_instance(override)
     return default_l2_instance()
@@ -257,7 +257,7 @@ def l2ft_l2_instance():
     from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
     from recon_gen.common.l2 import load_instance
 
-    override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
+    override = RECON_GEN_TEST_L2_INSTANCE.get_or_none()
     if override is not None:
         return load_instance(override)
     return default_l2_instance()
@@ -327,7 +327,7 @@ def l2ft_analysis_id(deployment_name) -> str:
 def inv_app(cfg):
     """Tree-built Investigation App (post-emit, auto-IDs resolved).
 
-    Honors ``QS_GEN_TEST_L2_INSTANCE`` so the tree's dataset ARNs
+    Honors ``RECON_GEN_TEST_L2_INSTANCE`` so the tree's dataset ARNs
     match the deployed resources' L2 prefix (release.yml's per-tag
     ``rel_<tag>``, the runner's variant ``sp_pg_aw``, etc.). Without
     this the hotfix-v8.8.0a23 derived-fixture pivot would have been
@@ -359,7 +359,7 @@ def exec_app(cfg):
 def l1_app(cfg):
     """Tree-built L1 Reconciliation Dashboard App.
 
-    Honors ``QS_GEN_TEST_L2_INSTANCE`` — the same L2 the CLI's
+    Honors ``RECON_GEN_TEST_L2_INSTANCE`` — the same L2 the CLI's
     ``json apply`` was driven with for the deployed resources. Tree
     shape (and dataset ARNs) thus match the deployed shape exactly,
     making derived ``l1_dataset_ids`` ↔ deployed-DataSetId comparisons
@@ -400,7 +400,7 @@ def l2ft_app(cfg):
 #
 #   - `qs`   — drives the *deployed* dashboard (`<deployment_name>-
 #     <app>-...`), real data via the QS datasource. `dashboard_arg` is
-#     the deployed dashboard ID. Skips when `QS_E2E_USER_ARN` is unset
+#     the deployed dashboard ID. Skips when `RECON_E2E_USER_ARN` is unset
 #     (no embed signer) or the dashboard isn't deployed.
 #   - `app2` — drives a *locally-spun* App 2 server built from the same
 #     `<app>_app` tree, reading the same DB (`cfg.demo_database_url`) via
@@ -449,7 +449,7 @@ def _parametrized_dashboard_driver(  # type: ignore[no-untyped-def]: return-type
             request, account_id=account_id, region=region,
         ) as driver:
             if driver is None:
-                pytest.skip("QS_E2E_USER_ARN unavailable — cannot derive QS user ARN")
+                pytest.skip("RECON_E2E_USER_ARN unavailable — cannot derive QS user ARN")
             yield driver, dashboard_id
     else:  # app2
         if not getattr(cfg, "demo_database_url", None):
@@ -587,7 +587,7 @@ def warm_aurora(cfg):
 # Replaces ``scripts/dump_top_queries.py`` (W.8a) for the in-process
 # path: instead of a CI-step shellout, every e2e session that hits a
 # DB writes its own perf snapshot to
-# ``$QS_GEN_RUN_DIR/db/<dialect>/top-queries.md`` at session
+# ``$RECON_GEN_RUN_DIR/db/<dialect>/top-queries.md`` at session
 # teardown. ``Y.2.gate.f.4`` deletes the standalone script + the
 # CI workflow steps that called it.
 #
@@ -600,7 +600,7 @@ def warm_aurora(cfg):
 def capture_top_queries(cfg, request):
     """Session-end perf-snapshot hook.
 
-    Yields immediately; on teardown, if ``QS_GEN_RUN_DIR`` is set AND
+    Yields immediately; on teardown, if ``RECON_GEN_RUN_DIR`` is set AND
     the cfg has a demo_database_url, connects, runs the dialect's
     stats-view query, and writes a markdown table. SQLite is silently
     skipped (no equivalent stats view).
@@ -616,7 +616,7 @@ def capture_top_queries(cfg, request):
     # Sidecar contract — swallow EnvVarInvalid (a misconfigured env
     # var must not break a passing test session's teardown).
     try:
-        run_dir_path = QS_GEN_RUN_DIR.get_or_none()
+        run_dir_path = RECON_GEN_RUN_DIR.get_or_none()
     except EnvVarInvalid:
         return
     if run_dir_path is None:

@@ -116,7 +116,7 @@ def connect_demo_db(cfg: Config) -> Any:  # typing-smell: ignore[explicit-any]: 
     if cfg.demo_database_url is None:
         raise ValueError(
             "cfg.demo_database_url is unset; set it in your config YAML "
-            "or via QS_GEN_DEMO_DATABASE_URL."
+            "or via RECON_GEN_DEMO_DATABASE_URL."
         )
     if cfg.dialect is Dialect.POSTGRES:
         try:
@@ -843,7 +843,7 @@ async def make_connection_pool(
     if cfg.demo_database_url is None:
         raise ValueError(
             "cfg.demo_database_url is unset; set it in your config YAML "
-            "or via QS_GEN_DEMO_DATABASE_URL."
+            "or via RECON_GEN_DEMO_DATABASE_URL."
         )
     if cfg.dialect is Dialect.POSTGRES:
         try:

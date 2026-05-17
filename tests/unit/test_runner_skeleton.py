@@ -14,14 +14,14 @@ import pytest
 
 from recon_gen._dev import runner
 from recon_gen.common.env_keys import (
-    QS_E2E_PAGE_TIMEOUT,
-    QS_E2E_USER_ARN,
-    QS_GEN_CONFIG,
-    QS_GEN_DEMO_DATABASE_URL,
-    QS_GEN_E2E,
-    QS_GEN_FUZZ_SEED,
-    QS_GEN_RUNNER_YES,
-    QS_GEN_TEST_L2_INSTANCE,
+    RECON_E2E_PAGE_TIMEOUT,
+    RECON_E2E_USER_ARN,
+    RECON_GEN_CONFIG,
+    RECON_GEN_DEMO_DATABASE_URL,
+    RECON_GEN_E2E,
+    RECON_GEN_FUZZ_SEED,
+    RECON_GEN_RUNNER_YES,
+    RECON_GEN_TEST_L2_INSTANCE,
 )
 from recon_gen.common.variant import ScenarioCode, VariantSpec
 
@@ -235,7 +235,7 @@ def test_probe_qs_arn_set(monkeypatch: Any) -> None:
     # 12-digit account ID required by the registry's IAM-ARN validator
     # (Y.2.gate.b.15) — the previous 3-digit test value would now
     # raise EnvVarInvalid at the boundary, defeating the probe.
-    monkeypatch.setenv(QS_E2E_USER_ARN.name, "arn:aws:quicksight:us-east-1:111122223333:user/default/test")
+    monkeypatch.setenv(RECON_E2E_USER_ARN.name, "arn:aws:quicksight:us-east-1:111122223333:user/default/test")
     assert runner._probe_qs_e2e_user_arn() is None
 
 
@@ -248,7 +248,7 @@ def test_probe_qs_arn_unset(monkeypatch: Any) -> None:
     the cfg-discovery to return None so we exercise the original
     "no env, no cfg auth" failure path.
     """
-    monkeypatch.delenv(QS_E2E_USER_ARN.name, raising=False)
+    monkeypatch.delenv(RECON_E2E_USER_ARN.name, raising=False)
     monkeypatch.setattr(runner, "_resolve_seed_config", lambda _candidates: None)
     result = runner._probe_qs_e2e_user_arn()
     assert result is not None
@@ -259,10 +259,10 @@ def test_probe_qs_arn_passes_with_cfg_auth_profile(monkeypatch: Any) -> None:
     """Y.2.gate.h+i.0 — cfg.auth.aws_profile presence satisfies the probe.
 
     When operator has wired AWS_PROFILE via cfg, the runner will derive
-    QS_E2E_USER_ARN via STS+ListUsers in `_run_one_variant`. Probe should
+    RECON_E2E_USER_ARN via STS+ListUsers in `_run_one_variant`. Probe should
     pre-pass instead of demanding the env var be exported.
     """
-    monkeypatch.delenv(QS_E2E_USER_ARN.name, raising=False)
+    monkeypatch.delenv(RECON_E2E_USER_ARN.name, raising=False)
     fake_cfg = SimpleNamespace(
         auth=SimpleNamespace(aws_profile="recon-gen-local", quicksight_user_arn=None),
     )
@@ -275,7 +275,7 @@ def test_probe_qs_arn_passes_with_cfg_auth_profile(monkeypatch: Any) -> None:
 
 def test_probe_qs_arn_passes_with_cfg_auth_override(monkeypatch: Any) -> None:
     """Y.2.gate.h+i.0 — explicit cfg.auth.quicksight_user_arn satisfies probe."""
-    monkeypatch.delenv(QS_E2E_USER_ARN.name, raising=False)
+    monkeypatch.delenv(RECON_E2E_USER_ARN.name, raising=False)
     fake_cfg = SimpleNamespace(
         auth=SimpleNamespace(
             aws_profile=None,
@@ -305,7 +305,7 @@ def test_probe_dependencies_browser_aggregates_failures(monkeypatch: Any) -> Non
     its env-only failure path (otherwise an operator's local cfg with an
     `auth:` block would make the qs_arn dep silently pass).
     """
-    monkeypatch.delenv(QS_E2E_USER_ARN.name, raising=False)
+    monkeypatch.delenv(RECON_E2E_USER_ARN.name, raising=False)
     monkeypatch.setattr(runner, "_resolve_seed_config", lambda _candidates: None)
     fake_probes = {
         "aws": lambda: runner.ProbeFailure(kind="aws_creds_expired", message="..."),
@@ -449,23 +449,23 @@ def test_chain_through_app2() -> None:
 
 def test_layer_command_unit_runs_pytest() -> None:
     """Unit layer runs pytest. Conftest sessionstart hook handles pyright
-    before any test collects — no QS_GEN_SKIP_PYRIGHT env needed."""
+    before any test collects — no RECON_GEN_SKIP_PYRIGHT env needed."""
     cmd_env = runner._layer_command("unit", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env_addl = cmd_env
     assert cmd[0].endswith("pytest")
-    assert "QS_GEN_SKIP_PYRIGHT" not in env_addl
-    assert env_addl["QS_GEN_RUN_DIR"] == "/tmp/run"
-    assert env_addl["QS_GEN_LAYER"] == "unit"
+    assert "RECON_GEN_SKIP_PYRIGHT" not in env_addl
+    assert env_addl["RECON_GEN_RUN_DIR"] == "/tmp/run"
+    assert env_addl["RECON_GEN_LAYER"] == "unit"
 
 
 def test_layer_command_db_sets_e2e_gate() -> None:
-    """Layer 3 (DB SQL smoke) needs QS_GEN_E2E=1 to bypass the e2e gate."""
+    """Layer 3 (DB SQL smoke) needs RECON_GEN_E2E=1 to bypass the e2e gate."""
     cmd_env = runner._layer_command("db", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env_addl = cmd_env
     assert "test_dataset_sql_smoke.py" in cmd[1]
-    assert env_addl["QS_GEN_E2E"] == "1"
+    assert env_addl["RECON_GEN_E2E"] == "1"
 
 
 def test_layer_command_app2_dispatches_html2_tests() -> None:
@@ -478,7 +478,7 @@ def test_layer_command_app2_dispatches_html2_tests() -> None:
     ``@pytest.mark.browser`` tests in test_dashboard_driver.py
     (``test_qs_l1_*``) are deselected at collection time. Earlier
     reasoning that they "skip cleanly here" stopped holding once
-    Y.2.gate.h.1 made the runner auto-derive ``QS_E2E_USER_ARN``; the
+    Y.2.gate.h.1 made the runner auto-derive ``RECON_E2E_USER_ARN``; the
     QS-bound tests then actually try to run pre-deploy and probe a stale
     cross-cell dashboard. Browser layer picks them up via its own
     ``-m browser`` selector — no parallel addition needed there.
@@ -500,18 +500,18 @@ def test_layer_command_app2_dispatches_html2_tests() -> None:
     assert "not browser" in cmd
     m_idx = cmd.index("-m")
     assert cmd[m_idx + 1] == "not browser"
-    # Behind QS_GEN_E2E=1 like every other tests/e2e/ file.
-    assert env_addl["QS_GEN_E2E"] == "1"
-    assert env_addl["QS_GEN_LAYER"] == "app2"
+    # Behind RECON_GEN_E2E=1 like every other tests/e2e/ file.
+    assert env_addl["RECON_GEN_E2E"] == "1"
+    assert env_addl["RECON_GEN_LAYER"] == "app2"
 
 
 def test_layer_command_app2_threads_run_dir_env() -> None:
     """app2 runs Playwright; failure traces land under
-    `$QS_GEN_RUN_DIR/browser/<test-id>/...` per c.11."""
+    `$RECON_GEN_RUN_DIR/browser/<test-id>/...` per c.11."""
     cmd_env = runner._layer_command("app2", Path("/tmp/myrun"))
     assert cmd_env is not None
     _, env_addl = cmd_env
-    assert env_addl["QS_GEN_RUN_DIR"] == "/tmp/myrun"
+    assert env_addl["RECON_GEN_RUN_DIR"] == "/tmp/myrun"
 
 
 def test_layer_command_deploy_returns_none_without_variant_env() -> None:
@@ -522,13 +522,13 @@ def test_layer_command_deploy_returns_none_without_variant_env() -> None:
 
 
 def test_layer_command_deploy_returns_cmd_with_variant_env(tmp_path: Path) -> None:
-    """Y.2.gate.c.5.deploy — when variant_env supplies QS_GEN_CONFIG +
-    QS_GEN_TEST_L2_INSTANCE (per h+i.0 + h.6 injection), the deploy layer
+    """Y.2.gate.c.5.deploy — when variant_env supplies RECON_GEN_CONFIG +
+    RECON_GEN_TEST_L2_INSTANCE (per h+i.0 + h.6 injection), the deploy layer
     constructs a `recon-gen json apply --execute -c <cfg> --l2 <l2>
     -o <run_dir>/deploy/out` command."""
     variant_env = {
-        QS_GEN_CONFIG.name: "/tmp/cfg.yaml",
-        QS_GEN_TEST_L2_INSTANCE.name: "/tmp/l2.yaml",
+        RECON_GEN_CONFIG.name: "/tmp/cfg.yaml",
+        RECON_GEN_TEST_L2_INSTANCE.name: "/tmp/l2.yaml",
     }
     cmd_env = runner._layer_command(
         "deploy", tmp_path, variant_env=variant_env,
@@ -549,7 +549,7 @@ def test_layer_command_deploy_returns_cmd_with_variant_env(tmp_path: Path) -> No
 def test_layer_command_api_dispatches_pytest_marked_api() -> None:
     """Y.2.gate.c.5.api — pytest -m api selects the boto3-only e2e files
     (every test_*_deployed_resources.py + test_*_dashboard_structure.py +
-    test_*_filters.py carries `pytest.mark.api`). QS_GEN_E2E=1 like every
+    test_*_filters.py carries `pytest.mark.api`). RECON_GEN_E2E=1 like every
     other tests/e2e/ file."""
     cmd_env = runner._layer_command("api", Path("/tmp/run"))
     assert cmd_env is not None
@@ -557,16 +557,16 @@ def test_layer_command_api_dispatches_pytest_marked_api() -> None:
     assert cmd[0].endswith("/pytest")
     assert "-m" in cmd and "api" in cmd
     assert "tests/e2e/" in cmd
-    assert env.get(QS_GEN_E2E.name) == "1"
+    assert env.get(RECON_GEN_E2E.name) == "1"
 
 
 def test_layer_command_browser_dispatches_pytest_marked_browser(monkeypatch: Any) -> None:
     """Y.2.gate.c.5.browser — pytest -m browser selects the Playwright
-    files. QS_GEN_E2E=1; default `-n 4` for parallel runners (per existing
-    `./run_e2e.sh` pattern). QS_E2E_USER_ARN comes through from the h.1
+    files. RECON_GEN_E2E=1; default `-n 4` for parallel runners (per existing
+    `./run_e2e.sh` pattern). RECON_E2E_USER_ARN comes through from the h.1
     derivation in `_run_one_variant`'s variant_env. Y.7-followup: the
     browser layer also gets `--reruns` (flaky live-cloud e2e auto-retry)
-    and a 60 s `QS_E2E_PAGE_TIMEOUT` default (operator override wins).
+    and a 60 s `RECON_E2E_PAGE_TIMEOUT` default (operator override wins).
 
     Z.B.12-followup (2026-05-15): the layer dispatches via a ``bash -c``
     shell wrapper that chains TWO sequential pytest invocations — the
@@ -575,7 +575,7 @@ def test_layer_command_browser_dispatches_pytest_marked_browser(monkeypatch: Any
     with ``-n 1`` (its module-scoped ``seeded_audit`` fixture races
     multiple workers on persistent Aurora schema applies). So we
     assert against the joined shell string, not the argv list."""
-    monkeypatch.delenv(QS_E2E_PAGE_TIMEOUT.name, raising=False)
+    monkeypatch.delenv(RECON_E2E_PAGE_TIMEOUT.name, raising=False)
     cmd_env = runner._layer_command("browser", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env = cmd_env
@@ -592,23 +592,23 @@ def test_layer_command_browser_dispatches_pytest_marked_browser(monkeypatch: Any
     assert chained.count("-n ") >= 2
     assert "-n 4" in chained
     assert "-n 1" in chained
-    assert env.get(QS_GEN_E2E.name) == "1"
+    assert env.get(RECON_GEN_E2E.name) == "1"
     # Y.7-followup — flaky-e2e retry + per-page timeout bump.
     assert "--reruns" in chained
-    assert env.get(QS_E2E_PAGE_TIMEOUT.name) == "60000"
+    assert env.get(RECON_E2E_PAGE_TIMEOUT.name) == "60000"
     # ...but an operator-set value wins (no env entry → subprocess
     # inherits the operator's).
-    monkeypatch.setenv(QS_E2E_PAGE_TIMEOUT.name, "120000")
+    monkeypatch.setenv(RECON_E2E_PAGE_TIMEOUT.name, "120000")
     cmd_env2 = runner._layer_command("browser", Path("/tmp/run"))
     assert cmd_env2 is not None
     _cmd2, env2 = cmd_env2
-    assert QS_E2E_PAGE_TIMEOUT.name not in env2
+    assert RECON_E2E_PAGE_TIMEOUT.name not in env2
 
 
 def test_app2_in_db_touching_layers() -> None:
     """b.3.impl.layer — App2 reads from the variant DB via
     `make_tree_db_fetcher`, so it MUST be in DB_TOUCHING_LAYERS to
-    receive QS_GEN_DEMO_DATABASE_URL from setup_variant. Otherwise
+    receive RECON_GEN_DEMO_DATABASE_URL from setup_variant. Otherwise
     `--variants=local-pg` would seed the container but App2 would
     still try to talk to whatever the cfg file points at."""
     assert "app2" in runner.DB_TOUCHING_LAYERS
@@ -618,16 +618,16 @@ def test_dispatch_layer_threads_variant_env_to_app2(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
     """b.3.impl.layer — variant_env merges into the app2 subprocess
-    env so QS_GEN_DEMO_DATABASE_URL is visible to make_tree_db_fetcher
+    env so RECON_GEN_DEMO_DATABASE_URL is visible to make_tree_db_fetcher
     inside the pytest subprocess. Mirrors the same wiring as the db
     layer test but for app2."""
     captured: dict[str, Any] = {}
     with patch.object(subprocess, "Popen", side_effect=_fake_popen_factory(captured)):
         runner.dispatch_layer(
             "app2", tmp_path, runner.RunOptions(),
-            variant_env={"QS_GEN_DEMO_DATABASE_URL": "postgresql://localhost:5432/test"},
+            variant_env={"RECON_GEN_DEMO_DATABASE_URL": "postgresql://localhost:5432/test"},
         )
-    assert captured["env"]["QS_GEN_DEMO_DATABASE_URL"] == "postgresql://localhost:5432/test"
+    assert captured["env"]["RECON_GEN_DEMO_DATABASE_URL"] == "postgresql://localhost:5432/test"
 
 
 def test_dispatch_layer_stub_returns_skipped() -> None:
@@ -661,16 +661,16 @@ def test_dispatch_layer_failure_propagates(tmp_path: Path) -> None:
 
 
 def test_dispatch_layer_passes_run_dir_via_env(tmp_path: Path) -> None:
-    """QS_GEN_RUN_DIR threads through to the pytest subprocess so conftest
+    """RECON_GEN_RUN_DIR threads through to the pytest subprocess so conftest
     fixtures (c.10/c.11/c.12) can route artifacts under runs/<run-id>/.
-    QS_GEN_FUZZ_SEED also threads (c.6.xdist-safety)."""
+    RECON_GEN_FUZZ_SEED also threads (c.6.xdist-safety)."""
     captured: dict[str, Any] = {}
     with patch.object(subprocess, "Popen", side_effect=_fake_popen_factory(captured)):
         runner.dispatch_layer("unit", tmp_path, runner.RunOptions(fuzz_seed_value=42))
     env = captured["env"]
-    assert env["QS_GEN_RUN_DIR"] == str(tmp_path)
-    assert env["QS_GEN_LAYER"] == "unit"
-    assert env["QS_GEN_FUZZ_SEED"] == "42"
+    assert env["RECON_GEN_RUN_DIR"] == str(tmp_path)
+    assert env["RECON_GEN_LAYER"] == "unit"
+    assert env["RECON_GEN_FUZZ_SEED"] == "42"
 
 
 def test_cmd_up_to_stops_on_first_failure() -> None:
@@ -837,12 +837,12 @@ import json
 
 
 def test_layer_command_threads_qs_gen_layer_env() -> None:
-    """QS_GEN_LAYER must reach pytest subprocesses so conftest hooks know
+    """RECON_GEN_LAYER must reach pytest subprocesses so conftest hooks know
     which layer's JSONL file to append to."""
     cmd_env = runner._layer_command("unit", Path("/tmp/run"))
     assert cmd_env is not None
     _, env_addl = cmd_env
-    assert env_addl["QS_GEN_LAYER"] == "unit"
+    assert env_addl["RECON_GEN_LAYER"] == "unit"
 
 
 def test_aggregate_test_jsonl_empty_when_no_files(tmp_path: Path) -> None:
@@ -1101,20 +1101,20 @@ def test_layer_command_unknown_layer_returns_none() -> None:
 
 
 def test_layer_command_trace_all_sets_env() -> None:
-    """--trace-all sets QS_GEN_TRACE_ALL=1 in subprocess env (consumed by c.11)."""
+    """--trace-all sets RECON_GEN_TRACE_ALL=1 in subprocess env (consumed by c.11)."""
     opts = runner.RunOptions(trace_all=True)
     cmd_env = runner._layer_command("unit", Path("/tmp/run"), opts)
     assert cmd_env is not None
     _, env_addl = cmd_env
-    assert env_addl.get("QS_GEN_TRACE_ALL") == "1"
+    assert env_addl.get("RECON_GEN_TRACE_ALL") == "1"
 
 
 def test_layer_command_no_trace_env_when_default() -> None:
-    """Default options don't set QS_GEN_TRACE_ALL — only opt-in adds it."""
+    """Default options don't set RECON_GEN_TRACE_ALL — only opt-in adds it."""
     cmd_env = runner._layer_command("unit", Path("/tmp/run"))
     assert cmd_env is not None
     _, env_addl = cmd_env
-    assert "QS_GEN_TRACE_ALL" not in env_addl
+    assert "RECON_GEN_TRACE_ALL" not in env_addl
 
 
 # --- Y.2.gate.k.1.coverage — --coverage flag wiring ---
@@ -1148,8 +1148,8 @@ def test_layer_command_coverage_adds_cov_args_and_per_variant_data_file() -> Non
     cmd, env_addl = cmd_env
     assert "--cov=recon_gen" in cmd
     assert env_addl["COVERAGE_FILE"] == "runs/abc/sp_pg_lo/.coverage.sp_pg_lo.db"
-    # The db layer's QS_GEN_E2E gate still rides along.
-    assert env_addl.get("QS_GEN_E2E") == "1"
+    # The db layer's RECON_GEN_E2E gate still rides along.
+    assert env_addl.get("RECON_GEN_E2E") == "1"
 
 
 def test_layer_command_coverage_skips_non_pytest_deploy_layer(tmp_path: Path) -> None:
@@ -1159,7 +1159,7 @@ def test_layer_command_coverage_skips_non_pytest_deploy_layer(tmp_path: Path) ->
     cfg.write_text("dialect: postgres\n")
     l2 = tmp_path / "l2.yaml"
     l2.write_text("instance: x\n")
-    variant_env = {"QS_GEN_CONFIG": str(cfg), "QS_GEN_TEST_L2_INSTANCE": str(l2)}
+    variant_env = {"RECON_GEN_CONFIG": str(cfg), "RECON_GEN_TEST_L2_INSTANCE": str(l2)}
     opts = runner.RunOptions(coverage=True)
     cmd_env = runner._layer_command(
         "deploy", tmp_path / "run", opts, variant_env=variant_env,
@@ -1194,7 +1194,7 @@ def test_is_deploy_or_later() -> None:
 def test_cmd_up_to_dirty_refuses_at_deploy_layer(monkeypatch: Any) -> None:
     """b.10 — `up_to=deploy` (or higher) refuses on tracked-changes dirty
     state. NEEDS_OPERATOR exit, message tells operator what to do."""
-    monkeypatch.delenv(QS_GEN_RUNNER_YES.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_RUNNER_YES.name, raising=False)
     with patch.object(runner, "_is_dirty", return_value=True):
         code = runner.main(["up_to=deploy"])
     assert code == runner.EXIT_NEEDS_OPERATOR
@@ -1202,7 +1202,7 @@ def test_cmd_up_to_dirty_refuses_at_deploy_layer(monkeypatch: Any) -> None:
 
 def test_cmd_up_to_dirty_ok_below_deploy(monkeypatch: Any) -> None:
     """Layers 1-3 (pyright/unit/db) are local + idempotent; dirty state OK."""
-    monkeypatch.delenv(QS_GEN_RUNNER_YES.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_RUNNER_YES.name, raising=False)
 
     def fake_dispatch(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
         return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.01)
@@ -1222,7 +1222,7 @@ def test_cmd_up_to_dirty_ok_below_deploy(monkeypatch: Any) -> None:
 
 def test_cmd_up_to_allow_dirty_deploy_bypasses(monkeypatch: Any) -> None:
     """`--allow-dirty-deploy` bypasses the b.10 refusal."""
-    monkeypatch.delenv(QS_GEN_RUNNER_YES.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_RUNNER_YES.name, raising=False)
 
     def fake_dispatch(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
         return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.01)
@@ -1241,9 +1241,9 @@ def test_cmd_up_to_allow_dirty_deploy_bypasses(monkeypatch: Any) -> None:
 
 
 def test_cmd_up_to_qs_gen_runner_yes_env_bypasses_dirty(monkeypatch: Any) -> None:
-    """QS_GEN_RUNNER_YES=1 also bypasses b.10 (mirrors b.14.3 destructive-op
+    """RECON_GEN_RUNNER_YES=1 also bypasses b.10 (mirrors b.14.3 destructive-op
     convention so the env var works for both flag families)."""
-    monkeypatch.setenv(QS_GEN_RUNNER_YES.name, "1")
+    monkeypatch.setenv(RECON_GEN_RUNNER_YES.name, "1")
 
     def fake_run_one(
         spec: VariantSpec, run_dir: Path, options: Any, chain: list[str],
@@ -1387,12 +1387,16 @@ def test_audit_calls_pyright_pure_static_check() -> None:
 
 
 def test_audit_calls_out_qs_e2e_user_arn_for_browser() -> None:
-    """High-signal cell: audit row 6 (Browser e2e) lists 'QS_E2E_USER_ARN ...
+    """High-signal cell: audit row 6 (Browser e2e) lists 'RECON_E2E_USER_ARN ...
     required'. Runner reflects: 'qs_arn' in browser deps. If audit drops the
     requirement OR runner removes 'qs_arn' from browser, drift gets flagged."""
     assert "qs_arn" in runner._LAYER_DEPS["browser"]
     audit = _read_audit_text()
-    assert "QS_E2E_USER_ARN" in audit and "required" in audit
+    # AC.B.3 grace period — accept either prefix in the audit narrative
+    # (audit doc is "leave history alone" scope; runtime registry's
+    # legacy_name fallback covers both names).
+    assert ("RECON_E2E_USER_ARN" in audit or "QS_E2E_USER_ARN" in audit) \
+        and "required" in audit
 
 
 def test_audit_calls_out_aws_creds_for_deploy() -> None:
@@ -1556,7 +1560,7 @@ def test_cmd_pyright_failure_returns_failure_exit() -> None:
 def test_resolve_fuzz_seed_value_random_when_unset(monkeypatch: Any) -> None:
     """No env override → fresh random seed each call. Two calls likely
     different (32-bit space; collision odds vanishingly small)."""
-    monkeypatch.delenv(QS_GEN_FUZZ_SEED.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_FUZZ_SEED.name, raising=False)
     a = runner.resolve_fuzz_seed_value()
     b = runner.resolve_fuzz_seed_value()
     assert isinstance(a, int) and 0 <= a < 2**32
@@ -1564,16 +1568,16 @@ def test_resolve_fuzz_seed_value_random_when_unset(monkeypatch: Any) -> None:
 
 
 def test_resolve_fuzz_seed_value_honors_env(monkeypatch: Any) -> None:
-    """`QS_GEN_FUZZ_SEED=N` env → operator pin for failure repro. All workers
+    """`RECON_GEN_FUZZ_SEED=N` env → operator pin for failure repro. All workers
     in this run see the same value."""
-    monkeypatch.setenv(QS_GEN_FUZZ_SEED.name, "12345")
+    monkeypatch.setenv(RECON_GEN_FUZZ_SEED.name, "12345")
     assert runner.resolve_fuzz_seed_value() == 12345
 
 
 def test_resolve_fuzz_seed_value_random_on_blank_env(monkeypatch: Any) -> None:
     """Blank env (e.g. accidentally exported empty) → fall back to random,
     not crash on int('')."""
-    monkeypatch.setenv(QS_GEN_FUZZ_SEED.name, "")
+    monkeypatch.setenv(RECON_GEN_FUZZ_SEED.name, "")
     seed = runner.resolve_fuzz_seed_value()
     assert isinstance(seed, int)
 
@@ -1587,7 +1591,7 @@ def test_run_options_fuzz_seed_value_default_none() -> None:
 
 def test_options_from_args_resolves_fuzz_seed(monkeypatch: Any) -> None:
     """_options_from_args populates fuzz_seed_value (random unless env pinned)."""
-    monkeypatch.setenv(QS_GEN_FUZZ_SEED.name, "98765")
+    monkeypatch.setenv(RECON_GEN_FUZZ_SEED.name, "98765")
     parser = runner._build_parser()
     parsed = parser.parse_args(["up_to", "unit"])
     opts = runner._options_from_args(parsed)
@@ -1595,22 +1599,22 @@ def test_options_from_args_resolves_fuzz_seed(monkeypatch: Any) -> None:
 
 
 def test_layer_command_threads_qs_gen_fuzz_seed_env() -> None:
-    """fuzz_seed_value → QS_GEN_FUZZ_SEED env passed to subprocess. All xdist
+    """fuzz_seed_value → RECON_GEN_FUZZ_SEED env passed to subprocess. All xdist
     workers inherit; parametrize collection is deterministic."""
     opts = runner.RunOptions(fuzz_seed_value=42)
     cmd_env = runner._layer_command("unit", Path("/tmp/run"), opts)
     assert cmd_env is not None
     _, env_addl = cmd_env
-    assert env_addl.get("QS_GEN_FUZZ_SEED") == "42"
+    assert env_addl.get("RECON_GEN_FUZZ_SEED") == "42"
 
 
 def test_layer_command_no_fuzz_env_when_value_none() -> None:
-    """fuzz_seed_value=None → no QS_GEN_FUZZ_SEED in env_addl. Preserves
+    """fuzz_seed_value=None → no RECON_GEN_FUZZ_SEED in env_addl. Preserves
     operator's externally-set env (if any) without us shadowing it."""
     cmd_env = runner._layer_command("unit", Path("/tmp/run"), runner.RunOptions())
     assert cmd_env is not None
     _, env_addl = cmd_env
-    assert "QS_GEN_FUZZ_SEED" not in env_addl
+    assert "RECON_GEN_FUZZ_SEED" not in env_addl
 
 
 # Y.2.gate.c.9 — sweep subcommand.
@@ -1678,7 +1682,7 @@ def _install_fake_aws(monkeypatch: Any) -> None:
     # Force the config-path probe to succeed by pointing it at any
     # existing file (PLAN.md is fine — we only check existence, the
     # file content is read by the stubbed load_config).
-    monkeypatch.setenv(QS_GEN_CONFIG.name, str(runner.REPO_ROOT / "PLAN.md"))
+    monkeypatch.setenv(RECON_GEN_CONFIG.name, str(runner.REPO_ROOT / "PLAN.md"))
 
 
 def test_cmd_sweep_dry_run_collects_without_deleting(
@@ -1686,7 +1690,7 @@ def test_cmd_sweep_dry_run_collects_without_deleting(
 ) -> None:
     """No --yes → calls _collect, never calls sweep_qs_resources."""
     _install_fake_aws(monkeypatch)
-    monkeypatch.delenv(QS_GEN_RUNNER_YES.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_RUNNER_YES.name, raising=False)
     collect_calls, sweep_calls = _install_fake_harness_cleanup(
         monkeypatch,
         matched={
@@ -1711,7 +1715,7 @@ def test_cmd_sweep_dry_run_collects_without_deleting(
 def test_cmd_sweep_with_yes_invokes_sweep(monkeypatch: Any, capsys: Any) -> None:
     """--yes → sweep_qs_resources_by_tag is called; not _collect."""
     _install_fake_aws(monkeypatch)
-    monkeypatch.delenv(QS_GEN_RUNNER_YES.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_RUNNER_YES.name, raising=False)
     collect_calls, sweep_calls = _install_fake_harness_cleanup(
         monkeypatch,
         matched={
@@ -1732,10 +1736,10 @@ def test_cmd_sweep_with_yes_invokes_sweep(monkeypatch: Any, capsys: Any) -> None
 def test_cmd_sweep_qs_gen_runner_yes_env_bypasses_yes_flag(
     monkeypatch: Any,
 ) -> None:
-    """`QS_GEN_RUNNER_YES=1` env matches `--yes` per the b.14.3
+    """`RECON_GEN_RUNNER_YES=1` env matches `--yes` per the b.14.3
     destructive-op convention."""
     _install_fake_aws(monkeypatch)
-    monkeypatch.setenv(QS_GEN_RUNNER_YES.name, "1")
+    monkeypatch.setenv(RECON_GEN_RUNNER_YES.name, "1")
     _, sweep_calls = _install_fake_harness_cleanup(
         monkeypatch,
         matched={
@@ -1754,7 +1758,7 @@ def test_cmd_sweep_no_config_file_returns_needs_operator(
 ) -> None:
     """When no config.yaml is discoverable, exit needs-operator
     instead of crashing on a missing file."""
-    monkeypatch.delenv(QS_GEN_CONFIG.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_CONFIG.name, raising=False)
     # Point REPO_ROOT at an empty tmp dir so the candidate paths
     # (run/config.yaml, config.yaml, run/config.{postgres,oracle}.yaml)
     # all resolve to non-existent files.
@@ -2023,7 +2027,7 @@ def test_cmd_up_to_skip_cheap_short_circuits_cached_layer(
     monkeypatch.setattr(runner, "_short_sha", lambda: "abc1234")
     monkeypatch.setattr(runner, "_is_dirty", lambda: False)
     monkeypatch.setattr(runner, "RUN_TESTS_CACHE_DIR", tmp_path / ".cache")
-    monkeypatch.delenv(QS_GEN_RUNNER_YES.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_RUNNER_YES.name, raising=False)
 
     # Y.2.gate.n — the `unit` cache marker is keyed by the `_PRELUDE_VARIANT`
     # sentinel (unit runs once as a run-level prelude, not per cell).
@@ -2057,7 +2061,7 @@ def test_cmd_up_to_skip_cheap_no_cache_runs_all_layers(
     monkeypatch.setattr(runner, "_short_sha", lambda: "abc1234")
     monkeypatch.setattr(runner, "_is_dirty", lambda: False)
     monkeypatch.setattr(runner, "RUN_TESTS_CACHE_DIR", tmp_path / ".cache_empty")
-    monkeypatch.delenv(QS_GEN_RUNNER_YES.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_RUNNER_YES.name, raising=False)
 
     dispatched: list[str] = []
 
@@ -2151,7 +2155,7 @@ def test_setup_variant_aw_target_is_no_op() -> None:
 
 # Y.2.gate.k.1+k.6 — runner CI-mode tests.
 #
-# When QS_GEN_RUNNER_CI=1 + QS_GEN_DEMO_DATABASE_URL is pre-set, the
+# When RECON_GEN_RUNNER_CI=1 + RECON_GEN_DEMO_DATABASE_URL is pre-set, the
 # runner skips Docker spin-up for `lo` targets (the workflow YAML's
 # `services:` block has already provisioned the DB). Lets CI invoke
 # `./run_tests.sh up_to=db --dialects=pg --targets=lo` so the runner
@@ -2165,12 +2169,12 @@ def test_setup_variant_ci_mode_pg_lo_skips_docker(
     the pre-set URL. Verifies handle is None (nothing to teardown) and
     the env carries the URL the workflow set."""
     from recon_gen.common.env_keys import (
-        QS_GEN_DEMO_DATABASE_URL,
-        QS_GEN_RUNNER_CI,
+        RECON_GEN_DEMO_DATABASE_URL,
+        RECON_GEN_RUNNER_CI,
     )
-    monkeypatch.setenv(QS_GEN_RUNNER_CI.name, "1")
+    monkeypatch.setenv(RECON_GEN_RUNNER_CI.name, "1")
     monkeypatch.setenv(
-        QS_GEN_DEMO_DATABASE_URL.name,
+        RECON_GEN_DEMO_DATABASE_URL.name,
         "postgresql://ci:ci@localhost:5432/postgres",
     )
     env, handle = runner.setup_variant(_spec_pg_lo())
@@ -2178,7 +2182,7 @@ def test_setup_variant_ci_mode_pg_lo_skips_docker(
         "CI mode = no Docker container, so no handle to teardown"
     )
     assert env == {
-        QS_GEN_DEMO_DATABASE_URL.name: (
+        RECON_GEN_DEMO_DATABASE_URL.name: (
             "postgresql://ci:ci@localhost:5432/postgres"
         ),
     }
@@ -2191,18 +2195,18 @@ def test_setup_variant_ci_mode_or_lo_skips_docker(
     different URL shape. Verifies the dialect dispatch doesn't
     short-circuit before the CI-mode check."""
     from recon_gen.common.env_keys import (
-        QS_GEN_DEMO_DATABASE_URL,
-        QS_GEN_RUNNER_CI,
+        RECON_GEN_DEMO_DATABASE_URL,
+        RECON_GEN_RUNNER_CI,
     )
-    monkeypatch.setenv(QS_GEN_RUNNER_CI.name, "1")
+    monkeypatch.setenv(RECON_GEN_RUNNER_CI.name, "1")
     monkeypatch.setenv(
-        QS_GEN_DEMO_DATABASE_URL.name,
+        RECON_GEN_DEMO_DATABASE_URL.name,
         "system/ci@localhost:1521/FREEPDB1",
     )
     env, handle = runner.setup_variant(_spec_or_lo())
     assert handle is None
     assert env == {
-        QS_GEN_DEMO_DATABASE_URL.name: (
+        RECON_GEN_DEMO_DATABASE_URL.name: (
             "system/ci@localhost:1521/FREEPDB1"
         ),
     }
@@ -2212,19 +2216,19 @@ def test_setup_variant_ci_mode_without_url_fails_loud(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """gate.k.1+k.6 — CI mode requires the URL. Workflow operators who
-    forget to wire QS_GEN_DEMO_DATABASE_URL get a loud failure naming
+    forget to wire RECON_GEN_DEMO_DATABASE_URL get a loud failure naming
     the missing env var, not a silent fallback to cfg.demo_database_url
     that confusingly breaks downstream."""
     from recon_gen.common.env_keys import (
         EnvVarRequired,
-        QS_GEN_DEMO_DATABASE_URL,
-        QS_GEN_RUNNER_CI,
+        RECON_GEN_DEMO_DATABASE_URL,
+        RECON_GEN_RUNNER_CI,
     )
-    monkeypatch.setenv(QS_GEN_RUNNER_CI.name, "1")
-    monkeypatch.delenv(QS_GEN_DEMO_DATABASE_URL.name, raising=False)
+    monkeypatch.setenv(RECON_GEN_RUNNER_CI.name, "1")
+    monkeypatch.delenv(RECON_GEN_DEMO_DATABASE_URL.name, raising=False)
     with pytest.raises(EnvVarRequired) as exc_info:
         runner.setup_variant(_spec_pg_lo())
-    assert QS_GEN_DEMO_DATABASE_URL.name in str(exc_info.value)
+    assert RECON_GEN_DEMO_DATABASE_URL.name in str(exc_info.value)
 
 
 def test_setup_variant_ci_mode_aw_unchanged(
@@ -2233,9 +2237,9 @@ def test_setup_variant_ci_mode_aw_unchanged(
     """gate.k.1+k.6 — CI mode is irrelevant for aw targets — those
     always cfg-discover. The early `target=aw` return path runs first;
     CI mode never gets consulted."""
-    from recon_gen.common.env_keys import QS_GEN_RUNNER_CI
-    monkeypatch.setenv(QS_GEN_RUNNER_CI.name, "1")
-    # Deliberately don't set QS_GEN_DEMO_DATABASE_URL — aw doesn't need it.
+    from recon_gen.common.env_keys import RECON_GEN_RUNNER_CI
+    monkeypatch.setenv(RECON_GEN_RUNNER_CI.name, "1")
+    # Deliberately don't set RECON_GEN_DEMO_DATABASE_URL — aw doesn't need it.
     env, handle = runner.setup_variant(_spec_pg_aw())
     assert env == {}
     assert handle is None
@@ -2302,7 +2306,7 @@ def _stub_runner_for_keep_test(
     sentinel_handle = object()
     monkeypatch.setattr(
         runner, "setup_variant",
-        lambda spec: ({"QS_GEN_DEMO_DATABASE_URL": "x"}, sentinel_handle),
+        lambda spec: ({"RECON_GEN_DEMO_DATABASE_URL": "x"}, sentinel_handle),
     )
     monkeypatch.setattr(runner, "seed_variant", lambda spec, env, **_: None)
 
@@ -2455,32 +2459,32 @@ def test_dispatch_layer_threads_variant_env_to_db_layer(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
     """Y.2.gate.b.2.impl — variant_env merges into the subprocess env
-    for DB-touching layers so QS_GEN_DEMO_DATABASE_URL etc. is visible
+    for DB-touching layers so RECON_GEN_DEMO_DATABASE_URL etc. is visible
     to fixtures inside the pytest subprocess."""
     captured: dict[str, Any] = {}
     with patch.object(subprocess, "Popen", side_effect=_fake_popen_factory(captured)):
         runner.dispatch_layer(
             "db", tmp_path, runner.RunOptions(),
-            variant_env={"QS_GEN_DEMO_DATABASE_URL": "postgresql://localhost:5432/test"},
+            variant_env={"RECON_GEN_DEMO_DATABASE_URL": "postgresql://localhost:5432/test"},
         )
-    assert captured["env"]["QS_GEN_DEMO_DATABASE_URL"] == "postgresql://localhost:5432/test"
+    assert captured["env"]["RECON_GEN_DEMO_DATABASE_URL"] == "postgresql://localhost:5432/test"
 
 
 def test_dispatch_layer_does_not_thread_variant_env_to_unit(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
     """Unit layer doesn't need variant_env — passes through clean.
-    Tests that assert no QS_GEN_DEMO_DATABASE_URL would otherwise
+    Tests that assert no RECON_GEN_DEMO_DATABASE_URL would otherwise
     break when the operator runs --variants=local-pg."""
     captured: dict[str, Any] = {}
-    monkeypatch.delenv(QS_GEN_DEMO_DATABASE_URL.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_DEMO_DATABASE_URL.name, raising=False)
     with patch.object(subprocess, "Popen", side_effect=_fake_popen_factory(captured)):
         runner.dispatch_layer(
             "unit", tmp_path, runner.RunOptions(),
-            variant_env={"QS_GEN_DEMO_DATABASE_URL": "postgresql://localhost:5432/test"},
+            variant_env={"RECON_GEN_DEMO_DATABASE_URL": "postgresql://localhost:5432/test"},
         )
     # Variant env did NOT leak into the unit subprocess.
-    assert "QS_GEN_DEMO_DATABASE_URL" not in captured["env"]
+    assert "RECON_GEN_DEMO_DATABASE_URL" not in captured["env"]
 
 
 # Y.2.gate.b.2.impl.oracle followup — per-layer subprocess capture.
@@ -2496,12 +2500,12 @@ def test_dispatch_layer_writes_cmd_json_with_input_and_result(
     env-overrides) plus the result (exit code, duration). Re-written
     after the subprocess finishes; the pre-run write is the
     crash-trail safety net."""
-    monkeypatch.delenv(QS_GEN_DEMO_DATABASE_URL.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_DEMO_DATABASE_URL.name, raising=False)
     captured: dict[str, Any] = {}
     with patch.object(subprocess, "Popen", side_effect=_fake_popen_factory(captured)):
         result = runner.dispatch_layer(
             "db", tmp_path, runner.RunOptions(),
-            variant_env={"QS_GEN_DEMO_DATABASE_URL": "url-x"},
+            variant_env={"RECON_GEN_DEMO_DATABASE_URL": "url-x"},
         )
 
     cmd_json = json.loads((tmp_path / "db" / "cmd.json").read_text())
@@ -2509,7 +2513,7 @@ def test_dispatch_layer_writes_cmd_json_with_input_and_result(
     assert cmd_json["cmd"] == captured["cmd"]
     # env_overrides is the deltas only (variant env + per-layer env),
     # NOT the inherited os.environ noise.
-    assert cmd_json["env_overrides"]["QS_GEN_DEMO_DATABASE_URL"] == "url-x"
+    assert cmd_json["env_overrides"]["RECON_GEN_DEMO_DATABASE_URL"] == "url-x"
     assert "PATH" not in cmd_json["env_overrides"]
     assert cmd_json["exit_code"] == result.exit_code
     assert cmd_json["duration_seconds"] >= 0
@@ -2521,7 +2525,7 @@ def test_dispatch_layer_captures_stdout_and_stderr_to_files(
     """Real-subprocess test: stdout + stderr each land in their own
     log file under <run_dir>/<layer>/. Uses a tiny python -c so the
     threading + tee path runs end-to-end without mocking Popen."""
-    monkeypatch.delenv(QS_GEN_DEMO_DATABASE_URL.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_DEMO_DATABASE_URL.name, raising=False)
 
     # Stub the layer-command resolver to return a deterministic
     # tiny subprocess instead of the real pytest invocation.
@@ -2640,14 +2644,14 @@ def test_seed_variant_pg_lo_runs_three_subprocesses(
         runner, "_resolve_seed_config_for_dialect",
         lambda dialect: cfg if dialect == "pg" else None,
     )
-    monkeypatch.delenv(QS_GEN_TEST_L2_INSTANCE.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_TEST_L2_INSTANCE.name, raising=False)
 
     captured: list[dict[str, Any]] = []
     monkeypatch.setattr(
         runner, "_spawn_with_tee", _fake_spawn_with_tee(captured),
     )
 
-    runner.seed_variant(_spec_pg_lo(), {"QS_GEN_DEMO_DATABASE_URL": "x"})
+    runner.seed_variant(_spec_pg_lo(), {"RECON_GEN_DEMO_DATABASE_URL": "x"})
 
     # Three subprocesses, in order.
     assert len(captured) == 3
@@ -2665,7 +2669,7 @@ def test_seed_variant_threads_env_overrides_to_subprocesses(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
     """The container URL flows to each subprocess via env. load_config
-    inside the subprocess picks it up via QS_GEN_DEMO_DATABASE_URL
+    inside the subprocess picks it up via RECON_GEN_DEMO_DATABASE_URL
     env override (config.py:364) and writes against the container."""
     cfg = tmp_path / "fake_pg_cfg.yaml"
     cfg.write_text("")
@@ -2673,7 +2677,7 @@ def test_seed_variant_threads_env_overrides_to_subprocesses(
         runner, "_resolve_seed_config_for_dialect",
         lambda dialect: cfg if dialect == "pg" else None,
     )
-    monkeypatch.delenv(QS_GEN_TEST_L2_INSTANCE.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_TEST_L2_INSTANCE.name, raising=False)
 
     captured: list[dict[str, Any]] = []
     monkeypatch.setattr(
@@ -2682,19 +2686,19 @@ def test_seed_variant_threads_env_overrides_to_subprocesses(
 
     container_url = "postgresql+psycopg2://test:test@localhost:60455/test"
     runner.seed_variant(
-        _spec_pg_lo(), {"QS_GEN_DEMO_DATABASE_URL": container_url},
+        _spec_pg_lo(), {"RECON_GEN_DEMO_DATABASE_URL": container_url},
     )
 
     # Every step sees the override.
     assert len(captured) == 3
     for entry in captured:
-        assert entry["env"].get("QS_GEN_DEMO_DATABASE_URL") == container_url
+        assert entry["env"].get("RECON_GEN_DEMO_DATABASE_URL") == container_url
 
 
 def test_seed_variant_honors_qs_gen_test_l2_instance(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
-    """`QS_GEN_TEST_L2_INSTANCE` env flows through as `--l2 <yaml>` so seed
+    """`RECON_GEN_TEST_L2_INSTANCE` env flows through as `--l2 <yaml>` so seed
     + db tests target the same L2 instance. Without the env (and without a
     per-cell env_overrides), the CLI defaults to bundled spec_example."""
     cfg = tmp_path / "fake_pg_cfg.yaml"
@@ -2705,7 +2709,7 @@ def test_seed_variant_honors_qs_gen_test_l2_instance(
         runner, "_resolve_seed_config_for_dialect",
         lambda dialect: cfg if dialect == "pg" else None,
     )
-    monkeypatch.setenv(QS_GEN_TEST_L2_INSTANCE.name, str(l2_yaml))
+    monkeypatch.setenv(RECON_GEN_TEST_L2_INSTANCE.name, str(l2_yaml))
 
     captured: list[dict[str, Any]] = []
     monkeypatch.setattr(
@@ -2724,7 +2728,7 @@ def test_seed_variant_env_overrides_l2_wins_over_os_environ(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
     """m.2.g regression — `_run_one_variant` sets per-spec
-    `QS_GEN_TEST_L2_INSTANCE` in env_overrides; that MUST override
+    `RECON_GEN_TEST_L2_INSTANCE` in env_overrides; that MUST override
     whatever's in os.environ (or absence thereof). Without this, two
     parallel cells running different scenarios both seed the same L2
     (or none) and the downstream smoke test fails with "table does
@@ -2741,7 +2745,7 @@ def test_seed_variant_env_overrides_l2_wins_over_os_environ(
         lambda dialect: cfg if dialect == "pg" else None,
     )
     # OS env says one thing; env_overrides says another. Per-cell wins.
-    monkeypatch.setenv(QS_GEN_TEST_L2_INSTANCE.name, str(os_env_l2))
+    monkeypatch.setenv(RECON_GEN_TEST_L2_INSTANCE.name, str(os_env_l2))
 
     captured: list[dict[str, Any]] = []
     monkeypatch.setattr(
@@ -2750,7 +2754,7 @@ def test_seed_variant_env_overrides_l2_wins_over_os_environ(
 
     runner.seed_variant(
         _spec_pg_lo(),
-        {QS_GEN_TEST_L2_INSTANCE.name: str(overrides_l2)},
+        {RECON_GEN_TEST_L2_INSTANCE.name: str(overrides_l2)},
     )
 
     for entry in captured:
@@ -2792,14 +2796,14 @@ def test_seed_variant_or_lo_runs_three_subprocesses(
         runner, "_resolve_seed_config_for_dialect",
         lambda dialect: cfg if dialect == "or" else None,
     )
-    monkeypatch.delenv(QS_GEN_TEST_L2_INSTANCE.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_TEST_L2_INSTANCE.name, raising=False)
 
     captured: list[dict[str, Any]] = []
     monkeypatch.setattr(
         runner, "_spawn_with_tee", _fake_spawn_with_tee(captured),
     )
 
-    runner.seed_variant(_spec_or_lo(), {"QS_GEN_DEMO_DATABASE_URL": "x"})
+    runner.seed_variant(_spec_or_lo(), {"RECON_GEN_DEMO_DATABASE_URL": "x"})
 
     assert len(captured) == 3
     captured_cmds = [c["cmd"] for c in captured]
@@ -2829,7 +2833,7 @@ def test_resolve_seed_config_oracle_falls_back_to_run_oracle(
     """No env override + run/config.oracle.yaml exists at the repo root
     → return that path. Symmetric with the pg cfg discovery —
     each dialect has its own flavored fallback list."""
-    monkeypatch.delenv(QS_GEN_CONFIG.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_CONFIG.name, raising=False)
     fake_repo = tmp_path / "repo"
     (fake_repo / "run").mkdir(parents=True)
     cfg = fake_repo / "run" / "config.oracle.yaml"
@@ -2851,7 +2855,7 @@ def test_seed_variant_raises_on_subprocess_failure(
         runner, "_resolve_seed_config_for_dialect",
         lambda dialect: cfg if dialect == "pg" else None,
     )
-    monkeypatch.delenv(QS_GEN_TEST_L2_INSTANCE.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_TEST_L2_INSTANCE.name, raising=False)
 
     captured: list[dict[str, Any]] = []
     monkeypatch.setattr(
@@ -2864,22 +2868,22 @@ def test_seed_variant_raises_on_subprocess_failure(
 def test_resolve_seed_config_explicit_env_override(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
-    """`QS_GEN_CONFIG` operator override wins over the cfg-candidate
+    """`RECON_GEN_CONFIG` operator override wins over the cfg-candidate
     list. Mirrors the same env override the e2e suite + cmd_sweep
     already honor."""
     cfg = tmp_path / "my_pg.yaml"
     cfg.write_text("dialect: postgres\n")
-    monkeypatch.setenv(QS_GEN_CONFIG.name, str(cfg))
+    monkeypatch.setenv(RECON_GEN_CONFIG.name, str(cfg))
     assert runner._resolve_seed_config_for_dialect("pg") == cfg
 
 
 def test_resolve_seed_config_explicit_env_missing_returns_none(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
-    """Operator pointed QS_GEN_CONFIG at a path that doesn't exist —
+    """Operator pointed RECON_GEN_CONFIG at a path that doesn't exist —
     don't silently fall back to a candidate. The override stated
     intent; respect it (and surface the absence)."""
-    monkeypatch.setenv(QS_GEN_CONFIG.name, str(tmp_path / "does-not-exist.yaml"))
+    monkeypatch.setenv(RECON_GEN_CONFIG.name, str(tmp_path / "does-not-exist.yaml"))
     assert runner._resolve_seed_config_for_dialect("pg") is None
 
 
@@ -2890,7 +2894,7 @@ def test_resolve_seed_config_falls_back_to_run_postgres(
     root → return that path. We only check run/config.postgres.yaml
     here (not run/config.yaml) because run/config.yaml may be Oracle-
     flavored and won't match a Postgres container."""
-    monkeypatch.delenv(QS_GEN_CONFIG.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_CONFIG.name, raising=False)
     fake_repo = tmp_path / "repo"
     (fake_repo / "run").mkdir(parents=True)
     cfg = fake_repo / "run" / "config.postgres.yaml"
@@ -2910,7 +2914,7 @@ def test_cmd_up_to_seeds_variant_when_db_layer_in_chain(
     monkeypatch.setattr(runner, "RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(
         runner, "setup_variant",
-        lambda spec: ({"QS_GEN_DEMO_DATABASE_URL": "x"}, object()),
+        lambda spec: ({"RECON_GEN_DEMO_DATABASE_URL": "x"}, object()),
     )
 
     seed_calls: list[tuple[VariantSpec, dict[str, str]]] = []
@@ -2933,13 +2937,13 @@ def test_cmd_up_to_seeds_variant_when_db_layer_in_chain(
     assert rc == runner.EXIT_SUCCESS
     assert len(seed_calls) == 1
     assert seed_calls[0][0].name == "sp_pg_lo"
-    # `_run_one_variant` augments env_overrides with QS_GEN_TEST_L2_INSTANCE
-    # (m.2.b) and possibly QS_GEN_CONFIG (dialect cfg) before calling
+    # `_run_one_variant` augments env_overrides with RECON_GEN_TEST_L2_INSTANCE
+    # (m.2.b) and possibly RECON_GEN_CONFIG (dialect cfg) before calling
     # seed_variant — assert the URL passes through, not equality.
-    assert seed_calls[0][1].get("QS_GEN_DEMO_DATABASE_URL") == "x"
+    assert seed_calls[0][1].get("RECON_GEN_DEMO_DATABASE_URL") == "x"
     # m.4.f — the L2 path is now the per-cell synthesized yaml (always),
     # not the bundled spec_example.yaml. Ends with `_synth_l2.yaml`.
-    assert seed_calls[0][1].get(QS_GEN_TEST_L2_INSTANCE.name, "").endswith("_synth_l2.yaml")
+    assert seed_calls[0][1].get(RECON_GEN_TEST_L2_INSTANCE.name, "").endswith("_synth_l2.yaml")
 
 
 def test_cmd_up_to_skips_seed_when_chain_is_unit_only(
@@ -2953,7 +2957,7 @@ def test_cmd_up_to_skips_seed_when_chain_is_unit_only(
     monkeypatch.setattr(runner, "RUNS_DIR", tmp_path / "runs")
     monkeypatch.setattr(
         runner, "setup_variant",
-        lambda spec: ({"QS_GEN_DEMO_DATABASE_URL": "x"}, object()),
+        lambda spec: ({"RECON_GEN_DEMO_DATABASE_URL": "x"}, object()),
     )
 
     seed_calls: list[VariantSpec] = []
@@ -3037,7 +3041,7 @@ def test_cmd_up_to_seed_failure_still_runs_teardown(
     handle = object()
     monkeypatch.setattr(
         runner, "setup_variant",
-        lambda spec: ({"QS_GEN_DEMO_DATABASE_URL": "x"}, handle),
+        lambda spec: ({"RECON_GEN_DEMO_DATABASE_URL": "x"}, handle),
     )
 
     def fail_seed(spec: VariantSpec, env: dict[str, str], **_: Any) -> None:
@@ -3480,7 +3484,7 @@ def test_resolve_l2_yaml_for_spec_named_synthesizes_with_spec_name(
     """m.4.f + Z.C.9 — sp/sq cells synthesize a per-cell yaml that's the
     bundled fixture with any legacy ``instance:`` key stripped (the L2
     loader hard-rejects it post-Z.C). The per-cell DB-table prefix moves
-    to ``cfg.db_table_prefix`` via the ``QS_GEN_DB_TABLE_PREFIX`` env
+    to ``cfg.db_table_prefix`` via the ``RECON_GEN_DB_TABLE_PREFIX`` env
     override that ``_run_one_variant`` injects per cell — not via the
     L2 yaml anymore."""
     spec = _spec_pg_aw()  # sp_pg_aw

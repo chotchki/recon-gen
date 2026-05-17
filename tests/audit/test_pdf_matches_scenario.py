@@ -13,12 +13,12 @@ drift from what the scenario primitives planted, BEFORE the
 gated three-way job (U.8.b.3 onward) ever runs.
 
 **Destructive — drops + recreates schema for the test L2 instance.**
-Gated behind ``QS_GEN_DB_TESTS=1`` so a developer's local DB
+Gated behind ``RECON_GEN_DB_TESTS=1`` so a developer's local DB
 isn't wiped by accident. CI sets the env var; local dev opts in
 explicitly when running the test.
 
 Skips entirely when:
-  - ``QS_GEN_DB_TESTS != "1"``
+  - ``RECON_GEN_DB_TESTS != "1"``
   - The configured ``demo_database_url`` is unset (skeleton mode
     — no DB to seed)
   - The required driver for the configured dialect isn't installed
@@ -38,8 +38,8 @@ from recon_gen.common.config import load_config
 from recon_gen.common.db import connect_demo_db
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
-    QS_GEN_CONFIG,
-    QS_GEN_DB_TESTS,
+    RECON_GEN_CONFIG,
+    RECON_GEN_DB_TESTS,
 )
 from recon_gen.common.l2 import load_instance
 from recon_gen.common.l2.auto_scenario import default_scenario_for
@@ -85,18 +85,18 @@ _ALL_INVARIANTS: tuple[Invariant, ...] = (
 
 
 pytestmark = pytest.mark.skipif(
-    not QS_GEN_DB_TESTS.get_or_none(),
-    reason="Destructive DB tests gated on QS_GEN_DB_TESTS=1",
+    not RECON_GEN_DB_TESTS.get_or_none(),
+    reason="Destructive DB tests gated on RECON_GEN_DB_TESTS=1",
 )
 
 
 def _resolve_explicit_qs_gen_config() -> Path | None:
-    """Read QS_GEN_CONFIG via the registry but soft-fall on the
+    """Read RECON_GEN_CONFIG via the registry but soft-fall on the
     must_be_file validator failing — this fixture's discovery loop
     has fallback candidates, so a bad pin should degrade rather than
     raise inside test setup."""
     try:
-        return QS_GEN_CONFIG.get_or_none()
+        return RECON_GEN_CONFIG.get_or_none()
     except EnvVarInvalid:
         return None
 
@@ -123,7 +123,7 @@ def db_cfg():
     if cfg is None or cfg.demo_database_url is None:
         pytest.skip(
             "No demo_database_url configured — set "
-            "QS_GEN_DEMO_DATABASE_URL or point QS_GEN_CONFIG at "
+            "RECON_GEN_DEMO_DATABASE_URL or point RECON_GEN_CONFIG at "
             "a config.yaml carrying it."
         )
     return cfg
@@ -145,7 +145,7 @@ def db_cfg_path(db_cfg) -> Path:
             return candidate
     pytest.fail(
         "db_cfg loaded but no candidate config path on disk — "
-        "QS_GEN_CONFIG override resolution mismatch."
+        "RECON_GEN_CONFIG override resolution mismatch."
     )
 
 

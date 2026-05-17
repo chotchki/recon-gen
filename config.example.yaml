@@ -8,7 +8,7 @@
 # fails loud instead of silently no-op'ing.
 #
 # Copy this file to config.yaml and fill in your values. All values
-# can also be set via environment variables with a QS_GEN_ prefix.
+# can also be set via environment variables with a RECON_GEN_ prefix.
 
 aws_account_id: "123456789012"
 aws_region: "us-east-1"

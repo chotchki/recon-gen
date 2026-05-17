@@ -2,8 +2,8 @@
 
 Wraps the legacy CI workflow steps (`recon-gen audit apply --execute
 -o <pdf>` + `audit verify <pdf>`) as pytest so the runner's `db` layer
-can dispatch them. Reads cfg + L2 from `QS_GEN_CONFIG` /
-`QS_GEN_TEST_L2_INSTANCE`, picking up whatever prefix the variant's
+can dispatch them. Reads cfg + L2 from `RECON_GEN_CONFIG` /
+`RECON_GEN_TEST_L2_INSTANCE`, picking up whatever prefix the variant's
 synthesized yaml resolved to.
 
 Y.2.gate.k.1.absorb-audit (Phase 2.5): the workflow's audit-PDF step
@@ -35,8 +35,8 @@ import pytest
 
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
-    QS_GEN_CONFIG,
-    QS_GEN_TEST_L2_INSTANCE,
+    RECON_GEN_CONFIG,
+    RECON_GEN_TEST_L2_INSTANCE,
 )
 
 
@@ -48,7 +48,7 @@ def _resolve_cfg_path() -> Path:
     """Same cfg-resolution shape the sibling smoke tests use — env
     override wins, else the runner's per-variant cfg-discovery path."""
     try:
-        explicit = QS_GEN_CONFIG.get_or_none()
+        explicit = RECON_GEN_CONFIG.get_or_none()
     except EnvVarInvalid:
         explicit = None
     if explicit is not None:
@@ -62,14 +62,14 @@ def _resolve_cfg_path() -> Path:
     for candidate in candidates:
         if candidate.exists():
             return candidate
-    pytest.skip("no cfg discoverable (set QS_GEN_CONFIG or place run/config.*.yaml)")
+    pytest.skip("no cfg discoverable (set RECON_GEN_CONFIG or place run/config.*.yaml)")
 
 
 def _resolve_l2_path() -> Path | None:
-    """The runner sets QS_GEN_TEST_L2_INSTANCE on every variant
+    """The runner sets RECON_GEN_TEST_L2_INSTANCE on every variant
     subprocess. When unset (legacy path), fall through to the audit
     CLI's own default-L2 resolution."""
-    override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
+    override = RECON_GEN_TEST_L2_INSTANCE.get_or_none()
     return Path(override) if override is not None else None
 
 

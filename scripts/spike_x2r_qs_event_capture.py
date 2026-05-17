@@ -8,9 +8,9 @@ drop its 1.2s+700ms-poll heuristic in favor of `page.expect_response`
 
 Usage:
     AWS_PROFILE=recon-gen-local \\
-    QS_E2E_USER_ARN="arn:aws:quicksight:us-east-1:470656905821:user/default/recon-gen-local" \\
-    QS_GEN_TEST_L2_INSTANCE=tests/l2/sasquatch_pr.yaml \\
-    QS_GEN_CONFIG=run/config.postgres.yaml \\
+    RECON_E2E_USER_ARN="arn:aws:quicksight:us-east-1:470656905821:user/default/recon-gen-local" \\
+    RECON_GEN_TEST_L2_INSTANCE=tests/l2/sasquatch_pr.yaml \\
+    RECON_GEN_CONFIG=run/config.postgres.yaml \\
     .venv/bin/python scripts/spike_x2r_qs_event_capture.py
 
 Output: prints a timeline of every HTTP response + WS frame across

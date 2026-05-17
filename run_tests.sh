@@ -30,6 +30,6 @@ fi
 # match what cfg declares). Pre-existing values are never useful: the runner
 # is the sole source of truth for these, populated from cfg.auth.aws_profile,
 # the STS+ListUsers derivation, and cfg.default_l2_instance respectively.
-unset AWS_PROFILE QS_E2E_USER_ARN QS_GEN_TEST_L2_INSTANCE
+unset AWS_PROFILE RECON_E2E_USER_ARN RECON_GEN_TEST_L2_INSTANCE
 
 exec .venv/bin/python -m recon_gen._dev.runner "$@"

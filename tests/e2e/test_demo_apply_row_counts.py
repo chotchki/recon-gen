@@ -28,8 +28,8 @@ from recon_gen.common.config import Config, load_config
 from recon_gen.common.db import connect_demo_db
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
-    QS_GEN_CONFIG,
-    QS_GEN_TEST_L2_INSTANCE,
+    RECON_GEN_CONFIG,
+    RECON_GEN_TEST_L2_INSTANCE,
 )
 from recon_gen.common.l2 import L2Instance, load_instance
 
@@ -48,7 +48,7 @@ _SMOKE_SUFFIXES = (
 def _load_cfg() -> Config:
     """Same cfg-resolution pattern as ``test_dataset_sql_smoke.py``."""
     try:
-        explicit = QS_GEN_CONFIG.get_or_none()
+        explicit = RECON_GEN_CONFIG.get_or_none()
     except EnvVarInvalid:
         explicit = None
     if explicit is not None:
@@ -66,7 +66,7 @@ def _load_cfg() -> Config:
 
 
 def _load_l2() -> L2Instance:
-    override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
+    override = RECON_GEN_TEST_L2_INSTANCE.get_or_none()
     if override is not None:
         return load_instance(override)
     return default_l2_instance()

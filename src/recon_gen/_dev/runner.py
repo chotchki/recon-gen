@@ -52,20 +52,20 @@ if TYPE_CHECKING:
     from recon_gen.common.config import Config
 
 from recon_gen.common.env_keys import (
-    QS_E2E_PAGE_TIMEOUT,
-    QS_E2E_USER_ARN,
-    QS_GEN_CONFIG,
-    QS_GEN_DB_TABLE_PREFIX,
-    QS_GEN_DEMO_DATABASE_URL,
-    QS_GEN_DEPLOYMENT_NAME,
-    QS_GEN_E2E,
-    QS_GEN_FUZZ_SEED,
-    QS_GEN_LAYER,
-    QS_GEN_RUN_DIR,
-    QS_GEN_RUNNER_CI,
-    QS_GEN_RUNNER_YES,
-    QS_GEN_TEST_L2_INSTANCE,
-    QS_GEN_TRACE_ALL,
+    RECON_E2E_PAGE_TIMEOUT,
+    RECON_E2E_USER_ARN,
+    RECON_GEN_CONFIG,
+    RECON_GEN_DB_TABLE_PREFIX,
+    RECON_GEN_DEMO_DATABASE_URL,
+    RECON_GEN_DEPLOYMENT_NAME,
+    RECON_GEN_E2E,
+    RECON_GEN_FUZZ_SEED,
+    RECON_GEN_LAYER,
+    RECON_GEN_RUN_DIR,
+    RECON_GEN_RUNNER_CI,
+    RECON_GEN_RUNNER_YES,
+    RECON_GEN_TEST_L2_INSTANCE,
+    RECON_GEN_TRACE_ALL,
 )
 from recon_gen.common.variant import (
     DialectCode,
@@ -149,7 +149,7 @@ _RUN_ID_PATTERN: Final = re.compile(r"^\d{8}T\d{6}Z-\w+(?:-dirty)?$")
 # Probe kinds (matched to _probe_* function names):
 #   "aws"             — AWS creds present + not expired (sts:GetCallerIdentity).
 #   "docker"          — Docker daemon reachable (`docker ps`).
-#   "qs_arn"          — QS_E2E_USER_ARN set (browser e2e signs embed URLs as this user).
+#   "qs_arn"          — RECON_E2E_USER_ARN set (browser e2e signs embed URLs as this user).
 #   "aws_rds_running" — Y.2.gate.l.3 — cfg-declared RDS cluster + instance
 #                       are 'available'. Refuses dispatch BEFORE container
 #                       spin-up so a stopped cluster doesn't burn ~5min of
@@ -294,7 +294,7 @@ def _probe_docker() -> ProbeFailure | None:
 
 
 def _probe_qs_e2e_user_arn() -> ProbeFailure | None:
-    """Check that the runner can satisfy ``QS_E2E_USER_ARN``.
+    """Check that the runner can satisfy ``RECON_E2E_USER_ARN``.
 
     Three paths are accepted (any one passes the probe):
 
@@ -313,7 +313,7 @@ def _probe_qs_e2e_user_arn() -> ProbeFailure | None:
     "operator runs against external Aurora with `auth:` block in
     `run/config.postgres.yaml`" case without per-variant context.
     """
-    if QS_E2E_USER_ARN.get_or_none():
+    if RECON_E2E_USER_ARN.get_or_none():
         return None
     cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
     if cfg_path is not None:
@@ -330,7 +330,7 @@ def _probe_qs_e2e_user_arn() -> ProbeFailure | None:
     return ProbeFailure(
         kind="qs_arn_unset",
         message=(
-            "QS_E2E_USER_ARN unset and no cfg auth block found. "
+            "RECON_E2E_USER_ARN unset and no cfg auth block found. "
             "Either export the QuickSight user ARN, or add an "
             "`auth: { aws_profile: <name> }` block to "
             "run/config.<dialect>.yaml (combined spike: "
@@ -484,14 +484,14 @@ class RunOptions:
 def resolve_fuzz_seed_value() -> int:
     """Y.2.gate.c.6.xdist-safety — resolve the seed for this runner invocation.
 
-    Priority: ``QS_GEN_FUZZ_SEED`` env (operator pin for failure repro) > random
+    Priority: ``RECON_GEN_FUZZ_SEED`` env (operator pin for failure repro) > random
     per session (`secrets.randbits(32)`). Per audit §7.11 (LOCKED): default = 1
     random seed per run; cumulative coverage emerges across many runs. The seed
     is pinned across xdist workers within a single run so parametrize collection
     is deterministic (otherwise each worker rolls its own seed → collection
     diverges → ``Different tests were collected`` error).
     """
-    override = QS_GEN_FUZZ_SEED.get_or_none()
+    override = RECON_GEN_FUZZ_SEED.get_or_none()
     if override is not None:
         return override
     return secrets.randbits(32)
@@ -535,7 +535,7 @@ def _layer_command(
 
     ``variant_env`` (Y.2.gate.c.5) — env_overrides the per-variant setup
     already injected (cfg path, L2 path, AWS profile, QS user ARN). The
-    deploy layer reads `QS_GEN_CONFIG` + `QS_GEN_TEST_L2_INSTANCE` from
+    deploy layer reads `RECON_GEN_CONFIG` + `RECON_GEN_TEST_L2_INSTANCE` from
     here to construct the `recon-gen json apply` invocation; api +
     browser layers don't need it directly (env passes through to the
     pytest subprocess via the surrounding dispatch_layer).
@@ -547,28 +547,28 @@ def _layer_command(
     same gate. No separate runner layer; pyright duration folds into the
     unit layer's wall-clock.
 
-    ``QS_GEN_LAYER`` + ``QS_GEN_RUN_DIR`` are threaded through to every
+    ``RECON_GEN_LAYER`` + ``RECON_GEN_RUN_DIR`` are threaded through to every
     pytest subprocess so ``tests/conftest.py``'s makereport hook (c.2)
     can write per-test timings into the right ``runs/<run-id>/timings/``
     file.
 
     Y.2.gate.c.7 — `options.only` adds `-k <expr>` to pytest invocations;
-    `options.trace_all` exports `QS_GEN_TRACE_ALL=1` (consumed by c.11
+    `options.trace_all` exports `RECON_GEN_TRACE_ALL=1` (consumed by c.11
     browser fixtures).
 
     Y.2.gate.c.6.xdist-safety — `options.fuzz_seed_value` exports
-    ``QS_GEN_FUZZ_SEED=<N>`` so all xdist workers see the same seed and
+    ``RECON_GEN_FUZZ_SEED=<N>`` so all xdist workers see the same seed and
     parametrize collection is deterministic.
     """
     opts = options or RunOptions()
     env_addl = {
-        QS_GEN_RUN_DIR.name: str(run_dir),
-        QS_GEN_LAYER.name: layer,
+        RECON_GEN_RUN_DIR.name: str(run_dir),
+        RECON_GEN_LAYER.name: layer,
     }
     if opts.trace_all:
-        env_addl[QS_GEN_TRACE_ALL.name] = "1"
+        env_addl[RECON_GEN_TRACE_ALL.name] = "1"
     if opts.fuzz_seed_value is not None:
-        env_addl[QS_GEN_FUZZ_SEED.name] = str(opts.fuzz_seed_value)
+        env_addl[RECON_GEN_FUZZ_SEED.name] = str(opts.fuzz_seed_value)
     # Y.2.gate.k.1.coverage — every pytest layer (everything except `deploy`,
     # which is a `recon-gen json apply` CLI call) writes a per-(variant,
     # layer) `.coverage.<variant>.<layer>` data file when `--coverage` is set.
@@ -584,7 +584,7 @@ def _layer_command(
         else []
     )
     if opts.coverage and _is_pytest_layer:
-        # COVERAGE_FILE is coverage.py's standard env var (not a QS_GEN_*
+        # COVERAGE_FILE is coverage.py's standard env var (not a RECON_GEN_*
         # registry var); set it on the layer's subprocess env directly.
         env_addl["COVERAGE_FILE"] = str(run_dir / f".coverage.{run_dir.name}.{layer}")
     if layer == "unit":
@@ -607,7 +607,7 @@ def _layer_command(
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
         return (cmd, env_addl)
     if layer == "db":
-        # 3a — DB-touching pytest (behind QS_GEN_E2E=1). Three test files:
+        # 3a — DB-touching pytest (behind RECON_GEN_E2E=1). Three test files:
         #   - test_dataset_sql_smoke.py: parametrized over 37 datasets;
         #     substitutes QS `<<$param>>` placeholders with declared
         #     defaults, wraps in `WHERE 1=0`, runs against live DB.
@@ -617,10 +617,10 @@ def _layer_command(
         #   - test_audit_pdf_render_verify.py: invokes
         #     `recon-gen audit apply --execute` + `audit verify`
         #     against the variant's seeded DB (k.1.absorb-audit —
-        #     Phase 2.5). Reads QS_GEN_TEST_L2_INSTANCE so the audit
+        #     Phase 2.5). Reads RECON_GEN_TEST_L2_INSTANCE so the audit
         #     CLI picks the variant's synthesized yaml and finds the
         #     `<spec.name>_*` prefixed tables the seed populated.
-        # All three flow through the same QS_GEN_TEST_L2_INSTANCE-aware
+        # All three flow through the same RECON_GEN_TEST_L2_INSTANCE-aware
         # test resolution, so the variant's synthesized prefix is the
         # one source of truth for which tables to query / render from.
         # Real DB connection comes from cfg; until cfg loading lands the test
@@ -637,7 +637,7 @@ def _layer_command(
         # j.6 — see unit layer comment.
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
-        return (cmd, {**env_addl, QS_GEN_E2E.name: "1"})
+        return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
     if layer == "app2":
         # b.3.impl.layer — App2 e2e (HTMX dialect, Playwright WebKit
         # against the App2 Starlette server). Stub-fetcher renderer tests:
@@ -647,8 +647,8 @@ def _layer_command(
         # repeated-key `?param_<name>=A&param_<name>=B` refetch wire).
         # `test_html2_executives_live.py` uses `make_tree_db_fetcher(
         # tree_app, cfg)` against the variant DB — `connect_demo_db(cfg)`
-        # reads `QS_GEN_DEMO_DATABASE_URL` env override (config.py:364),
-        # so the variant URL flows through naturally. Behind `QS_GEN_E2E=1`
+        # reads `RECON_GEN_DEMO_DATABASE_URL` env override (config.py:364),
+        # so the variant URL flows through naturally. Behind `RECON_GEN_E2E=1`
         # like every other tests/e2e/ file. NO AWS contact (audit §7.10 LOCKED).
         #
         # X.2.u.6.followon — `test_dashboard_driver.py` joins the list: its 8
@@ -659,8 +659,8 @@ def _layer_command(
         # Z.B.14 (2026-05-15) — `-m "not browser"` deselects the 3
         # `@pytest.mark.browser` tests in `test_dashboard_driver.py`
         # (`test_qs_l1_*`). Earlier reasoning that they "skip cleanly here
-        # (no `QS_E2E_USER_ARN`)" is no longer true: Y.2.gate.h.1 made the
-        # runner auto-derive `QS_E2E_USER_ARN` from `cfg.auth.aws_profile`,
+        # (no `RECON_E2E_USER_ARN`)" is no longer true: Y.2.gate.h.1 made the
+        # runner auto-derive `RECON_E2E_USER_ARN` from `cfg.auth.aws_profile`,
         # so the QS-bound tests now actually try to run pre-deploy and probe
         # whatever dashboard happens to be left in QS from a prior run
         # (cross-cell coupling). The Z.B.12 verification matrix surfaced
@@ -687,11 +687,11 @@ def _layer_command(
         # j.6 — see unit layer comment.
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
-        return (cmd, {**env_addl, QS_GEN_E2E.name: "1"})
+        return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
     if layer == "deploy":
         # Y.2.gate.c.5.deploy — `recon-gen json apply --execute` against
         # the cfg + L2 the runner discovered. Two cfg-path sources, in order:
-        # (1) `variant_env[QS_GEN_CONFIG]` — `_run_one_variant` only injects
+        # (1) `variant_env[RECON_GEN_CONFIG]` — `_run_one_variant` only injects
         #     this for non-default variants (local-pg / local-oracle /
         #     local-sqlite, where the per-variant cfg matches the variant's
         #     dialect-flavored DB). For the default variant `_run_one_variant`
@@ -699,16 +699,16 @@ def _layer_command(
         #     subprocess-side via `tests/e2e/conftest.py` etc.
         # (2) Fall back to `_resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)`
         #     so the default variant still finds run/config.{postgres,oracle}.yaml.
-        # L2 path (`QS_GEN_TEST_L2_INSTANCE`) is always set by `_run_one_variant`
+        # L2 path (`RECON_GEN_TEST_L2_INSTANCE`) is always set by `_run_one_variant`
         # when cfg.default_l2_instance is configured (h.6); when it isn't we
         # genuinely can't deploy and fall through to the dispatch-skip path
         # with an actionable error.
         ve = variant_env or {}
-        cfg_str = ve.get(QS_GEN_CONFIG.name)
+        cfg_str = ve.get(RECON_GEN_CONFIG.name)
         if cfg_str is None:
             fallback_cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
             cfg_str = str(fallback_cfg_path) if fallback_cfg_path is not None else None
-        l2_str = ve.get(QS_GEN_TEST_L2_INSTANCE.name)
+        l2_str = ve.get(RECON_GEN_TEST_L2_INSTANCE.name)
         if cfg_str is None or l2_str is None:
             # Caller's dispatch_layer will print `dispatch-skip` — operator
             # gets a clear "set cfg.default_l2_instance:" pointer because
@@ -732,7 +732,7 @@ def _layer_command(
         # Y.2.gate.c.5.api — boto3-only e2e tests verifying deployed QS
         # resources via `describe_*` calls. Pytest mark `api` (set by
         # pytestmark in every e2e file) selects the right files; no
-        # hardcoded test-file list to drift. Behind `QS_GEN_E2E=1`.
+        # hardcoded test-file list to drift. Behind `RECON_GEN_E2E=1`.
         # Default `-n auto` for AWS-bound parallelism speed-up; operator
         # can override via `--parallel`.
         cmd = [
@@ -742,13 +742,13 @@ def _layer_command(
             cmd += ["-k", opts.only]
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
-        return (cmd, {**env_addl, QS_GEN_E2E.name: "1"})
+        return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
     if layer == "browser":
         # Y.2.gate.c.5.browser — Playwright WebKit e2e against deployed QS
         # embed URLs. Pytest mark `browser`. Default `-n 4` per existing
         # `./run_e2e.sh` pattern (browser tier is heavy enough that 8+
-        # workers thrash QS embed limits). Behind `QS_GEN_E2E=1`.
-        # `QS_E2E_USER_ARN` already in subprocess env via h.1 derivation.
+        # workers thrash QS embed limits). Behind `RECON_GEN_E2E=1`.
+        # `RECON_E2E_USER_ARN` already in subprocess env via h.1 derivation.
         #
         # Z.B.12-followup (2026-05-15) — split into two sequential pytest
         # invocations via a shell wrapper:
@@ -816,9 +816,9 @@ def _layer_command(
         # (tests/e2e/conftest.py) is fine for a local-pg container but too
         # tight for the `aw` target's remote Aurora / Oracle. Operator-set
         # value wins.
-        browser_env = {**env_addl, QS_GEN_E2E.name: "1"}
-        if QS_E2E_PAGE_TIMEOUT.name not in os.environ:
-            browser_env[QS_E2E_PAGE_TIMEOUT.name] = "60000"
+        browser_env = {**env_addl, RECON_GEN_E2E.name: "1"}
+        if RECON_E2E_PAGE_TIMEOUT.name not in os.environ:
+            browser_env[RECON_E2E_PAGE_TIMEOUT.name] = "60000"
         return (cmd, browser_env)
     # Fallthrough: unknown layer name. Return None so dispatch prints
     # `dispatch-skip` rather than crashing — easier-to-triage failure mode
@@ -925,7 +925,7 @@ def dispatch_layer(
     bug. Stubs print a clear `dispatch-skip` line so the operator knows.
 
     Y.2.gate.b.2.impl — ``variant_env`` (e.g.,
-    ``{"QS_GEN_DEMO_DATABASE_URL": "<container-url>"}``) gets merged into
+    ``{"RECON_GEN_DEMO_DATABASE_URL": "<container-url>"}``) gets merged into
     the subprocess env so the variant's resources (Docker container
     URL etc.) are visible to pytest fixtures + cfg loaders inside the
     subprocess.
@@ -1004,7 +1004,7 @@ def dispatch_layer(
         )
     # Y.2.gate.b.2.impl — variant_env only applies to layers that
     # actually need a DB. Unit doesn't (in-process tests / pyright);
-    # leaking QS_GEN_DEMO_DATABASE_URL into the unit subprocess
+    # leaking RECON_GEN_DEMO_DATABASE_URL into the unit subprocess
     # contaminates tests that assert "no demo_database_url is set".
     effective_variant_env = (
         variant_env if variant_env and layer in DB_TOUCHING_LAYERS else {}
@@ -1353,7 +1353,7 @@ def is_layer_cached_green(layer: str, *, variant: str = "default") -> bool:
 # Aurora/Oracle (`aw`).
 
 # Layers whose subprocess needs the variant's DB connection threaded
-# through (QS_GEN_DEMO_DATABASE_URL etc.). Unit doesn't need it.
+# through (RECON_GEN_DEMO_DATABASE_URL etc.). Unit doesn't need it.
 # `app2` (b.3.impl.layer) reads the variant DB via the App2 fetcher
 # (`make_tree_db_fetcher`), so it lives here.
 DB_TOUCHING_LAYERS: Final = ("db", "app2", "deploy", "api", "browser")
@@ -1480,7 +1480,7 @@ def _setup_local_sqlite() -> tuple[dict[str, str], object | None]:
       ``Config`` validators (the local-sqlite variant never touches
       AWS — these fields are required by the loader but unused).
 
-    Both ``QS_GEN_DEMO_DATABASE_URL`` and ``QS_GEN_CONFIG`` end up in
+    Both ``RECON_GEN_DEMO_DATABASE_URL`` and ``RECON_GEN_CONFIG`` end up in
     the env overrides so DB-touching layer subprocesses (``db``,
     ``app2``) load the right cfg + connect to the right file.
     """
@@ -1491,7 +1491,7 @@ def _setup_local_sqlite() -> tuple[dict[str, str], object | None]:
     cfg_path = tmp_dir / "config.sqlite.yaml"
     # Z.C — synth cfg uses ``deployment_name`` + ``db_table_prefix``
     # (Z.C.2 collapse). The runner injects per-cell overrides via
-    # QS_GEN_DEPLOYMENT_NAME / QS_GEN_DB_TABLE_PREFIX env vars in
+    # RECON_GEN_DEPLOYMENT_NAME / RECON_GEN_DB_TABLE_PREFIX env vars in
     # ``_run_one_variant`` so multi-cell parallel runs don't collide
     # — the values written here are the per-invocation defaults that
     # apply when a cell doesn't override.
@@ -1504,8 +1504,8 @@ def _setup_local_sqlite() -> tuple[dict[str, str], object | None]:
         f"db_table_prefix: \"qsgen_sqlite\"\n"
     )
     env: dict[str, str] = {
-        QS_GEN_DEMO_DATABASE_URL.name: f"sqlite:///{db_path}",
-        QS_GEN_CONFIG.name: str(cfg_path),
+        RECON_GEN_DEMO_DATABASE_URL.name: f"sqlite:///{db_path}",
+        RECON_GEN_CONFIG.name: str(cfg_path),
     }
     return env, _SqliteHandle(db_path=db_path, cfg_path=cfg_path)
 
@@ -1647,7 +1647,7 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
     - ``(or, lo)``: gvenzl/oracle-free:23-faststart testcontainer;
       URL override.
     - ``(sl, lo)``: per-invocation SQLite tempdir + cfg; both
-      ``QS_GEN_DEMO_DATABASE_URL`` and ``QS_GEN_CONFIG`` overrides
+      ``RECON_GEN_DEMO_DATABASE_URL`` and ``RECON_GEN_CONFIG`` overrides
       (no on-disk cfg under ``run/`` for sqlite — it's ephemeral).
     - ``(sl, aw)``: rejected upstream by ``VariantSpec.is_valid()``
       (sqlite is file-based; QS can't reach it remotely). Defensive
@@ -1663,17 +1663,17 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
         return {}, None
     # Y.2.gate.k.1+k.6 — runner CI-mode: skip Docker for lo targets
     # when the workflow YAML pre-provisions the DB via GHA service
-    # containers. Operator (or workflow) sets QS_GEN_RUNNER_CI=1 +
-    # QS_GEN_DEMO_DATABASE_URL=<service-container-url>; setup_variant
+    # containers. Operator (or workflow) sets RECON_GEN_RUNNER_CI=1 +
+    # RECON_GEN_DEMO_DATABASE_URL=<service-container-url>; setup_variant
     # is then a no-op and the variant URL passes through unchanged.
     # SQLite has no container to skip — but we still honor CI mode
     # for symmetry (the workflow can pre-create the SQLite file).
-    if QS_GEN_RUNNER_CI.get_or_none():
+    if RECON_GEN_RUNNER_CI.get_or_none():
         # Loud-fail if the operator set CI mode but forgot the URL —
         # we'd otherwise silently fall back to cfg.demo_database_url
         # and break in confusing ways downstream.
-        url = QS_GEN_DEMO_DATABASE_URL.require()
-        return {QS_GEN_DEMO_DATABASE_URL.name: url}, None
+        url = RECON_GEN_DEMO_DATABASE_URL.require()
+        return {RECON_GEN_DEMO_DATABASE_URL.name: url}, None
     # target == "lo" — local container or sqlite tempfile.
     if spec.dialect == "pg":
         # Lazy-import: testcontainers requires Docker, which not every
@@ -1685,7 +1685,7 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
         container = PostgresContainer("postgres:17-alpine")
         container.start()
         raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
-        return {QS_GEN_DEMO_DATABASE_URL.name: _normalize_pg_url(raw_url)}, container
+        return {RECON_GEN_DEMO_DATABASE_URL.name: _normalize_pg_url(raw_url)}, container
     if spec.dialect == "or":
         # Y.2.gate.j.5 — Oracle container reuse. Image cold-start is
         # ~30-60s; recreating per chain run dominates iteration time.
@@ -1700,7 +1700,7 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
         url, handle = _get_or_start_oracle_container(
             _oracle_container_name_for(spec), ORACLE_REUSE_PASSWORD,
         )
-        return {QS_GEN_DEMO_DATABASE_URL.name: url}, handle
+        return {RECON_GEN_DEMO_DATABASE_URL.name: url}, handle
     if spec.dialect == "sl":
         # Y.2.gate.b.2.impl.sqlite — no Docker, no network. Create
         # a tempdir with a SQLite DB file + minimal cfg pointing at
@@ -1761,11 +1761,11 @@ def _dump_top_queries_for_variant(
     out_path = out_dir / "top-queries.md"
     title = f"Top expensive queries — {spec.name}"
 
-    cfg_path = variant_env.get(QS_GEN_CONFIG.name)
+    cfg_path = variant_env.get(RECON_GEN_CONFIG.name)
     if not cfg_path:
         out_path.write_text(perf.format_skipped(
             title=title, dialect="?",
-            reason=f"no {QS_GEN_CONFIG.name} in variant_env",
+            reason=f"no {RECON_GEN_CONFIG.name} in variant_env",
         ))
         return
 
@@ -1862,7 +1862,7 @@ def teardown_variant(handle: object | None) -> None:
 # Y.2.gate.b.2.impl.schema — non-default variants spin up empty
 # containers; the db layer (and downstream layers) need the schema
 # applied + data seeded + matviews refreshed before tests can run.
-# Cfg discovery priority for local-pg: QS_GEN_CONFIG env override
+# Cfg discovery priority for local-pg: RECON_GEN_CONFIG env override
 # wins (operator pin), else run/config.postgres.yaml (PG-dialect cfg
 # the container expects). run/config.yaml is intentionally skipped —
 # it may be Oracle-flavored, which doesn't match a Postgres container.
@@ -1882,7 +1882,7 @@ def _resolve_seed_config(candidates: tuple[str, ...]) -> Path | None:
     fallback list (e.g. ``("run/config.postgres.yaml",)`` for
     local-pg).
 
-    QS_GEN_CONFIG always wins (operator pin); the candidates list is
+    RECON_GEN_CONFIG always wins (operator pin); the candidates list is
     the per-variant default. Returns None if nothing matches; caller
     surfaces the failure with operator-actionable guidance. An
     explicit pin at a non-existent path returns None (matches the
@@ -1892,7 +1892,7 @@ def _resolve_seed_config(candidates: tuple[str, ...]) -> Path | None:
     # Read the raw value to honor the "non-existent → None" contract
     # (registry's must_be_file validator would otherwise raise on a
     # bad explicit pin, but this code path wants a soft None).
-    explicit = os.environ.get(QS_GEN_CONFIG.name)
+    explicit = os.environ.get(RECON_GEN_CONFIG.name)
     if explicit:
         candidate = Path(explicit)
         if candidate.is_absolute():
@@ -1910,7 +1910,7 @@ def _resolve_seed_config_for_dialect(dialect: DialectCode) -> Path | None:
     """Per-dialect cfg dispatcher — returns the dialect-flavored cfg
     for ``pg`` / ``or``, ``None`` for ``sl`` (the per-invocation
     cfg is generated by ``setup_variant`` and threaded via
-    ``env_overrides[QS_GEN_CONFIG]``, not discovered on disk).
+    ``env_overrides[RECON_GEN_CONFIG]``, not discovered on disk).
 
     For ``aw`` targets the same per-dialect cfg is also right —
     operator's external Aurora is already addressable via
@@ -1927,7 +1927,7 @@ def _resolve_seed_config_for_dialect(dialect: DialectCode) -> Path | None:
 
 # Y.2.gate.h+i.0 — runner-side cfg discovery for AWS auth. Used by
 # ``_run_one_variant`` to load the cfg in the parent process so we can
-# inject ``AWS_PROFILE`` and derive ``QS_E2E_USER_ARN`` before
+# inject ``AWS_PROFILE`` and derive ``RECON_E2E_USER_ARN`` before
 # dispatching layers. Variant-specific cfg wins (so local-pg's auth
 # matches its dialect-flavored cfg); falls through to a generic
 # candidate list for ``default`` (the operator's external DB).
@@ -2042,12 +2042,12 @@ def seed_variant(
            (they don't auto-refresh — see CLAUDE.md operational
            footguns).
 
-    ``env_overrides`` (typically ``{"QS_GEN_DEMO_DATABASE_URL":
+    ``env_overrides`` (typically ``{"RECON_GEN_DEMO_DATABASE_URL":
     "<container-url>"}``) flows to each subprocess; ``load_config``
     in the subprocess picks up the env override (config.py:364) and
     writes against the container instead of the cfg-file URL.
 
-    L2 instance follows ``QS_GEN_TEST_L2_INSTANCE``; ``_run_one_variant``
+    L2 instance follows ``RECON_GEN_TEST_L2_INSTANCE``; ``_run_one_variant``
     sets it per-spec from the scenario code (sp/sq/us → fixture path).
 
     Raises ``RuntimeError`` on cfg-discovery failure or any subprocess
@@ -2064,32 +2064,32 @@ def seed_variant(
         if cfg_path is None:
             raise RuntimeError(
                 f"variant {spec.name}: no postgres-dialect cfg found "
-                f"(checked QS_GEN_CONFIG env, run/config.postgres.yaml). "
+                f"(checked RECON_GEN_CONFIG env, run/config.postgres.yaml). "
                 f"Create run/config.postgres.yaml (dialect: postgres) or "
-                f"set QS_GEN_CONFIG to a postgres-dialect cfg path."
+                f"set RECON_GEN_CONFIG to a postgres-dialect cfg path."
             )
     elif spec.dialect == "or":
         cfg_path = _resolve_seed_config_for_dialect("or")
         if cfg_path is None:
             raise RuntimeError(
                 f"variant {spec.name}: no oracle-dialect cfg found "
-                f"(checked QS_GEN_CONFIG env, run/config.oracle.yaml). "
+                f"(checked RECON_GEN_CONFIG env, run/config.oracle.yaml). "
                 f"Create run/config.oracle.yaml (dialect: oracle) or "
-                f"set QS_GEN_CONFIG to an oracle-dialect cfg path."
+                f"set RECON_GEN_CONFIG to an oracle-dialect cfg path."
             )
     elif spec.dialect == "sl":
         # Y.2.gate.b.2.impl.sqlite — cfg path comes from
         # ``setup_variant`` (it generates the per-invocation cfg + DB
         # file under a tempdir and returns the cfg path in
-        # ``env_overrides[QS_GEN_CONFIG]``). No on-disk cfg in
+        # ``env_overrides[RECON_GEN_CONFIG]``). No on-disk cfg in
         # ``run/`` — the SQLite variant is by-design ephemeral
         # per-invocation. If the override isn't there, setup_variant
         # was bypassed; fail loud.
-        cfg_str = env_overrides.get(QS_GEN_CONFIG.name)
+        cfg_str = env_overrides.get(RECON_GEN_CONFIG.name)
         if not cfg_str:
             raise RuntimeError(
                 f"variant {spec.name}: setup_variant must set "
-                f"QS_GEN_CONFIG in env_overrides (it generates the "
+                f"RECON_GEN_CONFIG in env_overrides (it generates the "
                 f"per-invocation cfg). Did the caller skip setup_variant?"
             )
         cfg_path = Path(cfg_str)
@@ -2099,14 +2099,14 @@ def seed_variant(
     env = {**os.environ, **env_overrides}
     l2_arg: list[str] = []
     # m.2.g hotfix — env_overrides wins over os.environ. Per-cell
-    # injection (`_run_one_variant` sets QS_GEN_TEST_L2_INSTANCE per
+    # injection (`_run_one_variant` sets RECON_GEN_TEST_L2_INSTANCE per
     # spec) MUST flow to the seed CLI; reading os.environ directly
     # would give every parallel cell the same L2 (or none), causing
     # cells to seed under the wrong prefix and downstream smoke tests
     # to fail with "table does not exist" against the right prefix.
     l2_path_str = env_overrides.get(
-        QS_GEN_TEST_L2_INSTANCE.name,
-    ) or QS_GEN_TEST_L2_INSTANCE.get_or_none()
+        RECON_GEN_TEST_L2_INSTANCE.name,
+    ) or RECON_GEN_TEST_L2_INSTANCE.get_or_none()
     if l2_path_str:
         l2_arg = ["--l2", str(l2_path_str)]
 
@@ -2256,7 +2256,7 @@ def _options_from_args(args: argparse.Namespace) -> RunOptions:
     (most flags `default=False`/`default=None` from `_build_parser`).
 
     Y.2.gate.c.6.xdist-safety: ``fuzz_seed_value`` is resolved here (not
-    argparse) — operator overrides via ``QS_GEN_FUZZ_SEED`` env (the canonical
+    argparse) — operator overrides via ``RECON_GEN_FUZZ_SEED`` env (the canonical
     pinning channel per audit §7.11), else random per invocation.
     """
     return RunOptions(
@@ -2313,7 +2313,7 @@ def _load_random_l2_yaml() -> Callable[[int], str]:
 
 def _resolve_l2_yaml_for_spec(spec: VariantSpec, run_dir: Path) -> Path:
     """Map ``spec.scenario`` → on-disk L2 YAML path. Threaded into
-    each variant's subprocess env via ``QS_GEN_TEST_L2_INSTANCE``
+    each variant's subprocess env via ``RECON_GEN_TEST_L2_INSTANCE``
     so the seed CLI + downstream e2e tests pick the right instance.
 
     m.4.f — ALL cells get a per-cell synthesized yaml under
@@ -2326,7 +2326,7 @@ def _resolve_l2_yaml_for_spec(spec: VariantSpec, run_dir: Path) -> Path:
     ``<spec.name>_*`` DB-table prefix. Z.C dropped the L2 yaml's
     ``instance:`` field entirely (loader now hard-rejects it) — the
     per-cell DB-table prefix moves to ``cfg.db_table_prefix`` via the
-    ``QS_GEN_DB_TABLE_PREFIX=qsgen_<spec.name>`` env override that
+    ``RECON_GEN_DB_TABLE_PREFIX=qsgen_<spec.name>`` env override that
     ``_run_one_variant`` injects per cell. Defensively pop any stray
     ``instance:`` key from the source (older fuzz output, hand-edited
     user yamls); the loader would reject it anyway.
@@ -2336,7 +2336,7 @@ def _resolve_l2_yaml_for_spec(spec: VariantSpec, run_dir: Path) -> Path:
       override. Sister cells (sp_pg_aw + sp_or_aw + sq_pg_aw + ...)
       deploy to non-colliding tables on shared external Aurora.
     - QS resource ID prefix becomes ``qsgen-<spec.name>`` via the
-      ``QS_GEN_DEPLOYMENT_NAME`` env override.
+      ``RECON_GEN_DEPLOYMENT_NAME`` env override.
     - Fuzz determinism preserved: same seed → same fuzzer output →
       same synthesized yaml (it's now byte-identical to the source).
 
@@ -2443,16 +2443,16 @@ def _run_one_variant(
     if spec.target == "lo":
         print(f"{terminal_prefix}runner: variant={spec.name} (spinning up container...)")
     variant_env, variant_handle = setup_variant(spec)
-    # Y.2.gate.b.2.impl.oracle — also thread QS_GEN_CONFIG into the
+    # Y.2.gate.b.2.impl.oracle — also thread RECON_GEN_CONFIG into the
     # layer subprocess env. Layers that load cfg (e.g.,
     # tests/e2e/test_dataset_sql_smoke.py reading run/config.yaml by
     # default) MUST pick up the dialect-matching cfg or the connector
     # selection (cfg.dialect → psycopg vs oracledb) mismatches the
-    # variant URL (env QS_GEN_DEMO_DATABASE_URL), producing
+    # variant URL (env RECON_GEN_DEMO_DATABASE_URL), producing
     # "invalid connection option oracle+oracledb://" from psycopg.
     dialect_cfg = _resolve_seed_config_for_dialect(spec.dialect)
-    if dialect_cfg is not None and QS_GEN_CONFIG.name not in variant_env:
-        variant_env[QS_GEN_CONFIG.name] = str(dialect_cfg)
+    if dialect_cfg is not None and RECON_GEN_CONFIG.name not in variant_env:
+        variant_env[RECON_GEN_CONFIG.name] = str(dialect_cfg)
 
     # Z.C.4 — per-cell ``deployment_name`` + ``db_table_prefix`` overrides
     # so multi-cell parallel runs (sp_pg_lo / sq_pg_lo / fuzz cells) don't
@@ -2470,14 +2470,14 @@ def _run_one_variant(
     # cap). DB prefix joins with `_`; QS-resource-ID prefix joins with
     # `-` (DB identifiers reject hyphens unquoted; QS resource IDs are
     # kebab-case). Use `qsgen` (no hyphen) as the literal prefix on both.
-    if QS_GEN_DEPLOYMENT_NAME.name not in variant_env:
-        variant_env[QS_GEN_DEPLOYMENT_NAME.name] = f"qsgen-{spec.name}"
-    if QS_GEN_DB_TABLE_PREFIX.name not in variant_env:
-        variant_env[QS_GEN_DB_TABLE_PREFIX.name] = f"qsgen_{spec.name}"
+    if RECON_GEN_DEPLOYMENT_NAME.name not in variant_env:
+        variant_env[RECON_GEN_DEPLOYMENT_NAME.name] = f"qsgen-{spec.name}"
+    if RECON_GEN_DB_TABLE_PREFIX.name not in variant_env:
+        variant_env[RECON_GEN_DB_TABLE_PREFIX.name] = f"qsgen_{spec.name}"
 
     # Y.2.gate.h+i.0 — AWS auth wiring. Inject AWS_PROFILE so subprocess
     # boto3 calls + AWS CLI invocations see the long-lived IAM-user creds
-    # (combined spike candidate C). Derive QS_E2E_USER_ARN from STS+ListUsers
+    # (combined spike candidate C). Derive RECON_E2E_USER_ARN from STS+ListUsers
     # so browser-layer embed signing works without operator-managed env vars.
     # Cfg-load failures here downgrade to "skip auth wiring + let layer
     # probes catch any operator-action need" — keeps unit/db layers running
@@ -2491,14 +2491,14 @@ def _run_one_variant(
             print(
                 f"{terminal_prefix}runner: auth-cfg load failed "
                 f"({type(exc).__name__}: {exc}); skipping AWS_PROFILE + "
-                f"QS_E2E_USER_ARN injection",
+                f"RECON_E2E_USER_ARN injection",
                 file=sys.stderr,
             )
             runner_cfg = None
         if runner_cfg is not None and runner_cfg.auth is not None:
             if runner_cfg.auth.aws_profile is not None:
                 variant_env["AWS_PROFILE"] = runner_cfg.auth.aws_profile
-            # Derive QS_E2E_USER_ARN only when chain reaches a layer
+            # Derive RECON_E2E_USER_ARN only when chain reaches a layer
             # that needs it (qs_arn dep). Avoids the boto3 import +
             # ~1s ListUsers cost on unit-only invocations.
             if any(
@@ -2506,10 +2506,10 @@ def _run_one_variant(
             ):
                 try:
                     arn = _derive_qs_user_arn(runner_cfg)
-                    variant_env[QS_E2E_USER_ARN.name] = arn
+                    variant_env[RECON_E2E_USER_ARN.name] = arn
                 except Exception as exc:  # noqa: BLE001 — surface as EXIT_NEEDS_OPERATOR
                     print(
-                        f"{terminal_prefix}runner: QS_E2E_USER_ARN derivation "
+                        f"{terminal_prefix}runner: RECON_E2E_USER_ARN derivation "
                         f"failed: {exc}",
                         file=sys.stderr,
                     )
@@ -2527,12 +2527,12 @@ def _run_one_variant(
     # the matrix axis is the source of truth, not whatever the cfg
     # happened to default to.
     l2_yaml = _resolve_l2_yaml_for_spec(spec, run_dir)
-    variant_env[QS_GEN_TEST_L2_INSTANCE.name] = str(l2_yaml)
+    variant_env[RECON_GEN_TEST_L2_INSTANCE.name] = str(l2_yaml)
     # m.4.f — the synthesized yaml's `instance` field IS spec.name,
     # so cfg.db_table_prefix downstream (Z.C — formerly
     # cfg.with_l2_instance_prefix(instance.instance)) produces per-cell-
     # unique QS resource IDs naturally. The explicit
-    # QS_GEN_L2_INSTANCE_PREFIX env override is no longer set by the
+    # RECON_GEN_L2_INSTANCE_PREFIX env override is no longer set by the
     # runner (the env var stays in env_keys/cfg as a general-purpose
     # escape hatch, just no longer needed here).
 
@@ -2716,7 +2716,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     auto-invoke any interactive flow (b.14.4).
 
     Y.2.gate.b.10 — for layers >= deploy, refuses on tracked-changes dirty
-    state unless `--allow-dirty-deploy` (or `QS_GEN_RUNNER_YES=1`) is set.
+    state unless `--allow-dirty-deploy` (or `RECON_GEN_RUNNER_YES=1`) is set.
 
     Then dispatches the chain (c.5): stop on first layer failure (b.9 LOCKED:
     cross-layer = sequential). Stubbed layers (deploy/api/browser pending cfg
@@ -2744,7 +2744,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     options = _options_from_args(args)
 
     if _is_deploy_or_later(args.layer) and _is_dirty():
-        if not options.allow_dirty_deploy and not QS_GEN_RUNNER_YES.get_or_none():
+        if not options.allow_dirty_deploy and not RECON_GEN_RUNNER_YES.get_or_none():
             print(
                 "runner: refusing to deploy: tracked changes present "
                 "(commit / stash, or pass --allow-dirty-deploy)",
@@ -2791,7 +2791,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     print(f"runner: run_dir={_rel_or_abs(run_dir)}")
     print(f"runner: up_to={args.layer}")
     if options.fuzz_seed_value is not None:
-        print(f"runner: fuzz_seed={options.fuzz_seed_value} (pin via QS_GEN_FUZZ_SEED env to repro)")
+        print(f"runner: fuzz_seed={options.fuzz_seed_value} (pin via RECON_GEN_FUZZ_SEED env to repro)")
 
     # Y.2.gate.n — unit prelude: run the variant-independent layer once,
     # before any matrix fan-out. Artifacts → runs/<id>/_prelude/unit/.
@@ -2987,7 +2987,7 @@ def _compose_specs_from_options(
 
 def _load_runner_cfg_for_lifecycle() -> Config | None:
     """Find + load the operator's cfg for the lifecycle commands. Same
-    discovery shape as ``_probe_aws_creds`` — QS_GEN_CONFIG override
+    discovery shape as ``_probe_aws_creds`` — RECON_GEN_CONFIG override
     first, then ``run/config.yaml`` / ``run/config.postgres.yaml`` /
     ``run/config.oracle.yaml``. Returns None when none found OR when
     the loaded cfg fails validation; caller surfaces operator-actionable
@@ -3111,7 +3111,7 @@ def _cmd_up_aws() -> int:
     cfg = _load_runner_cfg_for_lifecycle()
     if cfg is None:
         print(
-            "runner: up aws — no cfg discoverable. Set QS_GEN_CONFIG or "
+            "runner: up aws — no cfg discoverable. Set RECON_GEN_CONFIG or "
             "place run/config.{postgres,oracle}.yaml.",
             file=sys.stderr,
         )
@@ -3122,7 +3122,7 @@ def _cmd_up_aws() -> int:
             "runner: up aws — neither cfg.aws_pg_cluster_id nor "
             "cfg.aws_oracle_instance_id set. Add them to your cfg "
             "(see docs/audits/y_2_gate_l_ci_aws_provisioning.md) or "
-            "set QS_GEN_AWS_PG_CLUSTER_ID / QS_GEN_AWS_ORACLE_INSTANCE_ID.",
+            "set RECON_GEN_AWS_PG_CLUSTER_ID / RECON_GEN_AWS_ORACLE_INSTANCE_ID.",
             file=sys.stderr,
         )
         return EXIT_NEEDS_OPERATOR
@@ -3163,10 +3163,10 @@ def cmd_down(args: argparse.Namespace) -> int:
     idempotent + non-blocking (stop takes minutes; runner returns
     after the stop request is accepted, doesn't poll).
     """
-    if not args.yes and not QS_GEN_RUNNER_YES.get_or_none():
+    if not args.yes and not RECON_GEN_RUNNER_YES.get_or_none():
         print(
             "runner: 'down' is destructive — pass --yes "
-            "(or set QS_GEN_RUNNER_YES=1)",
+            "(or set RECON_GEN_RUNNER_YES=1)",
             file=sys.stderr,
         )
         return EXIT_NEEDS_OPERATOR
@@ -3226,7 +3226,7 @@ def _cmd_down_aws() -> int:
     cfg = _load_runner_cfg_for_lifecycle()
     if cfg is None:
         print(
-            "runner: down aws — no cfg discoverable. Set QS_GEN_CONFIG or "
+            "runner: down aws — no cfg discoverable. Set RECON_GEN_CONFIG or "
             "place run/config.{postgres,oracle}.yaml.",
             file=sys.stderr,
         )
@@ -3391,12 +3391,12 @@ def cmd_dump_last_errors(args: argparse.Namespace) -> int:
     Surfaces:
 
     - **Per failing layer**: layer name + exit code + duration +
-      cell-level env (cmd.json fields: ``QS_GEN_DEPLOYMENT_NAME``,
-      ``QS_GEN_FUZZ_SEED``, ``QS_GEN_TEST_L2_INSTANCE``).
+      cell-level env (cmd.json fields: ``RECON_GEN_DEPLOYMENT_NAME``,
+      ``RECON_GEN_FUZZ_SEED``, ``RECON_GEN_TEST_L2_INSTANCE``).
     - **Per failing test**: the ``FAILED ...`` summary line + the
       matched ``____ <test_id> ____`` traceback block from
       ``stdout.log`` (truncated at the next ``____`` / ``=====``).
-    - **Capture-artifact pointer**: ``$QS_GEN_RUN_DIR/browser/<sanitized
+    - **Capture-artifact pointer**: ``$RECON_GEN_RUN_DIR/browser/<sanitized
       test_id>/`` paths, with a loud warning if AA.H.6's 6 files
       (screenshot.png / dom.html / console.txt / network.txt /
       qs_errors.txt / trace.zip) are missing — AA.H.10 wired the hook
@@ -3482,8 +3482,8 @@ def cmd_dump_last_errors(args: argparse.Namespace) -> int:
             # Surface the high-signal env values — operator can derive
             # rest from the run-id + cmd.json directly.
             for key in (
-                "QS_GEN_DEPLOYMENT_NAME", "QS_GEN_FUZZ_SEED",
-                "QS_GEN_TEST_L2_INSTANCE",
+                "RECON_GEN_DEPLOYMENT_NAME", "RECON_GEN_FUZZ_SEED",
+                "RECON_GEN_TEST_L2_INSTANCE",
             ):
                 if key in env:
                     print(f"- `{key}={env[key]}`")
@@ -3622,7 +3622,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
 
     Replaces ``scripts/sweep_harness_orphans.py`` (deletion of the
     standalone script is `Y.2.gate.f.8`). Same default: dry-run
-    (collect + print). Pass ``--yes`` (or set ``QS_GEN_RUNNER_YES=1``,
+    (collect + print). Pass ``--yes`` (or set ``RECON_GEN_RUNNER_YES=1``,
     matching the destructive-op convention from `b.14.3`) to actually
     delete.
 
@@ -3644,7 +3644,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     # Soft-fallback: registry's must_be_file validator would raise on
     # a non-existent pin; sweep is best-effort + cfg discovery has
     # other candidates, so soak the absence rather than fail-loud.
-    explicit = os.environ.get(QS_GEN_CONFIG.name)
+    explicit = os.environ.get(RECON_GEN_CONFIG.name)
     if explicit:
         candidate = Path(explicit)
         if candidate.exists():
@@ -3662,7 +3662,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     if config_path is None:
         print(
             "runner: sweep — no config.yaml found in repo "
-            "(checked QS_GEN_CONFIG, run/config.yaml, config.yaml, "
+            "(checked RECON_GEN_CONFIG, run/config.yaml, config.yaml, "
             "run/config.{postgres,oracle}.yaml); cannot resolve "
             "AWS account/region.",
             file=sys.stderr,
@@ -3690,7 +3690,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
         "quicksight", region_name=cfg.aws_region,
     )
 
-    confirm = bool(args.yes) or bool(QS_GEN_RUNNER_YES.get_or_none())
+    confirm = bool(args.yes) or bool(RECON_GEN_RUNNER_YES.get_or_none())
     tag_key, tag_value = "Harness", "e2e"
 
     if not confirm:
@@ -3750,7 +3750,7 @@ Auth (Y.2.gate.h+i):
         aws_profile: "recon-gen-local"   # ~/.aws/credentials profile
         quicksight_user_arn: null             # optional explicit override
   When set, the runner injects AWS_PROFILE into every layer subprocess and
-  auto-derives QS_E2E_USER_ARN via STS+ListUsers — no env-var exports.
+  auto-derives RECON_E2E_USER_ARN via STS+ListUsers — no env-var exports.
   One-time IAM-user setup runbook + IAM policy json:
       docs/audits/y_2_gate_h_i_combined_spike.md   §6 (runbook), §7 (policy)
       docs/audits/_iam/recon-gen-local-policy.json
@@ -3858,7 +3858,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_up_to.add_argument(
         "--trace-all",
         action="store_true",
-        help="Playwright capture every test (failure-only is the default). Threads QS_GEN_TRACE_ALL=1 to subprocesses (consumed by c.11).",
+        help="Playwright capture every test (failure-only is the default). Threads RECON_GEN_TRACE_ALL=1 to subprocesses (consumed by c.11).",
     )
     p_up_to.add_argument(
         "--allow-dirty-deploy",

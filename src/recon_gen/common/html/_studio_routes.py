@@ -1943,7 +1943,7 @@ def make_studio_routes(
 
             roll_raw = form.get("roll")
             if isinstance(roll_raw, str) and roll_raw.strip():
-                # uint32 range matches QS_GEN_FUZZ_SEED's contract
+                # uint32 range matches RECON_GEN_FUZZ_SEED's contract
                 # (CLAUDE.md: "runner rolls a fresh random uint32 per
                 # invocation"). Trainer-mode UI is not a determinism
                 # path, so an unseeded random call is honest here.

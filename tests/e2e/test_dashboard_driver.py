@@ -9,11 +9,11 @@ Two legs:
 - The ``qs_driver`` fixture (QuickSight only) drives a *deployed*
   dashboard through ``QsEmbedDriver``, proving the QS facade works
   against a live embed. (Needs a live QuickSight account +
-  ``QS_E2E_USER_ARN`` — skips cleanly without.)
+  ``RECON_E2E_USER_ARN`` — skips cleanly without.)
 
 X.2.q.3 will fold a real app (L1) onto a single ``@parametrize(["qs",
 "app2"])`` fixture so one body verifies both renderers. Gated by
-``QS_GEN_E2E`` like every e2e (``conftest.py`` matches on path) and
+``RECON_GEN_E2E`` like every e2e (``conftest.py`` matches on path) and
 skips cleanly without Playwright.
 """
 

@@ -10,12 +10,12 @@ them by hand — and both flow through the test-layer-chain runner's
 
 - **pyright strict** (L.1.20) — type-checks the strict-scope include
   list (``pyproject.toml::tool.pyright.include``). Opt out:
-  ``QS_GEN_SKIP_PYRIGHT=1``.
+  ``RECON_GEN_SKIP_PYRIGHT=1``.
 - **biome** (the X.2.l.4 follow-on) — lints the App 2 JS + the JS test
   fixtures (``biome.jsonc::files.includes``). ``biome check`` exits
   non-zero on lint *errors* (e.g. ``noInnerDeclarations``) and zero on
   warnings — same "errors fail, warnings don't" policy as the project
-  config. Opt out: ``QS_GEN_SKIP_BIOME=1``. ``biome`` is a standalone
+  config. Opt out: ``RECON_GEN_SKIP_BIOME=1``. ``biome`` is a standalone
   Rust binary (brew locally / ``biomejs/setup-biome`` in CI), not a pip
   dep — when it's not on ``PATH`` the gate skips rather than failing.
   (No official Biome PyPI package yet — tracking biomejs/biome#8818; once
@@ -80,7 +80,7 @@ def pytest_sessionstart(session: pytest.Session) -> None:
             name="pyright strict",
             argv=[pyright],
             cwd=rootpath,
-            skip_env="QS_GEN_SKIP_PYRIGHT",
+            skip_env="RECON_GEN_SKIP_PYRIGHT",
             fail_msg="pyright strict failed — fix type errors before tests run.",
         )
 
@@ -92,6 +92,6 @@ def pytest_sessionstart(session: pytest.Session) -> None:
             # the default cap by the pre-existing style warnings.
             argv=[biome, "check", "--max-diagnostics=400"],
             cwd=rootpath,
-            skip_env="QS_GEN_SKIP_BIOME",
+            skip_env="RECON_GEN_SKIP_BIOME",
             fail_msg="biome found lint errors — fix the App 2 JS before tests run.",
         )

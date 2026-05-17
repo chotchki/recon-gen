@@ -46,7 +46,7 @@ def qs_driver_or_none(
 
     "QS available" = ``get_user_arn()`` resolves a QuickSight user ARN
     (either from cfg.auth.aws_profile derivation or the explicit
-    ``QS_E2E_USER_ARN`` env override). When unavailable, yields
+    ``RECON_E2E_USER_ARN`` env override). When unavailable, yields
     ``None`` — the caller decides whether to ``pytest.skip`` or run
     with reduced renderer coverage. (``per_dialect_qs_driver`` in
     ``test_audit_dashboard_agreement.py`` takes the latter path so

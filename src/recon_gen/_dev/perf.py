@@ -167,6 +167,6 @@ def dialect_name(dialect: Dialect) -> str:
 
     Mirrors the script's ``"postgres" if cfg.dialect is POSTGRES else
     "oracle"`` shape but covers SQLite explicitly. Used for
-    ``$QS_GEN_RUN_DIR/db/<dialect>/top-queries.md`` paths.
+    ``$RECON_GEN_RUN_DIR/db/<dialect>/top-queries.md`` paths.
     """
     return dialect.value

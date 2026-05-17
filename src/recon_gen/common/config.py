@@ -14,17 +14,17 @@ from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 import yaml
 
 from recon_gen.common.env_keys import (
-    QS_GEN_APP2_DB_POOL_SIZE,
-    QS_GEN_AWS_ACCOUNT_ID,
-    QS_GEN_AWS_ORACLE_INSTANCE_ID,
-    QS_GEN_AWS_PG_CLUSTER_ID,
-    QS_GEN_AWS_REGION,
-    QS_GEN_DATASOURCE_ARN,
-    QS_GEN_DB_TABLE_PREFIX,
-    QS_GEN_DEMO_DATABASE_URL,
-    QS_GEN_DEPLOYMENT_NAME,
-    QS_GEN_DIALECT,
-    QS_GEN_PRINCIPAL_ARNS,
+    RECON_GEN_APP2_DB_POOL_SIZE,
+    RECON_GEN_AWS_ACCOUNT_ID,
+    RECON_GEN_AWS_ORACLE_INSTANCE_ID,
+    RECON_GEN_AWS_PG_CLUSTER_ID,
+    RECON_GEN_AWS_REGION,
+    RECON_GEN_DATASOURCE_ARN,
+    RECON_GEN_DB_TABLE_PREFIX,
+    RECON_GEN_DEMO_DATABASE_URL,
+    RECON_GEN_DEPLOYMENT_NAME,
+    RECON_GEN_DIALECT,
+    RECON_GEN_PRINCIPAL_ARNS,
 )
 from recon_gen.common.sql import Dialect
 
@@ -118,7 +118,7 @@ PlantKind = Literal[
 # its knobs from this block. Defaults preserve byte-identical-to-locked-
 # seeds output: with `etl_datasource` unset and these knobs at defaults,
 # `emit_full_seed` produces today's locked seed unchanged. The cfg-level
-# `seed` is the persistent baseline; `QS_GEN_FUZZ_SEED` env or the studio
+# `seed` is the persistent baseline; `RECON_GEN_FUZZ_SEED` env or the studio
 # data-shaping panel's "Roll" button (X.4.h.4) can override per-deploy.
 # `only_template` and `derive_balances` are declared here but their
 # pipeline modes ship later (X.4.i.1 / X.4.i.2).
@@ -212,7 +212,7 @@ class Config:
     # Y.2.gate.h+i.0 — Local-runner AWS auth + QS embed-signing identity.
     # When set, the test-layer-chain runner injects ``AWS_PROFILE`` into
     # subprocess envs (per ``cfg.auth.aws_profile``) and auto-derives
-    # ``QS_E2E_USER_ARN`` from STS+ListUsers (or uses
+    # ``RECON_E2E_USER_ARN`` from STS+ListUsers (or uses
     # ``cfg.auth.quicksight_user_arn`` when explicitly set). Absent =
     # operator manages auth via ambient env vars (legacy behavior; CI
     # also uses ambient via OIDC). See combined spike for the full
@@ -229,7 +229,7 @@ class Config:
         default=False, init=False, repr=False, compare=False,
     )
     # Y.2.gate.h.6 — Path to the L2 institution YAML the operator's external
-    # DB has been seeded with. Runner injects ``QS_GEN_TEST_L2_INSTANCE=<path>``
+    # DB has been seeded with. Runner injects ``RECON_GEN_TEST_L2_INSTANCE=<path>``
     # into subprocess env_overrides so both the seed flow (passes ``--l2 <yaml>``
     # to schema/data CLI subcommands) and the dataset-SQL smoke test (reads
     # the env var to pick which L2's datasets to parametrize) align with the
@@ -515,9 +515,9 @@ def load_config(path: str | Path | None = None) -> Config:
     YAML keys map directly to Config fields (snake_case). ``principal_arns``
     may be a single string or a list; a legacy ``principal_arn`` key is also
     accepted as a single string.
-    Environment variables use uppercase with QS_GEN_ prefix:
-        QS_GEN_AWS_ACCOUNT_ID, QS_GEN_AWS_REGION, QS_GEN_DATASOURCE_ARN,
-        QS_GEN_RESOURCE_PREFIX, QS_GEN_PRINCIPAL_ARNS (comma-separated)
+    Environment variables use uppercase with RECON_GEN_ prefix:
+        RECON_GEN_AWS_ACCOUNT_ID, RECON_GEN_AWS_REGION, RECON_GEN_DATASOURCE_ARN,
+        RECON_GEN_RESOURCE_PREFIX, RECON_GEN_PRINCIPAL_ARNS (comma-separated)
 
     V.1.b: rejects unknown YAML keys and L2-only keys (theme, persona,
     rails, etc.) with a pointer to the L2 institution YAML.
@@ -550,23 +550,23 @@ def load_config(path: str | Path | None = None) -> Config:
     # at the boundary; any malformed override surfaces as
     # EnvVarInvalid carrying the env-var name + description.
     env_map = {
-        "aws_account_id": QS_GEN_AWS_ACCOUNT_ID,
-        "aws_region": QS_GEN_AWS_REGION,
-        "datasource_arn": QS_GEN_DATASOURCE_ARN,
-        "deployment_name": QS_GEN_DEPLOYMENT_NAME,
-        "db_table_prefix": QS_GEN_DB_TABLE_PREFIX,
-        "demo_database_url": QS_GEN_DEMO_DATABASE_URL,
-        "dialect": QS_GEN_DIALECT,
-        "app2_db_pool_size": QS_GEN_APP2_DB_POOL_SIZE,
-        "aws_pg_cluster_id": QS_GEN_AWS_PG_CLUSTER_ID,
-        "aws_oracle_instance_id": QS_GEN_AWS_ORACLE_INSTANCE_ID,
+        "aws_account_id": RECON_GEN_AWS_ACCOUNT_ID,
+        "aws_region": RECON_GEN_AWS_REGION,
+        "datasource_arn": RECON_GEN_DATASOURCE_ARN,
+        "deployment_name": RECON_GEN_DEPLOYMENT_NAME,
+        "db_table_prefix": RECON_GEN_DB_TABLE_PREFIX,
+        "demo_database_url": RECON_GEN_DEMO_DATABASE_URL,
+        "dialect": RECON_GEN_DIALECT,
+        "app2_db_pool_size": RECON_GEN_APP2_DB_POOL_SIZE,
+        "aws_pg_cluster_id": RECON_GEN_AWS_PG_CLUSTER_ID,
+        "aws_oracle_instance_id": RECON_GEN_AWS_ORACLE_INSTANCE_ID,
     }
     for cfg_key, spec in env_map.items():
         env_val = spec.get_or_none()
         if env_val is not None:
             values[cfg_key] = env_val
 
-    env_principals = QS_GEN_PRINCIPAL_ARNS.get_or_none()
+    env_principals = RECON_GEN_PRINCIPAL_ARNS.get_or_none()
     if env_principals is not None:
         values["principal_arns"] = [
             p.strip() for p in env_principals.split(",") if p.strip()
@@ -580,11 +580,11 @@ def load_config(path: str | Path | None = None) -> Config:
     missing = [k for k in required if k not in values]
     if missing:
         required_env = {
-            "aws_account_id": "QS_GEN_AWS_ACCOUNT_ID",
-            "aws_region": "QS_GEN_AWS_REGION",
-            "datasource_arn": "QS_GEN_DATASOURCE_ARN",
-            "deployment_name": "QS_GEN_DEPLOYMENT_NAME",
-            "db_table_prefix": "QS_GEN_DB_TABLE_PREFIX",
+            "aws_account_id": "RECON_GEN_AWS_ACCOUNT_ID",
+            "aws_region": "RECON_GEN_AWS_REGION",
+            "datasource_arn": "RECON_GEN_DATASOURCE_ARN",
+            "deployment_name": "RECON_GEN_DEPLOYMENT_NAME",
+            "db_table_prefix": "RECON_GEN_DB_TABLE_PREFIX",
         }
         raise ValueError(
             f"Missing required configuration: {', '.join(missing)}. "

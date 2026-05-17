@@ -265,8 +265,8 @@ Once your first deploy completes with all
    manually, automate it. The env-var override pattern from
    [How do I configure the deploy?](how-do-i-configure-the-deploy.md)
    lets one CI runner deploy to multiple environments by
-   swapping `QS_GEN_AWS_ACCOUNT_ID` /
-   `QS_GEN_DATASOURCE_ARN` per stage.
+   swapping `RECON_GEN_AWS_ACCOUNT_ID` /
+   `RECON_GEN_DATASOURCE_ARN` per stage.
 
 ## Related walkthroughs
 

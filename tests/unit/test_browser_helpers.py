@@ -1,7 +1,7 @@
 """Unit tests for ``common/browser/helpers.py``.
 
 W.4 — ``get_user_arn`` historically silently fell back to a
-hardcoded account-specific ARN when ``QS_E2E_USER_ARN`` was unset.
+hardcoded account-specific ARN when ``RECON_E2E_USER_ARN`` was unset.
 That masked CI misconfiguration (Phase W's ``ci-bot`` has a
 different ARN — the fallback produced an embed URL the bot
 couldn't view) and burned a project account ID into the source.
@@ -23,13 +23,13 @@ from recon_gen.common.browser.helpers import (
     _test_id_from_pytest_env,
     get_user_arn,
 )
-from recon_gen.common.env_keys import QS_E2E_USER_ARN, QS_GEN_RUN_DIR
+from recon_gen.common.env_keys import RECON_E2E_USER_ARN, RECON_GEN_RUN_DIR
 
 
 class TestGetUserArn:
     def test_returns_env_var_when_set(self, monkeypatch):
         monkeypatch.setenv(
-            QS_E2E_USER_ARN.name,
+            RECON_E2E_USER_ARN.name,
             "arn:aws:quicksight:us-east-1:111122223333:user/default/test-user",
         )
         assert get_user_arn() == (
@@ -37,24 +37,24 @@ class TestGetUserArn:
         )
 
     def test_raises_when_env_var_unset(self, monkeypatch):
-        monkeypatch.delenv(QS_E2E_USER_ARN.name, raising=False)
-        with pytest.raises(RuntimeError, match="QS_E2E_USER_ARN is not set"):
+        monkeypatch.delenv(RECON_E2E_USER_ARN.name, raising=False)
+        with pytest.raises(RuntimeError, match="RECON_E2E_USER_ARN is not set"):
             get_user_arn()
 
     def test_raises_when_env_var_empty_string(self, monkeypatch):
         # An empty string is treated as unset — same fail-loud path.
-        # Otherwise an unset-via-``export QS_E2E_USER_ARN=`` shell
+        # Otherwise an unset-via-``export RECON_E2E_USER_ARN=`` shell
         # idiom would slip through with an empty UserArn that AWS
         # rejects with a less obvious error.
-        monkeypatch.setenv(QS_E2E_USER_ARN.name, "")
-        with pytest.raises(RuntimeError, match="QS_E2E_USER_ARN is not set"):
+        monkeypatch.setenv(RECON_E2E_USER_ARN.name, "")
+        with pytest.raises(RuntimeError, match="RECON_E2E_USER_ARN is not set"):
             get_user_arn()
 
     def test_error_message_points_at_e2e_setup_runbook(self, monkeypatch):
         # The runbook reference is the documented path for fixing
         # this in CI; if the doc moves, this test fails loud and
         # reminds the editor to update the message.
-        monkeypatch.delenv(QS_E2E_USER_ARN.name, raising=False)
+        monkeypatch.delenv(RECON_E2E_USER_ARN.name, raising=False)
         with pytest.raises(RuntimeError) as exc_info:
             get_user_arn()
         assert ".github/E2E_SETUP.md" in str(exc_info.value)
@@ -136,7 +136,7 @@ class TestTestIdFromPytestEnv:
 
 class TestCaptureDirAndPath:
     """Y.2.gate.c.11 — failure dumps + Playwright trace.zip route to
-    ``$QS_GEN_RUN_DIR/browser/<test_id>/`` when running under the
+    ``$RECON_GEN_RUN_DIR/browser/<test_id>/`` when running under the
     test layer chain runner; fall back to the legacy
     ``<SCREENSHOT_DIR>/_failures/`` flat dir otherwise."""
 
@@ -147,12 +147,12 @@ class TestCaptureDirAndPath:
         # branch that triggers on validator failure).
         run_dir = tmp_path / "run"
         run_dir.mkdir(parents=True)
-        monkeypatch.setenv(QS_GEN_RUN_DIR.name, str(run_dir))
+        monkeypatch.setenv(RECON_GEN_RUN_DIR.name, str(run_dir))
         out = _capture_dir_for("tests_e2e_test_foo__bar")
         assert out == run_dir / "browser" / "tests_e2e_test_foo__bar"
 
     def test_capture_dir_legacy_mode(self, monkeypatch) -> None:
-        monkeypatch.delenv(QS_GEN_RUN_DIR.name, raising=False)
+        monkeypatch.delenv(RECON_GEN_RUN_DIR.name, raising=False)
         out = _capture_dir_for("any_test_id")
         assert out == SCREENSHOT_DIR / "_failures"
 
@@ -165,7 +165,7 @@ class TestCaptureDirAndPath:
         # See test_capture_dir_runner_mode for why mkdir is needed.
         run_dir = tmp_path / "run"
         run_dir.mkdir(parents=True)
-        monkeypatch.setenv(QS_GEN_RUN_DIR.name, str(run_dir))
+        monkeypatch.setenv(RECON_GEN_RUN_DIR.name, str(run_dir))
         test_id = "tests_e2e_test_foo__bar"
         assert _capture_path("screenshot.png", test_id) == (
             run_dir / "browser" / test_id / "screenshot.png"
@@ -184,7 +184,7 @@ class TestCaptureDirAndPath:
         from concurrent test runs don't collide. Special-case:
         ``screenshot.png`` lands at ``<test_id>.png`` (no underscore
         prefix) per the M.4.4.11-era convention."""
-        monkeypatch.delenv(QS_GEN_RUN_DIR.name, raising=False)
+        monkeypatch.delenv(RECON_GEN_RUN_DIR.name, raising=False)
         test_id = "tests_e2e_test_foo__bar"
         assert _capture_path("screenshot.png", test_id) == (
             SCREENSHOT_DIR / "_failures" / f"{test_id}.png"
@@ -248,5 +248,5 @@ class TestNoHardcodedArnInSource:
         assert not matches, (
             f"helpers.py contains hardcoded ARN(s) with embedded "
             f"AWS account IDs: {matches}. Read the user ARN from "
-            f"``QS_E2E_USER_ARN`` instead."
+            f"``RECON_E2E_USER_ARN`` instead."
         )

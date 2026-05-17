@@ -159,7 +159,7 @@ def test_apply_demo_database_url_auto_emits_datasource_json(
     (the bug #263 backlog item). Asserts the file lands; defers
     content correctness to the build_datasource unit tests.
 
-    Strip the ``QS_GEN_DATASOURCE_ARN`` env fallback first: an ambient
+    Strip the ``RECON_GEN_DATASOURCE_ARN`` env fallback first: an ambient
     value (``tests/audit/test_dashboard_extract.py`` sets one via
     module-level ``os.environ.setdefault``, and pytest collects that
     module before this one in a full run) would leak into the loader's
@@ -167,8 +167,8 @@ def test_apply_demo_database_url_auto_emits_datasource_json(
     flip ``datasource_arn_was_derived`` to False — so the auto-emit gate
     wouldn't fire and the file wouldn't land. Same defensive pattern as
     ``test_apply_no_demo_database_url_skips_datasource_emit`` below."""
-    from recon_gen.common.env_keys import QS_GEN_DATASOURCE_ARN
-    monkeypatch.delenv(QS_GEN_DATASOURCE_ARN.name, raising=False)
+    from recon_gen.common.env_keys import RECON_GEN_DATASOURCE_ARN
+    monkeypatch.delenv(RECON_GEN_DATASOURCE_ARN.name, raising=False)
 
     cfg = _make_demo_yaml_config(tmp_path)
     out_dir = tmp_path / "out"
@@ -194,11 +194,11 @@ def test_apply_no_demo_database_url_skips_datasource_emit(
     deploy would otherwise overwrite the customer-managed resource."""
     # Strip the env-var fallback so the cfg yaml's missing
     # demo_database_url is what actually drives the test. Otherwise
-    # an ambient QS_GEN_DEMO_DATABASE_URL (e.g. set by the runner in
+    # an ambient RECON_GEN_DEMO_DATABASE_URL (e.g. set by the runner in
     # CI mode for the db layer) leaks into the loader's env-fallback
     # path and quietly populates cfg.demo_database_url.
-    from recon_gen.common.env_keys import QS_GEN_DEMO_DATABASE_URL
-    monkeypatch.delenv(QS_GEN_DEMO_DATABASE_URL.name, raising=False)
+    from recon_gen.common.env_keys import RECON_GEN_DEMO_DATABASE_URL
+    monkeypatch.delenv(RECON_GEN_DEMO_DATABASE_URL.name, raising=False)
 
     cfg = _make_yaml_config(tmp_path)  # no demo_database_url
     out_dir = tmp_path / "out"

@@ -7,7 +7,7 @@
 #      PRs from forks to defend against.
 #   2. Even if PRs become a thing later, this workflow exposes
 #      `secrets.QS_GEN_PG_URL`, `secrets.QS_GEN_ORACLE_URL`,
-#      `secrets.QS_E2E_USER_ARN`, AND assumes the `qs-gen-ci` IAM role
+#      `secrets.RECON_E2E_USER_ARN`, AND assumes the `qs-gen-ci` IAM role
 #      via OIDC. Letting it run on `pull_request` from a fork would
 #      let attackers exfiltrate every one of those by editing the
 #      workflow YAML in their PR. The right pattern there is
@@ -164,7 +164,7 @@ jobs:
           dialect: "postgres"
           demo_database_url: "${{ secrets.QS_GEN_PG_URL }}"
           principal_arns:
-            - "${{ secrets.QS_E2E_USER_ARN }}"
+            - "${{ secrets.RECON_E2E_USER_ARN }}"
           EOF
 
       - name: Apply schema (DDL)
@@ -188,9 +188,9 @@ jobs:
         # under xdist's per-worker isolation so the failure manifest
         # captures every problem in one go.
         env:
-          QS_GEN_E2E: "1"
-          QS_GEN_CONFIG: /tmp/ci-pg.yaml
-          QS_E2E_USER_ARN: ${{ secrets.QS_E2E_USER_ARN }}
+          RECON_GEN_E2E: "1"
+          RECON_GEN_CONFIG: /tmp/ci-pg.yaml
+          RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
         run: |
           .venv/bin/pytest \
             tests/e2e/test_l1_deployed_resources.py \
@@ -345,7 +345,7 @@ jobs:
           dialect: "postgres"
           demo_database_url: "${{ secrets.QS_GEN_PG_URL }}"
           principal_arns:
-            - "${{ secrets.QS_E2E_USER_ARN }}"
+            - "${{ secrets.RECON_E2E_USER_ARN }}"
           EOF
 
       - name: Apply schema (DDL)
@@ -367,10 +367,10 @@ jobs:
         # timeout to 60s so the slower browser-tier waits don't trip
         # on cold-start visual loads.
         env:
-          QS_GEN_E2E: "1"
-          QS_GEN_CONFIG: /tmp/ci-pg-browser.yaml
-          QS_E2E_USER_ARN: ${{ secrets.QS_E2E_USER_ARN }}
-          QS_E2E_PAGE_TIMEOUT: "60000"
+          RECON_GEN_E2E: "1"
+          RECON_GEN_CONFIG: /tmp/ci-pg-browser.yaml
+          RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
+          RECON_E2E_PAGE_TIMEOUT: "60000"
         # X.2.u.6 — file list reconciled against the parametrized
         # ``[qs, app2]`` suite. The parametrized files (``test_*_filters``,
         # ``test_*_sheet_visuals``, ``test_l2ft_*_dropdowns``,
@@ -413,10 +413,10 @@ jobs:
       # File list mirrors release.yml — keep in sync (feedback_ci_release_workflow_parity).
       - name: Run 4-way cross-tool agreement test (re-seeds spec_example)
         env:
-          QS_GEN_E2E: "1"
-          QS_GEN_CONFIG: /tmp/ci-pg-browser.yaml
-          QS_E2E_USER_ARN: ${{ secrets.QS_E2E_USER_ARN }}
-          QS_E2E_PAGE_TIMEOUT: "60000"
+          RECON_GEN_E2E: "1"
+          RECON_GEN_CONFIG: /tmp/ci-pg-browser.yaml
+          RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
+          RECON_E2E_PAGE_TIMEOUT: "60000"
         run: |
           .venv/bin/pytest \
             tests/e2e/test_audit_dashboard_agreement.py \
@@ -528,7 +528,7 @@ jobs:
           dialect: "oracle"
           demo_database_url: "${{ secrets.QS_GEN_ORACLE_URL }}"
           principal_arns:
-            - "${{ secrets.QS_E2E_USER_ARN }}"
+            - "${{ secrets.RECON_E2E_USER_ARN }}"
           EOF
 
       - name: Apply schema (DDL)
@@ -545,9 +545,9 @@ jobs:
 
       - name: Run API e2e (L1 + Investigation + Executives)
         env:
-          QS_GEN_E2E: "1"
-          QS_GEN_CONFIG: /tmp/ci-oracle.yaml
-          QS_E2E_USER_ARN: ${{ secrets.QS_E2E_USER_ARN }}
+          RECON_GEN_E2E: "1"
+          RECON_GEN_CONFIG: /tmp/ci-oracle.yaml
+          RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
         run: |
           .venv/bin/pytest \
             tests/e2e/test_l1_deployed_resources.py \
@@ -668,7 +668,7 @@ jobs:
           dialect: "postgres"
           demo_database_url: "${{ secrets.QS_GEN_PG_URL }}"
           principal_arns:
-            - "${{ secrets.QS_E2E_USER_ARN }}"
+            - "${{ secrets.RECON_E2E_USER_ARN }}"
           EOF
           cat > /tmp/ci-pg-browser.yaml <<EOF
           aws_account_id: "470656905821"
@@ -678,7 +678,7 @@ jobs:
           dialect: "postgres"
           demo_database_url: "${{ secrets.QS_GEN_PG_URL }}"
           principal_arns:
-            - "${{ secrets.QS_E2E_USER_ARN }}"
+            - "${{ secrets.RECON_E2E_USER_ARN }}"
           EOF
 
       - name: Sweep QS resources + drop schema objects
@@ -772,7 +772,7 @@ jobs:
           dialect: "oracle"
           demo_database_url: "${{ secrets.QS_GEN_ORACLE_URL }}"
           principal_arns:
-            - "${{ secrets.QS_E2E_USER_ARN }}"
+            - "${{ secrets.RECON_E2E_USER_ARN }}"
           EOF
 
       - name: Sweep QS resources + drop schema objects

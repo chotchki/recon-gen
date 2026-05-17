@@ -20,7 +20,7 @@ the expected shape:
   - TransferTemplates whose legs don't actually net to expected_net
   - LimitSchedules absent from any rail
 
-Both tests gate on a live Postgres connection via ``QS_GEN_DEMO_DATABASE_URL``
+Both tests gate on a live Postgres connection via ``RECON_GEN_DEMO_DATABASE_URL``
 or fall back to ``run/config.postgres.yaml``'s ``demo_database_url``.
 Skip cleanly when the DB isn't reachable (CI environments without it,
 fresh checkouts).
@@ -41,7 +41,7 @@ from typing import Any
 
 import pytest
 
-from recon_gen.common.env_keys import QS_GEN_DEMO_DATABASE_URL
+from recon_gen.common.env_keys import RECON_GEN_DEMO_DATABASE_URL
 from recon_gen.common.l2 import L2Instance
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import TwoLegRail
@@ -55,7 +55,7 @@ def _demo_database_url() -> str | None:
 
     Returns None if no URL is reachable; the test will skip.
     """
-    env_url = QS_GEN_DEMO_DATABASE_URL.get_or_none()
+    env_url = RECON_GEN_DEMO_DATABASE_URL.get_or_none()
     if env_url:
         return env_url
     cfg_path = Path(__file__).parent.parent / "run" / "config.postgres.yaml"
@@ -77,7 +77,7 @@ def demo_db_conn() -> Any:
     url = _demo_database_url()
     if not url:
         pytest.skip(
-            "Demo DB URL not configured — set QS_GEN_DEMO_DATABASE_URL or "
+            "Demo DB URL not configured — set RECON_GEN_DEMO_DATABASE_URL or "
             "populate run/config.postgres.yaml::demo_database_url to run "
             "live runtime assertions."
         )

@@ -30,9 +30,9 @@ than clarify.
 
 Gates:
 
-- ``QS_GEN_E2E=1`` — same as every other tests/e2e/ file
+- ``RECON_GEN_E2E=1`` — same as every other tests/e2e/ file
 - A reachable DB (cfg.demo_database_url + driver installed)
-- ``QS_GEN_TEST_L2_INSTANCE=<path>`` — points at the L2 YAML that
+- ``RECON_GEN_TEST_L2_INSTANCE=<path>`` — points at the L2 YAML that
   matches the seeded DB. Defaults to ``spec_example`` (rarely what you
   want for a live DB run; sasquatch_pr is the canonical demo).
 
@@ -52,7 +52,7 @@ import pytest
 from recon_gen.apps.executives.app import build_executives_app
 from recon_gen.apps.executives.datasets import build_all_datasets
 from recon_gen.common.dataset_contract import get_sql
-from recon_gen.common.env_keys import QS_GEN_TEST_L2_INSTANCE
+from recon_gen.common.env_keys import RECON_GEN_TEST_L2_INSTANCE
 from recon_gen.common.html._tree_fetcher import (
     _find_visual_dataset_identifier,
 )
@@ -74,12 +74,12 @@ _DASHBOARD_ID = "exec"
 
 def _load_l2_instance() -> Any:
     """Load the L2 instance the test runs against — env override via
-    ``QS_GEN_TEST_L2_INSTANCE``, else the bundled default
+    ``RECON_GEN_TEST_L2_INSTANCE``, else the bundled default
     (spec_example)."""
     from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
     from recon_gen.common.l2 import load_instance
 
-    override = QS_GEN_TEST_L2_INSTANCE.get_or_none()
+    override = RECON_GEN_TEST_L2_INSTANCE.get_or_none()
     if override is not None:
         return load_instance(override)
     return default_l2_instance()
@@ -111,14 +111,14 @@ def live_db_exec_driver(cfg: Any) -> Iterator[_LiveDriver]:
     Skips when no DB is reachable — operator opts in by configuring
     cfg.demo_database_url + having a populated DB.
     """
-    # Hard gate on QS_GEN_TEST_L2_INSTANCE — without it, the test would
+    # Hard gate on RECON_GEN_TEST_L2_INSTANCE — without it, the test would
     # fall back to spec_example (the bundled default) which almost
     # certainly doesn't match the prefix used to seed the operator's DB.
     # Better to skip cleanly than fail with a misleading "relation does
     # not exist" error.
-    if QS_GEN_TEST_L2_INSTANCE.get_or_none() is None:
+    if RECON_GEN_TEST_L2_INSTANCE.get_or_none() is None:
         pytest.skip(
-            "live-DB e2e skipped: set QS_GEN_TEST_L2_INSTANCE to the L2 "
+            "live-DB e2e skipped: set RECON_GEN_TEST_L2_INSTANCE to the L2 "
             "YAML matching your seeded DB (e.g. "
             "src/recon_gen/_l2_fixtures/sasquatch_pr.yaml)"
         )

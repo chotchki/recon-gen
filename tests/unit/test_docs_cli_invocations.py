@@ -125,7 +125,7 @@ def _is_qsg_command_position(tokens: list[str], idx: int) -> bool:
     """
     for prior in tokens[:idx]:
         if "=" in prior and not prior.startswith("-"):
-            # Env-var assignment like ``QS_GEN_E2E=1`` — skip.
+            # Env-var assignment like ``RECON_GEN_E2E=1`` — skip.
             continue
         return False
     return True

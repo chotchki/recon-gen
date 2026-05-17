@@ -21,7 +21,7 @@ verified against both dialects when the X.2.a.5 cross-dialect
 parity tests land.
 
 No AWS, no embed URL, no QuickSight identity region. Just uvicorn
-+ Playwright. Fast enough that gating behind ``QS_GEN_E2E=1`` is
++ Playwright. Fast enough that gating behind ``RECON_GEN_E2E=1`` is
 the only e2e-suite concession — local devs setting that env var
 get the dialect parity tests in the same run as the QS tests.
 """
@@ -39,7 +39,7 @@ from typing import Any
 
 import uvicorn
 
-from recon_gen.common.env_keys import EnvVarInvalid, QS_GEN_RUN_DIR
+from recon_gen.common.env_keys import EnvVarInvalid, RECON_GEN_RUN_DIR
 from recon_gen.common.html._tree_fetcher import OptionsFetcher
 from recon_gen.common.html.render import FilterSpec
 from recon_gen.common.html.server import (
@@ -66,9 +66,9 @@ _UVICORN_LOGGER_NAMES = (
 
 
 def _attach_app2_log_handler() -> tuple[logging.FileHandler | None, Path | None]:
-    """Y.2.gate.c.11.app2-server-logs — when ``QS_GEN_RUN_DIR`` is
+    """Y.2.gate.c.11.app2-server-logs — when ``RECON_GEN_RUN_DIR`` is
     set, route uvicorn's three loggers through a shared
-    ``$QS_GEN_RUN_DIR/app2/server.log`` file. Returns the handler
+    ``$RECON_GEN_RUN_DIR/app2/server.log`` file. Returns the handler
     + log path so the caller can detach + report on cleanup. No-op
     (returns ``(None, None)``) when the env var is unset (legacy
     direct ``pytest`` invocation; nowhere to put the file).
@@ -78,7 +78,7 @@ def _attach_app2_log_handler() -> tuple[logging.FileHandler | None, Path | None]
     capture failure must not break the test session.
     """
     try:
-        run_dir_path = QS_GEN_RUN_DIR.get_or_none()
+        run_dir_path = RECON_GEN_RUN_DIR.get_or_none()
     except EnvVarInvalid:
         return None, None
     if run_dir_path is None:
@@ -182,7 +182,7 @@ def html2_server(
     )
     # Y.2.gate.c.11.app2-server-logs — log_level lifts to "info" iff
     # capturing (otherwise stays "error" — keeps stderr quiet during
-    # direct pytest invocations that don't set QS_GEN_RUN_DIR). The
+    # direct pytest invocations that don't set RECON_GEN_RUN_DIR). The
     # handler attaches AFTER server.started: uvicorn.Server.run()
     # calls logging.config.dictConfig at startup which wipes any
     # handlers added beforehand. Post-start the dictConfig has run
@@ -192,7 +192,7 @@ def html2_server(
     # Soft presence-check (sidecar pattern — bad env value should
     # degrade to "not capturing" rather than fail the server boot).
     try:
-        capture_enabled = QS_GEN_RUN_DIR.get_or_none() is not None
+        capture_enabled = RECON_GEN_RUN_DIR.get_or_none() is not None
     except EnvVarInvalid:
         capture_enabled = False
     log_level = "info" if capture_enabled else "error"

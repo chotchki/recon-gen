@@ -19,7 +19,7 @@ Four checks today, all extensible — drop a new ``Check`` into
 - **envvar-bypass** (Y.2.gate.b.15.lint.envvar) — direct
   ``os.environ.get`` / ``os.environ[...]`` / ``os.getenv`` /
   ``monkeypatch.setenv`` / ``monkeypatch.delenv`` calls with a
-  ``QS_GEN_*`` or ``QS_E2E_*`` string literal as the first arg.
+  ``RECON_GEN_*`` or ``RECON_E2E_*`` string literal as the first arg.
   These bypass the typed ``EnvVar`` registry at
   ``common/env_keys.py``, defeating type coercion + value
   validation + the operator-facing ``EnvVarRequired`` /
@@ -312,12 +312,15 @@ class ExplicitAnyCheck(Check):
 # Names matching this pattern are owned by the env_keys.py registry.
 # Anything matching that the lint encounters outside the whitelist is
 # a bug going forward.
-_ENV_VAR_NAME_RE = re.compile(r"^QS_(GEN|E2E)_[A-Z0-9_]+$")
+_ENV_VAR_NAME_RE = re.compile(r"^(QS|RECON)_(GEN|E2E)_[A-Z0-9_]+$")
 
 
 def _is_qs_env_literal(node: ast.AST) -> str | None:
     """Return the env-var name if ``node`` is a ``Constant(str)`` matching
-    the QS_GEN/QS_E2E pattern; else None."""
+    the QS_GEN/QS_E2E (legacy) or RECON_GEN/RECON_E2E (canonical)
+    pattern; else None. AC.B.3 grace period — registry's typed
+    fallback handles legacy reads, but new bypass calls with either
+    prefix are still smells."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         if _ENV_VAR_NAME_RE.match(node.value):
             return node.value
@@ -1306,9 +1309,9 @@ def _build_checks() -> list[Check]:
             name="envvar-bypass",
             description=(
                 "bare os.environ.get / os.environ[...] / os.getenv / "
-                "monkeypatch.setenv|delenv with a QS_GEN_/QS_E2E_ "
-                "string literal — use the typed EnvVar registry at "
-                "common/env_keys.py instead"
+                "monkeypatch.setenv|delenv with a RECON_GEN_/RECON_E2E_ "
+                "(or legacy QS_GEN_/QS_E2E_) string literal — use the "
+                "typed EnvVar registry at common/env_keys.py instead"
             ),
             files=envvar_scope,
         ),

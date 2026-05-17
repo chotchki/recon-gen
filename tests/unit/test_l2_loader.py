@@ -27,7 +27,7 @@ from recon_gen.common.l2 import (
     TwoLegRail,
     load_instance,
 )
-from recon_gen.common.env_keys import QS_GEN_RUN_DIR
+from recon_gen.common.env_keys import RECON_GEN_RUN_DIR
 
 
 # -- Happy paths --------------------------------------------------------------
@@ -662,7 +662,7 @@ def test_capture_no_op_when_run_dir_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Y.2.gate.c.12 — direct invocation (env unset) writes nothing."""
-    monkeypatch.delenv(QS_GEN_RUN_DIR.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_RUN_DIR.name, raising=False)
     p = tmp_path / "src.yaml"
     p.write_text(_MINIMAL_YAML)
 
@@ -689,7 +689,7 @@ def test_capture_writes_yaml_when_run_dir_set(
     # to no-op and the assertion below would fail.
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True)
-    monkeypatch.setenv(QS_GEN_RUN_DIR.name, str(run_dir))
+    monkeypatch.setenv(RECON_GEN_RUN_DIR.name, str(run_dir))
     p = tmp_path / "src.yaml"
     p.write_text(_MINIMAL_YAML)
 
@@ -710,7 +710,7 @@ def test_capture_overwrites_on_repeat_load(
     # See test_capture_writes_yaml_when_run_dir_set for why mkdir is needed.
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True)
-    monkeypatch.setenv(QS_GEN_RUN_DIR.name, str(run_dir))
+    monkeypatch.setenv(RECON_GEN_RUN_DIR.name, str(run_dir))
     p = tmp_path / "src.yaml"
     p.write_text(_MINIMAL_YAML)
 
@@ -728,13 +728,13 @@ def test_capture_sidecar_failure_doesnt_break_load(
 ) -> None:
     """Sidecar contract: if the capture write fails, ``load_instance``
     must still return the parsed instance. Simulated here by pointing
-    ``QS_GEN_RUN_DIR`` at a path that can't be created (a regular file
+    ``RECON_GEN_RUN_DIR`` at a path that can't be created (a regular file
     sitting where a directory should be)."""
     blocker = tmp_path / "blocker"
     blocker.write_text("I am a file, not a directory.")
     # /<blocker>/l2/<basename>.yaml — mkdir(blocker/l2) fails because
     # blocker is a file, but load_instance must still succeed.
-    monkeypatch.setenv(QS_GEN_RUN_DIR.name, str(blocker))
+    monkeypatch.setenv(RECON_GEN_RUN_DIR.name, str(blocker))
     p = tmp_path / "src.yaml"
     p.write_text(_MINIMAL_YAML)
 

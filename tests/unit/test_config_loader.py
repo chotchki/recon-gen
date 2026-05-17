@@ -18,12 +18,12 @@ import yaml
 
 from recon_gen.common.config import load_config
 from recon_gen.common.env_keys import (
-    QS_GEN_AWS_ACCOUNT_ID,
-    QS_GEN_AWS_REGION,
-    QS_GEN_DATASOURCE_ARN,
-    QS_GEN_DB_TABLE_PREFIX,
-    QS_GEN_DEMO_DATABASE_URL,
-    QS_GEN_DEPLOYMENT_NAME,
+    RECON_GEN_AWS_ACCOUNT_ID,
+    RECON_GEN_AWS_REGION,
+    RECON_GEN_DATASOURCE_ARN,
+    RECON_GEN_DB_TABLE_PREFIX,
+    RECON_GEN_DEMO_DATABASE_URL,
+    RECON_GEN_DEPLOYMENT_NAME,
 )
 
 
@@ -232,9 +232,9 @@ def test_missing_aws_account_id_fails_loud_with_env_var_hint(
     Clear the env vars so the loader's env-fallback path can't quietly
     fill them — we're testing the missing-everything case.
     """
-    monkeypatch.delenv(QS_GEN_AWS_ACCOUNT_ID.name, raising=False)
-    monkeypatch.delenv(QS_GEN_AWS_REGION.name, raising=False)
-    monkeypatch.delenv(QS_GEN_DATASOURCE_ARN.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_AWS_ACCOUNT_ID.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_AWS_REGION.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_DATASOURCE_ARN.name, raising=False)
 
     p = _write_yaml(tmp_path, {
         # aws_account_id deliberately absent — also missing from env.
@@ -251,7 +251,7 @@ def test_missing_aws_account_id_fails_loud_with_env_var_hint(
     assert "aws_account_id" in msg, (
         f"loud-fail message must name the missing key; got: {msg}"
     )
-    assert "QS_GEN_AWS_ACCOUNT_ID" in msg, (
+    assert "RECON_GEN_AWS_ACCOUNT_ID" in msg, (
         f"loud-fail message must surface the env-var fallback so the "
         f"operator knows the alternative; got: {msg}"
     )
@@ -263,8 +263,8 @@ def test_missing_datasource_arn_without_demo_url_fails_loud(
     """gate.h.5 — datasource_arn is required UNLESS demo_database_url
     is set (the latter auto-derives the former). Without either, fail
     loud with the missing key + env-var fallback."""
-    monkeypatch.delenv(QS_GEN_DATASOURCE_ARN.name, raising=False)
-    monkeypatch.delenv(QS_GEN_DEMO_DATABASE_URL.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_DATASOURCE_ARN.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_DEMO_DATABASE_URL.name, raising=False)
 
     p = _write_yaml(tmp_path, {
         "aws_account_id": "111122223333",
@@ -275,7 +275,7 @@ def test_missing_datasource_arn_without_demo_url_fails_loud(
         load_config(p)
     msg = str(exc_info.value)
     assert "datasource_arn" in msg
-    assert "QS_GEN_DATASOURCE_ARN" in msg
+    assert "RECON_GEN_DATASOURCE_ARN" in msg
 
 
 def test_demo_database_url_satisfies_datasource_arn_requirement(
@@ -285,7 +285,7 @@ def test_demo_database_url_satisfies_datasource_arn_requirement(
     is auto-derived from it — no loud-fail. Locks the contract that
     the missing-cfg check is necessity-aware, not just a blanket key
     list."""
-    monkeypatch.delenv(QS_GEN_DATASOURCE_ARN.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_DATASOURCE_ARN.name, raising=False)
     body = {
         k: v for k, v in _REQUIRED.items() if k != "datasource_arn"
     }
@@ -316,8 +316,8 @@ def test_datasource_arn_was_derived_flag(
     is no longer applicable. The ARN-was-derived flag survives normal
     construction; that's all we need to verify here.
     """
-    monkeypatch.delenv(QS_GEN_DATASOURCE_ARN.name, raising=False)
-    monkeypatch.delenv(QS_GEN_DEMO_DATABASE_URL.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_DATASOURCE_ARN.name, raising=False)
+    monkeypatch.delenv(RECON_GEN_DEMO_DATABASE_URL.name, raising=False)
     explicit_arn = "arn:aws:quicksight:us-east-1:111122223333:datasource/customer-managed-ds"
     dir_a = tmp_path / "a"; dir_a.mkdir()
     dir_b = tmp_path / "b"; dir_b.mkdir()
@@ -372,8 +372,8 @@ def _base_cfg(extras: dict[str, object]) -> dict[str, object]:
 # --- Z.C — deployment_name + db_table_prefix loud-fail ---
 
 @pytest.mark.parametrize("missing_key,env_var", [
-    ("deployment_name", "QS_GEN_DEPLOYMENT_NAME"),
-    ("db_table_prefix", "QS_GEN_DB_TABLE_PREFIX"),
+    ("deployment_name", "RECON_GEN_DEPLOYMENT_NAME"),
+    ("db_table_prefix", "RECON_GEN_DB_TABLE_PREFIX"),
 ])
 def test_missing_zc_field_fails_loud_with_env_var_hint(
     tmp_path: Path, missing_key: str, env_var: str,
@@ -402,8 +402,8 @@ def test_zc_field_env_overrides_yaml(
     """Z.C: env var override path covers both fields (the runner relies
     on this to inject per-cell deployment_name + db_table_prefix without
     rewriting the operator's cfg yaml)."""
-    monkeypatch.setenv(QS_GEN_DEPLOYMENT_NAME.name, "recon-from-env")
-    monkeypatch.setenv(QS_GEN_DB_TABLE_PREFIX.name, "from_env")
+    monkeypatch.setenv(RECON_GEN_DEPLOYMENT_NAME.name, "recon-from-env")
+    monkeypatch.setenv(RECON_GEN_DB_TABLE_PREFIX.name, "from_env")
     body = dict(_REQUIRED)
     # Leave the yaml fields in place to confirm env wins.
     body["deployment_name"] = "recon-from-yaml"

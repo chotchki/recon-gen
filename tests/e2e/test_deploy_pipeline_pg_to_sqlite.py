@@ -25,7 +25,7 @@ Then asserts each of the 4 dashboards (L1 / L2FT / Inv / Exec) returns
 non-empty visual data after the deploy.
 
 Layer + gating:
-  - lives in ``tests/e2e/`` (gated by QS_GEN_E2E=1 via conftest)
+  - lives in ``tests/e2e/`` (gated by RECON_GEN_E2E=1 via conftest)
   - skipif on docker probe (testcontainers needs a daemon)
   - takes ~120s with sasquatch_pr (postgres container ~10s + data
     apply ~15s + sqlite seed ~5s + matview refresh ~5s)

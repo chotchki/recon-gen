@@ -43,7 +43,7 @@ from typing import Any, cast
 
 import yaml
 
-from recon_gen.common.env_keys import QS_GEN_RUN_DIR
+from recon_gen.common.env_keys import RECON_GEN_RUN_DIR
 
 from .primitives import (
     Account,
@@ -1040,9 +1040,9 @@ def _load_limit_schedule(raw: object, *, path: str) -> LimitSchedule:
 
 
 def _capture_to_run_dir(raw_text: str, slug: str) -> None:
-    """Y.2.gate.c.12 — copy every loaded L2 YAML into ``$QS_GEN_RUN_DIR/l2/``.
+    """Y.2.gate.c.12 — copy every loaded L2 YAML into ``$RECON_GEN_RUN_DIR/l2/``.
 
-    No-op when ``QS_GEN_RUN_DIR`` is unset (direct ``pytest`` /
+    No-op when ``RECON_GEN_RUN_DIR`` is unset (direct ``pytest`` /
     ``recon-gen`` invocations are unchanged). When set, writes
     the raw YAML bytes to ``<run-dir>/l2/<slug>.yaml`` so the runner's
     per-run snapshot captures every L2 the test session touched —
@@ -1064,7 +1064,7 @@ def _capture_to_run_dir(raw_text: str, slug: str) -> None:
     # regular file) must not break ``load_instance``.
     from recon_gen.common.env_keys import EnvVarInvalid
     try:
-        run_dir = QS_GEN_RUN_DIR.get_or_none()
+        run_dir = RECON_GEN_RUN_DIR.get_or_none()
     except EnvVarInvalid:
         return
     if run_dir is None:
@@ -1099,7 +1099,7 @@ def load_instance(path: Path | str, *, validate: bool = True) -> L2Instance:
     cardinality, vocabulary, Origin resolution) raise
     ``L2ValidationError``.
 
-    Y.2.gate.c.12 — when ``QS_GEN_RUN_DIR`` is set, the raw YAML is
+    Y.2.gate.c.12 — when ``RECON_GEN_RUN_DIR`` is set, the raw YAML is
     captured to ``<run-dir>/l2/<instance-prefix>.yaml`` for per-run
     debugging. See ``_capture_to_run_dir``.
     """

@@ -22,12 +22,12 @@ contract shape was locked by the X.2.j.0 spike — see
 
 **Per-leg degradation, not per-test skip (X.2.j.C):** a missing prereq
 disables one *leg*, not the whole test:
-  - ``QS_GEN_E2E=1`` gates the whole module (the existing browser-test
+  - ``RECON_GEN_E2E=1`` gates the whole module (the existing browser-test
     gate).
   - ``run/config.<dialect>.yaml`` absent / no ``demo_database_url`` →
     that dialect cell skips (the other dialect still runs).
   - The L1 dashboard not deployed for this dialect (a SQLite cell has
-    none) OR ``QS_E2E_USER_ARN`` unset → the QS leg yields ``None``; the
+    none) OR ``RECON_E2E_USER_ARN`` unset → the QS leg yields ``None``; the
     test runs as a 3-way ``scenario ⊆ direct == App2`` + PDF. CI deploys
     ``spec_example`` first via ``recon-gen json apply --execute -c
     run/config.<dialect>.yaml --l2 tests/l2/spec_example.yaml``; the QS
@@ -98,7 +98,7 @@ pytestmark = [
 
 # Y.2.gate.m.4.c — per-cell dialect-mismatch skip. When the runner
 # dispatches this test inside a per-cell ``lo``-target variant (e.g.,
-# ``sp_pg_lo``), the cell's ``QS_GEN_DEMO_DATABASE_URL`` env override
+# ``sp_pg_lo``), the cell's ``RECON_GEN_DEMO_DATABASE_URL`` env override
 # points at ONE container — the matching dialect's. The Oracle
 # parametrization in that cell would have ``load_config`` route to a
 # PG container with ``cfg.dialect=oracle`` (env URL wins; cfg yaml's
@@ -108,8 +108,8 @@ pytestmark = [
 # env URL override) run both parametrizations against the operator's
 # external Aurora + Oracle.
 def _env_demo_url_dialect() -> str | None:
-    from recon_gen.common.env_keys import QS_GEN_DEMO_DATABASE_URL
-    env_url = QS_GEN_DEMO_DATABASE_URL.get_or_none()
+    from recon_gen.common.env_keys import RECON_GEN_DEMO_DATABASE_URL
+    env_url = RECON_GEN_DEMO_DATABASE_URL.get_or_none()
     if env_url is None:
         return None
     if env_url.startswith(("postgres", "postgresql")):
@@ -127,7 +127,7 @@ def _l2_yaml_for_test() -> Path:
     """m.4.f — honor the runner's per-cell synthesized yaml when set.
 
     Z.C — the Y.2.gate.m runner used to set
-    ``QS_GEN_TEST_L2_INSTANCE`` to a per-cell synthesized yaml whose
+    ``RECON_GEN_TEST_L2_INSTANCE`` to a per-cell synthesized yaml whose
     dropped ``instance`` field encoded the cell code (e.g.,
     ``sp_pg_aw``). With the field gone, the DB-table prefix lives on
     cfg.db_table_prefix and the QS-resource prefix lives on
@@ -137,8 +137,8 @@ def _l2_yaml_for_test() -> Path:
     Outside the runner (operator running pytest directly), the env
     var is unset; fall back to the bundled spec_example fixture.
     """
-    from recon_gen.common.env_keys import QS_GEN_TEST_L2_INSTANCE
-    env_val = QS_GEN_TEST_L2_INSTANCE.get_or_none()
+    from recon_gen.common.env_keys import RECON_GEN_TEST_L2_INSTANCE
+    env_val = RECON_GEN_TEST_L2_INSTANCE.get_or_none()
     if env_val:
         return Path(env_val)
     return _SPEC_EXAMPLE_BUNDLED
@@ -179,7 +179,7 @@ def dialect_cfg(request):
     invocations; each invocation drives just one dialect and the
     other is irrelevant for that cell.
 
-    The ``QS_GEN_CONFIG`` env override is intentionally ignored here —
+    The ``RECON_GEN_CONFIG`` env override is intentionally ignored here —
     a per-dialect matrix needs both files visible by their canonical
     paths. Operators wanting to point at a non-canonical config should
     edit ``_DIALECT_CONFIG_PATHS`` for that test run.
@@ -192,23 +192,23 @@ def dialect_cfg(request):
     env_url_dialect = _env_demo_url_dialect()
     if env_url_dialect is not None and env_url_dialect != dialect_name:
         pytest.skip(
-            f"runner cell's QS_GEN_DEMO_DATABASE_URL implies "
+            f"runner cell's RECON_GEN_DEMO_DATABASE_URL implies "
             f"dialect={env_url_dialect!r}; this {dialect_name!r} "
             f"parametrization would route to the wrong DB. The sibling "
             f"sp_{env_url_dialect[:2]}_lo cell handles {dialect_name!r}."
         )
     # Y.2.browser.triage — `aw`-target analogue of the skip above. An `aw`
-    # cell doesn't set QS_GEN_DEMO_DATABASE_URL (it uses the operator's
-    # external Aurora/Oracle), but the runner DOES inject QS_GEN_CONFIG =
+    # cell doesn't set RECON_GEN_DEMO_DATABASE_URL (it uses the operator's
+    # external Aurora/Oracle), but the runner DOES inject RECON_GEN_CONFIG =
     # the cell's *dialect* cfg (`run/config.postgres.yaml` for the pg cell).
     # That cell only seeded that one dialect's DB with the cell-prefixed
     # tables, so the other dialect's parametrization would `ORA-00942` /
     # UndefinedTable. Skip it; the sibling `sp_<other>_aw` cell runs that
-    # dialect's agreement check against its own seeded DB. When QS_GEN_CONFIG
+    # dialect's agreement check against its own seeded DB. When RECON_GEN_CONFIG
     # is unset (operator running pytest directly with both DBs seeded), the
     # both-dialects flow is unchanged.
-    from recon_gen.common.env_keys import QS_GEN_CONFIG
-    qs_gen_cfg = QS_GEN_CONFIG.get_or_none()  # Path | None — coercer=Path
+    from recon_gen.common.env_keys import RECON_GEN_CONFIG
+    qs_gen_cfg = RECON_GEN_CONFIG.get_or_none()  # Path | None — coercer=Path
     if qs_gen_cfg is not None:
         low = str(qs_gen_cfg).lower()
         cfg_dialect = (
@@ -218,7 +218,7 @@ def dialect_cfg(request):
         )
         if cfg_dialect is not None and cfg_dialect != dialect_name:
             pytest.skip(
-                f"runner cell's QS_GEN_CONFIG={qs_gen_cfg!r} implies "
+                f"runner cell's RECON_GEN_CONFIG={qs_gen_cfg!r} implies "
                 f"dialect={cfg_dialect!r}; this {dialect_name!r} cell would "
                 f"walk tables it never seeded. The sibling sp_{cfg_dialect[:2]}_<tgt> "
                 f"cell handles {dialect_name!r}."
@@ -368,7 +368,7 @@ def per_dialect_qs_driver(
     the .grid-container close enough to the viewport to scroll into.
 
     **Yields ``None`` (does NOT skip the test) when the QS leg can't run**
-    — ``QS_E2E_USER_ARN`` unset (the runner derives it from
+    — ``RECON_E2E_USER_ARN`` unset (the runner derives it from
     ``cfg.auth.aws_profile``; export it for a direct ``pytest`` run), or
     the L1 dashboard isn't deployed for this dialect (a SQLite cell has
     no QS dashboard by construction). The 4-way test then runs the other
@@ -616,7 +616,7 @@ def test_invariant_four_way_agreement(
     app2 = per_dialect_app2_results[invariant]
     app2_count = int(app2["count"])  # type: ignore[call-overload]: dict value is `object`; it's an int by construction in the fixture
     # The QS leg is optional — the fixture yields ``None`` when QS isn't
-    # available for this dialect (SQLite cell, or QS_E2E_USER_ARN unset).
+    # available for this dialect (SQLite cell, or RECON_E2E_USER_ARN unset).
     # The QS driver fixture's tall viewport keeps the detail table inside
     # the initial render area; ``count_l1_invariant_rows`` then handles
     # the per-invariant sheet switch + date-filter application + page-

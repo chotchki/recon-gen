@@ -12,16 +12,16 @@ from recon_gen.common.env_keys import (
     EnvVar,
     EnvVarInvalid,
     EnvVarRequired,
-    QS_E2E_IDENTITY_REGION,
-    QS_E2E_USER_ARN,
-    QS_GEN_CONFIG,
-    QS_GEN_DEMO_DATABASE_URL,
-    QS_GEN_E2E,
-    QS_GEN_FUZZ_SEED,
-    QS_GEN_RUN_DIR,
-    QS_GEN_RUNNER_YES,
-    QS_GEN_TEST_L2_INSTANCE,
-    QS_GEN_TRACE_ALL,
+    RECON_E2E_IDENTITY_REGION,
+    RECON_E2E_USER_ARN,
+    RECON_GEN_CONFIG,
+    RECON_GEN_DEMO_DATABASE_URL,
+    RECON_GEN_E2E,
+    RECON_GEN_FUZZ_SEED,
+    RECON_GEN_RUN_DIR,
+    RECON_GEN_RUNNER_YES,
+    RECON_GEN_TEST_L2_INSTANCE,
+    RECON_GEN_TRACE_ALL,
     _bool_coercer,
     matches,
     must_be_dir,
@@ -247,33 +247,33 @@ def test_canonical_specs_are_present() -> None:
     it. Every name on this list is referenced by the runner / config
     / harness wiring."""
     expected_names = {
-        "QS_GEN_RUN_DIR",
-        "QS_GEN_LAYER",
-        "QS_GEN_E2E",
-        "QS_GEN_DEMO_DATABASE_URL",
-        "QS_GEN_TRACE_ALL",
-        "QS_GEN_FUZZ_SEED",
-        "QS_GEN_RUNNER_YES",
-        "QS_GEN_CONFIG",
-        "QS_GEN_TEST_L2_INSTANCE",
-        "QS_E2E_USER_ARN",
-        "QS_E2E_PAGE_TIMEOUT",
-        "QS_E2E_VISUAL_TIMEOUT",
-        "QS_E2E_IDENTITY_REGION",
+        "RECON_GEN_RUN_DIR",
+        "RECON_GEN_LAYER",
+        "RECON_GEN_E2E",
+        "RECON_GEN_DEMO_DATABASE_URL",
+        "RECON_GEN_TRACE_ALL",
+        "RECON_GEN_FUZZ_SEED",
+        "RECON_GEN_RUNNER_YES",
+        "RECON_GEN_CONFIG",
+        "RECON_GEN_TEST_L2_INSTANCE",
+        "RECON_E2E_USER_ARN",
+        "RECON_E2E_PAGE_TIMEOUT",
+        "RECON_E2E_VISUAL_TIMEOUT",
+        "RECON_E2E_IDENTITY_REGION",
     }
     actual_specs = [
-        QS_GEN_RUN_DIR, QS_GEN_E2E, QS_GEN_DEMO_DATABASE_URL,
-        QS_GEN_TRACE_ALL, QS_GEN_FUZZ_SEED, QS_GEN_RUNNER_YES,
-        QS_GEN_CONFIG, QS_GEN_TEST_L2_INSTANCE,
-        QS_E2E_USER_ARN, QS_E2E_IDENTITY_REGION,
+        RECON_GEN_RUN_DIR, RECON_GEN_E2E, RECON_GEN_DEMO_DATABASE_URL,
+        RECON_GEN_TRACE_ALL, RECON_GEN_FUZZ_SEED, RECON_GEN_RUNNER_YES,
+        RECON_GEN_CONFIG, RECON_GEN_TEST_L2_INSTANCE,
+        RECON_E2E_USER_ARN, RECON_E2E_IDENTITY_REGION,
     ]
     actual_names = {s.name for s in actual_specs}
     # Subset because we don't import all 13 here (LAYER + the two
     # E2E timeouts intentionally omitted from the smoke check).
     missing = (expected_names - {
-        "QS_GEN_LAYER",
-        "QS_E2E_PAGE_TIMEOUT",
-        "QS_E2E_VISUAL_TIMEOUT",
+        "RECON_GEN_LAYER",
+        "RECON_E2E_PAGE_TIMEOUT",
+        "RECON_E2E_VISUAL_TIMEOUT",
     }) - actual_names
     assert not missing, f"specs missing from registry: {missing}"
 
@@ -284,9 +284,9 @@ def test_path_specs_have_validators() -> None:
     adds a Path-shaped EnvVar but forgets to wire ``must_exist`` /
     ``must_be_file`` / ``must_be_dir``."""
     path_specs = [
-        QS_GEN_RUN_DIR,
-        QS_GEN_CONFIG,
-        QS_GEN_TEST_L2_INSTANCE,
+        RECON_GEN_RUN_DIR,
+        RECON_GEN_CONFIG,
+        RECON_GEN_TEST_L2_INSTANCE,
     ]
     for spec in path_specs:
         assert spec.validator is not None, (
@@ -297,31 +297,31 @@ def test_path_specs_have_validators() -> None:
 
 def test_user_arn_validator_rejects_non_arn(monkeypatch: Any) -> None:
     """The IAM ARN regex catches 'looks-like-an-arn-but-isn't'."""
-    monkeypatch.setenv(QS_E2E_USER_ARN.name, "not-an-arn")
+    monkeypatch.setenv(RECON_E2E_USER_ARN.name, "not-an-arn")
     with pytest.raises(EnvVarInvalid, match="does not match"):
-        QS_E2E_USER_ARN.require()
+        RECON_E2E_USER_ARN.require()
 
 
 def test_user_arn_validator_accepts_real_arn(monkeypatch: Any) -> None:
     monkeypatch.setenv(
-        QS_E2E_USER_ARN.name,
+        RECON_E2E_USER_ARN.name,
         "arn:aws:quicksight:us-east-1:470656905821:user/default/test-user",
     )
-    assert "test-user" in QS_E2E_USER_ARN.require()
+    assert "test-user" in RECON_E2E_USER_ARN.require()
 
 
 def test_identity_region_rejects_non_region(monkeypatch: Any) -> None:
-    monkeypatch.setenv(QS_E2E_IDENTITY_REGION.name, "USEAST1")
+    monkeypatch.setenv(RECON_E2E_IDENTITY_REGION.name, "USEAST1")
     with pytest.raises(EnvVarInvalid, match="does not match"):
-        QS_E2E_IDENTITY_REGION.get_or_none()
+        RECON_E2E_IDENTITY_REGION.get_or_none()
 
 
 def test_identity_region_accepts_real_region(monkeypatch: Any) -> None:
-    monkeypatch.setenv(QS_E2E_IDENTITY_REGION.name, "us-east-1")
-    assert QS_E2E_IDENTITY_REGION.get_or_none() == "us-east-1"
+    monkeypatch.setenv(RECON_E2E_IDENTITY_REGION.name, "us-east-1")
+    assert RECON_E2E_IDENTITY_REGION.get_or_none() == "us-east-1"
 
 
 def test_fuzz_seed_rejects_negative(monkeypatch: Any) -> None:
-    monkeypatch.setenv(QS_GEN_FUZZ_SEED.name, "-1")
+    monkeypatch.setenv(RECON_GEN_FUZZ_SEED.name, "-1")
     with pytest.raises(EnvVarInvalid, match="positive"):
-        QS_GEN_FUZZ_SEED.get_or_none()
+        RECON_GEN_FUZZ_SEED.get_or_none()

@@ -33,7 +33,7 @@ and already covered by the PG / Oracle audit tests in ``tests/audit/``.
 Lives under ``tests/audit/`` alongside the other audit tests so the
 existing CI ``test`` job picks it up via pytest discovery. (Originally
 landed under ``tests/e2e/`` but that directory's conftest gates on
-``QS_GEN_E2E=1``, which silently skipped the SQLite cells in CI —
+``RECON_GEN_E2E=1``, which silently skipped the SQLite cells in CI —
 moved here, and the X.3.g.1 Layer 1 SQLite file moved to
 ``tests/unit/`` for the same reason.)
 """

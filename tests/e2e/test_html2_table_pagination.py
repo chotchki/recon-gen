@@ -15,7 +15,7 @@ interactive without a DB / AWS). App2-only — QuickSight does its own
 client-side virtualization, not server-side page-offset, so there's no
 ``[qs, app2]`` parametrization here.
 
-Behind ``QS_GEN_E2E`` like every ``tests/e2e/`` file; skips cleanly
+Behind ``RECON_GEN_E2E`` like every ``tests/e2e/`` file; skips cleanly
 without Playwright. Runs in the runner's ``app2`` layer.
 """
 

@@ -185,23 +185,23 @@ A few patterns to know once the basic config works:
 
 ### Env-var overrides (CI / multi-environment)
 
-Every field has a `QS_GEN_*` env var that overrides the YAML.
+Every field has a `RECON_GEN_*` env var that overrides the YAML.
 The mapping (from `config.py:90-98`):
 
 | YAML field          | Env var                          |
 |---------------------|----------------------------------|
-| `aws_account_id`    | `QS_GEN_AWS_ACCOUNT_ID`          |
-| `aws_region`        | `QS_GEN_AWS_REGION`              |
-| `datasource_arn`    | `QS_GEN_DATASOURCE_ARN`          |
-| `deployment_name`   | `QS_GEN_DEPLOYMENT_NAME`         |
-| `db_table_prefix`   | `QS_GEN_DB_TABLE_PREFIX`         |
-| `principal_arns`    | `QS_GEN_PRINCIPAL_ARNS` (CSV)    |
-| `demo_database_url` | `QS_GEN_DEMO_DATABASE_URL`       |
+| `aws_account_id`    | `RECON_GEN_AWS_ACCOUNT_ID`          |
+| `aws_region`        | `RECON_GEN_AWS_REGION`              |
+| `datasource_arn`    | `RECON_GEN_DATASOURCE_ARN`          |
+| `deployment_name`   | `RECON_GEN_DEPLOYMENT_NAME`         |
+| `db_table_prefix`   | `RECON_GEN_DB_TABLE_PREFIX`         |
+| `principal_arns`    | `RECON_GEN_PRINCIPAL_ARNS` (CSV)    |
+| `demo_database_url` | `RECON_GEN_DEMO_DATABASE_URL`       |
 | `dialect`           | (YAML only — see Demo-only)      |
 
 CI pattern: commit `examples/config.yaml` as the staging
-template, override `QS_GEN_AWS_ACCOUNT_ID` /
-`QS_GEN_DATASOURCE_ARN` per environment in the CI runner. No
+template, override `RECON_GEN_AWS_ACCOUNT_ID` /
+`RECON_GEN_DATASOURCE_ARN` per environment in the CI runner. No
 per-environment YAML files to maintain.
 
 ### Production datasource ARN vs demo connection string

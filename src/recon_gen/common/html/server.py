@@ -99,7 +99,7 @@ from starlette.staticfiles import StaticFiles
 # logging module so the test harness's per-run log capture
 # (`tests/e2e/_harness_html2.py::_attach_app2_log_handler`) lands
 # the events alongside uvicorn's access log under
-# ``$QS_GEN_RUN_DIR/app2/server.log``.
+# ``$RECON_GEN_RUN_DIR/app2/server.log``.
 _DEVLOG = logging.getLogger("recon_gen.app2.devlog")
 
 

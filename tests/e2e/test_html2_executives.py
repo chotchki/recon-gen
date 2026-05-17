@@ -17,7 +17,7 @@ analogue, so a parametrized ``[qs, app2]`` body can't cover it:
   date picker; a sheet with data visuals does);
 - the date filter → visual re-fetch round-trip carrying ``date_from`` in
   the query string (the fetcher's calls log);
-- the dev-log POST → uvicorn logging → ``$QS_GEN_RUN_DIR/app2/server.log``
+- the dev-log POST → uvicorn logging → ``$RECON_GEN_RUN_DIR/app2/server.log``
   capture path.
 
 What's NOT here anymore (X.2.u.3 / u.5 — covered by the parametrized
@@ -38,7 +38,7 @@ import pytest
 
 from recon_gen.apps.executives.app import build_executives_app
 from recon_gen.apps.executives.datasets import build_all_datasets
-from recon_gen.common.env_keys import QS_GEN_RUN_DIR
+from recon_gen.common.env_keys import RECON_GEN_RUN_DIR
 from tests._test_helpers import make_test_config
 from tests.e2e._drivers import App2Driver
 
@@ -179,7 +179,7 @@ def test_account_coverage_sheet_does_emit_filter_form(
 
 # Y.2.gate.c.11.app2-server-logs — verify the full dev-log path:
 # JS in browser → POST /log → server's _DEVLOG.info → uvicorn's logging
-# chain → harness FileHandler → $QS_GEN_RUN_DIR/app2/server.log.
+# chain → harness FileHandler → $RECON_GEN_RUN_DIR/app2/server.log.
 
 def test_dev_log_events_land_in_server_log() -> None:
     """Spin a separate App2 server (own driver) with `dev_log=True` so
@@ -188,15 +188,15 @@ def test_dev_log_events_land_in_server_log() -> None:
     load (and HTMX events thereafter). Assert the captured server log
     file contains the forwarded event.
 
-    Skips when `QS_GEN_RUN_DIR` isn't set — there's no log file to
+    Skips when `RECON_GEN_RUN_DIR` isn't set — there's no log file to
     assert against in legacy mode (direct pytest invocation). Runs
     under the runner (`./run_tests.sh up_to=app2 ...`).
     """
     from pathlib import Path
-    run_dir_path = QS_GEN_RUN_DIR.get_or_none()
+    run_dir_path = RECON_GEN_RUN_DIR.get_or_none()
     if run_dir_path is None:
         pytest.skip(
-            "QS_GEN_RUN_DIR unset — server.log capture is runner-mode only"
+            "RECON_GEN_RUN_DIR unset — server.log capture is runner-mode only"
         )
     log_path = Path(run_dir_path) / "app2" / "server.log"
 

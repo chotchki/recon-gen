@@ -27,7 +27,7 @@ wire-shape assertions (param-name attributes, fetcher's calls log).
 Stub fetcher (not live PG) keeps the test fast + DB-free, same shape as
 ``test_html2_executives.py``. The live-PG variant is the ``app2`` chain
 layer (``./run_tests.sh up_to=app2 …``) which runs this file with
-``QS_GEN_E2E=1`` against a seeded container.
+``RECON_GEN_E2E=1`` against a seeded container.
 """
 
 from __future__ import annotations

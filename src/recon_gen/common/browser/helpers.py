@@ -23,10 +23,10 @@ from typing import TYPE_CHECKING, Callable, Generator, TypeVar
 
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
-    QS_E2E_SCREENSHOT_DIR,
-    QS_E2E_USER_ARN,
-    QS_GEN_RUN_DIR,
-    QS_GEN_TRACE_ALL,
+    RECON_E2E_SCREENSHOT_DIR,
+    RECON_E2E_USER_ARN,
+    RECON_GEN_RUN_DIR,
+    RECON_GEN_TRACE_ALL,
 )
 
 if TYPE_CHECKING:
@@ -48,19 +48,19 @@ T = TypeVar("T")
 # Failure-screenshot output directory used by the e2e test suite's
 # ``screenshot()`` helper. Resolved relative to the current working
 # directory (pytest runs from repo root per pyproject.toml's
-# ``testpaths = ["tests"]``); override via ``QS_E2E_SCREENSHOT_DIR``
+# ``testpaths = ["tests"]``); override via ``RECON_E2E_SCREENSHOT_DIR``
 # if you need a different sink. Production CLI screenshot capture
 # uses an explicit ``output_dir`` arg to ``ScreenshotHarness`` and
 # does NOT touch this constant.
 SCREENSHOT_DIR = (
-    QS_E2E_SCREENSHOT_DIR.get_or_none() or Path("tests/e2e/screenshots")
+    RECON_E2E_SCREENSHOT_DIR.get_or_none() or Path("tests/e2e/screenshots")
 ).resolve()
 
 
 def get_user_arn() -> str:
     """Return the QuickSight user ARN to embed dashboards for.
 
-    Reads ``QS_E2E_USER_ARN``. Raises ``RuntimeError`` when unset —
+    Reads ``RECON_E2E_USER_ARN``. Raises ``RuntimeError`` when unset —
     the previous silent fallback to a hardcoded account-specific
     ARN string masked CI misconfiguration (Phase W's ``ci-bot`` user
     has a different ARN than the local-dev default; the fallback
@@ -74,10 +74,10 @@ def get_user_arn() -> str:
     # would be a behavior change. The registry's IAM-ARN regex
     # validator still runs on the present value, surfacing
     # malformed-ARN bugs at this boundary instead of inside boto.
-    arn = QS_E2E_USER_ARN.get_or_none()
+    arn = RECON_E2E_USER_ARN.get_or_none()
     if not arn:
         raise RuntimeError(
-            "QS_E2E_USER_ARN is not set. Embedding requires a "
+            "RECON_E2E_USER_ARN is not set. Embedding requires a "
             "QuickSight user ARN to sign the URL for. Export the "
             "ARN of the user whose session you want the embed to "
             "render under (locally: your default-namespace IAM "
@@ -170,10 +170,10 @@ def webkit_page(
       trace.zip``. Plain-text artifacts (``dom.html``) cover the
       grep-able path; trace.zip is for full-UI replay.
 
-    Output destination depends on ``QS_GEN_RUN_DIR``:
+    Output destination depends on ``RECON_GEN_RUN_DIR``:
 
     - **Set** (running under the test layer chain runner):
-      ``$QS_GEN_RUN_DIR/browser/<test_id>/{screenshot.png,dom.html,
+      ``$RECON_GEN_RUN_DIR/browser/<test_id>/{screenshot.png,dom.html,
       console.txt,qs_errors.txt,network.txt,trace.zip}`` — per-test
       directory so artifacts cluster cleanly.
     - **Unset** (legacy ``./run_e2e.sh`` / direct ``pytest`` invocation):
@@ -189,7 +189,7 @@ def webkit_page(
 
     Trace capture policy:
     - On exception → trace always written (under the run-dir mode).
-    - On clean exit → trace written iff ``QS_GEN_TRACE_ALL=1`` is set
+    - On clean exit → trace written iff ``RECON_GEN_TRACE_ALL=1`` is set
       (operator opt-in for "I want the full trace even on green tests";
       flag plumbed by ``Y.2.gate.c.7``).
 
@@ -334,12 +334,12 @@ def _stop_and_maybe_save_trace(
 ) -> None:
     """Y.2.gate.c.11 — finalize the Playwright trace.
 
-    Saves + unpacks to ``$QS_GEN_RUN_DIR/browser/<test_id>/`` when:
+    Saves + unpacks to ``$RECON_GEN_RUN_DIR/browser/<test_id>/`` when:
     - ``failed`` is True (always capture failure traces), OR
-    - ``QS_GEN_TRACE_ALL=1`` (operator opt-in for full traces on green).
+    - ``RECON_GEN_TRACE_ALL=1`` (operator opt-in for full traces on green).
 
     Otherwise discards the trace (call ``stop()`` with no path).
-    No-op when ``QS_GEN_RUN_DIR`` isn't set — there's nowhere to put
+    No-op when ``RECON_GEN_RUN_DIR`` isn't set — there's nowhere to put
     the trace file in legacy mode.
 
     Two outputs land per saved trace:
@@ -362,15 +362,15 @@ def _stop_and_maybe_save_trace(
     import zipfile
 
     # Sidecar contract — swallow registry validator failures (e.g.
-    # QS_GEN_RUN_DIR pointing at a non-dir) the same way the surrounding
+    # RECON_GEN_RUN_DIR pointing at a non-dir) the same way the surrounding
     # try/except swallows OSError. A misconfigured env var must not
     # fail the wrapped browser test.
     try:
-        run_dir_path = QS_GEN_RUN_DIR.get_or_none()
+        run_dir_path = RECON_GEN_RUN_DIR.get_or_none()
     except EnvVarInvalid:
         run_dir_path = None
     run_dir = str(run_dir_path) if run_dir_path is not None else None
-    trace_all = bool(QS_GEN_TRACE_ALL.get_or_none())
+    trace_all = bool(RECON_GEN_TRACE_ALL.get_or_none())
     should_save = bool(run_dir) and (failed or trace_all)
     try:
         if should_save:
@@ -398,14 +398,14 @@ def _stop_and_maybe_save_trace(
 def _capture_dir_for(test_id: str) -> Path:
     """Y.2.gate.c.11 — pick where per-failure dumps land.
 
-    Returns ``$QS_GEN_RUN_DIR/browser/<test_id>/`` when the runner
+    Returns ``$RECON_GEN_RUN_DIR/browser/<test_id>/`` when the runner
     env is set, else the legacy ``<SCREENSHOT_DIR>/_failures/`` flat
     dir.
     """
     # Soft-fall through on bad value (matches the sidecar pattern in
     # ``_finalize_browser_capture``).
     try:
-        run_dir = QS_GEN_RUN_DIR.get_or_none()
+        run_dir = RECON_GEN_RUN_DIR.get_or_none()
     except EnvVarInvalid:
         run_dir = None
     if run_dir is not None:
@@ -428,7 +428,7 @@ def _capture_path(filename_short: str, test_id: str) -> Path:
     """
     # Soft-presence check (matches sidecar pattern).
     try:
-        run_dir_present = QS_GEN_RUN_DIR.get_or_none() is not None
+        run_dir_present = RECON_GEN_RUN_DIR.get_or_none() is not None
     except EnvVarInvalid:
         run_dir_present = False
     if run_dir_present:

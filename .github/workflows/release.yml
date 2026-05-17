@@ -160,7 +160,7 @@ jobs:
           # installed against the smoke venv (it's a [dev] extra the
           # smoke env doesn't pull). The wheel itself is the subject
           # under test, not its pyright cleanliness.
-          QS_GEN_SKIP_PYRIGHT: "1"
+          RECON_GEN_SKIP_PYRIGHT: "1"
         run: |
           # Q.3.a.9 reorg moved these into tests/{unit,json}/ for v8.0.0.
           /tmp/qs-smoke/bin/pytest \
@@ -390,7 +390,7 @@ jobs:
           dialect: "postgres"
           demo_database_url: "${{ secrets.QS_GEN_PG_URL }}"
           principal_arns:
-            - "${{ secrets.QS_E2E_USER_ARN }}"
+            - "${{ secrets.RECON_E2E_USER_ARN }}"
           EOF
 
       - name: Apply schema (DDL)
@@ -408,7 +408,7 @@ jobs:
       - name: Run API e2e against TestPyPI wheel
         # Same 3 apps as the standalone e2e-pg-api job.
         #
-        # gate.l.8 — `QS_GEN_TEST_L2_INSTANCE` MUST point at the same
+        # gate.l.8 — `RECON_GEN_TEST_L2_INSTANCE` MUST point at the same
         # synthesized `/tmp/release-l2.yaml` the deploy steps above used
         # (`--l2 /tmp/release-l2.yaml`). Otherwise the conftest fixtures
         # derive the expected QS resource IDs from `cfg.default_l2_instance`
@@ -417,10 +417,10 @@ jobs:
         # `test_*_deployed_resources.py` / `_dashboard_structure.py` test
         # fails — exactly what broke v8.8.0a20's release.
         env:
-          QS_GEN_E2E: "1"
-          QS_GEN_CONFIG: /tmp/release-e2e.yaml
-          QS_GEN_TEST_L2_INSTANCE: /tmp/release-l2.yaml
-          QS_E2E_USER_ARN: ${{ secrets.QS_E2E_USER_ARN }}
+          RECON_GEN_E2E: "1"
+          RECON_GEN_CONFIG: /tmp/release-e2e.yaml
+          RECON_GEN_TEST_L2_INSTANCE: /tmp/release-l2.yaml
+          RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
         run: |
           /tmp/qs-release-e2e/bin/pytest \
             tests/e2e/test_l1_deployed_resources.py \
@@ -459,15 +459,15 @@ jobs:
         # ``test_*_sheet_visuals`` / ``test_l2ft_*_dropdowns`` /
         # ``test_dashboard_driver``) run both legs: ``qs`` against the
         # just-deployed dashboards, ``app2`` against a local server
-        # reading the same seeded release DB (``QS_GEN_CONFIG`` carries
-        # the URL). ``QS_GEN_TEST_L2_INSTANCE`` MUST stay pointed at
+        # reading the same seeded release DB (``RECON_GEN_CONFIG`` carries
+        # the URL). ``RECON_GEN_TEST_L2_INSTANCE`` MUST stay pointed at
         # ``/tmp/release-l2.yaml`` (same reason as the API step above).
         env:
-          QS_GEN_E2E: "1"
-          QS_GEN_CONFIG: /tmp/release-e2e.yaml
-          QS_GEN_TEST_L2_INSTANCE: /tmp/release-l2.yaml
-          QS_E2E_USER_ARN: ${{ secrets.QS_E2E_USER_ARN }}
-          QS_E2E_PAGE_TIMEOUT: "60000"
+          RECON_GEN_E2E: "1"
+          RECON_GEN_CONFIG: /tmp/release-e2e.yaml
+          RECON_GEN_TEST_L2_INSTANCE: /tmp/release-l2.yaml
+          RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
+          RECON_E2E_PAGE_TIMEOUT: "60000"
         run: |
           /tmp/qs-release-e2e/bin/pytest \
             tests/e2e/test_l1_dashboard_renders.py \
@@ -500,11 +500,11 @@ jobs:
       # sync (feedback_ci_release_workflow_parity).
       - name: Run 4-way cross-tool agreement test (re-seeds the prefixed schema)
         env:
-          QS_GEN_E2E: "1"
-          QS_GEN_CONFIG: /tmp/release-e2e.yaml
-          QS_GEN_TEST_L2_INSTANCE: /tmp/release-l2.yaml
-          QS_E2E_USER_ARN: ${{ secrets.QS_E2E_USER_ARN }}
-          QS_E2E_PAGE_TIMEOUT: "60000"
+          RECON_GEN_E2E: "1"
+          RECON_GEN_CONFIG: /tmp/release-e2e.yaml
+          RECON_GEN_TEST_L2_INSTANCE: /tmp/release-l2.yaml
+          RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
+          RECON_E2E_PAGE_TIMEOUT: "60000"
         run: |
           /tmp/qs-release-e2e/bin/pytest \
             tests/e2e/test_audit_dashboard_agreement.py \

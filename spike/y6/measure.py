@@ -42,7 +42,7 @@ from recon_gen.apps.investigation.app import build_investigation_app
 
 L2_YAML = Path("tests/l2/sasquatch_pr.yaml")
 DB_URL = os.environ.get(
-    "QS_GEN_DEMO_DATABASE_URL",
+    "RECON_GEN_DEMO_DATABASE_URL",
     "postgresql://postgres:itGKQHRaSocmIwEReXyZ@"
     "database-2.cluster-cup0y2gmc2hu.us-east-1.rds.amazonaws.com:5432/postgres",
 )

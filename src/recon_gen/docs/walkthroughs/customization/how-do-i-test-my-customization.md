@@ -28,7 +28,7 @@ now, and where do I add a test for the change I just made?"
 Three reference points:
 
 - **`tests/`** — the shipped pytest suite. Two layers: unit /
-  integration (fast, no AWS) and e2e (gated on `QS_GEN_E2E=1`,
+  integration (fast, no AWS) and e2e (gated on `RECON_GEN_E2E=1`,
   hits a real AWS account).
 - **`tests/test_dataset_contract.py`** — the contract test.
   For every dataset, asserts the SQL projection's column
@@ -143,7 +143,7 @@ new index) are most likely to fail tests here. The fix is
 usually to update the matching test expectation alongside the
 schema change.
 
-### Layer 4 — End-to-end (`tests/e2e/*`, gated on `QS_GEN_E2E=1`)
+### Layer 4 — End-to-end (`tests/e2e/*`, gated on `RECON_GEN_E2E=1`)
 
 The expensive layer. Two sub-layers:
 
@@ -193,15 +193,15 @@ from recon_gen.apps.l1_dashboard.datasets import build_overdraft_dataset
 
 
 @pytest.mark.skipif(
-    not os.environ.get("QS_GEN_TEST_DB_URL"),
-    reason="set QS_GEN_TEST_DB_URL to a fixture-loaded warehouse",
+    not os.environ.get("RECON_GEN_TEST_DB_URL"),
+    reason="set RECON_GEN_TEST_DB_URL to a fixture-loaded warehouse",
 )
 def test_overdraft_returns_known_overdrawn_account():
     cfg = load_config("config.yaml")
     ds = build_overdraft_dataset(cfg)
     sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
 
-    conn = psycopg2.connect(os.environ["QS_GEN_TEST_DB_URL"])
+    conn = psycopg2.connect(os.environ["RECON_GEN_TEST_DB_URL"])
     rows = conn.cursor().execute(sql).fetchall()
 
     # Your bank's known-overdrawn-yesterday account fixture

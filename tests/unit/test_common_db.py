@@ -5,7 +5,7 @@ covering both the CLI's ``demo apply`` consumer + the e2e harness's
 ``apply_db_seed`` consumer with the same regression bar.
 
 ``connect_demo_db`` and ``execute_script`` are integration-tested via
-the e2e harness fixtures (gated behind ``QS_GEN_E2E=1`` and a real DB);
+the e2e harness fixtures (gated behind ``RECON_GEN_E2E=1`` and a real DB);
 the import-error branches in ``connect_demo_db`` are covered here with
 ``monkeypatch``-based stubs.
 """

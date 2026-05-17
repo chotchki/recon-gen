@@ -1,9 +1,9 @@
 """Top-level conftest — Y.2.gate.c.2 timings capture hook.
 
-When invoked under the test layer chain runner, ``QS_GEN_RUN_DIR`` and
-``QS_GEN_LAYER`` are set in the env (see ``runner.py::_layer_command``);
+When invoked under the test layer chain runner, ``RECON_GEN_RUN_DIR`` and
+``RECON_GEN_LAYER`` are set in the env (see ``runner.py::_layer_command``);
 ``pytest_runtest_makereport`` writes one JSONL line per test ``call`` phase
-into ``$QS_GEN_RUN_DIR/timings/<layer>.jsonl``.
+into ``$RECON_GEN_RUN_DIR/timings/<layer>.jsonl``.
 
 When invoked directly (``pytest tests/...`` without the runner), both env
 vars are unset and the hook is a no-op — direct invocation behavior is
@@ -23,9 +23,9 @@ import pytest
 
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
-    QS_GEN_FUZZ_SEED,
-    QS_GEN_LAYER,
-    QS_GEN_RUN_DIR,
+    RECON_GEN_FUZZ_SEED,
+    RECON_GEN_LAYER,
+    RECON_GEN_RUN_DIR,
 )
 
 
@@ -40,10 +40,10 @@ def pytest_configure(config: Any) -> None:
     then collects ``[fuzz-seed-NNNNN]`` parametrize IDs with a
     different N, and pytest-xdist refuses to start with "Different
     tests were collected between gw0 and gwN". Fix: controller sets
-    ``QS_GEN_FUZZ_SEED`` once at session start; xdist passes env vars
+    ``RECON_GEN_FUZZ_SEED`` once at session start; xdist passes env vars
     from controller to worker subprocesses via execnet, so workers
     inherit the same seed. Operator-pinned seeds
-    (``QS_GEN_FUZZ_SEED=12345 pytest ...``) flow through unchanged.
+    (``RECON_GEN_FUZZ_SEED=12345 pytest ...``) flow through unchanged.
 
     **runs/ isolation (#741).** Tests that call
     ``runner.main(["up_to=..."])`` (e.g. ``test_cmd_up_to_*``)
@@ -60,8 +60,8 @@ def pytest_configure(config: Any) -> None:
     ``monkeypatch.setattr(runner, "RUNS_DIR", tmp_path)``) still win
     by pytest fixture-scope precedence.
     """
-    if QS_GEN_FUZZ_SEED.get_or_none() is None:
-        os.environ[QS_GEN_FUZZ_SEED.name] = str(secrets.randbits(32))
+    if RECON_GEN_FUZZ_SEED.get_or_none() is None:
+        os.environ[RECON_GEN_FUZZ_SEED.name] = str(secrets.randbits(32))
 
     # Y.7-followup — when pytest-xdist is active and `-n` workers were
     # requested (xdist then defaults `dist` to "load"), bump to "loadgroup"
@@ -112,14 +112,14 @@ def pytest_runtest_makereport(item: Any, call: Any) -> Generator[None, Any, None
         return
 
     # Sidecar contract — swallow registry validator failures (a test
-    # that monkeypatches QS_GEN_RUN_DIR to an invalid path for its
+    # that monkeypatches RECON_GEN_RUN_DIR to an invalid path for its
     # own purposes must not cause the timings hook to crash the
     # worker).
     try:
-        run_dir_path = QS_GEN_RUN_DIR.get_or_none()
+        run_dir_path = RECON_GEN_RUN_DIR.get_or_none()
     except EnvVarInvalid:
         return
-    layer = QS_GEN_LAYER.get_or_none()
+    layer = RECON_GEN_LAYER.get_or_none()
     if not run_dir_path or not layer:
         return
     run_dir = str(run_dir_path)
@@ -135,7 +135,7 @@ def pytest_runtest_makereport(item: Any, call: Any) -> Generator[None, Any, None
     suffix = f"-{worker_id}" if worker_id else ""
     # Sidecar contract (Y.2.gate.c.12 alignment): capture failures must
     # never break a passing test. A test that monkeypatches
-    # QS_GEN_RUN_DIR for its own purposes (e.g., the loader sidecar
+    # RECON_GEN_RUN_DIR for its own purposes (e.g., the loader sidecar
     # tests) might point us at an unwritable path; swallow OSError
     # rather than crashing the worker.
     try:
