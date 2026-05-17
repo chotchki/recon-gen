@@ -309,6 +309,41 @@ class Table:
                 "Table: `columns` (unaggregated mode) cannot be combined "
                 "with `group_by` / `values` (aggregated mode). Pick one."
             )
+        # AA.A.8.bug — duplicate ``(dataset, column)`` entries in a Table's
+        # field-well list make QuickSight reject the visual at render
+        # time with: "your tabular report contains duplicate columns. To
+        # proceed, remove all duplicates." The bug class is silent at
+        # JSON emit (the model accepts the duplicate) and only surfaces
+        # at render — operator sees a blank Stuck Pending Detail / etc.
+        # Found 4 instances on 2026-05-17 (L1 Pending/Unbundled Aging,
+        # Supersession Audit's Transactions Audit, Transactions sheet's
+        # Posting Ledger — all ``ds["rail_name"].dim()`` listed twice).
+        # Make the buggy line fail at construction instead: the
+        # mistake is now a typed invariant violation at the wiring site,
+        # not a runtime QS error 30 min into a deploy.
+        from recon_gen.common.tree.calc_fields import resolve_column
+
+        seen: dict[tuple[str, str], str] = {}
+        for well_name, entries in (
+            ("columns", self.columns),
+            ("group_by", self.group_by),
+            ("values", self.values),
+        ):
+            for entry in entries:
+                ds_id = entry.dataset.identifier
+                col_name = resolve_column(entry.column)
+                key = (ds_id, col_name)
+                if key in seen:
+                    raise ValueError(
+                        f"Table {self.title!r}: duplicate field-well entry "
+                        f"({ds_id}, {col_name}) in {well_name} (also "
+                        f"appears in {seen[key]}). QuickSight rejects "
+                        f"this at render with 'your tabular report "
+                        f"contains duplicate columns. To proceed, remove "
+                        f"all duplicates.' — drop the duplicate from the "
+                        f"field-well list."
+                    )
+                seen[key] = well_name
 
     @property
     def element_id(self) -> str:
