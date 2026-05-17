@@ -279,7 +279,9 @@ def webkit_page(
             browser.close()
 
 
-def trigger_failure_capture(page: Page, *, test_id: str | None = None) -> None:
+def trigger_failure_capture(
+    page: Page, *, test_id: str | None = None, cfg: object | None = None,
+) -> None:
     """Public-API capture trigger for the pytest-fixture path.
 
     Pytest's yield-fixture semantics don't re-throw test-body exceptions
@@ -288,12 +290,18 @@ def trigger_failure_capture(page: Page, *, test_id: str | None = None) -> None:
     test failure. The fixture's teardown (post-yield code, after
     consulting ``request.node.rep_call.failed`` via the standard
     ``pytest_runtest_makereport`` hook) calls this function instead to
-    drop the same six artifacts.
+    drop the same artifacts.
 
     Reads the sinks ``webkit_page`` attached to the page
     (``_qs_gen_console_sink``, ``_qs_gen_network_sink``,
     ``_qs_gen_test_id``). Falls back to ``_test_id_from_pytest_env()``
     when no test_id is passed and no page-attached default exists.
+
+    ``cfg`` is the Config dataclass; when present, also dumps
+    ``db_counts.txt`` (per-table row counts for every relation matching
+    ``cfg.db_table_prefix_*``). Pass ``None`` to skip — the QS-side
+    artifacts still land. Conftest's ``maybe_capture_on_failure``
+    resolves cfg from the ``cfg`` fixture and forwards it.
 
     Sets ``page._qs_gen_capture_triggered = True`` so ``webkit_page``'s
     ``finally`` block knows to save the trace.zip (otherwise the trace
@@ -327,6 +335,8 @@ def trigger_failure_capture(page: Page, *, test_id: str | None = None) -> None:
     _capture_failure_console(console_messages, resolved_test_id)
     _capture_failure_qs_errors(page, resolved_test_id)
     _capture_failure_network(network_responses, resolved_test_id)
+    if cfg is not None:
+        _capture_failure_db_counts(cfg, resolved_test_id)
 
 
 def _stop_and_maybe_save_trace(
@@ -675,6 +685,131 @@ def _capture_failure_qs_errors(page: Page, test_id: str) -> None:
         path.write_text("\n".join(errors or []), encoding="utf-8")
     except Exception as exc:
         _warn_capture_failure("qs_errors.txt", exc)
+
+
+def _capture_failure_db_counts(
+    cfg: object, test_id: str,  # typing-smell: ignore[explicit-any]: cfg typed as Config but importing it would force a cycle from helpers.py — soft-duck-type
+) -> None:
+    """Dump per-table row counts from the demo DB to
+    ``<capture_dir>/db_counts.txt`` (or legacy
+    ``<test_id>_db_counts.txt``).
+
+    Answers the first question every "visual rendered blank" triage
+    asks: "is the data even there?". A blank Sankey is two failure
+    modes superimposed:
+
+      - Backend OK, frontend broken: matview has N rows but the swap
+        landed in the wrong container / the test selector mis-matched
+        / HTMX stalled mid-flight.
+      - Backend empty: matview has 0 rows because seed didn't fire,
+        matview refresh skipped, or the parameter narrow excluded
+        everything.
+
+    Without this dump, triage means inspecting the DOM artifact + cross-
+    referencing the API leg's pass/fail. With it, the first line of the
+    `db_counts.txt` answers it before any DOM archaeology — same role
+    the in-dashboard "Info" sheet plays for live runs (see
+    ``common/sheets/app_info.py``).
+
+    Format: ``<table_name>: <count>`` per line, sorted by name. Tables
+    enumerated by querying the dialect's catalog for objects (tables +
+    views + matviews) starting with ``<cfg.db_table_prefix>_``. Empty
+    file is a signal — either prefix is wrong or schema was never
+    applied (the very thing this is meant to surface).
+
+    Sidecar contract: swallow ALL exceptions to a stderr warning. A
+    failed DB roundtrip during capture must not mask the original test
+    failure.
+    """
+    try:
+        from recon_gen.common.db import connect_demo_db
+        from recon_gen.common.sql.dialect import Dialect
+
+        path = _capture_path("db_counts.txt", test_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        prefix = str(getattr(cfg, "db_table_prefix", "") or "")
+        dialect = getattr(cfg, "dialect", None)
+        if not prefix or dialect is None:
+            path.write_text(
+                f"# capture skipped: cfg missing db_table_prefix or dialect\n"
+                f"# prefix={prefix!r} dialect={dialect!r}\n",
+                encoding="utf-8",
+            )
+            return
+
+        conn = connect_demo_db(cfg)  # type: ignore[arg-type]: cfg duck-typed to Config (see header note)
+        try:
+            # sqlite3.Cursor doesn't implement the context-manager
+            # protocol (unlike psycopg + oracledb), so use try/finally
+            # for portable resource handling.
+            cur = conn.cursor()
+            try:
+                # Dialect-aware enumeration of every relation (table /
+                # view / matview) whose name starts with the prefix.
+                # Each name then gets a `SELECT COUNT(*)` — bounded by
+                # the number of prefixed objects (matview list is
+                # ~30 per L2 instance — under 1s end-to-end on Aurora).
+                if dialect is Dialect.POSTGRES:
+                    cur.execute(
+                        "SELECT relname FROM pg_class "
+                        "WHERE relkind IN ('r', 'm', 'v') AND relname LIKE %s "
+                        "ORDER BY relname",
+                        (f"{prefix}_%",),
+                    )
+                    names = [row[0] for row in cur.fetchall()]
+                elif dialect is Dialect.ORACLE:
+                    # Oracle uppercases identifiers; prefix is case-insensitive
+                    # in our cfg so query both layers.
+                    cur.execute(
+                        "SELECT object_name FROM user_objects "
+                        "WHERE object_type IN ('TABLE', 'VIEW', "
+                        "'MATERIALIZED VIEW') "
+                        "AND UPPER(object_name) LIKE UPPER(:1) "
+                        "ORDER BY object_name",
+                        (f"{prefix}_%",),
+                    )
+                    names = [row[0] for row in cur.fetchall()]
+                elif dialect is Dialect.SQLITE:
+                    cur.execute(
+                        "SELECT name FROM sqlite_master "
+                        "WHERE type IN ('table', 'view') AND name LIKE ? "
+                        "ORDER BY name",
+                        (f"{prefix}_%",),
+                    )
+                    names = [row[0] for row in cur.fetchall()]
+                else:
+                    path.write_text(
+                        f"# capture skipped: unsupported dialect {dialect!r}\n",
+                        encoding="utf-8",
+                    )
+                    return
+
+                lines: list[str] = []
+                for name in names:
+                    try:
+                        # Identifier is from a catalog query against our
+                        # own prefix — safe to interpolate. No bind path
+                        # because table names can't be parameterized.
+                        cur.execute(f"SELECT COUNT(*) FROM {name}")
+                        row = cur.fetchone()
+                        count = row[0] if row else "?"
+                        lines.append(f"{name}: {count}")
+                    except Exception as exc:
+                        lines.append(f"{name}: ERROR {type(exc).__name__}: {exc}")
+                path.write_text("\n".join(lines), encoding="utf-8")
+            finally:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception as exc:
+        _warn_capture_failure("db_counts.txt", exc)
 
 
 def wait_for_dashboard_loaded(page: Page, timeout_ms: int) -> None:

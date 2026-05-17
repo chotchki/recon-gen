@@ -1,5 +1,44 @@
 # Release Notes
 
+## v11.0.0a4 — e2e failure capture: per-matview row-count dump
+
+Adds a 7th failure artifact to the browser e2e capture pipeline:
+`db_counts.txt` — one `<table>: <count>` line per relation matching
+`<cfg.db_table_prefix>_*` in the demo DB. Answers the first question
+every "visual rendered blank" triage asks ("is the data even there?")
+without DOM archaeology.
+
+Motivated by v11.0.0a3's e2e leg: two `app2-Template` /
+`app2-Completion` browser tests timed out with the table-visual stuck
+on `htmx-request`, leaving triage to correlate the empty DOM against
+the API leg's pass/fail. With this dump in place, the first line of
+`db_counts.txt` immediately distinguishes:
+
+- backend-empty (matview has 0 rows — seed didn't fire, refresh
+  skipped, or the parameter narrow excluded everything), from
+- backend-OK / frontend-stalled (matview has N rows but the swap
+  landed wrong / HTMX request hung).
+
+Implementation:
+
+- `_capture_failure_db_counts(cfg, test_id)` in
+  `common/browser/helpers.py` — dialect-aware enumeration (Postgres
+  `pg_class`, Oracle `user_objects`, SQLite `sqlite_master`); one
+  `COUNT(*)` per matching relation. Same sidecar contract as the
+  other capture functions: never re-raise (capture failures emit
+  `[CAPTURE FAILURE] db_counts.txt` to stderr and the original test
+  failure still bubbles up).
+- `trigger_failure_capture(page, *, test_id, cfg=None)` — new optional
+  `cfg` kwarg; when present, db_counts fires alongside the other 5
+  page-side dumps. Backwards-compatible (`cfg=None` skips just the
+  DB dump).
+- `tests/e2e/_capture.py::maybe_capture_on_failure` — resolves cfg
+  via `request.getfixturevalue("cfg")` and forwards. Soft-fall when
+  the fixture isn't in scope.
+
+Unit-tested against SQLite — 3 cases (prefix matches, empty result,
+bad cfg → "skipped" marker).
+
 ## v11.0.0a3 — hotfix: AC.D test-coverage misses + obsolete dot-binary test
 
 v11.0.0a2's release got past collection but caught three Phase AC tail

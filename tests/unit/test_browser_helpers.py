@@ -231,6 +231,103 @@ class TestSanitizeTestId:
         assert _sanitize_test_id("foo'bar\"") == "foo_bar_"
 
 
+class TestCaptureFailureDbCounts:
+    """v11.0.0a4 — db_counts.txt artifact answers "is the data even
+    there?" for blank-visual triage. Sidecar contract: never raise."""
+
+    def _make_cfg(self, db_path, prefix: str):
+        """Build a tiny duck-typed cfg sufficient for the helper's
+        attribute reads + connect_demo_db(SQLITE) path. Real Config
+        carries other fields the helper doesn't touch.
+        """
+        from dataclasses import dataclass
+
+        from recon_gen.common.sql.dialect import Dialect
+
+        @dataclass
+        class _Cfg:
+            db_table_prefix: str
+            dialect: Dialect
+            demo_database_url: str
+
+        return _Cfg(
+            db_table_prefix=prefix,
+            dialect=Dialect.SQLITE,
+            demo_database_url=f"sqlite:///{db_path}",
+        )
+
+    def test_writes_per_table_counts_for_prefixed_tables(self, tmp_path, monkeypatch):
+        import sqlite3
+
+        from recon_gen.common.browser.helpers import _capture_failure_db_counts
+
+        db_path = tmp_path / "smoke.db"
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.cursor()
+            cur.execute("CREATE TABLE smoke_transactions (id INTEGER)")
+            cur.execute("INSERT INTO smoke_transactions VALUES (1), (2), (3)")
+            cur.execute("CREATE TABLE smoke_daily_balances (id INTEGER)")
+            # Non-prefixed: must be ignored.
+            cur.execute("CREATE TABLE other_table (id INTEGER)")
+            cur.execute("INSERT INTO other_table VALUES (99)")
+            conn.commit()
+
+        # Route capture output to tmp_path via the legacy SCREENSHOT_DIR
+        # path (no RECON_GEN_RUN_DIR mode).
+        monkeypatch.setattr(
+            "recon_gen.common.browser.helpers.SCREENSHOT_DIR", tmp_path,
+        )
+        cfg = self._make_cfg(db_path, prefix="smoke")
+        _capture_failure_db_counts(cfg, "test_capture_one")
+
+        out = (tmp_path / "_failures" / "test_capture_one_db_counts.txt").read_text()
+        lines = out.strip().split("\n")
+        assert lines == [
+            "smoke_daily_balances: 0",
+            "smoke_transactions: 3",
+        ], f"unexpected output:\n{out}"
+        # other_table is non-prefixed so it must NOT appear.
+        assert "other_table" not in out
+
+    def test_empty_file_when_no_prefixed_tables(self, tmp_path, monkeypatch):
+        import sqlite3
+
+        from recon_gen.common.browser.helpers import _capture_failure_db_counts
+
+        db_path = tmp_path / "empty.db"
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("CREATE TABLE unrelated_table (id INTEGER)")
+            conn.commit()
+
+        monkeypatch.setattr(
+            "recon_gen.common.browser.helpers.SCREENSHOT_DIR", tmp_path,
+        )
+        cfg = self._make_cfg(db_path, prefix="absent")
+        _capture_failure_db_counts(cfg, "test_capture_empty")
+
+        out = (tmp_path / "_failures" / "test_capture_empty_db_counts.txt").read_text()
+        # Empty file IS the signal — schema was never applied / prefix is wrong.
+        assert out == ""
+
+    def test_sidecar_swallows_bad_dialect(self, tmp_path, monkeypatch):
+        from recon_gen.common.browser.helpers import _capture_failure_db_counts
+
+        monkeypatch.setattr(
+            "recon_gen.common.browser.helpers.SCREENSHOT_DIR", tmp_path,
+        )
+
+        class _BadCfg:
+            db_table_prefix = "smoke"
+            dialect = None  # missing → helper writes a "skipped" marker
+            demo_database_url = ""
+
+        # Must not raise — sidecar contract.
+        _capture_failure_db_counts(_BadCfg(), "test_capture_bad_cfg")
+
+        out = (tmp_path / "_failures" / "test_capture_bad_cfg_db_counts.txt").read_text()
+        assert "capture skipped" in out
+
+
 class TestNoHardcodedArnInSource:
     """W.4 hygiene: the helpers module must not retain a hardcoded
     AWS account ID. The previous silent fallback baked a real account
