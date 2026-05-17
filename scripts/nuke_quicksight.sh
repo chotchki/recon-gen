@@ -153,16 +153,26 @@ delete_one() {
         force_flag="--force-delete-without-recovery"
     fi
     if [[ $EXECUTE -eq 1 ]]; then
+        # Capture stderr so we can distinguish real failures (perms /
+        # in-use) from "already gone" (ResourceNotFoundException) —
+        # the latter happens whenever a parallel cleanup-pg job in
+        # e2e.yml is racing this sweep, which is the common case in CI.
+        local stderr_file
+        stderr_file=$(mktemp)
         if aws quicksight "$cmd_verb" \
             --aws-account-id "$AWS_ACCOUNT" \
             --region "$region" \
             $id_flag "$id" \
             $force_flag \
-            --output text >/dev/null 2>&1; then
+            --output text >/dev/null 2>"$stderr_file"; then
             green "    ✓ $kind/$id"
+        elif grep -q "ResourceNotFoundException" "$stderr_file"; then
+            green "    ✓ $kind/$id (already gone — raced with another deleter)"
         else
-            red   "    ✗ $kind/$id (delete failed — likely starter theme / in-use / cascaded already)"
+            red   "    ✗ $kind/$id"
+            sed 's/^/        /' "$stderr_file" >&2
         fi
+        rm -f "$stderr_file"
     else
         yellow "    [DRY-RUN] would delete $kind/$id"
     fi
