@@ -1,5 +1,86 @@
 # Release Notes
 
+## v11.0.0 — Phase AC: project rename `quicksight-gen` → `recon-gen`
+
+Consolidated final tag of the Phase AC alpha series (a1 through a6).
+PyPI publishes `recon-gen` as the canonical package name; the
+`quicksight-gen` shim remains on PyPI as a thin deprecation
+meta-package depending on `recon-gen==11.0.0` (drops 1-2 months
+after publish).
+
+**Why the rename.** AWS owns the "QuickSight" trademark, and the
+tool's scope has grown past pure QuickSight JSON generation — it
+also ships a self-hosted HTMX dashboard renderer and a
+regulator-ready audit PDF builder. `recon-gen` is trademark-clean
+and accurately reflects what the tool does.
+
+**Operator migration:**
+
+- New install: `pip install recon-gen` (or `uv add recon-gen`).
+- Existing install: `pip install -U quicksight-gen` keeps working
+  through the grace window — the shim transparently pulls in
+  `recon-gen` and prints a one-shot `DeprecationWarning` pointing
+  at the new install + import paths.
+- Imports: `from recon_gen import …` (was `from quicksight_gen import
+  …`). No re-exports — the shim handles the *install* path only;
+  code changes are required to migrate imports.
+- CLI: `recon-gen <verb>` (was `quicksight-gen <verb>`).
+- Env vars: `RECON_GEN_*` / `RECON_E2E_*` (was `QS_GEN_*` /
+  `QS_E2E_*`). Legacy names still resolve through the EnvVar
+  registry's `legacy_name` arm and emit a one-shot
+  `DeprecationWarning` per name for the grace window.
+- IAM user + OIDC trust policy: rename `quicksight-gen-local` →
+  `recon-gen-local`; the `Github_e2e_testing` policy keeps its
+  current shape.
+- GitHub repo: `chotchki/recon-gen` (was `chotchki/quicksight-gen`);
+  GitHub's 301 redirect handles old URLs.
+
+**What's in the box** (carried over from a1—a6):
+
+- `AC.A` — `src/quicksight_gen/` → `src/recon_gen/` (320 files
+  preserved via `git mv`); `pyproject.toml` rewires every name +
+  entrypoint + package-data + pyright/coverage scope.
+- `AC.B` — Env var registry flips to `RECON_*`; lint rule renamed
+  `qs-gen-prefix` → `recon-prefix`; tests + locked-seed headers
+  re-emitted with the new prefix.
+- `AC.D` — Doc surface sweep + audit markdown title flip + test
+  signing cert regenerated.
+- `AC.F` — PyPI shim (`quicksight-gen-shim/`); release.yml builds +
+  publishes both wheels; verify-step asserts shim's
+  DeprecationWarning fires and `recon-gen` resolves transitively.
+
+**Alpha-iteration retrospective** (a1—a6 hotfixes, all rolled into
+this final tag):
+
+- `a1` — initial AC merge tag; release.yml died at unit collection
+  on Z.C.2's loud-fail for missing required cfg fields.
+- `a2` — gated `tests/e2e/test_dataset_sql_smoke.py` +
+  `tests/e2e/test_demo_apply_row_counts.py` at module import on
+  `RECON_GEN_E2E`, so the bare unit job no longer hits a cfg
+  load at collection.
+- `a3` — three AC.D test-coverage misses (audit markdown title × 2
+  + test signing cert CN/Org); regenerated cert with new identity;
+  deleted obsolete `tests/unit/test_l2_topology_dot_layout.py` (the
+  graphviz `.pipe()` path violated Phase T's wasm-only contract).
+- `a4` — added `db_counts.txt` as the 7th browser e2e failure
+  artifact (per-matview row counts at moment-of-failure;
+  dialect-aware via `pg_class` / `user_objects` / `sqlite_master`).
+  Release.yml at this tag was the first fully-green publish to
+  PyPI.
+- `a5` + `a6` — unit-test env isolation for the new `db_counts`
+  tests (runner sets `RECON_GEN_RUN_DIR`, which routes capture
+  output away from the legacy `SCREENSHOT_DIR` path the
+  assertions key off).
+
+**Known pre-existing infra issue** (NOT a v11.0.0 regression):
+`ci.yml::integration-oracle` fails at seed apply with
+`ORA-01653: unable to increase tablespace SYSTEM by 1MB`. The CI
+container logs in as Oracle's `system` user and creates tables in
+the tiny default SYSTEM tablespace. Pre-AC main commits hit the
+same failure. Fix is one of: switch CI to a dedicated app user
+with `DEFAULT TABLESPACE USERS`, resize SYSTEM at container init,
+or seed in chunks. Queued post-release.
+
 ## v11.0.0a6 — hotfix: extend a5's env-isolation fix to the other two tests
 
 v11.0.0a5's `replace_all=true` edit only matched the comment block in
