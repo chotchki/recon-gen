@@ -245,6 +245,14 @@ jobs:
         image: gvenzl/oracle-free:latest
         env:
           ORACLE_PASSWORD: ci_ora_password
+          # Create a dedicated app user with quota on the USERS
+          # tablespace, so seed inserts don't pile into SYSTEM (which
+          # autoextends in tiny increments and hits ORA-01653 around
+          # ~60k transaction rows). Default behavior of
+          # gvenzl/oracle-free: APP_USER + APP_USER_PASSWORD create
+          # the user with UNLIMITED quota on USERS at container init.
+          APP_USER: recon
+          APP_USER_PASSWORD: ci_recon_password
         ports:
           - 1521:1521
         options: >-
@@ -281,7 +289,7 @@ jobs:
           deployment_name: "qs-ci-oracle"
           db_table_prefix: "qs_ci_oracle"
           dialect: "oracle"
-          demo_database_url: "system/ci_ora_password@localhost:1521/FREEPDB1"
+          demo_database_url: "recon/ci_recon_password@localhost:1521/FREEPDB1"
           EOF
 
       # Y.2.gate.k.1.thin-wrapper (Phase 4): runner drives the entire
