@@ -73,7 +73,7 @@ def _render_audit_markdown(
         else l2_fingerprint_placeholder()
     )
     cover = (
-        "# QuickSight Generator Audit Report\n"
+        "# Recon Generator Audit Report\n"
         "\n"
         f"## {institution}\n"
         "\n"

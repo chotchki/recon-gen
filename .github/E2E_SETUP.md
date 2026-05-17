@@ -104,7 +104,7 @@ defeating the trigger-model lockdown.
 ### Step 3: Attach the permissions policy
 
 Create a new inline policy on the role with this JSON. Scope is
-exactly what `quicksight-gen json apply --execute` + `json clean
+exactly what `recon-gen json apply --execute` + `json clean
 --execute` + `audit apply --execute` + `audit verify` need, plus
 the embed-URL generation for browser tests. Anything beyond this
 is a leak.

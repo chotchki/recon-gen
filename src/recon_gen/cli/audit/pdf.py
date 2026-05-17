@@ -125,7 +125,7 @@ def _write_audit_pdf(
         rightMargin=0.75 * inch,
         topMargin=0.75 * inch,
         bottomMargin=0.85 * inch,  # extra room for the page footer
-        title=f"QuickSight Generator Audit Report — {institution}",
+        title=f"Recon Generator Audit Report — {institution}",
         subject=subject_meta,
         author=f"recon-gen v{version}",
         total_pages_holder=total_pages_holder,
@@ -189,7 +189,7 @@ def _write_audit_pdf(
     # _bookmark_level directly rather than wrapping in
     # bookmarked_h1 because we want to preserve the Title style.
     cover_title = Paragraph(
-        "QuickSight Generator Audit Report",
+        "Recon Generator Audit Report",
         styles["Title"],
     )
     cover_title._bookmark_level = 0  # type: ignore[attr-defined]: reportlab Paragraph monkey-patch for bookmark generation

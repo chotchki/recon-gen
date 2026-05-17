@@ -1,4 +1,4 @@
-# QuickSight Analysis Generator
+# Recon Generator
 
 Python tool that programmatically generates AWS QuickSight JSON definitions (theme, datasets, analyses, dashboards) and deploys them via boto3. Ships **four independent QuickSight apps** plus a **regulator-ready PDF reconciliation report**, all L2-fed off one institution YAML (account, datasource, theme, per-instance schema prefix), sharing the CLI surface:
 
@@ -14,7 +14,7 @@ The customer doesn't know exactly what they want yet. Everything is generated fr
 
 - **Language**: Python 3.13. (3.12 was supported until Y.2.gate; dropped to simplify the test matrix and to free up newer-syntax features as they land.)
 - **Package manager**: uv (lock at `uv.lock`); setuptools build backend; venv at `.venv/`. Run `uv sync --all-extras` after pulling to refresh deps; tests/CLI invoke via `.venv/bin/...` directly (no `source activate`).
-- **Entry point**: `python -m quicksight_gen` or `quicksight-gen` (installed script)
+- **Entry point**: `python -m recon_gen` or `recon-gen` (installed script)
 - **CLI framework**: Click
 - **Output**: JSON files in `out/` (theme, per-app analysis/dashboard, datasets, optional datasource)
 - **Dialects**: PostgreSQL 17+, Oracle 19c+, and SQLite 3.38+. SQL emitters branch on `Dialect` enum (`common/sql/dialect.py`); SQLite uses JSON1 functions in place of SQL/JSON `JSON_VALUE` (via the `json_value` helper) and matviews emit as `CREATE TABLE … AS SELECT` (refresh = re-CREATE).
@@ -39,24 +39,24 @@ uv sync --extra dev --extra audit          # just unit tests + audit PDF
 uv sync --extra dev --extra demo --extra demo-oracle  # for `data apply --execute`
 
 # Generate all JSON for the four bundled apps
-quicksight-gen json apply -c config.yaml -o out/
-quicksight-gen json apply -c config.yaml -o out/ --l2 run/sasquatch_pr.yaml
+recon-gen json apply -c config.yaml -o out/
+recon-gen json apply -c config.yaml -o out/ --l2 run/sasquatch_pr.yaml
 
 # Deploy (writes JSON to out/, then delete-then-create against AWS)
-quicksight-gen json apply -c config.yaml -o out/ --execute
+recon-gen json apply -c config.yaml -o out/ --execute
 
-# Cleanup: delete ManagedBy:quicksight-gen resources not in current out/
-quicksight-gen json clean                 # dry-run (default)
-quicksight-gen json clean --execute       # actually delete
+# Cleanup: delete ManagedBy:recon-gen resources not in current out/
+recon-gen json clean                 # dry-run (default)
+recon-gen json clean --execute       # actually delete
 
 # Demo flow: schema -> seed -> matview refresh against the demo DB
-quicksight-gen schema apply -c config.yaml --execute
-quicksight-gen data apply -c config.yaml --execute
-quicksight-gen data refresh -c config.yaml --execute
+recon-gen schema apply -c config.yaml --execute
+recon-gen data apply -c config.yaml --execute
+recon-gen data refresh -c config.yaml --execute
 
 # Audit PDF: query L1 invariant matviews + emit regulator-ready PDF
-quicksight-gen audit apply -c config.yaml --execute -o report.pdf
-quicksight-gen audit verify report.pdf -c config.yaml   # recompute + compare provenance
+recon-gen audit apply -c config.yaml --execute -o report.pdf
+recon-gen audit verify report.pdf -c config.yaml   # recompute + compare provenance
 
 # Studio (X.4) — implementation-tools surface for the integrator + trainer
 # + ETL engineer. One Starlette process serves: unified diagram (`/diagram`),
@@ -70,13 +70,13 @@ quicksight-gen audit verify report.pdf -c config.yaml   # recompute + compare pr
 # scope=only_template), derive_balances toggle (X.4.i.2 — re-derives
 # control-account balances from posted transactions for the configured
 # account_role set, default gl_control / concentration_master / funds_pool).
-quicksight-gen studio -c run/config.yaml --l2 run/sasquatch_pr.yaml
-quicksight-gen studio --port 8765 --no-docs   # narrow surface for fast iteration
+recon-gen studio -c run/config.yaml --l2 run/sasquatch_pr.yaml
+recon-gen studio --port 8765 --no-docs   # narrow surface for fast iteration
 
 # Dashboards (X.2) — just the dashboards, no Studio chrome. The HTMX
 # renderer alternative to QuickSight; same tree, two backends.
-quicksight-gen dashboards -c run/config.yaml --l2 run/sasquatch_pr.yaml
-quicksight-gen dashboards --app investigation   # narrow to one app for triage
+recon-gen dashboards -c run/config.yaml --l2 run/sasquatch_pr.yaml
+recon-gen dashboards --app investigation   # narrow to one app for triage
 
 # Tests — canonical entry is the layered chain runner (Y.2.gate.b/c/m/n).
 # Layers: unit → db → app2 → deploy → api → browser. Stops on first
@@ -132,7 +132,7 @@ The `data apply --execute` path reads theme from the L2 institution YAML's inlin
 auth:
   # Profile name in ~/.aws/credentials. Runner injects AWS_PROFILE=<value>
   # into every subprocess. Keys live in ~/.aws/credentials, NOT in cfg yaml.
-  aws_profile: "quicksight-gen-local"
+  aws_profile: "recon-gen-local"
 
   # Optional explicit override; skips the auto-derive STS+ListUsers call.
   # Use case: authed as one IAM principal but want embed URLs signed for
@@ -146,9 +146,9 @@ When `aws_profile` is set:
 - Runner auto-derives `QS_E2E_USER_ARN` via `sts:GetCallerIdentity` → `quicksight:ListUsers` → match on `PrincipalId == "federated/iam/<UserId>"`. **The operator no longer exports the env var.**
 - `quicksight_user_arn` (when set) wins over the derivation — no API calls fired.
 
-**Long-lived IAM user vs SSO.** The recommended local-dev approach is a dedicated `quicksight-gen-local` IAM user with long-lived access keys (NOT SSO). The reason: a multi-hour Claude-loop session burns through the SSO token's ~12-hour cache, and every cache miss triggers a browser-based `aws sso login` that Claude can't auto-invoke (per `Y.2.gate.b.14.4`'s refusal pattern). Long-lived keys never trigger a browser flow.
+**Long-lived IAM user vs SSO.** The recommended local-dev approach is a dedicated `recon-gen-local` IAM user with long-lived access keys (NOT SSO). The reason: a multi-hour Claude-loop session burns through the SSO token's ~12-hour cache, and every cache miss triggers a browser-based `aws sso login` that Claude can't auto-invoke (per `Y.2.gate.b.14.4`'s refusal pattern). Long-lived keys never trigger a browser flow.
 
-**One-time onboarding:** runbook in `docs/audits/y_2_gate_h_i_combined_spike.md` §6. IAM policy: `docs/audits/_iam/quicksight-gen-local-policy.json` (mirror of `Github_e2e_testing` + `quicksight:ListUsers`). CI keeps OIDC unchanged.
+**One-time onboarding:** runbook in `docs/audits/y_2_gate_h_i_combined_spike.md` §6. IAM policy: `docs/audits/_iam/recon-gen-local-policy.json` (mirror of `Github_e2e_testing` + `quicksight:ListUsers`). CI keeps OIDC unchanged.
 
 ### Cfg precedence + tunable defaults (`Y.2.gate.h.2`–`h.5`)
 
@@ -198,7 +198,7 @@ No "decode the GH log" step — the artifact set IS the local triage shape, just
 ## Project Structure
 
 ```
-src/quicksight_gen/
+src/recon_gen/
   cli/                  # Click CLI shell — schema | data | json | docs | audit groups
     __init__.py         # main + group registration
     schema.py / data.py / json.py / docs.py
@@ -236,7 +236,7 @@ src/quicksight_gen/
     executives/         # 4 sheets — coverage/volume/money moved
   docs/                 # mkdocs source — concepts/, handbook/, walkthroughs/,
                         # for-your-role/, scenario/, Schema_v6.md, _diagrams/, _macros/.
-                        # Extract via `quicksight-gen docs export`.
+                        # Extract via `recon-gen docs export`.
 tests/
   test_*.py             # Unit + integration (~50 modules)
   e2e/                  # Two layers: API (boto3) + browser (Playwright); QS_GEN_E2E=1
@@ -276,8 +276,8 @@ Walk-the-flow drills (Account Network): right-click any touching-edges table row
 - Config accepts a pre-existing DataSource ARN for production; for demo, `datasource_arn` is auto-derived from `demo_database_url` and `datasource.json` is generated.
 - All datasets use custom SQL with Direct Query (no SPICE). Seed changes show up immediately after `demo apply`.
 - SQL is constrained to a portable subset across Postgres + Oracle: SQL/JSON path syntax; no JSONB, no `->>`, no extensions, no array / range types.
-- Generated resource IDs are kebab-case under `cfg.deployment_name` (Z.C, required cfg field — no default). Use `cfg.prefixed(name)` to apply it, producing IDs like `qsgen-prod-l1-dashboard`. Enforced by `tests/unit/test_typing_smells.py::qs-gen-prefix` — no hardcoded `"qs-gen-..."` / `"qsgen-..."` literals outside `common/config.py`.
-- All resources tagged `ManagedBy: quicksight-gen` plus `Deployment: <deployment_name>` (Z.C — single-axis tag, replaces the legacy `ResourcePrefix` + `L2Instance` pair); `extra_tags` in config are merged in. `cleanup` gates on the `Deployment` tag — only sweeps resources whose tag matches `cfg.deployment_name`.
+- Generated resource IDs are kebab-case under `cfg.deployment_name` (Z.C, required cfg field — no default). Use `cfg.prefixed(name)` to apply it, producing IDs like `recon-prod-l1-dashboard`. Enforced by `tests/unit/test_typing_smells.py::recon-prefix` — no hardcoded `"recon-..."` literals outside `common/config.py`.
+- All resources tagged `ManagedBy: recon-gen` plus `Deployment: <deployment_name>` (Z.C — single-axis tag, replaces the legacy `ResourcePrefix` + `L2Instance` pair); `extra_tags` in config are merged in. `cleanup` gates on the `Deployment` tag — only sweeps resources whose tag matches `cfg.deployment_name`.
 - Every sheet has a plain-language description; every visual has a subtitle — the end customer is not technical. Enforced by `Sheet.__post_init__` + `Visual.__post_init__` raising `ValueError` on missing/blank.
 - Clickable cells use `common/clickability.py`: accent-colored text = left-click drill; accent text on pale-tint background = also carries a right-click menu drill (use this style whenever a right-click action exists, even if a left-click is also wired).
 - **Drill direction convention** — left clicks move you LEFT, right clicks move you RIGHT. Pick the trigger by which sheet the drill points to relative to the source: deeper / further-down-the-pipeline / further-right goes on `DATA_POINT_MENU` (right-click); back-toward-source goes on `DATA_POINT_CLICK` (left-click). Call out both clicks in the visual's subtitle when both are wired. Existing pre-rule wirings are not retroactively flipped.
@@ -326,7 +326,7 @@ A browser e2e test drives a dashboard through the `DashboardDriver` protocol (`t
 - **`QsEmbedDriver`** (`tests/e2e/_drivers/qs.py`) — the embedded QuickSight iframe. `QsEmbedDriver.embed(*, aws_account_id, aws_region, viewport=…)` is a `@contextmanager` classmethod that owns the WebKit page; `open(dashboard_id)` mints a fresh region-matched single-use embed URL. The conftest `qs_driver` fixture wraps it (skips cleanly when `QS_E2E_USER_ARN` is unset — the runner derives it from `cfg.auth.aws_profile`; export it yourself for a direct `pytest` run).
 - **`App2Driver`** (`tests/e2e/_drivers/app2.py`) — the self-hosted HTMX/d3 page. `App2Driver.smoke()` serves the bundled smoke app + stub fetcher; `App2Driver.serving(*, tree_app, sheet, data_fetcher, …)` serves any tree + fetcher (stub or live-DB via `make_live_db_fetcher_for_app`). `driver.page` / `driver.base_url` are the escape hatch for App2-internal wire-shape assertions (`page.route` for HTTP intercept, `page.expect_response` for refetch checks, `select_option` on `<select name="param_X">`) — the kind of thing the renderer-agnostic verbs deliberately don't expose. Row-level drills (u.4.e.3): App2's Table renderer reads each visual's tree-level `Drill` actions off a `data-row-drills` JSON attr on the visual section and makes every row clickable (left-click → the primary drill, i.e. a `DATA_POINT_CLICK` one if declared else the first), plus a trailing "⋯" button per row that opens a `ctxmenu` popover (vendored — `assets/vendor/js/ctxmenu.min.js`; re-skinned onto the L2 theme via `widgets-theme.css`'s `.ctxmenu` block) listing every drill's label — `drill_from_first_row` clicks the row, `drill_from_first_row_via_menu(visual, item)` clicks the "⋯" then the named `ctxmenu` `<li>`; both verbs work on both renderers (QS uses the data-point click / right-click context menu). The drill navigates `target_path?param_<name>=<row cell value>` for each declared param, and the destination sheet's `server.py` route threads those `?param_*` keys into the rendered filter form's initial state (`_apply_url_param_overrides` — u.4.e.4): a dropdown pre-selects the matching `<option>`, a `ParameterMultiSelect` pre-selects all the repeated-key values, a `ParameterNumberSpec` slider takes the value as its `default`. Because every visual loads via `hx-include="#filter-form"`, the *first* fetch already carries the value — a cross-sheet drill (or a bookmarked `?param_X=Y` URL) renders the destination narrowed, no manual re-pick. QS's own URL-param write still doesn't sync its controls (the standing quirk — `project_qs_url_parameter_no_control_sync`), so don't expect the QS leg to show the picked value in the widget.
 
-A QS-only check just uses `qs_driver`; an App2-only check uses `App2Driver`; an overlapping check ("every visual rendered", "filter narrows the table") is one body parametrized over both. "This verb isn't meaningful here" → the driver raises `NotImplementedError` (not skip) — the test skips the *param*, not the verb. **Enforced**: the `no-playwright-leak` AST lint (`tests/unit/test_typing_smells.py`) flags any `import playwright[.x]` / `from playwright[.x] import …` / `from quicksight_gen.common.browser.{helpers,screenshot} import …` in `tests/e2e/**` outside `tests/e2e/_drivers/` (the AWS-only `get_user_arn` / `generate_dashboard_embed_url` helpers are exempt). New e2e tests use `DashboardDriver`; they do NOT reach into `common/browser/helpers.py`.
+A QS-only check just uses `qs_driver`; an App2-only check uses `App2Driver`; an overlapping check ("every visual rendered", "filter narrows the table") is one body parametrized over both. "This verb isn't meaningful here" → the driver raises `NotImplementedError` (not skip) — the test skips the *param*, not the verb. **Enforced**: the `no-playwright-leak` AST lint (`tests/unit/test_typing_smells.py`) flags any `import playwright[.x]` / `from playwright[.x] import …` / `from recon_gen.common.browser.{helpers,screenshot} import …` in `tests/e2e/**` outside `tests/e2e/_drivers/` (the AWS-only `get_user_arn` / `generate_dashboard_embed_url` helpers are exempt). New e2e tests use `DashboardDriver`; they do NOT reach into `common/browser/helpers.py`.
 
 ### What's sealed inside `QsEmbedDriver` (you don't touch these)
 
@@ -352,15 +352,15 @@ A QS-only check just uses `qs_driver`; an App2-only check uses `App2Driver`; an 
 - **Per-job perf dump** — every e2e job runs `scripts/dump_top_queries.py` after pytest and uploads top-50 expensive queries as a markdown artifact. `pg_stat_statements` (PG) / `v$sqlstats` (Oracle); auto-installs the PG extension on first run.
 - **`.github/workflows/release.yml::e2e-against-testpypi`** holds prod publish on a live AWS run against the just-published TestPyPI wheel. `publish-pypi` `needs:` includes this job.
 - **`.github/workflows/ci.yml::coverage`** combines per-matrix `.coverage` data files via `coverage combine` and posts a markdown report to the GHA Step Summary + republishes to the `badges` branch (README badge wrap-links to it).
-- **`.github/workflows/ci.yml::docs-portable-install`** builds the wheel, installs in a fresh non-editable venv, runs `quicksight-gen docs apply --portable`, and asserts the rendered HTML lands. Regression guard for the bundled-docs path.
+- **`.github/workflows/ci.yml::docs-portable-install`** builds the wheel, installs in a fresh non-editable venv, runs `recon-gen docs apply --portable`, and asserts the rendered HTML lands. Regression guard for the bundled-docs path.
 
 ## Demo Data Conventions
 
 - Every visual should have non-empty data in the demo. For each new visual that relies on a scenario (drift, overdraft, limit-breach, stuck-pending, etc.), add a `TestScenarioCoverage` assertion guaranteeing ≥N rows of that shape — counts alone don't catch "zero scenario rows slipped through".
 - Generators must stay deterministic. Enforced by `tests/unit/test_typing_smells.py::determinism` — no module-level `random.X()` in seed modules.
 - Write the coverage assertion **before** the visual, not after.
-- The L2-shape demo seed plants every L1 SHOULD-violation kind plus the Investigation fanout via `emit_full_seed(l2_instance, scenario)` — driven by `default_scenario_for(l2_instance)` from `common/l2/auto_scenario.py`. The `data apply` CLI wraps the scenario in `densify_scenario(factor=5) → add_broken_rail_plants(15) → boost_inv_fanout_plants(5×)` before calling `emit_full_seed`, so the live demo gets ~60k baseline rows + plants on top. Pass `quicksight-gen data apply --seed-density=N` (Y.2.gate.c.13.1) to scale all three knobs by `N` — `1.0` (default) is byte-identical to the locked SQL files; `2.0` doubles plant counts for heavier nightly scenarios; `0.5` halves them for fast-iteration runs. Density flows through `cli/_helpers.py::build_full_seed_sql(... density=N)`.
-- Determinism is locked at `tests/data/_locked_seeds/<instance>.<dialect>.sql` — one byte-stamped file per `(L2 instance, dialect)` pair. `tests/data/test_locked_seeds.py::test_locked_seed_matches_fresh_emit` re-emits and asserts byte-equality (which subsumes hash equality — the `-- SHA256: <hex>` line in each file's header is a human-readable provenance stamp, not the assertion mechanism). Any generator change that shifts a single byte fails the test loudly — re-lock with `quicksight-gen data lock -c <postgres-or-oracle config> --l2 <yaml>` (run once per dialect) when the shift is intentional. Anchor pinned at `date(2030, 1, 1)` so the emit is machine-independent. Per-run drift detection (across runs of any density) lives separately in `runs/<run-id>/{timings,hashes}.json` (Y.2.gate.c.2 + c.3).
+- The L2-shape demo seed plants every L1 SHOULD-violation kind plus the Investigation fanout via `emit_full_seed(l2_instance, scenario)` — driven by `default_scenario_for(l2_instance)` from `common/l2/auto_scenario.py`. The `data apply` CLI wraps the scenario in `densify_scenario(factor=5) → add_broken_rail_plants(15) → boost_inv_fanout_plants(5×)` before calling `emit_full_seed`, so the live demo gets ~60k baseline rows + plants on top. Pass `recon-gen data apply --seed-density=N` (Y.2.gate.c.13.1) to scale all three knobs by `N` — `1.0` (default) is byte-identical to the locked SQL files; `2.0` doubles plant counts for heavier nightly scenarios; `0.5` halves them for fast-iteration runs. Density flows through `cli/_helpers.py::build_full_seed_sql(... density=N)`.
+- Determinism is locked at `tests/data/_locked_seeds/<instance>.<dialect>.sql` — one byte-stamped file per `(L2 instance, dialect)` pair. `tests/data/test_locked_seeds.py::test_locked_seed_matches_fresh_emit` re-emits and asserts byte-equality (which subsumes hash equality — the `-- SHA256: <hex>` line in each file's header is a human-readable provenance stamp, not the assertion mechanism). Any generator change that shifts a single byte fails the test loudly — re-lock with `recon-gen data lock -c <postgres-or-oracle config> --l2 <yaml>` (run once per dialect) when the shift is intentional. Anchor pinned at `date(2030, 1, 1)` so the emit is machine-independent. Per-run drift detection (across runs of any density) lives separately in `runs/<run-id>/{timings,hashes}.json` (Y.2.gate.c.2 + c.3).
 
 ## Operational Footguns
 

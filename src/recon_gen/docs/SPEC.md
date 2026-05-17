@@ -1,4 +1,4 @@
-# Domain Model — QuickSight Analysis Generator
+# Domain Model — Recon Generator
 
 ## Overall Goal
 

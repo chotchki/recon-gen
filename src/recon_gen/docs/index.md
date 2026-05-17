@@ -1,4 +1,4 @@
-# QuickSight Analysis Generator
+# Recon Generator
 
 *Programmatic AWS QuickSight analysis generator for financial
 reporting. Currently rendered against
