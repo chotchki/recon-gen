@@ -1,5 +1,31 @@
 # Release Notes
 
+## v10.1.0a1 — Phase AA: dropdown defaults, exception literacy panels, account search, Daily Statement + App2 partial-refetch fixes
+
+Pre-release / alpha tag. Closes Phase AA — a dashboard-UX literacy + correctness pass landing on top of the Phase Z grammar work. Six independent threads ship together; A.6/A.7/A.8 (generic test-coverage gaps) deferred to Phase AB.
+
+**AA.A — Multi-select → single-select default for drill-to-one dropdowns.** Audited all 36 dropdowns across L1 / L2FT / Investigation; flipped 25 to `SINGLE_SELECT` (drill-to-one workflows where the operator picks one value and reads the narrowed table). 6 stay multi-select for workflow-state columns (`status` / `completion_status` / `bundle_status` / `check_type` — analysts often select 2-3 states at once). The `ALL` sentinel default holds the "show everything on load" semantic; `_data_value_clause` / `_match_all_in_clause` SQL helpers rewrote from `col IN (<<$pX>>)` to `('<sentinel>' = <<$pX>> OR col = <<$pX>>)`. App2 `_tree_filter_specs.py` gained a `SINGLE_SELECT + StaticValues` deriver — L2FT MetaKey dropdowns now render in App2 where they were previously skipped.
+
+**AA.B — Daily Statement Role → Account → Business Day workflow.** AA.B.1 added the Role dropdown above Account so the cascade direction is visually explicit. AA.B.4 caught a wrong-visual-title regression in the e2e test (Posted Money Records vs sheet-name). AA.B.5 chain: TomSelect's internal Sync was overwriting manual `option.selected` mutations — `App2Driver.pick_filter` routes through `select.tomselect.setValue()` to fix. AA.B.5.followon: a true 3-of-6 partial-refetch bug surfaced — the bottom 3 visuals in DOM order silently dropped the refresh trigger under parallel-initial-load + mid-load filter pick. Fixed via three coordinated changes:
+
+1. `hx-sync="this:queue last"` (was `this:replace`) — queues new requests behind in-flight ones instead of attempting an abort+new race HTMX dropped half the time.
+2. Explicit per-visual `htmx.trigger(div, "refresh")` iteration in `wireFilterAutoRefresh` (was `htmx.trigger(body, "refresh")` broadcast). Bypasses the cross-element ordering edge case.
+3. Per-visual loading skeleton (`.visual-loading` inside every `.visual-data` swap target; CSS `transition-delay: 300ms` so fast loads never flash; bootstrap.js re-injects on `htmx:beforeRequest` so refresh loads show it too). Presence/absence of `.visual-loading` is the new "is loading?" detection signal — `App2Driver.wait_loaded` + `_wait_for_refetch` poll skeleton-absence instead of the racy first-response + networkidle pattern (which lost queued refetches under queue-last).
+
+AA.B.5.followon.2: Daily Statement browser tests went calendar-flake on UTC midnight crossover (cust-011 had 0 tx on chain's "yesterday"). New helper `tests/e2e/_daily_statement_pick.py::find_account_day_with_data(cfg)` queries the deployed DB for a `(account_display, role, business_day)` triple with most rows on the most-recent day; tests drive all three filter pickers to those values. New `DashboardDriver.set_date(label, iso)` verb (QS impl; App2 no-op since App2 skips `add_parameter_datetime_picker`).
+
+**AA.C — Exception literacy panels.** `docs/L1_Invariants.md` parser captures a `what_to_do` field per invariant; `common/sheets/_exception_panel.py` helper composes plain-English text-box panels at the bottom of the 6 L1 invariant sheets + Today's Exceptions. Studio trainer pane (X.4.h.7's deferred work) wires the same content as a per-template knowledge surface — same prose, two consumers.
+
+**AA.E — Account dropdown shows "Name (id)".** AA.E.1 picked the search-by-name-AND-id pattern (substring search hits either the customer name or the bare account id). AA.E.2 wired `account_display` (the `account_name || ' (' || account_id || ')'` projection) as the bound column across all L1 Account dropdowns. AA.E.3 catch: Daily Statement's direct `add_parameter_dropdown` callsite missed the AA.E.2 sweep — silent-empty regression caught by the new browser test `test_daily_statement_picked_account_narrows_table`.
+
+**AA.H — QS-driver lifecycle primitive.** `QsEmbedDriver.embed(*, aws_account_id, aws_region, viewport=…)` is a `@contextmanager` classmethod that owns the WebKit page; `open(dashboard_id)` mints fresh region-matched single-use embed URLs. Wired across all 3 QS-driver fixtures + the audit-agreement scenarios; runner exit-code parity normalized.
+
+**Diagnostics.** `data-bound-params` attribute on each visual's `<script class="chart-data">` self-describes what URL params each visual was queried with — bootstrap.js copies the attr onto the persistent `<section>` before clearing the script so failure-capture's `dom.html` reveals the exact per-visual bind shape. `network.txt` capture extended to keep every `/visuals/*/data` response regardless of status (was filtering out 200s, which masked empty-vs-no-request distinction).
+
+**Deferred to Phase AB.** AA.A.6 (generic additive-pickers row-survival test), AA.A.7 (inverse exclusion test), AA.A.8 (generic "table failed to render" probe across all sheets + the adjacent Pending Aging duplicate-columns bug). These are coverage gaps + hardening, not regressions blocking the alpha. Each needs a spike before locking implementation.
+
+**Migration for operators.** None — every change is internal to the dashboards / test infrastructure / docs. Existing `config.yaml` files, L2 YAML files, and deploy pipelines work unchanged from `v10.0.0a7`.
+
 ## v10.0.0a7 — Z.B + Z.C + Z.D: `transfer_type` subsumed into rail; deployment-namespace collapse; Phase Z complete
 
 Pre-release / alpha tag. Closes Phase Z (started in `v10.0.0a6` with Z.A's chain grammar collapse). Two more grammar reshapes + an end-of-phase verify ship together.
