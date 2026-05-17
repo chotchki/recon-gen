@@ -289,18 +289,26 @@ jobs:
           deployment_name: "qs-ci-oracle"
           db_table_prefix: "qs_ci_oracle"
           dialect: "oracle"
-          demo_database_url: "recon/ci_recon_password@localhost:1521/FREEPDB1"
+          demo_database_url: "recon/ci_recon_password@localhost:1521/FREEPDB1:POOLED"
           EOF
 
       # Two variant cells (sp_or_lo + sq_or_lo) seed in parallel against
       # the SAME Oracle container (runner uses asyncio.gather per
-      # m.5.a). gvenzl/oracle-free's default PGA_AGGREGATE_LIMIT is
-      # ~256MB; two concurrent 60k-row INSERT-ALL sessions blow it out
-      # with ORA-04036. Bump to 1G (well under the container's ~2-3GB
-      # working set) so concurrent variant seeds don't exhaust the
-      # process global area. Runs as `system` because ALTER SYSTEM is
-      # admin-only.
-      - name: Bump Oracle PGA_AGGREGATE_LIMIT for concurrent variant seeds
+      # m.5.a). gvenzl/oracle-free's default config gives each client
+      # connection its own dedicated server process with its own PGA;
+      # two concurrent 60k-row INSERT-ALL sessions exhaust the process
+      # global area regardless of PGA_AGGREGATE_LIMIT (prior 1G bump
+      # didn't help — container memory caps below what two dedicated
+      # servers need).
+      #
+      # Fix: DRCP (Database Resident Connection Pooling). One
+      # ALTER-style call starts a server-side pool of dedicated server
+      # processes shared across all client sessions; clients append
+      # `:POOLED` to the service name in the DSN (see cfg line above
+      # + env var below). PGA pressure collapses because both variants
+      # multiplex onto the same small set of pooled server processes
+      # instead of forking a dedicated server per connection.
+      - name: Start Oracle DRCP (Database Resident Connection Pool)
         run: |
           .venv/bin/python <<'PY'
           import oracledb
@@ -310,10 +318,25 @@ jobs:
               dsn="localhost:1521/FREEPDB1",
           )
           cur = conn.cursor()
-          cur.execute("ALTER SYSTEM SET PGA_AGGREGATE_LIMIT = 1G SCOPE = BOTH")
-          cur.execute("SELECT value FROM v$parameter WHERE name = 'pga_aggregate_limit'")
-          (current,) = cur.fetchone()
-          print(f"PGA_AGGREGATE_LIMIT now: {current} bytes ({int(current) // (1024*1024)} MB)")
+          # Idempotent: START_POOL errors with ORA-56501 if already
+          # started, which is fine in CI (single-job lifetime anyway).
+          try:
+              cur.callproc("DBMS_CONNECTION_POOL.START_POOL")
+              print("DRCP pool started.")
+          except oracledb.DatabaseError as exc:
+              (err,) = exc.args
+              if "ORA-56501" in str(err):
+                  print("DRCP pool already running (ignoring).")
+              else:
+                  raise
+          # Verify
+          cur.execute(
+              "SELECT status, num_busy_servers, num_open_servers "
+              "FROM dba_cpool_info "
+              "WHERE connection_pool = 'SYS_DEFAULT_CONNECTION_POOL'"
+          )
+          (status, busy, open_srv) = cur.fetchone()
+          print(f"DRCP pool: status={status} busy={busy} open={open_srv}")
           conn.close()
           PY
 
@@ -337,7 +360,11 @@ jobs:
           # the runner uses this env var as the connection URL and
           # ignores the cfg yaml's URL. Both must point at `recon`, not
           # `system`, so seed inserts land in USERS not SYSTEM tablespace.
-          RECON_GEN_DEMO_DATABASE_URL: "recon/ci_recon_password@localhost:1521/FREEPDB1"
+          # `:POOLED` suffix routes the client through the DRCP pool
+          # (started by the prior step). Without it, each connection
+          # forks a dedicated server with its own PGA, exhausting the
+          # container under parallel variant seeds.
+          RECON_GEN_DEMO_DATABASE_URL: "recon/ci_recon_password@localhost:1521/FREEPDB1:POOLED"
           RECON_GEN_CONFIG: /tmp/ci-oracle.yaml
           RECON_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
         run: ./run_tests.sh up_to=db --dialects=or --targets=lo
