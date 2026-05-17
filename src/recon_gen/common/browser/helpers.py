@@ -1081,6 +1081,61 @@ def visual_is_empty(page: Page, visual_title: str) -> bool:
     )
 
 
+def visual_error_text(page: Page, visual_title: str) -> str | None:
+    """AA.A.8 — cheap DOM probe — does this visual show a QS error overlay?
+
+    QuickSight surfaces per-visual rendering failures via an error
+    overlay scoped inside the ``[data-automation-id="analysis_visual"]``
+    container — e.g. the "your tabular report contains duplicate
+    columns. To proceed, remove all duplicates." message that surfaces
+    on Pending Aging's Stuck Pending Detail today (the AA.A.8.bug
+    case). Returns the overlay's text content (concatenated across
+    matched nodes) when an error is present; ``None`` when the visual
+    is mounted without errors OR when the visual isn't found.
+
+    Use this in ``DashboardDriver.wait_loaded`` to HARD-FAIL on error
+    overlays — pre-AA.A.8 a broken visual would silently time out the
+    cell/empty-overlay predicate and the caller had to wait the full
+    visual timeout before getting a generic "didn't render" failure
+    (with no error text). After AA.A.8: the operator gets the actual
+    QS error string in the test failure message, fast.
+
+    Selector union mirrors ``_capture_failure_qs_errors`` (the post-
+    failure forensics path) but scopes to the named visual container
+    — that's the meaningful axis for "did THIS visual fail to render".
+    """
+    raw = page.evaluate(
+        """(title) => {
+            const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
+            for (const v of visuals) {
+                const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
+                if (!t || t.innerText.trim() !== title) continue;
+                const selectors = [
+                    '[data-automation-id*="error"]',
+                    '[data-automation-id*="Error"]',
+                    '[data-automation-id*="failure"]',
+                    '[data-automation-id*="visual_unavailable"]',
+                    '[role="alert"]',
+                    '[class*="error-message"]',
+                    '[class*="ErrorMessage"]',
+                    '[class*="visualError"]',
+                ];
+                const fragments = [];
+                for (const sel of selectors) {
+                    v.querySelectorAll(sel).forEach(el => {
+                        const txt = (el.innerText || el.textContent || '').trim();
+                        if (txt) fragments.push(txt);
+                    });
+                }
+                return fragments.length ? fragments.join(' | ') : null;
+            }
+            return null;
+        }""",
+        visual_title,
+    )
+    return raw if isinstance(raw, str) and raw else None
+
+
 def scroll_visual_into_view(
     page: Page, visual_title: str, timeout_ms: int, *, wait_for_cells: bool = True,
 ) -> None:

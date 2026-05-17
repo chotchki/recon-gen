@@ -44,6 +44,7 @@ from typing import Any
 
 from recon_gen.common.browser.helpers import (
     bump_table_page_size_to_10000,
+    visual_error_text,
     visual_is_empty,
     click_context_menu_item,
     click_first_row_of_visual,
@@ -327,6 +328,22 @@ class QsEmbedDriver:
             )
         except PlaywrightTimeoutError:
             pass
+
+        # AA.A.8 — hard-fail on per-visual QS error overlay. Pre-AA.A.8
+        # a broken visual silently timed out the wait above and the
+        # caller had to puzzle out "why empty?" from the failure
+        # artifacts; now the actual QS error text surfaces in the
+        # exception message at the call site. Spike resolution locked
+        # 2026-05-17 (PLAN.md AA.A.8): zero existing tests depend on
+        # the silent-timeout path (the only ``qs_errors`` codepath is
+        # the post-failure capture, not a wait predicate). The
+        # Pending Aging "duplicate columns" bug surfaces here today.
+        err = visual_error_text(self._page, visual_title)
+        if err is not None:
+            raise RuntimeError(
+                f"QuickSight visual {visual_title!r} rendered with "
+                f"error overlay: {err}"
+            )
 
     def table_rows(self, visual_title: str) -> list[dict[str, str]]:
         # Headers from the `sn-table-column-N` divs (their `.title` span),
