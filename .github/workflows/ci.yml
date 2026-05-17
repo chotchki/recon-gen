@@ -309,13 +309,19 @@ jobs:
       # multiplex onto the same small set of pooled server processes
       # instead of forking a dedicated server per connection.
       - name: Start Oracle DRCP (Database Resident Connection Pool)
+        # CRITICAL: connect to FREE (the CDB root), NOT FREEPDB1 (the
+        # PDB). DBMS_CONNECTION_POOL is a SYS-owned CDB-level package;
+        # calling START_POOL from inside a PDB fails with PLS-00201.
+        # The pool started here is shared across all PDBs in the CDB,
+        # which is what we want — both variant cells connect through
+        # FREEPDB1:POOLED and route through the CDB's pooled servers.
         run: |
           .venv/bin/python <<'PY'
           import oracledb
           conn = oracledb.connect(
               user="system",
               password="ci_ora_password",
-              dsn="localhost:1521/FREEPDB1",
+              dsn="localhost:1521/FREE",
           )
           cur = conn.cursor()
           # Idempotent: START_POOL errors with ORA-56501 if already
