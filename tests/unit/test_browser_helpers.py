@@ -303,6 +303,9 @@ class TestCaptureFailureDbCounts:
             conn.execute("CREATE TABLE unrelated_table (id INTEGER)")
             conn.commit()
 
+        # RECON_GEN_RUN_DIR takes priority over SCREENSHOT_DIR (set by
+        # the runner per-cell); force the legacy branch.
+        monkeypatch.delenv(RECON_GEN_RUN_DIR.name, raising=False)
         monkeypatch.setattr(
             "recon_gen.common.browser.helpers.SCREENSHOT_DIR", tmp_path,
         )
@@ -316,6 +319,9 @@ class TestCaptureFailureDbCounts:
     def test_sidecar_swallows_bad_dialect(self, tmp_path, monkeypatch):
         from recon_gen.common.browser.helpers import _capture_failure_db_counts
 
+        # RECON_GEN_RUN_DIR takes priority over SCREENSHOT_DIR (set by
+        # the runner per-cell); force the legacy branch.
+        monkeypatch.delenv(RECON_GEN_RUN_DIR.name, raising=False)
         monkeypatch.setattr(
             "recon_gen.common.browser.helpers.SCREENSHOT_DIR", tmp_path,
         )

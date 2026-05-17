@@ -1,5 +1,17 @@
 # Release Notes
 
+## v11.0.0a6 — hotfix: extend a5's env-isolation fix to the other two tests
+
+v11.0.0a5's `replace_all=true` edit only matched the comment block in
+`test_writes_per_table_counts_for_prefixed_tables`; the other two
+methods in `TestCaptureFailureDbCounts` had different `setattr` blocks
+and didn't receive the `monkeypatch.delenv(RECON_GEN_RUN_DIR.name, …)`.
+ci.yml's three runner-driven db jobs still failed on
+`test_empty_file_when_no_prefixed_tables` +
+`test_sidecar_swallows_bad_dialect`.
+
+This release adds the delenv to those two too. Test-only change.
+
 ## v11.0.0a5 — hotfix: TestCaptureFailureDbCounts unit-test env isolation
 
 v11.0.0a4 release pipeline went fully green (published to PyPI) — but
