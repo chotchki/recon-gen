@@ -1,5 +1,45 @@
 # Release Notes
 
+## v11.0.0a2 — hotfix: e2e collection skip when RECON_GEN_E2E unset
+
+v11.0.0a1's release pipeline died at `Tests + pyright strict` (same
+shape as v10.0.0a7 and v10.1.0a1 — three releases in a row). Two e2e
+tests — `tests/e2e/test_dataset_sql_smoke.py` and
+`tests/e2e/test_demo_apply_row_counts.py` — call `_load_cfg()` at
+module import; Z.C.2's loud-fail on missing required cfg fields
+(`aws_account_id`, `aws_region`, `deployment_name`, `db_table_prefix`,
+`datasource_arn`) raises `ValueError`, crashing pytest collection in
+the bare CI unit job (no cfg yaml, no env overrides).
+
+Fix: `pytest.skip(allow_module_level=True)` guarded on
+`RECON_GEN_E2E.get_or_none()` at the top of both modules — matches the
+e2e suite's existing skip-marker pattern in
+`tests/e2e/conftest.py::pytest_collection_modifyitems`, but fires
+*before* import-time cfg load instead of after collection. Unit job
+now collects 0 tests from these files and proceeds.
+
+## v11.0.0a1 — Phase AC: project rename quicksight-gen → recon-gen
+
+AWS owns the "QuickSight" trademark and the tool's scope has grown
+beyond emitting QuickSight JSON — it also ships an HTMX renderer
+and a regulator-ready audit PDF. Rename to clarify both.
+
+- Source package: `quicksight_gen` → `recon_gen` (history preserved
+  via `git mv`).
+- PyPI distribution: `quicksight-gen` → `recon-gen`.
+- CLI entrypoint: `quicksight-gen` → `recon-gen`.
+- Env-var prefixes: `QS_GEN_*` / `QS_E2E_*` → `RECON_GEN_*` /
+  `RECON_E2E_*`. Legacy names still resolve through `EnvVar`'s
+  `legacy_name` arm and emit a one-shot `DeprecationWarning` per name
+  for the grace window.
+- IAM user + OIDC trust policy: `quicksight-gen-local` →
+  `recon-gen-local`; existing `Github_e2e_testing` policy retained.
+- PyPI shim package `quicksight-gen` (at 11.0.0a2 in lockstep) keeps
+  `pip install quicksight-gen` working; it has no code, depends only
+  on `recon-gen==<same version>`, and emits a `DeprecationWarning`
+  pointing operators at `pip install recon-gen` + import-path
+  rewrites. Shim wheel drops 1-2 months after v11.0.0 publish.
+
 ## v10.1.0a1 — Phase AA: dropdown defaults, exception literacy panels, account search, Daily Statement + App2 partial-refetch fixes
 
 Pre-release / alpha tag. Closes Phase AA — a dashboard-UX literacy + correctness pass landing on top of the Phase Z grammar work. Six independent threads ship together; A.6/A.7/A.8 (generic test-coverage gaps) deferred to Phase AB.

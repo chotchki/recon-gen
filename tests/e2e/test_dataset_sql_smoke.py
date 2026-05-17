@@ -47,10 +47,21 @@ from recon_gen.common.db import connect_demo_db
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
     RECON_GEN_CONFIG,
+    RECON_GEN_E2E,
     RECON_GEN_TEST_L2_INSTANCE,
 )
 from recon_gen.common.l2 import L2Instance, load_instance
 from recon_gen.common.models import DataSet, DatasetParameter
+
+# Module-level cfg+L2 load (below) needs a live cfg yaml or env overrides;
+# under the unit-only CI job neither exists, and load_config(None) raises
+# the loud-fail ValueError, taking down pytest collection. Match the rest
+# of the e2e suite's RECON_GEN_E2E gate at import time so collection
+# cleanly skips this whole module when e2e is off.
+if not RECON_GEN_E2E.get_or_none():
+    pytest.skip(
+        "e2e tests disabled (set RECON_GEN_E2E=1)", allow_module_level=True,
+    )
 
 
 # ---------------------------------------------------------------------------
