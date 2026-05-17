@@ -308,7 +308,11 @@ jobs:
       - name: Run runner db layer (CI-mode, no Docker spin-up)
         env:
           RECON_GEN_RUNNER_CI: "1"
-          RECON_GEN_DEMO_DATABASE_URL: "system/ci_ora_password@localhost:1521/FREEPDB1"
+          # Must match cfg's demo_database_url (line ~292) — in CI mode
+          # the runner uses this env var as the connection URL and
+          # ignores the cfg yaml's URL. Both must point at `recon`, not
+          # `system`, so seed inserts land in USERS not SYSTEM tablespace.
+          RECON_GEN_DEMO_DATABASE_URL: "recon/ci_recon_password@localhost:1521/FREEPDB1"
           RECON_GEN_CONFIG: /tmp/ci-oracle.yaml
           RECON_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
         run: ./run_tests.sh up_to=db --dialects=or --targets=lo
