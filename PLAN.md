@@ -591,8 +591,8 @@ The tool still talks to AWS QuickSight as a target system, so technical referenc
 
 ### AC.spike — Open decisions to lock before any AC.1+ work
 
-- [ ] **AC.spike.1 — Timing within "after AA".** Three sub-options: (a) **AC immediately after AA closes** (clean-release between phases — cleanest cut, no other in-flight phases need re-flowing through the rename), (b) **AC before AA closes** (rename first, then finish AA on the renamed codebase — costs the in-progress AA work a churn cycle but means AA ships with the new name out the gate), (c) **AC after AA + first slice of AB**, only if AB.1 (inbound caps) is tiny enough to ship as a clean spike-doc-only effort. User to ratify (a) vs (b); (c) is the unusual case.
-- [ ] **AC.spike.2 — Repo rename redirects.** GitHub auto-creates a HTTP redirect from old → new repo URL after rename (per their docs, "as long as no new repo with the old name is created"). Are we OK relying on that, or do we want to keep a stub repo at `Quicksight-Generator` with a README pointing to the new location? **Recommendation**: rely on the auto-redirect; don't create a stub (creates an exception to their redirect rule, then the redirect dies).
+- [x] **AC.spike.1 — Timing within "after AA".** **Locked 2026-05-16: (a) — AC immediately after AA closes.** AA shipped v10.1.0a1; AC starts now on this branch. Cleanest cut; no in-flight phase needs to re-flow through the rename. (b) was rejected because re-doing the just-shipped AA work under the new name is pure churn; (c) is moot — AC starts before AB, not interleaved with it.
+- [x] **AC.spike.2 — Repo rename redirects.** **Locked 2026-05-16: rely on GitHub auto-redirect; no stub.** GitHub's 301 from old → new URL works as long as no new repo with the old name exists; creating a stub would block the auto-redirect entirely and force perpetual manual link maintenance. AC.E.1 + AC.E.3 cover the operator-facing remote-URL update.
 
 ### AC.locked — Decisions confirmed before sub-phase work
 
