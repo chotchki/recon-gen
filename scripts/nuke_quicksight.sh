@@ -143,11 +143,21 @@ delete_one() {
         data-sources) id_flag="--data-source-id" ;;
         *) red "  unknown kind: $kind" >&2; return 1 ;;
     esac
+    # delete-analysis soft-deletes by default (30-day recoverable trash);
+    # the analysis still appears in list-analyses, so a re-run reports
+    # the same count and the operator thinks the script did nothing.
+    # --force-delete-without-recovery purges immediately. delete-dashboard
+    # hard-deletes already; other kinds have no soft-delete behavior.
+    local force_flag=""
+    if [[ "$kind" == "analyses" ]]; then
+        force_flag="--force-delete-without-recovery"
+    fi
     if [[ $EXECUTE -eq 1 ]]; then
         if aws quicksight "$cmd_verb" \
             --aws-account-id "$AWS_ACCOUNT" \
             --region "$region" \
             $id_flag "$id" \
+            $force_flag \
             --output text >/dev/null 2>&1; then
             green "    ✓ $kind/$id"
         else
