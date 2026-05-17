@@ -73,7 +73,13 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         anchor_columns=(
             "account_id", "account_name", "account_role", "business_day_start",
         ),
-        anchor_order="business_day_start DESC",
+        # Bias toward low cust-N so the picked anchor lands in MUI
+        # Autocomplete's first-visible-window (the QS Account dropdown
+        # virtualizes — typed-filter doesn't reliably narrow to a
+        # specific Customer N when the seed has 25+ accounts, see the
+        # AA.A.6 v1 chain bs8k6zogh failure capture). Bias-not-fix —
+        # deeper MUI-Autocomplete typed-filter behavior follow-on.
+        anchor_order="account_id ASC, business_day_start DESC",
         pickers=(
             PickerSpec(
                 label="Date From", kind="date_from",
@@ -99,7 +105,8 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         anchor_columns=(
             "account_id", "account_name", "account_role", "business_day_start",
         ),
-        anchor_order="business_day_start DESC",
+        # Bias toward low cust-N — see Drift spec for context.
+        anchor_order="account_id ASC, business_day_start DESC",
         pickers=(
             PickerSpec(
                 label="Date From", kind="date_from",
@@ -125,7 +132,8 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         anchor_columns=(
             "account_id", "account_name", "rail_name", "business_day",
         ),
-        anchor_order="business_day DESC",
+        # Bias toward low cust-N — see Drift spec for context.
+        anchor_order="account_id ASC, business_day DESC",
         pickers=(
             PickerSpec(
                 label="Date From", kind="date_from",
