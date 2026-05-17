@@ -23,15 +23,33 @@ DB-direct anchor query (precedent: ``_daily_statement_pick.py``). The
 shape; the "split-into-bespoke" path was rejected because it loses
 the generic-coverage benefit that's the whole point of AA.A.6.
 
-v1 scope: Drift + Overdraft (structurally identical: date range +
-Account + Account Role pickers + Table target). Daily Statement is
-covered by the pre-existing ``test_daily_statement_*`` tests via the
-bespoke ``find_account_day_with_data`` helper; not re-wired here.
-Follow-on commits will extend ``L1_PICKER_SPECS`` to Limit Breach /
-Today's Exceptions / Transactions / Pending Aging / Unbundled Aging
-(those need per-sheet picker→column mapping; some have off-table
-columns like Today's Exceptions' Check Type that the generic shape
-handles via the spec's ``anchor_columns``).
+L1 coverage: Drift, Overdraft, Limit Breach, Pending Aging,
+Unbundled Aging, Today's Exceptions, Transactions — every L1 sheet
+with ≥2 pickers AND a Table target. Daily Statement is covered by
+the pre-existing ``test_daily_statement_*`` tests via the bespoke
+``find_account_day_with_data`` helper; not re-wired here. Drift
+Timelines (LineChart only, no Table) and Supersession Audit (single
+dropdown) don't qualify for ≥2 pickers + Table target.
+
+Cross-app scope (why AA.A.6 v1 is L1-only):
+
+- **L2FT** — every sheet with ≥2 pickers (Rails / Chains / Templates)
+  has its dropdown values derived from CTEs or projected via SQL CASE
+  (``parent_chain_name`` lives in a 3-CTE join; ``status`` /
+  ``bundle_status`` are CASE-aliases on the postings query). An
+  anchor query that replicates those derivations is fragile and
+  duplicates the dataset SQL. Each L2FT sheet already has bespoke
+  dropdown coverage (``test_l2ft_*_dropdowns.py``, X.1.g.8–10); the
+  marginal AA.A.6 value here is small.
+- **Investigation** — Money Trail / Account Network defaults to a
+  sentinel chain-root / anchor on first paint (``_MONEY_TRAIL_ROOT_
+  SENTINEL`` / empty anchor default) so the visual renders **empty
+  pre-pick**, which breaks AA.A.6's ``before > 0`` precondition.
+  Recipient Fanout / Volume Anomalies have <2 pickers.
+- **Executives** — every sheet has only Date From + Date To (the
+  universal date range). Both pickers narrow the same column with
+  different bounds; the "additive narrowing across distinct columns"
+  contract degenerates here.
 """
 
 from __future__ import annotations
@@ -152,6 +170,136 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
             # rail). Picker label kept as "Transfer Type" for analyst
             # continuity; the WHERE clause is rail_name. See
             # ``apps/l1_dashboard/datasets.py::build_limit_breach_dataset``.
+            PickerSpec(
+                label="Transfer Type", kind="dropdown", column="rail_name",
+            ),
+        ),
+    ),
+    # Pending / Unbundled Aging — current-state matviews (no date scope
+    # — see ``_wire_date_range_filter``'s skip note: stuck items don't
+    # narrow by the analyst's window). Both have an Account dropdown +
+    # a Transfer Type dropdown + a Rail dropdown. Transfer Type AND
+    # Rail both narrow ``rail_name`` (different value-source sets — see
+    # ``l1_rail_universe_values`` vs ``l1_rail_values``) — the anchor
+    # row's single rail_name value satisfies both pickers.
+    SheetAnchorSpec(
+        sheet_name="Pending Aging",
+        target_visual="Stuck Pending Detail",
+        anchor_table="{p}_stuck_pending",
+        anchor_columns=(
+            "account_id", "account_name", "rail_name", "posting",
+        ),
+        # No date filter to bias against — order by account_id ASC so
+        # we land on the lowest-numbered customer (MUI Autocomplete
+        # first-visible-window — see Drift spec).
+        anchor_order="account_id ASC, posting DESC",
+        pickers=(
+            PickerSpec(
+                label="Account", kind="dropdown", column="account_id",
+                format=lambda a: f"{a['account_name']} ({a['account_id']})",
+            ),
+            PickerSpec(
+                label="Transfer Type", kind="dropdown", column="rail_name",
+            ),
+            PickerSpec(
+                label="Rail", kind="dropdown", column="rail_name",
+            ),
+        ),
+    ),
+    SheetAnchorSpec(
+        sheet_name="Unbundled Aging",
+        target_visual="Stuck Unbundled Detail",
+        anchor_table="{p}_stuck_unbundled",
+        anchor_columns=(
+            "account_id", "account_name", "rail_name", "posting",
+        ),
+        anchor_order="account_id ASC, posting DESC",
+        pickers=(
+            PickerSpec(
+                label="Account", kind="dropdown", column="account_id",
+                format=lambda a: f"{a['account_name']} ({a['account_id']})",
+            ),
+            PickerSpec(
+                label="Transfer Type", kind="dropdown", column="rail_name",
+            ),
+            PickerSpec(
+                label="Rail", kind="dropdown", column="rail_name",
+            ),
+        ),
+    ),
+    # Today's Exceptions — UNION ALL across 5 L1 invariant views,
+    # pre-filtered to the latest business_day at the SQL layer (so the
+    # matview's max(business_day) IS "today" for the analyst). Date
+    # range + Check Type (closed enum) + Account + Transfer Type. The
+    # spike claim (AA.A.6 PLAN entry) was that Check Type filters a
+    # UNION-shape where the column doesn't appear in the displayed
+    # table; we project it through anyway so the picker can be driven.
+    SheetAnchorSpec(
+        sheet_name="Today's Exceptions",
+        target_visual="Exception Detail",
+        anchor_table="{p}_todays_exceptions",
+        anchor_columns=(
+            "account_id", "account_name", "rail_name",
+            "business_day", "check_type",
+        ),
+        # Sorted-by-magnitude is the visual default — pick the top row
+        # of the smallest cust-N for the MUI window bias (see Drift).
+        anchor_order="account_id ASC, magnitude DESC",
+        pickers=(
+            PickerSpec(
+                label="Date From", kind="date_from", column="business_day",
+            ),
+            PickerSpec(
+                label="Date To", kind="date_to", column="business_day",
+            ),
+            PickerSpec(
+                label="Check Type", kind="dropdown", column="check_type",
+            ),
+            PickerSpec(
+                label="Account", kind="dropdown", column="account_id",
+                format=lambda a: f"{a['account_name']} ({a['account_id']})",
+            ),
+            PickerSpec(
+                label="Transfer Type", kind="dropdown", column="rail_name",
+            ),
+        ),
+    ),
+    # Transactions — per-leg ledger via ``<p>_current_transactions``.
+    # 5 dropdowns + date range — the densest picker landscape in L1.
+    # ``posting`` is a timestamp; the default 7-day window is generous
+    # enough that ``posting DESC`` order lands on a recent leg that
+    # satisfies the picker's date bounds (when both bounds are set to
+    # the anchor's day, the anchor leg still falls inside since the
+    # bounds are full-day on the column-truncated date).
+    SheetAnchorSpec(
+        sheet_name="Transactions",
+        target_visual="Posting Ledger",
+        anchor_table="{p}_current_transactions",
+        anchor_columns=(
+            "account_id", "account_name", "transfer_id", "rail_name",
+            "status", "origin", "posting",
+        ),
+        anchor_order="account_id ASC, posting DESC",
+        pickers=(
+            PickerSpec(
+                label="Date From", kind="date_from", column="posting",
+            ),
+            PickerSpec(
+                label="Date To", kind="date_to", column="posting",
+            ),
+            PickerSpec(
+                label="Account", kind="dropdown", column="account_id",
+                format=lambda a: f"{a['account_name']} ({a['account_id']})",
+            ),
+            PickerSpec(
+                label="Transfer", kind="dropdown", column="transfer_id",
+            ),
+            PickerSpec(
+                label="Status", kind="dropdown", column="status",
+            ),
+            PickerSpec(
+                label="Origin", kind="dropdown", column="origin",
+            ),
             PickerSpec(
                 label="Transfer Type", kind="dropdown", column="rail_name",
             ),
