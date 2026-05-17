@@ -336,14 +336,16 @@ jobs:
                   print("DRCP pool already running (ignoring).")
               else:
                   raise
-          # Verify
+          # Verify ACTIVE state. dba_cpool_info is the config-side
+          # view (it has STATUS but NOT runtime counters); the busy /
+          # open server counts live in v$cpool_stats, which is empty
+          # until a pooled client connects — no point querying it here.
           cur.execute(
-              "SELECT status, num_busy_servers, num_open_servers "
-              "FROM dba_cpool_info "
+              "SELECT status FROM dba_cpool_info "
               "WHERE connection_pool = 'SYS_DEFAULT_CONNECTION_POOL'"
           )
-          (status, busy, open_srv) = cur.fetchone()
-          print(f"DRCP pool: status={status} busy={busy} open={open_srv}")
+          (status,) = cur.fetchone()
+          print(f"DRCP pool: status={status}")
           conn.close()
           PY
 
