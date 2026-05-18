@@ -197,8 +197,13 @@ def test_l2ft_additive_pickers_keep_anchor_row(
     driver.open(dashboard_arg, sheet=spec.sheet_name)
     driver.wait_loaded(spec.target_visual)
 
-    before = driver.table_rows(spec.target_visual)
-    assert len(before) > 0, (
+    # AA.A.l2ft-rails-inverse.2 — use table_row_count, not table_rows.
+    # table_rows() returns the DOM-visible window (capped at ~50 by QS's
+    # default page size). When both pre-pick and post-pick exceed the
+    # cap, comparing two saturated 50s silently passes broken narrows.
+    # See L1 additive test + AA.A.l2ft-rails-inverse PLAN entry.
+    before_count = driver.table_row_count(spec.target_visual)
+    assert before_count > 0, (
         f"{spec.sheet_name!r}: target visual {spec.target_visual!r} "
         f"empty BEFORE any pick. The dataset's default-param SQL "
         f"returns rows for the anchor (the dataset SQL was checked "
@@ -209,13 +214,13 @@ def test_l2ft_additive_pickers_keep_anchor_row(
 
     apply_anchor_to_pickers(driver, spec, anchor)
     driver.wait_loaded(spec.target_visual)
-    after = driver.table_rows(spec.target_visual)
+    after_count = driver.table_row_count(spec.target_visual)
     driver.screenshot()
 
-    assert 0 < len(after) <= len(before), (
+    assert 0 < after_count <= before_count, (
         f"{spec.sheet_name!r}: anchor row {dict(anchor)!r} should "
         f"survive the all-pickers-narrowed-to-anchor state. Got "
-        f"{len(after)} rows (was {len(before)} pre-pick). One of the "
+        f"{after_count} rows (was {before_count} pre-pick). One of the "
         f"picker WHERE clauses is wrong column / wrong operator / "
         f"wrong value format — drill into the failure capture's "
         f"network.txt to see which dataset SQL came back empty."
@@ -243,7 +248,12 @@ def test_l2ft_dropdown_pickers_inverse_excludes_anchor(
 
     apply_anchor_to_pickers(driver, spec, anchor)
     driver.wait_loaded(spec.target_visual)
-    anchor_count = len(driver.table_rows(spec.target_visual))
+    # AA.A.l2ft-rails-inverse.2 — table_row_count, not len(table_rows()).
+    # The original code measured the DOM-visible window (50 cap), which
+    # made `post_invert < anchor_count` always false when both states
+    # exceeded the cap — the L2FT-Rails-inverse bug that surfaced in
+    # v11.0.1's verification chain. See L1 inverse test for the same fix.
+    anchor_count = driver.table_row_count(spec.target_visual)
     assert anchor_count > 0, (
         f"{spec.sheet_name!r}: AA.A.6 precondition failed — anchor "
         f"narrowing produced 0 rows. Inverse test can't run; fix "
@@ -271,7 +281,7 @@ def test_l2ft_dropdown_pickers_inverse_excludes_anchor(
 
         driver.pick_filter(picker.label, [non_matching])
         driver.wait_loaded(spec.target_visual)
-        post_invert = len(driver.table_rows(spec.target_visual))
+        post_invert = driver.table_row_count(spec.target_visual)
         assert post_invert < anchor_count, (
             f"{spec.sheet_name!r} picker {picker.label!r}: toggling "
             f"to non-matching value {non_matching!r} should reduce "
@@ -283,7 +293,7 @@ def test_l2ft_dropdown_pickers_inverse_excludes_anchor(
 
         driver.pick_filter(picker.label, [matching])
         driver.wait_loaded(spec.target_visual)
-        post_restore = len(driver.table_rows(spec.target_visual))
+        post_restore = driver.table_row_count(spec.target_visual)
         assert post_restore == anchor_count, (
             f"{spec.sheet_name!r} picker {picker.label!r}: restoring "
             f"matching value {matching!r} should return row count to "
