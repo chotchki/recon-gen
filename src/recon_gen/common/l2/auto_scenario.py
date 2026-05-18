@@ -1013,6 +1013,35 @@ def _pick_template(instance: L2Instance) -> AccountTemplate | None:
     return sorted(instance.account_templates, key=lambda t: str(t.role))[0]
 
 
+_TEMPLATE_INSTANCE_NS: tuple[int, int] = (1, 2)
+"""The ``n`` values the seed materializes per AccountTemplate.
+
+Hardcoded at 2 instances (n=1, n=2) since M.4.2b. Validator U7 walks
+the same range to enumerate template-generated IDs — keeping both
+consumers reading this constant prevents the validator from missing
+collisions if the seed ever expands the range.
+"""
+
+
+def template_instance_ids(template: AccountTemplate) -> tuple[str, ...]:
+    """The account_ids this template will materialize during seed.
+
+    Public surface for the validator (U7 — collision with singleton
+    Account.id) so the validator never replicates the rendering rule.
+    Resolves the same template-rendering path the seed uses inside
+    ``_materialize_instances`` — change one, the other follows.
+    """
+    return tuple(
+        _render_template_field(
+            template.instance_id_template,
+            fallback=f"cust-{n:03d}",
+            template=template,
+            n=n,
+        )
+        for n in _TEMPLATE_INSTANCE_NS
+    )
+
+
 def _materialize_instances(
     template: AccountTemplate,
 ) -> tuple[TemplateInstance, TemplateInstance]:
@@ -1024,16 +1053,15 @@ def _materialize_instances(
     falls back to the legacy synthetic patterns ``cust-{n:03d}`` +
     ``Customer {n}`` so existing L2 fixtures don't drift their
     seed_hash.
+
+    IDs come from :func:`template_instance_ids` so the validator's
+    U7 collision check sees exactly what the seed will plant.
     """
+    ids = template_instance_ids(template)
     return tuple(
         TemplateInstance(
             template_role=template.role,
-            account_id=Identifier(_render_template_field(
-                template.instance_id_template,
-                fallback=f"cust-{n:03d}",
-                template=template,
-                n=n,
-            )),
+            account_id=Identifier(account_id),
             name=Name(_render_template_field(
                 template.instance_name_template,
                 fallback=f"Customer {n}",
@@ -1041,7 +1069,7 @@ def _materialize_instances(
                 n=n,
             )),
         )
-        for n in (1, 2)
+        for n, account_id in zip(_TEMPLATE_INSTANCE_NS, ids, strict=True)
     )  # type: ignore[return-value]: tuple-of-2 narrowed at runtime; declared return is tuple[T, T]
 
 

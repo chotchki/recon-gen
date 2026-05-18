@@ -57,6 +57,12 @@ account_templates:
   - role: CustomerSubledger
     scope: internal
     parent_role: CustomerLedger
+    # Non-colliding instance ids — the singletons above already use
+    # cust-001 / cust-002 (the fallback pattern), so the template
+    # picks a distinct ``tmpl-cust-...`` shape. Per validator U7:
+    # template-generated ids MUST NOT collide with declared singletons.
+    instance_id_template: tmpl-cust-{n:03d}
+    instance_name_template: Demo Customer {n}
 
 rails:
   # Two-leg with per-leg origin — used by drift plant background postings

@@ -24,6 +24,17 @@ Rules enforced (numbered for cross-reference with the test file):
       (M.1a — duplicate combinations are a configuration error).
       Z.B (2026-05-15): renamed from (parent_role, transfer_type) when
       the symmetric transfer_type collapse landed.
+  U7. AccountTemplate-generated account_ids MUST NOT collide with any
+      declared Account.id (AA.A.6.bug 2026-05-17). The seed plants both
+      the singleton AND the template-rendered instance under the same
+      id, producing two ``account_name`` values for one account_id;
+      downstream the L1 dashboard renders inconsistent dropdown labels
+      vs WHERE-clause matches and silently breaks per-account narrowing.
+      Author resolution: rename the singleton, drop the redundant
+      template, OR set ``instance_id_template`` to a non-colliding
+      pattern. See :func:`recon_gen.common.l2.auto_scenario.
+      template_instance_ids` — the validator walks the same rendering
+      path the seed uses so the collision set is computed identically.
 
   Removed under Z.B grammar collapse (PLAN.md §Z.B — locked 2026-05-15):
   - U6 (Rail per-leg ``(transfer_type, role)`` discriminators unique) —
@@ -205,6 +216,7 @@ def validate(instance: L2Instance) -> None:
     _check_unique_rail_names(instance)
     _check_unique_transfer_template_names(instance)
     _check_unique_limit_schedule_combinations(instance)
+    _check_no_template_id_collides_with_singleton(instance)
 
     account_roles = {a.role for a in instance.accounts if a.role is not None}
     template_roles = {t.role for t in instance.account_templates}
@@ -299,6 +311,42 @@ def _check_unique_limit_schedule_combinations(inst: L2Instance) -> None:
                 f"limit_schedules[{seen[key]}]"
             )
         seen[key] = i
+
+
+def _check_no_template_id_collides_with_singleton(inst: L2Instance) -> None:
+    """U7: AccountTemplate-generated account_ids MUST NOT collide with
+    any declared Account.id.
+
+    The seed plants both the singleton AND the template-rendered
+    instance under the same id, producing two ``account_name`` values
+    for one ``account_id``. The L1 dashboard's dropdown source
+    (``current_daily_balances`` DISTINCT) then advertises both display
+    strings; the WHERE clause picks rows by *one* of them, so picking
+    the dropdown option silently narrows to half the account's rows.
+
+    Walks :func:`recon_gen.common.l2.auto_scenario.template_instance_ids`
+    so the validator's ID set is the same set the seed will plant —
+    impossible to drift apart.
+    """
+    # Import locally to avoid auto_scenario ↔ validate import cycle
+    # at module load (auto_scenario imports nothing from validate but
+    # the surrounding common.l2 package wires them together).
+    from recon_gen.common.l2.auto_scenario import template_instance_ids
+    singleton_ids = {str(a.id): i for i, a in enumerate(inst.accounts)}
+    for ti, template in enumerate(inst.account_templates):
+        for generated in template_instance_ids(template):
+            if generated in singleton_ids:
+                raise L2ValidationError(
+                    f"account_templates[{ti}] (role={template.role!r}) "
+                    f"materializes account_id {generated!r} which is "
+                    f"already declared as a singleton at "
+                    f"accounts[{singleton_ids[generated]}] — rename the "
+                    f"singleton, drop the redundant template, OR set "
+                    f"the template's ``instance_id_template`` to a "
+                    f"non-colliding pattern (e.g. "
+                    f"``tmpl-cust-{{n:03d}}``). Per U7 — collision "
+                    f"breaks L1 dashboard per-account narrowing."
+                )
 
 
 def _reject_duplicates(values: Iterable[Identifier], *, label: str) -> None:

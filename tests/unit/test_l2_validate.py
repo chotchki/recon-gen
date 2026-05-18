@@ -173,6 +173,33 @@ def test_u4_duplicate_transfer_template_name_rejected() -> None:
         validate(bad)
 
 
+def test_u7_template_id_collides_with_singleton_rejected() -> None:
+    """U7 — the singleton/template ID-collision surfaced by AA.A.6.bug
+    (spec_example.yaml had ``cust-001`` as both a declared singleton and
+    a template-generated instance, producing duplicate account_name
+    rows in the seed and silently breaking L1 dashboard narrowing).
+
+    Reproducer: add a singleton ``cust-001`` with the
+    ``CustomerSubledger`` role. The baseline's CustomerSubledger
+    template uses fallback ``cust-{n:03d}`` for n in (1, 2), so it
+    will also generate ``cust-001`` — collision.
+    """
+    inst = _baseline_instance()
+    colliding_singleton = Account(
+        id=Identifier("cust-001"),  # what the fallback renders for n=1
+        scope="internal",
+        name=Name("Customer Number One"),
+        role=Identifier("CustomerSubledger"),
+        parent_role=Identifier("ControlAccount"),
+    )
+    bad = _replace(inst, accounts=(*inst.accounts, colliding_singleton))
+    with pytest.raises(
+        L2ValidationError,
+        match=r"materializes account_id 'cust-001' which is already declared",
+    ):
+        validate(bad)
+
+
 # -- Reference resolution (R1-R6) --------------------------------------------
 
 
