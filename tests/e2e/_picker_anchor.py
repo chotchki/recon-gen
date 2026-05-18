@@ -236,6 +236,32 @@ def picker_value(
     return str(value)
 
 
+def visual_column_label(
+    spec: SheetAnchorSpec, cfg: Any, l2: Any, sql_column: str,
+) -> str:
+    """Resolve a SQL column name (as declared on ``PickerSpec.column``)
+    to the display label QuickSight/App2 actually renders as the
+    Table column header.
+
+    Builds the spec's dataset (one shot per call — fixture-cache the
+    result if it gets called repeatedly in a hot loop) and reads the
+    column's ``human_name`` off the contract — that's the explicit
+    ``display_name`` if set, else the auto-derived title-case form
+    (``rail_name`` → "Rail Name", with initialism preservation so
+    ``account_id`` → "Account ID"). Raises ``KeyError`` if the column
+    isn't in the contract — surfaces a wired-wrong picker spec loudly
+    (e.g. ``column="raul_name"`` typo) instead of silently mismatching
+    at the row-identity assertion.
+
+    Used by the inverse-pickers test (AA.A.l2ft-rails-inverse.2) to
+    bridge SQL column names → rendered header text for the
+    ``row[header] == anchor_value`` check.
+    """
+    dataset = spec.dataset_builder(cfg, l2)
+    contract = dataset.contract
+    return contract.column(sql_column).human_name
+
+
 def non_matching_dropdown_value(
     driver: Any, picker_label: str, matching_value: str,
 ) -> str:

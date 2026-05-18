@@ -55,6 +55,7 @@ from recon_gen.common.browser.helpers import (
     generate_dashboard_embed_url,
     get_sheet_tab_names,
     get_visual_titles,
+    read_all_table_rows_via_scroll,
     read_kpi_value,
     read_table_rows_dom,
     right_click_first_row_of_visual,
@@ -492,6 +493,20 @@ class QsEmbedDriver:
             wait_for_cells=False,
         )
         return read_table_rows_dom(self._page, visual_title)
+
+    def read_all_table_rows(
+        self, visual_title: str,
+    ) -> list[dict[str, str]]:
+        # AA.A.l2ft-rails-inverse.2.c — scroll the inner grid container
+        # to load every virtualized row, then dump headers + per-row
+        # cells. For the inverse-picker test's "is anchor excluded"
+        # check: needs the FULL filtered result, not just the visible
+        # window. ~1-3s wall on a 100-row table (one scroll step ≈ 120ms).
+        scroll_visual_into_view(
+            self._page, visual_title, self._visual_timeout,
+            wait_for_cells=False,
+        )
+        return read_all_table_rows_via_scroll(self._page, visual_title)
 
     def table_row_count(self, visual_title: str) -> int:
         # AA.H.11 — orchestrate {scroll-into-view → detect pagination → bump

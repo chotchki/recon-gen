@@ -108,6 +108,22 @@ class DashboardDriver(Protocol):
         table is small). Returns 0 for an empty table (not a sentinel)."""
         ...
 
+    def read_all_table_rows(
+        self, visual_title: str,
+    ) -> list[dict[str, str]]:
+        """Every row of a table visual as a list of header-keyed dicts,
+        including rows below the fold. On QS that's a scroll-accumulate
+        dance through the visual's inner grid container so virtualized
+        rows get mounted and read. On App2 it's just every rendered row
+        (the server-side pagination already returns all matching rows
+        in one fetch).
+
+        Use case: identity-checks where you need to verify the presence
+        or absence of a specific row in the FULL filtered result, not
+        just the visible window. ``table_rows()`` returns the window;
+        this returns the universe."""
+        ...
+
     def kpi_value(self, visual_title: str) -> str | None:
         """The headline value text of a KPI visual, or ``None`` if the
         named visual isn't a KPI / has no value rendered yet."""

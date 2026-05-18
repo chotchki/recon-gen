@@ -1445,6 +1445,106 @@ def count_table_total_rows(page: Page, visual_title: str, timeout_ms: int) -> in
 
 
 
+def read_all_table_rows_via_scroll(
+    page: Page, visual_title: str,
+) -> list[dict[str, str]]:
+    """AA.A.l2ft-rails-inverse.2.c — return EVERY rendered row as a
+    list of dicts keyed by column-header display text, walking the
+    scroll-accumulate dance so virtualized rows below the fold get
+    mounted before they're read.
+
+    Same scroll loop as ``count_table_total_rows`` — scroll the inner
+    ``.grid-container`` 400px at a time, settle 120ms per step,
+    exit on stable-for-3 or scroll-to-bottom. At each step,
+    accumulate ``{row_idx -> {col_idx -> value}}`` keyed by the
+    ``sn-table-cell-{r}-{c}`` automation IDs so re-mounted rows
+    don't double-count. After scrolling completes, project headers
+    (left-to-right ``sn-table-column-N`` titles) and zip them with
+    each row's cells (sorted by column index) to produce the per-
+    row dict.
+
+    Use case: the inverse-picker test needs to verify the anchor row
+    is NOT in the post-pick result. The picker may filter the table
+    from 88 → 174 rows (different rail, different rows); reading only
+    the DOM-visible window misses rows below the fold and the test
+    can't distinguish "anchor excluded" from "anchor below the fold".
+
+    Returns ``[]`` if the visual isn't on the page or has no
+    ``.grid-container`` (one-row table).
+    """
+    return page.evaluate(
+        """async (title) => {
+            const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
+            let target = null;
+            for (const v of visuals) {
+                const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
+                if (t && t.innerText.trim() === title) { target = v; break; }
+            }
+            if (!target) return [];
+            const container = target.querySelector('.grid-container');
+            // Cells map across scroll steps. Keyed by row_idx then col_idx
+            // so re-mounted rows just overwrite with the same value.
+            const cellsByRow = {};
+            const collect = () => {
+                target.querySelectorAll('[data-automation-id^="sn-table-cell-"]').forEach(c => {
+                    const m = c.getAttribute('data-automation-id').match(/sn-table-cell-(\\d+)-(\\d+)/);
+                    if (!m) return;
+                    const r = parseInt(m[1], 10), col = parseInt(m[2], 10);
+                    (cellsByRow[r] = cellsByRow[r] || {})[col] = c.innerText.trim();
+                });
+            };
+            const getMaxRow = () => {
+                let max = -1;
+                for (const r of Object.keys(cellsByRow)) {
+                    const n = parseInt(r, 10);
+                    if (n > max) max = n;
+                }
+                return max;
+            };
+            collect();
+            if (container) {
+                let max = getMaxRow();
+                let stable = 0;
+                for (let step = 0; step < 500; step++) {
+                    const prev = max;
+                    container.scrollTop = container.scrollTop + 400;
+                    await new Promise(r => setTimeout(r, 120));
+                    collect();
+                    const now = getMaxRow();
+                    if (now > max) max = now;
+                    if (container.scrollTop + container.clientHeight >= container.scrollHeight - 1) {
+                        await new Promise(r => setTimeout(r, 400));
+                        collect();
+                        break;
+                    }
+                    if (now === prev) { stable++; if (stable > 3) break; }
+                    else { stable = 0; }
+                }
+            }
+            // Project headers left-to-right; zip with cells per row.
+            const headers = [];
+            target.querySelectorAll('[data-automation-id^="sn-table-column-"]').forEach(c => {
+                if (!/sn-table-column-\\d+$/.test(c.getAttribute('data-automation-id'))) return;
+                const titleEl = c.querySelector('.table-title .title')
+                    || c.querySelector('.title');
+                headers.push(titleEl ? titleEl.innerText.trim() : c.innerText.trim());
+            });
+            const rows = [];
+            Object.keys(cellsByRow).map(Number).sort((a, b) => a - b).forEach(r => {
+                const ordered = Object.keys(cellsByRow[r]).map(Number).sort((a, b) => a - b)
+                    .map(col => cellsByRow[r][col]);
+                const row = {};
+                for (let i = 0; i < headers.length && i < ordered.length; i++) {
+                    row[headers[i]] = ordered[i];
+                }
+                rows.push(row);
+            });
+            return rows;
+        }""",
+        visual_title,
+    ) or []
+
+
 def count_chart_categories(page: Page, visual_title: str) -> int:
     """Count distinct categorical entries (bars / slices) in a chart.
 

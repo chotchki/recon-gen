@@ -368,6 +368,27 @@ class App2Driver:
             rows.append(dict(zip(headers, cells, strict=False)))
         return rows
 
+    def read_all_table_rows(
+        self, visual_title: str,
+    ) -> list[dict[str, str]]:
+        # App2 paginates server-side at ``_TABLE_PAGE_SIZE`` (50 rows/page,
+        # cap 10000). To surface ALL rows for identity-checks, re-navigate
+        # to the current page URL with ``?page_size=10000`` appended,
+        # preserving every other query param (picker state lives in
+        # ``?param_*``). Then read the now-single-page table.
+        from urllib.parse import (  # noqa: PLC0415 — local import keeps the cold path off general driver init
+            parse_qsl,
+            urlencode,
+            urlparse,
+            urlunparse,
+        )
+        current = urlparse(self.page.url)
+        qs = dict(parse_qsl(current.query, keep_blank_values=True))
+        qs["page_size"] = "10000"
+        bumped = urlunparse(current._replace(query=urlencode(qs)))
+        self.page.goto(bumped, wait_until="domcontentloaded")
+        return self.table_rows(visual_title)
+
     def table_row_count(self, visual_title: str) -> int:
         # App2's Table renderer is server-side paginated
         # (``_tree_fetcher._TABLE_PAGE_SIZE`` = 50) — the DOM holds one

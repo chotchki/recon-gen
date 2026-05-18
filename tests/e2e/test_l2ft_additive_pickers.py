@@ -62,6 +62,7 @@ from tests.e2e._picker_anchor import (
     fetch_anchor_row,
     non_matching_dropdown_value,
     picker_value,
+    visual_column_label,
 )
 
 
@@ -279,16 +280,31 @@ def test_l2ft_dropdown_pickers_inverse_excludes_anchor(
             # still exercise the inverse contract.
             continue
 
+        # AA.A.l2ft-rails-inverse.2.d — row-identity check, not row-count.
+        # Old `post_invert < anchor_count` baked in the wrong premise
+        # that non-matching values yield fewer rows; refuted on L2FT
+        # Rails where Inbound (174 rows) > Outbound anchor (88 rows) on
+        # the anchor's day, so a count-narrow assertion can never pass.
+        # The real contract: after the toggle, NO row in the result
+        # should still match the anchor's value for the toggled column.
+        # See L1 inverse test for the same fix shape.
         driver.pick_filter(picker.label, [non_matching])
         driver.wait_loaded(spec.target_visual)
-        post_invert = driver.table_row_count(spec.target_visual)
-        assert post_invert < anchor_count, (
-            f"{spec.sheet_name!r} picker {picker.label!r}: toggling "
-            f"to non-matching value {non_matching!r} should reduce "
-            f"row count below the anchor-narrowed count "
-            f"({anchor_count}). Got {post_invert}. Picker is wired "
-            f"to nothing, WHERE clause is too loose (LIKE/IN with "
-            f"wrong scope), or binding is inverted."
+        post_invert_rows = driver.read_all_table_rows(spec.target_visual)
+        visual_col = visual_column_label(spec, cfg, l2, picker.column)
+        offenders = [
+            r for r in post_invert_rows if r.get(visual_col) == matching
+        ]
+        assert not offenders, (
+            f"{spec.sheet_name!r} picker {picker.label!r}: after "
+            f"toggling to non-matching value {non_matching!r}, the "
+            f"result should contain NO rows with {visual_col!r}="
+            f"{matching!r} (the anchor's value). Found "
+            f"{len(offenders)} offending row(s) out of "
+            f"{len(post_invert_rows)} total; first 3: "
+            f"{offenders[:3]!r}. Picker is wired to nothing, WHERE "
+            f"clause is too loose (LIKE/IN with wrong scope), or "
+            f"binding is inverted."
         )
 
         driver.pick_filter(picker.label, [matching])
