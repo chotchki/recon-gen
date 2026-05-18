@@ -172,6 +172,25 @@ def _resolve_test_l2_instance():  # type: ignore[no-untyped-def]: return-type an
 
 
 @pytest.fixture(scope="session")
+def l2(cfg):  # type: ignore[no-untyped-def]: return-type annotation would force an L2Instance import at module scope
+    """Session-scoped L2Instance matching what the deploy used.
+
+    Mirrors the L2 ``json apply`` / ``data apply`` were driven with for
+    the deployed resources. Tests that need to call production code
+    that takes ``(cfg, l2)`` (e.g. ``apps/l1_dashboard/datasets.py``
+    builders, used by ``tests/e2e/_picker_anchor.py``) depend on this
+    fixture so they see the same L2 the deployed dashboard sees.
+
+    AA.A.9 — added when ``fetch_anchor_row`` needed an L2 to call the
+    dataset builder. Honors ``RECON_GEN_TEST_L2_INSTANCE`` via
+    ``_resolve_test_l2_instance`` (same path the ``*_app`` fixtures
+    use).
+    """
+    del cfg  # required as a fixture dep so collection order is stable
+    return _resolve_test_l2_instance()
+
+
+@pytest.fixture(scope="session")
 def inv_dashboard_id(deployment_name) -> str:
     """Z.C — single-prefix ``<deployment_name>-investigation-dashboard``
     (was M.2d.3's two-segment ``<resource_prefix>-<l2_prefix>-...``)."""

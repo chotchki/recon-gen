@@ -56,6 +56,15 @@ from __future__ import annotations
 
 import pytest
 
+from recon_gen.apps.l1_dashboard.datasets import (
+    build_drift_dataset,
+    build_limit_breach_dataset,
+    build_overdraft_dataset,
+    build_stuck_pending_dataset,
+    build_stuck_unbundled_dataset,
+    build_todays_exceptions_dataset,
+    build_transactions_dataset,
+)
 from tests.e2e._picker_anchor import (
     PickerSpec,
     SheetAnchorSpec,
@@ -70,27 +79,33 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
 # Per-sheet picker→column maps. To extend: add a new SheetAnchorSpec
-# entry following the same shape — the test body below picks it up
-# automatically.
+# entry — the test body below picks it up automatically.
 #
-# Anchor column choices:
-#   - Always include every column referenced by a picker's `column`
-#     OR its `format` callable (e.g. account_display needs both
-#     account_name + account_id).
-#   - `anchor_order` biases the pick: typically `business_day_start
-#     DESC` so the anchor lands on a recent day (matches what an
-#     analyst sees on open). For sheets where the matview is empty
-#     often (zero violations on a fresh seed), the row-survival
-#     assertion is meaningful only when the seed actually plants
-#     something for that sheet — confirm via ``data apply`` first.
+# AA.A.9 (2026-05-17) — spec carries a ``dataset_builder`` reference
+# (the production ``build_*_dataset`` fn deploy uses), NOT a hand-
+# listed matview name + column tuple. ``fetch_anchor_row`` extracts
+# the CustomSql from the builder's DataSet output, applies declared
+# param defaults via ``apply_dataset_param_defaults`` (the same
+# production substitutor App2 uses on initial paint), and wraps to
+# anchor on one row. Net effect: anchor SQL is **provably the same
+# SQL the visual loads** — no risk of test/visual drift.
+#
+# Picker ``column`` values must be keys in the dataset's projection
+# (i.e. columns the dataset SELECTs). AA.A.10 (stretch) plans to
+# derive these from the tree walk too; until then they stay
+# hand-mapped (1 line per picker).
+#
+# ``anchor_order`` biases the pick: typically a column-name
+# ASC/DESC clause that picks a recent / lowest-cust-N / highest-
+# magnitude row. For sheets where the dataset's default-param SQL
+# is empty (zero violations on a fresh seed; or sentinel-empty
+# Money-Trail-style), the row-survival assertion is meaningful only
+# when the seed plants something — confirm via ``data apply`` first.
 L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
     SheetAnchorSpec(
         sheet_name="Drift",
         target_visual="Leaf Account Drift",
-        anchor_table="{p}_drift",
-        anchor_columns=(
-            "account_id", "account_name", "account_role", "business_day_start",
-        ),
+        dataset_builder=build_drift_dataset,
         # Bias toward low cust-N so the picked anchor lands in MUI
         # Autocomplete's first-visible-window (the QS Account dropdown
         # virtualizes — typed-filter doesn't reliably narrow to a
@@ -119,10 +134,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
     SheetAnchorSpec(
         sheet_name="Overdraft",
         target_visual="Overdraft Violations",
-        anchor_table="{p}_overdraft",
-        anchor_columns=(
-            "account_id", "account_name", "account_role", "business_day_start",
-        ),
+        dataset_builder=build_overdraft_dataset,
         # Bias toward low cust-N — see Drift spec for context.
         anchor_order="account_id ASC, business_day_start DESC",
         pickers=(
@@ -146,10 +158,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
     SheetAnchorSpec(
         sheet_name="Limit Breach",
         target_visual="Limit Breach Detail",
-        anchor_table="{p}_limit_breach",
-        anchor_columns=(
-            "account_id", "account_name", "rail_name", "business_day",
-        ),
+        dataset_builder=build_limit_breach_dataset,
         # Bias toward low cust-N — see Drift spec for context.
         anchor_order="account_id ASC, business_day DESC",
         pickers=(
@@ -185,10 +194,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
     SheetAnchorSpec(
         sheet_name="Pending Aging",
         target_visual="Stuck Pending Detail",
-        anchor_table="{p}_stuck_pending",
-        anchor_columns=(
-            "account_id", "account_name", "rail_name", "posting",
-        ),
+        dataset_builder=build_stuck_pending_dataset,
         # No date filter to bias against — order by account_id ASC so
         # we land on the lowest-numbered customer (MUI Autocomplete
         # first-visible-window — see Drift spec).
@@ -209,10 +215,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
     SheetAnchorSpec(
         sheet_name="Unbundled Aging",
         target_visual="Stuck Unbundled Detail",
-        anchor_table="{p}_stuck_unbundled",
-        anchor_columns=(
-            "account_id", "account_name", "rail_name", "posting",
-        ),
+        dataset_builder=build_stuck_unbundled_dataset,
         anchor_order="account_id ASC, posting DESC",
         pickers=(
             PickerSpec(
@@ -229,19 +232,12 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
     ),
     # Today's Exceptions — UNION ALL across 5 L1 invariant views,
     # pre-filtered to the latest business_day at the SQL layer (so the
-    # matview's max(business_day) IS "today" for the analyst). Date
-    # range + Check Type (closed enum) + Account + Transfer Type. The
-    # spike claim (AA.A.6 PLAN entry) was that Check Type filters a
-    # UNION-shape where the column doesn't appear in the displayed
-    # table; we project it through anyway so the picker can be driven.
+    # dataset's default-param output IS "today" for the analyst).
+    # Date range + Check Type (closed enum) + Account + Transfer Type.
     SheetAnchorSpec(
         sheet_name="Today's Exceptions",
         target_visual="Exception Detail",
-        anchor_table="{p}_todays_exceptions",
-        anchor_columns=(
-            "account_id", "account_name", "rail_name",
-            "business_day", "check_type",
-        ),
+        dataset_builder=build_todays_exceptions_dataset,
         # Sorted-by-magnitude is the visual default — pick the top row
         # of the smallest cust-N for the MUI window bias (see Drift).
         anchor_order="account_id ASC, magnitude DESC",
@@ -266,19 +262,12 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
     ),
     # Transactions — per-leg ledger via ``<p>_current_transactions``.
     # 5 dropdowns + date range — the densest picker landscape in L1.
-    # ``posting`` is a timestamp; the default 7-day window is generous
-    # enough that ``posting DESC`` order lands on a recent leg that
-    # satisfies the picker's date bounds (when both bounds are set to
-    # the anchor's day, the anchor leg still falls inside since the
-    # bounds are full-day on the column-truncated date).
+    # ``posting`` is a timestamp; ``posting DESC`` lands on the most
+    # recent leg in the default-param SQL output.
     SheetAnchorSpec(
         sheet_name="Transactions",
         target_visual="Posting Ledger",
-        anchor_table="{p}_current_transactions",
-        anchor_columns=(
-            "account_id", "account_name", "transfer_id", "rail_name",
-            "status", "origin", "posting",
-        ),
+        dataset_builder=build_transactions_dataset,
         anchor_order="account_id ASC, posting DESC",
         pickers=(
             PickerSpec(
@@ -312,7 +301,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
     "spec", L1_PICKER_SPECS, ids=lambda s: s.sheet_name,
 )
 def test_l1_additive_pickers_keep_anchor_row(
-    l1_dashboard_driver, cfg, spec: SheetAnchorSpec,
+    l1_dashboard_driver, cfg, l2, spec: SheetAnchorSpec,
 ):
     """For each L1 sheet with ≥2 pickers: fetch a known-good anchor
     row, drive every picker to that row's values, assert the target
@@ -347,13 +336,13 @@ def test_l1_additive_pickers_keep_anchor_row(
     before = driver.table_rows(spec.target_visual)
     assert len(before) > 0, (
         f"{spec.sheet_name!r}: target visual {spec.target_visual!r} "
-        f"empty BEFORE any pick. The matview ({spec.anchor_table}) "
-        f"likely has zero rows for the default date window, or the "
-        f"dataset SQL filters them out at load. Check the seed + "
-        f"matview refresh state."
+        f"empty BEFORE any pick. The dataset's default-param SQL "
+        f"returns rows for the anchor (otherwise ``fetch_anchor_row`` "
+        f"would have raised), but the visual isn't surfacing them — "
+        f"matview refresh skipped? dataset → visual binding stale?"
     )
 
-    anchor = fetch_anchor_row(cfg, spec)
+    anchor = fetch_anchor_row(cfg, l2, spec)
     apply_anchor_to_pickers(driver, spec, anchor)
     driver.wait_loaded(spec.target_visual)
     after = driver.table_rows(spec.target_visual)
@@ -385,7 +374,7 @@ def test_l1_additive_pickers_keep_anchor_row(
     "spec", L1_PICKER_SPECS, ids=lambda s: s.sheet_name,
 )
 def test_l1_dropdown_pickers_inverse_excludes_anchor(
-    l1_dashboard_driver, cfg, spec: SheetAnchorSpec,
+    l1_dashboard_driver, cfg, l2, spec: SheetAnchorSpec,
 ):
     """For each sheet with ≥2 pickers: after the AA.A.6 all-pickers-
     anchored state, iterate over the *dropdown* pickers. For each:
@@ -421,7 +410,7 @@ def test_l1_dropdown_pickers_inverse_excludes_anchor(
     driver.open(dashboard_arg, sheet=spec.sheet_name)
     driver.wait_loaded(spec.target_visual)
 
-    anchor = fetch_anchor_row(cfg, spec)
+    anchor = fetch_anchor_row(cfg, l2, spec)
     apply_anchor_to_pickers(driver, spec, anchor)
     driver.wait_loaded(spec.target_visual)
     anchor_count = len(driver.table_rows(spec.target_visual))

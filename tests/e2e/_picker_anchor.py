@@ -1,29 +1,34 @@
 """AA.A.6 — generic additive-pickers row-survival infrastructure.
 
-Picker-anchor pattern for sheets with ≥2 pickers: open the sheet,
-query the DB for a known-good row that satisfies every picker's bound
-column, drive each picker to that row's values *additively* (i.e.
-without clearing between picks), assert the anchor row survives in
-the target table visual.
+Picker-anchor pattern for sheets with ≥2 pickers: query the *dataset's
+own SQL* (the same emitter the deploy uses) for a known-good row that
+satisfies every picker's bound column, drive each picker to that row's
+values *additively* (no clear between picks), assert the anchor row
+survives in the target table visual.
 
-Why DB-direct instead of "pick first option from each dropdown":
-some pickers bind columns that aren't in the displayed table (Daily
-Statement's Role narrows the account dropdown's source; Today's
-Exceptions' Check Type filters a UNION-shape). Reading the anchor
-value from the displayed table cells works only when every picker's
-column is on-table; the DB-query path generalizes across both cases
-without depending on seed luck (the AA.B.5.followon calendar-luck
-regression is the precedent — picking ``options[0]`` and inheriting
-the date picker's default produced a thin-data combination on chains
-that crossed UTC midnight). Spike resolution locked 2026-05-17 at
-PLAN.md AA.A.6.
+Why dataset-builder-driven (AA.A.9 refactor, locked 2026-05-17):
+the original v1 (AA.A.6) hand-listed the matview name + columns per
+spec and ran ``SELECT cols FROM table`` against the underlying
+matview. Two codebases — the test queried the matview directly, the
+visual queried the dataset's CustomSql; the two could (and did)
+diverge silently. The U7 spec_example rename surfaced this: anchor
+rows came from one source, dropdown options from another, and the
+two stopped agreeing. User-flagged: "if we have the sql copied in
+the test or a mess of duplicated strings from the code. We now have
+2 code bases and have not proven the behavior."
 
-The shape mirrors `_daily_statement_pick.py::find_account_day_with_data`
-generalized — that helper is Daily-Statement-specific and predates this
-infra; the generic helper here covers sheets where we don't already
-have a bespoke picker. Daily Statement keeps its dedicated helper for
-the cascade-pick flow it tests; new sheets without bespoke coverage
-land here.
+AA.A.9 collapses the two: the spec carries a ``dataset_builder``
+reference (the exact fn deploy uses), the helper extracts CustomSql
+from the resulting ``DataSet`` object + walks ``DataSetParameters``
+to substitute ``<<$pX>>`` with each param's declared default via
+``apply_dataset_param_defaults`` (the same production substitutor
+App2's ``_sql_executor`` uses on initial paint). The anchor row is
+guaranteed to be a row the visual sees on load AND a row the
+dropdown can pick — both read the same registered SQL.
+
+Daily Statement keeps its bespoke ``find_account_day_with_data``
+helper for the cascade-pick flow it tests; new sheets without
+bespoke coverage land here.
 
 Dialect-aware via the existing ``Dialect`` enum on cfg; only PG +
 Oracle are wired (matches the runner's `aw` target shape — QS can't
@@ -32,17 +37,26 @@ reach a sqlite tempfile).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import psycopg
 
 from recon_gen.common.config import Config
+from recon_gen.common.html._sql_executor import apply_dataset_param_defaults
+from recon_gen.common.l2 import L2Instance
+from recon_gen.common.models import DataSet
 from recon_gen.common.sql.dialect import Dialect
 
 
 PickerKind = Literal["dropdown", "datetime", "date_from", "date_to", "slider"]
+
+DatasetBuilder = Callable[[Config, L2Instance], DataSet]
+"""The ``build_*_dataset(cfg, l2)`` signature every L1 dataset uses.
+
+Specs carry one of these — the helper calls it to get the production
+DataSet object, then extracts the SQL the visual will run."""
 
 
 @dataclass(frozen=True)
@@ -66,11 +80,14 @@ class PickerSpec:
       anchor value sets both bounds (lo == hi == value) so the slider
       narrows to exactly the anchor's value.
 
-    ``column`` is the source column in the anchor row (a key into the
-    dict returned by ``fetch_anchor_row``). For the typical "picker's
-    bound column == anchor source column" shape this is just the column
-    name; for derived values (e.g. account_display concat) use
-    ``format`` to derive the picker value from multiple anchor columns.
+    ``column`` is the column name in the **dataset's projection** (NOT
+    the underlying matview) — i.e. a key into the dict returned by
+    ``fetch_anchor_row`` whose contents come from the dataset's
+    CustomSql output. For the typical "picker's bound column == anchor
+    source column" shape this is just the column name; for derived
+    values (e.g. account_display concat) use ``format`` to derive the
+    picker value from multiple anchor columns. AA.A.10 (stretch) plans
+    to derive this from the tree walk; until then it stays hand-mapped.
 
     ``format`` (optional) maps the anchor dict to the picker's expected
     value. Default = ``str(anchor[column])``. Use it for:
@@ -93,42 +110,60 @@ class SheetAnchorSpec:
     (== ``Sheet.name`` from the tree).
 
     ``target_visual`` is the table whose row-count we assert ``>= 1``
-    after all pickers are driven. Pick the canonical detail table —
-    the Drift sheet has two (Leaf + Parent), use the dominant one
-    most analysts land on.
+    after all pickers are driven.
 
-    ``anchor_table`` is the SQL table the anchor row comes from (the
-    matview the target visual reads from, formatted with ``{p}`` for
-    the cfg's ``db_table_prefix``). The query selects ``anchor_columns``
-    from this table ordered by ``anchor_order`` and takes the first row.
+    ``dataset_builder`` is the production ``build_*_dataset`` function
+    backing the target visual (e.g. ``build_drift_dataset`` from
+    ``apps/l1_dashboard/datasets.py``). The helper calls it with the
+    test's cfg + L2 instance, pulls the CustomSql from the resulting
+    DataSet, applies each ``DataSetParameter``'s declared default to
+    its ``<<$pX>>`` placeholders, wraps the result with ``ORDER BY
+    {anchor_order} LIMIT 1``, and executes. AA.A.9 — replaces the v1
+    ``anchor_table`` + ``anchor_columns`` fields which duplicated
+    matview knowledge in the spec.
 
-    ``anchor_columns`` are the columns the anchor SELECT projects —
-    one per ``PickerSpec.column`` plus any auxiliary columns the
-    formatters need.
+    ``anchor_order`` biases the anchor pick: typically a column-name
+    ASC/DESC clause that picks a recent / lowest-cust-N / highest-
+    magnitude row. Empty string = arbitrary first row from the dataset
+    SQL output.
 
-    ``anchor_order`` biases the anchor pick: typically
-    ``"business_day_start DESC"`` so the anchor lands on a recent day
-    (matches what an analyst would naturally see open). Empty string =
-    arbitrary first row.
-
-    ``pickers`` is the tuple of picker wirings. All must be drivable
-    from the anchor row (i.e. ``column`` in ``anchor_columns``).
+    ``pickers`` is the tuple of picker wirings. All ``column`` values
+    must be keys in the dict ``fetch_anchor_row`` returns (i.e.
+    projection columns from the dataset's CustomSql output).
     """
     sheet_name: str
     target_visual: str
-    anchor_table: str  # ``"{p}_drift"`` — formatted with cfg.db_table_prefix
-    anchor_columns: tuple[str, ...]
+    dataset_builder: DatasetBuilder
     anchor_order: str
     pickers: tuple[PickerSpec, ...]
 
 
-def fetch_anchor_row(cfg: Config, spec: SheetAnchorSpec) -> Mapping[str, Any]:
-    """Run ``spec``'s anchor SELECT against ``cfg.demo_database_url``
-    and return the first row as a column→value dict.
+def fetch_anchor_row(
+    cfg: Config, l2: L2Instance, spec: SheetAnchorSpec,
+) -> Mapping[str, Any]:
+    """Run ``spec.dataset_builder``'s SQL against ``cfg.demo_database_url``
+    (with declared param defaults applied) and return the first row as a
+    column→value dict.
 
-    Raises ``RuntimeError`` when the anchor table is empty (deploy step
-    skipped? wrong cfg? wrong prefix?) — refusing to silently return
-    a useless tuple, same shape as ``find_account_day_with_data``.
+    The SQL is the exact CustomSql the deploy registers — extracted
+    from ``ds.PhysicalTableMap[<key>].CustomSql.SqlQuery`` after calling
+    the builder. ``apply_dataset_param_defaults`` substitutes each
+    ``<<$pX>>`` placeholder with its ``DataSetParameter``'s declared
+    static default (the same production substitutor App2 uses on
+    initial page load). The result is then wrapped:
+
+        SELECT * FROM (<dataset-sql-with-defaults>) sub
+        ORDER BY {spec.anchor_order}
+        LIMIT 1
+
+    Column names come from ``cursor.description`` — no hand-listing.
+    Picker ``column`` values must be projection columns from this
+    output.
+
+    Raises ``RuntimeError`` when the dataset SQL returns zero rows
+    (matview legitimately empty, or the dataset's default-param state
+    filters everything out — e.g. Money Trail's sentinel chain-root
+    default).
 
     Only Postgres + Oracle are wired; the AW-target browser e2e cells
     only run against those two dialects.
@@ -141,26 +176,44 @@ def fetch_anchor_row(cfg: Config, spec: SheetAnchorSpec) -> Mapping[str, Any]:
     if not cfg.demo_database_url:
         raise RuntimeError("fetch_anchor_row: cfg.demo_database_url is unset")
 
-    table = spec.anchor_table.format(p=cfg.db_table_prefix)
-    cols = ", ".join(spec.anchor_columns)
+    ds = spec.dataset_builder(cfg, l2)
+    if not ds.PhysicalTableMap:
+        raise RuntimeError(
+            f"fetch_anchor_row: {spec.sheet_name!r}'s dataset has no "
+            f"PhysicalTableMap entries — builder returned an empty "
+            f"shape"
+        )
+    _, table = next(iter(ds.PhysicalTableMap.items()))
+    if table.CustomSql is None:
+        raise RuntimeError(
+            f"fetch_anchor_row: {spec.sheet_name!r}'s dataset table "
+            f"has no CustomSql — non-custom-SQL datasets aren't wired"
+        )
+    qs_sql = table.CustomSql.SqlQuery
+    resolved = apply_dataset_param_defaults(
+        qs_sql, ds.DatasetParameters or [], {},
+    )
     order_clause = f"ORDER BY {spec.anchor_order} " if spec.anchor_order else ""
     limit_clause = (
         "LIMIT 1" if cfg.dialect is Dialect.POSTGRES else "FETCH FIRST 1 ROWS ONLY"
     )
-    sql = f"SELECT {cols} FROM {table} {order_clause}{limit_clause}"
+    wrapped = f"SELECT * FROM ({resolved}) sub {order_clause}{limit_clause}"
 
     with psycopg.connect(cfg.demo_database_url, connect_timeout=60) as conn:
         with conn.cursor() as cur:
-            cur.execute(sql)
+            cur.execute(wrapped)
             row = cur.fetchone()
+            cols = [d.name for d in cur.description] if cur.description else []
     if row is None:
         raise RuntimeError(
-            f"fetch_anchor_row: {table} returned zero rows. Deploy "
-            f"skipped? Wrong cfg? Wrong prefix? Check the chain's "
-            f"seed/db layers — the matview may legitimately be empty "
-            f"if the scenario plants no violations for this sheet."
+            f"fetch_anchor_row: {spec.sheet_name!r}'s dataset SQL "
+            f"returned zero rows with default params applied. Deploy "
+            f"skipped? Seed plants nothing for this dataset's matview? "
+            f"Or the dataset's default param state legitimately renders "
+            f"empty (e.g. Money Trail's sentinel chain-root) — this "
+            f"sheet may not fit AA.A.6's anchor-survives-narrow contract."
         )
-    return dict(zip(spec.anchor_columns, row, strict=True))
+    return dict(zip(cols, row, strict=True))
 
 
 def picker_value(
