@@ -1593,6 +1593,19 @@ def _wire_date_range_filter(
                 time_granularity="DAY",
                 minimum=min_bound,
                 maximum=max_bound,
+                # AA.A.daterange.5 — Both bounds INCLUSIVE. With
+                # defaults (None / exclusive both), QS compiles to
+                # ``business_day_start >= addDateTime(1, 'DD',
+                # truncDate('DD', date_from)) AND <
+                # truncDate('DD', date_to))``, which when ``date_from
+                # == date_to`` produces an inverted (empty) range —
+                # AA.A.qs-triage Shape A. Inclusive-both compiles to
+                # ``>= truncDate(date_from) AND <= truncDate(date_to)``,
+                # so picking the anchor's exact day matches it. App2
+                # already had the symmetric fix (X.2.j.dateparity:
+                # ``column < date_to + 1 day``).
+                include_minimum=True,
+                include_maximum=True,
             )],
         ))
         fg.scope_sheet(sheet)
