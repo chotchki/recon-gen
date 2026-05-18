@@ -51,6 +51,9 @@ from __future__ import annotations
 import pytest
 
 from recon_gen.apps.l2_flow_tracing.datasets import (
+    CHAIN_INSTANCES_CONTRACT,
+    POSTINGS_CONTRACT,
+    TT_INSTANCES_CONTRACT,
     build_chain_instances_dataset,
     build_postings_dataset,
     build_tt_instances_dataset,
@@ -115,6 +118,7 @@ L2FT_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         sheet_name="Rails",
         target_visual="Transactions",
         dataset_builder=build_postings_dataset,
+        contract=POSTINGS_CONTRACT,
         anchor_order="posting DESC, id ASC",
         pickers=(
             PickerSpec(
@@ -138,6 +142,7 @@ L2FT_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         sheet_name="Chains",
         target_visual="Chain Instances",
         dataset_builder=build_chain_instances_dataset,
+        contract=CHAIN_INSTANCES_CONTRACT,
         anchor_order="parent_posting DESC, parent_transfer_id ASC",
         pickers=(
             PickerSpec(
@@ -159,6 +164,7 @@ L2FT_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         sheet_name="Transfer Templates",
         target_visual="Template Instances",
         dataset_builder=build_tt_instances_dataset,
+        contract=TT_INSTANCES_CONTRACT,
         anchor_order="posting DESC, transfer_id ASC",
         pickers=(
             PickerSpec(
@@ -287,7 +293,7 @@ def test_l2ft_dropdown_pickers_inverse_excludes_anchor(
         # the filter is broken). See L1 inverse test for the same shape.
         driver.pick_filter(picker.label, [non_matching])
         driver.wait_loaded(spec.target_visual)
-        visual_col = visual_column_label(spec, cfg, l2, picker.column)
+        visual_col = visual_column_label(spec, picker.column)
         offender = driver.find_row(
             spec.target_visual, {visual_col: matching},
         )

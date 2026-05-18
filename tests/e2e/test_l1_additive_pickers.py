@@ -57,6 +57,13 @@ from __future__ import annotations
 import pytest
 
 from recon_gen.apps.l1_dashboard.datasets import (
+    DRIFT_CONTRACT,
+    LIMIT_BREACH_CONTRACT,
+    OVERDRAFT_CONTRACT,
+    STUCK_PENDING_CONTRACT,
+    STUCK_UNBUNDLED_CONTRACT,
+    TODAYS_EXCEPTIONS_CONTRACT,
+    TRANSACTIONS_CONTRACT,
     build_drift_dataset,
     build_limit_breach_dataset,
     build_overdraft_dataset,
@@ -107,6 +114,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         sheet_name="Drift",
         target_visual="Leaf Account Drift",
         dataset_builder=build_drift_dataset,
+        contract=DRIFT_CONTRACT,
         # Bias toward low cust-N so the picked anchor lands in MUI
         # Autocomplete's first-visible-window (the QS Account dropdown
         # virtualizes — typed-filter doesn't reliably narrow to a
@@ -136,6 +144,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         sheet_name="Overdraft",
         target_visual="Overdraft Violations",
         dataset_builder=build_overdraft_dataset,
+        contract=OVERDRAFT_CONTRACT,
         # Bias toward low cust-N — see Drift spec for context.
         anchor_order="account_id ASC, business_day_start DESC",
         pickers=(
@@ -160,6 +169,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         sheet_name="Limit Breach",
         target_visual="Limit Breach Detail",
         dataset_builder=build_limit_breach_dataset,
+        contract=LIMIT_BREACH_CONTRACT,
         # Bias toward low cust-N — see Drift spec for context.
         anchor_order="account_id ASC, business_day DESC",
         pickers=(
@@ -196,6 +206,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         sheet_name="Pending Aging",
         target_visual="Stuck Pending Detail",
         dataset_builder=build_stuck_pending_dataset,
+        contract=STUCK_PENDING_CONTRACT,
         # No date filter to bias against — order by account_id ASC so
         # we land on the lowest-numbered customer (MUI Autocomplete
         # first-visible-window — see Drift spec).
@@ -217,6 +228,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         sheet_name="Unbundled Aging",
         target_visual="Stuck Unbundled Detail",
         dataset_builder=build_stuck_unbundled_dataset,
+        contract=STUCK_UNBUNDLED_CONTRACT,
         anchor_order="account_id ASC, posting DESC",
         pickers=(
             PickerSpec(
@@ -239,6 +251,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         sheet_name="Today's Exceptions",
         target_visual="Exception Detail",
         dataset_builder=build_todays_exceptions_dataset,
+        contract=TODAYS_EXCEPTIONS_CONTRACT,
         # Sorted-by-magnitude is the visual default — pick the top row
         # of the smallest cust-N for the MUI window bias (see Drift).
         anchor_order="account_id ASC, magnitude DESC",
@@ -269,6 +282,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         sheet_name="Transactions",
         target_visual="Posting Ledger",
         dataset_builder=build_transactions_dataset,
+        contract=TRANSACTIONS_CONTRACT,
         anchor_order="account_id ASC, posting DESC",
         pickers=(
             PickerSpec(
@@ -457,7 +471,7 @@ def test_l1_dropdown_pickers_inverse_excludes_anchor(
         # the first offender (fast-fail when the filter is broken).
         driver.pick_filter(picker.label, [non_matching])
         driver.wait_loaded(spec.target_visual)
-        visual_col = visual_column_label(spec, cfg, l2, picker.column)
+        visual_col = visual_column_label(spec, picker.column)
         offender = driver.find_row(
             spec.target_visual, {visual_col: matching},
         )

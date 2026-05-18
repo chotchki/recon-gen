@@ -44,6 +44,7 @@ from typing import Any, Literal
 import psycopg
 
 from recon_gen.common.config import Config
+from recon_gen.common.dataset_contract import DatasetContract
 from recon_gen.common.html._sql_executor import apply_dataset_param_defaults
 from recon_gen.common.l2 import L2Instance
 from recon_gen.common.models import DataSet
@@ -122,6 +123,15 @@ class SheetAnchorSpec:
     ``anchor_table`` + ``anchor_columns`` fields which duplicated
     matview knowledge in the spec.
 
+    ``contract`` is the matching ``DatasetContract`` (e.g.
+    ``DRIFT_CONTRACT``) — the source-of-truth for column → display-
+    label resolution. Passed alongside the builder because
+    ``build_dataset`` consumes the contract to size the projection but
+    doesn't attach it to the returned AWS-shape ``DataSet`` — so the
+    test has to be told both. Used by ``visual_column_label`` to bridge
+    SQL column names → table header text for the row-identity check
+    in the inverse-pickers test.
+
     ``anchor_order`` biases the anchor pick: typically a column-name
     ASC/DESC clause that picks a recent / lowest-cust-N / highest-
     magnitude row. Empty string = arbitrary first row from the dataset
@@ -134,6 +144,7 @@ class SheetAnchorSpec:
     sheet_name: str
     target_visual: str
     dataset_builder: DatasetBuilder
+    contract: DatasetContract
     anchor_order: str
     pickers: tuple[PickerSpec, ...]
 
@@ -236,30 +247,27 @@ def picker_value(
     return str(value)
 
 
-def visual_column_label(
-    spec: SheetAnchorSpec, cfg: Any, l2: Any, sql_column: str,
-) -> str:
+def visual_column_label(spec: SheetAnchorSpec, sql_column: str) -> str:
     """Resolve a SQL column name (as declared on ``PickerSpec.column``)
     to the display label QuickSight/App2 actually renders as the
     Table column header.
 
-    Builds the spec's dataset (one shot per call — fixture-cache the
-    result if it gets called repeatedly in a hot loop) and reads the
-    column's ``human_name`` off the contract — that's the explicit
-    ``display_name`` if set, else the auto-derived title-case form
-    (``rail_name`` → "Rail Name", with initialism preservation so
-    ``account_id`` → "Account ID"). Raises ``KeyError`` if the column
-    isn't in the contract — surfaces a wired-wrong picker spec loudly
-    (e.g. ``column="raul_name"`` typo) instead of silently mismatching
-    at the row-identity assertion.
+    Reads ``spec.contract`` (the ``DatasetContract`` carried alongside
+    the builder — ``build_dataset`` consumes the contract to size the
+    projection but doesn't attach it to the returned AWS-shape
+    ``DataSet``, so the spec has to declare both). Returns the
+    column's ``human_name`` — explicit ``display_name`` when set, else
+    the auto-derived title-case form (``rail_name`` → "Rail Name",
+    with initialism preservation so ``account_id`` → "Account ID").
+    Raises ``KeyError`` if the column isn't in the contract — surfaces
+    a wired-wrong picker spec loudly (e.g. ``column="raul_name"`` typo)
+    instead of silently mismatching at the row-identity assertion.
 
     Used by the inverse-pickers test (AA.A.l2ft-rails-inverse.2) to
     bridge SQL column names → rendered header text for the
     ``row[header] == anchor_value`` check.
     """
-    dataset = spec.dataset_builder(cfg, l2)
-    contract = dataset.contract
-    return contract.column(sql_column).human_name
+    return spec.contract.column(sql_column).human_name
 
 
 def non_matching_dropdown_value(
