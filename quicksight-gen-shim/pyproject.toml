@@ -18,7 +18,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quicksight-gen"
-version = "11.0.0"
+# AA.A.996.release-fix, 2026-05-18 — release.yml::Sync shim version step
+# rewrites this line + the recon-gen pin from ${GITHUB_REF_NAME#v} before
+# build, so CI is authoritative for the published wheel. The in-tree
+# value here is a placeholder used by local `python -m build` invocations
+# and as a sanity check; bump alongside `src/recon_gen/__init__.py` when
+# you want a local shim wheel to match.
+version = "11.0.2"
 description = "Deprecated rename shim — install `recon-gen` instead (this package will be removed in ~1-2 months)."
 readme = "README.md"
 license = "MIT"
@@ -34,8 +40,10 @@ classifiers = [
 dependencies = [
     # Pin to the same version as this shim — the shim publishes once
     # per recon-gen release during the grace window so the version
-    # pair stays in lockstep.
-    "recon-gen==11.0.0",
+    # pair stays in lockstep. release.yml rewrites this line from the
+    # git tag on publish (AA.A.996.release-fix); the in-tree value is
+    # a placeholder for local builds.
+    "recon-gen==11.0.2",
 ]
 
 [project.urls]

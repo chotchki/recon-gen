@@ -1,5 +1,23 @@
 # Release Notes
 
+## v11.0.2 — drift/overdraft visual + matview natural-key alignment; CI shim-lockstep fix
+
+Bugfix release. Two production-facing fixes + one release-pipeline structural fix that re-armed the publish path after v11.0.1's smoke step blocked it.
+
+**Drift / Overdraft / Parent Drift tables now display `business_day_start` at SECOND granularity** (was `business_day_end` at DAY). One logical day per row, full timestamp visible so per-account boundary differences (a 17:00→17:00 customer DDA vs midnight→midnight retail DDA) stay legible. Aligns the visual with the matview natural key + scenario plants + universal date filter, and corrects the Daily Statement drill that previously wrote `business_day_end` while Daily Statement filters on `business_day_start` (off by 1 day). `tests/audit/_dashboard_extract.py::_parse_day_cell` now parses both ISO (App2's `2026-05-13 17:00:00`) and locale-rendered (QS at SECOND granularity's `May 13, 2026 17:00:00`) head shapes for the 4-way agreement comparison. All 6 `test_invariant_four_way_agreement[postgres-*]` cells green against deployed Aurora.
+
+**Driver-layer `<th>`-hiding** for QS↔App2 header divergence (`AA.A.995`). `DashboardDriver.table_rows(visual_title, columns=...)` now accepts an optional sequence of raw SQL column names; the driver projects each row to just those cells, looking each up by raw name (App2 stamps `account_id` on `<th>`) or title-case display label (QS stamps `Account ID`). `tests/e2e/_drivers/base.py::rekey_by_columns` + `_title_case_header` helpers preserve known initialisms (`id` / `sql` / `url` / `api`). Hides the previously-leaking renderer difference from the agreement test bodies.
+
+**6 picker failures fixed** (`AA.A.993`). Additive + inverse picker tests on Overdraft + Transactions sheets. Root causes: (a) modern hybrid QS dropdown shape needed search-input selector probe in both `set_dropdown_value` and `_open_control_dropdown`; (b) anchor SQL for Transactions was selecting `clearing-suspense` accounts not in the Account dropdown's narrowed universe — `SheetAnchorSpec` gains an `anchor_where_template` field constraining anchors to the visible dropdown set (`current_daily_balances`); (c) Transfer-picker dropped from Transactions spec — its 8k option universe exceeds App2's 2000-cap (see #994 follow-on).
+
+**L2FT rails inverse-picker reliability** (`AA.A.l2ft-rails-inverse.*`). Browser drivers now scroll-accumulate QS infinite-scroll tables; `DashboardDriver.find_row(visual_title, predicate)` walks for the first matching row with early-exit; 4 inverse-picker tests swapped from DOM-window `table_rows` to authoritative `table_row_count` for the post-filter total.
+
+**Auto-emit `dump-last-errors` on chain failure** (`AA.A.992`). Runner's chain runner emits the dump on its own failure path so triage doesn't need a separate command after the chain reports failed.
+
+**README / CLAUDE.md / GH Pages landing recast** for the v11.x voice: validation tool ("you bring the data — we tell you whether it adds up"), not "AWS QuickSight JSON generator". Explicit "Not an ETL tool" framing.
+
+**CI shim-lockstep fix** (`AA.A.996.release-fix`). v11.0.1's release failed at the smoke step because `quicksight-gen-shim/pyproject.toml` was still pinned to `recon-gen==11.0.0` after the main package bumped to 11.0.1 — `pip install ./dist/*.whl` blew up on the pin conflict. `release.yml` now `sed`-rewrites the shim's `version` + `recon-gen==…` line from `${GITHUB_REF_NAME#v}` before build, so future cuts can't drift via forgotten manual bump. The in-tree shim version is now explicitly a placeholder; CI is authoritative.
+
 ## v11.0.1 — L1 / L2FT / Executives date-range filter inclusive bounds
 
 Bugfix release. `TimeRangeFilter` with parameter-bound min/max and no

@@ -106,6 +106,22 @@ jobs:
       - name: Build sdist + wheel
         run: .venv/bin/python -m build
 
+      - name: Sync shim version + recon-gen pin to ${TAG} (AC.F.1 lockstep)
+        # AA.A.996.release-fix, 2026-05-18 — v11.0.1's release failed because
+        # the shim's in-tree pyproject.toml was still pinned to 11.0.0 while
+        # the main package bumped to 11.0.1; the Smoke test wheel step's
+        # ``pip install ./dist/*.whl`` blew up on the recon-gen==11.0.0 pin
+        # vs the recon_gen-11.0.1-py3-none-any.whl side-by-side. CI is now
+        # the authoritative bumper — the shim's in-tree version is just a
+        # placeholder; this step rewrites it from ${TAG} so manual lockstep
+        # can no longer drift.
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          sed -i "s/^version = .*/version = \"${TAG}\"/" quicksight-gen-shim/pyproject.toml
+          sed -i "s/^    \"recon-gen==.*/    \"recon-gen==${TAG}\",/" quicksight-gen-shim/pyproject.toml
+          echo "--- shim pyproject.toml after sync ---"
+          grep -E '^(version|    "recon-gen==)' quicksight-gen-shim/pyproject.toml
+
       - name: Build quicksight-gen shim (AC.F.1 — PyPI deprecation shim)
         # Builds the `quicksight-gen` meta-package into the same dist/
         # directory so the existing upload-artifact / pypi-publish steps
