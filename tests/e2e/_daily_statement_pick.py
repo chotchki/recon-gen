@@ -87,15 +87,22 @@ def find_account_day_with_data(cfg: Config) -> tuple[str, str, str]:
         )
     bday_expr = date_trunc_day("posting", cfg.dialect)
     prefix = cfg.db_table_prefix
-    # Group by (account, day); pick most-recent-then-most-active. The
-    # tiebreak (n DESC) matters: in a thin-data day a single 1-row
-    # planted scenario would be picked over a 10-row organic firing
-    # on the same day if we ordered by bday alone with deterministic-
-    # but-unhelpful tiebreaks.
+    # Group by (account, day); bias the pick toward low ``account_id`` so
+    # the resulting account lands in QS's MUI Autocomplete first-visible
+    # window (the Account dropdown virtualizes options at ~14 items —
+    # picks past that window aren't reachable via Playwright clicks even
+    # though the dropdown's SQL returns them). bday DESC + n DESC are
+    # tiebreaks so within the lowest-id account we still favor the most-
+    # recent / most-active day.
     #
     # WHERE narrows to the alphabetically-first role from
     # current_daily_balances — same universe the Daily Statement Role
-    # dropdown auto-selects. Subquery is portable across PG + Oracle.
+    # dropdown auto-selects (its SINGLE_SELECT default picks the first
+    # LinkedValues option). Subquery is portable across PG + Oracle. The
+    # Role dropdown's option list doesn't refresh after a runtime pick
+    # (standing quirk project_qs_url_parameter_no_control_sync — explicit
+    # in test_daily_statement_role_then_account_populates_table's
+    # docstring), so the helper must pick from the initial-role universe.
     sql = (
         f"SELECT account_name, account_id, account_role, "
         f"       {bday_expr} AS bday, COUNT(*) AS n "
@@ -105,7 +112,7 @@ def find_account_day_with_data(cfg: Config) -> tuple[str, str, str]:
         f") "
         f"GROUP BY account_name, account_id, account_role, {bday_expr} "
         f"HAVING COUNT(*) > 0 "
-        f"ORDER BY bday DESC, n DESC "
+        f"ORDER BY account_id ASC, bday DESC, n DESC "
     )
     if cfg.dialect is Dialect.POSTGRES:
         sql += "LIMIT 1"
