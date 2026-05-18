@@ -2715,6 +2715,13 @@ def _finalize_run(
     pruned = prune_old_runs()
     if pruned:
         print(f"runner: pruned {len(pruned)} old run(s) (retained last {RUNS_RETAIN_N})")
+    # Auto-emit dump-last-errors on failure so the operator doesn't have
+    # to remember the subcommand (2026-05-18 — pre-fix, both Claude and
+    # operators were grepping stdout.log manually even though the tool
+    # surfaced the actionable assertion in 1 sec).
+    if code != EXIT_SUCCESS:
+        print()
+        _render_failures_for_run(run_dir)
     return code
 
 
@@ -3451,6 +3458,21 @@ def cmd_dump_last_errors(args: argparse.Namespace) -> int:
         candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         run_dir = candidates[0]
 
+    _render_failures_for_run(run_dir, variant_filter=args.variant)
+    return EXIT_SUCCESS
+
+
+def _render_failures_for_run(
+    run_dir: Path, *, variant_filter: str | None = None,
+) -> bool:
+    """Render the failing-layers report for ``run_dir`` to stdout.
+
+    Returns ``True`` if at least one failing layer was found, else ``False``.
+
+    Shared by ``cmd_dump_last_errors`` (operator-invoked triage) and
+    ``_finalize_run`` (auto-emit on chain failure, 2026-05-18 per user
+    request — saves the operator from remembering the subcommand).
+    """
     print(f"# Failing layers in {run_dir.name}")
     print()
 
@@ -3463,7 +3485,7 @@ def cmd_dump_last_errors(args: argparse.Namespace) -> int:
     for sub in sorted(run_dir.iterdir()):
         if not sub.is_dir() or sub.name == "_prelude":
             continue
-        if args.variant and sub.name != args.variant:
+        if variant_filter and sub.name != variant_filter:
             continue
         cells.append((sub.name, sub))
 
@@ -3508,7 +3530,7 @@ def cmd_dump_last_errors(args: argparse.Namespace) -> int:
             _dump_capture_status(cell_dir, layer_dir, stdout)
     if not found_any_failure:
         print("(no failing layers in this run — all clean)")
-    return EXIT_SUCCESS
+    return found_any_failure
 
 
 _FAILED_LINE_RE: Final = re.compile(r"^FAILED (?P<nodeid>\S+)(?: - (?P<reason>.+))?$", re.MULTILINE)

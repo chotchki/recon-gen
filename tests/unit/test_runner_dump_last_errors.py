@@ -327,3 +327,50 @@ def test_dump_includes_prelude_unit_failures(runs_dir: Path) -> None:
     )
     out = _dump(runs_dir)
     assert "[_prelude/unit]" in out
+
+
+# -- auto-emit on chain failure (#992) ---------------------------------------
+
+
+def test_finalize_run_auto_emits_failures_dump_on_failure(
+    runs_dir: Path,
+) -> None:
+    """When ``_finalize_run`` is called with code != EXIT_SUCCESS, it
+    appends the failing-layers dump to stdout — operator doesn't have
+    to remember the subcommand (#992, 2026-05-18).
+    """
+    run_dir = runs_dir / _RUN_ID_NEW
+    run_dir.mkdir()
+    _write_layer(
+        run_dir, "sp_pg_lo", "db",
+        exit_code=1, stdout="FAILED tests/x.py::test_a - AssertionError\n",
+    )
+    unit = r.LayerResult(layer="unit", exit_code=0, duration_seconds=1.0)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = r._finalize_run(run_dir, unit, [], r.EXIT_FAILURE)
+    assert rc == r.EXIT_FAILURE
+    out = buf.getvalue()
+    assert "Failing layers in" in out
+    assert "[sp_pg_lo/db]" in out
+    # The dump's per-test renderer reformats the bare "FAILED ..." line
+    # into a markdown header + reason (see _dump_pytest_failures); the
+    # test_id shows up as the section header.
+    assert "tests/x.py::test_a" in out
+
+
+def test_finalize_run_skips_dump_on_clean_chain(runs_dir: Path) -> None:
+    """When the chain passes (code == EXIT_SUCCESS), no auto-dump fires
+    — keeps clean-run output uncluttered.
+    """
+    run_dir = runs_dir / _RUN_ID_NEW
+    run_dir.mkdir()
+    _write_layer(run_dir, "sp_pg_lo", "db", exit_code=0, stdout="42 passed\n")
+    unit = r.LayerResult(layer="unit", exit_code=0, duration_seconds=1.0)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = r._finalize_run(run_dir, unit, [], r.EXIT_SUCCESS)
+    assert rc == r.EXIT_SUCCESS
+    out = buf.getvalue()
+    # The dump's banner line MUST NOT appear on a clean run.
+    assert "Failing layers in" not in out
