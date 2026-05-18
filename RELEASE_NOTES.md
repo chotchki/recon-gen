@@ -1,5 +1,54 @@
 # Release Notes
 
+## v11.0.1 — L1 / L2FT / Executives date-range filter inclusive bounds
+
+Bugfix release. `TimeRangeFilter` with parameter-bound min/max and no
+explicit `include_minimum` / `include_maximum` defaults to exclusive
+bounds — QuickSight compiles that with day-granularity to
+`column >= addDateTime(1, 'DD', truncDate('DD', date_from)) AND <
+truncDate('DD', date_to)`. When `date_from == date_to` (anchor on a
+single day), the lower bound shifts to `date_from + 1`, producing an
+empty inverted range — the visual shows "No data". App2's already-
+inclusive `BETWEEN date_from AND date_to + 1 day` (X.2.j.dateparity)
+masked the divergence on the App2 side.
+
+7 call sites flipped to explicit `include_minimum=True,
+include_maximum=True`:
+
+- `apps/l1_dashboard/app.py::_scope_one` (covers all 7 L1 invariant
+  sheets + Daily Statement + Transactions + Drift Timelines)
+- `apps/l2_flow_tracing/app.py` × 3 (Rails / Chains / Transfer
+  Templates universal date controls)
+- `apps/executives/app.py` × 3 (Account Coverage / Transaction Volume
+  / Money Moved)
+
+Investigation is unaffected — its `TimeRangeFilter`s bind directly to
+the widget (no parameter intermediate); the filter receives values
+directly and the include semantics never bite.
+
+**Captured via** the new `ws_frames.txt` driver artifact (AA.A.qs-
+triage.1) — every `QsEmbedDriver`-driven browser test now drops
+captured QS WebSocket `START_VIS` frames alongside the existing
+`console.txt` / `network.txt` / `dom.html` / `screenshot.png` /
+`trace.zip` for forensic replay. No JS re-deploy / re-instrumentation
+needed to capture the post-pick parameter substitution QS actually
+sent.
+
+**Structural follow-on (backlogged, AA.A.daterange):** the underlying
+parameter-pair model has a known multi-widget UX footgun (user can set
+"Date From > Date To"). The fix shape — replace
+`(ParameterDateTimePickerControl Date From + ParameterDateTimePickerControl
+Date To + TimeRangeFilter)` triplet with a single
+`FilterDateTimePickerControl(Type="DATE_RANGE")` bound to one column,
+same widget Investigation already uses in production — closes the
+footgun structurally and aligns L1 / L2FT / Exec with Investigation
+on idiomatic QS widget choice. Hits a multi-dataset-per-sheet wall
+(L1's Drift sheet, for example, has both leaf-drift + ledger-drift
+datasets sharing the date filter via parameter binding; the filter-
+bound widget pattern needs a different sharing mechanism). Deferred
+to a future cycle when we have appetite for the dataset-consolidation
+work.
+
 ## v11.0.0 — Phase AC: project rename `quicksight-gen` → `recon-gen`
 
 Consolidated final tag of the Phase AC alpha series (a1 through a6).
