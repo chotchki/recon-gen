@@ -332,7 +332,11 @@ def test_emit_visual_data_fragment_collapses_single_value_lists() -> None:
             "param_pMulti": ["a", "b", "c"],
         },
     )
+    # AA.A.9.race — compact JSON form (no space after colon) keeps the
+    # server's serialization byte-identical to JS's ``JSON.stringify``
+    # output so the bootstrap.js requested/rendered comparison reduces
+    # to a string equality check.
     # Single → bare string "only"
-    assert '&quot;param_pSingle&quot;: &quot;only&quot;' in out
+    assert '&quot;param_pSingle&quot;:&quot;only&quot;' in out
     # Multi → array
-    assert '&quot;param_pMulti&quot;: [&quot;a&quot;' in out
+    assert '&quot;param_pMulti&quot;:[&quot;a&quot;' in out

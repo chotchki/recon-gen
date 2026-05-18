@@ -1161,8 +1161,14 @@ def emit_visual_data_fragment(
             )
         }
         if relevant:
+            # AA.A.9.race — ``separators=(',', ':')`` keeps the JSON byte-
+            # identical to JS's ``JSON.stringify(...)`` so the bootstrap.js
+            # ``requestedParams === renderedParams`` comparison reduces to
+            # a string equality check (no canonicalization needed). Python's
+            # default (``{"a": 1}`` with space-after-colon) would mismatch
+            # JS's compact form on every key, defeating the provenance check.
             bound_json = html.escape(
-                json.dumps(relevant, sort_keys=True),  # typing-smell: ignore[json-indent]: compact embedded attr value — must fit on one line
+                json.dumps(relevant, sort_keys=True, separators=(",", ":")),  # typing-smell: ignore[json-indent]: compact embedded attr value — must fit on one line
                 quote=True,
             )
             bound_attr = f' data-bound-params="{bound_json}"'

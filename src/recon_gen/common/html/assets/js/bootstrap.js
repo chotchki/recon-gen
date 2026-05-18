@@ -1099,9 +1099,22 @@
   // always present + the "is loading?" signal (presence of
   // ``.visual-loading``) stays accurate across initial + refresh.
   // CSS opacity-with-300ms-delay keeps fast loads from flashing.
+  //
+  // AA.A.9.race — ALSO stamp ``data-requested-params`` on the visual-data
+  // div using the same shape ``render.py::emit_visual_data_fragment``
+  // serializes ``data-bound-params`` with. The pair is the per-visual
+  // freshness oracle: ``afterSwap`` mirrors the response's
+  // ``data-bound-params`` onto the div as ``data-rendered-params``;
+  // the visual is settled iff ``requested === rendered``. Closes the
+  // T2→T4 gap in ``hx-sync="this:queue last"`` chains where a queued
+  // wave's content briefly shows old data after the in-flight wave's
+  // swap clears the skeleton but before the queued wave's own
+  // beforeRequest re-injects it.
   document.addEventListener("htmx:beforeRequest", (evt) => {
-    var elt = evt.detail.elt;
-    if (elt && elt.classList && elt.classList.contains("visual-data")) {
+    const elt = evt.detail.elt;
+    if (elt?.classList?.contains("visual-data")) {
+      const params = evt.detail.requestConfig?.parameters || {};
+      elt.dataset.requestedParams = _serializeBoundParams(params);
       elt.innerHTML =
         '<div class="visual-loading" aria-hidden="true">' +
         '<div class="skeleton-block"></div>' +
@@ -1112,7 +1125,50 @@
   document.addEventListener("htmx:afterSwap", (evt) => {
     hydrate(evt.detail.target);
     wireFilterWidgets(evt.detail.target);
+    // AA.A.9.race — mirror the response's data-bound-params onto the
+    // visual-data div so it sits next to the requested-params snapshot
+    // from beforeRequest. ``hydrateSection`` already copies the script
+    // tag's data-bound-params onto the enclosing section just before
+    // wiping innerHTML (see line ~85), so by the time we run here the
+    // section is the freshness source of truth. We just mirror it onto
+    // the swap target div so the driver reads both attrs from one node.
+    const tgt = evt.detail.target;
+    if (tgt?.classList?.contains("visual-data")) {
+      const section = tgt.closest("[data-visual-id]");
+      const bp = section?.getAttribute("data-bound-params");
+      if (bp != null) {
+        tgt.dataset.renderedParams = bp;
+      }
+    }
   });
+
+  // AA.A.9.race — mirror of ``render.py::emit_visual_data_fragment``'s
+  // ``relevant`` filter. Same key set (``param_*`` / ``filter_*`` /
+  // ``date_from`` / ``date_to``), same value shape (single string or
+  // array-of-strings on multi-valued), same byte-shape JSON
+  // (sort_keys + compact). Stays in sync by convention — if the server
+  // filter ever changes, this must change too.
+  function _serializeBoundParams(params) {
+    const rel = {};
+    Object.keys(params)
+      .sort()
+      .forEach((k) => {
+        if (
+          k.indexOf("param_") === 0 ||
+          k.indexOf("filter_") === 0 ||
+          k === "date_from" ||
+          k === "date_to"
+        ) {
+          const v = params[k];
+          if (Array.isArray(v)) {
+            rel[k] = v.length > 1 ? v : v.length === 1 ? v[0] : "";
+          } else {
+            rel[k] = v == null ? "" : v;
+          }
+        }
+      });
+    return JSON.stringify(rel);
+  }
   document.addEventListener("DOMContentLoaded", () => {
     hydrate(document.body);
     wireCategoryFilters(document);

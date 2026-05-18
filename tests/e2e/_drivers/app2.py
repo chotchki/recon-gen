@@ -303,6 +303,54 @@ class App2Driver:
         section.locator(
             ".visual-data table, .visual-data svg, .visual-data .kpi-value"
         ).first.wait_for(state="visible", timeout=timeout_ms)
+        # AA.A.9.race — freshness oracle: the visual is settled iff
+        # the content rendered in the DOM was produced by the LATEST
+        # request fired against it (``data-requested-params`` set in
+        # bootstrap.js htmx:beforeRequest matches ``data-rendered-params``
+        # mirrored in htmx:afterSwap from the response's
+        # ``data-bound-params``). Closes the T2→T4 gap in
+        # ``hx-sync="this:queue last"`` chains: when a queued wave's
+        # in-flight response lands and clears the skeleton BUT a fresher
+        # wave is already queued, the no-skeleton check returns true
+        # while the rendered content still reflects the queued (stale)
+        # wave. The freshness oracle catches this — requested has
+        # advanced to the queued wave's params, but rendered still
+        # shows the prior wave's. We wait until the queued wave's
+        # response lands and rendered catches up.
+        #
+        # Skip when no requested-params has been stamped yet (initial
+        # load on a visual where bootstrap.js's beforeRequest hasn't
+        # fired the stamp yet because the request was dispatched
+        # before the JS loaded — rare, but the wait_for above already
+        # guarantees content is visible, so we don't gate on freshness
+        # in that degraded case).
+        section.locator(".visual-data").first.evaluate(
+            """(el, timeoutMs) => {
+                const deadline = performance.now() + timeoutMs;
+                return new Promise((resolve, reject) => {
+                    const tick = () => {
+                        const req = el.dataset.requestedParams;
+                        const ren = el.dataset.renderedParams;
+                        // Pre-first-stamp: ren may be set from the
+                        // initial server-render but req hasn't been
+                        // stamped (no htmx event has fired). Treat
+                        // that as settled — wait_for above already
+                        // confirmed content is visible.
+                        if (req == null) { resolve(); return; }
+                        if (req === ren) { resolve(); return; }
+                        if (performance.now() > deadline) {
+                            reject(new Error(
+                              `freshness wait timed out: req=${req} ren=${ren}`
+                            ));
+                            return;
+                        }
+                        setTimeout(tick, 50);
+                    };
+                    tick();
+                });
+            }""",
+            timeout_ms,
+        )
 
     def table_rows(self, visual_title: str) -> list[dict[str, str]]:
         section = self._section(visual_title)
