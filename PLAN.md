@@ -430,26 +430,43 @@ assert 50 < 50
 
 **Captured post-pick WS frame** (`ws_frames.txt`, last START_VIS): dates collapsed to 2026-05-18 = 2026-05-18 (NOT the cause — additive narrows fine with same date collapse, proving the v11.0.1 fix works for L2FT). Rail param substituted = `"ExternalRailInbound"` (the inverse-toggle value, NOT the anchor's rail).
 
-**Hypothesis bucket** (cheap probes first):
+**Root cause** (AA.A.l2ft-rails-inverse.1 — Aurora SQL probe, 2026-05-18): **NEW hypothesis (d) confirmed.** The bug is the test assertion's row-count mechanic, NOT the production SQL and NOT the test-side picker-value helpers. The PLAN's original (a)/(b)/(c) bucket is dead.
 
-- (a) `non_matching_dropdown_value(driver, "Rail", matching)` returns a value that **isn't actually non-matching** for spec_example's L2 → both additive and inverse fetch the same rows. Test-side bug.
-- (b) Anchor's rail IS `ExternalRailInbound` (the test's "non-matching" pick matches it) → same root cause as (a) but on the anchor side.
-- (c) `_match_all_in_clause('rail_name', 'pL2ftRail')` substitution doesn't actually narrow on rail_name → both queries return all 50 rows unfiltered. Production bug; would also imply additive PASSES trivially (only asserts `anchor_count > 0`). Most-load-bearing hypothesis since it explains all of additive-passing + inverse-failing + count-unchanged.
+Aurora probe against `qsgen_sp_pg_aw_current_transactions` with the exact WS-frame substitutions (`posting=[2026-05-18, 2026-05-19)`, `status='Posted'`, `bundle='Unbundled'`):
+
+```
+pL2ftRail='__l2ft_all__'        -> 272 rows
+pL2ftRail='ExternalRailOutbound' ->  88 rows  (the anchor's rail — additive)
+pL2ftRail='ExternalRailInbound'  -> 174 rows  (the inverse pick)
+```
+
+Production SQL **does** narrow correctly by rail (88 vs 174 — clear delta). Hypothesis (c) refuted.
+
+Why the test sees `50 == 50` then: `len(driver.table_rows(visual))` returns the **DOM-visible window only**, not the true filtered row count. QS Table virtualizes / paginates — the visible page caps at 50 rows. When both the anchor-narrowed result (88 rows) and the inverse-picked result (174 rows) exceed 50, both DOM windows show 50, so `post_invert < anchor_count` becomes `50 < 50` → false.
+
+L1 inverse cells passed because L1 sheets have small matching row counts (5-10) that fit in one DOM page. L2FT Rails is the first sheet where post-narrowing data volume exceeds the page cap, exposing the latent test bug.
+
+**Fix:** swap `len(driver.table_rows(target))` → `driver.table_row_count(target)` in:
+
+- `tests/e2e/test_l1_additive_pickers.py::test_l1_additive_pickers_keep_anchor_row` (`before`/`after`)
+- `tests/e2e/test_l1_additive_pickers.py::test_l1_dropdown_pickers_inverse_excludes_anchor` (`anchor_count`/`post_invert`/`post_restore`)
+- Same two tests in `tests/e2e/test_l2ft_additive_pickers.py`
+
+`table_row_count()` does the bump-page-size-to-10000 + WS-settle + scroll-accumulate dance for the true post-filter row total. Documented in CLAUDE.md "What's sealed inside QsEmbedDriver" section.
 
 **Triage steps** (cheapest first):
 
-- [ ] **AA.A.l2ft-rails-inverse.1 — Aurora-direct SQL probe.** Connect to Aurora (`database-2`, `qsgen_sp_pg_aw_*` tables), run the dataset's CustomSql with `pL2ftRail='ExternalRailOutbound'`, `pL2ftStatus='Posted'`, `pL2ftBundle='Unbundled'`, date range `[2026-05-17, 2026-05-19]`. Record row count. Repeat with `pL2ftRail='ExternalRailInbound'`. If counts equal → hypothesis (c). If counts differ → hypotheses (a)/(b).
-- [ ] **AA.A.l2ft-rails-inverse.2 — Inspect anchor row + non-matching pick.** From the same Aurora data, query `fetch_anchor_row` directly to confirm the anchor's `rail_name`. Compare against what `non_matching_dropdown_value` returned (read from captured WS frame's rail param = "ExternalRailInbound"). If anchor's rail name == "ExternalRailInbound" → hypothesis (b). If different → not (b).
-- [ ] **AA.A.l2ft-rails-inverse.3 — Fix the root cause.** Depending on outcome of .1/.2:
-  - (a)/(b): fix `non_matching_dropdown_value` to actually pick a different rail value OR fix `fetch_anchor_row` to return a different rail
-  - (c): fix the L2FT postings dataset SQL so `pL2ftRail` actually narrows. Inspect why additive passes (probably the sentinel default during additive's apply_anchor_to_pickers, while inverse's pick lands a non-sentinel but the SQL still doesn't filter)
-- [ ] **AA.A.l2ft-rails-inverse.4 — Verify against Aurora.** `up_to=browser --variants=sp_pg_aw` should drop to 9 failures (2 Rails inverse close). Cut v11.0.2 if the fix is small.
+- [x] **AA.A.l2ft-rails-inverse.1 — Aurora-direct SQL probe.** Probe complete. Production SQL narrows correctly (88 vs 174 vs 272). Hypothesis (c) refuted. Real root cause is the test's DOM-window vs true-row-count conflation (hypothesis (d), new).
+- [ ] **AA.A.l2ft-rails-inverse.2 — Swap `len(table_rows)` → `table_row_count` in 4 test functions.** L1 + L2FT additive + inverse. Drop the now-obsolete .2 "inspect anchor row" probe — bypassed by the SQL-probe finding.
+- [ ] **AA.A.l2ft-rails-inverse.3 — Re-verify against Aurora.** `up_to=browser --variants=sp_pg_aw` should drop to 9 failures (2 L2FT Rails inverse cells close). Cut v11.0.2.
+- [ ] **AA.A.l2ft-rails-inverse.4 — Type-encode the invariant.** Backlog: `table_rows()` for narrowing-assertion sites is a smell — the picker-row-survival contract is about SQL row count, not DOM visibility. Consider deprecating `len(table_rows())` for assertion use, or naming it `dom_visible_rows()` so the cap is obvious at call sites.
 
 **What we know does NOT cause this:**
 
 - Date filter (v11.0.1's inclusive-bounds fix works for L2FT — additive narrows correctly)
 - Picker-doesn't-fire-at-all (WS frame shows ExternalRailInbound IS being substituted into the param)
-- L1 Shape B (different sheets, different dataset SQL pattern)
+- Production SQL not narrowing (Aurora probe confirms 88 vs 174 vs 272)
+- `non_matching_dropdown_value` / `fetch_anchor_row` (test-side helpers are correct — the bug is downstream in the assertion mechanic)
 
 ### AA.A.qs-triage — 12 persistent QS-* picker failures (umbrella, 2026-05-18)
 
