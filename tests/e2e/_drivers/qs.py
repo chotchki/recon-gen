@@ -39,6 +39,7 @@ import contextlib
 import json
 import time
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -77,6 +78,27 @@ _DEFAULT_PAGE_TIMEOUT_MS = 30_000
 _DEFAULT_VISUAL_TIMEOUT_MS = 15_000
 
 
+@dataclass(frozen=True)
+class WsSnapshot:
+    """AA.A.race.3 — frozen snapshot of ``_QsWsActivityTracker`` state
+    at a point in time. Captured BEFORE an action fires so the settle
+    loop can ask "what's NEW since I started?" rather than "what's the
+    current absolute state?".
+
+    Two fields suffice:
+
+    - ``total_starts`` — counter at snapshot time. Detects "did any
+      new START_VIS fire?" via ``current.total_starts - snap.total_starts``.
+    - ``pending`` — frozen set of in-flight cids at snapshot time.
+      Detects "are the new cids done?" via
+      ``(current.pending - snap.pending) == set()``. This frame
+      identifies cids the snapshot saw vs cids fired during the wait,
+      independent of how many cids were already draining from prior work.
+    """
+    total_starts: int
+    pending: frozenset[str]
+
+
 class _QsWsActivityTracker:
     """X.2.r — track QuickSight's WebSocket data layer for event-driven settle.
 
@@ -100,9 +122,20 @@ class _QsWsActivityTracker:
     - ``pending: set[str]`` — cids currently in-flight (START sent, no
       matching STOP yet)
     - ``total_starts: int`` — monotonic counter of START_VIS frames
-      seen since construction (the baseline a settle compares against)
+      seen since construction
     - ``last_start_at: float`` — wall-clock of the most recent START
       (the "no new START in N ms" guard against the two-burst case)
+
+    AA.A.race.3 — added ``snapshot()`` for snapshot-then-wait. The
+    App2 cache-vs-network bug surfaced the failure shape where a
+    pick *appears* to fire no fetch (Playwright's `expect_response`
+    didn't fire on cache hits); the QS analogue would be QS's own
+    client deciding not to fire ``START_VIS`` for a parameter-write
+    whose result is already on-screen. The pre-AA.A.race.3
+    ``_settle_after_param_change`` keyed off ``total_starts > baseline``
+    which would spin until timeout in that case; with snapshots the
+    settle can distinguish "new cids fired and drained" from "no new
+    cids — cache-equivalent fast-path."
 
     Best-effort: malformed payloads, binary frames, or missing keys
     are swallowed (the tracker degrades to "saw nothing" — better than
@@ -155,6 +188,36 @@ class _QsWsActivityTracker:
         if self._last_start_at == 0.0:
             return float("inf")
         return (time.monotonic() - self._last_start_at) * 1000.0
+
+    def snapshot(self) -> WsSnapshot:
+        """AA.A.race.3 — capture an immutable snapshot of tracker state.
+
+        Call BEFORE the action whose effect you want to settle on.
+        After the action, compare current state to the snapshot to ask
+        "did new cids fire?" and "did all new cids drain?" independent
+        of how many cids were already in-flight at snapshot time.
+        """
+        return WsSnapshot(
+            total_starts=self._total_starts,
+            pending=frozenset(self._pending),
+        )
+
+    def new_pending_since(self, snap: WsSnapshot) -> frozenset[str]:
+        """Cids currently in-flight that weren't in-flight at ``snap``.
+
+        ``current.pending - snap.pending`` — these are the cids the
+        action triggered (and any other cids that started during the
+        wait window). Empty iff all post-snapshot fetches have drained.
+        """
+        return frozenset(self._pending) - snap.pending
+
+    def new_starts_since(self, snap: WsSnapshot) -> int:
+        """Count of START_VIS frames since ``snap``.
+
+        Zero iff no new fetches fired — the cache-equivalent case the
+        race.3 fast-path detects.
+        """
+        return self._total_starts - snap.total_starts
 
 
 class QsEmbedDriver:
@@ -430,52 +493,63 @@ class QsEmbedDriver:
         (sent START minus sent STOP — the in-flight re-query count) and
         a monotonic ``total_starts`` counter.
 
-        Algorithm:
+        AA.A.race.3 — snapshot-then-wait. Capture an immutable snapshot
+        BEFORE the caller's action fires; the settle loop asks "did
+        anything new happen since the snapshot, and is it done?" rather
+        than "is the current absolute state quiet?". Two paths through
+        the loop:
 
-        1. Snapshot ``baseline = total_starts`` *before* the caller's
-           action fires.
-        2. Spin (Playwright ``wait_for_function`` would be tighter but
-           tracker state lives in Python; the Python-side spin polls
-           cheap in-process state, no IPC). Each iteration sleeps a
-           tiny ``120 ms`` and checks:
+        - **New cids fired** (``new_starts_since(snap) > 0``): wait until
+          every cid issued since the snapshot has STOPped
+          (``new_pending_since(snap) == set()``) AND a 300 ms quiet
+          window has passed since the most recent START. The quiet
+          window straddles the two-burst pattern the X.2.r spike caught
+          (pick → immediate START_VIS round, then debounced follow-up
+          ~2 s later).
+        - **No new cids fired** after the 500 ms grace period
+          (``min_wait_ms``): the QS client decided the parameter write
+          didn't need a fresh fetch (own-cache hit, or the param didn't
+          actually change a dataset binding). Return immediately rather
+          than spinning to the full 18 s timeout. This is the QS analogue
+          of the App2 cache-equivalent case race.1 root-caused.
 
-           - **Re-fetch fired**: ``total_starts > baseline``. If we
-             never see this within ``timeout_ms``, the write didn't
-             trigger a re-query — caller's read will surface what's
-             actually on screen, swallow.
-           - **Drained**: ``pending_count == 0``.
-           - **Settled past the burst**: ``ms_since_last_start >= 300``
-             (the X.2.r spike caught a two-burst pattern: pick →
-             immediate START_VIS round, then debounced follow-up ~2 s
-             later. The 300 ms guard waits past both bursts before
-             returning).
-
-        3. When all three are true, return. Capped at ``timeout_ms``
-           (default 18 s — same budget as the X.2.q.3 sleep-and-poll
-           it replaces); swallowed on timeout (best-effort contract —
-           callers re-read).
+        Capped at ``timeout_ms`` (default 18 s); swallowed on timeout
+        (best-effort contract — callers re-read).
 
         Replaces the X.2.q.3 sleep-and-poll heuristic (1.2 s upfront +
-        700 ms-spaced cell-text-stability poll, capped 18 s) which was
-        a content-stabilization workaround for the lack of an event
-        signal. Now we have one.
+        700 ms-spaced cell-text-stability poll, capped 18 s) AND the
+        pre-race.3 absolute-state heuristic (``total_starts > baseline``
+        which spun until timeout if QS never fired a new START_VIS).
         """
-        # NOTE: this MUST be called AFTER the caller's mutating action
-        # fires the START_VIS frames. The baseline is captured here
-        # because even a STOP_VIS-only burst from leftover prior work
-        # could fool a pre-action snapshot.
-        baseline = self._ws_tracker.total_starts
+        # Snapshot must happen BEFORE the caller's mutating action.
+        # Callers invoke this AFTER the action; we capture immediately
+        # on entry. Two-thread interleaving caveat: a STOP_VIS for a
+        # previously-pending cid could land between action fire + this
+        # snapshot, shrinking ``snap.pending``. That's fine — the
+        # ``new_pending_since`` set will just be slightly wider than
+        # strictly necessary; the wait still terminates correctly.
+        snap = self._ws_tracker.snapshot()
         deadline = time.monotonic() + (timeout_ms / 1000.0)
-        # Quiet window (ms) the tracker must show with no new START
-        # before we accept "settled". 300 ms straddles the two-burst
-        # case the X.2.r spike caught.
+        # Quiet window (ms) past the most recent START before we accept
+        # "all new cids settled". 300 ms straddles the two-burst case.
         quiet_ms = 300.0
+        # Cache-equivalent grace period (s). If no new START_VIS fires
+        # within this window, conclude QS served the post-pick state
+        # from its own cache (or the pick was a no-op) and return.
+        min_wait_deadline = time.monotonic() + 0.500
         while time.monotonic() < deadline:
-            if (
-                self._ws_tracker.total_starts > baseline
-                and self._ws_tracker.pending_count == 0
-                and self._ws_tracker.ms_since_last_start >= quiet_ms
-            ):
+            new_starts = self._ws_tracker.new_starts_since(snap)
+            new_pending = self._ws_tracker.new_pending_since(snap)
+            if new_starts > 0:
+                # New cids fired — wait for ALL of them to drain + quiet.
+                if (
+                    not new_pending
+                    and self._ws_tracker.ms_since_last_start >= quiet_ms
+                ):
+                    return
+            elif time.monotonic() > min_wait_deadline:
+                # No new cids since snapshot, past 500 ms grace.
+                # Cache-equivalent: nothing to wait for, return.
                 return
             # Tight in-process loop — no IPC. The tracker state mutates
             # on Playwright's event-loop callback; this short sleep
