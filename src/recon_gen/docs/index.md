@@ -1,13 +1,27 @@
 # Recon Generator
 
-*Programmatic AWS QuickSight analysis generator for financial
-reporting. Currently rendered against
-**{{ vocab.institution.name }}** ({{ l2_instance_name }}).*
+*Independent validation that a financial institution's books balance
+day to day — and when they don't, where to look first. This site is
+the live training-materials surface rendered against
+**{{ vocab.institution.name }}** (`{{ l2_instance_name }}`); the same
+materials render against your own institution once you swap the L2
+YAML.*
 
-Ships **four independent QuickSight apps** — L1 Reconciliation,
-L2 Flow Tracing, Investigation, Executives — all L2-fed off one
-institution YAML. Different audiences open different dashboards;
-this site funnels each audience to the right one.
+Accounting is standard. Your institution is not. Recon Generator
+layers the two — standard double-entry invariants on top of your
+unique shape (accounts, rails, multi-leg transfer templates,
+bundling rules, aging caps) — so every way you actually move money
+is checked against the rules that govern it. Four dashboards split
+the work across roles, all reading from the same shared base ledger.
+
+!!! info "Not an ETL tool"
+    Recon Generator validates data; it doesn't move it. Your existing
+    pipeline lands data in `<prefix>_transactions` and
+    `<prefix>_daily_balances` (see [Data Integration](handbook/etl.md)
+    for the column contract), and Recon Generator reads from there.
+    On top of your real data, the test-data generator plants synthetic
+    scenarios so every L1 invariant is exercisable without delaying
+    go-live.
 
 ## Pick your role
 
