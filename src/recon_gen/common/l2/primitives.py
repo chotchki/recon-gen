@@ -369,10 +369,29 @@ class Chain:
 
     Aggregating rails MUST NOT appear in ``children`` (they don't have
     per-Transfer parents — they sweep on cadence). Validator enforces.
+
+    ``fan_in`` (AB.4) declares an N:1 chain — N parent firings may
+    share one child Transfer (the batched-payout pattern: a monthly
+    merchant payout aggregates K daily settlements into one
+    end-of-month transfer). Default ``False`` keeps every pre-AB.4
+    Chain shape byte-equivalent. When ``True``, the validator requires
+    the child to be a TransferTemplate (rail-as-child fan-in isn't
+    well-defined — a rail's per-Transfer parent is the canonical
+    1:1 shape).
+
+    ``expected_parent_count`` (AB.4) declares how many parent firings
+    are expected per child Transfer when ``fan_in=True``. Set + matview
+    flags exact-mismatch (parent count != expected). Unset + matview
+    falls back to orphan-only detection (parent count < 2). Must be
+    None when ``fan_in=False`` (validator C8). Per AB.4.0 lock,
+    operator picks contract strength per chain — variable-batch-size
+    flows leave it unset; fixed-size flows set it for tighter detection.
     """
 
     parent: Identifier
     children: tuple[Identifier, ...]
+    fan_in: bool = False
+    expected_parent_count: int | None = None
     description: str | None = None
 
 

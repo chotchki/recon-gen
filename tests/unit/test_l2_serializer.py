@@ -89,3 +89,56 @@ def test_serialize_l2_skips_default_optional_fields() -> None:
     # (Just spot-check that we don't emit empty `posted_requirements: []`)
     assert "posted_requirements: []" not in text
     assert "bundles_activity: []" not in text
+    # AB.4 — fan_in / expected_parent_count default values shouldn't
+    # bloat pre-AB.4 chain rows either. spec_example doesn't declare
+    # a fan-in chain yet (AB.4.5.spec hasn't fired).
+    assert "fan_in:" not in text
+    assert "expected_parent_count:" not in text
+
+
+def test_serialize_l2_emits_fan_in_when_non_default() -> None:
+    """AB.4 — when a Chain declares fan_in=True (and optionally
+    expected_parent_count), the serializer emits both fields so the
+    YAML round-trips byte-equivalent. The non-default-only emit rule
+    means pre-AB.4 chains stay clean (above test); fan-in chains
+    surface both fields here."""
+    import dataclasses
+
+    from recon_gen.common.l2.primitives import Chain, Identifier
+    from recon_gen.common.l2.serializer import serialize_l2
+
+    instance = load_instance(_FIXTURES_DIR / "spec_example.yaml")
+    # Synthesize a fan-in chain on the existing ReconciliationLeg →
+    # MerchantSettlementCycle pair (AB.2.6.spec — template-as-child).
+    fanin_chain = Chain(
+        parent=Identifier("ReconciliationLeg"),
+        children=(Identifier("MerchantSettlementCycle"),),
+        fan_in=True,
+        expected_parent_count=3,
+    )
+    instance = dataclasses.replace(instance, chains=(fanin_chain,))
+    text = serialize_l2(instance)
+    assert "fan_in: true" in text
+    assert "expected_parent_count: 3" in text
+
+
+def test_serialize_l2_omits_expected_parent_count_when_unset() -> None:
+    """AB.4 — a fan-in chain that leaves expected_parent_count unset
+    (variable-batch-size flow) serializes with fan_in: true but
+    omits expected_parent_count entirely."""
+    import dataclasses
+
+    from recon_gen.common.l2.primitives import Chain, Identifier
+    from recon_gen.common.l2.serializer import serialize_l2
+
+    instance = load_instance(_FIXTURES_DIR / "spec_example.yaml")
+    fanin_chain = Chain(
+        parent=Identifier("ReconciliationLeg"),
+        children=(Identifier("MerchantSettlementCycle"),),
+        fan_in=True,
+        expected_parent_count=None,
+    )
+    instance = dataclasses.replace(instance, chains=(fanin_chain,))
+    text = serialize_l2(instance)
+    assert "fan_in: true" in text
+    assert "expected_parent_count:" not in text

@@ -658,6 +658,127 @@ _MINIMAL_YAML = dedent("""\
     """)
 
 
+# -- AB.4: Chain.fan_in + expected_parent_count loader contract -------------
+
+
+def test_loader_chain_fan_in_defaults_to_false_when_absent(
+    tmp_path: Path,
+) -> None:
+    """Pre-AB.4 YAML (no fan_in: key) loads with fan_in=False +
+    expected_parent_count=None — backwards-compatible default."""
+    p = tmp_path / "src.yaml"
+    p.write_text(dedent("""\
+        accounts:
+          - id: a
+            role: R
+            scope: internal
+        rails:
+          - name: ParentRail
+            origin: InternalInitiated
+            source_role: R
+            destination_role: R
+            expected_net: "0"
+        transfer_templates:
+          - name: ChildTpl
+            expected_net: "0"
+            transfer_key: []
+            completion: business_day_end+1d
+            leg_rails: [ParentRail]
+        chains:
+          - parent: ParentRail
+            children: [ChildTpl]
+    """))
+    inst = load_instance(p, validate=False)
+    assert inst.chains[0].fan_in is False
+    assert inst.chains[0].expected_parent_count is None
+
+
+def test_loader_chain_fan_in_parses_true_with_expected_parent_count(
+    tmp_path: Path,
+) -> None:
+    """AB.4 YAML loads fan_in + expected_parent_count cleanly."""
+    p = tmp_path / "src.yaml"
+    p.write_text(dedent("""\
+        accounts:
+          - id: a
+            role: R
+            scope: internal
+        rails:
+          - name: ParentRail
+            origin: InternalInitiated
+            source_role: R
+            destination_role: R
+            expected_net: "0"
+        transfer_templates:
+          - name: ChildTpl
+            expected_net: "0"
+            transfer_key: []
+            completion: business_day_end+1d
+            leg_rails: [ParentRail]
+        chains:
+          - parent: ParentRail
+            children: [ChildTpl]
+            fan_in: true
+            expected_parent_count: 3
+    """))
+    inst = load_instance(p, validate=False)
+    assert inst.chains[0].fan_in is True
+    assert inst.chains[0].expected_parent_count == 3
+
+
+def test_loader_chain_fan_in_rejects_non_bool(tmp_path: Path) -> None:
+    """fan_in: not-a-bool surfaces a typed error at load time, not a
+    silent coercion."""
+    from recon_gen.common.l2.loader import L2LoaderError
+
+    p = tmp_path / "src.yaml"
+    p.write_text(dedent("""\
+        accounts:
+          - id: a
+            role: R
+            scope: internal
+        rails:
+          - name: ParentRail
+            origin: InternalInitiated
+            source_role: R
+            destination_role: R
+            expected_net: "0"
+        chains:
+          - parent: ParentRail
+            children: [ParentRail]
+            fan_in: "yes"
+    """))
+    with pytest.raises(L2LoaderError, match="fan_in.*expected bool"):
+        load_instance(p, validate=False)
+
+
+def test_loader_chain_expected_parent_count_rejects_non_int(
+    tmp_path: Path,
+) -> None:
+    """expected_parent_count: not-an-int surfaces typed error."""
+    from recon_gen.common.l2.loader import L2LoaderError
+
+    p = tmp_path / "src.yaml"
+    p.write_text(dedent("""\
+        accounts:
+          - id: a
+            role: R
+            scope: internal
+        rails:
+          - name: ParentRail
+            origin: InternalInitiated
+            source_role: R
+            destination_role: R
+            expected_net: "0"
+        chains:
+          - parent: ParentRail
+            children: [ParentRail]
+            expected_parent_count: "three"
+    """))
+    with pytest.raises(L2LoaderError, match="expected_parent_count.*expected int"):
+        load_instance(p, validate=False)
+
+
 def test_capture_no_op_when_run_dir_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

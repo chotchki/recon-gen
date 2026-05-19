@@ -114,6 +114,16 @@ Rules enforced (numbered for cross-reference with the test file):
       introduces. E.g. one row says "Foo is required" plus another
       says "Foo is one of [Foo, Bar]" — the two rows contradict so
       reject at load.)
+  C8a. ``fan_in=True`` requires every chain child to resolve to a
+      TransferTemplate. Rail-as-child fan-in isn't well-defined per
+      AB.4 gap doc §2 footnote — a rail's per-Transfer parent is the
+      canonical 1:1 shape.
+  C8b. ``expected_parent_count`` MUST be None when ``fan_in=False``
+      (the field only carries meaning under fan-in; setting it on a
+      non-fan-in chain is operator confusion).
+  C8c. ``expected_parent_count`` MUST be ≥2 when set under
+      ``fan_in=True`` (a 1-parent fan-in chain is degenerate — it's
+      just a 1:1 chain).
 
   Removed under Z.A grammar collapse (PLAN.md §Z.A — locked 2026-05-13):
   - C2 (xor_group members share parent) — every Chain row IS one
@@ -261,6 +271,7 @@ def validate(instance: L2Instance) -> None:
     _check_variable_single_leg_in_some_template(instance, rails_by_name)
     _check_chain_parent_has_non_empty_children(instance)
     _check_chain_no_duplicate_child_per_parent(instance)
+    _check_fan_in_shape(instance, template_names)
 
     _check_two_leg_expected_net_consistency(instance)
     _check_single_leg_reconciliation(instance)
@@ -888,6 +899,65 @@ def _check_chain_no_duplicate_child_per_parent(inst: L2Instance) -> None:
                 f"= required, multi-item row = XOR among the listed "
                 f"children. (PLAN.md §Z.A C6.)"
             )
+
+
+def _check_fan_in_shape(
+    inst: L2Instance,
+    template_names: set[Identifier],
+) -> None:
+    """C8 (AB.4): structural rules on ``Chain.fan_in`` + ``Chain.expected_parent_count``.
+
+    - **C8a**: ``fan_in=True`` requires every child to resolve to a
+      TransferTemplate. Rail-as-child fan-in isn't well-defined —
+      a rail's per-Transfer parent is the canonical 1:1 shape; the
+      AB.4 gap doc §2 footnote closes this door explicitly.
+    - **C8b**: ``expected_parent_count`` MUST be None when
+      ``fan_in=False`` (the field only carries meaning under fan-in;
+      setting it on a non-fan-in chain is operator confusion that
+      would mislead the matview wiring).
+    - **C8c**: when ``expected_parent_count`` is set under
+      ``fan_in=True``, it MUST be ≥2 (a 1-parent fan-in chain is
+      degenerate — it's just a 1:1 chain; the AB.4 contract is "≥2
+      parent firings share one child Transfer").
+
+    Runtime "actual parent count matches expected" check lives in
+    the AB.4.7 ``_fan_in_disagreement`` matview, not here.
+    """
+    for c in inst.chains:
+        if c.fan_in:
+            non_template_children = [
+                child for child in c.children
+                if child not in template_names
+            ]
+            if non_template_children:
+                raise L2ValidationError(
+                    f"Chain parent={c.parent!r}: fan_in=True requires "
+                    f"every child to resolve to a TransferTemplate; "
+                    f"got non-template children "
+                    f"{sorted(str(x) for x in non_template_children)!r}. "
+                    f"SPEC C8a: rail-as-child fan-in is undefined — "
+                    f"a rail's per-Transfer parent is the canonical "
+                    f"1:1 shape (AB.4 gap doc §2 footnote)."
+                )
+            if (
+                c.expected_parent_count is not None
+                and c.expected_parent_count < 2
+            ):
+                raise L2ValidationError(
+                    f"Chain parent={c.parent!r}: fan_in=True with "
+                    f"expected_parent_count={c.expected_parent_count} "
+                    f"is degenerate — SPEC C8c requires ≥2 "
+                    f"(a 1-parent fan-in is just a 1:1 chain; if you "
+                    f"only have 1 expected parent, drop fan_in)."
+                )
+        else:
+            if c.expected_parent_count is not None:
+                raise L2ValidationError(
+                    f"Chain parent={c.parent!r}: expected_parent_count "
+                    f"is set ({c.expected_parent_count}) but fan_in is "
+                    f"False. SPEC C8b: the field only carries meaning "
+                    f"under fan_in=True; remove it or set fan_in=True."
+                )
 
 
 def _check_chain_parent_has_non_empty_children(inst: L2Instance) -> None:

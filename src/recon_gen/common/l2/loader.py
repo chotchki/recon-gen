@@ -1045,11 +1045,32 @@ def _load_chain(raw: object, *, path: str) -> Chain:
         _load_identifier(item, path=f"{path}.children[{i}]")
         for i, item in enumerate(children_raw)
     )
+    # AB.4: fan_in + expected_parent_count are both optional. Default
+    # fan_in=False keeps every pre-AB.4 YAML byte-equivalent.
+    fan_in_raw = raw_d.get("fan_in", False)
+    if not isinstance(fan_in_raw, bool):
+        raise L2LoaderError(
+            f"{path}.fan_in: expected bool, got "
+            f"{type(fan_in_raw).__name__}",
+        )
+    expected_raw = raw_d.get("expected_parent_count")
+    expected_parent_count: int | None = None
+    if expected_raw is not None:
+        if isinstance(expected_raw, bool) or not isinstance(
+            expected_raw, int,
+        ):
+            raise L2LoaderError(
+                f"{path}.expected_parent_count: expected int, got "
+                f"{type(expected_raw).__name__}",
+            )
+        expected_parent_count = expected_raw
     return Chain(
         parent=_load_identifier(
             _require(raw_d, "parent", path=path), path=f"{path}.parent",
         ),
         children=children,
+        fan_in=fan_in_raw,
+        expected_parent_count=expected_parent_count,
         description=_load_description(
             raw_d.get("description"), path=f"{path}.description",
         ),

@@ -227,6 +227,13 @@ def _dump_chain(c: Chain) -> dict[str, Any]:  # typing-smell: ignore[explicit-an
         "parent": str(c.parent),
         "children": [str(child) for child in c.children],
     }
+    # AB.4: emit fan_in + expected_parent_count only when non-default
+    # so every pre-AB.4 chain round-trips byte-equivalent (mirrors
+    # AB.1's direction non-default omit pattern).
+    if c.fan_in:
+        out["fan_in"] = True
+    if c.expected_parent_count is not None:
+        out["expected_parent_count"] = c.expected_parent_count
     if c.description is not None:
         out["description"] = c.description
     return out

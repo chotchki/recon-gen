@@ -1253,3 +1253,109 @@ def test_xor_groups_empty_default_no_change_to_validator() -> None:
     for t in inst.transfer_templates:
         assert t.leg_rail_xor_groups == ()
     validate(inst)
+
+
+# -- C8a-c (AB.4): Chain.fan_in + expected_parent_count rules --------------
+
+
+def test_c8a_fan_in_with_rail_child_rejected() -> None:
+    """C8a (AB.4): fan_in=True requires every child to resolve to a
+    TransferTemplate. Pointing fan_in at a Rail-as-child is rejected."""
+    inst = _baseline_instance()
+    bad = _replace(inst, chains=(
+        Chain(
+            parent=Identifier("MerchantSettlementCycle"),
+            children=(Identifier("ExtInbound"),),  # ExtInbound is a Rail
+            fan_in=True,
+            expected_parent_count=3,
+        ),
+    ))
+    with pytest.raises(
+        L2ValidationError,
+        match=r"fan_in=True.*non-template children.*ExtInbound",
+    ):
+        validate(bad)
+
+
+def test_c8a_fan_in_with_template_child_accepted() -> None:
+    """C8a positive: fan_in=True + TransferTemplate child is legal."""
+    inst = _baseline_instance()
+    ok = _replace(inst, chains=(
+        Chain(
+            parent=Identifier("ExtInbound"),
+            children=(Identifier("MerchantSettlementCycle"),),
+            fan_in=True,
+            expected_parent_count=3,
+        ),
+    ))
+    validate(ok)
+
+
+def test_c8b_expected_parent_count_without_fan_in_rejected() -> None:
+    """C8b: expected_parent_count is meaningful only under fan_in=True.
+    Setting it on a non-fan-in chain is rejected with a helpful
+    "remove it or set fan_in=True" message."""
+    inst = _baseline_instance()
+    bad = _replace(inst, chains=(
+        Chain(
+            parent=Identifier("ExtInbound"),
+            children=(Identifier("MerchantSettlementCycle"),),
+            fan_in=False,
+            expected_parent_count=3,
+        ),
+    ))
+    with pytest.raises(
+        L2ValidationError,
+        match=r"expected_parent_count.*set.*but fan_in is False",
+    ):
+        validate(bad)
+
+
+def test_c8c_expected_parent_count_one_under_fan_in_rejected() -> None:
+    """C8c: ``expected_parent_count=1`` under fan_in=True is degenerate
+    — it's just a 1:1 chain. Rejected with a helpful "drop fan_in"
+    message."""
+    inst = _baseline_instance()
+    bad = _replace(inst, chains=(
+        Chain(
+            parent=Identifier("ExtInbound"),
+            children=(Identifier("MerchantSettlementCycle"),),
+            fan_in=True,
+            expected_parent_count=1,
+        ),
+    ))
+    with pytest.raises(
+        L2ValidationError,
+        match=r"fan_in=True.*expected_parent_count=1.*degenerate",
+    ):
+        validate(bad)
+
+
+def test_c8_fan_in_with_expected_parent_count_unset_accepted() -> None:
+    """C8 positive: fan_in=True with expected_parent_count unset is
+    legal — the matview falls back to orphan-only detection for
+    variable-batch-size flows."""
+    inst = _baseline_instance()
+    ok = _replace(inst, chains=(
+        Chain(
+            parent=Identifier("ExtInbound"),
+            children=(Identifier("MerchantSettlementCycle"),),
+            fan_in=True,
+            expected_parent_count=None,
+        ),
+    ))
+    validate(ok)
+
+
+def test_chain_fan_in_default_no_change_to_validator() -> None:
+    """Defense-in-depth: a Chain with default ``fan_in=False`` +
+    ``expected_parent_count=None`` passes validation cleanly. All
+    pre-AB.4 chains round-trip."""
+    inst = _baseline_instance()
+    ok = _replace(inst, chains=(
+        Chain(
+            parent=Identifier("ExtInbound"),
+            children=(Identifier("MerchantSettlementCycle"),),
+        ),
+    ))
+    validate(ok)
