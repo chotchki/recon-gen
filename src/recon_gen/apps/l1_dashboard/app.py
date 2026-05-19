@@ -1053,10 +1053,13 @@ def _populate_limit_breach_sheet(
         width=_FULL,
         title="Limit Breach Detail",
         subtitle=(
-            "Each (account, day, rail_name) cell where outbound "
-            "debit > cap. `outbound_total` and `cap` shown side-by-side "
-            "so the magnitude of the breach is readable in-line. "
-            "Right-click any row → View Daily Statement."
+            "Each (account, day, rail_name, direction) cell where "
+            "flow > cap. `direction` is Outbound (classic per-rail send "
+            "cap) or Inbound (AML / structuring threshold on inbound "
+            "volume — AB.1). `outbound_total` (totals on the breaching "
+            "side) and `cap` shown side-by-side so the magnitude of "
+            "the breach is readable in-line. Right-click any row → "
+            "View Daily Statement."
         ),
         columns=[
             account_col,
@@ -1065,6 +1068,9 @@ def _populate_limit_breach_sheet(
             ds_lb["account_parent_role"].dim(),
             day_col,
             ds_lb["rail_name"].dim(),
+            # AB.1 — per-direction cap. Outbound = Debit flow exceeds
+            # the cap; Inbound = Credit flow (typical AML threshold).
+            ds_lb["direction"].dim(),
             ds_lb["outbound_total"].numerical(currency=True),
             ds_lb["cap"].numerical(currency=True),
         ],
