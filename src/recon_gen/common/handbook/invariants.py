@@ -51,6 +51,12 @@ INVARIANT_KIND_TO_SHEET: dict[str, str] = {
     # on transfer_id not (account, day) and the analyst's drill goes
     # straight to the Transactions sheet via the conflicting parent ids).
     "chain_parent_disagreement": "Today's Exceptions",
+    # AB.3.3 — xor_group_violation also surfaces only on Today's
+    # Exceptions (same pattern: keyed on transfer_id + template_name,
+    # analyst's drill goes to the Transactions sheet to see which
+    # variant did or didn't fire). Mirrors chain_parent_disagreement's
+    # cross-tool wiring; no dedicated dashboard sheet.
+    "xor_group_violation": "Today's Exceptions",
     "supersession_audit": "Supersession Audit",
 }
 

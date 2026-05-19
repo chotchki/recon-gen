@@ -269,6 +269,57 @@ different parent_transfer_ids ("tr-cpd-parent-a-0001" vs
 "tr-cpd-parent-b-0001").
 {% endif %}
 
+### 9. `{{ l2_instance_name }}_xor_group_violation` — Multi-mode template variant XOR violation (AB.3.3)
+
+> For every TransferTemplate that declares `leg_rail_xor_groups`,
+> for every group in that template, exactly ONE member of the
+> group SHOULD fire per Transfer (the variants compete; the
+> runtime picks one per cycle).
+
+A Transfer where a group has 0 firings (missed — the template
+fired but no variant did, the cycle didn't close) or ≥2 firings
+(overlap — the runtime double-posted competing variants) surfaces
+here. The pattern usually means an ETL bug: a misrouted variant
+trigger, a re-post that didn't suppress the original, or a race
+where two variants both wrote the closure.
+
+The matview's CTE inlines `(template_name, xor_group_index,
+member_rail_name)` rows from the L2 yaml's `leg_rail_xor_groups`
+declarations, LEFT JOINs them against
+`<prefix>_current_transactions` per (Transfer-of-template,
+group-of-template, member-rail), and gates on
+`COUNT(tx.transfer_id) <> 1`. When no template declares
+`leg_rail_xor_groups`, the matview short-circuits with
+`WHERE 1=0` (parses cleanly, zero rows).
+
+**Columns:** `transfer_id`, `template_name`, `xor_group_index`
+(0-based), `firing_count` (0 = missed; ≥2 = overlap),
+`fired_rails` (dialect-specific concat of the rail_names that
+DID fire; empty string when `firing_count=0`), `business_day`
+(MIN of the firing legs' postings, or NULL for missed firings).
+
+**What to do:** Identify which template firing this is, then
+look at the upstream variant trigger. For missed firings (count=0):
+the template fired but no variant trigger ran — usually a routing
+bug where the runtime resolved to no variant. For overlaps (count≥2):
+two variant triggers both fired — usually a re-post that didn't
+suppress the original, or a race condition between two variant
+selection paths. Drill from the row to the Transactions sheet to
+see every leg of the Transfer, including the non-variant legs
+that DID fire (so you know which template firing the violation
+belongs to).
+
+{% if vocab.fixture_name == "sasquatch_pr" %}
+**the matview should surface:** a planted `XorVariantMissedFiringPlant`
+on `MerchantSettlementCycle` (group 0, settlement-timing) at
+days_ago=2 — one witness leg fires but no member of the
+`[SettlementAutoSettle, SettlementStandardSettle, SettlementSlowSettle]`
+group did. And a planted `XorVariantOverlapPlant` on the same
+template at days_ago=1 — both `SettlementAutoSettle` and
+`SettlementStandardSettle` fired for the same Transfer (1 minute
+apart for visual separability).
+{% endif %}
+
 ## Diagnostic surface — Supersession Audit
 
 `{{ l2_instance_name }}_supersession_*` is **not** a SHOULD-constraint — it's a

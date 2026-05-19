@@ -366,9 +366,18 @@ A rail MAY be reconciled by both (a leg of a TransferTemplate AND bundled by an 
 #### `LegDirection = Variable`
 Both the leg's amount AND direction are determined at posting time by surrounding context — specifically, by the requirement that a containing TransferTemplate's `ExpectedNet` hold given the other legs already posted. A "settlement" leg that posts whatever amount/direction closes the bundle is the canonical case.
 
-A TransferTemplate MUST contain at most one Variable-direction leg per shared Transfer. Two or more Variable legs leave the closure under-determined; the library detects this at load-time validation, not at posting.
+A TransferTemplate MUST contain at most one **non-grouped** Variable-direction leg per shared Transfer. Two or more non-grouped Variable legs leave the closure under-determined; the library detects this at load-time validation (C1), not at posting. *Members of a `leg_rail_xor_groups` group are exempt* — they're mutually-exclusive variants where the runtime picks one per Transfer, so the closure is still uniquely determined.
 
 A Variable-direction leg MUST be the LAST leg posted on its Transfer — all sibling legs MUST be `Status = Posted` (not Pending) before the Variable leg posts. Posting a Variable leg while sibling legs are still Pending is a posting-time error (the closure amount can't be computed against incomplete data).
+
+**AB.3: Multi-variant closure via XOR groups.** A TransferTemplate MAY declare `leg_rail_xor_groups` — a list of mutually-exclusive subsets of `leg_rails` where exactly one member per group fires per Transfer. The classic case is a settlement template with multiple cadence variants (auto / standard / slow) sharing one `expected_net` and one `transfer_key`. The structural validator enforces:
+
+- **C1a**: every group member also appears in the template's `leg_rails`.
+- **C1b**: every group member resolves to a Variable-direction SingleLegRail.
+- **C1c**: no rail appears in two groups within the same template.
+- **C1d**: every group has ≥2 members.
+
+The runtime "exactly one fires per Transfer" check lives in the L1 `_xor_group_violation` matview (not the load-time validator): a Transfer where a group has 0 firings (missed closure) or ≥2 firings (overlap) surfaces with `firing_count = 0` or `firing_count >= 2`.
 
 #### Union roles
 `(RoleA | RoleB)` — a Role field MAY express that the rail can target accounts of more than one role. Each firing still resolves to one concrete role per leg; the union is about which roles are admissible, not about firing multiple legs at once.

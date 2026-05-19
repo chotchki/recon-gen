@@ -64,6 +64,11 @@ _L1_KIND_TO_SHEET_ID: Final[dict[str, str]] = {
     # AB.2.3 — chain_parent_disagreement surfaces only on Today's
     # Exceptions (no dedicated sheet); deep-link there.
     "chain_parent_disagreement": "l1-sheet-todays-exceptions",
+    # AB.3.3 — xor_group_violation also surfaces only on Today's
+    # Exceptions (same pattern: UNION-only L1 invariant, analyst
+    # drill goes to the Transactions sheet via the conflicting
+    # Transfer's id).
+    "xor_group_violation": "l1-sheet-todays-exceptions",
     "supersession_audit": "l1-sheet-supersession-audit",
 }
 
@@ -83,6 +88,7 @@ _DISPLAY_ORDER: Final[tuple[str, ...]] = (
     "stuck_pending",
     "stuck_unbundled",
     "chain_parent_disagreement",  # AB.2.3
+    "xor_group_violation",  # AB.3.3
     "supersession_audit",
 )
 

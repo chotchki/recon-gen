@@ -189,13 +189,14 @@ def test_parse_l1_invariants_columns_block_wraps_across_lines() -> None:
 def test_bundled_invariants_yields_expected_kinds() -> None:
     # The doc evolves; the contract is "no kind drops off the bottom"
     # (losing one would orphan a panel). AB.2.3 added
-    # ``chain_parent_disagreement``.
+    # ``chain_parent_disagreement``; AB.3.3 added ``xor_group_violation``.
     sections = load_bundled_invariants()
     assert set(sections.keys()) == {
         "drift", "ledger_drift", "overdraft",
         "expected_eod_balance_breach", "limit_breach",
         "stuck_pending", "stuck_unbundled",
         "chain_parent_disagreement",  # AB.2.3
+        "xor_group_violation",  # AB.3.3
         "supersession_audit",
     }
 
