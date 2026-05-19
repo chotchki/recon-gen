@@ -1756,16 +1756,49 @@ def _baseline_target_leg_count(
 
 
 def _baseline_amount_sample(
-    rng: random.Random, kind: _RailKind, cap: Decimal | None = None,
+    rng: random.Random,
+    kind: _RailKind,
+    cap: Decimal | None = None,
+    rail: Rail | None = None,
 ) -> Decimal:
-    """Sample one amount per R.1.f §2's per-kind lognormal table.
+    """Sample one amount per R.1.f §2's per-kind lognormal table — OR
+    per AB.5 (E7) per-rail ``amount_typical_range`` when the rail
+    declares one.
+
+    AB.5 (E7): when ``rail`` is passed AND ``rail.amount_typical_range``
+    is set, samples log-uniformly within the declared range — financial
+    flows cluster at the low end of typical bands so log-uniform
+    reproduces that shape. Per AB.5.0 lock: log-uniform default. When
+    the rail leaves ``amount_typical_range`` unset (or ``rail`` is
+    None), falls through to the per-kind lognormal heuristic.
 
     ``cap``: optional ``LimitSchedule.cap`` ceiling. When set, a sample
     that exceeds the cap is **clamped + resampled** rather than truncated
     so the underlying distribution shape stays clean (truncation would
     pile mass at the cap). Resample retries up to 5 times; falls back to
-    ``cap * 0.95`` so the loop always terminates.
+    ``cap * 0.95`` so the loop always terminates. The cap interaction
+    with `amount_typical_range`: log-uniform samples that exceed the
+    cap also resample; if every retry hits the cap (e.g., cap < range
+    minimum), falls back to ``min(cap * 0.95, range.max)`` so the
+    plant amount stays inside the declared range when possible.
     """
+    # AB.5 (E7) — per-rail typical-range path.
+    if rail is not None and rail.amount_typical_range is not None:
+        lo, hi = rail.amount_typical_range
+        import math
+        log_lo = math.log(float(lo))
+        log_hi = math.log(float(hi))
+        for _ in range(5):
+            raw = math.exp(rng.uniform(log_lo, log_hi))
+            amount = Decimal(f"{raw:.2f}")
+            if cap is None or amount <= cap:
+                return amount
+        # Cap blew through every retry; pin to min(cap * 0.95, range.max).
+        if cap is not None:
+            ceiling = min(float(cap) * 0.95, float(hi))
+            return Decimal(f"{ceiling:.2f}")
+        return Decimal(f"{float(hi):.2f}")
+
     params = _RAIL_KIND_PARAMS[kind]
     for _ in range(5):
         raw = rng.lognormvariate(params.amount_mu, params.amount_sigma)
@@ -2076,9 +2109,13 @@ def _emit_baseline_for_rail(
                 remaining_cap = cap - cap_accumulated
                 if remaining_cap < Decimal("50"):
                     continue  # daily cap exhausted; emitting <$50 is silly
-                amount = _baseline_amount_sample(rng, kind, cap=remaining_cap)
+                amount = _baseline_amount_sample(
+                    rng, kind, cap=remaining_cap, rail=rail,
+                )
             else:
-                amount = _baseline_amount_sample(rng, kind, cap=cap)
+                amount = _baseline_amount_sample(
+                    rng, kind, cap=cap, rail=rail,
+                )
 
             metadata = _baseline_metadata(rail, n, firing_seq)
             # R.2.c bundle stamp: if this child rail is bundled by some
@@ -2493,7 +2530,7 @@ def _emit_baseline_for_aggregating_rail(
         cap = cap_by_parent_role.get(
             str(src.account_parent_role) if src.account_parent_role else ""
         )
-        amount = _baseline_amount_sample(rng, kind, cap=cap)
+        amount = _baseline_amount_sample(rng, kind, cap=cap, rail=rail)
         metadata = _baseline_metadata(rail, n, 0)
         # R.2.d firing log: aggregating-rail parents are also chain
         # parents in some L2 instances.
@@ -3040,12 +3077,14 @@ def _emit_chain_child_leg(
         remaining_cap = cap - cap_accumulated
         if remaining_cap < Decimal("50"):
             return []  # daily cap exhausted; skip this child firing
-        amount = _baseline_amount_sample(rng, kind, cap=remaining_cap)
+        amount = _baseline_amount_sample(
+            rng, kind, cap=remaining_cap, rail=child_rail,
+        )
     else:
         # Sample from the child rail's distribution. Slightly conservative
         # vs the parent_amount so the chain looks like a downstream
         # transfer of part of the parent.
-        amount = _baseline_amount_sample(rng, kind, cap=cap)
+        amount = _baseline_amount_sample(rng, kind, cap=cap, rail=child_rail)
     _ = parent_amount  # reserved — could constrain to <= parent in the future
 
     metadata = _baseline_metadata(child_rail, n, 0)

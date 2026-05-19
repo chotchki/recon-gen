@@ -168,6 +168,11 @@ def _dump_two_leg_rail(r: TwoLegRail) -> dict[str, Any]:  # typing-smell: ignore
         out["metadata_value_examples"] = {
             str(k): list(vs) for k, vs in r.metadata_value_examples
         }
+    # AB.5 (E7) — emit only when non-default per "skip default optional
+    # fields" convention; pre-AB.5 yamls round-trip byte-equivalent.
+    if r.amount_typical_range is not None:
+        lo, hi = r.amount_typical_range
+        out["amount_typical_range"] = [_dump_money(lo), _dump_money(hi)]
     return out
 
 
@@ -199,6 +204,10 @@ def _dump_single_leg_rail(r: SingleLegRail) -> dict[str, Any]:  # typing-smell: 
         out["metadata_value_examples"] = {
             str(k): list(vs) for k, vs in r.metadata_value_examples
         }
+    # AB.5 (E7) — emit only when non-default (same shape as TwoLegRail).
+    if r.amount_typical_range is not None:
+        lo, hi = r.amount_typical_range
+        out["amount_typical_range"] = [_dump_money(lo), _dump_money(hi)]
     return out
 
 

@@ -277,6 +277,7 @@ def validate(instance: L2Instance) -> None:
     _check_single_leg_reconciliation(instance)
     _check_chain_aggregating_not_child(instance)
     _check_aggregating_rail_required_fields(instance)
+    _check_amount_typical_range_shape(instance)
     _check_non_aggregating_rail_no_cadence_or_bundles(instance)
     _check_role_business_day_offsets_resolve(instance, all_roles)
 
@@ -1078,6 +1079,50 @@ def _check_aggregating_rail_required_fields(inst: L2Instance) -> None:
             raise L2ValidationError(
                 f"Rail {r.name!r}: aggregating=true requires "
                 f"bundles_activity to be a non-empty list"
+            )
+
+
+def _check_amount_typical_range_shape(inst: L2Instance) -> None:
+    """V1a-c (AB.5): structural rules on Rail.amount_typical_range.
+
+    - **V1a**: when set, ``min < max`` (a degenerate single-point range
+      would mean every firing samples the same amount — pointless soft
+      bound; integrator probably meant either a single value [not the
+      feature] or an actual range).
+    - **V1b**: both ``min`` and ``max`` MUST be > 0. The bound is on
+      ``abs(amount)``; signed direction is determined elsewhere
+      (leg_direction for fixed rails; closure for Variable rails).
+      Negative or zero magnitudes are operator confusion — reject
+      loud rather than silently coerce.
+    - **V1c**: ``amount_typical_range`` is forbidden on aggregating
+      rails (per AB.5.0 lock — aggregator amounts derive from bundled
+      children, so the per-firing bound's meaning is fuzzy; deferred
+      to a future iteration if integrators want a sanity-check field
+      on aggregators too).
+    """
+    for r in inst.rails:
+        if r.amount_typical_range is None:
+            continue
+        lo, hi = r.amount_typical_range
+        if lo >= hi:
+            raise L2ValidationError(
+                f"Rail {r.name!r}: amount_typical_range min ({lo}) "
+                f"must be strictly less than max ({hi}); SPEC V1a "
+                f"rejects degenerate single-point ranges."
+            )
+        if lo <= 0 or hi <= 0:
+            raise L2ValidationError(
+                f"Rail {r.name!r}: amount_typical_range values must "
+                f"both be > 0 (got min={lo}, max={hi}); SPEC V1b — "
+                f"the bound is on abs(amount), so signed/zero values "
+                f"have no meaning here."
+            )
+        if r.aggregating:
+            raise L2ValidationError(
+                f"Rail {r.name!r}: amount_typical_range is forbidden "
+                f"on aggregating rails (aggregator amounts derive from "
+                f"bundled children; per-firing bound's meaning is "
+                f"fuzzy); SPEC V1c per AB.5.0 lock."
             )
 
 

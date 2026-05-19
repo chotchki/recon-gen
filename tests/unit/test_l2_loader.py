@@ -779,6 +779,101 @@ def test_loader_chain_expected_parent_count_rejects_non_int(
         load_instance(p, validate=False)
 
 
+# -- AB.5: Rail.amount_typical_range loader contract ------------------------
+
+
+def test_loader_amount_typical_range_defaults_to_none_when_absent(
+    tmp_path: Path,
+) -> None:
+    """Pre-AB.5 YAML loads with amount_typical_range=None."""
+    p = tmp_path / "src.yaml"
+    p.write_text(dedent("""\
+        accounts:
+          - id: a
+            role: R
+            scope: internal
+        rails:
+          - name: SubCharge
+            origin: InternalInitiated
+            leg_role: R
+            leg_direction: Debit
+    """))
+    inst = load_instance(p, validate=False)
+    assert inst.rails[0].amount_typical_range is None
+
+
+def test_loader_amount_typical_range_parses_two_element_list(
+    tmp_path: Path,
+) -> None:
+    """AB.5 YAML loads [min, max] cleanly into a tuple of Money."""
+    from decimal import Decimal
+
+    p = tmp_path / "src.yaml"
+    p.write_text(dedent("""\
+        accounts:
+          - id: a
+            role: R
+            scope: internal
+        rails:
+          - name: SubCharge
+            origin: InternalInitiated
+            leg_role: R
+            leg_direction: Debit
+            amount_typical_range: ["5.00", "500.00"]
+    """))
+    inst = load_instance(p, validate=False)
+    rng = inst.rails[0].amount_typical_range
+    assert rng is not None
+    assert rng[0] == Decimal("5.00")
+    assert rng[1] == Decimal("500.00")
+
+
+def test_loader_amount_typical_range_rejects_non_list(tmp_path: Path) -> None:
+    """A scalar (not a list) surfaces typed error."""
+    from recon_gen.common.l2.loader import L2LoaderError
+
+    p = tmp_path / "src.yaml"
+    p.write_text(dedent("""\
+        accounts:
+          - id: a
+            role: R
+            scope: internal
+        rails:
+          - name: SubCharge
+            origin: InternalInitiated
+            leg_role: R
+            leg_direction: Debit
+            amount_typical_range: "5"
+    """))
+    with pytest.raises(
+        L2LoaderError, match=r"amount_typical_range.*expected a 2-element list",
+    ):
+        load_instance(p, validate=False)
+
+
+def test_loader_amount_typical_range_rejects_wrong_length(tmp_path: Path) -> None:
+    """3-element list rejected."""
+    from recon_gen.common.l2.loader import L2LoaderError
+
+    p = tmp_path / "src.yaml"
+    p.write_text(dedent("""\
+        accounts:
+          - id: a
+            role: R
+            scope: internal
+        rails:
+          - name: SubCharge
+            origin: InternalInitiated
+            leg_role: R
+            leg_direction: Debit
+            amount_typical_range: ["5", "100", "500"]
+    """))
+    with pytest.raises(
+        L2LoaderError, match=r"expected exactly 2 elements",
+    ):
+        load_instance(p, validate=False)
+
+
 def test_capture_no_op_when_run_dir_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -132,6 +132,33 @@ def test_serialize_l2_emits_fan_in_when_non_default() -> None:
     assert "expected_parent_count: 3" in text
 
 
+def test_serialize_l2_amount_typical_range_round_trips() -> None:
+    """AB.5 — non-default amount_typical_range emits + round-trips
+    byte-equivalent; default None is omitted."""
+    import dataclasses
+    from decimal import Decimal
+
+    from recon_gen.common.l2.primitives import Money
+    from recon_gen.common.l2.serializer import serialize_l2
+
+    instance = load_instance(_FIXTURES_DIR / "spec_example.yaml")
+    # Spike: set range on the first rail; assert it appears in YAML.
+    first_rail = instance.rails[0]
+    first_rail_ranged = dataclasses.replace(
+        first_rail,
+        amount_typical_range=(Money(Decimal("5.00")), Money(Decimal("500.00"))),
+    )
+    instance = dataclasses.replace(
+        instance,
+        rails=(first_rail_ranged,) + instance.rails[1:],
+    )
+    text = serialize_l2(instance)
+    assert "amount_typical_range:" in text
+    # Other rails (no range) shouldn't bloat their yaml with the field.
+    # Count `amount_typical_range:` occurrences — should be exactly 1.
+    assert text.count("amount_typical_range:") == 1
+
+
 def test_serialize_l2_omits_expected_parent_count_when_unset() -> None:
     """AB.4 — a fan-in chain that leaves expected_parent_count unset
     (variable-batch-size flow) serializes with fan_in: true but

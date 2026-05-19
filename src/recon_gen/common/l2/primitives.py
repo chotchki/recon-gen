@@ -265,6 +265,17 @@ class TwoLegRail:
     metadata_value_examples: tuple[tuple[Identifier, tuple[str, ...]], ...] = (
         field(default_factory=tuple)
     )
+    # AB.5 (E7) — optional per-firing magnitude soft bound. When set,
+    # ``(min, max)`` declares the typical ``abs(amount)`` band per
+    # firing; the auto-scenario generator samples log-uniformly from
+    # this range, producing realistic-looking demo data (financial
+    # flows cluster at the low end of typical bands; log-uniform
+    # reproduces that pattern). The optional runtime SHOULD-constraint
+    # matview (`_magnitude_anomaly`) is deferred to a follow-on per
+    # AB.5.0 lock. Validator V1a-c: ``min < max``, both > 0,
+    # ``aggregating=false`` (aggregator amounts derive from bundled
+    # children; per-firing bound is fuzzy on aggregators).
+    amount_typical_range: tuple[Money, Money] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,6 +324,10 @@ class SingleLegRail:
     metadata_value_examples: tuple[tuple[Identifier, tuple[str, ...]], ...] = (
         field(default_factory=tuple)
     )
+    # AB.5 (E7) — optional per-firing magnitude soft bound. See
+    # ``TwoLegRail.amount_typical_range`` for full semantics. Same
+    # shape, same validator V1a-c rules.
+    amount_typical_range: tuple[Money, Money] | None = None
 
 
 Rail: TypeAlias = TwoLegRail | SingleLegRail

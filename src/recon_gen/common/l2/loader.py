@@ -805,6 +805,11 @@ def _load_rail(raw: object, *, path: str) -> Rail:
         raw_d.get("metadata_value_examples"),
         path=f"{path}.metadata_value_examples",
     )
+    # AB.5 (E7) — optional per-firing magnitude soft bound.
+    amount_typical_range = _load_amount_typical_range(
+        raw_d.get("amount_typical_range"),
+        path=f"{path}.amount_typical_range",
+    )
 
     has_two_leg_fields = "source_role" in raw_d or "destination_role" in raw_d
     has_single_leg_fields = "leg_role" in raw_d or "leg_direction" in raw_d
@@ -863,6 +868,7 @@ def _load_rail(raw: object, *, path: str) -> Rail:
             cadence=cadence,
             description=description,
             metadata_value_examples=metadata_value_examples,
+            amount_typical_range=amount_typical_range,
         )
 
     # Single-leg
@@ -897,6 +903,39 @@ def _load_rail(raw: object, *, path: str) -> Rail:
         cadence=cadence,
         description=description,
         metadata_value_examples=metadata_value_examples,
+        amount_typical_range=amount_typical_range,
+    )
+
+
+def _load_amount_typical_range(
+    raw: object | None, *, path: str,
+) -> tuple[Money, Money] | None:
+    """AB.5 (E7): parse the optional ``amount_typical_range`` field.
+
+    Expected YAML shape: ``[min, max]`` — a 2-element list of money
+    literals (``"5.00"`` / ``5.00`` / ``5`` all valid; reuses the
+    existing ``_load_money`` parser). ``None`` when the key is absent
+    or null. Bad shapes (non-list, wrong-length, non-numeric element)
+    raise ``L2LoaderError``. Validator V1a-c (``min < max``, both > 0,
+    ``aggregating=false``) fires in :mod:`validate` — the loader's
+    job is shape-narrowing.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise L2LoaderError(
+            f"{path}: expected a 2-element list `[min, max]`, "
+            f"got {type(raw).__name__}",
+        )
+    raw_list = cast("list[object]", raw)
+    if len(raw_list) != 2:
+        raise L2LoaderError(
+            f"{path}: expected exactly 2 elements `[min, max]`, "
+            f"got {len(raw_list)}",
+        )
+    return (
+        _load_money(raw_list[0], path=f"{path}[0]"),
+        _load_money(raw_list[1], path=f"{path}[1]"),
     )
 
 

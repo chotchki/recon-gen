@@ -24,6 +24,7 @@ from recon_gen.common.l2 import (
     L2Instance,
     L2ValidationError,
     LimitSchedule,
+    Money,
     Name,
     RailName,
     SingleLegRail,
@@ -1359,3 +1360,84 @@ def test_chain_fan_in_default_no_change_to_validator() -> None:
         ),
     ))
     validate(ok)
+
+
+# -- V1a-c (AB.5): Rail.amount_typical_range structural rules --------------
+
+
+def test_v1a_amount_typical_range_min_eq_max_rejected() -> None:
+    """V1a (AB.5): min < max strictly; degenerate single-point range
+    rejected."""
+    inst = _baseline_instance()
+    bad_rail = dataclasses.replace(
+        inst.rails[0],
+        amount_typical_range=(Money(Decimal("100")), Money(Decimal("100"))),
+    )
+    bad = _replace(inst, rails=(bad_rail,) + inst.rails[1:])
+    with pytest.raises(
+        L2ValidationError,
+        match=r"amount_typical_range min.*must be strictly less than max",
+    ):
+        validate(bad)
+
+
+def test_v1b_amount_typical_range_zero_or_negative_rejected() -> None:
+    """V1b (AB.5): both bounds must be > 0 (bound is on abs(amount));
+    a 0 or negative magnitude is operator confusion."""
+    inst = _baseline_instance()
+    bad_rail = dataclasses.replace(
+        inst.rails[0],
+        amount_typical_range=(Money(Decimal("0")), Money(Decimal("500"))),
+    )
+    bad = _replace(inst, rails=(bad_rail,) + inst.rails[1:])
+    with pytest.raises(
+        L2ValidationError,
+        match=r"amount_typical_range values must both be > 0",
+    ):
+        validate(bad)
+
+
+def test_v1c_amount_typical_range_on_aggregating_rejected() -> None:
+    """V1c (AB.5): aggregating rails can't carry amount_typical_range
+    per AB.5.0 lock (aggregator amounts derive from bundled children;
+    per-firing bound's meaning is fuzzy)."""
+    inst = _baseline_instance()
+    # PoolBalancing is aggregating in the baseline; add the field.
+    pool_rail = next(r for r in inst.rails if r.name == "PoolBalancing")
+    bad_pool = dataclasses.replace(
+        pool_rail,
+        amount_typical_range=(Money(Decimal("100")), Money(Decimal("500"))),
+    )
+    bad = _replace(
+        inst,
+        rails=tuple(
+            bad_pool if r.name == "PoolBalancing" else r
+            for r in inst.rails
+        ),
+    )
+    with pytest.raises(
+        L2ValidationError,
+        match=r"amount_typical_range is forbidden on aggregating rails",
+    ):
+        validate(bad)
+
+
+def test_v1_amount_typical_range_valid_accepted() -> None:
+    """V1 positive: a well-formed range on a non-aggregating rail
+    passes validation."""
+    inst = _baseline_instance()
+    ok_rail = dataclasses.replace(
+        inst.rails[0],
+        amount_typical_range=(Money(Decimal("5")), Money(Decimal("500"))),
+    )
+    ok = _replace(inst, rails=(ok_rail,) + inst.rails[1:])
+    validate(ok)
+
+
+def test_v1_amount_typical_range_default_no_change_to_validator() -> None:
+    """Default ``amount_typical_range=None`` passes; pre-AB.5 rails
+    round-trip."""
+    inst = _baseline_instance()
+    for r in inst.rails:
+        assert r.amount_typical_range is None
+    validate(inst)
