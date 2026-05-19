@@ -1,77 +1,59 @@
 ;; AE.2 — sandbox-exec profile for the sasquatch.recon-gen.hotchkiss.io
-;; demo instance (studio surface, --demo-mode lockdown). This profile
-;; mirrors recon-demo-spec.sb but allows an additional per-process
-;; tmpdir for `.studio-state.yaml` writes (trainer knob state).
+;; demo instance (studio --demo-mode surface).
 ;;
 ;; macOS sandbox-exec syntax: TinyScheme S-expressions. `(deny default)`
 ;; denies everything; explicit `(allow ...)` clauses re-open. Parameters
 ;; are passed in via `sandbox-exec -D KEY=VALUE -f recon-demo-sasquatch.sb -- ...`
 ;; and referenced as `(param "KEY")`. Required parameters:
 ;;
-;;   HOME           - the dedicated user's home directory (e.g.
-;;                    "/Users/recon-demo")
-;;   INSTANCE_DIR   - per-instance state dir
-;;                    (e.g. "/Users/recon-demo/sasquatch_pr")
-;;   STUDIO_STATE_DIR  - per-process tmpdir for .studio-state.yaml
-;;                    (set by the launchd plist to a tmpdir created
-;;                    per-process; wiped on restart so trainer knob
-;;                    mutations don't persist across the daily refresh)
-;;   PORT           - bind port for the studio HTTP server (e.g. "8402")
-;;   PYTHON         - the venv's python interpreter
-;;                    (e.g. "/Users/recon-demo/venv/bin/python3.13")
+;;   HOME             - the dedicated user's home directory (e.g.
+;;                      "/Users/recon-demo")
+;;   INSTANCE_DIR     - per-instance state dir
+;;                      (e.g. "/Users/recon-demo/sasquatch_pr")
+;;   STUDIO_STATE_DIR - per-process tmpdir for .studio-state.yaml
+;;                      (computed by launch-sasquatch.sh via mktemp -d;
+;;                      wiped per launchd restart so trainer-knob
+;;                      mutations don't persist across the daily refresh)
+;;   PORT             - bind port for the studio HTTP server (e.g. "8402")
+;;   PYTHON           - the venv's python interpreter
+;;                      (e.g. "/Users/recon-demo/venv/bin/python3.13")
 ;;
-;; Sanity-check the profile before wiring launchd:
-;;   sandbox-exec -D HOME=/Users/recon-demo \
-;;                -D INSTANCE_DIR=/Users/recon-demo/sasquatch_pr \
-;;                -D STUDIO_STATE_DIR=/tmp/studio-state-XXXXXX \
-;;                -D PORT=8402 -D PYTHON=/Users/recon-demo/venv/bin/python3.13 \
-;;                -f recon-demo-sasquatch.sb -- /bin/sh
-;; Inside the shell, try `touch /Users/recon-demo/sasquatch_pr/l2.yaml`
-;; (must FAIL — L2 yaml is read-only) and `touch /tmp/studio-state-XXXXXX/foo`
-;; (must SUCCEED — studio state tmpdir is writable). Studio's
-;; --demo-mode is the friendly UX cut; this sandbox is the load-bearing
-;; safety against any UI bug that bypasses it.
+;; Same shape as recon-demo-spec.sb but with STUDIO_STATE_DIR added to
+;; the file-write* allow list (the trainer-knob mutations land there).
+;; Studio's --demo-mode flag strips the L2-mutation + Deploy + ETL-hook
+;; routes from the route table; this sandbox is the defense-in-depth
+;; layer that denies file-write on L2 yaml + cfg.yaml regardless.
+;;
+;; Sanity-check the profile before wiring launchd — same shape as the
+;; spec profile but with a STUDIO_STATE_DIR allocated via mktemp:
+;;   TEST_STATE_DIR=$(sudo -u recon-demo mktemp -d -t recon-demo-studio-state-test)
+;;   sudo -u recon-demo /usr/bin/sandbox-exec \
+;;       -D HOME=/Users/recon-demo \
+;;       -D INSTANCE_DIR=/Users/recon-demo/sasquatch_pr \
+;;       -D STUDIO_STATE_DIR="$TEST_STATE_DIR" \
+;;       -D PORT=8402 \
+;;       -D PYTHON=/Users/recon-demo/venv/bin/python3.13 \
+;;       -f /Users/recon-demo/sandbox/recon-demo-sasquatch.sb \
+;;       /usr/bin/touch /Users/recon-demo/sasquatch_pr/l2.yaml
+;; The touch MUST FAIL. Same touch on $TEST_STATE_DIR/.studio-state.yaml
+;; MUST SUCCEED. Profile is correct when both outcomes match.
 
 (version 1)
 (deny default)
-(deny file-write* (with no-log))
 
-;; ---------------------------------------------------------------------
-;; Process model
-;; ---------------------------------------------------------------------
-(allow process-fork)
-(allow process-exec
-    (literal (param "PYTHON"))
-    (subpath "/usr/lib")
-    (subpath "/usr/bin")
-    (subpath "/bin"))
-(allow signal (target same-sandbox))
+;; --- Bootstrap baseline (required for child to launch on Tahoe) ---
+(allow process*)
+(allow file-read*)
+(allow mach-lookup)
+(allow ipc-posix-shm)
+(allow signal)
+(allow sysctl-read)
+(allow iokit-open)
+(allow system-socket)
 
-;; ---------------------------------------------------------------------
-;; Read access — Python stdlib, system libs, the venv, the cfg + L2 yaml.
-;; L2 yaml is explicitly NOT in the write set (defense in depth against
-;; the L2 editor save endpoint slipping through --demo-mode's 403 gate).
-;; ---------------------------------------------------------------------
-(allow file-read*
-    (subpath "/usr/lib")
-    (subpath "/usr/share")
-    (subpath "/System/Library")
-    (subpath "/Library/Frameworks")
-    (subpath "/private/etc")
-    (subpath (param "INSTANCE_DIR"))
-    (subpath (param "STUDIO_STATE_DIR"))
-    (subpath (string-append (param "HOME") "/venv"))
-    (literal "/dev/null")
-    (literal "/dev/random")
-    (literal "/dev/urandom")
-    (literal "/dev/zero")
-    (literal "/dev/dtracehelper"))
-
-;; ---------------------------------------------------------------------
-;; Write access — SQLite db + log dir + the per-process studio state
-;; tmpdir. The cfg.yaml + l2.yaml are NOT writable (they sit inside
-;; INSTANCE_DIR which is read-only above).
-;; ---------------------------------------------------------------------
+;; --- Write perimeter: per-instance SQLite db files + log dir + the
+;; --- per-process studio state tmpdir + system tmpdirs. L2 yaml +
+;; --- cfg.yaml in INSTANCE_DIR are read-only by absence from this list.
 (allow file-write*
     (literal (string-append (param "INSTANCE_DIR") "/current.sqlite3"))
     (literal (string-append (param "INSTANCE_DIR") "/current.sqlite3-journal"))
@@ -79,35 +61,14 @@
     (literal (string-append (param "INSTANCE_DIR") "/current.sqlite3-shm"))
     (subpath (string-append (param "INSTANCE_DIR") "/logs"))
     (subpath (param "STUDIO_STATE_DIR"))
+    (subpath "/tmp")
+    (subpath "/private/tmp")
+    (subpath "/private/var/folders")
     (literal "/dev/null")
     (literal "/dev/dtracehelper"))
 
-;; Allow writes under TMPDIR for short-lived Python interpreter state.
-(allow file-write*
-    (subpath "/tmp")
-    (subpath "/private/tmp")
-    (subpath "/private/var/folders"))
-
-;; ---------------------------------------------------------------------
-;; Network — bind only the configured port on loopback. Studio doesn't
-;; egress at request time (no AWS calls, no etl_hook execution under
-;; --demo-mode); locally-bound HTTP only.
-;;
-;; macOS sandbox-exec only accepts `*` or `localhost` in the host
-;; portion of a network address (`127.0.0.1` literal raises
-;; `sandbox-exec: host must be * or localhost`). `localhost` matches
-;; both 127.0.0.1 and ::1 — the bind itself uses --host 127.0.0.1 on
-;; the recon-gen CLI side, so only the IPv4 loopback is actually
-;; listening regardless.
-;; ---------------------------------------------------------------------
+;; --- Network: bind the configured port on loopback. Studio --demo-mode
+;; --- doesn't egress at request time (no AWS calls, no etl_hook exec);
+;; --- locally-bound HTTP only.
 (allow network-bind
     (local tcp (string-append "localhost:" (param "PORT"))))
-(allow network-inbound
-    (local tcp (string-append "localhost:" (param "PORT"))))
-
-;; ---------------------------------------------------------------------
-;; sysctl + mach lookups (CPython startup requirement).
-;; ---------------------------------------------------------------------
-(allow sysctl-read)
-(allow mach-lookup)
-(allow ipc-posix-shm)
