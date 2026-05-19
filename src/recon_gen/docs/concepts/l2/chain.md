@@ -124,6 +124,64 @@ false-positive every fan-in firing.
 > See [How do I model batched payouts?](../../walkthroughs/customization/how-do-i-model-batched-payouts.md)
 > for a worked example.
 
+## Multi-XOR runtime enforcement (AB.6.5)
+
+A multi-children chain (≥2 children) encodes the "exactly one MUST
+fire" XOR contract: every parent firing should be followed by exactly
+ONE of the declared children. AB.6.5 adds the runtime side of that
+contract: the L1 ``<prefix>_multi_xor_violation`` matview flags
+parent firings where:
+
+- **missed** (`child_count = 0`) — none of the declared children
+  fired (the operator's intent was lost between parent firing and
+  child posting); OR
+- **overlap** (`child_count ≥ 2`) — two or more children fired,
+  collapsing the alternation contract.
+
+The matview's CTE skips per-child ``fan_in=True`` entries (AB.5
+coupling — their cardinality is enforced by
+``<prefix>_fan_in_disagreement`` instead). Mixed-cardinality
+chains (one fan_in child + two or more 1:1 XOR siblings)
+contribute only the non-fan_in siblings to the multi-XOR matview.
+
+## Mixed-cardinality chains (AB.6 per-child shape)
+
+AB.6 (2026-05-19) moved ``fan_in`` from chain-level to per-child
+so one chain can carry both:
+
+- **1:1 XOR alternation children** — every parent firing picks
+  exactly ONE; enforced by ``_multi_xor_violation``.
+- **N:1 fan-in children** — N parent firings batch into ONE shared
+  child Transfer; enforced by ``_fan_in_disagreement``.
+
+Both buckets emit independently from one parent firing — a single
+parent contributes to ONE XOR child AND contributes to EVERY
+fan_in child's batch.
+
+YAML shape:
+
+```yaml
+chains:
+  - parent: MerchantSettlementCycle
+    children:
+      - MerchantPayoutACH       # 1:1 XOR alternative
+      - MerchantPayoutWire      # 1:1 XOR alternative
+      - MerchantPayoutCheck     # 1:1 XOR alternative
+      - name: MerchantWeeklyPayoutBatch  # N:1 fan-in entry
+        fan_in: true
+        expected_parent_count: 5
+```
+
+That's sasquatch's canonical demo: every settled cycle picks ONE
+of three payout vehicles AND contributes to the week's batched
+payout. The two enforcement matviews split the work:
+`_multi_xor_violation` flags XOR violations on the 3 alternatives;
+`_fan_in_disagreement` flags batches whose `parent_count ≠ 5` on
+`MerchantWeeklyPayoutBatch`.
+
+See [How do I mix cardinality children?](../../walkthroughs/customization/how-do-i-mix-cardinality-children.md)
+for a worked example.
+
 ## Specific example for you
 
 {{ l2_chain_focus() }}

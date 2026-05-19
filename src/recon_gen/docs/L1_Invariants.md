@@ -380,6 +380,72 @@ days_ago=4, `disagreement_kind='missing'`), extra-parent (6 parents,
 days_ago=3, `disagreement_kind='extra'`).
 {% endif %}
 
+### 11. `{{ l2_instance_name }}_multi_xor_violation` — Chain XOR alternation violation (AB.6.5)
+
+> For every multi-children chain (≥2 children) — after stripping
+> per-child `fan_in` entries — every parent firing SHOULD have
+> exactly ONE non-fan_in child fire under it. Zero fires (none of
+> the declared XOR alternatives followed the parent) and overlap
+> (≥2 fired) both surface here.
+
+A parent firing whose declared XOR-sibling set was not honored
+surfaces with `disagreement_kind` ∈ ('missed', 'overlap'):
+
+- `missed` (count = 0): the chain.md contract "exactly one MUST
+  fire" was dropped on the floor — the parent fired but no child
+  followed.
+- `overlap` (count ≥ 2): XOR alternation collapsed — two or more
+  declared children fired under one parent.
+
+The matview's CTE inlines `(chain_parent_name, child_name)` rows
+for every multi-children chain after filtering out per-child
+`fan_in=True` entries (their cardinality is
+`_fan_in_disagreement`'s job per AB.5 coupling). For each parent
+firing of a multi-XOR chain, the CTE LEFT JOINs against
+`<prefix>_current_transactions` keyed on `transfer_parent_id`,
+matches the firing's child name against the declared siblings,
+counts distinct matches, and emits a row when the count ≠ 1.
+
+When no chain qualifies (no multi-children chain after stripping
+fan_in entries), the body falls back to a typed-NULL placeholder
+with `WHERE 1=0` so the matview parses + plans cleanly on all 3
+dialects and contributes zero rows.
+
+**Columns:** `parent_transfer_id`, `parent_rail_or_template_name`,
+`child_count` (actual count of declared XOR siblings that fired),
+`fired_children` (comma-separated names, empty when count = 0),
+`disagreement_kind` ('missed' / 'overlap'), `business_day`
+(earliest contributing leg's posting day).
+
+**What to do:** For 'missed': inspect the parent firing's
+`metadata` for clues about which alternative the operator intended.
+Either a child contribution failed to post (ETL bug on the child
+rail) or the L2 declaration over-specifies the children list (the
+intended alternative was never on the operator's menu). For
+'overlap': two children fired for one parent — either the XOR
+contract is wrong (the children aren't truly alternates and the
+L2 should split into separate chain rows) or the seed-emit / ETL
+double-fired on a single firing. The drill from Today's Exceptions
+on a row navigates to Transactions filtered to the parent's
+`transfer_id` — eyeball the child legs to see which alternatives
+landed.
+
+{% if vocab.fixture_name == "sasquatch_pr" %}
+**the matview should surface:** 2 planted violations on
+`MerchantSettlementCycle` (XOR alternation across the 3 non-fan_in
+payout vehicles `MerchantPayoutACH` / `MerchantPayoutWire` /
+`MerchantPayoutCheck` — `MerchantWeeklyPayoutBatch` is fan_in so
+excluded per AB.5 coupling): missed (count=0, days_ago=6,
+`disagreement_kind='missed'`), overlap (count≥2, days_ago=5,
+`disagreement_kind='overlap'`). Healthy cycles (exactly one
+payout vehicle fires) emit no row.
+{% else %}
+**the matview should surface:** 2 planted violations on
+`BulkAccrualSettlement` (the AB.6.5.spec demo chain with XOR
+alternation across `BulkAccrualSettleACH` / `BulkAccrualSettleWire`):
+missed (count=0, days_ago=6) + overlap (count=2, days_ago=5).
+{% endif %}
+
 ## Diagnostic surface — Supersession Audit
 
 `{{ l2_instance_name }}_supersession_*` is **not** a SHOULD-constraint — it's a
