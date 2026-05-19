@@ -70,5 +70,12 @@
 ;; --- Network: bind the configured port on loopback. Studio --demo-mode
 ;; --- doesn't egress at request time (no AWS calls, no etl_hook exec);
 ;; --- locally-bound HTTP only.
+;; ---
+;; --- network-bind allows the bind() syscall; network-inbound is a
+;; --- separate rule on macOS 26 that allows accept() on the bound
+;; --- socket. Without it, bind() succeeds but the server crashes
+;; --- the moment cloudflared (or any other client) tries to connect.
 (allow network-bind
+    (local tcp (string-append "localhost:" (param "PORT"))))
+(allow network-inbound
     (local tcp (string-append "localhost:" (param "PORT"))))

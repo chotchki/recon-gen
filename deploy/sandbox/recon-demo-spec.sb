@@ -68,5 +68,12 @@
 ;; --- localhost`). `localhost` matches both 127.0.0.1 and ::1; the
 ;; --- recon-gen CLI binds via `--host 127.0.0.1` so only the IPv4
 ;; --- loopback is actually listening.
+;; ---
+;; --- network-bind allows the bind() syscall; network-inbound is a
+;; --- separate rule on macOS 26 that allows accept() on the bound
+;; --- socket. Without it, bind() succeeds but the server crashes
+;; --- the moment cloudflared (or any other client) tries to connect.
 (allow network-bind
+    (local tcp (string-append "localhost:" (param "PORT"))))
+(allow network-inbound
     (local tcp (string-append "localhost:" (param "PORT"))))
