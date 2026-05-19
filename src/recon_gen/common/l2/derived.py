@@ -78,7 +78,7 @@ def posted_requirements_for(
     chain_targets: set[Identifier] = {rail_name}
     chain_targets.update(t.name for t in containing_templates)
     for c in instance.chains:
-        if len(c.children) == 1 and c.children[0] in chain_targets:
+        if len(c.children) == 1 and c.children[0].name in chain_targets:
             fields.add(PARENT_TRANSFER_ID)
             break  # a single match is enough; the field is added at most once.
 

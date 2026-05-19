@@ -1391,9 +1391,29 @@ def _render_read_card(
     specs = _filter_specs_for_entity(_FIELD_SPECS_BY_KIND[kind], entity)
     entity_id = _entity_id(kind, entity)
     hidden = _hidden_fields_for_entity(kind, entity, instance)
+
+    # AB.6.1 transitional: synthesize chain-level fan_in /
+    # expected_parent_count for read-card rendering (same shape as
+    # _render_edit_form's synthesis). AB.6.7 replaces with per-child UI.
+    def _value_for(s: FieldSpec) -> object:
+        if kind == "chain":
+            if s.name == "fan_in":
+                children = getattr(entity, "children", ())
+                return any(getattr(c, "fan_in", False) for c in children)
+            if s.name == "expected_parent_count":
+                children = getattr(entity, "children", ())
+                for c in children:
+                    if (
+                        getattr(c, "fan_in", False)
+                        and getattr(c, "expected_parent_count", None) is not None
+                    ):
+                        return getattr(c, "expected_parent_count")
+                return None
+        return getattr(entity, s.name, None)
+
     rows = "".join(
         f'<dt>{escape(s.label)}</dt><dd>'
-        f"{_render_read_value(s, getattr(entity, s.name, None))}"
+        f"{_render_read_value(s, _value_for(s))}"
         f"</dd>"
         for s in specs
         if s.name not in hidden
@@ -1515,11 +1535,34 @@ def _render_edit_form(
     field_errors = field_errors or {}
     overrides = form_overrides or {}
 
+    # AB.6.1 transitional: Chain.fan_in / .expected_parent_count moved
+    # to per-child ChainChildSpec, but the editor still presents
+    # chain-level controls. Collapse per-child flags back so the form
+    # pre-fills correctly. AB.6.7 replaces this with a per-child UI.
+    chain_synth: Mapping[str, str | tuple[str, ...]] | None = None
+    if kind == "chain":
+        children = getattr(entity, "children", ())
+        fan_in_any = any(getattr(c, "fan_in", False) for c in children)
+        epcs = [
+            getattr(c, "expected_parent_count", None)
+            for c in children
+            if getattr(c, "fan_in", False)
+            and getattr(c, "expected_parent_count", None) is not None
+        ]
+        chain_synth = {}
+        if "fan_in" not in overrides:
+            chain_synth["fan_in"] = "true" if fan_in_any else "false"
+        if "expected_parent_count" not in overrides and epcs:
+            chain_synth["expected_parent_count"] = str(epcs[0])
+    effective_overrides: Mapping[str, str | tuple[str, ...]] = (
+        {**chain_synth, **overrides} if chain_synth else overrides
+    )
+
     hidden = _hidden_fields_for_entity(kind, entity, instance)
     fields_html = "".join(
         _render_field(
             s,
-            overrides.get(s.name, getattr(entity, s.name, None)),
+            effective_overrides.get(s.name, getattr(entity, s.name, None)),
             instance,
             error=field_errors.get(s.name),
             entity=entity,
@@ -2017,8 +2060,10 @@ def _entity_id(kind: EntityKind, entity: object) -> str:
     if kind == "chain":
         # Z.A: composite key = "parent::sorted-children-csv" — same
         # shape editor.py's _find_entity uses to address Chain rows.
+        # AB.6 (per-child): children entries are now ChainChildSpec; the
+        # composite key still keys on the child names (sorted).
         children = getattr(entity, "children")
-        children_csv = ",".join(sorted(str(c) for c in children))
+        children_csv = ",".join(sorted(str(c.name) for c in children))
         return f"{getattr(entity, 'parent')}::{children_csv}"
     # limit_schedule — 3-part composite (AB.1): parent_role::rail::direction.
     # Same (parent_role, rail) may carry both an Outbound and an Inbound

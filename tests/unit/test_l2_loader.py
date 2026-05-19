@@ -139,10 +139,15 @@ def test_loads_kitchen_sink_yaml_inline(tmp_path: Path) -> None:
     assert inst.limit_schedules[0].cap == Decimal("5000.00")
 
     # Z.A: chain rows carry parent + a children tuple. The above
-    # fixture is multi-children (XOR semantics).
+    # fixture is multi-children (XOR semantics). AB.6 (per-child):
+    # each child entry is a ChainChildSpec; bare-Identifier yaml lowers
+    # to defaults (fan_in=False, expected_parent_count=None).
     chain = inst.chains[0]
     assert chain.parent == "MerchantSettlementCycle"
-    assert chain.children == ("MerchantPayoutACH", "MerchantPayoutWire")
+    assert tuple(c.name for c in chain.children) == (
+        "MerchantPayoutACH", "MerchantPayoutWire",
+    )
+    assert all(not c.fan_in for c in chain.children)
 
     # AccountTemplate Money coercion (the float-precision case for F4)
     merchant_tmpl = inst.account_templates[1]
@@ -689,8 +694,12 @@ def test_loader_chain_fan_in_defaults_to_false_when_absent(
             children: [ChildTpl]
     """))
     inst = load_instance(p, validate=False)
-    assert inst.chains[0].fan_in is False
-    assert inst.chains[0].expected_parent_count is None
+    # AB.6.1 transitional: chain-level fan_in absent ⇒ all children
+    # default to fan_in=False + expected_parent_count=None.
+    assert all(not c.fan_in for c in inst.chains[0].children)
+    assert all(
+        c.expected_parent_count is None for c in inst.chains[0].children
+    )
 
 
 def test_loader_chain_fan_in_parses_true_with_expected_parent_count(
@@ -722,8 +731,13 @@ def test_loader_chain_fan_in_parses_true_with_expected_parent_count(
             expected_parent_count: 3
     """))
     inst = load_instance(p, validate=False)
-    assert inst.chains[0].fan_in is True
-    assert inst.chains[0].expected_parent_count == 3
+    # AB.6.1 transitional: chain-level fan_in: true is synthesized
+    # onto every child entry; the AB.6.2 hard-cut + per-child mapping
+    # form replaces this synthesis.
+    assert all(c.fan_in for c in inst.chains[0].children)
+    assert all(
+        c.expected_parent_count == 3 for c in inst.chains[0].children
+    )
 
 
 def test_loader_chain_fan_in_rejects_non_bool(tmp_path: Path) -> None:

@@ -1210,7 +1210,7 @@ def _build_broad_rail_firings(
         if parent_starts is None:
             continue  # parent didn't fire
         child_rail = _resolve_rail_by_name(
-            Identifier(str(chain.children[0])), instance,
+            Identifier(str(chain.children[0].name)), instance,
         )
         if child_rail is None or child_rail.aggregating:
             continue
@@ -1484,7 +1484,8 @@ def _pick_chain_children_for_template(
         # transfer_parent_id, so over-listing XOR siblings is fine —
         # the assertion is "any one of these landed", not "exactly
         # this one".
-        for child_name in chain.children:
+        for child_spec in chain.children:
+            child_name = child_spec.name
             child_rail = _resolve_rail_by_name(child_name, instance)
             if child_rail is None:
                 continue
@@ -1683,13 +1684,16 @@ def _pick_two_template_chain_inputs(
     rail_names = {r.name for r in instance.rails}
     for c in sorted(
         instance.chains,
-        key=lambda ch: (str(ch.parent), ",".join(sorted(str(d) for d in ch.children))),
+        key=lambda ch: (
+            str(ch.parent),
+            ",".join(sorted(str(d.name) for d in ch.children)),
+        ),
     ):
         if len(c.children) != 1:
             continue
         if c.parent not in rail_names:
             continue
-        child = c.children[0]
+        child = c.children[0].name
         if child in template_names:
             return (c.parent, child)
     return None
@@ -1773,15 +1777,17 @@ def _pick_fan_in_chain_inputs(
     rail_names = {r.name for r in instance.rails}
     for c in sorted(
         instance.chains,
-        key=lambda ch: (str(ch.parent), ",".join(sorted(str(d) for d in ch.children))),
+        key=lambda ch: (
+            str(ch.parent),
+            ",".join(sorted(str(d.name) for d in ch.children)),
+        ),
     ):
-        if not c.fan_in:
+        fan_in_child = next((ch for ch in c.children if ch.fan_in), None)
+        if fan_in_child is None:
             continue
         if c.parent not in rail_names:
             continue
-        if not c.children:
-            continue
-        return (c.parent, c.children[0], c.expected_parent_count)
+        return (c.parent, fan_in_child.name, fan_in_child.expected_parent_count)
     return None
 
 

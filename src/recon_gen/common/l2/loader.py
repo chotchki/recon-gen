@@ -51,6 +51,7 @@ from .primitives import (
     BundlesActivityRef,
     CadenceExpression,
     Chain,
+    ChainChildSpec,
     CompletionExpression,
     Duration,
     Identifier,
@@ -1080,12 +1081,14 @@ def _load_chain(raw: object, *, path: str) -> Chain:
             f"{path}.children: must be a non-empty list (singleton ⇒ "
             f"required, multi ⇒ XOR per Z.A grammar). Got [].",
         )
-    children = tuple(
+    child_names = tuple(
         _load_identifier(item, path=f"{path}.children[{i}]")
         for i, item in enumerate(children_raw)
     )
-    # AB.4: fan_in + expected_parent_count are both optional. Default
-    # fan_in=False keeps every pre-AB.4 YAML byte-equivalent.
+    # AB.6.1 transitional: chain-level fan_in / expected_parent_count
+    # still parsed (AB.4 yaml shape) and synthesized into every child.
+    # Per AB.6.0 Lock 2 hard cut, AB.6.2 will REJECT chain-level keys
+    # with an actionable error pointing at the per-child shape.
     fan_in_raw = raw_d.get("fan_in", False)
     if not isinstance(fan_in_raw, bool):
         raise L2LoaderError(
@@ -1103,13 +1106,19 @@ def _load_chain(raw: object, *, path: str) -> Chain:
                 f"{type(expected_raw).__name__}",
             )
         expected_parent_count = expected_raw
+    children = tuple(
+        ChainChildSpec(
+            name=name,
+            fan_in=fan_in_raw,
+            expected_parent_count=expected_parent_count,
+        )
+        for name in child_names
+    )
     return Chain(
         parent=_load_identifier(
             _require(raw_d, "parent", path=path), path=f"{path}.parent",
         ),
         children=children,
-        fan_in=fan_in_raw,
-        expected_parent_count=expected_parent_count,
         description=_load_description(
             raw_d.get("description"), path=f"{path}.description",
         ),

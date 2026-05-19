@@ -1618,9 +1618,10 @@ def _declared_chains_cte(l2_instance: L2Instance, dialect: Dialect) -> str:
         xor_group: str | None = (
             None
             if is_required
-            else f"{c.parent}::{','.join(sorted(str(ch) for ch in c.children))}"
+            else f"{c.parent}::{','.join(sorted(str(ch.name) for ch in c.children))}"
         )
-        for child in c.children:
+        for child_spec in c.children:
+            child = child_spec.name
             source_node = str(c.parent)
             target_node = str(child)
             rows.append(

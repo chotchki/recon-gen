@@ -16,6 +16,7 @@ import pytest
 from recon_gen.common.l2 import (
     Account,
     Chain,
+    ChainChildSpec,
     Identifier,
     L2Instance,
     PARENT_TRANSFER_ID,
@@ -155,7 +156,7 @@ def test_singleton_children_chain_adds_parent_transfer_id() -> None:
     child = _two_leg("ChildRail")
     chain = Chain(
         parent=Identifier("ParentRail"),
-        children=(Identifier("ChildRail"),),
+        children=(ChainChildSpec(name=Identifier("ChildRail")),),
     )
     inst = _make_instance(rails=(parent, child), chains=(chain,))
     assert posted_requirements_for(inst, Identifier("ChildRail")) == (
@@ -171,7 +172,10 @@ def test_multi_children_xor_does_not_add_parent_transfer_id() -> None:
     child_b = _two_leg("ChildB")
     chain = Chain(
         parent=Identifier("ParentRail"),
-        children=(Identifier("ChildA"), Identifier("ChildB")),
+        children=(
+            ChainChildSpec(name=Identifier("ChildA")),
+            ChainChildSpec(name=Identifier("ChildB")),
+        ),
     )
     inst = _make_instance(rails=(parent, child_a, child_b), chains=(chain,))
     assert posted_requirements_for(inst, Identifier("ChildA")) == ()
@@ -193,7 +197,7 @@ def test_singleton_children_chain_via_containing_template() -> None:
     parent = _two_leg("Parent")
     chain = Chain(
         parent=Identifier("Parent"),
-        children=(Identifier("MyTemplate"),),
+        children=(ChainChildSpec(name=Identifier("MyTemplate")),),
     )
     inst = _make_instance(
         rails=(rail, parent),
@@ -234,7 +238,7 @@ def test_ab2_two_template_chain_propagates_parent_id_to_every_leg_rail() -> None
     parent_rail = _two_leg("ParentRail")
     chain = Chain(
         parent=Identifier("ParentRail"),
-        children=(Identifier("ChildTemplateB"),),
+        children=(ChainChildSpec(name=Identifier("ChildTemplateB")),),
     )
     inst = _make_instance(
         rails=(leg_a, leg_b, leg_c, parent_rail),
@@ -271,7 +275,7 @@ def test_unions_all_three_sources_together() -> None:
     parent = _two_leg("Parent")
     chain = Chain(
         parent=Identifier("Parent"),
-        children=(Identifier("BigLeg"),),
+        children=(ChainChildSpec(name=Identifier("BigLeg")),),
     )
     inst = _make_instance(
         rails=(rail, parent),
@@ -352,7 +356,7 @@ def test_chain_parent_does_not_inherit_parent_transfer_id() -> None:
     child = _two_leg("Child")
     chain = Chain(
         parent=Identifier("Parent"),
-        children=(Identifier("Child"),),
+        children=(ChainChildSpec(name=Identifier("Child")),),
     )
     inst = _make_instance(rails=(parent, child), chains=(chain,))
     assert posted_requirements_for(inst, Identifier("Parent")) == ()

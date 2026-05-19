@@ -2728,7 +2728,7 @@ def _emit_baseline_chains(
     # editor uses to address chain rows.
     for chain in sorted(
         instance.chains,
-        key=lambda c: (str(c.parent), ",".join(sorted(str(ch) for ch in c.children))),
+        key=lambda c: (str(c.parent), ",".join(sorted(str(ch.name) for ch in c.children))),
     ):
         parent_firings = state.firings.get(chain.parent, [])
         if not parent_firings:
@@ -2741,7 +2741,7 @@ def _emit_baseline_chains(
         # AB.4.3 transfer_parents matview derives the multi-parent set
         # via DISTINCT(child, parent); AB.4.7's fan_in_disagreement
         # joins against expected_parent_count for cardinality check.
-        if chain.fan_in:
+        if any(c.fan_in for c in chain.children):
             rows.extend(_emit_fan_in_chain_firings(
                 chain, parent_firings, instance, state, counter, rng, dialect,
             ))
@@ -2757,7 +2757,7 @@ def _emit_baseline_chains(
                 zlib.crc32(parent_transfer_id.encode("utf-8"))
                 & 0x7FFFFFFF
             ) % len(chain.children)
-            child_name = chain.children[child_idx]
+            child_name = chain.children[child_idx].name
 
             # Completion roll: singleton ≈95% (Z.A required), multi ≈50% (XOR).
             completion_threshold = 0.95 if is_required else 0.50
@@ -2941,11 +2941,16 @@ def _emit_fan_in_chain_firings(
     """
     if not chain.children:
         return []
-    # AB.4.2 (C8a): every fan_in chain's children are TransferTemplates.
-    # Use the first child as the canonical fan-in target (singleton
-    # children is the typical shape; multi-children + fan_in is allowed
-    # by the validator but unusual — pick deterministically by index 0).
-    child_name = chain.children[0]
+    # AB.4.2 (C8a): every fan_in child resolves to a TransferTemplate.
+    # AB.6.1 transitional: pick the first fan_in entry (singleton
+    # children + chain-wide fan_in is today's typical shape). AB.6.4
+    # will rewrite to emit per fan_in child entry; multi-XOR + per-child
+    # fan_in inhomogeneity becomes expressible once AB.6.2 lands the
+    # heterogeneous loader.
+    fan_in_child = next((c for c in chain.children if c.fan_in), None)
+    if fan_in_child is None:
+        return []
+    child_name = fan_in_child.name
     child_template = next(
         (t for t in instance.transfer_templates if t.name == child_name),
         None,
@@ -2956,7 +2961,7 @@ def _emit_fan_in_chain_firings(
 
     # Default batch size = 2 (the minimum non-orphan) when
     # expected_parent_count is unset (variable-batch-size flow).
-    batch_size = chain.expected_parent_count or 2
+    batch_size = fan_in_child.expected_parent_count or 2
     rows: list[str] = []
 
     n_parents = len(parent_firings)

@@ -35,6 +35,7 @@ from recon_gen.common.l2.primitives import (
     Account,
     AccountTemplate,
     Chain,
+    ChainChildSpec,
     Identifier,
     L2Instance,
     LimitSchedule,
@@ -107,6 +108,40 @@ def mutate_l2(
             fields of the target entity.
     """
     matched, idx, collection = _find_entity(instance, kind, entity_id)
+    # AB.6.1 transitional: editor's chain form still posts a flat
+    # children list + chain-level fan_in / expected_parent_count.
+    # Coerce them into ChainChildSpec entries before dataclasses.replace
+    # (Chain.children is now tuple[ChainChildSpec, ...]; raw strings
+    # would skip wrap and break the validator's per-child reads).
+    # AB.6.7 replaces this with a true per-child editor surface.
+    if kind == "chain" and "children" in fields:
+        children_raw_any: Any = fields["children"]  # typing-smell: ignore[explicit-any]: form-submitted children — list[str] or tuple[ChainChildSpec, ...]
+        already_specs = (
+            isinstance(children_raw_any, tuple)
+            and all(isinstance(c, ChainChildSpec) for c in children_raw_any)  # pyright: ignore[reportUnknownVariableType]  # WHY: Any narrows to Unknown inside the tuple iterator; isinstance is the gate
+        )
+        if children_raw_any is not None and not already_specs:
+            fan_in_raw = fields.get("fan_in", False)
+            fan_in = bool(fan_in_raw) if fan_in_raw is not None else False
+            expected_raw = fields.get("expected_parent_count")
+            expected_parent_count: int | None = (
+                int(expected_raw)
+                if expected_raw is not None and expected_raw != ""
+                else None
+            )
+            children_list: list[object] = list(children_raw_any)  # pyright: ignore[reportUnknownArgumentType]  # WHY: form-typed Any narrowed at this hop
+            fields = {
+                k: v for k, v in fields.items()
+                if k not in ("fan_in", "expected_parent_count")
+            }
+            fields["children"] = tuple(
+                ChainChildSpec(
+                    name=Identifier(str(c)),
+                    fan_in=fan_in,
+                    expected_parent_count=expected_parent_count,
+                )
+                for c in children_list
+            )
     new_entity = dataclasses.replace(matched, **fields)
     new_collection = collection[:idx] + (new_entity,) + collection[idx + 1:]
     return _replace_collection(instance, kind, new_collection)
@@ -404,40 +439,48 @@ def create_l2_entity(
                 "rail / template names (singleton ⇒ required, "
                 "multi ⇒ XOR per Z.A grammar).",
             )
-        children: tuple[Identifier, ...] = tuple(
+        child_names: tuple[Identifier, ...] = tuple(
             Identifier(str(c)) for c in children_raw  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]  # WHY: fields[] dict comes back Any-typed; per-item str() narrows safely
         )
-        if not children:
+        if not child_names:
             raise ValueError(
                 "Chain.children must be non-empty (singleton ⇒ required, "
                 "multi ⇒ XOR per Z.A grammar).",
             )
         # Check for duplicate row by (parent, sorted-children-tuple).
-        new_key = (str(parent), tuple(sorted(str(c) for c in children)))
+        new_key = (str(parent), tuple(sorted(str(c) for c in child_names)))
         for c in instance.chains:
             existing_key = (
                 str(c.parent),
-                tuple(sorted(str(ch) for ch in c.children)),
+                tuple(sorted(str(ch.name) for ch in c.children)),
             )
             if existing_key == new_key:
                 raise ValueError(
                     f"Chain row for parent={parent!r} with "
-                    f"children={list(children)!r} already exists.",
+                    f"children={list(child_names)!r} already exists.",
                 )
-        # AB.4.9 — fan_in + expected_parent_count default to safe
-        # non-fan-in shape when absent. Validator C8a-c enforces the
-        # cross-field rules after construction.
+        # AB.6.1 transitional: studio editor still presents chain-level
+        # fan_in / expected_parent_count fields (per-child UI lands in
+        # AB.6.7); synthesize them onto every child entry. Validator
+        # C8a-c (now per-child) enforces cross-field rules after
+        # construction.
         fan_in_raw = fields.get("fan_in", False)
         fan_in = bool(fan_in_raw) if fan_in_raw is not None else False
         expected_raw = fields.get("expected_parent_count")
         expected_parent_count: int | None = (
             int(expected_raw) if expected_raw is not None and expected_raw != "" else None
         )
+        children = tuple(
+            ChainChildSpec(
+                name=name,
+                fan_in=fan_in,
+                expected_parent_count=expected_parent_count,
+            )
+            for name in child_names
+        )
         new_ce = Chain(
             parent=Identifier(str(parent)),
             children=children,
-            fan_in=fan_in,
-            expected_parent_count=expected_parent_count,
             description=fields.get("description"),
         )
         return dataclasses.replace(
@@ -597,7 +640,7 @@ def _find_entity(
         # Sorted so the address is stable across yaml round-trips even
         # if the children list got re-ordered during an edit.
         for i, ch in enumerate(instance.chains):
-            children_csv = ",".join(sorted(str(c) for c in ch.children))
+            children_csv = ",".join(sorted(str(c.name) for c in ch.children))
             if f"{ch.parent}::{children_csv}" == entity_id:
                 return ch, i, instance.chains
     elif kind == "limit_schedule":
@@ -765,11 +808,15 @@ def _rename_template_leg_rails(
 def _rename_chain_endpoint(
     c: Chain, old: Identifier, new: Identifier,
 ) -> Chain:
-    """Rewrite Chain.parent + each Chain.children[i] when they match
-    old. Z.A grammar collapse — children is a tuple now, not a single
-    field, so per-item rewrite."""
+    """Rewrite Chain.parent + each Chain.children[i].name when they
+    match old. AB.6 (per-child): children entries are now ChainChildSpec
+    — rename swaps the `.name` field while preserving `.fan_in` +
+    `.expected_parent_count`."""
     parent = new if c.parent == old else c.parent
-    children = tuple(new if ch == old else ch for ch in c.children)
+    children = tuple(
+        dataclasses.replace(ch, name=new) if ch.name == old else ch
+        for ch in c.children
+    )
     if parent is c.parent and children == c.children:
         return c
     return dataclasses.replace(c, parent=parent, children=children)

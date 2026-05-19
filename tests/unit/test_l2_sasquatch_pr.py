@@ -130,7 +130,7 @@ def test_chain_counts_pinned() -> None:
     # AB.2 — at least one chain has a TransferTemplate as its singleton child.
     template_names = {t.name for t in inst.transfer_templates}
     assert any(
-        len(c.children) == 1 and c.children[0] in template_names
+        len(c.children) == 1 and c.children[0].name in template_names
         for c in inst.chains
     ), "AB.2 expected: sasquatch_pr carries at least one template-as-chain-child"
 
@@ -346,7 +346,7 @@ def test_pr_payout_vehicle_xor_chain_present() -> None:
     assert payout_chain is not None, (
         "Expected a multi-children Chain row under MerchantSettlementCycle"
     )
-    children = {str(ch) for ch in payout_chain.children}
+    children = {str(ch.name) for ch in payout_chain.children}
     assert children == {
         "MerchantPayoutACH", "MerchantPayoutWire", "MerchantPayoutCheck",
     }
@@ -393,7 +393,7 @@ def test_every_primitive_has_a_description() -> None:
             missing.append(f"transfer_template {tt.name!r}")
     for c in inst.chains:
         if not c.description:
-            children_str = ",".join(str(ch) for ch in c.children)
+            children_str = ",".join(str(ch.name) for ch in c.children)
             missing.append(f"chain {c.parent}->[{children_str}]")
     for ls in inst.limit_schedules:
         if not ls.description:

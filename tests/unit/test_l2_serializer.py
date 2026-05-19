@@ -114,7 +114,7 @@ def test_serialize_l2_emits_fan_in_when_non_default() -> None:
     surface both fields here."""
     import dataclasses
 
-    from recon_gen.common.l2.primitives import Chain, Identifier
+    from recon_gen.common.l2.primitives import Chain, ChainChildSpec, Identifier
     from recon_gen.common.l2.serializer import serialize_l2
 
     instance = load_instance(_FIXTURES_DIR / "spec_example.yaml")
@@ -122,9 +122,13 @@ def test_serialize_l2_emits_fan_in_when_non_default() -> None:
     # MerchantSettlementCycle pair (AB.2.6.spec — template-as-child).
     fanin_chain = Chain(
         parent=Identifier("ReconciliationLeg"),
-        children=(Identifier("MerchantSettlementCycle"),),
-        fan_in=True,
-        expected_parent_count=3,
+        children=(
+            ChainChildSpec(
+                name=Identifier("MerchantSettlementCycle"),
+                fan_in=True,
+                expected_parent_count=3,
+            ),
+        ),
     )
     instance = dataclasses.replace(instance, chains=(fanin_chain,))
     text = serialize_l2(instance)
@@ -155,15 +159,19 @@ def test_serialize_l2_omits_expected_parent_count_when_unset() -> None:
     omits expected_parent_count entirely."""
     import dataclasses
 
-    from recon_gen.common.l2.primitives import Chain, Identifier
+    from recon_gen.common.l2.primitives import Chain, ChainChildSpec, Identifier
     from recon_gen.common.l2.serializer import serialize_l2
 
     instance = load_instance(_FIXTURES_DIR / "spec_example.yaml")
     fanin_chain = Chain(
         parent=Identifier("ReconciliationLeg"),
-        children=(Identifier("MerchantSettlementCycle"),),
-        fan_in=True,
-        expected_parent_count=None,
+        children=(
+            ChainChildSpec(
+                name=Identifier("MerchantSettlementCycle"),
+                fan_in=True,
+                expected_parent_count=None,
+            ),
+        ),
     )
     instance = dataclasses.replace(instance, chains=(fanin_chain,))
     text = serialize_l2(instance)

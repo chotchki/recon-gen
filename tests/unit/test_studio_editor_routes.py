@@ -924,7 +924,8 @@ def test_chain_card_id_replaces_double_colon_to_avoid_css_pseudo_element(
         return
     chain = pre.chains[0]
     # Z.A: composite key = "parent::sorted-children-csv".
-    children_csv = ",".join(sorted(str(ch) for ch in chain.children))
+    # AB.6 (per-child): children entries are now ChainChildSpec.
+    children_csv = ",".join(sorted(str(ch.name) for ch in chain.children))
     composite = f"{chain.parent}::{children_csv}"
     slug = composite.replace("::", "__")
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -953,7 +954,7 @@ def test_put_chain_edit_renders_card_after_save(
     if not pre.chains:
         return  # spec_example has at least one
     chain = pre.chains[0]
-    children = [str(c) for c in chain.children]
+    children = [str(c.name) for c in chain.children]
     children_csv = ",".join(sorted(children))
     composite = f"{chain.parent}::{children_csv}"
     data = {
@@ -970,9 +971,9 @@ def test_put_chain_edit_renders_card_after_save(
     saved = next(
         ch for ch in reloaded.chains
         if str(ch.parent) == str(chain.parent)
-        and sorted(str(c) for c in ch.children) == sorted(children)
+        and sorted(str(c.name) for c in ch.children) == sorted(children)
     )
-    assert sorted(str(c) for c in saved.children) == sorted(children)
+    assert sorted(str(c.name) for c in saved.children) == sorted(children)
 
 
 def test_chain_create_form_renders_parent_child_dropdowns(
@@ -1020,24 +1021,28 @@ def test_chain_card_renders_fan_in_field_on_existing_fan_in_chain(
     app = _build_app(writable_l2_yaml)
     pre = load_instance(writable_l2_yaml)
     fan_in_chain = next(
-        (c for c in pre.chains if c.fan_in),
+        (c for c in pre.chains if any(ch.fan_in for ch in c.children)),
         None,
     )
     if fan_in_chain is None:
         return  # AB.4.5.spec hasn't activated; defensive skip
-    children_csv = ",".join(sorted(str(ch) for ch in fan_in_chain.children))
+    children_csv = ",".join(sorted(str(ch.name) for ch in fan_in_chain.children))
     composite = f"{fan_in_chain.parent}::{children_csv}"
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.get(f"/l2_shape/chain/{composite}/edit")
     assert resp.status_code == 200, resp.text
     body = resp.text
-    # fan_in select preselects true.
+    # AB.6.1 transitional: editor still presents chain-level fields by
+    # collapsing per-child flags (all children share — AB.4 shape).
+    # AB.6.7 will replace this with a per-child sub-form.
     assert '<option value="true" selected>true</option>' in body
-    # expected_parent_count text input carries the value.
-    if fan_in_chain.expected_parent_count is not None:
+    # expected_parent_count text input carries the value (collapsed from
+    # the first fan_in child).
+    fan_in_child = next(ch for ch in fan_in_chain.children if ch.fan_in)
+    if fan_in_child.expected_parent_count is not None:
         assert (
             f'name="expected_parent_count" type="text" '
-            f'value="{fan_in_chain.expected_parent_count}"'
+            f'value="{fan_in_child.expected_parent_count}"'
         ) in body
 
 

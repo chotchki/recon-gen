@@ -234,15 +234,25 @@ def _dump_transfer_template(t: TransferTemplate) -> dict[str, Any]:  # typing-sm
 def _dump_chain(c: Chain) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
     out: dict[str, Any] = {  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
         "parent": str(c.parent),
-        "children": [str(child) for child in c.children],
+        "children": [str(child.name) for child in c.children],
     }
-    # AB.4: emit fan_in + expected_parent_count only when non-default
-    # so every pre-AB.4 chain round-trips byte-equivalent (mirrors
-    # AB.1's direction non-default omit pattern).
-    if c.fan_in:
+    # AB.6.1 transitional: collapse per-child fan_in / expected_parent_count
+    # back to chain-level for AB.4-shape round-trip parity. AB.6.2 will
+    # emit per-child mapping form when children diverge; for now (AB.6.1)
+    # AB.4-era yamls (all children share the same flag) round-trip
+    # byte-equivalent through this collapse.
+    if any(child.fan_in for child in c.children):
         out["fan_in"] = True
-    if c.expected_parent_count is not None:
-        out["expected_parent_count"] = c.expected_parent_count
+    epcs = {
+        child.expected_parent_count
+        for child in c.children
+        if child.expected_parent_count is not None
+    }
+    if epcs:
+        # AB.6.1 invariant: AB.4 yamls only express one chain-level
+        # expected_parent_count, so all per-child copies match. AB.6.2
+        # heterogeneous emit handles the divergent case.
+        out["expected_parent_count"] = next(iter(epcs))
     if c.description is not None:
         out["description"] = c.description
     return out

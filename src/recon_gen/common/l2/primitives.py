@@ -372,6 +372,35 @@ class TransferTemplate:
 
 
 @dataclass(frozen=True, slots=True)
+class ChainChildSpec:
+    """One entry in ``Chain.children`` — name plus optional fan-in flag.
+
+    AB.6 (2026-05-19) relocated ``fan_in`` + ``expected_parent_count``
+    from chain-level to per-child. Motivation (per SPEC_gap_feedback §5):
+    a single chain may carry mixed-cardinality children — some 1:1
+    (ACH / wire / check) AND one N:1 (batched payout) — which a single
+    chain-level flag can't express.
+
+    ``name`` resolves to either a Rail or a TransferTemplate (same
+    resolution rules R5 / S4 apply per-child entry).
+
+    ``fan_in=True`` declares THIS child is N:1 — N parent firings may
+    share one child Transfer (the batched-payout pattern). Validator
+    requires fan_in children to resolve to TransferTemplates only.
+
+    ``expected_parent_count`` (when set) declares the exact number of
+    parent firings per child Transfer. Set + matview flags
+    exact-mismatch (parent count != expected). Unset + matview falls
+    back to orphan-only detection (parent count < 2). Must be None
+    when ``fan_in=False`` (validator C8b).
+    """
+
+    name: Identifier
+    fan_in: bool = False
+    expected_parent_count: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Chain:
     """A firing rule: one parent + one list of candidate children.
 
@@ -385,28 +414,16 @@ class Chain:
     Aggregating rails MUST NOT appear in ``children`` (they don't have
     per-Transfer parents — they sweep on cadence). Validator enforces.
 
-    ``fan_in`` (AB.4) declares an N:1 chain — N parent firings may
-    share one child Transfer (the batched-payout pattern: a monthly
-    merchant payout aggregates K daily settlements into one
-    end-of-month transfer). Default ``False`` keeps every pre-AB.4
-    Chain shape byte-equivalent. When ``True``, the validator requires
-    the child to be a TransferTemplate (rail-as-child fan-in isn't
-    well-defined — a rail's per-Transfer parent is the canonical
-    1:1 shape).
-
-    ``expected_parent_count`` (AB.4) declares how many parent firings
-    are expected per child Transfer when ``fan_in=True``. Set + matview
-    flags exact-mismatch (parent count != expected). Unset + matview
-    falls back to orphan-only detection (parent count < 2). Must be
-    None when ``fan_in=False`` (validator C8). Per AB.4.0 lock,
-    operator picks contract strength per chain — variable-batch-size
-    flows leave it unset; fixed-size flows set it for tighter detection.
+    AB.6 (2026-05-19): ``children`` is now ``tuple[ChainChildSpec, ...]``
+    — the AB.4 chain-level ``fan_in`` + ``expected_parent_count`` flags
+    moved per-child to allow mixed-cardinality chains. Loader rejects
+    chain-level fan_in / expected_parent_count with an actionable error
+    pointing at the per-child shape (hard cut per AB.6.0 lock, no
+    deprecation grace window).
     """
 
     parent: Identifier
-    children: tuple[Identifier, ...]
-    fan_in: bool = False
-    expected_parent_count: int | None = None
+    children: tuple[ChainChildSpec, ...]
     description: str | None = None
 
 

@@ -634,12 +634,12 @@ def _render_chain_parent_disagreement_fan_in_filter(
     """
     fan_in_templates: set[str] = set()
     for chain in instance.chains:
-        if not chain.fan_in:
-            continue
         for child in chain.children:
+            if not child.fan_in:
+                continue
             # C8a guarantees every fan_in child is a TransferTemplate
             # (validator enforces); collect their names.
-            fan_in_templates.add(str(child))
+            fan_in_templates.add(str(child.name))
     if not fan_in_templates:
         return ""
     quoted = ", ".join(f"'{name}'" for name in sorted(fan_in_templates))
@@ -811,12 +811,12 @@ def _render_fan_in_disagreement_body(
     """
     fan_in_rows: list[tuple[str, str, int | None]] = []
     for chain in instance.chains:
-        if not chain.fan_in:
-            continue
         for child in chain.children:
+            if not child.fan_in:
+                continue
             # C8a guarantees every fan_in child is a TransferTemplate.
             fan_in_rows.append(
-                (str(chain.parent), str(child), chain.expected_parent_count),
+                (str(chain.parent), str(child.name), child.expected_parent_count),
             )
 
     if not fan_in_rows:

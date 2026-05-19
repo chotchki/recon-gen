@@ -253,8 +253,8 @@ def render_l2_chain_focus(l2_instance: L2Instance) -> str | None:
             g.node(ref_id, ref_id, fillcolor="#f5f5f5")
 
     _add_endpoint(chain.parent)
-    for child in chain.children:
-        _add_endpoint(child)
+    for child_spec in chain.children:
+        _add_endpoint(child_spec.name)
     _add_chain_edge(g, chain)
     return g.source
 
@@ -538,8 +538,8 @@ def _build_chains_graph(l2_instance: L2Instance) -> graphviz.Digraph:
     referenced_ids: set[str] = set()
     for chain in l2_instance.chains:
         referenced_ids.add(str(chain.parent))
-        for child in chain.children:
-            referenced_ids.add(str(child))
+        for child_spec in chain.children:
+            referenced_ids.add(str(child_spec.name))
 
     rails_by_name = {str(r.name): r for r in l2_instance.rails}
     templates_by_name = {str(t.name): t for t in l2_instance.transfer_templates}
@@ -603,10 +603,10 @@ def _build_layered_graph(l2_instance: L2Instance) -> graphviz.Digraph:
             is_required = len(chain.children) == 1
             style = "solid" if is_required else "dashed"
             label = "" if is_required else "xor"
-            for child in chain.children:
+            for child_spec in chain.children:
                 c.edge(
                     f"chain::{chain.parent}",
-                    f"chain::{child}",
+                    f"chain::{child_spec.name}",
                     label=label,
                     style=style,
                     color="#666666",
@@ -993,10 +993,10 @@ def _add_chain_edge(g: graphviz.Digraph, chain: Chain) -> None:
     is_required = len(chain.children) == 1
     style = "solid" if is_required else "dashed"
     label = "required" if is_required else "xor"
-    for child in chain.children:
+    for child_spec in chain.children:
         g.edge(
             str(chain.parent),
-            str(child),
+            str(child_spec.name),
             label=label,
             fontsize="9",
             style=style,

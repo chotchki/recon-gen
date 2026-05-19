@@ -49,7 +49,7 @@ def test_no_focus_returns_all_entities() -> None:
     # editor + topology + visibility surfaces all address chain rows
     # the same way.
     assert v["chain"] == frozenset(
-        f"{c.parent}::{','.join(sorted(str(ch) for ch in c.children))}"
+        f"{c.parent}::{','.join(sorted(str(ch.name) for ch in c.children))}"
         for c in inst.chains
     )
     assert v["limit_schedule"] == frozenset(

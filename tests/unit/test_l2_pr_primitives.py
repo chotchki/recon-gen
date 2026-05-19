@@ -213,9 +213,9 @@ class TestXorGroupEnforcement:
             if len(c.children) < 2:
                 continue
             for child in c.children:
-                assert str(child) not in aggregating_names, (
+                assert str(child.name) not in aggregating_names, (
                     f"Chain row parent={c.parent!r} children={list(c.children)!r}: "
-                    f"{child!r} is aggregating — XOR groups can only target "
+                    f"{child.name!r} is aggregating — XOR groups can only target "
                     f"non-aggregating rails or templates."
                 )
 
@@ -235,7 +235,7 @@ class TestXorGroupEnforcement:
         assert payout is not None, (
             "Expected the merchant payout XOR row under MerchantSettlementCycle"
         )
-        children = sorted(str(ch) for ch in payout.children)
+        children = sorted(str(ch.name) for ch in payout.children)
         assert children == [
             "MerchantPayoutACH", "MerchantPayoutCheck", "MerchantPayoutWire",
         ]

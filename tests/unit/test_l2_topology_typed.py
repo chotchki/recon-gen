@@ -18,6 +18,7 @@ from recon_gen.common.l2 import (
     Account,
     AccountTemplate,
     Chain,
+    ChainChildSpec,
     Identifier,
     L2Instance,
     Name,
@@ -101,7 +102,7 @@ def _kitchen_instance() -> L2Instance:
         chains=(
             Chain(
                 parent=Identifier("InboundRail"),
-                children=(Identifier("SettlementCycle"),),
+                children=(ChainChildSpec(name=Identifier("SettlementCycle")),),
             ),
         ),
         limit_schedules=(),
@@ -262,7 +263,10 @@ def test_topology_graph_chain_edge_carries_xor_group_metadata() -> None:
         chains=(
             Chain(
                 parent=Identifier("Parent"),
-                children=(Identifier("ChildA"), Identifier("ChildB")),
+                children=(
+                    ChainChildSpec(name=Identifier("ChildA")),
+                    ChainChildSpec(name=Identifier("ChildB")),
+                ),
             ),
         ),
         limit_schedules=(),
@@ -392,9 +396,13 @@ def test_topology_graph_chain_edge_carries_fan_in_metadata() -> None:
         chains=(
             Chain(
                 parent=Identifier("Parent"),
-                children=(Identifier("ChildTpl"),),
-                fan_in=True,
-                expected_parent_count=3,
+                children=(
+                    ChainChildSpec(
+                        name=Identifier("ChildTpl"),
+                        fan_in=True,
+                        expected_parent_count=3,
+                    ),
+                ),
             ),
         ),
         limit_schedules=(),

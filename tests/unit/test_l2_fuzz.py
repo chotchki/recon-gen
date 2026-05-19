@@ -146,10 +146,10 @@ def test_fuzzer_exercises_every_primitive_kind_across_seeds(
             if len(c.children) >= 2:
                 saw["chain_with_multiple_children"] = True
             # AB.2.6.fuzz — singleton child resolving to a template.
-            if len(c.children) == 1 and c.children[0] in template_name_set:
+            if len(c.children) == 1 and c.children[0].name in template_name_set:
                 saw["chain_with_template_child"] = True
-            # AB.4.5.fuzz — chain with fan_in=True.
-            if c.fan_in:
+            # AB.4.5.fuzz — chain with any per-child fan_in entry.
+            if any(child.fan_in for child in c.children):
                 saw["fan_in_chain"] = True
         # AB.3.5.fuzz — TT with non-empty leg_rail_xor_groups.
         for t in inst.transfer_templates:

@@ -178,7 +178,8 @@ async def coverage_for(
         # diagram chrome paints one chain edge per child (singleton =
         # 1 edge, multi/XOR = N edges), so the coverage map needs to
         # match 1:1.
-        for child_name in ch.children:
+        for child_spec in ch.children:
+            child_name = child_spec.name
             child_count = (
                 rail_counts.get(str(child_name), 0)
                 + tmpl_counts.get(str(child_name), 0)

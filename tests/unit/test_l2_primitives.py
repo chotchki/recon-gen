@@ -17,6 +17,7 @@ from recon_gen.common.l2 import (
     Account,
     AccountTemplate,
     Chain,
+    ChainChildSpec,
     Identifier,
     L2Instance,
     LimitSchedule,
@@ -80,7 +81,7 @@ def _example_instance() -> L2Instance:
         chains=(
             Chain(
                 parent=Identifier("MerchantSettlementCycle"),
-                children=(Identifier("MerchantPayoutACH"),),
+                children=(ChainChildSpec(name=Identifier("MerchantPayoutACH")),),
             ),
         ),
         limit_schedules=(

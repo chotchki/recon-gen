@@ -283,7 +283,9 @@ def test_pipeline_chain_xor_group(tmp_path: Path) -> None:
     assert len(inst.chains) == 1
     chain = inst.chains[0]
     assert chain.parent == "SettlementCycle"
-    assert set(chain.children) == {"PayoutACH", "PayoutVoucher", "PayoutInternal"}
+    assert {c.name for c in chain.children} == {
+        "PayoutACH", "PayoutVoucher", "PayoutInternal",
+    }
 
 
 def test_pipeline_chain_fan_out(tmp_path: Path) -> None:
@@ -315,7 +317,7 @@ def test_pipeline_chain_fan_out(tmp_path: Path) -> None:
               - PerRecipientCredit
         """), tmp_path, prefix="t9")
     chain = inst.chains[0]
-    assert chain.children == ("PerRecipientCredit",)
+    assert tuple(c.name for c in chain.children) == ("PerRecipientCredit",)
     assert len(chain.children) == 1  # singleton = required semantics
 
 

@@ -356,7 +356,7 @@ def _chain_label(chain: Chain, *, cardinality: Literal["required", "xor"]) -> st
     """
     if cardinality == "required":
         return "chain\n(required)"
-    siblings = ", ".join(str(c) for c in chain.children)
+    siblings = ", ".join(str(c.name) for c in chain.children)
     return f"chain\n(xor: {siblings})"
 
 
@@ -435,7 +435,7 @@ def topology_graph_for(
     for chain in instance.chains:
         chain_referenced.add(chain.parent)
         for child in chain.children:
-            chain_referenced.add(child)
+            chain_referenced.add(child.name)
     template_names: set[Identifier] = {
         t.name for t in instance.transfer_templates
     }
@@ -574,8 +574,9 @@ def topology_graph_for(
         cardinality: Literal["required", "xor"] = (
             "required" if len(chain.children) == 1 else "xor"
         )
-        siblings_str = ",".join(str(c) for c in chain.children)
-        for child_name in chain.children:
+        siblings_str = ",".join(str(c.name) for c in chain.children)
+        for child_spec in chain.children:
+            child_name = child_spec.name
             child_id = (
                 _template_id(child_name)
                 if child_name in template_names
@@ -584,15 +585,17 @@ def topology_graph_for(
             chain_metadata: dict[str, str] = {"cardinality": cardinality}
             if cardinality == "xor":
                 chain_metadata["xor_siblings"] = siblings_str
-            # AB.4.9 — fan_in chain edges tag their metadata with
-            # ``fan_in=true`` (and the chain's ``expected_parent_count``
-            # when set) so renderers can apply distinct styling. Mirrors
-            # AB.3.8's ``xor_group_index`` metadata convention.
-            if chain.fan_in:
+            # AB.6 (per-child) — fan_in edges tag metadata with
+            # ``fan_in=true`` (and the child's ``expected_parent_count``
+            # when set) so renderers can apply distinct styling on the
+            # specific child edge. Mirrors AB.3.8's ``xor_group_index``
+            # metadata convention; AB.4.9 tagged at chain level — AB.6
+            # narrows to the specific fan-in child edge.
+            if child_spec.fan_in:
                 chain_metadata["fan_in"] = "true"
-                if chain.expected_parent_count is not None:
+                if child_spec.expected_parent_count is not None:
                     chain_metadata["expected_parent_count"] = str(
-                        chain.expected_parent_count,
+                        child_spec.expected_parent_count,
                     )
             edges.append(TopologyEdge(
                 source=parent_id,
@@ -763,8 +766,8 @@ def build_topology_graph_per_rail(
         if chain.parent in rail_names_set:
             anchored_rails.add(chain.parent)
         for child in chain.children:
-            if child in rail_names_set:
-                anchored_rails.add(child)
+            if child.name in rail_names_set:
+                anchored_rails.add(child.name)
     for tmpl in instance.transfer_templates:
         for rn in tmpl.leg_rails:
             if rn in rail_names_set:
@@ -880,7 +883,8 @@ def build_topology_graph_per_rail(
                 if chain.parent in template_names_set
                 else _rail_id(chain.parent)
             )
-            for child_name in chain.children:
+            for child_spec in chain.children:
+                child_name = child_spec.name
                 child_id = (
                     _template_id(child_name)
                     if child_name in template_names_set
@@ -1200,7 +1204,8 @@ def build_topology_graph_per_rail(
         cardinality: Literal["required", "xor"] = (
             "required" if len(chain.children) == 1 else "xor"
         )
-        for child_name in chain.children:
+        for child_spec in chain.children:
+            child_name = child_spec.name
             child_id = (
                 _template_id(child_name)
                 if child_name in template_names_set
@@ -1208,14 +1213,16 @@ def build_topology_graph_per_rail(
             )
             if not (_in_focus(parent_id) and _in_focus(child_id)):
                 continue
-            # AB.4.9 — fan_in chains render with a distinct visual hint:
-            # "bold" pen weight + a label annotation "fan-in N→1" so the
-            # diagram reader sees the N:1 shape without reading the
-            # chain's yaml. Non-fan-in chains stay unchanged.
-            if chain.fan_in:
+            # AB.6 (per-child) — fan-in edges render with a distinct
+            # visual hint: "bold" pen weight + a label annotation
+            # "fan-in N→1" so the diagram reader sees the N:1 shape
+            # without reading the yaml. Non-fan-in edges (including
+            # siblings of a fan-in entry under mixed-cardinality)
+            # stay unchanged.
+            if child_spec.fan_in:
                 fan_in_suffix = (
-                    f" [fan-in {chain.expected_parent_count}→1]"
-                    if chain.expected_parent_count is not None
+                    f" [fan-in {child_spec.expected_parent_count}→1]"
+                    if child_spec.expected_parent_count is not None
                     else " [fan-in N→1]"
                 )
                 label = _chain_label(
@@ -1364,7 +1371,8 @@ def visible_entities_for(
             if chain.parent in template_names_set
             else _rail_id(chain.parent)
         )
-        for child_name in chain.children:
+        for child_spec in chain.children:
+            child_name = child_spec.name
             child_id = (
                 _template_id(child_name)
                 if child_name in template_names_set
@@ -1420,10 +1428,10 @@ def visible_entities_for(
     # Z.A: chain composite key = "parent::sorted-children-csv" — the
     # same shape the editor's _find_entity uses to address Chain rows.
     chains = frozenset(
-        f"{c.parent}::{','.join(sorted(str(ch) for ch in c.children))}"
+        f"{c.parent}::{','.join(sorted(str(ch.name) for ch in c.children))}"
         for c in instance.chains
         if str(c.parent) in rail_or_tmpl
-        or any(str(ch) in rail_or_tmpl for ch in c.children)
+        or any(str(ch.name) in rail_or_tmpl for ch in c.children)
     )
     limit_schedules = frozenset(
         f"{ls.parent_role}::{ls.rail}"
@@ -1455,7 +1463,7 @@ def _all_entities_per_kind(
             str(t.name) for t in instance.transfer_templates
         ),
         "chain": frozenset(
-            f"{c.parent}::{','.join(sorted(str(ch) for ch in c.children))}"
+            f"{c.parent}::{','.join(sorted(str(ch.name) for ch in c.children))}"
             for c in instance.chains
         ),
         "limit_schedule": frozenset(

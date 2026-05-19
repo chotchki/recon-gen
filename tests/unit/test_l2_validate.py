@@ -20,6 +20,7 @@ from recon_gen.common.l2 import (
     Account,
     AccountTemplate,
     Chain,
+    ChainChildSpec,
     Identifier,
     L2Instance,
     L2ValidationError,
@@ -278,7 +279,7 @@ def test_r5_chain_endpoints_must_exist() -> None:
     inst = _baseline_instance()
     bad_chain = Chain(
         parent=Identifier("MerchantSettlementCycle"),
-        children=(Identifier("NonexistentRail"),),
+        children=(ChainChildSpec(name=Identifier("NonexistentRail")),),
     )
     bad = _replace(inst, chains=(bad_chain,))
     with pytest.raises(L2ValidationError, match=r"chains\[0\]\.children\[0\]"):
@@ -436,7 +437,7 @@ def test_s4_aggregating_rail_rejected_as_chain_child() -> None:
     inst = _baseline_instance()
     bad_chain = Chain(
         parent=Identifier("MerchantSettlementCycle"),
-        children=(Identifier("PoolBalancing"),),  # aggregating rail
+        children=(ChainChildSpec(name=Identifier("PoolBalancing")),),  # aggregating rail
     )
     bad = _replace(inst, chains=(bad_chain,))
     with pytest.raises(
@@ -1020,7 +1021,7 @@ def test_c5_chain_row_with_empty_children_rejected() -> None:
     empty_chain = Chain(
         parent=Identifier("MerchantSettlementCycle"),
         children=(),
-    )
+    )  # validator C5 rejects empty children
     bad = _replace(inst, chains=(empty_chain,))
     with pytest.raises(L2ValidationError, match="children list is empty"):
         validate(bad)
@@ -1035,13 +1036,16 @@ def test_c6_duplicate_child_under_same_parent_rejected() -> None:
     inst = _baseline_instance()
     a = Chain(
         parent=Identifier("MerchantSettlementCycle"),
-        children=(Identifier("ExtInbound"),),
+        children=(ChainChildSpec(name=Identifier("ExtInbound")),),
     )
     # Same parent, ExtInbound listed in this row's XOR siblings as
     # well — duplicates the child reference under the same parent.
     b = Chain(
         parent=Identifier("MerchantSettlementCycle"),
-        children=(Identifier("ExtInbound"), Identifier("SubledgerCharge")),
+        children=(
+            ChainChildSpec(name=Identifier("ExtInbound")),
+            ChainChildSpec(name=Identifier("SubledgerCharge")),
+        ),
     )
     bad = _replace(inst, chains=(a, b))
     with pytest.raises(
@@ -1256,37 +1260,46 @@ def test_xor_groups_empty_default_no_change_to_validator() -> None:
     validate(inst)
 
 
-# -- C8a-c (AB.4): Chain.fan_in + expected_parent_count rules --------------
+# -- C8a-c (AB.6 per-child): ChainChildSpec.fan_in + .expected_parent_count rules
 
 
 def test_c8a_fan_in_with_rail_child_rejected() -> None:
-    """C8a (AB.4): fan_in=True requires every child to resolve to a
-    TransferTemplate. Pointing fan_in at a Rail-as-child is rejected."""
+    """C8a (AB.6 per-child): a child with fan_in=True must resolve to a
+    TransferTemplate. Pointing per-child fan_in at a Rail-as-child is
+    rejected."""
     inst = _baseline_instance()
     bad = _replace(inst, chains=(
         Chain(
             parent=Identifier("MerchantSettlementCycle"),
-            children=(Identifier("ExtInbound"),),  # ExtInbound is a Rail
-            fan_in=True,
-            expected_parent_count=3,
+            children=(
+                ChainChildSpec(
+                    name=Identifier("ExtInbound"),  # ExtInbound is a Rail
+                    fan_in=True,
+                    expected_parent_count=3,
+                ),
+            ),
         ),
     ))
     with pytest.raises(
         L2ValidationError,
-        match=r"fan_in=True.*non-template children.*ExtInbound",
+        match=r"child 'ExtInbound'.*fan_in=True must resolve to a TransferTemplate",
     ):
         validate(bad)
 
 
 def test_c8a_fan_in_with_template_child_accepted() -> None:
-    """C8a positive: fan_in=True + TransferTemplate child is legal."""
+    """C8a positive: per-child fan_in=True + TransferTemplate child is legal."""
     inst = _baseline_instance()
     ok = _replace(inst, chains=(
         Chain(
             parent=Identifier("ExtInbound"),
-            children=(Identifier("MerchantSettlementCycle"),),
-            fan_in=True,
-            expected_parent_count=3,
+            children=(
+                ChainChildSpec(
+                    name=Identifier("MerchantSettlementCycle"),
+                    fan_in=True,
+                    expected_parent_count=3,
+                ),
+            ),
         ),
     ))
     validate(ok)
@@ -1294,20 +1307,24 @@ def test_c8a_fan_in_with_template_child_accepted() -> None:
 
 def test_c8b_expected_parent_count_without_fan_in_rejected() -> None:
     """C8b: expected_parent_count is meaningful only under fan_in=True.
-    Setting it on a non-fan-in chain is rejected with a helpful
+    Setting it on a non-fan-in child is rejected with a helpful
     "remove it or set fan_in=True" message."""
     inst = _baseline_instance()
     bad = _replace(inst, chains=(
         Chain(
             parent=Identifier("ExtInbound"),
-            children=(Identifier("MerchantSettlementCycle"),),
-            fan_in=False,
-            expected_parent_count=3,
+            children=(
+                ChainChildSpec(
+                    name=Identifier("MerchantSettlementCycle"),
+                    fan_in=False,
+                    expected_parent_count=3,
+                ),
+            ),
         ),
     ))
     with pytest.raises(
         L2ValidationError,
-        match=r"expected_parent_count.*set.*but fan_in is False",
+        match=r"expected_parent_count is set.*but fan_in is\s+False",
     ):
         validate(bad)
 
@@ -1320,14 +1337,18 @@ def test_c8c_expected_parent_count_one_under_fan_in_rejected() -> None:
     bad = _replace(inst, chains=(
         Chain(
             parent=Identifier("ExtInbound"),
-            children=(Identifier("MerchantSettlementCycle"),),
-            fan_in=True,
-            expected_parent_count=1,
+            children=(
+                ChainChildSpec(
+                    name=Identifier("MerchantSettlementCycle"),
+                    fan_in=True,
+                    expected_parent_count=1,
+                ),
+            ),
         ),
     ))
     with pytest.raises(
         L2ValidationError,
-        match=r"fan_in=True.*expected_parent_count=1.*degenerate",
+        match=r"fan_in=True with expected_parent_count=1 is degenerate",
     ):
         validate(bad)
 
@@ -1340,23 +1361,27 @@ def test_c8_fan_in_with_expected_parent_count_unset_accepted() -> None:
     ok = _replace(inst, chains=(
         Chain(
             parent=Identifier("ExtInbound"),
-            children=(Identifier("MerchantSettlementCycle"),),
-            fan_in=True,
-            expected_parent_count=None,
+            children=(
+                ChainChildSpec(
+                    name=Identifier("MerchantSettlementCycle"),
+                    fan_in=True,
+                    expected_parent_count=None,
+                ),
+            ),
         ),
     ))
     validate(ok)
 
 
 def test_chain_fan_in_default_no_change_to_validator() -> None:
-    """Defense-in-depth: a Chain with default ``fan_in=False`` +
-    ``expected_parent_count=None`` passes validation cleanly. All
-    pre-AB.4 chains round-trip."""
+    """Defense-in-depth: a Chain whose children all default
+    ``fan_in=False`` + ``expected_parent_count=None`` passes validation
+    cleanly. All pre-AB.4 chains round-trip."""
     inst = _baseline_instance()
     ok = _replace(inst, chains=(
         Chain(
             parent=Identifier("ExtInbound"),
-            children=(Identifier("MerchantSettlementCycle"),),
+            children=(ChainChildSpec(name=Identifier("MerchantSettlementCycle")),),
         ),
     ))
     validate(ok)

@@ -21,6 +21,7 @@ from decimal import Decimal
 from recon_gen.common.l2.primitives import (
     Account,
     Chain,
+    ChainChildSpec,
     Identifier,
     L2Instance,
     Money,
@@ -83,9 +84,13 @@ def _toy_instance(
         chains=(
             Chain(
                 parent=Identifier("ParentRail"),
-                children=(Identifier("BatchedPayout"),),
-                fan_in=fan_in,
-                expected_parent_count=expected_parent_count,
+                children=(
+                    ChainChildSpec(
+                        name=Identifier("BatchedPayout"),
+                        fan_in=fan_in,
+                        expected_parent_count=expected_parent_count,
+                    ),
+                ),
             ),
         ),
         limit_schedules=(),
