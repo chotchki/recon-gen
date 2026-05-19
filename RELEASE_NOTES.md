@@ -1,5 +1,40 @@
 # Release Notes
 
+## v11.6.0 — AB.6 per-child fan_in + multi-XOR runtime enforcement
+
+Feature release. Phase AB.6 bundles SPEC Enhancements 5+6: relocate `fan_in` from chain-level to per-child (E5 — mixed-cardinality chains become expressible) AND add runtime enforcement of chain.md's "multi-children = exactly one MUST fire" contract (E6 — the new `_multi_xor_violation` L1 invariant matview). **Hard cut** on chain-level `fan_in: true` / `expected_parent_count` — loader rejects with an actionable per-child pointer (no deprecation grace per AB.6.0 Lock 2). Operator yamls migrate at the same commit.
+
+**Per-child shape (E5).** `Chain.children` is now `tuple[ChainChildSpec, ...]` where `ChainChildSpec(name, fan_in=False, expected_parent_count=None)`. Bare-Identifier YAML entries lower to default `ChainChildSpec`; mapping form `{name: Foo, fan_in: true, expected_parent_count: 3}` opts a specific child into fan-in. Validator C8a-c re-keyed per-child:
+- **C8a**: a child with `fan_in=True` MUST resolve to a TransferTemplate (rail-as-child fan-in is undefined per gap doc §2 footnote — close the door at load).
+- **C8b**: `expected_parent_count` only meaningful under `fan_in=True`.
+- **C8c**: `expected_parent_count ≥ 2` when set (1-parent fan-in is degenerate).
+
+**Mixed-cardinality.** A chain can carry both 1:1 XOR alternation children AND a fan-in child — the canonical example sasquatch lands: `MerchantSettlementCycle → [MerchantPayoutACH, MerchantPayoutWire, MerchantPayoutCheck, MerchantWeeklyPayoutBatch(fan_in=true, expected_parent_count=5)]`. Each settled cycle fires exactly ONE payout vehicle (XOR) AND contributes to the week's batched payout. The seed loop emits both buckets independently per parent firing.
+
+**Multi-XOR runtime enforcement (E6).** New L1 invariant matview `<prefix>_multi_xor_violation`: for every multi-children chain (≥2 children), after stripping per-child fan_in entries (their cardinality is `_fan_in_disagreement`'s job — AB.5 coupling), every parent firing SHOULD have exactly ONE non-fan_in child fire under it. Long-form, one row per `(parent_transfer_id, disagreement_kind)`:
+- `'missed'` (`child_count = 0`): the XOR contract was dropped on the floor — parent fired, no child followed.
+- `'overlap'` (`child_count ≥ 2`): XOR alternation collapsed — two or more children fired under one parent.
+
+Body shape: inline `(chain_parent_name, child_name)` CTE → UNION-of-template+rail `parent_firings` CTE (chain.parent can be either kind) → LEFT JOIN against `_current_transactions` keyed on `transfer_parent_id` → GROUP BY parent + HAVING `COUNT(...) <> 1`. Empty case (no qualifying chain) falls back to typed-NULL `WHERE 1=0` per AB.3.3/AB.4.7 precedent.
+
+**Plants.** `MultiXorMissedPlant(chain_parent_rail_name, days_ago)` + `MultiXorOverlapPlant(chain_parent_rail_name, variant_a_child_name, variant_b_child_name, days_ago)` lay out one of each at `days_ago=6/5` (separable from AB.4 fan-in plants at 3/4/5 on the date axis). Picker `_pick_multi_xor_chain_inputs` finds chains with Rail parent + ≥2 non-fan_in children.
+
+**Today's Exceptions UNION ALL** gains a 10th branch `check_type='multi_xor_violation'`: `parent_rail_or_template_name → rail_name`, `child_count → magnitude`. Dashboard wiring extends `INVARIANT_KIND_TO_SHEET` + `_studio_training._L1_KIND_TO_SHEET_ID` + `_DISPLAY_ORDER`.
+
+**Studio editor.** Chain card replaced 3 FieldSpec entries (children + chain-level fan_in + expected_parent_count) with a single `chain_children` kind that renders the children checkbox group with per-child fan-in checkbox + epc text input on each row. Operator picks the fan-in target with one click; mixed-cardinality chains are now expressible entirely via Studio. Form coerce builds `tuple[ChainChildSpec, ...]` directly. Topology renderer reads per-child fan_in for the visual `[fan-in N→1]` hint on the specific fan_in edge (not the chain as a whole).
+
+**Loader hard-cut.** Chain-level `fan_in` / `expected_parent_count` rejected with: `chain-level [...] no longer supported. AB.6 (2026-05-19): chain-level fan_in / expected_parent_count have moved to per-child entries. ...`. spec_example + sasquatch_pr migrated to per-child shape; bundled 4-way (`tests/l2` + `_l2_fixtures` + `apps/l1_dashboard/_default_l2.yaml` + `docs/reference/fixtures`).
+
+**Fixtures.** spec_example gains a dedicated `BulkAccrualSettlement → [BulkAccrualSettleACH, BulkAccrualSettleWire]` multi-XOR chain (+ 3 supporting rails) so the AB.6.6 plants surface in the demo. Sasquatch's `MerchantSettlementCycle` folded `MerchantWeeklyPayoutBatch (fan_in=true, expected_parent_count=5)` as a 4th child alongside the 3 XOR payout vehicles — the canonical mixed-cardinality demo per AB.6.6.sasq (option 2 fold + keep standalone).
+
+**Fuzzer.** Synthesized template-child chains emit per-child mapping form with ~20% probability — bare-Identifier children still round-trip through the loader as `ChainChildSpec` defaults.
+
+**Docs.** `concepts/l2/chain.md` gains "Multi-XOR runtime enforcement (AB.6.5)" + "Mixed-cardinality chains (AB.6 per-child shape)" sections with the canonical YAML example. New `walkthroughs/customization/how-do-i-mix-cardinality-children.md` worked example framed around sasquatch's MerchantSettlementCycle. `L1_Invariants.md` §11 documents `multi_xor_violation`. `how-do-i-model-batched-payouts.md` migrated to per-child mapping form.
+
+**Tests.** 17 new + several updated across the AB.6 surface: schema body shape (empty + populated + UNION ALL branch + per-child fan_in skip), picker contracts (eligible chain / template-parent skip / per-child fan_in skip / singleton skip), Studio per-child UI render + coerce, validator C8a-c per-child, loader heterogeneous parser + chain-level reject, serializer mapping emit, fuzz meta-guard. Full sweep: 2416 unit + data + schema passed, 84 skipped.
+
+**Re-locked seeds.** spec_example seeds regenerated for the new BulkAccrualSettlement chain. Mixed-cardinality routing landed in seed.py: each parent firing emits BOTH an XOR-picked non-fan_in child firing AND a contribution to every fan_in child's batch.
+
 ## v11.5.0 — AB.5 soft per-firing magnitude bounds on Rail
 
 Feature release. `TwoLegRail` + `SingleLegRail` gain an optional `amount_typical_range: tuple[Money, Money] | None = None` field — the SPEC gap doc §7 Enhancement 7 ("soft per-firing magnitude bounds"). Operator declares a per-rail typical `[min, max]` band and the test-data generator clamps every firing on that rail to that band via a log-uniform sampler (financial flows cluster at the low end of typical bands; log-uniform reproduces that pattern). **Generator-only first cut** per the gap doc's preferred path — the optional runtime SHOULD-constraint `<prefix>_magnitude_anomaly` matview is deferred to a follow-on when an integrator asks for runtime anomaly surfacing. **Fully additive** — pre-AB.5 rails with no range declared keep their per-kind lognormal heuristic byte-equivalent through seed.
