@@ -561,15 +561,18 @@ def test_v2_cadence_vocabulary_rejects_invalid(bad_cadence: str) -> None:
 
 
 def test_u5_duplicate_limit_schedule_combination_rejected() -> None:
-    """U5: (parent_role, rail) MUST be unique across LimitSchedule.
+    """U5: (parent_role, rail, direction) triple MUST be unique across
+    LimitSchedule.
 
     Z.B (2026-05-15): keyed on the rail name now (was transfer_type).
+    AB.1 (2026-05-19): triple now includes direction.
     """
     inst = _baseline_instance()
     dup = LimitSchedule(
         parent_role=inst.limit_schedules[0].parent_role,
         rail=inst.limit_schedules[0].rail,
         cap=Decimal("999.00"),
+        # Direction defaults to Outbound — same triple as the base entry.
     )
     bad = _replace(inst, limit_schedules=(*inst.limit_schedules, dup))
     with pytest.raises(L2ValidationError, match="duplicate"):
@@ -586,6 +589,47 @@ def test_u5_same_role_different_rail_allowed() -> None:
     )
     ok = _replace(inst, limit_schedules=(*inst.limit_schedules, extra))
     validate(ok)
+
+
+def test_u5_same_parent_rail_different_direction_allowed() -> None:
+    """AB.1: (parent_role, rail) may carry both an Outbound + an Inbound
+    LimitSchedule simultaneously — they're separate U5 triples.
+    """
+    inst = _baseline_instance()
+    inbound_sibling = LimitSchedule(
+        parent_role=inst.limit_schedules[0].parent_role,
+        rail=inst.limit_schedules[0].rail,
+        cap=Decimal("250.00"),
+        direction="Inbound",
+    )
+    ok = _replace(
+        inst, limit_schedules=(*inst.limit_schedules, inbound_sibling),
+    )
+    validate(ok)
+
+
+def test_u5_same_triple_inbound_dup_rejected() -> None:
+    """AB.1: two Inbound caps on the same (parent, rail) still rejected
+    — uniqueness holds at the triple level, not just per-direction.
+    """
+    inst = _baseline_instance()
+    a = LimitSchedule(
+        parent_role=inst.limit_schedules[0].parent_role,
+        rail=inst.limit_schedules[0].rail,
+        cap=Decimal("100.00"),
+        direction="Inbound",
+    )
+    b = LimitSchedule(
+        parent_role=inst.limit_schedules[0].parent_role,
+        rail=inst.limit_schedules[0].rail,
+        cap=Decimal("200.00"),
+        direction="Inbound",
+    )
+    bad = _replace(inst, limit_schedules=(*inst.limit_schedules, a, b))
+    with pytest.raises(
+        L2ValidationError, match="duplicate.*direction='Inbound'",
+    ):
+        validate(bad)
 
 
 # Z.B (2026-05-15): U6 (Rail discriminator uniqueness on (transfer_type,

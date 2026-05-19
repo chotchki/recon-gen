@@ -143,6 +143,7 @@ def _create_audit_schema(conn: sqlite3.Connection) -> None:
             account_parent_role TEXT,
             business_day TEXT NOT NULL,
             rail_name TEXT,
+            direction TEXT NOT NULL,
             outbound_total REAL NOT NULL,
             cap REAL NOT NULL
         );
@@ -221,10 +222,14 @@ def _seed_audit_data(conn: sqlite3.Connection) -> None:
         ],
     )
     cur.executemany(
-        "INSERT INTO ut_limit_breach VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO ut_limit_breach VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
+            # AB.1: 1 Outbound + 1 Inbound row prove the audit query
+            # surfaces both directions.
             ("acct-004", "Acct Four", "dda", "DDAControl",
-             "2030-01-02", "ach", 15000.0, 10000.0),
+             "2030-01-02", "ach", "Outbound", 15000.0, 10000.0),
+            ("acct-004", "Acct Four", "dda", "DDAControl",
+             "2030-01-02", "ach", "Inbound", 25000.0, 20000.0),
         ],
     )
     cur.executemany(
@@ -339,12 +344,16 @@ def test_limit_breach_query_runs_against_sqlite(patched_connect: None) -> None:
     """Limit-breach query uses ``business_day`` (not ``business_day_start``)
     for the period filter — distinct column name from the others.
     Confirms the CAST sweep covers every WHERE-clause site, not just
-    business_day_start ones."""
+    business_day_start ones. AB.1 (2026-05-19): also verifies both
+    Outbound + Inbound rows surface via the new ``direction`` column."""
     rows = _query_limit_breach_violations(_CFG, _INSTANCE, _PERIOD)
     assert rows is not None
-    assert len(rows) == 1
-    assert rows[0].account_id == "acct-004"
-    assert rows[0].overshoot == Decimal("5000")
+    assert len(rows) == 2
+    by_direction = {r.direction: r for r in rows}
+    assert set(by_direction) == {"Outbound", "Inbound"}
+    assert by_direction["Outbound"].account_id == "acct-004"
+    assert by_direction["Outbound"].overshoot == Decimal("5000")
+    assert by_direction["Inbound"].overshoot == Decimal("5000")
 
 
 def test_stuck_pending_query_runs_against_sqlite(patched_connect: None) -> None:
@@ -420,7 +429,9 @@ def test_executive_summary_query_runs_against_sqlite(
     assert counts["Drift"] == 2
     assert counts["Ledger drift"] == 1
     assert counts["Overdraft"] == 1
-    assert counts["Limit breach"] == 1
+    # AB.1: 2 limit_breach rows planted (1 Outbound + 1 Inbound) — both
+    # surface in the exec summary count.
+    assert counts["Limit breach"] == 2
     assert counts["Stuck pending*"] == 1
     assert counts["Stuck unbundled*"] == 1
     # Supersession total = 1 (transactions) + 1 (daily_balances) = 2.

@@ -222,7 +222,7 @@ _OVERDRAFT_SQL = (
 _LIMIT_BREACH_SQL = (
     "SELECT account_id, account_name, account_role,"
     "       account_parent_role, business_day,"
-    "       rail_name, outbound_total, cap"
+    "       rail_name, direction, outbound_total, cap"
     "  FROM ut_limit_breach"
     " WHERE business_day >= DATE '2030-01-01'"
     "   AND business_day < DATE '2030-01-08'"

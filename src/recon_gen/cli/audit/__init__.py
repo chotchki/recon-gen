@@ -569,9 +569,11 @@ def _split_overdraft_by_account_class(
 class LimitBreachViolation:
     """One row of the ``<prefix>_limit_breach`` matview, audit-shaped.
 
-    Each row is one (account, day, rail_name) cell where the
-    cumulative outbound debit total exceeded the L2-configured cap.
-    Magnitude = ``outbound_total - cap`` (always positive).
+    Each row is one (account, day, rail_name, direction) cell where
+    the cumulative flow exceeded the L2-configured cap. Magnitude =
+    ``outbound_total - cap`` (always positive). AB.1 (2026-05-19):
+    added ``direction`` — 'Outbound' (classic per-rail send cap) or
+    'Inbound' (AML / structuring threshold on inbound volume).
     """
     account_id: str
     account_name: str
@@ -579,6 +581,7 @@ class LimitBreachViolation:
     account_parent_role: str
     business_day: date
     rail_name: str
+    direction: str
     outbound_total: Decimal
     cap: Decimal
 
@@ -613,7 +616,7 @@ def _query_limit_breach_violations(
         cur.execute(
             f"SELECT account_id, account_name, account_role,"
             f"       account_parent_role, business_day,"
-            f"       rail_name, outbound_total, cap"
+            f"       rail_name, direction, outbound_total, cap"
             f"  FROM {prefix}_limit_breach"
             f" WHERE business_day >= {start_lit}"
             f"   AND business_day < {end_excl_lit}"
@@ -630,8 +633,9 @@ def _query_limit_breach_violations(
                     _coerce_to_date(r[4])
                 ),
                 rail_name=str(r[5] or ""),
-                outbound_total=Decimal(r[6] or 0),
-                cap=Decimal(r[7] or 0),
+                direction=str(r[6] or "Outbound"),
+                outbound_total=Decimal(r[7] or 0),
+                cap=Decimal(r[8] or 0),
             )
             for r in cur.fetchall()
         ]

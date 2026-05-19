@@ -116,6 +116,9 @@ _LIMIT_BREACH_VIOLATION_FIELDS = (
     ("account_parent_role", "str"),
     ("business_day", "date"),
     ("rail_name", "str"),
+    # AB.1 (2026-05-19): per-direction cap split — Outbound (classic
+    # per-rail send cap) vs Inbound (AML / structuring threshold).
+    ("direction", "str"),
     ("outbound_total", "Decimal"),
     ("cap", "Decimal"),
 )

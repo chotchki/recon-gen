@@ -819,7 +819,7 @@ def _limit_breach_story(
         ])
         detail_data: list[list] = [
             ["Account ID", "Account name", "Role", "Day",
-             "Transfer type", "Outbound", "Cap", "Overshoot"],
+             "Transfer type", "Direction", "Flow", "Cap", "Overshoot"],
         ]
         for r in parent_rows:
             detail_data.append([
@@ -828,21 +828,23 @@ def _limit_breach_story(
                 Paragraph(r.account_role, cell_style),
                 r.business_day.isoformat(),
                 Paragraph(r.rail_name, cell_style),
+                Paragraph(r.direction, cell_style),
                 f"${r.outbound_total:,.2f}",
                 f"${r.cap:,.2f}",
                 f"${r.overshoot:,.2f}",
             ])
         detail_style = TableStyle(
             base_table_style.getCommands() + [
-                # Right-align Day + Transfer type + 3 numerics.
+                # Right-align Day + 4 right-hand columns (Transfer type,
+                # Direction, Flow, Cap, Overshoot).
                 ("ALIGN", (5, 1), (-1, -1), "RIGHT"),
             ],
         )
         elements.append(LongTable(
             detail_data,
-            colWidths=[1.05 * inch, 1.05 * inch, 0.85 * inch,
-                       0.75 * inch, 0.95 * inch, 0.85 * inch,
-                       0.7 * inch, 0.8 * inch],
+            colWidths=[1.0 * inch, 1.0 * inch, 0.8 * inch,
+                       0.7 * inch, 0.9 * inch, 0.65 * inch, 0.8 * inch,
+                       0.65 * inch, 0.75 * inch],
             style=detail_style, repeatRows=1,
         ))
         elements.append(Spacer(1, 0.25 * inch))

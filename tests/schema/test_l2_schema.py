@@ -615,6 +615,33 @@ def test_limit_breach_view_does_not_join_daily_balances() -> None:
     assert "_daily_balances" not in body
 
 
+def test_limit_breach_view_ab1_per_direction_shape() -> None:
+    """AB.1: the limit_breach matview now UNIONs Outbound + Inbound
+    branches, each carrying an explicit `direction` literal column
+    and its own amount_direction filter.
+    """
+    sql = emit_schema(_instance_with_limits("ab1"), prefix="ab1")
+    body_match = re.search(
+        r"CREATE MATERIALIZED VIEW ab1_limit_breach AS(.*?);",
+        sql,
+        re.DOTALL,
+    )
+    assert body_match is not None
+    body = body_match.group(1)
+    # Both literal direction column projections present.
+    assert "'Outbound' AS direction" in body
+    assert "'Inbound' AS direction" in body
+    # Outbound branch filters Debit; Inbound branch filters Credit.
+    assert "amount_direction = 'Debit'" in body
+    assert "amount_direction = 'Credit'" in body
+    # UNION ALL stitches them together.
+    assert "UNION ALL" in body
+    # Outer breach filter still gates `cap IS NOT NULL AND outbound_total > cap`.
+    assert "WHERE cap IS NOT NULL" in body
+    # New direction index on the matview.
+    assert "idx_ab1_lb_direction" in sql
+
+
 def _instance_with_pending_age(prefix: str) -> L2Instance:
     """L2 instance with one Rail carrying a `max_pending_age` so the
     stuck_pending view's CASE-branch lookup has data to match against.
