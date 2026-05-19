@@ -726,6 +726,88 @@ rails:
       origin: the card network's settlement file is the authoritative
       record.
 
+  # ----- MerchantSettlementCycle closing-leg variants (AB.3.6) ----------
+  # Per gap doc §1: three settlement-timing variants for when the cycle's
+  # net-zero close posts (PT4H / P1D / P7D) AND three fraud-review
+  # variants for which review level the cycle's amounts pass through
+  # (NoFraudReview / StandardFraudReview / EnhancedFraudReview). Each of
+  # the two XOR groups picks exactly one variant per cycle Transfer based
+  # on per-merchant config — large/auto-settle merchants pair with
+  # NoFraudReview, small/slow merchants pair with EnhancedFraudReview,
+  # etc. Different shape than spec_example's SettlementTimingCycle (one
+  # 2-member group); sasquatch_pr exercises TWO groups on ONE template
+  # to cover C1c's "no rail in two groups" rule + AB.3.4's
+  # per-group iteration in _xor_suppressed_members under multi-group.
+
+  - name: SettlementAutoSettle
+    leg_role: MerchantPayableClearing
+    leg_direction: Variable
+    origin: InternalInitiated
+    metadata_keys: [merchant_id, settlement_period]
+    max_pending_age: PT4H
+    description: |
+      AB.3.6 settlement-timing variant — auto-settle (T+0). High-volume
+      merchants enrolled in intraday clearing close their cycle within
+      4 hours of business_day_end. Tight max_pending_age surfaces ETL
+      delays on the L1 stuck_pending matview within the same day.
+
+  - name: SettlementStandardSettle
+    leg_role: MerchantPayableClearing
+    leg_direction: Variable
+    origin: InternalInitiated
+    metadata_keys: [merchant_id, settlement_period]
+    max_pending_age: P1D
+    description: |
+      AB.3.6 settlement-timing variant — standard-settle (T+1). The
+      common case for most merchants — cycle closes the business day
+      after the card-sale period ends.
+
+  - name: SettlementSlowSettle
+    leg_role: MerchantPayableClearing
+    leg_direction: Variable
+    origin: InternalInitiated
+    metadata_keys: [merchant_id, settlement_period]
+    max_pending_age: P7D
+    description: |
+      AB.3.6 settlement-timing variant — slow-settle (weekly batch).
+      Low-volume merchants opt into a weekly batch close; 7-day
+      max_pending_age tolerance reflects the cadence.
+
+  - name: NoFraudReview
+    leg_role: InternalSuspenseRecon
+    leg_direction: Variable
+    origin: InternalInitiated
+    metadata_keys: [merchant_id, settlement_period]
+    max_pending_age: PT15M
+    description: |
+      AB.3.6 fraud-review variant — no review (auto-approved). Trusted
+      high-volume merchants with clean fraud histories skip manual
+      review; the cycle clears immediately on close. PT15M
+      max_pending_age is operational latency only.
+
+  - name: StandardFraudReview
+    leg_role: InternalSuspenseRecon
+    leg_direction: Variable
+    origin: InternalInitiated
+    metadata_keys: [merchant_id, settlement_period]
+    max_pending_age: PT4H
+    description: |
+      AB.3.6 fraud-review variant — analyst review. New or
+      medium-volume merchants pass through standard fraud-team
+      review before the cycle closes (4-hour SLA).
+
+  - name: EnhancedFraudReview
+    leg_role: InternalSuspenseRecon
+    leg_direction: Variable
+    origin: InternalInitiated
+    metadata_keys: [merchant_id, settlement_period]
+    max_pending_age: P3D
+    description: |
+      AB.3.6 fraud-review variant — escalated review. Flagged
+      merchants or unusual-pattern cycles route through enhanced
+      review (3-day SLA). Surfaces as stuck_pending when the
+      compliance team lags beyond the cap.
+
 # ---------------------------------------------------------------------
 # Transfer templates — multi-leg shared Transfers.
 #
@@ -765,8 +847,39 @@ transfer_templates:
     expected_net: 0
     transfer_key: [merchant_id, settlement_period]
     completion: business_day_end
+    # AB.3.6 (2026-05-19) — MerchantCardSale stays as the per-sale
+    # aggregation leg; SettlementAutoSettle is leg_rails[0] so the
+    # auto-scenario's TransferTemplatePlant (which uses leg_rails[0]
+    # for its rail_name) lands on a Variable single-leg variant that's
+    # an XOR group member — keeps the AB.3.3 xor_group_violation
+    # matview's first group ("healthy" branch) populated by TT-plant
+    # firings rather than contaminated by them. The fraud-review group
+    # has no leg_rails[0] member, so TT-plant firings DO contaminate
+    # that group's matview surface with firing_count=0 rows — accepted
+    # as a "feature" for the demo: shows the real-world case where a
+    # multi-XOR-group template has firings that don't resolve every
+    # group, surfacing as analyst-actionable rows on the L1 dashboard.
     leg_rails:
+      - SettlementAutoSettle
+      - SettlementStandardSettle
+      - SettlementSlowSettle
+      - NoFraudReview
+      - StandardFraudReview
+      - EnhancedFraudReview
       - MerchantCardSale
+    # AB.3.6 — TWO independent XOR groups (settlement-timing AND
+    # fraud-review). Different from spec_example's SettlementTimingCycle
+    # (one group of two members + one non-grouped Variable witness);
+    # sasquatch exercises the multi-group-per-template axis. Validator
+    # C1c (no rail appears in two groups within one template) holds by
+    # construction — the two groups draw from disjoint variant pools.
+    leg_rail_xor_groups:
+      - - SettlementAutoSettle
+        - SettlementStandardSettle
+        - SettlementSlowSettle
+      - - NoFraudReview
+        - StandardFraudReview
+        - EnhancedFraudReview
     description: |
       TransferKey-grouped merchant settlement. All `MerchantCardSale`
       firings carrying the same `(merchant_id, settlement_period)`
@@ -776,6 +889,16 @@ transfer_templates:
       triggers the chain: per the `PayoutVehicle` XOR group, exactly
       one of `MerchantPayoutACH` / `Wire` / `Check` fires to drain
       the merchant's accumulated clearing balance.
+
+      AB.3.6 (2026-05-19): per-merchant config picks one settlement-
+      timing variant AND one fraud-review variant per cycle. Two
+      independent XOR groups in `leg_rail_xor_groups` — auto/standard/
+      slow for the cycle's close cadence, no/standard/enhanced for
+      the review level. Each variant carries its own `max_pending_age`
+      so the L1 stuck_pending matview surfaces a different SLA for
+      each operating mode. ETL bugs where a cycle fires zero or two+
+      members of a group surface on the AB.3.3 xor_group_violation
+      matview.
 
 # ---------------------------------------------------------------------
 # Chains — parent → child relationships between Rails / TransferTemplates.

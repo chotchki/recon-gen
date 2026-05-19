@@ -89,12 +89,16 @@ def test_template_counts_pinned() -> None:
 
 def test_rail_counts_pinned() -> None:
     inst = _instance()
-    assert len(inst.rails) == 21
+    # AB.3.6 (2026-05-19): +6 Variable-direction SingleLegRails for the
+    # MerchantSettlementCycle XOR groups (settlement-timing trio +
+    # fraud-review trio). Two-leg count unchanged; single_leg jumps
+    # 6 → 12.
+    assert len(inst.rails) == 27
     two_leg = [r for r in inst.rails if isinstance(r, TwoLegRail)]
     single_leg = [r for r in inst.rails if isinstance(r, SingleLegRail)]
     aggregating = [r for r in inst.rails if r.aggregating]
     assert len(two_leg) == 15
-    assert len(single_leg) == 6
+    assert len(single_leg) == 12
     assert len(aggregating) == 3
 
 

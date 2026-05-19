@@ -122,22 +122,31 @@ class TestVariableClosure:
     equals the template's ExpectedNet. SPEC §Single-leg variable-direction
     rail + §Transfer Templates."""
 
-    def test_at_most_one_variable_leg_per_template(self) -> None:
-        """C1 — already validator-enforced; mirror here so a SPEC
-        loosening surfaces in this test file too (single source of truth
-        for the runtime invariant)."""
+    def test_at_most_one_non_grouped_variable_leg_per_template(self) -> None:
+        """AB.3.2 rewrote C1 — "at most one *non-grouped* Variable-direction
+        leg per template". Members of ``leg_rail_xor_groups`` are
+        excluded from the count because exactly one of each group
+        fires per Transfer (matview-enforced runtime contract). Validator
+        already enforces this; mirrored here as the SPEC-side invariant.
+        """
         inst = _instance()
         rails_by_name = {str(r.name): r for r in inst.rails}
         for tt in inst.transfer_templates:
-            variable_legs = [
+            grouped: set[str] = {
+                str(m) for group in tt.leg_rail_xor_groups for m in group
+            }
+            non_grouped_variable = [
                 rails_by_name[str(n)]
                 for n in tt.leg_rails
-                if isinstance(rails_by_name.get(str(n)), SingleLegRail)
+                if str(n) not in grouped
+                and isinstance(rails_by_name.get(str(n)), SingleLegRail)
                 and rails_by_name[str(n)].leg_direction == "Variable"  # type: ignore[union-attr]: narrowed by the prior isinstance(..., SingleLegRail) check
             ]
-            assert len(variable_legs) <= 1, (
-                f"TransferTemplate {tt.name!r}: more than one Variable "
-                f"leg breaks closure (under-determined). Got {len(variable_legs)}."
+            assert len(non_grouped_variable) <= 1, (
+                f"TransferTemplate {tt.name!r}: more than one non-grouped "
+                f"Variable leg breaks closure (under-determined). "
+                f"Got {len(non_grouped_variable)}; XOR-grouped Variables are "
+                f"exempt per AB.3.2 C1 rewrite."
             )
 
     def test_template_with_variable_leg_has_expected_net(self) -> None:
