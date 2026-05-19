@@ -340,6 +340,69 @@ class XorVariantMissedFiringPlant:
 
 
 @dataclass(frozen=True, slots=True)
+class FanInChainPlant:
+    """AB.4.5 plant: healthy fan-in chain firing.
+
+    Per AB.4.0 lock: N parent firings share one child Transfer (the
+    batched-payout pattern). The healthy case has ``parent_count`` =
+    chain's ``expected_parent_count`` (or any value ≥2 when the
+    chain leaves ``expected_parent_count`` unset for variable-batch
+    flows). The AB.4.7 ``_fan_in_disagreement`` matview reads
+    ``parent_count == expected`` (or ``parent_count >= 2`` unset)
+    and emits no violation row — purpose is positive demo coverage.
+    """
+
+    chain_parent_rail_name: Identifier
+    child_template_name: Identifier
+    days_ago: int
+    parent_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class FanInChainMissingParentPlant:
+    """AB.4.5 plant: fan-in batch with parent set SHORT of expected
+    (orphan / incomplete).
+
+    Emits ``parent_count`` parent firings (less than the chain's
+    ``expected_parent_count``) sharing one child Transfer. The AB.4.7
+    matview reads ``parent_count < expected`` and emits a row with
+    ``disagreement_kind='missing'`` (or ``'orphan'`` if parent_count
+    falls to 1 — the AB.4.0 lock's fallback when expected is unset).
+    Models the ETL bug where a parent contribution never lands —
+    e.g., one daily settlement of a monthly payout batch failed to
+    post but the batch still closed.
+    """
+
+    chain_parent_rail_name: Identifier
+    child_template_name: Identifier
+    days_ago: int
+    parent_count: int  # < chain.expected_parent_count
+
+
+@dataclass(frozen=True, slots=True)
+class FanInChainExtraParentPlant:
+    """AB.4.5 plant: fan-in batch with parent set EXCEEDING expected.
+
+    Emits ``parent_count`` parent firings (more than the chain's
+    ``expected_parent_count``) sharing one child Transfer. The AB.4.7
+    matview reads ``parent_count > expected`` and emits a row with
+    ``disagreement_kind='extra'``. Models the ETL bug where an
+    unrelated parent firing claimed membership in a batch it
+    shouldn't have been part of — cross-batch contamination or stale
+    parent reference.
+
+    Only meaningful when the chain declares ``expected_parent_count``
+    (otherwise the matview has no upper bound to flag against; the
+    picker drops this plant when expected is unset).
+    """
+
+    chain_parent_rail_name: Identifier
+    child_template_name: Identifier
+    days_ago: int
+    parent_count: int  # > chain.expected_parent_count
+
+
+@dataclass(frozen=True, slots=True)
 class StuckPendingPlant:
     """A planted Pending leg whose age exceeds the rail's `max_pending_age`.
 
@@ -577,6 +640,9 @@ class ScenarioPlant:
     chain_parent_disagreement_plants: tuple[ChainParentDisagreementPlant, ...] = ()
     xor_variant_missed_firing_plants: tuple[XorVariantMissedFiringPlant, ...] = ()
     xor_variant_overlap_plants: tuple[XorVariantOverlapPlant, ...] = ()
+    fan_in_chain_plants: tuple[FanInChainPlant, ...] = ()
+    fan_in_chain_missing_parent_plants: tuple[FanInChainMissingParentPlant, ...] = ()
+    fan_in_chain_extra_parent_plants: tuple[FanInChainExtraParentPlant, ...] = ()
     stuck_pending_plants: tuple[StuckPendingPlant, ...] = ()
     failed_transaction_plants: tuple[FailedTransactionPlant, ...] = ()
     stuck_unbundled_plants: tuple[StuckUnbundledPlant, ...] = ()
@@ -691,6 +757,66 @@ def emit_seed(
         txn_rows.extend(
             _emit_xor_variant_overlap_rows(
                 p, instance, scenarios, template_by_role, txn_counter, dialect,
+            )
+        )
+
+    # AB.4.5 — FanInChainPlant: healthy fan-in firing (parent_count =
+    # chain's expected_parent_count). No matview row.
+    for fip in sorted(scenarios.fan_in_chain_plants, key=_fan_in_chain_key):
+        txn_rows.extend(
+            _emit_fan_in_chain_plant_rows(
+                fip.chain_parent_rail_name,
+                fip.child_template_name,
+                fip.days_ago,
+                fip.parent_count,
+                plant_tag="fanin-h",
+                instance=instance,
+                scenarios=scenarios,
+                template_by_role=template_by_role,
+                counter=txn_counter,
+                dialect=dialect,
+            )
+        )
+
+    # AB.4.5 — FanInChainMissingParentPlant: parent_count < expected.
+    # AB.4.7 matview reads disagreement_kind='missing' (or 'orphan').
+    for mp in sorted(
+        scenarios.fan_in_chain_missing_parent_plants,
+        key=_fan_in_missing_parent_key,
+    ):
+        txn_rows.extend(
+            _emit_fan_in_chain_plant_rows(
+                mp.chain_parent_rail_name,
+                mp.child_template_name,
+                mp.days_ago,
+                mp.parent_count,
+                plant_tag="fanin-m",
+                instance=instance,
+                scenarios=scenarios,
+                template_by_role=template_by_role,
+                counter=txn_counter,
+                dialect=dialect,
+            )
+        )
+
+    # AB.4.5 — FanInChainExtraParentPlant: parent_count > expected.
+    # AB.4.7 matview reads disagreement_kind='extra'.
+    for xp in sorted(
+        scenarios.fan_in_chain_extra_parent_plants,
+        key=_fan_in_extra_parent_key,
+    ):
+        txn_rows.extend(
+            _emit_fan_in_chain_plant_rows(
+                xp.chain_parent_rail_name,
+                xp.child_template_name,
+                xp.days_ago,
+                xp.parent_count,
+                plant_tag="fanin-x",
+                instance=instance,
+                scenarios=scenarios,
+                template_by_role=template_by_role,
+                counter=txn_counter,
+                dialect=dialect,
             )
         )
 
@@ -3724,6 +3850,39 @@ def _stuck_pending_key(p: StuckPendingPlant) -> tuple[str, int, str]:
     return (str(p.account_id), p.days_ago, str(p.rail_name))
 
 
+def _fan_in_chain_key(
+    p: FanInChainPlant,
+) -> tuple[str, str, int, int]:
+    return (
+        str(p.chain_parent_rail_name),
+        str(p.child_template_name),
+        p.days_ago,
+        p.parent_count,
+    )
+
+
+def _fan_in_missing_parent_key(
+    p: FanInChainMissingParentPlant,
+) -> tuple[str, str, int, int]:
+    return (
+        str(p.chain_parent_rail_name),
+        str(p.child_template_name),
+        p.days_ago,
+        p.parent_count,
+    )
+
+
+def _fan_in_extra_parent_key(
+    p: FanInChainExtraParentPlant,
+) -> tuple[str, str, int, int]:
+    return (
+        str(p.chain_parent_rail_name),
+        str(p.child_template_name),
+        p.days_ago,
+        p.parent_count,
+    )
+
+
 def _failed_transaction_key(p: FailedTransactionPlant) -> tuple[str, int, str]:
     return (str(p.account_id), p.days_ago, str(p.rail_name))
 
@@ -4022,6 +4181,144 @@ def _emit_chain_parent_disagreement_rows(
             transfer_parent_id=parent_tid,
             dialect=dialect,
         ))
+    return rows
+
+
+def _emit_fan_in_chain_plant_rows(
+    chain_parent_rail_name: Identifier,
+    child_template_name: Identifier,
+    days_ago: int,
+    parent_count: int,
+    *,
+    plant_tag: str,
+    instance: L2Instance,
+    scenarios: ScenarioPlant,
+    template_by_role: dict[Identifier, AccountTemplate],
+    counter: _Counter,
+    dialect: Dialect,
+) -> list[str]:
+    """AB.4.5 — shared emitter for all 3 fan-in plant kinds (healthy /
+    missing / extra). Each plant kind passes a different
+    ``parent_count`` value:
+
+    - Healthy (``FanInChainPlant``): parent_count = chain's expected
+      → no AB.4.7 matview row.
+    - Missing (``FanInChainMissingParentPlant``): parent_count < expected
+      → row with ``disagreement_kind='missing'`` (or ``'orphan'`` when
+      parent_count = 1).
+    - Extra (``FanInChainExtraParentPlant``): parent_count > expected
+      → row with ``disagreement_kind='extra'``.
+
+    Emits ``parent_count`` synthetic parent legs + the child template's
+    full leg_rail set, all leg_rails of the child Transfer sharing one
+    ``transfer_id`` but each parent's leg row carrying that parent's
+    ``transfer_parent_id``. The AB.4.3 ``_transfer_parents`` matview's
+    DISTINCT over (child_transfer_id, transfer_parent_id) yields
+    ``parent_count`` rows for this Transfer — that's the cardinality
+    AB.4.7's downstream check reads.
+
+    ``plant_tag`` is the row-id prefix discriminator (``'fanin-h'`` /
+    ``'fanin-m'`` / ``'fanin-x'``) so analysts can grep the dialect-
+    specific SQL for the plant kind.
+    """
+    parent_rail = _find_rail_or_skip(chain_parent_rail_name, instance)
+    if parent_rail is None:
+        return []
+    child_template = _find_template_or_skip(child_template_name, instance)
+    if child_template is None or not child_template.leg_rails:
+        return []
+    ti = _first_template_instance_or_skip(scenarios)
+    if ti is None:
+        return []
+    template = template_by_role.get(ti.template_role)
+    if template is None:
+        return []
+    parent_role = template.parent_role
+
+    plant_day = scenarios.today - timedelta(days=days_ago)
+    parent_posting = f"{plant_day.isoformat()}T10:00:00+00:00"
+    child_posting = f"{plant_day.isoformat()}T11:00:00+00:00"
+
+    n_child = counter.next()
+    child_transfer_id = f"tr-{plant_tag}-child-{n_child:04d}"
+
+    rows: list[str] = []
+    parent_ids: list[str] = []
+    # Emit `parent_count` synthetic parent legs.
+    for k in range(parent_count):
+        counter.next()  # advance counter for determinism across plant kinds
+        parent_transfer_id = f"tr-{plant_tag}-parent-{n_child:04d}-{k:02d}"
+        parent_ids.append(parent_transfer_id)
+        rows.append(_txn_row(
+            id_=f"tx-{plant_tag}-parent-{n_child:04d}-{k:02d}",
+            account_id=ti.account_id,
+            account_name=ti.name,
+            account_role=ti.template_role,
+            account_scope=template.scope,
+            account_parent_role=parent_role,
+            money=-Decimal("100.00"),
+            direction="Debit",
+            posting=parent_posting,
+            transfer_id=parent_transfer_id,
+            rail_name=chain_parent_rail_name,
+            origin="InternalInitiated",
+            metadata={},
+            dialect=dialect,
+        ))
+    # Emit child template's leg_rails, cycling through the parent_ids
+    # so each leg row carries a contributing parent's transfer_parent_id.
+    # All legs share the single child_transfer_id (the fan-in shape).
+    for i, leg_rail_name in enumerate(child_template.leg_rails):
+        parent_tid = parent_ids[i % len(parent_ids)]
+        rows.append(_txn_row(
+            id_=f"tx-{plant_tag}-child-{n_child:04d}-{i}",
+            account_id=ti.account_id,
+            account_name=ti.name,
+            account_role=ti.template_role,
+            account_scope=template.scope,
+            account_parent_role=parent_role,
+            money=Decimal("50.00"),
+            direction="Credit",
+            posting=child_posting,
+            transfer_id=child_transfer_id,
+            rail_name=leg_rail_name,
+            origin="InternalInitiated",
+            metadata={},
+            template_name=child_template.name,
+            transfer_parent_id=parent_tid,
+            dialect=dialect,
+        ))
+    # If parent_count > len(leg_rails), emit additional child legs
+    # carrying the leftover parents' transfer_parent_ids so they show
+    # up in the _transfer_parents DISTINCT. Without this loop, the
+    # extra-parent plant's parent firings would exist in transactions
+    # but not contribute to the child Transfer's parent set.
+    n_legs = len(child_template.leg_rails)
+    if parent_count > n_legs:
+        for k in range(n_legs, parent_count):
+            parent_tid = parent_ids[k]
+            # Reuse the first leg_rail for the extra rows — the matview
+            # cares about (child_transfer_id, transfer_parent_id) DISTINCT
+            # so the rail_name choice doesn't matter for fan_in_disagreement.
+            leg_rail_name = child_template.leg_rails[0]
+            rows.append(_txn_row(
+                id_=f"tx-{plant_tag}-child-{n_child:04d}-extra-{k}",
+                account_id=ti.account_id,
+                account_name=ti.name,
+                account_role=ti.template_role,
+                account_scope=template.scope,
+                account_parent_role=parent_role,
+                money=Decimal("50.00"),
+                direction="Credit",
+                posting=child_posting,
+                transfer_id=child_transfer_id,
+                rail_name=leg_rail_name,
+                origin="InternalInitiated",
+                metadata={},
+                template_name=child_template.name,
+                transfer_parent_id=parent_tid,
+                dialect=dialect,
+            ))
     return rows
 
 

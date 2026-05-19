@@ -66,6 +66,9 @@ from .seed import (
     ChainParentDisagreementPlant,
     DriftPlant,
     FailedTransactionPlant,
+    FanInChainExtraParentPlant,
+    FanInChainMissingParentPlant,
+    FanInChainPlant,
     InboundCapBreachPlant,
     InvFanoutPlant,
     LimitBreachPlant,
@@ -192,6 +195,22 @@ def default_scenario_for(
         omitted.append((
             "XorVariantOverlapPlant",
             "no TransferTemplate declares leg_rail_xor_groups (AB.3)",
+        ))
+    # AB.4.5 — Fan-in chain plant picker: any chain with fan_in=True
+    # whose parent is a Rail (so the plant can synthesize parent legs).
+    fan_in_pick = _pick_fan_in_chain_inputs(instance)
+    if fan_in_pick is None:
+        omitted.append((
+            "FanInChainPlant",
+            "no Chain declares fan_in=True (AB.4)",
+        ))
+        omitted.append((
+            "FanInChainMissingParentPlant",
+            "no Chain declares fan_in=True (AB.4)",
+        ))
+        omitted.append((
+            "FanInChainExtraParentPlant",
+            "no Chain declares fan_in=True (AB.4)",
         ))
     pending_rail = _pick_first_with(
         instance.rails, key=lambda r: r.max_pending_age is not None,
@@ -337,6 +356,60 @@ def default_scenario_for(
                 variant_b_rail_name=ov_variant_b,
             ),
         )
+
+    # AB.4.5 — Fan-in chain plants. When a fan_in chain exists, plant
+    # all three kinds (healthy + missing + extra) so the demo dashboard
+    # surfaces every branch of the AB.4.7 matview's disagreement_kind
+    # discriminator. Extra-parent plant only fires when the chain
+    # declares expected_parent_count (otherwise the matview has no
+    # upper bound to flag against — see AB.4.0 lock).
+    fan_in_chain_plants: tuple[FanInChainPlant, ...] = ()
+    fan_in_chain_missing_parent_plants: tuple[
+        FanInChainMissingParentPlant, ...
+    ] = ()
+    fan_in_chain_extra_parent_plants: tuple[
+        FanInChainExtraParentPlant, ...
+    ] = ()
+    if fan_in_pick is not None:
+        fi_parent_rail, fi_child_template, fi_expected = fan_in_pick
+        # Healthy plant: parent_count == expected (or 2 when unset).
+        healthy_count = fi_expected if fi_expected is not None else 2
+        fan_in_chain_plants = (
+            FanInChainPlant(
+                chain_parent_rail_name=fi_parent_rail,
+                child_template_name=fi_child_template,
+                days_ago=5,
+                parent_count=healthy_count,
+            ),
+        )
+        # Missing-parent plant: parent_count = expected - 1 (or 1 when
+        # expected is unset — the orphan threshold).
+        missing_count = max(1, healthy_count - 1)
+        fan_in_chain_missing_parent_plants = (
+            FanInChainMissingParentPlant(
+                chain_parent_rail_name=fi_parent_rail,
+                child_template_name=fi_child_template,
+                days_ago=4,
+                parent_count=missing_count,
+            ),
+        )
+        # Extra-parent plant: only meaningful when expected is set
+        # (otherwise no upper bound for the matview to flag).
+        if fi_expected is not None:
+            fan_in_chain_extra_parent_plants = (
+                FanInChainExtraParentPlant(
+                    chain_parent_rail_name=fi_parent_rail,
+                    child_template_name=fi_child_template,
+                    days_ago=3,
+                    parent_count=fi_expected + 1,
+                ),
+            )
+        else:
+            omitted.append((
+                "FanInChainExtraParentPlant",
+                "fan_in chain has no expected_parent_count — extra "
+                "parent count can't be flagged without an upper bound",
+            ))
 
     stuck_pending_plants: tuple[StuckPendingPlant, ...] = ()
     if pending_rail is not None:
@@ -572,6 +645,9 @@ def default_scenario_for(
         chain_parent_disagreement_plants=chain_parent_disagreement_plants if include_l1 else (),
         xor_variant_missed_firing_plants=xor_variant_missed_firing_plants if include_l1 else (),
         xor_variant_overlap_plants=xor_variant_overlap_plants if include_l1 else (),
+        fan_in_chain_plants=fan_in_chain_plants if include_l1 else (),
+        fan_in_chain_missing_parent_plants=fan_in_chain_missing_parent_plants if include_l1 else (),
+        fan_in_chain_extra_parent_plants=fan_in_chain_extra_parent_plants if include_l1 else (),
         stuck_pending_plants=stuck_pending_plants if include_l1 else (),
         failed_transaction_plants=failed_transaction_plants if include_l1 else (),
         stuck_unbundled_plants=stuck_unbundled_plants if include_l1 else (),
@@ -725,6 +801,9 @@ def densify_scenario(
         chain_parent_disagreement_plants=base.chain_parent_disagreement_plants,
         xor_variant_missed_firing_plants=base.xor_variant_missed_firing_plants,
         xor_variant_overlap_plants=base.xor_variant_overlap_plants,
+        fan_in_chain_plants=base.fan_in_chain_plants,
+        fan_in_chain_missing_parent_plants=base.fan_in_chain_missing_parent_plants,
+        fan_in_chain_extra_parent_plants=base.fan_in_chain_extra_parent_plants,
         stuck_pending_plants=tuple(
             r for p in base.stuck_pending_plants for r in replicate_pending(p)
         ),
@@ -799,6 +878,9 @@ def boost_inv_fanout_plants(
         chain_parent_disagreement_plants=base.chain_parent_disagreement_plants,
         xor_variant_missed_firing_plants=base.xor_variant_missed_firing_plants,
         xor_variant_overlap_plants=base.xor_variant_overlap_plants,
+        fan_in_chain_plants=base.fan_in_chain_plants,
+        fan_in_chain_missing_parent_plants=base.fan_in_chain_missing_parent_plants,
+        fan_in_chain_extra_parent_plants=base.fan_in_chain_extra_parent_plants,
         stuck_pending_plants=base.stuck_pending_plants,
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants,
@@ -879,6 +961,9 @@ def add_broken_rail_plants(
         chain_parent_disagreement_plants=base.chain_parent_disagreement_plants,
         xor_variant_missed_firing_plants=base.xor_variant_missed_firing_plants,
         xor_variant_overlap_plants=base.xor_variant_overlap_plants,
+        fan_in_chain_plants=base.fan_in_chain_plants,
+        fan_in_chain_missing_parent_plants=base.fan_in_chain_missing_parent_plants,
+        fan_in_chain_extra_parent_plants=base.fan_in_chain_extra_parent_plants,
         stuck_pending_plants=base.stuck_pending_plants + extra_plants,
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants,
@@ -931,6 +1016,9 @@ def filter_scenario_plants(
         chain_parent_disagreement_plants=base.chain_parent_disagreement_plants if "chain_parent_disagreement" in selected else (),
         xor_variant_missed_firing_plants=base.xor_variant_missed_firing_plants if "xor_group_violation" in selected else (),
         xor_variant_overlap_plants=base.xor_variant_overlap_plants if "xor_group_violation" in selected else (),
+        fan_in_chain_plants=base.fan_in_chain_plants if "fan_in_disagreement" in selected else (),
+        fan_in_chain_missing_parent_plants=base.fan_in_chain_missing_parent_plants if "fan_in_disagreement" in selected else (),
+        fan_in_chain_extra_parent_plants=base.fan_in_chain_extra_parent_plants if "fan_in_disagreement" in selected else (),
         stuck_pending_plants=base.stuck_pending_plants if "stuck_pending" in selected else (),
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants if "stuck_unbundled" in selected else (),
@@ -1643,6 +1731,41 @@ def _pick_xor_overlap_inputs(
         for gi, group in enumerate(t.leg_rail_xor_groups):
             if len(group) >= 2:
                 return (t.name, gi, group[0], group[1])
+    return None
+
+
+def _pick_fan_in_chain_inputs(
+    instance: L2Instance,
+) -> tuple[Identifier, Identifier, int | None] | None:
+    """AB.4.5 picker: find any Chain that declares ``fan_in=True``.
+
+    Returns ``(chain_parent_rail_name, child_template_name,
+    expected_parent_count_or_None)`` if found, else ``None``.
+    Iterates chains in deterministic order (sorted by parent + sorted-
+    children CSV); takes the first child of the first fan_in chain
+    (validator C8a guarantees every fan_in child is a TransferTemplate,
+    so the first child resolves cleanly). The picker also restricts
+    to chains whose parent resolves to a Rail (not a TransferTemplate)
+    so the plant emitter can synthesize parent legs without needing
+    nested-firing logic — same restriction AB.2.6 carries.
+
+    ``expected_parent_count`` is passed through verbatim (None ⇒
+    variable-batch-flow; the matview falls back to orphan-only
+    detection and the FanInChainExtraParentPlant is dropped from the
+    scenario since there's no upper bound to flag).
+    """
+    rail_names = {r.name for r in instance.rails}
+    for c in sorted(
+        instance.chains,
+        key=lambda ch: (str(ch.parent), ",".join(sorted(str(d) for d in ch.children))),
+    ):
+        if not c.fan_in:
+            continue
+        if c.parent not in rail_names:
+            continue
+        if not c.children:
+            continue
+        return (c.parent, c.children[0], c.expected_parent_count)
     return None
 
 

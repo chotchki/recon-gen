@@ -79,11 +79,14 @@ def test_auto_scenario_against_spec_example_covers_all_six_plant_kinds(
     assert len(sc.xor_variant_overlap_plants) == 1
     # Permitted omissions: TT plants whose first leg_rail isn't TwoLeg
     # (the AB.3.5.spec / AB.3.5b XOR plants are no longer omitted).
+    # AB.4.5 added the FanIn* plants; spec_example doesn't declare a
+    # fan_in chain yet (AB.4.5.spec is the activator), so they show
+    # as "no Chain declares fan_in=True" omissions until then.
     omitted_kinds = [kind for kind, _ in report.omitted]
     assert all(
-        k.startswith("TransferTemplatePlant[")
+        k.startswith("TransferTemplatePlant[") or k.startswith("FanInChain")
         for k in omitted_kinds
-    ), f"Unexpected non-TT omissions: {report.omitted!r}"
+    ), f"Unexpected non-TT/non-FanIn omissions: {report.omitted!r}"
 
 
 def test_auto_scenario_against_sasquatch_pr_covers_all_six_plant_kinds(
