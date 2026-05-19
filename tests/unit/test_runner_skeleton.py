@@ -793,6 +793,48 @@ def test_cmd_up_to_prelude_failure_aborts_before_matrix() -> None:
     mock_run_one.assert_not_called()
 
 
+def test_cmd_up_to_only_tolerates_prelude_exit_5() -> None:
+    """#986, 2026-05-18 — When ``--only=<expr>`` filters the prelude's
+    pytest collection to zero, pytest exits 5 ("no tests collected") and
+    the chain should NOT halt. The same filter is applied to per-cell
+    layers via ``-k``; the user's intent is that the matched tests live
+    in a later layer (browser, app2, etc.).
+
+    Without this tolerance, ``./run_tests.sh up_to=browser --only=foo``
+    halts at the prelude even when ``foo`` matches real tests in the
+    browser layer."""
+    dispatched: list[str] = []
+
+    def fake_dispatch(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
+        dispatched.append(layer)
+        # Simulate "no tests collected" only when --only is set + unit layer
+        if layer == "unit" and options is not None and options.only is not None:
+            return runner.LayerResult(layer=layer, exit_code=5, duration_seconds=0.01)
+        return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.01)
+
+    with (
+        patch.object(runner, "probe_dependencies", return_value=[]),
+        patch.object(runner, "_is_dirty", return_value=False),
+        patch.object(runner, "dispatch_layer", side_effect=fake_dispatch),
+        patch.object(
+            runner, "_run_one_variant",
+            return_value=(None, [], runner.EXIT_SUCCESS),
+        ) as mock_run_one,
+    ):
+        code = runner.main([
+            "up_to=db",
+            "--variants=sp_pg_aw",
+            "--only=account_filters or additive_pickers",
+        ])
+    assert code == runner.EXIT_SUCCESS, (
+        f"--only-filtered prelude (exit 5) should not halt chain; got code={code}"
+    )
+    assert dispatched == ["unit"], (
+        "prelude dispatch happened; subsequent layers run via _run_one_variant"
+    )
+    mock_run_one.assert_called_once()
+
+
 def test_cmd_up_to_skip_cheap_skips_unit_prelude_when_cached() -> None:
     """``--skip-cheap`` + a green ``unit`` cache marker for the current SHA
     (keyed by the ``_PRELUDE_VARIANT`` bucket) → the prelude doesn't dispatch.

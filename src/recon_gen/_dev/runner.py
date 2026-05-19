@@ -2669,11 +2669,36 @@ def _run_unit_prelude(prelude_dir: Path, options: RunOptions) -> LayerResult:
         return LayerResult(layer="unit", exit_code=0, duration_seconds=0.0, skipped=True)
 
     result = dispatch_layer("unit", prelude_dir, options)
-    marker = "skip" if result.skipped else ("ok" if result.passed else "FAIL")
-    print(
-        f"runner: layer-{marker} [unit] rc={result.exit_code} "
-        f"duration={result.duration_seconds:.2f}s (prelude — runs once for all cells)"
+    # #986, 2026-05-18 — When ``--only=<expr>`` is set, the same ``-k`` filter
+    # is applied to the unit prelude AND every per-cell layer (CLAUDE.md:
+    # "narrow every layer's pytest -k <expr>"). If the operator is targeting
+    # a test that lives in a later layer (e.g. ``--only=account_filters``,
+    # which matches only ``tests/e2e/test_l1_account_filters.py``), pytest
+    # collects nothing in the unit roots, exits 5 ("no tests collected"),
+    # and the chain halts before the matrix dispatches the real work. Treat
+    # exit 5 on the prelude as "skipped" when ``--only`` is in effect — the
+    # operator's intent is explicit and the matched layer's own pytest
+    # invocation will still fail loud if the expr typos.
+    only_filter_matched_nothing = (
+        result.exit_code == 5 and options.only is not None
     )
+    if only_filter_matched_nothing:
+        result = LayerResult(
+            layer="unit",
+            exit_code=0,
+            duration_seconds=result.duration_seconds,
+            skipped=True,
+        )
+        print(
+            f"runner: layer-skip [unit] rc=5 → 0 (prelude; --only="
+            f"{options.only!r} matched no unit tests, deferring to later layers)"
+        )
+    else:
+        marker = "skip" if result.skipped else ("ok" if result.passed else "FAIL")
+        print(
+            f"runner: layer-{marker} [unit] rc={result.exit_code} "
+            f"duration={result.duration_seconds:.2f}s (prelude — runs once for all cells)"
+        )
     if not result.skipped and result.passed:
         write_cache_marker("unit", duration_seconds=result.duration_seconds, variant=_PRELUDE_VARIANT)
     if not result.passed:
