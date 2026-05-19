@@ -377,6 +377,23 @@ def _build_rails(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
         if rng.random() < state.plan.pending_age_probability:
             rail["max_pending_age"] = _random_iso_duration(rng, kind="pending")
 
+        # AB.5 (E7) — ~30% of non-aggregating rails get an
+        # amount_typical_range. Aggregating rails forbidden by V1c.
+        # Range rolls log-uniformly over [1, 100000] for the min, then
+        # max = min * (2..50) so we exercise the spread axis (narrow
+        # bands like $10-$50 vs wide like $5-$2500).
+        if not is_aggregating and rng.random() < 0.30:
+            import math
+            lo_float = math.exp(
+                rng.uniform(math.log(1.0), math.log(100000.0)),
+            )
+            spread = rng.uniform(2.0, 50.0)
+            hi_float = lo_float * spread
+            rail["amount_typical_range"] = [
+                f"{lo_float:.2f}",
+                f"{hi_float:.2f}",
+            ]
+
         d = _maybe_description(rng, state, f"rail {i}")
         if d is not None:
             rail["description"] = d

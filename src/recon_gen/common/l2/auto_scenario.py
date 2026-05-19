@@ -270,9 +270,12 @@ def default_scenario_for(
     limit_breach_plants: tuple[LimitBreachPlant, ...] = ()
     if breach_picks is not None:
         ls, breach_rail, breach_counter = breach_picks
-        # Plant amount = cap * 1.5, rounded to whole dollars, to
-        # guarantee OutboundFlow > cap regardless of rounding.
-        breach_amount = (ls.cap * Decimal("1.5")).quantize(Decimal("1"))
+        # AB.5 (E7): cap-breach plants emit at cap * 1.5 by default
+        # (violation MUST exceed cap). When the rail declares an
+        # amount_typical_range AND cap * 1.5 exceeds range.max * 3,
+        # _cap_breach_amount pins to range.max * 3 so the breach
+        # amount stays in a realistic ballpark.
+        breach_amount = _cap_breach_amount(ls.cap, breach_rail)
         limit_breach_plants = (
             LimitBreachPlant(
                 account_id=cust1.account_id,
@@ -289,7 +292,7 @@ def default_scenario_for(
     inbound_cap_breach_plants: tuple[InboundCapBreachPlant, ...] = ()
     if inbound_breach_picks is not None:
         in_ls, in_rail, in_counter = inbound_breach_picks
-        in_amount = (in_ls.cap * Decimal("1.5")).quantize(Decimal("1"))
+        in_amount = _cap_breach_amount(in_ls.cap, in_rail)
         inbound_cap_breach_plants = (
             InboundCapBreachPlant(
                 account_id=cust1.account_id,
@@ -430,7 +433,9 @@ def default_scenario_for(
                 account_id=cust1.account_id,
                 days_ago=cap_days,
                 rail_name=pending_rail.name,
-                amount=Decimal("450.00"),
+                amount=_plant_amount_for_rail(
+                    pending_rail, Decimal("450.00"),
+                ),
             ),
         )
 
@@ -446,7 +451,9 @@ def default_scenario_for(
                 account_id=cust1.account_id,
                 days_ago=2,
                 rail_name=pending_rail.name,
-                amount=Decimal("75.00"),
+                amount=_plant_amount_for_rail(
+                    pending_rail, Decimal("75.00"),
+                ),
             ),
         )
     else:
@@ -468,19 +475,28 @@ def default_scenario_for(
                 account_id=cust2.account_id,
                 days_ago=cap_days,
                 rail_name=unbundled_rail.name,
-                amount=Decimal("12.50"),
+                amount=_plant_amount_for_rail(
+                    unbundled_rail, Decimal("12.50"),
+                ),
             ),
         )
 
     supersession_plants: tuple[SupersessionPlant, ...] = ()
     if super_rail is not None:
+        supersession_orig = _plant_amount_for_rail(
+            super_rail, Decimal("250.00"),
+        )
+        # Corrected amount adds 10% (the "we got the amount wrong" pattern).
+        supersession_corr = (
+            supersession_orig * Decimal("1.10")
+        ).quantize(Decimal("0.01"))
         supersession_plants = (
             SupersessionPlant(
                 account_id=cust1.account_id,
                 days_ago=3,
                 rail_name=super_rail.name,
-                original_amount=Decimal("250.00"),
-                corrected_amount=Decimal("275.00"),
+                original_amount=supersession_orig,
+                corrected_amount=supersession_corr,
             ),
         )
 
@@ -1774,3 +1790,42 @@ def _zero_td():
     in practice — the picker only returns rails with the field set)."""
     from datetime import timedelta
     return timedelta(0)
+
+
+def _plant_amount_for_rail(
+    rail: TwoLegRail | SingleLegRail | None, default: Decimal,
+) -> Decimal:
+    """AB.5 (E7): when the rail declares ``amount_typical_range``,
+    return the range midpoint (cents-quantized) so the planted row
+    fits realistic banking magnitudes; else return the hardcoded
+    default. Pre-AB.5 fixtures (no ranges declared) keep the legacy
+    default amounts byte-equivalent.
+
+    Why the midpoint: plants are positive demo coverage, not violations
+    sized to break invariants — landing them squarely in the middle of
+    the typical band makes them look like ordinary firings (just at
+    the boundary that triggers the SHOULD-constraint).
+    """
+    if rail is None or rail.amount_typical_range is None:
+        return default
+    lo, hi = rail.amount_typical_range
+    midpoint = (lo + hi) / Decimal(2)
+    return midpoint.quantize(Decimal("0.01"))
+
+
+def _cap_breach_amount(
+    cap: Decimal, rail: TwoLegRail | SingleLegRail | None,
+) -> Decimal:
+    """AB.5 (E7): cap-breach plants emit at ``cap * 1.5`` by default
+    (the violation MUST exceed the cap). When the rail's
+    ``amount_typical_range`` is declared AND ``cap * 1.5`` exceeds
+    ``range.max * 3``, pin to ``range.max * 3`` so the breach amount
+    stays in a realistic ballpark relative to the rail's typical
+    volume. Pre-AB.5 rails (no range): unchanged ``cap * 1.5``.
+    """
+    breach = cap * Decimal("1.5")
+    if rail is None or rail.amount_typical_range is None:
+        return breach.quantize(Decimal("1"))
+    _, hi = rail.amount_typical_range
+    ceiling = hi * Decimal("3")
+    return min(breach, ceiling).quantize(Decimal("1"))

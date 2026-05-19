@@ -76,6 +76,8 @@ rails:
     metadata_keys: [external_reference]
     posted_requirements: [external_reference]
     max_pending_age: PT24H
+    # AB.5 (E7): typical inbound customer-rail amount band.
+    amount_typical_range: ["50.00", "5000.00"]
 
   # Two-leg standalone outbound — used by limit-breach plant.
   - name: ExternalRailOutbound
@@ -85,6 +87,9 @@ rails:
     source_origin: InternalInitiated
     destination_origin: ExternalForcePosted
     metadata_keys: [external_reference]
+    # AB.5 (E7): outbound has a higher upper bound — vendor payments
+    # and larger transfers happen here too.
+    amount_typical_range: ["50.00", "10000.00"]
 
   # Single-leg debit — used by stuck_unbundled plant (max_unbundled_age
   # only meaningful on rails appearing in some bundles_activity, satisfied
@@ -95,6 +100,8 @@ rails:
     origin: InternalInitiated
     metadata_keys: [merchant_id, customer_id, settlement_period]
     max_unbundled_age: PT4H
+    # AB.5 (E7): subledger fee accrual band — small charges.
+    amount_typical_range: ["1.00", "100.00"]
 
   # AB.3.5.spec (2026-05-19) — three Variable-direction settlement-timing
   # variants for the AB.3 XOR group demo. Each represents a different

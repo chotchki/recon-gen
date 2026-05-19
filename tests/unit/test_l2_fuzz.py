@@ -102,6 +102,11 @@ def test_fuzzer_exercises_every_primitive_kind_across_seeds(
         # roughly 20% × (template-child rate) × META_GUARD_SEEDS — sized
         # to comfortably cover within the seed pool.
         "fan_in_chain": False,
+        # AB.5.5.fuzz — confirm the fuzzer emits at least one rail
+        # with amount_typical_range. _build_rails gates at ~30%
+        # probability on non-aggregating rails so this comfortably
+        # lands within META_GUARD_SEEDS.
+        "rail_with_amount_typical_range": False,
     }
     for seed in META_GUARD_SEEDS:
         yaml_text = random_l2_yaml(seed)
@@ -132,6 +137,9 @@ def test_fuzzer_exercises_every_primitive_kind_across_seeds(
                 saw["rail_with_max_pending_age"] = True
             if r.max_unbundled_age is not None:
                 saw["rail_with_max_unbundled_age"] = True
+            # AB.5.5.fuzz — rail with amount_typical_range.
+            if r.amount_typical_range is not None:
+                saw["rail_with_amount_typical_range"] = True
         template_name_set = {t.name for t in inst.transfer_templates}
         for c in inst.chains:
             # Z.A: a multi-children Chain row encodes XOR alternation.

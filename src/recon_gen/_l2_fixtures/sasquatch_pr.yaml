@@ -336,6 +336,9 @@ rails:
     metadata_keys: [external_reference, originator_id, customer_id]
     posted_requirements: [external_reference, customer_id]
     max_pending_age: PT24H
+    # AB.5 (E7): payroll deposits + vendor payments + peer transfers
+    # typically $50-$5K per item.
+    amount_typical_range: ["50.00", "5000.00"]
     description: |
       Inbound ACH credit originated by an external party (employer
       payroll, vendor payment, peer transfer). External party drives
@@ -352,6 +355,10 @@ rails:
     metadata_keys: [external_reference, customer_id, beneficiary_id]
     posted_requirements: [customer_id]
     max_pending_age: PT24H
+    # AB.5 (E7): outbound ACH (bill pay, vendor payment, recurring
+    # transfer) typically $50-$10K — slightly wider than inbound to
+    # accommodate occasional high-value bill payments.
+    amount_typical_range: ["50.00", "10000.00"]
     description: |
       Outbound ACH debit initiated by SNB on behalf of a customer
       (bill pay, vendor payment, recurring transfer). Both legs are
@@ -437,6 +444,10 @@ rails:
     metadata_keys: [internal_transfer_id, source_customer_id, destination_customer_id, transfer_purpose]
     metadata_value_examples:
       transfer_purpose: ["rent", "payroll", "vendor_payment"]
+    # AB.5 (E7): on-us transfers span rent ($800-$3K), payroll
+    # ($1K-$10K), vendor payments ($100-$50K) — wider band than
+    # external ACH to accommodate the upper-end vendor-payment use.
+    amount_typical_range: ["20.00", "50000.00"]
     description: |
       Debit leg of an on-us transfer cycle. Posts against the source
       customer's DDA. Joins the shared `InternalTransferCycle` Transfer
@@ -449,6 +460,9 @@ rails:
     leg_direction: Credit
     origin: InternalInitiated
     metadata_keys: [internal_transfer_id, source_customer_id, destination_customer_id, transfer_purpose]
+    # AB.5 (E7): mirror of InternalTransferDebit — same band since
+    # the on-us cycle nets to zero, both legs carry equal magnitude.
+    amount_typical_range: ["20.00", "50000.00"]
     description: |
       Credit leg of an on-us transfer cycle. Posts against the
       destination customer's DDA. Joins the shared `InternalTransferCycle`
@@ -488,6 +502,11 @@ rails:
       accrual_period: ["2026-04", "2026-05", "2026-06"]
     posted_requirements: [customer_id, fee_type]
     max_unbundled_age: P31D
+    # AB.5 (E7): individual fee accruals are small — monthly
+    # maintenance fees, per-incident overdraft fees, per-event
+    # stop-payment fees. Range $0.25-$25 covers the typical SNB fee
+    # schedule.
+    amount_typical_range: ["0.25", "25.00"]
     description: |
       Daily fee accrual posting (monthly maintenance, overdraft,
       stop-pay, etc.). Bundled by the monthly settlement aggregating
@@ -642,6 +661,10 @@ rails:
     posted_requirements: [merchant_id, settlement_period, card_network_ref]
     max_pending_age: PT24H
     max_unbundled_age: PT48H
+    # AB.5 (E7): typical per-swipe range. Single coffee, low-ticket
+    # retail, lunch transactions cluster at the low end; higher-end
+    # purchases (electronics, appliances) lift the upper bound.
+    amount_typical_range: ["5.00", "500.00"]
     description: |
       One merchant card-sale posting. Card network force-posts the
       external (debit) leg via daily settlement file; SNB records the
