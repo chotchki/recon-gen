@@ -28,6 +28,7 @@ re-orders something the fingerprint hashes.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -36,12 +37,47 @@ import pytest
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
     RECON_GEN_CONFIG,
+    RECON_GEN_LAYER,
+    RECON_GEN_RUN_DIR,
     RECON_GEN_TEST_L2_INSTANCE,
 )
 
 
 _VENV_BIN = Path(__file__).resolve().parents[2] / ".venv" / "bin"
 _QS_GEN = _VENV_BIN / "recon-gen"
+
+
+def _stash_audit_failure(
+    test_name: str,
+    pdf: Path,
+    *,
+    apply_rc: subprocess.CompletedProcess[str],
+    verify_rc: subprocess.CompletedProcess[str] | None,
+) -> None:
+    """Copy the failing PDF + subprocess outputs into the runner's
+    per-cell artifact dir so CI's ``Upload runner artifacts`` step
+    picks them up. No-op when invoked outside the runner (legacy
+    direct-pytest path); the assertion message still carries the
+    stderr summary in that case.
+
+    Layout: ``<RECON_GEN_RUN_DIR>/<RECON_GEN_LAYER>/audit-failure/<test>/``
+    with ``report.pdf`` (when the PDF was rendered) + per-step
+    ``apply-stdout.log`` / ``apply-stderr.log`` / ``verify-stdout.log``
+    / ``verify-stderr.log``.
+    """
+    run_dir = RECON_GEN_RUN_DIR.get_or_none()
+    layer = RECON_GEN_LAYER.get_or_none()
+    if run_dir is None or layer is None:
+        return
+    dest = Path(run_dir) / layer / "audit-failure" / test_name
+    dest.mkdir(parents=True, exist_ok=True)
+    if pdf.exists() and pdf.stat().st_size > 0:
+        shutil.copy(pdf, dest / "report.pdf")
+    (dest / "apply-stdout.log").write_text(apply_rc.stdout)
+    (dest / "apply-stderr.log").write_text(apply_rc.stderr)
+    if verify_rc is not None:
+        (dest / "verify-stdout.log").write_text(verify_rc.stdout)
+        (dest / "verify-stderr.log").write_text(verify_rc.stderr)
 
 
 def _resolve_cfg_path() -> Path:
@@ -89,6 +125,11 @@ def test_audit_apply_renders_pdf(tmp_path: Path) -> None:
     if l2 is not None:
         cmd += ["--l2", str(l2)]
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0 or not pdf.exists() or pdf.stat().st_size == 0:
+        _stash_audit_failure(
+            "test_audit_apply_renders_pdf", pdf,
+            apply_rc=result, verify_rc=None,
+        )
     assert result.returncode == 0, (
         f"audit apply failed (rc={result.returncode}):\n"
         f"--- stdout ---\n{result.stdout}\n"
@@ -114,6 +155,11 @@ def test_audit_verify_recomputed_fingerprint_matches(tmp_path: Path) -> None:
     if l2 is not None:
         apply_cmd += ["--l2", str(l2)]
     apply_rc = subprocess.run(apply_cmd, capture_output=True, text=True, check=False)
+    if apply_rc.returncode != 0:
+        _stash_audit_failure(
+            "test_audit_verify_recomputed_fingerprint_matches", pdf,
+            apply_rc=apply_rc, verify_rc=None,
+        )
     assert apply_rc.returncode == 0, (
         f"audit apply (verify-prerequisite) failed:\n{apply_rc.stderr}"
     )
@@ -122,6 +168,11 @@ def test_audit_verify_recomputed_fingerprint_matches(tmp_path: Path) -> None:
     if l2 is not None:
         verify_cmd += ["--l2", str(l2)]
     verify_rc = subprocess.run(verify_cmd, capture_output=True, text=True, check=False)
+    if verify_rc.returncode != 0:
+        _stash_audit_failure(
+            "test_audit_verify_recomputed_fingerprint_matches", pdf,
+            apply_rc=apply_rc, verify_rc=verify_rc,
+        )
     assert verify_rc.returncode == 0, (
         f"audit verify failed (rc={verify_rc.returncode}):\n"
         f"--- stdout ---\n{verify_rc.stdout}\n"

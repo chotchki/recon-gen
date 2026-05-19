@@ -222,6 +222,15 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
+      - name: Upload runner artifacts (triage parity)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: integration-pg-runs
+          path: runs/
+          if-no-files-found: warn
+          retention-days: 7
+
   # P.7 — containerized integration job (Oracle leg).
   #
   # Y.2.gate.k.3 (2026-05-09): gated to push:main + workflow_dispatch
@@ -377,6 +386,15 @@ jobs:
           RECON_GEN_CONFIG: /tmp/ci-oracle.yaml
           RECON_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
         run: ./run_tests.sh up_to=db --dialects=or --targets=lo
+
+      - name: Upload runner artifacts (triage parity)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: integration-oracle-runs
+          path: runs/
+          if-no-files-found: warn
+          retention-days: 7
 
   # X.3.g — the SQLite column of the X.2 matrix. SQLite is the
   # cheapest cell in the whole grid: no DB service container, no
