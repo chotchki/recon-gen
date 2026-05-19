@@ -1772,8 +1772,8 @@ FROM {p}_stuck_unbundled
 -- AB.2.3 — Chain Parent Disagreement: surfaces per child Transfer (not
 -- per (account, day)), so no per-day filter applies. The matview's
 -- business_day comes from MIN(posting day) of the conflicting leg
--- rows; magnitude is the cardinality of the parent_transfer_id set
--- (≥2 = violation). account_id / account_role default to NULL since
+-- rows. magnitude is the cardinality of the parent_transfer_id set
+-- (>= 2 = violation). account_id / account_role default to NULL since
 -- the violation is keyed on transfer_id, not account.
 UNION ALL
 SELECT 'chain_parent_disagreement',

@@ -642,6 +642,88 @@ def test_limit_breach_view_ab1_per_direction_shape() -> None:
     assert "idx_ab1_lb_direction" in sql
 
 
+def test_chain_parent_disagreement_view_ab2_shape() -> None:
+    """AB.2.3: the chain_parent_disagreement matview groups by
+    (transfer_id, template_name) over current_transactions and surfaces
+    any child Transfer where leg_rail firings claim ≥2 distinct
+    parent_transfer_id values.
+
+    Shape contract: filters keep rail-as-child chains out
+    (`template_name IS NOT NULL`), exclude Failed legs (whose metadata
+    is unreliable), and require ≥1 parent claim per row
+    (`transfer_parent_id IS NOT NULL`). HAVING gates on distinct
+    parent count > 1.
+    """
+    # Empty L2 is enough — the matview template is rendered regardless
+    # of declared content; the body shape is what we assert.
+    sql = emit_schema(
+        L2Instance(
+            accounts=(),
+            account_templates=(),
+            rails=(),
+            transfer_templates=(),
+            chains=(),
+            limit_schedules=(),
+        ),
+        prefix="ab2",
+    )
+    body_match = re.search(
+        r"CREATE MATERIALIZED VIEW ab2_chain_parent_disagreement AS(.*?);",
+        sql,
+        re.DOTALL,
+    )
+    assert body_match is not None, (
+        "chain_parent_disagreement matview missing from emit_schema output"
+    )
+    body = body_match.group(1)
+    # Projection columns the dashboard reads.
+    assert "tx.transfer_id" in body
+    assert "tx.template_name AS child_template_name" in body
+    assert "AS business_day" in body
+    assert "COUNT(DISTINCT tx.transfer_parent_id) AS distinct_parent_count" in body
+    assert "MIN(tx.transfer_parent_id) AS parent_transfer_id_min" in body
+    assert "MAX(tx.transfer_parent_id) AS parent_transfer_id_max" in body
+    # Filters keep rail-as-child chains + Failed legs out.
+    assert "tx.transfer_parent_id IS NOT NULL" in body
+    assert "tx.template_name IS NOT NULL" in body
+    assert "tx.status <> 'Failed'" in body
+    # GROUP BY (transfer_id, template_name) + HAVING > 1.
+    assert "GROUP BY tx.transfer_id, tx.template_name" in body
+    assert "HAVING COUNT(DISTINCT tx.transfer_parent_id) > 1" in body
+    # Three indexes for dashboard hot paths.
+    assert "idx_ab2_cpd_transfer" in sql
+    assert "idx_ab2_cpd_template" in sql
+    assert "idx_ab2_cpd_day" in sql
+
+
+def test_todays_exceptions_includes_chain_parent_disagreement_branch() -> None:
+    """AB.2.9: Today's Exceptions matview UNION ALLs a row category for
+    chain_parent_disagreement violations, with check_type='chain_parent_disagreement'
+    and magnitude = distinct_parent_count."""
+    sql = emit_schema(
+        L2Instance(
+            accounts=(),
+            account_templates=(),
+            rails=(),
+            transfer_templates=(),
+            chains=(),
+            limit_schedules=(),
+        ),
+        prefix="te2",
+    )
+    body_match = re.search(
+        r"CREATE MATERIALIZED VIEW te2_todays_exceptions AS(.*?);",
+        sql,
+        re.DOTALL,
+    )
+    assert body_match is not None
+    body = body_match.group(1)
+    assert "'chain_parent_disagreement'" in body
+    assert "FROM te2_chain_parent_disagreement" in body
+    assert "child_template_name AS rail_name" in body
+    assert "distinct_parent_count AS magnitude" in body
+
+
 def _instance_with_pending_age(prefix: str) -> L2Instance:
     """L2 instance with one Rail carrying a `max_pending_age` so the
     stuck_pending view's CASE-branch lookup has data to match against.
