@@ -2542,6 +2542,40 @@ def _emit_baseline_chains(
     return rows
 
 
+def _xor_suppressed_members(
+    template: TransferTemplate, *, firing_id: str,
+) -> set[str]:
+    """AB.3.4: per-firing XOR resolution for a TransferTemplate.
+
+    For each entry in ``template.leg_rail_xor_groups``, deterministically
+    pick one member by ``zlib.crc32`` over ``template_name|group_index
+    |firing_id`` and return the *other* members so callers can suppress
+    them. Returns an empty set when the template declares no XOR groups
+    (every pre-AB.3 template is byte-equivalent through this helper).
+
+    The picker keys off ``firing_id`` — caller passes the chain parent's
+    ``parent_transfer_id``, which is stable across seeds AND across
+    ``scope:`` changes (re-running with a different scope doesn't shift
+    which variant fires for any given chain invocation, per AB.3.0
+    lock). Picker is independent of the seeded ``random.Random`` state
+    so RNG-consuming changes elsewhere in the seed don't ripple into
+    XOR pick decisions.
+    """
+    if not template.leg_rail_xor_groups:
+        return set()
+    suppressed: set[str] = set()
+    template_name = str(template.name)
+    for gi, group in enumerate(template.leg_rail_xor_groups):
+        key = f"{template_name}|{gi}|{firing_id}"
+        h = zlib.crc32(key.encode("utf-8")) & 0x7FFFFFFF
+        picked = str(group[h % len(group)])
+        for member in group:
+            m = str(member)
+            if m != picked:
+                suppressed.add(m)
+    return suppressed
+
+
 def _emit_chain_child_template_legs(
     child_template: TransferTemplate,
     instance: L2Instance,
@@ -2567,6 +2601,15 @@ def _emit_chain_child_template_legs(
     multiple leg rows aggregate into one Transfer in the matview's
     GROUP BY. Per-leg amount samples + per-leg account selection stay
     independent (each leg_rail has its own role bindings).
+
+    AB.3.4: when ``child_template.leg_rail_xor_groups`` is non-empty,
+    exactly one member of each XOR group fires per chain invocation;
+    the other members are suppressed via ``_xor_suppressed_members``.
+    The AB.3.3 ``<prefix>_xor_group_violation`` matview then reads
+    ``firing_count = 1`` per (transfer_id, template, group_index) for
+    healthy baseline firings — no violation. Templates with empty
+    ``leg_rail_xor_groups`` see no behavioral change (suppressed set
+    is empty).
     """
     rails_by_name = {r.name: r for r in instance.rails}
     # One shared transfer_id for the child Transfer — every leg_rail
@@ -2574,8 +2617,14 @@ def _emit_chain_child_template_legs(
     n_shared = counter.next()
     shared_transfer_id = f"tr-base-chain-tmpl-{n_shared:06d}"
 
+    xor_suppressed = _xor_suppressed_members(
+        child_template, firing_id=parent_transfer_id,
+    )
+
     rows: list[str] = []
     for leg_rail_name in child_template.leg_rails:
+        if str(leg_rail_name) in xor_suppressed:
+            continue
         leg_rail = rails_by_name.get(leg_rail_name)
         if leg_rail is None:
             # Validator R3 should reject this at load time; defensive skip.
