@@ -306,6 +306,11 @@ def refresh_matviews_sql(
         # matviews. Refresh before todays_exceptions so its UNION ALL
         # branch reads fresh rows.
         f"{p}_xor_group_violation",
+        # AB.4.3 — Per-child Transfer parent set (long form). Derived
+        # from current_transactions; AB.4.7's fan_in_disagreement
+        # JOINs against this. Refresh before fan_in_disagreement so
+        # the downstream matview sees fresh rows.
+        f"{p}_transfer_parents",
         # Dashboard-shape matviews: read from current_* +
         # L1 invariants. MUST refresh AFTER all L1 invariants are
         # fresh so todays_exceptions's UNION reads up-to-date data.
@@ -387,6 +392,7 @@ def _emit_sqlite_matview_refresh(instance: L2Instance, *, prefix: str) -> str:
         f"{p}_stuck_unbundled",
         f"{p}_chain_parent_disagreement",
         f"{p}_xor_group_violation",
+        f"{p}_transfer_parents",
         f"{p}_daily_statement_summary",
         f"{p}_todays_exceptions",
         f"{p}_inv_pair_rolling_anomalies",
@@ -1348,6 +1354,7 @@ CREATE INDEX idx_{p}_curr_db_scope_day
 _L1_INVARIANT_DROP_NAMES: tuple[str, ...] = (
     "todays_exceptions",
     "daily_statement_summary",
+    "transfer_parents",
     "xor_group_violation",
     "chain_parent_disagreement",
     "stuck_unbundled",
@@ -1824,6 +1831,40 @@ CREATE INDEX idx_{p}_cpd_day ON {p}_chain_parent_disagreement (business_day);
 CREATE INDEX idx_{p}_xgv_transfer ON {p}_xor_group_violation (transfer_id);
 CREATE INDEX idx_{p}_xgv_template ON {p}_xor_group_violation (template_name);
 CREATE INDEX idx_{p}_xgv_day ON {p}_xor_group_violation (business_day);
+
+-- ---------------------------------------------------------------------
+-- Derived matview: per-child Transfer parent set (long form).
+-- AB.4.3 — Lifts the multi-parent set out of `_current_transactions`
+-- so AB.4.7's `_fan_in_disagreement` can JOIN against (child_transfer,
+-- parent_transfer) pairs without re-running a DISTINCT scan every
+-- refresh. One row per (child_transfer_id, parent_transfer_id) pair;
+-- DISTINCT collapses any cross-leg duplicates (multiple leg_rails of
+-- one child Transfer claiming the same parent_transfer_id ⇒ one row).
+--
+-- Per AB.4.0 lock: matview-only storage, no `_transactions` schema
+-- change, no ETL contract change. Reads from the existing
+-- `transfer_parent_id` top-level column on `_current_transactions`
+-- (NOT from JSON metadata — that was the AB.4.3 lock description's
+-- outdated phrasing; the column was promoted from JSON to top-level
+-- by Schema_v6 well before AB.4 landed).
+--
+-- Failed legs filtered out for the same reason AB.2.3 filters them:
+-- a failed leg's parent claim is unreliable. NULL parent legs (rails
+-- that are NOT chain children) filtered out — they're not part of
+-- any chain's parent set by construction.
+-- ---------------------------------------------------------------------
+{matview_create_kw} {p}_transfer_parents{matview_options} AS
+SELECT DISTINCT
+    tx.transfer_id AS child_transfer_id,
+    tx.transfer_parent_id AS parent_transfer_id
+FROM {p}_current_transactions tx
+WHERE tx.transfer_parent_id IS NOT NULL
+  AND tx.status <> 'Failed';
+-- Dashboard hot-path indexes — child-side drill (AB.4.7
+-- fan_in_disagreement looks up "all parents of this child") + parent-
+-- side drill (Investigation: "all children of this parent firing").
+CREATE INDEX idx_{p}_tp_child ON {p}_transfer_parents (child_transfer_id);
+CREATE INDEX idx_{p}_tp_parent ON {p}_transfer_parents (parent_transfer_id);
 
 -- ---------------------------------------------------------------------
 -- Dashboard-shape matview: Daily Statement Summary.

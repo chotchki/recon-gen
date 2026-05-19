@@ -1045,22 +1045,67 @@ def test_todays_exceptions_includes_xor_group_violation_branch() -> None:
     assert "firing_count AS magnitude" in body
 
 
+def test_transfer_parents_view_ab4_shape() -> None:
+    """AB.4.3: the transfer_parents matview is a per-(child, parent)
+    DISTINCT projection over current_transactions. AB.4.7's
+    fan_in_disagreement reads this; surfacing the long-form pair
+    set lets the downstream matview JOIN instead of re-running
+    DISTINCT every refresh.
+
+    Reads the existing ``transfer_parent_id`` top-level column (not
+    JSON metadata — that was the AB.4.3 PLAN lock's outdated
+    phrasing; Schema_v6 promoted it to a real column).
+    """
+    sql = emit_schema(
+        L2Instance(
+            accounts=(),
+            account_templates=(),
+            rails=(),
+            transfer_templates=(),
+            chains=(),
+            limit_schedules=(),
+        ),
+        prefix="tp",
+    )
+    body_match = re.search(
+        r"CREATE MATERIALIZED VIEW tp_transfer_parents AS(.*?);",
+        sql,
+        re.DOTALL,
+    )
+    assert body_match is not None, (
+        "transfer_parents matview missing from emit_schema output"
+    )
+    body = body_match.group(1)
+    # Projection: long form (one row per (child, parent) pair).
+    assert "tx.transfer_id AS child_transfer_id" in body
+    assert "tx.transfer_parent_id AS parent_transfer_id" in body
+    # DISTINCT collapses multi-leg duplicates.
+    assert "SELECT DISTINCT" in body
+    # Filters: NULL parents + Failed legs out.
+    assert "tx.transfer_parent_id IS NOT NULL" in body
+    assert "tx.status <> 'Failed'" in body
+    # Two indexes for the dashboard hot paths.
+    assert "idx_tp_tp_child" in sql
+    assert "idx_tp_tp_parent" in sql
+
+
 def test_refresh_matviews_sql_emits_one_per_view() -> None:
-    """All 17 L1+inv matviews each get a REFRESH command + an
+    """All 18 L1+inv matviews each get a REFRESH command + an
     ANALYZE follow-up: 2 current_* + 2 computed_* + 9 L1 invariants
     (drift + ledger_drift + overdraft + expected_eod_balance_breach +
     limit_breach + stuck_pending + stuck_unbundled +
     chain_parent_disagreement [AB.2.3] + xor_group_violation
-    [AB.3.3]) + 2 dashboard-shape (daily_statement_summary +
-    todays_exceptions) + 2 Investigation matviews
-    (inv_pair_rolling_anomalies + inv_money_trail_edges, added in
-    N.3.b) = 17 matviews × 2 statements each = 34 total."""
+    [AB.3.3]) + 1 derived (transfer_parents [AB.4.3]) + 2
+    dashboard-shape (daily_statement_summary + todays_exceptions) + 2
+    Investigation matviews (inv_pair_rolling_anomalies +
+    inv_money_trail_edges, added in N.3.b) = 18 matviews × 2
+    statements each = 36 total."""
     sql = refresh_matviews_sql(_baseline_instance(), prefix="re")
     statements = [s.strip() for s in sql.split(";") if s.strip()]
     refreshes = [s for s in statements if s.startswith("REFRESH ")]
     analyzes = [s for s in statements if s.startswith("ANALYZE ")]
-    assert len(refreshes) == 17
-    assert len(analyzes) == 17
+    assert len(refreshes) == 18
+    assert len(analyzes) == 18
     # Every REFRESHed matview gets a matching ANALYZE.
     refresh_names = {s.removeprefix("REFRESH MATERIALIZED VIEW ") for s in refreshes}
     analyze_names = {s.removeprefix("ANALYZE ") for s in analyzes}
