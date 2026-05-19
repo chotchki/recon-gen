@@ -346,8 +346,13 @@ def test_pr_payout_vehicle_xor_chain_present() -> None:
     assert payout_chain is not None, (
         "Expected a multi-children Chain row under MerchantSettlementCycle"
     )
-    children = {str(ch.name) for ch in payout_chain.children}
-    assert children == {
+    # AB.6.6.sasq folded MerchantWeeklyPayoutBatch (fan_in) into this
+    # chain as a 4th child — mixed-cardinality demo. The XOR-vehicle
+    # alternation is still the three non-fan_in children.
+    xor_children = {
+        str(ch.name) for ch in payout_chain.children if not ch.fan_in
+    }
+    assert xor_children == {
         "MerchantPayoutACH", "MerchantPayoutWire", "MerchantPayoutCheck",
     }
 

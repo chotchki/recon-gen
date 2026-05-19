@@ -75,6 +75,7 @@ from .primitives import (
     Account,
     AccountTemplate,
     Chain,
+    ChainChildSpec,
     Identifier,
     L2Instance,
     Name,
@@ -2808,31 +2809,42 @@ def _emit_baseline_chains(
         if not parent_firings:
             continue
 
-        # AB.4.4 (AB.6 per-child): a chain carrying at least one
-        # per-child fan_in entry routes into batched-firing emission.
-        # All legs of the batch's child template share one
-        # `transfer_id`; each leg carries its contributing parent's
-        # `parent_transfer_id`. The AB.4.3 transfer_parents matview
-        # derives the multi-parent set via DISTINCT(child, parent);
-        # AB.4.7's fan_in_disagreement joins against
-        # expected_parent_count for cardinality check.
-        if any(c.fan_in for c in chain.children):
+        # AB.6 (mixed-cardinality): a chain may carry both fan_in
+        # children (N parents → 1 shared child Transfer) AND non-fan_in
+        # children (XOR alternation: each parent picks one of these).
+        # Both buckets emit independently; a single parent firing may
+        # contribute to BOTH (one XOR pick + one batch contribution per
+        # fan_in entry).
+        fan_in_children = tuple(c for c in chain.children if c.fan_in)
+        non_fan_in_children = tuple(c for c in chain.children if not c.fan_in)
+
+        # AB.4.4: emit batched-firing rows for every fan_in entry.
+        # `_emit_fan_in_chain_firings` accumulates parents into batches
+        # of `expected_parent_count` and emits all-legs-share-transfer_id
+        # rows; AB.4.3 transfer_parents matview reads DISTINCT(child,
+        # parent); AB.4.7 fan_in_disagreement joins against the entry's
+        # expected_parent_count.
+        for fan_in_child in fan_in_children:
             rows.extend(_emit_fan_in_chain_firings(
-                chain, parent_firings, instance, state, counter, rng, dialect,
+                chain, fan_in_child, parent_firings,
+                instance, state, counter, rng, dialect,
             ))
+
+        # No non-fan_in children → no XOR/required emission for this chain.
+        if not non_fan_in_children:
             continue
 
-        is_required = len(chain.children) == 1
+        is_required = len(non_fan_in_children) == 1
 
         for parent_transfer_id, parent_day, parent_amount in parent_firings:
-            # Pick which child fires. Deterministic via hash of parent
-            # transfer_id so reruns produce identical output. Singleton
-            # children always picks the lone child (modulo 1).
+            # Pick which non-fan_in child fires (XOR alternation when
+            # >1, the lone child when singleton). Deterministic via
+            # hash of parent transfer_id so reruns are identical.
             child_idx = (
                 zlib.crc32(parent_transfer_id.encode("utf-8"))
                 & 0x7FFFFFFF
-            ) % len(chain.children)
-            child_name = chain.children[child_idx].name
+            ) % len(non_fan_in_children)
+            child_name = non_fan_in_children[child_idx].name
 
             # Completion roll: singleton ≈95% (Z.A required), multi ≈50% (XOR).
             completion_threshold = 0.95 if is_required else 0.50
@@ -2976,6 +2988,7 @@ def _emit_chain_child_template_legs(
 
 def _emit_fan_in_chain_firings(
     chain: Chain,
+    fan_in_child: ChainChildSpec,
     parent_firings: list[tuple[str, date, Decimal]],
     instance: L2Instance,
     state: _BaselineState,
@@ -2984,21 +2997,19 @@ def _emit_fan_in_chain_firings(
     dialect: Dialect,
 ) -> list[str]:
     """AB.4.4 (AB.6 per-child): emit chain firings where N parent
-    firings share one child Transfer (the batched-payout pattern).
+    firings share one child Transfer (the batched-payout pattern),
+    for a single per-child fan_in entry.
 
-    AB.6 (2026-05-19) — fan_in moved per-child. This function reads
-    the chain's first ``ChainChildSpec`` whose ``fan_in=True`` and
-    uses its ``expected_parent_count`` for batch sizing. Mixed-
-    cardinality chains (some children fan_in, some not) are
-    representable in the L2 grammar but not yet exercised by any
-    fixture; today's spec_example + sasquatch_pr each carry a single
-    fan_in child per chain. When AB.6.6.sasq's fold lock fires, the
-    function will need a second pass over non-fan_in children — track
-    via a follow-on if the lock activates.
+    AB.6 (2026-05-19) — caller passes the ``fan_in_child`` explicitly
+    so the main chain loop can iterate every fan_in entry under a
+    mixed-cardinality chain (AB.6.6.sasq's fold lock landed: one
+    chain can carry both XOR-alternation children AND a fan-in
+    child — the MerchantSettlementCycle + MerchantWeeklyPayoutBatch
+    shape).
 
     Per AB.4.0 lock: parents are grouped into batches of size
-    ``child.expected_parent_count`` (default 2 when unset — the
-    minimum non-orphan). Each batch:
+    ``fan_in_child.expected_parent_count`` (default 2 when unset —
+    the minimum non-orphan). Each batch:
 
     - Allocates ONE shared ``child_transfer_id`` (``tr-base-fanin-NNNNNN``).
     - Each parent in the batch emits a FULL set of the child template's
@@ -3024,14 +3035,8 @@ def _emit_fan_in_chain_firings(
     rows that the plant path (AB.4.5) covers instead. The baseline's
     job is to populate the healthy case.
     """
-    if not chain.children:
-        return []
-    # AB.6 C8a: every per-child entry with fan_in=True resolves to a
-    # TransferTemplate. Pick the first fan_in entry (today's fixtures
-    # all carry singleton fan_in per chain; mixed-cardinality is a
-    # downstream extension when AB.6.6.sasq's fold lock activates).
-    fan_in_child = next((c for c in chain.children if c.fan_in), None)
-    if fan_in_child is None:
+    if not fan_in_child.fan_in:
+        # Defensive: caller is responsible for filtering to fan_in entries.
         return []
     child_name = fan_in_child.name
     child_template = next(

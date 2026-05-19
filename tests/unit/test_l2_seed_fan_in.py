@@ -135,8 +135,8 @@ def test_fan_in_emits_one_shared_transfer_per_batch() -> None:
     counter = _Counter()
 
     rows = _emit_fan_in_chain_firings(
-        chain, _make_parent_firings(6), inst, state, counter, rng,
-        Dialect.POSTGRES,
+        chain, chain.children[0], _make_parent_firings(6),
+        inst, state, counter, rng, Dialect.POSTGRES,
     )
     # Each batch emits batch_size (3) parents × 2 leg_rails = 6 leg
     # rows per batch. 2 batches → 12 rows total.
@@ -161,8 +161,8 @@ def test_fan_in_batch_legs_carry_distinct_parent_ids() -> None:
     counter = _Counter()
 
     rows = _emit_fan_in_chain_firings(
-        chain, _make_parent_firings(3), inst, state, counter, rng,
-        Dialect.POSTGRES,
+        chain, chain.children[0], _make_parent_firings(3),
+        inst, state, counter, rng, Dialect.POSTGRES,
     )
     pairs = {_extract_transfer_id_and_parent(r) for r in rows}
     # 1 batch → 1 child_transfer_id × 3 parents = 3 distinct pairs.
@@ -187,8 +187,8 @@ def test_fan_in_partial_tail_batch_dropped() -> None:
     counter = _Counter()
 
     rows = _emit_fan_in_chain_firings(
-        chain, _make_parent_firings(7), inst, state, counter, rng,
-        Dialect.POSTGRES,
+        chain, chain.children[0], _make_parent_firings(7),
+        inst, state, counter, rng, Dialect.POSTGRES,
     )
     # 2 full batches × 3 parents × 2 leg_rails = 12. The 7th parent
     # (index 6) is dropped.
@@ -207,8 +207,8 @@ def test_fan_in_unset_expected_count_defaults_to_two() -> None:
     counter = _Counter()
 
     rows = _emit_fan_in_chain_firings(
-        chain, _make_parent_firings(4), inst, state, counter, rng,
-        Dialect.POSTGRES,
+        chain, chain.children[0], _make_parent_firings(4),
+        inst, state, counter, rng, Dialect.POSTGRES,
     )
     # 4 parents / batch_size=2 = 2 batches × 2 parents × 2 leg_rails = 8.
     assert len(rows) == 8
@@ -225,6 +225,6 @@ def test_fan_in_zero_parents_emits_nothing() -> None:
     counter = _Counter()
 
     rows = _emit_fan_in_chain_firings(
-        chain, [], inst, state, counter, rng, Dialect.POSTGRES,
+        chain, chain.children[0], [], inst, state, counter, rng, Dialect.POSTGRES,
     )
     assert rows == []

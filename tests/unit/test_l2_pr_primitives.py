@@ -235,8 +235,14 @@ class TestXorGroupEnforcement:
         assert payout is not None, (
             "Expected the merchant payout XOR row under MerchantSettlementCycle"
         )
-        children = sorted(str(ch.name) for ch in payout.children)
-        assert children == [
+        # AB.6.6.sasq added MerchantWeeklyPayoutBatch as a 4th fan_in
+        # child — mixed-cardinality. Filter to non-fan_in for the XOR
+        # alternation assertion (the fan_in sibling is enforced by
+        # _fan_in_disagreement, not the XOR contract).
+        xor_children = sorted(
+            str(ch.name) for ch in payout.children if not ch.fan_in
+        )
+        assert xor_children == [
             "MerchantPayoutACH", "MerchantPayoutCheck", "MerchantPayoutWire",
         ]
 

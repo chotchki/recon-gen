@@ -1034,14 +1034,21 @@ chains:
       - MerchantPayoutACH
       - MerchantPayoutWire
       - MerchantPayoutCheck
+      - name: MerchantWeeklyPayoutBatch
+        fan_in: true
+        expected_parent_count: 5
     description: |
-      Merchant payout vehicle — exactly one of three options fires
-      per settled MerchantSettlementCycle. ACH (preferred default,
-      lowest friction; merchant holds an SNB DDA). Wire (faster but
-      Fedwire fees apply; merchant banks elsewhere and opts into
-      wire delivery). Check (legacy paper path for merchants not yet
-      enrolled in ACH or wire — slowest, hence
-      `MerchantPayoutCheck`'s `max_pending_age: P7D`).
+      AB.6.6.sasq (2026-05-19) — mixed-cardinality demonstration.
+      Each settled MerchantSettlementCycle fires both:
+      - exactly ONE of three 1:1 payout vehicles (ACH preferred
+        default, Wire for merchants banking elsewhere, Check for
+        legacy paper); AND
+      - contributes to the week's MerchantWeeklyPayoutBatch
+        (5 daily settlements share one weekly batch Transfer —
+        AB.6 per-child fan_in shape).
+      The L1 invariants split the work: `multi_xor_violation`
+      enforces the XOR alternation on [ACH, Wire, Check];
+      `fan_in_disagreement` enforces parent_count=5 on the batch.
 
   # ----- AB.2 (2026-05-19): template-as-chain-child (rail → template)
 
