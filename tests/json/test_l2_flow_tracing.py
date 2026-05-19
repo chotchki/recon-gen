@@ -440,7 +440,7 @@ def test_chains_dataset_inlines_l2_chain_entries() -> None:
     for c in inst.chains:
         assert f"'{c.parent}'" in sql
         for child in c.children:
-            assert f"'{child}'" in sql
+            assert f"'{child.name}'" in sql
         total_rows += len(c.children)
     # UNION ALL count = (per-child rows) - 1.
     assert sql.count("UNION ALL") == max(0, total_rows - 1)
