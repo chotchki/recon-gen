@@ -1,5 +1,27 @@
 # Release Notes
 
+## v11.6.2 — AB.7.1a release-gate fix + coverage aggregation
+
+Patch release. Two related fixes surfaced by AB.7.1's release-gate verification:
+
+**4-way agreement silent-skip on every release** (canonical prod-publish gate). The `test_invariant_four_way_agreement` parametrized test silently reported all 6 postgres legs as `SKIPPED` on every recent release tag. Root cause: `_DIALECT_CONFIG_PATHS` hardcodes `run/config.{postgres,oracle}.yaml`; `run/` is gitignored; CI runners clone fresh so neither file exists, so the fixture skips at `not cfg_path.exists()`. release.yml + `aw`-target runner cells generate a synthesized cfg at `/tmp/release-e2e.yaml` and set `RECON_GEN_CONFIG` to it — but the fixture docstring said "RECON_GEN_CONFIG is intentionally ignored here." That intent was stale; the result was a canonical-gate-of-no-value (green CI step, zero assertions). Fix: honor `RECON_GEN_CONFIG` when its `dialect:` matches the parametrize dialect; fall through to the canonical path otherwise. The next release tag re-enables the gate.
+
+**Coverage aggregation across e2e + release legs**. Pre-existing setup measured coverage from the unit-test phase only. The browser / e2e / 4-way agreement / smoke legs execute massive amounts of production code (deploy paths, audit PDF, dashboard render, persistence) but contributed zero data. Headline 81% was hiding behind a green number.
+
+Changes:
+- Every pytest invocation in `e2e.yml` (e2e-pg-api, e2e-pg-browser dashboard sweep + 4-way agreement, e2e-oracle-api) sets a distinct `COVERAGE_FILE` + adds `--cov=recon_gen`. Each job uploads its `.coverage.e2e-*` data files as a workflow artifact.
+- Same pattern across `release.yml` (Tests + pyright, Smoke wheel install, e2e-against-testpypi API / browser / 4-way).
+- New `coverage` aggregator job in `e2e.yml` and new `release-coverage` aggregator in `release.yml` download every `coverage-data-*` artifact, `coverage combine` them, render markdown to Step Summary + xml/html as artifacts.
+- `github-release` now depends on `release-coverage` and attaches the aggregated `coverage.xml` + `coverage-html.zip` + `coverage-report.md` to the GitHub release page alongside the wheel + sdist. Coverage aggregation is non-blocking (`if: always()`); a coverage hiccup doesn't gate the publish.
+
+**Test-assertion fix in `tests/json/test_l2_flow_tracing.py::test_chains_dataset_inlines_l2_chain_entries`** (a stray AB.6-shape miss caught by the `up_to=db` prelude). The test was using `f"'{child}'"` over `chain.children`; post-AB.6 `child` is a `ChainChildSpec` dataclass and its repr leaked into the assertion. Fixed to `f"'{child.name}'"`.
+
+**Skip triage** (AB.7.1a). Baseline 77 prelude skips audited per-skip:
+- 74 are `tests/unit/test_docs_cli_invocations.py:235`'s "No recon-gen invocations in <doc>.md" parametric skip — designed conditional behavior; no fix.
+- 3 are docs build chain tests (`tests/docs/test_docs_persona_neutral.py` + `tests/docs/test_docs_links.py`) checking `MKDOCS_YML.exists()` against a stale path (`src/recon_gen/docs/mkdocs.yml` — file is at `src/recon_gen/mkdocs.yml` post-Phase R restructure). Path corrected + build cwd fixed (mkdocs-macros resolves `include_dir` cwd-relative, not project_dir-relative). End state: 1 PASS (sasquatch persona test) + 2 XFAIL with tracking note pointing at a follow-on cleanup task (pre-existing persona leaks + 3 dead anchors surfaced when the tests re-enabled, unrelated to AB.6).
+
+No production behavior change vs v11.6.1 — operators on v11.6.1 see no functional impact.
+
 ## v11.6.1 — AB.6 test-assertion fix
 
 Patch release. `tests/json/test_l2_flow_tracing.py::test_chains_dataset_inlines_l2_chain_entries` asserted `f"'{child}'" in sql` over a chain's children — pre-AB.6 that stringified the bare `Identifier`; post-AB.6 (where `chain.children[i]` is a `ChainChildSpec` dataclass) it expanded to the full `'ChainChildSpec(name=..., fan_in=False, expected_parent_count=None)'` repr and the substring check missed. Production SQL emit (`apps/l2_flow_tracing/datasets.py`) was already correct (uses `.name`); only the test assertion needed the `.name` accessor.
