@@ -127,8 +127,9 @@ def test_demo_mode_strips_l2_shape_mutating_routes(
     yaml_path: Path, tmp_path: Path,
 ) -> None:
     """In demo_mode, POST/PUT/DELETE handlers on /l2_shape/* must not
-    be in the route table. (GET routes for the L2 view may or may not
-    remain — this assertion only forbids the mutating verbs.)
+    be in the route table. The read-only list + read-card GETs are
+    preserved (visitors can browse the L2 yaml's accounts / rails /
+    templates / chains).
     """
     routes = _build_routes_with_demo_mode(
         yaml_path, tmp_path, demo_mode=True,
@@ -141,6 +142,41 @@ def test_demo_mode_strips_l2_shape_mutating_routes(
     assert mutating_l2_shape == set(), (
         f"demo_mode must strip POST/PUT/DELETE on /l2_shape/*; "
         f"found: {sorted(mutating_l2_shape)!r}"
+    )
+    # Form-GET routes whose submit buttons would 404 are also stripped
+    # — /l2_shape/{kind}/new (POST submission goes nowhere) and
+    # /l2_shape/{kind}/{entity_id}/edit (PUT submission ditto).
+    form_gets = {
+        (p, m) for (p, m) in pairs
+        if p.startswith("/l2_shape/") and m == "GET"
+        and (p.endswith("/new") or p.endswith("/edit"))
+    }
+    assert form_gets == set(), (
+        f"demo_mode must strip /new + /edit form GETs; "
+        f"found: {sorted(form_gets)!r}"
+    )
+
+
+def test_demo_mode_preserves_l2_shape_read_gets(
+    yaml_path: Path, tmp_path: Path,
+) -> None:
+    """Demo-mode preserves the read-only browse view: list GET +
+    entity read-card GET. This is the bug that surfaced when sasquatch
+    went live — `/l2_shape/account/` 404'd because the editor routes
+    were stripped wholesale.
+    """
+    routes = _build_routes_with_demo_mode(
+        yaml_path, tmp_path, demo_mode=True,
+    )
+    pairs = _route_paths_with_methods(routes)
+    expected_reads = {
+        ("/l2_shape/{kind}/", "GET"),
+        ("/l2_shape/{kind}/{entity_id}", "GET"),
+    }
+    missing = expected_reads - pairs
+    assert missing == set(), (
+        f"demo_mode dropped expected read-only /l2_shape/* routes: "
+        f"{sorted(missing)!r}"
     )
 
 

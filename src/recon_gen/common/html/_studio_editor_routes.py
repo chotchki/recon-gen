@@ -2710,41 +2710,64 @@ def _placeholder(kind: EntityKind) -> object:
 # ---------------------------------------------------------------------------
 
 
-def make_editor_routes(cache: L2InstanceCache) -> list[Route]:
+def make_editor_routes(
+    cache: L2InstanceCache,
+    *,
+    demo_mode: bool = False,
+) -> list[Route]:
     """Build the editor route list bound to ``cache``.
 
     Spliced into ``make_studio_routes`` (X.4.e.7) so the cache + the
     diagram routes share one in-memory instance per server.
+
+    When ``demo_mode=True`` (AE.2.b lockdown for public-demo hosting),
+    the mutating routes (POST create / PUT save / DELETE delete) AND
+    the new-entity form GET + edit-form GET are stripped — those forms
+    submit to routes that don't exist, so showing them would just lead
+    visitors to clicks that 404. The read-only list + read-card GETs
+    are preserved so the demo still surfaces "here are the accounts /
+    rails / templates / chains in this L2".
     """
     h = _make_handlers(cache)
-    return [
+    # ``/new`` MUST be declared before ``/{entity_id}`` so Starlette's
+    # path matcher doesn't treat the literal "new" as an entity_id.
+    # In demo-mode the /new GET is stripped — list + read-card are the
+    # only routes that mount.
+    routes: list[Route] = [
         Route(
             "/l2_shape/{kind}/", h["list_view"], methods=["GET"],
         ),
-        Route(
-            "/l2_shape/{kind}/", h["create"], methods=["POST"],
-            name="l2_shape_create",
-        ),
-        # ``/new`` MUST be declared before ``/{entity_id}`` so Starlette's
-        # path matcher doesn't treat the literal "new" as an entity_id.
-        Route(
-            "/l2_shape/{kind}/new", h["new_form"], methods=["GET"],
-            name="l2_shape_new_form",
-        ),
+    ]
+    if not demo_mode:
+        routes.extend([
+            Route(
+                "/l2_shape/{kind}/", h["create"], methods=["POST"],
+                name="l2_shape_create",
+            ),
+            Route(
+                "/l2_shape/{kind}/new", h["new_form"], methods=["GET"],
+                name="l2_shape_new_form",
+            ),
+        ])
+    routes.append(
         Route(
             "/l2_shape/{kind}/{entity_id}", h["read_card"],
             methods=["GET"], name="l2_shape_read",
         ),
-        Route(
-            "/l2_shape/{kind}/{entity_id}/edit", h["edit_form"],
-            methods=["GET"], name="l2_shape_edit",
-        ),
-        Route(
-            "/l2_shape/{kind}/{entity_id}", h["save"],
-            methods=["PUT"], name="l2_shape_save",
-        ),
-        Route(
-            "/l2_shape/{kind}/{entity_id}", h["delete"],
-            methods=["DELETE"], name="l2_shape_delete",
-        ),
-    ]
+    )
+    if not demo_mode:
+        routes.extend([
+            Route(
+                "/l2_shape/{kind}/{entity_id}/edit", h["edit_form"],
+                methods=["GET"], name="l2_shape_edit",
+            ),
+            Route(
+                "/l2_shape/{kind}/{entity_id}", h["save"],
+                methods=["PUT"], name="l2_shape_save",
+            ),
+            Route(
+                "/l2_shape/{kind}/{entity_id}", h["delete"],
+                methods=["DELETE"], name="l2_shape_delete",
+            ),
+        ])
+    return routes

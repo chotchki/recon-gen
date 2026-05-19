@@ -1,5 +1,29 @@
 # Release Notes
 
+## v11.6.6 — Studio --demo-mode keeps read-only L2 browse routes
+
+v11.6.5's `--demo-mode` stripped the entire `make_editor_routes()`
+output, including the read-only GETs (`/l2_shape/{kind}/` list view,
+`/l2_shape/{kind}/{entity_id}` read card). Result: visitors to the
+sasquatch demo's studio surface hit "Accounts" / "Rails" / etc. in
+the nav and got 404s.
+
+Fix: `make_editor_routes(cache, demo_mode=False)` now accepts a
+`demo_mode` flag. When set, only the list + read-card GETs mount; the
+new-form GET, edit-form GET, POST create, PUT save, DELETE delete are
+all stripped. Visitors can browse what's in the L2 yaml but can't
+mutate. Same security posture as v11.6.5 (sandbox-exec still denies
+file-write on the L2 yaml; --demo-mode is the UX-cleaner cut).
+
+7 unit tests (1 new) in `tests/unit/test_studio_demo_mode.py` walk
+the route table and assert the preserve/strip contract.
+
+Phase AE Mac mini deploy test for the GitHub Actions self-hosted
+runner: when v11.6.6 publishes, the runner picks up the
+`release: published` event and runs `refresh-demos.sh`, which
+pip-upgrades + restarts both daemons. The sasquatch accounts page
+should work after the refresh fires.
+
 ## v11.6.5 — Suppress recon-prefix smell on demo-mode tmpdir
 
 v11.6.4 release CI's typing-smells test failed because

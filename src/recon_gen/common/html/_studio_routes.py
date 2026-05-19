@@ -1747,17 +1747,15 @@ def make_studio_routes(
     # for every entity kind). Pure scenario over the cached L2 — no
     # pool needed, always mounted alongside the diagram.
     #
-    # AE.2.b: in `--demo-mode`, the editor routes are not mounted at all.
-    # The L2 yaml view (`GET /l2_shape/...`) remains useful for browsing
-    # primitives, but POST/PUT/DELETE on those paths would mutate
-    # `cache.path`'s on-disk yaml — sandbox-exec denies the write anyway,
-    # but route-level skip keeps the UI from offering save/delete buttons
-    # that 500 at submission.
-    if not demo_mode:
-        from recon_gen.common.html._studio_editor_routes import (  # noqa: PLC0415
-            make_editor_routes,
-        )
-        routes.extend(make_editor_routes(cache))
+    # AE.2.b: in `--demo-mode`, ``make_editor_routes(cache, demo_mode=True)``
+    # keeps only the read-only GETs (list + read card) and strips the
+    # new/edit-form GETs + POST create + PUT save + DELETE delete.
+    # Visitors can browse the L2 yaml's accounts / rails / templates /
+    # chains but can't mutate.
+    from recon_gen.common.html._studio_editor_routes import (  # noqa: PLC0415
+        make_editor_routes,
+    )
+    routes.extend(make_editor_routes(cache, demo_mode=demo_mode))
 
     # X.4.c.6 — trainer JSON route. Always mounted (no DB needed —
     # the scenario walk is pure Python over the cached L2).
