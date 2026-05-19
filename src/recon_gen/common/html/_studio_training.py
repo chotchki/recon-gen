@@ -72,6 +72,11 @@ _L1_KIND_TO_SHEET_ID: Final[dict[str, str]] = {
     # AB.4.7 — fan_in_disagreement also UNION-only. Same drill path
     # as the chain_parent_disagreement / xor_group_violation kinds.
     "fan_in_disagreement": "l1-sheet-todays-exceptions",
+    # AB.6.5 — multi_xor_violation also UNION-only. Same drill path
+    # as the other AB.2/3/4 UNION-only kinds: analyst's drill on a
+    # surfaced row navigates to the Transactions sheet keyed by the
+    # parent firing's transfer_id.
+    "multi_xor_violation": "l1-sheet-todays-exceptions",
     "supersession_audit": "l1-sheet-supersession-audit",
 }
 
@@ -93,6 +98,7 @@ _DISPLAY_ORDER: Final[tuple[str, ...]] = (
     "chain_parent_disagreement",  # AB.2.3
     "xor_group_violation",  # AB.3.3
     "fan_in_disagreement",  # AB.4.7
+    "multi_xor_violation",  # AB.6.5
     "supersession_audit",
 )
 

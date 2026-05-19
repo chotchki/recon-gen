@@ -1246,6 +1246,146 @@ def test_todays_exceptions_includes_fan_in_disagreement_branch() -> None:
     assert "parent_count AS magnitude" in body
 
 
+def test_multi_xor_violation_view_empty_branch_when_no_qualifying_chain(
+) -> None:
+    """AB.6.5: when no chain qualifies (≥2 non-fan_in children with a
+    Rail parent), the multi_xor_violation matview body short-circuits
+    with ``WHERE 1=0`` (mirrors AB.3.3 + AB.4.7 empty-branch shape).
+    Empty L2 + an L2 with only singleton chains both hit the empty path.
+    """
+    sql = emit_schema(
+        L2Instance(
+            accounts=(),
+            account_templates=(),
+            rails=(),
+            transfer_templates=(),
+            chains=(),
+            limit_schedules=(),
+        ),
+        prefix="mxv",
+    )
+    body_match = re.search(
+        r"CREATE MATERIALIZED VIEW mxv_multi_xor_violation AS(.*?);",
+        sql,
+        re.DOTALL,
+    )
+    assert body_match is not None, (
+        "multi_xor_violation matview missing from emit_schema output"
+    )
+    body = body_match.group(1)
+    assert "WHERE 1=0" in body
+    assert "multi_xor_chains" not in body
+
+
+def test_multi_xor_violation_view_populated_when_multi_xor_chain_declared(
+) -> None:
+    """AB.6.5 + AB.6.5.spec: when ≥1 chain declares ≥2 non-fan_in
+    children, the matview body carries:
+    - a CTE ``multi_xor_chains(chain_parent_name, child_name)`` populated
+      by VALUES (one row per (parent, non-fan_in child) pair);
+    - a UNION-of-template_name + rail_name parent_firings CTE so the
+      parent can be either a Rail or a Template;
+    - a LEFT JOIN against _current_transactions for children matching
+      the declared XOR siblings;
+    - a CASE expression discriminating ``'missed'`` (count=0) vs
+      ``'overlap'`` (count>=2).
+    Body-shape assertion under spec_example's
+    ``BulkAccrualSettlement → [BulkAccrualSettleACH, BulkAccrualSettleWire]``
+    chain (AB.6.5.spec).
+    """
+    from pathlib import Path
+    from recon_gen.common.l2.loader import load_instance
+    fx = Path(__file__).resolve().parent.parent / "l2" / "spec_example.yaml"
+    inst = load_instance(fx)
+    sql = emit_schema(inst, prefix="mxp")
+    body_match = re.search(
+        r"CREATE MATERIALIZED VIEW mxp_multi_xor_violation AS(.*?);",
+        sql,
+        re.DOTALL,
+    )
+    assert body_match is not None
+    body = body_match.group(1)
+    assert "WHERE 1=0" not in body
+    assert (
+        "multi_xor_chains(chain_parent_name, child_name) AS (\n  VALUES"
+        in body
+    )
+    # spec_example's multi-XOR chain rows appear in the CTE — the
+    # non-fan_in children only (fan_in children are filtered out per
+    # AB.5 coupling).
+    assert "'BulkAccrualSettlement'" in body
+    assert "'BulkAccrualSettleACH'" in body
+    assert "'BulkAccrualSettleWire'" in body
+    # CASE discriminates the two disagreement kinds.
+    assert "'missed'" in body
+    assert "'overlap'" in body
+    # Parent firings UNION both template + rail matches.
+    assert "tx.template_name IN (SELECT name FROM parent_names)" in body
+    assert "tx.rail_name IN (SELECT name FROM parent_names)" in body
+
+
+def test_todays_exceptions_includes_multi_xor_violation_branch() -> None:
+    """AB.6.5 wiring: Today's Exceptions matview UNION ALLs a row
+    category for multi_xor_violation violations, with
+    check_type='multi_xor_violation' and magnitude=child_count."""
+    sql = emit_schema(
+        L2Instance(
+            accounts=(),
+            account_templates=(),
+            rails=(),
+            transfer_templates=(),
+            chains=(),
+            limit_schedules=(),
+        ),
+        prefix="mxt",
+    )
+    body_match = re.search(
+        r"CREATE MATERIALIZED VIEW mxt_todays_exceptions AS(.*?);",
+        sql,
+        re.DOTALL,
+    )
+    assert body_match is not None
+    body = body_match.group(1)
+    assert "'multi_xor_violation'" in body
+    assert "FROM mxt_multi_xor_violation" in body
+    assert "parent_rail_or_template_name AS rail_name" in body
+    assert "child_count AS magnitude" in body
+
+
+def test_multi_xor_violation_skips_per_child_fan_in_entries() -> None:
+    """AB.6.5 + AB.5 coupling: chains where ≥2 children are declared
+    but one is fan_in get filtered to the non-fan_in subset. If the
+    non-fan_in subset has <2 entries, the chain doesn't qualify for
+    multi_xor_violation (its cardinality is _fan_in_disagreement's job).
+
+    Sasquatch's MerchantSettlementCycle chain has 4 children (3 XOR
+    payout vehicles + 1 fan_in MerchantWeeklyPayoutBatch). The 3 XOR
+    children DO qualify for multi_xor_violation; the fan_in entry is
+    excluded from the CTE. Inverse: a chain with [ChildA(fan_in),
+    ChildB] has only 1 non-fan_in → doesn't qualify (the singleton
+    1:1 contract belongs to AB.2.3).
+    """
+    from pathlib import Path
+    from recon_gen.common.l2.loader import load_instance
+    fx = Path(__file__).resolve().parent.parent / "l2" / "sasquatch_pr.yaml"
+    inst = load_instance(fx)
+    sql = emit_schema(inst, prefix="sqmx")
+    body_match = re.search(
+        r"CREATE MATERIALIZED VIEW sqmx_multi_xor_violation AS(.*?);",
+        sql,
+        re.DOTALL,
+    )
+    assert body_match is not None
+    body = body_match.group(1)
+    # MerchantSettlementCycle's 3 XOR children qualify (AB.6.6.sasq
+    # mixed-cardinality fold). MerchantWeeklyPayoutBatch is fan_in →
+    # excluded.
+    assert "'MerchantPayoutACH'" in body
+    assert "'MerchantPayoutWire'" in body
+    assert "'MerchantPayoutCheck'" in body
+    assert "'MerchantWeeklyPayoutBatch'" not in body
+
+
 def test_refresh_matviews_sql_emits_one_per_view() -> None:
     """All 19 L1+inv matviews each get a REFRESH command + an
     ANALYZE follow-up: 2 current_* + 2 computed_* + 10 L1 invariants

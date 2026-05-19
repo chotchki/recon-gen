@@ -276,3 +276,195 @@ def test_cap_breach_amount_uses_cap_when_below_range_cap() -> None:
     # → 150 wins (it's the smaller).
     rail = _ranged_rail("5", "500")
     assert _cap_breach_amount(Decimal("100"), rail) == Decimal("150")
+
+
+# -- AB.6.6 _pick_multi_xor_chain_inputs picker contracts -------------------
+
+
+def test_pick_multi_xor_chain_inputs_finds_eligible_chain() -> None:
+    """AB.6.6: picker returns (parent, child_a, child_b) for the first
+    chain (in deterministic order) with a Rail parent + ≥2 non-fan_in
+    children. spec_example's BulkAccrualSettlement chain qualifies."""
+    from pathlib import Path
+    from recon_gen.common.l2.auto_scenario import _pick_multi_xor_chain_inputs
+    from recon_gen.common.l2.loader import load_instance
+
+    fx = Path(__file__).resolve().parent.parent / "l2" / "spec_example.yaml"
+    inst = load_instance(fx)
+    pick = _pick_multi_xor_chain_inputs(inst)
+    assert pick is not None, "AB.6.5.spec should land an eligible chain"
+    parent, child_a, child_b = pick
+    assert str(parent) == "BulkAccrualSettlement"
+    # Children traversed in declared order; first two non-fan_in entries win.
+    assert {str(child_a), str(child_b)} == {
+        "BulkAccrualSettleACH", "BulkAccrualSettleWire",
+    }
+
+
+def test_pick_multi_xor_chain_inputs_skips_template_parent() -> None:
+    """AB.6.6: picker restricts to Rail parents (mirrors AB.2.6 /
+    AB.4.5). spec_example's ReconciliationLeg → MerchantSettlementCycle
+    chain has a template parent — the picker MUST NOT return it.
+    Sasquatch's MerchantSettlementCycle chain also has a template
+    parent (the template itself), so it's also skipped.
+
+    Verified by inspecting the pick: must be a Rail-parented chain.
+    """
+    from pathlib import Path
+    from recon_gen.common.l2.auto_scenario import _pick_multi_xor_chain_inputs
+    from recon_gen.common.l2.loader import load_instance
+
+    fx = (
+        Path(__file__).resolve().parent.parent / "l2" / "sasquatch_pr.yaml"
+    )
+    inst = load_instance(fx)
+    pick = _pick_multi_xor_chain_inputs(inst)
+    # sasquatch_pr's MerchantSettlementCycle chain is mixed-cardinality
+    # but its parent is a TransferTemplate (the template itself). The
+    # picker should skip it. sasquatch carries no Rail-parented
+    # multi-XOR chain, so the picker returns None.
+    if pick is None:
+        return
+    parent, _, _ = pick
+    rail_names = {r.name for r in inst.rails}
+    assert parent in rail_names, (
+        f"picker returned non-Rail parent {parent!r}; "
+        f"AB.6.6 picker MUST gate on Rail parents only"
+    )
+
+
+def test_pick_multi_xor_chain_inputs_skips_per_child_fan_in_entries() -> None:
+    """AB.6.6 + AB.5 coupling: when a chain has both fan_in and
+    non-fan_in children, the picker counts only the non-fan_in subset.
+    A chain like [ChildA, ChildB(fan_in)] has only 1 non-fan_in →
+    skipped. A chain like [ChildA, ChildB, ChildC(fan_in)] has 2
+    non-fan_in → qualifies (returns A, B).
+    """
+    from recon_gen.common.l2.auto_scenario import _pick_multi_xor_chain_inputs
+    from recon_gen.common.l2.primitives import (
+        Account,
+        Chain,
+        ChainChildSpec,
+        Identifier,
+        L2Instance,
+        LegDirection,
+        Money,
+        Name,
+        SingleLegRail,
+        TransferTemplate,
+    )
+
+    parent_rail = SingleLegRail(
+        name=Identifier("Trigger"),
+        metadata_keys=(),
+        leg_role=Identifier("ParentRole"),
+        leg_direction="Credit",
+        origin="InternalInitiated",
+    )
+    a_rail = SingleLegRail(
+        name=Identifier("ChildA"),
+        metadata_keys=(),
+        leg_role=Identifier("ParentRole"),
+        leg_direction="Credit",
+        origin="InternalInitiated",
+    )
+    b_rail = SingleLegRail(
+        name=Identifier("ChildB"),
+        metadata_keys=(),
+        leg_role=Identifier("ParentRole"),
+        leg_direction="Credit",
+        origin="InternalInitiated",
+    )
+    fan_in_tpl = TransferTemplate(
+        name=Identifier("FanInChild"),
+        expected_net=Money(Decimal("0")),
+        transfer_key=(Identifier("batch_id"),),
+        completion="business_day_end",
+        leg_rails=(Identifier("ChildA"),),
+    )
+    inst = L2Instance(
+        accounts=(
+            Account(
+                id=Identifier("acct"),
+                role=Identifier("ParentRole"),
+                scope="internal",
+                name=Name("Parent Account"),
+            ),
+        ),
+        account_templates=(),
+        rails=(parent_rail, a_rail, b_rail),
+        transfer_templates=(fan_in_tpl,),
+        chains=(
+            Chain(
+                parent=Identifier("Trigger"),
+                children=(
+                    ChainChildSpec(name=Identifier("ChildA")),
+                    ChainChildSpec(name=Identifier("ChildB")),
+                    ChainChildSpec(
+                        name=Identifier("FanInChild"),
+                        fan_in=True,
+                        expected_parent_count=3,
+                    ),
+                ),
+            ),
+        ),
+        limit_schedules=(),
+    )
+    pick = _pick_multi_xor_chain_inputs(inst)
+    assert pick is not None
+    parent, child_a, child_b = pick
+    assert str(parent) == "Trigger"
+    # Fan_in child is SKIPPED — picker returns the 2 non-fan_in children.
+    assert {str(child_a), str(child_b)} == {"ChildA", "ChildB"}
+
+
+def test_pick_multi_xor_chain_inputs_returns_none_for_singleton_chain() -> None:
+    """AB.6.6: singleton-children chains (Z.A 'required' semantics)
+    don't qualify — only multi-XOR chains do. A chain with 1 non-fan_in
+    child returns None even if the chain has other (fan_in) entries.
+    """
+    from recon_gen.common.l2.auto_scenario import _pick_multi_xor_chain_inputs
+    from recon_gen.common.l2.primitives import (
+        Account,
+        Chain,
+        ChainChildSpec,
+        Identifier,
+        L2Instance,
+        Money,
+        Name,
+        SingleLegRail,
+    )
+
+    rail = SingleLegRail(
+        name=Identifier("P"),
+        metadata_keys=(),
+        leg_role=Identifier("R"),
+        leg_direction="Credit",
+        origin="InternalInitiated",
+    )
+    rail_c = SingleLegRail(
+        name=Identifier("C"),
+        metadata_keys=(),
+        leg_role=Identifier("R"),
+        leg_direction="Credit",
+        origin="InternalInitiated",
+    )
+    inst = L2Instance(
+        accounts=(
+            Account(
+                id=Identifier("a"), role=Identifier("R"), scope="internal",
+                name=Name("Acct"),
+            ),
+        ),
+        account_templates=(),
+        rails=(rail, rail_c),
+        transfer_templates=(),
+        chains=(
+            Chain(
+                parent=Identifier("P"),
+                children=(ChainChildSpec(name=Identifier("C")),),
+            ),
+        ),
+        limit_schedules=(),
+    )
+    assert _pick_multi_xor_chain_inputs(inst) is None

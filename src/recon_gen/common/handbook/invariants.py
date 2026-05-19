@@ -63,6 +63,12 @@ INVARIANT_KIND_TO_SHEET: dict[str, str] = {
     # analyst's drill goes to Transactions to see which contributing
     # parent legs landed (or didn't).
     "fan_in_disagreement": "Today's Exceptions",
+    # AB.6.5 — multi_xor_violation surfaces on Today's Exceptions
+    # too (same UNION-only pattern). Keyed on parent_transfer_id +
+    # parent_rail_or_template_name + disagreement_kind ('missed' /
+    # 'overlap'); analyst's drill goes to Transactions to see which
+    # XOR alternatives did or didn't fire under the parent firing.
+    "multi_xor_violation": "Today's Exceptions",
     "supersession_audit": "Supersession Audit",
 }
 
