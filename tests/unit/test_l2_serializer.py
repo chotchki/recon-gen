@@ -90,10 +90,20 @@ def test_serialize_l2_skips_default_optional_fields() -> None:
     assert "posted_requirements: []" not in text
     assert "bundles_activity: []" not in text
     # AB.4 — fan_in / expected_parent_count default values shouldn't
-    # bloat pre-AB.4 chain rows either. spec_example doesn't declare
-    # a fan-in chain yet (AB.4.5.spec hasn't fired).
-    assert "fan_in:" not in text
-    assert "expected_parent_count:" not in text
+    # bloat pre-AB.4 chain rows. spec_example has one fan-in chain
+    # (AB.4.5.spec activated it), so the field SHOULD appear — but
+    # only on chains that declare it. Spot-check that ALL chains
+    # don't carry the field (i.e., default omission still works for
+    # the non-fan-in chains).
+    chain_blocks = text.split("- parent: ")[1:]
+    fan_in_chain_blocks = [b for b in chain_blocks if "fan_in:" in b]
+    assert len(fan_in_chain_blocks) == 1, (
+        f"spec_example expected exactly 1 chain with fan_in field; "
+        f"got {len(fan_in_chain_blocks)}"
+    )
+    # The one fan-in chain emits both fields.
+    assert "fan_in: true" in text
+    assert "expected_parent_count: 2" in text
 
 
 def test_serialize_l2_emits_fan_in_when_non_default() -> None:

@@ -1817,10 +1817,11 @@ CREATE INDEX idx_{p}_su_transfer ON {p}_stuck_unbundled (transfer_id);
 --
 -- AB.4.4 (2026-05-19): fan_in chain children are legitimately multi-
 -- parent by design (N parent firings share one child Transfer — the
--- batched-payout pattern). The {chain_parent_disagreement_fan_in_filter}
--- placeholder inlines a NOT IN clause excluding fan_in template names;
--- when no chains declare fan_in (pre-AB.4 fixtures), the placeholder
--- resolves to the empty string and behavior matches AB.2.3.
+-- batched-payout pattern). A template-format placeholder (named
+-- chain_parent_disagreement_fan_in_filter) inlines a NOT IN clause
+-- excluding fan_in template names; when no chains declare fan_in
+-- (pre-AB.4 fixtures), the placeholder resolves to the empty string
+-- and behavior matches AB.2.3.
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_chain_parent_disagreement{matview_options} AS
 SELECT

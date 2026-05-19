@@ -161,6 +161,27 @@ rails:
     destination_origin: ExternalForcePosted
     metadata_keys: [external_reference]
 
+  # AB.4.5.spec (2026-05-19) — dedicated parent + child rails for the
+  # fan-in chain demo. Two-leg parent self-reconciles (expected_net=0);
+  # single-leg child is reconciled via BatchedPayoutBatch.leg_rails (S3).
+  # N firings of BatchPayoutTrigger fan into one BatchedPayoutBatch
+  # Transfer (per chain expected_parent_count=2) — the AB.4.7
+  # fan_in_disagreement matview reads parent_count=2 for the healthy
+  # case, parent_count<2 for missing, parent_count>2 for extra.
+  - name: BatchPayoutTrigger
+    source_role: CustomerSubledger
+    destination_role: ClearingSuspense
+    expected_net: 0
+    source_origin: InternalInitiated
+    destination_origin: InternalInitiated
+    metadata_keys: [batch_id]
+
+  - name: BatchPayoutClose
+    leg_role: ClearingSuspense
+    leg_direction: Credit
+    origin: InternalInitiated
+    metadata_keys: [batch_id]
+
 transfer_templates:
   - name: MerchantSettlementCycle
     expected_net: 0
@@ -204,6 +225,20 @@ transfer_templates:
       - - SettlementAuto
         - SettlementStandard
 
+  # AB.4.5.spec (2026-05-19) — dedicated template for the fan-in chain
+  # demo. 2 parent firings of BatchPayoutTrigger share one
+  # BatchedPayoutBatch Transfer (per chain expected_parent_count=2);
+  # the AB.4.3 _transfer_parents matview reads 2 rows per child.
+  # AB.2.3 chain_parent_disagreement matview ignores this template
+  # because the fan-in filter excludes fan_in template children
+  # (else every fan_in firing would false-positive there).
+  - name: BatchedPayoutBatch
+    expected_net: 0
+    transfer_key: [batch_id]
+    completion: business_day_end+1d
+    leg_rails:
+      - BatchPayoutClose
+
 chains:
   # First chain on spec_example — makes the L2FT Chains sheet
   # non-empty and exercises both completion_status values
@@ -238,6 +273,26 @@ chains:
       share one Transfer and one parent_transfer_id. The L1
       chain_parent_disagreement invariant flags any leg that
       claims a different parent.
+
+  # AB.4.5.spec (2026-05-19) — fan-in chain demo. 2 BatchPayoutTrigger
+  # firings batch into one BatchedPayoutBatch Transfer (the merchant-
+  # payout-batch pattern: N daily settlements aggregate into one
+  # weekly/monthly payout). The auto-scenario plants 3 violations:
+  # healthy (2 parents), missing (1 parent ⇒ orphan), extra (3
+  # parents ⇒ excess contributor). AB.4.7's fan_in_disagreement
+  # matview reads the cardinality per child Transfer.
+  - parent: BatchPayoutTrigger
+    children:
+      - BatchedPayoutBatch
+    fan_in: true
+    expected_parent_count: 2
+    description: |
+      Demonstrates N:1 fan-in chain semantics. Multiple
+      BatchPayoutTrigger firings (the upstream settlements) share
+      one BatchedPayoutBatch Transfer (the downstream batch payout).
+      The L1 fan_in_disagreement invariant flags batches whose
+      parent_count != expected_parent_count (missing contributor or
+      extra contributor — both ETL bugs).
 
 limit_schedules:
   # Cap matches ExternalRailOutbound (Z.B 2026-05-15: rail name IS the type).
