@@ -1,5 +1,34 @@
 # Release Notes
 
+## v11.5.0 — AB.5 soft per-firing magnitude bounds on Rail
+
+Feature release. `TwoLegRail` + `SingleLegRail` gain an optional `amount_typical_range: tuple[Money, Money] | None = None` field — the SPEC gap doc §7 Enhancement 7 ("soft per-firing magnitude bounds"). Operator declares a per-rail typical `[min, max]` band and the test-data generator clamps every firing on that rail to that band via a log-uniform sampler (financial flows cluster at the low end of typical bands; log-uniform reproduces that pattern). **Generator-only first cut** per the gap doc's preferred path — the optional runtime SHOULD-constraint `<prefix>_magnitude_anomaly` matview is deferred to a follow-on when an integrator asks for runtime anomaly surfacing. **Fully additive** — pre-AB.5 rails with no range declared keep their per-kind lognormal heuristic byte-equivalent through seed.
+
+**Validator V1a-c.** New structural rules on Rail:
+- **V1a**: `min` MUST be strictly less than `max` (degenerate single-point ranges rejected; if you want a fixed amount, write the seed directly).
+- **V1b**: both `min` and `max` MUST be `> 0`. The bound is on `abs(amount)`, so signed and zero values have no meaning.
+- **V1c**: forbidden on rails with `aggregating: true`. Aggregator amounts derive from bundled children — set the range on the child rails instead.
+
+**Seed — log-uniform sampler.** `_baseline_amount_sample(rng, kind, cap=None, rail=None)` extended: when `rail.amount_typical_range` is set, samples log-uniformly within `[min, max]` via `math.exp(rng.uniform(log(min), log(max)))`. Cap interaction: if every retry hits the cap, falls back to `min(cap * 0.95, range.max)` so plants stay inside the declared range when possible. All 5 call sites updated to thread `rail=rail`. Pre-AB.5 byte-equivalent when `rail` is None or `amount_typical_range` is unset.
+
+**Plant-sizing helpers.** Two new helpers in `auto_scenario.py`:
+- `_plant_amount_for_rail(rail, default)` — returns the rail's range midpoint when set, else the hardcoded default. Used at 4 plant construction sites (`StuckPendingPlant` / `FailedTransactionPlant` / `StuckUnbundledPlant` / `SupersessionPlant`). Why midpoint: plants are positive demo coverage, not violations sized to break invariants — landing them squarely in the middle of the typical band makes them look like ordinary firings at the boundary that triggers the SHOULD-constraint.
+- `_cap_breach_amount(cap, rail)` — returns `min(cap * 1.5, range.max * 3)` when range is set, else plain `cap * 1.5`. Used at the 2 cap-breach plant construction sites (`LimitBreachPlant` Outbound + `InboundCapBreachPlant`). When the rail's typical band is tiny vs the cap (cap=$100K, range=[5, 500]), the breach pins to $1500 instead of $150K — still violates the cap (preserving the L1 surface) but in a realistic ballpark.
+
+**Studio editor.** Rail card gains an `amount_typical_range` text input accepting `"min, max"` (comma-separated). New `FieldSpec` entry on `_RAIL_FIELDS`; `_coerce_field` rail-specific branch splits on `,`, strips whitespace, parses via `Decimal`, wraps as `tuple[Money, Money]`. Bad shape (≠2 parts or non-numeric) raises `ValueError` with actionable message — surfaces inline via the X.4.e.5 validation-failure path.
+
+**Topology + dashboard.** No surface changes — the range is generator-shaping, not dashboard-rendered (the deferred `_magnitude_anomaly` matview will surface anomalies if/when it lands).
+
+**Fixtures.** `tests/l2/spec_example.yaml` adds 3 ranged rails (`ExternalRailInbound [50, 5000]`, `ExternalRailOutbound [50, 10000]`, `SubledgerCharge [1, 100]`) so the locked seed exercises the new emit path. `tests/l2/sasquatch_pr.yaml` adds 6 representative ranges per gap doc §7's example table: `MerchantCardSale [5, 500]` (single coffee → high-end retail), `CustomerInboundACH [50, 5000]` (payroll + vendor + peer), `CustomerOutboundACH [50, 10000]` (occasional high-value bill pay), `InternalTransferDebit/Credit [20, 50000]` (both legs balanced — on-us cycle nets to zero), `CustomerFeeAccrual [0.25, 25]` (monthly maintenance + overdraft + stop-pay).
+
+**Fuzzer.** `_build_rails` extended: per non-aggregating rail, ~30% probability gate emits `amount_typical_range`. Range `min` rolls log-uniformly over $1-$100K; `max = min × (2..50)` uniform so both narrow ($10-$50) and wide ($5-$2500) bands get exercised. Aggregating rails skipped (validator V1c). Meta-guard `rail_with_amount_typical_range` saw entry.
+
+**Docs.** `concepts/l2/rail.md` gains an "Optional: typical amount range (AB.5)" section covering the generator behavior, the deferred runtime SHOULD-constraint hook, and the V1a-c rules. New `walkthroughs/customization/how-do-i-set-typical-amount-ranges.md` worked-example framed around the "demo went sideways with a $1.2M card swipe" story. `Schema_v6.md` gains a "Magnitude as data (AB.5)" sibling section to "Lateness as data". `SPEC_gap_feedback.md` E7 carries a landed-status marker pointing at the concept doc + walkthrough. `mkdocs.yml` nav extended.
+
+**Tests.** 23 new tests across the surface: 5 validator V1a-c tests + 4 loader round-trip tests + 1 serializer round-trip + count assertion = 3 + 6 seed-amount tests (in-range / log-uniform clustering / determinism / cap respect / no-range fall-back / no-rail fall-back) + 5 auto-scenario helper tests (midpoint when range set / default fall-through / cap × 1.5 unbounded / clamp to range.max × 3 / cap × 1.5 below ceiling) + fuzz meta-guard saw entry + 2 Studio editor tests (edit form render + coerce contract). Full unit + data sweep: 1922 + 177 = 2099 passed.
+
+**Re-locked seeds.** `tests/data/_locked_seeds/spec_example.{postgres,oracle,sqlite}.sql` regenerated to include the 3 new ranged rails. Seed grew from 12,514,962 → 12,728,213 bytes (PG/SQLite) and 12,697,592 → 12,954,733 bytes (Oracle).
+
 ## v11.4.0 — AB.4 N:1 fan-in chains + fan_in_disagreement L1 invariant
 
 Feature release. `Chain` gains an optional `fan_in: bool = False` flag + an optional `expected_parent_count: int | None = None` field — the N:1 batched-payout pattern the AB.4 enhancement targets (gap doc §2). When `fan_in=True`, N parent firings share ONE child Transfer (instead of the default 1:1 per-parent shape); the new L1 `<prefix>_fan_in_disagreement` matview flags batches whose actual parent count doesn't match the chain's declared expected count (or has cardinality < 2 when expected is unset). **Fully additive** — pre-AB.4 chain rows with `fan_in=False` round-trip byte-equivalent through load/seed/dashboard.
