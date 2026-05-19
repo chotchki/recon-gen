@@ -74,6 +74,7 @@ from recon_gen.common.sql import Dialect
 from .primitives import (
     Account,
     AccountTemplate,
+    Chain,
     Identifier,
     L2Instance,
     Name,
@@ -2570,6 +2571,19 @@ def _emit_baseline_chains(
         if not parent_firings:
             continue
 
+        # AB.4.4: fan_in chains group N parent firings into one shared
+        # child Transfer (the batched-payout pattern). All legs of the
+        # batch's child template share one `transfer_id`; each leg
+        # carries its contributing parent's `parent_transfer_id`. The
+        # AB.4.3 transfer_parents matview derives the multi-parent set
+        # via DISTINCT(child, parent); AB.4.7's fan_in_disagreement
+        # joins against expected_parent_count for cardinality check.
+        if chain.fan_in:
+            rows.extend(_emit_fan_in_chain_firings(
+                chain, parent_firings, instance, state, counter, rng, dialect,
+            ))
+            continue
+
         is_required = len(chain.children) == 1
 
         for parent_transfer_id, parent_day, parent_amount in parent_firings:
@@ -2719,6 +2733,98 @@ def _emit_chain_child_template_legs(
             template_name=child_template.name,
         )
         rows.extend(leg_rows)
+    return rows
+
+
+def _emit_fan_in_chain_firings(
+    chain: Chain,
+    parent_firings: list[tuple[str, date, Decimal]],
+    instance: L2Instance,
+    state: _BaselineState,
+    counter: _Counter,
+    rng: random.Random,
+    dialect: Dialect,
+) -> list[str]:
+    """AB.4.4: emit chain firings where N parent firings share one
+    child Transfer (the batched-payout pattern).
+
+    Per AB.4.0 lock: parents are grouped into batches of size
+    ``chain.expected_parent_count`` (default 2 when unset — the
+    minimum non-orphan). Each batch:
+
+    - Allocates ONE shared ``child_transfer_id`` (``tr-base-fanin-NNNNNN``).
+    - Each parent in the batch emits a FULL set of the child template's
+      leg_rails, with each leg's ``transfer_parent_id`` = that parent's
+      transfer_id and ``transfer_id`` = the batch's shared id.
+    - DISTINCT over (child_transfer_id, transfer_parent_id) in the
+      AB.4.3 ``_transfer_parents`` matview yields ``batch_size`` rows
+      per child Transfer (the multi-parent set).
+
+    Per AB.4.2 (validator C8a), every fan_in chain's children resolve
+    to TransferTemplates — that's enforced at load time. Defensive
+    skip if somehow a non-template snuck through.
+
+    XOR suppression: per AB.3.4, the XOR pick is keyed off the firing
+    id. For fan_in chains, the firing id is the shared
+    ``child_transfer_id`` (all parents in the batch produce one
+    logical firing of the child template — the picks need to agree
+    across parents so the resulting batch has consistent variant
+    membership).
+
+    Partial-tail batches (fewer than ``batch_size`` parents at the
+    end) are SKIPPED in baseline emission — they'd be orphan-shaped
+    rows that the plant path (AB.4.5) covers instead. The baseline's
+    job is to populate the healthy case.
+    """
+    if not chain.children:
+        return []
+    # AB.4.2 (C8a): every fan_in chain's children are TransferTemplates.
+    # Use the first child as the canonical fan-in target (singleton
+    # children is the typical shape; multi-children + fan_in is allowed
+    # by the validator but unusual — pick deterministically by index 0).
+    child_name = chain.children[0]
+    child_template = next(
+        (t for t in instance.transfer_templates if t.name == child_name),
+        None,
+    )
+    if child_template is None:
+        return []
+    rails_by_name = {r.name: r for r in instance.rails}
+
+    # Default batch size = 2 (the minimum non-orphan) when
+    # expected_parent_count is unset (variable-batch-size flow).
+    batch_size = chain.expected_parent_count or 2
+    rows: list[str] = []
+
+    n_parents = len(parent_firings)
+    n_batches = n_parents // batch_size  # drop partial tail
+    for batch_idx in range(n_batches):
+        batch = parent_firings[
+            batch_idx * batch_size:(batch_idx + 1) * batch_size
+        ]
+        n_shared = counter.next()
+        shared_transfer_id = f"tr-base-fanin-{n_shared:06d}"
+
+        xor_suppressed = _xor_suppressed_members(
+            child_template, firing_id=shared_transfer_id,
+        )
+
+        for parent_transfer_id, parent_day, parent_amount in batch:
+            for leg_rail_name in child_template.leg_rails:
+                if str(leg_rail_name) in xor_suppressed:
+                    continue
+                leg_rail = rails_by_name.get(leg_rail_name)
+                if leg_rail is None:
+                    # Validator R3 catches at load time; defensive skip.
+                    continue
+                leg_rows = _emit_chain_child_leg(
+                    leg_rail, instance, state,
+                    parent_transfer_id, parent_day, parent_amount,
+                    counter, rng, dialect,
+                    shared_transfer_id=shared_transfer_id,
+                    template_name=child_template.name,
+                )
+                rows.extend(leg_rows)
     return rows
 
 

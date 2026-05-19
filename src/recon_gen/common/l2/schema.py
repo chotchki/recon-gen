@@ -494,6 +494,9 @@ def _emit_l1_invariant_views(
     xor_group_violation_body = _render_xor_group_violation_body(
         instance, p=p, dialect=dialect,
     )
+    chain_parent_disagreement_fan_in_filter = (
+        _render_chain_parent_disagreement_fan_in_filter(instance)
+    )
     return _L1_INVARIANT_VIEWS_TEMPLATE.format(
         p=p,
         limit_cases_outbound=limit_cases_outbound,
@@ -501,6 +504,7 @@ def _emit_l1_invariant_views(
         pending_age_cases=pending_age_cases,
         unbundled_age_cases=unbundled_age_cases,
         xor_group_violation_body=xor_group_violation_body,
+        chain_parent_disagreement_fan_in_filter=chain_parent_disagreement_fan_in_filter,
         matview_options=matview_options(dialect),
         matview_create_kw=matview_create_keyword(dialect),
         date_trunc_tx_posting=date_trunc_day("tx.posting", dialect),
@@ -600,6 +604,37 @@ def _render_pending_age_cases(
         return typed_null("bigint", dialect)
     branches_sql = "\n        ".join(branches)
     return f"CASE\n        {branches_sql}\n        ELSE NULL\n    END"
+
+
+def _render_chain_parent_disagreement_fan_in_filter(
+    instance: L2Instance,
+) -> str:
+    """AB.4.4: Render the optional ``AND tx.template_name NOT IN (...)``
+    clause that excludes fan_in chain children from the
+    ``chain_parent_disagreement`` matview.
+
+    Fan_in chain children are legitimately multi-parent (N parent
+    firings share one child Transfer by design — the batched-payout
+    pattern). AB.2.3's matview rule "COUNT(DISTINCT parent_transfer_id)
+    > 1" would false-positive every fan_in firing as a violation; this
+    filter excludes them at the source.
+
+    When no chains declare ``fan_in=True`` (pre-AB.4 fixtures), the
+    fan-in template set is empty and the filter resolves to ``""`` —
+    behavior is byte-identical to AB.2.3.
+    """
+    fan_in_templates: set[str] = set()
+    for chain in instance.chains:
+        if not chain.fan_in:
+            continue
+        for child in chain.children:
+            # C8a guarantees every fan_in child is a TransferTemplate
+            # (validator enforces); collect their names.
+            fan_in_templates.add(str(child))
+    if not fan_in_templates:
+        return ""
+    quoted = ", ".join(f"'{name}'" for name in sorted(fan_in_templates))
+    return f"\n  AND tx.template_name NOT IN ({quoted})"
 
 
 def _render_xor_group_violation_body(
@@ -1779,6 +1814,13 @@ CREATE INDEX idx_{p}_su_transfer ON {p}_stuck_unbundled (transfer_id);
 -- claim. `parent_transfer_id_min` / `parent_transfer_id_max` carry
 -- sample conflicting values so the analyst can drill into the
 -- transactions sheet without re-running the GROUP BY.
+--
+-- AB.4.4 (2026-05-19): fan_in chain children are legitimately multi-
+-- parent by design (N parent firings share one child Transfer — the
+-- batched-payout pattern). The {chain_parent_disagreement_fan_in_filter}
+-- placeholder inlines a NOT IN clause excluding fan_in template names;
+-- when no chains declare fan_in (pre-AB.4 fixtures), the placeholder
+-- resolves to the empty string and behavior matches AB.2.3.
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_chain_parent_disagreement{matview_options} AS
 SELECT
@@ -1791,7 +1833,7 @@ SELECT
 FROM {p}_current_transactions tx
 WHERE tx.transfer_parent_id IS NOT NULL
   AND tx.template_name IS NOT NULL
-  AND tx.status <> 'Failed'
+  AND tx.status <> 'Failed'{chain_parent_disagreement_fan_in_filter}
 GROUP BY tx.transfer_id, tx.template_name
 HAVING COUNT(DISTINCT tx.transfer_parent_id) > 1;
 -- Dashboard hot-path indexes — per-transfer drill (Today's Exceptions
