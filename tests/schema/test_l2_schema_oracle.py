@@ -242,15 +242,15 @@ def test_refresh_matviews_sql_oracle_uses_dbms_mview() -> None:
     sql = refresh_matviews_sql(_full_instance("orcl"), prefix="orcl", dialect=Dialect.ORACLE)
     assert ";;" not in sql
     assert "REFRESH MATERIALIZED VIEW" not in sql  # the PG verb
-    # 18 matviews refresh in dependency order: 2 current_* + 2 helpers
-    # (computed_*) + 9 L1 invariants (drift / ledger_drift / overdraft /
+    # 19 matviews refresh in dependency order: 2 current_* + 2 helpers
+    # (computed_*) + 10 L1 invariants (drift / ledger_drift / overdraft /
     # expected_eod_balance_breach / limit_breach / stuck_pending /
     # stuck_unbundled / chain_parent_disagreement [AB.2.3] /
-    # xor_group_violation [AB.3.3]) + 1 derived (transfer_parents
-    # [AB.4.3]) + 2 dashboard-shape (daily_statement /
-    # todays_exceptions) + 2 Investigation matviews.
-    assert sql.count("BEGIN DBMS_MVIEW.REFRESH(") == 18
-    assert sql.count("BEGIN DBMS_STATS.GATHER_TABLE_STATS(") == 18
+    # xor_group_violation [AB.3.3] / fan_in_disagreement [AB.4.7])
+    # + 1 derived (transfer_parents [AB.4.3]) + 2 dashboard-shape
+    # (daily_statement / todays_exceptions) + 2 Investigation matviews.
+    assert sql.count("BEGIN DBMS_MVIEW.REFRESH(") == 19
+    assert sql.count("BEGIN DBMS_STATS.GATHER_TABLE_STATS(") == 19
     # Per-instance prefix appears in every refresh + analyze call.
     assert "'orcl_current_transactions'" in sql
     assert "'orcl_inv_money_trail_edges'" in sql

@@ -311,6 +311,10 @@ def refresh_matviews_sql(
         # JOINs against this. Refresh before fan_in_disagreement so
         # the downstream matview sees fresh rows.
         f"{p}_transfer_parents",
+        # AB.4.7 — Fan-in disagreement L1 invariant. JOINs against
+        # _transfer_parents (AB.4.3) for the parent-count derivation;
+        # MUST refresh AFTER _transfer_parents.
+        f"{p}_fan_in_disagreement",
         # Dashboard-shape matviews: read from current_* +
         # L1 invariants. MUST refresh AFTER all L1 invariants are
         # fresh so todays_exceptions's UNION reads up-to-date data.
@@ -393,6 +397,7 @@ def _emit_sqlite_matview_refresh(instance: L2Instance, *, prefix: str) -> str:
         f"{p}_chain_parent_disagreement",
         f"{p}_xor_group_violation",
         f"{p}_transfer_parents",
+        f"{p}_fan_in_disagreement",
         f"{p}_daily_statement_summary",
         f"{p}_todays_exceptions",
         f"{p}_inv_pair_rolling_anomalies",
@@ -497,6 +502,9 @@ def _emit_l1_invariant_views(
     chain_parent_disagreement_fan_in_filter = (
         _render_chain_parent_disagreement_fan_in_filter(instance)
     )
+    fan_in_disagreement_body = _render_fan_in_disagreement_body(
+        instance, p=p, dialect=dialect,
+    )
     return _L1_INVARIANT_VIEWS_TEMPLATE.format(
         p=p,
         limit_cases_outbound=limit_cases_outbound,
@@ -505,6 +513,7 @@ def _emit_l1_invariant_views(
         unbundled_age_cases=unbundled_age_cases,
         xor_group_violation_body=xor_group_violation_body,
         chain_parent_disagreement_fan_in_filter=chain_parent_disagreement_fan_in_filter,
+        fan_in_disagreement_body=fan_in_disagreement_body,
         matview_options=matview_options(dialect),
         matview_create_kw=matview_create_keyword(dialect),
         date_trunc_tx_posting=date_trunc_day("tx.posting", dialect),
@@ -766,6 +775,147 @@ def _render_xor_group_violation_body(
         f"  AND tx.status <> 'Failed'\n"
         f"GROUP BY e.transfer_id, e.template_name, e.xor_group_index, e.business_day\n"
         f"HAVING COUNT(tx.transfer_id) <> 1"
+    )
+
+
+def _render_fan_in_disagreement_body(
+    instance: L2Instance, *, p: str, dialect: Dialect = Dialect.POSTGRES,
+) -> str:
+    """AB.4.7: Render the body of ``{p}_fan_in_disagreement``.
+
+    Per AB.4.0 lock: long-form, one row per (child_transfer_id,
+    disagreement_kind) tuple where ``kind`` ∈ ``{'orphan', 'missing',
+    'extra'}``. Columns: ``child_transfer_id``, ``chain_parent_name``,
+    ``child_template_name``, ``parent_count`` (actual),
+    ``expected_parent_count`` (NULL when chain leaves it unset),
+    ``disagreement_kind``, ``business_day``.
+
+    Joins AB.4.3's ``_transfer_parents`` matview against an inline
+    rowset of the L2's fan_in chains (``(chain_parent_name,
+    child_template_name, expected_parent_count)``). For each child
+    Transfer:
+
+    - **healthy** (no row): ``parent_count == expected`` (when set)
+      OR ``parent_count >= 2`` (when unset). The matview emits no row.
+    - **missing** row: ``parent_count < expected`` (only when
+      ``expected_parent_count`` is set on the chain).
+    - **extra** row: ``parent_count > expected`` (same gate).
+    - **orphan** row: ``parent_count < 2`` AND
+      ``expected_parent_count`` is unset (variable-batch-flow
+      fallback per AB.4.0 lock).
+
+    Empty case: when no chain declares ``fan_in=True``, the matview
+    body falls back to a typed-NULL placeholder with ``WHERE 1=0``
+    (mirrors AB.3.3's empty-XOR pattern) so it parses + plans
+    cleanly on all 3 dialects and contributes zero rows.
+    """
+    fan_in_rows: list[tuple[str, str, int | None]] = []
+    for chain in instance.chains:
+        if not chain.fan_in:
+            continue
+        for child in chain.children:
+            # C8a guarantees every fan_in child is a TransferTemplate.
+            fan_in_rows.append(
+                (str(chain.parent), str(child), chain.expected_parent_count),
+            )
+
+    if not fan_in_rows:
+        null_varchar = typed_null("VARCHAR(100)", dialect)
+        null_int = typed_null("INTEGER", dialect)
+        null_ts = typed_null("TIMESTAMP", dialect)
+        if dialect is Dialect.ORACLE:
+            from_clause = "FROM dual"
+        else:
+            from_clause = ""
+        return (
+            f"SELECT {null_varchar} AS child_transfer_id,\n"
+            f"       {null_varchar} AS chain_parent_name,\n"
+            f"       {null_varchar} AS child_template_name,\n"
+            f"       {null_int} AS parent_count,\n"
+            f"       {null_int} AS expected_parent_count,\n"
+            f"       {null_varchar} AS disagreement_kind,\n"
+            f"       {null_ts} AS business_day\n"
+            f"{from_clause}\n"
+            f"WHERE 1=0"
+        )
+
+    # Inline the per-chain expected-set CTE. Oracle uses
+    # UNION-ALL-of-SELECT-FROM-DUAL; PG + SQLite use VALUES under a
+    # WITH column-list (the AB.3.3 portable shape). expected_parent_count
+    # may be NULL — both forms encode that as a typed-NULL.
+    null_int = typed_null("INTEGER", dialect)
+    if dialect is Dialect.ORACLE:
+        def fmt_expected(v: int | None) -> str:
+            return str(v) if v is not None else null_int
+        union_rows = "\n  UNION ALL ".join(
+            f"SELECT '{cp}' AS chain_parent_name, "
+            f"'{ct}' AS child_template_name, "
+            f"{fmt_expected(ex)} AS expected_parent_count FROM dual"
+            for cp, ct, ex in fan_in_rows
+        )
+        fan_in_chains_cte = (
+            f"fan_in_chains AS (\n"
+            f"  {union_rows}\n"
+            f")"
+        )
+    else:
+        def fmt_row(cp: str, ct: str, ex: int | None) -> str:
+            ex_sql = str(ex) if ex is not None else "NULL"
+            return f"('{cp}', '{ct}', {ex_sql})"
+        rows = ",\n    ".join(
+            fmt_row(cp, ct, ex) for cp, ct, ex in fan_in_rows
+        )
+        fan_in_chains_cte = (
+            f"fan_in_chains(chain_parent_name, child_template_name, "
+            f"expected_parent_count) AS (\n"
+            f"  VALUES\n    {rows}\n"
+            f")"
+        )
+
+    return (
+        f"WITH {fan_in_chains_cte},\n"
+        f"child_parent_counts AS (\n"
+        f"  -- Per child Transfer: how many DISTINCT parents contributed\n"
+        f"  -- (from AB.4.3's _transfer_parents) + the template_name +\n"
+        f"  -- the earliest contributing leg's business day for the\n"
+        f"  -- analyst drill axis.\n"
+        f"  SELECT\n"
+        f"    tp.child_transfer_id,\n"
+        f"    MIN(tx.template_name) AS template_name,\n"
+        f"    COUNT(DISTINCT tp.parent_transfer_id) AS parent_count,\n"
+        f"    MIN({date_trunc_day('tx.posting', dialect)}) AS business_day\n"
+        f"  FROM {p}_transfer_parents tp\n"
+        f"  JOIN {p}_current_transactions tx\n"
+        f"    ON tx.transfer_id = tp.child_transfer_id\n"
+        f"   AND tx.template_name IS NOT NULL\n"
+        f"   AND tx.status <> 'Failed'\n"
+        f"  GROUP BY tp.child_transfer_id\n"
+        f")\n"
+        f"SELECT\n"
+        f"  cpc.child_transfer_id,\n"
+        f"  fic.chain_parent_name,\n"
+        f"  cpc.template_name AS child_template_name,\n"
+        f"  cpc.parent_count,\n"
+        f"  fic.expected_parent_count,\n"
+        f"  CASE\n"
+        f"    WHEN fic.expected_parent_count IS NULL\n"
+        f"         AND cpc.parent_count < 2 THEN 'orphan'\n"
+        f"    WHEN fic.expected_parent_count IS NOT NULL\n"
+        f"         AND cpc.parent_count < fic.expected_parent_count\n"
+        f"         THEN 'missing'\n"
+        f"    WHEN fic.expected_parent_count IS NOT NULL\n"
+        f"         AND cpc.parent_count > fic.expected_parent_count\n"
+        f"         THEN 'extra'\n"
+        f"  END AS disagreement_kind,\n"
+        f"  cpc.business_day\n"
+        f"FROM child_parent_counts cpc\n"
+        f"JOIN fan_in_chains fic\n"
+        f"  ON fic.child_template_name = cpc.template_name\n"
+        f"WHERE\n"
+        f"  (fic.expected_parent_count IS NULL\n"
+        f"   AND cpc.parent_count < 2)\n"
+        f"  OR (fic.expected_parent_count IS NOT NULL\n"
+        f"      AND cpc.parent_count <> fic.expected_parent_count)"
     )
 
 
@@ -1389,6 +1539,7 @@ CREATE INDEX idx_{p}_curr_db_scope_day
 _L1_INVARIANT_DROP_NAMES: tuple[str, ...] = (
     "todays_exceptions",
     "daily_statement_summary",
+    "fan_in_disagreement",
     "transfer_parents",
     "xor_group_violation",
     "chain_parent_disagreement",
@@ -1910,6 +2061,36 @@ CREATE INDEX idx_{p}_tp_child ON {p}_transfer_parents (child_transfer_id);
 CREATE INDEX idx_{p}_tp_parent ON {p}_transfer_parents (parent_transfer_id);
 
 -- ---------------------------------------------------------------------
+-- L1 invariant matview: Fan-In Disagreement (AB.4.7).
+-- AB.4.7 — Enforces the runtime side of fan-in chain expectations:
+-- for every fan_in chain (parent → child template, with optional
+-- expected_parent_count), every child Transfer's parent_count
+-- (derived from AB.4.3's _transfer_parents) SHOULD match the
+-- expected count (or be >=2 when expected is unset). Violations
+-- surface as rows with disagreement_kind in ('orphan', 'missing',
+-- 'extra'):
+--   - missing: parent_count < expected (a contribution never landed
+--     → batch is incomplete);
+--   - extra: parent_count > expected (stale or foreign parent
+--     reference claimed batch membership it shouldn't have);
+--   - orphan: parent_count < 2 AND expected is unset (variable-
+--     batch-flow fallback per AB.4.0 lock — a single-parent fan-in
+--     child Transfer is degenerate).
+--
+-- The body is rendered dialect-aware by _render_fan_in_disagreement_body;
+-- when no chain declares fan_in (pre-AB.4 fixtures), the body
+-- short-circuits with WHERE 1=0 so the matview parses on all 3
+-- dialects and contributes zero rows.
+-- ---------------------------------------------------------------------
+{matview_create_kw} {p}_fan_in_disagreement{matview_options} AS
+{fan_in_disagreement_body};
+-- Dashboard hot-path indexes — per-transfer drill (Today's Exceptions
+-- → Transactions), per-template dropdown filter, per-kind triage filter.
+CREATE INDEX idx_{p}_fid_transfer ON {p}_fan_in_disagreement (child_transfer_id);
+CREATE INDEX idx_{p}_fid_template ON {p}_fan_in_disagreement (child_template_name);
+CREATE INDEX idx_{p}_fid_kind ON {p}_fan_in_disagreement (disagreement_kind);
+
+-- ---------------------------------------------------------------------
 -- Dashboard-shape matview: Daily Statement Summary.
 -- M.1a.9 — moved from `apps/l1_dashboard/datasets.py` CustomSql into
 -- a per-instance MATERIALIZED VIEW so QS Direct Query mode doesn't
@@ -2059,7 +2240,22 @@ SELECT 'xor_group_violation',
        business_day,
        template_name AS rail_name,
        firing_count AS magnitude
-FROM {p}_xor_group_violation;
+FROM {p}_xor_group_violation
+-- AB.4.7 — Fan-In Disagreement: surfaces per child Transfer when the
+-- contributing parent set doesn't match the chain's
+-- expected_parent_count (or has cardinality < 2 when expected is
+-- unset). Like the other transfer-keyed branches, account columns
+-- default NULL. magnitude is the actual parent_count.
+UNION ALL
+SELECT 'fan_in_disagreement',
+       {null_text} AS account_id,
+       {null_text} AS account_name,
+       {null_text} AS account_role,
+       NULL AS account_parent_role,
+       business_day,
+       child_template_name AS rail_name,
+       parent_count AS magnitude
+FROM {p}_fan_in_disagreement;
 -- Today's Exceptions sheet has 3 dropdowns (check_type, account,
 -- rail_name); each WHERE filter benefits from its own index.
 CREATE INDEX idx_{p}_te_check_type

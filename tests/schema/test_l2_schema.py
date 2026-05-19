@@ -1089,23 +1089,126 @@ def test_transfer_parents_view_ab4_shape() -> None:
     assert "idx_tp_tp_parent" in sql
 
 
+def test_fan_in_disagreement_view_empty_branch_when_no_fan_in_chain(
+) -> None:
+    """AB.4.7: when no chain declares ``fan_in=True``, the
+    fan_in_disagreement matview is still emitted (every L1 invariant
+    matview is unconditional) but its body short-circuits with
+    ``WHERE 1=0`` so it produces zero rows AND parses cleanly on all
+    3 dialects. Mirrors AB.3.3's empty-XOR-groups fallback."""
+    sql = emit_schema(
+        L2Instance(
+            accounts=(),
+            account_templates=(),
+            rails=(),
+            transfer_templates=(),
+            chains=(),
+            limit_schedules=(),
+        ),
+        prefix="fid",
+    )
+    body_match = re.search(
+        r"CREATE MATERIALIZED VIEW fid_fan_in_disagreement AS(.*?);",
+        sql,
+        re.DOTALL,
+    )
+    assert body_match is not None, (
+        "fan_in_disagreement matview missing from emit_schema output"
+    )
+    body = body_match.group(1)
+    assert "WHERE 1=0" in body
+    assert "fan_in_chains" not in body
+
+
+def test_fan_in_disagreement_view_populated_when_fan_in_chain_declared(
+) -> None:
+    """AB.4.7 + AB.4.5.spec: when ≥1 chain declares ``fan_in=True``,
+    the matview body carries:
+    - a CTE ``fan_in_chains(chain_parent_name, child_template_name,
+      expected_parent_count)`` populated by VALUES (one row per
+      fan_in (parent, child) pair);
+    - a JOIN against AB.4.3's ``_transfer_parents`` matview for the
+      DISTINCT-parent-count derivation;
+    - a CASE expression discriminating ``disagreement_kind`` across
+      ``'orphan'`` / ``'missing'`` / ``'extra'`` rows.
+    Body shape assertion under spec_example's
+    ``BatchPayoutTrigger → BatchedPayoutBatch`` fan-in chain.
+    """
+    from pathlib import Path
+    from recon_gen.common.l2.loader import load_instance
+    fx = Path(__file__).resolve().parent.parent / "l2" / "spec_example.yaml"
+    inst = load_instance(fx)
+    sql = emit_schema(inst, prefix="fp")
+    body_match = re.search(
+        r"CREATE MATERIALIZED VIEW fp_fan_in_disagreement AS(.*?);",
+        sql,
+        re.DOTALL,
+    )
+    assert body_match is not None
+    body = body_match.group(1)
+    # Populated branch — no empty-branch placeholder.
+    assert "WHERE 1=0" not in body
+    # CTE column-list shape on PG/SQLite.
+    assert (
+        "fan_in_chains(chain_parent_name, child_template_name, "
+        "expected_parent_count) AS (\n  VALUES" in body
+    )
+    # spec_example's fan_in chain rows appear in the CTE.
+    assert "'BatchPayoutTrigger'" in body
+    assert "'BatchedPayoutBatch'" in body
+    # CASE discriminates the three disagreement kinds.
+    assert "'orphan'" in body
+    assert "'missing'" in body
+    assert "'extra'" in body
+    # Joins _transfer_parents (AB.4.3 dependency).
+    assert "fp_transfer_parents tp" in body
+
+
+def test_todays_exceptions_includes_fan_in_disagreement_branch() -> None:
+    """AB.4.7 wiring: Today's Exceptions matview UNION ALLs a row
+    category for fan_in_disagreement violations, with
+    check_type='fan_in_disagreement' and magnitude=parent_count."""
+    sql = emit_schema(
+        L2Instance(
+            accounts=(),
+            account_templates=(),
+            rails=(),
+            transfer_templates=(),
+            chains=(),
+            limit_schedules=(),
+        ),
+        prefix="fit",
+    )
+    body_match = re.search(
+        r"CREATE MATERIALIZED VIEW fit_todays_exceptions AS(.*?);",
+        sql,
+        re.DOTALL,
+    )
+    assert body_match is not None
+    body = body_match.group(1)
+    assert "'fan_in_disagreement'" in body
+    assert "FROM fit_fan_in_disagreement" in body
+    assert "child_template_name AS rail_name" in body
+    assert "parent_count AS magnitude" in body
+
+
 def test_refresh_matviews_sql_emits_one_per_view() -> None:
-    """All 18 L1+inv matviews each get a REFRESH command + an
-    ANALYZE follow-up: 2 current_* + 2 computed_* + 9 L1 invariants
+    """All 19 L1+inv matviews each get a REFRESH command + an
+    ANALYZE follow-up: 2 current_* + 2 computed_* + 10 L1 invariants
     (drift + ledger_drift + overdraft + expected_eod_balance_breach +
     limit_breach + stuck_pending + stuck_unbundled +
     chain_parent_disagreement [AB.2.3] + xor_group_violation
-    [AB.3.3]) + 1 derived (transfer_parents [AB.4.3]) + 2
-    dashboard-shape (daily_statement_summary + todays_exceptions) + 2
-    Investigation matviews (inv_pair_rolling_anomalies +
-    inv_money_trail_edges, added in N.3.b) = 18 matviews × 2
-    statements each = 36 total."""
+    [AB.3.3] + fan_in_disagreement [AB.4.7]) + 1 derived
+    (transfer_parents [AB.4.3]) + 2 dashboard-shape
+    (daily_statement_summary + todays_exceptions) + 2 Investigation
+    matviews (inv_pair_rolling_anomalies + inv_money_trail_edges,
+    added in N.3.b) = 19 matviews × 2 statements each = 38 total."""
     sql = refresh_matviews_sql(_baseline_instance(), prefix="re")
     statements = [s.strip() for s in sql.split(";") if s.strip()]
     refreshes = [s for s in statements if s.startswith("REFRESH ")]
     analyzes = [s for s in statements if s.startswith("ANALYZE ")]
-    assert len(refreshes) == 18
-    assert len(analyzes) == 18
+    assert len(refreshes) == 19
+    assert len(analyzes) == 19
     # Every REFRESHed matview gets a matching ANALYZE.
     refresh_names = {s.removeprefix("REFRESH MATERIALIZED VIEW ") for s in refreshes}
     analyze_names = {s.removeprefix("ANALYZE ") for s in analyzes}
