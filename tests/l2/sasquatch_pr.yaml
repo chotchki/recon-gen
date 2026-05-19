@@ -906,6 +906,20 @@ limit_schedules:
       ACH cap because check-payout merchants are by definition
       lower-tech / lower-volume operations; SNB caps aggressive
       check issuance to surface anomalies.
+
+  - parent_role: DDAControl
+    rail: CustomerInboundACH
+    cap: 20000.00
+    direction: Inbound
+    description: |
+      AB.1 (2026-05-19): $20,000 daily ACH inbound cap per customer DDA.
+      AML / structuring threshold — modeled after the federal
+      currency-transaction-reporting rule but applied to ACH inbound
+      volume so SNB compliance surfaces aggregated deposits that
+      approach the threshold from below. Breaches surface on the
+      Inbound branch of the L1 Limit Breach matview (UNION ALL split)
+      and route to the AML review queue, distinct from the operations
+      triage queue that the Outbound payout breaches use.
 theme:
   theme_name: "Sasquatch National Bank Theme"
   version_description: "Sasquatch National Bank — forest green and gold palette"

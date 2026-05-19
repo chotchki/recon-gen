@@ -116,7 +116,13 @@ def test_chain_counts_pinned() -> None:
 
 def test_limit_schedule_counts_pinned() -> None:
     inst = _instance()
-    assert len(inst.limit_schedules) == 6
+    # 6 Outbound (the legacy AR + PR payout caps) + 1 Inbound
+    # (CustomerInboundACH AML threshold, AB.1.6 2026-05-19).
+    assert len(inst.limit_schedules) == 7
+    outbound = [ls for ls in inst.limit_schedules if ls.direction == "Outbound"]
+    inbound = [ls for ls in inst.limit_schedules if ls.direction == "Inbound"]
+    assert len(outbound) == 6
+    assert len(inbound) == 1
 
 
 # -- Encompasses sasquatch_ar's primitive coverage -------------------------
