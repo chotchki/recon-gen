@@ -1,8 +1,8 @@
 # Mac mini self-hosted demo host
 
 End-to-end runbook for the Phase AE Cloudflare-routed public demo at
-`spec.recon-gen.hotchkiss.io` (dashboards) and
-`sasquatch.recon-gen.hotchkiss.io` (studio --demo-mode).
+`recon-gen-spec.hotchkiss.io` (dashboards) and
+`recon-gen-sasquatch.hotchkiss.io` (studio --demo-mode).
 
 This document is operator-private — it lives under `docs/operations/`
 which is excluded from the public mkdocs build at
@@ -15,7 +15,7 @@ nothing public should link in.
 ```
 ┌────────────────────────────────────────────────────────────────────┐
 │                     Cloudflare edge (public)                        │
-│  spec.recon-gen.hotchkiss.io     sasquatch.recon-gen.hotchkiss.io  │
+│  recon-gen-spec.hotchkiss.io     recon-gen-sasquatch.hotchkiss.io  │
 │           │                                  │                       │
 │           │           Cloudflare Tunnel      │                       │
 └───────────┼──────────────────────────────────┼───────────────────────┘
@@ -155,9 +155,9 @@ sudo -u recon-demo vi /Users/recon-demo/.cloudflared/config.yml
 
 # DNS routing (one command per hostname)
 sudo -u recon-demo cloudflared tunnel route dns recon-demo \
-    spec.recon-gen.hotchkiss.io
+    recon-gen-spec.hotchkiss.io
 sudo -u recon-demo cloudflared tunnel route dns recon-demo \
-    sasquatch.recon-gen.hotchkiss.io
+    recon-gen-sasquatch.hotchkiss.io
 ```
 
 ### 7. Install + load the launchd services
@@ -200,8 +200,8 @@ with label `mac-mini-demo` and status `Idle`.
 ### Health check
 
 ```bash
-curl -sI https://spec.recon-gen.hotchkiss.io/dashboards/l1_dashboard/
-curl -sI https://sasquatch.recon-gen.hotchkiss.io/dashboards/l1_dashboard/
+curl -sI https://recon-gen-spec.hotchkiss.io/dashboards/l1_dashboard/
+curl -sI https://recon-gen-sasquatch.hotchkiss.io/dashboards/l1_dashboard/
 # Both should return HTTP/2 200.
 ```
 

@@ -65,8 +65,8 @@ jobs:
         run: |
           set -eu
           for url in \
-              https://spec.recon-gen.hotchkiss.io/dashboards/l1_dashboard/ \
-              https://sasquatch.recon-gen.hotchkiss.io/dashboards/l1_dashboard/; do
+              https://recon-gen-spec.hotchkiss.io/dashboards/l1_dashboard/ \
+              https://recon-gen-sasquatch.hotchkiss.io/dashboards/l1_dashboard/; do
             echo "==> probing $url"
             code=$(curl --silent --output /dev/null --write-out "%{http_code}" --max-time 30 "$url")
             if [ "$code" != "200" ]; then

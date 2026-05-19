@@ -11,13 +11,21 @@
 # rule gets a 404 from cloudflared rather than a connection-refused
 # (more graceful for stray requests).
 #
+# **Hostname structure note.** Cloudflare Universal SSL on the free
+# tier covers only single-level subdomains (`*.hotchkiss.io`).
+# Two-level subdomains like `spec.recon-gen.hotchkiss.io` would TLS-
+# handshake-fail because no cert covers them. The example below uses
+# single-level names (`recon-gen-spec.hotchkiss.io`) which Universal
+# SSL covers automatically. If you want nested names you'll need
+# Cloudflare's Total TLS (free beta) or Advanced Certificate Manager.
+#
 # After editing this file, restart the tunnel daemon:
-#   launchctl unload -w ~/Library/LaunchAgents/io.hotchkiss.recon-demo.tunnel.plist
-#   launchctl load   -w ~/Library/LaunchAgents/io.hotchkiss.recon-demo.tunnel.plist
+#   sudo launchctl bootout system /Library/LaunchDaemons/io.hotchkiss.recon-demo.tunnel.plist
+#   sudo launchctl bootstrap system /Library/LaunchDaemons/io.hotchkiss.recon-demo.tunnel.plist
 #
 # DNS wiring (run once per hostname, as recon-demo):
-#   cloudflared tunnel route dns recon-demo spec.recon-gen.hotchkiss.io
-#   cloudflared tunnel route dns recon-demo sasquatch.recon-gen.hotchkiss.io
+#   cloudflared tunnel route dns recon-demo recon-gen-spec.hotchkiss.io
+#   cloudflared tunnel route dns recon-demo recon-gen-sasquatch.hotchkiss.io
 
 tunnel: <REPLACE-WITH-TUNNEL-UUID-FROM-credentials.json>
 credentials-file: /Users/recon-demo/.cloudflared/<REPLACE-WITH-TUNNEL-UUID-FROM-credentials.json>.json
@@ -34,22 +42,22 @@ originRequest:
   noTLSVerify: false      # the origin is plain HTTP on loopback; not TLS
 
 ingress:
-  # spec.recon-gen.hotchkiss.io — dashboards-only surface (AE.4 spec
-  # plist on port 8401).
-  - hostname: spec.recon-gen.hotchkiss.io
+  # recon-gen-spec.hotchkiss.io — dashboards-only surface (AE.4 spec
+  # daemon on port 8401).
+  - hostname: recon-gen-spec.hotchkiss.io
     service: http://127.0.0.1:8401
     originRequest:
       # Optional: tighten origin headers / disable chunked encoding
       # if the dashboards server's WebKit-render path hits any of the
       # known cloudflared quirks. Defaults are usually fine.
-      httpHostHeader: spec.recon-gen.hotchkiss.io
+      httpHostHeader: recon-gen-spec.hotchkiss.io
 
-  # sasquatch.recon-gen.hotchkiss.io — studio --demo-mode surface
-  # (AE.4 sasquatch plist on port 8402).
-  - hostname: sasquatch.recon-gen.hotchkiss.io
+  # recon-gen-sasquatch.hotchkiss.io — studio --demo-mode surface
+  # (AE.4 sasquatch daemon on port 8402).
+  - hostname: recon-gen-sasquatch.hotchkiss.io
     service: http://127.0.0.1:8402
     originRequest:
-      httpHostHeader: sasquatch.recon-gen.hotchkiss.io
+      httpHostHeader: recon-gen-sasquatch.hotchkiss.io
 
   # Catch-all 404 for any unrecognized hostname.
   - service: http_status:404

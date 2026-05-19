@@ -276,8 +276,6 @@ Alternative implementation: relabel multi-children rows in `_declared_chains_cte
 
 ## Enhancement 7: Soft per-firing magnitude bounds on Rail
 
-**Status: landed in Phase AB.5 (2026-05-19) — generator-only first cut adopted as proposed.** Field shipped as `Rail.amount_typical_range: tuple[Money, Money] | None`. Validator rules V1a (min < max), V1b (both > 0), V1c (forbidden on aggregating) enforced at L2 load time. Generator log-uniform sampler honors the range; planted scenarios size to midpoint; cap-breach plants clamp to `range.max × 3` when both `amount_typical_range` and a `LimitSchedule` are declared on the rail. Optional runtime `magnitude_anomaly` matview deferred to follow-on. Concept doc: [Rail → Optional: typical amount range](src/recon_gen/docs/concepts/l2/rail.md#optional-typical-amount-range-ab5). Worked example: [How do I set typical amount ranges on a rail?](src/recon_gen/docs/walkthroughs/customization/how-do-i-set-typical-amount-ranges.md).
-
 ### Problem
 
 The auto-scenario seed generator picks `Transaction.amount` per firing using internal heuristics — no operator-declared "typical magnitude" hint per rail. Synthesized amounts can be orders of magnitude off from real-world expectations: $100K card swipes, $0.42 wire transfers, $1 ACH originations sitting next to each other on the same dashboard. The plausibility ceiling on the dashboard drops to a level where reviewers stop trusting the visualization before they reach a real exception.
@@ -406,3 +404,339 @@ A staged adoption order that minimizes churn:
 5. **Enhancement 2** next (N:1 fan-in) — bigger conceptual change. Ships `fan_in` as a chain-level flag.
 6. **Enhancement 6** can land any time after Enhancement 3 — it's purely a runtime check that brings the chain.md contract under enforcement; no SPEC schema change. Reasonable to bundle with Enhancement 5 since the per-child `fan_in` interaction wants the CTE skip baked in.
 7. **Enhancement 5** last — relocates `fan_in` per-child once Enhancement 2's chain-level shape proves bite-prone in mixed-cardinality flows. One-cycle deprecation window on the chain-level field.
+
+---
+
+## Generator implementation gaps surfaced during integrator phase-2 integration testing
+
+Distinct category from the Enhancements above. Enhancements are SPEC additions — new fields or relaxed constraints the SPEC should grow. The items below are existing-behavior bugs / gaps in the generator implementation: code that doesn't deliver what the SPEC + release notes already promise, OR code calibrated for one fixture that doesn't generalize. No SPEC change needed; just upstream code fixes.
+
+Surfaced when an integrator exercises a phase-2-style coverage sweep against an L2 instance that diverges from sasquatch_pr's exact shape (different chain topologies, different naming conventions, different plant-kind distributions). The sasquatch_pr fixture passes its locked tests because the tests cover sasquatch_pr's specific shape — but the surface area is wider than the fixture, and the gaps below land on any L2 with a structurally different layout.
+
+Each item is reproduce-able against sasquatch_pr (or spec_example) by tweaking the fixture into the relevant shape; the description below cites the closest existing sasquatch_pr / spec_example structure as the integrator-visible reproduction target.
+
+### Implementation Gap A: Picker Rail-parent restriction blocks 7 plant kinds for template-heavy L2s
+
+**Severity:** gap (cumulative blocker for AB.2 + AB.4 + AB.6 plants against template-parent chains)
+
+#### Problem
+
+Three pickers in `auto_scenario.py` filter the chain set to **Rail-parent** chains only, silently omitting any chain whose parent resolves to a TransferTemplate. The docstring on `_pick_two_template_chain_inputs` (line 1718) acknowledges the design choice:
+
+> "The parent MUST resolve to a Rail (not a TransferTemplate) — two-template chains where BOTH ends are templates are valid but produce nested-firing semantics out of scope for the AB.2 plant scaffold."
+
+Same restriction in `_pick_fan_in_chain_inputs` (line 1807) and `_pick_multi_xor_chain_inputs` (line 1844). Cumulative effect: 7 plant kinds never auto-derive for any L2 whose chains are template-parented.
+
+| Picker | Plant kinds blocked |
+|---|---|
+| `_pick_two_template_chain_inputs` | `TwoTemplateChainPlant`, `ChainParentDisagreementPlant` |
+| `_pick_fan_in_chain_inputs` | `FanInChainPlant`, `FanInChainMissingParentPlant`, `FanInChainExtraParentPlant` |
+| `_pick_multi_xor_chain_inputs` | `MultiXorMissedPlant`, `MultiXorOverlapPlant` |
+
+#### Where it bites in the Sasquatch example
+
+sasquatch_pr's `MerchantSettlementCycle` template post-AB.6.6 has both:
+- A multi-children XOR group (`[MerchantPayoutACH, MerchantPayoutWire, MerchantPayoutCheck, MerchantWeeklyPayoutBatch]` — the last child carrying `fan_in: true`)
+- AB.6's `_multi_xor_violation` matview wired for the runtime check
+
+The plants land cleanly because the existing test fixture's `MerchantSettlementCycle` is reachable from a Rail-parent chain via `ReconciliationLeg → MerchantSettlementCycle` (the singleton-Required chain from spec_example). The fan_in plants land via `MerchantSettlementCycle` itself acting as parent of `MerchantWeeklyPayoutBatch`, BUT the picker rejects it because `MerchantSettlementCycle` is a Template.
+
+Concrete reproduction shape for an integrator:
+
+```yaml
+chains:
+  # Template-parent chain — picker omits
+  - parent: MerchantSettlementCycle  # template, not rail
+    children:
+      - name: SomeChildTemplate
+        fan_in: true
+        expected_parent_count: 5
+```
+
+Result: `auto_scenario.default_scenario_for(instance).omitted` reports `"FanInChainPlant: no Chain declares fan_in=True (AB.4)"` — the message is doubly misleading: the YAML DOES declare `fan_in: true`, the picker just won't accept the parent shape.
+
+For integrators with template-heavy L2 designs (any flow that uses TransferTemplate as a cycle aggregator AND chains downstream of it), this can block most of the AB.2/AB.4/AB.6 plant surface.
+
+#### Proposed fix
+
+Extend each of the 3 pickers to support TransferTemplate parents. Synthesize parent firings via the template's first leg_rail using `_pick_account_id_for_role_expr` (already used elsewhere in `default_scenario_for` to resolve template-instance accounts). Reuses an existing helper; one ~20-line change per picker.
+
+Update docstrings to drop the "out of scope" language. Locked-seed determinism for the existing sasquatch_pr / spec_example fixtures should hold (the fixtures use Rail-parent chains as their primary plant target; the Template-parent path is new and additive).
+
+#### Tradeoffs / open questions
+
+- **Test coverage cost** — needs ~3 new unit-test cases per picker covering Template-parent shape. Not big; mirrors the AB.6 test pattern.
+- **Locked-seed regen** — adding sasquatch_pr / spec_example fixture shape with a Template-parent chain (e.g., add `BulkAccrualSettlement` chained off `MerchantSettlementCycle`) is the natural validation; would regen seed hashes for that fixture.
+- **Picker omit-reason messages need sharpening** — the current "no Chain declares fan_in=True" message is wrong in the Template-parent case. Should say "no Chain with fan_in=True AND a parent the picker supports".
+
+---
+
+### Implementation Gap B: AB.2 template-as-chain-child emit doesn't write `transfer_parent_id` for some shapes
+
+**Severity:** bug (major — breaks AB.2's runtime check + L2FT chain_orphans against affected chain shapes)
+
+#### Problem
+
+The v11.2.0 release notes for AB.2 promised:
+
+> "Seed — two-template chain firings. New `_emit_chain_child_template_legs` replaces the pre-existing silent-skip path at seed.py:2442-2446. Generates ONE shared transfer_id per chain invocation, iterates the child template's leg_rails, calls the existing `_emit_chain_child_leg` once per leg with `shared_transfer_id=` and `template_name=` injected. **All emitted rows share transfer_id, template_name, and parent_transfer_id**."
+
+The emitted rows DO share `transfer_id` and `template_name`. Empirically, `transfer_parent_id` is NULL on emitted rows for at least one chain shape (template-parent + template-child, observed against an L2 with this structure).
+
+Cascading effects:
+
+- `<prefix>_chain_parent_disagreement` matview filters `transfer_parent_id IS NOT NULL` → never fires for affected chain shapes regardless of plant input. The AB.2 audit promise ("chain hierarchy is structurally enforced for template-as-child shapes") doesn't deliver for these shapes.
+- L2FT `chain_orphans` dataset matches children via `transfer_parent_id IN (parent's transfer_ids)` → never matches → false-positive orphan count = parent firing count.
+
+#### Where it bites in the Sasquatch example
+
+Reproduction target: an integrator declares a chain `MerchantSettlementCycle → MerchantWeeklyPayoutBatch` (both templates) — the canonical AB.6.6 mixed-cardinality shape. After `data apply --execute`, query:
+
+```sql
+SELECT template_name,
+       COUNT(*) AS total,
+       SUM(CASE WHEN transfer_parent_id IS NOT NULL THEN 1 ELSE 0 END) AS with_parent
+FROM <prefix>_transactions
+WHERE template_name = 'MerchantWeeklyPayoutBatch'
+GROUP BY template_name;
+```
+
+Expected per v11.2.0 release notes: `with_parent = total`. If `with_parent = 0`, the bug is present.
+
+(Sasquatch_pr's existing Rail-parent template-child chain `CustomerFeeAccrual → InternalTransferCycle` passes the check — `InternalTransferCycle` legs DO populate `transfer_parent_id`. The bug appears specific to Template-parent + Template-child shapes; the rail-as-parent path works correctly.)
+
+#### Proposed fix
+
+Trace `_emit_chain_child_template_legs` (seed.py:2925) execution for Template-parent chains. Two candidate causes:
+
+1. The function isn't being invoked for Template-parent chains (the chain-emit machinery only calls it for Rail-parent shapes). Add the Template-parent code path.
+2. The function IS invoked but the parent_transfer_id isn't being threaded through to `_emit_chain_child_leg` for this shape. Trace argument-passing.
+
+Add a unit test that asserts `transfer_parent_id` is non-NULL on every chain-child template's leg row, parameterized across {Rail-parent + Rail-child, Rail-parent + Template-child, Template-parent + Rail-child, Template-parent + Template-child}.
+
+Likely paired with Implementation Gap A's picker fix — same architectural blind spot ("Template-parent chains were out of scope at AB.2 design time"). Worth fixing both together.
+
+#### Tradeoffs / open questions
+
+- **Sasquatch_pr / spec_example locked seeds** stay byte-equivalent until a Template-parent chain is added to either fixture. Adding one (per Gap A's locked-seed regen note) is the natural validation point.
+- **Backward compat** — fixing this populates `transfer_parent_id` where it was previously NULL. The AB.2 chain_parent_disagreement matview will start firing for chains where it was previously empty; L2FT chain_orphans dataset will start counting children correctly (orphan counts will drop where they were false-high).
+
+---
+
+### Implementation Gap C: `emit_baseline_chains` doesn't enforce multi-children XOR semantics
+
+**Severity:** bug (baseline emits chain.md-violating activity; AB.6 matview correctly catches it as false-positive exceptions on healthy baselines)
+
+#### Problem
+
+`docs/concepts/l2/chain.md` prose:
+
+> "Two or more children = XOR alternation. Exactly one of the listed children MUST fire per parent invocation."
+
+`emit_baseline_chains` doesn't honor this contract. It can emit parent firings with zero matching children (missed) OR with two matching children (overlap). AB.6's runtime `<prefix>_multi_xor_violation` matview correctly catches both shapes; the operator-facing dashboard then renders them as exceptions on what should be a "healthy" baseline.
+
+Pre-AB.6 this was latent — multi-children chains were untracked at runtime. AB.6's matview exposed the existing baseline-emit gap.
+
+#### Where it bites in the Sasquatch example
+
+Sasquatch_pr's `MerchantSettlementCycle` template chains to `[MerchantPayoutACH, MerchantPayoutWire, MerchantPayoutCheck, MerchantWeeklyPayoutBatch]` — a 4-children chain (3 non-fan_in + 1 fan_in). Per chain.md, exactly one non-fan_in child must fire per parent firing (the fan_in child is exempt — its semantics are governed by `<prefix>_fan_in_disagreement`).
+
+Reproduction: fresh `data apply --execute` against sasquatch_pr, then:
+
+```sql
+SELECT parent_rail_or_template_name, disagreement_kind, child_count, COUNT(*)
+FROM <prefix>_multi_xor_violation
+WHERE parent_rail_or_template_name = 'MerchantSettlementCycle'
+GROUP BY 1, 2, 3;
+```
+
+Expected on a healthy baseline: 0 rows for MerchantSettlementCycle (the picker enforces XOR per firing; baseline obeys). Actual (against L2 instances with multi-children chains): some count > 0 with `disagreement_kind` ∈ {missed, overlap}.
+
+`AB.6.5.spec` added a dedicated `BulkAccrualSettlement → [BulkAccrualSettleACH, BulkAccrualSettleWire]` chain to spec_example specifically for plant coverage. That test passes because the plants explicitly synthesize the violations. The bug is in the *baseline* emit path — the routine activity that should fire chain children correctly.
+
+#### Proposed fix
+
+Add deterministic per-firing child-pick to `emit_baseline_chains`. Pattern matches AB.3's `_xor_suppressed_members` for `leg_rail_xor_groups`:
+
+```python
+def _baseline_xor_child_pick(
+    chain: Chain, parent_transfer_id: str, base_seed: int,
+) -> Identifier:
+    """Pick exactly one child for this parent firing, deterministic."""
+    if len(chain.children) == 1:
+        return chain.children[0].name  # singleton-required
+    non_fan_in = [c for c in chain.children if not c.fan_in]
+    pick_seed = base_seed ^ zlib.crc32(
+        f"{chain.parent}|{parent_transfer_id}".encode()
+    )
+    rng = random.Random(pick_seed)
+    return rng.choice(non_fan_in).name
+```
+
+For every parent firing of a multi-children chain, pick exactly one non-fan_in child to fire; suppress siblings for that firing. fan_in children fire independently per AB.4 semantics (parent contributes regardless of XOR pick for non-fan_in siblings).
+
+Rename-resilient (keys on `transfer_id`, not chain children's names). Same RNG-derivation pattern AB.3 already validates.
+
+#### Tradeoffs / open questions
+
+- **Locked-seed regen** — sasquatch_pr / spec_example seeds regenerate when the per-firing pick lands. The change is structural enough to bump the locked SHA-hashes; expected and documented.
+- **Interaction with fan_in (Enhancement 5 per-child shape)** — the picker should skip fan_in children when picking the XOR target. fan_in children fire on their own AB.4 logic; XOR pick targets the multi-children Z.A grammar non-fan_in subset.
+- **Backward compat** — pre-fix L2 instances see a drop in multi_xor_violation matview rows (the baseline noise floor goes from "some count > 0" to 0 on healthy baselines). Plants still fire violations on demand.
+
+---
+
+### Implementation Gap D: Rail kind classifier substring vocabulary tuned for sasquatch_pr; degrades for other L2s
+
+**Severity:** gap (per-rail count + amount realism degrades for any L2 not following sasquatch_pr's CamelCase substring conventions)
+
+#### Problem
+
+`_classify_rail` (seed.py:1703) substring-matches on `rail.name.lower()` against a fixed vocabulary:
+
+```
+"return" | "cardsale" | "externalcard" | "payout" | "fee" | "inbound" |
+"deposit" | "outbound" | "withdrawal" | "concentration" | "internal" |
+"charge" | "subledger"
+```
+
+Falls to OTHER on no match. The vocabulary is calibrated for sasquatch_pr's CamelCase patterns (`CustomerInboundACH`, `MerchantCardSale`, `MerchantPayoutACH`, `CustomerFeeMonthlySettlement`, etc.). For integrators using different naming conventions — SOP-derived names, abbreviated forms, legacy snake_case, domain-specific vocabulary — most rails fall to OTHER. The OTHER bucket has `daily_target_per_unit=1.0, scaling_kind="system"`: 1 firing per business day system-wide, regardless of operational reality.
+
+Additionally, the existing `"inbound"` pattern over-matches: any rail name containing `"inbound"` is bucketed as CUSTOMER_INBOUND (4/customer/day × customer_count). System-wide inbound rails (e.g., a single ACH batch from a payroll provider that fans out to N customers) get the per-customer scaling wrongly applied — produces ~80 firings/day where the real cadence is 1 per pay period.
+
+#### Where it bites in the Sasquatch example
+
+Sasquatch_pr itself doesn't trigger Implementation Gap D — its rail names are the calibration set, so every rail matches a non-OTHER pattern.
+
+The integrator-visible reproduction is a rail-renaming exercise. Imagine an integrator working from operational documentation that names rails differently — e.g., renaming sasquatch_pr's `MerchantCardSale` to `RetailerSwipe` to match their domain vocabulary. `RetailerSwipe` matches none of the patterns → OTHER → 1/day system-wide instead of `8/merchant/day × merchant_count` (CARD_SALE).
+
+Sample integrator rails likely to land in OTHER and produce wrong volumes:
+- `RetailerSwipe`, `PointOfSalePosting`, `MerchantClearingDebit` (should be CARD_SALE-equivalent)
+- `RefundChit`, `ReturnAuthorization`, `CardholderCredit` (should be CARD_SALE-refund-shape)
+- `MonthlyServiceCharge`, `MaintenanceFee` (should be CUSTOMER_FEE; "fee" only matches if it's a substring — `MaintenanceFee` has it, `MonthlyServiceCharge` doesn't)
+- `BatchACHCredit` (system-wide-scaled, not per-customer-scaled — but contains "credit" which isn't in the vocab → OTHER)
+
+Net effect: any L2 instance whose rails don't follow sasquatch_pr's CamelCase substring conventions sees its dashboard's per-period volumes orders of magnitude off from operational reality.
+
+#### Proposed fix
+
+Two interventions, both small, in parallel:
+
+1. **Broaden the substring vocabulary.** Add patterns that catch common alternative naming. Preserve existing-match order so locked seeds for sasquatch_pr stay byte-identical — append new patterns AFTER existing ones in the substring chain. Candidate additions:
+
+| New substring | Maps to | Rationale |
+|---|---|---|
+| `"sale"` | CARD_SALE | More general than `"cardsale"`; catches `*Sale` patterns |
+| `"swipe"` | CARD_SALE | POS-system terminology variant |
+| `"refund"` | CARD_SALE | Refunds mirror sales in count + amount shape |
+| `"chit"` | CARD_SALE | Refund-chit terminology |
+| `"settlement"` | MERCHANT_PAYOUT | Settlement = per-merchant per-period scaling |
+| `"voucher"` | MERCHANT_PAYOUT-like or new VOUCHER kind | Voucher batches are periodic per merchant |
+| `"interest"` | new INTEREST kind or AGGREGATING_MONTHLY-like | Monthly accrual cadence |
+| `"emit"` | AGGREGATING_MONTHLY-like | Voucher / batch emit per cycle |
+| `"cash"` | new CASH kind | Cash-handling at branch / NCAO |
+
+2. **Tighten the `"inbound"` pattern's over-match.** Either require `"inbound"` NOT also contain `"payroll"` / `"batch"` (route those to a new system-wide PAYROLL_BATCH kind), OR add `"payroll"` / `"batch"` as higher-priority patterns that win the matcher first.
+
+Both fixes are short-term mitigations. The long-term answer is Enhancement 8 (operator-declared `firings_typical_per_*_range`), which short-circuits the classifier for any rail that declares it. Worth doing both — the classifier fix unblocks the immediate per-period plausibility for integrators who haven't yet declared E8 ranges; E8 is the universal opt-in.
+
+#### Tradeoffs / open questions
+
+- **New `_RailKind` granularity** — adding new kinds (INTEREST, CASH, VOUCHER, PAYROLL_BATCH) means new `_RailKindParams` entries with calibrated `daily_target_per_unit` + amount mu/sigma. Operator-visible knob proliferation; lean conservative.
+- **Locked-seed determinism** — sasquatch_pr / spec_example seeds stay byte-identical as long as the new patterns are appended AFTER the existing ones (so they don't capture rails the existing chain already classified). Validated via locked-seed regression tests.
+- **Test coverage** — add unit tests per new pattern showing the substring matches the expected `_RailKind`.
+
+---
+
+### Implementation Gap E: Trainer modules missing AB.1–AB.6 plant kinds
+
+**Severity:** gap (bit-rot; Studio chrome shows incomplete per-node badges for post-AB.0 plant kinds)
+
+#### Problem
+
+Two trainer modules — `trainer.py::plants_per_node` and `trainer_timeline.py::_scenario_to_timeline` — were calibrated against the original 9 plant kinds and haven't been extended as AB.1 through AB.6 landed new plant kinds.
+
+`trainer.py::plants_per_node` covers: drift, overdraft, limit_breach, stuck_pending, stuck_unbundled, supersession, failed, transfer_template, inv_fanout. **Missing:**
+
+- `inbound_cap_breach_plants` (AB.1)
+- `two_template_chain_plants` + `chain_parent_disagreement_plants` (AB.2)
+- `xor_variant_missed_firing_plants` + `xor_variant_overlap_plants` (AB.3)
+- `fan_in_chain_plants` + `fan_in_chain_missing_parent_plants` + `fan_in_chain_extra_parent_plants` (AB.4)
+- `multi_xor_missed_plants` + `multi_xor_overlap_plants` (AB.6)
+
+11 plant kinds added to `ScenarioPlant` since AB.1 → not surfaced in Studio's per-node badges.
+
+`trainer_timeline.py::_scenario_to_timeline` covers even fewer (6 of the original 9). Same bit-rot shape.
+
+#### Where it bites in the Sasquatch example
+
+Post-v11.6.0, sasquatch_pr's auto-scenario emits the full plant surface — inbound_cap_breach (AB.1), two_template_chain + chain_parent_disagreement (AB.2 from the `CustomerFeeAccrual → InternalTransferCycle` chain), xor_variant_missed_firing + overlap (AB.3 from the spec_example `SettlementTimingCycle` chain, and from sasquatch_pr's MerchantSettlementCycle 2-group setup), fan_in_chain trio (AB.4 from `MerchantSettlementCycle → MerchantWeeklyPayoutBatch`), and multi_xor_missed + overlap (AB.6 from MerchantSettlementCycle's 4-children XOR group).
+
+An integrator opening Studio's diagram view against sasquatch_pr sees per-node plant-count badges for drift / overdraft / limit_breach / stuck_pending / stuck_unbundled / supersession / failed / transfer_template / inv_fanout — but ZERO badges for the 11 newer plant kinds. The chrome silently undercounts; integrators may incorrectly read "no plants here" on nodes that actually carry AB.x plant rows.
+
+Reproduction: open Studio against sasquatch_pr, inspect the trainer chrome's per-node badges, cross-reference against `default_scenario_for(sasquatch_pr).scenario` — the badge surface is missing the plant kinds the scenario actually carries.
+
+#### Proposed fix
+
+Extend `plants_per_node` to iterate the missing plant tuples. For chain-shaped plants (AB.2 chain_parent_disagreement, AB.4 fan-in trio, AB.6 multi_xor pair), pick a per-plant binding to a topology node:
+
+- AB.2 chain_parent_disagreement → chain-child template node (the disagreement is OBSERVED on the child)
+- AB.4 fan-in trio → child template node (the parent_count check is keyed on the child)
+- AB.6 multi_xor pair → chain-parent rail or template node (the XOR violation is observed AT the parent firing)
+
+Similar update for `_scenario_to_timeline` in `trainer_timeline.py`. Both functions follow the same iteration pattern; the change is mechanical once the per-plant binding is decided.
+
+Update the `PlantKind` enum / typedef stub at `trainer.py:38` so it enumerates every supported kind authoritatively (currently it's a `str` alias with a comment listing 9 kinds — rotted).
+
+#### Tradeoffs / open questions
+
+- **Test coverage** — add unit tests per new plant kind showing the expected per-node count. Mirrors existing `plants_per_node` tests.
+- **Studio chrome visual** — the SVG `data-trainer-kinds` attribute needs to support the new kind names. Likely no schema change needed; the attribute is comma-joined strings.
+- **Backward compat** — pre-fix Studio sessions don't render the missing badges. Post-fix they will. No yaml change required.
+
+---
+
+### Implementation Gap F: Picker determinism is first-by-name (observation)
+
+**Severity:** observation / known design choice — not actionable upstream unless reframed
+
+#### Problem
+
+Every per-plant-kind picker in `auto_scenario.py` selects the first matching rail by sorted name. For an L2 instance with N rails of a given shape, only 1 gets exercised by the auto-scenario; the other N-1 stay uncovered.
+
+`densify_scenario` replicates the picked rail across days via `days_ago` stride; it doesn't expand to OTHER rails in the kind.
+
+#### Where it bites in the Sasquatch example
+
+Sasquatch_pr has multiple rails declaring `max_unbundled_age` (the bundled-aging-watch surface). The auto-scenario picks ONE for the `StuckUnbundledPlant`; the other N-1 don't surface stuck-unbundled exceptions even though they're equally eligible.
+
+For an integrator running a phase-2-style coverage exercise asking "does every rail × stuck_unbundled cell surface?", the auto-scenario answers "no" for N-1 of N rails. Explicit plants for the remaining N-1 are required.
+
+This is by design per existing pattern, but integrators may not realize the auto-scenario only covers one rail per kind — could be a documentation gap.
+
+#### Proposed fix
+
+Two flavors, either / both:
+
+1. **Documentation** — add a "the auto-scenario picks one rail per plant kind by design" note to the seed.md concept doc. Operator-facing surface; clarifies the limitation.
+
+2. **`coverage_mode` flag** — add a `mode` value (or separate `coverage_scenario_for` entry) that iterates ALL rails per kind, producing one plant per rail. Useful for integrator coverage tests; default behavior stays single-rail per kind for the existing demo-readability use case.
+
+Phase 2 (integrator side) prototyped per-rail explicit plants via a runnable test suite (`phase2_coverage_tests.py`) — it bypasses the picker entirely and INSERTs plant rows directly. Pattern works; could be folded upstream as a `recon-gen audit l2 capability` CLI surface if integrators want it.
+
+#### Tradeoffs / open questions
+
+- **Scope** — coverage-mode auto-scenarios would produce N× more plants per kind, which densifies the dashboard significantly. Could overwhelm the visual surface for large L2 instances; should probably be an opt-in scope, not the default.
+- **Locked-seed determinism** — adding a new mode is additive; existing modes stay byte-equivalent.
+
+---
+
+### Recommended filing order for the implementation gaps
+
+1. **Gap B (transfer_parent_id missing)** — broadest blast radius; one focused fix; immediate cleanup of false-positive chain orphans on integrator dashboards.
+2. **Gap C (baseline multi-XOR not enforced)** — close behind. Pattern matches AB.3's `_xor_suppressed_members` — well-trodden ground.
+3. **Gap A (picker Rail-parent restriction)** — biggest plant-coverage win (7 plant kinds unblocked); shared bug shape across 3 pickers.
+4. **Gap D (classifier substring + over-match)** — short-term mitigation while Enhancement 8 lands.
+5. **Gap E (trainer modules bit-rot)** — Studio chrome polish; can wait until the AB-train slows.
+6. **Gap F (picker first-by-name)** — design-choice observation; defer unless integrators ask.
+
+Gap B + C + A together address ~80% of the integrator-visible coverage gaps surfaced during phase-2 testing. Gap D + Enhancement 8 together restore per-period dashboard plausibility for any non-sasquatch L2.

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  AE.4 — LaunchDaemon plist for the spec.recon-gen.hotchkiss.io demo
+  AE.4 — LaunchDaemon plist for the recon-gen-spec.hotchkiss.io demo
   (recon-gen dashboards against spec_example L2, sandboxed).
 
   This is a LaunchDaemon, NOT a LaunchAgent. On macOS 26 (Tahoe) a
