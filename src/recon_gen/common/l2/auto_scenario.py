@@ -65,6 +65,7 @@ from .primitives import (
 from .seed import (
     DriftPlant,
     FailedTransactionPlant,
+    InboundCapBreachPlant,
     InvFanoutPlant,
     LimitBreachPlant,
     OverdraftPlant,
@@ -149,8 +150,13 @@ def default_scenario_for(
     breach_picks = _pick_breach_inputs(instance, template.role)
     if breach_picks is None:
         omitted.append(("LimitBreachPlant",
-                        "no LimitSchedule whose transfer_type matches an "
+                        "no Outbound LimitSchedule whose rail matches an "
                         "outbound 2-leg Rail with external counter"))
+    inbound_breach_picks = _pick_inbound_breach_inputs(instance, template.role)
+    if inbound_breach_picks is None:
+        omitted.append(("InboundCapBreachPlant",
+                        "no Inbound LimitSchedule whose rail matches an "
+                        "inbound 2-leg Rail with external counter (AB.1)"))
     pending_rail = _pick_first_with(
         instance.rails, key=lambda r: r.max_pending_age is not None,
     )
@@ -219,6 +225,23 @@ def default_scenario_for(
                 rail_name=breach_rail.name,
                 amount=breach_amount,
                 counter_account_id=breach_counter.id,
+            ),
+        )
+
+    # AB.1 — Inbound cap breach mirrors Outbound. Different days_ago
+    # (3 vs 4) to keep the planted rows visually distinct on the L1
+    # Limit Breach sheet's date axis.
+    inbound_cap_breach_plants: tuple[InboundCapBreachPlant, ...] = ()
+    if inbound_breach_picks is not None:
+        in_ls, in_rail, in_counter = inbound_breach_picks
+        in_amount = (in_ls.cap * Decimal("1.5")).quantize(Decimal("1"))
+        inbound_cap_breach_plants = (
+            InboundCapBreachPlant(
+                account_id=cust1.account_id,
+                days_ago=3,
+                rail_name=in_rail.name,
+                amount=in_amount,
+                counter_account_id=in_counter.id,
             ),
         )
 
@@ -451,6 +474,7 @@ def default_scenario_for(
         drift_plants=drift_plants if include_l1 else (),
         overdraft_plants=overdraft_plants if include_l1 else (),
         limit_breach_plants=limit_breach_plants if include_l1 else (),
+        inbound_cap_breach_plants=inbound_cap_breach_plants if include_l1 else (),
         stuck_pending_plants=stuck_pending_plants if include_l1 else (),
         failed_transaction_plants=failed_transaction_plants if include_l1 else (),
         stuck_unbundled_plants=stuck_unbundled_plants if include_l1 else (),
@@ -528,6 +552,20 @@ def densify_scenario(
             for i in range(factor)
         )
 
+    def replicate_inbound_breach(
+        p: InboundCapBreachPlant,
+    ) -> tuple[InboundCapBreachPlant, ...]:
+        return tuple(
+            InboundCapBreachPlant(
+                account_id=p.account_id,
+                days_ago=p.days_ago + i * day_stride,
+                rail_name=p.rail_name,
+                amount=p.amount,
+                counter_account_id=p.counter_account_id,
+            )
+            for i in range(factor)
+        )
+
     def replicate_pending(
         p: StuckPendingPlant,
     ) -> tuple[StuckPendingPlant, ...]:
@@ -578,6 +616,10 @@ def densify_scenario(
         ),
         limit_breach_plants=tuple(
             r for p in base.limit_breach_plants for r in replicate_breach(p)
+        ),
+        inbound_cap_breach_plants=tuple(
+            r for p in base.inbound_cap_breach_plants
+            for r in replicate_inbound_breach(p)
         ),
         stuck_pending_plants=tuple(
             r for p in base.stuck_pending_plants for r in replicate_pending(p)
@@ -648,6 +690,7 @@ def boost_inv_fanout_plants(
         drift_plants=base.drift_plants,
         overdraft_plants=base.overdraft_plants,
         limit_breach_plants=base.limit_breach_plants,
+        inbound_cap_breach_plants=base.inbound_cap_breach_plants,
         stuck_pending_plants=base.stuck_pending_plants,
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants,
@@ -723,6 +766,7 @@ def add_broken_rail_plants(
         drift_plants=base.drift_plants,
         overdraft_plants=base.overdraft_plants,
         limit_breach_plants=base.limit_breach_plants,
+        inbound_cap_breach_plants=base.inbound_cap_breach_plants,
         stuck_pending_plants=base.stuck_pending_plants + extra_plants,
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants,
@@ -770,6 +814,7 @@ def filter_scenario_plants(
         drift_plants=base.drift_plants if "drift" in selected else (),
         overdraft_plants=base.overdraft_plants if "overdraft" in selected else (),
         limit_breach_plants=base.limit_breach_plants if "limit_breach" in selected else (),
+        inbound_cap_breach_plants=base.inbound_cap_breach_plants if "limit_breach" in selected else (),
         stuck_pending_plants=base.stuck_pending_plants if "stuck_pending" in selected else (),
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants if "stuck_unbundled" in selected else (),
@@ -1290,15 +1335,51 @@ def _pick_breach_inputs(
     instance: L2Instance, template_role: Identifier,
 ) -> tuple[LimitSchedule, TwoLegRail, Account] | None:
     """Find a (LimitSchedule, outbound Rail, external Account) triple
-    suitable for a LimitBreachPlant. Sorted by LimitSchedule key."""
+    suitable for a LimitBreachPlant. Only considers Outbound-direction
+    LimitSchedules. Sorted by LimitSchedule key."""
     for ls in sorted(
-        instance.limit_schedules,
+        (ls for ls in instance.limit_schedules if ls.direction == "Outbound"),
         key=lambda ls: (str(ls.parent_role), str(ls.rail)),
     ):
         rail = _pick_outbound_2leg_rail(instance, template_role, Identifier(str(ls.rail)))
         if rail is None:
             continue
         counter = _pick_external_counter_for_outbound(instance, rail)
+        if counter is None:
+            continue
+        return (ls, rail, counter)
+    return None
+
+
+def _pick_inbound_breach_inputs(
+    instance: L2Instance, template_role: Identifier,
+) -> tuple[LimitSchedule, TwoLegRail, Account] | None:
+    """AB.1 mirror of :func:`_pick_breach_inputs`: find a
+    (LimitSchedule, inbound Rail, external Account) triple suitable for
+    an InboundCapBreachPlant. Only considers Inbound-direction
+    LimitSchedules. Sorted by LimitSchedule key for determinism.
+
+    Inbound rail = TwoLegRail whose ``destination_role`` includes the
+    customer template_role (money flows IN to the customer). Counter =
+    external Account on the rail's ``source_role`` side (the funds
+    source).
+    """
+    for ls in sorted(
+        (ls for ls in instance.limit_schedules if ls.direction == "Inbound"),
+        key=lambda ls: (str(ls.parent_role), str(ls.rail)),
+    ):
+        # Inbound: match rail by name AND destination includes template.
+        rail_target = Identifier(str(ls.rail))
+        candidates = [
+            r for r in instance.rails
+            if isinstance(r, TwoLegRail)
+            and r.name == rail_target
+            and template_role in r.destination_role
+        ]
+        if not candidates:
+            continue
+        rail = sorted(candidates, key=lambda r: str(r.name))[0]
+        counter = _pick_external_counter_for_rail(instance, rail)
         if counter is None:
             continue
         return (ls, rail, counter)

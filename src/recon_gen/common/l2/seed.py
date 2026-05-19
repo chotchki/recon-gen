@@ -477,6 +477,7 @@ class ScenarioPlant:
     drift_plants: tuple[DriftPlant, ...] = ()
     overdraft_plants: tuple[OverdraftPlant, ...] = ()
     limit_breach_plants: tuple[LimitBreachPlant, ...] = ()
+    inbound_cap_breach_plants: tuple[InboundCapBreachPlant, ...] = ()
     stuck_pending_plants: tuple[StuckPendingPlant, ...] = ()
     failed_transaction_plants: tuple[FailedTransactionPlant, ...] = ()
     stuck_unbundled_plants: tuple[StuckUnbundledPlant, ...] = ()
@@ -528,6 +529,17 @@ def emit_seed(
     for p in sorted(scenarios.limit_breach_plants, key=_breach_key):
         txn_rows.extend(
             _emit_limit_breach_rows(
+                p, instance, scenarios, template_by_role,
+                parent_singleton_by_role, txn_counter, dialect,
+            )
+        )
+
+    # AB.1 — Inbound cap breaches mirror Outbound: customer-side
+    # CREDIT leg breaches the InboundFlow cap, external counter-leg
+    # debits the funds source.
+    for p in sorted(scenarios.inbound_cap_breach_plants, key=_inbound_breach_key):
+        txn_rows.extend(
+            _emit_inbound_cap_breach_rows(
                 p, instance, scenarios, template_by_role,
                 parent_singleton_by_role, txn_counter, dialect,
             )
@@ -663,7 +675,8 @@ def emit_seed(
 --   {len(scenarios.template_instances)} template instances
 --   {len(scenarios.drift_plants)} drift scenarios
 --   {len(scenarios.overdraft_plants)} overdraft scenarios
---   {len(scenarios.limit_breach_plants)} limit-breach scenarios
+--   {len(scenarios.limit_breach_plants)} limit-breach scenarios (Outbound)
+--   {len(scenarios.inbound_cap_breach_plants)} limit-breach scenarios (Inbound, AB.1)
 --   {len(scenarios.rail_firing_plants)} rail firings (broad mode)
 -- =====================================================================
 
@@ -3280,6 +3293,10 @@ def _breach_key(p: LimitBreachPlant) -> tuple[str, int, str]:
     return (str(p.account_id), p.days_ago, str(p.rail_name))
 
 
+def _inbound_breach_key(p: InboundCapBreachPlant) -> tuple[str, int, str]:
+    return (str(p.account_id), p.days_ago, str(p.rail_name))
+
+
 def _stuck_pending_key(p: StuckPendingPlant) -> tuple[str, int, str]:
     return (str(p.account_id), p.days_ago, str(p.rail_name))
 
@@ -3355,6 +3372,79 @@ def _bod_timestamp(d: date, offset_hours: int = 0) -> str:
     Default 0 keeps midnight-aligned production behavior.
     """
     return f"{d.isoformat()}T{offset_hours:02d}:00:00+00:00"
+
+
+def _emit_inbound_cap_breach_rows(
+    p: InboundCapBreachPlant,
+    instance: L2Instance,
+    scenarios: ScenarioPlant,
+    template_by_role: dict[Identifier, AccountTemplate],
+    parent_singleton_by_role: dict[Identifier, Account],
+    counter: _Counter,
+    dialect: Dialect,
+) -> list[str]:
+    """Plant ONE inbound credit row exceeding the cap. Mirror of
+    :func:`_emit_limit_breach_rows`: customer leg is Credit (money IN),
+    external counter-leg is Debit (money OUT of the funds source).
+
+    The row alone drives ``InboundFlow > limit`` for the
+    ``(account, day, rail)`` cell — surfaces on the Inbound branch of
+    the ``<prefix>_limit_breach`` matview (AB.1).
+    """
+    ti = _resolve_template(p.account_id, scenarios)
+    template = template_by_role[ti.template_role]
+    parent_role = template.parent_role
+    counter_account = _resolve_account(p.counter_account_id, instance)
+    counter_name = counter_account.name or Name(str(counter_account.id))
+    counter_role = counter_account.role or Identifier(str(counter_account.id))
+    breach_day = scenarios.today - timedelta(days=p.days_ago)
+    posting_ts = (
+        f"{breach_day.isoformat()}T14:00:00+00:00"  # 2pm — middle of business day
+    )
+
+    n = counter.next()
+    txn_id = f"tx-inbreach-{n:04d}"
+    transfer_id = f"tr-inbreach-{n:04d}"
+    credit_money = p.amount  # inbound = Credit; sign-direction agreement (+ = money IN)
+
+    return [
+        # Customer DDA credit leg (the breaching one)
+        _txn_row(
+            id_=txn_id,
+            account_id=ti.account_id,
+            account_name=ti.name,
+            account_role=ti.template_role,
+            account_scope=template.scope,
+            account_parent_role=parent_role,
+            money=credit_money,
+            direction="Credit",
+            posting=posting_ts,
+            transfer_id=transfer_id,
+            rail_name=p.rail_name,
+            origin="ExternalForcePosted",  # inbound from external system
+            metadata={"customer_id": str(ti.account_id)},
+
+            dialect=dialect,
+        ),
+        # External counter-leg (no balance tracking, but needed for Conservation)
+        _txn_row(
+            id_=f"{txn_id}-ext",
+            account_id=counter_account.id,
+            account_name=counter_name,
+            account_role=counter_role,
+            account_scope=counter_account.scope,
+            account_parent_role=counter_account.parent_role,
+            money=-p.amount,  # -ve: external sends
+            direction="Debit",
+            posting=posting_ts,
+            transfer_id=transfer_id,
+            rail_name=p.rail_name,
+            origin="ExternalForcePosted",
+            metadata={"customer_id": str(ti.account_id)},
+
+            dialect=dialect,
+        ),
+    ]
 
 
 def _emit_limit_breach_rows(
