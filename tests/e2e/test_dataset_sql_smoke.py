@@ -231,9 +231,36 @@ _DATASETS_BY_ID = {ds.DataSetId: ds for ds in _DATASETS}
 @pytest.fixture(scope="module")
 def smoke_conn():
     """Module-scoped DB connection — opened once, reused across every
-    parametrized test. ``_smoke_one`` rolls back per-dataset so the
-    connection stays clean across iterations."""
+    parametrized test, set to autocommit so AccessShareLocks release
+    statement-by-statement.
+
+    AB.2.followon — switched to autocommit to fix intermittent
+    ``DeadlockDetected`` on the PG integration CI job. Without
+    autocommit, psycopg/oracledb hold an implicit transaction open
+    after each ``SELECT * FROM (<dataset_sql>) WHERE 1=0``. The
+    AccessShareLocks the planner+executor took on every referenced
+    matview persist until the next commit/rollback. Across pytest-xdist
+    workers each holding a module-scoped connection, two workers'
+    cumulative lock sets can intersect with an in-flight
+    ``REFRESH MATERIALIZED VIEW`` (or autovacuum / autoanalyze taking
+    AccessExclusiveLock briefly) and PG's deadlock detector kills one.
+    Symptom in CI was 3 datasets failing simultaneously
+    (app-info-matviews / daily-statement-transactions / transactions).
+    Autocommit closes the inter-statement lock-holding window — locks
+    drop the instant each SELECT returns. ``_smoke_one``'s rollback
+    on the error path stays as defensive housekeeping; the success
+    path no longer needs one.
+    """
     conn = connect_demo_db(_CFG)
+    # Only the PG / Oracle drivers expose `autocommit` as a settable
+    # attribute; SQLite is already effectively autocommit at the
+    # statement level (it uses BEGIN-DEFERRED semantics + immediate
+    # release on commit, and the smoke tests don't write).
+    if hasattr(conn, "autocommit"):
+        try:
+            conn.autocommit = True
+        except Exception:  # noqa: BLE001 — best-effort; SQLite raises here
+            pass
     try:
         yield conn
     finally:
