@@ -79,6 +79,7 @@ from .primitives import (
     Name,
     Rail,
     SingleLegRail,
+    TransferTemplate,
     TwoLegRail,
 )
 
@@ -2441,8 +2442,28 @@ def _emit_baseline_chains(
 
             child_rail = rails_by_name.get(child_name)
             if child_rail is None:
-                # Chain references a TransferTemplate or unknown name —
-                # skip for R.2.d's first land.
+                # AB.2.5: chain.children entry isn't a Rail — check if
+                # it's a TransferTemplate name (template-as-chain-child
+                # case, gap doc §3). Each leg_rail of the chain-child
+                # template fires once per chain invocation, all sharing
+                # ONE child Transfer (lookup-or-create on transfer_id,
+                # first-firing-wins per gap doc §3). All leg firings
+                # carry the same parent_transfer_id so the AB.2.3
+                # chain_parent_disagreement matview reads cardinality=1
+                # for the healthy case.
+                child_template = next(
+                    (t for t in instance.transfer_templates if t.name == child_name),
+                    None,
+                )
+                if child_template is None:
+                    # Unknown name (validator should have caught at R5).
+                    continue
+                child_rows = _emit_chain_child_template_legs(
+                    child_template, instance, state,
+                    parent_transfer_id, parent_day, parent_amount,
+                    counter, rng, dialect,
+                )
+                rows.extend(child_rows)
                 continue
 
             child_rows = _emit_chain_child_leg(
@@ -2456,6 +2477,55 @@ def _emit_baseline_chains(
     return rows
 
 
+def _emit_chain_child_template_legs(
+    child_template: TransferTemplate,
+    instance: L2Instance,
+    state: _BaselineState,
+    parent_transfer_id: str,
+    parent_day: date,
+    parent_amount: Decimal,
+    counter: _Counter,
+    rng: random.Random,
+    dialect: Dialect,
+) -> list[str]:
+    """AB.2.5: emit one chain-firing where the child is a TransferTemplate.
+
+    First-firing-wins per gap doc §3: every leg_rail of ``child_template``
+    fires once per chain invocation, all sharing one child Transfer
+    (`transfer_id`) and the same `parent_transfer_id`. The AB.2.3
+    `<prefix>_chain_parent_disagreement` matview groups by transfer_id
+    and asserts `COUNT(DISTINCT parent_transfer_id) <= 1` — healthy
+    firings emitted here read cardinality=1 (no violation).
+
+    Each leg_rail emits via `_emit_chain_child_leg` semantics but with
+    the shared ``transfer_id`` and ``template_name`` injected, so
+    multiple leg rows aggregate into one Transfer in the matview's
+    GROUP BY. Per-leg amount samples + per-leg account selection stay
+    independent (each leg_rail has its own role bindings).
+    """
+    rails_by_name = {r.name: r for r in instance.rails}
+    # One shared transfer_id for the child Transfer — every leg_rail
+    # firing of this chain invocation reuses it (first-firing-wins).
+    n_shared = counter.next()
+    shared_transfer_id = f"tr-base-chain-tmpl-{n_shared:06d}"
+
+    rows: list[str] = []
+    for leg_rail_name in child_template.leg_rails:
+        leg_rail = rails_by_name.get(leg_rail_name)
+        if leg_rail is None:
+            # Validator R3 should reject this at load time; defensive skip.
+            continue
+        leg_rows = _emit_chain_child_leg(
+            leg_rail, instance, state,
+            parent_transfer_id, parent_day, parent_amount,
+            counter, rng, dialect,
+            shared_transfer_id=shared_transfer_id,
+            template_name=child_template.name,
+        )
+        rows.extend(leg_rows)
+    return rows
+
+
 def _emit_chain_child_leg(
     child_rail: Rail,
     instance: L2Instance,
@@ -2466,6 +2536,9 @@ def _emit_chain_child_leg(
     counter: _Counter,
     rng: random.Random,
     dialect: Dialect,
+    *,
+    shared_transfer_id: str | None = None,
+    template_name: Identifier | None = None,
 ) -> list[str]:
     """Emit one child Transfer's legs linked to the parent firing.
 
@@ -2474,11 +2547,20 @@ def _emit_chain_child_leg(
     sampled from the child rail's lognormal kind (or the parent's
     amount × 0.5 if the child rail isn't classifiable). Honors the
     L2's LimitSchedule cap on the child via clamp+resample.
+
+    AB.2.5: when ``shared_transfer_id`` is provided (template-as-chain
+    -child case), the leg(s) use that transfer_id instead of generating
+    a fresh one — multiple leg_rail firings of the same chain invocation
+    aggregate into one Transfer via shared id (first-firing-wins per
+    gap doc §3). ``template_name`` is set on every emitted row so the
+    AB.2.3 chain_parent_disagreement matview's `template_name IS NOT
+    NULL` filter catches them. txn_id stays per-leg so individual
+    transactions remain addressable.
     """
     kind = _classify_rail(child_rail)
     rail_slug = _baseline_rail_slug(child_rail.name)
     n = counter.next()
-    transfer_id = f"tr-base-chain-{rail_slug}-{n:06d}"
+    transfer_id = shared_transfer_id or f"tr-base-chain-{rail_slug}-{n:06d}"
     txn_id = f"tx-base-chain-{rail_slug}-{n:06d}"
 
     # Chain child posts ~1 hour after the parent's natural band end —
@@ -2565,6 +2647,7 @@ def _emit_chain_child_leg(
                 rail_name=child_rail.name,
                 origin=src_origin,
                 metadata=metadata,
+                template_name=template_name,
                 transfer_parent_id=parent_transfer_id,
                 dialect=dialect,
             ),
@@ -2582,6 +2665,7 @@ def _emit_chain_child_leg(
                 rail_name=child_rail.name,
                 origin=dst_origin,
                 metadata=metadata,
+                template_name=template_name,
                 transfer_parent_id=parent_transfer_id,
                 dialect=dialect,
             ),
@@ -2620,6 +2704,7 @@ def _emit_chain_child_leg(
             rail_name=child_rail.name,
             origin=leg_origin,
             metadata=metadata,
+            template_name=template_name,
             transfer_parent_id=parent_transfer_id,
             dialect=dialect,
         )]
