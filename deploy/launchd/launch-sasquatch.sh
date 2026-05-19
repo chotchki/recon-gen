@@ -20,6 +20,18 @@
 
 set -eu
 
+# Skip Python bytecode caching — Python tries to write .pyc files
+# alongside imported modules, which means `__pycache__/` dirs inside
+# /opt/homebrew/Cellar/python@3.13/.../lib/python3.13/<module>/ for
+# stdlib imports. The sandbox profile denies file-write outside the
+# per-instance state dir + tmpdir; Python normally swallows the EPERM,
+# but uvicorn's accept-loop setup surfaces the downstream error as
+# `ERROR: [Errno 1] Operation not permitted` and crashes the server.
+# Exported here (not just set in the plist) because launchd → wrapper
+# → sandbox-exec → recon-gen env-var propagation has been unreliable
+# on Tahoe; setting it directly in the wrapper is load-bearing.
+export PYTHONDONTWRITEBYTECODE=1
+
 STUDIO_STATE_DIR="$(mktemp -d -t recon-demo-studio-state)"
 export STUDIO_STATE_DIR
 
