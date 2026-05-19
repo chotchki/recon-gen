@@ -78,7 +78,7 @@ cd ~
 mkdir -p venv bin sandbox logs spec_example sasquatch_pr tunnel runner
 python3.13 -m venv venv
 venv/bin/pip install --upgrade pip
-venv/bin/pip install "recon-gen[deploy,demo,audit]"
+venv/bin/pip install "recon-gen[deploy,demo,audit,serve]"
 ```
 
 ### 3. Install the sandbox profiles + launcher wrappers

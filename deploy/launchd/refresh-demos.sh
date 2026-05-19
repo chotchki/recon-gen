@@ -38,10 +38,10 @@ echo "==> $(date -Iseconds) nightly refresh start"
 # (operator escape hatch to hold a release).
 if [ -n "${RECON_GEN_PIN_VERSION:-}" ]; then
     echo "==> pinning recon-gen==$RECON_GEN_PIN_VERSION"
-    "$PIP" install --upgrade "recon-gen[deploy,demo,audit]==$RECON_GEN_PIN_VERSION"
+    "$PIP" install --upgrade "recon-gen[deploy,demo,audit,serve]==$RECON_GEN_PIN_VERSION"
 else
     echo "==> upgrading recon-gen from PyPI"
-    "$PIP" install --upgrade "recon-gen[deploy,demo,audit]"
+    "$PIP" install --upgrade "recon-gen[deploy,demo,audit,serve]"
 fi
 
 # Step 2-4 per instance. Define the loop body as a function so a
