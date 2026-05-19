@@ -88,6 +88,14 @@ def test_fuzzer_exercises_every_primitive_kind_across_seeds(
         # chain_parent_disagreement matview + the AB.2 plant scaffold
         # ship un-exercised under the fuzz axis.
         "chain_with_template_child": False,
+        # AB.3.5.fuzz — confirm the fuzzer emits at least one
+        # TransferTemplate carrying a non-empty leg_rail_xor_groups
+        # entry. Without this, the C1 rewrite + AB.3.3 xor_group_violation
+        # matview + AB.3.4 picker + AB.3.5/.5b plant scaffolds ship
+        # un-exercised under the fuzz axis. _maybe_inject_xor_template
+        # fires with ~50% probability per seed so this lands in roughly
+        # half of META_GUARD_SEEDS.
+        "xor_grouped_template": False,
     }
     for seed in META_GUARD_SEEDS:
         yaml_text = random_l2_yaml(seed)
@@ -126,6 +134,10 @@ def test_fuzzer_exercises_every_primitive_kind_across_seeds(
             # AB.2.6.fuzz — singleton child resolving to a template.
             if len(c.children) == 1 and c.children[0] in template_name_set:
                 saw["chain_with_template_child"] = True
+        # AB.3.5.fuzz — TT with non-empty leg_rail_xor_groups.
+        for t in inst.transfer_templates:
+            if t.leg_rail_xor_groups:
+                saw["xor_grouped_template"] = True
         if all(saw.values()):
             return  # short-circuit on full coverage
     missing = [k for k, v in saw.items() if not v]

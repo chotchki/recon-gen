@@ -165,6 +165,15 @@ def _build_instance(rng: Random, plan: _FuzzPlan) -> dict[str, Any]:
     # aggregating rail exists, fold them into a transfer_template.
     _ensure_single_leg_reconciliation(rng, state, rails, transfer_templates)
 
+    # AB.3.5.fuzz — with ~50% probability per seed, inject a dedicated
+    # XOR-grouped TransferTemplate (3 Variable-direction SingleLegRails
+    # bundled under one leg_rail_xor_groups entry). Exercises the C1
+    # rewrite + AB.3.3 matview + AB.3.4 XOR resolution + AB.3.5/.5b
+    # plant pickers under fuzz seeds — without this, every synthesized
+    # template stays single-Variable and AB.3 code paths are untested
+    # under random shapes.
+    _maybe_inject_xor_template(rng, state, rails, transfer_templates)
+
     # max_unbundled_age can only land on rails confirmed bundled (R8).
     _wire_max_unbundled_age(rng, state, rails)
 
@@ -525,6 +534,82 @@ def _build_transfer_templates(
             tt["description"] = d
         templates.append(tt)
     return templates
+
+
+def _maybe_inject_xor_template(
+    rng: Random,
+    state: _BuildState,
+    rails: list[dict[str, Any]],
+    transfer_templates: list[dict[str, Any]],
+) -> None:
+    """AB.3.5.fuzz — inject a synthetic TransferTemplate carrying 3
+    Variable-direction SingleLegRail leg_rails grouped via
+    ``leg_rail_xor_groups``.
+
+    Fires with ~50% probability per seed; ~half of META_GUARD_SEEDS
+    will land XOR coverage. The injected template + 3 variant rails
+    satisfy validator C1a-d:
+    - C1a: members ⊆ leg_rails (members are the 3 variant names)
+    - C1b: members are Variable-direction SingleLegRails (set inline)
+    - C1c: no rail appears in two groups (only 1 group)
+    - C1d: ≥2 members per group (we emit 2 or 3)
+    Plus C1 rewritten ("at most 1 non-grouped Variable leg"): when
+    grouping 2 of 3, the third stays as the lone non-grouped Variable;
+    when grouping all 3, no non-grouped Variable remains. Both shapes
+    are legal.
+
+    Skips quietly when role pool is empty (a degenerate seed shape).
+    All injected names are prefixed so collisions with the seeded
+    naming scheme (`Rail_NN` / `TransferTemplate_NN`) can't happen.
+    """
+    if rng.random() > 0.5:
+        return
+    if not state.all_role_names:
+        return  # degenerate — nothing to bind leg_role to
+
+    template_name = "TransferTemplate_FuzzXor"
+    variant_names = (
+        "FuzzXorVariantAuto",
+        "FuzzXorVariantStandard",
+        "FuzzXorVariantSlow",
+    )
+    leg_role = rng.choice(state.all_role_names)
+    origin = rng.choice(_ORIGINS)
+    transfer_key = ["fuzz_xor_key"]
+    completion = _random_completion(rng)
+
+    for variant in variant_names:
+        rails.append({
+            "name": variant,
+            "metadata_keys": list(transfer_key),
+            "leg_role": leg_role,
+            "leg_direction": "Variable",
+            "origin": origin,
+        })
+        state.rail_names.append(variant)
+        state.non_aggregating_rail_names.append(variant)
+        state.single_leg_rail_names.append(variant)
+        state.template_leg_rail_names.add(variant)
+        # NOTE: not added to needs_reconciliation — the variant rails
+        # are S2 (template-bound) from the moment they're declared,
+        # so the AB.2 reconciliation pass has nothing to do for them.
+
+    # Group size: 2 or 3 — random per seed. 2 leaves the third as a
+    # lone non-grouped Variable (legal under C1 rewrite); 3 puts all
+    # members in the group (also legal). Both arms get exercised
+    # across META_GUARD_SEEDS.
+    group_size = rng.randint(2, 3)
+    xor_group = list(variant_names[:group_size])
+
+    transfer_templates.append({
+        "name": template_name,
+        "expected_net": 0,
+        "transfer_key": transfer_key,
+        "completion": completion,
+        "leg_rails": list(variant_names),
+        "leg_rail_xor_groups": [xor_group],
+    })
+    state.transfer_template_names.append(template_name)
 
 
 def _random_completion(rng: Random) -> str:
