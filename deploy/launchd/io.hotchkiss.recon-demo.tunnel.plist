@@ -1,40 +1,44 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  AE.6 — launchd plist for the Cloudflare Tunnel daemon (cloudflared).
-  Runs the tunnel as a long-lived process under recon-demo, bridging
-  the two locally-bound dashboard servers to their public hostnames
-  via the operator's Cloudflare account.
+  AE.6 — LaunchDaemon plist for the Cloudflare Tunnel daemon
+  (cloudflared). Runs the tunnel as a long-lived process under
+  recon-demo, bridging the two locally-bound dashboard servers to
+  their public hostnames via the operator's Cloudflare account.
+
+  LaunchDaemon (not Agent) for the same Tahoe reason as the other
+  recon-demo daemons. UserName drops privileges to recon-demo.
 
   Prerequisite (AE.6 install steps):
-    1. brew install cloudflared (operator runs as their admin user;
-       the binary lands at /opt/homebrew/bin/cloudflared on Apple
-       Silicon or /usr/local/bin/cloudflared on Intel).
-    2. As recon-demo: cloudflared tunnel login (opens browser, links
-       to Cloudflare account; persists cert at ~/.cloudflared/cert.pem).
-    3. cloudflared tunnel create recon-demo (creates tunnel + writes
-       credentials.json with the tunnel UUID to ~/.cloudflared/).
-    4. Edit ~/.cloudflared/config.yml to match deploy/cloudflared/cloudflared.yml.example.
-    5. cloudflared tunnel route dns recon-demo spec.recon-gen.hotchkiss.io
-       cloudflared tunnel route dns recon-demo sasquatch.recon-gen.hotchkiss.io
-       (CNAMEs the hostnames to <tunnel-id>.cfargotunnel.com.)
-    6. Install + load this plist.
+    1. brew install cloudflared (admin)
+    2. As recon-demo: cloudflared tunnel login (browser auth)
+    3. As recon-demo: cloudflared tunnel create recon-demo
+    4. As recon-demo: copy deploy/cloudflared/cloudflared.yml.example
+       to /Users/recon-demo/.cloudflared/config.yml, substitute UUID
+    5. As recon-demo: cloudflared tunnel route dns recon-demo <host>
+    6. Install this plist + bootstrap.
 
-  Install:
-    cp deploy/launchd/io.hotchkiss.recon-demo.tunnel.plist \
-       ~/Library/LaunchAgents/
-    launchctl load -w ~/Library/LaunchAgents/io.hotchkiss.recon-demo.tunnel.plist
+  Path differs on Apple Silicon (/opt/homebrew/bin) vs Intel
+  (/usr/local/bin). Verify with `which cloudflared` and edit if needed.
+
+  Install (as admin):
+    sudo cp deploy/launchd/io.hotchkiss.recon-demo.tunnel.plist \
+            /Library/LaunchDaemons/
+    sudo chown root:wheel /Library/LaunchDaemons/io.hotchkiss.recon-demo.tunnel.plist
+    sudo chmod 0644 /Library/LaunchDaemons/io.hotchkiss.recon-demo.tunnel.plist
+    sudo launchctl bootstrap system \
+        /Library/LaunchDaemons/io.hotchkiss.recon-demo.tunnel.plist
 -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
     <string>io.hotchkiss.recon-demo.tunnel</string>
 
-    <!--
-      Path differs on Apple Silicon (/opt/homebrew/bin) vs Intel
-      (/usr/local/bin). Verify with `which cloudflared` after brew
-      install and update the literal path below.
-    -->
+    <key>UserName</key>
+    <string>recon-demo</string>
+    <key>GroupName</key>
+    <string>staff</string>
+
     <key>ProgramArguments</key>
     <array>
         <string>/opt/homebrew/bin/cloudflared</string>
@@ -66,9 +70,6 @@
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
         <key>HOME</key>
         <string>/Users/recon-demo</string>
-        <!-- cloudflared reads ~/.cloudflared/ by default; TUNNEL_ORIGIN_CERT
-             is the explicit override if the operator wants the cert
-             elsewhere. -->
     </dict>
 </dict>
 </plist>

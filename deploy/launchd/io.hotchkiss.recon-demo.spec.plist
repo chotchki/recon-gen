@@ -1,34 +1,45 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  AE.4 — launchd plist for the spec.recon-gen.hotchkiss.io demo
+  AE.4 — LaunchDaemon plist for the spec.recon-gen.hotchkiss.io demo
   (recon-gen dashboards against spec_example L2, sandboxed).
 
-  Install:
-    cp deploy/launchd/io.hotchkiss.recon-demo.spec.plist \
-       ~/Library/LaunchAgents/
-    launchctl load -w ~/Library/LaunchAgents/io.hotchkiss.recon-demo.spec.plist
+  This is a LaunchDaemon, NOT a LaunchAgent. On macOS 26 (Tahoe) a
+  hidden user without an active login session can't host LaunchAgents
+  in the per-user domain — `launchctl bootstrap user/<uid> ...` returns
+  "Input/output error" even when the plist is valid XML and all
+  ProgramArguments paths exist. LaunchDaemons run in the system domain
+  and drop privileges via UserName/GroupName at process start, which
+  works for our recon-demo-without-GUI-session shape.
 
-  Reload after editing:
-    launchctl unload -w ~/Library/LaunchAgents/io.hotchkiss.recon-demo.spec.plist
-    launchctl load   -w ~/Library/LaunchAgents/io.hotchkiss.recon-demo.spec.plist
+  Install (as admin):
+    sudo cp deploy/launchd/io.hotchkiss.recon-demo.spec.plist \
+            /Library/LaunchDaemons/
+    sudo chown root:wheel /Library/LaunchDaemons/io.hotchkiss.recon-demo.spec.plist
+    sudo chmod 0644 /Library/LaunchDaemons/io.hotchkiss.recon-demo.spec.plist
+    sudo launchctl bootstrap system \
+        /Library/LaunchDaemons/io.hotchkiss.recon-demo.spec.plist
 
-  Substitute the absolute paths below to match the operator's
-  RECON_DEMO_HOME / RECON_DEMO_VENV. The /Users/recon-demo defaults
-  match scripts/provision_demo_instance.sh's expectations.
+  Restart after editing:
+    sudo launchctl bootout system \
+        /Library/LaunchDaemons/io.hotchkiss.recon-demo.spec.plist
+    sudo launchctl bootstrap system \
+        /Library/LaunchDaemons/io.hotchkiss.recon-demo.spec.plist
+
+  Status: `sudo launchctl print system/io.hotchkiss.recon-demo.spec`
+  Logs:   /Users/recon-demo/spec_example/logs/server.{out,err}.log
 -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
     <string>io.hotchkiss.recon-demo.spec</string>
 
-    <!--
-      Wrap the recon-gen dashboards invocation in sandbox-exec so the
-      process can't write outside the per-instance state dir + logs.
-      All four -D parameters are positional in the recon-demo-spec.sb
-      profile; the order doesn't matter to sandbox-exec but matches
-      the profile's documented parameter list for readability.
-    -->
+    <!-- Drop privileges to recon-demo at process start. -->
+    <key>UserName</key>
+    <string>recon-demo</string>
+    <key>GroupName</key>
+    <string>staff</string>
+
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/sandbox-exec</string>
@@ -59,12 +70,6 @@
     <key>WorkingDirectory</key>
     <string>/Users/recon-demo/spec_example</string>
 
-    <!--
-      Run at boot + keep alive on exit. ThrottleInterval prevents a
-      crash loop from hammering the system; if the server exits
-      cleanly (e.g. KillSignaled by `launchctl kickstart -k` after
-      the nightly refresh), launchd respawns after this interval.
-    -->
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -72,11 +77,6 @@
     <key>ThrottleInterval</key>
     <integer>10</integer>
 
-    <!--
-      Per-instance log files. launchd rotates these automatically when
-      they grow past ~10 MB; for a heavier-traffic deploy, layer a
-      newsyslog config on top.
-    -->
     <key>StandardOutPath</key>
     <string>/Users/recon-demo/spec_example/logs/server.out.log</string>
     <key>StandardErrorPath</key>

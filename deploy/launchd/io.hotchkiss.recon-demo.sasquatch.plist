@@ -1,55 +1,40 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  AE.4 — launchd plist for the sasquatch.recon-gen.hotchkiss.io demo
-  (recon-gen studio --demo-mode against sasquatch_pr L2, sandboxed
-  with mutation perimeter cut).
+  AE.4 — LaunchDaemon plist for the sasquatch.recon-gen.hotchkiss.io
+  demo (recon-gen studio --demo-mode against sasquatch_pr L2,
+  sandboxed with mutation perimeter cut).
 
-  Install:
-    cp deploy/launchd/io.hotchkiss.recon-demo.sasquatch.plist \
-       ~/Library/LaunchAgents/
-    launchctl load -w ~/Library/LaunchAgents/io.hotchkiss.recon-demo.sasquatch.plist
+  LaunchDaemon (not Agent) for the same Tahoe reason as the spec
+  daemon — hidden user, no GUI session, system-domain load is what
+  works. UserName/GroupName drops privileges to recon-demo at process
+  start.
 
-  Reload after editing:
-    launchctl unload -w ~/Library/LaunchAgents/io.hotchkiss.recon-demo.sasquatch.plist
-    launchctl load   -w ~/Library/LaunchAgents/io.hotchkiss.recon-demo.sasquatch.plist
+  Install (as admin):
+    sudo cp deploy/launchd/io.hotchkiss.recon-demo.sasquatch.plist \
+            /Library/LaunchDaemons/
+    sudo chown root:wheel /Library/LaunchDaemons/io.hotchkiss.recon-demo.sasquatch.plist
+    sudo chmod 0644 /Library/LaunchDaemons/io.hotchkiss.recon-demo.sasquatch.plist
+    sudo launchctl bootstrap system \
+        /Library/LaunchDaemons/io.hotchkiss.recon-demo.sasquatch.plist
 
-  The plist invokes `recon-gen studio --demo-mode`. AE.2.b's
-  --demo-mode flag strips POST/PUT/DELETE /l2_shape/* + PUT
-  /data/knobs/etl_hook + POST /deploy from the route table. Trainer
-  knob mutations (plants, end_date, window, seed, scope) land in a
-  per-process tmpdir for .studio-state.yaml — wiped on every server
-  restart (nightly refresh restart cycles state freshly).
+  The plist execs launch-sasquatch.sh (in /Users/recon-demo/bin/).
+  That wrapper computes STUDIO_STATE_DIR via mktemp -d (since
+  launchd's ProgramArguments doesn't expand $(...)) before
+  exec-ing sandbox-exec + `recon-gen studio --demo-mode`.
 
-  The sandbox-exec profile (recon-demo-sasquatch.sb) is defense in
-  depth: it denies file-write on the L2 yaml + cfg.yaml regardless
-  of UI state. STUDIO_STATE_DIR points at the per-process tmpdir;
-  the wrapper script (set up by AE.1 / the install step) computes a
-  fresh tmpdir per launchd start.
+  Requires recon-gen >=11.6.5 on PyPI (--demo-mode shipped there).
 -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
     <string>io.hotchkiss.recon-demo.sasquatch</string>
 
-    <!--
-      The wrapper-shell pattern. launchd doesn't support `$(...)` in
-      ProgramArguments, so a thin /bin/sh -c wrapper is the cleanest
-      way to compute a fresh STUDIO_STATE_DIR per launchd start
-      (mktemp -d) before exec-ing into sandbox-exec.
+    <key>UserName</key>
+    <string>recon-demo</string>
+    <key>GroupName</key>
+    <string>staff</string>
 
-      Wrapper pseudocode:
-        STUDIO_STATE_DIR="$(mktemp -d -t recon-demo-studio-state)"
-        exec sandbox-exec -D HOME=... -D INSTANCE_DIR=... \
-             -D PORT=8402 -D PYTHON=... \
-             -D STUDIO_STATE_DIR="$STUDIO_STATE_DIR" \
-             -f /Users/recon-demo/sandbox/recon-demo-sasquatch.sb \
-             -- /Users/recon-demo/venv/bin/recon-gen studio --demo-mode ...
-
-      Operator authors this wrapper at /Users/recon-demo/bin/launch-sasquatch.sh
-      during AE.1. It's owned by recon-demo, mode 0500 (read+exec, no write),
-      so the sandboxed process can't tamper with it.
-    -->
     <key>ProgramArguments</key>
     <array>
         <string>/Users/recon-demo/bin/launch-sasquatch.sh</string>

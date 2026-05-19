@@ -1,25 +1,38 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  AE.5 — launchd plist for the nightly refresh job. Fires at 03:00
-  America/New_York every day. Rebuilds both demo SQLite databases
-  (spec + sasquatch) from scratch using the latest recon-gen PyPI
-  wheel, then kickstart-restarts both server jobs (~5s outage each).
+  AE.5 — LaunchDaemon plist for the nightly refresh job. Fires at
+  03:00 local time daily. Rebuilds both demo SQLite databases from
+  scratch using the latest recon-gen PyPI wheel, then restarts both
+  server daemons (~5s outage each).
 
-  Install:
-    cp deploy/launchd/io.hotchkiss.recon-demo.refresh.plist \
-       ~/Library/LaunchAgents/
-    launchctl load -w ~/Library/LaunchAgents/io.hotchkiss.recon-demo.refresh.plist
+  LaunchDaemon (not Agent) for the same Tahoe reason as the server
+  daemons. UserName drops privileges to recon-demo before running
+  refresh-demos.sh.
 
-  The plist fires the wrapper script at /Users/recon-demo/bin/refresh-demos.sh
-  (operator installs from deploy/launchd/refresh-demos.sh during AE.1).
-  StartCalendarInterval in launchd is local-timezone — set the Mac
-  mini's system timezone to America/New_York or adjust the Hour field.
+  Install (as admin):
+    sudo cp deploy/launchd/io.hotchkiss.recon-demo.refresh.plist \
+            /Library/LaunchDaemons/
+    sudo chown root:wheel /Library/LaunchDaemons/io.hotchkiss.recon-demo.refresh.plist
+    sudo chmod 0644 /Library/LaunchDaemons/io.hotchkiss.recon-demo.refresh.plist
+    sudo launchctl bootstrap system \
+        /Library/LaunchDaemons/io.hotchkiss.recon-demo.refresh.plist
+
+  StartCalendarInterval Hour/Minute is local-time. Operator running
+  on a UTC-system Mac mini should adjust Hour to match their target
+  local-time (e.g. 7 for 03:00 EST during winter, 8 for EDT).
+  Daylight savings drift across the year is fine for a demo
+  refresh — it'll slide by one hour twice yearly.
 -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
     <string>io.hotchkiss.recon-demo.refresh</string>
+
+    <key>UserName</key>
+    <string>recon-demo</string>
+    <key>GroupName</key>
+    <string>staff</string>
 
     <key>ProgramArguments</key>
     <array>
@@ -29,13 +42,6 @@
     <key>WorkingDirectory</key>
     <string>/Users/recon-demo</string>
 
-    <!--
-      03:00 every day, local time. launchd interprets StartCalendarInterval
-      against the system's local timezone (`systemsetup -gettimezone`).
-      If the Mac mini sits on UTC, change Hour to 7 (03:00 ET in winter)
-      or 8 (03:00 ET in summer) — daylight-savings drift is fine for
-      a demo's refresh schedule.
-    -->
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
@@ -44,11 +50,6 @@
         <integer>0</integer>
     </dict>
 
-    <!--
-      RunAtLoad false: a fresh `launchctl load` shouldn't trigger an
-      immediate refresh (the server jobs handle that on their own
-      RunAtLoad=true). Refresh fires only at 03:00.
-    -->
     <key>RunAtLoad</key>
     <false/>
     <key>KeepAlive</key>
