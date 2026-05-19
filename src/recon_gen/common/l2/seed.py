@@ -285,6 +285,33 @@ class ChainParentDisagreementPlant:
 
 
 @dataclass(frozen=True, slots=True)
+class XorVariantMissedFiringPlant:
+    """AB.3.5 plant: a TransferTemplate Transfer where one XOR group
+    has zero firings — matches the AB.3.3 matview's
+    ``firing_count = 0`` branch.
+
+    Emits a single ``witness`` leg_rail row carrying ``template_name``
+    so the synthetic Transfer enters ``<prefix>_current_transactions``
+    (and therefore the matview's ``template_transfers`` universe), but
+    NO member of ``target_xor_group_index`` fires for this transfer_id.
+    The matview's LEFT JOIN finds zero member-rail firings for
+    ``(transfer_id, template, target_xor_group_index)`` →
+    ``COUNT(*) = 0`` → ``HAVING <> 1`` → violation row surfaces with
+    ``fired_rails=''``.
+
+    Picker constraint: the chosen template MUST have ≥1 leg_rail
+    outside the target XOR group, so the witness is real (a synthetic
+    sentinel rail_name would be ambiguous — could be confused for an
+    undeclared rail). Picker logic in ``_pick_xor_missed_firing_inputs``.
+    """
+
+    template_name: Identifier
+    target_xor_group_index: int
+    days_ago: int
+    witness_rail_name: Identifier
+
+
+@dataclass(frozen=True, slots=True)
 class StuckPendingPlant:
     """A planted Pending leg whose age exceeds the rail's `max_pending_age`.
 
@@ -520,6 +547,7 @@ class ScenarioPlant:
     inbound_cap_breach_plants: tuple[InboundCapBreachPlant, ...] = ()
     two_template_chain_plants: tuple[TwoTemplateChainPlant, ...] = ()
     chain_parent_disagreement_plants: tuple[ChainParentDisagreementPlant, ...] = ()
+    xor_variant_missed_firing_plants: tuple[XorVariantMissedFiringPlant, ...] = ()
     stuck_pending_plants: tuple[StuckPendingPlant, ...] = ()
     failed_transaction_plants: tuple[FailedTransactionPlant, ...] = ()
     stuck_unbundled_plants: tuple[StuckUnbundledPlant, ...] = ()
@@ -607,6 +635,19 @@ def emit_seed(
     ):
         txn_rows.extend(
             _emit_chain_parent_disagreement_rows(
+                p, instance, scenarios, template_by_role, txn_counter, dialect,
+            )
+        )
+
+    # AB.3.5 — XorVariantMissedFiringPlant: synthetic Transfer where
+    # one XOR group has zero firings. Surfaces on the AB.3.3
+    # xor_group_violation matview with firing_count=0.
+    for p in sorted(
+        scenarios.xor_variant_missed_firing_plants,
+        key=_xor_missed_firing_key,
+    ):
+        txn_rows.extend(
+            _emit_xor_variant_missed_firing_rows(
                 p, instance, scenarios, template_by_role, txn_counter, dialect,
             )
         )
@@ -3509,6 +3550,17 @@ def _chain_parent_disagreement_key(
     )
 
 
+def _xor_missed_firing_key(
+    p: XorVariantMissedFiringPlant,
+) -> tuple[str, int, int, str]:
+    return (
+        str(p.template_name),
+        p.target_xor_group_index,
+        p.days_ago,
+        str(p.witness_rail_name),
+    )
+
+
 def _stuck_pending_key(p: StuckPendingPlant) -> tuple[str, int, str]:
     return (str(p.account_id), p.days_ago, str(p.rail_name))
 
@@ -3812,6 +3864,77 @@ def _emit_chain_parent_disagreement_rows(
             dialect=dialect,
         ))
     return rows
+
+
+def _emit_xor_variant_missed_firing_rows(
+    p: XorVariantMissedFiringPlant,
+    instance: L2Instance,
+    scenarios: ScenarioPlant,
+    template_by_role: dict[Identifier, AccountTemplate],
+    counter: _Counter,
+    dialect: Dialect,
+) -> list[str]:
+    """AB.3.5 violation plant: emit a Transfer tagged with a template
+    whose targeted XOR group has zero member-rail firings.
+
+    Emits one witness row (template_name set, rail_name = a leg_rail
+    NOT in the target XOR group). The AB.3.3 matview's
+    ``template_transfers`` CTE picks up the Transfer (template_name
+    matches an XOR-grouped template); the LEFT JOIN against
+    ``(transfer_id, template, member_rail)`` for the target group
+    finds zero rows; ``firing_count = 0`` → ``HAVING <> 1`` → row
+    surfaces with ``fired_rails=''``.
+
+    Graceful skip when: the template doesn't exist, declares no XOR
+    groups, the target group_index is out of range, the witness rail
+    isn't a real leg_rail of the template, OR no materialized template
+    instance is available (account-side defensive checks mirror AB.2).
+    """
+    template = _find_template_or_skip(p.template_name, instance)
+    if template is None:
+        return []
+    if not template.leg_rail_xor_groups:
+        return []
+    if p.target_xor_group_index >= len(template.leg_rail_xor_groups):
+        return []
+    if p.witness_rail_name not in template.leg_rails:
+        return []
+    # The witness MUST NOT be a member of the targeted group, else it
+    # would itself fire the group and break the missed-firing invariant.
+    target_group = set(template.leg_rail_xor_groups[p.target_xor_group_index])
+    if p.witness_rail_name in target_group:
+        return []
+    ti = _first_template_instance_or_skip(scenarios)
+    if ti is None:
+        return []
+    at = template_by_role.get(ti.template_role)
+    if at is None:
+        return []
+    parent_role = at.parent_role
+
+    plant_day = scenarios.today - timedelta(days=p.days_ago)
+    posting = f"{plant_day.isoformat()}T11:30:00+00:00"
+
+    n = counter.next()
+    transfer_id = f"tr-xor-missed-{n:04d}"
+
+    return [_txn_row(
+        id_=f"tx-xor-missed-{n:04d}-w",
+        account_id=ti.account_id,
+        account_name=ti.name,
+        account_role=ti.template_role,
+        account_scope=at.scope,
+        account_parent_role=parent_role,
+        money=Decimal("100.00"),  # arbitrary; matview only counts row presence
+        direction="Credit",
+        posting=posting,
+        transfer_id=transfer_id,
+        rail_name=p.witness_rail_name,
+        origin="InternalInitiated",
+        metadata={},
+        template_name=template.name,
+        dialect=dialect,
+    )]
 
 
 def _find_rail_or_skip(name: Identifier, instance: L2Instance) -> Rail | None:

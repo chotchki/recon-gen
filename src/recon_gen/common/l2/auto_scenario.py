@@ -78,6 +78,7 @@ from .seed import (
     TemplateInstance,
     TransferTemplatePlant,
     TwoTemplateChainPlant,
+    XorVariantMissedFiringPlant,
 )
 
 
@@ -170,6 +171,17 @@ def default_scenario_for(
         omitted.append((
             "ChainParentDisagreementPlant",
             "no Chain whose singleton child resolves to a TransferTemplate (AB.2)",
+        ))
+    # AB.3.5 — XorVariantMissedFiringPlant picker: finds any
+    # TransferTemplate with ≥1 XOR group AND a leg_rail outside that
+    # group (the witness leg used to surface the Transfer without
+    # firing any XOR-group member).
+    xor_missed_pick = _pick_xor_missed_firing_inputs(instance)
+    if xor_missed_pick is None:
+        omitted.append((
+            "XorVariantMissedFiringPlant",
+            "no TransferTemplate declares leg_rail_xor_groups with a "
+            "non-XOR-group leg_rail to use as witness (AB.3)",
         ))
     pending_rail = _pick_first_with(
         instance.rails, key=lambda r: r.max_pending_age is not None,
@@ -280,6 +292,22 @@ def default_scenario_for(
                 days_ago=1,
                 parent_a_transfer_id="tr-cpd-parent-a-0001",
                 parent_b_transfer_id="tr-cpd-parent-b-0001",
+            ),
+        )
+
+    # AB.3.5 — XorVariantMissedFiringPlant. Plants one Transfer tagged
+    # with an XOR-grouped template where the target group has zero
+    # firings. days_ago=0 places business_day=today so the row surfaces
+    # on Today's Exceptions immediately.
+    xor_variant_missed_firing_plants: tuple[XorVariantMissedFiringPlant, ...] = ()
+    if xor_missed_pick is not None:
+        xor_template_name, xor_group_idx, xor_witness = xor_missed_pick
+        xor_variant_missed_firing_plants = (
+            XorVariantMissedFiringPlant(
+                template_name=xor_template_name,
+                target_xor_group_index=xor_group_idx,
+                days_ago=0,
+                witness_rail_name=xor_witness,
             ),
         )
 
@@ -515,6 +543,7 @@ def default_scenario_for(
         inbound_cap_breach_plants=inbound_cap_breach_plants if include_l1 else (),
         two_template_chain_plants=two_template_chain_plants if include_l1 else (),
         chain_parent_disagreement_plants=chain_parent_disagreement_plants if include_l1 else (),
+        xor_variant_missed_firing_plants=xor_variant_missed_firing_plants if include_l1 else (),
         stuck_pending_plants=stuck_pending_plants if include_l1 else (),
         failed_transaction_plants=failed_transaction_plants if include_l1 else (),
         stuck_unbundled_plants=stuck_unbundled_plants if include_l1 else (),
@@ -666,6 +695,7 @@ def densify_scenario(
         # coverage; multiplying noise legs doesn't add new shape coverage.
         two_template_chain_plants=base.two_template_chain_plants,
         chain_parent_disagreement_plants=base.chain_parent_disagreement_plants,
+        xor_variant_missed_firing_plants=base.xor_variant_missed_firing_plants,
         stuck_pending_plants=tuple(
             r for p in base.stuck_pending_plants for r in replicate_pending(p)
         ),
@@ -738,6 +768,7 @@ def boost_inv_fanout_plants(
         inbound_cap_breach_plants=base.inbound_cap_breach_plants,
         two_template_chain_plants=base.two_template_chain_plants,
         chain_parent_disagreement_plants=base.chain_parent_disagreement_plants,
+        xor_variant_missed_firing_plants=base.xor_variant_missed_firing_plants,
         stuck_pending_plants=base.stuck_pending_plants,
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants,
@@ -816,6 +847,7 @@ def add_broken_rail_plants(
         inbound_cap_breach_plants=base.inbound_cap_breach_plants,
         two_template_chain_plants=base.two_template_chain_plants,
         chain_parent_disagreement_plants=base.chain_parent_disagreement_plants,
+        xor_variant_missed_firing_plants=base.xor_variant_missed_firing_plants,
         stuck_pending_plants=base.stuck_pending_plants + extra_plants,
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants,
@@ -866,6 +898,7 @@ def filter_scenario_plants(
         inbound_cap_breach_plants=base.inbound_cap_breach_plants if "limit_breach" in selected else (),
         two_template_chain_plants=base.two_template_chain_plants if "chain_parent_disagreement" in selected else (),
         chain_parent_disagreement_plants=base.chain_parent_disagreement_plants if "chain_parent_disagreement" in selected else (),
+        xor_variant_missed_firing_plants=base.xor_variant_missed_firing_plants if "xor_group_violation" in selected else (),
         stuck_pending_plants=base.stuck_pending_plants if "stuck_pending" in selected else (),
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants if "stuck_unbundled" in selected else (),
@@ -1523,6 +1556,39 @@ def _pick_two_template_chain_inputs(
         child = c.children[0]
         if child in template_names:
             return (c.parent, child)
+    return None
+
+
+def _pick_xor_missed_firing_inputs(
+    instance: L2Instance,
+) -> tuple[Identifier, int, Identifier] | None:
+    """AB.3.5 picker: find any TransferTemplate that declares at least
+    one ``leg_rail_xor_groups`` entry AND has at least one leg_rail
+    OUTSIDE that group (the witness leg used by the missed-firing
+    plant to surface the Transfer without firing any XOR-group member).
+
+    Returns ``(template_name, target_xor_group_index, witness_rail_name)``
+    or ``None``. Iterates templates in deterministic name order; for
+    each template tries each XOR group in declared order; for each
+    group picks the first leg_rail not in the group. The first
+    matching triple wins.
+
+    Why the constraint: the plant needs to emit a row with
+    ``template_name`` set (so the matview's ``template_transfers``
+    CTE includes it) without firing any member of the targeted XOR
+    group (else firing_count >= 1 and the missed branch never
+    surfaces). The witness must therefore be a leg_rail of the
+    template (so it carries the right template_name in the matview's
+    sense) but NOT a member of the target group.
+    """
+    for t in sorted(instance.transfer_templates, key=lambda x: str(x.name)):
+        if not t.leg_rail_xor_groups:
+            continue
+        for gi, group in enumerate(t.leg_rail_xor_groups):
+            group_members = set(group)
+            for leg in t.leg_rails:
+                if leg not in group_members:
+                    return (t.name, gi, leg)
     return None
 
 
