@@ -93,20 +93,30 @@ def test_rail_counts_pinned() -> None:
     # MerchantSettlementCycle XOR groups (settlement-timing trio +
     # fraud-review trio). Two-leg count unchanged; single_leg jumps
     # 6 → 12.
-    assert len(inst.rails) == 27
+    # AB.4.6 (2026-05-19): +2 rails for the fan-in batch payout
+    # (MerchantDailySettleAggregator two-leg + MerchantWeeklyBatchClose
+    # single-leg). Total: 27 + 2 = 29; two_leg 15 → 16; single_leg
+    # 12 → 13.
+    assert len(inst.rails) == 29
     two_leg = [r for r in inst.rails if isinstance(r, TwoLegRail)]
     single_leg = [r for r in inst.rails if isinstance(r, SingleLegRail)]
     aggregating = [r for r in inst.rails if r.aggregating]
-    assert len(two_leg) == 15
-    assert len(single_leg) == 12
+    assert len(two_leg) == 16
+    assert len(single_leg) == 13
     assert len(aggregating) == 3
 
 
 def test_transfer_template_counts_pinned() -> None:
     inst = _instance()
-    assert len(inst.transfer_templates) == 2
+    # AB.4.6 (2026-05-19): +1 template (MerchantWeeklyPayoutBatch)
+    # for the fan-in batch payout demo. Total 2 → 3.
+    assert len(inst.transfer_templates) == 3
     template_names = {str(t.name) for t in inst.transfer_templates}
-    assert template_names == {"InternalTransferCycle", "MerchantSettlementCycle"}
+    assert template_names == {
+        "InternalTransferCycle",
+        "MerchantSettlementCycle",
+        "MerchantWeeklyPayoutBatch",
+    }
 
 
 def test_chain_counts_pinned() -> None:
@@ -114,8 +124,9 @@ def test_chain_counts_pinned() -> None:
     # Z.A grammar: 1 singleton-children row (ACH→FRB sweep, required)
     # + 1 multi-children row (ACH return reasons, XOR) + 1 multi
     # (merchant payout vehicles, XOR) + 1 AB.2 template-as-child
-    # (CustomerFeeAccrual → InternalTransferCycle).
-    assert len(inst.chains) == 4
+    # (CustomerFeeAccrual → InternalTransferCycle) + 1 AB.4 fan-in
+    # chain (MerchantDailySettleAggregator → MerchantWeeklyPayoutBatch).
+    assert len(inst.chains) == 5
     # AB.2 — at least one chain has a TransferTemplate as its singleton child.
     template_names = {t.name for t in inst.transfer_templates}
     assert any(

@@ -808,6 +808,46 @@ rails:
       review (3-day SLA). Surfaces as stuck_pending when the
       compliance team lags beyond the cap.
 
+  # ===================================================================
+  # AB.4.6 (2026-05-19) — Batched-payout flow (gap doc §2's
+  # MerchantPayoutBatch example). N daily merchant settlements
+  # aggregate into 1 weekly batch payout. The L1
+  # `_fan_in_disagreement` matview flags batches with
+  # parent_count != expected_parent_count (5):
+  #   - missing parent: a daily settlement leg never landed →
+  #     the batch is short of contributions
+  #   - extra parent: a stale/foreign settlement leg's metadata
+  #     claimed batch membership it shouldn't have
+  # Dedicated parent + child rails keeps the AB.2 +
+  # ChainParentDisagreementPlant cases on InternalTransferCycle
+  # cleanly separable from this fan-in batch's plants.
+  # ===================================================================
+  - name: MerchantDailySettleAggregator
+    source_role: MerchantPayableClearing
+    destination_role: WireSettlementSuspense
+    expected_net: 0
+    origin: InternalInitiated
+    metadata_keys: [merchant_id, payout_batch_id]
+    description: |
+      AB.4.6 fan-in parent rail. Each daily merchant settlement legs
+      out a balance from `MerchantPayableClearing` into
+      `WireSettlementSuspense` tagged with the batch id it'll
+      contribute to. The week's 5 daily firings then aggregate into
+      one `MerchantWeeklyPayoutBatch` Transfer per merchant via the
+      AB.4 fan-in chain below.
+
+  - name: MerchantWeeklyBatchClose
+    leg_role: WireSettlementSuspense
+    leg_direction: Credit
+    origin: InternalInitiated
+    metadata_keys: [merchant_id, payout_batch_id]
+    description: |
+      AB.4.6 fan-in child closure leg. Posts ONCE per weekly
+      MerchantWeeklyPayoutBatch firing to credit
+      WireSettlementSuspense for the aggregated payout. Reconciles
+      via MerchantWeeklyPayoutBatch.leg_rails (S3 — every single-leg
+      non-aggregating rail must appear in some template's leg_rails).
+
 # ---------------------------------------------------------------------
 # Transfer templates — multi-leg shared Transfers.
 #
@@ -900,6 +940,26 @@ transfer_templates:
       members of a group surface on the AB.3.3 xor_group_violation
       matview.
 
+  # AB.4.6 — fan-in batch payout template. 5 daily settlement legs
+  # contribute to one weekly batch Transfer; the close leg posts
+  # once per batch. AB.4.7's _fan_in_disagreement matview reads
+  # parent_count=5 (healthy), parent_count<5 (missing), or
+  # parent_count>5 (extra) per child Transfer.
+  - name: MerchantWeeklyPayoutBatch
+    expected_net: 0
+    transfer_key: [merchant_id, payout_batch_id]
+    completion: business_day_end+7d
+    leg_rails:
+      - MerchantWeeklyBatchClose
+    description: |
+      AB.4.6 fan-in batch template (gap doc §2 MerchantPayoutBatch
+      example). 5 daily MerchantDailySettleAggregator firings share
+      one MerchantWeeklyPayoutBatch Transfer — the week's per-merchant
+      payouts aggregate into a single closure leg posting. The L1
+      _fan_in_disagreement matview reads parent_count per child
+      Transfer and flags batches with too few (missing contribution)
+      or too many (cross-batch contamination) parent firings.
+
 # ---------------------------------------------------------------------
 # Chains — parent → child relationships between Rails / TransferTemplates.
 #
@@ -976,6 +1036,23 @@ chains:
       The L1 `chain_parent_disagreement` matview catches any leg
       that claims a different parent — surfaces as an ETL bug on
       Today's Exceptions.
+
+  # ----- AB.4 (2026-05-19): fan-in chain (N parents → 1 child)
+
+  - parent: MerchantDailySettleAggregator
+    children:
+      - MerchantWeeklyPayoutBatch
+    fan_in: true
+    expected_parent_count: 5
+    description: |
+      AB.4 fan-in chain (gap doc §2 MerchantPayoutBatch). 5 daily
+      MerchantDailySettleAggregator firings (one per business day
+      of the week) share ONE MerchantWeeklyPayoutBatch Transfer.
+      The AB.4.3 `_transfer_parents` matview derives the multi-
+      parent set per child; AB.4.7's `_fan_in_disagreement` matview
+      reads parent_count vs expected_parent_count=5 to flag
+      batches missing a daily contribution (parent_count<5) or
+      carrying an extra one (parent_count>5).
 
 # ---------------------------------------------------------------------
 # Limit schedules — daily outbound caps per (parent role, transfer type).
