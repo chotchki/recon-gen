@@ -330,9 +330,71 @@ Magnitude is absolute — the bound applies to `abs(amount)`. Direction is deter
 
 ---
 
+## Enhancement 8: Soft per-period firing-count bounds on Rail
+
+### Problem
+
+Enhancement 7's `amount_typical_range` fixed per-firing magnitude plausibility but leaves the parallel concern of per-period firing COUNT unaddressed. The auto-scenario seed generator picks count-of-firings-per-rail-per-period using internal heuristics — no operator-declared "typical activity volume" hint per rail. Result: even when per-firing amounts are realistic, aggregate per-period volumes can be orders of magnitude off. A $50 typical card sale repeated 50,000 times per day produces a $2.5M daily aggregate that doesn't match the integrator's mental model for what the fixture's institution actually processes.
+
+The dashboard top-line — daily / monthly aggregates — is what operators scan first when judging plausibility. Per-firing amounts and per-period counts both feed it; AB.5 addressed the former.
+
+### Where it bites in the Sasquatch example
+
+Imagine SNB's L1 Daily Statement after AB.5 ships: `MerchantCardSale` shows $50 typical amount (realistic per E7) but the generator fires 50,000 of them per day across all merchants — implying the bank processes $2.5M/day in card sales. For a small community-bank fixture (the sasquatch positioning), that's an order of magnitude too large; for a larger institution fixture, it might be undersized. Neither matches what the integrator wants the dashboard to look like for their audience.
+
+Same bite across SNB's rails:
+
+- `MerchantCardSale` — real for a small bank: 50-500 per day across all merchants
+- `CustomerInboundACH` — real: 50-200 per day across all DDAs
+- `InternalTransfer` — real: a few hundred per day
+- `MerchantSettlementCycle` firings (template) — real: ~1 per merchant per business day
+- `CustomerFeeMonthlySettlement` — real: one per DDA per month (= N firings where N = customer count)
+- `InterestAccrual` — real: 1 firing per ledger account per month
+
+Aggregating rails handle their own cadence via the existing `cadence` field; non-aggregating rails have no analogous control surface.
+
+### Proposed fix
+
+Optional firing-count hint on `Rail`:
+
+```yaml
+- name: MerchantCardSale
+  amount_typical_range: ["5.00", "500.00"]
+  firings_typical_per_business_day_range: [50, 500]  # institution-wide daily count
+```
+
+For rails with non-daily natural cadences, parallel fields by period:
+
+```yaml
+- name: CustomerFeeMonthlySettlement
+  firings_typical_per_month_range: [80, 120]  # one per DDA per month
+```
+
+Or a generic form: `firings_typical_per_period: {period: business_day | pay_period | week | month, range: [N_min, N_max]}` (single field with a period vocab). Period vocab stays bounded and easy to validate.
+
+**Generator behavior**: when present, the auto-scenario generator picks count-per-period from the declared range using uniform-random sampling. When absent, falls back to the current per-kind heuristic. Composes naturally with Enhancement 7 — count × log-uniform(amount_typical_range) = realistic aggregate-per-period totals.
+
+Aggregating rails: their `cadence` field already governs firing frequency (one firing per cadence-period). Field is N/A on aggregating rails (matches Enhancement 7's aggregator scope-out).
+
+**Optional runtime extension** (separate flag): SHOULD-constraint surfacing real-data periods where firing count is way outside the declared band as a `volume_anomaly` matview row. Useful for early-warning surveillance ("today's transfer count is 10× yesterday — what changed?"); separable from the generator-side fix and add as a follow-on if integrators want it.
+
+**Validator**: `min ≤ max`, both non-negative integers. Period enum bounded.
+
+### Tradeoffs / open questions
+
+- **Period vocabulary** — multiple period-specific fields (`firings_per_business_day_range`, `firings_per_week_range`, ...) is more readable but adds N fields per supported period. Generic single-field form (`firings_typical_per_period: {period, range}`) is more compact and extensible. Lean generic, with `period: business_day` as default if only `range` is supplied.
+- **Scope per-rail vs per-account** — default scope is "rail-wide aggregate per period." Per-account scoping (e.g., "each customer DDA gets 1-3 ACH inbounds per business day") is a useful extension for cap-shaped patterns; defer to v2.
+- **Distribution within the count range** — uniform-random by default. Lognormal or operator-declared variants for over-dispersed data could be a refinement field analogous to Enhancement 7's planned `amount_distribution`. Defer.
+- **Interaction with Enhancement 7** — fully independent. Generator picks count, then per-firing amount independently. Composes naturally; the win compounds (realistic amounts × realistic counts = realistic aggregates).
+- **Backward compat** — optional field, default unset. Pre-Enhancement-8 yamls byte-equivalent through load + dump.
+
+**Our preferred implementation path: adopt as stated, generator-only first cut.** Parallels Enhancement 7's adoption shape — one optional field on Rail (and TransferTemplate, for cycle-scope rails), default unset, log-uniform-or-uniform sampler keyed off the declared range. The optional `volume_anomaly` runtime matview as a follow-on if/when integrators ask for surveillance signals.
+
+---
+
 ## How these proposals interrelate
 
-Enhancements 2 (N:1 fan-in chains) and 3 (template-as-chain-child) compose naturally: if 3 lands first, two-template chains become expressible; if 2 then lands, the N:1 batching pattern becomes structurally enforceable. Enhancement 1 is independent — it tightens up template's `leg_rails` semantics for the per-mode-XOR case, separate from the chain plumbing. Enhancement 4 is entirely independent of the chain/template plumbing — it only touches the LimitSchedule / OutboundFlow surface. Enhancement 5 is a follow-on to Enhancement 2 — once `fan_in` ships chain-level, the mixed-cardinality bite surfaces and per-child relocation becomes the natural next move. Enhancement 6 is independent of the others — it brings the existing chain.md "exactly one MUST fire" contract under runtime enforcement, and Enhancement 5 needs to skip per-child fan-in entries to play nicely with it (a small CTE-level interaction, not a schema-level coupling). Enhancement 7 is entirely independent of the chain / template / fan-in surface — it's a Rail-level optional field plus a generator code path; it sits next to Enhancement 4 in operator vocabulary (both are "bounds you declare on a rail") but their scopes are non-overlapping (E4 = per-day aggregate, E7 = per-firing magnitude).
+Enhancements 2 (N:1 fan-in chains) and 3 (template-as-chain-child) compose naturally: if 3 lands first, two-template chains become expressible; if 2 then lands, the N:1 batching pattern becomes structurally enforceable. Enhancement 1 is independent — it tightens up template's `leg_rails` semantics for the per-mode-XOR case, separate from the chain plumbing. Enhancement 4 is entirely independent of the chain/template plumbing — it only touches the LimitSchedule / OutboundFlow surface. Enhancement 5 is a follow-on to Enhancement 2 — once `fan_in` ships chain-level, the mixed-cardinality bite surfaces and per-child relocation becomes the natural next move. Enhancement 6 is independent of the others — it brings the existing chain.md "exactly one MUST fire" contract under runtime enforcement, and Enhancement 5 needs to skip per-child fan-in entries to play nicely with it (a small CTE-level interaction, not a schema-level coupling). Enhancements 7 and 8 are entirely independent of the chain / template / fan-in surface — both are Rail-level optional fields plus generator code paths; they sit next to Enhancement 4 in operator vocabulary (all three are "bounds you declare on a rail") but their scopes are non-overlapping (E4 = per-day aggregate caps, E7 = per-firing magnitude, E8 = per-period firing count). E7 and E8 compose: count × magnitude = realistic per-period aggregate.
 
 A staged adoption order that minimizes churn:
 
@@ -340,6 +402,7 @@ A staged adoption order that minimizes churn:
 2. **Enhancement 3** (template-as-chain-child) — small, well-scoped, no schema-level addition. Just clarification + new validator rule.
 3. **Enhancement 1** (multi-Variable + leg_rails XOR) — adds one field (`leg_rail_xor_groups`) and relaxes one constraint (C1). Self-contained.
 4. **Enhancement 7** can land any time after the alpha train has bandwidth — one optional field on Rail + a generator code path. No interaction with the chain / template / fan-in machinery. Easy second win after Enhancement 4. The optional runtime SHOULD-constraint matview is a follow-on.
+4a. **Enhancement 8** lands naturally right after Enhancement 7 — same generator-only first-cut shape, one optional field, parallel to E7's adoption. Together they let the fixture's per-period aggregates match operator intuition (count × magnitude = volume).
 5. **Enhancement 2** next (N:1 fan-in) — bigger conceptual change. Ships `fan_in` as a chain-level flag.
 6. **Enhancement 6** can land any time after Enhancement 3 — it's purely a runtime check that brings the chain.md contract under enforcement; no SPEC schema change. Reasonable to bundle with Enhancement 5 since the per-child `fan_in` interaction wants the CTE skip baked in.
 7. **Enhancement 5** last — relocates `fan_in` per-child once Enhancement 2's chain-level shape proves bite-prone in mixed-cardinality flows. One-cycle deprecation window on the chain-level field.
