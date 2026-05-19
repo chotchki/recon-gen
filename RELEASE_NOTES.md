@@ -1,5 +1,51 @@
 # Release Notes
 
+## v11.4.0 — AB.4 N:1 fan-in chains + fan_in_disagreement L1 invariant
+
+Feature release. `Chain` gains an optional `fan_in: bool = False` flag + an optional `expected_parent_count: int | None = None` field — the N:1 batched-payout pattern the AB.4 enhancement targets (gap doc §2). When `fan_in=True`, N parent firings share ONE child Transfer (instead of the default 1:1 per-parent shape); the new L1 `<prefix>_fan_in_disagreement` matview flags batches whose actual parent count doesn't match the chain's declared expected count (or has cardinality < 2 when expected is unset). **Fully additive** — pre-AB.4 chain rows with `fan_in=False` round-trip byte-equivalent through load/seed/dashboard.
+
+**New L1 invariant — fan_in_disagreement.** `<prefix>_fan_in_disagreement` matview surfaces batches with the wrong parent set. Long-form: one row per (child_transfer_id, disagreement_kind) where kind ∈ ('orphan', 'missing', 'extra'). Joins AB.4.3's `<prefix>_transfer_parents` matview against inline-CTE rows of the L2's fan_in chains, derives `parent_count` per child Transfer via DISTINCT, and emits a row when:
+
+- `expected_parent_count IS NOT NULL AND parent_count < expected` → `disagreement_kind='missing'` (a contribution never landed);
+- `expected_parent_count IS NOT NULL AND parent_count > expected` → `disagreement_kind='extra'` (a stale or foreign parent reference claimed batch membership);
+- `expected_parent_count IS NULL AND parent_count < 2` → `disagreement_kind='orphan'` (variable-batch-flow fallback; the chain declared no upper bound).
+
+When no chain declares fan_in, the matview short-circuits with `WHERE 1=0` (parses cleanly on PG/Oracle/SQLite, zero rows). 3 hot-path indexes (transfer / template / kind). Wired into `refresh_matviews_sql` between `<prefix>_transfer_parents` and `<prefix>_daily_statement_summary`. Today's Exceptions matview gains a 4th UNION ALL branch with `check_type='fan_in_disagreement'`, `child_template_name AS rail_name`, `parent_count AS magnitude`. Matview count bumps 17 → 19 (AB.4.3 adds `_transfer_parents`; AB.4.7 adds `_fan_in_disagreement`).
+
+**New derived matview — transfer_parents.** `<prefix>_transfer_parents` matview projects DISTINCT `(child_transfer_id, parent_transfer_id)` pairs from `<prefix>_current_transactions`. Reads the existing top-level `transfer_parent_id` column directly (no JSON path — Schema_v6 promoted it from JSON to a real column well before AB.4 landed). Failed legs + NULL parents filtered out. Two indexes (child + parent) for hot-path drills. AB.4.7's downstream matview reads this; Investigation queries can also use the parent-side index for "all children of this parent firing" lookups.
+
+**AB.2 chain_parent_disagreement filter.** AB.2.3's `<prefix>_chain_parent_disagreement` matview would false-positive every fan_in firing (legitimately N > 1 parents per child Transfer), so its body gains a `chain_parent_disagreement_fan_in_filter` template variable that resolves to `AND tx.template_name NOT IN ('FanInTpl1', ...)` when ≥1 chain declares fan_in, else `""` (byte-identical to AB.2.3 for pre-AB.4 fixtures). New `_render_chain_parent_disagreement_fan_in_filter(instance)` helper.
+
+**Validator C8a-c.** New structural rules on Chain:
+- **C8a**: `fan_in=True` requires every child to resolve to a TransferTemplate. Rail-as-child fan-in is undefined per gap doc §2 footnote; close that door at load time.
+- **C8b**: `expected_parent_count` MUST be None when `fan_in=False` (the field carries meaning only under fan-in).
+- **C8c**: when set under `fan_in=True`, `expected_parent_count >= 2` (a 1-parent fan-in chain is degenerate — it's just a 1:1 chain).
+
+**Seed — fan-in chain firings.** New `_emit_fan_in_chain_firings(chain, parent_firings, ...)` helper. Parents grouped into batches of size `chain.expected_parent_count` (default 2 when unset — the minimum non-orphan); each batch allocates one shared `child_transfer_id` (`tr-base-fanin-NNNNNN`); each parent emits the FULL set of child template's leg_rails with `transfer_id = shared_id` and `transfer_parent_id = parent's id`. Partial-tail batches (n_parents % batch_size != 0) are SKIPPED in baseline emission — the orphan-shaped firings are AB.4.5's plant path's job. XOR-suppression integration: per AB.3.4, the XOR pick is keyed off the firing id; for fan_in the firing id is the shared child_transfer_id so all parents in one batch produce a consistent variant set.
+
+**Plants + scenario (3 kinds, mirrors AB.3.5's pattern).** Three new dataclasses in seed.py:
+- `FanInChainPlant` — healthy fan-in firing (`parent_count == expected`); no matview row.
+- `FanInChainMissingParentPlant` — `parent_count < expected` → matview reads `disagreement_kind='missing'` (or `'orphan'` when parent_count = 1).
+- `FanInChainExtraParentPlant` — `parent_count > expected` → matview reads `disagreement_kind='extra'`. Only fires when expected is set on the chain (no upper bound to flag otherwise).
+
+Shared `_emit_fan_in_chain_plant_rows` helper serves all 3 kinds; each kind passes a different `parent_count`. `plant_tag` discriminator (`fanin-h` / `fanin-m` / `fanin-x`) embedded in row ids. `auto_scenario.py` derives `_pick_fan_in_chain_inputs` to find any fan_in chain whose parent is a Rail; plants laid out at days_ago 5/4/3 for date-axis separability. All 5 densifier + ScenarioPlant pass-through call sites carry the new fields. `tests/l2/spec_example.yaml` declares `BatchPayoutTrigger → BatchedPayoutBatch` with `expected_parent_count=2` (dedicated 2 rails + 1 template + 1 chain, mirroring AB.3.5.spec's "fresh structure not mutation" pattern). `tests/l2/sasquatch_pr.yaml` carries the real-world `MerchantDailySettleAggregator → MerchantWeeklyPayoutBatch` chain with `expected_parent_count=5` (gap doc §2 batched-payout shape; 5 daily settlements aggregate into 1 weekly batch).
+
+**Dashboard wiring (UNION-only).** Today's Exceptions surfaces fan_in_disagreement violations via the matview's 4th UNION ALL branch. `INVARIANT_KIND_TO_SHEET` + `_studio_training._L1_KIND_TO_SHEET_ID` + `_DISPLAY_ORDER` all gain `fan_in_disagreement` (deep-links to Today's Exceptions). Audit PDF dedicated section deferred per AB.2.10 + AB.3.10 precedent — UNION-only L1 invariants surface adequately via Today's Exceptions for the demo.
+
+**Studio editor.** Chain editor card gains `fan_in` (bool select, options `("false", "true")`) + `expected_parent_count` (int text input) field specs. `_coerce_field` extends with chain-specific branches; `create_l2_entity` threads both new fields into the Chain constructor; `mutate_l2` already works via `dataclasses.replace`. Validator C8a-c surfaces inline on form-error path.
+
+**Topology + diagram.** Typed projection (`topology_graph_for`) tags chain-edge metadata with `fan_in='true'` + `expected_parent_count='N'` (when set) — mirrors AB.3.8's `xor_group_index` convention. Graphviz per-rail renderer applies distinct visual treatment to fan_in chain edges: `style="dashed"` + `penwidth="2.0"` + `arrowhead="onormalonormal"` (double-arrow head signals N:1 collection) + a `[fan-in N→1]` label annotation appended to the chain's existing label. The diagram reader sees the N:1 shape without reading the yaml.
+
+**Fuzzer.** `_build_chains` extended: per singleton-children chain whose child resolves to a TransferTemplate, ~20% probability gate adds `fan_in: True` + randomized `expected_parent_count` (2 or 3). Deterministic per seed. Meta-guard `fan_in_chain` saw entry.
+
+**Docs.** `concepts/l2/chain.md` gains a new "Fan-in chains (AB.4)" section covering design intent, validator C8a-c, matview surface, and the AB.2.3 cross-interaction. New `walkthroughs/customization/how-do-i-model-batched-payouts.md` worked-example. `L1_Invariants.md` gains section 10 mirroring sections 8/9. `Schema_v6.md` cross-references the new matviews. `INVARIANT_KIND_TO_SHEET` + `_studio_training` + `test_bundled_invariants_yields_expected_kinds` updated. mkdocs.yml nav extended.
+
+**Tests.** 22+ new tests across the surface: 6 validator C8a-c tests + 4 loader tests + 2 serializer tests + 4 schema matview-body tests (transfer_parents shape + fan_in_disagreement empty/populated + Today's Exceptions UNION) + 5 seed-shape tests + 2 chain_parent_disagreement filter tests + 4 Studio editor / topology tests. 4-way audit-dashboard-agreement extension deferred per AB.2.10 + AB.3.9 precedent (UNION-only L1 invariants use the 3-way matview-body / UNION / plant-emission coverage contract). Full unit + data + schema + audit + json + cli sweep at 2943 passed, 92 skipped.
+
+**Re-locked seeds:** `tests/data/_locked_seeds/spec_example.{postgres,oracle,sqlite}.sql` regenerated to include the BatchPayoutTrigger → BatchedPayoutBatch fan-in baseline emission.
+
+**Bundled small fix.** `pyproject.toml` project description refreshed to match the README's "outside validation" framing — was a leftover gap from the recon-gen rename.
+
 ## v11.3.0 — AB.3 TransferTemplate multi-Variable leg_rail_xor_groups + xor_group_violation L1 invariant
 
 Feature release. `TransferTemplate` gains an optional `leg_rail_xor_groups` field — a list of mutually-exclusive subsets of `leg_rails` where exactly ONE member per group fires per Transfer. Real-world payoff: multi-mode templates (settlement-timing variants auto / standard / slow that share one `expected_net`, one `transfer_key`, one closure), instead of N separate templates + a chain XOR row. **Fully additive** — pre-AB.3 L2 yamls with the default empty `leg_rail_xor_groups=()` round-trip byte-equivalent through load/seed/dashboard.

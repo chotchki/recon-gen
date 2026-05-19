@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "recon-gen"
 dynamic = ["version"]
-description = "L1 reconciliation invariants validator for midsize financial institutions — ships AWS QuickSight + self-hosted HTMX + PDF audit surfaces from one L2 model"
+description = "Outside validation that your financial system is sound — tells midsize financial institutions whether their books balance day to day, and when they don't, where to look first. Ships AWS QuickSight, self-hosted HTMX, and regulator-ready PDF surfaces from one L2 institution model."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.13"
