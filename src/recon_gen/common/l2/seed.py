@@ -3672,7 +3672,7 @@ def _emit_two_template_chain_rows(
         transfer_id=parent_transfer_id,
         rail_name=p.chain_parent_rail_name,
         origin="InternalInitiated",
-        metadata={"chain_role": "parent"},
+        metadata={},
         dialect=dialect,
     ))
     # Child leg_rail firings — all share child_transfer_id, all carry
@@ -3693,7 +3693,7 @@ def _emit_two_template_chain_rows(
             transfer_id=child_transfer_id,
             rail_name=leg_rail_name,
             origin="InternalInitiated",
-            metadata={"chain_role": "child", "leg_index": str(i)},
+            metadata={},
             template_name=child_template.name,
             transfer_parent_id=parent_transfer_id,
             dialect=dialect,
@@ -3757,7 +3757,7 @@ def _emit_chain_parent_disagreement_rows(
             transfer_id=child_transfer_id,
             rail_name=leg_rail_name,
             origin="ExternalForcePosted",  # ETL-bug origin convention
-            metadata={"chain_role": "child", "leg_index": str(i)},
+            metadata={},
             template_name=child_template.name,
             transfer_parent_id=parent_tid,
             dialect=dialect,

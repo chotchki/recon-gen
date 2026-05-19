@@ -155,12 +155,12 @@ transfer_templates:
       - ReconciliationLeg
 
 chains:
-  # First (and only) chain on spec_example — makes the L2FT Chains
-  # sheet non-empty and exercises both completion_status values
+  # First chain on spec_example — makes the L2FT Chains sheet
+  # non-empty and exercises both completion_status values
   # ('Completed' when the closing leg fires, 'Incomplete' when it
   # doesn't). Z.A: a single-element ``children`` list encodes
   # "required" semantics — every parent firing must invoke this
-  # child.
+  # child. Template-as-parent shape.
   - parent: ExternalReconciliationCycle
     children:
       - ReconciliationClosing
@@ -168,6 +168,26 @@ chains:
       Every reconciliation cycle SHOULD be closed by a matching
       ReconciliationClosing leg; an unmatched cycle surfaces as an
       orphan in the L2FT Chains explorer.
+
+  # AB.2 (2026-05-19) — template-as-chain-child shape: every
+  # ReconciliationLeg firing should kick off a downstream
+  # MerchantSettlementCycle as its chain child. All leg_rails of
+  # the child template share one Transfer with a shared
+  # ``parent_transfer_id`` (first-firing-wins per gap doc §3);
+  # AB.2.3's ``<prefix>_chain_parent_disagreement`` matview catches
+  # any leg that claims a different parent (the ETL-bug case).
+  # Activates the auto-scenario's TwoTemplateChainPlant +
+  # ChainParentDisagreementPlant.
+  - parent: ReconciliationLeg
+    children:
+      - MerchantSettlementCycle
+    description: |
+      Demonstrates template-as-chain-child semantics. Every
+      ReconciliationLeg firing initiates a MerchantSettlementCycle
+      reconciliation downstream; all leg_rails of that template
+      share one Transfer and one parent_transfer_id. The L1
+      chain_parent_disagreement invariant flags any leg that
+      claims a different parent.
 
 limit_schedules:
   # Cap matches ExternalRailOutbound (Z.B 2026-05-15: rail name IS the type).
