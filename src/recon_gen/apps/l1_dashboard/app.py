@@ -1132,19 +1132,30 @@ def _populate_pending_aging_sheet(
         values=[ds["transaction_id"].count()],
     )
 
-    # Row 2: horizontal aging bar chart — count per bucket.
+    # Row 2: horizontal aging bar chart — count per bucket, stacked
+    # by rail_name (AB.3.8 — per-variant rollup). For
+    # XOR-grouped multi-Variable templates this segments the stuck
+    # population by which variant fired: ``SettlementAuto`` /
+    # ``SettlementStandard`` / ``SettlementSlow`` each become a color
+    # band so analysts can see "the slow variant is dragging".
+    # Single-rail rows still render cleanly (one color per bucket).
     sheet.layout.row(height=_CHART_ROW_SPAN).add_bar_chart(
         width=_FULL,
         title="Stuck Pending by Age Bucket",
         category_label="Age Bucket",
         value_label="Transactions",
+        color_label="Rail",
         subtitle=(
             "Distribution of stuck-Pending transactions across 5 age "
-            "bands. Right-skewed (>3d, >7d) ⇒ slow drift; spike at "
-            "0-6h ⇒ a recent batch failed to post."
+            "bands, stacked by rail. Right-skewed (>3d, >7d) ⇒ slow "
+            "drift; spike at 0-6h ⇒ a recent batch failed to post. "
+            "Color bands surface per-variant rollup for "
+            "XOR-grouped multi-mode templates."
         ),
         category=[aging_bucket.dim()],
         values=[ds["transaction_id"].count()],
+        colors=[ds["rail_name"].dim()],
+        bars_arrangement="STACKED",
         orientation="HORIZONTAL",
     )
 
@@ -1224,18 +1235,25 @@ def _populate_unbundled_aging_sheet(
         values=[ds["transaction_id"].count()],
     )
 
+    # AB.3.8 — stacked by rail_name for per-variant rollup
+    # (mirrors `_populate_pending_aging_sheet`'s shape).
     sheet.layout.row(height=_CHART_ROW_SPAN).add_bar_chart(
         width=_FULL,
         title="Stuck Unbundled by Age Bucket",
         category_label="Age Bucket",
         value_label="Transactions",
+        color_label="Rail",
         subtitle=(
             "Distribution of stuck-Unbundled transactions across 4 age "
-            "bands. Right-skewed (>2d, >7d) ⇒ the bundler hasn't fired "
-            "for those rails in a while."
+            "bands, stacked by rail. Right-skewed (>2d, >7d) ⇒ the "
+            "bundler hasn't fired for those rails in a while. Color "
+            "bands surface per-variant rollup for XOR-grouped "
+            "multi-mode templates."
         ),
         category=[aging_bucket.dim()],
         values=[ds["transaction_id"].count()],
+        colors=[ds["rail_name"].dim()],
+        bars_arrangement="STACKED",
         orientation="HORIZONTAL",
     )
 

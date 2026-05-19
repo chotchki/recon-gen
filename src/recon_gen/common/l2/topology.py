@@ -187,6 +187,12 @@ _CHAIN_EDGE_COLOR = "#5a5a5a"
 _BUNDLE_EDGE_COLOR = "#1f4e79"
 _SELF_LOOP_COLOR = "#7f6000"
 _CONTROL_PARENT_COLOR = "#888888"
+# AB.3.8 — XOR group sub-cluster styling. Distinct hue + tighter fill
+# so the analyst can read "these rails are mutually exclusive per
+# firing" without confusing them with the surrounding template's
+# orange/brown chrome.
+_XOR_GROUP_FILL = "#f0f4ff"
+_XOR_GROUP_BORDER = "#5a6f9c"
 
 
 @dataclass(frozen=True, slots=True)
@@ -495,13 +501,29 @@ def topology_graph_for(
             ))
 
     # 4c. Template-member edges (template → each leg rail).
+    # AB.3.8: when a leg_rail is part of an XOR group, the edge's
+    # metadata carries ``xor_group_index`` (str-of-int, 0-based) so
+    # the renderer can sub-cluster grouped rails inside the template
+    # cluster. Non-grouped leg_rails get no ``xor_group_index`` key —
+    # the absence IS the "not grouped" signal (mirrors the chain
+    # edge's ``cardinality`` metadata pattern).
     for template in instance.transfer_templates:
+        rail_to_group: dict[Identifier, int] = {}
+        for gi, group in enumerate(template.leg_rail_xor_groups):
+            for member in group:
+                rail_to_group[member] = gi
         for rail_name in template.leg_rails:
+            edge_metadata: dict[str, str] = {}
+            if rail_name in rail_to_group:
+                edge_metadata["xor_group_index"] = str(
+                    rail_to_group[rail_name],
+                )
             edges.append(TopologyEdge(
                 source=_template_id(template.name),
                 target=_rail_id(rail_name),
                 kind="template_member",
                 label="",
+                metadata=edge_metadata,
             ))
 
     # 4c.5 Control-parent edges (Account.parent_role + AccountTemplate.parent_role).
@@ -922,6 +944,11 @@ def build_topology_graph_per_rail(
     # Cluster only emits if either the template itself OR any of its
     # leg-rails are in focus. Inside the cluster, each leg-rail is
     # emitted only if in focus. Layer-gated: clusters only show at L3.
+    # AB.3.8: an XOR group renders as a nested sub-cluster inside the
+    # template cluster — graphviz renders this as a labeled boundary
+    # ("XOR group 1 (exactly 1 fires)") so the analyst can see the
+    # mutual-exclusion contract at a glance without leaving the
+    # topology.
     rails_in_clusters: set[Identifier] = set()
     template_iter = (
         instance.transfer_templates if show_chains_and_templates else ()
@@ -936,6 +963,11 @@ def build_topology_graph_per_rail(
             continue
         cluster_name = f"cluster_tmpl_{template.name}"
         cluster_label = _template_cluster_label(template)
+        # Per-rail XOR-group lookup; absent → not grouped.
+        rail_to_group: dict[Identifier, int] = {}
+        for gi, group in enumerate(template.leg_rail_xor_groups):
+            for member in group:
+                rail_to_group[member] = gi
         with g.subgraph(name=cluster_name) as sub:
             assert sub is not None
             sub.attr(
@@ -956,10 +988,25 @@ def build_topology_graph_per_rail(
                     fontcolor=_TRANSFER_TEMPLATE_BORDER,
                     style="filled",
                 )
+            # AB.3.8: collect XOR-grouped rails per group so we can
+            # emit them inside nested sub-clusters. Non-grouped rails
+            # render at the template-cluster level (unchanged shape).
+            grouped_in_focus: dict[int, list[Identifier]] = {}
             for rail_name in template.leg_rails:
                 if rail_name not in rail_names_set:
                     continue
                 if not _in_focus(_rail_id(rail_name)):
+                    continue
+                if rail_name in rail_to_group:
+                    gi = rail_to_group[rail_name]
+                    grouped_in_focus.setdefault(gi, []).append(rail_name)
+            for rail_name in template.leg_rails:
+                if rail_name not in rail_names_set:
+                    continue
+                if not _in_focus(_rail_id(rail_name)):
+                    continue
+                if rail_name in rail_to_group:
+                    # Emitted inside the per-group sub-cluster below.
                     continue
                 rail = rails_by_name[rail_name]
                 _emit_rail_node(sub, rail)
@@ -972,6 +1019,36 @@ def build_topology_graph_per_rail(
                         color=_TRANSFER_TEMPLATE_BORDER,
                         arrowhead="none",
                     )
+            # AB.3.8: per-XOR-group nested sub-clusters.
+            for gi in sorted(grouped_in_focus):
+                members = grouped_in_focus[gi]
+                xor_cluster_name = (
+                    f"cluster_tmpl_{template.name}_xor_{gi}"
+                )
+                xor_label = f"XOR group {gi + 1} (exactly 1 fires)"
+                with sub.subgraph(name=xor_cluster_name) as xor_sub:
+                    assert xor_sub is not None
+                    xor_sub.attr(
+                        label=xor_label,
+                        style="dashed,rounded,filled",
+                        color=_XOR_GROUP_BORDER,
+                        fillcolor=_XOR_GROUP_FILL,
+                        fontcolor=_XOR_GROUP_BORDER,
+                        fontname="Helvetica",
+                        fontsize="10",
+                    )
+                    for rail_name in members:
+                        rail = rails_by_name[rail_name]
+                        _emit_rail_node(xor_sub, rail)
+                        rails_in_clusters.add(rail_name)
+                        if _in_focus(tmpl_id):
+                            xor_sub.edge(
+                                tmpl_id,
+                                _rail_id(rail_name),
+                                style="dashed",
+                                color=_XOR_GROUP_BORDER,
+                                arrowhead="none",
+                            )
 
     # Phase C — Top-level individual rails (not bundled, not in a cluster).
     # Layer-gated: rail nodes only show at L2+.

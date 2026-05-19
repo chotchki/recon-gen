@@ -278,6 +278,93 @@ def test_topology_graph_chain_edge_carries_xor_group_metadata() -> None:
         assert ce.metadata["xor_siblings"] == "ChildA,ChildB"
 
 
+def test_topology_graph_template_member_edge_carries_xor_group_metadata() -> None:
+    """AB.3.8 — when a template's ``leg_rail_xor_groups`` carries a
+    rail, the template_member edge for that rail tags its metadata
+    with ``xor_group_index`` (str-of-int, 0-based). Non-grouped
+    leg_rails get no key — the absence IS the not-grouped signal.
+    """
+    inst = L2Instance(
+        accounts=(
+            Account(id=Identifier("a"), role=Identifier("X"), scope="internal"),
+            Account(id=Identifier("b"), role=Identifier("Y"), scope="internal"),
+        ),
+        account_templates=(),
+        rails=(
+            SingleLegRail(
+                name=Identifier("Auto"),
+                metadata_keys=(),
+                leg_role=(Identifier("X"),),
+                leg_direction="Variable",
+                origin="InternalInitiated",
+            ),
+            SingleLegRail(
+                name=Identifier("Standard"),
+                metadata_keys=(),
+                leg_role=(Identifier("X"),),
+                leg_direction="Variable",
+                origin="InternalInitiated",
+            ),
+            SingleLegRail(
+                name=Identifier("Slow"),
+                metadata_keys=(),
+                leg_role=(Identifier("X"),),
+                leg_direction="Variable",
+                origin="InternalInitiated",
+            ),
+        ),
+        transfer_templates=(
+            TransferTemplate(
+                name=Identifier("Cycle"),
+                expected_net=Decimal("0"),
+                transfer_key=(),
+                completion="business_day_end",
+                leg_rails=(
+                    Identifier("Auto"),
+                    Identifier("Standard"),
+                    Identifier("Slow"),
+                ),
+                leg_rail_xor_groups=((
+                    Identifier("Auto"), Identifier("Standard"),
+                ),),
+            ),
+        ),
+        chains=(),
+        limit_schedules=(),
+    )
+    g = topology_graph_for(inst, db_table_prefix="test")
+    members = [e for e in g.edges if e.kind == "template_member"]
+    by_target = {e.target: e for e in members}
+    # Grouped rails tag the group index; non-grouped Slow has no key.
+    assert by_target["rail__Auto"].metadata["xor_group_index"] == "0"
+    assert by_target["rail__Standard"].metadata["xor_group_index"] == "0"
+    assert "xor_group_index" not in by_target["rail__Slow"].metadata
+
+
+def test_topology_graphviz_per_rail_emits_xor_subcluster() -> None:
+    """AB.3.8 — the graphviz per-rail renderer wraps XOR-grouped
+    leg_rails in a nested sub-cluster inside the template cluster.
+    The sub-cluster's label is "XOR group N (exactly 1 fires)" so
+    the analyst can see the mutual-exclusion contract directly on
+    the topology diagram.
+
+    Skipped if the ``graphviz`` package isn't installed in the test
+    env (it's a soft dep — typed projection covers the contract).
+    """
+    import pytest
+    graphviz = pytest.importorskip("graphviz")
+    del graphviz  # only used as availability check
+    from recon_gen.common.l2.topology import build_topology_graph_per_rail
+    inst = load_instance(FIXTURES / "spec_example.yaml")
+    g = build_topology_graph_per_rail(
+        inst, db_table_prefix="spec_example",
+    )
+    src = g.source
+    # spec_example's SettlementTimingCycle declares one XOR group.
+    assert "cluster_tmpl_SettlementTimingCycle_xor_0" in src
+    assert "XOR group 1 (exactly 1 fires)" in src
+
+
 # -- Typed projection against shipped fixtures ------------------------------
 
 
