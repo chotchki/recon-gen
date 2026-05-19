@@ -10,6 +10,33 @@ which is excluded from the public mkdocs build at
 paths, and Cloudflare account names that are specific to one operator;
 nothing public should link in.
 
+## Tahoe (macOS 26) gotchas — surfaced during the first install
+
+If you're re-doing this on a fresh Mac mini or a different macOS, these
+are the friction points that cost time on the original install:
+
+1. **LaunchDaemons not LaunchAgents.** A hidden user without a GUI/SSH
+   login session can't host LaunchAgents. `launchctl bootstrap user/<uid>`
+   returns `Input/output error`. Use `/Library/LaunchDaemons/` + UserName
+   instead. See Phase 7 below.
+2. **`network-bind` ≠ `network-inbound`.** Server's bind() succeeds
+   but accept() fails. Both rules required in the sandbox profile.
+3. **Bootstrap allows.** sandbox-exec on Tahoe requires `process*` +
+   `file-read*` + `mach-lookup` + `ipc-posix-shm` + `signal` +
+   `sysctl-read` + `iokit-open` + `system-socket` for ANY deny-default
+   profile to launch a child process. Profiles in `deploy/sandbox/`
+   already have these — don't strip them.
+4. **`PYTHONDONTWRITEBYTECODE=1`.** Python stdlib `.pyc` writes hit
+   the sandbox file-write denies; uvicorn surfaces the cascaded EPERM
+   as `[Errno 1] Operation not permitted`. Plists set the env var, and
+   the sasquatch wrapper exports it inline as belt-and-suspenders.
+5. **Cloudflare Universal SSL.** Free tier covers `*.hotchkiss.io`
+   but not `*.recon-gen.hotchkiss.io` (two levels deep). Hostnames
+   use single-level names (`recon-gen-spec`, `recon-gen-sasquatch`).
+6. **`sudo -u recon-demo` HOME propagation.** Without `-H`, sudo keeps
+   the calling user's HOME. Tools like cloudflared write to the wrong
+   home. Always pass `-H` when running anything that reads `~`.
+
 ## Architecture at a glance
 
 ```
@@ -70,15 +97,23 @@ sudo dscl . -append /Groups/staff GroupMembership recon-demo
 ### 2. Set up the venv + install recon-gen
 
 ```bash
-# Switch to recon-demo:
-sudo -u recon-demo -i
+# Create directory layout owned by recon-demo. Use `sudo -u` from your
+# admin shell so we never need to log in interactively as recon-demo.
+sudo -u recon-demo mkdir -p \
+    /Users/recon-demo/venv \
+    /Users/recon-demo/bin \
+    /Users/recon-demo/sandbox \
+    /Users/recon-demo/logs \
+    /Users/recon-demo/spec_example/logs \
+    /Users/recon-demo/sasquatch_pr/logs \
+    /Users/recon-demo/tunnel \
+    /Users/recon-demo/runner \
+    /Users/recon-demo/Library/LaunchAgents
 
-# Inside recon-demo's shell:
-cd ~
-mkdir -p venv bin sandbox logs spec_example sasquatch_pr tunnel runner
-python3.13 -m venv venv
-venv/bin/pip install --upgrade pip
-venv/bin/pip install "recon-gen[deploy,demo,audit,serve]"
+# Create the venv + install recon-gen with HTTP-serving extras.
+sudo -u recon-demo /opt/homebrew/bin/python3.13 -m venv /Users/recon-demo/venv
+sudo -u recon-demo -H /Users/recon-demo/venv/bin/pip install --upgrade pip
+sudo -u recon-demo -H /Users/recon-demo/venv/bin/pip install "recon-gen[deploy,demo,audit,serve]"
 ```
 
 ### 3. Install the sandbox profiles + launcher wrappers
@@ -160,16 +195,29 @@ sudo -u recon-demo cloudflared tunnel route dns recon-demo \
     recon-gen-sasquatch.hotchkiss.io
 ```
 
-### 7. Install + load the launchd services
+### 7. Install + bootstrap the launchd daemons
+
+The plists are LaunchDaemons (system domain), not LaunchAgents.
+LaunchAgents require an active GUI/SSH session for the target user;
+recon-demo is hidden + has no login, so `launchctl bootstrap user/<uid>`
+returns "Input/output error". LaunchDaemons run in the system domain
+and use `UserName=recon-demo` inside the plist to drop privileges at
+process start.
 
 ```bash
-sudo cp deploy/launchd/*.plist /Users/recon-demo/Library/LaunchAgents/
-sudo chown recon-demo:staff /Users/recon-demo/Library/LaunchAgents/*.plist
+sudo cp deploy/launchd/io.hotchkiss.recon-demo.*.plist /Library/LaunchDaemons/
+sudo chown root:wheel /Library/LaunchDaemons/io.hotchkiss.recon-demo.*.plist
+sudo chmod 0644 /Library/LaunchDaemons/io.hotchkiss.recon-demo.*.plist
 
-# Load each (as recon-demo so launchctl picks up the user's GUI session)
-for plist in /Users/recon-demo/Library/LaunchAgents/io.hotchkiss.recon-demo.*.plist; do
-    sudo -u recon-demo launchctl load -w "$plist"
+# Bootstrap each (spec first, then tunnel + refresh + sasquatch — sasquatch
+# needs v11.6.5+ on PyPI for the --demo-mode flag, so do it last)
+for plist in /Library/LaunchDaemons/io.hotchkiss.recon-demo.{spec,tunnel,refresh,sasquatch}.plist; do
+    sudo launchctl bootstrap system "$plist"
+    sleep 3
 done
+
+# Sanity
+sudo launchctl print system/io.hotchkiss.recon-demo.spec 2>&1 | grep -E "state|active count"
 ```
 
 ### 8. Install the GitHub Actions runner
