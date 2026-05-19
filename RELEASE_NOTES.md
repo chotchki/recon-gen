@@ -1,5 +1,13 @@
 # Release Notes
 
+## v11.6.1 — AB.6 test-assertion fix
+
+Patch release. `tests/json/test_l2_flow_tracing.py::test_chains_dataset_inlines_l2_chain_entries` asserted `f"'{child}'" in sql` over a chain's children — pre-AB.6 that stringified the bare `Identifier`; post-AB.6 (where `chain.children[i]` is a `ChainChildSpec` dataclass) it expanded to the full `'ChainChildSpec(name=..., fan_in=False, expected_parent_count=None)'` repr and the substring check missed. Production SQL emit (`apps/l2_flow_tracing/datasets.py`) was already correct (uses `.name`); only the test assertion needed the `.name` accessor.
+
+Caught by `./run_tests.sh up_to=db` prelude unit phase on the AB.7.1 verify pass. v11.6.0 shipped the AB.6 surface but the json-layer test slipped through the local unit-only sweep used at the AB.6 close-out commits.
+
+No behavior change vs v11.6.0. Operators on v11.6.0 see no functional impact.
+
 ## v11.6.0 — AB.6 per-child fan_in + multi-XOR runtime enforcement
 
 Feature release. Phase AB.6 bundles SPEC Enhancements 5+6: relocate `fan_in` from chain-level to per-child (E5 — mixed-cardinality chains become expressible) AND add runtime enforcement of chain.md's "multi-children = exactly one MUST fire" contract (E6 — the new `_multi_xor_violation` L1 invariant matview). **Hard cut** on chain-level `fan_in: true` / `expected_parent_count` — loader rejects with an actionable per-child pointer (no deprecation grace per AB.6.0 Lock 2). Operator yamls migrate at the same commit.
