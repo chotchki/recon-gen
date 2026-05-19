@@ -67,6 +67,7 @@ from recon_gen.common.l2.validate import L2ValidationError, validate
 
 FieldKind: TypeAlias = Literal[
     "text", "select", "money", "textarea", "multi_select", "yaml_block",
+    "multi_select_groups",
 ]
 
 # X.4.f.11 — Rail is a discriminated union (TwoLegRail | SingleLegRail).
@@ -113,6 +114,13 @@ class FieldSpec:
     select_from: str | None = None
     required: bool = False
     subtype_only: RailSubtype | None = None
+    # AB.3.7 — fields whose option universe references a sibling
+    # dataclass field on the same entity (``leg_rail_xor_groups`` reads
+    # the template's own ``leg_rails``). The entity must already exist
+    # for this to make sense; the create page filters these out so the
+    # operator authors the sibling field first, then edits to add the
+    # group-shaped layer.
+    edit_only: bool = False
 
 
 _ACCOUNT_FIELDS: tuple[FieldSpec, ...] = (
@@ -512,6 +520,30 @@ _TRANSFER_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         select_from="rails",
         required=True,
     ),
+    # AB.3.7 — Variable-rail XOR groups. Each group is a multi-select
+    # whose option universe is this template's own ``leg_rails``. The
+    # operator gets one row per existing group plus a trailing blank
+    # row for adding a new group; unchecking every box in a group
+    # removes it on save. Hidden on the create page (the operator
+    # authors ``leg_rails`` first, then edits to add the group layer)
+    # via ``edit_only=True``.
+    FieldSpec(
+        name="leg_rail_xor_groups",
+        label="Variable rail XOR groups",
+        helper=(
+            "Groups of Variable-direction leg rails that are mutually "
+            "exclusive per template firing — exactly ONE member of "
+            "each group fires per cycle (per-firing pick is "
+            "deterministic). Each group needs ≥2 members, all members "
+            "must be in this template's leg_rails, all must be "
+            "Variable-direction SingleLegRails, and no rail may appear "
+            "in two groups (validator C1a-d). Uncheck every box in a "
+            "group to drop it on save."
+        ),
+        kind="multi_select_groups",
+        select_from="self_leg_rails",
+        edit_only=True,
+    ),
     FieldSpec(
         name="description",
         label="Description",
@@ -698,6 +730,47 @@ def _coerce_form(
                 Identifier,
             )
             fields[spec.name] = tuple(Identifier(v) for v in raw_list)
+        elif spec.kind == "multi_select_groups":
+            # AB.3.7 — repeated keys per group: ``<name>_0``, ``<name>_1``,
+            # ... A hidden ``<name>__num_groups`` tells the server how
+            # many group slots were rendered (operator can author up
+            # to N groups + the trailing blank slot). Empty groups
+            # (operator unchecked every box) are filtered server-side
+            # — that's the "remove this group" UX.
+            if f"{spec.name}__present" not in form:
+                continue
+            num_groups_raw = form.get(
+                f"{spec.name}__num_groups", "0",
+            )
+            try:
+                num_groups = int(str(num_groups_raw) or "0")
+            except ValueError:
+                num_groups = 0
+            override_groups: list[tuple[str, ...]] = []
+            field_groups: list[tuple[Identifier, ...]] = []
+            from recon_gen.common.l2.primitives import (  # noqa: PLC0415
+                Identifier,
+            )
+            for i in range(num_groups):
+                raw_group = tuple(
+                    str(v)
+                    for v in form.getlist(f"{spec.name}_{i}")
+                    if str(v).strip()
+                )
+                if not raw_group:
+                    continue
+                override_groups.append(raw_group)
+                field_groups.append(
+                    tuple(Identifier(v) for v in raw_group),
+                )
+            # _value_to_input_str doesn't know how to render nested
+            # tuple-of-tuples; the render path branches on field kind
+            # and reads override directly, so we can store the
+            # tuple-of-tuples shape here without coercion.
+            overrides[spec.name] = tuple(  # pyright: ignore[reportArgumentType]  # WHY: overrides dict stores tuple[tuple[str, ...], ...] for this kind; outer typing.Mapping isn't nested-tuple-aware
+                override_groups,
+            )
+            fields[spec.name] = tuple(field_groups)
         else:
             if spec.name not in form:
                 continue
@@ -865,12 +938,17 @@ def _render_field(
     value: object,
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed to resolve select_from at render time
     error: str | None = None,
+    *,
+    entity: object | None = None,
 ) -> str:
     """One form-field <div> with label + input + helper + (optional) error.
 
     The error fragment slot lets the X.4.e.5 validation-failure path
     render per-field validator errors inline without losing the
-    user's typed content.
+    user's typed content. ``entity`` is the dataclass being edited
+    (None on the create page); used by AB.3.7's
+    ``multi_select_groups`` to read a sibling field for the option
+    universe (e.g., ``leg_rail_xor_groups`` reads ``entity.leg_rails``).
     """
     label = (
         f'<label for="field-{spec.name}">{escape(spec.label)}'
@@ -884,6 +962,11 @@ def _render_field(
     err_html = (
         f'<div class="field-error">{escape(error)}</div>' if error else ""
     )
+
+    if spec.kind == "multi_select_groups":
+        return _render_multi_select_groups_field(
+            spec, value, entity, error,
+        )
 
     if spec.kind == "multi_select":
         # Render a checkbox group — easier than Cmd/Ctrl-clicking a
@@ -977,6 +1060,159 @@ def _render_field(
     )
 
 
+def _multi_select_groups_value_as_groups(
+    value: object,
+) -> tuple[tuple[str, ...], ...]:
+    """Normalize a ``multi_select_groups`` current/override value to a
+    tuple-of-tuples of strings.
+
+    Accepts:
+    - ``None`` → ``()`` (no groups)
+    - ``""`` (initial create page) → ``()``
+    - ``tuple[tuple[Identifier-or-str, ...], ...]`` → stringify each
+      member
+    - ``tuple[tuple[str, ...], ...]`` (override path on re-render) →
+      pass through
+
+    Defensive: any inner element that isn't a list/tuple is dropped
+    (it can't be a valid XOR group).
+    """
+    if value is None or value == "":
+        return ()
+    if not isinstance(value, (list, tuple)):
+        return ()
+    groups: list[tuple[str, ...]] = []
+    for inner in value:  # pyright: ignore[reportUnknownVariableType]  # WHY: outer tuple element type isn't narrowed by isinstance
+        if not isinstance(inner, (list, tuple)):
+            continue
+        members = tuple(
+            str(m)  # pyright: ignore[reportUnknownArgumentType]  # WHY: inner-tuple element type isn't narrowed
+            for m in inner  # pyright: ignore[reportUnknownVariableType]  # WHY: inner-tuple element type isn't narrowed
+            if str(m).strip()  # pyright: ignore[reportUnknownArgumentType]  # WHY: inner-tuple element type isn't narrowed
+        )
+        groups.append(members)
+    return tuple(groups)
+
+
+def _render_multi_select_groups_field(
+    spec: FieldSpec,
+    value: object,
+    entity: object | None,
+    error: str | None,
+) -> str:
+    """AB.3.7 — render a list-of-multi-selects for ``leg_rail_xor_groups``.
+
+    Each existing group renders as a checkbox group whose option set is
+    drawn from the entity's ``leg_rails`` (the sibling field named by
+    ``spec.select_from="self_leg_rails"``). One always-empty trailing
+    row lets the operator add a new group without JS. Unchecking every
+    box in a group drops it on save (server filters empty groups in
+    ``_coerce_form``).
+
+    No entity → the create page is rendering this; show a helper
+    message instead. The ``edit_only=True`` flag on the FieldSpec
+    means this branch only fires if the field-spec filter on the
+    create page accidentally let it through (defense-in-depth).
+    """
+    label_html = (
+        f'<label>{escape(spec.label)}</label>'
+    )
+    helper_html = (
+        f'<small class="field-helper">{escape(spec.helper)}</small>'
+        if spec.helper else ""
+    )
+    err_html = (
+        f'<div class="field-error">{escape(error)}</div>' if error else ""
+    )
+    # Option universe = the entity's leg_rails (sibling field). On the
+    # create page there's no entity; render the empty-state helper.
+    if entity is None:
+        empty_msg = (
+            "Save the template with at least 2 leg rails first; then "
+            "open it for editing to add XOR groups."
+        )
+        body = (
+            f'<div class="multi-select-groups-empty">{escape(empty_msg)}</div>'
+        )
+        return (
+            f'<div class="field-row">'
+            f'{label_html}{body}{helper_html}{err_html}</div>'
+        )
+    leg_rails_raw = getattr(entity, "leg_rails", ()) or ()
+    rails: tuple[str, ...] = tuple(
+        str(r)  # pyright: ignore[reportUnknownArgumentType]  # WHY: leg_rails element type is Identifier (runtime str) but typed as Any here
+        for r in leg_rails_raw  # pyright: ignore[reportUnknownVariableType]  # WHY: leg_rails is Any
+    )
+    groups = _multi_select_groups_value_as_groups(value)
+    if not rails:
+        empty_msg = (
+            "Add at least 2 leg rails to this template, save, then "
+            "reopen the edit form to author XOR groups."
+        )
+        body = (
+            f'<div class="multi-select-groups-empty">{escape(empty_msg)}</div>'
+            f'<input type="hidden" name="{escape(spec.name)}__present" value="1">'
+            f'<input type="hidden" name="{escape(spec.name)}__num_groups" value="0">'
+        )
+        return (
+            f'<div class="field-row">'
+            f'{label_html}{body}{helper_html}{err_html}</div>'
+        )
+    # Render N existing groups + 1 always-empty trailing slot for
+    # adding a new group. Unchecking every box in a row drops that
+    # group on save (server filters empty groups).
+    blocks: list[str] = []
+    for i, group in enumerate(groups):
+        blocks.append(_render_xor_group_row(spec.name, i, rails, group))
+    blocks.append(_render_xor_group_row(spec.name, len(groups), rails, ()))
+    num_groups = len(groups) + 1
+    body = (
+        f'<div id="field-{escape(spec.name)}" '
+        f'class="multi-select-groups" role="group">'
+        f'{"".join(blocks)}'
+        f'</div>'
+        f'<input type="hidden" name="{escape(spec.name)}__present" value="1">'
+        f'<input type="hidden" name="{escape(spec.name)}__num_groups" '
+        f'value="{num_groups}">'
+    )
+    return (
+        f'<div class="field-row">'
+        f'{label_html}{body}{helper_html}{err_html}</div>'
+    )
+
+
+def _render_xor_group_row(
+    name: str,
+    index: int,
+    rails: tuple[str, ...],
+    selected: tuple[str, ...],
+) -> str:
+    """One <fieldset> with all template leg_rails as checkboxes; those
+    in ``selected`` start checked. Empty selected → "Add new XOR group"
+    trailing slot."""
+    selected_set = frozenset(selected)
+    is_new = not selected_set
+    legend = (
+        "Add new XOR group" if is_new
+        else f"XOR group {index + 1}"
+    )
+    items = "".join(
+        f'<label class="multi-select-item">'
+        f'<input type="checkbox" name="{escape(name)}_{index}" '
+        f'value="{escape(r)}"'
+        f'{" checked" if r in selected_set else ""}>'
+        f' {escape(r)}</label>'
+        for r in rails
+    )
+    css_class = "xor-group new" if is_new else "xor-group"
+    return (
+        f'<fieldset class="{css_class}" data-group-index="{index}">'
+        f'<legend>{escape(legend)}</legend>'
+        f'<div class="multi-select-group">{items}</div>'
+        f'</fieldset>'
+    )
+
+
 def _multi_value_as_strs(value: object) -> tuple[str, ...]:
     """Normalize the multi-select current/override value to a tuple of
     strings for the option-selected check.
@@ -1044,6 +1280,27 @@ def _metadata_value_examples_to_yaml(
     return yaml.safe_dump(as_dict, default_flow_style=False, sort_keys=False).rstrip() + "\n"
 
 
+def _render_read_value(spec: FieldSpec, value: object) -> str:
+    """Render a dataclass field value for the read-only card.
+
+    Most fields fall through to ``_value_to_input_str``. AB.3.7's
+    ``multi_select_groups`` is the exception: a nested
+    tuple-of-tuples needs a per-group bullet display, since the
+    flat-tuple stringifier would print the inner tuple's ``repr``
+    (``('A', 'B'), ('C', 'D')`` — readable but cluttered).
+    """
+    if spec.kind == "multi_select_groups":
+        groups = _multi_select_groups_value_as_groups(value)
+        if not groups:
+            return "—"
+        items = "".join(
+            f'<li>group {i + 1}: {escape(", ".join(g))}</li>'
+            for i, g in enumerate(groups)
+        )
+        return f'<ul class="xor-group-list">{items}</ul>'
+    return escape(_value_to_input_str(value)) or "—"
+
+
 def _render_read_card(
     kind: EntityKind, entity: object,
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed to suppress fields hidden by the two-layer rule
@@ -1056,7 +1313,7 @@ def _render_read_card(
     hidden = _hidden_fields_for_entity(kind, entity, instance)
     rows = "".join(
         f'<dt>{escape(s.label)}</dt><dd>'
-        f"{escape(_value_to_input_str(getattr(entity, s.name, None))) or '—'}"
+        f"{_render_read_value(s, getattr(entity, s.name, None))}"
         f"</dd>"
         for s in specs
         if s.name not in hidden
@@ -1185,6 +1442,7 @@ def _render_edit_form(
             overrides.get(s.name, getattr(entity, s.name, None)),
             instance,
             error=field_errors.get(s.name),
+            entity=entity,
         )
         for s in specs
         if s.name not in hidden
@@ -1433,6 +1691,10 @@ def _render_create_page(
     constructor. For non-rail kinds, ``subtype`` is ignored.
     """
     specs = _filter_specs_by_subtype(_FIELD_SPECS_BY_KIND[kind], subtype)
+    # AB.3.7 — edit-only fields (e.g. ``leg_rail_xor_groups``) reference
+    # sibling dataclass fields that don't exist yet on the create page;
+    # filter them out so the operator authors the sibling first.
+    specs = tuple(s for s in specs if not s.edit_only)
     overrides = form_overrides or {}
     fields_html = "".join(
         _render_field(s, overrides.get(s.name, ""), instance)

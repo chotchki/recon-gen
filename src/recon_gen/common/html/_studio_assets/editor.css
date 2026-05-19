@@ -373,6 +373,61 @@ body.create-page {
   cursor: pointer;
 }
 
+/* AB.3.7 — leg_rail_xor_groups field renders as a stack of
+ * <fieldset> rows, each one a multi_select checkbox group whose
+ * options are the parent TransferTemplate's own leg_rails. The
+ * trailing ".xor-group.new" row is the always-present "Add new
+ * XOR group" slot; uncheck every box in a regular row to drop it
+ * on save.
+ */
+.multi-select-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.xor-group {
+  border: 1px solid var(--studio-border);
+  border-radius: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  background: white;
+}
+.xor-group > legend {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--studio-fg);
+  padding: 0 0.4rem;
+}
+.xor-group.new {
+  border-style: dashed;
+  background: #f9fafb;
+}
+.xor-group.new > legend {
+  color: var(--studio-muted);
+  font-weight: 500;
+}
+.xor-group > .multi-select-group {
+  border: none;
+  padding: 0.25rem 0;
+  max-height: 9rem;
+  background: transparent;
+}
+.multi-select-groups-empty {
+  font-size: 0.85rem;
+  color: var(--studio-muted);
+  padding: 0.5rem 0.6rem;
+  border: 1px dashed var(--studio-border);
+  border-radius: 0.25rem;
+  background: #f9fafb;
+}
+.xor-group-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+}
+.xor-group-list > li {
+  margin: 0.15rem 0;
+}
+
 .field-helper {
   font-size: 0.75rem;
   color: var(--studio-muted);

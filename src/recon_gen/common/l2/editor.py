@@ -360,11 +360,29 @@ def create_l2_entity(
             )
         else:
             leg_rails = (Identifier(str(leg_rails_raw)),)
+        # AB.3.7 — leg_rail_xor_groups arrives from
+        # ``multi_select_groups`` as ``tuple[tuple[Identifier, ...], ...]``.
+        # Defensive coerce: form-data path normalizes to Identifier
+        # before this point, but accept loose nested lists too for
+        # API-style POSTs / future call sites.
+        xor_raw: object = fields.get("leg_rail_xor_groups") or ()
+        if isinstance(xor_raw, (list, tuple)):
+            leg_rail_xor_groups: tuple[tuple[Identifier, ...], ...] = tuple(
+                tuple(
+                    Identifier(str(r))  # pyright: ignore[reportUnknownArgumentType]  # WHY: nested tuple element type isn't narrowed
+                    for r in group  # pyright: ignore[reportUnknownVariableType]  # WHY: nested tuple element type isn't narrowed
+                )
+                for group in xor_raw  # pyright: ignore[reportUnknownVariableType]  # WHY: tuple element type isn't narrowed
+                if isinstance(group, (list, tuple))
+            )
+        else:
+            leg_rail_xor_groups = ()
         new_tt = TransferTemplate(
             name=Identifier(str(new_name)),
             expected_net=Money(fields["expected_net"]),
             completion=str(fields["completion"]),
             leg_rails=leg_rails,
+            leg_rail_xor_groups=leg_rail_xor_groups,
             transfer_key=(),
             description=fields.get("description"),
         )

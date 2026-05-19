@@ -624,6 +624,289 @@ def test_put_transfer_template_with_empty_leg_rails_returns_400(
     assert saved.leg_rails == tmpl.leg_rails
 
 
+# ---------------------------------------------------------------------------
+# AB.3.7 — TransferTemplate.leg_rail_xor_groups UI (list of multi_selects,
+# each sourcing the template's own leg_rails)
+# ---------------------------------------------------------------------------
+
+
+def test_xor_groups_edit_form_renders_existing_groups_plus_blank_row(
+    writable_l2_yaml: Path,
+) -> None:
+    """AB.3.7 — TransferTemplate edit form exposes ``leg_rail_xor_groups``
+    as a stack of fieldset checkbox groups. Each existing group is one
+    row pre-checked with its members; a trailing always-empty "Add
+    new XOR group" row lets the operator author a new group without
+    JS. spec_example's ``SettlementTimingCycle`` carries one group
+    [Auto, Standard]; the trailing slot is the second fieldset."""
+    app = _build_app(writable_l2_yaml)
+    pre = load_instance(writable_l2_yaml)
+    tmpl = next(
+        (t for t in pre.transfer_templates if t.leg_rail_xor_groups),
+        None,
+    )
+    if tmpl is None:
+        return  # AB.3.5.spec wires this; defensive skip
+    tmpl_name = str(tmpl.name)
+    group0 = tmpl.leg_rail_xor_groups[0]
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get(f"/l2_shape/transfer_template/{tmpl_name}/edit")
+    assert resp.status_code == 200
+    body = resp.text
+    # Field label + container present.
+    assert "Variable rail XOR groups" in body
+    assert 'class="multi-select-groups"' in body
+    # First group's members are checked under name="leg_rail_xor_groups_0".
+    for member in group0:
+        assert (
+            f'name="leg_rail_xor_groups_0" value="{escape_html(str(member))}"'
+            f' checked'
+        ) in body
+    # Trailing blank row is rendered (legend = "Add new XOR group").
+    assert "Add new XOR group" in body
+    # Hidden control inputs.
+    assert 'name="leg_rail_xor_groups__present"' in body
+    assert 'name="leg_rail_xor_groups__num_groups"' in body
+
+
+def test_xor_groups_create_form_omits_field(writable_l2_yaml: Path) -> None:
+    """AB.3.7 — the create page filters ``edit_only=True`` fields. The
+    operator authors ``leg_rails`` first, saves, then edits to add
+    XOR groups. Two-step UX is acceptable; the field references
+    sibling state that doesn't exist yet on create."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/transfer_template/new")
+    assert resp.status_code == 200, resp.text
+    body = resp.text
+    # ``leg_rails`` checkbox group present, ``leg_rail_xor_groups``
+    # field-row absent.
+    assert 'name="leg_rails"' in body
+    assert "leg_rail_xor_groups" not in body
+    assert "Variable rail XOR groups" not in body
+
+
+def test_put_transfer_template_round_trips_existing_xor_groups(
+    writable_l2_yaml: Path,
+) -> None:
+    """AB.3.7 — wire-shape round-trip: PUT the existing groups +
+    one trailing-blank slot (the server-rendered render shape) and
+    confirm the persisted tuple-of-tuples is byte-identical to the
+    pre-state. Mirrors the existing leg_rails round-trip pattern —
+    asserts the form wire passes the nested-tuple shape through
+    ``_coerce_form`` cleanly without depending on validator
+    cross-rule traversal."""
+    pre = load_instance(writable_l2_yaml)
+    tmpl = next(
+        (t for t in pre.transfer_templates if t.leg_rail_xor_groups),
+        None,
+    )
+    if tmpl is None:
+        return
+    tmpl_name = str(tmpl.name)
+    n_existing = len(tmpl.leg_rail_xor_groups)
+    app = _build_app(writable_l2_yaml)
+    data: dict[str, object] = {
+        "name": tmpl_name,
+        "expected_net": str(tmpl.expected_net),
+        "completion": str(tmpl.completion),
+        "leg_rails__present": "1",
+        "leg_rails": [str(r) for r in tmpl.leg_rails],
+        "leg_rail_xor_groups__present": "1",
+        # Render emits N existing slots + 1 trailing blank.
+        "leg_rail_xor_groups__num_groups": str(n_existing + 1),
+    }
+    for i, group in enumerate(tmpl.leg_rail_xor_groups):
+        data[f"leg_rail_xor_groups_{i}"] = [str(r) for r in group]
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(f"/l2_shape/transfer_template/{tmpl_name}", data=data)
+    assert resp.status_code == 200, resp.text
+
+    reloaded = load_instance(writable_l2_yaml)
+    saved = next(
+        t for t in reloaded.transfer_templates if str(t.name) == tmpl_name
+    )
+    assert saved.leg_rail_xor_groups == tmpl.leg_rail_xor_groups
+
+
+def test_put_transfer_template_xor_groups_validator_rejects_invalid_shape(
+    writable_l2_yaml: Path,
+) -> None:
+    """AB.3.7 — submitting a shape the validator rejects (C1: clearing
+    the only XOR group when ≥2 Variable rails would be left
+    non-grouped) returns 400 + inline error message. Round-trip-side
+    invariant: the operator's typed selection is preserved in the
+    re-rendered form (X.4.e.5 pattern). Disk unchanged."""
+    pre = load_instance(writable_l2_yaml)
+    tmpl = next(
+        (t for t in pre.transfer_templates if t.leg_rail_xor_groups),
+        None,
+    )
+    if tmpl is None:
+        return
+    # AB.3.5.spec SettlementTimingCycle has 3 Variable rails + 1 XOR
+    # group of [Auto, Standard]; clearing the group ⇒ 3 non-grouped
+    # Variables ⇒ C1 rejection (max 1 non-grouped).
+    if len(tmpl.leg_rail_xor_groups) != 1:
+        return
+    tmpl_name = str(tmpl.name)
+    app = _build_app(writable_l2_yaml)
+    data: dict[str, object] = {
+        "name": tmpl_name,
+        "expected_net": str(tmpl.expected_net),
+        "completion": str(tmpl.completion),
+        "leg_rails__present": "1",
+        "leg_rails": [str(r) for r in tmpl.leg_rails],
+        "leg_rail_xor_groups__present": "1",
+        # All slots empty → tuple coerces to () → validator C1 fires.
+        "leg_rail_xor_groups__num_groups": "2",
+    }
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(f"/l2_shape/transfer_template/{tmpl_name}", data=data)
+    assert resp.status_code == 400, resp.text
+    assert "form-global-error" in resp.text
+    # Validator's exact phrasing (rewritten in AB.3.2).
+    assert "non-grouped Variable" in resp.text
+    # Disk unchanged.
+    reloaded = load_instance(writable_l2_yaml)
+    saved = next(
+        t for t in reloaded.transfer_templates if str(t.name) == tmpl_name
+    )
+    assert saved.leg_rail_xor_groups == tmpl.leg_rail_xor_groups
+
+
+def test_coerce_form_multi_select_groups_filters_empty_groups(
+) -> None:
+    """AB.3.7 — direct coerce-form unit test (no Starlette / no disk
+    persistence) so the validator-bound "removes the only XOR group"
+    case can be exercised on its own. Empty groups (operator
+    unchecked every box in a row) are filtered server-side; mixed
+    populated + empty groups preserve order of the populated ones."""
+    from recon_gen.common.html._studio_editor_routes import _coerce_form
+    from recon_gen.common.l2.primitives import Identifier
+
+    class _StubForm:
+        """Minimal FormData duck-type for _coerce_form's call shape."""
+
+        def __init__(
+            self,
+            kv: dict[str, object],
+            lists: dict[str, list[str]],
+        ) -> None:
+            self._kv = kv
+            self._lists = lists
+
+        def __contains__(self, key: str) -> bool:
+            return key in self._kv
+
+        def __getitem__(self, key: str) -> object:
+            return self._kv[key]
+
+        def get(self, key: str, default: object = None) -> object:
+            return self._kv.get(key, default)
+
+        def getlist(self, key: str) -> list[str]:
+            return list(self._lists.get(key, ()))
+
+    # Three slots; middle one empty (operator unchecked all boxes).
+    form = _StubForm(
+        kv={
+            "name": "T",
+            "expected_net": "0",
+            "completion": "business_day_end+1d",
+            "leg_rail_xor_groups__present": "1",
+            "leg_rail_xor_groups__num_groups": "3",
+        },
+        lists={
+            "leg_rails": [],
+            "leg_rail_xor_groups_0": ["RailA", "RailB"],
+            "leg_rail_xor_groups_1": [],
+            "leg_rail_xor_groups_2": ["RailC", "RailD"],
+        },
+    )
+    fields, overrides = _coerce_form("transfer_template", form)
+    assert fields["leg_rail_xor_groups"] == (
+        (Identifier("RailA"), Identifier("RailB")),
+        (Identifier("RailC"), Identifier("RailD")),
+    )
+    # Overrides preserve the operator's submission for re-render on
+    # validator-rejected POSTs.
+    assert overrides["leg_rail_xor_groups"] == (
+        ("RailA", "RailB"),
+        ("RailC", "RailD"),
+    )
+
+
+def test_coerce_form_multi_select_groups_all_empty_yields_empty_tuple(
+) -> None:
+    """AB.3.7 — operator unchecks every checkbox in every group row →
+    final value is ``()``. Validator may reject this depending on the
+    template (C1: at most 1 non-grouped Variable allowed); coerce
+    returns the empty tuple regardless and lets the validator decide."""
+    from recon_gen.common.html._studio_editor_routes import _coerce_form
+
+    class _StubForm:
+        def __init__(
+            self,
+            kv: dict[str, object],
+            lists: dict[str, list[str]],
+        ) -> None:
+            self._kv = kv
+            self._lists = lists
+
+        def __contains__(self, key: str) -> bool:
+            return key in self._kv
+
+        def __getitem__(self, key: str) -> object:
+            return self._kv[key]
+
+        def get(self, key: str, default: object = None) -> object:
+            return self._kv.get(key, default)
+
+        def getlist(self, key: str) -> list[str]:
+            return list(self._lists.get(key, ()))
+
+    form = _StubForm(
+        kv={
+            "name": "T",
+            "expected_net": "0",
+            "completion": "business_day_end+1d",
+            "leg_rail_xor_groups__present": "1",
+            "leg_rail_xor_groups__num_groups": "2",
+        },
+        lists={"leg_rails": []},
+    )
+    fields, _ = _coerce_form("transfer_template", form)
+    assert fields["leg_rail_xor_groups"] == ()
+
+
+def test_xor_groups_read_card_renders_groups_as_bullets(
+    writable_l2_yaml: Path,
+) -> None:
+    """AB.3.7 — read-only card displays ``leg_rail_xor_groups`` as a
+    bullet list ("group 1: A, B", "group 2: C, D") rather than the
+    flat-tuple stringifier's noisy ``('A', 'B'), ('C', 'D')`` shape."""
+    app = _build_app(writable_l2_yaml)
+    pre = load_instance(writable_l2_yaml)
+    tmpl = next(
+        (t for t in pre.transfer_templates if t.leg_rail_xor_groups),
+        None,
+    )
+    if tmpl is None:
+        return
+    tmpl_name = str(tmpl.name)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get(f"/l2_shape/transfer_template/{tmpl_name}")
+    assert resp.status_code == 200
+    body = resp.text
+    # Bullet-list rendering, not the flat-tuple repr.
+    assert 'class="xor-group-list"' in body
+    members = ", ".join(str(r) for r in tmpl.leg_rail_xor_groups[0])
+    assert f"group 1: {members}" in body
+    # The flat-tuple repr (parens + comma) should NOT appear.
+    assert f"(&#x27;{tmpl.leg_rail_xor_groups[0][0]}&#x27;" not in body
+
+
 def test_chain_card_id_replaces_double_colon_to_avoid_css_pseudo_element(
     writable_l2_yaml: Path,
 ) -> None:
