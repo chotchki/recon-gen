@@ -1,0 +1,98 @@
+;; AE.2 — sandbox-exec profile for the spec.recon-gen.hotchkiss.io
+;; demo instance (dashboards-only surface).
+;;
+;; macOS sandbox-exec syntax: TinyScheme S-expressions. `(deny default)`
+;; denies everything; explicit `(allow ...)` clauses re-open. Parameters
+;; are passed in via `sandbox-exec -D KEY=VALUE -f recon-demo-spec.sb -- ...`
+;; and referenced as `(param "KEY")`. Required parameters:
+;;
+;;   HOME          - the dedicated user's home directory (e.g.
+;;                   "/Users/recon-demo")
+;;   INSTANCE_DIR  - per-instance state dir
+;;                   (e.g. "/Users/recon-demo/spec_example")
+;;   PORT          - bind port for the dashboards HTTP server (e.g. "8401")
+;;   PYTHON        - the venv's python interpreter
+;;                   (e.g. "/Users/recon-demo/venv/bin/python3.13")
+;;
+;; Sanity-check the profile before wiring launchd:
+;;   sandbox-exec -D HOME=/Users/recon-demo -D INSTANCE_DIR=/Users/recon-demo/spec_example \
+;;                -D PORT=8401 -D PYTHON=/Users/recon-demo/venv/bin/python3.13 \
+;;                -f recon-demo-spec.sb -- /bin/sh
+;; Inside the shell, try `touch /Users/recon-demo/spec_example/l2.yaml` and
+;; confirm it fails with "Operation not permitted". Then try `touch
+;; /Users/recon-demo/spec_example/current.sqlite3.test` and confirm it
+;; succeeds. The sandbox is correct when those two outcomes are seen.
+
+(version 1)
+(deny default)
+(deny file-write* (with no-log))   ;; loud denies on read; silent denies on write
+
+;; ---------------------------------------------------------------------
+;; Process model — fork + exec the python interpreter and its children.
+;; ---------------------------------------------------------------------
+(allow process-fork)
+(allow process-exec
+    (literal (param "PYTHON"))
+    (subpath "/usr/lib")
+    (subpath "/usr/bin")
+    (subpath "/bin"))
+(allow signal (target same-sandbox))
+
+;; ---------------------------------------------------------------------
+;; Read access — Python stdlib, system libs, the venv, the cfg + L2 yaml.
+;; The L2 yaml is explicitly NOT in the write set (defense in depth
+;; against any UI bug that bypasses --demo-mode).
+;; ---------------------------------------------------------------------
+(allow file-read*
+    (subpath "/usr/lib")
+    (subpath "/usr/share")
+    (subpath "/System/Library")
+    (subpath "/Library/Frameworks")
+    (subpath "/private/etc")
+    (subpath (param "INSTANCE_DIR"))
+    (subpath (string-append (param "HOME") "/venv"))
+    (literal "/dev/null")
+    (literal "/dev/random")
+    (literal "/dev/urandom")
+    (literal "/dev/zero")
+    (literal "/dev/dtracehelper"))
+
+;; ---------------------------------------------------------------------
+;; Write access — restricted to the per-instance SQLite db + log dir.
+;; The cfg.yaml + l2.yaml within INSTANCE_DIR are read-only by virtue
+;; of the explicit literal allow-list below (write* targets only the
+;; specific db + log paths, not subpath INSTANCE_DIR).
+;; ---------------------------------------------------------------------
+(allow file-write*
+    (literal (string-append (param "INSTANCE_DIR") "/current.sqlite3"))
+    (literal (string-append (param "INSTANCE_DIR") "/current.sqlite3-journal"))
+    (literal (string-append (param "INSTANCE_DIR") "/current.sqlite3-wal"))
+    (literal (string-append (param "INSTANCE_DIR") "/current.sqlite3-shm"))
+    (subpath (string-append (param "INSTANCE_DIR") "/logs"))
+    (literal "/dev/null")
+    (literal "/dev/dtracehelper"))
+
+;; Allow writes under TMPDIR for short-lived Python interpreter state
+;; (.pyc compile caches, etc.). NSTemporaryDirectory varies per-user.
+(allow file-write*
+    (subpath "/tmp")
+    (subpath "/private/tmp")
+    (subpath "/private/var/folders"))
+
+;; ---------------------------------------------------------------------
+;; Network — bind only the configured port on loopback.  No outbound
+;; connections (the dashboards process serves HTTP; it doesn't fetch
+;; anything at request time — the SQLite db is local).
+;; ---------------------------------------------------------------------
+(allow network-bind
+    (local tcp (string-append "127.0.0.1:" (param "PORT"))))
+(allow network-inbound
+    (local tcp (string-append "127.0.0.1:" (param "PORT"))))
+
+;; ---------------------------------------------------------------------
+;; sysctl + mach lookups — Python's startup pokes mach services.
+;; This is the minimum that lets CPython boot under sandbox-exec.
+;; ---------------------------------------------------------------------
+(allow sysctl-read)
+(allow mach-lookup)
+(allow ipc-posix-shm)
