@@ -797,6 +797,7 @@ def _build_chains(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
     if want_xor:
         n_singleton = max(0, n_singleton - 1)  # XOR row consumes one slot
 
+    template_name_set = set(state.transfer_template_names)
     for _ in range(n_singleton):
         # Pick a fresh parent so we don't collide with later rows.
         candidates = [p for p in valid_endpoints if p not in used_parents]
@@ -805,7 +806,17 @@ def _build_chains(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
         parent = rng.choice(candidates)
         used_parents.add(parent)
         child = rng.choice(valid_children)
-        chains.append({"parent": parent, "children": [child]})
+        row: dict[str, Any] = {"parent": parent, "children": [child]}
+        # AB.4.5.fuzz: when the child resolves to a TransferTemplate,
+        # ~20% chance to mark the chain fan_in: true with a small
+        # expected_parent_count (2 or 3). Validator C8a guarantees
+        # fan_in requires template child; only template-child chains
+        # qualify for the flag. Deterministic per seed via the
+        # shared rng.
+        if child in template_name_set and rng.random() < 0.20:
+            row["fan_in"] = True
+            row["expected_parent_count"] = rng.randint(2, 3)
+        chains.append(row)
 
     # Multi-children (XOR) row.
     if want_xor:

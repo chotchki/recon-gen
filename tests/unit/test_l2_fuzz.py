@@ -96,6 +96,12 @@ def test_fuzzer_exercises_every_primitive_kind_across_seeds(
         # fires with ~50% probability per seed so this lands in roughly
         # half of META_GUARD_SEEDS.
         "xor_grouped_template": False,
+        # AB.4.5.fuzz — confirm the fuzzer emits at least one chain
+        # with fan_in=True. _build_chains gates fan_in on template-child
+        # singleton chains at ~20% probability, so this lands in
+        # roughly 20% × (template-child rate) × META_GUARD_SEEDS — sized
+        # to comfortably cover within the seed pool.
+        "fan_in_chain": False,
     }
     for seed in META_GUARD_SEEDS:
         yaml_text = random_l2_yaml(seed)
@@ -134,6 +140,9 @@ def test_fuzzer_exercises_every_primitive_kind_across_seeds(
             # AB.2.6.fuzz — singleton child resolving to a template.
             if len(c.children) == 1 and c.children[0] in template_name_set:
                 saw["chain_with_template_child"] = True
+            # AB.4.5.fuzz — chain with fan_in=True.
+            if c.fan_in:
+                saw["fan_in_chain"] = True
         # AB.3.5.fuzz — TT with non-empty leg_rail_xor_groups.
         for t in inst.transfer_templates:
             if t.leg_rail_xor_groups:
