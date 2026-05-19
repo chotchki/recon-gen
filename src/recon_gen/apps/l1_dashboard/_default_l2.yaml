@@ -96,6 +96,33 @@ rails:
     metadata_keys: [merchant_id, customer_id, settlement_period]
     max_unbundled_age: PT4H
 
+  # AB.3.5.spec (2026-05-19) — three Variable-direction settlement-timing
+  # variants for the AB.3 XOR group demo. Each represents a different
+  # settlement cadence (auto-confirm at sale, standard T+1, slow
+  # manual-review T+3); per-merchant config picks ONE per
+  # SettlementTimingCycle Transfer. The AB.3.3 xor_group_violation
+  # matview surfaces Transfers where zero variants fire (missed) or two+
+  # fire (overlap). All three share leg_role=ClearingSuspense (the
+  # generic singleton) so the baseline emitter has a stable target
+  # without fan-out across template instances.
+  - name: SettlementAuto
+    leg_role: ClearingSuspense
+    leg_direction: Variable
+    origin: InternalInitiated
+    metadata_keys: [settlement_cycle_id]
+
+  - name: SettlementStandard
+    leg_role: ClearingSuspense
+    leg_direction: Variable
+    origin: InternalInitiated
+    metadata_keys: [settlement_cycle_id]
+
+  - name: SettlementSlow
+    leg_role: ClearingSuspense
+    leg_direction: Variable
+    origin: InternalInitiated
+    metadata_keys: [settlement_cycle_id]
+
   # Aggregating two-leg that bundles SubledgerCharge → satisfies R8 + R11.
   - name: PoolBalancing
     source_role: NorthPool
@@ -153,6 +180,29 @@ transfer_templates:
     completion: business_day_end+1d
     leg_rails:
       - ReconciliationLeg
+
+  # AB.3.5.spec (2026-05-19) — multi-Variable template with one XOR
+  # group of 2 members. SettlementAuto and SettlementStandard are
+  # mutually exclusive (the merchant's config picks ONE per cycle);
+  # SettlementSlow stays as the lone non-grouped Variable for cycles
+  # routed through manual review. The auto-scenario's
+  # XorVariantMissedFiringPlant fires SettlementSlow as the witness
+  # (group has zero firings → matview firing_count=0 violation); the
+  # XorVariantOverlapPlant emits both SettlementAuto + SettlementStandard
+  # for one Transfer (group has 2 firings → firing_count=2 violation).
+  # Together they exercise BOTH branches of the AB.3.3 matview's HAVING
+  # firing_count <> 1 filter.
+  - name: SettlementTimingCycle
+    expected_net: 0
+    transfer_key: [settlement_cycle_id]
+    completion: business_day_end+1d
+    leg_rails:
+      - SettlementAuto
+      - SettlementStandard
+      - SettlementSlow
+    leg_rail_xor_groups:
+      - - SettlementAuto
+        - SettlementStandard
 
 chains:
   # First chain on spec_example — makes the L2FT Chains sheet

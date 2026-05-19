@@ -656,33 +656,37 @@ def _render_xor_group_violation_body(
             f"WHERE 1=0"
         )
 
-    # Build the inline VALUES list — one row per (template, group_index,
-    # member). Oracle: emit as UNION-ALL of SELECT FROM dual since
-    # standalone VALUES isn't reliably supported. Postgres + SQLite
-    # support `VALUES (...)` directly.
+    # Build the inline rowset of (template, group_index, member) triples.
+    # SQLite doesn't accept the PG-style ``(VALUES ...) AS g(col, ...)``
+    # column-list alias — moving the column-list onto the WITH clause
+    # (``WITH g(col, ...) AS (VALUES ...)``) is portable across PG +
+    # SQLite. Oracle has neither shape; use ``SELECT ... FROM dual
+    # UNION ALL`` so the columns get their names from the SELECT-list.
+    fired_rails_agg = concat_agg("tx.rail_name", ",", dialect)
     if dialect is Dialect.ORACLE:
-        # Oracle's VALUES clause is restricted; use SELECT...FROM dual UNION ALL.
         union_rows = "\n  UNION ALL ".join(
             f"SELECT '{t}' AS template_name, "
             f"{gi} AS xor_group_index, "
             f"'{m}' AS member_rail_name FROM dual"
             for t, gi, m in triples
         )
-        groups_cte = f"(\n  {union_rows}\n)"
+        xor_groups_cte = (
+            f"xor_groups AS (\n"
+            f"  {union_rows}\n"
+            f")"
+        )
     else:
         rows = ",\n    ".join(
             f"('{t}', {gi}, '{m}')" for t, gi, m in triples
         )
-        groups_cte = (
-            f"(VALUES\n    {rows}\n) "
-            f"AS g(template_name, xor_group_index, member_rail_name)"
+        xor_groups_cte = (
+            f"xor_groups(template_name, xor_group_index, member_rail_name) AS (\n"
+            f"  VALUES\n    {rows}\n"
+            f")"
         )
 
-    fired_rails_agg = concat_agg("tx.rail_name", ",", dialect)
     return (
-        f"WITH xor_groups AS (\n"
-        f"  SELECT * FROM {groups_cte}\n"
-        f"),\n"
+        f"WITH {xor_groups_cte},\n"
         f"template_transfers AS (\n"
         f"  -- Every Transfer instance of a template that has at least\n"
         f"  -- one XOR group. We GROUP BY (transfer_id, template_name)\n"
