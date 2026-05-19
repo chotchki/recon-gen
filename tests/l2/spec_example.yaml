@@ -290,16 +290,16 @@ chains:
   # matview reads the cardinality per child Transfer.
   - parent: BatchPayoutTrigger
     children:
-      - BatchedPayoutBatch
-    fan_in: true
-    expected_parent_count: 2
+      - name: BatchedPayoutBatch
+        fan_in: true
+        expected_parent_count: 2
     description: |
-      Demonstrates N:1 fan-in chain semantics. Multiple
-      BatchPayoutTrigger firings (the upstream settlements) share
-      one BatchedPayoutBatch Transfer (the downstream batch payout).
-      The L1 fan_in_disagreement invariant flags batches whose
-      parent_count != expected_parent_count (missing contributor or
-      extra contributor — both ETL bugs).
+      Demonstrates N:1 fan-in chain semantics (AB.6 per-child shape).
+      Multiple BatchPayoutTrigger firings (the upstream settlements)
+      share one BatchedPayoutBatch Transfer (the downstream batch
+      payout). The L1 fan_in_disagreement invariant flags batches
+      whose parent_count != expected_parent_count (missing contributor
+      or extra contributor — both ETL bugs).
 
 limit_schedules:
   # Cap matches ExternalRailOutbound (Z.B 2026-05-15: rail name IS the type).

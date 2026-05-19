@@ -78,14 +78,17 @@ per child via DISTINCT, and the L1 ``<prefix>_fan_in_disagreement``
 matview flags batches whose actual parent count doesn't match the
 declared expected count (missing or extra contribution).
 
-A fan-in chain has two extra fields on top of the regular chain
-shape:
+A fan-in entry rides on a specific child in the ``children:`` list
+via the mapping form (AB.6 2026-05-19 — per-child shape; chain-level
+``fan_in`` / ``expected_parent_count`` were retired so mixed-cardinality
+chains compose naturally — some 1:1 children + some N:1 children
+under one chain). Each child entry may carry two optional fields:
 
-- ``fan_in: true`` — declares the N:1 inversion. Default ``false``
-  (every pre-AB.4 chain row stays byte-equivalent). Validator C8a
-  requires every child to resolve to a TransferTemplate when
-  ``fan_in=true`` (rail-as-child fan-in is undefined per gap doc §2
-  footnote — close that door at load time).
+- ``fan_in: true`` — declares the N:1 inversion for THIS child.
+  Default ``false`` (every bare-Identifier child stays byte-equivalent).
+  Validator C8a requires the child to resolve to a TransferTemplate
+  when ``fan_in=true`` (rail-as-child fan-in is undefined per gap doc
+  §2 footnote — close that door at load time).
 - ``expected_parent_count: N`` (optional, int ≥2) — the contract
   strength. When set, the L1 matview flags batches where
   ``parent_count != expected`` (kind ``'missing'`` for too few,
@@ -96,6 +99,18 @@ shape:
   (a 1-parent fan-in is degenerate — it's just a 1:1 chain).
   Validator C8b requires the field to be unset when ``fan_in=false``
   (the field carries meaning only under fan-in).
+
+YAML shape — a bare child (no flags) lowers to defaults:
+
+```yaml
+chains:
+  - parent: ParentRail
+    children:
+      - SimpleChild              # bare Identifier ⇒ fan_in=false
+      - name: BatchedChild       # mapping form opts in to fan_in
+        fan_in: true
+        expected_parent_count: 3
+```
 
 The L1 ``<prefix>_fan_in_disagreement`` matview surfaces violations
 on Today's Exceptions under ``check_type='fan_in_disagreement'``;

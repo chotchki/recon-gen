@@ -1064,18 +1064,19 @@ chains:
 
   - parent: MerchantDailySettleAggregator
     children:
-      - MerchantWeeklyPayoutBatch
-    fan_in: true
-    expected_parent_count: 5
+      - name: MerchantWeeklyPayoutBatch
+        fan_in: true
+        expected_parent_count: 5
     description: |
-      AB.4 fan-in chain (gap doc §2 MerchantPayoutBatch). 5 daily
-      MerchantDailySettleAggregator firings (one per business day
-      of the week) share ONE MerchantWeeklyPayoutBatch Transfer.
-      The AB.4.3 `_transfer_parents` matview derives the multi-
-      parent set per child; AB.4.7's `_fan_in_disagreement` matview
-      reads parent_count vs expected_parent_count=5 to flag
-      batches missing a daily contribution (parent_count<5) or
-      carrying an extra one (parent_count>5).
+      AB.4 fan-in chain (gap doc §2 MerchantPayoutBatch; AB.6
+      per-child shape). 5 daily MerchantDailySettleAggregator firings
+      (one per business day of the week) share ONE
+      MerchantWeeklyPayoutBatch Transfer. The AB.4.3
+      `_transfer_parents` matview derives the multi-parent set per
+      child; AB.4.7's `_fan_in_disagreement` matview reads
+      parent_count vs expected_parent_count=5 to flag batches
+      missing a daily contribution (parent_count<5) or carrying an
+      extra one (parent_count>5).
 
 # ---------------------------------------------------------------------
 # Limit schedules — daily outbound caps per (parent role, transfer type).

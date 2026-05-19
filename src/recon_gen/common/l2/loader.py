@@ -1063,32 +1063,37 @@ _LEGACY_CHAIN_KEYS_REJECT_MSG = (
 )
 
 
-def _load_chain(raw: object, *, path: str) -> Chain:
-    raw_d = _as_mapping(raw, path=path, what="chain")
-    # Reject legacy keys with an actionable error pointing at the PLAN.
-    legacy = [k for k in ("child", "required", "xor_group") if k in raw_d]
-    if legacy:
-        raise L2LoaderError(
-            f"{path}: legacy chain key(s) {legacy} no longer supported. "
-            f"{_LEGACY_CHAIN_KEYS_REJECT_MSG}",
+_AB6_CHAIN_LEVEL_FAN_IN_REJECT_MSG = (
+    "AB.6 (2026-05-19): chain-level `fan_in` / `expected_parent_count` "
+    "have moved to per-child entries. Replace "
+    "`children: [TplName]` + chain-level `fan_in: true` + "
+    "`expected_parent_count: N` with the per-child mapping form: "
+    "`children: [{name: TplName, fan_in: true, expected_parent_count: N}]`. "
+    "Mixed-cardinality chains (some 1:1 children + some N:1 children) "
+    "are now expressible because each child carries its own flag. See "
+    "concepts/l2/chain.md for the per-child shape."
+)
+
+
+def _load_chain_child_spec(raw: object, *, path: str) -> ChainChildSpec:
+    """AB.6.2 heterogeneous parser: a chain child entry may be EITHER
+    a bare Identifier (no fan_in, no expected_parent_count) OR a
+    mapping {name, fan_in?, expected_parent_count?}.
+
+    Mirrors AB.1's LimitSchedule.direction non-default emit pattern at
+    the load layer: bare form lowers to defaults; mapping form lets the
+    operator opt in to per-child flags only on the children that need them.
+    """
+    if isinstance(raw, str):
+        return ChainChildSpec(
+            name=_load_identifier(raw, path=path),
+            fan_in=False,
+            expected_parent_count=None,
         )
-    children_raw = _as_list(
-        _require(raw_d, "children", path=path),
-        path=f"{path}.children",
+    raw_d = _as_mapping(raw, path=path, what="chain child")
+    name = _load_identifier(
+        _require(raw_d, "name", path=path), path=f"{path}.name",
     )
-    if not children_raw:
-        raise L2LoaderError(
-            f"{path}.children: must be a non-empty list (singleton ⇒ "
-            f"required, multi ⇒ XOR per Z.A grammar). Got [].",
-        )
-    child_names = tuple(
-        _load_identifier(item, path=f"{path}.children[{i}]")
-        for i, item in enumerate(children_raw)
-    )
-    # AB.6.1 transitional: chain-level fan_in / expected_parent_count
-    # still parsed (AB.4 yaml shape) and synthesized into every child.
-    # Per AB.6.0 Lock 2 hard cut, AB.6.2 will REJECT chain-level keys
-    # with an actionable error pointing at the per-child shape.
     fan_in_raw = raw_d.get("fan_in", False)
     if not isinstance(fan_in_raw, bool):
         raise L2LoaderError(
@@ -1106,13 +1111,45 @@ def _load_chain(raw: object, *, path: str) -> Chain:
                 f"{type(expected_raw).__name__}",
             )
         expected_parent_count = expected_raw
-    children = tuple(
-        ChainChildSpec(
-            name=name,
-            fan_in=fan_in_raw,
-            expected_parent_count=expected_parent_count,
+    return ChainChildSpec(
+        name=name,
+        fan_in=fan_in_raw,
+        expected_parent_count=expected_parent_count,
+    )
+
+
+def _load_chain(raw: object, *, path: str) -> Chain:
+    raw_d = _as_mapping(raw, path=path, what="chain")
+    # Reject legacy keys with an actionable error pointing at the PLAN.
+    legacy = [k for k in ("child", "required", "xor_group") if k in raw_d]
+    if legacy:
+        raise L2LoaderError(
+            f"{path}: legacy chain key(s) {legacy} no longer supported. "
+            f"{_LEGACY_CHAIN_KEYS_REJECT_MSG}",
         )
-        for name in child_names
+    # AB.6.2 hard cut (per AB.6.0 Lock 2): chain-level fan_in /
+    # expected_parent_count are rejected with an actionable error
+    # pointing at the per-child shape. No deprecation grace.
+    chain_level = [
+        k for k in ("fan_in", "expected_parent_count") if k in raw_d
+    ]
+    if chain_level:
+        raise L2LoaderError(
+            f"{path}: chain-level {chain_level} no longer supported. "
+            f"{_AB6_CHAIN_LEVEL_FAN_IN_REJECT_MSG}",
+        )
+    children_raw = _as_list(
+        _require(raw_d, "children", path=path),
+        path=f"{path}.children",
+    )
+    if not children_raw:
+        raise L2LoaderError(
+            f"{path}.children: must be a non-empty list (singleton ⇒ "
+            f"required, multi ⇒ XOR per Z.A grammar). Got [].",
+        )
+    children = tuple(
+        _load_chain_child_spec(item, path=f"{path}.children[{i}]")
+        for i, item in enumerate(children_raw)
     )
     return Chain(
         parent=_load_identifier(

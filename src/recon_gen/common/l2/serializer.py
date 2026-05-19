@@ -28,6 +28,7 @@ from recon_gen.common.l2.primitives import (
     Account,
     AccountTemplate,
     Chain,
+    ChainChildSpec,
     L2Instance,
     LimitSchedule,
     Rail,
@@ -231,28 +232,26 @@ def _dump_transfer_template(t: TransferTemplate) -> dict[str, Any]:  # typing-sm
     return out
 
 
+def _dump_chain_child(child: object) -> str | dict[str, Any]:  # typing-smell: ignore[explicit-any]: heterogeneous YAML row
+    """AB.6.2 heterogeneous emit: bare-Identifier when ChainChildSpec
+    carries defaults; mapping form otherwise. Mirrors AB.1's
+    `LimitSchedule.direction` non-default emit pattern."""
+    assert isinstance(child, ChainChildSpec)  # noqa: S101 - typed boundary; _dump_chain only feeds ChainChildSpec
+    if not child.fan_in and child.expected_parent_count is None:
+        return str(child.name)
+    out: dict[str, Any] = {"name": str(child.name)}  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
+    if child.fan_in:
+        out["fan_in"] = True
+    if child.expected_parent_count is not None:
+        out["expected_parent_count"] = child.expected_parent_count
+    return out
+
+
 def _dump_chain(c: Chain) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
     out: dict[str, Any] = {  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
         "parent": str(c.parent),
-        "children": [str(child.name) for child in c.children],
+        "children": [_dump_chain_child(child) for child in c.children],
     }
-    # AB.6.1 transitional: collapse per-child fan_in / expected_parent_count
-    # back to chain-level for AB.4-shape round-trip parity. AB.6.2 will
-    # emit per-child mapping form when children diverge; for now (AB.6.1)
-    # AB.4-era yamls (all children share the same flag) round-trip
-    # byte-equivalent through this collapse.
-    if any(child.fan_in for child in c.children):
-        out["fan_in"] = True
-    epcs = {
-        child.expected_parent_count
-        for child in c.children
-        if child.expected_parent_count is not None
-    }
-    if epcs:
-        # AB.6.1 invariant: AB.4 yamls only express one chain-level
-        # expected_parent_count, so all per-child copies match. AB.6.2
-        # heterogeneous emit handles the divergent case.
-        out["expected_parent_count"] = next(iter(epcs))
     if c.description is not None:
         out["description"] = c.description
     return out

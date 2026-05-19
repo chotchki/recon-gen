@@ -27,8 +27,9 @@ The institution wants:
 
 This is exactly the AB.4
 [fan-in chain](../../concepts/l2/chain.md#fan-in-chains-ab4-n-parents-one-child-transfer)
-feature. You declare a chain with ``fan_in: true`` + a fixed
-``expected_parent_count: N``; the runtime aggregates N parent
+feature. You declare a chain whose specific child carries
+``fan_in: true`` + a fixed ``expected_parent_count: N`` (per-child
+shape from AB.6 2026-05-19); the runtime aggregates N parent
 firings into one child Transfer; the L1
 ``<prefix>_fan_in_disagreement`` matview flags batches whose actual
 parent set diverges from the declared count.
@@ -121,9 +122,9 @@ chains:
 
   - parent: MerchantDailySettleAggregator
     children:
-      - MerchantWeeklyPayoutBatch
-    fan_in: true
-    expected_parent_count: 5
+      - name: MerchantWeeklyPayoutBatch
+        fan_in: true
+        expected_parent_count: 5
     description: |
       5 daily MerchantDailySettleAggregator firings aggregate into
       one weekly MerchantWeeklyPayoutBatch Transfer per merchant.
@@ -191,12 +192,13 @@ without reading the yaml.
   AB.4 gap doc §2 footnote closes that door explicitly. If you
   need to fan multiple rails into one downstream rail, model it
   with a template wrapping the downstream rail.
-- **Don't set ``expected_parent_count`` on a non-fan-in chain.**
+- **Don't set ``expected_parent_count`` on a non-fan-in child entry.**
   Validator C8b rejects this. The field carries no meaning under
   ``fan_in=false`` and would mislead operators reading the yaml.
 - **Don't set ``expected_parent_count=1``.** Validator C8c
   rejects this. A 1-parent fan-in is degenerate — it's just a 1:1
-  chain. If you want a 1:1 chain, drop ``fan_in: true`` entirely.
+  chain. If you want a 1:1 chain, drop ``fan_in: true`` entirely
+  (and you can use the bare-Identifier child form).
 - **Don't leave ``expected_parent_count`` unset for fixed-size
   batches.** The matview falls back to orphan-only detection
   (parent_count < 2), so missing/extra cases never surface. Set

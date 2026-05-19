@@ -322,10 +322,10 @@ apart for visual separability).
 
 ### 10. `{{ l2_instance_name }}_fan_in_disagreement` — Fan-in chain parent-set mismatch (AB.4.7)
 
-> For every chain declaring `fan_in: true`, every child Transfer's
-> contributing parent set SHOULD match the chain's
-> `expected_parent_count` (when set), or have cardinality ≥2 (when
-> unset).
+> For every chain child entry declaring `fan_in: true` (AB.6
+> per-child shape), every child Transfer's contributing parent set
+> SHOULD match the entry's `expected_parent_count` (when set), or
+> have cardinality ≥2 (when unset).
 
 A child Transfer where the contributing parent set deviates from
 the chain's expected count surfaces here. The pattern usually
@@ -349,8 +349,9 @@ row when:
 - `expected_parent_count IS NOT NULL AND parent_count > expected` →
   `disagreement_kind='extra'`.
 
-When no chain declares `fan_in: true`, the matview short-circuits
-with `WHERE 1=0` (parses cleanly across all 3 dialects, zero rows).
+When no chain child declares `fan_in: true`, the matview
+short-circuits with `WHERE 1=0` (parses cleanly across all 3
+dialects, zero rows).
 
 **Columns:** `child_transfer_id`, `chain_parent_name`,
 `child_template_name`, `parent_count` (actual contributing

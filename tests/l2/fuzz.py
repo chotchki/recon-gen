@@ -823,16 +823,23 @@ def _build_chains(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
         parent = rng.choice(candidates)
         used_parents.add(parent)
         child = rng.choice(valid_children)
-        row: dict[str, Any] = {"parent": parent, "children": [child]}
-        # AB.4.5.fuzz: when the child resolves to a TransferTemplate,
-        # ~20% chance to mark the chain fan_in: true with a small
-        # expected_parent_count (2 or 3). Validator C8a guarantees
-        # fan_in requires template child; only template-child chains
-        # qualify for the flag. Deterministic per seed via the
-        # shared rng.
+        row: dict[str, Any]
+        # AB.6.2 (per-child shape): when the child resolves to a
+        # TransferTemplate, ~20% chance to emit it in mapping form
+        # with fan_in: true + a small expected_parent_count (2 or 3).
+        # Validator C8a guarantees fan_in requires template child;
+        # only template-child chains qualify for the flag. Bare-form
+        # children round-trip through the loader as ChainChildSpec
+        # with defaults (fan_in=False). Deterministic per seed.
         if child in template_name_set and rng.random() < 0.20:
-            row["fan_in"] = True
-            row["expected_parent_count"] = rng.randint(2, 3)
+            child_entry: dict[str, Any] = {
+                "name": child,
+                "fan_in": True,
+                "expected_parent_count": rng.randint(2, 3),
+            }
+            row = {"parent": parent, "children": [child_entry]}
+        else:
+            row = {"parent": parent, "children": [child]}
         chains.append(row)
 
     # Multi-children (XOR) row.
