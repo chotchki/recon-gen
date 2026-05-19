@@ -46,6 +46,11 @@ INVARIANT_KIND_TO_SHEET: dict[str, str] = {
     "limit_breach": "Limit Breach",
     "stuck_pending": "Pending Aging",
     "stuck_unbundled": "Unbundled Aging",
+    # AB.2.3 — chain_parent_disagreement surfaces only on Today's
+    # Exceptions (no dedicated sheet, because the violation is keyed
+    # on transfer_id not (account, day) and the analyst's drill goes
+    # straight to the Transactions sheet via the conflicting parent ids).
+    "chain_parent_disagreement": "Today's Exceptions",
     "supersession_audit": "Supersession Audit",
 }
 

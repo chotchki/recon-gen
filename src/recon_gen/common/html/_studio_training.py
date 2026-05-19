@@ -61,6 +61,9 @@ _L1_KIND_TO_SHEET_ID: Final[dict[str, str]] = {
     "limit_breach": "l1-sheet-limit-breach",
     "stuck_pending": "l1-sheet-pending-aging",
     "stuck_unbundled": "l1-sheet-unbundled-aging",
+    # AB.2.3 — chain_parent_disagreement surfaces only on Today's
+    # Exceptions (no dedicated sheet); deep-link there.
+    "chain_parent_disagreement": "l1-sheet-todays-exceptions",
     "supersession_audit": "l1-sheet-supersession-audit",
 }
 
@@ -79,6 +82,7 @@ _DISPLAY_ORDER: Final[tuple[str, ...]] = (
     "expected_eod_balance_breach",
     "stuck_pending",
     "stuck_unbundled",
+    "chain_parent_disagreement",  # AB.2.3
     "supersession_audit",
 )
 

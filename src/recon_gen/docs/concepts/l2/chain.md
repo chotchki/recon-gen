@@ -35,6 +35,32 @@ transactions but you want hygiene to check the second one happened.
 > you can investigate why the chain broke (rail SQL error, missing
 > data, manual posting that bypassed automation, etc).
 
+## Template-as-chain-child (AB.2)
+
+When a chain row's ``children`` entry resolves to a TransferTemplate
+(rather than a Rail), the firing semantic shifts in two ways:
+
+1. **First-firing-wins.** The first leg_rail firing of the child
+   template establishes the shared Transfer's ``parent_transfer_id`` —
+   subsequent leg_rail firings reuse that same value. All legs of the
+   child template aggregate into ONE child Transfer per chain
+   invocation.
+2. **Chain Parent Disagreement.** When subsequent leg_rail firings
+   claim a *different* ``parent_transfer_id`` than the first-firing
+   established (typically an ETL bug — stale parent reference,
+   cross-cycle contamination, race condition), the L1
+   ``<prefix>_chain_parent_disagreement`` matview surfaces the
+   conflict on Today's Exceptions under
+   ``check_type='chain_parent_disagreement'``.
+
+The validator auto-derives the implicit ``parent_transfer_id`` posted
+metadata requirement for every leg_rail of a chain-child template — no
+operator-explicit YAML declaration needed (the chain relationship is
+the single source of truth, per AB.2.0 design lock).
+
+> See [How do I chain two templates?](../../walkthroughs/customization/how-do-i-chain-two-templates.md)
+> for a worked example.
+
 ## Specific example for you
 
 {{ l2_chain_focus() }}

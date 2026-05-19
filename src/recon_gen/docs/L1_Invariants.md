@@ -227,6 +227,48 @@ days_ago=35` surfaces with `age_seconds > max_unbundled_age_seconds`
 (2,678,400s for the `CustomerFeeAccrual` rail's P31D cap).
 {% endif %}
 
+### 8. `{{ l2_instance_name }}_chain_parent_disagreement` — Two-template chain Parent disagreement (AB.2.3)
+
+> For every two-template chain (chain.children resolves to a
+> TransferTemplate), every leg_rail firing of one child Transfer
+> SHOULD agree on which parent firing it descends from
+> (first-firing-wins per gap doc §3).
+
+A child Transfer where leg_rail firings claim **different**
+`parent_transfer_id` values surfaces here. The pattern usually means
+an ETL bug: stale parent reference, cross-cycle contamination, or a
+race where two parent firings both wrote into the same downstream
+template Transfer.
+
+The matview groups by `(transfer_id, template_name)` over
+`<prefix>_current_transactions` and gates on
+`COUNT(DISTINCT transfer_parent_id) > 1`. Filters keep rail-as-child
+chains out (`template_name IS NOT NULL`) and exclude `Failed` legs
+(metadata is unreliable on failures).
+
+**Columns:** `transfer_id`, `child_template_name`, `business_day`
+(MIN of conflicting leg postings), `distinct_parent_count` (the
+cardinality, ≥2 = violation), `parent_transfer_id_min` /
+`parent_transfer_id_max` (sample conflicting values for analyst drill
+without re-running the GROUP BY).
+
+**What to do:** Identify which leg_rails of the child template wrote
+the conflicting `parent_transfer_id` values — usually the bug is
+upstream of the matview (in the ETL adapter that assigns
+`parent_transfer_id` from a stale reference). Compare the two parents
+by drilling into their respective transfer_ids on the Transactions
+sheet; one should be the correct first-firing parent and the other a
+contamination from an unrelated cycle. Fix the ETL's parent-resolution
+logic and re-run the affected child Transfer.
+
+{% if vocab.fixture_name == "sasquatch_pr" %}
+**the matview should surface:** a planted `ChainParentDisagreementPlant`
+on `InternalTransferCycle` (chain child of `CustomerFeeAccrual`) at
+days_ago=1 — two leg rows share one child_transfer_id but carry
+different parent_transfer_ids ("tr-cpd-parent-a-0001" vs
+"tr-cpd-parent-b-0001").
+{% endif %}
+
 ## Diagnostic surface — Supersession Audit
 
 `{{ l2_instance_name }}_supersession_*` is **not** a SHOULD-constraint — it's a

@@ -187,14 +187,16 @@ def test_parse_l1_invariants_columns_block_wraps_across_lines() -> None:
 
 
 def test_bundled_invariants_yields_expected_kinds() -> None:
-    # The doc evolves, but these eight kinds are the contract the
-    # dashboard panels (AA.C.3) + trainer pane (AA.C.5) wire against.
-    # Adding a new kind here is fine; *losing* one would orphan a panel.
+    # The doc evolves; the contract is "no kind drops off the bottom"
+    # (losing one would orphan a panel). AB.2.3 added
+    # ``chain_parent_disagreement``.
     sections = load_bundled_invariants()
     assert set(sections.keys()) == {
         "drift", "ledger_drift", "overdraft",
         "expected_eod_balance_breach", "limit_breach",
-        "stuck_pending", "stuck_unbundled", "supersession_audit",
+        "stuck_pending", "stuck_unbundled",
+        "chain_parent_disagreement",  # AB.2.3
+        "supersession_audit",
     }
 
 
