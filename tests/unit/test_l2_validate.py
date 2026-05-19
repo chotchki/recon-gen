@@ -1048,3 +1048,208 @@ def test_c6_duplicate_child_under_same_parent_rejected() -> None:
         match=r"Chain parent 'MerchantSettlementCycle'.*ExtInbound",
     ):
         validate(bad)
+
+
+# -- C1a-d (AB.3): leg_rail_xor_groups structural rules --------------------
+
+
+def _xor_baseline_instance() -> L2Instance:
+    """Baseline extended with 3 Variable-direction SingleLegRails +
+    a 2-member XOR group on a new TransferTemplate. The 3rd Variable
+    rail stays as the lone non-grouped Variable so C1 (at most 1
+    non-grouped Variable per template) still holds. Every C1a-d
+    test below mutates this baseline to trip exactly one rule.
+    """
+    base = _baseline_instance()
+    extra_rails = (
+        SingleLegRail(
+            name=Identifier("VarAuto"),
+            origin="InternalInitiated",
+            metadata_keys=(Identifier("cycle_id"),),
+            leg_role=(Identifier("CustomerSubledger"),),
+            leg_direction="Variable",
+        ),
+        SingleLegRail(
+            name=Identifier("VarStandard"),
+            origin="InternalInitiated",
+            metadata_keys=(Identifier("cycle_id"),),
+            leg_role=(Identifier("CustomerSubledger"),),
+            leg_direction="Variable",
+        ),
+        SingleLegRail(
+            name=Identifier("VarSlow"),
+            origin="InternalInitiated",
+            metadata_keys=(Identifier("cycle_id"),),
+            leg_role=(Identifier("CustomerSubledger"),),
+            leg_direction="Variable",
+        ),
+    )
+    xor_tmpl = TransferTemplate(
+        name=Identifier("VarCycle"),
+        expected_net=Decimal("0"),
+        transfer_key=(Identifier("cycle_id"),),
+        completion="business_day_end+1d",
+        leg_rails=(
+            Identifier("VarAuto"),
+            Identifier("VarStandard"),
+            Identifier("VarSlow"),
+        ),
+        leg_rail_xor_groups=((
+            Identifier("VarAuto"), Identifier("VarStandard"),
+        ),),
+    )
+    return _replace(
+        base,
+        rails=base.rails + extra_rails,
+        transfer_templates=base.transfer_templates + (xor_tmpl,),
+    )
+
+
+def test_c1a_xor_member_outside_leg_rails_rejected() -> None:
+    """C1a: every XOR-group member MUST also appear in the template's
+    leg_rails. ``SubledgerCharge`` is a real rail but isn't in
+    VarCycle.leg_rails → C1a fires. Group includes both grouped
+    Variables plus the violator so C1 (≤1 non-grouped Variable) and
+    C1d (≥2 members) stay clean — C1a's the only failing rule."""
+    inst = _xor_baseline_instance()
+    bad_tmpl = dataclasses.replace(
+        inst.transfer_templates[-1],
+        leg_rail_xor_groups=((
+            Identifier("VarAuto"),
+            Identifier("VarStandard"),
+            Identifier("SubledgerCharge"),
+        ),),
+    )
+    new_templates = inst.transfer_templates[:-1] + (bad_tmpl,)
+    bad = _replace(inst, transfer_templates=new_templates)
+    with pytest.raises(
+        L2ValidationError,
+        match=r"SubledgerCharge.*not in this template's `leg_rails`",
+    ):
+        validate(bad)
+
+
+def test_c1b_xor_member_non_variable_rail_rejected() -> None:
+    """C1b: every XOR-group member MUST resolve to a Variable-direction
+    SingleLegRail. Add a Debit single-leg rail to the template's
+    leg_rails (so C1a passes), pair it with the two Variables in
+    the XOR group → C1b fires (Debit rail in XOR is the rule
+    violation; C1 passes because all 3 Variables are now grouped)."""
+    inst = _xor_baseline_instance()
+    debit_rail = SingleLegRail(
+        name=Identifier("VarDebitOnly"),
+        origin="InternalInitiated",
+        metadata_keys=(Identifier("cycle_id"),),
+        leg_role=(Identifier("CustomerSubledger"),),
+        leg_direction="Debit",
+    )
+    # All 3 Variables + 1 Debit in leg_rails; group spans 2 Variables
+    # + the Debit → C1b on the Debit; VarSlow non-grouped (legal C1).
+    bad_tmpl = dataclasses.replace(
+        inst.transfer_templates[-1],
+        leg_rails=inst.transfer_templates[-1].leg_rails + (
+            Identifier("VarDebitOnly"),
+        ),
+        leg_rail_xor_groups=((
+            Identifier("VarAuto"),
+            Identifier("VarStandard"),
+            Identifier("VarDebitOnly"),
+        ),),
+    )
+    new_templates = inst.transfer_templates[:-1] + (bad_tmpl,)
+    bad = _replace(
+        inst,
+        rails=inst.rails + (debit_rail,),
+        transfer_templates=new_templates,
+    )
+    with pytest.raises(
+        L2ValidationError,
+        match=r"VarDebitOnly.*Variable-direction.*SingleLegRail",
+    ):
+        validate(bad)
+
+
+def test_c1c_xor_member_in_two_groups_rejected() -> None:
+    """C1c: no rail appears in two XOR groups within the same template.
+    Two groups sharing VarAuto → ambiguous deterministic resolution."""
+    inst = _xor_baseline_instance()
+    bad_tmpl = dataclasses.replace(
+        inst.transfer_templates[-1],
+        leg_rail_xor_groups=(
+            (Identifier("VarAuto"), Identifier("VarStandard")),
+            (Identifier("VarAuto"), Identifier("VarSlow")),
+        ),
+    )
+    new_templates = inst.transfer_templates[:-1] + (bad_tmpl,)
+    bad = _replace(inst, transfer_templates=new_templates)
+    with pytest.raises(
+        L2ValidationError,
+        match=r"VarAuto.*appears in two XOR groups.*groups 0 and 1",
+    ):
+        validate(bad)
+
+
+def test_c1d_xor_group_singleton_member_rejected() -> None:
+    """C1d: every XOR group has ≥2 members. A 1-member group is
+    degenerate — the lone rail always fires, the XOR adds nothing.
+    Two groups: a legal 2-member group + a violating 1-member group
+    so all 3 Variables stay grouped (C1 passes), no rail in two
+    groups (C1c passes), C1d's the only failing rule."""
+    inst = _xor_baseline_instance()
+    bad_tmpl = dataclasses.replace(
+        inst.transfer_templates[-1],
+        leg_rail_xor_groups=(
+            (Identifier("VarAuto"), Identifier("VarStandard")),
+            (Identifier("VarSlow"),),
+        ),
+    )
+    new_templates = inst.transfer_templates[:-1] + (bad_tmpl,)
+    bad = _replace(inst, transfer_templates=new_templates)
+    with pytest.raises(
+        L2ValidationError,
+        match=r"VarCycle.*leg_rail_xor_groups\[1\].*1 member",
+    ):
+        validate(bad)
+
+
+def test_c1_at_most_one_non_grouped_variable_per_template() -> None:
+    """C1 (rewrite, AB.3.2): members of leg_rail_xor_groups are exempt
+    from the ≤1 non-grouped Variable cap. Baseline has 3 Variable
+    rails — 2 in the group + 1 non-grouped (VarSlow) — passes. Drop
+    the group → all 3 become non-grouped → C1 fires."""
+    inst = _xor_baseline_instance()
+    # Baseline passes (2 grouped, 1 non-grouped Variable — legal).
+    validate(inst)
+    # Drop the group; now all 3 Variables are non-grouped.
+    bad_tmpl = dataclasses.replace(
+        inst.transfer_templates[-1],
+        leg_rail_xor_groups=(),
+    )
+    new_templates = inst.transfer_templates[:-1] + (bad_tmpl,)
+    bad = _replace(inst, transfer_templates=new_templates)
+    with pytest.raises(
+        L2ValidationError,
+        match=(
+            r"contains 3 non-grouped Variable-direction legs.*"
+            r"at most one"
+        ),
+    ):
+        validate(bad)
+
+
+def test_c1_three_variables_two_grouped_one_non_grouped_accepted() -> None:
+    """C1 (rewrite, AB.3.2) — positive path: 3 Variable rails with a
+    2-member XOR group + 1 non-grouped Variable is legal. Mirrors
+    spec_example's ``SettlementTimingCycle`` shape."""
+    # _xor_baseline_instance already constructs this shape.
+    validate(_xor_baseline_instance())
+
+
+def test_xor_groups_empty_default_no_change_to_validator() -> None:
+    """Defense-in-depth: a TransferTemplate with the default empty
+    ``leg_rail_xor_groups`` passes validation cleanly. Baseline
+    has no XOR groups → all pre-AB.3 templates round-trip."""
+    inst = _baseline_instance()
+    for t in inst.transfer_templates:
+        assert t.leg_rail_xor_groups == ()
+    validate(inst)

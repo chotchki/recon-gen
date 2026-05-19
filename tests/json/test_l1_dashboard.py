@@ -1020,6 +1020,34 @@ def test_pending_aging_sheet_has_kpi_bar_table() -> None:
     assert bar.orientation == "HORIZONTAL"
 
 
+def test_aging_sheets_bar_chart_stacked_by_rail_per_variant_rollup() -> None:
+    """AB.3.8 — Pending Aging + Unbundled Aging bar charts stack by
+    rail_name (color dimension) with bars_arrangement="STACKED" so
+    XOR-grouped multi-Variable templates surface per-variant rollup
+    as color bands. Wire-shape regression guard."""
+    from recon_gen.common.tree import BarChart
+
+    app = build_l1_dashboard_app(_CFG)
+    for sheet_name in ("Pending Aging", "Unbundled Aging"):
+        sheet = _sheet_by_name(app, sheet_name)
+        bar = next(v for v in sheet.visuals if isinstance(v, BarChart))
+        assert bar.bars_arrangement == "STACKED", (
+            f"{sheet_name}: expected stacked bars for per-variant rollup, "
+            f"got bars_arrangement={bar.bars_arrangement!r}"
+        )
+        assert len(bar.colors) == 1, (
+            f"{sheet_name}: expected one color dimension (rail_name) for "
+            f"per-variant rollup, got {len(bar.colors)}"
+        )
+        # Color dim must reference rail_name from the dataset.
+        col = bar.colors[0].column
+        col_name = col.name if hasattr(col, "name") else str(col)
+        assert col_name == "rail_name", (
+            f"{sheet_name}: expected color dim to be rail_name; "
+            f"got {col_name!r}"
+        )
+
+
 def test_pending_aging_buckets_computed_in_dataset_sql() -> None:
     """The 5 aging buckets are a portable ``CASE`` over ``age_seconds``
     in the dataset SQL aliased ``stuck_pending_aging_bucket`` (Y.3.e —

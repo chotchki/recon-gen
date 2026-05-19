@@ -943,6 +943,108 @@ def _baseline_instance() -> L2Instance:
     )
 
 
+def test_xor_group_violation_view_empty_branch_when_no_groups_declared(
+) -> None:
+    """AB.3.3: when no TransferTemplate declares ``leg_rail_xor_groups``,
+    the xor_group_violation matview is still emitted (every L1 invariant
+    matview is unconditional — keeps the refresh DAG stable) but its
+    body short-circuits with ``WHERE 1=0`` so it produces zero rows
+    AND parses cleanly on all 3 dialects. The empty-branch is the
+    pre-AB.3.5.spec path; no fixture in this test declares groups."""
+    sql = emit_schema(
+        L2Instance(
+            accounts=(),
+            account_templates=(),
+            rails=(),
+            transfer_templates=(),
+            chains=(),
+            limit_schedules=(),
+        ),
+        prefix="xg",
+    )
+    body_match = re.search(
+        r"CREATE MATERIALIZED VIEW xg_xor_group_violation AS(.*?);",
+        sql,
+        re.DOTALL,
+    )
+    assert body_match is not None, (
+        "xor_group_violation matview missing from emit_schema output"
+    )
+    body = body_match.group(1)
+    # Typed-NULL placeholder SELECT + WHERE 1=0 — see schema.py.
+    assert "WHERE 1=0" in body
+    # No xor_groups CTE in the empty path.
+    assert "xor_groups" not in body
+
+
+def test_xor_group_violation_view_populated_when_groups_declared() -> None:
+    """AB.3.3 + AB.3.5.spec: when ≥1 TransferTemplate declares
+    ``leg_rail_xor_groups``, the matview body carries:
+    - a CTE ``xor_groups(template_name, xor_group_index,
+      member_rail_name)`` populated by VALUES (one row per group
+      member);
+    - a LEFT JOIN against ``current_transactions`` per
+      ``(template_transfer, group_member)`` so 0-firing rows surface;
+    - ``HAVING COUNT(tx.transfer_id) <> 1`` catches both missed
+      (count=0) and overlap (count>=2) cases.
+    Body shape assertion under spec_example's
+    ``SettlementTimingCycle`` group [SettlementAuto, SettlementStandard].
+    """
+    from pathlib import Path
+    from recon_gen.common.l2.loader import load_instance
+    fx = Path(__file__).resolve().parent.parent / "l2" / "spec_example.yaml"
+    inst = load_instance(fx)
+    sql = emit_schema(inst, prefix="xs")
+    body_match = re.search(
+        r"CREATE MATERIALIZED VIEW xs_xor_group_violation AS(.*?);",
+        sql,
+        re.DOTALL,
+    )
+    assert body_match is not None
+    body = body_match.group(1)
+    # Populated path — no empty-branch placeholder.
+    assert "WHERE 1=0" not in body
+    # CTE column-list shape on PG/SQLite.
+    assert (
+        "xor_groups(template_name, xor_group_index, member_rail_name) "
+        "AS (\n  VALUES" in body
+    )
+    # spec_example's group members appear as VALUES rows.
+    assert "'SettlementTimingCycle'" in body
+    assert "'SettlementAuto'" in body
+    assert "'SettlementStandard'" in body
+    # HAVING gates on count != 1 (catches both 0 and ≥2).
+    assert "HAVING COUNT(tx.transfer_id) <> 1" in body
+
+
+def test_todays_exceptions_includes_xor_group_violation_branch() -> None:
+    """AB.3.3 wiring: Today's Exceptions matview UNION ALLs a row
+    category for xor_group_violation violations, with
+    check_type='xor_group_violation' and magnitude=firing_count."""
+    sql = emit_schema(
+        L2Instance(
+            accounts=(),
+            account_templates=(),
+            rails=(),
+            transfer_templates=(),
+            chains=(),
+            limit_schedules=(),
+        ),
+        prefix="xt",
+    )
+    body_match = re.search(
+        r"CREATE MATERIALIZED VIEW xt_todays_exceptions AS(.*?);",
+        sql,
+        re.DOTALL,
+    )
+    assert body_match is not None
+    body = body_match.group(1)
+    assert "'xor_group_violation'" in body
+    assert "FROM xt_xor_group_violation" in body
+    assert "template_name AS rail_name" in body
+    assert "firing_count AS magnitude" in body
+
+
 def test_refresh_matviews_sql_emits_one_per_view() -> None:
     """All 17 L1+inv matviews each get a REFRESH command + an
     ANALYZE follow-up: 2 current_* + 2 computed_* + 9 L1 invariants
