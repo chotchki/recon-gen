@@ -1,0 +1,55 @@
+# AE.6 — Cloudflare Tunnel ingress config for the Phase AE Mac mini demo.
+#
+# Copy to ~/.cloudflared/config.yml (as the recon-demo user) after
+# running `cloudflared tunnel create recon-demo`. The `tunnel:` UUID
+# must match the value cloudflared wrote to credentials.json at create
+# time — `cloudflared tunnel list` shows current UUIDs if forgotten.
+#
+# Cloudflare Tunnel routes are matched in order, top to bottom, by
+# `Host:` header. The final `service: http_status:404` is the
+# catch-all: any request whose hostname doesn't match a prior ingress
+# rule gets a 404 from cloudflared rather than a connection-refused
+# (more graceful for stray requests).
+#
+# After editing this file, restart the tunnel daemon:
+#   launchctl unload -w ~/Library/LaunchAgents/io.hotchkiss.recon-demo.tunnel.plist
+#   launchctl load   -w ~/Library/LaunchAgents/io.hotchkiss.recon-demo.tunnel.plist
+#
+# DNS wiring (run once per hostname, as recon-demo):
+#   cloudflared tunnel route dns recon-demo spec.recon-gen.hotchkiss.io
+#   cloudflared tunnel route dns recon-demo sasquatch.recon-gen.hotchkiss.io
+
+tunnel: <REPLACE-WITH-TUNNEL-UUID-FROM-credentials.json>
+credentials-file: /Users/recon-demo/.cloudflared/<REPLACE-WITH-TUNNEL-UUID-FROM-credentials.json>.json
+
+# Loglevel: info is fine for production; debug surfaces handshake +
+# per-request trace if a hostname misroutes during initial setup.
+loglevel: info
+
+# Origin connection settings. The dashboards/studio servers are on
+# loopback (127.0.0.1) — connect_timeout / tcp_keepalive defaults are
+# fine for the LAN-equivalent path.
+originRequest:
+  connectTimeout: 30s
+  noTLSVerify: false      # the origin is plain HTTP on loopback; not TLS
+
+ingress:
+  # spec.recon-gen.hotchkiss.io — dashboards-only surface (AE.4 spec
+  # plist on port 8401).
+  - hostname: spec.recon-gen.hotchkiss.io
+    service: http://127.0.0.1:8401
+    originRequest:
+      # Optional: tighten origin headers / disable chunked encoding
+      # if the dashboards server's WebKit-render path hits any of the
+      # known cloudflared quirks. Defaults are usually fine.
+      httpHostHeader: spec.recon-gen.hotchkiss.io
+
+  # sasquatch.recon-gen.hotchkiss.io — studio --demo-mode surface
+  # (AE.4 sasquatch plist on port 8402).
+  - hostname: sasquatch.recon-gen.hotchkiss.io
+    service: http://127.0.0.1:8402
+    originRequest:
+      httpHostHeader: sasquatch.recon-gen.hotchkiss.io
+
+  # Catch-all 404 for any unrecognized hostname.
+  - service: http_status:404

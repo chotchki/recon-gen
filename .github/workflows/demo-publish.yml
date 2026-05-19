@@ -1,0 +1,77 @@
+# AE.8 — Demo refresh trigger on release publish.
+#
+# Fires when a GitHub release is published (after release.yml's
+# publish-pypi step lands the wheel on PyPI Production). Runs on the
+# self-hosted Mac mini runner (label: mac-mini-demo) which invokes
+# the local refresh script — same script the nightly 03:00 ET launchd
+# job runs. Result: release-day refresh is immediate, not capped at
+# 24h wait.
+#
+# Runner setup (AE.8 install steps):
+#   1. As recon-demo on the Mac mini: install the GitHub Actions
+#      runner per https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners
+#   2. Register with label `mac-mini-demo` and tie to this repo only
+#      (NOT org-wide — narrow blast radius).
+#   3. Run as a launchd service so the runner survives reboots:
+#      ./svc.sh install (provided by the runner package).
+#
+# Permissions: this workflow does NOT need write access to the repo.
+# The runner pulls from PyPI directly; no git operations land back
+# in the repo from the runner.
+
+name: Demo publish
+
+on:
+  release:
+    types: [published]
+  # Allow manual trigger from the Actions UI — useful for "I just
+  # changed cfg.yaml; force a refresh without cutting a release".
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    # The self-hosted Mac mini runner. The label `mac-mini-demo` is
+    # set on the runner registration; the additional `self-hosted`
+    # label is automatic. Both labels required so this job never
+    # falls back to a GitHub-hosted runner.
+    runs-on: [self-hosted, mac-mini-demo]
+    # Belt-and-suspenders: bail if the runner accidentally runs as
+    # the wrong user. The refresh script is mode 0500 owned by
+    # recon-demo; a wrong-user execution would fail anyway, but a
+    # clean early abort beats opaque permission denial.
+    steps:
+      - name: Identify runner user
+        run: |
+          set -eu
+          if [ "$(id -un)" != "recon-demo" ]; then
+            echo "::error::expected to run as recon-demo, got $(id -un)"
+            exit 2
+          fi
+          echo "runner user: $(id -un)"
+          echo "hostname:    $(hostname)"
+          echo "release tag: ${{ github.event.release.tag_name || 'manual' }}"
+
+      - name: Fire the refresh wrapper
+        # The wrapper handles pip install --upgrade + per-instance
+        # rebuild + atomic swap + launchctl kickstart. Same script
+        # the nightly launchd job runs at 03:00 ET; same exit-code
+        # propagation (any sub-step failure aborts).
+        run: /Users/recon-demo/bin/refresh-demos.sh
+
+      - name: Health check both demos
+        # After the refresh, hit each public URL via cloudflared and
+        # confirm 200. ``curl --max-time`` so a hanging request
+        # doesn't block CI for 5+ min on the runner.
+        run: |
+          set -eu
+          for url in \
+              https://spec.recon-gen.hotchkiss.io/dashboards/l1_dashboard/ \
+              https://sasquatch.recon-gen.hotchkiss.io/dashboards/l1_dashboard/; do
+            echo "==> probing $url"
+            code=$(curl --silent --output /dev/null --write-out "%{http_code}" --max-time 30 "$url")
+            if [ "$code" != "200" ]; then
+              echo "::error::$url returned HTTP $code (expected 200)"
+              exit 1
+            fi
+            echo "    200 OK"
+          done

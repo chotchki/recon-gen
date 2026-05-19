@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  AE.4 — launchd plist for the spec.recon-gen.hotchkiss.io demo
+  (recon-gen dashboards against spec_example L2, sandboxed).
+
+  Install:
+    cp deploy/launchd/io.hotchkiss.recon-demo.spec.plist \
+       ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/io.hotchkiss.recon-demo.spec.plist
+
+  Reload after editing:
+    launchctl unload -w ~/Library/LaunchAgents/io.hotchkiss.recon-demo.spec.plist
+    launchctl load   -w ~/Library/LaunchAgents/io.hotchkiss.recon-demo.spec.plist
+
+  Substitute the absolute paths below to match the operator's
+  RECON_DEMO_HOME / RECON_DEMO_VENV. The /Users/recon-demo defaults
+  match scripts/provision_demo_instance.sh's expectations.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.hotchkiss.recon-demo.spec</string>
+
+    <!--
+      Wrap the recon-gen dashboards invocation in sandbox-exec so the
+      process can't write outside the per-instance state dir + logs.
+      All four -D parameters are positional in the recon-demo-spec.sb
+      profile; the order doesn't matter to sandbox-exec but matches
+      the profile's documented parameter list for readability.
+    -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/sandbox-exec</string>
+        <string>-D</string>
+        <string>HOME=/Users/recon-demo</string>
+        <string>-D</string>
+        <string>INSTANCE_DIR=/Users/recon-demo/spec_example</string>
+        <string>-D</string>
+        <string>PORT=8401</string>
+        <string>-D</string>
+        <string>PYTHON=/Users/recon-demo/venv/bin/python3.13</string>
+        <string>-f</string>
+        <string>/Users/recon-demo/sandbox/recon-demo-spec.sb</string>
+        <string>--</string>
+        <string>/Users/recon-demo/venv/bin/recon-gen</string>
+        <string>dashboards</string>
+        <string>-c</string>
+        <string>/Users/recon-demo/spec_example/config.yaml</string>
+        <string>--l2</string>
+        <string>/Users/recon-demo/spec_example/l2.yaml</string>
+        <string>--port</string>
+        <string>8401</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--no-docs</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/recon-demo/spec_example</string>
+
+    <!--
+      Run at boot + keep alive on exit. ThrottleInterval prevents a
+      crash loop from hammering the system; if the server exits
+      cleanly (e.g. KillSignaled by `launchctl kickstart -k` after
+      the nightly refresh), launchd respawns after this interval.
+    -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!--
+      Per-instance log files. launchd rotates these automatically when
+      they grow past ~10 MB; for a heavier-traffic deploy, layer a
+      newsyslog config on top.
+    -->
+    <key>StandardOutPath</key>
+    <string>/Users/recon-demo/spec_example/logs/server.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/recon-demo/spec_example/logs/server.err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/recon-demo/venv/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/recon-demo</string>
+    </dict>
+</dict>
+</plist>
