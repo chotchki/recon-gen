@@ -742,17 +742,29 @@ def _build_chains(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
 def _build_limit_schedules(
     rng: Random, state: _BuildState,
 ) -> list[dict[str, Any]]:
-    """LimitSchedule entries — unique (parent_role, rail) pairs (U5)
-    with rail sampled from declared Rail.name (R10).
+    """LimitSchedule entries — unique (parent_role, rail, direction)
+    triples (U5) with rail sampled from declared Rail.name (R10).
 
     Z.B (2026-05-15): formerly sampled from rail_transfer_types; under
     the symmetric collapse the cap binds directly to a rail name.
+    AB.1 (2026-05-19): each chosen entry gets a direction picked
+    randomly — ~70% Outbound (default), ~30% Inbound. The fuzz matrix
+    cells thus exercise both branches of the per-direction
+    `<prefix>_limit_breach` matview UNION ALL across seeds. Default
+    Outbound is omitted from the emitted YAML to keep pre-AB.1
+    fuzz_failure fixtures byte-equivalent under the new serializer
+    (which only emits ``direction:`` when non-default).
     """
     schedules: list[dict[str, Any]] = []
     if not state.all_role_names or not state.rail_names:
         return schedules
 
     # Build candidate pairs and sample without replacement (U5).
+    # Per-pair uniqueness still holds — direction is a flavor knob
+    # on the chosen pair, not a multiplier (so fuzz doesn't plant
+    # both Outbound + Inbound on the same (parent, rail) in one
+    # instance; that combination is exercised by hand-written unit
+    # tests + AB.1.5.spec).
     candidate_pairs: list[tuple[str, str]] = []
     declared_rails = sorted(set(state.rail_names))
     for r in state.all_role_names:
@@ -770,6 +782,10 @@ def _build_limit_schedules(
             "rail": rail,
             "cap": cap,
         }
+        # AB.1 direction draw — ~30% Inbound. Outbound is the default
+        # so it's omitted (matches serializer's "non-default only" emit).
+        if rng.random() < 0.30:
+            ls["direction"] = "Inbound"
         d = _maybe_description(rng, state, "limit schedule")
         if d is not None:
             ls["description"] = d
