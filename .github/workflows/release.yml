@@ -421,7 +421,7 @@ jobs:
             if /tmp/qs-release-e2e/bin/pip install \
                 --index-url https://test.pypi.org/simple/ \
                 --extra-index-url https://pypi.org/simple/ \
-                "recon-gen[deploy,demo,audit,e2e]==${TAG}"; then
+                "recon-gen[deploy,demo,audit,e2e]==${TAG}" pytest-cov; then
               echo "Install succeeded on attempt ${attempt}"
               exit 0
             fi

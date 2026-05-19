@@ -1,5 +1,17 @@
 # Release Notes
 
+## v11.6.3 — pytest-cov in e2e + release-e2e venvs
+
+Patch release. v11.6.2 added `--cov=recon_gen` to every e2e / release-e2e pytest invocation but didn't add `pytest-cov` to the corresponding venvs. Result: every API e2e + browser e2e + release-against-TestPyPI step failed with `pytest: error: unrecognized arguments: --cov=recon_gen` — the v11.6.2 wheel reached TestPyPI but never made it to PyPI Production (the publish-pypi step is gated on e2e-against-testpypi passing).
+
+Changes:
+- `.github/workflows/e2e.yml` — `uv sync` lines for `e2e-pg-api`, `e2e-pg-browser`, `e2e-oracle-api` add `--extra dev` (which carries `pytest-cov>=4.0`).
+- `.github/workflows/release.yml::e2e-against-testpypi` — pip install line in the TestPyPI-install retry loop appends `pytest-cov` (resolved via `--extra-index-url https://pypi.org/simple/` since pytest-cov isn't on TestPyPI).
+
+`ci.yml` already used `--extra dev` everywhere — no change needed there. Per the `ci.yml`/`release.yml` parity memory, the smoke job in `release.yml` was also already correct (line 187 explicitly installs `pytest pytest-cov`); only the TestPyPI e2e job was missing.
+
+No production behavior change vs v11.6.2 — operators on either version see no functional difference.
+
 ## v11.6.2 — AB.7.1a release-gate fix + coverage aggregation
 
 Patch release. Two related fixes surfaced by AB.7.1's release-gate verification:

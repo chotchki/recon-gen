@@ -126,9 +126,10 @@ jobs:
         # Extras: ``deploy`` for boto3+botocore[crt], ``demo`` for
         # psycopg2, ``audit`` for the seed pipeline (data apply pulls
         # in the audit-generated baseline plants), ``e2e`` for pytest +
-        # pytest-xdist + boto3-stubs. Skip ``[docs]``. Skip
+        # pytest-xdist + boto3-stubs, ``dev`` for pytest-cov (AB.7.1a
+        # coverage aggregation). Skip ``[docs]``. Skip
         # ``playwright install`` — API tests don't render anything.
-        run: uv sync --frozen --extra deploy --extra demo --extra audit --extra e2e
+        run: uv sync --frozen --extra deploy --extra demo --extra audit --extra e2e --extra dev
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -323,9 +324,10 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies (incl. Playwright)
-        # ``[e2e]`` extra brings in playwright + pytest-xdist; the
-        # other extras match e2e-pg-api so the deploy steps work.
-        run: uv sync --frozen --extra deploy --extra demo --extra audit --extra e2e
+        # ``[e2e]`` extra brings in playwright + pytest-xdist; ``[dev]``
+        # adds pytest-cov (AB.7.1a coverage aggregation). The other
+        # extras match e2e-pg-api so the deploy steps work.
+        run: uv sync --frozen --extra deploy --extra demo --extra audit --extra e2e --extra dev
 
       - name: Install Playwright WebKit browser
         # Only WebKit — that's what ``common/browser/helpers.py``
@@ -540,8 +542,9 @@ jobs:
       - name: Install dependencies
         # ``demo-oracle`` brings in ``oracledb>=2.0`` (thin mode, no
         # Instant Client install needed). Skip ``--extra demo`` —
-        # ``psycopg2`` would just sit unused on this leg.
-        run: uv sync --frozen --extra deploy --extra demo-oracle --extra audit --extra e2e
+        # ``psycopg2`` would just sit unused on this leg. ``[dev]`` adds
+        # pytest-cov (AB.7.1a coverage aggregation).
+        run: uv sync --frozen --extra deploy --extra demo-oracle --extra audit --extra e2e --extra dev
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
