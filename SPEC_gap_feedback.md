@@ -171,13 +171,173 @@ Generalize the Limit Breach invariant (and the `OutboundFlow` theorem) to suppor
 
 ---
 
+## Enhancement 5: Chain `fan_in` should be per-child, not chain-level
+
+### Problem
+
+Enhancement 2's preferred implementation path put `fan_in: bool` on Chain — a chain-level flag governing every child of that chain row. Once shipped, this collides with mixed-cardinality downstreams: some children of a single parent are 1:1 (each parent firing produces its own child Transfer), others are N:1 (N parent firings converge on one shared batch Transfer). A chain-level flag can't carry both contracts.
+
+Validator C8a tightens this further: `fan_in=true` requires every child to resolve to a TransferTemplate, so even mixed-rail-and-template children break the flag's all-or-nothing semantics regardless of cardinality.
+
+### Where it bites in the Sasquatch example
+
+Imagine SNB extends `MerchantSettlementCycle` with the Enhancement-2 `MerchantPayoutBatch` flow alongside the existing per-merchant payout vehicles. High-volume merchants enroll in batched ACH (N cycles → 1 batch); low-volume merchants keep individual ACH / wire / check (1 cycle → 1 payout). The natural model is one chain off `MerchantSettlementCycle` with mixed-cardinality children:
+
+```yaml
+chains:
+  - parent: MerchantSettlementCycle
+    children:
+      - MerchantPayoutACH         # 1:1 (low-volume merchants)
+      - MerchantPayoutWire        # 1:1
+      - MerchantPayoutCheck       # 1:1
+      - MerchantPayoutBatch       # N:1 (high-volume merchants batched)
+    fan_in: true                  # ← doesn't work for the 1:1 children
+```
+
+`fan_in: true` false-positives the 1:1 payout vehicles on `<prefix>_fan_in_disagreement` as `parent_count < 2` orphan-only rows (their parent set is always 1 — one merchant cycle, one payout). `fan_in: false` drops `MerchantPayoutBatch`'s structural audit entirely; the cycle → batch linkage falls back to metadata-only correlation.
+
+Splitting into two chain rows off the same parent (one `fan_in: false` for the 1:1 vehicles, one `fan_in: true` for the batch) makes Chain B's singleton-Required false-positive every low-volume merchant cycle as orphan (their `transfer_id` is never in any `MerchantPayoutBatch`'s parent set).
+
+The integrator's fork: drop the batched flow from chain hierarchy (lose AB.4 audit value) or split into per-merchant-tier templates (one cycle template per merchant tier — substantial duplication of cardholder-side rails for an enforcement gain).
+
+### Proposed fix
+
+Move `fan_in` (and `expected_parent_count`) from Chain-level to per-child. Children become a heterogeneous list — bare-Identifier OR mapping:
+
+```yaml
+chains:
+  - parent: MerchantSettlementCycle
+    children:
+      - MerchantPayoutACH                  # bare-Identifier — defaults fan_in=false
+      - MerchantPayoutWire
+      - MerchantPayoutCheck
+      - name: MerchantPayoutBatch          # mapping — fan-in flag per child
+        fan_in: true
+        expected_parent_count: 10
+```
+
+The chain-level `fan_in` field deprecates (one-cycle grace warning on load; serialize per-child going forward). Validator C8a-c become per-child rules: `fan_in=true` on a child requires that child to resolve to a TransferTemplate; `expected_parent_count` carries meaning only on per-child fan-in entries. The L1 `<prefix>_fan_in_disagreement` matview already keys per-child Transfer; only the chain CTE / topology source needs to read `fan_in` from the per-child mapping.
+
+### Tradeoffs / open questions
+
+- **Schema heterogeneity** — chain children list becomes `Identifier | mapping`. Loader, serializer, Studio editor card, and topology renderer all need to handle both shapes. Manageable but touches more surface than the bare-flag shape.
+- **Backward compat** — pre-Enhancement-5 `fan_in=true` chains migrate to per-child mappings (mechanical translation: lift the chain-level fan_in down to each child entry). `fan_in=false` chains stay bare-Identifier; byte-equivalent through load + dump.
+- **`expected_parent_count` follows** — moves per-child alongside `fan_in`; the validator rule stays "set only when this child carries fan_in=true."
+- **C8a's "no rail children with fan_in" rule simplifies** — per-child means rail children are simply non-fan-in; the chain row can still mix template fan-in children and rail 1:1 children freely.
+
+**Our preferred implementation path: adopt as stated.** Per-child shape mirrors how operators reason about each downstream branch's cardinality contract; chain-level was a conceptual shortcut that breaks once mixed-cardinality patterns surface in real integrations.
+
+---
+
+## Enhancement 6: L2 Flow Tracing chain-orphan dataset should enforce multi-children XOR semantics
+
+### Problem
+
+`docs/concepts/l2/chain.md` (the operator-facing semantic contract) states:
+
+> Two or more children = XOR alternation. Exactly one of the listed children MUST fire per parent invocation. Used for branching cycles (e.g. an ACH return MUST fire as one of "NSF", "stop-pay", "duplicate" — not zero, not two; …).
+
+But the runtime check in `src/recon_gen/apps/l2_flow_tracing/datasets.py::_declared_chains_cte` labels multi-children rows `required = 'Optional'`:
+
+```python
+is_required = len(c.children) == 1
+required_label = "Required" if is_required else "Optional"
+```
+
+And `build_exc_chain_orphans_dataset` filters `WHERE e.required = 'Required'`. Multi-children chains never produce orphan exception rows regardless of which children fire or how many. The chain.md contract is doc-aspirational; runtime enforcement covers only the singleton-Required case.
+
+### Where it bites in the Sasquatch example
+
+Sasquatch's existing `MerchantSettlementCycle → [MerchantPayoutACH, MerchantPayoutWire, MerchantPayoutCheck]` is a 3-way XOR per chain.md prose — "exactly one MUST fire." Today's L2FT dashboard surfaces nothing if zero payouts fire for a settled merchant; the cycle closes (Conservation+Timeliness pass on the cycle itself), nothing downstream fires, and the operator's "every merchant gets paid" mental model has no exception row to drive triage. Same shape for any multi-children XOR in any L2 instance: `InternalTransferCycle` outcome branches, hypothetical ACH-return-reason XOR, etc.
+
+The chain.md prose explicitly named "an ACH return MUST fire as one of NSF/stop-pay/duplicate — not zero, not two" as the canonical example of the contract. That contract is invisible at runtime.
+
+### Proposed fix
+
+Extend the L2FT chain-orphan dataset to enforce multi-children semantics. Two new violation kinds projected into `<prefix>_todays_exceptions` alongside the existing `chain_orphan` (singleton-Required) branch:
+
+- **`multi_xor_missed`** — parent fired AND zero children of this chain row fired with `parent_transfer_id` pointing at this parent. The "zero of N fired" case (the chain.md "not zero" rule).
+- **`multi_xor_overlap`** — parent fired AND ≥2 children of this chain row fired pointing at this parent. The "two of N fired" case (the chain.md "not two" rule).
+
+Implementation mirrors AB.3.3's `_xor_group_violation` matview shape: per-chain children inlined as CTE rows (VALUES on PG/SQLite, UNION-ALL-of-SELECT-FROM-DUAL on Oracle) + LEFT JOIN against `<prefix>_current_transactions` grouped by parent_transfer_id with `HAVING child_count <> 1`. Studio editor and topology layers don't change — chain definition is the source of truth; renderer is unaffected. Audit PDF gains a per-invariant table for the new check_type.
+
+Alternative implementation: relabel multi-children rows in `_declared_chains_cte` to drop `'Optional'` — but the chain-orphan matview's existing query is per-edge (one row per parent×child pair), not per-parent-firing-counting-firings-across-children. The aggregate shape that catches "exactly one" needs a new query branch; just relabeling the existing rows wouldn't fire the right exceptions.
+
+### Tradeoffs / open questions
+
+- **Two violation kinds, not one** — `missed` and `overlap` surface different ETL bug shapes (downstream never fired vs downstream fired twice via duplicate metadata) and route to different analyst remediation. Worth keeping distinct on the L2 Exceptions sheet.
+- **Performance** — adds one CTE branch with `COUNT(DISTINCT child_template_name_or_rail_name) GROUP BY parent_transfer_id` on `<prefix>_current_transactions`. Analogous to AB.3.3's xor_group_violation matview which already aggregates by transfer_id; same cost profile.
+- **Backward compat** — pre-fix L2 instances see new exception rows on Today's Exceptions where they didn't before. The signal was always supposed to be there per chain.md; the surfacing is the change. No yaml migration needed; the contract was already declared by chain shape.
+- **Interaction with Enhancement 5** — once chains carry per-child `fan_in`, the multi-XOR check needs to skip per-child fan_in=true entries (their cardinality contract is enforced by `<prefix>_fan_in_disagreement`, not by the multi-XOR "exactly one" rule). Bake the skip into the CTE.
+
+**Our preferred implementation path: adopt as stated.** The chain.md contract was written first and the runtime check was implemented as scaffolding for the singleton case; multi-children enforcement is the missing scaffolding step, not a SPEC change.
+
+---
+
+## Enhancement 7: Soft per-firing magnitude bounds on Rail
+
+### Problem
+
+The auto-scenario seed generator picks `Transaction.amount` per firing using internal heuristics — no operator-declared "typical magnitude" hint per rail. Synthesized amounts can be orders of magnitude off from real-world expectations: $100K card swipes, $0.42 wire transfers, $1 ACH originations sitting next to each other on the same dashboard. The plausibility ceiling on the dashboard drops to a level where reviewers stop trusting the visualization before they reach a real exception.
+
+This is generator-facing primarily. The runtime side has no signal for "this posted Transaction's magnitude is way outside this rail's typical range" either — a SHOULD-constraint the SPEC could expose, but the immediate pain is the synthesized-data side undermining demo / training credibility.
+
+### Where it bites in the Sasquatch example
+
+Imagine an SNB integrator hands the demo to a non-technical reviewer — a new ops analyst, a compliance officer, a training audience — for the first hands-on walkthrough. The reviewer opens the L1 Daily Statement and sees a $73,294.18 `MerchantCardSale` next to a $0.42 `CustomerInboundACH` next to a $14,892,403.91 `InternalTransfer`. Their first reaction isn't "let me figure out which of these is an exception." It's "this isn't a real banking dataset, why am I looking at this?" The dashboard's training value collapses before the cross-tool agreement story even starts.
+
+For SNB's rails specifically (real-world ranges in financial flows of this shape):
+
+- `MerchantCardSale` — $5–$500 typical per swipe
+- `CustomerInboundACH` — $50–$5,000 typical per item
+- `CustomerOutboundACH` — $50–$10,000 typical per item
+- `InternalTransfer` (DDA → DDA) — $20–$50,000 typical
+- `CustomerFeeMonthlySettlement` — $0.25–$25 typical
+- `InterestAccrual` — fractions of a cent to single dollars
+- `ExternalCardSettlement` (aggregating) — thousands per daily batch
+
+Without operator-declared bounds, the generator has no signal for what "credible" means per rail and produces uniform-random amounts that don't cluster anything like real financial activity.
+
+### Proposed fix
+
+Optional soft per-firing magnitude bound on `Rail`:
+
+```yaml
+- name: MerchantCardSale
+  ...
+  amount_typical_range: [5.00, 500.00]
+```
+
+Magnitude is absolute — the bound applies to `abs(amount)`. Direction is determined elsewhere (per `leg_direction` for fixed rails; per containing template's `ExpectedNet` closure for Variable rails).
+
+**Generator behavior**: when present, the auto-scenario generator picks amounts from the declared range using a log-uniform default distribution (most financial flows cluster at the low end of their typical band; log-uniform reproduces that pattern). When absent, falls back to current heuristics.
+
+**Optional runtime extension** (separate flag — integrators opt in): SHOULD-constraint surfacing real-data Transactions whose magnitude falls outside the declared bound as a `magnitude_anomaly` matview row. RFC 2119 SHOULD — not a load-time rejection, not a hard runtime fail. Useful for early-warning anomaly detection alongside the existing per-day `LimitSchedule` aggregate caps (different scopes, complementary signals — `LimitSchedule` catches "today's total ACH inbound > $20K AML threshold"; `magnitude_anomaly` catches "this single $50K wire is way outside the typical $50–$10K band, flag for review").
+
+**Validator**: `min < max`, both positive. Restrict the field to non-aggregating rails — aggregator amounts derive from bundled children, so the per-firing bound's meaning is fuzzy; deferred to a future iteration if integrators want a sanity-check field on aggregators too.
+
+### Tradeoffs / open questions
+
+- **Distribution shape** — log-uniform default is reasonable for financial flows. Could extend to `amount_distribution: {median, sigma_log}` for operators with tightly-peaked flows (e.g. monthly payroll always ≈ $2500 ± $50 — range would say `[2450, 2550]` which is fine, but lognormal with median + sigma is more honest). Out of scope for v1; add the optional refinement field if integrators ask.
+- **Aggregating rails** — scoped out for v1 per above. The aggregator's amount is downstream of its bundled children's amounts; per-firing bound's meaning needs more design thought.
+- **Interaction with Enhancement 4 (inbound caps) and `LimitSchedule` generally** — different scopes. `LimitSchedule` = per-account, per-day, per-rail aggregate cap (hard runtime, matview violation on breach). `amount_typical_range` = per-firing typical band (soft generator, optional soft runtime). Both can coexist on the same `(rail, parent_role)` and surface complementary signals (aggregate cap breach vs single-firing magnitude anomaly).
+- **Currency mixing** — single-currency instances assumed for v1; multi-currency instances would need per-rail currency respected by the generator's range picker. Out of scope.
+- **Backward compat** — optional field, default unset. Pre-Enhancement-7 yamls byte-equivalent through load + dump.
+
+**Our preferred implementation path: adopt as stated, generator-only first cut.** Add the optional `magnitude_anomaly` SHOULD-constraint matview as a follow-on if integrators want runtime anomaly surfacing — two-step rollout keeps the schema change small (one optional field) and lets the demo-plausibility win land first.
+
+---
+
 ## How these proposals interrelate
 
-Enhancements 2 (N:1 fan-in chains) and 3 (template-as-chain-child) compose naturally: if 3 lands first, two-template chains become expressible; if 2 then lands, the N:1 batching pattern becomes structurally enforceable. Enhancement 1 is independent — it tightens up template's `leg_rails` semantics for the per-mode-XOR case, separate from the chain plumbing. Enhancement 4 is entirely independent of the chain/template plumbing — it only touches the LimitSchedule / OutboundFlow surface.
+Enhancements 2 (N:1 fan-in chains) and 3 (template-as-chain-child) compose naturally: if 3 lands first, two-template chains become expressible; if 2 then lands, the N:1 batching pattern becomes structurally enforceable. Enhancement 1 is independent — it tightens up template's `leg_rails` semantics for the per-mode-XOR case, separate from the chain plumbing. Enhancement 4 is entirely independent of the chain/template plumbing — it only touches the LimitSchedule / OutboundFlow surface. Enhancement 5 is a follow-on to Enhancement 2 — once `fan_in` ships chain-level, the mixed-cardinality bite surfaces and per-child relocation becomes the natural next move. Enhancement 6 is independent of the others — it brings the existing chain.md "exactly one MUST fire" contract under runtime enforcement, and Enhancement 5 needs to skip per-child fan-in entries to play nicely with it (a small CTE-level interaction, not a schema-level coupling). Enhancement 7 is entirely independent of the chain / template / fan-in surface — it's a Rail-level optional field plus a generator code path; it sits next to Enhancement 4 in operator vocabulary (both are "bounds you declare on a rail") but their scopes are non-overlapping (E4 = per-day aggregate, E7 = per-firing magnitude).
 
 A staged adoption order that minimizes churn:
 
 1. **Enhancement 4** first (inbound caps) — adds one optional field (`direction`) + one new theorem (`InboundFlow`). No interaction with chains, templates, or aggregating rails. Easy first win.
 2. **Enhancement 3** (template-as-chain-child) — small, well-scoped, no schema-level addition. Just clarification + new validator rule.
 3. **Enhancement 1** (multi-Variable + leg_rails XOR) — adds one field (`leg_rail_xor_groups`) and relaxes one constraint (C1). Self-contained.
-4. **Enhancement 2** last (N:1 fan-in) — bigger conceptual change. Worth doing only if the integrator population has multiple N:1 patterns to justify the chain-validator complexity.
+4. **Enhancement 7** can land any time after the alpha train has bandwidth — one optional field on Rail + a generator code path. No interaction with the chain / template / fan-in machinery. Easy second win after Enhancement 4. The optional runtime SHOULD-constraint matview is a follow-on.
+5. **Enhancement 2** next (N:1 fan-in) — bigger conceptual change. Ships `fan_in` as a chain-level flag.
+6. **Enhancement 6** can land any time after Enhancement 3 — it's purely a runtime check that brings the chain.md contract under enforcement; no SPEC schema change. Reasonable to bundle with Enhancement 5 since the per-child `fan_in` interaction wants the CTE skip baked in.
+7. **Enhancement 5** last — relocates `fan_in` per-child once Enhancement 2's chain-level shape proves bite-prone in mixed-cardinality flows. One-cycle deprecation window on the chain-level field.
