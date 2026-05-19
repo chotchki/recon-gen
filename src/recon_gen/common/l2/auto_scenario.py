@@ -79,6 +79,7 @@ from .seed import (
     TransferTemplatePlant,
     TwoTemplateChainPlant,
     XorVariantMissedFiringPlant,
+    XorVariantOverlapPlant,
 )
 
 
@@ -182,6 +183,15 @@ def default_scenario_for(
             "XorVariantMissedFiringPlant",
             "no TransferTemplate declares leg_rail_xor_groups with a "
             "non-XOR-group leg_rail to use as witness (AB.3)",
+        ))
+    # AB.3.5b — XorVariantOverlapPlant picker: any XOR group with ≥2
+    # members. Validator C1d enforces ≥2 at load time, so every
+    # declared XOR group qualifies.
+    xor_overlap_pick = _pick_xor_overlap_inputs(instance)
+    if xor_overlap_pick is None:
+        omitted.append((
+            "XorVariantOverlapPlant",
+            "no TransferTemplate declares leg_rail_xor_groups (AB.3)",
         ))
     pending_rail = _pick_first_with(
         instance.rails, key=lambda r: r.max_pending_age is not None,
@@ -308,6 +318,23 @@ def default_scenario_for(
                 target_xor_group_index=xor_group_idx,
                 days_ago=0,
                 witness_rail_name=xor_witness,
+            ),
+        )
+
+    # AB.3.5b — XorVariantOverlapPlant. Plants one Transfer tagged
+    # with an XOR-grouped template where two members of the target
+    # group both fire. days_ago=1 (yesterday) keeps it visually
+    # separable from the AB.3.5 missed-firing plant (today).
+    xor_variant_overlap_plants: tuple[XorVariantOverlapPlant, ...] = ()
+    if xor_overlap_pick is not None:
+        ov_template_name, ov_group_idx, ov_variant_a, ov_variant_b = xor_overlap_pick
+        xor_variant_overlap_plants = (
+            XorVariantOverlapPlant(
+                template_name=ov_template_name,
+                target_xor_group_index=ov_group_idx,
+                days_ago=1,
+                variant_a_rail_name=ov_variant_a,
+                variant_b_rail_name=ov_variant_b,
             ),
         )
 
@@ -544,6 +571,7 @@ def default_scenario_for(
         two_template_chain_plants=two_template_chain_plants if include_l1 else (),
         chain_parent_disagreement_plants=chain_parent_disagreement_plants if include_l1 else (),
         xor_variant_missed_firing_plants=xor_variant_missed_firing_plants if include_l1 else (),
+        xor_variant_overlap_plants=xor_variant_overlap_plants if include_l1 else (),
         stuck_pending_plants=stuck_pending_plants if include_l1 else (),
         failed_transaction_plants=failed_transaction_plants if include_l1 else (),
         stuck_unbundled_plants=stuck_unbundled_plants if include_l1 else (),
@@ -696,6 +724,7 @@ def densify_scenario(
         two_template_chain_plants=base.two_template_chain_plants,
         chain_parent_disagreement_plants=base.chain_parent_disagreement_plants,
         xor_variant_missed_firing_plants=base.xor_variant_missed_firing_plants,
+        xor_variant_overlap_plants=base.xor_variant_overlap_plants,
         stuck_pending_plants=tuple(
             r for p in base.stuck_pending_plants for r in replicate_pending(p)
         ),
@@ -769,6 +798,7 @@ def boost_inv_fanout_plants(
         two_template_chain_plants=base.two_template_chain_plants,
         chain_parent_disagreement_plants=base.chain_parent_disagreement_plants,
         xor_variant_missed_firing_plants=base.xor_variant_missed_firing_plants,
+        xor_variant_overlap_plants=base.xor_variant_overlap_plants,
         stuck_pending_plants=base.stuck_pending_plants,
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants,
@@ -848,6 +878,7 @@ def add_broken_rail_plants(
         two_template_chain_plants=base.two_template_chain_plants,
         chain_parent_disagreement_plants=base.chain_parent_disagreement_plants,
         xor_variant_missed_firing_plants=base.xor_variant_missed_firing_plants,
+        xor_variant_overlap_plants=base.xor_variant_overlap_plants,
         stuck_pending_plants=base.stuck_pending_plants + extra_plants,
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants,
@@ -899,6 +930,7 @@ def filter_scenario_plants(
         two_template_chain_plants=base.two_template_chain_plants if "chain_parent_disagreement" in selected else (),
         chain_parent_disagreement_plants=base.chain_parent_disagreement_plants if "chain_parent_disagreement" in selected else (),
         xor_variant_missed_firing_plants=base.xor_variant_missed_firing_plants if "xor_group_violation" in selected else (),
+        xor_variant_overlap_plants=base.xor_variant_overlap_plants if "xor_group_violation" in selected else (),
         stuck_pending_plants=base.stuck_pending_plants if "stuck_pending" in selected else (),
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants if "stuck_unbundled" in selected else (),
@@ -1589,6 +1621,28 @@ def _pick_xor_missed_firing_inputs(
             for leg in t.leg_rails:
                 if leg not in group_members:
                     return (t.name, gi, leg)
+    return None
+
+
+def _pick_xor_overlap_inputs(
+    instance: L2Instance,
+) -> tuple[Identifier, int, Identifier, Identifier] | None:
+    """AB.3.5b picker: find any TransferTemplate XOR group with ≥2
+    members. Validator C1d enforces ≥2 at load time, so every declared
+    XOR group qualifies — picks the first group in name + index order
+    and returns its first two members in declared order.
+
+    Returns ``(template_name, target_xor_group_index, variant_a,
+    variant_b)`` or ``None``. Determinism: templates traversed in
+    sorted name order, groups in declared order, members in declared
+    order. The same picker output for any given L2 across runs.
+    """
+    for t in sorted(instance.transfer_templates, key=lambda x: str(x.name)):
+        if not t.leg_rail_xor_groups:
+            continue
+        for gi, group in enumerate(t.leg_rail_xor_groups):
+            if len(group) >= 2:
+                return (t.name, gi, group[0], group[1])
     return None
 
 

@@ -71,15 +71,17 @@ def test_auto_scenario_against_spec_example_covers_all_six_plant_kinds(
     # AB.2 plants (healthy + ETL-bug-disagreement).
     assert len(sc.two_template_chain_plants) == 1
     assert len(sc.chain_parent_disagreement_plants) == 1
-    # AB.3.5: XorVariantMissedFiringPlant is omitted until AB.3.5.spec
+    # AB.3.5 + AB.3.5b: Both XOR plants are omitted until AB.3.5.spec
     # lands an XOR-grouped template in spec_example. .spec will tighten
-    # this to `len(sc.xor_variant_missed_firing_plants) == 1`.
+    # both assertions to `== 1`.
     assert len(sc.xor_variant_missed_firing_plants) == 0
+    assert len(sc.xor_variant_overlap_plants) == 0
     # Permitted omissions: TT plants whose first leg_rail isn't TwoLeg,
-    # plus the AB.3.5 XOR plant pending AB.3.5.spec.
+    # plus the AB.3.5 / AB.3.5b XOR plants pending AB.3.5.spec.
     omitted_kinds = [kind for kind, _ in report.omitted]
     assert all(
-        k.startswith("TransferTemplatePlant[") or k == "XorVariantMissedFiringPlant"
+        k.startswith("TransferTemplatePlant[")
+        or k in {"XorVariantMissedFiringPlant", "XorVariantOverlapPlant"}
         for k in omitted_kinds
     ), f"Unexpected omissions: {report.omitted!r}"
 

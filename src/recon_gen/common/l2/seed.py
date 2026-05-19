@@ -285,6 +285,33 @@ class ChainParentDisagreementPlant:
 
 
 @dataclass(frozen=True, slots=True)
+class XorVariantOverlapPlant:
+    """AB.3.5b plant: a TransferTemplate Transfer where TWO members of
+    one XOR group both fire — matches the AB.3.3 matview's
+    ``firing_count >= 2`` branch.
+
+    Emits two leg_rail rows sharing one ``transfer_id`` + ``template
+    _name``, both ``rail_name`` values being members of
+    ``target_xor_group_index``. The matview's LEFT JOIN per (transfer,
+    group, member_rail) hits twice → ``COUNT(*) = 2`` → ``HAVING <>
+    1`` → row surfaces with ``fired_rails='<a>,<b>'``. Pairs with
+    ``XorVariantMissedFiringPlant`` so the demo dashboard surfaces
+    BOTH branches of the matview's ``firing_count <> 1`` HAVING.
+
+    Picker constraint: target group MUST have ≥2 distinct members.
+    Validator C1d already enforces ≥2 at load time, so every declared
+    XOR group qualifies. ``variant_a`` and ``variant_b`` MUST be
+    distinct members of the targeted group.
+    """
+
+    template_name: Identifier
+    target_xor_group_index: int
+    days_ago: int
+    variant_a_rail_name: Identifier
+    variant_b_rail_name: Identifier
+
+
+@dataclass(frozen=True, slots=True)
 class XorVariantMissedFiringPlant:
     """AB.3.5 plant: a TransferTemplate Transfer where one XOR group
     has zero firings — matches the AB.3.3 matview's
@@ -548,6 +575,7 @@ class ScenarioPlant:
     two_template_chain_plants: tuple[TwoTemplateChainPlant, ...] = ()
     chain_parent_disagreement_plants: tuple[ChainParentDisagreementPlant, ...] = ()
     xor_variant_missed_firing_plants: tuple[XorVariantMissedFiringPlant, ...] = ()
+    xor_variant_overlap_plants: tuple[XorVariantOverlapPlant, ...] = ()
     stuck_pending_plants: tuple[StuckPendingPlant, ...] = ()
     failed_transaction_plants: tuple[FailedTransactionPlant, ...] = ()
     stuck_unbundled_plants: tuple[StuckUnbundledPlant, ...] = ()
@@ -648,6 +676,19 @@ def emit_seed(
     ):
         txn_rows.extend(
             _emit_xor_variant_missed_firing_rows(
+                p, instance, scenarios, template_by_role, txn_counter, dialect,
+            )
+        )
+
+    # AB.3.5b — XorVariantOverlapPlant: synthetic Transfer where two
+    # members of one XOR group both fire. Surfaces on the AB.3.3
+    # xor_group_violation matview with firing_count>=2.
+    for p in sorted(
+        scenarios.xor_variant_overlap_plants,
+        key=_xor_overlap_key,
+    ):
+        txn_rows.extend(
+            _emit_xor_variant_overlap_rows(
                 p, instance, scenarios, template_by_role, txn_counter, dialect,
             )
         )
@@ -3561,6 +3602,18 @@ def _xor_missed_firing_key(
     )
 
 
+def _xor_overlap_key(
+    p: XorVariantOverlapPlant,
+) -> tuple[str, int, int, str, str]:
+    return (
+        str(p.template_name),
+        p.target_xor_group_index,
+        p.days_ago,
+        str(p.variant_a_rail_name),
+        str(p.variant_b_rail_name),
+    )
+
+
 def _stuck_pending_key(p: StuckPendingPlant) -> tuple[str, int, str]:
     return (str(p.account_id), p.days_ago, str(p.rail_name))
 
@@ -3935,6 +3988,84 @@ def _emit_xor_variant_missed_firing_rows(
         template_name=template.name,
         dialect=dialect,
     )]
+
+
+def _emit_xor_variant_overlap_rows(
+    p: XorVariantOverlapPlant,
+    instance: L2Instance,
+    scenarios: ScenarioPlant,
+    template_by_role: dict[Identifier, AccountTemplate],
+    counter: _Counter,
+    dialect: Dialect,
+) -> list[str]:
+    """AB.3.5b violation plant: emit a Transfer tagged with a template
+    whose targeted XOR group has TWO member-rail firings.
+
+    Emits two leg_rail rows sharing one ``transfer_id`` +
+    ``template_name``, ``rail_name`` values = the plant's
+    ``variant_a`` and ``variant_b`` (both must be members of the
+    target group, distinct). The AB.3.3 matview's LEFT JOIN finds two
+    member-rail firings for ``(transfer_id, template, target_group)``
+    → ``COUNT(*) = 2`` → ``HAVING <> 1`` → row surfaces with
+    ``fired_rails='<a>,<b>'`` (concat ordering dialect-specific).
+
+    Graceful skip when the template / group / variants don't satisfy
+    the AB.3.5b plant invariants (mirrors AB.3.5's defensive checks).
+    """
+    template = _find_template_or_skip(p.template_name, instance)
+    if template is None:
+        return []
+    if not template.leg_rail_xor_groups:
+        return []
+    if p.target_xor_group_index >= len(template.leg_rail_xor_groups):
+        return []
+    group = set(template.leg_rail_xor_groups[p.target_xor_group_index])
+    if p.variant_a_rail_name not in group or p.variant_b_rail_name not in group:
+        return []
+    if p.variant_a_rail_name == p.variant_b_rail_name:
+        return []
+    if p.variant_a_rail_name not in template.leg_rails:
+        return []
+    if p.variant_b_rail_name not in template.leg_rails:
+        return []
+    ti = _first_template_instance_or_skip(scenarios)
+    if ti is None:
+        return []
+    at = template_by_role.get(ti.template_role)
+    if at is None:
+        return []
+    parent_role = at.parent_role
+
+    plant_day = scenarios.today - timedelta(days=p.days_ago)
+    posting_a = f"{plant_day.isoformat()}T11:45:00+00:00"
+    posting_b = f"{plant_day.isoformat()}T11:46:00+00:00"
+
+    n = counter.next()
+    transfer_id = f"tr-xor-overlap-{n:04d}"
+
+    rows: list[str] = []
+    for suffix, posting, variant in (
+        ("a", posting_a, p.variant_a_rail_name),
+        ("b", posting_b, p.variant_b_rail_name),
+    ):
+        rows.append(_txn_row(
+            id_=f"tx-xor-overlap-{n:04d}-{suffix}",
+            account_id=ti.account_id,
+            account_name=ti.name,
+            account_role=ti.template_role,
+            account_scope=at.scope,
+            account_parent_role=parent_role,
+            money=Decimal("100.00"),  # arbitrary; matview only counts row presence
+            direction="Credit",
+            posting=posting,
+            transfer_id=transfer_id,
+            rail_name=variant,
+            origin="InternalInitiated",
+            metadata={},
+            template_name=template.name,
+            dialect=dialect,
+        ))
+    return rows
 
 
 def _find_rail_or_skip(name: Identifier, instance: L2Instance) -> Rail | None:
