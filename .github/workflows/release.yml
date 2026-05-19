@@ -59,7 +59,22 @@ jobs:
         run: .venv/bin/playwright install --with-deps webkit
 
       - name: Run tests with coverage (pytest sessionstart runs pyright strict)
-        run: .venv/bin/pytest --cov=recon_gen --cov-report=xml --cov-report=term
+        # AB.7.1a — name the coverage file so the aggregator job can
+        # combine it with the e2e + smoke legs into one release-wide
+        # report. Drop --cov-report so we don't write per-step xml
+        # (the aggregator emits one combined xml).
+        env:
+          COVERAGE_FILE: .coverage.release-unit
+        run: .venv/bin/pytest --cov=recon_gen
+
+      - name: Upload unit coverage data
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-data-release-unit
+          path: .coverage.release-unit
+          if-no-files-found: ignore
+          retention-days: 7
 
   # ---------------------------------------------------------------------------
   # Build sdist + wheel
@@ -186,13 +201,25 @@ jobs:
           # smoke env doesn't pull). The wheel itself is the subject
           # under test, not its pyright cleanliness.
           RECON_GEN_SKIP_PYRIGHT: "1"
+          # AB.7.1a — coverage from the installed-wheel smoke test.
+          COVERAGE_FILE: .coverage.release-smoke
         run: |
           # Q.3.a.9 reorg moved these into tests/{unit,json}/ for v8.0.0.
           /tmp/qs-smoke/bin/pytest \
             tests/unit/test_models.py \
             tests/unit/test_persona.py \
             tests/unit/test_theme_presets.py \
-            tests/json/test_dataset_contract.py
+            tests/json/test_dataset_contract.py \
+            --cov=recon_gen
+
+      - name: Upload smoke coverage data
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-data-release-smoke
+          path: .coverage.release-smoke
+          if-no-files-found: ignore
+          retention-days: 7
 
   # ---------------------------------------------------------------------------
   # Publish to TestPyPI (always on tag) — Trusted Publisher OIDC, no tokens
@@ -486,6 +513,8 @@ jobs:
           RECON_GEN_CONFIG: /tmp/release-e2e.yaml
           RECON_GEN_TEST_L2_INSTANCE: /tmp/release-l2.yaml
           RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
+          # AB.7.1a — coverage from the release-gate API e2e.
+          COVERAGE_FILE: .coverage.release-e2e-api
         run: |
           /tmp/qs-release-e2e/bin/pytest \
             tests/e2e/test_l1_deployed_resources.py \
@@ -494,7 +523,8 @@ jobs:
             tests/e2e/test_inv_dashboard_structure.py \
             tests/e2e/test_exec_deployed_resources.py \
             tests/e2e/test_exec_dashboard_structure.py \
-            -m api -v -n auto
+            -m api -v -n auto \
+            --cov=recon_gen
 
       - name: Install Playwright WebKit browser
         # The TestPyPI install above pulls the ``e2e`` extra (playwright
@@ -533,6 +563,8 @@ jobs:
           RECON_GEN_TEST_L2_INSTANCE: /tmp/release-l2.yaml
           RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
           RECON_E2E_PAGE_TIMEOUT: "60000"
+          # AB.7.1a — coverage from the release-gate browser e2e.
+          COVERAGE_FILE: .coverage.release-e2e-browser
         run: |
           /tmp/qs-release-e2e/bin/pytest \
             tests/e2e/test_l1_dashboard_renders.py \
@@ -550,7 +582,8 @@ jobs:
             tests/e2e/test_dashboard_driver.py \
             tests/e2e/test_l1_cross_sheet_drill_date_widening.py \
             tests/e2e/test_l2ft_metadata_cascade.py \
-            -m browser -v -n 2
+            -m browser -v -n 2 \
+            --cov=recon_gen
 
       # X.2.j — the 4-way cross-tool agreement test, separate invocation
       # (its ``seeded_audit`` fixture re-applies the prefixed schema +
@@ -570,10 +603,25 @@ jobs:
           RECON_GEN_TEST_L2_INSTANCE: /tmp/release-l2.yaml
           RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
           RECON_E2E_PAGE_TIMEOUT: "60000"
+          # AB.7.1a — coverage from the canonical release-gate path.
+          COVERAGE_FILE: .coverage.release-e2e-4way
         run: |
           /tmp/qs-release-e2e/bin/pytest \
             tests/e2e/test_audit_dashboard_agreement.py \
-            -m browser -v -k postgres
+            -m browser -v -k postgres \
+            --cov=recon_gen
+
+      # AB.7.1a — upload all three e2e coverage files from this job
+      # (api + browser + 4way) so the release-coverage aggregator can
+      # combine them with the unit + smoke legs.
+      - name: Upload e2e coverage data
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-data-release-e2e
+          path: .coverage.release-e2e-*
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload failure screenshots
         if: failure()
@@ -622,6 +670,83 @@ jobs:
   # Publish to PyPI (gated on TestPyPI install verify + e2e gate +
   # manual environment approval if configured)
   # ---------------------------------------------------------------------------
+  # AB.7.1a — combine coverage data uploaded by every release leg
+  # (unit + smoke + e2e API + e2e browser + 4-way agreement) into
+  # ONE release-wide report. Runs in parallel with publish-pypi
+  # (not a publish gate — coverage failure shouldn't block the
+  # publish). `github-release` depends on this so the aggregated
+  # coverage.xml + htmlcov.zip land in the release asset list.
+  release-coverage:
+    name: Combine + report release coverage
+    needs: [tests, smoke, e2e-against-testpypi]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (just coverage tooling)
+        run: uv sync --frozen --extra dev
+
+      - name: Download all coverage data artifacts
+        uses: actions/download-artifact@v6
+        with:
+          pattern: coverage-data-*
+          merge-multiple: true
+
+      - name: Combine coverage data files
+        run: .venv/bin/coverage combine || true
+
+      - name: Render markdown report (Step Summary + artifact)
+        run: |
+          {
+            echo "# Coverage report — release ${GITHUB_REF_NAME}"
+            echo ""
+            echo "_Combined from unit + smoke (installed wheel) + e2e API + e2e browser + 4-way agreement on commit ${GITHUB_SHA:0:7}._"
+            echo ""
+            .venv/bin/coverage report --format=markdown || echo "(no coverage data)"
+          } > coverage-report.md
+          cat coverage-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Render terminal report (for the job log)
+        run: .venv/bin/coverage report || true
+
+      - name: Generate HTML report
+        run: .venv/bin/coverage html -d htmlcov || true
+
+      - name: Generate XML report
+        run: .venv/bin/coverage xml -o coverage.xml || true
+
+      - name: Bundle HTML report into release-asset zip
+        # softprops/action-gh-release upload contract is "1 file per
+        # asset"; zip the htmlcov tree so it lands as ONE
+        # downloadable bundle on the release page.
+        run: |
+          if [ -d htmlcov ]; then
+            zip -r coverage-html.zip htmlcov/ >/dev/null
+            ls -la coverage-html.zip
+          fi
+
+      - name: Upload combined report artifacts (for github-release job)
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-coverage-${{ github.run_id }}
+          path: |
+            coverage.xml
+            coverage-html.zip
+            coverage-report.md
+          if-no-files-found: warn
+          retention-days: 30
+
   publish-pypi:
     name: Publish to PyPI
     needs: [verify-testpypi-install, e2e-against-testpypi]
@@ -705,7 +830,12 @@ jobs:
   # ---------------------------------------------------------------------------
   github-release:
     name: GitHub Release
-    needs: verify-pypi-install
+    # AB.7.1a — also depend on release-coverage so the aggregated
+    # report lands in the release asset list. `release-coverage` is
+    # `if: always()` so a failed coverage leg doesn't block the
+    # release (the dist/ assets are still ready); github-release
+    # picks up whatever coverage data made it through.
+    needs: [verify-pypi-install, release-coverage]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -716,6 +846,16 @@ jobs:
         with:
           name: dist
           path: dist/
+
+      # AB.7.1a — pull the aggregated coverage report so it can attach
+      # to the GitHub Release. `continue-on-error` so a missing
+      # artifact (zero-leg-passed) doesn't fail the release itself.
+      - name: Download release coverage artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: release-coverage-${{ github.run_id }}
+          path: release-coverage/
 
       - name: Extract release notes for ${{ github.ref_name }}
         run: |
@@ -769,7 +909,15 @@ jobs:
           body_path: release-body.md
           prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
           make_latest: ${{ steps.prerelease.outputs.make_latest }}
+          # AB.7.1a — also attach the aggregated coverage assets.
+          # `coverage-report.md` is the markdown table; `coverage.xml`
+          # is the Cobertura-format XML; `coverage-html.zip` bundles
+          # the navigable HTML report. Missing files (zero-leg-passed)
+          # are tolerated because `fail_on_unmatched_files: false`.
           files: |
             dist/*.whl
             dist/*.tar.gz
-          fail_on_unmatched_files: true
+            release-coverage/coverage.xml
+            release-coverage/coverage-html.zip
+            release-coverage/coverage-report.md
+          fail_on_unmatched_files: false

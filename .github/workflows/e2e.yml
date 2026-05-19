@@ -191,6 +191,11 @@ jobs:
           RECON_GEN_E2E: "1"
           RECON_GEN_CONFIG: /tmp/ci-pg.yaml
           RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
+          # AB.7.1a — coverage from the e2e-pg-api leg. `--cov` measures
+          # the cli/apps/schema/seed paths exercised by deploy + walk.
+          # `COVERAGE_FILE` keeps this leg's data distinct from sibling
+          # legs so the aggregator's `coverage combine` merges by name.
+          COVERAGE_FILE: .coverage.e2e-pg-api
         run: |
           .venv/bin/pytest \
             tests/e2e/test_l1_deployed_resources.py \
@@ -199,7 +204,8 @@ jobs:
             tests/e2e/test_inv_dashboard_structure.py \
             tests/e2e/test_exec_deployed_resources.py \
             tests/e2e/test_exec_dashboard_structure.py \
-            -m api -v -n auto
+            -m api -v -n auto \
+            --cov=recon_gen
 
       # W.8a — perf snapshot. Dump pg_stat_statements top-N queries
       # touching our test schema BEFORE cleanup drops the schema —
@@ -223,6 +229,19 @@ jobs:
           path: /tmp/top-queries-pg-api.md
           if-no-files-found: ignore
           retention-days: 14
+
+      # AB.7.1a — upload .coverage.e2e-pg-api so the workflow's
+      # `coverage` aggregator job can combine it with sibling legs.
+      # `if: always()` because partial coverage from a failing run is
+      # still useful triage data.
+      - name: Upload coverage data
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-data-e2e-pg-api
+          path: .coverage.e2e-pg-api
+          if-no-files-found: ignore
+          retention-days: 7
 
       # ``if: always()`` runs even if any prior step (or the test
       # itself) failed. The ``|| true`` on each clean call prevents a
@@ -371,6 +390,9 @@ jobs:
           RECON_GEN_CONFIG: /tmp/ci-pg-browser.yaml
           RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
           RECON_E2E_PAGE_TIMEOUT: "60000"
+          # AB.7.1a — coverage from the browser leg (visual render +
+          # filter + drill paths).
+          COVERAGE_FILE: .coverage.e2e-pg-browser
         # X.2.u.6 — file list reconciled against the parametrized
         # ``[qs, app2]`` suite. The parametrized files (``test_*_filters``,
         # ``test_*_sheet_visuals``, ``test_l2ft_*_dropdowns``,
@@ -400,7 +422,8 @@ jobs:
             tests/e2e/test_dashboard_driver.py \
             tests/e2e/test_l1_cross_sheet_drill_date_widening.py \
             tests/e2e/test_l2ft_metadata_cascade.py \
-            -m browser -v -n 2
+            -m browser -v -n 2 \
+            --cov=recon_gen
 
       # X.2.j — the 4-way cross-tool agreement test runs in its OWN
       # pytest invocation: its module-scoped ``seeded_audit`` fixture
@@ -417,10 +440,14 @@ jobs:
           RECON_GEN_CONFIG: /tmp/ci-pg-browser.yaml
           RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
           RECON_E2E_PAGE_TIMEOUT: "60000"
+          # AB.7.1a — coverage from the canonical release-gate path
+          # (scenario_plants ⊆ direct == QS == App2 == PDF).
+          COVERAGE_FILE: .coverage.e2e-pg-4way
         run: |
           .venv/bin/pytest \
             tests/e2e/test_audit_dashboard_agreement.py \
-            -m browser -v -k postgres
+            -m browser -v -k postgres \
+            --cov=recon_gen
 
       - name: Upload failure screenshots
         if: failure()
@@ -450,6 +477,19 @@ jobs:
           path: /tmp/top-queries-pg-browser.md
           if-no-files-found: ignore
           retention-days: 14
+
+      # AB.7.1a — upload coverage from BOTH browser pytest invocations
+      # (the dashboard-render sweep + the 4-way agreement test). The
+      # glob picks both files since they share the `.coverage.e2e-pg-`
+      # prefix.
+      - name: Upload coverage data
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-data-e2e-pg-browser
+          path: .coverage.e2e-pg-*
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Cleanup (always)
         if: always()
@@ -548,6 +588,8 @@ jobs:
           RECON_GEN_E2E: "1"
           RECON_GEN_CONFIG: /tmp/ci-oracle.yaml
           RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
+          # AB.7.1a — coverage from the Oracle dialect e2e leg.
+          COVERAGE_FILE: .coverage.e2e-oracle-api
         run: |
           .venv/bin/pytest \
             tests/e2e/test_l1_deployed_resources.py \
@@ -556,7 +598,8 @@ jobs:
             tests/e2e/test_inv_dashboard_structure.py \
             tests/e2e/test_exec_deployed_resources.py \
             tests/e2e/test_exec_dashboard_structure.py \
-            -m api -v -n auto
+            -m api -v -n auto \
+            --cov=recon_gen
 
       # W.8a — perf snapshot via v$sqlstats. The script tolerates
       # the no-permission case by writing a "skipped" marker.
@@ -577,6 +620,16 @@ jobs:
           path: /tmp/top-queries-oracle-api.md
           if-no-files-found: ignore
           retention-days: 14
+
+      # AB.7.1a — upload Oracle dialect's e2e coverage.
+      - name: Upload coverage data
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-data-e2e-oracle-api
+          path: .coverage.e2e-oracle-api
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Cleanup (always)
         if: always()
@@ -616,6 +669,84 @@ jobs:
   # Idempotent with the per-job cleanup: ``json clean`` and
   # ``schema clean`` both no-op when the targets don't exist, so the
   # second sweep just confirms the first was complete.
+  # AB.7.1a — combine coverage data uploaded by every e2e leg
+  # (e2e-pg-api + e2e-pg-browser + e2e-oracle-api) into a single
+  # report. Each leg uploaded ``.coverage.e2e-<leg>`` as an artifact;
+  # this job downloads + `coverage combine` merges them. Renders
+  # markdown to Step Summary + uploads xml/html as artifacts.
+  #
+  # Same shape as ci.yml's ``coverage`` job. ``if: always()`` so a
+  # failed leg's partial data still surfaces — useful triage even
+  # when the underlying test failed.
+  coverage:
+    name: Combine + report e2e coverage
+    needs: [e2e-pg-api, e2e-pg-browser, e2e-oracle-api]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (just coverage tooling)
+        run: uv sync --frozen --extra dev
+
+      - name: Download all coverage data artifacts
+        uses: actions/download-artifact@v6
+        with:
+          pattern: coverage-data-*
+          merge-multiple: true
+
+      - name: Combine coverage data files
+        # Each e2e leg uploaded `.coverage.e2e-<name>`. Combine merges
+        # them into a single `.coverage` data file. `|| true` so a
+        # zero-leg-passed run still produces a sensible report.
+        run: .venv/bin/coverage combine || true
+
+      - name: Render markdown report (Step Summary + artifact)
+        run: |
+          {
+            echo "# Coverage report (e2e legs)"
+            echo ""
+            echo "_Combined from e2e-pg-api + e2e-pg-browser (incl. 4-way agreement) + e2e-oracle-api on commit ${GITHUB_SHA:0:7}._"
+            echo ""
+            .venv/bin/coverage report --format=markdown || echo "(no coverage data)"
+          } > coverage-report.md
+          cat coverage-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Render terminal report (for the job log)
+        run: .venv/bin/coverage report || true
+
+      - name: Generate HTML report
+        run: .venv/bin/coverage html -d htmlcov || true
+
+      - name: Generate XML report
+        run: .venv/bin/coverage xml -o coverage.xml || true
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-html-e2e-${{ github.run_id }}
+          path: htmlcov/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload combined XML report
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-xml-e2e-${{ github.run_id }}
+          path: coverage.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
   cleanup-pg:
     needs: [e2e-pg-api, e2e-pg-browser]
     # ``if: always()`` runs even when ``e2e-pg-browser`` is skipped
