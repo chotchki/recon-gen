@@ -88,6 +88,21 @@
         <string>/Users/recon-demo/venv/bin:/usr/local/bin:/usr/bin:/bin</string>
         <key>HOME</key>
         <string>/Users/recon-demo</string>
+        <!--
+          Disable Python bytecode caching. Default behavior tries to
+          write .pyc files to ``<sys.path-entry>/__pycache__/``, which
+          includes the system Python stdlib at
+          ``/opt/homebrew/Cellar/python@3.13/.../lib/python3.13/...``.
+          The sandbox profile denies file-write outside the per-instance
+          state dir — Python normally swallows the EPERM but uvicorn
+          surfaces it during its accept-loop setup as
+          ``ERROR: [Errno 1] Operation not permitted`` and crashes the
+          server. PYTHONDONTWRITEBYTECODE=1 makes Python skip the .pyc
+          write attempts entirely; modest import-startup penalty for a
+          long-running server.
+        -->
+        <key>PYTHONDONTWRITEBYTECODE</key>
+        <string>1</string>
     </dict>
 </dict>
 </plist>

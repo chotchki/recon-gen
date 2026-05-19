@@ -66,6 +66,11 @@
         <string>/Users/recon-demo/venv/bin:/usr/local/bin:/usr/bin:/bin</string>
         <key>HOME</key>
         <string>/Users/recon-demo</string>
+        <!-- Match the server daemons. Refresh runs outside the
+             sandbox-exec wrapper so .pyc writes succeed there, but
+             keeping the env var consistent avoids surprise drift. -->
+        <key>PYTHONDONTWRITEBYTECODE</key>
+        <string>1</string>
     </dict>
 </dict>
 </plist>

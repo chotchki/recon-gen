@@ -61,6 +61,14 @@
         <string>/Users/recon-demo/venv/bin:/usr/local/bin:/usr/bin:/bin</string>
         <key>HOME</key>
         <string>/Users/recon-demo</string>
+        <!--
+          See spec plist for the rationale — sandbox-exec denies .pyc
+          writes to system Python stdlib paths; uvicorn surfaces the
+          downstream EPERM as a crash. PYTHONDONTWRITEBYTECODE=1
+          skips bytecode caching entirely.
+        -->
+        <key>PYTHONDONTWRITEBYTECODE</key>
+        <string>1</string>
     </dict>
 </dict>
 </plist>
