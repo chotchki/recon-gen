@@ -350,6 +350,7 @@ Today's chain-level `fan_in` flag (AB.4 shape) can't carry mixed-cardinality chi
 
 - [ ] AB.7 End-of-phase (was AB.5 pre-2026-05-19; renumbered when E5/E6/E7 pushed close-out back)
   - [ ] AB.7.1 Verify (full 13-cell db matrix + browser canary). Same shape as Z.D.1 (`./run_tests.sh up_to=db` no-flags + a thin browser-layer `--scenarios=sp --dialects=pg --targets=aw` canary). Deterministic cells must all be green; fuzz-cell instability tracked separately.
+  - [ ] AB.7.1a Triage skipped tests surfaced by AB.7.1 verify. Categorize each skip: (a) legitimately conditional (env / dialect / target gate) — document the gate is intentional; (b) stale / fixable — implement the missing fixture / driver verb / cfg knob so it runs; (c) broken — convert to xfail with a tracking link, or delete. End state: every skip is justified per-skip, not a black box. Per `feedback_build_verbs_not_skip` memory: when a parametrized [qs, app2] driver test skips because a renderer verb is unsupported, prefer building the verb on both renderers over the `skips_if_unsupported` helper. Baseline count to capture before starting: sum the skip totals reported across unit prelude + every per-cell pytest invocation in `runs/<id>/`.
   - [ ] AB.7.2 Commit, archive Phase AB to PLAN_ARCHIVE.md, push. Add Phase AB one-liner to the Phase history section. Cut a release tag.
 
 ---
