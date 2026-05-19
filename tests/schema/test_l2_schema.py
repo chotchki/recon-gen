@@ -1089,6 +1089,60 @@ def test_transfer_parents_view_ab4_shape() -> None:
     assert "idx_tp_tp_parent" in sql
 
 
+def test_chain_parent_disagreement_excludes_fan_in_templates() -> None:
+    """AB.4.4 — chain_parent_disagreement matview filters fan_in
+    template children out of its violation set. Otherwise every
+    legitimate fan_in firing (N parents per child by design) would
+    false-positive into the AB.2.3 violation surface. Empty filter
+    when no fan_in declared (pre-AB.4 behavior); inline NOT IN
+    clause when ≥1 fan_in template exists."""
+    from pathlib import Path
+    from recon_gen.common.l2.loader import load_instance
+    # spec_example declares BatchedPayoutBatch as a fan_in child.
+    fx = Path(__file__).resolve().parent.parent / "l2" / "spec_example.yaml"
+    inst = load_instance(fx)
+    sql = emit_schema(inst, prefix="cpdf")
+    body_match = re.search(
+        r"CREATE MATERIALIZED VIEW cpdf_chain_parent_disagreement "
+        r"AS(.*?);",
+        sql,
+        re.DOTALL,
+    )
+    assert body_match is not None
+    body = body_match.group(1)
+    # NOT IN filter inlines the fan_in template name.
+    assert "AND tx.template_name NOT IN ('BatchedPayoutBatch')" in body
+
+
+def test_chain_parent_disagreement_filter_empty_when_no_fan_in() -> None:
+    """AB.4.4 backwards-compat: when no chain declares fan_in,
+    the filter resolves to empty — pre-AB.4 fixtures match byte-
+    for-byte with AB.2.3's original matview shape."""
+    sql = emit_schema(
+        L2Instance(
+            accounts=(),
+            account_templates=(),
+            rails=(),
+            transfer_templates=(),
+            chains=(),
+            limit_schedules=(),
+        ),
+        prefix="cpdn",
+    )
+    body_match = re.search(
+        r"CREATE MATERIALIZED VIEW cpdn_chain_parent_disagreement "
+        r"AS(.*?);",
+        sql,
+        re.DOTALL,
+    )
+    assert body_match is not None
+    body = body_match.group(1)
+    # No NOT IN clause in the empty branch.
+    assert "NOT IN (" not in body
+    # The WHERE chain ends cleanly with status filter; no dangling AND.
+    assert "tx.status <> 'Failed'\nGROUP BY" in body
+
+
 def test_fan_in_disagreement_view_empty_branch_when_no_fan_in_chain(
 ) -> None:
     """AB.4.7: when no chain declares ``fan_in=True``, the
