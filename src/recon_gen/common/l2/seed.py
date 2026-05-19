@@ -246,6 +246,45 @@ class InboundCapBreachPlant:
 
 
 @dataclass(frozen=True, slots=True)
+class TwoTemplateChainPlant:
+    """A planted healthy two-template chain firing (AB.2.6).
+
+    Generates one parent leg_rail firing + child template leg_rail
+    firings (all sharing one child Transfer per gap doc §3's first
+    -firing-wins semantic, all carrying the same ``parent_transfer_id``).
+    Cardinality = 1 in the AB.2.3 matview = NO violation row. Gives the
+    L1 dashboard's PostedRequirements panel + the audit PDF a healthy
+    two-template chain row to display, separate from the probabilistic
+    baseline.
+    """
+
+    chain_parent_rail_name: Identifier
+    child_template_name: Identifier
+    days_ago: int
+
+
+@dataclass(frozen=True, slots=True)
+class ChainParentDisagreementPlant:
+    """A planted L1 violation: two-template chain where leg_rail firings
+    of one child Transfer claim *different* ``parent_transfer_id`` values
+    (AB.2.6 / AB.2.3).
+
+    First-firing-wins per gap doc §3 means subsequent legs MUST agree
+    on the Parent — disagreement is an ETL bug (parent reference drift,
+    cross-cycle contamination). The emitter generates 2+ leg_rail rows
+    sharing one ``transfer_id`` + ``template_name`` but assigning
+    different synthetic ``transfer_parent_id`` values, so the AB.2.3
+    matview reads ``COUNT(DISTINCT parent_transfer_id) > 1`` and
+    surfaces the row.
+    """
+
+    child_template_name: Identifier
+    days_ago: int
+    parent_a_transfer_id: str  # synthetic; doesn't need to resolve to a real Transfer
+    parent_b_transfer_id: str  # synthetic; the *second* parent that disagrees with A
+
+
+@dataclass(frozen=True, slots=True)
 class StuckPendingPlant:
     """A planted Pending leg whose age exceeds the rail's `max_pending_age`.
 
@@ -479,6 +518,8 @@ class ScenarioPlant:
     overdraft_plants: tuple[OverdraftPlant, ...] = ()
     limit_breach_plants: tuple[LimitBreachPlant, ...] = ()
     inbound_cap_breach_plants: tuple[InboundCapBreachPlant, ...] = ()
+    two_template_chain_plants: tuple[TwoTemplateChainPlant, ...] = ()
+    chain_parent_disagreement_plants: tuple[ChainParentDisagreementPlant, ...] = ()
     stuck_pending_plants: tuple[StuckPendingPlant, ...] = ()
     failed_transaction_plants: tuple[FailedTransactionPlant, ...] = ()
     stuck_unbundled_plants: tuple[StuckUnbundledPlant, ...] = ()
@@ -543,6 +584,30 @@ def emit_seed(
             _emit_inbound_cap_breach_rows(
                 p, instance, scenarios, template_by_role,
                 parent_singleton_by_role, txn_counter, dialect,
+            )
+        )
+
+    # AB.2.6 — TwoTemplateChainPlant: healthy two-template chain firing
+    # with cardinality=1 on the AB.2.3 chain_parent_disagreement
+    # matview (no violation row produced).
+    for p in sorted(scenarios.two_template_chain_plants, key=_two_template_chain_key):
+        txn_rows.extend(
+            _emit_two_template_chain_rows(
+                p, instance, scenarios, template_by_role, txn_counter, dialect,
+            )
+        )
+
+    # AB.2.6 — ChainParentDisagreementPlant: child Transfer with 2
+    # distinct parent_transfer_id values across its leg_rail firings.
+    # Surfaces on the AB.2.3 chain_parent_disagreement matview as an
+    # ETL-bug L1 violation.
+    for p in sorted(
+        scenarios.chain_parent_disagreement_plants,
+        key=_chain_parent_disagreement_key,
+    ):
+        txn_rows.extend(
+            _emit_chain_parent_disagreement_rows(
+                p, instance, scenarios, template_by_role, txn_counter, dialect,
             )
         )
 
@@ -3382,6 +3447,19 @@ def _inbound_breach_key(p: InboundCapBreachPlant) -> tuple[str, int, str]:
     return (str(p.account_id), p.days_ago, str(p.rail_name))
 
 
+def _two_template_chain_key(p: TwoTemplateChainPlant) -> tuple[str, str, int]:
+    return (str(p.chain_parent_rail_name), str(p.child_template_name), p.days_ago)
+
+
+def _chain_parent_disagreement_key(
+    p: ChainParentDisagreementPlant,
+) -> tuple[str, int, str, str]:
+    return (
+        str(p.child_template_name), p.days_ago,
+        p.parent_a_transfer_id, p.parent_b_transfer_id,
+    )
+
+
 def _stuck_pending_key(p: StuckPendingPlant) -> tuple[str, int, str]:
     return (str(p.account_id), p.days_ago, str(p.rail_name))
 
@@ -3530,6 +3608,188 @@ def _emit_inbound_cap_breach_rows(
             dialect=dialect,
         ),
     ]
+
+
+def _emit_two_template_chain_rows(
+    p: TwoTemplateChainPlant,
+    instance: L2Instance,
+    scenarios: ScenarioPlant,
+    template_by_role: dict[Identifier, AccountTemplate],
+    counter: _Counter,
+    dialect: Dialect,
+) -> list[str]:
+    """AB.2.6 healthy plant: one parent leg_rail firing + one child
+    template firing (all leg_rails of the child template share one
+    transfer_id and agree on parent_transfer_id).
+
+    No violation: the AB.2.3 matview reads COUNT(DISTINCT
+    parent_transfer_id) = 1 for the shared child transfer_id. Purpose
+    is positive demo coverage on the dashboard's PostedRequirements
+    panel + audit PDF — a clearly-labeled healthy two-template chain
+    row, separate from the probabilistic baseline.
+    """
+    parent_rail = _find_rail_or_skip(p.chain_parent_rail_name, instance)
+    if parent_rail is None:
+        return []
+    child_template = _find_template_or_skip(p.child_template_name, instance)
+    if child_template is None or not child_template.leg_rails:
+        return []
+    # Source / counter accounts: any TemplateInstance the parent rail
+    # could fire on. Falls back to first available template_instance
+    # for shape consistency with the rest of the plant emitters.
+    ti = _first_template_instance_or_skip(scenarios)
+    if ti is None:
+        return []
+    template = template_by_role.get(ti.template_role)
+    if template is None:
+        return []
+    parent_role = template.parent_role
+
+    plant_day = scenarios.today - timedelta(days=p.days_ago)
+    parent_posting = f"{plant_day.isoformat()}T10:00:00+00:00"
+    child_posting = f"{plant_day.isoformat()}T11:00:00+00:00"
+
+    n_parent = counter.next()
+    parent_transfer_id = f"tr-tmpl-chain-parent-{n_parent:04d}"
+    n_child = counter.next()
+    child_transfer_id = f"tr-tmpl-chain-child-{n_child:04d}"
+
+    rows: list[str] = []
+    # Parent firing: one row keyed to parent_rail, no template_name (the
+    # parent of a two-template chain may itself be either a Rail or a
+    # Template; for this plant we treat it as a single-leg debit row
+    # for SQL simplicity — the matview only inspects child rows).
+    rows.append(_txn_row(
+        id_=f"tx-tmpl-chain-parent-{n_parent:04d}",
+        account_id=ti.account_id,
+        account_name=ti.name,
+        account_role=ti.template_role,
+        account_scope=template.scope,
+        account_parent_role=parent_role,
+        money=-Decimal("100.00"),
+        direction="Debit",
+        posting=parent_posting,
+        transfer_id=parent_transfer_id,
+        rail_name=p.chain_parent_rail_name,
+        origin="InternalInitiated",
+        metadata={"chain_role": "parent"},
+        dialect=dialect,
+    ))
+    # Child leg_rail firings — all share child_transfer_id, all carry
+    # transfer_parent_id=parent_transfer_id, all carry template_name=
+    # child_template_name. The AB.2.3 matview groups these into one
+    # row with distinct_parent_count=1 (no violation).
+    for i, leg_rail_name in enumerate(child_template.leg_rails):
+        rows.append(_txn_row(
+            id_=f"tx-tmpl-chain-child-{n_child:04d}-{i}",
+            account_id=ti.account_id,
+            account_name=ti.name,
+            account_role=ti.template_role,
+            account_scope=template.scope,
+            account_parent_role=parent_role,
+            money=Decimal("50.00"),  # arbitrary; matview doesn't read amount
+            direction="Credit",
+            posting=child_posting,
+            transfer_id=child_transfer_id,
+            rail_name=leg_rail_name,
+            origin="InternalInitiated",
+            metadata={"chain_role": "child", "leg_index": str(i)},
+            template_name=child_template.name,
+            transfer_parent_id=parent_transfer_id,
+            dialect=dialect,
+        ))
+    return rows
+
+
+def _emit_chain_parent_disagreement_rows(
+    p: ChainParentDisagreementPlant,
+    instance: L2Instance,
+    scenarios: ScenarioPlant,
+    template_by_role: dict[Identifier, AccountTemplate],
+    counter: _Counter,
+    dialect: Dialect,
+) -> list[str]:
+    """AB.2.6 violation plant: ≥2 leg_rail rows sharing one child
+    transfer_id + template_name but assigning *different* parent
+    transfer_ids — simulates an ETL bug where leg_rail firings of one
+    chain invocation disagree on which parent firing they descend from.
+
+    The AB.2.3 matview reads COUNT(DISTINCT parent_transfer_id) = 2 for
+    the shared child transfer_id and surfaces a row. This is the
+    canonical demo-visible L1 violation for two-template chains.
+    """
+    child_template = _find_template_or_skip(p.child_template_name, instance)
+    if child_template is None or len(child_template.leg_rails) < 1:
+        return []
+    ti = _first_template_instance_or_skip(scenarios)
+    if ti is None:
+        return []
+    template = template_by_role.get(ti.template_role)
+    if template is None:
+        return []
+    parent_role = template.parent_role
+
+    plant_day = scenarios.today - timedelta(days=p.days_ago)
+    posting = f"{plant_day.isoformat()}T12:00:00+00:00"
+    n = counter.next()
+    child_transfer_id = f"tr-cpd-{n:04d}"
+    # If the template has only 1 leg_rail, the disagreement still fires
+    # — we emit 2 rows on the same leg_rail with different parent ids.
+    # The matview's GROUP BY (transfer_id, template_name) doesn't care
+    # about rail_name distinctness.
+    leg_rails = list(child_template.leg_rails)
+    if len(leg_rails) == 1:
+        leg_rails.append(leg_rails[0])  # second row on same rail
+    parent_ids = [p.parent_a_transfer_id, p.parent_b_transfer_id]
+
+    rows: list[str] = []
+    for i, (leg_rail_name, parent_tid) in enumerate(zip(leg_rails[:2], parent_ids, strict=True)):
+        rows.append(_txn_row(
+            id_=f"tx-cpd-{n:04d}-{i}",
+            account_id=ti.account_id,
+            account_name=ti.name,
+            account_role=ti.template_role,
+            account_scope=template.scope,
+            account_parent_role=parent_role,
+            money=Decimal("75.00"),  # arbitrary; matview only counts DISTINCT parent_transfer_id
+            direction="Credit",
+            posting=posting,
+            transfer_id=child_transfer_id,
+            rail_name=leg_rail_name,
+            origin="ExternalForcePosted",  # ETL-bug origin convention
+            metadata={"chain_role": "child", "leg_index": str(i)},
+            template_name=child_template.name,
+            transfer_parent_id=parent_tid,
+            dialect=dialect,
+        ))
+    return rows
+
+
+def _find_rail_or_skip(name: Identifier, instance: L2Instance) -> Rail | None:
+    """Return the L2 Rail matching ``name`` or None for graceful skip."""
+    for r in instance.rails:
+        if r.name == name:
+            return r
+    return None
+
+
+def _find_template_or_skip(
+    name: Identifier, instance: L2Instance,
+) -> TransferTemplate | None:
+    """Return the L2 TransferTemplate matching ``name`` or None for skip."""
+    for t in instance.transfer_templates:
+        if t.name == name:
+            return t
+    return None
+
+
+def _first_template_instance_or_skip(
+    scenarios: ScenarioPlant,
+) -> TemplateInstance | None:
+    """Return the first materialized TemplateInstance, or None."""
+    if scenarios.template_instances:
+        return scenarios.template_instances[0]
+    return None
 
 
 def _emit_limit_breach_rows(

@@ -63,6 +63,7 @@ from .primitives import (
     TwoLegRail,
 )
 from .seed import (
+    ChainParentDisagreementPlant,
     DriftPlant,
     FailedTransactionPlant,
     InboundCapBreachPlant,
@@ -76,6 +77,7 @@ from .seed import (
     SupersessionPlant,
     TemplateInstance,
     TransferTemplatePlant,
+    TwoTemplateChainPlant,
 )
 
 
@@ -157,6 +159,18 @@ def default_scenario_for(
         omitted.append(("InboundCapBreachPlant",
                         "no Inbound LimitSchedule whose rail matches an "
                         "inbound 2-leg Rail with external counter (AB.1)"))
+    # AB.2.6 — two-template chain picker: finds any chain whose singleton
+    # child is a TransferTemplate (template-as-chain-child case, gap doc §3).
+    two_template_chain_pick = _pick_two_template_chain_inputs(instance)
+    if two_template_chain_pick is None:
+        omitted.append((
+            "TwoTemplateChainPlant",
+            "no Chain whose singleton child resolves to a TransferTemplate (AB.2)",
+        ))
+        omitted.append((
+            "ChainParentDisagreementPlant",
+            "no Chain whose singleton child resolves to a TransferTemplate (AB.2)",
+        ))
     pending_rail = _pick_first_with(
         instance.rails, key=lambda r: r.max_pending_age is not None,
     )
@@ -242,6 +256,30 @@ def default_scenario_for(
                 rail_name=in_rail.name,
                 amount=in_amount,
                 counter_account_id=in_counter.id,
+            ),
+        )
+
+    # AB.2.6 — TwoTemplateChainPlant + ChainParentDisagreementPlant.
+    # Both gate on a two-template chain existing in the L2. Distinct
+    # days_ago (2 vs 1) so planted rows are visually separable from
+    # the limit-breach plants above.
+    two_template_chain_plants: tuple[TwoTemplateChainPlant, ...] = ()
+    chain_parent_disagreement_plants: tuple[ChainParentDisagreementPlant, ...] = ()
+    if two_template_chain_pick is not None:
+        chain_parent_rail, chain_child_template = two_template_chain_pick
+        two_template_chain_plants = (
+            TwoTemplateChainPlant(
+                chain_parent_rail_name=chain_parent_rail,
+                child_template_name=chain_child_template,
+                days_ago=2,
+            ),
+        )
+        chain_parent_disagreement_plants = (
+            ChainParentDisagreementPlant(
+                child_template_name=chain_child_template,
+                days_ago=1,
+                parent_a_transfer_id="tr-cpd-parent-a-0001",
+                parent_b_transfer_id="tr-cpd-parent-b-0001",
             ),
         )
 
@@ -475,6 +513,8 @@ def default_scenario_for(
         overdraft_plants=overdraft_plants if include_l1 else (),
         limit_breach_plants=limit_breach_plants if include_l1 else (),
         inbound_cap_breach_plants=inbound_cap_breach_plants if include_l1 else (),
+        two_template_chain_plants=two_template_chain_plants if include_l1 else (),
+        chain_parent_disagreement_plants=chain_parent_disagreement_plants if include_l1 else (),
         stuck_pending_plants=stuck_pending_plants if include_l1 else (),
         failed_transaction_plants=failed_transaction_plants if include_l1 else (),
         stuck_unbundled_plants=stuck_unbundled_plants if include_l1 else (),
@@ -621,6 +661,11 @@ def densify_scenario(
             r for p in base.inbound_cap_breach_plants
             for r in replicate_inbound_breach(p)
         ),
+        # AB.2.6 — chain plants pass through un-replicated. One healthy
+        # + one disagreement row per L2 is enough for dashboard / matview
+        # coverage; multiplying noise legs doesn't add new shape coverage.
+        two_template_chain_plants=base.two_template_chain_plants,
+        chain_parent_disagreement_plants=base.chain_parent_disagreement_plants,
         stuck_pending_plants=tuple(
             r for p in base.stuck_pending_plants for r in replicate_pending(p)
         ),
@@ -691,6 +736,8 @@ def boost_inv_fanout_plants(
         overdraft_plants=base.overdraft_plants,
         limit_breach_plants=base.limit_breach_plants,
         inbound_cap_breach_plants=base.inbound_cap_breach_plants,
+        two_template_chain_plants=base.two_template_chain_plants,
+        chain_parent_disagreement_plants=base.chain_parent_disagreement_plants,
         stuck_pending_plants=base.stuck_pending_plants,
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants,
@@ -767,6 +814,8 @@ def add_broken_rail_plants(
         overdraft_plants=base.overdraft_plants,
         limit_breach_plants=base.limit_breach_plants,
         inbound_cap_breach_plants=base.inbound_cap_breach_plants,
+        two_template_chain_plants=base.two_template_chain_plants,
+        chain_parent_disagreement_plants=base.chain_parent_disagreement_plants,
         stuck_pending_plants=base.stuck_pending_plants + extra_plants,
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants,
@@ -815,6 +864,8 @@ def filter_scenario_plants(
         overdraft_plants=base.overdraft_plants if "overdraft" in selected else (),
         limit_breach_plants=base.limit_breach_plants if "limit_breach" in selected else (),
         inbound_cap_breach_plants=base.inbound_cap_breach_plants if "limit_breach" in selected else (),
+        two_template_chain_plants=base.two_template_chain_plants if "chain_parent_disagreement" in selected else (),
+        chain_parent_disagreement_plants=base.chain_parent_disagreement_plants if "chain_parent_disagreement" in selected else (),
         stuck_pending_plants=base.stuck_pending_plants if "stuck_pending" in selected else (),
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants if "stuck_unbundled" in selected else (),
@@ -1441,6 +1492,37 @@ def _pick_supersession_rail(
             or template_role in r.destination_role
         ):
             return r
+    return None
+
+
+def _pick_two_template_chain_inputs(
+    instance: L2Instance,
+) -> tuple[Identifier, Identifier] | None:
+    """AB.2.6 picker: find any Chain whose singleton child is a
+    TransferTemplate (the template-as-chain-child shape, gap doc §3).
+
+    Returns ``(parent_rail_name, child_template_name)`` if found, else
+    ``None``. Restricts to singleton-children chains because Z.A's XOR
+    semantics on multi-children chains make parent_transfer_id optional
+    per leg (which would make the AB.2.6 plant probabilistic rather
+    than deterministic). The parent MUST resolve to a Rail (not a
+    TransferTemplate) — two-template chains where BOTH ends are
+    templates are valid but produce nested-firing semantics out of
+    scope for the AB.2 plant scaffold.
+    """
+    template_names = {t.name for t in instance.transfer_templates}
+    rail_names = {r.name for r in instance.rails}
+    for c in sorted(
+        instance.chains,
+        key=lambda ch: (str(ch.parent), ",".join(sorted(str(d) for d in ch.children))),
+    ):
+        if len(c.children) != 1:
+            continue
+        if c.parent not in rail_names:
+            continue
+        child = c.children[0]
+        if child in template_names:
+            return (c.parent, child)
     return None
 
 

@@ -66,12 +66,16 @@ def test_auto_scenario_against_spec_example_covers_all_six_plant_kinds(
     assert len(sc.stuck_unbundled_plants) == 1
     assert len(sc.supersession_plants) == 1
     assert len(sc.inv_fanout_plants) == 1
-    # Only-omission: the lone TT plant whose first leg_rail isn't TwoLeg.
+    # Permitted omissions: (a) lone TT plant whose first leg_rail isn't TwoLeg,
+    # (b) AB.2 chain-template plants pending AB.2.6.spec fixture (spec_example
+    # doesn't carry a two-template chain yet — AB.2.6.spec will add one and
+    # tighten this assertion to require non-empty plant tuples).
     omitted_kinds = [kind for kind, _ in report.omitted]
+    permitted_ab2 = {"TwoTemplateChainPlant", "ChainParentDisagreementPlant"}
     assert all(
-        k.startswith("TransferTemplatePlant[")
+        k.startswith("TransferTemplatePlant[") or k in permitted_ab2
         for k in omitted_kinds
-    ), f"Unexpected non-TT omissions: {report.omitted!r}"
+    ), f"Unexpected omissions: {report.omitted!r}"
 
 
 def test_auto_scenario_against_sasquatch_pr_covers_all_six_plant_kinds(
