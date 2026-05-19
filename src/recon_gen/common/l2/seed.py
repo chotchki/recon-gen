@@ -2734,13 +2734,14 @@ def _emit_baseline_chains(
         if not parent_firings:
             continue
 
-        # AB.4.4: fan_in chains group N parent firings into one shared
-        # child Transfer (the batched-payout pattern). All legs of the
-        # batch's child template share one `transfer_id`; each leg
-        # carries its contributing parent's `parent_transfer_id`. The
-        # AB.4.3 transfer_parents matview derives the multi-parent set
-        # via DISTINCT(child, parent); AB.4.7's fan_in_disagreement
-        # joins against expected_parent_count for cardinality check.
+        # AB.4.4 (AB.6 per-child): a chain carrying at least one
+        # per-child fan_in entry routes into batched-firing emission.
+        # All legs of the batch's child template share one
+        # `transfer_id`; each leg carries its contributing parent's
+        # `parent_transfer_id`. The AB.4.3 transfer_parents matview
+        # derives the multi-parent set via DISTINCT(child, parent);
+        # AB.4.7's fan_in_disagreement joins against
+        # expected_parent_count for cardinality check.
         if any(c.fan_in for c in chain.children):
             rows.extend(_emit_fan_in_chain_firings(
                 chain, parent_firings, instance, state, counter, rng, dialect,
@@ -2908,11 +2909,21 @@ def _emit_fan_in_chain_firings(
     rng: random.Random,
     dialect: Dialect,
 ) -> list[str]:
-    """AB.4.4: emit chain firings where N parent firings share one
-    child Transfer (the batched-payout pattern).
+    """AB.4.4 (AB.6 per-child): emit chain firings where N parent
+    firings share one child Transfer (the batched-payout pattern).
+
+    AB.6 (2026-05-19) — fan_in moved per-child. This function reads
+    the chain's first ``ChainChildSpec`` whose ``fan_in=True`` and
+    uses its ``expected_parent_count`` for batch sizing. Mixed-
+    cardinality chains (some children fan_in, some not) are
+    representable in the L2 grammar but not yet exercised by any
+    fixture; today's spec_example + sasquatch_pr each carry a single
+    fan_in child per chain. When AB.6.6.sasq's fold lock fires, the
+    function will need a second pass over non-fan_in children — track
+    via a follow-on if the lock activates.
 
     Per AB.4.0 lock: parents are grouped into batches of size
-    ``chain.expected_parent_count`` (default 2 when unset — the
+    ``child.expected_parent_count`` (default 2 when unset — the
     minimum non-orphan). Each batch:
 
     - Allocates ONE shared ``child_transfer_id`` (``tr-base-fanin-NNNNNN``).
@@ -2923,12 +2934,12 @@ def _emit_fan_in_chain_firings(
       AB.4.3 ``_transfer_parents`` matview yields ``batch_size`` rows
       per child Transfer (the multi-parent set).
 
-    Per AB.4.2 (validator C8a), every fan_in chain's children resolve
-    to TransferTemplates — that's enforced at load time. Defensive
+    Per AB.6 validator C8a, every per-child entry with ``fan_in=True``
+    resolves to a TransferTemplate — enforced at load time. Defensive
     skip if somehow a non-template snuck through.
 
     XOR suppression: per AB.3.4, the XOR pick is keyed off the firing
-    id. For fan_in chains, the firing id is the shared
+    id. For fan_in entries, the firing id is the shared
     ``child_transfer_id`` (all parents in the batch produce one
     logical firing of the child template — the picks need to agree
     across parents so the resulting batch has consistent variant
@@ -2941,12 +2952,10 @@ def _emit_fan_in_chain_firings(
     """
     if not chain.children:
         return []
-    # AB.4.2 (C8a): every fan_in child resolves to a TransferTemplate.
-    # AB.6.1 transitional: pick the first fan_in entry (singleton
-    # children + chain-wide fan_in is today's typical shape). AB.6.4
-    # will rewrite to emit per fan_in child entry; multi-XOR + per-child
-    # fan_in inhomogeneity becomes expressible once AB.6.2 lands the
-    # heterogeneous loader.
+    # AB.6 C8a: every per-child entry with fan_in=True resolves to a
+    # TransferTemplate. Pick the first fan_in entry (today's fixtures
+    # all carry singleton fan_in per chain; mixed-cardinality is a
+    # downstream extension when AB.6.6.sasq's fold lock activates).
     fan_in_child = next((c for c in chain.children if c.fan_in), None)
     if fan_in_child is None:
         return []

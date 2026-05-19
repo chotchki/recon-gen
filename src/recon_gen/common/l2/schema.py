@@ -315,6 +315,11 @@ def refresh_matviews_sql(
         # _transfer_parents (AB.4.3) for the parent-count derivation;
         # MUST refresh AFTER _transfer_parents.
         f"{p}_fan_in_disagreement",
+        # AB.6.5 — Multi-XOR violation L1 invariant. Reads from
+        # current_transactions + L2 declaration inlined; independent
+        # of other L1 matviews. Refresh before todays_exceptions so
+        # its UNION ALL branch reads fresh rows.
+        f"{p}_multi_xor_violation",
         # Dashboard-shape matviews: read from current_* +
         # L1 invariants. MUST refresh AFTER all L1 invariants are
         # fresh so todays_exceptions's UNION reads up-to-date data.
@@ -398,6 +403,7 @@ def _emit_sqlite_matview_refresh(instance: L2Instance, *, prefix: str) -> str:
         f"{p}_xor_group_violation",
         f"{p}_transfer_parents",
         f"{p}_fan_in_disagreement",
+        f"{p}_multi_xor_violation",
         f"{p}_daily_statement_summary",
         f"{p}_todays_exceptions",
         f"{p}_inv_pair_rolling_anomalies",
@@ -505,6 +511,9 @@ def _emit_l1_invariant_views(
     fan_in_disagreement_body = _render_fan_in_disagreement_body(
         instance, p=p, dialect=dialect,
     )
+    multi_xor_violation_body = _render_multi_xor_violation_body(
+        instance, p=p, dialect=dialect,
+    )
     return _L1_INVARIANT_VIEWS_TEMPLATE.format(
         p=p,
         limit_cases_outbound=limit_cases_outbound,
@@ -514,6 +523,7 @@ def _emit_l1_invariant_views(
         xor_group_violation_body=xor_group_violation_body,
         chain_parent_disagreement_fan_in_filter=chain_parent_disagreement_fan_in_filter,
         fan_in_disagreement_body=fan_in_disagreement_body,
+        multi_xor_violation_body=multi_xor_violation_body,
         matview_options=matview_options(dialect),
         matview_create_kw=matview_create_keyword(dialect),
         date_trunc_tx_posting=date_trunc_day("tx.posting", dialect),
@@ -618,9 +628,10 @@ def _render_pending_age_cases(
 def _render_chain_parent_disagreement_fan_in_filter(
     instance: L2Instance,
 ) -> str:
-    """AB.4.4: Render the optional ``AND tx.template_name NOT IN (...)``
-    clause that excludes fan_in chain children from the
-    ``chain_parent_disagreement`` matview.
+    """AB.4.4 (AB.6 per-child): Render the optional
+    ``AND tx.template_name NOT IN (...)`` clause that excludes
+    fan_in-marked chain children from the ``chain_parent_disagreement``
+    matview.
 
     Fan_in chain children are legitimately multi-parent (N parent
     firings share one child Transfer by design — the batched-payout
@@ -628,9 +639,15 @@ def _render_chain_parent_disagreement_fan_in_filter(
     > 1" would false-positive every fan_in firing as a violation; this
     filter excludes them at the source.
 
-    When no chains declare ``fan_in=True`` (pre-AB.4 fixtures), the
-    fan-in template set is empty and the filter resolves to ``""`` —
-    behavior is byte-identical to AB.2.3.
+    AB.6 (2026-05-19) — fan_in moved per-child, so the source is now
+    `[child.name for chain in chains for child in chain.children
+    if child.fan_in]`. Mixed-cardinality chains (one fan_in child +
+    other 1:1 children) contribute only the fan_in child to the
+    NOT IN filter — siblings stay under the AB.2.3 1:1 contract.
+
+    When no child declares ``fan_in=True``, the fan-in template set
+    is empty and the filter resolves to ``""`` — behavior is
+    byte-identical to AB.2.3.
     """
     fan_in_templates: set[str] = set()
     for chain in instance.chains:
@@ -781,31 +798,41 @@ def _render_xor_group_violation_body(
 def _render_fan_in_disagreement_body(
     instance: L2Instance, *, p: str, dialect: Dialect = Dialect.POSTGRES,
 ) -> str:
-    """AB.4.7: Render the body of ``{p}_fan_in_disagreement``.
+    """AB.4.7 (AB.6 per-child): Render the body of
+    ``{p}_fan_in_disagreement``.
 
     Per AB.4.0 lock: long-form, one row per (child_transfer_id,
     disagreement_kind) tuple where ``kind`` ∈ ``{'orphan', 'missing',
     'extra'}``. Columns: ``child_transfer_id``, ``chain_parent_name``,
     ``child_template_name``, ``parent_count`` (actual),
-    ``expected_parent_count`` (NULL when chain leaves it unset),
+    ``expected_parent_count`` (NULL when entry leaves it unset),
     ``disagreement_kind``, ``business_day``.
 
+    AB.6 (2026-05-19): the CTE source shifted from "one row per fan_in
+    chain" to "one row per fan_in chain *child entry*" — so
+    ``(chain.parent, child.name, child.expected_parent_count)`` is
+    drawn from each per-child entry with ``fan_in=True``.
+    Mixed-cardinality chains (some fan_in children, some not) only
+    contribute their fan_in entries; the 1:1 siblings stay under
+    AB.2.3's contract.
+
     Joins AB.4.3's ``_transfer_parents`` matview against an inline
-    rowset of the L2's fan_in chains (``(chain_parent_name,
+    rowset of the L2's fan_in entries (``(chain_parent_name,
     child_template_name, expected_parent_count)``). For each child
     Transfer:
 
     - **healthy** (no row): ``parent_count == expected`` (when set)
       OR ``parent_count >= 2`` (when unset). The matview emits no row.
     - **missing** row: ``parent_count < expected`` (only when
-      ``expected_parent_count`` is set on the chain).
+      ``expected_parent_count`` is set on the entry).
     - **extra** row: ``parent_count > expected`` (same gate).
     - **orphan** row: ``parent_count < 2`` AND
       ``expected_parent_count`` is unset (variable-batch-flow
       fallback per AB.4.0 lock).
 
-    Empty case: when no chain declares ``fan_in=True``, the matview
-    body falls back to a typed-NULL placeholder with ``WHERE 1=0``
+    Empty case: when no chain child declares ``fan_in=True``, the
+    matview body falls back to a typed-NULL placeholder with
+    ``WHERE 1=0``
     (mirrors AB.3.3's empty-XOR pattern) so it parses + plans
     cleanly on all 3 dialects and contributes zero rows.
     """
@@ -916,6 +943,151 @@ def _render_fan_in_disagreement_body(
         f"   AND cpc.parent_count < 2)\n"
         f"  OR (fic.expected_parent_count IS NOT NULL\n"
         f"      AND cpc.parent_count <> fic.expected_parent_count)"
+    )
+
+
+def _render_multi_xor_violation_body(
+    instance: L2Instance, *, p: str, dialect: Dialect = Dialect.POSTGRES,
+) -> str:
+    """AB.6.5: Render the body of ``{p}_multi_xor_violation``.
+
+    Per AB.6.0 Lock 3: long-form, one row per (parent_transfer_id,
+    disagreement_kind) tuple where ``kind`` ∈ ``{'missed', 'overlap'}``.
+    Columns: ``parent_transfer_id``, ``parent_rail_or_template_name``,
+    ``child_count`` (actual count of declared XOR siblings that fired),
+    ``fired_children`` (comma-separated names), ``disagreement_kind``,
+    ``business_day``.
+
+    Sources rows from every multi-children chain (``len(children) >= 2``)
+    after SKIPPING per-child fan_in entries (their cardinality is
+    ``_fan_in_disagreement``'s job — AB.5 coupling per Lock 3). Mixed-
+    cardinality chains contribute only their non-fan_in children to
+    this matview; the fan_in entries are enforced by AB.4.7.
+
+    For each parent firing under such a chain, LEFT JOIN against
+    ``_current_transactions`` to count declared XOR siblings that
+    fired (transfer_parent_id = parent.transfer_id AND
+    name IN declared-siblings). HAVING ``COUNT(...) <> 1`` surfaces
+    both the missed (count=0) and overlap (count≥2) cases.
+
+    Empty case: when no chain qualifies (no multi-children chain
+    without fan_in entries), the body falls back to a typed-NULL
+    placeholder SELECT with ``WHERE 1=0`` (mirrors AB.3.3 + AB.4.7).
+    """
+    # Collect (chain_parent_name, child_name) pairs from every
+    # multi-children chain, SKIPPING per-child fan_in entries.
+    pairs: list[tuple[str, str]] = []
+    for chain in instance.chains:
+        # Skip singleton-children chains — those are 1:1 (required)
+        # semantics, not XOR.
+        if len(chain.children) < 2:
+            continue
+        # Skip per-child fan_in entries — their cardinality is the
+        # AB.4.7 _fan_in_disagreement matview's job.
+        non_fan_in_children = [c for c in chain.children if not c.fan_in]
+        # Need ≥2 non-fan_in children to qualify as multi-XOR. (A chain
+        # like [ChildA(1:1), ChildB(fan_in)] has only 1 non-fan_in child
+        # → AB.2.3's 1:1 enforcement covers it.)
+        if len(non_fan_in_children) < 2:
+            continue
+        for child in non_fan_in_children:
+            pairs.append((str(chain.parent), str(child.name)))
+
+    if not pairs:
+        null_varchar = typed_null("VARCHAR(100)", dialect)
+        null_int = typed_null("INTEGER", dialect)
+        null_ts = typed_null("TIMESTAMP", dialect)
+        from_clause = "FROM dual" if dialect is Dialect.ORACLE else ""
+        return (
+            f"SELECT {null_varchar} AS parent_transfer_id,\n"
+            f"       {null_varchar} AS parent_rail_or_template_name,\n"
+            f"       {null_int} AS child_count,\n"
+            f"       {null_varchar} AS fired_children,\n"
+            f"       {null_varchar} AS disagreement_kind,\n"
+            f"       {null_ts} AS business_day\n"
+            f"{from_clause}\n"
+            f"WHERE 1=0"
+        )
+
+    # Inline the (chain_parent_name, child_name) rowset.
+    if dialect is Dialect.ORACLE:
+        union_rows = "\n  UNION ALL ".join(
+            f"SELECT '{cp}' AS chain_parent_name, "
+            f"'{cn}' AS child_name FROM dual"
+            for cp, cn in pairs
+        )
+        multi_xor_chains_cte = (
+            f"multi_xor_chains AS (\n"
+            f"  {union_rows}\n"
+            f")"
+        )
+    else:
+        rows = ",\n    ".join(f"('{cp}', '{cn}')" for cp, cn in pairs)
+        multi_xor_chains_cte = (
+            f"multi_xor_chains(chain_parent_name, child_name) AS (\n"
+            f"  VALUES\n    {rows}\n"
+            f")"
+        )
+
+    fired_agg = concat_agg("fcd.matched_child_name", ",", dialect)
+    return (
+        f"WITH {multi_xor_chains_cte},\n"
+        f"parent_names AS (\n"
+        f"  SELECT DISTINCT chain_parent_name AS name FROM multi_xor_chains\n"
+        f"),\n"
+        f"parent_firings AS (\n"
+        f"  -- Every transfer that fires under a multi-XOR chain parent.\n"
+        f"  -- Chain.parent can be a rail OR a template name; UNION both.\n"
+        f"  -- DISTINCT collapses multi-leg template firings to one row.\n"
+        f"  SELECT DISTINCT tx.transfer_id AS parent_transfer_id,\n"
+        f"         tx.template_name AS chain_parent_name,\n"
+        f"         {date_trunc_day('tx.posting', dialect)} AS business_day\n"
+        f"  FROM {p}_current_transactions tx\n"
+        f"  WHERE tx.template_name IN (SELECT name FROM parent_names)\n"
+        f"    AND tx.status <> 'Failed'\n"
+        f"  UNION\n"
+        f"  SELECT DISTINCT tx.transfer_id, tx.rail_name,\n"
+        f"         {date_trunc_day('tx.posting', dialect)}\n"
+        f"  FROM {p}_current_transactions tx\n"
+        f"  WHERE tx.rail_name IN (SELECT name FROM parent_names)\n"
+        f"    AND tx.status <> 'Failed'\n"
+        f"),\n"
+        f"fired_children_distinct AS (\n"
+        f"  -- For each parent firing, which declared XOR siblings\n"
+        f"  -- fired? LEFT JOIN preserves the missed (count=0) case;\n"
+        f"  -- the DISTINCT collapses multi-leg child firings to one\n"
+        f"  -- name per (parent, child).\n"
+        f"  SELECT DISTINCT\n"
+        f"    pf.parent_transfer_id,\n"
+        f"    pf.chain_parent_name,\n"
+        f"    pf.business_day,\n"
+        f"    CASE WHEN ch.rail_name IS NOT NULL\n"
+        f"           AND EXISTS (SELECT 1 FROM multi_xor_chains m\n"
+        f"                       WHERE m.chain_parent_name = pf.chain_parent_name\n"
+        f"                         AND m.child_name = ch.rail_name)\n"
+        f"         THEN ch.rail_name\n"
+        f"         WHEN ch.template_name IS NOT NULL\n"
+        f"           AND EXISTS (SELECT 1 FROM multi_xor_chains m\n"
+        f"                       WHERE m.chain_parent_name = pf.chain_parent_name\n"
+        f"                         AND m.child_name = ch.template_name)\n"
+        f"         THEN ch.template_name\n"
+        f"    END AS matched_child_name\n"
+        f"  FROM parent_firings pf\n"
+        f"  LEFT JOIN {p}_current_transactions ch\n"
+        f"    ON ch.transfer_parent_id = pf.parent_transfer_id\n"
+        f"   AND ch.status <> 'Failed'\n"
+        f")\n"
+        f"SELECT\n"
+        f"  fcd.parent_transfer_id,\n"
+        f"  fcd.chain_parent_name AS parent_rail_or_template_name,\n"
+        f"  COUNT(fcd.matched_child_name) AS child_count,\n"
+        f"  COALESCE({fired_agg}, '') AS fired_children,\n"
+        f"  CASE WHEN COUNT(fcd.matched_child_name) = 0 THEN 'missed'\n"
+        f"       ELSE 'overlap' END AS disagreement_kind,\n"
+        f"  MIN(fcd.business_day) AS business_day\n"
+        f"FROM fired_children_distinct fcd\n"
+        f"GROUP BY fcd.parent_transfer_id, fcd.chain_parent_name\n"
+        f"HAVING COUNT(fcd.matched_child_name) <> 1"
     )
 
 
@@ -1539,6 +1711,7 @@ CREATE INDEX idx_{p}_curr_db_scope_day
 _L1_INVARIANT_DROP_NAMES: tuple[str, ...] = (
     "todays_exceptions",
     "daily_statement_summary",
+    "multi_xor_violation",
     "fan_in_disagreement",
     "transfer_parents",
     "xor_group_violation",
@@ -2091,6 +2264,33 @@ CREATE INDEX idx_{p}_fid_template ON {p}_fan_in_disagreement (child_template_nam
 CREATE INDEX idx_{p}_fid_kind ON {p}_fan_in_disagreement (disagreement_kind);
 
 -- ---------------------------------------------------------------------
+-- L1 invariant matview: Multi-XOR Violation (AB.6.5).
+-- AB.6 (2026-05-19) — Enforces the runtime side of chain.md's
+-- "multi-children = exactly one MUST fire" contract. For every chain
+-- declaring ≥2 children that are NOT per-child fan_in (their
+-- cardinality is `_fan_in_disagreement`'s job — AB.5 coupling), each
+-- parent firing's child set should contain exactly one fired child
+-- from the declared XOR siblings. Violations surface with
+-- disagreement_kind ∈ ('missed', 'overlap'):
+--   - missed: 0 declared children fired under this parent (the
+--     chain's XOR contract was not honored);
+--   - overlap: ≥2 declared children fired under this parent (the
+--     XOR alternation collapsed into a duplicate firing).
+--
+-- The body is rendered dialect-aware by _render_multi_xor_violation_body;
+-- when no chain qualifies (no multi-children chain after stripping
+-- per-child fan_in entries), the body short-circuits with WHERE 1=0.
+-- ---------------------------------------------------------------------
+{matview_create_kw} {p}_multi_xor_violation{matview_options} AS
+{multi_xor_violation_body};
+-- Dashboard hot-path indexes — per-parent drill (Today's Exceptions
+-- → Transactions on the parent firing), per-chain-parent filter,
+-- per-kind triage filter.
+CREATE INDEX idx_{p}_mxv_parent ON {p}_multi_xor_violation (parent_transfer_id);
+CREATE INDEX idx_{p}_mxv_name ON {p}_multi_xor_violation (parent_rail_or_template_name);
+CREATE INDEX idx_{p}_mxv_kind ON {p}_multi_xor_violation (disagreement_kind);
+
+-- ---------------------------------------------------------------------
 -- Dashboard-shape matview: Daily Statement Summary.
 -- M.1a.9 — moved from `apps/l1_dashboard/datasets.py` CustomSql into
 -- a per-instance MATERIALIZED VIEW so QS Direct Query mode doesn't
@@ -2255,7 +2455,22 @@ SELECT 'fan_in_disagreement',
        business_day,
        child_template_name AS rail_name,
        parent_count AS magnitude
-FROM {p}_fan_in_disagreement;
+FROM {p}_fan_in_disagreement
+-- AB.6.5 — Multi-XOR Violation: surfaces per parent firing when the
+-- declared XOR-sibling set wasn't honored (0 fired = missed,
+-- ≥2 fired = overlap). Transfer-keyed like the chain_parent /
+-- xor_group branches, so account columns default NULL.
+-- magnitude is the child_count (0 or ≥2).
+UNION ALL
+SELECT 'multi_xor_violation',
+       {null_text} AS account_id,
+       {null_text} AS account_name,
+       {null_text} AS account_role,
+       NULL AS account_parent_role,
+       business_day,
+       parent_rail_or_template_name AS rail_name,
+       child_count AS magnitude
+FROM {p}_multi_xor_violation;
 -- Today's Exceptions sheet has 3 dropdowns (check_type, account,
 -- rail_name); each WHERE filter benefits from its own index.
 CREATE INDEX idx_{p}_te_check_type
