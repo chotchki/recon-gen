@@ -83,11 +83,18 @@
 ;; Network — bind only the configured port on loopback.  No outbound
 ;; connections (the dashboards process serves HTTP; it doesn't fetch
 ;; anything at request time — the SQLite db is local).
+;;
+;; macOS sandbox-exec only accepts `*` or `localhost` in the host
+;; portion of a network address (`127.0.0.1` literal raises
+;; `sandbox-exec: host must be * or localhost`). `localhost` matches
+;; both 127.0.0.1 and ::1 — the bind itself uses --host 127.0.0.1 on
+;; the recon-gen CLI side, so only the IPv4 loopback is actually
+;; listening regardless.
 ;; ---------------------------------------------------------------------
 (allow network-bind
-    (local tcp (string-append "127.0.0.1:" (param "PORT"))))
+    (local tcp (string-append "localhost:" (param "PORT"))))
 (allow network-inbound
-    (local tcp (string-append "127.0.0.1:" (param "PORT"))))
+    (local tcp (string-append "localhost:" (param "PORT"))))
 
 ;; ---------------------------------------------------------------------
 ;; sysctl + mach lookups — Python's startup pokes mach services.

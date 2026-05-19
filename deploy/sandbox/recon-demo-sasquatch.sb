@@ -92,11 +92,18 @@
 ;; Network — bind only the configured port on loopback. Studio doesn't
 ;; egress at request time (no AWS calls, no etl_hook execution under
 ;; --demo-mode); locally-bound HTTP only.
+;;
+;; macOS sandbox-exec only accepts `*` or `localhost` in the host
+;; portion of a network address (`127.0.0.1` literal raises
+;; `sandbox-exec: host must be * or localhost`). `localhost` matches
+;; both 127.0.0.1 and ::1 — the bind itself uses --host 127.0.0.1 on
+;; the recon-gen CLI side, so only the IPv4 loopback is actually
+;; listening regardless.
 ;; ---------------------------------------------------------------------
 (allow network-bind
-    (local tcp (string-append "127.0.0.1:" (param "PORT"))))
+    (local tcp (string-append "localhost:" (param "PORT"))))
 (allow network-inbound
-    (local tcp (string-append "127.0.0.1:" (param "PORT"))))
+    (local tcp (string-append "localhost:" (param "PORT"))))
 
 ;; ---------------------------------------------------------------------
 ;; sysctl + mach lookups (CPython startup requirement).
