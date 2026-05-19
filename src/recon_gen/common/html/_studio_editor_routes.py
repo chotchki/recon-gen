@@ -546,6 +546,22 @@ _LIMIT_SCHEDULE_FIELDS: tuple[FieldSpec, ...] = (
         kind="money",
         required=True,
     ),
+    # AB.1 (2026-05-19) — per-direction cap. Outbound is the default
+    # (classic per-rail send cap); Inbound is the AML / structuring
+    # threshold on inbound volume. The same (parent_role, rail) pair
+    # may carry both — duplicate detection broadened to the triple.
+    FieldSpec(
+        name="direction",
+        label="Direction",
+        helper=(
+            "Which flow side the cap watches. Outbound = money leaving "
+            "the parent's children (classic send cap). Inbound = money "
+            "arriving (AML / structuring threshold)."
+        ),
+        kind="select",
+        options=("Outbound", "Inbound"),
+        required=True,
+    ),
     FieldSpec(
         name="description",
         label="Description",
@@ -1309,12 +1325,17 @@ _CREATE_INTRO_BY_KIND: Mapping[EntityKind, str] = {
         "exactly-one-of branching (e.g. ACH return reasons).</p>"
     ),
     "limit_schedule": (
-        "<p><strong>A LimitSchedule</strong> is a daily $-cap on outbound "
-        "flow from a parent role for a given rail. Any day exceeding the "
-        "cap surfaces as an L1 limit-breach violation.</p>"
-        "<p>Required: <code>parent_role</code> (the role whose outbound "
-        "flow is capped), <code>rail</code> (the Rail name the cap "
-        "applies to), and <code>cap</code> (the $ ceiling).</p>"
+        "<p><strong>A LimitSchedule</strong> is a daily $-cap on flow "
+        "from a parent role for a given rail and direction. Any day "
+        "exceeding the cap surfaces as an L1 limit-breach violation.</p>"
+        "<p>Required: <code>parent_role</code> (the role whose flow is "
+        "capped), <code>rail</code> (the Rail name the cap applies to), "
+        "<code>cap</code> (the $ ceiling), and <code>direction</code> "
+        "(<code>Outbound</code> for classic send caps, <code>Inbound</code> "
+        "for AML / structuring thresholds on inbound volume — AB.1).</p>"
+        "<p>The same <code>(parent_role, rail)</code> pair may carry "
+        "<em>both</em> an Outbound and an Inbound LimitSchedule — they "
+        "show up on different branches of the L1 Limit Breach matview.</p>"
     ),
 }
 
@@ -1657,8 +1678,14 @@ def _entity_id(kind: EntityKind, entity: object) -> str:
         children = getattr(entity, "children")
         children_csv = ",".join(sorted(str(c) for c in children))
         return f"{getattr(entity, 'parent')}::{children_csv}"
-    # limit_schedule
-    return f"{getattr(entity, 'parent_role')}::{getattr(entity, 'rail')}"
+    # limit_schedule — 3-part composite (AB.1): parent_role::rail::direction.
+    # Same (parent_role, rail) may carry both an Outbound and an Inbound
+    # cap; the direction segment distinguishes which row each URL addresses.
+    return (
+        f"{getattr(entity, 'parent_role')}::"
+        f"{getattr(entity, 'rail')}::"
+        f"{getattr(entity, 'direction')}"
+    )
 
 
 def _html_id_slug(entity_id: str) -> str:
@@ -2119,14 +2146,22 @@ def _post_mutate_entity_id(
             children_csv = old_children_csv
         return f"{parent}::{children_csv}"
     if kind == "limit_schedule":
-        old_parent_role, _, old_rail = old_entity_id.partition("::")
+        # AB.1 — 3-part composite. Backward-compat: a stored 2-part
+        # entity_id (legacy "<parent>::<rail>") means direction=Outbound.
+        old_parts = old_entity_id.split("::")
+        if len(old_parts) == 2:
+            old_parts = [*old_parts, "Outbound"]
+        old_parent_role, old_rail, old_direction = old_parts
         parent_role = str(
             new_fields.get("parent_role", old_parent_role) or old_parent_role,
         )
         rail = str(
             new_fields.get("rail", old_rail) or old_rail,
         )
-        return f"{parent_role}::{rail}"
+        direction = str(
+            new_fields.get("direction", old_direction) or old_direction,
+        )
+        return f"{parent_role}::{rail}::{direction}"
     addr = _addressing_field(kind)
     return str(new_fields.get(addr, old_entity_id) or old_entity_id)
 

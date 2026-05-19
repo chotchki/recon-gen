@@ -418,6 +418,14 @@ def create_l2_entity(
         parent_role = fields.get("parent_role")
         rail = fields.get("rail")
         cap = fields.get("cap")
+        # AB.1 — direction defaults to Outbound (preserves legacy
+        # behavior + the loader's same default for unset YAML keys).
+        direction_raw = fields.get("direction") or "Outbound"
+        if direction_raw not in ("Outbound", "Inbound"):
+            raise ValueError(
+                f"LimitSchedule.direction={direction_raw!r}: must be "
+                f"'Outbound' or 'Inbound'",
+            )
         if not parent_role or not rail or cap is None:
             raise ValueError(
                 "LimitSchedule.parent_role / .rail / .cap "
@@ -426,16 +434,18 @@ def create_l2_entity(
         if any(
             str(ls.parent_role) == str(parent_role)
             and str(ls.rail) == str(rail)
+            and str(ls.direction) == str(direction_raw)
             for ls in instance.limit_schedules
         ):
             raise ValueError(
-                f"LimitSchedule {parent_role}::{rail} "
+                f"LimitSchedule {parent_role}::{rail}::{direction_raw} "
                 f"already exists",
             )
         new_ls = LimitSchedule(
             parent_role=Identifier(str(parent_role)),
             rail=RailName(str(rail)),
             cap=Money(cap),
+            direction=direction_raw,  # pyright: ignore[reportArgumentType]: validated against the LimitDirection Literal set just above
             description=fields.get("description"),
         )
         return dataclasses.replace(
@@ -562,10 +572,21 @@ def _find_entity(
             if f"{ch.parent}::{children_csv}" == entity_id:
                 return ch, i, instance.chains
     elif kind == "limit_schedule":
-        # Composite key: "<parent_role>::<rail>"
-        for i, ls in enumerate(instance.limit_schedules):
-            if f"{ls.parent_role}::{ls.rail}" == entity_id:
-                return ls, i, instance.limit_schedules
+        # Composite key: "<parent_role>::<rail>::<direction>" (AB.1).
+        # Backward-compat: a 2-part key (legacy "<parent_role>::<rail>")
+        # means direction="Outbound" — that's all pre-AB.1 schedules had.
+        parts = entity_id.split("::")
+        if len(parts) == 2:
+            parts = [*parts, "Outbound"]
+        if len(parts) == 3:
+            parent_role, rail, direction = parts
+            for i, ls in enumerate(instance.limit_schedules):
+                if (
+                    str(ls.parent_role) == parent_role
+                    and str(ls.rail) == rail
+                    and str(ls.direction) == direction
+                ):
+                    return ls, i, instance.limit_schedules
     raise KeyError(f"{kind} {entity_id!r} not found in instance")
 
 
