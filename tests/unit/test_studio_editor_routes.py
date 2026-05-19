@@ -979,45 +979,52 @@ def test_put_chain_edit_renders_card_after_save(
 def test_chain_create_form_renders_parent_child_dropdowns(
     writable_l2_yaml: Path,
 ) -> None:
-    """Z.A.f1 — chain create form renders `parent` as a single-select
-    and `children` as a multi_select checkbox group (one input per
-    available rail / template). NO single-select `child` dropdown
-    (that was the pre-Z.A shape) and NO `required` boolean field
-    (that semantic moved into "list length == 1")."""
+    """Z.A.f1 + AB.6.7 — chain create form renders `parent` as a
+    single-select and `children` as a chain_children checkbox group
+    (one input per available rail/template). NO legacy `child` /
+    `required` / `xor_group` fields."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.get("/l2_shape/chain/new")
     assert resp.status_code == 200, resp.text
     body = resp.text
     assert '<select id="field-parent" name="parent">' in body
-    assert 'class="multi-select-group"' in body
+    # AB.6.7 — chain_children kind replaces multi_select for chain.children.
+    assert 'class="chain-children-group"' in body
     assert 'name="children__present"' in body
     assert 'name="child"' not in body
     assert 'name="required"' not in body
     assert 'name="xor_group"' not in body
 
 
-def test_chain_create_form_has_fan_in_and_expected_parent_count(
+def test_chain_create_form_has_per_child_fan_in_sub_inputs(
     writable_l2_yaml: Path,
 ) -> None:
-    """AB.4.9 — chain create + edit forms expose the new fan_in
-    (bool select) + expected_parent_count (int text input) fields
-    so operators can declare batched-payout chains entirely via
-    the Studio UI."""
+    """AB.6.7 — chain create form exposes per-child fan_in checkbox +
+    expected-parent-count text input alongside each candidate child.
+    The shape replaces AB.4.9's chain-level fan_in/expected_parent_count
+    fields (AB.6.0 Lock 2 hard cut). Operator can mix fan_in flags
+    per child."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.get("/l2_shape/chain/new")
     body = resp.text
-    assert '<select id="field-fan_in" name="fan_in">' in body
-    assert 'name="expected_parent_count"' in body
+    # No chain-level fan_in select (removed at AB.6.0 Lock 2).
+    assert '<select id="field-fan_in" name="fan_in">' not in body
+    assert 'id="field-expected_parent_count"' not in body
+    # Per-child fan_in checkbox + epc input for ≥1 candidate child
+    # (option set from rails_or_templates).
+    assert 'name="fan_in_' in body
+    assert 'name="epc_' in body
 
 
-def test_chain_card_renders_fan_in_field_on_existing_fan_in_chain(
+def test_chain_card_renders_per_child_fan_in_on_existing_chain(
     writable_l2_yaml: Path,
 ) -> None:
-    """AB.4.9 — when the L2 has a fan_in chain (AB.4.5.spec activates
-    one on spec_example), the chain card edit form pre-selects the
-    fan_in=true option + the expected_parent_count value."""
+    """AB.6.7 — when the L2 has a chain with a per-child fan_in entry
+    (AB.4.5.spec's BatchPayoutTrigger → BatchedPayoutBatch), the chain
+    card edit form pre-checks the per-child fan_in box + pre-fills the
+    expected-parent-count input for that specific child."""
     app = _build_app(writable_l2_yaml)
     pre = load_instance(writable_l2_yaml)
     fan_in_chain = next(
@@ -1032,16 +1039,16 @@ def test_chain_card_renders_fan_in_field_on_existing_fan_in_chain(
         resp = c.get(f"/l2_shape/chain/{composite}/edit")
     assert resp.status_code == 200, resp.text
     body = resp.text
-    # AB.6.1 transitional: editor still presents chain-level fields by
-    # collapsing per-child flags (all children share — AB.4 shape).
-    # AB.6.7 will replace this with a per-child sub-form.
-    assert '<option value="true" selected>true</option>' in body
-    # expected_parent_count text input carries the value (collapsed from
-    # the first fan_in child).
     fan_in_child = next(ch for ch in fan_in_chain.children if ch.fan_in)
+    name = str(fan_in_child.name)
+    # Per-child fan_in checkbox pre-checked.
+    assert (
+        f'name="fan_in_{name}" value="true" checked' in body
+    ), f"expected pre-checked fan_in checkbox for {name!r} in body"
+    # Per-child epc text input carries the value when set.
     if fan_in_child.expected_parent_count is not None:
         assert (
-            f'name="expected_parent_count" type="text" '
+            f'name="epc_{name}" '
             f'value="{fan_in_child.expected_parent_count}"'
         ) in body
 

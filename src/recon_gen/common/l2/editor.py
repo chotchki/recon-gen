@@ -108,40 +108,6 @@ def mutate_l2(
             fields of the target entity.
     """
     matched, idx, collection = _find_entity(instance, kind, entity_id)
-    # AB.6.1 transitional: editor's chain form still posts a flat
-    # children list + chain-level fan_in / expected_parent_count.
-    # Coerce them into ChainChildSpec entries before dataclasses.replace
-    # (Chain.children is now tuple[ChainChildSpec, ...]; raw strings
-    # would skip wrap and break the validator's per-child reads).
-    # AB.6.7 replaces this with a true per-child editor surface.
-    if kind == "chain" and "children" in fields:
-        children_raw_any: Any = fields["children"]  # typing-smell: ignore[explicit-any]: form-submitted children — list[str] or tuple[ChainChildSpec, ...]
-        already_specs = (
-            isinstance(children_raw_any, tuple)
-            and all(isinstance(c, ChainChildSpec) for c in children_raw_any)  # pyright: ignore[reportUnknownVariableType]  # WHY: Any narrows to Unknown inside the tuple iterator; isinstance is the gate
-        )
-        if children_raw_any is not None and not already_specs:
-            fan_in_raw = fields.get("fan_in", False)
-            fan_in = bool(fan_in_raw) if fan_in_raw is not None else False
-            expected_raw = fields.get("expected_parent_count")
-            expected_parent_count: int | None = (
-                int(expected_raw)
-                if expected_raw is not None and expected_raw != ""
-                else None
-            )
-            children_list: list[object] = list(children_raw_any)  # pyright: ignore[reportUnknownArgumentType]  # WHY: form-typed Any narrowed at this hop
-            fields = {
-                k: v for k, v in fields.items()
-                if k not in ("fan_in", "expected_parent_count")
-            }
-            fields["children"] = tuple(
-                ChainChildSpec(
-                    name=Identifier(str(c)),
-                    fan_in=fan_in,
-                    expected_parent_count=expected_parent_count,
-                )
-                for c in children_list
-            )
     new_entity = dataclasses.replace(matched, **fields)
     new_collection = collection[:idx] + (new_entity,) + collection[idx + 1:]
     return _replace_collection(instance, kind, new_collection)

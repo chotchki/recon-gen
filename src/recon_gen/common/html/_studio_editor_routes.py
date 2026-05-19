@@ -67,7 +67,7 @@ from recon_gen.common.l2.validate import L2ValidationError, validate
 
 FieldKind: TypeAlias = Literal[
     "text", "select", "money", "textarea", "multi_select", "yaml_block",
-    "multi_select_groups",
+    "multi_select_groups", "chain_children",
 ]
 
 # X.4.f.11 — Rail is a discriminated union (TwoLegRail | SingleLegRail).
@@ -472,53 +472,31 @@ _CHAIN_FIELDS: tuple[FieldSpec, ...] = (
         select_from="rails_or_templates",
         required=True,
     ),
+    # AB.6.7 (2026-05-19) — per-child fan_in shape. The chain card
+    # renders the children checkbox group with per-child fan_in +
+    # expected_parent_count sub-inputs that submit only when the
+    # corresponding child is checked. Coerce produces
+    # tuple[ChainChildSpec, ...] directly. Replaces the AB.4.9
+    # chain-level fan_in / expected_parent_count fields (removed at
+    # AB.6.0 Lock 2 hard cut).
     FieldSpec(
         name="children",
         label="Children",
         helper=(
-            "Rails / templates that may follow the parent. "
-            "Cmd/Ctrl-click to multi-select. Z.A grammar: one selected "
-            "child = required (every parent firing MUST invoke it; "
-            "missing surfaces as a stuck-pending invariant violation). "
-            "Two or more selected = XOR alternation (exactly one of the "
-            "selected children MUST fire per parent firing). Empty "
-            "selection is rejected by the validator."
+            "Rails / templates that may follow the parent. Z.A grammar: "
+            "one selected = required (every parent firing MUST invoke "
+            "it). Two+ selected = XOR alternation (exactly one fires "
+            "per parent firing). For each selected child, the fan-in "
+            "checkbox + expected-parent-count input let you opt that "
+            "child into N:1 fan-in (validator C8a requires fan_in "
+            "children to be TransferTemplates). Mixed-cardinality is "
+            "supported: one child fan_in while siblings stay 1:1 XOR "
+            "(AB.6 shape; sasquatch's MerchantSettlementCycle chain "
+            "is the canonical demo). Empty selection is rejected."
         ),
-        kind="multi_select",
+        kind="chain_children",
         select_from="rails_or_templates",
         required=True,
-    ),
-    # AB.4.9 — fan_in gate flag. When true, N parent firings share one
-    # child Transfer (the batched-payout pattern). Validator C8a
-    # requires every child to be a TransferTemplate; checking this
-    # flag while children includes a Rail surfaces a 400 + inline
-    # validator error.
-    FieldSpec(
-        name="fan_in",
-        label="Fan-in (N:1)",
-        helper=(
-            "true ⇒ N parent firings share one child Transfer (the "
-            "batched-payout pattern). Every child MUST be a "
-            "TransferTemplate (validator C8a) — picking this flag "
-            "while a child is a Rail is rejected inline."
-        ),
-        kind="select",
-        options=("false", "true"),
-    ),
-    # AB.4.9 — expected_parent_count picks the matview's contract
-    # strength per chain. Set + fan_in=true → exact-mismatch flagged;
-    # unset + fan_in=true → orphan-only fallback. Must be unset on
-    # non-fan-in chains (validator C8b).
-    FieldSpec(
-        name="expected_parent_count",
-        label="Expected parent count",
-        helper=(
-            "Only meaningful when fan_in=true. Integer ≥2 (a 1-parent "
-            "fan-in is degenerate — validator C8c). Leave blank to opt "
-            "out of strict count detection; the matview then falls "
-            "back to orphan-only detection (parent_count < 2)."
-        ),
-        kind="text",
     ),
     FieldSpec(
         name="description",
@@ -795,7 +773,47 @@ def _coerce_form(
     fields: dict[str, object] = {}
     overrides: dict[str, str | tuple[str, ...]] = {}
     for spec in specs:
-        if spec.kind == "multi_select":
+        if spec.kind == "chain_children":
+            # AB.6.7 — chain children submit as: `children=<name>` per
+            # checked box + `fan_in_<name>=true` per checked fan-in +
+            # `epc_<name>=<int>` per filled epc input. Build the
+            # ChainChildSpec tuple by joining the three streams on name.
+            if f"{spec.name}__present" not in form and spec.name not in form:
+                continue
+            from recon_gen.common.l2.primitives import (  # noqa: PLC0415
+                ChainChildSpec,
+                Identifier,
+            )
+            selected_names = tuple(
+                str(v) for v in form.getlist("children") if str(v).strip()
+            )
+            overrides[spec.name] = selected_names
+            child_specs: list[ChainChildSpec] = []
+            for name in selected_names:
+                fan_in_raw = form.get(f"fan_in_{name}")
+                fan_in = (
+                    str(fan_in_raw).lower() == "true"
+                    if fan_in_raw is not None else False
+                )
+                epc_raw = form.get(f"epc_{name}", "")
+                epc: int | None = None
+                if str(epc_raw).strip():
+                    try:
+                        epc = int(str(epc_raw))
+                    except ValueError:
+                        # Surface as a typed L2ValidationError downstream
+                        # rather than fail silently — _coerce_field's
+                        # ValueError raise pattern but routed via the
+                        # chain shape. Keep the raw on the override so
+                        # the failure-rerender shows the operator's input.
+                        epc = None
+                child_specs.append(ChainChildSpec(
+                    name=Identifier(name),
+                    fan_in=fan_in,
+                    expected_parent_count=epc,
+                ))
+            fields[spec.name] = tuple(child_specs)
+        elif spec.kind == "multi_select":
             if f"{spec.name}__present" not in form and spec.name not in form:
                 continue
             raw_list = tuple(
@@ -1048,6 +1066,9 @@ def _render_field(
             spec, value, entity, error,
         )
 
+    if spec.kind == "chain_children":
+        return _render_chain_children_field(spec, value, instance, error)
+
     if spec.kind == "multi_select":
         # Render a checkbox group — easier than Cmd/Ctrl-clicking a
         # <select multiple>. Each checkbox submits its own form-data
@@ -1293,6 +1314,125 @@ def _render_xor_group_row(
     )
 
 
+def _chain_children_value_as_specs(
+    value: object,
+) -> tuple[tuple[str, bool, int | None], ...]:
+    """AB.6.7 — normalize a chain_children value to (name, fan_in,
+    expected_parent_count) tuples regardless of whether it arrived
+    as ChainChildSpec dataclasses (current entity reload),
+    tuple-of-strings (validation-failure override), or None (create).
+
+    The render path needs this shape: per child name, what was its
+    fan_in / expected_parent_count when the entity was last saved?
+    """
+    if value is None:
+        return ()
+    if isinstance(value, (list, tuple)):
+        out: list[tuple[str, bool, int | None]] = []
+        for item in value:  # pyright: ignore[reportUnknownVariableType]  # WHY: form-typed; isinstance gates below narrow per item
+            if hasattr(item, "name") and hasattr(item, "fan_in"):
+                name = str(getattr(item, "name"))
+                fan_in = bool(getattr(item, "fan_in", False))
+                epc_raw = getattr(item, "expected_parent_count", None)
+                epc: int | None = (
+                    int(epc_raw) if epc_raw is not None and epc_raw != "" else None
+                )
+                out.append((name, fan_in, epc))
+            else:
+                # Validation-failure path: tuple-of-strings (operator's
+                # last submission). fan_in / epc came from sibling form
+                # fields, not the value itself — defaulted here; the
+                # form_overrides dict carries the per-child shape.
+                out.append((str(item), False, None))
+        return tuple(out)
+    return ()
+
+
+def _render_chain_children_field(
+    spec: FieldSpec,
+    value: object,
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — for select_from resolution
+    error: str | None,
+) -> str:
+    """AB.6.7 — render the chain.children multi-select with per-child
+    fan_in + expected_parent_count sub-inputs.
+
+    Layout: one checkbox per available rail/template. Each checkbox
+    sits in a row that also carries a ``fan-in`` checkbox + an
+    ``expected-parent-count`` text input. The sub-inputs are named
+    ``fan_in_<child_name>`` / ``epc_<child_name>`` so the server can
+    associate them with the right child without an index-based dance.
+
+    On save, the server reads `getlist("children")` for selected
+    names, then per name reads the sub-inputs to build a tuple of
+    ``ChainChildSpec(name, fan_in, expected_parent_count)``.
+
+    Per AB.6.0 validator C8a, picking the fan-in checkbox while the
+    matching child is a Rail (not TransferTemplate) is rejected on
+    submit with an inline error.
+    """
+    if spec.select_from is None:
+        raise ValueError(
+            f"chain_children FieldSpec {spec.name!r} requires select_from",
+        )
+    label = (
+        f'<label for="field-{spec.name}">{escape(spec.label)}'
+        f'{"<span class=\"required\"> *</span>" if spec.required else ""}'
+        f"</label>"
+    )
+    helper = (
+        f'<small class="field-helper">{escape(spec.helper)}</small>'
+        if spec.helper else ""
+    )
+    err_html = (
+        f'<div class="field-error">{escape(error)}</div>' if error else ""
+    )
+
+    options, _ = _resolve_select_options(spec.select_from, instance, "")
+    existing = _chain_children_value_as_specs(value)
+    selected_by_name = {name: (fan_in, epc) for name, fan_in, epc in existing}
+    # Defensive: any selected child not in the option set still shows
+    # (stale reference; validator surfaces the broken ref separately).
+    for name in selected_by_name:
+        if name not in options:
+            options = (*options, name)
+
+    rows: list[str] = []
+    for opt in options:
+        is_selected = opt in selected_by_name
+        fan_in, epc = selected_by_name.get(opt, (False, None))
+        epc_str = str(epc) if epc is not None else ""
+        rows.append(
+            f'<div class="chain-child-row" data-child="{escape(opt)}">'
+            f'<label class="multi-select-item">'
+            f'<input type="checkbox" name="children" '
+            f'value="{escape(opt)}"{" checked" if is_selected else ""}>'
+            f' {escape(opt)}</label>'
+            f'<label class="chain-child-fanin">'
+            f'<input type="checkbox" name="fan_in_{escape(opt)}" '
+            f'value="true"{" checked" if fan_in else ""}>'
+            f' fan-in</label>'
+            f'<label class="chain-child-epc">'
+            f' epc:&nbsp;'
+            f'<input type="text" name="epc_{escape(opt)}" '
+            f'value="{escape(epc_str)}" size="3" '
+            f'placeholder="—" inputmode="numeric"></label>'
+            f"</div>"
+        )
+
+    # Hidden marker so the server distinguishes "form rendered with
+    # empty selection" from "field absent" (same shape multi_select uses).
+    input_html = (
+        f'<input type="hidden" name="children__present" value="1">'
+        f'<div id="field-{spec.name}" class="chain-children-group" '
+        f'role="group">{"".join(rows)}</div>'
+    )
+    return (
+        f'<div class="form-field form-field-chain-children">'
+        f"{label}{input_html}{helper}{err_html}</div>"
+    )
+
+
 def _multi_value_as_strs(value: object) -> tuple[str, ...]:
     """Normalize the multi-select current/override value to a tuple of
     strings for the option-selected check.
@@ -1378,6 +1518,20 @@ def _render_read_value(spec: FieldSpec, value: object) -> str:
             for i, g in enumerate(groups)
         )
         return f'<ul class="xor-group-list">{items}</ul>'
+    if spec.kind == "chain_children":
+        children = _chain_children_value_as_specs(value)
+        if not children:
+            return "—"
+        items: list[str] = []
+        for name, fan_in, epc in children:
+            tag = ""
+            if fan_in:
+                epc_str = (
+                    f" epc={epc}" if epc is not None else " (variable batch)"
+                )
+                tag = f' <span class="chain-child-fanin-tag">[fan-in{epc_str}]</span>'
+            items.append(f"<li>{escape(name)}{tag}</li>")
+        return f'<ul class="chain-children-list">{"".join(items)}</ul>'
     return escape(_value_to_input_str(value)) or "—"
 
 
@@ -1391,29 +1545,9 @@ def _render_read_card(
     specs = _filter_specs_for_entity(_FIELD_SPECS_BY_KIND[kind], entity)
     entity_id = _entity_id(kind, entity)
     hidden = _hidden_fields_for_entity(kind, entity, instance)
-
-    # AB.6.1 transitional: synthesize chain-level fan_in /
-    # expected_parent_count for read-card rendering (same shape as
-    # _render_edit_form's synthesis). AB.6.7 replaces with per-child UI.
-    def _value_for(s: FieldSpec) -> object:
-        if kind == "chain":
-            if s.name == "fan_in":
-                children = getattr(entity, "children", ())
-                return any(getattr(c, "fan_in", False) for c in children)
-            if s.name == "expected_parent_count":
-                children = getattr(entity, "children", ())
-                for c in children:
-                    if (
-                        getattr(c, "fan_in", False)
-                        and getattr(c, "expected_parent_count", None) is not None
-                    ):
-                        return getattr(c, "expected_parent_count")
-                return None
-        return getattr(entity, s.name, None)
-
     rows = "".join(
         f'<dt>{escape(s.label)}</dt><dd>'
-        f"{_render_read_value(s, _value_for(s))}"
+        f"{_render_read_value(s, getattr(entity, s.name, None))}"
         f"</dd>"
         for s in specs
         if s.name not in hidden
@@ -1535,34 +1669,11 @@ def _render_edit_form(
     field_errors = field_errors or {}
     overrides = form_overrides or {}
 
-    # AB.6.1 transitional: Chain.fan_in / .expected_parent_count moved
-    # to per-child ChainChildSpec, but the editor still presents
-    # chain-level controls. Collapse per-child flags back so the form
-    # pre-fills correctly. AB.6.7 replaces this with a per-child UI.
-    chain_synth: Mapping[str, str | tuple[str, ...]] | None = None
-    if kind == "chain":
-        children = getattr(entity, "children", ())
-        fan_in_any = any(getattr(c, "fan_in", False) for c in children)
-        epcs = [
-            getattr(c, "expected_parent_count", None)
-            for c in children
-            if getattr(c, "fan_in", False)
-            and getattr(c, "expected_parent_count", None) is not None
-        ]
-        chain_synth = {}
-        if "fan_in" not in overrides:
-            chain_synth["fan_in"] = "true" if fan_in_any else "false"
-        if "expected_parent_count" not in overrides and epcs:
-            chain_synth["expected_parent_count"] = str(epcs[0])
-    effective_overrides: Mapping[str, str | tuple[str, ...]] = (
-        {**chain_synth, **overrides} if chain_synth else overrides
-    )
-
     hidden = _hidden_fields_for_entity(kind, entity, instance)
     fields_html = "".join(
         _render_field(
             s,
-            effective_overrides.get(s.name, getattr(entity, s.name, None)),
+            overrides.get(s.name, getattr(entity, s.name, None)),
             instance,
             error=field_errors.get(s.name),
             entity=entity,
