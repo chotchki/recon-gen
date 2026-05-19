@@ -383,7 +383,7 @@ Optional on day 1; populate when a downstream check needs them:
 | `account_parent_role` | The Drift / Limit Breach views need the parent rollup (most cases). |
 | `transfer_completion` | The dashboard shows transfer-lifecycle aging. |
 | `transfer_parent_id` | PR pipeline (sale → settlement → payment → external). |
-| `template_name` | TransferTemplates with named variants (closure tracking). Also drives AB.3's `xor_group_violation` matview when the template declares `leg_rail_xor_groups` — the matview joins `template_name + rail_name` against the L2-declared group membership to flag "exactly one variant per Transfer" violations. |
+| `template_name` | TransferTemplates with named variants (closure tracking). Also drives AB.3's `xor_group_violation` matview when the template declares `leg_rail_xor_groups` — the matview joins `template_name + rail_name` against the L2-declared group membership to flag "exactly one variant per Transfer" violations. AB.4's `fan_in_disagreement` matview also keys on `template_name` to find batch children + the upstream `transfer_parents` matview reads `transfer_parent_id` directly (no JSON path) to derive the multi-parent set per child Transfer. |
 | `bundle_id` | AggregatingRails finalize bundles (sets `bundle_id`). |
 | `supersedes` | Correction workflows. NULL on every original posting. |
 | `metadata` | App-specific extension keys (per-app conventions). |

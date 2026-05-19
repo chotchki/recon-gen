@@ -127,6 +127,8 @@ nav:
       - How do I extend canonical values?: walkthroughs/customization/how-do-i-extend-canonical-values.md
       - How do I add an AML inbound-flow cap?: walkthroughs/customization/how-do-i-add-an-aml-inbound-cap.md
       - How do I chain two templates?: walkthroughs/customization/how-do-i-chain-two-templates.md
+      - How do I add multi-mode settlement?: walkthroughs/customization/how-do-i-add-multi-mode-settlement.md
+      - How do I model batched payouts?: walkthroughs/customization/how-do-i-model-batched-payouts.md
       - How do I author a new app on the tree?: walkthroughs/customization/how-do-i-author-a-new-app-on-the-tree.md
       - How do I test my customization?: walkthroughs/customization/how-do-i-test-my-customization.md
       - How do I publish docs against my L2?: walkthroughs/customization/how-do-i-publish-docs-against-my-l2.md

@@ -320,6 +320,65 @@ template at days_ago=1 — both `SettlementAutoSettle` and
 apart for visual separability).
 {% endif %}
 
+### 10. `{{ l2_instance_name }}_fan_in_disagreement` — Fan-in chain parent-set mismatch (AB.4.7)
+
+> For every chain declaring `fan_in: true`, every child Transfer's
+> contributing parent set SHOULD match the chain's
+> `expected_parent_count` (when set), or have cardinality ≥2 (when
+> unset).
+
+A child Transfer where the contributing parent set deviates from
+the chain's expected count surfaces here. The pattern usually
+means an ETL bug: a daily contribution never landed (the batch is
+short of contributors), or a stale / foreign parent reference
+claimed batch membership it shouldn't have (cross-batch
+contamination).
+
+The matview's CTE inlines the L2 chain config rows
+`(chain_parent_name, child_template_name, expected_parent_count)`,
+joins them against the upstream `<prefix>_transfer_parents`
+matview's per-(child, parent) DISTINCT projection, and emits a
+row when:
+
+- `expected_parent_count IS NULL AND parent_count < 2` →
+  `disagreement_kind='orphan'` (variable-batch flow's fallback —
+  the chain declared no upper bound so the matview can only flag
+  the degenerate single-parent case);
+- `expected_parent_count IS NOT NULL AND parent_count < expected` →
+  `disagreement_kind='missing'`;
+- `expected_parent_count IS NOT NULL AND parent_count > expected` →
+  `disagreement_kind='extra'`.
+
+When no chain declares `fan_in: true`, the matview short-circuits
+with `WHERE 1=0` (parses cleanly across all 3 dialects, zero rows).
+
+**Columns:** `child_transfer_id`, `chain_parent_name`,
+`child_template_name`, `parent_count` (actual contributing
+parents), `expected_parent_count` (NULL when chain leaves it
+unset), `disagreement_kind` ('orphan' / 'missing' / 'extra'),
+`business_day` (earliest contributing leg's posting day).
+
+**What to do:** Identify which batch this is via the `business_day`
++ `child_template_name`. For 'missing': the upstream parent rail
+should have fired N times but one (or more) firings never landed —
+look at the parent rail's firing log for the batch period and find
+the missing date(s). For 'extra': a parent firing claimed membership
+in this batch it shouldn't have — could be a stale `parent_transfer_id`
+metadata value (ETL pulled from a wrong source) or a duplicate
+re-post. For 'orphan': only one parent contributed — either the
+chain shouldn't be `fan_in` (it's actually 1:1) OR the operator
+should set `expected_parent_count` so the matview can flag the
+missing siblings.
+
+{% if vocab.fixture_name == "sasquatch_pr" %}
+**the matview should surface:** 3 planted batches on
+`MerchantWeeklyPayoutBatch` (chain child of
+`MerchantDailySettleAggregator`, `expected_parent_count=5`):
+healthy (5 parents, days_ago=5, no row), missing-parent (4 parents,
+days_ago=4, `disagreement_kind='missing'`), extra-parent (6 parents,
+days_ago=3, `disagreement_kind='extra'`).
+{% endif %}
+
 ## Diagnostic surface — Supersession Audit
 
 `{{ l2_instance_name }}_supersession_*` is **not** a SHOULD-constraint — it's a
