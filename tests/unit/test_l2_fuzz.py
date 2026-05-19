@@ -82,6 +82,12 @@ def test_fuzzer_exercises_every_primitive_kind_across_seeds(
         "rail_with_max_pending_age": False,
         "rail_with_max_unbundled_age": False,
         "chain_with_multiple_children": False,
+        # AB.2.6.fuzz — confirm the fuzzer emits at least one chain whose
+        # singleton child is a TransferTemplate (template-as-chain-child
+        # shape, gap doc §3). Without this, the AB.2.3
+        # chain_parent_disagreement matview + the AB.2 plant scaffold
+        # ship un-exercised under the fuzz axis.
+        "chain_with_template_child": False,
     }
     for seed in META_GUARD_SEEDS:
         yaml_text = random_l2_yaml(seed)
@@ -112,10 +118,14 @@ def test_fuzzer_exercises_every_primitive_kind_across_seeds(
                 saw["rail_with_max_pending_age"] = True
             if r.max_unbundled_age is not None:
                 saw["rail_with_max_unbundled_age"] = True
+        template_name_set = {t.name for t in inst.transfer_templates}
         for c in inst.chains:
             # Z.A: a multi-children Chain row encodes XOR alternation.
             if len(c.children) >= 2:
                 saw["chain_with_multiple_children"] = True
+            # AB.2.6.fuzz — singleton child resolving to a template.
+            if len(c.children) == 1 and c.children[0] in template_name_set:
+                saw["chain_with_template_child"] = True
         if all(saw.values()):
             return  # short-circuit on full coverage
     missing = [k for k, v in saw.items() if not v]
