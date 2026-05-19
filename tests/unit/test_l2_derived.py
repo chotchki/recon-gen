@@ -206,6 +206,52 @@ def test_singleton_children_chain_via_containing_template() -> None:
     assert Identifier("k") in result
 
 
+def test_ab2_two_template_chain_propagates_parent_id_to_every_leg_rail() -> None:
+    """AB.2 case: chain.children=[template_b] where the template has MULTIPLE
+    leg_rails. Per AB.2.2 validator rule (auto-derive from chain relationship):
+    every leg_rail of the chain-child template inherits parent_transfer_id as a
+    posted requirement — not just the singleton-leg case covered above.
+
+    The L1 chain-parent-disagreement matview (AB.2.3) relies on every leg_rail
+    firing carrying parent_transfer_id; if the derived helper skipped any
+    leg_rail, the matview would false-positive (disagreement = the missing leg)
+    on healthy two-template chains.
+    """
+    leg_a = _single_leg("LegA")
+    leg_b = _single_leg("LegB")
+    leg_c = _single_leg("LegC")
+    template_b = TransferTemplate(
+        name=Identifier("ChildTemplateB"),
+        expected_net=Decimal("0"),
+        transfer_key=(Identifier("batch_id"),),
+        completion="business_day_end",
+        leg_rails=(
+            Identifier("LegA"),
+            Identifier("LegB"),
+            Identifier("LegC"),
+        ),
+    )
+    parent_rail = _two_leg("ParentRail")
+    chain = Chain(
+        parent=Identifier("ParentRail"),
+        children=(Identifier("ChildTemplateB"),),
+    )
+    inst = _make_instance(
+        rails=(leg_a, leg_b, leg_c, parent_rail),
+        transfer_templates=(template_b,),
+        chains=(chain,),
+    )
+    # All three leg_rails of the chain-child template inherit
+    # parent_transfer_id — none skipped, none over-counted.
+    for leg_name in ("LegA", "LegB", "LegC"):
+        result = posted_requirements_for(inst, Identifier(leg_name))
+        assert PARENT_TRANSFER_ID in result, (
+            f"Leg {leg_name!r} of chain-child template missing parent_transfer_id"
+        )
+        # TransferKey field also propagates.
+        assert Identifier("batch_id") in result
+
+
 # -- Combined --------------------------------------------------------------
 
 
