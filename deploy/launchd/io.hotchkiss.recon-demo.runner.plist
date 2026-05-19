@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  AE.8 — LaunchDaemon plist for the GitHub Actions self-hosted runner.
+  Polls GitHub for queued jobs labeled `mac-mini-demo` and runs them
+  on the Mac mini under recon-demo's account.
+
+  GitHub ships its own service installer at `./svc.sh install`, but it
+  creates a per-user LaunchAgent under ~/Library/LaunchAgents/ — same
+  hidden-user trap as the demo daemons. Use this LaunchDaemon shape
+  instead (system domain, drop privileges via UserName/GroupName).
+
+  Prerequisite: ./config.sh has been run to register the runner with
+  GitHub (creates /Users/recon-demo/runner/.runner with the
+  credentials). The plist execs run.sh directly; no svc.sh involvement.
+
+  Install (as admin):
+    sudo cp deploy/launchd/io.hotchkiss.recon-demo.runner.plist \
+            /Library/LaunchDaemons/
+    sudo chown root:wheel /Library/LaunchDaemons/io.hotchkiss.recon-demo.runner.plist
+    sudo chmod 0644 /Library/LaunchDaemons/io.hotchkiss.recon-demo.runner.plist
+    sudo launchctl bootstrap system \
+        /Library/LaunchDaemons/io.hotchkiss.recon-demo.runner.plist
+
+  Status: `sudo launchctl print system/io.hotchkiss.recon-demo.runner`
+  Logs:   /Users/recon-demo/logs/runner.{out,err}.log
+
+  Confirm registration: https://github.com/chotchki/recon-gen/settings/actions/runners
+  Should show `mac-mini-demo` with status Idle.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.hotchkiss.recon-demo.runner</string>
+
+    <key>UserName</key>
+    <string>recon-demo</string>
+    <key>GroupName</key>
+    <string>staff</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/recon-demo/runner/run.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/recon-demo/runner</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <!-- Throttle a bit higher than the server daemons; the runner
+         takes 5-10s to talk to GitHub on startup. -->
+    <key>ThrottleInterval</key>
+    <integer>15</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/recon-demo/logs/runner.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/recon-demo/logs/runner.err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/recon-demo/venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/recon-demo</string>
+    </dict>
+</dict>
+</plist>
