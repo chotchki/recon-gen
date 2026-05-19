@@ -424,6 +424,11 @@ LIMIT_BREACH_CONTRACT = DatasetContract(columns=[
     ColumnSpec("account_parent_role", "STRING"),
     ColumnSpec("business_day", "DATETIME", shape=ColumnShape.DATETIME_DAY),
     ColumnSpec("rail_name", "STRING", shape=ColumnShape.RAIL_NAME),
+    # AB.1 (2026-05-19): new column — 'Outbound' / 'Inbound' literal,
+    # emitted by the per-direction matview UNION ALL. Visual surfaces
+    # in AB.1.8; contract listed here so `SELECT * FROM matview`
+    # projects all 9 columns into the dataset's declared shape.
+    ColumnSpec("direction", "STRING"),
     ColumnSpec("outbound_total", "DECIMAL"),
     ColumnSpec("cap", "DECIMAL"),
 ])

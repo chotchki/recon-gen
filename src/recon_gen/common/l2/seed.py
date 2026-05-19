@@ -205,7 +205,7 @@ class OverdraftPlant:
 @dataclass(frozen=True, slots=True)
 class LimitBreachPlant:
     """A planted (account, business_day, rail) cell where the daily
-    outbound flow exceeds the configured ``LimitSchedule.cap``.
+    outbound flow exceeds the configured Outbound ``LimitSchedule.cap``.
 
     Surfaces in L1's Limit Breach SHOULD-constraint when
     ``OutboundFlow(account, rail, day) > limit``.
@@ -214,6 +214,27 @@ class LimitBreachPlant:
     uses ``counter_account_id`` (must be a declared external Account
     in the same instance), resolved from ``instance`` at emit time so
     this dataclass never hardcodes a specific persona's counterparty.
+    """
+
+    account_id: Identifier
+    days_ago: int
+    rail_name: Identifier
+    amount: Decimal             # absolute value; must exceed the cap
+    counter_account_id: Identifier
+
+
+@dataclass(frozen=True, slots=True)
+class InboundCapBreachPlant:
+    """A planted (account, business_day, rail) cell where the daily
+    inbound flow exceeds the configured Inbound ``LimitSchedule.cap``.
+
+    Mirror of :class:`LimitBreachPlant` for the AB.1 Inbound direction
+    — surfaces in L1's Limit Breach SHOULD-constraint when
+    ``InboundFlow(account, rail, day) > limit`` (typical AML /
+    structuring threshold). The breaching *credit* posts on the
+    customer side (money IN); the counter-leg debits the external
+    account (the funds-source). Direction column on the matview row
+    will read ``'Inbound'`` so the dashboard / audit can distinguish.
     """
 
     account_id: Identifier

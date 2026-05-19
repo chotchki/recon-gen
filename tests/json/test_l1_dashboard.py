@@ -734,7 +734,7 @@ def test_aa_c_3_invariant_sheets_carry_per_kind_panels() -> None:
         ("Drift", "l1-drift-panel", "Sub-ledger drift"),
         ("Drift", "l1-ledger_drift-panel", "Parent-account roll-up drift"),
         ("Overdraft", "l1-overdraft-panel", "Non-negative balance"),
-        ("Limit Breach", "l1-limit_breach-panel", "Outbound flow cap"),
+        ("Limit Breach", "l1-limit_breach-panel", "Per-direction flow cap"),
         ("Pending Aging", "l1-stuck_pending-panel",
          "Per-rail pending aging"),
         ("Unbundled Aging", "l1-stuck_unbundled-panel",

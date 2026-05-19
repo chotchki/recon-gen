@@ -231,6 +231,10 @@ def _dump_limit_schedule(ls: LimitSchedule) -> dict[str, Any]:  # typing-smell: 
         "rail": str(ls.rail),
         "cap": _dump_money(ls.cap),
     }
+    # AB.1 (2026-05-19): only emit direction when non-default — keeps every
+    # pre-AB.1 YAML byte-equivalent through a load+dump round-trip.
+    if ls.direction != "Outbound":
+        out["direction"] = ls.direction
     if ls.description is not None:
         out["description"] = ls.description
     return out

@@ -20,10 +20,13 @@ Rules enforced (numbered for cross-reference with the test file):
   U2. AccountTemplate.role values are unique within ``account_templates``.
   U3. Rail.name values are unique within ``rails``.
   U4. TransferTemplate.name values are unique within ``transfer_templates``.
-  U5. LimitSchedule (parent_role, rail) combinations are unique
+  U5. LimitSchedule (parent_role, rail, direction) triples are unique
       (M.1a — duplicate combinations are a configuration error).
       Z.B (2026-05-15): renamed from (parent_role, transfer_type) when
-      the symmetric transfer_type collapse landed.
+      the symmetric transfer_type collapse landed. AB.1 (2026-05-19):
+      added ``direction`` to the key — same (parent_role, rail) may
+      now appear twice with different directions (one Outbound +
+      one Inbound).
   U7. AccountTemplate-generated account_ids MUST NOT collide with any
       declared Account.id (AA.A.6.bug 2026-05-17). The seed plants both
       the singleton AND the template-rendered instance under the same
@@ -293,21 +296,25 @@ def _check_unique_transfer_template_names(inst: L2Instance) -> None:
 
 
 def _check_unique_limit_schedule_combinations(inst: L2Instance) -> None:
-    """U5: each (parent_role, rail) pair appears at most once.
+    """U5: each (parent_role, rail, direction) triple appears at most once.
 
     Per SPEC: duplicate combinations are a load-time configuration error
     (the projection into ``StoredBalance.Limits`` would be ambiguous —
     which cap wins?). Z.B (2026-05-15): renamed from
-    (parent_role, transfer_type) under the symmetric collapse.
+    (parent_role, transfer_type) under the symmetric collapse. AB.1
+    (2026-05-19) added ``direction``: the same ``(parent_role, rail)``
+    may now carry both an Outbound AND an Inbound cap (per-direction
+    flow caps split AML inbound thresholds from per-rail send caps).
     """
-    seen: dict[tuple[Identifier, str], int] = {}
+    seen: dict[tuple[Identifier, str, str], int] = {}
     for i, ls in enumerate(inst.limit_schedules):
-        key = (ls.parent_role, ls.rail)
+        key = (ls.parent_role, ls.rail, ls.direction)
         if key in seen:
             raise L2ValidationError(
                 f"limit_schedules[{i}]: duplicate "
                 f"(parent_role={ls.parent_role!r}, "
-                f"rail={ls.rail!r}) — also declared at "
+                f"rail={ls.rail!r}, "
+                f"direction={ls.direction!r}) — also declared at "
                 f"limit_schedules[{seen[key]}]"
             )
         seen[key] = i

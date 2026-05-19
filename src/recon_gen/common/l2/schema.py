@@ -462,12 +462,18 @@ def _emit_l1_invariant_views(
       across mixed-NULL branches).
     """
     p = prefix
-    limit_cases = _render_limit_breach_cases(instance, p=p, dialect=dialect)
+    limit_cases_outbound = _render_limit_breach_cases(
+        instance, p=p, dialect=dialect, direction="Outbound",
+    )
+    limit_cases_inbound = _render_limit_breach_cases(
+        instance, p=p, dialect=dialect, direction="Inbound",
+    )
     pending_age_cases = _render_pending_age_cases(instance, dialect=dialect)
     unbundled_age_cases = _render_unbundled_age_cases(instance, dialect=dialect)
     return _L1_INVARIANT_VIEWS_TEMPLATE.format(
         p=p,
-        limit_cases=limit_cases,
+        limit_cases_outbound=limit_cases_outbound,
+        limit_cases_inbound=limit_cases_inbound,
         pending_age_cases=pending_age_cases,
         unbundled_age_cases=unbundled_age_cases,
         matview_options=matview_options(dialect),
@@ -490,10 +496,14 @@ def _emit_l1_invariant_views(
 
 
 def _render_limit_breach_cases(
-    instance: L2Instance, *, p: str, dialect: Dialect = Dialect.POSTGRES,
+    instance: L2Instance,
+    *,
+    p: str,
+    dialect: Dialect = Dialect.POSTGRES,
+    direction: str = "Outbound",
 ) -> str:
     """Build the CASE-WHEN body that the limit_breach view uses to look
-    up a (parent_role, rail) cap from L2's LimitSchedules.
+    up a (parent_role, rail, direction) cap from L2's LimitSchedules.
 
     Inline at view-emit time (not via JSON_VALUE on daily_balances.limits)
     because dynamic-key JSON path syntax isn't portable across the SQL
@@ -503,20 +513,29 @@ def _render_limit_breach_cases(
     Returns a multi-line SQL CASE expression. References ``tx.``-prefixed
     columns since the view reads parent_role + rail_name directly from
     the transaction row (denormalized in v6) — no JOIN to daily_balances
-    needed. If the instance has no LimitSchedules, returns
-    ``NULL::numeric`` (typed NULL) so the column has a concrete type —
-    bare NULL infers as text in PostgreSQL and breaks the outer
-    ``outbound_total > cap`` comparison with `numeric > text`.
+    needed. Only LimitSchedules matching ``direction`` contribute
+    branches; the other direction's caps are emitted by the sibling
+    call with ``direction="Inbound"``. If no LimitSchedules match
+    ``direction``, returns ``NULL::numeric`` (typed NULL) so the column
+    has a concrete type — bare NULL infers as text in PostgreSQL and
+    breaks the outer ``outbound_total > cap`` comparison with
+    ``numeric > text``. The branch's empty-cap result then matches no
+    rows in the outer UNION-ALL SELECT (``cap IS NOT NULL`` filter), so
+    an L2 with zero Inbound caps cleanly contributes zero Inbound
+    breach rows without any branch removal.
 
     Z.B (2026-05-15): formerly matched on ``tx.transfer_type``; under
     the symmetric collapse the cap binds to a rail name directly.
+    AB.1 (2026-05-19): added ``direction`` filter — the matview emits
+    one SELECT branch per direction with its own cap CASE.
     """
-    if not instance.limit_schedules:
+    matching = [ls for ls in instance.limit_schedules if ls.direction == direction]
+    if not matching:
         return typed_null("numeric", dialect)
     branches: list[str] = []
-    for ls in instance.limit_schedules:
-        # Each LimitSchedule is keyed on (parent_role, rail) per
-        # validator U5; the cap is the threshold value.
+    for ls in matching:
+        # Each LimitSchedule is keyed on (parent_role, rail, direction)
+        # per validator U5; the cap is the threshold value.
         branches.append(
             f"WHEN tx.account_parent_role = '{ls.parent_role}' "
             f"AND tx.rail_name = '{ls.rail}' "
@@ -1418,18 +1437,27 @@ CREATE INDEX idx_{p}_eod_breach_account_day
     ON {p}_expected_eod_balance_breach (account_id, business_day_start);
 
 -- ---------------------------------------------------------------------
--- L1 invariant: Limit breach.
+-- L1 invariant: Per-direction flow cap (Limit breach).
 -- SPEC: For every CurrentStoredBalance where Limits is set, for every
--- (TransferType, limit) in Limits, for every child Account whose
--- Parent = this account, OutboundFlow(child, type, businessDay)
--- SHOULD be ≤ limit.
--- Implementation: compute outbound debit totals per (account, day, type)
--- from CurrentTransaction, compare against the cap. Caps come from
--- L2's LimitSchedules — embedded inline as CASE branches at view-emit
--- time (dynamic JSON path lookup isn't portable across our SQL targets).
--- account_parent_role is denormalized on every transaction row in v6,
--- so no JOIN to daily_balances is needed (which also avoids the failure
--- mode where a breach business_day has no enclosing daily_balance row).
+-- (Rail, limit, direction) in Limits, for every child Account whose
+-- Parent = this account, when direction=Outbound
+-- OutboundFlow(child, rail, businessDay) SHOULD be ≤ limit; when
+-- direction=Inbound InboundFlow(child, rail, businessDay) SHOULD be
+-- ≤ limit.
+-- Implementation: UNION ALL of two SELECT branches — one filters
+-- amount_direction='Debit' (the Outbound branch, classic per-rail send
+-- cap) and one filters amount_direction='Credit' (the Inbound branch,
+-- typical AML / structuring threshold). Each branch carries its own
+-- direction-filtered cap CASE and an explicit `direction` literal
+-- column so downstream consumers (dashboard, audit PDF, agreement
+-- test) can distinguish which kind of breach the row represents.
+-- Caps come from L2's LimitSchedules — embedded inline as CASE
+-- branches at view-emit time (dynamic JSON path lookup isn't portable
+-- across our SQL targets). account_parent_role is denormalized on
+-- every transaction row in v6, so no JOIN to daily_balances is needed
+-- (which also avoids the failure mode where a breach business_day has
+-- no enclosing daily_balance row). AB.1 (2026-05-19) added the
+-- direction split — pre-AB.1 was an Outbound-only SELECT.
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_limit_breach{matview_options} AS
 SELECT *
@@ -1441,8 +1469,9 @@ FROM (
         tx.account_parent_role,
         {date_trunc_tx_posting} AS business_day,
         tx.rail_name,
+        'Outbound' AS direction,
         SUM(ABS(tx.amount_money)) AS outbound_total,
-        {limit_cases} AS cap
+        {limit_cases_outbound} AS cap
     FROM {p}_current_transactions tx
     WHERE tx.amount_direction = 'Debit'
       AND tx.status = 'Posted'
@@ -1453,12 +1482,34 @@ FROM (
         tx.account_parent_role,
         {date_trunc_tx_posting},
         tx.rail_name
-) outbound_with_cap
+    UNION ALL
+    SELECT
+        tx.account_id,
+        tx.account_name,
+        tx.account_role,
+        tx.account_parent_role,
+        {date_trunc_tx_posting} AS business_day,
+        tx.rail_name,
+        'Inbound' AS direction,
+        SUM(ABS(tx.amount_money)) AS outbound_total,
+        {limit_cases_inbound} AS cap
+    FROM {p}_current_transactions tx
+    WHERE tx.amount_direction = 'Credit'
+      AND tx.status = 'Posted'
+      AND tx.account_scope = 'internal'
+      AND tx.account_parent_role IS NOT NULL
+    GROUP BY
+        tx.account_id, tx.account_name, tx.account_role,
+        tx.account_parent_role,
+        {date_trunc_tx_posting},
+        tx.rail_name
+) flow_with_cap
 WHERE cap IS NOT NULL
   AND outbound_total > cap;
 CREATE INDEX idx_{p}_lb_account_day
     ON {p}_limit_breach (account_id, business_day);
 CREATE INDEX idx_{p}_lb_rail ON {p}_limit_breach (rail_name);
+CREATE INDEX idx_{p}_lb_direction ON {p}_limit_breach (direction);
 
 -- ---------------------------------------------------------------------
 -- L1 invariant: Stuck Pending (M.2b.8).

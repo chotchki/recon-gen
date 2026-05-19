@@ -56,6 +56,7 @@ from .primitives import (
     Identifier,
     L2Instance,
     LegDirection,
+    LimitDirection,
     LimitSchedule,
     Money,
     Name,
@@ -249,6 +250,14 @@ def _load_leg_direction(raw: object, *, path: str) -> LegDirection:
         raise L2LoaderError(
             f"{path}={raw!r}: leg_direction must be 'Debit', 'Credit', "
             f"or 'Variable'"
+        )
+    return raw  # type: ignore[return-value]: narrowed by the membership check above; Literal not inferrable
+
+
+def _load_limit_direction(raw: object, *, path: str) -> LimitDirection:
+    if raw not in ("Outbound", "Inbound"):
+        raise L2LoaderError(
+            f"{path}={raw!r}: direction must be 'Outbound' or 'Inbound'"
         )
     return raw  # type: ignore[return-value]: narrowed by the membership check above; Literal not inferrable
 
@@ -1020,6 +1029,7 @@ def _load_limit_schedule(raw: object, *, path: str) -> LimitSchedule:
             f"{path}.transfer_type: legacy field renamed to `rail`. "
             f"{_LEGACY_TRANSFER_TYPE_REJECT_MSG}",
         )
+    direction_raw = raw_d.get("direction", "Outbound")
     return LimitSchedule(
         parent_role=_load_identifier(
             _require(raw_d, "parent_role", path=path),
@@ -1030,6 +1040,7 @@ def _load_limit_schedule(raw: object, *, path: str) -> LimitSchedule:
             path=f"{path}.rail",
         )),
         cap=_load_money(_require(raw_d, "cap", path=path), path=f"{path}.cap"),
+        direction=_load_limit_direction(direction_raw, path=f"{path}.direction"),
         description=_load_description(
             raw_d.get("description"), path=f"{path}.description",
         ),

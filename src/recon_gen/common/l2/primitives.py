@@ -129,6 +129,19 @@ SupersedeReason: TypeAlias = Literal[
     "Inflight", "BundleAssignment", "TechnicalCorrection",
 ]
 
+# AB.1 (2026-05-19): the *cap-watch perspective* of a LimitSchedule —
+# whether the cap watches money leaving the parent's children
+# (``Outbound``, the classic per-rail send cap) or arriving at them
+# (``Inbound``, the typical AML/structuring inbound-cap pattern). Stays
+# distinct from ``LegDirection`` (Debit/Credit/Variable, the
+# accounting perspective on a single leg): a LimitSchedule with
+# ``direction="Outbound"`` aggregates ``Debit``-amount legs from the
+# child's view, ``"Inbound"`` aggregates ``Credit``-amount legs. The
+# AB.1.0 lock keeps the two enums separate so the validator can
+# enforce "watch direction" without leaking into the leg-amount
+# vocabulary.
+LimitDirection: TypeAlias = Literal["Outbound", "Inbound"]
+
 
 # -- Account dimension --------------------------------------------------------
 
@@ -359,7 +372,7 @@ class Chain:
 
 @dataclass(frozen=True, slots=True)
 class LimitSchedule:
-    """A daily cap on outbound flow per (parent role, rail).
+    """A daily cap on per-direction flow per (parent role, rail, direction).
 
     Per SPEC: time-invariant in v1. The library projects each entry into
     the relevant ``StoredBalance.Limits`` map; L1's Limit Breach
@@ -369,11 +382,18 @@ class LimitSchedule:
     Rail name directly, eliminating the templated-leg footgun where a
     `LimitSchedule on transfer_type=<leg_rail_type>` failed to fire on
     transactions tagged with the *template*'s transfer_type instead.
+    AB.1 (2026-05-19) added ``direction``: a single ``(parent_role,
+    rail)`` may now carry *two* schedules — one ``Outbound`` (classic
+    per-rail send cap) and one ``Inbound`` (AML / structuring threshold
+    on inbound volume). The validator broadens uniqueness from
+    ``(parent_role, rail)`` to ``(parent_role, rail, direction)``.
+    Default ``Outbound`` keeps every pre-AB.1 YAML byte-equivalent.
     """
 
     parent_role: Identifier
     rail: RailName
     cap: Money
+    direction: LimitDirection = "Outbound"
     description: str | None = None
 
 
