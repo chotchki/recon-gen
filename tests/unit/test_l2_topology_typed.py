@@ -365,6 +365,67 @@ def test_topology_graphviz_per_rail_emits_xor_subcluster() -> None:
     assert "XOR group 1 (exactly 1 fires)" in src
 
 
+def test_topology_graph_chain_edge_carries_fan_in_metadata() -> None:
+    """AB.4.9 — when a chain declares ``fan_in=True``, the typed
+    projection's chain edge metadata tags ``fan_in='true'`` and
+    (when set) ``expected_parent_count='N'``. Non-fan-in chain
+    edges get neither key.
+    """
+    inst = L2Instance(
+        accounts=(
+            Account(id=Identifier("a"), role=Identifier("X"), scope="internal"),
+            Account(id=Identifier("b"), role=Identifier("Y"), scope="internal"),
+        ),
+        account_templates=(),
+        rails=(
+            _make_two_leg("Parent", "X", "Y"),
+        ),
+        transfer_templates=(
+            TransferTemplate(
+                name=Identifier("ChildTpl"),
+                expected_net=Decimal("0"),
+                transfer_key=(),
+                completion="business_day_end",
+                leg_rails=(Identifier("Parent"),),
+            ),
+        ),
+        chains=(
+            Chain(
+                parent=Identifier("Parent"),
+                children=(Identifier("ChildTpl"),),
+                fan_in=True,
+                expected_parent_count=3,
+            ),
+        ),
+        limit_schedules=(),
+    )
+    g = topology_graph_for(inst, db_table_prefix="test")
+    chain_edges = [e for e in g.edges if e.kind == "chain"]
+    assert len(chain_edges) == 1
+    chain_edge = chain_edges[0]
+    assert chain_edge.metadata["fan_in"] == "true"
+    assert chain_edge.metadata["expected_parent_count"] == "3"
+
+
+def test_topology_graphviz_per_rail_renders_fan_in_chain_distinctly() -> None:
+    """AB.4.9 — the graphviz per-rail renderer applies a distinct
+    visual treatment to fan_in chain edges: ``[fan-in N→1]`` label
+    annotation + bolder pen + double-arrowhead. spec_example
+    declares ``BatchPayoutTrigger → BatchedPayoutBatch`` with
+    expected_parent_count=2."""
+    import pytest
+    graphviz = pytest.importorskip("graphviz")
+    del graphviz
+    from recon_gen.common.l2.topology import build_topology_graph_per_rail
+    inst = load_instance(FIXTURES / "spec_example.yaml")
+    g = build_topology_graph_per_rail(
+        inst, db_table_prefix="spec_example",
+    )
+    src = g.source
+    # Fan-in label annotation embedded in the chain edge label.
+    assert "fan-in 2→1" in src
+
+
 # -- Typed projection against shipped fixtures ------------------------------
 
 

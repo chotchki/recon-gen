@@ -424,9 +424,20 @@ def create_l2_entity(
                     f"Chain row for parent={parent!r} with "
                     f"children={list(children)!r} already exists.",
                 )
+        # AB.4.9 — fan_in + expected_parent_count default to safe
+        # non-fan-in shape when absent. Validator C8a-c enforces the
+        # cross-field rules after construction.
+        fan_in_raw = fields.get("fan_in", False)
+        fan_in = bool(fan_in_raw) if fan_in_raw is not None else False
+        expected_raw = fields.get("expected_parent_count")
+        expected_parent_count: int | None = (
+            int(expected_raw) if expected_raw is not None and expected_raw != "" else None
+        )
         new_ce = Chain(
             parent=Identifier(str(parent)),
             children=children,
+            fan_in=fan_in,
+            expected_parent_count=expected_parent_count,
             description=fields.get("description"),
         )
         return dataclasses.replace(

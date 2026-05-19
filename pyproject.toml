@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "recon-gen"
 dynamic = ["version"]
-description = "Programmatic AWS QuickSight analysis generator for financial reporting"
+description = "L1 reconciliation invariants validator for midsize financial institutions — ships AWS QuickSight + self-hosted HTMX + PDF audit surfaces from one L2 model"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.13"

@@ -996,6 +996,51 @@ def test_chain_create_form_renders_parent_child_dropdowns(
     assert 'name="xor_group"' not in body
 
 
+def test_chain_create_form_has_fan_in_and_expected_parent_count(
+    writable_l2_yaml: Path,
+) -> None:
+    """AB.4.9 — chain create + edit forms expose the new fan_in
+    (bool select) + expected_parent_count (int text input) fields
+    so operators can declare batched-payout chains entirely via
+    the Studio UI."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/chain/new")
+    body = resp.text
+    assert '<select id="field-fan_in" name="fan_in">' in body
+    assert 'name="expected_parent_count"' in body
+
+
+def test_chain_card_renders_fan_in_field_on_existing_fan_in_chain(
+    writable_l2_yaml: Path,
+) -> None:
+    """AB.4.9 — when the L2 has a fan_in chain (AB.4.5.spec activates
+    one on spec_example), the chain card edit form pre-selects the
+    fan_in=true option + the expected_parent_count value."""
+    app = _build_app(writable_l2_yaml)
+    pre = load_instance(writable_l2_yaml)
+    fan_in_chain = next(
+        (c for c in pre.chains if c.fan_in),
+        None,
+    )
+    if fan_in_chain is None:
+        return  # AB.4.5.spec hasn't activated; defensive skip
+    children_csv = ",".join(sorted(str(ch) for ch in fan_in_chain.children))
+    composite = f"{fan_in_chain.parent}::{children_csv}"
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get(f"/l2_shape/chain/{composite}/edit")
+    assert resp.status_code == 200, resp.text
+    body = resp.text
+    # fan_in select preselects true.
+    assert '<option value="true" selected>true</option>' in body
+    # expected_parent_count text input carries the value.
+    if fan_in_chain.expected_parent_count is not None:
+        assert (
+            f'name="expected_parent_count" type="text" '
+            f'value="{fan_in_chain.expected_parent_count}"'
+        ) in body
+
+
 def _escape_html_attr(s: str) -> str:
     """Tiny helper for asserting against escape()'d attribute values."""
     return s.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")

@@ -471,6 +471,38 @@ _CHAIN_FIELDS: tuple[FieldSpec, ...] = (
         select_from="rails_or_templates",
         required=True,
     ),
+    # AB.4.9 — fan_in gate flag. When true, N parent firings share one
+    # child Transfer (the batched-payout pattern). Validator C8a
+    # requires every child to be a TransferTemplate; checking this
+    # flag while children includes a Rail surfaces a 400 + inline
+    # validator error.
+    FieldSpec(
+        name="fan_in",
+        label="Fan-in (N:1)",
+        helper=(
+            "true ⇒ N parent firings share one child Transfer (the "
+            "batched-payout pattern). Every child MUST be a "
+            "TransferTemplate (validator C8a) — picking this flag "
+            "while a child is a Rail is rejected inline."
+        ),
+        kind="select",
+        options=("false", "true"),
+    ),
+    # AB.4.9 — expected_parent_count picks the matview's contract
+    # strength per chain. Set + fan_in=true → exact-mismatch flagged;
+    # unset + fan_in=true → orphan-only fallback. Must be unset on
+    # non-fan-in chains (validator C8b).
+    FieldSpec(
+        name="expected_parent_count",
+        label="Expected parent count",
+        helper=(
+            "Only meaningful when fan_in=true. Integer ≥2 (a 1-parent "
+            "fan-in is degenerate — validator C8c). Leave blank to opt "
+            "out of strict count detection; the matview then falls "
+            "back to orphan-only detection (parent_count < 2)."
+        ),
+        kind="text",
+    ),
     FieldSpec(
         name="description",
         label="Description",
@@ -639,6 +671,19 @@ def _coerce_field(spec: FieldSpec, raw: str, kind: EntityKind) -> object:
     # X.4.f.11.4 — Rail.aggregating gate flag.
     if spec.name == "aggregating" and kind == "rail":
         return raw.lower() == "true"
+    # AB.4.9 — Chain.fan_in gate flag.
+    if spec.name == "fan_in" and kind == "chain":
+        return raw.lower() == "true"
+    # AB.4.9 — Chain.expected_parent_count: int | None. Empty → None
+    # handled above; non-empty parses as int (rejects non-numeric).
+    if spec.name == "expected_parent_count" and kind == "chain":
+        try:
+            return int(raw)
+        except ValueError as exc:
+            raise ValueError(
+                f"expected_parent_count must be an integer (got "
+                f"{raw!r})",
+            ) from exc
     # X.4.f.11.6 — Rail.metadata_keys + posted_requirements: textarea
     # one-per-line (or comma-separated). tuple[Identifier, ...].
     if spec.name in ("metadata_keys", "posted_requirements") and kind == "rail":

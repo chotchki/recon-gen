@@ -584,6 +584,16 @@ def topology_graph_for(
             chain_metadata: dict[str, str] = {"cardinality": cardinality}
             if cardinality == "xor":
                 chain_metadata["xor_siblings"] = siblings_str
+            # AB.4.9 — fan_in chain edges tag their metadata with
+            # ``fan_in=true`` (and the chain's ``expected_parent_count``
+            # when set) so renderers can apply distinct styling. Mirrors
+            # AB.3.8's ``xor_group_index`` metadata convention.
+            if chain.fan_in:
+                chain_metadata["fan_in"] = "true"
+                if chain.expected_parent_count is not None:
+                    chain_metadata["expected_parent_count"] = str(
+                        chain.expected_parent_count,
+                    )
             edges.append(TopologyEdge(
                 source=parent_id,
                 target=child_id,
@@ -1198,13 +1208,36 @@ def build_topology_graph_per_rail(
             )
             if not (_in_focus(parent_id) and _in_focus(child_id)):
                 continue
-            g.edge(
-                parent_id, child_id,
-                label=_chain_label(chain, cardinality=cardinality),
-                color=_CHAIN_EDGE_COLOR,
-                style="dashed",
-                fontcolor=_CHAIN_EDGE_COLOR,
-            )
+            # AB.4.9 — fan_in chains render with a distinct visual hint:
+            # "bold" pen weight + a label annotation "fan-in N→1" so the
+            # diagram reader sees the N:1 shape without reading the
+            # chain's yaml. Non-fan-in chains stay unchanged.
+            if chain.fan_in:
+                fan_in_suffix = (
+                    f" [fan-in {chain.expected_parent_count}→1]"
+                    if chain.expected_parent_count is not None
+                    else " [fan-in N→1]"
+                )
+                label = _chain_label(
+                    chain, cardinality=cardinality,
+                ) + fan_in_suffix
+                g.edge(
+                    parent_id, child_id,
+                    label=label,
+                    color=_CHAIN_EDGE_COLOR,
+                    style="dashed",
+                    penwidth="2.0",
+                    arrowhead="onormalonormal",
+                    fontcolor=_CHAIN_EDGE_COLOR,
+                )
+            else:
+                g.edge(
+                    parent_id, child_id,
+                    label=_chain_label(chain, cardinality=cardinality),
+                    color=_CHAIN_EDGE_COLOR,
+                    style="dashed",
+                    fontcolor=_CHAIN_EDGE_COLOR,
+                )
 
     # Phase G — Control-parent edges (subledger → control role).
     parents_with_limits: set[Identifier] = {
