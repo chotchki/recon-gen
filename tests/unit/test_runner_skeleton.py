@@ -835,6 +835,51 @@ def test_cmd_up_to_only_tolerates_prelude_exit_5() -> None:
     mock_run_one.assert_called_once()
 
 
+def test_cmd_up_to_only_tolerates_per_layer_exit_5() -> None:
+    """#986 followon, 2026-05-19 — extends the prelude's exit-5 + --only
+    tolerance to every per-cell layer. The operator may use
+    ``./run_tests.sh up_to=browser --only=foo`` to drive a single browser
+    test through the chain; per-cell ``db``/``app2``/``deploy`` layers
+    apply the same ``-k foo`` filter and collect nothing, exit 5, and
+    (without this tolerance) halt the chain before browser dispatches.
+
+    Verifies: chain runs `db` → exit 5 → tolerated → `app2` → exit 5 →
+    tolerated → `browser` → exit 0 (the matched layer)."""
+    dispatched: list[str] = []
+
+    def fake_dispatch(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
+        dispatched.append(layer)
+        # Simulate "no tests collected" for every layer EXCEPT browser when
+        # --only is set. browser is where the matched test lives.
+        if layer != "browser" and options is not None and options.only is not None:
+            return runner.LayerResult(layer=layer, exit_code=5, duration_seconds=0.01)
+        return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.01)
+
+    with (
+        patch.object(runner, "probe_dependencies", return_value=[]),
+        patch.object(runner, "_is_dirty", return_value=False),
+        patch.object(runner, "dispatch_layer", side_effect=fake_dispatch),
+        patch.object(runner, "seed_variant"),  # m.5 fix-up — see test_cmd_up_to_stops_on_first_failure.
+        patch.object(runner, "setup_variant", return_value=({}, None)),
+        patch.object(runner, "teardown_variant"),
+    ):
+        code = runner.main([
+            "up_to=browser",
+            "--variants=sp_pg_aw",
+            "--only=test_l1_additive_pickers",
+        ])
+    assert code == runner.EXIT_SUCCESS, (
+        f"--only-filtered per-cell layers (exit 5) should not halt chain; "
+        f"got code={code}; dispatched={dispatched}"
+    )
+    # Prelude unit + per-cell db/app2/deploy/api all tolerate exit 5;
+    # browser dispatches and returns 0 (it owns the matched test).
+    assert "unit" in dispatched
+    assert "browser" in dispatched, (
+        f"chain should reach browser despite earlier exit-5s: {dispatched}"
+    )
+
+
 def test_cmd_up_to_skip_cheap_skips_unit_prelude_when_cached() -> None:
     """``--skip-cheap`` + a green ``unit`` cache marker for the current SHA
     (keyed by the ``_PRELUDE_VARIANT`` bucket) → the prelude doesn't dispatch.

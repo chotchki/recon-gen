@@ -2591,6 +2591,31 @@ def _run_one_variant(
                 layer, run_dir, options,
                 variant_env=variant_env, terminal_prefix=terminal_prefix,
             )
+            # #986 followon, 2026-05-19 — extend the prelude's exit-5 + --only
+            # tolerance to every per-cell layer. Same shape: when the operator
+            # narrows with ``--only=<expr>`` aimed at a single later-layer test
+            # (e.g. one browser-layer picker), every earlier layer's pytest
+            # collects nothing and exits 5; without the rewrite the chain
+            # halts at db / app2 / deploy on "no tests collected" before the
+            # target layer ever dispatches. The matched layer's own invocation
+            # still fails loudly if the expr typos.
+            only_filter_matched_nothing = (
+                result.exit_code == 5 and options.only is not None
+            )
+            if only_filter_matched_nothing:
+                result = LayerResult(
+                    layer=layer,
+                    exit_code=0,
+                    duration_seconds=result.duration_seconds,
+                    skipped=True,
+                )
+                print(
+                    f"{terminal_prefix}runner: layer-skip [{layer}] rc=5 → 0 "
+                    f"(--only={options.only!r} matched no tests in this layer, "
+                    f"deferring to later layers)"
+                )
+                layer_results.append(result)
+                continue
             layer_results.append(result)
             marker = "skip" if result.skipped else ("ok" if result.passed else "FAIL")
             print(f"{terminal_prefix}runner: layer-{marker} [{layer}] rc={result.exit_code} duration={result.duration_seconds:.2f}s")
