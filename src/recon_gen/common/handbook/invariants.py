@@ -57,6 +57,12 @@ INVARIANT_KIND_TO_SHEET: dict[str, str] = {
     # variant did or didn't fire). Mirrors chain_parent_disagreement's
     # cross-tool wiring; no dedicated dashboard sheet.
     "xor_group_violation": "Today's Exceptions",
+    # AB.4.7 — fan_in_disagreement also surfaces on Today's Exceptions
+    # (same UNION-only pattern as AB.2.3 + AB.3.3). Keyed on
+    # child_transfer_id + child_template_name + disagreement_kind;
+    # analyst's drill goes to Transactions to see which contributing
+    # parent legs landed (or didn't).
+    "fan_in_disagreement": "Today's Exceptions",
     "supersession_audit": "Supersession Audit",
 }
 

@@ -69,6 +69,9 @@ _L1_KIND_TO_SHEET_ID: Final[dict[str, str]] = {
     # drill goes to the Transactions sheet via the conflicting
     # Transfer's id).
     "xor_group_violation": "l1-sheet-todays-exceptions",
+    # AB.4.7 — fan_in_disagreement also UNION-only. Same drill path
+    # as the chain_parent_disagreement / xor_group_violation kinds.
+    "fan_in_disagreement": "l1-sheet-todays-exceptions",
     "supersession_audit": "l1-sheet-supersession-audit",
 }
 
@@ -89,6 +92,7 @@ _DISPLAY_ORDER: Final[tuple[str, ...]] = (
     "stuck_unbundled",
     "chain_parent_disagreement",  # AB.2.3
     "xor_group_violation",  # AB.3.3
+    "fan_in_disagreement",  # AB.4.7
     "supersession_audit",
 )
 
