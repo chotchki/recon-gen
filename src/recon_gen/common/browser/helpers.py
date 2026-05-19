@@ -2061,9 +2061,19 @@ def set_dropdown_value(
         # ``fill`` debounces + repaints the option list; wait for the
         # filtered ``[role="option"]`` to appear before clicking so
         # we don't race a stale option from the pre-filter listbox.
+        #
+        # AA.A.qs-triage.5, 2026-05-19 — wait on the same multi-shape
+        # selector used to actually click the option (``_OPTION_SELECTOR``,
+        # which accepts both ``[role="listbox"] [role="option"]`` AND
+        # ``sheet_control_value-menu [role="option"]``). The Today's
+        # Exceptions Account dropdown renders filtered options under the
+        # ``sheet_control_value-menu`` shape, not under
+        # ``[role="listbox"]`` — waiting only on the listbox path
+        # timed out even though the option was visible in the DOM (per
+        # the failure screenshot in tests/e2e/screenshots/_failures/).
         search_input.fill(value, timeout=timeout_ms)
         page.wait_for_selector(
-            '[role="listbox"] [role="option"]',
+            _OPTION_SELECTOR,
             timeout=timeout_ms, state="visible",
         )
     page.locator(
