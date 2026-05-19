@@ -179,12 +179,20 @@ def dialect_cfg(request):
     invocations; each invocation drives just one dialect and the
     other is irrelevant for that cell.
 
-    The ``RECON_GEN_CONFIG`` env override is intentionally ignored here —
-    a per-dialect matrix needs both files visible by their canonical
-    paths. Operators wanting to point at a non-canonical config should
-    edit ``_DIALECT_CONFIG_PATHS`` for that test run.
+    AB.7.1a — ``RECON_GEN_CONFIG`` env override IS now honored when its
+    ``dialect:`` field matches the parametrize dialect. release.yml +
+    runner ``aw``-target cells generate a synthesized cfg at
+    ``/tmp/release-e2e.yaml`` (or per-cell prefix) and set
+    ``RECON_GEN_CONFIG`` to point at it; the canonical
+    ``run/config.<dialect>.yaml`` path is gitignored so CI runners
+    that clone fresh never have it — silently skipping the 4-way
+    agreement test (the canonical release gate). Honoring the env
+    override fixes the silent-skip. Mismatched dialects still fall
+    through to the hardcoded path so the sibling dialect's cell
+    sees its own canonical cfg.
     """
     from recon_gen.common.config import load_config
+    from recon_gen.common.env_keys import RECON_GEN_CONFIG as _RGC
 
     dialect_name: str = request.param
     # m.4.c — per-cell dialect-mismatch skip. See docstring on
@@ -223,12 +231,35 @@ def dialect_cfg(request):
                 f"walk tables it never seeded. The sibling sp_{cfg_dialect[:2]}_<tgt> "
                 f"cell handles {dialect_name!r}."
             )
-    cfg_path = _DIALECT_CONFIG_PATHS[dialect_name]
+    # AB.7.1a — prefer the runtime `RECON_GEN_CONFIG` cfg when its
+    # `dialect:` field matches the parametrize dialect. release.yml +
+    # `aw`-target runner cells generate a synthesized cfg outside the
+    # gitignored `run/` dir and set `RECON_GEN_CONFIG` to it; the
+    # canonical path lookup would silently skip every release-gate
+    # 4-way agreement run otherwise.
+    cfg_path: Path | None = None
+    env_cfg_path = _RGC.get_or_none()
+    if env_cfg_path is not None:
+        env_cfg_path_p = Path(env_cfg_path)
+        if env_cfg_path_p.exists():
+            try:
+                env_loaded = load_config(str(env_cfg_path_p))
+            except Exception:  # noqa: BLE001 — defensive; fall through
+                env_loaded = None
+            if (
+                env_loaded is not None
+                and env_loaded.dialect.value == dialect_name
+            ):
+                cfg_path = env_cfg_path_p
+    if cfg_path is None:
+        cfg_path = _DIALECT_CONFIG_PATHS[dialect_name]
     if not cfg_path.exists():
         pytest.skip(
             f"{cfg_path} not present — {dialect_name} dialect cell "
             f"skipped. The other dialect still runs; CI runs each "
-            f"dialect cell with its own ``-c run/config.{dialect_name}.yaml``."
+            f"dialect cell with its own ``-c run/config.{dialect_name}.yaml`` "
+            f"or via `RECON_GEN_CONFIG=<path>` when the canonical path "
+            f"is gitignored (release.yml + `aw`-target cells)."
         )
     loaded = load_config(str(cfg_path))
     if loaded.demo_database_url is None:
