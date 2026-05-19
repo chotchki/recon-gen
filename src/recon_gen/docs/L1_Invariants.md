@@ -135,27 +135,40 @@ clean up to their expected zero / target by end-of-day.
 posting that should have landed before EOD. Verify the
 source-system posting time and re-time the posting if needed.
 
-### 5. `{{ l2_instance_name }}_limit_breach` — Outbound flow cap
+### 5. `{{ l2_instance_name }}_limit_breach` — Per-direction flow cap
 
 > For every CurrentStoredBalance where `Limits` is set, for every
-> `(Rail, limit)` in `Limits`, for every child Account whose
-> `Parent = this account`,
-> `OutboundFlow(child, rail, businessDay)` SHOULD be ≤ `limit`.
+> `(Rail, limit, direction)` in `Limits`, for every child Account
+> whose `Parent = this account`, when `direction = Outbound`
+> `OutboundFlow(child, rail, businessDay)` SHOULD be ≤ `limit`;
+> when `direction = Inbound` `InboundFlow(child, rail, businessDay)`
+> SHOULD be ≤ `limit`.
 
-Per-`(account, day, rail_name)` cells where cumulative outbound
-debit exceeded the cap. Caps come from the L2 instance's
+Per-`(account, day, rail_name, direction)` cells where cumulative
+flow exceeded the cap. Caps come from the L2 instance's
 LimitSchedules and are inlined into the view as CASE branches at
-schema-emit time. (Z.B 2026-05-15: keyed on `rail_name` now —
-previously `transfer_type` — under the symmetric grammar collapse.)
+schema-emit time. The matview emits one row per breach per
+direction — the `direction` column distinguishes Outbound caps
+(`amount_direction = 'Debit'` transactions) from Inbound caps
+(`amount_direction = 'Credit'`, typical AML inbound-cap pattern).
+Both directions can apply to the same `(parent, rail)` pair via
+two LimitSchedules; the dashboard renders both on the Limit
+Breach sheet, distinguished by the Direction column. (Z.B
+2026-05-15: keyed on `rail_name` — previously `transfer_type`.
+AB.1 2026-05-19: added `direction` column.)
 
 **Columns:** `account_id`, `account_name`, `account_role`,
-`account_parent_role`, `business_day`, `rail_name`,
-`outbound_total`, `cap`.
+`account_parent_role`, `business_day`, `rail_name`, `direction`,
+`flow_total`, `cap`.
 
 **What to do:** Either the LimitSchedule cap is too low (raise it
 after confirming the day's volume is legitimate) or an upstream
-control failed (audit the feed for over-sent volume). Downstream
-beneficiaries may be undercredited until reconciled.
+control failed. For Outbound breaches, audit the feed for
+over-sent volume — downstream beneficiaries may be undercredited
+until reconciled. For Inbound breaches, flag the source for
+review per the AML / KYC policy that motivated the cap
+(structuring, unexpected deposits, counterparty source
+diligence).
 
 {% if vocab.fixture_name == "sasquatch_pr" %}
 **the matview should surface:** `big-meadow-dairy $22k wire`

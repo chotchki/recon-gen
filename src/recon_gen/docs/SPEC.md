@@ -128,6 +128,7 @@ Recording the reason is load-bearing for the recon experience: an accountant loo
 - `NetOfTransfer(inTransfer: Transfer)` := `Σ CurrentTransaction(Transfer = inTransfer, Status = Posted).Amount.Money`
 - `IsParent(inAccount: Account)` := `∃ child ∈ Account where child.Parent = inAccount`
 - `OutboundFlow(inAccount: Account, inTransferType: TransferType, inBusinessDay: BusinessDay)` := `Σ |CurrentTransaction(Account = inAccount, Transfer.TransferType = inTransferType, Amount.Direction = Debit, Status = Posted, Posting between inBusinessDay.StartTime and inBusinessDay.EndTime).Amount.Money|`
+- `InboundFlow(inAccount: Account, inTransferType: TransferType, inBusinessDay: BusinessDay)` := `Σ |CurrentTransaction(Account = inAccount, Transfer.TransferType = inTransferType, Amount.Direction = Credit, Status = Posted, Posting between inBusinessDay.StartTime and inBusinessDay.EndTime).Amount.Money|` (mirror of `OutboundFlow` filtering on credit-side rather than debit-side; used by inbound-direction Limit breach checks — see Limit breach SHOULD-constraint below)
 - `Age(inTransaction: Transaction)` := `now() − inTransaction.Posting`
 
 ## System Constraints
@@ -140,7 +141,7 @@ Recording the reason is load-bearing for the recon experience: an accountant loo
 - **Ledger drift**: For every `sb: CurrentStoredBalance` where `sb.Account.Scope = Internal` and `IsParent(sb.Account)`, `LedgerDrift(sb.Account, sb.BusinessDay)` SHOULD equal `0`.
 - **Parent balance existence**: For every `sb: CurrentStoredBalance` where `sb.Account.Parent` is set, there MUST exist `CurrentStoredBalance(Account = sb.Account.Parent, BusinessDay = sb.BusinessDay)`.
 - **Expected EOD balance**: For every `sb: CurrentStoredBalance` where `sb.Account.ExpectedEODBalance` is set, `sb.Money` SHOULD equal `sb.Account.ExpectedEODBalance`.
-- **Limit breach**: For every `sb: CurrentStoredBalance` where `sb.Limits` is set, for every `(t, limit) ∈ sb.Limits`, for every child `c ∈ Account(Parent = sb.Account)`, `OutboundFlow(c, t, sb.BusinessDay)` SHOULD be `≤ limit`. (Limits live on the parent's `StoredBalance` and apply to each child individually — not aggregated across children.)
+- **Limit breach**: For every `sb: CurrentStoredBalance` where `sb.Limits` is set, for every `(t, limit, direction) ∈ sb.Limits`, for every child `c ∈ Account(Parent = sb.Account)`: when `direction = Outbound`, `OutboundFlow(c, t, sb.BusinessDay)` SHOULD be `≤ limit`; when `direction = Inbound`, `InboundFlow(c, t, sb.BusinessDay)` SHOULD be `≤ limit`. (Limits live on the parent's `StoredBalance` and apply to each child individually — not aggregated across children. `direction` defaults to `Outbound` for backward compat with v1 LimitSchedules; integrators can declare `direction: Inbound` to cap credit-side flow — typical AML inbound-cap pattern. Both directions can apply to the same `(parent, rail)` pair via two LimitSchedules.)
 - **Immutability**: Every `Transaction` and `StoredBalance` entity is immutable. Violations of constraints should be repaired by posting additional transactions. System errors may be corrected (but not hidden) by entering a higher entry; every higher Entry row MUST set `Supersedes` to record why.
 
 **Stored balance contract** (implementation note for integrators planting StoredBalance rows): every StoredBalance row is an assertion that this account's cumulative net through that BusinessDay's end is exactly `Money`. The Sub-ledger drift / Ledger drift constraints check that assertion against `ComputedBalance` (see Theorems). Practically:
@@ -565,20 +566,21 @@ Reversals are not a separate L2 primitive. A reversal is a Rail (typically with 
 
 ### Limit Schedules *(optional: list)*
 
-Daily caps on outbound flow per `(parent role, transfer type)`. Time-invariant in v1.
+Daily caps on per-rail flow per `(parent role, rail)`. Time-invariant in v1. Direction defaults to `Outbound` (debit-side flow); declare `direction: Inbound` to cap credit-side flow (typical AML inbound-cap pattern — daily per-customer inbound ACH ceiling, new-account inbound limits, counterparty inbound diligence thresholds, etc.).
 
 ```
 LimitSchedule: (
   ParentRole: Role,
-  TransferType,
+  Rail,
   Cap: Money,
-  Description?: Value,                   # see "Description fields" above
+  Direction?: { Outbound | Inbound } = Outbound,  # AB.1
+  Description?: Value,                              # see "Description fields" above
 )
 ```
 
-The library projects each LimitSchedule entry into the relevant `StoredBalance.Limits` map for every StoredBalance of every account whose Role matches `ParentRole`, for every BusinessDay. L1's Limit Breach invariant then evaluates per child individually (the cap is per-child, not aggregated across siblings of the parent).
+The library projects each LimitSchedule entry into the relevant `StoredBalance.Limits` map for every StoredBalance of every account whose Role matches `ParentRole`, for every BusinessDay. L1's Limit Breach invariant then evaluates per child individually (the cap is per-child, not aggregated across siblings of the parent) — selecting `OutboundFlow` or `InboundFlow` based on the LimitSchedule's `Direction`.
 
-The combination `(ParentRole, TransferType)` MUST be unique across LimitSchedule entries — duplicate combinations are a load-time configuration error.
+The combination `(ParentRole, Rail, Direction)` MUST be unique across LimitSchedule entries — duplicate combinations are a load-time configuration error. Note that `(ParentRole, Rail)` MAY appear twice if the two entries declare different directions (e.g., a $10K outbound cap + a $20K inbound cap on the same `(DDAControl, CustomerACH)` pair is valid and useful).
 
 ---
 
@@ -662,7 +664,7 @@ Every rule below is enforced at YAML load time — `load_instance(path)` runs th
 - Every `Aggregating: true` Rail is absent from `Child` positions in chains.
 - Every `XorGroup` membership is consistent (all members share `Parent`).
 - Every `Completion` and `Cadence` literal is in the v1 vocabulary.
-- Every `LimitSchedule` `(ParentRole, TransferType)` combination is unique. **(M.2d.2)** Duplicate combinations are ambiguous — the projection into `StoredBalance.Limits` would have two competing caps, and the CASE-branch render order in the limit-breach matview silently picks the first match. Caught at YAML load.
+- Every `LimitSchedule` `(ParentRole, Rail, Direction)` combination is unique. **(M.2d.2 + AB.1)** Duplicate combinations are ambiguous — the projection into `StoredBalance.Limits` would have two competing caps for the same flow direction, and the CASE-branch render order in the limit-breach matview silently picks the first match. Caught at YAML load. Note: `(ParentRole, Rail)` MAY appear twice if the entries declare different directions — a $10K outbound + $20K inbound cap on the same `(parent, rail)` pair is a valid and common AML pattern.
 - Every `MaxUnbundledAge` is set only on Rails that appear in some AggregatingRail's `BundlesActivity` (otherwise the watch can never fire).
 - Every `BundleSelector` of the form `TransferTemplateName.LegRailName` references a rail that's actually in that template's `LegRails`.
 - Every leg of every Rail resolves to an Origin (per the resolution rules in "Per-leg Origin"). Unresolved legs are a load-time configuration error.

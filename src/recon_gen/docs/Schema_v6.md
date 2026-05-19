@@ -56,7 +56,7 @@ L1 invariant matviews
   ├── {{ l2_instance_name }}_ledger_drift                   — parent account drift
   ├── {{ l2_instance_name }}_overdraft                      — non-negative balance
   ├── {{ l2_instance_name }}_expected_eod_balance_breach    — declared EOD target
-  ├── {{ l2_instance_name }}_limit_breach                   — outbound flow cap
+  ├── {{ l2_instance_name }}_limit_breach                   — per-direction flow cap (Outbound + Inbound, AB.1)
   ├── {{ l2_instance_name }}_stuck_pending                  — per-rail Pending aging (M.2b.8)
   └── {{ l2_instance_name }}_stuck_unbundled                — per-rail Unbundled aging (M.2b.9)
                   ↓ (UI convenience)
@@ -307,7 +307,16 @@ the `JSON_VALUE` / `JSON_QUERY` / `JSON_EXISTS` family.
 - L2 `LimitSchedules` are EMITTED as inline CASE branches in the
   `_limit_breach` view at schema-emit time — **not** read from
   `daily_balances.limits` at query time. The `limits` column exists
-  for per-day override scenarios that may emerge later.
+  for per-day override scenarios that may emerge later. Each
+  LimitSchedule carries a `direction` field (default `Outbound`,
+  AB.1) selecting which flow side gets capped — Outbound caps
+  apply to `amount_direction = 'Debit'` transactions (the original
+  v1 semantic), Inbound caps apply to `amount_direction = 'Credit'`
+  (typical AML inbound-cap pattern). The matview emits a `UNION ALL`
+  of two per-direction SELECTs, each carrying an explicit `direction`
+  column so the dashboard can render Outbound + Inbound violations on
+  one sheet, distinguished by a column rather than by separate
+  matview names.
 
 ---
 
