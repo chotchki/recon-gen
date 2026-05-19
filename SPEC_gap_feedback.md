@@ -276,6 +276,8 @@ Alternative implementation: relabel multi-children rows in `_declared_chains_cte
 
 ## Enhancement 7: Soft per-firing magnitude bounds on Rail
 
+**Status: landed in Phase AB.5 (2026-05-19) — generator-only first cut adopted as proposed.** Field shipped as `Rail.amount_typical_range: tuple[Money, Money] | None`. Validator rules V1a (min < max), V1b (both > 0), V1c (forbidden on aggregating) enforced at L2 load time. Generator log-uniform sampler honors the range; planted scenarios size to midpoint; cap-breach plants clamp to `range.max × 3` when both `amount_typical_range` and a `LimitSchedule` are declared on the rail. Optional runtime `magnitude_anomaly` matview deferred to follow-on. Concept doc: [Rail → Optional: typical amount range](src/recon_gen/docs/concepts/l2/rail.md#optional-typical-amount-range-ab5). Worked example: [How do I set typical amount ranges on a rail?](src/recon_gen/docs/walkthroughs/customization/how-do-i-set-typical-amount-ranges.md).
+
 ### Problem
 
 The auto-scenario seed generator picks `Transaction.amount` per firing using internal heuristics — no operator-declared "typical magnitude" hint per rail. Synthesized amounts can be orders of magnitude off from real-world expectations: $100K card swipes, $0.42 wire transfers, $1 ACH originations sitting next to each other on the same dashboard. The plausibility ceiling on the dashboard drops to a level where reviewers stop trusting the visualization before they reach a real exception.

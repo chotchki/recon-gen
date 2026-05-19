@@ -1074,6 +1074,51 @@ def test_two_leg_rail_edit_form_renders_subtype_fields(
     assert 'name="leg_direction"' not in body
 
 
+def test_rail_edit_form_renders_amount_typical_range_field(
+    writable_l2_yaml: Path,
+) -> None:
+    """AB.5 (E7) — Rail edit form exposes amount_typical_range as a
+    text input. spec_example's ExternalRailInbound declares
+    [50.00, 5000.00] (AB.5.6.spec) so the value pre-fills."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/rail/ExternalRailInbound/edit")
+    assert resp.status_code == 200, resp.text
+    body = resp.text
+    assert 'name="amount_typical_range"' in body
+    # Pre-fills with the existing value (comma-separated Money tuple).
+    # The default tuple-stringification produces "50.00, 5000.00".
+    assert "50.00, 5000.00" in body
+
+
+def test_rail_amount_typical_range_coerce_round_trip() -> None:
+    """AB.5 (E7) — _coerce_field parses `min, max` into
+    tuple[Money, Money]. Invalid shapes raise ValueError that the
+    form re-renders with inline error."""
+    from decimal import Decimal
+
+    from recon_gen.common.html._studio_editor_routes import (
+        FieldSpec,
+        _coerce_field,
+    )
+    from recon_gen.common.l2.primitives import Money
+
+    spec = FieldSpec(
+        name="amount_typical_range",
+        label="Range",
+        helper="",
+        kind="text",
+    )
+    out = _coerce_field(spec, "5.00, 500.00", "rail")
+    assert out == (Money(Decimal("5.00")), Money(Decimal("500.00")))
+    # Bad shape — 1 value, not 2.
+    with pytest.raises(ValueError, match="comma-separated"):
+        _coerce_field(spec, "5.00", "rail")
+    # Bad value — non-numeric.
+    with pytest.raises(ValueError, match="numeric values"):
+        _coerce_field(spec, "five, ten", "rail")
+
+
 def test_single_leg_rail_edit_form_renders_subtype_fields(
     writable_l2_yaml: Path,
 ) -> None:

@@ -441,6 +441,33 @@ SHOULD complete within window W") — the L2 path makes the window a
 schema-emit-time property of the rail; the v5 path makes it a per-row
 property of the leg. Pick one per app; don't mix.
 
+---
+
+## Magnitude as data (AB.5)
+
+A rail can declare `amount_typical_range: [min, max]` as a **soft
+per-firing bound** (not a hard CHECK constraint). The bound is
+generator-shaping today and a runtime SHOULD-constraint hook for the
+follow-on `{{ l2_instance_name }}_magnitude_anomaly` matview (deferred per the AB.5
+"generator-only first cut" lock — lands when an integrator asks for
+runtime anomaly surfacing).
+
+Validator rules at L2 load time:
+
+- **V1a** — `min` strictly less than `max` (degenerate single-point
+  ranges rejected).
+- **V1b** — both `min` and `max` `> 0`. The bound is on `abs(amount)`,
+  so signed and zero values have no meaning.
+- **V1c** — forbidden on rails with `aggregating: true`. Aggregator
+  amounts derive from bundled children; set the range on the child
+  rails instead.
+
+When set, the generator samples log-uniformly within `[min, max]` so
+demo transactions cluster at the low end of the band (the natural
+shape of retail card flows). Plants size to the midpoint; cap-breach
+plants clamp to `range.max × 3` when both the rail and an
+intersecting `LimitSchedule` are declared.
+
 ## Forbidden SQL patterns
 
 The portability constraint targets PostgreSQL 17+ AND Oracle 19c+ —

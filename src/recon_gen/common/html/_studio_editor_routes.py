@@ -429,6 +429,23 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         ),
         kind="yaml_block",
     ),
+    # AB.5 (E7) — soft per-firing magnitude bound. Operator types a
+    # ``min, max`` shape (comma-separated decimals); coerce parses to
+    # ``tuple[Money, Money] | None``. Validator V1a-c (min<max, both>0,
+    # aggregating=false) surfaces inline.
+    FieldSpec(
+        name="amount_typical_range",
+        label="Typical amount range (min, max)",
+        helper=(
+            "Optional soft bound on per-firing abs(amount). Format: "
+            "`min, max` (e.g. `5.00, 500.00`). Generator samples "
+            "log-uniformly within this range, producing realistic "
+            "demo amounts. Validator V1a-c rejects min≥max, "
+            "non-positive values, and aggregating rails. Empty ⇒ "
+            "falls back to per-kind lognormal heuristic."
+        ),
+        kind="text",
+    ),
     FieldSpec(
         name="description",
         label="Description",
@@ -694,6 +711,24 @@ def _coerce_field(spec: FieldSpec, raw: str, kind: EntityKind) -> object:
             if p.strip()
         ]
         return tuple(Identifier(p) for p in parts)
+    # AB.5 (E7) — Rail.amount_typical_range: tuple[Money, Money] | None.
+    # Operator types `min, max` as a comma-separated pair of decimals.
+    # Empty handled above by early return.
+    if spec.name == "amount_typical_range" and kind == "rail":
+        from decimal import Decimal, InvalidOperation  # noqa: PLC0415 — lazy
+        parts = [p.strip() for p in raw.split(",")]
+        if len(parts) != 2:
+            raise ValueError(
+                f"amount_typical_range expects `min, max` "
+                f"(comma-separated); got {raw!r}",
+            )
+        try:
+            return (Money(Decimal(parts[0])), Money(Decimal(parts[1])))
+        except InvalidOperation as exc:
+            raise ValueError(
+                f"amount_typical_range expects numeric values; "
+                f"got {raw!r}",
+            ) from exc
     # X.4.f.11.7 — Rail aging windows: Duration | None. Reuse the
     # loader's ISO 8601 parser; empty handled above by the early return.
     if spec.name in ("max_pending_age", "max_unbundled_age") and kind == "rail":

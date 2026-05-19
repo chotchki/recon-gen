@@ -207,3 +207,72 @@ def test_filter_passes_through_non_l1_fixtures() -> None:
     assert out.rail_firing_plants == base.rail_firing_plants
     assert out.inv_fanout_plants == base.inv_fanout_plants
     assert out.today == base.today
+
+
+# -- AB.5 (E7): plant-amount + cap-breach helpers --------------------------
+
+
+def _ranged_rail(lo: str, hi: str) -> object:
+    """Build a minimal TwoLegRail with amount_typical_range set. Only
+    the field the helper reads matters here; other rail fields stay at
+    their dataclass defaults (the helpers only touch amount_typical_range)."""
+    from recon_gen.common.l2.primitives import Money, TwoLegRail
+    return TwoLegRail(
+        name=Identifier("R"),
+        metadata_keys=(Identifier("transfer_id"),),
+        source_role=(Identifier("src"),),
+        destination_role=(Identifier("dst"),),
+        amount_typical_range=(Money(Decimal(lo)), Money(Decimal(hi))),
+    )
+
+
+def test_plant_amount_for_rail_uses_midpoint_when_range_set() -> None:
+    """AB.5: a rail with declared range returns the cents-quantized
+    midpoint regardless of the caller's default — keeps plants sized
+    like ordinary firings on that rail."""
+    from recon_gen.common.l2.auto_scenario import _plant_amount_for_rail
+
+    rail = _ranged_rail("50", "5000")  # midpoint = 2525.00
+    got = _plant_amount_for_rail(rail, Decimal("999.99"))
+    assert got == Decimal("2525.00")
+
+
+def test_plant_amount_for_rail_returns_default_when_range_unset() -> None:
+    """Pre-AB.5 fixtures (no range): legacy hardcoded default preserved
+    byte-equivalent."""
+    from recon_gen.common.l2.auto_scenario import _plant_amount_for_rail
+
+    got = _plant_amount_for_rail(None, Decimal("100.00"))
+    assert got == Decimal("100.00")
+
+
+def test_cap_breach_amount_unbounded_falls_through_to_cap_times_1_5() -> None:
+    """Pre-AB.5: no range → plain ``cap * 1.5`` whole-dollar quantized."""
+    from recon_gen.common.l2.auto_scenario import _cap_breach_amount
+
+    # cap=1000, no range → 1500
+    assert _cap_breach_amount(Decimal("1000"), None) == Decimal("1500")
+
+
+def test_cap_breach_amount_clamps_to_range_max_times_3() -> None:
+    """AB.5: when ``cap * 1.5`` exceeds ``range.max * 3``, the breach
+    pins to ``range.max * 3`` so it stays in a realistic ballpark
+    relative to the rail's typical volume (rather than blowing past
+    the typical band by an absurd multiplier)."""
+    from recon_gen.common.l2.auto_scenario import _cap_breach_amount
+
+    # cap=100000, range=[5, 500] → cap*1.5=150000 vs range.max*3=1500
+    # → clamped to 1500.
+    rail = _ranged_rail("5", "500")
+    assert _cap_breach_amount(Decimal("100000"), rail) == Decimal("1500")
+
+
+def test_cap_breach_amount_uses_cap_when_below_range_cap() -> None:
+    """AB.5: when ``cap * 1.5`` is BELOW ``range.max * 3``, the breach
+    stays at ``cap * 1.5`` — the clamp is a ceiling, not a floor."""
+    from recon_gen.common.l2.auto_scenario import _cap_breach_amount
+
+    # cap=100, range=[5, 500] → cap*1.5=150 vs range.max*3=1500
+    # → 150 wins (it's the smaller).
+    rail = _ranged_rail("5", "500")
+    assert _cap_breach_amount(Decimal("100"), rail) == Decimal("150")
