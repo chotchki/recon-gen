@@ -153,7 +153,7 @@ def studio(  # type: ignore[no-untyped-def]: Click decorator strips the function
     if demo_mode:
         import tempfile  # noqa: PLC0415
         _demo_state_dir = _Path(
-            tempfile.mkdtemp(prefix="recon-demo-studio-state-"),
+            tempfile.mkdtemp(prefix="recon-demo-studio-state-"),  # typing-smell: ignore[recon-prefix]: tmpdir name, not a deployment prefix — never reaches cfg.prefixed() flow
         )
         tg_cache = TestGeneratorCache(
             cfg.test_generator,

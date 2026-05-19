@@ -1,5 +1,18 @@
 # Release Notes
 
+## v11.6.5 — Suppress recon-prefix smell on demo-mode tmpdir
+
+v11.6.4 release CI's typing-smells test failed because
+`tempfile.mkdtemp(prefix="recon-demo-studio-state-")` in
+`cli/studio.py:156` (added in AE.2.b) matched the
+`recon-<env>-` deployment-prefix-string smell-check. That check is
+designed to catch hardcoded production tag values; a tmpdir name is
+neither a deployment prefix nor a multi-tenant scoping concern, so
+the right answer is the documented suppression marker:
+`# typing-smell: ignore[recon-prefix]: <reason>`.
+
+No production behavior change vs v11.6.4 (which never published).
+
 ## v11.6.4 — Studio --demo-mode flag (Phase AE Mac mini lockdown)
 
 New CLI flag on `recon-gen studio`: `--demo-mode/--no-demo-mode` (default off). When set, mutation routes are stripped from the route table so public-demo hosting (Phase AE Mac mini under sandbox-exec) can't be poked into mutating L2 yaml on disk, running the operator's etl_hook shell command, or triggering an AWS deploy.
