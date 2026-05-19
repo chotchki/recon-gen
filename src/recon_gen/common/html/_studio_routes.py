@@ -1634,6 +1634,7 @@ def make_studio_routes(
     prefix_override: str | None = None,
     cfg: Config | None = None,
     tg_cache: TestGeneratorCache | None = None,
+    demo_mode: bool = False,
 ) -> list[Route | Mount]:
     """Build the Studio route list bound to ``cache``.
 
@@ -1745,10 +1746,18 @@ def make_studio_routes(
     # X.4.e + X.4.f — editor routes (list / read / edit / save / delete
     # for every entity kind). Pure scenario over the cached L2 — no
     # pool needed, always mounted alongside the diagram.
-    from recon_gen.common.html._studio_editor_routes import (  # noqa: PLC0415
-        make_editor_routes,
-    )
-    routes.extend(make_editor_routes(cache))
+    #
+    # AE.2.b: in `--demo-mode`, the editor routes are not mounted at all.
+    # The L2 yaml view (`GET /l2_shape/...`) remains useful for browsing
+    # primitives, but POST/PUT/DELETE on those paths would mutate
+    # `cache.path`'s on-disk yaml — sandbox-exec denies the write anyway,
+    # but route-level skip keeps the UI from offering save/delete buttons
+    # that 500 at submission.
+    if not demo_mode:
+        from recon_gen.common.html._studio_editor_routes import (  # noqa: PLC0415
+            make_editor_routes,
+        )
+        routes.extend(make_editor_routes(cache))
 
     # X.4.c.6 — trainer JSON route. Always mounted (no DB needed —
     # the scenario walk is pure Python over the cached L2).
@@ -2036,9 +2045,13 @@ def make_studio_routes(
                 },
             )
 
-        routes.append(
-            Route("/data/knobs/etl_hook", put_etl_hook, methods=["PUT"]),
-        )
+        # AE.2.b: etl_hook PUT triggers the operator's shell command
+        # (cfg.etl_hook) — that's an arbitrary shell-exec surface no
+        # public-demo should expose. Skip mounting in demo-mode.
+        if not demo_mode:
+            routes.append(
+                Route("/data/knobs/etl_hook", put_etl_hook, methods=["PUT"]),
+            )
 
         async def put_only_template(request: Request) -> HTMLResponse:
             """X.4.i.3 — set the test_generator.only_template knob.
@@ -2174,7 +2187,15 @@ def make_studio_routes(
             status = 503 if summary.halted else 200
             return JSONResponse(summary.to_json(), status_code=status)
 
-        routes.append(Route("/deploy", deploy, methods=["POST"]))
+        # AE.2.b: /deploy orchestrates the AWS QuickSight deploy pipeline
+        # — schema apply + data apply + matview refresh + json apply
+        # against the operator-supplied AWS account. No public-demo
+        # should ever execute that. Skip mounting in demo-mode (the
+        # sandbox-exec profile also denies the outbound network the
+        # boto3 calls would need, but route-level skip is the cleaner
+        # cut so the Deploy button never appears to do anything).
+        if not demo_mode:
+            routes.append(Route("/deploy", deploy, methods=["POST"]))
 
     return routes
 

@@ -87,6 +87,25 @@ from recon_gen.cli._html_serve import run_html_server
         "when mkdocs isn't installed (`pip install recon-gen[docs]`)."
     ),
 )
+@click.option(
+    "--demo-mode/--no-demo-mode",
+    default=False,
+    show_default=True,
+    help=(
+        "AE.2.b lockdown for public-demo hosting (Phase AE Mac mini). "
+        "When set: (1) L2 yaml mutation endpoints (POST/PUT/DELETE on "
+        "/l2_shape/*) are not mounted; (2) `POST /deploy` (AWS deploy) "
+        "is not mounted; (3) `PUT /data/knobs/etl_hook` (shell exec) "
+        "is not mounted; (4) trainer knob state (`.studio-state.yaml`) "
+        "writes to a per-process tmpdir wiped on restart instead of "
+        "persisting next to cfg.yaml. Diagram + L2 read views + "
+        "data-shaping knobs (plants/window/seed/scope/etc.) continue "
+        "to work — this is a mutation-perimeter cut, not a feature "
+        "blackout. Defense in depth: sandbox-exec profile under "
+        "`deploy/sandbox/` also denies file-write on L2 yaml + cfg.yaml "
+        "regardless of this flag."
+    ),
+)
 def studio(  # type: ignore[no-untyped-def]: Click decorator strips the function-decorator return type
     config,
     l2_instance_path,
@@ -95,6 +114,7 @@ def studio(  # type: ignore[no-untyped-def]: Click decorator strips the function
     dev_log: bool,
     app_name: str,
     embed_docs: bool,
+    demo_mode: bool,
 ) -> None:
     """Start Studio — the implementation-tools surface for the integrator,
     trainer, and ETL engineer.
@@ -124,8 +144,23 @@ def studio(  # type: ignore[no-untyped-def]: Click decorator strips the function
     # cfg.test_generator snapshot merged with sidefile overrides
     # (X.4.h.7 — `<cfg.parent>/.studio-state.yaml` survives Studio
     # restarts without polluting the operator-authored cfg.yaml).
+    #
+    # AE.2.b — in `--demo-mode`, redirect the sidefile to a per-process
+    # tmpdir so trainer-knob mutations don't persist next to cfg.yaml
+    # (which is read-only under the sandbox-exec profile anyway). The
+    # tmpdir is wiped on restart, matching the nightly-refresh contract.
     from pathlib import Path as _Path  # noqa: PLC0415
-    tg_cache = TestGeneratorCache.from_cfg_with_state(cfg, _Path(config))
+    if demo_mode:
+        import tempfile  # noqa: PLC0415
+        _demo_state_dir = _Path(
+            tempfile.mkdtemp(prefix="recon-demo-studio-state-"),
+        )
+        tg_cache = TestGeneratorCache(
+            cfg.test_generator,
+            state_path=_demo_state_dir / ".studio-state.yaml",
+        )
+    else:
+        tg_cache = TestGeneratorCache.from_cfg_with_state(cfg, _Path(config))
     # Bind dialect + prefix at the CLI layer (X.4.c.5.c — coverage
     # fetcher needs both, but threading them through ``_html_serve``
     # would couple Studio internals to a Studio-ignorant module).
@@ -135,6 +170,7 @@ def studio(  # type: ignore[no-untyped-def]: Click decorator strips the function
         prefix_override=cfg.db_table_prefix,
         cfg=cfg,
         tg_cache=tg_cache,
+        demo_mode=demo_mode,
     )
     run_html_server(
         cfg=cfg,
