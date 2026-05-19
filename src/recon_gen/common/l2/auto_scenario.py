@@ -69,6 +69,8 @@ from .seed import (
     FanInChainExtraParentPlant,
     FanInChainMissingParentPlant,
     FanInChainPlant,
+    MultiXorMissedPlant,
+    MultiXorOverlapPlant,
     InboundCapBreachPlant,
     InvFanoutPlant,
     LimitBreachPlant,
@@ -211,6 +213,22 @@ def default_scenario_for(
         omitted.append((
             "FanInChainExtraParentPlant",
             "no Chain declares fan_in=True (AB.4)",
+        ))
+    # AB.6.6 — Multi-XOR chain plant picker: any chain with ≥2 non-fan_in
+    # children and a Rail parent (so the plant can synthesize parent
+    # firings). Plants exercise both 'missed' (count=0) and 'overlap'
+    # (count≥2) branches of the AB.6.5 _multi_xor_violation matview.
+    multi_xor_pick = _pick_multi_xor_chain_inputs(instance)
+    if multi_xor_pick is None:
+        omitted.append((
+            "MultiXorMissedPlant",
+            "no Chain declares ≥2 non-fan_in children with a Rail "
+            "parent (AB.6)",
+        ))
+        omitted.append((
+            "MultiXorOverlapPlant",
+            "no Chain declares ≥2 non-fan_in children with a Rail "
+            "parent (AB.6)",
         ))
     pending_rail = _pick_first_with(
         instance.rails, key=lambda r: r.max_pending_age is not None,
@@ -413,6 +431,28 @@ def default_scenario_for(
                 "fan_in chain has no expected_parent_count — extra "
                 "parent count can't be flagged without an upper bound",
             ))
+
+    # AB.6.6 — Multi-XOR plants. days_ago 6/5 separates from AB.4's
+    # fan-in plants (days_ago 3/4/5) on the date axis so date-binned
+    # rollups can tell them apart without filter narrowing.
+    multi_xor_missed_plants: tuple[MultiXorMissedPlant, ...] = ()
+    multi_xor_overlap_plants: tuple[MultiXorOverlapPlant, ...] = ()
+    if multi_xor_pick is not None:
+        mxc_parent, mxc_child_a, mxc_child_b = multi_xor_pick
+        multi_xor_missed_plants = (
+            MultiXorMissedPlant(
+                chain_parent_rail_name=mxc_parent,
+                days_ago=6,
+            ),
+        )
+        multi_xor_overlap_plants = (
+            MultiXorOverlapPlant(
+                chain_parent_rail_name=mxc_parent,
+                variant_a_child_name=mxc_child_a,
+                variant_b_child_name=mxc_child_b,
+                days_ago=5,
+            ),
+        )
 
     stuck_pending_plants: tuple[StuckPendingPlant, ...] = ()
     if pending_rail is not None:
@@ -664,6 +704,8 @@ def default_scenario_for(
         fan_in_chain_plants=fan_in_chain_plants if include_l1 else (),
         fan_in_chain_missing_parent_plants=fan_in_chain_missing_parent_plants if include_l1 else (),
         fan_in_chain_extra_parent_plants=fan_in_chain_extra_parent_plants if include_l1 else (),
+        multi_xor_missed_plants=multi_xor_missed_plants if include_l1 else (),
+        multi_xor_overlap_plants=multi_xor_overlap_plants if include_l1 else (),
         stuck_pending_plants=stuck_pending_plants if include_l1 else (),
         failed_transaction_plants=failed_transaction_plants if include_l1 else (),
         stuck_unbundled_plants=stuck_unbundled_plants if include_l1 else (),
@@ -820,6 +862,8 @@ def densify_scenario(
         fan_in_chain_plants=base.fan_in_chain_plants,
         fan_in_chain_missing_parent_plants=base.fan_in_chain_missing_parent_plants,
         fan_in_chain_extra_parent_plants=base.fan_in_chain_extra_parent_plants,
+        multi_xor_missed_plants=base.multi_xor_missed_plants,
+        multi_xor_overlap_plants=base.multi_xor_overlap_plants,
         stuck_pending_plants=tuple(
             r for p in base.stuck_pending_plants for r in replicate_pending(p)
         ),
@@ -897,6 +941,8 @@ def boost_inv_fanout_plants(
         fan_in_chain_plants=base.fan_in_chain_plants,
         fan_in_chain_missing_parent_plants=base.fan_in_chain_missing_parent_plants,
         fan_in_chain_extra_parent_plants=base.fan_in_chain_extra_parent_plants,
+        multi_xor_missed_plants=base.multi_xor_missed_plants,
+        multi_xor_overlap_plants=base.multi_xor_overlap_plants,
         stuck_pending_plants=base.stuck_pending_plants,
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants,
@@ -980,6 +1026,8 @@ def add_broken_rail_plants(
         fan_in_chain_plants=base.fan_in_chain_plants,
         fan_in_chain_missing_parent_plants=base.fan_in_chain_missing_parent_plants,
         fan_in_chain_extra_parent_plants=base.fan_in_chain_extra_parent_plants,
+        multi_xor_missed_plants=base.multi_xor_missed_plants,
+        multi_xor_overlap_plants=base.multi_xor_overlap_plants,
         stuck_pending_plants=base.stuck_pending_plants + extra_plants,
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants,
@@ -1035,6 +1083,8 @@ def filter_scenario_plants(
         fan_in_chain_plants=base.fan_in_chain_plants if "fan_in_disagreement" in selected else (),
         fan_in_chain_missing_parent_plants=base.fan_in_chain_missing_parent_plants if "fan_in_disagreement" in selected else (),
         fan_in_chain_extra_parent_plants=base.fan_in_chain_extra_parent_plants if "fan_in_disagreement" in selected else (),
+        multi_xor_missed_plants=base.multi_xor_missed_plants if "multi_xor_violation" in selected else (),
+        multi_xor_overlap_plants=base.multi_xor_overlap_plants if "multi_xor_violation" in selected else (),
         stuck_pending_plants=base.stuck_pending_plants if "stuck_pending" in selected else (),
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants if "stuck_unbundled" in selected else (),
@@ -1788,6 +1838,45 @@ def _pick_fan_in_chain_inputs(
         if c.parent not in rail_names:
             continue
         return (c.parent, fan_in_child.name, fan_in_child.expected_parent_count)
+    return None
+
+
+def _pick_multi_xor_chain_inputs(
+    instance: L2Instance,
+) -> tuple[Identifier, Identifier, Identifier] | None:
+    """AB.6.6 picker: find any Chain with ≥2 non-fan_in children whose
+    parent resolves to a Rail (not a TransferTemplate).
+
+    Returns ``(chain_parent_rail_name, child_a_name, child_b_name)``
+    or ``None``. Skips per-child fan_in entries entirely (AB.5
+    coupling — their cardinality is _fan_in_disagreement's job, not
+    _multi_xor_violation's). Mixed-cardinality chains qualify as long
+    as ≥2 non-fan_in children remain.
+
+    The parent-rail restriction mirrors AB.2.6 / AB.4.5: the plant
+    emitter synthesizes parent firings via the chain.parent rail
+    name, which only makes sense when parent is a Rail (a
+    TransferTemplate parent would require nested-firing logic the
+    AB.6.6 plant scaffold doesn't carry).
+
+    Determinism: chains traversed in (parent-name, sorted-children-
+    CSV) order — same key the seed loop uses; children traversed in
+    declared order; the first two non-fan_in children win.
+    """
+    rail_names = {r.name for r in instance.rails}
+    for c in sorted(
+        instance.chains,
+        key=lambda ch: (
+            str(ch.parent),
+            ",".join(sorted(str(d.name) for d in ch.children)),
+        ),
+    ):
+        if c.parent not in rail_names:
+            continue
+        non_fan_in = [child for child in c.children if not child.fan_in]
+        if len(non_fan_in) < 2:
+            continue
+        return (c.parent, non_fan_in[0].name, non_fan_in[1].name)
     return None
 
 

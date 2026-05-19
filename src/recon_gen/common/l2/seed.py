@@ -403,6 +403,52 @@ class FanInChainExtraParentPlant:
 
 
 @dataclass(frozen=True, slots=True)
+class MultiXorMissedPlant:
+    """AB.6.6 plant: a chain parent firing with ZERO declared XOR
+    siblings firing — matches the AB.6.5 matview's
+    ``child_count = 0`` 'missed' branch.
+
+    Models the ETL bug where chain.md's "multi-children = exactly one
+    MUST fire" contract was violated: the parent fired but no child
+    followed (all XOR alternatives were dropped on the floor). The
+    AB.6.5 ``_multi_xor_violation`` matview reads
+    ``COUNT(matched_child_name) = 0`` → ``HAVING <> 1`` → row surfaces
+    with ``disagreement_kind='missed'``, ``fired_children=''``.
+
+    Picker constraint (AB.6.6): the chain has ≥2 non-fan-in children
+    and a Rail (not Template) parent so the plant emitter can
+    synthesize a parent firing without nested-firing logic. Mirrors
+    AB.2.6's parent-must-be-rail restriction.
+    """
+
+    chain_parent_rail_name: Identifier
+    days_ago: int
+
+
+@dataclass(frozen=True, slots=True)
+class MultiXorOverlapPlant:
+    """AB.6.6 plant: a chain parent firing where TWO declared XOR
+    siblings fire — matches the AB.6.5 matview's ``child_count >= 2``
+    'overlap' branch.
+
+    Emits one parent firing (the chain.parent rail) plus child legs
+    for variant_a + variant_b, both with ``transfer_parent_id`` set
+    to the parent's ``transfer_id``. The AB.6.5 matview's
+    ``fired_children_distinct`` CTE picks up both → ``COUNT = 2`` →
+    ``HAVING <> 1`` → row surfaces with ``disagreement_kind='overlap'``,
+    ``fired_children='<a>,<b>'`` (concat ordering dialect-specific).
+
+    Pairs with ``MultiXorMissedPlant`` so the dashboard surfaces BOTH
+    branches of the AB.6.5 matview's HAVING clause.
+    """
+
+    chain_parent_rail_name: Identifier
+    variant_a_child_name: Identifier
+    variant_b_child_name: Identifier
+    days_ago: int
+
+
+@dataclass(frozen=True, slots=True)
 class StuckPendingPlant:
     """A planted Pending leg whose age exceeds the rail's `max_pending_age`.
 
@@ -643,6 +689,8 @@ class ScenarioPlant:
     fan_in_chain_plants: tuple[FanInChainPlant, ...] = ()
     fan_in_chain_missing_parent_plants: tuple[FanInChainMissingParentPlant, ...] = ()
     fan_in_chain_extra_parent_plants: tuple[FanInChainExtraParentPlant, ...] = ()
+    multi_xor_missed_plants: tuple[MultiXorMissedPlant, ...] = ()
+    multi_xor_overlap_plants: tuple[MultiXorOverlapPlant, ...] = ()
     stuck_pending_plants: tuple[StuckPendingPlant, ...] = ()
     failed_transaction_plants: tuple[FailedTransactionPlant, ...] = ()
     stuck_unbundled_plants: tuple[StuckUnbundledPlant, ...] = ()
@@ -817,6 +865,32 @@ def emit_seed(
                 template_by_role=template_by_role,
                 counter=txn_counter,
                 dialect=dialect,
+            )
+        )
+
+    # AB.6.6 — MultiXorMissedPlant: parent firing with zero declared
+    # XOR siblings firing. Surfaces on the AB.6.5 multi_xor_violation
+    # matview with disagreement_kind='missed'.
+    for mxm in sorted(
+        scenarios.multi_xor_missed_plants,
+        key=_multi_xor_missed_key,
+    ):
+        txn_rows.extend(
+            _emit_multi_xor_missed_rows(
+                mxm, instance, scenarios, template_by_role, txn_counter, dialect,
+            )
+        )
+
+    # AB.6.6 — MultiXorOverlapPlant: parent firing with TWO declared
+    # XOR siblings firing. Surfaces on the AB.6.5 multi_xor_violation
+    # matview with disagreement_kind='overlap'.
+    for mxo in sorted(
+        scenarios.multi_xor_overlap_plants,
+        key=_multi_xor_overlap_key,
+    ):
+        txn_rows.extend(
+            _emit_multi_xor_overlap_rows(
+                mxo, instance, scenarios, template_by_role, txn_counter, dialect,
             )
         )
 
@@ -3936,6 +4010,19 @@ def _fan_in_extra_parent_key(
     )
 
 
+def _multi_xor_missed_key(p: MultiXorMissedPlant) -> tuple[str, int]:
+    return (str(p.chain_parent_rail_name), p.days_ago)
+
+
+def _multi_xor_overlap_key(p: MultiXorOverlapPlant) -> tuple[str, int, str, str]:
+    return (
+        str(p.chain_parent_rail_name),
+        p.days_ago,
+        str(p.variant_a_child_name),
+        str(p.variant_b_child_name),
+    )
+
+
 def _failed_transaction_key(p: FailedTransactionPlant) -> tuple[str, int, str]:
     return (str(p.account_id), p.days_ago, str(p.rail_name))
 
@@ -4519,6 +4606,167 @@ def _emit_xor_variant_overlap_rows(
             origin="InternalInitiated",
             metadata={},
             template_name=template.name,
+            dialect=dialect,
+        ))
+    return rows
+
+
+def _emit_multi_xor_missed_rows(
+    p: MultiXorMissedPlant,
+    instance: L2Instance,
+    scenarios: ScenarioPlant,
+    template_by_role: dict[Identifier, AccountTemplate],
+    counter: _Counter,
+    dialect: Dialect,
+) -> list[str]:
+    """AB.6.6 violation plant: emit ONE parent firing with ZERO
+    declared XOR-sibling children. AB.6.5 matview reads
+    ``COUNT(matched_child_name) = 0`` → ``HAVING <> 1`` → row with
+    ``disagreement_kind='missed'``.
+
+    Account context comes from the first materialized TemplateInstance
+    (mirrors xor_variant emit pattern — the matview doesn't care which
+    account; it groups by parent_transfer_id).
+
+    Graceful skip when no template instance is available or the parent
+    rail isn't declared (defensive — the picker filters these, but
+    this preserves the contract on hand-built scenarios).
+    """
+    if not _find_rail_or_skip(p.chain_parent_rail_name, instance):
+        return []
+    ti = _first_template_instance_or_skip(scenarios)
+    if ti is None:
+        return []
+    at = template_by_role.get(ti.template_role)
+    if at is None:
+        return []
+
+    plant_day = scenarios.today - timedelta(days=p.days_ago)
+    posting = f"{plant_day.isoformat()}T12:15:00+00:00"
+
+    n = counter.next()
+    parent_tid = f"tr-mxor-missed-{n:04d}"
+
+    return [_txn_row(
+        id_=f"tx-mxor-missed-{n:04d}-p",
+        account_id=ti.account_id,
+        account_name=ti.name,
+        account_role=ti.template_role,
+        account_scope=at.scope,
+        account_parent_role=at.parent_role,
+        money=Decimal("100.00"),
+        direction="Credit",
+        posting=posting,
+        transfer_id=parent_tid,
+        rail_name=p.chain_parent_rail_name,
+        origin="InternalInitiated",
+        metadata={},
+        dialect=dialect,
+    )]
+
+
+def _emit_multi_xor_overlap_rows(
+    p: MultiXorOverlapPlant,
+    instance: L2Instance,
+    scenarios: ScenarioPlant,
+    template_by_role: dict[Identifier, AccountTemplate],
+    counter: _Counter,
+    dialect: Dialect,
+) -> list[str]:
+    """AB.6.6 violation plant: emit ONE parent firing + TWO child firings
+    that both reference it via ``transfer_parent_id``. AB.6.5 matview
+    reads ``COUNT(matched_child_name) = 2`` → ``HAVING <> 1`` → row
+    with ``disagreement_kind='overlap'``.
+
+    Both variants MUST be declared children of a multi-XOR chain whose
+    parent is ``chain_parent_rail_name`` (picker enforces). Each child
+    can be either a Rail or a TransferTemplate; the matview matches
+    on whichever fires (rail_name or template_name).
+
+    Graceful skip when the parent rail doesn't exist or no template
+    instance is available.
+    """
+    if not _find_rail_or_skip(p.chain_parent_rail_name, instance):
+        return []
+    ti = _first_template_instance_or_skip(scenarios)
+    if ti is None:
+        return []
+    at = template_by_role.get(ti.template_role)
+    if at is None:
+        return []
+    # Resolve each child name to whether it's a rail or template — the
+    # emitter sets rail_name OR template_name accordingly.
+    rail_names = {r.name for r in instance.rails}
+    template_names = {t.name for t in instance.transfer_templates}
+
+    def _child_kind(name: Identifier) -> str | None:
+        if name in rail_names:
+            return "rail"
+        if name in template_names:
+            return "template"
+        return None
+
+    kind_a = _child_kind(p.variant_a_child_name)
+    kind_b = _child_kind(p.variant_b_child_name)
+    if kind_a is None or kind_b is None:
+        return []
+    if p.variant_a_child_name == p.variant_b_child_name:
+        return []
+
+    plant_day = scenarios.today - timedelta(days=p.days_ago)
+    posting_parent = f"{plant_day.isoformat()}T12:30:00+00:00"
+    posting_a = f"{plant_day.isoformat()}T12:31:00+00:00"
+    posting_b = f"{plant_day.isoformat()}T12:32:00+00:00"
+
+    n = counter.next()
+    parent_tid = f"tr-mxor-overlap-{n:04d}"
+    child_a_tid = f"tr-mxor-overlap-{n:04d}-a"
+    child_b_tid = f"tr-mxor-overlap-{n:04d}-b"
+
+    rows: list[str] = []
+    # Parent firing (chain.parent rail).
+    rows.append(_txn_row(
+        id_=f"tx-mxor-overlap-{n:04d}-p",
+        account_id=ti.account_id,
+        account_name=ti.name,
+        account_role=ti.template_role,
+        account_scope=at.scope,
+        account_parent_role=at.parent_role,
+        money=Decimal("100.00"),
+        direction="Credit",
+        posting=posting_parent,
+        transfer_id=parent_tid,
+        rail_name=p.chain_parent_rail_name,
+        origin="InternalInitiated",
+        metadata={},
+        dialect=dialect,
+    ))
+    # Two child firings sharing transfer_parent_id = parent_tid. Each
+    # carries its name on rail_name OR template_name per its kind.
+    for suffix, posting, child_tid, child_name, kind in (
+        ("a", posting_a, child_a_tid, p.variant_a_child_name, kind_a),
+        ("b", posting_b, child_b_tid, p.variant_b_child_name, kind_b),
+    ):
+        rail_name_for_row = (
+            child_name if kind == "rail" else p.chain_parent_rail_name
+        )
+        template_name_for_row = child_name if kind == "template" else None
+        rows.append(_txn_row(
+            id_=f"tx-mxor-overlap-{n:04d}-{suffix}",
+            account_id=ti.account_id,
+            account_name=ti.name,
+            account_role=ti.template_role,
+            account_scope=at.scope,
+            account_parent_role=at.parent_role,
+            money=Decimal("100.00"),
+            direction="Credit",
+            posting=posting,
+            transfer_id=child_tid,
+            rail_name=rail_name_for_row,
+            origin="InternalInitiated",
+            metadata={},
+            template_name=template_name_for_row,
+            transfer_parent_id=parent_tid,
             dialect=dialect,
         ))
     return rows

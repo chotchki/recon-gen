@@ -231,7 +231,14 @@ def test_coverage_includes_every_declared_primitive(
     for tt in spec_example_instance.transfer_templates:
         assert _template_id(tt.name) in nodes
 
-    assert len(edges) == len(spec_example_instance.chains)
+    # Coverage emits one edge per chain CHILD (Z.A: singleton = 1 edge,
+    # multi/XOR = N edges) so the diagram pane and the coverage map
+    # stay 1:1. For spec_example: 3 singleton chains + 1 multi-XOR
+    # chain (2 children, AB.6.5.spec) = 5 edges total.
+    expected_edge_count = sum(
+        len(c.children) for c in spec_example_instance.chains
+    )
+    assert len(edges) == expected_edge_count
 
 
 def _id(s: str) -> Identifier:

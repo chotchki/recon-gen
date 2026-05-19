@@ -189,6 +189,36 @@ rails:
     origin: InternalInitiated
     metadata_keys: [batch_id]
 
+  # AB.6.5.spec (2026-05-19) — multi-XOR chain demo. BulkAccrualSettlement
+  # is a parent rail that fires the accrual; downstream, exactly ONE of
+  # two settlement-vehicle rails (BulkAccrualSettleACH or
+  # BulkAccrualSettleWire) should follow. The AB.6.5 multi_xor_violation
+  # matview flags violations: 0 children fired (missed) or both fired
+  # (overlap).
+  - name: BulkAccrualSettlement
+    source_role: CustomerSubledger
+    destination_role: ClearingSuspense
+    expected_net: 0
+    source_origin: InternalInitiated
+    destination_origin: InternalInitiated
+    metadata_keys: [accrual_id]
+
+  - name: BulkAccrualSettleACH
+    source_role: ClearingSuspense
+    destination_role: ExternalCounterparty
+    expected_net: 0
+    source_origin: InternalInitiated
+    destination_origin: ExternalForcePosted
+    metadata_keys: [accrual_id]
+
+  - name: BulkAccrualSettleWire
+    source_role: ClearingSuspense
+    destination_role: ExternalCounterparty
+    expected_net: 0
+    source_origin: InternalInitiated
+    destination_origin: ExternalForcePosted
+    metadata_keys: [accrual_id]
+
 transfer_templates:
   - name: MerchantSettlementCycle
     expected_net: 0
@@ -300,6 +330,27 @@ chains:
       payout). The L1 fan_in_disagreement invariant flags batches
       whose parent_count != expected_parent_count (missing contributor
       or extra contributor — both ETL bugs).
+
+  # AB.6.5.spec (2026-05-19) — dedicated multi-XOR chain so the
+  # AB.6.5 _multi_xor_violation matview has rows to surface. Per
+  # AB.6.0 Lock 5: rather than mutate an existing chain (which would
+  # entangle other invariant tests), this chain stands alone with
+  # the BulkAccrualSettlement parent + two settlement-vehicle child
+  # rails. The auto-scenario plants MultiXorMissedPlant (parent fires,
+  # no child) + MultiXorOverlapPlant (parent fires, BOTH children
+  # fire) so both branches of the matview's HAVING <> 1 surface.
+  - parent: BulkAccrualSettlement
+    children:
+      - BulkAccrualSettleACH
+      - BulkAccrualSettleWire
+    description: |
+      Demonstrates the multi-XOR chain contract: every
+      BulkAccrualSettlement firing SHOULD be followed by exactly
+      ONE of the two settlement-vehicle rails. The L1
+      multi_xor_violation invariant flags violations: 'missed'
+      when no child fires (the chain.md contract was dropped on
+      the floor) or 'overlap' when both fire (XOR alternation
+      collapsed into a duplicate).
 
 limit_schedules:
   # Cap matches ExternalRailOutbound (Z.B 2026-05-15: rail name IS the type).
