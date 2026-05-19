@@ -1768,7 +1768,23 @@ UNION ALL
 SELECT 'stuck_unbundled', account_id, account_name, account_role,
        account_parent_role, {posting_to_date} AS business_day,
        rail_name, amount_money AS magnitude
-FROM {p}_stuck_unbundled;
+FROM {p}_stuck_unbundled
+-- AB.2.3 — Chain Parent Disagreement: surfaces per child Transfer (not
+-- per (account, day)), so no per-day filter applies. The matview's
+-- business_day comes from MIN(posting day) of the conflicting leg
+-- rows; magnitude is the cardinality of the parent_transfer_id set
+-- (≥2 = violation). account_id / account_role default to NULL since
+-- the violation is keyed on transfer_id, not account.
+UNION ALL
+SELECT 'chain_parent_disagreement',
+       {null_text} AS account_id,
+       {null_text} AS account_name,
+       {null_text} AS account_role,
+       NULL AS account_parent_role,
+       business_day,
+       child_template_name AS rail_name,
+       distinct_parent_count AS magnitude
+FROM {p}_chain_parent_disagreement;
 -- Today's Exceptions sheet has 3 dropdowns (check_type, account,
 -- rail_name); each WHERE filter benefits from its own index.
 CREATE INDEX idx_{p}_te_check_type
