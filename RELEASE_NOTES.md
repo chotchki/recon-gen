@@ -1,5 +1,29 @@
 # Release Notes
 
+## v11.1.0 — AB.1 per-direction limit caps (Outbound + Inbound)
+
+Feature release. `LimitSchedule` gains a `direction` field — every cap is now `Outbound` (default, classic per-rail send cap) or `Inbound` (the AML / structuring-threshold pattern applied to inbound volume). Same `(parent_role, rail_name)` pair may carry both kinds of cap simultaneously; the L1 `<prefix>_limit_breach` matview UNIONs the two branches and emits a `direction` column distinguishing them. **Fully backwards-compatible** — any pre-AB.1 L2 yaml that omits `direction:` defaults cleanly to Outbound, and the serializer only emits the key when non-default, so existing files round-trip byte-equivalent through load+dump.
+
+**L1 invariant — per-direction flow cap.** The matview rewrites from a single SELECT (Debit-only outbound) into a UNION ALL of two branches: Outbound filters `amount_direction='Debit'` and applies Outbound LimitSchedule caps; Inbound filters `'Credit'` and applies Inbound caps. Each branch projects a literal `direction` column ('Outbound'/'Inbound'). New `idx_<p>_lb_direction` index. An L2 with zero Inbound caps stays cleanly empty (typed-NULL cap excludes via the outer `cap IS NOT NULL` filter) — no conditional template surgery.
+
+**Validator U5 broadened.** Uniqueness key is now `(parent_role, rail_name, direction)` triple. Same parent+rail with different directions is fine — that's the point. Two Inbound caps on the same parent+rail still rejected with `direction='Inbound'` in the error message.
+
+**Dashboard wiring (L1 Limit Breach sheet).** Table visual gains a Direction column between Rail and Flow. Sheet subtitle explains the Outbound (send cap) vs Inbound (AML / structuring threshold) interpretation. Today's Exceptions inherits the new Inbound rows automatically since its UNION-over-matviews reads from `<prefix>_limit_breach` unchanged.
+
+**Audit PDF wiring.** `LimitBreachViolation` dataclass gains `direction`; SELECT query extended; PDF detail table renderer gains a Direction column between Transfer type and Flow. Auditor reads the routing signal directly off the violation row.
+
+**Studio editor (leg 2 of the cross-cutting contract).** LimitSchedule card gets a Direction select field (Outbound / Inbound). Card description prose calls out the routing-queue split (Outbound → ops triage, Inbound → AML / compliance review). Entity-ID composite extends from 2-part `parent_role::rail` to 3-part `parent_role::rail::direction`; backward-compat keeps 2-part keys working (treats as Outbound). Trainer can author + flip Inbound caps entirely through the Studio UI, no YAML hand-edit.
+
+**Plant + scenario (leg 5 of the contract).** New `InboundCapBreachPlant` mirror of `LimitBreachPlant`: Credit customer leg + Debit external counter (`Origin=ExternalForcePosted`). `auto_scenario` derives `_pick_inbound_breach_inputs` and plants at `days_ago=3` (distinct from Outbound's `days_ago=4` on the date axis). All densifier + ScenarioPlant pass-through call sites carry the new field. `tests/l2/spec_example.yaml` now declares 1 Outbound + 1 Inbound cap on `(CustomerLedger, *)`. `run/sasquatch_pr.yaml` carries a real-world `(DDAControl, CustomerInboundACH, $20K, Inbound)` AML cap modeled after the federal CTR threshold.
+
+**Fuzzer (leg 6).** `random_l2_yaml(seed)` randomly picks `direction: Inbound` for ~30% of synthesized LimitSchedules; default Outbound stays omitted so existing fuzz_failure fixtures round-trip byte-equivalent. ~5/10 random seeds emit at least one Inbound row.
+
+**Docs.** `concepts/l2/limit-schedule.md` rewritten with the new field semantics + U5 triple-key rule + routing convention. New `walkthroughs/customization/how-do-i-add-an-aml-inbound-cap.md` worked-example walkthrough: the operator's story (compliance asks for $20K daily ACH inbound cap), the YAML diff, the verify path, and 3 "don't" rules. SPEC.md + Schema_v6.md + L1_Invariants.md all carry the per-direction theorem (InboundFlow) + matview shape + Inbound interpretation prose. Walkthrough wired into mkdocs nav.
+
+**Tests.** 2 new validator tests cover the AB.1 U5 behaviors (same parent+rail with different directions allowed; duplicate Inbound triple rejected). New schema snapshot test verifies the matview emits both direction projections + filters + index across PG/Oracle/SQLite. Audit-side test fixture + assertions extended to exercise both directions. Verified at 2963 passed across unit + data + schema + json + cli + audit + docs layers; live PG / AWS QS verify happens when CI runs the e2e + agreement leg on this tag.
+
+**Re-locked seeds:** `tests/data/_locked_seeds/spec_example.{postgres,oracle,sqlite}.sql` regenerated to include the planted Inbound breach rows.
+
 ## v11.0.2 — drift/overdraft visual + matview natural-key alignment; CI shim-lockstep fix
 
 Bugfix release. Two production-facing fixes + one release-pipeline structural fix that re-armed the publish path after v11.0.1's smoke step blocked it.
