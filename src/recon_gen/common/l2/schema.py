@@ -293,6 +293,12 @@ def refresh_matviews_sql(
         f"{p}_limit_breach",
         f"{p}_stuck_pending",
         f"{p}_stuck_unbundled",
+        # AB.2.3 — Chain Parent Disagreement: two-template chains where
+        # leg_rail firings of one child Transfer disagree on which
+        # parent firing they belong to. Reads from current_transactions
+        # (no dependency on other L1 matviews). Sits with the other
+        # L1 invariants in dependency order.
+        f"{p}_chain_parent_disagreement",
         # Dashboard-shape matviews: read from current_* +
         # L1 invariants. MUST refresh AFTER all L1 invariants are
         # fresh so todays_exceptions's UNION reads up-to-date data.
@@ -372,6 +378,7 @@ def _emit_sqlite_matview_refresh(instance: L2Instance, *, prefix: str) -> str:
         f"{p}_limit_breach",
         f"{p}_stuck_pending",
         f"{p}_stuck_unbundled",
+        f"{p}_chain_parent_disagreement",
         f"{p}_daily_statement_summary",
         f"{p}_todays_exceptions",
         f"{p}_inv_pair_rolling_anomalies",
@@ -1197,6 +1204,7 @@ CREATE INDEX idx_{p}_curr_db_scope_day
 _L1_INVARIANT_DROP_NAMES: tuple[str, ...] = (
     "todays_exceptions",
     "daily_statement_summary",
+    "chain_parent_disagreement",
     "stuck_unbundled",
     "stuck_pending",
     "limit_breach",
@@ -1600,6 +1608,45 @@ WHERE tx.max_unbundled_age_seconds IS NOT NULL
 CREATE INDEX idx_{p}_su_rail ON {p}_stuck_unbundled (rail_name);
 CREATE INDEX idx_{p}_su_account ON {p}_stuck_unbundled (account_id);
 CREATE INDEX idx_{p}_su_transfer ON {p}_stuck_unbundled (transfer_id);
+
+-- ---------------------------------------------------------------------
+-- L1 invariant: Chain Parent Disagreement (AB.2.3).
+-- SPEC-derived: two-template chains where chain.children=[TemplateB]
+-- emit multiple leg_rail firings per child Transfer, each carrying
+-- `transfer_parent_id` (the parent firing's id) in its row. The L1
+-- invariant: every leg_rail firing of one child Transfer MUST agree on
+-- which parent firing it descends from — the Parent is first-firing-wins
+-- per gap doc §3, and subsequent disagreement = ETL bug / stale parent
+-- reference / cross-cycle contamination. Rows here are the violations:
+-- `COUNT(DISTINCT transfer_parent_id) > 1` for a given transfer_id.
+--
+-- The matview filters to `template_name IS NOT NULL` so rail-as-child
+-- chains (which don't have a template-level identity to GROUP BY)
+-- don't false-positive into this surface. Status filter excludes
+-- 'Failed' legs — a failed leg's metadata is unreliable as a parent
+-- claim. `parent_transfer_id_min` / `parent_transfer_id_max` carry
+-- sample conflicting values so the analyst can drill into the
+-- transactions sheet without re-running the GROUP BY.
+-- ---------------------------------------------------------------------
+{matview_create_kw} {p}_chain_parent_disagreement{matview_options} AS
+SELECT
+    tx.transfer_id,
+    tx.template_name AS child_template_name,
+    MIN({date_trunc_tx_posting}) AS business_day,
+    COUNT(DISTINCT tx.transfer_parent_id) AS distinct_parent_count,
+    MIN(tx.transfer_parent_id) AS parent_transfer_id_min,
+    MAX(tx.transfer_parent_id) AS parent_transfer_id_max
+FROM {p}_current_transactions tx
+WHERE tx.transfer_parent_id IS NOT NULL
+  AND tx.template_name IS NOT NULL
+  AND tx.status <> 'Failed'
+GROUP BY tx.transfer_id, tx.template_name
+HAVING COUNT(DISTINCT tx.transfer_parent_id) > 1;
+-- Dashboard hot-path indexes — per-transfer drill (Today's Exceptions
+-- → Transactions), per-template dropdown (analyst filter), per-day filter.
+CREATE INDEX idx_{p}_cpd_transfer ON {p}_chain_parent_disagreement (transfer_id);
+CREATE INDEX idx_{p}_cpd_template ON {p}_chain_parent_disagreement (child_template_name);
+CREATE INDEX idx_{p}_cpd_day ON {p}_chain_parent_disagreement (business_day);
 
 -- ---------------------------------------------------------------------
 -- Dashboard-shape matview: Daily Statement Summary.
