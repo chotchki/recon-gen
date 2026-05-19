@@ -1,5 +1,22 @@
 # Release Notes
 
+## v11.6.4 — Studio --demo-mode flag (Phase AE Mac mini lockdown)
+
+New CLI flag on `recon-gen studio`: `--demo-mode/--no-demo-mode` (default off). When set, mutation routes are stripped from the route table so public-demo hosting (Phase AE Mac mini under sandbox-exec) can't be poked into mutating L2 yaml on disk, running the operator's etl_hook shell command, or triggering an AWS deploy.
+
+Stripped in `--demo-mode`:
+- `POST/PUT/DELETE /l2_shape/*` (L2 yaml editor mutations)
+- `PUT /data/knobs/etl_hook` (shell-exec trigger for `cfg.etl_hook`)
+- `POST /deploy` (AWS QuickSight deploy pipeline)
+
+Preserved: every GET (landing / data view / diagram / trainer JSON / dashboards / docs) plus trainer knobs that just flip state (plants, end_date, window, seed, scope, only_template, derive_balances). Demo-mode is a mutation-perimeter cut, not a feature blackout.
+
+State redirect — when `--demo-mode` is set, `cli/studio.py` constructs `TestGeneratorCache` directly with `state_path=<tempfile.mkdtemp(...)>/.studio-state.yaml` instead of `from_cfg_with_state(cfg, cfg_path)`'s `<cfg.parent>/.studio-state.yaml` derivation. Trainer-knob mutations land in the tmpdir; launchd restart wipes the tmpdir; nightly refresh cycles state freshly.
+
+6 unit tests in `tests/unit/test_studio_demo_mode.py` walk the route table and assert the strip/preserve contract. Defense in depth: sandbox-exec profile under `deploy/sandbox/` also denies file-write on L2 yaml + cfg.yaml regardless of this flag.
+
+Phase AE deployment kit ships repo-side: `deploy/sandbox/recon-demo-{spec,sasquatch}.sb` sandbox profiles, `deploy/launchd/io.hotchkiss.recon-demo.*.plist` launchd templates, `deploy/launchd/{launch-sasquatch,refresh-demos}.sh` wrappers, `deploy/cloudflared/cloudflared.yml.example` ingress template, `.github/workflows/demo-publish.yml` self-hosted runner workflow, and `docs/operations/mac-mini-demo-host.md` operator runbook.
+
 ## v11.6.3 — pytest-cov in e2e + release-e2e venvs
 
 Patch release. v11.6.2 added `--cov=recon_gen` to every e2e / release-e2e pytest invocation but didn't add `pytest-cov` to the corresponding venvs. Result: every API e2e + browser e2e + release-against-TestPyPI step failed with `pytest: error: unrecognized arguments: --cov=recon_gen` — the v11.6.2 wheel reached TestPyPI but never made it to PyPI Production (the publish-pypi step is gated on e2e-against-testpypi passing).
