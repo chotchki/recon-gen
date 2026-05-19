@@ -334,6 +334,14 @@ class TransferTemplate:
     A Rail listed in ``leg_rails`` MUST NOT also fire standalone
     Transfers — its firings always join the shared Transfer matching the
     ``transfer_key`` values.
+
+    ``leg_rail_xor_groups`` (AB.3) declares mutually-exclusive subsets
+    of ``leg_rails`` — exactly one member of each inner tuple SHOULD
+    fire per Transfer. Empty default keeps every pre-AB.3 template byte-
+    equivalent; the structural validator (C1a-d) enforces members ⊆
+    leg_rails, members are Variable-direction, no overlap between
+    groups, ≥2 members per group. Runtime "exactly one fires" check
+    lives in the ``_xor_group_violation`` matview (AB.3.3).
     """
 
     name: Identifier
@@ -341,6 +349,7 @@ class TransferTemplate:
     transfer_key: tuple[Identifier, ...]
     completion: CompletionExpression
     leg_rails: tuple[Identifier, ...]
+    leg_rail_xor_groups: tuple[tuple[Identifier, ...], ...] = ()
     description: str | None = None
 
 

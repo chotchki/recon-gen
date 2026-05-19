@@ -944,20 +944,21 @@ def _baseline_instance() -> L2Instance:
 
 
 def test_refresh_matviews_sql_emits_one_per_view() -> None:
-    """All 16 L1+inv matviews each get a REFRESH command + an
-    ANALYZE follow-up: 2 current_* + 2 computed_* + 8 L1 invariants
+    """All 17 L1+inv matviews each get a REFRESH command + an
+    ANALYZE follow-up: 2 current_* + 2 computed_* + 9 L1 invariants
     (drift + ledger_drift + overdraft + expected_eod_balance_breach +
     limit_breach + stuck_pending + stuck_unbundled +
-    chain_parent_disagreement [AB.2.3]) + 2 dashboard-shape
-    (daily_statement_summary + todays_exceptions) + 2 Investigation
-    matviews (inv_pair_rolling_anomalies + inv_money_trail_edges,
-    added in N.3.b) = 16 matviews × 2 statements each = 32 total."""
+    chain_parent_disagreement [AB.2.3] + xor_group_violation
+    [AB.3.3]) + 2 dashboard-shape (daily_statement_summary +
+    todays_exceptions) + 2 Investigation matviews
+    (inv_pair_rolling_anomalies + inv_money_trail_edges, added in
+    N.3.b) = 17 matviews × 2 statements each = 34 total."""
     sql = refresh_matviews_sql(_baseline_instance(), prefix="re")
     statements = [s.strip() for s in sql.split(";") if s.strip()]
     refreshes = [s for s in statements if s.startswith("REFRESH ")]
     analyzes = [s for s in statements if s.startswith("ANALYZE ")]
-    assert len(refreshes) == 16
-    assert len(analyzes) == 16
+    assert len(refreshes) == 17
+    assert len(analyzes) == 17
     # Every REFRESHed matview gets a matching ANALYZE.
     refresh_names = {s.removeprefix("REFRESH MATERIALIZED VIEW ") for s in refreshes}
     analyze_names = {s.removeprefix("ANALYZE ") for s in analyzes}

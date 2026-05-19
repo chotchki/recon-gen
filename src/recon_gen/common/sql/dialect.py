@@ -576,6 +576,37 @@ def date_trunc_day(timestamp_expr: str, dialect: Dialect) -> str:
     return f"CAST(TRUNC({timestamp_expr}) AS TIMESTAMP)"
 
 
+def concat_agg(column_expr: str, separator: str, dialect: Dialect) -> str:
+    """Aggregate text values from a group into a delimited string.
+
+    First introduced for AB.3.3's ``_xor_group_violation`` matview
+    (``fired_rails`` column — comma-separated rail names per Transfer).
+    Dialect mapping:
+
+    - Postgres: ``STRING_AGG(col, ',')`` — null-safe (NULLs skipped),
+      no implicit ordering.
+    - Oracle: ``LISTAGG(col, ',') WITHIN GROUP (ORDER BY col)`` —
+      deterministic ordering by value; truncation at 4000 chars by
+      default (acceptable for fired-rails: bounded by leg_rails count).
+    - SQLite: ``GROUP_CONCAT(col, ',')`` — null-safe, no implicit
+      ordering (matches PG's contract).
+
+    ``separator`` is wrapped in single quotes; callers pass the bare
+    delimiter (e.g., ``','`` or ``', '``). ``column_expr`` is interpolated
+    raw — caller's responsibility to quote / cast as appropriate for
+    the dialect.
+    """
+    sep_literal = f"'{separator}'"
+    if dialect is Dialect.POSTGRES:
+        return f"STRING_AGG({column_expr}, {sep_literal})"
+    if dialect is Dialect.SQLITE:
+        return f"GROUP_CONCAT({column_expr}, {sep_literal})"
+    return (
+        f"LISTAGG({column_expr}, {sep_literal}) "
+        f"WITHIN GROUP (ORDER BY {column_expr})"
+    )
+
+
 # -- DDL idempotency ---------------------------------------------------------
 
 

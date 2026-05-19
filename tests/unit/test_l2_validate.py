@@ -330,7 +330,8 @@ def test_c1_at_most_one_variable_leg_per_template() -> None:
         transfer_templates=(bad_template,),
     )
     with pytest.raises(
-        L2ValidationError, match="contains 2 Variable-direction legs",
+        L2ValidationError,
+        match="contains 2 non-grouped Variable-direction legs",
     ):
         validate(bad)
 

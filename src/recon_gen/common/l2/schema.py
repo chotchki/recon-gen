@@ -44,6 +44,7 @@ from recon_gen.common.sql import (
     Dialect,
     analyze_table,
     cast,
+    concat_agg,
     date_minus_days,
     date_trunc_day,
     decimal_type,
@@ -299,6 +300,12 @@ def refresh_matviews_sql(
         # (no dependency on other L1 matviews). Sits with the other
         # L1 invariants in dependency order.
         f"{p}_chain_parent_disagreement",
+        # AB.3.3 — XOR group violations: per (Transfer, template, XOR
+        # group) firing-cardinality check. Reads current_transactions
+        # + the L2 declaration (inlined); independent of other L1
+        # matviews. Refresh before todays_exceptions so its UNION ALL
+        # branch reads fresh rows.
+        f"{p}_xor_group_violation",
         # Dashboard-shape matviews: read from current_* +
         # L1 invariants. MUST refresh AFTER all L1 invariants are
         # fresh so todays_exceptions's UNION reads up-to-date data.
@@ -379,6 +386,7 @@ def _emit_sqlite_matview_refresh(instance: L2Instance, *, prefix: str) -> str:
         f"{p}_stuck_pending",
         f"{p}_stuck_unbundled",
         f"{p}_chain_parent_disagreement",
+        f"{p}_xor_group_violation",
         f"{p}_daily_statement_summary",
         f"{p}_todays_exceptions",
         f"{p}_inv_pair_rolling_anomalies",
@@ -477,12 +485,16 @@ def _emit_l1_invariant_views(
     )
     pending_age_cases = _render_pending_age_cases(instance, dialect=dialect)
     unbundled_age_cases = _render_unbundled_age_cases(instance, dialect=dialect)
+    xor_group_violation_body = _render_xor_group_violation_body(
+        instance, p=p, dialect=dialect,
+    )
     return _L1_INVARIANT_VIEWS_TEMPLATE.format(
         p=p,
         limit_cases_outbound=limit_cases_outbound,
         limit_cases_inbound=limit_cases_inbound,
         pending_age_cases=pending_age_cases,
         unbundled_age_cases=unbundled_age_cases,
+        xor_group_violation_body=xor_group_violation_body,
         matview_options=matview_options(dialect),
         matview_create_kw=matview_create_keyword(dialect),
         date_trunc_tx_posting=date_trunc_day("tx.posting", dialect),
@@ -582,6 +594,134 @@ def _render_pending_age_cases(
         return typed_null("bigint", dialect)
     branches_sql = "\n        ".join(branches)
     return f"CASE\n        {branches_sql}\n        ELSE NULL\n    END"
+
+
+def _render_xor_group_violation_body(
+    instance: L2Instance, *, p: str, dialect: Dialect = Dialect.POSTGRES,
+) -> str:
+    """AB.3.3: Render the body of ``{p}_xor_group_violation``.
+
+    Per AB.3.0 lock: per-(transfer_id, template_name, xor_group_index)
+    row carrying ``firing_count`` (HAVING ``<> 1`` to surface both
+    overlap ≥2 and missed-firing 0 cases), ``fired_rails`` (dialect-
+    specific concat aggregate), and ``business_day``. The 0-firings
+    case requires a LEFT JOIN against the per-template-XOR-group
+    expected set; the SELECT-list expressions COALESCE the LEFT-JOIN's
+    NULLable transfer-side columns so the row still surfaces.
+
+    Empty case: when no template in ``instance.transfer_templates``
+    declares any ``leg_rail_xor_groups`` (the pre-AB.3.5.spec /
+    pre-AB.3.6 state for every L2), the matview body falls back to
+    a typed-NULL placeholder SELECT with ``WHERE 1=0`` so it parses
+    + plans cleanly on all 3 dialects but contributes zero rows. The
+    same shape is used by ``_render_pending_age_cases`` for the
+    no-aging-rails case.
+
+    Returns the SQL body (everything between ``... AS`` and the
+    terminating ``;``) — caller's template wraps it in
+    ``{matview_create_kw} {p}_xor_group_violation{matview_options} AS\\n``
+    and the trailing ``;``.
+    """
+    # Collect per-template XOR group declarations.
+    # Shape: [(template_name, group_index, member_rail_name), ...]
+    triples: list[tuple[str, int, str]] = []
+    for t in instance.transfer_templates:
+        for gi, group in enumerate(t.leg_rail_xor_groups):
+            for member in group:
+                triples.append((str(t.name), gi, str(member)))
+
+    if not triples:
+        # Empty case — emit typed-NULL placeholder so the matview
+        # parses + plans on all 3 dialects and produces zero rows.
+        # Column type alignment mirrors the non-empty branch (varchar
+        # for ids/names/rails, integer for firing_count + xor_group_index,
+        # timestamp for business_day).
+        null_varchar = typed_null("VARCHAR(100)", dialect)
+        null_int = typed_null("INTEGER", dialect)
+        null_ts = typed_null("TIMESTAMP", dialect)
+        # SQLite + Postgres can SELECT without FROM but Oracle needs
+        # FROM dual — wrap accordingly.
+        if dialect is Dialect.ORACLE:
+            from_clause = "FROM dual"
+        else:
+            from_clause = ""
+        return (
+            f"SELECT {null_varchar} AS transfer_id,\n"
+            f"       {null_varchar} AS template_name,\n"
+            f"       {null_int} AS xor_group_index,\n"
+            f"       {null_int} AS firing_count,\n"
+            f"       {null_varchar} AS fired_rails,\n"
+            f"       {null_ts} AS business_day\n"
+            f"{from_clause}\n"
+            f"WHERE 1=0"
+        )
+
+    # Build the inline VALUES list — one row per (template, group_index,
+    # member). Oracle: emit as UNION-ALL of SELECT FROM dual since
+    # standalone VALUES isn't reliably supported. Postgres + SQLite
+    # support `VALUES (...)` directly.
+    if dialect is Dialect.ORACLE:
+        # Oracle's VALUES clause is restricted; use SELECT...FROM dual UNION ALL.
+        union_rows = "\n  UNION ALL ".join(
+            f"SELECT '{t}' AS template_name, "
+            f"{gi} AS xor_group_index, "
+            f"'{m}' AS member_rail_name FROM dual"
+            for t, gi, m in triples
+        )
+        groups_cte = f"(\n  {union_rows}\n)"
+    else:
+        rows = ",\n    ".join(
+            f"('{t}', {gi}, '{m}')" for t, gi, m in triples
+        )
+        groups_cte = (
+            f"(VALUES\n    {rows}\n) "
+            f"AS g(template_name, xor_group_index, member_rail_name)"
+        )
+
+    fired_rails_agg = concat_agg("tx.rail_name", ",", dialect)
+    return (
+        f"WITH xor_groups AS (\n"
+        f"  SELECT * FROM {groups_cte}\n"
+        f"),\n"
+        f"template_transfers AS (\n"
+        f"  -- Every Transfer instance of a template that has at least\n"
+        f"  -- one XOR group. We GROUP BY (transfer_id, template_name)\n"
+        f"  -- via the cartesian below to get one row per (Transfer, group).\n"
+        f"  SELECT DISTINCT tx.transfer_id, tx.template_name,\n"
+        f"         MIN({date_trunc_day('tx.posting', dialect)})\n"
+        f"           OVER (PARTITION BY tx.transfer_id, tx.template_name) AS business_day\n"
+        f"  FROM {p}_current_transactions tx\n"
+        f"  WHERE tx.status <> 'Failed'\n"
+        f"    AND tx.template_name IN (SELECT DISTINCT template_name FROM xor_groups)\n"
+        f"),\n"
+        f"expected AS (\n"
+        f"  -- Cartesian: every (Transfer-of-T, group-of-T) pair we need\n"
+        f"  -- to check.\n"
+        f"  SELECT tt.transfer_id, tt.template_name, g.xor_group_index,\n"
+        f"         MIN(tt.business_day) AS business_day\n"
+        f"  FROM template_transfers tt\n"
+        f"  JOIN xor_groups g ON g.template_name = tt.template_name\n"
+        f"  GROUP BY tt.transfer_id, tt.template_name, g.xor_group_index\n"
+        f")\n"
+        f"SELECT\n"
+        f"  e.transfer_id,\n"
+        f"  e.template_name,\n"
+        f"  e.xor_group_index,\n"
+        f"  COUNT(tx.transfer_id) AS firing_count,\n"
+        f"  COALESCE({fired_rails_agg}, '') AS fired_rails,\n"
+        f"  e.business_day\n"
+        f"FROM expected e\n"
+        f"JOIN xor_groups g\n"
+        f"  ON g.template_name = e.template_name\n"
+        f"  AND g.xor_group_index = e.xor_group_index\n"
+        f"LEFT JOIN {p}_current_transactions tx\n"
+        f"  ON tx.transfer_id = e.transfer_id\n"
+        f"  AND tx.template_name = e.template_name\n"
+        f"  AND tx.rail_name = g.member_rail_name\n"
+        f"  AND tx.status <> 'Failed'\n"
+        f"GROUP BY e.transfer_id, e.template_name, e.xor_group_index, e.business_day\n"
+        f"HAVING COUNT(tx.transfer_id) <> 1"
+    )
 
 
 def _emit_inv_views(
@@ -1204,6 +1344,7 @@ CREATE INDEX idx_{p}_curr_db_scope_day
 _L1_INVARIANT_DROP_NAMES: tuple[str, ...] = (
     "todays_exceptions",
     "daily_statement_summary",
+    "xor_group_violation",
     "chain_parent_disagreement",
     "stuck_unbundled",
     "stuck_pending",
@@ -1649,6 +1790,38 @@ CREATE INDEX idx_{p}_cpd_template ON {p}_chain_parent_disagreement (child_templa
 CREATE INDEX idx_{p}_cpd_day ON {p}_chain_parent_disagreement (business_day);
 
 -- ---------------------------------------------------------------------
+-- L1 invariant matview: XOR-group firing-cardinality violations.
+-- AB.3.3 — Enforces the runtime side of the rewritten C1: for every
+-- (Transfer, TransferTemplate, xor_group_index) tuple, exactly one
+-- member of the XOR group SHOULD fire. Violations surface when:
+--   - firing_count = 0 (XorVariantMissedFiringPlant): none of the
+--     declared variant rails posted — Transfer never closes through
+--     its declared Variable path.
+--   - firing_count >= 2 (XorVariantOverlapPlant): two or more variants
+--     posted for the same Transfer — closure is over-determined; the
+--     reconciliation engine can't pick which variant's amount + role
+--     to use as the Transfer's net.
+--
+-- Implementation: the XOR group members come from the L2 declaration
+-- (inlined as a VALUES list / SELECT-FROM-DUAL UNION). The matview
+-- LEFT JOINs that against `_current_transactions` per Transfer +
+-- template + member, so the 0-firings case still surfaces a row.
+-- `fired_rails` carries the comma-separated list of rails that fired
+-- for analyst drill — empty string when firing_count=0.
+--
+-- When no template in the L2 declares any `leg_rail_xor_groups`, the
+-- body becomes a typed-NULL placeholder with `WHERE 1=0` so the
+-- matview parses on all 3 dialects but contributes zero rows.
+-- ---------------------------------------------------------------------
+{matview_create_kw} {p}_xor_group_violation{matview_options} AS
+{xor_group_violation_body};
+-- Dashboard hot-path indexes — per-transfer drill (Today's Exceptions
+-- → Transactions), per-template dropdown filter, per-day filter.
+CREATE INDEX idx_{p}_xgv_transfer ON {p}_xor_group_violation (transfer_id);
+CREATE INDEX idx_{p}_xgv_template ON {p}_xor_group_violation (template_name);
+CREATE INDEX idx_{p}_xgv_day ON {p}_xor_group_violation (business_day);
+
+-- ---------------------------------------------------------------------
 -- Dashboard-shape matview: Daily Statement Summary.
 -- M.1a.9 — moved from `apps/l1_dashboard/datasets.py` CustomSql into
 -- a per-instance MATERIALIZED VIEW so QS Direct Query mode doesn't
@@ -1784,7 +1957,21 @@ SELECT 'chain_parent_disagreement',
        business_day,
        child_template_name AS rail_name,
        distinct_parent_count AS magnitude
-FROM {p}_chain_parent_disagreement;
+FROM {p}_chain_parent_disagreement
+-- AB.3.3 — XOR Group Violation: surfaces per (Transfer, template, XOR
+-- group) when firing_count != 1. Like chain_parent_disagreement this
+-- is keyed on transfer_id, not account, so account columns default
+-- NULL. magnitude is the firing_count (0 = missed, >=2 = overlap).
+UNION ALL
+SELECT 'xor_group_violation',
+       {null_text} AS account_id,
+       {null_text} AS account_name,
+       {null_text} AS account_role,
+       NULL AS account_parent_role,
+       business_day,
+       template_name AS rail_name,
+       firing_count AS magnitude
+FROM {p}_xor_group_violation;
 -- Today's Exceptions sheet has 3 dropdowns (check_type, account,
 -- rail_name); each WHERE filter benefits from its own index.
 CREATE INDEX idx_{p}_te_check_type

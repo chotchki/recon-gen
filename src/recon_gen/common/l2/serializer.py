@@ -210,6 +210,13 @@ def _dump_transfer_template(t: TransferTemplate) -> dict[str, Any]:  # typing-sm
         "completion": t.completion,
         "leg_rails": [str(r) for r in t.leg_rails],
     }
+    # AB.3: emit `leg_rail_xor_groups` only when non-empty so every
+    # pre-AB.3 template round-trips byte-equivalent (mirrors AB.1's
+    # `direction` non-default omit pattern).
+    if t.leg_rail_xor_groups:
+        out["leg_rail_xor_groups"] = [
+            [str(r) for r in group] for group in t.leg_rail_xor_groups
+        ]
     if t.description is not None:
         out["description"] = t.description
     return out

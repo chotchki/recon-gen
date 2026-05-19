@@ -972,10 +972,44 @@ def _load_transfer_template(raw: object, *, path: str) -> TransferTemplate:
             path=f"{path}.leg_rails",
             allow_empty=False,
         ),
+        leg_rail_xor_groups=_load_leg_rail_xor_groups(
+            raw_d.get("leg_rail_xor_groups"),
+            path=f"{path}.leg_rail_xor_groups",
+        ),
         description=_load_description(
             raw_d.get("description"), path=f"{path}.description",
         ),
     )
+
+
+def _load_leg_rail_xor_groups(
+    raw: object, *, path: str,
+) -> tuple[tuple[Identifier, ...], ...]:
+    """AB.3: list-of-lists of identifier strings → tuple of tuples.
+
+    Default `()` when the key is absent / null so every pre-AB.3 YAML
+    loads byte-equivalent. Each inner list yields a non-empty tuple
+    of Identifiers. Structural rules (≥2 members per group, members ⊆
+    leg_rails, Variable-direction only, no overlap between groups)
+    fire later in :mod:`validate` (C1a-d) — the loader's job is
+    shape-narrowing, not cross-primitive semantics.
+    """
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise L2LoaderError(
+            f"{path}: expected a list of lists of identifiers, "
+            f"got {type(raw).__name__}"
+        )
+    groups: list[tuple[Identifier, ...]] = []
+    items = cast("list[object]", raw)
+    for i, group in enumerate(items):
+        groups.append(
+            _load_identifier_list(
+                group, path=f"{path}[{i}]", allow_empty=False,
+            ),
+        )
+    return tuple(groups)
 
 
 _LEGACY_CHAIN_KEYS_REJECT_MSG = (

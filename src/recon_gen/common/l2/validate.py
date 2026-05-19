@@ -87,7 +87,18 @@ Rules enforced (numbered for cross-reference with the test file):
       key would otherwise be silently ignored by the seed picker;
       catch it at load).
 
-  C1. Every TransferTemplate contains at most one Variable-direction leg.
+  C1. Every TransferTemplate contains at most one *non-grouped*
+      Variable-direction leg (AB.3 rewrite — Variables that are
+      members of a ``leg_rail_xor_groups`` group are exempt from this
+      count; the runtime "exactly one fires per Transfer" check moves
+      to the ``_xor_group_violation`` matview).
+  C1a. Every member of every ``TransferTemplate.leg_rail_xor_groups``
+      group is also in that template's ``leg_rails``.
+  C1b. Every XOR-group member resolves to a Variable-direction
+      SingleLegRail (Debit / Credit / non-SingleLeg rails are excluded).
+  C1c. No rail appears in two XOR groups within the same template
+      (overlap groups can't resolve to one firing deterministically).
+  C1d. Every XOR group has ≥2 members (a 1-member group is degenerate).
   C3. Every Variable-direction SingleLegRail MUST appear in some
       ``TransferTemplate.leg_rails`` (M.3.13 — Variable closure
       semantics require a containing template's ``ExpectedNet`` to
@@ -246,6 +257,7 @@ def validate(instance: L2Instance) -> None:
     _check_metadata_value_example_keys_resolve(instance)
 
     _check_variable_leg_count_per_template(instance)
+    _check_leg_rail_xor_group_shape(instance)
     _check_variable_single_leg_in_some_template(instance, rails_by_name)
     _check_chain_parent_has_non_empty_children(instance)
     _check_chain_no_duplicate_child_per_parent(instance)
@@ -714,21 +726,104 @@ def _check_metadata_value_example_keys_resolve(inst: L2Instance) -> None:
 
 
 def _check_variable_leg_count_per_template(inst: L2Instance) -> None:
-    """C1: at most one LegDirection=Variable leg per TransferTemplate."""
+    """C1 (AB.3 rewrite): at most one *non-grouped* Variable-direction
+    leg per TransferTemplate.
+
+    Pre-AB.3 C1 was "≤1 Variable per template, period". AB.3 relaxes
+    that for XOR-grouped Variables: a template MAY declare any number
+    of Variable-direction legs as long as every additional one beyond
+    the first non-grouped Variable is a member of some
+    ``leg_rail_xor_groups`` group (where the AB.3.3 matview enforces
+    exactly-one-firing-per-Transfer at runtime). The structural
+    invariants on the groups themselves live in C1a-d below.
+    """
     rails_by_name: dict[str, Rail] = {r.name: r for r in inst.rails}
     for t in inst.transfer_templates:
+        grouped: set[Identifier] = {
+            member for group in t.leg_rail_xor_groups for member in group
+        }
         variable_legs = [
             n for n in t.leg_rails
             if isinstance(rails_by_name.get(n), SingleLegRail)
             and isinstance(rails_by_name[n], SingleLegRail)
             and rails_by_name[n].leg_direction == "Variable"  # type: ignore[union-attr]: narrowed by the prior isinstance(..., SingleLegRail) check
         ]
-        if len(variable_legs) > 1:
+        non_grouped_variables = [n for n in variable_legs if n not in grouped]
+        if len(non_grouped_variables) > 1:
             raise L2ValidationError(
-                f"TransferTemplate {t.name!r}: contains {len(variable_legs)} "
-                f"Variable-direction legs ({variable_legs!r}); SPEC requires "
-                f"at most one (otherwise closure is under-determined)"
+                f"TransferTemplate {t.name!r}: contains "
+                f"{len(non_grouped_variables)} non-grouped Variable-"
+                f"direction legs ({non_grouped_variables!r}); SPEC C1 "
+                f"requires at most one (otherwise closure is "
+                f"under-determined). Variables in `leg_rail_xor_groups` "
+                f"don't count — see AB.3 lock."
             )
+
+
+def _check_leg_rail_xor_group_shape(inst: L2Instance) -> None:
+    """C1a-d (AB.3): structural rules on TransferTemplate.leg_rail_xor_groups.
+
+    - **C1a**: every member of every group MUST appear in the same
+      template's ``leg_rails``.
+    - **C1b**: every member MUST resolve to a Variable-direction
+      SingleLegRail. (A non-Variable rail in an XOR group is a category
+      error — the "exactly one fires per Transfer" matview enforcement
+      only makes sense for Variable closure legs.)
+    - **C1c**: no rail appears in two XOR groups within the same
+      template. (Overlap groups can't be resolved to one firing
+      deterministically.)
+    - **C1d**: every group MUST have ≥2 members. (A 1-member group is
+      degenerate — the rail always fires; the XOR adds no information.
+      Same defense-in-depth shape as Z.A's C5 empty-children check.)
+
+    Runtime "exactly one fires per Transfer" check lives in the AB.3.3
+    ``_xor_group_violation`` matview, not here.
+    """
+    rails_by_name: dict[Identifier, Rail] = {r.name: r for r in inst.rails}
+    for t in inst.transfer_templates:
+        leg_rails_set: set[Identifier] = set(t.leg_rails)
+        seen_members: dict[Identifier, int] = {}  # member -> group index
+        for gi, group in enumerate(t.leg_rail_xor_groups):
+            if len(group) < 2:
+                raise L2ValidationError(
+                    f"TransferTemplate {t.name!r}.leg_rail_xor_groups[{gi}]: "
+                    f"has {len(group)} member(s); SPEC C1d requires "
+                    f"at least 2 (a 1-member XOR group is degenerate)."
+                )
+            for member in group:
+                if member not in leg_rails_set:
+                    raise L2ValidationError(
+                        f"TransferTemplate {t.name!r}."
+                        f"leg_rail_xor_groups[{gi}]: member {member!r} "
+                        f"is not in this template's `leg_rails`; SPEC "
+                        f"C1a requires every XOR-group member to also "
+                        f"be declared as a leg_rail."
+                    )
+                rail = rails_by_name.get(member)
+                if not (
+                    isinstance(rail, SingleLegRail)
+                    and rail.leg_direction == "Variable"
+                ):
+                    raise L2ValidationError(
+                        f"TransferTemplate {t.name!r}."
+                        f"leg_rail_xor_groups[{gi}]: member {member!r} "
+                        f"must resolve to a Variable-direction "
+                        f"SingleLegRail; SPEC C1b excludes Debit/Credit/"
+                        f"non-SingleLeg rails from XOR groups (the "
+                        f"exactly-one-fires runtime check only applies "
+                        f"to Variable closure legs)."
+                    )
+                if member in seen_members:
+                    prior_gi = seen_members[member]
+                    raise L2ValidationError(
+                        f"TransferTemplate {t.name!r}: rail {member!r} "
+                        f"appears in two XOR groups (groups {prior_gi} "
+                        f"and {gi}); SPEC C1c forbids overlap because "
+                        f"the exactly-one-fires-per-group rule can't "
+                        f"resolve deterministically when groups share "
+                        f"a member."
+                    )
+                seen_members[member] = gi
 
 
 def _check_variable_single_leg_in_some_template(
