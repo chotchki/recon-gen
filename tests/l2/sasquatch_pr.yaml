@@ -837,6 +837,23 @@ chains:
       enrolled in ACH or wire — slowest, hence
       `MerchantPayoutCheck`'s `max_pending_age: P7D`).
 
+  # ----- AB.2 (2026-05-19): template-as-chain-child (rail → template)
+
+  - parent: CustomerFeeAccrual
+    children:
+      - InternalTransferCycle
+    description: |
+      Template-as-chain-child shape (AB.2, gap doc §3). Every customer
+      fee accrual SHOULD trigger an `InternalTransferCycle` to move
+      the accrued amount from the customer's DDA to the fee revenue
+      GL. All three leg_rails of the child template
+      (`InternalTransferDebit`, `InternalTransferCredit`,
+      `InternalTransferSuspenseClose`) share one child Transfer and
+      one `parent_transfer_id` (first-firing-wins per gap doc §3).
+      The L1 `chain_parent_disagreement` matview catches any leg
+      that claims a different parent — surfaces as an ETL bug on
+      Today's Exceptions.
+
 # ---------------------------------------------------------------------
 # Limit schedules — daily outbound caps per (parent role, transfer type).
 #

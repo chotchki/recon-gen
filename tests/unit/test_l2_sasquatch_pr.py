@@ -109,9 +109,15 @@ def test_chain_counts_pinned() -> None:
     inst = _instance()
     # Z.A grammar: 1 singleton-children row (ACH→FRB sweep, required)
     # + 1 multi-children row (ACH return reasons, XOR) + 1 multi
-    # (merchant payout vehicles, XOR). Per-(parent,child) rows became
-    # parent-grouped Chain rows.
-    assert len(inst.chains) == 3
+    # (merchant payout vehicles, XOR) + 1 AB.2 template-as-child
+    # (CustomerFeeAccrual → InternalTransferCycle).
+    assert len(inst.chains) == 4
+    # AB.2 — at least one chain has a TransferTemplate as its singleton child.
+    template_names = {t.name for t in inst.transfer_templates}
+    assert any(
+        len(c.children) == 1 and c.children[0] in template_names
+        for c in inst.chains
+    ), "AB.2 expected: sasquatch_pr carries at least one template-as-chain-child"
 
 
 def test_limit_schedule_counts_pinned() -> None:
