@@ -263,6 +263,37 @@ Surfacing an unexpected omitted reason is the fastest way to debug
 "why is dashboard sheet X empty?" — see the live scenario section
 below.
 
+### One rail per kind, by design
+
+The picker materializes **one demonstrative plant per kind** — it
+selects the *first* eligible rail (by sorted name) and stops. This is
+deliberate: the demo's job is to make each dashboard sheet
+*non-empty and legible*, not to exhaustively cover every rail. For an
+L2 that declares N rails eligible for a given kind (e.g. several rails
+carrying `max_unbundled_age`), only ONE surfaces an auto-plant; the
+other N−1 stay clean even though they're equally eligible.
+
+That's the right default for a teaching demo, but it means the
+auto-scenario is **not a coverage tool**. If you're running an
+integrator-style exercise that asks "does every rail × every plant kind
+surface an exception?", the auto-scenario answers "no" for the N−1
+un-picked rails — you need explicit plants for them. Two ways to get
+per-rail coverage:
+
+- **Author explicit plant rows** — bypass the picker and INSERT the
+  plant transactions directly (the integrator phase-2 coverage suite
+  takes this route), or
+- **Declare more shape** — add the eligibility primitive (a
+  `LimitSchedule`, a `chains` entry, a `max_*_age`) to the specific
+  rails you want covered, then re-pick. The picker still takes the
+  first per kind, so this only helps if you want a *different* single
+  rail picked, not all of them.
+
+A `--coverage-mode` flag that iterates ALL rails per kind (one plant
+each) is a parked stretch idea — it would densify the dashboard
+substantially, so it stays opt-in-only and unbuilt unless integrators
+ask. For now, treat one-rail-per-kind as the contract.
+
 ## Scenario modes
 
 `default_scenario_for(instance, mode=...)` picks WHICH plant kinds
