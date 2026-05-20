@@ -2981,19 +2981,29 @@ def _emit_baseline_chains(
         is_required = len(non_fan_in_children) == 1
 
         for parent_transfer_id, parent_day, parent_amount in parent_firings:
-            # Pick which non-fan_in child fires (XOR alternation when
-            # >1, the lone child when singleton). Deterministic via
-            # hash of parent transfer_id so reruns are identical.
-            child_idx = (
-                zlib.crc32(parent_transfer_id.encode("utf-8"))
-                & 0x7FFFFFFF
-            ) % len(non_fan_in_children)
-            child_name = non_fan_in_children[child_idx].name
+            # AG.2: per-firing XOR pick via _baseline_xor_child_pick.
+            # Returns the lone non-fan_in child for singleton chains and
+            # one of the non-fan_in entries (RNG-keyed on chain.parent +
+            # parent_transfer_id) for multi-children chains. None when
+            # the children list is entirely fan_in — defensive skip; the
+            # fan_in path above already handled them.
+            child_name_picked = _baseline_xor_child_pick(
+                chain, parent_transfer_id, base_seed,
+            )
+            if child_name_picked is None:
+                continue
+            child_name = child_name_picked
 
-            # Completion roll: singleton ≈95% (Z.A required), multi ≈50% (XOR).
-            completion_threshold = 0.95 if is_required else 0.50
-            if rng.random() > completion_threshold:
-                continue  # parent fired but child did not — orphan exception
+            # AG.2 (Gap C): singleton-children chains keep the 5% baseline
+            # orphan noise — `<prefix>_chain_orphans` reads this as the
+            # required-but-missed baseline shape (intentional per Z.A
+            # grammar). Multi-children chains MUST fire exactly one child
+            # per parent invocation per chain.md XOR contract — no
+            # completion roll, the pick IS the fire. Pre-AG.2 the multi
+            # path rolled 50% and produced `_multi_xor_violation` rows
+            # tagged 'missed' on healthy baseline.
+            if is_required and rng.random() > 0.95:
+                continue  # parent fired but required child did not — orphan exception
 
             child_rail = rails_by_name.get(child_name)
             if child_rail is None:
@@ -3030,6 +3040,48 @@ def _emit_baseline_chains(
 
     _ = template_by_role
     return rows
+
+
+def _baseline_xor_child_pick(
+    chain: Chain, parent_transfer_id: str, base_seed: int,
+) -> Identifier | None:
+    """AG.2 (Gap C): pick exactly one non-fan_in child per parent firing
+    for the chain.md multi-children XOR contract.
+
+    chain.md prose: "Two or more children = XOR alternation. Exactly one
+    of the listed children MUST fire per parent invocation." Pre-AG.2,
+    ``_emit_baseline_chains`` rolled a 50% completion threshold on
+    multi-children chains, so ~half of parent firings emitted zero
+    children — ``<prefix>_multi_xor_violation`` reported them as
+    ``disagreement_kind='missed'`` on what should be a healthy
+    baseline. This helper centralizes the per-firing pick so the
+    completion threshold is bound to chain shape (singleton vs multi)
+    at one site, not threaded through ad-hoc rng calls.
+
+    Returns ``None`` when the chain has no non-fan_in children — a
+    chain whose children list is entirely fan_in has no XOR pick to
+    make. fan_in firings happen via ``_emit_fan_in_chain_firings`` per
+    AB.4 semantics, orthogonal to this picker.
+
+    Mirrors AB.3's ``_xor_suppressed_members`` keying pattern:
+    deterministic ``crc32(chain.parent | parent_transfer_id)`` keyed
+    RNG so the pick is rename-resilient on child names and stable
+    across re-runs at the same base_seed. Singleton (1 non-fan_in
+    child) returns the lone child by definition — the helper still
+    routes through here so the caller doesn't need to special-case it.
+    """
+    non_fan_in = [c for c in chain.children if not c.fan_in]
+    if not non_fan_in:
+        return None
+    if len(non_fan_in) == 1:
+        return non_fan_in[0].name
+    pick_seed = base_seed ^ (
+        zlib.crc32(
+            f"{chain.parent}|{parent_transfer_id}".encode("utf-8"),
+        ) & 0x7FFFFFFF
+    )
+    pick_rng = random.Random(pick_seed)
+    return pick_rng.choice(non_fan_in).name
 
 
 def _xor_suppressed_members(
