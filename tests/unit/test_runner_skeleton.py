@@ -713,6 +713,8 @@ def test_cmd_up_to_runs_full_chain_when_all_pass() -> None:
         patch.object(runner, "_is_dirty", return_value=False),
         patch.object(runner, "dispatch_layer", side_effect=fake_dispatch),
         patch.object(runner, "seed_variant"),  # m.5 fix-up — see test_cmd_up_to_stops_on_first_failure.
+        # browser cell derives the embed user (real AWS otherwise) — stub it.
+        patch.object(runner, "_derive_qs_user_arn", return_value="arn:aws:quicksight:us-east-1:111122223333:user/default/recon-gen-admin"),
     ):
         # Pin single AW cell so the dispatch order is deterministic.
         code = runner.main(["up_to=browser", "--variants=sp_pg_aw"])
@@ -862,6 +864,8 @@ def test_cmd_up_to_only_tolerates_per_layer_exit_5() -> None:
         patch.object(runner, "seed_variant"),  # m.5 fix-up — see test_cmd_up_to_stops_on_first_failure.
         patch.object(runner, "setup_variant", return_value=({}, None)),
         patch.object(runner, "teardown_variant"),
+        # browser cell derives the embed user (real AWS otherwise) — stub it.
+        patch.object(runner, "_derive_qs_user_arn", return_value="arn:aws:quicksight:us-east-1:111122223333:user/default/recon-gen-admin"),
     ):
         code = runner.main([
             "up_to=browser",
@@ -3401,11 +3405,13 @@ def _fake_cfg_for_derive(
     quicksight_user_arn: str | None = None,
     aws_region: str = "us-east-1",
     aws_account_id: str = "111122223333",
+    principal_arns: list[str] | None = None,
 ) -> SimpleNamespace:
     """Minimal cfg shape consumed by _derive_qs_user_arn.
 
     Uses SimpleNamespace instead of building a real Config — the
-    function only touches `cfg.auth`, `cfg.aws_region`, `cfg.aws_account_id`.
+    function touches `cfg.auth`, `cfg.aws_region`, `cfg.aws_account_id`,
+    and `cfg.principal_arns` (the AD 1-seat embed-user fallback).
     """
     auth = SimpleNamespace(
         aws_profile=aws_profile,
@@ -3415,7 +3421,20 @@ def _fake_cfg_for_derive(
         auth=auth,
         aws_region=aws_region,
         aws_account_id=aws_account_id,
+        principal_arns=principal_arns or [],
     )
+
+
+def test_derive_qs_user_arn_falls_back_to_principal_arns(monkeypatch: Any) -> None:
+    """AD — when the caller isn't a registered QS user (1-seat model: deploy
+    identities are IAM-only), the embed user is the `principal_arns` grantee
+    (the lone QS user), resolved BEFORE STS+ListUsers. Must not reach boto3."""
+    def _no_boto3(*_a: Any, **_k: Any) -> Any:
+        raise AssertionError("principal_arns fallback must short-circuit before boto3")
+    monkeypatch.setattr("boto3.Session", _no_boto3)
+    arn = "arn:aws:quicksight:us-east-1:111122223333:user/default/recon-gen-admin"
+    cfg = _fake_cfg_for_derive(principal_arns=[arn])
+    assert runner._derive_qs_user_arn(cfg) == arn  # pyright: ignore[reportArgumentType]: SimpleNamespace stand-in for Config
 
 
 def test_derive_qs_user_arn_override_short_circuits_boto3(monkeypatch: Any) -> None:

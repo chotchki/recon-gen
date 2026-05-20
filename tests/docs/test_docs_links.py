@@ -19,57 +19,28 @@ otherwise the test runs ``mkdocs build`` once.
 from __future__ import annotations
 
 import re
-import subprocess
-import sys
 from collections import defaultdict
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SITE = REPO_ROOT / "site"
-# Bundled inside the package post-restructure (was at repo root). Note:
-# ``parents[1]`` was a pre-existing bug — resolved to ``tests/``, so
-# ``MKDOCS_YML.exists()`` always returned False and the test
-# silently skipped. Correct path now.
-MKDOCS_YML = (
-    REPO_ROOT / "src" / "recon_gen" / "mkdocs.yml"
-)
+from tests.docs._handbook_build import build_handbook
 
 HREF_RE = re.compile(r'(?:href|src)="([^"]+)"')
 ID_RE = re.compile(r'id="([^"]+)"')
 
 
-def _build_site() -> None:
-    """Rebuild ``site/`` so the test sees the current docs state."""
-    cmd = [
-        sys.executable, "-m", "mkdocs", "build", "--strict",
-        "-d", str(SITE),
-    ]
-    # AB.7.1a — mkdocs-macros resolves `include_dir` relative to cwd
-    # (not project_dir), so build from the dir containing mkdocs.yml.
-    proc = subprocess.run(
-        cmd, cwd=MKDOCS_YML.parent, capture_output=True, text=True,
-    )
-    if proc.returncode != 0:
-        pytest.fail(
-            f"mkdocs build failed (exit {proc.returncode}):\n"
-            f"stdout:\n{proc.stdout}\n"
-            f"stderr:\n{proc.stderr}"
-        )
-
-
 @pytest.fixture(scope="module")
 def built_site() -> Path:
-    if not MKDOCS_YML.exists():
-        pytest.skip("mkdocs.yml not found at repo root")
-    try:
-        import mkdocs  # noqa: F401
-    except ImportError:
-        pytest.skip("mkdocs not installed")
-    _build_site()
-    return SITE
+    """Build the handbook once per xdist worker into an isolated sandbox.
+
+    AH.8 (#175) — the site used to land in a shared ``REPO_ROOT/site`` that
+    every docs module rebuilt + rmtree'd, racing under ``-n auto``.
+    ``build_handbook`` copies ``docs/`` + redirects ``docs_dir`` under the
+    run-artifact dir so each build is self-contained.
+    """
+    return build_handbook(None)
 
 
 def _anchors_in(path: Path, cache: dict[Path, set[str]]) -> set[str]:

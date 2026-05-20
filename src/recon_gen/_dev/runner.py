@@ -1969,7 +1969,9 @@ def _derive_qs_user_arn(cfg: "Config") -> str:
 
     Combined h+i.0 spike (`docs/audits/y_2_gate_h_i_combined_spike.md`):
     cfg override wins (explicit `cfg.auth.quicksight_user_arn`); else
-    derive via ``sts:GetCallerIdentity`` → ``quicksight:ListUsers``
+    the single QS-user ARN in ``cfg.principal_arns`` (the resource
+    grantee == the embed user in the 1-seat deploy model); else derive
+    via ``sts:GetCallerIdentity`` → ``quicksight:ListUsers``
     filter on ``PrincipalId == "federated/iam/<UserId>"``. The join
     key was validated live against three identity types (IAM user,
     assumed-role, root) in account 470656905821 — all three QS users'
@@ -1982,6 +1984,17 @@ def _derive_qs_user_arn(cfg: "Config") -> str:
     """
     if cfg.auth and cfg.auth.quicksight_user_arn:
         return cfg.auth.quicksight_user_arn
+
+    # AD — 1-seat model: the deploy/caller identity (e.g. recon-gen-local)
+    # is NOT a registered QS user, so the STS+ListUsers caller-match below
+    # finds nothing. The embed user is whoever the resources are granted
+    # to — the QS-user ARN in ``principal_arns`` (groups can't be embedded
+    # as, so pick a user ARN — the resource segment is ``:user/`` (a QS
+    # group ARN is ``:group/``). In the 1-seat model that single grantee
+    # IS the embed identity.
+    user_arns = [a for a in cfg.principal_arns if ":user/" in a]
+    if user_arns:
+        return user_arns[0]
 
     # Lazy import: boto3 cold-start is ~300ms; this function only fires
     # when the chain reaches a layer needing ``qs_arn``, not on every
@@ -2014,9 +2027,10 @@ def _derive_qs_user_arn(cfg: "Config") -> str:
     raise RuntimeError(
         f"AWS principal UserId {user_id!r} (Arn {identity['Arn']!r}) "
         f"does not match any QuickSight user in account "
-        f"{cfg.aws_account_id} namespace 'default'. Either authenticate "
-        f"as a registered QS user, or set 'auth.quicksight_user_arn:' "
-        f"in cfg yaml. (Spike: docs/audits/y_2_gate_h_i_combined_spike.md)"
+        f"{cfg.aws_account_id} namespace 'default'. Either put a QS-user "
+        f"ARN in 'principal_arns', set 'auth.quicksight_user_arn:', or "
+        f"authenticate as a registered QS user. "
+        f"(Spike: docs/audits/y_2_gate_h_i_combined_spike.md)"
     )
 
 

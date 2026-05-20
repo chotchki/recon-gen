@@ -42,6 +42,11 @@ src/recon_gen/docs/_diagrams/_rendered/
 src/recon_gen/docs/img/_l2_*
 src/recon_gen/docs/stylesheets/_l2_*
 
+# AH.8 (#175) — transient INHERIT configs from isolated docs-build sandboxes
+# (tests/docs/_handbook_build.py). Each build removes its own in a finally;
+# this guards against a stray if a build is hard-killed mid-flight.
+src/recon_gen/mkdocs.sandbox-*.yml
+
 /config.yaml
 tests/e2e/screenshots/
 tests/e2e/failures/

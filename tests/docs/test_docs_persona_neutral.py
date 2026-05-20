@@ -20,24 +20,14 @@ artifacts, not persona prose.
 
 from __future__ import annotations
 
-import os
 import re
-import shutil
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
+from tests.docs._handbook_build import build_handbook
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SITE = REPO_ROOT / "site"
-# Bundled inside the package post-restructure (was at repo root). Note:
-# ``parents[1]`` was a pre-existing bug — resolved to ``tests/``, so
-# the skip-if-missing guard always tripped and these tests silently
-# never ran in CI. Correct path now.
-MKDOCS_YML = (
-    REPO_ROOT / "src" / "recon_gen" / "mkdocs.yml"
-)
 
 # Real persona tokens — institution acronym, hand-curated personas,
 # fixture name. Word-boundaries on `snb` because `snb-card` etc. are
@@ -103,31 +93,15 @@ ALLOWED_LEAK_COUNTS: dict[str, int] = {
 }
 
 
-def _build_site_for(fixture_path: str) -> None:
-    """Rebuild ``site/`` against the named L2 fixture."""
-    if SITE.exists():
-        shutil.rmtree(SITE)
-    env = os.environ.copy()
-    # AB.7.1a — pass absolute path so main.py macros can resolve it
-    # regardless of the build cwd (we run from src/recon_gen/ for
-    # mkdocs-macros' include_dir resolution).
-    env["QS_DOCS_L2_INSTANCE"] = str(REPO_ROOT / fixture_path)
-    cmd = [
-        sys.executable, "-m", "mkdocs", "build", "--strict",
-        "-d", str(SITE),
-    ]
-    # AB.7.1a — mkdocs-macros resolves `include_dir` relative to cwd
-    # (not project_dir), so build from the dir containing mkdocs.yml.
-    proc = subprocess.run(
-        cmd, cwd=MKDOCS_YML.parent, capture_output=True, text=True, env=env,
-    )
-    if proc.returncode != 0:
-        pytest.fail(
-            f"mkdocs build (fixture {fixture_path}) failed "
-            f"(exit {proc.returncode}):\n"
-            f"stdout:\n{proc.stdout}\n"
-            f"stderr:\n{proc.stderr}"
-        )
+def _build_site_for(fixture_path: str) -> Path:
+    """Build the site against the named L2 fixture into an isolated sandbox.
+
+    AH.8 (#175) — was a shared ``REPO_ROOT/site`` rebuilt per fixture, which
+    raced other workers under ``-n auto``; ``build_handbook`` gives each
+    build its own ``docs_dir`` copy + output under the run-artifact dir.
+    Returns the rendered ``site/`` so callers read from their own build.
+    """
+    return build_handbook(REPO_ROOT / fixture_path)
 
 
 def _count_leaks(html: str) -> int:
@@ -136,17 +110,8 @@ def _count_leaks(html: str) -> int:
     return len(PERSONA_TOKEN_RE.findall(cleaned))
 
 
-def _site_html_files() -> list[Path]:
-    return sorted(SITE.rglob("*.html"))
-
-
-def _check_mkdocs_available() -> None:
-    if not MKDOCS_YML.exists():
-        pytest.skip(f"mkdocs.yml not found at {MKDOCS_YML}")
-    try:
-        import mkdocs  # noqa: F401
-    except ImportError:
-        pytest.skip("mkdocs not installed")
+def _site_html_files(site: Path) -> list[Path]:
+    return sorted(site.rglob("*.html"))
 
 
 # AH.5 — persona leaks resolved: SPEC.md + quicksight-quirks.md prose
@@ -156,12 +121,11 @@ def _check_mkdocs_available() -> None:
 # under AB.7.1a).
 def test_spec_example_build_has_no_unexpected_persona_leaks() -> None:
     """spec_example renders generic prose — zero leaks outside allowlist."""
-    _check_mkdocs_available()
-    _build_site_for("tests/l2/spec_example.yaml")
+    site = _build_site_for("tests/l2/spec_example.yaml")
 
     failures: list[str] = []
-    for html_path in _site_html_files():
-        rel = html_path.relative_to(SITE).as_posix()
+    for html_path in _site_html_files(site):
+        rel = html_path.relative_to(site).as_posix()
         leaks = _count_leaks(html_path.read_text(errors="replace"))
         allowed = ALLOWED_LEAK_COUNTS.get(rel, 0)
         if leaks > allowed:
@@ -180,8 +144,7 @@ def test_spec_example_build_has_no_unexpected_persona_leaks() -> None:
 
 def test_sasquatch_pr_build_renders_persona_flavor() -> None:
     """Guard against over-deletion: the curated SNB strings still render."""
-    _check_mkdocs_available()
-    _build_site_for("tests/l2/sasquatch_pr.yaml")
+    site = _build_site_for("tests/l2/sasquatch_pr.yaml")
 
     expected_per_page: dict[str, list[str]] = {
         "handbook/l1/index.html": ["Sasquatch National Bank"],
@@ -197,7 +160,7 @@ def test_sasquatch_pr_build_renders_persona_flavor() -> None:
 
     missing: list[str] = []
     for rel, expected in expected_per_page.items():
-        page = SITE / rel
+        page = site / rel
         if not page.is_file():
             missing.append(f"{rel}: file not built")
             continue

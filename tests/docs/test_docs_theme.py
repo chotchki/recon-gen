@@ -27,9 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from click.testing import CliRunner
-
-from recon_gen.cli import main as cli_root
+from tests.docs._handbook_build import build_handbook
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SPEC_EXAMPLE = _REPO_ROOT / "tests" / "l2" / "spec_example.yaml"
@@ -40,13 +38,6 @@ _ACCENT = "#FF00CC"
 # An SNB-palette hex that MUST NOT appear in the rendered site.css after
 # X.2.s.2 (it was `--snb-valley-deep`).
 _OLD_SNB_HEX = "2B4A2E"
-
-
-def _require_mkdocs() -> None:
-    try:
-        import mkdocs  # noqa: F401
-    except ImportError:  # pragma: no cover — env-specific
-        pytest.skip("mkdocs not installed")
 
 
 @pytest.fixture
@@ -72,15 +63,9 @@ def themed_l2(tmp_path: Path) -> Path:
 
 @pytest.mark.parametrize("portable", [True, False], ids=["portable", "default"])
 def test_docs_build_carries_l2_theme_and_site_css_is_persona_neutral(
-    tmp_path: Path, themed_l2: Path, portable: bool,
+    themed_l2: Path, portable: bool,
 ) -> None:
-    _require_mkdocs()
-    out = tmp_path / ("site-portable" if portable else "site-default")
-    argv = ["docs", "apply", "--no-strict", "-o", str(out), "--l2", str(themed_l2)]
-    if portable:
-        argv.append("--portable")
-    result = CliRunner().invoke(cli_root, argv)
-    assert result.exit_code == 0, result.output
+    out = build_handbook(themed_l2, strict=False, portable=portable)
 
     l2_css = (out / "stylesheets" / "_l2_theme.css").read_text()
     assert "--qs-accent" in l2_css, l2_css

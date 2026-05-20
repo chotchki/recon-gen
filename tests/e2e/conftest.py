@@ -216,6 +216,19 @@ def _refresh_matviews_once_per_session(cfg, l2):  # type: ignore[no-untyped-def]
     """
     if not RECON_GEN_E2E.get_or_none():
         return
+    # Under the runner, seed_variant already ran `data refresh`, so this is
+    # redundant — and scope="session" means once PER XDIST WORKER, so N
+    # desynchronized workers fire concurrent REFRESH MATERIALIZED VIEW
+    # (AccessExclusiveLock) on the one shared deployed DB while reader tests
+    # (e.g. audit apply) hold AccessShareLock, acquired in the opposite order
+    # → DeadlockDetected (sibling of the 9f54b4d flake). RECON_GEN_RUN_DIR is
+    # set iff we're under the runner → skip; direct pytest keeps the refresh.
+    try:
+        under_runner = RECON_GEN_RUN_DIR.get_or_none() is not None
+    except EnvVarInvalid:
+        under_runner = False
+    if under_runner:
+        return
     try:
         from recon_gen.common.db import connect_demo_db, execute_script
         from recon_gen.common.l2.schema import refresh_matviews_sql
