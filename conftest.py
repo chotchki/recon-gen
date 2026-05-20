@@ -21,14 +21,19 @@ them by hand — and both flow through the test-layer-chain runner's
   (No official Biome PyPI package yet — tracking biomejs/biome#8818; once
   that lands it becomes a ``[dev]`` dep like ``pyright`` and this gate's
   ``shutil.which`` lookup gets a venv-sibling check.)
-- **tailwind output.css drift** (AH.2) — App 2's ``output.css`` is a
-  committed, hand-rebuilt Tailwind artifact (``scripts/build_app2_css.py``);
-  there's no autobuild. If ``render.py`` / ``bootstrap.js`` grows a utility
-  class without a rebuild, the class silently no-ops in the shipped CSS.
-  This gate runs ``build_app2_css.py --check`` (rebuild to a temp file +
-  byte-diff against the committed one) so drift can't reach a commit.
-  Skips when ``tailwindcss`` (``pytailwindcss``, a standalone Rust binary)
-  isn't installed. Opt out: ``RECON_GEN_SKIP_TAILWIND=1``.
+- **tailwind output.css drift** (AH.2/AH.7, LOCAL-ONLY) — App 2's
+  ``output.css`` is a committed, hand-rebuilt Tailwind artifact
+  (``scripts/build_app2_css.py``); there's no autobuild. If ``render.py``
+  / ``bootstrap.js`` grows a utility class without a rebuild, the class
+  silently no-ops in the shipped CSS. This gate runs
+  ``build_app2_css.py --check`` (rebuild to a temp file + byte-diff
+  against the committed one) to catch that on the committer's machine.
+  ``build_app2_css.py`` pins ``TAILWINDCSS_VERSION`` so the version is
+  stable, but Tailwind's minified output still isn't byte-identical
+  ACROSS PLATFORMS (committed file = committer's OS; CI = linux-x64) —
+  so the gate **skips in CI** (``CI=true``); CI trusts the committed
+  file. Also skips when ``tailwindcss`` (``pytailwindcss``) isn't
+  installed. Opt out: ``RECON_GEN_SKIP_TAILWIND=1``.
 """
 
 from __future__ import annotations
@@ -124,8 +129,18 @@ def pytest_sessionstart(session: pytest.Session) -> None:
             ),
         )
 
+    # AH.7 — LOCAL-ONLY gate. Tailwind's minified output is NOT
+    # byte-identical across platforms (the committed output.css is built
+    # on the committer's OS; CI is linux-x64), so a cross-platform
+    # rebuild always "differs" even at the same pinned version — pinning
+    # fixed the version drift but not the platform drift. The gate's
+    # value is catching a dev who edited render.py / bootstrap.js but
+    # forgot to rebuild output.css on THEIR machine; CI trusts the
+    # committed file (the local gate + pre-push hook already guarded it).
+    # So skip when running in CI.
     tailwind = _find_tailwind()
-    if tailwind is not None:  # pytailwindcss not installed → skip the gate
+    in_ci = os.environ.get("CI") == "true"
+    if tailwind is not None and not in_ci:
         _run_static_gate(
             name="tailwind output.css drift",
             argv=[
