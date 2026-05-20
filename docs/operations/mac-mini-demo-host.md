@@ -65,7 +65,7 @@ are the friction points that cost time on the original install:
 │                                                                      │
 │   io.hotchkiss.recon-demo.refresh.plist (StartCalendarInterval 03:00)│
 │     refresh-demos.sh: pip install --upgrade → schema + data +       │
-│     refresh + audit verify → atomic mv next → current → kickstart   │
+│     refresh + audit verify → atomic mv next → current → restart     │
 │                                                                      │
 │   io.hotchkiss.recon-demo.tunnel.plist   io.hotchkiss.recon-demo.   │
 │     cloudflared tunnel run recon-demo       .runner.plist           │
@@ -282,11 +282,19 @@ freshly published wheel without waiting for 03:00 ET.
 
 ### Restart a single server
 
+The servers are system-domain LaunchDaemons, so kickstart them in the
+`system/` domain as root (admin sudo). Do NOT use `gui/<uid>/...` — that
+LaunchAgent-era path returns exit 125 ("Domain does not support specified
+action") against a system daemon.
+
 ```bash
-RECON_DEMO_UID=$(id -u recon-demo)
-sudo -u recon-demo launchctl kickstart -k \
-    "gui/$RECON_DEMO_UID/io.hotchkiss.recon-demo.spec"
+sudo launchctl kickstart -k system/io.hotchkiss.recon-demo.spec
 ```
+
+(The nightly refresh job restarts servers differently — it runs as the
+non-admin `recon-demo` user, which can't manage system-domain services,
+so it SIGTERMs the server process and relies on the plist's
+`KeepAlive=true` to respawn. See `refresh-demos.sh`.)
 
 ### Pin to a specific recon-gen version
 
@@ -343,7 +351,9 @@ launchd's log.
 the launchd job restarted mid-day (e.g. crash + KeepAlive respawn), the
 previous tmpdir is left behind and unwritable from the new process.
 This is expected; trainer-knob state is ephemeral by design. State
-returns when the next `launchctl kickstart -k` cycles in a fresh tmpdir.
+returns when the next server restart (the nightly refresh's SIGTERM +
+KeepAlive respawn, or an admin `launchctl kickstart`) cycles in a fresh
+tmpdir.
 
 ## Tear-down
 

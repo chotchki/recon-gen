@@ -10,8 +10,17 @@
 #      build runs OUTSIDE the launchd-loaded server's sandbox — it's
 #      a regular shell invocation under recon-demo's user.
 #   3. mv next.sqlite3 current.sqlite3 (atomic on POSIX same-filesystem).
-#   4. launchctl kickstart -k restarts the per-instance server plist
-#      (~5s outage as the new sandbox-exec sub-process boots).
+#   4. SIGTERM the per-instance server; its plist's KeepAlive=true makes
+#      launchd respawn it (~5s outage) reopening the swapped db.
+#
+# AH.6: the servers are LaunchDaemons (system domain) and recon-demo is a
+# non-admin Standard user — it CANNOT `launchctl kickstart system/...`
+# (that needs root) nor sudo. It CAN signal its own processes, and the
+# server plists carry KeepAlive=true, so terminating the running server
+# (matched by its unique --port) and letting launchd relaunch is the
+# privilege-free restart. The pre-AH.6 `launchctl kickstart -k
+# gui/<uid>/...` was a LaunchAgent-era leftover that returns exit 125
+# ("Domain does not support specified action") against a system daemon.
 #
 # Failure handling: if pip install fails, the script aborts (set -e)
 # and the existing servers keep serving the previous db. If schema
@@ -48,7 +57,8 @@ fi
 # failure on one instance still aborts the script (set -e propagates).
 refresh_one() {
     instance="$1"
-    short="$2"        # short label for launchctl (matches plist Label suffix)
+    short="$2"        # short label suffix (matches the plist Label suffix)
+    port="$3"         # server's bind port — the unique restart matcher
     instance_dir="$RECON_DEMO_HOME/$instance"
     cfg="$instance_dir/config.yaml"
     l2="$instance_dir/l2.yaml"
@@ -89,14 +99,18 @@ refresh_one() {
     mv "$next_db" "$current_db"
     rm -f "$current_db-journal" "$current_db-wal" "$current_db-shm"
 
-    # Restart the per-instance server. `launchctl kickstart -k`
-    # kills the existing process + respawns under the same plist;
-    # KeepAlive=true in the plist ensures restart.
-    echo "==> kickstart server: io.hotchkiss.recon-demo.$short"
-    launchctl kickstart -k "gui/$(id -u)/io.hotchkiss.recon-demo.$short"
+    # Restart the per-instance server so it reopens current.sqlite3.
+    # SIGTERM the running process (matched by its unique --port, scoped
+    # to our own uid); KeepAlive=true in the plist makes launchd respawn
+    # it (~ThrottleInterval s) against the freshly-swapped db. `|| true`:
+    # if the server is already down, launchd's KeepAlive is already
+    # (re)starting it, so a no-match is not an error. See the AH.6 note
+    # in the header for why this isn't `launchctl kickstart`.
+    echo "==> restart server: io.hotchkiss.recon-demo.$short (SIGTERM + KeepAlive respawn)"
+    pkill -TERM -U "$(id -u)" -f "[-][-]port $port" || true
 }
 
-refresh_one spec_example spec
-refresh_one sasquatch_pr sasquatch
+refresh_one spec_example spec 8401
+refresh_one sasquatch_pr sasquatch 8402
 
 echo "==> $(date -Iseconds) nightly refresh complete"

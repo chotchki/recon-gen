@@ -9,10 +9,10 @@
 #
 # The launchd plist (io.hotchkiss.recon-demo.sasquatch.plist) execs
 # this script. Why a wrapper: launchd's ProgramArguments doesn't expand
-# $(...) — to compute mktemp at start time, we shell out. Each
-# `launchctl load` (or `launchctl kickstart -k` from the nightly
-# refresh job) creates a fresh tmpdir; the previous tmpdir is left
-# behind in /var/folders for the OS to eventually reap.
+# $(...) — to compute mktemp at start time, we shell out. Each launchd
+# start (RunAtLoad, or a KeepAlive respawn after the nightly refresh
+# SIGTERMs the server) creates a fresh tmpdir; the previous tmpdir is
+# left behind in /var/folders for the OS to eventually reap.
 #
 # The sandbox-exec profile (recon-demo-sasquatch.sb) read+writes only
 # the tmpdir passed via STUDIO_STATE_DIR — so even if old tmpdirs
