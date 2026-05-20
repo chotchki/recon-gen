@@ -187,13 +187,18 @@ class TestBaselineLegLoop:
             instance, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
         )
         n = sql.count("INSERT INTO sasquatch_pr_transactions")
-        # R.1.f §1: total expected ~30k-100k legs over 90 days for
-        # sasquatch_pr. Restored to 30k lower bound after Z.C.7 follow-on
-        # rewired ``seed.py::_classify_rail`` to substring-match the
-        # post-Z.B CamelCase rail names (`CustomerInboundACH` etc.)
-        # instead of the legacy snake_case tokens (`ach_inbound`).
-        assert 30_000 <= n <= 100_000, (
-            f"R.2.b should emit 30k-100k baseline legs for sasquatch_pr; "
+        # R.1.f §1: total expected ~30k-150k legs over 90 days for
+        # sasquatch_pr. Lower bound restored to 30k after Z.C.7 rewired
+        # ``seed.py::_classify_rail`` to substring-match the post-Z.B
+        # CamelCase rail names. Upper bound raised 100k → 150k at AF
+        # (E8): three rails now declare operator-realistic
+        # firings_typical_per_period bands (MerchantCardSale [50,500],
+        # CustomerInboundACH [50,200], InternalTransferDebit [200,500]
+        # per business day) which intentionally shift the count off the
+        # per-kind heuristic toward the gap-doc §8 numbers — ~2k
+        # legs/business-day for the full bank, gap-doc-faithful.
+        assert 30_000 <= n <= 150_000, (
+            f"R.2.b should emit 30k-150k baseline legs for sasquatch_pr; "
             f"got {n}"
         )
 

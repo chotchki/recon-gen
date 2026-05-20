@@ -468,6 +468,38 @@ shape of retail card flows). Plants size to the midpoint; cap-breach
 plants clamp to `range.max × 3` when both the rail and an
 intersecting `LimitSchedule` are declared.
 
+## Volume as data (AF)
+
+Where `amount_typical_range` bounds per-firing magnitude, a rail (or
+TransferTemplate) can declare `firings_typical_per_period` to bound the
+per-period firing COUNT — a **soft generator-shaping hint** (and a
+future runtime hook for the `{{ l2_instance_name }}_volume_anomaly`
+matview, deferred per the AF "generator-only first cut" lock). Two YAML
+shapes: compact `firings_typical_per_period: [min, max]` (period
+defaults `business_day`) or full `{period: <p>, range: [min, max]}`
+where `<p> ∈ business_day | pay_period | week | month`.
+
+Validator rules at L2 load time:
+
+- **W1a** — `min <= max` (equal endpoints allowed; `[1, 1]` = "exactly
+  one per period", unlike AB.5's V1a strict-less-than).
+- **W1b** — both `min` and `max` `>= 0` (zero allowed; negatives
+  rejected).
+- **W1c** — forbidden on rails with `aggregating: true` (the `cadence`
+  field already governs aggregator firing frequency). Rail-only;
+  TransferTemplates aren't aggregating rails so W1c doesn't apply to
+  them.
+
+When set, the generator (`_pick_firings_count`) samples a per-period
+count uniform-randomly from the band and scales by the number of
+periods in the window (period-to-window ratios: 5 business days/week,
+10/pay-period, 21/month); the per-day distribution is the existing
+Poisson spread. When absent, falls back to the per-kind heuristic
+without consuming RNG (pre-AF locked seeds stay byte-identical).
+Composes with `amount_typical_range`: count × per-firing amount = a
+realistic per-period aggregate, the dashboard top-line operators scan
+first.
+
 ## Forbidden SQL patterns
 
 The portability constraint targets PostgreSQL 17+ AND Oracle 19c+ —

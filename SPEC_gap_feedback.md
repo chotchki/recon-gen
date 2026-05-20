@@ -330,6 +330,16 @@ Magnitude is absolute — the bound applies to `abs(amount)`. Direction is deter
 
 ## Enhancement 8: Soft per-period firing-count bounds on Rail
 
+> **LANDED — Phase AF (2026-05-19), generator-only first cut.** Field
+> `firings_typical_per_period` on Rail (single + two-leg) + TransferTemplate;
+> generic `{period, range}` shape with compact `[min, max]` defaulting to
+> `business_day`; validator W1a-c; generator `_pick_firings_count`; fuzz +
+> studio editor + docs. The optional `volume_anomaly` runtime matview stays
+> deferred (PLAN AF.x.runtime). One divergence from the §"Where it bites"
+> table below: `CustomerFeeMonthlySettlement` is an aggregating rail
+> (cadence `monthly-eom`), so W1c forbids the field there — the cadence
+> already encodes its firing count.
+
 ### Problem
 
 Enhancement 7's `amount_typical_range` fixed per-firing magnitude plausibility but leaves the parallel concern of per-period firing COUNT unaddressed. The auto-scenario seed generator picks count-of-firings-per-rail-per-period using internal heuristics — no operator-declared "typical activity volume" hint per rail. Result: even when per-firing amounts are realistic, aggregate per-period volumes can be orders of magnitude off. A $50 typical card sale repeated 50,000 times per day produces a $2.5M daily aggregate that doesn't match the integrator's mental model for what the fixture's institution actually processes.

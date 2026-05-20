@@ -84,6 +84,72 @@ queue, not landed yet.
 > (the validator's R10 / U3 rules enforce uniqueness + resolution at
 > L2 load time, so the binding can never be ambiguous).
 
+## Optional: typical firing-count range (AF)
+
+Where ``amount_typical_range`` bounds *how much* each firing moves,
+``firings_typical_per_period`` bounds *how many times* the rail fires
+per period. The two compose: realistic per-firing amounts × realistic
+per-period counts = a realistic per-period aggregate — the
+daily/monthly top-line operators scan first when judging whether a
+demo's numbers are plausible. A $50 typical card sale fired 50,000
+times a day implies $2.5M/day in card volume; for a small community
+bank that's an order of magnitude too large no matter how realistic
+the per-swipe amount is.
+
+Two accepted YAML shapes:
+
+```yaml
+# Compact — period defaults to business_day.
+- name: MerchantCardSale
+  firings_typical_per_period: [50, 500]   # 50-500 swipes per business day
+
+# Full — explicit period (business_day | pay_period | week | month).
+- name: CustomerFeeMonthlySettlement_child
+  firings_typical_per_period:
+    period: month
+    range: [80, 120]
+```
+
+- **Test-data generator (today).** When set, the baseline emitter
+  (``_pick_firings_count``) samples a per-period count uniform-randomly
+  from the band and scales by the number of periods in the window
+  (count-per-period × periods = total firings over the window). When
+  absent, it falls back to the per-kind firing-count heuristic —
+  *without consuming any RNG state*, so pre-AF L2 instances stay
+  byte-identical to their locked seeds. The per-day distribution is the
+  generator's existing Poisson spread, so the declared band shows up as
+  the aggregate-per-period the operator intended. Composes with
+  ``amount_typical_range`` — count, then per-firing amount, fully
+  independent.
+- **Runtime SHOULD-constraint (follow-on).** A future
+  ``<prefix>_volume_anomaly`` matview will surface periods whose actual
+  firing count falls outside the declared band (early-warning
+  surveillance: "today's transfer count is 10× yesterday — what
+  changed?"). Deferred per the gap doc's "generator-only first cut".
+
+**Validator rules (W1a-c):**
+
+- **W1a** — ``min`` MUST be ``<= max``. Equal endpoints ARE allowed
+  (``[1, 1]`` = "exactly one per period" — a legitimate fixed count,
+  unlike AB.5's V1a which rejects degenerate amount ranges).
+- **W1b** — both ``min`` and ``max`` MUST be ``>= 0``. Zero is allowed
+  (a rail that typically fires zero times in some periods). Negative
+  counts are rejected.
+- **W1c** — forbidden on rails with ``aggregating: true``. An
+  aggregating rail's ``cadence`` already governs its firing frequency
+  (one firing per cadence-period), so a count band would conflict. Set
+  the band on the child rails the aggregator bundles instead.
+
+``firings_typical_per_period`` is also valid on a **TransferTemplate**
+(W1a-b only — templates aren't aggregating rails). It's honored when
+the template is a chain parent (the template fires as a unit via the
+chain machinery); a template that never appears as a chain parent
+doesn't fire as a unit at baseline, so the field is inert there.
+
+Period-to-window conversion uses standard banking ratios: 5 business
+days/week, 10/pay-period (bi-weekly), 21/month. A window shorter than
+one period still emits one period's worth of firings.
+
 ## Specific example for you
 
 {{ l2_rail_focus() }}
