@@ -1005,7 +1005,7 @@ LAYER 3 is a set of dashboard applications, each answering one **question shape*
 ## Per-app stepbacks
 
 ### L1 Reconciliation Dashboard
-Operational integrity at the level of L1 invariants. Every sheet maps to one or more L1 SHOULD-constraints — drift, overdraft, limit breach, expected-EOD-balance, stuck pending, stuck unbundled, supersession audit. The accountant scans today's exception count, drills into the offending row, and routes it to whoever owns the upstream feed. Configured by exactly one L2 instance: feed it `sasquatch_ar.yaml`, get a Sasquatch dashboard; feed it `cascadia.yaml`, get a Cascadia dashboard.
+Operational integrity at the level of L1 invariants. Every sheet maps to one or more L1 SHOULD-constraints — drift, overdraft, limit breach, expected-EOD-balance, stuck pending, stuck unbundled, supersession audit. The accountant scans today's exception count, drills into the offending row, and routes it to whoever owns the upstream feed. Configured by exactly one L2 instance: the L2 YAML you feed it determines the institution — swap the YAML and the same code emits a different institution's dashboard.
 
 ### L2 Flow Tracing
 Operational integrity at the level of L2-declared transfer flows. Where L1 asks "is the math right?", L2 FT asks "did the transfer happen the way the institution said it would?" — every Transfer should match a declared Rail, every leg should land on the role the Rail names, every PostedRequirement should be satisfied within the declared Duration. The accountant uses it to triage failed transfers; the integration engineer uses it to validate that a newly-declared Rail actually fires.

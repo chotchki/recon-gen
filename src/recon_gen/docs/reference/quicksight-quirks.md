@@ -459,8 +459,8 @@ the rows" returns on the **stale** rows; if it instead waits a beat and
 reads, it can catch the spinner gap (zero rows) → spurious "the filter
 emptied the table". Worse under a load-warmed Aurora where the re-query
 is slow (a warm-then-busy cluster widens the spinner gap past a 10–12s
-"wait for cells" budget). (Verified X.2.q.3 against the deployed
-`sasquatch_pr` L2FT dashboard — the L2FT dropdown e2e flaked exactly
+"wait for cells" budget). (Verified X.2.q.3 against a deployed
+L2FT dashboard — the L2FT dropdown e2e flaked exactly
 this way until the workaround landed.)
 
 **Workaround.** It turns out QS *does* expose a usable signal — just

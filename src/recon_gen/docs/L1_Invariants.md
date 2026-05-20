@@ -135,7 +135,7 @@ clean up to their expected zero / target by end-of-day.
 posting that should have landed before EOD. Verify the
 source-system posting time and re-time the posting if needed.
 
-### 5. `{{ l2_instance_name }}_limit_breach` — Per-direction flow cap
+### 5. `{{ l2_instance_name }}_limit_breach` — Per-direction flow cap {: #5-per-direction-flow-cap}
 
 > For every CurrentStoredBalance where `Limits` is set, for every
 > `(Rail, limit, direction)` in `Limits`, for every child Account
@@ -227,7 +227,7 @@ days_ago=35` surfaces with `age_seconds > max_unbundled_age_seconds`
 (2,678,400s for the `CustomerFeeAccrual` rail's P31D cap).
 {% endif %}
 
-### 8. `{{ l2_instance_name }}_chain_parent_disagreement` — Two-template chain Parent disagreement (AB.2.3)
+### 8. `{{ l2_instance_name }}_chain_parent_disagreement` — Two-template chain Parent disagreement (AB.2.3) {: #chain-parent-disagreement}
 
 > For every two-template chain (chain.children resolves to a
 > TransferTemplate), every leg_rail firing of one child Transfer
@@ -269,7 +269,7 @@ different parent_transfer_ids ("tr-cpd-parent-a-0001" vs
 "tr-cpd-parent-b-0001").
 {% endif %}
 
-### 9. `{{ l2_instance_name }}_xor_group_violation` — Multi-mode template variant XOR violation (AB.3.3)
+### 9. `{{ l2_instance_name }}_xor_group_violation` — Multi-mode template variant XOR violation (AB.3.3) {: #xor-group-violation}
 
 > For every TransferTemplate that declares `leg_rail_xor_groups`,
 > for every group in that template, exactly ONE member of the
@@ -320,7 +320,7 @@ template at days_ago=1 — both `SettlementAutoSettle` and
 apart for visual separability).
 {% endif %}
 
-### 10. `{{ l2_instance_name }}_fan_in_disagreement` — Fan-in chain parent-set mismatch (AB.4.7)
+### 10. `{{ l2_instance_name }}_fan_in_disagreement` — Fan-in chain parent-set mismatch (AB.4.7) {: #fan-in-disagreement}
 
 > For every chain child entry declaring `fan_in: true` (AB.6
 > per-child shape), every child Transfer's contributing parent set

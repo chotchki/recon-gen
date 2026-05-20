@@ -211,6 +211,11 @@ markdown_extensions:
   - toc:
       permalink: true
   - md_in_html
+  # AH.5 — stable ``{#slug}`` heading anchors. L1_Invariants / Schema_v6
+  # headings carry ``{{ l2_instance_name }}`` + a number prefix, so their
+  # auto-slugs are L2-instance-dependent (unstable). Cross-references use
+  # short natural slugs (#fan-in-disagreement) pinned via attr_list.
+  - attr_list
   - pymdownx.superfences
   # Q.2.c.exec.3 — admonitions enable the ??? collapse pattern used to
   # fold screenshot embeds by default. `pymdownx.details` is what makes

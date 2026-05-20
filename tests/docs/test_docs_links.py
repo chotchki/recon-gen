@@ -133,14 +133,11 @@ def _sweep(site: Path) -> list[tuple[Path, str, str]]:
     return dead
 
 
-@pytest.mark.xfail(
-    reason=(
-        "AB.7.1a: pre-existing dead anchors — "
-        "Schema_v6/#table-1-prefix_transactions + "
-        "L1_Invariants/#fan-in-disagreement. Tracked as AB.7.1a follow-on."
-    ),
-    strict=False,
-)
+# AH.5 — dead anchors resolved: stable ``{#slug}`` anchors added to the
+# L1_Invariants + Schema_v6 headings (their auto-slugs embed
+# ``{{ l2_instance_name }}`` + a number prefix, so they're
+# L2-instance-dependent — cross-refs pin the natural slug via attr_list).
+# Gate is live (was xfail under AB.7.1a).
 def test_no_dead_links_in_built_site(built_site: Path):
     """Every internal href / src in the built mkdocs site resolves.
 

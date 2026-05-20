@@ -79,6 +79,24 @@ ALLOWED_LEAK_COUNTS: dict[str, int] = {
     # the worked example for the optional persona: YAML block.
     "walkthroughs/customization/how-do-i-brand-my-handbook-prose/"
     "index.html": 15,
+    # AF/AB-era customization walkthroughs — each cites the bundled
+    # sasquatch_pr fixture once as "the real-world example" of the
+    # feature it teaches (a Files-you'll-touch pointer, same intentional
+    # Tier-2 citation pattern as the entries above).
+    "walkthroughs/customization/how-do-i-add-an-aml-inbound-cap/"
+    "index.html": 1,
+    "walkthroughs/customization/how-do-i-add-multi-mode-settlement/"
+    "index.html": 1,
+    "walkthroughs/customization/how-do-i-chain-two-templates/"
+    "index.html": 1,
+    "walkthroughs/customization/how-do-i-mix-cardinality-children/"
+    "index.html": 1,
+    "walkthroughs/customization/how-do-i-model-batched-payouts/"
+    "index.html": 1,
+    "walkthroughs/customization/how-do-i-set-typical-amount-ranges/"
+    "index.html": 1,
+    "walkthroughs/customization/how-do-i-set-typical-firing-counts/"
+    "index.html": 1,
     # Macro-emitted "Fallback example" admonition naming sasquatch_pr
     # when spec_example carries no Chains entries.
     "concepts/l2/chain/index.html": 1,
@@ -131,17 +149,11 @@ def _check_mkdocs_available() -> None:
         pytest.skip("mkdocs not installed")
 
 
-# AB.7.1a — the path fix (MKDOCS_YML now points at the bundled config
-# under src/recon_gen/) re-enabled these tests after months of silent
-# skip. Surfacing them exposes pre-existing persona leaks (8+ pages
-# missing ALLOWED_LEAK_COUNTS entries) + dead-anchor links
-# (Schema_v6/#table-1-prefix_transactions + L1_Invariants/#fan-in-disagreement).
-# Marked xfail (strict=False) for v11.6.x so AB.7 close-out isn't gated
-# on the cascade fix — tracking ticket lands as AB.7.1a follow-on.
-@pytest.mark.xfail(
-    reason="AB.7.1a: pre-existing persona leaks; see AB.7.1a follow-on",
-    strict=False,
-)
+# AH.5 — persona leaks resolved: SPEC.md + quicksight-quirks.md prose
+# generalized, the CLI --l2 help example neutralized; the AF/AB-era
+# customization walkthroughs' intentional sasquatch_pr citations are
+# allowlisted in ALLOWED_LEAK_COUNTS above. Gate is live (was xfail
+# under AB.7.1a).
 def test_spec_example_build_has_no_unexpected_persona_leaks() -> None:
     """spec_example renders generic prose — zero leaks outside allowlist."""
     _check_mkdocs_available()

@@ -538,7 +538,7 @@ def docs_export(output: str, l2_instance_path: str | None) -> None:
     help=(
         "L2 institution YAML override. Defaults to each app's built-in "
         "default (spec_example for most). Pass when capturing a deploy "
-        "against a non-default L2 (e.g. tests/l2/sasquatch_pr.yaml)."
+        "against a non-default L2 (e.g. your own institution's YAML)."
     ),
 )
 @click.option(

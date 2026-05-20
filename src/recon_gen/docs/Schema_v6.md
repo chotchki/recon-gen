@@ -107,7 +107,7 @@ target state.
 
 ---
 
-## Table 1 — `{{ l2_instance_name }}_transactions`
+## Table 1 — `{{ l2_instance_name }}_transactions` {: #table-1-prefix_transactions}
 
 One row per money-movement **leg**. Two-leg transfers (debit + credit
 pairs) write two rows; single-leg transfers (sales, external
