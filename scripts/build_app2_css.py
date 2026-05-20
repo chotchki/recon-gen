@@ -33,6 +33,7 @@ scan set is config-in-the-CSS — nothing to pass on the command line beyond
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -45,6 +46,15 @@ _ASSETS = (
 )
 _INPUT = _ASSETS / "input.css"
 _OUTPUT = _ASSETS / "output.css"
+
+# AH.7 — PIN the Tailwind binary version. ``pytailwindcss`` defaults to
+# "latest", so an unpinned build is non-deterministic: a fresh CI runner
+# downloads whatever Tailwind shipped today (it grabbed v4.3.0) while a
+# dev box reuses an older cached binary (v4.2.4) — the bytes differ and
+# the sessionstart drift gate (conftest.py) fails CI. Pinning makes
+# ``output.css`` reproducible across local + CI. Bumping Tailwind = bump
+# this string + re-run this script + commit the regenerated output.css.
+_TAILWIND_VERSION = "v4.3.0"
 
 
 def _tailwind_bin() -> str:
@@ -69,9 +79,15 @@ def _tailwind_bin() -> str:
 
 
 def _build(out_path: Path) -> None:
+    # Pin the Tailwind version (pytailwindcss reads TAILWINDCSS_VERSION;
+    # default "latest" is the CI-vs-local drift source). Set it for this
+    # subprocess so both a hand rebuild and the conftest drift gate's
+    # ``--check`` resolve the same binary → byte-identical output.css.
+    env = {**os.environ, "TAILWINDCSS_VERSION": _TAILWIND_VERSION}
     subprocess.run(
         [_tailwind_bin(), "--minify", "-i", str(_INPUT), "-o", str(out_path)],
         check=True,
+        env=env,
     )
 
 
