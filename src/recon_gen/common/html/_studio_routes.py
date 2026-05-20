@@ -165,8 +165,33 @@ _HOME_SINGLETONS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+def _demo_mode_banner(demo_mode: bool) -> str:
+    """AH.4 — top-of-page read-only banner for ``studio --demo-mode``.
+
+    Cosmetic only. The load-bearing lockdown is the route-level skip of
+    every mutation route (+ the sandbox-exec deny-write on the L2 yaml);
+    this just tells a visitor the surface is read-only and pairs with
+    the suppressed Deploy / editor-mutation affordances. Empty string
+    when not in demo-mode. Inline-styled so it needs no stylesheet /
+    Tailwind-utility rebuild.
+    """
+    if not demo_mode:
+        return ""
+    return (
+        '<div class="demo-banner" role="status" '
+        'style="background:#fff3cd;border-bottom:1px solid #ffe69c;'
+        'color:#664d03;padding:0.6rem 1rem;font-size:0.9rem;text-align:center">'
+        "<strong>Read-only demo</strong> — editing and deploy are disabled. "
+        '<a href="https://chotchki.github.io/recon-gen/" target="_blank" '
+        'rel="noopener" style="color:#664d03;text-decoration:underline">'
+        "Learn more</a>."
+        "</div>"
+    )
+
+
 def _render_home_page(
     cache: L2InstanceCache, dev_log: bool, *, cfg: Config | None = None,
+    demo_mode: bool = False,
 ) -> str:
     """X.4.f.7 — unified Studio home page (diagram + every entity kind).
 
@@ -201,17 +226,20 @@ def _render_home_page(
         n = len(getattr(instance, accessor))
         open_attr = " open" if idx == 0 else ""
         body_id = f"home-section-body-{kind}"
+        # AH.4 — hide the create affordance in demo-mode (the /new route
+        # is 404'd there anyway; the button shouldn't tease it).
+        add_link = "" if demo_mode else (
+            f'<a class="home-section-add" href="/l2_shape/{kind}/new" '
+            # Stop the click from triggering the surrounding <details>
+            # toggle. The browser still follows the href to the create page.
+            f'onclick="event.stopPropagation()" '
+            f'title="Create a new {escape(kind)}">+ Add</a>'
+        )
         section_blocks.append(
             f'<details class="home-section" data-kind="{escape(kind)}"{open_attr}>'
             f"<summary>{escape(label)} "
             f'<span class="count">({n})</span> '
-            f'<a class="home-section-add" '
-            f'href="/l2_shape/{kind}/new" '
-            # Stop the click from triggering the surrounding <details>
-            # toggle (preventDefault). The browser still follows the
-            # href so the operator lands on the dedicated create page.
-            f'onclick="event.stopPropagation()" '
-            f'title="Create a new {escape(kind)}">+ Add</a>'
+            f"{add_link}"
             f'<a class="home-section-link" href="/l2_shape/{kind}/" '
             f'onclick="event.stopPropagation()" '
             f'title="Open in dedicated page">↗</a>'
@@ -230,25 +258,37 @@ def _render_home_page(
     for kind, label, attr in _HOME_SINGLETONS:
         is_set = getattr(instance, attr, None) is not None
         status = "set" if is_set else "not set"
+        # AH.4 — demo-mode hides the singleton Edit affordance (its form
+        # route is 404'd) and drops the "click Edit" prompt.
+        singleton_link = "" if demo_mode else (
+            f'<a class="home-section-add" href="/l2_shape/{kind}/" '
+            f'onclick="event.stopPropagation()" '
+            f'title="Edit {escape(label)} (single YAML block)">Edit</a>'
+        )
+        singleton_body = (
+            f"{escape(label)} is a single YAML block."
+            if demo_mode else
+            f"{escape(label)} is a single YAML block — "
+            f"click <strong>Edit</strong> to view / change it."
+        )
         section_blocks.append(
             f'<details class="home-section" data-kind="{escape(kind)}">'
             f'<summary>{escape(label)} '
             f'<span class="count">({escape(status)})</span> '
-            f'<a class="home-section-add" '
-            f'href="/l2_shape/{kind}/" '
-            f'onclick="event.stopPropagation()" '
-            f'title="Edit {escape(label)} (single YAML block)">'
-            f"Edit</a>"
+            f"{singleton_link}"
             f"</summary>"
             f'<div class="home-section-body">'
-            f'<p class="home-section-loading">'
-            f'{escape(label)} is a single YAML block — '
-            f'click <strong>Edit</strong> to view / change it.'
-            f"</p>"
+            f'<p class="home-section-loading">{singleton_body}</p>'
             f"</div>"
             f"</details>"
         )
     sections_html = "\n    ".join(section_blocks)
+    demo_banner = _demo_mode_banner(demo_mode)
+    deploy_controls = "" if demo_mode else (
+        '<button id="deploy-btn" class="deploy-btn" type="button"\n'
+        '            onclick="quicksightDeploy()">Deploy changes</button>\n'
+        '    <span id="deploy-status" class="deploy-status" aria-live="polite"></span>'
+    )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -396,15 +436,14 @@ def _render_home_page(
   </script>
   {devlog_script}</head>
 <body class="home-page">
+  {demo_banner}
   <header class="studio-header">
     <h1>Studio</h1>
     <span class="instance">{prefix}</span>
     <a class="nav-link" href="/diagram">→ diagram (full)</a>
     <a class="nav-link" href="/data">→ data</a>
     <a class="nav-link" href="/dashboards">→ dashboards</a>
-    <button id="deploy-btn" class="deploy-btn" type="button"
-            onclick="quicksightDeploy()">Deploy changes</button>
-    <span id="deploy-status" class="deploy-status" aria-live="polite"></span>
+    {deploy_controls}
   </header>
   <script>
     // X.4.g.14 — Studio "Deploy changes" button. POSTs /deploy, swaps
@@ -468,6 +507,7 @@ def _render_diagram_page(
     coverage_available: bool = False,
     embed: bool = False,
     cfg: Config | None = None,
+    demo_mode: bool = False,
 ) -> str:
     """Render the L2 topology diagram (per-rail / dot, X.4.b spike winner).
 
@@ -614,6 +654,7 @@ def _render_diagram_page(
   <link rel="stylesheet" href="{asset_url("diagram.css")}">
   {devlog_script}</head>
 <body class="{"diagram-embed" if embed else ""}">
+  {_demo_mode_banner(demo_mode and not embed)}
   {("" if embed else (
     '<header class="studio-header">'
     f'<h1>Studio · diagram</h1>'
@@ -1471,6 +1512,7 @@ def _render_data_page(
     tg_cache: TestGeneratorCache | None = None,
     etl_hook_command: str | None = None,
     cfg: Config | None = None,
+    demo_mode: bool = False,
 ) -> str:
     """X.4.h.1 — Studio "trainer mode" data-shaping panel shell.
 
@@ -1541,6 +1583,12 @@ def _render_data_page(
     )
     timeline_section = _render_timeline_section(instance, tg_cache)
     training_pane = render_training_pane()
+    demo_banner = _demo_mode_banner(demo_mode)
+    deploy_controls = "" if demo_mode else (
+        '<button id="deploy-btn" class="deploy-btn" type="button"\n'
+        '            onclick="quicksightDeploy()">Deploy changes</button>\n'
+        '    <span id="deploy-status" class="deploy-status" aria-live="polite"></span>'
+    )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -1552,15 +1600,14 @@ def _render_data_page(
   <link rel="stylesheet" href="{asset_url("data.css")}">
   {devlog_script}</head>
 <body class="data-page">
+  {demo_banner}
   <header class="studio-header">
     <h1>Studio · data shaping</h1>
     <span class="instance">{prefix}</span>
     <a class="nav-link" href="/">← landing</a>
     <a class="nav-link" href="/diagram">→ diagram</a>
     <a class="nav-link" href="/dashboards">→ dashboards</a>
-    <button id="deploy-btn" class="deploy-btn" type="button"
-            onclick="quicksightDeploy()">Deploy changes</button>
-    <span id="deploy-status" class="deploy-status" aria-live="polite"></span>
+    {deploy_controls}
   </header>
   <script>
     // X.4.h.1 — Deploy button mirrors the home page's. POSTs /deploy,
@@ -1678,7 +1725,9 @@ def make_studio_routes(
             surface that doesn't exercise the pipeline).
     """
     async def landing(_request: Request) -> HTMLResponse:
-        return HTMLResponse(_render_home_page(cache, dev_log, cfg=cfg))
+        return HTMLResponse(
+            _render_home_page(cache, dev_log, cfg=cfg, demo_mode=demo_mode),
+        )
 
     async def data(request: Request) -> HTMLResponse:
         # X.4.h.url — read URL query params into the cache so a
@@ -1693,6 +1742,7 @@ def make_studio_routes(
             tg_cache=tg_cache,
             etl_hook_command=etl_hook_command,
             cfg=cfg,
+            demo_mode=demo_mode,
         ))
 
     async def data_timeline(_request: Request) -> HTMLResponse:
@@ -1723,6 +1773,7 @@ def make_studio_routes(
                 coverage_available=db_pool is not None,
                 embed=embed,
                 cfg=cfg,
+                demo_mode=demo_mode,
             ),
         )
 

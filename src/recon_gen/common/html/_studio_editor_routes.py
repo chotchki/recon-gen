@@ -1622,9 +1622,13 @@ def _render_read_value(spec: FieldSpec, value: object) -> str:
 def _render_read_card(
     kind: EntityKind, entity: object,
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed to suppress fields hidden by the two-layer rule
+    *, demo_mode: bool = False,
 ) -> str:
     """Read-only card — the post-PUT response + the click-to-expand
     target for the list view.
+
+    AH.4: ``demo_mode`` drops the Edit / Delete actions (their routes
+    are 404'd in demo-mode anyway — the buttons shouldn't appear).
     """
     specs = _filter_specs_for_entity(_FIELD_SPECS_BY_KIND[kind], entity)
     entity_id = _entity_id(kind, entity)
@@ -1667,23 +1671,27 @@ def _render_read_card(
     # selector like ``#entity-chain-Foo::Bar``. The URL-side path stays
     # ``::`` (matches the L2 API key contract); only the HTML id swaps.
     html_id = f"entity-{kind}-{escape(_html_id_slug(entity_id))}"
-    return (
-        f'<article class="entity-card" id="{html_id}" '
-        f'data-kind="{escape(kind)}" data-entity-id="{escape(entity_id)}">'
-        f"<header>"
-        f"{title_html}"
+    # X.4.f.9.delete — DELETE on success returns empty (card disappears
+    # via outerHTML swap); on validator-rejected structural break returns
+    # 400 + the error fragment which swaps in place. No cascade — the
+    # operator clears the dependent reference first. AH.4: omitted in
+    # demo-mode (the edit / delete routes are 404'd there).
+    actions_html = "" if demo_mode else (
         f'<div class="entity-card-actions">'
         f'<a class="edit-link" hx-get="/l2_shape/{kind}/{escape(entity_id)}/edit" '
         f'hx-target="#{html_id}" hx-swap="outerHTML">Edit</a>'
-        # X.4.f.9.delete — DELETE on success returns empty (card disappears
-        # via outerHTML swap); on validator-rejected structural break
-        # returns 400 + the error fragment which swaps in place. No
-        # cascade — the operator clears the dependent reference first.
         f'<a class="delete-link" hx-delete="/l2_shape/{kind}/{escape(entity_id)}" '
         f'hx-target="#{html_id}" hx-swap="outerHTML" '
         f'hx-confirm="Delete this entity? References that block deletion '
         f'will be reported inline.">Delete</a>'
         f"</div>"
+    )
+    return (
+        f'<article class="entity-card" id="{html_id}" '
+        f'data-kind="{escape(kind)}" data-entity-id="{escape(entity_id)}">'
+        f"<header>"
+        f"{title_html}"
+        f"{actions_html}"
         f"</header>"
         f"<dl>{rows}</dl>"
         f"</article>"
@@ -2189,6 +2197,7 @@ def _render_list_page(
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — passed through to per-card hide logic
     *,
     embed: bool = False,
+    demo_mode: bool = False,
 ) -> str:
     """Full HTML page — every entity of the kind rendered as a read card.
 
@@ -2198,7 +2207,10 @@ def _render_list_page(
     htmx + the editor CSS + the htmx:beforeSwap fix, so the embed
     fragment doesn't need to redeclare them.
     """
-    cards = "\n".join(_render_read_card(kind, e, instance) for e in entities)
+    cards = "\n".join(
+        _render_read_card(kind, e, instance, demo_mode=demo_mode)
+        for e in entities
+    )
     if embed:
         return f'<div class="entity-list" data-kind="{escape(kind)}">{cards}</div>'
     return f"""<!doctype html>
@@ -2302,7 +2314,7 @@ def _entities_for_kind(
 # ---------------------------------------------------------------------------
 
 
-def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-handler ASGI callables; uniform shape but per-route closure
+def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-handler ASGI callables; uniform shape but per-route closure
     """Build closures over the cache for each route handler.
 
     Returned as a dict keyed by route name so ``make_editor_routes``
@@ -2335,7 +2347,7 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
         # without nesting full documents.
         embed = request.query_params.get("embed") == "1"
         return HTMLResponse(
-            _render_list_page(kind, entities, inst, embed=embed),
+            _render_list_page(kind, entities, inst, embed=embed, demo_mode=demo_mode),
         )
 
     async def read_card(request: Request) -> HTMLResponse:
@@ -2347,7 +2359,9 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
         entity = _find_entity_or_none(inst, kind, entity_id)
         if entity is None:
             return HTMLResponse("not found", status_code=404)
-        return HTMLResponse(_render_read_card(kind, entity, inst))
+        return HTMLResponse(
+            _render_read_card(kind, entity, inst, demo_mode=demo_mode),
+        )
 
     async def edit_form(request: Request) -> HTMLResponse:
         kind = _kind_from_path(request.path_params["kind"])
@@ -2456,7 +2470,7 @@ def _make_handlers(cache: L2InstanceCache) -> dict[str, Any]:  # typing-smell: i
             _post_mutate_entity_id(kind, new_fields, entity_id),
         )
         resp = HTMLResponse(
-            _render_read_card(kind, new_entity, new_inst)
+            _render_read_card(kind, new_entity, new_inst, demo_mode=demo_mode)
             if new_entity is not None else "saved",
         )
         # X.4.e.7 — diagram + entity list listen for this trigger and
@@ -2812,7 +2826,7 @@ def make_editor_routes(
     are preserved so the demo still surfaces "here are the accounts /
     rails / templates / chains in this L2".
     """
-    h = _make_handlers(cache)
+    h = _make_handlers(cache, demo_mode=demo_mode)
     # ``/new`` MUST be declared before ``/{entity_id}`` so Starlette's
     # path matcher doesn't treat the literal "new" as an entity_id.
     # In demo-mode the /new GET is stripped — list + read-card are the

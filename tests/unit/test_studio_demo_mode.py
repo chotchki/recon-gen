@@ -266,3 +266,69 @@ def test_demo_mode_preserves_trainer_knob_routes(
         f"demo_mode dropped trainer knob routes that should remain: "
         f"{sorted(missing)!r}"
     )
+
+
+# ---------- AH.4: demo-mode chrome cosmetics (rendered HTML) ----------
+# The route lockdown above is the load-bearing safety; these assert the
+# UX layer — a read-only banner + suppressed Deploy / create / edit
+# affordances so the demo doesn't tease buttons that 404.
+class TestDemoModeChrome:
+    def _home(self, yaml_path: Path, tmp_path: Path, *, demo_mode: bool) -> str:
+        from recon_gen.common.html._studio_routes import _render_home_page
+
+        cfg = _sqlite_cfg(tmp_path)
+        cache = L2InstanceCache.from_path(yaml_path)
+        return _render_home_page(
+            cache, dev_log=False, cfg=cfg, demo_mode=demo_mode,
+        )
+
+    def test_home_banner_present_only_in_demo_mode(
+        self, yaml_path: Path, tmp_path: Path,
+    ) -> None:
+        assert "Read-only demo" not in self._home(
+            yaml_path, tmp_path, demo_mode=False,
+        )
+        assert "Read-only demo" in self._home(
+            yaml_path, tmp_path, demo_mode=True,
+        )
+
+    def test_home_deploy_button_hidden_in_demo_mode(
+        self, yaml_path: Path, tmp_path: Path,
+    ) -> None:
+        assert 'id="deploy-btn"' in self._home(
+            yaml_path, tmp_path, demo_mode=False,
+        )
+        assert 'id="deploy-btn"' not in self._home(
+            yaml_path, tmp_path, demo_mode=True,
+        )
+
+    def test_home_create_affordance_hidden_in_demo_mode(
+        self, yaml_path: Path, tmp_path: Path,
+    ) -> None:
+        # The per-kind "+ Add" links + the singleton "Edit" link.
+        assert "+ Add" in self._home(yaml_path, tmp_path, demo_mode=False)
+        assert "+ Add" not in self._home(yaml_path, tmp_path, demo_mode=True)
+
+    def test_data_page_banner_and_deploy(
+        self, yaml_path: Path, tmp_path: Path,
+    ) -> None:
+        from recon_gen.common.html._studio_routes import _render_data_page
+
+        cfg = _sqlite_cfg(tmp_path)
+        cache = L2InstanceCache.from_path(yaml_path)
+        demo = _render_data_page(cache, dev_log=False, cfg=cfg, demo_mode=True)
+        live = _render_data_page(cache, dev_log=False, cfg=cfg, demo_mode=False)
+        assert "Read-only demo" in demo and 'id="deploy-btn"' not in demo
+        assert "Read-only demo" not in live and 'id="deploy-btn"' in live
+
+    def test_read_card_edit_delete_hidden_in_demo_mode(
+        self, yaml_path: Path,
+    ) -> None:
+        from recon_gen.common.html._studio_editor_routes import _render_read_card
+
+        inst = L2InstanceCache.from_path(yaml_path).get()
+        account = inst.accounts[0]
+        live = _render_read_card("account", account, inst, demo_mode=False)
+        demo = _render_read_card("account", account, inst, demo_mode=True)
+        assert "edit-link" in live and "delete-link" in live
+        assert "edit-link" not in demo and "delete-link" not in demo
