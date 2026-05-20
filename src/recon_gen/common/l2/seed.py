@@ -1331,6 +1331,21 @@ def emit_baseline_seed(
             )
         txn_rows.extend(rail_rows)
 
+    # AG.1 (Gap B): synthesize Template-parent firings BEFORE the chain
+    # overlay. For every TransferTemplate referenced as a Chain's
+    # `parent`, allocate firings (one per business day, shared
+    # transfer_id, template_name stamped) and record under the template
+    # name in state.firings so the chain overlay below picks them up
+    # as parent firings. Pre-fix: Template-parent chains silently
+    # emitted zero rows (state.firings[template] was always empty),
+    # breaking chain_parent_disagreement + L2FT chain_orphans for these
+    # shapes.
+    template_firing_rows = _emit_baseline_template_firings(
+        instance, state, txn_counter, dialect,
+        base_seed=effective_base_seed,
+    )
+    txn_rows.extend(template_firing_rows)
+
     # Chain firings overlay (R.2.d). For every Chain the L2 declares,
     # emit matching parent + child legs at the declared completion rate.
     chain_rows = _emit_baseline_chains(
@@ -2760,6 +2775,135 @@ def _poisson_sample(rng: random.Random, mean: float) -> int:
             return k - 1
 
 
+def _emit_baseline_template_firings(
+    instance: L2Instance,
+    state: _BaselineState,
+    counter: _Counter,
+    dialect: Dialect,
+    *,
+    base_seed: int = _BASELINE_BASE_SEED,
+) -> list[str]:
+    """AG.1 (Gap B): emit baseline firings for TransferTemplates that are
+    referenced as Chain parents.
+
+    Templates don't have their own R.2.b firing loop — leg_rails fire
+    independently in ``_emit_baseline_for_rail`` and groupings happen at
+    chain-child time (``_emit_chain_child_template_legs``). That left a
+    blind spot: when a Chain's ``parent`` is a TransferTemplate name,
+    ``state.firings.get(chain.parent, [])`` in ``_emit_baseline_chains``
+    returned ``[]`` because nothing wrote template-keyed firings. The
+    chain emit silently ``continue``'d and the chain produced ZERO rows.
+    Cascading effects:
+
+    - L1 ``chain_parent_disagreement`` matview never fires for these
+      shapes (no chain-emit rows → no template_name + transfer_parent_id
+      pairs to compare).
+    - L2FT ``chain_orphans`` dataset false-positives every parent firing
+      as orphan (children never link back).
+
+    This helper synthesizes one Template firing per business day for
+    every template appearing as a chain parent. Each firing allocates
+    ONE shared transfer_id (``tr-base-tmpl-NNNNNN``) and emits each
+    leg_rail's row via ``_emit_chain_child_leg`` with ``parent_transfer_id
+    =None`` (the template IS the root, no parent ref). Firing-level
+    amount + posting time come from the FIRST leg_rail's
+    ``_classify_rail`` kind so the daily-balance walk + cap budget see
+    consistent shape.
+
+    Records ``(shared_transfer_id, day, amount)`` in
+    ``state.firings[template.name]`` BEFORE emitting legs so any
+    downstream user of ``state.firings`` mid-pass sees them. The
+    subsequent ``_emit_baseline_chains`` pass picks them up as parent
+    firings of any Chain whose ``parent`` is this template name.
+
+    AB.3.4 XOR groups are honored — for each firing, one member of each
+    XOR group fires (keyed on the shared transfer_id, so the pick is
+    stable across leg iterations).
+
+    Templates referenced ONLY as chain children are NOT fired here —
+    they emit via ``_emit_chain_child_template_legs`` during
+    ``_emit_baseline_chains`` with ``parent_transfer_id`` set correctly.
+    """
+    if not instance.chains or not instance.transfer_templates:
+        return []
+
+    templates_by_name = {t.name: t for t in instance.transfer_templates}
+    parent_template_names: set[Identifier] = set()
+    for chain in instance.chains:
+        if chain.parent in templates_by_name:
+            parent_template_names.add(chain.parent)
+    if not parent_template_names:
+        return []
+
+    rails_by_name = {r.name: r for r in instance.rails}
+    rows: list[str] = []
+
+    for tmpl_name in sorted(parent_template_names, key=str):
+        template = templates_by_name[tmpl_name]
+        if not template.leg_rails:
+            continue
+        first_leg = rails_by_name.get(template.leg_rails[0])
+        if first_leg is None:
+            continue
+        # Honor skip_rails + only_rails (X.4.g.10 / X.4.i.1) transparently:
+        # if the first leg_rail didn't fire in the rail loop (because it
+        # was filtered out), state.firings is empty for it and the
+        # template can't fire as a unit either. Same "naturally produces
+        # nothing downstream" pattern the rail loop relies on for chains
+        # + cascade credits + daily balances.
+        if not state.firings.get(first_leg.name):
+            continue
+
+        kind = _classify_rail(first_leg)
+        # Per-template RNG keyed off base_seed + template name — changes
+        # to other templates don't ripple into this template's firings.
+        tmpl_rng = random.Random(
+            base_seed ^ (zlib.crc32(str(tmpl_name).encode("utf-8")) & 0x7FFFFFFF),
+        )
+
+        for day in state.business_days:
+            n_shared = counter.next()
+            shared_transfer_id = f"tr-base-tmpl-{n_shared:06d}"
+
+            # Firing-level amount is sampled once from the first
+            # leg_rail's distribution and passed to each leg emit as
+            # parent_amount — the legs themselves sample their own
+            # leg-level amounts internally for the row's `money` value;
+            # this firing-level amount is what state.firings carries
+            # for downstream chain-emit pickup.
+            firing_amount = _baseline_amount_sample(
+                tmpl_rng, kind, cap=None, rail=first_leg,
+            )
+
+            # Record firing BEFORE emitting legs so any read-during-emit
+            # of state.firings (defensive future-proofing) sees it.
+            state.firings.setdefault(tmpl_name, []).append(
+                (shared_transfer_id, day, firing_amount),
+            )
+
+            # AB.3.4 XOR suppression keyed on the firing's shared id.
+            xor_suppressed = _xor_suppressed_members(
+                template, firing_id=shared_transfer_id,
+            )
+
+            for leg_rail_name in template.leg_rails:
+                if str(leg_rail_name) in xor_suppressed:
+                    continue
+                leg_rail = rails_by_name.get(leg_rail_name)
+                if leg_rail is None:
+                    continue
+                leg_rows = _emit_chain_child_leg(
+                    leg_rail, instance, state,
+                    None,  # parent_transfer_id — template is the root
+                    day, firing_amount,
+                    counter, tmpl_rng, dialect,
+                    shared_transfer_id=shared_transfer_id,
+                    template_name=tmpl_name,
+                )
+                rows.extend(leg_rows)
+    return rows
+
+
 def _emit_baseline_chains(
     instance: L2Instance,
     state: _BaselineState,
@@ -3088,7 +3232,7 @@ def _emit_chain_child_leg(
     child_rail: Rail,
     instance: L2Instance,
     state: _BaselineState,
-    parent_transfer_id: str,
+    parent_transfer_id: str | None,
     parent_day: date,
     parent_amount: Decimal,
     counter: _Counter,
@@ -3114,6 +3258,12 @@ def _emit_chain_child_leg(
     AB.2.3 chain_parent_disagreement matview's `template_name IS NOT
     NULL` filter catches them. txn_id stays per-leg so individual
     transactions remain addressable.
+
+    AG.1: ``parent_transfer_id`` is ``None`` when this helper is reused
+    from ``_emit_baseline_template_firings`` to emit Template-parent
+    leg_rail rows — the template IS the root of the chain hierarchy so
+    its own legs carry no parent ref. ``_txn_row`` writes the column as
+    SQL NULL in that case.
     """
     kind = _classify_rail(child_rail)
     rail_slug = _baseline_rail_slug(child_rail.name)

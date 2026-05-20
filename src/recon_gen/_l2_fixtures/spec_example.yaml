@@ -331,6 +331,29 @@ chains:
       whose parent_count != expected_parent_count (missing contributor
       or extra contributor — both ETL bugs).
 
+  # AG.1.spec (2026-05-19) — Template-parent + Template-child shape so
+  # spec_example exercises the 4th cell of the {Rail/Template} ×
+  # {parent/child} matrix as integration coverage (the AG.1 unit test
+  # also covers this via a synthetic L2, but integration coverage in
+  # the locked seed surfaces Gap B regressions in plant + matview
+  # behavior, not just the bare row emission). Both endpoints are
+  # already-declared TransferTemplates: SettlementTimingCycle as parent
+  # (3 leg_rails with an XOR group on Auto/Standard) → BatchedPayoutBatch
+  # as child (1 leg_rail). BatchedPayoutBatch is also a chain child of
+  # the AB.4.5.spec fan-in chain; that's fine — same child shape from
+  # two distinct parent chains is a valid L2 declaration.
+  - parent: SettlementTimingCycle
+    children:
+      - BatchedPayoutBatch
+    description: |
+      Demonstrates Template-parent + Template-child chain semantics
+      (AG.1 Gap B regression coverage). Without the AG.1 fix,
+      ``state.firings[SettlementTimingCycle]`` is empty at chain-emit
+      time and this chain silently emits zero rows — the locked seed
+      surfaces the bug on regression. With the fix, the parent
+      template fires once per business day and the chain threads
+      ``transfer_parent_id`` through BatchedPayoutBatch's leg_rail.
+
   # AB.6.5.spec (2026-05-19) — dedicated multi-XOR chain so the
   # AB.6.5 _multi_xor_violation matview has rows to surface. Per
   # AB.6.0 Lock 5: rather than mutate an existing chain (which would
