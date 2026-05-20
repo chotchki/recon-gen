@@ -1,5 +1,33 @@
 # Release Notes
 
+## v11.8.0 — Phase AH (post-AE polish + bug sweep)
+
+Surfaced largely by the public Mac-mini demo + integrator feedback.
+
+- **App2 rich-text parity (AH.2).** The self-hosted HTMX renderer now
+  mirrors QuickSight's full text-box vocabulary — `<b>/<i>/<s>/<u>`,
+  `<inline background-color/font-family>`, `<block align>`,
+  `<expression>`, and `ql-indent-N` bullet nesting (vocab confirmed by
+  round-tripping a hand-authored QS box). A lone newline is now a
+  CommonMark soft break (collapses to a space, not `<br/>`), fixing the
+  over-wrapping seen on the demo. Bullets render again — Tailwind
+  Preflight was stripping list markers; restored via list / margin
+  utilities (full Tailwind, no hand-rolled CSS).
+- **Studio `--demo-mode` chrome (AH.4).** A "Read-only demo" banner +
+  hidden Deploy / create / edit affordances on the public studio demo
+  (the route-level lockdown remains the load-bearing safety).
+- **README live demo links (AH.3).** The two public demos lead the
+  "See it live" section.
+- **Demo-host nightly refresh fixed (AH.6).** The server restart was a
+  LaunchAgent-era `launchctl kickstart gui/<uid>` that exited 125 against
+  the migrated system-domain daemons; now SIGTERM + KeepAlive respawn
+  (the non-admin demo user can't manage system services).
+- **Docs build chain cleanup (AH.5).** Persona-leak generalization +
+  stable heading anchors re-enable the persona-neutral + dead-link gates.
+- **CI / infra.** Coverage artifact upload fixed (`include-hidden-files`);
+  a LOCAL `output.css` Tailwind-drift gate (pinned Tailwind version;
+  skips in CI, where cross-platform builds aren't byte-identical).
+
 ## v11.7.1 — bundled-fixture re-sync (v11.7.0 release-gate fix)
 
 v11.7.0's release gate failed (never published — no PyPI artifact, no
