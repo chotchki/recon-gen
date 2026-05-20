@@ -73,6 +73,10 @@ jobs:
         with:
           name: coverage-data-release-unit
           path: .coverage.release-unit
+          # AH.1 — .coverage.* is hidden (leading dot); v7 excludes
+          # hidden files by default, dropping per-leg coverage from the
+          # aggregator.
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 
@@ -218,6 +222,8 @@ jobs:
         with:
           name: coverage-data-release-smoke
           path: .coverage.release-smoke
+          # AH.1 — see coverage-data-release-unit note.
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 
@@ -620,6 +626,8 @@ jobs:
         with:
           name: coverage-data-release-e2e
           path: .coverage.release-e2e-*
+          # AH.1 — see coverage-data-release-unit note.
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 

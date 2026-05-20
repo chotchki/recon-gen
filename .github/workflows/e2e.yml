@@ -241,6 +241,10 @@ jobs:
         with:
           name: coverage-data-e2e-pg-api
           path: .coverage.e2e-pg-api
+          # AH.1 — .coverage.* is hidden (leading dot); v7 defaults to
+          # excluding hidden files, which silently dropped every per-leg
+          # coverage measurement from the aggregator.
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 
@@ -490,6 +494,8 @@ jobs:
         with:
           name: coverage-data-e2e-pg-browser
           path: .coverage.e2e-pg-*
+          # AH.1 — see coverage-data-e2e-pg-api note.
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 
@@ -631,6 +637,8 @@ jobs:
         with:
           name: coverage-data-e2e-oracle-api
           path: .coverage.e2e-oracle-api
+          # AH.1 — see coverage-data-e2e-pg-api note.
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 
