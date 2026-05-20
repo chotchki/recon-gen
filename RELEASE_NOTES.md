@@ -1,5 +1,55 @@
 # Release Notes
 
+## v11.7.0 — firings_typical_per_period (E8) + generator gap fixes (post-AE wave)
+
+Two phases ship together — **Phase AF** (SPEC Enhancement 8) and
+**Phase AG** (six generator implementation gaps surfaced during
+integrator phase-2 testing). No breaking changes: every new field is
+optional and default-unset; existing L2 yamls load + validate
+unchanged.
+
+### AF — `firings_typical_per_period`
+
+The complement to `amount_typical_range`: an optional soft bound on how
+MANY times a Rail (or TransferTemplate) fires per period. count ×
+per-firing amount = a realistic per-period aggregate — the dashboard
+top-line operators scan first when judging plausibility. Two YAML
+shapes: compact `[min, max]` (defaults to per business day) or
+`{period, range}` with `period ∈ business_day | pay_period | week |
+month`. The generator samples uniform-random per period × periods in
+the window; when absent it falls back to the per-kind heuristic
+*without consuming RNG*, so pre-AF locked seeds stay byte-identical.
+Validator W1a-c (min ≤ max, both ≥ 0, forbidden on aggregating rails —
+cadence already governs those). Full stack: primitives + loader /
+serializer / validator + seed generator + fuzz (~30% of non-aggregating
+rails) + studio editor (composite text field on the Rail + Template
+cards) + docs (concept + walkthrough + Schema_v6). Generator-only first
+cut; the runtime `volume_anomaly` matview is deferred. spec_example +
+sasquatch fixtures gained realistic per-rail counts (sasquatch's
+baseline-leg sanity band rose to match the gap-doc volumes).
+
+### AG — generator implementation gaps (B / C / A / D / E / F)
+
+- **B** — Template-parent chains now thread `transfer_parent_id` through
+  child firings (was NULL, which broke the `chain_parent_disagreement`
+  invariant + false-positived L2FT chain-orphans for those shapes).
+- **C** — baseline multi-children chains now fire exactly one child per
+  parent firing (the chain.md XOR contract), eliminating false-positive
+  `multi_xor_violation` rows on healthy baselines.
+- **A** — the three chain-parent pickers + four plant emitters accept
+  Template parents (were Rail-only), unblocking 7 plant kinds for
+  template-heavy L2 instances.
+- **D** — inbound over-match guard: a payroll/batch rail whose name
+  contains "inbound" now routes to a new system-scaled `PAYROLL_BATCH`
+  kind instead of per-customer scaling (the ~80×/day over-fire). Scoped
+  minimal — AF is the universal per-rail count override.
+- **E** — Studio's per-node plant-count badges now cover the AB.1-AB.6
+  plant kinds (the diagram view was silently under-counting).
+- **F** — docs note that the auto-scenario picks one rail per plant
+  kind by design (it's a teaching demo, not a coverage tool).
+
+Locked seeds re-locked for spec_example (AF.5.spec + AG.1 + AG.2).
+
 ## v11.6.6 — Studio --demo-mode keeps read-only L2 browse routes
 
 v11.6.5's `--demo-mode` stripped the entire `make_editor_routes()`
