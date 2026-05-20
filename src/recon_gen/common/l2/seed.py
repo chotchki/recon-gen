@@ -4394,9 +4394,15 @@ def _emit_two_template_chain_rows(
     panel + audit PDF — a clearly-labeled healthy two-template chain
     row, separate from the probabilistic baseline.
     """
-    parent_rail = _find_rail_or_skip(p.chain_parent_rail_name, instance)
-    if parent_rail is None:
+    # AG.3 (Gap A): accept Rail OR Template parents. Template parents
+    # synthesize the parent row via the template's first leg_rail and
+    # stamp template_name on the row so it reads as a template firing.
+    parent_resolution = _resolve_plant_chain_parent(
+        p.chain_parent_rail_name, instance,
+    )
+    if parent_resolution is None:
         return []
+    parent_rail_for_emit, parent_template_for_emit = parent_resolution
     child_template = _find_template_or_skip(p.child_template_name, instance)
     if child_template is None or not child_template.leg_rails:
         return []
@@ -4421,10 +4427,10 @@ def _emit_two_template_chain_rows(
     child_transfer_id = f"tr-tmpl-chain-child-{n_child:04d}"
 
     rows: list[str] = []
-    # Parent firing: one row keyed to parent_rail, no template_name (the
-    # parent of a two-template chain may itself be either a Rail or a
-    # Template; for this plant we treat it as a single-leg debit row
-    # for SQL simplicity — the matview only inspects child rows).
+    # Parent firing: one row keyed to parent_rail_for_emit, with
+    # template_name set when the chain.parent resolved to a Template
+    # (AG.3 — Gap A). For SQL simplicity the parent is a single-leg
+    # debit row — the matview only inspects child rows.
     rows.append(_txn_row(
         id_=f"tx-tmpl-chain-parent-{n_parent:04d}",
         account_id=ti.account_id,
@@ -4436,7 +4442,8 @@ def _emit_two_template_chain_rows(
         direction="Debit",
         posting=parent_posting,
         transfer_id=parent_transfer_id,
-        rail_name=p.chain_parent_rail_name,
+        rail_name=parent_rail_for_emit,
+        template_name=parent_template_for_emit,
         origin="InternalInitiated",
         metadata={},
         dialect=dialect,
@@ -4568,9 +4575,13 @@ def _emit_fan_in_chain_plant_rows(
     ``'fanin-m'`` / ``'fanin-x'``) so analysts can grep the dialect-
     specific SQL for the plant kind.
     """
-    parent_rail = _find_rail_or_skip(chain_parent_rail_name, instance)
-    if parent_rail is None:
+    # AG.3 (Gap A): accept Rail OR Template parents.
+    parent_resolution = _resolve_plant_chain_parent(
+        chain_parent_rail_name, instance,
+    )
+    if parent_resolution is None:
         return []
+    parent_rail_for_emit, parent_template_for_emit = parent_resolution
     child_template = _find_template_or_skip(child_template_name, instance)
     if child_template is None or not child_template.leg_rails:
         return []
@@ -4607,7 +4618,8 @@ def _emit_fan_in_chain_plant_rows(
             direction="Debit",
             posting=parent_posting,
             transfer_id=parent_transfer_id,
-            rail_name=chain_parent_rail_name,
+            rail_name=parent_rail_for_emit,
+            template_name=parent_template_for_emit,
             origin="InternalInitiated",
             metadata={},
             dialect=dialect,
@@ -4839,8 +4851,13 @@ def _emit_multi_xor_missed_rows(
     rail isn't declared (defensive — the picker filters these, but
     this preserves the contract on hand-built scenarios).
     """
-    if not _find_rail_or_skip(p.chain_parent_rail_name, instance):
+    # AG.3 (Gap A): accept Rail OR Template parents.
+    parent_resolution = _resolve_plant_chain_parent(
+        p.chain_parent_rail_name, instance,
+    )
+    if parent_resolution is None:
         return []
+    parent_rail_for_emit, parent_template_for_emit = parent_resolution
     ti = _first_template_instance_or_skip(scenarios)
     if ti is None:
         return []
@@ -4865,7 +4882,8 @@ def _emit_multi_xor_missed_rows(
         direction="Credit",
         posting=posting,
         transfer_id=parent_tid,
-        rail_name=p.chain_parent_rail_name,
+        rail_name=parent_rail_for_emit,
+        template_name=parent_template_for_emit,
         origin="InternalInitiated",
         metadata={},
         dialect=dialect,
@@ -4893,8 +4911,13 @@ def _emit_multi_xor_overlap_rows(
     Graceful skip when the parent rail doesn't exist or no template
     instance is available.
     """
-    if not _find_rail_or_skip(p.chain_parent_rail_name, instance):
+    # AG.3 (Gap A): accept Rail OR Template parents.
+    parent_resolution = _resolve_plant_chain_parent(
+        p.chain_parent_rail_name, instance,
+    )
+    if parent_resolution is None:
         return []
+    parent_rail_for_emit, parent_template_for_emit = parent_resolution
     ti = _first_template_instance_or_skip(scenarios)
     if ti is None:
         return []
@@ -4931,7 +4954,7 @@ def _emit_multi_xor_overlap_rows(
     child_b_tid = f"tr-mxor-overlap-{n:04d}-b"
 
     rows: list[str] = []
-    # Parent firing (chain.parent rail).
+    # Parent firing (chain.parent rail OR template — AG.3 Gap A).
     rows.append(_txn_row(
         id_=f"tx-mxor-overlap-{n:04d}-p",
         account_id=ti.account_id,
@@ -4943,7 +4966,8 @@ def _emit_multi_xor_overlap_rows(
         direction="Credit",
         posting=posting_parent,
         transfer_id=parent_tid,
-        rail_name=p.chain_parent_rail_name,
+        rail_name=parent_rail_for_emit,
+        template_name=parent_template_for_emit,
         origin="InternalInitiated",
         metadata={},
         dialect=dialect,
@@ -4984,6 +5008,39 @@ def _find_rail_or_skip(name: Identifier, instance: L2Instance) -> Rail | None:
     for r in instance.rails:
         if r.name == name:
             return r
+    return None
+
+
+def _resolve_plant_chain_parent(
+    name: Identifier, instance: L2Instance,
+) -> tuple[Identifier, Identifier | None] | None:
+    """AG.3 (Gap A): resolve a chain.parent identifier to the
+    ``(rail_name_for_emit, template_name_for_emit)`` pair to stamp on
+    a plant-emitted parent row.
+
+    Mirrors the picker-side AG.3 fix: picker tuples carry a chain
+    parent that may resolve to either a Rail or a TransferTemplate.
+    Plant emitters need to synthesize a valid parent row whose
+    ``rail_name`` column references a real Rail (per the schema
+    convention that template firings stamp the leg_rail's name in
+    ``rail_name`` and the template's name in ``template_name``).
+
+    - Rail parent ``X``: returns ``(X, None)`` — caller stamps
+      ``rail_name=X`` and leaves ``template_name`` NULL.
+    - Template parent ``T`` (with at least one leg_rail): returns
+      ``(T.leg_rails[0], T)`` — caller stamps ``rail_name=leg_rails[0]``
+      AND ``template_name=T`` so the row reads as a template firing
+      via its first leg_rail (consistent with how chain-child template
+      legs are emitted at ``_emit_chain_child_template_legs``).
+    - Returns ``None`` if name resolves to neither a Rail nor a
+      Template (defensive — pickers should guard, but plant emit stays
+      tolerant of hand-built scenarios).
+    """
+    if _find_rail_or_skip(name, instance) is not None:
+        return (name, None)
+    template = _find_template_or_skip(name, instance)
+    if template is not None and template.leg_rails:
+        return (template.leg_rails[0], template.name)
     return None
 
 

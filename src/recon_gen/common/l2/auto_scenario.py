@@ -202,17 +202,24 @@ def default_scenario_for(
     # whose parent is a Rail (so the plant can synthesize parent legs).
     fan_in_pick = _pick_fan_in_chain_inputs(instance)
     if fan_in_pick is None:
+        # AG.3 (Gap A): the message is "no Chain declares fan_in=True
+        # AND a parent the picker supports" — the parent can now be a
+        # Rail OR a Template (post-AG.3); pre-AG.3 the rejection often
+        # happened on the Rail-only filter even when fan_in WAS declared.
         omitted.append((
             "FanInChainPlant",
-            "no Chain declares fan_in=True (AB.4)",
+            "no Chain declares fan_in=True with a known Rail or "
+            "Template parent (AB.4)",
         ))
         omitted.append((
             "FanInChainMissingParentPlant",
-            "no Chain declares fan_in=True (AB.4)",
+            "no Chain declares fan_in=True with a known Rail or "
+            "Template parent (AB.4)",
         ))
         omitted.append((
             "FanInChainExtraParentPlant",
-            "no Chain declares fan_in=True (AB.4)",
+            "no Chain declares fan_in=True with a known Rail or "
+            "Template parent (AB.4)",
         ))
     # AB.6.6 — Multi-XOR chain plant picker: any chain with ≥2 non-fan_in
     # children and a Rail parent (so the plant can synthesize parent
@@ -220,15 +227,18 @@ def default_scenario_for(
     # (count≥2) branches of the AB.6.5 _multi_xor_violation matview.
     multi_xor_pick = _pick_multi_xor_chain_inputs(instance)
     if multi_xor_pick is None:
+        # AG.3 (Gap A): "with a Rail or Template parent" — Template
+        # parents are now eligible (the plant emitter synthesizes the
+        # parent row from the template's first leg_rail).
         omitted.append((
             "MultiXorMissedPlant",
-            "no Chain declares ≥2 non-fan_in children with a Rail "
-            "parent (AB.6)",
+            "no Chain declares ≥2 non-fan_in children with a known "
+            "Rail or Template parent (AB.6)",
         ))
         omitted.append((
             "MultiXorOverlapPlant",
-            "no Chain declares ≥2 non-fan_in children with a Rail "
-            "parent (AB.6)",
+            "no Chain declares ≥2 non-fan_in children with a known "
+            "Rail or Template parent (AB.6)",
         ))
     pending_rail = _pick_first_with(
         instance.rails, key=lambda r: r.max_pending_age is not None,
@@ -1721,14 +1731,14 @@ def _pick_two_template_chain_inputs(
     """AB.2.6 picker: find any Chain whose singleton child is a
     TransferTemplate (the template-as-chain-child shape, gap doc §3).
 
-    Returns ``(parent_rail_name, child_template_name)`` if found, else
+    Returns ``(parent_name, child_template_name)`` if found, else
     ``None``. Restricts to singleton-children chains because Z.A's XOR
     semantics on multi-children chains make parent_transfer_id optional
     per leg (which would make the AB.2.6 plant probabilistic rather
-    than deterministic). The parent MUST resolve to a Rail (not a
-    TransferTemplate) — two-template chains where BOTH ends are
-    templates are valid but produce nested-firing semantics out of
-    scope for the AB.2 plant scaffold.
+    than deterministic). AG.3 (Gap A) lifts the prior Rail-only-parent
+    restriction — Template-parent chains are now eligible, with the
+    plant emitter synthesizing the parent row from the template's
+    first leg_rail.
     """
     template_names = {t.name for t in instance.transfer_templates}
     rail_names = {r.name for r in instance.rails}
@@ -1741,7 +1751,10 @@ def _pick_two_template_chain_inputs(
     ):
         if len(c.children) != 1:
             continue
-        if c.parent not in rail_names:
+        # AG.3 (Gap A): accept Rail OR Template parents. Plant emitter
+        # synthesizes a parent row via the Template's first leg_rail
+        # when the parent resolves to a Template.
+        if c.parent not in rail_names and c.parent not in template_names:
             continue
         child = c.children[0].name
         if child in template_names:
@@ -1809,15 +1822,15 @@ def _pick_fan_in_chain_inputs(
 ) -> tuple[Identifier, Identifier, int | None] | None:
     """AB.4.5 picker: find any Chain that declares ``fan_in=True``.
 
-    Returns ``(chain_parent_rail_name, child_template_name,
+    Returns ``(chain_parent_name, child_template_name,
     expected_parent_count_or_None)`` if found, else ``None``.
     Iterates chains in deterministic order (sorted by parent + sorted-
     children CSV); takes the first child of the first fan_in chain
     (validator C8a guarantees every fan_in child is a TransferTemplate,
-    so the first child resolves cleanly). The picker also restricts
-    to chains whose parent resolves to a Rail (not a TransferTemplate)
-    so the plant emitter can synthesize parent legs without needing
-    nested-firing logic — same restriction AB.2.6 carries.
+    so the first child resolves cleanly). AG.3 (Gap A) lifts the prior
+    Rail-only-parent restriction — Template-parent fan-in chains are
+    now eligible; the plant emitter synthesizes parent rows from the
+    Template's first leg_rail when needed.
 
     ``expected_parent_count`` is passed through verbatim (None ⇒
     variable-batch-flow; the matview falls back to orphan-only
@@ -1825,6 +1838,7 @@ def _pick_fan_in_chain_inputs(
     scenario since there's no upper bound to flag).
     """
     rail_names = {r.name for r in instance.rails}
+    template_names = {t.name for t in instance.transfer_templates}
     for c in sorted(
         instance.chains,
         key=lambda ch: (
@@ -1835,7 +1849,8 @@ def _pick_fan_in_chain_inputs(
         fan_in_child = next((ch for ch in c.children if ch.fan_in), None)
         if fan_in_child is None:
             continue
-        if c.parent not in rail_names:
+        # AG.3 (Gap A): accept Rail OR Template parents.
+        if c.parent not in rail_names and c.parent not in template_names:
             continue
         return (c.parent, fan_in_child.name, fan_in_child.expected_parent_count)
     return None
@@ -1845,25 +1860,26 @@ def _pick_multi_xor_chain_inputs(
     instance: L2Instance,
 ) -> tuple[Identifier, Identifier, Identifier] | None:
     """AB.6.6 picker: find any Chain with ≥2 non-fan_in children whose
-    parent resolves to a Rail (not a TransferTemplate).
+    parent resolves to either a Rail or a TransferTemplate.
 
-    Returns ``(chain_parent_rail_name, child_a_name, child_b_name)``
-    or ``None``. Skips per-child fan_in entries entirely (AB.5
-    coupling — their cardinality is _fan_in_disagreement's job, not
+    Returns ``(chain_parent_name, child_a_name, child_b_name)`` or
+    ``None``. Skips per-child fan_in entries entirely (AB.5 coupling —
+    their cardinality is _fan_in_disagreement's job, not
     _multi_xor_violation's). Mixed-cardinality chains qualify as long
     as ≥2 non-fan_in children remain.
 
-    The parent-rail restriction mirrors AB.2.6 / AB.4.5: the plant
-    emitter synthesizes parent firings via the chain.parent rail
-    name, which only makes sense when parent is a Rail (a
-    TransferTemplate parent would require nested-firing logic the
-    AB.6.6 plant scaffold doesn't carry).
+    AG.3 (Gap A) lifts the prior Rail-only-parent restriction. Template
+    parents are now eligible; the plant emitter synthesizes the parent
+    row from the Template's first leg_rail when needed (the AB.6.5
+    matview LEFT JOINs children on transfer_parent_id and doesn't read
+    the parent row's rail_name semantically).
 
     Determinism: chains traversed in (parent-name, sorted-children-
     CSV) order — same key the seed loop uses; children traversed in
     declared order; the first two non-fan_in children win.
     """
     rail_names = {r.name for r in instance.rails}
+    template_names = {t.name for t in instance.transfer_templates}
     for c in sorted(
         instance.chains,
         key=lambda ch: (
@@ -1871,7 +1887,8 @@ def _pick_multi_xor_chain_inputs(
             ",".join(sorted(str(d.name) for d in ch.children)),
         ),
     ):
-        if c.parent not in rail_names:
+        # AG.3 (Gap A): accept Rail OR Template parents.
+        if c.parent not in rail_names and c.parent not in template_names:
             continue
         non_fan_in = [child for child in c.children if not child.fan_in]
         if len(non_fan_in) < 2:
