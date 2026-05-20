@@ -186,3 +186,45 @@ def test_multiple_plants_on_same_node_accumulate(
     assert tm.by_node_id[_role_id(Identifier("CustomerSubledger"))] == {
         "drift": 2,
     }
+
+
+_SASQUATCH = Path(__file__).resolve().parent.parent / "l2" / "sasquatch_pr.yaml"
+
+
+def test_ab_plant_kinds_surface_in_per_node_badges() -> None:
+    """AG.5 (Gap E): every AB.1-AB.6 plant kind the auto-scenario carries
+    for sasquatch_pr must appear in the per-node badge map.
+
+    Pre-fix ``plants_per_node`` iterated only the original 9 kinds, so the
+    Studio chrome silently under-counted the post-AB.0 plant surface
+    (integrators read "no plants here" on nodes that actually carry AB.x
+    rows). Derives the expected kind set from the scenario itself so the
+    test stays correct as the auto-scenario evolves.
+    """
+    from recon_gen.common.l2.auto_scenario import default_scenario_for
+
+    inst = load_instance(_SASQUATCH)
+    scenario = default_scenario_for(inst).scenario
+
+    ab_tuples = {
+        "inbound_cap_breach": scenario.inbound_cap_breach_plants,
+        "two_template_chain": scenario.two_template_chain_plants,
+        "chain_parent_disagreement": scenario.chain_parent_disagreement_plants,
+        "xor_variant_missed_firing": scenario.xor_variant_missed_firing_plants,
+        "xor_variant_overlap": scenario.xor_variant_overlap_plants,
+        "fan_in_chain": scenario.fan_in_chain_plants,
+        "fan_in_chain_missing_parent": scenario.fan_in_chain_missing_parent_plants,
+        "fan_in_chain_extra_parent": scenario.fan_in_chain_extra_parent_plants,
+        "multi_xor_missed": scenario.multi_xor_missed_plants,
+        "multi_xor_overlap": scenario.multi_xor_overlap_plants,
+    }
+    expected_kinds = {k for k, tup in ab_tuples.items() if tup}
+    assert expected_kinds, "sasquatch scenario should carry SOME AB plant kinds"
+
+    tm = plants_per_node(inst, scenario=scenario)
+    seen_kinds = {kind for kinds in tm.by_node_id.values() for kind in kinds}
+    missing = expected_kinds - seen_kinds
+    assert not missing, (
+        f"AB plant kinds carried by the scenario but missing from per-node "
+        f"badges (Gap E bit-rot): {sorted(missing)}"
+    )

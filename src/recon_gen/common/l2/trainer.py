@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal
 
 from recon_gen.common.l2.auto_scenario import default_scenario_for
 from recon_gen.common.l2.primitives import Identifier, L2Instance
@@ -34,9 +35,25 @@ from recon_gen.common.l2.topology import (
 
 # All the plant kinds the chrome cares about. Lower-case so they
 # round-trip cleanly through the JSON shape and the SVG
-# ``data-trainer-kinds`` attr (comma-joined) without escaping.
-PlantKind = str  # one of: drift, overdraft, limit_breach, stuck_pending,
-# stuck_unbundled, supersession, failed, transfer_template, inv_fanout
+# ``data-trainer-kinds`` attr (comma-joined) without escaping. AG.5
+# (Gap E) made this an authoritative Literal (was a rotted ``str`` alias
+# whose comment listed only the original 9) — it now enumerates every
+# plant kind ``plants_per_node`` can emit, so a new ScenarioPlant tuple
+# that forgets to wire a badge fails pyright at the ``_bump`` call site.
+# NOTE: a superset of ``config.PlantKind`` (the 6 operator-TOGGLEABLE L1
+# kinds) — the extra kinds are badge/timeline-visible but not gated by
+# ``cfg.test_generator.plants``.
+PlantKind = Literal[
+    # Original 9 (M-phase).
+    "drift", "overdraft", "limit_breach", "stuck_pending", "stuck_unbundled",
+    "supersession", "failed", "transfer_template", "inv_fanout",
+    # AB.1-AB.6 chain / template / cap plant kinds.
+    "inbound_cap_breach",
+    "two_template_chain", "chain_parent_disagreement",
+    "xor_variant_missed_firing", "xor_variant_overlap",
+    "fan_in_chain", "fan_in_chain_missing_parent", "fan_in_chain_extra_parent",
+    "multi_xor_missed", "multi_xor_overlap",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,9 +147,69 @@ def plants_per_node(
     for p in scenario.inv_fanout_plants:
         _bump(_rail_id(p.rail_name), "inv_fanout")
 
+    # AG.5 (Gap E): AB.1-AB.6 plant kinds. Bindings per gap doc:
+    #   - inbound_cap_breach → role + rail (mirrors limit_breach)
+    #   - two_template_chain / chain_parent_disagreement / fan_in trio →
+    #     the chain-CHILD template node (the disagreement / cardinality
+    #     check is observed on the child)
+    #   - xor_variant_missed/overlap → the template carrying the XOR group
+    #   - multi_xor_missed/overlap → the chain PARENT (rail OR template;
+    #     post-AG.3 a chain parent can be either), where the XOR
+    #     violation is observed at the parent firing.
+    for p in scenario.inbound_cap_breach_plants:
+        role = role_lookup.get(p.account_id)
+        if role is not None:
+            _bump(_role_id(role), "inbound_cap_breach")
+        _bump(_rail_id(p.rail_name), "inbound_cap_breach")
+
+    for p in scenario.two_template_chain_plants:
+        _bump(_template_id(p.child_template_name), "two_template_chain")
+
+    for p in scenario.chain_parent_disagreement_plants:
+        _bump(_template_id(p.child_template_name), "chain_parent_disagreement")
+
+    for p in scenario.xor_variant_missed_firing_plants:
+        _bump(_template_id(p.template_name), "xor_variant_missed_firing")
+
+    for p in scenario.xor_variant_overlap_plants:
+        _bump(_template_id(p.template_name), "xor_variant_overlap")
+
+    for p in scenario.fan_in_chain_plants:
+        _bump(_template_id(p.child_template_name), "fan_in_chain")
+
+    for p in scenario.fan_in_chain_missing_parent_plants:
+        _bump(_template_id(p.child_template_name), "fan_in_chain_missing_parent")
+
+    for p in scenario.fan_in_chain_extra_parent_plants:
+        _bump(_template_id(p.child_template_name), "fan_in_chain_extra_parent")
+
+    for p in scenario.multi_xor_missed_plants:
+        _bump(
+            _chain_parent_node_id(p.chain_parent_rail_name, instance),
+            "multi_xor_missed",
+        )
+
+    for p in scenario.multi_xor_overlap_plants:
+        _bump(
+            _chain_parent_node_id(p.chain_parent_rail_name, instance),
+            "multi_xor_overlap",
+        )
+
     return TrainerMap(
         by_node_id={k: dict(v) for k, v in counts.items()},
     )
+
+
+def _chain_parent_node_id(name: Identifier, instance: L2Instance) -> str:
+    """AG.5 (Gap E): resolve a chain-parent identifier to its topology
+    node id. Post-AG.3 a chain parent may resolve to either a Rail or a
+    TransferTemplate; pick the matching node so the multi_xor badge lands
+    on the right shape. Defaults to the rail node if the name resolves to
+    neither (defensive — the picker guards, but keep the badge from
+    silently vanishing)."""
+    if any(t.name == name for t in instance.transfer_templates):
+        return _template_id(name)
+    return _rail_id(name)
 
 
 def _account_id_to_role(instance: L2Instance) -> dict[Identifier, Identifier]:

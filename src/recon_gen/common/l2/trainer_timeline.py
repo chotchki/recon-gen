@@ -148,6 +148,18 @@ def _scenario_to_timeline(scenario: ScenarioPlant) -> list[TimelineDay]:
             amount=p.corrected_amount,
         ))
 
+    # AG.5 note: the timeline is intentionally scoped to the operator-
+    # TOGGLEABLE plant kinds (``config.PlantKind`` — the 6 above). It's
+    # the "how does my plant-toggle selection land across time" view, NOT
+    # an all-planted projection — ``compute_plant_timeline`` applies
+    # ``filter_scenario_plants`` (which gates exactly these 6) upstream.
+    # The AB.1-AB.6 + failed/transfer_template/inv_fanout kinds surface
+    # on the per-node BADGES (``trainer.plants_per_node``, fixed in AG.5),
+    # which is where Gap E's "incomplete badges" complaint actually lives.
+    # Adding them here would require making them toggleable
+    # (``config.PlantKind`` expansion + gating) — a separate operator-
+    # facing change, deferred.
+
     return [
         TimelineDay(day=d, hits=tuple(by_date[d]))
         for d in sorted(by_date)

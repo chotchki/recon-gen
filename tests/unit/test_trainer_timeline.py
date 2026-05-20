@@ -304,3 +304,4 @@ def test_hits_by_kind_counts_across_days() -> None:
 
 def test_hits_by_kind_empty_returns_empty_mapping() -> None:
     assert hits_by_kind([]) == {}
+
