@@ -278,6 +278,7 @@ def validate(instance: L2Instance) -> None:
     _check_chain_aggregating_not_child(instance)
     _check_aggregating_rail_required_fields(instance)
     _check_amount_typical_range_shape(instance)
+    _check_firings_typical_per_period_shape(instance)
     _check_non_aggregating_rail_no_cadence_or_bundles(instance)
     _check_role_business_day_offsets_resolve(instance, all_roles)
 
@@ -1129,6 +1130,62 @@ def _check_amount_typical_range_shape(inst: L2Instance) -> None:
                 f"on aggregating rails (aggregator amounts derive from "
                 f"bundled children; per-firing bound's meaning is "
                 f"fuzzy); SPEC V1c per AB.5.0 lock."
+            )
+
+
+def _check_firings_typical_per_period_shape(inst: L2Instance) -> None:
+    """W1a-c (AF / E8): structural rules on ``firings_typical_per_period``.
+
+    Applies to Rails AND TransferTemplates (both carry the field).
+
+    - **W1a**: ``count_range`` min ≤ max. Equal endpoints are allowed
+      here (unlike AB.5's V1a strict-less-than) — a fixed count like
+      ``[1, 1]`` ("exactly one InterestAccrual per ledger account per
+      month") is a legitimate operator intent, not confusion.
+    - **W1b**: both endpoints ≥ 0. Zero is allowed (a rail that
+      typically fires zero times in some periods — e.g. a seasonal
+      rail). Negative counts are operator confusion — reject loud.
+    - **W1c**: forbidden on aggregating Rails — the existing ``cadence``
+      field already governs aggregator firing frequency (one firing per
+      cadence-period), so a count band would conflict. (Templates are
+      never aggregating, so W1c is Rail-only.)
+    """
+    for r in inst.rails:
+        ftp = r.firings_typical_per_period
+        if ftp is None:
+            continue
+        lo, hi = ftp.count_range
+        if lo > hi:
+            raise L2ValidationError(
+                f"Rail {r.name!r}: firings_typical_per_period min ({lo}) "
+                f"must be <= max ({hi}); SPEC W1a."
+            )
+        if lo < 0 or hi < 0:
+            raise L2ValidationError(
+                f"Rail {r.name!r}: firings_typical_per_period values must "
+                f"both be >= 0 (got min={lo}, max={hi}); SPEC W1b."
+            )
+        if r.aggregating:
+            raise L2ValidationError(
+                f"Rail {r.name!r}: firings_typical_per_period is forbidden "
+                f"on aggregating rails (the cadence field already governs "
+                f"aggregator firing frequency); SPEC W1c per AF.0 lock."
+            )
+    for t in inst.transfer_templates:
+        ftp = t.firings_typical_per_period
+        if ftp is None:
+            continue
+        lo, hi = ftp.count_range
+        if lo > hi:
+            raise L2ValidationError(
+                f"TransferTemplate {t.name!r}: firings_typical_per_period "
+                f"min ({lo}) must be <= max ({hi}); SPEC W1a."
+            )
+        if lo < 0 or hi < 0:
+            raise L2ValidationError(
+                f"TransferTemplate {t.name!r}: firings_typical_per_period "
+                f"values must both be >= 0 (got min={lo}, max={hi}); "
+                f"SPEC W1b."
             )
 
 

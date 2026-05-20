@@ -29,6 +29,7 @@ from recon_gen.common.l2.primitives import (
     AccountTemplate,
     Chain,
     ChainChildSpec,
+    FiringsTypicalPerPeriod,
     L2Instance,
     LimitSchedule,
     Rail,
@@ -174,6 +175,11 @@ def _dump_two_leg_rail(r: TwoLegRail) -> dict[str, Any]:  # typing-smell: ignore
     if r.amount_typical_range is not None:
         lo, hi = r.amount_typical_range
         out["amount_typical_range"] = [_dump_money(lo), _dump_money(hi)]
+    # AF (E8) — same non-default omit convention.
+    if r.firings_typical_per_period is not None:
+        out["firings_typical_per_period"] = _dump_firings_typical_per_period(
+            r.firings_typical_per_period,
+        )
     return out
 
 
@@ -212,6 +218,20 @@ def _dump_single_leg_rail(r: SingleLegRail) -> dict[str, Any]:  # typing-smell: 
     return out
 
 
+def _dump_firings_typical_per_period(
+    f: FiringsTypicalPerPeriod,
+) -> list[int] | dict[str, Any]:  # typing-smell: ignore[explicit-any]: heterogeneous YAML row
+    """AF (E8) heterogeneous emit: compact bare ``[min, max]`` when the
+    period is the default ``business_day``; full ``{period, range}``
+    mapping otherwise. Mirrors AB.6's ChainChildSpec compact/mapping
+    emit so pre-AF yamls round-trip byte-equivalent (the field is
+    absent) and business_day rails stay terse."""
+    lo, hi = f.count_range
+    if f.period == "business_day":
+        return [lo, hi]
+    return {"period": f.period, "range": [lo, hi]}
+
+
 def _dump_transfer_template(t: TransferTemplate) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
     out: dict[str, Any] = {  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
         "name": str(t.name),
@@ -229,6 +249,12 @@ def _dump_transfer_template(t: TransferTemplate) -> dict[str, Any]:  # typing-sm
         ]
     if t.description is not None:
         out["description"] = t.description
+    # AF (E8) — emit only when set so pre-AF templates round-trip
+    # byte-equivalent.
+    if t.firings_typical_per_period is not None:
+        out["firings_typical_per_period"] = _dump_firings_typical_per_period(
+            t.firings_typical_per_period,
+        )
     return out
 
 

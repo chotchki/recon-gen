@@ -142,6 +142,15 @@ SupersedeReason: TypeAlias = Literal[
 # vocabulary.
 LimitDirection: TypeAlias = Literal["Outbound", "Inbound"]
 
+# AF (E8, 2026-05-19): the period vocabulary for
+# ``firings_typical_per_period`` — the soft per-period firing-COUNT
+# bound (complement to AB.5's per-firing amount bound). Bounded enum so
+# the validator + generator can switch on it without open-ended
+# parsing. ``business_day`` is the default when an integrator supplies
+# only a count range (the compact form). ``pay_period`` ≈ 2 weeks
+# (bi-weekly payroll cadence — the dominant US small-bank rhythm).
+Period: TypeAlias = Literal["business_day", "pay_period", "week", "month"]
+
 
 # -- Account dimension --------------------------------------------------------
 
@@ -206,6 +215,27 @@ class AccountTemplate:
 
 
 # -- Rails (discriminated union per F2) --------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class FiringsTypicalPerPeriod:
+    """AF (E8): a soft per-period firing-COUNT bound on a Rail / Template.
+
+    The complement to AB.5's ``amount_typical_range`` (per-firing
+    magnitude): this bounds how MANY times the rail/template fires per
+    ``period``, institution-wide. The generator samples a count
+    uniform-randomly from ``count_range`` per period when set; absent,
+    it falls back to the per-kind firing-count heuristic. Per-firing
+    count × per-firing amount = realistic per-period aggregates — the
+    dashboard top-line operators scan first.
+
+    ``period`` is a bounded enum (``Period``); ``count_range`` is
+    ``(min, max)`` non-negative integers with ``min <= max`` (validator
+    W1a-c). Frozen + slotted to match the rest of the L2 primitives.
+    """
+
+    period: Period
+    count_range: tuple[int, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,6 +306,11 @@ class TwoLegRail:
     # ``aggregating=false`` (aggregator amounts derive from bundled
     # children; per-firing bound is fuzzy on aggregators).
     amount_typical_range: tuple[Money, Money] | None = None
+    # AF (E8) — optional per-period firing-COUNT soft bound. See
+    # ``FiringsTypicalPerPeriod``. Validator W1a-c: ``min <= max``,
+    # both >= 0, ``aggregating=false`` (cadence already governs
+    # aggregator firing frequency).
+    firings_typical_per_period: FiringsTypicalPerPeriod | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -328,6 +363,10 @@ class SingleLegRail:
     # ``TwoLegRail.amount_typical_range`` for full semantics. Same
     # shape, same validator V1a-c rules.
     amount_typical_range: tuple[Money, Money] | None = None
+    # AF (E8) — optional per-period firing-COUNT soft bound. See
+    # ``FiringsTypicalPerPeriod`` + ``TwoLegRail.firings_typical_per_period``.
+    # Same shape, same validator W1a-c rules.
+    firings_typical_per_period: FiringsTypicalPerPeriod | None = None
 
 
 Rail: TypeAlias = TwoLegRail | SingleLegRail
@@ -366,6 +405,12 @@ class TransferTemplate:
     leg_rails: tuple[Identifier, ...]
     leg_rail_xor_groups: tuple[tuple[Identifier, ...], ...] = ()
     description: str | None = None
+    # AF (E8) — optional per-period firing-COUNT soft bound for the
+    # template's shared Transfer (e.g. "~1 MerchantSettlementCycle per
+    # merchant per business_day"). See ``FiringsTypicalPerPeriod``.
+    # Validator W1a-b: ``min <= max``, both >= 0 (no aggregating-rail
+    # exclusion — templates aren't aggregating rails).
+    firings_typical_per_period: FiringsTypicalPerPeriod | None = None
 
 
 # -- Chains ------------------------------------------------------------------

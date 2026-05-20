@@ -79,6 +79,7 @@ from .primitives import (
     Identifier,
     L2Instance,
     Name,
+    Period,
     Rail,
     SingleLegRail,
     TransferTemplate,
@@ -1845,6 +1846,56 @@ def _baseline_target_leg_count(
     return max(1, int(business_day_count * params.daily_target_per_unit * scale))
 
 
+# AF (E8): approximate count of each Period within a business-day window.
+# business_day is exact; the others approximate using standard banking
+# ratios (5 business days/week, 10/pay-period [bi-weekly], 21/month).
+_BUSINESS_DAYS_PER_PERIOD: dict[Period, int] = {
+    "business_day": 1,
+    "week": 5,
+    "pay_period": 10,
+    "month": 21,
+}
+
+
+def _periods_in_window(period: Period, business_day_count: int) -> int:
+    """AF (E8): how many whole ``period``s fit in a window of
+    ``business_day_count`` business days. Floor-divided, min 1 — a
+    window shorter than one period still gets one period's worth of
+    firings so the rail isn't silent."""
+    per = _BUSINESS_DAYS_PER_PERIOD[period]
+    return max(1, business_day_count // per)
+
+
+def _pick_firings_count(
+    entity: Rail | TransferTemplate,
+    *,
+    business_day_count: int,
+    rng: random.Random,
+    fallback: int,
+) -> int:
+    """AF (E8): total firing count over the window.
+
+    When ``entity.firings_typical_per_period`` is set, sample a
+    per-period count uniform-randomly from the declared range and scale
+    by the number of periods in the window (count-per-period × periods
+    = total-over-window). The per-day distribution is then handled by
+    the caller's existing Poisson spread, so the declared band shows up
+    as the aggregate-per-period the operator intended.
+
+    When the field is absent, return ``fallback`` (the per-kind
+    heuristic from ``_baseline_target_leg_count``) WITHOUT consuming any
+    ``rng`` state — so pre-AF L2 instances stay byte-identical to their
+    locked seeds (no rng-stream drift for rails that don't declare the
+    field).
+    """
+    ftp = entity.firings_typical_per_period
+    if ftp is None:
+        return fallback
+    lo, hi = ftp.count_range
+    per_period = rng.randint(lo, hi)
+    return per_period * _periods_in_window(ftp.period, business_day_count)
+
+
 def _baseline_amount_sample(
     rng: random.Random,
     kind: _RailKind,
@@ -2114,8 +2165,17 @@ def _emit_baseline_for_rail(
     customer_count = max(1, customer_count)
     merchant_count = max(1, merchant_count)
 
-    target_total = _baseline_target_leg_count(
+    heuristic_total = _baseline_target_leg_count(
         rail, kind, customer_count, merchant_count, len(business_days),
+    )
+    # AF (E8): operator-declared firings_typical_per_period overrides the
+    # per-kind heuristic. No rng consumption when the field is absent, so
+    # pre-AF rails stay byte-identical to their locked seeds.
+    target_total = _pick_firings_count(
+        rail,
+        business_day_count=len(business_days),
+        rng=rng,
+        fallback=heuristic_total,
     )
     daily_target = target_total / len(business_days)
 
@@ -2861,7 +2921,24 @@ def _emit_baseline_template_firings(
             base_seed ^ (zlib.crc32(str(tmpl_name).encode("utf-8")) & 0x7FFFFFFF),
         )
 
-        for day in state.business_days:
+        # AF (E8): when the template declares firings_typical_per_period,
+        # the total firing count comes from the declared band; else the
+        # AG.1 default of one firing per business day. _pick_firings_count
+        # consumes no rng when the field is absent, so AG.1's locked seed
+        # stays byte-identical for templates that don't declare it. Total
+        # firings are round-robined across business days (firing i lands
+        # on business_days[i % N]) — for the default total == N this
+        # reproduces the original one-per-day order exactly.
+        n_business_days = len(state.business_days)
+        total_firings = _pick_firings_count(
+            template,
+            business_day_count=n_business_days,
+            rng=tmpl_rng,
+            fallback=n_business_days,
+        )
+
+        for firing_i in range(total_firings):
+            day = state.business_days[firing_i % n_business_days]
             n_shared = counter.next()
             shared_transfer_id = f"tr-base-tmpl-{n_shared:06d}"
 

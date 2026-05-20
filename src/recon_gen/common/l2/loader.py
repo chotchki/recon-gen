@@ -54,6 +54,7 @@ from .primitives import (
     ChainChildSpec,
     CompletionExpression,
     Duration,
+    FiringsTypicalPerPeriod,
     Identifier,
     L2Instance,
     LegDirection,
@@ -62,6 +63,7 @@ from .primitives import (
     Money,
     Name,
     Origin,
+    Period,
     Rail,
     RailName,
     RoleExpression,
@@ -811,6 +813,11 @@ def _load_rail(raw: object, *, path: str) -> Rail:
         raw_d.get("amount_typical_range"),
         path=f"{path}.amount_typical_range",
     )
+    # AF (E8) — optional per-period firing-count soft bound.
+    firings_typical_per_period = _load_firings_typical_per_period(
+        raw_d.get("firings_typical_per_period"),
+        path=f"{path}.firings_typical_per_period",
+    )
 
     has_two_leg_fields = "source_role" in raw_d or "destination_role" in raw_d
     has_single_leg_fields = "leg_role" in raw_d or "leg_direction" in raw_d
@@ -870,6 +877,7 @@ def _load_rail(raw: object, *, path: str) -> Rail:
             description=description,
             metadata_value_examples=metadata_value_examples,
             amount_typical_range=amount_typical_range,
+            firings_typical_per_period=firings_typical_per_period,
         )
 
     # Single-leg
@@ -905,7 +913,101 @@ def _load_rail(raw: object, *, path: str) -> Rail:
         description=description,
         metadata_value_examples=metadata_value_examples,
         amount_typical_range=amount_typical_range,
+        firings_typical_per_period=firings_typical_per_period,
     )
+
+
+def _load_firings_typical_per_period(
+    raw: object | None, *, path: str,
+) -> FiringsTypicalPerPeriod | None:
+    """AF (E8): parse the optional ``firings_typical_per_period`` field.
+
+    Two accepted YAML shapes (heterogeneous, per AF.0 lock):
+
+    - **Compact** — a bare 2-element list ``[min, max]``. Period
+      defaults to ``business_day`` (the dominant per-day cadence).
+      ::
+
+          firings_typical_per_period: [50, 500]
+
+    - **Full** — a mapping with ``range`` (required) + ``period``
+      (optional, defaults ``business_day``). ::
+
+          firings_typical_per_period:
+            period: month
+            range: [80, 120]
+
+    ``None`` when the key is absent or null. Bad shapes (wrong type,
+    wrong-length range, non-integer element, unknown period) raise
+    ``L2LoaderError``. Validator W1a-c (``min <= max``, both >= 0,
+    aggregating-rail exclusion) fires in :mod:`validate` — the loader's
+    job is shape-narrowing.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        raw_d = cast("dict[object, object]", raw)
+        if "range" not in raw_d:
+            raise L2LoaderError(
+                f"{path}: mapping form requires a `range: [min, max]` key",
+            )
+        period_raw = raw_d.get("period", "business_day")
+        period = _load_period(period_raw, path=f"{path}.period")
+        return FiringsTypicalPerPeriod(
+            period=period,
+            count_range=_load_count_range(
+                raw_d["range"], path=f"{path}.range",
+            ),
+        )
+    if isinstance(raw, str):
+        raise L2LoaderError(
+            f"{path}: expected a 2-element list `[min, max]` (compact) or a "
+            f"mapping `{{period, range}}`, got str",
+        )
+    # Compact form — bare [min, max], period defaults to business_day.
+    # _load_count_range re-validates list-ness + length + element types.
+    return FiringsTypicalPerPeriod(
+        period="business_day",
+        count_range=_load_count_range(raw, path=path),
+    )
+
+
+def _load_count_range(raw: object, *, path: str) -> tuple[int, int]:
+    """AF (E8): narrow a ``[min, max]`` integer list. Shape-only — the
+    ``min <= max`` + non-negative checks are validator W1a-b's job."""
+    if not isinstance(raw, list):
+        raise L2LoaderError(
+            f"{path}: expected a 2-element list `[min, max]`, "
+            f"got {type(raw).__name__}",
+        )
+    raw_list = cast("list[object]", raw)
+    if len(raw_list) != 2:
+        raise L2LoaderError(
+            f"{path}: expected exactly 2 elements `[min, max]`, "
+            f"got {len(raw_list)}",
+        )
+    out: list[int] = []
+    for i, v in enumerate(raw_list):
+        # bool is an int subclass — reject it explicitly (a YAML `true`
+        # would otherwise coerce to 1 silently).
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise L2LoaderError(
+                f"{path}[{i}]: firing count must be an integer, "
+                f"got {type(v).__name__}",
+            )
+        out.append(v)
+    return (out[0], out[1])
+
+
+def _load_period(raw: object, *, path: str) -> Period:
+    """AF (E8): narrow a period string against the bounded ``Period``
+    vocabulary. Unknown periods raise with the valid set listed."""
+    valid: tuple[Period, ...] = ("business_day", "pay_period", "week", "month")
+    if not isinstance(raw, str) or raw not in valid:
+        raise L2LoaderError(
+            f"{path}: period must be one of {list(valid)}, got {raw!r}",
+        )
+    return raw
 
 
 def _load_amount_typical_range(
@@ -1018,6 +1120,10 @@ def _load_transfer_template(raw: object, *, path: str) -> TransferTemplate:
         ),
         description=_load_description(
             raw_d.get("description"), path=f"{path}.description",
+        ),
+        firings_typical_per_period=_load_firings_typical_per_period(
+            raw_d.get("firings_typical_per_period"),
+            path=f"{path}.firings_typical_per_period",
         ),
     )
 
