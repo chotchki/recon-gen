@@ -394,6 +394,26 @@ def _build_rails(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
                 f"{hi_float:.2f}",
             ]
 
+        # AF (E8) — ~30% of non-aggregating rails get a
+        # firings_typical_per_period. Aggregating rails forbidden by W1c.
+        # Period drawn uniformly from the 4 enum values; range min in
+        # [1, 50], max = min * [2, 10] to exercise narrow + wide bands.
+        # Emit compact bare-list when business_day, mapping otherwise —
+        # exercises both loader parse paths across the seed pool.
+        if not is_aggregating and rng.random() < 0.30:
+            period = rng.choice(
+                ["business_day", "pay_period", "week", "month"],
+            )
+            lo = rng.randint(1, 50)
+            hi = lo * rng.randint(2, 10)
+            if period == "business_day":
+                rail["firings_typical_per_period"] = [lo, hi]
+            else:
+                rail["firings_typical_per_period"] = {
+                    "period": period,
+                    "range": [lo, hi],
+                }
+
         d = _maybe_description(rng, state, f"rail {i}")
         if d is not None:
             rail["description"] = d

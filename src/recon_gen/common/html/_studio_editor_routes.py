@@ -53,9 +53,11 @@ from recon_gen.common.l2.editor import (
 )
 from recon_gen.common.l2.primitives import (
     Account,
+    FiringsTypicalPerPeriod,
     Identifier,
     Money,
     Name,
+    Period,
 )
 from recon_gen.common.l2.validate import L2ValidationError, validate
 
@@ -446,6 +448,25 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         ),
         kind="text",
     ),
+    # AF (E8) — soft per-period firing-COUNT bound. Single composite
+    # text input: `min, max` (period defaults business_day) OR
+    # `period: min, max` (period ∈ business_day|pay_period|week|month).
+    # Coerce parses to FiringsTypicalPerPeriod | None; validator W1a-c
+    # (min≤max, both≥0, aggregating=false) surfaces inline.
+    FieldSpec(
+        name="firings_typical_per_period",
+        label="Typical firings per period (min, max)",
+        helper=(
+            "Optional soft bound on how many times this rail fires per "
+            "period. Format: `min, max` (defaults to per business day, "
+            "e.g. `50, 500`) OR `period: min, max` where period is "
+            "business_day | pay_period | week | month (e.g. "
+            "`month: 80, 120`). Generator samples uniformly per period. "
+            "Validator W1a-c rejects min>max, negatives, and aggregating "
+            "rails. Empty ⇒ falls back to per-kind heuristic."
+        ),
+        kind="text",
+    ),
     FieldSpec(
         name="description",
         label="Description",
@@ -570,6 +591,25 @@ _TRANSFER_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         kind="multi_select_groups",
         select_from="self_leg_rails",
         edit_only=True,
+    ),
+    # AF (E8) — soft per-period firing-COUNT bound for the template's
+    # shared Transfer (honored when the template is a chain parent —
+    # see _emit_baseline_template_firings). Same composite text shape as
+    # the Rail field. Validator W1a-b (no aggregating exclusion —
+    # templates aren't aggregating rails).
+    FieldSpec(
+        name="firings_typical_per_period",
+        label="Typical firings per period (min, max)",
+        helper=(
+            "Optional soft bound on how many times this template's "
+            "shared Transfer fires per period (honored when the template "
+            "is a chain parent). Format: `min, max` (defaults per "
+            "business day) OR `period: min, max` where period is "
+            "business_day | pay_period | week | month. Validator W1a-b "
+            "rejects min>max and negatives. Empty ⇒ one firing per "
+            "business day when this template is a chain parent."
+        ),
+        kind="text",
     ),
     FieldSpec(
         name="description",
@@ -707,6 +747,41 @@ def _coerce_field(spec: FieldSpec, raw: str, kind: EntityKind) -> object:
                 f"amount_typical_range expects numeric values; "
                 f"got {raw!r}",
             ) from exc
+    # AF (E8) — firings_typical_per_period: FiringsTypicalPerPeriod | None
+    # on both Rail and TransferTemplate. Composite text shape:
+    #   `min, max`            → period defaults business_day
+    #   `period: min, max`    → explicit period
+    # Empty handled above by the early return. Validator W1a-c fires on
+    # the coerced value via the PUT handler's validate() pass.
+    if spec.name == "firings_typical_per_period":
+        from recon_gen.common.l2.loader import _load_period  # noqa: PLC0415 — lazy to dodge cycle
+        period: Period = "business_day"
+        range_part = raw
+        if ":" in raw:
+            period_str, range_part = raw.split(":", 1)
+            # _load_period validates against the bounded enum + raises
+            # L2LoaderError on an unknown period; surface as ValueError
+            # so the form re-renders with the inline message.
+            try:
+                period = _load_period(
+                    period_str.strip(), path="firings_typical_per_period.period",
+                )
+            except ValueError as exc:
+                raise ValueError(str(exc)) from exc
+        parts = [p.strip() for p in range_part.split(",")]
+        if len(parts) != 2:
+            raise ValueError(
+                f"firings_typical_per_period expects `min, max` or "
+                f"`period: min, max`; got {raw!r}",
+            )
+        try:
+            lo, hi = int(parts[0]), int(parts[1])
+        except ValueError as exc:
+            raise ValueError(
+                f"firings_typical_per_period counts must be integers; "
+                f"got {raw!r}",
+            ) from exc
+        return FiringsTypicalPerPeriod(period=period, count_range=(lo, hi))
     # X.4.f.11.7 — Rail aging windows: Duration | None. Reuse the
     # loader's ISO 8601 parser; empty handled above by the early return.
     if spec.name in ("max_pending_age", "max_unbundled_age") and kind == "rail":
@@ -1467,6 +1542,15 @@ def _value_to_input_str(value: object) -> str:
         return ""
     if isinstance(value, bool):
         return "true" if value else "false"
+    # AF (E8) — FiringsTypicalPerPeriod → composite text shape: bare
+    # `min, max` when business_day, `period: min, max` otherwise.
+    # Round-trips through _coerce_field's firings_typical_per_period
+    # branch.
+    if isinstance(value, FiringsTypicalPerPeriod):
+        lo, hi = value.count_range
+        if value.period == "business_day":
+            return f"{lo}, {hi}"
+        return f"{value.period}: {lo}, {hi}"
     # X.4.f.11.6.5 — metadata_value_examples is the only field whose
     # tuple shape is nested (tuple[(key, tuple[str, ...]), ...]). Match
     # on tuple-of-2-tuples-with-tuple-second specifically and dump as

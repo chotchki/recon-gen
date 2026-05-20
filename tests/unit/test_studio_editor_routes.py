@@ -1131,6 +1131,66 @@ def test_rail_amount_typical_range_coerce_round_trip() -> None:
         _coerce_field(spec, "five, ten", "rail")
 
 
+def test_rail_edit_form_renders_firings_typical_per_period_field(
+    writable_l2_yaml: Path,
+) -> None:
+    """AF (E8) — Rail edit form exposes firings_typical_per_period as a
+    text input. spec_example's ExternalRailInbound declares [20, 50]
+    (AF.5.spec, business_day compact) so the value pre-fills as the
+    bare `20, 50` shape; SubledgerCharge declares {month, [60,90]} so it
+    pre-fills as `month: 60, 90`."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/rail/ExternalRailInbound/edit")
+        assert resp.status_code == 200, resp.text
+        assert 'name="firings_typical_per_period"' in resp.text
+        assert "20, 50" in resp.text
+        resp2 = c.get("/l2_shape/rail/SubledgerCharge/edit")
+        assert resp2.status_code == 200, resp2.text
+        assert "month: 60, 90" in resp2.text
+
+
+def test_firings_typical_per_period_coerce_round_trip() -> None:
+    """AF (E8) — _coerce_field parses the composite text shape into a
+    FiringsTypicalPerPeriod for both rail + template kinds. Bad shapes
+    raise ValueError that the form re-renders with an inline error."""
+    from recon_gen.common.html._studio_editor_routes import (
+        FieldSpec,
+        _coerce_field,
+    )
+    from recon_gen.common.l2.primitives import FiringsTypicalPerPeriod
+
+    spec = FieldSpec(
+        name="firings_typical_per_period",
+        label="Firings",
+        helper="",
+        kind="text",
+    )
+    # Compact form — period defaults business_day.
+    assert _coerce_field(spec, "50, 500", "rail") == FiringsTypicalPerPeriod(
+        period="business_day", count_range=(50, 500),
+    )
+    # Mapping form — explicit period.
+    assert _coerce_field(spec, "month: 80, 120", "rail") == FiringsTypicalPerPeriod(
+        period="month", count_range=(80, 120),
+    )
+    # Template kind coerces identically (same field name).
+    assert _coerce_field(
+        spec, "week: 3, 8", "transfer_template",
+    ) == FiringsTypicalPerPeriod(period="week", count_range=(3, 8))
+    # Empty → None (optional field).
+    assert _coerce_field(spec, "", "rail") is None
+    # Bad: wrong element count.
+    with pytest.raises(ValueError, match="min, max"):
+        _coerce_field(spec, "50", "rail")
+    # Bad: non-integer count.
+    with pytest.raises(ValueError, match="integers"):
+        _coerce_field(spec, "5.5, 10", "rail")
+    # Bad: unknown period.
+    with pytest.raises(ValueError, match="period must be one of"):
+        _coerce_field(spec, "fortnight: 1, 2", "rail")
+
+
 def test_single_leg_rail_edit_form_renders_subtype_fields(
     writable_l2_yaml: Path,
 ) -> None:

@@ -215,6 +215,11 @@ def _dump_single_leg_rail(r: SingleLegRail) -> dict[str, Any]:  # typing-smell: 
     if r.amount_typical_range is not None:
         lo, hi = r.amount_typical_range
         out["amount_typical_range"] = [_dump_money(lo), _dump_money(hi)]
+    # AF (E8) — same non-default omit convention (same shape as TwoLegRail).
+    if r.firings_typical_per_period is not None:
+        out["firings_typical_per_period"] = _dump_firings_typical_per_period(
+            r.firings_typical_per_period,
+        )
     return out
 
 

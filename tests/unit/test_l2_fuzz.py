@@ -107,6 +107,12 @@ def test_fuzzer_exercises_every_primitive_kind_across_seeds(
         # probability on non-aggregating rails so this comfortably
         # lands within META_GUARD_SEEDS.
         "rail_with_amount_typical_range": False,
+        # AF.5.fuzz — confirm the fuzzer emits at least one rail with
+        # firings_typical_per_period. _build_rails gates at ~30%
+        # probability on non-aggregating rails (independent of the
+        # amount_typical_range roll), so this lands comfortably within
+        # META_GUARD_SEEDS.
+        "rail_with_firings_typical_per_period": False,
     }
     for seed in META_GUARD_SEEDS:
         yaml_text = random_l2_yaml(seed)
@@ -140,6 +146,9 @@ def test_fuzzer_exercises_every_primitive_kind_across_seeds(
             # AB.5.5.fuzz — rail with amount_typical_range.
             if r.amount_typical_range is not None:
                 saw["rail_with_amount_typical_range"] = True
+            # AF.5.fuzz — rail with firings_typical_per_period.
+            if r.firings_typical_per_period is not None:
+                saw["rail_with_firings_typical_per_period"] = True
         template_name_set = {t.name for t in inst.transfer_templates}
         for c in inst.chains:
             # Z.A: a multi-children Chain row encodes XOR alternation.
