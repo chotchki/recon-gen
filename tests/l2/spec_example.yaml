@@ -78,6 +78,10 @@ rails:
     max_pending_age: PT24H
     # AB.5 (E7): typical inbound customer-rail amount band.
     amount_typical_range: ["50.00", "5000.00"]
+    # AF (E8): compact form — ~20-50 inbound ACH per business day for a
+    # small institution. Composes with amount_typical_range above:
+    # count × amount = realistic per-day inbound aggregate.
+    firings_typical_per_period: [20, 50]
 
   # Two-leg standalone outbound — used by limit-breach plant.
   - name: ExternalRailOutbound
@@ -102,6 +106,12 @@ rails:
     max_unbundled_age: PT4H
     # AB.5 (E7): subledger fee accrual band — small charges.
     amount_typical_range: ["1.00", "100.00"]
+    # AF (E8): mapping form — fee accruals settle on a monthly cadence
+    # (~60-90 charges per month). Demonstrates the {period, range}
+    # form (period != business_day).
+    firings_typical_per_period:
+      period: month
+      range: [60, 90]
 
   # AB.3.5.spec (2026-05-19) — three Variable-direction settlement-timing
   # variants for the AB.3 XOR group demo. Each represents a different
@@ -261,6 +271,14 @@ transfer_templates:
     leg_rail_xor_groups:
       - - SettlementAuto
         - SettlementStandard
+    # AF (E8): template-level firing count. SettlementTimingCycle is the
+    # parent of the AG.1 SettlementTimingCycle → BatchedPayoutBatch
+    # chain, so it fires as a unit via _emit_baseline_template_firings —
+    # this band (~3-8 cycles per week) drives that firing count.
+    # Demonstrates the field on a TransferTemplate + the week period.
+    firings_typical_per_period:
+      period: week
+      range: [3, 8]
 
   # AB.4.5.spec (2026-05-19) — dedicated template for the fan-in chain
   # demo. 2 parent firings of BatchPayoutTrigger share one

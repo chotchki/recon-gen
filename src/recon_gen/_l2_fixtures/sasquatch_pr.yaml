@@ -339,6 +339,8 @@ rails:
     # AB.5 (E7): payroll deposits + vendor payments + peer transfers
     # typically $50-$5K per item.
     amount_typical_range: ["50.00", "5000.00"]
+    # AF (E8): ~50-200 inbound ACH credits per business day across all DDAs.
+    firings_typical_per_period: [50, 200]
     description: |
       Inbound ACH credit originated by an external party (employer
       payroll, vendor payment, peer transfer). External party drives
@@ -448,6 +450,11 @@ rails:
     # ($1K-$10K), vendor payments ($100-$50K) — wider band than
     # external ACH to accommodate the upper-end vendor-payment use.
     amount_typical_range: ["20.00", "50000.00"]
+    # AF (E8): ~200-500 on-us transfer debit legs per business day.
+    # (CustomerFeeMonthlySettlement from the gap-doc table is aggregating —
+    # its monthly-eom cadence already governs firing count, so W1c forbids
+    # the field there; the count intent is served by the cadence.)
+    firings_typical_per_period: [200, 500]
     description: |
       Debit leg of an on-us transfer cycle. Posts against the source
       customer's DDA. Joins the shared `InternalTransferCycle` Transfer
@@ -665,6 +672,11 @@ rails:
     # retail, lunch transactions cluster at the low end; higher-end
     # purchases (electronics, appliances) lift the upper bound.
     amount_typical_range: ["5.00", "500.00"]
+    # AF (E8): institution-wide ~50-500 card swipes per business day —
+    # realistic for a small community bank's merchant book. Composes
+    # with amount_typical_range: count × amount = the daily card-sales
+    # aggregate on the L1 Daily Statement top-line.
+    firings_typical_per_period: [50, 500]
     description: |
       One merchant card-sale posting. Card network force-posts the
       external (debit) leg via daily settlement file; SNB records the
