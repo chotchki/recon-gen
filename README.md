@@ -23,10 +23,10 @@ Every surface speaks **your** institution's vocabulary — account names, role l
 
 **See it live — two public demos, no install:**
 
-- **[recon-gen-spec.hotchkiss.io](https://recon-gen-spec.hotchkiss.io/)** — the `spec_example` L2: the smallest viable bank, dashboards only. The four bundled apps served by the self-hosted HTMX runtime.
-- **[recon-gen-sasquatch.hotchkiss.io](https://recon-gen-sasquatch.hotchkiss.io/)** — the `sasquatch_pr` L2: realistic community-bank flavor, served through the **Studio** surface in read-only demo mode (L2 editor, unified diagram, and data-shaping panel — with every mutation locked down).
+- **[Spec Example](https://recon-gen-spec.hotchkiss.io/)** — the smallest viable bank, dashboards only. The four bundled apps served by the self-hosted HTMX runtime.
+- **[Sasquatch Bank Example](https://recon-gen-sasquatch.hotchkiss.io/)** — realistic community-bank flavor, served through the **Studio** surface in read-only demo mode (L2 editor, unified diagram, and data-shaping panel — with every mutation locked down).
 
-Both render straight from the bundled L2 YAMLs (`tests/l2/{spec_example,sasquatch_pr}.yaml`): read them to evaluate the tool, fork one to start your own. The full persona-driven handbooks, walkthroughs, and per-sheet explainers your operators would see live at **[chotchki.github.io/recon-gen](https://chotchki.github.io/recon-gen/)**.
+Both render straight from the bundled L2 YAMLs (`tests/l2/{spec_example,sasquatch_pr}.yaml`): read them to evaluate the tool, fork one to start your own. The full persona-driven handbooks, walkthroughs, and per-sheet explainers your operators would see live at **[GitHub Pages](https://chotchki.github.io/recon-gen/)**.
 
 ## Not an ETL tool — but we'll help you wire one in
 
@@ -62,8 +62,6 @@ You can't ship a reconciliation tool on "trust me." This tool ships with:
 CLI is organized as five artifact groups: `recon-gen schema|data|json|docs|audit`. Each artifact has `apply`/`clean`/`test` (plus a few extras); destructive operations default to emit and require `--execute` to actually run. The `audit` group also exposes a `verify` subcommand for recomputing a generated PDF's provenance fingerprint. Change the Python (or ask Claude), re-run `json apply --execute`, get a new dashboard.
 
 ## Demo Docs
-
-The demo ships with task-shaped handbooks deployed to GitHub Pages at **[chotchki.github.io/recon-gen](https://chotchki.github.io/recon-gen/)**.
 
 - **[L1 Dashboard handbook](https://chotchki.github.io/recon-gen/handbook/l1/)** — 11 sheets covering 5 baseline L1 invariants + 2 aging-watch invariants + supersession audit + per-account-day walk + raw posting ledger. Switch the L2 instance to switch the persona prose without touching dashboard code.
 - **[L2 Flow Tracing handbook](https://chotchki.github.io/recon-gen/handbook/l2_flow_tracing/)** — Rails / Chains / Transfer Templates / L2 Hygiene Exceptions for L2 spec verification.
