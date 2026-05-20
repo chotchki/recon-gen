@@ -1636,6 +1636,11 @@ class _RailKind(StrEnum):
     MERCHANT_PAYOUT = "merchant_payout"
     EXTERNAL_CARD_SETTLEMENT = "external_card_settlement"
     ACH_RETURN = "ach_return"
+    # AG.4 (Gap D): a system-wide payroll/batch credit — one ACH file
+    # that fans out to N customers, fired ~once per pay period. Distinct
+    # from CUSTOMER_INBOUND (per-customer scaled) because the batch is a
+    # single system event, not per-account activity.
+    PAYROLL_BATCH = "payroll_batch"
     OTHER = "other"
 
 
@@ -1709,6 +1714,15 @@ _RAIL_KIND_PARAMS: dict[_RailKind, _RailKindParams] = {
         daily_target_per_unit=0.2, scaling_kind="customer",
         amount_mu=6.5, amount_sigma=1.2, time_band=(9, 17),
     ),
+    _RailKind.PAYROLL_BATCH: _RailKindParams(
+        # AG.4 (Gap D): system-wide batch fired ~once per pay period
+        # (bi-weekly ≈ 1 firing per 10 business days = 0.1/day). Large
+        # aggregate amount (the whole payroll file); early-morning ACH
+        # settlement window. NOT per-customer scaled — that was the
+        # over-match bug (a single batch wrongly fired ~80×/day).
+        daily_target_per_unit=0.1, scaling_kind="system",
+        amount_mu=11.5, amount_sigma=0.9, time_band=(6, 9),
+    ),
     _RailKind.OTHER: _RailKindParams(
         daily_target_per_unit=1.0, scaling_kind="system",
         amount_mu=7.0, amount_sigma=1.0, time_band=(9, 17),
@@ -1755,6 +1769,15 @@ def _classify_rail(rail: Rail) -> _RailKind:
     if "fee" in tt:
         return _RailKind.CUSTOMER_FEE
     if "inbound" in tt or "deposit" in tt:
+        # AG.4 (Gap D): a rail containing "inbound"/"deposit" that is
+        # ALSO a payroll/batch is a system-wide batch (one ACH file
+        # fanning out to N customers), not per-customer activity. Route
+        # it to PAYROLL_BATCH (system-wide ~1/pay-period) instead of
+        # letting the per-customer CUSTOMER_INBOUND scaling fire it
+        # ~80×/day. Guard is intentionally narrow (inbound/deposit AND
+        # payroll/batch) so it can't reclassify a plain CustomerInboundACH.
+        if "payroll" in tt or "batch" in tt:
+            return _RailKind.PAYROLL_BATCH
         return _RailKind.CUSTOMER_INBOUND
     if "outbound" in tt or "withdrawal" in tt:
         return _RailKind.CUSTOMER_OUTBOUND
