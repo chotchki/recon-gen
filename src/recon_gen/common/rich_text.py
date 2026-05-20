@@ -1,15 +1,21 @@
 """Compose rich-text XML for QuickSight ``SheetTextBox.Content``.
 
 QuickSight accepts a small XML dialect inside a single ``<text-box>`` root
-(undocumented — confirmed by round-tripping a UI-authored text box via
-``describe-analysis-definition``):
+(undocumented — full set confirmed by round-tripping a UI-authored text box
+that exercised every formatting button via ``describe-analysis-definition``):
 
-* ``<inline font-size="36px" color="#hex">text</inline>`` — sized / tinted run
+* ``<inline ...>text</inline>`` — styled run; attrs ``font-size="36px"``,
+  ``color="#hex"``, ``background-color="#hex"`` (highlight), ``font-family="Name"``
+* ``<b>`` / ``<i>`` / ``<s>`` / ``<u>`` — bold / italic / strikethrough /
+  underline (bare HTML tags, NOT ``<inline>`` attrs)
+* ``<block align="center">text</block>`` — paragraph alignment
+  (``center`` / ``right``; left is the default, emitted with no block)
 * ``<br/>`` — explicit line break
 * ``<ul><li class="ql-indent-0">item</li></ul>`` — bulleted list
   (the ``ql-indent-0`` class is required for top-level bullets)
 * ``<a href="..." target="_self">Link</a>`` — hyperlink
-* Body text between tags must be XML-escaped
+* ``<expression>${pName}</expression>`` — live parameter-value injection
+* Body text between tags must be XML-escaped; ``&nbsp;`` survives
 
 Theme tokens aren't supported by the parser, so colors are resolved to hex
 at generate-time and interpolated here by the caller.
@@ -20,9 +26,10 @@ Authoring helpers:
   prose with no paragraph breaks or links.
 * ``markdown(text)`` — multi-paragraph prose with optional inline
   ``[text](url)`` links. ``\\n\\n`` paragraph breaks become ``<br/><br/>``,
-  single ``\\n`` becomes ``<br/>``, ``[text](url)`` becomes a clickable
-  ``<a href="...">``. Use whenever the source string is L2-YAML-supplied
-  description prose (which is markdown-shaped by convention).
+  a lone ``\\n`` is a CommonMark soft break that collapses to a single
+  space, ``[text](url)`` becomes a clickable ``<a href="...">``. Use
+  whenever the source string is L2-YAML-supplied description prose
+  (which is markdown-shaped by convention).
 * ``markdown_inline(text)`` — same XML-escape + ``[text](url)`` link
   handling, but ALL newlines collapse to a single space (no ``<br/>``).
   Use inside contexts where ``<br/>`` is not a valid child — most
@@ -97,11 +104,13 @@ def bullets(items: Iterable[str]) -> str:
     ``[text](url)`` links render as clickable anchors) and then
     defensively stripped of any ``<br/>`` tags — QS's XML parser
     rejects ``<br/>`` as a child of ``<li>`` with
-    ``Element 'li' cannot have 'br' elements as children``. L2 YAML
-    ``description: |`` block scalars carry embedded ``\\n`` for
-    human-readable wrapping; those would otherwise reflow to
-    ``<br/>`` via :func:`markdown` and break ``CreateAnalysis`` (the
-    v8.5.4 → v8.5.8 regression on the L1 Drift sheet).
+    ``Element 'li' cannot have 'br' elements as children``. A
+    ``\\n\\n`` paragraph break still reflows to ``<br/><br/>`` via
+    :func:`markdown` and would break ``CreateAnalysis`` inside an
+    ``<li>`` (the v8.5.4 → v8.5.8 regression on the L1 Drift sheet),
+    so it is stripped here. (A lone ``\\n`` is a soft break that
+    :func:`markdown` collapses to a space upstream, so it never
+    reaches this strip.)
 
     Any stripped ``<br/>`` raises a ``UserWarning`` showing the
     original item so authors can clean the source string when the
@@ -145,7 +154,7 @@ def markdown(text: str) -> str:
        QuickSight clickable links. Both ``text`` and ``url`` are XML-escaped.
     2. The remaining non-link spans get XML-escaped.
     3. ``\\n\\n`` (one or more blank lines between paragraphs) → ``<br/><br/>``
-    4. Lone ``\\n`` (intra-paragraph break) → ``<br/>``
+    4. Lone ``\\n`` (CommonMark soft break) → a single space
 
     Use whenever the input is L2-YAML-supplied prose or any string with
     markdown-shaped paragraph breaks. ``body()`` is for plain single-line
@@ -211,22 +220,30 @@ def _escape_collapse_newlines(text: str) -> str:
 
 
 def _escape_with_breaks(text: str) -> str:
-    """XML-escape ``text`` and convert paragraph + line breaks.
+    """XML-escape ``text`` and convert paragraph breaks.
 
     Paragraph break (``\\n\\n+``) becomes ``<br/><br/>`` so QuickSight
     renders the visible vertical gap between paragraphs that authors
-    expect from markdown. A lone ``\\n`` becomes a single ``<br/>`` so
-    intra-paragraph wrapping survives.
+    expect from markdown.
 
-    Order matters: collapse paragraph breaks BEFORE single ``\\n`` so
-    ``\\n\\n\\n`` becomes ``<br/><br/>`` (one paragraph break), not
-    ``<br/><br/><br/>`` (three line breaks).
+    AH.2 (2026-05-20): a LONE ``\\n`` is a CommonMark **soft break** —
+    it collapses to a single space, NOT a ``<br/>``. L2 YAML block
+    scalars (``description: |``) and SPEC-doc prose hard-wrap their
+    source lines for readability; rendering each wrap as a ``<br/>``
+    double-wrapped the text on the narrower self-hosted (App2) text box
+    — the "extra line-wrapping" bug. Authors who want a hard line break
+    use a blank line (``\\n\\n`` → paragraph) or an explicit ``<br/>``
+    in the source.
+
+    Order matters: collapse paragraph breaks BEFORE the lone-``\\n``
+    pass so ``\\n\\n\\n`` becomes one ``<br/><br/>`` paragraph break,
+    not a paragraph break plus a stray space.
     """
     escaped = _xml_escape(text)
     # Two-or-more newlines = one paragraph break = two <br/>
     escaped = re.sub(r"\n{2,}", BR + BR, escaped)
-    # Remaining single \n = soft break = one <br/>
-    escaped = escaped.replace("\n", BR)
+    # Remaining lone \n = CommonMark soft break = a single space.
+    escaped = escaped.replace("\n", " ")
     return escaped
 
 

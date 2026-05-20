@@ -66,10 +66,13 @@ class TestMarkdown:
         out = rt.markdown("a\n\n\n\nb")
         assert out == "a<br/><br/>b"
 
-    def test_single_newline_becomes_one_br(self) -> None:
-        # Soft break inside a paragraph.
+    def test_single_newline_becomes_a_space(self) -> None:
+        # AH.2 — a lone \n is a CommonMark soft break = a single space,
+        # NOT a <br/>. Source-readability line wrapping (YAML block
+        # scalars, SPEC-doc prose) must reflow rather than hard-break
+        # on the narrower self-hosted text box.
         out = rt.markdown("line one\nline two")
-        assert out == "line one<br/>line two"
+        assert out == "line one line two"
 
     def test_xml_escapes_body_text(self) -> None:
         assert rt.markdown("a < b & c") == "a &lt; b &amp; c"
@@ -174,26 +177,19 @@ class TestBullets:
         assert "[the docs]" not in out
         assert "](https://x.com)" not in out
 
-    def test_bullets_strip_br_from_item_and_warn(self) -> None:
-        # v8.5.8 — bullets() is defensive: any ``<br/>`` produced by
-        # markdown() (e.g. from a ``\n`` inside a YAML block scalar)
-        # gets stripped and the caller gets a UserWarning showing the
-        # original item. QS rejects ``<br/>`` as a child of ``<li>``
-        # with ``Element 'li' cannot have 'br' elements as children``.
+    def test_bullets_lone_newline_reflows_to_space(self) -> None:
+        # AH.2 — a lone \n is a CommonMark soft break: markdown()
+        # collapses it to a space upstream, so no <br/> ever reaches
+        # the <li> and no warning fires. (A \n\n paragraph break still
+        # produces <br/><br/> → stripped + warned; see the next test.)
         import warnings as _w
 
         with _w.catch_warnings(record=True) as caught:
             _w.simplefilter("always")
             out = rt.bullets(["line one\nline two"])
         assert "<br/>" not in out
-        assert "line one" in out and "line two" in out
-        # The warning surfaces the input (via repr) so authors can fix
-        # the source. ``repr('a\nb')`` is the escaped form ``'a\\nb'``.
-        assert len(caught) == 1
-        assert issubclass(caught[0].category, UserWarning)
-        msg = str(caught[0].message)
-        assert "line one" in msg and "line two" in msg
-        assert "<br/>" in msg  # the warning explains what was stripped
+        assert "line one line two" in out
+        assert caught == []
 
     def test_bullets_strip_br_from_paragraph_break_and_warn(self) -> None:
         # ``\n\n`` produces ``<br/><br/>`` via markdown(); both get
@@ -238,13 +234,15 @@ class TestBullets:
         assert "<br/>" not in out
 
     def test_bullets_one_warning_per_offending_item(self) -> None:
-        # If multiple items contain newlines, each one gets its own
+        # If multiple items contain a \n\n paragraph break (which
+        # markdown() turns into <br/><br/>), each one gets its own
         # warning so the author can fix every offender in one pass.
+        # (A lone \n is a soft break → space → no warning; see above.)
         import warnings as _w
 
         with _w.catch_warnings(record=True) as caught:
             _w.simplefilter("always")
-            rt.bullets(["a\nb", "clean", "c\nd"])
+            rt.bullets(["a\n\nb", "clean", "c\n\nd"])
         assert len(caught) == 2
 
 

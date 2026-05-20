@@ -48,6 +48,7 @@ from __future__ import annotations
 import datetime as _dt
 import html
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
@@ -800,6 +801,24 @@ def emit_error_page(
     )
 
 
+# QS Quill encodes bullet nesting as a FLAT list of
+# ``<li class="ql-indent-N">`` (N = depth, 0 = top level), NOT nested
+# <ul>. Mirror Quill's own rendering by indenting each level a fixed
+# step via a left-margin utility. These MUST be literal class strings
+# (not f-string-computed) so Tailwind's source scanner — which regexes
+# ``render.py`` per ``input.css``'s ``@source`` — compiles them into
+# ``output.css``. Level 0 gets no class. ``re.match`` parses the depth.
+_QL_INDENT_ML: Mapping[int, str] = {
+    1: "ml-[1.5rem]",
+    2: "ml-[3rem]",
+    3: "ml-[4.5rem]",
+    4: "ml-[6rem]",
+    5: "ml-[7.5rem]",
+    6: "ml-[9rem]",
+}
+_QL_INDENT_RE = re.compile(r"ql-indent-(\d+)")
+
+
 def _qs_richtext_to_html(content: str) -> str:
     """Project the QS rich-text XML dialect to HTML (X.2.g.1.a).
 
@@ -809,15 +828,24 @@ def _qs_richtext_to_html(content: str) -> str:
     a roughly-equivalent HTML node:
 
       <text-box>...</text-box>            → just the children
-      <inline font-size="X" color="Y">…</inline> → <span style="…">…</span>
+      <inline color="C" font-size="S" background-color="B"
+              font-family="F">…</inline>  → <span style="…">…</span>
+      <b>/<i>/<s>/<u>…</…>                 → same tag (bold/italic/
+                                             strike/underline)
+      <block align="center|right">…</block> → <div style="text-align:…">
       <br/>                                → <br>
       <ul><li class="ql-indent-0">…</li></ul> → <ul><li>…</li></ul>
       <a href="…" target="_self">…</a>     → <a href="…" target="_self">…</a>
+      <expression>${pName}</expression>    → literal text (App2 has no
+                                             live param state here)
 
-    Body text is XML-escaped on input + the output stays escaped (we
-    only emit element tags, never raw user prose). Unknown tags pass
-    through with their text + tail preserved so a future QS-side
-    addition degrades to "render the body, drop the styling".
+    The full tag set is confirmed by round-tripping a hand-authored QS
+    UI text box through ``describe-analysis-definition`` (the same
+    method ``common/rich_text.py`` documents). Body text is XML-escaped
+    on input + the output stays escaped (we only emit element tags,
+    never raw user prose). Unknown tags pass through with their text +
+    tail preserved so a future QS-side addition degrades to "render the
+    body, drop the styling".
     """
     import xml.etree.ElementTree as ET  # noqa: PLC0415
 
@@ -846,21 +874,59 @@ def _qs_richtext_to_html(content: str) -> str:
             font_weight = node.get("font-weight")
             if font_weight:
                 style_parts.append(f"font-weight: {font_weight}")
+            # QS UI text boxes also emit these two inline attrs
+            # (confirmed by round-tripping a hand-authored box).
+            background_color = node.get("background-color")
+            if background_color:
+                style_parts.append(f"background-color: {background_color}")
+            font_family = node.get("font-family")
+            if font_family:
+                style_parts.append(f"font-family: {font_family}")
             style_attr = (
                 f' style="{html.escape("; ".join(style_parts))}"'
                 if style_parts else ""
             )
             return f"<span{style_attr}>{text}{children}</span>{tail}"
+        # QS's inline-formatting tags are bare HTML elements (NOT
+        # ``<inline>`` attrs): ``<b>`` bold, ``<i>`` italic, ``<s>``
+        # strikethrough, ``<u>`` underline. Mirror each 1:1 — the
+        # ``.richtext`` CSS supplies the s/u text-decoration that
+        # Tailwind Preflight would otherwise strip.
+        if tag in ("b", "i", "s", "u"):
+            return f"<{tag}>{text}{children}</{tag}>{tail}"
+        if tag == "block":
+            # QS paragraph-level alignment: <block align="center|right">.
+            # Default is left (QS omits the block for left-aligned text).
+            align_cls = {
+                "center": "text-center",
+                "right": "text-right",
+            }.get(node.get("align", "left"), "text-left")
+            return f'<div class="{align_cls}">{text}{children}</div>{tail}'
+        if tag == "expression":
+            # QS injects a live parameter value, e.g.
+            # ``<expression>${pName}</expression>``. App2 doesn't thread
+            # parameter state into static text-box rendering, so the
+            # placeholder degrades to its literal source text rather than
+            # silently vanishing. Live resolution is a separate feature —
+            # recon-gen's emitters don't currently produce <expression>.
+            return f"{text}{children}{tail}"
         if tag == "br":
             return f"<br>{tail}"
         if tag == "ul":
-            return f"<ul>{text}{children}</ul>{tail}"
+            # Tailwind Preflight resets ``list-style:none``; restore disc
+            # markers + indent with utilities (compiled from these literals
+            # by the @source scan of this file — see _QL_INDENT_ML).
+            return f'<ul class="list-disc pl-6 my-2">{text}{children}</ul>{tail}'
         if tag == "ol":
-            return f"<ol>{text}{children}</ol>{tail}"
+            return f'<ol class="list-decimal pl-6 my-2">{text}{children}</ol>{tail}'
         if tag == "li":
-            # Drop the QS-required ``ql-indent-0`` class — HTML <li>
-            # doesn't need it.
-            return f"<li>{text}{children}</li>{tail}"
+            # QS requires ``ql-indent-N`` on every <li>; N = bullet-nesting
+            # depth (flat list, not nested <ul>). Project depth → a
+            # left-margin step so nested bullets visibly indent like Quill.
+            m = _QL_INDENT_RE.search(node.get("class", ""))
+            indent = _QL_INDENT_ML.get(int(m.group(1)), "") if m else ""
+            cls = f' class="{indent}"' if indent else ""
+            return f"<li{cls}>{text}{children}</li>{tail}"
         if tag == "a":
             href = node.get("href", "")
             target = node.get("target", "_self")

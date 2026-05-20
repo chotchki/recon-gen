@@ -340,3 +340,132 @@ def test_emit_visual_data_fragment_collapses_single_value_lists() -> None:
     assert '&quot;param_pSingle&quot;:&quot;only&quot;' in out
     # Multi → array
     assert '&quot;param_pMulti&quot;:[&quot;a&quot;' in out
+
+
+class TestQsRichtextToHtml:
+    """AH.2 — App2's projection of the QS ``<text-box>`` rich-text XML
+    must render every tag QS itself renders (the App2↔QS parity
+    contract). Vocabulary confirmed by round-tripping a hand-authored
+    QS UI text box via ``describe-analysis-definition``: bold/italic/
+    strike/underline are bare ``<b>/<i>/<s>/<u>`` tags (NOT
+    ``<inline>`` attrs), and ``<inline>`` additionally carries
+    ``background-color`` + ``font-family``.
+    """
+
+    @staticmethod
+    def _project(content: str) -> str:
+        from recon_gen.common.html.render import _qs_richtext_to_html
+
+        return _qs_richtext_to_html(content)
+
+    def test_bold_italic_strike_underline_tags_survive(self) -> None:
+        # Pre-AH.2 these fell through the unknown-tag branch → rendered
+        # as plain text (the styling silently dropped on App2 only).
+        out = self._project(
+            "<text-box><b>b</b><i>i</i><s>s</s><u>u</u></text-box>"
+        )
+        assert "<b>b</b>" in out
+        assert "<i>i</i>" in out
+        assert "<s>s</s>" in out
+        assert "<u>u</u>" in out
+
+    def test_inline_background_color_becomes_span_style(self) -> None:
+        out = self._project(
+            '<text-box><inline background-color="#ff0606">x</inline></text-box>'
+        )
+        assert 'background-color: #ff0606' in out
+        assert "<span" in out
+
+    def test_inline_font_family_becomes_span_style(self) -> None:
+        out = self._project(
+            '<text-box><inline font-family="Noto Sans">x</inline></text-box>'
+        )
+        assert "font-family: Noto Sans" in out
+
+    def test_inline_combines_all_supported_attrs(self) -> None:
+        out = self._project(
+            '<text-box><inline color="#111" font-size="20px" '
+            'background-color="#eee" font-family="Menlo">x</inline></text-box>'
+        )
+        for frag in (
+            "color: #111",
+            "font-size: 20px",
+            "background-color: #eee",
+            "font-family: Menlo",
+        ):
+            assert frag in out, frag
+
+    def test_bullet_list_gets_tailwind_list_utilities(self) -> None:
+        # Tailwind Preflight resets list-style:none, so the <ul> must
+        # carry the list-disc/pl-6 utilities (compiled from render.py's
+        # literals) to render markers. ql-indent-0 (top level) → no li
+        # class; the QS-specific class is dropped.
+        out = self._project(
+            '<text-box><ul><li class="ql-indent-0">one</li>'
+            '<li class="ql-indent-0">two</li></ul></text-box>'
+        )
+        assert '<ul class="list-disc pl-6 my-2">' in out
+        assert out.count("<li>") == 2  # both top-level → bare <li>
+        assert "ql-indent-0" not in out
+
+    def test_nested_bullets_get_per_level_indent(self) -> None:
+        # QS encodes nesting as a flat list with ql-indent-N; each level
+        # projects to a left-margin utility so nested bullets indent.
+        out = self._project(
+            '<text-box><ul>'
+            '<li class="ql-indent-0">top</li>'
+            '<li class="ql-indent-1">nest 1</li>'
+            '<li class="ql-indent-2">nest 2</li>'
+            '</ul></text-box>'
+        )
+        assert '<li class="ml-[1.5rem]">nest 1</li>' in out
+        assert '<li class="ml-[3rem]">nest 2</li>' in out
+        # Top level stays bare (no indent class).
+        assert "<li>top</li>" in out
+
+    def test_full_authored_box_round_trips(self) -> None:
+        # Regression mirror of the hand-authored QS sample (every
+        # markup type the operator could find). All formatting must
+        # reach the HTML projection.
+        content = (
+            '<text-box>'
+            '<inline color="#2e5090" font-size="20px">L2 Coverage</inline>'
+            '<br/>'
+            '<ul>'
+            '<li class="ql-indent-0"><b>6 internal</b> accounts</li>'
+            '<li class="ql-indent-0"><i>1 account</i> templates</li>'
+            '<li class="ql-indent-0"><s>6 rails</s> patterns</li>'
+            '<li class="ql-indent-0"><u>2 transfer</u> templates</li>'
+            '<li class="ql-indent-0">'
+            '<inline background-color="#ff0606">1 chains</inline> flows</li>'
+            '<li class="ql-indent-0">'
+            '<inline font-family="Noto Sans">1 limit</inline> schedules</li>'
+            '</ul>'
+            '</text-box>'
+        )
+        out = self._project(content)
+        assert "<b>6 internal</b>" in out
+        assert "<i>1 account</i>" in out
+        assert "<s>6 rails</s>" in out
+        assert "<u>2 transfer</u>" in out
+        assert "background-color: #ff0606" in out
+        assert "font-family: Noto Sans" in out
+        assert "color: #2e5090" in out
+        assert out.count("<li>") == 6
+
+    def test_block_align_becomes_text_align_div(self) -> None:
+        out = self._project(
+            '<text-box><block align="center">mid</block>'
+            '<block align="right">end</block></text-box>'
+        )
+        assert '<div class="text-center">mid</div>' in out
+        assert '<div class="text-right">end</div>' in out
+
+    def test_expression_degrades_to_literal_text(self) -> None:
+        # App2 has no live parameter state in the text-box render path,
+        # so the placeholder shows its literal source rather than
+        # silently vanishing.
+        out = self._project(
+            "<text-box><expression>${pL1UnbundledRail}</expression></text-box>"
+        )
+        assert "${pL1UnbundledRail}" in out

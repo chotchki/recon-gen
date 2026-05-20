@@ -21,6 +21,14 @@ them by hand — and both flow through the test-layer-chain runner's
   (No official Biome PyPI package yet — tracking biomejs/biome#8818; once
   that lands it becomes a ``[dev]`` dep like ``pyright`` and this gate's
   ``shutil.which`` lookup gets a venv-sibling check.)
+- **tailwind output.css drift** (AH.2) — App 2's ``output.css`` is a
+  committed, hand-rebuilt Tailwind artifact (``scripts/build_app2_css.py``);
+  there's no autobuild. If ``render.py`` / ``bootstrap.js`` grows a utility
+  class without a rebuild, the class silently no-ops in the shipped CSS.
+  This gate runs ``build_app2_css.py --check`` (rebuild to a temp file +
+  byte-diff against the committed one) so drift can't reach a commit.
+  Skips when ``tailwindcss`` (``pytailwindcss``, a standalone Rust binary)
+  isn't installed. Opt out: ``RECON_GEN_SKIP_TAILWIND=1``.
 """
 
 from __future__ import annotations
@@ -46,6 +54,20 @@ def _find_pyright() -> str | None:
     if venv_pyright.exists():
         return str(venv_pyright)
     return shutil.which("pyright")
+
+
+def _find_tailwind() -> str | None:
+    """Locate the standalone ``tailwindcss`` binary.
+
+    ``pytailwindcss`` drops it next to the venv interpreter (same place
+    ``_find_pyright`` looks); fall back to ``PATH``. ``None`` when it's
+    not installed, so the drift gate skips rather than failing a dev
+    box without the build toolchain.
+    """
+    venv_tw = Path(sys.executable).parent / "tailwindcss"
+    if venv_tw.exists():
+        return str(venv_tw)
+    return shutil.which("tailwindcss")
 
 
 def _run_static_gate(
@@ -99,5 +121,24 @@ def pytest_sessionstart(session: pytest.Session) -> None:
                 "src/recon_gen/common/html/assets/js/\n"
                 "  Auto-fix incl. unsafe: biome check --write --unsafe "
                 "src/recon_gen/common/html/assets/js/"
+            ),
+        )
+
+    tailwind = _find_tailwind()
+    if tailwind is not None:  # pytailwindcss not installed → skip the gate
+        _run_static_gate(
+            name="tailwind output.css drift",
+            argv=[
+                sys.executable,
+                str(Path(rootpath) / "scripts" / "build_app2_css.py"),
+                "--check",
+            ],
+            cwd=rootpath,
+            skip_env="RECON_GEN_SKIP_TAILWIND",
+            fail_msg=(
+                "App 2's output.css is stale — a fresh Tailwind build differs "
+                "from the committed file (a render.py / bootstrap.js utility "
+                "class was added without a rebuild).\n"
+                "  Rebuild + commit:  .venv/bin/python scripts/build_app2_css.py"
             ),
         )
