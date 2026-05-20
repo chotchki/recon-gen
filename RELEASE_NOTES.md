@@ -1,5 +1,20 @@
 # Release Notes
 
+## v11.7.1 — bundled-fixture re-sync (v11.7.0 release-gate fix)
+
+v11.7.0's release gate failed (never published — no PyPI artifact, no
+GitHub Release) on `tests/json/test_l1_dashboard.py`: the AF.5.spec edit
+to `tests/l2/spec_example.yaml` (adding `firings_typical_per_period` to
+three entities) propagated to `src/recon_gen/_l2_fixtures/spec_example.yaml`
+but missed two sibling bundled copies that the byte-identity tests guard
+— `src/recon_gen/apps/l1_dashboard/_default_l2.yaml` (the wheel-shipped
+L1 default L2) and `src/recon_gen/docs/reference/fixtures/spec_example.yaml`
+(the published docs reference). Both re-synced.
+
+No package-behavior change vs the intended v11.7.0 — this patch only
+re-aligns the bundled fixture copies so the byte-identity gate passes.
+All AF + AG content below ships in v11.7.1.
+
 ## v11.7.0 — firings_typical_per_period (E8) + generator gap fixes (post-AE wave)
 
 Two phases ship together — **Phase AF** (SPEC Enhancement 8) and
