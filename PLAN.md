@@ -297,6 +297,69 @@ Heterogeneous follow-ons collected during/after Phase AE: a CI hygiene fix, two 
 
 ---
 
+## Phase AI — Studio editor dogfood: any L2 yaml rebuilt via browser-driven editor
+
+User-asked 2026-05-19. Sanity check that the Studio L2 editor is end-to-end faithful by recreating a *parameterized* set of L2 yamls (spec_example + sasquatch_pr + N fuzz-sampled instances) entirely through Playwright-driven editor interactions, then assert (a) the resulting `L2Instance` is structurally equal to the parsed original AND (b) dashboards produced from the dogfood-built L2 match dashboards produced from the original L2.
+
+The user's framing: "make that test general and do it for ANY yaml we're making (fuzz included)". This shifts the test from a one-off check on spec_example to a *property test* over the L2 design space — the assertion becomes "for any valid L2 yaml the validator accepts, the editor can recreate it identically". Fuzz-generated yamls catch entity-kind combinations spec_example + sasquatch don't cover; combined with the existing fuzz seed pool (`tests/l2/fuzz.py` + `RECON_GEN_FUZZ_SEED`), a sample of N seeds per CI run exercises the editor against shapes hand-authored fixtures wouldn't think to test.
+
+**Scope:** SQLite-only (no AWS / QuickSight dependency). Both comparison points use the self-hosted App2 HTMX renderer (`recon-gen dashboards`). Runs as a browser-layer e2e test gated behind `QS_GEN_E2E=1` (per Y.2.gate test-layer protocol).
+
+**Why this matters:** the Studio editor is the X.4 / X.5 offline-iteration path; if it can't faithfully recreate a non-trivial L2 instance, the offline-editing claim is hollow. This phase ALSO surfaces editor surface gaps (UI missing for some entity kinds) — the test failure IS the discovery vehicle. Drift between editor-built yaml and hand-written yaml has zero acceptable noise floor; either the editor preserves semantic equivalence or it doesn't. And making it fuzz-sampled means future entity-kind additions (e.g., AB.3's `leg_rail_xor_groups`, AB.6's per-child `fan_in`) automatically gain dogfood coverage when they show up in the fuzz pool.
+
+- [ ] AI Studio editor dogfood: any L2 yaml rebuilt via browser
+  - [ ] AI.0 Locks (decisions before AI.1 fires, 2026-05-19).
+    - **Scope split for missing editor surfaces** (Lock 1, confirmed 2026-05-19). If the AI.1 audit reveals a non-trivial editor UI gap (no widget for a primitive that some test-input L2 uses), AI.2 BUILDS the missing UI inline as a sub-task per entity kind. Phase ships only when the editor can recreate the full corpus. No "scope to current surface; defer gaps" escape hatch — the dogfood claim has zero acceptable noise floor.
+    - **L2Instance equivalence granularity.** Compare via parsed `L2Instance` dataclass equality, not byte-equality on the YAML file. Editor-emitted YAML may diff in formatting (field ordering, comment placement, indentation) but the L2Instance struct MUST match. Use existing `tests/unit/test_l2_loader.py`-style structural asserts.
+    - **Dashboard equivalence granularity** (Lock 2, confirmed 2026-05-19). Per-sheet, per-visual: visual titles + table row content (rows + cell text) + KPI numeric values. Skip DOM byte-equality + screenshot diffs. Hermetic comparison: same L2 + seed + anchor must yield identical `DashboardDriver.visual_titles()` + `table_rows()` + `kpi_value()` outputs. Filter unstable fields (analysis_id / sheet_internal_id / wall-clock timestamps) from the comparison dict.
+    - **Test layer = browser** (Lock 3, confirmed 2026-05-19). New file `tests/e2e/test_studio_dogfood.py` gated behind `QS_GEN_E2E=1`. Runs under `./run_tests.sh up_to=browser`. Marker: `@pytest.mark.browser` (existing convention).
+    - **Determinism + reproducibility.** Anchor `date(2030, 1, 1)`; `RECON_GEN_FUZZ_SEED` pinned per CI cell. Editor mutations are exact sequences (no waits-for-element ambiguity); fail loudly if a mutation widget reports unexpected state. Studio cfg is ephemeral (tmpdir-rooted) per test invocation so studio's `.studio-state.yaml` doesn't pollute across runs.
+    - **No mutation of source yamls.** Dogfood'd YAML writes to `tmp/dogfood_<instance_name>.yaml` (test-scoped tmp dir). The shipping `tests/l2/spec_example.yaml` + `tests/l2/sasquatch_pr.yaml` are reference; the test asserts dogfood matches reference.
+    - **Fuzz axis sample size.** Locked-input seeds: 5 per CI cell. Override via `QS_GEN_AI_FUZZ_SAMPLE_N=N` env var (default 5, runner pins this to a known-good value for the deterministic suite; ad-hoc local testing can crank it). The fuzz pool itself is `tests/l2/fuzz.py::random_l2_yaml(seed)` — already produces validator-passing L2 instances. Add an opt-in nightly run that bumps the sample to 100+ once the deterministic 5-seed sample is green.
+    - **Editor save-to-yaml route.** The editor needs a single POST route that serializes the current in-memory L2Instance to a yaml file (file path supplied or returned). If no such route exists, AI.2 builds it (preferred path: `POST /l2/export?path=<dest>` returns 204 after writing). Save-on-mutate (every edit re-flushes to disk) is the current behavior; AI confirms or adjusts as needed.
+  - [ ] AI.1 Editor surface coverage audit. Walk every entity kind in the test-input corpus (spec_example + sasquatch + 5 fuzz seeds) and inventory whether each kind has an "add/edit/delete" widget in the Studio editor. Cover:
+      - Account (with all optional fields: name, role, parent_role, expected_eod_balance, description)
+      - AccountTemplate (with instance_id_template / instance_name_template)
+      - SingleLegRail (with origin variants, metadata_keys, leg_role, leg_direction)
+      - TwoLegRail (source_role, destination_role, source_origin, destination_origin)
+      - AggregatingRail (cadence, bundles_activity)
+      - TransferTemplate (leg_rails, transfer_key, completion, leg_rail_xor_groups)
+      - Chain (parent, children with ChainChildSpec including fan_in + expected_parent_count + mixed-cardinality)
+      - LimitSchedule (per-rail + per-account_type caps)
+    Produce `docs/audits/ai_1_editor_surface_audit.md` listing per-entity gaps + "needed widget" punch list. This is the discovery step — without it, AI.2 has no driver-verb scope. Run the audit BEFORE locking AI.2 effort.
+  - [ ] AI.2 StudioEditorDriver verbs + missing UI builds. Extend the App2Driver protocol (or subclass it as `StudioEditorDriver` in `tests/e2e/_drivers/`) with editor verbs keyed off the AI.1 audit. Per Lock 1, build any missing editor UI inline as AI.2.x sub-tasks. Driver shape:
+      - `create_account(id, role, scope, **opts)` + similar for other entity kinds
+      - `set_template_leg_rail_xor_groups(template, groups)` (AB.3 surface)
+      - `create_chain(parent, children: list[ChainChildSpec])` (AB.6 surface — mixed-cardinality)
+      - `save_l2_to_path(path)` — invoke editor's serialize-to-yaml route, write to disk
+      - Bulk-create helper `create_l2(reference: L2Instance)` that walks reference entities in dependency order and creates each via the verb-per-entity-kind path
+    Per `feedback_build_verbs_not_skip`: when an editor verb's underlying UI is missing, BUILD the UI (and the verb that wires to it), don't skip the test param.
+  - [ ] AI.3 Test harness — `tests/e2e/test_studio_dogfood.py`. Parameterized over L2 yaml input:
+      ```python
+      @pytest.mark.parametrize("l2_source", [
+          pytest.param("tests/l2/spec_example.yaml", id="spec_example"),
+          pytest.param("tests/l2/sasquatch_pr.yaml", id="sasquatch_pr"),
+          *[
+              pytest.param(_fuzz_yaml(seed), id=f"fuzz_{seed:010d}")
+              for seed in _fuzz_seeds_for_run()
+          ],
+      ])
+      ```
+    Sequence per test case: (a) load reference L2 via `load_instance(l2_source)`; (b) start `recon-gen studio` on a tmpdir-rooted cfg + empty L2; (c) StudioEditorDriver creates every entity from the reference IN DEPENDENCY ORDER (AccountTemplates → Accounts → Rails → TransferTemplates → Chains → LimitSchedules); (d) save via `save_l2_to_path(dogfood_yaml_path)`; (e) shutdown studio. Failures surface the FIRST missing editor verb + entity + cell.
+  - [ ] AI.4 L2Instance equivalence assertion. Load both `l2_source` and `dogfood_yaml_path` via `load_instance`. Assert structural equality: `original.accounts == dogfood.accounts`, `original.rails == dogfood.rails`, etc. Use dataclass `__eq__`. Fail with a focused diff (which entity differs in which field). This is the FIRST acceptance gate — if it fails, the editor lost information during the round-trip.
+  - [ ] AI.5 Dashboard equivalence assertion (SQLite-only, App2 only). For each of `(original L2, dogfood L2)`:
+      1. Apply schema against a fresh SQLite db (one per L2; tmpdir-rooted)
+      2. `data apply --execute` against the same anchor + seed
+      3. `data refresh` to materialize L1 + Investigation matviews
+      4. Start `recon-gen dashboards -c <ephemeral cfg> --l2 <yaml>` on a distinct port; mount in App2Driver
+      5. Walk every dashboard's every sheet's every visual; collect `(dashboard_id, sheet_name, visual_title) → {row_count, rows, kpi_value}` into a comparison dict
+      6. Compare the two collected dicts; assert byte-equal modulo dashboard-internal-id randomness
+    The dashboards-match assertion is the user-facing acceptance: "the editor produces an L2 that drives identical dashboards".
+  - [ ] AI.6 Fuzz axis wiring. Extend the runner so `./run_tests.sh up_to=browser` honors `QS_GEN_AI_FUZZ_SAMPLE_N` (default 5 per cell; nightly opt-in cranks to 100+). Fuzz seeds derive from the run-id-hash so reruns at the same commit see the same seed pool (per `feedback_fuzzer_as_property_testing.md` reproducibility contract). Failed fuzz seeds get re-runnable via `./run_tests.sh up_to=browser --variants=fNNNNN_sl_lo`.
+  - [ ] AI.7 Re-verify + commit. Run `./run_tests.sh up_to=browser --scenarios=sp --dialects=sl --targets=lo` locally to confirm the 5-seed deterministic dogfood suite passes; gate CI on it via the existing browser-job pipeline (`e2e.yml` or analog). Phase history one-liner: "AI — Studio editor dogfood: ANY L2 yaml (spec_example + sasquatch_pr + fuzz-sampled) rebuilt via browser-driven editor matches reference structurally + in dashboard output (SQLite/App2 only)".
+
+---
+
 ## Phase Q (continued) — CLI / YAML ergonomics
 
 The standing "Phase Q" thread (Q.1–Q.5 + Q.3.a shipped; see Phase history). What's still open: the CLI-shape revisit below, plus the older "schema ergonomics around the L2 yaml" item (task #488 — fold into Q.6's spike or its own sub-item when scoped). Queues behind Phase X.
