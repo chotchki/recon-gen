@@ -21,7 +21,12 @@ Reconciliation needs more than one perspective because no single role has the fu
 
 Every surface speaks **your** institution's vocabulary — account names, role labels, persona prose are all driven from the L2 institution YAML and substituted into the rendered output. Swap the L2, the language follows.
 
-**See it live.** The bundled Sasquatch example institution (`tests/l2/sasquatch_pr.yaml`) renders into the full training-materials surface at **[chotchki.github.io/recon-gen](https://chotchki.github.io/recon-gen/)** — the same persona-driven handbooks, walkthroughs, and per-sheet explainers your operators would see against your own L2 instance. It's both demo and template: read it to evaluate the tool, fork it to start your own.
+**See it live — two public demos, no install:**
+
+- **[recon-gen-spec.hotchkiss.io](https://recon-gen-spec.hotchkiss.io/)** — the `spec_example` L2: the smallest viable bank, dashboards only. The four bundled apps served by the self-hosted HTMX runtime.
+- **[recon-gen-sasquatch.hotchkiss.io](https://recon-gen-sasquatch.hotchkiss.io/)** — the `sasquatch_pr` L2: realistic community-bank flavor, served through the **Studio** surface in read-only demo mode (L2 editor, unified diagram, and data-shaping panel — with every mutation locked down).
+
+Both render straight from the bundled L2 YAMLs (`tests/l2/{spec_example,sasquatch_pr}.yaml`): read them to evaluate the tool, fork one to start your own. The full persona-driven handbooks, walkthroughs, and per-sheet explainers your operators would see live at **[chotchki.github.io/recon-gen](https://chotchki.github.io/recon-gen/)**.
 
 ## Not an ETL tool — but we'll help you wire one in
 
