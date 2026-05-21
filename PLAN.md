@@ -403,8 +403,8 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
 
 **Seed / instance-side artifacts (don't ship as dashboard bugs — fix seed or annotate):**
   - [x] AO.R.1 AO.R.1 — App2 table headers + currency format honor the contract
-  - [ ] AO.R.2 AO.R.2 — App2 charts: currency format + STACKED + legible axis labels
-  - [ ] AO.R.3 AO.R.3 — App2 text panels render bold/code/bullets (rt.markdown)
+  - [x] AO.R.2 AO.R.2 — App2 charts: currency format + STACKED + legible axis labels
+  - [x] AO.R.3 AO.R.3 — App2 text panels render bold/code/bullets (rt.markdown)
   - [ ] AO.R.4 AO.R.4 — App2 slider control default bound on initial load
   - [x] AO.R.5 AO.R.5 — parity drift gate: App2 table shape carries QS's label+format
 - [ ] AO.S1 (feedback #3/#4) Magnitude-0 exception rows + pool `ledger_drift` in the millions = the known plant-residual / independent-leg fan-out modeling. AO.1's integer-cents math clears the float-noise portion; decide fix-seed-to-reduce-noise vs annotate-as-intended for the rest. NOTE: feedback #4's "child postings don't roll up to parent / no working drill" IS a real dashboard concern (the dead-end drill depends on AO.2).
