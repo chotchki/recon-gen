@@ -51,6 +51,7 @@ from recon_gen.common.l2.primitives import L2Instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.l2.seed import emit_full_seed
 from recon_gen.common.sql import Dialect
+from recon_gen.cli._helpers import build_full_seed_sql
 
 from tests._test_helpers import make_test_config
 
@@ -162,6 +163,72 @@ def test_multi_xor_violation_holds_only_intended_plants(
         f"(Gap H residual — should be routed through "
         f"_baseline_xor_child_pick so the firing is chain-complete): "
         f"{incidental}"
+    )
+
+
+def _seed_refresh_densified(
+    yaml_path: Path, prefix: str,
+) -> tuple[L2Instance, sqlite3.Cursor]:
+    """Like ``_seed_refresh`` but emits the DENSIFIED seed (the
+    ``data apply`` path: ×5 densify + broken-rail + inv-fanout plants) via
+    ``build_full_seed_sql`` — the full plant set where broad-mode coverage
+    fires the chain-parent rails that trip the AJ.6 residual."""
+    inst = load_instance(yaml_path)
+    cfg = make_test_config(dialect=Dialect.SQLITE, db_table_prefix=prefix)
+    conn = sqlite3.connect(":memory:")
+    conn.execute("PRAGMA foreign_keys = ON;")
+    _register_sqlite_aggregates(conn)
+    cur = conn.cursor()
+    execute_script(
+        cur, emit_schema(inst, prefix=prefix, dialect=Dialect.SQLITE),
+        dialect=Dialect.SQLITE,
+    )
+    execute_script(
+        cur, build_full_seed_sql(cfg, inst, anchor=_ANCHOR),
+        dialect=Dialect.SQLITE,
+    )
+    execute_script(
+        cur, refresh_matviews_sql(inst, prefix=prefix, dialect=Dialect.SQLITE),
+        dialect=Dialect.SQLITE,
+    )
+    return inst, cur
+
+
+@pytest.mark.parametrize("yaml_path,prefix", _FIXTURES)
+def test_broad_rail_coverage_firings_are_chain_complete(
+    yaml_path: Path, prefix: str,
+) -> None:
+    """AJ.6 (Gap H broad-rail residual): on the DENSIFIED seed, no
+    broad-mode RAIL coverage firing (``tr-rail-*``) of a multi-XOR chain
+    parent stays childless in ``multi_xor_violation``.
+
+    The broad rail picker SKIPS multi-XOR chains (``auto_scenario.
+    _build_broad_rail_firings`` — "the seed.py XOR picker chooses one
+    sibling per parent firing"), so a coverage firing of such a parent has
+    no child unless ``_emit_plant_chain_completion`` fills it. The chain
+    parent may be the rail itself (``BulkAccrualSettlement``) OR the
+    firing's template (``DisbursementCycle``) — the rail emitter completes
+    via both (``via_template_name``).
+
+    RED before AJ.6 (6 ``tr-rail`` rows on spec_example densified), GREEN
+    after. Densified because the residual only surfaces in the full plant
+    set. NOTE: the intentional ``tr-tt-*`` firing-1/2 demo (overlap/missed
+    for the tt-instances explorer) and the dedicated ``tr-mxor-*`` plants
+    are NOT residuals — this guards only the unintentional ``tr-rail-*``.
+    """
+    _inst, cur = _seed_refresh_densified(yaml_path, prefix)
+    rail_residuals = cur.execute(
+        f"SELECT parent_transfer_id, parent_rail_or_template_name, "
+        f"       disagreement_kind "
+        f"FROM {prefix}_multi_xor_violation "
+        f"WHERE parent_transfer_id LIKE 'tr-rail-%' "
+        f"ORDER BY parent_transfer_id"
+    ).fetchall()
+    assert not rail_residuals, (
+        f"{len(rail_residuals)} broad-rail coverage firing(s) of a "
+        f"multi-XOR chain parent are childless in multi_xor_violation "
+        f"(AJ.6 — _emit_plant_chain_completion should complete them via "
+        f"rail.name OR template_name): {rail_residuals}"
     )
 
 

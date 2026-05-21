@@ -5269,6 +5269,8 @@ def _emit_plant_chain_completion(
     counter: _Counter,
     dialect: Dialect,
     base_seed: int = _BASELINE_BASE_SEED,
+    multi_children_only: bool = False,
+    via_template_name: Identifier | None = None,
 ) -> list[str]:
     """AJ.3 (Gap H residual): make a plant's chain-parent firing chain-
     complete by emitting its XOR/fan-in child.
@@ -5295,11 +5297,33 @@ def _emit_plant_chain_completion(
     plant firings land on standalone rails). fan_in-only chains return no
     pick (their N:1 cardinality is ``_fan_in_disagreement``'s concern,
     not multi_xor / chain_orphans).
+
+    ``multi_children_only`` (broad rail emitter only): skip single-child
+    chains — ``auto_scenario._build_broad_rail_firings`` already links those
+    to the parent firing, so completing them here would double the child.
+    The picker skips multi-XOR chains, so those are ours to fill.
+
+    ``via_template_name`` (broad rail emitter): a rail firing carries a
+    ``template_name``; when the chain parent IS that template (not the
+    rail), match it too — e.g. a broad firing of ``DisbursementCycle``'s
+    leg-rail is a ``DisbursementCycle``-chain parent firing.
     """
     rail_names = {r.name for r in instance.rails}
+    # A firing's chain-parent identity may be its rail_name OR its
+    # template_name — the multi_xor matview attributes via either, so a
+    # broad rail firing of a template-parented chain's leg-rail counts.
+    candidate_parents = {str(parent_name)}
+    if via_template_name is not None:
+        candidate_parents.add(str(via_template_name))
     rows: list[str] = []
     for chain in instance.chains:
-        if str(chain.parent) != str(parent_name):
+        if str(chain.parent) not in candidate_parents:
+            continue
+        if multi_children_only and len(chain.children) <= 1:
+            # The broad rail picker already links single-child chains to
+            # their parent firing (auto_scenario._build_broad_rail_firings);
+            # only multi-XOR chains (which it skips) need completing here.
+            # Without this guard the rail emitter double-emits the child.
             continue
         child_name = _baseline_xor_child_pick(
             chain, parent_transfer_id, base_seed,
@@ -6054,7 +6078,7 @@ def _emit_transfer_template_rows(
                 origin=child_origin,
                 metadata=metadata,
                 transfer_parent_id=transfer_id,
-            
+
                 dialect=dialect,
             ))
     return rows
@@ -6143,7 +6167,7 @@ def _emit_rail_firing_rows(
             str(rail.destination_origin) if rail.destination_origin is not None
             else (str(rail.origin) if rail.origin is not None else "InternalInitiated")
         )
-        return [
+        rows = [
             _txn_row(
                 id_=f"{txn_id}-src",
                 account_id=src.account_id,
@@ -6183,6 +6207,20 @@ def _emit_rail_firing_rows(
                 dialect=dialect,
             ),
         ]
+        # AJ.6 (Gap H residual, broad mode): if this rail is also a
+        # multi-XOR chain parent, emit its XOR-pick child so the firing is
+        # chain-complete — otherwise it false-positives as a childless
+        # multi_xor_violation / chain_orphan. Same pick the baseline +
+        # sibling plant emitters use (no-op when the rail parents no chain).
+        rows.extend(_emit_plant_chain_completion(
+            transfer_id, rail.name, posting_ts,
+            account_id=dst.account_id, account_name=dst.account_name,
+            account_role=dst.account_role, account_scope=dst.account_scope,
+            account_parent_role=dst.account_parent_role,
+            instance=instance, counter=counter, dialect=dialect,
+            multi_children_only=True, via_template_name=p.template_name,
+        ))
+        return rows
 
     # SingleLegRail (the only other arm of the discriminated union;
     # exhaustion guarded by the TwoLegRail isinstance branch above).
@@ -6198,7 +6236,7 @@ def _emit_rail_firing_rows(
         str(rail.origin) if rail.origin is not None
         else "InternalInitiated"
     )
-    return [
+    rows = [
         _txn_row(
             id_=txn_id,
             account_id=src.account_id,
@@ -6219,6 +6257,17 @@ def _emit_rail_firing_rows(
             dialect=dialect,
         ),
     ]
+    # AJ.6 (Gap H residual, broad mode): same completion for a single-leg
+    # rail firing that is also a chain parent.
+    rows.extend(_emit_plant_chain_completion(
+        transfer_id, rail.name, posting_ts,
+        account_id=src.account_id, account_name=src.account_name,
+        account_role=src.account_role, account_scope=src.account_scope,
+        account_parent_role=src.account_parent_role,
+        instance=instance, counter=counter, dialect=dialect,
+        multi_children_only=True, via_template_name=p.template_name,
+    ))
+    return rows
 
 
 def _emit_inv_fanout_rows(

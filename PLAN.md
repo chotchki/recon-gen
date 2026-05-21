@@ -81,7 +81,7 @@ Third supported dialect alongside Postgres + Oracle. Schema emit, matview-as-tab
 - [x] AK.0 AK.0 QS dataset-parameter GUIDs are shape-only, not valid → QS fails to load
   - [x] AK.1 AK.1 build_dataset derives dataset-param Id via auto_id(dataset_id:dsparam:Name); drop hardcoded _DSP_ID_* constants (l2ft/inv/l1/exec)
   - [x] AK.2 AK.2 Regenerate bundled tests/json fixtures (param Ids shifted) + add test: every dataset-param Id is a valid UUID + unique across an analysis's datasets
-  - [ ] AK.3 AK.3 Full suite + DB gate + commit (AK QS dataset-param GUID fix)
+  - [x] AK.3 AK.3 Full suite + DB gate + commit (AK QS dataset-param GUID fix)
 - [ ] X.6.a mkdocstrings expansion. Auto-generate L2 entity reference (`common/l2/primitives.py` — Account, Rail, Chain, TransferTemplate, etc.) and visual reference (`common/tree/visuals.py` — KPI, Table, BarChart, Sankey, ForceGraph). Per-class page with docstring + field table. Replaces today's hand-written `docs/reference/l2-spec.md` + per-visual handbook callouts.
 - [ ] X.6.b Custom mkdocs-macros plugin: tree → walkthrough scaffolds. Reads sheet/visual descriptions from each app's tree (`apps/<app>/app.py` builds the tree; the plugin walks it). Emits per-sheet walkthrough scaffold with the sheet's own `description` as the lede + each visual's `subtitle` as a section. Hand-written prose can extend the scaffold but the model-derived parts can't drift.
 - [ ] X.6.c Auto dataset reference. `DatasetContract` lists columns + types + (often) shape. Generates per-dataset reference page. Replaces today's hand-written column lists in `docs/data-contract/`.
@@ -334,6 +334,9 @@ Source: `SPEC_gap_feedback.md` Gaps G–I, surfaced by post-AG integration re-te
 - [x] AJ.3 AJ.3 Gap H residual — plant helpers emit chain-complete firings (not baseline)
 - [x] AJ.4 Gap I — L2FT `chain_orphans` dataset (`apps/l2_flow_tracing/datasets.py::build_exc_chain_orphans_dataset`) computes fan_in parent-side orphans via `<prefix>_transfer_parents`, not naive `parent − child`; 4-way agreement.
 - [x] AJ.5 Re-lock seeds, full sweep + 4-way agreement green, commit + cut release.
+- [x] AJ.6 Gap H broad-rail residual — broad-mode RAIL coverage firings of a multi-XOR chain parent were childless (the rail picker skips multi-XOR chains), false-positiving in `multi_xor_violation`. Complete them via `_emit_plant_chain_completion` (matched by `rail.name` OR `template_name`). The broad tt firing-1/2/3 demo (overlap/missed/complete for the tt-instances explorer) is INTENTIONAL — left intact.
+  - [x] AJ.6.1 Rail completion: `multi_children_only` (skip single-child chains the picker already links) + `via_template_name` (template-parented chains like DisbursementCycle); revert the tt completion (intentional demo); pyright clean.
+  - [x] AJ.6.2 Densified RED→GREEN structural guard (no childless `tr-rail` in `multi_xor_violation`) + re-lock spec_example seeds (×3 dialects) + full suite + commit.
 
 ---
 
