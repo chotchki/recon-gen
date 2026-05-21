@@ -284,6 +284,9 @@ def create_l2_entity(
                 bundles_activity=bundles_activity_v,  # pyright: ignore[reportArgumentType]  # WHY: form-typed tuple[Identifier, ...]
                 description=fields.get("description"),
                 metadata_value_examples=metadata_value_examples_v,  # pyright: ignore[reportArgumentType]  # WHY: form-typed nested tuple from yaml_block coerce
+                cadence=fields.get("cadence"),  # pyright: ignore[reportArgumentType]  # WHY: AI.2.a — form-coerced CadenceExpression or None (was dropped on create)
+                amount_typical_range=fields.get("amount_typical_range"),  # pyright: ignore[reportArgumentType]  # WHY: AI.2.a — form-coerced tuple[Money, Money] or None (was dropped on create)
+                firings_typical_per_period=fields.get("firings_typical_per_period"),  # pyright: ignore[reportArgumentType]  # WHY: AI.2.a — form-coerced FiringsTypicalPerPeriod or None (was dropped on create)
             )
         else:
             # Default to two_leg when subtype is missing — caller is
@@ -332,6 +335,9 @@ def create_l2_entity(
                 bundles_activity=bundles_activity_v,  # pyright: ignore[reportArgumentType]  # WHY: form-typed tuple[Identifier, ...]
                 description=fields.get("description"),
                 metadata_value_examples=metadata_value_examples_v,  # pyright: ignore[reportArgumentType]  # WHY: form-typed nested tuple from yaml_block coerce
+                cadence=fields.get("cadence"),  # pyright: ignore[reportArgumentType]  # WHY: AI.2.a — form-coerced CadenceExpression or None (was dropped on create)
+                amount_typical_range=fields.get("amount_typical_range"),  # pyright: ignore[reportArgumentType]  # WHY: AI.2.a — form-coerced tuple[Money, Money] or None (was dropped on create)
+                firings_typical_per_period=fields.get("firings_typical_per_period"),  # pyright: ignore[reportArgumentType]  # WHY: AI.2.a — form-coerced FiringsTypicalPerPeriod or None (was dropped on create)
             )
         return dataclasses.replace(instance, rails=(*instance.rails, new_r))
     if kind == "transfer_template":
@@ -405,14 +411,40 @@ def create_l2_entity(
                 "rail / template names (singleton ⇒ required, "
                 "multi ⇒ XOR per Z.A grammar).",
             )
-        child_names: tuple[Identifier, ...] = tuple(
-            Identifier(str(c)) for c in children_raw  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]  # WHY: fields[] dict comes back Any-typed; per-item str() narrows safely
-        )
-        if not child_names:
+        # AI.2.a — _coerce_form's chain_children path already builds a
+        # tuple[ChainChildSpec, ...] carrying per-child fan_in +
+        # expected_parent_count (the same shape mutate_l2 consumes on edit),
+        # so consume it directly: create now supports per-child fan-in +
+        # mixed-cardinality (sasquatch's MerchantSettlementCycle shape).
+        # Earlier this branch re-read the specs as bare names and synthesized
+        # ONE chain-level fan_in onto every child, silently dropping per-child
+        # fan-in on create. Fall back to a name-list + optional chain-level
+        # fan_in for non-form (API) callers that pass plain strings.
+        children: tuple[ChainChildSpec, ...]
+        if all(isinstance(c, ChainChildSpec) for c in children_raw):  # pyright: ignore[reportUnknownVariableType]  # WHY: children_raw is Any-typed form data, narrowed to list/tuple above
+            children = tuple(children_raw)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]  # WHY: each element confirmed ChainChildSpec by the all() guard
+        else:
+            fan_in_raw = fields.get("fan_in", False)
+            fan_in = bool(fan_in_raw) if fan_in_raw is not None else False
+            expected_raw = fields.get("expected_parent_count")
+            expected_parent_count: int | None = (
+                int(expected_raw)
+                if expected_raw is not None and expected_raw != "" else None
+            )
+            children = tuple(
+                ChainChildSpec(
+                    name=Identifier(str(c)),  # pyright: ignore[reportUnknownArgumentType]  # WHY: API-path element is Any; str() narrows
+                    fan_in=fan_in,
+                    expected_parent_count=expected_parent_count,
+                )
+                for c in children_raw  # pyright: ignore[reportUnknownVariableType]  # WHY: Any-typed form data narrowed to list/tuple above
+            )
+        if not children:
             raise ValueError(
                 "Chain.children must be non-empty (singleton ⇒ required, "
                 "multi ⇒ XOR per Z.A grammar).",
             )
+        child_names = tuple(c.name for c in children)
         # Check for duplicate row by (parent, sorted-children-tuple).
         new_key = (str(parent), tuple(sorted(str(c) for c in child_names)))
         for c in instance.chains:
@@ -425,25 +457,6 @@ def create_l2_entity(
                     f"Chain row for parent={parent!r} with "
                     f"children={list(child_names)!r} already exists.",
                 )
-        # AB.6.1 transitional: studio editor still presents chain-level
-        # fan_in / expected_parent_count fields (per-child UI lands in
-        # AB.6.7); synthesize them onto every child entry. Validator
-        # C8a-c (now per-child) enforces cross-field rules after
-        # construction.
-        fan_in_raw = fields.get("fan_in", False)
-        fan_in = bool(fan_in_raw) if fan_in_raw is not None else False
-        expected_raw = fields.get("expected_parent_count")
-        expected_parent_count: int | None = (
-            int(expected_raw) if expected_raw is not None and expected_raw != "" else None
-        )
-        children = tuple(
-            ChainChildSpec(
-                name=name,
-                fan_in=fan_in,
-                expected_parent_count=expected_parent_count,
-            )
-            for name in child_names
-        )
         new_ce = Chain(
             parent=Identifier(str(parent)),
             children=children,

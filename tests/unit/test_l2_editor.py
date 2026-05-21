@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from recon_gen.common.l2.editor import (
+    create_l2_entity,
     delete_l2_entity,
     mutate_l2,
     rename_identifier,
@@ -28,6 +29,7 @@ from recon_gen.common.l2.editor import (
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import (
     Account,
+    ChainChildSpec,
     Identifier,
     L2Instance,
     Rail,
@@ -45,6 +47,74 @@ _FIXTURES = Path(__file__).resolve().parent.parent / "l2"
 @pytest.fixture
 def spec_example() -> L2Instance:
     return load_instance(_FIXTURES / "spec_example.yaml")
+
+
+# ---------------------------------------------------------------------------
+# create_l2_entity — AI.2.a create-path field-drop guards
+# ---------------------------------------------------------------------------
+
+
+def test_create_chain_preserves_per_child_fan_in(
+    spec_example: L2Instance,
+) -> None:
+    """AI.2.a: create_l2_entity consumes the tuple[ChainChildSpec, ...] that
+    _coerce_form builds (per-child fan_in + expected_parent_count) directly,
+    instead of re-reading bare names and synthesizing ONE chain-level flag
+    onto every child. A mixed-cardinality chain (one fan_in child + one 1:1
+    sibling) must round-trip with per-child fan-in intact — the create-path
+    drop both garbled the names (str(ChainChildSpec)) and collapsed every
+    child to the same flag.
+    """
+    new_inst = create_l2_entity(
+        spec_example,
+        kind="chain",
+        fields={
+            "parent": "ReconciliationLeg",
+            "children": (
+                ChainChildSpec(
+                    name=Identifier("MerchantSettlementCycle"),
+                    fan_in=True,
+                    expected_parent_count=3,
+                ),
+                ChainChildSpec(
+                    name=Identifier("ReconciliationClosing"),
+                    fan_in=False,
+                    expected_parent_count=None,
+                ),
+            ),
+        },
+    )
+    new_chain = new_inst.chains[-1]
+    by_name = {str(c.name): c for c in new_chain.children}
+    assert by_name["MerchantSettlementCycle"].fan_in is True
+    assert by_name["MerchantSettlementCycle"].expected_parent_count == 3
+    # The 1:1 sibling must NOT inherit the fan_in child's flag.
+    assert by_name["ReconciliationClosing"].fan_in is False
+    assert by_name["ReconciliationClosing"].expected_parent_count is None
+
+
+def test_create_rail_preserves_cadence(spec_example: L2Instance) -> None:
+    """AI.2.a: a created aggregating rail carries `cadence` (was silently
+    dropped on create — only the edit path set it). amount_typical_range +
+    firings_typical_per_period follow the same one-line fix and are covered
+    end-to-end by the AI.3 round-trip dogfood.
+    """
+    new_inst = create_l2_entity(
+        spec_example,
+        kind="rail",
+        fields={
+            "subtype": "single_leg",
+            "name": "NewSweepRail",
+            "leg_role": (Identifier("ClearingSuspense"),),
+            "leg_direction": "Credit",
+            "aggregating": True,
+            "cadence": "intraday-2h",
+        },
+    )
+    new_rail = next(
+        r for r in new_inst.rails if str(r.name) == "NewSweepRail"
+    )
+    assert str(new_rail.cadence) == "intraday-2h"
 
 
 # ---------------------------------------------------------------------------

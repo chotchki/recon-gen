@@ -294,6 +294,10 @@ The user's framing: "make that test general and do it for ANY yaml we're making 
       - `save_l2_to_path(path)` — invoke editor's serialize-to-yaml route, write to disk
       - Bulk-create helper `create_l2(reference: L2Instance)` that walks reference entities in dependency order and creates each via the verb-per-entity-kind path
     Per `feedback_build_verbs_not_skip`: when an editor verb's underlying UI is missing, BUILD the UI (and the verb that wires to it), don't skip the test param.
+      - [x] AI.2.a AI.2.a Fix create-path field drops (rail cadence/amount_typical_range/firings_typical_per_period + chain per-child fan_in/epc)
+      - [ ] AI.2.b AI.2.b TransferTemplate transfer_key field (FieldSpec + create wiring)
+      - [ ] AI.2.c AI.2.c Top-level L2 editor for description + role_business_day_offsets (new singleton kind)
+      - [ ] AI.2.d AI.2.d StudioEditorDriver verbs + create_l2(reference) bulk helper
     - [ ] AI.3 Test harness — `tests/e2e/test_studio_dogfood.py`. Parameterized over L2 yaml input:
       ```python
       @pytest.mark.parametrize("l2_source", [
