@@ -37,11 +37,13 @@ This walk closes that gap for four control shapes:
   type="number" name="param_<name>">`` + a one-handle noUiSlider
   (single-value scalar bind, the same ``<<$param>>`` narrowing QS does).
 
-Out of scope: ``ParameterTextField`` / ``ParameterDateTimePicker``
-controls (a different shape — text-field parity not yet needed;
-date-control parity is the universal date range, handled separately).
-Those controls are silently skipped — the form just won't carry a
-widget for them.
+``ParameterDateTimePicker`` → ``ParameterDateSpec`` (AO.2 — a single-date
+Flatpickr control, e.g. the Daily Statement's Business Day; it also
+suppresses the universal date-RANGE on its sheet).
+
+Out of scope: ``ParameterTextField`` controls (a different shape —
+text-field parity not yet needed). Those are silently skipped — the form
+just won't carry a widget for them.
 """
 
 from __future__ import annotations
@@ -50,12 +52,14 @@ from typing import TYPE_CHECKING
 
 from recon_gen.common.html.render import (
     FilterSpec,
+    ParameterDateSpec,
     ParameterDropdownSpec,
     ParameterMultiSelectSpec,
     ParameterNumberSpec,
 )
 from recon_gen.common.tree import (
     LinkedValues,
+    ParameterDateTimePicker,
     ParameterDropdown,
     ParameterSlider,
     StaticValues,
@@ -106,6 +110,15 @@ def make_filter_specs_for_sheet(sheet: "Sheet") -> list[FilterSpec]:
     separately). Skipped controls just don't get a widget.
     """
     specs: list[FilterSpec] = []
+    # AO.2 — a LONE datetime picker is a single-date sheet (Daily
+    # Statement's Business Day); a From/To PAIR is a date RANGE (L2FT /
+    # Executives / L1 invariant sheets). Only the lone case becomes a
+    # single-date control + suppresses the universal range; the pair stays
+    # out-of-scope so the universal date-range form keeps driving it.
+    n_date_pickers = sum(
+        isinstance(c, ParameterDateTimePicker)
+        for c in sheet.parameter_controls
+    )
     for ctrl in sheet.parameter_controls:
         if isinstance(ctrl, ParameterSlider):
             # X.2.u.4.e — a slider bound to a numeric parameter
@@ -126,6 +139,20 @@ def make_filter_specs_for_sheet(sheet: "Sheet") -> list[FilterSpec]:
                 step=float(ctrl.step_size),
                 default=float(default_vals[0]) if default_vals else None,
             ))
+            continue
+        if isinstance(ctrl, ParameterDateTimePicker):
+            # AO.2 — a LONE datetime picker is a single date (Daily
+            # Statement's Business Day, bound to a SQL-pushed-down param):
+            # render a Flatpickr single-date input → ``?param_<name>=
+            # YYYY-MM-DD`` (the same ``<<$param>>`` narrowing QS does via
+            # the bridged dataset param), and the resulting spec suppresses
+            # the universal date-RANGE on the sheet. A From/To PAIR (count
+            # > 1) is a range — leave those out-of-scope so the universal
+            # date-range form keeps driving them (pre-AO.2 behaviour).
+            if n_date_pickers == 1:
+                specs.append(ParameterDateSpec(
+                    name=str(ctrl.parameter.name), label=ctrl.title,
+                ))
             continue
         if not isinstance(ctrl, ParameterDropdown):
             continue

@@ -28,6 +28,10 @@ from recon_gen.common.html import (
     ParameterNumberSpec,
     make_filter_specs_for_sheet,
 )
+from recon_gen.common.html.render import (
+    ParameterDateSpec,
+    _render_filter_form,
+)
 from recon_gen.common.ids import ParameterName, SheetId
 from recon_gen.common.tree import (
     Analysis,
@@ -167,3 +171,46 @@ def test_l2ft_rails_sheet_auto_derives_post_aa_a_3_pushdown_specs() -> None:
     for spec in specs:
         if isinstance(spec, ParameterDropdownSpec):
             assert len(spec.options) >= 1
+
+
+def test_date_control_shape_comes_from_the_tree() -> None:
+    """AO.2 — range vs single date is the TREE's call; the renderer
+    implements it. L1 Daily Statement's LONE Business Day picker →
+    a single-date ``ParameterDateSpec`` (and the universal date-RANGE is
+    suppressed on that sheet); L2FT's Date From/To PAIR → no
+    ``ParameterDateSpec`` (the universal range keeps driving it)."""
+    from recon_gen.apps.l1_dashboard.app import build_l1_dashboard_app
+    from recon_gen.apps.l1_dashboard.datasets import (
+        build_all_l1_dashboard_datasets,
+    )
+    from recon_gen.apps.l2_flow_tracing.app import build_l2_flow_tracing_app
+    from recon_gen.apps.l2_flow_tracing.datasets import (
+        build_all_l2_flow_tracing_datasets,
+    )
+    from recon_gen.common.l2 import default_l2_instance
+
+    cfg = make_test_config(db_table_prefix="spec_example")
+    inst = default_l2_instance()
+
+    # Lone picker → single date, range suppressed.
+    build_all_l1_dashboard_datasets(cfg, inst)
+    l1 = build_l1_dashboard_app(cfg, l2_instance=inst)
+    assert l1.analysis is not None
+    ds_sheet = next(s for s in l1.analysis.sheets if s.name == "Daily Statement")
+    ds_specs = make_filter_specs_for_sheet(ds_sheet)
+    date_specs = [s for s in ds_specs if isinstance(s, ParameterDateSpec)]
+    assert len(date_specs) == 1
+    assert date_specs[0].name == "pL1DsBalanceDate"
+    ds_form = _render_filter_form([], tuple(ds_specs))
+    assert 'data-widget="flatpickr-single"' in ds_form
+    assert 'data-widget="flatpickr-range"' not in ds_form
+
+    # From/To pair → range (no single-date spec; universal range stays).
+    build_all_l2_flow_tracing_datasets(cfg, inst)
+    l2ft = build_l2_flow_tracing_app(cfg, l2_instance=inst)
+    assert l2ft.analysis is not None
+    rails = next(s for s in l2ft.analysis.sheets if s.name == "Rails")
+    rails_specs = make_filter_specs_for_sheet(rails)
+    assert not [s for s in rails_specs if isinstance(s, ParameterDateSpec)]
+    rails_form = _render_filter_form([], tuple(rails_specs))
+    assert 'data-widget="flatpickr-range"' in rails_form

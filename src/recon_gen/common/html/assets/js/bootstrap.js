@@ -1467,6 +1467,8 @@
         wireTomSelect(el);
       } else if (kind === "flatpickr-range") {
         wireFlatpickrRange(el, scope);
+      } else if (kind === "flatpickr-single") {
+        wireFlatpickrSingle(el, scope);
       } else if (kind === "nouislider") {
         wireNoUiSlider(el, scope);
       }
@@ -1513,6 +1515,34 @@
         if (toInput) toInput.value = hi;
         if (fromInput) {
           fromInput.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      },
+    });
+  }
+
+  // AO.2 — single-date picker (Daily Statement Business Day). The visible
+  // input is the Flatpickr target; it writes the picked YYYY-MM-DD into the
+  // sibling hidden ``param_<name>`` named by data-target-input, then fires
+  // change so wireFilterAutoRefresh re-fetches. Empty value (no pick) =>
+  // the dataset param's sentinel default => the account's latest day.
+  function wireFlatpickrSingle(el, scope) {
+    if (typeof flatpickr === "undefined") return;
+    el.dataset.widgetWired = "1";
+    var targetName = el.dataset.targetInput;
+    var hidden = targetName
+      ? scope.querySelector('input[name="' + targetName + '"]')
+      : null;
+    flatpickr(el, {
+      mode: "single",
+      dateFormat: "Y-m-d",
+      defaultDate: hidden && hidden.value ? hidden.value : null,
+      onChange: (selectedDates, _dateStr, instance) => {
+        var d = selectedDates[0]
+          ? instance.formatDate(selectedDates[0], "Y-m-d")
+          : "";
+        if (hidden) {
+          hidden.value = d;
+          hidden.dispatchEvent(new Event("change", { bubbles: true }));
         }
       },
     });

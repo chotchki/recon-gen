@@ -231,12 +231,35 @@ class ParameterMultiSelectSpec:
     selected: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class ParameterDateSpec:
+    """Single DATE value bound to a named parameter — the App2 counterpart
+    of a tree ``ParameterDateTimePicker`` (AO.2). Renders a Flatpickr
+    single-date input feeding a hidden ``param_<name>``; URL key on submit
+    ``?param_<name>=YYYY-MM-DD``. Empty → no key → the executor's
+    static-default fallback (the dataset param's sentinel default, which
+    the SQL resolves to the latest available day — so an empty picker opens
+    the statement on the account's most recent day, not blank). A sheet
+    that carries one of these is a single-day sheet (Daily Statement), so
+    ``_render_filter_form`` suppresses the universal date-RANGE there — the
+    operator-flagged "range doesn't make sense, it's one day" fix.
+
+    ``selected`` is filled from a ``?param_<name>=<v>`` page-URL key by
+    ``server.py::_apply_url_param_overrides`` so a bookmark / drill lands on
+    that day with the visuals' load-fetch already narrowed.
+    """
+    name: str
+    label: str
+    selected: str = ""
+
+
 FilterSpec = (
     ParameterDropdownSpec
     | CategoryFilterSpec
     | NumericRangeSpec
     | ParameterNumberSpec
     | ParameterMultiSelectSpec
+    | ParameterDateSpec
 )
 
 
@@ -609,20 +632,29 @@ def _render_filter_form(
         "bg-surface rounded-lg shadow-sm border border-surface-border"
     )
     parts = [f'  <form id="filter-form" class="{form_class}">']
-    # X.2.l.4 — one Flatpickr range popover (the visible, un-named text
-    # input) feeding two hidden ``date_from`` / ``date_to`` inputs (the
-    # wire-serialized ones — URL keys unchanged). ``readonly`` so the
-    # field can't take typed garbage; Flatpickr opens it on click. If
-    # Flatpickr fails to load the text input just sits inert and the
-    # hidden inputs stay empty → no date narrowing (degraded, not broken).
-    parts.append(
-        f'    <label class="{_FORM_LABEL_CLASS}">Date range '
-        f'<input type="text" data-widget="flatpickr-range" readonly '
-        f'placeholder="All dates" class="{_DATE_INPUT_CLASS}"'
-        f' style="{_DATE_INPUT_STYLE}"></label>'
-        f'<input type="hidden" name="date_from" value="">'
-        f'<input type="hidden" name="date_to" value="">'
+    # AO.2 — a sheet with a single-date control (ParameterDateSpec, e.g.
+    # the Daily Statement's Business Day) is a single-DAY sheet; the
+    # universal date-RANGE makes no sense there (and its datasets don't
+    # even bind date_from/date_to), so suppress it. Every other sheet
+    # keeps the range.
+    has_single_date = any(
+        isinstance(spec, ParameterDateSpec) for spec in filter_specs
     )
+    if not has_single_date:
+        # X.2.l.4 — one Flatpickr range popover (the visible, un-named text
+        # input) feeding two hidden ``date_from`` / ``date_to`` inputs (the
+        # wire-serialized ones — URL keys unchanged). ``readonly`` so the
+        # field can't take typed garbage; Flatpickr opens it on click. If
+        # Flatpickr fails to load the text input just sits inert and the
+        # hidden inputs stay empty → no date narrowing (degraded, not broken).
+        parts.append(
+            f'    <label class="{_FORM_LABEL_CLASS}">Date range '
+            f'<input type="text" data-widget="flatpickr-range" readonly '
+            f'placeholder="All dates" class="{_DATE_INPUT_CLASS}"'
+            f' style="{_DATE_INPUT_STYLE}"></label>'
+            f'<input type="hidden" name="date_from" value="">'
+            f'<input type="hidden" name="date_to" value="">'
+        )
     for spec in filter_specs:
         if isinstance(spec, ParameterDropdownSpec):
             parts.append(_render_parameter_dropdown(spec))
@@ -634,8 +666,32 @@ def _render_filter_form(
             parts.append(_render_parameter_number(spec))
         elif isinstance(spec, ParameterMultiSelectSpec):
             parts.append(_render_parameter_multiselect(spec))
+        else:  # ParameterDateSpec — the union's last member
+            parts.append(_render_parameter_date(spec))
     parts.append('  </form>')
     return "\n".join(parts)
+
+
+def _render_parameter_date(spec: ParameterDateSpec) -> str:
+    """Flatpickr single-date input → hidden ``param_<name>`` (AO.2).
+
+    Empty placeholder reads "Latest day": no value means no
+    ``param_<name>`` key, so the dataset param's sentinel default opens
+    the account's most recent day. ``selected`` (a bookmarked /
+    drilled-in ``?param_<name>=<v>``) pre-fills both the visible picker
+    (via the value Flatpickr reads as ``defaultDate``) and the hidden
+    wire input so the load-fetch is already narrowed to that day.
+    """
+    target = f"param_{spec.name}"
+    val = html.escape(spec.selected)
+    return (
+        f'    <label class="{_FORM_LABEL_CLASS}">{html.escape(spec.label)} '
+        f'<input type="text" data-widget="flatpickr-single" '
+        f'data-target-input="{target}" readonly placeholder="Latest day" '
+        f'class="{_DATE_INPUT_CLASS}" style="{_DATE_INPUT_STYLE}"'
+        f' value="{val}"></label>'
+        f'<input type="hidden" name="{target}" value="{val}">'
+    )
 
 
 def _visual_fetch_url(

@@ -109,6 +109,7 @@ from recon_gen.common.html._tree_filter_specs import (
 )
 from recon_gen.common.html.render import (
     FilterSpec,
+    ParameterDateSpec,
     ParameterDropdownSpec,
     ParameterMultiSelectSpec,
     ParameterNumberSpec,
@@ -261,6 +262,9 @@ def _apply_url_param_overrides(
         elif isinstance(spec, ParameterMultiSelectSpec):
             vals = by_name.get(spec.name)
             out.append(replace(spec, selected=tuple(vals)) if vals else spec)
+        elif isinstance(spec, ParameterDateSpec):
+            vals = by_name.get(spec.name)
+            out.append(replace(spec, selected=vals[-1]) if vals else spec)
         elif isinstance(spec, ParameterNumberSpec):
             vals = by_name.get(spec.name)
             if vals:
