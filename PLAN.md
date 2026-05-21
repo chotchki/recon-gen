@@ -367,6 +367,24 @@ Surfaced during the v11.9.3 dashboard sweep, *separate* from the App2 options-fe
 
 ---
 
+## Phase AO — Cold-read warm-pass dashboard triage *(fresh-viewer cold read, 2026-05-21; data-correctness AND presentation both in scope; separate from the v11.9.4 options-fetcher fix; extensible as the cold read continues)*
+
+A first-time viewer's cold read of the deployed dashboards surfaced findings that collapse to ~3 root causes — the data is largely correct; the gaps are a precision leak, a param default, and presentation.
+
+**Root cause 1 — SQLite money-precision (float).** `amount_money` / `money` are declared `DECIMAL(20,2)` (exact on PG/Oracle) but SQLite's NUMERIC affinity stores them as REAL (float64). `_computed_subledger_balance`'s `SUM(amount_money)` accumulates ~1e-11 float error, and the `_drift` / `_ledger_drift` matviews' exact `money <> computed_balance` filter flags that float dust as a drift exception → 114/116 spurious rows that display as $0.00 (repro on sasquatch_pr SQLite: `typeof(drift)='real'`, `computed=46147.649999999994` vs `stored=46147.65`). SQLite-only manifestation — the local-serve backend; PG/Oracle deploys are clean.
+- [ ] AO.1 (#3) Drift exception tables: replace exact money-equality (`a <> b`) with a 2-decimal materiality band (`ABS(a - b) >= 0.005`) in `_drift` / `_ledger_drift` (+ any sibling money-equality matview). Production-honest: in a 2-dp money system a difference < half a cent is *definitionally* float noise, never a real drift; every ≥1-cent drift still flags. Update SQLite structural test counts + re-lock seeds.
+- [ ] AO.2 (#4) Today's Exceptions magnitude-0 padding (828): split the AO.1 float-noise drift/ledger_drift flowing into the UNION from the known E8 independent-leg residual (read internals); the AO.1 fix should clear the float portion.
+- [ ] AO.x (deeper — flag, decide scope after AO.1) SQLite money-as-REAL could surface elsewhere (daily_statement drift KPI, conservation sums, any displayed money math). Proper SQLite fix = store money as INTEGER cents (or a decimal-aware path). Bigger phase.
+
+**Root cause 2 — App2 param-default-not-applied (sibling to v11.9.4).**
+- [ ] AO.3 (#5) Volume Anomalies "0 flagged" while the σ-distribution chart shows tail mass. The data HAS 129 anomalies at the default 2σ (67 at 3σ, max z=25.3) — so 0 is wrong-or-mislabeled, not correct. Likely the App2 sigma SLIDER's default (2) isn't pushed into the initial query (control renders at 2 but the executor's static-default fallback may not fire) — same class as the daily-statement picker. Confirm: does nudging the slider make the KPI jump to ~129? Fix the slider-default initial bind if so. Secondary: clarify the KPI's scope wording ("flagged windows" vs the chart's full population) so a cold reader isn't confused — user: "could be both a slider and a precision issue".
+
+**Root cause 3 — chart presentation / wording (cold-read clarity).**
+- [ ] AO.4 (#6) Executives charts not actually stacked — stacking visual-property not applied.
+- [ ] AO.5 (#7) Unreadable `rail_name` axis labels — rotate / truncate / wrap long categorical labels.
+
+---
+
 ## Phase Q (continued) — CLI / YAML ergonomics
 
 The standing "Phase Q" thread (Q.1–Q.5 + Q.3.a shipped; see Phase history). What's still open: the CLI-shape revisit below, plus the older "schema ergonomics around the L2 yaml" item (task #488 — fold into Q.6's spike or its own sub-item when scoped). Queues behind Phase X.
