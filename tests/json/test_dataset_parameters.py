@@ -43,6 +43,7 @@ from recon_gen.common.models import (
     StringDatasetParameterDefaultValues,
 )
 from recon_gen.common.tree import Dataset, IntegerParam, StringParam
+from recon_gen.common.tree._helpers import auto_id
 
 
 _CFG = make_test_config()
@@ -295,9 +296,10 @@ def test_dataset_param_mapping_uses_dataset_identifier_not_arn() -> None:
 
 
 def test_cascade_round_trip_against_spike_shape() -> None:
-    """Build the M.3.10 spike's full setup end-to-end through both
-    the AWS-shape DataSet + the tree's StringParam, and assert the
-    JSON shape matches the captured spike."""
+    """Build the M.3.10 spike's full setup end-to-end through the
+    AWS-shape DataSet + assert the JSON shape. AK.1 — the param Ids are
+    now build_dataset-derived (auto_id over dataset_id + name), not the
+    captured spike's hand-picked values; the rest of the shape holds."""
     contract = DatasetContract(columns=[
         ColumnSpec("id", "STRING"),
         ColumnSpec("rail_name", "STRING"),
@@ -316,7 +318,6 @@ def test_cascade_round_trip_against_spike_shape() -> None:
         visual_identifier="meta-cascade-ds",
         dataset_parameters=[
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id="6d1ce7f7-2a8a-405a-b81a-b016a66c0a2f",
                 Name="pKey",
                 ValueType="SINGLE_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
@@ -324,7 +325,6 @@ def test_cascade_round_trip_against_spike_shape() -> None:
                 ),
             )),
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id="751f40e3-eec9-4263-afee-40cfca9661a6",
                 Name="pValues",
                 ValueType="MULTI_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
@@ -334,15 +334,18 @@ def test_cascade_round_trip_against_spike_shape() -> None:
         ],
     )
     out = ds_aws.to_aws_json()
+    # AK.1 — build_dataset assigns each param a deterministic, dataset-
+    # scoped UUID (auto_id over dataset_id + name); construction sites no
+    # longer hand-pick Ids. Shape is unchanged; the Ids are derived.
     assert out["DatasetParameters"] == [
         {"StringDatasetParameter": {
-            "Id": "6d1ce7f7-2a8a-405a-b81a-b016a66c0a2f",
+            "Id": auto_id("qs-gen-meta-cascade-dataset:dsparam:pKey"),
             "Name": "pKey",
             "ValueType": "SINGLE_VALUED",
             "DefaultValues": {"StaticValues": ["customer_id"]},
         }},
         {"StringDatasetParameter": {
-            "Id": "751f40e3-eec9-4263-afee-40cfca9661a6",
+            "Id": auto_id("qs-gen-meta-cascade-dataset:dsparam:pValues"),
             "Name": "pValues",
             "ValueType": "MULTI_VALUED",
             "DefaultValues": {
@@ -350,3 +353,52 @@ def test_cascade_round_trip_against_spike_shape() -> None:
             },
         }},
     ]
+
+
+def test_dataset_param_ids_are_valid_unique_uuids_across_all_apps() -> None:
+    """AK.1 regression guard for the QS dataset-parameter Id bug.
+
+    Every ``DataSetParameter.Id`` QuickSight sees must be a real UUID
+    (QS rejects non-UUIDs) AND unique across all datasets an analysis
+    can span. The bug was hand-picked GUID-shaped constants reused
+    across datasets sharing a param name (``pKey`` on several L2FT
+    datasets); when an analysis spanned them the colliding Ids made QS
+    reject it on load. build_dataset now derives each Id from
+    ``(dataset_id, name)`` so the Ids are real v5 UUIDs and unique."""
+    import uuid
+
+    from recon_gen.common.l2 import default_l2_instance
+    from recon_gen.apps.executives.datasets import build_all_datasets as _exec
+    from recon_gen.apps.investigation.datasets import build_all_datasets as _inv
+    from recon_gen.apps.l1_dashboard.datasets import (
+        build_all_l1_dashboard_datasets as _l1,
+    )
+    from recon_gen.apps.l2_flow_tracing.datasets import (
+        build_all_l2_flow_tracing_datasets as _l2ft,
+    )
+
+    l2 = default_l2_instance()
+    datasets = [*_exec(_CFG), *_inv(_CFG, l2), *_l1(_CFG, l2), *_l2ft(_CFG, l2)]
+
+    seen: dict[str, tuple[str, str]] = {}
+    for ds in datasets:
+        for p in (ds.DatasetParameters or []):
+            variant = (
+                p.StringDatasetParameter
+                or p.IntegerDatasetParameter
+                or p.DecimalDatasetParameter
+                or p.DateTimeDatasetParameter
+            )
+            assert variant is not None
+            where = (ds.DataSetId, variant.Name)
+            # Real UUID (v5 — deterministic from dataset_id + name).
+            assert uuid.UUID(variant.Id).version == 5, (where, variant.Id)
+            # Globally unique — the bug was a param Id reused across
+            # datasets sharing a param name.
+            assert variant.Id not in seen, (
+                f"dataset-param Id {variant.Id} collides: "
+                f"{where} vs {seen[variant.Id]}"
+            )
+            seen[variant.Id] = where
+
+    assert seen, "no dataset parameters built — the guard exercised nothing"

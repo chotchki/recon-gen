@@ -468,33 +468,37 @@ class DateTimeDatasetParameterDefaultValues:
         _check_static_values_cap(self.StaticValues, "DateTimeDatasetParameter")
 
 
-@dataclass
+@dataclass(kw_only=True)
 class StringDatasetParameter:
-    Id: str
+    # AK.1 — build_dataset assigns a deterministic, dataset-scoped UUID
+    # (``auto_id(f"{dataset_id}:dsparam:{Name}")``). Construction sites do
+    # NOT set this; "" is the unset marker the remap fills. Keeping it
+    # app-un-settable makes a colliding hand-picked Id unrepresentable.
+    Id: str = ""
     Name: str
     ValueType: str  # SINGLE_VALUED|MULTI_VALUED
     DefaultValues: StringDatasetParameterDefaultValues | None = None
 
 
-@dataclass
+@dataclass(kw_only=True)
 class IntegerDatasetParameter:
-    Id: str
+    Id: str = ""  # AK.1 — see StringDatasetParameter.Id
     Name: str
     ValueType: str  # SINGLE_VALUED|MULTI_VALUED
     DefaultValues: IntegerDatasetParameterDefaultValues | None = None
 
 
-@dataclass
+@dataclass(kw_only=True)
 class DecimalDatasetParameter:
-    Id: str
+    Id: str = ""  # AK.1 — see StringDatasetParameter.Id
     Name: str
     ValueType: str  # SINGLE_VALUED|MULTI_VALUED
     DefaultValues: DecimalDatasetParameterDefaultValues | None = None
 
 
-@dataclass
+@dataclass(kw_only=True)
 class DateTimeDatasetParameter:
-    Id: str
+    Id: str = ""  # AK.1 — see StringDatasetParameter.Id
     Name: str
     ValueType: str  # SINGLE_VALUED|MULTI_VALUED
     TimeGranularity: str | None = None

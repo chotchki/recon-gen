@@ -191,7 +191,7 @@ def l1_check_type_values() -> list[str]:
 
 
 def _mv_dataset_param(
-    dsp_id: str, name: str, default: list[str],
+    name: str, default: list[str],
 ) -> DatasetParameter:
     """A MULTI_VALUED string dataset parameter. ``default`` must be
     non-empty (an empty default substitutes as ``IN ()``, invalid SQL)
@@ -204,14 +204,14 @@ def _mv_dataset_param(
     today).
     """
     return DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-        Id=dsp_id, Name=name, ValueType="MULTI_VALUED",
+        Name=name, ValueType="MULTI_VALUED",
         DefaultValues=StringDatasetParameterDefaultValues(
             StaticValues=list(default),
         ),
     ))
 
 
-def _all_sentinel_sv_param(dsp_id: str, name: str) -> DatasetParameter:
+def _all_sentinel_sv_param(name: str) -> DatasetParameter:
     """AA.A.3 — a SINGLE_VALUED string dataset param whose static default
     is the bare ``L1_ALL_SENTINEL`` (wrapped in a 1-element list per the
     ``StringDatasetParameterDefaultValues`` dataclass shape; the
@@ -224,17 +224,17 @@ def _all_sentinel_sv_param(dsp_id: str, name: str) -> DatasetParameter:
     come from elsewhere (the control's ``StaticValues`` for enum
     dropdowns; a companion ``LinkedValues`` dataset for data-value
     dropdowns)."""
-    return _sv_dataset_param(dsp_id, name, L1_ALL_SENTINEL)
+    return _sv_dataset_param(name, L1_ALL_SENTINEL)
 
 
 def _sv_dataset_param(
-    dsp_id: str, name: str, default: str,
+    name: str, default: str,
 ) -> DatasetParameter:
     """A SINGLE_VALUED string dataset parameter with a sentinel default
     (AA.A.3 — every pushdown dropdown uses this shape; pre-AA.A only the
     Daily Statement per-account narrow did)."""
     return DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-        Id=dsp_id, Name=name, ValueType="SINGLE_VALUED",
+        Name=name, ValueType="SINGLE_VALUED",
         DefaultValues=StringDatasetParameterDefaultValues(
             StaticValues=[default],
         ),
@@ -662,9 +662,6 @@ L1_TX_FACETS_CONTRACT = DatasetContract(columns=[
 # dataset param on each dataset (mirrors L2FT's Y.2.e TT sheet). The
 # Drift Timelines sheet's Account-Role dropdown likewise narrows both
 # timeline datasets.
-_DSP_L1_DRIFT_ACCOUNT = "dsp-l1-drift-account"
-_DSP_L1_DRIFT_ROLE = "dsp-l1-drift-role"
-_DSP_L1_DRIFT_TL_ROLE = "dsp-l1-drift-tl-role"
 P_L1_DRIFT_ACCOUNT = "pL1DriftAccount"
 P_L1_DRIFT_ROLE = "pL1DriftRole"
 P_L1_DRIFT_TL_ROLE = "pL1DriftTlRole"
@@ -703,8 +700,8 @@ def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
         sql_template, DRIFT_CONTRACT,
         visual_identifier=DS_DRIFT,
         dataset_parameters=[
-            _all_sentinel_sv_param(_DSP_L1_DRIFT_ACCOUNT, P_L1_DRIFT_ACCOUNT),
-            _all_sentinel_sv_param(_DSP_L1_DRIFT_ROLE, P_L1_DRIFT_ROLE),
+            _all_sentinel_sv_param(P_L1_DRIFT_ACCOUNT),
+            _all_sentinel_sv_param(P_L1_DRIFT_ROLE),
         ],
         app2_date_column="business_day_start",
     )
@@ -735,20 +732,16 @@ def build_ledger_drift_dataset(
         sql_template, LEDGER_DRIFT_CONTRACT,
         visual_identifier=DS_LEDGER_DRIFT,
         dataset_parameters=[
-            _all_sentinel_sv_param(_DSP_L1_DRIFT_ACCOUNT, P_L1_DRIFT_ACCOUNT),
-            _all_sentinel_sv_param(_DSP_L1_DRIFT_ROLE, P_L1_DRIFT_ROLE),
+            _all_sentinel_sv_param(P_L1_DRIFT_ACCOUNT),
+            _all_sentinel_sv_param(P_L1_DRIFT_ROLE),
         ],
         app2_date_column="business_day_start",
     )
 
 
 # Y.2.g — per-sheet single-dataset pushdown param names + IDs.
-_DSP_L1_OVERDRAFT_ACCOUNT = "dsp-l1-overdraft-account"
-_DSP_L1_OVERDRAFT_ROLE = "dsp-l1-overdraft-role"
 P_L1_OVERDRAFT_ACCOUNT = "pL1OverdraftAccount"
 P_L1_OVERDRAFT_ROLE = "pL1OverdraftRole"
-_DSP_L1_LIMIT_BREACH_ACCOUNT = "dsp-l1-limit-breach-account"
-_DSP_L1_LIMIT_BREACH_TYPE = "dsp-l1-limit-breach-type"
 P_L1_LIMIT_BREACH_ACCOUNT = "pL1LimitBreachAccount"
 P_L1_LIMIT_BREACH_TYPE = "pL1LimitBreachType"
 
@@ -780,9 +773,8 @@ def build_overdraft_dataset(
         sql_template, OVERDRAFT_CONTRACT,
         visual_identifier=DS_OVERDRAFT,
         dataset_parameters=[
-            _all_sentinel_sv_param(_DSP_L1_OVERDRAFT_ACCOUNT,
-                                   P_L1_OVERDRAFT_ACCOUNT),
-            _all_sentinel_sv_param(_DSP_L1_OVERDRAFT_ROLE, P_L1_OVERDRAFT_ROLE),
+            _all_sentinel_sv_param(P_L1_OVERDRAFT_ACCOUNT),
+            _all_sentinel_sv_param(P_L1_OVERDRAFT_ROLE),
         ],
         app2_date_column="business_day_start",
     )
@@ -816,19 +808,14 @@ def build_limit_breach_dataset(
         sql_template, LIMIT_BREACH_CONTRACT,
         visual_identifier=DS_LIMIT_BREACH,
         dataset_parameters=[
-            _all_sentinel_sv_param(_DSP_L1_LIMIT_BREACH_ACCOUNT,
-                                   P_L1_LIMIT_BREACH_ACCOUNT),
-            _all_sentinel_sv_param(_DSP_L1_LIMIT_BREACH_TYPE,
-                                   P_L1_LIMIT_BREACH_TYPE),
+            _all_sentinel_sv_param(P_L1_LIMIT_BREACH_ACCOUNT),
+            _all_sentinel_sv_param(P_L1_LIMIT_BREACH_TYPE),
         ],
         app2_date_column="business_day",
     )
 
 
 # Y.2.g — Today's Exceptions pushdown params.
-_DSP_L1_TODAYS_EXC_CHECK_TYPE = "dsp-l1-todays-exc-check-type"
-_DSP_L1_TODAYS_EXC_ACCOUNT = "dsp-l1-todays-exc-account"
-_DSP_L1_TODAYS_EXC_TYPE = "dsp-l1-todays-exc-type"
 P_L1_TODAYS_EXC_CHECK_TYPE = "pL1TodaysExcCheckType"
 P_L1_TODAYS_EXC_ACCOUNT = "pL1TodaysExcAccount"
 P_L1_TODAYS_EXC_TYPE = "pL1TodaysExcType"
@@ -874,12 +861,9 @@ def build_todays_exceptions_dataset(
             # pL1TodaysExcAccount + pL1TodaysExcType). check_type was the
             # one fixed enum that kept its value-list default pre-flip; now
             # uses the sentinel-default + match-all guard like the others.
-            _all_sentinel_sv_param(_DSP_L1_TODAYS_EXC_CHECK_TYPE,
-                                   P_L1_TODAYS_EXC_CHECK_TYPE),
-            _all_sentinel_sv_param(_DSP_L1_TODAYS_EXC_ACCOUNT,
-                                   P_L1_TODAYS_EXC_ACCOUNT),
-            _all_sentinel_sv_param(_DSP_L1_TODAYS_EXC_TYPE,
-                                   P_L1_TODAYS_EXC_TYPE),
+            _all_sentinel_sv_param(P_L1_TODAYS_EXC_CHECK_TYPE),
+            _all_sentinel_sv_param(P_L1_TODAYS_EXC_ACCOUNT),
+            _all_sentinel_sv_param(P_L1_TODAYS_EXC_TYPE),
         ],
         app2_date_column="business_day",
     )
@@ -890,7 +874,6 @@ def build_todays_exceptions_dataset(
 # from the analysis-level account picker. Sentinel default → empty
 # statement until the analyst picks. The date picker stays an
 # analysis-level TimeEqualityFilter (Y.2.f territory).
-_DSP_L1_DS_ACCOUNT = "dsp-l1-ds-account"
 P_L1_DS_ACCOUNT_DSP = "pL1DsAccount"
 
 # AA.B.1 — Role cascade dataset param. Lives on the DS_L1_ACCOUNTS
@@ -898,7 +881,6 @@ P_L1_DS_ACCOUNT_DSP = "pL1DsAccount"
 # narrows the account dropdown to that role's accounts; the bridged
 # analysis param is ``pL1DsRole`` and reverts to ``L1_ALL_SENTINEL``
 # (the "show all roles" default) on load.
-_DSP_L1_DS_ROLE = "dsp-l1-ds-role"
 P_L1_DS_ROLE_DSP = "pL1DsRole"
 
 
@@ -930,7 +912,7 @@ def build_daily_statement_summary_dataset(
         sql, DAILY_STATEMENT_SUMMARY_CONTRACT,
         visual_identifier=DS_DAILY_STATEMENT_SUMMARY,
         dataset_parameters=[
-            _sv_dataset_param(_DSP_L1_DS_ACCOUNT, P_L1_DS_ACCOUNT_DSP,
+            _sv_dataset_param(P_L1_DS_ACCOUNT_DSP,
                               _L1_DS_ACCOUNT_SENTINEL),
         ],
     )
@@ -974,7 +956,7 @@ def build_daily_statement_transactions_dataset(
         sql, DAILY_STATEMENT_TRANSACTIONS_CONTRACT,
         visual_identifier=DS_DAILY_STATEMENT_TRANSACTIONS,
         dataset_parameters=[
-            _sv_dataset_param(_DSP_L1_DS_ACCOUNT, P_L1_DS_ACCOUNT_DSP,
+            _sv_dataset_param(P_L1_DS_ACCOUNT_DSP,
                               _L1_DS_ACCOUNT_SENTINEL),
         ],
     )
@@ -983,11 +965,6 @@ def build_daily_statement_transactions_dataset(
 # Y.2.g — Transactions sheet pushdown params. account_id / transfer_id /
 # status / origin are data-value (sentinel-OR; status + origin are
 # open-set in the L1 schema); rail_name is the bounded enum.
-_DSP_L1_TX_ACCOUNT = "dsp-l1-tx-account"
-_DSP_L1_TX_TRANSFER_ID = "dsp-l1-tx-transfer-id"
-_DSP_L1_TX_STATUS = "dsp-l1-tx-status"
-_DSP_L1_TX_ORIGIN = "dsp-l1-tx-origin"
-_DSP_L1_TX_TYPE = "dsp-l1-tx-type"
 P_L1_TX_ACCOUNT = "pL1TxAccount"
 P_L1_TX_TRANSFER_ID = "pL1TxTransferId"
 P_L1_TX_STATUS = "pL1TxStatus"
@@ -1035,11 +1012,11 @@ def build_transactions_dataset(
         sql_template, TRANSACTIONS_CONTRACT,
         visual_identifier=DS_TRANSACTIONS,
         dataset_parameters=[
-            _all_sentinel_sv_param(_DSP_L1_TX_ACCOUNT, P_L1_TX_ACCOUNT),
-            _all_sentinel_sv_param(_DSP_L1_TX_TRANSFER_ID, P_L1_TX_TRANSFER_ID),
-            _all_sentinel_sv_param(_DSP_L1_TX_STATUS, P_L1_TX_STATUS),
-            _all_sentinel_sv_param(_DSP_L1_TX_ORIGIN, P_L1_TX_ORIGIN),
-            _all_sentinel_sv_param(_DSP_L1_TX_TYPE, P_L1_TX_TYPE),
+            _all_sentinel_sv_param(P_L1_TX_ACCOUNT),
+            _all_sentinel_sv_param(P_L1_TX_TRANSFER_ID),
+            _all_sentinel_sv_param(P_L1_TX_STATUS),
+            _all_sentinel_sv_param(P_L1_TX_ORIGIN),
+            _all_sentinel_sv_param(P_L1_TX_TYPE),
         ],
         app2_date_column="posting",
     )
@@ -1078,7 +1055,7 @@ def build_drift_timeline_dataset(
         sql_template, DRIFT_TIMELINE_CONTRACT,
         visual_identifier=DS_DRIFT_TIMELINE,
         dataset_parameters=[
-            _all_sentinel_sv_param(_DSP_L1_DRIFT_TL_ROLE, P_L1_DRIFT_TL_ROLE),
+            _all_sentinel_sv_param(P_L1_DRIFT_TL_ROLE),
         ],
         app2_date_column="business_day_end",
     )
@@ -1112,7 +1089,7 @@ def build_ledger_drift_timeline_dataset(
         sql_template, DRIFT_TIMELINE_CONTRACT,
         visual_identifier=DS_LEDGER_DRIFT_TIMELINE,
         dataset_parameters=[
-            _all_sentinel_sv_param(_DSP_L1_DRIFT_TL_ROLE, P_L1_DRIFT_TL_ROLE),
+            _all_sentinel_sv_param(P_L1_DRIFT_TL_ROLE),
         ],
         app2_date_column="business_day_end",
     )
@@ -1120,15 +1097,9 @@ def build_ledger_drift_timeline_dataset(
 
 # Y.2.g — Pending / Unbundled Aging pushdown params (same three vectors
 # over their respective matviews).
-_DSP_L1_PENDING_ACCOUNT = "dsp-l1-pending-account"
-_DSP_L1_PENDING_TYPE = "dsp-l1-pending-type"
-_DSP_L1_PENDING_RAIL = "dsp-l1-pending-rail"
 P_L1_PENDING_ACCOUNT = "pL1PendingAccount"
 P_L1_PENDING_TYPE = "pL1PendingType"
 P_L1_PENDING_RAIL = "pL1PendingRail"
-_DSP_L1_UNBUNDLED_ACCOUNT = "dsp-l1-unbundled-account"
-_DSP_L1_UNBUNDLED_TYPE = "dsp-l1-unbundled-type"
-_DSP_L1_UNBUNDLED_RAIL = "dsp-l1-unbundled-rail"
 P_L1_UNBUNDLED_ACCOUNT = "pL1UnbundledAccount"
 P_L1_UNBUNDLED_TYPE = "pL1UnbundledType"
 P_L1_UNBUNDLED_RAIL = "pL1UnbundledRail"
@@ -1161,10 +1132,9 @@ def build_stuck_pending_dataset(
         sql, STUCK_PENDING_CONTRACT,
         visual_identifier=DS_STUCK_PENDING,
         dataset_parameters=[
-            _all_sentinel_sv_param(_DSP_L1_PENDING_ACCOUNT,
-                                   P_L1_PENDING_ACCOUNT),
-            _all_sentinel_sv_param(_DSP_L1_PENDING_TYPE, P_L1_PENDING_TYPE),
-            _all_sentinel_sv_param(_DSP_L1_PENDING_RAIL, P_L1_PENDING_RAIL),
+            _all_sentinel_sv_param(P_L1_PENDING_ACCOUNT),
+            _all_sentinel_sv_param(P_L1_PENDING_TYPE),
+            _all_sentinel_sv_param(P_L1_PENDING_RAIL),
         ],
     )
 
@@ -1195,10 +1165,9 @@ def build_stuck_unbundled_dataset(
         sql, STUCK_UNBUNDLED_CONTRACT,
         visual_identifier=DS_STUCK_UNBUNDLED,
         dataset_parameters=[
-            _all_sentinel_sv_param(_DSP_L1_UNBUNDLED_ACCOUNT,
-                                   P_L1_UNBUNDLED_ACCOUNT),
-            _all_sentinel_sv_param(_DSP_L1_UNBUNDLED_TYPE, P_L1_UNBUNDLED_TYPE),
-            _all_sentinel_sv_param(_DSP_L1_UNBUNDLED_RAIL, P_L1_UNBUNDLED_RAIL),
+            _all_sentinel_sv_param(P_L1_UNBUNDLED_ACCOUNT),
+            _all_sentinel_sv_param(P_L1_UNBUNDLED_TYPE),
+            _all_sentinel_sv_param(P_L1_UNBUNDLED_RAIL),
         ],
     )
 
@@ -1208,7 +1177,6 @@ def build_stuck_unbundled_dataset(
 # every audit trail, so the predicate keeps the originals visible on
 # load and while narrowing — you always see the trail, the dropdown
 # just narrows which cause class you're auditing.
-_DSP_L1_SUPERSEDE_REASON = "dsp-l1-supersede-reason"
 P_L1_SUPERSEDE_REASON = "pL1SupersedeReason"
 
 
@@ -1263,8 +1231,7 @@ def build_supersession_transactions_dataset(
         sql, SUPERSESSION_TRANSACTIONS_CONTRACT,
         visual_identifier=DS_SUPERSESSION_TRANSACTIONS,
         dataset_parameters=[
-            _all_sentinel_sv_param(_DSP_L1_SUPERSEDE_REASON,
-                                   P_L1_SUPERSEDE_REASON),
+            _all_sentinel_sv_param(P_L1_SUPERSEDE_REASON),
         ],
     )
 
@@ -1340,7 +1307,7 @@ def build_l1_accounts_dataset(
         sql, L1_ACCOUNTS_CONTRACT,
         visual_identifier=DS_L1_ACCOUNTS,
         dataset_parameters=[
-            _all_sentinel_sv_param(_DSP_L1_DS_ROLE, P_L1_DS_ROLE_DSP),
+            _all_sentinel_sv_param(P_L1_DS_ROLE_DSP),
         ],
     )
 

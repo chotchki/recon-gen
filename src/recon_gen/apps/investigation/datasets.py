@@ -252,10 +252,8 @@ _DEFAULT_FANOUT_THRESHOLD_DSP = 5
 # Y.3.a — dataset parameter id for the threshold pushdown. The PARAMETER
 # NAME (``pInvFanoutThreshold``) is the analysis-level handle the slider
 # binds to; QS substitutes via ``<<$pInvFanoutThreshold>>``; App2 binds
-# via ``:param_pInvFanoutThreshold`` after the preprocessor. The id is
-# the dataset-resource-internal handle the MappedDataSetParameters
-# bridge resolves to when the analysis param fires.
-_DSP_ID_INV_FANOUT_THRESHOLD = "dsp-inv-fanout-threshold"
+# via ``:param_pInvFanoutThreshold`` after the preprocessor. AK.1 — the
+# dataset-resource-internal Id is assigned by build_dataset.
 
 
 def build_recipient_fanout_dataset(cfg: Config) -> DataSet:
@@ -356,7 +354,6 @@ WHERE dpr.distinct_senders >= <<${P_INV_FANOUT_THRESHOLD}>>"""
         visual_identifier=DS_INV_RECIPIENT_FANOUT,
         dataset_parameters=[
             DatasetParameter(IntegerDatasetParameter=IntegerDatasetParameter(
-                Id=_DSP_ID_INV_FANOUT_THRESHOLD,
                 Name=str(P_INV_FANOUT_THRESHOLD),
                 ValueType="SINGLE_VALUED",
                 DefaultValues=IntegerDatasetParameterDefaultValues(
@@ -372,11 +369,8 @@ _DEFAULT_VOLUME_ANOMALIES_SIGMA = 2
 # Y.1.b — dataset parameter id for the σ-threshold pushdown. Distinct
 # from the parameter NAME (``pInvAnomaliesSigma``) — the name is what
 # QuickSight substitutes via ``<<$pInvAnomaliesSigma>>`` and what App2
-# binds via ``:param_pInvAnomaliesSigma`` after the preprocessor; the
-# id is the dataset-resource-internal handle that QS uses to find the
-# parameter when the analysis param's MappedDataSetParameters resolves
-# to it.
-_DSP_ID_INV_ANOMALIES_SIGMA = "dsp-inv-anomalies-sigma"
+# binds via ``:param_pInvAnomaliesSigma`` after the preprocessor. AK.1 —
+# the dataset-resource-internal Id is assigned by build_dataset.
 
 
 def build_volume_anomalies_dataset(cfg: Config) -> DataSet:
@@ -416,7 +410,6 @@ def build_volume_anomalies_dataset(cfg: Config) -> DataSet:
         visual_identifier=DS_INV_VOLUME_ANOMALIES,
         dataset_parameters=[
             DatasetParameter(IntegerDatasetParameter=IntegerDatasetParameter(
-                Id=_DSP_ID_INV_ANOMALIES_SIGMA,
                 Name=str(P_INV_ANOMALIES_SIGMA),
                 ValueType="SINGLE_VALUED",
                 DefaultValues=IntegerDatasetParameterDefaultValues(
@@ -472,10 +465,6 @@ _DEFAULT_MONEY_TRAIL_MAX_HOPS = 5
 _DEFAULT_MONEY_TRAIL_MIN_AMOUNT = 0
 
 
-_DSP_ID_INV_MONEY_TRAIL_ROOT = "dsp-inv-money-trail-root"
-_DSP_ID_INV_MONEY_TRAIL_MAX_HOPS = "dsp-inv-money-trail-max-hops"
-_DSP_ID_INV_MONEY_TRAIL_MIN_AMOUNT = "dsp-inv-money-trail-min-amount"
-
 # Sentinel default for the chain-root dataset parameter. The analysis-
 # level ``pInvMoneyTrailRoot`` carries an empty default by design (the
 # dropdown auto-populates from the companion roots dataset on first
@@ -529,7 +518,6 @@ def build_money_trail_dataset(cfg: Config) -> DataSet:
         visual_identifier=DS_INV_MONEY_TRAIL,
         dataset_parameters=[
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id=_DSP_ID_INV_MONEY_TRAIL_ROOT,
                 Name=str(P_INV_MONEY_TRAIL_ROOT),
                 ValueType="SINGLE_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
@@ -537,7 +525,6 @@ def build_money_trail_dataset(cfg: Config) -> DataSet:
                 ),
             )),
             DatasetParameter(IntegerDatasetParameter=IntegerDatasetParameter(
-                Id=_DSP_ID_INV_MONEY_TRAIL_MAX_HOPS,
                 Name=str(P_INV_MONEY_TRAIL_MAX_HOPS),
                 ValueType="SINGLE_VALUED",
                 DefaultValues=IntegerDatasetParameterDefaultValues(
@@ -545,7 +532,6 @@ def build_money_trail_dataset(cfg: Config) -> DataSet:
                 ),
             )),
             DatasetParameter(IntegerDatasetParameter=IntegerDatasetParameter(
-                Id=_DSP_ID_INV_MONEY_TRAIL_MIN_AMOUNT,
                 Name=str(P_INV_MONEY_TRAIL_MIN_AMOUNT),
                 ValueType="SINGLE_VALUED",
                 DefaultValues=IntegerDatasetParameterDefaultValues(
@@ -584,9 +570,6 @@ def build_money_trail_roots_dataset(cfg: Config) -> DataSet:
         visual_identifier=DS_INV_MONEY_TRAIL_ROOTS,
     )
 
-
-_DSP_ID_INV_ANETWORK_ANCHOR = "dsp-inv-anetwork-anchor"
-_DSP_ID_INV_ANETWORK_MIN_AMOUNT = "dsp-inv-anetwork-min-amount"
 
 # Sentinel default for the anchor dataset parameter. The analysis-level
 # ``pInvANetworkAnchor`` carries an empty default by design (the dropdown
@@ -674,7 +657,6 @@ def build_account_network_dataset(cfg: Config) -> DataSet:
         visual_identifier=DS_INV_ACCOUNT_NETWORK,
         dataset_parameters=[
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id=_DSP_ID_INV_ANETWORK_ANCHOR,
                 Name=str(P_INV_ANETWORK_ANCHOR),
                 ValueType="SINGLE_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
@@ -682,7 +664,6 @@ def build_account_network_dataset(cfg: Config) -> DataSet:
                 ),
             )),
             DatasetParameter(IntegerDatasetParameter=IntegerDatasetParameter(
-                Id=_DSP_ID_INV_ANETWORK_MIN_AMOUNT,
                 Name=str(P_INV_ANETWORK_MIN_AMOUNT),
                 ValueType="SINGLE_VALUED",
                 DefaultValues=IntegerDatasetParameterDefaultValues(

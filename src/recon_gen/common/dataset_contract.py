@@ -8,7 +8,7 @@ drill-downs) binds to contract columns, not SQL specifics.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 from recon_gen.common.config import Config
@@ -376,6 +376,45 @@ def _oracle_lowercase_alias_wrapper(
     return f"SELECT {aliases} FROM (\n{sql}\n) qs_inner"
 
 
+_DSP_VARIANT_FIELDS = (
+    "StringDatasetParameter",
+    "IntegerDatasetParameter",
+    "DecimalDatasetParameter",
+    "DateTimeDatasetParameter",
+)
+
+
+def _assign_dataset_param_ids(
+    dataset_id: str, params: list[DatasetParameter],
+) -> list[DatasetParameter]:
+    """AK.1 — stamp each dataset parameter with a deterministic,
+    dataset-scoped UUID.
+
+    QuickSight requires every ``DataSetParameter.Id`` to be a real UUID
+    and rejects an analysis whose datasets carry colliding parameter Ids.
+    Construction sites leave ``Id`` unset (``""``); here we derive
+    ``auto_id(f"{dataset_id}:dsparam:{Name}")`` — a UUIDv5 that is stable
+    across runs (deterministic emit / idempotent deploy) yet unique per
+    (dataset, param name), so two datasets that share a param name (e.g.
+    ``pKey`` across several L2FT datasets) never collide.
+    """
+    from recon_gen.common.tree._helpers import auto_id
+
+    out: list[DatasetParameter] = []
+    for p in params:
+        for field_name in _DSP_VARIANT_FIELDS:
+            variant = getattr(p, field_name)
+            if variant is not None:
+                new_id = auto_id(f"{dataset_id}:dsparam:{variant.Name}")
+                out.append(
+                    replace(p, **{field_name: replace(variant, Id=new_id)})
+                )
+                break
+        else:  # pragma: no cover — a wrapper with no variant set is a bug
+            out.append(p)
+    return out
+
+
 def build_dataset(
     cfg: Config,
     dataset_id: str,
@@ -438,7 +477,14 @@ def build_dataset(
     # Y.2.app2.cde — register the dataset's QS parameters too, so the
     # App2 executor can resolve a `<<$paramName>>` placeholder's default
     # (string-substituted) when the URL doesn't supply that param.
-    register_dataset_params(visual_identifier, dataset_parameters or [])
+    # AK.1 — assign deterministic dataset-scoped UUIDs before registering
+    # + emitting. App2 keys off the param Name, so the Id remap is QS-side
+    # only; QS rejects colliding/non-UUID parameter Ids across an analysis.
+    params = (
+        _assign_dataset_param_ids(dataset_id, dataset_parameters)
+        if dataset_parameters else None
+    )
+    register_dataset_params(visual_identifier, params or [])
     columns = contract.to_input_columns()
     # Config.__post_init__ guarantees datasource_arn is non-None
     # post-construction (raises if neither it nor demo_database_url
@@ -472,5 +518,5 @@ def build_dataset(
         DataSetUsageConfiguration=DataSetUsageConfiguration(),
         Permissions=dataset_permissions(cfg),
         Tags=cfg.tags(),
-        DatasetParameters=dataset_parameters,
+        DatasetParameters=params,
     )

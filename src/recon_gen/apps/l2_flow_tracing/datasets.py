@@ -170,26 +170,13 @@ def _match_all_in_clause(col: str, param_name: str) -> str:
         f" OR {col} = <<${param_name}>>)"
     )
 
-# Dataset-parameter IDs are stable UUIDs so re-deploying produces
-# byte-identical DatasetParameters JSON. QS-issued IDs would re-rotate
-# on every regenerate.
-_DSP_ID_PKEY = "11111111-1111-4111-8111-111111111111"
-_DSP_ID_PVALUES = "22222222-2222-4222-8222-222222222222"
-# Y.2.c + AA.A.3 — postings-dataset pushdown params (rail / status /
-# bundle). SINGLE_VALUED post-AA.A.3 (was MULTI_VALUED pre-flip);
-# bridged from the Rails sheet's SINGLE_SELECT dropdowns.
-_DSP_ID_PRAIL = "33333333-3333-4333-8333-333333333333"
-_DSP_ID_PSTATUS = "44444444-4444-4444-8444-444444444444"
-_DSP_ID_PBUNDLE = "55555555-5555-4555-8555-555555555555"
-# Y.2.d — chain-instances-dataset pushdown params (chain / completion).
-_DSP_ID_PCHAINSCHAIN = "66666666-6666-4666-8666-666666666666"
-_DSP_ID_PCHAINSCOMPLETION = "77777777-7777-4777-8777-777777777777"
-# Y.2.e — Transfer Templates pushdown params (template / completion).
-# Declared on BOTH tt-instances + tt-legs (the Template/Completion
-# dropdowns narrow the Table + the Sankey together); same Id reused
-# across the two datasets is fine — IDs are unique per-dataset, not global.
-_DSP_ID_PTTTEMPLATE = "88888888-8888-4888-8888-888888888888"
-_DSP_ID_PTTCOMPLETION = "99999999-9999-4999-8999-999999999999"
+# AK.1 — dataset-parameter Ids are assigned in build_dataset via
+# auto_id(f"{dataset_id}:dsparam:{Name}"); construction sites below leave
+# Id unset. The old hand-picked GUID-shaped constants (11111111…) were
+# IDENTICAL across datasets sharing a param name (pKey lives on postings +
+# chain-instances + tt-legs), which collides when an analysis spans them —
+# QS rejects the whole analysis. Deriving per (dataset, name) keeps emit
+# byte-stable AND unique.
 
 
 # Per-Chain-row-child edge — declared parent→child relationship +
@@ -705,7 +692,6 @@ def build_postings_dataset(
         visual_identifier=DS_POSTINGS,
         dataset_parameters=[
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id=_DSP_ID_PKEY,
                 Name="pKey",
                 ValueType="SINGLE_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
@@ -713,7 +699,6 @@ def build_postings_dataset(
                 ),
             )),
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id=_DSP_ID_PVALUES,
                 Name="pValues",
                 # Y.1.m: SINGLE_VALUED to match the analysis-level
                 # parameter shape (text-field control). Was MULTI_VALUED
@@ -731,7 +716,6 @@ def build_postings_dataset(
             # and rail_name had the sentinel-1-element-list default
             # (X.2.t.2). AA.A.3 unified all three on the SINGLE shape.
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id=_DSP_ID_PRAIL,
                 Name="pL2ftRail",
                 ValueType="SINGLE_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
@@ -739,7 +723,6 @@ def build_postings_dataset(
                 ),
             )),
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id=_DSP_ID_PSTATUS,
                 Name="pL2ftStatus",
                 ValueType="SINGLE_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
@@ -747,7 +730,6 @@ def build_postings_dataset(
                 ),
             )),
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id=_DSP_ID_PBUNDLE,
                 Name="pL2ftBundle",
                 ValueType="SINGLE_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
@@ -1055,7 +1037,6 @@ def build_chain_instances_dataset(
         visual_identifier=DS_CHAIN_INSTANCES,
         dataset_parameters=[
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id=_DSP_ID_PKEY,
                 Name="pKey",
                 ValueType="SINGLE_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
@@ -1063,7 +1044,6 @@ def build_chain_instances_dataset(
                 ),
             )),
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id=_DSP_ID_PVALUES,
                 Name="pValues",
                 # Y.1.m: SINGLE_VALUED to match the analysis-level
                 # parameter shape (text-field control). Was MULTI_VALUED
@@ -1080,7 +1060,6 @@ def build_chain_instances_dataset(
             # no Chains declared lands on the same sentinel default —
             # harmless, the chain-instances table is empty anyway.
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id=_DSP_ID_PCHAINSCHAIN,
                 Name="pL2ftChainsChain",
                 ValueType="SINGLE_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
@@ -1088,7 +1067,6 @@ def build_chain_instances_dataset(
                 ),
             )),
             DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Id=_DSP_ID_PCHAINSCOMPLETION,
                 Name="pL2ftChainsCompletion",
                 ValueType="SINGLE_VALUED",
                 DefaultValues=StringDatasetParameterDefaultValues(
@@ -2047,12 +2025,12 @@ def _tt_dataset_parameters(
     """Y.2.e + AA.A.3 — the shared dataset-parameter set for both
     TransferTemplates datasets (tt-instances + tt-legs): the metadata
     cascade pair (pKey / pValues) plus the template / completion pushdown
-    pair (both SINGLE_VALUED post-AA.A.3). Same IDs in both datasets is
-    fine — dataset-parameter IDs are unique per-dataset.
+    pair (both SINGLE_VALUED post-AA.A.3). AK.1 — build_dataset assigns
+    the Ids deterministically (auto_id over dataset_id + param name), so
+    the two datasets get distinct Ids for the same param name.
     """
     return [
         DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-            Id=_DSP_ID_PKEY,
             Name="pKey",
             ValueType="SINGLE_VALUED",
             DefaultValues=StringDatasetParameterDefaultValues(
@@ -2060,7 +2038,6 @@ def _tt_dataset_parameters(
             ),
         )),
         DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-            Id=_DSP_ID_PVALUES,
             Name="pValues",
             # Y.1.m: SINGLE_VALUED to match the analysis-level
             # parameter shape (text-field control). Was MULTI_VALUED
@@ -2077,7 +2054,6 @@ def _tt_dataset_parameters(
         # Templates declared lands on the same sentinel default —
         # harmless, the tt-instances / tt-legs tables are empty anyway.
         DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-            Id=_DSP_ID_PTTTEMPLATE,
             Name="pL2ftTtTemplate",
             ValueType="SINGLE_VALUED",
             DefaultValues=StringDatasetParameterDefaultValues(
@@ -2085,7 +2061,6 @@ def _tt_dataset_parameters(
             ),
         )),
         DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-            Id=_DSP_ID_PTTCOMPLETION,
             Name="pL2ftTtCompletion",
             ValueType="SINGLE_VALUED",
             DefaultValues=StringDatasetParameterDefaultValues(
