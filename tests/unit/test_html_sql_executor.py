@@ -470,6 +470,28 @@ def test_collect_bind_params_picks_referenced_names() -> None:
     assert binds == {"date_from": "2030-01-01", "amount": "100"}
 
 
+def test_collect_bind_params_coerces_integer_param_to_int() -> None:
+    # AO.R.4 — an integer dataset param's URL value binds as an int, not
+    # a string, so ``z >= :param_pSigma`` is a numeric (not text)
+    # comparison. A string bind made SQLite's affinity match 0 rows (the
+    # moved-σ-slider "0 flagged" bug; the default-substitution path
+    # splices the int literal and worked, hiding it until a control moved).
+    sql = "SELECT * FROM t WHERE z >= :param_pSigma"
+    dps = [_int_dsp("pSigma", value_type="SINGLE_VALUED", defaults=[2])]
+    binds = collect_bind_params(sql, {"param_pSigma": ["3"]}, dps)
+    assert binds["param_pSigma"] == 3
+    assert isinstance(binds["param_pSigma"], int)
+
+
+def test_collect_bind_params_non_numeric_integer_value_falls_back_to_str() -> None:
+    # A blank / non-numeric value for an integer param stays a string so
+    # the dataset SQL author's empty-guard (``OR :p = ''``) still fires.
+    sql = "SELECT * FROM t WHERE z >= :param_pSigma"
+    dps = [_int_dsp("pSigma", value_type="SINGLE_VALUED", defaults=[2])]
+    binds = collect_bind_params(sql, {"param_pSigma": [""]}, dps)
+    assert binds["param_pSigma"] == ""
+
+
 def test_collect_bind_params_takes_last_value_for_repeated_key() -> None:
     """A repeated query key (``?x=a&x=b``) collapses to its last
     value for a single ``:name`` bind — mirrors the old

@@ -217,7 +217,7 @@ def expand_multivalued_dataset_params(
     sql: str,
     dataset_parameters: Sequence[DatasetParameter],
     url_params: Mapping[str, list[str]],
-) -> tuple[str, dict[str, str]]:
+) -> tuple[str, dict[str, Any]]:  # typing-smell: ignore[explicit-any]: int|float|str bind values per the param kind (AO.R.4 coercion)
     """Y.2.app2.cde.multivalued — for a ``MULTI_VALUED`` dataset
     parameter whose URL supplies 2+ non-empty values, expand the
     placeholder ``<<$pName>>`` into ``:param_pName_0, :param_pName_1, …``
@@ -236,12 +236,15 @@ def expand_multivalued_dataset_params(
     whatever ``collect_bind_params`` returns (it overwrites the empty
     placeholders that walk would otherwise emit for the ``_i`` names).
     """
+    kind_by_name: dict[str, str] = {}
     multi_names: set[str] = set()
     for dp in dataset_parameters:
         fields = _dataset_param_fields(dp)
-        if fields is not None and fields[2] == "MULTI_VALUED":
-            multi_names.add(fields[0])
-    extra_binds: dict[str, str] = {}
+        if fields is not None:
+            kind_by_name[fields[0]] = fields[1]
+            if fields[2] == "MULTI_VALUED":
+                multi_names.add(fields[0])
+    extra_binds: dict[str, Any] = {}  # typing-smell: ignore[explicit-any]: int|float|str per the param kind (AO.R.4 coercion)
 
     def _sub(match: re.Match[str]) -> str:
         pname = match.group(1)
@@ -251,8 +254,9 @@ def expand_multivalued_dataset_params(
         if len(vals) < 2:
             return match.group(0)  # 0 → default already applied; 1 → normal bind.
         names = [f"param_{pname}_{i}" for i in range(len(vals))]
+        kind = kind_by_name.get(pname)
         for n, v in zip(names, vals, strict=True):
-            extra_binds[n] = v
+            extra_binds[n] = _coerce_bind(v, kind)  # AO.R.4 — numeric IN-list values
         return ", ".join(f":{n}" for n in names)
 
     sql = _QS_QUOTED_DSP_RE.sub(_sub, sql)
@@ -274,9 +278,36 @@ def rewrite_placeholders_for_dialect(sql: str, dialect: Dialect) -> str:
     return sql
 
 
+def _coerce_bind(value: str, kind: str | None) -> Any:  # typing-smell: ignore[explicit-any]: returns int|float|str depending on the dataset-param kind
+    """Coerce a URL-supplied bind value to the dataset parameter's type.
+
+    AO.R.4 — an ``IntegerDatasetParameter`` / ``DecimalDatasetParameter``
+    bound from the URL arrives as a string (``"2"``); binding it as text
+    makes a numeric comparison (``z_score >= :p``) fall to a string
+    comparison, which on SQLite's type affinity matches 0 rows (the moved
+    σ-slider → "0 flagged" bug — the default-substitution path splices the
+    integer literal and works, so the symptom only appears once the
+    control is touched). String / datetime params stay as-is (date columns
+    compare correctly against ISO text). A non-numeric value falls back to
+    the raw string so the SQL author's empty-guard still fires.
+    """
+    if kind == "integer":
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return value
+    if kind == "decimal":
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return value
+    return value
+
+
 def collect_bind_params(
     sql: str,
     url_params: Mapping[str, list[str]],
+    dataset_parameters: Sequence[DatasetParameter] = (),
 ) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: bind dict accepted by every driver coerces values per-driver — caller passes whatever the SQL placeholder needs
     """Build the bind-param dict for the SQL string.
 
@@ -294,7 +325,17 @@ def collect_bind_params(
     value), whose ``extra_binds`` the caller merges over this dict.
     """
     referenced = set(_NAMED_PLACEHOLDER_RE.findall(sql))
-    return {name: (url_params.get(name) or [""])[-1] for name in referenced}
+    # ``param_<name>`` bind → the declared kind of dataset param ``<name>``,
+    # so an integer / decimal value coerces off its URL string (AO.R.4).
+    kind_by_bind: dict[str, str] = {}
+    for dp in dataset_parameters:
+        fields = _dataset_param_fields(dp)
+        if fields is not None:
+            kind_by_bind[f"param_{fields[0]}"] = fields[1]
+    return {
+        name: _coerce_bind((url_params.get(name) or [""])[-1], kind_by_bind.get(name))
+        for name in referenced
+    }
 
 
 def _prepare_sql_and_binds(
@@ -313,7 +354,7 @@ def _prepare_sql_and_binds(
     )
     sql = translate_qs_dataset_params(sql)
     rewritten = rewrite_placeholders_for_dialect(sql, dialect)
-    binds = collect_bind_params(sql, url_params)
+    binds = collect_bind_params(sql, url_params, dataset_parameters)
     binds.update(extra_binds)
     return rewritten, binds
 
