@@ -26,7 +26,7 @@ both consume.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 
@@ -73,6 +73,8 @@ def shape_table(
     page_size: int | None = None,
     total_rows: int | None = None,
     sort_column: str = "",
+    column_labels: Mapping[str, str] | None = None,
+    column_formats: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Shape SQL rows as a paginated table.
 
@@ -82,13 +84,37 @@ def shape_table(
     when not supplied (no separate count query) — the renderer's
     pagination UI will hide page-N-of-M when total == page size.
 
-    ``columns`` go out as ``[{"name": <col>}]`` objects — that's the
-    shape ``bootstrap.js::renderTable`` reads (it uses ``col.name`` for
-    the header label and ``col.format`` for numeric alignment; a future
-    pass can thread per-column ``format`` through from the tree).
+    ``columns`` go out as ``[{"name", "label"?, "format"?}]`` objects —
+    the shape ``bootstrap.js::renderTable`` reads. ``name`` is the raw
+    SQL column; ``label`` is the plain-English header (``col.label ||
+    col.name`` in the renderer); ``format`` (``"currency"`` / ``"number"``)
+    drives ``formatTableCell`` + right-alignment.
+
+    ``column_labels`` / ``column_formats`` are keyed by raw SQL column
+    name (AO.R.1). They carry the SAME per-column presentation QuickSight
+    derives from the contract + the visual's field leaves (``human_name``
+    header, ``currency`` measure format) — the App2 tree fetcher resolves
+    them and passes them here. When BOTH are omitted, columns emit as the
+    bare ``[{"name"}]`` shape (renderer falls back to the raw name) so
+    callers that don't have the tree (test stubs) are unaffected. A
+    per-column key is omitted (not None) when there's no mapping for it,
+    keeping the JSON clean.
     """
+    labels = column_labels or {}
+    formats = column_formats or {}
+
+    def _col(name: str) -> dict[str, Any]:
+        out: dict[str, Any] = {"name": name}
+        label = labels.get(name)
+        if label is not None:
+            out["label"] = label
+        fmt = formats.get(name)
+        if fmt is not None:
+            out["format"] = fmt
+        return out
+
     return {
-        "columns": [{"name": str(c)} for c in columns],
+        "columns": [_col(str(c)) for c in columns],
         "rows": [list(r) for r in rows],
         "page_offset": page_offset,
         "page_size": page_size if page_size is not None else len(rows),

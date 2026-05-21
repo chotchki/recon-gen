@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 # X.2.b URL contract: query params come back as a multi-dict (a key
@@ -49,14 +50,23 @@ from typing import Any
 # silently do ``"a"[-1]``; ``Mapping[str, list[str]]`` rejects it.
 
 from recon_gen.common.config import Config
-from recon_gen.common.dataset_contract import get_dataset_params, get_sql
+from recon_gen.common.dataset_contract import (
+    get_contract,
+    get_dataset_params,
+    get_sql,
+)
 from recon_gen.common.db import AsyncConnectionPool
 from recon_gen.common.html._data_shape import shape_for_kind
 from recon_gen.common.html._sql_executor import execute_visual_sql_async
 from recon_gen.common.html._visual_sql import wrap_for_visual
 from recon_gen.common.ids import VisualId
 from recon_gen.common.sql.dialect import Dialect, column_name
+from recon_gen.common.tree.fields import Dim, Measure
 from recon_gen.common.tree.structure import App
+# AO.R.1 — reuse the EXACT label QuickSight stamps on a table header so
+# App2 headers match QS by construction (single source of truth; the
+# AO.R.5 parity gate asserts they stay in lock-step).
+from recon_gen.common.tree.visuals import _field_label
 
 
 # Async fetcher shape — what production callers (the App2 server)
@@ -213,6 +223,85 @@ def _find_visual_dataset_identifier(visual: Any) -> str | None:  # typing-smell:
     return None
 
 
+@dataclass(frozen=True)
+class _VisualPlan:
+    """Pre-resolved per-visual fetch plan, built once at fetcher-construction
+    and reused per request. ``column_labels`` / ``column_formats`` (AO.R.1)
+    are keyed by raw SQL column name and carry the SAME per-column
+    presentation QuickSight derives (contract ``human_name`` header +
+    ``currency`` measure format) so App2 renders identical headers + money."""
+
+    kind: str
+    sql: str | None
+    ds_id: str | None
+    column_labels: Mapping[str, str]
+    column_formats: Mapping[str, str]
+
+
+def _leaf_column_name(leaf: Any) -> str | None:  # typing-smell: ignore[explicit-any]: walks dynamic Dim/Measure leaves via getattr
+    """The SQL column name a Dim/Measure leaf projects (its ``Column`` /
+    ``CalcField`` ``name``), or None when there's no resolvable column."""
+    col: Any = getattr(leaf, "column", None)  # typing-smell: ignore[explicit-any]: leaf.column is Column | CalcField | str
+    name = getattr(col, "name", None)
+    if name is None and isinstance(col, str):
+        name = col
+    return str(name) if name else None
+
+
+def _table_column_meta(
+    visual: Any,  # typing-smell: ignore[explicit-any]: dynamic visual subtype walked via getattr
+    ds_id: str | None,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """AO.R.1 — per-column ``(label, format)`` for a visual, derived from the
+    SAME sources QuickSight uses so App2 renders identical headers + money.
+
+    - ``label`` ← the dataset contract's ``ColumnSpec.human_name`` (the
+      ``display_name`` override or smart-titled snake_case) for every
+      contract column — exactly what QS's ``_field_label`` resolves to.
+    - ``format`` ← the visual's field leaves: a ``Measure`` formats as
+      ``"currency"`` (when ``currency=True``) else ``"number"``; a ``Dim``
+      formats as ``"currency"`` only when it carries ``currency=True``.
+      Dimension ids stay unformatted (no thousands-separator on an id) —
+      mirrors QS's measure-vs-dimension number formatting.
+
+    Empty maps when the visual has no resolvable contract (text boxes etc.):
+    the renderer then falls back to the raw column name, unformatted.
+    """
+    labels: dict[str, str] = {}
+    formats: dict[str, str] = {}
+    if ds_id is not None:
+        try:
+            contract = get_contract(ds_id)
+        except KeyError:
+            contract = None
+        if contract is not None:
+            for spec in contract.columns:
+                labels[spec.name] = spec.human_name
+    for field_name in _FIELDS_WITH_DATASET_REFS:
+        field_val: Any = getattr(visual, field_name, None)  # typing-smell: ignore[explicit-any]: getattr returns Any; collapsed to a known shape below
+        if field_val is None:
+            continue
+        if isinstance(field_val, list):
+            items: list[Any] = field_val  # pyright: ignore[reportUnknownVariableType]  # typing-smell: ignore[explicit-any]: list of Dim/Measure unions narrowed by the isinstance walk below
+        else:
+            items = [field_val]
+        for item in items:
+            if not isinstance(item, (Dim, Measure)):
+                continue
+            name = _leaf_column_name(item)
+            if name is None:
+                continue
+            # Authoritative header — the same _field_label QS emits as the
+            # column's CustomLabel (overrides the contract entry for calc
+            # fields, which aren't in the contract).
+            labels[name] = _field_label(item)
+            if isinstance(item, Measure):
+                formats[name] = "currency" if getattr(item, "currency", False) else "number"
+            elif getattr(item, "currency", False):
+                formats[name] = "currency"
+    return labels, formats
+
+
 def make_tree_db_fetcher(
     tree_app: App,
     cfg: Config,
@@ -263,8 +352,7 @@ def make_tree_db_fetcher(
     # aggregation (KPI count → SELECT COUNT, BarChart → GROUP BY
     # category, etc.). Without this, KPI visuals would render one
     # card per dataset row instead of the aggregated value QS shows.
-    # (kind, wrapped_sql | None, dataset_identifier | None) per visual.
-    visual_index: dict[VisualId, tuple[str, str | None, str | None]] = {}
+    visual_index: dict[VisualId, _VisualPlan] = {}
     for sheet in tree_app.analysis.sheets:
         for visual in sheet.visuals:
             # ``visual.visual_id`` is ``VisualId | AutoResolved`` per
@@ -282,7 +370,11 @@ def make_tree_db_fetcher(
             if ds_id is not None:
                 base_sql = get_sql(ds_id)
                 sql = wrap_for_visual(base_sql, visual)
-            visual_index[vid] = (kind, sql, ds_id)
+            col_labels, col_formats = _table_column_meta(visual, ds_id)
+            visual_index[vid] = _VisualPlan(
+                kind=kind, sql=sql, ds_id=ds_id,
+                column_labels=col_labels, column_formats=col_formats,
+            )
 
     async def fetcher(visual_id: VisualId, params: Mapping[str, list[str]]) -> Any:  # typing-smell: ignore[explicit-any]: per-visual-kind shape (KPI float, Sankey {nodes,links}, etc.) — JSON-serialized downstream, so a real union here would be every renderer's shape
         if visual_id not in visual_index:
@@ -290,7 +382,8 @@ def make_tree_db_fetcher(
             # cached page. Return empty so the d3 renderers paint
             # an empty visual instead of throwing.
             return {}
-        kind, sql, ds_id = visual_index[visual_id]
+        plan = visual_index[visual_id]
+        kind, sql, ds_id = plan.kind, plan.sql, plan.ds_id
         if sql is None:
             # Visual without a SQL-backed dataset (text box etc.).
             # Empty payload renders as a blank visual — fine for
@@ -336,6 +429,8 @@ def make_tree_db_fetcher(
                 "Table", page_rows, page_cols,
                 page_offset=offset, page_size=limit, total_rows=total,
                 sort_column=echo_sort,
+                column_labels=plan.column_labels,
+                column_formats=plan.column_formats,
             )
         rows, columns = await execute_visual_sql_async(
             pool, sql, params, dialect=cfg.dialect,
