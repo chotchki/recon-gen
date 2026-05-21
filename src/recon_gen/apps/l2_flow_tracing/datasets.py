@@ -397,7 +397,13 @@ UNIFIED_L2_EXCEPTIONS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("entity_a", "STRING", shape=ColumnShape.L2_DECLARED_NAME),
     ColumnSpec("entity_b", "STRING"),
     ColumnSpec("detail", "STRING"),
-    ColumnSpec("count", "INTEGER"),
+    # AO.6 — display as "Occurrences" so this per-violation magnitude
+    # column doesn't read as "Count" and collide with the sheet's
+    # "Open L2 Violations" KPI (which tallies violation ROWS). A reader
+    # otherwise sees "39 violations" above a column headed "Count" whose
+    # values run to the hundreds — the v11.9.4 cold-sweep's #6
+    # "count overloaded on L2 Exceptions".
+    ColumnSpec("count", "INTEGER", display_name="Occurrences"),
 ])
 
 

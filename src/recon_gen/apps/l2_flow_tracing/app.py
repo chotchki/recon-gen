@@ -1294,7 +1294,7 @@ def _populate_l2_exceptions_sheet(
         title="L2 Violation Detail",
         subtitle=(
             "Every row is one detected L2 violation. Sorted by "
-            "count (largest first). Right-click any row to drill "
+            "occurrences (largest first). Right-click any row to drill "
             "into Rails (entity_a → Rail filter) or Chains (entity_a → "
             "Chain filter). Read entity_a / entity_b / detail in the "
             "context of the row's check_type — see the sheet "
