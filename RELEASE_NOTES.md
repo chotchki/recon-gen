@@ -1,5 +1,41 @@
 # Release Notes
 
+## v11.10.0 — App2 renderer parity + Daily Statement KPIs compute
+
+A cold read of the v11.9.4 self-hosted (App2) build surfaced that a class
+of "dashboard bugs" were really **App2 renderer-parity gaps**: the shared
+contract/tree already declared the intent, but App2's Python projection
+layer silently dropped it while QuickSight honored it. App2 is now brought
+up to parity (its d3 / HTMX renderer was already capable — the projection
+just wasn't supplying it), plus the Daily Statement keystone fix.
+
+**App2 renderer parity (AO.R):**
+- **Table headers + money** — columns now carry the contract's
+  `human_name` header (no more raw `snake_case`) and `$`-format currency
+  measures, threaded through `shape_table` (was bare `{"name"}`). A parity
+  drift gate (`test_html_table_parity.py`) asserts it across all four apps
+  so a QS-only contract field can't ship silently again.
+- **Charts** — App2 BarChart now stacks (`bars_arrangement="STACKED"`,
+  honored end-to-end via `wrap_for_visual` projecting the colors dim →
+  series pivot → d3 stack), with per-series colors, a legend, currency
+  y-axis, and rotated long x-axis labels.
+- **Text panels** — `rt.markdown` now parses `**bold**` / `` `code` `` /
+  `- bullets` / `> quote` into the rich-text vocab both renderers honor
+  (panels rendered raw markdown before).
+- **Sliders** — integer/decimal control values bind as numbers, so a moved
+  σ / threshold slider narrows correctly (was a string compare → 0 rows).
+
+**Daily Statement KPIs compute (AO.2):** the balance-date now pushes into
+both dataset SQLs (day-truncated equality + a latest-day fallback),
+replacing a broken analysis-level `TimeEqualityFilter` (QS missed the
+stored timestamp → 0-row signed-`MAX` KPIs; App2 ignored it). The sheet's
+lone date picker also renders as a single-date control in App2 (the tree's
+range-vs-single intent now drives the renderer; From/To pairs stay a
+range).
+
+All renderer-agnostic; QuickSight deploys benefit from the same contract
+threading. Full unit + json suites green.
+
 ## v11.9.4 — fix: App2 local-serve blank dataset-backed pickers
 
 The local `recon-gen dashboards` / `studio` HTMX server composed its
