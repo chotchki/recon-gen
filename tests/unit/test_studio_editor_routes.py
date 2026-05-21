@@ -1507,6 +1507,95 @@ def test_singleton_theme_bad_yaml_returns_400(
     assert 'class="form-global-error"' in resp.text
 
 
+def test_singleton_instance_get_renders_description(
+    writable_l2_yaml: Path,
+) -> None:
+    """AI.2.c — GET /l2_shape/instance/ renders the top-level settings
+    singleton with the existing description + role_business_day_offsets
+    dumped into the YAML textarea. spec_example has a description, so it
+    prefills."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/instance/")
+    assert resp.status_code == 200, resp.text
+    assert 'name="yaml"' in resp.text
+    assert "yaml-block" in resp.text
+    # spec_example declares a top-level description → the key prefills.
+    assert "description" in resp.text
+
+
+def test_singleton_instance_save_round_trips(
+    writable_l2_yaml: Path,
+) -> None:
+    """AI.2.c — POST /l2_shape/instance/ writes both top-level fields
+    (description + role_business_day_offsets) and the round-trip survives
+    reload. This is the gap that blocked rebuilding any fuzz seed
+    (≈ every one emits role_business_day_offsets)."""
+    app = _build_app(writable_l2_yaml)
+    yaml_text = (
+        "description: Independent reconciliation validator demo.\n"
+        "role_business_day_offsets:\n"
+        "  CustomerSubledger: 17\n"
+        "  ClearingSuspense: 0\n"
+    )
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/instance/",
+            data={"yaml": yaml_text},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+
+    reloaded = load_instance(writable_l2_yaml)
+    assert reloaded.description == "Independent reconciliation validator demo."
+    assert reloaded.role_business_day_offsets == {
+        "CustomerSubledger": 17,
+        "ClearingSuspense": 0,
+    }
+
+
+def test_singleton_instance_empty_clears_both(
+    writable_l2_yaml: Path,
+) -> None:
+    """AI.2.c — an empty block clears BOTH top-level fields (the singleton
+    block IS the full state of description + role_business_day_offsets)."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/instance/",
+            data={"yaml": ""},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+
+    reloaded = load_instance(writable_l2_yaml)
+    assert reloaded.description is None
+    assert reloaded.role_business_day_offsets is None
+
+
+def test_singleton_instance_bad_offset_returns_400(
+    writable_l2_yaml: Path,
+) -> None:
+    """AI.2.c — the instance singleton reuses the loader's per-field
+    validators, so an out-of-range offset (hours must be in [0, 24))
+    returns 400 + the form re-rendered with the error inline — the same
+    rule a fresh YAML load enforces."""
+    app = _build_app(writable_l2_yaml)
+    bad_yaml = "role_business_day_offsets:\n  CustomerSubledger: 25\n"
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/instance/",
+            data={"yaml": bad_yaml},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 400, resp.text
+    assert 'class="form-global-error"' in resp.text
+
+    # Disk unchanged — the bad save never reached cache.save().
+    reloaded = load_instance(writable_l2_yaml)
+    assert reloaded.role_business_day_offsets is None
+
+
 def test_delete_unreferenced_account_persists(writable_l2_yaml: Path) -> None:
     """Deleting cust-002 succeeds — no rail / template references it
     by id; the role CustomerSubledger is still satisfied by cust-001."""

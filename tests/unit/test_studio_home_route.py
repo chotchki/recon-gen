@@ -120,6 +120,21 @@ def test_home_page_each_section_carries_add_button(
     assert "event.stopPropagation()" in body
 
 
+def test_home_page_lists_instance_settings_singleton(
+    writable_l2_yaml: Path,
+) -> None:
+    """AI.2.c — the home page surfaces the new top-level "Instance
+    settings" singleton (description + role_business_day_offsets)
+    alongside Theme / Persona, with an Edit link to its YAML form."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/").text
+
+    assert 'data-kind="instance"' in body
+    assert "Instance settings" in body
+    assert 'href="/l2_shape/instance/"' in body
+
+
 def test_home_page_renders_deploy_button_in_header(
     writable_l2_yaml: Path,
 ) -> None:

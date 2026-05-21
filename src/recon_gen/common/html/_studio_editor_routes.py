@@ -2157,6 +2157,25 @@ _SINGLETON_INTRO_BY_KIND: Mapping[EntityKind, tuple[str, str]] = {
         "bundled <code>tests/l2/sasquatch_pr.yaml</code> for a reference "
         "shape.</p>"
     ),
+    "instance": (
+        "Instance settings",
+        "<p><strong>Instance settings</strong> are the two top-level "
+        "L2 fields that live alongside the entity collections: the "
+        "institution <code>description</code> (free-form prose the "
+        "handbook reads as the intro paragraph) and "
+        "<code>role_business_day_offsets</code> (an optional "
+        "<code>{role: hours}</code> map shifting a role's emitted "
+        "business-day window off midnight).</p>"
+        "<p>Edit the YAML below — the block IS the full state of both "
+        "fields, so an omitted key clears that field. Shape:</p>"
+        "<pre>description: One-line institution summary.\n"
+        "role_business_day_offsets:\n"
+        "  CustomerSubledger: 17\n"
+        "  ClearingSuspense: 0</pre>"
+        "<p><code>description</code> must be a non-blank string (omit "
+        "the key for none); each offset must be an int in "
+        "<code>[0, 24)</code> hours. An empty block clears both.</p>"
+    ),
 }
 
 
@@ -2168,6 +2187,24 @@ def _singleton_yaml_text(instance: object, kind: EntityKind) -> str:
     """
     import dataclasses as dc  # noqa: PLC0415 — lazy
     import yaml  # noqa: PLC0415 — lazy
+
+    if kind == "instance":
+        # AI.2.c — two top-level scalars (description +
+        # role_business_day_offsets) dumped as one block. Omit a key when
+        # its field is None; both-None ⇒ blank textarea (the "clear"
+        # state). Round-trips through singleton_save_l2's instance branch.
+        instance_map: dict[str, object] = {}
+        desc = getattr(instance, "description", None)
+        if desc is not None:
+            instance_map["description"] = desc
+        offsets = getattr(instance, "role_business_day_offsets", None)
+        if offsets is not None:
+            instance_map["role_business_day_offsets"] = offsets
+        if not instance_map:
+            return ""
+        return yaml.safe_dump(
+            instance_map, default_flow_style=False, sort_keys=False,
+        ).rstrip() + "\n"
 
     attr = "theme" if kind == "theme" else "persona"
     value = getattr(instance, attr, None)
@@ -2723,7 +2760,9 @@ _VALID_KINDS: frozenset[str] = frozenset(
      # X.4.f.12 — singletons (theme, persona) are valid kinds for the
      # URL path; the route handlers branch on SINGLETON_KINDS to use
      # the singleton form/save flow instead of list/CRUD.
-     "theme", "persona"),
+     # AI.2.c — ``instance`` is the third singleton (top-level
+     # description + role_business_day_offsets as one YAML block).
+     "theme", "persona", "instance"),
 )
 
 

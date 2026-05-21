@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal, TypeAlias, cast
 
 from recon_gen.common.l2.primitives import (
     Account,
@@ -64,13 +64,24 @@ EntityKind: TypeAlias = Literal[
     # editor are a polish follow-on.
     "theme",
     "persona",
+    # AI.2.c — top-level L2Instance settings (``description`` +
+    # ``role_business_day_offsets``) edited as a single YAML block. Same
+    # singleton pattern as theme/persona, but the block maps to two
+    # scalar attributes rather than one nested dataclass — so the editor
+    # can rebuild fuzz seeds (≈ every one emits role_business_day_offsets)
+    # and the corpus descriptions, closing the last top-level gaps.
+    "instance",
 ]
 
 
 # X.4.f.12 — kinds that exist as a single optional attribute on
 # L2Instance rather than a tuple. Routes / handlers branch on this
 # to skip list view, create page, delete, and per-id addressing.
-SINGLETON_KINDS: frozenset[EntityKind] = frozenset({"theme", "persona"})
+# AI.2.c — ``instance`` joins as a 2-attribute singleton (description +
+# role_business_day_offsets) sharing the same render/save plumbing.
+SINGLETON_KINDS: frozenset[EntityKind] = frozenset(
+    {"theme", "persona", "instance"},
+)
 
 
 # ---------------------------------------------------------------------------
@@ -546,7 +557,9 @@ def singleton_save_l2(
     import yaml  # noqa: PLC0415 — lazy
     from recon_gen.common.l2.loader import (  # noqa: PLC0415 — lazy to dodge cycle
         L2LoaderError,
+        _load_description,
         _load_persona,
+        _load_role_business_day_offsets,
         _load_theme,
     )
     raw = yaml_text.strip()
@@ -554,7 +567,13 @@ def singleton_save_l2(
         # Empty ⇒ clear the singleton; silent-fallback takes over.
         if kind == "theme":
             return dataclasses.replace(instance, theme=None)
-        return dataclasses.replace(instance, persona=None)
+        if kind == "persona":
+            return dataclasses.replace(instance, persona=None)
+        # AI.2.c — instance settings: an empty block clears BOTH
+        # top-level fields (description + role_business_day_offsets).
+        return dataclasses.replace(
+            instance, description=None, role_business_day_offsets=None,
+        )
     try:
         parsed = yaml.safe_load(raw)
     except yaml.YAMLError as exc:
@@ -563,12 +582,32 @@ def singleton_save_l2(
         raise ValueError(
             f"Expected a YAML map; got {type(parsed).__name__}",
         )
+    parsed_map = cast("dict[str, object]", parsed)
     try:
         if kind == "theme":
-            new_theme = _load_theme(parsed, path=kind)  # pyright: ignore[reportUnknownArgumentType]  # WHY: yaml.safe_load returns Any-typed dict; the loader validates the shape
+            new_theme = _load_theme(parsed_map, path=kind)
             return dataclasses.replace(instance, theme=new_theme)
-        new_persona = _load_persona(parsed, path=kind)  # pyright: ignore[reportUnknownArgumentType]  # WHY: yaml.safe_load returns Any-typed dict; the loader validates the shape
-        return dataclasses.replace(instance, persona=new_persona)
+        if kind == "persona":
+            new_persona = _load_persona(parsed_map, path=kind)
+            return dataclasses.replace(instance, persona=new_persona)
+        # AI.2.c — instance settings: the block IS the full state of both
+        # top-level fields (an omitted key clears that field). Reuse the
+        # loader's per-field validators so the studio enforces exactly the
+        # same rules as a fresh YAML load — description must be a
+        # non-blank string; role_business_day_offsets must be a
+        # {role: hours-in-[0,24)} int map.
+        new_description = _load_description(
+            parsed_map.get("description"), path="description",
+        )
+        new_offsets = _load_role_business_day_offsets(
+            parsed_map.get("role_business_day_offsets"),
+            path="role_business_day_offsets",
+        )
+        return dataclasses.replace(
+            instance,
+            description=new_description,
+            role_business_day_offsets=new_offsets,
+        )
     except L2LoaderError as exc:
         raise ValueError(str(exc)) from exc
 
