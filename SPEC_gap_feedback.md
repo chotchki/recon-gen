@@ -734,7 +734,7 @@ Phase 2 (integrator side) prototyped per-rail explicit plants via a runnable tes
 
 **Severity:** bug (regression introduced when Gap A's picker fix shipped — Template-parent chains became reachable but the plant emitter's `rail_name` assignment didn't account for them)
 
-**Status:** surfaced during post-fix integration re-testing, after Gap A landed.
+**Status: RESOLVED — AJ.2 / v11.9.0.** The multi_xor plant emitter resolves a Template child's `rail_name` to the child template's first leg_rail (a real declared Rail) instead of the chain-parent template name (`seed.py:5166`). A template-heavy fixture confirms `unmatched_rail_name = 0`.
 
 #### Problem
 
@@ -757,32 +757,48 @@ The MultiXor plant emitters should set `rail_name` to an actual leg_rail of the 
 
 ---
 
-### Implementation Gap H: baseline template-firing path bypasses the multi-children XOR child-pick (Gap B and Gap C fixes don't compose)
+### Implementation Gap H: scenario/plant emitters fire chain-parent rails standalone without a chain child → false `multi_xor_violation` (and `chain_orphans`) — sibling of Gap I
 
-**Severity:** bug (Gap B's new template-firing synthesis + Gap C's XOR child-pick don't compose for templates that are simultaneously chain-parents AND independently baseline-fired)
+**Severity:** bug (false-positive on a runtime exception matview; plant scaffolding contaminates the XOR-cardinality check). Note: this gap was *originally filed* as "baseline template-firing path bypasses the XOR child-pick" — that hypothesis is **disproven** by the empirical re-diagnosis below; the residual is plant-side, not baseline.
 
-**Status:** surfaced during post-fix integration re-testing, after Gap B + Gap C both landed.
+**Status: PARTIALLY RESOLVED — AJ.3 / v11.9.0.** The seed-side fix landed: `_emit_plant_chain_completion` (`seed.py:5258`) emits the XOR/fan-in child for a plant firing that is also a chain parent (matview stays production-honest). **But it was wired into only 3 of 5 plant emitters** — the XOR-variant missed/overlap and limit-breach plants — and NOT the two broad-mode coverage helpers `_emit_transfer_template_rows` (`seed.py:5686`) / `_emit_rail_firing_rows` (`seed.py:5882`). On a template-heavy fixture those two still fire chain-parent legs without a child, so childless `multi_xor_violation` rows persist (and bleed into `chain_orphans`). **Remaining fix: extend the same `_emit_plant_chain_completion` call to those two emitters** — mechanical, identical to the 3 that already have it. Keep the baseline `childless=0` guard.
 
-#### Problem
+#### Problem (re-diagnosed)
 
-Gap C's fix added a per-firing XOR child-pick to `emit_baseline_chains` (pick exactly one non-fan_in child per parent firing); its regression test asserts "zero `multi_xor_violation` rows for any multi-children chain on a healthy baseline." Gap B's fix added a routine that synthesizes per-business-day firings for chain-parent templates (so `transfer_parent_id` threads through). The two paths don't compose: parent firings produced via the template-firing path don't route through Gap C's chain XOR child-pick, so a subset fire without any matching child → baseline `multi_xor_violation` (missed) on a "healthy" baseline.
+The baseline emitter (`tr-base-tmpl-*`) composes correctly after AG.1/AG.2: every baseline multi-children-chain parent firing gets exactly one XOR/fan-in child (`childless=0`). The original repro keyed off a `tr-rail%` prefix that predates the AG.1 seed refactor, which is why it no longer reproduces against the baseline path.
 
-The composition only bites when a single template is BOTH (a) a multi-children chain parent AND (b) independently baseline-fired as a standalone template. Fixtures whose chain parents aren't heavily baseline-fired as standalone templates don't trip it.
+The real residual lives in the **scenario / broad-mode plant helpers**, not the baseline:
+
+- `_emit_rail_firing_rows` (`seed.py:5882`, `tr-rail-*`)
+- `_emit_transfer_template_rows` (`seed.py:5686`, `tr-tt-*`)
+
+When the rail or template a plant fires *happens to be a multi-children chain parent*, these helpers emit the parent leg but **do not emit the chain child** — they only set `transfer_parent_id` when the plant explicitly carries one. The `multi_xor_violation` matview then reads the parent as a "missed" XOR violation, and the same firing would surface in `chain_orphans` too. This makes it the **sibling of Gap I**: a runtime exception check that can't distinguish a plant's incidental chain-parent firing from a genuinely-missed child.
+
+Two observations narrow the fix:
+
+- **Density-invariant** — `--seed-density 1.0` vs `5.0` produce identical childless counts. Not a scale effect.
+- **Not a window-edge / settlement-lag effect** — the healthy chain children are same-day (lag 0); the apparent clustering near the window edge just reflects where the plant helpers emit, not truncation.
 
 #### Where it bites in the Sasquatch example
 
-sasquatch_pr's `MerchantSettlementCycle` is a multi-children chain parent (4-vehicle XOR-and-fan-in group) AND a baseline-fired template (its `MerchantCardSale` leg fires per-business-day across merchants). After Gap B + Gap C, the chain-invocation firings of `MerchantSettlementCycle` get a child via the XOR pick — but the template-instance baseline firings of the same template don't, so a fraction surface as `multi_xor_violation` missed-firings on a healthy seed.
+A fixture that reuses a rail or template as both a standalone-fired entity AND a multi-children chain-parent leg (e.g. `MerchantSettlementCycle`'s `MerchantCardSale` leg) trips this. The baseline (`tr-base-*`) firings of that chain parent are clean; the *plant* firings of the same rail/template (`tr-rail-*` / `tr-tt-*`) surface as `multi_xor_violation` missed-firings on a healthy seed. The count scales with how many rails the fixture reuses as chain-parent template legs, which is why single-purpose fixtures barely show it (they surface only the deliberate `tr-mxor-*` XOR-plant rows, which are correct-by-design).
 
-Reproduction recipe: fresh `data apply --execute`, then `SELECT parent_rail_or_template_name, COUNT(*) FROM <prefix>_multi_xor_violation WHERE parent_transfer_id LIKE 'tr-rail%' GROUP BY 1` — multi-children chain parents that are also baseline-fired templates show non-zero missed-firing counts, contradicting Gap C's "zero rows" regression claim.
+Reproduction recipe: fresh `data apply --execute`, then break the childless rows down by emit-path —
+`SELECT parent_transfer_id, parent_rail_or_template_name FROM <prefix>_multi_xor_violation WHERE child_count = 0`.
+The `tr-base-*` baseline firings are absent (they compose); the surviving childless parents are `tr-rail-*` / `tr-tt-*` plants (incidental) plus `tr-mxor-*` plants (deliberate).
 
-#### Proposed fix
+#### Proposed fix — SEED-SIDE (not a dataset filter)
 
-Route the template-instance baseline firing path (and Gap B's `_emit_baseline_template_firings`) through Gap C's `_baseline_xor_child_pick` for any template that is also a multi-children chain parent. Equivalently: ensure the chain XOR child-pick fires for every parent-template firing regardless of which baseline code path produced it. Add a regression fixture where a single template is BOTH a chain parent AND independently baseline-fired — the existing fixtures don't carry this composition, which is why Gap C's regression test passed while the gap remained.
+The fix belongs in the plant emitters, **not** in the exception surfaces. `multi_xor_violation` and `chain_orphans` run against `<prefix>_transactions` — i.e. real customer ETL data in production, where there is no `tr-base-*`/plant prefix and a chain-parent firing with no child is a **genuine** violation. (The `origin` column is posting-origin — `InternalInitiated` / `ExternalForcePosted` / `ExternalInitiated` — and carries no plant-vs-baseline marker; the only such signal is the demo-only `tr-base-*` transfer_id prefix.) Filtering those datasets on origin/prefix would be demo-only logic leaking into a production-correct invariant: it would no-op on real data, or worse, train operators that the check has demo-shaped escape hatches. The childless rows are not really false positives — the plant helpers are genuinely firing a chain-parent leg with no child, which is a real (if unintended) violation. So the demo seed must stop manufacturing them.
+
+In the broad-mode/scenario plant helpers, when the picked target is a multi-children chain parent, route the firing through the existing baseline XOR child-pick so the planted firing carries its child (preferred — preserves the ability to plant *other* invariants, e.g. stuck_pending/drift, on a rail that happens to be a chain parent). Skipping chain-parent targets entirely is the simpler fallback where a picker never needs them.
+
+Keep the structural guard regardless: assert that baseline chain-parent firings stay `childless=0`, locking in what AG.1/AG.2 fixed.
 
 #### Tradeoffs / open questions
 
-- Gap C's regression test is correct as written; it just doesn't cover the "template is both chain-parent and standalone-baseline-fired" composition. The fix is to extend coverage to that shape, then make both baseline paths share the child-pick.
-- This is the canonical "two independently-correct fixes that don't compose" finding — worth a composition test rather than just patching the one path.
+- Distinct from Gap I: N:1 is a real structural property of the L2, so making `chain_orphans` fan_in-aware is *production-correct* and stays a dataset fix. Gap H's residual is demo-seed contamination of a production-correct invariant, so it stays a seed fix. They are siblings in symptom (a chain-parent firing reads as missing a child) but the correct fix layer differs.
+- The original "baseline paths don't compose" framing was a measurement artifact (stale `tr-rail%` repro predating the AG.1 refactor); the original instinct ("route the firing through the XOR child-pick") was right about the *mechanism* but wrong about the *layer* — it applies to the plant helpers, not the baseline, which already composes. Retain the baseline `childless=0` regression guard regardless.
 
 ---
 
@@ -790,7 +806,7 @@ Route the template-instance baseline firing path (and Gap B's `_emit_baseline_te
 
 **Severity:** bug (false-positive on a runtime exception dataset; pre-existing, predates the Gap A–F wave)
 
-**Status:** the dominant residual chain-orphan noise once Gap B's fix cleared the template-as-child false positives. The planned AB.4.8 dashboard-wiring step is the fix.
+**Status: RESOLVED — AJ.4 / v11.9.0.** `build_exc_chain_orphans_dataset` CASE-guards fan_in edges: for `fan_in = 1` the orphan count is parent firings absent from the `_transfer_parents` anti-join (genuine "cycle never batched"), not the naive `parent − child` subtraction (`l2_flow_tracing/datasets.py:1136`). Production-correct. On a template-heavy fixture the structural false-positives collapse; the only residual is (a) Gap H's plant bleed-through — clears once Gap H's two emitters are completed — and (b) a small number of window-edge baseline cycles posted past the snapshot anchor (legitimately not-yet-batched). The dataset fix itself is complete.
 
 #### Problem
 
@@ -817,12 +833,53 @@ Simpler alternative: skip fan_in chain children entirely in the chain_orphans da
 
 ---
 
+### Implementation Gap J: `firings_typical_per_period` (E8) can't scale an atomic multi-leg flow modeled as separate 1-leg rails in a TransferTemplate
+
+**Severity:** gap (E8 is unusable — produces false drift — for a common, legitimate modeling pattern: a balanced multi-leg transfer whose legs are separate 1-leg rails joined by a TransferTemplate).
+
+**Status:** surfaced applying E8 to a template-heavy L2 (most flows modeled as templates).
+
+#### Problem
+
+The baseline seed has two firing paths:
+
+- **Per-rail loop** (`seed.py` ~line 1309, `for rail in sorted(instance.rails …)`): fires every rail independently, reading the count from `_pick_firings_count(rail, …)` — i.e. **the rail's** `firings_typical_per_period`. No skip for rails that are template legs (only the operator `skip_rails` / `only_rails` filters apply).
+- **Template-firing loop** (`seed.py` ~line 2890+, the AG.1 helper): fires a template **as a unit** — all leg_rails together, one shared transfer_id, balanced — reading the count from `_pick_firings_count(template, …)`. But it runs **only for templates that appear as a Chain `parent`** (`parent_template_names` is derived from `instance.chains`).
+
+So for an atomic multi-leg flow modeled as two (or more) **1-leg rails** joined into one TransferTemplate with `expected_net = 0` (legs must net to zero), the **only** firing path is the per-rail loop, which fires each leg **independently with its own count**. Consequences of declaring E8:
+
+- Declare E8 on **one** leg → that leg's count diverges from its siblings → the template's shared Transfer is imbalanced → false `drift` / `ledger_drift`.
+- Declare the **same** E8 band on **all** legs → still diverges: each rail samples its own per-period count from its own RNG stream (`base_seed ^ crc32(rail.name)`), so the legs land on different counts; and a leg shared with other flows (e.g. a sweep-side leg) also receives paired emissions from those flows, pushing it past its own band.
+
+Net: there is **no way to set a coupled, scaled firing count** for such a template. The legs only stay balanced at the per-kind heuristic (which happens to give matched legs the same count) — i.e. you can't scale the flow at all without breaking it.
+
+This is not an exotic shape. Modeling an atomic transfer as separate 1-leg rails (rather than one `TwoLegRail`) is the right choice whenever the legs need distinct rail identities — different accounts/roles, different bundling (one leg consumed by an aggregator, the other not), or different aging/`max_unbundled_age` treatment. E8 silently doesn't work for any of them.
+
+#### Where it bites in the Sasquatch example
+
+A template like `CardLoad` whose legs are two 1-leg rails — `CardLoadCardholderCredit` (posts to the cardholder account, unbundled) and `CardLoadSweepDebit` (posts to a sweep account, consumed by an EOD aggregator) — joined with `expected_net = 0`. Setting `firings_typical_per_period` on either leg (or both) drifts the pair; the flow can only run at the heuristic default. The single-leg-into-aggregator flows (a sale rail whose counter-leg is a pool aggregator) and 2-leg *standalone* rails (one `TwoLegRail` emitting both legs atomically per firing) both scale fine — it's specifically the **multi-1-leg-rail template** that has no lever.
+
+Reproduction recipe: take any TransferTemplate whose `leg_rails` are ≥2 SingleLegRails with `expected_net = 0`; add `firings_typical_per_period: [N, M]` to one leg; `data apply --execute` + `data refresh --execute`; observe the leg's transfer count diverge from its sibling and new `ledger_drift` rows appear on a previously-clean baseline.
+
+#### Proposed fix
+
+Let `firings_typical_per_period` on a **TransferTemplate** drive a coupled unit-firing count for **any** template that declares it — not just chain-parent templates. The unit-firing machinery already exists (the AG.1 template-firing helper emits all leg_rails together, balanced, from `_pick_firings_count(template, …)`); the fix is to (a) run it for every template carrying E8, and (b) have the per-rail loop **skip leg_rails of any template that fires as a unit**, so those legs aren't also emitted independently (which would both double-count and re-introduce the divergence). Validator W1 should then also accept `firings_typical_per_period` on a TransferTemplate (today E8 is documented on rails).
+
+Smaller alternative if template-level E8 is out of scope: have the per-rail loop, when emitting a rail that is a leg of an `expected_net = 0` template, derive its count from a single per-template draw shared across that template's legs (so sibling legs stay matched even when each is declared independently). The template-level knob is cleaner and also lets the operator express "this whole flow fires N times per period" directly.
+
+#### Tradeoffs / open questions
+
+- The two-path baseline (per-rail loop + chain-parent template loop) already double-emits chain-parent template legs today (legs fire in the per-rail loop *and* as part of the unit firing). Fixing E8 via the "skip leg_rails of unit-firing templates" route would also tidy that up.
+- Doesn't affect single-leg→aggregator flows or 2-leg standalone rails — those scale correctly via rail-level E8. Scope is precisely the multi-1-leg-rail balanced template.
+
+---
+
 ### Recommended filing order for the implementation gaps
 
 Original wave (A–F) — all landed in Phase AG (v11.7.0):
 
 1. **Gap B (transfer_parent_id missing)** — ✅ RESOLVED (AG.1). Broadest blast radius; cleared false-positive chain orphans.
-2. **Gap C (baseline multi-XOR not enforced)** — ✅ RESOLVED for chain-invocation path (AG.2); see Gap H for the residual composition gap.
+2. **Gap C (baseline multi-XOR not enforced)** — ✅ RESOLVED (AG.2); the baseline path composes. The remaining childless `multi_xor_violation` rows are plant-origin, not baseline — see Gap H (re-diagnosed).
 3. **Gap A (picker Rail-parent restriction)** — ✅ RESOLVED (AG.3); see Gap G for the regression it surfaced.
 4. **Gap D (classifier substring + over-match)** — ✅ RESOLVED minimal (AG.4 — PAYROLL_BATCH + overmatch guard); vocabulary breadth deferred (Enhancement 8 is the universal fix).
 5. **Gap E (trainer modules bit-rot)** — ✅ RESOLVED (AG.5 — per-node badges; timeline left toggle-scoped by design).
@@ -831,7 +888,7 @@ Original wave (A–F) — all landed in Phase AG (v11.7.0):
 Second wave (G–I) — surfaced by post-AG integration re-testing; not yet filed upstream:
 
 7. **Gap G (MultiXor plant rail_name leak)** — regression from Gap A; file with Gap A's family; Template-parent plant-emitter test.
-8. **Gap H (baseline template-firing ↔ XOR child-pick don't compose)** — Gap B+C composition gap; file with Gap C's family; composition regression test.
+8. **Gap H (plant emitters fire chain-parent rails standalone without a child)** — re-diagnosed: NOT a baseline compose gap (baseline composes after AG.1/AG.2); the residual is demo-seed contamination of a production-correct invariant. **Seed-side fix** (route plant chain-parent firings through the XOR child-pick) — NOT a dataset filter, since `multi_xor_violation`/`chain_orphans` run against real customer data where a childless chain-parent firing is genuine. Sibling of Gap I in symptom but the fix layer differs (I is a production-correct dataset fix). Keep a baseline `childless=0` guard.
 9. **Gap I (L2FT chain_orphans not fan_in-aware)** — pre-existing; the AB.4.8 dashboard-wiring step. Largest residual chain-orphan noise once Gap B cleared the template-as-child false positives.
 
 G and H share a root cause with the original wave: Template-parent / template-heavy L2 shapes weren't in the fixture set, so the AG fixes were validated against Rail-parent shapes and the Template-parent composition slipped through. A single "template-heavy L2" regression fixture (one template that is a chain parent, baseline-fired, AND a MultiXor plant target) would catch both G and H — worth adding upstream as a structural guard against this whole class. I is independent (a pre-AG dataset that never learned about fan-in); it's bundled here because it's the dominant residual now visible.
