@@ -183,6 +183,7 @@ _ACCOUNT_NETWORK_DESCRIPTION = (
 
 def _build_getting_started_sheet(
     cfg: Config, analysis: Analysis, *, theme: ThemePreset,
+    l2_instance: L2Instance,
 ) -> Sheet:
     """Getting Started — landing page with welcome + roadmap text boxes.
 
@@ -192,8 +193,27 @@ def _build_getting_started_sheet(
     text-box layout slot support) so subsequent sheet ports snap in.
 
     N.3.g: ``theme`` is the L2-resolved theme.
+
+    AO.3: the institution name in the welcome prose is config-driven —
+    read from the L2 ``persona:`` block's institution name when present,
+    else neutral (no bank name). Previously hardcoded, which leaked the
+    demo persona onto persona-neutral instances and read as a placeholder
+    on the examiner-facing AML landing.
     """
     accent = theme.accent
+
+    # AO.3 — institution name from the persona; neutral when absent.
+    persona = l2_instance.persona
+    institution_name = (
+        persona.institution[0]
+        if persona is not None and persona.institution
+        else None
+    )
+    ledger_phrase = (
+        f"the {institution_name} shared base ledger"
+        if institution_name
+        else "the shared base ledger"
+    )
 
     sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_INV_GETTING_STARTED,
@@ -217,8 +237,8 @@ def _build_getting_started_sheet(
                 rt.BR,
                 rt.BR,
                 rt.markdown(
-                    "Compliance / AML triage surface for the Sasquatch "
-                    "National Bank shared base ledger. Three question-shaped "
+                    f"Compliance / AML triage surface for {ledger_phrase}. "
+                    "Three question-shaped "
                     "sheets — recipient fanout, volume anomalies, and money "
                     "trail — each one drilling back into Account "
                     "Reconciliation or Payment Reconciliation for the row "
@@ -1072,7 +1092,9 @@ def build_investigation_app(
         analysis_id_suffix="investigation-analysis",
         name=analysis_name,
     ))
-    _build_getting_started_sheet(cfg, analysis, theme=theme)
+    _build_getting_started_sheet(
+        cfg, analysis, theme=theme, l2_instance=l2_instance,
+    )
     _build_recipient_fanout_sheet(cfg, app, analysis)
     _build_volume_anomalies_sheet(cfg, app, analysis)
     _build_money_trail_sheet(cfg, app, analysis)
