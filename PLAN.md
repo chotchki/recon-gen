@@ -299,7 +299,8 @@ The user's framing: "make that test general and do it for ANY yaml we're making 
       - [x] AI.2.b AI.2.b TransferTemplate transfer_key field (FieldSpec + create wiring)
       - [x] AI.2.c AI.2.c Top-level L2 editor for description + role_business_day_offsets (new singleton kind)
       - [ ] AI.2.d AI.2.d StudioEditorDriver verbs + create_l2(reference) bulk helper
-        - [ ] AI.2.d.1 AI.2.d.1 Protocol + HTTP transport + create_l2 bulk
+        - [ ] AI.2.d.1 AI.2.d.1 Protocol + HTTP transport + create_l2 bulk *(WIP — protocol + encoders + HTTP transport + create_l2 walk + build_editor_app shipped; rebuild round-trip blocked, see AI.2.d.1.a)*
+          - [ ] AI.2.d.1.a Defer-validation bulk-load path. The rebuild round-trip (`test_studio_editor_driver.py`, currently SKIPPED) surfaced that the editor runs full `validate()` after EACH create/save, so an incremental bulk rebuild hits invalid intermediate states (an AccountTemplate whose `parent_role` isn't yet on any Account → 400). Two candidate fixes: (1) a defer-validation bulk path that validates ONCE at the end; (2) a topological create order over the reference graph (parent-accounts → child-accounts → templates → rails → transfer_templates → chains → limits) IF every validator check is reference-resolution (no completeness checks on partial graphs). Spike (2) first — no editor-surface change; fall back to (1) if completeness checks fail on partial graphs. Un-skip the rebuild test once green.
         - [ ] AI.2.d.2 AI.2.d.2 Playwright transport (spec_example pass)
       - [x] AI.2.e AI.2.e Route diagram edit/add affordance to dedicated screens (drop inline-on-diagram editing)
     - [ ] AI.3 Test harness — `tests/e2e/test_studio_dogfood.py`. Parameterized over L2 yaml input:
@@ -353,6 +354,16 @@ The HTML surface is split across two styling systems: App2 dashboards + rich-tex
 - [ ] AM.2 Convert the diagram + Studio chrome (`studio-header`, nav, data-knob panel) to Tailwind; drop `diagram.css` rules.
 - [ ] AM.3 Verify: re-screenshot create / edit / diagram / dashboards before↔after for visual parity; AI dogfood + browser e2e stay green; output.css scan-scoping doesn't regress.
 - [ ] AM.4 Drop `editor.css` / `diagram.css` (or reduce to the irreducible non-utility remainder); update asset links; commit + Phase AM history one-liner.
+
+---
+
+## Phase AN — Supersession "Daily Balances Audit" empty (no superseded daily_balance entries) *(future — sequenced AFTER Phase AI, per user 2026-05-21)*
+
+Surfaced during the v11.9.3 dashboard sweep, *separate* from the App2 options-fetcher bug (that one — the blank pickers — shipped fixed in v11.9.4). The L1 Supersession sheet's "Daily Balances Audit" table reads `<prefix>_daily_balances` for logical keys `(account_id, business_day_start)` with >1 `entry` — superseded balance corrections (`build_supersession_daily_balances_dataset`). The seed plants a superseded *transaction* (`tx-supersedes-NNNN`, 1 row) but ZERO superseded *daily_balance* entries: confirmed `daily_balances.supersedes` is NULL across both spec_example + sasquatch_pr, so that table renders permanently empty. Violates the "every visual has non-empty data + a TestScenarioCoverage assertion" convention.
+
+- [ ] AN.1 Seed: plant a superseded daily_balance entry (a second `entry` row for an existing `(account_id, business_day_start)` carrying `supersedes='TechnicalCorrection'` + a corrected `money`), mirroring the `tx-supersedes-*` transaction plant. Deterministic; production-honest (a real balance-correction shape — never a demo-prefix filter on the dataset).
+- [ ] AN.2 Add a `TestScenarioCoverage` assertion (≥1 superseded daily_balance logical key) BEFORE re-locking — counts alone won't catch a future drop.
+- [ ] AN.3 Re-lock seeds (`recon-gen data lock` per dialect — the new row shifts the locked SQL), full suite + 4-way agreement green, commit + tag.
 
 ---
 
