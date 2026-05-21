@@ -246,6 +246,13 @@ rails:
     source_origin: InternalInitiated
     destination_origin: InternalInitiated
     metadata_keys: [disbursement_id]
+    # AL.6 (Gap J follow-up, v11.9.3) — high-volume operating-leg band.
+    # Paired with the new DisbursementFee [1,1] below: DisbursementCycle's
+    # two leg_rails are INDEPENDENT activities at DISTINCT firing volumes
+    # that merely settle into the same cycle, NOT one balanced atomic event.
+    # The v11.9.2 unit-firing leg-skip (keyed off chain-parenthood) collapsed
+    # both legs to one shared per-firing count; they must fire independently.
+    firings_typical_per_period: [4, 6]
 
   # The two XOR settlement vehicles — exactly ONE should follow each
   # DisbursementCycle firing (ACH transfer vs. paper check). Both are
@@ -265,6 +272,22 @@ rails:
     source_origin: InternalInitiated
     destination_origin: ExternalForcePosted
     metadata_keys: [disbursement_id]
+
+  # AL.6 (Gap J follow-up, v11.9.3) — a SECOND, low-volume leg_rail on the
+  # DisbursementCycle template. With DisbursementAccrual [4,6] it makes
+  # DisbursementCycle the regression shape: a chain-parent (multi-XOR),
+  # expected_net:0, MULTI-leg template with NO template-level E8 whose legs
+  # are INDEPENDENT events at distinct rail-E8 bands. They must keep their
+  # own per-rail volumes — the v11.9.2 leg-skip collapsed them to one shared
+  # per-firing count. Two-leg balanced (S2, template owns the net) like
+  # DisbursementAccrual so the cycle firing still reads 'Complete'.
+  - name: DisbursementFee
+    source_role: CustomerSubledger
+    destination_role: ClearingSuspense
+    source_origin: InternalInitiated
+    destination_origin: InternalInitiated
+    metadata_keys: [disbursement_id]
+    firings_typical_per_period: [1, 1]
 
   # AJ.4b (2026-05-20) — label-only internal balance-maintenance rail.
   # The seed's cascade-credit + opening-balance legs (demo scaffolding
@@ -378,12 +401,21 @@ transfer_templates:
   # Sorts AFTER BulkAccrualSettlement, so the AB.6.6 multi-XOR plant
   # picker still selects the Rail-parent chain (preserving that coverage);
   # this chain's Gap H surfaces purely from baseline broad-firing.
+  #
+  # AL.6 (Gap J follow-up, v11.9.3) — now carries a SECOND leg_rail
+  # (DisbursementFee). DisbursementAccrual [4,6] + DisbursementFee [1,1] are
+  # INDEPENDENT activities at distinct rail-E8 bands; because this template
+  # is a chain parent WITHOUT a template-level E8 opt-in, its legs must fire
+  # independently in the per-rail loop (keeping their distinct volumes), NOT
+  # collapse into one shared per-firing unit. The
+  # test_chain_parent_template_legs_keep_independent_counts guard pins it.
   - name: DisbursementCycle
     expected_net: 0
     transfer_key: [disbursement_id]
     completion: business_day_end+1d
     leg_rails:
       - DisbursementAccrual
+      - DisbursementFee
 
   # AL.1 (Gap J) — multi-1-leg-rail balanced template, NOT a chain parent.
   # firings_typical_per_period must drive a coupled unit-firing (AL.3);

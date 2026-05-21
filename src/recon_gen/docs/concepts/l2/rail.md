@@ -141,15 +141,26 @@ Two accepted YAML shapes:
   the band on the child rails the aggregator bundles instead.
 
 ``firings_typical_per_period`` is also valid on a **TransferTemplate**
-(W1a-b only — templates aren't aggregating rails). It drives a coupled
-**unit firing**: every firing emits all the template's leg_rails together
-as one balanced Transfer, at the declared per-period count. This works for
-ANY template that declares it — chain parents (which already fire as a
-unit via the chain machinery) AND standalone balanced multi-leg flows
-(e.g. a card-load = cardholder-credit + clearing-debit pair). A
-unit-firing template's leg_rails do NOT also fire independently in the
-per-rail loop — that would double-emit and uncouple the legs, ignoring the
-band and tripping false drift (Gap J).
+(W1a-b only — templates aren't aggregating rails). Declaring it is the
+explicit opt-in that drives a coupled **unit firing**: every firing emits
+all the template's leg_rails together as one balanced Transfer, at the
+declared per-period count, and those leg_rails do NOT also fire
+independently in the per-rail loop (that would double-emit + uncouple the
+legs, ignoring the band and tripping false drift — Gap J). Use it for a
+genuinely atomic multi-leg flow — e.g. a card-load = cardholder-credit +
+clearing-debit pair that is ONE event with two legs.
+
+**Coupling is gated on this declaration ALONE — never inferred from
+chain-parenthood (Gap J follow-up).** A template referenced as a Chain
+``parent`` also unit-fires (once per business day, so the chain overlay
+has a parent firing to thread children onto — AG.1), but if it does NOT
+declare ``firings_typical_per_period`` its leg_rails ALSO keep firing
+independently in the per-rail loop. That's deliberate: chain-parenthood is
+a linkage property, not a claim that the legs are one balanced event. A
+settlement-cycle template whose legs are independent activities (high-
+volume sales vs. occasional adjustments, each at its own rail-level band)
+must keep those distinct per-leg volumes — collapsing them into one shared
+per-firing count is exactly the v11.9.2 regression v11.9.3 fixes.
 
 Period-to-window conversion uses standard banking ratios: 5 business
 days/week, 10/pay-period (bi-weekly), 21/month. A window shorter than

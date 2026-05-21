@@ -1327,11 +1327,13 @@ def emit_baseline_seed(
         # emitters, which tag it explicitly.
         if str(rail.name) == _BALANCE_MAINTENANCE_RAIL:
             continue
-        # AL (Gap J): leg_rails of a unit-firing template (chain-parent OR
-        # E8-declaring) fire only as the balanced unit in
-        # _emit_baseline_template_firings — firing them standalone here too
-        # would double-emit + uncouple the legs (false drift / ignored E8
-        # band). Operator skip_rails / only_rails already handled above.
+        # AL (Gap J): leg_rails of a template that declares template-level
+        # E8 fire ONLY as the balanced unit in _emit_baseline_template_
+        # firings — firing them standalone here too would double-emit +
+        # uncouple the legs (false drift / ignored E8 band). Gated on
+        # template-E8 alone, NOT chain-parenthood: a chain-parent template
+        # without E8 has INDEPENDENT legs that must keep firing here (Gap J
+        # follow-up, v11.9.3). Operator skip_rails / only_rails handled above.
         if rail.name in unit_firing_legs:
             continue
         rail_rng = random.Random(_seed_for_rail(rail.name, effective_base_seed))
@@ -2880,11 +2882,18 @@ def _poisson_sample(rng: random.Random, mean: float) -> int:
 
 
 def _unit_firing_template_names(instance: L2Instance) -> set[Identifier]:
-    """AL (Gap J): templates that fire as a coupled UNIT — one shared
-    Transfer per firing, all leg_rails balanced — rather than leg-by-leg in
-    the per-rail loop. Two triggers: a template referenced as a Chain
-    ``parent`` (AG.1), OR a template that declares
-    ``firings_typical_per_period`` (template-level E8)."""
+    """Templates that emit a coupled UNIT firing — one shared Transfer per
+    firing carrying all leg_rails — in ``_emit_baseline_template_firings``.
+    Two triggers: a template referenced as a Chain ``parent`` (AG.1 — the
+    parent firing the chain overlay threads children onto), OR a template
+    declaring ``firings_typical_per_period`` (template-level E8).
+
+    NOTE the asymmetry with ``_unit_firing_leg_rails`` (the per-rail-loop
+    SKIP set): that's gated on template-E8 ALONE. A chain-parent template
+    without template-E8 unit-fires HERE (for linkage) yet its legs ALSO
+    fire independently in the per-rail loop — chain-parenthood is a linkage
+    property, not a 'these legs are one balanced event' claim (Gap J
+    follow-up, v11.9.3)."""
     tmpl_names = {t.name for t in instance.transfer_templates}
     names: set[Identifier] = {
         chain.parent for chain in instance.chains
@@ -2898,13 +2907,21 @@ def _unit_firing_template_names(instance: L2Instance) -> set[Identifier]:
 
 
 def _unit_firing_leg_rails(instance: L2Instance) -> set[Identifier]:
-    """The leg_rails of every unit-firing template (see
-    ``_unit_firing_template_names``) — the baseline per-rail loop skips
-    these so they fire only as part of the balanced unit firing."""
-    by_name = {t.name: t for t in instance.transfer_templates}
+    """The leg_rails the baseline per-rail loop SKIPS — they fire ONLY as
+    part of a coupled unit firing. Gated on template-level E8
+    (``firings_typical_per_period``) opt-in, NOT chain-parenthood: a
+    template's legs are a single balanced atomic event only when it
+    explicitly declares the E8 band. A chain-parent template WITHOUT
+    template-E8 still unit-fires for AG.1 chain linkage (see
+    ``_unit_firing_template_names``), but its leg_rails are INDEPENDENT
+    events (distinct per-leg volumes / amounts) that must keep firing in
+    the per-rail loop — keying the skip off chain-parenthood collapsed
+    those independent volumes into one shared per-firing count (Gap J
+    follow-up, v11.9.3)."""
     legs: set[Identifier] = set()
-    for name in _unit_firing_template_names(instance):
-        legs.update(by_name[name].leg_rails)
+    for t in instance.transfer_templates:
+        if t.firings_typical_per_period is not None:
+            legs.update(t.leg_rails)
     return legs
 
 
@@ -2921,7 +2938,10 @@ def _emit_baseline_template_firings(
     """AG.1 (Gap B) + AL (Gap J): emit balanced UNIT firings for every
     unit-firing TransferTemplate — Chain parents AND templates declaring
     ``firings_typical_per_period`` (``_unit_firing_template_names``). The
-    per-rail loop skips their leg_rails, so the legs fire only here.
+    per-rail loop skips the leg_rails of E8-declaring templates only
+    (``_unit_firing_leg_rails``), so those fire solely here; a chain-parent
+    template without E8 also unit-fires here for linkage but its legs fire
+    independently in the per-rail loop too (Gap J follow-up, v11.9.3).
 
     Templates don't have their own R.2.b firing loop — leg_rails fire
     independently in ``_emit_baseline_for_rail`` and groupings happen at

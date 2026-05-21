@@ -263,6 +263,44 @@ def test_multi_leg_template_e8_fires_as_coupled_unit() -> None:
     )
 
 
+def test_chain_parent_template_legs_keep_independent_counts() -> None:
+    """AL.6 (Gap J follow-up, v11.9.3): a chain-parent template WITHOUT a
+    template-level `firings_typical_per_period` has INDEPENDENT legs — they
+    must keep their distinct per-leg rail-E8 volumes, NOT collapse to one
+    shared per-firing count.
+
+    spec_example's `DisbursementCycle` is a multi-XOR chain parent with no
+    template-E8; its two leg_rails carry deliberately different rail-E8
+    bands — `DisbursementAccrual` [4,6] vs `DisbursementFee` [1,1]. The
+    v11.9.2 AL leg-skip keyed off chain-parenthood, so BOTH legs were
+    skipped from the per-rail loop and fired ONLY as the 1/business-day unit
+    firing → equal counts (collapsed). v11.9.3 gates the skip on template-E8
+    alone, so the legs fire independently at their own bands →
+    DisbursementAccrual fires several times more than DisbursementFee. RED
+    (counts ~equal) → GREEN. Complement of
+    test_multi_leg_template_e8_fires_as_coupled_unit (the E8 template that
+    SHOULD couple). spec_example-only; non-densified is enough (the per-rail
+    loop is a baseline path).
+    """
+    _inst, cur = _seed_refresh(_SPEC_EXAMPLE, "spec_example")
+    accrual = cur.execute(
+        "SELECT COUNT(*) FROM spec_example_transactions "
+        "WHERE rail_name = 'DisbursementAccrual'"
+    ).fetchone()[0]
+    fee = cur.execute(
+        "SELECT COUNT(*) FROM spec_example_transactions "
+        "WHERE rail_name = 'DisbursementFee'"
+    ).fetchone()[0]
+    assert accrual > fee * 2, (
+        f"DisbursementCycle's two leg_rails collapsed to a shared per-firing "
+        f"count (DisbursementAccrual={accrual}, DisbursementFee={fee}) — the "
+        f"chain-parent unit-firing leg-skip swallowed their independent "
+        f"per-rail volumes (Gap J follow-up / v11.9.3). With the skip gated "
+        f"on template-E8 only, the [4,6] accrual leg must fire well above the "
+        f"[1,1] fee leg."
+    )
+
+
 # -- Gap I (AJ.4): fan_in chains are not orphans (RED) -----------------------
 
 

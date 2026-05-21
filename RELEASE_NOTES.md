@@ -1,5 +1,36 @@
 # Release Notes
 
+## v11.9.3 — Gap J follow-up: unit-firing leg-skip gated on template-E8 only
+
+v11.9.2's leg-skip was too broad. AL skipped the leg_rails of every unit-firing
+template from the per-rail loop, but a template counts as unit-firing if it's a
+Chain `parent` OR declares `firings_typical_per_period`. For a chain-parent
+template whose legs are INDEPENDENT events — a settlement-cycle whose legs are
+unrelated activities (high-volume sales vs. occasional adjustments) that merely
+settle into the same cycle, not one balanced atomic event — that collapsed both
+legs to one shared per-firing count + amount: independent per-leg volumes
+vanished (every leg shared the firing count) and per-leg amounts collapsed (a $5
+sale ⇒ a simultaneous $5 adjustment).
+
+Root cause: chain-parenthood was being treated as "balanced unit." It isn't — a
+template is referenced as a chain parent for linkage, which says nothing about
+whether its legs are one balanced event. Fix: the per-rail-loop leg-skip
+(`_unit_firing_leg_rails`) now gates on template-level E8 declaration ALONE, not
+chain-parenthood:
+
+- Template declares template-E8 → coupled unit-fire + skip its legs (the Gap J
+  win, preserved — `CardLoadCycle` still couples).
+- Chain-parent template without template-E8 → unit-fires 1/day for AG.1 chain
+  linkage, but its legs ALSO fire independently in the per-rail loop, keeping
+  their distinct per-rail volumes (the pre-Gap-J behavior).
+
+Regression guard: spec_example's `DisbursementCycle` (a multi-XOR chain parent,
+no template-E8) now carries two leg_rails at distinct rail-E8 bands —
+`DisbursementAccrual` [4,6] vs the new `DisbursementFee` [1,1];
+`test_chain_parent_template_legs_keep_independent_counts` asserts they keep
+distinct firing counts (collapsed → equal = RED; independent → ~3× apart =
+GREEN). spec_example seeds re-locked (×3). No grammar / API change.
+
 ## v11.9.2 — Gap J: template-level `firings_typical_per_period` drives a coupled unit-firing
 
 `firings_typical_per_period` on a **TransferTemplate** now drives a coupled UNIT firing
