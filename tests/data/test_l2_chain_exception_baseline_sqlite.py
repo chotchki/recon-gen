@@ -232,6 +232,37 @@ def test_broad_rail_coverage_firings_are_chain_complete(
     )
 
 
+# -- Gap J (AL): template-level firings_typical_per_period (RED) -------------
+
+
+def test_multi_leg_template_e8_fires_as_coupled_unit() -> None:
+    """AL (Gap J): a multi-1-leg-rail `expected_net=0` template that
+    declares `firings_typical_per_period` but is NOT a chain parent must
+    fire as a coupled UNIT — both legs sharing one Transfer per firing.
+
+    spec_example's `CardLoadCycle` (`CardLoadCardholderCredit` +
+    `CardLoadSweepDebit`) is the broken case. Pre-AL.3 the legs fire only
+    via the per-rail loop — each with its own `transfer_id`, never paired
+    — so the template's E8 band is ignored and the flow can't be scaled
+    as a unit. RED: zero Transfers carry both legs. AL.3 (template-level
+    E8 → unit-firing for any E8-declaring template + per-rail loop skips
+    its legs) pairs them → GREEN. spec_example-only (the fixture lives
+    there); non-densified is enough (the unit-firing is a baseline path).
+    """
+    _inst, cur = _seed_refresh(_SPEC_EXAMPLE, "spec_example")
+    paired = cur.execute(
+        "SELECT transfer_id FROM spec_example_transactions "
+        "WHERE rail_name IN ('CardLoadCardholderCredit', 'CardLoadSweepDebit') "
+        "GROUP BY transfer_id HAVING COUNT(DISTINCT rail_name) = 2"
+    ).fetchall()
+    assert paired, (
+        "CardLoadCycle's two SingleLegRail legs never share a Transfer — "
+        "template-level firings_typical_per_period didn't drive a coupled "
+        "unit-firing (Gap J / AL.3); the legs only fired standalone via the "
+        "per-rail loop."
+    )
+
+
 # -- Gap I (AJ.4): fan_in chains are not orphans (RED) -----------------------
 
 

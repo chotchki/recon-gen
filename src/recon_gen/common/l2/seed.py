@@ -1306,6 +1306,7 @@ def emit_baseline_seed(
     # (R.2.c) which knows about the children-first / EOD-bundling pattern.
     txn_rows: list[str] = list(opening_rows)
     txn_counter = _Counter(start=1)
+    unit_firing_legs = _unit_firing_leg_rails(instance)
     for rail in sorted(instance.rails, key=lambda r: str(r.name)):
         # X.4.g.10 — operator's external data already covers this rail;
         # skip its baseline emit so we don't duplicate transactions.
@@ -1325,6 +1326,13 @@ def emit_baseline_seed(
         # show false drift). Its only legs come from the cascade + opening
         # emitters, which tag it explicitly.
         if str(rail.name) == _BALANCE_MAINTENANCE_RAIL:
+            continue
+        # AL (Gap J): leg_rails of a unit-firing template (chain-parent OR
+        # E8-declaring) fire only as the balanced unit in
+        # _emit_baseline_template_firings — firing them standalone here too
+        # would double-emit + uncouple the legs (false drift / ignored E8
+        # band). Operator skip_rails / only_rails already handled above.
+        if rail.name in unit_firing_legs:
             continue
         rail_rng = random.Random(_seed_for_rail(rail.name, effective_base_seed))
         if rail.aggregating:
@@ -1351,6 +1359,7 @@ def emit_baseline_seed(
     template_firing_rows = _emit_baseline_template_firings(
         instance, state, txn_counter, dialect,
         base_seed=effective_base_seed,
+        skip_rails=skip_rails, only_rails=only_rails,
     )
     txn_rows.extend(template_firing_rows)
 
@@ -2870,6 +2879,35 @@ def _poisson_sample(rng: random.Random, mean: float) -> int:
             return k - 1
 
 
+def _unit_firing_template_names(instance: L2Instance) -> set[Identifier]:
+    """AL (Gap J): templates that fire as a coupled UNIT — one shared
+    Transfer per firing, all leg_rails balanced — rather than leg-by-leg in
+    the per-rail loop. Two triggers: a template referenced as a Chain
+    ``parent`` (AG.1), OR a template that declares
+    ``firings_typical_per_period`` (template-level E8)."""
+    tmpl_names = {t.name for t in instance.transfer_templates}
+    names: set[Identifier] = {
+        chain.parent for chain in instance.chains
+        if chain.parent in tmpl_names
+    }
+    names.update(
+        t.name for t in instance.transfer_templates
+        if t.firings_typical_per_period is not None
+    )
+    return names
+
+
+def _unit_firing_leg_rails(instance: L2Instance) -> set[Identifier]:
+    """The leg_rails of every unit-firing template (see
+    ``_unit_firing_template_names``) — the baseline per-rail loop skips
+    these so they fire only as part of the balanced unit firing."""
+    by_name = {t.name: t for t in instance.transfer_templates}
+    legs: set[Identifier] = set()
+    for name in _unit_firing_template_names(instance):
+        legs.update(by_name[name].leg_rails)
+    return legs
+
+
 def _emit_baseline_template_firings(
     instance: L2Instance,
     state: _BaselineState,
@@ -2877,9 +2915,13 @@ def _emit_baseline_template_firings(
     dialect: Dialect,
     *,
     base_seed: int = _BASELINE_BASE_SEED,
+    skip_rails: frozenset[Identifier] = frozenset(),
+    only_rails: frozenset[Identifier] | None = None,
 ) -> list[str]:
-    """AG.1 (Gap B): emit baseline firings for TransferTemplates that are
-    referenced as Chain parents.
+    """AG.1 (Gap B) + AL (Gap J): emit balanced UNIT firings for every
+    unit-firing TransferTemplate — Chain parents AND templates declaring
+    ``firings_typical_per_period`` (``_unit_firing_template_names``). The
+    per-rail loop skips their leg_rails, so the legs fire only here.
 
     Templates don't have their own R.2.b firing loop — leg_rails fire
     independently in ``_emit_baseline_for_rail`` and groupings happen at
@@ -2919,34 +2961,31 @@ def _emit_baseline_template_firings(
     they emit via ``_emit_chain_child_template_legs`` during
     ``_emit_baseline_chains`` with ``parent_transfer_id`` set correctly.
     """
-    if not instance.chains or not instance.transfer_templates:
+    if not instance.transfer_templates:
         return []
 
     templates_by_name = {t.name: t for t in instance.transfer_templates}
-    parent_template_names: set[Identifier] = set()
-    for chain in instance.chains:
-        if chain.parent in templates_by_name:
-            parent_template_names.add(chain.parent)
-    if not parent_template_names:
+    unit_firing_templates = _unit_firing_template_names(instance)
+    if not unit_firing_templates:
         return []
 
     rails_by_name = {r.name: r for r in instance.rails}
     rows: list[str] = []
 
-    for tmpl_name in sorted(parent_template_names, key=str):
+    for tmpl_name in sorted(unit_firing_templates, key=str):
         template = templates_by_name[tmpl_name]
         if not template.leg_rails:
             continue
         first_leg = rails_by_name.get(template.leg_rails[0])
         if first_leg is None:
             continue
-        # Honor skip_rails + only_rails (X.4.g.10 / X.4.i.1) transparently:
-        # if the first leg_rail didn't fire in the rail loop (because it
-        # was filtered out), state.firings is empty for it and the
-        # template can't fire as a unit either. Same "naturally produces
-        # nothing downstream" pattern the rail loop relies on for chains
-        # + cascade credits + daily balances.
-        if not state.firings.get(first_leg.name):
+        # AL (Gap J): the per-rail loop now skips unit-firing-template legs
+        # (they fire only as this unit), so "did the first leg fire in the
+        # rail loop?" is no longer a valid operator-filter proxy — honor
+        # skip_rails / only_rails (X.4.g.10 / X.4.i.1) directly instead.
+        if first_leg.name in skip_rails:
+            continue
+        if only_rails is not None and first_leg.name not in only_rails:
             continue
 
         kind = _classify_rail(first_leg)

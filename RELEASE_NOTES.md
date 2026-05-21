@@ -1,5 +1,19 @@
 # Release Notes
 
+## v11.9.2 — Gap J: template-level `firings_typical_per_period` drives a coupled unit-firing
+
+`firings_typical_per_period` on a **TransferTemplate** now drives a coupled UNIT firing
+for ANY template that declares it — every firing emits all the template's leg_rails
+together as one balanced Transfer at the declared per-period count. Previously it was
+honored only for chain-parent templates; a standalone balanced multi-leg flow (≥2
+SingleLegRails, `expected_net=0`) modeled as a template had no firing path but the
+per-rail loop, which fired each leg independently with its own count → diverging legs →
+imbalanced Transfer → false `ledger_drift`, with no lever to scale the flow. The baseline
+per-rail loop now SKIPS the leg_rails of any unit-firing template — which also tidies a
+latent double-emit (chain-parent template legs previously fired in both the per-rail loop
+AND the unit firing). New densified RED→GREEN structural guard (`CardLoadCycle`);
+spec_example seeds re-locked (×3). No new YAML field — reuses the AF.7 Studio card.
+
 ## v11.9.1 — QuickSight dataset-parameter UUIDs (AK) + Gap H broad-rail residual (AJ.6)
 
 Two follow-on fixes on top of v11.9.0, both surfaced by post-release

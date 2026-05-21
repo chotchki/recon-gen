@@ -141,10 +141,15 @@ Two accepted YAML shapes:
   the band on the child rails the aggregator bundles instead.
 
 ``firings_typical_per_period`` is also valid on a **TransferTemplate**
-(W1a-b only — templates aren't aggregating rails). It's honored when
-the template is a chain parent (the template fires as a unit via the
-chain machinery); a template that never appears as a chain parent
-doesn't fire as a unit at baseline, so the field is inert there.
+(W1a-b only — templates aren't aggregating rails). It drives a coupled
+**unit firing**: every firing emits all the template's leg_rails together
+as one balanced Transfer, at the declared per-period count. This works for
+ANY template that declares it — chain parents (which already fire as a
+unit via the chain machinery) AND standalone balanced multi-leg flows
+(e.g. a card-load = cardholder-credit + clearing-debit pair). A
+unit-firing template's leg_rails do NOT also fire independently in the
+per-rail loop — that would double-emit and uncouple the legs, ignoring the
+band and tripping false drift (Gap J).
 
 Period-to-window conversion uses standard banking ratios: 5 business
 days/week, 10/pay-period (bi-weekly), 21/month. A window shorter than

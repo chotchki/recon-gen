@@ -285,6 +285,24 @@ rails:
     destination_origin: InternalInitiated
     metadata_keys: [source_transfer_id]
 
+  # AL.1 (Gap J) — a balanced 2-SingleLegRail flow joined by CardLoadCycle
+  # below (which is NOT a chain parent). The legs net to zero per firing
+  # (cardholder credit + clearing-suspense debit). This is the broken case
+  # for template-level firings_typical_per_period: pre-AL.3 the legs only
+  # fire via the per-rail loop (each its own transfer_id, uncoupled), so
+  # CardLoadCycle's E8 band is ignored. AL.3 makes the unit-firing honor it.
+  - name: CardLoadCardholderCredit
+    leg_role: CustomerSubledger
+    leg_direction: Credit
+    origin: InternalInitiated
+    metadata_keys: [card_load_id]
+
+  - name: CardLoadSweepDebit
+    leg_role: ClearingSuspense
+    leg_direction: Debit
+    origin: InternalInitiated
+    metadata_keys: [card_load_id]
+
 transfer_templates:
   - name: MerchantSettlementCycle
     expected_net: 0
@@ -366,6 +384,23 @@ transfer_templates:
     completion: business_day_end+1d
     leg_rails:
       - DisbursementAccrual
+
+  # AL.1 (Gap J) — multi-1-leg-rail balanced template, NOT a chain parent.
+  # firings_typical_per_period must drive a coupled unit-firing (AL.3);
+  # pre-fix the legs fire independently via the per-rail loop and the band
+  # is ignored. The week band is far from the per-business-day per-rail
+  # heuristic, so the coupling RED→GREEN (legs sharing one Transfer) is
+  # unambiguous.
+  - name: CardLoadCycle
+    expected_net: 0
+    transfer_key: [card_load_id]
+    completion: business_day_end+1d
+    leg_rails:
+      - CardLoadCardholderCredit
+      - CardLoadSweepDebit
+    firings_typical_per_period:
+      period: week
+      range: [1, 2]
 
 chains:
   # First chain on spec_example — makes the L2FT Chains sheet

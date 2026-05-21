@@ -78,6 +78,8 @@ Third supported dialect alongside Postgres + Oracle. Schema emit, matview-as-tab
 
 **Scope:**
 
+- [ ] AD.0 Phase AD
+  - [ ] AD.G AD.G CI derives the QS principal ARN from quicksight:ListUsers (pick the ADMIN user) instead of the static RECON_E2E_USER_ARN GitHub secret — so a QS-subscription recreate (à la Phase AD) doesn't silently red the e2e + release pipelines. This was the v11.9.0 release-blocker root cause (secret pointed at the deleted Enterprise-era user). Per feedback_no_credential_friction: a stored-ARN secret is automation backlog. See memory project_qs_e2e_user_arn ("CI uses a stale-prone static secret").
 - [x] AK.0 AK.0 QS dataset-parameter GUIDs are shape-only, not valid → QS fails to load
   - [x] AK.1 AK.1 build_dataset derives dataset-param Id via auto_id(dataset_id:dsparam:Name); drop hardcoded _DSP_ID_* constants (l2ft/inv/l1/exec)
   - [x] AK.2 AK.2 Regenerate bundled tests/json fixtures (param Ids shifted) + add test: every dataset-param Id is a valid UUID + unique across an analysis's datasets
@@ -337,6 +339,21 @@ Source: `SPEC_gap_feedback.md` Gaps G–I, surfaced by post-AG integration re-te
 - [x] AJ.6 Gap H broad-rail residual — broad-mode RAIL coverage firings of a multi-XOR chain parent were childless (the rail picker skips multi-XOR chains), false-positiving in `multi_xor_violation`. Complete them via `_emit_plant_chain_completion` (matched by `rail.name` OR `template_name`). The broad tt firing-1/2/3 demo (overlap/missed/complete for the tt-instances explorer) is INTENTIONAL — left intact.
   - [x] AJ.6.1 Rail completion: `multi_children_only` (skip single-child chains the picker already links) + `via_template_name` (template-parented chains like DisbursementCycle); revert the tt completion (intentional demo); pyright clean.
   - [x] AJ.6.2 Densified RED→GREEN structural guard (no childless `tr-rail` in `multi_xor_violation`) + re-lock spec_example seeds (×3 dialects) + full suite + commit.
+
+---
+
+## Phase AL — Gap J: template-level `firings_typical_per_period` (E8)
+
+Source: `SPEC_gap_feedback.md` Implementation Gap J. E8 (the Phase AF per-period firing-count knob) is unusable for an atomic balanced multi-leg flow modeled as ≥2 SingleLegRails joined in a TransferTemplate with `expected_net = 0`: the only firing path for such a template is the per-rail loop, which fires each leg independently with its own RNG-sampled count → declaring E8 diverges the legs → the shared Transfer imbalances → false `ledger_drift`. No lever to scale the flow as a coupled unit.
+
+Locked approach (user, 2026-05-21): **template-level E8**. `firings_typical_per_period` on a TransferTemplate drives a coupled unit-firing for ANY template that declares it (not just chain-parent templates); the per-rail loop SKIPS leg_rails of any unit-firing template (no double-emit, no divergence); validator W1 accepts E8 on a TransferTemplate. Also tidies the latent chain-parent-template-leg double-emit (legs currently fire in BOTH the per-rail loop AND the unit firing). Fixture-first TDD.
+
+- [x] AL.0 Spike/confirm: (a) does the baseline double-emit chain-parent template legs today (per-rail loop @ `seed.py` ~1309 + unit-firing helper @ ~2890), and does it currently cause drift? (b) lock "unit-firing template" = chain-parent OR E8-declaring (`expected_net = 0`); (c) fixture shape (a ≥2-SingleLegRail `expected_net=0` template in `spec_example`).
+- [x] AL.1 Fixture-first: add a multi-1-leg-rail `expected_net = 0` template (E8 declared) to `spec_example`; RED test asserting the legs fire coupled (matched per-period count, no `ledger_drift`).
+- [x] AL.2 Validator W1: accept `firings_typical_per_period` on TransferTemplate (today rails-only); resolve the W1c (aggregating) interaction.
+- [x] AL.3 seed.py: run the unit-firing helper for every E8-carrying template (not just chain parents); per-rail loop skips leg_rails of any unit-firing template (kills the double-emit + the divergence).
+- [x] AL.4 Tests green (validator + seed coupled-count + AL.1 RED→GREEN); confirm the chain-parent double-emit is tidied (inspect seed delta).
+- [x] AL.5 Re-lock seeds (×3) + full suite + docs (E8-on-template in rail.md / Schema_v6 + SPEC marker) + commit.
 
 ---
 
