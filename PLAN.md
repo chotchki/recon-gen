@@ -298,7 +298,7 @@ The user's framing: "make that test general and do it for ANY yaml we're making 
       - [ ] AI.2.b AI.2.b TransferTemplate transfer_key field (FieldSpec + create wiring)
       - [ ] AI.2.c AI.2.c Top-level L2 editor for description + role_business_day_offsets (new singleton kind)
       - [ ] AI.2.d AI.2.d StudioEditorDriver verbs + create_l2(reference) bulk helper
-      - [ ] AI.2.e AI.2.e Route diagram edit/add affordance to dedicated screens (drop inline-on-diagram editing)
+      - [x] AI.2.e AI.2.e Route diagram edit/add affordance to dedicated screens (drop inline-on-diagram editing)
     - [ ] AI.3 Test harness — `tests/e2e/test_studio_dogfood.py`. Parameterized over L2 yaml input:
       ```python
       @pytest.mark.parametrize("l2_source", [
@@ -339,6 +339,20 @@ Source: `SPEC_gap_feedback.md` Gaps G–I, surfaced by post-AG integration re-te
 
 ---
 
+## Phase AM — Standardize the Studio + editor surface on Tailwind *(future — sequenced AFTER Phase AI)*
+
+The HTML surface is split across two styling systems: App2 dashboards + rich-text render via Tailwind utilities (`output.css`), but the Studio editor + diagram pages are styled by hand-written `editor.css` + `diagram.css` (semantic classes — `.create-page`, `.studio-header`, `.create-form`, …). Standardize the whole surface on Tailwind so there's ONE system (no drift between two CSS approaches; the editor screens already LOAD `output.css`, so the utilities are right there).
+
+**Sequenced after Phase AI deliberately** (user, 2026-05-21): the AI dogfood round-trip (structural + dashboard-equivalence, browser-driven) pins the editor's behavior + emitted HTML structure, so the CSS refactor lands with a regression safety net and doesn't churn the editor markup mid-test-build.
+
+- [ ] AM.0 Audit + spike: inventory every hand-written class in `editor.css` + `diagram.css`; map each to a Tailwind utility set (or an `@apply` component class). Lock utility-inline vs `@apply`-component (lean: `@apply` for repeated structures like `.create-form`, inline utilities for one-offs). Spike the Tailwind build + scan-scoping so `output.css` covers the `_studio_assets` templates (ties to AH.9 / #176 output.css scan-scoping).
+- [ ] AM.1 Convert the editor screens (create / edit / list / singleton / read-card) to Tailwind; drop the `editor.css` rules they replace. **Fold in the AI.2.e part-2 stretch** — richer subtype-aware per-field requirement hints beyond the existing `*` markers + entity intro (e.g. a subtype requirements banner on the rail form).
+- [ ] AM.2 Convert the diagram + Studio chrome (`studio-header`, nav, data-knob panel) to Tailwind; drop `diagram.css` rules.
+- [ ] AM.3 Verify: re-screenshot create / edit / diagram / dashboards before↔after for visual parity; AI dogfood + browser e2e stay green; output.css scan-scoping doesn't regress.
+- [ ] AM.4 Drop `editor.css` / `diagram.css` (or reduce to the irreducible non-utility remainder); update asset links; commit + Phase AM history one-liner.
+
+---
+
 ## Phase Q (continued) — CLI / YAML ergonomics
 
 The standing "Phase Q" thread (Q.1–Q.5 + Q.3.a shipped; see Phase history). What's still open: the CLI-shape revisit below, plus the older "schema ergonomics around the L2 yaml" item (task #488 — fold into Q.6's spike or its own sub-item when scoped). Queues behind Phase X.
@@ -359,8 +373,8 @@ Spike-before-implement (per `feedback_spike_before_locking_implementation.md`):
 this is a CLI-surface change touching every operator command + every doc
 example + tests. Wrong factoring locks in for years.
 
-    - [ ] Q.6 CLI shape revisit: cfg ⇄ L2 dual-yaml factoring
-      - [>] Q.6.0 SPIKE: combined-yaml vs cfg-with-L2-pointer vs status-quo
+  - [ ] Q.6 CLI shape revisit: cfg ⇄ L2 dual-yaml factoring
+    - [>] Q.6.0 SPIKE: combined-yaml vs cfg-with-L2-pointer vs status-quo
   (LOCKED 2026-05-08; spike before Q.6.1).** Output `docs/audits/y_11_cli_shape_spike.md`.
   Compare the candidate factorings against today's two-yaml shape:
 
@@ -406,16 +420,16 @@ example + tests. Wrong factoring locks in for years.
   **Likely outcome (to validate in spike):** A or D. A is the smallest delta;
   D is the cleanest if multi-L2-per-cfg becomes common.
 
-      - [ ] Q.6.1 Implement per spike result. Updates touch `cli/json.py`,
+    - [ ] Q.6.1 Implement per spike result. Updates touch `cli/json.py`,
   `cli/schema.py`, `cli/data.py`, `cli/audit.py`, `cli/_helpers.py::resolve_l2_for_demo`,
   every CLAUDE.md / README / handbook example, every test that invokes
   `runner.invoke([...,"--l2",...])`, and every CI workflow YAML that uses
   `--l2`. Migration warning for at least one minor version.
-      - [ ] Q.6.2 Sweep memory entries + docs for stale `--l2 <yaml>` references.
-      - [ ] Q.6.3 Update CLAUDE.md "Commands" block to show the new shape as
+    - [ ] Q.6.2 Sweep memory entries + docs for stale `--l2 <yaml>` references.
+    - [ ] Q.6.3 Update CLAUDE.md "Commands" block to show the new shape as
   canonical; keep the explicit `--l2` form as the "multi-instance / explicit
   override" sub-pattern.
-      - [>] Q.6.4 Bump version (breaking CLI change — post-v9.0.0) + RELEASE_NOTES
+    - [>] Q.6.4 Bump version (breaking CLI change — post-v9.0.0) + RELEASE_NOTES
   entry highlighting the simplification + migration recipe.**
 
 ---
@@ -451,9 +465,9 @@ Backlog beyond Phase X. Promote to a numbered phase entry when scope justifies i
 - **Encode more invariants in the type system.** K.2 did this for drill-param shape compatibility; Phase L's tree primitives close another big chunk. What remains after L is the candidate list for the next round.
 - ~~**Fold the biome JS lint into the test runner, like pyright.**~~ *(done, 2026-05-12.)* `conftest.py::pytest_sessionstart` now runs `biome check --max-diagnostics=400` alongside the pyright gate — `biome check` exits non-zero on lint *errors* (e.g. `noInnerDeclarations`) and zero on warnings, so the gate fires before any test collects (`pytest.exit(returncode=2)`); opt out with `QS_GEN_SKIP_BIOME=1`. `biome` is a standalone Rust binary (brew locally; `biomejs/setup-biome@v2` in CI), not an npm/pip package — when it's not on `PATH` the gate skips cleanly (same posture pyright has if it's missing). Bare `pytest tests/`, `./run_tests.sh up_to=unit`, and `ci.yml::test` all enforce it. (Why not a `[dev]` dep like `pyright` / `pytailwindcss`? The Biome project hasn't published an *official* PyPI package yet — in flight at biomejs/biome#8818. The unofficial `biome-js` wrapper bundles the Rust binary like `ruff` does, but ships only a `manylinux_2_28_x86_64` wheel — no macOS / arm64 / sdist, and it's a stale single release on Biome 2.3.x — so adding it would break `uv sync --extra dev` off linux-x86_64. Biome therefore stays a system binary; the `[dev]` block carries a NB comment recording this + a "revisit when biomejs/biome#8818 merges" pointer. `dev_setup`: `brew install biome`, or any of biome's install methods. **Follow-on when biomejs/biome#8818 lands:** add the official package to `[dev]`, drop the `setup-biome` CI step + the system-binary fallback in conftest / install.md.)
 - **Drop `_oracle_lowercase_alias_wrapper`; emit dialect-natural identifier case from the generator** (was Y.3.f, parked 2026-05-09). DDL is emitted unquoted (PG folds lowercase, Oracle UPPERCASE → divergent storage); `_oracle_lowercase_alias_wrapper` (`common/dataset_contract.py`) bolts an outer `SELECT qs_inner."ACCOUNT_ID" AS "account_id" ...` so QuickSight (which builds `SELECT "account_id" FROM (...)` from its declared lowercase Columns) finds matching aliases. The proper fix — generator emits dialect-natural case in `DatasetContract.to_input_columns()`, QS quotes UPPERCASE on Oracle natively, wrapper gone — is bigger than it looks: QuickSight's analysis-side validation is *case-sensitive* against `Dataset.Columns` (Y.3.f.2's reverted Oracle-deploy probe surfaced 45 column-missing errors), so it requires case-folding ~30+ analysis-side column refs per dialect (visuals / filters / calc-fields / drills), not just the Columns declaration. The original App2 Oracle column-casing bug it would have fixed was instead fixed narrowly by Y.3.f.alt (`wrap_for_visual` quotes its column refs). Re-spike if the dialect-helper count grows past ~60, or if SQLite gets dropped from the matrix. See `project_qs_analysis_validates_columns_case_sensitive` memory.
-    - [ ] Post.0 X.2 App 2 polish (queued — not part of phase X scope)
-      - [ ] X.2.dashboards.1 Dashboards-local L1 dashboard render errors (surfaced 2026-05-10, X.2.g.4 territory, NOT a Y.2.g regression). With the Y.2.g.2.d pool-lifespan fix landed, `dashboards --app l1_dashboard` now starts cleanly + the drift KPI fetches data from the live matview, but other L1 visuals throw render errors in Dashboards (operator observed during the manual local pass; smoke + drift KPI work, broader rendering doesn't). This is per-visual coverage in `_tree_fetcher` / `wrap_for_visual` — investigation/L2FT shipped via X.2.g.{2,3} with the same pattern, so the gap is L1-specific visual kinds the renderer hasn't grown arms for yet (KPIs work, tables / line-charts may not). Triage: capture the failing visual_ids + the renderer error, extend `_tree_fetcher.wrap_for_visual` with the missing arms, mirror the Investigation/L2FT shape. Out of Y.2.g scope (Dashboards visual coverage ≠ pushdown SQL); on the X.2.g roadmap.
-      - [ ] X.7.cleanup.1 CI/release cleanup steps target the wrong scope — `database-2` + QS leak (captured 2026-05-10; non-trivial, pick a fix before doing). Three related bugs, all "the cleanup ran but cleaned the wrong thing", all harmless functionally (no impact on the release publishing / e2e passing) but they leak resources:
+  - [ ] Post.0 X.2 App 2 polish (queued — not part of phase X scope)
+    - [ ] X.2.dashboards.1 Dashboards-local L1 dashboard render errors (surfaced 2026-05-10, X.2.g.4 territory, NOT a Y.2.g regression). With the Y.2.g.2.d pool-lifespan fix landed, `dashboards --app l1_dashboard` now starts cleanly + the drift KPI fetches data from the live matview, but other L1 visuals throw render errors in Dashboards (operator observed during the manual local pass; smoke + drift KPI work, broader rendering doesn't). This is per-visual coverage in `_tree_fetcher` / `wrap_for_visual` — investigation/L2FT shipped via X.2.g.{2,3} with the same pattern, so the gap is L1-specific visual kinds the renderer hasn't grown arms for yet (KPIs work, tables / line-charts may not). Triage: capture the failing visual_ids + the renderer error, extend `_tree_fetcher.wrap_for_visual` with the missing arms, mirror the Investigation/L2FT shape. Out of Y.2.g scope (Dashboards visual coverage ≠ pushdown SQL); on the X.2.g roadmap.
+    - [ ] X.7.cleanup.1 CI/release cleanup steps target the wrong scope — `database-2` + QS leak (captured 2026-05-10; non-trivial, pick a fix before doing). Three related bugs, all "the cleanup ran but cleaned the wrong thing", all harmless functionally (no impact on the release publishing / e2e passing) but they leak resources:
     1. **`e2e.yml::cleanup-pg::schema clean -c /tmp/ci-pg.yaml`** (no `--l2`) drops `spec_example_*` tables — but `e2e-pg-api` runs the runner with `--variants=sp_pg_aw`, which synthesizes an L2 with `instance: sp_pg_aw` → creates `sp_pg_aw_*` tables. So `cleanup-pg` drops a table set nothing created; the actual `sp_pg_aw_*` (and on cron, `sp_pg_aw_*` from `e2e-pg-browser`) accumulate in the operator's `database-2` forever. (Pre-existing, surfaced during the gate.l.8 work.)
     2. **The runner's `teardown_variant` for an `aw` target doesn't `DROP` the per-variant `<spec.name>_*` schema it created** (it only no-ops the AWS env / drops `lo` containers). This is the *source* of #1's leak — if the runner self-cleaned its aw tables, `cleanup-pg` wouldn't need to schema-clean at all.
     3. **`release.yml::e2e-against-testpypi::Cleanup (always)` passes `--l2 /tmp/release-l2.yaml` to `quicksight-gen json clean`** — but `json clean` has no `--l2` option (only `-c` / `-o` / `--all` / `--execute`), so it exits nonzero, `|| true` swallows it, and the step is a no-op → the `qs-release-<tag>-rel_<tag>-*` QS resources (deployed with `--l2 /tmp/release-l2.yaml` → tagged `L2Instance: rel_<tag>`, which `json clean` defaulting to `spec_example` won't match anyway) linger in QuickSight. **Fix:** swap that line to `json clean -c /tmp/release-e2e.yaml --all --execute` — `--all` purge mode sweeps everything matching the cfg's `resource_prefix` (`qs-release-<tag>`) regardless of L2Instance tag, which is exactly the one resource set the release-e2e job deployed. (Introduced by gate.l.8, 2026-05-10.)
