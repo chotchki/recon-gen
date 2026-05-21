@@ -298,6 +298,7 @@ The user's framing: "make that test general and do it for ANY yaml we're making 
       - [ ] AI.2.b AI.2.b TransferTemplate transfer_key field (FieldSpec + create wiring)
       - [ ] AI.2.c AI.2.c Top-level L2 editor for description + role_business_day_offsets (new singleton kind)
       - [ ] AI.2.d AI.2.d StudioEditorDriver verbs + create_l2(reference) bulk helper
+      - [ ] AI.2.e AI.2.e Route diagram edit/add affordance to dedicated screens (drop inline-on-diagram editing)
     - [ ] AI.3 Test harness — `tests/e2e/test_studio_dogfood.py`. Parameterized over L2 yaml input:
       ```python
       @pytest.mark.parametrize("l2_source", [

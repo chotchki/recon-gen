@@ -399,13 +399,12 @@ def test_home_page_cards_carry_data_attributes_for_filter(
     assert 'data-entity-id="cust-001"' in body
 
 
-def test_put_from_home_page_emits_cascade_trigger_for_diagram_and_sections(
+def test_put_from_home_page_redirects_home(
     writable_l2_yaml: Path,
 ) -> None:
-    """Server-side contract: a successful PUT against any editor route
-    returns ``HX-Trigger: l2-cascade-reload``. The home page's section
-    divs (assert above) and the iframe listener (assert above) consume
-    that trigger to refetch — this test pins the wire-side half."""
+    """AI.2.e — a successful save (POST/PUT) 303-redirects to the home page;
+    the full navigation re-renders the diagram + entity sections fresh,
+    replacing the X.4 inline ``HX-Trigger: l2-cascade-reload`` fan-out."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.put(
@@ -417,6 +416,7 @@ def test_put_from_home_page_emits_cascade_trigger_for_diagram_and_sections(
                 "role": "CustomerSubledger",
                 "parent_role": "CustomerLedger",
             },
+            follow_redirects=False,
         )
-        assert resp.status_code == 200, resp.text
-        assert resp.headers.get("HX-Trigger") == "l2-cascade-reload"
+        assert resp.status_code == 303, resp.text
+        assert resp.headers.get("location") == "/"

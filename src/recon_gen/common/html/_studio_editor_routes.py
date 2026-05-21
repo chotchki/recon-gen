@@ -34,7 +34,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Mapping
 from html import escape
-from typing import Any, Literal, TypeAlias, cast
+from typing import Any, Literal, TypeAlias
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
@@ -1678,8 +1678,7 @@ def _render_read_card(
     # demo-mode (the edit / delete routes are 404'd there).
     actions_html = "" if demo_mode else (
         f'<div class="entity-card-actions">'
-        f'<a class="edit-link" hx-get="/l2_shape/{kind}/{escape(entity_id)}/edit" '
-        f'hx-target="#{html_id}" hx-swap="outerHTML">Edit</a>'
+        f'<a class="edit-link" href="/l2_shape/{kind}/{escape(entity_id)}/edit">Edit</a>'
         f'<a class="delete-link" hx-delete="/l2_shape/{kind}/{escape(entity_id)}" '
         f'hx-target="#{html_id}" hx-swap="outerHTML" '
         f'hx-confirm="Delete this entity? References that block deletion '
@@ -1743,68 +1742,6 @@ def _focus_node_for_entity(
             return None
         return f"role__{parent_role}"
     return None
-
-
-def _render_edit_form(
-    kind: EntityKind,
-    entity: object,
-    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed for dynamic select_from resolution
-    form_overrides: Mapping[str, str | tuple[str, ...]] | None = None,
-    field_errors: Mapping[str, str] | None = None,
-    global_error: str | None = None,
-) -> str:
-    """Editable form fragment. ``form_overrides`` lets the validation-
-    failure path re-render with the user's typed-but-invalid values
-    (X.4.e.5)."""
-    specs = _filter_specs_for_entity(_FIELD_SPECS_BY_KIND[kind], entity)
-    entity_id = _entity_id(kind, entity)
-    field_errors = field_errors or {}
-    overrides = form_overrides or {}
-
-    hidden = _hidden_fields_for_entity(kind, entity, instance)
-    fields_html = "".join(
-        _render_field(
-            s,
-            overrides.get(s.name, getattr(entity, s.name, None)),
-            instance,
-            error=field_errors.get(s.name),
-            entity=entity,
-        )
-        for s in specs
-        if s.name not in hidden
-    )
-    global_err_html = (
-        f'<div class="form-global-error">{escape(global_error)}</div>'
-        if global_error else ""
-    )
-    html_id = f"entity-{kind}-{escape(_html_id_slug(entity_id))}"
-    # X.4.f.11 — surface rail subtype in the edit form header so the
-    # operator can see which subtype's fields they're editing (matches
-    # the create page's "Create new rail (two-leg)" pattern).
-    rail_subtype = _rail_subtype_of(entity)
-    edit_subtype_badge = ""
-    if rail_subtype is not None:
-        subtype_label = "two-leg" if rail_subtype == "two_leg" else "single-leg"
-        edit_subtype_badge = (
-            f' <span class="entity-subtype-badge">{escape(subtype_label)}</span>'
-        )
-    return (
-        f'<article class="entity-card editing" id="{html_id}">'
-        f"<header><h3>Editing: {escape(entity_id)}{edit_subtype_badge}</h3></header>"
-        f'<form hx-put="/l2_shape/{kind}/{escape(entity_id)}" '
-        f'hx-target="#{html_id}" '
-        f'hx-swap="outerHTML">'
-        f"{global_err_html}"
-        f"{fields_html}"
-        f'<div class="form-actions">'
-        f'<button type="submit">Save</button>'
-        f'<a class="cancel-link" hx-get="/l2_shape/{kind}/{escape(entity_id)}" '
-        f'hx-target="#{html_id}" hx-swap="outerHTML">'
-        f"Cancel</a>"
-        f"</div>"
-        f"</form>"
-        f"</article>"
-    )
 
 
 _CREATE_INTRO_BY_KIND: Mapping[EntityKind, str] = {
@@ -2068,6 +2005,82 @@ def _render_create_page(
         {fields_html}
         <div class="form-actions">
           <button type="submit">Create</button>
+          <a class="cancel-link" href="/">Cancel</a>
+        </div>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
+"""
+
+
+def _render_edit_page(
+    kind: EntityKind,
+    entity: object,
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed for select_from option resolution
+    form_overrides: Mapping[str, str | tuple[str, ...]] | None = None,
+    global_error: str | None = None,
+) -> str:
+    """AI.2.e — full HTML page for editing an existing entity: the dedicated
+    edit screen, symmetric with ``_render_create_page``. Replaces the X.4.e
+    inline hx-swap edit fragment (``_render_edit_form``) so editing reads the
+    same as creating — a roomy full-page form where the per-kind / per-subtype
+    field requirements (e.g. single-leg vs two-leg rail) are obvious.
+
+    Prefilled from ``entity``; a plain HTML POST to
+    ``/l2_shape/<kind>/<id>`` (the ``save`` handler 303-redirects home on
+    success, re-renders this page + 400 on validation/coercion error).
+    Includes ``edit_only`` fields (e.g. ``leg_rail_xor_groups``) the create
+    page must omit — the entity already has the siblings they reference.
+    """
+    specs = _filter_specs_for_entity(_FIELD_SPECS_BY_KIND[kind], entity)
+    entity_id = _entity_id(kind, entity)
+    overrides = form_overrides or {}
+    hidden = _hidden_fields_for_entity(kind, entity, instance)
+    fields_html = "".join(
+        _render_field(
+            s,
+            overrides.get(s.name, getattr(entity, s.name, None)),
+            instance,
+            entity=entity,
+        )
+        for s in specs
+        if s.name not in hidden
+    )
+    global_err_html = (
+        f'<div class="form-global-error">{escape(global_error)}</div>'
+        if global_error else ""
+    )
+    intro_html = _CREATE_INTRO_BY_KIND.get(kind, "")
+    rail_subtype = _rail_subtype_of(entity)
+    title_suffix = (
+        f" ({'two-leg' if rail_subtype == 'two_leg' else 'single-leg'})"
+        if rail_subtype is not None else ""
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Edit {escape(kind)}: {escape(entity_id)} — Studio</title>
+  {studio_theme_head(instance)}
+  <link rel="stylesheet" href="{asset_url("diagram.css")}">
+  <link rel="stylesheet" href="{asset_url("editor.css")}">
+</head>
+<body class="create-page edit-page">
+  <header class="studio-header">
+    <h1>Edit {escape(kind)}{escape(title_suffix)}: {escape(entity_id)}</h1>
+    <a class="nav-link" href="/">← back to Studio</a>
+    <a class="nav-link" href="/l2_shape/{escape(kind)}/">→ list all {escape(kind)}s</a>
+  </header>
+  <main class="create-page-main">
+    <section class="create-intro">{intro_html}</section>
+    <section class="create-form-wrap">
+      <form method="post" action="/l2_shape/{escape(kind)}/{escape(entity_id)}" class="create-form edit-form">
+        {global_err_html}
+        {fields_html}
+        <div class="form-actions">
+          <button type="submit">Save</button>
           <a class="cancel-link" href="/">Cancel</a>
         </div>
       </form>
@@ -2372,14 +2385,16 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
         entity = _find_entity_or_none(inst, kind, entity_id)
         if entity is None:
             return HTMLResponse("not found", status_code=404)
-        return HTMLResponse(_render_edit_form(kind, entity, inst))
+        return HTMLResponse(_render_edit_page(kind, entity, inst))
 
-    async def save(request: Request) -> HTMLResponse:
-        """X.4.e.4 — the cascade flow: validate → mutate → save → respond.
+    async def save(request: Request) -> Response:
+        """AI.2.e — dedicated-screen save: coerce → mutate → validate →
+        save → 303-redirect home (symmetric with the create POST).
 
-        Validation failure → 400 + edit-form fragment with the error
-        rendered inline (preserves user's typed content). Success →
-        200 + read-card fragment + ``HX-Trigger: l2-cascade-reload``.
+        Validation / coercion failure → 400 + the full-page edit screen
+        re-rendered with the error banner + the operator's typed values
+        preserved. Bound to both POST and PUT /l2_shape/<kind>/<id> so the
+        plain HTML edit form (POST) and any programmatic PUT both work.
         """
         kind = _kind_from_path(request.path_params["kind"])
         entity_id = request.path_params["entity_id"]
@@ -2397,7 +2412,7 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
             # operator's typed values aren't lost.
             best_effort = {str(k): str(v) for k, v in form.items()}
             return HTMLResponse(
-                _render_edit_form(
+                _render_edit_page(
                     kind, entity if entity is not None else _placeholder(kind),
                     inst,
                     form_overrides=best_effort,
@@ -2452,7 +2467,7 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
             inst = cache.get()
             entity = _find_entity_or_none(inst, kind, entity_id)
             return HTMLResponse(
-                _render_edit_form(
+                _render_edit_page(
                     kind, entity if entity is not None else _placeholder(kind),
                     inst,
                     form_overrides=coerced_overrides,
@@ -2462,21 +2477,11 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
             )
 
         cache.save(new_inst)
-        # If the form changed the addressing key, the entity is now
-        # keyed under the NEW value. Composite kinds (chain /
-        # limit_schedule) need both halves rebuilt — see helper.
-        new_entity = _find_entity_or_none(
-            new_inst, kind,
-            _post_mutate_entity_id(kind, new_fields, entity_id),
-        )
-        resp = HTMLResponse(
-            _render_read_card(kind, new_entity, new_inst, demo_mode=demo_mode)
-            if new_entity is not None else "saved",
-        )
-        # X.4.e.7 — diagram + entity list listen for this trigger and
-        # hx-get themselves to pick up the cascade.
-        resp.headers["HX-Trigger"] = "l2-cascade-reload"
-        return resp
+        # AI.2.e — dedicated-screen flow: 303-redirect home on success,
+        # symmetric with the create POST. (Replaces the X.4.e inline
+        # read-card swap + HX-Trigger cascade-reload; a full navigation back
+        # to Studio re-renders the diagram + entity lists fresh anyway.)
+        return RedirectResponse("/", status_code=303)
 
     async def new_form(request: Request) -> HTMLResponse:
         kind = _kind_from_path(request.path_params["kind"])
@@ -2694,74 +2699,6 @@ def _kind_from_path(raw: str) -> EntityKind | None:
     return None
 
 
-def _addressing_field(kind: EntityKind) -> str:
-    """Which dataclass field is the addressing key for this kind."""
-    return {
-        "account": "id",
-        "account_template": "role",
-        "rail": "name",
-        "transfer_template": "name",
-        # chains + limit_schedules use composite keys → this is the
-        # FIRST half (the second is fixed in the URL).
-        "chain": "parent",
-        "limit_schedule": "parent_role",
-    }[kind]
-
-
-def _post_mutate_entity_id(
-    kind: EntityKind,
-    new_fields: Mapping[str, object],
-    old_entity_id: str,
-) -> str:
-    """Compute the addressing string the just-mutated entity now lives
-    under, given the field changes the operator submitted.
-
-    Single-key kinds (account/template/rail) — pull the new value of
-    the addressing field if it changed; otherwise keep the old.
-    Composite kinds (chain / limit_schedule) — REBUILD the
-    "<half1>::<half2>" composite from the new field values, falling
-    back to the old halves where the form didn't touch them. Without
-    this fix, ``_find_entity_or_none`` can't locate a chain whose
-    parent or child the operator just changed (it'd compare a single
-    half against the composite and miss).
-    """
-    if kind == "chain":
-        # Z.A: composite = "parent::sorted-children-csv". When the form
-        # touched `children`, fields["children"] is a tuple of
-        # Identifiers; otherwise fall back to the old children half.
-        old_parent, _, old_children_csv = old_entity_id.partition("::")
-        parent = str(new_fields.get("parent", old_parent) or old_parent)
-        new_children = new_fields.get("children")
-        if isinstance(new_children, (list, tuple)) and new_children:
-            # WHY: cast — Mapping[str, object] narrows isinstance to
-            # list[Unknown]/tuple[Unknown,...]; rebrand the source so
-            # pyright tracks element type as object, not Unknown.
-            items = cast("tuple[object, ...]", new_children)
-            children_csv = ",".join(sorted(str(c) for c in items))
-        else:
-            children_csv = old_children_csv
-        return f"{parent}::{children_csv}"
-    if kind == "limit_schedule":
-        # AB.1 — 3-part composite. Backward-compat: a stored 2-part
-        # entity_id (legacy "<parent>::<rail>") means direction=Outbound.
-        old_parts = old_entity_id.split("::")
-        if len(old_parts) == 2:
-            old_parts = [*old_parts, "Outbound"]
-        old_parent_role, old_rail, old_direction = old_parts
-        parent_role = str(
-            new_fields.get("parent_role", old_parent_role) or old_parent_role,
-        )
-        rail = str(
-            new_fields.get("rail", old_rail) or old_rail,
-        )
-        direction = str(
-            new_fields.get("direction", old_direction) or old_direction,
-        )
-        return f"{parent_role}::{rail}::{direction}"
-    addr = _addressing_field(kind)
-    return str(new_fields.get(addr, old_entity_id) or old_entity_id)
-
-
 def _rename_trigger_field(kind: EntityKind) -> str | None:
     """Which field's change should cascade across L2 references.
 
@@ -2861,7 +2798,7 @@ def make_editor_routes(
             ),
             Route(
                 "/l2_shape/{kind}/{entity_id}", h["save"],
-                methods=["PUT"], name="l2_shape_save",
+                methods=["POST", "PUT"], name="l2_shape_save",
             ),
             Route(
                 "/l2_shape/{kind}/{entity_id}", h["delete"],

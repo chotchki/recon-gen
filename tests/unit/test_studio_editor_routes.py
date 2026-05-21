@@ -98,15 +98,21 @@ def test_read_card_returns_fragment(writable_l2_yaml: Path) -> None:
         assert "Customer Number One" in resp.text
 
 
-def test_edit_form_returns_form_fragment(writable_l2_yaml: Path) -> None:
+def test_edit_form_is_full_page_with_post_form(writable_l2_yaml: Path) -> None:
+    """AI.2.e — GET /edit is a dedicated full-page screen (symmetric with the
+    create page), not an inline hx-swap fragment. The form is a plain POST
+    back to the entity's save route."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.get("/l2_shape/account/cust-001/edit")
         assert resp.status_code == 200
         body = resp.text
-        assert "<form" in body
-        # PUT target points back at the same id.
-        assert 'hx-put="/l2_shape/account/cust-001"' in body
+        # Full page (doctype + chrome), not a bare fragment.
+        assert "<!doctype html>" in body
+        assert "← back to Studio" in body
+        # Plain POST form targeting the entity's save route.
+        assert 'method="post"' in body
+        assert 'action="/l2_shape/account/cust-001"' in body
 
 
 def test_unknown_kind_returns_404(writable_l2_yaml: Path) -> None:
@@ -121,11 +127,12 @@ def test_unknown_kind_returns_404(writable_l2_yaml: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_put_account_persists_to_disk_and_triggers_cascade(
+def test_put_account_persists_to_disk_and_redirects_home(
     writable_l2_yaml: Path,
 ) -> None:
-    """Save flow: PUT → mutate → validate → cache.save (atomic write
-    + cache.replace) → respond with read card + HX-Trigger header.
+    """AI.2.e save flow: POST/PUT → mutate → validate → cache.save (atomic
+    write) → 303-redirect home (symmetric with the create POST). The mutation
+    persists to the --l2 file on disk.
     """
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -140,13 +147,11 @@ def test_put_account_persists_to_disk_and_triggers_cascade(
                 "parent_role": "CustomerLedger",
                 "description": "Edited via Studio.",
             },
+            follow_redirects=False,
         )
-        assert resp.status_code == 200, resp.text
-        # Cascade trigger lets the diagram + entity list hx-get
-        # themselves to pick up the change.
-        assert resp.headers.get("HX-Trigger") == "l2-cascade-reload"
-        # Response body carries the new read card.
-        assert "Customer One Edited" in resp.text
+        # Dedicated-screen flow: 303 back to home, not an inline fragment.
+        assert resp.status_code == 303, resp.text
+        assert resp.headers.get("location") == "/"
 
     # Disk persistence — re-load and confirm.
     reloaded = load_instance(writable_l2_yaml)
@@ -387,9 +392,11 @@ def test_put_account_role_rename_cascades_to_rails_and_templates(
                 "role": "CustomerSubledgerV2",  # the rename
                 "parent_role": "CustomerLedger",
             },
+            follow_redirects=False,
         )
-        assert resp.status_code == 200, resp.text
-        assert resp.headers.get("HX-Trigger") == "l2-cascade-reload"
+        # AI.2.e — save 303-redirects home; the cascade (below) still ran.
+        assert resp.status_code == 303, resp.text
+        assert resp.headers.get("location") == "/"
 
     reloaded = load_instance(writable_l2_yaml)
     # Both Accounts that played the role get the new value (rename is
@@ -464,9 +471,11 @@ def test_put_rail_name_rename_cascades_to_templates_and_chains(
             data={
                 "name": new_name,
             },
+            follow_redirects=False,
         )
-        assert resp.status_code == 200, resp.text
-        assert resp.headers.get("HX-Trigger") == "l2-cascade-reload"
+        # AI.2.e — save 303-redirects home; the cascade (below) still ran.
+        assert resp.status_code == 303, resp.text
+        assert resp.headers.get("location") == "/"
 
     reloaded = load_instance(writable_l2_yaml)
     assert any(str(r.name) == new_name for r in reloaded.rails)
@@ -934,10 +943,12 @@ def test_chain_card_id_replaces_double_colon_to_avoid_css_pseudo_element(
     assert f'id="entity-chain-{slug}"' in body
     # NO raw ``::`` in the id attr.
     assert f'id="entity-chain-{composite}"' not in body
-    # hx-target uses the slug too.
+    # hx-target (the Delete link's outerHTML swap) uses the slug too.
     assert f'hx-target="#entity-chain-{slug}"' in body
-    # URL path KEEPS the original ``::``.
-    assert f'hx-get="/l2_shape/chain/{composite}/edit"' in body
+    # URL path KEEPS the original ``::``. The Edit link is now a plain
+    # navigation to the dedicated edit screen (AI.2.e); card id + delete
+    # hx-target use the CSS-safe slug.
+    assert f'href="/l2_shape/chain/{composite}/edit"' in body
 
 
 def test_put_chain_edit_renders_card_after_save(
