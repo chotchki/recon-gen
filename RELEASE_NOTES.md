@@ -1,5 +1,24 @@
 # Release Notes
 
+## v11.9.4 — fix: App2 local-serve blank dataset-backed pickers
+
+The local `recon-gen dashboards` / `studio` HTMX server composed its
+`ServedDashboard` map without an `OptionsFetcher`, so dataset-backed
+(LinkedValues) parameter controls — the Daily Statement account/role
+picker, Money Trail, Account Network, Recipient Fanout — rendered with
+empty option lists. With nothing to pick, the (correct, parameterized)
+dataset query never received a value and the sheet stayed permanently
+blank. The backing matview, query, and option-source SQL were all fine.
+
+**Local-serve-only.** QuickSight populates LinkedValues controls natively
+from the dataset, so production deploys are unaffected.
+
+Why it slipped: the e2e harness wired an options fetcher while the CLI
+serve path did not — the two serve paths diverged with nothing guarding
+parity. Fix: a shared `build_real_dashboards` helper wires BOTH the data
+fetcher and the options fetcher, and `test_html_serve_options_fetcher`
+pins the wiring so the CLI path can't drop it again.
+
 ## v11.9.3 — Gap J follow-up: unit-firing leg-skip gated on template-E8 only
 
 v11.9.2's leg-skip was too broad. AL skipped the leg_rails of every unit-firing
