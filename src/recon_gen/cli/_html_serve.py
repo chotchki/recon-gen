@@ -112,6 +112,51 @@ def build_real_app(app_name: str, cfg: Any, instance: Any) -> tuple[Any, Any]:  
     return tree_app, tree_app.analysis.sheets[0]
 
 
+def build_real_dashboards(
+    real_apps: list[tuple[str, Any, Any]],
+    cfg: Any,  # type: ignore[no-untyped-def]: cfg untyped pending CLI-wide sweep
+    *,
+    pool: Any,  # AsyncConnectionPool — Any keeps the no-[serve] install importable
+    theme: Any = None,  # ThemePreset | None
+) -> dict[str, ServedDashboard]:
+    """Compose the ``{name: ServedDashboard}`` map for the real apps.
+
+    Wires BOTH per-app fetchers: the visual ``data_fetcher`` AND the
+    ``options_fetcher`` that resolves dataset-backed (LinkedValues)
+    parameter-control options from their companion option-source
+    datasets — the Daily Statement account/role picker, Money Trail /
+    Account Network / Recipient Fanout pickers, etc. One options fetcher
+    serves every app (it keys off the dataset registry by identifier at
+    fetch time).
+
+    Extracted from ``_serve`` so a unit test can assert the wiring: the
+    CLI serve path silently dropped ``options_fetcher`` (empty pickers →
+    the correct parameterized query never received a value → a
+    permanently blank sheet) while the e2e harness wired it, and nothing
+    guarded the parity between the two serve paths.
+    """
+    from recon_gen.common.html._tree_fetcher import (  # noqa: PLC0415
+        make_options_fetcher,
+        make_tree_db_fetcher,
+    )
+    from recon_gen.common.html.server import (  # noqa: PLC0415
+        ServedDashboard,
+    )
+    opts_fetcher = make_options_fetcher(cfg, pool=pool)
+    return {
+        name: ServedDashboard(
+            tree_app=tree_app,
+            sheet=sheet,
+            title=APP_TITLES.get(name, name.title()),
+            data_fetcher=make_tree_db_fetcher(tree_app, cfg, pool=pool),
+            theme=theme,
+            filter_specs=(),
+            options_fetcher=opts_fetcher,
+        )
+        for name, tree_app, sheet in real_apps
+    }
+
+
 # Studio-routes factory contract: a callable that takes the cache, a
 # dev-log flag, and the demo-DB pool (None = no pool, e.g. unit tests
 # or stub-mode dashboards) and returns a list of routes.
@@ -269,19 +314,17 @@ def run_html_server(
             from recon_gen.common.db import (  # noqa: PLC0415
                 make_connection_pool,
             )
-            from recon_gen.common.html._tree_fetcher import (  # noqa: PLC0415
-                make_tree_db_fetcher,
-            )
             pool = await make_connection_pool(
                 cfg, max_size=cfg.app2_db_pool_size,
             )
-            for name, tree_app, sheet in real_apps:
-                dashboards[name] = ServedDashboard(
-                    tree_app=tree_app, sheet=sheet,
-                    title=APP_TITLES.get(name, name.title()),
-                    data_fetcher=make_tree_db_fetcher(tree_app, cfg, pool=pool),
-                    theme=theme, filter_specs=(),
-                )
+            # X.2.u.4.b — build via the shared helper so the data fetcher
+            # AND the dataset-backed-control options fetcher are both
+            # wired (the latter was dropped here pre-fix => empty pickers
+            # => blank Daily Statement / Money Trail / Account Network /
+            # Recipient Fanout). Guarded by test_html_serve_options_fetcher.
+            dashboards.update(
+                build_real_dashboards(real_apps, cfg, pool=pool, theme=theme),
+            )
             click.echo(
                 f"data: DB-backed ({cfg.dialect.value}) → {len(real_apps)} "
                 f"app(s) [{', '.join(n for n, _, _ in real_apps)}] "
