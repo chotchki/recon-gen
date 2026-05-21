@@ -241,3 +241,56 @@ def test_shape_for_kind_threads_kwargs() -> None:
     )
     assert out["x_label"] == "Status"
     assert out["y_label"] == "Count"
+
+
+class TestBarChartChartMeta:
+    """AO.R.2 — currency format, multi-series (colors dim), and stacked."""
+
+    def test_single_series_keeps_values_shorthand(self) -> None:
+        # Backward-compat: no series_column → {categories, values}.
+        out = shape_bar_chart(rows=[("a", 1), ("b", 2)], columns=["s", "n"])
+        assert out["categories"] == ["a", "b"]
+        assert out["values"] == [1, 2]
+        assert "series" not in out
+        assert "stacked" not in out
+
+    def test_format_threads_through(self) -> None:
+        out = shape_bar_chart(
+            rows=[("a", 100)], columns=["s", "amount"], format="currency",
+        )
+        assert out["format"] == "currency"
+
+    def test_multi_series_buckets_by_series_column(self) -> None:
+        # rows: (category, series, value). series_column=1 → one series
+        # per distinct series value, aligned to the shared category axis.
+        out = shape_bar_chart(
+            rows=[
+                ("2026-01-01", "ach", 5),
+                ("2026-01-01", "wire", 2),
+                ("2026-01-02", "ach", 7),
+            ],
+            columns=["day", "rail", "n"],
+            series_column=1,
+            stacked=True,
+        )
+        assert out["categories"] == ["2026-01-01", "2026-01-02"]
+        names = {s["name"] for s in out["series"]}
+        assert names == {"ach", "wire"}
+        ach = next(s for s in out["series"] if s["name"] == "ach")
+        assert ach["values"] == [5, 7]
+        wire = next(s for s in out["series"] if s["name"] == "wire")
+        assert wire["values"] == [2, None]  # no wire bar on day 2
+        assert out["stacked"] is True
+
+    def test_stacked_omitted_when_false(self) -> None:
+        out = shape_bar_chart(
+            rows=[("a", "x", 1)], columns=["c", "s", "n"], series_column=1,
+        )
+        assert "stacked" not in out
+
+
+def test_shape_line_chart_format_threads_through() -> None:
+    out = shape_line_chart(
+        rows=[("2026-01-01", 10)], columns=["day", "amount"], format="currency",
+    )
+    assert out["format"] == "currency"

@@ -129,29 +129,80 @@ def shape_bar_chart(
     *,
     x_label: str | None = None,
     y_label: str | None = None,
+    series_column: int | None = None,
+    format: str | None = None,
+    stacked: bool = False,
 ) -> dict[str, Any]:
     """Shape SQL rows as a bar chart.
 
-    Convention: column 0 is the category (string), column 1 is the
-    value (numeric). Axis labels default to the column names so an
-    unconfigured BarChart still labels its axes; pass ``x_label`` /
-    ``y_label`` to override (per Q.1.a.3 plain-English labels).
+    Two modes (mirrors :func:`shape_line_chart`):
+
+    - **Single series** (``series_column=None``, default): column 0 is
+      the category, column 1 the value — emits the
+      ``{categories, values}`` shorthand ``bootstrap.js`` accepts.
+    - **Multi series** (``series_column=N``, AO.R.2): rows split by the
+      value of column ``N`` (the BarChart's ``colors`` dim). Column 0 is
+      the category; the remaining non-category, non-series column is the
+      value. Emits ``{categories, series: [{name, values}]}`` aligned to
+      a shared, first-seen-ordered category axis (``None`` where a
+      series has no bar for a category).
+
+    ``format`` (``"currency"`` / ``"number"``) drives the y-axis tick
+    formatting; ``stacked`` asks the renderer to stack (vs. cluster) the
+    series. Axis labels default to the column names; pass ``x_label`` /
+    ``y_label`` to override (Q.1.a.3 plain-English labels).
     """
-    cats: list[Any] = []
-    vals: list[Any] = []
+    x_label_out = (
+        x_label if x_label is not None else (str(columns[0]) if columns else "")
+    )
+
+    def _decorate(out: dict[str, Any]) -> dict[str, Any]:
+        if format is not None:
+            out["format"] = format
+        if stacked:
+            out["stacked"] = True
+        return out
+
+    if series_column is None:
+        cats: list[Any] = []
+        vals: list[Any] = []
+        for row in rows:
+            cats.append(row[0])
+            if len(row) > 1:
+                vals.append(row[1])
+        return _decorate({
+            "categories": cats,
+            "values": vals,
+            "x_label": x_label_out,
+            "y_label": (
+                y_label if y_label is not None
+                else (str(columns[1]) if len(columns) > 1 else "")
+            ),
+        })
+
+    cat_order: list[Any] = []
+    buckets: dict[Any, dict[Any, Any]] = {}
     for row in rows:
-        cats.append(row[0])
-        if len(row) > 1:
-            vals.append(row[1])
-    return {
-        "categories": cats,
-        "values": vals,
-        "x_label": x_label if x_label is not None else (columns[0] if columns else ""),
-        "y_label": (
-            y_label if y_label is not None
-            else (columns[1] if len(columns) > 1 else "")
-        ),
-    }
+        cat = row[0]
+        series_key = row[series_column]
+        if cat not in cat_order:
+            cat_order.append(cat)
+        y_idx = next(
+            (i for i in range(len(row)) if i != 0 and i != series_column),
+            None,
+        )
+        buckets.setdefault(series_key, {})[cat] = (
+            row[y_idx] if y_idx is not None else None
+        )
+    return _decorate({
+        "categories": cat_order,
+        "series": [
+            {"name": str(name), "values": [pts.get(c) for c in cat_order]}
+            for name, pts in buckets.items()
+        ],
+        "x_label": x_label_out,
+        "y_label": y_label if y_label is not None else "",
+    })
 
 
 def shape_line_chart(
@@ -161,6 +212,7 @@ def shape_line_chart(
     x_label: str | None = None,
     y_label: str | None = None,
     series_column: int | None = None,
+    format: str | None = None,
 ) -> dict[str, Any]:
     """Shape SQL rows as one or more line series.
 
@@ -200,6 +252,7 @@ def shape_line_chart(
                 y_label if y_label is not None
                 else (str(columns[1]) if len(columns) > 1 else "")
             ),
+            **({"format": format} if format is not None else {}),
         }
     # Multi-series — bucket each series' (x → y) and align every
     # series to the shared, first-seen-ordered x axis.
@@ -226,6 +279,7 @@ def shape_line_chart(
         ],
         "x_label": x_label_out,
         "y_label": y_label if y_label is not None else "",
+        **({"format": format} if format is not None else {}),
     }
 
 

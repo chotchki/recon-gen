@@ -134,14 +134,20 @@ def wrap_for_visual(base_sql: str, visual: Any) -> str:
         measures = getattr(visual, "values", []) or []
         if not cats or not measures:
             return base_sql
-        cat_cols = [_dim_sql(d) for d in cats]
-        cat_cols = [c for c in cat_cols if c]
-        meas_cols = [_measure_sql(m) for m in measures]
-        meas_cols = [c for c in meas_cols if c]
+        cat_cols = [c for c in (_dim_sql(d) for d in cats) if c]
+        # AO.R.2 — a BarChart's ``colors`` dim is the stacked/grouped
+        # series. Project + group it (between category and value) so the
+        # per-series breakdown survives to ``shape_bar_chart``; without
+        # this the SQL rolled up to one value per category and App2 lost
+        # the rail-name composition QuickSight stacks. (LineChart has no
+        # ``colors`` field, so ``color_cols`` is empty there — no change.)
+        color_dims = getattr(visual, "colors", []) or []
+        color_cols = [c for c in (_dim_sql(d) for d in color_dims) if c]
+        meas_cols = [c for c in (_measure_sql(m) for m in measures) if c]
         if not cat_cols or not meas_cols:
             return base_sql
-        select_clause = ", ".join(cat_cols + meas_cols)
-        group_clause = ", ".join(cat_cols)
+        select_clause = ", ".join(cat_cols + color_cols + meas_cols)
+        group_clause = ", ".join(cat_cols + color_cols)
         wrapped = (
             f"SELECT {select_clause} FROM (\n{base_sql}\n) sub "
             f"GROUP BY {group_clause}"

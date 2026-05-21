@@ -546,18 +546,36 @@
   // Single-series shorthand also accepted: ``{categories, values}``.
   // d3 native — no charting lib. Bars are click-targets for future
   // drill (X.2.e); for now they're inert.
+  // ``stacked`` (AO.R.2): when the tree declares bars_arrangement=STACKED
+  // and there's a series (colors) dim, segments stack per category;
+  // otherwise multi-series clusters side-by-side. Multi-series gets a
+  // per-series color scale + a legend; single-series stays accent-filled.
+  // Long / many category labels rotate so they don't smear (the #8 fix).
   function renderBarChart(target, data, _visualId) {
-    var width = target.clientWidth || 800;
-    var height = 320;
-    var margin = { top: 16, right: 24, bottom: 56, left: 64 };
-    var innerW = width - margin.left - margin.right;
-    var innerH = height - margin.top - margin.bottom;
-
     var categories = data.categories || [];
     var series = data.series
       ? data.series
       : [{ name: data.label || "", values: data.values || [] }];
     var format = data.format;
+    var multi = series.length > 1;
+    var stacked = !!data.stacked && multi;
+
+    var width = target.clientWidth || 800;
+    var plotH = 320; // fixed plot area; bars scale to this, not the legend
+    var rotateX =
+      categories.length > 8 || categories.some((c) => String(c).length > 6);
+    var margin = {
+      top: 16,
+      right: multi ? 132 : 24, // legend gutter when multi-series
+      bottom: rotateX ? 92 : 56,
+      left: 64,
+    };
+    var innerW = Math.max(0, width - margin.left - margin.right);
+    var innerH = plotH - margin.top - margin.bottom;
+    // Grow the SVG (not the plot) so a tall multi-series legend doesn't
+    // clip — a dense instance can have dozens of series.
+    var legendH = multi ? margin.top + series.length * 18 + 8 : 0;
+    var height = Math.max(plotH, legendH);
 
     var svg = d3
       .select(target)
@@ -568,57 +586,89 @@
       .append("g")
       .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
 
-    // Outer band per category, inner band per series so multi-series
-    // groups bars side-by-side. Single-series collapses to a regular
-    // bar chart by virtue of one inner slot.
+    var seriesNames = series.map((s, i) => s.name || String(i));
+    // Ordinal color scale — fixed fallback palette so we don't depend on
+    // d3.schemeCategory10 being present in the minified bundle.
+    var palette = d3.schemeCategory10 || [
+      "#2E5090",
+      "#E8833A",
+      "#3FA34D",
+      "#C0392B",
+      "#8E44AD",
+      "#16A085",
+      "#D4AC0D",
+      "#7F8C8D",
+      "#2980B9",
+      "#CB4335",
+    ];
+    var color = d3.scaleOrdinal().domain(seriesNames).range(palette);
+
     var x0 = d3.scaleBand().domain(categories).range([0, innerW]).padding(0.15);
     var x1 = d3
       .scaleBand()
-      .domain(series.map((s, i) => s.name || String(i)))
+      .domain(seriesNames)
       .range([0, x0.bandwidth()])
       .padding(0.05);
-    var allValues = [];
-    series.forEach((s) => {
-      (s.values || []).forEach((v) => {
-        if (typeof v === "number") allValues.push(v);
-      });
-    });
-    var maxVal = allValues.length > 0 ? d3.max(allValues) : 0;
+
+    // y domain: stacked → max per-category column total; else max single bar.
+    var maxVal;
+    if (stacked) {
+      maxVal =
+        d3.max(
+          categories.map((_c, ci) =>
+            d3.sum(series, (s) =>
+              typeof s.values[ci] === "number" ? s.values[ci] : 0,
+            ),
+          ),
+        ) || 0;
+    } else {
+      maxVal =
+        d3.max(
+          series.flatMap((s) =>
+            (s.values || []).filter((v) => typeof v === "number"),
+          ),
+        ) || 0;
+    }
     var y = d3
       .scaleLinear()
       .domain([0, maxVal || 1])
       .nice()
       .range([innerH, 0]);
 
-    // Axes — formatted via the same formatKPIValue helper so
-    // currency / number formatting stays consistent across the
-    // dashboard.
-    var xAxis = d3.axisBottom(x0);
-    var yAxis = d3
-      .axisLeft(y)
-      .ticks(5)
-      .tickFormat((v) => formatKPIValue(v, format));
-    g.append("g")
+    // Axes — y formatted via formatKPIValue so currency / number stays
+    // consistent; x labels rotate when long/many.
+    var xg = g
+      .append("g")
       .attr("class", "barchart-x-axis")
       .attr("transform", "translate(0," + innerH + ")")
-      .call(xAxis)
-      .selectAll("text")
-      .attr("class", "text-xs fill-primary-fg");
+      .call(d3.axisBottom(x0));
+    xg.selectAll("text").attr("class", "text-xs fill-primary-fg");
+    if (rotateX) {
+      xg.selectAll("text")
+        .attr("transform", "rotate(-40)")
+        .attr("text-anchor", "end")
+        .attr("dx", "-0.4em")
+        .attr("dy", "0.3em");
+    }
     g.append("g")
       .attr("class", "barchart-y-axis")
-      .call(yAxis)
+      .call(
+        d3
+          .axisLeft(y)
+          .ticks(5)
+          .tickFormat((v) => formatKPIValue(v, format)),
+      )
       .selectAll("text")
       .attr("class", "text-xs fill-primary-fg");
 
-    // Axis labels (plain English from the tree per Q.1.a.3 — they
-    // carry over via the tree's Measure.axis_label / Column.label).
+    // Axis labels (plain English from the tree per Q.1.a.3).
     if (data.x_label) {
       svg
         .append("text")
         .attr("class", "barchart-x-label text-xs fill-secondary-fg")
         .attr("text-anchor", "middle")
         .attr("x", margin.left + innerW / 2)
-        .attr("y", height - 8)
+        .attr("y", height - 6)
         .text(data.x_label);
     }
     if (data.y_label) {
@@ -633,33 +683,83 @@
         .text(data.y_label);
     }
 
-    // Bars per (category × series) — one rect per data point.
-    var seriesGroups = g
-      .selectAll("g.barchart-series")
-      .data(series)
-      .enter()
-      .append("g")
-      .attr("class", "barchart-series")
-      .attr("data-series-name", (s, i) => s.name || String(i));
-    seriesGroups
-      .selectAll("rect")
-      .data((s, si) =>
-        (s.values || []).map((v, ci) => ({
-          value: v,
-          category: categories[ci],
-          seriesIdx: si,
-          seriesName: s.name || String(si),
-        })),
-      )
+    // Flatten to one rect descriptor per (category × series) so the
+    // stacked offset is computed up-front (binding once avoids the
+    // mutate-during-.attr ordering hazard).
+    var rects = [];
+    if (stacked) {
+      categories.forEach((cat, ci) => {
+        var offset = 0;
+        series.forEach((s, si) => {
+          var v = typeof s.values[ci] === "number" ? s.values[ci] : 0;
+          rects.push({
+            x: x0(cat) || 0,
+            w: x0.bandwidth(),
+            y: y(offset + v),
+            h: y(offset) - y(offset + v),
+            fill: color(s.name || String(si)),
+          });
+          offset += v;
+        });
+      });
+    } else {
+      series.forEach((s, si) => {
+        (s.values || []).forEach((v, ci) => {
+          var num = typeof v === "number" ? v : 0;
+          rects.push({
+            x:
+              (x0(categories[ci]) || 0) +
+              (multi ? x1(s.name || String(si)) || 0 : 0),
+            w: multi ? x1.bandwidth() : x0.bandwidth(),
+            y: y(num),
+            h: innerH - y(num),
+            fill: color(s.name || String(si)),
+          });
+        });
+      });
+    }
+    g.selectAll("rect.barchart-bar")
+      .data(rects)
       .enter()
       .append("rect")
-      .attr("class", "barchart-bar fill-accent hover:opacity-80")
-      .attr("x", (d) => (x0(d.category) || 0) + (x1(d.seriesName) || 0))
-      .attr("y", (d) => (typeof d.value === "number" ? y(d.value) : innerH))
-      .attr("width", x1.bandwidth())
-      .attr("height", (d) =>
-        typeof d.value === "number" ? innerH - y(d.value) : 0,
-      );
+      .attr(
+        "class",
+        "barchart-bar hover:opacity-80" + (multi ? "" : " fill-accent"),
+      )
+      .attr("x", (d) => d.x)
+      .attr("y", (d) => d.y)
+      .attr("width", (d) => d.w)
+      .attr("height", (d) => d.h)
+      .attr("fill", (d) => (multi ? d.fill : null));
+
+    // Legend — multi-series only (single-series needs none). One <g>
+    // per series, positioned by index in the right gutter.
+    if (multi) {
+      seriesNames.forEach((name, i) => {
+        var row = svg
+          .append("g")
+          .attr("class", "barchart-legend")
+          .attr(
+            "transform",
+            "translate(" +
+              (width - margin.right + 12) +
+              "," +
+              (margin.top + i * 18) +
+              ")",
+          );
+        row
+          .append("rect")
+          .attr("width", 12)
+          .attr("height", 12)
+          .attr("fill", color(name));
+        row
+          .append("text")
+          .attr("x", 16)
+          .attr("y", 10)
+          .attr("class", "text-xs fill-primary-fg")
+          .text(name);
+      });
+    }
   }
 
   // LineChart — one line per series + axes + legend. Data shape:

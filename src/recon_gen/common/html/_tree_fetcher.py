@@ -224,18 +224,35 @@ def _find_visual_dataset_identifier(visual: Any) -> str | None:  # typing-smell:
 
 
 @dataclass(frozen=True)
+class _ChartMeta:
+    """Per-chart presentation derived from a BarChart / LineChart's field
+    wells (AO.R.2), so App2 charts match QuickSight: the series/``colors``
+    dim (``series_column_name``, resolved to a column index at fetch
+    time), plain-English axis labels, the value ``currency`` / ``number``
+    format, and ``stacked`` (``bars_arrangement="STACKED"``)."""
+
+    series_column_name: str | None
+    x_label: str
+    y_label: str
+    value_format: str
+    stacked: bool
+
+
+@dataclass(frozen=True)
 class _VisualPlan:
     """Pre-resolved per-visual fetch plan, built once at fetcher-construction
     and reused per request. ``column_labels`` / ``column_formats`` (AO.R.1)
     are keyed by raw SQL column name and carry the SAME per-column
     presentation QuickSight derives (contract ``human_name`` header +
-    ``currency`` measure format) so App2 renders identical headers + money."""
+    ``currency`` measure format) so App2 renders identical headers + money.
+    ``chart`` (AO.R.2) is set for BarChart / LineChart visuals only."""
 
     kind: str
     sql: str | None
     ds_id: str | None
     column_labels: Mapping[str, str]
     column_formats: Mapping[str, str]
+    chart: _ChartMeta | None
 
 
 def _leaf_column_name(leaf: Any) -> str | None:  # typing-smell: ignore[explicit-any]: walks dynamic Dim/Measure leaves via getattr
@@ -300,6 +317,43 @@ def _table_column_meta(
             elif getattr(item, "currency", False):
                 formats[name] = "currency"
     return labels, formats
+
+
+def _chart_meta(visual: Any) -> _ChartMeta | None:  # typing-smell: ignore[explicit-any]: dynamic visual subtype walked via getattr
+    """AO.R.2 — per-chart presentation for a BarChart / LineChart, from
+    the SAME field wells QuickSight reads. ``None`` for any other kind.
+
+    - ``series_column_name`` ← the BarChart's first ``colors`` dim (the
+      stacked/grouped series); ``None`` when there's no series dim.
+    - ``x_label`` / ``y_label`` ← the author's ``category_label`` /
+      ``value_label`` override, else ``_field_label`` of the first
+      category / value leaf (the same human label QS axis-labels with).
+    - ``value_format`` ← ``"currency"`` when the first value measure is
+      ``currency=True``, else ``"number"``.
+    - ``stacked`` ← ``bars_arrangement`` is ``STACKED`` / ``STACKED_PERCENT``.
+    """
+    kind = type(visual).__name__
+    if kind not in ("BarChart", "LineChart"):
+        return None
+    cats = getattr(visual, "category", []) or []
+    vals = getattr(visual, "values", []) or []
+    if not cats or not vals:
+        return None
+    colors = getattr(visual, "colors", []) or []
+    series_name = _leaf_column_name(colors[0]) if colors else None
+    x_label = getattr(visual, "category_label", None) or _field_label(cats[0])
+    y_label = getattr(visual, "value_label", None) or _field_label(vals[0])
+    value_format = "currency" if getattr(vals[0], "currency", False) else "number"
+    stacked = getattr(visual, "bars_arrangement", None) in (
+        "STACKED", "STACKED_PERCENT",
+    )
+    return _ChartMeta(
+        series_column_name=series_name,
+        x_label=str(x_label),
+        y_label=str(y_label),
+        value_format=value_format,
+        stacked=stacked,
+    )
 
 
 def make_tree_db_fetcher(
@@ -374,6 +428,7 @@ def make_tree_db_fetcher(
             visual_index[vid] = _VisualPlan(
                 kind=kind, sql=sql, ds_id=ds_id,
                 column_labels=col_labels, column_formats=col_formats,
+                chart=_chart_meta(visual),
             )
 
     async def fetcher(visual_id: VisualId, params: Mapping[str, list[str]]) -> Any:  # typing-smell: ignore[explicit-any]: per-visual-kind shape (KPI float, Sankey {nodes,links}, etc.) — JSON-serialized downstream, so a real union here would be every renderer's shape
@@ -436,12 +491,33 @@ def make_tree_db_fetcher(
             pool, sql, params, dialect=cfg.dialect,
             dataset_parameters=dataset_params,
         )
+        # AO.R.2 — BarChart / LineChart carry per-chart presentation
+        # (series/colors dim → multi-series, axis labels, currency
+        # format, stacked) derived from the tree at build time. Resolve
+        # the series column to a positional index against the live
+        # result columns (case-insensitive — Oracle upper-cases) and
+        # pass the chart kwargs the shaper + d3 renderer read.
+        if plan.chart is not None:
+            series_column: int | None = None
+            name = plan.chart.series_column_name
+            if name:
+                lowered = [str(c).lower() for c in columns]
+                if name.lower() in lowered:
+                    series_column = lowered.index(name.lower())
+            chart_kwargs: dict[str, Any] = {  # typing-smell: ignore[explicit-any]: heterogeneous shape-fn kwargs (int|str|bool), splatted into shape_for_kind
+                "series_column": series_column,
+                "x_label": plan.chart.x_label,
+                "y_label": plan.chart.y_label,
+                "format": plan.chart.value_format,
+            }
+            if kind == "BarChart":
+                chart_kwargs["stacked"] = plan.chart.stacked
+            return shape_for_kind(kind, rows, columns, **chart_kwargs)
         # ForceGraph + Sankey have specialized projectors today
         # (_db_fetcher._topology_to_force_graph, etc.); the generic
-        # SQL path handles KPI / Table / BarChart / LineChart /
-        # Sankey via shape_for_kind. Visual kinds without a SQL
-        # adapter raise from shape_for_kind — same loud-failure
-        # pattern as the SQL lookup above.
+        # SQL path handles KPI / Table / Sankey via shape_for_kind.
+        # Visual kinds without a SQL adapter raise from shape_for_kind —
+        # same loud-failure pattern as the SQL lookup above.
         return shape_for_kind(kind, rows, columns)
 
     return fetcher

@@ -12,7 +12,7 @@ SQLite (case-insensitive identifiers).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pytest
 
@@ -49,6 +49,7 @@ class KPI:
 class BarChart:
     category: list[_StubDim]
     values: list[_StubMeasure]
+    colors: list[_StubDim] = field(default_factory=list)
 
 
 @dataclass
@@ -109,6 +110,19 @@ class TestBarChartWrap:
         # Unquoted forms gone
         assert " transfer_type FROM" not in wrapped
         assert " transfer_type GROUP" not in wrapped
+
+    def test_projects_and_groups_colors_dim(self):
+        # AO.R.2 — a BarChart with a `colors` (series) dim must project +
+        # group it between category and value so the per-series breakdown
+        # survives to shape_bar_chart (stacked / multi-series).
+        bar = BarChart(
+            category=[_StubDim(column=_StubColumn("posted_date"))],
+            values=[_StubMeasure(kind="sum", column=_StubColumn("amount"))],
+            colors=[_StubDim(column=_StubColumn("rail_name"))],
+        )
+        wrapped = wrap_for_visual(_BASE, bar)
+        assert 'SELECT "posted_date", "rail_name", SUM("amount")' in wrapped
+        assert 'GROUP BY "posted_date", "rail_name"' in wrapped
 
 
 class TestLineChartWrap:
