@@ -2873,3 +2873,33 @@ Heterogeneous follow-ons collected during/after Phase AE: a CI hygiene fix, two 
 **Cross-cutting contract per sub-task:** code fix + unit test where applicable + regression-guard test + commit. No shared lock decisions across sub-tasks (they're orthogonal); sequence by impact rather than dependency.
 
 
+---
+
+## 2026-05-21
+
+- [x] AK.0 AK.0 QS dataset-parameter GUIDs are shape-only, not valid → QS fails to load
+  - [x] AK.1 AK.1 build_dataset derives dataset-param Id via auto_id(dataset_id:dsparam:Name); drop hardcoded _DSP_ID_* constants (l2ft/inv/l1/exec)
+  - [x] AK.2 AK.2 Regenerate bundled tests/json fixtures (param Ids shifted) + add test: every dataset-param Id is a valid UUID + unique across an analysis's datasets
+  - [x] AK.3 AK.3 Full suite + DB gate + commit (AK QS dataset-param GUID fix)
+
+- [ ] AJ.0 SPEC gaps G/H/I: template-heavy L2 composition fixes
+  - [x] AJ.0 Locks: `spec_example` is the template-heavy fixture home (extend the `BulkAccrualSettlement`-off-`MerchantSettlementCycle` shape); Gap I uses the precise `transfer_parents` computation (not skip-fan_in); Gap G `rail_name` = the fired variant's resolved leg_rail; fixture-first TDD.
+    - [x] AJ.4a AJ.4a Consolidate the 4 spec_example copies → one packaged copy + shared accessor
+    - [x] AJ.4b AJ.4b chain_orphans clean on healthy baseline — residuals beyond Gap I
+  - [x] AJ.1 Template-heavy regression fixture in `spec_example` (template = multi-children chain-parent + baseline-fired + MultiXor plant target) + red Gap G (`unmatched_rail_name`) and Gap H (`multi_xor_violation` missed) assertions.
+  - [x] AJ.2 Gap G — `auto_scenario.py` MultiXor plant emitters set `rail_name` to the fired child template's resolved leg_rail, never the chain-parent name; Template-parent plant-emitter unit test → Gap G green.
+  - [x] AJ.3 AJ.3 Gap H residual — plant helpers emit chain-complete firings (not baseline)
+  - [x] AJ.4 Gap I — L2FT `chain_orphans` dataset (`apps/l2_flow_tracing/datasets.py::build_exc_chain_orphans_dataset`) computes fan_in parent-side orphans via `<prefix>_transfer_parents`, not naive `parent − child`; 4-way agreement.
+  - [x] AJ.5 Re-lock seeds, full sweep + 4-way agreement green, commit + cut release.
+  - [x] AJ.6 Gap H broad-rail residual — broad-mode RAIL coverage firings of a multi-XOR chain parent were childless (the rail picker skips multi-XOR chains), false-positiving in `multi_xor_violation`. Complete them via `_emit_plant_chain_completion` (matched by `rail.name` OR `template_name`). The broad tt firing-1/2/3 demo (overlap/missed/complete for the tt-instances explorer) is INTENTIONAL — left intact.
+    - [x] AJ.6.1 Rail completion: `multi_children_only` (skip single-child chains the picker already links) + `via_template_name` (template-parented chains like DisbursementCycle); revert the tt completion (intentional demo); pyright clean.
+    - [x] AJ.6.2 Densified RED→GREEN structural guard (no childless `tr-rail` in `multi_xor_violation`) + re-lock spec_example seeds (×3 dialects) + full suite + commit.
+
+---
+
+
+Source: `SPEC_gap_feedback.md` Implementation Gap J. E8 (the Phase AF per-period firing-count knob) is unusable for an atomic balanced multi-leg flow modeled as ≥2 SingleLegRails joined in a TransferTemplate with `expected_net = 0`: the only firing path for such a template is the per-rail loop, which fires each leg independently with its own RNG-sampled count → declaring E8 diverges the legs → the shared Transfer imbalances → false `ledger_drift`. No lever to scale the flow as a coupled unit.
+
+Locked approach (user, 2026-05-21): **template-level E8**. `firings_typical_per_period` on a TransferTemplate drives a coupled unit-firing for ANY template that declares it (not just chain-parent templates); the per-rail loop SKIPS leg_rails of any unit-firing template (no double-emit, no divergence); validator W1 accepts E8 on a TransferTemplate. Also tidies the latent chain-parent-template-leg double-emit (legs currently fire in BOTH the per-rail loop AND the unit firing). Fixture-first TDD.
+
+

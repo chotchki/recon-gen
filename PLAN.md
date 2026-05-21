@@ -80,10 +80,6 @@ Third supported dialect alongside Postgres + Oracle. Schema emit, matview-as-tab
 
 - [ ] AD.0 Phase AD
   - [ ] AD.G AD.G CI derives the QS principal ARN from quicksight:ListUsers (pick the ADMIN user) instead of the static RECON_E2E_USER_ARN GitHub secret — so a QS-subscription recreate (à la Phase AD) doesn't silently red the e2e + release pipelines. This was the v11.9.0 release-blocker root cause (secret pointed at the deleted Enterprise-era user). Per feedback_no_credential_friction: a stored-ARN secret is automation backlog. See memory project_qs_e2e_user_arn ("CI uses a stale-prone static secret").
-- [x] AK.0 AK.0 QS dataset-parameter GUIDs are shape-only, not valid → QS fails to load
-  - [x] AK.1 AK.1 build_dataset derives dataset-param Id via auto_id(dataset_id:dsparam:Name); drop hardcoded _DSP_ID_* constants (l2ft/inv/l1/exec)
-  - [x] AK.2 AK.2 Regenerate bundled tests/json fixtures (param Ids shifted) + add test: every dataset-param Id is a valid UUID + unique across an analysis's datasets
-  - [x] AK.3 AK.3 Full suite + DB gate + commit (AK QS dataset-param GUID fix)
 - [ ] X.6.a mkdocstrings expansion. Auto-generate L2 entity reference (`common/l2/primitives.py` — Account, Rail, Chain, TransferTemplate, etc.) and visual reference (`common/tree/visuals.py` — KPI, Table, BarChart, Sankey, ForceGraph). Per-class page with docstring + field table. Replaces today's hand-written `docs/reference/l2-spec.md` + per-visual handbook callouts.
 - [ ] X.6.b Custom mkdocs-macros plugin: tree → walkthrough scaffolds. Reads sheet/visual descriptions from each app's tree (`apps/<app>/app.py` builds the tree; the plugin walks it). Emits per-sheet walkthrough scaffold with the sheet's own `description` as the lede + each visual's `subtitle` as a section. Hand-written prose can extend the scaffold but the model-derived parts can't drift.
 - [ ] X.6.c Auto dataset reference. `DatasetContract` lists columns + types + (often) shape. Generates per-dataset reference page. Replaces today's hand-written column lists in `docs/data-contract/`.
@@ -324,37 +320,17 @@ The user's framing: "make that test general and do it for ANY yaml we're making 
 
 ---
 
-## Phase AJ — SPEC gaps G/H/I: template-heavy L2 composition fixes
 
 Source: `SPEC_gap_feedback.md` Gaps G–I, surfaced by post-AG integration re-testing. G+H share a root cause — template-parent shapes weren't in the fixture set, so the AG fixes validated against Rail-parent shapes only. A "template-heavy" regression fixture (a template that is a multi-children chain-parent + baseline-fired + MultiXor plant target) is the shared structural guard; built first (red), G+H turn it green. Gap I is the independent fan_in-aware `chain_orphans` dataset (the planned AB.4.8 step).
 
-- [x] AJ.0 Locks: `spec_example` is the template-heavy fixture home (extend the `BulkAccrualSettlement`-off-`MerchantSettlementCycle` shape); Gap I uses the precise `transfer_parents` computation (not skip-fan_in); Gap G `rail_name` = the fired variant's resolved leg_rail; fixture-first TDD.
-  - [x] AJ.4a AJ.4a Consolidate the 4 spec_example copies → one packaged copy + shared accessor
-  - [x] AJ.4b AJ.4b chain_orphans clean on healthy baseline — residuals beyond Gap I
-- [x] AJ.1 Template-heavy regression fixture in `spec_example` (template = multi-children chain-parent + baseline-fired + MultiXor plant target) + red Gap G (`unmatched_rail_name`) and Gap H (`multi_xor_violation` missed) assertions.
-- [x] AJ.2 Gap G — `auto_scenario.py` MultiXor plant emitters set `rail_name` to the fired child template's resolved leg_rail, never the chain-parent name; Template-parent plant-emitter unit test → Gap G green.
-- [x] AJ.3 AJ.3 Gap H residual — plant helpers emit chain-complete firings (not baseline)
-- [x] AJ.4 Gap I — L2FT `chain_orphans` dataset (`apps/l2_flow_tracing/datasets.py::build_exc_chain_orphans_dataset`) computes fan_in parent-side orphans via `<prefix>_transfer_parents`, not naive `parent − child`; 4-way agreement.
-- [x] AJ.5 Re-lock seeds, full sweep + 4-way agreement green, commit + cut release.
-- [x] AJ.6 Gap H broad-rail residual — broad-mode RAIL coverage firings of a multi-XOR chain parent were childless (the rail picker skips multi-XOR chains), false-positiving in `multi_xor_violation`. Complete them via `_emit_plant_chain_completion` (matched by `rail.name` OR `template_name`). The broad tt firing-1/2/3 demo (overlap/missed/complete for the tt-instances explorer) is INTENTIONAL — left intact.
-  - [x] AJ.6.1 Rail completion: `multi_children_only` (skip single-child chains the picker already links) + `via_template_name` (template-parented chains like DisbursementCycle); revert the tt completion (intentional demo); pyright clean.
-  - [x] AJ.6.2 Densified RED→GREEN structural guard (no childless `tr-rail` in `multi_xor_violation`) + re-lock spec_example seeds (×3 dialects) + full suite + commit.
-
----
-
-## Phase AL — Gap J: template-level `firings_typical_per_period` (E8)
-
-Source: `SPEC_gap_feedback.md` Implementation Gap J. E8 (the Phase AF per-period firing-count knob) is unusable for an atomic balanced multi-leg flow modeled as ≥2 SingleLegRails joined in a TransferTemplate with `expected_net = 0`: the only firing path for such a template is the per-rail loop, which fires each leg independently with its own RNG-sampled count → declaring E8 diverges the legs → the shared Transfer imbalances → false `ledger_drift`. No lever to scale the flow as a coupled unit.
-
-Locked approach (user, 2026-05-21): **template-level E8**. `firings_typical_per_period` on a TransferTemplate drives a coupled unit-firing for ANY template that declares it (not just chain-parent templates); the per-rail loop SKIPS leg_rails of any unit-firing template (no double-emit, no divergence); validator W1 accepts E8 on a TransferTemplate. Also tidies the latent chain-parent-template-leg double-emit (legs currently fire in BOTH the per-rail loop AND the unit firing). Fixture-first TDD.
-
-- [x] AL.0 Spike/confirm: (a) does the baseline double-emit chain-parent template legs today (per-rail loop @ `seed.py` ~1309 + unit-firing helper @ ~2890), and does it currently cause drift? (b) lock "unit-firing template" = chain-parent OR E8-declaring (`expected_net = 0`); (c) fixture shape (a ≥2-SingleLegRail `expected_net=0` template in `spec_example`).
-  - [x] AL.6 AL.6 Gap J follow-up — unit-firing leg-skip gated on template-E8 only (v11.9.3)
-- [x] AL.1 Fixture-first: add a multi-1-leg-rail `expected_net = 0` template (E8 declared) to `spec_example`; RED test asserting the legs fire coupled (matched per-period count, no `ledger_drift`).
-- [x] AL.2 Validator W1: accept `firings_typical_per_period` on TransferTemplate (today rails-only); resolve the W1c (aggregating) interaction.
-- [x] AL.3 seed.py: run the unit-firing helper for every E8-carrying template (not just chain parents); per-rail loop skips leg_rails of any unit-firing template (kills the double-emit + the divergence).
-- [x] AL.4 Tests green (validator + seed coupled-count + AL.1 RED→GREEN); confirm the chain-parent double-emit is tidied (inspect seed delta).
-- [x] AL.5 Re-lock seeds (×3) + full suite + docs (E8-on-template in rail.md / Schema_v6 + SPEC marker) + commit.
+- [ ] AL.0 Gap J: template-level `firings_typical_per_period` (E8)
+  - [x] AL.0 Spike/confirm: (a) does the baseline double-emit chain-parent template legs today (per-rail loop @ `seed.py` ~1309 + unit-firing helper @ ~2890), and does it currently cause drift? (b) lock "unit-firing template" = chain-parent OR E8-declaring (`expected_net = 0`); (c) fixture shape (a ≥2-SingleLegRail `expected_net=0` template in `spec_example`).
+    - [x] AL.6 AL.6 Gap J follow-up — unit-firing leg-skip gated on template-E8 only (v11.9.3)
+  - [x] AL.1 Fixture-first: add a multi-1-leg-rail `expected_net = 0` template (E8 declared) to `spec_example`; RED test asserting the legs fire coupled (matched per-period count, no `ledger_drift`).
+  - [x] AL.2 Validator W1: accept `firings_typical_per_period` on TransferTemplate (today rails-only); resolve the W1c (aggregating) interaction.
+  - [x] AL.3 seed.py: run the unit-firing helper for every E8-carrying template (not just chain parents); per-rail loop skips leg_rails of any unit-firing template (kills the double-emit + the divergence).
+  - [x] AL.4 Tests green (validator + seed coupled-count + AL.1 RED→GREEN); confirm the chain-parent double-emit is tidied (inspect seed delta).
+  - [x] AL.5 Re-lock seeds (×3) + full suite + docs (E8-on-template in rail.md / Schema_v6 + SPEC marker) + commit.
 
 ---
 
@@ -378,8 +354,8 @@ Spike-before-implement (per `feedback_spike_before_locking_implementation.md`):
 this is a CLI-surface change touching every operator command + every doc
 example + tests. Wrong factoring locks in for years.
 
-  - [ ] Q.6 CLI shape revisit: cfg ⇄ L2 dual-yaml factoring
-    - [>] Q.6.0 SPIKE: combined-yaml vs cfg-with-L2-pointer vs status-quo
+    - [ ] Q.6 CLI shape revisit: cfg ⇄ L2 dual-yaml factoring
+      - [>] Q.6.0 SPIKE: combined-yaml vs cfg-with-L2-pointer vs status-quo
   (LOCKED 2026-05-08; spike before Q.6.1).** Output `docs/audits/y_11_cli_shape_spike.md`.
   Compare the candidate factorings against today's two-yaml shape:
 
@@ -425,16 +401,16 @@ example + tests. Wrong factoring locks in for years.
   **Likely outcome (to validate in spike):** A or D. A is the smallest delta;
   D is the cleanest if multi-L2-per-cfg becomes common.
 
-    - [ ] Q.6.1 Implement per spike result. Updates touch `cli/json.py`,
+      - [ ] Q.6.1 Implement per spike result. Updates touch `cli/json.py`,
   `cli/schema.py`, `cli/data.py`, `cli/audit.py`, `cli/_helpers.py::resolve_l2_for_demo`,
   every CLAUDE.md / README / handbook example, every test that invokes
   `runner.invoke([...,"--l2",...])`, and every CI workflow YAML that uses
   `--l2`. Migration warning for at least one minor version.
-    - [ ] Q.6.2 Sweep memory entries + docs for stale `--l2 <yaml>` references.
-    - [ ] Q.6.3 Update CLAUDE.md "Commands" block to show the new shape as
+      - [ ] Q.6.2 Sweep memory entries + docs for stale `--l2 <yaml>` references.
+      - [ ] Q.6.3 Update CLAUDE.md "Commands" block to show the new shape as
   canonical; keep the explicit `--l2` form as the "multi-instance / explicit
   override" sub-pattern.
-    - [>] Q.6.4 Bump version (breaking CLI change — post-v9.0.0) + RELEASE_NOTES
+      - [>] Q.6.4 Bump version (breaking CLI change — post-v9.0.0) + RELEASE_NOTES
   entry highlighting the simplification + migration recipe.**
 
 ---
@@ -470,9 +446,9 @@ Backlog beyond Phase X. Promote to a numbered phase entry when scope justifies i
 - **Encode more invariants in the type system.** K.2 did this for drill-param shape compatibility; Phase L's tree primitives close another big chunk. What remains after L is the candidate list for the next round.
 - ~~**Fold the biome JS lint into the test runner, like pyright.**~~ *(done, 2026-05-12.)* `conftest.py::pytest_sessionstart` now runs `biome check --max-diagnostics=400` alongside the pyright gate — `biome check` exits non-zero on lint *errors* (e.g. `noInnerDeclarations`) and zero on warnings, so the gate fires before any test collects (`pytest.exit(returncode=2)`); opt out with `QS_GEN_SKIP_BIOME=1`. `biome` is a standalone Rust binary (brew locally; `biomejs/setup-biome@v2` in CI), not an npm/pip package — when it's not on `PATH` the gate skips cleanly (same posture pyright has if it's missing). Bare `pytest tests/`, `./run_tests.sh up_to=unit`, and `ci.yml::test` all enforce it. (Why not a `[dev]` dep like `pyright` / `pytailwindcss`? The Biome project hasn't published an *official* PyPI package yet — in flight at biomejs/biome#8818. The unofficial `biome-js` wrapper bundles the Rust binary like `ruff` does, but ships only a `manylinux_2_28_x86_64` wheel — no macOS / arm64 / sdist, and it's a stale single release on Biome 2.3.x — so adding it would break `uv sync --extra dev` off linux-x86_64. Biome therefore stays a system binary; the `[dev]` block carries a NB comment recording this + a "revisit when biomejs/biome#8818 merges" pointer. `dev_setup`: `brew install biome`, or any of biome's install methods. **Follow-on when biomejs/biome#8818 lands:** add the official package to `[dev]`, drop the `setup-biome` CI step + the system-binary fallback in conftest / install.md.)
 - **Drop `_oracle_lowercase_alias_wrapper`; emit dialect-natural identifier case from the generator** (was Y.3.f, parked 2026-05-09). DDL is emitted unquoted (PG folds lowercase, Oracle UPPERCASE → divergent storage); `_oracle_lowercase_alias_wrapper` (`common/dataset_contract.py`) bolts an outer `SELECT qs_inner."ACCOUNT_ID" AS "account_id" ...` so QuickSight (which builds `SELECT "account_id" FROM (...)` from its declared lowercase Columns) finds matching aliases. The proper fix — generator emits dialect-natural case in `DatasetContract.to_input_columns()`, QS quotes UPPERCASE on Oracle natively, wrapper gone — is bigger than it looks: QuickSight's analysis-side validation is *case-sensitive* against `Dataset.Columns` (Y.3.f.2's reverted Oracle-deploy probe surfaced 45 column-missing errors), so it requires case-folding ~30+ analysis-side column refs per dialect (visuals / filters / calc-fields / drills), not just the Columns declaration. The original App2 Oracle column-casing bug it would have fixed was instead fixed narrowly by Y.3.f.alt (`wrap_for_visual` quotes its column refs). Re-spike if the dialect-helper count grows past ~60, or if SQLite gets dropped from the matrix. See `project_qs_analysis_validates_columns_case_sensitive` memory.
-  - [ ] Post.0 X.2 App 2 polish (queued — not part of phase X scope)
-    - [ ] X.2.dashboards.1 Dashboards-local L1 dashboard render errors (surfaced 2026-05-10, X.2.g.4 territory, NOT a Y.2.g regression). With the Y.2.g.2.d pool-lifespan fix landed, `dashboards --app l1_dashboard` now starts cleanly + the drift KPI fetches data from the live matview, but other L1 visuals throw render errors in Dashboards (operator observed during the manual local pass; smoke + drift KPI work, broader rendering doesn't). This is per-visual coverage in `_tree_fetcher` / `wrap_for_visual` — investigation/L2FT shipped via X.2.g.{2,3} with the same pattern, so the gap is L1-specific visual kinds the renderer hasn't grown arms for yet (KPIs work, tables / line-charts may not). Triage: capture the failing visual_ids + the renderer error, extend `_tree_fetcher.wrap_for_visual` with the missing arms, mirror the Investigation/L2FT shape. Out of Y.2.g scope (Dashboards visual coverage ≠ pushdown SQL); on the X.2.g roadmap.
-    - [ ] X.7.cleanup.1 CI/release cleanup steps target the wrong scope — `database-2` + QS leak (captured 2026-05-10; non-trivial, pick a fix before doing). Three related bugs, all "the cleanup ran but cleaned the wrong thing", all harmless functionally (no impact on the release publishing / e2e passing) but they leak resources:
+    - [ ] Post.0 X.2 App 2 polish (queued — not part of phase X scope)
+      - [ ] X.2.dashboards.1 Dashboards-local L1 dashboard render errors (surfaced 2026-05-10, X.2.g.4 territory, NOT a Y.2.g regression). With the Y.2.g.2.d pool-lifespan fix landed, `dashboards --app l1_dashboard` now starts cleanly + the drift KPI fetches data from the live matview, but other L1 visuals throw render errors in Dashboards (operator observed during the manual local pass; smoke + drift KPI work, broader rendering doesn't). This is per-visual coverage in `_tree_fetcher` / `wrap_for_visual` — investigation/L2FT shipped via X.2.g.{2,3} with the same pattern, so the gap is L1-specific visual kinds the renderer hasn't grown arms for yet (KPIs work, tables / line-charts may not). Triage: capture the failing visual_ids + the renderer error, extend `_tree_fetcher.wrap_for_visual` with the missing arms, mirror the Investigation/L2FT shape. Out of Y.2.g scope (Dashboards visual coverage ≠ pushdown SQL); on the X.2.g roadmap.
+      - [ ] X.7.cleanup.1 CI/release cleanup steps target the wrong scope — `database-2` + QS leak (captured 2026-05-10; non-trivial, pick a fix before doing). Three related bugs, all "the cleanup ran but cleaned the wrong thing", all harmless functionally (no impact on the release publishing / e2e passing) but they leak resources:
     1. **`e2e.yml::cleanup-pg::schema clean -c /tmp/ci-pg.yaml`** (no `--l2`) drops `spec_example_*` tables — but `e2e-pg-api` runs the runner with `--variants=sp_pg_aw`, which synthesizes an L2 with `instance: sp_pg_aw` → creates `sp_pg_aw_*` tables. So `cleanup-pg` drops a table set nothing created; the actual `sp_pg_aw_*` (and on cron, `sp_pg_aw_*` from `e2e-pg-browser`) accumulate in the operator's `database-2` forever. (Pre-existing, surfaced during the gate.l.8 work.)
     2. **The runner's `teardown_variant` for an `aw` target doesn't `DROP` the per-variant `<spec.name>_*` schema it created** (it only no-ops the AWS env / drops `lo` containers). This is the *source* of #1's leak — if the runner self-cleaned its aw tables, `cleanup-pg` wouldn't need to schema-clean at all.
     3. **`release.yml::e2e-against-testpypi::Cleanup (always)` passes `--l2 /tmp/release-l2.yaml` to `quicksight-gen json clean`** — but `json clean` has no `--l2` option (only `-c` / `-o` / `--all` / `--execute`), so it exits nonzero, `|| true` swallows it, and the step is a no-op → the `qs-release-<tag>-rel_<tag>-*` QS resources (deployed with `--l2 /tmp/release-l2.yaml` → tagged `L2Instance: rel_<tag>`, which `json clean` defaulting to `spec_example` won't match anyway) linger in QuickSight. **Fix:** swap that line to `json clean -c /tmp/release-e2e.yaml --all --execute` — `--all` purge mode sweeps everything matching the cfg's `resource_prefix` (`qs-release-<tag>`) regardless of L2Instance tag, which is exactly the one resource set the release-e2e job deployed. (Introduced by gate.l.8, 2026-05-10.)
