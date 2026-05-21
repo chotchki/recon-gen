@@ -81,7 +81,7 @@ def _table_leaves(visual: Any) -> list[tuple[str, Dim | Measure]]:  # typing-sme
     field wells (the columns the renderer paints headers for)."""
     out: list[tuple[str, Dim | Measure]] = []
     for field_name in ("columns", "group_by", "values"):
-        fv: Any = getattr(visual, field_name, None)  # typing-smell: ignore[explicit-any]: getattr
+        fv: Any = getattr(visual, field_name, None)  # typing-smell: ignore[explicit-any]: dynamic field well off a visual subtype, narrowed by the isinstance walk below
         if fv is None:
             continue
         items = fv if isinstance(fv, list) else [fv]

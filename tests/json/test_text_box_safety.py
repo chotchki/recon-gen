@@ -126,6 +126,39 @@ def test_no_unconverted_markdown_link_in_text_box_content(
     )
 
 
+# Unconverted ``**bold**`` markdown (AO.R.3). Opener must be followed by
+# a non-space (real markdown bold), so a lone ``**`` or a ``**/*.py``
+# glob doesn't false-positive. After ``rt.markdown()`` every bold span
+# becomes ``<b>…</b>`` — a surviving ``**word**`` means a panel author
+# fed markdown to ``rt.body()`` (or some path that skips the parser).
+_UNCONVERTED_BOLD = re.compile(r"\*\*\S.*?\*\*")
+
+
+@pytest.mark.parametrize("app_name,emitted", list(_build_all_apps()))
+def test_no_unconverted_bold_in_text_box_content(
+    app_name: str, emitted: Any,
+) -> None:
+    """Class regression (AO.R.3): no ``**bold**`` survives in any
+    rendered text box. ``rt.markdown()`` converts it to ``<b>``; a
+    surviving marker means raw markdown is reaching the panel (the
+    operator-flagged L2FT/L1 panels rendered literal ``**`` before the
+    parser learned bold/code/bullets)."""
+    bad: list[str] = []
+    for sheet_id, content in _all_text_box_contents(emitted):
+        match = _UNCONVERTED_BOLD.search(content)
+        if match:
+            bad.append(
+                f"  sheet={sheet_id!r}: content carries literal "
+                f"{match.group(0)!r} (markdown bold not converted)"
+            )
+    assert not bad, (
+        f"App {app_name!r} has text-box content with unconverted "
+        f"``**bold**`` markers. Route the string through ``rt.markdown()`` "
+        f"(which now parses bold/code/bullets) instead of ``rt.body()``:\n"
+        + "\n".join(bad)
+    )
+
+
 # ``<li ...>...</li>`` block, captured non-greedily so adjacent items
 # don't merge into one match. ``re.DOTALL`` so any line breaks inside
 # the item (the failure mode we're hunting) are visible to the

@@ -303,3 +303,107 @@ class TestMarkdownInline:
             '<li class="ql-indent-0">beta</li>'
             '<li class="ql-indent-0">gamma</li></ul>'
         )
+
+
+class TestBoldCodeHelpers:
+    """AO.R.3 — bold / code primitives."""
+
+    def test_bold(self) -> None:
+        assert rt.bold("Drift") == "<b>Drift</b>"
+
+    def test_bold_xml_escapes(self) -> None:
+        assert rt.bold("a < b") == "<b>a &lt; b</b>"
+
+    def test_code(self) -> None:
+        assert rt.code("rail_name") == (
+            '<inline font-family="Courier New">rail_name</inline>'
+        )
+
+
+class TestMarkdownEmphasisAndBullets:
+    """AO.R.3 — markdown() parses ``**bold**`` / ```code``` / ``- bullets``
+    into the QS rich-text vocab both renderers honor. Before this, panel
+    content authored with these markers rendered the raw ``**`` / ``- ``
+    in QS AND App2 (the operator-flagged L2FT bottom panel)."""
+
+    def test_inline_bold(self) -> None:
+        assert rt.markdown("a **bold** word") == "a <b>bold</b> word"
+
+    def test_inline_code(self) -> None:
+        assert rt.markdown("the `rail_name` column") == (
+            'the <inline font-family="Courier New">rail_name</inline> column'
+        )
+
+    def test_no_raw_markers_survive(self) -> None:
+        out = rt.markdown("**B.** the `c` and a [l](https://x.com)")
+        assert "**" not in out
+        assert "`" not in out
+        assert "<b>B.</b>" in out
+        assert '<a href="https://x.com"' in out
+
+    def test_bullet_list(self) -> None:
+        out = rt.markdown("- one\n- two")
+        assert out == (
+            '<ul><li class="ql-indent-0">one</li>'
+            '<li class="ql-indent-0">two</li></ul>'
+        )
+
+    def test_bullet_star_marker(self) -> None:
+        out = rt.markdown("* a\n* b")
+        assert out.count('<li class="ql-indent-0">') == 2
+
+    def test_bullet_continuation_line_joins_into_item(self) -> None:
+        # A soft-wrapped bullet (item text spans two source lines) is one
+        # <li>, not a dropped line — matches _TODAYS_EXCEPTIONS_PANEL's
+        # wrapped bullets.
+        out = rt.markdown("- first part\n  wrapped tail\n- second")
+        assert out == (
+            '<ul><li class="ql-indent-0">first part wrapped tail</li>'
+            '<li class="ql-indent-0">second</li></ul>'
+        )
+
+    def test_blank_line_separated_bullets_merge_into_one_list(self) -> None:
+        # panel_markdown joins each bullet with \n\n; they must still
+        # render as ONE list, not N single-item lists with gaps.
+        out = rt.markdown("- a\n\n- b\n\n- c")
+        assert out.startswith("<ul>")
+        assert out.endswith("</ul>")
+        assert out.count("<ul>") == 1
+        assert out.count('<li class="ql-indent-0">') == 3
+        assert "<br/>" not in out
+
+    def test_bold_inside_bullet(self) -> None:
+        out = rt.markdown("- **Drift.** the sub-ledger drifted")
+        assert out == (
+            '<ul><li class="ql-indent-0"><b>Drift.</b> '
+            "the sub-ledger drifted</li></ul>"
+        )
+
+    def test_prose_block_then_bullets(self) -> None:
+        out = rt.markdown("Intro line.\n\n- a\n- b")
+        assert out == (
+            "Intro line.<br/><br/>"
+            '<ul><li class="ql-indent-0">a</li>'
+            '<li class="ql-indent-0">b</li></ul>'
+        )
+
+    def test_markdown_inline_parses_bold_and_code(self) -> None:
+        assert rt.markdown_inline("**x** and `y`") == (
+            '<b>x</b> and <inline font-family="Courier New">y</inline>'
+        )
+
+    def test_markdown_inline_never_bullets_or_br(self) -> None:
+        # markdown_inline is for <li> / no-break contexts: it must NOT
+        # introduce <ul>/<br/> even when the source looks list-shaped.
+        out = rt.markdown_inline("- a\n- b")
+        assert "<ul>" not in out
+        assert "<br/>" not in out
+
+    def test_blockquote_renders_italic(self) -> None:
+        # QS has no <blockquote>; the L1 invariant panels' "> SHOULD"
+        # line renders as italic prose (marker stripped).
+        assert rt.markdown("> X SHOULD hold.") == "<i>X SHOULD hold.</i>"
+
+    def test_blockquote_then_prose_block(self) -> None:
+        out = rt.markdown("> quoted line\n\nbody para")
+        assert out == "<i>quoted line</i><br/><br/>body para"
