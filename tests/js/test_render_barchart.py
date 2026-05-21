@@ -65,7 +65,9 @@ def test_barchart_renders_one_rect_per_category_single_series() -> None:
 
 
 def test_barchart_renders_rect_per_category_x_series() -> None:
-    """Multi-series → rects = categories × series count."""
+    """Multi-series → rects = categories × series; each series gets a
+    legend entry. (AO.R.2 flattened the per-series ``g.barchart-series``
+    wrappers into one rect set + a color legend so stacking works.)"""
     with playwright_sync_api.sync_playwright() as p:
         browser = p.webkit.launch(headless=True)
         page = browser.new_page()
@@ -78,18 +80,53 @@ def test_barchart_renders_rect_per_category_x_series() -> None:
             ],
         })
         bars = page.locator("#barchart-target svg rect.barchart-bar").count()
-        series_groups = page.locator(
-            "#barchart-target svg g.barchart-series",
+        legend = page.locator(
+            "#barchart-target svg g.barchart-legend",
         ).count()
         browser.close()
     assert bars == 8
-    assert series_groups == 2
+    assert legend == 2  # one legend row per series
+
+
+def test_barchart_stacked_renders_segments_and_legend() -> None:
+    """AO.R.2 — ``stacked=true`` with a series stacks one rect per
+    (category × series) and shows the per-series legend. Segments in a
+    category share the category's x (stacked, not clustered)."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_into_target(page, {
+            "categories": ["Q1", "Q2"],
+            "series": [
+                {"name": "ach", "values": [5, 7]},
+                {"name": "wire", "values": [2, 3]},
+            ],
+            "stacked": True,
+        })
+        bars = page.locator("#barchart-target svg rect.barchart-bar").count()
+        legend = page.locator(
+            "#barchart-target svg g.barchart-legend",
+        ).count()
+        # Distinct x positions == category count (segments stack, not
+        # cluster side-by-side).
+        distinct_xs = cast(int, page.evaluate(
+            """() => new Set(
+                Array.from(
+                  document.querySelectorAll('#barchart-target rect.barchart-bar'),
+                ).map((r) => r.getAttribute('x')),
+            ).size""",
+        ))
+        browser.close()
+    assert bars == 4  # 2 categories × 2 series
+    assert legend == 2
+    assert distinct_xs == 2  # stacked → one x per category
 
 
 def test_barchart_accepts_single_series_shorthand() -> None:
     """``{categories, values, label}`` (no ``series`` wrapper) still
     renders one rect per category — convenience for fetchers that
-    return one number per category."""
+    return one number per category. Single-series → no legend."""
     with playwright_sync_api.sync_playwright() as p:
         browser = p.webkit.launch(headless=True)
         page = browser.new_page()
@@ -100,12 +137,12 @@ def test_barchart_accepts_single_series_shorthand() -> None:
             "label": "count",
         })
         bars = page.locator("#barchart-target svg rect.barchart-bar").count()
-        series_groups = page.locator(
-            "#barchart-target svg g.barchart-series",
+        legend = page.locator(
+            "#barchart-target svg g.barchart-legend",
         ).count()
         browser.close()
     assert bars == 2
-    assert series_groups == 1
+    assert legend == 0  # single-series needs no legend
 
 
 def test_barchart_renders_x_and_y_axis_labels() -> None:
