@@ -1,5 +1,33 @@
 # Release Notes
 
+## v11.9.1 — QuickSight dataset-parameter UUIDs (AK) + Gap H broad-rail residual (AJ.6)
+
+Two follow-on fixes on top of v11.9.0, both surfaced by post-release
+integration testing.
+
+- **Deterministic dataset-parameter UUIDs (AK).** Every QuickSight dataset
+  parameter `Id` was a hand-picked per-app constant — GUID-shaped fakes in
+  L2 Flow Tracing (`11111111…`), kebab slugs in Investigation / L1
+  Dashboard (`dsp-inv-…`, `dsp-l1-…`) — assigned by position within an app,
+  so two datasets sharing a param name (`pKey` lives on several L2FT
+  datasets) emitted the same `Id`. An analysis spanning them got colliding
+  (or non-UUID) `DataSetParameter` Ids and QuickSight rejected it on load.
+  `build_dataset` now derives every Id from
+  `auto_id(f"{dataset_id}:dsparam:{Name}")` — a deterministic v5 UUID,
+  unique per (dataset, param name). The Id is framework-assigned
+  (`kw_only`), so a colliding hand-pick is unrepresentable; ~38 hardcoded
+  constants dropped across the three apps. A new cross-app guard asserts
+  every emitted Id is a valid UUID and globally unique.
+- **Gap H broad-rail residual (AJ.6).** The broad-mode RAIL coverage picker
+  skips multi-XOR chains, so a coverage firing of a multi-XOR chain parent
+  had no child and false-positived as a childless `multi_xor_violation`.
+  The rail emitter now completes such firings via
+  `_emit_plant_chain_completion`, matched by `rail.name` OR `template_name`
+  (covers rail-parented *and* template-parented chains), guarded so it
+  never doubles a single-child chain the picker already links. The
+  intentional broad-tt overlap/missed/complete demo is left intact. A new
+  densified structural guard catches the residual.
+
 ## v11.9.0 — Phase AJ (SPEC gaps G/H/I + chain_orphans cleanup + copy consolidation)
 
 Closes the second wave of integrator-surfaced SPEC gaps (G–I), plus a
