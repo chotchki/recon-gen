@@ -1,5 +1,43 @@
 # Release Notes
 
+## v11.9.0 — Phase AJ (SPEC gaps G/H/I + chain_orphans cleanup + copy consolidation)
+
+Closes the second wave of integrator-surfaced SPEC gaps (G–I), plus a
+`chain_orphans` cleanup and a fixture-copy consolidation.
+
+- **Gap G — multi-XOR plant `rail_name` leak.** The overlap plant stamped
+  the chain-parent's name into a template-child's `rail_name`, surfacing a
+  spurious `unmatched_rail_name` exception (the highest-signal L1
+  invariant — "a posting matching no declared rail is always wrong"). It
+  now resolves the fired child template's own leg_rail.
+- **Gap H — reframed.** The post-AG.1 baseline already composes (every
+  baseline chain-parent firing gets exactly one XOR/fan-in child); the
+  real residual was plant scaffolding (XOR-variant, limit-breach, …)
+  firing a chain-parent leg with no child, false-positiving as
+  `multi_xor_violation` 'missed'. Those plant firings now emit the XOR
+  child via the same `_baseline_xor_child_pick` the baseline uses — fixed
+  seed-side so the matview stays production-honest (no demo-prefix
+  filtering in the invariant).
+- **Gap I — `chain_orphans` fan_in-aware.** The L2FT orphans dataset did a
+  naive `parent − child` subtraction that read every healthy N:1 batch as
+  a pile of orphans; it now counts parent firings absent from
+  `<prefix>_transfer_parents`.
+- **`chain_orphans` cleanup.** Cascade-credit + opening-balance
+  scaffolding (which net to zero / fund starting balances) were tagged
+  with money-movement rails, flooding `chain_orphans`
+  (`ACHOriginationDailySweep`: 2619 false orphans). A new label-only
+  `InternalBalanceMaintenance` rail carries them so they satisfy
+  `unmatched_rail_name` without masquerading as firings → 2619 → 4
+  genuine orphans.
+- **spec_example copy consolidation.** Collapsed a 4-copy sprawl: deleted
+  `apps/l1_dashboard/_default_l2.yaml` + the `_l2.py` module; one
+  `common.l2.default_l2_instance` accessor loads the single packaged
+  `_l2_fixtures` copy via `importlib.resources`; every consumer + the docs
+  reference copy repointed and guarded against silent drift.
+
+A template-heavy regression fixture (`DisbursementCycle`) is now in
+spec_example as a structural guard for the Gap G/H template-parent shape.
+
 ## v11.8.0 — Phase AH (post-AE polish + bug sweep)
 
 Surfaced largely by the public Mac-mini demo + integrator feedback.
