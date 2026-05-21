@@ -1,5 +1,9 @@
 # Release Notes
 
+## v11.10.1 — Quicksight Font Error
+
+Discovered during e2e testing that Quicksight doesn't support the requested font, updating to a supported one.
+
 ## v11.10.0 — App2 renderer parity + Daily Statement KPIs compute
 
 A cold read of the v11.9.4 self-hosted (App2) build surfaced that a class
