@@ -75,7 +75,7 @@ def resolve_l2_for_demo(
     ``cfg.deployment_name`` (QS resource-ID prefix) +
     ``cfg.db_table_prefix`` (DB-table prefix); no auto-stamping needed.
     """
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
 
     cfg = load_config(config_path)
     if l2_instance_path is not None:

@@ -1841,10 +1841,8 @@ def _read_l2_yaml_bytes(l2_instance_path: str | None) -> bytes:
     byte-equality with what got hashed.
     """
     if l2_instance_path is None:
-        from importlib.resources import as_file, files
-        pkg = files("recon_gen.apps.l1_dashboard")
-        with as_file(pkg / "_default_l2.yaml") as path:
-            return Path(path).read_bytes()
+        from recon_gen.common.l2 import default_l2_bytes
+        return default_l2_bytes()
     return Path(l2_instance_path).read_bytes()
 
 

@@ -1319,6 +1319,13 @@ def emit_baseline_seed(
         # behavior for excluded rails as the skip_rails branch above.
         if only_rails is not None and rail.name not in only_rails:
             continue
+        # AJ.4b — the internal balance-maintenance rail is a label-only
+        # rail for cascade/opening scaffolding; it never fires on its own
+        # (an independent firing would pump the clearing GL it credits and
+        # show false drift). Its only legs come from the cascade + opening
+        # emitters, which tag it explicitly.
+        if str(rail.name) == _BALANCE_MAINTENANCE_RAIL:
+            continue
         rail_rng = random.Random(_seed_for_rail(rail.name, effective_base_seed))
         if rail.aggregating:
             rail_rows = _emit_baseline_for_aggregating_rail(
@@ -2449,6 +2456,11 @@ def _emit_opening_balance_rows(
             if dest not in rail_for_role:
                 rail_for_role[dest] = rail
 
+    # AJ.4b — opening-balance legs are demo funding scaffolding; tag them
+    # with the internal balance-maintenance rail (when declared) so they
+    # don't count as firings of the funding rail used only as a label.
+    bm = _balance_maintenance_rail(instance)
+
     # Build account list: template instances + internal-scope singletons.
     # Both pools need opening capital so the cumulative-from-zero balance
     # walk doesn't show false-positive overdrafts on the bank's GL +
@@ -2507,7 +2519,7 @@ def _emit_opening_balance_rows(
             direction="Debit",
             posting=opening_ts,
             transfer_id=transfer_id,
-            rail_name=rail.name,
+            rail_name=bm if bm is not None else rail.name,
             origin=src_origin,
             metadata=metadata,
             dialect=dialect,
@@ -2523,7 +2535,7 @@ def _emit_opening_balance_rows(
             direction="Credit",
             posting=opening_ts,
             transfer_id=transfer_id,
-            rail_name=rail.name,
+            rail_name=bm if bm is not None else rail.name,
             origin=dst_origin,
             metadata=metadata,
             dialect=dialect,
@@ -3630,6 +3642,35 @@ def _emit_chain_child_leg(
 # balance walk picks them up.
 
 
+_BALANCE_MAINTENANCE_RAIL = "InternalBalanceMaintenance"
+
+
+def _balance_maintenance_rail(instance: L2Instance) -> Identifier | None:
+    """AJ.4b — the declared internal balance-maintenance rail, if any.
+
+    Cascade-credit + opening-balance legs are demo balance-maintenance
+    scaffolding (they net to zero / fund starting balances so the demo's
+    cumulative-balance walk stays positive). They MUST carry a declared
+    ``rail_name`` to satisfy the ``unmatched_rail_name`` invariant — but
+    tagging them with a real money-movement rail makes every firing-count
+    analysis (``chain_orphans`` / ``multi_xor_violation`` / the L2FT rails
+    sheet) count them as firings of that rail (the 2615-row
+    ``ACHOriginationDailySweep`` false-orphan flood). The fix: tag them
+    with a dedicated internal rail (by convention named
+    ``InternalBalanceMaintenance``) that is NOT a chain parent, so they
+    pass rail-conformance without masquerading as firings.
+
+    Returns ``None`` for L2s that don't declare it — those keep the legacy
+    behavior (legs tagged with the cascaded / funding rail). The bundled
+    fixtures declare it; the contract is opt-in so arbitrary / fuzzed L2s
+    don't break.
+    """
+    for r in instance.rails:
+        if str(r.name) == _BALANCE_MAINTENANCE_RAIL:
+            return r.name
+    return None
+
+
 def _emit_baseline_cascade_credits(
     instance: L2Instance,
     state: _BaselineState,
@@ -3698,6 +3739,10 @@ def _emit_baseline_cascade_credits(
         return []
 
     rails_by_name: dict[Identifier, Rail] = {r.name: r for r in instance.rails}
+    # AJ.4b — tag every cascade leg with the internal balance-maintenance
+    # rail (when declared) so the synthetic credits don't masquerade as
+    # firings of the money-movement rail they balance.
+    bm = _balance_maintenance_rail(instance)
 
     # ---- Pattern 1: aggregating-rail bundled-child cascades ----
     # For each aggregating Rail (TwoLegRail) with bundles_activity, walk
@@ -3745,6 +3790,7 @@ def _emit_baseline_cascade_credits(
                 day=day,
                 source_transfer_id=parent_transfer_id,
                 cascade_label=label_rail,
+                balance_rail=bm,
                 counter=counter,
                 rng=rng,
                 dialect=dialect,
@@ -3790,6 +3836,7 @@ def _emit_baseline_cascade_credits(
                 day=day,
                 source_transfer_id=parent_transfer_id,
                 cascade_label=rail.name,
+                balance_rail=bm,
                 counter=counter,
                 rng=rng,
                 dialect=dialect,
@@ -3823,6 +3870,7 @@ def _emit_baseline_cascade_credits(
                 day=day,
                 source_transfer_id=parent_transfer_id,
                 cascade_label=Identifier("CardSaleDailySettlement"),
+                balance_rail=bm,
                 counter=counter,
                 rng=rng,
                 dialect=dialect,
@@ -3925,6 +3973,7 @@ def _emit_baseline_cascade_credits(
                     day=day,
                     source_transfer_id=parent_transfer_id,
                     cascade_label=Identifier("ZBAFundingInbound"),
+                    balance_rail=bm,
                     counter=counter,
                     rng=rng,
                     dialect=dialect,
@@ -3945,8 +3994,15 @@ def _emit_cascade_pair(
     counter: _Counter,
     rng: random.Random,
     dialect: Dialect,
+    balance_rail: Identifier | None = None,
 ) -> list[str]:
     """Emit one cascade credit + counter-debit pair (helper for V.5.b).
+
+    AJ.4b: when ``balance_rail`` is given (the L2 declares an
+    ``InternalBalanceMaintenance`` rail), both legs are stamped with it
+    instead of ``cascade_label`` so the synthetic balance-maintenance
+    pair doesn't count as a firing of the cascaded money-movement rail.
+    ``cascade_label`` is still recorded in metadata for debugging.
 
     The credit lands on ``target`` (the internal clearing GL / suspense
     / sub-account that's about to be debited). The counter-leg debits
@@ -3995,7 +4051,7 @@ def _emit_cascade_pair(
             direction="Debit",
             posting=posting,
             transfer_id=transfer_id,
-            rail_name=cascade_label,
+            rail_name=balance_rail if balance_rail is not None else cascade_label,
             origin="ExternalForcePosted",
             metadata=metadata,
             dialect=dialect,
@@ -4012,7 +4068,7 @@ def _emit_cascade_pair(
             direction="Credit",
             posting=posting,
             transfer_id=transfer_id,
-            rail_name=cascade_label,
+            rail_name=balance_rail if balance_rail is not None else cascade_label,
             origin="InternalInitiated",
             metadata=metadata,
             dialect=dialect,
@@ -4436,7 +4492,7 @@ def _emit_inbound_cap_breach_rows(
     transfer_id = f"tr-inbreach-{n:04d}"
     credit_money = p.amount  # inbound = Credit; sign-direction agreement (+ = money IN)
 
-    return [
+    rows = [
         # Customer DDA credit leg (the breaching one)
         _txn_row(
             id_=txn_id,
@@ -4474,6 +4530,18 @@ def _emit_inbound_cap_breach_rows(
             dialect=dialect,
         ),
     ]
+    # AJ.3 (Gap H residual): the breaching rail may also be a chain parent
+    # (e.g. an inbound rail with downstream return-rail children) — complete
+    # the firing so multi_xor_violation / chain_orphans don't read this
+    # limit-breach plant as a missing-child violation too.
+    rows.extend(_emit_plant_chain_completion(
+        transfer_id, p.rail_name, posting_ts,
+        account_id=ti.account_id, account_name=ti.name,
+        account_role=ti.template_role, account_scope=template.scope,
+        account_parent_role=parent_role,
+        instance=instance, counter=counter, dialect=dialect,
+    ))
+    return rows
 
 
 def _emit_two_template_chain_rows(
@@ -4833,7 +4901,7 @@ def _emit_xor_variant_missed_firing_rows(
     n = counter.next()
     transfer_id = f"tr-xor-missed-{n:04d}"
 
-    return [_txn_row(
+    rows = [_txn_row(
         id_=f"tx-xor-missed-{n:04d}-w",
         account_id=ti.account_id,
         account_name=ti.name,
@@ -4850,6 +4918,17 @@ def _emit_xor_variant_missed_firing_rows(
         template_name=template.name,
         dialect=dialect,
     )]
+    # AJ.3 (Gap H residual): this template may ALSO be a multi-XOR chain
+    # parent — complete the firing so multi_xor_violation / chain_orphans
+    # don't read this XOR-variant plant as a missing-child violation too.
+    rows.extend(_emit_plant_chain_completion(
+        transfer_id, template.name, posting,
+        account_id=ti.account_id, account_name=ti.name,
+        account_role=ti.template_role, account_scope=at.scope,
+        account_parent_role=parent_role,
+        instance=instance, counter=counter, dialect=dialect,
+    ))
+    return rows
 
 
 def _emit_xor_variant_overlap_rows(
@@ -4927,6 +5006,15 @@ def _emit_xor_variant_overlap_rows(
             template_name=template.name,
             dialect=dialect,
         ))
+    # AJ.3 (Gap H residual): complete the firing if this template is also
+    # a multi-XOR chain parent (see _emit_plant_chain_completion).
+    rows.extend(_emit_plant_chain_completion(
+        transfer_id, template.name, posting_a,
+        account_id=ti.account_id, account_name=ti.name,
+        account_role=ti.template_role, account_scope=at.scope,
+        account_parent_role=parent_role,
+        instance=instance, counter=counter, dialect=dialect,
+    ))
     return rows
 
 
@@ -5078,10 +5166,23 @@ def _emit_multi_xor_overlap_rows(
         ("a", posting_a, child_a_tid, p.variant_a_child_name, kind_a),
         ("b", posting_b, child_b_tid, p.variant_b_child_name, kind_b),
     ):
-        rail_name_for_row = (
-            child_name if kind == "rail" else p.chain_parent_rail_name
-        )
-        template_name_for_row = child_name if kind == "template" else None
+        # AJ.2 (Gap G): a child row's rail_name must be a REAL declared
+        # Rail. For a Rail child that's the child's own name; for a
+        # Template child it's the child template's first leg_rail
+        # (resolved the same way the parent row is). Pre-fix this fell
+        # back to ``p.chain_parent_rail_name`` for Template children —
+        # leaking the chain-PARENT name (a TransferTemplate name when the
+        # parent is a template) into the rail-conformance column, which
+        # then false-positived on the unmatched_rail_name exception.
+        if kind == "rail":
+            rail_name_for_row = child_name
+            template_name_for_row = None
+        else:  # template
+            child_resolution = _resolve_plant_chain_parent(child_name, instance)
+            rail_name_for_row = (
+                child_resolution[0] if child_resolution else child_name
+            )
+            template_name_for_row = child_name
         rows.append(_txn_row(
             id_=f"tx-mxor-overlap-{n:04d}-{suffix}",
             account_id=ti.account_id,
@@ -5152,6 +5253,86 @@ def _find_template_or_skip(
         if t.name == name:
             return t
     return None
+
+
+def _emit_plant_chain_completion(
+    parent_transfer_id: str,
+    parent_name: Identifier,
+    posting: str,
+    *,
+    account_id: Identifier,
+    account_name: Name,
+    account_role: Identifier,
+    account_scope: str,
+    account_parent_role: Identifier | None,
+    instance: L2Instance,
+    counter: _Counter,
+    dialect: Dialect,
+    base_seed: int = _BASELINE_BASE_SEED,
+) -> list[str]:
+    """AJ.3 (Gap H residual): make a plant's chain-parent firing chain-
+    complete by emitting its XOR/fan-in child.
+
+    A plant that targets some OTHER invariant (rail-conformance,
+    template-completion, XOR-variant, limit-breach, …) may fire a
+    rail/template that *also* happens to be a Chain ``parent``. The
+    firing then carries ``rail_name``/``template_name`` of a chain parent
+    but has no child Transfer, so ``<prefix>_multi_xor_violation`` and the
+    L2FT ``chain_orphans`` dataset false-positive it as a missing-child
+    violation on a "healthy" seed.
+
+    The fix is seed-side (NOT a matview/dataset filter — those run on
+    real customer data where a childless chain-parent firing IS a
+    violation, and there are no ``tr-*`` prefixes to filter on): emit one
+    non-fan_in child per chain this firing parents, picked deterministi-
+    cally by the SAME ``_baseline_xor_child_pick`` the baseline uses, so
+    the planted firing is chain-complete and only trips the invariant it
+    actually targets. The child reuses the plant's already-resolved
+    account context (the matview/dataset key on ``transfer_parent_id`` +
+    child name, not the child's account).
+
+    No-op when ``parent_name`` parents no chain (the common case — most
+    plant firings land on standalone rails). fan_in-only chains return no
+    pick (their N:1 cardinality is ``_fan_in_disagreement``'s concern,
+    not multi_xor / chain_orphans).
+    """
+    rail_names = {r.name for r in instance.rails}
+    rows: list[str] = []
+    for chain in instance.chains:
+        if str(chain.parent) != str(parent_name):
+            continue
+        child_name = _baseline_xor_child_pick(
+            chain, parent_transfer_id, base_seed,
+        )
+        if child_name is None:
+            continue
+        if child_name in rail_names:
+            rail_for_row: Identifier = child_name
+            template_for_row: Identifier | None = None
+        else:
+            child_res = _resolve_plant_chain_parent(child_name, instance)
+            rail_for_row = child_res[0] if child_res else child_name
+            template_for_row = child_name
+        n = counter.next()
+        rows.append(_txn_row(
+            id_=f"tx-plant-chainfill-{n:04d}",
+            account_id=account_id,
+            account_name=account_name,
+            account_role=account_role,
+            account_scope=account_scope,
+            account_parent_role=account_parent_role,
+            money=Decimal("100.00"),
+            direction="Credit",
+            posting=posting,
+            transfer_id=f"tr-plant-chainfill-{n:04d}",
+            rail_name=rail_for_row,
+            template_name=template_for_row,
+            origin="InternalInitiated",
+            metadata={},
+            transfer_parent_id=parent_transfer_id,
+            dialect=dialect,
+        ))
+    return rows
 
 
 def _first_template_instance_or_skip(

@@ -61,7 +61,7 @@ from recon_gen.common.handbook.l2ft_exceptions import (
     panel_markdown as l2ft_panel_markdown,
 )
 from recon_gen.common.ids import FilterGroupId, ParameterName, SheetId
-from recon_gen.common.l2 import L2Instance, load_instance
+from recon_gen.common.l2 import L2Instance
 from recon_gen.common.models import DateTimeDefaultValues
 from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_DESCRIPTION,
@@ -210,7 +210,8 @@ def build_l2_flow_tracing_app(
     auto-derivation from the L2 yaml.
     """
     if l2_instance is None:
-        l2_instance = _default_l2_instance()
+        from recon_gen.common.l2 import default_l2_instance
+        l2_instance = default_l2_instance()
 
     # N.1.f / N.4.k — resolve theme once from the L2 instance, coerced
     # to the registry default for in-canvas accent colors when the
@@ -360,18 +361,6 @@ def _l2ft_datasets(
         vid: Dataset(identifier=vid, arn=cfg.dataset_arn(aws.DataSetId))
         for vid, aws in zip(visual_ids, aws_datasets)
     }
-
-
-def _default_l2_instance() -> L2Instance:
-    """Persona-neutral default (M.3.2 — same as L1 dashboard's default).
-
-    Loaded lazily from ``tests/l2/spec_example.yaml`` so the import graph
-    doesn't pull the YAML at module load. Production callers always pass
-    their own ``l2_instance``.
-    """
-    from pathlib import Path
-    spec_yaml = Path(__file__).resolve().parents[3].parent / "tests" / "l2" / "spec_example.yaml"
-    return load_instance(spec_yaml)
 
 
 def _populate_getting_started(

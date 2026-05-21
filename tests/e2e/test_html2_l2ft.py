@@ -37,7 +37,7 @@ from typing import Any
 
 import pytest
 
-from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+from recon_gen.common.l2 import default_l2_instance
 from recon_gen.apps.l2_flow_tracing.app import build_l2_flow_tracing_app
 from recon_gen.apps.l2_flow_tracing.datasets import (
     build_all_l2_flow_tracing_datasets,

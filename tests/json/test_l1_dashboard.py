@@ -24,29 +24,11 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+from recon_gen.common.l2 import default_l2_instance
 from recon_gen.apps.l1_dashboard.app import build_l1_dashboard_app
 from recon_gen.cli import main
 from tests._test_helpers import make_test_config
 from recon_gen.common.l2 import L2Instance
-
-
-# v6.0.1 hotfix regression — the bundled `_default_l2.yaml` next to
-# `_l2.py` ships in the wheel via `pyproject.toml`'s package-data
-# entry; if it drifts from `tests/l2/spec_example.yaml` the L1
-# dashboard's "default L2" silently diverges from the test fixture.
-def test_default_l2_yaml_is_byte_identical_to_test_fixture():
-    pkg_yaml = (
-        Path(__file__).parent.parent.parent
-        / "src" / "recon_gen" / "apps" / "l1_dashboard"
-        / "_default_l2.yaml"
-    )
-    test_yaml = Path(__file__).parent.parent / "l2" / "spec_example.yaml"
-    assert pkg_yaml.read_bytes() == test_yaml.read_bytes(), (
-        f"Bundled L1 default L2 has drifted from test fixture. "
-        f"Re-sync with:\n"
-        f"  cp {test_yaml} {pkg_yaml}"
-    )
 
 
 _CFG = make_test_config()
@@ -224,7 +206,7 @@ def test_drift_dataset_sql_targets_prefixed_l1_views() -> None:
     """SQL for each drift dataset must SELECT from the L2-prefixed L1
     invariant view emitted by M.1a.7. Switching L2 instance switches the
     view targets — the parallel-stack v6 promise."""
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l1_dashboard.datasets import (
         build_drift_dataset,
         build_ledger_drift_dataset,
@@ -293,7 +275,7 @@ def test_drift_timeline_datasets_registered_and_aggregate_in_sql() -> None:
     """Both timeline datasets must register on the App + their SQL must
     GROUP BY the (day, role) keys so each dataset row IS one (day, role)
     cell — otherwise the line chart would re-aggregate at render time."""
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l1_dashboard.datasets import (
         DS_DRIFT_TIMELINE,
         DS_LEDGER_DRIFT_TIMELINE,
@@ -354,7 +336,7 @@ def test_overdraft_sheet_has_kpi_and_table() -> None:
 def test_overdraft_dataset_registered_and_targets_l1_view() -> None:
     """The L1 overdraft dataset must be registered + its SQL must point
     at the L2-prefixed `<prefix>_overdraft` invariant view."""
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l1_dashboard.datasets import (
         DS_OVERDRAFT,
         build_overdraft_dataset,
@@ -394,7 +376,7 @@ def test_limit_breach_sheet_has_kpi_and_table() -> None:
 def test_limit_breach_dataset_registered_and_targets_l1_view() -> None:
     """The L1 limit-breach dataset must be registered + its SQL must
     point at the L2-prefixed `<prefix>_limit_breach` invariant view."""
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l1_dashboard.datasets import (
         DS_LIMIT_BREACH,
         build_limit_breach_dataset,
@@ -440,7 +422,7 @@ def test_todays_exceptions_dataset_reads_matview() -> None:
     moved into the L1 schema in M.1a.9 so QS reads a precomputed
     table instead of re-running the 5-branch UNION per visual.
     """
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l1_dashboard.datasets import (
         DS_TODAYS_EXCEPTIONS,
         build_todays_exceptions_dataset,
@@ -481,7 +463,7 @@ def test_transactions_sheet_has_single_table() -> None:
 def test_transactions_dataset_registered_and_targets_matview() -> None:
     """The new transactions dataset reads from the prefix's
     `<prefix>_current_transactions` matview (M.1a.9)."""
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l1_dashboard.datasets import (
         DS_TRANSACTIONS,
         build_transactions_dataset,
@@ -569,7 +551,7 @@ def test_daily_statement_filter_groups_target_correct_columns() -> None:
 def test_daily_statement_datasets_registered() -> None:
     """Both new datasets register on the App tree + their SQL targets
     the prefixed L2 instance (mirrors the M.2a.3 pattern)."""
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l1_dashboard.datasets import (
         DS_DAILY_STATEMENT_SUMMARY,
         DS_DAILY_STATEMENT_TRANSACTIONS,
@@ -607,7 +589,7 @@ def test_daily_statement_transactions_business_day_is_dialect_aware() -> None:
     shaped value across PG and Oracle. PG uses DATE_TRUNC; Oracle uses
     CAST(TRUNC(...) AS TIMESTAMP)."""
     from dataclasses import replace
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l1_dashboard.datasets import (
         build_daily_statement_transactions_dataset,
     )
@@ -676,7 +658,7 @@ def test_drift_sheet_lists_internal_accounts_from_l2() -> None:
     assert "Internal Accounts in Scope" in accounts_xml
     # Sasquatch fixture has at least one GL control + one DDA template;
     # both should appear.
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     instance = default_l2_instance()
     internal_account_ids = [
         a.id for a in instance.accounts if a.scope == "internal"
@@ -1054,7 +1036,7 @@ def test_pending_aging_buckets_computed_in_dataset_sql() -> None:
     the analysis-level CalcField was dropped when the buckets moved into
     the SQL). Number-prefixed labels keep the QS bar chart sort stable
     without an explicit sort_by override."""
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l1_dashboard.datasets import (
         build_stuck_pending_dataset,
     )
@@ -1097,7 +1079,7 @@ def test_pending_aging_dataset_registered() -> None:
     bucket-CASE SELECT over the prefixed `<prefix>_stuck_pending` matview
     with the Y.2.g pushdown WHERE (account_id data-value + transfer_type
     / rail_name enums via `<<$pL1Pending*>>`)."""
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l1_dashboard.datasets import (
         DS_STUCK_PENDING,
         build_stuck_pending_dataset,
@@ -1151,7 +1133,7 @@ def test_unbundled_aging_uses_4_buckets() -> None:
     `max_unbundled_age` is typically days, not hours. Same SQL-side
     CASE-over-`age_seconds` shape (Y.3.e), aliased
     `stuck_unbundled_aging_bucket`."""
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l1_dashboard.datasets import (
         build_stuck_unbundled_dataset,
     )
@@ -1187,7 +1169,7 @@ def test_unbundled_aging_dataset_registered() -> None:
     """DS_STUCK_UNBUNDLED registers + its SQL is the bucket-CASE SELECT
     over the prefixed `<prefix>_stuck_unbundled` matview with the Y.2.g
     pushdown WHERE (`<<$pL1Unbundled*>>`)."""
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l1_dashboard.datasets import (
         DS_STUCK_UNBUNDLED,
         build_stuck_unbundled_dataset,
@@ -1241,7 +1223,7 @@ def test_supersession_datasets_registered_and_target_base_tables() -> None:
     """Both supersession datasets register on the App and read from
     the BASE tables (NOT Current*) — Current* hides superseded
     entries by design, but the audit specifically needs them."""
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l1_dashboard.datasets import (
         DS_SUPERSESSION_DAILY_BALANCES,
         DS_SUPERSESSION_TRANSACTIONS,

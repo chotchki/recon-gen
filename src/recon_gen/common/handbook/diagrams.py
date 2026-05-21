@@ -1014,9 +1014,9 @@ def _build_app(app_name: str):
     (sheets + visuals + dataset refs), not a real datasource.
     """
     from recon_gen.common.config import Config
-    from recon_gen.common.l2.loader import load_instance
+    from recon_gen.common.l2 import default_l2_instance
 
-    spec_example = load_instance(_TESTS_L2_DIR / "spec_example.yaml")
+    spec_example = default_l2_instance()
     cfg = Config(
         aws_account_id="000000000000",
         aws_region="us-east-2",
@@ -1066,10 +1066,3 @@ _APP_BUILDERS = {
 
 _DOCS_DIR = Path(__file__).parent.parent.parent / "docs"
 _CONCEPTUAL_DIR = _DOCS_DIR / "_diagrams" / "conceptual"
-# Bundled L2 fixtures live inside the package at
-# ``src/recon_gen/_l2_fixtures/`` (see ``main.py`` for the matching
-# constant). Pre-restructure this walked up to ``<repo>/tests/l2/``,
-# which broke ``render_dataflow`` from an installed wheel.
-_TESTS_L2_DIR = (
-    Path(__file__).parent.parent.parent / "_l2_fixtures"
-)

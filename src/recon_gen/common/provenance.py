@@ -243,15 +243,13 @@ def l2_yaml_sha256(l2_instance_path: str | None) -> str:
     """SHA256 of the L2 YAML file bytes (verbatim, no normalization).
 
     When the user passed ``--l2 path``, hash that file. When they
-    didn't (audit ran against the bundled default), reach into the
-    L1 dashboard package's ``_default_l2.yaml`` resource so the
+    didn't (audit ran against the bundled default), hash the packaged
+    ``spec_example.yaml`` bytes via the shared accessor so the
     fingerprint is still deterministic for the no-flag case.
     """
     if l2_instance_path is None:
-        from importlib.resources import as_file, files
-        pkg = files("recon_gen.apps.l1_dashboard")
-        with as_file(pkg / "_default_l2.yaml") as path:
-            data = Path(path).read_bytes()
+        from recon_gen.common.l2 import default_l2_bytes
+        data = default_l2_bytes()
     else:
         data = Path(l2_instance_path).read_bytes()
     return hashlib.sha256(data).hexdigest()

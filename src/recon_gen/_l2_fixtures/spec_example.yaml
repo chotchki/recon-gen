@@ -229,6 +229,62 @@ rails:
     destination_origin: ExternalForcePosted
     metadata_keys: [accrual_id]
 
+  # AJ.1.spec (2026-05-20) — template-heavy regression fixture for SPEC
+  # gaps G + H. DisbursementAccrual is the leg_rail of the DisbursementCycle
+  # TEMPLATE (below), which is the parent of a multi-XOR chain. Because a
+  # leg_rail of a template fires BROADLY in the per-rail loop (M.4.2a stamps
+  # template_name on those firings so they surface on the L2FT Transfer
+  # Templates sheet), every DisbursementAccrual firing carries
+  # template_name=DisbursementCycle but has NO XOR child — the multi_xor_
+  # violation matview's parent_firings CTE (template_name IN parent_names)
+  # then false-positives them as 'missed' (Gap H). Two-leg balanced (S2 —
+  # no expected_net; the template owns it) so the template firing reads
+  # 'Complete', not 'Imbalanced'.
+  - name: DisbursementAccrual
+    source_role: CustomerSubledger
+    destination_role: ClearingSuspense
+    source_origin: InternalInitiated
+    destination_origin: InternalInitiated
+    metadata_keys: [disbursement_id]
+
+  # The two XOR settlement vehicles — exactly ONE should follow each
+  # DisbursementCycle firing (ACH transfer vs. paper check). Both are
+  # children of the DisbursementCycle chain below.
+  - name: DisbursementSettleACH
+    source_role: ClearingSuspense
+    destination_role: ExternalCounterparty
+    expected_net: 0
+    source_origin: InternalInitiated
+    destination_origin: ExternalForcePosted
+    metadata_keys: [disbursement_id]
+
+  - name: DisbursementSettleCheck
+    source_role: ClearingSuspense
+    destination_role: ExternalCounterparty
+    expected_net: 0
+    source_origin: InternalInitiated
+    destination_origin: ExternalForcePosted
+    metadata_keys: [disbursement_id]
+
+  # AJ.4b (2026-05-20) — label-only internal balance-maintenance rail.
+  # The seed's cascade-credit + opening-balance legs (demo scaffolding
+  # that keeps the cumulative-balance walk positive) are tagged with THIS
+  # rail instead of a money-movement rail. They must carry a declared
+  # rail_name (the unmatched_rail_name L1 invariant rejects any posting
+  # matching no rail), but tagging them with a real rail made every
+  # firing-count analysis (chain_orphans / multi_xor_violation / the L2FT
+  # rails sheet) count the scaffolding as firings of that rail. This rail
+  # never fires on its own (the seed skips it in the per-rail loop — an
+  # independent firing would pump the clearing GL it credits); its only
+  # postings are the cascade + opening legs, which carry source_transfer_id.
+  - name: InternalBalanceMaintenance
+    source_role: ExternalCounterparty
+    destination_role: ClearingSuspense
+    expected_net: 0
+    source_origin: ExternalForcePosted
+    destination_origin: InternalInitiated
+    metadata_keys: [source_transfer_id]
+
 transfer_templates:
   - name: MerchantSettlementCycle
     expected_net: 0
@@ -293,6 +349,23 @@ transfer_templates:
     completion: business_day_end+1d
     leg_rails:
       - BatchPayoutClose
+
+  # AJ.1.spec (2026-05-20) — the template-heavy regression parent. A
+  # TransferTemplate that is BOTH (a) a multi-children XOR chain parent
+  # (the DisbursementCycle chain below) AND (b) baseline-fired — its leg
+  # DisbursementAccrual fires per-business-day in the rail loop. That
+  # composition is what the SPEC Gap G + Gap H families slipped through:
+  # the AB.6/AG fixes were validated only against Rail-parent multi-XOR
+  # chains, so the Template-parent shape (this one) was never exercised.
+  # Sorts AFTER BulkAccrualSettlement, so the AB.6.6 multi-XOR plant
+  # picker still selects the Rail-parent chain (preserving that coverage);
+  # this chain's Gap H surfaces purely from baseline broad-firing.
+  - name: DisbursementCycle
+    expected_net: 0
+    transfer_key: [disbursement_id]
+    completion: business_day_end+1d
+    leg_rails:
+      - DisbursementAccrual
 
 chains:
   # First chain on spec_example — makes the L2FT Chains sheet
@@ -392,6 +465,32 @@ chains:
       when no child fires (the chain.md contract was dropped on
       the floor) or 'overlap' when both fire (XOR alternation
       collapsed into a duplicate).
+
+  # AJ.1.spec (2026-05-20) — TEMPLATE-parent multi-XOR chain (the
+  # complement of the Rail-parent BulkAccrualSettlement chain above).
+  # DisbursementCycle (a TransferTemplate) is the parent; the two
+  # settlement-vehicle rails are XOR children. This is the structural
+  # guard the SPEC gap doc calls for: a single template that is a
+  # multi-XOR chain parent AND independently baseline-fired catches both
+  # Gap G (multi-XOR plant emitter leaking the parent name into rail_name
+  # for template children) and Gap H (broad leg firings false-positiving
+  # as 'missed' on a healthy baseline). Before the AJ.2/AJ.3 fixes, a
+  # fresh seed shows DisbursementCycle 'missed' rows in
+  # <prefix>_multi_xor_violation despite every cycle being correctly
+  # settled.
+  - parent: DisbursementCycle
+    children:
+      - DisbursementSettleACH
+      - DisbursementSettleCheck
+    description: |
+      Demonstrates a TEMPLATE-parent multi-XOR chain: every
+      DisbursementCycle firing SHOULD be settled by exactly ONE of
+      the two vehicle rails (ACH transfer or paper check). The L1
+      multi_xor_violation invariant flags 'missed' (neither vehicle
+      fired) and 'overlap' (both fired). Unlike the Rail-parent
+      BulkAccrualSettlement chain, the parent here is a TransferTemplate
+      whose leg also fires standalone — the composition that the
+      Template-parent regression coverage exists to protect.
 
 limit_schedules:
   # Cap matches ExternalRailOutbound (Z.B 2026-05-15: rail name IS the type).

@@ -29,7 +29,7 @@ from recon_gen.apps.investigation.app import build_investigation_app
 from recon_gen.apps.investigation.datasets import build_all_datasets
 from recon_gen.common.ids import VisualId
 from recon_gen.common.html._tree_fetcher import make_tree_db_fetcher
-from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+from recon_gen.common.l2 import default_l2_instance
 from tests._test_helpers import make_test_config
 
 

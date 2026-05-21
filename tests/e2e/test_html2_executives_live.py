@@ -76,7 +76,7 @@ def _load_l2_instance() -> Any:
     """Load the L2 instance the test runs against — env override via
     ``RECON_GEN_TEST_L2_INSTANCE``, else the bundled default
     (spec_example)."""
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.common.l2 import load_instance
 
     override = RECON_GEN_TEST_L2_INSTANCE.get_or_none()

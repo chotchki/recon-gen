@@ -35,7 +35,7 @@ from recon_gen.apps.executives.datasets import (
 from recon_gen.apps.investigation.datasets import (
     build_all_datasets as build_inv_datasets,
 )
-from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+from recon_gen.common.l2 import default_l2_instance
 from recon_gen.apps.l1_dashboard.datasets import (
     build_all_l1_dashboard_datasets,
 )

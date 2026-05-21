@@ -34,9 +34,7 @@ from dataclasses import replace
 from recon_gen.apps.executives import datasets as _register_contracts  # noqa: F401
 # N.4.b: Executives reads the same default institution YAML as L1
 # (per the N.2 audit's "one institution YAML drives all apps" framing).
-# The default lives under apps/l1_dashboard/ for now; the path will be
-# neutralized when the spec/scenario YAML split lands (Phase O candidate).
-from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+from recon_gen.common.l2 import default_l2_instance
 from recon_gen.common import rich_text as rt
 from recon_gen.common.config import Config
 from recon_gen.common.ids import FilterGroupId, SheetId, VisualId

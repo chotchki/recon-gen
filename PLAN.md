@@ -78,6 +78,7 @@ Third supported dialect alongside Postgres + Oracle. Schema emit, matview-as-tab
 
 **Scope:**
 
+- [ ] AK.0 AK.0 QS dataset-parameter GUIDs are shape-only, not valid → QS fails to load
 - [ ] X.6.a mkdocstrings expansion. Auto-generate L2 entity reference (`common/l2/primitives.py` — Account, Rail, Chain, TransferTemplate, etc.) and visual reference (`common/tree/visuals.py` — KPI, Table, BarChart, Sankey, ForceGraph). Per-class page with docstring + field table. Replaces today's hand-written `docs/reference/l2-spec.md` + per-visual handbook callouts.
 - [ ] X.6.b Custom mkdocs-macros plugin: tree → walkthrough scaffolds. Reads sheet/visual descriptions from each app's tree (`apps/<app>/app.py` builds the tree; the plugin walks it). Emits per-sheet walkthrough scaffold with the sheet's own `description` as the lede + each visual's `subtitle` as a section. Hand-written prose can extend the scaffold but the model-derived parts can't drift.
 - [ ] X.6.c Auto dataset reference. `DatasetContract` lists columns + types + (often) shape. Generates per-dataset reference page. Replaces today's hand-written column lists in `docs/data-contract/`.
@@ -322,11 +323,13 @@ The user's framing: "make that test general and do it for ANY yaml we're making 
 
 Source: `SPEC_gap_feedback.md` Gaps G–I, surfaced by post-AG integration re-testing. G+H share a root cause — template-parent shapes weren't in the fixture set, so the AG fixes validated against Rail-parent shapes only. A "template-heavy" regression fixture (a template that is a multi-children chain-parent + baseline-fired + MultiXor plant target) is the shared structural guard; built first (red), G+H turn it green. Gap I is the independent fan_in-aware `chain_orphans` dataset (the planned AB.4.8 step).
 
-- [ ] AJ.0 Locks: `spec_example` is the template-heavy fixture home (extend the `BulkAccrualSettlement`-off-`MerchantSettlementCycle` shape); Gap I uses the precise `transfer_parents` computation (not skip-fan_in); Gap G `rail_name` = the fired variant's resolved leg_rail; fixture-first TDD.
-- [ ] AJ.1 Template-heavy regression fixture in `spec_example` (template = multi-children chain-parent + baseline-fired + MultiXor plant target) + red Gap G (`unmatched_rail_name`) and Gap H (`multi_xor_violation` missed) assertions.
-- [ ] AJ.2 Gap G — `auto_scenario.py` MultiXor plant emitters set `rail_name` to the fired child template's resolved leg_rail, never the chain-parent name; Template-parent plant-emitter unit test → Gap G green.
-- [ ] AJ.3 Gap H — route `_emit_baseline_template_firings` + the template-instance baseline path through `_baseline_xor_child_pick` for templates that are also multi-children chain parents → Gap H composition green.
-- [ ] AJ.4 Gap I — L2FT `chain_orphans` dataset (`apps/l2_flow_tracing/datasets.py::build_exc_chain_orphans_dataset`) computes fan_in parent-side orphans via `<prefix>_transfer_parents`, not naive `parent − child`; 4-way agreement.
+- [x] AJ.0 Locks: `spec_example` is the template-heavy fixture home (extend the `BulkAccrualSettlement`-off-`MerchantSettlementCycle` shape); Gap I uses the precise `transfer_parents` computation (not skip-fan_in); Gap G `rail_name` = the fired variant's resolved leg_rail; fixture-first TDD.
+  - [x] AJ.4a AJ.4a Consolidate the 4 spec_example copies → one packaged copy + shared accessor
+  - [x] AJ.4b AJ.4b chain_orphans clean on healthy baseline — residuals beyond Gap I
+- [x] AJ.1 Template-heavy regression fixture in `spec_example` (template = multi-children chain-parent + baseline-fired + MultiXor plant target) + red Gap G (`unmatched_rail_name`) and Gap H (`multi_xor_violation` missed) assertions.
+- [x] AJ.2 Gap G — `auto_scenario.py` MultiXor plant emitters set `rail_name` to the fired child template's resolved leg_rail, never the chain-parent name; Template-parent plant-emitter unit test → Gap G green.
+- [x] AJ.3 AJ.3 Gap H residual — plant helpers emit chain-complete firings (not baseline)
+- [x] AJ.4 Gap I — L2FT `chain_orphans` dataset (`apps/l2_flow_tracing/datasets.py::build_exc_chain_orphans_dataset`) computes fan_in parent-side orphans via `<prefix>_transfer_parents`, not naive `parent − child`; 4-way agreement.
 - [ ] AJ.5 Re-lock seeds, full sweep + 4-way agreement green, commit + cut release.
 
 ---

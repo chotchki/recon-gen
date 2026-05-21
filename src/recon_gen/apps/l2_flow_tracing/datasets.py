@@ -1113,6 +1113,18 @@ def build_exc_chain_orphans_dataset(
     > 0``. XOR-group multi/none violations are deferred to a follow-on
     substep — a precise XOR check needs per-Transfer-id grouping that
     the simpler aggregate doesn't capture.
+
+    AJ.4 (Gap I): a ``fan_in`` (N:1) chain is singleton-children, so it's
+    labeled ``Required`` and would take the naive
+    ``parent_firing_count − child_firing_count`` path — but N parents
+    converging on far fewer shared child Transfers makes that difference
+    large and positive on *healthy* batching, so every fan_in chain read
+    as a pile of orphans. For fan_in edges the orphan count is instead
+    the number of parent firings whose ``transfer_id`` is NOT a parent of
+    any child batch Transfer (the genuine "cycle closed but never
+    assigned to a batch"), derived from the AB.4.3 ``_transfer_parents``
+    matview. This is production-correct: fan_in is a real structural
+    property of the L2, not a demo artifact.
     """
     prefix = cfg.db_table_prefix
     declared = _declared_chains_cte(l2_instance, cfg.dialect)
@@ -1123,6 +1135,7 @@ def build_exc_chain_orphans_dataset(
         f"    d.parent_name,\n"
         f"    d.child_name,\n"
         f"    d.required,\n"
+        f"    d.fan_in,\n"
         f"    COALESCE((\n"
         f"      SELECT COUNT(DISTINCT t.transfer_id)\n"
         f"      FROM {prefix}_current_transactions t\n"
@@ -1138,20 +1151,48 @@ def build_exc_chain_orphans_dataset(
         f"          WHERE COALESCE(t2.template_name, t2.rail_name) "
         f"= d.parent_name\n"
         f"        )\n"
-        f"    ), 0) AS child_firing_count\n"
+        f"    ), 0) AS child_firing_count,\n"
+        # AJ.4 (Gap I): fan_in-only — parent firings not assigned to any
+        # batch. CASE-guarded so the _transfer_parents anti-join only runs
+        # for fan_in edges (0 for the naive non-fan_in path).
+        f"    CASE WHEN d.fan_in = 1 THEN COALESCE((\n"
+        f"      SELECT COUNT(DISTINCT t3.transfer_id)\n"
+        f"      FROM {prefix}_current_transactions t3\n"
+        f"      WHERE COALESCE(t3.template_name, t3.rail_name) "
+        f"= d.parent_name\n"
+        f"        AND t3.transfer_id NOT IN (\n"
+        f"          SELECT tp.parent_transfer_id\n"
+        f"          FROM {prefix}_transfer_parents tp\n"
+        f"          JOIN {prefix}_current_transactions ch\n"
+        f"            ON ch.transfer_id = tp.child_transfer_id\n"
+        f"          WHERE COALESCE(ch.template_name, ch.rail_name) "
+        f"= d.child_name\n"
+        f"        )\n"
+        f"    ), 0) ELSE 0 END AS unbatched_parent_count\n"
         f"  FROM declared d\n"
+        f"),\n"
+        f"edge_orphans AS (\n"
+        f"  SELECT\n"
+        f"    e.parent_name,\n"
+        f"    e.child_name,\n"
+        f"    e.required,\n"
+        f"    e.parent_firing_count,\n"
+        f"    e.child_firing_count,\n"
+        f"    CASE WHEN e.fan_in = 1 THEN e.unbatched_parent_count\n"
+        f"         ELSE {greatest('e.parent_firing_count - e.child_firing_count', '0', dialect=cfg.dialect)} "
+        f"END AS orphan_count\n"
+        f"  FROM edge_runtime e\n"
         f")\n"
         f"SELECT\n"
         f"  e.parent_name,\n"
         f"  e.child_name,\n"
         f"  e.parent_firing_count,\n"
         f"  e.child_firing_count,\n"
-        f"  {greatest('e.parent_firing_count - e.child_firing_count', '0', dialect=cfg.dialect)} "
-        f"AS orphan_count\n"
-        f"FROM edge_runtime e\n"
+        f"  e.orphan_count\n"
+        f"FROM edge_orphans e\n"
         f"WHERE e.required = 'Required'\n"
-        f"  AND e.parent_firing_count > e.child_firing_count\n"
-        f"ORDER BY orphan_count DESC, e.parent_name, e.child_name"
+        f"  AND e.orphan_count > 0\n"
+        f"ORDER BY e.orphan_count DESC, e.parent_name, e.child_name"
     )
     return build_dataset(
         cfg, cfg.prefixed("l2ft-exc-chain-orphans-dataset"),
@@ -1600,6 +1641,7 @@ def _declared_chains_cte(l2_instance: L2Instance, dialect: Dialect) -> str:
     df = dual_from(dialect)
     if not l2_instance.chains:
         nt = typed_null("varchar(4000)", dialect)
+        ni = typed_null("integer", dialect)
         return (
             "  SELECT\n"
             f"    {nt} AS parent_name,\n"
@@ -1607,7 +1649,8 @@ def _declared_chains_cte(l2_instance: L2Instance, dialect: Dialect) -> str:
             f"    {nt} AS required,\n"
             f"    {nt} AS xor_group,\n"
             f"    {nt} AS source_node,\n"
-            f"    {nt} AS target_node"
+            f"    {nt} AS target_node,\n"
+            f"    {ni} AS fan_in"
             f"{df}\n"
             "  WHERE 1=0"
         )
@@ -1624,6 +1667,11 @@ def _declared_chains_cte(l2_instance: L2Instance, dialect: Dialect) -> str:
             child = child_spec.name
             source_node = str(c.parent)
             target_node = str(child)
+            # AJ.4 (Gap I): expose per-child fan_in so chain_orphans can
+            # compute N:1 participation correctly (a fan_in child is
+            # singleton ⇒ labeled Required, so without this flag it would
+            # take the naive parent−child subtraction path).
+            fan_in_flag = 1 if child_spec.fan_in else 0
             rows.append(
                 "  SELECT "
                 f"{_sql_str(str(c.parent))} AS parent_name, "
@@ -1631,7 +1679,8 @@ def _declared_chains_cte(l2_instance: L2Instance, dialect: Dialect) -> str:
                 f"{_sql_str(required_label)} AS required, "
                 f"{_sql_nullable_str(xor_group)} AS xor_group, "
                 f"{_sql_str(source_node)} AS source_node, "
-                f"{_sql_str(target_node)} AS target_node"
+                f"{_sql_str(target_node)} AS target_node, "
+                f"{fan_in_flag} AS fan_in"
                 f"{df}"
             )
     return "\n  UNION ALL\n".join(rows)

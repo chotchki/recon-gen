@@ -598,6 +598,29 @@ rails:
       where the receivable lands). Cadence `monthly-eom` mirrors the
       contracted processor billing cycle.
 
+  # AJ.4b (2026-05-20) — label-only internal balance-maintenance rail.
+  # The seed's cascade-credit + opening-balance legs (demo scaffolding
+  # that keeps the cumulative-balance walk positive) are tagged with THIS
+  # rail rather than a money-movement rail, so they pass the
+  # unmatched_rail_name invariant WITHOUT counting as firings of a real
+  # rail (the 2615-row ACHOriginationDailySweep false-orphan flood in
+  # chain_orphans). Never fires on its own (the seed skips it in the
+  # per-rail loop); its only postings are the cascade + opening legs.
+  - name: InternalBalanceMaintenance
+    source_role: ExternalCounterparty
+    destination_role: InternalSuspenseRecon
+    expected_net: 0
+    source_origin: ExternalForcePosted
+    destination_origin: InternalInitiated
+    metadata_keys: [source_transfer_id]
+    description: |
+      Internal balance-maintenance rail. Carries the demo's
+      cascade-credit + opening-balance scaffolding legs (which keep the
+      cumulative-balance walk positive) so they reference a real declared
+      rail without masquerading as firings of a money-movement rail.
+      Never fires on its own — its postings come only from the cascade +
+      opening emitters.
+
   # ----- Inbound ACH return paths (XOR group) ------------------------
   #
   # When NACHA returns an inbound ACH, SNB posts a reversal. The return

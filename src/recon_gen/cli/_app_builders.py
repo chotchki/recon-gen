@@ -59,7 +59,7 @@ def _all_dataset_filenames(
     with the wrong prefix and the prune step deletes the sibling's
     actual files.
     """
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.executives.datasets import (
         build_all_datasets as _exec,
     )
@@ -91,7 +91,7 @@ def _all_dataset_filenames(
 
 def _resolve_l2(l2_instance_path: str | None):  # type: ignore[no-untyped-def]: returns L2Instance, untyped pending CLI-wide sweep
     """Load + return the L2 instance, defaulting to the bundled spec_example."""
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.common.l2 import load_instance
 
     if l2_instance_path is not None:

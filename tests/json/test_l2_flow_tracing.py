@@ -37,7 +37,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+from recon_gen.common.l2 import default_l2_instance
 from recon_gen.apps.l2_flow_tracing.app import (
     build_l2_flow_tracing_app,
 )

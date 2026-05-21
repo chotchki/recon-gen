@@ -84,7 +84,7 @@ _TEST_CFG = make_test_config(db_table_prefix="spec_example")
 # Investigation's ``build_all_datasets`` requires an L2Instance for
 # the App Info matview names (P.9f.f — dropped silent fallback). Tests
 # pass the spec_example default so prefix derivation matches _TEST_CFG.
-from recon_gen.apps.l1_dashboard._l2 import default_l2_instance  # noqa: E402
+from recon_gen.common.l2 import default_l2_instance  # noqa: E402
 
 _TEST_L2 = default_l2_instance()
 

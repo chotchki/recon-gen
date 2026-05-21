@@ -139,7 +139,7 @@ def test_l2ft_rails_sheet_auto_derives_post_aa_a_3_pushdown_specs() -> None:
     skipped). Every dropdown auto-derives as a ``ParameterDropdownSpec``
     now; pre-AA.A.3 the pushdown trio derived as MULTI but the flip
     moved them to SINGLE."""
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l2_flow_tracing.app import build_l2_flow_tracing_app
     from recon_gen.apps.l2_flow_tracing.datasets import (
         build_all_l2_flow_tracing_datasets,

@@ -1451,3 +1451,46 @@ def load_instance(path: Path | str, *, validate: bool = True) -> L2Instance:
         from .validate import validate as _validate
         _validate(inst)
     return inst
+
+
+# -- Packaged default instance (AJ.4a) --------------------------------------
+#
+# ``spec_example`` is the persona-neutral default every app falls back to
+# when the caller passes no explicit ``l2_instance``. The SINGLE accessor:
+# every ``src/`` consumer (apps, CLI, audit, handbook diagrams) loads through
+# here, so the packaged copy can't drift per-consumer — that was the 4-copy
+# sprawl AJ.4a collapsed (each component had grown its own copy because
+# ``tests/l2/`` — the human-edited source of truth — isn't shipped in the
+# wheel). The canonical packaged copy is ``recon_gen/_l2_fixtures/
+# spec_example.yaml`` (kept byte-identical to ``tests/l2/`` by
+# ``test_l2_fixtures_sync``); we read it via ``importlib.resources`` so it
+# resolves from an installed wheel, doing the load INSIDE the ``as_file``
+# block so it's correct even under a zipimport install.
+
+_PACKAGED_DEFAULT = ("_l2_fixtures", "spec_example.yaml")
+
+
+def default_l2_instance() -> L2Instance:
+    """Load + validate the persona-neutral default ``spec_example`` instance.
+
+    The one built-in default every app's build path uses when the caller
+    doesn't supply an explicit ``l2_instance``. Pass
+    ``load_instance(".../sasquatch_pr.yaml")`` for the canonical persona demo.
+    """
+    from importlib.resources import as_file, files
+    resource = files("recon_gen").joinpath(*_PACKAGED_DEFAULT)
+    with as_file(resource) as path:
+        return load_instance(Path(path))
+
+
+def default_l2_bytes() -> bytes:
+    """Raw bytes of the packaged default ``spec_example.yaml``.
+
+    For the audit fingerprint / provenance hash of the no-``--l2`` case —
+    hashing the exact bytes the default is loaded from keeps the fingerprint
+    deterministic + byte-identical to what the report claims it hashed.
+    """
+    from importlib.resources import as_file, files
+    resource = files("recon_gen").joinpath(*_PACKAGED_DEFAULT)
+    with as_file(resource) as path:
+        return Path(path).read_bytes()

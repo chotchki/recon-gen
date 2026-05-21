@@ -97,11 +97,14 @@ def test_rail_counts_pinned() -> None:
     # (MerchantDailySettleAggregator two-leg + MerchantWeeklyBatchClose
     # single-leg). Total: 27 + 2 = 29; two_leg 15 → 16; single_leg
     # 12 → 13.
-    assert len(inst.rails) == 29
+    # AJ.4b (2026-05-20): +1 two-leg label-only rail
+    # (InternalBalanceMaintenance) carrying cascade/opening scaffolding.
+    # Total 29 → 30; two_leg 16 → 17; single_leg unchanged.
+    assert len(inst.rails) == 30
     two_leg = [r for r in inst.rails if isinstance(r, TwoLegRail)]
     single_leg = [r for r in inst.rails if isinstance(r, SingleLegRail)]
     aggregating = [r for r in inst.rails if r.aggregating]
-    assert len(two_leg) == 16
+    assert len(two_leg) == 17
     assert len(single_leg) == 13
     assert len(aggregating) == 3
 

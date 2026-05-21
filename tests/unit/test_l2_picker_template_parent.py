@@ -18,6 +18,7 @@ in the plant-emit test files.
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from decimal import Decimal
 from typing import Literal
@@ -263,4 +264,63 @@ def test_template_parent_multi_xor_plant_emits_with_template_name() -> None:
         "(AG.3 synthesizes the parent row from the parent template's first "
         "leg_rail). Pre-fix the plant emitter returned [] for Template "
         "parents."
+    )
+
+
+def test_template_parent_multi_xor_plant_child_rail_name_is_real_rail() -> None:
+    """AJ.2 (Gap G): a MultiXorOverlapPlant must stamp every child row's
+    ``rail_name`` with a REAL declared Rail, never the chain-parent's
+    name.
+
+    When the chain children are TransferTemplates, the emitter takes the
+    ``kind == 'template'`` branch at ``seed.py``'s
+    ``_emit_multi_xor_overlap_rows`` and (pre-fix) sets
+    ``rail_name = p.chain_parent_rail_name``. For a Template-parent chain
+    that's a TransferTemplate name — which matches no declared Rail, so
+    the planted child surfaces as a spurious ``unmatched_rail_name``
+    exception (the highest-signal L1 invariant: 'a posting matching no
+    declared rail is always wrong'). The fix: resolve ``rail_name`` to
+    the fired child template's own leg_rail.
+
+    Hermetic L2 with NO Rail-parent alternative so the picker selects
+    this chain; both children are Templates so the buggy branch fires.
+    """
+    parent_tmpl = _template("ParentTmpl", ("ParentLeg",))
+    child_a = _template("ChildTmplA", ("LegA",))
+    child_b = _template("ChildTmplB", ("LegB",))
+    inst = _l2_with_chain(
+        chain=Chain(
+            parent=Identifier("ParentTmpl"),
+            children=(
+                ChainChildSpec(name=Identifier("ChildTmplA")),
+                ChainChildSpec(name=Identifier("ChildTmplB")),
+            ),
+        ),
+        extra_templates=(parent_tmpl, child_a, child_b),
+        extra_rails=(
+            _single_leg("ParentLeg"),
+            _single_leg("LegA", direction="Credit"),
+            _single_leg("LegB", direction="Credit"),
+        ),
+    )
+    report = default_scenario_for(inst)
+    sql = emit_full_seed(
+        inst, report.scenario, prefix="t",
+        anchor=date(2030, 1, 1), dialect=Dialect.SQLITE,
+    )
+    # Overlap-plant CHILD rows have tx ids tx-mxor-overlap-NNNN-a / -b
+    # (the parent row is ...-p). A correct child row references only the
+    # child template (LegA/LegB + ChildTmplA/B) — never the chain-parent
+    # template name. The leak: rail_name = 'ParentTmpl'.
+    child_row_re = re.compile(r"tx-mxor-overlap-\d+-[ab]'")
+    leaking_child_rows = [
+        ln for ln in sql.splitlines()
+        if child_row_re.search(ln) and "'ParentTmpl'" in ln
+    ]
+    assert not leaking_child_rows, (
+        "MultiXorOverlapPlant leaked the chain-parent template name "
+        "'ParentTmpl' into a child row's rail_name (seed.py Gap G, the "
+        "kind=='template' branch). The child row's rail_name must be the "
+        "child template's leg_rail (LegA / LegB), a declared Rail. "
+        f"Leaking rows: {len(leaking_child_rows)}"
     )

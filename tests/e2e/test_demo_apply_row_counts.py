@@ -23,7 +23,7 @@ from typing import Any
 
 import pytest
 
-from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+from recon_gen.common.l2 import default_l2_instance
 from recon_gen.common.config import Config, load_config
 from recon_gen.common.db import connect_demo_db
 from recon_gen.common.env_keys import (

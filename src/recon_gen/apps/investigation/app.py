@@ -56,7 +56,7 @@ from recon_gen.apps.investigation import datasets as _register_contracts  # noqa
 # The default lives under apps/l1_dashboard/ for now because L1 was the
 # first app L2-fed; the path will be neutralized when the spec/scenario
 # YAML split lands (Phase O candidate).
-from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+from recon_gen.common.l2 import default_l2_instance
 from recon_gen.common.dataset_contract import ColumnShape
 from recon_gen.common import rich_text as rt
 from recon_gen.common.config import Config

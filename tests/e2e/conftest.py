@@ -162,7 +162,7 @@ def _resolve_test_l2_instance():  # type: ignore[no-untyped-def]: return-type an
     construction) and the ``*_app`` fixtures (so the tree the test
     walks has the same L2 prefix as the deployed resources).
     """
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.common.l2 import load_instance
 
     override = RECON_GEN_TEST_L2_INSTANCE.get_or_none()
@@ -343,7 +343,7 @@ def l1_dataset_ids(l1_app) -> list[str]:
 def l2ft_l2_instance():
     """The loaded ``L2Instance`` the e2e session targets — same resolution
     as `l2ft_l2_prefix`, but the object, not just the prefix string."""
-    from recon_gen.apps.l1_dashboard._l2 import default_l2_instance
+    from recon_gen.common.l2 import default_l2_instance
     from recon_gen.common.l2 import load_instance
 
     override = RECON_GEN_TEST_L2_INSTANCE.get_or_none()
