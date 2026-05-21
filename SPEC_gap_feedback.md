@@ -330,16 +330,6 @@ Magnitude is absolute — the bound applies to `abs(amount)`. Direction is deter
 
 ## Enhancement 8: Soft per-period firing-count bounds on Rail
 
-> **LANDED — Phase AF (2026-05-19), generator-only first cut.** Field
-> `firings_typical_per_period` on Rail (single + two-leg) + TransferTemplate;
-> generic `{period, range}` shape with compact `[min, max]` defaulting to
-> `business_day`; validator W1a-c; generator `_pick_firings_count`; fuzz +
-> studio editor + docs. The optional `volume_anomaly` runtime matview stays
-> deferred (PLAN AF.x.runtime). One divergence from the §"Where it bites"
-> table below: `CustomerFeeMonthlySettlement` is an aggregating rail
-> (cadence `monthly-eom`), so W1c forbids the field there — the cadence
-> already encodes its firing count.
-
 ### Problem
 
 Enhancement 7's `amount_typical_range` fixed per-firing magnitude plausibility but leaves the parallel concern of per-period firing COUNT unaddressed. The auto-scenario seed generator picks count-of-firings-per-rail-per-period using internal heuristics — no operator-declared "typical activity volume" hint per rail. Result: even when per-firing amounts are realistic, aggregate per-period volumes can be orders of magnitude off. A $50 typical card sale repeated 50,000 times per day produces a $2.5M daily aggregate that doesn't match the integrator's mental model for what the fixture's institution actually processes.
@@ -740,13 +730,108 @@ Phase 2 (integrator side) prototyped per-rail explicit plants via a runnable tes
 
 ---
 
+### Implementation Gap G: MultiXor plant emitter writes the chain-parent name into `rail_name` for Template-parent chains
+
+**Severity:** bug (regression introduced when Gap A's picker fix shipped — Template-parent chains became reachable but the plant emitter's `rail_name` assignment didn't account for them)
+
+**Status:** surfaced during post-fix integration re-testing, after Gap A landed.
+
+#### Problem
+
+Once the MultiXor pickers accept Template-parent chains (Gap A fix), the MultiXorOverlapPlant / MultiXorMissedPlant emitters fire against those chains — but the emitter sets the planted row's `rail_name` to the chain-PARENT's name. For Rail-parent chains (the only shape the fixtures exercised pre-fix) the parent name IS a valid rail name, so the bug was invisible. For Template-parent chains the parent name is a TransferTemplate name, which matches no declared Rail → the planted row surfaces on the `unmatched_rail_name` (rail-conformance) exception as a false positive.
+
+#### Where it bites in the Sasquatch example
+
+After the Gap A picker fix, sasquatch_pr's `MerchantSettlementCycle` (a Template) becomes a valid MultiXor plant target — it's the parent of the 4-children XOR-and-fan-in group (`MerchantPayoutACH / Wire / Check / MerchantWeeklyPayoutBatch`). A MultiXorOverlapPlant fired against it would emit a row with `rail_name='MerchantSettlementCycle'` (the template name) → a spurious `unmatched_rail_name` row.
+
+Reproduction recipe: add a Template-parent multi-children chain to spec_example (Gap A's regression fixture, `BulkAccrualSettlement` chained off `MerchantSettlementCycle`, is the natural candidate), run `data apply --execute`, query the `unmatched_rail_name` dataset → the chain-parent template name appears as a non-conformant posting on a healthy seed.
+
+#### Proposed fix
+
+The MultiXor plant emitters should set `rail_name` to an actual leg_rail of the FIRED child template, never the chain-parent's name. When the chain parent is a Template, guard against the template name leaking into the `rail_name` column. Add a Template-parent variant to the plant-emitter unit tests — the fixtures preferred Rail parents, so this path is untested.
+
+#### Tradeoffs / open questions
+
+- Low blast radius (one spurious row per affected plant per seed) but it false-positives the rail-conformance check — the highest-signal L1 invariant ("a posting matching no rail is always wrong"). A false positive there is disproportionately corrosive to operator trust.
+- Pairs naturally with Gap A's fix — same code-path family, same "Template parents weren't exercised" root cause.
+
+---
+
+### Implementation Gap H: baseline template-firing path bypasses the multi-children XOR child-pick (Gap B and Gap C fixes don't compose)
+
+**Severity:** bug (Gap B's new template-firing synthesis + Gap C's XOR child-pick don't compose for templates that are simultaneously chain-parents AND independently baseline-fired)
+
+**Status:** surfaced during post-fix integration re-testing, after Gap B + Gap C both landed.
+
+#### Problem
+
+Gap C's fix added a per-firing XOR child-pick to `emit_baseline_chains` (pick exactly one non-fan_in child per parent firing); its regression test asserts "zero `multi_xor_violation` rows for any multi-children chain on a healthy baseline." Gap B's fix added a routine that synthesizes per-business-day firings for chain-parent templates (so `transfer_parent_id` threads through). The two paths don't compose: parent firings produced via the template-firing path don't route through Gap C's chain XOR child-pick, so a subset fire without any matching child → baseline `multi_xor_violation` (missed) on a "healthy" baseline.
+
+The composition only bites when a single template is BOTH (a) a multi-children chain parent AND (b) independently baseline-fired as a standalone template. Fixtures whose chain parents aren't heavily baseline-fired as standalone templates don't trip it.
+
+#### Where it bites in the Sasquatch example
+
+sasquatch_pr's `MerchantSettlementCycle` is a multi-children chain parent (4-vehicle XOR-and-fan-in group) AND a baseline-fired template (its `MerchantCardSale` leg fires per-business-day across merchants). After Gap B + Gap C, the chain-invocation firings of `MerchantSettlementCycle` get a child via the XOR pick — but the template-instance baseline firings of the same template don't, so a fraction surface as `multi_xor_violation` missed-firings on a healthy seed.
+
+Reproduction recipe: fresh `data apply --execute`, then `SELECT parent_rail_or_template_name, COUNT(*) FROM <prefix>_multi_xor_violation WHERE parent_transfer_id LIKE 'tr-rail%' GROUP BY 1` — multi-children chain parents that are also baseline-fired templates show non-zero missed-firing counts, contradicting Gap C's "zero rows" regression claim.
+
+#### Proposed fix
+
+Route the template-instance baseline firing path (and Gap B's `_emit_baseline_template_firings`) through Gap C's `_baseline_xor_child_pick` for any template that is also a multi-children chain parent. Equivalently: ensure the chain XOR child-pick fires for every parent-template firing regardless of which baseline code path produced it. Add a regression fixture where a single template is BOTH a chain parent AND independently baseline-fired — the existing fixtures don't carry this composition, which is why Gap C's regression test passed while the gap remained.
+
+#### Tradeoffs / open questions
+
+- Gap C's regression test is correct as written; it just doesn't cover the "template is both chain-parent and standalone-baseline-fired" composition. The fix is to extend coverage to that shape, then make both baseline paths share the child-pick.
+- This is the canonical "two independently-correct fixes that don't compose" finding — worth a composition test rather than just patching the one path.
+
+---
+
+### Implementation Gap I: L2FT `chain_orphans` dataset isn't fan_in-aware — over-counts N:1 chains as orphans
+
+**Severity:** bug (false-positive on a runtime exception dataset; pre-existing, predates the Gap A–F wave)
+
+**Status:** the dominant residual chain-orphan noise once Gap B's fix cleared the template-as-child false positives. The planned AB.4.8 dashboard-wiring step is the fix.
+
+#### Problem
+
+The L2FT `chain_orphans` dataset (`apps/l2_flow_tracing/datasets.py::build_exc_chain_orphans_dataset`, line 1105) computes `orphan_count = GREATEST(parent_firing_count - child_firing_count, 0)` for `Required` (singleton-children) chains. A `fan_in: true` chain IS singleton-children (one child = the batch template), so it's labeled Required and gets the naive subtraction. But fan-in is N:1 — N parent firings converge on far fewer shared child Transfers — so `parent_count - child_count` is large and positive for perfectly healthy fan-in activity. Every fan-in chain reads as a pile of orphans on the L2FT exceptions sheet.
+
+The `<prefix>_fan_in_disagreement` matview (the N:1 fan-in runtime check) IS fan_in-aware on the child side and correctly surfaces only genuine violations. But the L2FT `chain_orphans` DATASET predates fan-in awareness and still does the naive 1:1 subtraction.
+
+#### Where it bites in the Sasquatch example
+
+sasquatch_pr's `MerchantSettlementCycle → MerchantWeeklyPayoutBatch` is a fan-in chain (N merchant cycles converge on a weekly batch). The chain_orphans dataset would compute `(# merchant cycles) - (# weekly batches)` as the orphan count — a large false positive proportional to the batching ratio, on a healthy seed.
+
+Reproduction recipe: fresh `data apply --execute`, open the L2FT exceptions sheet (or query the chain_orphans dataset SQL), and observe the fan-in chain showing orphan_count ≈ (parent firings − batch Transfers) despite every parent being correctly batched.
+
+#### Proposed fix (AB.4.8)
+
+For `fan_in: true` chains, the chain_orphans dataset should compute PARENT-side participation correctly: count parent firings whose `transfer_id` does NOT appear in any child's `<prefix>_transfer_parents` set (the genuine "cycle closed but never assigned to a batch" orphan), rather than the naive `parent_count - child_count`. The `transfer_parents` matview already derives the multi-parent set; the dataset just consumes it for fan_in chains.
+
+Simpler alternative: skip fan_in chain children entirely in the chain_orphans dataset and let `fan_in_disagreement` own all fan-in cardinality detection — but that loses the parent-side "cycle not in any batch" orphan, so the precise computation is preferable.
+
+#### Tradeoffs / open questions
+
+- Same architectural move as the multi_xor matview skipping fan_in entries (cardinality is `fan_in_disagreement`'s job) — applied to the L2FT chain_orphans dataset.
+- This is the largest residual chain-orphan noise chunk for any fan-in-heavy L2 once the Gap B template-as-child false positives are cleared.
+
+---
+
 ### Recommended filing order for the implementation gaps
 
-1. **Gap B (transfer_parent_id missing)** — broadest blast radius; one focused fix; immediate cleanup of false-positive chain orphans on integrator dashboards.
-2. **Gap C (baseline multi-XOR not enforced)** — close behind. Pattern matches AB.3's `_xor_suppressed_members` — well-trodden ground.
-3. **Gap A (picker Rail-parent restriction)** — biggest plant-coverage win (7 plant kinds unblocked); shared bug shape across 3 pickers.
-4. **Gap D (classifier substring + over-match)** — short-term mitigation while Enhancement 8 lands.
-5. **Gap E (trainer modules bit-rot)** — Studio chrome polish; can wait until the AB-train slows.
-6. **Gap F (picker first-by-name)** — design-choice observation; defer unless integrators ask.
+Original wave (A–F) — all landed in Phase AG (v11.7.0):
 
-Gap B + C + A together address ~80% of the integrator-visible coverage gaps surfaced during phase-2 testing. Gap D + Enhancement 8 together restore per-period dashboard plausibility for any non-sasquatch L2.
+1. **Gap B (transfer_parent_id missing)** — ✅ RESOLVED (AG.1). Broadest blast radius; cleared false-positive chain orphans.
+2. **Gap C (baseline multi-XOR not enforced)** — ✅ RESOLVED for chain-invocation path (AG.2); see Gap H for the residual composition gap.
+3. **Gap A (picker Rail-parent restriction)** — ✅ RESOLVED (AG.3); see Gap G for the regression it surfaced.
+4. **Gap D (classifier substring + over-match)** — ✅ RESOLVED minimal (AG.4 — PAYROLL_BATCH + overmatch guard); vocabulary breadth deferred (Enhancement 8 is the universal fix).
+5. **Gap E (trainer modules bit-rot)** — ✅ RESOLVED (AG.5 — per-node badges; timeline left toggle-scoped by design).
+6. **Gap F (picker first-by-name)** — ✅ ADDRESSED (AG.6 — docs note).
+
+Second wave (G–I) — surfaced by post-AG integration re-testing; not yet filed upstream:
+
+7. **Gap G (MultiXor plant rail_name leak)** — regression from Gap A; file with Gap A's family; Template-parent plant-emitter test.
+8. **Gap H (baseline template-firing ↔ XOR child-pick don't compose)** — Gap B+C composition gap; file with Gap C's family; composition regression test.
+9. **Gap I (L2FT chain_orphans not fan_in-aware)** — pre-existing; the AB.4.8 dashboard-wiring step. Largest residual chain-orphan noise once Gap B cleared the template-as-child false positives.
+
+G and H share a root cause with the original wave: Template-parent / template-heavy L2 shapes weren't in the fixture set, so the AG fixes were validated against Rail-parent shapes and the Template-parent composition slipped through. A single "template-heavy L2" regression fixture (one template that is a chain parent, baseline-fired, AND a MultiXor plant target) would catch both G and H — worth adding upstream as a structural guard against this whole class. I is independent (a pre-AG dataset that never learned about fan-in); it's bundled here because it's the dominant residual now visible.
