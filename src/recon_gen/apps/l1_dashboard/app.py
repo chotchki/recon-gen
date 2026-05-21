@@ -61,6 +61,7 @@ from recon_gen.apps.l1_dashboard.datasets import (
     P_L1_DRIFT_ROLE,
     P_L1_DRIFT_TL_ROLE,
     P_L1_DS_ACCOUNT_DSP,
+    P_L1_DS_BALANCE_DATE_DSP,
     P_L1_DS_ROLE_DSP,
     P_L1_LIMIT_BREACH_ACCOUNT,
     P_L1_LIMIT_BREACH_TYPE,
@@ -2054,54 +2055,32 @@ def _wire_daily_statement_filters(
             (datasets[DS_L1_ACCOUNTS], P_L1_DS_ROLE_DSP),
         ],
     ))
+    # AO.2 — the balance date now pushes DOWN into both datasets' SQL
+    # (day-truncated equality + latest-day fallback) via the
+    # ``pL1DsBalanceDate`` dataset param, replacing the pre-AO.2
+    # analysis-level ``TimeEqualityFilter``s. Those did a raw TEXT
+    # equality QS missed (stored ``'…  00:00:00'`` ≠ ``'…'`` → 0 rows →
+    # the signed-MAX KPIs read 0) and App2 ignored entirely. The picker
+    # default stays a RollingDate(yesterday) so QS shows a sensible day;
+    # the dataset param's own sentinel default opens the statement on the
+    # account's latest day (QS can't data-drive a control default — the
+    # SQL fallback does; see datasets.P_L1_DS_BALANCE_DATE_DSP).
     ds_balance_date = analysis.add_parameter(DateTimeParam(
         name=P_L1_DS_BALANCE_DATE,
         time_granularity="DAY",
         # M.4.4.10ab — must have a default; QS UI errors with
         # "epochMilliseconds must be a number, you gave: null"
         # when the picker initializes with no value.
-        #
-        # Q.1.c — default to YESTERDAY rather than today. Today's
-        # daily-balance row may not exist yet (the EOD job hasn't run
-        # for today's business day), so a today-default lands on a
-        # blank statement until late-day. Yesterday is the latest day
-        # guaranteed to have closed-out balance rows.
         default=DateTimeDefaultValues(
             RollingDate={
                 "Expression": "addDateTime(-1, 'DD', truncDate('DD', now()))",
             },
         ),
+        mapped_dataset_params=[
+            (datasets[DS_DAILY_STATEMENT_SUMMARY], P_L1_DS_BALANCE_DATE_DSP),
+            (datasets[DS_DAILY_STATEMENT_TRANSACTIONS], P_L1_DS_BALANCE_DATE_DSP),
+        ],
     ))
-
-    summary_ds = datasets[DS_DAILY_STATEMENT_SUMMARY]
-    txn_ds = datasets[DS_DAILY_STATEMENT_TRANSACTIONS]
-
-    # Date narrow stays analysis-level on each dataset's day column.
-    summary_date_fg = analysis.add_filter_group(FilterGroup(
-        filter_group_id=FilterGroupId("fg-l1-ds-summary-date"),
-        cross_dataset="SINGLE_DATASET",
-        filters=[TimeEqualityFilter(
-            filter_id="filter-l1-ds-summary-date",
-            dataset=summary_ds,
-            column=summary_ds["business_day_start"],
-            parameter=ds_balance_date,
-            time_granularity="DAY",
-        )],
-    ))
-    summary_date_fg.scope_sheet(daily_statement_sheet)
-
-    txn_date_fg = analysis.add_filter_group(FilterGroup(
-        filter_group_id=FilterGroupId("fg-l1-ds-txn-date"),
-        cross_dataset="SINGLE_DATASET",
-        filters=[TimeEqualityFilter(
-            filter_id="filter-l1-ds-txn-date",
-            dataset=txn_ds,
-            column=txn_ds["business_day"],
-            parameter=ds_balance_date,
-            time_granularity="DAY",
-        )],
-    ))
-    txn_date_fg.scope_sheet(daily_statement_sheet)
 
     # Sheet controls — Role → Account → Business Day. AA.B.1 added the
     # Role dropdown above Account so the cascade direction is visually

@@ -28,6 +28,8 @@ from recon_gen.common.l2 import L2Instance
 from recon_gen.common.models import (
     DataSet,
     DatasetParameter,
+    DateTimeDatasetParameter,
+    DateTimeDatasetParameterDefaultValues,
     StringDatasetParameter,
     StringDatasetParameterDefaultValues,
 )
@@ -872,9 +874,34 @@ def build_todays_exceptions_dataset(
 # Y.2.g — Daily Statement is single-account: one SINGLE_VALUED dataset
 # param (the same name on the summary + transactions datasets) bridged
 # from the analysis-level account picker. Sentinel default → empty
-# statement until the analyst picks. The date picker stays an
-# analysis-level TimeEqualityFilter (Y.2.f territory).
+# statement until the analyst picks.
 P_L1_DS_ACCOUNT_DSP = "pL1DsAccount"
+
+# AO.2 — the balance-date narrow is now SQL-pushed-down too (was a broken
+# analysis-level TimeEqualityFilter: QS did a raw TEXT equality that
+# missed the stored ``'...  00:00:00'`` timestamp → 0 rows → the signed
+# MAX KPIs read 0; App2 ignored the analysis filter entirely). The
+# dataset param's name matches the analysis-level ``pL1DsBalanceDate`` so
+# QS's MappedDataSetParameters bridge substitutes the picked day. Its
+# default is a far-future SENTINEL meaning "open on this account's most
+# recent day" — so the statement isn't blank for an account whose latest
+# activity wasn't literally yesterday (QS can't data-drive a control
+# default, so the SQL does it).
+P_L1_DS_BALANCE_DATE_DSP = "pL1DsBalanceDate"
+_L1_DS_LATEST_SENTINEL = "2999-12-31"
+
+
+def _date_dataset_param(name: str) -> DatasetParameter:
+    """A SINGLE_VALUED DateTime dataset param defaulting to the
+    latest-day sentinel (AO.2)."""
+    return DatasetParameter(
+        DateTimeDatasetParameter=DateTimeDatasetParameter(
+            Name=name, ValueType="SINGLE_VALUED", TimeGranularity="DAY",
+            DefaultValues=DateTimeDatasetParameterDefaultValues(
+                StaticValues=[f"{_L1_DS_LATEST_SENTINEL}T00:00:00"],
+            ),
+        ),
+    )
 
 # AA.B.1 — Role cascade dataset param. Lives on the DS_L1_ACCOUNTS
 # companion (the account-picker's option source) so picking a role
@@ -902,9 +929,22 @@ def build_daily_statement_summary_dataset(
     companion (not this parameterized dataset).
     """
     prefix = cfg.db_table_prefix
+    day = date_trunc_day("business_day_start", cfg.dialect)
+    bdate = date_trunc_day(f"<<${P_L1_DS_BALANCE_DATE_DSP}>>", cfg.dialect)
+    sentinel = date_trunc_day(f"'{_L1_DS_LATEST_SENTINEL}'", cfg.dialect)
+    acct = "(account_name || ' (' || account_id || ')')"
+    # AO.2 — day-truncated balance-date narrow + latest-day fallback (see
+    # P_L1_DS_BALANCE_DATE_DSP). Exactly one (account, day) row → the
+    # signed-MAX KPIs collapse to that day's values.
     sql = (
         f"SELECT * FROM {prefix}_daily_statement_summary\n"
-        f"WHERE (account_name || ' (' || account_id || ')') = <<${P_L1_DS_ACCOUNT_DSP}>>"
+        f"WHERE {acct} = <<${P_L1_DS_ACCOUNT_DSP}>>\n"
+        f"  AND ({day} = {bdate}\n"
+        f"       OR ({bdate} >= {sentinel} AND business_day_start = (\n"
+        f"           SELECT MAX(s2.business_day_start)\n"
+        f"           FROM {prefix}_daily_statement_summary s2\n"
+        f"           WHERE (s2.account_name || ' (' || s2.account_id || ')')"
+        f" = <<${P_L1_DS_ACCOUNT_DSP}>>)))"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-daily-statement-summary-dataset"),
@@ -914,6 +954,7 @@ def build_daily_statement_summary_dataset(
         dataset_parameters=[
             _sv_dataset_param(P_L1_DS_ACCOUNT_DSP,
                               _L1_DS_ACCOUNT_SENTINEL),
+            _date_dataset_param(P_L1_DS_BALANCE_DATE_DSP),
         ],
     )
 
@@ -931,6 +972,12 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
     across dialects.
     """
     business_day = date_trunc_day("tx.posting", dialect)
+    bdate = date_trunc_day(f"<<${P_L1_DS_BALANCE_DATE_DSP}>>", dialect)
+    sentinel = date_trunc_day(f"'{_L1_DS_LATEST_SENTINEL}'", dialect)
+    latest_day = date_trunc_day("tx2.posting", dialect)
+    # AO.2 — same balance-date narrow as the summary, on the leg-grain
+    # posting day, so the detail table shows exactly the picked (or
+    # latest) account-day's legs and stays in step with the KPIs.
     return (
         f"SELECT tx.id AS transaction_id,"
         f"       tx.account_id, tx.account_name,"
@@ -941,6 +988,12 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
         f"       tx.status, tx.origin"
         f" FROM {prefix}_current_transactions tx"
         f" WHERE (tx.account_name || ' (' || tx.account_id || ')') = <<${P_L1_DS_ACCOUNT_DSP}>>"
+        f"   AND ({business_day} = {bdate}"
+        f"        OR ({bdate} >= {sentinel} AND {business_day} = ("
+        f"            SELECT MAX({latest_day})"
+        f"            FROM {prefix}_current_transactions tx2"
+        f"            WHERE (tx2.account_name || ' (' || tx2.account_id || ')')"
+        f" = <<${P_L1_DS_ACCOUNT_DSP}>>)))"
     )
 
 
@@ -958,6 +1011,7 @@ def build_daily_statement_transactions_dataset(
         dataset_parameters=[
             _sv_dataset_param(P_L1_DS_ACCOUNT_DSP,
                               _L1_DS_ACCOUNT_SENTINEL),
+            _date_dataset_param(P_L1_DS_BALANCE_DATE_DSP),
         ],
     )
 

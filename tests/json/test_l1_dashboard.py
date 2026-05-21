@@ -531,21 +531,39 @@ def test_daily_statement_parameters_and_controls() -> None:
     assert "Business Day" in control_titles
 
 
-def test_daily_statement_filter_groups_target_correct_columns() -> None:
-    """4 SINGLE_DATASET filter groups (2 datasets × 2 params), each
-    column-specific: summary uses business_day_start; transactions
-    uses business_day."""
+def test_daily_statement_date_pushes_down_not_filter_group() -> None:
+    """AO.2 — the balance-date narrow is SQL-pushdown (the
+    ``pL1DsBalanceDate`` dataset param on BOTH datasets, day-truncated
+    equality + latest-day fallback), not an analysis-level
+    ``TimeEqualityFilter``. The pre-AO.2 ``fg-l1-ds-summary-date`` /
+    ``fg-l1-ds-txn-date`` FilterGroups are gone — their raw TEXT equality
+    missed the stored ``'…  00:00:00'`` timestamp (→ 0-row, signed-MAX-0
+    KPIs) and App2 ignored them entirely."""
+    from recon_gen.apps.l1_dashboard.datasets import (
+        P_L1_DS_BALANCE_DATE_DSP,
+        build_daily_statement_summary_dataset,
+        build_daily_statement_transactions_dataset,
+    )
+    from recon_gen.common.l2 import default_l2_instance
+
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
     fg_ids = {fg.filter_group_id for fg in app.analysis.filter_groups}
-    expected = {
-        # Y.2.g.9 — the account narrow now pushes into the dataset SQL
-        # via the bridged pL1DsAccount param; only the date FilterGroups
-        # remain analysis-level.
-        "fg-l1-ds-summary-date",
-        "fg-l1-ds-txn-date",
-    }
-    assert expected.issubset(fg_ids)
+    assert "fg-l1-ds-summary-date" not in fg_ids
+    assert "fg-l1-ds-txn-date" not in fg_ids
+
+    inst = default_l2_instance()
+    for build in (
+        build_daily_statement_summary_dataset,
+        build_daily_statement_transactions_dataset,
+    ):
+        ds = build(_CFG, inst)
+        date_params = {
+            p.DateTimeDatasetParameter.Name
+            for p in (ds.DatasetParameters or [])
+            if p.DateTimeDatasetParameter is not None
+        }
+        assert P_L1_DS_BALANCE_DATE_DSP in date_params
 
 
 def test_daily_statement_datasets_registered() -> None:
