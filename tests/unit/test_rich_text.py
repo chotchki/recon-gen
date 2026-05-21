@@ -26,7 +26,9 @@ class TestInline:
         assert rt.inline("hi") == "<inline>hi</inline>"
 
     def test_font_size(self) -> None:
-        assert rt.inline("hi", font_size="24px") == '<inline font-size="24px">hi</inline>'
+        assert (
+            rt.inline("hi", font_size="24px") == '<inline font-size="24px">hi</inline>'
+        )
 
     def test_color(self) -> None:
         assert rt.inline("hi", color="#2E5090") == '<inline color="#2E5090">hi</inline>'
@@ -134,17 +136,13 @@ class TestTextBox:
         # v8.6.3 — auto-pads with leading + trailing ``<br/><br/>`` so
         # rendered text doesn't sit flush against the box edges.
         # SheetTextBox itself has no padding fields in the AWS API.
-        assert rt.text_box("a", "b") == (
-            "<text-box><br/><br/>ab<br/><br/></text-box>"
-        )
+        assert rt.text_box("a", "b") == ("<text-box><br/><br/>ab<br/><br/></text-box>")
 
     def test_empty_still_pads(self) -> None:
         # Empty content still pads — the box renders as visible
         # whitespace rather than collapsing to zero-height (which is
         # less useful as a layout placeholder).
-        assert rt.text_box() == (
-            "<text-box><br/><br/><br/><br/></text-box>"
-        )
+        assert rt.text_box() == ("<text-box><br/><br/><br/><br/></text-box>")
 
 
 class TestBullets:
@@ -169,10 +167,7 @@ class TestBullets:
         # pre-fix path leaked literal ``[...](...)`` into the rendered
         # text box.
         out = rt.bullets(["see [the docs](https://x.com) for details"])
-        assert (
-            'see <a href="https://x.com" target="_self">the docs</a>'
-            in out
-        )
+        assert 'see <a href="https://x.com" target="_self">the docs</a>' in out
         # Sanity: the literal markdown syntax must NOT survive.
         assert "[the docs]" not in out
         assert "](https://x.com)" not in out
@@ -213,8 +208,7 @@ class TestBullets:
             out = rt.bullets(["alpha", "beta"])
         assert caught == []
         assert (
-            out
-            == '<ul><li class="ql-indent-0">alpha</li>'
+            out == '<ul><li class="ql-indent-0">alpha</li>'
             '<li class="ql-indent-0">beta</li></ul>'
         )
 
@@ -227,10 +221,7 @@ class TestBullets:
         with _w.catch_warnings():
             _w.simplefilter("ignore")
             out = rt.bullets(["see [docs](https://x.com)\nfor details"])
-        assert (
-            '<a href="https://x.com" target="_self">docs</a>'
-            in out
-        )
+        assert '<a href="https://x.com" target="_self">docs</a>' in out
         assert "<br/>" not in out
 
     def test_bullets_one_warning_per_offending_item(self) -> None:
@@ -265,17 +256,11 @@ class TestMarkdownInline:
 
     def test_inline_link_becomes_anchor(self) -> None:
         out = rt.markdown_inline("see [docs](https://x.com) here")
-        assert (
-            out
-            == 'see <a href="https://x.com" target="_self">docs</a> here'
-        )
+        assert out == 'see <a href="https://x.com" target="_self">docs</a> here'
 
     def test_link_with_newlines_around_it(self) -> None:
         out = rt.markdown_inline("intro\n[click](https://x.com)\noutro")
-        assert (
-            out
-            == 'intro <a href="https://x.com" target="_self">click</a> outro'
-        )
+        assert out == 'intro <a href="https://x.com" target="_self">click</a> outro'
 
     def test_never_emits_br(self) -> None:
         # The whole raison d'etre — the ``<br/>`` ban must be total.
@@ -298,8 +283,7 @@ class TestMarkdownInline:
         # identically to the pre-v8.5.4 path.
         out = rt.bullets(["alpha", "beta", "gamma"])
         assert (
-            out
-            == '<ul><li class="ql-indent-0">alpha</li>'
+            out == '<ul><li class="ql-indent-0">alpha</li>'
             '<li class="ql-indent-0">beta</li>'
             '<li class="ql-indent-0">gamma</li></ul>'
         )
@@ -316,7 +300,7 @@ class TestBoldCodeHelpers:
 
     def test_code(self) -> None:
         assert rt.code("rail_name") == (
-            '<inline font-family="Courier New">rail_name</inline>'
+            '<inline font-family="Source Sans Pro">rail_name</inline>'
         )
 
 
@@ -331,7 +315,7 @@ class TestMarkdownEmphasisAndBullets:
 
     def test_inline_code(self) -> None:
         assert rt.markdown("the `rail_name` column") == (
-            'the <inline font-family="Courier New">rail_name</inline> column'
+            'the <inline font-family="Source Sans Pro">rail_name</inline> column'
         )
 
     def test_no_raw_markers_survive(self) -> None:
@@ -344,8 +328,7 @@ class TestMarkdownEmphasisAndBullets:
     def test_bullet_list(self) -> None:
         out = rt.markdown("- one\n- two")
         assert out == (
-            '<ul><li class="ql-indent-0">one</li>'
-            '<li class="ql-indent-0">two</li></ul>'
+            '<ul><li class="ql-indent-0">one</li><li class="ql-indent-0">two</li></ul>'
         )
 
     def test_bullet_star_marker(self) -> None:
@@ -375,8 +358,7 @@ class TestMarkdownEmphasisAndBullets:
     def test_bold_inside_bullet(self) -> None:
         out = rt.markdown("- **Drift.** the sub-ledger drifted")
         assert out == (
-            '<ul><li class="ql-indent-0"><b>Drift.</b> '
-            "the sub-ledger drifted</li></ul>"
+            '<ul><li class="ql-indent-0"><b>Drift.</b> the sub-ledger drifted</li></ul>'
         )
 
     def test_prose_block_then_bullets(self) -> None:
@@ -389,7 +371,7 @@ class TestMarkdownEmphasisAndBullets:
 
     def test_markdown_inline_parses_bold_and_code(self) -> None:
         assert rt.markdown_inline("**x** and `y`") == (
-            '<b>x</b> and <inline font-family="Courier New">y</inline>'
+            '<b>x</b> and <inline font-family="Source Sans Pro">y</inline>'
         )
 
     def test_markdown_inline_never_bullets_or_br(self) -> None:

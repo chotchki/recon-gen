@@ -50,7 +50,6 @@ import warnings
 from typing import Iterable
 from xml.sax.saxutils import escape as _xml_escape
 
-
 BR = "<br/>"
 
 
@@ -80,7 +79,8 @@ _CODE_SPAN = re.compile(r"`([^`]+)`")
 _BULLET_LINE = re.compile(r"^[-*]\s+(.*)$")
 # QS-safe monospace family for ```code``` spans (QS has no dedicated code
 # tag; a monospace ``font-family`` is the closest portable rendering).
-_CODE_FONT_FAMILY = "Courier New"
+# TODO: Courier New Is Not Supported, falling back
+_CODE_FONT_FAMILY = "Source Sans Pro"
 
 
 def body(text: str) -> str:
@@ -197,7 +197,7 @@ def _inline_md(text: str) -> str:
     parts: list[str] = []
     cursor = 0
     for match in _MARKDOWN_LINK.finditer(text):
-        parts.append(_emphasis(_xml_escape(text[cursor:match.start()])))
+        parts.append(_emphasis(_xml_escape(text[cursor : match.start()])))
         parts.append(link(match.group(1), match.group(2)))
         cursor = match.end()
     parts.append(_emphasis(_xml_escape(text[cursor:])))
@@ -253,9 +253,7 @@ def markdown(text: str) -> str:
             # Blockquote — QS has no <blockquote> tag, so render the
             # quoted lines as one italic run (the closest portable
             # rendering; used by the L1 invariant panels' SHOULD line).
-            quoted = " ".join(
-                re.sub(r"^>\s?", "", ln.strip()) for ln in nonblank
-            )
+            quoted = " ".join(re.sub(r"^>\s?", "", ln.strip()) for ln in nonblank)
             rendered.append(f"<i>{_inline_md(quoted)}</i>")
         else:
             # Prose — lone \n is a CommonMark soft break (→ space).
@@ -284,7 +282,7 @@ def markdown_inline(text: str) -> str:
     parts: list[str] = []
     cursor = 0
     for match in _MARKDOWN_LINK.finditer(text):
-        before = text[cursor:match.start()]
+        before = text[cursor : match.start()]
         parts.append(_emphasis(_escape_collapse_newlines(before)))
         parts.append(link(match.group(1), match.group(2)))
         cursor = match.end()
