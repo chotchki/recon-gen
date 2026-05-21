@@ -384,13 +384,26 @@ def create_l2_entity(
             )
         else:
             leg_rail_xor_groups = ()
+        # AI.2.b — transfer_key arrives from the textarea FieldSpec as a
+        # tuple[Identifier, ...] (coerced by _coerce_field), or None when
+        # the operator left it blank (validator R12 permits empty). Accept
+        # a loose list/scalar too for API-style POSTs, mirroring leg_rails.
+        # Was hardcoded to () — every corpus template declares a non-empty
+        # transfer_key, so the old hardcode meant no template round-tripped.
+        transfer_key_raw: object = fields.get("transfer_key") or ()
+        if isinstance(transfer_key_raw, (list, tuple)):
+            transfer_key: tuple[Identifier, ...] = tuple(
+                Identifier(str(k)) for k in transfer_key_raw  # pyright: ignore[reportUnknownVariableType,reportUnknownArgumentType]  # WHY: form-data values arrive as untyped strings; per-element coercion is the boundary
+            )
+        else:
+            transfer_key = (Identifier(str(transfer_key_raw)),)
         new_tt = TransferTemplate(
             name=Identifier(str(new_name)),
             expected_net=Money(fields["expected_net"]),
             completion=str(fields["completion"]),
             leg_rails=leg_rails,
             leg_rail_xor_groups=leg_rail_xor_groups,
-            transfer_key=(),
+            transfer_key=transfer_key,
             description=fields.get("description"),
         )
         return dataclasses.replace(

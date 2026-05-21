@@ -597,6 +597,43 @@ def test_put_transfer_template_updates_leg_rails(
     assert [str(r) for r in saved.leg_rails] == current_leg_rails
 
 
+def test_put_transfer_template_round_trips_transfer_key(
+    writable_l2_yaml: Path,
+) -> None:
+    """AI.2.b — adding the transfer_key FieldSpec means edit-PUT now flows
+    transfer_key through the form (previously it was preserved untouched
+    because no field existed at all). Round-trip the existing value — same
+    shape as the leg_rails test — to assert the new textarea coerce delivers
+    it back intact rather than dropping or mangling it. (R12 holds because
+    the value already satisfied it on load.)"""
+    app = _build_app(writable_l2_yaml)
+    pre = load_instance(writable_l2_yaml)
+    tmpl = next(
+        (t for t in pre.transfer_templates if t.transfer_key), None,
+    )
+    if tmpl is None:
+        return
+    tmpl_name = str(tmpl.name)
+    original_key = [str(k) for k in tmpl.transfer_key]
+    data = {
+        "name": tmpl_name,
+        "expected_net": str(tmpl.expected_net),
+        "completion": str(tmpl.completion),
+        "leg_rails__present": "1",
+        "leg_rails": [str(rn) for rn in tmpl.leg_rails],
+        "transfer_key": ", ".join(original_key),
+    }
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(f"/l2_shape/transfer_template/{tmpl_name}", data=data)
+    assert resp.status_code == 200, resp.text
+
+    reloaded = load_instance(writable_l2_yaml)
+    saved = next(
+        t for t in reloaded.transfer_templates if str(t.name) == tmpl_name
+    )
+    assert [str(k) for k in saved.transfer_key] == original_key
+
+
 def test_put_transfer_template_with_empty_leg_rails_returns_400(
     writable_l2_yaml: Path,
 ) -> None:
@@ -887,6 +924,50 @@ def test_coerce_form_multi_select_groups_all_empty_yields_empty_tuple(
     )
     fields, _ = _coerce_form("transfer_template", form)
     assert fields["leg_rail_xor_groups"] == ()
+
+
+def test_coerce_form_transfer_key_splits_newline_and_comma() -> None:
+    """AI.2.b — transfer_key is a textarea FieldSpec; the operator types
+    one key per line (or comma-separated), same shape as Rail.metadata_keys.
+    _coerce_field splits on both \\n and , and coerces to tuple[Identifier].
+    """
+    from recon_gen.common.html._studio_editor_routes import _coerce_form
+    from recon_gen.common.l2.primitives import Identifier
+
+    class _StubForm:
+        def __init__(self, kv: dict[str, object]) -> None:
+            self._kv = kv
+
+        def __contains__(self, key: str) -> bool:
+            return key in self._kv
+
+        def __getitem__(self, key: str) -> object:
+            return self._kv[key]
+
+        def get(self, key: str, default: object = None) -> object:
+            return self._kv.get(key, default)
+
+        def getlist(self, key: str) -> list[str]:
+            return []
+
+    form = _StubForm(
+        kv={
+            "name": "T",
+            "expected_net": "0",
+            "completion": "business_day_end+1d",
+            "transfer_key": "disbursement_id\nbatch_id, settlement_id",
+        },
+    )
+    fields, overrides = _coerce_form("transfer_template", form)
+    assert fields["transfer_key"] == (
+        Identifier("disbursement_id"),
+        Identifier("batch_id"),
+        Identifier("settlement_id"),
+    )
+    # Raw override preserved verbatim for the validator-reject re-render.
+    assert overrides["transfer_key"] == (
+        "disbursement_id\nbatch_id, settlement_id"
+    )
 
 
 def test_xor_groups_read_card_renders_groups_as_bullets(

@@ -117,6 +117,59 @@ def test_create_rail_preserves_cadence(spec_example: L2Instance) -> None:
     assert str(new_rail.cadence) == "intraday-2h"
 
 
+def test_create_transfer_template_preserves_transfer_key(
+    spec_example: L2Instance,
+) -> None:
+    """AI.2.b: a created TransferTemplate carries its `transfer_key` (the
+    metadata-key field names that group leg firings into one shared
+    Transfer). Before AI.2.b create_l2_entity hardcoded `transfer_key=()`,
+    so NO corpus template round-tripped — every one declares a non-empty
+    transfer_key. The textarea coerce delivers a tuple[Identifier, ...];
+    the create path must thread it onto the constructed template.
+    """
+    new_inst = create_l2_entity(
+        spec_example,
+        kind="transfer_template",
+        fields={
+            "name": "NewDisbursementTemplate",
+            "expected_net": "0",
+            "completion": "business_day_end+1d",
+            "leg_rails": (Identifier("DisbursementAccrual"),),
+            "transfer_key": (Identifier("disbursement_id"),),
+        },
+    )
+    new_tt = next(
+        t for t in new_inst.transfer_templates
+        if str(t.name) == "NewDisbursementTemplate"
+    )
+    assert tuple(str(k) for k in new_tt.transfer_key) == ("disbursement_id",)
+
+
+def test_create_transfer_template_allows_empty_transfer_key(
+    spec_example: L2Instance,
+) -> None:
+    """AI.2.b: an omitted transfer_key coerces to `()` (the `or ()` path),
+    which validator R12 permits (it skips empty transfer_key) — so the
+    editor must not force a value where the model allows none. Mirrors the
+    `required=False` decision on the FieldSpec.
+    """
+    new_inst = create_l2_entity(
+        spec_example,
+        kind="transfer_template",
+        fields={
+            "name": "NoKeyTemplate",
+            "expected_net": "0",
+            "completion": "business_day_end+1d",
+            "leg_rails": (Identifier("DisbursementAccrual"),),
+        },
+    )
+    new_tt = next(
+        t for t in new_inst.transfer_templates
+        if str(t.name) == "NoKeyTemplate"
+    )
+    assert new_tt.transfer_key == ()
+
+
 # ---------------------------------------------------------------------------
 # mutate_l2
 # ---------------------------------------------------------------------------

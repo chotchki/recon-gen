@@ -568,6 +568,29 @@ _TRANSFER_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         select_from="rails",
         required=True,
     ),
+    # AI.2.b — transfer_key: the metadata-key field names that group leg
+    # firings into one shared Transfer. tuple[Identifier, ...], same
+    # textarea one-per-line shape as Rail.metadata_keys. NOT required:
+    # the validator (R12) skips empty transfer_key and the loader only
+    # requires the YAML key present (empty list is structurally valid),
+    # so the asterisk would lie about the constraint — unlike leg_rails,
+    # which the validator rejects when empty. Almost every real template
+    # declares a non-empty one, and R12 requires each field to also
+    # appear in every leg_rail's metadata_keys.
+    FieldSpec(
+        name="transfer_key",
+        label="Transfer key",
+        helper=(
+            "Metadata-key field names whose matching values group the "
+            "leg rails' firings into one shared Transfer (one per line, "
+            "or comma-separated; e.g. disbursement_id). Each key MUST "
+            "also be declared in every leg rail's metadata_keys "
+            "(validator R12) — the library auto-derives them as "
+            "PostedRequirements. Usually non-empty; blank ⇒ all firings "
+            "of the leg rails join one Transfer."
+        ),
+        kind="textarea",
+    ),
     # AB.3.7 — Variable-rail XOR groups. Each group is a multi-select
     # whose option universe is this template's own ``leg_rails``. The
     # operator gets one row per existing group plus a trailing blank
@@ -722,6 +745,18 @@ def _coerce_field(spec: FieldSpec, raw: str, kind: EntityKind) -> object:
     # X.4.f.11.6 — Rail.metadata_keys + posted_requirements: textarea
     # one-per-line (or comma-separated). tuple[Identifier, ...].
     if spec.name in ("metadata_keys", "posted_requirements") and kind == "rail":
+        parts = [
+            p.strip()
+            for line in raw.splitlines()
+            for p in line.split(",")
+            if p.strip()
+        ]
+        return tuple(Identifier(p) for p in parts)
+    # AI.2.b — TransferTemplate.transfer_key: same textarea one-per-line
+    # (or comma-separated) shape as Rail.metadata_keys. tuple[Identifier,
+    # ...]. Empty handled above by the early return (⇒ None → () in the
+    # create path); non-empty splits + coerces here.
+    if spec.name == "transfer_key" and kind == "transfer_template":
         parts = [
             p.strip()
             for line in raw.splitlines()
