@@ -101,16 +101,107 @@ Consequences:
 
 ---
 
-## 5. Proposed model (for decision)
+## 5. Step back — the hidden structure: time is the unowned coordinate
 
-**Principle: one source of truth for the data's calendar extent, one vocabulary
-for "all"/"latest", and a single rule for which default wins per renderer.**
+The recurring lesson on this project: when two things hit each other badly,
+there's a hidden thing making it hard, and the move is to step back. Here are the
+two things, coming from opposite directions and meeting at the data/query
+boundary:
 
-1. **Make the seed's calendar extent discoverable** (e.g. `[min, max]
-   business_day` for the instance) so every default can derive from *where the
-   data actually is* instead of guessing via `now()`. Kills C3 at the root: a
-   dashboard default of "the data's latest day" / "the data's full span" is
-   correct under *both* the live and locked anchors.
+- **App (forward from definition):** `constraints + shape → queries that elevate
+  violations → visuals to see them`.
+- **Test / training (forward from scenario):** `seed + time + shape → generator →
+  data that feeds those queries`.
+
+They share **shape** — the L2 (accounts, rails, templates, chains, limits) — and
+shape is a *first-class, owned, declared* artifact both directions read. They also
+share **time** — but **time is not owned**. The app improvises its temporal
+predicates from wall-clock `now()` (QS `now()`, RollingDate exprs, `date.today()`);
+the generator improvises data placement from a seed anchor (today for live, 2030
+for lock). Nobody declares the scenario's *temporal frame* the way the L2 declares
+its shape.
+
+**Every conflict in §4 is a symptom of that one gap.** The query's temporal
+predicate and the data's temporal placement only line up by luck — both ≈ `now`
+in a live deploy — and diverge the moment they don't: locked-2030 data vs
+`now()`-rolling defaults (C3); a single-day predicate vs sparse placement (C5);
+the QS-vs-App2 default split (C1) riding on top. They are not N date bugs; they
+are one missing abstraction surfacing in N places.
+
+**The hidden thing: there are two clocks that should be one.** Make time
+first-class — a *scenario as-of* bound once per deployment, that **both**
+directions read instead of `now()`:
+
+- **Production:** `as_of = now()` — data genuinely flows up to now.
+- **Demo / test:** `as_of = the fixed scenario anchor` — data frozen there.
+
+The generator places its window relative to `as_of`; the dashboards set their
+windows / "latest" / "today" relative to `as_of`. Then the temporal predicate and
+the data placement are consistent **by construction under any binding** — the
+float-vs-fixed tension dissolves because "now" *for the scenario* is the binding,
+not wall-clock. Shape is owned (L2); time should be owned the same way (a scenario
+temporal frame), and the bugs are the cost of its absence.
+
+This is the keystone. §6 is the *mechanism* that implements it; the §8 determinism
+story falls out of it for free (the frame's binding is the only thing that floats,
+and it's an explicit input, so locked = byte-identical and live = ends-at-now by
+the same code path).
+
+### …but the frame is only the first layer (the residual tension)
+
+A shared `as_of` aligns the *anchor point* — "where the data ends" = "where the
+dashboard looks." It does **not** by itself align the *temporal semantics* on
+either side, and that's the residual tension worth naming now rather than
+rediscovering later. The two directions each independently encode what time
+*means*:
+
+- **App side:** each query carries a temporal predicate — "today's exceptions"
+  (the `as_of` day), "rolling 2-day anomaly", "last 7 / 30 days", "latest day for
+  this account". These windows live in query/analysis code.
+- **Generator side:** plants land at *positions and spreads* on the calendar
+  (a drift on day X, a fan-out over days X..X+2, a pending stuck N days).
+
+For a planted violation to actually surface, the generator must place it **inside
+the window the app's query will scan** — a contract about window *shape*, not just
+the anchor. Today nothing owns that contract: the app defines windows in one place,
+the generator places plants in another, and they agree only by a developer holding
+both in their head. When they drift, you get exactly the AO symptoms — "Today's
+Exceptions" spanning multiple days (AO.4), an average over the wrong window (AO.5),
+a single-day balance that lands off the plant (the balance KPI). The `2999`/
+`yesterday` mess is the *anchor* layer of this; AO.4/AO.5 are the *window-semantics*
+layer.
+
+So there are plausibly **two** hidden things, not one: (1) time as an unowned
+*anchor* (the frame — addressed by D1), and (2) temporal *window semantics* as an
+unowned *contract between query windows and plant placement* (the residual). The
+frame is necessary but not sufficient; the deeper fix is to let both directions
+read window definitions from one place too — e.g. the same scenario frame declares
+the windows the queries scan *and* the windows the generator plants into, so "a
+violation the dashboard can see" is true by construction. This audit recommends
+proving the frame (D1) first, then treating the window-semantics contract as the
+next step-back once the anchor layer is solid.
+
+---
+
+## 6. The mechanism (for decision)
+
+**Principle: one owned temporal frame (§5), read by both directions; one
+vocabulary for "all"/"latest"; and a single rule for which default wins per
+renderer.**
+
+0. **Own the temporal frame.** Introduce a single `scenario as_of` (+ `window`)
+   the generator and the dashboards both read. `as_of` defaults to `now()` (prod)
+   and is pinnable to the anchor (demo/test). Replaces every direct `now()` /
+   `date.today()` / RollingDate-off-`now()` with "off `as_of`". This is the
+   keystone; the rest are how it lands per surface.
+
+1. **Generation contract = `(as_of, window)`, not `(end_anchor, lookback)`.**
+   Lock the *inputs* `(as_of, window, seed)` → byte-identical SQL (determinism).
+   Live deploy passes `as_of = now()` → data **ends at `now()`** by the same
+   generator. The window is the fixed shape; `as_of` is the single thing that
+   floats. The dashboards read the *same* `as_of` (§6.0), so "where the data is"
+   and "where the dashboard looks" are the same point by construction — kills C3
+   at the root under both bindings, no `now()` guessing on either side.
 2. **One sentinel vocabulary.** A `common/sql` helper pair — e.g. `MATCH_ALL`
    (an unbounded bracket) and a `latest`-day idiom — replacing `2999-12-31`,
    `1900↔2099`, and the ad-hoc App2 binds. Self-documenting; one place to reason
@@ -133,28 +224,34 @@ for "all"/"latest", and a single rule for which default wins per renderer.**
      latest data day (per #1). No sentinel in the UI at all. Trade-off: the default
      is baked at deploy and goes stale as data advances past it (re-deploy
      refreshes it; acceptable for a delete-then-create pipeline).
-4. **Rolling vs static: pick one policy per "range" param** and apply it
-   uniformly across L1/Exec/L2FT — driven by #1 (derive from data extent) rather
-   than the current mix.
+4. **Rolling vs static: dissolved by §6.0/§6.1.** With every range read off
+   `as_of`, there's no rolling-vs-static choice left — all four apps reference the
+   same frame; "static" was only ever L2FT's workaround for `now()` being wrong
+   against locked data.
 
 ---
 
-## 6. Decisions needed (open)
+## 7. Decisions needed (open)
 
-- **D1.** Adopt #1 (discoverable seed calendar extent as the single source)? This
-  is the keystone — most other simplifications fall out of it.
-- **D2.** Balance-date fix: option (a), (b), or (c) from §5.3? (This unblocks the
-  release; (b) or (c) avoid the `2999` UI wart.)
+- **D1 (keystone).** Own the temporal frame (§6.0) + the `(as_of, window)`
+  generation contract (§6.1)? Everything else falls out of this. Subsumes the old
+  D5 (anchor convergence): the anchor *is* the demo binding of `as_of`, so locked
+  (fixed `as_of`) and live (`as_of = now()`) stop being separate references.
+- **D2 (release blocker — cause UNCONFIRMED, see §8).** The QS Daily Statement
+  KPIs are missing, but the date-default story is *not* a sufficient explanation:
+  the KPI summary dataset and the (rendering) transactions table **share the same
+  `pL1DsBalanceDate` param**, so a date filter that emptied one would empty both.
+  Re-confirm at the live QS layer (`describe_data_set` on the summary +
+  embed/spinner check) before choosing a fix. If it *is* date-related, prefer the
+  frame (§6.0) + option (b) "no rows for the picked day → latest"; options (a)/(c)
+  are dispreferred on the §8 determinism grounds.
 - **D3.** One sentinel vocabulary in `common/sql` — yes, and what names?
-- **D4.** Unify rolling-vs-static range defaults across all four apps?
-- **D5.** Should locked-seed (2030) and live-seed (today) anchors converge, or is
-  the split deliberate (byte-identity needs a fixed anchor)? If they stay split,
-  every RollingDate default is wrong under the locked anchor — which only #1 (or a
-  fixed anchor everywhere) resolves.
+- **D4.** Whether `window` is an L2/config field (author-controlled per instance)
+  or a generator constant (your open question).
 
 ---
 
-## 7. Intersection with test-data determinism / seed locking
+## 8. Intersection with test-data determinism / seed locking
 
 The date model is co-mingled with the determinism story, and that's the deeper
 reason the static-vs-rolling split exists. Two time references are in play and
@@ -194,31 +291,25 @@ Three consequences that reframe the §5/§6 decisions:
 3. **RollingDate defaults are silently anchor-fragile.** They pass today only
    because live `data apply` happens to seed near `now()`. They are *wrong* against
    the locked 2030 data — a latent trap for any preview/test that renders a
-   dashboard over locked-seed data, and the deep reason "single-day yesterday"
-   (#5) was doomed.
+   dashboard over locked-seed data, and part of why "single-day yesterday" (C5)
+   was fragile.
 
-**This elevates the keystone (D1) to the real fix:** seed-lock anchor, live-seed
-anchor, and every dashboard "where to look" default should derive from **one
-scenario clock** — the data's actual `[min, max] business_day` extent — instead
-of three independent references (`2030`, `now()`, and per-app rolling/static
-guesses). With a single clock:
-- "latest day" / "full span" are computed from the data, correct under *any*
-  anchor, and need no magic far-future constant in the UI;
-- determinism holds because the clock is a function of the (locked) data, not of
+**This is exactly why the §5 frame is the real fix, and why it's free on
+determinism.** The only thing that floats is `as_of`, and it's an explicit
+*input*: lock fixes it (byte-identical output), live binds it to `now()` (data
+ends at now). Everything else — window, plant offsets, dashboard ranges — is a
+deterministic function of `(as_of, window, seed)`. So:
+- "latest day" / "full span" are read off the frame, correct under *any* binding,
+  and need no magic far-future constant in the UI;
+- determinism holds because emission is a pure function of the inputs, not of
   wall-clock time;
 - the static-vs-rolling inconsistency (C3) dissolves — there's nothing to choose.
 
-### New decision
+This is the determinism face of decision **D1** (§7); no separate decision is
+needed here. The remaining open sub-question is **D4** — is `window` an L2/config
+field or a generator constant.
 
-- **D6.** Adopt a single **scenario clock** (derive all dashboard date defaults +
-  the live-seed anchor from the data's `[min,max]` business-day extent), and
-  decide whether the locked-seed anchor (`2030`) folds into it or stays a separate
-  fixed determinism anchor that the clock reads from. This subsumes D1/D5 and makes
-  D2 option (b) the natural balance-date fix (SQL "no rows for the picked day →
-  latest", anchor-agnostic, no UI sentinel). Options (a)/(c) are dispreferred on
-  the determinism grounds above.
-
-## 8. Scope note
+## 9. Scope note
 
 This audit is intentionally analysis-only. The AO.10 Oracle fix (ORA-00932,
 `day_text`) and AO.S2.a (trainer pin) already landed and are independent of these
