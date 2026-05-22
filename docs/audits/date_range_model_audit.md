@@ -171,15 +171,49 @@ a single-day balance that lands off the plant (the balance KPI). The `2999`/
 `yesterday` mess is the *anchor* layer of this; AO.4/AO.5 are the *window-semantics*
 layer.
 
-So there are plausibly **two** hidden things, not one: (1) time as an unowned
-*anchor* (the frame — addressed by D1), and (2) temporal *window semantics* as an
-unowned *contract between query windows and plant placement* (the residual). The
-frame is necessary but not sufficient; the deeper fix is to let both directions
-read window definitions from one place too — e.g. the same scenario frame declares
-the windows the queries scan *and* the windows the generator plants into, so "a
-violation the dashboard can see" is true by construction. This audit recommends
-proving the frame (D1) first, then treating the window-semantics contract as the
-next step-back once the anchor layer is solid.
+So there are **two** hidden things, not one:
+
+1. **Time as an unowned *anchor* (the frame).** Addressed by D1 — and its home is
+   already obvious: `as_of` belongs in **config**, which already owns the
+   *instantiation* of the L2 shape (the L2 declares the shape; config binds it to a
+   deployment). `as_of` is the temporal half of that same binding.
+
+2. **Temporal *window semantics* as an unowned contract.** This is the real smell —
+   and the reason "we constantly don't know what should be where" is that we've
+   been treating one homeless thing as if it were the same as two things that
+   already have homes. Window semantics actually come from **three** sources:
+
+   - **Invariant-derived (objective, owned by the check).** "Rolling 2-day anomaly"
+     is *intrinsic to what the anomaly invariant means*; the window is part of the
+     violation definition and lives in the matview SQL. No new home needed — it's
+     owned by the invariant.
+   - **Data/deadline-derived (objective, owned by the scenario data).** "Stuck
+     pending N days" is defined relative to a *deadline populated in the data*; the
+     window is a fact of the scenario, owned by the L2/data. No new home needed.
+   - **Subjective view (a presentation choice — UNOWNED).** "I want to see the last
+     X days", "open on the latest day", "today's statement". These are *analyst
+     viewing preferences*, not properties of any invariant or datum — and they have
+     **no home, and their *limitations* are unencoded.** A "last 7 days off `as_of`"
+     view carries an implicit precondition — *data must exist in `[as_of-7, as_of]`*
+     — that nobody wrote down, so when the view meets data that doesn't satisfy it,
+     it silently goes empty and we call it a bug instead of "the view hit its
+     stated limit."
+
+   **The fix for the residual is to make subjective views first-class typed objects
+   that carry their own precondition** (anchor = `as_of`, span, empty-behavior, and
+   the data-coverage they require to be meaningful). Then: the renderer knows what
+   the view assumes; the seed-coverage test can assert the scenario satisfies it
+   (so a planted violation is *guaranteed* visible — the query-window ⟷
+   plant-placement contract becomes checkable, not developer-memory); and the
+   invariant/data windows stay owned by their definitions, no longer conflated with
+   view choices. This is the same "encode the invariant in the type system, not a
+   post-hoc test" principle ([[feedback_invariants_in_types]]) applied to *views*:
+   a view that can't be satisfied by the data should fail loud at construction/seed
+   time, not render blank.
+
+This audit recommends proving the frame (D1, `as_of` in config) first — it's the
+anchor layer and unblocks the immediate mess — then treating **typed views with
+encoded preconditions** as the next step-back for the window-semantics layer.
 
 ---
 
@@ -189,11 +223,14 @@ next step-back once the anchor layer is solid.
 vocabulary for "all"/"latest"; and a single rule for which default wins per
 renderer.**
 
-0. **Own the temporal frame.** Introduce a single `scenario as_of` (+ `window`)
-   the generator and the dashboards both read. `as_of` defaults to `now()` (prod)
-   and is pinnable to the anchor (demo/test). Replaces every direct `now()` /
-   `date.today()` / RollingDate-off-`now()` with "off `as_of`". This is the
-   keystone; the rest are how it lands per surface.
+0. **Own the temporal frame — in config.** `as_of` (+ `window`) lives in
+   **config**, the same binding that already instantiates the L2 shape for a
+   deployment (L2 = shape; config = this deployment's binding of it; `as_of` = the
+   temporal half of that binding). Both the generator and the dashboards read it.
+   `as_of` defaults to `now()` (prod) and is pinnable to the fixed anchor
+   (demo/test). Replaces every direct `now()` / `date.today()` /
+   RollingDate-off-`now()` with "off `as_of`". This is the keystone; the rest are
+   how it lands per surface.
 
 1. **Generation contract = `(as_of, window)`, not `(end_anchor, lookback)`.**
    Lock the *inputs* `(as_of, window, seed)` → byte-identical SQL (determinism).
@@ -228,15 +265,24 @@ renderer.**
    `as_of`, there's no rolling-vs-static choice left — all four apps reference the
    same frame; "static" was only ever L2FT's workaround for `now()` being wrong
    against locked data.
+5. **Classify every window by source, and give *views* a typed home (§5).**
+   Invariant windows stay in the matview SQL; data/deadline windows stay in the
+   L2/data; **subjective views become first-class typed objects** carrying
+   `(anchor=as_of, span, empty-behavior, required-coverage)`. The required-coverage
+   precondition is what the seed-coverage test asserts (planted violation
+   guaranteed visible) and what the renderer reasons about (graceful empty vs
+   silent blank). This is the window-semantics layer; it follows once the frame
+   (#0) lands.
 
 ---
 
 ## 7. Decisions needed (open)
 
 - **D1 (keystone).** Own the temporal frame (§6.0) + the `(as_of, window)`
-  generation contract (§6.1)? Everything else falls out of this. Subsumes the old
-  D5 (anchor convergence): the anchor *is* the demo binding of `as_of`, so locked
-  (fixed `as_of`) and live (`as_of = now()`) stop being separate references.
+  generation contract (§6.1)? Everything else falls out of this. Subsumes the
+  anchor-convergence question: the anchor *is* the demo binding of `as_of`, so
+  locked (fixed `as_of`) and live (`as_of = now()`) stop being separate references.
+  `as_of` lives in **config** (the existing L2-instantiation binding).
 - **D2 (release blocker — cause UNCONFIRMED, see §8).** The QS Daily Statement
   KPIs are missing, but the date-default story is *not* a sufficient explanation:
   the KPI summary dataset and the (rendering) transactions table **share the same
@@ -248,6 +294,12 @@ renderer.**
 - **D3.** One sentinel vocabulary in `common/sql` — yes, and what names?
 - **D4.** Whether `window` is an L2/config field (author-controlled per instance)
   or a generator constant (your open question).
+- **D5 (the residual smell — next step-back after D1).** Adopt typed **views**
+  with encoded preconditions (§6.5) as the home for subjective view-windows,
+  keeping invariant- and data/deadline-windows owned by their definitions? This is
+  the structural fix for "we don't know what should be where" — but it's a larger
+  effort and should follow once the frame (D1) is proven and the release is
+  unblocked.
 
 ---
 
