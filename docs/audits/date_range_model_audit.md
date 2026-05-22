@@ -228,10 +228,70 @@ So there are **two** hidden things, not one:
    ([[feedback_invariants_in_types]]) applied to *views*: a view the data can't
    satisfy fails loud at construction/seed, not blank at render.
 
-This audit recommends proving the frame (D1, `as_of` in config) first — it's the
-anchor layer and unblocks the immediate mess — then treating **the view primitive
-(source of truth; picker + all defaults derive from it)** as the next step-back for
-the window-semantics layer.
+### The destination: the invariant is the typed spine
+
+Pulling the thread all the way: the real target is to **define, in code/types,
+three linked layers** —
+
+1. **Invariants** — the rules that must hold (the detectors).
+2. **Failures** — the planted violations of a specific invariant (the test/training
+   data).
+3. **Views** — how to surface a specific invariant's violations (on top).
+
+…with the **invariant as the single source of truth** that the other two *reference*.
+A failure is "a violation of invariant X"; a view is "how you see invariant X's
+violations over `as_of`±span". This collapses the whole two-directions problem
+(§5 opener) into one spine: the invariant declares its **detector** (the matview
+query), its **failures** (the seed shapes that should trip it), and its **views**
+(the visual + window that surface it) *together*, so app and generator stop being
+two pipelines that must be hand-aligned — they're two projections of one
+declaration.
+
+**Evidence the spine is currently fractured into three string/Literal spaces:**
+`PlantKind` (20 typed values, generator side) vs `check_type` (~10 *untyped* SQL
+strings, invariant + view side) — and they don't even align 1:1: a `drift` plant
+trips both `drift` and `ledger_drift`; `xor_variant_missed_firing` +
+`xor_variant_overlap` plants both trip the single `xor_group_violation` detector.
+The plant→check→view relation is unowned and aligned only by developer memory —
+exactly the kind of "two things hitting each other badly" with a hidden missing
+abstraction (the invariant spine).
+
+### Is Python expressive enough? (the worry)
+
+For the realistic encoding, **yes — Python + pyright-strict (already the project's
+gate) is enough**, and this is an *extension of idioms already in the codebase*
+(`PlantKind` `Literal`, `NewType` discipline, `assert_never`, the 4-way agreement
+test), not a new capability. Split by tier:
+
+- **Compile-time (pyright) — the "encode" win:** a single closed violation
+  taxonomy (`Literal`/`Enum`); `Invariant`, `Failure`, `View` as
+  dataclasses/`Generic` parameterized by it; the `invariant → {failures}` and
+  `invariant → {views}` maps made *total* and checked by `assert_never`
+  exhaustiveness (add an invariant → the type checker walks you to every failure
+  and view that must grow an arm). This is the "make wrong unrepresentable" payoff,
+  and it's the same mechanism that kills C1.
+- **Runtime (tests/property) — the "assert they're linked" win:** that a planted
+  failure *actually* trips its invariant's matview, and falls inside a view's
+  `as_of`±window — these are value-level facts about SQL output and dates that **no
+  pragmatic language type-checks** (they need dependent/refinement types — Idris,
+  F\*, Liquid Haskell — not Rust either). They're already the home turf of the
+  4-way agreement + `TestScenarioCoverage` tests; you'd re-key those off the spine.
+
+The honest gap vs Rust/Haskell: true sum-types-with-payloads are slightly more
+ergonomic there, and "totality" is a hard compiler guarantee rather than an
+`assert_never`-+-lint convention. Neither is load-bearing here — the project
+already operates exactly this way (discriminated dataclasses + `Literal` tag,
+pyright-gated, AST lints for the rest). The expressiveness fear only bites at a
+level (dependent types) that isn't the pragmatic target for *any* mainstream
+choice. So: build it; Python won't be the wall.
+
+### Recommended sequence
+
+1. **Frame (D1, `as_of` in config)** — anchor layer; unblocks the immediate mess.
+2. **View primitive (D5)** — source of truth; picker + defaults derive; kills C1.
+3. **Invariant spine (D6, the destination)** — unify the violation taxonomy, make
+   `invariant → {failures, views}` total + asserted. The biggest lift; do it last,
+   on the foundation the first two lay.
 
 ---
 
@@ -323,6 +383,15 @@ renderer.**
   user-configurable — an authoring abstraction. This is the structural fix for "we
   don't know what should be where" AND for C1 (one view → one default), but it's a
   larger effort; land once the frame (D1) is proven and the release is unblocked.
+- **D6 (the destination — biggest lift, do last).** Define **invariants in
+  code/types** as the single spine, with **failures** (plants) and **views** both
+  *referencing* an invariant (§5 "destination"). Unify the fractured
+  `PlantKind`/`check_type`/view-filter spaces into one closed violation taxonomy;
+  make `invariant → {failures}` and `invariant → {views}` total + exhaustiveness-
+  checked (compile) and linkage-asserted (runtime, via the 4-way agreement +
+  `TestScenarioCoverage`). Python + pyright-strict is expressive enough (§5 "is
+  Python enough"). This collapses the two-pipelines hand-alignment into one
+  declaration; build it on the D1+D5 foundation.
 
 ---
 
