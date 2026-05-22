@@ -397,6 +397,68 @@ the spike**, deliberately not promoted to `src/` — the rollout decides the
 production home + shape. AP.3 answered only "does the round-trip hold and does
 Python express it cleanly?" Both: yes.
 
+### AP.3 extension — the generator side crystallized (the request shape + the state medium)
+
+Pushing on the generator side (in design dialogue) sharpened it well past finding
+#4, and the spike grew four more passing tests that pin the conclusions. Two layers:
+
+**(a) The request is `(invariant kind, shape selector)`, and the invariant owns its
+own manufacture.** The blind `() -> rows` framing was wrong (finding #4 hinted; this
+nails it): a generator *cannot* be authored without the shape. `limit_breach` is the
+disproof — its cap comes from the L2's `LimitSchedule` (inlined CASE), so a made-up
+`(parent_role, rail)` is **inert** (NULL cap → trips nothing; pinned by
+`test_limit_breach_generator_is_not_constructible_without_a_shape`). So the real
+shape is **`Invariant[T].scenario_for(shape, selector) -> ViolationGenerator[T]`**,
+where the *selector is in shape vocabulary* ("drift for `account_role=X`",
+"breach all outbound caps") and the invariant resolves it to concrete coordinates,
+**failing loud** if the shape can't host it (no such role / no declared cap). The
+invariant thus owns BOTH halves — `detect` (find itself) and `scenario_for`
+(manufacture itself) — which is what makes "the invariant is the single source of
+truth" literal. Magnitude is expressed **relative to the shape-derived threshold**
+(`cap + ε`), so generators are portable across re-skins and **fuzzed shapes**
+([[feedback_fuzzer_as_property_testing]] payoff: `random_l2_yaml(seed)` × the
+scenario = valid planted violations in arbitrary topologies, self-validated). A
+**scenario** is then a composition of such requests, fanning a kind across the
+shape's declared coordinates (pinned by
+`test_scenario_composes_many_generators_across_the_shape`).
+
+**(b) The medium is STATE, not rows — and this is the same realization as D1.** The
+inverse of "plant a violation" is "produce *non-violating* data", and conforming
+data is not the absence of plants — it is data that **satisfies the invariants**,
+which means it is a **consistent state evolution**: a daily balance equals the
+accumulated signed legs, a chain progresses leg by leg, a pending leg posts. So
+generation is fundamentally a **stateful temporal simulation** — step the
+institution forward day by day maintaining consistent state — and **the invariants
+are that simulation's conservation laws** (drift = 0 ⇔ stored balance equals the
+state computed from legs). In that frame:
+- **non-violating data = the simulation running clean** (every law holds); it is
+  first-class, not "everything we didn't break";
+- a **`ViolationGenerator[T]` is a perturbation** that breaks law `T` at a point —
+  and may **propagate** through state (an overdraft persists, a missed chain leg
+  cascades);
+- the baseline a *Populational* generator perturbs (finding #4) **is this state
+  stream** — confirmed by the co-mingling note in the scenario test (a windowed
+  generator's population is the whole scenario, not a private fixture).
+
+**This is the same act as D1 from the other side.** Owning `as_of` (D1) and owning
+the *state evolution up to `as_of`* are one thing: the state at `as_of` is the fold
+of all flows up to it; "latest balance" is the terminal state of the simulation, not
+a date filter. That is *why* D1 is the keystone — own time as an evolution and the
+generators become simulators, non-violating data becomes the clean run, and a view's
+"`as_of` ± window" is a window onto the state stream. Today's `emit_baseline_seed`
+is already an implicit, imperative, monolithic version of exactly this simulator
+(it computes running balances); the spine makes it explicit, typed, and
+per-invariant-decomposed.
+
+**The honest LIMIT of AP.3 (→ the AP.2 core).** The spike proved *detection* against
+hand-set, **single-day, stateless** data; it did **not** simulate multi-day state
+evolution or propagation. So generation-as-stateful-simulation is a gap AP.3
+surfaces *by omission* — and it is the heart of AP.2's generator side: a generator
+is not `rows` nor even `Stream -> Stream` of independent rows but a **state step**
+(`State -> (flows, State')`) folded forward, clean for baseline, perturbed for a
+violation. AP.2 must settle: does the generator carry state, and is "non-violating"
+the same generator with perturbation off?
+
 ---
 
 ## 6. The mechanism (for decision)

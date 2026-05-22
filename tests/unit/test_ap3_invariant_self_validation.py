@@ -51,6 +51,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
+import pytest
+
 from recon_gen.common.db import _register_sqlite_aggregates, execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
@@ -216,11 +218,50 @@ class DriftInvariant:
             for aid, d in rows
         }
 
+    @staticmethod
+    def scenario_for(
+        account_role: str, *, drift_amount: float = 5.0,
+    ) -> "DriftGenerator":
+        """\"Take an L2 and say: I need a drift scenario for this
+        account_role.\" The request is in SHAPE VOCABULARY (a role name);
+        the invariant resolves it to a concrete leaf internal account that
+        can actually exhibit drift, against the L2.
+
+        This is the generator side of the spine living ON the invariant:
+        the invariant knows both how to DETECT itself (``detect``) and how
+        to MANUFACTURE a violation of itself (``scenario_for``). Resolution
+        fails loud if the role isn't in the shape, or isn't drift-eligible
+        (drift needs a leaf — account_parent_role IS NOT NULL).
+        """
+        instance = load_instance(_SPEC_EXAMPLE)
+        candidates = [
+            a for a in instance.accounts
+            if getattr(a, "role", None) == account_role
+            and getattr(a, "scope", None) == "internal"
+            and getattr(a, "parent_role", None) is not None
+        ]
+        if not candidates:
+            raise ValueError(
+                f"shape has no drift-eligible (leaf internal) account with "
+                f"role {account_role!r} — cannot manufacture a drift scenario",
+            )
+        acct = candidates[0]
+        return DriftGenerator(
+            account_id=f"acct-drift-{account_role}",
+            account_role=account_role,
+            parent_role=str(getattr(acct, "parent_role")),
+            stored=100.0 + drift_amount, posted=100.0,
+        )
+
 
 @dataclass
 class DriftGenerator:
     """Emit a leaf internal account with a stored balance that does NOT
     equal Σ of its posted legs. drift = stored − computed.
+
+    Built via ``DriftInvariant.scenario_for(role)`` — account_role +
+    parent_role come FROM THE SHAPE (the role is what the caller asked for;
+    the parent_role is resolved from the L2's account of that role).
 
     FINDING: the focused row-set is small (1 balance + 1 leg) but it must
     satisfy the detector's structural preconditions, which are NOT
@@ -231,9 +272,11 @@ class DriftGenerator:
     today (silent-empty matview).
     """
 
-    account_id: str = "acct-drift"
-    stored: float = 105.0
-    posted: float = 100.0  # clean ⇒ stored == posted
+    account_id: str
+    account_role: str
+    parent_role: str
+    stored: float
+    posted: float  # clean ⇒ stored == posted
 
     @property
     def intended(self) -> Violation:
@@ -246,16 +289,17 @@ class DriftGenerator:
         start, end = _day_bounds(_DAY)
         _insert_balance(
             conn, account_id=self.account_id, account_name="Drift Acct",
-            account_role="customer_dda", account_scope="internal",
-            account_parent_role="dda_pool", business_day_start=start,
+            account_role=self.account_role, account_scope="internal",
+            account_parent_role=self.parent_role, business_day_start=start,
             business_day_end=end, money=self.stored,
         )
         _insert_tx(conn, **_credit_leg(
-            id="tx-drift-1", account_id=self.account_id,
-            account_name="Drift Acct", account_role="customer_dda",
-            account_scope="internal", account_parent_role="dda_pool",
+            id=f"tx-drift-{self.account_role}", account_id=self.account_id,
+            account_name="Drift Acct", account_role=self.account_role,
+            account_scope="internal", account_parent_role=self.parent_role,
             amount_money=self.posted, posting=_ts(_DAY),
-            transfer_id="xfer-drift-1", rail_name="ach", origin="etl",
+            transfer_id=f"xfer-drift-{self.account_role}", rail_name="ach",
+            origin="etl",
         ))
 
 
@@ -420,6 +464,118 @@ class MoneyTrailGenerator:
 
 
 # ---------------------------------------------------------------------------
+# 4. INSTANCE-COUPLED — limit_breach. The disproof of the "blind generator".
+#
+# This is the case that forced the finding (the other three got away with
+# made-up role/rail strings because their detectors are persona-blind —
+# structural/arithmetic only). limit_breach's CAP comes FROM THE SHAPE: the
+# matview inlines a CASE keyed on the L2's LimitSchedules
+# (parent_role, rail, direction) -> cap. A generator that emits a made-up
+# (parent_role, rail) gets a NULL cap and trips NOTHING. So this generator
+# CANNOT be authored blind — it must read the L2 instance to (a) SELECT a
+# (parent_role, rail) that actually has a declared cap, and (b) pick a
+# magnitude RELATIVE to that cap. Hence ``from_instance`` (a smart
+# constructor): there is no ``LimitBreachGenerator()`` — only one resolved
+# against a shape, which fails loud if the shape declares no caps.
+# ---------------------------------------------------------------------------
+
+
+class LimitBreachInvariant:
+    name = "limit_breach"
+
+    def detect(self, conn: sqlite3.Connection) -> set[Violation]:
+        rows = conn.execute(
+            f"SELECT account_id, rail_name, direction "
+            f"FROM {_PREFIX}_limit_breach",
+        ).fetchall()
+        return {
+            Violation.of(
+                "limit_breach", account_id=aid, rail_name=rail,
+                direction=direction,
+            )
+            for aid, rail, direction in rows
+        }
+
+
+@dataclass
+class LimitBreachGenerator:
+    """Plant a per-rail outbound flow that exceeds the shape's declared cap.
+
+    The magnitude is expressed RELATIVE to the shape-derived cap
+    (``cap + delta``), not as an absolute number — so the same generator
+    plants a valid breach against ANY L2 that declares an Outbound cap,
+    and survives a re-skin / a fuzzed topology unchanged. That portability
+    is the contingent fuzzer payoff: shape-parameterized generators × a
+    fuzzed shape stream = valid planted violations in arbitrary topologies.
+    """
+
+    account_id: str
+    parent_role: str
+    rail_name: str
+    direction: str
+    cap: float
+    delta: float = 1.0  # clean ⇒ negative delta (under the cap)
+
+    @classmethod
+    def from_instance(cls, *, delta: float) -> "LimitBreachGenerator":
+        """SELECT the first Outbound LimitSchedule from the shape. No shape
+        ⇒ no generator — the precondition the 'blind' framing missed.
+        """
+        gens = cls.from_instance_all(delta=delta)
+        outbound = [g for g in gens if g.direction == "Outbound"]
+        if not outbound:
+            raise ValueError(
+                "shape declares no Outbound LimitSchedule — a limit_breach "
+                "generator is not constructible against it",
+            )
+        return outbound[0]
+
+    @classmethod
+    def from_instance_all(cls, *, delta: float) -> list["LimitBreachGenerator"]:
+        """Fan out: ONE generator per declared LimitSchedule in the shape.
+        This is the 'across many roles/rails' shape — the selection IS a
+        query over the shape's structure, not a hand-listed set.
+        """
+        instance = load_instance(_SPEC_EXAMPLE)
+        return [
+            cls(
+                account_id=f"acct-limit-{ls.direction}-{ls.rail}",
+                parent_role=ls.parent_role, rail_name=ls.rail,
+                direction=ls.direction, cap=float(ls.cap), delta=delta,
+            )
+            for ls in instance.limit_schedules
+        ]
+
+    @property
+    def amount(self) -> float:
+        return self.cap + self.delta
+
+    @property
+    def intended(self) -> Violation:
+        return Violation.of(
+            "limit_breach", account_id=self.account_id,
+            rail_name=self.rail_name, direction=self.direction,
+        )
+
+    def emit(self, conn: sqlite3.Connection) -> None:
+        # Outbound breach = Debit legs (matview's Debit branch); Inbound =
+        # Credit legs. |amount| crosses (or, delta<0, stays under) the cap.
+        # account_parent_role + rail_name MUST be the shape's declared pair
+        # or the matview's cap CASE yields NULL.
+        leg = _debit_leg if self.direction == "Outbound" else _credit_leg
+        signed = -self.amount if self.direction == "Outbound" else self.amount
+        _insert_tx(conn, **leg(
+            id=f"tx-limit-{self.direction}-{self.rail_name}",
+            account_id=self.account_id, account_name="Limit Acct",
+            account_role="CustomerSubledger", account_scope="internal",
+            account_parent_role=self.parent_role, amount_money=signed,
+            posting=_ts(_DAY),
+            transfer_id=f"xfer-limit-{self.direction}-{self.rail_name}",
+            rail_name=self.rail_name, origin="etl",
+        ))
+
+
+# ---------------------------------------------------------------------------
 # The self-validation link.
 # ---------------------------------------------------------------------------
 
@@ -465,11 +621,28 @@ def _assert_self_validates(
 
 
 def test_arithmetic_invariant_self_validates() -> None:
+    # dirty/clean both built via scenario_for(role) — the role is resolved
+    # against the shape; clean = the same account with zero drift.
     _assert_self_validates(
         DriftInvariant(),
-        dirty=DriftGenerator(stored=105.0, posted=100.0),
-        clean=DriftGenerator(stored=100.0, posted=100.0),
+        dirty=DriftInvariant.scenario_for("CustomerSubledger", drift_amount=5.0),
+        clean=DriftInvariant.scenario_for("CustomerSubledger", drift_amount=0.0),
     )
+
+
+def test_drift_scenario_for_resolves_the_role_against_the_shape() -> None:
+    # "I need a drift scenario for this account_role" — the parent_role is
+    # NOT supplied by the caller; the invariant resolves it from the L2's
+    # account of that role. Shape vocabulary in, concrete coordinates out.
+    gen = DriftInvariant.scenario_for("CustomerSubledger")
+    assert gen.parent_role == "CustomerLedger"
+
+
+def test_drift_scenario_for_unknown_role_fails_loud() -> None:
+    # A role not in the shape (or not drift-eligible) can't manufacture a
+    # scenario — fail at the request, not silently emit inert rows.
+    with pytest.raises(ValueError, match="no drift-eligible"):
+        DriftInvariant.scenario_for("NoSuchRole")
 
 
 def test_windowed_invariant_self_validates() -> None:
@@ -486,3 +659,77 @@ def test_recursive_invariant_self_validates() -> None:
         dirty=MoneyTrailGenerator(depth=2),
         clean=MoneyTrailGenerator(depth=0),
     )
+
+
+def test_instance_coupled_invariant_self_validates() -> None:
+    # The generator is resolved AGAINST THE SHAPE (cap pulled from the L2's
+    # LimitSchedule); magnitude is relative to that cap. dirty = cap + $1,
+    # clean = cap − $1. Disproves the "blind local generator".
+    _assert_self_validates(
+        LimitBreachInvariant(),
+        dirty=LimitBreachGenerator.from_instance(delta=1.0),
+        clean=LimitBreachGenerator.from_instance(delta=-1.0),
+    )
+
+
+def test_scenario_composes_many_generators_across_the_shape() -> None:
+    # "The input may be the scenario." A scenario is a composition of
+    # (invariant, generator) requests against ONE shape — here drift on a
+    # role + limit_breach FANNED across every declared LimitSchedule (2 in
+    # spec_example: outbound + inbound). All apply to one DB, one refresh,
+    # and every intended violation is detected together.
+    #
+    # NOTE (a finding for AP.2): generators co-mingle in the shared
+    # matviews after one refresh. For Local invariants (drift, limit_breach)
+    # that's fine — they're per-account/per-group. For a Populational
+    # invariant the population would now include every other generator's
+    # legs, so its z-statistics depend on the rest of the scenario. The
+    # baseline a windowed generator perturbs is therefore the WHOLE
+    # scenario, not its private fixture — confirms finding #4's stream model.
+    pairs: list[tuple[Invariant, ViolationGenerator]] = [
+        (DriftInvariant(), DriftInvariant.scenario_for("CustomerSubledger")),
+    ]
+    pairs += [
+        (LimitBreachInvariant(), g)
+        for g in LimitBreachGenerator.from_instance_all(delta=1.0)
+    ]
+    assert len(pairs) == 3, "expected drift + 2 fanned-out limit breaches"
+
+    conn = _fresh_db()
+    try:
+        for _inv, gen in pairs:
+            gen.emit(conn)
+        conn.commit()
+        _refresh(conn)
+        for inv, gen in pairs:
+            detected = inv.detect(conn)
+            assert gen.intended in detected, (
+                f"scenario: {inv.name} did not confirm {gen.intended}\n"
+                f"  detected: {detected}"
+            )
+    finally:
+        conn.close()
+
+
+def test_limit_breach_generator_is_not_constructible_without_a_shape() -> None:
+    # The signature isn't () -> rows: the cap (selector + threshold) comes
+    # from the shape. A generator with a made-up (parent_role, rail) plants
+    # rows that insert fine but trip NOTHING — the matview's cap CASE yields
+    # NULL, so outbound_total > cap is never true. Proven directly: emit a
+    # breach-magnitude leg on a bogus pair, refresh, detect ∅.
+    conn = _fresh_db()
+    try:
+        bogus = LimitBreachGenerator(
+            account_id="acct-bogus", parent_role="NoSuchRole",
+            rail_name="NoSuchRail", direction="Outbound", cap=5000.0,
+            delta=1_000_000.0,
+        )
+        bogus.emit(conn)
+        conn.commit()
+        _refresh(conn)
+        assert LimitBreachInvariant().detect(conn) == set(), (
+            "a made-up (parent_role, rail) tripped limit_breach — it must "
+            "not: the cap is shape-derived, so an off-shape generator is inert"
+        )
+    finally:
+        conn.close()
