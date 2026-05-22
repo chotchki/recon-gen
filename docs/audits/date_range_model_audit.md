@@ -263,35 +263,54 @@ gate) is enough**, and this is an *extension of idioms already in the codebase*
 (`PlantKind` `Literal`, `NewType` discipline, `assert_never`, the 4-way agreement
 test), not a new capability. Split by tier:
 
-- **Compile-time (pyright) — the "encode" win:** a single closed violation
-  taxonomy (`Literal`/`Enum`); `Invariant`, `Failure`, `View` as
-  dataclasses/`Generic` parameterized by it; the `invariant → {failures}` and
-  `invariant → {views}` maps made *total* and checked by `assert_never`
-  exhaustiveness (add an invariant → the type checker walks you to every failure
-  and view that must grow an arm). This is the "make wrong unrepresentable" payoff,
-  and it's the same mechanism that kills C1.
-- **Runtime (tests/property) — the "assert they're linked" win:** that a planted
-  failure *actually* trips its invariant's matview, and falls inside a view's
-  `as_of`±window — these are value-level facts about SQL output and dates that **no
-  pragmatic language type-checks** (they need dependent/refinement types — Idris,
-  F\*, Liquid Haskell — not Rust either). They're already the home turf of the
-  4-way agreement + `TestScenarioCoverage` tests; you'd re-key those off the spine.
+- **Compile-time (pyright) — STRUCTURAL/wiring validation, NOT semantic.** Pyright
+  is *not* dependently typed: it cannot validate that data satisfies an invariant,
+  ever. What it *can* validate is that the **spine is complete and consistent** — a
+  single closed violation taxonomy (`Literal`/`Enum`); `Invariant`, `Failure`,
+  `View` parameterized by it; the `invariant → {failures}` and `invariant →
+  {views}` maps made *total* and exhaustiveness-checked (`assert_never`) so adding
+  an invariant walks you to every failure/view that must grow an arm. That proves
+  *"every invariant is fully wired into all three layers"* — **not** that the
+  detection logic is right or that any datum conforms. This structural win is the
+  same mechanism that kills C1 (one declaration → one default).
+- **Boundary (smart constructors) — the only "value-fitting" Python offers.**
+  Parse-don't-validate: a `Failure[Drift]` can only be *constructed* via a
+  constructor that runtime-checks the drift shape, so the **type thereafter
+  witnesses "a check happened"** even though the check ran at runtime. Illegal
+  states unrepresentable downstream; the proof is "validated at the boundary," not
+  a compile-time proof of the property.
+- **Runtime (tests/property) — the actual invariant.** "Does this data violate
+  invariant X?" is *running the invariant* (the matview query / a predicate). "Does
+  the planted failure trip it, and land in a view's `as_of`±window?" — runtime. No
+  pragmatic language type-checks SQL output or date-containment (that needs
+  dependent/refinement types — Idris, F\*, Liquid Haskell — not Rust either). This
+  is already the home turf of the 4-way agreement + `TestScenarioCoverage` tests;
+  re-key those off the spine.
 
-The honest gap vs Rust/Haskell: true sum-types-with-payloads are slightly more
-ergonomic there, and "totality" is a hard compiler guarantee rather than an
-`assert_never`-+-lint convention. Neither is load-bearing here — the project
-already operates exactly this way (discriminated dataclasses + `Literal` tag,
-pyright-gated, AST lints for the rest). The expressiveness fear only bites at a
-level (dependent types) that isn't the pragmatic target for *any* mainstream
-choice. So: build it; Python won't be the wall.
+So, scoped precisely: Python+pyright gives **structural completeness + closed
+taxonomy + boundary-validated types**; the semantic "does data fit the invariant"
+is runtime, as it must be anywhere short of a proof assistant. The expressiveness
+fear is real only at the dependent-types level, which isn't the target. Python
+won't be the wall — but it also won't *prove* the invariants; it wires and witnesses.
 
-### Recommended sequence
+### Candidate path — UNCERTAIN, needs spikes (not a locked plan)
 
-1. **Frame (D1, `as_of` in config)** — anchor layer; unblocks the immediate mess.
-2. **View primitive (D5)** — source of truth; picker + defaults derive; kills C1.
-3. **Invariant spine (D6, the destination)** — unify the violation taxonomy, make
-   `invariant → {failures, views}` total + asserted. The biggest lift; do it last,
-   on the foundation the first two lay.
+The *destination* (invariant-as-spine) is clearer than the *path to it*. Evolving
+what exists today — invariants as hand-written matview SQL, the
+`PlantKind`/`check_type` string split, views wired into the tree + QS params — into
+the typed spine is itself a research problem: we don't yet know the right
+decomposition or order, and a confident linear plan here would be a vibes-lock.
+Treat the below as a *hypothesis to validate by spike*, expecting it to change:
+
+- **(likely first) Frame (D1, `as_of` in config)** — smallest, unblocks the
+  immediate mess, low coupling to the rest.
+- **View primitive (D5)** — source of truth; picker + defaults derive; kills C1.
+- **Invariant spine (D6, the destination)** — unify the violation taxonomy, make
+  `invariant → {failures, views}` total + asserted. The biggest lift; almost
+  certainly last, on the foundation the first two lay.
+
+**The honest first move is therefore a spike, not phase 1 of a build.** Phase
+breakdown (spike-gated) lives in PLAN.md under Phase AP.
 
 ---
 
