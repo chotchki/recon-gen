@@ -420,7 +420,7 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
   - [ ] AO.S2 (feedback #5) Exec time-axis multi-week empty stretch + weekend gaps = the deliberate short seed window — annotate the chart so it doesn't read as an outage.
 
 **Confirm-on-AWS:**
-    - [x] AO.S2.a Trainer timeline: anchor window_end on end_date (deterministic; kills KNOWN MISMATCH)
+    - [x] AO.S2.a Trainer timeline determinism: scenario-end date (`window_end`, plant anchor) is DISTINCT from load-up-to (`up_to`/`end_date`, the trainer's scrub head — load early for good days, advance to reveal the issue). Tests passed 5/21, broke 5/22 (window_end floated on wall-clock today). Fix: pin window_end explicitly in the two timeline tests (cache default stays today for the live trainer); + regression test that plants stay fixed at window_end across different up_to values. (`ao-oracle-release-fix`)
   - [ ] AO.C1 (feedback #10) App Info shows `dialect: sqlite` / dev prefix — fine for the dev capture; confirm a production deploy shows the real engine + prefix.
   - [ ] AO.C2 (feedback #9) Empty-default AML sliders (Fanout, Anomalies) — confirm render-on-default vs broken on AWS (likely the slider-default class; pairs with AO.9).
 
