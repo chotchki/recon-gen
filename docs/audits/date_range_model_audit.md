@@ -230,22 +230,32 @@ So there are **two** hidden things, not one:
 
 ### The destination: the invariant is the typed spine
 
-Pulling the thread all the way: the real target is to **define, in code/types,
-three linked layers** —
+Pulling the thread all the way: the real target is to **define, in code/types**, a
+small set of linked first-class types with **`Violation` as the currency that
+flows** between them (candidate vocabulary — the AP spikes settle the exact shape):
 
-1. **Invariants** — the rules that must hold (the detectors).
-2. **Failures** — the planted violations of a specific invariant (the test/training
-   data).
-3. **Views** — how to surface a specific invariant's violations (on top).
+- **`Violation[T]`** — a first-class **detected instance**: invariant `T` broken,
+  here, by these rows, this magnitude. It is what `Invariant.detect()` returns and
+  what a `View` renders. *This type does not exist today* — detected violations are
+  just untyped matview rows.
+- **`Invariant[T]`** — the rule/**detector**: `detect(data) -> set[Violation[T]]`
+  (today: matview SQL). Also self-validates a candidate (AP.3).
+- **`ViolationGenerator[T]`** — the **producer** (today's "plant"/`PlantKind`,
+  poorly typed): `emit() -> seed rows` *intended* to manifest a `Violation[T]`.
+  Distinct from the `Violation` itself — "how to seed it" ≠ "what got broken".
+- **`View`** — the **presenter**: shows `Violation[T]`s over `as_of`±span.
 
-…with the **invariant as the single source of truth** that the other two *reference*.
-A failure is "a violation of invariant X"; a view is "how you see invariant X's
-violations over `as_of`±span". This collapses the whole two-directions problem
-(§5 opener) into one spine: the invariant declares its **detector** (the matview
-query), its **failures** (the seed shapes that should trip it), and its **views**
-(the visual + window that surface it) *together*, so app and generator stop being
-two pipelines that must be hand-aligned — they're two projections of one
-declaration.
+…with the **invariant as the single source of truth** the others reference. The
+clean link that replaces developer-memory: **`Invariant[T].detect(
+ViolationGenerator[T].emit()) ⊇ the intended Violation[T]`** — checkable, ideally
+in-memory (AP.3). This collapses the two-directions problem (§5 opener) into one
+spine: the invariant declares its detector + the generators that should trip it +
+the views that surface it *together*, so app and generator stop being two pipelines
+that must be hand-aligned — they're two projections of one declaration.
+
+(Why split `Violation` from `ViolationGenerator`: today "plant"/"failure" conflates
+the *producer* with the *thing produced*. Separating them is what makes the link
+above expressible and the seed-coverage assertion a pure function of the two.)
 
 **Evidence the spine is currently fractured into three string/Literal spaces:**
 `PlantKind` (20 typed values, generator side) vs `check_type` (~10 *untyped* SQL
