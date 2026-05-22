@@ -576,6 +576,29 @@ def date_trunc_day(timestamp_expr: str, dialect: Dialect) -> str:
     return f"CAST(TRUNC({timestamp_expr}) AS TIMESTAMP)"
 
 
+def day_text(timestamp_expr: str, dialect: Dialect) -> str:
+    """Render a timestamp expression as its ``YYYY-MM-DD`` day string.
+
+    Unlike :func:`date_trunc_day` (which keeps a timestamp-shaped result
+    for JOIN/equality against TIMESTAMP columns), this collapses to a
+    plain text day key for comparisons that must tolerate *either* side
+    being a string. Used by the Daily Statement balance-date narrow
+    (AO.2/AO.10): the pushed-down ``<<$pL1DsBalanceDate>>`` param arrives
+    as an ISO string in every renderer, and ``TRUNC(<string>)`` is an
+    ORA-00932 on Oracle — comparing day-text sidesteps it. Pair with
+    ``SUBSTR(<param>, 1, 10)`` on the param side (date or datetime → its
+    ``YYYY-MM-DD`` prefix); ISO day strings also compare correctly with
+    ``<`` / ``>=`` lexically.
+
+    Postgres + Oracle: ``TO_CHAR(expr, 'YYYY-MM-DD')``. SQLite:
+    ``strftime('%Y-%m-%d', expr)`` (the stored ``YYYY-MM-DD HH:MM:SS``
+    text → its date portion).
+    """
+    if dialect is Dialect.SQLITE:
+        return f"strftime('%Y-%m-%d', {timestamp_expr})"
+    return f"TO_CHAR({timestamp_expr}, 'YYYY-MM-DD')"
+
+
 def concat_agg(column_expr: str, separator: str, dialect: Dialect) -> str:
     """Aggregate text values from a group into a delimited string.
 

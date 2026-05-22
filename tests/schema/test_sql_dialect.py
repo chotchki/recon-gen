@@ -20,6 +20,7 @@ from recon_gen.common.sql import (
     date_literal,
     date_minus_days,
     date_trunc_day,
+    day_text,
     decimal_type,
     drop_index_if_exists,
     drop_matview_if_exists,
@@ -118,6 +119,13 @@ class TestPostgresDateTime:
         # 00:00:00).
         assert date_trunc_day("tx.posting", PG) == (
             "DATE_TRUNC('day', tx.posting)"
+        )
+
+    def test_day_text(self):
+        # AO.10 — YYYY-MM-DD day key as text (TO_CHAR), for comparisons
+        # that must tolerate a string on the other side.
+        assert day_text("business_day_start", PG) == (
+            "TO_CHAR(business_day_start, 'YYYY-MM-DD')"
         )
 
     def test_date_literal(self):
@@ -250,6 +258,13 @@ class TestOracleDateTime:
         # through implicit conversion.
         assert date_trunc_day("tx.posting", ORA) == (
             "CAST(TRUNC(tx.posting) AS TIMESTAMP)"
+        )
+
+    def test_day_text(self):
+        # AO.10 — Oracle TO_CHAR day key. The fix for ORA-00932: never
+        # TRUNC a string param/literal; compare YYYY-MM-DD text instead.
+        assert day_text("business_day_start", ORA) == (
+            "TO_CHAR(business_day_start, 'YYYY-MM-DD')"
         )
 
     def test_date_literal_identical_to_postgres(self):
@@ -449,6 +464,12 @@ class TestSqliteDateTime:
         # deliver via DATE_TRUNC / CAST(TRUNC AS TIMESTAMP).
         assert date_trunc_day("tx.posting", SQLITE) == (
             "datetime(tx.posting, 'start of day')"
+        )
+
+    def test_day_text(self):
+        # AO.10 — SQLite strftime day key from the stored ISO text.
+        assert day_text("business_day_start", SQLITE) == (
+            "strftime('%Y-%m-%d', business_day_start)"
         )
 
     def test_date_literal_plain_text(self):

@@ -632,6 +632,47 @@ def test_daily_statement_transactions_business_day_is_dialect_aware() -> None:
     assert "DATE_TRUNC" not in sql_or
 
 
+def test_daily_statement_balance_date_narrow_never_truncs_a_string() -> None:
+    """AO.10 regression — the balance-date WHERE narrow must NOT feed the
+    string-valued ``<<$pL1DsBalanceDate>>`` param or the sentinel literal
+    into ``date_trunc_day``. On Oracle that emits ``CAST(TRUNC('…') AS
+    TIMESTAMP)`` → ORA-00932 (the param/sentinel arrive as ISO strings in
+    every renderer). The narrow compares day-as-text instead: ``TO_CHAR``
+    / ``strftime`` on the column, ``SUBSTR(<param>, 1, 10)`` on the param.
+
+    Guards the exact shape that shipped broken in v11.10.1 — CI's Oracle
+    leg is API-only, so no Oracle execution catches it. Builds all three
+    dialects from one config seam."""
+    from dataclasses import replace
+    from recon_gen.common.l2 import default_l2_instance
+    from recon_gen.apps.l1_dashboard.datasets import (
+        P_L1_DS_BALANCE_DATE_DSP,
+        build_daily_statement_summary_dataset,
+        build_daily_statement_transactions_dataset,
+    )
+    from recon_gen.common.sql import Dialect
+    from recon_gen.apps.l1_dashboard.datasets import _L1_DS_LATEST_SENTINEL
+
+    instance = default_l2_instance()
+    param = f"<<${P_L1_DS_BALANCE_DATE_DSP}>>"
+    for dialect in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.SQLITE):
+        cfg = replace(_CFG, dialect=dialect)
+        for build in (
+            build_daily_statement_summary_dataset,
+            build_daily_statement_transactions_dataset,
+        ):
+            sql = next(iter(
+                build(cfg, instance).PhysicalTableMap.values()
+            )).CustomSql.SqlQuery
+            # The bug shape: the string PARAM or the sentinel LITERAL fed
+            # into a day-trunc (≠ the legit DATE_TRUNC('day', <column>)
+            # projection, which truncs a real timestamp column).
+            assert f"TRUNC({param}" not in sql
+            assert f"TRUNC('{_L1_DS_LATEST_SENTINEL}'" not in sql
+            # The fix shape: param compared via its SUBSTR day-prefix.
+            assert f"SUBSTR({param}, 1, 10)" in sql
+
+
 # -- Description-driven prose (M.2a.7) ---------------------------------------
 
 

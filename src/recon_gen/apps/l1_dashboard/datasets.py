@@ -37,7 +37,7 @@ from recon_gen.common.sheets.app_info import (
     build_liveness_dataset,
     build_matview_status_dataset,
 )
-from recon_gen.common.sql import Dialect, date_trunc_day
+from recon_gen.common.sql import Dialect, date_trunc_day, day_text
 
 
 def l1_matview_specs(cfg: Config) -> list[tuple[str, str | None]]:
@@ -929,11 +929,16 @@ def build_daily_statement_summary_dataset(
     companion (not this parameterized dataset).
     """
     prefix = cfg.db_table_prefix
-    day = date_trunc_day("business_day_start", cfg.dialect)
-    bdate = date_trunc_day(f"<<${P_L1_DS_BALANCE_DATE_DSP}>>", cfg.dialect)
-    sentinel = date_trunc_day(f"'{_L1_DS_LATEST_SENTINEL}'", cfg.dialect)
+    # AO.10 — compare the balance date as YYYY-MM-DD text on both sides.
+    # The pushed-down param arrives as an ISO string in every renderer and
+    # ``TRUNC(<string>)`` is ORA-00932 on Oracle (the AO.2 regression);
+    # SUBSTR(...,1,10) takes the param's day prefix (date or datetime) and
+    # ISO day strings compare correctly with ``>=``.
+    day = day_text("business_day_start", cfg.dialect)
+    bdate = f"SUBSTR(<<${P_L1_DS_BALANCE_DATE_DSP}>>, 1, 10)"
+    sentinel = f"'{_L1_DS_LATEST_SENTINEL}'"
     acct = "(account_name || ' (' || account_id || ')')"
-    # AO.2 — day-truncated balance-date narrow + latest-day fallback (see
+    # AO.2 — balance-date narrow + latest-day fallback (see
     # P_L1_DS_BALANCE_DATE_DSP). Exactly one (account, day) row → the
     # signed-MAX KPIs collapse to that day's values.
     sql = (
@@ -971,10 +976,15 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
     TIMESTAMP)) — keeps QuickSight's date column-type inference stable
     across dialects.
     """
+    # Projected column stays a TIMESTAMP-shaped trunc so QuickSight's date
+    # column-type inference is stable across dialects (see docstring).
     business_day = date_trunc_day("tx.posting", dialect)
-    bdate = date_trunc_day(f"<<${P_L1_DS_BALANCE_DATE_DSP}>>", dialect)
-    sentinel = date_trunc_day(f"'{_L1_DS_LATEST_SENTINEL}'", dialect)
-    latest_day = date_trunc_day("tx2.posting", dialect)
+    # AO.10 — the WHERE narrow compares day-as-text (TRUNC(<string-param>)
+    # is ORA-00932 on Oracle); SUBSTR takes the param's YYYY-MM-DD prefix.
+    day_txt = day_text("tx.posting", dialect)
+    latest_day_txt = day_text("tx2.posting", dialect)
+    bdate = f"SUBSTR(<<${P_L1_DS_BALANCE_DATE_DSP}>>, 1, 10)"
+    sentinel = f"'{_L1_DS_LATEST_SENTINEL}'"
     # AO.2 — same balance-date narrow as the summary, on the leg-grain
     # posting day, so the detail table shows exactly the picked (or
     # latest) account-day's legs and stays in step with the KPIs.
@@ -988,9 +998,9 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
         f"       tx.status, tx.origin"
         f" FROM {prefix}_current_transactions tx"
         f" WHERE (tx.account_name || ' (' || tx.account_id || ')') = <<${P_L1_DS_ACCOUNT_DSP}>>"
-        f"   AND ({business_day} = {bdate}"
-        f"        OR ({bdate} >= {sentinel} AND {business_day} = ("
-        f"            SELECT MAX({latest_day})"
+        f"   AND ({day_txt} = {bdate}"
+        f"        OR ({bdate} >= {sentinel} AND {day_txt} = ("
+        f"            SELECT MAX({latest_day_txt})"
         f"            FROM {prefix}_current_transactions tx2"
         f"            WHERE (tx2.account_name || ' (' || tx2.account_id || ')')"
         f" = <<${P_L1_DS_ACCOUNT_DSP}>>)))"
