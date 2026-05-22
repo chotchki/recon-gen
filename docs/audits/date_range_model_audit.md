@@ -459,6 +459,95 @@ is not `rows` nor even `Stream -> Stream` of independent rows but a **state step
 violation. AP.2 must settle: does the generator carry state, and is "non-violating"
 the same generator with perturbation off?
 
+### AP.2 result — the generator is a stateful fold; non-violating = perturbation off (2026-05-22)
+
+`tests/unit/test_ap2_stateful_generator.py` (5 tests, in-process, **no DB server**,
+real emitted `drift` matview) closes the gap AP.3 left. It steps one leaf account
+forward over three days as a fold — each day's emitted stored balance IS the running
+`State'` (Σ recorded legs so far) — and turns the perturbation knob. All three AP.2
+questions land:
+
+| case | `detect` (day → drift) | what it answers |
+| --- | --- | --- |
+| clean 3-day fold | `{}` | **Q1** — state is carried; the fold satisfies the law every day |
+| recorded extra flow (+500, folded into stored) | `{}` | **Q2** — a real extra flow conforms; non-violating ≠ "no activity" |
+| state-snapshot blip (+7 on day 1, balance carried clean) | `{D1: 7.0}` | **Q3** — **local**; detector is memoryless in `stored` |
+| unrecorded flow (+13 on day 1, not folded) | `{D1: −13, D2: −13}` | **Q3** — **propagates forward**, never backward to D0 |
+| minimal witness (1-day fold + blip) | `{D0: 5.0}` | **shape decision** — uniform state-step subsumes `()→rows` |
+
+**The findings (each pinned by a passing test):**
+
+1. **Q1 — YES, the generator carries state.** A `ViolationGenerator` is a fold
+   `State -> (flows, State')` over days; the daily-balance row it emits is literally
+   the running `State'`. This is not `Stream -> Stream` of *independent* rows
+   (finding #4's intermediate framing) — the rows are *coupled by the fold*. Today's
+   imperative `emit_baseline_seed` (which already computes running balances) is the
+   un-typed, monolithic version of exactly this.
+2. **Q2 — YES, non-violating is the same generator with the perturbation off, AND a
+   *recorded* extra flow is equally non-violating.** Conformance is **flow/state
+   agreement**, not the absence of activity. A violation is never "a flow"; it is the
+   *disagreement* between the flow stream and the stored state. So "clean run" is
+   first-class and parameterized by one knob (`perturb.kind == "none"`), not defined
+   negatively as "everything we didn't break".
+3. **Q3 — propagation is governed by WHICH SIDE you break, and it is predictable from
+   the detector SQL (the spike verifies the prediction, doesn't discover it).** The
+   real `drift` detector computes `computed_balance(D) = Σ posted legs WHERE posting
+   ≤ business_day_end(D)` — cumulative over the absolute leg stream, re-derived per
+   day, **no recurrence on `stored(D-1)`**. Therefore:
+   - **State-snapshot perturbation** (a one-day stored typo, running balance carried
+     clean) → **local**: only that day drifts, because the next day re-derives
+     `computed` from the leg stream and `stored` is back on the fold.
+   - **Unrecorded-flow perturbation** (a leg in the stream not folded into stored) →
+     **propagates forward** to every later day (cumulative `computed` carries the
+     stray leg; `stored` stayed on the clean fold) and **never backward** (days before
+     the leg don't include it). A missed posting is a *persistent* break; a balance
+     typo is a *transient* one. The generator taxonomy must distinguish them because
+     they model different real failures (lost ETL leg vs balance-feed glitch).
+4. **The shape decision finding #4 left open is settled: ONE uniform generator shape
+   — the state-step fold — NOT a kind-indexed `()→rows | Stream→Stream` split.** The
+   "minimal standalone witness" finding #4 feared losing (the docs/teaching payoff,
+   "drift in 2 rows") is recovered as a **degenerate one-day simulation** — the same
+   generator type, its shortest fold (`test_minimal_witness_is_a_one_day_simulation`).
+   Local vs Populational survives **only as how the `Invariant` READS** the emitted
+   stream (per-group rows vs across-distribution z-score), not as two generator types.
+   This is the cleaner answer: the medium is the state-fold for *everything*;
+   "Populational" just means the detector's window spans the stream the fold produced
+   (the co-mingling note in the AP.3 scenario test is the same point from the read
+   side).
+5. **The carried state is `(balances, active-violation-set)`, not balances alone —
+   and that is what makes effects checkable and violations stackable** (the
+   refinement that closed AP.2). A generator that carries only the balance can emit
+   rows and *hope* the detector finds them (AP.3's bogus-shape `limit_breach` plants
+   rows that trip nothing — silently inert). Carry the active-violation set as state
+   and a step's **effect is a delta**: `detect(after) − detect(before)`. Three
+   consequences, each pinned:
+   - **Effect is observable.** `violation_trajectory` refreshes+detects after each
+     day (mirroring per-load ETL); the snapshot list IS the violation set carried
+     through the fold. An inert step shows ∅ delta — the generator *knows* it didn't
+     land instead of believing it did.
+   - **Lifecycle / resolution is first-class.** A violation persists as carried state
+     until a corrective booking closes it (the AN.1 supersession/`TechnicalCorrection`
+     shape). `test_correction_closes_forward_propagation`: an unrecorded leg booked a
+     day later stops the forward propagation (`{D1,D2}` → `{D1}`) while the historical
+     breach correctly remains — the correction's measurable effect is exactly the
+     closed `{D2}`.
+   - **Scenarios STACK.** Composition (AP.3's spatial fan-out) becomes temporal: each
+     perturbation adds its own violation to the carried set without masking the
+     others (`test_stacked_violations_accumulate_without_interference`: `{}` →
+     `{D1}` → `{D1,D2}`, each keeping identity). A scenario is a fold of perturbations
+     over `(balances, violations)`, and you can assert the running set after each step
+     — not just the final plant.
+
+**The honest LIMIT of AP.2 (→ AP.0 / AP.1).** AP.2 simulated ONE account's own
+balance fold. It did **not** simulate *cross-account* conservation (a transfer's two
+legs must net to zero across two accounts' folds; `ledger_drift` rolls children into
+a parent) — i.e. the state is really a *vector* over accounts with coupling
+constraints, and a propagating perturbation can cross account boundaries. Nor did it
+own `as_of` as the terminal state of the fold (that is AP.0/D1 — and AP.2 confirmed
+the duality: "latest balance" = the fold's terminal `State'`, not a date filter). The
+vector-state simulator is the next layer down, but AP.2 proved the core mechanic
+(stateful fold, perturbation-as-knob, predictable propagation) on the scalar case.
+
 ---
 
 ## 6. The mechanism (for decision)
