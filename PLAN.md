@@ -118,8 +118,8 @@ Third supported dialect alongside Postgres + Oracle. Schema emit, matview-as-tab
   - [ ] AD.G AD.G CI derives the QS principal ARN from quicksight:ListUsers (pick the ADMIN user) instead of the static RECON_E2E_USER_ARN GitHub secret — so a QS-subscription recreate (à la Phase AD) doesn't silently red the e2e + release pipelines. This was the v11.9.0 release-blocker root cause (secret pointed at the deleted Enterprise-era user). Per feedback_no_credential_friction: a stored-ARN secret is automation backlog. See memory project_qs_e2e_user_arn ("CI uses a stale-prone static secret").
 - [ ] AP.0 AP.0 Spike: the as_of frame (D1) on one surface
   - [ ] AP.1 AP.1 Spike: the view primitive (D5) on one view
-  - [ ] AP.2 AP.2 Spike: the invariant spine (D6) on one invariant
-  - [ ] AP.3 AP.3 Spike: can an invariant validate a violation? (self-validation, no drift, no DB server)
+  - [ ] AP.2 AP.2 Spike: the invariant spine (D6) on one invariant — must settle generator shape (uniform Stream→Stream vs kind-indexed Local `()→rows` / Populational `Stream→Stream`; AP.3 finding #4)
+  - [x] AP.3 AP.3 Spike: can an invariant validate a violation? (self-validation, no drift, no DB server)
 - [ ] X.6.a mkdocstrings expansion. Auto-generate L2 entity reference (`common/l2/primitives.py` — Account, Rail, Chain, TransferTemplate, etc.) and visual reference (`common/tree/visuals.py` — KPI, Table, BarChart, Sankey, ForceGraph). Per-class page with docstring + field table. Replaces today's hand-written `docs/reference/l2-spec.md` + per-visual handbook callouts.
 - [ ] X.6.b Custom mkdocs-macros plugin: tree → walkthrough scaffolds. Reads sheet/visual descriptions from each app's tree (`apps/<app>/app.py` builds the tree; the plugin walks it). Emits per-sheet walkthrough scaffold with the sheet's own `description` as the lede + each visual's `subtitle` as a section. Hand-written prose can extend the scaffold but the model-derived parts can't drift.
 - [ ] X.6.c Auto dataset reference. `DatasetContract` lists columns + types + (often) shape. Generates per-dataset reference page. Replaces today's hand-written column lists in `docs/data-contract/`.

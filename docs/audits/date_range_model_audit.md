@@ -322,6 +322,81 @@ Treat the below as a *hypothesis to validate by spike*, expecting it to change:
 **The honest first move is therefore a spike, not phase 1 of a build.** Phase
 breakdown (spike-gated) lives in PLAN.md under Phase AP.
 
+### AP.3 result — the make-or-break is GREEN (2026-05-22)
+
+The spike ran first, because if an invariant *can't* self-validate a violation the
+whole spine (and both contingent payoffs below) doesn't pay off. It holds.
+`tests/unit/test_ap3_invariant_self_validation.py` proves, in-process and with **no
+DB server**, the round-trip in both directions across three complexity classes:
+
+| class | invariant (real emitted matview) | dirty detect | clean detect |
+| --- | --- | --- | --- |
+| arithmetic | `drift` (stored − Σ posted legs) | drift = 5.0 ✓ | ∅ ✓ |
+| windowed | `inv_pair_rolling_anomalies` (rolling-2-day z) | spike pair z=4.36 / "4+ sigma" ✓ | z=0.0, ∅ ✓ |
+| recursive | `inv_money_trail_edges` (`WITH RECURSIVE` walk) | depth-2 edge ✓ | depth 0 only, ∅ ✓ |
+
+What makes it load-bearing: the detector under test is the **real** SQL from
+`emit_schema` + `refresh_matviews_sql` (SQLite dialect) — the same definition QS /
+App2 / PDF read in production. There is no re-encoded detection logic in the test;
+`detect()` is a thin read of the matview output. So `Invariant.detect(
+ViolationGenerator.emit()) ⊇ intended` (and `detect(clean) ⊉ intended`) is checkable
+against the production detector, in-memory, in 0.3s. The spine's core bet — one
+detector definition serving both detection and self-validation — is confirmed.
+
+**Three findings that constrain the rollout (the spike earned these):**
+
+1. **A focused `ViolationGenerator` must carry the detector's structural
+   preconditions, not just the breach.** drift needs `account_scope='internal' AND
+   account_parent_role IS NOT NULL` + the leg posting inside `[business_day_start,
+   end)`; the recursive trail needs each chain member to be a *complete* 2-leg
+   Posted transfer or the edge silently drops. These preconditions are exactly what
+   a developer forgets today (→ silent-empty matview). The generator type has to
+   own them — which is the point ([[feedback_invariants_in_types]]).
+2. **`ViolationGenerator[windowed]` is intrinsically `(baseline + spike)`, never a
+   single row.** A statistical invariant's z-score is computed across the whole
+   population; a lone outlier among *n* points has a hard z ceiling of ≈√n, so a
+   stable ≥3σ flag *requires* the generator also emit a baseline population (20 quiet
+   pair-days here). The clean counterpart is the same topology with the spike
+   magnitude normalized — the violation is purely the magnitude. This is a real
+   shape constraint on the generator taxonomy, not an artifact of the spike.
+3. **The z *threshold* is a `View` concern, not the invariant's.** The matview emits
+   the z-score; "≥3σ is a violation" is the analyst band the view applies. The spike
+   folded them into one assertion, but the spine should keep the detector emitting
+   the continuous signal and let the `View` own the band — confirming the
+   §5 three-sources split (invariant-derived signal vs subjective view threshold).
+4. **(the biggest — reshapes the generator type) Invariants split Local vs
+   Populational, and the `ViolationGenerator` shape follows from the kind.** A
+   *Local* violation is absolute — per-row/per-group, definable from rows alone
+   (`drift`, `overdraft`, `limit_breach`, `stuck_pending`); its generator is a
+   constructor `() -> rows` and yields a *minimal standalone witness*. A
+   *Populational* violation is **relative to a distribution** (`z = (this −
+   pop_mean)/pop_stddev`) and **cannot be generated in a vacuum** — so its generator
+   must consume a baseline stream: `Stream -> Stream` (perturb/amplify, not "filter"
+   — a filter only selects). Finding #2 is the symptom; this is the cause. Two
+   consequences for AP.2:
+   - **Unification option:** make *every* generator `Stream -> Stream` (Local ones
+     ignore the input). The baseline stream is exactly today's 90-day
+     `emit_baseline_seed`; a scenario is a fold of transforms over it — which is
+     *literally* what `emit_full_seed` does (baseline + layered plants). Then
+     self-validation is `detect(gen(baseline)) ⊇ intended ∧ detect(baseline) ⊉
+     intended`, and **generator and detector become duals over one stream** (detect
+     filters the stream for breaches; gen perturbs it to plant one). Tidy, and
+     matches the existing plant-layering.
+   - **The cost / decision:** uniform `Stream -> Stream` loses the *minimal
+     standalone witness*, which is what makes the docs/teaching payoff shine ("drift
+     in 2 rows"). Resolve by having the `Invariant` **declare its kind (`Local |
+     Populational`) and gate the valid generator shape on it** — a standalone-row
+     generator for a Populational invariant is then *unrepresentable*
+     ([[feedback_invariants_in_types]] one level up). **DECISION for AP.2:** is
+     generator-shape one uniform `Stream -> Stream`, or kind-indexed (`() -> rows`
+     for Local, `Stream -> Stream` for Populational)? Flagged, not silently
+     deferred — AP.2's spike settles it.
+
+The spine vocab (`Violation` / `Invariant` / `ViolationGenerator`) lives **local to
+the spike**, deliberately not promoted to `src/` — the rollout decides the
+production home + shape. AP.3 answered only "does the round-trip hold and does
+Python express it cleanly?" Both: yes.
+
 ---
 
 ## 6. The mechanism (for decision)
@@ -482,7 +557,7 @@ This is the determinism face of decision **D1** (§7); no separate decision is
 needed here. The remaining open sub-question is **D4** — is `window` an L2/config
 field or a generator constant.
 
-### Payoff (contingent on the AP.3 spike): byte-locked seed SQL can retire
+### Payoff (AP.3 GREEN → now load-bearing): byte-locked seed SQL can retire
 
 The locked seed SQL (`tests/data/_locked_seeds/*.sql` +
 `test_locked_seed_matches_fresh_emit`) is doing **two jobs mashed into one byte
@@ -492,7 +567,8 @@ by byte-matching a checked-in golden — which is why it's brittle (couples to a
 dates, dialect formatting) and forces the **per-dialect re-lock dance** on every
 intentional change (AN.3, AO.1.impl, and most "re-lock seeds" toil in PLAN).
 
-If the spine + self-validation lands (AP.3), the two jobs **split and both get
+AP.3 landed green (§5), so self-validation works across all three complexity
+classes — the contingency is discharged. The two jobs **split and both get
 *direct* checks**, and the golden files can retire:
 
 - **(b) semantic content → direct.** `Invariant[T].detect(
@@ -504,12 +580,12 @@ If the spine + self-validation lands (AP.3), the two jobs **split and both get
   `(as_of, window, seed)`, so determinism is an emit-twice-equal or input-keyed
   *hash* — no checked-in per-dialect SQL, no re-lock dance.
 
-So: **determinism stays load-bearing; byte-locked seed SQL does not.** This is a
-*contingent* payoff — it depends on AP.3 showing invariants self-validate across
-the complexity classes (a recursive/windowed invariant that *can't* validate
-in-memory would keep some value in the locked SQL). Worth tracking as an explicit
-AP outcome: a green AP.3 likely lets us delete the `_locked_seeds` mechanism and
-the re-lock toil, replacing it with semantic coverage + a determinism hash.
+So: **determinism stays load-bearing; byte-locked seed SQL does not.** AP.3
+discharged the contingency — invariants self-validate in-memory across arithmetic,
+windowed, and recursive (the windowed/recursive cases were the doubt, and both
+held). The rollout can delete the `_locked_seeds` mechanism and the per-dialect
+re-lock toil, replacing it with semantic coverage (`detect(emit) ⊇ intended`) + a
+determinism hash — sequenced after the spine itself exists.
 
 ### Payoff: training + docs scenarios become declarative (and can't lie)
 
