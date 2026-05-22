@@ -15,6 +15,42 @@ X.7 Cloud cost optimization
 
 ---
 
+## Phase AP — date/range → invariant spine *(ACTIVE FOCUS, spike-first)*
+
+Source + full reasoning: `docs/audits/date_range_model_audit.md` (grew out of AO.10/AO.11).
+
+**The destination.** Define, in code/types, three linked layers — **invariants**
+(the rules/detectors), **failures** (planted violations of an invariant), **views**
+(how to surface an invariant's violations over `as_of`±span) — with the
+**invariant as the single source of truth** the other two *reference*. This
+collapses the two pipelines that keep colliding (app: `constraints+shape →
+queries → visuals`; generator: `seed+time+shape → data`) into one declaration.
+Today the spine is fractured: `as_of` is improvised from `now()` on the app side
+and a seed anchor on the generator side; the violation taxonomy is split across
+`PlantKind` (20 typed) vs `check_type` (~10 untyped SQL strings, not even 1:1);
+views live tangled in QS params + pickers. Every recurring date bug is a symptom.
+
+**Expressiveness (settled):** Python + pyright-strict is enough — it *wires and
+witnesses* (closed taxonomy, total `invariant→{failures,views}` maps via
+exhaustiveness, smart-constructor "validated at boundary" types), it does NOT
+*prove* invariants. "Does data satisfy invariant X" is runtime, as it must be short
+of a dependent-type language. Not the wall.
+
+**Approach: spike-first per layer.** The destination is clearer than the path;
+evolving the current matview-SQL + string-taxonomy + tree-wired-views into the
+spine is a research problem. Each layer gets a spike on ONE surface → decide →
+roll out; rollouts are NOT pre-specified (a spike may reorder/redecompose
+everything after it).
+
+**Prioritization (user call 2026-05-22):** PARK the release and *everything above
+unit tests* until we're through the spikes. No D2 interim fix, no chasing the e2e
+cluster, no db/deploy/e2e runs, no re-cut — those surfaces will be rewritten by
+this work; fixing them now is a side quest. Stay unit-only; work toward the
+destination. (AO.10 Oracle + AO.S2.a trainer-pin are already done + committed on
+`ao-oracle-release-fix` and stay; the rest of AO + AN/AM/AI etc. wait.)
+
+---
+
 ## Phase history (one-line per shipped phase)
 
 - **Phase N** (v6.1.0) — Investigation + Executives ported onto L1/L2 tree primitives; theme moved to L2 YAML attribute; preset registry dropped. Full detail: `PLAN_ARCHIVE.md`.
@@ -80,6 +116,9 @@ Third supported dialect alongside Postgres + Oracle. Schema emit, matview-as-tab
 
 - [ ] AD.0 Phase AD
   - [ ] AD.G AD.G CI derives the QS principal ARN from quicksight:ListUsers (pick the ADMIN user) instead of the static RECON_E2E_USER_ARN GitHub secret — so a QS-subscription recreate (à la Phase AD) doesn't silently red the e2e + release pipelines. This was the v11.9.0 release-blocker root cause (secret pointed at the deleted Enterprise-era user). Per feedback_no_credential_friction: a stored-ARN secret is automation backlog. See memory project_qs_e2e_user_arn ("CI uses a stale-prone static secret").
+- [ ] AP.0 AP.0 Spike: the as_of frame (D1) on one surface
+  - [ ] AP.1 AP.1 Spike: the view primitive (D5) on one view
+  - [ ] AP.2 AP.2 Spike: the invariant spine (D6) on one invariant
 - [ ] X.6.a mkdocstrings expansion. Auto-generate L2 entity reference (`common/l2/primitives.py` — Account, Rail, Chain, TransferTemplate, etc.) and visual reference (`common/tree/visuals.py` — KPI, Table, BarChart, Sankey, ForceGraph). Per-class page with docstring + field table. Replaces today's hand-written `docs/reference/l2-spec.md` + per-visual handbook callouts.
 - [ ] X.6.b Custom mkdocs-macros plugin: tree → walkthrough scaffolds. Reads sheet/visual descriptions from each app's tree (`apps/<app>/app.py` builds the tree; the plugin walks it). Emits per-sheet walkthrough scaffold with the sheet's own `description` as the lede + each visual's `subtitle` as a section. Hand-written prose can extend the scaffold but the model-derived parts can't drift.
 - [ ] X.6.c Auto dataset reference. `DatasetContract` lists columns + types + (often) shape. Generates per-dataset reference page. Replaces today's hand-written column lists in `docs/data-contract/`.
@@ -402,7 +441,7 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
 
 **App2 renderer parity (AO.R — the smell the operator named 2026-05-21: a fix to a shared contract field landed in QS *only*, because App2's projection layer silently drops it).** The v11.9.4 cold-read ran on App2, which has confirmed renderer-parity gaps vs QuickSight: `_data_shape.shape_table` emits `[{"name"}]` only (drops `ColumnSpec.human_name` header + currency `format`); `shape_bar_chart` drops `format` + the JS BarChart has no STACKED/legend/long-label handling though the tree declares `bars_arrangement="STACKED"`; `rt.markdown` renders only links + paragraph breaks (not bold/code/bullets). The JS renderer is already capable (`col.label||col.name`, `formatTableCell(v,col.format)`, `formatKPIValue(...,"currency")`) — the Python projection starves it. So AO.6 (label), AO.8 (charts), and AO.9-anomalies are App2-render gaps where QS is already correct → **fix App2 to honor what the tree already declares; AO.R supersedes the renderer-portion of those items.** Operator decision 2026-05-21: default to *enhancing App2* (it's fully ours) + a parity drift gate so a QS-only contract field can't ship silently again. One branch: `ao-app2-renderer-parity`.
   - [ ] AO.10 Fix ORA-00932: AO.2 date_trunc_day on ISO string literals breaks Oracle (release blocker)
-  - [ ] AO.11 Audit doc: unify the date/range/anchor model across apps, datasets, seed, trainer, App2
+  - [x] AO.11 Audit doc: unify the date/range/anchor model across apps, datasets, seed, trainer, App2
   - [x] AO.R App2 renderer parity cluster — make App2's projection honor the contract/tree the same way QS does (single branch)
   > **DONE (2026-05-21, branch `ao-app2-renderer-parity`, 6 commits — NOT merged/tagged; operator visual-confirms + ships).** All 5 children shipped + each live-verified on the SQLite dashboards server (`recon-gen dashboards -c /tmp/config.sqlite.yaml --port 8766`):
   > - **R.1** table headers/currency (`12f1d154`): L2FT detail table now reads "Check Type / Entity A / … / Occurrences" (the AO.6 label finally lands in App2), money cols `$`-formatted. **R.5** parity gate (`test_html_table_parity.py`) asserts it across all 4 apps.
