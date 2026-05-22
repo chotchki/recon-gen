@@ -482,6 +482,35 @@ This is the determinism face of decision **D1** (§7); no separate decision is
 needed here. The remaining open sub-question is **D4** — is `window` an L2/config
 field or a generator constant.
 
+### Payoff (contingent on the AP.3 spike): byte-locked seed SQL can retire
+
+The locked seed SQL (`tests/data/_locked_seeds/*.sql` +
+`test_locked_seed_matches_fresh_emit`) is doing **two jobs mashed into one byte
+check**: proving (a) the generator is *deterministic* and (b) the data still has
+the right *semantic content* (the planted violations are present). Both indirectly,
+by byte-matching a checked-in golden — which is why it's brittle (couples to anchor
+dates, dialect formatting) and forces the **per-dialect re-lock dance** on every
+intentional change (AN.3, AO.1.impl, and most "re-lock seeds" toil in PLAN).
+
+If the spine + self-validation lands (AP.3), the two jobs **split and both get
+*direct* checks**, and the golden files can retire:
+
+- **(b) semantic content → direct.** `Invariant[T].detect(
+  ViolationGenerator[T].emit()) ⊇ intended Violation[T]` asserts the property we
+  actually care about (the violation is present + detected), not a byte proxy for
+  it. This is *stronger* than byte-identity — byte-identity never checked that the
+  data still tripped the invariants.
+- **(a) determinism → direct, lightweight.** Emission is a pure function of
+  `(as_of, window, seed)`, so determinism is an emit-twice-equal or input-keyed
+  *hash* — no checked-in per-dialect SQL, no re-lock dance.
+
+So: **determinism stays load-bearing; byte-locked seed SQL does not.** This is a
+*contingent* payoff — it depends on AP.3 showing invariants self-validate across
+the complexity classes (a recursive/windowed invariant that *can't* validate
+in-memory would keep some value in the locked SQL). Worth tracking as an explicit
+AP outcome: a green AP.3 likely lets us delete the `_locked_seeds` mechanism and
+the re-lock toil, replacing it with semantic coverage + a determinism hash.
+
 ## 9. Scope note
 
 This audit is intentionally analysis-only. The AO.10 Oracle fix (ORA-00932,
