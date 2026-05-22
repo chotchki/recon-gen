@@ -154,7 +154,71 @@ for "all"/"latest", and a single rule for which default wins per renderer.**
 
 ---
 
-## 7. Scope note
+## 7. Intersection with test-data determinism / seed locking
+
+The date model is co-mingled with the determinism story, and that's the deeper
+reason the static-vs-rolling split exists. Two time references are in play and
+they are deliberately *different*:
+
+- **Determinism reference = `2030-01-01`.** The seed SQL is the byte-locked
+  artifact (`tests/data/_locked_seeds/*.sql`, gated by
+  `test_locked_seed_matches_fresh_emit`). Byte-identity demands a *fixed* anchor,
+  so `data lock` pins `_CANONICAL_LOCK_ANCHOR = date(2030, 1, 1)` and the 90-day
+  baseline + plants all derive from it. Data lives ~Oct 2029 – Jan 2030.
+- **Deploy reference = wall-clock today.** `data apply` (live + e2e) passes no
+  anchor → falls back to `now()`. Data lives ~`[today-90, today]`.
+
+So "where the data is" is **2030 in the determinism context and today in the
+deploy context.** The dashboard JSON is *not* byte-locked — it's structurally
+tested (tree-walk) — but it must render correctly against **both** data sets:
+the 2030 locked data the unit/json layer seeds, and the today data a real deploy
+seeds. That dual obligation is what each default strategy passes or fails:
+
+| Default strategy | Emission (deterministic?) | Correct vs 2030 locked data | Correct vs today live data |
+|---|---|---|---|
+| **RollingDate `now()-N`** (L1 #4, balance #5, Exec #6) | Yes — the *expression string* is fixed | **No** — looks at ~2026, data at 2030 | Yes |
+| **Static sentinel** (`2999`, `1900↔2099`) (#5b, #7) | Yes — constant | **Yes** — anchor-agnostic (match-all / SQL-latest) | Yes |
+| **Data-derived static** (option (c): bake "latest data day") | **No** — embeds a concrete date that moves with the anchor | only if generated at 2030 anchor | only if generated at today |
+
+Three consequences that reframe the §5/§6 decisions:
+
+1. **The static sentinels are determinism-motivated, not just a hack.** `2999` /
+   `1900↔2099` are the *only* strategy that's both deterministic in emission and
+   correct under both anchors. L2FT almost certainly chose static for this reason.
+   The wart is purely how `2999` *surfaces in the UI* (C1), not the technique.
+2. **Option (c) is determinism-hostile.** Baking the latest data day into the
+   analysis default makes dashboard emission depend on the seed anchor, coupling a
+   currently-decoupled pair (dashboard JSON ⟂ seed anchor). It would also be wrong
+   unless generated against the same anchor as the deployed data — i.e. it forces
+   the two anchors to converge. Drop (c) unless we deliberately unify anchors.
+3. **RollingDate defaults are silently anchor-fragile.** They pass today only
+   because live `data apply` happens to seed near `now()`. They are *wrong* against
+   the locked 2030 data — a latent trap for any preview/test that renders a
+   dashboard over locked-seed data, and the deep reason "single-day yesterday"
+   (#5) was doomed.
+
+**This elevates the keystone (D1) to the real fix:** seed-lock anchor, live-seed
+anchor, and every dashboard "where to look" default should derive from **one
+scenario clock** — the data's actual `[min, max] business_day` extent — instead
+of three independent references (`2030`, `now()`, and per-app rolling/static
+guesses). With a single clock:
+- "latest day" / "full span" are computed from the data, correct under *any*
+  anchor, and need no magic far-future constant in the UI;
+- determinism holds because the clock is a function of the (locked) data, not of
+  wall-clock time;
+- the static-vs-rolling inconsistency (C3) dissolves — there's nothing to choose.
+
+### New decision
+
+- **D6.** Adopt a single **scenario clock** (derive all dashboard date defaults +
+  the live-seed anchor from the data's `[min,max]` business-day extent), and
+  decide whether the locked-seed anchor (`2030`) folds into it or stays a separate
+  fixed determinism anchor that the clock reads from. This subsumes D1/D5 and makes
+  D2 option (b) the natural balance-date fix (SQL "no rows for the picked day →
+  latest", anchor-agnostic, no UI sentinel). Options (a)/(c) are dispreferred on
+  the determinism grounds above.
+
+## 8. Scope note
 
 This audit is intentionally analysis-only. The AO.10 Oracle fix (ORA-00932,
 `day_text`) and AO.S2.a (trainer pin) already landed and are independent of these
