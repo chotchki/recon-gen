@@ -88,6 +88,13 @@ class TestGeneratorCache:
         state_path: Path | None = None,
     ) -> None:
         if window_end is None:
+            # The scenario-end / plant-projection anchor. Defaults to
+            # wall-clock today for the live trainer (scenario ends "now");
+            # it is DISTINCT from the load-up-to scrub head (up_to =
+            # state.end_date), which the trainer slides independently
+            # (start early to show good days, advance to reveal the issue).
+            # Deterministic surfaces (tests, authored scenarios) pin it via
+            # the window_end arg rather than relying on wall-clock.
             window_end = date.today()  # typing-smell: ignore[no-datetime-now]: trainer-mode default window — wall-clock today is the operator-friendly anchor for "last 90 days"; not a determinism path
         if window_start is None:
             window_start = window_end - timedelta(

@@ -1012,8 +1012,14 @@ def test_data_page_renders_timeline_section(
     """The /data page emits a populated timeline section (replacing
     the h.1 placeholder). Header summarizes total + per-kind, rows
     carry per-day chips."""
+    # AO.S2.a — pin window_end (the scenario-end / plant anchor) so the
+    # timeline is deterministic regardless of wall-clock date; it's a
+    # distinct knob from end_date (the load-up-to scrub head). With both
+    # at 2026-05-14 the scenario is fully loaded to its end, so its plants
+    # render as data-days (not the dimmed "future" zone).
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(end_date=date(2026, 5, 14), scope="full"),
+        window_end=date(2026, 5, 14),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -1028,6 +1034,38 @@ def test_data_page_renders_timeline_section(
     assert 'class="timeline-day"' in body
     # Each row's chips carry a per-kind class.
     assert "timeline-chip--" in body
+
+
+def test_timeline_plants_anchor_on_scenario_end_not_load_up_to() -> None:
+    """AO.S2.a — the scenario-end date (``window_end``, the plant anchor)
+    and the load-up-to scrub head (``end_date`` / ``up_to``) are distinct.
+
+    The trainer slides up_to to load earlier (show good days) then later
+    (reveal when the issue hits); the plants must stay at fixed calendar
+    positions while it moves. So with ``window_end`` held constant, the
+    projected plant timeline must be IDENTICAL across different up_to
+    values — anchoring plants on up_to (the bug this guards) would drag
+    them backward as the trainer loads an earlier day."""
+    import dataclasses as _dc
+    from recon_gen.common.l2 import default_l2_instance
+    from recon_gen.common.l2.trainer_timeline import compute_plant_timeline
+
+    inst = default_l2_instance()
+    scenario_end = date(2026, 5, 22)
+
+    def plant_days(up_to: date) -> list[date]:
+        tg = TestGeneratorCache(
+            TestGeneratorConfig(end_date=up_to, scope="full"),
+            window_end=scenario_end,
+        )
+        # _render_timeline_section projects plants on window_end, NOT up_to.
+        proj = _dc.replace(tg.get(), end_date=tg.get_window()[1])
+        return [td.day for td in compute_plant_timeline(inst, proj)]  # type: ignore[arg-type]: instance shape is Any-ish; compute_plant_timeline narrows internally
+
+    early = plant_days(date(2026, 5, 10))   # loaded only through good days
+    late = plant_days(date(2026, 5, 22))    # loaded through the issue
+    assert early == late
+    assert len(early) > 0  # spec_example has plants in this window
 
 
 def test_data_page_timeline_uncovered_rails_renders_dense_window(
@@ -1164,8 +1202,14 @@ def test_timeline_day_button_writes_end_date(
     #data-knob-end-date so the on-screen end_date strip refreshes
     (and the end_date PUT in turn fires the trainer-knobs-changed
     trigger that re-renders the timeline)."""
+    # AO.S2.a — pin window_end (the scenario-end / plant anchor) so the
+    # timeline is deterministic regardless of wall-clock date; it's a
+    # distinct knob from end_date (the load-up-to scrub head). With both
+    # at 2026-05-14 the scenario is fully loaded to its end, so its plants
+    # render as data-days (not the dimmed "future" zone).
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(end_date=date(2026, 5, 14), scope="full"),
+        window_end=date(2026, 5, 14),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any

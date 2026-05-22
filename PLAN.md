@@ -420,6 +420,7 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
   - [ ] AO.S2 (feedback #5) Exec time-axis multi-week empty stretch + weekend gaps = the deliberate short seed window — annotate the chart so it doesn't read as an outage.
 
 **Confirm-on-AWS:**
+    - [x] AO.S2.a Trainer timeline: anchor window_end on end_date (deterministic; kills KNOWN MISMATCH)
   - [ ] AO.C1 (feedback #10) App Info shows `dialect: sqlite` / dev prefix — fine for the dev capture; confirm a production deploy shows the real engine + prefix.
   - [ ] AO.C2 (feedback #9) Empty-default AML sliders (Fanout, Anomalies) — confirm render-on-default vs broken on AWS (likely the slider-default class; pairs with AO.9).
 
