@@ -611,6 +611,78 @@ And it modeled the window as a single `[as_of-span, as_of]` look-back — the ri
 view taxonomy (latest-day, today-only, rolling-N, empty-behavior, required-coverage)
 is AP.1, which the `contains()`/coverage-limit tests here only foreshadow.
 
+### AP.1 result — the view primitive: GO, C1 reproduced AND collapsed in-process (2026-05-22)
+
+`tests/unit/test_ap1_view_primitive.py` (6 tests, in-process, real emitted balance
+schema) spikes D5 on the balance-date view. Verdict: **GO** — a single typed
+`BalanceDateView` inverts the derivation and makes C1 *unrepresentable*. The win is
+sharper than AP.0's value-equality because the spike **reproduces C1 behaviorally**
+and then dissolves it:
+
+- **C1 reproduced in-process (the release blocker's mechanism, no QS needed).** With
+  balance data ending at the locked 2030 anchor, the legacy analysis default (QS
+  `RollingDate now-1d`, anchored to wall-clock ≈2026) resolves to a day with **0
+  rows**, while the legacy dataset default (`2999` sentinel → latest) resolves to the
+  anchor day with **1 row**. Same `pL1DsBalanceDate` param, two independently-authored
+  defaults, two different result sets — that divergence IS C1
+  (`test_c1_reproduced_legacy_dual_defaults_diverge`).
+- **One view collapses it — value AND behavior.** `BalanceDateView(frame)` exposes a
+  single `anchor_day()` (= `as_of`, not now()); `qs_analysis_default_day() ==
+  qs_dataset_default_day() == anchor_day()`, so the `MappedDataSetParameters` bridge is
+  a no-op divergence (nothing to keep in sync). Both sides then resolve the SAME day,
+  which has data → identical, non-zero KPI rows
+  (`test_view_default_resolves_to_rows_on_both_sides`). The dual-default disagreement
+  is gone structurally, not patched.
+- **The derivation inversion holds for all four bindings.** picker default,
+  analysis-param default, dataset-param default, and the App2 `date_to` all derive
+  from `view.anchor_day()` (`test_all_four_bindings_derive_from_one_source`) — the
+  audit's "view object is the source of truth; the picker/defaults/App2 binding
+  derive" made concrete.
+- **The view carries its own limit (the residual-tension fix).** `empty_behavior`
+  (`LATEST_ON_EMPTY` falls back to the latest day ≤ anchor and renders; `SHOW_EMPTY`
+  honors the empty anchor) and `required_coverage()` + `is_satisfied_by()` (a single-
+  date latest-fallback view needs ≥1 row ≤ anchor) turn the unwritten precondition
+  into a checkable seed contract — the view fails loud BEFORE render instead of going
+  silently blank (`test_empty_behavior_latest_falls_back`,
+  `test_required_coverage_is_a_checkable_contract`).
+
+**Can the tree carry it cleanly? YES — the primitives already exist; the view is the
+constructor that wires them consistently.** `common/tree/parameters.py::DateTimeParam`
+already holds the analysis-side `default: DateTimeDefaultValues` AND the
+`mapped_dataset_params` bridge; `controls.py::ParameterDateTimePicker` is the picker;
+the dataset-side `StaticValues` default lives in `apps/l1_dashboard/datasets.py`
+(`P_L1_DS_BALANCE_DATE_DSP`). C1 exists precisely because those three are authored in
+three places. A `View` tree node becomes the single constructor that emits the
+`DateTimeParam.default`, the dataset `StaticValues`, the `ParameterDateTimePicker`, and
+the App2 binding from one resolved `anchor_day()` — no new tree machinery, a wiring
+inversion. This is the same "tree IS the source of truth" spine (Phase L) extended to
+time, and the same encode-in-types principle ([[feedback_invariants_in_types]]) as the
+existing `DateTimeParam` required-`default` (which already prevents the null-picker
+crash at the wiring site).
+
+**Rollout shape for the view layer (the go/no-go output):**
+1. Add a `View` (date-view) tree primitive carrying `(anchor: AsOfFrame, span,
+   empty_behavior, required_coverage)`. Authoring abstraction — not end-user config.
+2. `apps/<app>/app.py` constructs the view ONCE per surface; `DateTimeParam.default`,
+   the dataset-param `StaticValues`, the `ParameterDateTimePicker`, and the App2
+   binding are *emitted by the view*, deleting the per-app RollingDate exprs
+   (`l1_dashboard/app.py:1582-83,2076`; `executives/app.py:287-88`) and the standalone
+   dataset sentinels (`datasets.py:891`).
+3. A `TestScenarioCoverage`-style assertion calls `view.is_satisfied_by(...)` against
+   the seed so a planted violation is *guaranteed* inside the view window — the
+   plant ⟷ query-window contract becomes a test, not developer-memory.
+4. Resolves **D2** the principled way: the balance KPIs were dead because the QS
+   analysis default (yesterday) won the bridge over the dataset sentinel; one view →
+   one default (= `as_of` with latest-on-empty) → both renderers land on data. (Still
+   confirm at the live QS layer per D2's note before declaring the blocker closed —
+   the in-process repro is strong evidence, not the live proof.)
+
+**Honest limit of AP.1.** Reproduced + collapsed C1 in-process at the SQL-resolution
+level; the live QS embed (does the bridged default actually render the 5 KPIs) stays
+behind the parked deploy/e2e layers. Spiked the single-date view; the range / rolling-
+N / today-only members of the taxonomy reuse the same primitive (`span` > 0) but
+aren't separately exercised here.
+
 ---
 
 ## 6. The mechanism (for decision)
