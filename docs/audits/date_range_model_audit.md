@@ -511,6 +511,27 @@ in-memory would keep some value in the locked SQL). Worth tracking as an explici
 AP outcome: a green AP.3 likely lets us delete the `_locked_seeds` mechanism and
 the re-lock toil, replacing it with semantic coverage + a determinism hash.
 
+### Payoff: training + docs scenarios become declarative (and can't lie)
+
+Today a scenario is hand-built: the Studio trainer toggles `PlantKind`s and places
+them; a docs walkthrough hand-describes a scenario + a `TestScenarioCoverage`
+assertion, and walkthrough rewrites have to *dogfood the dashboard* to catch drift
+([[project_walkthrough_rewrites_dogfood]]). With the spine, a **scenario is a
+declarative composition of `ViolationGenerator`s**, and the views that surface them
+are *known* (each `Violation[T]` → its `View`). Two consequences:
+
+- **Trainer**: building a scenario = picking `ViolationGenerator`s; the seed
+  derives, and self-validation (AP.3) *guarantees* the scenario actually exhibits
+  what it claims — a trainer scenario can't silently fail to demonstrate its point
+  (the empty-dashboard-bug class disappears for authored scenarios too).
+- **Docs**: a walkthrough for invariant `T` is *generated/validated from the spine*
+  — `T`'s definition + the `ViolationGenerator` that produces the example + the
+  `View` that shows it — and self-validated, so **the example provably exhibits the
+  violation: the doc can't lie.** This is the direct enabler for the Greater Plan's
+  "make the core domain model the source of the documentation site" and X.6 ("stop
+  the documentation lying"): the invariant spine *is* that model, and the
+  walkthrough-dogfooding toil collapses into a typed, self-validating link.
+
 ## 9. Scope note
 
 This audit is intentionally analysis-only. The AO.10 Oracle fix (ORA-00932,
