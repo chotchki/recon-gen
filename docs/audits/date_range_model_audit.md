@@ -200,20 +200,38 @@ So there are **two** hidden things, not one:
      stated limit."
 
    **The fix for the residual is to make subjective views first-class typed objects
-   that carry their own precondition** (anchor = `as_of`, span, empty-behavior, and
-   the data-coverage they require to be meaningful). Then: the renderer knows what
-   the view assumes; the seed-coverage test can assert the scenario satisfies it
-   (so a planted violation is *guaranteed* visible — the query-window ⟷
-   plant-placement contract becomes checkable, not developer-memory); and the
-   invariant/data windows stay owned by their definitions, no longer conflated with
-   view choices. This is the same "encode the invariant in the type system, not a
-   post-hoc test" principle ([[feedback_invariants_in_types]]) applied to *views*:
-   a view that can't be satisfied by the data should fail loud at construction/seed
-   time, not render blank.
+   that carry their own definition** (anchor = `as_of`, span, empty-behavior, and
+   the data-coverage they require to be meaningful) — **decoupled from any form
+   picker.** They need *not* be end-user-configurable; this is an *authoring*
+   abstraction (a tree primitive), not a config field. The point is the direction
+   of derivation: today the view "lives" inside the QS param declaration + its
+   picker control (the RollingDate expr, the control widget) — the picker *is* the
+   definition. Invert it: the **view object is the source of truth, and the picker
+   control, the analysis-param default, the dataset-param default, and the App2
+   binding all *derive* from it** — exactly the project's "tree IS the source of
+   truth" spine (Phase L) extended to time.
+
+   This is what structurally kills **C1** (the release blocker's mechanism). C1
+   exists *because the view is split across two hand-maintained encodings* — the
+   analysis-param default (`RollingDate yesterday`) and the dataset-param default
+   (`2999` sentinel) — and they were allowed to disagree. With one view object
+   emitting *both*, there is only one default; the two renderers can't diverge
+   because there's nothing to keep in sync. The dual-default split becomes
+   unrepresentable, not merely "fixed."
+
+   Then the rest follows: the renderer knows what the view assumes; the
+   seed-coverage test asserts the scenario satisfies `required-coverage` (a planted
+   violation is *guaranteed* visible — the query-window ⟷ plant-placement contract
+   becomes checkable, not developer-memory); and invariant/data windows stay owned
+   by their definitions, no longer conflated with view choices. Same "encode the
+   invariant in the type system, not a post-hoc test" principle
+   ([[feedback_invariants_in_types]]) applied to *views*: a view the data can't
+   satisfy fails loud at construction/seed, not blank at render.
 
 This audit recommends proving the frame (D1, `as_of` in config) first — it's the
-anchor layer and unblocks the immediate mess — then treating **typed views with
-encoded preconditions** as the next step-back for the window-semantics layer.
+anchor layer and unblocks the immediate mess — then treating **the view primitive
+(source of truth; picker + all defaults derive from it)** as the next step-back for
+the window-semantics layer.
 
 ---
 
@@ -243,11 +261,13 @@ renderer.**
    (an unbounded bracket) and a `latest`-day idiom — replacing `2999-12-31`,
    `1900↔2099`, and the ad-hoc App2 binds. Self-documenting; one place to reason
    about it. (Addresses C2.)
-3. **Default-resolution rule (addresses C1, the blocker).** For any param that is
-   analysis-declared *and* dataset-mapped: the **analysis default is
-   authoritative** (QS wins that way), so the dataset default must be set equal to
-   it, OR the param must not be analysis-declared where the two would differ.
-   Concretely for the balance date: pick ONE of —
+3. **Default-resolution rule (interim C1 fix; §6.5 is the structural one).** Until
+   the view primitive lands, the two hand-maintained defaults must be kept in sync
+   by hand: for any param that is analysis-declared *and* dataset-mapped, the
+   **analysis default is authoritative** (QS wins that way), so the dataset default
+   must be set equal to it, OR the param must not be analysis-declared where the two
+   would differ. (§6.5 removes this chore entirely — one view emits both.)
+   Concretely for the balance date, pick ONE of —
    - **(a)** analysis default = the same sentinel as the dataset (QS then takes the
      SQL latest-day fallback, matching App2). Trade-off: the picker control shows
      the sentinel date until the user picks. *Cosmetically poor with `2999`; fine
@@ -267,12 +287,14 @@ renderer.**
    against locked data.
 5. **Classify every window by source, and give *views* a typed home (§5).**
    Invariant windows stay in the matview SQL; data/deadline windows stay in the
-   L2/data; **subjective views become first-class typed objects** carrying
-   `(anchor=as_of, span, empty-behavior, required-coverage)`. The required-coverage
-   precondition is what the seed-coverage test asserts (planted violation
-   guaranteed visible) and what the renderer reasons about (graceful empty vs
-   silent blank). This is the window-semantics layer; it follows once the frame
-   (#0) lands.
+   L2/data; **subjective views become first-class tree primitives** carrying
+   `(anchor=as_of, span, empty-behavior, required-coverage)` — the *source of
+   truth*, from which the picker control, the analysis-param default, the
+   dataset-param default, and the App2 binding all **derive** (not the reverse).
+   Need not be end-user-configurable — it's an authoring abstraction. This kills C1
+   structurally (one view → one default → renderers can't diverge) and makes
+   `required-coverage` the checkable contract the seed-coverage test asserts. It's
+   the window-semantics layer; follows once the frame (#0) lands.
 
 ---
 
@@ -294,12 +316,13 @@ renderer.**
 - **D3.** One sentinel vocabulary in `common/sql` — yes, and what names?
 - **D4.** Whether `window` is an L2/config field (author-controlled per instance)
   or a generator constant (your open question).
-- **D5 (the residual smell — next step-back after D1).** Adopt typed **views**
-  with encoded preconditions (§6.5) as the home for subjective view-windows,
-  keeping invariant- and data/deadline-windows owned by their definitions? This is
-  the structural fix for "we don't know what should be where" — but it's a larger
-  effort and should follow once the frame (D1) is proven and the release is
-  unblocked.
+- **D5 (the residual smell — next step-back after D1).** Adopt a **view tree
+  primitive** as the source of truth for subjective view-windows (picker control +
+  all param/dataset/App2 defaults derive from it; §6.5), keeping invariant- and
+  data/deadline-windows owned by their definitions? Not necessarily
+  user-configurable — an authoring abstraction. This is the structural fix for "we
+  don't know what should be where" AND for C1 (one view → one default), but it's a
+  larger effort; land once the frame (D1) is proven and the release is unblocked.
 
 ---
 
