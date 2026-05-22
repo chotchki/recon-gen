@@ -548,6 +548,69 @@ the duality: "latest balance" = the fold's terminal `State'`, not a date filter)
 vector-state simulator is the next layer down, but AP.2 proved the core mechanic
 (stateful fold, perturbation-as-knob, predictable propagation) on the scalar case.
 
+### AP.0 result — own the `as_of` frame: GO, the dual-default is collapsible (2026-05-22)
+
+`tests/unit/test_ap0_as_of_frame.py` (6 tests, in-process) spikes D1 on the balance-
+date surface and a coupling survey maps the blast radius. Verdict: **GO** — a single
+owned `AsOfFrame` (`as_of` + `window_days`) makes the C1 dual-default *unrepresentable*
+and gives determinism + ends-at-now from one code path. What the spike pins:
+
+- **(a) One frame → both renderers, equal by construction.** `qs_window_end() == as_of
+  == app2_date_to()` (and the starts likewise). Today (surveyed) these are two
+  hand-maintained encodings — `truncDate('DD', now())` on the QS side, a `1900`/`2999`
+  sentinel on the App2 side — that are *allowed to disagree* (that disagreement IS C1).
+  With one frame there is nothing to keep in sync: the divergence is unrepresentable,
+  not merely fixed.
+- **(b) Determinism + ends-at-now, one code path.** `AsOfFrame.locked()` (anchor =
+  the existing `date(2030,1,1)`) and `AsOfFrame.live()` (anchor = `today`) differ ONLY
+  in the bound anchor value; every derivation is the same method. Locked = byte-stable,
+  live = ends-at-now, for free — the §8 determinism story falls out of the frame.
+- **(c) Generator data-end and view window share ONE value.** The fold's terminal
+  balance day == `frame.as_of` under both bindings (the AP.2 duality made concrete:
+  "latest" is the terminal `State'`, not a `now()` filter), and a plant at `as_of` is
+  inside the view's `[window_start, as_of]` *by construction* — the plant ⟷
+  query-window contract becomes a property of the frame, not developer-memory. A
+  too-narrow view fails its own stated coverage (the residual-tension hook for AP.1).
+
+**Coupling inventory (the survey — the real blast radius):** the two clocks are
+genuinely independent today.
+- *Generator side is ALREADY pinned* — `cli/data.py::_CANONICAL_LOCK_ANCHOR =
+  date(2030,1,1)` threaded as `anchor=` through `_helpers.build_full_seed_sql` →
+  `seed.py` → `auto_scenario.py`; locked seeds never read wall-clock. Wall-clock
+  fallback survives only on the ad-hoc / trainer paths (`seed.py:704/1247`,
+  `auto_scenario.py:140`, `tg_cache.py:98` `window_end → date.today()`).
+- *Dashboard side is fully independent, no shared helper* — QS rolling-date exprs live
+  per-app (`l1_dashboard/app.py:1582-83,2076` 7-day + yesterday; `executives/app.py:
+  287-88` 30-day); App2 sentinels live in `common/sql/app2_filters.py:45-46`
+  (`1900-01-01`/`9999-12-30`) + `l1_dashboard/datasets.py:891` (`2999-12-31` latest) +
+  `l2_flow_tracing/app.py:427-28` static bounds. **These two encodings never meet** —
+  exactly why C1 was possible.
+- SQL `CURRENT_TIMESTAMP` appears only in the `stuck_*` age matviews
+  (`schema.py:531`) — that is *data/deadline-derived* window semantics (§5's second
+  source), correctly owned by the invariant, NOT a view default; leave it.
+
+**Rollout shape for AP's frame layer (the go/no-go output):**
+1. `AsOfFrame` (or `as_of: date` + `window`) lands in **config** — the existing home
+   that binds the L2 shape to a deployment (`common/config.py`, alongside the
+   `TestGeneratorConfig.end_date`/trainer `window_end` it subsumes). `as_of` is the
+   temporal half of that same binding; `locked`/`live` are the two bindings.
+2. The generator reads `frame.as_of` as its anchor — a *rename + funnel* of the
+   already-threaded `anchor=`, not new plumbing; collapse the ad-hoc `date.today()`
+   fallbacks (4 sites) into "no frame ⇒ live frame".
+3. The QS rolling-date exprs and App2 sentinels are **derived from the frame**, not
+   authored per-app — this is the AP.1 view-primitive's job (the frame supplies the
+   anchor; the view supplies the span + empty-behavior). C1's fix is *structural*:
+   one view object emits both the analysis-param default and the dataset-param
+   default, so they cannot disagree.
+4. The `stuck_*` `CURRENT_TIMESTAMP` matviews stay as-is (deadline-derived, owned by
+   the invariant) — the frame is for *view anchors*, not invariant-intrinsic windows.
+
+**Honest limit of AP.0.** The spike proved the frame VALUES agree across renderers
+in-process; live-rendered QS/App2 parity stays behind the parked deploy/e2e layers.
+And it modeled the window as a single `[as_of-span, as_of]` look-back — the richer
+view taxonomy (latest-day, today-only, rolling-N, empty-behavior, required-coverage)
+is AP.1, which the `contains()`/coverage-limit tests here only foreshadow.
+
 ---
 
 ## 6. The mechanism (for decision)
