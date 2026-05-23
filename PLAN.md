@@ -320,10 +320,14 @@ is the production rollout for the two L2 classes. AT.0 redecomposes from AS's re
   L2 invariants NOT added to ALL_L1_INVARIANTS — they'll get
   ALL_L2_INVARIANTS / ALL_L2_GENERATORS sibling registries when AT.5's
   L2-side exhaustiveness gate lands.
-- [ ] AT.2 - **σ-threshold View knob** (AP.3 finding #3 lock). New `AnomalyView` tree
-  primitive owns `sigma_threshold` (default 3.0); detector returns ALL anomaly rows,
-  the View slices on threshold. Anomaly's `detect()` becomes threshold-free + projects
-  every bucket. **AT.2 decomposition decision (2026-05-23)**: the originally-planned
+- [x] AT.2 - **σ-threshold View knob** (AP.3 finding #3 lock). New `AnomalyView`
+  spine primitive owns `sigma_threshold` (default 3.0); detector returns ALL anomaly
+  rows, the View slices on threshold via the `BUCKET_LOWER_BOUNDS` map. Anomaly's
+  `detect()` is now threshold-free + projects every bucket; 16 new tests in
+  `tests/unit/test_spine_anomaly_view.py` pin defaults, monotonicity, full
+  (threshold → buckets) table, matview-vocab drift guard, defensive shapes.
+  Investigation dataset already projected every bucket — no app touch needed.
+  **AT.2 decomposition decision (2026-05-23)**: the originally-planned
   "fold AnomalyGenerator onto AS.3 stateful simulator" doesn't fit — anomaly is
   fundamentally pair-shaped (one day, many pairs), `AccountSimulation` is
   single-account multi-day; the natural shape is `LedgerSimulation.transfers` which
@@ -548,9 +552,6 @@ Operator can introspect: `SELECT JSON_VALUE(l2_yaml, '$.rails[*].max_pending_age
   migration warning for custom ETL operators + verification ladder +
   pointer to the unlocked dashboard-pickers backlog. **Phase AW
   complete (7/7 leaves).**
-## Phase Phase AT > AT.0 - Phase Phase AT > AT
-- [ ] Phase AT > AT.2 AT.2 — AnomalyView with sigma_threshold knob
-
 # Backlog (not yet phased)
 
 - **Studio / Dashboards rethink under the post-AW DB-projected
