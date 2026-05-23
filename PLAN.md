@@ -149,7 +149,7 @@ The destination: invariant as single source of truth, with generators + views re
 - *In-process SQLite harness is load-bearing.* AP.3's pattern (`emit_schema` + `_register_sqlite_aggregates` + real matview SQL, no DB server) made AR's design confidence cheap. Every promoted Invariant should self-validate this way before its production wiring.
 - *Honest limits become the actual blocker.* AR.5's "honest limit" (substitution paths) was the live regression. AP.2's honest limit is **cross-account vector state** — AS.4 is therefore the highest-exposure leaf in this phase.
 
-- [ ] AS.0 - Plan/spike the spine rollout decomposition (lock the `src/` home + the taxonomy migration order before building)
+- [x] AS.0 - Plan/spike the spine rollout decomposition (lock the `src/` home + the taxonomy migration order before building)
 - [ ] AS.1 - promote `Violation` / `Invariant` / `ViolationGenerator` / `View` types to `src/`
 - [ ] AS.2 - unify the fractured taxonomy: `PlantKind` (20) ⋈ `check_type` (~10 untyped) → one closed `Violation` taxonomy; total `invariant→{generators,views}` maps, exhaustiveness-checked (data/deadline windows stay invariant-owned)
 - [ ] AS.3 - generator = stateful fold carrying `(balances, active-violation-set)`; `Invariant.scenario_for(shape, selector)`; non-violating = perturbation off

@@ -683,6 +683,100 @@ behind the parked deploy/e2e layers. Spiked the single-date view; the range / ro
 N / today-only members of the taxonomy reuse the same primitive (`span` > 0) but
 aren't separately exercised here.
 
+### AS.0 result — spine rollout decomposition: drift threads cleanly end-to-end (2026-05-23)
+
+The first AS-phase deliverable closes after AR confirmed the frame + view layers in
+production. `tests/unit/test_as0_drift_full_spine.py` (5 tests, in-process, real
+emitted `drift` matview, no DB server) puts ALL four spine types together on one
+invariant — `Violation` ⋈ `Invariant.detect` ⋈ `Invariant.scenario_for` ⋈
+`ViolationGenerator` (stateful fold from AP.2) ⋈ `View` (the AR primitive). What
+the spike pinned:
+
+1. **The four spine types compose at the type level.** ONE call chain —
+   `inv.scenario_for("CustomerSubledger", magnitude=5.0).emit(conn)` →
+   `inv.detect(conn)` → `view.resolve_day([as_of])` — exercises every type in the
+   AS taxonomy. The DriftGenerator IS a stateful day-by-day fold (AP.2 shape: the
+   running balance is the carried state, the perturbation is a single-day "blip"),
+   not a single-shot row emitter.
+2. **`Invariant` is the smart-constructor home.** `scenario_for(shape_selector)` is
+   a CLASS method that resolves the role string against the L2 and fails loud when
+   the shape can't host it (`ValueError("no drift-eligible …")`). The invariant
+   owns both halves of the spine link — `detect` (find itself) and `scenario_for`
+   (manufacture itself) — exactly the AP.3 + AP.3-extension shape.
+3. **Non-violating is the same generator with the perturbation off.** `magnitude=0.0`
+   on `scenario_for` makes the fold's perturbation a no-op; the simulation runs
+   clean; `intended NOT IN detect(conn)`. AP.2's Q2 promoted into the spine API.
+4. **View anchor == generator anchor by construction.** Both read ONE `AsOfFrame`;
+   the plant lands AT `frame.as_of`; the view's `required_coverage` always
+   contains it. The plant ⟷ query-window contract is a property of the spine, not
+   developer-memory (AR.3's gate generalizes).
+5. **Drift's `detect()` carries ZERO substitution-path risk.** The AR.5 lesson
+   encoded as a property test: `set_trace_callback` captures every SQL the detector
+   runs; the assertion is `"<<$" not in sql`. Drift reads the matview directly,
+   no `<<$param>>` substitution → no api/smoke vs QS-runtime divergence. The
+   checklist passes for arithmetic invariants; AT.0's L2 surface (Investigation
+   matviews) is where this assertion may fire and require AR.5-style work.
+
+**Locked design decisions for AS.1–AS.5 (the migration order):**
+
+- **`src/` home — three new modules under `common/spine/`** (the spine name keeps
+  the conceptual cluster contained; existing `common/tree/` stays for the
+  presentation taxonomy):
+  - `common/spine/violation.py` — `Violation` frozen dataclass + `Violation.of()`
+    smart constructor.
+  - `common/spine/invariant.py` — `Invariant` Protocol + concrete invariants
+    (DriftInvariant, OverdraftInvariant, …); detector implementations stay
+    thin SQL reads, NOT re-encoded matview logic.
+  - `common/spine/generator.py` — `ViolationGenerator` Protocol + base classes
+    for the stateful-fold shape (the AP.2 `AccountSimulation` pattern,
+    productionized).
+  - `View` stays on `common/tree/date_view.py` — already promoted by AR.1; the
+    spine references it.
+- **Migration order across AS.1–AS.5** (what AS.0 settled, what AS.1 picks up):
+  1. `Violation` first (no deps; promoted as-is from the spike).
+  2. `Invariant` Protocol + DriftInvariant (depends on `Violation`; concrete
+     detectors and scenario_for hooks land here).
+  3. `ViolationGenerator` Protocol + DriftGenerator (depends on `Invariant`
+     for the scenario_for hook signature; the stateful fold's `State -> (flows,
+     State')` shape promotes from AP.2's `AccountSimulation`).
+  4. The remaining L1 invariants (ledger_drift, overdraft, expected_eod_balance_breach,
+     limit_breach, stuck_pending, stuck_unbundled) get their own pairs — same
+     shape, different SQL bodies. **Many-to-many edges land here**: a `drift`
+     `ViolationGenerator` trips BOTH `DriftInvariant` AND `LedgerDriftInvariant`
+     detectors (AP.3 finding). The taxonomy unification (AS.2) is the bookkeeping
+     that records those edges.
+  5. AS.4 cross-account vector state is the AS.3 stateful-fold's
+     generalization — same Protocol, the State is now a `dict[account_id, balance]`
+     rather than a scalar. AP.2's honest limit becomes AS.4's design surface.
+- **Per-promoted-invariant substitution-path checklist** (AR.5's lesson codified):
+  for every Invariant landing in `common/spine/invariant.py`, the AS.1 commit must
+  include a copy of `test_drift_detect_does_not_cross_a_sql_pushdown_surface` for
+  that invariant's `detect()`. If the assertion FAILS, the production wiring must
+  also include an api-layer smoke test that runs the dataset SQL with BOTH
+  substitution shapes (string literal + typed value), AR.5-style.
+- **The taxonomy mapping is many-to-many; AS.2 records edges, not a rename.**
+  Surfaced explicitly in audit §5 (AP.3 extension); AS.2's deliverable is a
+  total `invariant → {ViolationGenerator}` map (exhaustiveness-checked, since
+  every `PlantKind` value must hit ≥1 invariant) plus `invariant → {View}`
+  (same shape). The mapping table is the spine's wiring registry.
+- **The fourth window kind (no-narrowing) stays orthogonal to the spine.**
+  Invariant/Generator/View are PER-VIOLATION; the no-narrowing L2FT static
+  bounds are PER-SURFACE — a different axis. AS doesn't need to absorb them;
+  they stay declared at the app layer (per the AR.4 documented note).
+
+**GO for AS.1.** The spike's type shape composes cleanly, the migration order is
+locked, the substitution-path checklist has its first concrete pass (drift =
+zero risk). AS.1 can promote without further design work; the spike's local
+classes are the production-shape proposal verbatim.
+
+**Honest limit of AS.0.** Threaded only ONE invariant (drift, arithmetic). The
+spike type shape was already proven for windowed + recursive by AP.3, but the
+PRODUCTION promotion of those (anomaly, money_trail) is AT.x territory — AT.0
+will spike anomaly through the same end-to-end shape before AT.1 promotes.
+Many-to-many wiring isn't exercised in the spike (drift→drift+ledger_drift is
+captured in the AS.2 design note but not threaded through code yet). Cross-
+account state is fully AS.4's surface.
+
 ---
 
 ## 6. The mechanism (for decision)
