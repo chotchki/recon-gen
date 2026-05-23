@@ -158,6 +158,38 @@ The destination: invariant as single source of truth, with generators + views re
 - [ ] AS.6 - **MANDATORY GATE** — 4-way agreement + `TestScenarioCoverage` become the runtime linkage assertion over the spine. The bridge between in-process semantic correctness and live-rendered correctness; AR.5 proved this layer is where deploy-time divergence surfaces, so this is non-skippable, not polish.
 - [ ] AS.7 - training/docs scenarios self-validated (can't lie / can't silently fail to demonstrate)
 
+## Phase AT - L2 invariant spine rollout *(depends on: AS)*
+
+Parallel rollout to AS, scoped to the **L2 (Investigation) surface**: the Investigation
+matviews carry the two non-arithmetic complexity classes from AP.3 — windowed-statistical
+(`inv_pair_rolling_anomalies` z-score) and recursive-graph (`inv_money_trail_edges`
+WITH RECURSIVE walk). AS pilots the arithmetic case (drift); AT extends the proven
+spine to the other two classes on the actual Investigation app.
+
+AP.3 already proved the spine holds across all three complexity classes in-process; AT
+is the production rollout for the two L2 classes. AT.0 redecomposes from AS's results
+(same pattern as AS.0 did from AP's spike findings).
+
+- [ ] AT.0 - Plan/spike the L2 spine extension: pilot the windowed-statistical case
+  (anomaly) end-to-end through the AS-produced `Violation`/`Invariant`/`ViolationGenerator`/
+  `View` shape. Lock the migration order for AT.1-AT.5 based on what AS's L1 rollout
+  taught us about each step's actual cost.
+- [ ] AT.1 - extend the `Invariant` taxonomy with the two L2 kinds (`anomaly`,
+  `money_trail`); detector shims read the existing Investigation matview rows.
+- [ ] AT.2 - windowed `ViolationGenerator` in `src/`: baseline-plus-spike (AP.3 finding #2 —
+  statistical invariants can't be generated from a single row) folded into the AS.3
+  stateful simulator. View owns the σ-threshold (AP.3 finding #3).
+- [ ] AT.3 - recursive `ViolationGenerator` in `src/`: parent-linked chain emission
+  (root → child → grandchild, each a 2-leg Posted transfer per AP.3's MoneyTrailGenerator).
+  Cross-account by nature — this is the surface AS.4's vector-state work has to support.
+- [ ] AT.4 - retire L2 byte-locked seed SQL → semantic self-validation extends to the
+  Investigation matviews (parallel to AS.5 for L1).
+- [ ] AT.5 - **MANDATORY GATE** — 4-way agreement extends to the Investigation dashboard
+  (parallel to AS.6 for L1). The cross-tool linkage assertion that QS / App2 / PDF /
+  direct-DB agree on L2 violations. Non-skippable for the same reason AS.6 is.
+- [ ] AT.6 - L2 training/docs scenarios self-validated (anomaly + money_trail scenarios
+  can't silently fail to demonstrate; parallel to AS.7).
+
 # Backlog (not yet phased)
 
 - **Q.6 — CLI shape revisit: cfg ⇄ L2 dual-yaml factoring.** Surfaced 2026-05-08 during `Y.2.gate.h.6`. The runner reads `cfg.default_l2_instance` and threads `QS_GEN_TEST_L2_INSTANCE` to subprocesses, making the CLI's dual-arg shape (`-c <cfg.yaml> --l2 <l2.yaml>`) partially redundant. Spike-before-implement (per `feedback_spike_before_locking_implementation`); CLI-surface change touches every operator command + doc example + tests.
