@@ -320,11 +320,22 @@ is the production rollout for the two L2 classes. AT.0 redecomposes from AS's re
   L2 invariants NOT added to ALL_L1_INVARIANTS — they'll get
   ALL_L2_INVARIANTS / ALL_L2_GENERATORS sibling registries when AT.5's
   L2-side exhaustiveness gate lands.
-- [ ] AT.2 - windowed `ViolationGenerator` in `src/`: baseline-plus-spike (AP.3 finding #2 —
-  statistical invariants can't be generated from a single row) folded into the AS.3
-  stateful simulator. View owns the σ-threshold (AP.3 finding #3).
-- [ ] AT.3 - recursive `ViolationGenerator` in `src/`: parent-linked chain emission
-  (root → child → grandchild, each a 2-leg Posted transfer per AP.3's MoneyTrailGenerator).
+- [ ] AT.2 - **σ-threshold View knob** (AP.3 finding #3 lock). New `AnomalyView` tree
+  primitive owns `sigma_threshold` (default 3.0); detector returns ALL anomaly rows,
+  the View slices on threshold. Anomaly's `detect()` becomes threshold-free + projects
+  every bucket. **AT.2 decomposition decision (2026-05-23)**: the originally-planned
+  "fold AnomalyGenerator onto AS.3 stateful simulator" doesn't fit — anomaly is
+  fundamentally pair-shaped (one day, many pairs), `AccountSimulation` is
+  single-account multi-day; the natural shape is `LedgerSimulation.transfers` which
+  is documented as AT.3's primitive. AT.2 keeps the View-only scope; AT.3 lands
+  `Transfer` once + refactors both `AnomalyGenerator` (consumer 1) +
+  `MoneyTrailGenerator` (consumer 2).
+- [ ] AT.3 - **`Transfer` primitive on `LedgerSimulation`** + two-consumer refactor.
+  Extend `LedgerSimulation` with `transfers: list[Transfer]` (account_id, signed
+  amount per leg + shared `transfer_id` + optional `parent_transfer_id` for chains).
+  Refactor `AnomalyGenerator` to construct N baseline transfers + 1 spike transfer.
+  Land `MoneyTrailGenerator` for the parent-linked chain emission shape (root →
+  child → grandchild, each a 2-leg Posted transfer per AP.3's MoneyTrailGenerator).
   Cross-account by nature — this is the surface AS.4's vector-state work has to support.
 - [ ] AT.4 - retire L2 byte-locked seed SQL → semantic self-validation extends to the
   Investigation matviews (parallel to AS.5 for L1).
@@ -537,6 +548,8 @@ Operator can introspect: `SELECT JSON_VALUE(l2_yaml, '$.rails[*].max_pending_age
   migration warning for custom ETL operators + verification ladder +
   pointer to the unlocked dashboard-pickers backlog. **Phase AW
   complete (7/7 leaves).**
+## Phase Phase AT > AT.0 - Phase Phase AT > AT
+- [ ] Phase AT > AT.2 AT.2 — AnomalyView with sigma_threshold knob
 
 # Backlog (not yet phased)
 

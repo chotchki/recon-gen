@@ -55,13 +55,17 @@ _DEFAULT_SPIKE_MAGNITUDE = 100_000.0
 @dataclass(frozen=True)
 class AnomalyInvariant:
     """Pair-rolling-anomaly detector. Reads
-    `<prefix>_inv_pair_rolling_anomalies` and projects rows with
-    `z_bucket` in {'3-4 sigma', '4+ sigma'} as Violations.
+    `<prefix>_inv_pair_rolling_anomalies` and projects EVERY row as a
+    Violation — every (pair, window_end) the matview computed, across
+    every `z_bucket` (including '0-1 sigma' background).
 
-    Per AP.3 finding #3, the σ threshold belongs on the View (AT.2 will
-    parametrize). AT.1 bakes in 3σ as the spine-default cutoff —
-    matches the analyst-facing "anomaly" semantics in the existing
-    Investigation dashboard.
+    Per AP.3 finding #3, the σ threshold belongs on the **View**, not
+    the detector. AT.2 promoted `AnomalyView` (`anomaly_view.py`) that
+    slices over the detected violation set on `sigma_threshold`. The
+    detector here is now bucket-agnostic — `AnomalyView(3.0).slice(...)`
+    reproduces AT.1's behaviour exactly; other thresholds (2.0 for
+    deep-dive triage, etc.) work over the same `detect()` result with
+    no re-query.
     """
 
     name: ClassVar[str] = "inv_pair_rolling_anomalies"
@@ -71,8 +75,7 @@ class AnomalyInvariant:
         rows = conn.execute(
             f"SELECT sender_account_id, recipient_account_id, window_end, "
             f"z_bucket "
-            f"FROM {self.prefix}_inv_pair_rolling_anomalies "
-            f"WHERE z_bucket IN ('3-4 sigma', '4+ sigma')",
+            f"FROM {self.prefix}_inv_pair_rolling_anomalies",
         ).fetchall()
         return {
             Violation.of(

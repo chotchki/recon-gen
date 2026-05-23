@@ -2,18 +2,26 @@
 promotion. Mirrors the AT.0 spike's assertions but against the
 production-shape classes in `common/spine/anomaly.py`.
 
+**AT.2 update**: the σ threshold moved off the detector and onto the
+`AnomalyView` knob. `inv.detect(conn)` now returns ALL buckets; tests
+that previously asserted only-high-sigma-rows now go through
+`AnomalyView().slice(...)`. The AT.2 separation is pinned here AND in
+`test_spine_anomaly_view.py` (the View's own properties).
+
 What's pinned:
 
 1. AnomalyInvariant satisfies the Invariant Protocol (`name`,
-   `detect`); detect reads the matview with 3σ default cutoff.
+   `detect`); detect reads the matview returning every bucket (no
+   threshold filter — that's the View's job).
 2. AnomalyGenerator satisfies the ViolationGenerator Protocol; emits
    N baseline pairs + 1 spike pair.
 3. scenario_for resolves sender + recipient roles; fails loud on
    missing roles.
 4. The AT.0 statistical finding holds: with default
-   baseline_pair_count=100, the spike fires '4+ sigma'.
+   baseline_pair_count=100, the spike fires '4+ sigma' (verified
+   through the 3σ-default View slice).
 5. The AT.0 honest-limit holds: with degenerate baseline (count=1),
-   no anomaly fires.
+   no anomaly fires (slice empty under 3σ default).
 6. Identity round-trip — generator.intended matches detect projection.
 7. Substitution-path absence (AR.5 lesson codified for AT.1).
 """
@@ -33,6 +41,7 @@ from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.spine import (
     AnomalyInvariant,
+    AnomalyView,
     Invariant,
     Violation,
     ViolationGenerator,
@@ -135,7 +144,39 @@ def test_scenario_for_unknown_recipient_fails_loud() -> None:
 
 def test_default_baseline_plus_spike_fires_anomaly() -> None:
     """With default settings (100 baseline + 100k spike), the spike
-    pair gets ~9.95σ → '4+ sigma' bucket → fires."""
+    pair gets ~9.95σ → '4+ sigma' bucket → fires under the default
+    `AnomalyView(sigma_threshold=3.0)` slice."""
+    inv = AnomalyInvariant()
+    view = AnomalyView()  # default 3σ — matches AT.1 baked-in behaviour
+    gen = inv.scenario_for("CustomerSubledger", "CustomerSubledger")
+
+    conn = _fresh_db()
+    try:
+        gen.emit(conn)
+        conn.commit()
+        _refresh(conn)
+        sliced = view.slice(inv.detect(conn))
+    finally:
+        conn.close()
+
+    spike_hits = {
+        v for v in sliced
+        if (
+            dict(v.identity).get("sender_account_id") == gen.sender_account_id
+            and dict(v.identity).get("recipient_account_id")
+                == gen.recipient_account_id
+        )
+    }
+    assert spike_hits, (
+        f"spike pair must fire anomaly under default 3σ slice; "
+        f"sliced={sliced}"
+    )
+
+
+def test_detect_returns_every_bucket_unfiltered() -> None:
+    """AT.2 contract: detect() returns EVERY bucket (no threshold
+    filter — that's the View's job). The baseline pairs occupy
+    '0-1 sigma', the spike '4+ sigma'; both surface."""
     inv = AnomalyInvariant()
     gen = inv.scenario_for("CustomerSubledger", "CustomerSubledger")
 
@@ -148,23 +189,23 @@ def test_default_baseline_plus_spike_fires_anomaly() -> None:
     finally:
         conn.close()
 
-    spike_hits = {
-        v for v in detected
-        if (
-            dict(v.identity).get("sender_account_id") == gen.sender_account_id
-            and dict(v.identity).get("recipient_account_id")
-                == gen.recipient_account_id
-        )
-    }
-    assert spike_hits, (
-        f"spike pair must fire anomaly; detected={detected}"
+    buckets = {dict(v.identity).get("z_bucket") for v in detected}
+    # Baseline pairs are at-or-near the mean → '0-1 sigma'; spike is
+    # ~9.95σ → '4+ sigma'. Both must be in the unfiltered detect set.
+    assert "0-1 sigma" in buckets, (
+        f"baseline pairs should be in '0-1 sigma'; got {buckets}"
+    )
+    assert "4+ sigma" in buckets, (
+        f"spike pair should be in '4+ sigma'; got {buckets}"
     )
 
 
 def test_no_spike_no_anomaly() -> None:
     """Non-violating: spike_magnitude == baseline_amount ⇒ no outlier
-    ⇒ no '3-4 sigma' or '4+ sigma' bucket."""
+    ⇒ default 3σ slice empty. (detect() still returns the rows; they
+    just sit in '0-1 sigma' and the View filters them out.)"""
     inv = AnomalyInvariant()
+    view = AnomalyView()
     gen = inv.scenario_for(
         "CustomerSubledger", "CustomerSubledger",
         spike_magnitude=100.0,  # ← same as baseline_amount default
@@ -174,15 +215,17 @@ def test_no_spike_no_anomaly() -> None:
         gen.emit(conn)
         conn.commit()
         _refresh(conn)
-        assert inv.detect(conn) == set()
+        assert view.slice(inv.detect(conn)) == set()
     finally:
         conn.close()
 
 
 def test_degenerate_baseline_does_not_fire() -> None:
     """AT.0 finding: with baseline_pair_count=1, the spike's z is too
-    small to fire ('0-1 sigma'). The outlier-shifts-mean effect."""
+    small to fire ('0-1 sigma'). The outlier-shifts-mean effect.
+    Default 3σ slice stays empty."""
     inv = AnomalyInvariant()
+    view = AnomalyView()
     gen = inv.scenario_for(
         "CustomerSubledger", "CustomerSubledger",
         baseline_pair_count=1,
@@ -192,7 +235,7 @@ def test_degenerate_baseline_does_not_fire() -> None:
         gen.emit(conn)
         conn.commit()
         _refresh(conn)
-        assert inv.detect(conn) == set()
+        assert view.slice(inv.detect(conn)) == set()
     finally:
         conn.close()
 
