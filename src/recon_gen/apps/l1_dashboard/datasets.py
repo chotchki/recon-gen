@@ -932,15 +932,24 @@ def build_daily_statement_summary_dataset(
     prefix = cfg.db_table_prefix
     view = DateView(frame=cfg.test_generator.as_of_frame())
     # AO.10 / AR.2 — compare the balance date as YYYY-MM-DD text on both
-    # sides. Pre-AR.2 the param was string-coerced (analysis-default was
-    # RollingDate evaluated to a date object QS handed off as text); now
-    # it's a typed timestamp (StaticValues with an ISO datetime literal),
-    # so `SUBSTR(<timestamp>, 1, 10)` blows up on PG (`function substr
-    # (timestamp without time zone, integer, integer) does not exist`).
-    # `day_text()` on the param mirrors the column-side treatment and
-    # handles either string or timestamp portably.
+    # sides. The param substitutes TWO shapes: a string LITERAL in the
+    # api/smoke path (smoke reads the dataset's StaticValues default and
+    # inlines it as text) and a typed timestamp VALUE in the QS runtime
+    # path (MappedDataSetParameters bridges the typed analysis value
+    # through). PG can't disambiguate `to_char(<unknown-typed string>,
+    # text)` AND can't `substr(timestamp,…)`. Cast the param to DATE
+    # first — PG's `CAST(<expr> AS DATE)` accepts both ISO-T string
+    # literals AND timestamp values; Oracle's the same. SQLite has no
+    # real DATE type — strftime parses ISO strings directly — so the
+    # cast is dialect-skipped to keep the no-op out of SQLite's path.
     day = day_text("business_day_start", cfg.dialect)
-    bdate = day_text(f"<<${P_L1_DS_BALANCE_DATE_DSP}>>", cfg.dialect)
+    _param_ref = f"<<${P_L1_DS_BALANCE_DATE_DSP}>>"
+    bdate_param = (
+        _param_ref
+        if cfg.dialect is Dialect.SQLITE
+        else f"CAST({_param_ref} AS DATE)"
+    )
+    bdate = day_text(bdate_param, cfg.dialect)
     acct = "(account_name || ' (' || account_id || ')')"
     # AO.2 / AR.2 — balance-date narrow is a strict day equality. The
     # pre-AR.2 ``OR (bdate ≥ sentinel ...)`` latest-on-empty fallback is
@@ -983,10 +992,18 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
     # column-type inference is stable across dialects (see docstring).
     business_day = date_trunc_day("tx.posting", dialect)
     # AO.10 / AR.2 — see build_daily_statement_summary_dataset for the
-    # day_text-on-both-sides rationale (param is a typed timestamp
-    # post-AR.2; SUBSTR(timestamp,…) is PG-invalid).
+    # CAST-then-day_text rationale (param substitutes as a string in the
+    # api/smoke path + as a typed timestamp at QS runtime; CAST AS DATE
+    # accepts both on PG/Oracle, SQLite's strftime handles strings
+    # directly so its branch skips the cast).
     day_txt = day_text("tx.posting", dialect)
-    bdate = day_text(f"<<${P_L1_DS_BALANCE_DATE_DSP}>>", dialect)
+    _param_ref = f"<<${P_L1_DS_BALANCE_DATE_DSP}>>"
+    bdate_param = (
+        _param_ref
+        if dialect is Dialect.SQLITE
+        else f"CAST({_param_ref} AS DATE)"
+    )
+    bdate = day_text(bdate_param, dialect)
     # AO.2 / AR.2 — same balance-date narrow as the summary; strict day
     # equality (pre-AR.2 latest-on-empty fallback removed per the
     # view-primitive strict-collapse decision).

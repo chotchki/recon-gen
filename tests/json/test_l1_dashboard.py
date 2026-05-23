@@ -657,9 +657,16 @@ def test_daily_statement_balance_date_narrow_renders_a_portable_day_string() -> 
     instance = default_l2_instance()
     param = f"<<${P_L1_DS_BALANCE_DATE_DSP}>>"
     expected_per_dialect = {
-        Dialect.POSTGRES: f"TO_CHAR({param}",
-        Dialect.ORACLE: f"TO_CHAR({param}",
-        Dialect.SQLITE: f"strftime('%Y-%m-%d', {param}",
+        # PG/Oracle: TO_CHAR(CAST(<param> AS DATE), ...). The CAST is
+        # the AR.5 fix — handles both string literal (api/smoke path,
+        # where the dataset StaticValues default inlines as text) and
+        # typed timestamp (QS runtime path, where MappedDataSetParameters
+        # bridges the typed analysis-default value).
+        Dialect.POSTGRES: f"TO_CHAR(CAST({param} AS DATE), 'YYYY-MM-DD')",
+        Dialect.ORACLE: f"TO_CHAR(CAST({param} AS DATE), 'YYYY-MM-DD')",
+        # SQLite has no real DATE type — strftime parses ISO strings
+        # directly — so the cast is skipped.
+        Dialect.SQLITE: f"strftime('%Y-%m-%d', {param})",
     }
     for dialect, expected_fn in expected_per_dialect.items():
         cfg = replace(_CFG, dialect=dialect)
@@ -674,7 +681,8 @@ def test_daily_statement_balance_date_narrow_renders_a_portable_day_string() -> 
             assert f"TRUNC({param}" not in sql
             # The bug shape we hit at AR.2 — SUBSTR on a timestamp param.
             assert f"SUBSTR({param}" not in sql
-            # The fix shape — day_text() on the param, dialect-natural.
+            # The fix shape — day_text(CAST(...)) for PG/Oracle, raw for
+            # SQLite.
             assert expected_fn in sql
 
 
