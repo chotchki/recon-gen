@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
 import yaml
 
+from recon_gen.common.as_of_frame import LOCKED_ANCHOR, AsOfFrame
 from recon_gen.common.env_keys import (
     RECON_GEN_APP2_DB_POOL_SIZE,
     RECON_GEN_AWS_ACCOUNT_ID,
@@ -161,6 +162,33 @@ class TestGeneratorConfig:
     # leave it None (full emission). Studio-only knob — no UI for it
     # outside the trainer panel.
     cutoff_date: date | None = None
+
+    def as_of_frame(self, *, window_days: int = 0) -> AsOfFrame:
+        """Resolve this config's scenario anchor as the owned `AsOfFrame`
+        (D1; see `docs/audits/date_range_model_audit.md` §5).
+
+        This is the call-site every `as_of` reader lands on — AQ.3 funnels
+        the generator's threaded ``anchor=`` and the four ad-hoc
+        ``date.today()`` fallbacks through it, and AR's views take an
+        `AsOfFrame` as their anchor. Three resolution paths, one shape out:
+
+          * ``end_date == LOCKED_ANCHOR`` → ``AsOfFrame.locked()`` (the
+            canonical demo anchor; locked-seed determinism).
+          * ``end_date is not None`` → ``AsOfFrame(end_date, window_days)``
+            (an explicit anchor — operator override or trainer-pinned).
+          * ``end_date is None`` → ``AsOfFrame.live()`` (production
+            ends-at-now).
+
+        ``window_days`` defaults to 0 (a single-day frame, no look-back),
+        matching today's single-anchor semantics; AR widens it on the
+        View primitive. The audit's D4 — whether ``window`` is an
+        L2/config field or a generator constant — is still open.
+        """
+        if self.end_date == LOCKED_ANCHOR:
+            return AsOfFrame.locked(window_days=window_days)
+        if self.end_date is not None:
+            return AsOfFrame(as_of=self.end_date, window_days=window_days)
+        return AsOfFrame.live(window_days=window_days)
 
 
 @dataclass

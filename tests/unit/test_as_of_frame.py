@@ -69,3 +69,46 @@ def test_locked_anchor_agrees_with_canonical_lock_anchor() -> None:
     # generator will read. Both must name the same day or determinism
     # breaks at the seam. AQ.3 collapses this to a single import.
     assert LOCKED_ANCHOR == _CANONICAL_LOCK_ANCHOR
+
+
+# ---------------------------------------------------------------------------
+# AQ.2 — TestGeneratorConfig.as_of_frame() is the call-site every reader
+# lands on. Three resolution paths, one shape out.
+# ---------------------------------------------------------------------------
+
+
+def test_config_end_date_equal_to_locked_anchor_resolves_to_locked_frame() -> None:
+    from recon_gen.common.config import TestGeneratorConfig
+    cfg = TestGeneratorConfig(end_date=LOCKED_ANCHOR)
+    frame = cfg.as_of_frame()
+    assert frame == AsOfFrame.locked()
+    assert frame.as_of == LOCKED_ANCHOR
+
+
+def test_config_explicit_end_date_resolves_to_anchored_frame() -> None:
+    # An operator override or trainer-pinned day that isn't the canonical
+    # anchor still produces a deterministic frame at that day.
+    from recon_gen.common.config import TestGeneratorConfig
+    pinned = date(2026, 5, 22)
+    cfg = TestGeneratorConfig(end_date=pinned)
+    assert cfg.as_of_frame() == AsOfFrame(as_of=pinned, window_days=0)
+
+
+def test_config_no_end_date_resolves_to_live_frame() -> None:
+    # The default (no end_date in cfg yaml) means "production / ad-hoc" —
+    # ends-at-now, same code path. This is the binding the AQ.3 funnel
+    # collapses the four ad-hoc date.today() fallbacks onto.
+    from recon_gen.common.config import TestGeneratorConfig
+    cfg = TestGeneratorConfig()
+    frame = cfg.as_of_frame()
+    assert frame.as_of == date.today()
+    assert frame == AsOfFrame.live()
+
+
+def test_config_window_days_threads_through() -> None:
+    # Callers can ask for a window without the resolver touching anything
+    # else — span concept stays AR-deferred (D4 in the audit).
+    from recon_gen.common.config import TestGeneratorConfig
+    cfg = TestGeneratorConfig(end_date=LOCKED_ANCHOR)
+    assert cfg.as_of_frame(window_days=7).window_days == 7
+    assert cfg.as_of_frame(window_days=7).as_of == LOCKED_ANCHOR
