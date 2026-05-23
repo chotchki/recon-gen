@@ -294,10 +294,20 @@ AP.3 already proved the spine holds across all three complexity classes in-proce
 is the production rollout for the two L2 classes. AT.0 redecomposes from AS's results
 (same pattern as AS.0 did from AP's spike findings).
 
-- [ ] AT.0 - Plan/spike the L2 spine extension: pilot the windowed-statistical case
+- [x] AT.0 - Plan/spike the L2 spine extension: pilot the windowed-statistical case
   (anomaly) end-to-end through the AS-produced `Violation`/`Invariant`/`ViolationGenerator`/
   `View` shape. Lock the migration order for AT.1-AT.5 based on what AS's L1 rollout
-  taught us about each step's actual cost.
+  taught us about each step's actual cost. Landed `tests/unit/test_at0_anomaly_full_spine.py`
+  (8 in-process tests). **AT.0 findings**: (1) windowed-statistical case fits the
+  existing spine Protocol without change — multi-row baseline-plus-spike emission
+  is just a multi-INSERT inside `emit()`; no Protocol surface needed; (2) the
+  spike's OUTLIER-EFFECT-ON-MEAN reduces its own z-score — needs ~100 baseline
+  points for a 1000:1 spike-to-baseline ratio to clear 3σ (caught mid-spike; 8
+  baseline points gave only z≈2.67); (3) View ownership of the σ-threshold (per
+  AP.3 finding #3) is unavoidable — for the spike, detect() bakes in `>=3σ`;
+  AT.1 + AT.2 move it to a View knob; (4) single-edge to anomaly empirically
+  (Posted leg, no balance row ⇒ no drift JOIN match — same shape as
+  stuck_unbundled/limit_breach).
 - [ ] AT.1 - extend the `Invariant` taxonomy with the two L2 kinds (`anomaly`,
   `money_trail`); detector shims read the existing Investigation matview rows.
 - [ ] AT.2 - windowed `ViolationGenerator` in `src/`: baseline-plus-spike (AP.3 finding #2 —
