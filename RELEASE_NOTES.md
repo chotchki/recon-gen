@@ -1,5 +1,87 @@
 # Release Notes
 
+## v11.11.0 — Phase AW: own the temporal frame + persona-blind matviews
+
+Phase AW closes the date/range audit's §6 principle ("own the temporal
+frame — in config") end-to-end. The spine's wall-clock dependency in
+`stuck_pending` + `stuck_unbundled` was a symptom of a deeper issue —
+the matview SQL itself used `CURRENT_TIMESTAMP` for age computation,
+forcing generators to plant relative to whatever the matview saw at
+refresh time. AW moves the temporal frame to a single owned source.
+
+**Schema change (one new table per deployment):**
+- New `<prefix>_config` table with three columns:
+  - `as_of TIMESTAMP NOT NULL` — typed; the owned temporal frame
+  - `cfg_yaml TEXT/CLOB NOT NULL` — JSON-serialized cfg
+  - `l2_yaml TEXT/CLOB NOT NULL` — JSON-serialized L2 yaml
+- This is the only relaxation of the "two-table rule" (`_transactions` +
+  `_daily_balances` historically the only base tables); the new table
+  is DERIVED from cfg+L2 (Python populates; never operator-mutated;
+  mirrors source YAML 1:1) so it doesn't break the principle.
+
+**Matview persona-blind:**
+- `stuck_pending` + `stuck_unbundled` + `limit_breach` matview bodies
+  no longer bake per-L2 literals at emit time. They LEFT JOIN the
+  config table's `l2_yaml` JSON and read per-rail / per-LimitSchedule
+  values via SQL/JSON path. Same SQL across every L2 deployment.
+- `age_seconds` formula reads as_of from
+  `(SELECT as_of FROM <prefix>_config)` — both halves of the spine
+  (plant + matview) read from one source.
+- New dialect helpers in `common/sql/dialect.py`:
+  `json_array_iterate` (LEFT JOIN over a JSON array via SQLite
+  `json_each` / PG+Oracle `JSON_TABLE`) + `json_field_extract`
+  (per-row scalar via SQLite `json_extract` / PG+Oracle `JSON_VALUE`).
+  No JSONB, no `->>` — SQL/JSON-standard only per the portability
+  constraint.
+
+**Spine generators wall-clock-free:**
+- `StuckPendingGenerator` + `StuckUnbundledGenerator` accept
+  `as_of: datetime` as required kwarg; emit() uses it instead of
+  `datetime.now()`. Tests pinned to a single `as_of` shared between
+  config-seed + generator; overshoots shrunk from ±50_000s (TZ-skew-
+  resistant) to ±60s (natural — no skew to absorb). Pre-existing
+  `no-datetime-now` typing-smell suppressions dropped.
+
+**Operational two-event split:**
+- **Deploy event** (cfg.yaml or L2.yaml changes): Python serializes
+  yamls, REPLACEs the config row, initial as_of populated, matviews
+  refresh. Use `common.l2.config_table.replace_config(conn, cfg_json,
+  l2_json, as_of)`.
+- **Daily ETL event** (data load, cfg unchanged): customer ETL fills
+  base tables; refresh helper runs
+  `UPDATE config SET as_of = CURRENT_TIMESTAMP; <refresh matviews>;`.
+  Use `common.l2.config_table.set_as_of(conn, as_of=None)` —
+  `None` defaults to `CURRENT_TIMESTAMP`.
+
+**Migration warning for downstream operators with custom ETL:**
+- After upgrading, `recon-gen schema apply --execute` populates the
+  new table empty; the first refresh would compute NULL `as_of`
+  → all stuck_* matviews return zero rows. Operators MUST call
+  `replace_config` once at deploy time (or use `recon-gen data
+  apply --execute` which now seeds it for the demo paths).
+- Customer ETL paths that touch `_transactions` + `_daily_balances`
+  directly stay unchanged; the new table is operator-owned, not
+  customer-fed.
+
+**Verification:**
+- PG DB layer: 48 + 48 tests green (spec_example + sasquatch_pr,
+  both variants) — the matview SQL works against real Postgres;
+  JOIN+JSON_TABLE shape executes.
+- PG App2 layer: 25 passed + 1 xpassed on sq_pg_lo — the App2
+  renderer reads from the new matview shape correctly.
+- Audit PDF render+verify (one leg of the 4-way) passes.
+- 3139 unit tests pass; pyright clean.
+- Oracle dialect helpers are mechanical (JSON_TABLE is SQL-standard);
+  CI's e2e.yml exercises them on every release.
+- QuickSight browser layer not run locally (heavyweight); CI's
+  release.yml runs the full 4-way on publish.
+
+**Phase AW unlocks** (queued in PLAN.md backlog): dashboard pickers
+sourced from `<prefix>_config.l2_yaml` — pickers that show
+L2-DECLARED values, JOIN to L2 metadata, survive deploys without
+re-emitting JSON. Worth its own phase when picker complexity
+surfaces as friction.
+
 ## v11.10.1 — Quicksight Font Error
 
 Discovered during e2e testing that Quicksight doesn't support the requested font, updating to a supported one.

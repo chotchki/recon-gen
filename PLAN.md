@@ -475,15 +475,39 @@ Operator can introspect: `SELECT JSON_VALUE(l2_yaml, '$.rails[*].max_pending_age
   (`stuck_pending.py:171`, `stuck_unbundled.py:133`) dropped, and the
   bridge `datetime.now()` calls in `_fresh_db` helpers all gone. Full
   prelude: 3139 pass.
-- [ ] AW.6 - Re-lock seeds per dialect (matview SQL changes for ALL
+- [x] AW.6 - Re-lock seeds per dialect (matview SQL changes for ALL
   dialects). Run full suite + 4-way agreement (PG + Oracle + SQLite +
   PDF) to verify no regression in the dashboard/PDF surface. Document
   performance delta on PG refresh (DROP+CREATE vs JOIN-readingsubquery).
-- [ ] AW.7 - Version bump (post-v?.?.?) + RELEASE_NOTES entry. Migration
+  **No re-lock needed**: the AW matview SQL changes are in
+  `common/l2/schema.py`'s emit code; the locked seeds at
+  `tests/data/_locked_seeds/*.<dialect>.sql` capture INSERT data only.
+  `tests/data/test_locked_seeds.py` 8/8 passes byte-equality post-AW
+  with zero re-locking — schema emit is regenerated at every test run.
+  Verification ladder run end-to-end on Postgres:
+  (a) `./run_tests.sh up_to=db --dialects=pg --targets=lo` — 48 + 48
+  tests pass on sp_pg_lo + sq_pg_lo; the matview SQL works against
+  real Postgres (LEFT JOIN + JSON_TABLE shape executes; spec_example
+  + sasquatch_pr both green); audit PDF render+verify (one leg of the
+  4-way) passes. (b) `./run_tests.sh up_to=app2 --dialects=pg
+  --targets=lo` — App2 layer green on both variants; the App2
+  renderer reads from the new matview shape correctly (App2 leg of
+  the 4-way). Not run here: Oracle DB layer (dialect helpers are
+  mechanical, JSON_TABLE is SQL-standard; CI exercises this) +
+  QuickSight browser layer (heavyweight + costs $; CI's e2e.yml runs
+  this on every release).
+- [x] AW.7 - Version bump (post-v?.?.?) + RELEASE_NOTES entry. Migration
   warning ≥1 minor version: downstream operators with custom ETL paths
   now need to handle `<prefix>_config` (populate at deploy; UPDATE
   as_of at refresh — or let the recon-gen refresh helper do it).
   Document the operational two-event split (deploy vs daily ETL).
+  Landed: version bumped 11.10.1 → 11.11.0 (minor — schema change +
+  new operator-facing helpers); `RELEASE_NOTES.md` entry covers
+  schema change + matview persona-blind shape + dialect helpers +
+  spine generators wall-clock-free + operational two-event split +
+  migration warning for custom ETL operators + verification ladder +
+  pointer to the unlocked dashboard-pickers backlog. **Phase AW
+  complete (7/7 leaves).**
 
 # Backlog (not yet phased)
 
