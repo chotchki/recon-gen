@@ -38,6 +38,7 @@ from recon_gen.common.spine.account_simulation import (
     Perturbation,
 )
 from recon_gen.common.spine.ledger_simulation import LedgerSimulation
+from recon_gen.common.spine.semantic_lock import apply_scenario, semantic_lock
 from recon_gen.common.spine.drift import (
     DriftGenerator,
     DriftInvariant,
@@ -78,4 +79,7 @@ __all__ = [
     "DayEmission",
     # Vector-state composition (AS.4) — many AccountSimulations side by side
     "LedgerSimulation",
+    # Semantic-lock mechanism (AS.5) — replaces SQL-byte-identity locks
+    "apply_scenario",
+    "semantic_lock",
 ]

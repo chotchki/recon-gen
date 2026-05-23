@@ -154,7 +154,7 @@ The destination: invariant as single source of truth, with generators + views re
 - [x] AS.2 - unify the fractured taxonomy: `PlantKind` (20) ⋈ `check_type` (~10 untyped) → one closed `Violation` taxonomy; total `invariant→{generators,views}` maps, exhaustiveness-checked (data/deadline windows stay invariant-owned)
 - [x] AS.3 - generator = stateful fold carrying `(balances, active-violation-set)`; `Invariant.scenario_for(shape, selector)`; non-violating = perturbation off
 - [x] AS.4 - cross-account VECTOR state (AP.2's honest limit): legs net to zero across accounts; `ledger_drift` parent rollup; cross-boundary propagation
-- [ ] AS.5 - retire byte-locked seed SQL → semantic self-validation (`detect(gen) ⊇ intended`) replaces byte-identity
+- [x] AS.5 - retire byte-locked seed SQL → semantic self-validation (`detect(gen) ⊇ intended`) replaces byte-identity
 - [ ] AS.6 - **MANDATORY GATE** — 4-way agreement + `TestScenarioCoverage` become the runtime linkage assertion over the spine. The bridge between in-process semantic correctness and live-rendered correctness; AR.5 proved this layer is where deploy-time divergence surfaces, so this is non-skippable, not polish.
 - [ ] AS.7 - training/docs scenarios self-validated (can't lie / can't silently fail to demonstrate)
 
