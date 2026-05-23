@@ -437,6 +437,67 @@ def json_value(col: str, path_expr: str, dialect: Dialect) -> str:
     return f"JSON_VALUE({col}, {path_expr})"
 
 
+def json_array_iterate(
+    json_expr: str, array_path: str, *, alias: str, dialect: Dialect,
+) -> str:
+    """``LEFT JOIN`` clause that iterates a JSON array within
+    ``json_expr`` at ``array_path``, exposing each element under
+    ``alias.value`` (and ``alias.key`` on SQLite — unused but harmless).
+
+    Per-dialect renderings (AW.0.b spike confirmed the SQLite shape;
+    PG + Oracle use the SQL/JSON-standard ``JSON_TABLE`` form per the
+    project's portability constraint — no JSONB, no ``->>``, only
+    SQL/JSON path syntax; PG 17+ required for native ``JSON_TABLE``):
+
+    - **SQLite**: ``json_each(<expr>, '<path>')`` — table-valued
+      function over JSON1; each row has ``key`` + ``value`` columns.
+    - **PG 17+**: ``JSON_TABLE(<expr>::json, '<path>[*]' COLUMNS
+      (value JSON PATH '$'))`` — SQL/JSON-standard, no JSONB needed.
+    - **Oracle 12c+**: same JSON_TABLE shape; ``VARCHAR2(4000) FORMAT
+      JSON PATH '$'`` for the per-row value column (Oracle doesn't
+      have a JSON type pre-21c; uses VARCHAR2 + FORMAT JSON hint).
+
+    ``json_expr`` is the SQL expression yielding the JSON document
+    (typically a scalar subquery like ``(SELECT l2_yaml FROM
+    <p>_config)``). ``array_path`` is the SQL/JSON path to the array
+    (e.g. ``'$.rails'``). ``alias`` is the per-row alias the matview
+    SQL uses to reference the iteration (e.g. ``rail``).
+    """
+    if dialect is Dialect.SQLITE:
+        return f"json_each({json_expr}, '{array_path}') {alias}"
+    if dialect is Dialect.POSTGRES:
+        # PG 17+ JSON_TABLE is SQL/JSON-standard; cast to `json`
+        # (not jsonb — banned by the project's portability constraint).
+        return (
+            f"JSON_TABLE(({json_expr})::json, '{array_path}[*]' "
+            f"COLUMNS (value json PATH '$')) {alias}"
+        )
+    # Oracle 12c+: VARCHAR2(4000) FORMAT JSON for the value column.
+    return (
+        f"JSON_TABLE({json_expr}, '{array_path}[*]' COLUMNS "
+        f"(value VARCHAR2(4000) FORMAT JSON PATH '$')) {alias}"
+    )
+
+
+def json_field_extract(value_expr: str, field_path: str, dialect: Dialect) -> str:
+    """Extract a scalar field from a per-row JSON element (e.g. one
+    iteration of `json_array_iterate`).
+
+    All dialects use SQL/JSON-standard path syntax — no JSONB-specific
+    operators (the project bans `->>`, `->`, `@>` per the portability
+    constraint).
+
+    - **SQLite**: ``json_extract(<value_expr>, '<field_path>')``
+    - **PG 12+ / Oracle 12c+**: ``JSON_VALUE(<value_expr>,
+      '<field_path>')`` — SQL/JSON-standard scalar extract.
+
+    ``field_path`` is the SQL/JSON path (e.g. ``'$.name'``).
+    """
+    if dialect is Dialect.SQLITE:
+        return f"json_extract({value_expr}, '{field_path}')"
+    return f"JSON_VALUE({value_expr}, '{field_path}')"
+
+
 def json_check(col: str, dialect: Dialect) -> str:
     """``CHECK (col IS NULL OR col IS JSON)`` in PG / Oracle; SQLite
     uses ``CHECK (col IS NULL OR json_valid(col))``.

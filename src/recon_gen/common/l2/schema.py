@@ -516,8 +516,37 @@ def _emit_l1_invariant_views(
     limit_cases_inbound = _render_limit_breach_cases(
         instance, p=p, dialect=dialect, direction="Inbound",
     )
-    pending_age_cases = _render_pending_age_cases(instance, dialect=dialect)
-    unbundled_age_cases = _render_unbundled_age_cases(instance, dialect=dialect)
+    # Phase AW.3 (2026-05-23): the per-rail max_*_age values used to be
+    # baked as CASE branches at emit time. Now they read from
+    # `<prefix>_config.l2_yaml` via LEFT JOIN — matview body becomes
+    # persona-blind (no per-L2 literals); same SQL across all deployments.
+    # See audit §6 + AW.0.b spike for the dialect-portable JOIN shape.
+    from recon_gen.common.sql import (
+        cast as cast_expr,
+        json_array_iterate,
+        json_field_extract,
+    )
+    # The shared rails-iteration JOIN (same expression for both
+    # stuck_pending + stuck_unbundled since they iterate the same
+    # `$.rails` array; the difference is which field they extract).
+    _rails_iter = json_array_iterate(
+        f"(SELECT l2_yaml FROM {p}_config)",
+        "$.rails", alias="rail", dialect=dialect,
+    )
+    _rail_name_predicate = (
+        f"{json_field_extract('rail.value', '$.name', dialect)} "
+        f"= ct.rail_name"
+    )
+    pending_age_join = f"{_rails_iter}\n      ON {_rail_name_predicate}"
+    pending_age_value = cast_expr(
+        json_field_extract("rail.value", "$.max_pending_age_seconds", dialect),
+        "bigint", dialect,
+    )
+    unbundled_age_join = pending_age_join
+    unbundled_age_value = cast_expr(
+        json_field_extract("rail.value", "$.max_unbundled_age_seconds", dialect),
+        "bigint", dialect,
+    )
     xor_group_violation_body = _render_xor_group_violation_body(
         instance, p=p, dialect=dialect,
     )
@@ -534,8 +563,10 @@ def _emit_l1_invariant_views(
         p=p,
         limit_cases_outbound=limit_cases_outbound,
         limit_cases_inbound=limit_cases_inbound,
-        pending_age_cases=pending_age_cases,
-        unbundled_age_cases=unbundled_age_cases,
+        pending_age_join=pending_age_join,
+        pending_age_value=pending_age_value,
+        unbundled_age_join=unbundled_age_join,
+        unbundled_age_value=unbundled_age_value,
         xor_group_violation_body=xor_group_violation_body,
         chain_parent_disagreement_fan_in_filter=chain_parent_disagreement_fan_in_filter,
         fan_in_disagreement_body=fan_in_disagreement_body,
@@ -615,36 +646,9 @@ def _render_limit_breach_cases(
     return f"CASE\n        {branches_sql}\n        ELSE NULL\n    END"
 
 
-def _render_pending_age_cases(
-    instance: L2Instance, *, dialect: Dialect = Dialect.POSTGRES,
-) -> str:
-    """Build the CASE-WHEN body the stuck_pending view uses to look up
-    a Rail's `max_pending_age` (in seconds).
-
-    Mirror of `_render_limit_breach_cases` — inline at view-emit time
-    rather than via JSON_VALUE on a per-row config column, so the SQL
-    stays JSON-path-portable. Walks both TwoLegRail + SingleLegRail
-    instances; each Rail with a non-None `max_pending_age` becomes one
-    CASE branch keyed on `rail_name`. Rails without an aging watch get
-    no branch (the outer CASE returns NULL → outer WHERE excludes them).
-
-    Empty result if no Rail has `max_pending_age` set: returns ``NULL``
-    so the view emits valid SQL but surfaces zero rows.
-    """
-    branches: list[str] = []
-    for rail in instance.rails:
-        if rail.max_pending_age is None:
-            continue
-        seconds = int(rail.max_pending_age.total_seconds())
-        branches.append(
-            f"WHEN ct.rail_name = '{rail.name}' THEN {seconds}"
-        )
-    if not branches:
-        # Typed NULL — bare NULL infers as text and breaks the outer
-        # `tx.age_seconds > tx.max_pending_age_seconds` comparison.
-        return typed_null("bigint", dialect)
-    branches_sql = "\n        ".join(branches)
-    return f"CASE\n        {branches_sql}\n        ELSE NULL\n    END"
+# Phase AW.3 (2026-05-23): `_render_pending_age_cases` removed. Caps now
+# read from `<prefix>_config.l2_yaml` via LEFT JOIN; per-rail values are
+# no longer baked at emit time. The matview is persona-blind.
 
 
 def _render_chain_parent_disagreement_fan_in_filter(
@@ -1188,33 +1192,9 @@ def _emit_inv_views(
     )
 
 
-def _render_unbundled_age_cases(
-    instance: L2Instance, *, dialect: Dialect = Dialect.POSTGRES,
-) -> str:
-    """Build the CASE-WHEN body the stuck_unbundled view uses to look
-    up a Rail's `max_unbundled_age` (in seconds).
-
-    Same shape as `_render_pending_age_cases`, keyed on the same
-    `ct.rail_name` column. Per validator R8, `max_unbundled_age` is
-    only meaningful on rails that appear in some AggregatingRail's
-    `bundles_activity` — the validator catches misconfigured rails at
-    L2 load time, so by the time we render here every Rail with the
-    field set is bundle-eligible. Rails without `max_unbundled_age`
-    get no branch (no aging watch → NULL → excluded by outer WHERE).
-    """
-    branches: list[str] = []
-    for rail in instance.rails:
-        if rail.max_unbundled_age is None:
-            continue
-        seconds = int(rail.max_unbundled_age.total_seconds())
-        branches.append(
-            f"WHEN ct.rail_name = '{rail.name}' THEN {seconds}"
-        )
-    if not branches:
-        # Typed NULL — same reason as `_render_pending_age_cases`.
-        return typed_null("bigint", dialect)
-    branches_sql = "\n        ".join(branches)
-    return f"CASE\n        {branches_sql}\n        ELSE NULL\n    END"
+# Phase AW.3 (2026-05-23): `_render_unbundled_age_cases` removed. Caps
+# now read from `<prefix>_config.l2_yaml` via LEFT JOIN; same pattern as
+# stuck_pending. The matview is persona-blind.
 
 
 # Base-schema indexes that need a DROP IF EXISTS in the preamble (the
@@ -2083,9 +2063,10 @@ SELECT * FROM (
         ct.amount_money,
         ct.amount_direction,
         ct.posting,
-        {pending_age_cases} AS max_pending_age_seconds,
+        {pending_age_value} AS max_pending_age_seconds,
         {epoch_age_seconds} AS age_seconds
     FROM {p}_current_transactions ct
+    LEFT JOIN {pending_age_join}
     WHERE ct.status = 'Pending'
 ) tx
 WHERE tx.max_pending_age_seconds IS NOT NULL
@@ -2128,9 +2109,10 @@ SELECT * FROM (
         ct.amount_money,
         ct.amount_direction,
         ct.posting,
-        {unbundled_age_cases} AS max_unbundled_age_seconds,
+        {unbundled_age_value} AS max_unbundled_age_seconds,
         {epoch_age_seconds} AS age_seconds
     FROM {p}_current_transactions ct
+    LEFT JOIN {unbundled_age_join}
     WHERE ct.bundle_id IS NULL
       AND ct.status = 'Posted'
 ) tx

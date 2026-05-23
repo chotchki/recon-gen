@@ -72,12 +72,19 @@ def _fresh_db() -> sqlite3.Connection:
         dialect=_DIALECT,
     )
     conn.commit()
-    # AW.2 bridge — see stuck_pending's _fresh_db for rationale.
+    # AW.2 + AW.3 bridge — see stuck_pending's _fresh_db for rationale.
+    import json
     from datetime import datetime
     from recon_gen.common.l2.config_table import replace_config
+    l2_for_config = json.dumps({
+        "rails": [
+            {"name": "ExternalRailInbound", "max_pending_age_seconds": 86400},
+            {"name": "SubledgerCharge", "max_unbundled_age_seconds": 14400},
+        ]
+    })
     replace_config(
         conn, prefix=_PREFIX,
-        cfg_json="{}", l2_json="{}",
+        cfg_json="{}", l2_json=l2_for_config,
         as_of=datetime.now(),  # typing-smell: ignore[no-datetime-now]: bridge test harness — AW.5 retrofits to pinned LOCKED_ANCHOR
     )
     return conn

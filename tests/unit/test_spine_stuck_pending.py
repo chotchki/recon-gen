@@ -76,18 +76,27 @@ def _fresh_db() -> sqlite3.Connection:
         dialect=_DIALECT,
     )
     conn.commit()
-    # AW.2 bridge: matview's age_seconds reads `(SELECT as_of FROM
-    # <prefix>_config)`. Seed an initial row so refresh-time subquery
-    # returns a value instead of NULL. AW.5 will retrofit the generator
-    # to use this same as_of for plant timing → fully deterministic.
-    # For now (bridge), match the generator's `datetime.now()`-derived
-    # posting with `datetime.now()`-derived as_of so age computations
-    # match the pre-AW.2 behavior.
+    # AW.2 + AW.3 bridge: matview's age_seconds reads `(SELECT as_of FROM
+    # <prefix>_config)` AND max_pending_age_seconds reads `(SELECT
+    # json_value(...) FROM ...)`. Seed the config row with as_of plus
+    # an L2 yaml document carrying the rails the stuck_pending matview
+    # iterates. AW.5 will retrofit the generator + replace the
+    # hand-crafted L2 JSON with a real L2-instance-to-JSON serializer.
+    import json
     from datetime import datetime
     from recon_gen.common.l2.config_table import replace_config
+    l2_for_config = json.dumps({
+        "rails": [
+            # ExternalRailInbound: max_pending_age PT24H = 86400s.
+            {"name": "ExternalRailInbound", "max_pending_age_seconds": 86400},
+            # SubledgerCharge: max_unbundled_age PT4H = 14400s (used by
+            # stuck_unbundled tests on the same harness shape).
+            {"name": "SubledgerCharge", "max_unbundled_age_seconds": 14400},
+        ]
+    })
     replace_config(
         conn, prefix=_PREFIX,
-        cfg_json="{}", l2_json="{}",
+        cfg_json="{}", l2_json=l2_for_config,
         as_of=datetime.now(),  # typing-smell: ignore[no-datetime-now]: bridge test harness — AW.5 retrofits to pinned LOCKED_ANCHOR
     )
     return conn

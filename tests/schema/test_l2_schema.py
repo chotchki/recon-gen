@@ -774,22 +774,30 @@ def test_stuck_pending_emits_with_status_and_age_filter() -> None:
     assert "_config) - ct.posting))" in body
 
 
-def test_stuck_pending_embeds_rail_max_pending_age_inline() -> None:
-    """Each Rail with `max_pending_age` becomes one CASE branch keyed
-    on `ct.rail_name`. Cap renders as integer seconds (timedelta
-    → total_seconds())."""
+def test_stuck_pending_reads_rail_max_pending_age_from_config() -> None:
+    """AW.3 (2026-05-23): per-rail caps no longer baked as CASE branches.
+    The matview body LEFT JOINs `<prefix>_config.l2_yaml` via the
+    dialect-portable rails-iteration; the cap is extracted from the
+    iteration row's JSON field. Matview is now persona-blind — same SQL
+    across all L2 instances."""
     sql = emit_schema(_instance_with_pending_age("sp2"), prefix="sp2")
-    # 24 hours = 86400 seconds.
-    assert (
-        "WHEN ct.rail_name = 'ach-credit' THEN 86400"
-    ) in sql
+    # No per-rail literals baked.
+    assert "WHEN ct.rail_name = 'ach-credit' THEN 86400" not in sql
+    # The JOIN clause reads from the config table's l2_yaml.
+    assert "FROM sp2_config" in sql
+    # JSON_VALUE on PG/Oracle reads the field via SQL/JSON path.
+    assert "JSON_VALUE(rail.value, '$.max_pending_age_seconds')" in sql
 
 
-def test_stuck_pending_view_with_no_aging_rails_is_inert() -> None:
-    """An L2 instance whose Rails all leave `max_pending_age` unset
-    emits a syntactically valid stuck_pending view that surfaces no
-    rows (max_pending_age_seconds is NULL → outer WHERE excludes
-    everything)."""
+def test_stuck_pending_view_emits_uniform_body_with_no_aging_rails() -> None:
+    """After AW.3, the matview body shape is the SAME whether or not
+    any rails have `max_pending_age` set — the body iterates the
+    `l2_yaml.rails` JSON array at refresh time and per-row evaluates
+    the extracted cap. An L2 instance whose rails have NO
+    `max_pending_age` set produces rows where `max_pending_age_seconds`
+    is NULL (no field in the JSON) → outer WHERE filters them out →
+    matview is inert. The matview's CREATE SQL is the same regardless
+    of L2 contents."""
     sql = emit_schema(_instance("noage"), prefix="noage")
     assert "CREATE MATERIALIZED VIEW noage_stuck_pending" in sql
     body_match = re.search(
@@ -799,11 +807,10 @@ def test_stuck_pending_view_with_no_aging_rails_is_inert() -> None:
     )
     assert body_match is not None
     body = body_match.group(1)
-    # `NULL::bigint AS max_pending_age_seconds` from the helper's
-    # no-rails branch (M.4.4.6 — typed NULL so the outer `age_seconds
-    # > max_pending_age_seconds` doesn't fail with `numeric > text`).
-    assert "NULL::bigint AS max_pending_age_seconds" in body
-    # Outer WHERE filters NULL caps so an inert NULL excludes every row.
+    # New shape: LEFT JOIN to config's l2_yaml rails iteration.
+    assert "FROM noage_config" in body
+    # Outer WHERE still filters NULL caps so an inert NULL excludes
+    # every row.
     assert "max_pending_age_seconds IS NOT NULL" in body
 
 
@@ -866,21 +873,20 @@ def test_stuck_unbundled_emits_with_bundle_status_and_age_filter() -> None:
     assert "_config) - ct.posting))" in body
 
 
-def test_stuck_unbundled_embeds_rail_max_unbundled_age_inline() -> None:
-    """Each Rail with `max_unbundled_age` becomes one CASE branch keyed
-    on `ct.rail_name`. Cap renders as integer seconds (timedelta
-    → total_seconds())."""
+def test_stuck_unbundled_reads_rail_max_unbundled_age_from_config() -> None:
+    """AW.3 (2026-05-23): same as stuck_pending — caps read from
+    `<prefix>_config.l2_yaml` via LEFT JOIN; matview body is
+    persona-blind."""
     sql = emit_schema(_instance_with_unbundled_age("su2"), prefix="su2")
-    # 1 day = 86400 seconds.
-    assert (
-        "WHEN ct.rail_name = 'ach-orig' THEN 86400"
-    ) in sql
+    assert "WHEN ct.rail_name = 'ach-orig' THEN 86400" not in sql
+    assert "FROM su2_config" in sql
+    assert "JSON_VALUE(rail.value, '$.max_unbundled_age_seconds')" in sql
 
 
-def test_stuck_unbundled_view_with_no_bundling_rails_is_inert() -> None:
-    """An L2 instance whose Rails all leave `max_unbundled_age` unset
-    emits a syntactically valid stuck_unbundled view that surfaces no
-    rows."""
+def test_stuck_unbundled_view_emits_uniform_body_with_no_bundling_rails() -> None:
+    """AW.3 (2026-05-23): the matview body is the same regardless of
+    L2 rails contents. With no rails carrying `max_unbundled_age`, the
+    JSON path returns NULL → outer WHERE filters → matview inert."""
     sql = emit_schema(_instance("nobun"), prefix="nobun")
     assert "CREATE MATERIALIZED VIEW nobun_stuck_unbundled" in sql
     body_match = re.search(
@@ -890,7 +896,9 @@ def test_stuck_unbundled_view_with_no_bundling_rails_is_inert() -> None:
     )
     assert body_match is not None
     body = body_match.group(1)
-    assert "NULL::bigint AS max_unbundled_age_seconds" in body  # M.4.4.6
+    # New shape: LEFT JOIN to config's l2_yaml rails iteration.
+    assert "FROM nobun_config" in body
+    # Outer WHERE still filters NULL caps.
     assert "max_unbundled_age_seconds IS NOT NULL" in body
 
 

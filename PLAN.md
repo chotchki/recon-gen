@@ -427,12 +427,24 @@ Operator can introspect: `SELECT JSON_VALUE(l2_yaml, '$.rails[*].max_pending_age
   suppression added; AW.5 retrofits to LOCKED_ANCHOR). Pre-existing
   shape-asserting tests in `tests/schema/test_l2_schema.py` updated
   for the new SQL shape. Full prelude: 3139 unit tests pass.
-- [ ] AW.3 - Migrate `{pending_age_cases}` + `{unbundled_age_cases}` to
-  read from `<prefix>_config.l2_yaml` via JSON path. Add dialect-switch
-  helper `json_select_value_by_key(json_col, array_path, filter_key,
-  filter_value_expr, project_path, dialect)` that renders filter-path
-  syntax (PG/Oracle) or `json_each + WHERE` (SQLite). Each rail's
-  cap becomes a JOIN row, not a CASE branch.
+- [x] AW.3 - Migrate `{pending_age_cases}` + `{unbundled_age_cases}` to
+  read from `<prefix>_config.l2_yaml` via JSON path. Landed with two new
+  dialect helpers in `common/sql/dialect.py`: `json_array_iterate` (LEFT
+  JOIN clause iterating a JSON array — SQLite uses `json_each`; PG 17+
+  + Oracle 12c+ use SQL/JSON-standard `JSON_TABLE`) and
+  `json_field_extract` (per-row field extract — SQLite `json_extract`,
+  PG/Oracle `JSON_VALUE`). Matview templates simplified: emit-time CASE
+  branches gone (`_render_pending_age_cases` + `_render_unbundled_age_cases`
+  deleted); matview body is now persona-blind (same SQL across all L2s).
+  Real portability catch: first iteration used PG's `jsonb_array_elements`
+  with `::jsonb` cast; project CLAUDE.md rule bans JSONB (caught by
+  pre-existing `assert "JSONB" not in _strip_comments(sql).upper()`).
+  Pivoted to SQL/JSON-standard JSON_TABLE on PG (requires PG 17+ which
+  the project already targets). Test config-row JSON expanded to carry
+  the rails the matviews iterate. Shape-asserting tests in
+  `tests/schema/test_l2_schema.py` updated for the new JOIN form
+  (`FROM <prefix>_config` + `JSON_VALUE(rail.value, '$....')` instead
+  of `WHEN ct.rail_name = 'X' THEN N`).
 - [ ] AW.4 - Migrate `{limit_cases_outbound}` + `{limit_cases_inbound}`
   to the same JOIN-against-config shape. Multi-key filter via the
   dialect helper (parent_role + rail + direction).
