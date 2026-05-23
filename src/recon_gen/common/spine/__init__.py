@@ -39,6 +39,7 @@ from recon_gen.common.spine.account_simulation import (
 )
 from recon_gen.common.spine.ledger_simulation import LedgerSimulation
 from recon_gen.common.spine.semantic_lock import apply_scenario, semantic_lock
+from recon_gen.common.spine.training import TrainingScenario, validate_all
 from recon_gen.common.spine.drift import (
     DriftGenerator,
     DriftInvariant,
@@ -82,4 +83,7 @@ __all__ = [
     # Semantic-lock mechanism (AS.5) — replaces SQL-byte-identity locks
     "apply_scenario",
     "semantic_lock",
+    # Self-validating training/docs scenarios (AS.7; AT.6 reuses for L2)
+    "TrainingScenario",
+    "validate_all",
 ]
