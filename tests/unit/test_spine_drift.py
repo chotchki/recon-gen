@@ -205,19 +205,22 @@ def test_invariants_for_unregistered_generator_is_empty() -> None:
 
 
 def test_generators_for_reverse_lookup() -> None:
-    # Both invariants in the drift family are tripped by DriftGenerator —
-    # the reverse-lookup confirms the many-to-many shape.
+    # DriftInvariant collects generators as the spine grows. Every
+    # balance-only invariant whose plant on a LEAF account leaves Σ
+    # legs = 0 ≠ planted stored ALSO trips drift (the AU.0 empirical
+    # edge, manifest for OverdraftGenerator, ExpectedEodBalanceGenerator,
+    # …). The reverse-lookup is the running tally.
     #
-    # AU.1 update: DriftInvariant is now tripped by TWO generators —
-    # DriftGenerator (the canonical drift plant) AND OverdraftGenerator
-    # (per the AU.0 empirical edge: an overdraft plant on a LEAF account
-    # satisfies drift's matview filter, so drift fires too). The reverse-
-    # lookup grows accordingly. LedgerDriftInvariant stays single-source
-    # (DriftGenerator only) because overdraft plants on a parent-role
-    # account aren't part of the OverdraftGenerator default; that variant
-    # lands as a composition shape in AU.2.
-    from recon_gen.common.spine import OverdraftGenerator
-    assert generators_for(DriftInvariant) == {DriftGenerator, OverdraftGenerator}
+    # LedgerDriftInvariant stays single-source (DriftGenerator only) —
+    # composition-induced edges to ledger_drift (AU.2 finding) are
+    # scenario-level, not class-level, so they don't promote here.
+    from recon_gen.common.spine import (
+        ExpectedEodBalanceGenerator,
+        OverdraftGenerator,
+    )
+    assert generators_for(DriftInvariant) == {
+        DriftGenerator, OverdraftGenerator, ExpectedEodBalanceGenerator,
+    }
     assert generators_for(LedgerDriftInvariant) == {DriftGenerator}
 
 

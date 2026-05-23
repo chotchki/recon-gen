@@ -36,6 +36,10 @@ from recon_gen.common.spine.drift import (
     DriftInvariant,
     LedgerDriftInvariant,
 )
+from recon_gen.common.spine.expected_eod import (
+    ExpectedEodBalanceGenerator,
+    ExpectedEodBalanceInvariant,
+)
 from recon_gen.common.spine.generator import ViolationGenerator
 from recon_gen.common.spine.invariant import Invariant
 from recon_gen.common.spine.overdraft import OverdraftGenerator, OverdraftInvariant
@@ -57,6 +61,10 @@ INVARIANT_GENERATOR_EDGES: Final[
 ] = {
     DriftGenerator: (DriftInvariant, LedgerDriftInvariant),
     OverdraftGenerator: (OverdraftInvariant, DriftInvariant),
+    # AU.3.a — same empirical-edge shape as OverdraftGenerator: a leaf
+    # plant trips drift (zero transactions ⇒ Σ legs ≠ planted stored),
+    # a parent plant doesn't (matview's parent_role IS NOT NULL filter).
+    ExpectedEodBalanceGenerator: (ExpectedEodBalanceInvariant, DriftInvariant),
 }
 
 

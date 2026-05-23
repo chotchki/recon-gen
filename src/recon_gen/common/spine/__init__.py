@@ -45,6 +45,10 @@ from recon_gen.common.spine.drift import (
     DriftInvariant,
     LedgerDriftInvariant,
 )
+from recon_gen.common.spine.expected_eod import (
+    ExpectedEodBalanceGenerator,
+    ExpectedEodBalanceInvariant,
+)
 from recon_gen.common.spine.generator import ViolationGenerator
 from recon_gen.common.spine.invariant import Invariant
 from recon_gen.common.spine.overdraft import OverdraftGenerator, OverdraftInvariant
@@ -72,7 +76,10 @@ __all__ = [
     # Overdraft family — concrete invariant + generator (AU.1)
     "OverdraftInvariant",
     "OverdraftGenerator",
-    # Many-to-many registry (AS.2; AU.1 adds overdraft edge)
+    # Expected-EOD-balance family — concrete invariant + generator (AU.3.a)
+    "ExpectedEodBalanceInvariant",
+    "ExpectedEodBalanceGenerator",
+    # Many-to-many registry (AS.2; AU.1 + AU.3.a add edges)
     "INVARIANT_GENERATOR_EDGES",
     "invariants_for",
     "generators_for",
