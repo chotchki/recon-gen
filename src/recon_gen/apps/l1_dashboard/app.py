@@ -119,6 +119,7 @@ from recon_gen.common.tree import (
     CellAccentText,
     Dataset,
     DateTimeParam,
+    DateView,
     Drill,
     DrillParam,
     DrillResetSentinel,
@@ -2016,6 +2017,7 @@ def _wire_daily_statement_filters(
     *,
     datasets: dict[str, Dataset],
     daily_statement_sheet: Sheet,
+    balance_date_view: DateView,
 ) -> None:
     """M.2b.4 + Y.2.g.9 — wire the Daily Statement sheet's per-account-day
     filter.
@@ -2055,27 +2057,23 @@ def _wire_daily_statement_filters(
             (datasets[DS_L1_ACCOUNTS], P_L1_DS_ROLE_DSP),
         ],
     ))
-    # AO.2 — the balance date now pushes DOWN into both datasets' SQL
-    # (day-truncated equality + latest-day fallback) via the
-    # ``pL1DsBalanceDate`` dataset param, replacing the pre-AO.2
-    # analysis-level ``TimeEqualityFilter``s. Those did a raw TEXT
-    # equality QS missed (stored ``'…  00:00:00'`` ≠ ``'…'`` → 0 rows →
-    # the signed-MAX KPIs read 0) and App2 ignored entirely. The picker
-    # default stays a RollingDate(yesterday) so QS shows a sensible day;
-    # the dataset param's own sentinel default opens the statement on the
-    # account's latest day (QS can't data-drive a control default — the
-    # SQL fallback does; see datasets.P_L1_DS_BALANCE_DATE_DSP).
+    # AO.2 — the balance date pushes DOWN into both datasets' SQL via
+    # the ``pL1DsBalanceDate`` dataset param (day-truncated equality).
+    # AR.2 (D5 strict-collapse) — the picker default + dataset default
+    # + App2 binding all derive from ONE ``DateView``; the pre-AR.2
+    # RollingDate(yesterday) UX-hint + dataset latest-sentinel + SQL
+    # OR-clause fallback are gone (one source, no disagreement, no
+    # dead safety net). The picker now shows the view's anchor day
+    # (= today live / LOCKED_ANCHOR locked). Blank-on-empty is the
+    # accepted trade per the operator call — operator picks the
+    # account anyway, and adjusts the picker if needed.
     ds_balance_date = analysis.add_parameter(DateTimeParam(
         name=P_L1_DS_BALANCE_DATE,
         time_granularity="DAY",
         # M.4.4.10ab — must have a default; QS UI errors with
         # "epochMilliseconds must be a number, you gave: null"
         # when the picker initializes with no value.
-        default=DateTimeDefaultValues(
-            RollingDate={
-                "Expression": "addDateTime(-1, 'DD', truncDate('DD', now()))",
-            },
-        ),
+        default=balance_date_view.emit_qs_analysis_default(),
         mapped_dataset_params=[
             (datasets[DS_DAILY_STATEMENT_SUMMARY], P_L1_DS_BALANCE_DATE_DSP),
             (datasets[DS_DAILY_STATEMENT_TRANSACTIONS], P_L1_DS_BALANCE_DATE_DSP),
@@ -2599,10 +2597,16 @@ def build_l1_dashboard_app(
     )
 
     # M.2b.4 — Daily Statement per-account-day parameter filters.
+    # AR.2 — the balance-date view is constructed once from
+    # ``cfg.test_generator.as_of_frame()`` and threaded through; the
+    # same view's emissions drive the analysis-param default in the
+    # picker AND (via ``datasets.py::_date_dataset_param``) the
+    # dataset-param default. One source of truth.
     _wire_daily_statement_filters(
         analysis,
         datasets=datasets,
         daily_statement_sheet=daily_statement_sheet,
+        balance_date_view=DateView(frame=cfg.test_generator.as_of_frame()),
     )
 
     # M.2b.7 — Cross-sheet drill filter groups (sentinel-pattern).

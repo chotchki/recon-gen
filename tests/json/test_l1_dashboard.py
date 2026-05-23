@@ -651,7 +651,6 @@ def test_daily_statement_balance_date_narrow_never_truncs_a_string() -> None:
         build_daily_statement_transactions_dataset,
     )
     from recon_gen.common.sql import Dialect
-    from recon_gen.apps.l1_dashboard.datasets import _L1_DS_LATEST_SENTINEL
 
     instance = default_l2_instance()
     param = f"<<${P_L1_DS_BALANCE_DATE_DSP}>>"
@@ -664,11 +663,12 @@ def test_daily_statement_balance_date_narrow_never_truncs_a_string() -> None:
             sql = next(iter(
                 build(cfg, instance).PhysicalTableMap.values()
             )).CustomSql.SqlQuery
-            # The bug shape: the string PARAM or the sentinel LITERAL fed
-            # into a day-trunc (≠ the legit DATE_TRUNC('day', <column>)
-            # projection, which truncs a real timestamp column).
+            # The bug shape: the string PARAM fed into a day-trunc (≠ the
+            # legit DATE_TRUNC('day', <column>) projection, which truncs
+            # a real timestamp column). AR.2 removed the sentinel literal
+            # entirely; only the param-trunc assertion remains as the
+            # AO.10 regression guard.
             assert f"TRUNC({param}" not in sql
-            assert f"TRUNC('{_L1_DS_LATEST_SENTINEL}'" not in sql
             # The fix shape: param compared via its SUBSTR day-prefix.
             assert f"SUBSTR({param}, 1, 10)" in sql
 

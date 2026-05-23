@@ -36,6 +36,10 @@ from datetime import date
 from enum import Enum, auto
 
 from recon_gen.common.as_of_frame import AsOfFrame
+from recon_gen.common.models import (
+    DateTimeDatasetParameterDefaultValues,
+    DateTimeDefaultValues,
+)
 
 
 class EmptyBehavior(Enum):
@@ -139,3 +143,47 @@ class DateView:
             return self.anchor_day
         earlier = [d for d in available_days if d <= self.anchor_day]
         return max(earlier) if earlier else None
+
+    # ---- Renderer emissions (AR.2) ----------------------------------------
+    #
+    # ONE source — `anchor_day` — drives every renderer binding. The three
+    # emissions below return the SAME concrete day; QS's analysis default
+    # ⋈ MappedDataSetParameters bridge drops the same value into the
+    # dataset param, and App2 reads the same day from the dataset default.
+    # The C1 dual-default split becomes unrepresentable: there's nothing
+    # to keep in sync because there's only one source.
+
+    def _anchor_iso(self) -> str:
+        """QS-shape datetime literal — `YYYY-MM-DDT00:00:00` (no offset).
+        Matches the existing dataset StaticValues serialization."""
+        return f"{self.anchor_day.isoformat()}T00:00:00"
+
+    def emit_qs_analysis_default(self) -> DateTimeDefaultValues:
+        """The QS analysis-param default — a `StaticValues` literal day,
+        NOT a `RollingDate` expression. Strict-collapse: the anchor is
+        the owned `as_of` (baked at deploy time for the live binding,
+        the canonical `LOCKED_ANCHOR` for the locked binding). No
+        wall-clock drift between deploys, no disagreement with the
+        dataset side."""
+        return DateTimeDefaultValues(StaticValues=[self._anchor_iso()])
+
+    def emit_qs_dataset_default(self) -> DateTimeDatasetParameterDefaultValues:
+        """The QS dataset-param default — the SAME literal day as the
+        analysis default. App2 reads this directly; QS receives it via
+        `MappedDataSetParameters` from the analysis side. Both renderers
+        land on the same day."""
+        return DateTimeDatasetParameterDefaultValues(
+            StaticValues=[self._anchor_iso()],
+        )
+
+    def emit_app2_date_to(self) -> str:
+        """The App2 `:date_to` bind value (or single-date filter value)
+        — the anchor day as `YYYY-MM-DD`. For range views this is the
+        right edge; for single-date views this is the day."""
+        return self.anchor_day.isoformat()
+
+    def emit_app2_date_from(self) -> str:
+        """The App2 `:date_from` bind value — the look-back lower bound
+        (`window_start`). Equals `emit_app2_date_to()` for single-date
+        views (span=0)."""
+        return self.window_start.isoformat()

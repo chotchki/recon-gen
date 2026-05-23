@@ -168,7 +168,7 @@ Own `as_of`: the generator and the views read one anchor, not wall-clock `now()`
 The view primitive: one typed `View` is the source of truth; picker + analysis default + dataset default + App2 binding all derive from it. Kills C1 structurally and unparks the release.
 
 - [x] AR.1 - `View` date-view tree primitive in `common/tree/` (anchor=`AsOfFrame`, span, empty_behavior, required_coverage); authoring abstraction, not end-user config
-- [ ] AR.2 - balance-date view: `DateTimeParam.default` + dataset `StaticValues` + `ParameterDateTimePicker` + App2 binding all DERIVE from one view; delete the per-app RollingDate exprs + standalone sentinels
+- [x] AR.2 - balance-date view: `DateTimeParam.default` + dataset `StaticValues` + `ParameterDateTimePicker` + App2 binding all DERIVE from one view; delete the per-app RollingDate exprs + standalone sentinels
 - [ ] AR.3 - `required_coverage` seed-coverage assertion (plant ⟷ query-window contract becomes a test, not developer-memory)
 - [ ] AR.4 - roll the remaining date views onto the primitive (L1 universal range, Exec 30-day, L2FT static bounds)
 - [ ] AR.5 - **D2 confirm at the live QS layer** — the 5 Daily Statement KPIs render (the release blocker). db/deploy/e2e RESUME here; **release unparks.**

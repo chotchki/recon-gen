@@ -29,7 +29,6 @@ from recon_gen.common.models import (
     DataSet,
     DatasetParameter,
     DateTimeDatasetParameter,
-    DateTimeDatasetParameterDefaultValues,
     StringDatasetParameter,
     StringDatasetParameterDefaultValues,
 )
@@ -38,6 +37,7 @@ from recon_gen.common.sheets.app_info import (
     build_matview_status_dataset,
 )
 from recon_gen.common.sql import Dialect, date_trunc_day, day_text
+from recon_gen.common.tree import DateView
 
 
 def l1_matview_specs(cfg: Config) -> list[tuple[str, str | None]]:
@@ -877,29 +877,30 @@ def build_todays_exceptions_dataset(
 # statement until the analyst picks.
 P_L1_DS_ACCOUNT_DSP = "pL1DsAccount"
 
-# AO.2 — the balance-date narrow is now SQL-pushed-down too (was a broken
-# analysis-level TimeEqualityFilter: QS did a raw TEXT equality that
-# missed the stored ``'...  00:00:00'`` timestamp → 0 rows → the signed
-# MAX KPIs read 0; App2 ignored the analysis filter entirely). The
-# dataset param's name matches the analysis-level ``pL1DsBalanceDate`` so
-# QS's MappedDataSetParameters bridge substitutes the picked day. Its
-# default is a far-future SENTINEL meaning "open on this account's most
-# recent day" — so the statement isn't blank for an account whose latest
-# activity wasn't literally yesterday (QS can't data-drive a control
-# default, so the SQL does it).
+# AO.2 — the balance-date narrow is SQL-pushed-down. The dataset param's
+# name matches the analysis-level ``pL1DsBalanceDate`` so QS's
+# ``MappedDataSetParameters`` bridge substitutes the picked day.
+#
+# AR.2 (D5 view rollout) — both defaults (analysis + dataset) now derive
+# from one ``DateView`` (`common/tree/date_view.py`), so the C1 dual-
+# default split is structurally unrepresentable. The pre-AR.2
+# ``_L1_DS_LATEST_SENTINEL`` ("2999-12-31") + the SQL OR-clause that
+# fired on it ("if param ≥ sentinel, fall back to MAX(day)") are gone:
+# under strict collapse the picker default IS the data anchor, so the
+# operator picks the account (and, if needed, a different day) rather
+# than relying on a SQL safety net. See `docs/audits/date_range_model_
+# audit.md` §5 "AR.1 result" + the AR.2 operator call (strict collapse).
 P_L1_DS_BALANCE_DATE_DSP = "pL1DsBalanceDate"
-_L1_DS_LATEST_SENTINEL = "2999-12-31"
 
 
-def _date_dataset_param(name: str) -> DatasetParameter:
-    """A SINGLE_VALUED DateTime dataset param defaulting to the
-    latest-day sentinel (AO.2)."""
+def _date_dataset_param(name: str, view: DateView) -> DatasetParameter:
+    """A SINGLE_VALUED DateTime dataset param defaulting to the view's
+    anchor day. ONE source of truth — the same view also emits the
+    analysis-param default and the App2 binding."""
     return DatasetParameter(
         DateTimeDatasetParameter=DateTimeDatasetParameter(
             Name=name, ValueType="SINGLE_VALUED", TimeGranularity="DAY",
-            DefaultValues=DateTimeDatasetParameterDefaultValues(
-                StaticValues=[f"{_L1_DS_LATEST_SENTINEL}T00:00:00"],
-            ),
+            DefaultValues=view.emit_qs_dataset_default(),
         ),
     )
 
@@ -929,27 +930,25 @@ def build_daily_statement_summary_dataset(
     companion (not this parameterized dataset).
     """
     prefix = cfg.db_table_prefix
+    view = DateView(frame=cfg.test_generator.as_of_frame())
     # AO.10 — compare the balance date as YYYY-MM-DD text on both sides.
     # The pushed-down param arrives as an ISO string in every renderer and
     # ``TRUNC(<string>)`` is ORA-00932 on Oracle (the AO.2 regression);
-    # SUBSTR(...,1,10) takes the param's day prefix (date or datetime) and
-    # ISO day strings compare correctly with ``>=``.
+    # SUBSTR(...,1,10) takes the param's day prefix (date or datetime).
     day = day_text("business_day_start", cfg.dialect)
     bdate = f"SUBSTR(<<${P_L1_DS_BALANCE_DATE_DSP}>>, 1, 10)"
-    sentinel = f"'{_L1_DS_LATEST_SENTINEL}'"
     acct = "(account_name || ' (' || account_id || ')')"
-    # AO.2 — balance-date narrow + latest-day fallback (see
-    # P_L1_DS_BALANCE_DATE_DSP). Exactly one (account, day) row → the
-    # signed-MAX KPIs collapse to that day's values.
+    # AO.2 / AR.2 — balance-date narrow is a strict day equality. The
+    # pre-AR.2 ``OR (bdate ≥ sentinel ...)`` latest-on-empty fallback is
+    # gone: the picker default is the view's anchor day, never the
+    # sentinel, so the fallback never fired anyway. Strict-collapse
+    # behavior: anchor-day with no data ⇒ blank statement; operator
+    # adjusts the picker (paired with the account selection they already
+    # have to do).
     sql = (
         f"SELECT * FROM {prefix}_daily_statement_summary\n"
         f"WHERE {acct} = <<${P_L1_DS_ACCOUNT_DSP}>>\n"
-        f"  AND ({day} = {bdate}\n"
-        f"       OR ({bdate} >= {sentinel} AND business_day_start = (\n"
-        f"           SELECT MAX(s2.business_day_start)\n"
-        f"           FROM {prefix}_daily_statement_summary s2\n"
-        f"           WHERE (s2.account_name || ' (' || s2.account_id || ')')"
-        f" = <<${P_L1_DS_ACCOUNT_DSP}>>)))"
+        f"  AND {day} = {bdate}"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-daily-statement-summary-dataset"),
@@ -959,7 +958,7 @@ def build_daily_statement_summary_dataset(
         dataset_parameters=[
             _sv_dataset_param(P_L1_DS_ACCOUNT_DSP,
                               _L1_DS_ACCOUNT_SENTINEL),
-            _date_dataset_param(P_L1_DS_BALANCE_DATE_DSP),
+            _date_dataset_param(P_L1_DS_BALANCE_DATE_DSP, view),
         ],
     )
 
@@ -982,12 +981,10 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
     # AO.10 — the WHERE narrow compares day-as-text (TRUNC(<string-param>)
     # is ORA-00932 on Oracle); SUBSTR takes the param's YYYY-MM-DD prefix.
     day_txt = day_text("tx.posting", dialect)
-    latest_day_txt = day_text("tx2.posting", dialect)
     bdate = f"SUBSTR(<<${P_L1_DS_BALANCE_DATE_DSP}>>, 1, 10)"
-    sentinel = f"'{_L1_DS_LATEST_SENTINEL}'"
-    # AO.2 — same balance-date narrow as the summary, on the leg-grain
-    # posting day, so the detail table shows exactly the picked (or
-    # latest) account-day's legs and stays in step with the KPIs.
+    # AO.2 / AR.2 — same balance-date narrow as the summary; strict day
+    # equality (pre-AR.2 latest-on-empty fallback removed per the
+    # view-primitive strict-collapse decision).
     return (
         f"SELECT tx.id AS transaction_id,"
         f"       tx.account_id, tx.account_name,"
@@ -998,12 +995,7 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
         f"       tx.status, tx.origin"
         f" FROM {prefix}_current_transactions tx"
         f" WHERE (tx.account_name || ' (' || tx.account_id || ')') = <<${P_L1_DS_ACCOUNT_DSP}>>"
-        f"   AND ({day_txt} = {bdate}"
-        f"        OR ({bdate} >= {sentinel} AND {day_txt} = ("
-        f"            SELECT MAX({latest_day_txt})"
-        f"            FROM {prefix}_current_transactions tx2"
-        f"            WHERE (tx2.account_name || ' (' || tx2.account_id || ')')"
-        f" = <<${P_L1_DS_ACCOUNT_DSP}>>)))"
+        f"   AND {day_txt} = {bdate}"
     )
 
 
@@ -1012,6 +1004,7 @@ def build_daily_statement_transactions_dataset(
 ) -> DataSet:
     """Wrap the per-leg ledger feed for Daily Statement detail rows."""
     sql = _daily_statement_transactions_sql(cfg.db_table_prefix, cfg.dialect)
+    view = DateView(frame=cfg.test_generator.as_of_frame())
     return build_dataset(
         cfg, cfg.prefixed("l1-daily-statement-transactions-dataset"),
         "L1 Daily Statement Transactions",
@@ -1021,7 +1014,7 @@ def build_daily_statement_transactions_dataset(
         dataset_parameters=[
             _sv_dataset_param(P_L1_DS_ACCOUNT_DSP,
                               _L1_DS_ACCOUNT_SENTINEL),
-            _date_dataset_param(P_L1_DS_BALANCE_DATE_DSP),
+            _date_dataset_param(P_L1_DS_BALANCE_DATE_DSP, view),
         ],
     )
 
