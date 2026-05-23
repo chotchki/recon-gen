@@ -777,6 +777,95 @@ Many-to-many wiring isn't exercised in the spike (drift→drift+ledger_drift is
 captured in the AS.2 design note but not threaded through code yet). Cross-
 account state is fully AS.4's surface.
 
+### AU.0 result — overdraft threads cleanly; many-to-many edges are universal (2026-05-23)
+
+The first AU-phase deliverable closes after AS landed the framework + the live-
+agreement gate. `tests/unit/test_au0_overdraft_full_spine.py` (7 tests, in-
+process, real emitted `<prefix>_overdraft` matview, no DB server) threads
+overdraft — the next-simplest L1 invariant after drift, structurally distinct —
+through the AS-promoted spine, importing `Violation` / `Invariant` /
+`ViolationGenerator` from `src/recon_gen/common/spine/` (no spike-local Protocol
+copy; the AS promotion shape is stable). What the spike pinned:
+
+1. **The promoted spine vocabulary IS shape-agnostic.** `OverdraftInvariant` +
+   `OverdraftGenerator` satisfy both Protocols (`isinstance(inv, Invariant)`,
+   `isinstance(gen, ViolationGenerator)`) without specialization hooks the AS
+   impls didn't already need. Different SQL body, different identity columns
+   (stored_balance vs drift_amount), same Protocol contract.
+2. **Overdraft's `scenario_for(role)` is structurally weaker than drift's.** The
+   overdraft matview is `WHERE money < 0`; no leaf/parent filter, no role join.
+   So overdraft's smart constructor accepts ANY scope=internal account with the
+   requested role — drift's `parent_role IS NOT NULL` filter does not transfer.
+   Each invariant's `scenario_for` carries its own shape-resolution discipline;
+   no shared base class is needed (the Protocol minimum suffices).
+3. **Overdraft requires ZERO transaction rows to manifest.** The matview reads
+   `current_daily_balances` directly; the generator emits one balance row and
+   that's the entire emission. Pinned via a `_TX_COLS` row-count check so
+   AU.1's promotion can't silently grow accidental `_insert_tx` calls that a
+   future shape change would import.
+4. **(THE LESSON) Many-to-many edges are UNIVERSAL, not drift-specific.** The
+   spike was written predicting overdraft as the "structural inverse" of drift —
+   single-row witness, no edges to other detectors. The first run FAILED on the
+   no-edge claim, revealing the real shape: an overdraft planted on a LEAF
+   internal account ALSO trips `DriftInvariant`. Mechanism: drift's matview
+   filter is `parent_role IS NOT NULL` AND `stored ≠ Σ posted legs`. The
+   overdraft plant satisfies BOTH (the leaf has a parent role; the plant emits
+   stored=−magnitude with ZERO transactions, so Σ legs = 0 ≠ −magnitude). The
+   edge is not drift-specific exotica — it falls out of overlapping base-table
+   predicates between two independent matview SELECTs. **Every new
+   `ViolationGenerator` lands with an empirical multi-matview detect-sweep
+   check, NOT a structural prediction of "only my own invariant fires."**
+5. **The substitution-path checklist extends.** Overdraft's `detect()` reads
+   `<prefix>_overdraft` via a static SQL with no `<<$param>>` substitution —
+   zero AR.5 risk, same as drift. AU.1's promotion inherits the property test.
+
+**Locked design decisions for AU.1 (the promotion-order conclusion):**
+
+- **`common/spine/overdraft.py`** carries `OverdraftInvariant` (frozen
+  dataclass, `name: ClassVar[str] = "overdraft"`, `prefix: str`, `detect` reads
+  the matview) + `OverdraftGenerator` (dataclass; account_id, account_role,
+  account_parent_role, anchor_day, magnitude). No `rng` field — overdraft's
+  emission is fully determined by construction params (one balance row); the
+  RNG hook is only for invariants that randomize (drift accepts it for
+  structural uniformity, anomaly will actually use it).
+- **`INVARIANT_GENERATOR_EDGES` registers TWO edges for
+  `OverdraftGenerator`:** `(OverdraftInvariant, DriftInvariant)`. Mirrors
+  `DriftGenerator: (DriftInvariant, LedgerDriftInvariant)` already in
+  `registry.py`. The AS.2 many-to-many shape is the steady state, not the
+  exception.
+- **The per-promoted-invariant substitution-path property test** lands as
+  `test_overdraft_detect_does_not_cross_a_sql_pushdown_surface` in
+  `tests/unit/test_spine_overdraft.py` — AR.5 lesson codified for the second
+  invariant.
+- **The smart-constructor unknown-role test lands too** —
+  `test_scenario_for_unknown_role_fails_loud`, identical shape to drift's.
+
+**Locked promotion-order for AU.3-4 (what overdraft taught us about each
+step's cost):**
+
+| Order | Invariant | Cost driver | Notes |
+|---|---|---|---|
+| AU.1 | `overdraft` | LOW — single-row balance plant, no leg arithmetic, no parent dependency | AU.0 spike DONE. |
+| AU.3a | `expected_eod_balance_breach` | LOW — single-row balance + `expected_eod_balance` column plant. Same shape as overdraft + one extra field. |
+| AU.3b | `stuck_pending` | MEDIUM — requires `status='Pending'` + `posted_at` older than threshold. Time-window'd, but no cross-row arithmetic. Carries a window that's PART of the invariant per audit §5 "second source." |
+| AU.3c | `stuck_unbundled` | MEDIUM — same shape as stuck_pending, different status filter. |
+| AU.4 | `limit_breach` | HIGH — instance-coupled. `from_instance` smart constructor reads the L2's `LimitSchedule` table; the `(parent_role, rail, direction) → cap` mapping has to thread through. AP.3 finding #4 disproved the "blind generator" hypothesis for this one. |
+
+**GO for AU.1.** The spike's type shape promotes verbatim (no Protocol changes
+required), the empirical edge is documented, the substitution-path checklist is
+satisfied, the promotion-order for AU.3-4 is locked. AU.2's composition test
+(drift + overdraft in one `LedgerSimulation`) is set up by the spike's
+many-to-many finding — three Invariants should fire (overdraft on the
+overdraft plant's leaf, drift on BOTH the drift plant's child AND the
+overdraft plant's leaf, ledger_drift on the drift plant's parent).
+
+**Honest limit of AU.0.** Threaded only the LEAF-account overdraft case. A
+parent-role overdraft plant would trip `LedgerDriftInvariant` too (parent
+stored=−magnitude, parent computed = Σ children balances ≥ 0 → ledger_drift
+fires); AU.2's composition test will cover that variant. Promotion of
+expected_eod_balance_breach / stuck_pending / stuck_unbundled / limit_breach
+is AU.3-4 territory — AU.0's promotion-order table is the input.
+
 ---
 
 ## 6. The mechanism (for decision)

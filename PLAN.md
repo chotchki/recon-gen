@@ -175,16 +175,45 @@ arithmetic, single-row witness, no instance coupling). `limit_breach` deferred t
 near the end because of its instance-coupled `from_instance` smart constructor
 (AP.3 finding #4 — the disproof of the "blind generator").
 
-- [ ] AU.0 - Plan/spike: pilot Overdraft (next-simplest L1) end-to-end through
+**AU.0 learnings (info, not prescription — what the overdraft spike taught us):**
+
+- **Many-to-many edges are universal, not drift-specific.** Spike was written
+  predicting overdraft as the "structural inverse" of drift (single-row witness,
+  no edges to other detectors). First run FAILED on the no-edge claim: an
+  overdraft planted on a LEAF internal account ALSO trips `DriftInvariant`,
+  because drift's matview filter `parent_role IS NOT NULL` AND `stored ≠ Σ legs`
+  is satisfied by the overdraft plant (leaf has parent_role; emission has
+  zero transactions, so Σ legs = 0 ≠ −magnitude). **Every new
+  `ViolationGenerator` lands with an empirical multi-matview detect-sweep
+  check, NOT a structural prediction of "only my own invariant fires."**
+- **`scenario_for` discipline is per-invariant.** Overdraft's matview has no
+  leaf/parent filter (any internal account can overdraft), so overdraft's
+  smart constructor accepts ANY internal account with the requested role —
+  drift's `parent_role IS NOT NULL` filter does NOT transfer. The minimal
+  Protocol shape (no shared base class) is the right call.
+- **Substitution-path checklist extends cleanly.** Overdraft's `detect()` reads
+  the matview via a static SQL with no `<<$param>>` — zero AR.5 risk, same as
+  drift. AU.1 inherits the property-test pattern.
+- **Promotion-order locked from cost-driver analysis** (full table in audit §5
+  "AU.0 result"): overdraft (LOW) → expected_eod_balance_breach (LOW) →
+  stuck_pending/stuck_unbundled (MEDIUM, time-window'd) → limit_breach (HIGH,
+  instance-coupled per AP.3 finding #4).
+
+- [x] AU.0 - Plan/spike: pilot Overdraft (next-simplest L1) end-to-end through
   the AS framework. Lock the promotion-order for the remaining L1 invariants from
   what the AS drift rollout taught us about each step's cost.
 - [ ] AU.1 - `OverdraftInvariant` + `OverdraftGenerator` promoted to
   `common/spine/`. Register the edges; per-invariant substitution-path property
   test (AR.5 lesson encoded — every promoted detector ships with one).
 - [ ] AU.2 - **Composition test** — scenario combining `DriftGenerator` +
-  `OverdraftGenerator` in one `LedgerSimulation`; each invariant fires its own
-  violations; the trajectory's carried set tracks BOTH without one masking the
-  other; the AS.2 registry's many-to-many edges still hold under composition.
+  `OverdraftGenerator` in one `LedgerSimulation`; THREE invariants fire
+  (overdraft on the overdraft plant's leaf, drift on BOTH the drift plant's
+  child AND the overdraft plant's leaf per the AU.0 empirical-edge finding,
+  ledger_drift on the drift plant's parent); the trajectory's carried set
+  tracks ALL THREE without one masking the others; the AS.2 registry's
+  many-to-many edges still hold under composition. PLUS: parent-role overdraft
+  plant variant (the AU.0 honest limit) — confirm ledger_drift fires when an
+  overdraft is planted on a parent account.
 - [ ] AU.3 - Promote the data/deadline-derived L1 invariants
   (`expected_eod_balance_breach`, `stuck_pending`, `stuck_unbundled`). Each carries
   a window that's PART of the invariant definition (per audit §5 "second source"),
