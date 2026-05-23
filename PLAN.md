@@ -305,6 +305,136 @@ is the production rollout for the two L2 classes. AT.0 redecomposes from AS's re
 - [ ] AT.6 - L2 training/docs scenarios self-validated (anomaly + money_trail scenarios
   can't silently fail to demonstrate; parallel to AS.7).
 
+## Phase AW - Own the temporal frame + cfg/L2 in the DB (`<prefix>_config`)
+
+**Surfaced 2026-05-23** during AU.3.d hoist work. User caught the spine's
+`datetime.now()` calls in `stuck_pending.py` + `stuck_unbundled.py` as
+an uncontrolled dependency violating AR's "own the temporal frame"
+principle (audit §6). Root cause is upstream — the matview SQL itself
+uses `CURRENT_TIMESTAMP` / `julianday('now')` for the
+`age_seconds = NOW - posting` computation, and the spine generators
+have to follow the matview's wall-clock to keep tests deterministic.
+
+User-proposed design (the ONLY allowed relaxation of the "two-table
+rule" because the new table is DERIVED from cfg+L2, never
+operator-mutated, mirrors the source YAML 1:1):
+
+```sql
+CREATE TABLE <prefix>_config (
+    as_of    TIMESTAMP   NOT NULL,
+    cfg_yaml {json_text} NOT NULL,
+    l2_yaml  {json_text} NOT NULL
+);
+```
+
+**Operational model** (the two-event split user explicitly confirmed):
+
+- **Deploy** (cfg.yaml or L2.yaml changes): Python reads yamls,
+  serializes to JSON, REPLACEs the config row. Initial as_of populated
+  (CURRENT_TIMESTAMP or pinned per cfg). Matviews refresh.
+- **Daily ETL** (data load, cfg unchanged): customer ETL fills
+  `_transactions` + `_daily_balances`; refresh helper runs
+  `UPDATE config SET as_of = CURRENT_TIMESTAMP; <refresh matviews>;`.
+  The cfg/L2 blobs stay untouched. The matview's subquery picks up the
+  new as_of.
+
+**Spike findings (both green; design locked):**
+
+- `tests/unit/test_aw0_matview_as_of_spike.py` (AW.0, 5 tests) —
+  validated the subquery-in-matview mechanism: SQLite's `julianday(...)`
+  accepts scalar subquery; matview body stays stable across refreshes;
+  same plant + varied as_of → varied `age_seconds` → varied fire
+  status; plant + matview reading from one as_of source eliminates
+  wall-clock skew.
+- `tests/unit/test_aw0b_jsonpath_filter_spike.py` (AW.0.b, 7 tests) —
+  SQL/JSON portability: SQLite does NOT support filter-path syntax
+  (`$.arr[?(@.name == "X")]`); PG 12+ and Oracle 12c+ do. Portable
+  workaround for SQLite: `json_each(...) + WHERE` + LEFT JOIN against
+  the matview's main FROM. Composes cleanly into matview SELECTs. The
+  dialect-switch helper in `common/sql/dialect.py` renders the right
+  shape per backend.
+
+**Storage shape locked: JSON blobs + typed `as_of` sibling column**
+(vs key-value rows). The L2 yaml has deep multi-valued structure
+(rails[], chains[], limit_schedules[]); flattening to KV would be
+either lossy or require JSON-in-values. JSON mirrors the source
+1:1; matches existing project patterns (transactions metadata, the
+AV-renamed daily_balances.metadata, Investigation matviews' JSONPath
+usage); supports the WIDE-access cases (limit_breach iterates ALL
+LimitSchedules in one fetch).
+
+**Migration scope** (the user accepted "I'm sold on the migration
+either way"):
+
+| Currently baked at emit-time | After AW |
+|---|---|
+| `{epoch_age_seconds}` → `EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - posting))` | `EXTRACT(EPOCH FROM ((SELECT as_of FROM <prefix>_config) - posting))` |
+| `{pending_age_cases}` (per-rail CASE) | LEFT JOIN config + `json_each(l2_yaml, '$.rails')` + WHERE on name |
+| `{unbundled_age_cases}` | same shape |
+| `{limit_cases_outbound}` / `_inbound` | LEFT JOIN config + `json_each(l2_yaml, '$.limit_schedules')` + WHERE on (parent_role, rail, direction) |
+| `{rolling_window}` (anomaly's hardcoded 2 days) | could move to cfg in a follow-on |
+| Every L2-derived literal | reads from `<prefix>_config` JSON via dialect helper |
+
+Cleanness payoff: matview bodies become **persona-blind** — no per-L2
+literals; same SQL across spec_example, sasquatch_pr, every future L2.
+Operator can introspect: `SELECT JSON_VALUE(l2_yaml, '$.rails[*].max_pending_age') FROM <prefix>_config`.
+
+**Phase relationship to other phases:**
+- **Blocks AU.5** (the dual-axis exhaustiveness gate composes many
+  generators; needs the deterministic as_of). AU.3.d hoist resumes
+  after AW lands.
+- **Blocks AT.2** (windowed anomaly may want to read its threshold
+  from cfg too).
+- **Synergy with AV** (limits→metadata rename): both touch matview
+  literals; AV's rename moves the `limits` JSON to `metadata`; AW
+  ALSO reads from JSON. Probably want AV merged in or just-after AW.
+
+- [x] AW.0 - Spike: validated runtime-table-subquery mechanism (5 tests
+  in `tests/unit/test_aw0_matview_as_of_spike.py`). Pivoted under user
+  feedback: instead of `_runtime` (as_of-only), use `<prefix>_config`
+  (cfg + L2 yaml + typed as_of) — the ONE allowed relaxation of the
+  two-table rule. Spike's mechanism (subquery in matview body) carries
+  over directly to the bigger design.
+- [x] AW.0.b - Spike: SQL/JSON portability across PG/Oracle/SQLite
+  (7 tests in `tests/unit/test_aw0b_jsonpath_filter_spike.py`).
+  Finding: SQLite doesn't support filter-path syntax; portable shape is
+  `json_each() + WHERE` + LEFT JOIN. Dialect helper switches per backend.
+- [ ] AW.1 - Schema: emit `<prefix>_config` table at init; populate with
+  cfg + L2 as JSON + initial as_of. Drop/recreate handling for re-deploy.
+  Python helpers: `replace_config(conn, cfg, l2, as_of)` for deploy
+  events, `set_as_of(conn, as_of=None)` for refresh events (None →
+  CURRENT_TIMESTAMP).
+- [ ] AW.2 - Migrate `{epoch_age_seconds}` substitution to read as_of
+  from `<prefix>_config`. PG/Oracle uses `EXTRACT(EPOCH FROM ((SELECT
+  as_of FROM ...) - posting))`; SQLite uses the subquery-in-julianday
+  shape. Update `common/sql/dialect.py::epoch_seconds_between`
+  signature to accept the as_of expression.
+- [ ] AW.3 - Migrate `{pending_age_cases}` + `{unbundled_age_cases}` to
+  read from `<prefix>_config.l2_yaml` via JSON path. Add dialect-switch
+  helper `json_select_value_by_key(json_col, array_path, filter_key,
+  filter_value_expr, project_path, dialect)` that renders filter-path
+  syntax (PG/Oracle) or `json_each + WHERE` (SQLite). Each rail's
+  cap becomes a JOIN row, not a CASE branch.
+- [ ] AW.4 - Migrate `{limit_cases_outbound}` + `{limit_cases_inbound}`
+  to the same JOIN-against-config shape. Multi-key filter via the
+  dialect helper (parent_role + rail + direction).
+- [ ] AW.5 - Generators retrofitted — stuck_pending + stuck_unbundled
+  drop `datetime.now()`; accept `as_of: datetime` (or read from
+  config-via-Python at scenario_for time). Spine tests become
+  wall-clock-independent; the ±50_000s TZ-skew overshoots in
+  `test_spine_stuck_pending.py` + `test_spine_stuck_unbundled.py`
+  shrink to small natural values (e.g. ±60s). The
+  `no-datetime-now` typing-smell suppressions drop.
+- [ ] AW.6 - Re-lock seeds per dialect (matview SQL changes for ALL
+  dialects). Run full suite + 4-way agreement (PG + Oracle + SQLite +
+  PDF) to verify no regression in the dashboard/PDF surface. Document
+  performance delta on PG refresh (DROP+CREATE vs JOIN-readingsubquery).
+- [ ] AW.7 - Version bump (post-v?.?.?) + RELEASE_NOTES entry. Migration
+  warning ≥1 minor version: downstream operators with custom ETL paths
+  now need to handle `<prefix>_config` (populate at deploy; UPDATE
+  as_of at refresh — or let the recon-gen refresh helper do it).
+  Document the operational two-event split (deploy vs daily ETL).
+
 # Backlog (not yet phased)
 
 - **Q.6 — CLI shape revisit: cfg ⇄ L2 dual-yaml factoring.** Surfaced 2026-05-08 during `Y.2.gate.h.6`. The runner reads `cfg.default_l2_instance` and threads `QS_GEN_TEST_L2_INSTANCE` to subprocesses, making the CLI's dual-arg shape (`-c <cfg.yaml> --l2 <l2.yaml>`) partially redundant. Spike-before-implement (per `feedback_spike_before_locking_implementation`); CLI-surface change touches every operator command + doc example + tests.
