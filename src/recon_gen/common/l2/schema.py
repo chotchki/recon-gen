@@ -543,8 +543,14 @@ def _emit_l1_invariant_views(
         matview_options=matview_options(dialect),
         matview_create_kw=matview_create_keyword(dialect),
         date_trunc_tx_posting=date_trunc_day("tx.posting", dialect),
+        # Phase AW.2 (2026-05-23): age is computed against the owned
+        # temporal frame in `<prefix>_config.as_of`, not the matview
+        # engine's wall-clock CURRENT_TIMESTAMP. Plant + matview now
+        # read from one source — tests become deterministic, prod
+        # refresh helper sets as_of=CURRENT_TIMESTAMP per refresh.
+        # See audit §6 "own the temporal frame" + AW.0 spike.
         epoch_age_seconds=epoch_seconds_between(
-            "CURRENT_TIMESTAMP", "ct.posting", dialect,
+            f"(SELECT as_of FROM {p}_config)", "ct.posting", dialect,
         ),
         posting_to_date=to_date("posting", dialect),
         # Typed NULL for the UNION ALL rail_name column. Oracle

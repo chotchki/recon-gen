@@ -72,6 +72,14 @@ def _fresh_db() -> sqlite3.Connection:
         dialect=_DIALECT,
     )
     conn.commit()
+    # AW.2 bridge — see stuck_pending's _fresh_db for rationale.
+    from datetime import datetime
+    from recon_gen.common.l2.config_table import replace_config
+    replace_config(
+        conn, prefix=_PREFIX,
+        cfg_json="{}", l2_json="{}",
+        as_of=datetime.now(),  # typing-smell: ignore[no-datetime-now]: bridge test harness — AW.5 retrofits to pinned LOCKED_ANCHOR
+    )
     return conn
 
 

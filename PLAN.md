@@ -414,11 +414,19 @@ Operator can introspect: `SELECT JSON_VALUE(l2_yaml, '$.rails[*].max_pending_age
   typing-smell suppressions added to stuck_pending.py + stuck_unbundled.py
   for `datetime.now()` (the bridge until AW.5 retrofits generators to
   read from `<prefix>_config.as_of`).
-- [ ] AW.2 - Migrate `{epoch_age_seconds}` substitution to read as_of
+- [x] AW.2 - Migrate `{epoch_age_seconds}` substitution to read as_of
   from `<prefix>_config`. PG/Oracle uses `EXTRACT(EPOCH FROM ((SELECT
   as_of FROM ...) - posting))`; SQLite uses the subquery-in-julianday
   shape. Update `common/sql/dialect.py::epoch_seconds_between`
-  signature to accept the as_of expression.
+  signature to accept the as_of expression. Landed: schema.py call site
+  changed (the helper signature didn't need updating — it already took
+  arbitrary expression strings; the call site just passes
+  `f"(SELECT as_of FROM {p}_config)"` instead of `"CURRENT_TIMESTAMP"`).
+  stuck_pending + stuck_unbundled test `_fresh_db` helpers seed the
+  config row with `datetime.now()` as the as_of bridge (typing-smell
+  suppression added; AW.5 retrofits to LOCKED_ANCHOR). Pre-existing
+  shape-asserting tests in `tests/schema/test_l2_schema.py` updated
+  for the new SQL shape. Full prelude: 3139 unit tests pass.
 - [ ] AW.3 - Migrate `{pending_age_cases}` + `{unbundled_age_cases}` to
   read from `<prefix>_config.l2_yaml` via JSON path. Add dialect-switch
   helper `json_select_value_by_key(json_col, array_path, filter_key,

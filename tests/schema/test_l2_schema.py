@@ -765,8 +765,13 @@ def test_stuck_pending_emits_with_status_and_age_filter() -> None:
     assert "ct.status = 'Pending'" in body
     assert "max_pending_age_seconds IS NOT NULL" in body
     assert "age_seconds > tx.max_pending_age_seconds" in body
-    # CURRENT_TIMESTAMP-driven age computation lives in the inner SELECT.
-    assert "EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - ct.posting))" in body
+    # AW.2 (2026-05-23): age is computed against the owned temporal
+    # frame `<prefix>_config.as_of`, not the matview engine's wall-clock
+    # CURRENT_TIMESTAMP. Audit §6 "own the temporal frame."
+    assert (
+        "EXTRACT(EPOCH FROM ((SELECT as_of FROM "
+    ) in body
+    assert "_config) - ct.posting))" in body
 
 
 def test_stuck_pending_embeds_rail_max_pending_age_inline() -> None:
@@ -854,7 +859,11 @@ def test_stuck_unbundled_emits_with_bundle_status_and_age_filter() -> None:
     assert "ct.status = 'Posted'" in body
     assert "max_unbundled_age_seconds IS NOT NULL" in body
     assert "age_seconds > tx.max_unbundled_age_seconds" in body
-    assert "EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - ct.posting))" in body
+    # AW.2 (2026-05-23): age reads from <prefix>_config.as_of.
+    assert (
+        "EXTRACT(EPOCH FROM ((SELECT as_of FROM "
+    ) in body
+    assert "_config) - ct.posting))" in body
 
 
 def test_stuck_unbundled_embeds_rail_max_unbundled_age_inline() -> None:

@@ -76,6 +76,20 @@ def _fresh_db() -> sqlite3.Connection:
         dialect=_DIALECT,
     )
     conn.commit()
+    # AW.2 bridge: matview's age_seconds reads `(SELECT as_of FROM
+    # <prefix>_config)`. Seed an initial row so refresh-time subquery
+    # returns a value instead of NULL. AW.5 will retrofit the generator
+    # to use this same as_of for plant timing → fully deterministic.
+    # For now (bridge), match the generator's `datetime.now()`-derived
+    # posting with `datetime.now()`-derived as_of so age computations
+    # match the pre-AW.2 behavior.
+    from datetime import datetime
+    from recon_gen.common.l2.config_table import replace_config
+    replace_config(
+        conn, prefix=_PREFIX,
+        cfg_json="{}", l2_json="{}",
+        as_of=datetime.now(),  # typing-smell: ignore[no-datetime-now]: bridge test harness — AW.5 retrofits to pinned LOCKED_ANCHOR
+    )
     return conn
 
 
