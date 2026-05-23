@@ -186,3 +186,81 @@ def test_all_three_renderer_bindings_share_one_source() -> None:
     iso_day = view.emit_app2_date_to()
     assert analysis.StaticValues[0] == f"{iso_day}T00:00:00"
     assert dataset.StaticValues[0] == f"{iso_day}T00:00:00"
+
+
+# ---------------------------------------------------------------------------
+# AR.3 — the plant ⟷ query-window contract becomes a TEST. A view's
+# `required_coverage` is a stated precondition; the seed must satisfy it
+# or a planted violation will fall outside the window the dashboard
+# scans (silent-blank class of bug). Pinning it for the L1 balance-date
+# view here makes the regression a unit-layer fail, not a discovery at
+# the deploy/visual layer.
+# ---------------------------------------------------------------------------
+
+
+def _extract_balance_days(sql: str, anchor_year: int) -> list[date]:
+    """Pull `YYYY-MM-DD` literals out of the emitted seed SQL whose year
+    matches the anchor — filters out year-2099 / year-2999 sentinels +
+    template literals that aren't actual baseline placements."""
+    import re
+    out: set[date] = set()
+    for m in re.finditer(r"\b(\d{4})-(\d{2})-(\d{2})\b", sql):
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if y != anchor_year:
+            continue
+        try:
+            out.add(date(y, mo, d))
+        except ValueError:
+            continue
+    return sorted(out)
+
+
+def test_balance_date_view_required_coverage_is_satisfied_by_locked_seed() -> None:
+    # The L1 balance-date view (constructed in `apps/l1_dashboard/datasets.py`
+    # via `cfg.test_generator.as_of_frame()`) must have its
+    # `required_coverage` actually satisfied by the locked seed. Today
+    # that's trivial — a single-date LATEST_ON_EMPTY view accepts any day
+    # ≤ anchor, and the 90-day baseline gives plenty. The TEST guards
+    # against a future narrowing: if the view ever moves to SHOW_EMPTY
+    # at an unsupported anchor, or to a range that exceeds the baseline
+    # window, this fires BEFORE the dashboard goes blank in production.
+    from pathlib import Path
+    from recon_gen.cli._helpers import build_full_seed_sql
+    from recon_gen.common.config import TestGeneratorConfig
+    from recon_gen.common.l2 import load_instance
+    from tests._test_helpers import make_test_config
+
+    cfg = make_test_config(
+        db_table_prefix="spec_example",
+        test_generator=TestGeneratorConfig(end_date=LOCKED_ANCHOR),
+    )
+    instance = load_instance(
+        str(Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"),
+    )
+    view = DateView(frame=cfg.test_generator.as_of_frame())
+
+    sql: str = build_full_seed_sql(cfg, instance, anchor=view.anchor_day)
+    days = _extract_balance_days(sql, LOCKED_ANCHOR.year)
+
+    # Sanity: the anchor year is represented in the seed.
+    assert days, "expected ≥1 day at the locked anchor's year in the seed"
+    # The contract: every day the view *requires* must be findable in the
+    # data the seed emits.
+    assert view.is_satisfied_by(days), (
+        f"locked seed does not satisfy view.required_coverage="
+        f"{view.required_coverage}; first emitted anchor-year days: "
+        f"{days[:5]}"
+    )
+
+
+def test_required_coverage_gate_fires_on_uncovered_view() -> None:
+    # Inverse of the above: a contrived view whose required_coverage
+    # lands OUTSIDE the seed's emitted range must fail the gate. Pins
+    # the assertion's teeth — without this, a window-narrowing
+    # regression could pass the gate silently.
+    view = DateView(frame=AsOfFrame.locked(window_days=2))  # narrow range
+    # No days at all → can't satisfy.
+    assert not view.is_satisfied_by([])
+    # Days only in the year 2099 → outside locked-anchor's [2029-12-30, 2030-01-01].
+    far_future = [date(2099, 1, 1), date(2099, 1, 2)]
+    assert not view.is_satisfied_by(far_future)
