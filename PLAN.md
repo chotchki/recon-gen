@@ -158,7 +158,7 @@ Source + full reasoning: `docs/audits/date_range_model_audit.md` (grew out of AO
 
 Own `as_of`: the generator and the views read one anchor, not wall-clock `now()`. Locked binding ⇒ deterministic; live binding ⇒ ends-at-now, same code path. Stays unit+data.
 
-- [ ] AQ.1 - `AsOfFrame` (as_of + window; `locked`/`live` bindings) promoted to `src/recon_gen/common/`
+- [x] AQ.1 - `AsOfFrame` (as_of + window; `locked`/`live` bindings) promoted to `src/recon_gen/common/`
 - [ ] AQ.2 - `as_of` lands in config (subsumes `TestGeneratorConfig.end_date` + trainer `window_end`)
 - [ ] AQ.3 - generator reads `frame.as_of` (rename+funnel the threaded `anchor=`; collapse the 4 ad-hoc `date.today()` fallbacks → "no frame ⇒ live")
 - [ ] AQ.4 - determinism gate: locked ⇒ byte-identical seed; live ⇒ ends-at-now, same path (the §8 story)
