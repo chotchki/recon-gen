@@ -373,7 +373,7 @@ is the production rollout for the two L2 classes. AT.0 redecomposes from AS's re
     ledger_drift, anomaly, money_trail). The 5-way bridge for L2 is live;
     AT.2's "detector returns every bucket" contract validates against the
     matview's unfiltered row set, no manual filter to keep in sync.
-  - [ ] AT.5.b - **App2 Investigation dashboard ⋈ direct-matview agreement**.
+  - [x] AT.5.b - **App2 Investigation dashboard ⋈ direct-matview agreement**.
     Add `_dashboard_extract` projections for anomaly + money_trail tables;
     App2 leg (no AWS infra needed).
   - [ ] AT.5.c - **QS Investigation dashboard ⋈ direct-matview agreement**.

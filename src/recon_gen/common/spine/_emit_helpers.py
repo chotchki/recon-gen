@@ -51,6 +51,44 @@ from recon_gen.common.l2.primitives import Account, L2Instance
 DEFAULT_PREFIX = "spec_example"
 
 
+def _placeholder_style(conn: object) -> str:
+    """Detect the dbapi placeholder style for ``conn``.
+
+    Returns one of:
+
+    - ``"qmark"`` — SQLite (``?``). The in-process test shape.
+    - ``"format"`` — psycopg / PG (``%s``). The deployed-DB shape that
+      AT.5.b started exercising.
+    - ``"numeric"`` — oracledb (``:1``, ``:2``, …). Oracle's deployed shape.
+
+    Detected by module name rather than ``isinstance`` so the spine
+    avoids hard import dependencies on psycopg / oracledb (they're
+    optional extras). Falls through to ``"qmark"`` (SQLite) so the
+    in-process test harness — which doesn't carry psycopg/oracledb in
+    its baseline — stays byte-identical.
+
+    AT.5.b (2026-05-23) added this so the spine generators emit
+    directly into the deployed dialect — same generators, same SQL
+    shape — rather than requiring a parallel hand-rolled plant path
+    per dialect.
+    """
+    mod = type(conn).__module__
+    if mod.startswith("psycopg"):
+        return "format"
+    if mod.startswith("oracledb"):
+        return "numeric"
+    return "qmark"
+
+
+def _build_placeholders(style: str, n: int) -> str:
+    """``", ".join(...)`` of ``n`` placeholders in the given style."""
+    if style == "numeric":
+        return ", ".join(f":{i + 1}" for i in range(n))
+    if style == "format":
+        return ", ".join("%s" for _ in range(n))
+    return ", ".join("?" for _ in range(n))
+
+
 TX_COLS = (
     "id", "account_id", "account_name", "account_role", "account_scope",
     "account_parent_role", "amount_money", "amount_direction", "status",
@@ -85,14 +123,28 @@ def insert_tx(
 
     `prefix` defaults to the in-process spec_example shape. Generators
     that get prefix-parametric (deploy-time use) will pass it through;
-    AU.3.d kept default to preserve the AS-era call sites byte-stable."""
-    placeholders = ", ".join("?" for _ in TX_COLS)
+    AU.3.d kept default to preserve the AS-era call sites byte-stable.
+
+    AT.5.b: dialect-aware placeholder style + ``cursor.execute`` path
+    so the spine generators emit into deployed PG / Oracle DBs (not
+    just the in-process SQLite harness). The annotation still reads
+    ``sqlite3.Connection`` because that's the dominant call shape; in
+    practice the function accepts any dbapi 2.0 connection (psycopg /
+    oracledb / sqlite3) and dispatches via ``_placeholder_style``.
+    """
+    style = _placeholder_style(conn)
+    placeholders = _build_placeholders(style, len(TX_COLS))
     table = f"{prefix}_transactions"
-    conn.execute(
+    sql = (
         f"INSERT INTO {table} ({', '.join(TX_COLS)}) "
-        f"VALUES ({placeholders})",
-        [vals.get(c) for c in TX_COLS],
+        f"VALUES ({placeholders})"
     )
+    params = [vals.get(c) for c in TX_COLS]
+    cur = conn.cursor()
+    try:
+        cur.execute(sql, params)
+    finally:
+        cur.close()
 
 
 def insert_balance(
@@ -102,14 +154,20 @@ def insert_balance(
     **vals: object,
 ) -> None:
     """Insert one row into ``<prefix>_daily_balances``. Mirrors
-    `insert_tx` for the balance table."""
-    placeholders = ", ".join("?" for _ in DB_COLS)
+    `insert_tx` for the balance table — same dialect dispatch."""
+    style = _placeholder_style(conn)
+    placeholders = _build_placeholders(style, len(DB_COLS))
     table = f"{prefix}_daily_balances"
-    conn.execute(
+    sql = (
         f"INSERT INTO {table} ({', '.join(DB_COLS)}) "
-        f"VALUES ({placeholders})",
-        [vals.get(c) for c in DB_COLS],
+        f"VALUES ({placeholders})"
     )
+    params = [vals.get(c) for c in DB_COLS]
+    cur = conn.cursor()
+    try:
+        cur.execute(sql, params)
+    finally:
+        cur.close()
 
 
 def day_bounds(day: date) -> tuple[str, str]:

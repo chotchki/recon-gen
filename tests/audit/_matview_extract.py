@@ -134,6 +134,171 @@ def count_l1_invariant_matview_rows(
         return int(cur.fetchone()[0])
 
 
+# =====================================================================
+# L2 invariant anchors (AT.5.b — Investigation matviews)
+# =====================================================================
+#
+# The L2 dashboard tables aren't simple flat row-per-matview-row shapes
+# like the L1 ones; both filter the matview at the dataset SQL level
+# via a parameter pushdown. So the "direct SELECT" anchor takes the
+# same parameter value the dashboard's slider/dropdown is set to, and
+# the test asserts apples-to-apples agreement against that filtered
+# row set rather than the unfiltered matview total (which would only
+# agree with the *distribution* visual, not the detail tables).
+#
+# - ``anomaly`` — ``<prefix>_inv_pair_rolling_anomalies`` filtered by
+#   ``z_score >= <sigma>`` (matches build_volume_anomalies_dataset's
+#   ``WHERE 1=1 AND z_score >= <<$pInvAnomaliesSigma>>``); natural key
+#   tuple ``(sender_account_id, recipient_account_id, window_end)``
+#   matches the "Flagged Pair-Windows — Ranked" table's group_by.
+# - ``money_trail`` — ``<prefix>_inv_money_trail_edges`` filtered by
+#   ``root_transfer_id = <root>`` (matches build_money_trail_dataset's
+#   chain-root pushdown); natural key tuple ``(transfer_id, depth)``
+#   matches the "Money Trail — Hop-by-Hop" table's edge identity.
+L2Invariant = Literal["anomaly", "money_trail"]
+
+
+_L2_MATVIEW_SUFFIX: dict[L2Invariant, str] = {
+    "anomaly": "inv_pair_rolling_anomalies",
+    "money_trail": "inv_money_trail_edges",
+}
+
+
+_L2_KEY_COLS: dict[L2Invariant, tuple[str, ...]] = {
+    "anomaly": (
+        "sender_account_id", "recipient_account_id", "window_end",
+    ),
+    "money_trail": ("transfer_id", "depth"),
+}
+
+
+def l2_key_columns_for(invariant: L2Invariant) -> tuple[str, ...]:
+    """Natural-key columns for the L2 invariant's matview / detail table."""
+    return _L2_KEY_COLS[invariant]
+
+
+def _normalise_anomaly_cell(value: object, col_name: str) -> str | date:
+    if col_name == "window_end":
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        return date.fromisoformat(str(value)[:10])
+    return str(value)
+
+
+def _normalise_money_trail_cell(value: object, col_name: str) -> str | int:
+    if col_name == "depth":
+        return int(value)  # type: ignore[arg-type]: dbapi cursor returns Numeric for INTEGER; int() coerces
+    return str(value)
+
+
+def count_anomaly_matview_rows(
+    conn: Any,  # typing-smell: ignore[explicit-any]: per-driver connection union has no shared Protocol
+    prefix: str,
+    *,
+    sigma_threshold: float,
+) -> int:
+    """``SELECT count(*) FROM <prefix>_inv_pair_rolling_anomalies WHERE
+    z_score >= <sigma>``. Matches the dataset SQL the dashboard runs
+    when the σ slider is at ``sigma_threshold``."""
+    suffix = _L2_MATVIEW_SUFFIX["anomaly"]
+    sql = (
+        f"SELECT count(*) FROM {prefix}_{suffix} "
+        f"WHERE z_score >= {sigma_threshold}"
+    )
+    with conn.cursor() as cur:
+        cur.execute(sql)
+        return int(cur.fetchone()[0])
+
+
+def anomaly_matview_row_keys(
+    conn: Any,  # typing-smell: ignore[explicit-any]: per-driver connection union has no shared Protocol
+    prefix: str,
+    *,
+    sigma_threshold: float,
+) -> set[tuple[str | date, ...]]:
+    """Natural-key tuples ``(sender, recipient, window_end)`` for the
+    σ-filtered matview row set. The dashboard's "Flagged Pair-Windows
+    — Ranked" table group_bys on the same column set."""
+    suffix = _L2_MATVIEW_SUFFIX["anomaly"]
+    key_cols = _L2_KEY_COLS["anomaly"]
+    select_cols = ", ".join(key_cols)
+    sql = (
+        f"SELECT {select_cols} FROM {prefix}_{suffix} "
+        f"WHERE z_score >= {sigma_threshold}"
+    )
+    out: set[tuple[str | date, ...]] = set()
+    with conn.cursor() as cur:
+        cur.execute(sql)
+        for row in cur.fetchall():
+            out.add(tuple(
+                _normalise_anomaly_cell(v, c)
+                for v, c in zip(row, key_cols, strict=True)
+            ))
+    return out
+
+
+def count_money_trail_matview_rows(
+    conn: Any,  # typing-smell: ignore[explicit-any]: per-driver connection union has no shared Protocol
+    prefix: str,
+    *,
+    root_transfer_id: str,
+) -> int:
+    """``SELECT count(*) FROM <prefix>_inv_money_trail_edges WHERE
+    root_transfer_id = <root>``. Matches the dataset SQL the dashboard
+    runs when the chain-root dropdown is set to ``root_transfer_id``."""
+    suffix = _L2_MATVIEW_SUFFIX["money_trail"]
+    sql = (
+        f"SELECT count(*) FROM {prefix}_{suffix} "
+        f"WHERE root_transfer_id = '{root_transfer_id}'"
+    )
+    with conn.cursor() as cur:
+        cur.execute(sql)
+        return int(cur.fetchone()[0])
+
+
+def money_trail_matview_row_keys(
+    conn: Any,  # typing-smell: ignore[explicit-any]: per-driver connection union has no shared Protocol
+    prefix: str,
+    *,
+    root_transfer_id: str,
+) -> set[tuple[str | int, ...]]:
+    """Natural-key tuples ``(transfer_id, depth)`` for the root-filtered
+    matview row set. The dashboard's "Money Trail — Hop-by-Hop" table
+    surfaces one row per edge."""
+    suffix = _L2_MATVIEW_SUFFIX["money_trail"]
+    key_cols = _L2_KEY_COLS["money_trail"]
+    select_cols = ", ".join(key_cols)
+    sql = (
+        f"SELECT {select_cols} FROM {prefix}_{suffix} "
+        f"WHERE root_transfer_id = '{root_transfer_id}'"
+    )
+    out: set[tuple[str | int, ...]] = set()
+    with conn.cursor() as cur:
+        cur.execute(sql)
+        for row in cur.fetchall():
+            out.add(tuple(
+                _normalise_money_trail_cell(v, c)
+                for v, c in zip(row, key_cols, strict=True)
+            ))
+    return out
+
+
+def distinct_money_trail_roots(
+    conn: Any,  # typing-smell: ignore[explicit-any]: per-driver connection union has no shared Protocol
+    prefix: str,
+) -> list[str]:
+    """Every distinct ``root_transfer_id`` in the matview. The test uses
+    this to discover a planted root to drive the dropdown with — the
+    matview names the chains the dashboard would show."""
+    suffix = _L2_MATVIEW_SUFFIX["money_trail"]
+    sql = f"SELECT DISTINCT root_transfer_id FROM {prefix}_{suffix}"
+    with conn.cursor() as cur:
+        cur.execute(sql)
+        return [str(row[0]) for row in cur.fetchall()]
+
+
 def l1_invariant_matview_row_keys(
     conn: Any,  # typing-smell: ignore[explicit-any]: per-driver connection union has no shared Protocol
     prefix: str,
