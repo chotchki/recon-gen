@@ -2903,3 +2903,46 @@ Source: `SPEC_gap_feedback.md` Implementation Gap J. E8 (the Phase AF per-period
 Locked approach (user, 2026-05-21): **template-level E8**. `firings_typical_per_period` on a TransferTemplate drives a coupled unit-firing for ANY template that declares it (not just chain-parent templates); the per-rail loop SKIPS leg_rails of any unit-firing template (no double-emit, no divergence); validator W1 accepts E8 on a TransferTemplate. Also tidies the latent chain-parent-template-leg double-emit (legs currently fire in BOTH the per-rail loop AND the unit firing). Fixture-first TDD.
 
 
+---
+
+## 2026-05-23
+
+## Phase AP - date/range spikes
+
+Source + full reasoning: `docs/audits/date_range_model_audit.md` (grew out of AO.10/AO.11).
+
+**The destination.** Define, in code/types, three linked layers — **invariants** (the rules/detectors), **failures** (planted violations of an invariant), **views** (how to surface an invariant's violations over `as_of`±span) — with the **invariant as the single source of truth** the other two *reference*. Collapses the two pipelines that keep colliding (app: `constraints+shape → queries → visuals`; generator: `seed+time+shape → data`) into one declaration. Rollout = Phases AQ (frame) → AR (view) → AS (spine).
+
+**Expressiveness (settled):** Python + pyright-strict is enough — it *wires and witnesses* (closed taxonomy, total `invariant→{failures,views}` maps via exhaustiveness, smart-constructor types); it does NOT *prove* invariants ("does data satisfy X" is runtime).
+
+**Approach: spike-first per layer.** The destination is clearer than the path; each layer got a spike on ONE surface → decide → roll out. Rollouts are NOT pre-specified (a spike may reorder/redecompose what follows). All four spikes GREEN; findings in audit §5.
+
+**Status (2026-05-22):** spikes complete. Release + everything above unit+data stays PARKED until AR.5 (the view layer lands D2 live); db/deploy/e2e resume there. AQ + AR.1–4 are unit+data. (AO.10 Oracle + AO.S2.a trainer-pin already done on `ao-oracle-release-fix`.)
+
+- [x] AP.0 - as_of frame (D1) → `tests/unit/test_ap0_as_of_frame.py`
+- [x] AP.1 - view primitive (D5) → `tests/unit/test_ap1_view_primitive.py`
+- [x] AP.2 - stateful generator / invariant spine (D6) → `tests/unit/test_ap2_stateful_generator.py`
+- [x] AP.3 - invariant self-validation (make-or-break) → `tests/unit/test_ap3_invariant_self_validation.py`
+
+
+## Phase AQ - frame rollout (D1) *(depends on: AP)*
+
+Own `as_of`: the generator and the views read one anchor, not wall-clock `now()`. Locked binding ⇒ deterministic; live binding ⇒ ends-at-now, same code path. Stays unit+data.
+
+- [x] AQ.1 - `AsOfFrame` (as_of + window; `locked`/`live` bindings) promoted to `src/recon_gen/common/`
+- [x] AQ.2 - `as_of` lands in config (subsumes `TestGeneratorConfig.end_date` + trainer `window_end`)
+- [x] AQ.3 - generator reads `frame.as_of` (rename+funnel the threaded `anchor=`; collapse the 4 ad-hoc `date.today()` fallbacks → "no frame ⇒ live")
+- [x] AQ.4 - determinism gate: locked ⇒ byte-identical seed; live ⇒ ends-at-now, same path (the §8 story)
+
+
+## Phase AR - view rollout (D5) *(depends on: AQ)*
+
+The view primitive: one typed `View` is the source of truth; picker + analysis default + dataset default + App2 binding all derive from it. Kills C1 structurally and unparks the release.
+
+- [x] AR.1 - `View` date-view tree primitive in `common/tree/` (anchor=`AsOfFrame`, span, empty_behavior, required_coverage); authoring abstraction, not end-user config
+- [x] AR.2 - balance-date view: `DateTimeParam.default` + dataset `StaticValues` + `ParameterDateTimePicker` + App2 binding all DERIVE from one view; delete the per-app RollingDate exprs + standalone sentinels
+- [x] AR.3 - `required_coverage` seed-coverage assertion (plant ⟷ query-window contract becomes a test, not developer-memory)
+- [x] AR.4 - roll the remaining date views onto the primitive (L1 universal range, Exec 30-day, L2FT static bounds)
+- [x] AR.5 - **D2 confirm at the live QS layer** — the 5 Daily Statement KPIs render (the release blocker). db/deploy/e2e RESUME here; **release unparks.**
+
+
