@@ -866,6 +866,76 @@ fires); AU.2's composition test will cover that variant. Promotion of
 expected_eod_balance_breach / stuck_pending / stuck_unbundled / limit_breach
 is AU.3-4 territory — AU.0's promotion-order table is the input.
 
+> **AU.2 correction** (2026-05-23): the AU.0 "parent-role overdraft trips
+> ledger_drift" prediction was WRONG. See "AU.2 result" below — the
+> corrected claim is "drift + parent-role overdraft COMPOSITION trips
+> ledger_drift on BOTH parents," not the lone-parent variant.
+
+### AU.2 result — composition holds; lone-parent overdraft is single-edge; the composition-induced edge is real (2026-05-23)
+
+The first AU-phase composition deliverable. `tests/unit/test_spine_au2_composition.py`
+(6 tests, in-process) composes `DriftGenerator` + `OverdraftGenerator` via AS.5's
+`apply_scenario(*emitters)` — the existing composition primitive (the PLAN's
+"in one `LedgerSimulation`" was imprecise; `LedgerSimulation` composes
+`AccountSimulation`s, not arbitrary generators). What the spike pinned:
+
+1. **The spine SCALES past one invariant.** Leaf-overdraft + drift composed:
+   THREE invariants fire — overdraft on the overdraft plant's leaf, drift on
+   BOTH the drift plant's child AND the overdraft plant's leaf (the AU.0
+   empirical edge holds under composition), ledger_drift on the drift plant's
+   parent. The user's explicit ask is answered: the spine handles multi-
+   generator scenarios without one masking another's intended Violations.
+2. **(AU.2 finding — the AU.0 honest-limit prediction was WRONG.)** A lone
+   parent-role overdraft plant trips ONLY overdraft, NOT ledger_drift.
+   Mechanism: `_computed_ledger_balance` (which `_ledger_drift` joins) gates
+   on `EXISTS (SELECT 1 FROM ... child2 WHERE child2.account_parent_role =
+   parent.account_role)`. A lone parent has no children → no
+   `computed_balance` row → no ledger_drift candidate. Production-honest:
+   ledger_drift only makes sense when there ARE children to sum.
+3. **(AU.2 finding — composition-induced edges are a real, separate
+   property.)** When drift's plant supplies a CustomerSubledger child AND
+   overdraft plants on a CustomerLedger account, ledger_drift fires on BOTH
+   parents — drift's own parent AND the overdraft parent. `_computed_ledger_
+   balance` joins by `parent_role = account_role` (by role, not account_id),
+   so multiple CustomerLedger accounts share the same computed_balance from
+   the same children. This is the **composition-induced edge** — overdraft →
+   ledger_drift only manifests when another generator provides the
+   prerequisite child rows. It's a property of the SCENARIO, not the
+   generator class.
+4. **Registry semantics stay per-generator (AU.1's two-edge entry is
+   correct).** The composition-induced edge does NOT promote to
+   `INVARIANT_GENERATOR_EDGES`. The registry records what a single-generator
+   emission can trip; composition surfaces emergent edges that are
+   scenario-level, not class-level. The empirical-edge contract for single-
+   generator stays "UNION across all valid instance variants matches
+   registered" — for OverdraftGenerator: leaf → {Overdraft, Drift} + parent
+   → {Overdraft}; UNION = {Overdraft, Drift} = AU.1's registry entry.
+
+**Locked design decision for AU.5 (exhaustiveness gate):** AU.5 should pin
+TWO exhaustiveness properties, not one:
+
+- **Per-generator-class** (the original AU.5 scope): every PlantKind has
+  ≥1 registered `ViolationGenerator`; every L1 `check_type` has ≥1 registered
+  `Invariant`.
+- **Per-invariant-class** (the AU.2 addition): every L1 `Invariant` has
+  ≥1 SCENARIO (single-generator OR composition) that empirically trips it.
+  The composition-induced edges are part of the gate; AU.5 has to enumerate
+  composition scenarios, not just generator classes.
+
+**GO for AU.3-4.** The composition primitive works; the registry semantics
+hold; the empirical-edge discipline (write the test, let it surface the real
+behavior) is the AU.x cadence pattern. AU.3 promotes the next batch
+(expected_eod_balance_breach / stuck_pending / stuck_unbundled) per the AU.0
+table; AU.4 promotes limit_breach with its instance-coupled `from_instance`
+smart constructor; AU.5 closes the phase with the dual-axis exhaustiveness
+gate.
+
+**Honest limit of AU.2.** Threaded only the drift+overdraft pair. The
+composition-induced edge property is GENERAL — any pair of generators that
+share base-table rows can produce emergent edges. The exhaustive enumeration
+of "every pair, every shared-edge" is AU.5's territory; AU.2 pins the shape
+with one pair and stops.
+
 ---
 
 ## 6. The mechanism (for decision)

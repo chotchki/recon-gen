@@ -214,15 +214,24 @@ near the end because of its instance-coupled `from_instance` smart constructor
   behavior, registry helpers, and the substitution-path property. AS-era
   `test_generators_for_reverse_lookup` updated for DriftInvariant's now
   two-generator reverse-lookup.
-- [ ] AU.2 - **Composition test** — scenario combining `DriftGenerator` +
-  `OverdraftGenerator` in one `LedgerSimulation`; THREE invariants fire
-  (overdraft on the overdraft plant's leaf, drift on BOTH the drift plant's
-  child AND the overdraft plant's leaf per the AU.0 empirical-edge finding,
-  ledger_drift on the drift plant's parent); the trajectory's carried set
-  tracks ALL THREE without one masking the others; the AS.2 registry's
-  many-to-many edges still hold under composition. PLUS: parent-role overdraft
-  plant variant (the AU.0 honest limit) — confirm ledger_drift fires when an
-  overdraft is planted on a parent account.
+- [x] AU.2 - **Composition test** — scenario combining `DriftGenerator` +
+  `OverdraftGenerator` via `apply_scenario(*emitters)` (AS.5's existing
+  primitive; PLAN's "in one `LedgerSimulation`" was imprecise — that
+  composes `AccountSimulation`s, not arbitrary generators). THREE invariants
+  fire on the leaf-overdraft variant (overdraft + drift on TWO accounts +
+  ledger_drift on drift's parent); the carried set tracks all three without
+  masking. AU.2 findings (caught mid-write by the stop-and-evaluate cadence,
+  per `feedback_aws_research`-style empirical discipline): (1) lone
+  parent-role overdraft trips ONLY overdraft, NOT ledger_drift, because
+  `_computed_ledger_balance` gates on `EXISTS (child_with_parent_role)` —
+  AU.0's honest-limit prediction was WRONG; (2) composition-induced edges
+  are a real, separate property — drift+parent-overdraft DOES trip
+  ledger_drift on both parents (drift's child supplies the prerequisite);
+  (3) registry semantics stay per-generator (AU.1's two-edge entry stands);
+  composition-induced edges are scenario-level, not class-level. AU.5 needs
+  a dual-axis exhaustiveness gate (per-generator AND per-invariant via
+  composition). Landed: `tests/unit/test_spine_au2_composition.py` (6 tests).
+  Audit subsection "AU.2 result" captures the lessons.
 - [ ] AU.3 - Promote the data/deadline-derived L1 invariants
   (`expected_eod_balance_breach`, `stuck_pending`, `stuck_unbundled`). Each carries
   a window that's PART of the invariant definition (per audit §5 "second source"),
@@ -231,9 +240,16 @@ near the end because of its instance-coupled `from_instance` smart constructor
   the `from_instance` smart constructor reads the L2's `LimitSchedule` (no blind
   generator possible). The `(parent_role, rail, direction) → cap` table threads
   through here.
-- [ ] AU.5 - Exhaustiveness gate: every L1-related `PlantKind` value has ≥1
-  registered `ViolationGenerator`; every L1 `check_type` has ≥1 registered
-  `Invariant`. The taxonomy unification (AS.2) gets its empirical guarantee here.
+- [ ] AU.5 - **Dual-axis exhaustiveness gate** (refined by AU.2 finding #4):
+  - **Per-generator-class** (original scope): every L1-related `PlantKind`
+    value has ≥1 registered `ViolationGenerator`; every L1 `check_type` has
+    ≥1 registered `Invariant`.
+  - **Per-invariant-class** (the AU.2 addition): every L1 `Invariant` has
+    ≥1 SCENARIO (single-generator OR composition) that empirically trips
+    it. Composition-induced edges (e.g., overdraft+drift → ledger_drift on
+    overdraft's parent) are part of the gate; AU.5 must enumerate
+    composition scenarios, not just generator classes.
+  The taxonomy unification (AS.2) gets its empirical guarantee here.
 
 ## Phase AT - L2 invariant spine rollout *(depends on: AS)*
 
