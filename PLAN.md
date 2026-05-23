@@ -346,8 +346,19 @@ is the production rollout for the two L2 classes. AT.0 redecomposes from AS's re
   depth-threshold knob mirroring AnomalyView's σ pattern. 16 Transfer-primitive
   tests + 20 money_trail (generator + view) tests; AnomalyGenerator refactor is
   shape-preserving (all AT.2 tests still pass).
-- [ ] AT.4 - retire L2 byte-locked seed SQL → semantic self-validation extends to the
-  Investigation matviews (parallel to AS.5 for L1).
+- [x] AT.4 - retire L2 byte-locked seed SQL → semantic self-validation extends to the
+  Investigation matviews (parallel to AS.5 for L1). Landed
+  `tests/unit/test_spine_at4_l2_semantic_lock.py` (11 tests): per-scenario stability
+  for anomaly + money_trail alone, per-invariant lock keying, cross-class composition
+  (anomaly + money_trail both fire in one scenario without masking), single-edge
+  property preserved post-AT.3 refactor (no L1 trip from L2-only plants), gate-has-
+  teeth checks (different spike magnitudes / chain lengths → different locks),
+  L1-L2 cross-layer composition (drift + anomaly), View-sliced lock stability. The
+  byte-locked `tests/data/_locked_seeds/spec_example.*.sql` files stay for now —
+  they pin the FULL densified 60-day seed (not just L2 violations); their actual
+  removal is post-AT.5 (4-way agreement gate) when there's an alternative
+  source-of-truth for the seed shape itself. AT.4 establishes the pattern that the
+  4-way gate will compose.
 - [ ] AT.5 - **MANDATORY GATE** — 4-way agreement extends to the Investigation dashboard
   (parallel to AS.6 for L1). The cross-tool linkage assertion that QS / App2 / PDF /
   direct-DB agree on L2 violations. Non-skippable for the same reason AS.6 is.
@@ -557,6 +568,7 @@ Operator can introspect: `SELECT JSON_VALUE(l2_yaml, '$.rails[*].max_pending_age
   migration warning for custom ETL operators + verification ladder +
   pointer to the unlocked dashboard-pickers backlog. **Phase AW
   complete (7/7 leaves).**
+
 # Backlog (not yet phased)
 
 - **Studio / Dashboards rethink under the post-AW DB-projected
