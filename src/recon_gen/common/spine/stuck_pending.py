@@ -166,7 +166,10 @@ class StuckPendingGenerator:
         # margin to absorb ±12h of TZ skew (`tests/unit/test_spine_
         # stuck_pending.py` does so).
         age_back = self.max_pending_age_seconds + self.overshoot_seconds
-        posting_dt = datetime.now() - timedelta(seconds=age_back)
+        # Bridge until AW.5: matview computes CURRENT_TIMESTAMP - posting,
+        # so plant is wall-clock-relative by construction. AW.5 migrates
+        # this to read as_of from <prefix>_config; suppression drops then.
+        posting_dt = datetime.now() - timedelta(seconds=age_back)  # typing-smell: ignore[no-datetime-now]: matview computes CURRENT_TIMESTAMP - posting; bridge until AW.5 migrates to <prefix>_config.as_of
         _insert_tx(
             conn,
             id=self.transaction_id,

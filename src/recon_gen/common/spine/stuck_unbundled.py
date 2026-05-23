@@ -128,7 +128,9 @@ class StuckUnbundledGenerator:
         # `stuck_pending.py` for the rationale + the
         # [[project-local-tz-convention]] memory.
         age_back = self.max_unbundled_age_seconds + self.overshoot_seconds
-        posting_dt = datetime.now() - timedelta(seconds=age_back)
+        # Bridge until AW.5: same rationale as stuck_pending. Drops when
+        # AW.5 migrates generators to read as_of from <prefix>_config.
+        posting_dt = datetime.now() - timedelta(seconds=age_back)  # typing-smell: ignore[no-datetime-now]: matview computes CURRENT_TIMESTAMP - posting; bridge until AW.5 migrates to <prefix>_config.as_of
         # status='Posted' (not Pending — disjoint from stuck_pending).
         # bundle_id stays NULL by default (`_TX_COLS` doesn't include it,
         # so the INSERT leaves it NULL — exactly what the matview filter

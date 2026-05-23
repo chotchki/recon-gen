@@ -125,11 +125,22 @@ def emit_schema(
     # the same dependency-ordering rule applies.
     l1_drops = _emit_l1_invariant_drops(p, dialect)
     inv_drops = _emit_inv_matview_drops(p, dialect)
+    # Phase AW: <prefix>_config holds cfg + L2 yaml + as_of. Drop
+    # FIRST (no dependents reference it yet — AW.2+ will add matview
+    # subqueries against it), CREATE in the config block right after
+    # base tables.
+    from recon_gen.common.l2.config_table import (
+        emit_config_table_ddl,
+        emit_config_table_drop,
+    )
+    config_drop = emit_config_table_drop(p, dialect)
+    config_create = emit_config_table_ddl(p, dialect)
     base = _emit_base_schema(p, dialect, instance)
     invariants = _emit_l1_invariant_views(instance, prefix=p, dialect=dialect)
     inv_views = _emit_inv_views(instance, prefix=p, dialect=dialect)
     return (
-        l1_drops + "\n" + inv_drops + "\n" + base + "\n\n"
+        l1_drops + "\n" + inv_drops + "\n" + config_drop + "\n" + base
+        + "\n\n" + config_create + "\n\n"
         + invariants + "\n\n" + inv_views
     )
 
@@ -160,7 +171,8 @@ def emit_schema_drop_sql(
     p = prefix
     l1_drops = _emit_l1_invariant_drops(p, dialect)
     inv_drops = _emit_inv_matview_drops(p, dialect)
-    # Base layer: Current* matviews → indexes → base tables.
+    # Base layer: Current* matviews → indexes → base tables + config.
+    from recon_gen.common.l2.config_table import emit_config_table_drop
     pieces = [
         drop_matview_if_exists(f"{p}_current_daily_balances", dialect),
         drop_matview_if_exists(f"{p}_current_transactions", dialect),
@@ -170,6 +182,10 @@ def emit_schema_drop_sql(
     pieces.extend([
         drop_table_if_exists(f"{p}_daily_balances", dialect),
         drop_table_if_exists(f"{p}_transactions", dialect),
+        # Phase AW: <prefix>_config has no dependents yet (AW.2+ will
+        # add matview subqueries against it), so it's safe to drop
+        # alongside the base tables.
+        emit_config_table_drop(p, dialect),
     ])
     base_drops = "\n".join(pieces)
     header = (

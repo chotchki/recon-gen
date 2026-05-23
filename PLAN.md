@@ -399,11 +399,21 @@ Operator can introspect: `SELECT JSON_VALUE(l2_yaml, '$.rails[*].max_pending_age
   (7 tests in `tests/unit/test_aw0b_jsonpath_filter_spike.py`).
   Finding: SQLite doesn't support filter-path syntax; portable shape is
   `json_each() + WHERE` + LEFT JOIN. Dialect helper switches per backend.
-- [ ] AW.1 - Schema: emit `<prefix>_config` table at init; populate with
+- [x] AW.1 - Schema: emit `<prefix>_config` table at init; populate with
   cfg + L2 as JSON + initial as_of. Drop/recreate handling for re-deploy.
   Python helpers: `replace_config(conn, cfg, l2, as_of)` for deploy
   events, `set_as_of(conn, as_of=None)` for refresh events (None →
-  CURRENT_TIMESTAMP).
+  CURRENT_TIMESTAMP). Landed `src/recon_gen/common/l2/config_table.py`
+  (DDL emission + `replace_config` / `set_as_of` / `get_as_of` helpers
+  taking pre-serialized JSON strings — caller does the dataclass→JSON
+  conversion). `emit_schema` + `emit_schema_drop_sql` integrated with
+  the new table (drop before base, create after, symmetric teardown).
+  15 unit tests in `tests/unit/test_aw1_config_table.py` pin DDL shape,
+  table-name convention, helper round-trip, single-row invariant under
+  re-replace, CURRENT_TIMESTAMP default, full-schema integration. Bridge
+  typing-smell suppressions added to stuck_pending.py + stuck_unbundled.py
+  for `datetime.now()` (the bridge until AW.5 retrofits generators to
+  read from `<prefix>_config.as_of`).
 - [ ] AW.2 - Migrate `{epoch_age_seconds}` substitution to read as_of
   from `<prefix>_config`. PG/Oracle uses `EXTRACT(EPOCH FROM ((SELECT
   as_of FROM ...) - posting))`; SQLite uses the subquery-in-julianday
