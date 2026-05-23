@@ -38,15 +38,25 @@ from recon_gen.common.spine.drift import (
 )
 from recon_gen.common.spine.generator import ViolationGenerator
 from recon_gen.common.spine.invariant import Invariant
+from recon_gen.common.spine.overdraft import OverdraftGenerator, OverdraftInvariant
 
 #: For every generator class, the invariant classes its emission trips.
 #: Read as: "a single `emit()` from this generator + a refresh of the
 #: matviews causes detect() on each listed invariant to include the
 #: expected Violation."
+#:
+#: AU.0 finding (audit §5 "AU.0 result"): the OverdraftGenerator edge to
+#: `DriftInvariant` is the empirical consequence of overlapping base-table
+#: predicates between two independent matview SELECTs — not a structural
+#: claim. An overdraft planted on a LEAF internal account satisfies
+#: drift's matview filter (`parent_role IS NOT NULL` AND `stored ≠ Σ
+#: legs`), so drift fires too. The registry records this; AU.2's
+#: composition test holds it under multi-generator pressure.
 INVARIANT_GENERATOR_EDGES: Final[
     dict[type[ViolationGenerator], tuple[type[Invariant], ...]]
 ] = {
     DriftGenerator: (DriftInvariant, LedgerDriftInvariant),
+    OverdraftGenerator: (OverdraftInvariant, DriftInvariant),
 }
 
 

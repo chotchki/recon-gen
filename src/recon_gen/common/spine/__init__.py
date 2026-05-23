@@ -47,6 +47,7 @@ from recon_gen.common.spine.drift import (
 )
 from recon_gen.common.spine.generator import ViolationGenerator
 from recon_gen.common.spine.invariant import Invariant
+from recon_gen.common.spine.overdraft import OverdraftGenerator, OverdraftInvariant
 from recon_gen.common.spine.registry import (
     INVARIANT_GENERATOR_EDGES,
     generators_for,
@@ -68,7 +69,10 @@ __all__ = [
     "DriftInvariant",
     "LedgerDriftInvariant",
     "DriftGenerator",
-    # Many-to-many registry (AS.2)
+    # Overdraft family — concrete invariant + generator (AU.1)
+    "OverdraftInvariant",
+    "OverdraftGenerator",
+    # Many-to-many registry (AS.2; AU.1 adds overdraft edge)
     "INVARIANT_GENERATOR_EDGES",
     "invariants_for",
     "generators_for",

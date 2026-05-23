@@ -202,9 +202,18 @@ near the end because of its instance-coupled `from_instance` smart constructor
 - [x] AU.0 - Plan/spike: pilot Overdraft (next-simplest L1) end-to-end through
   the AS framework. Lock the promotion-order for the remaining L1 invariants from
   what the AS drift rollout taught us about each step's cost.
-- [ ] AU.1 - `OverdraftInvariant` + `OverdraftGenerator` promoted to
+- [x] AU.1 - `OverdraftInvariant` + `OverdraftGenerator` promoted to
   `common/spine/`. Register the edges; per-invariant substitution-path property
   test (AR.5 lesson encoded — every promoted detector ships with one).
+  Landed: `src/recon_gen/common/spine/overdraft.py` (mirrors `drift.py`'s shape:
+  `ClassVar[str]` name, frozen dataclass invariant, module-private helpers);
+  registry gains `OverdraftGenerator: (OverdraftInvariant, DriftInvariant)`
+  (the AU.0 empirical edge); `__init__.py` re-exports. `tests/unit/
+  test_spine_overdraft.py` (15 tests) pins detect, scenario_for, the
+  empirical drift edge on leaf accounts, the parent-role variant's no-edge
+  behavior, registry helpers, and the substitution-path property. AS-era
+  `test_generators_for_reverse_lookup` updated for DriftInvariant's now
+  two-generator reverse-lookup.
 - [ ] AU.2 - **Composition test** — scenario combining `DriftGenerator` +
   `OverdraftGenerator` in one `LedgerSimulation`; THREE invariants fire
   (overdraft on the overdraft plant's leaf, drift on BOTH the drift plant's

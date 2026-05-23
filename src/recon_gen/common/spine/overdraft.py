@@ -1,0 +1,252 @@
+"""Overdraft family — concrete `Invariant` + `ViolationGenerator` impls.
+
+`OverdraftInvariant` fires when an internal account's stored balance
+goes negative. The matview is a one-line filter on
+``<prefix>_current_daily_balances`` — no leg arithmetic, no parent
+dependency, no role join. Structurally the simplest L1 invariant after
+drift.
+
+The AU.0 spike (``tests/unit/test_au0_overdraft_full_spine.py``) caught
+a real finding: an overdraft planted on a LEAF internal account ALSO
+trips `DriftInvariant`. Mechanism — drift's matview filter is
+``parent_role IS NOT NULL`` AND ``stored ≠ Σ posted legs``. The
+overdraft plant satisfies both (the leaf has a parent_role; the plant
+emits stored=−magnitude with ZERO transactions, so Σ legs = 0 ≠
+−magnitude). The edge falls out of overlapping base-table predicates
+between two independent matview SELECTs — it's not drift-specific
+exotica.
+
+So AU.1's `INVARIANT_GENERATOR_EDGES` entry for `OverdraftGenerator` is
+``(OverdraftInvariant, DriftInvariant)``: two edges, same shape as
+drift's `(DriftInvariant, LedgerDriftInvariant)`.
+
+What this module deliberately does NOT carry:
+
+- An `rng` field on `OverdraftGenerator`. Overdraft's emission is fully
+  determined by construction params (one balance row, magnitude scalar);
+  no randomization surface. Drift accepts `rng` for structural
+  uniformity across the spine; overdraft has no use for it. AT's anomaly
+  generator will actually use the RNG.
+- A stateful day-by-day fold. Overdraft is a single-row witness; no
+  carried state across days; the `AccountSimulation` AS.3 base class is
+  for invariants with running balance.
+- Cross-account composition (AS.4's `LedgerSimulation`). Overdraft is
+  per-account; AU.2's composition test wires it into a LedgerSimulation
+  alongside DriftGenerator for the spine-scales-past-one-invariant gate.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from typing import ClassVar
+
+from recon_gen.common.l2.loader import load_instance
+from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.spine.violation import Violation
+
+
+@dataclass(frozen=True)
+class OverdraftInvariant:
+    """Non-negative-stored-balance detector. Persona-blind — the matview
+    SQL is `WHERE money < 0` on every internal account, no role join.
+    `scenario_for(role)` filters the L2 by role only; ANY scope=internal
+    account qualifies (no parent_role requirement that drift carries)."""
+
+    # `name` is class-level — matches the production matview suffix.
+    # ClassVar keeps it out of the dataclass field set so the Invariant
+    # Protocol's read-only `name` attribute is satisfied without variance
+    # fuss. Mirrors `DriftInvariant`'s shape.
+    name: ClassVar[str] = "overdraft"
+    #: Prefix of the deployed L2 instance's matviews. Same default +
+    #: per-call override pattern drift uses.
+    prefix: str = "spec_example"
+
+    def detect(self, conn: sqlite3.Connection) -> set[Violation]:
+        rows = conn.execute(
+            f"SELECT account_id, business_day_start, stored_balance "
+            f"FROM {self.prefix}_overdraft",
+        ).fetchall()
+        return {
+            Violation.of(
+                "overdraft",
+                account_id=aid,
+                business_day=_to_date(bds),
+                stored_balance=round(float(sb), 2),
+            )
+            for aid, bds, sb in rows
+        }
+
+    def scenario_for(
+        self,
+        role: str,
+        *,
+        magnitude: float = 5.0,
+        instance: L2Instance | None = None,
+    ) -> "OverdraftGenerator":
+        """Resolve a role against the shape; return a generator that
+        manufactures a stored-balance overdraft on the first internal
+        account with that role.
+
+        `magnitude` is caller-facing ("how far below zero the planted
+        stored is" — positive). `magnitude=0.0` plants stored=0 which is
+        NOT < 0, so overdraft does NOT fire — AP.2's non-violating
+        convention promoted to overdraft.
+
+        Raises `ValueError` if the L2 has no internal account with the
+        requested role. Smart-constructor discipline matching drift's:
+        the invariant owns shape resolution, fails loud at the request
+        site, never silently emits inert rows.
+
+        `instance=None` loads the bundled `spec_example` — production
+        callers (deploy-time, e2e fixtures) thread the real L2.
+        """
+        inst = instance if instance is not None else _spec_example()
+        acct = _find_internal_with_role(inst, role)
+        return OverdraftGenerator(
+            account_id=f"acct-overdraft-{role}",
+            account_role=role,
+            account_parent_role=(
+                str(getattr(acct, "parent_role"))
+                if getattr(acct, "parent_role", None) is not None
+                else None
+            ),
+            anchor_day=date(2030, 1, 1),
+            magnitude=magnitude,
+        )
+
+
+@dataclass
+class OverdraftGenerator:
+    """Emit a daily_balances row whose `money` is below zero by
+    `magnitude`. NO transactions — overdraft's matview reads
+    `current_daily_balances` directly; only the balance row is needed.
+
+    Per the AP.2 convention: `magnitude=0.0` means the perturbation is
+    OFF; the emitted row has money=0, which is NOT < 0, so overdraft
+    does NOT fire. The non-violating shape is the same generator with
+    the knob off.
+
+    AU.0 finding: on a LEAF internal account (account_parent_role !=
+    None), this emission ALSO trips `DriftInvariant` because drift's
+    matview filter `parent_role IS NOT NULL AND stored ≠ Σ legs` is
+    satisfied (no transactions emitted ⇒ Σ legs = 0 ≠ −magnitude). The
+    registry records the two-edge entry.
+    """
+
+    account_id: str
+    account_role: str
+    account_parent_role: str | None
+    anchor_day: date
+    magnitude: float
+
+    @property
+    def intended(self) -> Violation:
+        # `stored_balance` is the actual matview value (negative).
+        # `magnitude` is caller-facing positive; the identity carries the
+        # negative form so it round-trips against `detect()`.
+        return Violation.of(
+            "overdraft",
+            account_id=self.account_id,
+            business_day=self.anchor_day,
+            stored_balance=round(-self.magnitude, 2),
+        )
+
+    @property
+    def also_trips_drift(self) -> Violation | None:
+        """The empirical AU.0 edge: drift fires on the same account/day
+        when the planted account is a LEAF (account_parent_role is set).
+        Returns `None` when the planted account is NOT a leaf (drift's
+        `parent_role IS NOT NULL` filter excludes it).
+
+        Magnitude sign: drift = stored − Σ legs = −magnitude − 0 =
+        −magnitude.
+        """
+        if self.account_parent_role is None:
+            return None
+        return Violation.of(
+            "drift",
+            account_id=self.account_id,
+            business_day=self.anchor_day,
+            drift=round(-self.magnitude, 2),
+        )
+
+    def emit(self, conn: sqlite3.Connection) -> None:
+        start, end = _day_bounds(self.anchor_day)
+        _insert_balance(
+            conn,
+            account_id=self.account_id,
+            account_name=f"Overdraft Acct ({self.account_role})",
+            account_role=self.account_role,
+            account_scope="internal",
+            account_parent_role=self.account_parent_role,
+            business_day_start=start,
+            business_day_end=end,
+            money=-self.magnitude,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Helpers — kept module-private so AU.1 stays the only owner of overdraft's
+# emission shape. AS.2's drift.py follows the same discipline; AU.3 may hoist
+# shared `_insert_balance` / `_day_bounds` / `_to_date` into a base module if
+# duplication becomes painful across the L1 family.
+# ---------------------------------------------------------------------------
+
+
+def _spec_example() -> L2Instance:
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parents[4]
+    return load_instance(repo_root / "tests" / "l2" / "spec_example.yaml")
+
+
+def _find_internal_with_role(instance: L2Instance, role: str) -> object:
+    """Return the first internal account with the requested role.
+    Unlike drift's `_find_leaf_internal_with_role`, this accepts both
+    leaf (parent_role set) and parent (parent_role null) accounts —
+    overdraft fires on ANY internal account that goes negative."""
+    for a in instance.accounts:
+        if (
+            getattr(a, "role", None) == role
+            and getattr(a, "scope", None) == "internal"
+        ):
+            return a
+    raise ValueError(
+        f"shape has no overdraft-eligible internal account with role "
+        f"{role!r}; cannot manufacture an overdraft scenario"
+    )
+
+
+_DB_COLS = (
+    "account_id", "account_name", "account_role", "account_scope",
+    "account_parent_role", "expected_eod_balance", "business_day_start",
+    "business_day_end", "money",
+)
+
+
+def _insert_balance(conn: sqlite3.Connection, **vals: object) -> None:
+    # AS.2's drift.py keeps a local copy of these helpers for module
+    # self-containment; AU.1 follows suit. AU.3 may hoist if needed.
+    placeholders = ", ".join("?" for _ in _DB_COLS)
+    table = f"{_PREFIX}_daily_balances"
+    conn.execute(
+        f"INSERT INTO {table} ({', '.join(_DB_COLS)}) "
+        f"VALUES ({placeholders})",
+        [vals.get(c) for c in _DB_COLS],
+    )
+
+
+_PREFIX = "spec_example"
+
+
+def _day_bounds(day: date) -> tuple[str, str]:
+    start = datetime(day.year, day.month, day.day, 0, 0, 0)
+    return (
+        start.strftime("%Y-%m-%d %H:%M:%S"),
+        (start + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"),
+    )
+
+
+def _to_date(bds: object) -> date:
+    return datetime.strptime(str(bds)[:10], "%Y-%m-%d").date()
