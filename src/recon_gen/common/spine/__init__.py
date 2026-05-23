@@ -37,6 +37,7 @@ from recon_gen.common.spine.account_simulation import (
     DayPlan,
     Perturbation,
 )
+from recon_gen.common.spine.ledger_simulation import LedgerSimulation
 from recon_gen.common.spine.drift import (
     DriftGenerator,
     DriftInvariant,
@@ -75,4 +76,6 @@ __all__ = [
     "DayPlan",
     "Perturbation",
     "DayEmission",
+    # Vector-state composition (AS.4) — many AccountSimulations side by side
+    "LedgerSimulation",
 ]

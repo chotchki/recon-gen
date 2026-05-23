@@ -114,6 +114,15 @@ class AccountSimulation:
     opening_balance: float = 0.0
     prefix: str = "spec_example"
     rng: random.Random = field(default_factory=scenario_rng)
+    #: AS.4 — when False, the fold still computes per-day stored via
+    #: `Σ legs`, but does NOT insert leg rows into `_transactions`.
+    #: Right for parent-style ledger accounts that MIRROR the
+    #: children's cumulative balance without owning direct legs of
+    #: their own. The ledger_drift matview's per-day direct_totals
+    #: then stays zero on this account, so the clean fold's
+    #: `parent.stored = Σ child.stored` agreement gives drift = 0.
+    #: Default True keeps every existing leaf-style use site unchanged.
+    emit_legs: bool = True
 
     # ---- The pure fold (no IO) -------------------------------------------
 
@@ -204,21 +213,22 @@ class AccountSimulation:
     def _emit_day(
         self, conn: sqlite3.Connection, em: DayEmission,
     ) -> None:
-        for tag, amount in em.legs:
-            direction = "Credit" if amount >= 0 else "Debit"
-            _insert_tx(
-                conn, prefix=self.prefix,
-                id=f"tx-{self.account_id}-{tag}",
-                account_id=self.account_id,
-                account_name=f"Sim Acct ({self.account_role})",
-                account_role=self.account_role,
-                account_scope="internal",
-                account_parent_role=self.parent_role,
-                amount_money=amount, amount_direction=direction,
-                status="Posted", posting=_ts(em.day),
-                transfer_id=f"xfer-{self.account_id}-{tag}",
-                rail_name="ach", origin="etl",
-            )
+        if self.emit_legs:
+            for tag, amount in em.legs:
+                direction = "Credit" if amount >= 0 else "Debit"
+                _insert_tx(
+                    conn, prefix=self.prefix,
+                    id=f"tx-{self.account_id}-{tag}",
+                    account_id=self.account_id,
+                    account_name=f"Sim Acct ({self.account_role})",
+                    account_role=self.account_role,
+                    account_scope="internal",
+                    account_parent_role=self.parent_role,
+                    amount_money=amount, amount_direction=direction,
+                    status="Posted", posting=_ts(em.day),
+                    transfer_id=f"xfer-{self.account_id}-{tag}",
+                    rail_name="ach", origin="etl",
+                )
         start, end = _day_bounds(em.day)
         _insert_balance(
             conn, prefix=self.prefix,
