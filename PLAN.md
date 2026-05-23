@@ -308,8 +308,18 @@ is the production rollout for the two L2 classes. AT.0 redecomposes from AS's re
   AT.1 + AT.2 move it to a View knob; (4) single-edge to anomaly empirically
   (Posted leg, no balance row ⇒ no drift JOIN match — same shape as
   stuck_unbundled/limit_breach).
-- [ ] AT.1 - extend the `Invariant` taxonomy with the two L2 kinds (`anomaly`,
+- [x] AT.1 - extend the `Invariant` taxonomy with the two L2 kinds (`anomaly`,
   `money_trail`); detector shims read the existing Investigation matview rows.
+  Landed: `src/recon_gen/common/spine/anomaly.py` (AnomalyInvariant +
+  scenario_for + simple AnomalyGenerator promoted from AT.0 spike;
+  AT.2 will refactor the generator to use AS.3's AccountSimulation
+  stateful-fold base) + `src/recon_gen/common/spine/money_trail.py`
+  (MoneyTrailInvariant detector only; AT.3 lands the recursive
+  parent-linked generator). 12 + 6 unit tests in
+  `tests/unit/test_spine_anomaly.py` + `tests/unit/test_spine_money_trail.py`.
+  L2 invariants NOT added to ALL_L1_INVARIANTS — they'll get
+  ALL_L2_INVARIANTS / ALL_L2_GENERATORS sibling registries when AT.5's
+  L2-side exhaustiveness gate lands.
 - [ ] AT.2 - windowed `ViolationGenerator` in `src/`: baseline-plus-spike (AP.3 finding #2 —
   statistical invariants can't be generated from a single row) folded into the AS.3
   stateful simulator. View owns the σ-threshold (AP.3 finding #3).

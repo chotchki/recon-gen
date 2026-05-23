@@ -64,6 +64,8 @@ from recon_gen.common.spine.stuck_unbundled import (
     StuckUnbundledGenerator,
     StuckUnbundledInvariant,
 )
+from recon_gen.common.spine.anomaly import AnomalyGenerator, AnomalyInvariant
+from recon_gen.common.spine.money_trail import MoneyTrailInvariant
 from recon_gen.common.spine.registry import (
     ALL_L1_GENERATORS,
     ALL_L1_INVARIANTS,
@@ -102,6 +104,12 @@ __all__ = [
     # Limit-Breach family — deepest L2 coupling, from_instance (AU.4)
     "LimitBreachInvariant",
     "LimitBreachGenerator",
+    # Anomaly family — windowed-statistical L2 (AT.1; AT.2 refactors generator)
+    "AnomalyInvariant",
+    "AnomalyGenerator",
+    # Money-trail family — recursive-graph L2; detector only at AT.1
+    # (AT.3 adds the recursive parent-linked generator).
+    "MoneyTrailInvariant",
     # Many-to-many registry (AS.2; AU.1 + AU.3.a/b/c + AU.4 add edges)
     "INVARIANT_GENERATOR_EDGES",
     "ALL_L1_INVARIANTS",
