@@ -31,6 +31,12 @@ What is NOT here:
 
 from __future__ import annotations
 
+from recon_gen.common.spine.account_simulation import (
+    AccountSimulation,
+    DayEmission,
+    DayPlan,
+    Perturbation,
+)
 from recon_gen.common.spine.drift import (
     DriftGenerator,
     DriftInvariant,
@@ -64,4 +70,9 @@ __all__ = [
     "invariants_for",
     "generators_for",
     "iter_edges",
+    # Stateful-fold primitive (AS.3) — scalar-account; AS.4 vector
+    "AccountSimulation",
+    "DayPlan",
+    "Perturbation",
+    "DayEmission",
 ]
