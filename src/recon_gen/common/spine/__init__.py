@@ -51,6 +51,10 @@ from recon_gen.common.spine.expected_eod import (
 )
 from recon_gen.common.spine.generator import ViolationGenerator
 from recon_gen.common.spine.invariant import Invariant
+from recon_gen.common.spine.limit_breach import (
+    LimitBreachGenerator,
+    LimitBreachInvariant,
+)
 from recon_gen.common.spine.overdraft import OverdraftGenerator, OverdraftInvariant
 from recon_gen.common.spine.stuck_pending import (
     StuckPendingGenerator,
@@ -93,7 +97,10 @@ __all__ = [
     # Stuck-Unbundled family — twin of stuck_pending (AU.3.c)
     "StuckUnbundledInvariant",
     "StuckUnbundledGenerator",
-    # Many-to-many registry (AS.2; AU.1 + AU.3.a/b/c add edges)
+    # Limit-Breach family — deepest L2 coupling, from_instance (AU.4)
+    "LimitBreachInvariant",
+    "LimitBreachGenerator",
+    # Many-to-many registry (AS.2; AU.1 + AU.3.a/b/c + AU.4 add edges)
     "INVARIANT_GENERATOR_EDGES",
     "invariants_for",
     "generators_for",

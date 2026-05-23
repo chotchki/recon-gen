@@ -248,10 +248,20 @@ near the end because of its instance-coupled `from_instance` smart constructor
   scenario_for(instance=None) de-facto convention pending the
   spike-before-locking decision on a formal `from_instance` Protocol
   method (deferred to post-AU.4).
-- [ ] AU.4 - Promote `limit_breach` — the instance-coupled case. AP.3 finding #4:
+- [x] AU.4 - Promote `limit_breach` — the instance-coupled case. AP.3 finding #4:
   the `from_instance` smart constructor reads the L2's `LimitSchedule` (no blind
   generator possible). The `(parent_role, rail, direction) → cap` table threads
-  through here.
+  through here. Landed `src/recon_gen/common/spine/limit_breach.py` with the
+  smart constructor reading `LimitSchedule.cap` AS a load-bearing input to
+  the plant amount (cap + overshoot). Both Outbound (Debit, negative money) +
+  Inbound (Credit, positive money) variants exercised. Single-edge registry
+  entry confirmed empirically (Posted leg, no balance row ⇒ no drift JOIN
+  match ⇒ no drift fire — same shape as stuck_unbundled). 16 unit tests
+  in `tests/unit/test_spine_limit_breach.py`. **Protocol-enhancement
+  decision point** (second L2-coupling data point, deferred from AU.3.b):
+  the existing `scenario_for(<selectors>, *, instance=None)` convention
+  SCALED to limit_breach without strain. AT.2 (windowed anomaly) is the
+  next decision gate.
 - [ ] AU.5 - **Dual-axis exhaustiveness gate** (refined by AU.2 finding #4):
   - **Per-generator-class** (original scope): every L1-related `PlantKind`
     value has ≥1 registered `ViolationGenerator`; every L1 `check_type` has

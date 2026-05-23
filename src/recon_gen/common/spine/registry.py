@@ -42,6 +42,10 @@ from recon_gen.common.spine.expected_eod import (
 )
 from recon_gen.common.spine.generator import ViolationGenerator
 from recon_gen.common.spine.invariant import Invariant
+from recon_gen.common.spine.limit_breach import (
+    LimitBreachGenerator,
+    LimitBreachInvariant,
+)
 from recon_gen.common.spine.overdraft import OverdraftGenerator, OverdraftInvariant
 from recon_gen.common.spine.stuck_pending import (
     StuckPendingGenerator,
@@ -85,6 +89,11 @@ INVARIANT_GENERATOR_EDGES: Final[
     # verification in `test_spine_stuck_unbundled.py` resolves whether
     # this is single-edge OR the OverdraftGenerator-style two-edge entry.
     StuckUnbundledGenerator: (StuckUnbundledInvariant,),
+    # AU.4 — single-edge prediction (per AP.3 finding #4's from_instance
+    # framing). Posted transaction with no balance row ⇒ no drift JOIN
+    # match ⇒ no drift fire. Empirical verification in
+    # `test_spine_limit_breach.py`.
+    LimitBreachGenerator: (LimitBreachInvariant,),
 }
 
 
