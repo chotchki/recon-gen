@@ -31,8 +31,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import ClassVar
 
-from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import L2Instance, SingleLegRail, TwoLegRail
+from recon_gen.common.spine._emit_helpers import (
+    find_internal_with_role,
+    insert_tx,
+    load_spec_example,
+)
 from recon_gen.common.spine.violation import Violation
 
 _RailWithUnbundledAge = TwoLegRail | SingleLegRail
@@ -83,21 +87,19 @@ class StuckUnbundledInvariant:
         `max_unbundled_age` (matview excludes those — uncovered scenario
         would silently inert).
         """
-        inst = instance if instance is not None else _spec_example()
+        inst = instance if instance is not None else load_spec_example()
         rail = _find_rail_with_max_unbundled_age(inst, rail_name)
         assert rail.max_unbundled_age is not None  # narrowing for pyright
-        acct = _find_internal_with_role(inst, account_role)
+        acct = find_internal_with_role(
+            inst, account_role, error_kind="stuck_unbundled",
+        )
         return StuckUnbundledGenerator(
             transaction_id=f"tx-stuck-unbundled-{rail_name}",
             transfer_id=f"xfer-stuck-unbundled-{rail_name}",
             rail_name=rail_name,
             account_id=f"acct-stuck-unbundled-{rail_name}",
             account_role=account_role,
-            account_parent_role=(
-                str(getattr(acct, "parent_role"))
-                if getattr(acct, "parent_role", None) is not None
-                else None
-            ),
+            account_parent_role=acct.parent_role,
             max_unbundled_age_seconds=int(
                 rail.max_unbundled_age.total_seconds(),
             ),
@@ -143,7 +145,7 @@ class StuckUnbundledGenerator:
         # bundle_id stays NULL by default (`_TX_COLS` doesn't include it,
         # so the INSERT leaves it NULL — exactly what the matview filter
         # wants).
-        _insert_tx(
+        insert_tx(
             conn,
             id=self.transaction_id,
             account_id=self.account_id,
@@ -162,16 +164,10 @@ class StuckUnbundledGenerator:
 
 
 # ---------------------------------------------------------------------------
-# Helpers — module-private (AU.3.d hoists once the duplication burden across
-# drift / overdraft / expected_eod / stuck_pending / stuck_unbundled is
-# clear enough to refactor with shared semantics).
+# Stuck-unbundled-specific rail finder — per-invariant-shape, no
+# duplication burden. Shared helpers live in
+# `common/spine/_emit_helpers.py` post-AU.3.d.
 # ---------------------------------------------------------------------------
-
-
-def _spec_example() -> L2Instance:
-    from pathlib import Path
-    repo_root = Path(__file__).resolve().parents[4]
-    return load_instance(repo_root / "tests" / "l2" / "spec_example.yaml")
 
 
 def _find_rail_with_max_unbundled_age(
@@ -191,35 +187,3 @@ def _find_rail_with_max_unbundled_age(
         f"shape has no rail named {rail_name!r}; cannot manufacture "
         f"a stuck_unbundled scenario"
     )
-
-
-def _find_internal_with_role(instance: L2Instance, role: str) -> object:
-    for a in instance.accounts:
-        if (
-            getattr(a, "role", None) == role
-            and getattr(a, "scope", None) == "internal"
-        ):
-            return a
-    raise ValueError(
-        f"shape has no internal account with role {role!r}"
-    )
-
-
-_TX_COLS = (
-    "id", "account_id", "account_name", "account_role", "account_scope",
-    "account_parent_role", "amount_money", "amount_direction", "status",
-    "posting", "transfer_id", "transfer_parent_id", "rail_name", "origin",
-)
-
-
-def _insert_tx(conn: sqlite3.Connection, **vals: object) -> None:
-    placeholders = ", ".join("?" for _ in _TX_COLS)
-    table = f"{_PREFIX}_transactions"
-    conn.execute(
-        f"INSERT INTO {table} ({', '.join(_TX_COLS)}) "
-        f"VALUES ({placeholders})",
-        [vals.get(c) for c in _TX_COLS],
-    )
-
-
-_PREFIX = "spec_example"

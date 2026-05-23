@@ -41,8 +41,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import ClassVar
 
-from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import L2Instance, SingleLegRail, TwoLegRail
+from recon_gen.common.spine._emit_helpers import (
+    find_internal_with_role,
+    insert_tx,
+    load_spec_example,
+)
 from recon_gen.common.spine.violation import Violation
 
 # Either rail subtype is acceptable — both carry `max_pending_age`.
@@ -107,23 +111,21 @@ class StuckPendingInvariant:
         scenario against an uncovered rail would silently emit an inert
         row, which we refuse).
         """
-        inst = instance if instance is not None else _spec_example()
+        inst = instance if instance is not None else load_spec_example()
         rail = _find_rail_with_max_pending_age(inst, rail_name)
         # `_find_rail_with_max_pending_age` raises if `max_pending_age`
         # is None — pyright doesn't narrow the union member, so help it.
         assert rail.max_pending_age is not None
-        acct = _find_internal_with_role(inst, account_role)
+        acct = find_internal_with_role(
+            inst, account_role, error_kind="stuck_pending",
+        )
         return StuckPendingGenerator(
             transaction_id=f"tx-stuck-pending-{rail_name}",
             transfer_id=f"xfer-stuck-pending-{rail_name}",
             rail_name=rail_name,
             account_id=f"acct-stuck-pending-{rail_name}",
             account_role=account_role,
-            account_parent_role=(
-                str(getattr(acct, "parent_role"))
-                if getattr(acct, "parent_role", None) is not None
-                else None
-            ),
+            account_parent_role=acct.parent_role,
             max_pending_age_seconds=int(rail.max_pending_age.total_seconds()),
             overshoot_seconds=overshoot_seconds,
             as_of=as_of,
@@ -169,7 +171,7 @@ class StuckPendingGenerator:
         # money>=0 for Credit; arbitrary positive value).
         age_back = self.max_pending_age_seconds + self.overshoot_seconds
         posting_dt = self.as_of - timedelta(seconds=age_back)
-        _insert_tx(
+        insert_tx(
             conn,
             id=self.transaction_id,
             account_id=self.account_id,
@@ -188,16 +190,10 @@ class StuckPendingGenerator:
 
 
 # ---------------------------------------------------------------------------
-# Helpers — module-private (same discipline as drift.py / overdraft.py /
-# expected_eod.py). AU.3.d (queued) hoists once all three AU.3 invariants
-# land and the 4-copy duplication justifies the refactor.
+# Stuck-pending-specific rail finder — per-invariant-shape, no
+# duplication burden. Shared helpers live in
+# `common/spine/_emit_helpers.py` post-AU.3.d.
 # ---------------------------------------------------------------------------
-
-
-def _spec_example() -> L2Instance:
-    from pathlib import Path
-    repo_root = Path(__file__).resolve().parents[4]
-    return load_instance(repo_root / "tests" / "l2" / "spec_example.yaml")
 
 
 def _find_rail_with_max_pending_age(
@@ -205,9 +201,10 @@ def _find_rail_with_max_pending_age(
 ) -> _RailWithPendingAge:
     """Return the L2 rail with the given `name` AND a non-None
     `max_pending_age`. Raises ValueError if either condition fails —
-    the matview excludes rails without `max_pending_age` (`pending_age_
-    cases` → NULL → outer WHERE filters), so a scenario against an
-    uncovered rail would silently inert; we refuse instead.
+    the matview excludes rails without `max_pending_age` (the JOIN to
+    `<prefix>_config.l2_yaml`'s rails iteration filters NULLs out via
+    the outer WHERE), so a scenario against an uncovered rail would
+    silently inert; we refuse instead.
 
     Returns the concrete rail type (TwoLegRail | SingleLegRail) so the
     caller's `.max_pending_age.total_seconds()` typechecks without
@@ -225,35 +222,3 @@ def _find_rail_with_max_pending_age(
         f"shape has no rail named {rail_name!r}; cannot manufacture "
         f"a stuck_pending scenario"
     )
-
-
-def _find_internal_with_role(instance: L2Instance, role: str) -> object:
-    for a in instance.accounts:
-        if (
-            getattr(a, "role", None) == role
-            and getattr(a, "scope", None) == "internal"
-        ):
-            return a
-    raise ValueError(
-        f"shape has no internal account with role {role!r}"
-    )
-
-
-_TX_COLS = (
-    "id", "account_id", "account_name", "account_role", "account_scope",
-    "account_parent_role", "amount_money", "amount_direction", "status",
-    "posting", "transfer_id", "transfer_parent_id", "rail_name", "origin",
-)
-
-
-def _insert_tx(conn: sqlite3.Connection, **vals: object) -> None:
-    placeholders = ", ".join("?" for _ in _TX_COLS)
-    table = f"{_PREFIX}_transactions"
-    conn.execute(
-        f"INSERT INTO {table} ({', '.join(_TX_COLS)}) "
-        f"VALUES ({placeholders})",
-        [vals.get(c) for c in _TX_COLS],
-    )
-
-
-_PREFIX = "spec_example"

@@ -1,0 +1,180 @@
+"""Shared emit-side helpers across the spine's concrete invariant modules.
+
+Hoisted from drift / overdraft / expected_eod / stuck_pending /
+stuck_unbundled / limit_breach at the AU.3.d follow-on (each module
+previously kept its own copy of these helpers; at 6 modules the
+duplication was an obvious smell — promoting before AU.5's
+exhaustiveness gate composes generators across the registry).
+
+Module-private (leading underscore) — concrete invariant modules import
+from here, but the spine's public surface (`common.spine.__init__`)
+doesn't re-export. Callers outside the spine should not depend on
+these helpers; their shape will follow the spine's needs.
+
+What lives here:
+
+- `TX_COLS`, `DB_COLS` — the column tuples for `_transactions` +
+  `_daily_balances` INSERT statements (the subset every generator
+  uses; ignores per-row supersession / metadata / template_name
+  columns that no generator touches).
+- `insert_tx`, `insert_balance` — INSERT-helper functions taking a
+  prefix kwarg (default "spec_example" — the in-process harness
+  shape). Production-deploy callers thread the deployment's prefix.
+- `day_bounds`, `ts`, `to_date` — date/timestamp formatting helpers.
+- `load_spec_example` — the bundled `tests/l2/spec_example.yaml` loader.
+- `find_internal_with_role` — single L2 account finder, with a
+  `must_be_leaf` kwarg covering both drift's "leaf account with parent"
+  case and overdraft/expected_eod's "any internal account" case.
+
+What does NOT live here:
+
+- Per-invariant-shape finders (`find_rail_with_max_pending_age`,
+  `find_limit_schedule`, `find_child_with_parent_role`). These stay
+  in their owning module — single use site, no duplication.
+- The TZ convention helpers (used by stuck_pending /
+  stuck_unbundled / anomaly). They're wall-clock-specific; each
+  caller wraps `datetime.now()` differently. See
+  `[[project-local-tz-convention]]`.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from datetime import date, datetime, timedelta
+from pathlib import Path
+
+from recon_gen.common.l2.loader import load_instance
+from recon_gen.common.l2.primitives import Account, L2Instance
+
+# Default prefix for the in-process test harness shape. Production
+# callers thread their deployment's prefix via the kwarg.
+DEFAULT_PREFIX = "spec_example"
+
+
+TX_COLS = (
+    "id", "account_id", "account_name", "account_role", "account_scope",
+    "account_parent_role", "amount_money", "amount_direction", "status",
+    "posting", "transfer_id", "transfer_parent_id", "rail_name", "origin",
+)
+"""Columns every generator writes to ``_transactions``. Excludes ``entry``
+(supersession; defaults), ``transfer_completion`` (optional), ``template_
+name`` (no generator emits via templates), ``bundle_id`` (NULL by default
+— stuck_unbundled's plant explicitly relies on this), ``supersedes`` +
+``metadata`` (no generator tags today; AV.5 promotes per-row tagging once
+the limits→metadata rename ships)."""
+
+
+DB_COLS = (
+    "account_id", "account_name", "account_role", "account_scope",
+    "account_parent_role", "expected_eod_balance", "business_day_start",
+    "business_day_end", "money",
+)
+"""Columns every generator writes to ``_daily_balances``. Excludes
+``entry`` (supersession), ``limits`` (per-rail caps — no generator emits
+caps; AV.0 renames this to ``metadata``), ``supersedes``."""
+
+
+def insert_tx(
+    conn: sqlite3.Connection,
+    *,
+    prefix: str = DEFAULT_PREFIX,
+    **vals: object,
+) -> None:
+    """Insert one row into ``<prefix>_transactions``. Keyword args
+    correspond to ``TX_COLS``; missing keys default to SQL NULL.
+
+    `prefix` defaults to the in-process spec_example shape. Generators
+    that get prefix-parametric (deploy-time use) will pass it through;
+    AU.3.d kept default to preserve the AS-era call sites byte-stable."""
+    placeholders = ", ".join("?" for _ in TX_COLS)
+    table = f"{prefix}_transactions"
+    conn.execute(
+        f"INSERT INTO {table} ({', '.join(TX_COLS)}) "
+        f"VALUES ({placeholders})",
+        [vals.get(c) for c in TX_COLS],
+    )
+
+
+def insert_balance(
+    conn: sqlite3.Connection,
+    *,
+    prefix: str = DEFAULT_PREFIX,
+    **vals: object,
+) -> None:
+    """Insert one row into ``<prefix>_daily_balances``. Mirrors
+    `insert_tx` for the balance table."""
+    placeholders = ", ".join("?" for _ in DB_COLS)
+    table = f"{prefix}_daily_balances"
+    conn.execute(
+        f"INSERT INTO {table} ({', '.join(DB_COLS)}) "
+        f"VALUES ({placeholders})",
+        [vals.get(c) for c in DB_COLS],
+    )
+
+
+def day_bounds(day: date) -> tuple[str, str]:
+    """``(business_day_start, business_day_end)`` timestamp pair for a
+    given calendar day — midnight-to-midnight UTC-like wall-clock
+    formatting. See `[[project-local-tz-convention]]` — these are
+    NAIVE timestamps interpreted in the DB's own TZ."""
+    start = datetime(day.year, day.month, day.day, 0, 0, 0)
+    return (
+        start.strftime("%Y-%m-%d %H:%M:%S"),
+        (start + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"),
+    )
+
+
+def ts(day: date, hour: int = 12) -> str:
+    """Generator-friendly timestamp formatter — defaults to noon so
+    `business_day_start ≤ posting < business_day_end` always holds
+    for a given anchor day."""
+    return datetime(day.year, day.month, day.day, hour).strftime(
+        "%Y-%m-%d %H:%M:%S",
+    )
+
+
+def to_date(bd: object) -> date:
+    """Parse a matview-output date string back to ``datetime.date``.
+    Tolerates ISO timestamps with trailing time component by truncating
+    to the date prefix."""
+    return datetime.strptime(str(bd)[:10], "%Y-%m-%d").date()
+
+
+def load_spec_example() -> L2Instance:
+    """Load the bundled ``tests/l2/spec_example.yaml`` — the in-process
+    harness shape that the L1 spine generators default to. Production
+    callers thread an explicit `instance` kwarg through scenario_for
+    and skip this helper."""
+    repo_root = Path(__file__).resolve().parents[4]
+    return load_instance(repo_root / "tests" / "l2" / "spec_example.yaml")
+
+
+def find_internal_with_role(
+    instance: L2Instance,
+    role: str,
+    *,
+    must_be_leaf: bool = False,
+    error_kind: str = "scenario",
+) -> Account:
+    """Return the first ``Account`` matching ``role`` with
+    ``scope='internal'``.
+
+    `must_be_leaf=True` additionally requires ``parent_role IS NOT NULL``
+    — drift's smart constructor uses this (drift's matview filters
+    parent_role IS NOT NULL). overdraft / expected_eod /
+    stuck_pending / stuck_unbundled all accept either leaf or parent.
+
+    Raises `ValueError` with a `error_kind`-flavored message so the
+    caller's smart-constructor error text reads naturally
+    ("no overdraft-eligible internal account with role ...", etc.)."""
+    for a in instance.accounts:
+        if a.role != role or a.scope != "internal":
+            continue
+        if must_be_leaf and a.parent_role is None:
+            continue
+        return a
+    leaf_phrase = " leaf" if must_be_leaf else ""
+    raise ValueError(
+        f"shape has no {error_kind}-eligible{leaf_phrase} internal "
+        f"account with role {role!r}; cannot manufacture a scenario"
+    )

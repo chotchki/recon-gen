@@ -36,11 +36,18 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from typing import ClassVar
 
-from recon_gen.common.l2.loader import load_instance
-from recon_gen.common.l2.primitives import L2Instance, LimitDirection, LimitSchedule
+from recon_gen.common.l2.primitives import (
+    Account, L2Instance, LimitDirection, LimitSchedule,
+)
+from recon_gen.common.spine._emit_helpers import (
+    insert_tx,
+    load_spec_example,
+    to_date,
+    ts,
+)
 from recon_gen.common.spine.violation import Violation
 
 
@@ -64,7 +71,7 @@ class LimitBreachInvariant:
             Violation.of(
                 "limit_breach",
                 account_id=str(aid),
-                business_day=_to_date(bd),
+                business_day=to_date(bd),
                 rail_name=str(rn),
                 direction=str(d),
             )
@@ -97,14 +104,17 @@ class LimitBreachInvariant:
           `account_parent_role IS NOT NULL`; without a matching child
           the plant is inert)
         """
-        inst = instance if instance is not None else _spec_example()
+        inst = instance if instance is not None else load_spec_example()
         schedule = _find_limit_schedule(
             inst, parent_role, rail_name, direction,
         )
         child = _find_child_with_parent_role(inst, parent_role)
+        # _find_child_with_parent_role filters on parent_role IS NOT NULL
+        # ⇒ the child is a leaf ⇒ has a role set (validator R-something).
+        assert child.role is not None
         return LimitBreachGenerator(
             account_id=f"acct-limit-breach-{rail_name}-{direction}",
-            account_role=str(getattr(child, "role")),
+            account_role=child.role,
             account_parent_role=parent_role,
             rail_name=rail_name,
             direction=direction,
@@ -153,7 +163,7 @@ class LimitBreachGenerator:
         else:  # Inbound
             amount_direction = "Credit"
             amount_money = amount_magnitude
-        _insert_tx(
+        insert_tx(
             conn,
             id=f"tx-limit-breach-{self.rail_name}-{self.direction}",
             account_id=self.account_id,
@@ -164,7 +174,7 @@ class LimitBreachGenerator:
             amount_money=amount_money,
             amount_direction=amount_direction,
             status="Posted",
-            posting=_ts(self.anchor_day),
+            posting=ts(self.anchor_day),
             transfer_id=f"xfer-limit-breach-{self.rail_name}-{self.direction}",
             rail_name=self.rail_name,
             origin="etl",
@@ -172,15 +182,10 @@ class LimitBreachGenerator:
 
 
 # ---------------------------------------------------------------------------
-# Helpers — module-private (AU.3.d hoists the shared trio across the spine
-# modules once the duplication burden is clear).
+# Limit-breach-specific finders — per-invariant-shape, no duplication
+# burden. Shared helpers live in `common/spine/_emit_helpers.py`
+# post-AU.3.d.
 # ---------------------------------------------------------------------------
-
-
-def _spec_example() -> L2Instance:
-    from pathlib import Path
-    repo_root = Path(__file__).resolve().parents[4]
-    return load_instance(repo_root / "tests" / "l2" / "spec_example.yaml")
 
 
 def _find_limit_schedule(
@@ -208,48 +213,15 @@ def _find_limit_schedule(
     )
 
 
-def _find_child_with_parent_role(instance: L2Instance, parent_role: str) -> object:
+def _find_child_with_parent_role(instance: L2Instance, parent_role: str) -> Account:
     """Return any internal account whose `parent_role` is `parent_role`.
     Raises ValueError if none — the matview filters
     `account_parent_role IS NOT NULL`, and the plant needs to land on a
     real child role from the shape."""
     for a in instance.accounts:
-        if (
-            getattr(a, "scope", None) == "internal"
-            and getattr(a, "parent_role", None) == parent_role
-        ):
+        if a.scope == "internal" and a.parent_role == parent_role:
             return a
     raise ValueError(
         f"no internal child account with parent_role={parent_role!r}; "
         f"cannot manufacture a limit_breach scenario"
     )
-
-
-_TX_COLS = (
-    "id", "account_id", "account_name", "account_role", "account_scope",
-    "account_parent_role", "amount_money", "amount_direction", "status",
-    "posting", "transfer_id", "transfer_parent_id", "rail_name", "origin",
-)
-
-
-def _insert_tx(conn: sqlite3.Connection, **vals: object) -> None:
-    placeholders = ", ".join("?" for _ in _TX_COLS)
-    table = f"{_PREFIX}_transactions"
-    conn.execute(
-        f"INSERT INTO {table} ({', '.join(_TX_COLS)}) "
-        f"VALUES ({placeholders})",
-        [vals.get(c) for c in _TX_COLS],
-    )
-
-
-_PREFIX = "spec_example"
-
-
-def _ts(day: date, hour: int = 12) -> str:
-    return datetime(day.year, day.month, day.day, hour).strftime(
-        "%Y-%m-%d %H:%M:%S",
-    )
-
-
-def _to_date(bd: object) -> date:
-    return datetime.strptime(str(bd)[:10], "%Y-%m-%d").date()

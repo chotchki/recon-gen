@@ -39,11 +39,17 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import ClassVar
 
-from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.spine._emit_helpers import (
+    day_bounds,
+    find_internal_with_role,
+    insert_balance,
+    load_spec_example,
+    to_date,
+)
 from recon_gen.common.spine.violation import Violation
 
 
@@ -72,7 +78,7 @@ class OverdraftInvariant:
             Violation.of(
                 "overdraft",
                 account_id=aid,
-                business_day=_to_date(bds),
+                business_day=to_date(bds),
                 stored_balance=round(float(sb), 2),
             )
             for aid, bds, sb in rows
@@ -102,16 +108,12 @@ class OverdraftInvariant:
         `instance=None` loads the bundled `spec_example` — production
         callers (deploy-time, e2e fixtures) thread the real L2.
         """
-        inst = instance if instance is not None else _spec_example()
-        acct = _find_internal_with_role(inst, role)
+        inst = instance if instance is not None else load_spec_example()
+        acct = find_internal_with_role(inst, role, error_kind="overdraft")
         return OverdraftGenerator(
             account_id=f"acct-overdraft-{role}",
             account_role=role,
-            account_parent_role=(
-                str(getattr(acct, "parent_role"))
-                if getattr(acct, "parent_role", None) is not None
-                else None
-            ),
+            account_parent_role=acct.parent_role,
             anchor_day=date(2030, 1, 1),
             magnitude=magnitude,
         )
@@ -173,8 +175,8 @@ class OverdraftGenerator:
         )
 
     def emit(self, conn: sqlite3.Connection) -> None:
-        start, end = _day_bounds(self.anchor_day)
-        _insert_balance(
+        start, end = day_bounds(self.anchor_day)
+        insert_balance(
             conn,
             account_id=self.account_id,
             account_name=f"Overdraft Acct ({self.account_role})",
@@ -187,66 +189,6 @@ class OverdraftGenerator:
         )
 
 
-# ---------------------------------------------------------------------------
-# Helpers — kept module-private so AU.1 stays the only owner of overdraft's
-# emission shape. AS.2's drift.py follows the same discipline; AU.3 may hoist
-# shared `_insert_balance` / `_day_bounds` / `_to_date` into a base module if
-# duplication becomes painful across the L1 family.
-# ---------------------------------------------------------------------------
-
-
-def _spec_example() -> L2Instance:
-    from pathlib import Path
-    repo_root = Path(__file__).resolve().parents[4]
-    return load_instance(repo_root / "tests" / "l2" / "spec_example.yaml")
-
-
-def _find_internal_with_role(instance: L2Instance, role: str) -> object:
-    """Return the first internal account with the requested role.
-    Unlike drift's `_find_leaf_internal_with_role`, this accepts both
-    leaf (parent_role set) and parent (parent_role null) accounts —
-    overdraft fires on ANY internal account that goes negative."""
-    for a in instance.accounts:
-        if (
-            getattr(a, "role", None) == role
-            and getattr(a, "scope", None) == "internal"
-        ):
-            return a
-    raise ValueError(
-        f"shape has no overdraft-eligible internal account with role "
-        f"{role!r}; cannot manufacture an overdraft scenario"
-    )
-
-
-_DB_COLS = (
-    "account_id", "account_name", "account_role", "account_scope",
-    "account_parent_role", "expected_eod_balance", "business_day_start",
-    "business_day_end", "money",
-)
-
-
-def _insert_balance(conn: sqlite3.Connection, **vals: object) -> None:
-    # AS.2's drift.py keeps a local copy of these helpers for module
-    # self-containment; AU.1 follows suit. AU.3 may hoist if needed.
-    placeholders = ", ".join("?" for _ in _DB_COLS)
-    table = f"{_PREFIX}_daily_balances"
-    conn.execute(
-        f"INSERT INTO {table} ({', '.join(_DB_COLS)}) "
-        f"VALUES ({placeholders})",
-        [vals.get(c) for c in _DB_COLS],
-    )
-
-
-_PREFIX = "spec_example"
-
-
-def _day_bounds(day: date) -> tuple[str, str]:
-    start = datetime(day.year, day.month, day.day, 0, 0, 0)
-    return (
-        start.strftime("%Y-%m-%d %H:%M:%S"),
-        (start + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"),
-    )
-
-
-def _to_date(bds: object) -> date:
-    return datetime.strptime(str(bds)[:10], "%Y-%m-%d").date()
+# Phase AU.3.d (2026-05-23): local helpers hoisted to
+# `common/spine/_emit_helpers.py`. Per-invariant-shape helpers (none for
+# overdraft) would stay here.

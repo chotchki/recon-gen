@@ -511,6 +511,45 @@ Operator can introspect: `SELECT JSON_VALUE(l2_yaml, '$.rails[*].max_pending_age
 
 # Backlog (not yet phased)
 
+- **Studio / Dashboards rethink under the post-AW DB-projected
+  L2/cfg.** Surfaced 2026-05-23 after AW completed. AW lifted L2 + cfg
+  yaml into `<prefix>_config` as DB-resident JSON; matviews now JOIN to
+  it for per-L2 values. That changes a bunch of Studio/Dashboard
+  questions that deserve evaluation as a unit, not piecemeal:
+  - **Studio editing model.** Studio currently writes the L2 yaml file
+    only; deploy regenerates the schema + populates the config table.
+    Options: (a) yaml stays the only source of truth; deploy projects;
+    (b) Studio also UPDATEs `<prefix>_config` on save for "live-reflect"
+    semantics; (c) Studio writes the DB; exports back to yaml on
+    operator request. AW makes (b) + (c) feasible; whether they're
+    desirable is the open question.
+  - **"Deployed-vs-edited" Studio view.** Studio could show the
+    DB-resident `<prefix>_config` row alongside the WIP yaml edit — a
+    "what's deployed vs what you're authoring" diff surface. Useful for
+    "this rail's cap was 5000 in prod; my edit sets it to 7000."
+  - **Dashboard pickers from L2 yaml** (the originally-queued item):
+    pickers that show L2-DECLARED values (vs dataset-derived which
+    shows whatever's in the data); pickers that JOIN to L2 metadata
+    (descriptions, types, classifications); pickers that survive
+    deploys without re-emitting JSON. Caveat: requires changing
+    dashboard JSON's filter shape from `StaticValues` to
+    `LinkToDataSetColumn`.
+  - **Cross-tabular L2 context in dashboards.** Per-rail
+    descriptions / per-account roles surfaced in tooltips, drill
+    contexts, etc. — directly JOIN to `<prefix>_config.l2_yaml` from
+    the dataset SQL rather than baking at emit time.
+  - **Customer ETL access.** Operators / customer pipelines may want
+    SQL access to "the same L2 values the matview uses" — DB-resident
+    is friendlier than parsing yaml.
+  - **Auditability.** `<prefix>_config` could carry timestamps for
+    "when did the config last replace?" — Studio could surface "L2
+    last updated 3 hours ago" as a deploy-state indicator.
+  Scope this as its own evaluation phase (likely audit + spike +
+  decision per surface); each Studio/Dashboard surface gets a "use
+  DB / don't use DB / hybrid" call. Sized after picking a driver
+  goal (analyst-friendliness vs operator ergonomics vs Studio
+  iteration speed).
+
 - **Dashboard pickers sourced from `<prefix>_config.l2_yaml` (post-AW
   follow-on).** Surfaced 2026-05-23 during AW.3. Today's pickers come
   from two places: (1) hardcoded option lists baked into the QS dataset

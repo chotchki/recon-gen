@@ -29,11 +29,19 @@ from __future__ import annotations
 import random
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import ClassVar
 
-from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.spine._emit_helpers import (
+    day_bounds,
+    find_internal_with_role,
+    insert_balance,
+    insert_tx,
+    load_spec_example,
+    to_date,
+    ts,
+)
 from recon_gen.common.spine.rng import scenario_rng
 from recon_gen.common.spine.violation import Violation
 
@@ -63,7 +71,7 @@ class DriftInvariant:
             Violation.of(
                 "drift",
                 account_id=aid,
-                business_day=_to_date(bds),
+                business_day=to_date(bds),
                 drift=round(float(d), 2),
             )
             for aid, bds, d in rows
@@ -83,9 +91,11 @@ class DriftInvariant:
         `instance=None` loads the bundled `spec_example`; AS.x callers
         thread the real instance.
         """
-        inst = instance if instance is not None else _spec_example()
-        child = _find_leaf_internal_with_role(inst, role)
-        parent = _find_internal_with_role(
+        inst = instance if instance is not None else load_spec_example()
+        child = find_internal_with_role(
+            inst, role, must_be_leaf=True, error_kind="drift",
+        )
+        parent = _find_internal_with_role_or_none(
             inst, str(getattr(child, "parent_role")),
         )
         return DriftGenerator(
@@ -126,7 +136,7 @@ class LedgerDriftInvariant:
             Violation.of(
                 "ledger_drift",
                 account_id=aid,
-                business_day=_to_date(bds),
+                business_day=to_date(bds),
                 drift=round(float(d), 2),
             )
             for aid, bds, d in rows
@@ -184,10 +194,10 @@ class DriftGenerator:
         )
 
     def emit(self, conn: sqlite3.Connection) -> None:
-        start, end = _day_bounds(self.anchor_day)
+        start, end = day_bounds(self.anchor_day)
         # Child: clean balance == leg total. Stored is shifted by
         # `magnitude` → drift fires on the child.
-        _insert_balance(
+        insert_balance(
             conn,
             account_id=self.child_account_id,
             account_name=f"Drift Child ({self.child_role})",
@@ -198,7 +208,7 @@ class DriftGenerator:
             business_day_end=end,
             money=self.leg_amount + self.magnitude,
         )
-        _insert_tx(
+        insert_tx(
             conn,
             id=f"tx-drift-{self.child_role}-1",
             account_id=self.child_account_id,
@@ -209,7 +219,7 @@ class DriftGenerator:
             amount_money=self.leg_amount,
             amount_direction="Credit",
             status="Posted",
-            posting=_ts(self.anchor_day),
+            posting=ts(self.anchor_day),
             transfer_id=f"xfer-drift-{self.child_role}-1",
             rail_name="ach",
             origin="etl",
@@ -219,7 +229,7 @@ class DriftGenerator:
         # `magnitude`, the parent's computed (Σ child.money) is off by
         # `magnitude` too → ledger_drift fires on the parent.
         if self.parent_account_id is not None and self.parent_account_role is not None:
-            _insert_balance(
+            insert_balance(
                 conn,
                 account_id=self.parent_account_id,
                 account_name=f"Drift Parent ({self.parent_account_role})",
@@ -233,98 +243,21 @@ class DriftGenerator:
 
 
 # ---------------------------------------------------------------------------
-# Helpers — kept module-private so AS.2 stays the only owner of the drift
-# emission shape. AS.3's stateful-fold base will absorb most of these.
+# Drift-specific finder — kept here because it returns None rather than
+# raising. The shared `find_internal_with_role` raises on "not found";
+# drift needs "find the parent IF it exists, otherwise the parent edge
+# is just inactive" — different semantics.
 # ---------------------------------------------------------------------------
 
 
-def _spec_example() -> L2Instance:
-    from pathlib import Path
-    repo_root = Path(__file__).resolve().parents[4]
-    return load_instance(repo_root / "tests" / "l2" / "spec_example.yaml")
-
-
-def _find_leaf_internal_with_role(instance: L2Instance, role: str) -> object:
-    """Return the first leaf internal account (scope=internal,
-    parent_role IS NOT NULL) with the requested role."""
-    candidates = [
-        a for a in instance.accounts
-        if getattr(a, "role", None) == role
-        and getattr(a, "scope", None) == "internal"
-        and getattr(a, "parent_role", None) is not None
-    ]
-    if not candidates:
-        raise ValueError(
-            f"shape has no drift-eligible leaf internal account with role "
-            f"{role!r}; cannot manufacture a drift scenario"
-        )
-    return candidates[0]
-
-
-def _find_internal_with_role(
+def _find_internal_with_role_or_none(
     instance: L2Instance, role: str,
 ) -> object | None:
     """Return the first internal account with the requested role,
-    irrespective of leaf/parent status. None if no such account."""
+    irrespective of leaf/parent status. None if no such account —
+    drift's parent account is OPTIONAL (the ledger_drift edge is
+    inactive when the shape has no account at the child's parent_role)."""
     for a in instance.accounts:
-        if (
-            getattr(a, "role", None) == role
-            and getattr(a, "scope", None) == "internal"
-        ):
+        if a.role == role and a.scope == "internal":
             return a
     return None
-
-
-_TX_COLS = (
-    "id", "account_id", "account_name", "account_role", "account_scope",
-    "account_parent_role", "amount_money", "amount_direction", "status",
-    "posting", "transfer_id", "transfer_parent_id", "rail_name", "origin",
-)
-_DB_COLS = (
-    "account_id", "account_name", "account_role", "account_scope",
-    "account_parent_role", "expected_eod_balance", "business_day_start",
-    "business_day_end", "money",
-)
-
-
-def _insert_tx(conn: sqlite3.Connection, **vals: object) -> None:
-    # AS.3 hoists this into the shared stateful-fold base. AS.2 keeps a
-    # local copy so the spine module is self-contained on day-1.
-    placeholders = ", ".join("?" for _ in _TX_COLS)
-    table = f"{_PREFIX}_transactions"
-    conn.execute(
-        f"INSERT INTO {table} ({', '.join(_TX_COLS)}) "
-        f"VALUES ({placeholders})",
-        [vals.get(c) for c in _TX_COLS],
-    )
-
-
-def _insert_balance(conn: sqlite3.Connection, **vals: object) -> None:
-    placeholders = ", ".join("?" for _ in _DB_COLS)
-    table = f"{_PREFIX}_daily_balances"
-    conn.execute(
-        f"INSERT INTO {table} ({', '.join(_DB_COLS)}) "
-        f"VALUES ({placeholders})",
-        [vals.get(c) for c in _DB_COLS],
-    )
-
-
-_PREFIX = "spec_example"
-
-
-def _day_bounds(day: date) -> tuple[str, str]:
-    start = datetime(day.year, day.month, day.day, 0, 0, 0)
-    return (
-        start.strftime("%Y-%m-%d %H:%M:%S"),
-        (start + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"),
-    )
-
-
-def _ts(day: date, hour: int = 12) -> str:
-    return datetime(day.year, day.month, day.day, hour).strftime(
-        "%Y-%m-%d %H:%M:%S",
-    )
-
-
-def _to_date(bds: object) -> date:
-    return datetime.strptime(str(bds)[:10], "%Y-%m-%d").date()
