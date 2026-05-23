@@ -141,13 +141,21 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
 
 The destination: invariant as single source of truth, with generators + views referencing it. Biggest lift; AS.0 re-plans the decomposition from the spike findings first (the layer most likely to redecompose).
 
+**Learnings carried in from AQ/AR (info; AS.0 absorbs into the rollout plan, not pre-baked into leaves):**
+- *Many-to-many invariant↔generator wiring is real.* AP.3 finding: a `drift` plant trips both `drift` AND `ledger_drift` detectors; `xor_variant_missed_firing` + `xor_variant_overlap` plants both trip the single `xor_group_violation` detector. The taxonomy unification (AS.2) needs an explicit relation, not a direct rename.
+- *Substitution-path divergence is a deploy-time hazard.* AR.5's bite: "one value emitted everywhere" wasn't enough — QS bridge substitutes typed values, api/smoke substitutes string literals; PG can't accept both shapes with one SQL function. For every promoted Invariant whose `detect()` crosses SQL-pushdown surfaces, expect to add an api-layer smoke test covering BOTH substitution shapes (typed value vs string literal).
+- *Four window kinds, not three.* The audit named three (invariant-derived / data-deadline / subjective-view); AR.4 surfaced a fourth: **no-narrowing** (L2FT's static "show all" sentinels). The taxonomy work should account for it.
+- *Type-the-binding-then-funnel works.* AQ's pattern (`LOCKED_ANCHOR` constant + `locked()`/`live()` factories + funneled call sites; suppressions disappear as a side-effect) is the template for AS.1's promotion.
+- *In-process SQLite harness is load-bearing.* AP.3's pattern (`emit_schema` + `_register_sqlite_aggregates` + real matview SQL, no DB server) made AR's design confidence cheap. Every promoted Invariant should self-validate this way before its production wiring.
+- *Honest limits become the actual blocker.* AR.5's "honest limit" (substitution paths) was the live regression. AP.2's honest limit is **cross-account vector state** — AS.4 is therefore the highest-exposure leaf in this phase.
+
 - [ ] AS.0 - Plan/spike the spine rollout decomposition (lock the `src/` home + the taxonomy migration order before building)
 - [ ] AS.1 - promote `Violation` / `Invariant` / `ViolationGenerator` / `View` types to `src/`
 - [ ] AS.2 - unify the fractured taxonomy: `PlantKind` (20) ⋈ `check_type` (~10 untyped) → one closed `Violation` taxonomy; total `invariant→{generators,views}` maps, exhaustiveness-checked (data/deadline windows stay invariant-owned)
 - [ ] AS.3 - generator = stateful fold carrying `(balances, active-violation-set)`; `Invariant.scenario_for(shape, selector)`; non-violating = perturbation off
 - [ ] AS.4 - cross-account VECTOR state (AP.2's honest limit): legs net to zero across accounts; `ledger_drift` parent rollup; cross-boundary propagation
 - [ ] AS.5 - retire byte-locked seed SQL → semantic self-validation (`detect(gen) ⊇ intended`) replaces byte-identity
-- [ ] AS.6 - 4-way agreement + `TestScenarioCoverage` become the runtime linkage assertion over the spine
+- [ ] AS.6 - **MANDATORY GATE** — 4-way agreement + `TestScenarioCoverage` become the runtime linkage assertion over the spine. The bridge between in-process semantic correctness and live-rendered correctness; AR.5 proved this layer is where deploy-time divergence surfaces, so this is non-skippable, not polish.
 - [ ] AS.7 - training/docs scenarios self-validated (can't lie / can't silently fail to demonstrate)
 
 # Backlog (not yet phased)
