@@ -1,412 +1,83 @@
 # QuickSight Generator — Active Plan
 
-**Where we are.** **Phase X.2 — the self-hosted dashboard renderer (now named "Dashboards", was "App 2") — is complete** (shipped v9.0.0 → v9.3.0; full plan archived in `PLAN_ARCHIVE.md`). The four apps render two ways off one L2 instance: AWS QuickSight (`json apply`) and Dashboards (HTMX/d3 page server, offline-capable, all three SQL dialects), with a 4-way cross-tool agreement test gating the release. **Phase X.3 — SQLite as a database dialect — is complete** (a–d landed 2026-05-08; X.3.g added the `e2e-sqlite` CI cell on top of the existing Layer-1 + Audit-PDF SQLite unit suites). Active work is **X.4 — Studio**: implementation tools for the integrator / trainer / ETL engineer, designed in [`SPEC_studio.md`](SPEC_studio.md) on `x-4-5-spec-studio` (the original X.4 + X.5 folded into one phase — Studio is the YAML editor + unified diagram + data-shaping orchestrator + ETL coverage, all reached via `quicksight-gen studio`). Then **X.6** (model-driven docs — partly superseded by Studio's interactive surface; what survives is auto-reference + a positioning sweep) and **Phase Q (continued)** (CLI/YAML ergonomics). Sub-task detail for shipped phases lives in `PLAN_ARCHIVE.md`; per-release narratives in `RELEASE_NOTES.md`. This file tracks **forward-looking** work only.
-
-## Greater Plan
-X.2 - add the non quicksight renderer
-  - Solves testing limitations
-X.3 - add sqlite as a database dialect
-  - Does not support materialized views but shouldn’t matter due to the local nature of the db
-X.4 - Studio: implementation tools (yaml editor + unified diagram + data-shaping orchestrator + ETL coverage). Folds in the original X.5 (etl helper). See SPEC_studio.md.
-X.6 - Stop the documentation lying.
-
-- [ ] Make the core domain model the source of the documentation site just as the yaml for the shape today. No duplication, use it to build the doc from the models.
-X.7 Cloud cost optimization
-
----
-
-## Phase AP — date/range → invariant spine *(ACTIVE FOCUS, spike-first)*
-
-Source + full reasoning: `docs/audits/date_range_model_audit.md` (grew out of AO.10/AO.11).
-
-**The destination.** Define, in code/types, three linked layers — **invariants**
-(the rules/detectors), **failures** (planted violations of an invariant), **views**
-(how to surface an invariant's violations over `as_of`±span) — with the
-**invariant as the single source of truth** the other two *reference*. This
-collapses the two pipelines that keep colliding (app: `constraints+shape →
-queries → visuals`; generator: `seed+time+shape → data`) into one declaration.
-Today the spine is fractured: `as_of` is improvised from `now()` on the app side
-and a seed anchor on the generator side; the violation taxonomy is split across
-`PlantKind` (20 typed) vs `check_type` (~10 untyped SQL strings, not even 1:1);
-views live tangled in QS params + pickers. Every recurring date bug is a symptom.
-
-**Expressiveness (settled):** Python + pyright-strict is enough — it *wires and
-witnesses* (closed taxonomy, total `invariant→{failures,views}` maps via
-exhaustiveness, smart-constructor "validated at boundary" types), it does NOT
-*prove* invariants. "Does data satisfy invariant X" is runtime, as it must be short
-of a dependent-type language. Not the wall.
-
-**Approach: spike-first per layer.** The destination is clearer than the path;
-evolving the current matview-SQL + string-taxonomy + tree-wired-views into the
-spine is a research problem. Each layer gets a spike on ONE surface → decide →
-roll out; rollouts are NOT pre-specified (a spike may reorder/redecompose
-everything after it).
-
-**Prioritization (user call 2026-05-22):** PARK the release and *everything above
-unit tests* until we're through the spikes. No D2 interim fix, no chasing the e2e
-cluster, no db/deploy/e2e runs, no re-cut — those surfaces will be rewritten by
-this work; fixing them now is a side quest. Stay unit-only; work toward the
-destination. (AO.10 Oracle + AO.S2.a trainer-pin are already done + committed on
-`ao-oracle-release-fix` and stay; the rest of AO + AN/AM/AI etc. wait.)
-
----
-
-## Phase history (one-line per shipped phase)
-
-- **Phase N** (v6.1.0) — Investigation + Executives ported onto L1/L2 tree primitives; theme moved to L2 YAML attribute; preset registry dropped. Full detail: `PLAN_ARCHIVE.md`.
-- **Phase O** (v6.2.0) — Unified docs render pipeline with mkdocs-macros + `HandbookVocabulary`; per-app handbooks render against any L2 instance.
-- **Phase P** (v7.x cumulative) — Dialect-aware schema + dataset emission; Postgres + Oracle CI matrix; Phase R seed pipeline foundations.
-- **Phase Q.1** — Dashboard polish: USD currency formatting via `Measure(currency=True)`, universal date-filter sweep, Oracle case-fold wrapper for `ORA-00904`.
-- **Phase Q.2** — Doc IA cleanup; Shape C audience-first home; persona-leak sweep across handbook + walkthroughs.
-- **Phase Q.4** (v7.3.0) — Persona-neutral docs release; new `persona:` block on L2 YAML; CI gate for persona-token leakage.
-- **Phase Q.5** — Persona-neutral docs full L2-driven substitution; Investigation walkthroughs split into mechanics + worked-example admonitions.
-- **Phase Q.3.a** (v8.0.0) — CLI redesign: four artifact groups (`schema | data | json | docs`); each `apply`/`clean` defaults to emit, `--execute` opts in to side effects; `cli_legacy.py` deleted; bundled JSON emit (no per-app filter).
-- **Phase R** (v7.2.0) — 90-day per-Rail healthy baseline + embedded plant overlays (densify×5, broken×15, inv-fanout×5); Volume Anomalies signal real on the seed; lognormal amount distribution.
-- **Phase S** — Research: drop the system `dot` binary. Spiked Mermaid+ELK (failed eyeball — self-loops floated, layout fidelity poor) and graphviz WASM via `@hpcc-js/wasm-graphviz` (passed — byte-identical to graphviz/dot). Verdict written into RELEASE_NOTES + git log; Phase T executed the migration.
-- **Phase T** (v8.1.0) — Every diagram now renders client-side via `@hpcc-js/wasm-graphviz`. `render_*` helpers return DOT strings; `<template class="qs-graphviz-source">` blocks inside `<figure>` wrappers; ~50-line JS shim does the WASM render. 5 `apt-get install graphviz` lines deleted across CI / Release / Pages workflows.
-- **Phase U** (v8.2.0) — Audit Reconciliation Report. Fifth artifact group (`audit`) ships `apply` / `clean` / `verify` / `test` verbs that emit a regulator-ready PDF (cover + exec summary + per-invariant violation tables + per-account Daily Statement walks + sign-off + provenance appendix) bound by a four-input SHA256 fingerprint (`tx hwm + bal hwm + l2 yaml + code identity`); optional pyHanko auto-sign. Release-gate U.8.b's three-way contract (`expected == PDF == dashboard`) verified live across **6 invariants × 2 dialects = 12/12 PASS**. Closed the L1 dashboard's stuck/supersession `[today-7, today]` date scope that hid current-state matview rows from the dashboard's view.
-- **Phase V** (v8.3.0) — Cleanup + tooling: `config.yaml` ↔ L2 institution YAML strict split (env-only allowlist on `load_config`, hand-built `Config(...)` literals collapsed to `make_test_config(**overrides)`); `docs apply --portable` (offline static-site builds with inlined wasm-graphviz + no fetched fonts — ship-on-USB-stick workflow); App Info sheet enhancements (`__version__` deploy stamp, per-matview `latest_date` + base-table comparison rows, ETL stale-matview troubleshooting page); R.6.e baseline tune-up (limit_breach noise drop on customer outbound; intermediate-clearing overdraft credit cascades on aggregating-rail / TT-leg / MerchantPayout / ZBA patterns); reference-nav regroup (App handbooks / Data contract / Operations); pip → uv migration with `uv.lock` committed.
-- **Phase W** (v8.6.0) — Browser e2e in GitHub Actions. Three e2e jobs (`e2e-pg-api` push:main, `e2e-pg-browser` nightly cron, `e2e-oracle-api` push:main) against operator-owned Aurora/Oracle via OIDC role assumption + dedicated `ci-bot` QS user; per-run resource isolation via `qs-ci-${run_id}-{pg|oracle}` prefix; workflow-level always-cleanup (`cleanup-pg` / `cleanup-oracle`); `e2e-against-testpypi` release-pipeline gate holds prod publish on a live AWS run against the just-published TestPyPI wheel; per-job `pg_stat_statements` / `v$sqlstats` top-queries dump as a markdown artifact; unified Hynek-pattern coverage report posted to GHA Step Summary + republished to the `badges` branch (no Codecov); `docs-portable-install` CI regression guard. Docs now ship inside the wheel so `quicksight-gen docs apply` works from a plain PyPI install.
-- **v8.3.x → v8.6.x cumulative** — Post-Phase-V/W bug sweeps + small features (no phase number — graduated as a sustained release stream): independent-system bug sweep + per-prefix cleanup isolation (v8.4.0); plain-English column headers + BarChart axis labels (v8.5.0 / v8.5.5 / v8.6.1); cross-sheet drill date widening (v8.5.7); L2FT metadata cascade write-back (v8.6.5); Oracle 19c JSON_VALUE functional-index skip (v8.6.6); L2FT Transfer Templates SingleLegRail plants + dropdown perf indexes (v8.6.7 / v8.6.8); rich-text card padding 12px (v8.6.9); L2 theme CSS injection on docs site + relative logo/favicon paths (v8.6.10); `tagging_enabled` config override for IAM-restricted environments (v8.6.11); coverage uplift to ~82% via 33 new unit tests (v8.6.12); `json clean --all` purge mode for full-deploy teardown (v8.6.13).
-- **Phase Y** (v8.8.0aN cumulative → v9.0.0 → v9.0.1) — SQL-level parameter pushdown: the QuickSight + self-hosted (App 2) renderers converged on one filter mechanism — `<<$paramName>>` / `{date_filter}` placeholders in the dataset CustomSql, substituted per-renderer (QS via `MappedDataSetParameters`; App 2 via `:param_<name>` binds). Analysis-level `FilterGroup`s deprecated for filter intent; calc fields that existed only to be filtered pushed down to real dataset columns. Date-pushdown perf: −15.3% rows on the wire / −8.5% query time overall, `l1-transactions` −92%. Built `./run_tests.sh` — the layered chain runner (`unit → db → app2 → deploy → api → browser`, variant matrix) CI now wraps (Y.2.gate). e2e clean on PG + SQLite + Oracle. Customer-facing artifacts (CLI / config.yaml / L2 YAML) unchanged — the major bump is the internal filter-architecture clean break. Full detail: `PLAN_ARCHIVE.md` `# PLAN — Phase Y` + `# PLAN — Y.2.gate`.
-- **Phase X.2** (v9.0.2 → v9.0.3 → v9.1.0 → v9.2.0 → v9.3.0 cumulative) — App 2: the four apps render two ways off one L2 instance — AWS QuickSight (the stable `json apply` path) and a self-hosted HTMX/d3 page server (`quicksight-gen serve app2 apply`) reading the same DB directly (no AWS account; all three SQL dialects; offline-capable — browser-side assets vendored in the wheel; `/docs` handbook embedded). Built on Phase Y's shared dataset SQL; a 4-way cross-tool agreement test (`scenario plants ⊆ direct matview SELECT == QuickSight == App 2`, `== audit PDF` where it applies) gates the release. Dialect-aware `DashboardDriver` e2e protocol with parametrized `[qs, app2]` bodies; L2-theme-driven Tailwind + Tom Select / Flatpickr / noUiSlider widgets; vendored offline asset bundle; row-level table drills + cross-sheet URL-param threading; `biome check` folded into the pytest sessionstart gate. No customer-facing change (the `serve` group is a dev/iteration surface, not the stable CLI). Full detail: `PLAN_ARCHIVE.md` `# PLAN — Phase X.2`.
-
-- **Phase AA** (v10.1.0a1 → v11.0.2 cumulative, closed 2026-05-19) — Dashboard UX + exception literacy pass driven by X.4 trainer feedback. No yaml grammar touched. Headline: all 31 multi-select dropdowns flipped to SINGLE_SELECT (drill-to-one — collapses the 32-cap sentinel-guard pattern of X.2.t.2); Daily Statement gains Role cascade + balance-row-only Account filter; Exception literacy panels parsed from `L1_Invariants.md` land on every L1 invariant sheet + Studio trainer pane; Account dropdowns search by `name (id)` concat across L1; deep browser-capture infra hardened (`webkit_page` fixture-path capture, MUI Autocomplete lazy-render handling, QS embed lifecycle lifted into one shared primitive, `ws_frames.txt` + `sql_trace.txt` artifacts); generic additive/inverse picker tests across 7 L1 + 3 L2FT sheets via dataset-builder-driven anchor query. Triage chain closed AA.A.race (App2 cache-vs-network), AA.A.l2ft-rails-inverse (DOM-visible-rows vs SQL-count), AA.A.qs-triage (12 QS failures across Shape A date-collapse + Shape B parameter-bridge), AA.A.daterange Shape A 1-line fix. 7 items deferred (cross-corpus duplication lint, tree-walk picker→column derivation, structural DATE_RANGE refactor + .4/.5 followons, `table_rows()` typed-invariant) — rehomed to the in-PLAN "Backlog (rehomed from AA)" subsection. Full detail: `PLAN_ARCHIVE.md` `# PLAN — Phase AA`.
-
-- **Phase AE** (v11.6.6, 2026-05-19) — Mac mini self-hosted Cloudflare-routed public demo. Two SQLite instances (spec_example + sasquatch_pr) running under sandbox-exec'd LaunchDaemons as a hidden `recon-demo` user; cloudflared tunnel routes `recon-gen-spec.hotchkiss.io` (dashboards) + `recon-gen-sasquatch.hotchkiss.io` (studio --demo-mode lockdown). Nightly 03:00 PT refresh atomically swaps `next.sqlite3 → current.sqlite3`; GitHub Actions self-hosted runner picks up `release: published` for immediate redeploy. Demo kit upstream: `deploy/sandbox/`, `deploy/launchd/`, `deploy/cloudflared/`, `scripts/provision_demo_instance.sh`, `.github/workflows/demo-publish.yml`, `docs/operations/mac-mini-demo-host.md`. Surfaced 6 macOS 26 Tahoe gotchas captured in the runbook header (LaunchDaemons vs Agents for hidden users, network-bind ≠ network-inbound, sandbox-exec bootstrap baseline, `PYTHONDONTWRITEBYTECODE=1`, Cloudflare Universal SSL single-level coverage, sudo `-H` HOME propagation). Full detail: `PLAN_ARCHIVE.md`.
-
-- **Phase AF** (2026-05-19, unreleased — ships in the post-AE gap-fix wave alongside AG) — SPEC Enhancement 8: `firings_typical_per_period` soft per-period firing-COUNT bound on Rail + TransferTemplate (complement to AB.5's per-firing `amount_typical_range`; count × amount = realistic per-period aggregate). Generic `{period, range}` shape with compact `[min, max]` defaulting to `business_day`; period vocab `business_day | pay_period | week | month`. Generator `_pick_firings_count` samples uniform per period × periods-in-window, falls back to the per-kind heuristic without consuming RNG (pre-AF locked seeds byte-identical). Validator W1a-c (min≤max, both≥0, aggregating-rail exclusion). Full stack: primitives + loader/serializer/validator + seed + fuzz (~30% of non-aggregating rails) + studio editor (composite text field on Rail + Template cards) + docs (rail.md + walkthrough + Schema_v6 + SPEC marker). Generator-only first cut; `volume_anomaly` runtime matview deferred (AF.x.runtime). spec_example re-locked; sasquatch baseline-leg band raised 100k→150k for the gap-doc-faithful counts. Caught + flagged: gap-doc table's `CustomerFeeMonthlySettlement [80,120]/month` is invalid (aggregating rail → W1c) — cadence already governs it.
-- **Phase AG** (2026-05-19, unreleased — post-AE gap-fix wave alongside AF) — Generator implementation gaps surfaced by integrator phase-2 testing (`SPEC_gap_feedback.md`). **AG.1 (Gap B):** `transfer_parent_id` was NULL on Template-parent chain firings — new `_emit_baseline_template_firings` synthesizes per-business-day firings for chain-parent templates so `_emit_baseline_chains` threads the parent ref; spec_example gained a Template-parent + Template-child chain for 4-cell regression coverage; re-locked. **AG.2 (Gap C):** baseline multi-children chains rolled a 50% completion → false-positive `multi_xor_violation` rows; new `_baseline_xor_child_pick` enforces exactly-one-per-firing (singleton chains keep 5% orphan noise); re-locked. **AG.3 (Gap A):** the 3 chain-parent pickers + 4 plant emitters now accept Template parents (was Rail-only), unblocking 7 plant kinds for template-heavy L2s; additive (fixtures prefer Rail parents so no re-lock). **AG.4 (Gap D, scoped minimal):** AF made the classifier-vocabulary breadth backstop-only, so only the real bug shipped — a `PAYROLL_BATCH` kind + inbound-overmatch guard (payroll/batch rails stop getting per-customer scaling); vocabulary expansion deferred to Backlog. **AG.5 (Gap E):** `trainer.plants_per_node` per-node badges now cover all 10 AB.1-AB.6 plant kinds (`PlantKind` → authoritative Literal); the timeline left as the toggle-scoped view by design (gap doc misread). **AG.6 (Gap F):** docs-only note that the picker is one-rail-per-kind by design, not a coverage tool.
-- **Phase AH** (2026-05-20, unreleased — post-AE polish + bug sweep) — **AH.1:** CI coverage aggregator was empty — added `include-hidden-files: true` to the 6 coverage upload-artifact steps (`.coverage.*` are dotfiles GHA silently drops). **AH.2:** App2 rich-text broke on the public demo — `_qs_richtext_to_html` now mirrors the full QS text-box vocabulary (confirmed by round-tripping a hand-authored box): `<b>/<i>/<s>/<u>`, `<inline background-color/font-family>`, `<block align>`, `<expression>`, flat `ql-indent-N` bullet nesting; a lone `\n` is a CommonMark soft break (→ space, not `<br/>`); bullets rendered markerless because Tailwind Preflight resets `list-style`, restored via list + per-nesting-level left-margin utilities — full Tailwind, no special CSS, guarded by a LOCAL pytest-sessionstart `output.css` drift gate (skips in CI; see AH.7). **AH.3:** README's "See it live" leads with the two live demo links (spec dashboards + sasquatch studio). **AH.4:** Studio `--demo-mode` chrome — read-only banner + suppressed Deploy / "+ Add" / card Edit-Delete affordances (the route-level lockdown stays the load-bearing safety). **AH.5:** docs build chain cleanup — persona leaks generalized (SPEC + quirks prose + CLI `--l2` help) and the 7 customization-walkthrough fixture citations allowlisted; 5 dead anchors fixed with stable `{: #slug}` anchors (the `{#…}` form collides with Jinja `{# #}` comments in mkdocs-macros); both docs gates un-xfailed. **AH.6:** demo-host refresh restart was a LaunchAgent-era `launchctl kickstart gui/<uid>` (exit 125 against the migrated system-domain daemons) → SIGTERM + KeepAlive respawn, since the non-admin `recon-demo` user can't manage system services (host-verified). **AH.7:** pinned `TAILWINDCSS_VERSION` — the AH.2 drift gate's byte-compare failed CI on local-v4.2.4-vs-CI-latest-v4.3.0; `_build` now pins the version so `output.css` is reproducible. **AH.8 flagged:** a pre-existing `test_docs_theme` xdist isolation flake (local runner only; CI runs the test job sequentially, unaffected).
-- **Phase AC** (v11.0.0, 2026-05-17) — Renamed package + CLI + repo `quicksight-gen` → `recon-gen` (trademark + scope clarity). Clean cut with a `quicksight-gen` PyPI meta-package shim (1–2 month grace, calendar-anchored). `RECON_GEN_*` / `RECON_E2E_*` env-var prefix flipped with `QS_*` legacy-name fallback honored on read. Resource tag `ManagedBy: recon-gen` (no dual-scan back-compat — zero live tagged resources at cut time). AWS QuickSight references in code (API shapes, error messages, `QS` abbreviations) preserved as factual product references. GitHub repo renamed via auto-redirect; OIDC trust-policy `sub` claim updated in lockstep. Full detail: `PLAN_ARCHIVE.md` `# PLAN — Phase AC`.
-
-- **Phase Z** (next release — branch `phase-z-b`) — L2 grammar cleanup: chain collapse + transfer_type subsumption + cfg deployment-namespace collapse. Z.A: `Chain(parent, children: tuple[Identifier, ...])` — singleton ⇒ required, multi ⇒ XOR (drops `ChainEntry`'s `required` / `xor_group` flags + 3 validators C2/C4/C4.1). Z.B: drop `Rail.transfer_type` + `TransferTemplate.transfer_type` + `<prefix>_transactions.transfer_type` column; rename `LimitSchedule.transfer_type` → `LimitSchedule.rail` (closes pending task #498). Z.C: collapse `cfg.resource_prefix` + `cfg.l2_instance_prefix` + `l2.instance` into two cfg fields `cfg.deployment_name` (QS resource ID prefix, required) + `cfg.db_table_prefix` (DB-table prefix, required); cleanup tag pair `ResourcePrefix` + `L2Instance` collapses to single `Deployment`; L2 yaml's `instance:` field dropped entirely (loader hard-rejects with actionable migration error). End-of-phase verify: 11/11 deterministic db-matrix cells green across sp/sq × pg/or/sl × lo + sp/sq × pg/or × aw; 3 fuzz cells failed on a known fuzz-shape instability (todays_exceptions matview empty for seed 3313442831 — tracked as a fuzz-contract follow-up, not a Z regression). Full detail: `PLAN_ARCHIVE.md` `# PLAN — Phase Z`.
-
-_Phase S / T / U / V / W / Y / X.2 / Z / AA / AC sub-task detail in `PLAN_ARCHIVE.md`. RELEASE_NOTES `v8.{1,2,3,4,5,6,8}.x` / `v9.x` / `v10.1.0a1` / `v11.0.0`-`v11.0.2` carry the per-phase + per-release narratives._
-
----
-
-## Phase X — e2e testing expansion + cloud CI cost optimization
-
-### Parallelism map *(historical: covered fan-out for X.2/X.3 — both shipped; archived in `PLAN_ARCHIVE.md`. X.4's parallel-vs-sequential shape lives in its own "Shape of the work" subsection below.)*
-
-### X.1 — e2e fixes + auto-screenshot foundation *(COMPLETE — shipped pre-X.2; full plan archived in `PLAN_ARCHIVE.md` → "Phase X.1")*
-
-E2e harness fixes + auto-failure-screenshot + L2FT cascade root-cause + dropdown migration + theme-404 fix + open-set Status + Chain validator + ETL-examples module + CLI-cross-reference checker + unified seed-hash lock surface + Sasquatch L1 'flake' (table virtualization) diagnosis + Layer-1 query helpers. Conditional X.1.e (pre-warm Rails) was overcome by X.1.b's actual root-cause fix and dropped.
-
-### X.2 — App 2: self-hosted dashboard renderer *(COMPLETE — shipped v9.0.0 → v9.3.0; full plan archived in `PLAN_ARCHIVE.md` → "Phase X.2")*
-
-The four bundled apps now render two ways off one L2 instance: **AWS QuickSight** (the stable `json apply --execute` path) and **App 2** — a self-hosted HTMX + d3 page server (`quicksight-gen serve app2 apply`) that reads the same database directly, no AWS account, all three SQL dialects, offline-capable (browser-side assets vendored in the wheel; `/docs` handbook embedded). The two renderers share the dataset SQL (parameter pushdown — Phase Y converged them), and a 4-way cross-tool agreement test (`scenario plants ⊆ direct matview SELECT == QuickSight == App 2`, `== audit PDF` where it applies) gates the release — so App 2 is "QuickSight parity, minus the QuickSight bugs", enforced not just claimed. App 2 is the offline-iteration loop and the renderer X.4 (YAML editor) and X.5 (ETL helper) build on.
-
-Shipped per sub-phase: **v9.0.0** (Phase Y filter convergence) → **v9.0.2** (X.2.t dataset-param cap + X.2.s.1 + u.3.fix.demo) → **v9.0.3** (X.2.p offline assets + X.2.s.2 docs theme) → **v9.1.0** (X.2.g.5 serve-all-apps + X.2.i `/docs` embed + browser-e2e-on-push) → **v9.2.0** (X.2.j 4-way agreement + the `app2_date_filter` day-inclusivity fix) → **v9.3.0** (X.2.u.4.e App2 row-level drills + cross-sheet URL-param threading + the `[qs, app2]` parity test; the X.2.l/X.2.p close-outs incl. `docs/reference/self-host.md`; the `biome check` pytest-sessionstart lint gate). Sub-tasks all done: X.2.a–p (spike → arch cleanup → all-GET REST surface → d3 renderers → filter primitives → sheet structure + cross-sheet/cross-app nav → real data fetcher → all 4 apps → Layer-2 e2e → `/docs` embed → 4-way agreement → themed error pages → offline asset bundle), X.2.q/u (dialect-aware `DashboardDriver`, parametrized `[qs, app2]` parity), X.2.l (L2-theme-driven Tailwind + fancy filter widgets), X.2.r (event-driven settle, drop the sleep-waits), X.2.s/t (docs-CLI bugs, dataset-param sentinel), X.2.k (incremental releases + README App-2 section). Open follow-ons that survived close-out are X.6 scope (README "positioning sweep" beyond the App-2 section; the X.6.j self-host guide expansion) or backlog ("Demo seed quality" below — the densified-baseline reconciling-ledger + plant pair-window spikes; the `test_l2ft_rails_dropdowns` `require_all_advertised` coverage gap; the `test_inv_drilldown` anchor-determinism re-light).
-
-### X.3 — SQLite as a database dialect (integrator-local persona) *(COMPLETE — shipped 2026-05-08 → 2026-05-12; full plan archived in `PLAN_ARCHIVE.md` → "Phase X.3")*
-
-Third supported dialect alongside Postgres + Oracle. Schema emit, matview-as-table refresh, deterministic seed pipeline, hash-locked. CI cells: Layer-1 + Audit-PDF SQLite unit suites in ci.yml::test, plus the App-2-against-SQLite cell as ci.yml::e2e-sqlite. X.3.e's `--sqlite` CLI shorthand and X.3.f's integrator-local-loop walkthrough were cut — superseded by Studio (X.4), which becomes the integrator's local-iteration front door.
-
-### X.4 — Studio: implementation tools *(COMPLETE — shipped v10.0.0; full plan archived in `PLAN_ARCHIVE.md` → "Phase X.4")*
-
-### X.6 — Model-driven docs (drift reduction)
-
-**What.** Drive the documentation site from the same data model that drives the renderers. Today the L2 entity reference, visual reference, dataset reference, and per-sheet walkthroughs are hand-written in `docs/` Markdown — each is a place documentation can drift from code. Phase X.6 collapses those into `common/l2/primitives.py`, `common/tree/visuals.py`, `DatasetContract`, and the tree's `Sheet.description` / `Visual.subtitle` strings as the single source of truth, with mkdocs-macros + mkdocstrings rendering them into the docs site at build time.
-
-**Why.** Documentation drift is the failure mode this codebase has hit repeatedly (X.1.h ETL hallucination; persona-leak sweeps in Q.4 / Q.5; CLI-invocation drift caught by X.1.h.B). Each fix has been a one-off audit + handwritten correction. Auto-generation makes drift structurally impossible for the surfaces it covers — when the field docstring changes, the docs page changes the same commit.
-
-**Scope:**
-
-- [ ] AD.0 Phase AD
-  - [ ] AD.G AD.G CI derives the QS principal ARN from quicksight:ListUsers (pick the ADMIN user) instead of the static RECON_E2E_USER_ARN GitHub secret — so a QS-subscription recreate (à la Phase AD) doesn't silently red the e2e + release pipelines. This was the v11.9.0 release-blocker root cause (secret pointed at the deleted Enterprise-era user). Per feedback_no_credential_friction: a stored-ARN secret is automation backlog. See memory project_qs_e2e_user_arn ("CI uses a stale-prone static secret").
-- [x] AP.0 AP.0 Spike: the as_of frame (D1) on one surface
-  - [x] AP.1 AP.1 Spike: the view primitive (D5) on one view
-  - [x] AP.2 AP.2 Spike: invariant spine (D6) — invariant owns detect + scenario_for(shape,selector); settle generator shape: state-step/simulation (non-violating = clean run, violation = perturbation) + Local vs Populational. See audit §5 AP.3-extension findings.
-  - [x] AP.3 AP.3 Spike: can an invariant validate a violation? (self-validation, no drift, no DB server)
-- [ ] X.6.a mkdocstrings expansion. Auto-generate L2 entity reference (`common/l2/primitives.py` — Account, Rail, Chain, TransferTemplate, etc.) and visual reference (`common/tree/visuals.py` — KPI, Table, BarChart, Sankey, ForceGraph). Per-class page with docstring + field table. Replaces today's hand-written `docs/reference/l2-spec.md` + per-visual handbook callouts.
-- [ ] X.6.b Custom mkdocs-macros plugin: tree → walkthrough scaffolds. Reads sheet/visual descriptions from each app's tree (`apps/<app>/app.py` builds the tree; the plugin walks it). Emits per-sheet walkthrough scaffold with the sheet's own `description` as the lede + each visual's `subtitle` as a section. Hand-written prose can extend the scaffold but the model-derived parts can't drift.
-- [ ] X.6.c Auto dataset reference. `DatasetContract` lists columns + types + (often) shape. Generates per-dataset reference page. Replaces today's hand-written column lists in `docs/data-contract/`.
-- [ ] X.6.d Auto config reference. Config dataclass + `etl.yaml` schema (X.5.a) + L2 schema validators → reference pages for each config file the user touches. Field docstrings + valid-value enums → docs.
-- [ ] X.6.e Live-embed App 2 fragments in mkdocs pages. Because X.2.i mounts `/docs` in App 2's Starlette process, mkdocs pages can include `<iframe src="/dashboards/.../sheets/.../visuals/...">` fragments that render live. Doc walkthrough shows the actual visual it describes against the demo data, not a screenshot that goes stale. Use sparingly (page-load weight) — per-app handbook overview is the natural home.
-- [ ] X.6.f Migrate hand-written walkthroughs. Sweep `docs/walkthroughs/` to use the X.6.b scaffolds. Hand-written content lives in extension blocks; model-derived content comes from the tree. Captures the prose that's still useful while killing the drift surface.
-- [ ] X.6.g README + handbook positioning sweep (folded from former X.9). The 4 apps × 2 dialects × 3 DBs surface needs a fresh top-of-funnel pitch. README + handbook home pages should communicate what the tool now does — not what it did pre-X.2.
-- [ ] X.6.h Drift CI gate. pytest test that fails if any docs page references a model attribute (field, class, enum value) that no longer exists. Same shape as X.1.h.B's CLI invocation checker — extracts model references from docs, asserts they resolve. Catches the regression class even when the auto-generation is bypassed for hand-written prose.
-
-- [ ] X.6.i Source-of-truth discipline sweep. X.2.g + X.4.b only call out sheet description + visual subtitle + L2 entity field labels. Audit every analyst-facing string on tree primitives: parameter labels, calc field display names, drill action labels, dataset display names, theme token names, etc. Anything that appears in BOTH the rendered surface and the docs is a candidate for "lives on the tree, docs reads from it." Avoid the long-tail cleanup list that would otherwise hit at X.6 time.
-
-- [ ] X.6.j Self-host handbook guide. New handbook page covering the App 2 deployment story end-to-end — Dockerfile recipe (multi-stage: tailwind build → wheel install → uvicorn entry), env var contract (`QS_GEN_*` vars consumed at boot), reverse-proxy notes, ALB / phase.2 OIDC pointers. Operators going from local-iteration → production-self-host should not have to grep the codebase. Companion: a working Dockerfile in the repo at `deploy/Dockerfile` (referenced from the guide).
-
-**Threads from X.2-X.5 already in place** (so X.6 has source material to consume):
-- X.2.g — sheet `description` + visual `subtitle` are the docs source of truth from day one.
-- X.4.b — L2 entity card labels come from `common/l2/primitives.py` field docstrings, not hand-written in the editor.
-
-
-Out of active development iterations — manage cloud spend deliberately. Two-tier CI: a fast loop on every push that touches no AWS, and a gated full-e2e tier triggered by tag pushes (release gate, auto-fired), manual `workflow_dispatch`, or a weekly cron.
-
-- [ ] X.7 Cloud CI cost optimization — DONE (2026-05-11; a/b/c, landed across Y.2.gate.k/l + P.7)
-  - [x] X.7.a Baseline the spend — DONE (2026-05-11; decision recorded). Ballpark known (persistent Aurora ≈ $45/mo idle — see `feedback_ephemeral_aws_infra` memory). Decision: start/stop pre-existing instances rather than provision-and-terminate; keeps the connect strings static.
-  - Answer: I think start/stop is fine for now, keeps the connect strings pretty static
-
-  - [x] X.7.b Fast loop on every push:main — DONE (2026-05-11; landed via `Y.2.gate.k.3` + `P.7`). `ci.yml`: `test` job (pytest + pyright strict + Playwright JS unit), `integration-pg` (Postgres service-container db layer), `integration-oracle` (Oracle Free service-container db layer), `coverage` aggregator, `docs-portable-install`. No AWS touched. Per-commit feedback loop.
-
-  - [x] X.7.c Gated full e2e on three triggers — DONE (2026-05-11; landed via `Y.2.gate.l` + `e2e.yml` + `release.yml`). RDS start/stop cycling: `./run_tests.sh up aws` / `down` / `status [--cost]` (`l.2.c–e`), `aws_rds_running` pre-dispatch probe (`l.3.a`), CI start/stop wiring (`l.1.a`). Triggers: (1) tag push — `release.yml::e2e-against-testpypi` auto-gates before PyPI publish; (2) `workflow_dispatch` — `e2e-pg-api` / `e2e-pg-browser` / `e2e-oracle-api`; (3) nightly cron — `e2e-pg-browser`. Aurora scale-to-zero deferred to operator (will reconfigure scaling when revisited); start/stop additional IAM grants TBD when the operator wires it.
-  - Answer: Scale to zero is 100% doable, I'd just recommend start /stopping oracle. I'll reconfigure the scaling once we're here. For the start/stop I'll just need to know the additional permission grants.
-  - **Concurrency redesign — SUPERSEDED (2026-05-11).** (1) **within-run race** — resolved by the trigger split: `e2e-pg-api` fires on push:main, `e2e-pg-browser` only on cron + workflow_dispatch, so they're never concurrent in one trigger; and the `Y.2.gate.m` variant matrix uses per-cell prefixes (`sp_pg_aw` etc.) so even concurrent runs don't collide on `spec_example_*`. (2) **cross-run cancellation** — `e2e.yml` keeps distinct per-dialect concurrency groups (`e2e-pg` / `e2e-oracle`) plus workflow-level `cleanup-pg`; the 1-second-cancellation pathology hasn't recurred under the trigger split. If it does, the workflow-level-concurrency fix is still the move.
-
-### X.8 - Ask for configuring the row counts and date range for the data seeding
-
-### X.9 — _(folded into X.6.g)_
-
-The README + handbook positioning sweep is now X.6.g, since it shares the model-driven-docs concern.
-
-### X.10 — Runner: intra-cell layer DAG (deploy starts right after seed)
-
-The per-cell chain `unit → seed_variant → db → app2 → deploy → api → browser` is run strictly serially today, but `db`, `app2`, and `deploy` only depend on `seed_variant` — they're true siblings. `deploy` is the long pole (~2 min: boto3 creates theme + datasource + ~30 datasets + 4 analyses + 4 dashboards, each waiting on QS's slow async `CREATION_SUCCESSFUL`); `db` (~45 s) + `app2` (~30 s) fit entirely inside it. Fan `{db, app2, deploy}` out with `asyncio.gather` after the seed, then gather `{api, browser}` after `deploy` → ~75 s saved per cell. Only `aw`-target cells benefit (`lo` cells already drop deploy/api/browser), so ~5 cells × 75 s ≈ ~6 min off a full-matrix run, plus a noticeable win on a single `--variants=sp_or_aw` iteration loop. The `asyncio` plumbing already exists (`Y.2.gate.c.6.async` cell-level `gather`) — this pushes it one level down. Fits Phase X's cloud-CI-cost theme: less wall-clock on `aw` cells = less RDS uptime per run.
-
-  - [ ] X.10.a `cell_chain` expresses deps, not just order. Today it returns an ordered `list[str]`; change to a small DAG (`{layer: frozenset[deps]}`) so `_run_one_variant` can topo-sort + gather sibling layers. Keep the same `cell_chain(spec, requested_chain)` truncation semantics (`up_to=app2` ⇒ no deploy/api/browser).
-  - [ ] X.10.b `_run_one_variant` gathers the sibling layers. After `seed_variant`: `await asyncio.gather(db, app2, deploy)`; after `deploy` succeeds: `await asyncio.gather(api, browser)`. Per-(variant, layer) artifact / timing / db-perf dirs are already distinct, so concurrent writes are fine. The 3× concurrent `pytest -n auto` "bringing up nodes…" spin-ups add CPU pressure but the dev box absorbs it.
-  - [ ] X.10.c Decide failure semantics for in-flight `deploy` (the one real wrinkle). If `db` fails while `deploy` is mid-flight, boto3 `create_data_set` calls aren't cleanly cancellable — cancelling orphans a half-deployed QS graph (the next `json clean` sweeps it, but it's messier than today's "halt at the failed layer, nothing downstream started" guarantee). Default: let the in-flight `deploy` finish, report the `db` failure, skip `api`/`browser`. Document the choice; preserve the `EXIT_FAILURE` / `EXIT_NEEDS_OPERATOR` exit-code contract.
-  - [ ] X.10.d Unit tests for the DAG dispatch (`tests/unit/test_runner_skeleton.py`): topo order, sibling-gather, truncation, failure-skips-downstream. Mock the layer dispatch (no live DB/AWS).
-  - [ ] X.10.e Live wall-clock check + pyright + commit. Run `--variants=sp_pg_aw` (or `sp_or_aw`) before/after; record the delta in this entry. CLAUDE.md "Commands" section: update the chain description (`unit → seed → {db | app2 | deploy} → {api | browser}`).
-
----
-
-
-Bundled operator-feedback UX work that surfaced during X.4 trainer use — no yaml grammar touched. 8 sub-sections (AA.A dropdown flip, AA.A.race App2 freshness, AA.A.l2ft-rails-inverse row-count, AA.A.qs-triage 12-failure cohort, AA.A.daterange Shape A fix, AA.B Daily Statement, AA.C exception literacy panels + trainer pane, AA.D label hygiene, AA.E search-by-name-AND-id, AA.G dependabot, AA.H browser-capture infra). Closed 2026-05-19 with AA.A.qs-triage.5 Today's Exceptions resolution + `record_sql_trace` artifact. 7 deferred items rehomed to the "Backlog (rehomed from AA)" section below.
-
-### Backlog (rehomed from AA)
-
-Items uncovered during AA but explicitly deferred — all carry a spike-before-implement or "next phase end-of-phase" gate. Rehome onto a real driver when a phase picks one up.
-
-- [ ] AA.0 Dashboard UX + exception literacy *(COMPLETE — shipped v10.1.0a1; full plan archived in `PLAN_ARCHIVE.md` → "Phase AA")*
-  - [ ] AA.A.10 (stretch) — Tree-walk picker→column derivation. Even after AA.A.9, `PickerSpec.column` is still hand-mapped (1 line per picker referencing the dataset projection column). The tree carries the wiring formally: `ParameterControl.parameter` → `Parameter.mapped_dataset_params` → `(dataset, dataset_param_name)` → dataset SQL's `<<$p>>` substitution site → the column it compares. Either parse the dataset SQL to find the column the param narrows on, OR annotate `DataSetParameter` with a `narrows_column` field at construction time (production-code surface change). Result: spec carries only sheet/visual/builder/order — every PickerSpec disappears, the helper derives the full picker→column map from the tree. Plan + spike before locking the annotation-vs-parse path.
-  - [ ] AA.A.11 Cross-corpus duplication lint (test ↔ src), paired approaches 1+3. User-flagged 2026-05-17 as "huge structural win": every duplicated SQL string between `tests/` and `src/` is a second codebase that can pass while production breaks, or vice versa. Approach 1 (content-based AST lint walking `tests/` for SQL fingerprints + cross-referencing `src/`) + Approach 3 (provenance lint — require values in test assertions to come from `import` of src, not inline literal). Both, not either alone — Approach 1 catches today's drift, Approach 3 catches future drift before it can happen. Approach 2 (jscpd/PMD CPD) deliberately rejected (non-Rust). Spike-before-implement: throwaway script measuring false-positive rate at various length thresholds; allowlist syntax (sibling comment vs central registry); cheap-enough for unit prelude vs opt-in lint mode.
-  - [ ] AA.A.l2ft rails-inverse.4 — Type-encode the `table_rows()` invariant. `table_rows()` for narrowing-assertion sites is a smell — the picker-row-survival contract is about SQL row count, not DOM visibility. Consider deprecating `len(table_rows())` for assertion use, or renaming to `dom_visible_rows()` so the cap is obvious at call sites.
-  - [ ] AA.A.daterange.3 (BACKLOGGED) — Structural refactor: single DATE_RANGE control. Replace each sheet's `(ParameterDateTimePickerControl Date From + ParameterDateTimePickerControl Date To + TimeRangeFilter)` triplet with one `FilterDateTimePickerControl(Type="DATE_RANGE")`. Closes the "from > to" UX footgun structurally and aligns L1 / L2FT / Exec with Investigation. **Wall:** L1's multi-dataset-per-sheet model needs a sharing mechanism — the filter-bound widget pattern Investigation uses binds to ONE filter on ONE dataset. Options: (a) consolidate L1 datasets per sheet (schema work), (b) accept one widget per dataset per sheet (UX noise), (c) find a QS mechanism for one widget driving multiple parameter-bound filters via parameter intermediates. Spike before locking direction.
-  - [ ] AA.A.daterange.4 (BACKLOGGED) — App2 renderer for widget-bound DATE_RANGE. Already proven for Investigation; would extend to the new L1/L2FT/Exec range controls. Follows .3.
-  - [ ] AA.A.daterange.5 (BACKLOGGED) — Test infra. `apply_anchor_to_pickers` for date pickers becomes "set the range to span anchor's date ±1 day" instead of separate from/to. Single picker spec, not two. Follows .3.
-
----
-
-## Phase Z — L2 grammar cleanup *(COMPLETE — chain collapse + transfer_type subsumption + cfg deployment-namespace collapse; full plan archived in `PLAN_ARCHIVE.md` → "Phase Z")*
-
-Z.A (Chain grammar collapse: singleton ⇒ required, multi ⇒ XOR) + Z.B (subsume transfer_type into rail) + Z.C (collapse `resource_prefix` + `l2_instance_prefix` + `l2.instance` into `cfg.deployment_name` + `cfg.db_table_prefix`) shipped together as one grammar settle. End-of-phase verify: 11/11 deterministic db-matrix cells green (sp/sq × pg/or/sl × lo + sp/sq × pg/or × aw); 3 fuzz cells failed on a known fuzz-shape instability (todays_exceptions matview empty for seed 3313442831 — NOT a Z regression; tracked as a fuzz-contract follow-up).
-
----
-
-## Phase AB — SPEC enhancements for real-system gaps *(IN PROGRESS — E1/E2/E3/E4/E5/E6/E7 shipped v11.x; close-out AB.7 below; full plan archived in `PLAN_ARCHIVE.md` → "2026-05-19" section)*
-
-Source: `SPEC_gap_feedback.md` (7 enhancements surfaced during integrator-side real-system modeling). AB.1 (E4 inbound caps), AB.2 (E3 template-as-chain-child), AB.3 (E1 multi-Variable + leg_rail XOR), AB.4 (E2 N:1 chain fan-in), AB.5 (E7 amount_typical_range), AB.6 (E5/E6 per-child fan_in + multi-XOR runtime) all shipped against v11.1.0 → v11.6.2. Cross-cutting 7-leg contract held end-to-end across all sub-phases (primitives + loader/validator/serializer + Studio editor field + schema/matview + dashboard surface + plants + fuzz + spec_example + tests + docs).
-
-- [ ] AB.7 End-of-phase (was AB.5 pre-2026-05-19; renumbered when E5/E6/E7 pushed close-out back)
-  - [ ] AB.7.1 Verify (full 13-cell db matrix + browser canary). Same shape as Z.D.1 (`./run_tests.sh up_to=db` no-flags + a thin browser-layer `--scenarios=sp --dialects=pg --targets=aw` canary). Deterministic cells must all be green; fuzz-cell instability tracked separately.
-  - [x] AB.7.1a Triage skipped tests surfaced by AB.7.1 verify. Categorize each skip: (a) legitimately conditional (env / dialect / target gate) — document the gate is intentional; (b) stale / fixable — implement the missing fixture / driver verb / cfg knob so it runs; (c) broken — convert to xfail with a tracking link, or delete. End state: every skip is justified per-skip, not a black box. Per `feedback_build_verbs_not_skip` memory: when a parametrized [qs, app2] driver test skips because a renderer verb is unsupported, prefer building the verb on both renderers over the `skips_if_unsupported` helper. Baseline count to capture before starting: sum the skip totals reported across unit prelude + every per-cell pytest invocation in `runs/<id>/`.
-  - [ ] AB.7.2 Commit, archive Phase AB to PLAN_ARCHIVE.md, push. Add Phase AB one-liner to the Phase history section. Cut a release tag.
-
----
-
-## Phase AC — Rename to `recon-gen` *(COMPLETE — shipped v11.0.0 2026-05-17; full plan archived in `PLAN_ARCHIVE.md` → "Phase AC")*
-
----
-
-## Phase AD — QuickSight cost containment → defended-Enterprise
-
-Surfaced 2026-05-17 by an AWS "nasty fee" alert; root-caused 2026-05-20 via Cost Explorer (root profile). The burn was a **transient May 11–19 spike**, not a steady base charge: account-wide gross usage jumped from $14.28 (April) to $148.50 in the first 20 days of May (~$230/mo run-rate), credit-offset to ~$0 net — silently draining the credit balance. Driver: **Amazon Q in QuickSight** auto-enrolled ~May 11 (`USE1-Amazon-Q-QS-Fee` + a Pro seat + Enterprise user-month ≈ $11.72/day) and **survived the documented opt-out** — Dashboard Q&A disabled May 16 yet the fee charged full rate through May 18, proving `disable_quicksight_genai.sh`'s toggles don't control it. Secondary: idle/run RDS (~$50).
-
-**Path taken (2026-05-20):** deleted the Enterprise account (kills Q at the source + strongest stance for the Amazon billing dispute) → recreated single-user **Standard** to escape Q structurally → hit a wall: **`CreateAnalysis`/`CreateDashboard` are Enterprise-only public APIs** (a minimal empty-sheet create fails at the edition gate; Standard's UI can author but recon-gen is API-only). Live QS deploy is required, so Standard is out. Region migration was also evaluated and dropped (a QS home region can't change in place; no-Q regions are a shrinking target). **Landed on defended-Enterprise** — upgraded the account back to ENTERPRISE and *defend* the Q risk rather than escape it.
-
-**End-state (achieved 2026-05-20):** one standing **Enterprise** account; **single author seat** `recon-gen-admin` (QUICKSIGHT-native — also the resource grantee + embed user); deploy identities (`recon-gen-local`, `Github_e2e_testing`) are **IAM-only, no seat** (PROVEN — full 4-app deploy succeeded as `recon-gen-local`); **Q defended** — search/Q&A DISABLED, zero Pro users, **$20/mo budget tripwire** (the real net, since the toggles don't stop the fee). Embedding + custom themes work on Enterprise, so the existing QsEmbedDriver e2e path is intact. ~$24/mo + contained Q risk vs the ~$230 spike. (DB layer goes per-run ephemeral — AD.E.)
-
-**Hard-won AWS facts (→ quirks log, AD.D):** opt-out toggles do NOT stop `Amazon-Q-QS-Fee` (only edition change does); `CreateAnalysis`/`CreateDashboard`/`CreateTemplate` are Enterprise-only (Standard UI-authors only); `DeleteAccountSubscription` is Enterprise-only (can't API-delete a Standard account — Standard→Enterprise is a console-only upgrade); `create-account-subscription` auto-spawns the caller as `ADMIN_PRO` (downgrade immediately). Artifacts: `scripts/disable_quicksight_genai.sh` (cost audit), `scripts/nuke_quicksight.sh` (content-only).
-
-### AD.A — Kill the Q bleed (Enterprise subscription deletion) *(done 2026-05-20)*
-
-  - [x] AD.A.1 Disable termination protection + `delete-account-subscription` (us-east-1, root) → account UNSUBSCRIBED. Killed the `Amazon-Q-QS-Fee` at the source.
-  - [x] AD.A.2 Teardown confirmed (every QS op returned "not subscribed"). CE-$0 confirmation moot — account recreated same day.
-
-### AD.B — Stand up defended-Enterprise *(core done 2026-05-20; AD.B.6 remains)*
-
-  - [x] AD.B.1 Recreate path: API `create-account-subscription --edition STANDARD` (proven Q-free) → found `CreateAnalysis` is Enterprise-only → **upgraded Standard→Enterprise** (console; API can't delete a Standard account). `Edition=ENTERPRISE` confirmed (not `_AND_Q`).
-  - [x] AD.B.2 Single author seat `recon-gen-admin` (QUICKSIGHT-native ADMIN) survived the upgrade; root QS user removed; auto-spawned `ADMIN_PRO` downgraded to ADMIN; cfg `principal_arns` → recon-gen-admin (the lone grantee).
-  - [x] AD.B.3 1-seat IAM-only deploy PROVEN: `recon-gen-local` (unregistered IAM) deployed all 4 apps' analyses + dashboards (CREATION_SUCCESSFUL), granted to recon-gen-admin. Deploy identities need no QS-user registration → no seat.
-  - [x] AD.B.4 Q defended: search + Q&A DISABLED, zero Pro users (the structural part; the live guard is AD.F detail-audit).
-  - [x] AD.B.5 Auth map locked: recon-gen-admin = seat/grantee/embed-user; recon-gen-local + Github = IAM-only deploy; root = break-glass (no QS user). `QS_E2E_USER_ARN` resolves recon-gen-admin via `principal_arns` (`_dev/runner.py::_derive_qs_user_arn`).
-  - [x] AD.B.6 IAM verified — no action needed: `Github_e2e_testing` already carries the full `quicksight:*` deploy set (`github-e2e-policy`; QS IAM actions aren't account-scoped, so they survived the account churn), and `aws-quicksight-service-role-v0` is the LIVE QS service-linked role (trust `quicksight.amazonaws.com`), NOT an orphan — leave it. CI deploys IAM-only, no seat. (Real remaining IAM gap is AD.F.2: `recon-gen-local` lacks `ce:`/`budgets:`/audit perms.)
-
-### AD.C — e2e on Enterprise *(embedding works → the Standard console-login rework is MOOT)*
-
-  - [x] AD.C.1 `QS_E2E_USER_ARN` derivation falls back to the `principal_arns` user-ARN when the caller isn't a registered QS user (the 1-seat model broke the old STS+ListUsers caller-match). `_dev/runner.py::_derive_qs_user_arn`.
-  - [ ] AD.C.2 Run the browser e2e (QsEmbedDriver embed path) against Enterprise; confirm recon-gen-admin renders the deployed dashboards with data. 4-way agreement stays 4-way (no Standard 3-way fallback needed).
-- [ ] AD.D run_tests green + docs + release
-  - [ ] AD.D.1 Full `./run_tests.sh up_to=browser` green against the Enterprise account (1-seat IAM-only deploy + embed e2e). `e2e-pg-browser` / `release.yml::e2e-against-testpypi` keep working — embedding works on Enterprise, no fork needed.
-  - [ ] AD.D.2 Quirks-log + docs sweep: ADD the hard-won facts (opt-out toggles don't stop `Amazon-Q-QS-Fee`; `CreateAnalysis`/`CreateDashboard` Enterprise-only — Standard UI-authors only; `DeleteAccountSubscription` Enterprise-only; `create-account-subscription` auto-spawns `ADMIN_PRO`); README/CLAUDE cost+account note; operator runbook (defended-Enterprise: 1 seat, IAM-only deploy, Q off + AD.F detail-audit guard).
-  - [ ] AD.D.3 Tag release + RELEASE_NOTES entry. Net `src/` diff is ~zero after the Standard-gating revert; the AD work is operational (account/IAM/budgets) + the `_derive_qs_user_arn` principal_arns fallback.
-
-
-- [ ] AD.F Cost guard = automated WHY-detail (NOT a budget) *(carries forward)*
-  - [ ] AD.F.1 The guard is the per-usage-type GROSS-usage detail Amazon withholds — a *cost* budget (net spend) can't catch a credit-masked burn (this one was net ~$0 under credits, below any threshold). Operator already has cost budgets as the post-credits backstop; no new budget.
-  - [ ] AD.F.2 Grant `recon-gen-local` `ce:GetCostAndUsage` + read-only audit perms (`quicksight:ListTopics`, `Describe*QSearchConfiguration`, `DescribeDashboardsQAConfiguration`) so the detail-audit runs without root.
-  - [ ] AD.F.3 Weekly cost-audit GHA cron: run the CE gross-usage-by-`USAGE_TYPE` (`RECORD_TYPE=Usage`) breakdown + Q-signal scan; **alert on any Q/Pro signal reappearing** (`USE1-Amazon-Q-QS-Fee` > 0, new `*_PRO` user, Q-search/Q&A re-enabled) — catches it DURING the credit window, not after. Make `disable_quicksight_genai.sh` edition-robust (don't die at the Q-config step).
-  - [ ] AD.F.4 Monthly audit review + quarterly resource/cost sprawl check; action drift immediately.
-
----
-
-
-User-asked 2026-05-19. Source: `SPEC_gap_feedback.md` §"Enhancement 8". The complementary primitive to AB.5's `amount_typical_range` — instead of bounding per-firing magnitude, bound the per-period FIRING COUNT. Per-firing realism × per-period count realism = realistic per-period aggregates.
-
-**Preferred shape** (gap doc §8): new optional `firings_typical_per_period: {period, range}` on Rail (and TransferTemplate). Generator-only first cut. Optional `volume_anomaly` runtime matview as a follow-on.
-
-- [ ] AF.0 SPEC Enhancement 8: Soft per-period firing-count bounds on Rail
-  - [ ] AF SPEC Enhancement 8: firings_typical_per_period (generator-only first cut)
-    - [x] AF.0 Locks (6 decisions before AF.1 fires, 2026-05-19). Confirm generic-form field shape, period default, distribution default, aggregating-rail exclusion, deferred runtime, no-plant first cut.
-    - [x] AF.1 `primitives.py`: new `FiringsTypicalPerPeriod(period, range)` dataclass or TypedDict; optional field `firings_typical_per_period: FiringsTypicalPerPeriod | None = None` on Rail (single + two-leg) and TransferTemplate. Period enum: `business_day | pay_period | week | month` (Literal alias). Range: `tuple[int, int]` with `min ≤ max ≥ 0`.
-    - [x] AF.2 Loader + serializer + validator. Loader: heterogeneous parser — accepts compact `range: [N, N]` (defaults period=business_day) or full `{period, range}` mapping; rejects bad shapes with actionable message. Serializer: emits compact when period is default, mapping otherwise. Validator W1a-c: a) range[0] ≤ range[1]; b) both ≥ 0; c) field absent on aggregating rails (cadence already governs).
-    - [x] AF.3 `seed.py`: generator picks count-per-period from range. `_pick_firings_count(rail, period_window)` — when `firings_typical_per_period` set, samples uniform-random from range; when absent, falls back to current per-kind heuristic. Composes with `amount_typical_range` (AB.5) — count then amount, fully independent.
-    - [x] AF.4 `auto_scenario.py`: no new plant kind (generator-only first cut). Existing baseline emission threads through `_pick_firings_count`. (Optional follow-on AF.x.runtime adds `VolumeAnomalyPlant` when the SHOULD-constraint matview lands.)
-    - [x] AF.5 `tests/l2/fuzz.py`: emit `firings_typical_per_period` on ~30% of synthesized non-aggregating rails (deterministic per seed). Period drawn uniformly from the 4 enum values; range min = `rng.randint(1, 50)`, max = min × `rng.randint(2, 10)`. Meta-guard saw entry `rail_with_firings_typical_per_period`.
-    - [x] AF.5.spec `tests/l2/spec_example.yaml`: add `firings_typical_per_period` to 2-3 representative rails so the locked seed exercises the new path. Re-lock 3 dialects.
-    - [x] AF.6 `sasquatch_pr.yaml`: per-rail realistic counts per gap doc §8's example table. `MerchantCardSale [50, 500]/business_day`; `CustomerInboundACH [50, 200]/business_day`; `InternalTransfer [200, 500]/business_day`; `CustomerFeeMonthlySettlement [80, 120]/month`. Bundled copy synced. Re-lock.
-    - [x] AF.7 Studio editor: Rail card + TransferTemplate card gain `firings_typical_per_period` field. Single composite input accepting `period: range_min, range_max` shape (or the compact `range_min, range_max` defaulting to business_day). Per AB.5.7 precedent — `FieldSpec` entry + `_coerce_field` branch + edit-form render via existing tuple-to-input helper. Form-parse path round-trips. Validator W1a-c fires on submit.
-    - [x] AF.8 Tests consolidation. `test_l2_validate.py` (3 tests W1a-c), `test_l2_loader.py` (round-trip — compact + mapping forms + bad shapes), `test_l2_serializer.py` (round-trip + count assertion), `test_l2_seed_firings_count.py` (in-range / determinism / fall-back / aggregating skip), `test_l2_fuzz.py` (meta-guard saw entry), `test_studio_editor_routes.py` (edit form + coerce contract). All unit-layer.
-    - [x] AF.9 Docs. `concepts/l2/rail.md` gains "Optional: typical firing-count range (AF)" section (parallels AB.5's "Optional: typical amount range" section). New `walkthroughs/customization/how-do-i-set-typical-firing-counts.md` worked example (story-frame: "demo went sideways with 50,000 daily card swipes for a 200-customer bank"). `mkdocs.yml` nav extended. `Schema_v6.md` gains "Volume as data (AF)" sibling section to "Magnitude as data (AB.5)" and "Lateness as data". `SPEC_gap_feedback.md` E8 section gains landed-status marker.
-    - [x] AF.10 Re-lock seeds, verify, commit. Full unit + data + schema + json + cli + audit + docs sweep green. Phase history one-liner: "AF — SPEC Enhancement 8: firings_typical_per_period (generator-only first cut)".
-    - [ ] AF.x.runtime *(deferred — open follow-on once integrators ask for surveillance signals)*: optional `volume_anomaly` matview emitting rows when per-rail-per-period actual count falls outside declared range. Parallels AB.5's deferred SHOULD-constraint matview. Includes new `VolumeAnomalyPlant`, Today's Exceptions UNION branch, L1_Invariants section, audit PDF section.
-
----
-
-
-User-asked 2026-05-19. Source: `SPEC_gap_feedback.md` §"Generator implementation gaps surfaced during integrator phase-2 integration testing". Distinct from the Enhancements (which add new SPEC fields) — these are existing-behavior bugs / gaps where the code doesn't deliver what the SPEC + release notes already promise, OR is calibrated for sasquatch_pr's exact shape and degrades for other L2s. Surfaced when an integrator exercised a phase-2-style coverage sweep against an L2 instance that diverges from sasquatch_pr's chain topology / naming / plant-kind distribution.
-
-**Recommended filing order** (per gap doc): Gap B → Gap C → Gap A → Gap D → Gap E → Gap F. Numeric AG.1-AG.6 sub-phases below match this execution order; the `[Gap X]` letter in each title cross-references the SPEC doc for traceability.
-
-**Cross-cutting contract** (per AB-phase precedent): each sub-phase ships its 7 legs — primitives + loader/validator if any SPEC shape touched + studio editor if any new field surfaces + schema/matview if any DB shape touched + dashboard if any visible surface touched + tests (unit + agreement if matview involved) + docs (concept page + walkthrough where the gap stems from user-visible bite). For pure bug-fix gaps (most of A-D), the contract collapses to: code fix + unit test + regression-guard test + locked-seed re-lock if seed emission changes + commit.
-
-- [ ] AH.0 Post-AE polish + bug sweep
-  - [ ] AH Post-AE polish + bug sweep
-    - [x] AH.1 CI coverage aggregator empty (was Inbox.4). **Root cause:** `actions/upload-artifact@v7` defaults `include-hidden-files: false`; `.coverage.*` files (leading dot = hidden by macOS/Linux convention) get excluded from the artifact payload. Aggregator job downloads empty artifacts → `coverage combine` reports "No data to combine". **Fix:** add `include-hidden-files: true` to every upload-artifact step that captures `.coverage.*` data files across `.github/workflows/e2e.yml` + `.github/workflows/release.yml`. ~6 step diffs; pure workflow yaml fix, no Python code change. Surfaced 2026-05-20 during AB.7.1a release verify after CI told us 81% but the aggregator silently lost every per-leg coverage measurement. Verify: re-run CI, confirm `Combine coverage data files` step logs "Combined data file ... source files combined" instead of "No data to combine"; aggregator artifact shows coverage > 81%.
-    - [x] AH.2 Rich text rendering broken on multiple L1 dashboard sheets (was Inbox.5). App2 HTMX renderer issue surfaced on the public sasquatch demo (`recon-gen-sasquatch.hotchkiss.io`). Two confirmed bites:
-    - `/dashboards/l1_dashboard/sheets/l1-sheet-getting-started` — rich text box renders with extra (incorrect) line-wrapping.
-    - `/dashboards/l1_dashboard/sheets/l1-sheet-drift` — rich text boxes at the bottom of the page don't render at all (operator confirms "affects all bottom boxes" across multiple sheets).
-
-    Likely shared root cause in `common/html/` for the L1 dashboard's HTMX render path. Possible suspects: (a) SheetTextBox renderer mis-escaping the rich-text XML when emitting HTML; (b) bottom-of-page placement triggers a CSS/layout collapse hiding content; (c) a v11.6.x regression in the App2 renderer's handling of multi-paragraph text blocks. **Investigation:** (1) load each URL, inspect DOM for the affected rich-text box → "wrong HTML" vs "missing HTML"; (2) compare to QuickSight (if QS renders correctly, App2-specific); (3) git bisect on `common/html/` to find the introducing commit. **Severity:** integrator-visible — demo viewers see broken rendering. High priority once root cause is identified.
-    - [x] AH.3 README.md live demo links (was Inbox.3). Add to README's first scroll: `https://recon-gen-spec.hotchkiss.io/` (dashboards) + `https://recon-gen-sasquatch.hotchkiss.io/` (studio --demo-mode). User-flagged 2026-05-19: "seeing is proof it works" — Phase AE shipped public demos that should land where new readers land first. Pair with a short caption: spec_example = "smallest viable bank, dashboards only"; sasquatch_pr = "realistic community-bank flavor, studio surface with read-only lockdown". Trigger naturally on the next README touch; not standalone-worthy.
-    - [x] AH.4 Studio --demo-mode UI cosmetics (was Inbox.2 / AE.2.b.chrome, deferred from Phase AE). (1) `_render_home_page` + `_render_data_page` + `_render_diagram_page` accept `demo_mode: bool` and emit a top-of-page banner "Read-only demo — mutations disabled" with a link to the operator's docs explaining the lockdown. (2) Deploy-changes button conditionally rendered (hidden when demo_mode). (3) L2 editor save / create / delete buttons in the editor card chrome conditionally rendered (the routes are already 404 in demo-mode per v11.6.6, but the buttons shouldn't appear). Browser smoke test: assert banner present, Deploy button absent in DOM. **Defer rationale (still holds):** the route-level lockdown + sandbox-exec deny-write on L2 yaml are the load-bearing safety; chrome cosmetics are friendlier UX, not a correctness gate.
-    - [x] AH.5 Docs build chain cleanup (was Inbox.1 / AB.7.1a follow-on). Three docs-build issues caught when re-enabling the docs persona-leak tests in AB.7.1a: (1) pre-existing persona leaks across 8 docs pages (concrete bank names slipped into prose where they should reference generic L2 entity names); (2) 3 dead anchors — `Schema_v6.md#table-1-prefix_transactions` and `L1_Invariants.md#fan-in-disagreement` (one duplicate referenced from 2 pages); (3) `test_docs_persona_neutral.py` + `test_docs_links.py` currently xfail with a tracking note pointing here. **Investigation steps:** (1) flip xfail → fail on the 2 tests, read the failure output to enumerate every persona leak / dead anchor; (2) fix prose + add the missing anchors; (3) un-xfail the tests. Mechanical sweep — ~30 min of doc edits once the failure list is in hand.
-    - [x] AH.6 `refresh-demos.sh` launchctl kickstart target stale (LaunchAgent → LaunchDaemon migration miss). **Root cause:** line 96 uses `launchctl kickstart -k "gui/$(id -u)/io.hotchkiss.recon-demo.$short"` — the `gui/<uid>/` target was correct when the demo servers were LaunchAgents in the per-user GUI session. During AE install we switched them to LaunchDaemons (`system/` domain) because hidden-user `recon-demo` can't host LaunchAgents under Tahoe (Input/output error on `launchctl bootstrap user/505`). The refresh script's kickstart target never got updated. Effect: schema/seed/matview-refresh + atomic `mv next.sqlite3 → current.sqlite3` all succeed; the server daemons get no restart signal; they keep serving the prior db handle until they happen to restart for another reason. Observed exit 125 ("Domain does not support specified action") from launchctl. **Fix path A (preferred — no privilege widening):** replace `launchctl kickstart -k` with PID discovery + `kill -TERM`. The processes run as `recon-demo` (per the daemons' `UserName=recon-demo`), so the refresh script (also recon-demo) owns them and can signal them directly. KeepAlive=true in the server plists respawns within ThrottleInterval (5s). PID discovery: `pgrep -u recon-demo -f "/Users/recon-demo/$instance/"` — process working-dir matches uniquely per instance. Fall back to `launchctl print system/io.hotchkiss.recon-demo.$short` (read-only inspection, generally allowed for non-root) and awk the pid field if pgrep yields empty. **Fix path B (rejected — broader blast radius):** add NOPASSWD sudoers entry for `recon-demo ALL=NOPASSWD: /bin/launchctl kickstart -k system/io.hotchkiss.recon-demo.*` and prepend `sudo` to the launchctl line. Works but widens the recon-demo privilege boundary for a problem `kill -TERM` solves natively. **Verification:** trigger refresh manually (`sudo launchctl kickstart system/io.hotchkiss.recon-demo.refresh`), confirm refresh logs show successful TERM-signal, confirm `recon-gen-spec.hotchkiss.io` returns the new db (probe a known-distinctive row count or the deploy stamp in the Info sheet). Surfaced 2026-05-19 during initial demo deploy verification.
-    - [x] AH.7 Re-verify, commit. Run `./run_tests.sh up_to=unit` to confirm no regressions; AH.1 + AH.5 changes have unit-test coverage that AH itself doesn't gate on a separate verify step. Phase history one-liner: "AH — Post-AE polish + bug sweep (coverage CI fix, rich-text rendering, README demo links, studio chrome polish, docs build chain cleanup, refresh-demos launchctl target fix)".
-
----
-
-
-User-asked 2026-05-19. Sanity check that the Studio L2 editor is end-to-end faithful by recreating a *parameterized* set of L2 yamls (spec_example + sasquatch_pr + N fuzz-sampled instances) entirely through Playwright-driven editor interactions, then assert (a) the resulting `L2Instance` is structurally equal to the parsed original AND (b) dashboards produced from the dogfood-built L2 match dashboards produced from the original L2.
-
-The user's framing: "make that test general and do it for ANY yaml we're making (fuzz included)". This shifts the test from a one-off check on spec_example to a *property test* over the L2 design space — the assertion becomes "for any valid L2 yaml the validator accepts, the editor can recreate it identically". Fuzz-generated yamls catch entity-kind combinations spec_example + sasquatch don't cover; combined with the existing fuzz seed pool (`tests/l2/fuzz.py` + `RECON_GEN_FUZZ_SEED`), a sample of N seeds per CI run exercises the editor against shapes hand-authored fixtures wouldn't think to test.
-
-**Scope:** SQLite-only (no AWS / QuickSight dependency). Both comparison points use the self-hosted App2 HTMX renderer (`recon-gen dashboards`). Runs as a browser-layer e2e test gated behind `QS_GEN_E2E=1` (per Y.2.gate test-layer protocol).
-
-**Why this matters:** the Studio editor is the X.4 / X.5 offline-iteration path; if it can't faithfully recreate a non-trivial L2 instance, the offline-editing claim is hollow. This phase ALSO surfaces editor surface gaps (UI missing for some entity kinds) — the test failure IS the discovery vehicle. Drift between editor-built yaml and hand-written yaml has zero acceptable noise floor; either the editor preserves semantic equivalence or it doesn't. And making it fuzz-sampled means future entity-kind additions (e.g., AB.3's `leg_rail_xor_groups`, AB.6's per-child `fan_in`) automatically gain dogfood coverage when they show up in the fuzz pool.
-
-  - [x] AH.8 Docs builds: isolate into run-folder sandbox (kills xdist flakes)
-  - [ ] AH.9 Tailwind output.css scan-scoping — stop whole-repo prose pollution
-  - [ ] AH.10 demo-publish on-release refresh broken (trigger + runner-user)
-- [ ] AI.0 Studio editor dogfood: any L2 yaml rebuilt via browser-driven editor
-  - [ ] AI Studio editor dogfood: any L2 yaml rebuilt via browser
-    - [ ] AI.0 Locks (decisions before AI.1 fires, 2026-05-19).
-    - **Scope split for missing editor surfaces** (Lock 1, confirmed 2026-05-19). If the AI.1 audit reveals a non-trivial editor UI gap (no widget for a primitive that some test-input L2 uses), AI.2 BUILDS the missing UI inline as a sub-task per entity kind. Phase ships only when the editor can recreate the full corpus. No "scope to current surface; defer gaps" escape hatch — the dogfood claim has zero acceptable noise floor.
-    - **L2Instance equivalence granularity.** Compare via parsed `L2Instance` dataclass equality, not byte-equality on the YAML file. Editor-emitted YAML may diff in formatting (field ordering, comment placement, indentation) but the L2Instance struct MUST match. Use existing `tests/unit/test_l2_loader.py`-style structural asserts.
-    - **Dashboard equivalence granularity** (Lock 2, confirmed 2026-05-19). Per-sheet, per-visual: visual titles + table row content (rows + cell text) + KPI numeric values. Skip DOM byte-equality + screenshot diffs. Hermetic comparison: same L2 + seed + anchor must yield identical `DashboardDriver.visual_titles()` + `table_rows()` + `kpi_value()` outputs. Filter unstable fields (analysis_id / sheet_internal_id / wall-clock timestamps) from the comparison dict.
-    - **Test layer = browser** (Lock 3, confirmed 2026-05-19). New file `tests/e2e/test_studio_dogfood.py` gated behind `QS_GEN_E2E=1`. Runs under `./run_tests.sh up_to=browser`. Marker: `@pytest.mark.browser` (existing convention).
-      - **Transport: hybrid** (Lock 3 amendment, decided 2026-05-21 after the AI.1 audit revealed the editor surface is large — rail subtype picker, multi-selects, `multi_select_groups`, chain per-child checkboxes, 3 YAML-block singletons). `StudioEditorDriver` is one verb protocol with two transports: (a) `StudioBrowserEditorDriver` (Playwright) drives ONE full pass on the deterministic `spec_example` for real form-render+submit fidelity; (b) `StudioHttpEditorDriver` (httpx form-POST against a running studio server) drives `sasquatch_pr` + the fuzz-sampled bulk — fast, deterministic, fuzz-scalable. Rationale: the unit route tests (`test_studio_editor_routes.py`) already prove server-side coerce→create→serialize→save end-to-end, so HTTP covers the same fidelity; Playwright's marginal value (a form that renders-but-mis-submits) is captured by the one spec_example browser pass rather than a full-corpus×fuzz browser rebuild.
-    - **Determinism + reproducibility.** Anchor `date(2030, 1, 1)`; `RECON_GEN_FUZZ_SEED` pinned per CI cell. Editor mutations are exact sequences (no waits-for-element ambiguity); fail loudly if a mutation widget reports unexpected state. Studio cfg is ephemeral (tmpdir-rooted) per test invocation so studio's `.studio-state.yaml` doesn't pollute across runs.
-    - **No mutation of source yamls.** Dogfood'd YAML writes to `tmp/dogfood_<instance_name>.yaml` (test-scoped tmp dir). The shipping `tests/l2/spec_example.yaml` + `tests/l2/sasquatch_pr.yaml` are reference; the test asserts dogfood matches reference.
-    - **Fuzz axis sample size.** Locked-input seeds: 5 per CI cell. Override via `QS_GEN_AI_FUZZ_SAMPLE_N=N` env var (default 5, runner pins this to a known-good value for the deterministic suite; ad-hoc local testing can crank it). The fuzz pool itself is `tests/l2/fuzz.py::random_l2_yaml(seed)` — already produces validator-passing L2 instances. Add an opt-in nightly run that bumps the sample to 100+ once the deterministic 5-seed sample is green.
-    - **Editor save-to-yaml route.** The editor needs a single POST route that serializes the current in-memory L2Instance to a yaml file (file path supplied or returned). If no such route exists, AI.2 builds it (preferred path: `POST /l2/export?path=<dest>` returns 204 after writing). Save-on-mutate (every edit re-flushes to disk) is the current behavior; AI confirms or adjusts as needed.
-    - [x] AI.1 Editor surface coverage audit. Walk every entity kind in the test-input corpus (spec_example + sasquatch + 5 fuzz seeds) and inventory whether each kind has an "add/edit/delete" widget in the Studio editor. Cover:
-      - Account (with all optional fields: name, role, parent_role, expected_eod_balance, description)
-      - AccountTemplate (with instance_id_template / instance_name_template)
-      - SingleLegRail (with origin variants, metadata_keys, leg_role, leg_direction)
-      - TwoLegRail (source_role, destination_role, source_origin, destination_origin)
-      - AggregatingRail (cadence, bundles_activity)
-      - TransferTemplate (leg_rails, transfer_key, completion, leg_rail_xor_groups)
-      - Chain (parent, children with ChainChildSpec including fan_in + expected_parent_count + mixed-cardinality)
-      - LimitSchedule (per-rail + per-account_type caps)
+## Phase AI
+
+Per `feedback_build_verbs_not_skip`: when an editor verb's underlying UI is missing, BUILD the UI (and the verb that wires to it), don't skip the test param.
+The dashboards-match assertion is the user-facing acceptance: "the editor produces an L2 that drives identical dashboards".
+- [ ] AI.0 - Locks (decisions before AI.1 fires, 2026-05-19).
+  - **Scope split for missing editor surfaces** (Lock 1, confirmed 2026-05-19). If the AI.1 audit reveals a non-trivial editor UI gap (no widget for a primitive that some test-input L2 uses), AI.2 BUILDS the missing UI inline as a sub-task per entity kind. Phase ships only when the editor can recreate the full corpus. No "scope to current surface; defer gaps" escape hatch — the dogfood claim has zero acceptable noise floor.
+  - **L2Instance equivalence granularity.** Compare via parsed `L2Instance` dataclass equality, not byte-equality on the YAML file. Editor-emitted YAML may diff in formatting (field ordering, comment placement, indentation) but the L2Instance struct MUST match. Use existing `tests/unit/test_l2_loader.py`-style structural asserts.
+  - **Dashboard equivalence granularity** (Lock 2, confirmed 2026-05-19). Per-sheet, per-visual: visual titles + table row content (rows + cell text) + KPI numeric values. Skip DOM byte-equality + screenshot diffs. Hermetic comparison: same L2 + seed + anchor must yield identical `DashboardDriver.visual_titles()` + `table_rows()` + `kpi_value()` outputs. Filter unstable fields (analysis_id / sheet_internal_id / wall-clock timestamps) from the comparison dict.
+  - **Test layer = browser** (Lock 3, confirmed 2026-05-19). New file `tests/e2e/test_studio_dogfood.py` gated behind `QS_GEN_E2E=1`. Runs under `./run_tests.sh up_to=browser`. Marker: `@pytest.mark.browser` (existing convention).
+  - **Transport: hybrid** (Lock 3 amendment, decided 2026-05-21 after the AI.1 audit revealed the editor surface is large — rail subtype picker, multi-selects, `multi_select_groups`, chain per-child checkboxes, 3 YAML-block singletons). `StudioEditorDriver` is one verb protocol with two transports: (a) `StudioBrowserEditorDriver` (Playwright) drives ONE full pass on the deterministic `spec_example` for real form-render+submit fidelity; (b) `StudioHttpEditorDriver` (httpx form-POST against a running studio server) drives `sasquatch_pr` + the fuzz-sampled bulk — fast, deterministic, fuzz-scalable. Rationale: the unit route tests (`test_studio_editor_routes.py`) already prove server-side coerce→create→serialize→save end-to-end, so HTTP covers the same fidelity; Playwright's marginal value (a form that renders-but-mis-submits) is captured by the one spec_example browser pass rather than a full-corpus×fuzz browser rebuild.
+  - **Determinism + reproducibility.** Anchor `date(2030, 1, 1)`; `RECON_GEN_FUZZ_SEED` pinned per CI cell. Editor mutations are exact sequences (no waits-for-element ambiguity); fail loudly if a mutation widget reports unexpected state. Studio cfg is ephemeral (tmpdir-rooted) per test invocation so studio's `.studio-state.yaml` doesn't pollute across runs.
+  - **No mutation of source yamls.** Dogfood'd YAML writes to `tmp/dogfood_<instance_name>.yaml` (test-scoped tmp dir). The shipping `tests/l2/spec_example.yaml` + `tests/l2/sasquatch_pr.yaml` are reference; the test asserts dogfood matches reference.
+  - **Fuzz axis sample size.** Locked-input seeds: 5 per CI cell. Override via `QS_GEN_AI_FUZZ_SAMPLE_N=N` env var (default 5, runner pins this to a known-good value for the deterministic suite; ad-hoc local testing can crank it). The fuzz pool itself is `tests/l2/fuzz.py::random_l2_yaml(seed)` — already produces validator-passing L2 instances. Add an opt-in nightly run that bumps the sample to 100+ once the deterministic 5-seed sample is green.
+  - **Editor save-to-yaml route.** The editor needs a single POST route that serializes the current in-memory L2Instance to a yaml file (file path supplied or returned). If no such route exists, AI.2 builds it (preferred path: `POST /l2/export?path=<dest>` returns 204 after writing). Save-on-mutate (every edit re-flushes to disk) is the current behavior; AI confirms or adjusts as needed.
+- [x] AI.1 - Editor surface coverage audit. Walk every entity kind in the test-input corpus (spec_example + sasquatch + 5 fuzz seeds) and inventory whether each kind has an "add/edit/delete" widget in the Studio editor. Cover:
+  - Account (with all optional fields: name, role, parent_role, expected_eod_balance, description)
+  - AccountTemplate (with instance_id_template / instance_name_template)
+  - SingleLegRail (with origin variants, metadata_keys, leg_role, leg_direction)
+  - TwoLegRail (source_role, destination_role, source_origin, destination_origin)
+  - AggregatingRail (cadence, bundles_activity)
+  - TransferTemplate (leg_rails, transfer_key, completion, leg_rail_xor_groups)
+  - Chain (parent, children with ChainChildSpec including fan_in + expected_parent_count + mixed-cardinality)
+  - LimitSchedule (per-rail + per-account_type caps)
     Produce `docs/audits/ai_1_editor_surface_audit.md` listing per-entity gaps + "needed widget" punch list. This is the discovery step — without it, AI.2 has no driver-verb scope. Run the audit BEFORE locking AI.2 effort.
-    - [ ] AI.2 StudioEditorDriver verbs + missing UI builds. Extend the App2Driver protocol (or subclass it as `StudioEditorDriver` in `tests/e2e/_drivers/`) with editor verbs keyed off the AI.1 audit. Per Lock 1, build any missing editor UI inline as AI.2.x sub-tasks. Driver shape:
-      - `create_account(id, role, scope, **opts)` + similar for other entity kinds
-      - `set_template_leg_rail_xor_groups(template, groups)` (AB.3 surface)
-      - `create_chain(parent, children: list[ChainChildSpec])` (AB.6 surface — mixed-cardinality)
-      - `save_l2_to_path(path)` — invoke editor's serialize-to-yaml route, write to disk
-      - Bulk-create helper `create_l2(reference: L2Instance)` that walks reference entities in dependency order and creates each via the verb-per-entity-kind path
-    Per `feedback_build_verbs_not_skip`: when an editor verb's underlying UI is missing, BUILD the UI (and the verb that wires to it), don't skip the test param.
-      - [x] AI.2.a AI.2.a Fix create-path field drops (rail cadence/amount_typical_range/firings_typical_per_period + chain per-child fan_in/epc)
-      - [x] AI.2.b AI.2.b TransferTemplate transfer_key field (FieldSpec + create wiring)
-      - [x] AI.2.c AI.2.c Top-level L2 editor for description + role_business_day_offsets (new singleton kind)
-      - [ ] AI.2.d AI.2.d StudioEditorDriver verbs + create_l2(reference) bulk helper
-        - [ ] AI.2.d.1 AI.2.d.1 Protocol + HTTP transport + create_l2 bulk *(WIP — protocol + encoders + HTTP transport + create_l2 walk + build_editor_app shipped; rebuild round-trip blocked, see AI.2.d.1.a)*
-          - [ ] AI.2.d.1.a Defer-validation bulk-load path. The rebuild round-trip (`test_studio_editor_driver.py`, currently SKIPPED) surfaced that the editor runs full `validate()` after EACH create/save, so an incremental bulk rebuild hits invalid intermediate states (an AccountTemplate whose `parent_role` isn't yet on any Account → 400). Two candidate fixes: (1) a defer-validation bulk path that validates ONCE at the end; (2) a topological create order over the reference graph (parent-accounts → child-accounts → templates → rails → transfer_templates → chains → limits) IF every validator check is reference-resolution (no completeness checks on partial graphs). Spike (2) first — no editor-surface change; fall back to (1) if completeness checks fail on partial graphs. Un-skip the rebuild test once green.
-        - [ ] AI.2.d.2 AI.2.d.2 Playwright transport (spec_example pass)
-      - [x] AI.2.e AI.2.e Route diagram edit/add affordance to dedicated screens (drop inline-on-diagram editing)
-    - [ ] AI.3 Test harness — `tests/e2e/test_studio_dogfood.py`. Parameterized over L2 yaml input:
-      ```python
-      @pytest.mark.parametrize("l2_source", [
-          pytest.param("tests/l2/spec_example.yaml", id="spec_example"),
-          pytest.param("tests/l2/sasquatch_pr.yaml", id="sasquatch_pr"),
-          *[
-              pytest.param(_fuzz_yaml(seed), id=f"fuzz_{seed:010d}")
-              for seed in _fuzz_seeds_for_run()
-          ],
-      ])
-      ```
-    Sequence per test case: (a) load reference L2 via `load_instance(l2_source)`; (b) start `recon-gen studio` on a tmpdir-rooted cfg + empty L2; (c) StudioEditorDriver creates every entity from the reference IN DEPENDENCY ORDER (AccountTemplates → Accounts → Rails → TransferTemplates → Chains → LimitSchedules); (d) save via `save_l2_to_path(dogfood_yaml_path)`; (e) shutdown studio. Failures surface the FIRST missing editor verb + entity + cell.
-    - [ ] AI.4 L2Instance equivalence assertion. Load both `l2_source` and `dogfood_yaml_path` via `load_instance`. Assert structural equality: `original.accounts == dogfood.accounts`, `original.rails == dogfood.rails`, etc. Use dataclass `__eq__`. Fail with a focused diff (which entity differs in which field). This is the FIRST acceptance gate — if it fails, the editor lost information during the round-trip.
-    - [ ] AI.5 Dashboard equivalence assertion (SQLite-only, App2 only). For each of `(original L2, dogfood L2)`:
-      1. Apply schema against a fresh SQLite db (one per L2; tmpdir-rooted)
-      2. `data apply --execute` against the same anchor + seed
-      3. `data refresh` to materialize L1 + Investigation matviews
-      4. Start `recon-gen dashboards -c <ephemeral cfg> --l2 <yaml>` on a distinct port; mount in App2Driver
-      5. Walk every dashboard's every sheet's every visual; collect `(dashboard_id, sheet_name, visual_title) → {row_count, rows, kpi_value}` into a comparison dict
-      6. Compare the two collected dicts; assert byte-equal modulo dashboard-internal-id randomness
-    The dashboards-match assertion is the user-facing acceptance: "the editor produces an L2 that drives identical dashboards".
-    - [ ] AI.6 Fuzz axis wiring. Extend the runner so `./run_tests.sh up_to=browser` honors `QS_GEN_AI_FUZZ_SAMPLE_N` (default 5 per cell; nightly opt-in cranks to 100+). Fuzz seeds derive from the run-id-hash so reruns at the same commit see the same seed pool (per `feedback_fuzzer_as_property_testing.md` reproducibility contract). Failed fuzz seeds get re-runnable via `./run_tests.sh up_to=browser --variants=fNNNNN_sl_lo`.
-    - [ ] AI.7 Re-verify + commit. Run `./run_tests.sh up_to=browser --scenarios=sp --dialects=sl --targets=lo` locally to confirm the 5-seed deterministic dogfood suite passes; gate CI on it via the existing browser-job pipeline (`e2e.yml` or analog). Phase history one-liner: "AI — Studio editor dogfood: ANY L2 yaml (spec_example + sasquatch_pr + fuzz-sampled) rebuilt via browser-driven editor matches reference structurally + in dashboard output (SQLite/App2 only)".
+- [ ] AI.2 - StudioEditorDriver verbs + missing UI builds. Extend the App2Driver protocol (or subclass it as `StudioEditorDriver` in `tests/e2e/_drivers/`) with editor verbs keyed off the AI.1 audit. Per Lock 1, build any missing editor UI inline as AI.2.x sub-tasks. Driver shape:
+  - `create_account(id, role, scope, **opts)` + similar for other entity kinds
+  - `set_template_leg_rail_xor_groups(template, groups)` (AB.3 surface)
+  - `create_chain(parent, children: list[ChainChildSpec])` (AB.6 surface — mixed-cardinality)
+  - `save_l2_to_path(path)` — invoke editor's serialize-to-yaml route, write to disk
+  - Bulk-create helper `create_l2(reference: L2Instance)` that walks reference entities in dependency order and creates each via the verb-per-entity-kind path
+  - [x] AI.2.a - AI.2.a Fix create-path field drops (rail cadence/amount_typical_range/firings_typical_per_period + chain per-child fan_in/epc)
+  - [x] AI.2.b - AI.2.b TransferTemplate transfer_key field (FieldSpec + create wiring)
+  - [x] AI.2.c - AI.2.c Top-level L2 editor for description + role_business_day_offsets (new singleton kind)
+  - [ ] AI.2.d - AI.2.d StudioEditorDriver verbs + create_l2(reference) bulk helper
+    - [ ] AI.2.d.1 - AI.2.d.1 Protocol + HTTP transport + create_l2 bulk *(WIP — protocol + encoders + HTTP transport + create_l2 walk + build_editor_app shipped; rebuild round-trip blocked, see AI.2.d.1.a)*
+      - [ ] AI.2.d.1.a - Defer-validation bulk-load path. The rebuild round-trip (`test_studio_editor_driver.py`, currently SKIPPED) surfaced that the editor runs full `validate()` after EACH create/save, so an incremental bulk rebuild hits invalid intermediate states (an AccountTemplate whose `parent_role` isn't yet on any Account → 400). Two candidate fixes: (1) a defer-validation bulk path that validates ONCE at the end; (2) a topological create order over the reference graph (parent-accounts → child-accounts → templates → rails → transfer_templates → chains → limits) IF every validator check is reference-resolution (no completeness checks on partial graphs). Spike (2) first — no editor-surface change; fall back to (1) if completeness checks fail on partial graphs. Un-skip the rebuild test once green.
+    - [ ] AI.2.d.2 - AI.2.d.2 Playwright transport (spec_example pass)
+  - [x] AI.2.e - AI.2.e Route diagram edit/add affordance to dedicated screens (drop inline-on-diagram editing)
+- [ ] AI.3 - Test harness — `tests/e2e/test_studio_dogfood.py`. Parameterized over L2 yaml input:
+  ```python
+  @pytest.mark.parametrize("l2_source", [
+      pytest.param("tests/l2/spec_example.yaml", id="spec_example"),
+      pytest.param("tests/l2/sasquatch_pr.yaml", id="sasquatch_pr"),
+      *[
+          pytest.param(_fuzz_yaml(seed), id=f"fuzz_{seed:010d}")
+          for seed in _fuzz_seeds_for_run()
+      ],
+  ])
+  ```
+  Sequence per test case: (a) load reference L2 via `load_instance(l2_source)`; (b) start `recon-gen studio` on a tmpdir-rooted cfg + empty L2; (c) StudioEditorDriver creates every entity from the reference IN DEPENDENCY ORDER (AccountTemplates → Accounts → Rails → TransferTemplates → Chains → LimitSchedules); (d) save via `save_l2_to_path(dogfood_yaml_path)`; (e) shutdown studio. Failures surface the FIRST missing editor verb + entity + cell.
+- [ ] AI.4 - L2Instance equivalence assertion. Load both `l2_source` and `dogfood_yaml_path` via `load_instance`. Assert structural equality: `original.accounts == dogfood.accounts`, `original.rails == dogfood.rails`, etc. Use dataclass `__eq__`. Fail with a focused diff (which entity differs in which field). This is the FIRST acceptance gate — if it fails, the editor lost information during the round-trip.
+- [ ] AI.5 - Dashboard equivalence assertion (SQLite-only, App2 only). For each of `(original L2, dogfood L2)`:
+  1. Apply schema against a fresh SQLite db (one per L2; tmpdir-rooted)
+  2. `data apply --execute` against the same anchor + seed
+  3. `data refresh` to materialize L1 + Investigation matviews
+  4. Start `recon-gen dashboards -c <ephemeral cfg> --l2 <yaml>` on a distinct port; mount in App2Driver
+  5. Walk every dashboard's every sheet's every visual; collect `(dashboard_id, sheet_name, visual_title) → {row_count, rows, kpi_value}` into a comparison dict
+  6. Compare the two collected dicts; assert byte-equal modulo dashboard-internal-id randomness
+- [ ] AI.6 - Fuzz axis wiring. Extend the runner so `./run_tests.sh up_to=browser` honors `QS_GEN_AI_FUZZ_SAMPLE_N` (default 5 per cell; nightly opt-in cranks to 100+). Fuzz seeds derive from the run-id-hash so reruns at the same commit see the same seed pool (per `feedback_fuzzer_as_property_testing.md` reproducibility contract). Failed fuzz seeds get re-runnable via `./run_tests.sh up_to=browser --variants=fNNNNN_sl_lo`.
+- [ ] AI.7 - Re-verify + commit. Run `./run_tests.sh up_to=browser --scenarios=sp --dialects=sl --targets=lo` locally to confirm the 5-seed deterministic dogfood suite passes; gate CI on it via the existing browser-job pipeline (`e2e.yml` or analog). Phase history one-liner: "AI — Studio editor dogfood: ANY L2 yaml (spec_example + sasquatch_pr + fuzz-sampled) rebuilt via browser-driven editor matches reference structurally + in dashboard output (SQLite/App2 only)".
+- [x] AH.8 - Docs builds: isolate into run-folder sandbox (kills xdist flakes)
+- [ ] AH.9 - Tailwind output.css scan-scoping — stop whole-repo prose pollution
+- [ ] AH.10 - demo-publish on-release refresh broken (trigger + runner-user)
+- [ ] AI.0 - Studio editor dogfood: any L2 yaml rebuilt via browser-driven editor
 
----
-
-
-Source: `SPEC_gap_feedback.md` Gaps G–I, surfaced by post-AG integration re-testing. G+H share a root cause — template-parent shapes weren't in the fixture set, so the AG fixes validated against Rail-parent shapes only. A "template-heavy" regression fixture (a template that is a multi-children chain-parent + baseline-fired + MultiXor plant target) is the shared structural guard; built first (red), G+H turn it green. Gap I is the independent fan_in-aware `chain_orphans` dataset (the planned AB.4.8 step).
-
-- [ ] AL.0 Gap J: template-level `firings_typical_per_period` (E8)
-  - [x] AL.0 Spike/confirm: (a) does the baseline double-emit chain-parent template legs today (per-rail loop @ `seed.py` ~1309 + unit-firing helper @ ~2890), and does it currently cause drift? (b) lock "unit-firing template" = chain-parent OR E8-declaring (`expected_net = 0`); (c) fixture shape (a ≥2-SingleLegRail `expected_net=0` template in `spec_example`).
-    - [x] AL.6 AL.6 Gap J follow-up — unit-firing leg-skip gated on template-E8 only (v11.9.3)
-  - [x] AL.1 Fixture-first: add a multi-1-leg-rail `expected_net = 0` template (E8 declared) to `spec_example`; RED test asserting the legs fire coupled (matched per-period count, no `ledger_drift`).
-  - [x] AL.2 Validator W1: accept `firings_typical_per_period` on TransferTemplate (today rails-only); resolve the W1c (aggregating) interaction.
-  - [x] AL.3 seed.py: run the unit-firing helper for every E8-carrying template (not just chain parents); per-rail loop skips leg_rails of any unit-firing template (kills the double-emit + the divergence).
-  - [x] AL.4 Tests green (validator + seed coupled-count + AL.1 RED→GREEN); confirm the chain-parent double-emit is tidied (inspect seed delta).
-  - [x] AL.5 Re-lock seeds (×3) + full suite + docs (E8-on-template in rail.md / Schema_v6 + SPEC marker) + commit.
-
----
-
-
+## Phase AM - Standardize on tailwind *(prefer after: AI)*
 The HTML surface is split across two styling systems: App2 dashboards + rich-text render via Tailwind utilities (`output.css`), but the Studio editor + diagram pages are styled by hand-written `editor.css` + `diagram.css` (semantic classes — `.create-page`, `.studio-header`, `.create-form`, …). Standardize the whole surface on Tailwind so there's ONE system (no drift between two CSS approaches; the editor screens already LOAD `output.css`, so the utilities are right there).
 
 **Sequenced after Phase AI deliberately** (user, 2026-05-21): the AI dogfood round-trip (structural + dashboard-equivalence, browser-driven) pins the editor's behavior + emitted HTML structure, so the CSS refactor lands with a regression safety net and doesn't churn the editor markup mid-test-build.
 
-- [ ] AM.0 Standardize the Studio + editor surface on Tailwind *(future — sequenced AFTER Phase AI)*
-  - [ ] AM.0 Audit + spike: inventory every hand-written class in `editor.css` + `diagram.css`; map each to a Tailwind utility set (or an `@apply` component class). Lock utility-inline vs `@apply`-component (lean: `@apply` for repeated structures like `.create-form`, inline utilities for one-offs). Spike the Tailwind build + scan-scoping so `output.css` covers the `_studio_assets` templates (ties to AH.9 / #176 output.css scan-scoping).
-  - [ ] AM.1 Convert the editor screens (create / edit / list / singleton / read-card) to Tailwind; drop the `editor.css` rules they replace. **Fold in the AI.2.e part-2 stretch** — richer subtype-aware per-field requirement hints beyond the existing `*` markers + entity intro (e.g. a subtype requirements banner on the rail form).
-  - [ ] AM.2 Convert the diagram + Studio chrome (`studio-header`, nav, data-knob panel) to Tailwind; drop `diagram.css` rules.
-  - [ ] AM.3 Verify: re-screenshot create / edit / diagram / dashboards before↔after for visual parity; AI dogfood + browser e2e stay green; output.css scan-scoping doesn't regress.
-  - [ ] AM.4 Drop `editor.css` / `diagram.css` (or reduce to the irreducible non-utility remainder); update asset links; commit + Phase AM history one-liner.
+- [ ] AM.0 - Standardize the Studio + editor surface on Tailwind *(future — sequenced AFTER Phase AI)*
+  - [ ] AM.0.1 - Audit + spike: inventory every hand-written class in `editor.css` + `diagram.css`; map each to a Tailwind utility set (or an `@apply` component class). Lock utility-inline vs `@apply`-component (lean: `@apply` for repeated structures like `.create-form`, inline utilities for one-offs). Spike the Tailwind build + scan-scoping so `output.css` covers the `_studio_assets` templates (ties to AH.9 / #176 output.css scan-scoping).
+- [ ] AM.1 - Convert the editor screens (create / edit / list / singleton / read-card) to Tailwind; drop the `editor.css` rules they replace. **Fold in the AI.2.e part-2 stretch** — richer subtype-aware per-field requirement hints beyond the existing `*` markers + entity intro (e.g. a subtype requirements banner on the rail form).
+- [ ] AM.2 - Convert the diagram + Studio chrome (`studio-header`, nav, data-knob panel) to Tailwind; drop `diagram.css` rules.
+- [ ] AM.3 - Verify: re-screenshot create / edit / diagram / dashboards before↔after for visual parity; AI dogfood + browser e2e stay green; output.css scan-scoping doesn't regress.
+- [ ] AM.4 - Drop `editor.css` / `diagram.css` (or reduce to the irreducible non-utility remainder); update asset links; commit + Phase AM history one-liner.
 
----
-
-
-Surfaced during the v11.9.3 dashboard sweep, *separate* from the App2 options-fetcher bug (that one — the blank pickers — shipped fixed in v11.9.4). The L1 Supersession sheet's "Daily Balances Audit" table reads `<prefix>_daily_balances` for logical keys `(account_id, business_day_start)` with >1 `entry` — superseded balance corrections (`build_supersession_daily_balances_dataset`). The seed plants a superseded *transaction* (`tx-supersedes-NNNN`, 1 row) but ZERO superseded *daily_balance* entries: confirmed `daily_balances.supersedes` is NULL across both spec_example + sasquatch_pr, so that table renders permanently empty. Violates the "every visual has non-empty data + a TestScenarioCoverage assertion" convention.
-
-- [ ] AN.0 Supersession "Daily Balances Audit" empty (no superseded daily_balance entries) *(future — sequenced AFTER Phase AI, per user 2026-05-21)*
-  - [ ] AN.1 Seed: plant a superseded daily_balance entry (a second `entry` row for an existing `(account_id, business_day_start)` carrying `supersedes='TechnicalCorrection'` + a corrected `money`), mirroring the `tx-supersedes-*` transaction plant. Deterministic; production-honest (a real balance-correction shape — never a demo-prefix filter on the dataset).
-  - [ ] AN.2 Add a `TestScenarioCoverage` assertion (≥1 superseded daily_balance logical key) BEFORE re-locking — counts alone won't catch a future drop.
-  - [ ] AN.3 Re-lock seeds (`recon-gen data lock` per dialect — the new row shifts the locked SQL), full suite + 4-way agreement green, commit + tag.
-
----
-
+## Phase AO
 
 Findings route to four buckets: the money-precision root (AO.1 — drives several drift symptoms), real dashboard/SQL bugs (warm pass), seed/instance artifacts (don't ship as dashboard bugs), and confirm-on-AWS. **Keystone = AO.2 (Daily Statement KPIs don't compute)** — newly visible after the v11.9.4 picker fix let the statement populate.
 
@@ -419,31 +90,33 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
 > - ⏸ **PAUSED** the autonomous run here (deliberate — long session; remaining items are judgment/visual/migration-heavy, better fresh/paired). **Operator morning checklist:** (1) visual-confirm AO.3 + AO.6 on a deploy, then ship as a patch (version bump + RELEASE_NOTES + tag + push). (2) **NEXT to implement:** AO.7 (rail direction mislabel — needs the specific rail found in `sasquatch_pr.yaml` + a judgment on wrong-vs-intentional; may re-lock seeds), then AO.4/AO.5. (3) **Pair with me on:** AO.2-impl (date SQL-pushdown) + AO.1 (money cents — its 4-way gate won't catch a *uniform* 100× translation error → needs a known-value/visual check, not just suite-green).
 
 **Money precision (systemic root — underlies the drift symptoms in feedback #1/#3/#4).** `amount_money` / `money` are declared `DECIMAL(20,2)` (exact on PG/Oracle) but SQLite's NUMERIC affinity stores them as REAL (float64); `_computed_subledger_balance`'s `SUM` accumulates ~1e-11 float error → the `_drift` matviews' exact `money <> computed_balance` flags float dust (114/116 rows display $0.00). SQLite-only manifestation.
-- [ ] AO.0 v11.9.4 cold-read warm-pass dashboard fixes *(source: `docs/audits/v11_9_4_feedback.md` — 4 context-isolated cold-judge passes; per-finding agreement N/4 + triage routing live in that file. Data-correctness AND presentation both in scope.)*
-  - [ ] AO.1 (ROOT fix) Store money as integer cents, translate back at the edges (user call 2026-05-21 — materiality band rejected as a band-aid). **Spike done:** cents-space drift = 2 genuine vs 116 float-noisy on sasquatch_pr SQLite (≈ PG's exact NUMERIC → restores cross-dialect agreement); blast radius = 5 money columns, ~45 `currency=True` display sites (unchanged), money math concentrated in a few matviews. Design: money MATH in integer cents, translate cents→dollars at ONE chokepoint (`Current*` / matview projection). Footguns: ingest `×100` round-to-int at the `etl_hook`; literals flip to cents; divisions cast to NUMERIC; a missed `÷100` = silent 100× error.
-    - [x] AO.1.lock LOCKED: UNIFORM cents (BIGINT money base on ALL dialects; dollars-at-projection). Decided 2026-05-21. Decisive factor = the ETL integrator: an upstream-Oracle → downstream-SQLite pipeline must feed ONE money representation, so the customer feed contract (`<prefix>_transactions.amount_money` / `<prefix>_daily_balances.money`) MUST be dialect-agnostic. Uniform = one feed contract (integer cents); `etl_hook` converts dollars→cents at the edge. Update `docs/Schema_v6.md`.
-    - [ ] AO.1.impl Per lock: money cols → BIGINT cents; matview math in integer cents; `Current*`/matview projection → dollars; seed emits cents + `etl_hook` `×100`; literals → cents; re-lock seeds; SQLite structural drift count 116→2; full suite + 4-way green; commit + patch release.
-
 **Real dashboard / SQL bugs (warm pass):**
-  - [x] AO.2 (feedback #1 · BLOCKER 3/4 · KEYSTONE) Daily Statement summary KPIs don't compute / don't tie to the detail. **DONE (piece 1 — the keystone) `8c4c8815` on branch `ao-dashboard-sql-fixes` (stacked on `ao-app2-renderer-parity`; both unmerged).** Live-verified on :8766 (cust-0011, account picked): Opening −$9,174,092.74, Debits −$147,378.52, Credits $18,761.76 (were all $0). Full unit + json green.
+**Seed / instance-side artifacts (don't ship as dashboard bugs — fix seed or annotate):**
+**Confirm-on-AWS:**
+- [ ] AO.0 - v11.9.4 cold-read warm-pass dashboard fixes *(source: `docs/audits/v11_9_4_feedback.md` — 4 context-isolated cold-judge passes; per-finding agreement N/4 + triage routing live in that file. Data-correctness AND presentation both in scope.)*
+- [ ] AO.1 - (ROOT fix) Store money as integer cents, translate back at the edges (user call 2026-05-21 — materiality band rejected as a band-aid). **Spike done:** cents-space drift = 2 genuine vs 116 float-noisy on sasquatch_pr SQLite (≈ PG's exact NUMERIC → restores cross-dialect agreement); blast radius = 5 money columns, ~45 `currency=True` display sites (unchanged), money math concentrated in a few matviews. Design: money MATH in integer cents, translate cents→dollars at ONE chokepoint (`Current*` / matview projection). Footguns: ingest `×100` round-to-int at the `etl_hook`; literals flip to cents; divisions cast to NUMERIC; a missed `÷100` = silent 100× error.
+  - [x] AO.1.lock - LOCKED: UNIFORM cents (BIGINT money base on ALL dialects; dollars-at-projection). Decided 2026-05-21. Decisive factor = the ETL integrator: an upstream-Oracle → downstream-SQLite pipeline must feed ONE money representation, so the customer feed contract (`<prefix>_transactions.amount_money` / `<prefix>_daily_balances.money`) MUST be dialect-agnostic. Uniform = one feed contract (integer cents); `etl_hook` converts dollars→cents at the edge. Update `docs/Schema_v6.md`.
+  - [ ] AO.1.impl - Per lock: money cols → BIGINT cents; matview math in integer cents; `Current*`/matview projection → dollars; seed emits cents + `etl_hook` `×100`; literals → cents; re-lock seeds; SQLite structural drift count 116→2; full suite + 4-way green; commit + patch release.
+
+- [x] AO.2 - (feedback #1 · BLOCKER 3/4 · KEYSTONE) Daily Statement summary KPIs don't compute / don't tie to the detail. **DONE (piece 1 — the keystone) `8c4c8815` on branch `ao-dashboard-sql-fixes` (stacked on `ao-app2-renderer-parity`; both unmerged).** Live-verified on :8766 (cust-0011, account picked): Opening −$9,174,092.74, Debits −$147,378.52, Credits $18,761.76 (were all $0). Full unit + json green.
   - **DIAGNOSIS (2026-05-21, data-confirmed; matview is CORRECT — real per-day debits/credits/drift):** two bugs. (1) **Signed-`MAX` aggregation** — the 5 KPIs use `ds_summary[col].max()` (`_populate_daily_statement_sheet`, app.py ~1490-1521) assuming the date filter narrows to one row; but `total_debits` is stored NEGATIVE and `drift` is signed, so `MAX(total_debits)`=0 and `MAX(drift)`=0 over multiple days (a zero/no-activity day wins the max). (2) **Date filter can't narrow** — the balance-date is an analysis-level `TimeEqualityFilter` on `business_day_start` (`_wire_daily_statement_filters`, app.py ~2080), but `business_day_start` is a TEXT timestamp (`'2026-04-29 00:00:00'`); a DAY-granularity equality (`= '2026-04-29'`) matches 0 rows (`date(business_day_start) = '2026-04-29'` matches 1) → summary narrows to empty → all KPIs read 0 while the detail (txn `business_day` = `date_trunc`) still populates = the "KPIs 0, detail full" asymmetry. (Also: the balance-date defaults to wall-clock yesterday → misses fixed-anchor seed data — secondary.)
   - **FIX (canonical SQL-pushdown):** push the balance-date into the summary + txn dataset SQL via a date dataset-param with a day-truncated comparison (`date_trunc_day(business_day_start) = <<$pBalanceDate>>`), replacing the analysis-level `TimeEqualityFilter`s — fixes the TEXT match AND guarantees exactly one (account, day) row so the signed-`MAX` is moot. Verify at the data level (run the dataset SQL with a date → one row + correct per-day values) + App2 local-render KPI assertion. Operator visual-confirms after.
   - **DONE (piece 1, `8c4c8815`):** both daily-statement datasets push `pL1DsBalanceDate` (DateTimeDatasetParameter) down with `date_trunc_day(<col>) = date_trunc_day(<<$param>>)` (dialect-portable) + a sentinel→`MAX(day)`-per-account fallback (data runs through *yesterday* — the 2030 anchor is locked-seed-only — so latest-day opens populated even for accounts whose last activity wasn't literally yesterday; user call 2026-05-21: "latest-day data, picker best-effort"). Dropped `fg-l1-ds-summary-date` / `fg-l1-ds-txn-date`; bridged `P_L1_DS_BALANCE_DATE` → both dataset params. Rewrote `test_daily_statement_date_pushes_down_not_filter_group`. Verified end-to-end via the App2 executor on live SQLite (1 row each: active/sentinel→latest, picked→that day, sparse→its latest).
   - **TODO piece 2 (App2 single-date control — operator-flagged range-vs-single):** App2 still renders the universal date-RANGE for this sheet because `common/html/_tree_filter_specs.py` (see its lines ~40/104) lists `ParameterDateTimePicker` as out-of-scope ("date-control parity is the universal date range"). Fix: add a single-date `FilterSpec` (e.g. `ParameterDateSpec`) in `common/html/render.py` + a flatpickr-single renderer, and a `ParameterDateTimePicker` case in `make_filter_specs_for_sheet` → `?param_pL1DsBalanceDate=<date>`. Then App2 shows ONE date picker matching QS (the tree already wires `add_parameter_datetime_picker`). QS picker shows yesterday/last-picked best-effort (can't data-drive to "latest"); data opens on latest via the sentinel — flag the brief picker-vs-data disagreement for the operator's QS visual pass.
   - **FLAG (latent, operator):** the signed-`MAX` is moot with one row, but "Debits" still displays the stored-NEGATIVE value (−$147k). Consider showing magnitude (positive) for the Debits KPI — a one-line presentation call for the operator's visual pass.
-  - [ ] AO.3 (feedback #2 · BLOCKER 2/4) Investigation (AML) landing shows the template-default institution name instead of the deploy's configured identity — a placeholder on the examiner-facing compliance surface. Source the getting-started title from the L2 persona/config so a real deploy shows the real name (demo = the Sasquatch persona; the bug is it isn't config-driven / reads as a placeholder).
+- [ ] AO.3 - (feedback #2 · BLOCKER 2/4) Investigation (AML) landing shows the template-default institution name instead of the deploy's configured identity — a placeholder on the examiner-facing compliance surface. Source the getting-started title from the L2 persona/config so a real deploy shows the real name (demo = the Sasquatch persona; the bug is it isn't config-driven / reads as a placeholder).
   - **DONE — code-complete + verified, staged on branch (commit e55d8aed), pending operator visual + ship.** `_build_getting_started_sheet` now reads `l2_instance.persona.institution[0]` (neutral "the shared base ledger" fallback when no persona). Verified: spec_example → no "Sasquatch National Bank" leak; sasquatch_pr → renders it. New gate `tests/unit/test_investigation_getting_started_persona.py`; unit layer green (2872). Grep confirmed only `investigation/app.py:220` had the hardcode in RENDERED prose (L1/L2FT matches were comments). **FOLLOW-UP (flagged):** there's no general *dashboard-prose* persona-neutral gate (the docs gate scans mkdocs only, not analysis JSON); my test covers just the investigation landing. A broad gate (all apps × all sheets, like `test_docs_persona_neutral` but over emitted analyses) would catch future leaks — queue it.
-  - [ ] AO.4 (feedback #3 · MAJOR 3/4) Today's Exceptions count integrity: KPI 828 vs footer "1–50 of 935"; not sorted by magnitude (multi-million `ledger_drift` buried under magnitude-0 rows); rows span multiple days despite "today." Fix the count source + default sort (magnitude desc) + "today" scoping. (Magnitude-0 rows themselves = seed residual, AO.S1.)
-  - [ ] AO.5 (feedback #5 · MAJOR 2/4) Executives "Average Daily Volume" ≈67× off vs total ÷ active-days — avg calc bug (wrong denominator / window). (Time-axis "outage + gap" = short seed window + weekends → AO.S2 annotate.)
-  - [x] AO.6 (feedback #6 · MAJOR 1/4) L2 Exceptions "count" overloaded — "Open L2 Violations = 39" directly above a detail column showing hundreds. **DONE (code, staged, commit `f582456c`):** the detail table's per-violation magnitude column display_name → "Occurrences" + matching subtitle, so it no longer reads as "Count" colliding with the violation-tally KPI. Cosmetic display label (l2ft json + unit green); no dedicated test (suite-covered). Operator visual-confirms + ships.
-  - [ ] AO.7 (feedback #7 · MAJOR) Rail direction mislabel — an ACH credit-side rail tagged `direction = Debit` (name/direction mismatch); real data-classification issue, check leg_direction vs semantics. (Paired "mangled origin string" RESOLVED in the feedback: the `origin` column holds only the two clean values → display/transform artifact or screenshot misread, NOT our data.)
-  - [x] AO.8 (feedback #8 · MAJOR 2/4) Chart presentation: per-rail bar-chart x-axis label smear + "stacked by type" not stacking/no legend. **→ DONE via AO.R.2** (App2 BarChart: STACKED + per-series colors + legend + rotated/long-label x-axis + currency y-axis). Operator visual-confirms; the 30-series legend density is flagged under AO.R.
-  - [ ] AO.9 (feedback #9 · MINOR multi) Empty-state clarity + Anomalies flag-logic. **Anomalies "0 flagged" → DONE via AO.R.4** (slider int-binding; live 2σ→129 / 3σ→67). **Still open (real dashboard *content*, both renderers — not a render gap):** as-of stamps (Limit Breach "clean vs didn't run"), dollar-exposure context (Unbundled 802 / Supersession), clipped y-axis ("0,000,000"), context for the net "money moved" figure.
+- [ ] AO.4 - (feedback #3 · MAJOR 3/4) Today's Exceptions count integrity: KPI 828 vs footer "1–50 of 935"; not sorted by magnitude (multi-million `ledger_drift` buried under magnitude-0 rows); rows span multiple days despite "today." Fix the count source + default sort (magnitude desc) + "today" scoping. (Magnitude-0 rows themselves = seed residual, AO.S1.)
+- [ ] AO.5 - (feedback #5 · MAJOR 2/4) Executives "Average Daily Volume" ≈67× off vs total ÷ active-days — avg calc bug (wrong denominator / window). (Time-axis "outage + gap" = short seed window + weekends → AO.S2 annotate.)
+- [x] AO.6 - (feedback #6 · MAJOR 1/4) L2 Exceptions "count" overloaded — "Open L2 Violations = 39" directly above a detail column showing hundreds. **DONE (code, staged, commit `f582456c`):** the detail table's per-violation magnitude column display_name → "Occurrences" + matching subtitle, so it no longer reads as "Count" colliding with the violation-tally KPI. Cosmetic display label (l2ft json + unit green); no dedicated test (suite-covered). Operator visual-confirms + ships.
+- [ ] AO.7 - (feedback #7 · MAJOR) Rail direction mislabel — an ACH credit-side rail tagged `direction = Debit` (name/direction mismatch); real data-classification issue, check leg_direction vs semantics. (Paired "mangled origin string" RESOLVED in the feedback: the `origin` column holds only the two clean values → display/transform artifact or screenshot misread, NOT our data.)
+- [x] AO.8 - (feedback #8 · MAJOR 2/4) Chart presentation: per-rail bar-chart x-axis label smear + "stacked by type" not stacking/no legend. **→ DONE via AO.R.2** (App2 BarChart: STACKED + per-series colors + legend + rotated/long-label x-axis + currency y-axis). Operator visual-confirms; the 30-series legend density is flagged under AO.R.
+- [ ] AO.9 - (feedback #9 · MINOR multi) Empty-state clarity + Anomalies flag-logic. **Anomalies "0 flagged" → DONE via AO.R.4** (slider int-binding; live 2σ→129 / 3σ→67). **Still open (real dashboard *content*, both renderers — not a render gap):** as-of stamps (Limit Breach "clean vs didn't run"), dollar-exposure context (Unbundled 802 / Supersession), clipped y-axis ("0,000,000"), context for the net "money moved" figure.
 
-**App2 renderer parity (AO.R — the smell the operator named 2026-05-21: a fix to a shared contract field landed in QS *only*, because App2's projection layer silently drops it).** The v11.9.4 cold-read ran on App2, which has confirmed renderer-parity gaps vs QuickSight: `_data_shape.shape_table` emits `[{"name"}]` only (drops `ColumnSpec.human_name` header + currency `format`); `shape_bar_chart` drops `format` + the JS BarChart has no STACKED/legend/long-label handling though the tree declares `bars_arrangement="STACKED"`; `rt.markdown` renders only links + paragraph breaks (not bold/code/bullets). The JS renderer is already capable (`col.label||col.name`, `formatTableCell(v,col.format)`, `formatKPIValue(...,"currency")`) — the Python projection starves it. So AO.6 (label), AO.8 (charts), and AO.9-anomalies are App2-render gaps where QS is already correct → **fix App2 to honor what the tree already declares; AO.R supersedes the renderer-portion of those items.** Operator decision 2026-05-21: default to *enhancing App2* (it's fully ours) + a parity drift gate so a QS-only contract field can't ship silently again. One branch: `ao-app2-renderer-parity`.
-  - [x] AO.10 Fix ORA-00932: AO.2 date_trunc_day on ISO string literals breaks Oracle (release blocker)
-  - [x] AO.11 Audit doc: unify the date/range/anchor model across apps, datasets, seed, trainer, App2
-  - [x] AO.R App2 renderer parity cluster — make App2's projection honor the contract/tree the same way QS does (single branch)
+  **App2 renderer parity (AO.R — the smell the operator named 2026-05-21: a fix to a shared contract field landed in QS *only*, because App2's projection layer silently drops it).** The v11.9.4 cold-read ran on App2, which has confirmed renderer-parity gaps vs QuickSight: `_data_shape.shape_table` emits `[{"name"}]` only (drops `ColumnSpec.human_name` header + currency `format`); `shape_bar_chart` drops `format` + the JS BarChart has no STACKED/legend/long-label handling though the tree declares `bars_arrangement="STACKED"`; `rt.markdown` renders only links + paragraph breaks (not bold/code/bullets). The JS renderer is already capable (`col.label||col.name`, `formatTableCell(v,col.format)`, `formatKPIValue(...,"currency")`) — the Python projection starves it. So AO.6 (label), AO.8 (charts), and AO.9-anomalies are App2-render gaps where QS is already correct → **fix App2 to honor what the tree already declares; AO.R supersedes the renderer-portion of those items.** Operator decision 2026-05-21: default to *enhancing App2* (it's fully ours) + a parity drift gate so a QS-only contract field can't ship silently again. One branch: `ao-app2-renderer-parity`.
+- [x] AO.10 - Fix ORA-00932: AO.2 date_trunc_day on ISO string literals breaks Oracle (release blocker)
+- [x] AO.11 - Audit doc: unify the date/range/anchor model across apps, datasets, seed, trainer, App2
+- [x] AO.R - App2 renderer parity cluster — make App2's projection honor the contract/tree the same way QS does (single branch)
   > **DONE (2026-05-21, branch `ao-app2-renderer-parity`, 6 commits — NOT merged/tagged; operator visual-confirms + ships).** All 5 children shipped + each live-verified on the SQLite dashboards server (`recon-gen dashboards -c /tmp/config.sqlite.yaml --port 8766`):
   > - **R.1** table headers/currency (`12f1d154`): L2FT detail table now reads "Check Type / Entity A / … / Occurrences" (the AO.6 label finally lands in App2), money cols `$`-formatted. **R.5** parity gate (`test_html_table_parity.py`) asserts it across all 4 apps.
   > - **R.3** rich-text (`bf8a64e3`): `rt.markdown` now parses `**bold**` / `` `code` `` / `- bullets` / `> quote` → the L2FT bottom panel renders a real `<ul>` + bold leads (was raw markdown in BOTH renderers). Strengthened `test_text_box_safety.py` to reject surviving `**bold**`.
@@ -451,44 +124,102 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
   > - **R.4** slider binding (`c8099b37`): integer/decimal slider URL values now coerce to numeric → moved-slider no longer reads "0 flagged". Live: σ-anomaly KPI default→129, σ=2→129, σ=3→67, σ=4→53 (matches the cold-read's 129@2σ / 67@3σ). Fixes every numeric slider (also resolves **AO.C2** for App2; AWS still its own confirm).
   > - **DISCOVERY:** R.4's symptom was a *distinct* bug from the cold-read's (the cold-read's "0 flagged at default" was the pre-v11.9.4 default-not-applied path, already fixed by the fetcher wiring; the moved-slider int-binding was the live bug). **Full unit layer green (2904); full non-e2e tree green** (one tests/js poller test flaked under xdist, passes in isolation — not ours).
 
-**Seed / instance-side artifacts (don't ship as dashboard bugs — fix seed or annotate):**
-    - [x] AO.R.1 AO.R.1 — App2 table headers + currency format honor the contract
-    - [x] AO.R.2 AO.R.2 — App2 charts: currency format + STACKED + legible axis labels
-    - [x] AO.R.3 AO.R.3 — App2 text panels render bold/code/bullets (rt.markdown)
-    - [x] AO.R.4 AO.R.4 — App2 slider control default bound on initial load
-    - [x] AO.R.5 AO.R.5 — parity drift gate: App2 table shape carries QS's label+format
-  - [ ] AO.S1 (feedback #3/#4) Magnitude-0 exception rows + pool `ledger_drift` in the millions = the known plant-residual / independent-leg fan-out modeling. AO.1's integer-cents math clears the float-noise portion; decide fix-seed-to-reduce-noise vs annotate-as-intended for the rest. NOTE: feedback #4's "child postings don't roll up to parent / no working drill" IS a real dashboard concern (the dead-end drill depends on AO.2).
-  - [ ] AO.S2 (feedback #5) Exec time-axis multi-week empty stretch + weekend gaps = the deliberate short seed window — annotate the chart so it doesn't read as an outage.
+  - [x] AO.R.1 - App2 table headers + currency format honor the contract
+  - [x] AO.R.2 - App2 charts: currency format + STACKED + legible axis labels
+  - [x] AO.R.3 - App2 text panels render bold/code/bullets (rt.markdown)
+  - [x] AO.R.4 - App2 slider control default bound on initial load
+  - [x] AO.R.5 - parity drift gate: App2 table shape carries QS's label+format
+- [ ] AO.S - 
+  - [ ] AO.S.1 - (feedback #3/#4) Magnitude-0 exception rows + pool `ledger_drift` in the millions = the known plant-residual / independent-leg fan-out modeling. AO.1's integer-cents math clears the float-noise portion; decide fix-seed-to-reduce-noise vs annotate-as-intended for the rest. NOTE: feedback #4's "child postings don't roll up to parent / no working drill" IS a real dashboard concern (the dead-end drill depends on AO.2).
+  - [ ] AO.S.2 - (feedback #5) Exec time-axis multi-week empty stretch + weekend gaps = the deliberate short seed window — annotate the chart so it doesn't read as an outage.
 
-**Confirm-on-AWS:**
-    - [x] AO.S2.a Trainer timeline determinism: scenario-end date (`window_end`, plant anchor) is DISTINCT from load-up-to (`up_to`/`end_date`, the trainer's scrub head — load early for good days, advance to reveal the issue). Tests passed 5/21, broke 5/22 (window_end floated on wall-clock today). Fix: pin window_end explicitly in the two timeline tests (cache default stays today for the live trainer); + regression test that plants stay fixed at window_end across different up_to values. (`ao-oracle-release-fix`)
-  - [ ] AO.C1 (feedback #10) App Info shows `dialect: sqlite` / dev prefix — fine for the dev capture; confirm a production deploy shows the real engine + prefix.
-  - [ ] AO.C2 (feedback #9) Empty-default AML sliders (Fanout, Anomalies) — confirm render-on-default vs broken on AWS (likely the slider-default class; pairs with AO.9).
+    - [x] AO.S2.a - Trainer timeline determinism: scenario-end date (`window_end`, plant anchor) is DISTINCT from load-up-to (`up_to`/`end_date`, the trainer's scrub head — load early for good days, advance to reveal the issue). Tests passed 5/21, broke 5/22 (window_end floated on wall-clock today). Fix: pin window_end explicitly in the two timeline tests (cache default stays today for the live trainer); + regression test that plants stay fixed at window_end across different up_to values. (`ao-oracle-release-fix`)
+- [ ] AO.C1 - (feedback #10) App Info shows `dialect: sqlite` / dev prefix — fine for the dev capture; confirm a production deploy shows the real engine + prefix.
+- [ ] AO.C2 - (feedback #9) Empty-default AML sliders (Fanout, Anomalies) — confirm render-on-default vs broken on AWS (likely the slider-default class; pairs with AO.9).
 
----
+## Phase AP - date/range spikes
 
-## Phase Q (continued) — CLI / YAML ergonomics
+Source + full reasoning: `docs/audits/date_range_model_audit.md` (grew out of AO.10/AO.11).
 
-The standing "Phase Q" thread (Q.1–Q.5 + Q.3.a shipped; see Phase history). What's still open: the CLI-shape revisit below, plus the older "schema ergonomics around the L2 yaml" item (task #488 — fold into Q.6's spike or its own sub-item when scoped). Queues behind Phase X.
+**The destination.** Define, in code/types, three linked layers — **invariants** (the rules/detectors), **failures** (planted violations of an invariant), **views** (how to surface an invariant's violations over `as_of`±span) — with the **invariant as the single source of truth** the other two *reference*. Collapses the two pipelines that keep colliding (app: `constraints+shape → queries → visuals`; generator: `seed+time+shape → data`) into one declaration. Rollout = Phases AQ (frame) → AR (view) → AS (spine).
+
+**Expressiveness (settled):** Python + pyright-strict is enough — it *wires and witnesses* (closed taxonomy, total `invariant→{failures,views}` maps via exhaustiveness, smart-constructor types); it does NOT *prove* invariants ("does data satisfy X" is runtime).
+
+**Approach: spike-first per layer.** The destination is clearer than the path; each layer got a spike on ONE surface → decide → roll out. Rollouts are NOT pre-specified (a spike may reorder/redecompose what follows). All four spikes GREEN; findings in audit §5.
+
+**Status (2026-05-22):** spikes complete. Release + everything above unit+data stays PARKED until AR.5 (the view layer lands D2 live); db/deploy/e2e resume there. AQ + AR.1–4 are unit+data. (AO.10 Oracle + AO.S2.a trainer-pin already done on `ao-oracle-release-fix`.)
+
+- [x] AP.0 - as_of frame (D1) → `tests/unit/test_ap0_as_of_frame.py`
+- [x] AP.1 - view primitive (D5) → `tests/unit/test_ap1_view_primitive.py`
+- [x] AP.2 - stateful generator / invariant spine (D6) → `tests/unit/test_ap2_stateful_generator.py`
+- [x] AP.3 - invariant self-validation (make-or-break) → `tests/unit/test_ap3_invariant_self_validation.py`
+
+## Phase AQ - frame rollout (D1) *(depends on: AP)*
+
+Own `as_of`: the generator and the views read one anchor, not wall-clock `now()`. Locked binding ⇒ deterministic; live binding ⇒ ends-at-now, same code path. Stays unit+data.
+
+- [ ] AQ.1 - `AsOfFrame` (as_of + window; `locked`/`live` bindings) promoted to `src/recon_gen/common/`
+- [ ] AQ.2 - `as_of` lands in config (subsumes `TestGeneratorConfig.end_date` + trainer `window_end`)
+- [ ] AQ.3 - generator reads `frame.as_of` (rename+funnel the threaded `anchor=`; collapse the 4 ad-hoc `date.today()` fallbacks → "no frame ⇒ live")
+- [ ] AQ.4 - determinism gate: locked ⇒ byte-identical seed; live ⇒ ends-at-now, same path (the §8 story)
+
+## Phase AR - view rollout (D5) *(depends on: AQ)*
+
+The view primitive: one typed `View` is the source of truth; picker + analysis default + dataset default + App2 binding all derive from it. Kills C1 structurally and unparks the release.
+
+- [ ] AR.1 - `View` date-view tree primitive in `common/tree/` (anchor=`AsOfFrame`, span, empty_behavior, required_coverage); authoring abstraction, not end-user config
+- [ ] AR.2 - balance-date view: `DateTimeParam.default` + dataset `StaticValues` + `ParameterDateTimePicker` + App2 binding all DERIVE from one view; delete the per-app RollingDate exprs + standalone sentinels
+- [ ] AR.3 - `required_coverage` seed-coverage assertion (plant ⟷ query-window contract becomes a test, not developer-memory)
+- [ ] AR.4 - roll the remaining date views onto the primitive (L1 universal range, Exec 30-day, L2FT static bounds)
+- [ ] AR.5 - **D2 confirm at the live QS layer** — the 5 Daily Statement KPIs render (the release blocker). db/deploy/e2e RESUME here; **release unparks.**
+
+## Phase AS - invariant spine (D6) *(depends on: AR)*
+
+The destination: invariant as single source of truth, with generators + views referencing it. Biggest lift; AS.0 re-plans the decomposition from the spike findings first (the layer most likely to redecompose).
+
+- [ ] AS.0 - Plan/spike the spine rollout decomposition (lock the `src/` home + the taxonomy migration order before building)
+- [ ] AS.1 - promote `Violation` / `Invariant` / `ViolationGenerator` / `View` types to `src/`
+- [ ] AS.2 - unify the fractured taxonomy: `PlantKind` (20) ⋈ `check_type` (~10 untyped) → one closed `Violation` taxonomy; total `invariant→{generators,views}` maps, exhaustiveness-checked (data/deadline windows stay invariant-owned)
+- [ ] AS.3 - generator = stateful fold carrying `(balances, active-violation-set)`; `Invariant.scenario_for(shape, selector)`; non-violating = perturbation off
+- [ ] AS.4 - cross-account VECTOR state (AP.2's honest limit): legs net to zero across accounts; `ledger_drift` parent rollup; cross-boundary propagation
+- [ ] AS.5 - retire byte-locked seed SQL → semantic self-validation (`detect(gen) ⊇ intended`) replaces byte-identity
+- [ ] AS.6 - 4-way agreement + `TestScenarioCoverage` become the runtime linkage assertion over the spine
+- [ ] AS.7 - training/docs scenarios self-validated (can't lie / can't silently fail to demonstrate)
 
 
-Surfaced 2026-05-08 during `Y.2.gate.h.6` build. The runner now reads
-`cfg.default_l2_instance: tests/l2/sasquatch_pr.yaml` and threads it as
-`QS_GEN_TEST_L2_INSTANCE` into subprocess env_overrides — meaning the operator
-declares the L2 instance ONCE in cfg and the runner aligns the seed flow + the
-dataset-SQL smoke test automatically. **This makes the CLI's existing dual-arg
-shape (`-c <cfg.yaml> --l2 <l2.yaml>`) partially redundant**: every `quicksight-gen
-{schema|data|json|audit} {apply|clean|...}` invocation requires `--l2 <yaml>`
-even though the cfg now carries that pointer. The dual-yaml factoring itself
-may also be wrong now — a single combined cfg-with-L2-pointer (or a single
-yaml union) might be the right shape.
+  - X.10 — Runner: intra-cell layer DAG (deploy starts right after seed)
+    The per-cell chain `unit → seed_variant → db → app2 → deploy → api → browser` is run strictly serially today, but `db`, `app2`, and `deploy` only depend on `seed_variant` — they're true siblings. `deploy` is the long pole (~2 min: boto3 creates theme + datasource + ~30 datasets + 4 analyses + 4 dashboards, each waiting on QS's slow async `CREATION_SUCCESSFUL`); `db` (~45 s) + `app2` (~30 s) fit entirely inside it. Fan `{db, app2, deploy}` out with `asyncio.gather` after the seed, then gather `{api, browser}` after `deploy` → ~75 s saved per cell. Only `aw`-target cells benefit (`lo` cells already drop deploy/api/browser), so ~5 cells × 75 s ≈ ~6 min off a full-matrix run, plus a noticeable win on a single `--variants=sp_or_aw` iteration loop. The `asyncio` plumbing already exists (`Y.2.gate.c.6.async` cell-level `gather`) — this pushes it one level down. Fits Phase X's cloud-CI-cost theme: less wall-clock on `aw` cells = less RDS uptime per run.
 
-Spike-before-implement (per `feedback_spike_before_locking_implementation.md`):
-this is a CLI-surface change touching every operator command + every doc
-example + tests. Wrong factoring locks in for years.
+  - X.10.a `cell_chain` expresses deps, not just order. Today it returns an ordered `list[str]`; change to a small DAG (`{layer: frozenset[deps]}`) so `_run_one_variant` can topo-sort + gather sibling layers. Keep the same `cell_chain(spec, requested_chain)` truncation semantics (`up_to=app2` ⇒ no deploy/api/browser).
+  - X.10.b `_run_one_variant` gathers the sibling layers. After `seed_variant`: `await asyncio.gather(db, app2, deploy)`; after `deploy` succeeds: `await asyncio.gather(api, browser)`. Per-(variant, layer) artifact / timing / db-perf dirs are already distinct, so concurrent writes are fine. The 3× concurrent `pytest -n auto` "bringing up nodes…" spin-ups add CPU pressure but the dev box absorbs it.
+  - X.10.c Decide failure semantics for in-flight `deploy` (the one real wrinkle). If `db` fails while `deploy` is mid-flight, boto3 `create_data_set` calls aren't cleanly cancellable — cancelling orphans a half-deployed QS graph (the next `json clean` sweeps it, but it's messier than today's "halt at the failed layer, nothing downstream started" guarantee). Default: let the in-flight `deploy` finish, report the `db` failure, skip `api`/`browser`. Document the choice; preserve the `EXIT_FAILURE` / `EXIT_NEEDS_OPERATOR` exit-code contract.
+  - X.10.d Unit tests for the DAG dispatch (`tests/unit/test_runner_skeleton.py`): topo order, sibling-gather, truncation, failure-skips-downstream. Mock the layer dispatch (no live DB/AWS).
+  - X.10.e Live wall-clock check + pyright + commit. Run `--variants=sp_pg_aw` (or `sp_or_aw`) before/after; record the delta in this entry. CLAUDE.md "Commands" section: update the chain description (`unit → seed → {db | app2 | deploy} → {api | browser}`).
+  - AA.A.10 (stretch) — Tree-walk picker→column derivation. Even after AA.A.9, `PickerSpec.column` is still hand-mapped (1 line per picker referencing the dataset projection column). The tree carries the wiring formally: `ParameterControl.parameter` → `Parameter.mapped_dataset_params` → `(dataset, dataset_param_name)` → dataset SQL's `<<$p>>` substitution site → the column it compares. Either parse the dataset SQL to find the column the param narrows on, OR annotate `DataSetParameter` with a `narrows_column` field at construction time (production-code surface change). Result: spec carries only sheet/visual/builder/order — every PickerSpec disappears, the helper derives the full picker→column map from the tree. Plan + spike before locking the annotation-vs-parse path.
+  - AA.A.11 Cross-corpus duplication lint (test ↔ src), paired approaches 1+3. User-flagged 2026-05-17 as "huge structural win": every duplicated SQL string between `tests/` and `src/` is a second codebase that can pass while production breaks, or vice versa. Approach 1 (content-based AST lint walking `tests/` for SQL fingerprints + cross-referencing `src/`) + Approach 3 (provenance lint — require values in test assertions to come from `import` of src, not inline literal). Both, not either alone — Approach 1 catches today's drift, Approach 3 catches future drift before it can happen. Approach 2 (jscpd/PMD CPD) deliberately rejected (non-Rust). Spike-before-implement: throwaway script measuring false-positive rate at various length thresholds; allowlist syntax (sibling comment vs central registry); cheap-enough for unit prelude vs opt-in lint mode.
+  - AA.A.l2ft rails-inverse.4 — Type-encode the `table_rows()` invariant. `table_rows()` for narrowing-assertion sites is a smell — the picker-row-survival contract is about SQL row count, not DOM visibility. Consider deprecating `len(table_rows())` for assertion use, or renaming to `dom_visible_rows()` so the cap is obvious at call sites.
+  - AA.A.daterange.3 (BACKLOGGED) — Structural refactor: single DATE_RANGE control. Replace each sheet's `(ParameterDateTimePickerControl Date From + ParameterDateTimePickerControl Date To + TimeRangeFilter)` triplet with one `FilterDateTimePickerControl(Type="DATE_RANGE")`. Closes the "from > to" UX footgun structurally and aligns L1 / L2FT / Exec with Investigation. **Wall:** L1's multi-dataset-per-sheet model needs a sharing mechanism — the filter-bound widget pattern Investigation uses binds to ONE filter on ONE dataset. Options: (a) consolidate L1 datasets per sheet (schema work), (b) accept one widget per dataset per sheet (UX noise), (c) find a QS mechanism for one widget driving multiple parameter-bound filters via parameter intermediates. Spike before locking direction.
+  - AA.A.daterange.4 (BACKLOGGED) — App2 renderer for widget-bound DATE_RANGE. Already proven for Investigation; would extend to the new L1/L2FT/Exec range controls. Follows .3.
+  - AA.A.daterange.5 (BACKLOGGED) — Test infra. `apply_anchor_to_pickers` for date pickers becomes "set the range to span anchor's date ±1 day" instead of separate from/to. Single picker spec, not two. Follows .3.
+  The standing "Phase Q" thread (Q.1–Q.5 + Q.3.a shipped; see Phase history). What's still open: the CLI-shape revisit below, plus the older "schema ergonomics around the L2 yaml" item (task #488 — fold into Q.6's spike or its own sub-item when scoped). Queues behind Phase X.
 
-    - [ ] Q.6 CLI shape revisit: cfg ⇄ L2 dual-yaml factoring
-      - [>] Q.6.0 SPIKE: combined-yaml vs cfg-with-L2-pointer vs status-quo
+  Surfaced 2026-05-08 during `Y.2.gate.h.6` build. The runner now reads
+  `cfg.default_l2_instance: tests/l2/sasquatch_pr.yaml` and threads it as
+  `QS_GEN_TEST_L2_INSTANCE` into subprocess env_overrides — meaning the operator
+  declares the L2 instance ONCE in cfg and the runner aligns the seed flow + the
+  dataset-SQL smoke test automatically. **This makes the CLI's existing dual-arg
+  shape (`-c <cfg.yaml> --l2 <l2.yaml>`) partially redundant**: every `quicksight-gen
+  {schema|data|json|audit} {apply|clean|...}` invocation requires `--l2 <yaml>`
+  even though the cfg now carries that pointer. The dual-yaml factoring itself
+  may also be wrong now — a single combined cfg-with-L2-pointer (or a single
+  yaml union) might be the right shape.
+
+  Spike-before-implement (per `feedback_spike_before_locking_implementation.md`):
+  this is a CLI-surface change touching every operator command + every doc
+  example + tests. Wrong factoring locks in for years.
+
+  - [ ] Q.6 - CLI shape revisit: cfg ⇄ L2 dual-yaml factoring
+  - [>] Q.6.0 - SPIKE: combined-yaml vs cfg-with-L2-pointer vs status-quo
   (LOCKED 2026-05-08; spike before Q.6.1).** Output `docs/audits/y_11_cli_shape_spike.md`.
   Compare the candidate factorings against today's two-yaml shape:
 
@@ -534,66 +265,19 @@ example + tests. Wrong factoring locks in for years.
   **Likely outcome (to validate in spike):** A or D. A is the smallest delta;
   D is the cleanest if multi-L2-per-cfg becomes common.
 
-      - [ ] Q.6.1 Implement per spike result. Updates touch `cli/json.py`,
+  - [ ] Q.6.1 - Implement per spike result. Updates touch `cli/json.py`,
   `cli/schema.py`, `cli/data.py`, `cli/audit.py`, `cli/_helpers.py::resolve_l2_for_demo`,
   every CLAUDE.md / README / handbook example, every test that invokes
   `runner.invoke([...,"--l2",...])`, and every CI workflow YAML that uses
   `--l2`. Migration warning for at least one minor version.
-      - [ ] Q.6.2 Sweep memory entries + docs for stale `--l2 <yaml>` references.
-      - [ ] Q.6.3 Update CLAUDE.md "Commands" block to show the new shape as
+  - [ ] Q.6.2 - Sweep memory entries + docs for stale `--l2 <yaml>` references.
+  - [ ] Q.6.3 - Update CLAUDE.md "Commands" block to show the new shape as
   canonical; keep the explicit `--l2` form as the "multi-instance / explicit
   override" sub-pattern.
-      - [>] Q.6.4 Bump version (breaking CLI change — post-v9.0.0) + RELEASE_NOTES
+  - [>] Q.6.4 - Bump version (breaking CLI change — post-v9.0.0) + RELEASE_NOTES
   entry highlighting the simplification + migration recipe.**
 
----
-
-## Sustainment & minor features
-
-Backlog beyond Phase X. Promote to a numbered phase entry when scope justifies it.
-
-### L2 model gaps
-
-- **Multiple dashboards from one L2 instance** (shared prefix + naming).
-- **PR dashboard → generic L2-validation dashboard** (re-skinning of L2FT for a different validation persona).
-
-### Demo seed quality
-
-- **Baseline generator should produce a reconciling ledger — the planted scenarios should be the *only* L1-invariant violations** (surfaced 2026-05-12 during X.2.j.A; relates to closed `#525 Drift bug: rewrite _emit_baseline_daily_balances`). `emit_full_seed`'s baseline (before plants) leaves incidental violations that swamp the explicitly-planted lessons — at `data apply` (densified) density: `spec_example` shows ~70 `_drift` (leaf) + ~236 `_overdraft` rows against only ~1 explicitly-planted drift cell; `sasquatch_pr` shows 10 `_drift` + 98 `_overdraft`. The demo's pedagogy ("teach error classes, not topology" — see `feedback_demo_teaches_error_classes`) wants the matview rows to *be* the planted scenarios, not planted + noise; the 4-way agreement test's `expected ⊆ direct_SQL` shape tolerates the noise but `direct_SQL == expected` would be cleaner. Fix: make the per-Rail leg loop + daily-balance materialization (`common/l2/seed.py`) double-entry-exact so a baseline-only feed has zero `_drift`/`_overdraft`/`_ledger_drift` rows; encode as a **generator-invariant unit test** ("re-emit baseline-only `emit_full_seed`, assert the L1-invariant matviews are empty"), instance-agnostic but run on `spec_example` (hash-locked → a generator change shows up loud). The intraday-negative-balance-snapshot path (a balance dips negative mid-day before a credit lands, and the EOD snapshot catches it) is one suspected source for `_overdraft`. **Separate symptom, `sasquatch_pr`-specific:** parent `_ledger_drift` — `sasquatch_pr` shows 90 rows (worst day $50.3M), `spec_example` shows 0 — so the parent/child ledger-balance theorem fails only at `sasquatch_pr`'s topology. Needs its own `sasquatch_pr`/fuzz repro; can't be reproduced (or fixed) against `spec_example`.
-
-### Dashboard polish
-
-- **Executives Transaction Volume + Money Moved — metadata grouping** (was Q.1.c.6). Needs L2-instance-aware metadata key dropdowns (cascading Key + Value like L2FT Rails sheet) plus a dataset pivot to expose metadata as a dim. Bigger than a punch-list item; queue as its own sub-phase.
-
-
-- **Mobile / responsive.** Tailwind handles the layout primitives but no explicit mobile-first design pass. Promote when there's a customer story. Note: dashboards are dense by nature; mobile may always be a worse experience than desktop, regardless of effort.
-- **Per-table CSV / XLSX export.** Operators expect "export to spreadsheet" on tables (QS has it). Lower priority than feature parity — punt unless it's a small agent task. The audit PDF already covers the "regulator-ready snapshot" case; spreadsheet export is for analyst self-serve.
-
-### Audit / data evaluation
-
-- **Postgres dataset evaluator** — given a connection, evaluate whether all exception cases are present; report stats on the CLI.
-
-### Tech debt
-
-- **QuickSight datasource auto-create over a VPC endpoint** (kicked to backlog 2026-05-11; was a note under X.7). Auto-creating a QS datasource that has to traverse a VPC endpoint needs a `VpcConnectionArn` on the `create-data-source` call. Groundwork is done + parked on branch `hotfix-v8.7.4-vpc-connection-arn` (NOT merged): `VpcConnectionProperties` dataclass in `models.py`, `vpc_connection_arn` in `Config` + allowlist + `load_config`, wired into `build_datasource`, config-loader + datasource-emit tests cover it, version bumped + RELEASE_NOTES drafted. Held because QS VPC connections carry an hourly cost — revisit alongside the cloud-cost work (now-closed X.7's spirit) or when a customer actually needs a VPC-fronted datasource. See `project_vpc_endpoint_parked` memory.
-- **Encode more invariants in the type system.** K.2 did this for drill-param shape compatibility; Phase L's tree primitives close another big chunk. What remains after L is the candidate list for the next round.
-- ~~**Fold the biome JS lint into the test runner, like pyright.**~~ *(done, 2026-05-12.)* `conftest.py::pytest_sessionstart` now runs `biome check --max-diagnostics=400` alongside the pyright gate — `biome check` exits non-zero on lint *errors* (e.g. `noInnerDeclarations`) and zero on warnings, so the gate fires before any test collects (`pytest.exit(returncode=2)`); opt out with `QS_GEN_SKIP_BIOME=1`. `biome` is a standalone Rust binary (brew locally; `biomejs/setup-biome@v2` in CI), not an npm/pip package — when it's not on `PATH` the gate skips cleanly (same posture pyright has if it's missing). Bare `pytest tests/`, `./run_tests.sh up_to=unit`, and `ci.yml::test` all enforce it. (Why not a `[dev]` dep like `pyright` / `pytailwindcss`? The Biome project hasn't published an *official* PyPI package yet — in flight at biomejs/biome#8818. The unofficial `biome-js` wrapper bundles the Rust binary like `ruff` does, but ships only a `manylinux_2_28_x86_64` wheel — no macOS / arm64 / sdist, and it's a stale single release on Biome 2.3.x — so adding it would break `uv sync --extra dev` off linux-x86_64. Biome therefore stays a system binary; the `[dev]` block carries a NB comment recording this + a "revisit when biomejs/biome#8818 merges" pointer. `dev_setup`: `brew install biome`, or any of biome's install methods. **Follow-on when biomejs/biome#8818 lands:** add the official package to `[dev]`, drop the `setup-biome` CI step + the system-binary fallback in conftest / install.md.)
-- **Drop `_oracle_lowercase_alias_wrapper`; emit dialect-natural identifier case from the generator** (was Y.3.f, parked 2026-05-09). DDL is emitted unquoted (PG folds lowercase, Oracle UPPERCASE → divergent storage); `_oracle_lowercase_alias_wrapper` (`common/dataset_contract.py`) bolts an outer `SELECT qs_inner."ACCOUNT_ID" AS "account_id" ...` so QuickSight (which builds `SELECT "account_id" FROM (...)` from its declared lowercase Columns) finds matching aliases. The proper fix — generator emits dialect-natural case in `DatasetContract.to_input_columns()`, QS quotes UPPERCASE on Oracle natively, wrapper gone — is bigger than it looks: QuickSight's analysis-side validation is *case-sensitive* against `Dataset.Columns` (Y.3.f.2's reverted Oracle-deploy probe surfaced 45 column-missing errors), so it requires case-folding ~30+ analysis-side column refs per dialect (visuals / filters / calc-fields / drills), not just the Columns declaration. The original App2 Oracle column-casing bug it would have fixed was instead fixed narrowly by Y.3.f.alt (`wrap_for_visual` quotes its column refs). Re-spike if the dialect-helper count grows past ~60, or if SQLite gets dropped from the matrix. See `project_qs_analysis_validates_columns_case_sensitive` memory.
-    - [ ] Post.0 X.2 App 2 polish (queued — not part of phase X scope)
-      - [ ] X.2.dashboards.1 Dashboards-local L1 dashboard render errors (surfaced 2026-05-10, X.2.g.4 territory, NOT a Y.2.g regression). With the Y.2.g.2.d pool-lifespan fix landed, `dashboards --app l1_dashboard` now starts cleanly + the drift KPI fetches data from the live matview, but other L1 visuals throw render errors in Dashboards (operator observed during the manual local pass; smoke + drift KPI work, broader rendering doesn't). This is per-visual coverage in `_tree_fetcher` / `wrap_for_visual` — investigation/L2FT shipped via X.2.g.{2,3} with the same pattern, so the gap is L1-specific visual kinds the renderer hasn't grown arms for yet (KPIs work, tables / line-charts may not). Triage: capture the failing visual_ids + the renderer error, extend `_tree_fetcher.wrap_for_visual` with the missing arms, mirror the Investigation/L2FT shape. Out of Y.2.g scope (Dashboards visual coverage ≠ pushdown SQL); on the X.2.g roadmap.
-      - [ ] X.7.cleanup.1 CI/release cleanup steps target the wrong scope — `database-2` + QS leak (captured 2026-05-10; non-trivial, pick a fix before doing). Three related bugs, all "the cleanup ran but cleaned the wrong thing", all harmless functionally (no impact on the release publishing / e2e passing) but they leak resources:
-    1. **`e2e.yml::cleanup-pg::schema clean -c /tmp/ci-pg.yaml`** (no `--l2`) drops `spec_example_*` tables — but `e2e-pg-api` runs the runner with `--variants=sp_pg_aw`, which synthesizes an L2 with `instance: sp_pg_aw` → creates `sp_pg_aw_*` tables. So `cleanup-pg` drops a table set nothing created; the actual `sp_pg_aw_*` (and on cron, `sp_pg_aw_*` from `e2e-pg-browser`) accumulate in the operator's `database-2` forever. (Pre-existing, surfaced during the gate.l.8 work.)
-    2. **The runner's `teardown_variant` for an `aw` target doesn't `DROP` the per-variant `<spec.name>_*` schema it created** (it only no-ops the AWS env / drops `lo` containers). This is the *source* of #1's leak — if the runner self-cleaned its aw tables, `cleanup-pg` wouldn't need to schema-clean at all.
-    3. **`release.yml::e2e-against-testpypi::Cleanup (always)` passes `--l2 /tmp/release-l2.yaml` to `quicksight-gen json clean`** — but `json clean` has no `--l2` option (only `-c` / `-o` / `--all` / `--execute`), so it exits nonzero, `|| true` swallows it, and the step is a no-op → the `qs-release-<tag>-rel_<tag>-*` QS resources (deployed with `--l2 /tmp/release-l2.yaml` → tagged `L2Instance: rel_<tag>`, which `json clean` defaulting to `spec_example` won't match anyway) linger in QuickSight. **Fix:** swap that line to `json clean -c /tmp/release-e2e.yaml --all --execute` — `--all` purge mode sweeps everything matching the cfg's `resource_prefix` (`qs-release-<tag>`) regardless of L2Instance tag, which is exactly the one resource set the release-e2e job deployed. (Introduced by gate.l.8, 2026-05-10.)
-    **Fix options for #1+#2:** (a) make the runner's `teardown_variant` `DROP` the `<spec.name>_*` tables on `aw` teardown — robust, but a runner change touching the seed/teardown path; (b) have `cleanup-pg` re-synthesize the variant L2 (`sed "s/^instance:.*/instance: sp_pg_aw/" tests/l2/spec_example.yaml > /tmp/sp.yaml; schema clean -c /tmp/ci-pg.yaml --l2 /tmp/sp.yaml`) — quick but hardcodes the variant names; (c) a "sweep test tables" step that drops any `<test-variant-pattern>_transactions`-shaped table. **Recommend (a)** — it's the right home for "the runner cleans up after itself". #3 is a trivial one-liner (use `--all`); fold it into whichever release.yml touch comes next (or a tiny hotfix). All three are queued, not started — pick the approach when convenient.
-
-### Known platform limitations — do not re-attempt without new evidence
-
-- **QS URL-parameter control sync** — K.4.7 cross-app drills dropped. URL fragment sets the parameter store but doesn't push values into bound controls. Re-entry conditions: AWS fix, custom embedded app via `setParameters()` SDK, or a new URL form that triggers control sync. See `PLAN_ARCHIVE.md` for full re-entry details.
-- **QS dropdown click target is the middle grey bar** — `ParameterDropDownControl` only opens on the inner grey bar; clicking the visible edge does nothing. Suggest before investigating "unresponsive dropdown" reports.
-- **QS silent-fail mode** — datasets healthy + describe-cleanly, every visual on every sheet shows the spinner forever. See CLAUDE.md → Operational Footguns for the diagnostic ladder.
-
-## Backlog (not yet phased)
+# Backlog (not yet phased)
 
 - **SPIKE: combined-yaml vs cfg-with-L2-pointer vs status-quo** — deferred from Q.6.0 on 2026-05-19.
 - **Bump version (breaking CLI change — post-v9.0.0) + RELEASE_NOTES** — deferred from Q.6.4 on 2026-05-19.
@@ -604,3 +288,10 @@ Backlog beyond Phase X. Promote to a numbered phase entry when scope justifies i
 - **Local scripts: same pattern — own ephemeral DB per local run, pointed at the one standing Enterprise QS account.** — deferred from AD.E.3 on 2026-05-20.
 - **Per-run cleanup verification: after deploy→teardown, both the DB and any QS resources tagged with the run's deployment_name are gone (no orphans). `tests/e2e/test_cleanup_completeness.py` shape.** — deferred from AD.E.4 on 2026-05-20.
 - **Verify chain + commit; confirm idle RDS → ~$0 between runs in CE.** — deferred from AD.E.5 on 2026-05-20.
+- Model-driven docs (drift reduction)
+- AA.0 Dashboard UX + exception literacy *(COMPLETE — shipped v10.1.0a1; full plan archived in `PLAN_ARCHIVE.md` → "Phase AA")*
+- Phase Q (continued) — CLI / YAML ergonomics
+- **Mobile / responsive.** Tailwind handles the layout primitives but no explicit mobile-first design pass. Promote when there's a customer story. Note: dashboards are dense by nature; mobile may always be a worse experience than desktop, regardless of effort.
+- **Per-table CSV / XLSX export.** Operators expect "export to spreadsheet" on tables (QS has it). Lower priority than feature parity — punt unless it's a small agent task. The audit PDF already covers the "regulator-ready snapshot" case; spreadsheet export is for analyst self-serve.
+- ~~**Fold the biome JS lint into the test runner, like pyright.**~~ *(done, 2026-05-12.)* `conftest.py::pytest_sessionstart` now runs `biome check --max-diagnostics=400` alongside the pyright gate — `biome check` exits non-zero on lint *errors* (e.g. `noInnerDeclarations`) and zero on warnings, so the gate fires before any test collects (`pytest.exit(returncode=2)`); opt out with `QS_GEN_SKIP_BIOME=1`. `biome` is a standalone Rust binary (brew locally; `biomejs/setup-biome@v2` in CI), not an npm/pip package — when it's not on `PATH` the gate skips cleanly (same posture pyright has if it's missing). Bare `pytest tests/`, `./run_tests.sh up_to=unit`, and `ci.yml::test` all enforce it. (Why not a `[dev]` dep like `pyright` / `pytailwindcss`? The Biome project hasn't published an *official* PyPI package yet — in flight at biomejs/biome#8818. The unofficial `biome-js` wrapper bundles the Rust binary like `ruff` does, but ships only a `manylinux_2_28_x86_64` wheel — no macOS / arm64 / sdist, and it's a stale single release on Biome 2.3.x — so adding it would break `uv sync --extra dev` off linux-x86_64. Biome therefore stays a system binary; the `[dev]` block carries a NB comment recording this + a "revisit when biomejs/biome#8818 merges" pointer. `dev_setup`: `brew install biome`, or any of biome's install methods. **Follow-on when biomejs/biome#8818 lands:** add the official package to `[dev]`, drop the `setup-biome` CI step + the system-binary fallback in conftest / install.md.)
+- **Drop `_oracle_lowercase_alias_wrapper`; emit dialect-natural identifier case from the generator** (was Y.3.f, parked 2026-05-09). DDL is emitted unquoted (PG folds lowercase, Oracle UPPERCASE → divergent storage); `_oracle_lowercase_alias_wrapper` (`common/dataset_contract.py`) bolts an outer `SELECT qs_inner."ACCOUNT_ID" AS "account_id" ...` so QuickSight (which builds `SELECT "account_id" FROM (...)` from its declared lowercase Columns) finds matching aliases. The proper fix — generator emits dialect-natural case in `DatasetContract.to_input_columns()`, QS quotes UPPERCASE on Oracle natively, wrapper gone — is bigger than it looks: QuickSight's analysis-side validation is *case-sensitive* against `Dataset.Columns` (Y.3.f.2's reverted Oracle-deploy probe surfaced 45 column-missing errors), so it requires case-folding ~30+ analysis-side column refs per dialect (visuals / filters / calc-fields / drills), not just the Columns declaration. The original App2 Oracle column-casing bug it would have fixed was instead fixed narrowly by Y.3.f.alt (`wrap_for_visual` quotes its column refs). Re-spike if the dialect-helper count grows past ~60, or if SQLite gets dropped from the matrix. See `project_qs_analysis_validates_columns_case_sensitive` memory.
