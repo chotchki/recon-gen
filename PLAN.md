@@ -151,7 +151,7 @@ The destination: invariant as single source of truth, with generators + views re
 
 - [x] AS.0 - Plan/spike the spine rollout decomposition (lock the `src/` home + the taxonomy migration order before building)
 - [x] AS.1 - promote `Violation` / `Invariant` / `ViolationGenerator` / `View` types to `src/`
-- [ ] AS.2 - unify the fractured taxonomy: `PlantKind` (20) ⋈ `check_type` (~10 untyped) → one closed `Violation` taxonomy; total `invariant→{generators,views}` maps, exhaustiveness-checked (data/deadline windows stay invariant-owned)
+- [x] AS.2 - unify the fractured taxonomy: `PlantKind` (20) ⋈ `check_type` (~10 untyped) → one closed `Violation` taxonomy; total `invariant→{generators,views}` maps, exhaustiveness-checked (data/deadline windows stay invariant-owned)
 - [ ] AS.3 - generator = stateful fold carrying `(balances, active-violation-set)`; `Invariant.scenario_for(shape, selector)`; non-violating = perturbation off
 - [ ] AS.4 - cross-account VECTOR state (AP.2's honest limit): legs net to zero across accounts; `ledger_drift` parent rollup; cross-boundary propagation
 - [ ] AS.5 - retire byte-locked seed SQL → semantic self-validation (`detect(gen) ⊇ intended`) replaces byte-identity

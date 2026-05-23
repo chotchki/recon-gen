@@ -25,7 +25,7 @@ Promoted from `tests/unit/test_as0_drift_full_spine.py` by AS.1.
 from __future__ import annotations
 
 import sqlite3
-from typing import Protocol, runtime_checkable
+from typing import ClassVar, Protocol, runtime_checkable
 
 from recon_gen.common.spine.violation import Violation
 
@@ -34,8 +34,12 @@ from recon_gen.common.spine.violation import Violation
 class Invariant(Protocol):
     """A rule + detector. Concrete invariants implement this via:
 
-    1. A `name` class attribute matching the production matview suffix
-       (`"drift"` reads from `<prefix>_drift`, etc.).
+    1. A `name` `ClassVar[str]` matching the production matview suffix —
+       ``"drift"`` reads from ``<prefix>_drift``, etc. ClassVar here so
+       concrete impls (frozen dataclasses) declare ``name: ClassVar[str]
+       = "..."`` without ever shadowing it as an instance attribute. The
+       Protocol-variance dance pyright cares about: ClassVar on both
+       sides keeps the read-only contract honest.
     2. A `detect(conn)` method returning the breaches currently in the
        data, as a `set[Violation]`.
 
@@ -44,6 +48,6 @@ class Invariant(Protocol):
     map needs runtime lookup, not just static type checking.
     """
 
-    name: str
+    name: ClassVar[str]
 
     def detect(self, conn: sqlite3.Connection) -> set[Violation]: ...

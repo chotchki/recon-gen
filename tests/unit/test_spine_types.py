@@ -13,6 +13,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from datetime import date
+from typing import ClassVar
 
 from recon_gen.common.spine import (
     SCENARIO_BASE_SEED,
@@ -85,7 +86,7 @@ class _TrivialInvariant:
     """Smallest possible Invariant impl — for shape testing only.
     AS.2 promotes the real concretes (DriftInvariant etc.)."""
 
-    name: str = "trivial"
+    name: ClassVar[str] = "trivial"
 
     def detect(self, conn: sqlite3.Connection) -> set[Violation]:
         return set()  # never fires; just satisfies the Protocol

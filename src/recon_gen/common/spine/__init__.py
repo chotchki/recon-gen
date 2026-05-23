@@ -31,16 +31,37 @@ What is NOT here:
 
 from __future__ import annotations
 
+from recon_gen.common.spine.drift import (
+    DriftGenerator,
+    DriftInvariant,
+    LedgerDriftInvariant,
+)
 from recon_gen.common.spine.generator import ViolationGenerator
 from recon_gen.common.spine.invariant import Invariant
+from recon_gen.common.spine.registry import (
+    INVARIANT_GENERATOR_EDGES,
+    generators_for,
+    invariants_for,
+    iter_edges,
+)
 from recon_gen.common.spine.rng import SCENARIO_BASE_SEED, scenario_rng
 from recon_gen.common.spine.violation import Violation
 
 __all__ = [
+    # Protocols + currency type (AS.1)
     "Violation",
     "Invariant",
     "ViolationGenerator",
-    # AS.1 cleanup: deterministic RNG factory + convention.
+    # Deterministic RNG factory (AS.1 follow-on)
     "scenario_rng",
     "SCENARIO_BASE_SEED",
+    # Drift family — concrete invariants + generator (AS.2)
+    "DriftInvariant",
+    "LedgerDriftInvariant",
+    "DriftGenerator",
+    # Many-to-many registry (AS.2)
+    "INVARIANT_GENERATOR_EDGES",
+    "invariants_for",
+    "generators_for",
+    "iter_edges",
 ]
