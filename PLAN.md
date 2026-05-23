@@ -379,11 +379,18 @@ is the production rollout for the two L2 classes. AT.0 redecomposes from AS's re
   - [x] AT.5.c - **QS Investigation dashboard ⋈ direct-matview agreement**.
     Heaviest leg. AWS QS deploy of Investigation + InvestigationDriver
     projections.
-  - [ ] AT.5.d - **Investigation PDF section ⋈ direct-matview agreement**
-    (if the audit PDF carries Investigation sections; spike first to check
-    whether the section exists, then extend).
-  - [ ] AT.5.e - **Compose into parametrized `test_invariant_four_way_agreement`**
-    (or sibling test for L2). Cross-renderer assertion in one place.
+  - [x] AT.5.d - **Investigation PDF section ⋈ direct-matview agreement** —
+    **NOT APPLICABLE** (decision recorded 2026-05-23 after spike). The audit
+    PDF stops at L1 (drift / overdraft / limit_breach / stuck_* / supersession
+    + daily statement walks); anomaly + money_trail surface only on the
+    Investigation dashboard. Different audience by design: PDF is for the
+    regulator + accounting-trail invariants, Investigation is for the AML
+    analyst + fraud-pattern detection. AT.5 gate composes 3 renderers (spine
+    ⊆ direct_matview == App2 == QS), not 4. L1's PDF leg remains; L2's gate
+    is intentionally 3-way.
+  - [x] AT.5.e - AT.5.e — Compose parametrized `test_inv_three_way_agreement`
+    (or sibling test for L2). Cross-renderer assertion in one place. (3-way
+    not 4-way per AT.5.d's decision — no PDF leg.)
   - [ ] AT.5.f - **Scenario-plant lower-bound counts** — extend
     `expected_audit_counts` to include anomaly + money_trail.
 - [ ] AT.6 - L2 training/docs scenarios self-validated (anomaly + money_trail scenarios
