@@ -186,111 +186,28 @@ The destination: invariant as single source of truth, with generators + views re
 - [ ] AS.6 - 4-way agreement + `TestScenarioCoverage` become the runtime linkage assertion over the spine
 - [ ] AS.7 - training/docs scenarios self-validated (can't lie / can't silently fail to demonstrate)
 
-
-  - X.10 — Runner: intra-cell layer DAG (deploy starts right after seed)
-    The per-cell chain `unit → seed_variant → db → app2 → deploy → api → browser` is run strictly serially today, but `db`, `app2`, and `deploy` only depend on `seed_variant` — they're true siblings. `deploy` is the long pole (~2 min: boto3 creates theme + datasource + ~30 datasets + 4 analyses + 4 dashboards, each waiting on QS's slow async `CREATION_SUCCESSFUL`); `db` (~45 s) + `app2` (~30 s) fit entirely inside it. Fan `{db, app2, deploy}` out with `asyncio.gather` after the seed, then gather `{api, browser}` after `deploy` → ~75 s saved per cell. Only `aw`-target cells benefit (`lo` cells already drop deploy/api/browser), so ~5 cells × 75 s ≈ ~6 min off a full-matrix run, plus a noticeable win on a single `--variants=sp_or_aw` iteration loop. The `asyncio` plumbing already exists (`Y.2.gate.c.6.async` cell-level `gather`) — this pushes it one level down. Fits Phase X's cloud-CI-cost theme: less wall-clock on `aw` cells = less RDS uptime per run.
-
-  - X.10.a `cell_chain` expresses deps, not just order. Today it returns an ordered `list[str]`; change to a small DAG (`{layer: frozenset[deps]}`) so `_run_one_variant` can topo-sort + gather sibling layers. Keep the same `cell_chain(spec, requested_chain)` truncation semantics (`up_to=app2` ⇒ no deploy/api/browser).
-  - X.10.b `_run_one_variant` gathers the sibling layers. After `seed_variant`: `await asyncio.gather(db, app2, deploy)`; after `deploy` succeeds: `await asyncio.gather(api, browser)`. Per-(variant, layer) artifact / timing / db-perf dirs are already distinct, so concurrent writes are fine. The 3× concurrent `pytest -n auto` "bringing up nodes…" spin-ups add CPU pressure but the dev box absorbs it.
-  - X.10.c Decide failure semantics for in-flight `deploy` (the one real wrinkle). If `db` fails while `deploy` is mid-flight, boto3 `create_data_set` calls aren't cleanly cancellable — cancelling orphans a half-deployed QS graph (the next `json clean` sweeps it, but it's messier than today's "halt at the failed layer, nothing downstream started" guarantee). Default: let the in-flight `deploy` finish, report the `db` failure, skip `api`/`browser`. Document the choice; preserve the `EXIT_FAILURE` / `EXIT_NEEDS_OPERATOR` exit-code contract.
-  - X.10.d Unit tests for the DAG dispatch (`tests/unit/test_runner_skeleton.py`): topo order, sibling-gather, truncation, failure-skips-downstream. Mock the layer dispatch (no live DB/AWS).
-  - X.10.e Live wall-clock check + pyright + commit. Run `--variants=sp_pg_aw` (or `sp_or_aw`) before/after; record the delta in this entry. CLAUDE.md "Commands" section: update the chain description (`unit → seed → {db | app2 | deploy} → {api | browser}`).
-  - AA.A.10 (stretch) — Tree-walk picker→column derivation. Even after AA.A.9, `PickerSpec.column` is still hand-mapped (1 line per picker referencing the dataset projection column). The tree carries the wiring formally: `ParameterControl.parameter` → `Parameter.mapped_dataset_params` → `(dataset, dataset_param_name)` → dataset SQL's `<<$p>>` substitution site → the column it compares. Either parse the dataset SQL to find the column the param narrows on, OR annotate `DataSetParameter` with a `narrows_column` field at construction time (production-code surface change). Result: spec carries only sheet/visual/builder/order — every PickerSpec disappears, the helper derives the full picker→column map from the tree. Plan + spike before locking the annotation-vs-parse path.
-  - AA.A.11 Cross-corpus duplication lint (test ↔ src), paired approaches 1+3. User-flagged 2026-05-17 as "huge structural win": every duplicated SQL string between `tests/` and `src/` is a second codebase that can pass while production breaks, or vice versa. Approach 1 (content-based AST lint walking `tests/` for SQL fingerprints + cross-referencing `src/`) + Approach 3 (provenance lint — require values in test assertions to come from `import` of src, not inline literal). Both, not either alone — Approach 1 catches today's drift, Approach 3 catches future drift before it can happen. Approach 2 (jscpd/PMD CPD) deliberately rejected (non-Rust). Spike-before-implement: throwaway script measuring false-positive rate at various length thresholds; allowlist syntax (sibling comment vs central registry); cheap-enough for unit prelude vs opt-in lint mode.
-  - AA.A.l2ft rails-inverse.4 — Type-encode the `table_rows()` invariant. `table_rows()` for narrowing-assertion sites is a smell — the picker-row-survival contract is about SQL row count, not DOM visibility. Consider deprecating `len(table_rows())` for assertion use, or renaming to `dom_visible_rows()` so the cap is obvious at call sites.
-  - AA.A.daterange.3 (BACKLOGGED) — Structural refactor: single DATE_RANGE control. Replace each sheet's `(ParameterDateTimePickerControl Date From + ParameterDateTimePickerControl Date To + TimeRangeFilter)` triplet with one `FilterDateTimePickerControl(Type="DATE_RANGE")`. Closes the "from > to" UX footgun structurally and aligns L1 / L2FT / Exec with Investigation. **Wall:** L1's multi-dataset-per-sheet model needs a sharing mechanism — the filter-bound widget pattern Investigation uses binds to ONE filter on ONE dataset. Options: (a) consolidate L1 datasets per sheet (schema work), (b) accept one widget per dataset per sheet (UX noise), (c) find a QS mechanism for one widget driving multiple parameter-bound filters via parameter intermediates. Spike before locking direction.
-  - AA.A.daterange.4 (BACKLOGGED) — App2 renderer for widget-bound DATE_RANGE. Already proven for Investigation; would extend to the new L1/L2FT/Exec range controls. Follows .3.
-  - AA.A.daterange.5 (BACKLOGGED) — Test infra. `apply_anchor_to_pickers` for date pickers becomes "set the range to span anchor's date ±1 day" instead of separate from/to. Single picker spec, not two. Follows .3.
-  The standing "Phase Q" thread (Q.1–Q.5 + Q.3.a shipped; see Phase history). What's still open: the CLI-shape revisit below, plus the older "schema ergonomics around the L2 yaml" item (task #488 — fold into Q.6's spike or its own sub-item when scoped). Queues behind Phase X.
-
-  Surfaced 2026-05-08 during `Y.2.gate.h.6` build. The runner now reads
-  `cfg.default_l2_instance: tests/l2/sasquatch_pr.yaml` and threads it as
-  `QS_GEN_TEST_L2_INSTANCE` into subprocess env_overrides — meaning the operator
-  declares the L2 instance ONCE in cfg and the runner aligns the seed flow + the
-  dataset-SQL smoke test automatically. **This makes the CLI's existing dual-arg
-  shape (`-c <cfg.yaml> --l2 <l2.yaml>`) partially redundant**: every `quicksight-gen
-  {schema|data|json|audit} {apply|clean|...}` invocation requires `--l2 <yaml>`
-  even though the cfg now carries that pointer. The dual-yaml factoring itself
-  may also be wrong now — a single combined cfg-with-L2-pointer (or a single
-  yaml union) might be the right shape.
-
-  Spike-before-implement (per `feedback_spike_before_locking_implementation.md`):
-  this is a CLI-surface change touching every operator command + every doc
-  example + tests. Wrong factoring locks in for years.
-
-  - [ ] Q.6 - CLI shape revisit: cfg ⇄ L2 dual-yaml factoring
-  - [>] Q.6.0 - SPIKE: combined-yaml vs cfg-with-L2-pointer vs status-quo
-  (LOCKED 2026-05-08; spike before Q.6.1).** Output `docs/audits/y_11_cli_shape_spike.md`.
-  Compare the candidate factorings against today's two-yaml shape:
-
-  - **A. Status quo + `--l2` defaults from `cfg.default_l2_instance`.**
-    Operator can omit `--l2`; cfg implies it; explicit `--l2 <yaml>` overrides.
-    Smallest delta, mostly-additive. Only one breaking case: cfg without
-    `default_l2_instance:` AND CLI without `--l2` becomes ambiguous (was an
-    error before; now silently uses bundled `default_l2_instance()` =
-    spec_example).
-  - **B. Single combined yaml.** Cfg + L2 merge into one file; CLI takes one
-    `-c <combined.yaml>`. Eliminates the dual-yaml friction entirely.
-    Trade-off: cfg yaml grows large (couple hundred lines for a real
-    institution); env-only fields (account, DB password, signing material)
-    co-mingle with institution-flavor fields (rails, chains, accounts) — the
-    Q.5 separation existed for a reason (dev secrets vs institution shape are
-    different release cadences).
-  - **C. Cfg-with-L2-pointer + `--l2` removed entirely.** Cfg ALWAYS carries
-    `default_l2_instance:` (made required); CLI drops `--l2`. Operators who
-    deploy multiple L2 instances against one cfg use multiple cfg files (one
-    per instance). Cleanest narrow change. Forces multi-instance operators to
-    duplicate cfg.
-  - **D. `--l2 <yaml>` becomes `--l2 <name>` indexed against an L2 registry
-    in cfg.** Cfg carries `l2_instances: { sasquatch_pr: tests/l2/sasquatch_pr.yaml,
-    spec_example: tests/l2/spec_example.yaml }` plus `default_l2_instance: sasquatch_pr`.
-    CLI: `--l2 spec_example` (named, short). Multi-instance operators get
-    cleaner ergonomics; single-instance operators still benefit from the
-    default. Trade-off: another layer of indirection.
-
-  **Constraint set:**
-  1. **Operator types `quicksight-gen json apply --execute` with no other
-     args** and gets a sane deploy of the default L2.
-  2. **Multi-L2 operators don't have to copy cfg files** to deploy each L2.
-  3. **Existing `--l2 <yaml>` invocations keep working** OR a clean migration
-     path is documented (sed-able rename, deprecation warning, etc.).
-  4. **Doc examples shrink** — every CLAUDE.md / README / handbook command
-     example currently shows `-c X --l2 Y`; the spike's chosen shape should
-     simplify the dominant single-instance case.
-  5. **Tests pass without env-var passthrough** — the runner's
-     `QS_GEN_TEST_L2_INSTANCE` injection (h.6) covers the test-side; the spike
-     decides whether the CLI grows the same default behavior for non-test
-     invocations.
-
-  **Likely outcome (to validate in spike):** A or D. A is the smallest delta;
-  D is the cleanest if multi-L2-per-cfg becomes common.
-
-  - [ ] Q.6.1 - Implement per spike result. Updates touch `cli/json.py`,
-  `cli/schema.py`, `cli/data.py`, `cli/audit.py`, `cli/_helpers.py::resolve_l2_for_demo`,
-  every CLAUDE.md / README / handbook example, every test that invokes
-  `runner.invoke([...,"--l2",...])`, and every CI workflow YAML that uses
-  `--l2`. Migration warning for at least one minor version.
-  - [ ] Q.6.2 - Sweep memory entries + docs for stale `--l2 <yaml>` references.
-  - [ ] Q.6.3 - Update CLAUDE.md "Commands" block to show the new shape as
-  canonical; keep the explicit `--l2` form as the "multi-instance / explicit
-  override" sub-pattern.
-  - [>] Q.6.4 - Bump version (breaking CLI change — post-v9.0.0) + RELEASE_NOTES
-  entry highlighting the simplification + migration recipe.**
-
 # Backlog (not yet phased)
 
-- **SPIKE: combined-yaml vs cfg-with-L2-pointer vs status-quo** — deferred from Q.6.0 on 2026-05-19.
-- **Bump version (breaking CLI change — post-v9.0.0) + RELEASE_NOTES** — deferred from Q.6.4 on 2026-05-19.
-- **Dashboards-local L1 dashboard render errors (surfaced 2026-05-10, X.2.g.4 territory, NOT a Y.2.g regression). With the Y.2.g.2.d pool-lifespan fix landed, `dashboards --app l1_dashboard` now starts cleanly + the drift KPI fetches data from the live matview, but other L1 visuals throw render errors in Dashboards (operator observed during the manual local pass; smoke + drift KPI work, broader rendering doesn't). This is per-visual coverage in `_tree_fetcher` / `wrap_for_visual` — investigation/L2FT shipped via X.2.g.{2,3} with the same pattern, so the gap is L1-specific visual kinds the renderer hasn't grown arms for yet (KPIs work, tables / line-charts may not). Triage: capture the failing visual_ids + the renderer error, extend `_tree_fetcher.wrap_for_visual` with the missing arms, mirror the Investigation/L2FT shape. Out of Y.2.g scope (Dashboards visual coverage ≠ pushdown SQL); on the X.2.g roadmap.** — deferred from X.2.dashboards.1 on 2026-05-19.
-- **CI/release cleanup steps target the wrong scope — `database-2` + QS leak (captured 2026-05-10; non-trivial, pick a fix before doing). Three related bugs, all "the cleanup ran but cleaned the wrong thing", all harmless functionally (no impact on the release publishing / e2e passing) but they leak resources:** — deferred from X.7.cleanup.1 on 2026-05-19.
-- **IAM: widen the `rds-start-stop` inline policy → create/destroy on `recon-gen-local` + `Github_e2e_testing` (`rds:Create*/Delete*DBCluster/DBInstance`, DBSubnetGroup, `iam:PassRole` for monitoring, `ec2:` SG/subnet describe+authorize).** — deferred from AD.E.1 on 2026-05-20.
-- **CI: create a fresh DB per run → apply the current locked seed → drop after (NO snapshot — seeds churn every commit). Runner `up`/`down` lifecycle per `feedback_ephemeral_aws_infra`.** — deferred from AD.E.2 on 2026-05-20.
-- **Local scripts: same pattern — own ephemeral DB per local run, pointed at the one standing Enterprise QS account.** — deferred from AD.E.3 on 2026-05-20.
-- **Per-run cleanup verification: after deploy→teardown, both the DB and any QS resources tagged with the run's deployment_name are gone (no orphans). `tests/e2e/test_cleanup_completeness.py` shape.** — deferred from AD.E.4 on 2026-05-20.
-- **Verify chain + commit; confirm idle RDS → ~$0 between runs in CE.** — deferred from AD.E.5 on 2026-05-20.
-- Model-driven docs (drift reduction)
-- AA.0 Dashboard UX + exception literacy *(COMPLETE — shipped v10.1.0a1; full plan archived in `PLAN_ARCHIVE.md` → "Phase AA")*
-- Phase Q (continued) — CLI / YAML ergonomics
+- **Q.6 — CLI shape revisit: cfg ⇄ L2 dual-yaml factoring.** Surfaced 2026-05-08 during `Y.2.gate.h.6`. The runner reads `cfg.default_l2_instance` and threads `QS_GEN_TEST_L2_INSTANCE` to subprocesses, making the CLI's dual-arg shape (`-c <cfg.yaml> --l2 <l2.yaml>`) partially redundant. Spike-before-implement (per `feedback_spike_before_locking_implementation`); CLI-surface change touches every operator command + doc example + tests.
+  - **Q.6.0 SPIKE: combined-yaml vs cfg-with-L2-pointer vs status-quo** (LOCKED 2026-05-08; deferred from PLAN 2026-05-19). Output `docs/audits/y_11_cli_shape_spike.md`. Four candidates: **(A)** status quo + `--l2` defaults from `cfg.default_l2_instance` (smallest delta, mostly additive); **(B)** single combined yaml (eliminates dual-yaml friction but env-only fields co-mingle with institution-flavor — Q.5 separation existed for a reason); **(C)** cfg-with-L2-pointer + `--l2` removed entirely (forces multi-instance operators to duplicate cfg); **(D)** `--l2 <name>` indexed against an `l2_instances:` registry in cfg + `default_l2_instance:` (named ergonomics, one indirection layer). Constraints: (1) no-args `json apply --execute` deploys the default L2; (2) multi-L2 operators don't copy cfg files; (3) existing `--l2 <yaml>` keeps working or has a documented migration; (4) doc examples shrink; (5) tests pass without env-var passthrough. Likely outcome: A or D — A smallest delta, D cleanest if multi-L2-per-cfg becomes common.
+  - **Q.6.1–Q.6.3 implement per spike result.** Updates `cli/{json,schema,data,audit}.py`, `cli/_helpers.py::resolve_l2_for_demo`, every CLAUDE.md / README / handbook example, every `runner.invoke([..., "--l2", ...])` test, every CI workflow YAML that uses `--l2`. Migration warning ≥1 minor version. Sweep memory entries + docs for stale `--l2 <yaml>` refs. Update CLAUDE.md "Commands" block to show the new shape as canonical; keep explicit `--l2` form as the multi-instance/override sub-pattern.
+  - **Q.6.4 bump version (breaking CLI change — post-v9.0.0) + RELEASE_NOTES** (deferred from PLAN 2026-05-19) — entry highlighting the simplification + migration recipe.
+- **Dashboards-local L1 dashboard render errors (surfaced 2026-05-10, X.2.g.4 territory, NOT a Y.2.g regression).** With the Y.2.g.2.d pool-lifespan fix landed, `dashboards --app l1_dashboard` starts cleanly + the drift KPI fetches data from the live matview, but other L1 visuals throw render errors in Dashboards (smoke + drift KPI work, broader rendering doesn't). Per-visual coverage in `_tree_fetcher` / `wrap_for_visual` — investigation/L2FT shipped via X.2.g.{2,3} with the same pattern, so the gap is L1-specific visual kinds the renderer hasn't grown arms for yet. Triage: capture the failing visual_ids + renderer error, extend `wrap_for_visual` with the missing arms, mirror the Investigation/L2FT shape. Out of Y.2.g scope (Dashboards visual coverage ≠ pushdown SQL); on the X.2.g roadmap. *(deferred from PLAN 2026-05-19)*
+- **CI/release cleanup steps target the wrong scope — `database-2` + QS leak (captured 2026-05-10).** Three related bugs, all "the cleanup ran but cleaned the wrong thing," all functionally harmless (no impact on release publishing / e2e passing) but they leak resources. *(deferred from PLAN 2026-05-19; pick a fix before doing.)*
+- **IAM: widen the `rds-start-stop` inline policy → create/destroy on `recon-gen-local` + `Github_e2e_testing`** (`rds:Create*/Delete*DBCluster/DBInstance`, DBSubnetGroup, `iam:PassRole` for monitoring, `ec2:` SG/subnet describe+authorize). *(deferred from PLAN 2026-05-20)*
+- **CI: create a fresh DB per run → apply the current locked seed → drop after** (NO snapshot — seeds churn every commit). Runner `up`/`down` lifecycle per `feedback_ephemeral_aws_infra`. *(deferred from PLAN 2026-05-20)*
+- **Local scripts: same pattern — own ephemeral DB per local run, pointed at the one standing Enterprise QS account.** *(deferred from PLAN 2026-05-20)*
+- **Per-run cleanup verification:** after deploy→teardown, both the DB and any QS resources tagged with the run's `deployment_name` are gone (no orphans). `tests/e2e/test_cleanup_completeness.py` shape. *(deferred from PLAN 2026-05-20)*
+- **Verify chain + commit; confirm idle RDS → ~$0 between runs in CE.** *(deferred from PLAN 2026-05-20)*
+- **X.10 — Runner: intra-cell layer DAG (deploy starts right after seed).** The per-cell chain `unit → seed_variant → db → app2 → deploy → api → browser` runs strictly serially today, but `db` / `app2` / `deploy` only depend on `seed_variant` — they're siblings. `deploy` is the long pole (~2 min QS async creation); `db` (~45 s) + `app2` (~30 s) fit inside it. Fan `{db, app2, deploy}` with `asyncio.gather` after seed, then gather `{api, browser}` after `deploy` → ~75 s saved per `aw`-target cell (~6 min off a full-matrix run). The `asyncio` plumbing exists (`Y.2.gate.c.6.async`). Sub-tasks: (a) `cell_chain` returns a `{layer: frozenset[deps]}` DAG; (b) `_run_one_variant` topo-sorts + gathers siblings; (c) failure semantics for in-flight `deploy` (boto3 isn't cleanly cancellable — let it finish, report `db` failure, skip downstream); (d) unit tests for the DAG dispatch (topo/sibling-gather/truncation/failure-skips-downstream, mocked layer dispatch); (e) live wall-clock check, pyright, commit; update CLAUDE.md "Commands" chain description.
+- **AA.0 Dashboard UX + exception literacy** *(COMPLETE — shipped v10.1.0a1; full plan archived in `PLAN_ARCHIVE.md` → "Phase AA")*. Six follow-ups still queued from that work:
+  - **AA.A.10 (stretch) Tree-walk picker→column derivation.** `PickerSpec.column` still hand-mapped; the tree carries the wiring formally (`ParameterControl.parameter → Parameter.mapped_dataset_params → (dataset, dataset_param_name) → SQL <<$p>> site → column`). Either parse the dataset SQL or annotate `DataSetParameter` with a `narrows_column` field at construction. Spike before locking annotation-vs-parse.
+  - **AA.A.11 Cross-corpus duplication lint (test ↔ src), paired approaches 1+3.** Every duplicated SQL string between `tests/` and `src/` is a second codebase that can pass while production breaks. Approach 1 = content-based AST lint walking `tests/` for SQL fingerprints + cross-ref `src/`; Approach 3 = provenance lint requiring values in test assertions to come from `import` of src. Both, not either alone. Spike for false-positive rate at length thresholds; allowlist syntax; cheap-enough for unit prelude vs opt-in mode.
+  - **AA.A.l2ft rails-inverse.4 Type-encode the `table_rows()` invariant.** `table_rows()` for narrowing-assertion sites is a smell — picker-row-survival is about SQL row count, not DOM visibility. Deprecate `len(table_rows())` for assertion use, or rename to `dom_visible_rows()`.
+  - **AA.A.daterange.3 Structural refactor: single DATE_RANGE control.** Replace each sheet's `(DateTimePickerControl from + to + TimeRangeFilter)` triplet with one `FilterDateTimePickerControl(Type="DATE_RANGE")`. Closes "from > to" footgun; aligns L1 / L2FT / Exec with Investigation. **Wall:** L1's multi-dataset-per-sheet model needs a sharing mechanism (Investigation's filter-bound widget binds to ONE filter on ONE dataset). Options: (a) consolidate L1 datasets, (b) one widget per dataset per sheet, (c) QS mechanism driving multiple parameter-bound filters via intermediates. Spike before locking.
+  - **AA.A.daterange.4 App2 renderer for widget-bound DATE_RANGE.** Already proven for Investigation; extends to the new L1/L2FT/Exec range controls. Follows .3.
+  - **AA.A.daterange.5 Test infra.** `apply_anchor_to_pickers` becomes "set the range to span anchor's date ±1 day" instead of separate from/to. Single picker spec. Follows .3.
+- **Model-driven docs (drift reduction).** Headline carried forward; design TBD.
 - **Mobile / responsive.** Tailwind handles the layout primitives but no explicit mobile-first design pass. Promote when there's a customer story. Note: dashboards are dense by nature; mobile may always be a worse experience than desktop, regardless of effort.
 - **Per-table CSV / XLSX export.** Operators expect "export to spreadsheet" on tables (QS has it). Lower priority than feature parity — punt unless it's a small agent task. The audit PDF already covers the "regulator-ready snapshot" case; spreadsheet export is for analyst self-serve.
 - ~~**Fold the biome JS lint into the test runner, like pyright.**~~ *(done, 2026-05-12.)* `conftest.py::pytest_sessionstart` now runs `biome check --max-diagnostics=400` alongside the pyright gate — `biome check` exits non-zero on lint *errors* (e.g. `noInnerDeclarations`) and zero on warnings, so the gate fires before any test collects (`pytest.exit(returncode=2)`); opt out with `QS_GEN_SKIP_BIOME=1`. `biome` is a standalone Rust binary (brew locally; `biomejs/setup-biome@v2` in CI), not an npm/pip package — when it's not on `PATH` the gate skips cleanly (same posture pyright has if it's missing). Bare `pytest tests/`, `./run_tests.sh up_to=unit`, and `ci.yml::test` all enforce it. (Why not a `[dev]` dep like `pyright` / `pytailwindcss`? The Biome project hasn't published an *official* PyPI package yet — in flight at biomejs/biome#8818. The unofficial `biome-js` wrapper bundles the Rust binary like `ruff` does, but ships only a `manylinux_2_28_x86_64` wheel — no macOS / arm64 / sdist, and it's a stale single release on Biome 2.3.x — so adding it would break `uv sync --extra dev` off linux-x86_64. Biome therefore stays a system binary; the `[dev]` block carries a NB comment recording this + a "revisit when biomejs/biome#8818 merges" pointer. `dev_setup`: `brew install biome`, or any of biome's install methods. **Follow-on when biomejs/biome#8818 lands:** add the official package to `[dev]`, drop the `setup-biome` CI step + the system-binary fallback in conftest / install.md.)
