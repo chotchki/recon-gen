@@ -158,6 +158,45 @@ The destination: invariant as single source of truth, with generators + views re
 - [ ] AS.6 - **MANDATORY GATE** — 4-way agreement + `TestScenarioCoverage` become the runtime linkage assertion over the spine. The bridge between in-process semantic correctness and live-rendered correctness; AR.5 proved this layer is where deploy-time divergence surfaces, so this is non-skippable, not polish.
 - [ ] AS.7 - training/docs scenarios self-validated (can't lie / can't silently fail to demonstrate)
 
+## Phase AU - L1 invariant composition (second + more L1 violation types) *(depends on: AS)*
+
+AS piloted ONE invariant (drift) end-to-end through the framework. AU proves the
+framework SCALES: adds at least one more L1 invariant + a composition scenario that
+exercises multiple distinct generators in one `LedgerSimulation`, verifying each
+`Invariant.detect` picks up its own violations + the carried-set tracks all without
+interference. **The honest limit AS leaves open** — "does this work for ONE
+invariant or for a SPINE of them?" — only resolves under composition. AU is parallel
+to AT (both depend on AS, can land independently); AU finishes the L1 surface while
+AT crosses into L2's distinct complexity classes.
+
+The promotion order's set by AU.0; the cleanest pilot is **overdraft** (simplest
+L1 after drift — negative-balance check, structurally distinct from drift's
+arithmetic, single-row witness, no instance coupling). `limit_breach` deferred to
+near the end because of its instance-coupled `from_instance` smart constructor
+(AP.3 finding #4 — the disproof of the "blind generator").
+
+- [ ] AU.0 - Plan/spike: pilot Overdraft (next-simplest L1) end-to-end through
+  the AS framework. Lock the promotion-order for the remaining L1 invariants from
+  what the AS drift rollout taught us about each step's cost.
+- [ ] AU.1 - `OverdraftInvariant` + `OverdraftGenerator` promoted to
+  `common/spine/`. Register the edges; per-invariant substitution-path property
+  test (AR.5 lesson encoded — every promoted detector ships with one).
+- [ ] AU.2 - **Composition test** — scenario combining `DriftGenerator` +
+  `OverdraftGenerator` in one `LedgerSimulation`; each invariant fires its own
+  violations; the trajectory's carried set tracks BOTH without one masking the
+  other; the AS.2 registry's many-to-many edges still hold under composition.
+- [ ] AU.3 - Promote the data/deadline-derived L1 invariants
+  (`expected_eod_balance_breach`, `stuck_pending`, `stuck_unbundled`). Each carries
+  a window that's PART of the invariant definition (per audit §5 "second source"),
+  not subject to the AR view primitive's empty-behavior.
+- [ ] AU.4 - Promote `limit_breach` — the instance-coupled case. AP.3 finding #4:
+  the `from_instance` smart constructor reads the L2's `LimitSchedule` (no blind
+  generator possible). The `(parent_role, rail, direction) → cap` table threads
+  through here.
+- [ ] AU.5 - Exhaustiveness gate: every L1-related `PlantKind` value has ≥1
+  registered `ViolationGenerator`; every L1 `check_type` has ≥1 registered
+  `Invariant`. The taxonomy unification (AS.2) gets its empirical guarantee here.
+
 ## Phase AT - L2 invariant spine rollout *(depends on: AS)*
 
 Parallel rollout to AS, scoped to the **L2 (Investigation) surface**: the Investigation
