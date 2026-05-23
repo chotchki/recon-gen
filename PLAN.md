@@ -393,7 +393,7 @@ is the production rollout for the two L2 classes. AT.0 redecomposes from AS's re
     not 4-way per AT.5.d's decision — no PDF leg.)
   - [x] AT.5.f - **Scenario-plant lower-bound counts** — extend
     `expected_audit_counts` to include anomaly + money_trail.
-- [ ] AT.6 - L2 training/docs scenarios self-validated (anomaly + money_trail scenarios
+- [x] AT.6 - L2 training/docs scenarios self-validated (anomaly + money_trail scenarios
   can't silently fail to demonstrate; parallel to AS.7).
 
 ## Phase AV - Rename `daily_balances.limits` → `daily_balances.metadata` (with `limits` as a nested key)
