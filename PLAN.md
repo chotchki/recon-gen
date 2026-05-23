@@ -150,7 +150,7 @@ The destination: invariant as single source of truth, with generators + views re
 - *Honest limits become the actual blocker.* AR.5's "honest limit" (substitution paths) was the live regression. AP.2's honest limit is **cross-account vector state** — AS.4 is therefore the highest-exposure leaf in this phase.
 
 - [x] AS.0 - Plan/spike the spine rollout decomposition (lock the `src/` home + the taxonomy migration order before building)
-- [ ] AS.1 - promote `Violation` / `Invariant` / `ViolationGenerator` / `View` types to `src/`
+- [x] AS.1 - promote `Violation` / `Invariant` / `ViolationGenerator` / `View` types to `src/`
 - [ ] AS.2 - unify the fractured taxonomy: `PlantKind` (20) ⋈ `check_type` (~10 untyped) → one closed `Violation` taxonomy; total `invariant→{generators,views}` maps, exhaustiveness-checked (data/deadline windows stay invariant-owned)
 - [ ] AS.3 - generator = stateful fold carrying `(balances, active-violation-set)`; `Invariant.scenario_for(shape, selector)`; non-violating = perturbation off
 - [ ] AS.4 - cross-account VECTOR state (AP.2's honest limit): legs net to zero across accounts; `ledger_drift` parent rollup; cross-boundary propagation
