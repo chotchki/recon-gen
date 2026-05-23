@@ -19,6 +19,17 @@ That keeps the Protocol minimal — every L1 + L2 invariant can implement
 it without a kwargs-mismatch dance. The smart constructor varies by
 shape; the spine link (`detect`) does not.
 
+**Convention (de-facto across drift / overdraft / expected_eod /
+stuck_pending, formalized 2026-05-23):** every concrete invariant's
+`scenario_for(...)` accepts `instance: L2Instance | None = None` as a
+keyword-only argument. `None` defaults to the bundled `spec_example`
+yaml (the in-process test harness shape); callers thread an explicit
+`L2Instance` for production deploys and AT.x's Investigation surface.
+NOT enforced by Protocol — convention only — pending the spike-before-
+locking decision on whether to formalize a `from_instance(self,
+instance) -> Generator` Protocol method (deferred until AU.4 +
+AT.2 give two more L2-coupling data points).
+
 Promoted from `tests/unit/test_as0_drift_full_spine.py` by AS.1.
 """
 

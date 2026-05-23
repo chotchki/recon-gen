@@ -43,6 +43,10 @@ from recon_gen.common.spine.expected_eod import (
 from recon_gen.common.spine.generator import ViolationGenerator
 from recon_gen.common.spine.invariant import Invariant
 from recon_gen.common.spine.overdraft import OverdraftGenerator, OverdraftInvariant
+from recon_gen.common.spine.stuck_pending import (
+    StuckPendingGenerator,
+    StuckPendingInvariant,
+)
 
 #: For every generator class, the invariant classes its emission trips.
 #: Read as: "a single `emit()` from this generator + a refresh of the
@@ -65,6 +69,11 @@ INVARIANT_GENERATOR_EDGES: Final[
     # plant trips drift (zero transactions ⇒ Σ legs ≠ planted stored),
     # a parent plant doesn't (matview's parent_role IS NOT NULL filter).
     ExpectedEodBalanceGenerator: (ExpectedEodBalanceInvariant, DriftInvariant),
+    # AU.3.b — predicted single-edge: stuck_pending is transaction-based
+    # (no balance row) AND Pending status (excluded from drift's computed
+    # subledger balance which filters status='Posted'). Empirical edge
+    # verification in `test_spine_stuck_pending.py`.
+    StuckPendingGenerator: (StuckPendingInvariant,),
 }
 
 

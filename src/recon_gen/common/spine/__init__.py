@@ -52,6 +52,10 @@ from recon_gen.common.spine.expected_eod import (
 from recon_gen.common.spine.generator import ViolationGenerator
 from recon_gen.common.spine.invariant import Invariant
 from recon_gen.common.spine.overdraft import OverdraftGenerator, OverdraftInvariant
+from recon_gen.common.spine.stuck_pending import (
+    StuckPendingGenerator,
+    StuckPendingInvariant,
+)
 from recon_gen.common.spine.registry import (
     INVARIANT_GENERATOR_EDGES,
     generators_for,
@@ -79,7 +83,10 @@ __all__ = [
     # Expected-EOD-balance family — concrete invariant + generator (AU.3.a)
     "ExpectedEodBalanceInvariant",
     "ExpectedEodBalanceGenerator",
-    # Many-to-many registry (AS.2; AU.1 + AU.3.a add edges)
+    # Stuck-Pending family — first transaction-based + L2-coupled (AU.3.b)
+    "StuckPendingInvariant",
+    "StuckPendingGenerator",
+    # Many-to-many registry (AS.2; AU.1 + AU.3.a + AU.3.b add edges)
     "INVARIANT_GENERATOR_EDGES",
     "invariants_for",
     "generators_for",
