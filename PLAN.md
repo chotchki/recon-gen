@@ -334,13 +334,18 @@ is the production rollout for the two L2 classes. AT.0 redecomposes from AS's re
   is documented as AT.3's primitive. AT.2 keeps the View-only scope; AT.3 lands
   `Transfer` once + refactors both `AnomalyGenerator` (consumer 1) +
   `MoneyTrailGenerator` (consumer 2).
-- [ ] AT.3 - **`Transfer` primitive on `LedgerSimulation`** + two-consumer refactor.
-  Extend `LedgerSimulation` with `transfers: list[Transfer]` (account_id, signed
-  amount per leg + shared `transfer_id` + optional `parent_transfer_id` for chains).
-  Refactor `AnomalyGenerator` to construct N baseline transfers + 1 spike transfer.
-  Land `MoneyTrailGenerator` for the parent-linked chain emission shape (root →
-  child → grandchild, each a 2-leg Posted transfer per AP.3's MoneyTrailGenerator).
-  Cross-account by nature — this is the surface AS.4's vector-state work has to support.
+- [x] AT.3 - **`Transfer` primitive on `LedgerSimulation`** + two-consumer refactor.
+  Extended `LedgerSimulation` with `transfers: list[Transfer]` (TransferLeg per
+  account with signed amount + shared `transfer_id` + optional `parent_transfer_id`
+  for chains, rail_name + status + origin + hour). Refactored `AnomalyGenerator` —
+  baseline + spike pairs now build through `_transfers() -> list[Transfer]` and emit
+  via a transfers-only LedgerSimulation (single-edge property preserved: no balance
+  rows → no drift trip). Landed `MoneyTrailGenerator` for parent-linked chain
+  emission (each hop's recipient = next hop's sender; chain_length controls depth;
+  consecutive days for posted_at ordering) + `MoneyTrailView(min_depth=0)` for the
+  depth-threshold knob mirroring AnomalyView's σ pattern. 16 Transfer-primitive
+  tests + 20 money_trail (generator + view) tests; AnomalyGenerator refactor is
+  shape-preserving (all AT.2 tests still pass).
 - [ ] AT.4 - retire L2 byte-locked seed SQL → semantic self-validation extends to the
   Investigation matviews (parallel to AS.5 for L1).
 - [ ] AT.5 - **MANDATORY GATE** — 4-way agreement extends to the Investigation dashboard

@@ -37,7 +37,11 @@ from recon_gen.common.spine.account_simulation import (
     DayPlan,
     Perturbation,
 )
-from recon_gen.common.spine.ledger_simulation import LedgerSimulation
+from recon_gen.common.spine.ledger_simulation import (
+    LedgerSimulation,
+    Transfer,
+    TransferLeg,
+)
 from recon_gen.common.spine.semantic_lock import apply_scenario, semantic_lock
 from recon_gen.common.spine.training import TrainingScenario, validate_all
 from recon_gen.common.spine.drift import (
@@ -66,7 +70,11 @@ from recon_gen.common.spine.stuck_unbundled import (
 )
 from recon_gen.common.spine.anomaly import AnomalyGenerator, AnomalyInvariant
 from recon_gen.common.spine.anomaly_view import BUCKET_LOWER_BOUNDS, AnomalyView
-from recon_gen.common.spine.money_trail import MoneyTrailInvariant
+from recon_gen.common.spine.money_trail import (
+    MoneyTrailGenerator,
+    MoneyTrailInvariant,
+    MoneyTrailView,
+)
 from recon_gen.common.spine.registry import (
     ALL_L1_GENERATORS,
     ALL_L1_INVARIANTS,
@@ -112,10 +120,11 @@ __all__ = [
     # Anomaly View — σ-threshold slice over the detector's output (AT.2)
     "AnomalyView",
     "BUCKET_LOWER_BOUNDS",
-    # Money-trail family — recursive-graph L2; detector only at AT.1
-    # (AT.3 adds the recursive parent-linked generator on top of
-    # LedgerSimulation.transfers).
+    # Money-trail family — recursive-graph L2; AT.3 promoted generator
+    # + View on top of LedgerSimulation.transfers (parent-linked chain).
     "MoneyTrailInvariant",
+    "MoneyTrailGenerator",
+    "MoneyTrailView",
     # Many-to-many registry (AS.2; AU.1 + AU.3.a/b/c + AU.4 add edges)
     "INVARIANT_GENERATOR_EDGES",
     "ALL_L1_INVARIANTS",
@@ -130,6 +139,9 @@ __all__ = [
     "DayEmission",
     # Vector-state composition (AS.4) — many AccountSimulations side by side
     "LedgerSimulation",
+    # Transfer primitive (AT.3) — cross-account flow on LedgerSimulation
+    "Transfer",
+    "TransferLeg",
     # Semantic-lock mechanism (AS.5) — replaces SQL-byte-identity locks
     "apply_scenario",
     "semantic_lock",

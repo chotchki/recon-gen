@@ -1,10 +1,11 @@
-"""Anomaly family — windowed-statistical L2 invariant + simple generator.
+"""Anomaly family — windowed-statistical L2 invariant + generator.
 
 Promoted from `tests/unit/test_at0_anomaly_full_spine.py` (AT.0 spike).
 The matview ``<prefix>_inv_pair_rolling_anomalies`` computes a rolling
 2-day SUM per (sender, recipient) pair, then z-scores against the
 population mean+stddev of all pair-windows. The `AnomalyInvariant`
-detector projects rows with `z_bucket` >= '3-4 sigma' as Violations.
+detector projects EVERY (pair, window_end) row as a Violation; the
+`AnomalyView` (AT.2, `anomaly_view.py`) slices on σ threshold.
 
 Per AP.3 finding #2: statistical invariants CAN'T be generated from a
 single row — they need a POPULATION + a spike. `AnomalyGenerator` plants
@@ -18,13 +19,11 @@ self-shift). With small baselines (e.g. 8 pairs) + 100k spike, z ≈ 2.67
 (too low to fire 3σ). Default `baseline_pair_count=100` dilutes the
 outlier effect to ~1% → z ≈ 9.95 (clearly '4+ sigma').
 
-Per AP.3 finding #3: the σ threshold (which buckets count as "anomalous")
-lives on the View, not the detector. AT.2 will move the threshold to a
-View knob; AT.1 bakes in 3σ as the spine-default cutoff.
-
-AT.2 will refactor the generator to use AS.3's `AccountSimulation`
-stateful-fold base; AT.1 keeps the single-emission shape from the AT.0
-spike. The detector + scenario_for are stable across the refactor.
+AT.3 refactored `emit()` onto the `Transfer` / `LedgerSimulation`
+primitive — every leg pair goes through the same `_emit_transfer` path
+that `MoneyTrailGenerator` uses. Single-edge property preserved
+(transfers-only ledger → no balance rows → no drift trip). The
+detector + scenario_for are stable across the refactor.
 """
 
 from __future__ import annotations
@@ -37,10 +36,13 @@ from typing import ClassVar
 from recon_gen.common.l2.primitives import L2Instance
 from recon_gen.common.spine._emit_helpers import (
     find_internal_with_role,
-    insert_tx,
     load_spec_example,
     to_date,
-    ts,
+)
+from recon_gen.common.spine.ledger_simulation import (
+    LedgerSimulation,
+    Transfer,
+    TransferLeg,
 )
 from recon_gen.common.spine.violation import Violation
 
@@ -149,9 +151,14 @@ class AnomalyGenerator:
     Per AP.3 finding #2 (statistical invariants are multi-row by
     nature): the generator's `emit()` writes ALL the rows in one call
     — the Protocol stays minimal; the per-row-iterator shape isn't
-    pushed onto the Generator contract. AT.2 refactors to use AS.3's
-    `AccountSimulation` stateful-fold base, but the public Protocol
-    contract doesn't change.
+    pushed onto the Generator contract.
+
+    AT.3 refactor: pairs are now emitted as `Transfer`s through a
+    transfers-only `LedgerSimulation`. Single-edge property preserved
+    (no `AccountSimulation` folds → no balance rows → no drift trip).
+    Each baseline pair = one Posted 2-leg balanced Transfer; the spike
+    is the same shape with `spike_magnitude`. Shape is identical to
+    `MoneyTrailGenerator`'s — both consume the AT.3 primitive.
     """
 
     sender_account_id: str
@@ -164,6 +171,7 @@ class AnomalyGenerator:
     spike_magnitude: float
     baseline_pair_count: int
     baseline_amount: float
+    prefix: str = "spec_example"
 
     @property
     def intended(self) -> Violation:
@@ -178,67 +186,68 @@ class AnomalyGenerator:
         )
 
     def emit(self, conn: sqlite3.Connection) -> None:
+        LedgerSimulation(
+            transfers=list(self._transfers()),
+            prefix=self.prefix,
+        ).emit(conn)
+
+    def _transfers(self) -> list[Transfer]:
+        """Build the baseline pairs + spike as `Transfer`s. Pure (no
+        IO) — composable for callers that want to compose anomaly
+        with other transfer-shaped generators."""
+        out: list[Transfer] = []
         # Background pairs populate the distribution.
         for i in range(self.baseline_pair_count):
-            self._emit_pair(
-                conn,
+            out.append(self._build_pair(
                 sender_account_id=f"acct-anomaly-bg-sender-{i}",
                 recipient_account_id=f"acct-anomaly-bg-recipient-{i}",
                 transfer_id=f"xfer-anomaly-bg-{i}",
                 amount=self.baseline_amount,
                 slot=f"bg-{i}",
-            )
+            ))
         # The spike — between sender + recipient with spike_magnitude.
-        self._emit_pair(
-            conn,
+        out.append(self._build_pair(
             sender_account_id=self.sender_account_id,
             recipient_account_id=self.recipient_account_id,
             transfer_id="xfer-anomaly-spike",
             amount=self.spike_magnitude,
             slot="spike",
-        )
+        ))
+        return out
 
-    def _emit_pair(
+    def _build_pair(
         self,
-        conn: sqlite3.Connection,
         *,
         sender_account_id: str,
         recipient_account_id: str,
         transfer_id: str,
         amount: float,
         slot: str,
-    ) -> None:
-        # Sender leg (Debit, money < 0)
-        insert_tx(
-            conn,
-            id=f"tx-{slot}-sender",
-            account_id=sender_account_id,
-            account_name=f"Anomaly Sender ({slot})",
-            account_role=self.sender_account_role,
-            account_scope="internal",
-            account_parent_role=self.sender_account_parent_role,
-            amount_money=-amount,
-            amount_direction="Debit",
-            status="Posted",
-            posting=ts(self.anchor_day),
+    ) -> Transfer:
+        """One 2-leg balanced Posted Transfer: sender Debit + recipient
+        Credit. `slot` flavors the account display names so test
+        introspection can tell baseline from spike."""
+        return Transfer(
+            day=self.anchor_day,
             transfer_id=transfer_id,
             rail_name="ach",
-            origin="etl",
-        )
-        # Recipient leg (Credit, money > 0)
-        insert_tx(
-            conn,
-            id=f"tx-{slot}-recipient",
-            account_id=recipient_account_id,
-            account_name=f"Anomaly Recipient ({slot})",
-            account_role=self.recipient_account_role,
-            account_scope="internal",
-            account_parent_role=self.recipient_account_parent_role,
-            amount_money=amount,
-            amount_direction="Credit",
             status="Posted",
-            posting=ts(self.anchor_day),
-            transfer_id=transfer_id,
-            rail_name="ach",
-            origin="etl",
+            legs=(
+                TransferLeg(
+                    account_id=sender_account_id,
+                    amount=-amount,
+                    account_name=f"Anomaly Sender ({slot})",
+                    account_role=self.sender_account_role,
+                    account_scope="internal",
+                    account_parent_role=self.sender_account_parent_role,
+                ),
+                TransferLeg(
+                    account_id=recipient_account_id,
+                    amount=amount,
+                    account_name=f"Anomaly Recipient ({slot})",
+                    account_role=self.recipient_account_role,
+                    account_scope="internal",
+                    account_parent_role=self.recipient_account_parent_role,
+                ),
+            ),
         )
