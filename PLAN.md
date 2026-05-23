@@ -362,6 +362,30 @@ is the production rollout for the two L2 classes. AT.0 redecomposes from AS's re
 - [ ] AT.5 - **MANDATORY GATE** — 4-way agreement extends to the Investigation dashboard
   (parallel to AS.6 for L1). The cross-tool linkage assertion that QS / App2 / PDF /
   direct-DB agree on L2 violations. Non-skippable for the same reason AS.6 is.
+  **Decomposed 2026-05-23** into per-leg sub-tasks because the full gate is multi-
+  renderer + needs deploy:
+  - [x] AT.5.a - **Spine ⋈ direct-matview agreement** (the 5-way bridge for L2).
+    Extended `tests/e2e/test_spine_live_agreement.py` with AnomalyInvariant +
+    MoneyTrailInvariant tests; per-invariant key projection (anomaly:
+    sender/recipient/window_end/z_bucket; money_trail: root/transfer/depth).
+    Verified GREEN against live PG (RDS database-2 / qsgen_postgres prefix)
+    post deploy + seed + refresh — all 4 tests in the file pass (drift,
+    ledger_drift, anomaly, money_trail). The 5-way bridge for L2 is live;
+    AT.2's "detector returns every bucket" contract validates against the
+    matview's unfiltered row set, no manual filter to keep in sync.
+  - [ ] AT.5.b - **App2 Investigation dashboard ⋈ direct-matview agreement**.
+    Add `_dashboard_extract` projections for anomaly + money_trail tables;
+    App2 leg (no AWS infra needed).
+  - [ ] AT.5.c - **QS Investigation dashboard ⋈ direct-matview agreement**.
+    Heaviest leg. AWS QS deploy of Investigation + InvestigationDriver
+    projections.
+  - [ ] AT.5.d - **Investigation PDF section ⋈ direct-matview agreement**
+    (if the audit PDF carries Investigation sections; spike first to check
+    whether the section exists, then extend).
+  - [ ] AT.5.e - **Compose into parametrized `test_invariant_four_way_agreement`**
+    (or sibling test for L2). Cross-renderer assertion in one place.
+  - [ ] AT.5.f - **Scenario-plant lower-bound counts** — extend
+    `expected_audit_counts` to include anomaly + money_trail.
 - [ ] AT.6 - L2 training/docs scenarios self-validated (anomaly + money_trail scenarios
   can't silently fail to demonstrate; parallel to AS.7).
 
