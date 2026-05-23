@@ -931,12 +931,16 @@ def build_daily_statement_summary_dataset(
     """
     prefix = cfg.db_table_prefix
     view = DateView(frame=cfg.test_generator.as_of_frame())
-    # AO.10 — compare the balance date as YYYY-MM-DD text on both sides.
-    # The pushed-down param arrives as an ISO string in every renderer and
-    # ``TRUNC(<string>)`` is ORA-00932 on Oracle (the AO.2 regression);
-    # SUBSTR(...,1,10) takes the param's day prefix (date or datetime).
+    # AO.10 / AR.2 — compare the balance date as YYYY-MM-DD text on both
+    # sides. Pre-AR.2 the param was string-coerced (analysis-default was
+    # RollingDate evaluated to a date object QS handed off as text); now
+    # it's a typed timestamp (StaticValues with an ISO datetime literal),
+    # so `SUBSTR(<timestamp>, 1, 10)` blows up on PG (`function substr
+    # (timestamp without time zone, integer, integer) does not exist`).
+    # `day_text()` on the param mirrors the column-side treatment and
+    # handles either string or timestamp portably.
     day = day_text("business_day_start", cfg.dialect)
-    bdate = f"SUBSTR(<<${P_L1_DS_BALANCE_DATE_DSP}>>, 1, 10)"
+    bdate = day_text(f"<<${P_L1_DS_BALANCE_DATE_DSP}>>", cfg.dialect)
     acct = "(account_name || ' (' || account_id || ')')"
     # AO.2 / AR.2 — balance-date narrow is a strict day equality. The
     # pre-AR.2 ``OR (bdate ≥ sentinel ...)`` latest-on-empty fallback is
@@ -978,10 +982,11 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
     # Projected column stays a TIMESTAMP-shaped trunc so QuickSight's date
     # column-type inference is stable across dialects (see docstring).
     business_day = date_trunc_day("tx.posting", dialect)
-    # AO.10 — the WHERE narrow compares day-as-text (TRUNC(<string-param>)
-    # is ORA-00932 on Oracle); SUBSTR takes the param's YYYY-MM-DD prefix.
+    # AO.10 / AR.2 — see build_daily_statement_summary_dataset for the
+    # day_text-on-both-sides rationale (param is a typed timestamp
+    # post-AR.2; SUBSTR(timestamp,…) is PG-invalid).
     day_txt = day_text("tx.posting", dialect)
-    bdate = f"SUBSTR(<<${P_L1_DS_BALANCE_DATE_DSP}>>, 1, 10)"
+    bdate = day_text(f"<<${P_L1_DS_BALANCE_DATE_DSP}>>", dialect)
     # AO.2 / AR.2 — same balance-date narrow as the summary; strict day
     # equality (pre-AR.2 latest-on-empty fallback removed per the
     # view-primitive strict-collapse decision).

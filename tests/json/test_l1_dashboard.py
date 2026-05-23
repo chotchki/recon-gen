@@ -632,17 +632,19 @@ def test_daily_statement_transactions_business_day_is_dialect_aware() -> None:
     assert "DATE_TRUNC" not in sql_or
 
 
-def test_daily_statement_balance_date_narrow_never_truncs_a_string() -> None:
-    """AO.10 regression — the balance-date WHERE narrow must NOT feed the
-    string-valued ``<<$pL1DsBalanceDate>>`` param or the sentinel literal
-    into ``date_trunc_day``. On Oracle that emits ``CAST(TRUNC('…') AS
-    TIMESTAMP)`` → ORA-00932 (the param/sentinel arrive as ISO strings in
-    every renderer). The narrow compares day-as-text instead: ``TO_CHAR``
-    / ``strftime`` on the column, ``SUBSTR(<param>, 1, 10)`` on the param.
+def test_daily_statement_balance_date_narrow_renders_a_portable_day_string() -> None:
+    """AO.10 / AR.2 regression — the balance-date WHERE narrow must NOT
+    feed the ``<<$pL1DsBalanceDate>>`` param into ``date_trunc_day``: on
+    Oracle that emits ``CAST(TRUNC('…') AS TIMESTAMP)`` → ORA-00932 when
+    the param arrives as a string, and on PG the param now arrives as a
+    typed timestamp (AR.2 picker default became ``StaticValues`` ISO
+    datetime, not a ``RollingDate`` evaluation), so ``SUBSTR(<timestamp>
+    ,…)`` blows up. The narrow uses ``day_text()`` on both sides — that
+    helper handles both string and timestamp inputs portably (``TO_CHAR``
+    on PG/Oracle, ``strftime`` on SQLite).
 
-    Guards the exact shape that shipped broken in v11.10.1 — CI's Oracle
-    leg is API-only, so no Oracle execution catches it. Builds all three
-    dialects from one config seam."""
+    Pinned shape that shipped broken in v11.10.1 (Oracle leg) AND the
+    AR.2 PG-side regression caught in browser e2e."""
     from dataclasses import replace
     from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l1_dashboard.datasets import (
@@ -654,7 +656,12 @@ def test_daily_statement_balance_date_narrow_never_truncs_a_string() -> None:
 
     instance = default_l2_instance()
     param = f"<<${P_L1_DS_BALANCE_DATE_DSP}>>"
-    for dialect in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.SQLITE):
+    expected_per_dialect = {
+        Dialect.POSTGRES: f"TO_CHAR({param}",
+        Dialect.ORACLE: f"TO_CHAR({param}",
+        Dialect.SQLITE: f"strftime('%Y-%m-%d', {param}",
+    }
+    for dialect, expected_fn in expected_per_dialect.items():
         cfg = replace(_CFG, dialect=dialect)
         for build in (
             build_daily_statement_summary_dataset,
@@ -663,14 +670,12 @@ def test_daily_statement_balance_date_narrow_never_truncs_a_string() -> None:
             sql = next(iter(
                 build(cfg, instance).PhysicalTableMap.values()
             )).CustomSql.SqlQuery
-            # The bug shape: the string PARAM fed into a day-trunc (≠ the
-            # legit DATE_TRUNC('day', <column>) projection, which truncs
-            # a real timestamp column). AR.2 removed the sentinel literal
-            # entirely; only the param-trunc assertion remains as the
-            # AO.10 regression guard.
+            # The bug shape — the param fed into a day-trunc.
             assert f"TRUNC({param}" not in sql
-            # The fix shape: param compared via its SUBSTR day-prefix.
-            assert f"SUBSTR({param}, 1, 10)" in sql
+            # The bug shape we hit at AR.2 — SUBSTR on a timestamp param.
+            assert f"SUBSTR({param}" not in sql
+            # The fix shape — day_text() on the param, dialect-natural.
+            assert expected_fn in sql
 
 
 # -- Description-driven prose (M.2a.7) ---------------------------------------
