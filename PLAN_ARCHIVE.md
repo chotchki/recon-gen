@@ -2946,3 +2946,473 @@ The view primitive: one typed `View` is the source of truth; picker + analysis d
 - [x] AR.5 - **D2 confirm at the live QS layer** — the 5 Daily Statement KPIs render (the release blocker). db/deploy/e2e RESUME here; **release unparks.**
 
 
+---
+
+## 2026-05-23
+
+## Phase AS - invariant spine (D6) *(depends on: AR)*
+
+The destination: invariant as single source of truth, with generators + views referencing it. Biggest lift; AS.0 re-plans the decomposition from the spike findings first (the layer most likely to redecompose).
+
+**Learnings carried in from AQ/AR (info; AS.0 absorbs into the rollout plan, not pre-baked into leaves):**
+- *Many-to-many invariant↔generator wiring is real.* AP.3 finding: a `drift` plant trips both `drift` AND `ledger_drift` detectors; `xor_variant_missed_firing` + `xor_variant_overlap` plants both trip the single `xor_group_violation` detector. The taxonomy unification (AS.2) needs an explicit relation, not a direct rename.
+- *Substitution-path divergence is a deploy-time hazard.* AR.5's bite: "one value emitted everywhere" wasn't enough — QS bridge substitutes typed values, api/smoke substitutes string literals; PG can't accept both shapes with one SQL function. For every promoted Invariant whose `detect()` crosses SQL-pushdown surfaces, expect to add an api-layer smoke test covering BOTH substitution shapes (typed value vs string literal).
+- *Four window kinds, not three.* The audit named three (invariant-derived / data-deadline / subjective-view); AR.4 surfaced a fourth: **no-narrowing** (L2FT's static "show all" sentinels). The taxonomy work should account for it.
+- *Type-the-binding-then-funnel works.* AQ's pattern (`LOCKED_ANCHOR` constant + `locked()`/`live()` factories + funneled call sites; suppressions disappear as a side-effect) is the template for AS.1's promotion.
+- *In-process SQLite harness is load-bearing.* AP.3's pattern (`emit_schema` + `_register_sqlite_aggregates` + real matview SQL, no DB server) made AR's design confidence cheap. Every promoted Invariant should self-validate this way before its production wiring.
+- *Honest limits become the actual blocker.* AR.5's "honest limit" (substitution paths) was the live regression. AP.2's honest limit is **cross-account vector state** — AS.4 is therefore the highest-exposure leaf in this phase.
+
+- [x] AS.0 - Plan/spike the spine rollout decomposition (lock the `src/` home + the taxonomy migration order before building)
+- [x] AS.1 - promote `Violation` / `Invariant` / `ViolationGenerator` / `View` types to `src/`
+- [x] AS.2 - unify the fractured taxonomy: `PlantKind` (20) ⋈ `check_type` (~10 untyped) → one closed `Violation` taxonomy; total `invariant→{generators,views}` maps, exhaustiveness-checked (data/deadline windows stay invariant-owned)
+- [x] AS.3 - generator = stateful fold carrying `(balances, active-violation-set)`; `Invariant.scenario_for(shape, selector)`; non-violating = perturbation off
+- [x] AS.4 - cross-account VECTOR state (AP.2's honest limit): legs net to zero across accounts; `ledger_drift` parent rollup; cross-boundary propagation
+- [x] AS.5 - retire byte-locked seed SQL → semantic self-validation (`detect(gen) ⊇ intended`) replaces byte-identity
+- [x] AS.6 - **MANDATORY GATE** — 4-way agreement + `TestScenarioCoverage` become the runtime linkage assertion over the spine. The bridge between in-process semantic correctness and live-rendered correctness; AR.5 proved this layer is where deploy-time divergence surfaces, so this is non-skippable, not polish.
+- [x] AS.7 - training/docs scenarios self-validated (can't lie / can't silently fail to demonstrate)
+
+
+## Phase AU - L1 invariant composition (second + more L1 violation types) *(depends on: AS)*
+
+AS piloted ONE invariant (drift) end-to-end through the framework. AU proves the
+framework SCALES: adds at least one more L1 invariant + a composition scenario that
+exercises multiple distinct generators in one `LedgerSimulation`, verifying each
+`Invariant.detect` picks up its own violations + the carried-set tracks all without
+interference. **The honest limit AS leaves open** — "does this work for ONE
+invariant or for a SPINE of them?" — only resolves under composition. AU is parallel
+to AT (both depend on AS, can land independently); AU finishes the L1 surface while
+AT crosses into L2's distinct complexity classes.
+
+The promotion order's set by AU.0; the cleanest pilot is **overdraft** (simplest
+L1 after drift — negative-balance check, structurally distinct from drift's
+arithmetic, single-row witness, no instance coupling). `limit_breach` deferred to
+near the end because of its instance-coupled `from_instance` smart constructor
+(AP.3 finding #4 — the disproof of the "blind generator").
+
+**AU.0 learnings (info, not prescription — what the overdraft spike taught us):**
+
+- **Many-to-many edges are universal, not drift-specific.** Spike was written
+  predicting overdraft as the "structural inverse" of drift (single-row witness,
+  no edges to other detectors). First run FAILED on the no-edge claim: an
+  overdraft planted on a LEAF internal account ALSO trips `DriftInvariant`,
+  because drift's matview filter `parent_role IS NOT NULL` AND `stored ≠ Σ legs`
+  is satisfied by the overdraft plant (leaf has parent_role; emission has
+  zero transactions, so Σ legs = 0 ≠ −magnitude). **Every new
+  `ViolationGenerator` lands with an empirical multi-matview detect-sweep
+  check, NOT a structural prediction of "only my own invariant fires."**
+- **`scenario_for` discipline is per-invariant.** Overdraft's matview has no
+  leaf/parent filter (any internal account can overdraft), so overdraft's
+  smart constructor accepts ANY internal account with the requested role —
+  drift's `parent_role IS NOT NULL` filter does NOT transfer. The minimal
+  Protocol shape (no shared base class) is the right call.
+- **Substitution-path checklist extends cleanly.** Overdraft's `detect()` reads
+  the matview via a static SQL with no `<<$param>>` — zero AR.5 risk, same as
+  drift. AU.1 inherits the property-test pattern.
+- **Promotion-order locked from cost-driver analysis** (full table in audit §5
+  "AU.0 result"): overdraft (LOW) → expected_eod_balance_breach (LOW) →
+  stuck_pending/stuck_unbundled (MEDIUM, time-window'd) → limit_breach (HIGH,
+  instance-coupled per AP.3 finding #4).
+
+- [x] AU.0 - Plan/spike: pilot Overdraft (next-simplest L1) end-to-end through
+  the AS framework. Lock the promotion-order for the remaining L1 invariants from
+  what the AS drift rollout taught us about each step's cost.
+- [x] AU.1 - `OverdraftInvariant` + `OverdraftGenerator` promoted to
+  `common/spine/`. Register the edges; per-invariant substitution-path property
+  test (AR.5 lesson encoded — every promoted detector ships with one).
+  Landed: `src/recon_gen/common/spine/overdraft.py` (mirrors `drift.py`'s shape:
+  `ClassVar[str]` name, frozen dataclass invariant, module-private helpers);
+  registry gains `OverdraftGenerator: (OverdraftInvariant, DriftInvariant)`
+  (the AU.0 empirical edge); `__init__.py` re-exports. `tests/unit/
+  test_spine_overdraft.py` (15 tests) pins detect, scenario_for, the
+  empirical drift edge on leaf accounts, the parent-role variant's no-edge
+  behavior, registry helpers, and the substitution-path property. AS-era
+  `test_generators_for_reverse_lookup` updated for DriftInvariant's now
+  two-generator reverse-lookup.
+- [x] AU.2 - **Composition test** — scenario combining `DriftGenerator` +
+  `OverdraftGenerator` via `apply_scenario(*emitters)` (AS.5's existing
+  primitive; PLAN's "in one `LedgerSimulation`" was imprecise — that
+  composes `AccountSimulation`s, not arbitrary generators). THREE invariants
+  fire on the leaf-overdraft variant (overdraft + drift on TWO accounts +
+  ledger_drift on drift's parent); the carried set tracks all three without
+  masking. AU.2 findings (caught mid-write by the stop-and-evaluate cadence,
+  per `feedback_aws_research`-style empirical discipline): (1) lone
+  parent-role overdraft trips ONLY overdraft, NOT ledger_drift, because
+  `_computed_ledger_balance` gates on `EXISTS (child_with_parent_role)` —
+  AU.0's honest-limit prediction was WRONG; (2) composition-induced edges
+  are a real, separate property — drift+parent-overdraft DOES trip
+  ledger_drift on both parents (drift's child supplies the prerequisite);
+  (3) registry semantics stay per-generator (AU.1's two-edge entry stands);
+  composition-induced edges are scenario-level, not class-level. AU.5 needs
+  a dual-axis exhaustiveness gate (per-generator AND per-invariant via
+  composition). Landed: `tests/unit/test_spine_au2_composition.py` (6 tests).
+  Audit subsection "AU.2 result" captures the lessons.
+- [x] AU.3 - Promote the data/deadline-derived L1 invariants
+  (`expected_eod_balance_breach`, `stuck_pending`, `stuck_unbundled`). Each carries
+  a window that's PART of the invariant definition (per audit §5 "second source"),
+  not subject to the AR view primitive's empty-behavior. Landed as three
+  sub-leaves AU.3.a/b/c, each with its own `<invariant>.py` + tests +
+  registry edge: ExpectedEodBalanceGenerator (two-edge to drift via the
+  AU.0 leaf-overdraft pattern), StuckPendingGenerator (single-edge; first
+  L2-coupled + first transaction-based + first wall-clock invariant),
+  StuckUnbundledGenerator (single-edge twin of stuck_pending with disjoint
+  Posted+bundle_id-NULL filter). TZ convention captured as memory
+  (`[[project-local-tz-convention]]` — application uses LOCAL `datetime.now()`
+  per Oracle WITH-TIME-ZONE limitation; SQLite tests absorb UTC skew via
+  ±12h overshoot windows). Invariant Protocol docstring augmented with the
+  scenario_for(instance=None) de-facto convention pending the
+  spike-before-locking decision on a formal `from_instance` Protocol
+  method (deferred to post-AU.4).
+- [x] AU.4 - Promote `limit_breach` — the instance-coupled case. AP.3 finding #4:
+  the `from_instance` smart constructor reads the L2's `LimitSchedule` (no blind
+  generator possible). The `(parent_role, rail, direction) → cap` table threads
+  through here. Landed `src/recon_gen/common/spine/limit_breach.py` with the
+  smart constructor reading `LimitSchedule.cap` AS a load-bearing input to
+  the plant amount (cap + overshoot). Both Outbound (Debit, negative money) +
+  Inbound (Credit, positive money) variants exercised. Single-edge registry
+  entry confirmed empirically (Posted leg, no balance row ⇒ no drift JOIN
+  match ⇒ no drift fire — same shape as stuck_unbundled). 16 unit tests
+  in `tests/unit/test_spine_limit_breach.py`. **Protocol-enhancement
+  decision point** (second L2-coupling data point, deferred from AU.3.b):
+  the existing `scenario_for(<selectors>, *, instance=None)` convention
+  SCALED to limit_breach without strain. AT.2 (windowed anomaly) is the
+  next decision gate.
+- [x] AU.5 - **Dual-axis exhaustiveness gate** (refined by AU.2 finding #4):
+  - **Per-generator-class** (original scope): every L1-related `PlantKind`
+    value has ≥1 registered `ViolationGenerator`; every L1 `check_type` has
+    ≥1 registered `Invariant`.
+  - **Per-invariant-class** (the AU.2 addition): every L1 `Invariant` has
+    ≥1 SCENARIO (single-generator OR composition) that empirically trips
+    it. Composition-induced edges (e.g., overdraft+drift → ledger_drift on
+    overdraft's parent) are part of the gate; AU.5 must enumerate
+    composition scenarios, not just generator classes.
+  The taxonomy unification (AS.2) gets its empirical guarantee here.
+  Landed: `ALL_L1_INVARIANTS` + `ALL_L1_GENERATORS` registries added to
+  `common/spine/registry.py` (explicit, hand-maintained per promotion).
+  `tests/unit/test_spine_au5_exhaustiveness.py` (17 tests): parametrized
+  per-generator-registered check, per-invariant-has-a-generator check,
+  cross-cutting "every promoted invariant fires from a real scenario"
+  sweep, internal-consistency checks (no orphan refs). Composition-
+  induced edges stay scenario-level (per the AU.2 boundary decision) —
+  AU.5 covers per-class wiring only; composition coverage lives in
+  test_spine_au2_composition.py. **Phase AU complete (6/6 leaves).**
+
+
+## Phase AT - L2 invariant spine rollout *(depends on: AS)*
+
+Parallel rollout to AS, scoped to the **L2 (Investigation) surface**: the Investigation
+matviews carry the two non-arithmetic complexity classes from AP.3 — windowed-statistical
+(`inv_pair_rolling_anomalies` z-score) and recursive-graph (`inv_money_trail_edges`
+WITH RECURSIVE walk). AS pilots the arithmetic case (drift); AT extends the proven
+spine to the other two classes on the actual Investigation app.
+
+AP.3 already proved the spine holds across all three complexity classes in-process; AT
+is the production rollout for the two L2 classes. AT.0 redecomposes from AS's results
+(same pattern as AS.0 did from AP's spike findings).
+
+- [x] AT.0 - Plan/spike the L2 spine extension: pilot the windowed-statistical case
+  (anomaly) end-to-end through the AS-produced `Violation`/`Invariant`/`ViolationGenerator`/
+  `View` shape. Lock the migration order for AT.1-AT.5 based on what AS's L1 rollout
+  taught us about each step's actual cost. Landed `tests/unit/test_at0_anomaly_full_spine.py`
+  (8 in-process tests). **AT.0 findings**: (1) windowed-statistical case fits the
+  existing spine Protocol without change — multi-row baseline-plus-spike emission
+  is just a multi-INSERT inside `emit()`; no Protocol surface needed; (2) the
+  spike's OUTLIER-EFFECT-ON-MEAN reduces its own z-score — needs ~100 baseline
+  points for a 1000:1 spike-to-baseline ratio to clear 3σ (caught mid-spike; 8
+  baseline points gave only z≈2.67); (3) View ownership of the σ-threshold (per
+  AP.3 finding #3) is unavoidable — for the spike, detect() bakes in `>=3σ`;
+  AT.1 + AT.2 move it to a View knob; (4) single-edge to anomaly empirically
+  (Posted leg, no balance row ⇒ no drift JOIN match — same shape as
+  stuck_unbundled/limit_breach).
+- [x] AT.1 - extend the `Invariant` taxonomy with the two L2 kinds (`anomaly`,
+  `money_trail`); detector shims read the existing Investigation matview rows.
+  Landed: `src/recon_gen/common/spine/anomaly.py` (AnomalyInvariant +
+  scenario_for + simple AnomalyGenerator promoted from AT.0 spike;
+  AT.2 will refactor the generator to use AS.3's AccountSimulation
+  stateful-fold base) + `src/recon_gen/common/spine/money_trail.py`
+  (MoneyTrailInvariant detector only; AT.3 lands the recursive
+  parent-linked generator). 12 + 6 unit tests in
+  `tests/unit/test_spine_anomaly.py` + `tests/unit/test_spine_money_trail.py`.
+  L2 invariants NOT added to ALL_L1_INVARIANTS — they'll get
+  ALL_L2_INVARIANTS / ALL_L2_GENERATORS sibling registries when AT.5's
+  L2-side exhaustiveness gate lands.
+- [x] AT.2 - **σ-threshold View knob** (AP.3 finding #3 lock). New `AnomalyView`
+  spine primitive owns `sigma_threshold` (default 3.0); detector returns ALL anomaly
+  rows, the View slices on threshold via the `BUCKET_LOWER_BOUNDS` map. Anomaly's
+  `detect()` is now threshold-free + projects every bucket; 16 new tests in
+  `tests/unit/test_spine_anomaly_view.py` pin defaults, monotonicity, full
+  (threshold → buckets) table, matview-vocab drift guard, defensive shapes.
+  Investigation dataset already projected every bucket — no app touch needed.
+  **AT.2 decomposition decision (2026-05-23)**: the originally-planned
+  "fold AnomalyGenerator onto AS.3 stateful simulator" doesn't fit — anomaly is
+  fundamentally pair-shaped (one day, many pairs), `AccountSimulation` is
+  single-account multi-day; the natural shape is `LedgerSimulation.transfers` which
+  is documented as AT.3's primitive. AT.2 keeps the View-only scope; AT.3 lands
+  `Transfer` once + refactors both `AnomalyGenerator` (consumer 1) +
+  `MoneyTrailGenerator` (consumer 2).
+- [x] AT.3 - **`Transfer` primitive on `LedgerSimulation`** + two-consumer refactor.
+  Extended `LedgerSimulation` with `transfers: list[Transfer]` (TransferLeg per
+  account with signed amount + shared `transfer_id` + optional `parent_transfer_id`
+  for chains, rail_name + status + origin + hour). Refactored `AnomalyGenerator` —
+  baseline + spike pairs now build through `_transfers() -> list[Transfer]` and emit
+  via a transfers-only LedgerSimulation (single-edge property preserved: no balance
+  rows → no drift trip). Landed `MoneyTrailGenerator` for parent-linked chain
+  emission (each hop's recipient = next hop's sender; chain_length controls depth;
+  consecutive days for posted_at ordering) + `MoneyTrailView(min_depth=0)` for the
+  depth-threshold knob mirroring AnomalyView's σ pattern. 16 Transfer-primitive
+  tests + 20 money_trail (generator + view) tests; AnomalyGenerator refactor is
+  shape-preserving (all AT.2 tests still pass).
+- [x] AT.4 - retire L2 byte-locked seed SQL → semantic self-validation extends to the
+  Investigation matviews (parallel to AS.5 for L1). Landed
+  `tests/unit/test_spine_at4_l2_semantic_lock.py` (11 tests): per-scenario stability
+  for anomaly + money_trail alone, per-invariant lock keying, cross-class composition
+  (anomaly + money_trail both fire in one scenario without masking), single-edge
+  property preserved post-AT.3 refactor (no L1 trip from L2-only plants), gate-has-
+  teeth checks (different spike magnitudes / chain lengths → different locks),
+  L1-L2 cross-layer composition (drift + anomaly), View-sliced lock stability. The
+  byte-locked `tests/data/_locked_seeds/spec_example.*.sql` files stay for now —
+  they pin the FULL densified 60-day seed (not just L2 violations); their actual
+  removal is post-AT.5 (4-way agreement gate) when there's an alternative
+  source-of-truth for the seed shape itself. AT.4 establishes the pattern that the
+  4-way gate will compose.
+- [x] AT.5 - **MANDATORY GATE** — 3-way agreement on the Investigation dashboard
+  (the L2 sibling of AS.6 for L1). Cross-tool linkage assertion that spine /
+  QS / App2 / direct-DB agree on L2 violations. **3-way not 4-way per AT.5.d**:
+  audit PDF stops at L1 by design; L2 has no PDF leg. **Decomposed 2026-05-23**
+  into per-leg sub-tasks. All subtasks landed; verified GREEN against live PG.
+  - [x] AT.5.a - **Spine ⋈ direct-matview agreement** (the 5-way bridge for L2).
+    Extended `tests/e2e/test_spine_live_agreement.py` with AnomalyInvariant +
+    MoneyTrailInvariant tests; per-invariant key projection (anomaly:
+    sender/recipient/window_end/z_bucket; money_trail: root/transfer/depth).
+    Verified GREEN against live PG (RDS database-2 / qsgen_postgres prefix)
+    post deploy + seed + refresh — all 4 tests in the file pass (drift,
+    ledger_drift, anomaly, money_trail). The 5-way bridge for L2 is live;
+    AT.2's "detector returns every bucket" contract validates against the
+    matview's unfiltered row set, no manual filter to keep in sync.
+  - [x] AT.5.b - **App2 Investigation dashboard ⋈ direct-matview agreement**.
+    Add `_dashboard_extract` projections for anomaly + money_trail tables;
+    App2 leg (no AWS infra needed).
+  - [x] AT.5.c - **QS Investigation dashboard ⋈ direct-matview agreement**.
+    Heaviest leg. AWS QS deploy of Investigation + InvestigationDriver
+    projections.
+  - [x] AT.5.d - **Investigation PDF section ⋈ direct-matview agreement** —
+    **NOT APPLICABLE** (decision recorded 2026-05-23 after spike). The audit
+    PDF stops at L1 (drift / overdraft / limit_breach / stuck_* / supersession
+    + daily statement walks); anomaly + money_trail surface only on the
+    Investigation dashboard. Different audience by design: PDF is for the
+    regulator + accounting-trail invariants, Investigation is for the AML
+    analyst + fraud-pattern detection. AT.5 gate composes 3 renderers (spine
+    ⊆ direct_matview == App2 == QS), not 4. L1's PDF leg remains; L2's gate
+    is intentionally 3-way.
+  - [x] AT.5.e - AT.5.e — Compose parametrized `test_inv_three_way_agreement`
+    (or sibling test for L2). Cross-renderer assertion in one place. (3-way
+    not 4-way per AT.5.d's decision — no PDF leg.)
+  - [x] AT.5.f - **Scenario-plant lower-bound counts** — extend
+    `expected_audit_counts` to include anomaly + money_trail.
+- [x] AT.6 - L2 training/docs scenarios self-validated (anomaly + money_trail scenarios
+  can't silently fail to demonstrate; parallel to AS.7).
+
+
+## Phase AW - Own the temporal frame + cfg/L2 in the DB (`<prefix>_config`)
+
+**Surfaced 2026-05-23** during AU.3.d hoist work. User caught the spine's
+`datetime.now()` calls in `stuck_pending.py` + `stuck_unbundled.py` as
+an uncontrolled dependency violating AR's "own the temporal frame"
+principle (audit §6). Root cause is upstream — the matview SQL itself
+uses `CURRENT_TIMESTAMP` / `julianday('now')` for the
+`age_seconds = NOW - posting` computation, and the spine generators
+have to follow the matview's wall-clock to keep tests deterministic.
+
+User-proposed design (the ONLY allowed relaxation of the "two-table
+rule" because the new table is DERIVED from cfg+L2, never
+operator-mutated, mirrors the source YAML 1:1):
+
+```sql
+CREATE TABLE <prefix>_config (
+    as_of    TIMESTAMP   NOT NULL,
+    cfg_yaml {json_text} NOT NULL,
+    l2_yaml  {json_text} NOT NULL
+);
+```
+
+**Operational model** (the two-event split user explicitly confirmed):
+
+- **Deploy** (cfg.yaml or L2.yaml changes): Python reads yamls,
+  serializes to JSON, REPLACEs the config row. Initial as_of populated
+  (CURRENT_TIMESTAMP or pinned per cfg). Matviews refresh.
+- **Daily ETL** (data load, cfg unchanged): customer ETL fills
+  `_transactions` + `_daily_balances`; refresh helper runs
+  `UPDATE config SET as_of = CURRENT_TIMESTAMP; <refresh matviews>;`.
+  The cfg/L2 blobs stay untouched. The matview's subquery picks up the
+  new as_of.
+
+**Spike findings (both green; design locked):**
+
+- `tests/unit/test_aw0_matview_as_of_spike.py` (AW.0, 5 tests) —
+  validated the subquery-in-matview mechanism: SQLite's `julianday(...)`
+  accepts scalar subquery; matview body stays stable across refreshes;
+  same plant + varied as_of → varied `age_seconds` → varied fire
+  status; plant + matview reading from one as_of source eliminates
+  wall-clock skew.
+- `tests/unit/test_aw0b_jsonpath_filter_spike.py` (AW.0.b, 7 tests) —
+  SQL/JSON portability: SQLite does NOT support filter-path syntax
+  (`$.arr[?(@.name == "X")]`); PG 12+ and Oracle 12c+ do. Portable
+  workaround for SQLite: `json_each(...) + WHERE` + LEFT JOIN against
+  the matview's main FROM. Composes cleanly into matview SELECTs. The
+  dialect-switch helper in `common/sql/dialect.py` renders the right
+  shape per backend.
+
+**Storage shape locked: JSON blobs + typed `as_of` sibling column**
+(vs key-value rows). The L2 yaml has deep multi-valued structure
+(rails[], chains[], limit_schedules[]); flattening to KV would be
+either lossy or require JSON-in-values. JSON mirrors the source
+1:1; matches existing project patterns (transactions metadata, the
+AV-renamed daily_balances.metadata, Investigation matviews' JSONPath
+usage); supports the WIDE-access cases (limit_breach iterates ALL
+LimitSchedules in one fetch).
+
+**Migration scope** (the user accepted "I'm sold on the migration
+either way"):
+
+| Currently baked at emit-time | After AW |
+|---|---|
+| `{epoch_age_seconds}` → `EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - posting))` | `EXTRACT(EPOCH FROM ((SELECT as_of FROM <prefix>_config) - posting))` |
+| `{pending_age_cases}` (per-rail CASE) | LEFT JOIN config + `json_each(l2_yaml, '$.rails')` + WHERE on name |
+| `{unbundled_age_cases}` | same shape |
+| `{limit_cases_outbound}` / `_inbound` | LEFT JOIN config + `json_each(l2_yaml, '$.limit_schedules')` + WHERE on (parent_role, rail, direction) |
+| `{rolling_window}` (anomaly's hardcoded 2 days) | could move to cfg in a follow-on |
+| Every L2-derived literal | reads from `<prefix>_config` JSON via dialect helper |
+
+Cleanness payoff: matview bodies become **persona-blind** — no per-L2
+literals; same SQL across spec_example, sasquatch_pr, every future L2.
+Operator can introspect: `SELECT JSON_VALUE(l2_yaml, '$.rails[*].max_pending_age') FROM <prefix>_config`.
+
+**Phase relationship to other phases:**
+- **Blocks AU.5** (the dual-axis exhaustiveness gate composes many
+  generators; needs the deterministic as_of). AU.3.d hoist resumes
+  after AW lands.
+- **Blocks AT.2** (windowed anomaly may want to read its threshold
+  from cfg too).
+- **Synergy with AV** (limits→metadata rename): both touch matview
+  literals; AV's rename moves the `limits` JSON to `metadata`; AW
+  ALSO reads from JSON. Probably want AV merged in or just-after AW.
+
+- [x] AW.0 - Spike: validated runtime-table-subquery mechanism (5 tests
+  in `tests/unit/test_aw0_matview_as_of_spike.py`). Pivoted under user
+  feedback: instead of `_runtime` (as_of-only), use `<prefix>_config`
+  (cfg + L2 yaml + typed as_of) — the ONE allowed relaxation of the
+  two-table rule. Spike's mechanism (subquery in matview body) carries
+  over directly to the bigger design.
+- [x] AW.0.b - Spike: SQL/JSON portability across PG/Oracle/SQLite
+  (7 tests in `tests/unit/test_aw0b_jsonpath_filter_spike.py`).
+  Finding: SQLite doesn't support filter-path syntax; portable shape is
+  `json_each() + WHERE` + LEFT JOIN. Dialect helper switches per backend.
+- [x] AW.1 - Schema: emit `<prefix>_config` table at init; populate with
+  cfg + L2 as JSON + initial as_of. Drop/recreate handling for re-deploy.
+  Python helpers: `replace_config(conn, cfg, l2, as_of)` for deploy
+  events, `set_as_of(conn, as_of=None)` for refresh events (None →
+  CURRENT_TIMESTAMP). Landed `src/recon_gen/common/l2/config_table.py`
+  (DDL emission + `replace_config` / `set_as_of` / `get_as_of` helpers
+  taking pre-serialized JSON strings — caller does the dataclass→JSON
+  conversion). `emit_schema` + `emit_schema_drop_sql` integrated with
+  the new table (drop before base, create after, symmetric teardown).
+  15 unit tests in `tests/unit/test_aw1_config_table.py` pin DDL shape,
+  table-name convention, helper round-trip, single-row invariant under
+  re-replace, CURRENT_TIMESTAMP default, full-schema integration. Bridge
+  typing-smell suppressions added to stuck_pending.py + stuck_unbundled.py
+  for `datetime.now()` (the bridge until AW.5 retrofits generators to
+  read from `<prefix>_config.as_of`).
+- [x] AW.2 - Migrate `{epoch_age_seconds}` substitution to read as_of
+  from `<prefix>_config`. PG/Oracle uses `EXTRACT(EPOCH FROM ((SELECT
+  as_of FROM ...) - posting))`; SQLite uses the subquery-in-julianday
+  shape. Update `common/sql/dialect.py::epoch_seconds_between`
+  signature to accept the as_of expression. Landed: schema.py call site
+  changed (the helper signature didn't need updating — it already took
+  arbitrary expression strings; the call site just passes
+  `f"(SELECT as_of FROM {p}_config)"` instead of `"CURRENT_TIMESTAMP"`).
+  stuck_pending + stuck_unbundled test `_fresh_db` helpers seed the
+  config row with `datetime.now()` as the as_of bridge (typing-smell
+  suppression added; AW.5 retrofits to LOCKED_ANCHOR). Pre-existing
+  shape-asserting tests in `tests/schema/test_l2_schema.py` updated
+  for the new SQL shape. Full prelude: 3139 unit tests pass.
+- [x] AW.3 - Migrate `{pending_age_cases}` + `{unbundled_age_cases}` to
+  read from `<prefix>_config.l2_yaml` via JSON path. Landed with two new
+  dialect helpers in `common/sql/dialect.py`: `json_array_iterate` (LEFT
+  JOIN clause iterating a JSON array — SQLite uses `json_each`; PG 17+
+  + Oracle 12c+ use SQL/JSON-standard `JSON_TABLE`) and
+  `json_field_extract` (per-row field extract — SQLite `json_extract`,
+  PG/Oracle `JSON_VALUE`). Matview templates simplified: emit-time CASE
+  branches gone (`_render_pending_age_cases` + `_render_unbundled_age_cases`
+  deleted); matview body is now persona-blind (same SQL across all L2s).
+  Real portability catch: first iteration used PG's `jsonb_array_elements`
+  with `::jsonb` cast; project CLAUDE.md rule bans JSONB (caught by
+  pre-existing `assert "JSONB" not in _strip_comments(sql).upper()`).
+  Pivoted to SQL/JSON-standard JSON_TABLE on PG (requires PG 17+ which
+  the project already targets). Test config-row JSON expanded to carry
+  the rails the matviews iterate. Shape-asserting tests in
+  `tests/schema/test_l2_schema.py` updated for the new JOIN form
+  (`FROM <prefix>_config` + `JSON_VALUE(rail.value, '$....')` instead
+  of `WHEN ct.rail_name = 'X' THEN N`).
+- [x] AW.4 - Migrate `{limit_cases_outbound}` + `{limit_cases_inbound}`
+  to the same JOIN-against-config shape. Multi-key filter via the
+  dialect helper (parent_role + rail + direction). Landed:
+  `_render_limit_breach_cases` deleted; matview LEFT JOINs
+  `<prefix>_config.l2_yaml.$.limit_schedules` with 3-key ON clause
+  (parent_role + rail + direction='Outbound'/'Inbound'). Cap aggregated
+  via `MAX(cap)` since validator U5 guarantees one cap per triple →
+  same value across the GROUP BY. New substitutions `limit_join_outbound`
+  / `limit_join_inbound` / `limit_cap_value`. tests/unit/
+  test_spine_limit_breach.py + test_ap3_invariant_self_validation.py
+  `_fresh_db` helpers updated to seed limit_schedules JSON. Shape-
+  asserting tests in test_l2_schema.py refactored to assert on JOIN-form
+  + the inert-when-empty body uniformity (same SQL regardless of L2
+  contents).
+- [x] AW.5 - Generators retrofitted — stuck_pending + stuck_unbundled
+  drop `datetime.now()`; accept `as_of: datetime` (or read from
+  config-via-Python at scenario_for time). Spine tests become
+  wall-clock-independent; the ±50_000s TZ-skew overshoots in
+  `test_spine_stuck_pending.py` + `test_spine_stuck_unbundled.py`
+  shrink to small natural values (e.g. ±60s). The
+  `no-datetime-now` typing-smell suppressions drop. Landed:
+  `StuckPendingGenerator` + `StuckUnbundledGenerator` gain `as_of:
+  datetime` field; `scenario_for` requires it as a keyword arg
+  (no default — explicit > implicit). Tests use a pinned `_TEST_AS_OF
+  = datetime(2030, 1, 1, 12, 0, 0)` shared between config-seed +
+  generator. Overshoots dropped from ±50_000s to ±60s — deterministic
+  with no wall-clock skew to absorb. The two typing-smell suppressions
+  (`stuck_pending.py:171`, `stuck_unbundled.py:133`) dropped, and the
+  bridge `datetime.now()` calls in `_fresh_db` helpers all gone. Full
+  prelude: 3139 pass.
+- [x] AW.6 - Re-lock seeds per dialect (matview SQL changes for ALL
+  dialects). Run full suite + 4-way agreement (PG + Oracle + SQLite +
+  PDF) to verify no regression in the dashboard/PDF surface. Document
+  performance delta on PG refresh (DROP+CREATE vs JOIN-readingsubquery).
+  **No re-lock needed**: the AW matview SQL changes are in
+  `common/l2/schema.py`'s emit code; the locked seeds at
+  `tests/data/_locked_seeds/*.<dialect>.sql` capture INSERT data only.
+  `tests/data/test_locked_seeds.py` 8/8 passes byte-equality post-AW
+  with zero re-locking — schema emit is regenerated at every test run.
+  Verification ladder run end-to-end on Postgres:
+  (a) `./run_tests.sh up_to=db --dialects=pg --targets=lo` — 48 + 48
+  tests pass on sp_pg_lo + sq_pg_lo; the matview SQL works against
+  real Postgres (LEFT JOIN + JSON_TABLE shape executes; spec_example
+  + sasquatch_pr both green); audit PDF render+verify (one leg of the
+  4-way) passes. (b) `./run_tests.sh up_to=app2 --dialects=pg
+  --targets=lo` — App2 layer green on both variants; the App2
+  renderer reads from the new matview shape correctly (App2 leg of
+  the 4-way). Not run here: Oracle DB layer (dialect helpers are
+  mechanical, JSON_TABLE is SQL-standard; CI exercises this) +
+  QuickSight browser layer (heavyweight + costs $; CI's e2e.yml runs
+  this on every release).
+- [x] AW.7 - Version bump (post-v?.?.?) + RELEASE_NOTES entry. Migration
+  warning ≥1 minor version: downstream operators with custom ETL paths
+  now need to handle `<prefix>_config` (populate at deploy; UPDATE
+  as_of at refresh — or let the recon-gen refresh helper do it).
+  Document the operational two-event split (deploy vs daily ETL).
+  Landed: version bumped 11.10.1 → 11.11.0 (minor — schema change +
+  new operator-facing helpers); `RELEASE_NOTES.md` entry covers
+  schema change + matview persona-blind shape + dialect helpers +
+  spine generators wall-clock-free + operational two-event split +
+  migration warning for custom ETL operators + verification ladder +
+  pointer to the unlocked dashboard-pickers backlog. **Phase AW
+  complete (7/7 leaves).**
+
