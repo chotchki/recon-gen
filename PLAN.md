@@ -232,10 +232,22 @@ near the end because of its instance-coupled `from_instance` smart constructor
   a dual-axis exhaustiveness gate (per-generator AND per-invariant via
   composition). Landed: `tests/unit/test_spine_au2_composition.py` (6 tests).
   Audit subsection "AU.2 result" captures the lessons.
-- [ ] AU.3 - Promote the data/deadline-derived L1 invariants
+- [x] AU.3 - Promote the data/deadline-derived L1 invariants
   (`expected_eod_balance_breach`, `stuck_pending`, `stuck_unbundled`). Each carries
   a window that's PART of the invariant definition (per audit §5 "second source"),
-  not subject to the AR view primitive's empty-behavior.
+  not subject to the AR view primitive's empty-behavior. Landed as three
+  sub-leaves AU.3.a/b/c, each with its own `<invariant>.py` + tests +
+  registry edge: ExpectedEodBalanceGenerator (two-edge to drift via the
+  AU.0 leaf-overdraft pattern), StuckPendingGenerator (single-edge; first
+  L2-coupled + first transaction-based + first wall-clock invariant),
+  StuckUnbundledGenerator (single-edge twin of stuck_pending with disjoint
+  Posted+bundle_id-NULL filter). TZ convention captured as memory
+  (`[[project-local-tz-convention]]` — application uses LOCAL `datetime.now()`
+  per Oracle WITH-TIME-ZONE limitation; SQLite tests absorb UTC skew via
+  ±12h overshoot windows). Invariant Protocol docstring augmented with the
+  scenario_for(instance=None) de-facto convention pending the
+  spike-before-locking decision on a formal `from_instance` Protocol
+  method (deferred to post-AU.4).
 - [ ] AU.4 - Promote `limit_breach` — the instance-coupled case. AP.3 finding #4:
   the `from_instance` smart constructor reads the L2's `LimitSchedule` (no blind
   generator possible). The `(parent_role, rail, direction) → cap` table threads

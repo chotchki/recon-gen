@@ -47,6 +47,10 @@ from recon_gen.common.spine.stuck_pending import (
     StuckPendingGenerator,
     StuckPendingInvariant,
 )
+from recon_gen.common.spine.stuck_unbundled import (
+    StuckUnbundledGenerator,
+    StuckUnbundledInvariant,
+)
 
 #: For every generator class, the invariant classes its emission trips.
 #: Read as: "a single `emit()` from this generator + a refresh of the
@@ -74,6 +78,13 @@ INVARIANT_GENERATOR_EDGES: Final[
     # subledger balance which filters status='Posted'). Empirical edge
     # verification in `test_spine_stuck_pending.py`.
     StuckPendingGenerator: (StuckPendingInvariant,),
+    # AU.3.c — single-edge prediction: stuck_unbundled is Posted but
+    # bundle_id IS NULL. The Posted status puts it on drift's radar (Σ
+    # legs at posted_at counted), so the leaf-account variant MIGHT trip
+    # drift if a balance row isn't planted to match. Empirical edge
+    # verification in `test_spine_stuck_unbundled.py` resolves whether
+    # this is single-edge OR the OverdraftGenerator-style two-edge entry.
+    StuckUnbundledGenerator: (StuckUnbundledInvariant,),
 }
 
 

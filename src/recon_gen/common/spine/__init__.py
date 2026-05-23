@@ -56,6 +56,10 @@ from recon_gen.common.spine.stuck_pending import (
     StuckPendingGenerator,
     StuckPendingInvariant,
 )
+from recon_gen.common.spine.stuck_unbundled import (
+    StuckUnbundledGenerator,
+    StuckUnbundledInvariant,
+)
 from recon_gen.common.spine.registry import (
     INVARIANT_GENERATOR_EDGES,
     generators_for,
@@ -86,7 +90,10 @@ __all__ = [
     # Stuck-Pending family — first transaction-based + L2-coupled (AU.3.b)
     "StuckPendingInvariant",
     "StuckPendingGenerator",
-    # Many-to-many registry (AS.2; AU.1 + AU.3.a + AU.3.b add edges)
+    # Stuck-Unbundled family — twin of stuck_pending (AU.3.c)
+    "StuckUnbundledInvariant",
+    "StuckUnbundledGenerator",
+    # Many-to-many registry (AS.2; AU.1 + AU.3.a/b/c add edges)
     "INVARIANT_GENERATOR_EDGES",
     "invariants_for",
     "generators_for",
