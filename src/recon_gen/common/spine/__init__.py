@@ -65,6 +65,8 @@ from recon_gen.common.spine.stuck_unbundled import (
     StuckUnbundledInvariant,
 )
 from recon_gen.common.spine.registry import (
+    ALL_L1_GENERATORS,
+    ALL_L1_INVARIANTS,
     INVARIANT_GENERATOR_EDGES,
     generators_for,
     invariants_for,
@@ -102,6 +104,8 @@ __all__ = [
     "LimitBreachGenerator",
     # Many-to-many registry (AS.2; AU.1 + AU.3.a/b/c + AU.4 add edges)
     "INVARIANT_GENERATOR_EDGES",
+    "ALL_L1_INVARIANTS",
+    "ALL_L1_GENERATORS",
     "invariants_for",
     "generators_for",
     "iter_edges",

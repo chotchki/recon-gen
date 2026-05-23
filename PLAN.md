@@ -262,7 +262,7 @@ near the end because of its instance-coupled `from_instance` smart constructor
   the existing `scenario_for(<selectors>, *, instance=None)` convention
   SCALED to limit_breach without strain. AT.2 (windowed anomaly) is the
   next decision gate.
-- [ ] AU.5 - **Dual-axis exhaustiveness gate** (refined by AU.2 finding #4):
+- [x] AU.5 - **Dual-axis exhaustiveness gate** (refined by AU.2 finding #4):
   - **Per-generator-class** (original scope): every L1-related `PlantKind`
     value has ≥1 registered `ViolationGenerator`; every L1 `check_type` has
     ≥1 registered `Invariant`.
@@ -272,6 +272,15 @@ near the end because of its instance-coupled `from_instance` smart constructor
     overdraft's parent) are part of the gate; AU.5 must enumerate
     composition scenarios, not just generator classes.
   The taxonomy unification (AS.2) gets its empirical guarantee here.
+  Landed: `ALL_L1_INVARIANTS` + `ALL_L1_GENERATORS` registries added to
+  `common/spine/registry.py` (explicit, hand-maintained per promotion).
+  `tests/unit/test_spine_au5_exhaustiveness.py` (17 tests): parametrized
+  per-generator-registered check, per-invariant-has-a-generator check,
+  cross-cutting "every promoted invariant fires from a real scenario"
+  sweep, internal-consistency checks (no orphan refs). Composition-
+  induced edges stay scenario-level (per the AU.2 boundary decision) —
+  AU.5 covers per-class wiring only; composition coverage lives in
+  test_spine_au2_composition.py. **Phase AU complete (6/6 leaves).**
 
 ## Phase AT - L2 invariant spine rollout *(depends on: AS)*
 

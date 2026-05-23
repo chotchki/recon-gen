@@ -18,12 +18,26 @@ What this enforces (via `tests/unit/test_spine_drift.py`):
   "many-to-many" claims a generator's emission ACTUALLY trips that
   detector — not just that someone wrote it down.
 
-What this does NOT enforce yet (AS.2.x follow-on):
-- Exhaustiveness across all PlantKind values (we'd need to promote
-  every L1 invariant first; AS.2 lands drift + ledger_drift, the rest
-  follow incrementally).
+What this enforces additionally (via `tests/unit/test_spine_au5_exhaustiveness.py`):
+
+- **Per-generator-class exhaustiveness** — every class in
+  `ALL_L1_GENERATORS` has an entry in `INVARIANT_GENERATOR_EDGES`.
+  Catches "I promoted a new generator but forgot to register it."
+- **Per-invariant-class coverage** — every class in `ALL_L1_INVARIANTS`
+  is reached by at least one generator's edge set. Catches "I promoted
+  a new invariant but forgot to wire any generator to it."
+- **Empirical-edge contract** — every registered edge actually fires
+  on emission (existing per-invariant tests cover this; AU.5's
+  parametrized test consolidates).
+
+What this does NOT enforce yet:
 - View edges (`invariant → {Views}`); AT lands those when L2's
   Investigation surface comes online.
+- Composition-induced edges (AU.2 finding: drift+parent-overdraft →
+  ledger_drift on overdraft's parent). The registry stays
+  per-generator-class; composition-induced behavior is documented +
+  tested at the scenario level in
+  `tests/unit/test_spine_au2_composition.py`.
 """
 
 from __future__ import annotations
@@ -95,6 +109,49 @@ INVARIANT_GENERATOR_EDGES: Final[
     # `test_spine_limit_breach.py`.
     LimitBreachGenerator: (LimitBreachInvariant,),
 }
+
+
+# ---------------------------------------------------------------------------
+# AU.5 sources of truth — explicit lists of "what's promoted to the L1
+# spine" for the exhaustiveness gate. Hand-maintained per promotion;
+# new invariants/generators get appended here as they land. The gate
+# test in `tests/unit/test_spine_au5_exhaustiveness.py` asserts these
+# lists stay in sync with `INVARIANT_GENERATOR_EDGES`.
+#
+# Why hand-listed (vs auto-derived from common.spine.__all__):
+# explicit > implicit — the list IS the contract that "I intended to
+# promote this." A class that's defined but accidentally missing from
+# here triggers the gate's failure, NOT a silent omission. AT.5's L2
+# exhaustiveness will mirror this shape with `ALL_L2_INVARIANTS` +
+# `ALL_L2_GENERATORS`.
+# ---------------------------------------------------------------------------
+
+
+ALL_L1_INVARIANTS: Final[tuple[type[Invariant], ...]] = (
+    DriftInvariant,
+    LedgerDriftInvariant,
+    OverdraftInvariant,
+    ExpectedEodBalanceInvariant,
+    StuckPendingInvariant,
+    StuckUnbundledInvariant,
+    LimitBreachInvariant,
+)
+"""Every L1 `Invariant` class promoted to the spine. AU.5's coverage
+gate asserts each is reached by ≥1 generator in
+`INVARIANT_GENERATOR_EDGES`."""
+
+
+ALL_L1_GENERATORS: Final[tuple[type[ViolationGenerator], ...]] = (
+    DriftGenerator,
+    OverdraftGenerator,
+    ExpectedEodBalanceGenerator,
+    StuckPendingGenerator,
+    StuckUnbundledGenerator,
+    LimitBreachGenerator,
+)
+"""Every L1 `ViolationGenerator` class promoted to the spine. AU.5's
+registration gate asserts each is keyed in
+`INVARIANT_GENERATOR_EDGES`."""
 
 
 def invariants_for(
