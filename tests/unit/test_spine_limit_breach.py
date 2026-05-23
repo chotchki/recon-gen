@@ -74,6 +74,35 @@ def _fresh_db() -> sqlite3.Connection:
         dialect=_DIALECT,
     )
     conn.commit()
+    # AW.4 bridge: matview's `cap` reads from `<prefix>_config.l2_yaml`
+    # via LEFT JOIN on `$.limit_schedules`. Seed the config row with
+    # the LimitSchedules the matview iterates. Matches spec_example's
+    # declared schedules — the same Outbound+Inbound caps the tests
+    # exercise against (5000 and 3000 respectively).
+    import json
+    from datetime import datetime
+    from recon_gen.common.l2.config_table import replace_config
+    l2_for_config = json.dumps({
+        "limit_schedules": [
+            {
+                "parent_role": "CustomerLedger",
+                "rail": "ExternalRailOutbound",
+                "direction": "Outbound",
+                "cap": 5000,
+            },
+            {
+                "parent_role": "CustomerLedger",
+                "rail": "ExternalRailInbound",
+                "direction": "Inbound",
+                "cap": 3000,
+            },
+        ],
+    })
+    replace_config(
+        conn, prefix=_PREFIX,
+        cfg_json="{}", l2_json=l2_for_config,
+        as_of=datetime(2030, 1, 1, 12, 0, 0),  # arbitrary; limit_breach is wall-clock-agnostic
+    )
     return conn
 
 

@@ -445,9 +445,20 @@ Operator can introspect: `SELECT JSON_VALUE(l2_yaml, '$.rails[*].max_pending_age
   `tests/schema/test_l2_schema.py` updated for the new JOIN form
   (`FROM <prefix>_config` + `JSON_VALUE(rail.value, '$....')` instead
   of `WHEN ct.rail_name = 'X' THEN N`).
-- [ ] AW.4 - Migrate `{limit_cases_outbound}` + `{limit_cases_inbound}`
+- [x] AW.4 - Migrate `{limit_cases_outbound}` + `{limit_cases_inbound}`
   to the same JOIN-against-config shape. Multi-key filter via the
-  dialect helper (parent_role + rail + direction).
+  dialect helper (parent_role + rail + direction). Landed:
+  `_render_limit_breach_cases` deleted; matview LEFT JOINs
+  `<prefix>_config.l2_yaml.$.limit_schedules` with 3-key ON clause
+  (parent_role + rail + direction='Outbound'/'Inbound'). Cap aggregated
+  via `MAX(cap)` since validator U5 guarantees one cap per triple →
+  same value across the GROUP BY. New substitutions `limit_join_outbound`
+  / `limit_join_inbound` / `limit_cap_value`. tests/unit/
+  test_spine_limit_breach.py + test_ap3_invariant_self_validation.py
+  `_fresh_db` helpers updated to seed limit_schedules JSON. Shape-
+  asserting tests in test_l2_schema.py refactored to assert on JOIN-form
+  + the inert-when-empty body uniformity (same SQL regardless of L2
+  contents).
 - [ ] AW.5 - Generators retrofitted — stuck_pending + stuck_unbundled
   drop `datetime.now()`; accept `as_of: datetime` (or read from
   config-via-Python at scenario_for time). Spine tests become
@@ -466,6 +477,28 @@ Operator can introspect: `SELECT JSON_VALUE(l2_yaml, '$.rails[*].max_pending_age
   Document the operational two-event split (deploy vs daily ETL).
 
 # Backlog (not yet phased)
+
+- **Dashboard pickers sourced from `<prefix>_config.l2_yaml` (post-AW
+  follow-on).** Surfaced 2026-05-23 during AW.3. Today's pickers come
+  from two places: (1) hardcoded option lists baked into the QS dataset
+  JSON at emit time (rail-name picker, direction picker, parent-role
+  picker — Python reads cfg/L2, emits `StaticValues`); (2) dataset-
+  derived `SELECT DISTINCT <col> FROM <dataset>`. AW landed a third
+  option: the `<prefix>_config` table is SQL-queryable, so dashboards
+  can JOIN to `l2_yaml` for picker options — `SELECT JSON_VALUE(rail.
+  value, '$.name') FROM <prefix>_config, JSON_TABLE(l2_yaml, '$.rails
+  [*]' COLUMNS (value json PATH '$')) rail WHERE JSON_VALUE(rail.value,
+  '$.max_pending_age_seconds') IS NOT NULL`. What this unlocks: pickers
+  that show only L2-DECLARED values (vs. dataset-derived which shows
+  whatever's in the data); pickers that JOIN to L2 metadata
+  (descriptions, types, classifications); pickers that survive deploys
+  without re-emitting JSON (cfg row updates; pickers re-read); cross-
+  dashboard consistency without re-encoding the L2 in each dataset.
+  **Caveat**: requires changing the dashboard JSON's filter shape from
+  `StaticValues` to `LinkToDataSetColumn` (or equivalent). Not free
+  with AW; this is the dashboard-side migration that exercises AW's
+  payoff. *(Sized as its own phase when picker complexity surfaces as
+  friction.)*
 
 - **Q.6 — CLI shape revisit: cfg ⇄ L2 dual-yaml factoring.** Surfaced 2026-05-08 during `Y.2.gate.h.6`. The runner reads `cfg.default_l2_instance` and threads `QS_GEN_TEST_L2_INSTANCE` to subprocesses, making the CLI's dual-arg shape (`-c <cfg.yaml> --l2 <l2.yaml>`) partially redundant. Spike-before-implement (per `feedback_spike_before_locking_implementation`); CLI-surface change touches every operator command + doc example + tests.
   - **Q.6.0 SPIKE: combined-yaml vs cfg-with-L2-pointer vs status-quo** (LOCKED 2026-05-08; deferred from PLAN 2026-05-19). Output `docs/audits/y_11_cli_shape_spike.md`. Four candidates: **(A)** status quo + `--l2` defaults from `cfg.default_l2_instance` (smallest delta, mostly additive); **(B)** single combined yaml (eliminates dual-yaml friction but env-only fields co-mingle with institution-flavor — Q.5 separation existed for a reason); **(C)** cfg-with-L2-pointer + `--l2` removed entirely (forces multi-instance operators to duplicate cfg); **(D)** `--l2 <name>` indexed against an `l2_instances:` registry in cfg + `default_l2_instance:` (named ergonomics, one indirection layer). Constraints: (1) no-args `json apply --execute` deploys the default L2; (2) multi-L2 operators don't copy cfg files; (3) existing `--l2 <yaml>` keeps working or has a documented migration; (4) doc examples shrink; (5) tests pass without env-var passthrough. Likely outcome: A or D — A smallest delta, D cleanest if multi-L2-per-cfg becomes common.

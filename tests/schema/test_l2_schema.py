@@ -561,23 +561,32 @@ def test_expected_eod_balance_breach_excludes_null_expectations() -> None:
     assert "money <> sb.expected_eod_balance" in body
 
 
-def test_limit_breach_embeds_limit_schedule_caps_inline() -> None:
-    """L2's LimitSchedules become CASE branches in the limit_breach view;
-    JSON-path-portable across SQL targets. Branches reference `tx.`
-    aliases since the view reads parent_role + rail_name from the
-    transaction row directly (no JOIN to daily_balances needed —
-    parent_role is denormalized on every v6 transaction)."""
+def test_limit_breach_reads_limit_schedule_caps_from_config() -> None:
+    """AW.4 (2026-05-23): per-LimitSchedule caps no longer baked as
+    CASE branches at emit time. The matview LEFT JOINs `<prefix>_config
+    .l2_yaml.$.limit_schedules` and reads cap per-row via JSON path
+    (multi-key filter: parent_role + rail + direction). Matview is
+    persona-blind — same SQL across all L2s."""
     sql = emit_schema(_instance_with_limits("lb"), prefix="lb")
+    # No per-LimitSchedule literals baked.
     assert (
         "WHEN tx.account_parent_role = 'DDAControl' "
         "AND tx.rail_name = 'ach' THEN 12000"
-    ) in sql
+    ) not in sql
+    # The JOIN clause reads from the config table's l2_yaml.
+    assert "FROM lb_config" in sql
+    # JSON_VALUE on PG/Oracle reads the cap field.
+    assert "JSON_VALUE(ls.value, '$.cap')" in sql
+    # Direction filter lives in the JOIN's ON clause.
+    assert "= 'Outbound'" in sql
+    assert "= 'Inbound'" in sql
 
 
-def test_limit_breach_view_with_no_limit_schedules_is_inert() -> None:
-    """An L2 instance with no LimitSchedules emits a syntactically valid
-    limit_breach view that surfaces no rows (cap is NULL → outer WHERE
-    `cap IS NOT NULL` excludes everything)."""
+def test_limit_breach_view_emits_uniform_body_with_no_limit_schedules() -> None:
+    """AW.4 (2026-05-23): matview body is the same whether or not the
+    L2 declares LimitSchedules. With no schedules in the JSON, the LEFT
+    JOIN finds no matches → cap is NULL → outer WHERE `cap IS NOT NULL`
+    filters → matview is inert."""
     sql = emit_schema(_instance("nolim"), prefix="nolim")  # _instance has no limit_schedules
     assert "CREATE MATERIALIZED VIEW nolim_limit_breach" in sql
     body_match = re.search(
@@ -587,12 +596,9 @@ def test_limit_breach_view_with_no_limit_schedules_is_inert() -> None:
     )
     assert body_match is not None
     body = body_match.group(1)
-    # `NULL::numeric AS cap` appears in the inner SELECT — typed NULL
-    # so `outbound_total > cap` doesn't fail with `numeric > text`
-    # when no LimitSchedules are declared (M.4.4.6 fix).
-    assert "NULL::numeric AS cap" in body
-    # Outer WHERE filters `cap IS NOT NULL` so an inert NULL cap excludes
-    # every row.
+    # New shape: LEFT JOIN to config's l2_yaml limit_schedules iteration.
+    assert "FROM nolim_config" in body
+    # Outer WHERE still filters `cap IS NOT NULL`.
     assert "WHERE cap IS NOT NULL" in body
 
 

@@ -510,12 +510,38 @@ def _emit_l1_invariant_views(
       across mixed-NULL branches).
     """
     p = prefix
-    limit_cases_outbound = _render_limit_breach_cases(
-        instance, p=p, dialect=dialect, direction="Outbound",
+    # Phase AW.4 (2026-05-23): limit_breach caps no longer baked as
+    # CASE branches per direction. The matview LEFT JOINs the
+    # `$.limit_schedules` array in <prefix>_config.l2_yaml and reads
+    # cap per-row via JSON_VALUE. Multi-key filter (parent_role + rail
+    # + direction) lives in the JOIN's ON clause. Same JOIN shape per
+    # direction; the direction literal varies. Per-instance LimitSchedule
+    # validator U5 guarantees one cap per (parent_role, rail, direction)
+    # triple → no SUM-multiplication risk.
+    from recon_gen.common.sql import (
+        cast as _cast,
+        json_array_iterate,
+        json_field_extract,
     )
-    limit_cases_inbound = _render_limit_breach_cases(
-        instance, p=p, dialect=dialect, direction="Inbound",
+    _ls_iter = json_array_iterate(
+        f"(SELECT l2_yaml FROM {p}_config)",
+        "$.limit_schedules", alias="ls", dialect=dialect,
     )
+    _ls_parent_role = json_field_extract("ls.value", "$.parent_role", dialect)
+    _ls_rail = json_field_extract("ls.value", "$.rail", dialect)
+    _ls_direction = json_field_extract("ls.value", "$.direction", dialect)
+    _ls_cap_extract = json_field_extract("ls.value", "$.cap", dialect)
+
+    def _limit_join(direction: str) -> str:
+        return (
+            f"{_ls_iter}\n      ON {_ls_parent_role} = tx.account_parent_role"
+            f"\n     AND {_ls_rail} = tx.rail_name"
+            f"\n     AND {_ls_direction} = '{direction}'"
+        )
+
+    limit_cap_value = _cast(_ls_cap_extract, "numeric", dialect)
+    limit_join_outbound = _limit_join("Outbound")
+    limit_join_inbound = _limit_join("Inbound")
     # Phase AW.3 (2026-05-23): the per-rail max_*_age values used to be
     # baked as CASE branches at emit time. Now they read from
     # `<prefix>_config.l2_yaml` via LEFT JOIN — matview body becomes
@@ -561,8 +587,9 @@ def _emit_l1_invariant_views(
     )
     return _L1_INVARIANT_VIEWS_TEMPLATE.format(
         p=p,
-        limit_cases_outbound=limit_cases_outbound,
-        limit_cases_inbound=limit_cases_inbound,
+        limit_join_outbound=limit_join_outbound,
+        limit_join_inbound=limit_join_inbound,
+        limit_cap_value=limit_cap_value,
         pending_age_join=pending_age_join,
         pending_age_value=pending_age_value,
         unbundled_age_join=unbundled_age_join,
@@ -596,59 +623,15 @@ def _emit_l1_invariant_views(
     )
 
 
-def _render_limit_breach_cases(
-    instance: L2Instance,
-    *,
-    p: str,
-    dialect: Dialect = Dialect.POSTGRES,
-    direction: str = "Outbound",
-) -> str:
-    """Build the CASE-WHEN body that the limit_breach view uses to look
-    up a (parent_role, rail, direction) cap from L2's LimitSchedules.
-
-    Inline at view-emit time (not via JSON_VALUE on daily_balances.limits)
-    because dynamic-key JSON path syntax isn't portable across the SQL
-    targets we support. The L2 instance's LimitSchedules are static at
-    schema-emit time anyway — re-emitting the schema picks up changes.
-
-    Returns a multi-line SQL CASE expression. References ``tx.``-prefixed
-    columns since the view reads parent_role + rail_name directly from
-    the transaction row (denormalized in v6) — no JOIN to daily_balances
-    needed. Only LimitSchedules matching ``direction`` contribute
-    branches; the other direction's caps are emitted by the sibling
-    call with ``direction="Inbound"``. If no LimitSchedules match
-    ``direction``, returns ``NULL::numeric`` (typed NULL) so the column
-    has a concrete type — bare NULL infers as text in PostgreSQL and
-    breaks the outer ``outbound_total > cap`` comparison with
-    ``numeric > text``. The branch's empty-cap result then matches no
-    rows in the outer UNION-ALL SELECT (``cap IS NOT NULL`` filter), so
-    an L2 with zero Inbound caps cleanly contributes zero Inbound
-    breach rows without any branch removal.
-
-    Z.B (2026-05-15): formerly matched on ``tx.transfer_type``; under
-    the symmetric collapse the cap binds to a rail name directly.
-    AB.1 (2026-05-19): added ``direction`` filter — the matview emits
-    one SELECT branch per direction with its own cap CASE.
-    """
-    matching = [ls for ls in instance.limit_schedules if ls.direction == direction]
-    if not matching:
-        return typed_null("numeric", dialect)
-    branches: list[str] = []
-    for ls in matching:
-        # Each LimitSchedule is keyed on (parent_role, rail, direction)
-        # per validator U5; the cap is the threshold value.
-        branches.append(
-            f"WHEN tx.account_parent_role = '{ls.parent_role}' "
-            f"AND tx.rail_name = '{ls.rail}' "
-            f"THEN {ls.cap}"
-        )
-    branches_sql = "\n        ".join(branches)
-    return f"CASE\n        {branches_sql}\n        ELSE NULL\n    END"
-
-
-# Phase AW.3 (2026-05-23): `_render_pending_age_cases` removed. Caps now
-# read from `<prefix>_config.l2_yaml` via LEFT JOIN; per-rail values are
-# no longer baked at emit time. The matview is persona-blind.
+# Phase AW.4 (2026-05-23): `_render_limit_breach_cases` removed. Caps now
+# read from `<prefix>_config.l2_yaml.$.limit_schedules` via LEFT JOIN
+# (multi-key filter: parent_role + rail + direction); per-(parent_role,
+# rail, direction) values are no longer baked at emit time. The matview
+# is persona-blind.
+#
+# Phase AW.3 (2026-05-23): `_render_pending_age_cases` removed. Same
+# pattern for per-rail max_pending_age; matview reads from
+# `<prefix>_config.l2_yaml.$.rails`.
 
 
 def _render_chain_parent_disagreement_fan_in_filter(
@@ -1992,8 +1975,9 @@ FROM (
         tx.rail_name,
         'Outbound' AS direction,
         SUM(ABS(tx.amount_money)) AS outbound_total,
-        {limit_cases_outbound} AS cap
+        MAX({limit_cap_value}) AS cap
     FROM {p}_current_transactions tx
+    LEFT JOIN {limit_join_outbound}
     WHERE tx.amount_direction = 'Debit'
       AND tx.status = 'Posted'
       AND tx.account_scope = 'internal'
@@ -2013,8 +1997,9 @@ FROM (
         tx.rail_name,
         'Inbound' AS direction,
         SUM(ABS(tx.amount_money)) AS outbound_total,
-        {limit_cases_inbound} AS cap
+        MAX({limit_cap_value}) AS cap
     FROM {p}_current_transactions tx
+    LEFT JOIN {limit_join_inbound}
     WHERE tx.amount_direction = 'Credit'
       AND tx.status = 'Posted'
       AND tx.account_scope = 'internal'
