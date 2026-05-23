@@ -112,3 +112,64 @@ def test_config_window_days_threads_through() -> None:
     cfg = TestGeneratorConfig(end_date=LOCKED_ANCHOR)
     assert cfg.as_of_frame(window_days=7).window_days == 7
     assert cfg.as_of_frame(window_days=7).as_of == LOCKED_ANCHOR
+
+
+# ---------------------------------------------------------------------------
+# AQ.4 — the determinism gate. The §8 story end-to-end through the frame:
+# locked binding ⇒ byte-identical seed, live binding ⇒ ends-at-now, both
+# via THE SAME `build_full_seed_sql` emitter. The frame is the only thing
+# that floats.
+# ---------------------------------------------------------------------------
+
+
+def _spec_example_path() -> str:
+    from pathlib import Path
+    return str(Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml")
+
+
+def test_locked_binding_emits_byte_identical_seed_twice_via_frame() -> None:
+    # Resolve the anchor through the frame (`cfg.as_of_frame().as_of`) and
+    # emit twice; the locked binding must give byte-identical output. This
+    # is the AP.0 spike's `locked()` determinism claim made end-to-end:
+    # locked ⇒ same SQL string across runs, regardless of when run.
+    from recon_gen.cli._helpers import build_full_seed_sql
+    from recon_gen.common.config import TestGeneratorConfig
+    from recon_gen.common.l2 import load_instance
+    from tests._test_helpers import make_test_config
+
+    cfg = make_test_config(
+        db_table_prefix="spec_example",
+        test_generator=TestGeneratorConfig(end_date=LOCKED_ANCHOR),
+    )
+    instance = load_instance(_spec_example_path())
+
+    anchor = cfg.test_generator.as_of_frame().as_of
+    assert anchor == LOCKED_ANCHOR  # locked binding resolved through frame
+    a: str = build_full_seed_sql(cfg, instance, anchor=anchor)
+    b: str = build_full_seed_sql(cfg, instance, anchor=anchor)
+    assert a == b, "locked binding must emit byte-identical SQL across runs"
+    assert "2030-01-01" in a, "locked anchor day must appear in the output"
+
+
+def test_live_binding_emits_seed_ending_at_today_via_frame() -> None:
+    # The same emitter under the live binding — only the resolved anchor
+    # differs (= today). The emission carries that anchor through; today's
+    # ISO date string appears in the output. Same code path as locked.
+    from recon_gen.cli._helpers import build_full_seed_sql
+    from recon_gen.common.config import TestGeneratorConfig
+    from recon_gen.common.l2 import load_instance
+    from tests._test_helpers import make_test_config
+
+    cfg = make_test_config(
+        db_table_prefix="spec_example",
+        test_generator=TestGeneratorConfig(),  # no end_date → live
+    )
+    instance = load_instance(_spec_example_path())
+
+    anchor = cfg.test_generator.as_of_frame().as_of
+    assert anchor == date.today()  # live binding resolved through frame
+    sql: str = build_full_seed_sql(cfg, instance, anchor=anchor)
+    assert anchor.isoformat() in sql, (
+        f"live emission must carry today's anchor through; "
+        f"expected {anchor.isoformat()} in output"
+    )
