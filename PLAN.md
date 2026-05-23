@@ -170,7 +170,7 @@ The view primitive: one typed `View` is the source of truth; picker + analysis d
 - [x] AR.1 - `View` date-view tree primitive in `common/tree/` (anchor=`AsOfFrame`, span, empty_behavior, required_coverage); authoring abstraction, not end-user config
 - [x] AR.2 - balance-date view: `DateTimeParam.default` + dataset `StaticValues` + `ParameterDateTimePicker` + App2 binding all DERIVE from one view; delete the per-app RollingDate exprs + standalone sentinels
 - [x] AR.3 - `required_coverage` seed-coverage assertion (plant ⟷ query-window contract becomes a test, not developer-memory)
-- [ ] AR.4 - roll the remaining date views onto the primitive (L1 universal range, Exec 30-day, L2FT static bounds)
+- [x] AR.4 - roll the remaining date views onto the primitive (L1 universal range, Exec 30-day, L2FT static bounds)
 - [ ] AR.5 - **D2 confirm at the live QS layer** — the 5 Daily Statement KPIs render (the release blocker). db/deploy/e2e RESUME here; **release unparks.**
 
 ## Phase AS - invariant spine (D6) *(depends on: AR)*

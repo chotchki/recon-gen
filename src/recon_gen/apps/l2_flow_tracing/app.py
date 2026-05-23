@@ -422,8 +422,16 @@ def _populate_getting_started(
 # wall-clock), so a "now-relative" default would exclude every demo row;
 # (2) Rails is an explorer tab — the analyst comes in not knowing what
 # range to look at, and an unconstrained default lets them see what's
-# there before narrowing. Switch to RollingDate when the L2 instance
-# carries production data with current timestamps.
+# there before narrowing.
+#
+# AR.4 — INTENTIONALLY NOT MIGRATED to `DateView`. The view primitive
+# models (anchor + span + empty-behavior); these static bounds model a
+# fourth shape — "no narrowing, this surface doesn't filter on date" —
+# which doesn't fit a frame-anchored view cleanly. The view-primitive
+# audit (§5 residual tension) distinguishes invariant-derived /
+# data/deadline-derived / subjective-view windows; this is a fourth
+# kind. Switching to a RollingDate-or-anchored view would require the
+# L2 instance to carry production data with current timestamps.
 _DATE_START_STATIC = "1900-01-01T00:00:00.000Z"
 _DATE_END_STATIC = "2099-12-31T23:59:59.999Z"
 

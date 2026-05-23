@@ -159,13 +159,26 @@ class DateView:
         return f"{self.anchor_day.isoformat()}T00:00:00"
 
     def emit_qs_analysis_default(self) -> DateTimeDefaultValues:
-        """The QS analysis-param default — a `StaticValues` literal day,
-        NOT a `RollingDate` expression. Strict-collapse: the anchor is
-        the owned `as_of` (baked at deploy time for the live binding,
-        the canonical `LOCKED_ANCHOR` for the locked binding). No
-        wall-clock drift between deploys, no disagreement with the
-        dataset side."""
+        """Alias for `emit_qs_analysis_default_end()` — kept for the
+        single-date case where the "default" is unambiguously the
+        anchor (the AR.2 balance-date wiring's caller name)."""
+        return self.emit_qs_analysis_default_end()
+
+    def emit_qs_analysis_default_end(self) -> DateTimeDefaultValues:
+        """The QS analysis-param default for the END of a range view (or
+        the single-date case) — a `StaticValues` literal day, NOT a
+        `RollingDate` expression. Strict-collapse: the anchor is the
+        owned `as_of`, baked at deploy."""
         return DateTimeDefaultValues(StaticValues=[self._anchor_iso()])
+
+    def emit_qs_analysis_default_start(self) -> DateTimeDefaultValues:
+        """The QS analysis-param default for the START of a range view —
+        `window_start` as `StaticValues`. AR.4 wires this onto the L1
+        universal-range start param + the Exec 30-day start param,
+        replacing the per-app `RollingDate(addDateTime(-N, ...))`
+        expressions."""
+        start_iso = f"{self.window_start.isoformat()}T00:00:00"
+        return DateTimeDefaultValues(StaticValues=[start_iso])
 
     def emit_qs_dataset_default(self) -> DateTimeDatasetParameterDefaultValues:
         """The QS dataset-param default — the SAME literal day as the

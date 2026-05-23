@@ -1578,10 +1578,11 @@ def _populate_daily_statement_sheet(
 # the column-name mismatch without a schema migration.
 
 
-# Default = last 7 days. QuickSight rolling-date expressions handle the
-# "today" anchor; addDateTime yields the start-of-window 7 days back.
-_DATE_END_DEFAULT_EXPR = "truncDate('DD', now())"
-_DATE_START_DEFAULT_EXPR = "addDateTime(-7, 'DD', truncDate('DD', now()))"
+# AR.4 — the per-app RollingDate exprs (pre-AR.4: "last 7 days off now")
+# are gone; the universal range is a 7-day DateView constructed from
+# cfg.test_generator.as_of_frame(). Strict-collapse, same as AR.2's
+# balance-date — bake at deploy, no wall-clock drift between deploys,
+# no disagreement with the dataset side.
 
 
 def _wire_date_range_filter(
@@ -1597,28 +1598,26 @@ def _wire_date_range_filter(
     supersession_audit_sheet: Sheet,
     todays_exceptions_sheet: Sheet,
     transactions_sheet: Sheet,
+    universal_range_view: DateView,
 ) -> None:
     """Wire the universal date-range filter (params + groups + controls).
 
-    Adds 2 DateTimeParams (P_L1_DATE_START + P_L1_DATE_END) with rolling
-    7-day defaults; 5 SINGLE_DATASET FilterGroups (one per data-bearing
-    dataset, each scoped to its sheet); paired ParameterDateTimePicker
-    controls on every data-bearing sheet so the analyst sets the window
-    once and it propagates.
+    Adds 2 DateTimeParams (P_L1_DATE_START + P_L1_DATE_END) with the
+    7-day range from ``universal_range_view``; 5 SINGLE_DATASET
+    FilterGroups (one per data-bearing dataset, each scoped to its
+    sheet); paired ParameterDateTimePicker controls on every
+    data-bearing sheet so the analyst sets the window once and it
+    propagates.
     """
     date_start = analysis.add_parameter(DateTimeParam(
         name=P_L1_DATE_START,
         time_granularity="DAY",
-        default=DateTimeDefaultValues(
-            RollingDate={"Expression": _DATE_START_DEFAULT_EXPR},
-        ),
+        default=universal_range_view.emit_qs_analysis_default_start(),
     ))
     date_end = analysis.add_parameter(DateTimeParam(
         name=P_L1_DATE_END,
         time_granularity="DAY",
-        default=DateTimeDefaultValues(
-            RollingDate={"Expression": _DATE_END_DEFAULT_EXPR},
-        ),
+        default=universal_range_view.emit_qs_analysis_default_end(),
     ))
 
     # Param-bound dict literals — TimeRangeFilter.minimum/maximum are
@@ -2575,6 +2574,10 @@ def build_l1_dashboard_app(
         supersession_audit_sheet=supersession_audit_sheet,
         todays_exceptions_sheet=todays_exceptions_sheet,
         transactions_sheet=transactions_sheet,
+        # AR.4 — 7-day window per the pre-AR.4 RollingDate defaults.
+        universal_range_view=DateView(
+            frame=cfg.test_generator.as_of_frame(window_days=7),
+        ),
     )
 
     # M.2b.3 + M.2b.5 + M.2b.10 + M.2b.11 + M.2b.12 — Per-sheet

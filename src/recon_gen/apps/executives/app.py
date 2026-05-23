@@ -50,13 +50,13 @@ from recon_gen.common.sheets.app_info import (
     populate_app_info_sheet,
 )
 from recon_gen.common.theme import resolve_l2_theme
-from recon_gen.common.models import DateTimeDefaultValues
 from recon_gen.common.tree import (
     Analysis,
     App,
     CategoryFilter,
     Dataset,
     DateTimeParam,
+    DateView,
     FilterGroup,
     Sheet,
     TextBox,
@@ -281,11 +281,10 @@ P_EXEC_DATE_END = "pExecDateEnd"
 _FG_EXEC_DATE_TXN = "fg-exec-date-transaction-summary"
 _FG_EXEC_DATE_ACCT = FilterGroupId("fg-exec-date-account-summary")
 
-# Default = last 30 days. Exec sheets show daily-grain summaries
-# rather than per-leg detail, so 30 days reads as one trend page
-# instead of L1's 7-day operator window.
-_EXEC_DATE_END_DEFAULT_EXPR = "truncDate('DD', now())"
-_EXEC_DATE_START_DEFAULT_EXPR = "addDateTime(-30, 'DD', truncDate('DD', now()))"
+# AR.4 — Exec sheets show daily-grain summaries rather than per-leg
+# detail, so 30 days reads as one trend page (vs L1's 7-day operator
+# window). The pre-AR.4 RollingDate exprs are gone; the range is a
+# DateView constructed from cfg.test_generator.as_of_frame(window_days=30).
 
 
 def _populate_account_coverage(
@@ -581,6 +580,7 @@ def _wire_date_range_filter(
     account_coverage_sheet: Sheet,
     transaction_volume_sheet: Sheet,
     money_moved_sheet: Sheet,
+    exec_range_view: DateView,
 ) -> None:
     """Q.1.b — Universal date-range filter across the 3 data-bearing
     Exec sheets, mirroring L1's M.2b.1 pattern.
@@ -600,19 +600,16 @@ def _wire_date_range_filter(
     ds_acct_active = datasets[DS_EXEC_ACCOUNT_SUMMARY_ACTIVE]
     ds_txn = datasets[DS_EXEC_TRANSACTION_SUMMARY]
 
+    # AR.4 — 30-day window via DateView (pre-AR.4 RollingDate exprs gone).
     date_start = analysis.add_parameter(DateTimeParam(
         name=P_EXEC_DATE_START,
         time_granularity="DAY",
-        default=DateTimeDefaultValues(
-            RollingDate={"Expression": _EXEC_DATE_START_DEFAULT_EXPR},
-        ),
+        default=exec_range_view.emit_qs_analysis_default_start(),
     ))
     date_end = analysis.add_parameter(DateTimeParam(
         name=P_EXEC_DATE_END,
         time_granularity="DAY",
-        default=DateTimeDefaultValues(
-            RollingDate={"Expression": _EXEC_DATE_END_DEFAULT_EXPR},
-        ),
+        default=exec_range_view.emit_qs_analysis_default_end(),
     ))
 
     min_bound: dict[str, str] = {"Parameter": P_EXEC_DATE_START}
@@ -800,6 +797,10 @@ def build_executives_app(
         account_coverage_sheet=sheets[SHEET_EXEC_ACCOUNT_COVERAGE],
         transaction_volume_sheet=sheets[SHEET_EXEC_TRANSACTION_VOLUME],
         money_moved_sheet=sheets[SHEET_EXEC_MONEY_MOVED],
+        # AR.4 — 30-day window per the pre-AR.4 RollingDate defaults.
+        exec_range_view=DateView(
+            frame=cfg.test_generator.as_of_frame(window_days=30),
+        ),
     )
 
     # M.4.4.5 — App Info ("i") sheet, ALWAYS LAST. Diagnostic canary;
