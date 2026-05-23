@@ -376,7 +376,7 @@ is the production rollout for the two L2 classes. AT.0 redecomposes from AS's re
   - [x] AT.5.b - **App2 Investigation dashboard ⋈ direct-matview agreement**.
     Add `_dashboard_extract` projections for anomaly + money_trail tables;
     App2 leg (no AWS infra needed).
-  - [ ] AT.5.c - **QS Investigation dashboard ⋈ direct-matview agreement**.
+  - [x] AT.5.c - **QS Investigation dashboard ⋈ direct-matview agreement**.
     Heaviest leg. AWS QS deploy of Investigation + InvestigationDriver
     projections.
   - [ ] AT.5.d - **Investigation PDF section ⋈ direct-matview agreement**
