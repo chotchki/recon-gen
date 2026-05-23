@@ -46,9 +46,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date
 from decimal import Decimal
 from typing import Literal
+
+from recon_gen.common.as_of_frame import AsOfFrame
 
 from .primitives import (
     Account,
@@ -137,7 +139,9 @@ def default_scenario_for(
     materialized from this instance (e.g., no ``LimitSchedule``
     declared → no LimitBreachPlant).
     """
-    today_ref = today or datetime.now(tz=timezone.utc).date()  # typing-smell: ignore[no-datetime-now]: ad-hoc-run fallback; tests + CLI always pass today=anchor (CLAUDE.md "Anchor pinned at date(2030, 1, 1)")
+    # AQ.3 funnel: ad-hoc fallback routes through AsOfFrame.live() — the
+    # sole blessed wall-clock site. Tests + CLI always pass today=anchor.
+    today_ref = today or AsOfFrame.live().as_of
     omitted: list[tuple[str, str]] = []
     include_l1 = mode in ("l1_invariants", "l1_plus_broad")
     include_broad = mode in ("broad", "l1_plus_broad")

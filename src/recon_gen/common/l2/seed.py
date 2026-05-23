@@ -66,9 +66,10 @@ from __future__ import annotations
 import random
 import zlib
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from decimal import Decimal
 
+from recon_gen.common.as_of_frame import AsOfFrame
 from recon_gen.common.sql import Dialect
 
 from .primitives import (
@@ -701,7 +702,9 @@ class ScenarioPlant:
     rail_firing_plants: tuple[RailFiringPlant, ...] = ()
     inv_fanout_plants: tuple[InvFanoutPlant, ...] = ()
     today: date = field(
-        default_factory=lambda: datetime.now(tz=timezone.utc).date(),  # typing-smell: ignore[no-datetime-now]: dataclass default for ad-hoc; locked seeds + tests always override with the pinned anchor
+        # AQ.3 funnel: defaults route through AsOfFrame.live() — the sole
+        # blessed wall-clock site. Locked seeds + tests always override.
+        default_factory=lambda: AsOfFrame.live().as_of,
     )
 
 
@@ -1244,7 +1247,10 @@ def emit_baseline_seed(
         _BASELINE_BASE_SEED if base_seed is None else int(base_seed)
     )
     if anchor is None:
-        anchor = datetime.now(tz=timezone.utc).date()  # typing-smell: ignore[no-datetime-now]: ad-hoc-run fallback; locked seeds + tests always pass anchor=date(2030, 1, 1)
+        # AQ.3 funnel: ad-hoc-run fallback routes through AsOfFrame.live()
+        # — the sole blessed wall-clock site. Locked seeds + tests always
+        # pass anchor=LOCKED_ANCHOR.
+        anchor = AsOfFrame.live().as_of
 
     template_by_role = {t.role: t for t in instance.account_templates}
 

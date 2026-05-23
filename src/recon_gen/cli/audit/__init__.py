@@ -42,6 +42,7 @@ from pathlib import Path
 
 import click
 
+from recon_gen.common.as_of_frame import AsOfFrame
 from recon_gen.cli._helpers import (
     config_option,
     execute_option,
@@ -155,7 +156,9 @@ def _resolve_period(
     today − 1]`` inclusive. Both endpoints are inclusive dates.
     Override either endpoint via ``--from`` / ``--to``.
     """
-    anchor = today or date.today()
+    # AQ.3 funnel: default report anchor routes through AsOfFrame.live()
+    # — the sole blessed wall-clock site. Operators override via --today.
+    anchor = today or AsOfFrame.live().as_of
     end = period_to.date() if period_to is not None else anchor - timedelta(days=1)
     start = period_from.date() if period_from is not None else anchor - timedelta(days=7)
     if start > end:

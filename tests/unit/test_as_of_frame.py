@@ -62,13 +62,13 @@ def test_frame_is_frozen() -> None:
         frame.as_of = date(2031, 1, 1)  # type: ignore[misc]: pyright correctly flags assignment to a frozen dataclass; the test asserts the runtime FrozenInstanceError fires, which requires actually attempting the mutation
 
 
-def test_locked_anchor_agrees_with_canonical_lock_anchor() -> None:
-    # Drift gate until AQ.3 funnels the two constants. Today
-    # `cli/data.py::_CANONICAL_LOCK_ANCHOR` is the source the locked-seed
-    # SQL emitter uses; `as_of_frame.LOCKED_ANCHOR` is the new one views +
-    # generator will read. Both must name the same day or determinism
-    # breaks at the seam. AQ.3 collapses this to a single import.
-    assert LOCKED_ANCHOR == _CANONICAL_LOCK_ANCHOR
+def test_locked_anchor_is_the_single_source_of_truth() -> None:
+    # AQ.3 collapsed the two constants: `cli/data.py::_CANONICAL_LOCK_ANCHOR`
+    # is now an alias for `as_of_frame.LOCKED_ANCHOR` (the locked-SQL
+    # emitter's call site stayed for caller compat, but the value sources
+    # off LOCKED_ANCHOR). Identity check — if these ever drift, something
+    # went around the funnel.
+    assert _CANONICAL_LOCK_ANCHOR is LOCKED_ANCHOR
 
 
 # ---------------------------------------------------------------------------

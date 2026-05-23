@@ -24,6 +24,7 @@ import dataclasses
 from datetime import date, timedelta
 from pathlib import Path
 
+from recon_gen.common.as_of_frame import AsOfFrame
 from recon_gen.common.config import (
     Config,
     PlantKind,
@@ -95,7 +96,10 @@ class TestGeneratorCache:
             # (start early to show good days, advance to reveal the issue).
             # Deterministic surfaces (tests, authored scenarios) pin it via
             # the window_end arg rather than relying on wall-clock.
-            window_end = date.today()  # typing-smell: ignore[no-datetime-now]: trainer-mode default window — wall-clock today is the operator-friendly anchor for "last 90 days"; not a determinism path
+            # AQ.3 funnel: live trainer ends at "now" via AsOfFrame.live()
+            # — the sole blessed wall-clock site. Deterministic surfaces
+            # (tests, authored scenarios) still pin via the window_end arg.
+            window_end = AsOfFrame.live().as_of
         if window_start is None:
             window_start = window_end - timedelta(
                 days=DEFAULT_BASELINE_WINDOW_DAYS - 1,

@@ -160,7 +160,7 @@ Own `as_of`: the generator and the views read one anchor, not wall-clock `now()`
 
 - [x] AQ.1 - `AsOfFrame` (as_of + window; `locked`/`live` bindings) promoted to `src/recon_gen/common/`
 - [x] AQ.2 - `as_of` lands in config (subsumes `TestGeneratorConfig.end_date` + trainer `window_end`)
-- [ ] AQ.3 - generator reads `frame.as_of` (rename+funnel the threaded `anchor=`; collapse the 4 ad-hoc `date.today()` fallbacks → "no frame ⇒ live")
+- [x] AQ.3 - generator reads `frame.as_of` (rename+funnel the threaded `anchor=`; collapse the 4 ad-hoc `date.today()` fallbacks → "no frame ⇒ live")
 - [ ] AQ.4 - determinism gate: locked ⇒ byte-identical seed; live ⇒ ends-at-now, same path (the §8 story)
 
 ## Phase AR - view rollout (D5) *(depends on: AQ)*

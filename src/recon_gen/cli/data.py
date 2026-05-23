@@ -18,11 +18,11 @@ from __future__ import annotations
 import difflib
 import subprocess
 import sys
-from datetime import date
 from pathlib import Path
 
 import click
 
+from recon_gen.common.as_of_frame import LOCKED_ANCHOR
 from recon_gen.cli._helpers import (
     build_full_seed_sql,
     config_option,
@@ -37,8 +37,11 @@ from recon_gen.cli._helpers import (
 
 # X.1.k — fixed canonical anchor for locked-SQL determinism. The plants'
 # `today` and the baseline window's anchor both feed off this so the
-# emit is byte-stable regardless of when `data lock` runs.
-_CANONICAL_LOCK_ANCHOR = date(2030, 1, 1)
+# emit is byte-stable regardless of when `data lock` runs. AQ.3 funnel
+# (2026-05-23): the canonical value now lives on `AsOfFrame.LOCKED_ANCHOR`
+# (`common/as_of_frame.py`) — this name is kept as the locked-SQL
+# emitter's call site so its callers don't change.
+_CANONICAL_LOCK_ANCHOR = LOCKED_ANCHOR
 
 # X.1.k — locked SQL files live under tests/data/ (one per
 # (instance, dialect)). Discovered + asserted by
