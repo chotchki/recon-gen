@@ -14,7 +14,13 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date
 
-from recon_gen.common.spine import Invariant, Violation, ViolationGenerator
+from recon_gen.common.spine import (
+    SCENARIO_BASE_SEED,
+    Invariant,
+    Violation,
+    ViolationGenerator,
+    scenario_rng,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -174,3 +180,46 @@ def test_invariant_and_generator_compose() -> None:
         assert gen.intended not in detected
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# `scenario_rng` — the deterministic RNG factory generators must funnel
+# through (no module-level `random.X()`).
+# ---------------------------------------------------------------------------
+
+
+def test_scenario_rng_default_is_byte_stable_across_calls() -> None:
+    # Without a seed, generators land on SCENARIO_BASE_SEED → two
+    # constructed RNGs produce the same stream → locked-seed agreement
+    # survives. This is the property the convention exists to give us.
+    a = scenario_rng()
+    b = scenario_rng()
+    assert [a.randint(0, 1_000_000) for _ in range(8)] == [
+        b.randint(0, 1_000_000) for _ in range(8)
+    ]
+
+
+def test_scenario_rng_explicit_seed_overrides_default() -> None:
+    # Callers pinning a seed get a stream distinct from the default —
+    # so a scenario composing N generators can derive per-generator
+    # seeds (e.g., `seed + i`) and each lands somewhere different.
+    base = scenario_rng()
+    pinned = scenario_rng(42)
+    assert base.randint(0, 1_000_000) != pinned.randint(0, 1_000_000)
+
+
+def test_scenario_rng_same_seed_same_stream() -> None:
+    # The classic determinism contract — two RNGs from the same seed
+    # produce the same numbers in the same order. AS.2's concrete
+    # generators rely on this for byte-identical replay.
+    a = scenario_rng(seed=1234)
+    b = scenario_rng(seed=1234)
+    assert [a.random() for _ in range(8)] == [b.random() for _ in range(8)]
+
+
+def test_scenario_base_seed_is_a_concrete_int() -> None:
+    # Sanity: the default is an actual int constant, not a wall-clock
+    # read or a side-effecting call. Without this property the
+    # convention wouldn't deliver determinism.
+    assert isinstance(SCENARIO_BASE_SEED, int)
+    assert SCENARIO_BASE_SEED > 0

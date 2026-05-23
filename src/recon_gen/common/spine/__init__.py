@@ -33,6 +33,14 @@ from __future__ import annotations
 
 from recon_gen.common.spine.generator import ViolationGenerator
 from recon_gen.common.spine.invariant import Invariant
+from recon_gen.common.spine.rng import SCENARIO_BASE_SEED, scenario_rng
 from recon_gen.common.spine.violation import Violation
 
-__all__ = ["Violation", "Invariant", "ViolationGenerator"]
+__all__ = [
+    "Violation",
+    "Invariant",
+    "ViolationGenerator",
+    # AS.1 cleanup: deterministic RNG factory + convention.
+    "scenario_rng",
+    "SCENARIO_BASE_SEED",
+]
