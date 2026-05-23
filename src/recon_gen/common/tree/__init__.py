@@ -117,6 +117,7 @@ from recon_gen.common.tree.controls import (
     StaticValues,
 )
 from recon_gen.common.tree.datasets import Column, Dataset
+from recon_gen.common.tree.date_view import DateView, EmptyBehavior
 from recon_gen.common.tree.fields import (
     Dim,
     DimKind,
@@ -181,6 +182,8 @@ __all__ = [
     "auto_id",
     # Datasets
     "Dataset", "Column",
+    # Date view primitive (D5; AR.1)
+    "DateView", "EmptyBehavior",
     # Calc fields
     "CalcField", "ColumnRef",
     # Field-well leaves
