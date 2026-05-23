@@ -66,13 +66,18 @@ class StuckUnbundledInvariant:
         self,
         rail_name: str,
         *,
+        as_of: datetime,
         overshoot_seconds: int = 60,
         account_role: str = "CustomerSubledger",
         instance: L2Instance | None = None,
     ) -> "StuckUnbundledGenerator":
         """Resolve `rail_name` against the shape; plant a Posted-but-
-        unbundled transaction with `posting = now() − (rail.
+        unbundled transaction with `posting = as_of − (rail.
         max_unbundled_age + overshoot)`.
+
+        `as_of` is the owned temporal frame the matview reads from
+        `<prefix>_config.as_of` (per AW.2). See `StuckPendingInvariant
+        .scenario_for` for the full contract — same shape applies here.
 
         Raises `ValueError` if rail doesn't exist OR doesn't have a
         `max_unbundled_age` (matview excludes those — uncovered scenario
@@ -97,14 +102,19 @@ class StuckUnbundledInvariant:
                 rail.max_unbundled_age.total_seconds(),
             ),
             overshoot_seconds=overshoot_seconds,
+            as_of=as_of,
         )
 
 
 @dataclass
 class StuckUnbundledGenerator:
     """Emit a single Posted transaction with `bundle_id IS NULL` whose
-    `posting` is in the past by `max_unbundled_age_seconds + overshoot_
-    seconds`. NO balance row, NO related rows."""
+    `posting` is in the past of `as_of` by `max_unbundled_age_seconds
+    + overshoot_seconds`. NO balance row, NO related rows.
+
+    Post-AW.5: `as_of` is the owned temporal frame; matview reads the
+    same value from `<prefix>_config.as_of` → tests deterministic, no
+    TZ skew."""
 
     transaction_id: str
     transfer_id: str
@@ -114,6 +124,7 @@ class StuckUnbundledGenerator:
     account_parent_role: str | None
     max_unbundled_age_seconds: int
     overshoot_seconds: int
+    as_of: datetime
 
     @property
     def intended(self) -> Violation:
@@ -124,13 +135,10 @@ class StuckUnbundledGenerator:
         )
 
     def emit(self, conn: sqlite3.Connection) -> None:
-        # Same wall-clock + LOCAL-TZ convention as stuck_pending — see
-        # `stuck_pending.py` for the rationale + the
-        # [[project-local-tz-convention]] memory.
+        # Same as_of convention as stuck_pending — plant + matview read
+        # from one source.
         age_back = self.max_unbundled_age_seconds + self.overshoot_seconds
-        # Bridge until AW.5: same rationale as stuck_pending. Drops when
-        # AW.5 migrates generators to read as_of from <prefix>_config.
-        posting_dt = datetime.now() - timedelta(seconds=age_back)  # typing-smell: ignore[no-datetime-now]: matview computes CURRENT_TIMESTAMP - posting; bridge until AW.5 migrates to <prefix>_config.as_of
+        posting_dt = self.as_of - timedelta(seconds=age_back)
         # status='Posted' (not Pending — disjoint from stuck_pending).
         # bundle_id stays NULL by default (`_TX_COLS` doesn't include it,
         # so the INSERT leaves it NULL — exactly what the matview filter

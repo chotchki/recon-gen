@@ -55,10 +55,12 @@ _DIALECT = Dialect.SQLITE
 
 # spec_example has SubledgerCharge with max_unbundled_age=PT4H.
 _UNBUNDLED_RAIL = "SubledgerCharge"
-# TZ-skew-resistant overshoots (see `test_spine_stuck_pending.py` for
-# rationale + `[[project-local-tz-convention]]`).
-_TZ_SAFE_OVERSHOOT_FIRES = 50_000
-_TZ_SAFE_OVERSHOOT_NON_FIRING = -50_000
+
+# Post-AW.5: pinned as_of shared by plant + matview; small natural
+# overshoots suffice (no TZ skew to absorb).
+from datetime import datetime
+
+_TEST_AS_OF = datetime(2030, 1, 1, 12, 0, 0)
 
 
 def _fresh_db() -> sqlite3.Connection:
@@ -72,9 +74,10 @@ def _fresh_db() -> sqlite3.Connection:
         dialect=_DIALECT,
     )
     conn.commit()
-    # AW.2 + AW.3 bridge — see stuck_pending's _fresh_db for rationale.
+    # AW.2-5: matview reads as_of + per-rail caps from <prefix>_config.
+    # Seed with the test's pinned as_of + L2 rails. Generator's
+    # scenario_for receives the same as_of → plant + matview deterministic.
     import json
-    from datetime import datetime
     from recon_gen.common.l2.config_table import replace_config
     l2_for_config = json.dumps({
         "rails": [
@@ -85,7 +88,7 @@ def _fresh_db() -> sqlite3.Connection:
     replace_config(
         conn, prefix=_PREFIX,
         cfg_json="{}", l2_json=l2_for_config,
-        as_of=datetime.now(),  # typing-smell: ignore[no-datetime-now]: bridge test harness — AW.5 retrofits to pinned LOCKED_ANCHOR
+        as_of=_TEST_AS_OF,
     )
     return conn
 
@@ -110,7 +113,7 @@ def test_invariant_carries_the_matview_name() -> None:
 
 
 def test_scenario_for_resolves_rail_against_the_shape() -> None:
-    gen = StuckUnbundledInvariant().scenario_for(_UNBUNDLED_RAIL)
+    gen = StuckUnbundledInvariant().scenario_for(_UNBUNDLED_RAIL, as_of=_TEST_AS_OF)
     assert gen.rail_name == _UNBUNDLED_RAIL
     # SubledgerCharge has max_unbundled_age = PT4H = 14400 seconds.
     assert gen.max_unbundled_age_seconds == 14400
@@ -118,13 +121,13 @@ def test_scenario_for_resolves_rail_against_the_shape() -> None:
 
 def test_scenario_for_unknown_rail_fails_loud() -> None:
     with pytest.raises(ValueError, match="no rail named"):
-        StuckUnbundledInvariant().scenario_for("NoSuchRail")
+        StuckUnbundledInvariant().scenario_for("NoSuchRail", as_of=_TEST_AS_OF)
 
 
 def test_scenario_for_rail_without_max_unbundled_age_fails_loud() -> None:
     # ExternalRailInbound has max_pending_age but no max_unbundled_age.
     with pytest.raises(ValueError, match="no max_unbundled_age"):
-        StuckUnbundledInvariant().scenario_for("ExternalRailInbound")
+        StuckUnbundledInvariant().scenario_for("ExternalRailInbound", as_of=_TEST_AS_OF)
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +138,7 @@ def test_scenario_for_rail_without_max_unbundled_age_fails_loud() -> None:
 def test_generator_trips_invariant() -> None:
     inv = StuckUnbundledInvariant()
     gen = inv.scenario_for(
-        _UNBUNDLED_RAIL, overshoot_seconds=_TZ_SAFE_OVERSHOOT_FIRES,
+        _UNBUNDLED_RAIL, as_of=_TEST_AS_OF, overshoot_seconds=60,
     )
     intended = gen.intended
 
@@ -157,10 +160,10 @@ def test_generator_trips_invariant() -> None:
 def test_negative_overshoot_does_not_fire() -> None:
     inv = StuckUnbundledInvariant()
     clean = inv.scenario_for(
-        _UNBUNDLED_RAIL, overshoot_seconds=_TZ_SAFE_OVERSHOOT_NON_FIRING,
+        _UNBUNDLED_RAIL, as_of=_TEST_AS_OF, overshoot_seconds=-60,
     )
     dirty = inv.scenario_for(
-        _UNBUNDLED_RAIL, overshoot_seconds=_TZ_SAFE_OVERSHOOT_FIRES,
+        _UNBUNDLED_RAIL, as_of=_TEST_AS_OF, overshoot_seconds=60,
     )
 
     conn = _fresh_db()
@@ -175,7 +178,7 @@ def test_negative_overshoot_does_not_fire() -> None:
 
 def test_generator_emits_zero_balance_rows() -> None:
     gen = StuckUnbundledInvariant().scenario_for(
-        _UNBUNDLED_RAIL, overshoot_seconds=_TZ_SAFE_OVERSHOOT_FIRES,
+        _UNBUNDLED_RAIL, as_of=_TEST_AS_OF, overshoot_seconds=60,
     )
     conn = _fresh_db()
     try:
@@ -199,7 +202,7 @@ def test_emission_leaves_bundle_id_null() -> None:
     # default; this test pins that contract so a future _TX_COLS edit
     # can't silently break stuck_unbundled.
     gen = StuckUnbundledInvariant().scenario_for(
-        _UNBUNDLED_RAIL, overshoot_seconds=_TZ_SAFE_OVERSHOOT_FIRES,
+        _UNBUNDLED_RAIL, as_of=_TEST_AS_OF, overshoot_seconds=60,
     )
     conn = _fresh_db()
     try:
@@ -236,7 +239,7 @@ def test_stuck_unbundled_emission_trips_only_itself() -> None:
     # means no JOIN match means no drift row materializes, even though
     # the Posted leg IS aggregated by computed_subledger_balance.
     gen = StuckUnbundledInvariant().scenario_for(
-        _UNBUNDLED_RAIL, overshoot_seconds=_TZ_SAFE_OVERSHOOT_FIRES,
+        _UNBUNDLED_RAIL, as_of=_TEST_AS_OF, overshoot_seconds=60,
     )
     candidate_invariants: tuple[Invariant, ...] = (
         StuckUnbundledInvariant(),
@@ -309,7 +312,7 @@ def test_detect_does_not_cross_a_sql_pushdown_surface() -> None:
 
 
 def test_violation_identity_matches_detect_projection() -> None:
-    gen = StuckUnbundledInvariant().scenario_for(_UNBUNDLED_RAIL)
+    gen = StuckUnbundledInvariant().scenario_for(_UNBUNDLED_RAIL, as_of=_TEST_AS_OF)
     expected = Violation.of(
         "stuck_unbundled",
         transaction_id=gen.transaction_id,

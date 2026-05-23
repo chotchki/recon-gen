@@ -459,13 +459,22 @@ Operator can introspect: `SELECT JSON_VALUE(l2_yaml, '$.rails[*].max_pending_age
   asserting tests in test_l2_schema.py refactored to assert on JOIN-form
   + the inert-when-empty body uniformity (same SQL regardless of L2
   contents).
-- [ ] AW.5 - Generators retrofitted — stuck_pending + stuck_unbundled
+- [x] AW.5 - Generators retrofitted — stuck_pending + stuck_unbundled
   drop `datetime.now()`; accept `as_of: datetime` (or read from
   config-via-Python at scenario_for time). Spine tests become
   wall-clock-independent; the ±50_000s TZ-skew overshoots in
   `test_spine_stuck_pending.py` + `test_spine_stuck_unbundled.py`
   shrink to small natural values (e.g. ±60s). The
-  `no-datetime-now` typing-smell suppressions drop.
+  `no-datetime-now` typing-smell suppressions drop. Landed:
+  `StuckPendingGenerator` + `StuckUnbundledGenerator` gain `as_of:
+  datetime` field; `scenario_for` requires it as a keyword arg
+  (no default — explicit > implicit). Tests use a pinned `_TEST_AS_OF
+  = datetime(2030, 1, 1, 12, 0, 0)` shared between config-seed +
+  generator. Overshoots dropped from ±50_000s to ±60s — deterministic
+  with no wall-clock skew to absorb. The two typing-smell suppressions
+  (`stuck_pending.py:171`, `stuck_unbundled.py:133`) dropped, and the
+  bridge `datetime.now()` calls in `_fresh_db` helpers all gone. Full
+  prelude: 3139 pass.
 - [ ] AW.6 - Re-lock seeds per dialect (matview SQL changes for ALL
   dialects). Run full suite + 4-way agreement (PG + Oracle + SQLite +
   PDF) to verify no regression in the dashboard/PDF surface. Document

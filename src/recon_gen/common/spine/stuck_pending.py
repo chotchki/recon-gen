@@ -78,18 +78,28 @@ class StuckPendingInvariant:
         self,
         rail_name: str,
         *,
+        as_of: datetime,
         overshoot_seconds: int = 60,
         account_role: str = "CustomerSubledger",
         instance: L2Instance | None = None,
     ) -> "StuckPendingGenerator":
         """Resolve `rail_name` against the shape; return a generator
         that plants a Pending transaction on a `account_role` account
-        with `posting = now() − (rail.max_pending_age + overshoot)`.
+        with `posting = as_of − (rail.max_pending_age + overshoot)`.
+
+        `as_of` is the owned temporal frame the matview reads from
+        `<prefix>_config.as_of` (per AW.2). **Caller is responsible for
+        ensuring config.as_of matches** — see
+        `common.l2.config_table.set_as_of`. Tests pass a pinned
+        datetime; production passes `datetime.now()` at
+        scenario-creation time (same value the refresh helper UPDATEs
+        into config).
 
         `overshoot_seconds=0` ⇒ age == threshold ⇒ matview's `>` filter
         excludes ⇒ no fire (AP.2 non-violating convention adapted).
         Positive overshoot fires loud; negative also non-violating
-        (age < threshold).
+        (age < threshold). Post-AW.5 the overshoots can be small
+        natural values — no wall-clock skew to absorb.
 
         Raises `ValueError` if the L2 has no rail with `rail_name`,
         OR if that rail has no `max_pending_age` set (stuck_pending's
@@ -116,21 +126,22 @@ class StuckPendingInvariant:
             ),
             max_pending_age_seconds=int(rail.max_pending_age.total_seconds()),
             overshoot_seconds=overshoot_seconds,
+            as_of=as_of,
         )
 
 
 @dataclass
 class StuckPendingGenerator:
     """Emit a single Pending transaction whose `posting` is in the past
-    by `max_pending_age_seconds + overshoot_seconds`. NO balance row,
-    NO related Posted transactions — the stuck_pending matview reads
-    only the transactions table, so the plant is single-row.
+    of `as_of` by `max_pending_age_seconds + overshoot_seconds`. NO
+    balance row, NO related Posted transactions — the stuck_pending
+    matview reads only the transactions table, so the plant is
+    single-row.
 
-    Wall-clock time interaction: `now()` is captured at `emit()` time;
-    the matview's `age_seconds` is computed at refresh time (slightly
-    later). For positive `overshoot_seconds` the gap is comfortably
-    over the cap; identity stays stable since `transaction_id` doesn't
-    depend on wall-clock.
+    Post-AW.5: `as_of` is the owned temporal frame (matches what the
+    matview reads from `<prefix>_config.as_of`). NO `datetime.now()` —
+    plant + matview both read from one source; tests are deterministic;
+    no TZ skew to absorb.
     """
 
     transaction_id: str
@@ -141,6 +152,7 @@ class StuckPendingGenerator:
     account_parent_role: str | None
     max_pending_age_seconds: int
     overshoot_seconds: int
+    as_of: datetime
 
     @property
     def intended(self) -> Violation:
@@ -151,25 +163,12 @@ class StuckPendingGenerator:
         )
 
     def emit(self, conn: sqlite3.Connection) -> None:
-        # Plant `posting` far enough in the past that the matview's
-        # `age_seconds > max_pending_age_seconds` filter fires. Use a
-        # Credit posting (sign-direction CHECK constraint requires
+        # Plant `posting` far enough in the past of `as_of` that the
+        # matview's `age_seconds > max_pending_age_seconds` filter fires.
+        # Use a Credit posting (sign-direction CHECK constraint requires
         # money>=0 for Credit; arbitrary positive value).
-        #
-        # TIMEZONE: uses naive LOCAL `datetime.now()` to match the rest
-        # of the application's local-TZ convention (Oracle's TIMESTAMP
-        # lacks proper TZ-WITH-TIME-ZONE semantics; the codebase treats
-        # all stored timestamps as bare wall-clock interpreted in the
-        # DB's own TZ). Tests on SQLite (whose CURRENT_TIMESTAMP returns
-        # UTC) will see an inflated `age_seconds` by the system's TZ
-        # offset — callers MUST pick `overshoot_seconds` with enough
-        # margin to absorb ±12h of TZ skew (`tests/unit/test_spine_
-        # stuck_pending.py` does so).
         age_back = self.max_pending_age_seconds + self.overshoot_seconds
-        # Bridge until AW.5: matview computes CURRENT_TIMESTAMP - posting,
-        # so plant is wall-clock-relative by construction. AW.5 migrates
-        # this to read as_of from <prefix>_config; suppression drops then.
-        posting_dt = datetime.now() - timedelta(seconds=age_back)  # typing-smell: ignore[no-datetime-now]: matview computes CURRENT_TIMESTAMP - posting; bridge until AW.5 migrates to <prefix>_config.as_of
+        posting_dt = self.as_of - timedelta(seconds=age_back)
         _insert_tx(
             conn,
             id=self.transaction_id,

@@ -56,13 +56,12 @@ _DIALECT = Dialect.SQLITE
 # stuck_pending's covered rail.
 _PENDING_RAIL = "ExternalRailInbound"
 
-# Application convention is LOCAL TZ for stored timestamps (Oracle has
-# no proper WITH-TIME-ZONE semantics). SQLite's CURRENT_TIMESTAMP returns
-# UTC regardless of system TZ, so the in-process test sees `age_seconds`
-# inflated by the system TZ offset. Pick overshoots well outside ±12h to
-# stay TZ-skew-resistant — `12h*3600 = 43200s` safety margin.
-_TZ_SAFE_OVERSHOOT_FIRES = 50_000  # ~14h past the cap; fires on any TZ
-_TZ_SAFE_OVERSHOOT_NON_FIRING = -50_000  # ~14h under; doesn't fire on any TZ
+# Post-AW.5: deterministic as_of for both halves of the spine. The
+# matview reads as_of from <prefix>_config; the generator uses the same
+# value for its plant. No TZ skew; small natural overshoots suffice.
+from datetime import datetime
+
+_TEST_AS_OF = datetime(2030, 1, 1, 12, 0, 0)
 
 
 def _fresh_db() -> sqlite3.Connection:
@@ -76,14 +75,11 @@ def _fresh_db() -> sqlite3.Connection:
         dialect=_DIALECT,
     )
     conn.commit()
-    # AW.2 + AW.3 bridge: matview's age_seconds reads `(SELECT as_of FROM
-    # <prefix>_config)` AND max_pending_age_seconds reads `(SELECT
-    # json_value(...) FROM ...)`. Seed the config row with as_of plus
-    # an L2 yaml document carrying the rails the stuck_pending matview
-    # iterates. AW.5 will retrofit the generator + replace the
-    # hand-crafted L2 JSON with a real L2-instance-to-JSON serializer.
+    # AW.2-5: matview reads as_of + per-rail caps from <prefix>_config.
+    # Seed with the test's pinned as_of + L2 carrying the rails the
+    # matview iterates. Generator's scenario_for receives the same
+    # as_of → plant + matview deterministic.
     import json
-    from datetime import datetime
     from recon_gen.common.l2.config_table import replace_config
     l2_for_config = json.dumps({
         "rails": [
@@ -97,7 +93,7 @@ def _fresh_db() -> sqlite3.Connection:
     replace_config(
         conn, prefix=_PREFIX,
         cfg_json="{}", l2_json=l2_for_config,
-        as_of=datetime.now(),  # typing-smell: ignore[no-datetime-now]: bridge test harness — AW.5 retrofits to pinned LOCKED_ANCHOR
+        as_of=_TEST_AS_OF,
     )
     return conn
 
@@ -122,7 +118,7 @@ def test_stuck_pending_invariant_carries_the_matview_name() -> None:
 
 
 def test_scenario_for_resolves_rail_against_the_shape() -> None:
-    gen = StuckPendingInvariant().scenario_for(_PENDING_RAIL)
+    gen = StuckPendingInvariant().scenario_for(_PENDING_RAIL, as_of=_TEST_AS_OF)
     assert gen.rail_name == _PENDING_RAIL
     # ExternalRailInbound has max_pending_age = PT24H = 86400 seconds.
     assert gen.max_pending_age_seconds == 86400
@@ -131,7 +127,7 @@ def test_scenario_for_resolves_rail_against_the_shape() -> None:
 
 def test_scenario_for_unknown_rail_fails_loud() -> None:
     with pytest.raises(ValueError, match="no rail named"):
-        StuckPendingInvariant().scenario_for("NoSuchRail")
+        StuckPendingInvariant().scenario_for("NoSuchRail", as_of=_TEST_AS_OF)
 
 
 def test_scenario_for_rail_without_max_pending_age_fails_loud() -> None:
@@ -139,7 +135,7 @@ def test_scenario_for_rail_without_max_pending_age_fails_loud() -> None:
     # has max_unbundled_age but no max_pending_age). The smart constructor
     # refuses — the matview would silently exclude such a plant.
     with pytest.raises(ValueError, match="no max_pending_age"):
-        StuckPendingInvariant().scenario_for("SubledgerCharge")
+        StuckPendingInvariant().scenario_for("SubledgerCharge", as_of=_TEST_AS_OF)
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +145,7 @@ def test_scenario_for_rail_without_max_pending_age_fails_loud() -> None:
 
 def test_generator_trips_invariant() -> None:
     inv = StuckPendingInvariant()
-    gen = inv.scenario_for(_PENDING_RAIL, overshoot_seconds=_TZ_SAFE_OVERSHOOT_FIRES)
+    gen = inv.scenario_for(_PENDING_RAIL, as_of=_TEST_AS_OF, overshoot_seconds=60)
     intended = gen.intended
 
     conn = _fresh_db()
@@ -170,14 +166,14 @@ def test_generator_trips_invariant() -> None:
 def test_overshoot_zero_does_not_fire() -> None:
     # Matview filter is `age_seconds > max_pending_age_seconds` (strict
     # greater-than). Negative overshoot ⇒ age < cap ⇒ filter excludes.
-    # Use the TZ-skew-resistant negative overshoot — SQLite's UTC vs
-    # local skew can otherwise push age above cap unexpectedly.
+    # Post-AW.5: plant + matview share one as_of (LOCAL fixed value);
+    # no TZ skew → small natural overshoot of ±60s is deterministic.
     inv = StuckPendingInvariant()
     clean = inv.scenario_for(
-        _PENDING_RAIL, overshoot_seconds=_TZ_SAFE_OVERSHOOT_NON_FIRING,
+        _PENDING_RAIL, as_of=_TEST_AS_OF, overshoot_seconds=-60,
     )
     dirty = inv.scenario_for(
-        _PENDING_RAIL, overshoot_seconds=_TZ_SAFE_OVERSHOOT_FIRES,
+        _PENDING_RAIL, as_of=_TEST_AS_OF, overshoot_seconds=60,
     )
 
     conn = _fresh_db()
@@ -194,7 +190,7 @@ def test_generator_emits_zero_balance_rows() -> None:
     # Transaction-based invariant — no daily_balances row should
     # materialize from a stuck_pending plant.
     gen = StuckPendingInvariant().scenario_for(
-        _PENDING_RAIL, overshoot_seconds=_TZ_SAFE_OVERSHOOT_FIRES,
+        _PENDING_RAIL, as_of=_TEST_AS_OF, overshoot_seconds=60,
     )
     conn = _fresh_db()
     try:
@@ -224,7 +220,7 @@ def test_stuck_pending_emission_trips_only_itself() -> None:
     # to drift's Posted-filtered Σ legs; no balance row ⇒ no overdraft /
     # expected_eod / ledger_drift; only stuck_pending fires.
     gen = StuckPendingInvariant().scenario_for(
-        _PENDING_RAIL, overshoot_seconds=_TZ_SAFE_OVERSHOOT_FIRES,
+        _PENDING_RAIL, as_of=_TEST_AS_OF, overshoot_seconds=60,
     )
     candidate_invariants: tuple[Invariant, ...] = (
         StuckPendingInvariant(),
@@ -300,7 +296,7 @@ def test_detect_does_not_cross_a_sql_pushdown_surface() -> None:
 
 
 def test_violation_identity_matches_detect_projection() -> None:
-    gen = StuckPendingInvariant().scenario_for(_PENDING_RAIL)
+    gen = StuckPendingInvariant().scenario_for(_PENDING_RAIL, as_of=_TEST_AS_OF)
     expected = Violation.of(
         "stuck_pending",
         transaction_id=gen.transaction_id,
