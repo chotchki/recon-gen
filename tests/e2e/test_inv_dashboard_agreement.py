@@ -87,6 +87,10 @@ from tests.audit._matview_extract import (  # noqa: E402
     distinct_money_trail_roots,
     money_trail_matview_row_keys,
 )
+from tests.audit._scenario_expectations import (  # noqa: E402
+    ExpectedL2AuditCounts,
+    expected_l2_audit_counts,
+)
 from tests.e2e._drivers import App2Driver  # noqa: E402
 
 
@@ -145,6 +149,48 @@ _PLANTED_CHAIN_ROOT = "xfer-money-trail-0"
 _ALL_L2_INVARIANTS: tuple[str, ...] = ("anomaly", "money_trail")
 
 
+def _build_anomaly_generator(cfg, anchor_day):  # type: ignore[no-untyped-def]: cfg is recon_gen Config; annotation would force the import to module scope
+    """Construct the AnomalyGenerator the seed + agreement test share.
+
+    Hoisted so both ``seeded_l2_db`` (which emits) and
+    ``planted_l2_bounds`` (which derives expected key tuples without
+    touching the DB) can build identical generators — the lower-bound
+    key tuples otherwise depend on a planter rebuild that drifts from
+    what was emitted.
+    """
+    gen = AnomalyInvariant().scenario_for(
+        "CustomerSubledger", "CustomerSubledger",
+        baseline_pair_count=_ANOMALY_BASELINE_PAIRS,
+        baseline_amount=_ANOMALY_BASELINE_AMOUNT,
+        spike_magnitude=_ANOMALY_SPIKE_MAGNITUDE,
+        anchor_day=anchor_day,
+        instance=_INSTANCE,
+    )
+    gen.prefix = cfg.db_table_prefix
+    return gen
+
+
+def _build_money_trail_generator(cfg, anchor_day):  # type: ignore[no-untyped-def]: cfg is recon_gen Config; see _build_anomaly_generator
+    """Construct the MoneyTrailGenerator the seed + agreement test share.
+    See ``_build_anomaly_generator`` for the rationale."""
+    gen = MoneyTrailInvariant().scenario_for(
+        "CustomerSubledger",
+        chain_length=_MONEY_TRAIL_CHAIN_LENGTH,
+        amount=_MONEY_TRAIL_AMOUNT,
+        anchor_day=anchor_day,
+        instance=_INSTANCE,
+    )
+    gen.prefix = cfg.db_table_prefix
+    return gen
+
+
+def _plant_anchor_day() -> date:
+    """Anchor day for the L2 plants — two days before ``today``. Far
+    enough back to land in the past matview window, close enough to
+    stay deterministic relative to ``_TODAY``."""
+    return _TODAY - timedelta(days=2)
+
+
 @pytest.fixture(scope="module")
 def seeded_l2_db(cfg):  # type: ignore[no-untyped-def]: returns nothing the test introspects — the fixture's contract is "DB is seeded"
     """Apply the schema + broad seed + L2 spine plants + matview refresh.
@@ -178,24 +224,9 @@ def seeded_l2_db(cfg):  # type: ignore[no-untyped-def]: returns nothing the test
         # LedgerSimulation prefix wiring); the dialect-aware insert
         # helpers (AT.5.b refactor of ``_emit_helpers.insert_tx``)
         # make this work against PG / Oracle as well as SQLite.
-        anchor = _TODAY - timedelta(days=2)
-        anomaly_gen = AnomalyInvariant().scenario_for(
-            "CustomerSubledger", "CustomerSubledger",
-            baseline_pair_count=_ANOMALY_BASELINE_PAIRS,
-            baseline_amount=_ANOMALY_BASELINE_AMOUNT,
-            spike_magnitude=_ANOMALY_SPIKE_MAGNITUDE,
-            anchor_day=anchor,
-            instance=_INSTANCE,
-        )
-        anomaly_gen.prefix = cfg.db_table_prefix
-        money_trail_gen = MoneyTrailInvariant().scenario_for(
-            "CustomerSubledger",
-            chain_length=_MONEY_TRAIL_CHAIN_LENGTH,
-            amount=_MONEY_TRAIL_AMOUNT,
-            anchor_day=anchor,
-            instance=_INSTANCE,
-        )
-        money_trail_gen.prefix = cfg.db_table_prefix
+        anchor = _plant_anchor_day()
+        anomaly_gen = _build_anomaly_generator(cfg, anchor)
+        money_trail_gen = _build_money_trail_generator(cfg, anchor)
         anomaly_gen.emit(conn)
         money_trail_gen.emit(conn)
         conn.commit()
@@ -212,6 +243,19 @@ def seeded_l2_db(cfg):  # type: ignore[no-untyped-def]: returns nothing the test
         conn.commit()
     finally:
         conn.close()
+
+
+@pytest.fixture(scope="module")
+def planted_l2_bounds(cfg) -> ExpectedL2AuditCounts:  # type: ignore[no-untyped-def]: cfg is recon_gen Config
+    """AT.5.f — the lower-bound counts + key projections the spine
+    generators planted. The 3-way test asserts every renderer's count
+    is ``>=`` ``X_count`` and every renderer's key set is ``>=``
+    ``X_keys`` (subset/equality depends on the invariant)."""
+    anchor = _plant_anchor_day()
+    return expected_l2_audit_counts(
+        anomaly_gen=_build_anomaly_generator(cfg, anchor),
+        money_trail_gen=_build_money_trail_generator(cfg, anchor),
+    )
 
 
 @pytest.fixture(scope="module")
@@ -453,6 +497,7 @@ def test_invariant_three_way_agreement(
     inv_dashboard_id,
     db_conn,
     cfg,
+    planted_l2_bounds,
     invariant,
 ) -> None:
     """Per-invariant 3-renderer agreement (AT.5.e) — the chain
@@ -521,9 +566,18 @@ def test_invariant_three_way_agreement(
     else:
         raise AssertionError(f"unknown L2 invariant: {invariant!r}")
 
-    # --- producer-side lower bounds — the plant must reach the matview ---
+    # --- producer-side lower bounds (AT.5.f) — derived from the
+    # spine generators rather than hardcoded constants, so a plant-
+    # shape change can't drift the lower bound silently.
     expected_lower_bound = (
-        1 if invariant == "anomaly" else _MONEY_TRAIL_CHAIN_LENGTH
+        planted_l2_bounds.anomaly_count
+        if invariant == "anomaly"
+        else planted_l2_bounds.money_trail_count
+    )
+    expected_planted_keys = (
+        set(planted_l2_bounds.anomaly_keys)
+        if invariant == "anomaly"
+        else set(planted_l2_bounds.money_trail_keys)
     )
     assert direct_count >= expected_lower_bound, (
         f"Producer-side regression ({invariant}): scenario planted "
@@ -534,6 +588,16 @@ def test_invariant_three_way_agreement(
         f"Producer-side regression ({invariant}): App2 shows "
         f"{app2_count} rows but the scenario plant intended at least "
         f"{expected_lower_bound}."
+    )
+    # The planted keys MUST appear in the matview — the spine plant
+    # is the source of truth. (Extra rows are OK: rolling-window
+    # neighbors for anomaly, organic chains for money_trail.)
+    assert expected_planted_keys <= direct_keys, (  # type: ignore[operator]: expected_planted_keys items match direct_keys' element type by construction (cf. _scenario_expectations key projections)
+        f"Planted {invariant} keys missing from the matview:\n"
+        f"  planted but absent: "
+        f"{sorted(expected_planted_keys - direct_keys)[:5]}\n"  # type: ignore[operator,type-var]: set difference; sorted over union tuple
+        f"  planted: {sorted(expected_planted_keys)}\n"  # type: ignore[type-var]: sortable tuples by construction
+        f"  direct count: {len(direct_keys)}"
     )
 
     # --- spine ⋈ direct matview (the AT.5.a contract) ---

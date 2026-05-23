@@ -31,7 +31,10 @@ from recon_gen.common.l2.seed import (
     SupersessionPlant,
 )
 
-from tests.audit._scenario_expectations import expected_audit_counts
+from tests.audit._scenario_expectations import (
+    expected_audit_counts,
+    expected_l2_audit_counts,
+)
 
 
 _SPEC_EXAMPLE = (
@@ -279,3 +282,88 @@ def test_default_spec_example_scenario_smokes():
     assert expected.stuck_unbundled_count == len(
         report.scenario.stuck_unbundled_plants,
     )
+
+
+# =====================================================================
+# AT.5.f — L2 lower-bound expectations
+# =====================================================================
+
+
+def test_l2_anomaly_lower_bound_is_singleton_with_anchor_day():
+    """The AnomalyGenerator plants ONE spike row whose natural-key
+    tuple is ``(sender_account_id, recipient_account_id, anchor_day)``.
+    The helper must surface that as a singleton."""
+    from datetime import date
+
+    from recon_gen.common.spine import AnomalyInvariant, MoneyTrailInvariant
+
+    anchor = date(2030, 1, 1)
+    anomaly_gen = AnomalyInvariant().scenario_for(
+        "CustomerSubledger", "CustomerSubledger",
+        baseline_pair_count=10,
+        anchor_day=anchor,
+    )
+    money_trail_gen = MoneyTrailInvariant().scenario_for(
+        "CustomerSubledger", chain_length=3, anchor_day=anchor,
+    )
+    expected = expected_l2_audit_counts(
+        anomaly_gen=anomaly_gen, money_trail_gen=money_trail_gen,
+    )
+    assert expected.anomaly_count == 1
+    assert expected.anomaly_keys == (
+        (
+            anomaly_gen.sender_account_id,
+            anomaly_gen.recipient_account_id,
+            anchor,
+        ),
+    )
+
+
+def test_l2_money_trail_lower_bound_is_chain_length_edges():
+    """The MoneyTrailGenerator plants N chained transfers; each
+    becomes ONE matview edge ``(transfer_id, depth)``. The helper
+    enumerates ``xfer-money-trail-{i}`` for i in [0, chain_length)."""
+    from datetime import date
+
+    from recon_gen.common.spine import AnomalyInvariant, MoneyTrailInvariant
+
+    anchor = date(2030, 1, 1)
+    chain_length = 5
+    anomaly_gen = AnomalyInvariant().scenario_for(
+        "CustomerSubledger", "CustomerSubledger",
+        baseline_pair_count=10,
+        anchor_day=anchor,
+    )
+    money_trail_gen = MoneyTrailInvariant().scenario_for(
+        "CustomerSubledger",
+        chain_length=chain_length, anchor_day=anchor,
+    )
+    expected = expected_l2_audit_counts(
+        anomaly_gen=anomaly_gen, money_trail_gen=money_trail_gen,
+    )
+    assert expected.money_trail_count == chain_length
+    assert expected.money_trail_keys == tuple(
+        (f"xfer-money-trail-{i}", i) for i in range(chain_length)
+    )
+
+
+def test_l2_chain_length_one_yields_singleton_edge():
+    """Boundary case: chain_length=1 plants a single edge at depth 0."""
+    from datetime import date
+
+    from recon_gen.common.spine import AnomalyInvariant, MoneyTrailInvariant
+
+    anchor = date(2030, 1, 1)
+    anomaly_gen = AnomalyInvariant().scenario_for(
+        "CustomerSubledger", "CustomerSubledger",
+        baseline_pair_count=10,
+        anchor_day=anchor,
+    )
+    money_trail_gen = MoneyTrailInvariant().scenario_for(
+        "CustomerSubledger", chain_length=1, anchor_day=anchor,
+    )
+    expected = expected_l2_audit_counts(
+        anomaly_gen=anomaly_gen, money_trail_gen=money_trail_gen,
+    )
+    assert expected.money_trail_count == 1
+    assert expected.money_trail_keys == (("xfer-money-trail-0", 0),)

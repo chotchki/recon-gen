@@ -391,7 +391,7 @@ is the production rollout for the two L2 classes. AT.0 redecomposes from AS's re
   - [x] AT.5.e - AT.5.e — Compose parametrized `test_inv_three_way_agreement`
     (or sibling test for L2). Cross-renderer assertion in one place. (3-way
     not 4-way per AT.5.d's decision — no PDF leg.)
-  - [ ] AT.5.f - **Scenario-plant lower-bound counts** — extend
+  - [x] AT.5.f - **Scenario-plant lower-bound counts** — extend
     `expected_audit_counts` to include anomaly + money_trail.
 - [ ] AT.6 - L2 training/docs scenarios self-validated (anomaly + money_trail scenarios
   can't silently fail to demonstrate; parallel to AS.7).
