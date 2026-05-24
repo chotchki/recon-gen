@@ -145,6 +145,11 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
   - [x] AY.2.b AY.2.b — promote 7 new generators (CoverageObservation + AuditFixture)
 - [x] AY.3 - Lift Dialect.SQLITE hardcode in apply_scenario
 - [ ] AY.4 - Reroute production seed (build_full_seed_sql + emit_full_seed) through ScenarioContext.compose
+  - [x] AY.4.a - DryRunCapture conn + ScenarioContext.compose(dry_run=True) returns captured (sql, params) tuples
+  - [ ] AY.4.b - render_captured_sql() — per-dialect literal escaping (PG / Oracle / SQLite), produces static SQL text
+  - [ ] AY.4.c - plant_adapter.scenario_to_generators(plants, instance, anchor) — walks all 20 plant kinds
+  - [ ] AY.4.d - Rewrite build_full_seed_sql + emit_full_seed via adapter + compose(dry_run=True) + render; byte-lock test fails loudly (expected → AY.5 re-locks)
+  - [ ] AY.4.e - apply_db_seed in tests/e2e/_seed_helpers.py routes through the new path
 - [ ] AY.5 - Re-lock byte seeds via the new path; document any byte drift
 - [ ] AY.6 - Retire the old per-plant emitter functions in seed.py
 - [ ] AY.7 - Trainer/timeline regression check + Studio dogfood smoke

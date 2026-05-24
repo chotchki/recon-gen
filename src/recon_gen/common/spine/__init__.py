@@ -45,6 +45,7 @@ from recon_gen.common.spine.ledger_simulation import (
 from recon_gen.common.spine.scenario_context import (
     ClaimedAccountsGenerator,
     ScenarioContext,
+    dry_run_capture,
     scenario_metadata,
 )
 from recon_gen.common.spine.semantic_lock import apply_scenario, semantic_lock
@@ -260,6 +261,8 @@ __all__ = [
     "ScenarioContext",
     "ClaimedAccountsGenerator",
     "scenario_metadata",
+    # AY.4.a — dry-run SQL capture for the production-seed reroute.
+    "dry_run_capture",
     # Self-validating training/docs scenarios (AS.7; AT.6 reuses for L2)
     "TrainingScenario",
     "validate_all",
