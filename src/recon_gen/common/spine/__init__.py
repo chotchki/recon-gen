@@ -79,6 +79,10 @@ from recon_gen.common.spine.chain_parent_disagreement import (
     ChainParentDisagreementGenerator,
     ChainParentDisagreementInvariant,
 )
+from recon_gen.common.spine.fan_in_disagreement import (
+    FanInChainGenerator,
+    FanInDisagreementInvariant,
+)
 from recon_gen.common.spine.xor_group_violation import (
     XorGroupMissedFiringGenerator,
     XorGroupOverlapGenerator,
@@ -145,6 +149,13 @@ __all__ = [
     "XorGroupViolationInvariant",
     "XorGroupMissedFiringGenerator",
     "XorGroupOverlapGenerator",
+    # Fan-in-disagreement family — single invariant; 1 generator with
+    # 3 smart constructors for healthy/missing/extra/orphan variants
+    # (AB.4.5 family); promoted in AX.3. parent_count knob differen-
+    # tiates the variant; the matview derives disagreement_kind by
+    # comparing against the L2 chain's expected_parent_count.
+    "FanInDisagreementInvariant",
+    "FanInChainGenerator",
     # Money-trail family — recursive-graph L2; AT.3 promoted generator
     # + View on top of LedgerSimulation.transfers (parent-linked chain).
     "MoneyTrailInvariant",
