@@ -3416,3 +3416,74 @@ Operator can introspect: `SELECT JSON_VALUE(l2_yaml, '$.rails[*].max_pending_age
   pointer to the unlocked dashboard-pickers backlog. **Phase AW
   complete (7/7 leaves).**
 
+---
+
+## 2026-05-24
+
+## Phase AV - Rename `daily_balances.limits` → `daily_balances.metadata` (with `limits` as a nested key)
+
+**Recovered 2026-05-23** from `scenario-context-spike` branch — the planning
+was lost from `main`'s PLAN.md when the spike branch diverged. Original
+surfaced during the `tests/unit/test_scenario_context_spike.py` exploration
+of `ScenarioContext` (composition safety). Spike found that `_daily_balances`
+has no `metadata` column today (only `limits` JSON for per-rail caps);
+`_transactions` has both. Per-row scenario-tagging — the clean shape for
+"make sure they don't step on each other" composition safety — needs metadata
+on BOTH tables.
+
+User-proposed clean fix (2026-05-23, vs. adding a separate metadata
+column): **rename the existing `limits` column to `metadata`, with
+`limits` becoming a key inside that JSON** (`metadata.limits = {...}`).
+Same JSON column, restructured. No new column; the existing storage +
+indexes carry through. As a side effect, the spike's side-table approach
+(`<prefix>_scenario_claims`) goes away — once both base tables carry
+`metadata`, scenario tagging happens per-row.
+
+Why this needs its own phase (the user's exact reason — *"without a
+strong phase will get lost and bite us"*):
+- **Schema change** — every dialect's CREATE TABLE shape changes; every
+  CHECK constraint referencing `limits` (e.g. the JSON validity guard)
+  updates.
+- **ETL contract change** — customer ETL feeds populate this column;
+  the wire shape changes.
+- **Locked seeds** — `tests/data/_locked_seeds/<instance>.<dialect>.sql`
+  files contain `limits` column literals; re-lock per dialect.
+- **Every reader** — every dataset SQL + matview SQL + Python helper
+  that reads `limits` must update to read `metadata.limits` via the
+  dialect-portable `JSON_VALUE(metadata, '$.limits')` (or equivalent).
+- **Phase AV is the prereq** for promoting the `ScenarioContext`
+  mechanism with per-row metadata tagging on both tables. Until AV
+  lands, the scenario-context work would need the side-table approach
+  (the spike pattern); landing AV obviates the sidecar entirely.
+
+- [x] AV.0 - Audit + spike: inventory every reader of `daily_balances.
+  limits` (matview SQL + dataset SQL + Python helpers + tests). Map each
+  to its `metadata.limits` migration path. Output `docs/audits/av_0_
+  limits_metadata_rename_audit.md` with the punch list. Lock the
+  migration ordering (schema → ETL contract → matview/dataset SQL →
+  Python helpers → tests + locked seeds → docs). Also inventory the
+  `scenario-context-spike` branch's `<prefix>_scenario_claims` sidecar
+  and confirm AV's per-row tagging path eliminates the sidecar (per
+  user 2026-05-23: "this should also remove the sidecar table we've
+  gained for the scenario planting tagging").
+- [x] AV.1 - Schema change: rename column, update CHECK constraints,
+  emit per-dialect. Includes the JSON-validity guard rename. No data
+  semantics change — `metadata.limits` carries what `limits` carried.
+- [x] AV.2 - Update every matview SQL + dataset SQL to read
+  `metadata.limits` via the dialect-portable `JSON_VALUE` form. Includes
+  L1's expected_eod_balance_breach JOIN + the L2FT dashboards that read
+  per-rail caps. Verify by re-running the full suite + 4-way agreement.
+- [x] AV.3 - Update Python helpers + tests (including `tests/data/
+  _locked_seeds/`). Re-lock seeds per dialect (the column literal in
+  the locked SQL changes).
+- [x] AV.4 - Bump version (post-v?.?.?) + RELEASE_NOTES entry. Migration
+  warning ≥1 minor version for downstream operators with custom ETL.
+- [x] AV.5 - (After AV lands) Promote `ScenarioContext` mechanism from
+  spike to `src/recon_gen/common/spine/scenario_context.py` using
+  per-row metadata tagging (replacing the spike's side-table approach).
+  Updates every existing generator (drift / overdraft / expected_eod /
+  stuck_pending / stuck_unbundled / limit_breach / anomaly / money_trail
+  as they exist at AV-land time) to expose `claimed_accounts` +
+  thread `scenario_id` into metadata on emit. Decouples from the
+  side-table bridge.
+
