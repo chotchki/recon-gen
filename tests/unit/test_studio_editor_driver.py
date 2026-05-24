@@ -52,11 +52,14 @@ def _rebuild_via_http(reference_path: Path, dest: Path) -> L2Instance:
 
 
 @pytest.mark.skip(
-    reason="AI.2.d.1 WIP — the editor runs full validate() after each "
-    "create, so an incremental bulk rebuild hits invalid intermediate "
-    "states (reference resolution fails before all referents exist). "
-    "Needs a defer-validation bulk-load path; resuming after the "
-    "v11.9.3 daily-statement bug.",
+    reason="AI.2.d.1.a partial — topological create order + Duration "
+    "ISO encoder land in studio_editor.py / _studio_editor_routes.py, "
+    "but the rebuild still hits bilateral circular completeness checks "
+    "(e.g., single-leg rail unreconciled: aggregator A bundling rail S "
+    "needs both to exist before either's save validates). Full unblock "
+    "requires Phase AN — save-time/deploy-time validator split + "
+    "invalid-state UX. Un-skip when AN's editor-save permits in-flight "
+    "completeness violations + deploy gates them.",
 )
 def test_http_driver_rebuilds_spec_example_structurally(
     tmp_path: Path,

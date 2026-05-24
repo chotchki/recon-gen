@@ -26,6 +26,7 @@ the browser-adjacent dogfood run.
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -260,22 +261,70 @@ class _BaseStudioEditorDriver:
         raise NotImplementedError
 
     def create_l2(self, reference: L2Instance) -> None:
-        """Recreate every entity in dependency order:
-        AccountTemplates → Accounts → Rails → TransferTemplates →
-        Chains → LimitSchedules → top-level instance settings.
+        """Recreate every entity in **reference-resolution dependency
+        order** so each editor save's full ``validate()`` pass succeeds
+        without seeing an undeclared reference (AI.2.d.1.a — the
+        per-save validator was the blocker that originally surfaced as
+        ``AccountTemplate.parent_role='X': role is not declared on any
+        Account``).
 
-        The order guarantees referenced entities exist before their
-        referrers (a rail's roles via accounts/templates; a template's
-        ``transfer_key`` keys via its leg rails' metadata_keys; a chain's
-        parent/children via rails+templates), so each create's validator
-        pass succeeds.
+        Order:
+
+          1. **Accounts (parent role-holders first)** — Accounts with no
+             ``parent_role`` are roots; child Accounts depend on a
+             parent's ``role`` being declared first. A topological pass
+             on ``parent_role -> role`` puts roots before children.
+          2. **AccountTemplates** — their ``parent_role`` must resolve
+             to an existing Account.role (the validator's reject case).
+          3. **Rails** — split into two waves to honor the circular
+             ``bundles_activity ↔ max_unbundled_age`` constraint:
+             (3a) non-aggregating rails first, with ``max_unbundled_age``
+             **deferred** (operator workflow: create the rail without
+             the field that requires a not-yet-existing bundler);
+             (3b) aggregating rails (their ``bundles_activity`` now
+             resolves to declared rails);
+             (3c) **edit-in** the deferred ``max_unbundled_age`` on
+             each rail that had it — the validator now sees that some
+             aggregating rail bundles it.
+          4. **TransferTemplates** — their ``transfer_key`` resolves
+             against leg rails' ``metadata_keys``.
+          5. **Chains** — parent + children resolve against rails +
+             templates.
+          6. **LimitSchedules** — caps resolve against rails +
+             parent_roles.
+          7. **Top-level instance settings** — description +
+             role_business_day_offsets (no references).
+
+        This is the **dogfood operator workflow**: every save validates;
+        no cheating with a defer-validation flag.
         """
+        for account in _topo_accounts_by_parent(reference.accounts):
+            self.create_account(account)
         for template in reference.account_templates:
             self.create_account_template(template)
-        for account in reference.accounts:
-            self.create_account(account)
-        for rail in reference.rails:
+
+        # Rails: 2-wave + edit-in for the bundles_activity circular pair.
+        non_aggregating = [r for r in reference.rails if not r.aggregating]
+        aggregating = [r for r in reference.rails if r.aggregating]
+        deferred_max_unbundled_age: list[Rail] = []
+        for rail in non_aggregating:
+            if getattr(rail, "max_unbundled_age", None) is not None:
+                # Create without the deferred field — the validator on
+                # this save can't see any bundling rail yet (they come
+                # next). Edit-in after the aggregators land.
+                stripped = dataclasses.replace(rail, max_unbundled_age=None)
+                self.create_rail(stripped)
+                deferred_max_unbundled_age.append(rail)
+            else:
+                self.create_rail(rail)
+        for rail in aggregating:
             self.create_rail(rail)
+        for rail in deferred_max_unbundled_age:
+            self._edit(
+                "rail", str(rail.name),
+                _max_unbundled_age_edit_form_data(rail),
+            )
+
         for template in reference.transfer_templates:
             self.create_transfer_template(template)
         for chain in reference.chains:
@@ -290,6 +339,57 @@ class _BaseStudioEditorDriver:
                 description=reference.description,
                 role_business_day_offsets=reference.role_business_day_offsets,
             )
+
+
+def _max_unbundled_age_edit_form_data(rail: Rail) -> FormData:
+    """Build the edit PUT form payload that adds ``max_unbundled_age``
+    to an already-created rail.
+
+    The scalar field's value is the ISO 8601 duration literal —
+    ``_value_to_input_str`` handles the `timedelta → "P1D"` /
+    ``"PT24H"`` formatting that AI.2.d.1.a wired in. Only this one
+    field is sent so the editor's PUT mutate leaves every other field
+    untouched (dataclasses.replace semantics).
+    """
+    value_str = _value_to_input_str(rail.max_unbundled_age)
+    return {"max_unbundled_age": [value_str]}
+
+
+def _topo_accounts_by_parent(
+    accounts: "tuple[Account, ...]",
+) -> "list[Account]":
+    """Order Accounts so a child's ``parent_role`` is declared on some
+    earlier Account's ``role``. Roots (no parent_role) come first; then
+    children grouped by depth from the role-DAG. Stable within a depth
+    layer (input order preserved) so YAML authoring order survives when
+    it's already topological — only re-orderings happen when needed.
+    """
+    by_role: dict[str, "Account"] = {}
+    for a in accounts:
+        if a.role:
+            by_role.setdefault(a.role, a)
+
+    ordered: list["Account"] = []
+    placed: set[str] = set()
+
+    def _depth(role: str | None, seen: frozenset[str]) -> int:
+        """Reference-graph depth. Cycle / unresolved parent → 0 (root)
+        so the validator can surface the real error rather than a
+        cryptic ordering one."""
+        if not role:
+            return 0
+        a = by_role.get(role)
+        if a is None or a.parent_role is None or a.parent_role in seen:
+            return 0
+        return 1 + _depth(a.parent_role, seen | {role})
+
+    indexed = [(i, a, _depth(a.role, frozenset())) for i, a in enumerate(accounts)]
+    indexed.sort(key=lambda t: (t[2], t[0]))  # (depth asc, input idx asc)
+    for _i, a, _d in indexed:
+        ordered.append(a)
+        if a.role:
+            placed.add(a.role)
+    return ordered
 
 
 @runtime_checkable

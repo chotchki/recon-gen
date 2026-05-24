@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Mapping
+from datetime import timedelta
 from html import escape
 from typing import Any, Literal, TypeAlias
 
@@ -1577,6 +1578,28 @@ def _value_to_input_str(value: object) -> str:
         return ""
     if isinstance(value, bool):
         return "true" if value else "false"
+    # AI.2.d.1.a — Duration is a TypeAlias for timedelta; `str(timedelta)`
+    # emits Python's "1 day, 0:00:00" repr, which the loader's
+    # _ISO_DURATION_RE rejects. Emit ISO 8601 (P1D / PT24H / P1DT12H)
+    # so a create-form POST round-trips cleanly through `_load_duration`.
+    if isinstance(value, timedelta):
+        total = int(value.total_seconds())
+        days, rem = divmod(total, 86400)
+        hours, rem = divmod(rem, 3600)
+        minutes, seconds = divmod(rem, 60)
+        out = "P"
+        if days:
+            out += f"{days}D"
+        t_parts: list[str] = []
+        if hours:
+            t_parts.append(f"{hours}H")
+        if minutes:
+            t_parts.append(f"{minutes}M")
+        if seconds:
+            t_parts.append(f"{seconds}S")
+        if t_parts:
+            out += "T" + "".join(t_parts)
+        return out if out != "P" else "PT0S"
     # AF (E8) — FiringsTypicalPerPeriod → composite text shape: bare
     # `min, max` when business_day, `period: min, max` otherwise.
     # Round-trips through _coerce_field's firings_typical_per_period
