@@ -1,5 +1,107 @@
 # Release Notes
 
+## v11.18.0 — Phase AO closeout: AO.5 + AO.L.gate + AO.9 + AO.S + AO.C + Oracle CI fix
+
+Closes the remaining post-v11.17.0 Phase AO items so the next
+cold-read pass runs against a tagged release. All 10 cold-read
+findings (`docs/audits/v11_9_4_feedback.md`) now ✅.
+
+### AO.5 — Exec Average Daily Volume denominator
+
+`Volume` sheet's "Average Daily Volume" KPI consumed
+`exec-transaction-summary` (one row per `(posted_date, rail_name)`)
+and asked QS for `AVG(transfer_count)`. With Sasquatch's ~30 rails
+firing per day, that averages across `(days × rails)` rows instead
+of active days — the KPI ran ≈25× too small vs analyst's
+`total / active-days` expectation (cold-read reported "≈67×",
+which depends on the day's rail count). Fix: new
+`exec-transaction-daily-ds` rolls `per_transfer` to one row per
+active day; the KPI consumes the new dataset so AVG denominator is
+days-with-activity. Spot-check on sasquatch_pr/SQLite:
+ground truth = 581.98, old AVG = 22.97, new AVG = 581.98 ✓.
+
+### AO.L.gate — semantic-lock builder includes baseline emit
+
+The lock builder was the gate that should have caught AO.L but
+only emitted plant generators — the 90-day baseline (which produces
+181 ConcentrationMaster direct postings that trigger the buggy
+matview branch) was never in the lock pipeline. Design A landed:
+`_build_fresh_semantic_lock_sqlite` now runs `emit_baseline_seed`
+between schema setup and plant emit. Re-locked both bundled
+fixtures (spec_example.sqlite.json: 18KB → 1.8MB; sasquatch_pr:
+19KB → 13MB). Tradeoff accepted — the size is the cost of
+gating the baseline-derived violation surface so AO.L-class bugs
+can't stay latent again.
+
+### AO.9 — empty-state clarity + dollar context + y-axis margin + money-moved context
+
+Four cold-read MINOR-multi sub-items, one bundled commit:
+
+1. **Empty-state clarity** — KPI subtitles on Limit Breach (L1) +
+   Recipient Fanout + Volume Anomalies (Investigation) now
+   explicitly say what "zero" means and point analysts at App Info
+   → matview-status for stale-matview disambiguation.
+
+2. **Dollar exposure** — Unbundled Aging gets a paired
+   `SUM(amount).currency` KPI (HALF/HALF); Supersession Audit
+   becomes a 3-KPI THIRD row (count + $ exposure + no-reason).
+
+3. **Clipped y-axis `0,000,000`** — App2 BarChart + LineChart
+   hardcoded `margin.left = 64` clipped `$10,000,000`-class labels.
+   Both now scale margin.left from data magnitude + currency
+   prefix: `prefix + digits*8 + commas*3 + 12` (min 64). Stacked
+   bars sum per-category for the estimate.
+
+4. **Net Money Moved context** — subtitle expanded to explain
+   "expected near zero on a balanced book" + offsetting-leg
+   semantics + when large +/- values are explainable. Comparison
+   to Gross is now explicit.
+
+### AO.S — seed-residual annotations
+
+S.1: auto-closed by AO.1.impl (integer cents killed magnitude-0
+float noise) + AO.L (cumulative-vs-delta fix killed the 91 spurious
+ConcentrationMaster ledger_drift rows). The single remaining
+`sq_ledger_drift` row on sasquatch_pr is the deliberate DDAControl
+plant (-$2.8M, L1 SPEC cross-boundary example). Annotated the
+"Parent Accounts in Drift" KPI subtitle so analysts know that
+persistent ~$2.8M is intentional in the bundled demo (real deploys
+should see 0).
+
+S.2: both Exec time-series charts ("Daily Transaction Count by
+Type" + "Daily Gross Dollars Moved by Type") gained a note —
+apparent multi-week empty stretches + weekend gaps reflect the
+demo's 90-day seed window + non-business-day cadence, not data
+outages.
+
+### AO.C — confirm-on-AWS sub-items closed
+
+C1: App Info deploy stamp confirmed cfg-driven (no hardcode) via
+code inspection + lock test parametrized across the 4 shipped apps
+× 2 cfg shapes (PG/recon-prod, Oracle/recon-staging) — gates
+against future hardcode regression.
+
+C2: deferred to the next QS-on-AWS pass. App2-side slider default
+already fixed by AO.R.4; the QS-on-AWS surface is a QS engine
+feature. Per operator decision 2026-05-24 (cold-reads run locally),
+visual QS confirmation queues to the next deploy.
+
+### Oracle CI fix — drop bare `/` from `emit_config_table_drop`
+
+The PL/SQL `BEGIN ... END;` block had a trailing `\n/` SQL*Plus
+terminator that's not OCI-valid. The Oracle script splitter
+terminates PL/SQL blocks via the inner `END;` and doesn't
+recognize bare `/`; the orphan line leaked into the next
+statement's buffer and Oracle rejected stmt #37 with ORA-00900
+on schema apply (CI e2e-oracle-api on v11.17.0). Fix: drop the
+`\n/`.
+
+### Migration notes
+
+- No customer-facing migration (no schema or storage changes vs
+  v11.17.0; v11.17.0's BIGINT cents migration is still in effect).
+- ETL contract unchanged from v11.17.0.
+
 ## v11.17.0 — AO.L + AO.1.impl + AO.4 + AO.7: money precision + matview correctness
 
 Four cold-read findings closed in one release; three are structural
