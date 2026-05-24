@@ -39,7 +39,7 @@ from recon_gen.common.spine.ledger_simulation import (
     Transfer,
     TransferLeg,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 
 @dataclass(frozen=True)
@@ -63,7 +63,7 @@ class MoneyTrailInvariant:
             f"FROM {self.prefix}_inv_money_trail_edges",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "inv_money_trail_edges",
                 root_transfer_id=str(root),
                 transfer_id=str(tid),
@@ -178,7 +178,7 @@ class MoneyTrailGenerator:
     prefix: str = "spec_example"
 
     @property
-    def intended(self) -> Violation:
+    def intended(self) -> RuleViolation:
         """The deepest edge of the chain — the "story" of the trail.
         For chain_length=3, depth=2 (grandchild) is the most-removed-
         from-root edge, the analyst-meaningful endpoint.
@@ -188,7 +188,7 @@ class MoneyTrailGenerator:
         configuration."""
         leaf_transfer_id = self._transfer_id(self.chain_length - 1)
         root_transfer_id = self._transfer_id(0)
-        return Violation.of(
+        return RuleViolation.of(
             "inv_money_trail_edges",
             root_transfer_id=root_transfer_id,
             transfer_id=leaf_transfer_id,

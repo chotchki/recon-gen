@@ -35,7 +35,7 @@ helper.
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
 
@@ -45,7 +45,7 @@ from recon_gen.common.spine._emit_helpers import (
     load_spec_example,
     ts,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,7 @@ class XorGroupViolationInvariant:
             f"FROM {self.prefix}_xor_group_violation",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "xor_group_violation",
                 transfer_id=str(tid),
                 template_name=str(tname),
@@ -174,8 +174,8 @@ class XorGroupMissedFiringGenerator:
         return f"acct-xor-missed-{self.template_name}"
 
     @property
-    def intended(self) -> Violation:
-        return Violation.of(
+    def intended(self) -> RuleViolation:
+        return RuleViolation.of(
             "xor_group_violation",
             transfer_id=self.transfer_id,
             template_name=self.template_name,
@@ -248,8 +248,8 @@ class XorGroupOverlapGenerator:
         return f"acct-xor-overlap-{self.template_name}"
 
     @property
-    def intended(self) -> Violation:
-        return Violation.of(
+    def intended(self) -> RuleViolation:
+        return RuleViolation.of(
             "xor_group_violation",
             transfer_id=self.transfer_id,
             template_name=self.template_name,

@@ -44,7 +44,7 @@ from recon_gen.common.spine.ledger_simulation import (
     Transfer,
     TransferLeg,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 
 # AT.0 finding: 100 baseline pairs is the minimum to dilute the spike's
@@ -80,7 +80,7 @@ class AnomalyInvariant:
             f"FROM {self.prefix}_inv_pair_rolling_anomalies",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "inv_pair_rolling_anomalies",
                 sender_account_id=str(said),
                 recipient_account_id=str(raid),
@@ -174,10 +174,10 @@ class AnomalyGenerator:
     prefix: str = "spec_example"
 
     @property
-    def intended(self) -> Violation:
+    def intended(self) -> RuleViolation:
         # Identity: (sender, recipient, window_end). Bucket depends on
         # z-score; for spike >> baseline, expect '4+ sigma'.
-        return Violation.of(
+        return RuleViolation.of(
             "inv_pair_rolling_anomalies",
             sender_account_id=self.sender_account_id,
             recipient_account_id=self.recipient_account_id,

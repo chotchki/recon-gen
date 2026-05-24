@@ -113,11 +113,20 @@ from recon_gen.common.spine.registry import (
     iter_edges,
 )
 from recon_gen.common.spine.rng import SCENARIO_BASE_SEED, scenario_rng
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import (
+    AuditFixture,
+    CoverageObservation,
+    RuleViolation,
+    Violation,
+)
 
 __all__ = [
-    # Protocols + currency type (AS.1)
-    "Violation",
+    # Typed evidence currency (AS.1; layered into subtypes by AY.2.a)
+    "Violation",  # abstract base
+    "RuleViolation",  # matview-detected rule break (the AS post-shape)
+    "CoverageObservation",  # seed-color presence claim (AY.2.b plants)
+    "AuditFixture",  # audit-PDF input marker (AY.2.b plants)
+    # Spine Protocols (AS.1)
     "Invariant",
     "ViolationGenerator",
     # Deterministic RNG factory (AS.1 follow-on)

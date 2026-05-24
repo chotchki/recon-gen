@@ -43,7 +43,7 @@ from recon_gen.common.spine._emit_helpers import (
     ts,
 )
 from recon_gen.common.spine.rng import scenario_rng
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,7 @@ class DriftInvariant:
             f"FROM {self.prefix}_drift",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "drift",
                 account_id=aid,
                 business_day=to_date(bds),
@@ -133,7 +133,7 @@ class LedgerDriftInvariant:
             f"FROM {self.prefix}_ledger_drift",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "ledger_drift",
                 account_id=aid,
                 business_day=to_date(bds),
@@ -167,8 +167,8 @@ class DriftGenerator:
     leg_amount: float = 100.0
 
     @property
-    def intended(self) -> Violation:
-        return Violation.of(
+    def intended(self) -> RuleViolation:
+        return RuleViolation.of(
             "drift",
             account_id=self.child_account_id,
             business_day=self.anchor_day,
@@ -176,14 +176,14 @@ class DriftGenerator:
         )
 
     @property
-    def also_trips_ledger_drift(self) -> Violation | None:
+    def also_trips_ledger_drift(self) -> RuleViolation | None:
         """The secondary edge: when this generator's child-drift
         propagates up to the parent's `_ledger_drift`. `None` when no
         parent account is present in the shape (the L2 instance has no
         account with the child's `parent_role`)."""
         if self.parent_account_id is None:
             return None
-        return Violation.of(
+        return RuleViolation.of(
             "ledger_drift",
             account_id=self.parent_account_id,
             business_day=self.anchor_day,

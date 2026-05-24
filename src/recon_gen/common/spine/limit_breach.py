@@ -48,7 +48,7 @@ from recon_gen.common.spine._emit_helpers import (
     to_date,
     ts,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,7 @@ class LimitBreachInvariant:
             f"FROM {self.prefix}_limit_breach",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "limit_breach",
                 account_id=str(aid),
                 business_day=to_date(bd),
@@ -146,8 +146,8 @@ class LimitBreachGenerator:
     anchor_day: date
 
     @property
-    def intended(self) -> Violation:
-        return Violation.of(
+    def intended(self) -> RuleViolation:
+        return RuleViolation.of(
             "limit_breach",
             account_id=self.account_id,
             business_day=self.anchor_day,

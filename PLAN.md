@@ -140,6 +140,7 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
 - [x] AY.0 - Spike + design lock — ScenarioPlant.to_generators adapter shape
 - [x] AY.1 - Equivalence test gate — spine emit == ScenarioPlant emit for overlapping plant kinds
 - [ ] AY.2 - Fill remaining spine coverage — InboundCapBreachGenerator + SupersessionGenerator + RailFiringPlant/TransferTemplatePlant/InvFanoutPlant decision
+  - [x] AY.2.a AY.2.a — Violation subtype hierarchy (RuleViolation / CoverageObservation / AuditFixture)
 - [ ] AY.3 - Lift Dialect.SQLITE hardcode in apply_scenario
 - [ ] AY.4 - Reroute production seed (build_full_seed_sql + emit_full_seed) through ScenarioContext.compose
 - [ ] AY.5 - Re-lock byte seeds via the new path; document any byte drift

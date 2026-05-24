@@ -47,7 +47,7 @@ from recon_gen.common.spine._emit_helpers import (
     load_spec_example,
     ts,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 
 @dataclass(frozen=True)
@@ -69,7 +69,7 @@ class FanInDisagreementInvariant:
             f"FROM {self.prefix}_fan_in_disagreement",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "fan_in_disagreement",
                 child_transfer_id=str(ctid),
                 disagreement_kind=str(kind),
@@ -221,12 +221,12 @@ class FanInChainGenerator:
         return f"acct-fanin-{self.expected_kind}-{self.child_template_name}"
 
     @property
-    def intended(self) -> Violation | None:
+    def intended(self) -> RuleViolation | None:
         """The matview row this plant triggers, or `None` for the
         healthy shape (parent_count == expected → no row)."""
         if self.expected_kind == "healthy":
             return None
-        return Violation.of(
+        return RuleViolation.of(
             "fan_in_disagreement",
             child_transfer_id=self.child_transfer_id,
             disagreement_kind=self.expected_kind,

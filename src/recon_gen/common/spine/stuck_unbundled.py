@@ -37,7 +37,7 @@ from recon_gen.common.spine._emit_helpers import (
     insert_tx,
     load_spec_example,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 _RailWithUnbundledAge = TwoLegRail | SingleLegRail
 
@@ -58,7 +58,7 @@ class StuckUnbundledInvariant:
             f"FROM {self.prefix}_stuck_unbundled",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "stuck_unbundled",
                 transaction_id=str(tid),
                 rail_name=str(rn),
@@ -129,8 +129,8 @@ class StuckUnbundledGenerator:
     as_of: datetime
 
     @property
-    def intended(self) -> Violation:
-        return Violation.of(
+    def intended(self) -> RuleViolation:
+        return RuleViolation.of(
             "stuck_unbundled",
             transaction_id=self.transaction_id,
             rail_name=self.rail_name,

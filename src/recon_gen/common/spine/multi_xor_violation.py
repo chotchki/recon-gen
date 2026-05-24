@@ -45,7 +45,7 @@ from recon_gen.common.spine._emit_helpers import (
     load_spec_example,
     ts,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 
 @dataclass(frozen=True)
@@ -66,7 +66,7 @@ class MultiXorViolationInvariant:
             f"FROM {self.prefix}_multi_xor_violation",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "multi_xor_violation",
                 parent_transfer_id=str(ptid),
                 disagreement_kind=str(kind),
@@ -199,8 +199,8 @@ class MultiXorMissedGenerator:
         return f"acct-mxor-missed-{self.chain_parent_name}"
 
     @property
-    def intended(self) -> Violation:
-        return Violation.of(
+    def intended(self) -> RuleViolation:
+        return RuleViolation.of(
             "multi_xor_violation",
             parent_transfer_id=self.parent_transfer_id,
             disagreement_kind="missed",
@@ -276,8 +276,8 @@ class MultiXorOverlapGenerator:
         return f"acct-mxor-overlap-{self.chain_parent_name}"
 
     @property
-    def intended(self) -> Violation:
-        return Violation.of(
+    def intended(self) -> RuleViolation:
+        return RuleViolation.of(
             "multi_xor_violation",
             parent_transfer_id=self.parent_transfer_id,
             disagreement_kind="overlap",

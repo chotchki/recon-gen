@@ -47,7 +47,7 @@ from recon_gen.common.spine._emit_helpers import (
     insert_tx,
     load_spec_example,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 # Either rail subtype is acceptable — both carry `max_pending_age`.
 _RailWithPendingAge = TwoLegRail | SingleLegRail
@@ -70,7 +70,7 @@ class StuckPendingInvariant:
             f"FROM {self.prefix}_stuck_pending",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "stuck_pending",
                 transaction_id=str(tid),
                 rail_name=str(rn),
@@ -157,8 +157,8 @@ class StuckPendingGenerator:
     as_of: datetime
 
     @property
-    def intended(self) -> Violation:
-        return Violation.of(
+    def intended(self) -> RuleViolation:
+        return RuleViolation.of(
             "stuck_pending",
             transaction_id=self.transaction_id,
             rail_name=self.rail_name,

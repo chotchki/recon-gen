@@ -43,10 +43,9 @@ from recon_gen.common.l2.primitives import L2Instance
 from recon_gen.common.spine._emit_helpers import (
     insert_tx,
     load_spec_example,
-    to_date,
     ts,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 
 @dataclass(frozen=True)
@@ -69,7 +68,7 @@ class ChainParentDisagreementInvariant:
             f"FROM {self.prefix}_chain_parent_disagreement",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "chain_parent_disagreement",
                 transfer_id=str(tid),
                 child_template_name=str(tname),
@@ -182,9 +181,9 @@ class ChainParentDisagreementGenerator:
         return f"acct-cpd-{self.child_template_name}"
 
     @property
-    def intended(self) -> Violation:
+    def intended(self) -> RuleViolation:
         """The natural-key tuple the matview surfaces post-plant."""
-        return Violation.of(
+        return RuleViolation.of(
             "chain_parent_disagreement",
             transfer_id=self.transfer_id,
             child_template_name=self.child_template_name,

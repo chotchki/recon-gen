@@ -42,7 +42,7 @@ from recon_gen.common.spine._emit_helpers import (
     load_spec_example,
     to_date,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 
 @dataclass(frozen=True)
@@ -61,7 +61,7 @@ class ExpectedEodBalanceInvariant:
             f"FROM {self.prefix}_expected_eod_balance_breach",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "expected_eod_balance_breach",
                 account_id=aid,
                 business_day=to_date(bds),
@@ -125,11 +125,11 @@ class ExpectedEodBalanceGenerator:
     variance: float
 
     @property
-    def intended(self) -> Violation:
+    def intended(self) -> RuleViolation:
         # The matview's variance column = money − expected_eod_balance =
         # variance. Identity carries the variance directly (matches the
         # detect projection).
-        return Violation.of(
+        return RuleViolation.of(
             "expected_eod_balance_breach",
             account_id=self.account_id,
             business_day=self.anchor_day,
@@ -137,7 +137,7 @@ class ExpectedEodBalanceGenerator:
         )
 
     @property
-    def also_trips_drift(self) -> Violation | None:
+    def also_trips_drift(self) -> RuleViolation | None:
         """The empirical AU.0-style edge: drift fires on the same
         account/day when the planted account is a LEAF (account_parent_
         role is set). Drift magnitude = stored − Σ legs = (expected +
@@ -148,7 +148,7 @@ class ExpectedEodBalanceGenerator:
         """
         if self.account_parent_role is None:
             return None
-        return Violation.of(
+        return RuleViolation.of(
             "drift",
             account_id=self.account_id,
             business_day=self.anchor_day,
