@@ -42,6 +42,7 @@ from recon_gen.common.spine.ledger_simulation import (
     Transfer,
     TransferLeg,
 )
+from recon_gen.common.spine.dry_run_renderer import render_captured_sql
 from recon_gen.common.spine.scenario_context import (
     ClaimedAccountsGenerator,
     ScenarioContext,
@@ -263,6 +264,8 @@ __all__ = [
     "scenario_metadata",
     # AY.4.a — dry-run SQL capture for the production-seed reroute.
     "dry_run_capture",
+    # AY.4.b — render captured (sql, params) as static SQL text.
+    "render_captured_sql",
     # Self-validating training/docs scenarios (AS.7; AT.6 reuses for L2)
     "TrainingScenario",
     "validate_all",
