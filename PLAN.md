@@ -137,7 +137,7 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
 - [ ] AO.C1 - (feedback #10) App Info shows `dialect: sqlite` / dev prefix — fine for the dev capture; confirm a production deploy shows the real engine + prefix.
 - [ ] AO.C2 - (feedback #9) Empty-default AML sliders (Fanout, Anomalies) — confirm render-on-default vs broken on AWS (likely the slider-default class; pairs with AO.9).
 ## Phase AZ - Retire byte-locked seeds → semantic locks *(depends on: AY)*
-- [ ] AZ.0 - Spike + design — JSON schema for _semantic_locks/<instance>.<dialect>.json
+- [x] AZ.0 - Spike + design — JSON schema for _semantic_locks/<instance>.<dialect>.json. Locked shape: top-level `{_comment, scenario_fingerprint, violations}`; per-violation `{kind, identity}` where kind ∈ {rule_violation, coverage, audit_fixture} (matches AY.2.a subtypes); identity is sorted-key dict of native JSON values (date → ISO-8601 string). Deterministic + byte-stable. JSON-string equality is the gate contract (no Violation reconstruction). Validation table confirms semantic lock catches every real change AY.5 caught + drops every false-positive (per-row INSERT shift, header text, metadata payload). Full design: `docs/audits/az_0_semantic_lock_schema.md`.
 - [ ] AZ.1 - Generate baseline semantic locks via `recon-gen data semantic-lock` CLI
 - [ ] AZ.2 - tests/data/test_semantic_locks.py — gate replacement
 - [ ] AZ.3 - Dev-only dual-gate validation pass (both byte + semantic locks run locally before deletion)
