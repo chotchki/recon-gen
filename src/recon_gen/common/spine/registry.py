@@ -21,14 +21,25 @@ What this enforces (via `tests/unit/test_spine_drift.py`):
 What this enforces additionally (via `tests/unit/test_spine_au5_exhaustiveness.py`):
 
 - **Per-generator-class exhaustiveness** — every class in
-  `ALL_L1_GENERATORS` has an entry in `INVARIANT_GENERATOR_EDGES`.
+  `ALL_GENERATORS` has an entry in `INVARIANT_GENERATOR_EDGES`.
   Catches "I promoted a new generator but forgot to register it."
-- **Per-invariant-class coverage** — every class in `ALL_L1_INVARIANTS`
+- **Per-invariant-class coverage** — every class in `ALL_INVARIANTS`
   is reached by at least one generator's edge set. Catches "I promoted
   a new invariant but forgot to wire any generator to it."
 - **Empirical-edge contract** — every registered edge actually fires
   on emission (existing per-invariant tests cover this; AU.5's
   parametrized test consolidates).
+
+AX.5 registry split (2026-05-23): the spine's coverage now spans
+three invariant categories — L1 accounting (drift / overdraft /
+expected_eod / stuck_* / limit_breach), L2-shape integrity
+(chain_parent_disagreement / xor_group_violation /
+fan_in_disagreement / multi_xor_violation — the ETL-side contracts
+that the L2 yaml's declared chain/XOR/fan-in structure is honored),
+and L2-investigation fraud/AML pattern (anomaly / money_trail). Each
+category gets its own `ALL_<CATEGORY>_INVARIANTS` + `ALL_<CATEGORY>
+_GENERATORS` tuple; `ALL_INVARIANTS` + `ALL_GENERATORS` are the
+unified flat sequences AU.5's exhaustiveness gate walks.
 
 What this does NOT enforce yet:
 - View edges (`invariant → {Views}`); AT lands those when L2's
@@ -45,6 +56,14 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Final
 
+from recon_gen.common.spine.anomaly import (
+    AnomalyGenerator,
+    AnomalyInvariant,
+)
+from recon_gen.common.spine.chain_parent_disagreement import (
+    ChainParentDisagreementGenerator,
+    ChainParentDisagreementInvariant,
+)
 from recon_gen.common.spine.drift import (
     DriftGenerator,
     DriftInvariant,
@@ -54,11 +73,24 @@ from recon_gen.common.spine.expected_eod import (
     ExpectedEodBalanceGenerator,
     ExpectedEodBalanceInvariant,
 )
+from recon_gen.common.spine.fan_in_disagreement import (
+    FanInChainGenerator,
+    FanInDisagreementInvariant,
+)
 from recon_gen.common.spine.generator import ViolationGenerator
 from recon_gen.common.spine.invariant import Invariant
 from recon_gen.common.spine.limit_breach import (
     LimitBreachGenerator,
     LimitBreachInvariant,
+)
+from recon_gen.common.spine.money_trail import (
+    MoneyTrailGenerator,
+    MoneyTrailInvariant,
+)
+from recon_gen.common.spine.multi_xor_violation import (
+    MultiXorMissedGenerator,
+    MultiXorOverlapGenerator,
+    MultiXorViolationInvariant,
 )
 from recon_gen.common.spine.overdraft import OverdraftGenerator, OverdraftInvariant
 from recon_gen.common.spine.stuck_pending import (
@@ -68,6 +100,11 @@ from recon_gen.common.spine.stuck_pending import (
 from recon_gen.common.spine.stuck_unbundled import (
     StuckUnbundledGenerator,
     StuckUnbundledInvariant,
+)
+from recon_gen.common.spine.xor_group_violation import (
+    XorGroupMissedFiringGenerator,
+    XorGroupOverlapGenerator,
+    XorGroupViolationInvariant,
 )
 
 #: For every generator class, the invariant classes its emission trips.
@@ -82,6 +119,14 @@ from recon_gen.common.spine.stuck_unbundled import (
 #: drift's matview filter (`parent_role IS NOT NULL` AND `stored ≠ Σ
 #: legs`), so drift fires too. The registry records this; AU.2's
 #: composition test holds it under multi-generator pressure.
+#:
+#: AX.5: the L2-shape generators (chain_parent_disagreement /
+#: xor_group_violation / fan_in_disagreement / multi_xor_violation) all
+#: register single-edge by default. Cross-class noise (e.g., an XOR
+#: plant on a template that also parents a chain may also trip
+#: multi_xor_violation) is tolerated per AS.5's "intended ⊆ detected"
+#: contract — multi-edge entries land here only after per-invariant
+#: empirical verification, mirroring the OverdraftGenerator pattern.
 INVARIANT_GENERATOR_EDGES: Final[
     dict[type[ViolationGenerator], tuple[type[Invariant], ...]]
 ] = {
@@ -91,28 +136,40 @@ INVARIANT_GENERATOR_EDGES: Final[
     # plant trips drift (zero transactions ⇒ Σ legs ≠ planted stored),
     # a parent plant doesn't (matview's parent_role IS NOT NULL filter).
     ExpectedEodBalanceGenerator: (ExpectedEodBalanceInvariant, DriftInvariant),
-    # AU.3.b — predicted single-edge: stuck_pending is transaction-based
-    # (no balance row) AND Pending status (excluded from drift's computed
-    # subledger balance which filters status='Posted'). Empirical edge
-    # verification in `test_spine_stuck_pending.py`.
+    # AU.3.b — single-edge: stuck_pending is transaction-based (no
+    # balance row) AND Pending status (excluded from drift's computed
+    # subledger balance which filters status='Posted').
     StuckPendingGenerator: (StuckPendingInvariant,),
-    # AU.3.c — single-edge prediction: stuck_unbundled is Posted but
-    # bundle_id IS NULL. The Posted status puts it on drift's radar (Σ
-    # legs at posted_at counted), so the leaf-account variant MIGHT trip
-    # drift if a balance row isn't planted to match. Empirical edge
-    # verification in `test_spine_stuck_unbundled.py` resolves whether
-    # this is single-edge OR the OverdraftGenerator-style two-edge entry.
+    # AU.3.c — single-edge verified empirically: the bundle_id IS NULL
+    # plant doesn't trip drift on this fresh DB.
     StuckUnbundledGenerator: (StuckUnbundledInvariant,),
-    # AU.4 — single-edge prediction (per AP.3 finding #4's from_instance
-    # framing). Posted transaction with no balance row ⇒ no drift JOIN
-    # match ⇒ no drift fire. Empirical verification in
-    # `test_spine_limit_breach.py`.
+    # AU.4 — single-edge: Posted transaction with no balance row ⇒
+    # no drift JOIN match ⇒ no drift fire.
     LimitBreachGenerator: (LimitBreachInvariant,),
+    # AX.1 — chain_parent_disagreement: transfers-only emit (no
+    # balance rows) → single-edge to its own invariant.
+    ChainParentDisagreementGenerator: (ChainParentDisagreementInvariant,),
+    # AX.2 — xor_group_violation: two generators (missed + overlap)
+    # both trip the single invariant. Per-test verified.
+    XorGroupMissedFiringGenerator: (XorGroupViolationInvariant,),
+    XorGroupOverlapGenerator: (XorGroupViolationInvariant,),
+    # AX.3 — fan_in_disagreement: one generator (3 smart constructors;
+    # parent_count knob). The 'healthy' shape's emit produces no row;
+    # the registry edge represents the missing/extra/orphan cases.
+    FanInChainGenerator: (FanInDisagreementInvariant,),
+    # AX.4 — multi_xor_violation: two generators (missed + overlap)
+    # both trip the single invariant.
+    MultiXorMissedGenerator: (MultiXorViolationInvariant,),
+    MultiXorOverlapGenerator: (MultiXorViolationInvariant,),
+    # AT — L2 investigation invariants. Both are transfers-only emits
+    # (LedgerSimulation pattern) → single-edge to their own invariant.
+    AnomalyGenerator: (AnomalyInvariant,),
+    MoneyTrailGenerator: (MoneyTrailInvariant,),
 }
 
 
 # ---------------------------------------------------------------------------
-# AU.5 sources of truth — explicit lists of "what's promoted to the L1
+# AU.5 sources of truth — explicit lists of "what's promoted to the
 # spine" for the exhaustiveness gate. Hand-maintained per promotion;
 # new invariants/generators get appended here as they land. The gate
 # test in `tests/unit/test_spine_au5_exhaustiveness.py` asserts these
@@ -121,9 +178,11 @@ INVARIANT_GENERATOR_EDGES: Final[
 # Why hand-listed (vs auto-derived from common.spine.__all__):
 # explicit > implicit — the list IS the contract that "I intended to
 # promote this." A class that's defined but accidentally missing from
-# here triggers the gate's failure, NOT a silent omission. AT.5's L2
-# exhaustiveness will mirror this shape with `ALL_L2_INVARIANTS` +
-# `ALL_L2_GENERATORS`.
+# here triggers the gate's failure, NOT a silent omission.
+#
+# AX.5 split: three categories, each with their own _INVARIANTS +
+# _GENERATORS tuple; `ALL_INVARIANTS` + `ALL_GENERATORS` are the
+# unified sequences for the AU.5 sweep.
 # ---------------------------------------------------------------------------
 
 
@@ -136,9 +195,39 @@ ALL_L1_INVARIANTS: Final[tuple[type[Invariant], ...]] = (
     StuckUnbundledInvariant,
     LimitBreachInvariant,
 )
-"""Every L1 `Invariant` class promoted to the spine. AU.5's coverage
-gate asserts each is reached by ≥1 generator in
-`INVARIANT_GENERATOR_EDGES`."""
+"""L1 accounting / audit-trail invariants — the regulator-facing
+matview surface that the audit PDF covers."""
+
+
+ALL_L2_SHAPE_INVARIANTS: Final[tuple[type[Invariant], ...]] = (
+    ChainParentDisagreementInvariant,
+    XorGroupViolationInvariant,
+    FanInDisagreementInvariant,
+    MultiXorViolationInvariant,
+)
+"""L2-shape integrity invariants (AX) — the ETL-side contracts that
+the L2 yaml's declared chain/XOR/fan-in structure is honored at
+data-emit time. Surface on the L2 Flow Tracing dashboard's Unified
+L2 Exceptions matview."""
+
+
+ALL_L2_INVESTIGATION_INVARIANTS: Final[tuple[type[Invariant], ...]] = (
+    AnomalyInvariant,
+    MoneyTrailInvariant,
+)
+"""L2 investigation invariants (AT) — fraud / AML pattern detection.
+Surface on the Investigation dashboard (anomaly + money_trail
+sheets)."""
+
+
+ALL_INVARIANTS: Final[tuple[type[Invariant], ...]] = (
+    *ALL_L1_INVARIANTS,
+    *ALL_L2_SHAPE_INVARIANTS,
+    *ALL_L2_INVESTIGATION_INVARIANTS,
+)
+"""Every `Invariant` class promoted to the spine, across all three
+categories. AU.5's coverage gate asserts each is reached by ≥1
+generator in `INVARIANT_GENERATOR_EDGES`."""
 
 
 ALL_L1_GENERATORS: Final[tuple[type[ViolationGenerator], ...]] = (
@@ -149,8 +238,39 @@ ALL_L1_GENERATORS: Final[tuple[type[ViolationGenerator], ...]] = (
     StuckUnbundledGenerator,
     LimitBreachGenerator,
 )
-"""Every L1 `ViolationGenerator` class promoted to the spine. AU.5's
-registration gate asserts each is keyed in
+"""L1 accounting generators — match `ALL_L1_INVARIANTS`."""
+
+
+ALL_L2_SHAPE_GENERATORS: Final[tuple[type[ViolationGenerator], ...]] = (
+    ChainParentDisagreementGenerator,
+    XorGroupMissedFiringGenerator,
+    XorGroupOverlapGenerator,
+    FanInChainGenerator,
+    MultiXorMissedGenerator,
+    MultiXorOverlapGenerator,
+)
+"""L2-shape integrity generators (AX) — 1 per single-variant
+invariant + 2 each for the two-variant ones (XOR missed/overlap,
+multi-XOR missed/overlap). 7 generators across 4 invariants."""
+
+
+ALL_L2_INVESTIGATION_GENERATORS: Final[
+    tuple[type[ViolationGenerator], ...]
+] = (
+    AnomalyGenerator,
+    MoneyTrailGenerator,
+)
+"""L2 investigation generators (AT) — match
+`ALL_L2_INVESTIGATION_INVARIANTS`."""
+
+
+ALL_GENERATORS: Final[tuple[type[ViolationGenerator], ...]] = (
+    *ALL_L1_GENERATORS,
+    *ALL_L2_SHAPE_GENERATORS,
+    *ALL_L2_INVESTIGATION_GENERATORS,
+)
+"""Every `ViolationGenerator` class promoted to the spine, across all
+three categories. AU.5's registration gate asserts each is keyed in
 `INVARIANT_GENERATOR_EDGES`."""
 
 

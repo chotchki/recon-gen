@@ -99,8 +99,14 @@ from recon_gen.common.spine.money_trail import (
     MoneyTrailView,
 )
 from recon_gen.common.spine.registry import (
+    ALL_GENERATORS,
+    ALL_INVARIANTS,
     ALL_L1_GENERATORS,
     ALL_L1_INVARIANTS,
+    ALL_L2_INVESTIGATION_GENERATORS,
+    ALL_L2_INVESTIGATION_INVARIANTS,
+    ALL_L2_SHAPE_GENERATORS,
+    ALL_L2_SHAPE_INVARIANTS,
     INVARIANT_GENERATOR_EDGES,
     generators_for,
     invariants_for,
@@ -173,10 +179,17 @@ __all__ = [
     "MoneyTrailInvariant",
     "MoneyTrailGenerator",
     "MoneyTrailView",
-    # Many-to-many registry (AS.2; AU.1 + AU.3.a/b/c + AU.4 add edges)
+    # Many-to-many registry (AS.2; AU.1 + AU.3.a/b/c + AU.4 add edges;
+    # AX.5 splits into 3 category-scoped tuples + unified ALL_*)
     "INVARIANT_GENERATOR_EDGES",
     "ALL_L1_INVARIANTS",
     "ALL_L1_GENERATORS",
+    "ALL_L2_SHAPE_INVARIANTS",
+    "ALL_L2_SHAPE_GENERATORS",
+    "ALL_L2_INVESTIGATION_INVARIANTS",
+    "ALL_L2_INVESTIGATION_GENERATORS",
+    "ALL_INVARIANTS",
+    "ALL_GENERATORS",
     "invariants_for",
     "generators_for",
     "iter_edges",

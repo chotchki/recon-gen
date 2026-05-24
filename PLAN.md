@@ -142,7 +142,7 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
 - [x] AX.2 - `XorGroupViolationInvariant` + missed + overlap generators
 - [x] AX.3 - `FanInDisagreementInvariant` + healthy/missing/extra generators
 - [x] AX.4 - `MultiXorViolationInvariant` + missed + overlap generators
-- [ ] AX.5 - Registry split — ALL_L1 / ALL_L2_SHAPE / ALL_L2_INVESTIGATION + ALL_INVARIANTS
+- [x] AX.5 - Registry split — ALL_L1 / ALL_L2_SHAPE / ALL_L2_INVESTIGATION + ALL_INVARIANTS
 - [ ] AX.6 - Per-invariant unit tests + semantic_lock extension
 - [ ] AX.7 - Bump v11.14.0 + release notes + push
 
