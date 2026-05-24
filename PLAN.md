@@ -162,41 +162,40 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
 - [x] AO.L.gate - Semantic-lock builder must include baseline emit (gate-gap fix surfaced by AO.L).
   - **DONE — code on `main` (post-AO.5), pending operator visual + tag.** Implemented **Design A** (decided 2026-05-24): `_build_fresh_semantic_lock_sqlite` now runs `emit_baseline_seed(window_days=90, anchor=canonical)` between schema setup and plant emit. Lock JSON now captures the full (baseline + plants) violation set per L1/Investigation invariant. Re-locked both bundled fixtures with the cents-migration + AO.L matview fix already in place; lock self-match passes (`test_semantic_lock_matches_fresh_emit`). Sizes grew (spec_example 18KB → 1.8MB; sasquatch_pr 19KB → 13MB) — dominated by `inv_money_trail_edges` (per-transaction-edge audit fixtures, ~48K entries on sasquatch_pr) + `inv_pair_rolling_anomalies` (per-(pair, window) observations). Tradeoff accepted: the size is the cost of meaningfully gating the baseline-derived violation surface so a regression like AO.L's cumulative-vs-delta matview bug can't stay latent again.
 
-## Phase BB - Save-time/deploy-time validator split + invalid-state editor UX
+## Phase BB - Reconciler form-pairing for non-aggregating single-leg rails
 
-Surfaced 2026-05-24 during AI.2.d.1.a. The studio editor currently
-runs FULL `validate()` after every create/save and blocks on any
-violation. That's too strict for the bilateral circular references
-in the L2 reference graph (e.g., an aggregator's `bundles_activity`
-references a single-leg rail; the single-leg rail's reconciliation
-check requires the aggregator to bundle it — both must exist
-before either save validates). The dogfood claim "editor rebuilds
-ANY L2 from empty" runs into this wall and the per-save validate
-guarantee can't be honored for cross-referential structures
-in either creation order.
+Surfaced 2026-05-24 during AI.2.d.1.a. Per-save full `validate()` is
+too strict for **two bilateral-circular validator checks** (S3 + C3,
+both about non-aggregating single-leg rails needing a reconciler).
+Rest of the 38 validator checks (35 structural + 1 deferrable
+already handled in `studio_editor.py`) are fine — see
+`docs/audits/bb_0_a_validator_circulars.md` for the catalog.
 
-User-locked direction (2026-05-24): split the validator + give the
-editor an invalid-state UX. NO defer-validation cheat.
+User-locked direction (2026-05-24): **surgical form-pairing** at the
+2 actual circular points; NO validator split, NO invalid-state UX,
+NO defer-validation cheat. Editor's "Create non-aggregating
+single-leg rail" form requires the operator to pick (or create
+inline) a reconciler at the same time. Server commits both
+atomically; validator stays strict; no invalid in-flight state
+ever exists.
 
-- [ ] BB.0 - Locks (decisions before BB.1 fires).
-  - [ ] BB.0.a - **Catalog circular-tension cases** (input to the validator split). Walk every `_check_*` in `common/l2/validate.py`; for each completeness check, identify whether it requires a forward reference that operator incremental-construction can't satisfy. Output `docs/audits/bb_0_a_validator_circulars.md`: per-check (1) the validator function, (2) the reference shape (e.g., "Rail.max_unbundled_age → aggregator A's bundles_activity must contain Rail"), (3) the operator workflow that hits it, (4) whether the create-without-then-edit-in pattern works (deferrable field) or whether it's bilateral (no deferrable field — needs validator split). The catalog is the lock — the validator split's completeness vs structural classification follows the catalog directly.
-  - **Validator surface split** (Lock 1). Two surfaces:
-    - `validate_structure(inst)` — types, required-fields, reference-existence (an entity's references must resolve to declared entities); fast; allowed at every editor save.
-    - `validate_completeness(inst)` — reconciliation (S3), bundles_activity coverage (R8), expected_net (S5), no-orphan flows, chain XOR/fan-in cardinality, etc.; runs at deploy gate.
-    - The existing `validate(inst)` keeps its current semantics (full = structure + completeness); deploy + lock + tests call it.
-  - **Editor save semantics** (Lock 2). Save always succeeds if `validate_structure` passes. If `validate_completeness` fails, save proceeds AND surfaces the completeness errors as warnings (per-entity invalid flag + top-banner count). Only structural errors block.
-  - **Deploy gate** (Lock 3). `recon-gen json apply --execute`, `data apply --execute`, `studio` deploy-changes button, `audit apply --execute`, `data semantic-lock` — all keep the FULL `validate()` call. The save-time split is editor-only; the deploy edge remains strict.
-  - **UI surfaces for invalid state** (Lock 4):
-    - Top banner: "N validation warnings — Y of them block deploy" + link to the warnings view.
-    - Per-entity invalid flag on read-cards + list-view rows (small icon + tooltip with the first error).
-    - List-view filter "show only invalid": toggles a `?invalid=1` query param; the kind's list filters to entities with at least one warning.
-    - A dedicated `/l2/validation` page that lists every warning with its kind + entity + drill link to edit.
-  - **Test gate adjustment**. `test_studio_editor_driver.py`'s rebuild test un-skips once the editor save permits in-flight completeness violations; the round-trip then validates against `validate_structure` per save + full `validate()` at the end (load via `load_instance` which uses full `validate()`).
-- [ ] BB.1 - Validator split implementation. Refactor `common/l2/validate.py`: introduce `validate_structure(inst)` + `validate_completeness(inst)`; existing `validate(inst)` becomes `structure + completeness`. Every existing call site stays correct (still calls full `validate`). New `validate_structure` exposed for the editor's save path.
-- [ ] BB.2 - Editor save path uses `validate_structure`. `common/html/_studio_editor_routes.py` POST/PUT handlers swap `validate(new_inst)` → `validate_structure(new_inst)`. Completeness errors no longer block save; collected separately into `cache`'s metadata or a new `/l2/validation` endpoint.
-- [ ] BB.3 - Per-entity invalid flag + top-banner count + `/l2/validation` page. Compute per-entity warnings by walking `validate_completeness`'s output + indexing by `(kind, entity_id)`. Render in read-card + list-view.
-- [ ] BB.4 - List-view `?invalid=1` filter. Each kind's list page honors a query param to filter to entities with ≥1 warning.
-- [ ] BB.5 - Un-skip `test_studio_editor_driver.py` rebuild. Driver's `create_l2` no longer needs the deferred-edit dance for `max_unbundled_age` (still useful for cleanliness but optional). Confirm the structural-equivalence assertion passes after a full bulk rebuild + final `load_instance` validate.
+Rationale: only 2 bilateral cases (5% of validator surface);
+form-pairing matches the operator's actual mental model better
+than "save can be incomplete + show warnings". Avoids the
+combinatorial UX explosion (every entity might be in invalid
+state → flags + filters everywhere).
+
+- [x] BB.0 - Locks.
+  - [x] BB.0.a - **Catalog circular-tension cases.** Output: `docs/audits/bb_0_a_validator_circulars.md`. 38 checks classified — 35 structural / reference / deferrable stay in `validate()`; only 2 bilateral-circular (S3 single-leg reconciliation + C3 Variable single-leg in some template) need the form-pairing fix.
+  - **Direction** (Lock 1, 2026-05-24): surgical form-pairing per case. Validator unchanged. No invalid-state UX.
+  - **Atomic commit semantics** (Lock 2): the create POST takes the rail's form data PLUS the reconciler choice (`reconciler_kind`: `transfer_template` | `aggregating_rail`; `reconciler_name`: existing-name | `__create_new__`; if create-new, the nested form for the new reconciler). Server mutates the cache in memory (add rail; edit reconciler.leg_rails or .bundles_activity OR create the new reconciler with the new rail in its list), then runs full `validate()`, THEN saves. If validate fails, the whole composite mutation rolls back; nothing persists.
+  - **Form UI** (Lock 3): on the "Create Rail" form, when `subtype=single_leg` AND `aggregating=false`, a "Reconciler" section appears below the rail-specific fields. Required (form-level validator + client-side gate). Two sub-radios — "Attach to existing reconciler" (dropdown of TTs + aggregators) and "Create new reconciler" (nested mini-form for picking TT vs aggregator + the new entity's name + minimum fields). The C3 Variable case is a sub-variant: when `leg_direction=Variable`, only TTs appear in the picker (aggregators don't reconcile Variable per the validator).
+- [ ] BB.1 - Server-side atomic create-rail-with-reconciler handler. Extend `POST /l2_shape/rail/` to accept the reconciler fields; build the composite mutation (add rail + edit/create reconciler); run full `validate()`; on success, `cache.save()` the new instance atomically.
+- [ ] BB.2 - Editor form UI: "Reconciler" section. Render conditionally per subtype + aggregating + leg_direction. Required-field validation client-side + server-side. Dropdown lists existing TTs + (non-Variable case) aggregators; "create new" sub-form for the inline-create path. Form spec entries in `_FIELD_SPECS_BY_KIND` for the new fields.
+- [ ] BB.3 - Driver wiring: `StudioHttpEditorDriver.create_rail` for non-aggregating single-leg rails computes the reconciler-choice from the reference L2 (find which TT or aggregator in the reference contains this rail), passes it in the POST. `create_l2` walk no longer needs the 2-wave + deferred-edit dance for max_unbundled_age (still keep that for the DEFER category).
+- [ ] BB.4 - Un-skip `tests/unit/test_studio_editor_driver.py::test_http_driver_rebuilds_spec_example_structurally`. Confirm structural-equivalence passes for spec_example AND sasquatch_pr.
+- [ ] BB.5 - Resume AI.2.d.1.a downstream: tick AI.2.d.1, AI.2.d.2 Playwright transport, AI.3 test harness, AI.4 L2-equivalence, AI.5 dashboard-equivalence, AI.6 fuzz wiring, AI.7 commit.
+- [ ] BB.6 - Verify + commit + tag. Full unit/schema/data/json/audit/cli/l2/js green. `./run_tests.sh up_to=db` green. Bump v11.19.0 + release notes. Operator visual-confirms the new Reconciler picker on a fresh studio session.
 - [ ] BB.6 - Resume AI.2.d.1.a + downstream (AI.2.d.2 Playwright transport, AI.3 test harness, AI.4 equivalence assertion, AI.5 dashboard equivalence, AI.6 fuzz wiring, AI.7 commit).
 - [ ] BB.7 - Verify + commit. Full unit/schema/data/json/audit/cli/l2/js + ./run_tests.sh up_to=db green. Bump v11.19.0 + release notes. Operator visual-confirms the invalid-state UX (banner + flags + filter) on a sasquatch_pr deploy.
 
@@ -291,4 +290,3 @@ editor an invalid-state UX. NO defer-validation cheat.
 - **Per-table CSV / XLSX export.** Operators expect "export to spreadsheet" on tables (QS has it). Lower priority than feature parity — punt unless it's a small agent task. The audit PDF already covers the "regulator-ready snapshot" case; spreadsheet export is for analyst self-serve.
 - ~~**Fold the biome JS lint into the test runner, like pyright.**~~ *(done, 2026-05-12.)* `conftest.py::pytest_sessionstart` now runs `biome check --max-diagnostics=400` alongside the pyright gate — `biome check` exits non-zero on lint *errors* (e.g. `noInnerDeclarations`) and zero on warnings, so the gate fires before any test collects (`pytest.exit(returncode=2)`); opt out with `QS_GEN_SKIP_BIOME=1`. `biome` is a standalone Rust binary (brew locally; `biomejs/setup-biome@v2` in CI), not an npm/pip package — when it's not on `PATH` the gate skips cleanly (same posture pyright has if it's missing). Bare `pytest tests/`, `./run_tests.sh up_to=unit`, and `ci.yml::test` all enforce it. (Why not a `[dev]` dep like `pyright` / `pytailwindcss`? The Biome project hasn't published an *official* PyPI package yet — in flight at biomejs/biome#8818. The unofficial `biome-js` wrapper bundles the Rust binary like `ruff` does, but ships only a `manylinux_2_28_x86_64` wheel — no macOS / arm64 / sdist, and it's a stale single release on Biome 2.3.x — so adding it would break `uv sync --extra dev` off linux-x86_64. Biome therefore stays a system binary; the `[dev]` block carries a NB comment recording this + a "revisit when biomejs/biome#8818 merges" pointer. `dev_setup`: `brew install biome`, or any of biome's install methods. **Follow-on when biomejs/biome#8818 lands:** add the official package to `[dev]`, drop the `setup-biome` CI step + the system-binary fallback in conftest / install.md.)
 - **Drop `_oracle_lowercase_alias_wrapper`; emit dialect-natural identifier case from the generator** (was Y.3.f, parked 2026-05-09). DDL is emitted unquoted (PG folds lowercase, Oracle UPPERCASE → divergent storage); `_oracle_lowercase_alias_wrapper` (`common/dataset_contract.py`) bolts an outer `SELECT qs_inner."ACCOUNT_ID" AS "account_id" ...` so QuickSight (which builds `SELECT "account_id" FROM (...)` from its declared lowercase Columns) finds matching aliases. The proper fix — generator emits dialect-natural case in `DatasetContract.to_input_columns()`, QS quotes UPPERCASE on Oracle natively, wrapper gone — is bigger than it looks: QuickSight's analysis-side validation is *case-sensitive* against `Dataset.Columns` (Y.3.f.2's reverted Oracle-deploy probe surfaced 45 column-missing errors), so it requires case-folding ~30+ analysis-side column refs per dialect (visuals / filters / calc-fields / drills), not just the Columns declaration. The original App2 Oracle column-casing bug it would have fixed was instead fixed narrowly by Y.3.f.alt (`wrap_for_visual` quotes its column refs). Re-spike if the dialect-helper count grows past ~60, or if SQLite gets dropped from the matrix. See `project_qs_analysis_validates_columns_case_sensitive` memory.
-- **BB.0.a: catalog circular-tension cases in L2 validator** — added 2026-05-24.

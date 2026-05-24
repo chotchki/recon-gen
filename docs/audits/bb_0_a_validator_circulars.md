@@ -92,70 +92,68 @@ Categories used in the table:
 
 The split is small and well-bounded: 35 of 38 checks stay structural; only these 2 move to deploy-time-completeness. The editor permits in-flight invalid states ONLY for the bilateral-circular case (a rail exists without its reconciler — fix is to add the reconciler).
 
-## Implications for BB.1 — validator split
+## Direction LOCKED — surgical form-pairing (NOT validator split)
 
-```python
-# common/l2/validate.py — proposed shape
+**Decision 2026-05-24**: the original validator-split + invalid-state UX plan was over-scoped for 2 bilateral cases. Better fix: **at the 2 actual circular points, the editor's create form pairs the rail's creation with the reconciler choice. Server commits both atomically; validator stays untouched; no invalid in-flight state ever exists.**
 
-def validate_structure(instance: L2Instance) -> None:
-    """Save-time gate: blocks if the L2 is malformed.
+Why: 5% of validator checks need this; the combinatorial UX explosion of "every save can be incomplete" (per-entity flags + warnings + filter + invalid-state page) is a big tax to pay for solving 2 cases. Form-pairing also matches the operator's mental model: a non-aggregating single-leg rail without a reconciler IS conceptually incomplete; the editor should require the reconciler at the same moment.
 
-    Runs every check EXCEPT the bilateral-circular completeness ones
-    that the operator can't satisfy mid-incremental-build.
-    """
-    # All 35 structural + reference + deferrable-circular checks here.
+### Form-pairing shape
 
-def validate_completeness(instance: L2Instance) -> list[L2ValidationError]:
-    """Deploy-time gate: collects (does not raise) the completeness
-    violations.
+For both S3 and C3 (same shape, different applicability):
 
-    Returns the list so the editor can surface them as warnings;
-    callers that need fail-fast (CLI deploy) check the list and raise
-    on non-empty.
-    """
-    errs: list[L2ValidationError] = []
-    try:
-        _check_single_leg_reconciliation(instance)
-    except L2ValidationError as e:
-        errs.append(e)
-    try:
-        _check_variable_single_leg_in_some_template(instance, rails_by_name(instance))
-    except L2ValidationError as e:
-        errs.append(e)
-    return errs
+```
+Editor "Create Rail" form (subtype=single_leg, aggregating=false):
 
-def validate(instance: L2Instance) -> None:
-    """Full gate: structure then completeness; raises on first error.
-    Existing call sites keep this — deploy + lock + tests don't change.
-    """
-    validate_structure(instance)
-    errs = validate_completeness(instance)
-    if errs:
-        raise errs[0]
+  Name:        [SubledgerCharge]
+  leg_role:    [CustomerSubledger]
+  leg_direction: [Variable | Credit | Debit]
+  ...
+
+  ┌─ Reconciler (required) ────────────────────────────────────┐
+  │ This rail won't reconcile its own drift; pick a            │
+  │ TransferTemplate (closes the TT's expected_net) OR an      │
+  │ aggregating Rail (gets swept into a bundle).               │
+  │                                                            │
+  │ ◯ Attach to existing reconciler                            │
+  │   Kind: [TransferTemplate ▾]                               │
+  │   Name: [CustomerFeeAccrual ▾]                             │
+  │                                                            │
+  │ ◯ Create new reconciler inline                             │
+  │   Kind: [TransferTemplate ▾]                               │
+  │   Name: [_______________]                                  │
+  │   ...minimum required fields for that kind...              │
+  └────────────────────────────────────────────────────────────┘
+
+  [Save] → server atomic: { add rail + edit/create reconciler }
+            → full validate() → cache.save()
 ```
 
-## Implications for BB.2 — editor save path
+For the C3 Variable-direction sub-case: the Kind dropdown shows only `TransferTemplate` (aggregators don't reconcile Variable-direction per the validator).
 
-`POST/PUT /l2_shape/<kind>/...` handlers replace `validate(new_inst)` with `validate_structure(new_inst)`. After successful save, compute `validate_completeness(new_inst)` and stash the warnings list onto the L2InstanceCache for surface by the BB.3 UX (per-entity flag + top-banner count) + BB.4 list filter.
+### Server-side atomic commit
 
-## Implications for BB.3-4 — invalid-state UX
+`POST /l2_shape/rail/` extends to accept `reconciler_kind` + `reconciler_name` + (if new) the nested-create fields. The handler:
 
-- **Per-entity invalid flag**: for each warning in the completeness list, parse the message to extract `(kind, entity_id)` — e.g., `"Rail 'SubledgerCharge': single-leg rail is not reconciled..."` → `("rail", "SubledgerCharge")`. Render a badge on that entity's read-card + list-view row.
-- **Top-banner count**: `len(warnings)` across all kinds; clickable to `/l2/validation`.
-- **`/l2/validation` page**: lists warnings with kind + entity + raw message + edit link.
-- **List filter**: `GET /l2_shape/<kind>/?invalid=1` filters to entities whose ID is in the parsed-warnings set.
+1. Apply the rail-create mutation to a copy of the cache state.
+2. Apply the reconciler mutation (either edit existing — append rail to `leg_rails` / `bundles_activity` — or create new with the rail in its list).
+3. Run full `validate()` on the result.
+4. On success: `cache.save(new_inst)`. On failure: discard; return the form re-rendered with the validator error inline.
 
-## Implications for AI.2.d.1.a (this unblocks)
+The composite mutation is the unit of atomicity; nothing partial ever persists.
 
-The driver's existing 2-wave + deferred-edit pattern for `max_unbundled_age` stays useful for cleanliness. After BB.2 lands:
+### Driver wiring (BB.3)
 
-1. Driver creates all rails (including the unreconciled single-legs) — each save validates structurally, succeeds, accumulates a completeness warning.
-2. Driver creates the TTs / aggregators that reconcile them — completeness warnings resolve.
-3. Final `load_instance(dest)` uses full `validate()` which now passes (everything's reconciled).
+`StudioHttpEditorDriver.create_rail` for non-aggregating single-leg rails computes the reconciler-choice from the reference L2 (find which TT or aggregator in the reference contains this rail name) and passes it in the POST. The `create_l2` walk's 2-wave + deferred-edit pattern for `max_unbundled_age` STAYS — that's still a real DEFER case (different shape from the BI cases addressed here).
 
-The dogfood test's round-trip assertion gates on `load_instance` (full validate) so the editor's permissive save is invisible to the final assertion.
+### Operator-visible contract
 
-## Operator-visible contract
+Before BB: "save fails when you try to build single-leg rail X before its reconciler exists; sometimes the only fix is to abandon the editor and edit YAML directly".
 
-Before BB: "save fails on any incomplete state" → operator can't build L2 incrementally in the editor.
-After BB: "save fails only on malformed structure; completeness warnings surface as flags + banner; deploy blocks on warnings". Operator builds incrementally; the editor highlights what's incomplete; deploy enforces.
+After BB: "Create Rail form for non-aggregating single-leg rails has a required Reconciler picker; you can't accidentally save an unreconciled rail. The Reconciler picker offers existing TTs/aggregators OR an inline-create. The save is atomic — both the rail and the reconciler land together (or neither lands)."
+
+### Out of scope (consequence of NOT doing the validator split)
+
+- No invalid-state UX in the editor. Per-entity invalid flag, top-banner count, `?invalid=1` filter, `/l2/validation` page — all deferred. If a future bilateral validator surfaces that can't be solved with form-pairing, revisit.
+- No `validate_structure` / `validate_completeness` API split. `validate()` stays monolithic.
+- The "operator saved an incomplete L2" scenario doesn't exist — every save is fully valid.
