@@ -138,15 +138,27 @@ def test_poller_reloads_when_counter_advances() -> None:
         # invoke the poller again. The fresh closure captures
         # baseline=3 (re-reads the meta), then sees fetch returning 5,
         # 5 !== 3 ⇒ location.reload() fires.
-        page.evaluate(
-            "() => { window.__next_fetch_body__ = "
-            "{ data_generation_id: 5 }; "
-            "window.__bootstrap_internals__.wireDataGenerationPoller(); }",
-        )
-        # Wait for the reload to actually navigate (Playwright fires
-        # framenavigated when the navigation completes). 5s is plenty
-        # for a file:// reload.
-        page.wait_for_load_state("domcontentloaded", timeout=5000)
+        #
+        # Wait shape (fixed 2026-05-23 after the test flaked under
+        # full-suite load): wrap the bump in ``expect_navigation``.
+        # The previous ``wait_for_load_state("domcontentloaded")`` +
+        # ``wait_for_function(__bootstrap_internals__ != null)`` pair
+        # both return IMMEDIATELY on an already-loaded page — neither
+        # blocks for the *reload*. Under contention the test would
+        # then close the browser before the fetch promise chain
+        # microtask-fired the reload. ``expect_navigation`` blocks on
+        # the next frame navigation (the reload) and times out cleanly
+        # if it doesn't happen, removing the load-sensitivity.
+        with page.expect_navigation(timeout=5000):
+            page.evaluate(
+                "() => { window.__next_fetch_body__ = "
+                "{ data_generation_id: 5 }; "
+                "window.__bootstrap_internals__.wireDataGenerationPoller(); }",
+            )
+        # The reload landed; the reloaded page rebuilds
+        # ``__bootstrap_internals__`` synchronously during script
+        # execution. Wait so any post-navigation interaction has the
+        # exposed surface available.
         page.wait_for_function(
             "() => window.__bootstrap_internals__ != null",
             timeout=5000,
