@@ -183,12 +183,17 @@ class MultiXorMissedGenerator:
     chain.parent (or the template's first leg_rail when the parent
     is a Template); template_name stamps the parent template name
     when applicable.
+
+    AY.4.c.2 — account_id_override allows the plant adapter
+    (AY.4.c.3) to thread OLD plant account_ids through, preventing
+    PK collisions when N plants of the same shape compose.
     """
 
     chain_parent_name: str
     anchor_day: date
     instance: L2Instance | None = None
     prefix: str = "spec_example"
+    account_id_override: str | None = None
 
     @property
     def parent_transfer_id(self) -> str:
@@ -196,6 +201,9 @@ class MultiXorMissedGenerator:
 
     @property
     def account_id(self) -> str:
+        """``account_id_override`` wins when set (AY.4.c.2)."""
+        if self.account_id_override is not None:
+            return self.account_id_override
         return f"acct-mxor-missed-{self.chain_parent_name}"
 
     @property
@@ -258,6 +266,10 @@ class MultiXorOverlapGenerator:
     `rail_name`/`template_name` matches the chain's declared
     XOR-sibling child name (rail vs template kind resolved at emit
     time).
+
+    AY.4.c.2 — account_id_override allows the plant adapter
+    (AY.4.c.3) to thread OLD plant account_ids through, preventing
+    PK collisions when N plants of the same shape compose.
     """
 
     chain_parent_name: str
@@ -266,6 +278,7 @@ class MultiXorOverlapGenerator:
     anchor_day: date
     instance: L2Instance | None = None
     prefix: str = "spec_example"
+    account_id_override: str | None = None
 
     @property
     def parent_transfer_id(self) -> str:
@@ -273,6 +286,9 @@ class MultiXorOverlapGenerator:
 
     @property
     def account_id(self) -> str:
+        """``account_id_override`` wins when set (AY.4.c.2)."""
+        if self.account_id_override is not None:
+            return self.account_id_override
         return f"acct-mxor-overlap-{self.chain_parent_name}"
 
     @property

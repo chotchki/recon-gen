@@ -22,6 +22,7 @@ expected is None.)
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -334,3 +335,51 @@ def test_tagged_emit_writes_scenario_id_on_every_row() -> None:
     finally:
         conn.close()
     assert tagged == total > 0
+
+
+# ---------------------------------------------------------------------------
+# AY.4.c.2 — account_id_override threads through claimed_accounts.
+# ---------------------------------------------------------------------------
+
+
+def test_fan_in_chain_account_id_override_used_when_set() -> None:
+    """Setting ``account_id_override`` short-circuits the
+    derived-from-(expected_kind, child_template_name) default. The
+    fan-in generator's derivation also keys off ``expected_kind``
+    (healthy/missing/orphan/extra) so the override needs to win
+    regardless of which variant the plant adapter ships."""
+    gen = FanInChainGenerator(
+        chain_parent_name="parent",
+        child_template_name="child",
+        expected_parent_count=2,
+        parent_count=1,
+        anchor_day=date(2030, 1, 1),
+        expected_kind="missing",
+        account_id_override="custom-account-x",
+    )
+    assert gen.account_id == "custom-account-x"
+    assert gen.claimed_accounts == frozenset({"custom-account-x"})
+
+
+def test_fan_in_chain_default_derivation_preserved_when_unset() -> None:
+    """Derivation keys off ``expected_kind`` AND ``child_template_name``
+    — preserve that shape so the variant kind still differentiates
+    accounts when override is unset."""
+    gen_a = FanInChainGenerator(
+        chain_parent_name="parent",
+        child_template_name="child",
+        expected_parent_count=2,
+        parent_count=1,
+        anchor_day=date(2030, 1, 1),
+        expected_kind="missing",
+    )
+    gen_b = FanInChainGenerator(
+        chain_parent_name="parent",
+        child_template_name="child",
+        expected_parent_count=2,
+        parent_count=1,
+        anchor_day=date(2030, 1, 1),
+        expected_kind="missing",
+    )
+    assert gen_a.account_id == gen_b.account_id
+    assert gen_a.account_id == "acct-fanin-missing-child"

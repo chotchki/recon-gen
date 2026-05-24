@@ -17,6 +17,7 @@ The invariant differs from L1 in two important ways:
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -256,3 +257,37 @@ def test_tagged_emit_writes_scenario_id_in_metadata() -> None:
         f"All {total} emitted rows must carry the scenario_id; "
         f"only {tagged} did"
     )
+
+
+# ---------------------------------------------------------------------------
+# AY.4.c.2 — account_id_override threads through claimed_accounts.
+# ---------------------------------------------------------------------------
+
+
+def test_chain_parent_disagreement_account_id_override_used_when_set() -> None:
+    """Setting ``account_id_override`` short-circuits the
+    derived-from-template_name default — the override is the value
+    returned by both ``account_id`` and ``claimed_accounts`` so the
+    AY.4.c.3 plant adapter can pin per-plant account ids without
+    PK-colliding when N plants of the same shape compose."""
+    gen = ChainParentDisagreementGenerator(
+        child_template_name="t1",
+        anchor_day=date(2030, 1, 1),
+        account_id_override="custom-account-x",
+    )
+    assert gen.account_id == "custom-account-x"
+    assert gen.claimed_accounts == frozenset({"custom-account-x"})
+
+
+def test_chain_parent_disagreement_default_derivation_preserved_when_unset() -> None:
+    """When ``account_id_override`` is unset (the existing call-site
+    contract), account_id is derived deterministically from
+    ``child_template_name`` — byte-stable with pre-AY.4.c.2 behavior."""
+    gen_a = ChainParentDisagreementGenerator(
+        child_template_name="t1", anchor_day=date(2030, 1, 1),
+    )
+    gen_b = ChainParentDisagreementGenerator(
+        child_template_name="t1", anchor_day=date(2030, 1, 1),
+    )
+    assert gen_a.account_id == gen_b.account_id  # both derive same default
+    assert gen_a.account_id == "acct-cpd-t1"  # shape preserved
