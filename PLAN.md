@@ -138,7 +138,7 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
 - [ ] AO.C2 - (feedback #9) Empty-default AML sliders (Fanout, Anomalies) — confirm render-on-default vs broken on AWS (likely the slider-default class; pairs with AO.9).
 ## Phase AY - Converge the dual seed paths (ScenarioPlant + spine generators) *(depends on: AX)*
 - [x] AY.0 - Spike + design lock — ScenarioPlant.to_generators adapter shape
-- [ ] AY.1 - Equivalence test gate — spine emit == ScenarioPlant emit for overlapping plant kinds
+- [x] AY.1 - Equivalence test gate — spine emit == ScenarioPlant emit for overlapping plant kinds
 - [ ] AY.2 - Fill remaining spine coverage — InboundCapBreachGenerator + SupersessionGenerator + RailFiringPlant/TransferTemplatePlant/InvFanoutPlant decision
 - [ ] AY.3 - Lift Dialect.SQLITE hardcode in apply_scenario
 - [ ] AY.4 - Reroute production seed (build_full_seed_sql + emit_full_seed) through ScenarioContext.compose
