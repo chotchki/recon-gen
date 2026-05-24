@@ -140,6 +140,14 @@ you commit:
   ETL projection — *not* in a downstream view. Every dashboard
   check assumes our sign convention; flipping at the projection
   boundary keeps that assumption honest everywhere downstream.
+- **Money is integer cents.** `amount_money`,
+  `daily_balances.money`, and `daily_balances.expected_eod_balance`
+  are BIGINT integer cents on every dialect (Phase AO.1) — the
+  customer ETL feed contract is dollars-in / cents-stored. Your
+  ETL multiplies dollar amounts by 100 (or uses the
+  `recon_gen.common.money.Cents` Python helper) at the projection
+  boundary. Same rule: convert once at the ETL edge, not in a
+  downstream view. See [Schema_v6 → Money is stored as integer cents](../../Schema_v6.md#money-is-stored-as-integer-cents).
 - **`business_day_start` is denormalized from `posting`
   deliberately.** The dashboard datasets do fast date-range scans
   on `business_day_start` — populating it as a separate column

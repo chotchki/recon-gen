@@ -310,6 +310,33 @@ class Config:
     # the pipeline (the demo DB is never touched). When unset, step 1
     # is a no-op. Parsed via `shlex.split`, run with `shell=False`;
     # stdout/stderr stream to `/dev_log` (X.4.g.4 wires the runner).
+    #
+    # AO.1 — Money contract: the hook receives upstream rows in
+    # DOLLARS and MUST convert to integer cents before INSERTing into
+    # the prefixed base tables. The three money columns
+    # (``<prefix>_transactions.amount_money``,
+    # ``<prefix>_daily_balances.money``,
+    # ``<prefix>_daily_balances.expected_eod_balance``) are BIGINT
+    # integer cents on every dialect. Python ETL implementations
+    # should reach for ``recon_gen.common.money.Cents`` rather than a
+    # hand-rolled ``int(round(x * 100))`` — the helper rejects
+    # float-init Decimals that re-introduce float dust.
+    #
+    # Example wrapper command (``etl_hook: ./bin/my_etl.py``) where
+    # ``my_etl.py`` reads dollar amounts from upstream + writes cents::
+    #
+    #     from decimal import Decimal
+    #     from recon_gen.common.money import Cents
+    #     amount_cents = Cents.from_dollars(Decimal("75.00")).value
+    #     cur.execute(
+    #         "INSERT INTO myprefix_transactions (..., amount_money, ...) "
+    #         "VALUES (..., %s, ...)",
+    #         (..., amount_cents, ...),
+    #     )
+    #
+    # See ``src/recon_gen/docs/Schema_v6.md`` for the full column
+    # contract and ``recon-gen data etl-example`` for canonical
+    # per-table INSERT patterns.
     etl_hook: str | None = None
     # X.4.g.2 — When set, step 2 of the deploy pipeline pulls from
     # this datasource into the demo DB after the wipe. When None, the
