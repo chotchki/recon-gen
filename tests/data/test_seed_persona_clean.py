@@ -211,24 +211,37 @@ def test_seed_includes_only_spec_example_account_ids(spec_seed_sql) -> None:
     )
 
 
-def test_seed_includes_only_spec_example_account_names(spec_seed_sql) -> None:
-    """Every account display name in the SQL comes from spec_example.yaml.
+def test_seed_does_not_leak_sasquatch_persona_names(spec_seed_sql) -> None:
+    """No Sasquatch persona name leaks into the spec_example seed.
 
-    Catches hardcoded account-name strings (e.g. ``Federal Reserve Bank
-    — SNB Master``) that would still leak persona context even if the
-    id field was correctly resolved.
+    Pre-AY.4 the seed read account names directly from L2
+    TemplateInstance.name; the persona-clean contract was that the
+    spec_example seed contained ONLY spec_example's TemplateInstance
+    names (not Sasquatch's). Post-AY.4 (the spine reroute) the seed
+    uses synthetic per-generator names like "Drift Acct
+    (CustomerSubledger)" instead of L2-supplied display names — so
+    the leak risk is now STRUCTURALLY impossible (no L2 name flows
+    into the spine emit at all).
+
+    The test flips: assert no Sasquatch persona names appear, rather
+    than "these spec names DO appear." Same protection (no
+    cross-persona leak), updated for the new architecture. If the
+    spine emit later threads L2 TemplateInstance names through (per
+    PLAN AY.6.b's `metadata_value_examples` gap), this test gains
+    teeth back automatically.
     """
-    expected_names = {
-        "Customer Number One",
-        "Customer Number Two",
-        "External Counterparty One",
+    sasquatch_blocklist = {
+        "Sasquatch National Bank",
+        "Federal Reserve Bank",
+        "Bigfoot",
+        "Yeti",
+        "snb-",
     }
-    # Account names are the second single-quoted string in each VALUES row;
-    # we'll look for any name not in expected by checking the blocklist
-    # logic above plus an explicit assertion for the expected names being
-    # present.
-    for name in expected_names:
-        assert f"'{name}'" in spec_seed_sql, (
-            f"expected account name {name!r} missing from SQL — the seed "
-            f"is not emitting the SPEC instance's account names"
-        )
+    leaked = {
+        n for n in sasquatch_blocklist if n in spec_seed_sql
+    }
+    assert not leaked, (
+        f"spec_example seed leaked Sasquatch persona names: {leaked!r}. "
+        f"Check that the spine generators aren't pulling persona-flavored "
+        f"strings from the wrong L2 instance."
+    )

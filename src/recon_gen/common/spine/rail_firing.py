@@ -166,6 +166,13 @@ class RailFiringGenerator:
     firing_seq: int
     anchor_day: date
     prefix: str = "spec_example"
+    # AY.6.b — per-firing metadata field values (e.g. from
+    # `Rail.metadata_value_examples`). The OLD path cycled through
+    # the rail's declared example lists per firing_seq; the plant
+    # adapter (AY.4.c.3) threads each plant's `extra_metadata` tuple
+    # through this field. Empty tuple (default) → no extras emitted,
+    # only the AV.5 scenario_id stamp lands in the JSON column.
+    metadata_extras: tuple[tuple[str, str], ...] = ()
 
     @property
     def transfer_id(self) -> str:
@@ -201,13 +208,27 @@ class RailFiringGenerator:
         *,
         scenario_id: str | None = None,
     ) -> None:
+        import json
         from recon_gen.common.spine.scenario_context import scenario_metadata
-        metadata = (
-            scenario_metadata(
+        # AY.6.b — build the metadata JSON as the union of
+        # `metadata_extras` (per-firing field values from the rail's
+        # `metadata_value_examples`) + the AV.5 scenario_id stamp.
+        # Untagged callers (scenario_id is None) AND no extras → metadata
+        # is None → SQL NULL (byte-stable with pre-AY.6.b).
+        extras_dict: dict[str, str] = dict(self.metadata_extras)
+        if scenario_id is not None:
+            tagged = scenario_metadata(
                 scenario_id, generator="RailFiringGenerator",
             )
-            if scenario_id is not None else None
-        )
+            tagged_dict = json.loads(tagged)
+            extras_dict = {**tagged_dict, **extras_dict}  # extras win on overlap (matches OLD path)
+        if extras_dict:
+            metadata: str | None = json.dumps(
+                extras_dict, sort_keys=True,
+                separators=(",", ":"),  # typing-smell: ignore[json-indent]: compact deterministic per-row DB metadata, not a human-diffable file
+            )
+        else:
+            metadata = None
         posting = ts(self.anchor_day, hour=11)
 
         if self.is_two_leg:

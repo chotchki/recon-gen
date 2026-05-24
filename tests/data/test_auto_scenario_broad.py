@@ -314,6 +314,9 @@ def test_broad_mode_links_required_chain_children() -> None:
     child = chain_children[0]
     assert str(child.rail_name) == "ConcentrationToFRBSweep"
     # The transfer_parent_id matches a parent rail firing's ID pattern.
+    # AY.4 — picker layer still produces `tr-rail-NNNN`-prefixed
+    # transfer_parent_ids on chain children (it's a ScenarioPlant-side
+    # decoration, independent of the AY.4 spine emit rename). Untouched.
     assert child.transfer_parent_id is not None
     assert child.transfer_parent_id.startswith("tr-rail-")
 
@@ -347,8 +350,11 @@ def test_emit_seed_accepts_broad_mode_plants(
     )
     sql = emit_seed(instance, report.scenario, prefix=db_prefix)
     # Sanity: SQL is non-empty, references the prefix, and the
-    # rail-firing tx_id pattern (tx-rail-NNNN) appears.
+    # rail-firing tx_id pattern appears. AY.4 renamed the prefix
+    # from the OLD `tx-rail-NNNN` (counter-based) to `tx-rf-<rail>-
+    # <firing_seq>-{src,dst}` (the spine RailFiringGenerator's
+    # deterministic-per-construction-args scheme).
     assert sql
     assert f"INSERT INTO {db_prefix}_transactions" in sql
     if report.scenario.rail_firing_plants:
-        assert "tx-rail-" in sql
+        assert "tx-rf-" in sql

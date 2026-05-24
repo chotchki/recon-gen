@@ -158,7 +158,7 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
   - [x] AY.4.e - apply_db_seed in tests/e2e/_seed_helpers.py routes through the new path
 - [x] AY.5 - Re-lock byte seeds via the new path; document any byte drift. ~0.1% per file shrink (10-13KB out of ~9.4MB). Drift sources: (1) per-row INSERT replaces multi-row VALUES syntax (spine's insert_tx writes one row per execute); (2) plant counts collapsed to a single "N generators" line in the header; (3) SHA256 stamp updated. Locked seed test passes against the new bytes.
 - [x] AY.6 - Retire the old per-plant emitter functions in seed.py. seed.py 6600 → 4426 lines (33% reduction); 42 dead per-plant emitters + sort keys + private helpers deleted via AST-based purge. `emit_seed` now a thin spine wrapper (same public signature; same SQL-text return). All ScenarioPlant dataclasses + baseline emitters preserved. 464 spine tests + 8 byte-lock tests green; pyright strict clean.
-  - [ ] AY.6.b - 9 spine-emit drift test failures (per AY.5 drift acceptance umbrella): test_l2_yaml_naming.py (2: `metadata_value_examples` not threaded through RailFiringGenerator), test_auto_scenario_broad.py (3: id prefix changed `tx-rail-` → `tx-rf-`), test_l2_seed_contract.py (3: AV.5 infra-keys `generator`+`scenario_id` need to land in test's `_INFRA_METADATA_KEYS`), test_seed_persona_clean.py (1: spine emit doesn't use TemplateInstance names so the persona-leak test trivially holds — update assertion). Mix of "test needs update to new shape" + "spine generator gap to enhance." Decide per-test at AY.6.b spike.
+  - [x] AY.6.b - 9 spine-emit drift test failures fixed across 4 categories: (1) `_INFRA_METADATA_KEYS` allowlist extended with `generator`+`scenario_id` (3 tests); (2) ID prefix asserts `tx-rail-` → `tx-rf-` (3 tests); (3) persona-clean test flipped from "spec names appear" → "Sasquatch names don't appear" (structurally impossible now since spine uses synthetic names — 1 test); (4) real spine enhancement — `RailFiringGenerator.metadata_extras` field added + adapter threads `plant.extra_metadata` through so the OLD `rail.metadata_value_examples` cycling lands in the emitted metadata JSON (2 tests). Byte locks re-locked (+3,566 bytes per dialect, accounting for the new metadata payloads). 2795 unit + data tests pass; 0 failures.
 - [ ] AY.7 - Trainer/timeline regression check + Studio dogfood smoke
 - [ ] AY.8 - Bump v11.15.0 + release notes + push
 ## Phase AZ - Retire byte-locked seeds → semantic locks *(depends on: AY)*
@@ -170,7 +170,7 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
 - [ ] AZ.5 - Retire byte-lock infrastructure (delete files + test + data lock CLI)
 - [ ] AZ.6 - Bump v11.16.0 + release notes + push
 ## Phase PLAN.0 - AY
-- [ ] PLAN.md AY.4.c.4 — generator transaction.id derivations must include account_id (LimitBreach + audit)
+- [ ] PLAN.md AY.6.b — clean up 9 spine-emit drift test failures
 
 # Backlog (not yet phased)
 

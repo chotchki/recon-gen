@@ -651,6 +651,14 @@ def _adapt_rail_firing(
         single_leg_direction=leg_direction,
         firing_seq=plant.firing_seq,
         anchor_day=anchor_day,
+        # AY.6.b — thread per-firing metadata field values from the
+        # OLD plant's `extra_metadata` tuple (populated by the picker
+        # from `rail.metadata_value_examples`, cycling per firing_seq).
+        # The spine generator merges these into the metadata JSON
+        # alongside the AV.5 scenario_id stamp.
+        metadata_extras=tuple(
+            (str(k), str(v)) for k, v in plant.extra_metadata
+        ),
     )
 
 

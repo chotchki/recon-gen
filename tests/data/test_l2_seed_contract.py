@@ -507,6 +507,12 @@ def test_seed_transfer_types_resolve_to_instance(
 # the planted fanout edges back to their (sender, recipient) pair.
 _INFRA_METADATA_KEYS = {
     "customer_id", "external_reference", "sender_id", "recipient_id",
+    # AV.5 / AY.4 — scenario-tagging keys threaded by ScenarioContext.
+    # `scenario_id` is the per-emission tag (cleanup uses it for surgical
+    # tear-down); `generator` is the per-row attribution stamp identifying
+    # which spine generator wrote the row. Both flow into every row the
+    # AY.4 spine pipeline emits + are legitimate infra, not L2 schema.
+    "scenario_id", "generator",
 }
 
 
