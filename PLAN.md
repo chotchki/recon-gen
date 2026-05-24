@@ -173,7 +173,7 @@ strong phase will get lost and bite us"*):
   lands, the scenario-context work would need the side-table approach
   (the spike pattern); landing AV obviates the sidecar entirely.
 
-- [ ] AV.0 - Audit + spike: inventory every reader of `daily_balances.
+- [x] AV.0 - Audit + spike: inventory every reader of `daily_balances.
   limits` (matview SQL + dataset SQL + Python helpers + tests). Map each
   to its `metadata.limits` migration path. Output `docs/audits/av_0_
   limits_metadata_rename_audit.md` with the punch list. Lock the
