@@ -10,16 +10,22 @@
 - **Initial draft (committed `c708902d`):** locked a hybrid path where
   7 "seed-color" plants stayed on the OLD `_emit_<plant>_rows`
   dispatch loops while 13 violation plants converged to the spine.
-- **User feedback:** "your locks 1+2 seem to be deviating away from
-  what we're trying to accomplish here ... we took Violation too
-  strictly ... it should be more general but I support layering
-  violations if it helps."
-- **This revision:** `Violation` is the typed evidence currency for
-  the spine — not specifically L1-rule-violations. ALL 20 plant
-  kinds become spine `ViolationGenerator`s. A `severity` discriminator
-  on `Violation` separates rule-violations from coverage observations
-  + audit fixtures. The OLD dual-system architecture retires
-  entirely.
+- **First revision (committed `4c05ce1d`):** user pushback —
+  "your locks 1+2 seem to be deviating away from what we're trying
+  to accomplish here ... we took Violation too strictly ... it
+  should be more general." Generalized `Violation` with a
+  `severity: Literal['rule_violation', 'coverage',
+  'audit_fixture']` field; all 20 plants converge to the spine; the
+  OLD dual-system retires entirely.
+- **This revision:** user follow-up — "I would appreciate if those
+  severities ended up strongly typed." `Literal` discriminator
+  swapped for a proper subtype hierarchy: `Violation` stays as the
+  abstract base; concrete subtypes `RuleViolation` /
+  `CoverageObservation` / `AuditFixture` carry the kind in the
+  runtime class. pyright narrows via `isinstance`; per-subtype
+  fields available later if needed; matches the
+  `feedback_invariants_in_types` Rust-flavored preference for
+  typed constructors that fail at the buggy line.
 
 ---
 
@@ -32,17 +38,20 @@ spine/`) run only in tests + AT.5's e2e gate. AV.5's per-row
 `metadata.scenario_id` tagging therefore never lands on production
 seed rows.
 
-**AY.0 lock — full convergence:**
+**AY.0 lock — full convergence with strongly-typed evidence
+hierarchy:**
 
-1. **Generalize `Violation`.** Add a `severity: Literal['rule_violation',
-   'coverage', 'audit_fixture'] = 'rule_violation'` field. The default
-   value preserves backward compat for all 14 existing spine generators.
-   `Violation` is re-documented as "typed evidence the spine
-   emits/detects" — not just "rule violation".
+1. **`Violation` becomes the abstract base of a 3-subtype
+   hierarchy.** `RuleViolation` / `CoverageObservation` /
+   `AuditFixture` are concrete subtypes; each tag-only by default
+   (no extra fields, ready for per-subtype field growth later if
+   needed). pyright narrows via `isinstance(v, RuleViolation)`;
+   detectors get typed return values (`L1Invariant.detect() ->
+   set[RuleViolation]`).
 
 2. **All 20 plants land on the spine.** Each gets a `ViolationGenerator`
-   class; each generator's `intended` Violation carries the right
-   severity. No `ScenarioPlant`-only "seed-color" path survives.
+   class; each generator's `intended` is typed to the right subtype.
+   No `ScenarioPlant`-only "seed-color" path survives.
 
 3. **`emit_full_seed` / `build_full_seed_sql` route ENTIRELY through
    `ScenarioContext.compose(*adapter(scenario, instance))`.** All 20
@@ -53,46 +62,95 @@ seed rows.
 
 ---
 
-## Generalized `Violation` shape
+## Strongly-typed `Violation` hierarchy
 
 ```python
 @dataclass(frozen=True)
 class Violation:
     """Typed evidence the spine emits or detects.
 
-    Severity discriminator separates:
-      - 'rule_violation' — L1/L2 matview detects a rule break (drift,
-        chain_parent_disagreement, etc.). The default; preserves the
-        AS.1–AX shape.
-      - 'coverage' — seed presence claim (RailFiring, TransferTemplate,
-        InvFanout, etc.). Coverage observations are the GOOD signal
-        — their ABSENCE is the bug ("seed didn't emit the expected
-        rail firings" trips a coverage-invariant).
-      - 'audit_fixture' — auxiliary data the audit PDF consumes
-        (SupersessionPlant). Not a rule violation; not a coverage
-        invariant; just an audit-PDF-specific row presence claim.
+    Abstract base; concrete subtypes carry the kind in the runtime
+    class. Three subtypes:
+
+      - `RuleViolation` — L1/L2 matview detects a rule break (drift,
+        chain_parent_disagreement, anomaly, etc.). The post-AS shape;
+        every existing spine generator's `intended` returns one.
+      - `CoverageObservation` — seed presence claim (RailFiring,
+        TransferTemplate, InvFanout, etc.). The GOOD signal — its
+        ABSENCE is the bug; a coverage-invariant's detect() failing
+        to return one trips the regression gate.
+      - `AuditFixture` — auxiliary data the audit PDF consumes
+        (SupersessionPlant, FailedTransactionPlant). Not a rule
+        violation; not a coverage invariant; an audit-PDF-specific
+        row presence claim.
+
+    Equality + hashing inherit from the base; two instances compare
+    equal iff they're the same subtype + same identity. Subtype
+    tagging via runtime class is the discriminator (pyright narrows
+    via `isinstance`; per-subtype fields land if needed without
+    rewriting the base).
     """
 
     invariant: str
     identity: frozenset[tuple[str, object]]
-    severity: Literal[
-        "rule_violation", "coverage", "audit_fixture",
-    ] = "rule_violation"
+
+
+@dataclass(frozen=True)
+class RuleViolation(Violation):
+    """A matview-detected rule violation. The current post-AS shape
+    for every promoted spine invariant (drift / overdraft / etc.).
+
+    `RuleViolation.of(invariant, **identity)` is the blessed
+    constructor; `Violation.of(...)` is an alias that returns a
+    `RuleViolation` (backward compat — every existing caller keeps
+    working byte-stable)."""
+
+
+@dataclass(frozen=True)
+class CoverageObservation(Violation):
+    """A seed-color presence observation. The plant emits demo data
+    that a coverage detector (when one exists) reads back to confirm
+    the seed met the documented coverage shape. The plant's
+    `intended.severity == 'coverage'` in lock-dict terms.
+
+    Use `CoverageObservation.of(invariant, **identity)` to
+    construct."""
+
+
+@dataclass(frozen=True)
+class AuditFixture(Violation):
+    """An audit-PDF input row marker. Supersession and Failed-status
+    plants both emit rows the audit PDF reads directly; no matview
+    surfaces them. The fixture's `intended` lets the lock dict
+    reflect the audit-PDF's expected inputs.
+
+    Use `AuditFixture.of(invariant, **identity)`."""
 ```
 
-**Backward compat** — `severity` defaults to `'rule_violation'`.
-Every existing call site (`Violation.of(name, **identity)`) emits
-the same shape it always did; the AS.5 semantic_lock pinning, the
-AU.5 exhaustiveness gate, the AT.5 agreement test all keep working
-byte-stable.
+**Backward compat** — `Violation.of(name, **identity)` still works
+and returns a `RuleViolation`. Every existing call site is
+byte-stable — equality semantics unchanged (subtypes inherit
+`__eq__` from the frozen dataclass base + add their type to the
+tuple, so `RuleViolation(a, b) != CoverageObservation(a, b)` even
+when identity matches, but two `RuleViolation`s with same identity
+ARE equal). The AS.5 semantic_lock pinning, AU.5 exhaustiveness
+gate, AT.5 agreement test all keep working byte-stable.
 
-**Layering option flagged + declined for now.** Per the user's
-"I support layering violations if it helps" — the layering shape
-would be `Violation` base + `L1Violation` / `CoverageObservation` /
-`AuditFixture` subtypes. A discriminator field is simpler + the type
-narrowing is straightforward (`if v.severity == 'rule_violation':
-...`). Promote to subtypes later if the type-system precision pays
-off; the discriminator pattern is the reversible default.
+**Why subtypes over a discriminator field** — `isinstance(v,
+RuleViolation)` narrows the type for pyright (the spine's strict-
+pyright modules get tighter types). Detectors can be typed
+explicitly: `L1Invariant.detect(conn) -> set[RuleViolation]`;
+coverage detectors get `set[CoverageObservation]`. Mismatch
+returns surface at strict-pyright time, not runtime — matches the
+`feedback_invariants_in_types` Rust-flavored preference for typed
+constructors that fail at the buggy line.
+
+**ViolationGenerator's `intended` type** — stays `Violation` (the
+base); each concrete generator's `intended` narrows the return type
+via the implementation (`def intended(self) -> RuleViolation:`).
+Code that consumes generators-in-general (`gen.intended`) gets the
+base type; specific consumers (a coverage-invariant gate) can
+constrain.
 
 ---
 
@@ -101,8 +159,10 @@ off; the discriminator pattern is the reversible default.
 ### Rule-violation plants → existing spine generators (13 kinds)
 
 These are already promoted post-AS / AT / AU / AX. Adapter wires
-them through unchanged; each generator's `intended` defaults to
-`severity='rule_violation'`.
+them through unchanged; each generator's `intended` returns a
+`RuleViolation` (the post-AS shape; `Violation.of` is now an alias
+that returns `RuleViolation`, so existing call sites stay
+byte-stable).
 
 | Plant kind | Spine generator | Promoted in |
 |---|---|---|
@@ -124,28 +184,29 @@ them through unchanged; each generator's `intended` defaults to
 
 These ship as new `Generator` classes in `src/recon_gen/common/spine/`.
 Each emits the row shape the OLD `_emit_<plant>_rows` helper does;
-each `intended` returns a `Violation` with `severity='coverage'`.
+each `intended` returns a `CoverageObservation` (subtype of
+`Violation`).
 
-| Plant kind | NEW spine generator | Severity |
+| Plant kind | NEW spine generator | `intended` returns |
 |---|---|---|
-| `TwoTemplateChainPlant` | `TwoTemplateChainGenerator` | `coverage` |
-| `FanInChainPlant` (healthy) | already covered by `FanInChainGenerator(expected_kind='healthy')`; AY.2 just confirms `intended` returns a `severity='coverage'` Violation (was `None` post-AX.3 — change to a coverage-tagged Violation) | `coverage` |
-| `TransferTemplatePlant` | `TransferTemplateGenerator` | `coverage` |
-| `RailFiringPlant` | `RailFiringGenerator` | `coverage` |
-| `InvFanoutPlant` | `InvFanoutGenerator` | `coverage` |
+| `TwoTemplateChainPlant` | `TwoTemplateChainGenerator` | `CoverageObservation` |
+| `FanInChainPlant` (healthy) | already covered by `FanInChainGenerator(expected_kind='healthy')`; AY.2 flips `intended` from `None` to a `CoverageObservation` | `CoverageObservation` |
+| `TransferTemplatePlant` | `TransferTemplateGenerator` | `CoverageObservation` |
+| `RailFiringPlant` | `RailFiringGenerator` | `CoverageObservation` |
+| `InvFanoutPlant` | `InvFanoutGenerator` | `CoverageObservation` |
 
 ### Audit-fixture plants → NEW spine generators in AY.2 (2 kinds)
 
 These emit rows the audit PDF consumes but no matview or coverage
 detector reads. They get spine generators for substrate uniformity
 (claimed_accounts collision check, AV.5 metadata tagging,
-ScenarioContext cleanup attribution) but their `intended` Violation
-carries `severity='audit_fixture'`.
+ScenarioContext cleanup attribution) but their `intended` returns
+an `AuditFixture` (subtype of `Violation`).
 
-| Plant kind | NEW spine generator | Severity |
+| Plant kind | NEW spine generator | `intended` returns |
 |---|---|---|
-| `SupersessionPlant` | `SupersessionGenerator` | `audit_fixture` |
-| `FailedTransactionPlant` | `FailedTransactionGenerator` | `audit_fixture` |
+| `SupersessionPlant` | `SupersessionGenerator` | `AuditFixture` |
+| `FailedTransactionPlant` | `FailedTransactionGenerator` | `AuditFixture` |
 
 ### Coverage invariants — deferred per-plant
 
@@ -220,14 +281,28 @@ def scenario_to_generators(
    `<prefix>_daily_balances` contents. Catches adapter field-mapping
    drift before AY.4's reroute fires.
 
-2. **AY.2** — Promote 7 NEW spine generators for the coverage +
+2. **AY.2** — Two sub-phases:
+
+   **AY.2.a — `Violation` subtype hierarchy.** Extend
+   `common/spine/violation.py` with `RuleViolation` /
+   `CoverageObservation` / `AuditFixture` subclasses. Make
+   `Violation.of(...)` an alias that returns `RuleViolation` (each
+   subtype gets its own `.of(...)` classmethod). Existing 14
+   generators stay byte-stable; their `intended` annotations get
+   tightened to `-> RuleViolation` in this commit. All AS.5 /
+   AT.4 / AX.6 semantic_lock tests + AU.5 gate pass post-change
+   (equality semantics unchanged for the rule-violation case).
+
+   **AY.2.b — Promote 7 NEW spine generators** for the coverage +
    audit-fixture plant kinds (TwoTemplateChainGenerator,
-   TransferTemplateGenerator, RailFiringGenerator, InvFanoutGenerator,
-   SupersessionGenerator, FailedTransactionGenerator). Each ships
-   with a `claimed_accounts` property + `severity` discriminator on
-   its `intended`. `FanInChainGenerator(healthy)`'s `intended`
-   flips from `None` to a `severity='coverage'` Violation. Plus add
-   `severity` field to `Violation` (backward-compatible default).
+   TransferTemplateGenerator, RailFiringGenerator,
+   InvFanoutGenerator, SupersessionGenerator,
+   FailedTransactionGenerator). Each ships with a
+   `claimed_accounts` property + `intended` returning the right
+   subtype. `FanInChainGenerator(healthy)`'s `intended` flips from
+   `None` to a `CoverageObservation`. Per-generator unit tests
+   land in this sub-phase; AU.5 registry expands (`ALL_GENERATORS`
+   14 → 21).
 
 3. **AY.3** — `apply_scenario`'s `Dialect.SQLITE` hardcode lifted.
    Thread `dialect: Dialect = Dialect.SQLITE` kwarg through; pass
