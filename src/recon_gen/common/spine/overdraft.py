@@ -43,6 +43,7 @@ from datetime import date
 from typing import ClassVar
 
 from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.money import Cents
 from recon_gen.common.spine._emit_helpers import (
     day_bounds,
     find_internal_with_role,
@@ -74,12 +75,17 @@ class OverdraftInvariant:
             f"SELECT account_id, business_day_start, stored_balance "
             f"FROM {self.prefix}_overdraft",
         ).fetchall()
+        # AO.1: stored_balance is BIGINT cents — project to dollars at
+        # the detect boundary so violation identities still round-trip
+        # against generators that author in dollars.
         return {
             RuleViolation.of(
                 "overdraft",
                 account_id=aid,
                 business_day=to_date(bds),
-                stored_balance=round(float(sb), 2),
+                stored_balance=round(
+                    float(Cents.from_db(int(sb)).to_dollars()), 2,
+                ),
             )
             for aid, bds, sb in rows
         }

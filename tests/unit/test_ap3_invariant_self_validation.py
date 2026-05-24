@@ -191,6 +191,12 @@ _DB_COLS = (
 
 
 def _insert_tx(conn: sqlite3.Connection, **vals: object) -> None:
+    # AO.1 — amount_money is BIGINT cents; coerce author-side floats
+    # at the write boundary so this local helper mirrors `insert_tx`.
+    from recon_gen.common.money import Cents
+    raw = vals.get("amount_money")
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        vals["amount_money"] = int(Cents.from_dollars(raw))
     row = {c: vals.get(c) for c in _TX_COLS}
     placeholders = ", ".join("?" for _ in _TX_COLS)
     conn.execute(
@@ -201,6 +207,12 @@ def _insert_tx(conn: sqlite3.Connection, **vals: object) -> None:
 
 
 def _insert_balance(conn: sqlite3.Connection, **vals: object) -> None:
+    # AO.1 — money / expected_eod_balance are BIGINT cents; coerce.
+    from recon_gen.common.money import Cents
+    for col in ("money", "expected_eod_balance"):
+        raw = vals.get(col)
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            vals[col] = int(Cents.from_dollars(raw))
     row = {c: vals.get(c) for c in _DB_COLS}
     placeholders = ", ".join("?" for _ in _DB_COLS)
     conn.execute(
@@ -247,8 +259,13 @@ class DriftInvariant:
         rows = conn.execute(
             f"SELECT account_id, drift FROM {_PREFIX}_drift",
         ).fetchall()
+        # AO.1 — drift is BIGINT cents; convert at read.
+        from recon_gen.common.money import Cents
         return {
-            Violation.of("drift", account_id=aid, drift=round(float(d), 2))
+            Violation.of(
+                "drift", account_id=aid,
+                drift=round(float(Cents.from_db(int(d)).to_dollars()), 2),
+            )
             for aid, d in rows
         }
 

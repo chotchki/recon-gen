@@ -207,10 +207,11 @@ def test_transfer_emit_writes_one_tx_row_per_leg() -> None:
     finally:
         conn.close()
     # Two rows: source leg (-250, Debit), target leg (+250, Credit).
+    # AO.1: amount_money is BIGINT cents — $250 → 25000.
     assert len(rows) == 2
     src, tgt = rows[0], rows[1]
-    assert src == ("xfer-1", "acct-src", -250.0, "Debit", "Posted", "ach")
-    assert tgt == ("xfer-1", "acct-tgt", 250.0, "Credit", "Posted", "ach")
+    assert src == ("xfer-1", "acct-src", -25000, "Debit", "Posted", "ach")
+    assert tgt == ("xfer-1", "acct-tgt", 25000, "Credit", "Posted", "ach")
 
 
 def test_transfer_emit_preserves_parent_transfer_id() -> None:

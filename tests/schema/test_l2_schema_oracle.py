@@ -146,7 +146,9 @@ class TestOracleConstructsPresent:
         "posting              TIMESTAMP    NOT NULL",
         "business_day_start     TIMESTAMP    NOT NULL",
         "VARCHAR2(",
-        "NUMBER(20,2)",
+        # AO.1: money columns moved from NUMBER(20,2) → NUMBER(19) (the
+        # Oracle equivalent of BIGINT) for integer-cents storage.
+        "NUMBER(19)",
         "CLOB",
         # Idempotent DROPs (PL/SQL block per drop)
         "BEGIN EXECUTE IMMEDIATE 'DROP TABLE",

@@ -33,6 +33,7 @@ from datetime import date
 from typing import ClassVar
 
 from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.money import Cents
 from recon_gen.common.spine._emit_helpers import (
     day_bounds,
     find_internal_with_role,
@@ -67,12 +68,15 @@ class DriftInvariant:
             f"SELECT account_id, business_day_start, drift "
             f"FROM {self.prefix}_drift",
         ).fetchall()
+        # AO.1: matview math runs on BIGINT cents (integer-exact). Project
+        # back to dollars at the detect boundary so violation identities
+        # still round-trip against generators that author in dollars.
         return {
             RuleViolation.of(
                 "drift",
                 account_id=aid,
                 business_day=to_date(bds),
-                drift=round(float(d), 2),
+                drift=round(float(Cents.from_db(int(d)).to_dollars()), 2),
             )
             for aid, bds, d in rows
         }
@@ -146,12 +150,13 @@ class LedgerDriftInvariant:
             f"SELECT account_id, business_day_start, drift "
             f"FROM {self.prefix}_ledger_drift",
         ).fetchall()
+        # AO.1: see DriftInvariant.detect note on cents → dollars projection.
         return {
             RuleViolation.of(
                 "ledger_drift",
                 account_id=aid,
                 business_day=to_date(bds),
-                drift=round(float(d), 2),
+                drift=round(float(Cents.from_db(int(d)).to_dollars()), 2),
             )
             for aid, bds, d in rows
         }

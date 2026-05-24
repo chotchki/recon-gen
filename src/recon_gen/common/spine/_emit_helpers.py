@@ -41,10 +41,12 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import Account, L2Instance
+from recon_gen.common.money import Cents
 
 # Default prefix for the in-process test harness shape. Production
 # callers thread their deployment's prefix via the kwarg.
@@ -87,6 +89,47 @@ def _build_placeholders(style: str, n: int) -> str:
     if style == "format":
         return ", ".join("%s" for _ in range(n))
     return ", ".join("?" for _ in range(n))
+
+
+def _coerce_to_cents_int(value: object) -> object:
+    """Coerce a money kwarg to integer cents at the insert boundary.
+
+    AO.1: the three money columns (amount_money / money /
+    expected_eod_balance) store BIGINT cents on every dialect. Spine
+    generators author in floats (``leg_amount: float = 100.0``) and
+    Decimals (seed test fixtures); downstream parallel agents may
+    pass already-converted ``Cents``. Coerce all three shapes at this
+    one boundary so the wire path is uniform.
+
+    None passes through (NULL column). ``Cents`` → its ``.value``.
+    ``int`` passes through unchanged ONLY when already in cents shape
+    is impossible to distinguish from "dollar int"; the spine never
+    passes an int as a money kwarg today (always float / Decimal),
+    so route ints through ``from_dollars`` for consistency. Bool is
+    treated as int (defensive — Python's ``isinstance(True, int)``).
+    """
+    if value is None:
+        return None
+    if isinstance(value, Cents):
+        return value.value
+    if isinstance(value, bool):
+        # Defensive — Python's bool is an int subclass; route through
+        # from_dollars to keep the contract uniform (True→100, False→0).
+        return Cents.from_dollars(int(value)).value
+    if isinstance(value, (Decimal, int)):
+        return Cents.from_dollars(value).value
+    if isinstance(value, float):
+        # str() avoids float-init Decimal drift (Decimal(0.1) !=
+        # Decimal('0.1')) — same convention as Cents.from_dollars.
+        return Cents.from_dollars(str(value)).value
+    return value
+
+
+# AO.1: money columns that need dollar→cents coercion at the insert
+# boundary. Kept as module-level sets so the dispatch is a constant-time
+# lookup per kwarg.
+_TX_MONEY_COLS = frozenset({"amount_money"})
+_DB_MONEY_COLS = frozenset({"money", "expected_eod_balance"})
 
 
 TX_COLS = (
@@ -161,7 +204,13 @@ def insert_tx(
         f"INSERT INTO {table} ({', '.join(TX_COLS)}) "
         f"VALUES ({placeholders})"
     )
-    params = [vals.get(c) for c in TX_COLS]
+    # AO.1: amount_money is BIGINT cents — coerce dollar shapes at the
+    # insert boundary so generators can keep authoring in float dollars.
+    params = [
+        _coerce_to_cents_int(vals.get(c)) if c in _TX_MONEY_COLS
+        else vals.get(c)
+        for c in TX_COLS
+    ]
     cur = conn.cursor()
     try:
         cur.execute(sql, params)
@@ -184,7 +233,13 @@ def insert_balance(
         f"INSERT INTO {table} ({', '.join(DB_COLS)}) "
         f"VALUES ({placeholders})"
     )
-    params = [vals.get(c) for c in DB_COLS]
+    # AO.1: money + expected_eod_balance are BIGINT cents — coerce
+    # dollar shapes at the insert boundary.
+    params = [
+        _coerce_to_cents_int(vals.get(c)) if c in _DB_MONEY_COLS
+        else vals.get(c)
+        for c in DB_COLS
+    ]
     cur = conn.cursor()
     try:
         cur.execute(sql, params)

@@ -4370,7 +4370,8 @@ def _txn_row(
         f"({_sql_str(id_)}, {_sql_str(account_id)}, "
         f"{_sql_str(account_name)}, {_sql_str(account_role)}, "
         f"{_sql_str(account_scope)}, {parent_role_lit}, "
-        f"{money}, {_sql_str(direction)}, {_sql_str(status)}, "
+        f"{_sql_money_cents(money)}, {_sql_str(direction)}, "
+        f"{_sql_str(status)}, "
         f"{_sql_timestamp_literal(posting, dialect)}, "
         f"{_sql_str(transfer_id)}, "
         f"NULL, {transfer_parent_lit}, "
@@ -4415,7 +4416,7 @@ def _balance_row(
         f"{parent_role_lit}, NULL, "
         f"{_sql_timestamp_literal(_bod_timestamp(day, offset_hours), dialect)}, "
         f"{_sql_timestamp_literal(_eod_timestamp(day, offset_hours), dialect)}, "
-        f"{money}, NULL, NULL)"
+        f"{_sql_money_cents(money)}, NULL, NULL)"
     )
 
 
@@ -4423,3 +4424,26 @@ def _sql_str(s: object) -> str:
     """Render an arbitrary value as a SQL string literal (single-quoted,
     embedded quotes doubled). Used for every text column in the seed."""
     return "'" + str(s).replace("'", "''") + "'"
+
+
+def _sql_money_cents(money: object) -> str:
+    """Render a money value as an integer-cents SQL literal.
+
+    AO.1: amount_money / money / expected_eod_balance columns are
+    BIGINT cents. The seed authors hold the value as Decimal dollars
+    (or already-Cents); this helper coerces at the write boundary so
+    the seed SQL emits ``7500`` rather than ``75.00``.
+
+    Accepts ``Cents`` (use ``.value`` directly), ``Decimal`` / ``str``
+    / ``int`` / ``float`` (route through ``Cents.from_dollars`` so the
+    quantization is consistent with the rest of the codebase).
+    """
+    from recon_gen.common.money import Cents
+
+    if isinstance(money, Cents):
+        return str(money.value)
+    if isinstance(money, (Decimal, str, int)) and not isinstance(money, bool):
+        return str(Cents.from_dollars(money).value)
+    # float: convert via str() so we don't bake float dust into the
+    # Decimal init (Decimal(0.1) != Decimal("0.1")).
+    return str(Cents.from_dollars(str(money)).value)

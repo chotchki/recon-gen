@@ -47,11 +47,11 @@ from __future__ import annotations
 from recon_gen.common.sql import (
     Dialect,
     analyze_table,
+    bigint_type,
     cast,
     concat_agg,
     date_minus_days,
     date_trunc_day,
-    decimal_type,
     drop_index_if_exists,
     drop_matview_if_exists,
     drop_table_if_exists,
@@ -543,7 +543,13 @@ def _emit_l1_invariant_views(
             f"\n     AND {_ls_direction} = '{direction}'"
         )
 
-    limit_cap_value = _cast(_ls_cap_extract, "numeric", dialect)
+    # AO.1: amount_money is BIGINT cents; L2's limit-schedule cap is
+    # authored in dollars. Multiply the JSON-extracted cap by 100 so
+    # the matview's ``SUM(ABS(amount_money)) > cap`` compares
+    # cents-vs-cents.
+    limit_cap_value = (
+        f"({_cast(_ls_cap_extract, 'numeric', dialect)} * 100)"
+    )
     limit_join_outbound = _limit_join("Outbound")
     limit_join_inbound = _limit_join("Inbound")
     # Phase AW.3 (2026-05-23): the per-rail max_*_age values used to be
@@ -1307,7 +1313,7 @@ def _emit_base_schema(
     """Render ``_SCHEMA_TEMPLATE`` with all dialect placeholders filled.
 
     Type-name placeholders ({serial}, {ts}, {text}, {vc20…vc255},
-    {dec202}) come from common/sql type helpers. DROP placeholders
+    {bigint_money}) come from common/sql type helpers. DROP placeholders
     come from drop_*_if_exists helpers (PG IF EXISTS / Oracle PL/SQL).
     The bundler-eligibility partial-index ``WHERE bundle_id IS NULL``
     is a Postgres-only optimization — Oracle gets a full index, which
@@ -1334,7 +1340,9 @@ def _emit_base_schema(
         "vc50": varchar_type(50, dialect),
         "vc100": varchar_type(100, dialect),
         "vc255": varchar_type(255, dialect),
-        "dec202": decimal_type(20, 2, dialect),
+        # AO.1: money columns are BIGINT cents (was DECIMAL(20,2)) so
+        # SQLite stores them as exact INTEGER (no REAL float dust).
+        "bigint_money": bigint_type(dialect),
         # Matview options suffix (Oracle BUILD IMMEDIATE REFRESH COMPLETE
         # ON DEMAND; empty on Postgres + SQLite).
         "matview_options": matview_options(dialect),
@@ -1470,9 +1478,12 @@ _SCHEMA_TEMPLATE = """\
 -- entry         — BIGSERIAL append-only supersession key per L1 F's
 --                 Entry primitive. Higher entry overrides lower for the
 --                 same logical Transaction.id (Current* view in M.1.5).
--- amount_money  — signed Decimal per L1 Amount's "money agrees with
---                 direction" invariant. Positive ⇔ Credit; negative
+-- amount_money  — signed BIGINT cents per L1 Amount's "money agrees
+--                 with direction" invariant. Positive ⇔ Credit; negative
 --                 ⇔ Debit. The CHECK enforces sign-direction agreement.
+--                 AO.1: storage moved from DECIMAL(20,2) to BIGINT cents
+--                 (SQLite stored DECIMAL as REAL → float dust). Dollars
+--                 projection happens at read time via cents_to_dollars_sql.
 -- transfer_parent_id — L1 Transfer.Parent recursive chain (the PR
 --                 pipeline support added in Phase L's L1 spec work).
 -- rail_name     — L2 Rail name that produced this leg. Required on every
@@ -1512,7 +1523,7 @@ CREATE TABLE {p}_transactions (
     account_scope        {vc20}    NOT NULL
         CHECK (account_scope IN ('internal', 'external')),
     account_parent_role  {vc100},
-    amount_money         {dec202}  NOT NULL,
+    amount_money         {bigint_money}  NOT NULL,
     amount_direction     {vc20}    NOT NULL
         CHECK (amount_direction IN ('Debit', 'Credit')),
     status               {vc50}    NOT NULL,
@@ -1555,8 +1566,10 @@ CREATE TABLE {p}_transactions (
 --                 under the ``limits`` key; the integrator's ETL just
 --                 wraps the same map one level deeper.
 --                 NULL means no metadata on this account-day.
--- money         — signed; CAN go negative (overdraft is observable per
---                 L1's Non-negative Stored Balance SHOULD constraint).
+-- money         — signed BIGINT cents; CAN go negative (overdraft is
+--                 observable per L1's Non-negative Stored Balance SHOULD
+--                 constraint). AO.1: see amount_money comment above.
+-- expected_eod_balance — BIGINT cents; NULL when no expectation set.
 -- supersedes    — L1 StoredBalance.Supersedes; open enum per SPEC
 --                 (no CHECK). Per the SPEC's "Higher-Entry rows"
 --                 section, the only category applicable to StoredBalance
@@ -1572,10 +1585,10 @@ CREATE TABLE {p}_daily_balances (
     account_scope          {vc20}    NOT NULL
         CHECK (account_scope IN ('internal', 'external')),
     account_parent_role    {vc100},
-    expected_eod_balance   {dec202},
+    expected_eod_balance   {bigint_money},
     business_day_start     {ts}    NOT NULL,
     business_day_end       {ts}    NOT NULL,
-    money                  {dec202}  NOT NULL,
+    money                  {bigint_money}  NOT NULL,
     metadata               {json_text},
     supersedes             {vc50},
     {db_pk_decl},
