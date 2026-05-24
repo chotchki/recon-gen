@@ -80,6 +80,7 @@ class MoneyTrailInvariant:
         amount: float = 100.0,
         anchor_day: date = date(2030, 1, 1),
         instance: L2Instance | None = None,
+        chain_id_prefix: str | None = None,
     ) -> "MoneyTrailGenerator":
         """Resolve the chain's account role + return a generator that
         plants a `chain_length`-deep parent-linked chain. Every account
@@ -95,6 +96,18 @@ class MoneyTrailInvariant:
         sender — money walks through a chain of `chain_length + 1`
         distinct accounts. The matview surfaces each transfer as one
         edge (one source-leg × one target-leg per transfer).
+
+        AY.4.c — `chain_id_prefix` overrides the default synthetic ID
+        prefix. Unlike the single-account spine factories, money_trail
+        plants `chain_length + 1` account_ids + `chain_length`
+        transfer_ids; the natural disambiguator is a chain-wide prefix
+        feeding both `_account_id(i)` and `_transfer_id(i)`. The plant
+        adapter (AY.4.c.3) threads OLD money-trail chain identifiers
+        through this kwarg so N plants on the same `hop_role` produce
+        N distinct generators (the default `"acct-money-trail-hop"` /
+        `"xfer-money-trail"` derivations would collide). Existing test
+        callers can pass nothing → preserves the synthetic defaults
+        byte-stable.
         """
         if chain_length < 1:
             raise ValueError(
@@ -115,6 +128,7 @@ class MoneyTrailInvariant:
             chain_length=chain_length,
             amount=amount,
             anchor_day=anchor_day,
+            chain_id_prefix=chain_id_prefix or "money-trail",
         )
 
 
@@ -176,6 +190,11 @@ class MoneyTrailGenerator:
     amount: float
     anchor_day: date
     prefix: str = "spec_example"
+    #: AY.4.c — disambiguator threaded into `_account_id` /
+    #: `_transfer_id` so N money-trail plants on the same hop_role
+    #: produce N distinct chains. Defaults to the legacy
+    #: `"money-trail"` value → existing test callers stay byte-stable.
+    chain_id_prefix: str = "money-trail"
 
     @property
     def intended(self) -> Violation:
@@ -253,7 +272,7 @@ class MoneyTrailGenerator:
         return out
 
     def _account_id(self, index: int) -> str:
-        return f"acct-money-trail-hop-{index}"
+        return f"acct-{self.chain_id_prefix}-hop-{index}"
 
     def _transfer_id(self, index: int) -> str:
-        return f"xfer-money-trail-{index}"
+        return f"xfer-{self.chain_id_prefix}-{index}"

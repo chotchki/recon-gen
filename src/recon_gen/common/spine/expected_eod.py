@@ -77,6 +77,7 @@ class ExpectedEodBalanceInvariant:
         expected: float = 100.0,
         variance: float = 5.0,
         instance: L2Instance | None = None,
+        account_id: str | None = None,
     ) -> "ExpectedEodBalanceGenerator":
         """Resolve a role; return a generator that plants
         ``money = expected + variance`` with the per-row
@@ -88,11 +89,19 @@ class ExpectedEodBalanceInvariant:
 
         Raises `ValueError` if the L2 has no internal account with the
         requested role.
+
+        AY.4.c — `account_id` overrides the default synthetic ID. The
+        plant adapter (AY.4.c.3) threads OLD
+        `ExpectedEodBalancePlant.account_id` through this kwarg so N
+        plants on the same role produce N distinct generators (the
+        default `f"acct-eod-{role}"` derivation would collide). Existing
+        test callers can pass nothing → preserves the synthetic default
+        byte-stable.
         """
         inst = instance if instance is not None else load_spec_example()
         acct = find_internal_with_role(inst, role, error_kind="expected-EOD")
         return ExpectedEodBalanceGenerator(
-            account_id=f"acct-eod-{role}",
+            account_id=account_id or f"acct-eod-{role}",
             account_role=role,
             account_parent_role=acct.parent_role,
             anchor_day=date(2030, 1, 1),

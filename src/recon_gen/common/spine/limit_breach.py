@@ -86,6 +86,7 @@ class LimitBreachInvariant:
         direction: LimitDirection = "Outbound",
         overshoot: float = 100.0,
         instance: L2Instance | None = None,
+        account_id: str | None = None,
     ) -> "LimitBreachGenerator":
         """Resolve `(parent_role, rail_name, direction)` against the L2's
         LimitSchedule; return a generator that plants ONE Posted
@@ -103,6 +104,20 @@ class LimitBreachInvariant:
           parent_role` (the matview filters
           `account_parent_role IS NOT NULL`; without a matching child
           the plant is inert)
+
+        AY.4.c — `account_id` overrides the default synthetic ID. The
+        plant adapter (AY.4.c.3) threads OLD
+        `LimitBreachPlant.account_id` through this kwarg so N plants on
+        the same (parent_role, rail, direction) triple produce N
+        distinct generators (the default
+        `f"acct-limit-breach-{rail_name}-{direction}"` derivation would
+        collide). Existing test callers can pass nothing → preserves
+        the synthetic default byte-stable.
+
+        Note: LimitBreachGenerator carries only one `account_id` field
+        (the breaching account); there is no `counter_account_id` —
+        the matview groups solely on `(account_id, business_day,
+        rail_name, direction)`.
         """
         inst = instance if instance is not None else load_spec_example()
         schedule = _find_limit_schedule(
@@ -113,7 +128,10 @@ class LimitBreachInvariant:
         # ⇒ the child is a leaf ⇒ has a role set (validator R-something).
         assert child.role is not None
         return LimitBreachGenerator(
-            account_id=f"acct-limit-breach-{rail_name}-{direction}",
+            account_id=(
+                account_id
+                or f"acct-limit-breach-{rail_name}-{direction}"
+            ),
             account_role=child.role,
             account_parent_role=parent_role,
             rail_name=rail_name,
