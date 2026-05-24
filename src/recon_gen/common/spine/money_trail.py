@@ -195,11 +195,26 @@ class MoneyTrailGenerator:
             depth=self.chain_length - 1,
         )
 
-    def emit(self, conn: sqlite3.Connection) -> None:
+    @property
+    def claimed_accounts(self) -> frozenset[str]:
+        """The chain_length+1 hop account_ids the chain walks through.
+        ``account[0]`` is the chain's root sender; ``account[N]`` is
+        the leaf recipient. Used by AV.5 ``ScenarioContext.compose``
+        to catch cross-generator collisions at the wiring site."""
+        return frozenset(
+            self._account_id(i) for i in range(self.chain_length + 1)
+        )
+
+    def emit(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        scenario_id: str | None = None,
+    ) -> None:
         LedgerSimulation(
             transfers=list(self._transfers()),
             prefix=self.prefix,
-        ).emit(conn)
+        ).emit(conn, scenario_id=scenario_id)
 
     def _transfers(self) -> list[Transfer]:
         """Build the chain as `Transfer`s. Pure (no IO) — composable

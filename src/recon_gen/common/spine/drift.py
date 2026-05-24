@@ -193,7 +193,27 @@ class DriftGenerator:
             drift=round(-self.magnitude, 2),
         )
 
-    def emit(self, conn: sqlite3.Connection) -> None:
+    @property
+    def claimed_accounts(self) -> frozenset[str]:
+        """The child account_id this plant drifts + the parent
+        account_id when the shape has one (ledger_drift edge fires on
+        the parent). AV.5."""
+        out = {self.child_account_id}
+        if self.parent_account_id is not None:
+            out.add(self.parent_account_id)
+        return frozenset(out)
+
+    def emit(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        scenario_id: str | None = None,
+    ) -> None:
+        from recon_gen.common.spine.scenario_context import scenario_metadata
+        metadata = (
+            scenario_metadata(scenario_id, generator="DriftGenerator")
+            if scenario_id is not None else None
+        )
         start, end = day_bounds(self.anchor_day)
         # Child: clean balance == leg total. Stored is shifted by
         # `magnitude` → drift fires on the child.
@@ -207,6 +227,7 @@ class DriftGenerator:
             business_day_start=start,
             business_day_end=end,
             money=self.leg_amount + self.magnitude,
+            metadata=metadata,
         )
         insert_tx(
             conn,
@@ -223,6 +244,7 @@ class DriftGenerator:
             transfer_id=f"xfer-drift-{self.child_role}-1",
             rail_name="ach",
             origin="etl",
+            metadata=metadata,
         )
         # Parent (when present in the shape): stored money equals the
         # CLEAN child leg total. With the child's stored inflated by
@@ -239,6 +261,7 @@ class DriftGenerator:
                 business_day_start=start,
                 business_day_end=end,
                 money=self.leg_amount,
+                metadata=metadata,
             )
 
 

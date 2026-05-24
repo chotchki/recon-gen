@@ -164,7 +164,22 @@ class StuckPendingGenerator:
             rail_name=self.rail_name,
         )
 
-    def emit(self, conn: sqlite3.Connection) -> None:
+    @property
+    def claimed_accounts(self) -> frozenset[str]:
+        """The single account_id this plant stucks a Pending tx on. AV.5."""
+        return frozenset({self.account_id})
+
+    def emit(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        scenario_id: str | None = None,
+    ) -> None:
+        from recon_gen.common.spine.scenario_context import scenario_metadata
+        metadata = (
+            scenario_metadata(scenario_id, generator="StuckPendingGenerator")
+            if scenario_id is not None else None
+        )
         # Plant `posting` far enough in the past of `as_of` that the
         # matview's `age_seconds > max_pending_age_seconds` filter fires.
         # Use a Credit posting (sign-direction CHECK constraint requires
@@ -186,6 +201,7 @@ class StuckPendingGenerator:
             transfer_id=self.transfer_id,
             rail_name=self.rail_name,
             origin="etl",
+            metadata=metadata,
         )
 
 

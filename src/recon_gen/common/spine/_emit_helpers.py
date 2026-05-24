@@ -93,28 +93,31 @@ TX_COLS = (
     "id", "account_id", "account_name", "account_role", "account_scope",
     "account_parent_role", "amount_money", "amount_direction", "status",
     "posting", "transfer_id", "transfer_parent_id", "rail_name", "origin",
+    "metadata",
 )
 """Columns every generator writes to ``_transactions``. Excludes ``entry``
 (supersession; defaults), ``transfer_completion`` (optional), ``template_
 name`` (no generator emits via templates), ``bundle_id`` (NULL by default
-— stuck_unbundled's plant explicitly relies on this), ``supersedes`` +
-``metadata`` (no generator tags today; AV.5 will promote per-row
-scenario tagging here on both base tables now that AV.1 has unified
-the column shape)."""
+— stuck_unbundled's plant explicitly relies on this), ``supersedes``.
+AV.5 added ``metadata``: ``insert_tx`` callers that thread
+``ScenarioContext`` pass a JSON string carrying ``{"scenario_id": ...}``;
+untagged callers pass nothing (vals.get(``metadata``) returns None →
+SQL NULL — byte-identical to pre-AV.5)."""
 
 
 DB_COLS = (
     "account_id", "account_name", "account_role", "account_scope",
     "account_parent_role", "expected_eod_balance", "business_day_start",
-    "business_day_end", "money",
+    "business_day_end", "money", "metadata",
 )
 """Columns every generator writes to ``_daily_balances``. Excludes
-``entry`` (supersession), ``metadata`` (open JSON; spine generators
-emit NULL today — AV.5 will promote per-row scenario tagging here once
-the ScenarioContext primitive lands), ``supersedes``. The column was
-renamed from ``limits`` to ``metadata`` in Phase AV (2026-05-23); the
-per-rail caps shape it formerly carried is now a nested
-``metadata.limits`` key, populated by integrator ETL when needed."""
+``entry`` (supersession), ``supersedes``. AV.5 added ``metadata`` (the
+column was renamed from ``limits`` in AV.1; AV.5 made it a writable
+slot for the spine generators alongside ``transactions.metadata``):
+``insert_balance`` callers that thread ``ScenarioContext`` pass a JSON
+string carrying ``{"scenario_id": ...}``; untagged callers pass
+nothing (vals.get(``metadata``) returns None → SQL NULL — byte-
+identical to pre-AV.5)."""
 
 
 def insert_tx(

@@ -185,11 +185,30 @@ class AnomalyGenerator:
             z_bucket="4+ sigma",
         )
 
-    def emit(self, conn: sqlite3.Connection) -> None:
+    @property
+    def claimed_accounts(self) -> frozenset[str]:
+        """The 2 + 2*baseline_pair_count account_ids this plant touches:
+        the spike pair + every baseline pair's sender/recipient. Used
+        by AV.5 ``ScenarioContext.compose`` to catch cross-generator
+        collisions at the wiring site."""
+        accounts: set[str] = {
+            self.sender_account_id, self.recipient_account_id,
+        }
+        for i in range(self.baseline_pair_count):
+            accounts.add(f"acct-anomaly-bg-sender-{i}")
+            accounts.add(f"acct-anomaly-bg-recipient-{i}")
+        return frozenset(accounts)
+
+    def emit(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        scenario_id: str | None = None,
+    ) -> None:
         LedgerSimulation(
             transfers=list(self._transfers()),
             prefix=self.prefix,
-        ).emit(conn)
+        ).emit(conn, scenario_id=scenario_id)
 
     def _transfers(self) -> list[Transfer]:
         """Build the baseline pairs + spike as `Transfer`s. Pure (no

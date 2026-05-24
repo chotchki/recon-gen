@@ -195,7 +195,7 @@ strong phase will get lost and bite us"*):
   the locked SQL changes).
 - [ ] AV.4 - Bump version (post-v?.?.?) + RELEASE_NOTES entry. Migration
   warning ≥1 minor version for downstream operators with custom ETL.
-- [ ] AV.5 - (After AV lands) Promote `ScenarioContext` mechanism from
+- [x] AV.5 - (After AV lands) Promote `ScenarioContext` mechanism from
   spike to `src/recon_gen/common/spine/scenario_context.py` using
   per-row metadata tagging (replacing the spike's side-table approach).
   Updates every existing generator (drift / overdraft / expected_eod /

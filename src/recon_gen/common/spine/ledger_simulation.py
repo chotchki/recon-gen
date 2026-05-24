@@ -145,23 +145,46 @@ class LedgerSimulation:
     #: ledgers (anomaly's shape) this is the source of truth.
     prefix: str = "spec_example"
 
-    def emit(self, conn: sqlite3.Connection) -> None:
+    def emit(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        scenario_id: str | None = None,
+    ) -> None:
         """Write every account's full fold AND every transfer's legs.
         Commits to the caller — so a scenario can compose multiple
         LedgerSimulations against one connection and refresh once at
-        the end (the AP.3 pattern)."""
+        the end (the AP.3 pattern).
+
+        AV.5: ``scenario_id`` kwarg threads through to the per-row
+        metadata tag (``{"scenario_id": "..."}``) when set; ``None``
+        preserves the pre-AV.5 untagged emit (byte-identical)."""
         for acct in self.accounts:
-            acct.emit(conn)
+            acct.emit(conn, scenario_id=scenario_id)
         for transfer in self.transfers:
-            self._emit_transfer(conn, transfer)
+            self._emit_transfer(conn, transfer, scenario_id=scenario_id)
 
     def _emit_transfer(
-        self, conn: sqlite3.Connection, transfer: Transfer,
+        self,
+        conn: sqlite3.Connection,
+        transfer: Transfer,
+        *,
+        scenario_id: str | None = None,
     ) -> None:
         """Write one transfer's legs as `_transactions` rows. Per-leg
         denormalized account fields come from `TransferLeg`; the
         transfer-level fields (transfer_id, parent, rail, status,
-        posting) come from `Transfer`."""
+        posting) come from `Transfer`. When ``scenario_id`` is set,
+        each emitted row carries ``metadata.scenario_id`` for AV.5
+        cleanup attribution."""
+        # Avoid a top-level scenario_context import to keep the
+        # AS.1-era spine modules layered cleanly; the helper is a
+        # one-line JSON dump.
+        from recon_gen.common.spine.scenario_context import scenario_metadata
+        metadata = (
+            scenario_metadata(scenario_id, generator="LedgerSimulation")
+            if scenario_id is not None else None
+        )
         posting = ts(transfer.day, hour=transfer.hour)
         for i, leg in enumerate(transfer.legs):
             direction = "Credit" if leg.amount >= 0 else "Debit"
@@ -182,6 +205,7 @@ class LedgerSimulation:
                 transfer_parent_id=transfer.parent_transfer_id,
                 rail_name=transfer.rail_name,
                 origin=transfer.origin,
+                metadata=metadata,
             )
 
     def violation_trajectory(

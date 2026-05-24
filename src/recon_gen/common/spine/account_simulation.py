@@ -162,10 +162,19 @@ class AccountSimulation:
 
     # ---- IO (run + trajectory) -------------------------------------------
 
-    def emit(self, conn: sqlite3.Connection) -> None:
-        """Write the full fold to the connection in one pass."""
+    def emit(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        scenario_id: str | None = None,
+    ) -> None:
+        """Write the full fold to the connection in one pass.
+
+        AV.5: ``scenario_id`` kwarg tags each emitted row's metadata
+        column for ScenarioContext cleanup attribution. ``None``
+        (the default) preserves the pre-AV.5 untagged emit shape."""
         for em in self._fold():
-            self._emit_day(conn, em)
+            self._emit_day(conn, em, scenario_id=scenario_id)
 
     def violation_trajectory(
         self, invariant: Invariant, conn: sqlite3.Connection,
@@ -211,8 +220,20 @@ class AccountSimulation:
     # ---- Per-day write — shared by emit + violation_trajectory ----------
 
     def _emit_day(
-        self, conn: sqlite3.Connection, em: DayEmission,
+        self,
+        conn: sqlite3.Connection,
+        em: DayEmission,
+        *,
+        scenario_id: str | None = None,
     ) -> None:
+        # AV.5: tag each row's metadata column for ScenarioContext
+        # cleanup attribution. ``None`` skips the tag (untagged emit
+        # is byte-identical to pre-AV.5).
+        from recon_gen.common.spine.scenario_context import scenario_metadata
+        metadata = (
+            scenario_metadata(scenario_id, generator="AccountSimulation")
+            if scenario_id is not None else None
+        )
         if self.emit_legs:
             for tag, amount in em.legs:
                 direction = "Credit" if amount >= 0 else "Debit"
@@ -228,6 +249,7 @@ class AccountSimulation:
                     status="Posted", posting=_ts(em.day),
                     transfer_id=f"xfer-{self.account_id}-{tag}",
                     rail_name="ach", origin="etl",
+                    metadata=metadata,
                 )
         start, end = _day_bounds(em.day)
         _insert_balance(
@@ -239,6 +261,7 @@ class AccountSimulation:
             account_parent_role=self.parent_role,
             business_day_start=start, business_day_end=end,
             money=em.stored,
+            metadata=metadata,
         )
 
 
@@ -249,36 +272,14 @@ class AccountSimulation:
 # ---------------------------------------------------------------------------
 
 
-_TX_COLS = (
-    "id", "account_id", "account_name", "account_role", "account_scope",
-    "account_parent_role", "amount_money", "amount_direction", "status",
-    "posting", "transfer_id", "transfer_parent_id", "rail_name", "origin",
-)
-_DB_COLS = (
-    "account_id", "account_name", "account_role", "account_scope",
-    "account_parent_role", "expected_eod_balance", "business_day_start",
-    "business_day_end", "money",
-)
-
-
-def _insert_tx(conn: sqlite3.Connection, *, prefix: str, **vals: object) -> None:
-    placeholders = ", ".join("?" for _ in _TX_COLS)
-    conn.execute(
-        f"INSERT INTO {prefix}_transactions ({', '.join(_TX_COLS)}) "
-        f"VALUES ({placeholders})",
-        [vals.get(c) for c in _TX_COLS],
-    )
-
-
-def _insert_balance(
-    conn: sqlite3.Connection, *, prefix: str, **vals: object,
-) -> None:
-    placeholders = ", ".join("?" for _ in _DB_COLS)
-    conn.execute(
-        f"INSERT INTO {prefix}_daily_balances ({', '.join(_DB_COLS)}) "
-        f"VALUES ({placeholders})",
-        [vals.get(c) for c in _DB_COLS],
-    )
+# AV.5: the local _insert_tx / _insert_balance + _TX_COLS / _DB_COLS
+# pre-AU.3.d-hoist holdovers are gone. The shared
+# ``common/spine/_emit_helpers.insert_tx`` / ``insert_balance`` are
+# dialect-aware (detect psycopg / oracledb / sqlite3 placeholder style
+# per AT.5.b) and carry the ``metadata`` column AV.5 added, so the
+# dedup also unlocks AV.5 per-row scenario tagging for free.
+from recon_gen.common.spine._emit_helpers import insert_balance as _insert_balance
+from recon_gen.common.spine._emit_helpers import insert_tx as _insert_tx
 
 
 def _day_bounds(day: date) -> tuple[str, str]:

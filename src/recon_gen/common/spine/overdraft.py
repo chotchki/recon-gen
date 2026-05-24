@@ -174,7 +174,22 @@ class OverdraftGenerator:
             drift=round(-self.magnitude, 2),
         )
 
-    def emit(self, conn: sqlite3.Connection) -> None:
+    @property
+    def claimed_accounts(self) -> frozenset[str]:
+        """The single account_id this plant overdrafts. AV.5."""
+        return frozenset({self.account_id})
+
+    def emit(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        scenario_id: str | None = None,
+    ) -> None:
+        from recon_gen.common.spine.scenario_context import scenario_metadata
+        metadata = (
+            scenario_metadata(scenario_id, generator="OverdraftGenerator")
+            if scenario_id is not None else None
+        )
         start, end = day_bounds(self.anchor_day)
         insert_balance(
             conn,
@@ -186,6 +201,7 @@ class OverdraftGenerator:
             business_day_start=start,
             business_day_end=end,
             money=-self.magnitude,
+            metadata=metadata,
         )
 
 
