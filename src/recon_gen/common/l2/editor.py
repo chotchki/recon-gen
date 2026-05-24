@@ -488,6 +488,13 @@ def create_l2_entity(
             leg_rail_xor_groups=leg_rail_xor_groups,
             transfer_key=transfer_key,
             description=fields.get("description"),
+            # BB.3 — create-path field drop discovered via the dogfood
+            # round-trip (BB.3 driver create-new path passes the full
+            # reference TT including firings_typical_per_period; create
+            # was silently dropping it like AI.2.a fixed for rails).
+            firings_typical_per_period=fields.get(
+                "firings_typical_per_period",
+            ),  # pyright: ignore[reportArgumentType]: form-coerced FiringsTypicalPerPeriod or None
         )
         return dataclasses.replace(
             instance,

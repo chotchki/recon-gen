@@ -1986,6 +1986,118 @@ def _render_rail_subtype_picker(
 """
 
 
+def _apply_xor_groups_update_to_tt(
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — mutated through mutate_l2
+    *,
+    tt_name: str,
+    form: Any,  # typing-smell: ignore[explicit-any]: starlette FormData — reads leg_rail_xor_groups_<i> multi values
+) -> Any:  # typing-smell: ignore[explicit-any]: L2Instance — same shape
+    """BB.3 — apply a leg_rail_xor_groups update to a TT, used during
+    attach to satisfy C1 when multiple Variable rails accumulate.
+
+    Form payload (matches the wire shape of edit_xor_groups_form_data
+    on the driver side):
+
+      leg_rail_xor_groups__present      = "1"
+      leg_rail_xor_groups__num_groups   = "N"
+      leg_rail_xor_groups_0             = [rail_name, rail_name, ...]
+      ...
+      leg_rail_xor_groups_(N-1)         = [rail_name, ...]
+    """
+    from recon_gen.common.l2.primitives import Identifier
+
+    raw_n = form.get("leg_rail_xor_groups__num_groups")
+    if raw_n is None:
+        return instance
+    try:
+        n = int(str(raw_n))
+    except ValueError:
+        raise ValueError(
+            f"leg_rail_xor_groups__num_groups={raw_n!r} not an int"
+        ) from None
+    groups: list[tuple[Identifier, ...]] = []
+    for i in range(n):
+        rail_names = form.getlist(f"leg_rail_xor_groups_{i}")
+        if not rail_names:
+            continue
+        groups.append(tuple(Identifier(str(r)) for r in rail_names))
+    return mutate_l2(
+        instance, "transfer_template", tt_name,
+        {"leg_rail_xor_groups": tuple(groups)},
+    )
+
+
+def _create_new_reconciler_with_rail(
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — mutated through create_l2_entity
+    *,
+    new_rail_name: str,
+    reconciler_kind: str,
+    form: Any,  # typing-smell: ignore[explicit-any]: starlette FormData — structural multi_items / getlist surface, no shared Protocol across uvicorn/TestClient form impls
+) -> Any:  # typing-smell: ignore[explicit-any]: L2Instance — same shape
+    """BB.3 — create a new reconciler (TT or aggregating Rail) that
+    contains ``new_rail_name``, as the second half of the composite
+    rail-with-create-new atomic mutation.
+
+    Form payload (prefixed with ``reconciler_new_``):
+      - reconciler_new_name: name of the new reconciler
+      - For ``reconciler_kind == 'transfer_template'``:
+        - reconciler_new_transfer_key: optional (comma-separated)
+        - reconciler_new_completion: optional
+      - For ``reconciler_kind == 'aggregating_rail'``:
+        - reconciler_new_subtype: 'single_leg' | 'two_leg'
+        - reconciler_new_cadence: required
+        - reconciler_new_leg_role / source_role / destination_role
+        - reconciler_new_leg_direction (single_leg)
+        - reconciler_new_origin / source_origin / destination_origin
+        - reconciler_new_expected_net (two_leg)
+      - (any other reconciler-kind's FieldSpec field can be provided)
+
+    The rail-list field (leg_rails for TT, bundles_activity for
+    aggregating Rail) is computed server-side: the new rail's name
+    is appended to whatever the form's prefixed multi_select provided
+    (typically empty for the first occupant; subsequent rails use
+    attach-existing).
+    """
+    from starlette.datastructures import FormData as _FD
+    from recon_gen.common.l2.primitives import Identifier
+
+    # Strip the prefix; build a Starlette FormData over the sub-payload.
+    prefix = "reconciler_new_"
+    sub_items: list[tuple[str, str]] = []
+    for k, v in form.multi_items():
+        if k.startswith(prefix):
+            sub_items.append((k[len(prefix):], str(v)))
+    sub_form = _FD(sub_items)
+
+    if reconciler_kind == "transfer_template":
+        target_kind: EntityKind = "transfer_template"
+        sub_fields, _overrides = _coerce_form(target_kind, sub_form)
+        existing = tuple(sub_fields.get("leg_rails", ()) or ())
+        sub_fields["leg_rails"] = (*existing, Identifier(new_rail_name))
+        return create_l2_entity(instance, target_kind, sub_fields)
+    if reconciler_kind == "aggregating_rail":
+        target_kind = "rail"
+        # Force aggregating + subtype. The driver MUST supply subtype.
+        sub_fields, _overrides = _coerce_form(target_kind, sub_form)
+        sub_fields["aggregating"] = True
+        subtype = sub_form.get("subtype")
+        if subtype is None:
+            raise ValueError(
+                "reconciler_new_subtype required when reconciler_kind="
+                "'aggregating_rail' (single_leg | two_leg)"
+            )
+        sub_fields["subtype"] = str(subtype)
+        existing = tuple(sub_fields.get("bundles_activity", ()) or ())
+        sub_fields["bundles_activity"] = (
+            *existing, Identifier(new_rail_name),
+        )
+        return create_l2_entity(instance, target_kind, sub_fields)
+    raise ValueError(
+        f"reconciler_kind={reconciler_kind!r} not recognized "
+        f"(expected 'transfer_template' or 'aggregating_rail')"
+    )
+
+
 def _render_reconciler_section(
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — read .transfer_templates / .rails for the picker options
     overrides: Mapping[str, str | tuple[str, ...]],
@@ -2791,19 +2903,26 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
         if rail_subtype is not None:
             new_fields["subtype"] = rail_subtype
 
-        # BB.1 — when creating a non-aggregating single-leg rail, the
-        # operator MUST pair the create with a reconciler (some TT's
-        # leg_rails OR some aggregating rail's bundles_activity) per
-        # validator S3 / C3. Form-pairing the picker keeps the
-        # validator strict (no invalid in-flight states) while making
-        # the create step a single atomic composite mutation. The
-        # picker payload arrives as `reconciler_kind` + `reconciler_name`
-        # form fields (BB.1 ships attach-existing only; BB.2 adds the
-        # inline create-new sub-form).
-        needs_reconciler = (
+        # BB.1 / BB.3 — when creating a non-aggregating single-leg
+        # rail (S3 / C3 bilateral) or a two-leg rail without
+        # expected_net (S5 bilateral), the operator MUST pair the
+        # create with a reconciler. Form-pairing the picker keeps
+        # the validator strict (no invalid in-flight states) while
+        # making the create step a single atomic composite mutation.
+        # The picker payload arrives as ``reconciler_kind`` +
+        # ``reconciler_name`` form fields.
+        non_agg_single_leg = (
             kind == "rail"
             and rail_subtype == "single_leg"
             and not bool(new_fields.get("aggregating") or False)
+        )
+        two_leg_without_expected_net = (
+            kind == "rail"
+            and rail_subtype == "two_leg"
+            and new_fields.get("expected_net") is None
+        )
+        needs_reconciler = (
+            non_agg_single_leg or two_leg_without_expected_net
         )
         # BB.2 — capture the reconciler picker values into
         # ``coerced_overrides`` regardless of whether needs_reconciler
@@ -2870,29 +2989,91 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
                 status_code=400,
             )
 
-        # BB.1 — apply the reconciler edit to the in-memory new_inst
-        # BEFORE validate(). The composite (add rail + edit reconciler)
-        # is the unit of atomicity: either both land or neither.
+        # BB.1 / BB.3 — apply the reconciler mutation to the in-memory
+        # new_inst BEFORE validate(). The composite (add rail + edit/
+        # create reconciler) is the unit of atomicity: either both
+        # land or neither. Two paths:
+        #   reconciler_mode = "attach" (BB.1) — append to existing.
+        #   reconciler_mode = "create_new" (BB.3) — create a new
+        #     reconciler with the new rail in its rail-list field.
+        # Driver computes the right path; operator UI defaults to
+        # attach (the BB.2 picker; BB.2.b backlog adds the
+        # create-new sub-form).
+        reconciler_mode = (
+            str(form.get("reconciler_mode") or "attach").strip()
+            or "attach"
+        )
         if needs_reconciler:
-            try:
-                new_inst = attach_rail_to_reconciler(
-                    new_inst,
-                    new_rail_name=str(new_fields["name"]),
-                    reconciler_kind=str(reconciler_kind),
-                    reconciler_name=str(reconciler_name),
-                )
-            except (KeyError, ValueError) as exc:
-                return HTMLResponse(
-                    _render_create_page(
-                        kind, cache.get(),
-                        form_overrides=coerced_overrides,
-                        global_error=(
-                            f"Reconciler attach failed: {exc}"
+            if reconciler_mode == "create_new":
+                try:
+                    new_inst = _create_new_reconciler_with_rail(
+                        new_inst,
+                        new_rail_name=str(new_fields["name"]),
+                        reconciler_kind=str(reconciler_kind),
+                        form=form,
+                    )
+                except (KeyError, ValueError, TypeError) as exc:
+                    return HTMLResponse(
+                        _render_create_page(
+                            kind, cache.get(),
+                            form_overrides=coerced_overrides,
+                            global_error=(
+                                f"Reconciler create-new failed: {exc}"
+                            ),
+                            subtype=rail_subtype,
                         ),
-                        subtype=rail_subtype,
-                    ),
-                    status_code=400,
-                )
+                        status_code=400,
+                    )
+            else:
+                try:
+                    new_inst = attach_rail_to_reconciler(
+                        new_inst,
+                        new_rail_name=str(new_fields["name"]),
+                        reconciler_kind=str(reconciler_kind),
+                        reconciler_name=str(reconciler_name),
+                    )
+                except (KeyError, ValueError) as exc:
+                    return HTMLResponse(
+                        _render_create_page(
+                            kind, cache.get(),
+                            form_overrides=coerced_overrides,
+                            global_error=(
+                                f"Reconciler attach failed: {exc}"
+                            ),
+                            subtype=rail_subtype,
+                        ),
+                        status_code=400,
+                    )
+                # BB.3 — if the reconciler is a TT and the form
+                # carries an xor_groups update (multiple Variable-
+                # direction rails getting attached need to be in a
+                # leg_rail_xor_groups partition before C1 fires), apply
+                # it in the same composite. Driver computes the
+                # partial groups (filtered to rails currently in the
+                # cached TT) at each attach step.
+                if (
+                    reconciler_kind == "transfer_template"
+                    and "leg_rail_xor_groups__present" in form
+                ):
+                    try:
+                        new_inst = _apply_xor_groups_update_to_tt(
+                            new_inst,
+                            tt_name=str(reconciler_name),
+                            form=form,
+                        )
+                    except (KeyError, ValueError) as exc:
+                        return HTMLResponse(
+                            _render_create_page(
+                                kind, cache.get(),
+                                form_overrides=coerced_overrides,
+                                global_error=(
+                                    f"Reconciler XOR groups update "
+                                    f"failed: {exc}"
+                                ),
+                                subtype=rail_subtype,
+                            ),
+                            status_code=400,
+                        )
 
         try:
             validate(new_inst)

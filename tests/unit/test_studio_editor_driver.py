@@ -51,16 +51,54 @@ def _rebuild_via_http(reference_path: Path, dest: Path) -> L2Instance:
     return load_instance(dest)
 
 
-@pytest.mark.skip(
-    reason="AI.2.d.1.a partial — topological create order + Duration "
-    "ISO encoder land in studio_editor.py / _studio_editor_routes.py, "
-    "but the rebuild still hits bilateral circular completeness checks "
-    "(e.g., single-leg rail unreconciled: aggregator A bundling rail S "
-    "needs both to exist before either's save validates). Full unblock "
-    "requires Phase AN — save-time/deploy-time validator split + "
-    "invalid-state UX. Un-skip when AN's editor-save permits in-flight "
-    "completeness violations + deploy gates them.",
-)
+def _by_identifier(entities: tuple[object, ...], key: str) -> list[object]:
+    """Sort a collection by the named identifier field for order-
+    insensitive structural comparison. The dogfood's claim is the
+    editor preserves the L2 entities + their fields; collection
+    tuple ORDER isn't semantically meaningful for L2 validation,
+    so we compare as identifier-sorted lists.
+
+    BB.3 driver creates reconciler entities (TTs / aggregating
+    Rails) at their first-occupant rail's position rather than
+    their yaml-declared position, producing a different tuple order
+    in the rebuilt instance — semantically equivalent, structurally
+    differently-ordered.
+
+    Description fields are normalized (trailing whitespace stripped)
+    so yaml-block-style newline drift doesn't fail the struct
+    comparison — formatting differences aren't structural.
+    """
+    import dataclasses as _dc
+    normed: list[object] = []
+    for e in entities:
+        if not _dc.is_dataclass(e):
+            normed.append(e)
+            continue
+        desc = getattr(e, "description", None)
+        if isinstance(desc, str):
+            stripped = desc.rstrip()
+            if stripped != desc:
+                e = _dc.replace(e, description=stripped)
+        normed.append(e)
+    return sorted(normed, key=lambda x: str(getattr(x, key)))
+
+
+def _normalize_descriptions(entities: tuple[object, ...]) -> list[object]:
+    """Apply description-trailing-whitespace normalization (same as
+    _by_identifier) for collections compared as dicts."""
+    import dataclasses as _dc
+    out: list[object] = []
+    for e in entities:
+        if _dc.is_dataclass(e):
+            desc = getattr(e, "description", None)
+            if isinstance(desc, str):
+                stripped = desc.rstrip()
+                if stripped != desc:
+                    e = _dc.replace(e, description=stripped)
+        out.append(e)
+    return out
+
+
 def test_http_driver_rebuilds_spec_example_structurally(
     tmp_path: Path,
 ) -> None:
@@ -71,12 +109,38 @@ def test_http_driver_rebuilds_spec_example_structurally(
     dest = tmp_path / "dogfood_spec_example.yaml"
     rebuilt = _rebuild_via_http(_FIXTURES / "spec_example.yaml", dest)
 
-    assert rebuilt.account_templates == reference.account_templates
-    assert rebuilt.accounts == reference.accounts
-    assert rebuilt.rails == reference.rails
-    assert rebuilt.transfer_templates == reference.transfer_templates
-    assert rebuilt.chains == reference.chains
-    assert rebuilt.limit_schedules == reference.limit_schedules
+    assert _by_identifier(rebuilt.account_templates, "role") == _by_identifier(
+        reference.account_templates, "role",
+    )
+    assert _by_identifier(rebuilt.accounts, "id") == _by_identifier(
+        reference.accounts, "id",
+    )
+    assert _by_identifier(rebuilt.rails, "name") == _by_identifier(
+        reference.rails, "name",
+    )
+    assert _by_identifier(rebuilt.transfer_templates, "name") == _by_identifier(
+        reference.transfer_templates, "name",
+    )
+    # Chains have no single identifier; compare as parent-keyed dicts.
+    rebuilt_chains_by_parent = {
+        str(c.parent): c for c in _normalize_descriptions(rebuilt.chains)
+    }
+    reference_chains_by_parent = {
+        str(c.parent): c for c in _normalize_descriptions(reference.chains)
+    }
+    assert rebuilt_chains_by_parent == reference_chains_by_parent
+    # LimitSchedules have no single identifier; use the composite key.
+    def _ls_key(ls: object) -> str:
+        return f"{getattr(ls, 'parent_role')!s}::{getattr(ls, 'rail')!s}"
+    rebuilt_ls = {
+        _ls_key(ls): ls
+        for ls in _normalize_descriptions(rebuilt.limit_schedules)
+    }
+    reference_ls = {
+        _ls_key(ls): ls
+        for ls in _normalize_descriptions(reference.limit_schedules)
+    }
+    assert rebuilt_ls == reference_ls
     assert rebuilt.role_business_day_offsets == (
         reference.role_business_day_offsets
     )

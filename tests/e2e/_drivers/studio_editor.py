@@ -240,7 +240,21 @@ class _BaseStudioEditorDriver:
     def create_account_template(self, template: AccountTemplate) -> None:
         raise NotImplementedError
 
-    def create_rail(self, rail: Rail) -> None:
+    def create_rail(
+        self,
+        rail: Rail,
+        *,
+        reconciler: "tuple[str, tuple[str, str]] | None" = None,
+        reference: "L2Instance | None" = None,
+        partial_xor_groups: "tuple[tuple[str, ...], ...] | None" = None,
+    ) -> None:
+        """Create a Rail. ``reconciler`` (BB.3) is
+        ``(mode, (kind, name))`` where ``mode`` is ``"attach"`` or
+        ``"create_new"``. ``reference`` is required for ``create_new``.
+        ``partial_xor_groups`` (BB.3) is the leg_rail_xor_groups
+        update to apply to the reconciler TT in the same composite
+        save — needed when multiple Variable rails accumulate so C1
+        stays satisfied; ``None`` skips the update."""
         raise NotImplementedError
 
     def create_transfer_template(self, template: TransferTemplate) -> None:
@@ -261,64 +275,91 @@ class _BaseStudioEditorDriver:
         raise NotImplementedError
 
     def create_l2(self, reference: L2Instance) -> None:
-        """Recreate every entity in **reference-resolution dependency
-        order** so each editor save's full ``validate()`` pass succeeds
-        without seeing an undeclared reference (AI.2.d.1.a — the
-        per-save validator was the blocker that originally surfaced as
-        ``AccountTemplate.parent_role='X': role is not declared on any
-        Account``).
+        """Recreate every entity in dependency order so each editor
+        save's full ``validate()`` pass succeeds.
+
+        For non-aggregating single-leg rails (the BI bilateral cases
+        S3 / C3), the driver tracks which reconcilers have already
+        been materialized in the editor cache. The FIRST rail that
+        attaches to a given reconciler uses **create-new** mode
+        (POST creates rail + new reconciler atomically per BB.3);
+        subsequent rails attaching to the same reconciler use
+        **attach-existing** (BB.1). This dogfoods the operator
+        workflow: validator stays strict, no in-flight invalid state.
 
         Order:
-
-          1. **Accounts (parent role-holders first)** — Accounts with no
-             ``parent_role`` are roots; child Accounts depend on a
-             parent's ``role`` being declared first. A topological pass
-             on ``parent_role -> role`` puts roots before children.
-          2. **AccountTemplates** — their ``parent_role`` must resolve
-             to an existing Account.role (the validator's reject case).
-          3. **Rails** — split into two waves to honor the circular
-             ``bundles_activity ↔ max_unbundled_age`` constraint:
-             (3a) non-aggregating rails first, with ``max_unbundled_age``
-             **deferred** (operator workflow: create the rail without
-             the field that requires a not-yet-existing bundler);
-             (3b) aggregating rails (their ``bundles_activity`` now
-             resolves to declared rails);
-             (3c) **edit-in** the deferred ``max_unbundled_age`` on
-             each rail that had it — the validator now sees that some
-             aggregating rail bundles it.
-          4. **TransferTemplates** — their ``transfer_key`` resolves
-             against leg rails' ``metadata_keys``.
-          5. **Chains** — parent + children resolve against rails +
-             templates.
-          6. **LimitSchedules** — caps resolve against rails +
-             parent_roles.
-          7. **Top-level instance settings** — description +
-             role_business_day_offsets (no references).
-
-        This is the **dogfood operator workflow**: every save validates;
-        no cheating with a defer-validation flag.
+          1. Accounts (parent-first topological pass).
+          2. AccountTemplates.
+          3a. Non-aggregating rails (with reconciler create-new /
+              attach-existing as needed). max_unbundled_age deferred.
+          3b. Aggregating rails (any not already created via wave 3a's
+              create-new path).
+          3c. Edit-in deferred max_unbundled_age.
+          4. TransferTemplates (any not already created via wave 3a).
+          5. Chains.
+          6. LimitSchedules.
+          7. Top-level instance settings.
         """
         for account in _topo_accounts_by_parent(reference.accounts):
             self.create_account(account)
         for template in reference.account_templates:
             self.create_account_template(template)
 
-        # Rails: 2-wave + edit-in for the bundles_activity circular pair.
         non_aggregating = [r for r in reference.rails if not r.aggregating]
         aggregating = [r for r in reference.rails if r.aggregating]
+
+        # BB.3 — track which reconcilers (TTs + aggregating Rails)
+        # have already been created in the cache + which rails are
+        # currently attached to each. The first rail attaching to a
+        # reconciler uses create-new; subsequent rails for the same
+        # reconciler attach-existing. For TTs with leg_rail_xor_groups
+        # in reference, each attach step also pushes a partial
+        # xor_groups update (filtered to rails currently in the
+        # cached TT + the rail being attached) so C1 stays satisfied
+        # as Variable rails accumulate.
+        created_reconcilers: set[tuple[str, str]] = set()
+        attached_rails: dict[tuple[str, str], list[str]] = {}
         deferred_max_unbundled_age: list[Rail] = []
         for rail in non_aggregating:
+            reconciler = _reconciler_choice_for_rail(rail, reference)
+            mode_payload: "tuple[str, tuple[str, str]] | None" = None
+            partial_xor_groups: "tuple[tuple[str, ...], ...] | None" = None
+            if reconciler is not None:
+                rail_name_str = str(rail.name)
+                attached_rails.setdefault(reconciler, []).append(rail_name_str)
+                if reconciler in created_reconcilers:
+                    mode_payload = ("attach", reconciler)
+                    # For TT reconcilers with reference xor_groups,
+                    # compute the partial groups that include just the
+                    # currently-cached rails. Each attach pushes the
+                    # incrementally-grown groups.
+                    if reconciler[0] == "transfer_template":
+                        partial_xor_groups = _partial_xor_groups_for_attach(
+                            reference, reconciler[1],
+                            attached_so_far=attached_rails[reconciler],
+                        )
+                else:
+                    mode_payload = ("create_new", reconciler)
+                    created_reconcilers.add(reconciler)
             if getattr(rail, "max_unbundled_age", None) is not None:
-                # Create without the deferred field — the validator on
-                # this save can't see any bundling rail yet (they come
-                # next). Edit-in after the aggregators land.
                 stripped = dataclasses.replace(rail, max_unbundled_age=None)
-                self.create_rail(stripped)
+                self.create_rail(
+                    stripped, reconciler=mode_payload, reference=reference,
+                    partial_xor_groups=partial_xor_groups,
+                )
                 deferred_max_unbundled_age.append(rail)
             else:
-                self.create_rail(rail)
+                self.create_rail(
+                    rail, reconciler=mode_payload, reference=reference,
+                    partial_xor_groups=partial_xor_groups,
+                )
         for rail in aggregating:
-            self.create_rail(rail)
+            # Aggregating rails may have ALREADY been created in wave
+            # 3a if some non-agg rail referenced one as its reconciler
+            # via create-new mode. Skip those.
+            if ("aggregating_rail", str(rail.name)) in created_reconcilers:
+                continue
+            self.create_rail(rail, reconciler=None, reference=reference)
         for rail in deferred_max_unbundled_age:
             self._edit(
                 "rail", str(rail.name),
@@ -326,6 +367,11 @@ class _BaseStudioEditorDriver:
             )
 
         for template in reference.transfer_templates:
+            # TTs may have ALREADY been created in wave 3a if some
+            # non-agg rail referenced one as its reconciler via
+            # create-new mode. Skip those.
+            if ("transfer_template", str(template.name)) in created_reconcilers:
+                continue
             self.create_transfer_template(template)
         for chain in reference.chains:
             self.create_chain(chain)
@@ -353,6 +399,148 @@ def _max_unbundled_age_edit_form_data(rail: Rail) -> FormData:
     """
     value_str = _value_to_input_str(rail.max_unbundled_age)
     return {"max_unbundled_age": [value_str]}
+
+
+def _partial_xor_groups_for_attach(
+    reference: L2Instance,
+    tt_name: str,
+    *,
+    attached_so_far: list[str],
+) -> "tuple[tuple[str, ...], ...] | None":
+    """BB.3 — compute the leg_rail_xor_groups update for an attach
+    step. Returns the reference TT's groups filtered to rails that
+    are currently in the cached TT (per ``attached_so_far``).
+
+    Groups with fewer than 2 currently-attached members are dropped
+    (a single-member group isn't a useful XOR; C1 is only constraining
+    when >1 Variable rails are present).
+
+    Returns ``None`` when the reference TT has no xor_groups, so the
+    transport skips the update payload entirely.
+    """
+    for t in reference.transfer_templates:
+        if str(t.name) != tt_name:
+            continue
+        groups = getattr(t, "leg_rail_xor_groups", ()) or ()
+        if not groups:
+            return None
+        attached_set = set(attached_so_far)
+        partial: list[tuple[str, ...]] = []
+        for g in groups:
+            present = tuple(str(r) for r in g if str(r) in attached_set)
+            if len(present) >= 2:
+                partial.append(present)
+        if not partial:
+            return None
+        return tuple(partial)
+    return None
+
+
+def _find_reconciler_in_reference(
+    reference: L2Instance,
+    reconciler_kind: str,
+    reconciler_name: str,
+) -> object:
+    """BB.3 — fetch the reconciler entity (TT or aggregating Rail)
+    from ``reference`` so the driver can serialize its fields into
+    the create_new payload."""
+    if reconciler_kind == "transfer_template":
+        for t in reference.transfer_templates:
+            if str(t.name) == reconciler_name:
+                return t
+        raise KeyError(
+            f"reference has no TransferTemplate named {reconciler_name!r}"
+        )
+    if reconciler_kind == "aggregating_rail":
+        for r in reference.rails:
+            if r.aggregating and str(r.name) == reconciler_name:
+                return r
+        raise KeyError(
+            f"reference has no aggregating Rail named {reconciler_name!r}"
+        )
+    raise ValueError(
+        f"reconciler_kind={reconciler_kind!r} not recognized "
+        f"(expected 'transfer_template' or 'aggregating_rail')"
+    )
+
+
+def _strip_rail_lists(reconciler: object, reconciler_kind: str) -> object:
+    """BB.3 — strip the rail-list field (leg_rails for TTs;
+    bundles_activity for aggregating Rails) on the reconciler entity
+    being passed to the server's create-new path.
+
+    The server appends the new rail's name to this field after
+    coercion; the driver passes an empty list so subsequent rails
+    (which use attach-existing) are added by their own POSTs without
+    double-counting in the create-new step.
+    """
+    if reconciler_kind == "transfer_template":
+        # TT requires at least one leg_rail at create time; pass a
+        # one-element placeholder that the server replaces. The
+        # server's _create_new_reconciler_with_rail discards the
+        # placeholder by overwriting leg_rails with the rail being
+        # created. Use a dummy that's a structurally-valid Identifier
+        # (any non-empty string).
+        return dataclasses.replace(
+            reconciler, leg_rails=(),
+        )
+    if reconciler_kind == "aggregating_rail":
+        return dataclasses.replace(
+            reconciler, bundles_activity=(),
+        )
+    raise ValueError(
+        f"reconciler_kind={reconciler_kind!r} not recognized"
+    )
+
+
+def _reconciler_choice_for_rail(
+    rail: Rail,
+    reference: L2Instance,
+) -> "tuple[str, str] | None":
+    """BB.3 — find the reconciler (TT or aggregating Rail) in
+    ``reference`` that contains this rail's name.
+
+    Returns ``(reconciler_kind, reconciler_name)`` when the rail
+    needs a forward-reference reconciler at create time:
+
+    - **Non-aggregating SingleLegRail** (S3 / C3 bilateral): must be
+      in some TT.leg_rails or aggregator.bundles_activity.
+    - **TwoLegRail without expected_net** (S5 bilateral): must be
+      in some TT.leg_rails (the TT's expected_net closure replaces
+      the standalone rail's). With expected_net set, the rail is
+      self-standing and needs no reconciler.
+
+    Returns ``None`` for:
+    - Aggregating rails (self-reconciling per SPEC exemption)
+    - TwoLegRails with expected_net set (self-standing)
+
+    Search order (matches the BB.2 picker):
+
+    1. **TransferTemplate** — ``leg_rails`` contains the rail's name.
+    2. **Aggregating Rail** — ``bundles_activity`` contains the rail's
+       name (single-leg only — TTs only host two-leg via leg_rails).
+    """
+    from recon_gen.common.l2.primitives import SingleLegRail, TwoLegRail
+
+    if rail.aggregating:
+        return None
+    # Two-leg with expected_net set is self-standing — no reconciler
+    # forward-reference needed at create time.
+    if isinstance(rail, TwoLegRail) and rail.expected_net is not None:
+        return None
+    rail_name_str = str(rail.name)
+    for t in reference.transfer_templates:
+        if any(str(r) == rail_name_str for r in t.leg_rails):
+            return ("transfer_template", str(t.name))
+    # Aggregating-Rail reconciliation only applies to single-leg
+    # (S3 covers single-leg; TwoLegRail's only out is a TT).
+    if isinstance(rail, SingleLegRail):
+        for r in reference.rails:
+            if not r.aggregating:
+                continue
+            if any(str(b) == rail_name_str for b in r.bundles_activity):
+                return ("aggregating_rail", str(r.name))
+    return None
 
 
 def _topo_accounts_by_parent(
@@ -418,8 +606,16 @@ class StudioHttpEditorDriver(_BaseStudioEditorDriver):
 
     # -- transport primitives -------------------------------------------
 
-    def _create(self, kind: EntityKind, entity: object) -> None:
+    def _create(
+        self,
+        kind: EntityKind,
+        entity: object,
+        *,
+        extra: FormData | None = None,
+    ) -> None:
         data = create_form_data(kind, entity)
+        if extra:
+            data = {**data, **extra}
         resp = self._client.post(
             f"/l2_shape/{kind}/", data=data, follow_redirects=False,
         )
@@ -448,8 +644,55 @@ class StudioHttpEditorDriver(_BaseStudioEditorDriver):
     def create_account_template(self, template: AccountTemplate) -> None:
         self._create("account_template", template)
 
-    def create_rail(self, rail: Rail) -> None:
-        self._create("rail", rail)
+    def create_rail(
+        self,
+        rail: Rail,
+        *,
+        reconciler: "tuple[str, tuple[str, str]] | None" = None,
+        reference: "L2Instance | None" = None,
+        partial_xor_groups: "tuple[tuple[str, ...], ...] | None" = None,
+    ) -> None:
+        """BB.3 — thread the reconciler payload + optional
+        xor_groups update into the POST."""
+        extra: FormData | None = None
+        if reconciler is not None:
+            mode, (rec_kind, rec_name) = reconciler
+            extra = {
+                "reconciler_kind": [rec_kind],
+                "reconciler_name": [rec_name],
+                "reconciler_mode": [mode],
+            }
+            if mode == "create_new":
+                if reference is None:
+                    raise ValueError(
+                        "reconciler create_new requires `reference` to "
+                        "look up the reconciler entity's fields"
+                    )
+                reconciler_entity = _find_reconciler_in_reference(
+                    reference, rec_kind, rec_name,
+                )
+                stripped_reconciler = _strip_rail_lists(
+                    reconciler_entity, rec_kind,
+                )
+                reconciler_form_kind = (
+                    "transfer_template"
+                    if rec_kind == "transfer_template" else "rail"
+                )
+                reconciler_form = create_form_data(
+                    reconciler_form_kind, stripped_reconciler,
+                )
+                for k, v_list in reconciler_form.items():
+                    extra[f"reconciler_new_{k}"] = list(v_list)
+        if partial_xor_groups is not None:
+            if extra is None:
+                extra = {}
+            extra["leg_rail_xor_groups__present"] = ["1"]
+            extra["leg_rail_xor_groups__num_groups"] = [
+                str(len(partial_xor_groups)),
+            ]
+            for i, group in enumerate(partial_xor_groups):
+                extra[f"leg_rail_xor_groups_{i}"] = list(group)
+        self._create("rail", rail, extra=extra)
 
     def create_transfer_template(self, template: TransferTemplate) -> None:
         self._create("transfer_template", template)
