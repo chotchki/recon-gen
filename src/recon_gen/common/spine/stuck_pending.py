@@ -128,11 +128,18 @@ class StuckPendingInvariant:
         acct = find_internal_with_role(
             inst, account_role, error_kind="stuck_pending",
         )
+        resolved_account_id = (
+            account_id or f"acct-stuck-pending-{rail_name}"
+        )
+        # AY.4.c.4 — fold account_id into transaction_id / transfer_id so
+        # N plants on the same rail (different accounts) don't PK-collide
+        # at INSERT time. Default-case account_id derivation IS rail-keyed,
+        # so single-test callers stay byte-stable.
         return StuckPendingGenerator(
-            transaction_id=f"tx-stuck-pending-{rail_name}",
-            transfer_id=f"xfer-stuck-pending-{rail_name}",
+            transaction_id=f"tx-stuck-pending-{rail_name}-{resolved_account_id}",
+            transfer_id=f"xfer-stuck-pending-{rail_name}-{resolved_account_id}",
             rail_name=rail_name,
-            account_id=account_id or f"acct-stuck-pending-{rail_name}",
+            account_id=resolved_account_id,
             account_role=account_role,
             account_parent_role=acct.parent_role,
             max_pending_age_seconds=int(rail.max_pending_age.total_seconds()),

@@ -245,7 +245,7 @@ class DriftGenerator:
         )
         insert_tx(
             conn,
-            id=f"tx-drift-{self.child_role}-1",
+            id=f"tx-drift-{self.child_role}-{self.child_account_id}-1",
             account_id=self.child_account_id,
             account_name=f"Drift Child ({self.child_role})",
             account_role=self.child_role,
@@ -255,7 +255,7 @@ class DriftGenerator:
             amount_direction="Credit",
             status="Posted",
             posting=ts(self.anchor_day),
-            transfer_id=f"xfer-drift-{self.child_role}-1",
+            transfer_id=f"xfer-drift-{self.child_role}-{self.child_account_id}-1",
             rail_name="ach",
             origin="etl",
             metadata=metadata,

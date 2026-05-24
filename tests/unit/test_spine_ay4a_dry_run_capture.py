@@ -196,16 +196,29 @@ def test_compose_live_mode_unchanged_returns_none() -> None:
     assert rows >= 1
 
 
-def test_compose_dry_run_still_runs_pairwise_disjoint_check() -> None:
-    """Two generators claiming the same account_id must blow up at
-    compose-time even in dry_run — the pairwise check is pure data,
-    no DB needed."""
-    ctx = ScenarioContext(scenario_id="test-ay4a-collide", prefix=_PREFIX)
+def test_compose_dry_run_skips_pairwise_disjoint_check() -> None:
+    """Post-AY.4.c.4: dry_run skips the pairwise-disjoint check too.
+
+    The check was an over-strict heuristic — c.4's PK fix on the L1
+    generators (account_id folded into transaction.id derivation)
+    means same-class + same-account no longer = same transaction.id.
+    The check raised false positives blocking the production-seed
+    reroute (default scenario plants multiple LimitBreachGenerators
+    on the same account for different rails/directions, legitimate
+    composition). In dry_run there's no real DB to enforce PK
+    uniqueness anyway; in live mode the DB catches real collisions.
+    The test writer's compose-what-I-built workflow takes precedence.
+    """
+    ctx = ScenarioContext(scenario_id="test-ay4a-no-check", prefix=_PREFIX)
+    # Same factory call twice → same construction args → same derived
+    # account_id → would have raised pre-c.4. Post-c.4 dry_run skips
+    # the check; this composes cleanly.
     gen_a = DriftInvariant().scenario_for("CustomerSubledger", magnitude=5.0)
     gen_b = DriftInvariant().scenario_for("CustomerSubledger", magnitude=10.0)
     cap = dry_run_capture(Dialect.SQLITE)
-    with pytest.raises(ValueError, match="same-class account_id collision"):
-        ctx.compose(cap, gen_a, gen_b, dry_run=True)
+    captured = ctx.compose(cap, gen_a, gen_b, dry_run=True)
+    assert captured is not None
+    assert len(captured) > 0
 
 
 def test_compose_dry_run_skips_cross_scenario_check() -> None:

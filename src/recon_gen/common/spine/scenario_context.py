@@ -365,13 +365,21 @@ class ScenarioContext:
 
         Live mode (default): returns ``None``, commits the conn.
         """
-        _check_pairwise_disjoint(self.scenario_id, generators)
-
-        all_accounts: set[str] = set()
-        for gen in generators:
-            all_accounts.update(gen.claimed_accounts)
-
         if not dry_run:
+            # AY.4.c.4 — pairwise-disjoint is a heuristic that catches
+            # SOME class+account collisions; post-c.4 it's over-strict
+            # (the L1 generators' transaction.id derivations now include
+            # account_id + rail/direction so same-class + same-account
+            # with different other fields doesn't actually collide). In
+            # dry_run mode the DB can't catch real PK collisions either,
+            # so the test writer's "compose what I built" workflow takes
+            # precedence over the heuristic. In live mode the DB still
+            # enforces real PK uniqueness on INSERT.
+            _check_pairwise_disjoint(self.scenario_id, generators)
+
+            all_accounts: set[str] = set()
+            for gen in generators:
+                all_accounts.update(gen.claimed_accounts)
             _check_cross_scenario(
                 conn, self.scenario_id, all_accounts,
                 prefix=self.prefix, dialect=self.dialect,

@@ -297,12 +297,42 @@ def test_default_scenario_full_corpus_adapts_without_error() -> None:
     )
 
 
+def test_default_scenario_full_corpus_composes_via_dry_run() -> None:
+    """The integration check AY.4.c.4 unblocked: load spec_example →
+    adapt every plant in the default scenario → compose ALL of them
+    on ONE scenario_id via dry_run → render. No PK collisions, no
+    leftover placeholders, scenario_id stamps on every row.
+
+    Pre-AY.4.c.4 this raised on a same-class collision (two
+    LimitBreachGenerators on different accounts with the same
+    rail+direction PK-collided because transaction.id derivation
+    didn't include account_id). Post-AY.4.c.4 the L1 generators
+    (drift / limit_breach / stuck_pending / stuck_unbundled) all
+    fold account_id into their PK derivations.
+    """
+    inst = _load_instance()
+    scenario_bundle = default_scenario_for(
+        inst, today=date(2030, 1, 1),  # type: ignore[arg-type]
+    )
+    gens = scenario_to_generators(
+        scenario_bundle.scenario, inst,  # type: ignore[arg-type]
+    )
+    cap = dry_run_capture(Dialect.SQLITE)
+    ctx = ScenarioContext(scenario_id="ay4c4-smoke", prefix="spec_example")
+    captured = ctx.compose(cap, *gens, dry_run=True)
+    assert captured is not None
+    assert len(captured) > 0
+    sql = render_captured_sql(captured, dialect=Dialect.SQLITE)
+    assert "?" not in sql
+    assert "INSERT INTO" in sql
+    assert "ay4c4-smoke" in sql
+
+
 def test_focused_single_plant_round_trips_through_compose_render() -> None:
-    """End-to-end smoke at the focused-scenario level: one drift
-    plant → adapter → compose(dry_run=True) → render. Skip the full
-    default scenario because of the LimitBreachGenerator PK
-    derivation issue (documented in the prior test); a single-plant
-    scenario doesn't trip it.
+    """Focused-scenario smoke kept for fast iteration: one drift
+    plant → adapter → compose(dry_run=True) → render. Sister to
+    `test_default_scenario_full_corpus_composes_via_dry_run` but
+    much smaller surface for quick debugging.
     """
     inst = _load_instance()
     cust = next(

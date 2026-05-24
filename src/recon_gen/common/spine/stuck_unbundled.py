@@ -102,11 +102,16 @@ class StuckUnbundledInvariant:
         acct = find_internal_with_role(
             inst, account_role, error_kind="stuck_unbundled",
         )
+        resolved_account_id = (
+            account_id or f"acct-stuck-unbundled-{rail_name}"
+        )
+        # AY.4.c.4 — fold account_id into PK derivations so N plants on
+        # the same rail (different accounts) don't PK-collide at INSERT.
         return StuckUnbundledGenerator(
-            transaction_id=f"tx-stuck-unbundled-{rail_name}",
-            transfer_id=f"xfer-stuck-unbundled-{rail_name}",
+            transaction_id=f"tx-stuck-unbundled-{rail_name}-{resolved_account_id}",
+            transfer_id=f"xfer-stuck-unbundled-{rail_name}-{resolved_account_id}",
             rail_name=rail_name,
-            account_id=account_id or f"acct-stuck-unbundled-{rail_name}",
+            account_id=resolved_account_id,
             account_role=account_role,
             account_parent_role=acct.parent_role,
             max_unbundled_age_seconds=int(

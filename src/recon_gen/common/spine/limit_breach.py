@@ -198,7 +198,7 @@ class LimitBreachGenerator:
             amount_money = amount_magnitude
         insert_tx(
             conn,
-            id=f"tx-limit-breach-{self.rail_name}-{self.direction}",
+            id=f"tx-limit-breach-{self.rail_name}-{self.direction}-{self.account_id}",
             account_id=self.account_id,
             account_name=f"Limit Breach ({self.rail_name} {self.direction})",
             account_role=self.account_role,
@@ -208,7 +208,7 @@ class LimitBreachGenerator:
             amount_direction=amount_direction,
             status="Posted",
             posting=ts(self.anchor_day),
-            transfer_id=f"xfer-limit-breach-{self.rail_name}-{self.direction}",
+            transfer_id=f"xfer-limit-breach-{self.rail_name}-{self.direction}-{self.account_id}",
             rail_name=self.rail_name,
             origin="etl",
             metadata=metadata,
