@@ -136,15 +136,6 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
     - [x] AO.S2.a - Trainer timeline determinism: scenario-end date (`window_end`, plant anchor) is DISTINCT from load-up-to (`up_to`/`end_date`, the trainer's scrub head — load early for good days, advance to reveal the issue). Tests passed 5/21, broke 5/22 (window_end floated on wall-clock today). Fix: pin window_end explicitly in the two timeline tests (cache default stays today for the live trainer); + regression test that plants stay fixed at window_end across different up_to values. (`ao-oracle-release-fix`)
 - [ ] AO.C1 - (feedback #10) App Info shows `dialect: sqlite` / dev prefix — fine for the dev capture; confirm a production deploy shows the real engine + prefix.
 - [ ] AO.C2 - (feedback #9) Empty-default AML sliders (Fanout, Anomalies) — confirm render-on-default vs broken on AWS (likely the slider-default class; pairs with AO.9).
-## Phase AX - Promote the 4 matview-only invariants to the spine
-- [x] AX.0 - Spike audit `concat_agg` SQLite routing
-- [x] AX.1 - `ChainParentDisagreementInvariant` + Generator
-- [x] AX.2 - `XorGroupViolationInvariant` + missed + overlap generators
-- [x] AX.3 - `FanInDisagreementInvariant` + healthy/missing/extra generators
-- [x] AX.4 - `MultiXorViolationInvariant` + missed + overlap generators
-- [x] AX.5 - Registry split — ALL_L1 / ALL_L2_SHAPE / ALL_L2_INVESTIGATION + ALL_INVARIANTS
-- [x] AX.6 - Per-invariant unit tests + semantic_lock extension
-- [ ] AX.7 - Bump v11.14.0 + release notes + push
 ## Phase AY - Converge the dual seed paths (ScenarioPlant + spine generators) *(depends on: AX)*
 - [ ] AY.0 - Spike + design lock — ScenarioPlant.to_generators adapter shape
 - [ ] AY.1 - Equivalence test gate — spine emit == ScenarioPlant emit for overlapping plant kinds

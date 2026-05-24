@@ -3487,3 +3487,17 @@ strong phase will get lost and bite us"*):
   thread `scenario_id` into metadata on emit. Decouples from the
   side-table bridge.
 
+---
+
+## 2026-05-24
+
+## Phase AX - Promote the 4 matview-only invariants to the spine
+- [x] AX.0 - Spike audit `concat_agg` SQLite routing
+- [x] AX.1 - `ChainParentDisagreementInvariant` + Generator
+- [x] AX.2 - `XorGroupViolationInvariant` + missed + overlap generators
+- [x] AX.3 - `FanInDisagreementInvariant` + healthy/missing/extra generators
+- [x] AX.4 - `MultiXorViolationInvariant` + missed + overlap generators
+- [x] AX.5 - Registry split — ALL_L1 / ALL_L2_SHAPE / ALL_L2_INVESTIGATION + ALL_INVARIANTS
+- [x] AX.6 - Per-invariant unit tests + semantic_lock extension
+- [x] AX.7 - Bump v11.14.0 + release notes + push
+
