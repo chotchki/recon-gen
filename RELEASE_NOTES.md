@@ -1,5 +1,62 @@
 # Release Notes
 
+## v11.12.0 — Phases AS + AU + AT: invariant spine, L1 composition, L2 rollout
+
+Three phases close out the spine architecture seeded by AP/AR: AS (the
+typed invariant currency), AU (L1 composition across 7 invariants), and
+AT (L2 rollout — anomaly + money_trail). All complete; AS / AT / AU / AW
+swept to PLAN_ARCHIVE.md.
+
+**AS — invariant spine (D6).** Promoted `Violation` / `Invariant` /
+`ViolationGenerator` / `View` to `src/recon_gen/common/spine/` as the
+typed currency; unified the prior fractured taxonomy (PlantKind ⋈
+check_type) into one closed `Violation` shape with exhaustiveness
+checks. Generators run as stateful folds; cross-account VECTOR state
+makes legs net to zero across accounts and rolls up `ledger_drift`
+through parent accounts. Byte-locked seed SQL retires in favor of
+semantic self-validation — `detect(gen) ⊇ intended` replaces byte-
+identity locks. 4-way agreement gate becomes the runtime linkage
+assertion over the spine. `TrainingScenario` lets docs claim
+violations declaratively; the self-validate gate catches docs-vs-data
+drift.
+
+**AU — L1 invariant composition (7 invariants).** Drift + ledger_drift
+were the pilot in AS; AU promotes the rest: overdraft, expected_eod,
+stuck_pending, stuck_unbundled, limit_breach. Each carries its own
+generator + `Invariant.scenario_for()` smart constructor. Composition
+test (AU.2) confirms multiple generators emit cleanly side-by-side
+without masking each other's violations. The dual-axis exhaustiveness
+gate (AU.5) walks every `(invariant, generator)` edge in the registry
+and asserts the contract holds at every cell; new invariant promotions
+plug into the gate automatically.
+
+**AT — L2 invariant spine rollout (anomaly + money_trail).** The L2
+sibling of AS — extends the spine to the two Investigation
+invariants. New `Transfer` primitive on `LedgerSimulation` is the
+shared substrate consumed by both L2 generators (a transfers-only
+ledger has no balance rows → no drift trip from L2 plants).
+`AnomalyView` lifts the σ-threshold off the detector onto an
+analyst-facing slice (AP.3 finding #3 lock); `MoneyTrailView` mirrors
+it for chain-depth filtering. The L2 3-way agreement gate (AT.5) is
+the mandatory release contract: `spine ⊆ direct_matview == App2 == QS`
+(no PDF leg — AT.5.d decision recorded: the audit PDF is L1-only by
+design; Investigation is for the AML analyst, not the regulator).
+`L2_TRAINING_SCENARIOS` ships the anomaly + money_trail docs claims
+through the same self-validating mechanism.
+
+**Spine generators now emit against deployed PG / Oracle DBs.** AT.5.b's
+`_emit_helpers.insert_tx` refactor detects the dbapi placeholder style
+(qmark / format / numeric) and dispatches per-dialect. The in-process
+SQLite harness stays byte-identical; live-DB e2e tests (the AT.5
+agreement leg) now plant via the spine generators directly rather than
+through a parallel hand-rolled INSERT path.
+
+**Phase AV recovered.** The `daily_balances.limits` → `metadata` column
+rename phase (with `limits` as a nested JSON key) was on the
+`scenario-context-spike` branch only; restored to PLAN.md with the
+additional note that AV's per-row metadata-tagging path obsoletes the
+spike's `<prefix>_scenario_claims` sidecar.
+
 ## v11.11.0 — Phase AW: own the temporal frame + persona-blind matviews
 
 Phase AW closes the date/range audit's §6 principle ("own the temporal
