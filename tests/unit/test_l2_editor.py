@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from recon_gen.common.l2.editor import (
+    attach_rail_to_reconciler,
     create_l2_entity,
     delete_l2_entity,
     mutate_l2,
@@ -91,6 +92,180 @@ def test_create_chain_preserves_per_child_fan_in(
     # The 1:1 sibling must NOT inherit the fan_in child's flag.
     assert by_name["ReconciliationClosing"].fan_in is False
     assert by_name["ReconciliationClosing"].expected_parent_count is None
+
+
+# ---------------------------------------------------------------------------
+# BB.1 — attach_rail_to_reconciler (composite mutation for S3 / C3)
+# ---------------------------------------------------------------------------
+
+
+def test_attach_rail_to_existing_transfer_template(
+    spec_example: L2Instance,
+) -> None:
+    """A new non-aggregating single-leg rail can be reconciled by
+    appending its name to a TransferTemplate's leg_rails. Idempotency:
+    second call is a no-op."""
+    # Create the rail first (without reconciler — will fail validate
+    # on its own, but that's the BB.1 atomic-composite test).
+    after_rail = create_l2_entity(
+        spec_example,
+        kind="rail",
+        fields={
+            "subtype": "single_leg",
+            "name": "BB1AttachToTT",
+            "leg_role": (Identifier("CustomerLedger"),),
+            "leg_direction": "Credit",
+            "aggregating": False,
+        },
+    )
+    # Pick an existing TT from spec_example.
+    tt_name = str(spec_example.transfer_templates[0].name)
+    after_attach = attach_rail_to_reconciler(
+        after_rail,
+        new_rail_name="BB1AttachToTT",
+        reconciler_kind="transfer_template",
+        reconciler_name=tt_name,
+    )
+    target_tt = next(
+        t for t in after_attach.transfer_templates if str(t.name) == tt_name
+    )
+    assert Identifier("BB1AttachToTT") in target_tt.leg_rails, (
+        f"new rail must be in {tt_name}.leg_rails after attach"
+    )
+    # Idempotent.
+    after_attach_2 = attach_rail_to_reconciler(
+        after_attach,
+        new_rail_name="BB1AttachToTT",
+        reconciler_kind="transfer_template",
+        reconciler_name=tt_name,
+    )
+    target_tt_2 = next(
+        t for t in after_attach_2.transfer_templates if str(t.name) == tt_name
+    )
+    assert (
+        target_tt_2.leg_rails.count(Identifier("BB1AttachToTT")) == 1
+    ), "idempotent attach must not duplicate"
+
+
+def test_attach_rail_to_aggregating_rail_appends_bundles_activity(
+    spec_example: L2Instance,
+) -> None:
+    """A new non-aggregating single-leg rail can be reconciled by
+    appending its name to an aggregating Rail's bundles_activity."""
+    # Find an aggregating rail in the spec_example fixture.
+    agg_rail = next(
+        (r for r in spec_example.rails if r.aggregating), None,
+    )
+    if agg_rail is None:
+        pytest.skip("spec_example has no aggregating rail to attach to")
+    after_rail = create_l2_entity(
+        spec_example,
+        kind="rail",
+        fields={
+            "subtype": "single_leg",
+            "name": "BB1AttachToAgg",
+            "leg_role": (Identifier("CustomerLedger"),),
+            "leg_direction": "Credit",
+            "aggregating": False,
+        },
+    )
+    after_attach = attach_rail_to_reconciler(
+        after_rail,
+        new_rail_name="BB1AttachToAgg",
+        reconciler_kind="aggregating_rail",
+        reconciler_name=str(agg_rail.name),
+    )
+    target = next(
+        r for r in after_attach.rails if str(r.name) == str(agg_rail.name)
+    )
+    assert Identifier("BB1AttachToAgg") in target.bundles_activity
+
+
+def test_attach_rail_to_non_aggregating_rail_raises_valueerror(
+    spec_example: L2Instance,
+) -> None:
+    """Picking a non-aggregating rail as a reconciler is a category
+    error — only aggregating rails carry bundles_activity."""
+    non_agg = next(r for r in spec_example.rails if not r.aggregating)
+    with pytest.raises(ValueError, match="not aggregating"):
+        attach_rail_to_reconciler(
+            spec_example,
+            new_rail_name="DoesntMatter",
+            reconciler_kind="aggregating_rail",
+            reconciler_name=str(non_agg.name),
+        )
+
+
+def test_attach_rail_to_unknown_reconciler_raises_keyerror(
+    spec_example: L2Instance,
+) -> None:
+    """Unknown reconciler name → KeyError so the route handler can
+    surface a clear 'no such reconciler' to the operator."""
+    with pytest.raises(KeyError):
+        attach_rail_to_reconciler(
+            spec_example,
+            new_rail_name="DoesntMatter",
+            reconciler_kind="transfer_template",
+            reconciler_name="NoSuchTemplate",
+        )
+    with pytest.raises(KeyError):
+        attach_rail_to_reconciler(
+            spec_example,
+            new_rail_name="DoesntMatter",
+            reconciler_kind="aggregating_rail",
+            reconciler_name="NoSuchRail",
+        )
+
+
+def test_attach_rail_unknown_reconciler_kind_raises_valueerror(
+    spec_example: L2Instance,
+) -> None:
+    with pytest.raises(ValueError, match="not recognized"):
+        attach_rail_to_reconciler(
+            spec_example,
+            new_rail_name="DoesntMatter",
+            reconciler_kind="garbage",
+            reconciler_name="anything",
+        )
+
+
+def test_attach_rail_then_validate_passes_for_clean_composite(
+    spec_example: L2Instance,
+) -> None:
+    """The composite (create rail + attach to reconciler) must produce
+    a fully-valid L2 — this is the BB.1 atomic-composite contract.
+    Without the attach, validate would reject the bare unreconciled rail.
+
+    Uses the aggregating-rail path: TTs in spec_example all carry a
+    transfer_key that constrains every leg_rail's metadata_keys
+    (orthogonal to S3 reconciliation); the aggregator path has no
+    such constraint so it exercises the BB.1 contract cleanly.
+    """
+    after_rail = create_l2_entity(
+        spec_example,
+        kind="rail",
+        fields={
+            "subtype": "single_leg",
+            "name": "BB1Composite",
+            "leg_role": (Identifier("CustomerLedger"),),
+            "leg_direction": "Credit",
+            "aggregating": False,
+            "origin": "InternalInitiated",
+        },
+    )
+    # Bare-rail validate fails — proving the rail needs a reconciler.
+    with pytest.raises(L2ValidationError, match="not reconciled"):
+        validate_instance(after_rail)
+    # Attaching to an existing aggregating rail closes the gap; validate
+    # now passes.
+    agg_rail = next(r for r in spec_example.rails if r.aggregating)
+    after_attach = attach_rail_to_reconciler(
+        after_rail,
+        new_rail_name="BB1Composite",
+        reconciler_kind="aggregating_rail",
+        reconciler_name=str(agg_rail.name),
+    )
+    validate_instance(after_attach)  # MUST NOT raise
 
 
 def test_create_rail_preserves_cadence(spec_example: L2Instance) -> None:

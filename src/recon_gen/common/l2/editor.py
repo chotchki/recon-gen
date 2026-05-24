@@ -174,6 +174,78 @@ def rename_identifier(
     return _rename_transfer_template(instance, old, new)
 
 
+def attach_rail_to_reconciler(
+    instance: L2Instance,
+    *,
+    new_rail_name: str,
+    reconciler_kind: str,
+    reconciler_name: str,
+) -> L2Instance:
+    """BB.1 — append ``new_rail_name`` to an existing reconciler's
+    rail-list field so a freshly-created non-aggregating single-leg
+    rail satisfies S3 / C3 reconciliation atomically with its create.
+
+    ``reconciler_kind``:
+      - ``"transfer_template"`` — append to ``TransferTemplate.leg_rails``
+      - ``"aggregating_rail"`` — append to ``Rail.bundles_activity``
+        (the rail must already be ``aggregating=True``)
+
+    Returns a new ``L2Instance`` with the reconciler's field updated.
+    Caller composes ``validate(...)`` afterward.
+
+    Raises:
+      KeyError: no reconciler with that ``reconciler_name`` exists.
+      ValueError: ``reconciler_kind`` not recognized, or the matched
+        reconciler isn't a valid receiver (e.g., a non-aggregating
+        rail picked as ``aggregating_rail``).
+    """
+    name_id = Identifier(new_rail_name)
+    if reconciler_kind == "transfer_template":
+        for i, t in enumerate(instance.transfer_templates):
+            if str(t.name) == reconciler_name:
+                if name_id in t.leg_rails:
+                    return instance  # idempotent (already attached)
+                new_t = dataclasses.replace(
+                    t, leg_rails=(*t.leg_rails, name_id),
+                )
+                new_tts = (
+                    instance.transfer_templates[:i]
+                    + (new_t,)
+                    + instance.transfer_templates[i + 1:]
+                )
+                return dataclasses.replace(
+                    instance, transfer_templates=new_tts,
+                )
+        raise KeyError(
+            f"TransferTemplate {reconciler_name!r} not found",
+        )
+    if reconciler_kind == "aggregating_rail":
+        for i, r in enumerate(instance.rails):
+            if str(r.name) != reconciler_name:
+                continue
+            if not r.aggregating:
+                raise ValueError(
+                    f"Rail {reconciler_name!r} is not aggregating; "
+                    f"can't be a reconciler"
+                )
+            if name_id in r.bundles_activity:
+                return instance  # idempotent
+            new_r = dataclasses.replace(
+                r, bundles_activity=(*r.bundles_activity, name_id),
+            )
+            new_rails = (
+                instance.rails[:i] + (new_r,) + instance.rails[i + 1:]
+            )
+            return dataclasses.replace(instance, rails=new_rails)
+        raise KeyError(
+            f"Rail {reconciler_name!r} not found",
+        )
+    raise ValueError(
+        f"reconciler_kind={reconciler_kind!r} not recognized "
+        f"(expected 'transfer_template' or 'aggregating_rail')"
+    )
+
+
 def create_l2_entity(
     instance: L2Instance,
     kind: EntityKind,

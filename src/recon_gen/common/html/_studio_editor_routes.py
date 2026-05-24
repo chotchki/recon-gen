@@ -46,6 +46,7 @@ from recon_gen.common.l2.cache import L2InstanceCache
 from recon_gen.common.l2.editor import (
     SINGLETON_KINDS,
     EntityKind,
+    attach_rail_to_reconciler,
     create_l2_entity,
     delete_l2_entity,
     mutate_l2,
@@ -2702,6 +2703,61 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
         if rail_subtype is not None:
             new_fields["subtype"] = rail_subtype
 
+        # BB.1 — when creating a non-aggregating single-leg rail, the
+        # operator MUST pair the create with a reconciler (some TT's
+        # leg_rails OR some aggregating rail's bundles_activity) per
+        # validator S3 / C3. Form-pairing the picker keeps the
+        # validator strict (no invalid in-flight states) while making
+        # the create step a single atomic composite mutation. The
+        # picker payload arrives as `reconciler_kind` + `reconciler_name`
+        # form fields (BB.1 ships attach-existing only; BB.2 adds the
+        # inline create-new sub-form).
+        needs_reconciler = (
+            kind == "rail"
+            and rail_subtype == "single_leg"
+            and not bool(new_fields.get("aggregating") or False)
+        )
+        reconciler_kind: str | None = None
+        reconciler_name: str | None = None
+        if needs_reconciler:
+            raw_rk = form.get("reconciler_kind")
+            raw_rn = form.get("reconciler_name")
+            reconciler_kind = str(raw_rk).strip() if raw_rk else ""
+            reconciler_name = str(raw_rn).strip() if raw_rn else ""
+            if not reconciler_kind or not reconciler_name:
+                return HTMLResponse(
+                    _render_create_page(
+                        kind, cache.get(),
+                        form_overrides=coerced_overrides,
+                        global_error=(
+                            "Reconciler required for non-aggregating "
+                            "single-leg rails: pick an existing "
+                            "TransferTemplate (closes the TT's "
+                            "expected_net) or aggregating Rail (gets "
+                            "swept into a bundle), or create one "
+                            "inline. Per SPEC §S3, an unreconciled "
+                            "single-leg rail's drift would persist "
+                            "forever."
+                        ),
+                        subtype=rail_subtype,
+                    ),
+                    status_code=400,
+                )
+            if reconciler_kind not in ("transfer_template", "aggregating_rail"):
+                return HTMLResponse(
+                    _render_create_page(
+                        kind, cache.get(),
+                        form_overrides=coerced_overrides,
+                        global_error=(
+                            f"reconciler_kind={reconciler_kind!r} not "
+                            f"recognized (expected 'transfer_template' "
+                            f"or 'aggregating_rail')"
+                        ),
+                        subtype=rail_subtype,
+                    ),
+                    status_code=400,
+                )
+
         try:
             new_inst = create_l2_entity(cache.get(), kind, new_fields)
         except ValueError as exc:
@@ -2714,6 +2770,30 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
                 ),
                 status_code=400,
             )
+
+        # BB.1 — apply the reconciler edit to the in-memory new_inst
+        # BEFORE validate(). The composite (add rail + edit reconciler)
+        # is the unit of atomicity: either both land or neither.
+        if needs_reconciler:
+            try:
+                new_inst = attach_rail_to_reconciler(
+                    new_inst,
+                    new_rail_name=str(new_fields["name"]),
+                    reconciler_kind=str(reconciler_kind),
+                    reconciler_name=str(reconciler_name),
+                )
+            except (KeyError, ValueError) as exc:
+                return HTMLResponse(
+                    _render_create_page(
+                        kind, cache.get(),
+                        form_overrides=coerced_overrides,
+                        global_error=(
+                            f"Reconciler attach failed: {exc}"
+                        ),
+                        subtype=rail_subtype,
+                    ),
+                    status_code=400,
+                )
 
         try:
             validate(new_inst)

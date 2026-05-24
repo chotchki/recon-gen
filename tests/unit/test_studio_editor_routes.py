@@ -1607,3 +1607,132 @@ def test_delete_unreferenced_account_persists(writable_l2_yaml: Path) -> None:
 
     reloaded = load_instance(writable_l2_yaml)
     assert not any(str(a.id) == "cust-002" for a in reloaded.accounts)
+
+
+# ---------------------------------------------------------------------------
+# BB.1 — POST /l2_shape/rail/ requires + applies the reconciler picker
+# ---------------------------------------------------------------------------
+
+
+def _rail_form_data_single_leg_non_agg(name: str) -> dict[str, str]:
+    """Minimal form payload for a non-aggregating single-leg rail
+    create (BB.1 scenarios)."""
+    return {
+        "subtype": "single_leg",
+        "name": name,
+        "leg_role": "CustomerLedger",
+        "leg_role__present": "1",
+        "leg_direction": "Credit",
+        "aggregating": "false",
+        "origin": "InternalInitiated",
+    }
+
+
+def test_bb1_create_non_agg_single_leg_without_reconciler_returns_400(
+    writable_l2_yaml: Path,
+) -> None:
+    """BB.1 — the create POST for a non-aggregating single-leg rail
+    MUST carry `reconciler_kind` + `reconciler_name`; without them the
+    handler returns 400 with the S3 rationale inline. No half-committed
+    rail lands on disk."""
+    app = _build_app(writable_l2_yaml)
+    data = _rail_form_data_single_leg_non_agg("BB1NoReconciler")
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/rail/", data=data, follow_redirects=False,
+        )
+    assert resp.status_code == 400, resp.text
+    assert "Reconciler required" in resp.text
+    # On-disk yaml unchanged.
+    reloaded = load_instance(writable_l2_yaml)
+    assert not any(str(r.name) == "BB1NoReconciler" for r in reloaded.rails)
+
+
+def test_bb1_create_non_agg_single_leg_attach_to_aggregator_persists(
+    writable_l2_yaml: Path,
+) -> None:
+    """BB.1 — POST with reconciler_kind=aggregating_rail +
+    reconciler_name=<PoolBalancing> atomically creates the new rail
+    AND appends its name to PoolBalancing.bundles_activity. Single
+    303 redirect; disk reflects BOTH mutations; validate passes."""
+    app = _build_app(writable_l2_yaml)
+    data = {
+        **_rail_form_data_single_leg_non_agg("BB1AggReconciled"),
+        "reconciler_kind": "aggregating_rail",
+        "reconciler_name": "PoolBalancing",
+    }
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/rail/", data=data, follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+
+    reloaded = load_instance(writable_l2_yaml)
+    new_rail = next(
+        (r for r in reloaded.rails if str(r.name) == "BB1AggReconciled"), None,
+    )
+    assert new_rail is not None, "new rail must persist on disk"
+    pool_balancing = next(
+        r for r in reloaded.rails if str(r.name) == "PoolBalancing"
+    )
+    assert any(
+        str(b) == "BB1AggReconciled" for b in pool_balancing.bundles_activity
+    ), "PoolBalancing.bundles_activity must include the new rail"
+
+
+def test_bb1_create_with_unknown_reconciler_returns_400_no_partial_persist(
+    writable_l2_yaml: Path,
+) -> None:
+    """BB.1 atomicity — if attach_rail_to_reconciler raises KeyError
+    (unknown reconciler), the handler returns 400 AND the rail itself
+    does NOT land on disk. Either both mutations succeed or neither."""
+    app = _build_app(writable_l2_yaml)
+    data = {
+        **_rail_form_data_single_leg_non_agg("BB1Atomicity"),
+        "reconciler_kind": "transfer_template",
+        "reconciler_name": "NoSuchTemplate",
+    }
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/rail/", data=data, follow_redirects=False,
+        )
+    assert resp.status_code == 400, resp.text
+    assert "Reconciler attach failed" in resp.text
+    reloaded = load_instance(writable_l2_yaml)
+    assert not any(str(r.name) == "BB1Atomicity" for r in reloaded.rails), (
+        "atomicity violation: rail must NOT persist when reconciler "
+        "attach fails"
+    )
+
+
+def test_bb1_aggregating_single_leg_rail_unaffected_by_reconciler_gate(
+    writable_l2_yaml: Path,
+) -> None:
+    """BB.1 — aggregating single-leg rails are self-reconciling per
+    the S3 exemption; the BB.1 reconciler gate does NOT require the
+    picker fields for them. A POST without reconciler_* should still
+    succeed (assuming the rest of the aggregating-rail form is valid:
+    cadence + non-empty bundles_activity)."""
+    app = _build_app(writable_l2_yaml)
+    data = {
+        "subtype": "single_leg",
+        "name": "BB1SelfReconciling",
+        "leg_role": "CustomerLedger",
+        "leg_role__present": "1",
+        "leg_direction": "Credit",
+        "aggregating": "true",
+        "cadence": "daily-eod",
+        "origin": "InternalInitiated",
+        # An aggregating rail MUST carry bundles_activity (orthogonal to
+        # BB.1) — bundle some existing single-leg rail so the aggregator
+        # validates cleanly.
+        "bundles_activity__present": "1",
+        "bundles_activity": "ReconciliationLeg",
+    }
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/rail/", data=data, follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    reloaded = load_instance(writable_l2_yaml)
+    assert any(str(r.name) == "BB1SelfReconciling" for r in reloaded.rails)
