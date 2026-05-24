@@ -1,5 +1,112 @@
 # Release Notes
 
+## v11.14.0 — Phase AX: promote the 4 L2-shape invariants to the spine
+
+Phase AX closes the first of three gaps the post-AV retrospective
+surfaced: 4 matview-detected invariants
+(`chain_parent_disagreement` / `xor_group_violation` /
+`fan_in_disagreement` / `multi_xor_violation`) existed only as SQL
+matviews — invisible to the spine's exhaustiveness gate, semantic
+lock, ScenarioContext, and the agreement test. AX promotes all 4
+onto the spine as proper `Invariant` + `ViolationGenerator` pairs.
+
+**New spine modules** (one per invariant):
+
+- `src/recon_gen/common/spine/chain_parent_disagreement.py` —
+  AX.1. One generator (a single ETL bug shape: child Transfer
+  claiming 2 distinct parents). Identity tuple:
+  `(transfer_id, child_template_name)`. Custom non-fan_in picker
+  (the existing `_pick_two_template_chain_inputs` returns fan_in
+  templates that the matview filters out → silently empty
+  detection).
+- `src/recon_gen/common/spine/xor_group_violation.py` — AX.2. One
+  invariant + two generators (missed: witness leg outside the XOR
+  group → firing_count=0; overlap: 2 member legs inside →
+  firing_count≥2). Identity tuple:
+  `(transfer_id, template_name, xor_group_index)`.
+- `src/recon_gen/common/spine/fan_in_disagreement.py` — AX.3. One
+  generator + 3 smart constructors (healthy/missing/extra). The
+  `parent_count` knob differentiates variants; the matview's CASE
+  expression derives `disagreement_kind`. Identity tuple:
+  `(child_transfer_id, disagreement_kind)`.
+- `src/recon_gen/common/spine/multi_xor_violation.py` — AX.4. One
+  invariant + two generators (missed: parent alone with 0
+  XOR-sibling children firing; overlap: parent + 2 children both
+  firing). Identity tuple:
+  `(parent_transfer_id, disagreement_kind)`.
+
+All 4 invariants preserve the single-edge property (transfers-only
+emit → no daily_balances rows → no drift trip), confirmed by the
+per-invariant tests' `test_X_emit_does_not_trip_drift` cells.
+
+**Registry split** (AX.5) — `common/spine/registry.py` grows from one
+`ALL_L1_INVARIANTS` / `ALL_L1_GENERATORS` pair to three category-
+scoped tuples + unified `ALL_INVARIANTS` / `ALL_GENERATORS`
+sequences:
+
+```
+ALL_L1_INVARIANTS (7)          — accounting / audit-trail
+ALL_L2_SHAPE_INVARIANTS (4)    — L2 yaml integrity (AX)
+ALL_L2_INVESTIGATION_INVARIANTS (2) — fraud / AML pattern
+ALL_INVARIANTS (13)            — unified
+```
+
+Mirror for generators (6 / 6 / 2 = 14 total). `INVARIANT_GENERATOR
+_EDGES` grows from 6 to 14 entries; `AnomalyGenerator` +
+`MoneyTrailGenerator` were promoted in AT but had no registry
+edge — AX.5 fixes that omission.
+
+**AU.5 exhaustiveness gate expanded** — parametrizes over
+`ALL_INVARIANTS` (13) + `ALL_GENERATORS` (14) instead of just L1.
+The empirical sweep test now constructs scenarios for all 13
+invariants and asserts every one fires from at least one
+single-generator emit. 31 AU.5 cells gate the registry's
+consistency end-to-end.
+
+**Schema helper extension** — `common/spine/_emit_helpers.py::TX_COLS`
+gains `template_name` (all 4 AX matviews key the GROUP BY on it;
+pre-AX callers pass nothing → SQL NULL → byte-identical).
+
+**Semantic-lock extension** (AX.6) — new
+`tests/unit/test_spine_ax6_l2_shape_semantic_lock.py` (14 tests)
+mirrors AT.4's L2 shape for the 4 AX invariants: stability across
+runs / per-invariant keying / cross-class composition / gate teeth /
+L2-shape composes with L1 / single-edge preserved.
+
+**Cross-class noise notes** — the L2-shape generators register
+single-edge by default. Two empirically-observed cross-class trips:
+
+- `XorGroupMissedFiringGenerator` / `XorGroupOverlapGenerator` on the
+  `SettlementTimingCycle` template (which is also a chain parent)
+  also trip `multi_xor_violation` — the chain expects XOR-sibling
+  children that the XOR plant doesn't fire. Tolerated per AS.5's
+  `intended ⊆ detected` contract; tests assert subset, not equality.
+- `MultiXorOverlapGenerator` may also trip `fan_in_disagreement` if
+  the chain has fan_in entries (AB.5 coupling). Same tolerance
+  story.
+
+These are scenario-level extras, not registry-level edges (the
+OverdraftGenerator pattern: multi-edge entries only after explicit
+per-invariant verification — these don't qualify).
+
+**Verified GREEN against live PG** (RDS database-2 / qsgen_postgres):
+
+- 3710 non-e2e tests pass (was 3618 pre-AX, +92 from the 4 new
+  invariants × ~18 unit tests + 14 AU.5 expansion + 14 AX.6
+  semantic-lock tests).
+- AT.5 e2e gate (spine⋈matview + Investigation 3-way agreement)
+  passes 6/6 — confirms the registry refactor + TX_COLS extension
+  preserve the L2 deployed-DB agreement contract.
+
+**What AX does NOT do** (deferred to AY + AZ per the approved plan):
+
+- The OLD `ScenarioPlant` + `_emit_*_rows` system in
+  `common/l2/seed.py` still co-exists with the new spine
+  generators. The production seed (`recon-gen data apply
+  --execute`) still emits via the OLD path; AY converges them.
+- Byte-locked seeds at `tests/data/_locked_seeds/*.sql` still
+  gate. AZ retires them in favor of semantic locks.
+
 ## v11.13.0 — Phase AV: `daily_balances.limits` → `metadata` + ScenarioContext
 
 Phase AV closes two threads in one phase: the dormant
