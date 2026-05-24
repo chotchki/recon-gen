@@ -66,6 +66,7 @@ from recon_gen.common.tree import (
 from recon_gen.apps.executives.datasets import (
     DS_EXEC_ACCOUNT_SUMMARY,
     DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
+    DS_EXEC_TRANSACTION_DAILY,
     DS_EXEC_TRANSACTION_SUMMARY,
     build_all_datasets,
 )
@@ -252,6 +253,8 @@ def _datasets(cfg: Config) -> dict[str, Dataset]:
     built = build_all_datasets(cfg)
     names = [
         DS_EXEC_TRANSACTION_SUMMARY,
+        # AO.5 — per-active-day rollup for the avg-daily KPI.
+        DS_EXEC_TRANSACTION_DAILY,
         DS_EXEC_ACCOUNT_SUMMARY,
         # Y.2.h — second account dataset; same shape, baked WHERE.
         DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
@@ -413,6 +416,9 @@ def _populate_transaction_volume(
 ) -> None:
     del cfg
     ds_txn = datasets[DS_EXEC_TRANSACTION_SUMMARY]
+    # AO.5 — Avg Daily Volume uses the per-active-day rollup so its
+    # AVG denominator is days-with-activity, not days × rails.
+    ds_daily = datasets[DS_EXEC_TRANSACTION_DAILY]
 
     # Row 1: two KPIs.
     kpi_row = sheet.layout.row(height=_KPI_ROW_SPAN)
@@ -431,11 +437,11 @@ def _populate_transaction_volume(
         visual_id=VisualId("exec-txn-kpi-avg-daily"),
         title="Average Daily Volume",
         subtitle=(
-            "Average daily transfer count, averaged across days that "
-            "had any activity (zero-volume days don't surface in the "
-            "underlying dataset)"
+            "Total transfer count per active business day. Averaged "
+            "over days that had any activity; zero-volume days don't "
+            "surface in the underlying dataset."
         ),
-        values=[ds_txn["transfer_count"].average(
+        values=[ds_daily["daily_transfer_count"].average(
             field_id="exec-txn-avg-daily-count",
         )],
     )

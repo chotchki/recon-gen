@@ -109,32 +109,37 @@ def test_every_sheet_has_a_description(exec_analysis):
 # ---------------------------------------------------------------------------
 
 def test_datasets_in_expected_order():
-    """3 content datasets (Y.2.h split account into base + active) + 2
+    """4 content datasets (Y.2.h split account into base + active;
+    AO.5 added daily rollup for the avg-daily KPI denominator) + 2
     M.4.4.5 App Info datasets, in order."""
     datasets = build_all_datasets(_TEST_CFG)
-    assert len(datasets) == 5
+    assert len(datasets) == 6
     assert datasets[0].DataSetId == _TEST_CFG.prefixed(
         "exec-transaction-summary-dataset",
     )
     assert datasets[1].DataSetId == _TEST_CFG.prefixed(
-        "exec-account-summary-dataset",
+        "exec-transaction-daily-dataset",
     )
     assert datasets[2].DataSetId == _TEST_CFG.prefixed(
-        "exec-account-summary-active-dataset",
+        "exec-account-summary-dataset",
     )
     assert datasets[3].DataSetId == _TEST_CFG.prefixed(
-        "exec-app-info-liveness-dataset",
+        "exec-account-summary-active-dataset",
     )
     assert datasets[4].DataSetId == _TEST_CFG.prefixed(
+        "exec-app-info-liveness-dataset",
+    )
+    assert datasets[5].DataSetId == _TEST_CFG.prefixed(
         "exec-app-info-matviews-dataset",
     )
 
 
 def test_datasets_declared_in_analysis(exec_analysis):
-    """3 content datasets (Y.2.h split account into base + active) + the
-    2 M.4.4.5 App Info datasets."""
+    """4 content datasets (Y.2.h split account into base + active;
+    AO.5 added daily rollup) + the 2 M.4.4.5 App Info datasets."""
     from recon_gen.apps.executives.datasets import (
         DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
+        DS_EXEC_TRANSACTION_DAILY,
     )
     from recon_gen.common.sheets.app_info import (
         DS_APP_INFO_LIVENESS, DS_APP_INFO_MATVIEWS,
@@ -143,6 +148,7 @@ def test_datasets_declared_in_analysis(exec_analysis):
     decls = exec_analysis.Definition.DataSetIdentifierDeclarations
     assert [d.Identifier for d in decls] == [
         DS_EXEC_TRANSACTION_SUMMARY,
+        DS_EXEC_TRANSACTION_DAILY,
         DS_EXEC_ACCOUNT_SUMMARY,
         DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
         DS_APP_INFO_LIVENESS,
@@ -197,17 +203,20 @@ def test_account_summary_sql_left_joins_activity():
     NULL, activity_count 0) — the active-only filter narrows the KPI
     while the open-side counts every row."""
     datasets = build_all_datasets(_TEST_CFG)
-    acct_ds = datasets[1]
+    # AO.5 shifted the account_summary dataset to index 2 (after the
+    # new transaction-daily rollup at index 1).
+    acct_ds = datasets[2]
     sql = next(iter(acct_ds.PhysicalTableMap.values())).CustomSql.SqlQuery
     assert "LEFT JOIN activity" in sql
 
 
 def test_both_content_datasets_filter_to_status_posted():
     """Failed legs were recorded but didn't move money — including them
-    pollutes executive trends with operational noise. Scoped to the 2
-    content datasets — the M.4.4.5 App Info datasets read schema/
-    matview metadata and don't carry a status column."""
-    content = build_all_datasets(_TEST_CFG)[:2]
+    pollutes executive trends with operational noise. Scoped to the 4
+    content datasets (Y.2.h split account base + active; AO.5 added
+    daily rollup) — the M.4.4.5 App Info datasets read schema/matview
+    metadata and don't carry a status column."""
+    content = build_all_datasets(_TEST_CFG)[:4]
     for ds in content:
         sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
         assert "status = 'Posted'" in sql, (

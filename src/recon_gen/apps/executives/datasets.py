@@ -65,6 +65,11 @@ def exec_matview_specs(cfg: Config) -> list[tuple[str, str | None]]:
 
 # Identifier strings used as the DataSetIdentifier in visuals + filters.
 DS_EXEC_TRANSACTION_SUMMARY = "exec-transaction-summary-ds"
+# AO.5 — per-(posted_date) rollup of `exec-transaction-summary` so the
+# "Average Daily Volume" KPI averages over ACTIVE DAYS, not over
+# (date × rail_name) rows. Sasquatch's ~30 rails would make
+# `AVG(transfer_count)` on the per-(date, rail) dataset ≈30× too small.
+DS_EXEC_TRANSACTION_DAILY = "exec-transaction-daily-ds"
 DS_EXEC_ACCOUNT_SUMMARY = "exec-account-summary-ds"
 # Y.2.h — second account dataset with `WHERE activity_count > 0` baked
 # into the SQL. Replaces the visual-pinned `NumericRangeFilter` (which
@@ -84,6 +89,18 @@ EXEC_TRANSACTION_SUMMARY_CONTRACT = DatasetContract(columns=[
     ColumnSpec("transfer_count", "INTEGER"),
     ColumnSpec("gross_amount", "DECIMAL"),
     ColumnSpec("net_amount", "DECIMAL"),
+])
+
+
+# AO.5 — one row per active day (no rail split). The "Average Daily
+# Volume" KPI consumes this so its AVG denominator is days-with-activity
+# rather than (days × rails). Same upstream `per_transfer` shape as
+# `EXEC_TRANSACTION_SUMMARY_CONTRACT`, rolled up one level.
+EXEC_TRANSACTION_DAILY_CONTRACT = DatasetContract(columns=[
+    ColumnSpec("posted_date", "DATETIME"),
+    ColumnSpec("daily_transfer_count", "INTEGER"),
+    ColumnSpec("daily_gross_amount", "DECIMAL"),
+    ColumnSpec("daily_net_amount", "DECIMAL"),
 ])
 
 
@@ -160,6 +177,64 @@ GROUP BY posted_date, rail_name"""
         sql_template,
         EXEC_TRANSACTION_SUMMARY_CONTRACT,
         visual_identifier=DS_EXEC_TRANSACTION_SUMMARY,
+        app2_date_column="t.posting",
+    )
+
+
+def build_transaction_daily_dataset(cfg: Config) -> DataSet:
+    """Per-(posted_date) rollup of `exec-transaction-summary`.
+
+    AO.5 fix: the "Average Daily Volume" KPI in the Volume sheet used
+    to consume `exec-transaction-summary` (one row per (date, rail))
+    and ask QS for `AVG(transfer_count)` — that's the average across
+    (date × rail) rows, which is days-with-activity × distinct-rails-
+    on-that-day in the denominator. With Sasquatch's ~30 declared
+    rails, the KPI read ≈30× too small vs the analyst's
+    `total / active-days` expectation (cold-read MAJOR 2/4, reported
+    as "~67× off"). This dataset collapses the per-(date, rail)
+    breakdown to a single row per active day so `AVG(daily_transfer_
+    count)` gets the right denominator structurally — no calc-field
+    expression DSL gymnastics.
+
+    Shares the upstream `per_transfer` shape with
+    `build_transaction_summary_dataset` (so multi-leg transfers are
+    counted once, not once per leg).
+    """
+    p = cfg.db_table_prefix
+    posted_date_expr = to_date("MIN(t.posting)", cfg.dialect)
+    gross = cents_to_dollars_sql(
+        "SUM(transfer_amount)", dialect=cfg.dialect,
+    )
+    net = cents_to_dollars_sql(
+        "SUM(transfer_net)", dialect=cfg.dialect,
+    )
+    sql_template = f"""\
+WITH per_transfer AS (
+    SELECT
+        {posted_date_expr}     AS posted_date,
+        t.transfer_id,
+        MAX(ABS(t.amount_money)) AS transfer_amount,
+        SUM(t.amount_money)      AS transfer_net
+    FROM {p}_transactions t
+    WHERE t.status = 'Posted'
+      {{date_filter}}
+    GROUP BY t.transfer_id
+)
+SELECT
+    posted_date,
+    COUNT(*)            AS daily_transfer_count,
+    {gross}             AS daily_gross_amount,
+    {net}               AS daily_net_amount
+FROM per_transfer
+GROUP BY posted_date"""
+    return build_dataset(
+        cfg,
+        cfg.prefixed("exec-transaction-daily-dataset"),
+        "Executives Transaction Daily Rollup",
+        "exec-transaction-daily",
+        sql_template,
+        EXEC_TRANSACTION_DAILY_CONTRACT,
+        visual_identifier=DS_EXEC_TRANSACTION_DAILY,
         app2_date_column="t.posting",
     )
 
@@ -280,6 +355,7 @@ def build_all_datasets(cfg: Config) -> list[DataSet]:
     """Return every dataset used by the Executives app."""
     return [
         build_transaction_summary_dataset(cfg),
+        build_transaction_daily_dataset(cfg),
         build_account_summary_dataset(cfg),
         build_account_summary_active_dataset(cfg),
         # M.4.4.5 — App Info ("i") sheet datasets, ALWAYS LAST.
@@ -298,6 +374,7 @@ def build_all_datasets(cfg: Config) -> list[DataSet]:
 # (visual_identifier, contract) pair.
 _CONTRACT_REGISTRATIONS: tuple[tuple[str, DatasetContract], ...] = (
     (DS_EXEC_TRANSACTION_SUMMARY, EXEC_TRANSACTION_SUMMARY_CONTRACT),
+    (DS_EXEC_TRANSACTION_DAILY, EXEC_TRANSACTION_DAILY_CONTRACT),
     (DS_EXEC_ACCOUNT_SUMMARY, EXEC_ACCOUNT_SUMMARY_CONTRACT),
     # Y.2.h — same shape as the base; reuses the contract.
     (DS_EXEC_ACCOUNT_SUMMARY_ACTIVE, EXEC_ACCOUNT_SUMMARY_CONTRACT),
