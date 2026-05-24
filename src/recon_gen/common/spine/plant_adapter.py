@@ -86,20 +86,21 @@ from recon_gen.common.l2.seed import (
 from recon_gen.common.spine.chain_parent_disagreement import (
     ChainParentDisagreementGenerator,
 )
-from recon_gen.common.spine.drift import DriftInvariant
+from recon_gen.common.spine.drift import DriftGenerator
 from recon_gen.common.spine.failed_transaction import FailedTransactionGenerator
 from recon_gen.common.spine.fan_in_disagreement import FanInChainGenerator
 from recon_gen.common.spine.generator import ViolationGenerator
 from recon_gen.common.spine.inv_fanout import InvFanoutGenerator
-from recon_gen.common.spine.limit_breach import LimitBreachInvariant
+from recon_gen.common.spine.limit_breach import LimitBreachGenerator
 from recon_gen.common.spine.multi_xor_violation import (
     MultiXorMissedGenerator,
     MultiXorOverlapGenerator,
 )
-from recon_gen.common.spine.overdraft import OverdraftInvariant
+from recon_gen.common.spine.overdraft import OverdraftGenerator
 from recon_gen.common.spine.rail_firing import RailFiringGenerator
-from recon_gen.common.spine.stuck_pending import StuckPendingInvariant
-from recon_gen.common.spine.stuck_unbundled import StuckUnbundledInvariant
+from recon_gen.common.spine.rng import scenario_rng
+from recon_gen.common.spine.stuck_pending import StuckPendingGenerator
+from recon_gen.common.spine.stuck_unbundled import StuckUnbundledGenerator
 from recon_gen.common.spine.supersession import SupersessionGenerator
 from recon_gen.common.spine.transfer_template import TransferTemplateGenerator
 from recon_gen.common.spine.two_template_chain import TwoTemplateChainGenerator
@@ -221,12 +222,38 @@ def _adapt_drift(
     plant: DriftPlant, instance: L2Instance, scenarios: ScenarioPlant,
     anchor_day: date,
 ) -> ViolationGenerator:
-    role = _resolve_account_role(instance, scenarios, plant.account_id)
-    return DriftInvariant().scenario_for(
-        role,
-        magnitude=float(abs(plant.delta_money)),
-        instance=instance,
+    """AY.4.f — direct-construct DriftGenerator. Bypasses the
+    factory's `scenario_for(role)` which raises on roles only present
+    via AccountTemplate (sasquatch's CustomerDDA). The adapter
+    already has the plant's specific account_id; resolve role +
+    parent triple via `_resolve_account_triple` (which handles both
+    L2-singleton + template-instance accounts), then look up the
+    parent account by role IF the L2 declares one as a singleton
+    (template-instance parents aren't typically materialized for
+    drift; the OLD path tolerated the None case)."""
+    role, _scope, parent_role = _resolve_account_triple(
+        instance, scenarios, plant.account_id,
+    )
+    parent_account_id: str | None = None
+    parent_account_role: str | None = None
+    if parent_role is not None:
+        # Try L2 singletons first; fall back to None when no parent
+        # singleton exists for this role (the spine emit handles
+        # parent_account_id=None — no parent balance row written).
+        for a in instance.accounts:
+            if str(a.role) == parent_role and str(a.scope) == "internal":
+                parent_account_id = str(a.id)
+                parent_account_role = parent_role
+                break
+    return DriftGenerator(
         child_account_id=str(plant.account_id),
+        child_role=role,
+        parent_role=parent_role or "",
+        parent_account_id=parent_account_id,
+        parent_account_role=parent_account_role,
+        anchor_day=anchor_day,
+        magnitude=float(abs(plant.delta_money)),
+        rng=scenario_rng(),
     )
 
 
@@ -234,12 +261,15 @@ def _adapt_overdraft(
     plant: OverdraftPlant, instance: L2Instance, scenarios: ScenarioPlant,
     anchor_day: date,
 ) -> ViolationGenerator:
-    role = _resolve_account_role(instance, scenarios, plant.account_id)
-    return OverdraftInvariant().scenario_for(
-        role,
-        magnitude=float(abs(plant.money)),
-        instance=instance,
+    role, _scope, parent_role = _resolve_account_triple(
+        instance, scenarios, plant.account_id,
+    )
+    return OverdraftGenerator(
         account_id=str(plant.account_id),
+        account_role=role,
+        account_parent_role=parent_role,
+        anchor_day=anchor_day,
+        magnitude=float(abs(plant.money)),
     )
 
 
@@ -247,16 +277,30 @@ def _adapt_limit_breach(
     plant: LimitBreachPlant, instance: L2Instance, scenarios: ScenarioPlant,
     anchor_day: date, *, direction: str = "Outbound",
 ) -> ViolationGenerator:
-    parent_role = _resolve_account_parent_role(
+    """AY.4.f — direct-construct LimitBreachGenerator. Looks up the
+    LimitSchedule's cap by (parent_role, rail, direction) from the
+    L2 instance."""
+    role, _scope, parent_role = _resolve_account_triple(
         instance, scenarios, plant.account_id,
     )
-    return LimitBreachInvariant().scenario_for(
-        parent_role,
-        str(plant.rail_name),
-        direction=direction,  # type: ignore[arg-type]: LimitDirection literal, runtime str works
-        overshoot=float(plant.amount),
-        instance=instance,
+    if parent_role is None:
+        raise ValueError(
+            f"plant adapter: limit_breach plant on account "
+            f"{plant.account_id!r} has no parent_role; "
+            f"LimitSchedule lookup needs parent_role"
+        )
+    cap = _resolve_limit_schedule_cap(
+        instance, parent_role, str(plant.rail_name), direction,
+    )
+    return LimitBreachGenerator(
         account_id=str(plant.account_id),
+        account_role=role,
+        account_parent_role=parent_role,
+        rail_name=str(plant.rail_name),
+        direction=direction,  # type: ignore[arg-type]: LimitDirection literal accepts validated str at runtime
+        cap=cap,
+        overshoot=float(plant.amount) - cap,
+        anchor_day=anchor_day,
     )
 
 
@@ -264,18 +308,27 @@ def _adapt_inbound_cap_breach(
     plant: InboundCapBreachPlant, instance: L2Instance,
     scenarios: ScenarioPlant, anchor_day: date,
 ) -> ViolationGenerator:
-    # Same shape as LimitBreachPlant but Inbound direction; the matview
-    # surfaces both under LimitBreachInvariant with `direction='Inbound'`.
-    parent_role = _resolve_account_parent_role(
+    """Mirror of `_adapt_limit_breach` with `direction='Inbound'`."""
+    role, _scope, parent_role = _resolve_account_triple(
         instance, scenarios, plant.account_id,
     )
-    return LimitBreachInvariant().scenario_for(
-        parent_role,
-        str(plant.rail_name),
-        direction="Inbound",
-        overshoot=float(plant.amount),
-        instance=instance,
+    if parent_role is None:
+        raise ValueError(
+            f"plant adapter: inbound_cap_breach plant on account "
+            f"{plant.account_id!r} has no parent_role"
+        )
+    cap = _resolve_limit_schedule_cap(
+        instance, parent_role, str(plant.rail_name), "Inbound",
+    )
+    return LimitBreachGenerator(
         account_id=str(plant.account_id),
+        account_role=role,
+        account_parent_role=parent_role,
+        rail_name=str(plant.rail_name),
+        direction="Inbound",
+        cap=cap,
+        overshoot=float(plant.amount) - cap,
+        anchor_day=anchor_day,
     )
 
 
@@ -426,13 +479,30 @@ def _adapt_stuck_pending(
     plant: StuckPendingPlant, instance: L2Instance, scenarios: ScenarioPlant,
     as_of: datetime,
 ) -> ViolationGenerator:
-    role = _resolve_account_role(instance, scenarios, plant.account_id)
-    return StuckPendingInvariant().scenario_for(
-        str(plant.rail_name),
-        as_of=as_of,
+    """AY.4.f — direct-construct StuckPendingGenerator. Looks up the
+    rail's max_pending_age from the L2."""
+    role, _scope, parent_role = _resolve_account_triple(
+        instance, scenarios, plant.account_id,
+    )
+    rail = _find_rail_or_raise(instance, str(plant.rail_name))
+    if rail.max_pending_age is None:
+        raise ValueError(
+            f"plant adapter: stuck_pending plant on rail "
+            f"{plant.rail_name!r} has no max_pending_age set on the "
+            f"L2 (matview filter excludes; the plant would silently "
+            f"emit an inert row)"
+        )
+    account_id = str(plant.account_id)
+    return StuckPendingGenerator(
+        transaction_id=f"tx-stuck-pending-{plant.rail_name}-{account_id}",
+        transfer_id=f"xfer-stuck-pending-{plant.rail_name}-{account_id}",
+        rail_name=str(plant.rail_name),
+        account_id=account_id,
         account_role=role,
-        instance=instance,
-        account_id=str(plant.account_id),
+        account_parent_role=parent_role,
+        max_pending_age_seconds=int(rail.max_pending_age.total_seconds()),
+        overshoot_seconds=60,  # default from the factory's scenario_for
+        as_of=as_of,
     )
 
 
@@ -440,13 +510,31 @@ def _adapt_stuck_unbundled(
     plant: StuckUnbundledPlant, instance: L2Instance,
     scenarios: ScenarioPlant, as_of: datetime,
 ) -> ViolationGenerator:
-    role = _resolve_account_role(instance, scenarios, plant.account_id)
-    return StuckUnbundledInvariant().scenario_for(
-        str(plant.rail_name),
-        as_of=as_of,
+    """AY.4.f — direct-construct StuckUnbundledGenerator. Looks up
+    the rail's max_unbundled_age from the L2."""
+    role, _scope, parent_role = _resolve_account_triple(
+        instance, scenarios, plant.account_id,
+    )
+    rail = _find_rail_or_raise(instance, str(plant.rail_name))
+    if rail.max_unbundled_age is None:
+        raise ValueError(
+            f"plant adapter: stuck_unbundled plant on rail "
+            f"{plant.rail_name!r} has no max_unbundled_age set on "
+            f"the L2"
+        )
+    account_id = str(plant.account_id)
+    return StuckUnbundledGenerator(
+        transaction_id=f"tx-stuck-unbundled-{plant.rail_name}-{account_id}",
+        transfer_id=f"xfer-stuck-unbundled-{plant.rail_name}-{account_id}",
+        rail_name=str(plant.rail_name),
+        account_id=account_id,
         account_role=role,
-        instance=instance,
-        account_id=str(plant.account_id),
+        account_parent_role=parent_role,
+        max_unbundled_age_seconds=int(
+            rail.max_unbundled_age.total_seconds(),
+        ),
+        overshoot_seconds=60,
+        as_of=as_of,
     )
 
 
@@ -618,33 +706,11 @@ def _resolve_account_triple(
     )
 
 
-def _resolve_account_role(
-    instance: L2Instance, scenarios: ScenarioPlant, account_id: object,
-) -> str:
-    """Short-form wrapper returning just the role."""
-    role, _scope, _parent = _resolve_account_triple(
-        instance, scenarios, account_id,
-    )
-    return role
-
-
-def _resolve_account_parent_role(
-    instance: L2Instance, scenarios: ScenarioPlant, account_id: object,
-) -> str:
-    """Short-form wrapper returning just the parent_role; raises when
-    the account has no parent_role (limit_breach plants need it to
-    locate the matching LimitSchedule)."""
-    _role, _scope, parent = _resolve_account_triple(
-        instance, scenarios, account_id,
-    )
-    if parent is None:
-        raise ValueError(
-            f"plant adapter: account {account_id!r} has no parent_role; "
-            f"cannot adapt as a limit_breach plant "
-            f"(LimitBreachInvariant.scenario_for needs the parent role "
-            f"to find the matching LimitSchedule)"
-        )
-    return parent
+# AY.4.f retired the `_resolve_account_role` + `_resolve_account_parent_role`
+# short-form wrappers — every adapter now uses `_resolve_account_triple`
+# directly so the unused-import lint stays clean. If a future adapter
+# needs just one element, prefer destructuring the triple at the call
+# site over re-introducing thin wrappers.
 
 
 def _find_template_or_raise(
@@ -672,6 +738,32 @@ def _find_rail_or_raise(
             return r
     raise ValueError(
         f"plant adapter: rail {name!r} not declared on the L2 instance"
+    )
+
+
+def _resolve_limit_schedule_cap(
+    instance: L2Instance, parent_role: str, rail_name: str,
+    direction: str,
+) -> float:
+    """Look up the LimitSchedule.cap for the given (parent_role, rail,
+    direction) triple. AY.4.f's direct-construct adapter needs the
+    cap to compute the breach overshoot.
+
+    Raises ValueError when no schedule matches — the plant references
+    a (parent_role, rail, direction) the L2 doesn't declare a cap for.
+    """
+    for sched in instance.limit_schedules:
+        if (
+            str(sched.parent_role) == parent_role
+            and str(sched.rail) == rail_name
+            and str(sched.direction) == direction
+        ):
+            return float(sched.cap)
+    raise ValueError(
+        f"plant adapter: no LimitSchedule declared on the L2 for "
+        f"parent_role={parent_role!r}, rail={rail_name!r}, "
+        f"direction={direction!r}. Check the L2 instance's "
+        f"limit_schedules block."
     )
 
 
