@@ -85,11 +85,15 @@ def emit_config_table_drop(prefix: str, dialect: Dialect) -> str:
     # dialects.
     if dialect is Dialect.ORACLE:
         # Oracle has no IF EXISTS; the BEGIN/EXCEPTION dance handles
-        # missing-table without erroring.
+        # missing-table without erroring. NO trailing `/` — that's a
+        # SQL*Plus directive, not OCI-valid; the Oracle script splitter
+        # already terminates PL/SQL blocks on the inner `END;`. A bare
+        # `/` line leaks into the next statement and triggers ORA-00900
+        # on schema apply (caught 2026-05-24 in CI e2e-oracle-api).
         return (
             f"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {name}'; "
             f"EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; "
-            f"END IF; END;\n/"
+            f"END IF; END;"
         )
     return f"DROP TABLE IF EXISTS {name};"
 
