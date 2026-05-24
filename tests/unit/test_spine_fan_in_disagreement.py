@@ -146,11 +146,27 @@ def test_generator_satisfies_claimed_accounts_protocol() -> None:
     assert len(gen.claimed_accounts) == 1
 
 
-def test_healthy_intended_is_none() -> None:
-    """Per AP.2 non-violating convention, the healthy emit produces
-    no matview row → intended is None."""
+def test_healthy_intended_is_a_coverage_observation() -> None:
+    """Post AY.2.b: the healthy variant returns a CoverageObservation
+    (not None as it did pre-AY.2.b). The matview still emits no row
+    (healthy → parent_count == expected → matview's CASE produces
+    nothing), but the plant DOES produce coverage evidence — 'I
+    planted a healthy fan-in chain firing' — that a coverage detector
+    could read back.
+
+    The AY.0 evidence-currency layering: the healthy variant's
+    `intended.severity` is 'coverage', not 'rule_violation'.
+    `isinstance(intended, CoverageObservation)` narrows the type."""
+    from recon_gen.common.spine import CoverageObservation
     gen = FanInDisagreementInvariant().scenario_for_healthy()
-    assert gen.intended is None
+    intended = gen.intended
+    assert intended is not None
+    assert isinstance(intended, CoverageObservation)
+    items = dict(intended.identity)
+    assert intended.invariant == "fan_in_chain_healthy"
+    assert items["child_transfer_id"] == gen.child_transfer_id
+    assert items["chain_parent_name"] == gen.chain_parent_name
+    assert items["parent_count"] == gen.parent_count
 
 
 def test_missing_intended_matches_natural_key() -> None:

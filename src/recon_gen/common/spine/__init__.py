@@ -85,6 +85,10 @@ from recon_gen.common.spine.fan_in_disagreement import (
     FanInDisagreementInvariant,
 )
 from recon_gen.common.spine.supersession import SupersessionGenerator
+from recon_gen.common.spine.two_template_chain import (
+    TwoTemplateChainFactory,
+    TwoTemplateChainGenerator,
+)
 from recon_gen.common.spine.multi_xor_violation import (
     MultiXorMissedGenerator,
     MultiXorOverlapGenerator,
@@ -102,6 +106,7 @@ from recon_gen.common.spine.money_trail import (
 )
 from recon_gen.common.spine.registry import (
     ALL_AUDIT_FIXTURE_GENERATORS,
+    ALL_COVERAGE_GENERATORS,
     ALL_GENERATORS,
     ALL_INVARIANTS,
     ALL_L1_GENERATORS,
@@ -191,6 +196,11 @@ __all__ = [
     # an AuditFixture (the AY.2.a evidence-currency subtype).
     "FailedTransactionGenerator",
     "SupersessionGenerator",
+    # Seed-color coverage generators (AY.2.b) — emit CoverageObservation
+    # evidence the L1 PostedRequirements panel + audit-PDF coverage
+    # sections read directly. Non-violating by construction.
+    "TwoTemplateChainFactory",
+    "TwoTemplateChainGenerator",
     # Money-trail family — recursive-graph L2; AT.3 promoted generator
     # + View on top of LedgerSimulation.transfers (parent-linked chain).
     "MoneyTrailInvariant",
@@ -207,6 +217,7 @@ __all__ = [
     "ALL_L2_INVESTIGATION_INVARIANTS",
     "ALL_L2_INVESTIGATION_GENERATORS",
     "ALL_AUDIT_FIXTURE_GENERATORS",
+    "ALL_COVERAGE_GENERATORS",
     "ALL_INVARIANTS",
     "ALL_GENERATORS",
     "invariants_for",

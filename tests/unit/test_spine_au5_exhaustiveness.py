@@ -51,6 +51,7 @@ from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.spine import (
     ALL_AUDIT_FIXTURE_GENERATORS,
+    ALL_COVERAGE_GENERATORS,
     ALL_GENERATORS,
     ALL_INVARIANTS,
     INVARIANT_GENERATOR_EDGES,
@@ -86,15 +87,22 @@ def test_every_promoted_generator_is_registered(
     no matview surfaces their evidence, so there's no `Invariant`
     counterpart to register.
     """
-    if generator_class in ALL_AUDIT_FIXTURE_GENERATORS:
+    if (
+        generator_class in ALL_AUDIT_FIXTURE_GENERATORS
+        or generator_class in ALL_COVERAGE_GENERATORS
+    ):
         # Empty edges expected; the registration itself is the check
         # (KeyError on `INVARIANT_GENERATOR_EDGES[generator_class]`
-        # would fire if missing).
+        # would fire if missing). Two parallel buckets: audit-fixture
+        # generators emit AuditFixture evidence; coverage generators
+        # emit CoverageObservation evidence. Both are presence-only
+        # (no matching matview surfaces them as violations) — the
+        # `intended` subtype is the runtime discriminator.
         assert generator_class in INVARIANT_GENERATOR_EDGES, (
             f"{generator_class.__name__} is in "
-            f"ALL_AUDIT_FIXTURE_GENERATORS but not in "
-            f"INVARIANT_GENERATOR_EDGES. Add the empty-tuple entry "
-            f"to register the generator on the spine."
+            f"ALL_AUDIT_FIXTURE_GENERATORS / ALL_COVERAGE_GENERATORS "
+            f"but not in INVARIANT_GENERATOR_EDGES. Add the empty-"
+            f"tuple entry to register the generator on the spine."
         )
         return
     edges = invariants_for(generator_class)

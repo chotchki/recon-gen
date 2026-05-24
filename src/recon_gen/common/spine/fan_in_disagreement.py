@@ -47,7 +47,11 @@ from recon_gen.common.spine._emit_helpers import (
     load_spec_example,
     ts,
 )
-from recon_gen.common.spine.violation import RuleViolation, Violation
+from recon_gen.common.spine.violation import (
+    CoverageObservation,
+    RuleViolation,
+    Violation,
+)
 
 
 @dataclass(frozen=True)
@@ -221,11 +225,27 @@ class FanInChainGenerator:
         return f"acct-fanin-{self.expected_kind}-{self.child_template_name}"
 
     @property
-    def intended(self) -> RuleViolation | None:
-        """The matview row this plant triggers, or `None` for the
-        healthy shape (parent_count == expected → no row)."""
+    def intended(self) -> Violation:
+        """The evidence this plant produces:
+
+          - For 'missing' / 'orphan' / 'extra' variants — a
+            `RuleViolation` (the matview surfaces the disagreement row).
+          - For 'healthy' (parent_count == expected) — a
+            `CoverageObservation` (the AY.2.b layering: the plant emits
+            a chain firing that doesn't trip the fan_in matview but
+            DOES populate the chain's parent_count seed coverage).
+            Pre-AY.2.b this was `None`; AY.2.b promotes it to a typed
+            CoverageObservation so the seed's "I planted a healthy
+            fan-in chain" claim has somewhere to land.
+        """
         if self.expected_kind == "healthy":
-            return None
+            return CoverageObservation.of(
+                "fan_in_chain_healthy",
+                child_transfer_id=self.child_transfer_id,
+                chain_parent_name=self.chain_parent_name,
+                child_template_name=self.child_template_name,
+                parent_count=self.parent_count,
+            )
         return RuleViolation.of(
             "fan_in_disagreement",
             child_transfer_id=self.child_transfer_id,

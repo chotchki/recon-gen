@@ -79,6 +79,7 @@ from recon_gen.common.spine.fan_in_disagreement import (
     FanInDisagreementInvariant,
 )
 from recon_gen.common.spine.supersession import SupersessionGenerator
+from recon_gen.common.spine.two_template_chain import TwoTemplateChainGenerator
 from recon_gen.common.spine.generator import ViolationGenerator
 from recon_gen.common.spine.invariant import Invariant
 from recon_gen.common.spine.limit_breach import (
@@ -176,6 +177,13 @@ INVARIANT_GENERATOR_EDGES: Final[
     # generators (recognized via the `intended` subtype at gate time).
     FailedTransactionGenerator: (),
     SupersessionGenerator: (),
+    # AY.2.b — seed-color coverage generators. Emit CoverageObservation
+    # evidence (NOT RuleViolation) — they're the "I planted a healthy
+    # shape firing" claim that powers L1 Dashboard's PostedRequirements
+    # panel + audit-PDF's coverage sections. No matview surfaces these
+    # as violations (they're non-violating by construction); empty edge
+    # tuple is intentional.
+    TwoTemplateChainGenerator: (),
 }
 
 
@@ -288,11 +296,26 @@ for these (intended.severity == 'audit_fixture' or, post-AY.2.a,
 isinstance(intended, AuditFixture) is the discriminator)."""
 
 
+ALL_COVERAGE_GENERATORS: Final[
+    tuple[type[ViolationGenerator], ...]
+] = (
+    TwoTemplateChainGenerator,
+)
+"""Seed-color coverage generators (AY.2.b) — emit `CoverageObservation`
+evidence the L1 dashboard's PostedRequirements panel + audit-PDF
+coverage sections read directly. Non-violating by construction (no
+matview surfaces them as RuleViolations); the empty edge tuple in
+`INVARIANT_GENERATOR_EDGES` is intentional. AU.5's per-generator
+gate widens to allow empty edges for any generator in this tuple,
+paralleling the audit-fixture treatment."""
+
+
 ALL_GENERATORS: Final[tuple[type[ViolationGenerator], ...]] = (
     *ALL_L1_GENERATORS,
     *ALL_L2_SHAPE_GENERATORS,
     *ALL_L2_INVESTIGATION_GENERATORS,
     *ALL_AUDIT_FIXTURE_GENERATORS,
+    *ALL_COVERAGE_GENERATORS,
 )
 """Every `ViolationGenerator` class promoted to the spine, across all
 three categories. AU.5's registration gate asserts each is keyed in
