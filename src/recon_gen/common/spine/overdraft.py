@@ -90,6 +90,7 @@ class OverdraftInvariant:
         *,
         magnitude: float = 5.0,
         instance: L2Instance | None = None,
+        account_id: str | None = None,
     ) -> "OverdraftGenerator":
         """Resolve a role against the shape; return a generator that
         manufactures a stored-balance overdraft on the first internal
@@ -107,11 +108,19 @@ class OverdraftInvariant:
 
         `instance=None` loads the bundled `spec_example` — production
         callers (deploy-time, e2e fixtures) thread the real L2.
+
+        AY.4.c — `account_id` overrides the default synthetic ID. The
+        plant adapter (AY.4.c.3) threads OLD `OverdraftPlant.account_id`
+        through this kwarg so N overdraft plants on the same role
+        produce N distinct generators (the default
+        `f"acct-overdraft-{role}"` derivation would collide). Existing
+        test callers can pass nothing → preserves the synthetic default
+        byte-stable.
         """
         inst = instance if instance is not None else load_spec_example()
         acct = find_internal_with_role(inst, role, error_kind="overdraft")
         return OverdraftGenerator(
-            account_id=f"acct-overdraft-{role}",
+            account_id=account_id or f"acct-overdraft-{role}",
             account_role=role,
             account_parent_role=acct.parent_role,
             anchor_day=date(2030, 1, 1),

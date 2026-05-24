@@ -74,6 +74,7 @@ class StuckUnbundledInvariant:
         overshoot_seconds: int = 60,
         account_role: str = "CustomerSubledger",
         instance: L2Instance | None = None,
+        account_id: str | None = None,
     ) -> "StuckUnbundledGenerator":
         """Resolve `rail_name` against the shape; plant a Posted-but-
         unbundled transaction with `posting = as_of − (rail.
@@ -86,6 +87,14 @@ class StuckUnbundledInvariant:
         Raises `ValueError` if rail doesn't exist OR doesn't have a
         `max_unbundled_age` (matview excludes those — uncovered scenario
         would silently inert).
+
+        AY.4.c — `account_id` overrides the default synthetic ID. The
+        plant adapter (AY.4.c.3) threads OLD
+        `StuckUnbundledPlant.account_id` through this kwarg so N plants
+        on the same rail produce N distinct generators (the default
+        `f"acct-stuck-unbundled-{rail_name}"` derivation would
+        collide). Existing test callers can pass nothing → preserves
+        the synthetic default byte-stable.
         """
         inst = instance if instance is not None else load_spec_example()
         rail = _find_rail_with_max_unbundled_age(inst, rail_name)
@@ -97,7 +106,7 @@ class StuckUnbundledInvariant:
             transaction_id=f"tx-stuck-unbundled-{rail_name}",
             transfer_id=f"xfer-stuck-unbundled-{rail_name}",
             rail_name=rail_name,
-            account_id=f"acct-stuck-unbundled-{rail_name}",
+            account_id=account_id or f"acct-stuck-unbundled-{rail_name}",
             account_role=account_role,
             account_parent_role=acct.parent_role,
             max_unbundled_age_seconds=int(

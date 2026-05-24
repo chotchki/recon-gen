@@ -86,6 +86,7 @@ class StuckPendingInvariant:
         overshoot_seconds: int = 60,
         account_role: str = "CustomerSubledger",
         instance: L2Instance | None = None,
+        account_id: str | None = None,
     ) -> "StuckPendingGenerator":
         """Resolve `rail_name` against the shape; return a generator
         that plants a Pending transaction on a `account_role` account
@@ -110,6 +111,14 @@ class StuckPendingInvariant:
         matview filter excludes rails without one — manufacturing a
         scenario against an uncovered rail would silently emit an inert
         row, which we refuse).
+
+        AY.4.c — `account_id` overrides the default synthetic ID. The
+        plant adapter (AY.4.c.3) threads OLD
+        `StuckPendingPlant.account_id` through this kwarg so N plants
+        on the same rail produce N distinct generators (the default
+        `f"acct-stuck-pending-{rail_name}"` derivation would collide).
+        Existing test callers can pass nothing → preserves the
+        synthetic default byte-stable.
         """
         inst = instance if instance is not None else load_spec_example()
         rail = _find_rail_with_max_pending_age(inst, rail_name)
@@ -123,7 +132,7 @@ class StuckPendingInvariant:
             transaction_id=f"tx-stuck-pending-{rail_name}",
             transfer_id=f"xfer-stuck-pending-{rail_name}",
             rail_name=rail_name,
-            account_id=f"acct-stuck-pending-{rail_name}",
+            account_id=account_id or f"acct-stuck-pending-{rail_name}",
             account_role=account_role,
             account_parent_role=acct.parent_role,
             max_pending_age_seconds=int(rail.max_pending_age.total_seconds()),
