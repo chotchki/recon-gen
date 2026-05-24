@@ -35,6 +35,7 @@ from datetime import date
 from typing import ClassVar
 
 from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.money import Cents
 from recon_gen.common.spine._emit_helpers import (
     day_bounds,
     find_internal_with_role,
@@ -60,12 +61,15 @@ class ExpectedEodBalanceInvariant:
             f"SELECT account_id, business_day_start, variance "
             f"FROM {self.prefix}_expected_eod_balance_breach",
         ).fetchall()
+        # AO.1: variance is BIGINT cents — see overdraft.detect note.
         return {
             RuleViolation.of(
                 "expected_eod_balance_breach",
                 account_id=aid,
                 business_day=to_date(bds),
-                variance=round(float(var), 2),
+                variance=round(
+                    float(Cents.from_db(int(var)).to_dollars()), 2,
+                ),
             )
             for aid, bds, var in rows
         }

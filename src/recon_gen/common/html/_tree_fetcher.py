@@ -60,6 +60,7 @@ from recon_gen.common.html._data_shape import shape_for_kind
 from recon_gen.common.html._sql_executor import execute_visual_sql_async
 from recon_gen.common.html._visual_sql import wrap_for_visual
 from recon_gen.common.ids import VisualId
+from recon_gen.common.money import Cents
 from recon_gen.common.sql.dialect import Dialect, column_name
 from recon_gen.common.tree.fields import Dim, Measure
 from recon_gen.common.tree.structure import App
@@ -245,7 +246,15 @@ class _VisualPlan:
     are keyed by raw SQL column name and carry the SAME per-column
     presentation QuickSight derives (contract ``human_name`` header +
     ``currency`` measure format) so App2 renders identical headers + money.
-    ``chart`` (AO.R.2) is set for BarChart / LineChart visuals only."""
+    ``chart`` (AO.R.2) is set for BarChart / LineChart visuals only.
+
+    ``money_columns`` (AO.1.impl Studio slice) — SQL column names whose
+    storage is BIGINT cents and need to display as dollars at App2 render
+    time. Populated from the visual's ``currency=True`` fields (matches
+    ``column_formats[name] == 'currency'`` exactly; kept as a separate
+    field for the chart / KPI / Sankey shape paths where the format-by-
+    name map doesn't apply directly).
+    """
 
     kind: str
     sql: str | None
@@ -253,6 +262,57 @@ class _VisualPlan:
     column_labels: Mapping[str, str]
     column_formats: Mapping[str, str]
     chart: _ChartMeta | None
+    money_columns: frozenset[str]
+
+
+def _apply_cents_to_dollars(
+    rows: list[tuple[Any, ...]],  # typing-smell: ignore[explicit-any]: heterogeneous DB row tuples (per-column DB driver types) — same justification as the other tuple-of-Any returns in this module
+    columns: list[str],
+    money_columns: frozenset[str],
+) -> list[tuple[Any, ...]]:  # typing-smell: ignore[explicit-any]: heterogeneous DB row tuples — same justification as the input shape
+    """AO.1.impl (Studio slice) — convert BIGINT cents → float dollars
+    in-place for any column named in ``money_columns``.
+
+    Money columns are stored as integer cents per the AO.1 contract
+    (``recon_gen.common.money.Cents``); App2's renderer formats them as
+    currency assuming dollars. Without this conversion ``$1,234.56``
+    renders as ``$123,456.00`` (100× off). Bare-Table visuals only —
+    KPI / BarChart / LineChart / Sankey route their aggregations through
+    ``_measure_sql`` which divides by 100.0 at the SQL boundary instead.
+
+    Matches column names case-insensitively (Oracle returns column names
+    uppercased via the driver's case-folding); ``money_columns`` is the
+    set of lowercased identifiers from the visual's currency-flagged
+    field leaves. None values pass through (NULL columns). Type-coerces
+    via ``Cents.from_db(int(v)).to_dollars()`` then floats for JSON
+    serialization (Decimal isn't JSON-native).
+    """
+    if not money_columns or not rows:
+        return rows
+    # Resolve column index → conversion flag once per request (Oracle's
+    # uppercased column names + the lowercase money_columns spelling
+    # converge on lowercase compare).
+    convert_idx = [
+        i for i, c in enumerate(columns) if str(c).lower() in money_columns
+    ]
+    if not convert_idx:
+        return rows
+    out: list[tuple[Any, ...]] = []  # typing-smell: ignore[explicit-any]: heterogeneous DB row tuples — same justification as the function signature
+    for row in rows:
+        as_list = list(row)
+        for idx in convert_idx:
+            v = as_list[idx]
+            if v is None:
+                continue
+            try:
+                as_list[idx] = float(Cents.from_db(int(v)).to_dollars())
+            except (TypeError, ValueError):
+                # Already-converted floats / Decimals / strings pass
+                # through untouched — protects against double-convert
+                # paths and SQLite TEXT-affinity fallbacks.
+                pass
+        out.append(tuple(as_list))
+    return out
 
 
 def _leaf_column_name(leaf: Any) -> str | None:  # typing-smell: ignore[explicit-any]: walks dynamic Dim/Measure leaves via getattr
@@ -425,10 +485,14 @@ def make_tree_db_fetcher(
                 base_sql = get_sql(ds_id)
                 sql = wrap_for_visual(base_sql, visual)
             col_labels, col_formats = _table_column_meta(visual, ds_id)
+            money_cols = frozenset(
+                name for name, fmt in col_formats.items() if fmt == "currency"
+            )
             visual_index[vid] = _VisualPlan(
                 kind=kind, sql=sql, ds_id=ds_id,
                 column_labels=col_labels, column_formats=col_formats,
                 chart=_chart_meta(visual),
+                money_columns=money_cols,
             )
 
     async def fetcher(visual_id: VisualId, params: Mapping[str, list[str]]) -> Any:  # typing-smell: ignore[explicit-any]: per-visual-kind shape (KPI float, Sankey {nodes,links}, etc.) — JSON-serialized downstream, so a real union here would be every renderer's shape
@@ -471,8 +535,17 @@ def make_tree_db_fetcher(
             # Last column is COUNT(*) OVER () — strip it positionally
             # (the alias name varies by dialect / driver case-folding).
             total = int(rows[0][-1]) if rows and rows[0] else 0
-            page_rows = [list(r[:-1]) for r in rows]
+            page_rows_tuples = [tuple(r[:-1]) for r in rows]
             page_cols = list(columns[:-1])
+            # AO.1.impl (Studio slice) — Table visuals project raw rows
+            # straight from the dataset SQL (no aggregation wrap), so
+            # any money column lands as BIGINT cents. Convert by name
+            # against the visual's currency-marked field leaves before
+            # shaping.
+            converted = _apply_cents_to_dollars(
+                page_rows_tuples, page_cols, plan.money_columns,
+            )
+            page_rows = [list(r) for r in converted]
             # Echo the *resolved* sort back (not the raw URL value) so
             # the renderer's sort badge + next-direction logic stays
             # consistent — ``""`` when it didn't parse / wasn't given.

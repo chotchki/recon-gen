@@ -103,9 +103,9 @@ def _parent() -> AccountSimulation:
     """The parent account; stored MIRRORS the child's cumulative
     running balance, with NO direct legs of its own (the parent is a
     ledger-side aggregator, not an account where postings happen).
-    `emit_legs=False` is what keeps the matview's per-day
-    direct_totals on the parent at 0; then `parent.computed = Σ
-    child.stored` and a clean fold gives `ledger_drift = 0`.
+    `emit_legs=False` models the pure-aggregator shape. Parents with
+    mixed direct postings + child rollups are exercised by
+    `test_clean_parent_with_direct_postings_and_child_does_not_drift`.
 
     The `plans` field still drives the per-day STORED computation —
     the fold's running balance lands as the parent's daily money. So
@@ -148,6 +148,59 @@ def test_clean_ledger_fold_does_not_drift() -> None:
     finally:
         conn.close()
     assert ld == {}, f"clean ledger fold should not drift; got {ld}"
+
+
+# AO.L regression: a parent that posts directly AND has a child must
+# stay clean on every day, including days with zero direct activity.
+# Pre-fix the `direct_totals` subquery in `_computed_ledger_balance`
+# grouped postings per-day and joined on day-equality, giving the
+# daily delta instead of cumulative — so D1+ showed false drift equal
+# to the parent's prior-day direct-posting history. Matches the
+# ConcentrationMaster pattern surfaced by AY's spine pipeline against
+# sasquatch_pr.yaml (91 false-positive rows). Fix: direct_totals
+# becomes a correlated cumulative SUM mirroring computed_subledger.
+def test_clean_parent_with_direct_postings_and_child_does_not_drift() -> None:
+    child = AccountSimulation(
+        plans=[
+            DayPlan(_D0, (100.0,)),
+            DayPlan(_D1, ()),
+            DayPlan(_D2, ()),
+        ],
+        account_id="acct-vec-child-direct",
+        account_role="CustomerSubledger",
+        parent_role="CustomerLedger",
+    )
+    # Parent direct-posts +50 on D0 then idle. Opening 100 = child's
+    # cumulative. Stored fold = [150, 150, 150]; correct matview
+    # computed = Σ child.money + Σ parent.direct = 100 + 50 = 150
+    # every day → drift {}.
+    parent = AccountSimulation(
+        plans=[
+            DayPlan(_D0, (50.0,)),
+            DayPlan(_D1, ()),
+            DayPlan(_D2, ()),
+        ],
+        account_id="acct-vec-parent-direct",
+        account_role="CustomerLedger",
+        parent_role="",
+        opening_balance=100.0,
+        emit_legs=True,
+    )
+    ledger = LedgerSimulation(accounts=[parent, child])
+    conn = _fresh_db()
+    try:
+        ledger.emit(conn)
+        conn.commit()
+        _refresh(conn)
+        ld = _ledger_drift_days(
+            LedgerDriftInvariant().detect(conn), "acct-vec-parent-direct",
+        )
+    finally:
+        conn.close()
+    assert ld == {}, (
+        f"parent with direct postings + clean child must not drift on "
+        f"any day; got {ld}"
+    )
 
 
 # ---------------------------------------------------------------------------

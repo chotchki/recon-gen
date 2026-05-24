@@ -563,7 +563,13 @@ def test_volume_anomalies_dataset_reads_from_matview():
     # only references the matview which itself wraps the base table.)
     assert "spec_example_transactions" not in sql
     assert "OVER" not in sql
-    assert "STDDEV" not in sql.upper()
+    # AO.1.impl — the dataset projection now lists ``pop_stddev`` as a
+    # column (the SELECT * was expanded for the cents→dollars wrap on
+    # window_sum / pop_mean / pop_stddev). The original intent of this
+    # gate was "no STDDEV() function CALL at dataset time" — narrow the
+    # match accordingly so a bare column reference doesn't false-fail.
+    assert "STDDEV_SAMP(" not in sql.upper()
+    assert "STDDEV(" not in sql.upper()
 
 
 # ---------------------------------------------------------------------------

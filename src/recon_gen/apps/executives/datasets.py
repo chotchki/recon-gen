@@ -43,6 +43,7 @@ from recon_gen.common.sheets.app_info import (
 )
 from recon_gen.common.sql import to_date
 from recon_gen.common.sql.dialect import Dialect
+from recon_gen.common.sql.money import cents_to_dollars_sql
 
 
 # M.4.4.5 — Executives reads base tables only; no app-specific
@@ -119,6 +120,17 @@ def build_transaction_summary_dataset(cfg: Config) -> DataSet:
     # filter form actually narrows the query.
     p = cfg.db_table_prefix
     posted_date_expr = to_date("MIN(t.posting)", cfg.dialect)
+    # AO.1.impl — per_transfer's transfer_amount / transfer_net are
+    # cents (derived from t.amount_money BIGINT cents). The outer
+    # SUM(...) over both stays cents-cents (integer-safe); wrap to
+    # dollars at the outermost projection so the executive dashboard
+    # receives dollars on the two money columns.
+    gross = cents_to_dollars_sql(
+        "SUM(transfer_amount)", dialect=cfg.dialect,
+    )
+    net = cents_to_dollars_sql(
+        "SUM(transfer_net)", dialect=cfg.dialect,
+    )
     sql_template = f"""\
 WITH per_transfer AS (
     SELECT
@@ -136,8 +148,8 @@ SELECT
     posted_date,
     rail_name,
     COUNT(*)                   AS transfer_count,
-    SUM(transfer_amount)       AS gross_amount,
-    SUM(transfer_net)          AS net_amount
+    {gross}       AS gross_amount,
+    {net}          AS net_amount
 FROM per_transfer
 GROUP BY posted_date, rail_name"""
     return build_dataset(

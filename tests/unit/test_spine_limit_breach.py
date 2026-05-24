@@ -249,12 +249,16 @@ def test_plant_amount_money_sign_matches_direction() -> None:
     finally:
         conn.close()
     by_direction = {d: m for d, m in rows}
+    # AO.1: amount_money is BIGINT cents. Caps still authored in dollars,
+    # so dollar arithmetic × 100 = expected cents shape.
+    expected_outbound_cents = int((_OUTBOUND_CAP + 100.0) * 100)
+    expected_inbound_cents = int((_INBOUND_CAP + 100.0) * 100)
     # Outbound = Debit ⇒ money ≤ 0
     assert by_direction["Debit"] < 0
-    assert abs(by_direction["Debit"]) == _OUTBOUND_CAP + 100.0
+    assert abs(by_direction["Debit"]) == expected_outbound_cents
     # Inbound = Credit ⇒ money ≥ 0
     assert by_direction["Credit"] > 0
-    assert by_direction["Credit"] == _INBOUND_CAP + 100.0
+    assert by_direction["Credit"] == expected_inbound_cents
 
 
 # ---------------------------------------------------------------------------

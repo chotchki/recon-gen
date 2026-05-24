@@ -44,6 +44,19 @@ _HEADER = """\
 --   ``<prefix>_transactions``  — one row per money-movement leg
 --   ``<prefix>_daily_balances`` — one row per (account_id, business_day_start)
 --
+-- MONEY IS STORED AS INTEGER CENTS (Phase AO.1). Three columns —
+-- ``transactions.amount_money``, ``daily_balances.money``, and
+-- ``daily_balances.expected_eod_balance`` — are BIGINT integer cents
+-- on every dialect (PG / Oracle / SQLite). The customer ETL feed
+-- contract is dollars-in / cents-stored: your upstream emits dollar
+-- amounts, the ``etl_hook`` (or wrapping Python ETL) converts to
+-- integer cents via ``int(round(amount_dollars * 100))`` BEFORE the
+-- INSERT. Each pattern below shows the literal cents value with an
+-- inline ``/* $X.YZ in cents */`` comment so the conversion is
+-- self-documenting. Python ETL implementations should reach for the
+-- ``recon_gen.common.money.Cents`` helper — ``Cents.from_dollars(
+-- "75.00").value`` gives ``7500`` without the float-dust footgun.
+--
 -- Both tables auto-assign the ``entry`` BIGSERIAL on insert; supersession
 -- (rewriting a previously-Posted leg) is achieved by re-inserting with
 -- the same logical ``id`` (transactions) or ``(account_id, business_day_start)``
@@ -73,7 +86,7 @@ INSERT INTO <prefix>_transactions (
     'CustomerDDA',
     'internal',
     'DDAControl',
-    -25.00,                      -- signed: Debit ⇒ negative
+    -2500,                       /* -$25.00 in cents — Debit ⇒ negative */
     'Debit',
     'Posted',
     '2030-01-15T10:30:00',
@@ -106,7 +119,8 @@ INSERT INTO <prefix>_transactions (
         'tx-EXAMPLE-002-debit',
         'acct-EXAMPLE-cust-0001', 'Customer #0001', 'CustomerDDA',
         'internal', 'DDAControl',
-        -100.00, 'Debit', 'Posted',
+        -10000,                  /* -$100.00 in cents */
+        'Debit', 'Posted',
         '2030-01-15T11:00:00',
         'tr-EXAMPLE-002',
         'InternalTransferDebit', 'InternalInitiated',
@@ -116,7 +130,8 @@ INSERT INTO <prefix>_transactions (
         'tx-EXAMPLE-002-credit',
         'acct-EXAMPLE-cust-0002', 'Customer #0002', 'CustomerDDA',
         'internal', 'DDAControl',
-        100.00, 'Credit', 'Posted',
+        10000,                   /* +$100.00 in cents — sums to zero with the debit leg */
+        'Credit', 'Posted',
         '2030-01-15T11:00:00',
         'tr-EXAMPLE-002',
         'InternalTransferCredit', 'InternalInitiated',
@@ -149,7 +164,7 @@ INSERT INTO <prefix>_transactions (
     'ExternalCounterparty',
     'external',
     NULL,                         -- external accounts have no parent role
-    50000.00,
+    5000000,                      /* +$50,000.00 in cents */
     'Credit',
     'Posted',
     '2030-01-15T16:45:00',
@@ -186,7 +201,8 @@ INSERT INTO <prefix>_transactions (
     'tx-EXAMPLE-004',
     'acct-EXAMPLE-cust-0001', 'Customer #0001', 'CustomerDDA',
     'internal', 'DDAControl',
-    -750.00, 'Debit', 'Pending',
+    -75000,                            /* -$750.00 in cents */
+    'Debit', 'Pending',
     '2030-01-15T09:00:00',
     'tr-EXAMPLE-004',
     'CustomerOutboundACH', 'InternalInitiated',
@@ -204,7 +220,8 @@ INSERT INTO <prefix>_transactions (
     'tx-EXAMPLE-004',                  -- same logical id
     'acct-EXAMPLE-cust-0001', 'Customer #0001', 'CustomerDDA',
     'internal', 'DDAControl',
-    -750.00, 'Debit', 'Posted',        -- status advances
+    -75000,                            /* -$750.00 in cents — unchanged from the Pending row */
+    'Debit', 'Posted',                 -- status advances
     '2030-01-17T14:30:00',             -- posting advances
     'tr-EXAMPLE-004',
     'CustomerOutboundACH', 'InternalInitiated',
@@ -235,7 +252,7 @@ INSERT INTO <prefix>_transactions (
     'tx-EXAMPLE-005',                  -- same logical id as the original
     'acct-EXAMPLE-cust-0001', 'Customer #0001', 'CustomerDDA',
     'internal', 'DDAControl',
-    -125.00,                           -- corrected amount (was -1250.00)
+    -12500,                            /* -$125.00 in cents — corrected (was -$1,250.00 / -125000) */
     'Debit', 'Posted',
     '2030-01-15T13:00:00',             -- posting unchanged from original
     'tr-EXAMPLE-005',
@@ -270,7 +287,8 @@ INSERT INTO <prefix>_transactions (
         'tx-EXAMPLE-006-auth-1',
         'acct-EXAMPLE-merch-0001', 'Coffee Shop Merchant', 'MerchantDDA',
         'internal', 'MerchantDDAControl',
-        4.25, 'Credit', 'Posted',
+        425,                           /* +$4.25 in cents */
+        'Credit', 'Posted',
         '2030-01-15T08:15:00',
         'tr-EXAMPLE-006-auth-1',
         'MerchantCardSettlement',
@@ -281,7 +299,8 @@ INSERT INTO <prefix>_transactions (
         'tx-EXAMPLE-006-auth-2',
         'acct-EXAMPLE-merch-0001', 'Coffee Shop Merchant', 'MerchantDDA',
         'internal', 'MerchantDDAControl',
-        7.75, 'Credit', 'Posted',
+        775,                           /* +$7.75 in cents */
+        'Credit', 'Posted',
         '2030-01-15T08:42:00',
         'tr-EXAMPLE-006-auth-2',
         'MerchantCardSettlement',
@@ -313,7 +332,8 @@ INSERT INTO <prefix>_transactions (
     'tx-EXAMPLE-007',
     'acct-EXAMPLE-cust-0001', 'Customer #0001', 'CustomerDDA',
     'internal', 'DDAControl',
-    -50.00, 'Debit', 'Posted',
+    -5000,                             /* -$50.00 in cents */
+    'Debit', 'Posted',
     '2030-01-16T10:00:00',
     'tr-EXAMPLE-007-child',
     'tr-EXAMPLE-002',                  -- parent: the Pattern 2 transfer
@@ -349,10 +369,10 @@ INSERT INTO <prefix>_daily_balances (
     'CustomerDDA',
     'internal',
     'DDAControl',
-    NULL,                              -- expected_eod_balance optional
+    NULL,                              -- expected_eod_balance optional (BIGINT cents when set)
     '2030-01-15T00:00:00',
     '2030-01-16T00:00:00',
-    1875.00,                           -- stored EOD balance
+    187500,                            /* $1,875.00 in cents — stored EOD balance */
     NULL                               -- no per-day metadata / overrides
 );
 """
@@ -384,13 +404,16 @@ INSERT INTO <prefix>_daily_balances (
     'CustomerDDA',
     'internal',
     'DDAControl',
-    NULL,
+    NULL,                              -- expected_eod_balance optional (BIGINT cents when set)
     '2030-01-15T00:00:00',
     '2030-01-16T00:00:00',
-    1875.00,
+    187500,                            /* $1,875.00 in cents */
     -- Per-day cap override under ``metadata.limits``; keys are L2
-    -- Rail names (LimitSchedule.rail). Sibling keys can live
-    -- alongside (e.g. ``"scenario_id": "..."`` for AV.5).
+    -- Rail names (LimitSchedule.rail). Values mirror the L2 YAML's
+    -- LimitSchedule.cap shape — authored in DOLLARS (the matview
+    -- multiplies by 100 at read time to compare against the
+    -- cents-stored amount_money). Sibling keys can live alongside
+    -- (e.g. ``"scenario_id": "..."`` for AV.5).
     '{"limits": {"CustomerOutboundACH": 10000.00, "CustomerOutboundWire": 25000.00}}'
 );
 """
@@ -420,12 +443,67 @@ INSERT INTO <prefix>_transactions (
     'tx-EXAMPLE-010',
     'acct-EXAMPLE-cust-0001', 'Customer #0001', 'CustomerDDA',
     'internal', 'DDAControl',
-    -200.00, 'Debit', 'Posted',
+    -20000,                            /* -$200.00 in cents */
+    'Debit', 'Posted',
     '2030-01-15T15:30:00',
     'tr-EXAMPLE-010',
     'CustomerOutboundACH', 'InternalInitiated',
     '{"customer_id": "cust-0001", "originating_branch": "BR-DENVER", "fraud_score": 0.02}'
 );
+"""
+
+
+_PATTERN_PYTHON_CENTS_HELPER = """\
+-- ------------------------------------------------------------------------
+-- Pattern 11 — Python ETL wrapper using the ``Cents`` boundary helper
+-- ------------------------------------------------------------------------
+-- WHY: Python ETLs reading dollar amounts from upstream feeds (CSV,
+--   JSON, REST APIs, core-banking dumps) should convert to integer
+--   cents at the INSERT boundary via ``recon_gen.common.money.Cents``.
+--   The helper accepts ``Decimal`` / ``str`` / ``int`` dollar shapes,
+--   rejects float-init Decimals that would re-introduce float dust
+--   (``Cents.from_dollars("0.01") == Cents(1)``), and exposes ``.value``
+--   as the bare integer cents the dbapi driver needs to bind. Using
+--   ``int(round(amount_dollars * 100))`` works for the basic case but
+--   loses sub-cent precision on edge inputs; ``Cents.from_dollars`` is
+--   the recommended path.
+-- Consumed by: no SQL surface — this is a Python-side reference for
+--   ETL authors. Paste the wrapper into your ETL module verbatim.
+--
+-- Example Python ETL (psycopg2 / oracledb / sqlite3 — same shape):
+--
+--     from decimal import Decimal
+--     from recon_gen.common.money import Cents
+--
+--     cur.execute(
+--         '''
+--         INSERT INTO myprefix_transactions (
+--             id, account_id, account_name, account_role, account_scope,
+--             account_parent_role, amount_money, amount_direction, status,
+--             posting, transfer_id, rail_name, origin, metadata
+--         ) VALUES (
+--             %s, %s, %s, %s, %s,
+--             %s, %s, %s, %s,
+--             %s, %s, %s, %s, %s
+--         )
+--         ''',
+--         (
+--             'tx-001', 'acct-cust-0001', 'Customer #0001', 'CustomerDDA',
+--             'internal', 'DDAControl',
+--             # Upstream feed gave us "75.00" as a dollar string;
+--             # Cents.from_dollars converts at the boundary so the
+--             # column-side BIGINT bind is the integer 7500.
+--             Cents.from_dollars(Decimal("75.00")).value,
+--             'Credit', 'Posted',
+--             '2030-01-15T10:30:00', 'tr-001', 'CustomerInboundACH',
+--             'InternalInitiated', None,
+--         ),
+--     )
+--
+-- For batch loads, build the row tuple once + bind via ``executemany``;
+-- the ``.value`` access stays the same. NEVER mix a bare ``Decimal``
+-- or ``float`` into the amount_money bind — the BIGINT column will
+-- reject (PG / Oracle) or silently truncate (SQLite) the non-integer.
 """
 
 
@@ -440,6 +518,7 @@ _PATTERNS: tuple[str, ...] = (
     _PATTERN_DAILY_BALANCE,
     _PATTERN_DAILY_BALANCE_WITH_LIMITS,
     _PATTERN_METADATA_EXTENSION,
+    _PATTERN_PYTHON_CENTS_HELPER,
 )
 
 

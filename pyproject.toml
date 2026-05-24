@@ -324,6 +324,7 @@ include = [
     "src/recon_gen/common/dataset_contract.py",
     "src/recon_gen/common/env_keys.py",
     "src/recon_gen/common/models.py",
+    "src/recon_gen/common/money.py",
     "src/recon_gen/common/variant.py",
     # X.2.o.1 — async DB / App2 server surfaces. Added at strict
     # together because they form one cohesive subsystem (pool →

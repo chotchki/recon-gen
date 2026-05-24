@@ -229,6 +229,28 @@ def varchar_type(n: int, dialect: Dialect) -> str:
     return f"VARCHAR2({n})"
 
 
+def bigint_type(dialect: Dialect) -> str:
+    """Signed 64-bit integer column type.
+
+    Postgres + SQLite ``BIGINT`` (SQLite accepts BIGINT as an alias of
+    INTEGER affinity — both store as 64-bit when needed). Oracle has
+    no BIGINT; ``NUMBER(19)`` is the canonical signed-64-bit column
+    type (covers the full ±9.2×10^18 BIGINT range).
+
+    Introduced for AO.1's money-as-integer-cents migration; the three
+    money columns (amount_money / money / expected_eod_balance) use
+    this type instead of DECIMAL(20,2) so SQLite stores them as exact
+    INTEGER (no REAL float dust) and the read-side
+    ``cents_to_dollars_sql`` helper projects back to dollars when
+    needed.
+    """
+    if dialect is Dialect.POSTGRES:
+        return "BIGINT"
+    if dialect is Dialect.SQLITE:
+        return "BIGINT"
+    return "NUMBER(19)"
+
+
 def decimal_type(precision: int, scale: int, dialect: Dialect) -> str:
     """Fixed-precision decimal.
 

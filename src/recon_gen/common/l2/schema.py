@@ -47,11 +47,11 @@ from __future__ import annotations
 from recon_gen.common.sql import (
     Dialect,
     analyze_table,
+    bigint_type,
     cast,
     concat_agg,
     date_minus_days,
     date_trunc_day,
-    decimal_type,
     drop_index_if_exists,
     drop_matview_if_exists,
     drop_table_if_exists,
@@ -543,7 +543,13 @@ def _emit_l1_invariant_views(
             f"\n     AND {_ls_direction} = '{direction}'"
         )
 
-    limit_cap_value = _cast(_ls_cap_extract, "numeric", dialect)
+    # AO.1: amount_money is BIGINT cents; L2's limit-schedule cap is
+    # authored in dollars. Multiply the JSON-extracted cap by 100 so
+    # the matview's ``SUM(ABS(amount_money)) > cap`` compares
+    # cents-vs-cents.
+    limit_cap_value = (
+        f"({_cast(_ls_cap_extract, 'numeric', dialect)} * 100)"
+    )
     limit_join_outbound = _limit_join("Outbound")
     limit_join_inbound = _limit_join("Inbound")
     # Phase AW.3 (2026-05-23): the per-rail max_*_age values used to be
@@ -1307,7 +1313,7 @@ def _emit_base_schema(
     """Render ``_SCHEMA_TEMPLATE`` with all dialect placeholders filled.
 
     Type-name placeholders ({serial}, {ts}, {text}, {vc20…vc255},
-    {dec202}) come from common/sql type helpers. DROP placeholders
+    {bigint_money}) come from common/sql type helpers. DROP placeholders
     come from drop_*_if_exists helpers (PG IF EXISTS / Oracle PL/SQL).
     The bundler-eligibility partial-index ``WHERE bundle_id IS NULL``
     is a Postgres-only optimization — Oracle gets a full index, which
@@ -1334,7 +1340,9 @@ def _emit_base_schema(
         "vc50": varchar_type(50, dialect),
         "vc100": varchar_type(100, dialect),
         "vc255": varchar_type(255, dialect),
-        "dec202": decimal_type(20, 2, dialect),
+        # AO.1: money columns are BIGINT cents (was DECIMAL(20,2)) so
+        # SQLite stores them as exact INTEGER (no REAL float dust).
+        "bigint_money": bigint_type(dialect),
         # Matview options suffix (Oracle BUILD IMMEDIATE REFRESH COMPLETE
         # ON DEMAND; empty on Postgres + SQLite).
         "matview_options": matview_options(dialect),
@@ -1470,9 +1478,12 @@ _SCHEMA_TEMPLATE = """\
 -- entry         — BIGSERIAL append-only supersession key per L1 F's
 --                 Entry primitive. Higher entry overrides lower for the
 --                 same logical Transaction.id (Current* view in M.1.5).
--- amount_money  — signed Decimal per L1 Amount's "money agrees with
---                 direction" invariant. Positive ⇔ Credit; negative
+-- amount_money  — signed BIGINT cents per L1 Amount's "money agrees
+--                 with direction" invariant. Positive ⇔ Credit; negative
 --                 ⇔ Debit. The CHECK enforces sign-direction agreement.
+--                 AO.1: storage moved from DECIMAL(20,2) to BIGINT cents
+--                 (SQLite stored DECIMAL as REAL → float dust). Dollars
+--                 projection happens at read time via cents_to_dollars_sql.
 -- transfer_parent_id — L1 Transfer.Parent recursive chain (the PR
 --                 pipeline support added in Phase L's L1 spec work).
 -- rail_name     — L2 Rail name that produced this leg. Required on every
@@ -1512,7 +1523,7 @@ CREATE TABLE {p}_transactions (
     account_scope        {vc20}    NOT NULL
         CHECK (account_scope IN ('internal', 'external')),
     account_parent_role  {vc100},
-    amount_money         {dec202}  NOT NULL,
+    amount_money         {bigint_money}  NOT NULL,
     amount_direction     {vc20}    NOT NULL
         CHECK (amount_direction IN ('Debit', 'Credit')),
     status               {vc50}    NOT NULL,
@@ -1555,8 +1566,10 @@ CREATE TABLE {p}_transactions (
 --                 under the ``limits`` key; the integrator's ETL just
 --                 wraps the same map one level deeper.
 --                 NULL means no metadata on this account-day.
--- money         — signed; CAN go negative (overdraft is observable per
---                 L1's Non-negative Stored Balance SHOULD constraint).
+-- money         — signed BIGINT cents; CAN go negative (overdraft is
+--                 observable per L1's Non-negative Stored Balance SHOULD
+--                 constraint). AO.1: see amount_money comment above.
+-- expected_eod_balance — BIGINT cents; NULL when no expectation set.
 -- supersedes    — L1 StoredBalance.Supersedes; open enum per SPEC
 --                 (no CHECK). Per the SPEC's "Higher-Entry rows"
 --                 section, the only category applicable to StoredBalance
@@ -1572,10 +1585,10 @@ CREATE TABLE {p}_daily_balances (
     account_scope          {vc20}    NOT NULL
         CHECK (account_scope IN ('internal', 'external')),
     account_parent_role    {vc100},
-    expected_eod_balance   {dec202},
+    expected_eod_balance   {bigint_money},
     business_day_start     {ts}    NOT NULL,
     business_day_end       {ts}    NOT NULL,
-    money                  {dec202}  NOT NULL,
+    money                  {bigint_money}  NOT NULL,
     metadata               {json_text},
     supersedes             {vc50},
     {db_pk_decl},
@@ -1803,7 +1816,13 @@ SELECT
     parent_db.business_day_start,
     parent_db.business_day_end,
     COALESCE(child_totals.child_balance, 0)
-        + COALESCE(direct_totals.direct_balance, 0) AS computed_balance
+        + COALESCE((
+            SELECT SUM(tx.amount_money)
+            FROM {p}_current_transactions tx
+            WHERE tx.account_id = parent_db.account_id
+              AND tx.status = 'Posted'
+              AND tx.posting <= parent_db.business_day_end
+        ), 0) AS computed_balance
 FROM {p}_current_daily_balances parent_db
 LEFT JOIN (
     SELECT
@@ -1816,18 +1835,6 @@ LEFT JOIN (
 ) child_totals
     ON child_totals.parent_role = parent_db.account_role
    AND child_totals.business_day_start = parent_db.business_day_start
-LEFT JOIN (
-    SELECT
-        tx.account_id,
-        {date_trunc_tx_posting} AS business_day,
-        SUM(tx.amount_money) AS direct_balance
-    FROM {p}_current_transactions tx
-    WHERE tx.status = 'Posted'
-    GROUP BY tx.account_id, {date_trunc_tx_posting}
-) direct_totals
-    ON direct_totals.account_id = parent_db.account_id
-   AND direct_totals.business_day >= parent_db.business_day_start
-   AND direct_totals.business_day < parent_db.business_day_end
 WHERE parent_db.account_scope = 'internal'
   AND parent_db.account_role IS NOT NULL
   -- Only emit for accounts whose role IS a parent role to some child.
@@ -2358,8 +2365,10 @@ CREATE INDEX idx_{p}_dss_account_day
 -- Exceptions queries a precomputed table instead of re-running the
 -- 5-branch UNION ALL (each branch with its own MAX subquery).
 -- One row per L1 invariant violation on the most recent business day.
--- `magnitude` normalized per branch so sort-by-magnitude reads
--- consistently regardless of check_type.
+-- AO.4 — split magnitude into ``magnitude_amount`` (BIGINT cents, money
+-- branches) + ``magnitude_count`` (INT, transfer-keyed cardinality
+-- branches). Exactly one populated per row; the other NULL. Eliminates
+-- the dual-unit "is this $ or count?" UX confusion the operator flagged.
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_todays_exceptions{matview_options} AS
 WITH latest_day AS (
@@ -2373,29 +2382,34 @@ SELECT 'drift' AS check_type, account_id, account_name,
        account_role, account_parent_role,
        business_day_start AS business_day,
        {null_text} AS rail_name,
-       ABS(drift) AS magnitude
+       ABS(drift) AS magnitude_amount,
+       CAST(NULL AS INTEGER) AS magnitude_count
 FROM {p}_drift, latest_day
 WHERE business_day_start = latest_day.day
 UNION ALL
 SELECT 'ledger_drift', account_id, account_name, account_role,
-       NULL, business_day_start, NULL, ABS(drift)
+       NULL, business_day_start, NULL, ABS(drift),
+       CAST(NULL AS INTEGER)
 FROM {p}_ledger_drift, latest_day
 WHERE business_day_start = latest_day.day
 UNION ALL
 SELECT 'overdraft', account_id, account_name, account_role,
        account_parent_role, business_day_start, NULL,
-       ABS(stored_balance)
+       ABS(stored_balance),
+       CAST(NULL AS INTEGER)
 FROM {p}_overdraft, latest_day
 WHERE business_day_start = latest_day.day
 UNION ALL
 SELECT 'limit_breach', account_id, account_name, account_role,
        account_parent_role, business_day, rail_name,
-       (outbound_total - cap)
+       (outbound_total - cap),
+       CAST(NULL AS INTEGER)
 FROM {p}_limit_breach, latest_day
 WHERE business_day = latest_day.day
 UNION ALL
 SELECT 'expected_eod_balance_breach', account_id, account_name,
-       account_role, NULL, business_day_start, NULL, ABS(variance)
+       account_role, NULL, business_day_start, NULL, ABS(variance),
+       CAST(NULL AS INTEGER)
 FROM {p}_expected_eod_balance_breach, latest_day
 WHERE business_day_start = latest_day.day
 -- Currently-open branches (M.4.4.12) — stuck_pending and stuck_unbundled
@@ -2405,19 +2419,21 @@ WHERE business_day_start = latest_day.day
 UNION ALL
 SELECT 'stuck_pending', account_id, account_name, account_role,
        account_parent_role, {posting_to_date} AS business_day,
-       rail_name, amount_money AS magnitude
+       rail_name, amount_money AS magnitude_amount,
+       CAST(NULL AS INTEGER)
 FROM {p}_stuck_pending
 UNION ALL
 SELECT 'stuck_unbundled', account_id, account_name, account_role,
        account_parent_role, {posting_to_date} AS business_day,
-       rail_name, amount_money AS magnitude
+       rail_name, amount_money AS magnitude_amount,
+       CAST(NULL AS INTEGER)
 FROM {p}_stuck_unbundled
 -- AB.2.3 — Chain Parent Disagreement: surfaces per child Transfer (not
 -- per (account, day)), so no per-day filter applies. The matview's
 -- business_day comes from MIN(posting day) of the conflicting leg
--- rows. magnitude is the cardinality of the parent_transfer_id set
--- (>= 2 = violation). account_id / account_role default to NULL since
--- the violation is keyed on transfer_id, not account.
+-- rows. magnitude_count = the cardinality of the parent_transfer_id
+-- set (>= 2 = violation). account_id / account_role default to NULL
+-- since the violation is keyed on transfer_id, not account.
 UNION ALL
 SELECT 'chain_parent_disagreement',
        {null_text} AS account_id,
@@ -2426,12 +2442,13 @@ SELECT 'chain_parent_disagreement',
        NULL AS account_parent_role,
        business_day,
        child_template_name AS rail_name,
-       distinct_parent_count AS magnitude
+       CAST(NULL AS BIGINT) AS magnitude_amount,
+       distinct_parent_count AS magnitude_count
 FROM {p}_chain_parent_disagreement
 -- AB.3.3 — XOR Group Violation: surfaces per (Transfer, template, XOR
 -- group) when firing_count != 1. Like chain_parent_disagreement this
 -- is keyed on transfer_id, not account, so account columns default
--- NULL. magnitude is the firing_count (0 = missed, >=2 = overlap).
+-- NULL. magnitude_count = firing_count (0 = missed, >=2 = overlap).
 UNION ALL
 SELECT 'xor_group_violation',
        {null_text} AS account_id,
@@ -2440,13 +2457,14 @@ SELECT 'xor_group_violation',
        NULL AS account_parent_role,
        business_day,
        template_name AS rail_name,
-       firing_count AS magnitude
+       CAST(NULL AS BIGINT) AS magnitude_amount,
+       firing_count AS magnitude_count
 FROM {p}_xor_group_violation
 -- AB.4.7 — Fan-In Disagreement: surfaces per child Transfer when the
 -- contributing parent set doesn't match the chain's
 -- expected_parent_count (or has cardinality < 2 when expected is
 -- unset). Like the other transfer-keyed branches, account columns
--- default NULL. magnitude is the actual parent_count.
+-- default NULL. magnitude_count = actual parent_count.
 UNION ALL
 SELECT 'fan_in_disagreement',
        {null_text} AS account_id,
@@ -2455,13 +2473,14 @@ SELECT 'fan_in_disagreement',
        NULL AS account_parent_role,
        business_day,
        child_template_name AS rail_name,
-       parent_count AS magnitude
+       CAST(NULL AS BIGINT) AS magnitude_amount,
+       parent_count AS magnitude_count
 FROM {p}_fan_in_disagreement
 -- AB.6.5 — Multi-XOR Violation: surfaces per parent firing when the
 -- declared XOR-sibling set wasn't honored (0 fired = missed,
 -- ≥2 fired = overlap). Transfer-keyed like the chain_parent /
 -- xor_group branches, so account columns default NULL.
--- magnitude is the child_count (0 or ≥2).
+-- magnitude_count = child_count (0 or ≥2).
 UNION ALL
 SELECT 'multi_xor_violation',
        {null_text} AS account_id,
@@ -2470,7 +2489,8 @@ SELECT 'multi_xor_violation',
        NULL AS account_parent_role,
        business_day,
        parent_rail_or_template_name AS rail_name,
-       child_count AS magnitude
+       CAST(NULL AS BIGINT) AS magnitude_amount,
+       child_count AS magnitude_count
 FROM {p}_multi_xor_violation;
 -- Today's Exceptions sheet has 3 dropdowns (check_type, account,
 -- rail_name); each WHERE filter benefits from its own index.

@@ -1,5 +1,99 @@
 # Release Notes
 
+## v11.17.0 — AO.L + AO.1.impl + AO.4 + AO.7: money precision + matview correctness
+
+Four cold-read findings closed in one release; three are structural
+correctness fixes, one (AO.7) was already shipped in code and got
+its local-fixture sync.
+
+### AO.L — `_computed_ledger_balance` cumulative direct postings
+
+The matview's `direct_totals` subquery grouped direct postings
+per-day + joined on day-equality with the parent's
+`[business_day_start, business_day_end)`, giving daily delta paired
+against cumulative child balances. Result: 91 false-positive
+`ConcentrationMaster` ledger-drift rows on real seeded data — each
+row's "drift" ≈ the parent's prior-day stored balance (smoking gun
+for the cumulative-vs-delta mismatch). Latent through Phase AY/AZ
+because the semantic-lock builder skips the baseline emit (the canonical
+gate scenario doesn't post directly to any parent role). Fix: rewrite
+`direct_totals` as a correlated cumulative SUM mirroring
+`_computed_subledger_balance`. Drops 91 false ledger-drift rows on
+sasquatch_pr SQLite at today's anchor. Regression test added.
+
+### AO.1.impl — money columns flip to BIGINT integer cents
+
+Per the AO.1.lock decision (uniform cents across PG/Oracle/SQLite —
+ETL contract is dialect-agnostic): three money columns
+(`<prefix>_transactions.amount_money`,
+`<prefix>_daily_balances.money`,
+`<prefix>_daily_balances.expected_eod_balance`) flip from
+`DECIMAL(20,2)` to `BIGINT` cents. Matview math stays integer-safe;
+dataset SQL projects cents → dollars at the read boundary via the new
+`cents_to_dollars_sql(col, *, dialect)` helper. Python-side authoring
+stays Decimal dollars (readability); the insert helpers convert at
+the write boundary via the new `Cents` newtype (`common/money.py`).
+
+Drift count collapse on sasquatch_pr / SQLite (the AO.1 success
+metric): `<prefix>_drift` 675 rows → 2 rows; `<prefix>_ledger_drift`
+37 rows → 1 row. All remaining rows are the deliberate plants;
+the prior ~700 "drift" rows were float-arithmetic dust from SQLite's
+REAL-affinity DECIMAL.
+
+ETL contract update: the `etl_hook` now converts dollar amounts to
+integer cents at the edge before writing to the base tables. New
+`etl_examples.py` Pattern 11 demonstrates the
+`Cents.from_dollars(...).value` wrapper for Python ETL implementations.
+`docs/Schema_v6.md` updated with the new column types + storage
+contract + common pitfalls section.
+
+App2 / Studio / audit-PDF rendering paths all convert at their read
+boundary so consumers see dollar Decimals as before — the change is
+storage-internal.
+
+### AO.4 — `<prefix>_todays_exceptions.magnitude` split into amount + count
+
+Long-standing UX confusion (operator flagged 2026-05-24): the
+`magnitude` column UNION'd money-magnitude rows (drift, ledger_drift,
+overdraft, expected_eod_balance_breach, limit_breach overflow,
+stuck_pending/unbundled amounts) with cardinality-count rows
+(chain_parent_disagreement, xor_group_violation, fan_in_disagreement,
+multi_xor_violation) under one numeric column. The visual displayed
+it as `currency=True` so count rows rendered as `$3.00`. Split into
+`magnitude_amount` (BIGINT cents, money branches, NULL otherwise) +
+`magnitude_count` (INTEGER, cardinality branches, NULL otherwise).
+Exactly one populated per row. Exception Detail table renders both
+columns side-by-side so each row clearly shows either a dollar amount
+or a count, never both. Sort defaults to amount DESC.
+
+### AO.7 — ACH rail direction mislabel (root fix already in v11.9.4)
+
+The cold-read symptom — the 2615-row `ACHOriginationDailySweep`
+false-orphan flood (cascade-credit legs masquerading as firings of
+the money-movement rail) — was already fixed in v11.9.4 by AJ.4b
+(the `InternalBalanceMaintenance` label-only rail). Packaged fixtures
+have the rail. The operator-local `run/sasquatch_pr.yaml` had
+drifted from the packaged fixture and was missing the rail; synced
+2026-05-24. No code change; the local fixture-drift class is queued
+as a separate follow-on (regenerate `run/` from packaged fixture,
+or Studio "sync" affordance).
+
+### Migration notes
+
+- **ETL integrators**: feeds writing to `<prefix>_transactions` /
+  `<prefix>_daily_balances` MUST now write money as BIGINT integer
+  cents (`amount_money_cents = int(round(amount_dollars * 100))`).
+  The `etl_hook` cfg field carries the conversion at the deploy
+  edge; if your hook is custom, update it accordingly. See
+  `docs/Schema_v6.md` "Money is stored as integer cents" section.
+- **Direct SQL queries**: anything reading raw matview rows (custom
+  reports, ad-hoc dashboards) now gets cents. Use
+  `cents_to_dollars_sql(col, dialect=...)` in your SELECT or divide
+  by 100 at the consumer.
+- **Customer L2 yaml**: continues to author in dollars (`amount_typical_
+  range: ["50.00", "5000.00"]`, `LimitSchedule.cap`). The loader /
+  matview converts at the read boundary.
+
 ## v11.16.0 — Phase AZ: retire byte-locked seeds → semantic locks
 
 Phase AZ closes the third of three gaps the post-AV retrospective

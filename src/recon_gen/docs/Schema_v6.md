@@ -125,7 +125,7 @@ Every row identifies its parent transfer via `transfer_id`.
 | `account_role` | `VARCHAR(100) NOT NULL` | The L2 role this account materializes. |
 | `account_scope` | `VARCHAR(20) NOT NULL` | `'internal'` or `'external'`. |
 | `account_parent_role` | `VARCHAR(100)` | NULL for parent / external accounts; populated for sub-ledger child accounts. |
-| `amount_money` | `DECIMAL(20,2) NOT NULL` | Signed amount. **Positive = Credit (money in), Negative = Debit (money out).** Per L1 Amount invariant. |
+| `amount_money` | `BIGINT NOT NULL` | Signed amount in **integer cents** (converted from customer dollars at the `etl_hook` boundary — see [Money is stored as integer cents](#money-is-stored-as-integer-cents) below). **Positive = Credit (money in), Negative = Debit (money out).** Per L1 Amount invariant. |
 | `amount_direction` | `VARCHAR(20) NOT NULL` | `'Debit'` or `'Credit'`. Constrained agreement with `amount_money` sign — see CHECK below. |
 | `status` | `VARCHAR(20) NOT NULL` | `'Pending'`, `'Posted'`, `'Failed'`. Drives stuck_pending + non-zero-transfer math. |
 | `posting` | `TIMESTAMP NOT NULL` (TZ-naive) | When the leg posted to the underlying ledger. |
@@ -198,10 +198,10 @@ end-of-day stored balance for each account each day.
 | `account_role` | `VARCHAR(100) NOT NULL` | L2 role. |
 | `account_scope` | `VARCHAR(20) NOT NULL` | `'internal'` / `'external'`. |
 | `account_parent_role` | `VARCHAR(100)` | Parent role; NULL for parent / external. |
-| `expected_eod_balance` | `DECIMAL(20,2)` | If set, the L1 invariant `expected_eod_balance_breach` fires when `money <> expected_eod_balance` at EOD. NULL = no expected target declared. |
+| `expected_eod_balance` | `BIGINT` | **Integer cents** (signed; converted from customer dollars at the `etl_hook` boundary — see [Money is stored as integer cents](#money-is-stored-as-integer-cents) below). If set, the L1 invariant `expected_eod_balance_breach` fires when `money <> expected_eod_balance` at EOD. NULL = no expected target declared. |
 | `business_day_start` | `TIMESTAMP NOT NULL` (TZ-naive) | Beginning-of-day UTC midnight. The composite key `(account_id, business_day_start)` is the logical row id. |
 | `business_day_end` | `TIMESTAMP NOT NULL` (TZ-naive) | End-of-day = `business_day_start + INTERVAL '1 day'`. |
-| `money` | `DECIMAL(20,2) NOT NULL` | Stored EOD balance. Computed-vs-stored disagreement surfaces as drift. |
+| `money` | `BIGINT NOT NULL` | Stored EOD balance in **integer cents** (converted from customer dollars at the `etl_hook` boundary — see [Money is stored as integer cents](#money-is-stored-as-integer-cents) below). Computed-vs-stored disagreement surfaces as drift. |
 | `metadata` | `TEXT` | Per-row open JSON, symmetric with `transactions.metadata`. Per-day limit overrides live under `metadata.limits` (a JSON map keyed by `rail_name`). Renamed from `limits` in Phase AV (2026-05-23) — the per-rail caps moved one level deeper so the column has room for siblings (scenario_id, future per-day tags). See **Metadata** below. |
 | `supersedes` | `VARCHAR(50)` | Same vocabulary as transactions.supersedes. |
 
@@ -235,13 +235,109 @@ CREATE INDEX idx_{{ l2_instance_name }}_daily_balances_business_day
   (the drift-check invariant)
 
 Same rule for every `account_scope`. A leg posted to a customer DDA
-with `amount_money = +250.00, amount_direction = 'Credit'` means the
-customer's balance went up by $250. The matching leg posted to the
-counterparty (which sent the money) has `amount_money = -250.00,
-amount_direction = 'Debit'`.
+with `amount_money = +25000, amount_direction = 'Credit'` (i.e.
++$250.00 in cents — see next section) means the customer's balance
+went up by $250. The matching leg posted to the counterparty (which
+sent the money) has `amount_money = -25000, amount_direction =
+'Debit'`.
 
 The CHECK constraint enforces sign-direction agreement at write time —
 ETL bugs that emit `Credit` with negative money fail at INSERT.
+
+---
+
+## Money is stored as integer cents
+
+Phase AO.1 (2026-05-21) moved the three money columns —
+`transactions.amount_money`, `daily_balances.money`, and
+`daily_balances.expected_eod_balance` — from `DECIMAL(20,2)` to
+`BIGINT integer cents` on every dialect (PostgreSQL / Oracle /
+SQLite). SQLite's REAL-backed DECIMAL was producing ~700
+false-positive drift rows in the L1 `stored <> computed` matview;
+PG + Oracle DECIMAL stayed exact but had to follow for uniform
+storage — **the customer ETL feed contract must be
+dialect-agnostic**.
+
+### Storage contract
+
+- The three columns above are signed integer cents. A leg of $75.00
+  stores as `7500`; a leg of -$1.99 stores as `-199`.
+- All matview math (`SUM(amount_money)`, drift recomputations, limit
+  breach comparisons) operates in cents-space — integer arithmetic,
+  no float dust.
+- Dashboard display projects cents → dollars at the rendering edge
+  via `recon_gen.common.sql.money.cents_to_dollars_sql` (emits
+  `CAST(col AS REAL) / 100.0` on SQLite, `(col) / 100.0` on PG /
+  Oracle). Visual emitters carrying `currency=True` format the
+  resulting decimal as `$1,234.56`.
+
+### `etl_hook` conversion contract
+
+The customer ETL feed is dollar-shaped — upstream rows from core
+banking / Fed statements / processor settlements carry decimal dollar
+amounts. The conversion to integer cents happens at the ETL
+boundary, NOT at any later layer:
+
+```python
+# Bare-arithmetic conversion (works for the basic case).
+amount_money_cents = int(round(amount_dollars * 100))
+```
+
+The bare form loses sub-cent precision on edge inputs (a literal
+`Decimal("0.005") * 100` floats to `0.5` and rounds inconsistently
+across dialects). The recommended Python ETL path is the
+`Cents` boundary helper in `common/money.py`:
+
+```python
+from decimal import Decimal
+from recon_gen.common.money import Cents
+
+# Accepts Decimal / str / int dollar shapes; rejects float-init
+# Decimals that re-introduce float dust.
+amount_money_cents = Cents.from_dollars(Decimal("75.00")).value   # 7500
+amount_money_cents = Cents.from_dollars("0.01").value             # 1
+```
+
+`Cents.from_dollars(...).value` is the integer the dbapi driver
+binds. `Cents.from_db(raw_int)` is the symmetric read-boundary
+helper — applies when an ETL needs to round-trip a stored value
+back into authoring-side dollars (e.g., for a "did we already load
+this row?" reconciliation query).
+
+For shell-level etl_hooks (Bash / awk / SQL-only flows), do the
+multiply-and-truncate in the upstream projection:
+
+```sql
+-- Source row's amount column is a DECIMAL dollar value.
+INSERT INTO myprefix_transactions (..., amount_money, ...)
+SELECT ..., CAST(ROUND(source.amount_dollars * 100) AS BIGINT), ...
+FROM   upstream_feed source;
+```
+
+### Common pitfalls
+
+- **Inserting a bare Decimal / float into the BIGINT column.**
+  PG and Oracle reject the bind outright; SQLite silently truncates
+  to an integer (e.g., `75.00` stores as `75` cents — a 100×
+  understatement). Always convert client-side; never trust the
+  driver to coerce.
+- **Doubling the conversion.** A row that's already been multiplied
+  by 100 (e.g., from a cents-shaped upstream) hits the dashboard
+  rendered as 100× the actual value. The contract is one
+  conversion at the ETL boundary — no implicit `×100` anywhere
+  else.
+- **Missing the conversion on `daily_balances.expected_eod_balance`
+  or `daily_balances.money`.** Both are integer cents under the same
+  rule as `amount_money`. A dollars-shaped value in either column
+  inflates the L1 drift / expected-EOD-balance breach matviews by
+  100×.
+- **Per-day `metadata.limits` overrides stay in dollars.** They
+  mirror the L2 YAML's `LimitSchedule.cap` authoring shape; the
+  matview multiplies by 100 at read time to compare against the
+  cents-stored `amount_money`. Don't pre-multiply these.
+
+See `recon-gen data etl-example` for canonical INSERT patterns with
+inline cents-to-dollars annotations.
 
 ---
 

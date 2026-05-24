@@ -170,7 +170,8 @@ def test_single_leg_first_emit_writes_one_leg_stamped_with_template() -> None:
         ).fetchall()
     finally:
         conn.close()
-    assert rows == [(-50.0, "Debit", "SubledgerCharge", _SINGLE_LEG_FIRST_TEMPLATE)]
+    # AO.1: amount_money is BIGINT cents — $-50.00 → -5000.
+    assert rows == [(-5000, "Debit", "SubledgerCharge", _SINGLE_LEG_FIRST_TEMPLATE)]
 
 
 # ---------------------------------------------------------------------------

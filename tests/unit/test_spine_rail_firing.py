@@ -195,7 +195,8 @@ def test_single_leg_debit_emit_writes_one_negative_leg() -> None:
         ).fetchall()
     finally:
         conn.close()
-    assert rows == [(-100.0, "Debit", _SINGLE_LEG_DEBIT_RAIL)]
+    # AO.1: amount_money is BIGINT cents — $-100.00 → -10000.
+    assert rows == [(-10000, "Debit", _SINGLE_LEG_DEBIT_RAIL)]
 
 
 def test_single_leg_credit_emit_writes_one_positive_leg() -> None:
@@ -212,7 +213,8 @@ def test_single_leg_credit_emit_writes_one_positive_leg() -> None:
         ).fetchall()
     finally:
         conn.close()
-    assert rows == [(75.0, "Credit", _SINGLE_LEG_CREDIT_RAIL)]
+    # AO.1: amount_money is BIGINT cents — $75.00 → 7500.
+    assert rows == [(7500, "Credit", _SINGLE_LEG_CREDIT_RAIL)]
 
 
 # ---------------------------------------------------------------------------

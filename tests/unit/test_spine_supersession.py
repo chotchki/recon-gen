@@ -119,8 +119,9 @@ def test_emit_writes_two_rows_sharing_one_id() -> None:
     # Distinct entry values (auto-incremented by the dialect).
     assert rows[0][1] < rows[1][1]
     # Original (Debit -250) then correction (Debit -200).
-    assert rows[0][2] == -250.0
-    assert rows[1][2] == -200.0
+    # AO.1: amount_money is BIGINT cents.
+    assert rows[0][2] == -25000
+    assert rows[1][2] == -20000
     # Original has no `supersedes`; correction tags 'TechnicalCorrection'.
     assert rows[0][3] is None
     assert rows[1][3] == "TechnicalCorrection"

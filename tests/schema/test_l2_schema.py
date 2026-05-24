@@ -108,9 +108,12 @@ def test_emits_entry_column_on_both_tables() -> None:
 
 
 def test_transactions_includes_amount_money_and_direction() -> None:
-    """Per L1 SPEC: Amount = (Money, Direction); both columns present."""
+    """Per L1 SPEC: Amount = (Money, Direction); both columns present.
+
+    AO.1: amount_money moved from DECIMAL(20,2) to BIGINT integer cents
+    so SQLite stores it as exact INTEGER (no REAL float dust)."""
     sql = emit_schema(_instance("amt"), prefix="amt")
-    assert "amount_money         DECIMAL(20,2)  NOT NULL" in sql
+    assert "amount_money         BIGINT  NOT NULL" in sql
     assert "amount_direction     VARCHAR(20)    NOT NULL" in sql
     assert "amount_direction IN ('Debit', 'Credit')" in sql
 
@@ -176,7 +179,8 @@ def test_daily_balances_includes_expected_eod_and_metadata() -> None:
     Bounded VARCHAR so the column behaves like a string on both
     dialects (CLOB cannot be aggregated; bounded VARCHAR can)."""
     sql = emit_schema(_instance("eb"), prefix="eb")
-    assert "expected_eod_balance   DECIMAL(20,2)" in sql
+    # AO.1: BIGINT cents (was DECIMAL(20,2)) to eliminate SQLite float dust.
+    assert "expected_eod_balance   BIGINT" in sql
     assert "metadata               VARCHAR(4000)" in sql
     # Old column name MUST NOT appear in the CREATE TABLE block (a
     # half-done rename would leave it).
@@ -197,7 +201,9 @@ def test_daily_balances_money_is_signed() -> None:
     daily_balances CREATE TABLE block, NOT any usage in a downstream view.
     """
     sql = emit_schema(_instance("sg"), prefix="sg")
-    assert "money                  DECIMAL(20,2)  NOT NULL" in sql
+    # AO.1: BIGINT cents (was DECIMAL(20,2)) — see test_transactions
+    # amount_money note for the rationale.
+    assert "money                  BIGINT  NOT NULL" in sql
     # Find the daily_balances CREATE TABLE block specifically.
     db_block_match = re.search(
         r"CREATE TABLE sg_daily_balances\s*\((.*?)\);",
@@ -735,7 +741,7 @@ def test_todays_exceptions_includes_chain_parent_disagreement_branch() -> None:
     assert "'chain_parent_disagreement'" in body
     assert "FROM te2_chain_parent_disagreement" in body
     assert "child_template_name AS rail_name" in body
-    assert "distinct_parent_count AS magnitude" in body
+    assert "distinct_parent_count AS magnitude_count" in body
 
 
 def _instance_with_pending_age(prefix: str) -> L2Instance:
@@ -1073,7 +1079,7 @@ def test_todays_exceptions_includes_xor_group_violation_branch() -> None:
     assert "'xor_group_violation'" in body
     assert "FROM xt_xor_group_violation" in body
     assert "template_name AS rail_name" in body
-    assert "firing_count AS magnitude" in body
+    assert "firing_count AS magnitude_count" in body
 
 
 def test_transfer_parents_view_ab4_shape() -> None:
@@ -1274,7 +1280,7 @@ def test_todays_exceptions_includes_fan_in_disagreement_branch() -> None:
     assert "'fan_in_disagreement'" in body
     assert "FROM fit_fan_in_disagreement" in body
     assert "child_template_name AS rail_name" in body
-    assert "parent_count AS magnitude" in body
+    assert "parent_count AS magnitude_count" in body
 
 
 def test_multi_xor_violation_view_empty_branch_when_no_qualifying_chain(
@@ -1380,7 +1386,7 @@ def test_todays_exceptions_includes_multi_xor_violation_branch() -> None:
     assert "'multi_xor_violation'" in body
     assert "FROM mxt_multi_xor_violation" in body
     assert "parent_rail_or_template_name AS rail_name" in body
-    assert "child_count AS magnitude" in body
+    assert "child_count AS magnitude_count" in body
 
 
 def test_multi_xor_violation_skips_per_child_fan_in_entries() -> None:

@@ -108,6 +108,13 @@ def _create_audit_schema(conn: sqlite3.Connection) -> None:
     projects are declared — the production matviews carry more, but the
     audit queries select a fixed subset.
 
+    Money columns are ``INTEGER`` (BIGINT cents per AO.1 foundation —
+    the production schema migrated from DECIMAL dollars to BIGINT cents
+    to kill SQLite REAL-backed float-dust drift). The audit query
+    helpers project these to ``Decimal`` dollars at the cursor
+    boundary via ``_cents_to_dollars`` — seed values below are in
+    cents, assertions are in dollars.
+
     Naming uses the ``ut_`` prefix matched by ``_INSTANCE.instance``.
     """
     conn.executescript(
@@ -119,9 +126,9 @@ def _create_audit_schema(conn: sqlite3.Connection) -> None:
             account_parent_role TEXT,
             business_day_start TEXT NOT NULL,
             business_day_end TEXT NOT NULL,
-            stored_balance REAL NOT NULL,
-            computed_balance REAL NOT NULL,
-            drift REAL NOT NULL
+            stored_balance INTEGER NOT NULL,
+            computed_balance INTEGER NOT NULL,
+            drift INTEGER NOT NULL
         );
         CREATE TABLE ut_ledger_drift (
             account_id TEXT NOT NULL,
@@ -134,7 +141,7 @@ def _create_audit_schema(conn: sqlite3.Connection) -> None:
             account_parent_role TEXT,
             business_day_start TEXT NOT NULL,
             business_day_end TEXT NOT NULL,
-            stored_balance REAL NOT NULL
+            stored_balance INTEGER NOT NULL
         );
         CREATE TABLE ut_limit_breach (
             account_id TEXT NOT NULL,
@@ -144,8 +151,8 @@ def _create_audit_schema(conn: sqlite3.Connection) -> None:
             business_day TEXT NOT NULL,
             rail_name TEXT,
             direction TEXT NOT NULL,
-            outbound_total REAL NOT NULL,
-            cap REAL NOT NULL
+            outbound_total INTEGER NOT NULL,
+            cap INTEGER NOT NULL
         );
         CREATE TABLE ut_stuck_pending (
             account_id TEXT NOT NULL,
@@ -155,7 +162,7 @@ def _create_audit_schema(conn: sqlite3.Connection) -> None:
             transaction_id TEXT NOT NULL,
             rail_name TEXT,
             posting TEXT NOT NULL,
-            amount_money REAL NOT NULL,
+            amount_money INTEGER NOT NULL,
             age_seconds REAL NOT NULL,
             max_pending_age_seconds INTEGER NOT NULL
         );
@@ -167,7 +174,7 @@ def _create_audit_schema(conn: sqlite3.Connection) -> None:
             transaction_id TEXT NOT NULL,
             rail_name TEXT,
             posting TEXT NOT NULL,
-            amount_money REAL NOT NULL,
+            amount_money INTEGER NOT NULL,
             age_seconds REAL NOT NULL,
             max_unbundled_age_seconds INTEGER NOT NULL
         );
@@ -177,7 +184,7 @@ def _create_audit_schema(conn: sqlite3.Connection) -> None:
             account_id TEXT NOT NULL,
             account_name TEXT,
             posting TEXT NOT NULL,
-            amount_money REAL NOT NULL,
+            amount_money INTEGER NOT NULL,
             status TEXT NOT NULL,
             supersedes TEXT
         );
@@ -185,7 +192,7 @@ def _create_audit_schema(conn: sqlite3.Connection) -> None:
             account_id TEXT NOT NULL,
             account_name TEXT,
             business_day_start TEXT NOT NULL,
-            money REAL NOT NULL,
+            money INTEGER NOT NULL,
             supersedes TEXT
         );
         """
@@ -201,13 +208,18 @@ def _seed_audit_data(conn: sqlite3.Connection) -> None:
     row at all suffices to prove the SELECT works.
     """
     cur = conn.cursor()
+    # AO.1: money columns below are INTEGER cents to match the
+    # production BIGINT cents schema (drift 25.00 → 2500 cents,
+    # stored_balance -42.50 → -4250 cents, etc.). The audit query
+    # helpers project cents → dollars at the cursor boundary, so
+    # assertions stay in dollars (``Decimal("25")``).
     cur.executemany(
         "INSERT INTO ut_drift VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             ("acct-001", "Acct One", "dda", "DDAControl",
-             "2030-01-03", "2030-01-03", 100.0, 75.0, 25.0),
+             "2030-01-03", "2030-01-03", 10000, 7500, 2500),
             ("acct-002", "Acct Two", "dda", "DDAControl",
-             "2030-01-05", "2030-01-05", 50.0, 60.0, -10.0),
+             "2030-01-05", "2030-01-05", 5000, 6000, -1000),
         ],
     )
     cur.executemany(
@@ -218,7 +230,7 @@ def _seed_audit_data(conn: sqlite3.Connection) -> None:
         "INSERT INTO ut_overdraft VALUES (?, ?, ?, ?, ?, ?, ?)",
         [
             ("acct-003", "Acct Three", "dda", "DDAControl",
-             "2030-01-04", "2030-01-04", -42.50),
+             "2030-01-04", "2030-01-04", -4250),
         ],
     )
     cur.executemany(
@@ -227,9 +239,9 @@ def _seed_audit_data(conn: sqlite3.Connection) -> None:
             # AB.1: 1 Outbound + 1 Inbound row prove the audit query
             # surfaces both directions.
             ("acct-004", "Acct Four", "dda", "DDAControl",
-             "2030-01-02", "ach", "Outbound", 15000.0, 10000.0),
+             "2030-01-02", "ach", "Outbound", 1_500_000, 1_000_000),
             ("acct-004", "Acct Four", "dda", "DDAControl",
-             "2030-01-02", "ach", "Inbound", 25000.0, 20000.0),
+             "2030-01-02", "ach", "Inbound", 2_500_000, 2_000_000),
         ],
     )
     cur.executemany(
@@ -237,7 +249,7 @@ def _seed_audit_data(conn: sqlite3.Connection) -> None:
         [
             ("acct-005", "Acct Five", "dda", "DDAControl",
              "txn-001", "wire", "2029-12-15T10:00:00",
-             123.45, 432000.0, 86400),
+             12345, 432000.0, 86400),
         ],
     )
     cur.executemany(
@@ -245,7 +257,7 @@ def _seed_audit_data(conn: sqlite3.Connection) -> None:
         [
             ("acct-006", "Acct Six", "dda", "DDAControl",
              "txn-002", "ach", "2029-12-20T11:30:00",
-             67.89, 259200.0, 86400),
+             6789, 259200.0, 86400),
         ],
     )
     # transactions: one in-period correcting entry + one out-of-period
@@ -254,18 +266,18 @@ def _seed_audit_data(conn: sqlite3.Connection) -> None:
         "INSERT INTO ut_transactions VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [
             ("txn-100", "xfer-A", "acct-007", "Acct Seven",
-             "2030-01-04T12:00:00", 250.0, "Posted", "void_redo"),
+             "2030-01-04T12:00:00", 25000, "Posted", "void_redo"),
             ("txn-099", "xfer-A", "acct-007", "Acct Seven",
-             "2029-12-31T12:00:00", 100.0, "Posted", None),
+             "2029-12-31T12:00:00", 10000, "Posted", None),
             ("txn-101", "xfer-B", "acct-008", "Acct Eight",
-             "2030-01-06T09:00:00", 75.0, "Posted", None),
+             "2030-01-06T09:00:00", 7500, "Posted", None),
         ],
     )
     cur.executemany(
         "INSERT INTO ut_daily_balances VALUES (?, ?, ?, ?, ?)",
         [
-            ("acct-007", "Acct Seven", "2030-01-04", 250.0, "void_redo"),
-            ("acct-008", "Acct Eight", "2030-01-05", 75.0, None),
+            ("acct-007", "Acct Seven", "2030-01-04", 25000, "void_redo"),
+            ("acct-008", "Acct Eight", "2030-01-05", 7500, None),
         ],
     )
     conn.commit()

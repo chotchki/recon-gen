@@ -15,9 +15,11 @@ return expression-level SQL).
 from __future__ import annotations
 
 from .app2_filters import app2_date_filter
+from .money import cents_to_dollars_sql
 from .dialect import (
     Dialect,
     analyze_table,
+    bigint_type,
     boolean_type,
     cast,
     column_name,
@@ -59,8 +61,10 @@ __all__ = [
     "Dialect",
     "analyze_table",
     "app2_date_filter",
+    "bigint_type",
     "boolean_type",
     "cast",
+    "cents_to_dollars_sql",
     "column_name",
     "concat_agg",
     "create_matview",

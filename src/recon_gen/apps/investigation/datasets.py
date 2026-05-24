@@ -54,6 +54,7 @@ from recon_gen.common.sheets.app_info import (
     build_liveness_dataset,
     build_matview_status_dataset,
 )
+from recon_gen.common.sql.money import cents_to_dollars_sql
 
 
 # M.4.4.5 — matviews the Investigation app reads, surfaced on the
@@ -209,16 +210,32 @@ MONEY_TRAIL_ROOTS_CONTRACT = DatasetContract(columns=[
 # wrapper computes the display columns inline so the matview stays a
 # pure shape over base tables. N.3.d: matview name is per-instance
 # prefixed (was global ``inv_money_trail_edges`` pre-N.3).
-def _money_trail_base_sql(prefix: str) -> str:
+def _money_trail_base_sql(prefix: str, dialect: Dialect) -> str:
     # Oracle disallows ``SELECT *, expr FROM ...`` — the star must be
     # qualified when other columns appear in the same SELECT list. The
     # ``e.*`` qualified form parses on both Postgres and Oracle.
+    #
+    # AO.1.impl — hop_amount projects from the matview as BIGINT cents
+    # (target leg's amount_money); wrap at this read boundary so the
+    # dataset surfaces dollars. SELECT e.* expanded to an explicit
+    # column list so the per-column wrap is applied. The matview's raw
+    # e.hop_amount column stays cents — consumer WHERE clauses comparing
+    # against e.hop_amount keep the cents-vs-cents convention (and
+    # consumers that compare against a dollar-shaped param must lift
+    # the param into cents via `* 100`).
+    hop = cents_to_dollars_sql("e.hop_amount", dialect=dialect)
     return (
         f"SELECT\n"
-        f"    e.*,\n"
-        f"    source_account_name || ' (' || source_account_id || ')' "
+        f"    e.root_transfer_id, e.transfer_id, e.depth,\n"
+        f"    e.source_account_id, e.source_account_name,"
+        f" e.source_account_type,\n"
+        f"    e.target_account_id, e.target_account_name,"
+        f" e.target_account_type,\n"
+        f"    {hop} AS hop_amount,\n"
+        f"    e.posted_at, e.rail_name,\n"
+        f"    e.source_account_name || ' (' || e.source_account_id || ')' "
         f"AS source_display,\n"
-        f"    target_account_name || ' (' || target_account_id || ')' "
+        f"    e.target_account_name || ' (' || e.target_account_id || ')' "
         f"AS target_display\n"
         f"FROM {prefix}_inv_money_trail_edges e\n"
     )
@@ -277,6 +294,11 @@ def build_recipient_fanout_dataset(cfg: Config) -> DataSet:
     one shape.
     """
     p = cfg.db_table_prefix
+    # AO.1.impl — t.amount_money is BIGINT cents on the base table;
+    # wrap to dollars where the dataset surfaces ``amount`` to the
+    # renderer. ``WHERE t.amount_money > 0`` stays as-is (the sign
+    # comparison is unit-independent at zero).
+    inflow_amount = cents_to_dollars_sql("t.amount_money", dialect=cfg.dialect)
     # Two-CTE pattern instead of window: PG raises
     # "FeatureNotSupported: DISTINCT is not implemented for window
     # functions" on `COUNT(DISTINCT col) OVER (PARTITION BY ...)`.
@@ -290,7 +312,7 @@ WITH inflows AS (
         t.account_id            AS recipient_account_id,
         t.account_name          AS recipient_account_name,
         t.account_role          AS recipient_account_type,
-        t.amount_money          AS amount,
+        {inflow_amount}         AS amount,
         t.posting               AS posted_at
     FROM {p}_transactions t
     WHERE t.amount_money > 0
@@ -396,8 +418,25 @@ def build_volume_anomalies_dataset(cfg: Config) -> DataSet:
     declaration in ``apps/investigation/app.py``.
     """
     p = cfg.db_table_prefix
+    # AO.1.impl — window_sum / pop_mean / pop_stddev all derive from
+    # SUM(amount_money) in the matview body and project as BIGINT cents.
+    # z_score is dimensionless (cents-over-cents division) so it doesn't
+    # need wrapping. Expand SELECT * to explicit projection so the per-
+    # money-column wrap can be applied.
+    window_sum = cents_to_dollars_sql("window_sum", dialect=cfg.dialect)
+    pop_mean = cents_to_dollars_sql("pop_mean", dialect=cfg.dialect)
+    pop_stddev = cents_to_dollars_sql("pop_stddev", dialect=cfg.dialect)
     sql = (
-        f"SELECT * FROM {p}_inv_pair_rolling_anomalies "
+        f"SELECT recipient_account_id, recipient_account_name,"
+        f" recipient_account_type,"
+        f" sender_account_id, sender_account_name, sender_account_type,"
+        f" window_start, window_end,"
+        f" {window_sum} AS window_sum,"
+        f" transfer_count,"
+        f" {pop_mean} AS pop_mean,"
+        f" {pop_stddev} AS pop_stddev,"
+        f" z_score, z_bucket"
+        f" FROM {p}_inv_pair_rolling_anomalies "
         f"WHERE 1=1 AND z_score >= <<${P_INV_ANOMALIES_SIGMA}>>"
     )
     return build_dataset(
@@ -443,7 +482,24 @@ def build_volume_anomalies_distribution_dataset(cfg: Config) -> DataSet:
     SELECTED_VISUALS scope gets pushed to dataset SQL.
     """
     p = cfg.db_table_prefix
-    sql = f"SELECT * FROM {p}_inv_pair_rolling_anomalies"
+    # AO.1.impl — mirrors build_volume_anomalies_dataset's projection;
+    # SELECT * expanded so window_sum / pop_mean / pop_stddev wrap into
+    # dollars at the boundary. z_score stays dimensionless.
+    window_sum = cents_to_dollars_sql("window_sum", dialect=cfg.dialect)
+    pop_mean = cents_to_dollars_sql("pop_mean", dialect=cfg.dialect)
+    pop_stddev = cents_to_dollars_sql("pop_stddev", dialect=cfg.dialect)
+    sql = (
+        f"SELECT recipient_account_id, recipient_account_name,"
+        f" recipient_account_type,"
+        f" sender_account_id, sender_account_name, sender_account_type,"
+        f" window_start, window_end,"
+        f" {window_sum} AS window_sum,"
+        f" transfer_count,"
+        f" {pop_mean} AS pop_mean,"
+        f" {pop_stddev} AS pop_stddev,"
+        f" z_score, z_bucket"
+        f" FROM {p}_inv_pair_rolling_anomalies"
+    )
     return build_dataset(
         cfg,
         cfg.prefixed("inv-volume-anomalies-distribution-dataset"),
@@ -501,12 +557,19 @@ def build_money_trail_dataset(cfg: Config) -> DataSet:
     rewrites ``<<$pName>>`` → ``:param_pName`` bind variables.
     """
     p = cfg.db_table_prefix
-    base = _money_trail_base_sql(p)
+    base = _money_trail_base_sql(p, cfg.dialect)
+    # AO.1.impl — the min-amount slider's value is in dollars (the
+    # control title is "Min hop amount ($)"); under the foundation the
+    # matview's hop_amount is BIGINT cents, so the WHERE comparison
+    # lifts the param into cents via ``* 100``. SQL-side multiply is
+    # the minimum-blast-radius strategy: the analysis-level
+    # IntegerParam + slider control stay in dollars (UI shows
+    # dollars to the operator), only the dataset SQL re-scales.
     sql = (
         f"{base}WHERE 1=1\n"
         f"  AND e.root_transfer_id = <<${P_INV_MONEY_TRAIL_ROOT}>>\n"
         f"  AND e.depth <= <<${P_INV_MONEY_TRAIL_MAX_HOPS}>>\n"
-        f"  AND e.hop_amount >= <<${P_INV_MONEY_TRAIL_MIN_AMOUNT}>>"
+        f"  AND e.hop_amount >= <<${P_INV_MONEY_TRAIL_MIN_AMOUNT}>> * 100"
     )
     return build_dataset(
         cfg,
@@ -621,11 +684,18 @@ def build_account_network_dataset(cfg: Config) -> DataSet:
     # raises ``UndefinedColumn``. Wrapping the projection in a CTE moves
     # the WHERE one scope outward, where the alias IS in scope. Caught
     # by ``tests/integration/verify_dataset_sql.py`` in seconds.
-    base = _money_trail_base_sql(p)
+    base = _money_trail_base_sql(p, cfg.dialect)
     # Y.3.b — computed columns inline via CASE; the outer WHERE narrows
     # by anchor + min-amount. ``base.*`` projects the MONEY_TRAIL_CONTRACT
     # columns (incl. source_display / target_display from the inner
     # CTE), then we add the three anchor-derived columns.
+    #
+    # AO.1.impl — the base CTE already wraps hop_amount cents → dollars
+    # (see ``_money_trail_base_sql``). The min-amount slider is also in
+    # dollars, so the outer ``hop_amount >= <<$pInvANetworkMinAmount>>``
+    # compares dollars-vs-dollars; no ``* 100`` lift needed here (unlike
+    # ``build_money_trail_dataset``, which puts its WHERE on the inner
+    # matview row, not on a wrapped CTE).
     anchor = f"<<${P_INV_ANETWORK_ANCHOR}>>"
     sql = (
         f"WITH base AS (\n"

@@ -319,9 +319,11 @@ class TestBaselineLegLoop:
             instance, prefix=_SASQUATCH_PR_PREFIX, anchor=_ANCHOR,
         )
         # Pull the money column from chain child rows.
+        # AO.1: amount_money is BIGINT cents (integer literal), not
+        # decimal dollars. Match the integer column.
         chain_amounts = re.findall(
             r"tx-base-chain-[a-z-]+-\d+',[^,]+,[^,]+,[^,]+,[^,]+,[^,]+,\s*"
-            r"(-?\d+\.\d+),",
+            r"(-?\d+),",
             sql,
         )
         assert len(set(chain_amounts)) >= 5, (

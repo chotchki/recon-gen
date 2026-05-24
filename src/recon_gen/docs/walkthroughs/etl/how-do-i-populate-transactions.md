@@ -114,7 +114,7 @@ SELECT
     a.parent_role                        AS account_parent_role,
     a.account_role,
     a.account_scope,                                   -- Internal / External
-    p.signed_amount                      AS amount_money,
+    CAST(ROUND(p.signed_amount * 100) AS BIGINT) AS amount_money,  -- dollars → cents (AO.1)
     ABS(p.signed_amount)                 AS amount,
     CASE WHEN p.posting_status = 'P' THEN 'Posted' ELSE 'Failed' END,
     p.posting_timestamp                  AS posting,
@@ -144,6 +144,12 @@ A few things to note about this projection:
   this sign right is what makes the drift check honest. If your
   upstream uses the opposite sign convention, flip it here, not
   later in a view. Every check assumes our sign convention.
+  **Stored as integer cents** (Phase AO.1) — the projection above
+  multiplies by 100 + casts to BIGINT at the ETL boundary; see
+  [Schema_v6 → Money is stored as integer cents](../../Schema_v6.md#money-is-stored-as-integer-cents).
+  Python ETLs should reach for `recon_gen.common.money.Cents`
+  instead of the inline SQL CAST — `Cents.from_dollars(...).value`
+  rejects float-init Decimals that re-introduce float dust.
 - **`metadata`** carries `source` on every row from this projection
   (driven by the `JSON_OBJECT(... VALUE 'core_banking')` literal).
   That single key is enough to satisfy the Investigation

@@ -41,6 +41,7 @@ from recon_gen.common.l2.primitives import (
     SingleLegRail,
     TwoLegRail,
 )
+from recon_gen.common.money import Cents
 
 
 # URL params arrive as a multi-dict (a key can repeat). This legacy
@@ -274,4 +275,18 @@ def _query_money_trail_edges(
     finally:
         conn.close()
 
-    return [(str(r[0]), str(r[1]), float(r[2])) for r in rows]
+    # AO.1.impl (Studio slice) — ``hop_amount`` is the Investigation
+    # matview's BIGINT cents projection of ``amount_money``. The smoke
+    # Sankey renders the value as currency; convert to dollars at the
+    # read boundary so ``$1,250.00`` ships through, not ``$125,000.00``
+    # (100× off). Mirrors the row-side conversion in
+    # ``_tree_fetcher._apply_cents_to_dollars`` — same boundary, two
+    # consumers.
+    return [
+        (
+            str(r[0]),
+            str(r[1]),
+            float(Cents.from_db(int(r[2])).to_dollars()) if r[2] is not None else 0.0,
+        )
+        for r in rows
+    ]

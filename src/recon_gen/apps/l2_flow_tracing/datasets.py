@@ -63,6 +63,7 @@ from recon_gen.common.sql import (
     json_value,
     typed_null,
 )
+from recon_gen.common.sql.money import cents_to_dollars_sql
 from recon_gen.common.tree import Dataset
 
 
@@ -653,12 +654,16 @@ def build_postings_dataset(
     Date range stays an analysis-level TimeRangeFilter (Y.2.f territory).
     """
     prefix = cfg.db_table_prefix
+    # AO.1.impl — amount_money is BIGINT cents on the base table; wrap
+    # to dollars at projection (inner subquery so the outer SELECT *
+    # passes the already-dollar form through).
+    amount = cents_to_dollars_sql("amount_money", dialect=cfg.dialect)
     sql = (
         f"SELECT * FROM (\n"
         f"  SELECT\n"
         f"    id, transfer_id, transfer_parent_id, rail_name,\n"
         f"    account_id, account_name, account_role, account_scope,\n"
-        f"    posting, amount_money, amount_direction,\n"
+        f"    posting, {amount} AS amount_money, amount_direction,\n"
         # X.1.i — collapse open-set `status` into the bounded set the
         # tool reasons about. Pending / Posted carry first-class meaning
         # (drives Aging, Conservation, Completion checks); every other
@@ -931,6 +936,12 @@ def build_chain_instances_dataset(
     (typically tens of entries) so the cost stays predictable.
     """
     prefix = cfg.db_table_prefix
+    # AO.1.impl — parent_amount_money flows from MAX(t.amount_money)
+    # in BIGINT cents through two CTEs unchanged; wrap at the outermost
+    # projection so the chain-instances dataset surfaces dollars.
+    parent_amt = cents_to_dollars_sql(
+        "parent_amount_money", dialect=cfg.dialect,
+    )
     declared = _declared_chains_cte(l2_instance, cfg.dialect)
     sql = (
         f"WITH declared AS (\n{declared}\n),\n"
@@ -1015,7 +1026,7 @@ def build_chain_instances_dataset(
         f"    parent_transfer_id,\n"
         f"    parent_posting,\n"
         f"    parent_status,\n"
-        f"    parent_amount_money,\n"
+        f"    {parent_amt} AS parent_amount_money,\n"
         f"    required_total,\n"
         f"    required_fired,\n"
         f"    CASE\n"
@@ -1863,6 +1874,17 @@ def _declared_templates_cte(
     (any rogue ``template_name`` value in current_transactions that
     doesn't correspond to a declared TransferTemplate is excluded —
     surfaced separately by the L2.2 unmatched-transfer-type check).
+
+    AO.1.impl — emits ``expected_net`` in BIGINT cents so the
+    callers' internal cents-vs-cents math against SUM(amount_money)
+    (also cents post-foundation) compares like units. Outer
+    projections wrap the result back to dollars via
+    ``cents_to_dollars_sql``. The L2-authored cap stays a Decimal in
+    dollars; multiplying by 100 in this emitter is the cleanest way
+    to lift it into the cents number space without round-trip float
+    error (the *100 is an integer multiplication on Python's
+    Decimal, then ``CAST AS DECIMAL(20,0)`` keeps the SQL literal
+    integer-shaped).
     """
     df = dual_from(dialect)
     if not l2_instance.transfer_templates:
@@ -1873,9 +1895,10 @@ def _declared_templates_cte(
         )
     rows: list[str] = []
     for t in l2_instance.transfer_templates:
+        expected_cents = int(t.expected_net * 100)
         rows.append(
             f"  SELECT {_sql_str(str(t.name))} AS template_name, "
-            f"CAST({t.expected_net} AS DECIMAL(20,2)) AS expected_net{df}"
+            f"CAST({expected_cents} AS DECIMAL(20,0)) AS expected_net{df}"
         )
     return "\n  UNION ALL\n".join(rows)
 
@@ -1909,6 +1932,16 @@ def build_tt_instances_dataset(
     Parameterized on pKey + pValues for the metadata cascade.
     """
     prefix = cfg.db_table_prefix
+    # AO.1.impl — internal CTE math runs in BIGINT cents (expected_net
+    # was multiplied ×100 in the declared-templates CTE; actual_net is
+    # SUM(amount_money) which is cents from the foundation). The
+    # cents-vs-cents subtraction for ``net_diff`` is integer-safe; wrap
+    # all three money columns back to dollars at the outer projection.
+    actual = cents_to_dollars_sql("actual_net", dialect=cfg.dialect)
+    expected = cents_to_dollars_sql("expected_net", dialect=cfg.dialect)
+    netdiff = cents_to_dollars_sql(
+        "(actual_net - expected_net)", dialect=cfg.dialect,
+    )
     declared_tt = _declared_templates_cte(l2_instance, cfg.dialect)
     declared_ch = _declared_chains_cte(l2_instance, cfg.dialect)
     sql = (
@@ -1993,12 +2026,12 @@ def build_tt_instances_dataset(
         f"    template_name,\n"
         f"    transfer_id,\n"
         f"    posting,\n"
-        f"    expected_net,\n"
-        f"    actual_net,\n"
-        f"    (actual_net - expected_net) AS net_diff,\n"
+        f"    {expected} AS expected_net,\n"
+        f"    {actual} AS actual_net,\n"
+        f"    {netdiff} AS net_diff,\n"
         f"    leg_count,\n"
         f"    CASE\n"
-        f"      WHEN ABS(actual_net - expected_net) >= 0.01 THEN 'Imbalanced'\n"
+        f"      WHEN ABS(actual_net - expected_net) >= 1 THEN 'Imbalanced'\n"
         f"      WHEN required_fired < required_total THEN 'Orphaned'\n"
         f"      WHEN xor_violations > 0 THEN 'Orphaned'\n"
         f"      ELSE 'Complete'\n"
@@ -2117,6 +2150,12 @@ def build_tt_legs_dataset(
     Parameterized on pKey + pValues for the metadata cascade.
     """
     prefix = cfg.db_table_prefix
+    # AO.1.impl — wrap money columns at the outermost UNION projection.
+    # Inner CTEs run in BIGINT cents (amount_money from base table;
+    # expected_net pre-multiplied ×100 in the declared-templates CTE;
+    # `ABS(actual_net - expected_net) >= 1` is cents-vs-cents).
+    amount = cents_to_dollars_sql("amount_money", dialect=cfg.dialect)
+    amount_abs = cents_to_dollars_sql("amount_abs", dialect=cfg.dialect)
     declared_tt = _declared_templates_cte(l2_instance, cfg.dialect)
     declared_ch = _declared_chains_cte(l2_instance, cfg.dialect)
     sql = (
@@ -2175,7 +2214,7 @@ def build_tt_legs_dataset(
         f"  SELECT\n"
         f"    transfer_id,\n"
         f"    CASE\n"
-        f"      WHEN ABS(actual_net - expected_net) >= 0.01 THEN 'Imbalanced'\n"
+        f"      WHEN ABS(actual_net - expected_net) >= 1 THEN 'Imbalanced'\n"
         f"      WHEN required_fired < required_total THEN 'Orphaned'\n"
         f"      WHEN xor_violations > 0 THEN 'Orphaned'\n"
         f"      ELSE 'Complete'\n"
@@ -2261,14 +2300,18 @@ def build_tt_legs_dataset(
         # each branch (the column is in the CTEs but not the projection).
         f"SELECT * FROM (\n"
         f"  SELECT template_name, transfer_id, posting, account_name, "
-        f"account_role, amount_money, amount_direction, amount_abs, "
+        f"account_role, "
+        f"{amount} AS amount_money, amount_direction, "
+        f"{amount_abs} AS amount_abs, "
         f"flow_source, flow_target, edge_kind, completion_status\n"
         f"  FROM template_legs\n"
         f"  WHERE\n"
         f"{metadata_filter_clause(l2_instance, 'metadata', cfg.dialect)}\n"
         f"  UNION ALL\n"
         f"  SELECT template_name, transfer_id, posting, account_name, "
-        f"account_role, amount_money, amount_direction, amount_abs, "
+        f"account_role, "
+        f"{amount} AS amount_money, amount_direction, "
+        f"{amount_abs} AS amount_abs, "
         f"flow_source, flow_target, edge_kind, completion_status\n"
         f"  FROM chain_edges\n"
         f"  WHERE\n"

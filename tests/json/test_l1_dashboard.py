@@ -224,8 +224,14 @@ def test_drift_dataset_sql_targets_prefixed_l1_views() -> None:
     assert ledger_sql is not None
     # Y.2.g — SQL now also carries the per-sheet pushdown WHERE
     # (account_id sentinel-OR + account_role IN (...)).
-    assert drift_sql.SqlQuery.startswith(f"SELECT * FROM {prefix}_drift")
-    assert ledger_sql.SqlQuery.startswith(f"SELECT * FROM {prefix}_ledger_drift")
+    # AO.1.impl — SELECT * was expanded to an explicit column list so
+    # money columns (stored_balance / computed_balance / drift) can be
+    # wrapped cents→dollars at the projection. Gate on the FROM clause
+    # + the SELECT prefix instead of the SELECT * literal.
+    assert drift_sql.SqlQuery.startswith("SELECT account_id")
+    assert f"FROM {prefix}_drift" in drift_sql.SqlQuery
+    assert ledger_sql.SqlQuery.startswith("SELECT account_id")
+    assert f"FROM {prefix}_ledger_drift" in ledger_sql.SqlQuery
 
 
 # -- Drift Timelines sheet (M.2b.6) ------------------------------------------
@@ -351,7 +357,9 @@ def test_overdraft_dataset_registered_and_targets_l1_view() -> None:
     sql = next(iter(overdraft_ds.PhysicalTableMap.values())).CustomSql
     assert sql is not None
     # Y.2.g — SQL also carries the Account / Account-Role pushdown WHERE.
-    assert sql.SqlQuery.startswith(f"SELECT * FROM {_CFG.db_table_prefix}_overdraft")
+    # AO.1.impl — SELECT * expanded to wrap stored_balance cents → dollars.
+    assert sql.SqlQuery.startswith("SELECT account_id")
+    assert f"FROM {_CFG.db_table_prefix}_overdraft" in sql.SqlQuery
 
 
 # -- Limit Breach sheet (M.2a.5) ---------------------------------------------
@@ -390,7 +398,9 @@ def test_limit_breach_dataset_registered_and_targets_l1_view() -> None:
     lb_ds = build_limit_breach_dataset(_CFG, instance)
     sql = next(iter(lb_ds.PhysicalTableMap.values())).CustomSql
     assert sql is not None
-    assert sql.SqlQuery.startswith(f"SELECT * FROM {_CFG.db_table_prefix}_limit_breach")
+    # AO.1.impl — SELECT * expanded to wrap outbound_total + cap cents → dollars.
+    assert sql.SqlQuery.startswith("SELECT account_id")
+    assert f"FROM {_CFG.db_table_prefix}_limit_breach" in sql.SqlQuery
 
 
 # -- Today's Exceptions sheet (M.2a.6) ---------------------------------------
@@ -437,8 +447,10 @@ def test_todays_exceptions_dataset_reads_matview() -> None:
     sql_obj = next(iter(te_ds.PhysicalTableMap.values())).CustomSql
     assert sql_obj is not None
     sql = sql_obj.SqlQuery
-    # SQL is now just a SELECT * from the prefixed matview.
-    assert sql.startswith(f"SELECT * FROM {_CFG.db_table_prefix}_todays_exceptions")
+    # SQL wraps the prefixed matview. AO.1.impl — SELECT * expanded to
+    # wrap the ``magnitude`` column cents → dollars.
+    assert sql.startswith("SELECT check_type")
+    assert f"FROM {_CFG.db_table_prefix}_todays_exceptions" in sql
 
 
 # -- Transactions sheet (M.2b.5) ---------------------------------------------
@@ -595,8 +607,14 @@ def test_daily_statement_datasets_registered() -> None:
     # (the multi-CTE moved into the L1 schema). Transactions still
     # projects per-leg from current_transactions (which IS itself a
     # matview, so cheap).
-    assert summary_sql.SqlQuery.startswith(
-        f"SELECT * FROM {_CFG.db_table_prefix}_daily_statement_summary"
+    # AO.1.impl — SELECT * expanded so the 7 money columns
+    # (opening_balance / total_debits / total_credits / net_flow /
+    # closing_balance_stored / closing_balance_recomputed / drift)
+    # wrap cents → dollars at the dataset boundary.
+    assert summary_sql.SqlQuery.startswith("SELECT account_id")
+    assert (
+        f"FROM {_CFG.db_table_prefix}_daily_statement_summary"
+        in summary_sql.SqlQuery
     )
     assert f"FROM {_CFG.db_table_prefix}_current_transactions" in txn_sql.SqlQuery
 
@@ -1165,7 +1183,8 @@ def test_pending_aging_dataset_registered() -> None:
     sql_obj = next(iter(sp_ds.PhysicalTableMap.values())).CustomSql
     assert sql_obj is not None
     sql = sql_obj.SqlQuery
-    assert sql.startswith("SELECT t.*,")
+    # AO.1.impl — SELECT t.* expanded to wrap amount_money cents → dollars.
+    assert sql.startswith("SELECT t.transaction_id")
     assert f"FROM {_CFG.db_table_prefix}_stuck_pending t" in sql
     assert "<<$pL1PendingType>>" in sql and "<<$pL1PendingRail>>" in sql
     assert sp_ds.DatasetParameters  # the pushdown dataset params are wired
@@ -1255,7 +1274,8 @@ def test_unbundled_aging_dataset_registered() -> None:
     sql_obj = next(iter(su_ds.PhysicalTableMap.values())).CustomSql
     assert sql_obj is not None
     sql = sql_obj.SqlQuery
-    assert sql.startswith("SELECT t.*,")
+    # AO.1.impl — SELECT t.* expanded to wrap amount_money cents → dollars.
+    assert sql.startswith("SELECT t.transaction_id")
     assert f"FROM {_CFG.db_table_prefix}_stuck_unbundled t" in sql
     assert "<<$pL1UnbundledType>>" in sql and "<<$pL1UnbundledRail>>" in sql
     assert su_ds.DatasetParameters

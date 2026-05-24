@@ -124,12 +124,17 @@ class OverdraftInvariant:
             f"SELECT account_id, business_day_start, stored_balance "
             f"FROM {self.prefix}_overdraft",
         ).fetchall()
+        # AO.1: stored_balance is BIGINT cents — project to dollars at
+        # the detect boundary (mirror of OverdraftInvariant.detect).
+        from recon_gen.common.money import Cents
         return {
             Violation.of(
                 "overdraft",
                 account_id=aid,
                 business_day=_to_date(bds),
-                stored_balance=round(float(sb), 2),
+                stored_balance=round(
+                    float(Cents.from_db(int(sb)).to_dollars()), 2,
+                ),
             )
             for aid, bds, sb in rows
         }
@@ -265,6 +270,14 @@ _DB_COLS = (
 
 
 def _insert_balance(conn: sqlite3.Connection, **vals: object) -> None:
+    # AO.1: money + expected_eod_balance are BIGINT cents. Author-side
+    # floats convert at the write boundary so this local helper mirrors
+    # `insert_balance` in `common/spine/_emit_helpers.py`.
+    from recon_gen.common.money import Cents
+    for col in ("money", "expected_eod_balance"):
+        raw = vals.get(col)
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            vals[col] = int(Cents.from_dollars(raw))
     placeholders = ", ".join("?" for _ in _DB_COLS)
     conn.execute(
         f"INSERT INTO {_PREFIX}_daily_balances ({', '.join(_DB_COLS)}) "
