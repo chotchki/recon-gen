@@ -335,12 +335,14 @@ _PATTERN_DAILY_BALANCE = """\
 --   missing or duplicated postings.
 -- Consumed by: L1 Drift sheet (compares stored ``money`` against
 --   computed); L1 Daily Statement sheet (opening + closing
---   balances); L1 Limit Breach sheet (reads the ``limits`` JSON map).
+--   balances); L1 Limit Breach sheet (reads static caps from
+--   ``<prefix>_config.l2_yaml`` per Phase AW; per-day overrides
+--   would come from ``metadata.limits`` here).
 
 INSERT INTO <prefix>_daily_balances (
     account_id, account_name, account_role, account_scope,
     account_parent_role, expected_eod_balance, business_day_start,
-    business_day_end, money, limits
+    business_day_end, money, metadata
 ) VALUES (
     'acct-EXAMPLE-cust-0001',
     'Customer #0001',
@@ -351,28 +353,31 @@ INSERT INTO <prefix>_daily_balances (
     '2030-01-15T00:00:00',
     '2030-01-16T00:00:00',
     1875.00,                           -- stored EOD balance
-    NULL                               -- no per-day limit overrides
+    NULL                               -- no per-day metadata / overrides
 );
 """
 
 
 _PATTERN_DAILY_BALANCE_WITH_LIMITS = """\
 -- ------------------------------------------------------------------------
--- Pattern 9 — Daily balance carrying per-day Limit Schedule
+-- Pattern 9 — Daily balance carrying per-day Limit Schedule override
 -- ------------------------------------------------------------------------
--- WHY: When an L2 declares a LimitSchedule (e.g. ACH outbound capped
---   at $10k/day per DDA), the ETL projects the cap into the
---   account-day's ``limits`` JSON map keyed by ``rail_name`` (the
---   LimitSchedule's ``rail`` field per Z.B's symmetric-collapse —
---   formerly ``transfer_type``). L1's Limit Breach view sums same-day
---   outbound legs and fires when the running total exceeds the cap
---   stored here.
--- Consumed by: L1 Limit Breach sheet; Audit PDF limit-breach table.
+-- WHY: Static LimitSchedule caps are read by the L1 Limit Breach
+--   matview from ``<prefix>_config.l2_yaml`` (Phase AW); per-day
+--   overrides — when an ETL wants to override the static cap for a
+--   specific account-day — go under ``metadata.limits`` as a JSON
+--   map keyed by ``rail_name`` (the LimitSchedule's ``rail`` field
+--   per Z.B's symmetric collapse — formerly ``transfer_type``).
+--   Phase AV (2026-05-23) renamed the column from ``limits`` to
+--   ``metadata`` and demoted the per-rail caps to a nested key so
+--   the column has room for siblings (scenario_id per AV.5).
+-- Consumed by: nothing on main reads ``metadata.limits`` today;
+--   reserved for ETL-side per-day override scenarios.
 
 INSERT INTO <prefix>_daily_balances (
     account_id, account_name, account_role, account_scope,
     account_parent_role, expected_eod_balance, business_day_start,
-    business_day_end, money, limits
+    business_day_end, money, metadata
 ) VALUES (
     'acct-EXAMPLE-cust-0001',
     'Customer #0001',
@@ -383,9 +388,10 @@ INSERT INTO <prefix>_daily_balances (
     '2030-01-15T00:00:00',
     '2030-01-16T00:00:00',
     1875.00,
-    -- One entry per LimitSchedule that applies to this account's
-    -- parent_role; keys are L2 Rail names (LimitSchedule.rail).
-    '{"CustomerOutboundACH": 10000.00, "CustomerOutboundWire": 25000.00}'
+    -- Per-day cap override under ``metadata.limits``; keys are L2
+    -- Rail names (LimitSchedule.rail). Sibling keys can live
+    -- alongside (e.g. ``"scenario_id": "..."`` for AV.5).
+    '{"limits": {"CustomerOutboundACH": 10000.00, "CustomerOutboundWire": 25000.00}}'
 );
 """
 

@@ -183,14 +183,14 @@ strong phase will get lost and bite us"*):
   and confirm AV's per-row tagging path eliminates the sidecar (per
   user 2026-05-23: "this should also remove the sidecar table we've
   gained for the scenario planting tagging").
-- [ ] AV.1 - Schema change: rename column, update CHECK constraints,
+- [x] AV.1 - Schema change: rename column, update CHECK constraints,
   emit per-dialect. Includes the JSON-validity guard rename. No data
   semantics change — `metadata.limits` carries what `limits` carried.
-- [ ] AV.2 - Update every matview SQL + dataset SQL to read
+- [x] AV.2 - Update every matview SQL + dataset SQL to read
   `metadata.limits` via the dialect-portable `JSON_VALUE` form. Includes
   L1's expected_eod_balance_breach JOIN + the L2FT dashboards that read
   per-rail caps. Verify by re-running the full suite + 4-way agreement.
-- [ ] AV.3 - Update Python helpers + tests (including `tests/data/
+- [x] AV.3 - Update Python helpers + tests (including `tests/data/
   _locked_seeds/`). Re-lock seeds per dialect (the column literal in
   the locked SQL changes).
 - [ ] AV.4 - Bump version (post-v?.?.?) + RELEASE_NOTES entry. Migration

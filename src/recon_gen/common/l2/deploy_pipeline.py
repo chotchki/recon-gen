@@ -810,7 +810,7 @@ async def step_3_5_derive_balances(
                 f"account_id, account_name, account_role, "
                 f"account_scope, account_parent_role, "
                 f"expected_eod_balance, business_day_start, "
-                f"business_day_end, money, limits, supersedes"
+                f"business_day_end, money, metadata, supersedes"
                 f") "
                 f"SELECT "
                 f"  account_id, "

@@ -43,7 +43,7 @@ NULL fallback), `_render_pending_age_cases` (typed NULL bigint),
 | `CHECK (col IS JSON)` | `CHECK (col IS JSON)` | `json_check(col, d)` (portable but emit through helper for the OR-NULL guard) |
 
 Usage sites: `{p}_transactions.metadata` constraint;
-`{p}_daily_balances.limits` constraint.
+`{p}_daily_balances.metadata` constraint (post-AV; was `limits`).
 
 ### §1.4 JSON path query
 

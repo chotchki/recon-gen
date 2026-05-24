@@ -1011,7 +1011,7 @@ def emit_seed(
     db_cols = (
         "(account_id, account_name, account_role, account_scope, "
         "account_parent_role, expected_eod_balance, business_day_start, "
-        "business_day_end, money, limits, supersedes)"
+        "business_day_end, money, metadata, supersedes)"
     )
     db_insert = (
         "\n".join(
@@ -1420,7 +1420,7 @@ def emit_baseline_seed(
     db_cols = (
         "(account_id, account_name, account_role, account_scope, "
         "account_parent_role, expected_eod_balance, business_day_start, "
-        "business_day_end, money, limits, supersedes)"
+        "business_day_end, money, metadata, supersedes)"
     )
     db_insert = (
         "\n".join(

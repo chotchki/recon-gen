@@ -27,8 +27,12 @@ What is NOT emitted as SQL tables (per the M.0 spike's experience):
 - L2's account topology (Roles, AccountTemplates, parent_role chains) —
   the relevant fields denormalize onto the transactions / daily_balances
   rows; no separate dim table needed for v1.
-- L2's Limits — projected into the ``daily_balances.limits`` Map column
-  by integrator ETL; no separate limits table.
+- L2's Limits — projected into ``daily_balances.metadata.limits`` (a
+  nested JSON map keyed by Rail name) by integrator ETL; no separate
+  limits table. AV (2026-05-23) renamed the column from ``limits`` to
+  ``metadata`` and demoted the per-rail caps to a nested key so the
+  column mirrors ``transactions.metadata`` and has room for siblings
+  (scenario_id per AV.5, future per-day tags).
 - L2's Chains, TransferTemplates — read by dashboard SQL at view-build
   time (the SQL string knows which TransferTypes can chain into which
   via L2 lookups), not materialized as tables.
@@ -228,7 +232,7 @@ BASE_TRANSACTIONS_COLUMNS: tuple[str, ...] = (
 BASE_DAILY_BALANCES_COLUMNS: tuple[str, ...] = (
     "account_id", "account_name", "account_role", "account_scope",
     "account_parent_role", "expected_eod_balance", "business_day_start",
-    "business_day_end", "money", "limits", "supersedes",
+    "business_day_end", "money", "metadata", "supersedes",
 )
 
 
@@ -1340,7 +1344,11 @@ def _emit_base_schema(
         # JSON validity constraint — PG/Oracle ``IS JSON``,
         # SQLite ``json_valid()``.
         "metadata_json_check": json_check("metadata", dialect),
-        "limits_json_check": json_check("limits", dialect),
+        # AV (2026-05-23): daily_balances.limits → daily_balances.metadata.
+        # The CHECK shape is identical to the transactions.metadata
+        # check; both columns share the same JSON-validity contract
+        # post-rename.
+        "db_metadata_json_check": json_check("metadata", dialect),
         # Per-table ``entry`` column declaration. PG gets
         # ``BIGSERIAL NOT NULL`` (auto-incrementing). Oracle gets
         # ``NUMBER GENERATED ALWAYS AS IDENTITY NOT NULL``. SQLite
@@ -1538,11 +1546,15 @@ CREATE TABLE {p}_transactions (
 --                 wins; older entries stay for audit.
 -- expected_eod_balance — L1 ExpectedEODBalance. NULL means "no
 --                 expectation" (the constraint doesn't apply).
--- limits        — JSON map of Rail name → cap, projected from L2's
---                 LimitSchedule entries by the integrator's ETL (the
---                 key matches LimitSchedule.rail per Z.B's symmetric
---                 collapse — formerly TransferType). NULL means no
---                 limit enforcement on this account-day.
+-- metadata      — open JSON TEXT, symmetric with transactions.metadata.
+--                 AV (2026-05-23) renamed from ``limits`` and demoted
+--                 the per-rail caps to a nested ``metadata.limits``
+--                 key so the column has room for siblings (scenario_id
+--                 per AV.5, future per-day tags). Per-rail caps still
+--                 carry the same JSON-map shape (rail_name -> cap)
+--                 under the ``limits`` key; the integrator's ETL just
+--                 wraps the same map one level deeper.
+--                 NULL means no metadata on this account-day.
 -- money         — signed; CAN go negative (overdraft is observable per
 --                 L1's Non-negative Stored Balance SHOULD constraint).
 -- supersedes    — L1 StoredBalance.Supersedes; open enum per SPEC
@@ -1564,11 +1576,11 @@ CREATE TABLE {p}_daily_balances (
     business_day_start     {ts}    NOT NULL,
     business_day_end       {ts}    NOT NULL,
     money                  {dec202}  NOT NULL,
-    limits                 {json_text},
+    metadata               {json_text},
     supersedes             {vc50},
     {db_pk_decl},
     CHECK (business_day_end > business_day_start),
-    {limits_json_check}
+    {db_metadata_json_check}
 );
 
 -- B-tree indexes for the dashboard's hot-path queries. No GIN on

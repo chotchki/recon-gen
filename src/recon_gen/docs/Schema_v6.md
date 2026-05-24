@@ -202,7 +202,7 @@ end-of-day stored balance for each account each day.
 | `business_day_start` | `TIMESTAMP NOT NULL` (TZ-naive) | Beginning-of-day UTC midnight. The composite key `(account_id, business_day_start)` is the logical row id. |
 | `business_day_end` | `TIMESTAMP NOT NULL` (TZ-naive) | End-of-day = `business_day_start + INTERVAL '1 day'`. |
 | `money` | `DECIMAL(20,2) NOT NULL` | Stored EOD balance. Computed-vs-stored disagreement surfaces as drift. |
-| `limits` | `TEXT` | Per-row JSON; per-day limit overrides. See **Metadata** below. |
+| `metadata` | `TEXT` | Per-row open JSON, symmetric with `transactions.metadata`. Per-day limit overrides live under `metadata.limits` (a JSON map keyed by `rail_name`). Renamed from `limits` in Phase AV (2026-05-23) — the per-rail caps moved one level deeper so the column has room for siblings (scenario_id, future per-day tags). See **Metadata** below. |
 | `supersedes` | `VARCHAR(50)` | Same vocabulary as transactions.supersedes. |
 
 ### Constraints
@@ -210,7 +210,7 @@ end-of-day stored balance for each account each day.
 ```sql
 PRIMARY KEY (entry)
 CHECK (account_scope IN ('internal', 'external'))
-CHECK (limits IS NULL OR limits IS JSON)
+CHECK (metadata IS NULL OR metadata IS JSON)
 CHECK (supersedes IS NULL
     OR supersedes IN ('Inflight', 'BundleAssignment', 'TechnicalCorrection'))
 ```
@@ -285,8 +285,10 @@ relevant prior entries. See [L1 Invariants](L1_Invariants.md) and the
 
 ## Metadata JSON columns
 
-Both `transactions.metadata` and `daily_balances.limits` are open
-per-row JSON in `TEXT` columns. Read with SQL/JSON path:
+Both `transactions.metadata` and `daily_balances.metadata` are open
+per-row JSON in `TEXT` columns (the latter was renamed from `limits`
+in Phase AV — see `daily_balances.metadata` above). Read with SQL/JSON
+path:
 
 ```sql
 SELECT JSON_VALUE(tx.metadata, '$.customer_id') AS customer_id
@@ -304,10 +306,12 @@ the `JSON_VALUE` / `JSON_QUERY` / `JSON_EXISTS` family.
   Example: PR's `card_brand`, `cashier`, `settlement_type`,
   `payment_method`, `is_returned`, `return_reason` all live in
   `metadata`.
-- L2 `LimitSchedules` are EMITTED as inline CASE branches in the
-  `_limit_breach` view at schema-emit time — **not** read from
-  `daily_balances.limits` at query time. The `limits` column exists
-  for per-day override scenarios that may emerge later. Each
+- L2 `LimitSchedules` are read from `<prefix>_config.l2_yaml` at
+  matview-refresh time (Phase AW) — **not** read from
+  `daily_balances.metadata.limits` at query time. The
+  `metadata.limits` JSON path exists for per-day override scenarios
+  that may emerge later (ETL can populate it per-account-day; nothing
+  on main reads it yet). Each
   LimitSchedule carries a `direction` field (default `Outbound`,
   AB.1) selecting which flow side gets capped — Outbound caps
   apply to `amount_direction = 'Debit'` transactions (the original
@@ -399,7 +403,7 @@ Optional on day 1:
 |---|---|
 | `account_parent_role` | Drift parent rollup. |
 | `expected_eod_balance` | The L2 declares an EOD target for this account. |
-| `limits` | Per-day limit override scenarios (rare; LimitSchedules cover the static case). |
+| `metadata` | Open per-row JSON. Per-day limit overrides go under `metadata.limits` (rare; LimitSchedules cover the static case). AV.5 will write scenario tags here. |
 | `supersedes` | Stored-balance restatement. |
 
 ### Order of operations for a new feed

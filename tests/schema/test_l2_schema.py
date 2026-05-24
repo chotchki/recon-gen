@@ -166,14 +166,21 @@ def test_transactions_rail_name_is_open_enum() -> None:
     assert "transfer_type IN" not in sql
 
 
-def test_daily_balances_includes_expected_eod_and_limits() -> None:
-    """L1 SPEC: ExpectedEODBalance + Limits map both denormalized onto the row."""
+def test_daily_balances_includes_expected_eod_and_metadata() -> None:
+    """L1 SPEC: ExpectedEODBalance + open metadata JSON both denormalized
+    onto the row.
+
+    AV (2026-05-23) renamed ``limits`` → ``metadata`` and demoted the
+    per-rail caps to a nested ``metadata.limits`` key so the column
+    has room for siblings (scenario_id per AV.5, future per-day tags).
+    Bounded VARCHAR so the column behaves like a string on both
+    dialects (CLOB cannot be aggregated; bounded VARCHAR can)."""
     sql = emit_schema(_instance("eb"), prefix="eb")
     assert "expected_eod_balance   DECIMAL(20,2)" in sql
-    # Limits is the Map[TransferType, Money] serialized as JSON, bounded
-    # so the column behaves like a string on both dialects (CLOB
-    # cannot be aggregated; bounded VARCHAR can).
-    assert "limits                 VARCHAR(4000)" in sql
+    assert "metadata               VARCHAR(4000)" in sql
+    # Old column name MUST NOT appear in the CREATE TABLE block (a
+    # half-done rename would leave it).
+    assert "limits                 VARCHAR(4000)" not in sql
 
 
 def test_daily_balances_money_is_signed() -> None:
@@ -222,11 +229,12 @@ def test_metadata_uses_text_with_is_json_check() -> None:
     document the L2 schema emits in practice.
     """
     sql = emit_schema(_instance("p"), prefix="p")
+    # transactions.metadata (longstanding).
     assert "metadata             VARCHAR(4000)" in sql
     assert "metadata IS NULL OR metadata IS JSON" in sql
-    # Limits column same pattern
-    assert "limits                 VARCHAR(4000)" in sql
-    assert "limits IS NULL OR limits IS JSON" in sql
+    # daily_balances.metadata (AV: was ``limits``; same JSON-validity
+    # contract; both base tables now carry the symmetric column).
+    assert "metadata               VARCHAR(4000)" in sql
     # No JSONB type used in any actual SQL statement (comments allowed).
     assert "JSONB" not in _strip_comments(sql).upper()
 

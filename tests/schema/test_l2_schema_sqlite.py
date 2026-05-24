@@ -149,8 +149,10 @@ class TestSqliteConstructsPresent:
         "UNIQUE (id, entry)",
         "UNIQUE (account_id, business_day_start, entry)",
         # JSON validity — SQLite json_valid() vs PG/Oracle IS JSON.
+        # AV (2026-05-23): daily_balances.limits → daily_balances.metadata,
+        # so both base tables now carry the same constraint shape; only
+        # one literal asserts.
         "json_valid(metadata)",
-        "json_valid(limits)",
         # Matviews are plain tables.
         "CREATE TABLE sqlt_current_transactions",
         "CREATE TABLE sqlt_drift",

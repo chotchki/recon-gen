@@ -98,8 +98,9 @@ TX_COLS = (
 (supersession; defaults), ``transfer_completion`` (optional), ``template_
 name`` (no generator emits via templates), ``bundle_id`` (NULL by default
 — stuck_unbundled's plant explicitly relies on this), ``supersedes`` +
-``metadata`` (no generator tags today; AV.5 promotes per-row tagging once
-the limits→metadata rename ships)."""
+``metadata`` (no generator tags today; AV.5 will promote per-row
+scenario tagging here on both base tables now that AV.1 has unified
+the column shape)."""
 
 
 DB_COLS = (
@@ -108,8 +109,12 @@ DB_COLS = (
     "business_day_end", "money",
 )
 """Columns every generator writes to ``_daily_balances``. Excludes
-``entry`` (supersession), ``limits`` (per-rail caps — no generator emits
-caps; AV.0 renames this to ``metadata``), ``supersedes``."""
+``entry`` (supersession), ``metadata`` (open JSON; spine generators
+emit NULL today — AV.5 will promote per-row scenario tagging here once
+the ScenarioContext primitive lands), ``supersedes``. The column was
+renamed from ``limits`` to ``metadata`` in Phase AV (2026-05-23); the
+per-rail caps shape it formerly carried is now a nested
+``metadata.limits`` key, populated by integrator ETL when needed."""
 
 
 def insert_tx(
