@@ -264,9 +264,9 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         target_visual="Exception Detail",
         dataset_builder=build_todays_exceptions_dataset,
         contract=TODAYS_EXCEPTIONS_CONTRACT,
-        # Sorted-by-magnitude is the visual default — pick the top row
-        # of the smallest cust-N for the MUI window bias (see Drift).
-        anchor_order="account_id ASC, magnitude DESC",
+        # Sorted-by-magnitude_amount is the visual default — pick the top
+        # row of the smallest cust-N for the MUI window bias (see Drift).
+        anchor_order="account_id ASC, magnitude_amount DESC",
         anchor_where_template=(
             "account_id IN ("
             "SELECT account_id FROM {prefix}_current_daily_balances"

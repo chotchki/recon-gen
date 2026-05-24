@@ -2365,8 +2365,10 @@ CREATE INDEX idx_{p}_dss_account_day
 -- Exceptions queries a precomputed table instead of re-running the
 -- 5-branch UNION ALL (each branch with its own MAX subquery).
 -- One row per L1 invariant violation on the most recent business day.
--- `magnitude` normalized per branch so sort-by-magnitude reads
--- consistently regardless of check_type.
+-- AO.4 — split magnitude into ``magnitude_amount`` (BIGINT cents, money
+-- branches) + ``magnitude_count`` (INT, transfer-keyed cardinality
+-- branches). Exactly one populated per row; the other NULL. Eliminates
+-- the dual-unit "is this $ or count?" UX confusion the operator flagged.
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_todays_exceptions{matview_options} AS
 WITH latest_day AS (
@@ -2380,29 +2382,34 @@ SELECT 'drift' AS check_type, account_id, account_name,
        account_role, account_parent_role,
        business_day_start AS business_day,
        {null_text} AS rail_name,
-       ABS(drift) AS magnitude
+       ABS(drift) AS magnitude_amount,
+       CAST(NULL AS INTEGER) AS magnitude_count
 FROM {p}_drift, latest_day
 WHERE business_day_start = latest_day.day
 UNION ALL
 SELECT 'ledger_drift', account_id, account_name, account_role,
-       NULL, business_day_start, NULL, ABS(drift)
+       NULL, business_day_start, NULL, ABS(drift),
+       CAST(NULL AS INTEGER)
 FROM {p}_ledger_drift, latest_day
 WHERE business_day_start = latest_day.day
 UNION ALL
 SELECT 'overdraft', account_id, account_name, account_role,
        account_parent_role, business_day_start, NULL,
-       ABS(stored_balance)
+       ABS(stored_balance),
+       CAST(NULL AS INTEGER)
 FROM {p}_overdraft, latest_day
 WHERE business_day_start = latest_day.day
 UNION ALL
 SELECT 'limit_breach', account_id, account_name, account_role,
        account_parent_role, business_day, rail_name,
-       (outbound_total - cap)
+       (outbound_total - cap),
+       CAST(NULL AS INTEGER)
 FROM {p}_limit_breach, latest_day
 WHERE business_day = latest_day.day
 UNION ALL
 SELECT 'expected_eod_balance_breach', account_id, account_name,
-       account_role, NULL, business_day_start, NULL, ABS(variance)
+       account_role, NULL, business_day_start, NULL, ABS(variance),
+       CAST(NULL AS INTEGER)
 FROM {p}_expected_eod_balance_breach, latest_day
 WHERE business_day_start = latest_day.day
 -- Currently-open branches (M.4.4.12) — stuck_pending and stuck_unbundled
@@ -2412,19 +2419,21 @@ WHERE business_day_start = latest_day.day
 UNION ALL
 SELECT 'stuck_pending', account_id, account_name, account_role,
        account_parent_role, {posting_to_date} AS business_day,
-       rail_name, amount_money AS magnitude
+       rail_name, amount_money AS magnitude_amount,
+       CAST(NULL AS INTEGER)
 FROM {p}_stuck_pending
 UNION ALL
 SELECT 'stuck_unbundled', account_id, account_name, account_role,
        account_parent_role, {posting_to_date} AS business_day,
-       rail_name, amount_money AS magnitude
+       rail_name, amount_money AS magnitude_amount,
+       CAST(NULL AS INTEGER)
 FROM {p}_stuck_unbundled
 -- AB.2.3 — Chain Parent Disagreement: surfaces per child Transfer (not
 -- per (account, day)), so no per-day filter applies. The matview's
 -- business_day comes from MIN(posting day) of the conflicting leg
--- rows. magnitude is the cardinality of the parent_transfer_id set
--- (>= 2 = violation). account_id / account_role default to NULL since
--- the violation is keyed on transfer_id, not account.
+-- rows. magnitude_count = the cardinality of the parent_transfer_id
+-- set (>= 2 = violation). account_id / account_role default to NULL
+-- since the violation is keyed on transfer_id, not account.
 UNION ALL
 SELECT 'chain_parent_disagreement',
        {null_text} AS account_id,
@@ -2433,12 +2442,13 @@ SELECT 'chain_parent_disagreement',
        NULL AS account_parent_role,
        business_day,
        child_template_name AS rail_name,
-       distinct_parent_count AS magnitude
+       CAST(NULL AS BIGINT) AS magnitude_amount,
+       distinct_parent_count AS magnitude_count
 FROM {p}_chain_parent_disagreement
 -- AB.3.3 — XOR Group Violation: surfaces per (Transfer, template, XOR
 -- group) when firing_count != 1. Like chain_parent_disagreement this
 -- is keyed on transfer_id, not account, so account columns default
--- NULL. magnitude is the firing_count (0 = missed, >=2 = overlap).
+-- NULL. magnitude_count = firing_count (0 = missed, >=2 = overlap).
 UNION ALL
 SELECT 'xor_group_violation',
        {null_text} AS account_id,
@@ -2447,13 +2457,14 @@ SELECT 'xor_group_violation',
        NULL AS account_parent_role,
        business_day,
        template_name AS rail_name,
-       firing_count AS magnitude
+       CAST(NULL AS BIGINT) AS magnitude_amount,
+       firing_count AS magnitude_count
 FROM {p}_xor_group_violation
 -- AB.4.7 — Fan-In Disagreement: surfaces per child Transfer when the
 -- contributing parent set doesn't match the chain's
 -- expected_parent_count (or has cardinality < 2 when expected is
 -- unset). Like the other transfer-keyed branches, account columns
--- default NULL. magnitude is the actual parent_count.
+-- default NULL. magnitude_count = actual parent_count.
 UNION ALL
 SELECT 'fan_in_disagreement',
        {null_text} AS account_id,
@@ -2462,13 +2473,14 @@ SELECT 'fan_in_disagreement',
        NULL AS account_parent_role,
        business_day,
        child_template_name AS rail_name,
-       parent_count AS magnitude
+       CAST(NULL AS BIGINT) AS magnitude_amount,
+       parent_count AS magnitude_count
 FROM {p}_fan_in_disagreement
 -- AB.6.5 — Multi-XOR Violation: surfaces per parent firing when the
 -- declared XOR-sibling set wasn't honored (0 fired = missed,
 -- ≥2 fired = overlap). Transfer-keyed like the chain_parent /
 -- xor_group branches, so account columns default NULL.
--- magnitude is the child_count (0 or ≥2).
+-- magnitude_count = child_count (0 or ≥2).
 UNION ALL
 SELECT 'multi_xor_violation',
        {null_text} AS account_id,
@@ -2477,7 +2489,8 @@ SELECT 'multi_xor_violation',
        NULL AS account_parent_role,
        business_day,
        parent_rail_or_template_name AS rail_name,
-       child_count AS magnitude
+       CAST(NULL AS BIGINT) AS magnitude_amount,
+       child_count AS magnitude_count
 FROM {p}_multi_xor_violation;
 -- Today's Exceptions sheet has 3 dropdowns (check_type, account,
 -- rail_name); each WHERE filter benefits from its own index.

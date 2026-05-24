@@ -455,7 +455,13 @@ TODAYS_EXCEPTIONS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("account_parent_role", "STRING"),
     ColumnSpec("business_day", "DATETIME", shape=ColumnShape.DATETIME_DAY),
     ColumnSpec("rail_name", "STRING", shape=ColumnShape.RAIL_NAME),
-    ColumnSpec("magnitude", "DECIMAL"),
+    # AO.4 — split: amount populated for money branches (drift, ledger_drift,
+    # overdraft, expected_eod_balance_breach, limit_breach, stuck_pending,
+    # stuck_unbundled); count populated for transfer-keyed cardinality
+    # branches (chain_parent_disagreement, xor_group_violation,
+    # fan_in_disagreement, multi_xor_violation). Exactly one non-NULL per row.
+    ColumnSpec("magnitude_amount", "DECIMAL"),
+    ColumnSpec("magnitude_count", "INTEGER"),
 ])
 
 
@@ -885,28 +891,21 @@ def build_todays_exceptions_dataset(
 
     Y.2.f — App2-side date pushdown via ``business_day``.
 
-    AO.1.impl — ``magnitude`` is a UNION column whose source-branch
-    semantics vary: the money branches (drift / ledger_drift /
-    overdraft / expected_eod_balance_breach / limit_breach overflow /
-    stuck_pending.amount_money / stuck_unbundled.amount_money) come
-    out as BIGINT cents from the foundation matview rewrite and need
-    a dollar wrap here. The count branches (chain_parent_disagreement /
-    xor_group_violation / fan_in_disagreement / multi_xor_violation)
-    contribute small integer counts whose values divide cleanly by 100
-    only for the wrong reasons — a known pre-AO.1 cross-branch
-    semantic conflict (magnitude column was already `currency=True` in
-    the visual, so count rows already displayed as ``$3.00``-style
-    monetary cells before AO.1). Wrapping ``magnitude`` here keeps
-    money rows correct and leaves the pre-existing count-branch
-    cosmetic issue exactly where it was; the deeper fix is matview-
-    side and out of AO.1's dataset-slice scope.
+    AO.4 — the matview now splits ``magnitude`` into two columns by
+    source-branch unit: ``magnitude_amount`` (BIGINT cents — money
+    branches) and ``magnitude_count`` (INT — transfer-keyed cardinality
+    branches). Exactly one is non-NULL per row. Wrap ``magnitude_amount``
+    cents → dollars; pass ``magnitude_count`` through bare.
     """
     prefix = cfg.db_table_prefix
-    magnitude = cents_to_dollars_sql("magnitude", dialect=cfg.dialect)
+    magnitude_amount = cents_to_dollars_sql(
+        "magnitude_amount", dialect=cfg.dialect,
+    )
     sql_template = (
         f"SELECT check_type, account_id, account_name, account_role,"
         f" account_parent_role, business_day, rail_name,"
-        f" {magnitude} AS magnitude\n"
+        f" {magnitude_amount} AS magnitude_amount,"
+        f" magnitude_count\n"
         f"FROM {prefix}_todays_exceptions\n"
         f"WHERE {_data_value_clause('check_type', P_L1_TODAYS_EXC_CHECK_TYPE)}\n"
         f"  AND {_account_display_clause(P_L1_TODAYS_EXC_ACCOUNT)}\n"

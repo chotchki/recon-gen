@@ -926,10 +926,17 @@ def _populate_todays_exceptions_sheet(
     )
 
     # Row 3: detail table — every row is one violation, sorted by
-    # magnitude DESC so the biggest variances surface first. Drills:
-    # left-click → Drift (back-toward per-invariant source); right-click
-    # menu → Daily Statement (forward into the per-account-day walk).
-    magnitude_col = ds["magnitude"].numerical(currency=True)
+    # money-magnitude DESC so the biggest dollar variances surface
+    # first. AO.4 — magnitude split: ``magnitude_amount`` ($, money
+    # branches: drift/ledger_drift/overdraft/eod/limit/stuck_*) +
+    # ``magnitude_count`` (#, transfer-keyed cardinality branches:
+    # chain_parent_disagreement/xor/fan_in/multi_xor). Exactly one
+    # populated per row; the other displays as blank — visually
+    # disambiguating "$1,250.00" (money) from "3" (count).
+    # Drills: left-click → Drift (back-toward per-invariant source);
+    # right-click menu → Daily Statement (forward into per-account-day).
+    amount_col = ds["magnitude_amount"].numerical(currency=True)
+    count_col = ds["magnitude_count"].numerical()
     account_col = ds["account_id"].dim()
     business_day_col = ds["business_day"].date()
     sheet.layout.row(height=_TABLE_ROW_SPAN).add_table(
@@ -937,10 +944,12 @@ def _populate_todays_exceptions_sheet(
         title="Exception Detail",
         subtitle=(
             "Every violation on today's business day. Sorted by "
-            "magnitude (largest first) so the biggest variances are "
-            "the top rows. Left-click an account_id to narrow Drift "
-            "to that account; right-click → View Daily Statement to "
-            "open the per-account-day walk."
+            "dollar magnitude (largest first) so the biggest variances "
+            "are the top rows. Transfer-keyed checks (chain / XOR / "
+            "fan-in) carry a count instead of an amount and sort below. "
+            "Left-click an account_id to narrow Drift to that account; "
+            "right-click → View Daily Statement to open the per-"
+            "account-day walk."
         ),
         columns=[
             ds["check_type"].dim(),
@@ -950,9 +959,10 @@ def _populate_todays_exceptions_sheet(
             ds["account_parent_role"].dim(),
             business_day_col,
             ds["rail_name"].dim(),
-            magnitude_col,
+            amount_col,
+            count_col,
         ],
-        sort_by=(magnitude_col, "DESC"),
+        sort_by=(amount_col, "DESC"),
         actions=[
             _l1_drill(
                 target_sheet=drift_sheet,

@@ -741,7 +741,7 @@ def test_todays_exceptions_includes_chain_parent_disagreement_branch() -> None:
     assert "'chain_parent_disagreement'" in body
     assert "FROM te2_chain_parent_disagreement" in body
     assert "child_template_name AS rail_name" in body
-    assert "distinct_parent_count AS magnitude" in body
+    assert "distinct_parent_count AS magnitude_count" in body
 
 
 def _instance_with_pending_age(prefix: str) -> L2Instance:
@@ -1079,7 +1079,7 @@ def test_todays_exceptions_includes_xor_group_violation_branch() -> None:
     assert "'xor_group_violation'" in body
     assert "FROM xt_xor_group_violation" in body
     assert "template_name AS rail_name" in body
-    assert "firing_count AS magnitude" in body
+    assert "firing_count AS magnitude_count" in body
 
 
 def test_transfer_parents_view_ab4_shape() -> None:
@@ -1280,7 +1280,7 @@ def test_todays_exceptions_includes_fan_in_disagreement_branch() -> None:
     assert "'fan_in_disagreement'" in body
     assert "FROM fit_fan_in_disagreement" in body
     assert "child_template_name AS rail_name" in body
-    assert "parent_count AS magnitude" in body
+    assert "parent_count AS magnitude_count" in body
 
 
 def test_multi_xor_violation_view_empty_branch_when_no_qualifying_chain(
@@ -1386,7 +1386,7 @@ def test_todays_exceptions_includes_multi_xor_violation_branch() -> None:
     assert "'multi_xor_violation'" in body
     assert "FROM mxt_multi_xor_violation" in body
     assert "parent_rail_or_template_name AS rail_name" in body
-    assert "child_count AS magnitude" in body
+    assert "child_count AS magnitude_count" in body
 
 
 def test_multi_xor_violation_skips_per_child_fan_in_entries() -> None:
