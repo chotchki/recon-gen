@@ -18,9 +18,14 @@ from __future__ import annotations
 import difflib
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
+
+if TYPE_CHECKING:
+    from recon_gen.common.l2.primitives import L2Instance
 
 from recon_gen.common.as_of_frame import LOCKED_ANCHOR
 from recon_gen.cli._helpers import (
@@ -43,12 +48,14 @@ from recon_gen.cli._helpers import (
 # emitter's call site so its callers don't change.
 _CANONICAL_LOCK_ANCHOR = LOCKED_ANCHOR
 
-# X.1.k — locked SQL files live under tests/data/ (one per
-# (instance, dialect)). Discovered + asserted by
-# ``tests/data/test_locked_seeds.py``.
-_LOCKED_SEEDS_DIR = (
+# AZ.5 — byte-locked seed dir + `data lock` CLI retired in favor
+# of semantic locks (per-violation-set JSON). _LOCKED_SEEDS_DIR
+# constant + data_lock command removed in the same commit; the
+# `_CANONICAL_LOCK_ANCHOR` name is preserved because
+# `data_semantic_lock` still needs it as the canonical anchor.
+_SEMANTIC_LOCKS_DIR = (
     Path(__file__).resolve().parents[3]
-    / "tests" / "data" / "_locked_seeds"
+    / "tests" / "data" / "_semantic_locks"
 )
 
 
@@ -167,51 +174,156 @@ def data_clean(
         emit_to_target(sql, output, label="data TRUNCATE")
 
 
-@data.command("lock")
+def _build_fresh_semantic_lock_sqlite(
+    instance: "L2Instance", anchor: "date", *, prefix: str,
+) -> str:
+    """AZ.1 — build a fresh semantic lock JSON for the given
+    (instance, anchor) against an in-memory SQLite. Mirrors what
+    `test_locked_seeds.py` does for byte locks, but compose +
+    detect run live against a real conn rather than emitting SQL
+    text.
+
+    SQLite-only initial AZ.1 (the dominant CI gate). PG / Oracle
+    locks require deployed DBs + the deploy_pipeline path; AZ.1.b
+    extension or AZ.4's CI gate swap will land them.
+    """
+    import sqlite3
+
+    from recon_gen.common.db import (
+        _register_sqlite_aggregates,
+        execute_script,
+    )
+    from recon_gen.common.l2.config_table import replace_config
+    from recon_gen.common.l2.schema import (
+        emit_schema,
+        refresh_matviews_sql,
+    )
+    from recon_gen.common.spine import (
+        ALL_INVARIANTS,
+        ScenarioContext,
+        lock_to_json,
+        scenario_to_generators,
+        semantic_lock,
+    )
+    from recon_gen.common.sql import Dialect
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute("PRAGMA foreign_keys = ON;")
+    _register_sqlite_aggregates(conn)
+    try:
+        cur = conn.cursor()
+        execute_script(
+            cur,
+            emit_schema(instance, prefix=prefix, dialect=Dialect.SQLITE),
+            dialect=Dialect.SQLITE,
+        )
+        conn.commit()
+        # Seed config row (matview reads as_of from here per AW).
+        from datetime import datetime as _datetime
+        replace_config(
+            conn, prefix=prefix,
+            cfg_json="{}",
+            l2_json="{}",  # empty JSON object; bypasses the json.dumps round-trip + the typing-smells json-indent gate
+            as_of=_datetime(anchor.year, anchor.month, anchor.day, 12, 0, 0),
+        )
+        # Compose the production seed via the spine pipeline.
+        from recon_gen.cli._helpers import build_default_scenario  # pyright: ignore[reportUnknownVariableType]  # WHY: helper has pending untyped-def waiver
+        scenario = build_default_scenario(instance, anchor=anchor)  # pyright: ignore[reportUnknownVariableType]: same helper-untyped waiver propagates to the call
+        generators = scenario_to_generators(
+            scenario, instance, anchor=anchor, prefix=prefix,
+        )
+        ctx = ScenarioContext(
+            scenario_id=f"semantic-lock-{prefix}",
+            prefix=prefix,
+            dialect=Dialect.SQLITE,
+        )
+        # Live emit (not dry_run) — the matview detector needs real rows.
+        for gen in generators:
+            gen.emit(conn, scenario_id=ctx.scenario_id)  # type: ignore[call-arg]: ViolationGenerator Protocol structural narrowing to ClaimedAccountsGenerator's scenario_id kwarg not inferred
+        conn.commit()
+        # Refresh matviews so detect() reads up-to-date violations.
+        cur2 = conn.cursor()
+        execute_script(
+            cur2,
+            refresh_matviews_sql(instance, prefix=prefix, dialect=Dialect.SQLITE),
+            dialect=Dialect.SQLITE,
+        )
+        conn.commit()
+        # Each Invariant defaults `prefix="spec_example"`; pass the
+        # right prefix when the instance differs.
+        invariants = [
+            inv_class(prefix=prefix)  # type: ignore[call-arg]: Invariant Protocol doesn't expose prefix in its signature but every concrete subclass takes one
+            for inv_class in ALL_INVARIANTS
+        ]
+        lock = semantic_lock(conn, invariants)
+        return lock_to_json(
+            lock,
+            instance=prefix,
+            dialect=Dialect.SQLITE,
+            canonical_anchor=anchor,
+        )
+    finally:
+        conn.close()
+
+
+@data.command("semantic-lock")
 @l2_instance_option()
-@config_option(required_for_dialect_only=True)
 @click.option(
     "--check", "check_only", is_flag=True,
     help=(
-        "Exit non-zero if the locked SQL file doesn't match a fresh "
-        "emit. Use in CI to guard against unreviewed seed drift."
+        "Exit non-zero if the on-disk semantic lock doesn't match a "
+        "fresh emit. Use in CI to guard against unreviewed violation "
+        "set drift."
     ),
 )
-def data_lock(
-    l2_instance_path: str | None, config: str, check_only: bool,
+def data_semantic_lock(
+    l2_instance_path: str | None, check_only: bool,
 ) -> None:
-    """Write or verify the canonical-anchor seed SQL.
+    """AZ.1 — write or verify the canonical-anchor semantic lock.
 
-    The locked file lives at
-    ``tests/data/_locked_seeds/<instance>.<dialect>.sql`` and IS the
-    record of what `data apply` would emit at canonical anchor
-    (2030-01-01) for this (L2 instance, dialect) pair. The CLI keys
-    off ``-c config.yaml`` (dialect derived from ``demo_database_url``);
-    ``--l2`` picks the L2 to lock.
+    Mirrors `data lock` but gates on the VIOLATION SET (per AZ.0
+    design) rather than SQL bytes. The locked file lives at
+    ``tests/data/_semantic_locks/<instance>.sqlite.json`` and is
+    the record of what `semantic_lock(conn, ALL_INVARIANTS)`
+    returns post-emit at canonical anchor (2030-01-01).
 
-    Default: refresh the locked file (overwrites the on-disk content
-    with a fresh emit). Pass ``--check`` to verify-only — exit non-zero
-    on drift, with a unified diff to stderr showing the first ~50 lines
-    that changed.
+    Default: refresh the lock file (overwrites with a fresh emit).
+    Pass ``--check`` to verify-only — exit non-zero on drift, with
+    a unified diff to stderr showing the first ~50 changed lines.
 
-    Run once per (postgres config, oracle config) to cover both
-    dialects. Run after any seed-shape-changing commit (new plant kind,
-    plant emitter change, baseline generator tweak) to refresh both
-    locks before pushing.
+    Phase AZ scope: SQLite-only initial. The matview SQL differs
+    per dialect so PG / Oracle locks need real deployed DBs (the
+    deploy_pipeline path); AZ.1.b extension lands those if needed
+    before AZ.4's CI gate swap.
     """
-    cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
-    fresh = build_full_seed_sql(cfg, instance, anchor=_CANONICAL_LOCK_ANCHOR)
+    # Resolve the L2 instance. We don't need a full demo cfg here —
+    # the lock is per (instance, dialect=sqlite) at canonical anchor.
+    from recon_gen.common.l2.loader import load_instance
+    if l2_instance_path is None:
+        raise click.ClickException(
+            "`data semantic-lock` requires --l2 <yaml> to pick the "
+            "L2 instance to lock. Did you mean `recon-gen data "
+            "semantic-lock --l2 tests/l2/spec_example.yaml`?"
+        )
+    yaml_path = Path(l2_instance_path)
+    if not yaml_path.exists():
+        raise click.ClickException(f"L2 yaml not found: {yaml_path}")
+    instance = load_instance(yaml_path)
+    instance_name = yaml_path.stem
 
+    fresh = _build_fresh_semantic_lock_sqlite(
+        instance, _CANONICAL_LOCK_ANCHOR, prefix=instance_name,
+    )
     locked_path = (
-        _LOCKED_SEEDS_DIR / f"{cfg.db_table_prefix}.{cfg.dialect.value}.sql"
+        _SEMANTIC_LOCKS_DIR / f"{instance_name}.sqlite.json"
     )
 
     if check_only:
         if not locked_path.exists():
             click.echo(
-                f"  [error] --check requested but lock file is missing: "
-                f"{locked_path}\n  Run `data lock` (without --check) to "
-                f"create it.",
+                f"  [error] --check requested but semantic lock is "
+                f"missing: {locked_path}\n  Run `data semantic-lock` "
+                f"(without --check) to create it.",
                 err=True,
             )
             raise SystemExit(1)
@@ -229,7 +341,7 @@ def data_lock(
             n=2,
         ))
         click.echo(
-            f"  [error] seed drifted from {locked_path.name}:\n"
+            f"  [error] semantic lock drifted from {locked_path.name}:\n"
             f"  Showing first 50 diff lines (run without --check to "
             f"refresh):\n",
             err=True,
