@@ -1803,7 +1803,13 @@ SELECT
     parent_db.business_day_start,
     parent_db.business_day_end,
     COALESCE(child_totals.child_balance, 0)
-        + COALESCE(direct_totals.direct_balance, 0) AS computed_balance
+        + COALESCE((
+            SELECT SUM(tx.amount_money)
+            FROM {p}_current_transactions tx
+            WHERE tx.account_id = parent_db.account_id
+              AND tx.status = 'Posted'
+              AND tx.posting <= parent_db.business_day_end
+        ), 0) AS computed_balance
 FROM {p}_current_daily_balances parent_db
 LEFT JOIN (
     SELECT
@@ -1816,18 +1822,6 @@ LEFT JOIN (
 ) child_totals
     ON child_totals.parent_role = parent_db.account_role
    AND child_totals.business_day_start = parent_db.business_day_start
-LEFT JOIN (
-    SELECT
-        tx.account_id,
-        {date_trunc_tx_posting} AS business_day,
-        SUM(tx.amount_money) AS direct_balance
-    FROM {p}_current_transactions tx
-    WHERE tx.status = 'Posted'
-    GROUP BY tx.account_id, {date_trunc_tx_posting}
-) direct_totals
-    ON direct_totals.account_id = parent_db.account_id
-   AND direct_totals.business_day >= parent_db.business_day_start
-   AND direct_totals.business_day < parent_db.business_day_end
 WHERE parent_db.account_scope = 'internal'
   AND parent_db.account_role IS NOT NULL
   -- Only emit for accounts whose role IS a parent role to some child.

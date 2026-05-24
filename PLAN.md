@@ -136,8 +136,30 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
     - [x] AO.S2.a - Trainer timeline determinism: scenario-end date (`window_end`, plant anchor) is DISTINCT from load-up-to (`up_to`/`end_date`, the trainer's scrub head — load early for good days, advance to reveal the issue). Tests passed 5/21, broke 5/22 (window_end floated on wall-clock today). Fix: pin window_end explicitly in the two timeline tests (cache default stays today for the live trainer); + regression test that plants stay fixed at window_end across different up_to values. (`ao-oracle-release-fix`)
 - [ ] AO.C1 - (feedback #10) App Info shows `dialect: sqlite` / dev prefix — fine for the dev capture; confirm a production deploy shows the real engine + prefix.
 - [ ] AO.C2 - (feedback #9) Empty-default AML sliders (Fanout, Anomalies) — confirm render-on-default vs broken on AWS (likely the slider-default class; pairs with AO.9).
-## Phase PLAN.0 - AY
-- [x] PLAN.md AY.6.b — clean up 9 spine-emit drift test failures
+
+## Phase BA
+
+- **Dashboard pickers sourced from `<prefix>_config.l2_yaml` (post-AW
+  follow-on).** Surfaced 2026-05-23 during AW.3. Today's pickers come
+  from two places: (1) hardcoded option lists baked into the QS dataset
+  JSON at emit time (rail-name picker, direction picker, parent-role
+  picker — Python reads cfg/L2, emits `StaticValues`); (2) dataset-
+  derived `SELECT DISTINCT <col> FROM <dataset>`. AW landed a third
+  option: the `<prefix>_config` table is SQL-queryable, so dashboards
+  can JOIN to `l2_yaml` for picker options — `SELECT JSON_VALUE(rail.
+  value, '$.name') FROM <prefix>_config, JSON_TABLE(l2_yaml, '$.rails
+  [*]' COLUMNS (value json PATH '$')) rail WHERE JSON_VALUE(rail.value,
+  '$.max_pending_age_seconds') IS NOT NULL`. What this unlocks: pickers
+  that show only L2-DECLARED values (vs. dataset-derived which shows
+  whatever's in the data); pickers that JOIN to L2 metadata
+  (descriptions, types, classifications); pickers that survive deploys
+  without re-emitting JSON (cfg row updates; pickers re-read); cross-
+  dashboard consistency without re-encoding the L2 in each dataset.
+  **Caveat**: requires changing the dashboard JSON's filter shape from
+  `StaticValues` to `LinkToDataSetColumn` (or equivalent). Not free
+  with AW; this is the dashboard-side migration that exercises AW's
+  payoff. *(Sized as its own phase when picker complexity surfaces as
+  friction.)*
 
 # Backlog (not yet phased)
 
@@ -180,27 +202,7 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
   goal (analyst-friendliness vs operator ergonomics vs Studio
   iteration speed).
 
-- **Dashboard pickers sourced from `<prefix>_config.l2_yaml` (post-AW
-  follow-on).** Surfaced 2026-05-23 during AW.3. Today's pickers come
-  from two places: (1) hardcoded option lists baked into the QS dataset
-  JSON at emit time (rail-name picker, direction picker, parent-role
-  picker — Python reads cfg/L2, emits `StaticValues`); (2) dataset-
-  derived `SELECT DISTINCT <col> FROM <dataset>`. AW landed a third
-  option: the `<prefix>_config` table is SQL-queryable, so dashboards
-  can JOIN to `l2_yaml` for picker options — `SELECT JSON_VALUE(rail.
-  value, '$.name') FROM <prefix>_config, JSON_TABLE(l2_yaml, '$.rails
-  [*]' COLUMNS (value json PATH '$')) rail WHERE JSON_VALUE(rail.value,
-  '$.max_pending_age_seconds') IS NOT NULL`. What this unlocks: pickers
-  that show only L2-DECLARED values (vs. dataset-derived which shows
-  whatever's in the data); pickers that JOIN to L2 metadata
-  (descriptions, types, classifications); pickers that survive deploys
-  without re-emitting JSON (cfg row updates; pickers re-read); cross-
-  dashboard consistency without re-encoding the L2 in each dataset.
-  **Caveat**: requires changing the dashboard JSON's filter shape from
-  `StaticValues` to `LinkToDataSetColumn` (or equivalent). Not free
-  with AW; this is the dashboard-side migration that exercises AW's
-  payoff. *(Sized as its own phase when picker complexity surfaces as
-  friction.)*
+
 
 - **Q.6 — CLI shape revisit: cfg ⇄ L2 dual-yaml factoring.** Surfaced 2026-05-08 during `Y.2.gate.h.6`. The runner reads `cfg.default_l2_instance` and threads `QS_GEN_TEST_L2_INSTANCE` to subprocesses, making the CLI's dual-arg shape (`-c <cfg.yaml> --l2 <l2.yaml>`) partially redundant. Spike-before-implement (per `feedback_spike_before_locking_implementation`); CLI-surface change touches every operator command + doc example + tests.
   - **Q.6.0 SPIKE: combined-yaml vs cfg-with-L2-pointer vs status-quo** (LOCKED 2026-05-08; deferred from PLAN 2026-05-19). Output `docs/audits/y_11_cli_shape_spike.md`. Four candidates: **(A)** status quo + `--l2` defaults from `cfg.default_l2_instance` (smallest delta, mostly additive); **(B)** single combined yaml (eliminates dual-yaml friction but env-only fields co-mingle with institution-flavor — Q.5 separation existed for a reason); **(C)** cfg-with-L2-pointer + `--l2` removed entirely (forces multi-instance operators to duplicate cfg); **(D)** `--l2 <name>` indexed against an `l2_instances:` registry in cfg + `default_l2_instance:` (named ergonomics, one indirection layer). Constraints: (1) no-args `json apply --execute` deploys the default L2; (2) multi-L2 operators don't copy cfg files; (3) existing `--l2 <yaml>` keeps working or has a documented migration; (4) doc examples shrink; (5) tests pass without env-var passthrough. Likely outcome: A or D — A smallest delta, D cleanest if multi-L2-per-cfg becomes common.

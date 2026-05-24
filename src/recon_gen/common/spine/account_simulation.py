@@ -116,12 +116,13 @@ class AccountSimulation:
     rng: random.Random = field(default_factory=scenario_rng)
     #: AS.4 — when False, the fold still computes per-day stored via
     #: `Σ legs`, but does NOT insert leg rows into `_transactions`.
-    #: Right for parent-style ledger accounts that MIRROR the
-    #: children's cumulative balance without owning direct legs of
-    #: their own. The ledger_drift matview's per-day direct_totals
-    #: then stays zero on this account, so the clean fold's
-    #: `parent.stored = Σ child.stored` agreement gives drift = 0.
+    #: Right for parent-style ledger accounts that have no direct
+    #: postings of their own — pure aggregators of child balances.
     #: Default True keeps every existing leaf-style use site unchanged.
+    #: (Parents with mixed direct postings + child rollups also work;
+    #: AO.L fixed `_computed_ledger_balance` to sum direct postings
+    #: cumulatively across days, so the matview no longer relies on
+    #: direct_totals=0 for clean drift.)
     emit_legs: bool = True
 
     # ---- The pure fold (no IO) -------------------------------------------
