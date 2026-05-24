@@ -157,6 +157,10 @@ class XorGroupMissedFiringGenerator:
     against `(transfer_id, template, member_rail)` for the target
     group finds zero rows; `firing_count = 0`; the `HAVING <> 1` gate
     surfaces the row with `fired_rails = ''`.
+
+    AY.4.c.2 — account_id_override allows the plant adapter
+    (AY.4.c.3) to thread OLD plant account_ids through, preventing
+    PK collisions when N plants of the same shape compose.
     """
 
     template_name: str
@@ -164,6 +168,7 @@ class XorGroupMissedFiringGenerator:
     witness_rail_name: str
     anchor_day: date
     prefix: str = "spec_example"
+    account_id_override: str | None = None
 
     @property
     def transfer_id(self) -> str:
@@ -171,6 +176,9 @@ class XorGroupMissedFiringGenerator:
 
     @property
     def account_id(self) -> str:
+        """``account_id_override`` wins when set (AY.4.c.2)."""
+        if self.account_id_override is not None:
+            return self.account_id_override
         return f"acct-xor-missed-{self.template_name}"
 
     @property
@@ -230,6 +238,10 @@ class XorGroupOverlapGenerator:
     group. The matview's LEFT JOIN finds two member-rail firings for
     `(transfer_id, template, target_group)` → `COUNT = 2` → `HAVING
     <> 1` → row surfaces with `fired_rails = '<a>,<b>'`.
+
+    AY.4.c.2 — account_id_override allows the plant adapter
+    (AY.4.c.3) to thread OLD plant account_ids through, preventing
+    PK collisions when N plants of the same shape compose.
     """
 
     template_name: str
@@ -238,6 +250,7 @@ class XorGroupOverlapGenerator:
     variant_b_rail_name: str
     anchor_day: date
     prefix: str = "spec_example"
+    account_id_override: str | None = None
 
     @property
     def transfer_id(self) -> str:
@@ -245,6 +258,9 @@ class XorGroupOverlapGenerator:
 
     @property
     def account_id(self) -> str:
+        """``account_id_override`` wins when set (AY.4.c.2)."""
+        if self.account_id_override is not None:
+            return self.account_id_override
         return f"acct-xor-overlap-{self.template_name}"
 
     @property

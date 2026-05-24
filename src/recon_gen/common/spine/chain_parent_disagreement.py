@@ -157,6 +157,10 @@ class ChainParentDisagreementGenerator:
 
     Single-edge: transfers-only emit → no balance rows → no drift
     trip (matches the AT.3 anomaly / money_trail shape).
+
+    AY.4.c.2 — account_id_override allows the plant adapter
+    (AY.4.c.3) to thread OLD plant account_ids through, preventing
+    PK collisions when N plants of the same shape compose.
     """
 
     child_template_name: str
@@ -165,6 +169,7 @@ class ChainParentDisagreementGenerator:
     parent_b_transfer_id: str = field(default="tr-cpd-parent-b")
     rail_name: str = "ach"
     prefix: str = "spec_example"
+    account_id_override: str | None = None
 
     @property
     def transfer_id(self) -> str:
@@ -177,7 +182,10 @@ class ChainParentDisagreementGenerator:
         """Single synthetic account_id the generator's 2 legs land on.
         Matview filters don't depend on account columns; the account
         is here just to satisfy NOT NULL constraints + AV.5's
-        claimed_accounts contract."""
+        claimed_accounts contract. ``account_id_override`` wins when
+        set (AY.4.c.2 — plant-adapter PK-collision avoidance)."""
+        if self.account_id_override is not None:
+            return self.account_id_override
         return f"acct-cpd-{self.child_template_name}"
 
     @property

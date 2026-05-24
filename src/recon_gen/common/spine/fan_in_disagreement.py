@@ -206,6 +206,10 @@ class FanInChainGenerator:
     healthy (== expected), missing (< expected), extra (> expected).
 
     Single-edge: transfers-only → no balance rows → no drift trip.
+
+    AY.4.c.2 — account_id_override allows the plant adapter
+    (AY.4.c.3) to thread OLD plant account_ids through, preventing
+    PK collisions when N plants of the same shape compose.
     """
 
     chain_parent_name: str
@@ -215,6 +219,7 @@ class FanInChainGenerator:
     anchor_day: date
     expected_kind: str  # 'healthy' | 'missing' | 'orphan' | 'extra'
     prefix: str = "spec_example"
+    account_id_override: str | None = None
 
     @property
     def child_transfer_id(self) -> str:
@@ -222,6 +227,13 @@ class FanInChainGenerator:
 
     @property
     def account_id(self) -> str:
+        """Derivation keys off ``expected_kind`` + ``child_template_name``
+        (variant kind matters here — healthy/missing/orphan/extra each
+        get a distinct account so a compose of multiple variants on
+        the same chain doesn't PK-collide). ``account_id_override``
+        wins when set (AY.4.c.2)."""
+        if self.account_id_override is not None:
+            return self.account_id_override
         return f"acct-fanin-{self.expected_kind}-{self.child_template_name}"
 
     @property
