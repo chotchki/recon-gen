@@ -83,6 +83,11 @@ from recon_gen.common.spine.fan_in_disagreement import (
     FanInChainGenerator,
     FanInDisagreementInvariant,
 )
+from recon_gen.common.spine.multi_xor_violation import (
+    MultiXorMissedGenerator,
+    MultiXorOverlapGenerator,
+    MultiXorViolationInvariant,
+)
 from recon_gen.common.spine.xor_group_violation import (
     XorGroupMissedFiringGenerator,
     XorGroupOverlapGenerator,
@@ -156,6 +161,13 @@ __all__ = [
     # comparing against the L2 chain's expected_parent_count.
     "FanInDisagreementInvariant",
     "FanInChainGenerator",
+    # Multi-XOR-violation family — single invariant; 2 generators for
+    # the missed + overlap variants (AB.6.6); promoted in AX.4. Parent
+    # firing of a multi-XOR-child chain that fires 0 (missed) or ≥2
+    # (overlap) of its declared XOR-sibling children.
+    "MultiXorViolationInvariant",
+    "MultiXorMissedGenerator",
+    "MultiXorOverlapGenerator",
     # Money-trail family — recursive-graph L2; AT.3 promoted generator
     # + View on top of LedgerSimulation.transfers (parent-linked chain).
     "MoneyTrailInvariant",
