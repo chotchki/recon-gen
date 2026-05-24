@@ -300,3 +300,61 @@ def test_apply_scenario_works_with_ledger_simulation() -> None:
     # on parent. The lock captures both per-invariant sets in one shot.
     assert lock["drift"]
     assert lock["ledger_drift"]
+
+
+# ---------------------------------------------------------------------------
+# AY.3 — dialect kwarg threads through refresh + execute_script.
+# ---------------------------------------------------------------------------
+
+
+def test_apply_scenario_default_dialect_is_sqlite() -> None:
+    """The default kwarg matches every existing caller's implicit
+    expectation (preserves pre-AY.3 behavior byte-stable). The
+    in-process test harness is the dominant call site; threading
+    Dialect.SQLITE through doesn't change the rendered SQL."""
+    import inspect
+    sig = inspect.signature(apply_scenario)
+    assert sig.parameters["dialect"].default is Dialect.SQLITE
+
+
+def test_apply_scenario_accepts_dialect_kwarg_and_preserves_violations() -> None:
+    """Pass `dialect=Dialect.SQLITE` explicitly + assert the lock
+    matches the no-kwarg call. AY.3 is a no-op for SQLite (the
+    default); the test pins that the new kwarg path stays consistent
+    so AZ.1's per-dialect lock generation can lean on it.
+
+    Non-SQLite dialects (PG, Oracle) need real connections that the
+    spine unit suite doesn't have — those are covered by the AT.5
+    deploy-layer e2e gate. This test holds the in-process leg of the
+    same path: kwarg is threaded, default doesn't drift."""
+    inv = [DriftInvariant(), LedgerDriftInvariant()]
+    sim = AccountSimulation(
+        plans=_baseline_plans(),
+        perturbations=[
+            Perturbation(kind="state_blip", day_index=1, amount=11.0),
+        ],
+        account_id="acct-ay3-dialect",
+    )
+
+    def _run(*, explicit_dialect: Dialect | None) -> (
+        dict[str, frozenset[Violation]]
+    ):
+        conn = _fresh_db()
+        try:
+            if explicit_dialect is None:
+                apply_scenario(conn, sim, prefix=_PREFIX)
+            else:
+                apply_scenario(
+                    conn, sim, prefix=_PREFIX, dialect=explicit_dialect,
+                )
+            return semantic_lock(conn, inv)
+        finally:
+            conn.close()
+
+    implicit_lock = _run(explicit_dialect=None)
+    explicit_lock = _run(explicit_dialect=Dialect.SQLITE)
+    assert implicit_lock == explicit_lock, (
+        "passing dialect=Dialect.SQLITE explicitly should be byte-"
+        "identical to relying on the kwarg default — AY.3's lift "
+        "must not introduce semantic drift on the dominant call shape"
+    )
