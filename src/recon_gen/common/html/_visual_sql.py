@@ -76,6 +76,12 @@ def _measure_sql(measure: Any) -> str:
     ``Measure.kind`` is "sum" / "max" / "min" / "average" / "count" /
     "distinct_count". ``Measure.column.name`` is the column to
     aggregate (gets quoted via ``_quote_col`` — see Y.3.f.alt.1).
+
+    AO.1.impl (Studio slice) — when ``Measure.currency=True`` the
+    aggregated column is BIGINT cents per the AO.1 storage contract;
+    divide the aggregate by 100.0 so App2 renders dollars. ``count`` /
+    ``distinct_count`` aren't sums of cents (they're row counts) so
+    the divide is skipped for those kinds even when the flag is set.
     """
     kind = getattr(measure, "kind", None)
     column = getattr(getattr(measure, "column", None), "name", None)
@@ -83,17 +89,35 @@ def _measure_sql(measure: Any) -> str:
         return ""
     quoted = _quote_col(column)
     fn = _AGG_SQL_FN.get(kind)
+    is_currency = bool(getattr(measure, "currency", False))
+    counting = kind in ("count", "distinct_count")
     if fn is None:
         return f"COUNT({quoted})"  # safe fallback
     if kind == "distinct_count":
         # _AGG_SQL_FN entry is "COUNT(DISTINCT" — needs a closing paren.
         return f"COUNT(DISTINCT {quoted})"
-    return f"{fn}({quoted})"
+    expr = f"{fn}({quoted})"
+    if is_currency and not counting:
+        # cents → dollars at the SQL boundary; matches
+        # cents_to_dollars_sql's PG/Oracle/SQLite shape (the implicit
+        # NUMERIC promotion of `int / 100.0` works on every dialect
+        # the App2 path supports).
+        expr = f"({expr} / 100.0)"
+    return expr
 
 
 def _dim_sql(dim: Any) -> str:
     """Return the quoted column reference for a Dim (used in GROUP BY
     + SELECT). See ``_quote_col`` for why the quoting matters on Oracle.
+
+    Dim never carries an aggregation — it's a raw column reference.
+    When the Dim is ``currency=True`` (a money column projected as-is
+    into a table or chart category), the cents→dollars conversion has
+    to land on the row-side (``_apply_cents_to_dollars`` in the fetcher)
+    because the Dim reference appears in GROUP BY and projection both —
+    dividing here would force GROUP BY (col/100.0) which is fine
+    semantically but breaks ORDER BY by ordinal (the fetcher sorts on
+    the bare ref).
     """
     name = str(getattr(getattr(dim, "column", None), "name", "") or "")
     return _quote_col(name) if name else ""

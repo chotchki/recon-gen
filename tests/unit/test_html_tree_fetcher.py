@@ -28,6 +28,7 @@ from recon_gen.common.dataset_contract import (
 )
 from recon_gen.common.db import AsyncConnectionPool, make_connection_pool
 from recon_gen.common.html._tree_fetcher import (
+    _apply_cents_to_dollars,
     _find_visual_dataset_identifier,
     make_tree_db_fetcher,
 )
@@ -539,3 +540,120 @@ def test_make_tree_db_fetcher_sankey_passthrough_without_fields(
     out = asyncio.run(fetcher("v-ske", {}))
     # No fields → no dataset detected → empty payload.
     assert out == {}
+
+
+# ---------------------------------------------------------------------------
+# _apply_cents_to_dollars — AO.1.impl (Studio slice) row-side conversion
+# ---------------------------------------------------------------------------
+
+
+def test_apply_cents_to_dollars_converts_named_columns() -> None:
+    """Columns named in ``money_columns`` are coerced via Cents.from_db /
+    to_dollars; non-money columns pass through unchanged."""
+    rows = [("a", 7500, "x"), ("b", -125_000, "y")]
+    out = _apply_cents_to_dollars(
+        rows, ["name", "drift", "tag"], frozenset({"drift"}),
+    )
+    assert out[0] == ("a", 75.0, "x")  # 7500 cents → $75.00
+    assert out[1] == ("b", -1250.0, "y")  # -125000 cents → -$1,250.00
+
+
+def test_apply_cents_to_dollars_case_insensitive_oracle_match() -> None:
+    """Oracle's driver returns column names uppercased; the conversion
+    matches case-insensitively so an Oracle Studio /dashboards/ render
+    still drops the cents to dollars."""
+    rows = [(7500, "x")]
+    out = _apply_cents_to_dollars(
+        rows, ["DRIFT", "TAG"], frozenset({"drift"}),
+    )
+    assert out[0] == (75.0, "x")
+
+
+def test_apply_cents_to_dollars_none_passes_through() -> None:
+    """NULL money columns stay NULL (e.g., expected_eod_balance can be
+    NULL when no EOD invariant is set on the account)."""
+    rows = [("a", None), ("b", 0)]
+    out = _apply_cents_to_dollars(
+        rows, ["name", "money"], frozenset({"money"}),
+    )
+    assert out[0] == ("a", None)
+    assert out[1] == ("b", 0.0)  # 0 cents → $0.00
+
+
+def test_apply_cents_to_dollars_no_money_columns_is_noop() -> None:
+    """Visual without any currency fields → original rows returned (same
+    list, no copy)."""
+    rows = [("a", 7500)]
+    out = _apply_cents_to_dollars(rows, ["name", "drift"], frozenset())
+    assert out is rows  # same reference — short-circuit path
+
+
+def test_apply_cents_to_dollars_unknown_money_column_is_noop() -> None:
+    """money_columns names a column that doesn't appear in the result
+    set → no conversion happens, no errors raised."""
+    rows = [("a", 7500)]
+    out = _apply_cents_to_dollars(
+        rows, ["name", "amount"], frozenset({"drift"}),
+    )
+    assert out is rows
+
+
+def test_table_fetcher_converts_currency_columns_to_dollars(
+    aiosqlite_pool: AsyncConnectionPool,
+) -> None:
+    """End-to-end: a Table visual with a currency-flagged Dim returns
+    rows projected as dollars (cents / 100.0), not raw cents. Mirrors
+    the L1 drift table where ``drift`` is stored as BIGINT cents per
+    AO.1; the dashboards panel must show ``$75.00`` not ``$7,500.00``.
+    """
+    register_sql("x2g-test-ds", "SELECT status, amount FROM t")
+    app = App(name="x2g-currency-test", cfg=_TEST_CFG_SQLITE)
+    analysis = app.set_analysis(Analysis(
+        analysis_id_suffix="x2g-currency-test-analysis",
+        name="X.2.g Currency Test",
+    ))
+    ds = _ds("x2g-test-ds")
+    sheet = analysis.add_sheet(Sheet(
+        sheet_id=SheetId("s-cur"), name="SCur",
+        title="Currency Sheet", description="x",
+    ))
+    sheet.visuals.append(
+        Table(
+            title="Money rows", subtitle="t",
+            visual_id=VisualId("v-tbl-cur"),
+            columns=[ds["status"].dim(), ds["amount"].numerical(currency=True)],
+        ),
+    )
+    fetcher = make_tree_db_fetcher(
+        app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
+    )
+    out = asyncio.run(fetcher("v-tbl-cur", {}))
+    # The aiosqlite fixture seeds amount values [100, 50, 200, 25] in
+    # cents (BIGINT per AO.1). The currency-marked column converts to
+    # dollars in the row output: 100 cents → $1.00, etc.
+    cents_to_dollars = {100: 1.0, 50: 0.5, 200: 2.0, 25: 0.25}
+    amount_col_idx = 1
+    for row in out["rows"]:
+        # row[0] is status, row[1] is amount (already converted)
+        amount = row[amount_col_idx]
+        # Source row's amount value is one of the seeded cents values;
+        # after conversion it lands as the matching dollar float.
+        assert amount in cents_to_dollars.values(), (
+            f"amount {amount} not in {cents_to_dollars.values()}"
+        )
+    assert out["columns"][amount_col_idx].get("format") == "currency"
+
+
+def test_apply_cents_to_dollars_pre_converted_values_pass_through() -> None:
+    """Defensive: a value that's already a float / string (double-convert
+    path, or SQLite TEXT-affinity fallback) survives without raising —
+    int() conversion fails gracefully and the value stays as-is."""
+    rows = [("a", "not-a-number"), ("b", 75.0)]
+    out = _apply_cents_to_dollars(
+        rows, ["name", "money"], frozenset({"money"}),
+    )
+    # int("not-a-number") raises ValueError → caught, value preserved.
+    assert out[0] == ("a", "not-a-number")
+    # int(75.0) succeeds → reconverts (treats 75 as 75 cents = $0.75).
+    # This is a known limitation: callers must not double-convert.
+    assert out[1] == ("b", 0.75)

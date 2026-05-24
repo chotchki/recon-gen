@@ -33,6 +33,7 @@ class _StubDim:
 class _StubMeasure:
     kind: str
     column: _StubColumn
+    currency: bool = False
 
 
 # wrap_for_visual dispatches on `type(visual).__name__` so the stub
@@ -156,3 +157,76 @@ class TestTableWrap:
         """Tables paginate client-side — no SQL wrap."""
         result = wrap_for_visual(_BASE, Table())
         assert result == _BASE
+
+
+class TestCurrencyMeasureDividesByHundred:
+    """AO.1.impl (Studio slice) — money columns are BIGINT cents per the
+    AO.1 storage contract. A Measure with ``currency=True`` divides the
+    aggregate by 100.0 so App2 renders dollars (``$75.00``) not cents
+    (``$7,500.00``). Mirrors ``cents_to_dollars_sql`` at the same
+    boundary, just inside the visual's aggregation wrap."""
+
+    def test_currency_sum_divides_by_hundred(self):
+        kpi = KPI(values=[
+            _StubMeasure(
+                kind="sum",
+                column=_StubColumn("amount_money"),
+                currency=True,
+            ),
+        ])
+        wrapped = wrap_for_visual(_BASE, kpi)
+        assert '(SUM("amount_money") / 100.0)' in wrapped
+
+    def test_non_currency_sum_unchanged(self):
+        """Existing non-money aggregates stay unchanged — no spurious
+        divide on count of transfers, etc."""
+        kpi = KPI(values=[
+            _StubMeasure(kind="sum", column=_StubColumn("transfer_count")),
+        ])
+        wrapped = wrap_for_visual(_BASE, kpi)
+        assert 'SUM("transfer_count")' in wrapped
+        assert "/ 100.0" not in wrapped
+
+    def test_currency_count_does_not_divide(self):
+        """COUNT / DISTINCT_COUNT aren't sums of cents; the divide
+        skips them even when the flag is set (defensive — a counting
+        currency measure is nonsense but the wrap shouldn't corrupt
+        it into ``COUNT(...) / 100.0``)."""
+        kpi = KPI(values=[
+            _StubMeasure(
+                kind="count",
+                column=_StubColumn("account_id"),
+                currency=True,
+            ),
+        ])
+        wrapped = wrap_for_visual(_BASE, kpi)
+        assert 'COUNT("account_id")' in wrapped
+        assert "/ 100.0" not in wrapped
+
+    def test_currency_max_divides(self):
+        """MAX / MIN / AVG of cents still need conversion to dollars."""
+        kpi = KPI(values=[
+            _StubMeasure(
+                kind="max",
+                column=_StubColumn("abs_drift"),
+                currency=True,
+            ),
+        ])
+        wrapped = wrap_for_visual(_BASE, kpi)
+        assert '(MAX("abs_drift") / 100.0)' in wrapped
+
+    def test_sankey_weight_currency_divides(self):
+        """The Sankey weight measure is what ribbon thickness reads.
+        ``hop_amount`` is BIGINT cents per AO.1 — the wrap divides so
+        the rendered ribbon labels show dollars."""
+        sankey = Sankey(
+            source=_StubDim(column=_StubColumn("source_display")),
+            target=_StubDim(column=_StubColumn("target_display")),
+            weight=_StubMeasure(
+                kind="sum",
+                column=_StubColumn("hop_amount"),
+                currency=True,
+            ),
+        )
+        wrapped = wrap_for_visual(_BASE, sankey)
+        assert '(SUM("hop_amount") / 100.0)' in wrapped
