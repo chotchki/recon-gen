@@ -1,5 +1,99 @@
 # Release Notes
 
+## v11.13.0 — Phase AV: `daily_balances.limits` → `metadata` + ScenarioContext
+
+Phase AV closes two threads in one phase: the dormant
+`daily_balances.limits` column gets renamed to `metadata` (symmetric
+with `transactions.metadata`), and the `ScenarioContext` mechanism the
+`scenario-context-spike` branch designed gets promoted to `src/` —
+unified on the same column, no sidecar table.
+
+**Schema change (downstream ETL touch — migration warning):**
+
+- `<prefix>_daily_balances.limits` → `<prefix>_daily_balances.metadata`.
+  Same `TEXT IS JSON` shape (no semantic change on storage).
+- The JSON inside also restructures: per-rail caps that formerly lived
+  at the JSON root (`{rail_name: cap}`) now live under a nested
+  `limits` key (`{"limits": {rail_name: cap}}`) so the column has
+  room for siblings (scenario tags per ScenarioContext below; future
+  per-day metadata).
+- AV.0 audit (`docs/audits/av_0_limits_metadata_rename_audit.md`)
+  found the column was dormant on `main` — no production code reads
+  it; spine generators emit NULL; locked-seed INSERTs name the column
+  but populate NULL. So the rename is mostly mechanical: no live
+  reader to migrate.
+- **Custom ETL operators** who populate `daily_balances.limits` will
+  need to update both the column name AND the JSON shape (wrap
+  `{rail_name: cap}` under a `limits` key). The bundled
+  `etl_examples.py` Pattern 9 shows the new wire shape.
+- Locked seeds re-locked: `tests/data/_locked_seeds/spec_example.*.sql`
+  refreshed across all three dialects (byte-stable post-rename).
+- Docs updated: `Schema_v6.md`, `etl_examples.py`,
+  `docs/audits/p_2_dialect_catalog.md`.
+
+**ScenarioContext mechanism (`common/spine/scenario_context.py`):**
+
+- New `ScenarioContext(scenario_id, prefix, dialect)` frozen dataclass.
+  `compose(*generators)` runs pre-checks + emit + commit;
+  `cleanup()` does surgical `DELETE` on both base tables WHERE
+  `JSON_VALUE(metadata, '$.scenario_id')` matches.
+- New `ClaimedAccountsGenerator` Protocol — extension of
+  `ViolationGenerator` adding `claimed_accounts: frozenset[str]` +
+  a `scenario_id` keyword on `emit`.
+- New `scenario_metadata(scenario_id, **extra)` helper — compact JSON
+  every tagging caller writes.
+- **All 8 spine generators updated** — drift, overdraft, expected_eod,
+  stuck_pending, stuck_unbundled, limit_breach, anomaly, money_trail
+  — each gains `claimed_accounts` (derived from dataclass fields, no
+  DB IO) and an optional `scenario_id` kwarg on `emit()`. None →
+  byte-identical pre-AV.5 untagged emit; set → per-row metadata tag
+  on every row.
+- **No sidecar table**: the spike used `<prefix>_scenario_claims`
+  because `daily_balances` had no metadata column to tag with. The
+  AV.1 rename + restructure unblocks per-row tagging on both base
+  tables, so the production version writes the tag inline and the
+  sidecar never lands.
+- Three concrete safety properties the test suite pins:
+  1. Pairwise disjoint claims across composed generators (catches
+     "two `OverdraftGenerator` on the same account" at the wiring
+     site, before the DB-level PK collision).
+  2. Cross-scenario non-overlap: scenario B is refused at
+     compose-time if it claims an account already tagged with a
+     different scenario_id, with the conflicting scenario_id named
+     in the error.
+  3. Cleanup by scenario_id is surgical: only the matching rows
+     delete; sibling scenarios survive.
+
+**Insert path consolidation (drift / overdraft / expected_eod):**
+
+- `AccountSimulation` previously had its own SQLite-only local
+  `_insert_tx` / `_insert_balance` helpers (pre-AU.3.d-hoist
+  holdovers). AV.5 dedupes onto the shared dialect-aware versions
+  from `common/spine/_emit_helpers.py` (the dialect-detection AT.5.b
+  added). Net effect: `drift` / `overdraft` / `expected_eod`
+  generators can now emit against deployed PG / Oracle DBs via
+  `AccountSimulation` — no longer SQLite-only — matching what AT.5.b
+  did for anomaly + money_trail.
+
+**Side fix: flaky `test_poller_reloads_when_counter_advances`.** The
+JS poller test was load-sensitive — `wait_for_load_state(domcontentloaded)`
++ `wait_for_function(...)` both return immediately for an already-
+loaded page rather than blocking for the *reload*. Under suite load,
+`browser.close()` fired before the fetch promise chain microtask
+fired the reload. Fixed with `page.expect_navigation(timeout=5000)`
+context-manager around the bump — blocks on the next frame
+navigation deterministically. Verified: 3618 non-e2e tests green
+under load (was 3610 + AV.5's 8 new ScenarioContext tests).
+
+**Verified GREEN against live PG (RDS database-2 / qsgen_postgres):**
+
+- AT.5 e2e gate (spine⋈matview + Investigation 3-way agreement)
+  passes 6/6 — confirms the schema rename + spine refactor preserve
+  the L2 deployed-DB agreement contract.
+- Full non-e2e tree 3618/3618 (including 8 new
+  `test_spine_scenario_context.py` tests + the unchanged 251 spine
+  unit tests proving backward compat).
+
 ## v11.12.0 — Phases AS + AU + AT: invariant spine, L1 composition, L2 rollout
 
 Three phases close out the spine architecture seeded by AP/AR: AS (the
