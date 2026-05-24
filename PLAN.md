@@ -145,6 +145,24 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
 - [x] AX.5 - Registry split — ALL_L1 / ALL_L2_SHAPE / ALL_L2_INVESTIGATION + ALL_INVARIANTS
 - [x] AX.6 - Per-invariant unit tests + semantic_lock extension
 - [ ] AX.7 - Bump v11.14.0 + release notes + push
+## Phase AY - Converge the dual seed paths (ScenarioPlant + spine generators) *(depends on: AX)*
+- [ ] AY.0 - Spike + design lock — ScenarioPlant.to_generators adapter shape
+- [ ] AY.1 - Equivalence test gate — spine emit == ScenarioPlant emit for overlapping plant kinds
+- [ ] AY.2 - Fill remaining spine coverage — InboundCapBreachGenerator + SupersessionGenerator + RailFiringPlant/TransferTemplatePlant/InvFanoutPlant decision
+- [ ] AY.3 - Lift Dialect.SQLITE hardcode in apply_scenario
+- [ ] AY.4 - Reroute production seed (build_full_seed_sql + emit_full_seed) through ScenarioContext.compose
+- [ ] AY.5 - Re-lock byte seeds via the new path; document any byte drift
+- [ ] AY.6 - Retire the old per-plant emitter functions in seed.py
+- [ ] AY.7 - Trainer/timeline regression check + Studio dogfood smoke
+- [ ] AY.8 - Bump v11.15.0 + release notes + push
+## Phase AZ - Retire byte-locked seeds → semantic locks *(depends on: AY)*
+- [ ] AZ.0 - Spike + design — JSON schema for _semantic_locks/<instance>.<dialect>.json
+- [ ] AZ.1 - Generate baseline semantic locks via `recon-gen data semantic-lock` CLI
+- [ ] AZ.2 - tests/data/test_semantic_locks.py — gate replacement
+- [ ] AZ.3 - Dev-only dual-gate validation pass (both byte + semantic locks run locally before deletion)
+- [ ] AZ.4 - CI gate swap — pre-push hook + ci.yml + release.yml
+- [ ] AZ.5 - Retire byte-lock infrastructure (delete files + test + data lock CLI)
+- [ ] AZ.6 - Bump v11.16.0 + release notes + push
 
 # Backlog (not yet phased)
 
