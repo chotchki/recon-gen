@@ -78,6 +78,7 @@ from recon_gen.common.spine.stuck_unbundled import (
 )
 from recon_gen.common.spine.anomaly import AnomalyGenerator, AnomalyInvariant
 from recon_gen.common.spine.anomaly_view import BUCKET_LOWER_BOUNDS, AnomalyView
+from recon_gen.common.spine.chain_completion import ChainCompletionGenerator
 from recon_gen.common.spine.chain_parent_disagreement import (
     ChainParentDisagreementGenerator,
     ChainParentDisagreementInvariant,
@@ -224,6 +225,8 @@ __all__ = [
     "TransferTemplateGenerator",
     "InvFanoutFactory",
     "InvFanoutGenerator",
+    # AY.4.g — chain-completion shim for plants firing chain-parent rails.
+    "ChainCompletionGenerator",
     # Money-trail family — recursive-graph L2; AT.3 promoted generator
     # + View on top of LedgerSimulation.transfers (parent-linked chain).
     "MoneyTrailInvariant",

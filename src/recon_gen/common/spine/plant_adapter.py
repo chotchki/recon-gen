@@ -83,6 +83,7 @@ from recon_gen.common.l2.seed import (
     XorVariantMissedFiringPlant,
     XorVariantOverlapPlant,
 )
+from recon_gen.common.spine.chain_completion import ChainCompletionGenerator
 from recon_gen.common.spine.chain_parent_disagreement import (
     ChainParentDisagreementGenerator,
 )
@@ -148,12 +149,20 @@ def scenario_to_generators(
     for op in scenarios.overdraft_plants:
         out.append(_adapt_overdraft(op, instance, scenarios, anchor_day))
     for lp in scenarios.limit_breach_plants:
-        out.append(_adapt_limit_breach(
+        lb_gen = _adapt_limit_breach(
             lp, instance, scenarios, anchor_day, direction="Outbound",
+        )
+        out.append(lb_gen)
+        out.extend(_chain_completion_for_rail(
+            lb_gen, instance, anchor_day,  # type: ignore[arg-type]: LimitBreachGenerator has rail-keyed transfer_id; structural narrowing not inferred
         ))
     for icp in scenarios.inbound_cap_breach_plants:
-        out.append(_adapt_inbound_cap_breach(
+        ib_gen = _adapt_inbound_cap_breach(
             icp, instance, scenarios, anchor_day,
+        )
+        out.append(ib_gen)
+        out.extend(_chain_completion_for_rail(
+            ib_gen, instance, anchor_day,  # type: ignore[arg-type]: LimitBreachGenerator has rail-keyed transfer_id; structural narrowing not inferred
         ))
 
     # L2-shape plants — direct construct + L2 resolution.
@@ -162,9 +171,20 @@ def scenario_to_generators(
     for cpd in scenarios.chain_parent_disagreement_plants:
         out.append(_adapt_chain_parent_disagreement(cpd, anchor_day))
     for xm in scenarios.xor_variant_missed_firing_plants:
-        out.append(_adapt_xor_missed(xm, anchor_day))
+        xor_gen = _adapt_xor_missed(xm, anchor_day)
+        out.append(xor_gen)
+        # AY.4.g — if the template is a chain parent, co-plant the
+        # child completion so multi_xor_violation doesn't false-
+        # positive on the XOR firing's chain-parent-but-no-child shape.
+        out.extend(_chain_completion_for_template(
+            xor_gen, instance, anchor_day,  # type: ignore[arg-type]: XorGroupMissedFiringGenerator has transfer_id/account_id; structural narrowing not inferred
+        ))
     for xo in scenarios.xor_variant_overlap_plants:
-        out.append(_adapt_xor_overlap(xo, anchor_day))
+        xor_gen = _adapt_xor_overlap(xo, anchor_day)
+        out.append(xor_gen)
+        out.extend(_chain_completion_for_template(
+            xor_gen, instance, anchor_day,  # type: ignore[arg-type]: XorGroupOverlapGenerator has transfer_id/account_id; structural narrowing not inferred
+        ))
     for fp in scenarios.fan_in_chain_plants:
         out.append(_adapt_fan_in_healthy(fp, instance, anchor_day))
     for fmp in scenarios.fan_in_chain_missing_parent_plants:
@@ -739,6 +759,63 @@ def _find_rail_or_raise(
     raise ValueError(
         f"plant adapter: rail {name!r} not declared on the L2 instance"
     )
+
+
+def _chain_completion_for_template(
+    parent_gen: "XorGroupMissedFiringGenerator | XorGroupOverlapGenerator",
+    instance: L2Instance, anchor_day: date,
+) -> list[ChainCompletionGenerator]:
+    """AY.4.g — emit chain completion when the XOR plant's
+    ``template_name`` is also a chain parent. Returns empty list when
+    the template doesn't parent any chain (the common case)."""
+    parent_name = str(parent_gen.template_name)
+    if not _is_chain_parent(instance, parent_name):
+        return []
+    return [ChainCompletionGenerator(
+        parent_transfer_id=parent_gen.transfer_id,
+        parent_name=parent_name,
+        account_id=parent_gen.account_id,
+        account_role="CustomerSubledger",  # XOR plants emit on synthetic account; role/scope/parent are synthetic too
+        account_scope="internal",
+        account_parent_role="CustomerLedger",
+        anchor_day=anchor_day,
+        instance=instance,
+    )]
+
+
+def _chain_completion_for_rail(
+    parent_gen: "LimitBreachGenerator",
+    instance: L2Instance, anchor_day: date,
+) -> list[ChainCompletionGenerator]:
+    """AY.4.g — emit chain completion when the LimitBreach plant's
+    ``rail_name`` is also a chain parent. Returns empty list when the
+    rail doesn't parent any chain (most rails)."""
+    parent_name = str(parent_gen.rail_name)
+    if not _is_chain_parent(instance, parent_name):
+        return []
+    return [ChainCompletionGenerator(
+        # The OLD multi_xor matview keys on the chain-parent's
+        # transfer_id. LimitBreachGenerator's transfer_id is
+        # `xfer-limit-breach-{rail}-{direction}-{account}` — that's
+        # what we thread.
+        parent_transfer_id=(
+            f"xfer-limit-breach-"
+            f"{parent_gen.rail_name}-{parent_gen.direction}-"
+            f"{parent_gen.account_id}"
+        ),
+        parent_name=parent_name,
+        account_id=parent_gen.account_id,
+        account_role=parent_gen.account_role,
+        account_scope="internal",
+        account_parent_role=parent_gen.account_parent_role,
+        anchor_day=anchor_day,
+        instance=instance,
+    )]
+
+
+def _is_chain_parent(instance: L2Instance, name: str) -> bool:
+    """True when `name` matches any L2 chain's parent identifier."""
+    return any(str(c.parent) == name for c in instance.chains)
 
 
 def _resolve_limit_schedule_cap(

@@ -60,6 +60,7 @@ from recon_gen.common.spine.anomaly import (
     AnomalyGenerator,
     AnomalyInvariant,
 )
+from recon_gen.common.spine.chain_completion import ChainCompletionGenerator
 from recon_gen.common.spine.chain_parent_disagreement import (
     ChainParentDisagreementGenerator,
     ChainParentDisagreementInvariant,
@@ -189,6 +190,8 @@ INVARIANT_GENERATOR_EDGES: Final[
     TwoTemplateChainGenerator: (),
     RailFiringGenerator: (),
     TransferTemplateGenerator: (),
+    # AY.4.g — seed scaffolding, no matview surface.
+    ChainCompletionGenerator: (),
     # InvFanoutGenerator is a coverage generator (primary intent =
     # populate Investigation matviews) but its emit deterministically
     # trips MoneyTrailInvariant (every transfer is a depth-0 edge the
@@ -316,6 +319,7 @@ ALL_COVERAGE_GENERATORS: Final[
     RailFiringGenerator,
     TransferTemplateGenerator,
     InvFanoutGenerator,
+    ChainCompletionGenerator,
 )
 """Seed-color coverage generators (AY.2.b) — emit `CoverageObservation`
 evidence the L1 dashboard's PostedRequirements panel + audit-PDF
