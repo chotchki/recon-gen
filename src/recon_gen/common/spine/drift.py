@@ -84,12 +84,22 @@ class DriftInvariant:
         magnitude: float = 5.0,
         seed: int | None = None,
         instance: L2Instance | None = None,
+        child_account_id: str | None = None,
+        parent_account_id: str | None = None,
     ) -> "DriftGenerator":
         """Resolve the role against the shape and return a generator
         that manufactures a drift breach on a leaf account of that role.
 
         `instance=None` loads the bundled `spec_example`; AS.x callers
         thread the real instance.
+
+        AY.4.c — `child_account_id` / `parent_account_id` override the
+        default synthetic IDs. The plant adapter (AY.4.c.3) threads
+        OLD `DriftPlant.account_id` through these kwargs so N drift
+        plants on the same role produce N distinct generators (the
+        default `f"acct-drift-child-{role}"` derivation would collide).
+        Existing test callers can pass nothing → preserves the synthetic
+        defaults byte-stable.
         """
         inst = instance if instance is not None else load_spec_example()
         child = find_internal_with_role(
@@ -99,11 +109,15 @@ class DriftInvariant:
             inst, str(getattr(child, "parent_role")),
         )
         return DriftGenerator(
-            child_account_id=f"acct-drift-child-{role}",
+            child_account_id=(
+                child_account_id or f"acct-drift-child-{role}"
+            ),
             child_role=role,
             parent_role=str(getattr(child, "parent_role")),
             parent_account_id=(
-                f"acct-drift-parent-{getattr(parent, 'role', 'unknown')}"
+                parent_account_id
+                if parent_account_id is not None
+                else f"acct-drift-parent-{getattr(parent, 'role', 'unknown')}"
                 if parent is not None
                 else None
             ),

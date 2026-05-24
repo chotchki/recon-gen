@@ -148,6 +148,9 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
   - [x] AY.4.a - DryRunCapture conn + ScenarioContext.compose(dry_run=True) returns captured (sql, params) tuples
   - [x] AY.4.b - render_captured_sql() — per-dialect literal escaping (PG / Oracle / SQLite), produces static SQL text
   - [ ] AY.4.c - plant_adapter.scenario_to_generators(plants, instance, anchor) — walks all 20 plant kinds
+    - [ ] AY.4.c.1 - account_id_override kwargs on 8 simple factories (drift WIP — pattern proven; overdraft / expected_eod / stuck_pending / stuck_unbundled / limit_breach / anomaly / money_trail remaining)
+    - [ ] AY.4.c.2 - account_id_override field on 7 derived-account L2-shape generators (chain_parent / xor_missed+overlap / fan_in / multi_xor_missed+overlap / two_template_chain — currently derive account_id from template_name)
+    - [ ] AY.4.c.3 - plant_adapter.scenario_to_generators() — 20-kind dispatch table
   - [ ] AY.4.d - Rewrite build_full_seed_sql + emit_full_seed via adapter + compose(dry_run=True) + render; byte-lock test fails loudly (expected → AY.5 re-locks)
   - [ ] AY.4.e - apply_db_seed in tests/e2e/_seed_helpers.py routes through the new path
 - [ ] AY.5 - Re-lock byte seeds via the new path; document any byte drift
