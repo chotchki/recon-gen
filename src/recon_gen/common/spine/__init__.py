@@ -75,6 +75,10 @@ from recon_gen.common.spine.stuck_unbundled import (
 )
 from recon_gen.common.spine.anomaly import AnomalyGenerator, AnomalyInvariant
 from recon_gen.common.spine.anomaly_view import BUCKET_LOWER_BOUNDS, AnomalyView
+from recon_gen.common.spine.chain_parent_disagreement import (
+    ChainParentDisagreementGenerator,
+    ChainParentDisagreementInvariant,
+)
 from recon_gen.common.spine.money_trail import (
     MoneyTrailGenerator,
     MoneyTrailInvariant,
@@ -125,6 +129,11 @@ __all__ = [
     # Anomaly View — σ-threshold slice over the detector's output (AT.2)
     "AnomalyView",
     "BUCKET_LOWER_BOUNDS",
+    # Chain-parent-disagreement family — L2-shape integrity invariant
+    # promoted from common/l2/seed.py's ChainParentDisagreementPlant
+    # (AB.2.6) onto the spine in AX.1.
+    "ChainParentDisagreementInvariant",
+    "ChainParentDisagreementGenerator",
     # Money-trail family — recursive-graph L2; AT.3 promoted generator
     # + View on top of LedgerSimulation.transfers (parent-linked chain).
     "MoneyTrailInvariant",

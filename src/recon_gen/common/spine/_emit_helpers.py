@@ -92,17 +92,25 @@ def _build_placeholders(style: str, n: int) -> str:
 TX_COLS = (
     "id", "account_id", "account_name", "account_role", "account_scope",
     "account_parent_role", "amount_money", "amount_direction", "status",
-    "posting", "transfer_id", "transfer_parent_id", "rail_name", "origin",
-    "metadata",
+    "posting", "transfer_id", "transfer_parent_id", "rail_name",
+    "template_name", "origin", "metadata",
 )
-"""Columns every generator writes to ``_transactions``. Excludes ``entry``
-(supersession; defaults), ``transfer_completion`` (optional), ``template_
-name`` (no generator emits via templates), ``bundle_id`` (NULL by default
-— stuck_unbundled's plant explicitly relies on this), ``supersedes``.
+"""Columns every generator writes to ``_transactions``. Excludes
+``entry`` (supersession; defaults), ``transfer_completion`` (optional),
+``bundle_id`` (NULL by default — stuck_unbundled's plant explicitly
+relies on this), ``supersedes``.
+
 AV.5 added ``metadata``: ``insert_tx`` callers that thread
 ``ScenarioContext`` pass a JSON string carrying ``{"scenario_id": ...}``;
 untagged callers pass nothing (vals.get(``metadata``) returns None →
-SQL NULL — byte-identical to pre-AV.5)."""
+SQL NULL — byte-identical to pre-AV.5).
+
+AX.1 added ``template_name``: AX-promoted L2-shape generators
+(chain_parent_disagreement / xor_group_violation /
+fan_in_disagreement / multi_xor_violation) all key the matview GROUP
+BY on ``template_name`` so the spine emit needs to set it.
+Pre-AX callers (drift / overdraft / anomaly / etc.) pass nothing →
+SQL NULL → byte-identical to pre-AX."""
 
 
 DB_COLS = (

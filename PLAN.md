@@ -138,7 +138,7 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
 - [ ] AO.C2 - (feedback #9) Empty-default AML sliders (Fanout, Anomalies) — confirm render-on-default vs broken on AWS (likely the slider-default class; pairs with AO.9).
 ## Phase AX - Promote the 4 matview-only invariants to the spine
 - [x] AX.0 - Spike audit `concat_agg` SQLite routing
-- [ ] AX.1 - `ChainParentDisagreementInvariant` + Generator
+- [x] AX.1 - `ChainParentDisagreementInvariant` + Generator
 - [ ] AX.2 - `XorGroupViolationInvariant` + missed + overlap generators
 - [ ] AX.3 - `FanInDisagreementInvariant` + healthy/missing/extra generators
 - [ ] AX.4 - `MultiXorViolationInvariant` + missed + overlap generators
