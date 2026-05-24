@@ -198,6 +198,7 @@ def _build_fresh_semantic_lock_sqlite(
         emit_schema,
         refresh_matviews_sql,
     )
+    from recon_gen.common.l2.seed import emit_baseline_seed
     from recon_gen.common.spine import (
         ALL_INVARIANTS,
         ScenarioContext,
@@ -226,6 +227,22 @@ def _build_fresh_semantic_lock_sqlite(
             l2_json="{}",  # empty JSON object; bypasses the json.dumps round-trip + the typing-smells json-indent gate
             as_of=_datetime(anchor.year, anchor.month, anchor.day, 12, 0, 0),
         )
+        # AO.L.gate — emit the 90-day baseline BEFORE plants so the lock
+        # detects baseline-derived violations too. Pre-gate, the lock
+        # builder skipped the baseline emit and only stamped plants;
+        # AO.L stayed latent through Phase AY/AZ because baseline-only
+        # firings (e.g., ConcentrationMaster direct postings) never
+        # tripped the lock-anchored detector. Now the lock JSON encodes
+        # the union of (baseline + plant) violations — a regression to
+        # any L1 matview SQL that produces spurious baseline violations
+        # trips the gate loudly. (Post-AO.L the baseline produces zero
+        # spurious violations; lock files reflect that.)
+        baseline_sql = emit_baseline_seed(
+            instance, prefix=prefix,
+            window_days=90, anchor=anchor, dialect=Dialect.SQLITE,
+        )
+        conn.executescript(baseline_sql)
+        conn.commit()
         # Compose the production seed via the spine pipeline.
         from recon_gen.cli._helpers import build_default_scenario  # pyright: ignore[reportUnknownVariableType]  # WHY: helper has pending untyped-def waiver
         scenario = build_default_scenario(instance, anchor=anchor)  # pyright: ignore[reportUnknownVariableType]: same helper-untyped waiver propagates to the call
