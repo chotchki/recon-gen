@@ -62,6 +62,7 @@ def apply_scenario(
     *emitters: _Emitter,
     prefix: str = "spec_example",
     instance_path: Path | None = None,
+    dialect: Dialect = Dialect.SQLITE,
 ) -> None:
     """Emit every passed object's rows into `conn`, commit, then
     refresh the matviews for the `prefix`'s L2 instance.
@@ -69,6 +70,16 @@ def apply_scenario(
     `instance_path=None` uses the bundled `tests/l2/spec_example.yaml`
     — same default the existing in-process spike harness pattern uses.
     Pass an explicit path for AT's Investigation-surface scenarios.
+
+    `dialect` defaults to `Dialect.SQLITE` for the in-process test
+    harness shape (the dominant call site). AY.3 lifted the hardcode
+    so production callers + per-dialect semantic_lock generation
+    (AZ.1 will produce `_semantic_locks/<instance>.<dialect>.json`
+    snapshots that need PG + Oracle paths through this function) can
+    thread the deployed dialect through. The spine emitters already
+    detect the dbapi placeholder style per-connection (AT.5.b's
+    `_emit_helpers._placeholder_style`); this kwarg covers the
+    matview refresh + script execution leg of the same path.
     """
     for emitter in emitters:
         emitter.emit(conn)
@@ -82,8 +93,8 @@ def apply_scenario(
     cur = conn.cursor()
     execute_script(
         cur,
-        refresh_matviews_sql(instance, prefix=prefix, dialect=Dialect.SQLITE),
-        dialect=Dialect.SQLITE,
+        refresh_matviews_sql(instance, prefix=prefix, dialect=dialect),
+        dialect=dialect,
     )
     conn.commit()
 

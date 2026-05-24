@@ -17,6 +17,7 @@ group. Tests assert intended ⊆ detected, not equality.
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -306,3 +307,64 @@ def test_overlap_tagged_emit_writes_scenario_id_on_every_row() -> None:
     finally:
         conn.close()
     assert tagged == total > 0
+
+
+# ---------------------------------------------------------------------------
+# AY.4.c.2 — account_id_override threads through claimed_accounts.
+# ---------------------------------------------------------------------------
+
+
+def test_multi_xor_missed_account_id_override_used_when_set() -> None:
+    """Setting ``account_id_override`` short-circuits the
+    derived-from-chain_parent_name default for the missed generator."""
+    gen = MultiXorMissedGenerator(
+        chain_parent_name="parent",
+        anchor_day=date(2030, 1, 1),
+        account_id_override="custom-account-x",
+    )
+    assert gen.account_id == "custom-account-x"
+    assert gen.claimed_accounts == frozenset({"custom-account-x"})
+
+
+def test_multi_xor_missed_default_derivation_preserved_when_unset() -> None:
+    gen_a = MultiXorMissedGenerator(
+        chain_parent_name="parent",
+        anchor_day=date(2030, 1, 1),
+    )
+    gen_b = MultiXorMissedGenerator(
+        chain_parent_name="parent",
+        anchor_day=date(2030, 1, 1),
+    )
+    assert gen_a.account_id == gen_b.account_id
+    assert gen_a.account_id == "acct-mxor-missed-parent"
+
+
+def test_multi_xor_overlap_account_id_override_used_when_set() -> None:
+    """Setting ``account_id_override`` short-circuits the
+    derived-from-chain_parent_name default for the overlap generator."""
+    gen = MultiXorOverlapGenerator(
+        chain_parent_name="parent",
+        variant_a_child_name="child-a",
+        variant_b_child_name="child-b",
+        anchor_day=date(2030, 1, 1),
+        account_id_override="custom-account-y",
+    )
+    assert gen.account_id == "custom-account-y"
+    assert gen.claimed_accounts == frozenset({"custom-account-y"})
+
+
+def test_multi_xor_overlap_default_derivation_preserved_when_unset() -> None:
+    gen_a = MultiXorOverlapGenerator(
+        chain_parent_name="parent",
+        variant_a_child_name="child-a",
+        variant_b_child_name="child-b",
+        anchor_day=date(2030, 1, 1),
+    )
+    gen_b = MultiXorOverlapGenerator(
+        chain_parent_name="parent",
+        variant_a_child_name="child-a",
+        variant_b_child_name="child-b",
+        anchor_day=date(2030, 1, 1),
+    )
+    assert gen_a.account_id == gen_b.account_id
+    assert gen_a.account_id == "acct-mxor-overlap-parent"

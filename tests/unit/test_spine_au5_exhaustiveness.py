@@ -50,6 +50,8 @@ from recon_gen.common.l2.config_table import replace_config
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.spine import (
+    ALL_AUDIT_FIXTURE_GENERATORS,
+    ALL_COVERAGE_GENERATORS,
     ALL_GENERATORS,
     ALL_INVARIANTS,
     INVARIANT_GENERATOR_EDGES,
@@ -75,10 +77,34 @@ _PREFIX = "spec_example"
 def test_every_promoted_generator_is_registered(
     generator_class: type[ViolationGenerator],
 ) -> None:
-    """The orphan-generator check. If a new generator class is added
-    to `ALL_L1_GENERATORS` (= "I intended to promote this") but not
-    keyed in `INVARIANT_GENERATOR_EDGES`, this fails loud with the
-    class name."""
+    """Orphan-generator check.
+
+    Every generator in `ALL_GENERATORS` MUST appear as a key in
+    `INVARIANT_GENERATOR_EDGES` (the registration check). For
+    rule-violation generators the edge tuple is non-empty (≥1
+    invariant the generator's emission trips). For audit-fixture +
+    coverage generators (AY.2.b) the tuple is INTENTIONALLY empty —
+    no matview surfaces their evidence, so there's no `Invariant`
+    counterpart to register.
+    """
+    if (
+        generator_class in ALL_AUDIT_FIXTURE_GENERATORS
+        or generator_class in ALL_COVERAGE_GENERATORS
+    ):
+        # Empty edges expected; the registration itself is the check
+        # (KeyError on `INVARIANT_GENERATOR_EDGES[generator_class]`
+        # would fire if missing). Two parallel buckets: audit-fixture
+        # generators emit AuditFixture evidence; coverage generators
+        # emit CoverageObservation evidence. Both are presence-only
+        # (no matching matview surfaces them as violations) — the
+        # `intended` subtype is the runtime discriminator.
+        assert generator_class in INVARIANT_GENERATOR_EDGES, (
+            f"{generator_class.__name__} is in "
+            f"ALL_AUDIT_FIXTURE_GENERATORS / ALL_COVERAGE_GENERATORS "
+            f"but not in INVARIANT_GENERATOR_EDGES. Add the empty-"
+            f"tuple entry to register the generator on the spine."
+        )
+        return
     edges = invariants_for(generator_class)
     assert len(edges) > 0, (
         f"{generator_class.__name__} is in ALL_GENERATORS but has no "
@@ -88,7 +114,11 @@ def test_every_promoted_generator_is_registered(
         f"discover the edges), or\n"
         f"  (b) remove it from its category tuple (ALL_L1_GENERATORS / "
         f"ALL_L2_SHAPE_GENERATORS / ALL_L2_INVESTIGATION_GENERATORS) "
-        f"if it's not yet production-ready."
+        f"if it's not yet production-ready, or\n"
+        f"  (c) if this is a coverage / audit-fixture generator with "
+        f"no matching detector, move it to ALL_AUDIT_FIXTURE_GENERATORS "
+        f"(or add a similar category tuple) so the empty-edge case is "
+        f"explicit."
     )
 
 

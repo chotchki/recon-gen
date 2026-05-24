@@ -39,7 +39,7 @@ from recon_gen.common.spine.ledger_simulation import (
     Transfer,
     TransferLeg,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 
 @dataclass(frozen=True)
@@ -63,7 +63,7 @@ class MoneyTrailInvariant:
             f"FROM {self.prefix}_inv_money_trail_edges",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "inv_money_trail_edges",
                 root_transfer_id=str(root),
                 transfer_id=str(tid),
@@ -80,6 +80,7 @@ class MoneyTrailInvariant:
         amount: float = 100.0,
         anchor_day: date = date(2030, 1, 1),
         instance: L2Instance | None = None,
+        chain_id_prefix: str | None = None,
     ) -> "MoneyTrailGenerator":
         """Resolve the chain's account role + return a generator that
         plants a `chain_length`-deep parent-linked chain. Every account
@@ -95,6 +96,18 @@ class MoneyTrailInvariant:
         sender — money walks through a chain of `chain_length + 1`
         distinct accounts. The matview surfaces each transfer as one
         edge (one source-leg × one target-leg per transfer).
+
+        AY.4.c — `chain_id_prefix` overrides the default synthetic ID
+        prefix. Unlike the single-account spine factories, money_trail
+        plants `chain_length + 1` account_ids + `chain_length`
+        transfer_ids; the natural disambiguator is a chain-wide prefix
+        feeding both `_account_id(i)` and `_transfer_id(i)`. The plant
+        adapter (AY.4.c.3) threads OLD money-trail chain identifiers
+        through this kwarg so N plants on the same `hop_role` produce
+        N distinct generators (the default `"acct-money-trail-hop"` /
+        `"xfer-money-trail"` derivations would collide). Existing test
+        callers can pass nothing → preserves the synthetic defaults
+        byte-stable.
         """
         if chain_length < 1:
             raise ValueError(
@@ -115,6 +128,7 @@ class MoneyTrailInvariant:
             chain_length=chain_length,
             amount=amount,
             anchor_day=anchor_day,
+            chain_id_prefix=chain_id_prefix or "money-trail",
         )
 
 
@@ -143,6 +157,13 @@ class MoneyTrailView:
         for v in violations:
             depth = dict(v.identity).get("depth")
             if depth is None:
+                continue
+            # Violation.identity values are typed `object` (the frozenset's
+            # heterogeneous shape). The matview detector inserts an int
+            # for `depth` by construction, but pyright sees only `object`.
+            # Narrow defensively — non-int values (cross-invariant mix
+            # under the same `depth` key) are dropped silently.
+            if not isinstance(depth, (int, float)):
                 continue
             if int(depth) >= self.min_depth:
                 out.add(v)
@@ -176,9 +197,14 @@ class MoneyTrailGenerator:
     amount: float
     anchor_day: date
     prefix: str = "spec_example"
+    #: AY.4.c — disambiguator threaded into `_account_id` /
+    #: `_transfer_id` so N money-trail plants on the same hop_role
+    #: produce N distinct chains. Defaults to the legacy
+    #: `"money-trail"` value → existing test callers stay byte-stable.
+    chain_id_prefix: str = "money-trail"
 
     @property
-    def intended(self) -> Violation:
+    def intended(self) -> RuleViolation:
         """The deepest edge of the chain — the "story" of the trail.
         For chain_length=3, depth=2 (grandchild) is the most-removed-
         from-root edge, the analyst-meaningful endpoint.
@@ -188,7 +214,7 @@ class MoneyTrailGenerator:
         configuration."""
         leaf_transfer_id = self._transfer_id(self.chain_length - 1)
         root_transfer_id = self._transfer_id(0)
-        return Violation.of(
+        return RuleViolation.of(
             "inv_money_trail_edges",
             root_transfer_id=root_transfer_id,
             transfer_id=leaf_transfer_id,
@@ -253,7 +279,7 @@ class MoneyTrailGenerator:
         return out
 
     def _account_id(self, index: int) -> str:
-        return f"acct-money-trail-hop-{index}"
+        return f"acct-{self.chain_id_prefix}-hop-{index}"
 
     def _transfer_id(self, index: int) -> str:
-        return f"xfer-money-trail-{index}"
+        return f"xfer-{self.chain_id_prefix}-{index}"

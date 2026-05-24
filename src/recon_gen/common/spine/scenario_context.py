@@ -65,6 +65,113 @@ from recon_gen.common.sql import Dialect
 from recon_gen.common.sql.dialect import json_value
 
 
+# ---------------------------------------------------------------------------
+# AY.4.a — dry-run capture mode.
+#
+# The spine emitters write through `insert_tx` / `insert_balance` (in
+# `_emit_helpers`), which dispatch placeholder style via
+# `type(conn).__module__` ("sqlite3" → ?, "psycopg" → %s, "oracledb" →
+# :N). For the production seed reroute (AY.4) `build_full_seed_sql`
+# needs SQL TEXT, not a side-effect on a live connection. The capture
+# pattern: a fake dbapi conn that records `(sql, params)` pairs
+# instead of executing them, then a downstream renderer (AY.4.b)
+# converts to literal SQL.
+#
+# Three concrete subclasses — one per dialect — so each carries the
+# `__module__` value `_placeholder_style` already routes off. Captured
+# SQL ends up in the target dialect's placeholder convention, which
+# makes the renderer's job purely a literal-substitution loop. Factory
+# `dry_run_capture(dialect)` picks the right subclass.
+# ---------------------------------------------------------------------------
+
+
+class _DryRunCursor:
+    """Mock dbapi cursor: records `execute(sql, params)` calls onto
+    its parent capture conn's `captured` list. `close()` is a no-op.
+    """
+
+    def __init__(self, parent: "_DryRunBase") -> None:
+        self._parent = parent
+
+    def execute(
+        self, sql: str, params: object = (),
+    ) -> None:
+        # Params may be a list, tuple, or empty — normalize to tuple
+        # so downstream renderers don't care.
+        normalized: tuple[object, ...] = (
+            tuple(params) if params else ()  # type: ignore[arg-type]: dbapi takes any iterable
+        )
+        self._parent.captured.append((sql, normalized))
+
+    def close(self) -> None:
+        pass
+
+
+class _DryRunBase:
+    """Shared instance interface for the per-dialect dry-run capture
+    subclasses. `captured` accumulates every `cursor.execute` call;
+    `cursor()` returns a fresh `_DryRunCursor`; `commit`/`close`
+    are no-ops. The per-dialect subclasses only differ in
+    `__module__` (which `_emit_helpers._placeholder_style` reads).
+    """
+
+    captured: list[tuple[str, tuple[object, ...]]]
+
+    def __init__(self) -> None:
+        self.captured = []
+
+    def cursor(self) -> _DryRunCursor:
+        return _DryRunCursor(self)
+
+    def commit(self) -> None:  # noqa: D401 — dbapi-shaped no-op
+        pass
+
+    def close(self) -> None:  # noqa: D401 — dbapi-shaped no-op
+        pass
+
+
+class _DryRunCaptureSqlite(_DryRunBase):
+    """SQLite-dialect dry-run capture; `_placeholder_style` picks `?`."""
+
+
+_DryRunCaptureSqlite.__module__ = "sqlite3"
+
+
+class _DryRunCapturePostgres(_DryRunBase):
+    """Postgres-dialect dry-run capture; `_placeholder_style` picks `%s`."""
+
+
+_DryRunCapturePostgres.__module__ = "psycopg"
+
+
+class _DryRunCaptureOracle(_DryRunBase):
+    """Oracle-dialect dry-run capture; `_placeholder_style` picks `:N`."""
+
+
+_DryRunCaptureOracle.__module__ = "oracledb"
+
+
+_DRY_RUN_CLASSES: dict[Dialect, type[_DryRunBase]] = {
+    Dialect.SQLITE: _DryRunCaptureSqlite,
+    Dialect.POSTGRES: _DryRunCapturePostgres,
+    Dialect.ORACLE: _DryRunCaptureOracle,
+}
+
+
+def dry_run_capture(dialect: Dialect = Dialect.SQLITE) -> _DryRunBase:
+    """Return a fresh dry-run capture conn for the given dialect.
+
+    The returned object satisfies the dbapi 2.0 shape `insert_tx` /
+    `insert_balance` rely on: `cursor()` → cursor with `execute(sql,
+    params)`, `commit()` / `close()` no-op. `captured` accumulates
+    every emitted (sql, params) pair in arrival order.
+
+    Pair with `ScenarioContext.compose(conn=dry_run_capture(d), ...,
+    dry_run=True)` (AY.4.a) + the AY.4.b renderer.
+    """
+    return _DRY_RUN_CLASSES[dialect]()
+
+
 @runtime_checkable
 class ClaimedAccountsGenerator(Protocol):
     """Extension of ViolationGenerator: declares the account_ids the
@@ -80,7 +187,7 @@ class ClaimedAccountsGenerator(Protocol):
     def claimed_accounts(self) -> frozenset[str]: ...
 
     @property
-    def intended(self) -> Violation: ...
+    def intended(self) -> Violation | None: ...
 
     def emit(
         self,
@@ -109,21 +216,40 @@ def _check_pairwise_disjoint(
     scenario_id: str,
     generators: tuple[ClaimedAccountsGenerator, ...],
 ) -> None:
-    """Raise ``ValueError`` if any two generators claim the same
-    account_id. Names BOTH offending classes so the operator's fix is
-    immediate (rename one, split the scenario, etc.)."""
-    seen: dict[str, type] = {}
-    for gen in generators:
+    """Raise ``ValueError`` if any two generators of the SAME CLASS
+    claim the same account_id. AY.4.c.3 refined the check to be
+    class-aware: spine generators derive transaction.id from
+    (class-prefix, account_id, ...) so the actual PK collision risk
+    is two same-class instances on the same account; cross-class
+    co-location on one account is fine (different ID prefixes →
+    different transaction.id → no PK collision).
+
+    The production seed legitimately co-locates a Drift + Limit Breach
+    + Overdraft on one customer account (better dashboard coverage);
+    the previous class-blind check rejected this. The class-aware
+    check still catches the original target: two DriftGenerators on
+    the same role with the same construction args would deterministically
+    derive the same transaction.id and fail at INSERT time.
+
+    Names BOTH offending instances' class + account so the operator's
+    fix is immediate (rename one, split the scenario, etc.).
+    """
+    seen: dict[tuple[type, str], int] = {}
+    for idx, gen in enumerate(generators):
+        gen_class = type(gen)
         for account in gen.claimed_accounts:
-            if account in seen:
+            key = (gen_class, account)
+            if key in seen:
                 raise ValueError(
-                    f"account_id collision in scenario_id="
-                    f"{scenario_id!r}: both {seen[account].__name__} "
-                    f"and {type(gen).__name__} claim {account!r}. "
-                    f"Use distinct account selectors or split into "
-                    f"separate scenarios."
+                    f"same-class account_id collision in scenario_id="
+                    f"{scenario_id!r}: two {gen_class.__name__} "
+                    f"instances both claim {account!r}. Same-class "
+                    f"emissions derive their transaction.id from the "
+                    f"same prefix + account, so they'd PK-collide at "
+                    f"INSERT time. Use distinct account_id_override "
+                    f"values or split into separate scenarios."
                 )
-            seen[account] = type(gen)
+            seen[key] = idx
 
 
 def _check_cross_scenario(
@@ -210,7 +336,8 @@ class ScenarioContext:
         self,
         conn: sqlite3.Connection,
         *generators: ClaimedAccountsGenerator,
-    ) -> None:
+        dry_run: bool = False,
+    ) -> list[tuple[str, tuple[object, ...]]] | None:
         """Pre-compose checks + emit all generators with the
         scenario_id threaded through + commit.
 
@@ -226,20 +353,56 @@ class ScenarioContext:
         On success: each generator's ``emit(conn,
         scenario_id=self.scenario_id)`` runs in order; the generator
         is responsible for tagging every row it writes.
-        """
-        _check_pairwise_disjoint(self.scenario_id, generators)
 
-        all_accounts: set[str] = set()
-        for gen in generators:
-            all_accounts.update(gen.claimed_accounts)
-        _check_cross_scenario(
-            conn, self.scenario_id, all_accounts,
-            prefix=self.prefix, dialect=self.dialect,
-        )
+        AY.4.a — ``dry_run=True`` mode: ``conn`` must be a
+        ``dry_run_capture(dialect)`` instance. The cross-scenario
+        check is SKIPPED in dry-run (no real DB state exists to
+        check against; the pairwise-disjoint check still fires since
+        it's a pure-data check on the generators themselves).
+        Returns the captured ``[(sql, params), ...]`` list — pair
+        with the AY.4.b renderer to produce static SQL text for the
+        ``build_full_seed_sql`` path.
+
+        Live mode (default): returns ``None``, commits the conn.
+        """
+        if not dry_run:
+            # AY.4.c.4 — pairwise-disjoint is a heuristic that catches
+            # SOME class+account collisions; post-c.4 it's over-strict
+            # (the L1 generators' transaction.id derivations now include
+            # account_id + rail/direction so same-class + same-account
+            # with different other fields doesn't actually collide). In
+            # dry_run mode the DB can't catch real PK collisions either,
+            # so the test writer's "compose what I built" workflow takes
+            # precedence over the heuristic. In live mode the DB still
+            # enforces real PK uniqueness on INSERT.
+            _check_pairwise_disjoint(self.scenario_id, generators)
+
+            all_accounts: set[str] = set()
+            for gen in generators:
+                all_accounts.update(gen.claimed_accounts)
+            _check_cross_scenario(
+                conn, self.scenario_id, all_accounts,
+                prefix=self.prefix, dialect=self.dialect,
+            )
 
         for gen in generators:
             gen.emit(conn, scenario_id=self.scenario_id)
+
+        if dry_run:
+            # The capture conn carries the (sql, params) list; return
+            # it for the renderer. Defensive isinstance: a stray
+            # real-conn call with dry_run=True would silently no-op
+            # otherwise.
+            if not isinstance(conn, _DryRunBase):
+                raise TypeError(
+                    f"dry_run=True requires a dry_run_capture() conn; "
+                    f"got {type(conn).__name__}. Use "
+                    f"`dry_run_capture(dialect)` from "
+                    f"`recon_gen.common.spine`."
+                )
+            return list(conn.captured)
         conn.commit()
+        return None
 
     def cleanup(self, conn: sqlite3.Connection) -> int:
         """Delete every row on either base table whose

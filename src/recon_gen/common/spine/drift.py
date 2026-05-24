@@ -43,7 +43,7 @@ from recon_gen.common.spine._emit_helpers import (
     ts,
 )
 from recon_gen.common.spine.rng import scenario_rng
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,7 @@ class DriftInvariant:
             f"FROM {self.prefix}_drift",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "drift",
                 account_id=aid,
                 business_day=to_date(bds),
@@ -84,12 +84,22 @@ class DriftInvariant:
         magnitude: float = 5.0,
         seed: int | None = None,
         instance: L2Instance | None = None,
+        child_account_id: str | None = None,
+        parent_account_id: str | None = None,
     ) -> "DriftGenerator":
         """Resolve the role against the shape and return a generator
         that manufactures a drift breach on a leaf account of that role.
 
         `instance=None` loads the bundled `spec_example`; AS.x callers
         thread the real instance.
+
+        AY.4.c — `child_account_id` / `parent_account_id` override the
+        default synthetic IDs. The plant adapter (AY.4.c.3) threads
+        OLD `DriftPlant.account_id` through these kwargs so N drift
+        plants on the same role produce N distinct generators (the
+        default `f"acct-drift-child-{role}"` derivation would collide).
+        Existing test callers can pass nothing → preserves the synthetic
+        defaults byte-stable.
         """
         inst = instance if instance is not None else load_spec_example()
         child = find_internal_with_role(
@@ -99,11 +109,15 @@ class DriftInvariant:
             inst, str(getattr(child, "parent_role")),
         )
         return DriftGenerator(
-            child_account_id=f"acct-drift-child-{role}",
+            child_account_id=(
+                child_account_id or f"acct-drift-child-{role}"
+            ),
             child_role=role,
             parent_role=str(getattr(child, "parent_role")),
             parent_account_id=(
-                f"acct-drift-parent-{getattr(parent, 'role', 'unknown')}"
+                parent_account_id
+                if parent_account_id is not None
+                else f"acct-drift-parent-{getattr(parent, 'role', 'unknown')}"
                 if parent is not None
                 else None
             ),
@@ -133,7 +147,7 @@ class LedgerDriftInvariant:
             f"FROM {self.prefix}_ledger_drift",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "ledger_drift",
                 account_id=aid,
                 business_day=to_date(bds),
@@ -165,10 +179,12 @@ class DriftGenerator:
     rng: random.Random = field(default_factory=scenario_rng)
     #: Clean leg amount; the child's stored money is this + magnitude.
     leg_amount: float = 100.0
+    # AY.4.d — production callers thread cfg.db_table_prefix here.
+    prefix: str = "spec_example"
 
     @property
-    def intended(self) -> Violation:
-        return Violation.of(
+    def intended(self) -> RuleViolation:
+        return RuleViolation.of(
             "drift",
             account_id=self.child_account_id,
             business_day=self.anchor_day,
@@ -176,14 +192,14 @@ class DriftGenerator:
         )
 
     @property
-    def also_trips_ledger_drift(self) -> Violation | None:
+    def also_trips_ledger_drift(self) -> RuleViolation | None:
         """The secondary edge: when this generator's child-drift
         propagates up to the parent's `_ledger_drift`. `None` when no
         parent account is present in the shape (the L2 instance has no
         account with the child's `parent_role`)."""
         if self.parent_account_id is None:
             return None
-        return Violation.of(
+        return RuleViolation.of(
             "ledger_drift",
             account_id=self.parent_account_id,
             business_day=self.anchor_day,
@@ -219,6 +235,7 @@ class DriftGenerator:
         # `magnitude` → drift fires on the child.
         insert_balance(
             conn,
+            prefix=self.prefix,
             account_id=self.child_account_id,
             account_name=f"Drift Child ({self.child_role})",
             account_role=self.child_role,
@@ -231,7 +248,8 @@ class DriftGenerator:
         )
         insert_tx(
             conn,
-            id=f"tx-drift-{self.child_role}-1",
+            prefix=self.prefix,
+            id=f"tx-drift-{self.child_role}-{self.child_account_id}-1",
             account_id=self.child_account_id,
             account_name=f"Drift Child ({self.child_role})",
             account_role=self.child_role,
@@ -241,7 +259,7 @@ class DriftGenerator:
             amount_direction="Credit",
             status="Posted",
             posting=ts(self.anchor_day),
-            transfer_id=f"xfer-drift-{self.child_role}-1",
+            transfer_id=f"xfer-drift-{self.child_role}-{self.child_account_id}-1",
             rail_name="ach",
             origin="etl",
             metadata=metadata,
@@ -253,6 +271,7 @@ class DriftGenerator:
         if self.parent_account_id is not None and self.parent_account_role is not None:
             insert_balance(
                 conn,
+                prefix=self.prefix,
                 account_id=self.parent_account_id,
                 account_name=f"Drift Parent ({self.parent_account_role})",
                 account_role=self.parent_account_role,

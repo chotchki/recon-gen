@@ -42,9 +42,12 @@ from recon_gen.common.spine.ledger_simulation import (
     Transfer,
     TransferLeg,
 )
+from recon_gen.common.spine.dry_run_renderer import render_captured_sql
+from recon_gen.common.spine.plant_adapter import scenario_to_generators
 from recon_gen.common.spine.scenario_context import (
     ClaimedAccountsGenerator,
     ScenarioContext,
+    dry_run_capture,
     scenario_metadata,
 )
 from recon_gen.common.spine.semantic_lock import apply_scenario, semantic_lock
@@ -75,13 +78,32 @@ from recon_gen.common.spine.stuck_unbundled import (
 )
 from recon_gen.common.spine.anomaly import AnomalyGenerator, AnomalyInvariant
 from recon_gen.common.spine.anomaly_view import BUCKET_LOWER_BOUNDS, AnomalyView
+from recon_gen.common.spine.chain_completion import ChainCompletionGenerator
 from recon_gen.common.spine.chain_parent_disagreement import (
     ChainParentDisagreementGenerator,
     ChainParentDisagreementInvariant,
 )
+from recon_gen.common.spine.failed_transaction import FailedTransactionGenerator
 from recon_gen.common.spine.fan_in_disagreement import (
     FanInChainGenerator,
     FanInDisagreementInvariant,
+)
+from recon_gen.common.spine.inv_fanout import (
+    InvFanoutFactory,
+    InvFanoutGenerator,
+)
+from recon_gen.common.spine.rail_firing import (
+    RailFiringFactory,
+    RailFiringGenerator,
+)
+from recon_gen.common.spine.supersession import SupersessionGenerator
+from recon_gen.common.spine.transfer_template import (
+    TransferTemplateFactory,
+    TransferTemplateGenerator,
+)
+from recon_gen.common.spine.two_template_chain import (
+    TwoTemplateChainFactory,
+    TwoTemplateChainGenerator,
 )
 from recon_gen.common.spine.multi_xor_violation import (
     MultiXorMissedGenerator,
@@ -99,6 +121,8 @@ from recon_gen.common.spine.money_trail import (
     MoneyTrailView,
 )
 from recon_gen.common.spine.registry import (
+    ALL_AUDIT_FIXTURE_GENERATORS,
+    ALL_COVERAGE_GENERATORS,
     ALL_GENERATORS,
     ALL_INVARIANTS,
     ALL_L1_GENERATORS,
@@ -113,11 +137,20 @@ from recon_gen.common.spine.registry import (
     iter_edges,
 )
 from recon_gen.common.spine.rng import SCENARIO_BASE_SEED, scenario_rng
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import (
+    AuditFixture,
+    CoverageObservation,
+    RuleViolation,
+    Violation,
+)
 
 __all__ = [
-    # Protocols + currency type (AS.1)
-    "Violation",
+    # Typed evidence currency (AS.1; layered into subtypes by AY.2.a)
+    "Violation",  # abstract base
+    "RuleViolation",  # matview-detected rule break (the AS post-shape)
+    "CoverageObservation",  # seed-color presence claim (AY.2.b plants)
+    "AuditFixture",  # audit-PDF input marker (AY.2.b plants)
+    # Spine Protocols (AS.1)
     "Invariant",
     "ViolationGenerator",
     # Deterministic RNG factory (AS.1 follow-on)
@@ -174,13 +207,34 @@ __all__ = [
     "MultiXorViolationInvariant",
     "MultiXorMissedGenerator",
     "MultiXorOverlapGenerator",
+    # Audit-fixture generators (AY.2.b) — emit rows the audit PDF
+    # reads directly; no matview, no invariant. `intended` returns
+    # an AuditFixture (the AY.2.a evidence-currency subtype).
+    "FailedTransactionGenerator",
+    "SupersessionGenerator",
+    # Seed-color coverage generators (AY.2.b) — emit CoverageObservation
+    # evidence the L1 PostedRequirements panel + audit-PDF coverage
+    # sections read directly. Non-violating by construction. The
+    # factories pick + resolve from the L2 instance; the generators
+    # are kind-discriminated internally (TwoLegRail vs SingleLegRail).
+    "TwoTemplateChainFactory",
+    "TwoTemplateChainGenerator",
+    "RailFiringFactory",
+    "RailFiringGenerator",
+    "TransferTemplateFactory",
+    "TransferTemplateGenerator",
+    "InvFanoutFactory",
+    "InvFanoutGenerator",
+    # AY.4.g — chain-completion shim for plants firing chain-parent rails.
+    "ChainCompletionGenerator",
     # Money-trail family — recursive-graph L2; AT.3 promoted generator
     # + View on top of LedgerSimulation.transfers (parent-linked chain).
     "MoneyTrailInvariant",
     "MoneyTrailGenerator",
     "MoneyTrailView",
     # Many-to-many registry (AS.2; AU.1 + AU.3.a/b/c + AU.4 add edges;
-    # AX.5 splits into 3 category-scoped tuples + unified ALL_*)
+    # AX.5 splits into 3 category-scoped tuples + unified ALL_*;
+    # AY.2.b adds the audit-fixture category)
     "INVARIANT_GENERATOR_EDGES",
     "ALL_L1_INVARIANTS",
     "ALL_L1_GENERATORS",
@@ -188,6 +242,8 @@ __all__ = [
     "ALL_L2_SHAPE_GENERATORS",
     "ALL_L2_INVESTIGATION_INVARIANTS",
     "ALL_L2_INVESTIGATION_GENERATORS",
+    "ALL_AUDIT_FIXTURE_GENERATORS",
+    "ALL_COVERAGE_GENERATORS",
     "ALL_INVARIANTS",
     "ALL_GENERATORS",
     "invariants_for",
@@ -210,6 +266,12 @@ __all__ = [
     "ScenarioContext",
     "ClaimedAccountsGenerator",
     "scenario_metadata",
+    # AY.4.a — dry-run SQL capture for the production-seed reroute.
+    "dry_run_capture",
+    # AY.4.b — render captured (sql, params) as static SQL text.
+    "render_captured_sql",
+    # AY.4.c.3 — ScenarioPlant → ViolationGenerator tuple adapter.
+    "scenario_to_generators",
     # Self-validating training/docs scenarios (AS.7; AT.6 reuses for L2)
     "TrainingScenario",
     "validate_all",

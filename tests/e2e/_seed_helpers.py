@@ -30,7 +30,6 @@ from recon_gen.common.l2.auto_scenario import (
 from recon_gen.common.l2.seed import (
     ScenarioPlant,
     emit_full_seed,
-    emit_seed,
 )
 from recon_gen.common.sql import Dialect
 
@@ -97,7 +96,33 @@ def apply_db_seed(
         )
     else:
         scenario = report.scenario
-        seed_sql = emit_seed(instance, scenario, prefix=prefix, dialect=dialect)
+        # AY.4.e — plants-only path routes through the spine pipeline
+        # (was: emit_seed's OLD per-plant-kind dispatch). The adapter
+        # materializes one ViolationGenerator per plant kind;
+        # ScenarioContext.compose(dry_run=True) captures the dbapi
+        # writes; render_captured_sql produces dialect-appropriate
+        # static SQL the same shape execute_script consumes. Plants-
+        # only emit carries metadata.scenario_id per the AV.5 contract.
+        from recon_gen.common.spine import (
+            ScenarioContext,
+            dry_run_capture,
+            render_captured_sql,
+            scenario_to_generators,
+        )
+        generators = scenario_to_generators(
+            scenario, instance, anchor=today_ref, prefix=prefix,
+        )
+        cap = dry_run_capture(dialect)
+        ctx = ScenarioContext(
+            scenario_id=f"apply-db-seed-{prefix}",
+            prefix=prefix,
+            dialect=dialect,
+        )
+        captured = ctx.compose(cap, *generators, dry_run=True)  # type: ignore[arg-type]: ViolationGenerator → ClaimedAccountsGenerator Protocol narrowing not inferred at this seam
+        seed_sql = (
+            render_captured_sql(captured, dialect=dialect)
+            if captured else ""
+        )
     with conn.cursor() as cur:
         execute_script(cur, seed_sql, dialect=dialect)
     conn.commit()

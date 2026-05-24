@@ -43,10 +43,9 @@ from recon_gen.common.l2.primitives import L2Instance
 from recon_gen.common.spine._emit_helpers import (
     insert_tx,
     load_spec_example,
-    to_date,
     ts,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 
 @dataclass(frozen=True)
@@ -69,7 +68,7 @@ class ChainParentDisagreementInvariant:
             f"FROM {self.prefix}_chain_parent_disagreement",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "chain_parent_disagreement",
                 transfer_id=str(tid),
                 child_template_name=str(tname),
@@ -158,6 +157,10 @@ class ChainParentDisagreementGenerator:
 
     Single-edge: transfers-only emit → no balance rows → no drift
     trip (matches the AT.3 anomaly / money_trail shape).
+
+    AY.4.c.2 — account_id_override allows the plant adapter
+    (AY.4.c.3) to thread OLD plant account_ids through, preventing
+    PK collisions when N plants of the same shape compose.
     """
 
     child_template_name: str
@@ -166,6 +169,7 @@ class ChainParentDisagreementGenerator:
     parent_b_transfer_id: str = field(default="tr-cpd-parent-b")
     rail_name: str = "ach"
     prefix: str = "spec_example"
+    account_id_override: str | None = None
 
     @property
     def transfer_id(self) -> str:
@@ -178,13 +182,16 @@ class ChainParentDisagreementGenerator:
         """Single synthetic account_id the generator's 2 legs land on.
         Matview filters don't depend on account columns; the account
         is here just to satisfy NOT NULL constraints + AV.5's
-        claimed_accounts contract."""
+        claimed_accounts contract. ``account_id_override`` wins when
+        set (AY.4.c.2 — plant-adapter PK-collision avoidance)."""
+        if self.account_id_override is not None:
+            return self.account_id_override
         return f"acct-cpd-{self.child_template_name}"
 
     @property
-    def intended(self) -> Violation:
+    def intended(self) -> RuleViolation:
         """The natural-key tuple the matview surfaces post-plant."""
-        return Violation.of(
+        return RuleViolation.of(
             "chain_parent_disagreement",
             transfer_id=self.transfer_id,
             child_template_name=self.child_template_name,

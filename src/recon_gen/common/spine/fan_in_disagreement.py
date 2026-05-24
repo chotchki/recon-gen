@@ -47,7 +47,11 @@ from recon_gen.common.spine._emit_helpers import (
     load_spec_example,
     ts,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import (
+    CoverageObservation,
+    RuleViolation,
+    Violation,
+)
 
 
 @dataclass(frozen=True)
@@ -69,7 +73,7 @@ class FanInDisagreementInvariant:
             f"FROM {self.prefix}_fan_in_disagreement",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "fan_in_disagreement",
                 child_transfer_id=str(ctid),
                 disagreement_kind=str(kind),
@@ -202,6 +206,10 @@ class FanInChainGenerator:
     healthy (== expected), missing (< expected), extra (> expected).
 
     Single-edge: transfers-only → no balance rows → no drift trip.
+
+    AY.4.c.2 — account_id_override allows the plant adapter
+    (AY.4.c.3) to thread OLD plant account_ids through, preventing
+    PK collisions when N plants of the same shape compose.
     """
 
     chain_parent_name: str
@@ -211,6 +219,7 @@ class FanInChainGenerator:
     anchor_day: date
     expected_kind: str  # 'healthy' | 'missing' | 'orphan' | 'extra'
     prefix: str = "spec_example"
+    account_id_override: str | None = None
 
     @property
     def child_transfer_id(self) -> str:
@@ -218,15 +227,38 @@ class FanInChainGenerator:
 
     @property
     def account_id(self) -> str:
+        """Derivation keys off ``expected_kind`` + ``child_template_name``
+        (variant kind matters here — healthy/missing/orphan/extra each
+        get a distinct account so a compose of multiple variants on
+        the same chain doesn't PK-collide). ``account_id_override``
+        wins when set (AY.4.c.2)."""
+        if self.account_id_override is not None:
+            return self.account_id_override
         return f"acct-fanin-{self.expected_kind}-{self.child_template_name}"
 
     @property
-    def intended(self) -> Violation | None:
-        """The matview row this plant triggers, or `None` for the
-        healthy shape (parent_count == expected → no row)."""
+    def intended(self) -> Violation:
+        """The evidence this plant produces:
+
+          - For 'missing' / 'orphan' / 'extra' variants — a
+            `RuleViolation` (the matview surfaces the disagreement row).
+          - For 'healthy' (parent_count == expected) — a
+            `CoverageObservation` (the AY.2.b layering: the plant emits
+            a chain firing that doesn't trip the fan_in matview but
+            DOES populate the chain's parent_count seed coverage).
+            Pre-AY.2.b this was `None`; AY.2.b promotes it to a typed
+            CoverageObservation so the seed's "I planted a healthy
+            fan-in chain" claim has somewhere to land.
+        """
         if self.expected_kind == "healthy":
-            return None
-        return Violation.of(
+            return CoverageObservation.of(
+                "fan_in_chain_healthy",
+                child_transfer_id=self.child_transfer_id,
+                chain_parent_name=self.chain_parent_name,
+                child_template_name=self.child_template_name,
+                parent_count=self.parent_count,
+            )
+        return RuleViolation.of(
             "fan_in_disagreement",
             child_transfer_id=self.child_transfer_id,
             disagreement_kind=self.expected_kind,

@@ -125,7 +125,13 @@ def test_every_spine_generator_satisfies_claimed_accounts_protocol() -> None:
 def test_same_class_collision_caught_at_compose() -> None:
     """Two OverdraftGenerator instances naturally collide (both target
     `acct-overdraft-CustomerSubledger`). The context catches it BEFORE
-    the DB-level error with a clear two-class message."""
+    the DB-level error with a clear two-instance message.
+
+    AY.4.c.3 — the check is class-aware: same-class + same-account is
+    a real PK collision (deterministic transaction.id derivation);
+    cross-class + same-account is fine (different ID prefixes). The
+    regex confirms the new error shape names it as `same-class`.
+    """
     ctx = ScenarioContext(scenario_id="test-collision", prefix=_PREFIX)
     gen_a = OverdraftInvariant().scenario_for(
         "CustomerSubledger", magnitude=10.0,
@@ -135,26 +141,28 @@ def test_same_class_collision_caught_at_compose() -> None:
     )
     conn = _fresh_db()
     try:
-        with pytest.raises(ValueError, match="account_id collision"):
+        with pytest.raises(ValueError, match="same-class account_id collision"):
             ctx.compose(conn, gen_a, gen_b)
     finally:
         conn.close()
 
 
 # ---------------------------------------------------------------------------
-# 3. Cross-class collision also caught (check is by account, not class).
+# 3. Cross-class CO-LOCATION now allowed (AY.4.c.3 relaxation).
 # ---------------------------------------------------------------------------
 
 
-def test_cross_class_collision_caught_at_compose() -> None:
-    """Two different generator classes claiming the same account_id
-    fire the same compose-time error. The check is keyed on
-    account_id, not class identity — masking via type confusion is
-    impossible."""
-    # Both target acct-drift-child-CustomerSubledger by construction.
-    # Construct an overdraft that ALSO targets that account by hand
-    # (the smart constructor wouldn't pick that ID, but a manual
-    # construction can).
+def test_cross_class_colocation_on_same_account_allowed() -> None:
+    """AY.4.c.3 flip: a Drift + Overdraft on the SAME account is now
+    valid composition. Spine generators derive transaction.id from a
+    class-prefix (`tx-drift-*`, `tx-overdraft-*`) + the account, so
+    cross-class co-location doesn't PK-collide.
+
+    Pre-AY.4.c.3 this raised. Post-AY.4.c.3 the production seed
+    legitimately plants multi-violation coverage on one customer
+    account (drift + limit_breach + overdraft for richer dashboards);
+    the over-strict check was blocking the AY.4.d reroute.
+    """
     from recon_gen.common.spine import DriftGenerator, OverdraftGenerator
     import random as _random
     drift_gen = DriftGenerator(
@@ -177,8 +185,18 @@ def test_cross_class_collision_caught_at_compose() -> None:
     ctx = ScenarioContext(scenario_id="test-cross-class", prefix=_PREFIX)
     conn = _fresh_db()
     try:
-        with pytest.raises(ValueError, match="account_id collision"):
-            ctx.compose(conn, drift_gen, overdraft_gen)
+        ctx.compose(conn, drift_gen, overdraft_gen)
+        # No exception → both emits landed. Verify both rows exist.
+        n_drift = conn.execute(
+            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+            f"WHERE account_id = 'acct-shared' AND id LIKE 'tx-drift-%'",
+        ).fetchone()[0]
+        n_overdraft = conn.execute(
+            f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances "
+            f"WHERE account_id = 'acct-shared'",
+        ).fetchone()[0]
+        assert n_drift >= 1, "drift generator's rows should land"
+        assert n_overdraft >= 1, "overdraft generator's rows should land"
     finally:
         conn.close()
 

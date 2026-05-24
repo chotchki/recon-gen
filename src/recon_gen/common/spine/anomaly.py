@@ -44,7 +44,7 @@ from recon_gen.common.spine.ledger_simulation import (
     Transfer,
     TransferLeg,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 
 # AT.0 finding: 100 baseline pairs is the minimum to dilute the spike's
@@ -80,7 +80,7 @@ class AnomalyInvariant:
             f"FROM {self.prefix}_inv_pair_rolling_anomalies",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "inv_pair_rolling_anomalies",
                 sender_account_id=str(said),
                 recipient_account_id=str(raid),
@@ -100,6 +100,8 @@ class AnomalyInvariant:
         baseline_amount: float = _DEFAULT_BASELINE_AMOUNT,
         anchor_day: date = date(2030, 1, 1),
         instance: L2Instance | None = None,
+        sender_account_id: str | None = None,
+        recipient_account_id: str | None = None,
     ) -> "AnomalyGenerator":
         """Resolve sender + recipient roles; return a generator that
         plants `baseline_pair_count` baseline pairs + 1 spike between
@@ -114,6 +116,15 @@ class AnomalyInvariant:
         internal accounts (sender) or leaf internal accounts (recipient
         — the matview's recipient filter requires
         `account_parent_role IS NOT NULL`).
+
+        AY.4.c — `sender_account_id` / `recipient_account_id` override
+        the default synthetic IDs. The plant adapter (AY.4.c.3) threads
+        OLD `AnomalyPlant` account_ids through these kwargs so N
+        anomaly plants on the same (sender_role, recipient_role) pair
+        produce N distinct generators (the default
+        `f"acct-anomaly-{sender,recipient}-{role}"` derivations would
+        collide). Existing test callers can pass nothing → preserves
+        the synthetic defaults byte-stable.
         """
         inst = instance if instance is not None else load_spec_example()
         sender = find_internal_with_role(
@@ -126,10 +137,15 @@ class AnomalyInvariant:
         # Recipient's parent_role is guaranteed non-None by must_be_leaf.
         assert recipient.parent_role is not None
         return AnomalyGenerator(
-            sender_account_id=f"acct-anomaly-sender-{sender_role}",
+            sender_account_id=(
+                sender_account_id or f"acct-anomaly-sender-{sender_role}"
+            ),
             sender_account_role=sender_role,
             sender_account_parent_role=sender.parent_role,
-            recipient_account_id=f"acct-anomaly-recipient-{recipient_role}",
+            recipient_account_id=(
+                recipient_account_id
+                or f"acct-anomaly-recipient-{recipient_role}"
+            ),
             recipient_account_role=recipient_role,
             recipient_account_parent_role=recipient.parent_role,
             anchor_day=anchor_day,
@@ -174,10 +190,10 @@ class AnomalyGenerator:
     prefix: str = "spec_example"
 
     @property
-    def intended(self) -> Violation:
+    def intended(self) -> RuleViolation:
         # Identity: (sender, recipient, window_end). Bucket depends on
         # z-score; for spike >> baseline, expect '4+ sigma'.
-        return Violation.of(
+        return RuleViolation.of(
             "inv_pair_rolling_anomalies",
             sender_account_id=self.sender_account_id,
             recipient_account_id=self.recipient_account_id,

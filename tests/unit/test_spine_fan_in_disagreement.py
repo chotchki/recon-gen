@@ -22,6 +22,7 @@ expected is None.)
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -146,11 +147,27 @@ def test_generator_satisfies_claimed_accounts_protocol() -> None:
     assert len(gen.claimed_accounts) == 1
 
 
-def test_healthy_intended_is_none() -> None:
-    """Per AP.2 non-violating convention, the healthy emit produces
-    no matview row → intended is None."""
+def test_healthy_intended_is_a_coverage_observation() -> None:
+    """Post AY.2.b: the healthy variant returns a CoverageObservation
+    (not None as it did pre-AY.2.b). The matview still emits no row
+    (healthy → parent_count == expected → matview's CASE produces
+    nothing), but the plant DOES produce coverage evidence — 'I
+    planted a healthy fan-in chain firing' — that a coverage detector
+    could read back.
+
+    The AY.0 evidence-currency layering: the healthy variant's
+    `intended.severity` is 'coverage', not 'rule_violation'.
+    `isinstance(intended, CoverageObservation)` narrows the type."""
+    from recon_gen.common.spine import CoverageObservation
     gen = FanInDisagreementInvariant().scenario_for_healthy()
-    assert gen.intended is None
+    intended = gen.intended
+    assert intended is not None
+    assert isinstance(intended, CoverageObservation)
+    items = dict(intended.identity)
+    assert intended.invariant == "fan_in_chain_healthy"
+    assert items["child_transfer_id"] == gen.child_transfer_id
+    assert items["chain_parent_name"] == gen.chain_parent_name
+    assert items["parent_count"] == gen.parent_count
 
 
 def test_missing_intended_matches_natural_key() -> None:
@@ -334,3 +351,51 @@ def test_tagged_emit_writes_scenario_id_on_every_row() -> None:
     finally:
         conn.close()
     assert tagged == total > 0
+
+
+# ---------------------------------------------------------------------------
+# AY.4.c.2 — account_id_override threads through claimed_accounts.
+# ---------------------------------------------------------------------------
+
+
+def test_fan_in_chain_account_id_override_used_when_set() -> None:
+    """Setting ``account_id_override`` short-circuits the
+    derived-from-(expected_kind, child_template_name) default. The
+    fan-in generator's derivation also keys off ``expected_kind``
+    (healthy/missing/orphan/extra) so the override needs to win
+    regardless of which variant the plant adapter ships."""
+    gen = FanInChainGenerator(
+        chain_parent_name="parent",
+        child_template_name="child",
+        expected_parent_count=2,
+        parent_count=1,
+        anchor_day=date(2030, 1, 1),
+        expected_kind="missing",
+        account_id_override="custom-account-x",
+    )
+    assert gen.account_id == "custom-account-x"
+    assert gen.claimed_accounts == frozenset({"custom-account-x"})
+
+
+def test_fan_in_chain_default_derivation_preserved_when_unset() -> None:
+    """Derivation keys off ``expected_kind`` AND ``child_template_name``
+    — preserve that shape so the variant kind still differentiates
+    accounts when override is unset."""
+    gen_a = FanInChainGenerator(
+        chain_parent_name="parent",
+        child_template_name="child",
+        expected_parent_count=2,
+        parent_count=1,
+        anchor_day=date(2030, 1, 1),
+        expected_kind="missing",
+    )
+    gen_b = FanInChainGenerator(
+        chain_parent_name="parent",
+        child_template_name="child",
+        expected_parent_count=2,
+        parent_count=1,
+        anchor_day=date(2030, 1, 1),
+        expected_kind="missing",
+    )
+    assert gen_a.account_id == gen_b.account_id
+    assert gen_a.account_id == "acct-fanin-missing-child"

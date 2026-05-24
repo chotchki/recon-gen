@@ -50,7 +50,7 @@ from recon_gen.common.spine._emit_helpers import (
     load_spec_example,
     to_date,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 
 @dataclass(frozen=True)
@@ -75,7 +75,7 @@ class OverdraftInvariant:
             f"FROM {self.prefix}_overdraft",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "overdraft",
                 account_id=aid,
                 business_day=to_date(bds),
@@ -90,6 +90,7 @@ class OverdraftInvariant:
         *,
         magnitude: float = 5.0,
         instance: L2Instance | None = None,
+        account_id: str | None = None,
     ) -> "OverdraftGenerator":
         """Resolve a role against the shape; return a generator that
         manufactures a stored-balance overdraft on the first internal
@@ -107,11 +108,19 @@ class OverdraftInvariant:
 
         `instance=None` loads the bundled `spec_example` — production
         callers (deploy-time, e2e fixtures) thread the real L2.
+
+        AY.4.c — `account_id` overrides the default synthetic ID. The
+        plant adapter (AY.4.c.3) threads OLD `OverdraftPlant.account_id`
+        through this kwarg so N overdraft plants on the same role
+        produce N distinct generators (the default
+        `f"acct-overdraft-{role}"` derivation would collide). Existing
+        test callers can pass nothing → preserves the synthetic default
+        byte-stable.
         """
         inst = instance if instance is not None else load_spec_example()
         acct = find_internal_with_role(inst, role, error_kind="overdraft")
         return OverdraftGenerator(
-            account_id=f"acct-overdraft-{role}",
+            account_id=account_id or f"acct-overdraft-{role}",
             account_role=role,
             account_parent_role=acct.parent_role,
             anchor_day=date(2030, 1, 1),
@@ -142,13 +151,17 @@ class OverdraftGenerator:
     account_parent_role: str | None
     anchor_day: date
     magnitude: float
+    # AY.4.d — production callers thread cfg.db_table_prefix here so
+    # the emitted row lands on the right deployment's table; default
+    # matches the in-process test harness shape.
+    prefix: str = "spec_example"
 
     @property
-    def intended(self) -> Violation:
+    def intended(self) -> RuleViolation:
         # `stored_balance` is the actual matview value (negative).
         # `magnitude` is caller-facing positive; the identity carries the
         # negative form so it round-trips against `detect()`.
-        return Violation.of(
+        return RuleViolation.of(
             "overdraft",
             account_id=self.account_id,
             business_day=self.anchor_day,
@@ -156,7 +169,7 @@ class OverdraftGenerator:
         )
 
     @property
-    def also_trips_drift(self) -> Violation | None:
+    def also_trips_drift(self) -> RuleViolation | None:
         """The empirical AU.0 edge: drift fires on the same account/day
         when the planted account is a LEAF (account_parent_role is set).
         Returns `None` when the planted account is NOT a leaf (drift's
@@ -167,7 +180,7 @@ class OverdraftGenerator:
         """
         if self.account_parent_role is None:
             return None
-        return Violation.of(
+        return RuleViolation.of(
             "drift",
             account_id=self.account_id,
             business_day=self.anchor_day,
@@ -193,6 +206,7 @@ class OverdraftGenerator:
         start, end = day_bounds(self.anchor_day)
         insert_balance(
             conn,
+            prefix=self.prefix,
             account_id=self.account_id,
             account_name=f"Overdraft Acct ({self.account_role})",
             account_role=self.account_role,

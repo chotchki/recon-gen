@@ -42,7 +42,7 @@ from recon_gen.common.spine._emit_helpers import (
     load_spec_example,
     to_date,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 
 @dataclass(frozen=True)
@@ -61,7 +61,7 @@ class ExpectedEodBalanceInvariant:
             f"FROM {self.prefix}_expected_eod_balance_breach",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "expected_eod_balance_breach",
                 account_id=aid,
                 business_day=to_date(bds),
@@ -77,6 +77,7 @@ class ExpectedEodBalanceInvariant:
         expected: float = 100.0,
         variance: float = 5.0,
         instance: L2Instance | None = None,
+        account_id: str | None = None,
     ) -> "ExpectedEodBalanceGenerator":
         """Resolve a role; return a generator that plants
         ``money = expected + variance`` with the per-row
@@ -88,11 +89,19 @@ class ExpectedEodBalanceInvariant:
 
         Raises `ValueError` if the L2 has no internal account with the
         requested role.
+
+        AY.4.c — `account_id` overrides the default synthetic ID. The
+        plant adapter (AY.4.c.3) threads OLD
+        `ExpectedEodBalancePlant.account_id` through this kwarg so N
+        plants on the same role produce N distinct generators (the
+        default `f"acct-eod-{role}"` derivation would collide). Existing
+        test callers can pass nothing → preserves the synthetic default
+        byte-stable.
         """
         inst = instance if instance is not None else load_spec_example()
         acct = find_internal_with_role(inst, role, error_kind="expected-EOD")
         return ExpectedEodBalanceGenerator(
-            account_id=f"acct-eod-{role}",
+            account_id=account_id or f"acct-eod-{role}",
             account_role=role,
             account_parent_role=acct.parent_role,
             anchor_day=date(2030, 1, 1),
@@ -123,13 +132,15 @@ class ExpectedEodBalanceGenerator:
     anchor_day: date
     expected: float
     variance: float
+    # AY.4.d — production callers thread cfg.db_table_prefix here.
+    prefix: str = "spec_example"
 
     @property
-    def intended(self) -> Violation:
+    def intended(self) -> RuleViolation:
         # The matview's variance column = money − expected_eod_balance =
         # variance. Identity carries the variance directly (matches the
         # detect projection).
-        return Violation.of(
+        return RuleViolation.of(
             "expected_eod_balance_breach",
             account_id=self.account_id,
             business_day=self.anchor_day,
@@ -137,7 +148,7 @@ class ExpectedEodBalanceGenerator:
         )
 
     @property
-    def also_trips_drift(self) -> Violation | None:
+    def also_trips_drift(self) -> RuleViolation | None:
         """The empirical AU.0-style edge: drift fires on the same
         account/day when the planted account is a LEAF (account_parent_
         role is set). Drift magnitude = stored − Σ legs = (expected +
@@ -148,7 +159,7 @@ class ExpectedEodBalanceGenerator:
         """
         if self.account_parent_role is None:
             return None
-        return Violation.of(
+        return RuleViolation.of(
             "drift",
             account_id=self.account_id,
             business_day=self.anchor_day,
@@ -176,6 +187,7 @@ class ExpectedEodBalanceGenerator:
         start, end = day_bounds(self.anchor_day)
         insert_balance(
             conn,
+            prefix=self.prefix,
             account_id=self.account_id,
             account_name=f"EOD Acct ({self.account_role})",
             account_role=self.account_role,

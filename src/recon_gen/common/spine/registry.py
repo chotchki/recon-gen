@@ -60,6 +60,7 @@ from recon_gen.common.spine.anomaly import (
     AnomalyGenerator,
     AnomalyInvariant,
 )
+from recon_gen.common.spine.chain_completion import ChainCompletionGenerator
 from recon_gen.common.spine.chain_parent_disagreement import (
     ChainParentDisagreementGenerator,
     ChainParentDisagreementInvariant,
@@ -73,10 +74,16 @@ from recon_gen.common.spine.expected_eod import (
     ExpectedEodBalanceGenerator,
     ExpectedEodBalanceInvariant,
 )
+from recon_gen.common.spine.failed_transaction import FailedTransactionGenerator
 from recon_gen.common.spine.fan_in_disagreement import (
     FanInChainGenerator,
     FanInDisagreementInvariant,
 )
+from recon_gen.common.spine.inv_fanout import InvFanoutGenerator
+from recon_gen.common.spine.rail_firing import RailFiringGenerator
+from recon_gen.common.spine.supersession import SupersessionGenerator
+from recon_gen.common.spine.transfer_template import TransferTemplateGenerator
+from recon_gen.common.spine.two_template_chain import TwoTemplateChainGenerator
 from recon_gen.common.spine.generator import ViolationGenerator
 from recon_gen.common.spine.invariant import Invariant
 from recon_gen.common.spine.limit_breach import (
@@ -165,6 +172,34 @@ INVARIANT_GENERATOR_EDGES: Final[
     # (LedgerSimulation pattern) → single-edge to their own invariant.
     AnomalyGenerator: (AnomalyInvariant,),
     MoneyTrailGenerator: (MoneyTrailInvariant,),
+    # AY.2.b — audit-fixture generators. Emit rows the audit PDF
+    # reads directly; no matview, no invariant. Empty edge tuple is
+    # the AY.2.b widening — coverage / audit-fixture generators may
+    # register without an Invariant counterpart, since "no matching
+    # detector" is intentional for these. AU.5's per-generator gate
+    # treats empty edges as expected for AuditFixture / coverage
+    # generators (recognized via the `intended` subtype at gate time).
+    FailedTransactionGenerator: (),
+    SupersessionGenerator: (),
+    # AY.2.b — seed-color coverage generators. Emit CoverageObservation
+    # evidence (NOT RuleViolation) — they're the "I planted a healthy
+    # shape firing" claim that powers L1 Dashboard's PostedRequirements
+    # panel + audit-PDF's coverage sections. No matview surfaces these
+    # as violations (they're non-violating by construction); empty edge
+    # tuple is intentional.
+    TwoTemplateChainGenerator: (),
+    RailFiringGenerator: (),
+    TransferTemplateGenerator: (),
+    # AY.4.g — seed scaffolding, no matview surface.
+    ChainCompletionGenerator: (),
+    # InvFanoutGenerator is a coverage generator (primary intent =
+    # populate Investigation matviews) but its emit deterministically
+    # trips MoneyTrailInvariant (every transfer is a depth-0 edge the
+    # inv_money_trail_edges recursive CTE surfaces). Non-empty edges
+    # on a coverage generator are tolerated by AU.5 — the bucket
+    # membership (ALL_COVERAGE_GENERATORS) tags primary purpose;
+    # registered edges document deterministic side-effects.
+    InvFanoutGenerator: (MoneyTrailInvariant,),
 }
 
 
@@ -264,10 +299,43 @@ ALL_L2_INVESTIGATION_GENERATORS: Final[
 `ALL_L2_INVESTIGATION_INVARIANTS`."""
 
 
+ALL_AUDIT_FIXTURE_GENERATORS: Final[
+    tuple[type[ViolationGenerator], ...]
+] = (
+    FailedTransactionGenerator,
+    SupersessionGenerator,
+)
+"""Audit-fixture generators (AY.2.b) — emit AuditFixture evidence
+the audit PDF reads directly; no Invariant counterpart on the
+spine. AU.5's per-generator gate widens to allow empty edge tuples
+for these (intended.severity == 'audit_fixture' or, post-AY.2.a,
+isinstance(intended, AuditFixture) is the discriminator)."""
+
+
+ALL_COVERAGE_GENERATORS: Final[
+    tuple[type[ViolationGenerator], ...]
+] = (
+    TwoTemplateChainGenerator,
+    RailFiringGenerator,
+    TransferTemplateGenerator,
+    InvFanoutGenerator,
+    ChainCompletionGenerator,
+)
+"""Seed-color coverage generators (AY.2.b) — emit `CoverageObservation`
+evidence the L1 dashboard's PostedRequirements panel + audit-PDF
+coverage sections read directly. Non-violating by construction (no
+matview surfaces them as RuleViolations); the empty edge tuple in
+`INVARIANT_GENERATOR_EDGES` is intentional. AU.5's per-generator
+gate widens to allow empty edges for any generator in this tuple,
+paralleling the audit-fixture treatment."""
+
+
 ALL_GENERATORS: Final[tuple[type[ViolationGenerator], ...]] = (
     *ALL_L1_GENERATORS,
     *ALL_L2_SHAPE_GENERATORS,
     *ALL_L2_INVESTIGATION_GENERATORS,
+    *ALL_AUDIT_FIXTURE_GENERATORS,
+    *ALL_COVERAGE_GENERATORS,
 )
 """Every `ViolationGenerator` class promoted to the spine, across all
 three categories. AU.5's registration gate asserts each is keyed in

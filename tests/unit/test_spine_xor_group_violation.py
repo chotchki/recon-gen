@@ -17,6 +17,7 @@ AS.5's contract (`semantic_lock` follows the same shape).
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -327,3 +328,74 @@ def test_overlap_tagged_emit_writes_scenario_id() -> None:
     finally:
         conn.close()
     assert tagged == 2  # both legs tagged
+
+
+# ---------------------------------------------------------------------------
+# AY.4.c.2 — account_id_override threads through claimed_accounts.
+# ---------------------------------------------------------------------------
+
+
+def test_xor_missed_account_id_override_used_when_set() -> None:
+    """Setting ``account_id_override`` short-circuits the
+    derived-from-template_name default for the missed-firing
+    generator — the AY.4.c.3 adapter pins per-plant account ids."""
+    gen = XorGroupMissedFiringGenerator(
+        template_name="tmpl",
+        xor_group_index=0,
+        witness_rail_name="rail-w",
+        anchor_day=date(2030, 1, 1),
+        account_id_override="custom-account-x",
+    )
+    assert gen.account_id == "custom-account-x"
+    assert gen.claimed_accounts == frozenset({"custom-account-x"})
+
+
+def test_xor_missed_default_derivation_preserved_when_unset() -> None:
+    gen_a = XorGroupMissedFiringGenerator(
+        template_name="tmpl",
+        xor_group_index=0,
+        witness_rail_name="rail-w",
+        anchor_day=date(2030, 1, 1),
+    )
+    gen_b = XorGroupMissedFiringGenerator(
+        template_name="tmpl",
+        xor_group_index=0,
+        witness_rail_name="rail-w",
+        anchor_day=date(2030, 1, 1),
+    )
+    assert gen_a.account_id == gen_b.account_id
+    assert gen_a.account_id == "acct-xor-missed-tmpl"
+
+
+def test_xor_overlap_account_id_override_used_when_set() -> None:
+    """Setting ``account_id_override`` short-circuits the
+    derived-from-template_name default for the overlap generator."""
+    gen = XorGroupOverlapGenerator(
+        template_name="tmpl",
+        xor_group_index=0,
+        variant_a_rail_name="rail-a",
+        variant_b_rail_name="rail-b",
+        anchor_day=date(2030, 1, 1),
+        account_id_override="custom-account-y",
+    )
+    assert gen.account_id == "custom-account-y"
+    assert gen.claimed_accounts == frozenset({"custom-account-y"})
+
+
+def test_xor_overlap_default_derivation_preserved_when_unset() -> None:
+    gen_a = XorGroupOverlapGenerator(
+        template_name="tmpl",
+        xor_group_index=0,
+        variant_a_rail_name="rail-a",
+        variant_b_rail_name="rail-b",
+        anchor_day=date(2030, 1, 1),
+    )
+    gen_b = XorGroupOverlapGenerator(
+        template_name="tmpl",
+        xor_group_index=0,
+        variant_a_rail_name="rail-a",
+        variant_b_rail_name="rail-b",
+        anchor_day=date(2030, 1, 1),
+    )
+    assert gen_a.account_id == gen_b.account_id
+    assert gen_a.account_id == "acct-xor-overlap-tmpl"

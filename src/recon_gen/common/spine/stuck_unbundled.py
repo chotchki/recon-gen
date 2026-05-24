@@ -37,7 +37,7 @@ from recon_gen.common.spine._emit_helpers import (
     insert_tx,
     load_spec_example,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 _RailWithUnbundledAge = TwoLegRail | SingleLegRail
 
@@ -58,7 +58,7 @@ class StuckUnbundledInvariant:
             f"FROM {self.prefix}_stuck_unbundled",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "stuck_unbundled",
                 transaction_id=str(tid),
                 rail_name=str(rn),
@@ -74,6 +74,7 @@ class StuckUnbundledInvariant:
         overshoot_seconds: int = 60,
         account_role: str = "CustomerSubledger",
         instance: L2Instance | None = None,
+        account_id: str | None = None,
     ) -> "StuckUnbundledGenerator":
         """Resolve `rail_name` against the shape; plant a Posted-but-
         unbundled transaction with `posting = as_of − (rail.
@@ -86,6 +87,14 @@ class StuckUnbundledInvariant:
         Raises `ValueError` if rail doesn't exist OR doesn't have a
         `max_unbundled_age` (matview excludes those — uncovered scenario
         would silently inert).
+
+        AY.4.c — `account_id` overrides the default synthetic ID. The
+        plant adapter (AY.4.c.3) threads OLD
+        `StuckUnbundledPlant.account_id` through this kwarg so N plants
+        on the same rail produce N distinct generators (the default
+        `f"acct-stuck-unbundled-{rail_name}"` derivation would
+        collide). Existing test callers can pass nothing → preserves
+        the synthetic default byte-stable.
         """
         inst = instance if instance is not None else load_spec_example()
         rail = _find_rail_with_max_unbundled_age(inst, rail_name)
@@ -93,11 +102,16 @@ class StuckUnbundledInvariant:
         acct = find_internal_with_role(
             inst, account_role, error_kind="stuck_unbundled",
         )
+        resolved_account_id = (
+            account_id or f"acct-stuck-unbundled-{rail_name}"
+        )
+        # AY.4.c.4 — fold account_id into PK derivations so N plants on
+        # the same rail (different accounts) don't PK-collide at INSERT.
         return StuckUnbundledGenerator(
-            transaction_id=f"tx-stuck-unbundled-{rail_name}",
-            transfer_id=f"xfer-stuck-unbundled-{rail_name}",
+            transaction_id=f"tx-stuck-unbundled-{rail_name}-{resolved_account_id}",
+            transfer_id=f"xfer-stuck-unbundled-{rail_name}-{resolved_account_id}",
             rail_name=rail_name,
-            account_id=f"acct-stuck-unbundled-{rail_name}",
+            account_id=resolved_account_id,
             account_role=account_role,
             account_parent_role=acct.parent_role,
             max_unbundled_age_seconds=int(
@@ -127,10 +141,12 @@ class StuckUnbundledGenerator:
     max_unbundled_age_seconds: int
     overshoot_seconds: int
     as_of: datetime
+    # AY.4.d — production callers thread cfg.db_table_prefix here.
+    prefix: str = "spec_example"
 
     @property
-    def intended(self) -> Violation:
-        return Violation.of(
+    def intended(self) -> RuleViolation:
+        return RuleViolation.of(
             "stuck_unbundled",
             transaction_id=self.transaction_id,
             rail_name=self.rail_name,
@@ -162,6 +178,7 @@ class StuckUnbundledGenerator:
         # wants).
         insert_tx(
             conn,
+            prefix=self.prefix,
             id=self.transaction_id,
             account_id=self.account_id,
             account_name=f"Stuck Unbundled ({self.rail_name})",

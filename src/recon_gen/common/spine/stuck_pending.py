@@ -47,7 +47,7 @@ from recon_gen.common.spine._emit_helpers import (
     insert_tx,
     load_spec_example,
 )
-from recon_gen.common.spine.violation import Violation
+from recon_gen.common.spine.violation import RuleViolation, Violation
 
 # Either rail subtype is acceptable — both carry `max_pending_age`.
 _RailWithPendingAge = TwoLegRail | SingleLegRail
@@ -70,7 +70,7 @@ class StuckPendingInvariant:
             f"FROM {self.prefix}_stuck_pending",
         ).fetchall()
         return {
-            Violation.of(
+            RuleViolation.of(
                 "stuck_pending",
                 transaction_id=str(tid),
                 rail_name=str(rn),
@@ -86,6 +86,7 @@ class StuckPendingInvariant:
         overshoot_seconds: int = 60,
         account_role: str = "CustomerSubledger",
         instance: L2Instance | None = None,
+        account_id: str | None = None,
     ) -> "StuckPendingGenerator":
         """Resolve `rail_name` against the shape; return a generator
         that plants a Pending transaction on a `account_role` account
@@ -110,6 +111,14 @@ class StuckPendingInvariant:
         matview filter excludes rails without one — manufacturing a
         scenario against an uncovered rail would silently emit an inert
         row, which we refuse).
+
+        AY.4.c — `account_id` overrides the default synthetic ID. The
+        plant adapter (AY.4.c.3) threads OLD
+        `StuckPendingPlant.account_id` through this kwarg so N plants
+        on the same rail produce N distinct generators (the default
+        `f"acct-stuck-pending-{rail_name}"` derivation would collide).
+        Existing test callers can pass nothing → preserves the
+        synthetic default byte-stable.
         """
         inst = instance if instance is not None else load_spec_example()
         rail = _find_rail_with_max_pending_age(inst, rail_name)
@@ -119,11 +128,18 @@ class StuckPendingInvariant:
         acct = find_internal_with_role(
             inst, account_role, error_kind="stuck_pending",
         )
+        resolved_account_id = (
+            account_id or f"acct-stuck-pending-{rail_name}"
+        )
+        # AY.4.c.4 — fold account_id into transaction_id / transfer_id so
+        # N plants on the same rail (different accounts) don't PK-collide
+        # at INSERT time. Default-case account_id derivation IS rail-keyed,
+        # so single-test callers stay byte-stable.
         return StuckPendingGenerator(
-            transaction_id=f"tx-stuck-pending-{rail_name}",
-            transfer_id=f"xfer-stuck-pending-{rail_name}",
+            transaction_id=f"tx-stuck-pending-{rail_name}-{resolved_account_id}",
+            transfer_id=f"xfer-stuck-pending-{rail_name}-{resolved_account_id}",
             rail_name=rail_name,
-            account_id=f"acct-stuck-pending-{rail_name}",
+            account_id=resolved_account_id,
             account_role=account_role,
             account_parent_role=acct.parent_role,
             max_pending_age_seconds=int(rail.max_pending_age.total_seconds()),
@@ -155,10 +171,12 @@ class StuckPendingGenerator:
     max_pending_age_seconds: int
     overshoot_seconds: int
     as_of: datetime
+    # AY.4.d — production callers thread cfg.db_table_prefix here.
+    prefix: str = "spec_example"
 
     @property
-    def intended(self) -> Violation:
-        return Violation.of(
+    def intended(self) -> RuleViolation:
+        return RuleViolation.of(
             "stuck_pending",
             transaction_id=self.transaction_id,
             rail_name=self.rail_name,
@@ -188,6 +206,7 @@ class StuckPendingGenerator:
         posting_dt = self.as_of - timedelta(seconds=age_back)
         insert_tx(
             conn,
+            prefix=self.prefix,
             id=self.transaction_id,
             account_id=self.account_id,
             account_name=f"Stuck Pending ({self.rail_name})",

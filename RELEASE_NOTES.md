@@ -1,5 +1,122 @@
 # Release Notes
 
+## v11.15.0 — Phase AY: converge the dual seed paths
+
+Phase AY closes the second of three gaps the post-AV retrospective
+surfaced: two parallel plant systems coexisted by accident, not by
+design. The production seed (`recon-gen data apply --execute`)
+emitted through `ScenarioPlant` + per-plant `_emit_*_rows` helpers;
+the spine generators only fired in tests + the AT.5 agreement gate.
+AV.5's per-row `metadata.scenario_id` tagging landed on test rows
+but NOT production seed rows; `ScenarioContext.cleanup` would find
+nothing to delete against a real deploy.
+
+AY converges everything onto the spine. Production seed emission
+now flows through `scenario_to_generators` (the 20-kind plant →
+spine `ViolationGenerator` adapter) + `ScenarioContext.compose
+(dry_run=True)` + a per-dialect SQL renderer. Every row carries
+`metadata.scenario_id`; cleanup is surgical; the 1.7k LOC OLD
+per-plant dispatch retired.
+
+**New spine modules** (production-seed plumbing):
+
+- `src/recon_gen/common/spine/scenario_context.py::dry_run_capture` —
+  AY.4.a. Dbapi-shaped fake conn that records `cursor.execute(sql,
+  params)` calls per-dialect (sqlite3 / psycopg / oracledb) instead
+  of running them. Three concrete subclasses set `__module__` to
+  match what `_emit_helpers._placeholder_style` reads off
+  `type(conn).__module__`, so captured SQL already uses the target
+  dialect's placeholder convention.
+
+- `src/recon_gen/common/spine/dry_run_renderer.py::render_captured_sql`
+  — AY.4.b. Walks captured (sql, params) pairs + substitutes each
+  placeholder with the type-dispatched literal (None→NULL, str→
+  quoted, int/float→bare numeric, bool→0/1). Per-dialect placeholder
+  dispatch: SQLite `?`, PG `%s`, Oracle `:N`. Produces the static
+  SQL text the OLD `build_full_seed_sql` path returned, ready for
+  `execute_script` or pipe-to-psql.
+
+- `src/recon_gen/common/spine/plant_adapter.py::scenario_to_generators` —
+  AY.4.c.3. The 20-kind dispatch table. Walks every plant collection
+  on a `ScenarioPlant` and materializes the matching spine
+  `ViolationGenerator`. Threads the OLD plant's `account_id` through
+  the spine generators' override knobs (drift / overdraft /
+  limit_breach / stuck_pending / stuck_unbundled / + 7 derived-
+  account L2-shape generators) so N plants of the same kind don't
+  PK-collide.
+
+- `src/recon_gen/common/spine/chain_completion.py` — AY.4.g. New
+  spine primitive co-emitted by the adapter alongside XOR + LimitBreach
+  plants when the parent rail/template matches an L2 chain.parent.
+  Picks the first non-fan_in child + emits a synthetic child leg
+  satisfying the chain so `multi_xor_violation` doesn't false-
+  positive on the parent firing's chain-parent-but-no-child shape.
+
+**Spine generator improvements** rolled into AY:
+
+- `Violation` is now an abstract base with 3 concrete subtypes
+  (`RuleViolation` / `CoverageObservation` / `AuditFixture`) — AY.2.a.
+  Typed evidence currency: rule violations vs seed-color presence
+  claims vs audit-PDF fixtures get distinct subtype tags + the
+  pattern-matchable shape.
+- 7 new generators promoted (AY.2.b): `FailedTransaction`,
+  `Supersession`, `TwoTemplateChain`, `RailFiring`,
+  `TransferTemplate`, `InvFanout`, plus the `FanInChain(healthy)`
+  flip from `intended=None` to a `CoverageObservation`.
+- Every spine generator now accepts an `account_id_override`
+  (kwargs on factories where one exists; dataclass field on the
+  derived-account L2-shape generators) — AY.4.c.1 + AY.4.c.2.
+- 6 L1 generators' `transaction.id` derivations now include
+  `account_id` so N plants on different accounts but same
+  (rail, direction) don't PK-collide (AY.4.c.4).
+- `ScenarioContext.compose(dry_run=True)` is the production-seed
+  entry point. Pairwise-disjoint check runs only in live mode
+  (over-strict false positives blocked legitimate cross-class
+  composition pre-AY.4.c.4).
+- `apply_scenario(dialect=…)` kwarg lifted (AY.3); production
+  callers thread PG / Oracle through.
+
+**`seed.py` shrunk 6600 → 4426 lines** (33% reduction). 42 dead
+functions purged via AST-based pass (per-plant emitters + sort
+keys + private helpers). `emit_seed` is now a ~30-line spine
+wrapper; same public signature, same SQL-text return shape, so
+`deploy_pipeline.py` callers keep working unchanged. All
+ScenarioPlant dataclasses preserved (trainer / timeline depend on
+them).
+
+**Side-quest bugs caught + fixed during AY.4.d:**
+
+1. 6 L1 generators called `insert_tx` / `insert_balance` without
+   `prefix=self.prefix` — silently used `DEFAULT_PREFIX=
+   "spec_example"`. Worked for unit tests; broke studio deploy
+   (prefix="test") with "no such table." Fixed.
+2. 5 Generator dataclasses missing `prefix: str = "spec_example"`
+   field entirely — only their Invariant counterparts carried it.
+   Added.
+3. `ScenarioContext.compose`'s pairwise-disjoint check was
+   account-blind, blocking legitimate cross-class co-location.
+   Refined to class-aware (only same-class + same-account is a
+   real PK collision).
+4. `RailFiringGenerator.metadata_extras` field added so OLD
+   `rail.metadata_value_examples` cycling per firing_seq now
+   lands in spine emit too (AY.6.b).
+
+**Byte-locked seeds re-locked** twice during AY (-0.1% then +0.04%
+per file). Net drift accounts for: per-row INSERT replaces multi-
+row VALUES, plant counts collapsed in the header, metadata payloads
+now carry the AV.5 scenario_id stamp + per-firing
+`metadata_value_examples` values.
+
+**Tests:** 2795 unit + data pass; 8 byte-lock pass; pyright strict
+clean across `src/recon_gen/common/spine/`. The AT.5 4-way agreement
+gate keeps working through the new pipeline.
+
+**Next:** Phase AZ retires byte-locked seeds entirely in favor of
+JSON semantic locks (`_semantic_locks/<instance>.<dialect>.json`)
+that gate on the violation SET, not SQL bytes.
+
+---
+
 ## v11.14.0 — Phase AX: promote the 4 L2-shape invariants to the spine
 
 Phase AX closes the first of three gaps the post-AV retrospective

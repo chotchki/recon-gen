@@ -42,6 +42,15 @@ class ViolationGenerator(Protocol):
     `DriftGenerator` whose intended Violation includes its anchor day
     and resolved account_id, computed at access time.
 
+    AY.2.a — `intended` is typed `Violation | None`. The `None` case
+    is the AP.2 non-violating shape: `FanInChainGenerator(expected_
+    kind='healthy')` plants parent_count = expected, so the
+    fan_in_disagreement matview's CASE produces no row, so the
+    generator claims no Violation. AY.2.b's CoverageObservation
+    layering may flip the healthy variant to return a non-None
+    `CoverageObservation` (signalling "I planted a chain firing"),
+    but the Protocol stays widened to accommodate either shape.
+
     `emit(conn)` writes the rows. Generators MAY also commit or refresh
     matviews internally, but most leave that to the caller so a single
     scenario can compose multiple generators against ONE connection and
@@ -49,6 +58,6 @@ class ViolationGenerator(Protocol):
     """
 
     @property
-    def intended(self) -> Violation: ...
+    def intended(self) -> Violation | None: ...
 
     def emit(self, conn: sqlite3.Connection) -> None: ...
