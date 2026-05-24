@@ -163,6 +163,12 @@ class TwoTemplateChainGenerator:
     child_leg_rails: tuple[str, ...]
     anchor_day: date
     prefix: str = "spec_example"
+    # AY.4.c.2 — account_id_override allows the plant adapter
+    # (AY.4.c.3) to thread OLD plant account_ids through, preventing
+    # PK collisions when N plants of the same shape compose. Defaults
+    # to None → preserves the synthetic `f"acct-ttc-{child_template
+    # _name}"` derivation byte-stable for every existing test caller.
+    account_id_override: str | None = None
 
     @property
     def parent_transfer_id(self) -> str:
@@ -174,6 +180,8 @@ class TwoTemplateChainGenerator:
 
     @property
     def account_id(self) -> str:
+        if self.account_id_override is not None:
+            return self.account_id_override
         return f"acct-ttc-{self.child_template_name}"
 
     @property

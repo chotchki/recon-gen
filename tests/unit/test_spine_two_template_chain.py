@@ -247,3 +247,42 @@ def test_tagged_emit_tags_every_row() -> None:
     finally:
         conn.close()
     assert tagged == expected_row_count
+
+
+# ---------------------------------------------------------------------------
+# AY.4.c.2 — account_id_override mechanism for the plant adapter.
+# ---------------------------------------------------------------------------
+
+
+def test_two_template_chain_account_id_override_used_when_set() -> None:
+    """Per AY.4.c.2 contract: the plant adapter threads OLD plant
+    account_ids through `account_id_override` to prevent PK collisions
+    when N plants of the same template compose."""
+    gen = TwoTemplateChainGenerator(
+        chain_parent_name="ParentRail",
+        parent_rail_name="ParentRail",
+        parent_template_name=None,
+        child_template_name="SomeChildTemplate",
+        child_leg_rails=("leg1",),
+        anchor_day=date(2030, 1, 1),
+        account_id_override="custom-account-x",
+    )
+    assert gen.account_id == "custom-account-x"
+    assert gen.claimed_accounts == frozenset({"custom-account-x"})
+
+
+def test_two_template_chain_default_derivation_preserved_when_unset() -> None:
+    """Default behavior unchanged when override is None — every
+    existing test caller stays byte-stable."""
+    base_args = dict(
+        chain_parent_name="ParentRail",
+        parent_rail_name="ParentRail",
+        parent_template_name=None,
+        child_template_name="SomeChildTemplate",
+        child_leg_rails=("leg1",),
+        anchor_day=date(2030, 1, 1),
+    )
+    gen_a = TwoTemplateChainGenerator(**base_args)
+    gen_b = TwoTemplateChainGenerator(**base_args)
+    assert gen_a.account_id == gen_b.account_id
+    assert "acct-ttc-SomeChildTemplate" == gen_a.account_id
