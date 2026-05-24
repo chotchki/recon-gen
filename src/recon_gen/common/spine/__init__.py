@@ -84,7 +84,19 @@ from recon_gen.common.spine.fan_in_disagreement import (
     FanInChainGenerator,
     FanInDisagreementInvariant,
 )
+from recon_gen.common.spine.inv_fanout import (
+    InvFanoutFactory,
+    InvFanoutGenerator,
+)
+from recon_gen.common.spine.rail_firing import (
+    RailFiringFactory,
+    RailFiringGenerator,
+)
 from recon_gen.common.spine.supersession import SupersessionGenerator
+from recon_gen.common.spine.transfer_template import (
+    TransferTemplateFactory,
+    TransferTemplateGenerator,
+)
 from recon_gen.common.spine.two_template_chain import (
     TwoTemplateChainFactory,
     TwoTemplateChainGenerator,
@@ -198,9 +210,17 @@ __all__ = [
     "SupersessionGenerator",
     # Seed-color coverage generators (AY.2.b) — emit CoverageObservation
     # evidence the L1 PostedRequirements panel + audit-PDF coverage
-    # sections read directly. Non-violating by construction.
+    # sections read directly. Non-violating by construction. The
+    # factories pick + resolve from the L2 instance; the generators
+    # are kind-discriminated internally (TwoLegRail vs SingleLegRail).
     "TwoTemplateChainFactory",
     "TwoTemplateChainGenerator",
+    "RailFiringFactory",
+    "RailFiringGenerator",
+    "TransferTemplateFactory",
+    "TransferTemplateGenerator",
+    "InvFanoutFactory",
+    "InvFanoutGenerator",
     # Money-trail family — recursive-graph L2; AT.3 promoted generator
     # + View on top of LedgerSimulation.transfers (parent-linked chain).
     "MoneyTrailInvariant",

@@ -78,7 +78,10 @@ from recon_gen.common.spine.fan_in_disagreement import (
     FanInChainGenerator,
     FanInDisagreementInvariant,
 )
+from recon_gen.common.spine.inv_fanout import InvFanoutGenerator
+from recon_gen.common.spine.rail_firing import RailFiringGenerator
 from recon_gen.common.spine.supersession import SupersessionGenerator
+from recon_gen.common.spine.transfer_template import TransferTemplateGenerator
 from recon_gen.common.spine.two_template_chain import TwoTemplateChainGenerator
 from recon_gen.common.spine.generator import ViolationGenerator
 from recon_gen.common.spine.invariant import Invariant
@@ -184,6 +187,16 @@ INVARIANT_GENERATOR_EDGES: Final[
     # as violations (they're non-violating by construction); empty edge
     # tuple is intentional.
     TwoTemplateChainGenerator: (),
+    RailFiringGenerator: (),
+    TransferTemplateGenerator: (),
+    # InvFanoutGenerator is a coverage generator (primary intent =
+    # populate Investigation matviews) but its emit deterministically
+    # trips MoneyTrailInvariant (every transfer is a depth-0 edge the
+    # inv_money_trail_edges recursive CTE surfaces). Non-empty edges
+    # on a coverage generator are tolerated by AU.5 — the bucket
+    # membership (ALL_COVERAGE_GENERATORS) tags primary purpose;
+    # registered edges document deterministic side-effects.
+    InvFanoutGenerator: (MoneyTrailInvariant,),
 }
 
 
@@ -300,6 +313,9 @@ ALL_COVERAGE_GENERATORS: Final[
     tuple[type[ViolationGenerator], ...]
 ] = (
     TwoTemplateChainGenerator,
+    RailFiringGenerator,
+    TransferTemplateGenerator,
+    InvFanoutGenerator,
 )
 """Seed-color coverage generators (AY.2.b) — emit `CoverageObservation`
 evidence the L1 dashboard's PostedRequirements panel + audit-PDF
