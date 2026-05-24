@@ -51,6 +51,7 @@ from recon_gen.common.spine.scenario_context import (
     scenario_metadata,
 )
 from recon_gen.common.spine.semantic_lock import apply_scenario, semantic_lock
+from recon_gen.common.spine.semantic_lock_json import lock_to_json
 from recon_gen.common.spine.training import TrainingScenario, validate_all
 from recon_gen.common.spine.drift import (
     DriftGenerator,
@@ -262,6 +263,8 @@ __all__ = [
     # Semantic-lock mechanism (AS.5) — replaces SQL-byte-identity locks
     "apply_scenario",
     "semantic_lock",
+    # AZ.1 — JSON serialization for `_semantic_locks/*.json` gate
+    "lock_to_json",
     # ScenarioContext composition safety + per-row scenario tagging (AV.5)
     "ScenarioContext",
     "ClaimedAccountsGenerator",
