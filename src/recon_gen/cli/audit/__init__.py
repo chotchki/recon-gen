@@ -49,6 +49,7 @@ from recon_gen.cli._helpers import (
     l2_instance_option,
     resolve_l2_for_demo,
 )
+from recon_gen.common.money import Cents
 from recon_gen.common.pdf.audit_chrome import (
     BookmarkedDocTemplate,
     bookmarked_h1,
@@ -65,6 +66,25 @@ from recon_gen.common.provenance import (
 )
 from recon_gen.common.sql.dialect import date_literal
 from recon_gen.common.theme import DEFAULT_PRESET, resolve_l2_theme
+
+
+def _cents_to_dollars(raw: object) -> Decimal:
+    """Read-boundary cents→dollars projection (AO.1 audit slice).
+
+    Money columns in the DB are BIGINT integer cents post-AO.1
+    foundation. The audit's renderers (pdf.py / markdown.py) format
+    Decimal dollars (``f"${v:,.2f}"``). Wrap every money-cell fetch
+    with this helper so the dataclass instances populated here carry
+    dollars — the renderers stay unchanged.
+
+    Tolerates ``None`` / ``0`` for matview NULLs (Decimal(0) for
+    the missing-data render path). Foreign types (float dust from a
+    pre-migration column) would smell loud — Cents.from_db's
+    ``int()`` coerce raises TypeError on non-numeric input.
+    """
+    if raw is None:
+        return Decimal(0)
+    return Cents.from_db(int(raw)).to_dollars()
 
 
 def _coerce_to_date(v: object) -> date:
@@ -343,8 +363,11 @@ def _query_executive_summary(
         return ExecSummary(
             transactions_count=int(leg_count or 0),
             transfers_count=int(transfer_count or 0),
-            dollar_volume_gross=Decimal(gross or 0),
-            dollar_volume_net=Decimal(net or 0),
+            # AO.1 audit slice: gross/net sum cents-typed amount_money;
+            # _cents_to_dollars projects to Decimal dollars for the
+            # renderers' ``${v:,.2f}`` format strings.
+            dollar_volume_gross=_cents_to_dollars(gross),
+            dollar_volume_net=_cents_to_dollars(net),
             exception_counts=exception_counts,
         )
     finally:
@@ -420,9 +443,12 @@ def _query_drift_violations(
                 business_day=(
                     _coerce_to_date(r[4])
                 ),
-                stored_balance=Decimal(r[5] or 0),
-                computed_balance=Decimal(r[6] or 0),
-                drift=Decimal(r[7] or 0),
+                # AO.1: stored_balance / computed_balance / drift arrive
+                # as BIGINT cents from the drift matview — project to
+                # dollars at the cursor boundary.
+                stored_balance=_cents_to_dollars(r[5]),
+                computed_balance=_cents_to_dollars(r[6]),
+                drift=_cents_to_dollars(r[7]),
             )
             for r in rows
         ]
@@ -495,7 +521,9 @@ def _query_overdraft_violations(
                 business_day=(
                     _coerce_to_date(r[4])
                 ),
-                stored_balance=Decimal(r[5] or 0),
+                # AO.1: stored_balance is BIGINT cents from the overdraft
+                # matview — project to dollars at the boundary.
+                stored_balance=_cents_to_dollars(r[5]),
             )
             for r in cur.fetchall()
         ]
@@ -637,8 +665,12 @@ def _query_limit_breach_violations(
                 ),
                 rail_name=str(r[5] or ""),
                 direction=str(r[6] or "Outbound"),
-                outbound_total=Decimal(r[7] or 0),
-                cap=Decimal(r[8] or 0),
+                # AO.1: outbound_total / cap are BIGINT cents from the
+                # limit_breach matview — project to dollars at the
+                # boundary. ``overshoot`` (a @property) inherits the
+                # dollar typing for free since both inputs are dollars.
+                outbound_total=_cents_to_dollars(r[7]),
+                cap=_cents_to_dollars(r[8]),
             )
             for r in cur.fetchall()
         ]
@@ -771,7 +803,9 @@ def _query_stuck_pending_violations(
                 transaction_id=str(r[4]),
                 rail_name=str(r[5] or ""),
                 posting=_coerce_to_datetime(r[6]),
-                amount_money=Decimal(r[7] or 0),
+                # AO.1: amount_money is BIGINT cents — project to dollars.
+                # age_seconds stays in seconds (not money) — bare Decimal.
+                amount_money=_cents_to_dollars(r[7]),
                 age_seconds=Decimal(r[8] or 0),
                 max_pending_age_seconds=int(r[9] or 0),
             )
@@ -911,7 +945,9 @@ def _query_stuck_unbundled_violations(
                 transaction_id=str(r[4]),
                 rail_name=str(r[5] or ""),
                 posting=_coerce_to_datetime(r[6]),
-                amount_money=Decimal(r[7] or 0),
+                # AO.1: same shape as stuck_pending — amount_money in
+                # cents → dollars; age_seconds stays seconds.
+                amount_money=_cents_to_dollars(r[7]),
                 age_seconds=Decimal(r[8] or 0),
                 max_unbundled_age_seconds=int(r[9] or 0),
             )
@@ -1085,7 +1121,9 @@ def _query_supersession(
                 account_id=str(r[2]),
                 account_name=str(r[3] or ""),
                 posting=_coerce_to_datetime(r[4]),
-                amount_money=Decimal(r[5] or 0),
+                # AO.1: amount_money from transactions table — BIGINT
+                # cents → dollars.
+                amount_money=_cents_to_dollars(r[5]),
             )
             for r in cur.fetchall()
         ]
@@ -1107,7 +1145,9 @@ def _query_supersession(
                     _coerce_to_date(r[2])
                 ),
                 supersedes_category=str(r[3]),
-                money=Decimal(r[4] or 0),
+                # AO.1: ``money`` column on daily_balances is BIGINT
+                # cents → dollars at the boundary.
+                money=_cents_to_dollars(r[4]),
             )
             for r in cur.fetchall()
         ]
@@ -1306,7 +1346,9 @@ def _query_daily_statement_walks(
                     transaction_id=str(r[0]),
                     transfer_id=str(r[1] or ""),
                     rail_name=str(r[2] or ""),
-                    amount_money=Decimal(r[3] or 0),
+                    # AO.1: per-transaction amount_money is BIGINT cents
+                    # → dollars at boundary.
+                    amount_money=_cents_to_dollars(r[3]),
                     amount_direction=str(r[4] or ""),
                     status=str(r[5] or ""),
                     posting=_coerce_to_datetime(r[6]),
@@ -1324,12 +1366,17 @@ def _query_daily_statement_walks(
                 business_day_end=(
                     _coerce_to_date(bd_end)
                 ),
-                opening_balance=Decimal(opening or 0),
-                total_debits=Decimal(debits or 0),
-                total_credits=Decimal(credits or 0),
-                closing_balance_stored=Decimal(closing_stored or 0),
-                closing_balance_recomputed=Decimal(closing_recomp or 0),
-                drift=Decimal(day_drift or 0),
+                # AO.1: every daily_statement_summary KPI column is
+                # BIGINT cents (opening / debits / credits / closing_*
+                # / drift) — boundary-project to dollars so the
+                # ${v:,.2f} formatters in pdf.py / markdown.py emit
+                # the right shape.
+                opening_balance=_cents_to_dollars(opening),
+                total_debits=_cents_to_dollars(debits),
+                total_credits=_cents_to_dollars(credits),
+                closing_balance_stored=_cents_to_dollars(closing_stored),
+                closing_balance_recomputed=_cents_to_dollars(closing_recomp),
+                drift=_cents_to_dollars(day_drift),
                 transactions=transactions,
             ))
         return walks
