@@ -93,12 +93,12 @@ TX_COLS = (
     "id", "account_id", "account_name", "account_role", "account_scope",
     "account_parent_role", "amount_money", "amount_direction", "status",
     "posting", "transfer_id", "transfer_parent_id", "rail_name",
-    "template_name", "origin", "metadata",
+    "template_name", "origin", "metadata", "supersedes",
 )
 """Columns every generator writes to ``_transactions``. Excludes
-``entry`` (supersession; defaults), ``transfer_completion`` (optional),
-``bundle_id`` (NULL by default — stuck_unbundled's plant explicitly
-relies on this), ``supersedes``.
+``entry`` (auto-increment by the dialect), ``transfer_completion``
+(optional), ``bundle_id`` (NULL by default — stuck_unbundled's plant
+explicitly relies on this).
 
 AV.5 added ``metadata``: ``insert_tx`` callers that thread
 ``ScenarioContext`` pass a JSON string carrying ``{"scenario_id": ...}``;
@@ -110,7 +110,13 @@ AX.1 added ``template_name``: AX-promoted L2-shape generators
 fan_in_disagreement / multi_xor_violation) all key the matview GROUP
 BY on ``template_name`` so the spine emit needs to set it.
 Pre-AX callers (drift / overdraft / anomaly / etc.) pass nothing →
-SQL NULL → byte-identical to pre-AX."""
+SQL NULL → byte-identical to pre-AX.
+
+AY.2.b added ``supersedes``: SupersessionGenerator emits the
+TechnicalCorrection row with ``supersedes='TechnicalCorrection'`` so
+the M.2b.12 Supersession Audit dataset's
+``COUNT(*) OVER (PARTITION BY id) > 1`` + ``supersedes IS NOT NULL``
+filter catches the pair. Other callers pass nothing → SQL NULL."""
 
 
 DB_COLS = (

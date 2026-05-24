@@ -73,10 +73,12 @@ from recon_gen.common.spine.expected_eod import (
     ExpectedEodBalanceGenerator,
     ExpectedEodBalanceInvariant,
 )
+from recon_gen.common.spine.failed_transaction import FailedTransactionGenerator
 from recon_gen.common.spine.fan_in_disagreement import (
     FanInChainGenerator,
     FanInDisagreementInvariant,
 )
+from recon_gen.common.spine.supersession import SupersessionGenerator
 from recon_gen.common.spine.generator import ViolationGenerator
 from recon_gen.common.spine.invariant import Invariant
 from recon_gen.common.spine.limit_breach import (
@@ -165,6 +167,15 @@ INVARIANT_GENERATOR_EDGES: Final[
     # (LedgerSimulation pattern) → single-edge to their own invariant.
     AnomalyGenerator: (AnomalyInvariant,),
     MoneyTrailGenerator: (MoneyTrailInvariant,),
+    # AY.2.b — audit-fixture generators. Emit rows the audit PDF
+    # reads directly; no matview, no invariant. Empty edge tuple is
+    # the AY.2.b widening — coverage / audit-fixture generators may
+    # register without an Invariant counterpart, since "no matching
+    # detector" is intentional for these. AU.5's per-generator gate
+    # treats empty edges as expected for AuditFixture / coverage
+    # generators (recognized via the `intended` subtype at gate time).
+    FailedTransactionGenerator: (),
+    SupersessionGenerator: (),
 }
 
 
@@ -264,10 +275,24 @@ ALL_L2_INVESTIGATION_GENERATORS: Final[
 `ALL_L2_INVESTIGATION_INVARIANTS`."""
 
 
+ALL_AUDIT_FIXTURE_GENERATORS: Final[
+    tuple[type[ViolationGenerator], ...]
+] = (
+    FailedTransactionGenerator,
+    SupersessionGenerator,
+)
+"""Audit-fixture generators (AY.2.b) — emit AuditFixture evidence
+the audit PDF reads directly; no Invariant counterpart on the
+spine. AU.5's per-generator gate widens to allow empty edge tuples
+for these (intended.severity == 'audit_fixture' or, post-AY.2.a,
+isinstance(intended, AuditFixture) is the discriminator)."""
+
+
 ALL_GENERATORS: Final[tuple[type[ViolationGenerator], ...]] = (
     *ALL_L1_GENERATORS,
     *ALL_L2_SHAPE_GENERATORS,
     *ALL_L2_INVESTIGATION_GENERATORS,
+    *ALL_AUDIT_FIXTURE_GENERATORS,
 )
 """Every `ViolationGenerator` class promoted to the spine, across all
 three categories. AU.5's registration gate asserts each is keyed in

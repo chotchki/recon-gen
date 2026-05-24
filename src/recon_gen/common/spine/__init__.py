@@ -79,10 +79,12 @@ from recon_gen.common.spine.chain_parent_disagreement import (
     ChainParentDisagreementGenerator,
     ChainParentDisagreementInvariant,
 )
+from recon_gen.common.spine.failed_transaction import FailedTransactionGenerator
 from recon_gen.common.spine.fan_in_disagreement import (
     FanInChainGenerator,
     FanInDisagreementInvariant,
 )
+from recon_gen.common.spine.supersession import SupersessionGenerator
 from recon_gen.common.spine.multi_xor_violation import (
     MultiXorMissedGenerator,
     MultiXorOverlapGenerator,
@@ -99,6 +101,7 @@ from recon_gen.common.spine.money_trail import (
     MoneyTrailView,
 )
 from recon_gen.common.spine.registry import (
+    ALL_AUDIT_FIXTURE_GENERATORS,
     ALL_GENERATORS,
     ALL_INVARIANTS,
     ALL_L1_GENERATORS,
@@ -183,13 +186,19 @@ __all__ = [
     "MultiXorViolationInvariant",
     "MultiXorMissedGenerator",
     "MultiXorOverlapGenerator",
+    # Audit-fixture generators (AY.2.b) — emit rows the audit PDF
+    # reads directly; no matview, no invariant. `intended` returns
+    # an AuditFixture (the AY.2.a evidence-currency subtype).
+    "FailedTransactionGenerator",
+    "SupersessionGenerator",
     # Money-trail family — recursive-graph L2; AT.3 promoted generator
     # + View on top of LedgerSimulation.transfers (parent-linked chain).
     "MoneyTrailInvariant",
     "MoneyTrailGenerator",
     "MoneyTrailView",
     # Many-to-many registry (AS.2; AU.1 + AU.3.a/b/c + AU.4 add edges;
-    # AX.5 splits into 3 category-scoped tuples + unified ALL_*)
+    # AX.5 splits into 3 category-scoped tuples + unified ALL_*;
+    # AY.2.b adds the audit-fixture category)
     "INVARIANT_GENERATOR_EDGES",
     "ALL_L1_INVARIANTS",
     "ALL_L1_GENERATORS",
@@ -197,6 +206,7 @@ __all__ = [
     "ALL_L2_SHAPE_GENERATORS",
     "ALL_L2_INVESTIGATION_INVARIANTS",
     "ALL_L2_INVESTIGATION_GENERATORS",
+    "ALL_AUDIT_FIXTURE_GENERATORS",
     "ALL_INVARIANTS",
     "ALL_GENERATORS",
     "invariants_for",
