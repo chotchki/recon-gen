@@ -373,6 +373,31 @@ class _BaseStudioEditorDriver:
             if ("transfer_template", str(template.name)) in created_reconcilers:
                 continue
             self.create_transfer_template(template)
+
+        # BB.4 — final ordering pass: for each reconciler that was
+        # built via wave-3a (create-new + subsequent attach-existing),
+        # the rail-list order reflects driver-walk order, not yaml-
+        # declared order. PUT each TT / aggregator with the
+        # reference's leg_rails / bundles_activity order so the
+        # struct equality holds.
+        for tt_name in {n for (k, n) in created_reconcilers if k == "transfer_template"}:
+            ref_tt = next(
+                t for t in reference.transfer_templates if str(t.name) == tt_name
+            )
+            self._edit(
+                "transfer_template", tt_name,
+                _reorder_leg_rails_form_data(ref_tt),
+            )
+        for agg_name in {n for (k, n) in created_reconcilers if k == "aggregating_rail"}:
+            ref_agg = next(
+                r for r in reference.rails
+                if r.aggregating and str(r.name) == agg_name
+            )
+            self._edit(
+                "rail", agg_name,
+                _reorder_bundles_activity_form_data(ref_agg),
+            )
+
         for chain in reference.chains:
             self.create_chain(chain)
         for schedule in reference.limit_schedules:
@@ -385,6 +410,30 @@ class _BaseStudioEditorDriver:
                 description=reference.description,
                 role_business_day_offsets=reference.role_business_day_offsets,
             )
+
+
+def _reorder_leg_rails_form_data(template: TransferTemplate) -> FormData:
+    """BB.4 — PUT body that resets a TT's leg_rails to a known order.
+
+    Used after wave-3a create-new + attach-existing builds the TT
+    rail-list in driver-walk order; this restores reference-yaml
+    order so struct equality holds.
+    """
+    rails = [str(r) for r in template.leg_rails]
+    return {
+        "leg_rails__present": ["1"],
+        "leg_rails": rails,
+    }
+
+
+def _reorder_bundles_activity_form_data(rail: Rail) -> FormData:
+    """BB.4 — PUT body that resets an aggregating Rail's
+    bundles_activity to a known order."""
+    bundles = [str(b) for b in rail.bundles_activity]
+    return {
+        "bundles_activity__present": ["1"],
+        "bundles_activity": bundles,
+    }
 
 
 def _max_unbundled_age_edit_form_data(rail: Rail) -> FormData:

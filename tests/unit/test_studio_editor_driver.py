@@ -99,15 +99,26 @@ def _normalize_descriptions(entities: tuple[object, ...]) -> list[object]:
     return out
 
 
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        pytest.param("spec_example", id="spec_example"),
+        pytest.param("sasquatch_pr", id="sasquatch_pr"),
+    ],
+)
 def test_http_driver_rebuilds_spec_example_structurally(
-    tmp_path: Path,
+    tmp_path: Path, fixture_name: str,
 ) -> None:
     """The editor, driven verb-by-verb in dependency order, recreates
-    every spec_example entity + both top-level fields with zero
-    structural drift — the dogfood's core claim, HTTP transport."""
-    reference = load_instance(_FIXTURES / "spec_example.yaml")
-    dest = tmp_path / "dogfood_spec_example.yaml"
-    rebuilt = _rebuild_via_http(_FIXTURES / "spec_example.yaml", dest)
+    every fixture's entity + both top-level fields with zero
+    structural drift — the dogfood's core claim, HTTP transport.
+
+    BB.4 — parametrized over spec_example (deterministic baseline)
+    and sasquatch_pr (richer real-deploy fixture: ~30 rails, fan_in
+    chains, XOR groups, aggregating rails, persona)."""
+    reference = load_instance(_FIXTURES / f"{fixture_name}.yaml")
+    dest = tmp_path / f"dogfood_{fixture_name}.yaml"
+    rebuilt = _rebuild_via_http(_FIXTURES / f"{fixture_name}.yaml", dest)
 
     assert _by_identifier(rebuilt.account_templates, "role") == _by_identifier(
         reference.account_templates, "role",
