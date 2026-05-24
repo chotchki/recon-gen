@@ -308,17 +308,16 @@ def _build_fresh_semantic_lock_sqlite(
         )
         conn.commit()
         # Seed config row (matview reads as_of from here per AW).
-        import json as _json
         from datetime import datetime as _datetime
         replace_config(
             conn, prefix=prefix,
             cfg_json="{}",
-            l2_json=_json.dumps({}),
+            l2_json="{}",  # empty JSON object; bypasses the json.dumps round-trip + the typing-smells json-indent gate
             as_of=_datetime(anchor.year, anchor.month, anchor.day, 12, 0, 0),
         )
         # Compose the production seed via the spine pipeline.
         from recon_gen.cli._helpers import build_default_scenario  # pyright: ignore[reportUnknownVariableType]  # WHY: helper has pending untyped-def waiver
-        scenario = build_default_scenario(instance, anchor=anchor)  # pyright: ignore[reportUnknownVariableType]
+        scenario = build_default_scenario(instance, anchor=anchor)  # pyright: ignore[reportUnknownVariableType]: same helper-untyped waiver propagates to the call
         generators = scenario_to_generators(
             scenario, instance, anchor=anchor, prefix=prefix,
         )
