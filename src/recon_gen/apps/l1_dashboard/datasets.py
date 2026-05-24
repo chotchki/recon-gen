@@ -37,6 +37,7 @@ from recon_gen.common.sheets.app_info import (
     build_matview_status_dataset,
 )
 from recon_gen.common.sql import Dialect, date_trunc_day, day_text
+from recon_gen.common.sql.money import cents_to_dollars_sql
 from recon_gen.common.tree import DateView
 
 
@@ -688,10 +689,24 @@ def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
     analysis-level ``TimeRangeFilter`` FG (zero behavior change); App2
     binds ``:date_from`` / ``:date_to`` from the URL into
     ``business_day_start``.
+
+    AO.1.impl — money columns (stored_balance / computed_balance /
+    drift) project as BIGINT cents from the matview; wrap each with
+    ``cents_to_dollars_sql`` at this read boundary so the dashboard
+    receives dollars. SELECT * is replaced with the explicit column
+    list because the wrap needs per-column control.
     """
     prefix = cfg.db_table_prefix
+    sb = cents_to_dollars_sql("stored_balance", dialect=cfg.dialect)
+    cb = cents_to_dollars_sql("computed_balance", dialect=cfg.dialect)
+    drift = cents_to_dollars_sql("drift", dialect=cfg.dialect)
     sql_template = (
-        f"SELECT * FROM {prefix}_drift\n"
+        f"SELECT account_id, account_name, account_role,"
+        f" account_parent_role, business_day_start, business_day_end,"
+        f" {sb} AS stored_balance,"
+        f" {cb} AS computed_balance,"
+        f" {drift} AS drift\n"
+        f"FROM {prefix}_drift\n"
         f"WHERE {_account_display_clause(P_L1_DRIFT_ACCOUNT)}\n"
         f"  AND {_data_value_clause('account_role', P_L1_DRIFT_ROLE)}\n"
         f"  {{date_filter}}"
@@ -720,10 +735,20 @@ def build_ledger_drift_dataset(
     dataset so the Drift sheet's ALL_DATASETS dropdowns narrow both.
 
     Y.2.f — App2-side date pushdown matches ``build_drift_dataset``.
+
+    AO.1.impl — cents → dollars wrap mirrors ``build_drift_dataset``.
     """
     prefix = cfg.db_table_prefix
+    sb = cents_to_dollars_sql("stored_balance", dialect=cfg.dialect)
+    cb = cents_to_dollars_sql("computed_balance", dialect=cfg.dialect)
+    drift = cents_to_dollars_sql("drift", dialect=cfg.dialect)
     sql_template = (
-        f"SELECT * FROM {prefix}_ledger_drift\n"
+        f"SELECT account_id, account_name, account_role,"
+        f" business_day_start, business_day_end,"
+        f" {sb} AS stored_balance,"
+        f" {cb} AS computed_balance,"
+        f" {drift} AS drift\n"
+        f"FROM {prefix}_ledger_drift\n"
         f"WHERE {_account_display_clause(P_L1_DRIFT_ACCOUNT)}\n"
         f"  AND {_data_value_clause('account_role', P_L1_DRIFT_ROLE)}\n"
         f"  {{date_filter}}"
@@ -761,10 +786,16 @@ def build_overdraft_dataset(
     sentinel-OR); Account-Role dropdown via ``account_role IN (...)``.
 
     Y.2.f — App2-side date pushdown via ``business_day_start``.
+
+    AO.1.impl — wrap ``stored_balance`` (BIGINT cents) → dollars.
     """
     prefix = cfg.db_table_prefix
+    sb = cents_to_dollars_sql("stored_balance", dialect=cfg.dialect)
     sql_template = (
-        f"SELECT * FROM {prefix}_overdraft\n"
+        f"SELECT account_id, account_name, account_role,"
+        f" account_parent_role, business_day_start, business_day_end,"
+        f" {sb} AS stored_balance\n"
+        f"FROM {prefix}_overdraft\n"
         f"WHERE {_account_display_clause(P_L1_OVERDRAFT_ACCOUNT)}\n"
         f"  AND {_data_value_clause('account_role', P_L1_OVERDRAFT_ROLE)}\n"
         f"  {{date_filter}}"
@@ -796,10 +827,21 @@ def build_limit_breach_dataset(
     sentinel-OR); Transfer Type dropdown via ``rail_name IN (...)``.
 
     Y.2.f — App2-side date pushdown via ``business_day``.
+
+    AO.1.impl — both ``outbound_total`` (SUM(ABS(amount_money)) in
+    matview) and ``cap`` (multiplied ×100 in the matview per foundation
+    so cents-vs-cents comparison holds) project as BIGINT cents; wrap
+    each → dollars at the dataset boundary.
     """
     prefix = cfg.db_table_prefix
+    outbound = cents_to_dollars_sql("outbound_total", dialect=cfg.dialect)
+    cap = cents_to_dollars_sql("cap", dialect=cfg.dialect)
     sql_template = (
-        f"SELECT * FROM {prefix}_limit_breach\n"
+        f"SELECT account_id, account_name, account_role,"
+        f" account_parent_role, business_day, rail_name, direction,"
+        f" {outbound} AS outbound_total,"
+        f" {cap} AS cap\n"
+        f"FROM {prefix}_limit_breach\n"
         f"WHERE {_account_display_clause(P_L1_LIMIT_BREACH_ACCOUNT)}\n"
         f"  AND {_data_value_clause('rail_name', P_L1_LIMIT_BREACH_TYPE)}\n"
         f"  {{date_filter}}"
@@ -842,10 +884,30 @@ def build_todays_exceptions_dataset(
     replaces.
 
     Y.2.f — App2-side date pushdown via ``business_day``.
+
+    AO.1.impl — ``magnitude`` is a UNION column whose source-branch
+    semantics vary: the money branches (drift / ledger_drift /
+    overdraft / expected_eod_balance_breach / limit_breach overflow /
+    stuck_pending.amount_money / stuck_unbundled.amount_money) come
+    out as BIGINT cents from the foundation matview rewrite and need
+    a dollar wrap here. The count branches (chain_parent_disagreement /
+    xor_group_violation / fan_in_disagreement / multi_xor_violation)
+    contribute small integer counts whose values divide cleanly by 100
+    only for the wrong reasons — a known pre-AO.1 cross-branch
+    semantic conflict (magnitude column was already `currency=True` in
+    the visual, so count rows already displayed as ``$3.00``-style
+    monetary cells before AO.1). Wrapping ``magnitude`` here keeps
+    money rows correct and leaves the pre-existing count-branch
+    cosmetic issue exactly where it was; the deeper fix is matview-
+    side and out of AO.1's dataset-slice scope.
     """
     prefix = cfg.db_table_prefix
+    magnitude = cents_to_dollars_sql("magnitude", dialect=cfg.dialect)
     sql_template = (
-        f"SELECT * FROM {prefix}_todays_exceptions\n"
+        f"SELECT check_type, account_id, account_name, account_role,"
+        f" account_parent_role, business_day, rail_name,"
+        f" {magnitude} AS magnitude\n"
+        f"FROM {prefix}_todays_exceptions\n"
         f"WHERE {_data_value_clause('check_type', P_L1_TODAYS_EXC_CHECK_TYPE)}\n"
         f"  AND {_account_display_clause(P_L1_TODAYS_EXC_ACCOUNT)}\n"
         f"  AND ({_data_value_clause('rail_name', P_L1_TODAYS_EXC_TYPE)}"
@@ -958,8 +1020,35 @@ def build_daily_statement_summary_dataset(
     # behavior: anchor-day with no data ⇒ blank statement; operator
     # adjusts the picker (paired with the account selection they already
     # have to do).
+    # AO.1.impl — money columns (opening_balance / total_debits /
+    # total_credits / net_flow / closing_balance_stored /
+    # closing_balance_recomputed / drift) project as BIGINT cents from
+    # the daily-statement-summary matview; wrap each into dollars at the
+    # dataset boundary so dashboard KPIs receive dollars.
+    opening = cents_to_dollars_sql("opening_balance", dialect=cfg.dialect)
+    debits = cents_to_dollars_sql("total_debits", dialect=cfg.dialect)
+    credits = cents_to_dollars_sql("total_credits", dialect=cfg.dialect)
+    net = cents_to_dollars_sql("net_flow", dialect=cfg.dialect)
+    closing_st = cents_to_dollars_sql(
+        "closing_balance_stored", dialect=cfg.dialect,
+    )
+    closing_rc = cents_to_dollars_sql(
+        "closing_balance_recomputed", dialect=cfg.dialect,
+    )
+    drift_d = cents_to_dollars_sql("drift", dialect=cfg.dialect)
     sql = (
-        f"SELECT * FROM {prefix}_daily_statement_summary\n"
+        f"SELECT account_id, account_name, account_role,"
+        f" account_parent_role, account_scope,"
+        f" business_day_start, business_day_end,"
+        f" {opening} AS opening_balance,"
+        f" {debits} AS total_debits,"
+        f" {credits} AS total_credits,"
+        f" {net} AS net_flow,"
+        f" leg_count,"
+        f" {closing_st} AS closing_balance_stored,"
+        f" {closing_rc} AS closing_balance_recomputed,"
+        f" {drift_d} AS drift\n"
+        f"FROM {prefix}_daily_statement_summary\n"
         f"WHERE {acct} = <<${P_L1_DS_ACCOUNT_DSP}>>\n"
         f"  AND {day} = {bdate}"
     )
@@ -1007,13 +1096,15 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
     # AO.2 / AR.2 — same balance-date narrow as the summary; strict day
     # equality (pre-AR.2 latest-on-empty fallback removed per the
     # view-primitive strict-collapse decision).
+    # AO.1.impl — tx.amount_money is BIGINT cents; project as dollars.
+    amount = cents_to_dollars_sql("tx.amount_money", dialect=dialect)
     return (
         f"SELECT tx.id AS transaction_id,"
         f"       tx.account_id, tx.account_name,"
         f"       {business_day} AS business_day,"
         f"       tx.posting,"
         f"       tx.transfer_id, tx.rail_name,"
-        f"       tx.amount_money, tx.amount_direction,"
+        f"       {amount} AS amount_money, tx.amount_direction,"
         f"       tx.status, tx.origin"
         f" FROM {prefix}_current_transactions tx"
         f" WHERE (tx.account_name || ' (' || tx.account_id || ')') = <<${P_L1_DS_ACCOUNT_DSP}>>"
@@ -1071,11 +1162,14 @@ def build_transactions_dataset(
     Y.2.f — App2-side date pushdown via ``posting``.
     """
     prefix = cfg.db_table_prefix
+    # AO.1.impl — amount_money is BIGINT cents on the matview; wrap to
+    # dollars at projection.
+    amount = cents_to_dollars_sql("amount_money", dialect=cfg.dialect)
     sql_template = (
         f"SELECT id AS transaction_id, account_id, account_name,"
         f" account_role, account_parent_role,"
         f" transfer_id, transfer_parent_id, rail_name,"
-        f" amount_money, amount_direction, status, origin,"
+        f" {amount} AS amount_money, amount_direction, status, origin,"
         f" posting, transfer_completion"
         f" FROM {prefix}_current_transactions\n"
         f"WHERE {_account_display_clause(P_L1_TX_ACCOUNT)}\n"
@@ -1119,10 +1213,15 @@ def build_drift_timeline_dataset(
     is part of the WHERE.
     """
     prefix = cfg.db_table_prefix
+    # AO.1.impl — SUM(ABS(drift)) is BIGINT cents from the matview;
+    # wrap the aggregate to dollars at projection.
+    abs_drift = cents_to_dollars_sql(
+        "SUM(ABS(drift))", dialect=cfg.dialect,
+    )
     sql_template = (
         f"SELECT business_day_end,"
         f"       account_role,"
-        f"       SUM(ABS(drift)) AS abs_drift"
+        f"       {abs_drift} AS abs_drift"
         f" FROM {prefix}_drift"
         f" WHERE {_data_value_clause('account_role', P_L1_DRIFT_TL_ROLE)}"
         f" {{date_filter}}"
@@ -1153,10 +1252,15 @@ def build_ledger_drift_timeline_dataset(
     Y.2.f — App2-side date pushdown matches ``build_drift_timeline_dataset``.
     """
     prefix = cfg.db_table_prefix
+    # AO.1.impl — same as build_drift_timeline_dataset: aggregate of
+    # BIGINT-cents drift wrapped to dollars at projection.
+    abs_drift = cents_to_dollars_sql(
+        "SUM(ABS(drift))", dialect=cfg.dialect,
+    )
     sql_template = (
         f"SELECT business_day_end,"
         f"       account_role,"
-        f"       SUM(ABS(drift)) AS abs_drift"
+        f"       {abs_drift} AS abs_drift"
         f" FROM {prefix}_ledger_drift"
         f" WHERE {_data_value_clause('account_role', P_L1_DRIFT_TL_ROLE)}"
         f" {{date_filter}}"
@@ -1196,8 +1300,19 @@ def build_stuck_pending_dataset(
     (account_id data-value + rail_name / rail_name enums).
     """
     prefix = cfg.db_table_prefix
+    # AO.1.impl — t.amount_money projects from the matview as BIGINT
+    # cents (the stuck-pending matview SELECTs ct.amount_money straight
+    # through); wrap to dollars at the dataset boundary. SELECT t.* is
+    # expanded to explicit columns so the per-money-column wrap can be
+    # applied without touching non-money columns.
+    amount = cents_to_dollars_sql("t.amount_money", dialect=cfg.dialect)
     sql = (
-        f"SELECT t.*,\n"
+        f"SELECT t.transaction_id, t.account_id, t.account_name,"
+        f" t.account_role, t.account_parent_role,"
+        f" t.transfer_id, t.rail_name,"
+        f" {amount} AS amount_money,"
+        f" t.amount_direction, t.posting,"
+        f" t.max_pending_age_seconds, t.age_seconds,\n"
         f"  {_aging_bucket_case_sql('age_seconds', buckets=_PENDING_AGING_BUCKETS, overflow_label=_PENDING_AGING_OVERFLOW)}"
         f" AS stuck_pending_aging_bucket\n"
         f"FROM {prefix}_stuck_pending t\n"
@@ -1229,8 +1344,16 @@ def build_stuck_unbundled_dataset(
     dataset.
     """
     prefix = cfg.db_table_prefix
+    # AO.1.impl — same shape as build_stuck_pending_dataset; expand
+    # SELECT t.* to wrap amount_money cents → dollars.
+    amount = cents_to_dollars_sql("t.amount_money", dialect=cfg.dialect)
     sql = (
-        f"SELECT t.*,\n"
+        f"SELECT t.transaction_id, t.account_id, t.account_name,"
+        f" t.account_role, t.account_parent_role,"
+        f" t.transfer_id, t.rail_name,"
+        f" {amount} AS amount_money,"
+        f" t.amount_direction, t.posting,"
+        f" t.max_unbundled_age_seconds, t.age_seconds,\n"
         f"  {_aging_bucket_case_sql('age_seconds', buckets=_UNBUNDLED_AGING_BUCKETS, overflow_label=_UNBUNDLED_AGING_OVERFLOW)}"
         f" AS stuck_unbundled_aging_bucket\n"
         f"FROM {prefix}_stuck_unbundled t\n"
@@ -1284,13 +1407,17 @@ def build_supersession_transactions_dataset(
     cause class you're auditing).
     """
     prefix = cfg.db_table_prefix
+    # AO.1.impl — amount_money lives in the BASE table as BIGINT cents;
+    # wrap the outer projection so the dataset surfaces dollars.
+    amount = cents_to_dollars_sql("amount_money", dialect=cfg.dialect)
     sql = (
         f"SELECT entry, transaction_id, supersedes,"
         f" CASE WHEN entry > 1 AND supersedes IS NULL THEN 1 ELSE 0 END"
         f"   AS l1_supersession_no_reason,"
         f" account_id, account_name,"
         f" transfer_id, rail_name,"
-        f" amount_money, amount_direction, status, posting, bundle_id"
+        f" {amount} AS amount_money,"
+        f" amount_direction, status, posting, bundle_id"
         f" FROM ("
         f"   SELECT entry, id AS transaction_id, supersedes,"
         f"   account_id, account_name,"
@@ -1326,10 +1453,14 @@ def build_supersession_daily_balances_dataset(
     + outer `WHERE > 1` filter. Sort handled by the dashboard.
     """
     prefix = cfg.db_table_prefix
+    # AO.1.impl — daily_balances.money is BIGINT cents under the
+    # foundation; wrap to dollars at the outer projection.
+    money = cents_to_dollars_sql("money", dialect=cfg.dialect)
     sql = (
         f"SELECT entry,"
         f" account_id, account_name, account_role, supersedes,"
-        f" business_day_start, business_day_end, money"
+        f" business_day_start, business_day_end,"
+        f" {money} AS money"
         f" FROM ("
         f"   SELECT entry,"
         f"   account_id, account_name, account_role, supersedes,"
