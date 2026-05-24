@@ -153,6 +153,65 @@ def test_matview_status_sql_omits_postgres_only_casts():
         )
 
 
+@pytest.mark.parametrize("builder", SHIPPED_APP_BUILDERS)
+def test_app_info_deploy_stamp_reads_dialect_and_prefix_from_cfg(builder):
+    """AO.C1 lock — the App Info deploy-stamp TextBox must render
+    ``dialect: <cfg.dialect>`` + ``prefix: <cfg.deployment_name>``,
+    NOT the literals "sqlite" / "dev" / any other hardcoded value.
+
+    Background (cold-read feedback #10): a judge looking at the dev
+    capture saw ``dialect: sqlite`` / ``prefix: dev`` and flagged it —
+    fine for the dev shot, but the renderer MUST pull from cfg so a
+    production deploy stamps the real engine + the real deployment
+    name. Lock test runs two cfg shapes through each shipped app and
+    asserts the stamp content reflects the cfg.
+    """
+    from recon_gen.common.sql.dialect import Dialect
+
+    for cfg in [
+        make_test_config(
+            aws_region="us-east-2",
+            dialect=Dialect.POSTGRES,
+            deployment_name="recon-prod",
+        ),
+        make_test_config(
+            aws_region="us-east-2",
+            dialect=Dialect.ORACLE,
+            deployment_name="recon-staging",
+        ),
+    ]:
+        app = builder(cfg)
+        analysis = app.emit_analysis()
+        # Find the App Info sheet ("i") and pull its deploy-stamp text box.
+        info_sheet = next(
+            s for s in analysis.Definition.Sheets
+            if s.Name == APP_INFO_SHEET_NAME
+        )
+        # The deploy stamp TextBox carries inline content with the
+        # dialect + prefix lines.
+        deploy_stamp_text = None
+        for tb in info_sheet.TextBoxes or []:
+            if tb.SheetTextBoxId == "app-info-deploy-stamp":
+                deploy_stamp_text = tb.Content
+                break
+        assert deploy_stamp_text is not None, (
+            f"{builder.__name__}: App Info sheet must carry the "
+            f"`app-info-deploy-stamp` TextBox"
+        )
+        # Lock the cfg-driven shape: stamp content includes the literal
+        # cfg.dialect.value and cfg.deployment_name strings.
+        assert f"dialect: {cfg.dialect.value}" in deploy_stamp_text, (
+            f"{builder.__name__}: deploy stamp must read "
+            f"`dialect: {cfg.dialect.value}` (got hardcode or wrong "
+            f"dialect)"
+        )
+        assert f"prefix: {cfg.deployment_name}" in deploy_stamp_text, (
+            f"{builder.__name__}: deploy stamp must read "
+            f"`prefix: {cfg.deployment_name}` (got hardcode or wrong "
+            f"prefix)"
+        )
+
+
 def test_no_two_apps_share_an_app_info_data_set_id():
     """Each shipped app's App Info datasets carry a per-app segment in
     their AWS DataSetId so deploying app A doesn't delete-then-create
