@@ -1986,6 +1986,82 @@ def _render_rail_subtype_picker(
 """
 
 
+def _render_reconciler_section(
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — read .transfer_templates / .rails for the picker options
+    overrides: Mapping[str, str | tuple[str, ...]],
+) -> str:
+    """BB.2 — render the Reconciler picker for non-aggregating single-leg
+    rails. Pairs with BB.1's create-POST handler reading
+    ``reconciler_kind`` + ``reconciler_name`` from the form.
+
+    Two selects + grouped name options:
+    - **Kind** — ``transfer_template`` (closes TT's expected_net) or
+      ``aggregating_rail`` (gets swept into the aggregator's bundle).
+    - **Name** — dropdown grouped by kind so the operator picks from
+      the matching optgroup. Mismatched picks (e.g., TT name with
+      aggregating_rail kind) reach the server and surface as a 400 +
+      inline error.
+
+    Variable-direction sub-case is documented in the helper text; the
+    server enforces (only TTs can reconcile Variable per validator C3).
+    """
+    rk_override = str(overrides.get("reconciler_kind") or "")
+    rn_override = str(overrides.get("reconciler_name") or "")
+
+    tt_names = sorted(str(t.name) for t in instance.transfer_templates)
+    agg_names = sorted(
+        str(r.name) for r in instance.rails if r.aggregating
+    )
+
+    kind_options = [
+        ("transfer_template", "Attach to TransferTemplate (closes its expected_net)"),
+        ("aggregating_rail", "Attach to aggregating Rail (sweeps into its bundle)"),
+    ]
+    kind_html = "".join(
+        f'<option value="{escape(v)}"'
+        f'{" selected" if rk_override == v else ""}>{escape(lbl)}</option>'
+        for v, lbl in kind_options
+    )
+
+    def _opt(n: str) -> str:
+        sel = " selected" if rn_override == n else ""
+        return f'<option value="{escape(n)}"{sel}>{escape(n)}</option>'
+
+    tt_opts = "".join(_opt(n) for n in tt_names) or '<option disabled>(no TransferTemplates declared yet)</option>'
+    agg_opts = "".join(_opt(n) for n in agg_names) or '<option disabled>(no aggregating Rails declared yet)</option>'
+
+    return (
+        '<fieldset class="reconciler-section">'
+        '<legend>Reconciler<span class="required"> *</span></legend>'
+        '<p class="reconciler-helper">'
+        "Non-aggregating single-leg rails don't reconcile their own drift. "
+        "Per SPEC §S3 + C3, this rail must attach to either a "
+        "TransferTemplate (closes its expected_net) OR an aggregating Rail "
+        "(gets swept into its bundle). Save commits the rail + the "
+        "attach atomically (BB.1) — either both land or neither. "
+        "Variable-direction single-legs must attach to a TransferTemplate "
+        "only (per validator C3)."
+        "</p>"
+        '<div class="field-row">'
+        '<label for="field-reconciler_kind">Reconciler kind<span class="required"> *</span></label>'
+        '<select id="field-reconciler_kind" name="reconciler_kind">'
+        f'<option value=""{" selected" if not rk_override else ""}>— pick —</option>'
+        f'{kind_html}'
+        '</select>'
+        '</div>'
+        '<div class="field-row">'
+        '<label for="field-reconciler_name">Reconciler name<span class="required"> *</span></label>'
+        '<select id="field-reconciler_name" name="reconciler_name">'
+        f'<option value=""{" selected" if not rn_override else ""}>— pick —</option>'
+        f'<optgroup label="TransferTemplates">{tt_opts}</optgroup>'
+        f'<optgroup label="Aggregating Rails">{agg_opts}</optgroup>'
+        '</select>'
+        '<small class="field-helper">Pick from the optgroup matching the kind above; mismatches return 400.</small>'
+        '</div>'
+        '</fieldset>'
+    )
+
+
 def _render_create_page(
     kind: EntityKind,
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed for select_from option resolution
@@ -2021,6 +2097,17 @@ def _render_create_page(
     fields_html = "".join(
         _render_field(s, overrides.get(s.name, ""), instance)
         for s in specs
+    )
+    # BB.2 — Reconciler picker fieldset. Only renders for single-leg
+    # rails (any subtype). The picker is *required for non-aggregating*
+    # by the BB.1 handler (it validates server-side); aggregating
+    # single-leg rails are self-reconciling per SPEC's exemption and
+    # the picker is ignored if filled. Two-leg rails skip this
+    # entirely — they reconcile internally via expected_net.
+    reconciler_html = (
+        _render_reconciler_section(instance, overrides)
+        if kind == "rail" and subtype == "single_leg"
+        else ""
     )
     # Hidden subtype input — POST handler picks it up via _coerce_form's
     # passthrough on form keys not in the FieldSpec list (the create
@@ -2062,6 +2149,7 @@ def _render_create_page(
         {global_err_html}
         {subtype_html}
         {fields_html}
+        {reconciler_html}
         <div class="form-actions">
           <button type="submit">Create</button>
           <a class="cancel-link" href="/">Cancel</a>
@@ -2717,6 +2805,17 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
             and rail_subtype == "single_leg"
             and not bool(new_fields.get("aggregating") or False)
         )
+        # BB.2 — capture the reconciler picker values into
+        # ``coerced_overrides`` regardless of whether needs_reconciler
+        # fires, so a re-render on validation failure preserves the
+        # operator's typed picker state. The reconciler fields aren't
+        # FieldSpecs so they don't come through _coerce_form.
+        raw_rk_form = form.get("reconciler_kind")
+        raw_rn_form = form.get("reconciler_name")
+        if raw_rk_form is not None:
+            coerced_overrides["reconciler_kind"] = str(raw_rk_form)
+        if raw_rn_form is not None:
+            coerced_overrides["reconciler_name"] = str(raw_rn_form)
         reconciler_kind: str | None = None
         reconciler_name: str | None = None
         if needs_reconciler:

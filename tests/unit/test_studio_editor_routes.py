@@ -1705,6 +1705,81 @@ def test_bb1_create_with_unknown_reconciler_returns_400_no_partial_persist(
     )
 
 
+# ---------------------------------------------------------------------------
+# BB.2 — Reconciler picker UI on the Create Rail form
+# ---------------------------------------------------------------------------
+
+
+def test_bb2_create_form_single_leg_renders_reconciler_picker(
+    writable_l2_yaml: Path,
+) -> None:
+    """BB.2 — the Create Rail form (subtype=single_leg) renders the
+    Reconciler fieldset with both the kind select and the name
+    dropdown grouped by reconciler kind."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/rail/new?subtype=single_leg")
+    assert resp.status_code == 200, resp.text
+    body = resp.text
+    assert 'class="reconciler-section"' in body
+    assert "<legend>Reconciler" in body
+    assert 'name="reconciler_kind"' in body
+    assert 'name="reconciler_name"' in body
+    assert 'value="transfer_template"' in body
+    assert 'value="aggregating_rail"' in body
+    assert '<optgroup label="TransferTemplates">' in body
+    assert '<optgroup label="Aggregating Rails">' in body
+    # spec_example's PoolBalancing aggregator + MerchantSettlementCycle TT
+    # must appear as selectable options.
+    assert "PoolBalancing" in body
+    assert "MerchantSettlementCycle" in body
+
+
+def test_bb2_create_form_two_leg_skips_reconciler_picker(
+    writable_l2_yaml: Path,
+) -> None:
+    """BB.2 — two-leg rails reconcile via expected_net; the Reconciler
+    picker is irrelevant + must not render (operator-confusion guard)."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/rail/new?subtype=two_leg")
+    assert resp.status_code == 200, resp.text
+    body = resp.text
+    assert "reconciler-section" not in body
+    assert 'name="reconciler_kind"' not in body
+
+
+def test_bb2_validation_failure_preserves_reconciler_picker_state(
+    writable_l2_yaml: Path,
+) -> None:
+    """BB.2 — when the create POST fails coercion (a malformed ISO
+    duration in max_pending_age triggers a 400), the re-rendered
+    form preserves the operator's picked reconciler_kind +
+    reconciler_name so they don't lose their work."""
+    app = _build_app(writable_l2_yaml)
+    # Malformed max_pending_age forces a coerce-time 400.
+    data = {
+        "subtype": "single_leg",
+        "name": "BB2PreserveReconciler",
+        "leg_role": "CustomerLedger",
+        "leg_role__present": "1",
+        "leg_direction": "Credit",
+        "aggregating": "false",
+        "origin": "InternalInitiated",
+        "max_pending_age": "garbage-not-iso",
+        "reconciler_kind": "aggregating_rail",
+        "reconciler_name": "PoolBalancing",
+    }
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/rail/", data=data, follow_redirects=False,
+        )
+    assert resp.status_code == 400, resp.text
+    body = resp.text
+    assert 'value="aggregating_rail" selected' in body
+    assert 'value="PoolBalancing" selected' in body
+
+
 def test_bb1_aggregating_single_leg_rail_unaffected_by_reconciler_gate(
     writable_l2_yaml: Path,
 ) -> None:
