@@ -48,17 +48,11 @@ from recon_gen.cli._helpers import (
 # emitter's call site so its callers don't change.
 _CANONICAL_LOCK_ANCHOR = LOCKED_ANCHOR
 
-# X.1.k — locked SQL files live under tests/data/ (one per
-# (instance, dialect)). Discovered + asserted by
-# ``tests/data/test_locked_seeds.py``.
-_LOCKED_SEEDS_DIR = (
-    Path(__file__).resolve().parents[3]
-    / "tests" / "data" / "_locked_seeds"
-)
-
-# AZ.1 — semantic-lock JSON files (the byte-lock replacement). One
-# per (instance, dialect); gates on the violation SET via
-# ``tests/data/test_semantic_locks.py`` (AZ.2 lands).
+# AZ.5 — byte-locked seed dir + `data lock` CLI retired in favor
+# of semantic locks (per-violation-set JSON). _LOCKED_SEEDS_DIR
+# constant + data_lock command removed in the same commit; the
+# `_CANONICAL_LOCK_ANCHOR` name is preserved because
+# `data_semantic_lock` still needs it as the canonical anchor.
 _SEMANTIC_LOCKS_DIR = (
     Path(__file__).resolve().parents[3]
     / "tests" / "data" / "_semantic_locks"
@@ -178,89 +172,6 @@ def data_clean(
         connect_and_apply(cfg, sql, label="data TRUNCATE")
     else:
         emit_to_target(sql, output, label="data TRUNCATE")
-
-
-@data.command("lock")
-@l2_instance_option()
-@config_option(required_for_dialect_only=True)
-@click.option(
-    "--check", "check_only", is_flag=True,
-    help=(
-        "Exit non-zero if the locked SQL file doesn't match a fresh "
-        "emit. Use in CI to guard against unreviewed seed drift."
-    ),
-)
-def data_lock(
-    l2_instance_path: str | None, config: str, check_only: bool,
-) -> None:
-    """Write or verify the canonical-anchor seed SQL.
-
-    The locked file lives at
-    ``tests/data/_locked_seeds/<instance>.<dialect>.sql`` and IS the
-    record of what `data apply` would emit at canonical anchor
-    (2030-01-01) for this (L2 instance, dialect) pair. The CLI keys
-    off ``-c config.yaml`` (dialect derived from ``demo_database_url``);
-    ``--l2`` picks the L2 to lock.
-
-    Default: refresh the locked file (overwrites the on-disk content
-    with a fresh emit). Pass ``--check`` to verify-only — exit non-zero
-    on drift, with a unified diff to stderr showing the first ~50 lines
-    that changed.
-
-    Run once per (postgres config, oracle config) to cover both
-    dialects. Run after any seed-shape-changing commit (new plant kind,
-    plant emitter change, baseline generator tweak) to refresh both
-    locks before pushing.
-    """
-    cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
-    fresh = build_full_seed_sql(cfg, instance, anchor=_CANONICAL_LOCK_ANCHOR)
-
-    locked_path = (
-        _LOCKED_SEEDS_DIR / f"{cfg.db_table_prefix}.{cfg.dialect.value}.sql"
-    )
-
-    if check_only:
-        if not locked_path.exists():
-            click.echo(
-                f"  [error] --check requested but lock file is missing: "
-                f"{locked_path}\n  Run `data lock` (without --check) to "
-                f"create it.",
-                err=True,
-            )
-            raise SystemExit(1)
-        on_disk = locked_path.read_text()
-        if fresh == on_disk:
-            click.echo(
-                f"  [ok] {locked_path.name} matches fresh emit", err=True,
-            )
-            return
-        diff = list(difflib.unified_diff(
-            on_disk.splitlines(keepends=True),
-            fresh.splitlines(keepends=True),
-            fromfile=f"locked/{locked_path.name}",
-            tofile=f"fresh/{locked_path.name}",
-            n=2,
-        ))
-        click.echo(
-            f"  [error] seed drifted from {locked_path.name}:\n"
-            f"  Showing first 50 diff lines (run without --check to "
-            f"refresh):\n",
-            err=True,
-        )
-        for line in diff[:50]:
-            click.echo(line.rstrip("\n"), err=True)
-        if len(diff) > 50:
-            click.echo(
-                f"  ... ({len(diff) - 50} more diff lines truncated)",
-                err=True,
-            )
-        raise SystemExit(1)
-
-    locked_path.parent.mkdir(parents=True, exist_ok=True)
-    locked_path.write_text(fresh)
-    click.echo(
-        f"  [lock] wrote {locked_path} ({len(fresh):,} bytes)", err=True,
-    )
 
 
 def _build_fresh_semantic_lock_sqlite(

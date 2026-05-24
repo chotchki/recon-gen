@@ -57,13 +57,17 @@ def test_data_help_lists_subcommands():
     assert "apply" in result.output
     assert "clean" in result.output
     assert "refresh" in result.output
-    assert "lock" in result.output
+    # AZ.5 — byte-lock `data lock` retired in favor of
+    # `data semantic-lock` (per-violation-set JSON gate replaces
+    # per-line SQL byte gate; see AZ.0 design).
+    assert "semantic-lock" in result.output
     assert "etl-example" in result.output
     assert "test" in result.output
 
 
 @pytest.mark.parametrize(
-    "verb", ["apply", "clean", "refresh", "lock", "etl-example", "test"],
+    "verb",
+    ["apply", "clean", "refresh", "semantic-lock", "etl-example", "test"],
 )
 def test_data_verb_help_exits_zero(verb: str):
     runner = CliRunner()
