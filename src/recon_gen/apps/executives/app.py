@@ -455,7 +455,11 @@ def _populate_transaction_volume(
         title="Daily Transaction Count by Type",
         subtitle=(
             "Each day's transfer count, stacked by rail_name so "
-            "rail composition + trend show together"
+            "rail composition + trend show together. "
+            "**Note (AO.S.2):** apparent multi-week empty stretches + "
+            "weekend gaps reflect the bundled demo's short seed window "
+            "(90 days) + non-business-day cadence — not data outages. "
+            "Real deploys with full-history ETL won't show them."
         ),
         category=[ds_txn["posted_date"].date(field_id="exec-txn-daily-date")],
         values=[ds_txn["transfer_count"].sum(
@@ -544,7 +548,10 @@ def _populate_money_moved(
         visual_id=VisualId("exec-money-bar-daily-stacked"),
         title="Daily Gross Dollars Moved by Type",
         subtitle=(
-            "Each day's gross dollar volume, stacked by rail_name"
+            "Each day's gross dollar volume, stacked by rail_name. "
+            "**Note (AO.S.2):** apparent multi-week empty stretches + "
+            "weekend gaps reflect the bundled demo's short seed window "
+            "(90 days) + non-business-day cadence — not data outages."
         ),
         category=[
             ds_txn["posted_date"].date(field_id="exec-money-daily-date"),

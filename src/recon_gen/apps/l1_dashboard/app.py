@@ -614,7 +614,13 @@ def _populate_drift_sheet(
         title="Parent Accounts in Drift",
         subtitle=(
             "Count of parent-account day-rows where stored balance "
-            "disagrees with the sum of child accounts' stored balances."
+            "disagrees with the sum of child accounts' stored balances. "
+            "Demos with the bundled `sasquatch_pr` fixture show a "
+            "persistent **~$2.8M** ledger drift on `gl-2010-dda-control` — "
+            "that's the **Drift Parent (DDAControl) plant**, the L1 SPEC "
+            "example showing cross-boundary drift propagation. Real "
+            "deploys should see 0 here unless there's a real ledger "
+            "rollup gap."
         ),
         values=[ds_ledger_drift["account_id"].count()],
     )
