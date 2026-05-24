@@ -1201,8 +1201,9 @@ def test_unbundled_aging_sheet_present_after_m2b11() -> None:
 
 
 def test_unbundled_aging_sheet_has_kpi_bar_table() -> None:
-    """Same KPI + horizontal BarChart + detail-table structure as
-    Pending Aging, mirror but backed by stuck_unbundled."""
+    """KPI row (count + $ exposure, AO.9) + horizontal BarChart +
+    detail table. Same structural shape as Pending Aging, backed by
+    stuck_unbundled."""
     from recon_gen.common.tree import BarChart, KPI, Table
 
     app = build_l1_dashboard_app(_CFG)
@@ -1210,11 +1211,12 @@ def test_unbundled_aging_sheet_has_kpi_bar_table() -> None:
     titles = [v.title for v in ua.visuals]
     assert titles == [
         "Stuck Unbundled",
+        "Stuck Unbundled — $ Exposure",
         "Stuck Unbundled by Age Bucket",
         "Stuck Unbundled Detail",
     ]
     kinds = [type(v).__name__ for v in ua.visuals]
-    assert kinds == ["KPI", "BarChart", "Table"]
+    assert kinds == ["KPI", "KPI", "BarChart", "Table"]
     bar = next(v for v in ua.visuals if isinstance(v, BarChart))
     assert bar.orientation == "HORIZONTAL"
 
@@ -1292,10 +1294,9 @@ def test_supersession_audit_sheet_present_after_m2b12() -> None:
 
 
 def test_supersession_audit_has_kpis_and_two_tables() -> None:
-    """Supersession Audit structure (Q.1.c): 2 KPIs side-by-side
-    (count of distinct logical keys + count of higher-Entry rows
-    with no `supersedes` reason) + 1 transactions audit table +
-    1 daily-balances audit table."""
+    """Supersession Audit structure: 3 KPIs side-by-side (AO.9 added
+    $ exposure between logical-keys count and no-reason count) + 1
+    transactions audit table + 1 daily-balances audit table."""
     from recon_gen.common.tree import KPI, Table
 
     app = build_l1_dashboard_app(_CFG)
@@ -1303,12 +1304,13 @@ def test_supersession_audit_has_kpis_and_two_tables() -> None:
     titles = [v.title for v in sa.visuals]
     assert titles == [
         "Logical Keys with Supersession",
+        "Supersession $ Exposure",
         "Supersessions with No Reason",
         "Transactions Audit",
         "Daily Balances Audit",
     ]
     kinds = [type(v).__name__ for v in sa.visuals]
-    assert kinds == ["KPI", "KPI", "Table", "Table"]
+    assert kinds == ["KPI", "KPI", "KPI", "Table", "Table"]
 
 
 def test_supersession_datasets_registered_and_target_base_tables() -> None:

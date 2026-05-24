@@ -325,7 +325,13 @@ def _build_recipient_fanout_sheet(
     kpi_row.add_kpi(
         width=_THIRD,
         title="Qualifying Recipients",
-        subtitle="Distinct recipients meeting the fanout threshold.",
+        subtitle=(
+            "Distinct recipients meeting the fanout threshold. **Zero "
+            "at default threshold** means no recipient has ≥ N distinct "
+            "senders in the window — lower the slider to widen the net, "
+            "or check the App Info sheet's matview-status table for "
+            "freshness if the underlying matview is stale."
+        ),
         values=[ds_fanout["recipient_account_id"].distinct_count()],
     )
     kpi_row.add_kpi(
@@ -485,7 +491,11 @@ def _build_volume_anomalies_sheet(
         width=_THIRD,
         title="Flagged Pair-Windows",
         subtitle=(
-            "Pair-windows whose 2-day rolling SUM clears the σ threshold."
+            "Pair-windows whose 2-day rolling SUM clears the σ "
+            "threshold. **Zero at default σ** means no pair currently "
+            "exceeds the bar — the distribution chart on the right "
+            "shows the full population so you can see how far the "
+            "data sits from the threshold and whether to lower σ."
         ),
         values=[ds_anomalies["recipient_account_id"].count()],
     )

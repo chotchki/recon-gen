@@ -564,11 +564,44 @@
     var plotH = 320; // fixed plot area; bars scale to this, not the legend
     var rotateX =
       categories.length > 8 || categories.some((c) => String(c).length > 6);
+    // AO.9 — estimate left margin from the max y-axis label width.
+    // 64px clips ``$10,000,000``-class labels into ``0,000,000`` on
+    // currency-format charts. Scale margin from the data magnitude +
+    // format prefix so labels render fully across exec / l1 charts.
+    // For stacked, sum per-category; otherwise max single value.
+    var estMaxAbs = 0;
+    if (stacked) {
+      categories.forEach(function (_c, ci) {
+        var colSum = 0;
+        series.forEach(function (s) {
+          var v = s.values && s.values[ci];
+          if (typeof v === "number") colSum += v;
+        });
+        if (Math.abs(colSum) > estMaxAbs) estMaxAbs = Math.abs(colSum);
+      });
+    } else {
+      series.forEach(function (s) {
+        (s.values || []).forEach(function (v) {
+          if (typeof v === "number" && Math.abs(v) > estMaxAbs) {
+            estMaxAbs = Math.abs(v);
+          }
+        });
+      });
+    }
+    var leftMargin = 64;
+    var digits, commas, prefix, labelW;
+    if (estMaxAbs > 0) {
+      digits = Math.floor(Math.log10(estMaxAbs)) + 1;
+      commas = Math.floor((digits - 1) / 3);
+      prefix = format === "currency" ? 8 : 0;
+      labelW = prefix + digits * 8 + commas * 3 + 12;
+      if (labelW > leftMargin) leftMargin = labelW;
+    }
     var margin = {
       top: 16,
       right: multi ? 132 : 24, // legend gutter when multi-series
       bottom: rotateX ? 92 : 56,
-      left: 64,
+      left: leftMargin,
     };
     var innerW = Math.max(0, width - margin.left - margin.right);
     var innerH = plotH - margin.top - margin.bottom;
@@ -774,16 +807,34 @@
   function renderLineChart(target, data, _visualId) {
     var width = target.clientWidth || 800;
     var height = 320;
-    var margin = { top: 16, right: 24, bottom: 56, left: 64 };
-    var innerW = width - margin.left - margin.right;
-    var innerH = height - margin.top - margin.bottom;
-
     var xValues = data.x_values || [];
     var series = data.series
       ? data.series
       : [{ name: data.label || "", values: data.values || [] }];
     var format = data.format;
     var xKind = data.x_kind || "date";
+    // AO.9 — same left-margin scaling as the BarChart; without it
+    // currency labels above $1M clip to ``0,000,000``.
+    var estMaxAbs = 0;
+    series.forEach(function (s) {
+      (s.values || []).forEach(function (v) {
+        if (typeof v === "number" && Math.abs(v) > estMaxAbs) {
+          estMaxAbs = Math.abs(v);
+        }
+      });
+    });
+    var leftMargin = 64;
+    var digits, commas, prefix, labelW;
+    if (estMaxAbs > 0) {
+      digits = Math.floor(Math.log10(estMaxAbs)) + 1;
+      commas = Math.floor((digits - 1) / 3);
+      prefix = format === "currency" ? 8 : 0;
+      labelW = prefix + digits * 8 + commas * 3 + 12;
+      if (labelW > leftMargin) leftMargin = labelW;
+    }
+    var margin = { top: 16, right: 24, bottom: 56, left: leftMargin };
+    var innerW = width - margin.left - margin.right;
+    var innerH = height - margin.top - margin.bottom;
 
     var svg = d3
       .select(target)

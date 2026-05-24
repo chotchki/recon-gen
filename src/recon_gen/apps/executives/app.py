@@ -509,9 +509,15 @@ def _populate_money_moved(
         visual_id=VisualId("exec-money-kpi-net"),
         title="Net Money Moved",
         subtitle=(
-            "Σ signed amount across the period — positive = inflow to "
-            "the bank, near zero = balanced rails, negative = net "
-            "outflow"
+            "Σ signed amount across the period. **Expected near zero** "
+            "on a balanced book — every customer-to-external transfer "
+            "is offset by the matching external-to-customer leg, so "
+            "internal-only flows net out and only externally-cleared "
+            "asymmetries surface. Large positive = net inflow to the "
+            "bank's books (deposits exceeding payouts in the window); "
+            "large negative = net outflow you should be able to "
+            "explain. Compare against **Gross Money Moved** on the "
+            "right for the per-period handle."
         ),
         values=[ds_txn["net_amount"].sum(
             field_id="exec-money-net-sum", currency=True,
