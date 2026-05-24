@@ -139,7 +139,7 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
 ## Phase AX - Promote the 4 matview-only invariants to the spine
 - [x] AX.0 - Spike audit `concat_agg` SQLite routing
 - [x] AX.1 - `ChainParentDisagreementInvariant` + Generator
-- [ ] AX.2 - `XorGroupViolationInvariant` + missed + overlap generators
+- [x] AX.2 - `XorGroupViolationInvariant` + missed + overlap generators
 - [ ] AX.3 - `FanInDisagreementInvariant` + healthy/missing/extra generators
 - [ ] AX.4 - `MultiXorViolationInvariant` + missed + overlap generators
 - [ ] AX.5 - Registry split — ALL_L1 / ALL_L2_SHAPE / ALL_L2_INVESTIGATION + ALL_INVARIANTS

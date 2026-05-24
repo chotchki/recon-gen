@@ -79,6 +79,11 @@ from recon_gen.common.spine.chain_parent_disagreement import (
     ChainParentDisagreementGenerator,
     ChainParentDisagreementInvariant,
 )
+from recon_gen.common.spine.xor_group_violation import (
+    XorGroupMissedFiringGenerator,
+    XorGroupOverlapGenerator,
+    XorGroupViolationInvariant,
+)
 from recon_gen.common.spine.money_trail import (
     MoneyTrailGenerator,
     MoneyTrailInvariant,
@@ -134,6 +139,12 @@ __all__ = [
     # (AB.2.6) onto the spine in AX.1.
     "ChainParentDisagreementInvariant",
     "ChainParentDisagreementGenerator",
+    # XOR-group-violation family — single invariant; 2 generators for
+    # the missed-firing + overlap variants (AB.3.5 / AB.3.5b);
+    # promoted in AX.2.
+    "XorGroupViolationInvariant",
+    "XorGroupMissedFiringGenerator",
+    "XorGroupOverlapGenerator",
     # Money-trail family — recursive-graph L2; AT.3 promoted generator
     # + View on top of LedgerSimulation.transfers (parent-linked chain).
     "MoneyTrailInvariant",
