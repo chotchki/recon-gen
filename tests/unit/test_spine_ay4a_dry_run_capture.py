@@ -204,7 +204,7 @@ def test_compose_dry_run_still_runs_pairwise_disjoint_check() -> None:
     gen_a = DriftInvariant().scenario_for("CustomerSubledger", magnitude=5.0)
     gen_b = DriftInvariant().scenario_for("CustomerSubledger", magnitude=10.0)
     cap = dry_run_capture(Dialect.SQLITE)
-    with pytest.raises(ValueError, match="account_id collision"):
+    with pytest.raises(ValueError, match="same-class account_id collision"):
         ctx.compose(cap, gen_a, gen_b, dry_run=True)
 
 

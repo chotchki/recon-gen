@@ -43,6 +43,7 @@ from recon_gen.common.spine.ledger_simulation import (
     TransferLeg,
 )
 from recon_gen.common.spine.dry_run_renderer import render_captured_sql
+from recon_gen.common.spine.plant_adapter import scenario_to_generators
 from recon_gen.common.spine.scenario_context import (
     ClaimedAccountsGenerator,
     ScenarioContext,
@@ -266,6 +267,8 @@ __all__ = [
     "dry_run_capture",
     # AY.4.b — render captured (sql, params) as static SQL text.
     "render_captured_sql",
+    # AY.4.c.3 — ScenarioPlant → ViolationGenerator tuple adapter.
+    "scenario_to_generators",
     # Self-validating training/docs scenarios (AS.7; AT.6 reuses for L2)
     "TrainingScenario",
     "validate_all",

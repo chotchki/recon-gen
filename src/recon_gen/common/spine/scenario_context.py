@@ -216,21 +216,40 @@ def _check_pairwise_disjoint(
     scenario_id: str,
     generators: tuple[ClaimedAccountsGenerator, ...],
 ) -> None:
-    """Raise ``ValueError`` if any two generators claim the same
-    account_id. Names BOTH offending classes so the operator's fix is
-    immediate (rename one, split the scenario, etc.)."""
-    seen: dict[str, type] = {}
-    for gen in generators:
+    """Raise ``ValueError`` if any two generators of the SAME CLASS
+    claim the same account_id. AY.4.c.3 refined the check to be
+    class-aware: spine generators derive transaction.id from
+    (class-prefix, account_id, ...) so the actual PK collision risk
+    is two same-class instances on the same account; cross-class
+    co-location on one account is fine (different ID prefixes →
+    different transaction.id → no PK collision).
+
+    The production seed legitimately co-locates a Drift + Limit Breach
+    + Overdraft on one customer account (better dashboard coverage);
+    the previous class-blind check rejected this. The class-aware
+    check still catches the original target: two DriftGenerators on
+    the same role with the same construction args would deterministically
+    derive the same transaction.id and fail at INSERT time.
+
+    Names BOTH offending instances' class + account so the operator's
+    fix is immediate (rename one, split the scenario, etc.).
+    """
+    seen: dict[tuple[type, str], int] = {}
+    for idx, gen in enumerate(generators):
+        gen_class = type(gen)
         for account in gen.claimed_accounts:
-            if account in seen:
+            key = (gen_class, account)
+            if key in seen:
                 raise ValueError(
-                    f"account_id collision in scenario_id="
-                    f"{scenario_id!r}: both {seen[account].__name__} "
-                    f"and {type(gen).__name__} claim {account!r}. "
-                    f"Use distinct account selectors or split into "
-                    f"separate scenarios."
+                    f"same-class account_id collision in scenario_id="
+                    f"{scenario_id!r}: two {gen_class.__name__} "
+                    f"instances both claim {account!r}. Same-class "
+                    f"emissions derive their transaction.id from the "
+                    f"same prefix + account, so they'd PK-collide at "
+                    f"INSERT time. Use distinct account_id_override "
+                    f"values or split into separate scenarios."
                 )
-            seen[account] = type(gen)
+            seen[key] = idx
 
 
 def _check_cross_scenario(
