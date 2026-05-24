@@ -141,6 +141,8 @@ class StuckUnbundledGenerator:
     max_unbundled_age_seconds: int
     overshoot_seconds: int
     as_of: datetime
+    # AY.4.d — production callers thread cfg.db_table_prefix here.
+    prefix: str = "spec_example"
 
     @property
     def intended(self) -> RuleViolation:
@@ -176,6 +178,7 @@ class StuckUnbundledGenerator:
         # wants).
         insert_tx(
             conn,
+            prefix=self.prefix,
             id=self.transaction_id,
             account_id=self.account_id,
             account_name=f"Stuck Unbundled ({self.rail_name})",

@@ -199,9 +199,15 @@ class InvFanoutGenerator:
                 # deserializing + adding pair keys + reserializing so
                 # the row's JSON column carries everything.
                 merged = {**json.loads(tagged), **base_metadata}
-                metadata: str | None = json.dumps(merged, sort_keys=True)
+                metadata: str | None = json.dumps(
+                    merged, sort_keys=True,
+                    separators=(",", ":"),  # typing-smell: ignore[json-indent]: compact deterministic per-row DB metadata, not a human-diffable file
+                )
             else:
-                metadata = json.dumps(base_metadata, sort_keys=True)
+                metadata = json.dumps(
+                    base_metadata, sort_keys=True,
+                    separators=(",", ":"),  # typing-smell: ignore[json-indent]: compact deterministic per-row DB metadata, not a human-diffable file
+                )
             # Sender debit leg.
             insert_tx(
                 conn,

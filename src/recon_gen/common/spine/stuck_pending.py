@@ -171,6 +171,8 @@ class StuckPendingGenerator:
     max_pending_age_seconds: int
     overshoot_seconds: int
     as_of: datetime
+    # AY.4.d — production callers thread cfg.db_table_prefix here.
+    prefix: str = "spec_example"
 
     @property
     def intended(self) -> RuleViolation:
@@ -204,6 +206,7 @@ class StuckPendingGenerator:
         posting_dt = self.as_of - timedelta(seconds=age_back)
         insert_tx(
             conn,
+            prefix=self.prefix,
             id=self.transaction_id,
             account_id=self.account_id,
             account_name=f"Stuck Pending ({self.rail_name})",

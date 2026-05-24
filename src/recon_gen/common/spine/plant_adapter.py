@@ -115,6 +115,7 @@ def scenario_to_generators(
     *,
     anchor: date | None = None,
     as_of: datetime | None = None,
+    prefix: str = "spec_example",
 ) -> tuple[ViolationGenerator, ...]:
     """Walk every plant collection on `scenarios` + return the
     matching spine generator per plant. Order matches the OLD
@@ -126,6 +127,12 @@ def scenario_to_generators(
     plant collection's pinned reference date); `as_of` defaults to
     `anchor` at noon (StuckPending / StuckUnbundled generators need
     a wall-clock).
+
+    `prefix` defaults to "spec_example" (the in-process test harness
+    shape). Production callers (AY.4.d `build_full_seed_sql`) pass
+    `cfg.db_table_prefix`; every constructed generator inherits
+    `self.prefix = prefix` so `insert_tx` / `insert_balance` writes
+    to the correctly-prefixed tables.
     """
     anchor_day = anchor if anchor is not None else scenarios.today
     wall_clock = as_of if as_of is not None else datetime(
@@ -164,9 +171,9 @@ def scenario_to_generators(
     for fxp in scenarios.fan_in_chain_extra_parent_plants:
         out.append(_adapt_fan_in_extra(fxp, instance, anchor_day))
     for mxm in scenarios.multi_xor_missed_plants:
-        out.append(_adapt_multi_xor_missed(mxm, anchor_day))
+        out.append(_adapt_multi_xor_missed(mxm, instance, anchor_day))
     for mxo in scenarios.multi_xor_overlap_plants:
-        out.append(_adapt_multi_xor_overlap(mxo, anchor_day))
+        out.append(_adapt_multi_xor_overlap(mxo, instance, anchor_day))
 
     # Aging plants — need wall-clock `as_of`.
     for sp in scenarios.stuck_pending_plants:
@@ -187,6 +194,20 @@ def scenario_to_generators(
         out.append(_adapt_rail_firing(rp, instance, anchor_day))
     for ifp in scenarios.inv_fanout_plants:
         out.append(_adapt_inv_fanout(ifp, anchor_day))
+
+    # Thread `prefix` to every generator post-construction. Every
+    # spine generator carries a `prefix: str = "spec_example"` field;
+    # the adapter helpers build with that default to keep their
+    # construction signatures narrow. Production callers thread
+    # `cfg.db_table_prefix` here so the emit writes to the
+    # correctly-prefixed tables.
+    if prefix != "spec_example":
+        for gen in out:
+            # Spine generators are @dataclass (mutable); mutating
+            # `prefix` directly is cleaner than dataclasses.replace
+            # (which would lose the per-generator subtype). All
+            # generators have a `prefix` attribute by spine convention.
+            setattr(gen, "prefix", prefix)
 
     return tuple(out)
 
@@ -380,22 +401,24 @@ def _adapt_fan_in_extra(
 
 
 def _adapt_multi_xor_missed(
-    plant: MultiXorMissedPlant, anchor_day: date,
+    plant: MultiXorMissedPlant, instance: L2Instance, anchor_day: date,
 ) -> ViolationGenerator:
     return MultiXorMissedGenerator(
         chain_parent_name=str(plant.chain_parent_rail_name),
         anchor_day=anchor_day,
+        instance=instance,
     )
 
 
 def _adapt_multi_xor_overlap(
-    plant: MultiXorOverlapPlant, anchor_day: date,
+    plant: MultiXorOverlapPlant, instance: L2Instance, anchor_day: date,
 ) -> ViolationGenerator:
     return MultiXorOverlapGenerator(
         chain_parent_name=str(plant.chain_parent_rail_name),
         variant_a_child_name=str(plant.variant_a_child_name),
         variant_b_child_name=str(plant.variant_b_child_name),
         anchor_day=anchor_day,
+        instance=instance,
     )
 
 

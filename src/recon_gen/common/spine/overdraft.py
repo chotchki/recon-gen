@@ -151,6 +151,10 @@ class OverdraftGenerator:
     account_parent_role: str | None
     anchor_day: date
     magnitude: float
+    # AY.4.d — production callers thread cfg.db_table_prefix here so
+    # the emitted row lands on the right deployment's table; default
+    # matches the in-process test harness shape.
+    prefix: str = "spec_example"
 
     @property
     def intended(self) -> RuleViolation:
@@ -202,6 +206,7 @@ class OverdraftGenerator:
         start, end = day_bounds(self.anchor_day)
         insert_balance(
             conn,
+            prefix=self.prefix,
             account_id=self.account_id,
             account_name=f"Overdraft Acct ({self.account_role})",
             account_role=self.account_role,

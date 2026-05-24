@@ -132,6 +132,8 @@ class ExpectedEodBalanceGenerator:
     anchor_day: date
     expected: float
     variance: float
+    # AY.4.d — production callers thread cfg.db_table_prefix here.
+    prefix: str = "spec_example"
 
     @property
     def intended(self) -> RuleViolation:
@@ -185,6 +187,7 @@ class ExpectedEodBalanceGenerator:
         start, end = day_bounds(self.anchor_day)
         insert_balance(
             conn,
+            prefix=self.prefix,
             account_id=self.account_id,
             account_name=f"EOD Acct ({self.account_role})",
             account_role=self.account_role,

@@ -179,6 +179,8 @@ class DriftGenerator:
     rng: random.Random = field(default_factory=scenario_rng)
     #: Clean leg amount; the child's stored money is this + magnitude.
     leg_amount: float = 100.0
+    # AY.4.d — production callers thread cfg.db_table_prefix here.
+    prefix: str = "spec_example"
 
     @property
     def intended(self) -> RuleViolation:
@@ -233,6 +235,7 @@ class DriftGenerator:
         # `magnitude` → drift fires on the child.
         insert_balance(
             conn,
+            prefix=self.prefix,
             account_id=self.child_account_id,
             account_name=f"Drift Child ({self.child_role})",
             account_role=self.child_role,
@@ -245,6 +248,7 @@ class DriftGenerator:
         )
         insert_tx(
             conn,
+            prefix=self.prefix,
             id=f"tx-drift-{self.child_role}-{self.child_account_id}-1",
             account_id=self.child_account_id,
             account_name=f"Drift Child ({self.child_role})",
@@ -267,6 +271,7 @@ class DriftGenerator:
         if self.parent_account_id is not None and self.parent_account_role is not None:
             insert_balance(
                 conn,
+                prefix=self.prefix,
                 account_id=self.parent_account_id,
                 account_name=f"Drift Parent ({self.parent_account_role})",
                 account_role=self.parent_account_role,

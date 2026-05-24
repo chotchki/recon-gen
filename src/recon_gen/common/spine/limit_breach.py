@@ -162,6 +162,8 @@ class LimitBreachGenerator:
     cap: float
     overshoot: float
     anchor_day: date
+    # AY.4.d — production callers thread cfg.db_table_prefix here.
+    prefix: str = "spec_example"
 
     @property
     def intended(self) -> RuleViolation:
@@ -198,6 +200,7 @@ class LimitBreachGenerator:
             amount_money = amount_magnitude
         insert_tx(
             conn,
+            prefix=self.prefix,
             id=f"tx-limit-breach-{self.rail_name}-{self.direction}-{self.account_id}",
             account_id=self.account_id,
             account_name=f"Limit Breach ({self.rail_name} {self.direction})",

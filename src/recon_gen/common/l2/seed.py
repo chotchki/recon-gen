@@ -1578,7 +1578,50 @@ def emit_full_seed(
         dialect=dialect,
         base_seed=base_seed,
     )
-    plants_sql = emit_seed(instance, scenarios, prefix=prefix, dialect=dialect)
+    # AY.4.d — plants emit via the spine pipeline (was: per-kind dispatch
+    # in `emit_seed`). The adapter materializes one ViolationGenerator per
+    # plant; ScenarioContext.compose(dry_run=True) captures their dbapi
+    # writes as (sql, params) pairs; render_captured_sql substitutes
+    # placeholders with dialect-appropriate literals.
+    #
+    # Production-seed rows carry `metadata.scenario_id` post-AY.4.d
+    # (AV.5 contract) — `ScenarioContext.cleanup` can now surgically
+    # tear down a deployment's seed without sidecar bookkeeping.
+    #
+    # Byte drift from the OLD `emit_seed` path is EXPECTED (per AY.0
+    # design lock + AY.5 re-lock); the spine emit is simpler (no
+    # chain-completion side-effects, no transfer_key cascade) so the
+    # locked-seed test fails loudly here. AY.5 re-locks the byte
+    # files against the new pipeline.
+    from recon_gen.common.spine import (
+        ScenarioContext,
+        dry_run_capture,
+        render_captured_sql,
+        scenario_to_generators,
+    )
+    generators = scenario_to_generators(
+        scenarios, instance, anchor=anchor, prefix=prefix,
+    )
+    cap = dry_run_capture(dialect)
+    ctx = ScenarioContext(
+        scenario_id=f"build-full-seed-{prefix}",
+        prefix=prefix,
+        dialect=dialect,
+    )
+    # WHY (re: the ignore on the next line) — pyright doesn't narrow
+    # ViolationGenerator to ClaimedAccountsGenerator via Protocol
+    # structural compatibility at this seam (each adapter-returned
+    # generator does implement `claimed_accounts` + scenario_id-on-emit
+    # per c.1/c.2 contract, but the Protocol membership isn't inferred).
+    # DryRunCapture instance satisfies the dbapi Connection shape at
+    # runtime even though the static type is `_DryRunBase`. Both
+    # narrowings are runtime-safe; spine unit tests cover the behavior.
+    captured = ctx.compose(cap, *generators, dry_run=True)  # type: ignore[arg-type]: see preceding WHY comment block on protocol narrowing
+    plants_sql = (
+        render_captured_sql(captured, dialect=dialect)
+        if captured else ""
+    )
+
     body = f"{baseline_sql}\n\n{plants_sql}"
     # X.1.k — stamp a SHA256 header on every emit so any saved-to-disk
     # SQL output identifies itself. The hash is deterministic against
