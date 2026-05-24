@@ -141,6 +141,7 @@ Findings route to four buckets: the money-precision root (AO.1 — drives severa
 - [x] AY.1 - Equivalence test gate — spine emit == ScenarioPlant emit for overlapping plant kinds
 - [ ] AY.2 - Fill remaining spine coverage — InboundCapBreachGenerator + SupersessionGenerator + RailFiringPlant/TransferTemplatePlant/InvFanoutPlant decision
   - [x] AY.2.a AY.2.a — Violation subtype hierarchy (RuleViolation / CoverageObservation / AuditFixture)
+  - [x] AY.2.aa AY.2.aa — promote src/recon_gen/common/spine to pyright strict scope
 - [ ] AY.3 - Lift Dialect.SQLITE hardcode in apply_scenario
 - [ ] AY.4 - Reroute production seed (build_full_seed_sql + emit_full_seed) through ScenarioContext.compose
 - [ ] AY.5 - Re-lock byte seeds via the new path; document any byte drift

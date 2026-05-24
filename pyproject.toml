@@ -337,6 +337,9 @@ include = [
     "src/recon_gen/common/html/server.py",
     # Y.2.gate runner — dev tooling, kept strict from the start.
     "src/recon_gen/_dev",
+    # AY.2.aa — spine in strict scope; AY.2.b's new generators
+    # born strict-clean.
+    "src/recon_gen/common/spine",
 ]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"

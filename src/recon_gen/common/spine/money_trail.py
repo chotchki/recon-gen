@@ -144,6 +144,13 @@ class MoneyTrailView:
             depth = dict(v.identity).get("depth")
             if depth is None:
                 continue
+            # Violation.identity values are typed `object` (the frozenset's
+            # heterogeneous shape). The matview detector inserts an int
+            # for `depth` by construction, but pyright sees only `object`.
+            # Narrow defensively — non-int values (cross-invariant mix
+            # under the same `depth` key) are dropped silently.
+            if not isinstance(depth, (int, float)):
+                continue
             if int(depth) >= self.min_depth:
                 out.add(v)
         return out
