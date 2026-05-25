@@ -263,26 +263,26 @@ Per [[feedback_invariants_in_types]]: make the bug shape unrepresentable.
     **Fix shape (approach C — Hybrid EAV storage + typed views, locked 2026-05-24):** Generic EAV table holds the decomposed JSON; typed views project it into the matview-friendly shapes; matviews JOIN typed views (and don't see the EAV).
 
     - **Storage** (one table, replaces the existing `<prefix>_config`):
-      ```
+    ```
       <prefix>_config_kv(node_id BIGINT PK, parent_id BIGINT NULL, key VARCHAR(...), value VARCHAR(...))
-      ```
+    ```
       Populated by walking the L2 + cfg JSON once at config-populate time. Top-level scalars (`as_of`, etc.) live at `parent_id=NULL`; the matview-consumed leaves (rail caps, limit schedule caps) live at their natural depth. ONE-table operational story: shape change → `TRUNCATE <prefix>_config_kv` + re-populate; no DDL migration ever needed when L2 grows.
 
       Post-BC.12 the per-prefix schema is **3 base tables**: `<prefix>_config_kv` + `<prefix>_transactions` + `<prefix>_daily_balances` (plus the typed views BC.12.2 adds and the matviews built on top). The existing `<prefix>_config(as_of, cfg_yaml, l2_yaml)` table goes away — its three columns become rows in the kv (`as_of` as a top-level scalar; `cfg_yaml`/`l2_yaml` either decompose fully into per-field rows OR live as opaque-CLOB `(key='*_raw', value=<json>)` rows for provenance/display).
     - **Provenance**: handled INSIDE `<prefix>_config_kv` via opaque-CLOB rows (`key='l2_yaml_raw'`, `value=<full JSON>`, `parent_id=NULL`) — the operator can still read the original yaml back; just one SELECT WHERE key='l2_yaml_raw' away.
     - **Typed projection views** (emit_schema boilerplate, **pay-as-you-go** — locked 2026-05-24): only build the views that an existing matview actually consumes. BC.12.3 ships exactly two: `<prefix>_v_config_limit_schedules` (limit_breach) + `<prefix>_v_config_rails` (stuck_pending / stuck_unbundled). Future matviews that need a new L2 field add their typed view alongside the matview that consumes it — no speculative views for fields no matview reads. Keeps the BC.12 surface tight; matches the codebase's "don't add abstractions beyond the task" preference.
-      ```
+    ```
       CREATE VIEW <prefix>_v_config_limit_schedules AS
         WITH RECURSIVE walk AS (...) SELECT pivot(...);
       CREATE VIEW <prefix>_v_config_rails AS
         WITH RECURSIVE walk AS (...) SELECT pivot(...);
-      ```
+    ```
       Per-collection view; absorbs the recursive-CTE + pivot complexity once. Matviews see typed-column views; the EAV stays hidden.
     - **Matview JOINs** become natural:
-      ```
+    ```
       JOIN <prefix>_v_config_limit_schedules ls
         ON ls.parent_role = tx.account_parent_role AND ls.rail = tx.rail_name
-      ```
+    ```
 
     **User motivation (locked 2026-05-24):** "Allows the main schema to pretend the complexity of the JSON isn't there while keeping the deployment flexibility of just truncate this one table when you have a shape change."
 
@@ -326,9 +326,9 @@ Per [[feedback_invariants_in_types]]: make the bug shape unrepresentable.
 **Per the design principle.** [[feedback_invariants_in_types]] — make wrong unrepresentable. A frame is one value; sites that want "the as_of" or "the window" reach into the frame; sites that want to mint a NEW frame go through a `RunContext.live()` / `RunContext.locked(anchor)` / `RunContext.test(...)` named constructor. No bare 3-tuple construction.
 
 - [x] BD.0 - Frame design spike. Doc at `docs/audits/bd_0_asofframe_spike.md`. Headline: **extend the existing `AsOfFrame` in place; do NOT rename to `RunContext`** (109 existing callsites → continuity wins over fresh naming). Three field-level changes: `window: DateInterval` (was `window_days: int`), `seed: int | None` added (third frame leg per AO.11), two new named constructors (`for_audit(today, *, lookback_days)`, `for_test(*, window, seed, as_of=None)`). Backward-compat via `window_days` property shim. 9 decisions (D1-D9) for sign-off before BD.1 implements.
-- [ ] BD.1 - Implementation + AST lint. `RunContext` dataclass; `no-naked-runcontext-ctor` lint mirroring BC.1's `no-naked-interval-ctor`. Property tests (frame invariants + constructor coverage).
-- [ ] BD.2 - Audit CLI threads `RunContext`. `audit apply` builds the frame at entry; every PDF section (`pdf.py`, `markdown.py`) receives the frame; current `period: DateInterval` + `as_of: datetime` arg pairs collapse into one `frame: RunContext` arg.
-- [ ] BD.3 - Plant emit threads `RunContext`. `apply_db_seed(frame=...)`, `scenario_to_generators(frame=...)`. Each generator's `(anchor, window, seed)` triple becomes one frame field-set. Lock anchor + live anchor + test anchor all flow through the same constructor.
+- [x] BD.1 - Implementation. Extended `AsOfFrame` in place per BD.0 spike (no `RunContext` rename): `window: DateInterval` (was `window_days: int`), `seed: int | None` field added, two new named constructors (`for_audit`, `for_test`). `window_days` dropped (no compat shim per pre-stable framing). 12 existing tests updated + 7 new BD.1 tests pin the BD shape. Commit 609fa5f7.
+- [x] BD.2 - Audit CLI threads `AsOfFrame`. `audit apply` builds the frame at entry (`_resolve_frame`); every PDF section (`pdf.py` × 7 sigs, `markdown.py` × 3 sigs) receives `frame: AsOfFrame` instead of `period: DateInterval`. `range_clause(frame.window, ...)` at the SQL layer. Commit 6d932ecf.
+- [ ] BD.3 - Plant emit threads `AsOfFrame`. `scenario_to_generators(frame=...)` — legacy `anchor` / `plant_window` / `as_of` kwargs dropped (no-compat-shim). All 4 production callers migrated: `cli/data.py::semantic-lock`, `common/l2/seed.py::emit_seed` + `::emit_full_seed`, `tests/e2e/_seed_helpers.py::apply_db_seed`. Semantic locks regenerated to capture BC.4-corrected per-plant spreading (pre-BD.3 lock encoded the latent "all plants stack on anchor" bug per the BC.4 docstring).
 - [ ] BD.4 - QS / App2 dashboard defaults derive from frame. `apps/*/app.py` parameter defaults (RollingDate expressions, static date brackets) are functions of the frame's window. `RollingDate` → derived expression. Parity QS↔App2 by construction (both consume the same derivation).
 - [ ] BD.5 - Trainer cache + studio state thread `RunContext`. `tg_cache.py::get_window` returns `frame.window`; `studio_state.py` persists the frame instead of loose endpoints.
 - [ ] BD.6 - Sweep + retire dead constants. `DEFAULT_SEED_TODAY` / `_CANONICAL_LOCK_ANCHOR` / `_DATE_START_DEFAULT_EXPR` / etc. — every callsite either consumes a frame or constructs one via a named factory. Catalog retired constants in `docs/audits/bd_6_retired_temporal_constants.md`.

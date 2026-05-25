@@ -740,14 +740,26 @@ def emit_seed(
     # _emit_*_rows helpers, all retired in the same commit). Same
     # public signature; same SQL-text return shape; the per-plant
     # dispatch lives at common/spine/plant_adapter.
+    from recon_gen.common.as_of_frame import AsOfFrame
+    from recon_gen.common.intervals import DateInterval
     from recon_gen.common.spine import (
         ScenarioContext,
         dry_run_capture,
         render_captured_sql,
         scenario_to_generators,
     )
+    # BD.3 — legacy emit_seed has no explicit audit window; mirror
+    # emit_baseline_seed's default window_days=90 ending on
+    # scenarios.today so plants with days_ago in [0, 90] fit the
+    # at_offset_from_end validation (single-day would reject).
+    emit_frame = AsOfFrame(
+        as_of=scenarios.today,
+        window=DateInterval.trailing_days_ending_today(
+            scenarios.today, days=91,
+        ),
+    )
     generators = scenario_to_generators(
-        scenarios, instance, anchor=scenarios.today, prefix=prefix,
+        scenarios, instance, frame=emit_frame, prefix=prefix,
     )
     cap = dry_run_capture(dialect)
     ctx = ScenarioContext(
@@ -1299,6 +1311,11 @@ def emit_full_seed(
       ready for ``psycopg2.cursor.execute`` (PG) or ``cli._execute_script``
       (Oracle).
     """
+    # BD.3 — materialize anchor once (was: nested inside
+    # emit_baseline_seed's None-handler) so the BD.3 frame below can
+    # consume a non-Optional date.
+    if anchor is None:
+        anchor = AsOfFrame.live().as_of
     baseline_sql = emit_baseline_seed(
         instance,
         prefix=prefix,
@@ -1322,14 +1339,27 @@ def emit_full_seed(
     # chain-completion side-effects, no transfer_key cascade) so the
     # locked-seed test fails loudly here. AY.5 re-locks the byte
     # files against the new pipeline.
+    from recon_gen.common.as_of_frame import AsOfFrame as _AsOfFrame
+    from recon_gen.common.intervals import DateInterval as _DateInterval
     from recon_gen.common.spine import (
         ScenarioContext,
         dry_run_capture,
         render_captured_sql,
         scenario_to_generators,
     )
+    # BD.3 — build_full_seed_sql is the production data-apply path.
+    # Frame window matches the baseline emit above
+    # (baseline_window_days, default 90 days ending on `anchor`).
+    # Plants validate against this window via
+    # SingleDayPlant.at_offset_from_end.
+    seed_frame = _AsOfFrame(
+        as_of=anchor,
+        window=_DateInterval.trailing_days_ending_today(
+            anchor, days=baseline_window_days + 1,
+        ),
+    )
     generators = scenario_to_generators(
-        scenarios, instance, anchor=anchor, prefix=prefix,
+        scenarios, instance, frame=seed_frame, prefix=prefix,
     )
     cap = dry_run_capture(dialect)
     ctx = ScenarioContext(

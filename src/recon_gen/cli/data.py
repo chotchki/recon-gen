@@ -246,8 +246,19 @@ def _build_fresh_semantic_lock_sqlite(
         # Compose the production seed via the spine pipeline.
         from recon_gen.cli._helpers import build_default_scenario  # pyright: ignore[reportUnknownVariableType]  # WHY: helper has pending untyped-def waiver
         scenario = build_default_scenario(instance, anchor=anchor)  # pyright: ignore[reportUnknownVariableType]: same helper-untyped waiver propagates to the call
+        # BD.3 — semantic-lock detector frame: window matches the
+        # 90-day baseline above (emit_baseline_seed window_days=90),
+        # ending on `anchor`. Plants validate against this window via
+        # SingleDayPlant.at_offset_from_end (per-plant days_ago must
+        # fit inside [anchor-90, anchor]).
+        from recon_gen.common.as_of_frame import AsOfFrame
+        from recon_gen.common.intervals import DateInterval
+        lock_frame = AsOfFrame(
+            as_of=anchor,
+            window=DateInterval.trailing_days_ending_today(anchor, days=91),
+        )
         generators = scenario_to_generators(
-            scenario, instance, anchor=anchor, prefix=prefix,
+            scenario, instance, frame=lock_frame, prefix=prefix,
         )
         ctx = ScenarioContext(
             scenario_id=f"semantic-lock-{prefix}",

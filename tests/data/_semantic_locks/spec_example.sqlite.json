@@ -13,16 +13,80 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-001",
-          "business_day": "2030-01-01",
-          "drift": -2950.0
+          "business_day": "2029-11-30",
+          "drift": 75.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-001",
+          "business_day": "2029-12-07",
+          "drift": 3075.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-001",
+          "business_day": "2029-12-14",
+          "drift": 3075.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-001",
+          "business_day": "2029-12-21",
+          "drift": 3075.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-001",
+          "business_day": "2029-12-28",
+          "drift": 3075.0
         }
       },
       {
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-002",
-          "business_day": "2030-01-01",
-          "drift": -1600.0
+          "business_day": "2029-11-29",
+          "drift": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-06",
+          "drift": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-13",
+          "drift": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-20",
+          "drift": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-27",
+          "drift": -1500.0
         }
       }
     ],
@@ -56816,8 +56880,40 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "customer-ledger",
-          "business_day": "2030-01-01",
-          "drift": 1219345.21
+          "business_day": "2029-11-30",
+          "drift": 124651.27
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "customer-ledger",
+          "business_day": "2029-12-07",
+          "drift": 336823.8
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "customer-ledger",
+          "business_day": "2029-12-14",
+          "drift": 590922.43
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "customer-ledger",
+          "business_day": "2029-12-21",
+          "drift": 865079.99
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "customer-ledger",
+          "business_day": "2029-12-28",
+          "drift": 1117640.89
         }
       }
     ],
@@ -58189,7 +58285,39 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-002",
-          "business_day": "2030-01-01",
+          "business_day": "2029-11-29",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-06",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-13",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-20",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-27",
           "stored_balance": -1500.0
         }
       },

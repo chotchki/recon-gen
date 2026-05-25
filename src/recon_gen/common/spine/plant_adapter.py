@@ -54,6 +54,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
+from recon_gen.common.as_of_frame import AsOfFrame
 from recon_gen.common.intervals import DateInterval, SingleDayPlant
 from recon_gen.common.l2.primitives import (
     L2Instance,
@@ -116,9 +117,7 @@ def scenario_to_generators(
     scenarios: ScenarioPlant,
     instance: L2Instance,
     *,
-    anchor: date | None = None,
-    plant_window: DateInterval | None = None,
-    as_of: datetime | None = None,
+    frame: AsOfFrame | None = None,
     prefix: str = "spec_example",
 ) -> tuple[ViolationGenerator, ...]:
     """Walk every plant collection on `scenarios` + return the
@@ -127,24 +126,29 @@ def scenario_to_generators(
     inbound cap → two-template → ... → inv-fanout) so debug output
     stays diff-friendly.
 
-    Anchor resolution (BC.4a). The L1-invariant factories below
-    construct each generator's `anchor_day: date` field from a
-    `SingleDayPlant.at_window_end(plant_window)` when `plant_window`
-    is supplied — that's the day-pick policy ("most-recently-closed
-    auditable day") encoded in the constructor name, not in a
-    docstring. Fallback chain when `plant_window` is None:
+    BD.3 (2026-05-25): the only temporal input is `frame: AsOfFrame`.
+    The legacy `anchor` / `plant_window` / `as_of` kwargs were
+    dropped (no-compat-shim — pre-stable framing). The four
+    production callers — `cli/data.py::data apply`,
+    `common/l2/seed.py` × 2, `tests/e2e/_seed_helpers.py` — each
+    construct a frame at the seam.
 
-    1. `plant_window` is supplied → derive `anchor_day =
-       SingleDayPlant.at_window_end(plant_window).day` (matches the
-       audit window's right edge — the day plants intended for the
-       window will be picked up by an audit run over that window).
-    2. `anchor` is supplied → use it as `anchor_day` (backward-compat
-       with pre-BC.4 callers like `cli/data.py::data apply`).
-    3. Neither → fall back to `scenarios.today` (the plant
-       collection's pinned reference date).
+    Frame resolution:
 
-    `as_of` defaults to `anchor_day` at noon (StuckPending /
-    StuckUnbundled generators need a wall-clock).
+    1. `frame` is supplied → `anchor_day = frame.as_of`,
+       `plant_window = frame.window`.
+    2. Not supplied (positional-only test callers in
+       `tests/unit/test_spine_ay4c3_plant_adapter.py` and other
+       bare `emit_seed(inst, scenario)` test seams) → degenerate
+       fallback frame: `as_of = scenarios.today`, `plant_window =
+       [scenarios.today - 90, scenarios.today]`. The 90-day backward
+       window matches `emit_baseline_seed`'s default `window_days=90`
+       so plants with `days_ago` up to 90 fit the `at_offset_from_end`
+       validation. Single-day windows break L1 plants with
+       `days_ago > 0` (drift/overdraft default `days_ago=4`).
+
+    `wall_clock` (for StuckPending / StuckUnbundled generators)
+    derives from `anchor_day` at noon.
 
     `prefix` defaults to "spec_example" (the in-process test harness
     shape). Production callers (AY.4.d `build_full_seed_sql`) pass
@@ -152,13 +156,18 @@ def scenario_to_generators(
     `self.prefix = prefix` so `insert_tx` / `insert_balance` writes
     to the correctly-prefixed tables.
     """
-    if plant_window is not None:
-        anchor_day = SingleDayPlant.at_window_end(plant_window).day
-    elif anchor is not None:
-        anchor_day = anchor
+    if frame is not None:
+        anchor_day = frame.as_of
+        plant_window = frame.window
     else:
         anchor_day = scenarios.today
-    wall_clock = as_of if as_of is not None else datetime(
+        # 90-day backward window matches emit_baseline_seed's default.
+        # Plants validate via SingleDayPlant.at_offset_from_end —
+        # a single-day fallback would reject any plant with days_ago>0.
+        plant_window = DateInterval.trailing_days_ending_today(
+            anchor_day, days=91,
+        )
+    wall_clock = datetime(
         anchor_day.year, anchor_day.month, anchor_day.day, 12, 0, 0,
     )
 
