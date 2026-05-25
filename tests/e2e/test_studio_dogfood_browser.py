@@ -170,9 +170,12 @@ def test_browser_operator_creates_rail_with_role_checkbox(
         rail = TwoLegRail(
             name=Identifier("Rail_Smoke"),
             metadata_keys=(),
-            # AI.9 workaround — RoleExpression union; pass tuples.
-            source_role=(Identifier("RoleA"),),  # type: ignore[arg-type]: RoleExpression tuple per AI.9
-            destination_role=(Identifier("RoleB"),),  # type: ignore[arg-type]: RoleExpression tuple per AI.9
+            # AI.9 (resolved 2026-05-25 via __post_init__ coerce):
+            # tuples + bare Identifier both work now; keep tuples to
+            # match the strict type hint (and stay pyright-clean if
+            # this file ever lands in strict-scope).
+            source_role=(Identifier("RoleA"),),
+            destination_role=(Identifier("RoleB"),),
             expected_net=Decimal("0.00"),  # type: ignore[arg-type]: Money accepts Decimal at runtime
             origin="InternalInitiated",  # type: ignore[arg-type]: Origin literal accepts validated str at runtime
         )
@@ -290,7 +293,10 @@ def test_browser_operator_creates_rail_with_bb2_create_new_reconciler(
         rail = SingleLegRail(
             name=Identifier("Rail_BB2"),
             metadata_keys=(),
-            leg_role=(Identifier("LegRole"),),  # type: ignore[arg-type]: RoleExpression tuple per AI.9
+            # AI.9 (resolved 2026-05-25 via __post_init__ coerce):
+            # tuples match the strict type hint; bare Identifier also
+            # works via the guard.
+            leg_role=(Identifier("LegRole"),),
             leg_direction="Credit",  # type: ignore[arg-type]: LegDirection literal accepts validated str
             origin="InternalInitiated",  # type: ignore[arg-type]: Origin literal accepts validated str
         )

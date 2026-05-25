@@ -110,6 +110,45 @@ CadenceExpression: TypeAlias = str
 # as a tuple — single-role becomes a 1-tuple; the loader normalizes.
 RoleExpression: TypeAlias = tuple[Identifier, ...]
 
+
+def _coerce_role_expression(value: object) -> RoleExpression:
+    """AI.9 — defense-in-depth coercion for `RoleExpression` fields.
+
+    The L2 loader always emits tuples; the type hint says tuple; but
+    hand-constructors (tests, dynamic imports, anywhere bypassing
+    the typecheck) can pass a bare `Identifier` (which is a `str`
+    subclass). Without this guard, downstream consumers iterating
+    the value as a tuple (validators, encoders, render code) would
+    silently iterate the STRING'S CHARACTERS instead of getting a
+    single-role tuple. AI.2.d.2 piece 2c surfaced this when a test
+    passing `leg_role=Identifier("RoleA")` produced
+    `['R','o','l','e','A']` from the form-data encoder.
+
+    Accepts:
+    - tuple of Identifier → unchanged
+    - bare str / Identifier → wrapped in 1-tuple
+    - other (list, set, etc.) → coerced to tuple via iteration
+
+    Raises ``TypeError`` on None or non-iterable scalars (NOT a
+    silent no-op — a missing-required role should fail loudly).
+    """
+    if isinstance(value, tuple):
+        return value  # type: ignore[return-value]: assume operator-supplied tuple already holds Identifier; loader normalizes; the runtime cost of re-validating every element isn't justified
+    if isinstance(value, str):  # str catches Identifier (subclass)
+        return (Identifier(value),)
+    if value is None:
+        raise TypeError(
+            "RoleExpression field is None; required to be a tuple of "
+            "Identifier (or a bare str — coerced to 1-tuple)."
+        )
+    try:
+        return tuple(Identifier(v) for v in value)  # type: ignore[arg-type]: caller passed something iterable; trust the iteration produces stringable items
+    except TypeError as exc:
+        raise TypeError(
+            f"RoleExpression field must be a tuple, str, or iterable "
+            f"of str — got {type(value).__name__!r}"
+        ) from exc
+
 # An item in an aggregating rail's BundlesActivity. Per SPEC: a
 # TransferType matches every Transfer of that type; a RailName /
 # TransferTemplateName matches Transfers produced by that specific
@@ -312,6 +351,21 @@ class TwoLegRail:
     # aggregator firing frequency).
     firings_typical_per_period: FiringsTypicalPerPeriod | None = None
 
+    def __post_init__(self) -> None:
+        # AI.9 (2026-05-25) — runtime coerce of RoleExpression fields.
+        # Loader always produces tuples; this guards hand-constructors
+        # (tests, dynamic imports) from silently passing bare strings
+        # that downstream iteration would explode character-by-char.
+        # Frozen-dataclass setattr via object.__setattr__.
+        object.__setattr__(
+            self, "source_role",
+            _coerce_role_expression(self.source_role),
+        )
+        object.__setattr__(
+            self, "destination_role",
+            _coerce_role_expression(self.destination_role),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class SingleLegRail:
@@ -367,6 +421,13 @@ class SingleLegRail:
     # ``FiringsTypicalPerPeriod`` + ``TwoLegRail.firings_typical_per_period``.
     # Same shape, same validator W1a-c rules.
     firings_typical_per_period: FiringsTypicalPerPeriod | None = None
+
+    def __post_init__(self) -> None:
+        # AI.9 — same defense-in-depth as TwoLegRail.__post_init__.
+        object.__setattr__(
+            self, "leg_role",
+            _coerce_role_expression(self.leg_role),
+        )
 
 
 Rail: TypeAlias = TwoLegRail | SingleLegRail

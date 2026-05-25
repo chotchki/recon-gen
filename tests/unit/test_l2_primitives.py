@@ -265,3 +265,61 @@ def test_duration_is_timedelta() -> None:
     d: Duration = timedelta(hours=24)
     assert isinstance(d, timedelta)
     assert d == timedelta(days=1)
+
+
+
+# AI.9 (2026-05-25) — RoleExpression runtime coercion. Loader normalizes
+# bare strings to 1-tuples; this guard catches hand-constructors that
+# bypass the loader. Without it, downstream tuple-iteration silently
+# explodes char-by-char on a bare Identifier (str subclass).
+
+
+def test_single_leg_rail_coerces_bare_identifier_leg_role() -> None:
+    """Bare Identifier becomes a 1-tuple at construction time."""
+    rail = SingleLegRail(
+        name=Identifier("Rail_A"),
+        metadata_keys=(),
+        leg_role=Identifier("RoleA"),  # type: ignore[arg-type]: AI.9 — the runtime coerces; intentional test of the guard
+        leg_direction="Credit",
+    )
+    assert rail.leg_role == (Identifier("RoleA"),)
+    assert isinstance(rail.leg_role, tuple)
+    assert len(rail.leg_role) == 1
+
+
+def test_single_leg_rail_preserves_tuple_leg_role() -> None:
+    """Loader-shaped tuple input passes through unchanged."""
+    rail = SingleLegRail(
+        name=Identifier("Rail_B"),
+        metadata_keys=(),
+        leg_role=(Identifier("RoleA"), Identifier("RoleB")),
+        leg_direction="Credit",
+    )
+    assert rail.leg_role == (Identifier("RoleA"), Identifier("RoleB"))
+
+
+def test_two_leg_rail_coerces_bare_identifier_source_and_destination() -> None:
+    """Both source_role and destination_role get the same guard."""
+    rail = TwoLegRail(
+        name=Identifier("Rail_C"),
+        metadata_keys=(),
+        source_role=Identifier("SrcRole"),  # type: ignore[arg-type]: AI.9 — test of the guard
+        destination_role=Identifier("DstRole"),  # type: ignore[arg-type]: AI.9 — test of the guard
+        origin="InternalInitiated",
+        expected_net=Decimal("0"),
+    )
+    assert rail.source_role == (Identifier("SrcRole"),)
+    assert rail.destination_role == (Identifier("DstRole"),)
+
+
+def test_role_expression_coerce_rejects_none() -> None:
+    """None on a RoleExpression field raises TypeError — not silently
+    coerced to empty tuple (an unreconciled rail would surface a
+    confusing validator error downstream)."""
+    with pytest.raises(TypeError, match="RoleExpression field is None"):
+        SingleLegRail(
+            name=Identifier("Rail_D"),
+            metadata_keys=(),
+            leg_role=None,  # type: ignore[arg-type]: AI.9 — test of the guard rejecting None
+            leg_direction="Credit",
+        )
