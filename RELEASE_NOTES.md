@@ -1,5 +1,43 @@
 # Release Notes
 
+## v11.19.2 — BC.12.5 hotfix: `serialize_l2` emits `direction` on every `LimitSchedule`
+
+v11.19.1's release pipeline still goes red at the
+`e2e-against-testpypi` 4-way agreement test. Same chronic gate, same
+test, but a different production-side bug uncovered by it:
+
+> `('tmpl-cust-001', 2026-05-21, 'ExternalRailOutbound')` planted but
+> absent from the `<prefix>_limit_breach` matview.
+
+Root cause — same shape as BC.8's `_seconds`-omit bug:
+
+- `LimitSchedule.direction` defaults to `"Outbound"` on the dataclass
+  (AB.1, 2026-05-19); the serializer's "compact yaml" rule OMITTED
+  the field when it equaled the default.
+- Pre-BC.12 the matview's JOIN consumed direction via
+  `JSON_VALUE(... direction)` whose NULL-fallback happened to behave
+  like an implicit "Outbound" default.
+- BC.12 (2026-05-25) replaced the matview-on-CLOB pattern with typed
+  views over `<prefix>_config_kv`. The typed view
+  `<prefix>_v_config_limit_schedules` now projects `direction` as its
+  own column; rows whose kv had no `direction` entry project NULL;
+  the matview's strict `ls.direction = 'Outbound'` JOIN drops the row
+  → every Outbound limit_breach plant goes silently missing.
+
+Fix: `_dump_limit_schedule` always emits `direction`. The dataclass
+default IS the data — no implicit defaulting at SQL layer
+(production-honest invariants). Two-tier coverage in
+`tests/unit/test_serialize_l2_emits_limit_schedule_direction.py`
+mirroring the BC.8 test pattern:
+
+1. YAML emit shape — every LimitSchedule serializes with `direction:`.
+2. End-to-end — `serialize_l2 → JSON → replace_config → plant Debit tx
+   with ABS > cap → refresh → matview has 1 row`. Pre-fix returns 0.
+
+Customer impact: every deployment with implicit-Outbound limit
+schedules had silently empty Outbound limit_breach matviews
+post-BC.12. v11.19.2 restores correctness.
+
 ## v11.19.1 — BC.7 regression test rewritten for the BC.12 kv shape
 
 v11.19.0's release pipeline went red at the Tests + pyright step:
