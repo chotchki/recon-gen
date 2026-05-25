@@ -50,6 +50,16 @@
   --color-link-tint: #e8eff9;
   --color-surface: #ffffff;
   --color-surface-bg: #f6f9fc;
+  /* AM.0 decision 1 (2026-05-25): theme-driven subtle disabled-state
+   * surface (empty XOR group placeholder, multi-select-groups empty
+   * row). Per L5 — utilities like `bg-surface-alt` resolve here at
+   * paint time. Default sits one step warmer than surface-bg so
+   * disabled still feels disabled. Per-L2 override NOT wired today:
+   * adding a required field to ThemePreset would break every L2's
+   * theme block; deferred until a deploy actually wants to customize
+   * this surface (then: add optional field on ThemePreset + entry
+   * in render.py::_THEME_TOKEN_MAP). */
+  --color-surface-alt: #f1f5f9;
   --color-surface-border: #e2e8f0;
   --color-primary-fg: #1f2933;
   --color-secondary-fg: #4b5563;
