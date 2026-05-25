@@ -165,7 +165,7 @@ class TestGeneratorConfig:
 
     def as_of_frame(self, *, window_days: int = 0) -> AsOfFrame:
         """Resolve this config's scenario anchor as the owned `AsOfFrame`
-        (D1; see `docs/audits/date_range_model_audit.md` §5).
+        (D1; see `docs/audits/date_range_model_audit.md` §5 + BD.0 spike).
 
         This is the call-site every `as_of` reader lands on — AQ.3 funnels
         the generator's threaded ``anchor=`` and the four ad-hoc
@@ -174,20 +174,30 @@ class TestGeneratorConfig:
 
           * ``end_date == LOCKED_ANCHOR`` → ``AsOfFrame.locked()`` (the
             canonical demo anchor; locked-seed determinism).
-          * ``end_date is not None`` → ``AsOfFrame(end_date, window_days)``
-            (an explicit anchor — operator override or trainer-pinned).
+          * ``end_date is not None`` → explicit-anchor frame (operator
+            override or trainer-pinned).
           * ``end_date is None`` → ``AsOfFrame.live()`` (production
             ends-at-now).
 
-        ``window_days`` defaults to 0 (a single-day frame, no look-back),
-        matching today's single-anchor semantics; AR widens it on the
-        View primitive. The audit's D4 — whether ``window`` is an
-        L2/config field or a generator constant — is still open.
+        ``window_days`` is an ergonomic shortcut: 0 means a single-day
+        frame, N>0 means an N-day window ending at the anchor. BD.1
+        replaced the v1 ``window_days: int`` FIELD on AsOfFrame with a
+        typed ``window: DateInterval`` field; this kwarg stays at the
+        construction seam (construction-time ergonomics ≠ runtime
+        escape hatch).
         """
+        from recon_gen.common.intervals import DateInterval
         if self.end_date == LOCKED_ANCHOR:
             return AsOfFrame.locked(window_days=window_days)
         if self.end_date is not None:
-            return AsOfFrame(as_of=self.end_date, window_days=window_days)
+            window = (
+                DateInterval.single_day(self.end_date)
+                if window_days <= 0
+                else DateInterval.trailing_days_ending_today(
+                    self.end_date, window_days + 1,
+                )
+            )
+            return AsOfFrame(as_of=self.end_date, window=window)
         return AsOfFrame.live(window_days=window_days)
 
 
