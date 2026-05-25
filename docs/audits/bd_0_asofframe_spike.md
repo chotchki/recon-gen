@@ -93,10 +93,17 @@ Three semantic changes:
 
 - **D5 — Where does it live?** Extending in place → still `common/as_of_frame.py`. Renaming the module to `common/frame.py` or `common/run_context.py` triggers 109 import-line edits for the same reason as the class rename (no semantic gain, big diff). **Recommendation: keep `common/as_of_frame.py`.**
 
-- **D6 — Backward-compat: keep `window_days` accessor?** Some call sites read `frame.window_days` directly. Two options:
-  - **(a)** Drop the field; callers migrate to `frame.window.days - 1` (or `frame.window.days` if the semantic is closed-closed).
-  - **(b)** Keep as a `@property` derived from `window`. Callers stay unchanged; the field is just deprecated as a free attribute.
-  **Recommendation: (b) — keep as property.** Minimizes diff churn; future cleanup can drop the property in a later sweep.
+- **D6 — Backward-compat: keep `window_days` accessor?** *(Revised 2026-05-25 per operator pushback: keeping the property as a "future cleanup" shim is the same fiction that buries production bugs (cf. BC.6's `<prefix>_config` "we'll populate later" trap). Either drop the escape hatch now, or this typed migration was theater.)*
+
+  Three options:
+  - **(a) Drop the field entirely.** Migrate the ~5-10 actual `frame.window_days` READ sites (`common/tree/date_view.py` ×2, `apps/l1_dashboard/app.py` ×1, `apps/executives/app.py` ×2, plus a few stragglers). The dominant pattern (`frame.as_of - timedelta(days=frame.window_days)`) is already encapsulated by the existing `frame.window_start` property — keep that property; it now derives from `frame.window.start`. Migration table:
+    - `frame.window_days > 0` → `frame.window.days > 1` (closed-closed; 1 = single-day)
+    - `frame.window_start` → unchanged (property; now `return self.window.start`)
+    - `frame.window_days` raw int read → `frame.window.days` (rare; only when caller wants the count itself)
+  - **(b)** Keep as a `@property` derived from `window`. Lower diff churn but the property becomes a permanent escape hatch — callers keep reading the int, never engage the `DateInterval` API.
+  - **(c)** Keep the property BUT add an AST lint (`no-window-days-read`) that flags any non-allowlisted read. Heavy ceremony for what (a) achieves by deletion.
+
+  **Recommendation: (a) — drop the field.** The constructor kwarg `window_days=N` STAYS as an ergonomic shortcut on `live()` / `locked()` (internally builds `DateInterval.trailing_days_ending_today(today, N)`); construction-time ergonomics ≠ runtime escape hatch. ~5-10 callsite edits is the "make convention impossible" tax; the property shim that "future cleanup drops" is the tax we pay forever.
 
 - **D7 — `for_test` requires `seed`?** Currently the spine's `scenario_to_generators` accepts `seed: int | None` and falls through to a deterministic default. If `for_test` requires `seed`, every test fixture must declare one. **Recommendation: optional with sensible default** (e.g., `for_test(window, seed=0, as_of=None)` — `0` is a fine deterministic default; explicit `None` opts into the spine's internal default).
 
