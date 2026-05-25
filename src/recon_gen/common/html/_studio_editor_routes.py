@@ -42,9 +42,12 @@ from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from recon_gen.common.html._studio_assets.tw_classes import (
+    entity_card_classes,
+    field_input_classes,
+    field_row_classes,
     primary_button_classes,
 )
-from recon_gen.common.html._studio_routes import asset_url, studio_theme_head
+from recon_gen.common.html._studio_routes import studio_theme_head
 from recon_gen.common.l2.cache import L2InstanceCache
 from recon_gen.common.l2.editor import (
     SINGLETON_KINDS,
@@ -1163,17 +1166,22 @@ def _render_field(
     ``multi_select_groups`` to read a sibling field for the option
     universe (e.g., ``leg_rail_xor_groups`` reads ``entity.leg_rails``).
     """
+    # AM.1 step 4 (2026-05-25) — semantic classes migrated to raw
+    # Tailwind utilities per L1+L2; helpers absorb the 30+× repeat
+    # patterns (`field_row_classes` / `field_input_classes`) per L2.a.
+    input_cls = field_input_classes()
     label = (
-        f'<label for="field-{spec.name}">{escape(spec.label)}'
-        f'{"<span class=\"required\"> *</span>" if spec.required else ""}'
+        f'<label for="field-{spec.name}" class="font-semibold text-xs text-primary-fg">{escape(spec.label)}'
+        f'{"<span class=\"text-danger\"> *</span>" if spec.required else ""}'
         f"</label>"
     )
     helper = (
-        f'<small class="field-helper">{escape(spec.helper)}</small>'
+        f'<small class="text-xs text-secondary-fg">{escape(spec.helper)}</small>'
         if spec.helper else ""
     )
     err_html = (
-        f'<div class="field-error">{escape(error)}</div>' if error else ""
+        f'<div role="alert" class="text-xs text-danger bg-red-50 px-2 py-1 rounded-sm">{escape(error)}</div>'
+        if error else ""
     )
 
     if spec.kind == "multi_select_groups":
@@ -1205,7 +1213,7 @@ def _render_field(
             if v not in options:
                 options = (*options, v)
         check_blocks = [
-            f'<label class="multi-select-item">'
+            f'<label class="flex items-center gap-2 font-normal text-sm cursor-pointer text-primary-fg">'
             f'<input type="checkbox" name="{escape(spec.name)}" '
             f'value="{escape(o)}"'
             f'{" checked" if o in selected else ""}>'
@@ -1215,7 +1223,7 @@ def _render_field(
         input_html = (
             # Hidden marker — see comment above.
             f'<input type="hidden" name="{escape(spec.name)}__present" value="1">'
-            f'<div id="field-{spec.name}" class="multi-select-group" '
+            f'<div id="field-{spec.name}" class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 px-2 py-2 border border-surface-border rounded-sm bg-white max-h-56 overflow-y-auto" '
             f'role="group">'
             f'{"".join(check_blocks)}</div>'
         )
@@ -1239,14 +1247,14 @@ def _render_field(
             for o in options
         )
         input_html = (
-            f'<select id="field-{spec.name}" name="{escape(spec.name)}">'
+            f'<select id="field-{spec.name}" name="{escape(spec.name)}" class="{input_cls}">'
             f'{"".join(opt_blocks)}</select>'
         )
     elif spec.kind == "textarea":
         val_str = _value_to_input_str(value)
         input_html = (
             f'<textarea id="field-{spec.name}" name="{escape(spec.name)}" '
-            f'rows="3">{escape(val_str)}</textarea>'
+            f'rows="3" class="{input_cls} resize-y min-h-16">{escape(val_str)}</textarea>'
         )
     elif spec.kind == "yaml_block":
         # X.4.f.11.6.5 — Tier-3 YAML escape hatch for the
@@ -1259,7 +1267,7 @@ def _render_field(
         val_str = _value_to_input_str(value)
         input_html = (
             f'<textarea id="field-{spec.name}" name="{escape(spec.name)}" '
-            f'rows="10" class="yaml-block" spellcheck="false">'
+            f'rows="10" spellcheck="false" class="{input_cls} resize-y min-h-16 font-mono whitespace-pre">'
             f'{escape(val_str)}</textarea>'
         )
     else:
@@ -1268,11 +1276,11 @@ def _render_field(
         val_str = _value_to_input_str(value)
         input_html = (
             f'<input id="field-{spec.name}" name="{escape(spec.name)}" '
-            f'type="text" value="{escape(val_str)}">'
+            f'type="text" value="{escape(val_str)}" class="{input_cls}">'
         )
 
     return (
-        f'<div class="field-row">{label}{input_html}{helper}{err_html}</div>'
+        f'<div class="{field_row_classes()}">{label}{input_html}{helper}{err_html}</div>'
     )
 
 
@@ -1331,15 +1339,21 @@ def _render_multi_select_groups_field(
     create page accidentally let it through (defense-in-depth).
     """
     label_html = (
-        f'<label>{escape(spec.label)}</label>'
+        f'<label class="font-semibold text-xs text-primary-fg">{escape(spec.label)}</label>'
     )
     helper_html = (
-        f'<small class="field-helper">{escape(spec.helper)}</small>'
+        f'<small class="text-xs text-secondary-fg">{escape(spec.helper)}</small>'
         if spec.helper else ""
     )
     err_html = (
-        f'<div class="field-error">{escape(error)}</div>' if error else ""
+        f'<div role="alert" class="text-xs text-danger bg-red-50 px-2 py-1 rounded-sm">{escape(error)}</div>'
+        if error else ""
     )
+    empty_cls = (
+        "text-sm text-secondary-fg px-2 py-2 border border-dashed "
+        "border-surface-border rounded-sm bg-surface-alt"
+    )
+    row_cls = field_row_classes()
     # Option universe = the entity's leg_rails (sibling field). On the
     # create page there's no entity; render the empty-state helper.
     if entity is None:
@@ -1347,11 +1361,9 @@ def _render_multi_select_groups_field(
             "Save the template with at least 2 leg rails first; then "
             "open it for editing to add XOR groups."
         )
-        body = (
-            f'<div class="multi-select-groups-empty">{escape(empty_msg)}</div>'
-        )
+        body = f'<div class="{empty_cls}">{escape(empty_msg)}</div>'
         return (
-            f'<div class="field-row">'
+            f'<div class="{row_cls}">'
             f'{label_html}{body}{helper_html}{err_html}</div>'
         )
     leg_rails_raw = getattr(entity, "leg_rails", ()) or ()
@@ -1366,12 +1378,12 @@ def _render_multi_select_groups_field(
             "reopen the edit form to author XOR groups."
         )
         body = (
-            f'<div class="multi-select-groups-empty">{escape(empty_msg)}</div>'
+            f'<div class="{empty_cls}">{escape(empty_msg)}</div>'
             f'<input type="hidden" name="{escape(spec.name)}__present" value="1">'
             f'<input type="hidden" name="{escape(spec.name)}__num_groups" value="0">'
         )
         return (
-            f'<div class="field-row">'
+            f'<div class="{row_cls}">'
             f'{label_html}{body}{helper_html}{err_html}</div>'
         )
     # Render N existing groups + 1 always-empty trailing slot for
@@ -1384,7 +1396,7 @@ def _render_multi_select_groups_field(
     num_groups = len(groups) + 1
     body = (
         f'<div id="field-{escape(spec.name)}" '
-        f'class="multi-select-groups" role="group">'
+        f'class="flex flex-col gap-2" role="group">'
         f'{"".join(blocks)}'
         f'</div>'
         f'<input type="hidden" name="{escape(spec.name)}__present" value="1">'
@@ -1392,7 +1404,7 @@ def _render_multi_select_groups_field(
         f'value="{num_groups}">'
     )
     return (
-        f'<div class="field-row">'
+        f'<div class="{row_cls}">'
         f'{label_html}{body}{helper_html}{err_html}</div>'
     )
 
@@ -1412,19 +1424,33 @@ def _render_xor_group_row(
         "Add new XOR group" if is_new
         else f"XOR group {index + 1}"
     )
+    item_cls = (
+        "flex items-center gap-2 font-normal text-sm cursor-pointer "
+        "text-primary-fg"
+    )
     items = "".join(
-        f'<label class="multi-select-item">'
+        f'<label class="{item_cls}">'
         f'<input type="checkbox" name="{escape(name)}_{index}" '
         f'value="{escape(r)}"'
         f'{" checked" if r in selected_set else ""}>'
         f' {escape(r)}</label>'
         for r in rails
     )
-    css_class = "xor-group new" if is_new else "xor-group"
+    fieldset_base = (
+        "border border-surface-border rounded-sm px-3 py-2 bg-white"
+    )
+    fieldset_cls = (
+        f"{fieldset_base} border-dashed bg-surface-alt"
+        if is_new else fieldset_base
+    )
+    grid_cls = (
+        "grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 mt-1"
+    )
     return (
-        f'<fieldset class="{css_class}" data-group-index="{index}">'
-        f'<legend>{escape(legend)}</legend>'
-        f'<div class="multi-select-group">{items}</div>'
+        f'<fieldset class="{fieldset_cls}" data-group-index="{index}">'
+        f'<legend class="text-xs font-semibold text-secondary-fg px-1">'
+        f"{escape(legend)}</legend>"
+        f'<div class="{grid_cls}">{items}</div>'
         f'</fieldset>'
     )
 
@@ -1491,16 +1517,18 @@ def _render_chain_children_field(
             f"chain_children FieldSpec {spec.name!r} requires select_from",
         )
     label = (
-        f'<label for="field-{spec.name}">{escape(spec.label)}'
-        f'{"<span class=\"required\"> *</span>" if spec.required else ""}'
+        f'<label for="field-{spec.name}" class="font-semibold text-xs text-primary-fg">'
+        f'{escape(spec.label)}'
+        f'{"<span class=\"text-danger\"> *</span>" if spec.required else ""}'
         f"</label>"
     )
     helper = (
-        f'<small class="field-helper">{escape(spec.helper)}</small>'
+        f'<small class="text-xs text-secondary-fg">{escape(spec.helper)}</small>'
         if spec.helper else ""
     )
     err_html = (
-        f'<div class="field-error">{escape(error)}</div>' if error else ""
+        f'<div role="alert" class="text-xs text-danger bg-red-50 px-2 py-1 rounded-sm">{escape(error)}</div>'
+        if error else ""
     )
 
     options, _ = _resolve_select_options(spec.select_from, instance, "")
@@ -1512,38 +1540,56 @@ def _render_chain_children_field(
         if name not in options:
             options = (*options, name)
 
+    row_cls = (
+        "flex flex-wrap items-center gap-3 py-1 border-b "
+        "border-surface-border last:border-b-0"
+    )
+    item_cls = (
+        "flex items-center gap-2 font-normal text-sm cursor-pointer "
+        "text-primary-fg"
+    )
+    epc_input_cls = (
+        "w-16 px-1 py-0.5 border border-surface-border rounded-sm "
+        "text-sm bg-white"
+    )
     rows: list[str] = []
     for opt in options:
         is_selected = opt in selected_by_name
         fan_in, epc = selected_by_name.get(opt, (False, None))
         epc_str = str(epc) if epc is not None else ""
         rows.append(
-            f'<div class="chain-child-row" data-child="{escape(opt)}">'
-            f'<label class="multi-select-item">'
+            f'<div class="{row_cls}" data-child="{escape(opt)}">'
+            f'<label class="{item_cls}">'
             f'<input type="checkbox" name="children" '
             f'value="{escape(opt)}"{" checked" if is_selected else ""}>'
             f' {escape(opt)}</label>'
-            f'<label class="chain-child-fanin">'
+            f'<label class="{item_cls}">'
             f'<input type="checkbox" name="fan_in_{escape(opt)}" '
             f'value="true"{" checked" if fan_in else ""}>'
             f' fan-in</label>'
-            f'<label class="chain-child-epc">'
+            f'<label class="flex items-center gap-1 font-normal text-sm '
+            f'text-secondary-fg">'
             f' epc:&nbsp;'
             f'<input type="text" name="epc_{escape(opt)}" '
             f'value="{escape(epc_str)}" size="3" '
-            f'placeholder="—" inputmode="numeric"></label>'
+            f'placeholder="—" inputmode="numeric" '
+            f'class="{epc_input_cls}"></label>'
             f"</div>"
         )
 
     # Hidden marker so the server distinguishes "form rendered with
     # empty selection" from "field absent" (same shape multi_select uses).
+    group_cls = (
+        "flex flex-col gap-0 px-2 py-1 border border-surface-border "
+        "rounded-sm bg-white max-h-72 overflow-y-auto"
+    )
     input_html = (
         f'<input type="hidden" name="children__present" value="1">'
-        f'<div id="field-{spec.name}" class="chain-children-group" '
+        f'<div id="field-{spec.name}" class="{group_cls}" '
         f'role="group">{"".join(rows)}</div>'
     )
     return (
-        f'<div class="form-field form-field-chain-children">'
+        f'<div class="{field_row_classes()}">'
         f"{label}{input_html}{helper}{err_html}</div>"
     )
 
@@ -1655,6 +1701,7 @@ def _render_read_value(spec: FieldSpec, value: object) -> str:
     flat-tuple stringifier would print the inner tuple's ``repr``
     (``('A', 'B'), ('C', 'D')`` — readable but cluttered).
     """
+    ul_cls = "list-disc pl-5 m-0 text-sm text-primary-fg"
     if spec.kind == "multi_select_groups":
         groups = _multi_select_groups_value_as_groups(value)
         if not groups:
@@ -1663,11 +1710,15 @@ def _render_read_value(spec: FieldSpec, value: object) -> str:
             f'<li>group {i + 1}: {escape(", ".join(g))}</li>'
             for i, g in enumerate(groups)
         )
-        return f'<ul class="xor-group-list">{items}</ul>'
+        return f'<ul class="{ul_cls}">{items}</ul>'
     if spec.kind == "chain_children":
         children = _chain_children_value_as_specs(value)
         if not children:
             return "—"
+        tag_cls = (
+            "ml-2 px-1.5 py-0.5 text-xs rounded-sm bg-link-tint "
+            "text-accent border border-accent/25"
+        )
         items: list[str] = []
         for name, fan_in, epc in children:
             tag = ""
@@ -1675,9 +1726,11 @@ def _render_read_value(spec: FieldSpec, value: object) -> str:
                 epc_str = (
                     f" epc={epc}" if epc is not None else " (variable batch)"
                 )
-                tag = f' <span class="chain-child-fanin-tag">[fan-in{epc_str}]</span>'
+                tag = (
+                    f' <span class="{tag_cls}">[fan-in{epc_str}]</span>'
+                )
             items.append(f"<li>{escape(name)}{tag}</li>")
-        return f'<ul class="chain-children-list">{"".join(items)}</ul>'
+        return f'<ul class="{ul_cls}">{"".join(items)}</ul>'
     return escape(_value_to_input_str(value)) or "—"
 
 
@@ -1695,8 +1748,14 @@ def _render_read_card(
     specs = _filter_specs_for_entity(_FIELD_SPECS_BY_KIND[kind], entity)
     entity_id = _entity_id(kind, entity)
     hidden = _hidden_fields_for_entity(kind, entity, instance)
+    # AM.1 step 6 — read-card migrated. Semantic classes drop in favor
+    # of the entity_card_classes() helper + raw utilities for inner
+    # `<dl>` rows, `<header>`, action links, and the subtype badge.
+    dt_cls = "font-semibold text-xs text-secondary-fg uppercase tracking-wide mt-2"
+    dd_cls = "ml-0 mt-0.5 text-sm text-primary-fg break-words"
     rows = "".join(
-        f'<dt>{escape(s.label)}</dt><dd>'
+        f'<dt class="{dt_cls}">{escape(s.label)}</dt>'
+        f'<dd class="{dd_cls}">'
         f"{_render_read_value(s, getattr(entity, s.name, None))}"
         f"</dd>"
         for s in specs
@@ -1716,14 +1775,25 @@ def _render_read_card(
     rail_subtype = _rail_subtype_of(entity)
     if rail_subtype is not None:
         subtype_label = "two-leg" if rail_subtype == "two_leg" else "single-leg"
-        subtype_badge = (
-            f' <span class="entity-subtype-badge">{escape(subtype_label)}</span>'
+        badge_cls = (
+            "inline-block ml-2 px-1.5 py-0.5 text-xs font-semibold "
+            "rounded-sm bg-link-tint text-accent border border-accent/25"
         )
+        subtype_badge = (
+            f' <span class="{badge_cls}">{escape(subtype_label)}</span>'
+        )
+    h3_base = "text-base font-semibold m-0 text-primary-fg"
     if focus_node is None:
-        title_html = f"<h3>{escape(entity_id)}{subtype_badge}</h3>"
+        title_html = f'<h3 class="{h3_base}">{escape(entity_id)}{subtype_badge}</h3>'
     else:
+        # `entity-card-title` retained as a marker class
+        # (`_studio_routes.py` home-page JS uses
+        # `classList.contains('entity-card-title')` to detect the
+        # focus-target click). AM.2 migrates that JS to a
+        # `[data-focus-node]` attribute check and the marker drops.
         title_html = (
-            f'<h3 class="entity-card-title" tabindex="0" role="button" '
+            f'<h3 class="{h3_base} entity-card-title cursor-pointer hover:text-accent" '
+            f'tabindex="0" role="button" '
             f'data-focus-node="{escape(focus_node)}" '
             f'title="Focus the diagram on this entity">'
             f"{escape(entity_id)}{subtype_badge}</h3>"
@@ -1738,23 +1808,34 @@ def _render_read_card(
     # 400 + the error fragment which swaps in place. No cascade — the
     # operator clears the dependent reference first. AH.4: omitted in
     # demo-mode (the edit / delete routes are 404'd there).
+    action_link_cls = (
+        "text-accent no-underline text-xs cursor-pointer hover:underline"
+    )
     actions_html = "" if demo_mode else (
-        f'<div class="entity-card-actions">'
-        f'<a class="edit-link" href="/l2_shape/{kind}/{escape(entity_id)}/edit">Edit</a>'
-        f'<a class="delete-link" hx-delete="/l2_shape/{kind}/{escape(entity_id)}" '
+        f'<div class="flex items-center gap-3 shrink-0">'
+        f'<a class="{action_link_cls}" href="/l2_shape/{kind}/{escape(entity_id)}/edit">Edit</a>'
+        f'<a class="{action_link_cls}" hx-delete="/l2_shape/{kind}/{escape(entity_id)}" '
         f'hx-target="#{html_id}" hx-swap="outerHTML" '
         f'hx-confirm="Delete this entity? References that block deletion '
         f'will be reported inline.">Delete</a>'
         f"</div>"
     )
+    card_cls = entity_card_classes()
+    header_cls = "flex items-start justify-between gap-3 mb-2"
+    dl_cls = "m-0 grid grid-cols-[max-content_1fr] gap-x-4"
+    # `entity-card` retained as a marker class (no longer carries
+    # styling) — `_studio_routes.py` home-page JS uses
+    # `#home-entities .entity-card[data-kind]` to find loaded cards;
+    # AM.2 migrates that JS to the `[data-kind][data-entity-id]`
+    # attribute selector and this marker drops too.
     return (
-        f'<article class="entity-card" id="{html_id}" '
+        f'<article class="{card_cls} entity-card" id="{html_id}" '
         f'data-kind="{escape(kind)}" data-entity-id="{escape(entity_id)}">'
-        f"<header>"
+        f'<header class="{header_cls}">'
         f"{title_html}"
         f"{actions_html}"
         f"</header>"
-        f"<dl>{rows}</dl>"
+        f'<dl class="{dl_cls}">{rows}</dl>'
         f"</article>"
     )
 
@@ -1954,32 +2035,40 @@ def _render_rail_subtype_picker(
     ``/l2_shape/rail/new?subtype=<two_leg|single_leg>`` so the picked
     subtype shows up as a query param on step 2 (back button works).
     """
+    # AM.1 step 7 — rail-subtype-picker migrated. .rail-subtype-picker
+    # + .rail-subtype-button drop in favor of a flex column with
+    # two big anchor "cards" — each hover-tinted, focus-ringed for
+    # keyboard nav.
+    picker_btn_cls = (
+        "block bg-white border border-surface-border rounded-md px-5 py-4 "
+        "no-underline text-primary-fg cursor-pointer "
+        "hover:border-accent hover:bg-link-tint "
+        "focus:outline-2 focus:outline-accent focus:-outline-offset-1"
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>Create new rail — pick subtype — Studio</title>
   {studio_theme_head(instance)}
-  <link rel="stylesheet" href="{asset_url("diagram.css")}">
-  <link rel="stylesheet" href="{asset_url("editor.css")}">
 </head>
-<body class="create-page">
-  <header class="studio-header">
-    <h1>Create new rail</h1>
-    <a class="nav-link" href="/">← back to Studio</a>
-    <a class="nav-link" href="/l2_shape/rail/">→ list all rails</a>
+<body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
+  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
+    <h1 class="text-base m-0 font-semibold text-accent">Create new rail</h1>
+    <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
+    <a class="text-accent no-underline text-sm hover:underline" href="/l2_shape/rail/">→ list all rails</a>
   </header>
-  <main class="create-page-main">
-    <section class="create-intro">{_RAIL_SUBTYPE_PICKER_INTRO}</section>
-    <section class="create-form-wrap">
-      <div class="rail-subtype-picker">
-        <a class="rail-subtype-button" href="/l2_shape/rail/new?subtype=two_leg">
-          <strong>Two-leg rail →</strong>
-          <small>Debit + credit per firing (ACH, wire, internal, settlement)</small>
+  <main class="grid grid-cols-1 lg:[grid-template-columns:22rem_1fr] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
+    <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{_RAIL_SUBTYPE_PICKER_INTRO}</section>
+    <section class="bg-white border border-surface-border rounded-md p-5">
+      <div class="flex flex-col gap-3">
+        <a class="{picker_btn_cls}" href="/l2_shape/rail/new?subtype=two_leg">
+          <strong class="block text-base text-accent mb-1">Two-leg rail →</strong>
+          <small class="block text-sm text-secondary-fg">Debit + credit per firing (ACH, wire, internal, settlement)</small>
         </a>
-        <a class="rail-subtype-button" href="/l2_shape/rail/new?subtype=single_leg">
-          <strong>Single-leg rail →</strong>
-          <small>One leg per firing (fee, charge, sub-template leg)</small>
+        <a class="{picker_btn_cls}" href="/l2_shape/rail/new?subtype=single_leg">
+          <strong class="block text-base text-accent mb-1">Single-leg rail →</strong>
+          <small class="block text-sm text-secondary-fg">One leg per firing (fee, charge, sub-template leg)</small>
         </a>
       </div>
     </section>
@@ -2195,10 +2284,41 @@ def _render_reconciler_section(
         overrides.get("leg_rail_xor_groups_text") or "",
     )
 
+    # AM.1 step 4.5 — reconciler-section migrated. Semantic classes
+    # (.reconciler-section, .reconciler-helper, .reconciler-mode-row,
+    # .reconciler-mode-label, .reconciler-attach-block,
+    # .reconciler-create-block, .reconciler-new-{tt,agg,single-leg,two-leg}-fields)
+    # all retire to raw Tailwind utilities + the field_row_classes()
+    # helper. data-* hooks stay for the inline JS show/hide.
+    fieldset_cls = (
+        "border border-surface-border rounded-md p-4 my-3 "
+        "bg-surface-bg flex flex-col gap-3"
+    )
+    legend_cls = (
+        "px-2 font-semibold text-sm text-primary-fg"
+    )
+    helper_p_cls = "text-sm text-secondary-fg m-0"
+    mode_row_cls = "flex flex-wrap gap-4"
+    mode_label_cls = (
+        "flex items-center gap-2 font-normal text-sm cursor-pointer "
+        "text-primary-fg"
+    )
+    block_cls = (
+        "flex flex-col gap-3 pl-3 border-l-2 border-surface-border"
+    )
+    sub_block_cls = (
+        "flex flex-col gap-3 px-3 py-2 border border-dashed "
+        "border-surface-border rounded-sm bg-white"
+    )
+    label_cls = "font-semibold text-xs text-primary-fg"
+    helper_small_cls = "text-xs text-secondary-fg"
+    req = '<span class="text-danger"> *</span>'
+    input_cls = field_input_classes()
+    row_cls = field_row_classes()
     return (
-        '<fieldset class="reconciler-section">'
-        '<legend>Reconciler<span class="required"> *</span></legend>'
-        '<p class="reconciler-helper">'
+        f'<fieldset class="{fieldset_cls}">'
+        f'<legend class="{legend_cls}">Reconciler{req}</legend>'
+        f'<p class="{helper_p_cls}">'
         "Non-aggregating single-leg rails don't reconcile their own drift. "
         "Per SPEC §S3 + C3, this rail must attach to a reconciler — either "
         "a TransferTemplate (closes its expected_net) OR an aggregating Rail "
@@ -2208,31 +2328,31 @@ def _render_reconciler_section(
         "only (per validator C3)."
         "</p>"
         # Mode radio — Attach existing vs Create new.
-        '<div class="field-row reconciler-mode-row">'
-        '<label class="reconciler-mode-label">'
+        f'<div class="{mode_row_cls}">'
+        f'<label class="{mode_label_cls}">'
         f'<input type="radio" name="reconciler_mode" value="attach" data-reconciler-mode="attach"{attach_checked}>'
         ' Attach to existing reconciler</label>'
-        '<label class="reconciler-mode-label">'
+        f'<label class="{mode_label_cls}">'
         f'<input type="radio" name="reconciler_mode" value="create_new" data-reconciler-mode="create_new"{create_checked}>'
         ' Create new reconciler</label>'
         '</div>'
         # Attach-existing sub-form (kind + name dropdowns).
-        f'<div class="reconciler-attach-block" data-reconciler-block="attach"{attach_hidden}>'
-        '<div class="field-row">'
-        '<label for="field-reconciler_kind">Reconciler kind</label>'
-        '<select id="field-reconciler_kind" name="reconciler_kind">'
+        f'<div class="{block_cls}" data-reconciler-block="attach"{attach_hidden}>'
+        f'<div class="{row_cls}">'
+        f'<label for="field-reconciler_kind" class="{label_cls}">Reconciler kind</label>'
+        f'<select id="field-reconciler_kind" name="reconciler_kind" class="{input_cls}">'
         f'<option value=""{" selected" if not rk_override else ""}>— pick —</option>'
         f'{kind_html}'
         '</select>'
         '</div>'
-        '<div class="field-row">'
-        '<label for="field-reconciler_name">Reconciler name</label>'
-        '<select id="field-reconciler_name" name="reconciler_name">'
+        f'<div class="{row_cls}">'
+        f'<label for="field-reconciler_name" class="{label_cls}">Reconciler name</label>'
+        f'<select id="field-reconciler_name" name="reconciler_name" class="{input_cls}">'
         f'<option value=""{" selected" if not rn_override else ""}>— pick —</option>'
         f'<optgroup label="TransferTemplates">{tt_opts}</optgroup>'
         f'<optgroup label="Aggregating Rails">{agg_opts}</optgroup>'
         '</select>'
-        '<small class="field-helper">Pick from the optgroup matching the kind above; mismatches return 400.</small>'
+        f'<small class="{helper_small_cls}">Pick from the optgroup matching the kind above; mismatches return 400.</small>'
         '</div>'
         # AI.10 (2026-05-25) — leg_rail_xor_groups partitioning for
         # the TT case. Optional textarea: one group per line, comma-
@@ -2243,90 +2363,81 @@ def _render_reconciler_section(
         # create handler) parses + rewrites into the BB.3 wire
         # shape (leg_rail_xor_groups_<i> per group + the present /
         # num_groups markers).
-        '<div class="field-row">'
-        '<label for="field-leg_rail_xor_groups_text">XOR groups (TT only, optional)</label>'
-        f'<textarea id="field-leg_rail_xor_groups_text" name="leg_rail_xor_groups_text" rows="3" placeholder="rail_a, rail_b\\nrail_c, rail_d">{escape(rnn_xor_groups_text_override)}</textarea>'
-        '<small class="field-helper">One group per line, comma-separated rail names. Required when attaching a Variable-direction rail to a TT with existing Variables (SPEC C1 partitioning); leave blank for the common case.</small>'
+        f'<div class="{row_cls}">'
+        f'<label for="field-leg_rail_xor_groups_text" class="{label_cls}">XOR groups (TT only, optional)</label>'
+        f'<textarea id="field-leg_rail_xor_groups_text" name="leg_rail_xor_groups_text" rows="3" placeholder="rail_a, rail_b\\nrail_c, rail_d" class="{input_cls} resize-y min-h-16">{escape(rnn_xor_groups_text_override)}</textarea>'
+        f'<small class="{helper_small_cls}">One group per line, comma-separated rail names. Required when attaching a Variable-direction rail to a TT with existing Variables (SPEC C1 partitioning); leave blank for the common case.</small>'
         '</div>'
         '</div>'
         # Create-new sub-form (kind + new-name + per-kind required minima).
-        f'<div class="reconciler-create-block" data-reconciler-block="create_new"{create_hidden}>'
-        '<p class="reconciler-helper">'
+        f'<div class="{block_cls}" data-reconciler-block="create_new"{create_hidden}>'
+        f'<p class="{helper_p_cls}">'
         "The new reconciler is created in the same atomic save as the rail. "
         "Required fields below match the reconciler kind's validator minimum "
         "(rejected POSTs re-render with an inline error)."
         "</p>"
-        '<div class="field-row">'
-        '<label for="field-reconciler_new_name">New reconciler name'
-        '<span class="required"> *</span></label>'
-        f'<input type="text" id="field-reconciler_new_name" name="reconciler_new_name" value="{escape(rnn_name_override)}">'
+        f'<div class="{row_cls}">'
+        f'<label for="field-reconciler_new_name" class="{label_cls}">New reconciler name{req}</label>'
+        f'<input type="text" id="field-reconciler_new_name" name="reconciler_new_name" value="{escape(rnn_name_override)}" class="{input_cls}">'
         '</div>'
-        '<div class="field-row">'
-        '<label for="field-reconciler_new_kind">New reconciler kind'
-        '<span class="required"> *</span></label>'
-        '<select id="field-reconciler_new_kind" name="reconciler_new_kind" data-reconciler-new-kind>'
+        f'<div class="{row_cls}">'
+        f'<label for="field-reconciler_new_kind" class="{label_cls}">New reconciler kind{req}</label>'
+        f'<select id="field-reconciler_new_kind" name="reconciler_new_kind" data-reconciler-new-kind class="{input_cls}">'
         f'<option value=""{" selected" if not rk_override else ""}>— pick —</option>'
         f'<option value="transfer_template"{" selected" if rk_override == "transfer_template" else ""}>TransferTemplate</option>'
         f'<option value="aggregating_rail"{" selected" if rk_override == "aggregating_rail" else ""}>Aggregating Rail</option>'
         '</select>'
-        '<small class="field-helper">Server reads `reconciler_kind` from this when mode=create_new.</small>'
+        f'<small class="{helper_small_cls}">Server reads `reconciler_kind` from this when mode=create_new.</small>'
         '</div>'
         # TT-specific minimum fields.
-        f'<div class="reconciler-new-tt-fields" data-reconciler-new-kind-fields="transfer_template"{"" if rk_override == "transfer_template" else " hidden"}>'
-        '<div class="field-row">'
-        '<label for="field-reconciler_new_expected_net">Expected net'
-        '<span class="required"> *</span></label>'
-        f'<input type="text" id="field-reconciler_new_expected_net" name="reconciler_new_expected_net" value="{escape(rnn_expected_net_override)}" placeholder="0.00">'
-        '<small class="field-helper">Money — must equal the sum of leg amounts at close.</small>'
+        f'<div class="{sub_block_cls}" data-reconciler-new-kind-fields="transfer_template"{"" if rk_override == "transfer_template" else " hidden"}>'
+        f'<div class="{row_cls}">'
+        f'<label for="field-reconciler_new_expected_net" class="{label_cls}">Expected net{req}</label>'
+        f'<input type="text" id="field-reconciler_new_expected_net" name="reconciler_new_expected_net" value="{escape(rnn_expected_net_override)}" placeholder="0.00" class="{input_cls}">'
+        f'<small class="{helper_small_cls}">Money — must equal the sum of leg amounts at close.</small>'
         '</div>'
-        '<div class="field-row">'
-        '<label for="field-reconciler_new_transfer_key">Transfer key</label>'
-        f'<input type="text" id="field-reconciler_new_transfer_key" name="reconciler_new_transfer_key" value="{escape(rnn_transfer_key_override)}" placeholder="metadata_key_1, metadata_key_2">'
-        '<small class="field-helper">Comma-separated metadata keys that scope a transfer instance.</small>'
+        f'<div class="{row_cls}">'
+        f'<label for="field-reconciler_new_transfer_key" class="{label_cls}">Transfer key</label>'
+        f'<input type="text" id="field-reconciler_new_transfer_key" name="reconciler_new_transfer_key" value="{escape(rnn_transfer_key_override)}" placeholder="metadata_key_1, metadata_key_2" class="{input_cls}">'
+        f'<small class="{helper_small_cls}">Comma-separated metadata keys that scope a transfer instance.</small>'
         '</div>'
-        '<div class="field-row">'
-        '<label for="field-reconciler_new_completion">Completion'
-        '<span class="required"> *</span></label>'
-        f'<input type="text" id="field-reconciler_new_completion" name="reconciler_new_completion" value="{escape(rnn_completion_override)}" placeholder="all_legs_posted">'
-        '<small class="field-helper">CompletionExpression — when this TT is considered done.</small>'
+        f'<div class="{row_cls}">'
+        f'<label for="field-reconciler_new_completion" class="{label_cls}">Completion{req}</label>'
+        f'<input type="text" id="field-reconciler_new_completion" name="reconciler_new_completion" value="{escape(rnn_completion_override)}" placeholder="all_legs_posted" class="{input_cls}">'
+        f'<small class="{helper_small_cls}">CompletionExpression — when this TT is considered done.</small>'
         '</div>'
         '</div>'
         # Aggregating-rail minimum fields.
-        f'<div class="reconciler-new-agg-fields" data-reconciler-new-kind-fields="aggregating_rail"{"" if rk_override == "aggregating_rail" else " hidden"}>'
-        '<div class="field-row">'
-        '<label for="field-reconciler_new_subtype">Subtype'
-        '<span class="required"> *</span></label>'
-        '<select id="field-reconciler_new_subtype" name="reconciler_new_subtype" data-reconciler-new-subtype>'
+        f'<div class="{sub_block_cls}" data-reconciler-new-kind-fields="aggregating_rail"{"" if rk_override == "aggregating_rail" else " hidden"}>'
+        f'<div class="{row_cls}">'
+        f'<label for="field-reconciler_new_subtype" class="{label_cls}">Subtype{req}</label>'
+        f'<select id="field-reconciler_new_subtype" name="reconciler_new_subtype" data-reconciler-new-subtype class="{input_cls}">'
         f'<option value=""{" selected" if not rnn_subtype_override else ""}>— pick —</option>'
         f'{subtype_opts}'
         '</select>'
         '</div>'
-        '<div class="field-row">'
-        '<label for="field-reconciler_new_cadence">Cadence'
-        '<span class="required"> *</span></label>'
-        f'<input type="text" id="field-reconciler_new_cadence" name="reconciler_new_cadence" value="{escape(rnn_cadence_override)}" placeholder="daily">'
+        f'<div class="{row_cls}">'
+        f'<label for="field-reconciler_new_cadence" class="{label_cls}">Cadence{req}</label>'
+        f'<input type="text" id="field-reconciler_new_cadence" name="reconciler_new_cadence" value="{escape(rnn_cadence_override)}" placeholder="daily" class="{input_cls}">'
         '</div>'
         # AI.13 follow-on (2026-05-25): origin is validator-required
         # (O1: every leg resolves to an Origin). Single-leg + two-leg
         # both need it. Same form-pairing principle as expected_net.
-        '<div class="field-row">'
-        '<label for="field-reconciler_new_origin_agg">Origin'
-        '<span class="required"> *</span></label>'
-        '<input type="text" id="field-reconciler_new_origin_agg" name="reconciler_new_origin" placeholder="InternalInitiated">'
-        '<small class="field-helper">InternalInitiated / ExternalForcePosted (rail-level — applies to all legs).</small>'
+        f'<div class="{row_cls}">'
+        f'<label for="field-reconciler_new_origin_agg" class="{label_cls}">Origin{req}</label>'
+        f'<input type="text" id="field-reconciler_new_origin_agg" name="reconciler_new_origin" placeholder="InternalInitiated" class="{input_cls}">'
+        f'<small class="{helper_small_cls}">InternalInitiated / ExternalForcePosted (rail-level — applies to all legs).</small>'
         '</div>'
         # Single-leg aggregator: leg_role + leg_direction
-        f'<div class="reconciler-new-single-leg-fields" data-reconciler-new-subtype-fields="single_leg"{"" if rnn_subtype_override == "single_leg" else " hidden"}>'
-        '<div class="field-row">'
-        '<label for="field-reconciler_new_leg_role">Leg role'
-        '<span class="required"> *</span></label>'
-        f'<input type="text" id="field-reconciler_new_leg_role" name="reconciler_new_leg_role" value="{escape(rnn_leg_role_override)}">'
+        f'<div class="{sub_block_cls}" data-reconciler-new-subtype-fields="single_leg"{"" if rnn_subtype_override == "single_leg" else " hidden"}>'
+        f'<div class="{row_cls}">'
+        f'<label for="field-reconciler_new_leg_role" class="{label_cls}">Leg role{req}</label>'
+        f'<input type="text" id="field-reconciler_new_leg_role" name="reconciler_new_leg_role" value="{escape(rnn_leg_role_override)}" class="{input_cls}">'
         '<input type="hidden" name="reconciler_new_leg_role__present" value="1">'
         '</div>'
-        '<div class="field-row">'
-        '<label for="field-reconciler_new_leg_direction">Leg direction'
-        '<span class="required"> *</span></label>'
-        '<select id="field-reconciler_new_leg_direction" name="reconciler_new_leg_direction">'
+        f'<div class="{row_cls}">'
+        f'<label for="field-reconciler_new_leg_direction" class="{label_cls}">Leg direction{req}</label>'
+        f'<select id="field-reconciler_new_leg_direction" name="reconciler_new_leg_direction" class="{input_cls}">'
         f'<option value=""{" selected" if not rnn_leg_direction_override else ""}>— pick —</option>'
         f'{leg_dir_opts}'
         '</select>'
@@ -2339,24 +2450,21 @@ def _render_reconciler_section(
         # principle says the form should expose every validator-required
         # field — without this, BB.2's aggregator-two-leg create-new
         # 400s on submit. AI.2.d.2 piece 3 surfaced it.
-        f'<div class="reconciler-new-two-leg-fields" data-reconciler-new-subtype-fields="two_leg"{"" if rnn_subtype_override == "two_leg" else " hidden"}>'
-        '<div class="field-row">'
-        '<label for="field-reconciler_new_source_role">Source role'
-        '<span class="required"> *</span></label>'
-        f'<input type="text" id="field-reconciler_new_source_role" name="reconciler_new_source_role" value="{escape(rnn_source_role_override)}">'
+        f'<div class="{sub_block_cls}" data-reconciler-new-subtype-fields="two_leg"{"" if rnn_subtype_override == "two_leg" else " hidden"}>'
+        f'<div class="{row_cls}">'
+        f'<label for="field-reconciler_new_source_role" class="{label_cls}">Source role{req}</label>'
+        f'<input type="text" id="field-reconciler_new_source_role" name="reconciler_new_source_role" value="{escape(rnn_source_role_override)}" class="{input_cls}">'
         '<input type="hidden" name="reconciler_new_source_role__present" value="1">'
         '</div>'
-        '<div class="field-row">'
-        '<label for="field-reconciler_new_destination_role">Destination role'
-        '<span class="required"> *</span></label>'
-        f'<input type="text" id="field-reconciler_new_destination_role" name="reconciler_new_destination_role" value="{escape(rnn_destination_role_override)}">'
+        f'<div class="{row_cls}">'
+        f'<label for="field-reconciler_new_destination_role" class="{label_cls}">Destination role{req}</label>'
+        f'<input type="text" id="field-reconciler_new_destination_role" name="reconciler_new_destination_role" value="{escape(rnn_destination_role_override)}" class="{input_cls}">'
         '<input type="hidden" name="reconciler_new_destination_role__present" value="1">'
         '</div>'
-        '<div class="field-row">'
-        '<label for="field-reconciler_new_expected_net_agg">Expected net'
-        '<span class="required"> *</span></label>'
-        f'<input type="text" id="field-reconciler_new_expected_net_agg" name="reconciler_new_expected_net" value="{escape(rnn_expected_net_override)}" placeholder="0.00">'
-        '<small class="field-helper">Money — typically 0 for a standalone aggregator (validator: standalone two-leg rail MUST declare expected_net).</small>'
+        f'<div class="{row_cls}">'
+        f'<label for="field-reconciler_new_expected_net_agg" class="{label_cls}">Expected net{req}</label>'
+        f'<input type="text" id="field-reconciler_new_expected_net_agg" name="reconciler_new_expected_net" value="{escape(rnn_expected_net_override)}" placeholder="0.00" class="{input_cls}">'
+        f'<small class="{helper_small_cls}">Money — typically 0 for a standalone aggregator (validator: standalone two-leg rail MUST declare expected_net).</small>'
         '</div>'
         '</div>'
         '</div>'
@@ -2490,7 +2598,8 @@ def _render_create_page(
         if subtype is not None else ""
     )
     global_err_html = (
-        f'<div class="form-global-error">{escape(global_error)}</div>'
+        f'<div role="alert" class="text-sm text-danger bg-red-50 border '
+        f'border-danger rounded-sm px-3 py-2 mb-3">{escape(global_error)}</div>'
         if global_error else ""
     )
     intro_html = _CREATE_INTRO_BY_KIND.get(kind, "")
@@ -2500,16 +2609,15 @@ def _render_create_page(
         f" ({'two-leg' if subtype == 'two_leg' else 'single-leg'})"
         if subtype is not None else ""
     )
-    # AM.1 step 3 — page-shell chrome migrated to raw Tailwind
-    # utilities per AM.0 locks L1-L5. editor.css still loaded for
-    # the inner form-field markup (step 4 migrates `_render_field`'s
-    # output); diagram.css link dropped (.studio-header migrated to
-    # utilities, no other diagram.css class consumed here).
-    # `form.create-form` class kept ONLY as a hook for the
-    # `tests/e2e/_drivers/studio_browser_editor.py::_submit_create_form`
-    # locator (selects `form.create-form button[type="submit"]`);
-    # editor.css's `.create-form` rule is empty so it's a pure
-    # locator hook. Once browser-driver locators are updated to
+    # AM.1 steps 3 + 4 — page-shell chrome + inner form-field markup
+    # all migrated to raw Tailwind utilities per AM.0 locks L1-L5.
+    # editor.css link dropped — _render_field + _render_reconciler_section
+    # + _render_chain_children_field + _render_multi_select_groups_field
+    # no longer emit any editor.css class. `form.create-form` kept ONLY
+    # as a hook for `tests/e2e/_drivers/studio_browser_editor.py::
+    # _submit_create_form` (selects `form.create-form button[type="submit"]`);
+    # editor.css's `.create-form` rule is empty so it's a pure locator
+    # hook. Once browser-driver locators are updated to
     # `form[action^="/l2_shape/"]` (AM.4 cleanup), this class drops.
     primary_btn = primary_button_classes()
     return f"""<!doctype html>
@@ -2518,7 +2626,6 @@ def _render_create_page(
   <meta charset="utf-8">
   <title>Create new {escape(kind)}{escape(title_suffix)} — Studio</title>
   {studio_theme_head(instance)}
-  <link rel="stylesheet" href="{asset_url("editor.css")}">
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
@@ -2580,7 +2687,8 @@ def _render_edit_page(
         if s.name not in hidden
     )
     global_err_html = (
-        f'<div class="form-global-error">{escape(global_error)}</div>'
+        f'<div role="alert" class="text-sm text-danger bg-red-50 border '
+        f'border-danger rounded-sm px-3 py-2 mb-3">{escape(global_error)}</div>'
         if global_error else ""
     )
     intro_html = _CREATE_INTRO_BY_KIND.get(kind, "")
@@ -2589,30 +2697,37 @@ def _render_edit_page(
         f" ({'two-leg' if rail_subtype == 'two_leg' else 'single-leg'})"
         if rail_subtype is not None else ""
     )
+    # AM.1 step 5 — edit-page chrome migrated. Body now drops
+    # `.create-page` / `.edit-page` semantic shells; structure mirrors
+    # _render_create_page's grid-based main + bg-surface-bg body.
+    # `form.edit-form` class kept ONLY as a hook for browser-driver
+    # locators (selects `form.edit-form button[type="submit"]`) —
+    # editor.css's `.edit-form` rule is empty so it's a pure locator
+    # hook. AM.4 cleanup will swap drivers to
+    # `form[action^="/l2_shape/{kind}/{id}"]`.
+    primary_btn = primary_button_classes()
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>Edit {escape(kind)}: {escape(entity_id)} — Studio</title>
   {studio_theme_head(instance)}
-  <link rel="stylesheet" href="{asset_url("diagram.css")}">
-  <link rel="stylesheet" href="{asset_url("editor.css")}">
 </head>
-<body class="create-page edit-page">
-  <header class="studio-header">
-    <h1>Edit {escape(kind)}{escape(title_suffix)}: {escape(entity_id)}</h1>
-    <a class="nav-link" href="/">← back to Studio</a>
-    <a class="nav-link" href="/l2_shape/{escape(kind)}/">→ list all {escape(kind)}s</a>
+<body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
+  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
+    <h1 class="text-base m-0 font-semibold text-accent">Edit {escape(kind)}{escape(title_suffix)}: {escape(entity_id)}</h1>
+    <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
+    <a class="text-accent no-underline text-sm hover:underline" href="/l2_shape/{escape(kind)}/">→ list all {escape(kind)}s</a>
   </header>
-  <main class="create-page-main">
-    <section class="create-intro">{intro_html}</section>
-    <section class="create-form-wrap">
-      <form method="post" action="/l2_shape/{escape(kind)}/{escape(entity_id)}" class="create-form edit-form">
+  <main class="grid grid-cols-1 lg:[grid-template-columns:22rem_1fr] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
+    <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{intro_html}</section>
+    <section class="bg-white border border-surface-border rounded-md p-5">
+      <form method="post" action="/l2_shape/{escape(kind)}/{escape(entity_id)}" class="edit-form">
         {global_err_html}
         {fields_html}
-        <div class="form-actions">
-          <button type="submit">Save</button>
-          <a class="cancel-link" href="/">Cancel</a>
+        <div class="flex items-center gap-3 mt-4">
+          <button type="submit" class="{primary_btn}">Save</button>
+          <a class="text-accent no-underline text-xs cursor-pointer hover:underline" href="/">Cancel</a>
         </div>
       </form>
     </section>
@@ -2729,41 +2844,43 @@ def _render_singleton_page(
     label, intro_html = _SINGLETON_INTRO_BY_KIND[kind]
     current_yaml = yaml_text if yaml_text is not None else _singleton_yaml_text(instance, kind)
     global_err_html = (
-        f'<div class="form-global-error">{escape(global_error)}</div>'
+        f'<div role="alert" class="text-sm text-danger bg-red-50 border '
+        f'border-danger rounded-sm px-3 py-2 mb-3">{escape(global_error)}</div>'
         if global_error else ""
     )
+    primary_btn = primary_button_classes()
+    input_cls = field_input_classes()
+    row_cls = field_row_classes()
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>{escape(label)} — Studio</title>
   {studio_theme_head(instance)}
-  <link rel="stylesheet" href="{asset_url("diagram.css")}">
-  <link rel="stylesheet" href="{asset_url("editor.css")}">
 </head>
-<body class="create-page">
-  <header class="studio-header">
-    <h1>{escape(label)}</h1>
-    <a class="nav-link" href="/">← back to Studio</a>
+<body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
+  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
+    <h1 class="text-base m-0 font-semibold text-accent">{escape(label)}</h1>
+    <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
   </header>
-  <main class="create-page-main">
-    <section class="create-intro">{intro_html}</section>
-    <section class="create-form-wrap">
+  <main class="grid grid-cols-1 lg:[grid-template-columns:22rem_1fr] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
+    <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{intro_html}</section>
+    <section class="bg-white border border-surface-border rounded-md p-5">
       <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form">
         <input type="hidden" name="_method" value="PUT">
         {global_err_html}
-        <div class="field-row">
-          <label for="field-yaml">YAML</label>
-          <textarea id="field-yaml" name="yaml" rows="22" class="yaml-block" spellcheck="false">{escape(current_yaml)}</textarea>
-          <small class="field-helper">
+        <div class="{row_cls}">
+          <label for="field-yaml" class="font-semibold text-xs text-primary-fg">YAML</label>
+          <textarea id="field-yaml" name="yaml" rows="22" class="{input_cls} font-mono whitespace-pre resize-y min-h-16" spellcheck="false">{escape(current_yaml)}</textarea>
+          <small class="text-xs text-secondary-fg">
             Empty block ⇒ clears the {escape(kind)} (silent-fallback).
             Bad YAML or missing required fields ⇒ form re-renders with
             your typed content + the validator error inline.
           </small>
         </div>
-        <div class="form-actions">
-          <button type="submit">Save</button>
-          <a class="cancel-link" href="/">Cancel</a>
+        <div class="flex items-center gap-3 mt-4">
+          <button type="submit" class="{primary_btn}">Save</button>
+          <a class="text-accent no-underline text-xs cursor-pointer hover:underline" href="/">Cancel</a>
         </div>
       </form>
     </section>
@@ -2792,16 +2909,22 @@ def _render_list_page(
         _render_read_card(kind, e, instance, demo_mode=demo_mode)
         for e in entities
     )
+    # AM.1 step 6 — list-page chrome migrated. `entity-list` /
+    # `studio-header` / `nav-link` semantic classes drop in favor
+    # of raw utilities. `id="entity-list"` kept as the hx-target
+    # hook the routes' delete + save fragments swap into.
+    grid_cls = (
+        "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 "
+        "max-w-7xl mx-auto px-4 pt-4 pb-12"
+    )
     if embed:
-        return f'<div class="entity-list" data-kind="{escape(kind)}">{cards}</div>'
+        return f'<div class="{grid_cls}" data-kind="{escape(kind)}">{cards}</div>'
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>Studio editor — {escape(kind)}</title>
   {studio_theme_head(instance)}
-  <link rel="stylesheet" href="{asset_url("diagram.css")}">
-  <link rel="stylesheet" href="{asset_url("editor.css")}">
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <script>
     // X.4.e.5 fix — HTMX defaults to NOT swapping 4xx response bodies
@@ -2822,13 +2945,13 @@ def _render_list_page(
     }});
   </script>
 </head>
-<body>
-  <header class="studio-header">
-    <h1>Studio · editor · {escape(kind)}</h1>
-    <a class="nav-link" href="/">← landing</a>
-    <a class="nav-link" href="/diagram">→ diagram</a>
+<body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
+  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
+    <h1 class="text-base m-0 font-semibold text-accent">Studio · editor · {escape(kind)}</h1>
+    <a class="text-accent no-underline text-sm hover:underline" href="/">← landing</a>
+    <a class="text-accent no-underline text-sm hover:underline" href="/diagram">→ diagram</a>
   </header>
-  <main id="entity-list">
+  <main id="entity-list" class="{grid_cls}">
     {cards}
   </main>
 </body>
@@ -3449,7 +3572,8 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
             validate(new_inst)
         except L2ValidationError as exc:
             return HTMLResponse(
-                f'<div class="form-global-error">'
+                f'<div role="alert" class="text-sm text-danger bg-red-50 '
+                f'border border-danger rounded-sm px-3 py-2 mb-3">'
                 f"Cannot delete: {escape(str(exc))}</div>",
                 status_code=400,
             )

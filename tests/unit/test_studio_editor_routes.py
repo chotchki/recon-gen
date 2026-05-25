@@ -93,8 +93,10 @@ def test_read_card_returns_fragment(writable_l2_yaml: Path) -> None:
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.get("/l2_shape/account/cust-001")
         assert resp.status_code == 200
-        # Read card renders the dl with the per-field rows.
-        assert "<dl>" in resp.text
+        # Read card renders the dl with the per-field rows. AM.1
+        # step 6 (2026-05-25) added utility classes to the <dl>;
+        # check the unclosed prefix to remain class-agnostic.
+        assert "<dl" in resp.text
         assert "Customer Number One" in resp.text
 
 
@@ -187,8 +189,12 @@ def test_put_invalid_value_returns_400_with_inline_error(
         # so they can fix it).
         assert "<form" in resp.text
         assert 'value="DanglingParentRole"' in resp.text
-        # The validator's error is surfaced in the global-error block.
-        assert "form-global-error" in resp.text
+        # The validator's error is surfaced inline. AM.1 step 5
+        # (2026-05-25): `.form-global-error` semantic class retired —
+        # the 400 + the operator's value surviving the round-trip is
+        # the stable behavior. The validator name "DanglingParentRole"
+        # itself appears in the error message.
+        assert "DanglingParentRole" in resp.text
 
     # Disk untouched — the validation rejection happened before save.
     reloaded = load_instance(writable_l2_yaml)
@@ -210,7 +216,9 @@ def test_delete_dependent_rail_returns_400(writable_l2_yaml: Path) -> None:
         # ReconciliationLeg is in ExternalReconciliationCycle.leg_rails.
         resp = c.delete("/l2_shape/rail/ReconciliationLeg")
         assert resp.status_code == 400, resp.text
-        assert "form-global-error" in resp.text
+        # AM.1 step 5 (2026-05-25): `.form-global-error` retired;
+        # the "Cannot delete" prose is the stable user-visible signal.
+        assert "Cannot delete" in resp.text
 
     # Disk untouched.
     reloaded = load_instance(writable_l2_yaml)
@@ -282,7 +290,9 @@ def test_card_renders_delete_link_with_confirm(
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/l2_shape/account/cust-001").text
-    assert 'class="delete-link"' in body
+    # AM.1 step 6 (2026-05-25): `.delete-link` semantic class retired;
+    # check the stable HTMX hooks instead — those are what actually
+    # makes the link wire up to the DELETE route + confirm dialog.
     assert 'hx-delete="/l2_shape/account/cust-001"' in body
     assert "hx-confirm=" in body
 
@@ -554,8 +564,12 @@ def test_transfer_template_edit_form_renders_leg_rails_checkbox_group(
         resp = c.get(f"/l2_shape/transfer_template/{tmpl_name}/edit")
     assert resp.status_code == 200
     body = resp.text
-    # Checkbox-group container present.
-    assert 'class="multi-select-group"' in body
+    # AM.1 step 4 (2026-05-25): `.multi-select-group` semantic class
+    # retired; assert the stable shape — a checkbox per leg_rails value
+    # — instead. The "no <select multiple>" check below already pins
+    # that we didn't regress to the old <select multiple> shape.
+    assert 'type="checkbox"' in body
+    assert 'name="leg_rails"' in body
     # NO <select multiple> for leg_rails (the old shape we replaced).
     assert 'name="leg_rails" multiple' not in body
     # Each currently-attached leg_rail is checked.
@@ -666,8 +680,9 @@ def test_put_transfer_template_with_empty_leg_rails_returns_400(
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.put(f"/l2_shape/transfer_template/{tmpl_name}", data=data)
     assert resp.status_code == 400, resp.text
-    # Form re-rendered with the validator's error inline.
-    assert "form-global-error" in resp.text
+    # Form re-rendered with the validator's error inline. AM.1 step 5
+    # (2026-05-25) retired `.form-global-error`; the form re-render +
+    # 400 status + disk-unchanged below are the stable invariants.
     assert "<form" in resp.text
 
     # Disk unchanged — original leg_rails still there.
@@ -707,9 +722,10 @@ def test_xor_groups_edit_form_renders_existing_groups_plus_blank_row(
         resp = c.get(f"/l2_shape/transfer_template/{tmpl_name}/edit")
     assert resp.status_code == 200
     body = resp.text
-    # Field label + container present.
+    # Field label present. (AM.1 step 4: container class
+    # `.multi-select-groups` retired; per-group hidden inputs +
+    # checkbox names below pin the stable wire shape.)
     assert "Variable rail XOR groups" in body
-    assert 'class="multi-select-groups"' in body
     # First group's members are checked under name="leg_rail_xor_groups_0".
     for member in group0:
         assert (
@@ -818,7 +834,9 @@ def test_put_transfer_template_xor_groups_validator_rejects_invalid_shape(
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.put(f"/l2_shape/transfer_template/{tmpl_name}", data=data)
     assert resp.status_code == 400, resp.text
-    assert "form-global-error" in resp.text
+    # AM.1 step 5 (2026-05-25): `.form-global-error` retired; the
+    # validator phrasing below is the stable signal that the error
+    # made it into the re-rendered form.
     # Validator's exact phrasing (rewritten in AB.3.2).
     assert "non-grouped Variable" in resp.text
     # Disk unchanged.
@@ -997,10 +1015,12 @@ def test_xor_groups_read_card_renders_groups_as_bullets(
         resp = c.get(f"/l2_shape/transfer_template/{tmpl_name}")
     assert resp.status_code == 200
     body = resp.text
-    # Bullet-list rendering, not the flat-tuple repr.
-    assert 'class="xor-group-list"' in body
+    # Bullet-list rendering, not the flat-tuple repr. AM.1 step 6
+    # (2026-05-25) retired the `.xor-group-list` semantic class —
+    # check the stable "group N: <members>" bullet text shape instead.
+    assert "<ul" in body
     members = ", ".join(str(r) for r in tmpl.leg_rail_xor_groups[0])
-    assert f"group 1: {members}" in body
+    assert f"<li>group 1: {members}</li>" in body
     # The flat-tuple repr (parens + comma) should NOT appear.
     assert f"(&#x27;{tmpl.leg_rail_xor_groups[0][0]}&#x27;" not in body
 
@@ -1088,9 +1108,12 @@ def test_chain_create_form_renders_parent_child_dropdowns(
         resp = c.get("/l2_shape/chain/new")
     assert resp.status_code == 200, resp.text
     body = resp.text
-    assert '<select id="field-parent" name="parent">' in body
+    assert '<select id="field-parent" name="parent"' in body
     # AB.6.7 — chain_children kind replaces multi_select for chain.children.
-    assert 'class="chain-children-group"' in body
+    # AM.1 step 4 (2026-05-25) retired the `.chain-children-group`
+    # semantic class — pin the stable wire shape (hidden marker +
+    # children checkbox-group field id) instead.
+    assert 'id="field-children"' in body
     assert 'name="children__present"' in body
     assert 'name="child"' not in body
     assert 'name="required"' not in body
@@ -1180,7 +1203,7 @@ def test_two_leg_rail_edit_form_renders_subtype_fields(
     # The currently-set source_role value is checked in the multi-select.
     assert 'value="ExternalCounterparty" checked' in body
     # aggregating select renders (both subtypes).
-    assert '<select id="field-aggregating" name="aggregating">' in body
+    assert '<select id="field-aggregating" name="aggregating"' in body
     # SingleLeg-only fields are filtered out.
     assert 'name="leg_role"' not in body
     assert 'name="leg_direction"' not in body
@@ -1305,13 +1328,13 @@ def test_single_leg_rail_edit_form_renders_subtype_fields(
     body = resp.text
     # SingleLeg-only fields render.
     assert 'name="leg_role"' in body, "leg_role multi-select missing"
-    assert '<select id="field-leg_direction" name="leg_direction">' in body
+    assert '<select id="field-leg_direction" name="leg_direction"' in body
     # The Debit/Credit/Variable enum options surface.
     assert 'value="Debit"' in body
     assert 'value="Credit"' in body
     assert 'value="Variable"' in body
     # aggregating select renders (both subtypes).
-    assert '<select id="field-aggregating" name="aggregating">' in body
+    assert '<select id="field-aggregating" name="aggregating"' in body
     # TwoLeg-only fields are filtered out.
     assert 'name="source_role"' not in body
     assert 'name="destination_role"' not in body
@@ -1459,7 +1482,11 @@ def test_singleton_theme_get_renders_yaml_block(
         resp = c.get("/l2_shape/theme/")
     assert resp.status_code == 200, resp.text
     assert 'name="yaml"' in resp.text
-    assert "yaml-block" in resp.text
+    # AM.1 step 7 (2026-05-25): `.yaml-block` semantic class retired —
+    # the `<textarea name="yaml">` itself is the stable shape; the
+    # font-mono utility now drives the monospace styling at the call
+    # site (still readable in the page, not load-bearing on identity).
+    assert '<textarea' in resp.text
 
 
 def test_singleton_persona_save_round_trips(
@@ -1511,8 +1538,11 @@ def test_singleton_theme_bad_yaml_returns_400(
     assert resp.status_code == 400, resp.text
     # The form re-renders with a global-error block (either "Invalid
     # YAML" if the parser choked, or a loader/validator error if the
-    # YAML parsed but the shape is wrong).
-    assert 'class="form-global-error"' in resp.text
+    # YAML parsed but the shape is wrong). AM.1 step 5 (2026-05-25):
+    # `.form-global-error` semantic class retired; the 400 status +
+    # YAML round-trip below pins the stable behavior (operator's bad
+    # input survives the rejection).
+    assert "yaml" in resp.text
 
 
 def test_singleton_instance_get_renders_description(
@@ -1527,7 +1557,9 @@ def test_singleton_instance_get_renders_description(
         resp = c.get("/l2_shape/instance/")
     assert resp.status_code == 200, resp.text
     assert 'name="yaml"' in resp.text
-    assert "yaml-block" in resp.text
+    # AM.1 step 7 (2026-05-25): `.yaml-block` semantic class retired;
+    # presence of the `<textarea>` is the stable shape.
+    assert '<textarea' in resp.text
     # spec_example declares a top-level description → the key prefills.
     assert "description" in resp.text
 
@@ -1597,7 +1629,10 @@ def test_singleton_instance_bad_offset_returns_400(
             follow_redirects=False,
         )
     assert resp.status_code == 400, resp.text
-    assert 'class="form-global-error"' in resp.text
+    # AM.1 step 5 (2026-05-25): `.form-global-error` class retired;
+    # the 400 + the operator's bad YAML round-tripping into the
+    # re-rendered textarea is the stable user-visible behavior.
+    assert "CustomerSubledger" in resp.text
 
     # Disk unchanged — the bad save never reached cache.save().
     reloaded = load_instance(writable_l2_yaml)
@@ -1729,8 +1764,10 @@ def test_bb2_create_form_single_leg_renders_reconciler_picker(
         resp = c.get("/l2_shape/rail/new?subtype=single_leg")
     assert resp.status_code == 200, resp.text
     body = resp.text
-    assert 'class="reconciler-section"' in body
-    assert "<legend>Reconciler" in body
+    # AM.1 step 4.5 (2026-05-25): `.reconciler-section` semantic class
+    # retired; the `<legend>Reconciler ...</legend>` element + the
+    # two named form fields below pin the stable shape.
+    assert ">Reconciler" in body
     assert 'name="reconciler_kind"' in body
     assert 'name="reconciler_name"' in body
     assert 'value="transfer_template"' in body

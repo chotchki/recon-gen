@@ -71,11 +71,16 @@ class StudioEditorError(RuntimeError):
         self.entity_id = entity_id
         self.status = status
         self.body = body
-        # Trim the body — the inline form-global-error is what matters.
+        # Trim the body — the inline error block is what matters.
+        # AM.1 step 5 (2026-05-25): `.form-global-error` retired; the
+        # error block carries `role="alert"` (the ARIA semantic the
+        # assistive tech AND a screen-reading operator perceive).
+        # Look for that role attribute, not a styling-utility class.
         snippet = body
-        marker = 'class="form-global-error">'
+        marker = 'role="alert"'
         if marker in body:
-            start = body.index(marker) + len(marker)
+            close_idx = body.index(marker)
+            start = body.index('>', close_idx) + 1
             snippet = body[start:start + 300].split("<")[0].strip()
         super().__init__(
             f"editor {kind} {entity_id!r}: HTTP {status} (expected 303 "

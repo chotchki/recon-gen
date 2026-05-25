@@ -234,8 +234,17 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         # Step 1: home → list (assumes browser is at home; every verb
         # leaves it there via the 303 redirect).
         self._page.click(f'a[href="/l2_shape/{kind}/"]')
-        # Step 2: find the entity's card + click its Edit link.
-        self._page.click(f'a.edit-link[href="{edit_href}"]')
+        # Step 2: find the entity's card by its visible heading
+        # (the operator's mental anchor — they SEE the entity_id as
+        # the card title) and click the "Edit" link inside it. Pure
+        # user-facing locator: scoped by visible text, not CSS class
+        # or href shape. AM.1 step 6 (2026-05-25) retired the
+        # `.edit-link` semantic class; switching to label/role here
+        # also pre-empts brittleness from URL-encoding tweaks.
+        card = self._page.locator(
+            f'article:has(h3:has-text("{entity_id}"))',
+        ).first
+        card.get_by_role("link", name="Edit").click()
         # Step 3: apply the partial form data + submit.
         self._apply_form_data(data)
         self._submit_create_form(f"edit {kind} {entity_id!r}")
@@ -259,11 +268,15 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         if landed.rstrip("/") == self._base:
             return  # success path: 303 → home
         # Failure path: extract the inline error the editor renders.
-        error_locator = self._page.locator(".form-global-error")
+        # AM.1 step 5 (2026-05-25) retired `.form-global-error` in
+        # favor of the ARIA `role="alert"` semantic marker — locate
+        # via the role (what assistive tech reads) rather than the
+        # styling-utility class.
+        error_locator = self._page.get_by_role("alert")
         error_text = (
             error_locator.first.text_content() or ""
             if error_locator.count() > 0
-            else "(no .form-global-error block on the rendered page)"
+            else "(no inline alert block on the rendered page)"
         )
         raise AssertionError(
             f"create {kind_label}: submit failed to redirect home. "

@@ -330,5 +330,9 @@ class TestDemoModeChrome:
         account = inst.accounts[0]
         live = _render_read_card("account", account, inst, demo_mode=False)
         demo = _render_read_card("account", account, inst, demo_mode=True)
-        assert "edit-link" in live and "delete-link" in live
-        assert "edit-link" not in demo and "delete-link" not in demo
+        # AM.1 step 6 (2026-05-25): `.edit-link` / `.delete-link`
+        # semantic classes retired. Check the stable hooks: the live
+        # card carries the edit + DELETE href targets, the demo card
+        # carries neither (the route is 404'd in demo mode anyway).
+        assert "/edit" in live and "hx-delete=" in live
+        assert "/edit" not in demo and "hx-delete=" not in demo

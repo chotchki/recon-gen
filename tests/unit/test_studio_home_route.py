@@ -249,8 +249,11 @@ def test_l2_shape_embed_returns_cards_fragment_no_html_chrome(
         assert resp.status_code == 200
         body = resp.text
 
-    # Wrapper present; no full-document chrome.
-    assert '<div class="entity-list" data-kind="account">' in body
+    # Wrapper present; no full-document chrome. AM.1 step 6
+    # (2026-05-25): `.entity-list` semantic class retired; the
+    # `data-kind="account"` attribute on the wrapper is the stable
+    # hook the home-page JS reads.
+    assert 'data-kind="account"' in body
     assert "<!doctype" not in body.lower()
     assert "<html" not in body
     assert "<head>" not in body
