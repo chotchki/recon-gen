@@ -331,6 +331,92 @@ def test_get_new_form_returns_full_page_with_intro_prose(
     assert 'value=""' in body
 
 
+def test_rail_create_form_renders_subtype_requirements_banner_single_leg(
+    writable_l2_yaml: Path,
+) -> None:
+    """BF.1 (2026-05-25) — the single-leg rail create page renders a
+    subtype-specific requirements banner above the form that names
+    the reconciler-attachment requirement (SPEC §S3 + C3) and the
+    Variable-direction TT-only constraint. Additive to the per-kind
+    intro card per L4."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/rail/new?subtype=single_leg")
+    assert resp.status_code == 200, resp.text
+    body = resp.text
+    # Banner section is present with the accessible landmark.
+    assert 'aria-label="Subtype requirements"' in body
+    # Single-leg specifics: the reconciler-attachment rule + the C3
+    # Variable-direction constraint are both surfaced.
+    assert "Single-leg rail requires" in body
+    assert "reconciler attachment" in body
+    assert "Variable-direction" in body
+    # Per-kind intro card is still present (additive — banner does
+    # NOT replace it per L4).
+    assert "A Rail" in body and "money-movement contract" in body
+
+
+def test_rail_create_form_renders_subtype_requirements_banner_two_leg(
+    writable_l2_yaml: Path,
+) -> None:
+    """BF.1 — two-leg rail create page renders a different banner
+    naming source_role + destination_role + expected_net auto-balance."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/rail/new?subtype=two_leg")
+    assert resp.status_code == 200, resp.text
+    body = resp.text
+    assert 'aria-label="Subtype requirements"' in body
+    assert "Two-leg rail requires" in body
+    assert "source_role" in body and "destination_role" in body
+    assert "expected_net" in body
+    # NOT the single-leg banner.
+    assert "Single-leg rail requires" not in body
+    assert "reconciler attachment" not in body
+
+
+def test_non_rail_create_form_omits_subtype_requirements_banner(
+    writable_l2_yaml: Path,
+) -> None:
+    """BF.1 — only rail pages get the subtype banner. Other entity
+    kinds (account / chain / transfer_template / etc.) don't have
+    subtypes — the banner is rail-only by construction."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        for kind in ("account", "transfer_template", "chain"):
+            resp = c.get(f"/l2_shape/{kind}/new")
+            assert resp.status_code == 200, f"{kind}: {resp.text}"
+            assert 'aria-label="Subtype requirements"' not in resp.text, (
+                f"{kind} create page should not render the banner"
+            )
+
+
+def test_rail_edit_form_renders_subtype_requirements_banner(
+    writable_l2_yaml: Path,
+) -> None:
+    """BF.1 — the edit page also renders the banner so an operator
+    untangling a stale rail sees the same checklist. The subtype
+    comes from the entity itself, not a URL param."""
+    pre = load_instance(writable_l2_yaml)
+    rail = next(
+        (r for r in pre.rails if hasattr(r, "leg_direction")),
+        None,
+    )
+    if rail is None:
+        return  # spec_example may not have a single-leg
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get(f"/l2_shape/rail/{rail.name}/edit")
+    assert resp.status_code == 200, resp.text
+    body = resp.text
+    assert 'aria-label="Subtype requirements"' in body
+    # Banner content matches the rail's actual subtype.
+    if hasattr(rail, "leg_direction"):
+        assert "Single-leg rail requires" in body
+    else:
+        assert "Two-leg rail requires" in body
+
+
 def test_post_create_account_redirects_to_home_on_success(
     writable_l2_yaml: Path,
 ) -> None:

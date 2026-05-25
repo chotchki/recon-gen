@@ -2007,6 +2007,76 @@ _CREATE_INTRO_BY_KIND: Mapping[EntityKind, str] = {
 # (no form fields, two big buttons); step 2 is the create form
 # filtered to the chosen subtype's fields plus a hidden subtype input
 # the POST handler reads to dispatch the right constructor.
+# BF.1 (2026-05-25) — subtype-specific requirements banner on the
+# rail create + edit pages. Sits above the field list, beneath the
+# generic `_CREATE_INTRO_BY_KIND["rail"]` paragraph that explains
+# what a Rail IS. Banner purpose: surface the subtype-specific
+# checklist up-front so the operator doesn't reverse-engineer the
+# rules from validator errors after a failed submit (per the AI.2.e
+# part-2 brief). Additive — does NOT replace the per-kind intro or
+# the per-field `*` markers (per AM/BF L4).
+_RAIL_SUBTYPE_REQUIREMENTS_BANNER: Mapping[RailSubtype, str] = {
+    "two_leg": (
+        "<p><strong>Two-leg rail requires:</strong></p>"
+        "<ul>"
+        "<li><code>source_role</code> + <code>destination_role</code> "
+        "— Role(s) the debit + credit legs post to. Use multi-select "
+        "for unioned roles (validator F1).</li>"
+        "<li><code>expected_net</code> — the standalone-firing "
+        "Conservation contract. Typically <code>0</code>; leave blank "
+        "ONLY when this rail is exclusively used as a TransferTemplate "
+        "leg (the template owns the bundle's net then).</li>"
+        "</ul>"
+        "<p>Both legs auto-balance to <code>expected_net</code> by "
+        "the template's <code>completion</code> deadline (or on the "
+        "rail's own firing when standalone).</p>"
+    ),
+    "single_leg": (
+        "<p><strong>Single-leg rail requires:</strong></p>"
+        "<ul>"
+        "<li><code>leg_role</code> + <code>leg_direction</code> "
+        "(<code>Debit</code> / <code>Credit</code> / <code>Variable</code>).</li>"
+        "<li>A <strong>reconciler attachment</strong> — non-aggregating "
+        "single-legs can't reconcile their own drift (SPEC §S3 + C3). "
+        "Either attach to a TransferTemplate (closes its "
+        "<code>expected_net</code>) or to an aggregating Rail "
+        "(sweeps into its bundle). The Reconciler picker fieldset "
+        "below handles this atomically with the save (BB.1). "
+        "<em>Exception:</em> aggregating single-legs are self-"
+        "reconciling and skip this requirement.</li>"
+        "<li><strong>Variable-direction</strong> single-legs MUST "
+        "attach to a TransferTemplate (validator C3); they can't "
+        "sweep into an aggregating Rail. The template's "
+        "<code>expected_net</code> determines this leg's amount at "
+        "firing time.</li>"
+        "</ul>"
+    ),
+}
+
+
+def _render_subtype_requirements_banner(subtype: RailSubtype | None) -> str:
+    """Render the BF.1 banner. Empty string when subtype is None
+    (non-rail entities; rail-subtype-picker landing page)."""
+    if subtype is None:
+        return ""
+    prose = _RAIL_SUBTYPE_REQUIREMENTS_BANNER.get(subtype, "")
+    if not prose:
+        return ""
+    # bg-link-tint is the AM-landed pale-accent surface (matches
+    # `_CREATE_INTRO_BY_KIND` card but with an accent tint so the
+    # subtype-specific checklist visually distinguishes from the
+    # generic intro). border-accent/25 + an accent left rule mark
+    # this as "the requirements" surface.
+    return (
+        '<section aria-label="Subtype requirements" '
+        'class="bg-link-tint border border-accent/25 border-l-4 '
+        'border-l-accent rounded-md px-4 py-3 text-sm leading-normal '
+        'text-primary-fg mb-3">'
+        f"{prose}"
+        "</section>"
+    )
+
+
 _RAIL_SUBTYPE_PICKER_INTRO: str = (
     "<p><strong>Pick the rail subtype first.</strong> A Rail is one of "
     "two shapes — they have different fields, so we need to know which "
@@ -2600,6 +2670,12 @@ def _render_create_page(
         if global_error else ""
     )
     intro_html = _CREATE_INTRO_BY_KIND.get(kind, "")
+    # BF.1 — subtype-specific requirements banner (rail only when
+    # subtype is set). Sits above the form in the right column.
+    subtype_banner_html = (
+        _render_subtype_requirements_banner(subtype)
+        if kind == "rail" else ""
+    )
     # When a Rail subtype is picked, surface it in the page title so the
     # operator can see they're filling in the right form.
     title_suffix = (
@@ -2626,6 +2702,8 @@ def _render_create_page(
   </header>
   <main class="grid grid-cols-1 lg:[grid-template-columns:22rem_1fr] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
     <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{intro_html}</section>
+    <div>
+    {subtype_banner_html}
     <section class="bg-white border border-surface-border rounded-md p-5">
       <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form">
         {global_err_html}
@@ -2638,6 +2716,7 @@ def _render_create_page(
         </div>
       </form>
     </section>
+    </div>
   </main>
 </body>
 </html>
@@ -2684,6 +2763,14 @@ def _render_edit_page(
     )
     intro_html = _CREATE_INTRO_BY_KIND.get(kind, "")
     rail_subtype = _rail_subtype_of(entity)
+    # BF.1 — subtype-specific requirements banner on the edit page too.
+    # An operator editing an existing rail benefits from the same
+    # checklist (especially when they're untangling a stale rail whose
+    # reconciler attachment broke).
+    subtype_banner_html = (
+        _render_subtype_requirements_banner(rail_subtype)
+        if kind == "rail" else ""
+    )
     title_suffix = (
         f" ({'two-leg' if rail_subtype == 'two_leg' else 'single-leg'})"
         if rail_subtype is not None else ""
@@ -2707,6 +2794,8 @@ def _render_edit_page(
   </header>
   <main class="grid grid-cols-1 lg:[grid-template-columns:22rem_1fr] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
     <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{intro_html}</section>
+    <div>
+    {subtype_banner_html}
     <section class="bg-white border border-surface-border rounded-md p-5">
       <form method="post" action="/l2_shape/{escape(kind)}/{escape(entity_id)}" class="edit-form">
         {global_err_html}
@@ -2717,6 +2806,7 @@ def _render_edit_page(
         </div>
       </form>
     </section>
+    </div>
   </main>
 </body>
 </html>
