@@ -233,27 +233,38 @@ def _render_home_page(
         body_id = f"home-section-body-{kind}"
         # AH.4 — hide the create affordance in demo-mode (the /new route
         # is 404'd there anyway; the button shouldn't tease it).
+        # AM.2 step 2: section chrome migrated. `.home-section` /
+        # `.home-section-add` / `.home-section-link` / `.home-section-body`
+        # / `.home-section-loading` semantic classes retired in favor
+        # of raw Tailwind utilities. `data-kind` stays as the JS hook
+        # the home-page focus-filter listener uses.
         add_link = "" if demo_mode else (
-            f'<a class="home-section-add" href="/l2_shape/{kind}/new" '
+            f'<a class="ml-2 text-accent no-underline font-semibold text-sm hover:underline" '
+            f'href="/l2_shape/{kind}/new" '
             # Stop the click from triggering the surrounding <details>
             # toggle. The browser still follows the href to the create page.
             f'onclick="event.stopPropagation()" '
             f'title="Create a new {escape(kind)}">+ Add</a>'
         )
         section_blocks.append(
-            f'<details class="home-section" data-kind="{escape(kind)}"{open_attr}>'
-            f"<summary>{escape(label)} "
+            f'<details class="bg-white border border-surface-border '
+            f'rounded-md mb-3 overflow-hidden" '
+            f'data-kind="{escape(kind)}"{open_attr}>'
+            f'<summary class="cursor-pointer px-4 py-2 font-semibold '
+            f'text-accent bg-surface-bg select-none hover:bg-link-tint">'
+            f"{escape(label)} "
             f'<span class="text-xs text-secondary-fg font-normal">({n})</span> '
             f"{add_link}"
-            f'<a class="home-section-link" href="/l2_shape/{kind}/" '
+            f'<a class="ml-2 text-accent no-underline font-normal text-sm hover:underline" '
+            f'href="/l2_shape/{kind}/" '
             f'onclick="event.stopPropagation()" '
             f'title="Open in dedicated page">↗</a>'
             f"</summary>"
-            f'<div class="home-section-body" id="{body_id}" '
+            f'<div id="{body_id}" '
             f'hx-get="/l2_shape/{kind}/?embed=1" '
             f'hx-trigger="load, l2-cascade-reload from:body" '
             f'hx-swap="innerHTML">'
-            f'<p class="home-section-loading">loading…</p>'
+            f'<p class="p-4 text-secondary-fg italic m-0">loading…</p>'
             f"</div>"
             f"</details>"
         )
@@ -275,7 +286,8 @@ def _render_home_page(
         # AH.4 — demo-mode hides the singleton Edit affordance (its form
         # route is 404'd) and drops the "click Edit" prompt.
         singleton_link = "" if demo_mode else (
-            f'<a class="home-section-add" href="/l2_shape/{kind}/" '
+            f'<a class="ml-2 text-accent no-underline font-semibold text-sm hover:underline" '
+            f'href="/l2_shape/{kind}/" '
             f'onclick="event.stopPropagation()" '
             f'title="Edit {escape(label)} (single YAML block)">Edit</a>'
         )
@@ -286,13 +298,17 @@ def _render_home_page(
             f"click <strong>Edit</strong> to view / change it."
         )
         section_blocks.append(
-            f'<details class="home-section" data-kind="{escape(kind)}">'
-            f'<summary>{escape(label)} '
+            f'<details class="bg-white border border-surface-border '
+            f'rounded-md mb-3 overflow-hidden" '
+            f'data-kind="{escape(kind)}">'
+            f'<summary class="cursor-pointer px-4 py-2 font-semibold '
+            f'text-accent bg-surface-bg select-none hover:bg-link-tint">'
+            f"{escape(label)} "
             f'<span class="text-xs text-secondary-fg font-normal">({escape(status)})</span> '
             f"{singleton_link}"
             f"</summary>"
-            f'<div class="home-section-body">'
-            f'<p class="home-section-loading">{singleton_body}</p>'
+            f"<div>"
+            f'<p class="p-4 text-secondary-fg italic m-0">{singleton_body}</p>'
             f"</div>"
             f"</details>"
         )
@@ -345,34 +361,41 @@ def _render_home_page(
     var lastVisibleByKind = null;  // null = no filter
     var lastFocus = null;
     function applyFocusFilter() {{
+      // AM.2 step 2 (2026-05-25): scope by the stable [data-kind]
+      // [data-entity-id] attribute pair (semantic — encodes app
+      // domain, not styling). Use the native HTML `hidden` attribute
+      // instead of an `is-hidden-by-focus` class toggle so the
+      // browser's accessibility tree picks up the visibility change
+      // automatically (assistive tech reads `hidden`).
       var cards = document.querySelectorAll(
-        '#home-entities .entity-card[data-kind][data-entity-id]'
+        '#home-entities [data-kind][data-entity-id]'
       );
       cards.forEach(function(card) {{
-        var hidden = false;
+        var hide = false;
         if (lastVisibleByKind !== null) {{
           var k = card.dataset.kind;
           var id = card.dataset.entityId;
           var ids = lastVisibleByKind[k];
-          hidden = !ids || ids.indexOf(id) === -1;
+          hide = !ids || ids.indexOf(id) === -1;
         }}
-        card.classList.toggle('is-hidden-by-focus', hidden);
+        card.hidden = hide;
       }});
       // Per-section "(N shown)" indicator update.
-      document.querySelectorAll('details.home-section').forEach(function(d) {{
-        var visible = d.querySelectorAll(
-          '.entity-card:not(.is-hidden-by-focus)'
-        ).length;
-        var total = d.querySelectorAll('.entity-card').length;
+      document.querySelectorAll('details[data-kind]').forEach(function(d) {{
+        var entities = d.querySelectorAll('[data-kind][data-entity-id]');
+        var total = entities.length;
+        var visible = 0;
+        entities.forEach(function(e) {{ if (!e.hidden) visible += 1; }});
         var summary = d.querySelector('summary');
         if (!summary) return;
-        var ind = summary.querySelector('.focus-filter-indicator');
+        var ind = summary.querySelector('[data-role="focus-indicator"]');
         if (lastVisibleByKind === null || total === 0 || visible === total) {{
           if (ind) ind.remove();
         }} else {{
           if (!ind) {{
             ind = document.createElement('span');
-            ind.className = 'focus-filter-indicator';
+            ind.dataset.role = 'focus-indicator';
+            ind.className = 'text-secondary-fg font-normal text-sm';
             summary.appendChild(ind);
           }}
           ind.textContent = ' · ' + visible + ' shown';
@@ -433,12 +456,18 @@ def _render_home_page(
       f.contentWindow.location.href = url.toString();
     }}
     function _maybeFocusFromTitle(target) {{
+      // AM.2 step 2 (2026-05-25): detect by the stable
+      // `data-focus-node` attribute (semantic — what the JS
+      // actually reads next) instead of the `.entity-card-title`
+      // marker class. `data-focus-node` is set on the read-card
+      // h3 by `_render_read_card` precisely so the focus-on-click
+      // affordance has a target; checking for it here means the
+      // class is no longer load-bearing.
       var el = target;
       while (el && el !== document.body) {{
-        if (el.classList && el.classList.contains('entity-card-title')) {{
-          var nodeId = el.dataset.focusNode;
-          if (nodeId) {{ _focusDiagramOnNode(nodeId); return true; }}
-          return false;
+        if (el.dataset && el.dataset.focusNode) {{
+          _focusDiagramOnNode(el.dataset.focusNode);
+          return true;
         }}
         el = el.parentNode;
       }}
@@ -508,12 +537,12 @@ def _render_home_page(
     }}
   </script>
 
-  <section class="home-diagram">
+  <section class="border-b border-surface-border bg-white h-[50vh] min-h-96">
     <iframe id="diagram-frame" src="/diagram?layer=1&amp;embed=1"
-            title="L2 topology diagram"></iframe>
+            title="L2 topology diagram" class="w-full h-full border-0 block"></iframe>
   </section>
 
-  <section class="home-entities" id="home-entities">
+  <section class="px-4 pt-2 pb-8" id="home-entities">
     {sections_html}
   </section>
 </body>

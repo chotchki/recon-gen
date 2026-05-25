@@ -1786,13 +1786,12 @@ def _render_read_card(
     if focus_node is None:
         title_html = f'<h3 class="{h3_base}">{escape(entity_id)}{subtype_badge}</h3>'
     else:
-        # `entity-card-title` retained as a marker class
-        # (`_studio_routes.py` home-page JS uses
-        # `classList.contains('entity-card-title')` to detect the
-        # focus-target click). AM.2 migrates that JS to a
-        # `[data-focus-node]` attribute check and the marker drops.
+        # `data-focus-node` IS the focus-target hook — AM.2 step 2
+        # rewrote the home-page JS to walk parents looking for that
+        # attribute, so the previous `.entity-card-title` marker
+        # class is no longer load-bearing.
         title_html = (
-            f'<h3 class="{h3_base} entity-card-title cursor-pointer hover:text-accent" '
+            f'<h3 class="{h3_base} cursor-pointer hover:text-accent" '
             f'tabindex="0" role="button" '
             f'data-focus-node="{escape(focus_node)}" '
             f'title="Focus the diagram on this entity">'
@@ -1823,13 +1822,11 @@ def _render_read_card(
     card_cls = entity_card_classes()
     header_cls = "flex items-start justify-between gap-3 mb-2"
     dl_cls = "m-0 grid grid-cols-[max-content_1fr] gap-x-4"
-    # `entity-card` retained as a marker class (no longer carries
-    # styling) — `_studio_routes.py` home-page JS uses
-    # `#home-entities .entity-card[data-kind]` to find loaded cards;
-    # AM.2 migrates that JS to the `[data-kind][data-entity-id]`
-    # attribute selector and this marker drops too.
+    # `data-kind` + `data-entity-id` are the stable home-page
+    # focus-filter hooks (AM.2 step 2 migrated the JS off the
+    # `entity-card` marker class to these attribute selectors).
     return (
-        f'<article class="{card_cls} entity-card" id="{html_id}" '
+        f'<article class="{card_cls}" id="{html_id}" '
         f'data-kind="{escape(kind)}" data-entity-id="{escape(entity_id)}">'
         f'<header class="{header_cls}">'
         f"{title_html}"
