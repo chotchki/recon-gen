@@ -1751,7 +1751,7 @@ def _render_read_card(
     # AM.1 step 6 — read-card migrated. Semantic classes drop in favor
     # of the entity_card_classes() helper + raw utilities for inner
     # `<dl>` rows, `<header>`, action links, and the subtype badge.
-    dt_cls = "font-semibold text-xs text-secondary-fg uppercase tracking-wide mt-2"
+    dt_cls = "font-semibold text-xs text-secondary-fg mt-2"
     dd_cls = "ml-0 mt-0.5 text-sm text-primary-fg break-words"
     rows = "".join(
         f'<dt class="{dt_cls}">{escape(s.label)}</dt>'
@@ -1821,7 +1821,11 @@ def _render_read_card(
     )
     card_cls = entity_card_classes()
     header_cls = "flex items-start justify-between gap-3 mb-2"
-    dl_cls = "m-0 grid grid-cols-[max-content_1fr] gap-x-4"
+    # `minmax(0, 1fr)` on the dd column (not bare `1fr`) lets long
+    # unbroken values shrink + the `break-words` utility on `dd_cls`
+    # then wraps them inside the card. Without minmax(0,…), grid
+    # items can grow past the parent on long content.
+    dl_cls = "m-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4"
     # `data-kind` + `data-entity-id` are the stable home-page
     # focus-filter hooks (AM.2 step 2 migrated the JS off the
     # `entity-card` marker class to these attribute selectors).
@@ -2125,8 +2129,7 @@ def _render_rail_subtype_picker(
     <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
     <a class="text-accent no-underline text-sm hover:underline" href="/l2_shape/rail/">→ list all rails</a>
   </header>
-  <main class="grid grid-cols-1 lg:[grid-template-columns:22rem_1fr] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
-    <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{_RAIL_SUBTYPE_PICKER_INTRO}</section>
+  <main class="grid grid-cols-1 lg:[grid-template-columns:1fr_22rem] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
     <section class="bg-white border border-surface-border rounded-md p-5">
       <div class="flex flex-col gap-3">
         <a class="{picker_btn_cls}" href="/l2_shape/rail/new?subtype=two_leg">
@@ -2139,6 +2142,7 @@ def _render_rail_subtype_picker(
         </a>
       </div>
     </section>
+    <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{_RAIL_SUBTYPE_PICKER_INTRO}</section>
   </main>
 </body>
 </html>
@@ -2700,8 +2704,7 @@ def _render_create_page(
     <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
     <a class="text-accent no-underline text-sm hover:underline" href="/l2_shape/{escape(kind)}/">→ list all {escape(kind)}s</a>
   </header>
-  <main class="grid grid-cols-1 lg:[grid-template-columns:22rem_1fr] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
-    <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{intro_html}</section>
+  <main class="grid grid-cols-1 lg:[grid-template-columns:1fr_22rem] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
     <div>
     {subtype_banner_html}
     <section class="bg-white border border-surface-border rounded-md p-5">
@@ -2717,6 +2720,7 @@ def _render_create_page(
       </form>
     </section>
     </div>
+    <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{intro_html}</section>
   </main>
 </body>
 </html>
@@ -2792,8 +2796,7 @@ def _render_edit_page(
     <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
     <a class="text-accent no-underline text-sm hover:underline" href="/l2_shape/{escape(kind)}/">→ list all {escape(kind)}s</a>
   </header>
-  <main class="grid grid-cols-1 lg:[grid-template-columns:22rem_1fr] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
-    <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{intro_html}</section>
+  <main class="grid grid-cols-1 lg:[grid-template-columns:1fr_22rem] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
     <div>
     {subtype_banner_html}
     <section class="bg-white border border-surface-border rounded-md p-5">
@@ -2807,6 +2810,7 @@ def _render_edit_page(
       </form>
     </section>
     </div>
+    <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{intro_html}</section>
   </main>
 </body>
 </html>
@@ -2939,8 +2943,7 @@ def _render_singleton_page(
     <h1 class="text-base m-0 font-semibold text-accent">{escape(label)}</h1>
     <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
   </header>
-  <main class="grid grid-cols-1 lg:[grid-template-columns:22rem_1fr] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
-    <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{intro_html}</section>
+  <main class="grid grid-cols-1 lg:[grid-template-columns:1fr_22rem] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
     <section class="bg-white border border-surface-border rounded-md p-5">
       <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form">
         <input type="hidden" name="_method" value="PUT">
@@ -2960,6 +2963,7 @@ def _render_singleton_page(
         </div>
       </form>
     </section>
+    <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{intro_html}</section>
   </main>
 </body>
 </html>

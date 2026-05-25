@@ -725,7 +725,7 @@ def _render_diagram_page(
   {devlog_meta}{coverage_meta}{trainer_meta}{studio_theme_head(instance)}
   <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
   {devlog_script}</head>
-<body class="{"block m-0 p-0 font-sans bg-surface-bg text-primary-fg" if embed else "block min-h-screen font-sans bg-surface-bg text-primary-fg"}">
+<body class="{"flex flex-col m-0 p-0 font-sans bg-surface-bg text-primary-fg h-screen" if embed else "flex flex-col font-sans bg-surface-bg text-primary-fg h-screen"}">
   {_demo_mode_banner(demo_mode and not embed)}
   {("" if embed else (
     '<header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">'
@@ -793,8 +793,14 @@ def _render_diagram_page(
     </label>
   </div>
 
-  <div class="flex-1 overflow-auto p-2">
-    <div id="diagram-target"></div>
+  <!-- AM.2 step 3 fix-up (2026-05-25): viewport needs `flex` +
+       `min-h-0` (without min-h-0 a flex child falls back to its
+       intrinsic content size — graphviz's native SVG pixel size —
+       and the diagram overflows the iframe). `#diagram-target`
+       likewise needs its own `flex-1 min-h-0 min-w-0` so the
+       injected SVG can fit to the viewBox via preserveAspectRatio. -->
+  <div class="flex flex-1 min-h-0 overflow-hidden p-4 bg-white">
+    <div id="diagram-target" class="flex-1 min-h-0 min-w-0"></div>
   </div>
 
   <template id="topology-dot">{escape(dot_source)}</template>
