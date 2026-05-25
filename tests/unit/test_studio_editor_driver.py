@@ -259,3 +259,256 @@ def test_http_driver_rebuilds_fuzz_l2_structurally(
     dest = tmp_path / f"dogfood_fuzz_{seed:010d}.yaml"
     rebuilt = _rebuild_via_http(reference_path, dest)
     _assert_l2_structurally_equal(rebuilt, reference)
+
+
+# =============================================================================
+# AI.5 — Dashboard data equivalence (SQLite-only, matview-row level).
+# =============================================================================
+#
+# Per Lock 2 (2026-05-19): "Per-sheet, per-visual: visual titles + table
+# row content + KPI numeric values. Skip DOM byte-equality + screenshot
+# diffs." AI.5's data-equivalence claim is that the dogfood'd L2
+# produces dashboards that show the same NUMBERS as the reference L2.
+# The dashboards consume matview rows (every visual's SQL projects /
+# filters / groups OVER a matview). The proof shape: build a fresh
+# SQLite per L2, run schema → seed → refresh, then assert every
+# matview's row content matches byte-for-byte between reference and
+# dogfood. Dataset SQL is downstream-pure (a function of the L2),
+# so matview-row equality + L2 structural equality (AI.4) together
+# imply dashboard data equality — the BB.0 catalog's reasoning shape.
+#
+# Why this is meaningfully stronger than AI.4: AI.4 normalizes tuple
+# order + description whitespace as non-structural. AI.5 runs the FULL
+# generator pipeline (schema emit, seed, matview SQL) against both L2s
+# and asserts the OUTPUT is byte-equal — any hidden source of
+# non-determinism downstream of the dataclass shape (field-order
+# semantics in matview SQL emit, seed plant landing dates dependent on
+# tuple position, etc.) gets caught here.
+
+
+def _build_l2_sqlite(reference_path: Path) -> tuple[object, str]:
+    """Build an in-memory SQLite with schema + plants-only seed +
+    matview refresh for the L2 at ``reference_path``. Returns
+    ``(conn, prefix)``.
+
+    Plants-only seed (skips the 90-day baseline) keeps the
+    per-variant runtime sub-second while still exercising every
+    matview's SELECT shape — every L1 + Investigation matview reads
+    its source rows from the planted scenario.
+    """
+    import json as _json
+    import sqlite3
+    from datetime import datetime as _datetime
+
+    import yaml as _yaml
+    from recon_gen.common.as_of_frame import LOCKED_ANCHOR
+    from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+    from recon_gen.common.l2.auto_scenario import default_scenario_for
+    from recon_gen.common.l2.config_table import emit_config_populate_sql
+    from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
+    from recon_gen.common.l2.seed import emit_seed
+    from recon_gen.common.l2.serializer import serialize_l2
+    from recon_gen.common.sql import Dialect
+
+    instance = load_instance(reference_path)
+    prefix = reference_path.stem.replace("-", "_").replace(".", "_")
+    conn = sqlite3.connect(":memory:")
+    conn.execute("PRAGMA foreign_keys = ON;")
+    _register_sqlite_aggregates(conn)
+
+    cur = conn.cursor()
+    execute_script(
+        cur, emit_schema(instance, prefix=prefix, dialect=Dialect.SQLITE),
+        dialect=Dialect.SQLITE,
+    )
+    conn.commit()
+
+    # Populate <prefix>_config_kv (BC.7 + BC.12; matview JOINs depend
+    # on it for limit cap + max_pending_age + direction).
+    l2_yaml_text = serialize_l2(instance)
+    l2_dict = _yaml.safe_load(l2_yaml_text)
+    populate_sql = emit_config_populate_sql(
+        prefix=prefix,
+        cfg_json="{}",
+        l2_json=_json.dumps(l2_dict, default=str, separators=(",", ":")),
+        as_of=_datetime(
+            LOCKED_ANCHOR.year, LOCKED_ANCHOR.month, LOCKED_ANCHOR.day,
+            12, 0, 0,
+        ),
+        dialect=Dialect.SQLITE,
+    )
+    cur = conn.cursor()
+    execute_script(cur, populate_sql, dialect=Dialect.SQLITE)
+    conn.commit()
+
+    # Plants-only seed. Default scenario is deterministic per L2 +
+    # anchor; the spine generator produces the same SQL string given
+    # the same L2 + anchor.
+    report = default_scenario_for(instance, today=LOCKED_ANCHOR)
+    seed_sql = emit_seed(
+        instance, report.scenario,
+        prefix=prefix, dialect=Dialect.SQLITE,
+    )
+    if seed_sql:
+        cur = conn.cursor()
+        execute_script(cur, seed_sql, dialect=Dialect.SQLITE)
+        conn.commit()
+
+    # Refresh every matview against the planted scenario.
+    cur = conn.cursor()
+    execute_script(
+        cur, refresh_matviews_sql(
+            instance, prefix=prefix, dialect=Dialect.SQLITE,
+        ),
+        dialect=Dialect.SQLITE,
+    )
+    conn.commit()
+
+    return conn, prefix
+
+
+# Matviews the dashboards read from (subset of refresh_matviews_sql's
+# list; excludes the `current_*` views which are 1:1 projections of
+# the base tables — base tables compared separately if needed).
+_DASHBOARD_MATVIEWS = (
+    "computed_subledger_balance",
+    "computed_ledger_balance",
+    "drift",
+    "ledger_drift",
+    "overdraft",
+    "expected_eod_balance_breach",
+    "limit_breach",
+    "stuck_pending",
+    "stuck_unbundled",
+    "chain_parent_disagreement",
+    "xor_group_violation",
+    "transfer_parents",
+    "fan_in_disagreement",
+    "multi_xor_violation",
+    "daily_statement_summary",
+    "todays_exceptions",
+    "inv_pair_rolling_anomalies",
+    "inv_money_trail_edges",
+)
+
+
+def _collect_matview_rows(
+    conn: object, prefix: str,
+) -> dict[str, frozenset[tuple[object, ...]]]:
+    """SELECT * from every dashboard-consumed matview; return a
+    suffix-keyed dict of row-set fingerprints. ``frozenset`` makes
+    row-ORDER non-structural (matview row order isn't a stable
+    property — the dashboard sorts/filters downstream)."""
+    out: dict[str, frozenset[tuple[object, ...]]] = {}
+    for suffix in _DASHBOARD_MATVIEWS:
+        table = f"{prefix}_{suffix}"
+        try:
+            rows = conn.execute(  # type: ignore[attr-defined]: sqlite3.Connection — `object` annotation kept for the driver-side opaque-conn handoff pattern
+                f"SELECT * FROM {table}",
+            ).fetchall()
+        except Exception:
+            # Matview doesn't exist for this L2 (e.g., chain_parent_
+            # disagreement when no chains are declared). Treat as
+            # empty so the comparison still asserts shape-equal.
+            rows = []
+        out[suffix] = frozenset(tuple(r) for r in rows)
+    return out
+
+
+def _assert_matview_rows_equal(
+    ref_rows: dict[str, frozenset[tuple[object, ...]]],
+    dog_rows: dict[str, frozenset[tuple[object, ...]]],
+    variant: str,
+) -> None:
+    """AI.5 — per-matview row-set equality. Reports the first
+    matview that drifts so the failure points at a specific table."""
+    assert set(ref_rows.keys()) == set(dog_rows.keys()), (
+        f"[{variant}] matview key set differs: "
+        f"ref={sorted(ref_rows.keys())} dog={sorted(dog_rows.keys())}"
+    )
+    for matview, ref_set in ref_rows.items():
+        dog_set = dog_rows[matview]
+        missing_in_dog = ref_set - dog_set
+        extra_in_dog = dog_set - ref_set
+        assert not missing_in_dog and not extra_in_dog, (
+            f"[{variant}] matview {matview!r}: dogfood drift.\n"
+            f"  rows missing in dogfood ({len(missing_in_dog)}): "
+            f"{sorted(repr(r) for r in list(missing_in_dog)[:3])}\n"
+            f"  rows extra in dogfood ({len(extra_in_dog)}): "
+            f"{sorted(repr(r) for r in list(extra_in_dog)[:3])}\n"
+            f"  ref total: {len(ref_set)}, dog total: {len(dog_set)}"
+        )
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        pytest.param("spec_example", id="spec_example"),
+        pytest.param("sasquatch_pr", id="sasquatch_pr"),
+    ],
+)
+def test_dogfood_matview_rows_match_reference(
+    tmp_path: Path, fixture_name: str,
+) -> None:
+    """AI.5 — the dogfood'd L2 produces byte-identical matview rows
+    to the reference L2 when run through the same schema → seed →
+    refresh pipeline. This is the user-facing acceptance gate:
+    operators see the same dashboard numbers regardless of whether
+    the L2 was hand-authored or rebuilt through the Studio editor.
+
+    Stronger than AI.4 (which normalizes tuple order +
+    description-whitespace as non-structural): AI.5 runs the FULL
+    generator pipeline against both L2s and asserts the OUTPUT
+    matches byte-for-byte."""
+    reference_path = _FIXTURES / f"{fixture_name}.yaml"
+    dogfood_path = tmp_path / f"dogfood_{fixture_name}.yaml"
+    _rebuild_via_http(reference_path, dogfood_path)
+
+    ref_conn, ref_prefix = _build_l2_sqlite(reference_path)
+    try:
+        ref_rows = _collect_matview_rows(ref_conn, ref_prefix)
+    finally:
+        ref_conn.close()  # type: ignore[attr-defined]: sqlite3.Connection — `object` annotation kept for the driver-side opaque-conn handoff pattern
+
+    dog_conn, dog_prefix = _build_l2_sqlite(dogfood_path)
+    try:
+        dog_rows = _collect_matview_rows(dog_conn, dog_prefix)
+    finally:
+        dog_conn.close()  # type: ignore[attr-defined]: sqlite3.Connection — `object` annotation kept for the driver-side opaque-conn handoff pattern
+
+    _assert_matview_rows_equal(ref_rows, dog_rows, variant=fixture_name)
+
+
+@pytest.mark.parametrize(
+    "seed",
+    [
+        pytest.param(s, id=f"fuzz_{s:010d}")
+        for s in _fuzz_seeds_for_run()
+    ],
+)
+def test_dogfood_matview_rows_match_reference_fuzz(
+    tmp_path: Path, seed: int,
+) -> None:
+    """AI.5 + AI.6 — dashboard-data-equivalence claim parametrized
+    over the fuzz axis. Same shape as the named-fixture variant
+    above; fails loudly on the first seed whose dogfood'd L2
+    produces drifted matview rows."""
+    reference_path = _materialize_fuzz_yaml(seed, tmp_path)
+    dogfood_path = tmp_path / f"dogfood_fuzz_{seed:010d}.yaml"
+    _rebuild_via_http(reference_path, dogfood_path)
+
+    ref_conn, ref_prefix = _build_l2_sqlite(reference_path)
+    try:
+        ref_rows = _collect_matview_rows(ref_conn, ref_prefix)
+    finally:
+        ref_conn.close()  # type: ignore[attr-defined]: sqlite3.Connection — `object` annotation kept for the driver-side opaque-conn handoff pattern
+
+    dog_conn, dog_prefix = _build_l2_sqlite(dogfood_path)
+    try:
+        dog_rows = _collect_matview_rows(dog_conn, dog_prefix)
+    finally:
+        dog_conn.close()  # type: ignore[attr-defined]: sqlite3.Connection — `object` annotation kept for the driver-side opaque-conn handoff pattern
+
+    _assert_matview_rows_equal(
+        ref_rows, dog_rows, variant=f"fuzz_{seed:010d}",
+    )
