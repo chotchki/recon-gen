@@ -77,8 +77,14 @@ def test_studio_diagram_route_renders_with_dot_source() -> None:
         ):
             assert f'id="{kind}"' in body, f"missing checkbox {kind}"
         # Layer stepper landed (the mode dropdown + engine pills were
-        # dropped in X.4.b.cleanup once dot won the spike).
-        assert 'class="layer-btn' in body
+        # dropped in X.4.b.cleanup once dot won the spike). AM.2 step
+        # 3 (2026-05-25): `.layer-btn` semantic class retired in favor
+        # of `chrome_button_classes()` utilities; the layer-link href
+        # shape is the stable identity (each layer link sets
+        # `?layer=N`).
+        assert 'href="?layer=1"' in body
+        assert 'href="?layer=2"' in body
+        assert 'href="?layer=3"' in body
         # The DOT source carries an L2 identifier (proves the typed
         # walk is running, not just an empty digraph).
         assert "ClearingSuspense" in body or "role__" in body
@@ -100,10 +106,15 @@ def test_studio_diagram_route_uses_sasquatch_pr_when_loaded() -> None:
         assert "CashDueFRB" in sas_body
         assert "CashDueFRB" not in spec_body
         # And the sasquatch DOT block should be substantially larger
-        # (it has dozens more rails / templates / chains). Ratio is
-        # gentler post-X.4.b.cleanup because the page chrome shrunk
-        # — the DOT block itself still grows with the L2's size.
-        assert len(sas_body) > len(spec_body) * 1.3
+        # (it has dozens more rails / templates / chains). Ratio
+        # softened post-AM.2 step 3 (2026-05-25) — page chrome
+        # migrated to raw Tailwind utility classes, which inflates
+        # spec_example's fixed overhead enough that the 1.3x ratio
+        # no longer holds (sas/spec ≈ 1.24x today, still proves the
+        # DOT block grows with the L2's size but the noise floor is
+        # higher). The CashDueFRB / not-in-spec_body assertion above
+        # is the load-bearing identity check.
+        assert len(sas_body) > len(spec_body) * 1.2
 
 
 def test_studio_static_serves_diagram_js() -> None:

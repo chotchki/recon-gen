@@ -75,6 +75,14 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from recon_gen.common.config import Config, PlantKind, ScopeKind
+from recon_gen.common.html._studio_assets.tw_classes import (
+    chrome_button_classes,
+    compact_input_classes,
+    ghost_button_classes,
+    knob_wrapper_classes,
+    timeline_chip_base_classes,
+    timeline_day_classes,
+)
 from recon_gen.common.db import AsyncConnectionPool
 from recon_gen.common.l2.cache import L2InstanceCache
 from recon_gen.common.l2.coverage import CoverageEntry, coverage_for
@@ -487,9 +495,9 @@ def _render_home_page(
   <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
     <h1>Studio</h1>
     <span class="text-sm text-secondary-fg font-mono">{prefix}</span>
-    <a class="nav-link" href="/diagram">→ diagram (full)</a>
-    <a class="nav-link" href="/data">→ data</a>
-    <a class="nav-link" href="/dashboards">→ dashboards</a>
+    <a class="text-accent no-underline text-sm hover:underline" href="/diagram">→ diagram (full)</a>
+    <a class="text-accent no-underline text-sm hover:underline" href="/data">→ data</a>
+    <a class="text-accent no-underline text-sm hover:underline" href="/dashboards">→ dashboards</a>
     {deploy_controls}
   </header>
   <script>
@@ -655,8 +663,13 @@ def _render_diagram_page(
             bits.append(f"focus={escape(focus_val)}")
         return "?" + "&".join(bits)
 
+    # AM.2 step 3 — chrome buttons share the chrome_button_classes()
+    # helper. Active variant overrides the hover state with a solid
+    # accent fill so the current layer is visually pinned.
+    btn_base = chrome_button_classes()
+    btn_active = f"{btn_base} bg-accent text-accent-fg border-accent hover:bg-accent hover:text-accent-fg"
     layer_links = " ".join(
-        f'<a class="layer-btn{" active" if n == layer else ""}" '
+        f'<a class="{btn_active if n == layer else btn_base}" '
         f'href="{_qs(layer_val=n, focus_val=focus_node_id)}">{label}</a>'
         for n, label in (
             (1, "1 · Roles + structure"),
@@ -669,8 +682,9 @@ def _render_diagram_page(
     # is wired (which the JS shim also gates by reading the
     # diagram-coverage-available meta). Off by default — clean diagram;
     # on overlays presence/absence tint per node.
+    toggle_label_cls = "inline-flex items-center gap-1 cursor-pointer text-sm text-primary-fg"
     coverage_toggle_html = (
-        '<label class="chrome-coverage-toggle">'
+        f'<label class="{toggle_label_cls}">'
         '<input type="checkbox" id="toggle-coverage">'
         ' Coverage'
         '</label>'
@@ -680,7 +694,7 @@ def _render_diagram_page(
     # X.4.c.6 — Trainer toggle. Always available (pure scenario walk).
     # Off by default; on overlays per-plant-kind badges per node.
     trainer_toggle_html = (
-        '<label class="chrome-trainer-toggle">'
+        f'<label class="{toggle_label_cls}">'
         '<input type="checkbox" id="toggle-trainer">'
         ' Trainer'
         '</label>'
@@ -690,9 +704,11 @@ def _render_diagram_page(
     # Clear preserves the current layer.
     if focus_node_id is not None:
         focus_indicator = (
-            f'<span class="knob focus-indicator">focused: '
-            f'<code>{escape(focus_node_id)}</code> '
-            f'<a class="engine-link" href="{_qs(layer_val=layer, focus_val=None)}">clear</a></span>'
+            f'<span class="inline-flex items-center gap-1 ml-2 text-sm '
+            f'text-secondary-fg">focused: '
+            f'<code class="font-mono text-primary-fg">{escape(focus_node_id)}</code> '
+            f'<a class="{chrome_button_classes()}" '
+            f'href="{_qs(layer_val=layer, focus_val=None)}">clear</a></span>'
         )
     else:
         focus_indicator = ""
@@ -711,69 +727,69 @@ def _render_diagram_page(
     '<header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">'
     f'<h1>Studio · diagram</h1>'
     f'<span class="text-sm text-secondary-fg font-mono">{prefix}</span>'
-    '<a class="nav-link" href="/">← landing</a>'
-    '<a class="nav-link" href="/data">→ data</a>'
-    '<a class="nav-link" href="/dashboards">→ dashboards</a>'
+    '<a class="text-accent no-underline text-sm hover:underline" href="/">← landing</a>'
+    '<a class="text-accent no-underline text-sm hover:underline" href="/data">→ data</a>'
+    '<a class="text-accent no-underline text-sm hover:underline" href="/dashboards">→ dashboards</a>'
     '</header>'
   ))}
 
-  <div class="diagram-chrome">
-    <span class="layer-stepper" aria-label="Conceptual layers">
+  <div class="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-surface-border bg-white">
+    <span class="inline-flex items-center gap-2 text-sm text-secondary-fg" aria-label="Conceptual layers">
       layer: {layer_links}
     </span>
-    <a id="toggle-reset" href="?">Reset</a>
+    <a id="toggle-reset" class="{chrome_button_classes()}" href="?">Reset</a>
     {coverage_toggle_html}
     {trainer_toggle_html}
     {focus_indicator}
-    <span class="status" id="diagram-status">loading…</span>
+    <span class="text-xs text-secondary-fg ml-auto" id="diagram-status">loading…</span>
   </div>
 
-  <div class="diagram-chrome">
-    <strong class="chrome-section-label">Show:</strong>
-    <label>
+  <div class="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-surface-border bg-white">
+    <strong class="font-semibold text-sm text-primary-fg mr-1">Show:</strong>
+    <label class="{toggle_label_cls}">
       <input type="checkbox" id="toggle-role-internal" checked>
       Internal roles <span class="text-xs text-secondary-fg font-normal">({n_role_internal})</span>
     </label>
-    <label>
+    <label class="{toggle_label_cls}">
       <input type="checkbox" id="toggle-role-external" checked>
       External roles <span class="text-xs text-secondary-fg font-normal">({n_role_external})</span>
     </label>
-    <label>
+    <label class="{toggle_label_cls}">
       <input type="checkbox" id="toggle-rail" checked>
       Rails <span class="text-xs text-secondary-fg font-normal">({n_rail})</span>
     </label>
-    <label>
+    <label class="{toggle_label_cls}">
       <input type="checkbox" id="toggle-template" checked>
       Templates <span class="text-xs text-secondary-fg font-normal">({n_template})</span>
     </label>
-    <label>
+    <label class="{toggle_label_cls}">
       <input type="checkbox" id="toggle-chain" checked>
       Chains <span class="text-xs text-secondary-fg font-normal">({n_chain})</span>
     </label>
-    <label>
+    <label class="{toggle_label_cls}">
       <input type="checkbox" id="toggle-control_parent" checked>
       Control hierarchy <span class="text-xs text-secondary-fg font-normal">({n_control_parent})</span>
     </label>
-    <strong class="chrome-section-label">Edge labels:</strong>
-    <label>
+    <strong class="font-semibold text-sm text-primary-fg mr-1">Edge labels:</strong>
+    <label class="{toggle_label_cls}">
       <input type="checkbox" id="toggle-edge-label-rail_bundle" checked>
       Bundles <span class="text-xs text-secondary-fg font-normal">({n_bundle})</span>
     </label>
-    <label>
+    <label class="{toggle_label_cls}">
       <input type="checkbox" id="toggle-edge-label-self_loop" checked>
       Self-loops <span class="text-xs text-secondary-fg font-normal">({n_self_loop})</span>
     </label>
-    <label>
+    <label class="{toggle_label_cls}">
       <input type="checkbox" id="toggle-edge-label-chain" checked>
       Chain badges <span class="text-xs text-secondary-fg font-normal">({n_chain})</span>
     </label>
-    <label>
+    <label class="{toggle_label_cls}">
       <input type="checkbox" id="toggle-edge-label-control_parent" checked>
       Control labels
     </label>
   </div>
 
-  <div class="diagram-viewport">
+  <div class="flex-1 overflow-auto p-2">
     <div id="diagram-target"></div>
   </div>
 
@@ -1664,8 +1680,8 @@ def _render_data_page(
     <h1>Studio · data shaping</h1>
     <span class="text-sm text-secondary-fg font-mono">{prefix}</span>
     <a class="text-accent no-underline text-sm hover:underline" href="/">← landing</a>
-    <a class="nav-link" href="/diagram">→ diagram</a>
-    <a class="nav-link" href="/dashboards">→ dashboards</a>
+    <a class="text-accent no-underline text-sm hover:underline" href="/diagram">→ diagram</a>
+    <a class="text-accent no-underline text-sm hover:underline" href="/dashboards">→ dashboards</a>
     {deploy_controls}
   </header>
   <script>
