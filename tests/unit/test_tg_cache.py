@@ -357,3 +357,55 @@ def test_full_round_trip_via_two_cache_instances(tmp_path: Path) -> None:
         date(2026, 2, 1), date(2026, 5, 14),
     )
     assert cache_b.is_etl_hook_enabled() is False
+
+
+# ---------------------------------------------------------------------------
+# BD.5 — get_frame() bundles (up_to, window, seed) into one AsOfFrame.
+# ---------------------------------------------------------------------------
+
+
+def test_get_frame_bundles_up_to_window_and_seed() -> None:
+    """Frame aggregates the three temporal-and-determinism pieces
+    the trainer mutates independently. ``as_of`` is the scrub head
+    (`get_up_to()`); ``window`` is the scenario window; ``seed`` is
+    the cached generator seed."""
+    from recon_gen.common.as_of_frame import AsOfFrame
+    state = TestGeneratorConfig(end_date=date(2026, 3, 15), seed=42)
+    window = DateInterval.closed(date(2026, 1, 1), date(2026, 4, 1))
+    cache = TestGeneratorCache(state, window=window)
+    frame = cache.get_frame()
+    assert frame == AsOfFrame(
+        as_of=date(2026, 3, 15),
+        window=window,
+        seed=42,
+    )
+
+
+def test_get_frame_falls_back_to_window_end_when_end_date_unset() -> None:
+    """When the trainer hasn't pinned an end_date, the frame's
+    `as_of` resolves to `window.end` — mirrors `get_up_to()`'s
+    fallback (the trainer's intent: "render up through the right
+    edge of my scenario window")."""
+    state = TestGeneratorConfig(end_date=None, seed=None)
+    window = DateInterval.closed(date(2026, 1, 1), date(2026, 4, 1))
+    cache = TestGeneratorCache(state, window=window)
+    frame = cache.get_frame()
+    assert frame.as_of == date(2026, 4, 1)  # = window.end
+    assert frame.seed is None
+
+
+def test_get_frame_reflects_subsequent_mutations() -> None:
+    """Frame is derived, not snapshotted — each call reads current
+    state. Mutations through `update_window` / `update(seed=...)` /
+    `update(end_date=...)` all surface in the next `get_frame()`."""
+    state = TestGeneratorConfig(end_date=date(2026, 1, 1), seed=7)
+    initial = DateInterval.closed(date(2026, 1, 1), date(2026, 2, 1))
+    cache = TestGeneratorCache(state, window=initial)
+    assert cache.get_frame().seed == 7
+    cache.update(seed=99)
+    cache.update(end_date=date(2026, 1, 15))
+    cache.update_window(end=date(2026, 3, 1))
+    frame = cache.get_frame()
+    assert frame.as_of == date(2026, 1, 15)
+    assert frame.window.end == date(2026, 3, 1)
+    assert frame.seed == 99

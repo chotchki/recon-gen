@@ -26,7 +26,7 @@ import pytest
 from click.testing import CliRunner
 
 from recon_gen.cli import main
-from recon_gen.cli.audit import _resolve_period
+from recon_gen.cli.audit import _resolve_frame
 
 
 _FIXTURES = Path(__file__).parent.parent / "l2"
@@ -747,10 +747,14 @@ def test_audit_clean_missing_file_is_noop(tmp_path: Path):
     assert "doesn't exist" in result.output
 
 
-def test_resolve_period_default_is_seven_day_window():
-    """Default = today − 7 ... today − 1 (inclusive). 7 days, ending yesterday."""
+def test_resolve_frame_default_is_seven_day_window():
+    """Default = today − 7 ... today − 1 (inclusive). 7 days, ending yesterday.
+    BD.2 — was `_resolve_period -> DateInterval`; now `_resolve_frame ->
+    AsOfFrame`. Reach the window via `frame.window`. `frame.as_of` is
+    `today` (the day the audit runs)."""
     today = date(2026, 5, 15)
-    period = _resolve_period(None, today=today)
-    assert period.start == date(2026, 5, 8)
-    assert period.end == date(2026, 5, 14)
-    assert period.days == 7  # inclusive 7-day window
+    frame = _resolve_frame(None, today=today)
+    assert frame.window.start == date(2026, 5, 8)
+    assert frame.window.end == date(2026, 5, 14)
+    assert frame.window.days == 7  # inclusive 7-day window
+    assert frame.as_of == today  # audit-event anchor

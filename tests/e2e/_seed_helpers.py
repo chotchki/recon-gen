@@ -32,11 +32,13 @@ from recon_gen.common.l2.seed import (
     ScenarioPlant,
     emit_full_seed,
 )
+from recon_gen.common.as_of_frame import LOCKED_ANCHOR
 from recon_gen.common.sql import Dialect
 
 
-# Pinned reference date for hash-locked seed determinism (M.2a.8).
-DEFAULT_SEED_TODAY = date(2030, 1, 1)
+# BD.6 — `DEFAULT_SEED_TODAY` retired (was `date(2030, 1, 1)` — same value
+# as `LOCKED_ANCHOR`); callers default `today` to `LOCKED_ANCHOR` directly,
+# one source of truth for the canonical demo anchor.
 
 
 def apply_db_seed(
@@ -88,7 +90,7 @@ def apply_db_seed(
         of the lean planted scenarios. Default False — fast feedback,
         plants only.
     """
-    today_ref = today or DEFAULT_SEED_TODAY
+    today_ref = today or LOCKED_ANCHOR
 
     # 1. Schema.
     schema_sql = emit_schema(instance, prefix=prefix, dialect=dialect)
@@ -154,17 +156,30 @@ def apply_db_seed(
         # writes; render_captured_sql produces dialect-appropriate
         # static SQL the same shape execute_script consumes. Plants-
         # only emit carries metadata.scenario_id per the AV.5 contract.
+        from recon_gen.common.as_of_frame import AsOfFrame
         from recon_gen.common.spine import (
             ScenarioContext,
             dry_run_capture,
             render_captured_sql,
             scenario_to_generators,
         )
+        # BD.3 — fold (today, plant_window) into one AsOfFrame.
+        # When the caller supplies `plant_window`, it becomes
+        # `frame.window` (audit window) and `frame.as_of` anchors on
+        # its right edge — the BC.4 day-pick policy. When absent,
+        # degenerate single-day frame on `today_ref` preserves the
+        # pre-BC.4 "plants land on scenarios.today" test shape.
+        if plant_window is not None:
+            seed_frame = AsOfFrame(
+                as_of=plant_window.end, window=plant_window,
+            )
+        else:
+            seed_frame = AsOfFrame(
+                as_of=today_ref,
+                window=DateInterval.single_day(today_ref),
+            )
         generators = scenario_to_generators(
-            scenario, instance,
-            anchor=today_ref,
-            plant_window=plant_window,
-            prefix=prefix,
+            scenario, instance, frame=seed_frame, prefix=prefix,
         )
         cap = dry_run_capture(dialect)
         ctx = ScenarioContext(

@@ -40,19 +40,17 @@ from recon_gen.cli._helpers import (
 )
 
 
-# X.1.k — fixed canonical anchor for locked-SQL determinism. The plants'
-# `today` and the baseline window's anchor both feed off this so the
-# emit is byte-stable regardless of when `data lock` runs. AQ.3 funnel
-# (2026-05-23): the canonical value now lives on `AsOfFrame.LOCKED_ANCHOR`
-# (`common/as_of_frame.py`) — this name is kept as the locked-SQL
-# emitter's call site so its callers don't change.
-_CANONICAL_LOCK_ANCHOR = LOCKED_ANCHOR
+# X.1.k — fixed canonical anchor for locked-SQL determinism lives on
+# `AsOfFrame.LOCKED_ANCHOR` (`common/as_of_frame.py`). BD.6 dropped the
+# `_CANONICAL_LOCK_ANCHOR = LOCKED_ANCHOR` alias kept here for "caller
+# compat" — the alias was the AQ.3 funnel's transition shim, no longer
+# needed (data_lock command retired in AZ.5; data_semantic_lock imports
+# LOCKED_ANCHOR directly).
 
 # AZ.5 — byte-locked seed dir + `data lock` CLI retired in favor
 # of semantic locks (per-violation-set JSON). _LOCKED_SEEDS_DIR
-# constant + data_lock command removed in the same commit; the
-# `_CANONICAL_LOCK_ANCHOR` name is preserved because
-# `data_semantic_lock` still needs it as the canonical anchor.
+# constant + data_lock command removed in the same commit;
+# `data_semantic_lock` imports `LOCKED_ANCHOR` directly.
 _SEMANTIC_LOCKS_DIR = (
     Path(__file__).resolve().parents[3]
     / "tests" / "data" / "_semantic_locks"
@@ -246,8 +244,19 @@ def _build_fresh_semantic_lock_sqlite(
         # Compose the production seed via the spine pipeline.
         from recon_gen.cli._helpers import build_default_scenario  # pyright: ignore[reportUnknownVariableType]  # WHY: helper has pending untyped-def waiver
         scenario = build_default_scenario(instance, anchor=anchor)  # pyright: ignore[reportUnknownVariableType]: same helper-untyped waiver propagates to the call
+        # BD.3 — semantic-lock detector frame: window matches the
+        # 90-day baseline above (emit_baseline_seed window_days=90),
+        # ending on `anchor`. Plants validate against this window via
+        # SingleDayPlant.at_offset_from_end (per-plant days_ago must
+        # fit inside [anchor-90, anchor]).
+        from recon_gen.common.as_of_frame import AsOfFrame
+        from recon_gen.common.intervals import DateInterval
+        lock_frame = AsOfFrame(
+            as_of=anchor,
+            window=DateInterval.trailing_days_ending_today(anchor, days=91),
+        )
         generators = scenario_to_generators(
-            scenario, instance, anchor=anchor, prefix=prefix,
+            scenario, instance, frame=lock_frame, prefix=prefix,
         )
         ctx = ScenarioContext(
             scenario_id=f"semantic-lock-{prefix}",
@@ -329,7 +338,7 @@ def data_semantic_lock(
     instance_name = yaml_path.stem
 
     fresh = _build_fresh_semantic_lock_sqlite(
-        instance, _CANONICAL_LOCK_ANCHOR, prefix=instance_name,
+        instance, LOCKED_ANCHOR, prefix=instance_name,
     )
     locked_path = (
         _SEMANTIC_LOCKS_DIR / f"{instance_name}.sqlite.json"

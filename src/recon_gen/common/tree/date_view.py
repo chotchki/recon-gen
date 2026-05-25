@@ -74,12 +74,13 @@ class DateView:
     object — AR.2's emission layer. ONE source of truth; the C1
     dual-default split becomes unrepresentable.
 
-    The frame carries the anchor + span: `frame.as_of` is the
-    right-edge anchor, `frame.window_days` is the span (0 ⇒ single-day
-    view; >0 ⇒ rolling-N-day view). Span as a frame field is the
-    AQ-rolled-out shape; the audit's open D4 (where window lives —
-    L2/config vs generator constant) is still unsettled, but the
-    primitive doesn't have to take a position on it.
+    The frame carries the anchor + window: `frame.as_of` is the
+    right-edge anchor, `frame.window` is the typed `DateInterval` the
+    view queries against (single-day when `frame.window.days == 1`;
+    rolling N-day when `frame.window.days > 1`). BD.1 replaced the v1
+    `frame.window_days: int` field with `frame.window: DateInterval`
+    so the "span > 0 means rolling" convention is now a closed-closed
+    days count, not a separate scalar.
 
     Authoring abstraction — not end-user config. App authors construct
     one of these per surface; the operator never picks one.
@@ -113,7 +114,7 @@ class DateView:
         `is_satisfied_by(available_days)` to make the plant ⟷
         query-window contract a test, not developer-memory.
         """
-        if self.frame.window_days > 0:
+        if self.frame.window.days > 1:
             return (self.window_start, self.anchor_day)
         if self.empty_behavior is EmptyBehavior.LATEST_ON_EMPTY:
             return (date.min, self.anchor_day)

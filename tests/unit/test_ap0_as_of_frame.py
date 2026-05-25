@@ -53,9 +53,10 @@ _PREFIX = "spec_example"
 _DIALECT = Dialect.SQLITE
 
 # The locked scenario anchor the codebase already uses for byte-identical seed
-# SQL (cli/data.py::_CANONICAL_LOCK_ANCHOR). The frame's whole point is that
-# THIS is the only thing that floats: bind it fixed → deterministic; bind it
-# now() → ends-at-now; one code path either way.
+# SQL (post-BD.6: `common/as_of_frame.py::LOCKED_ANCHOR`; the AQ.3 funnel's
+# `_CANONICAL_LOCK_ANCHOR` alias in cli/data.py was retired). The frame's whole
+# point is that THIS is the only thing that floats: bind it fixed →
+# deterministic; bind it now() → ends-at-now; one code path either way.
 _LOCKED_ANCHOR = date(2030, 1, 1)
 
 

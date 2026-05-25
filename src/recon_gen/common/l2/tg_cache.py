@@ -215,6 +215,28 @@ class TestGeneratorCache:
         """
         return self._state.end_date or self._window.end
 
+    def get_frame(self) -> AsOfFrame:
+        """BD.5 — return the trainer's frame as a single `AsOfFrame`.
+
+        The trainer's three temporal-and-determinism pieces — scrub
+        head (`get_up_to()`), scenario window (`get_window()`), and
+        RNG seed (`get().seed`) — bundle naturally into the
+        post-BD.1 `AsOfFrame(as_of, window, seed)` shape. Callers that
+        need all three together (plant emit via
+        `scenario_to_generators(frame=...)` per BD.3, dashboard
+        defaults via `DateView(frame=...)` per BD.4) take the frame
+        instead of three independent reads.
+
+        Derivation: `as_of = get_up_to()` (the scrub head — what the
+        trainer is "looking at"); `window = _window`; `seed = state.seed`
+        (None when the cfg hasn't pinned one, same as `AsOfFrame.live()`).
+        """
+        return AsOfFrame(
+            as_of=self.get_up_to(),
+            window=self._window,
+            seed=self._state.seed,
+        )
+
     def replace(self, new_state: TestGeneratorConfig) -> None:
         """Swap the cached generator state (window untouched)."""
         self._state = new_state
