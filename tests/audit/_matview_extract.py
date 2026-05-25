@@ -36,6 +36,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
+from recon_gen.common.intervals import DateInterval
 from recon_gen.common.sql import Dialect
 
 
@@ -96,7 +97,7 @@ def _date_literal(d: date, dialect: Dialect) -> str:
 
 
 def _period_where(
-    day_col: str | None, period: tuple[date, date] | None, dialect: Dialect,
+    day_col: str | None, period: DateInterval | None, dialect: Dialect,
 ) -> str:
     """The ``WHERE`` clause narrowing ``day_col`` to ``period`` — the
     audit's ``>= start AND < (end + 1 day)`` window, so a same-day
@@ -106,10 +107,9 @@ def _period_where(
     Returns ``""`` when there's no day column or no period."""
     if day_col is None or period is None:
         return ""
-    start, end = period
-    end_plus_one = end + timedelta(days=1)
+    end_plus_one = period.end + timedelta(days=1)
     return (
-        f" WHERE {day_col} >= {_date_literal(start, dialect)} "
+        f" WHERE {day_col} >= {_date_literal(period.start, dialect)} "
         f"AND {day_col} < {_date_literal(end_plus_one, dialect)}"
     )
 
@@ -118,7 +118,7 @@ def count_l1_invariant_matview_rows(
     conn: Any,  # typing-smell: ignore[explicit-any]: per-driver connection union (psycopg/oracledb/sqlite3) has no shared Protocol
     prefix: str,
     invariant: L1Invariant,
-    period: tuple[date, date] | None,
+    period: DateInterval | None,
     dialect: Dialect,
 ) -> int:
     """``SELECT count(*)`` from the named invariant's matview, narrowed
@@ -303,7 +303,7 @@ def l1_invariant_matview_row_keys(
     conn: Any,  # typing-smell: ignore[explicit-any]: per-driver connection union has no shared Protocol
     prefix: str,
     invariant: L1Invariant,
-    period: tuple[date, date] | None,
+    period: DateInterval | None,
     dialect: Dialect,
 ) -> set[tuple[str | date, ...]]:
     """The set of natural-key tuples in the named invariant's matview,

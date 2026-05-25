@@ -19,6 +19,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+from recon_gen.common.intervals import DateInterval
 from recon_gen.common.l2.auto_scenario import default_scenario_for
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.seed import (
@@ -68,7 +69,7 @@ def test_drift_plant_inside_period_counts():
             ),
         ),
     )
-    period = (_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
+    period = DateInterval.closed(_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
     expected = expected_audit_counts(scenario, period)
     assert expected.drift_count == 1
     assert expected.drift_account_days == (
@@ -95,7 +96,7 @@ def test_drift_plants_outside_period_excluded():
             ),
         ),
     )
-    period = (_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
+    period = DateInterval.closed(_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
     expected = expected_audit_counts(scenario, period)
     assert expected.drift_count == 0
 
@@ -120,7 +121,7 @@ def test_period_endpoints_inclusive_both_sides():
             ),
         ),
     )
-    period = (_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
+    period = DateInterval.closed(_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
     expected = expected_audit_counts(scenario, period)
     assert expected.drift_count == 2
     assert {a for a, _ in expected.drift_account_days} == {
@@ -143,7 +144,7 @@ def test_overdraft_period_filtering():
             ),
         ),
     )
-    period = (_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
+    period = DateInterval.closed(_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
     expected = expected_audit_counts(scenario, period)
     assert expected.overdraft_count == 1
     assert expected.overdraft_account_days == (
@@ -163,7 +164,7 @@ def test_limit_breach_carries_transfer_type_in_identity():
             ),
         ),
     )
-    period = (_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
+    period = DateInterval.closed(_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
     expected = expected_audit_counts(scenario, period)
     assert expected.limit_breach_count == 1
     assert expected.limit_breach_account_days == (
@@ -191,7 +192,7 @@ def test_stuck_pending_skips_period_filter():
     )
     # Narrow period that excludes both plant dates by date arithmetic;
     # current-state semantics ignore it.
-    period = (_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
+    period = DateInterval.closed(_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
     expected = expected_audit_counts(scenario, period)
     assert expected.stuck_pending_count == 2
     assert expected.stuck_pending_accounts == ("a", "b")
@@ -208,7 +209,7 @@ def test_stuck_unbundled_skips_period_filter():
             ),
         ),
     )
-    period = (_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
+    period = DateInterval.closed(_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
     expected = expected_audit_counts(scenario, period)
     assert expected.stuck_unbundled_count == 1
     assert expected.stuck_unbundled_accounts == ("u1",)
@@ -233,7 +234,7 @@ def test_supersession_in_period_counts_as_correcting_tx():
             ),
         ),
     )
-    period = (_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
+    period = DateInterval.closed(_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
     expected = expected_audit_counts(scenario, period)
     assert expected.supersession_count == 1
     assert expected.supersession_account_days == (
@@ -264,7 +265,7 @@ def test_default_spec_example_scenario_smokes():
     """
     instance = load_instance(_SPEC_EXAMPLE)
     report = default_scenario_for(instance, today=_TODAY)
-    period = (_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
+    period = DateInterval.closed(_TODAY - timedelta(days=7), _TODAY - timedelta(days=1))
     expected = expected_audit_counts(report.scenario, period)
 
     # Re-derive the period filter independently, then check the
@@ -272,8 +273,9 @@ def test_default_spec_example_scenario_smokes():
     # helper's logic against the live scenario data.
     in_period_drift = sum(
         1 for p in report.scenario.drift_plants
-        if period[0] <= report.scenario.today
-            - timedelta(days=p.days_ago) <= period[1]
+        if period.contains(
+            report.scenario.today - timedelta(days=p.days_ago),
+        )
     )
     assert expected.drift_count == in_period_drift
     assert expected.stuck_pending_count == len(

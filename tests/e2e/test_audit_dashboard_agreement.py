@@ -52,7 +52,7 @@ invariants on both dialects.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -60,6 +60,7 @@ from click.testing import CliRunner
 
 from recon_gen.cli import main
 from recon_gen.common.db import connect_demo_db
+from recon_gen.common.intervals import DateInterval
 from recon_gen.common.l2 import load_instance
 from recon_gen.common.sql import Dialect
 
@@ -148,10 +149,14 @@ def _l2_yaml_for_test() -> Path:
 # only the absolute calendar date varies. The audit period [_TODAY - 7,
 # _TODAY - 1] then contains the plant effective dates by construction.
 _TODAY = date.today()  # typing-smell: ignore[test-module-nondeterminism]: stuck_* matviews use CURRENT_TIMESTAMP — plants must be in the past relative to NOW (see WHY block above)
-_PERIOD: tuple[date, date] = (
-    _TODAY - timedelta(days=7),
-    _TODAY - timedelta(days=1),
-)
+# BC.4d — typed window. `trailing_days_ending_yesterday(_TODAY, 7)` yields
+# `[_TODAY - 7, _TODAY - 1]` — same shape as the prior tuple, now with the
+# audit-window convention encoded in the constructor name. Threaded into
+# `apply_db_seed(plant_window=_PERIOD)` so the L1-invariant spine
+# generators land plants on `_PERIOD.end` (the most-recently-closed
+# auditable day) by construction — kills the chronic v11.10.0 off-by-one
+# (plant was landing on `_TODAY`, outside `[_TODAY - 7, _TODAY - 1]`).
+_PERIOD: DateInterval = DateInterval.trailing_days_ending_yesterday(_TODAY, 7)
 
 
 # U.8.b.5 — Per-dialect config files. The matrix runs one cell per
@@ -347,6 +352,7 @@ def seeded_audit(dialect_cfg, tmp_path_factory):
             prefix=cfg.db_table_prefix,
             mode="l1_invariants",
             today=_TODAY,
+            plant_window=_PERIOD,
             dialect=dialect,
             include_baseline=False,
         )
@@ -361,7 +367,7 @@ def seeded_audit(dialect_cfg, tmp_path_factory):
             "audit", "apply",
             "-c", str(cfg_path),
             "--l2", str(_l2_yaml_for_test()),
-            "--period", f"{_PERIOD[0].isoformat()}..{_PERIOD[1].isoformat()}",
+            "--period", f"{_PERIOD.start.isoformat()}..{_PERIOD.end.isoformat()}",
             "-o", str(out),
             "--execute",
         ],
@@ -693,7 +699,7 @@ def test_invariant_four_way_agreement(
                 f"Renderer disagrees with the matview ({invariant}, QS): the "
                 f"dashboard shows {qs_count} rows, a direct SELECT against "
                 f"{per_dialect_matview_prefix}_{invariant} shows {direct_count}. "
-                f"Same period ({_PERIOD[0]}–{_PERIOD[1]}), same matview."
+                f"Same period ({_PERIOD.start}–{_PERIOD.end}), same matview."
             )
         assert app2_count == direct_count, (
             f"Renderer disagrees with the matview ({invariant}, App2): the "
@@ -716,7 +722,7 @@ def test_invariant_four_way_agreement(
         assert pdf_count == direct_count, (
             f"Credibility contract broken ({invariant}): the audit PDF "
             f"shows {pdf_count} rows, the matview holds {direct_count}. "
-            f"Same period ({_PERIOD[0]}–{_PERIOD[1]}). The regulator-facing "
+            f"Same period ({_PERIOD.start}–{_PERIOD.end}). The regulator-facing "
             f"PDF and the live matview disagree."
         )
 

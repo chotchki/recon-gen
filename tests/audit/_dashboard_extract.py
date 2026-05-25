@@ -26,6 +26,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
+from recon_gen.common.intervals import DateInterval
+
 from tests.e2e._drivers import DashboardDriver
 
 
@@ -145,7 +147,7 @@ def key_columns_for(invariant: L1Invariant) -> tuple[str, ...]:
 def _go_to_invariant_sheet(
     driver: DashboardDriver,
     invariant: L1Invariant,
-    period: tuple[date, date] | None,
+    period: DateInterval | None,
 ) -> str:
     """Switch to the invariant's sheet + apply the period filter (when
     the invariant is time-series and ``period`` is set). Returns the
@@ -156,14 +158,14 @@ def _go_to_invariant_sheet(
         # ``set_date_range`` blocks on the QS settle (per X.2.q's
         # ``_settle_after_param_change``) so the read below sees the
         # post-filter state, not the spinner gap.
-        driver.set_date_range(period[0].isoformat(), period[1].isoformat())
+        driver.set_date_range(period.start.isoformat(), period.end.isoformat())
     return table_title
 
 
 def count_l1_invariant_rows(
     driver: DashboardDriver,
     invariant: L1Invariant,
-    period: tuple[date, date] | None,
+    period: DateInterval | None,
 ) -> int:
     """Count rows in the named invariant's L1 dashboard table.
 
@@ -183,7 +185,7 @@ def count_l1_invariant_rows(
 def l1_invariant_row_keys(
     driver: DashboardDriver,
     invariant: L1Invariant,
-    period: tuple[date, date] | None,
+    period: DateInterval | None,
 ) -> set[tuple[str | date, ...]]:
     """The set of natural-key tuples shown in the named invariant's L1
     dashboard table — for the X.2.j 4-way agreement test's row-identity
@@ -227,7 +229,7 @@ def l1_invariant_row_keys(
 def l1_invariant_rows_seen(
     driver: DashboardDriver,
     invariant: L1Invariant,
-    period: tuple[date, date] | None,
+    period: DateInterval | None,
 ) -> int:
     """How many rows ``table_rows`` actually returned (the DOM window) —
     distinct from ``count_l1_invariant_rows`` (the page-size-bump *total*).

@@ -37,6 +37,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from recon_gen.common.intervals import DateInterval
 from recon_gen.common.l2.seed import ScenarioPlant
 from recon_gen.common.spine import AnomalyGenerator, MoneyTrailGenerator
 
@@ -75,23 +76,22 @@ class ExpectedAuditCounts:
 
 def expected_audit_counts(
     scenario: ScenarioPlant,
-    period: tuple[date, date],
+    period: DateInterval,
 ) -> ExpectedAuditCounts:
     """Compute ExpectedAuditCounts from a scenario + audit period.
 
     ``scenario`` is the ``ScenarioPlant`` returned by
     ``default_scenario_for(instance, today=...)`` (or hand-built
-    for unit tests). ``period`` is the ``(start, end)`` window the
-    audit is rendered for; both endpoints are inclusive dates.
+    for unit tests). ``period`` is the ``DateInterval`` window the
+    audit is rendered for; both endpoints are inclusive dates
+    (BC.4d — was ``tuple[date, date]``).
     """
-    start, end = period
 
     def _eff(p) -> date:  # type: ignore[no-untyped-def]: p is one of the union of plant dataclasses; all carry days_ago
         return scenario.today - timedelta(days=p.days_ago)
 
     def _in_period(p) -> bool:  # type: ignore[no-untyped-def]: p is one of the union of plant dataclasses; all carry days_ago
-        eff = _eff(p)
-        return start <= eff <= end
+        return period.contains(_eff(p))
 
     drift = tuple(p for p in scenario.drift_plants if _in_period(p))
     overdraft = tuple(

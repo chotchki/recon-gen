@@ -54,6 +54,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
+from recon_gen.common.intervals import DateInterval, SingleDayPlant
 from recon_gen.common.l2.primitives import (
     L2Instance,
     SingleLegRail,
@@ -116,6 +117,7 @@ def scenario_to_generators(
     instance: L2Instance,
     *,
     anchor: date | None = None,
+    plant_window: DateInterval | None = None,
     as_of: datetime | None = None,
     prefix: str = "spec_example",
 ) -> tuple[ViolationGenerator, ...]:
@@ -125,10 +127,24 @@ def scenario_to_generators(
     inbound cap → two-template → ... → inv-fanout) so debug output
     stays diff-friendly.
 
-    Anchor defaults: `anchor` defaults to `scenarios.today` (the
-    plant collection's pinned reference date); `as_of` defaults to
-    `anchor` at noon (StuckPending / StuckUnbundled generators need
-    a wall-clock).
+    Anchor resolution (BC.4a). The L1-invariant factories below
+    construct each generator's `anchor_day: date` field from a
+    `SingleDayPlant.at_window_end(plant_window)` when `plant_window`
+    is supplied — that's the day-pick policy ("most-recently-closed
+    auditable day") encoded in the constructor name, not in a
+    docstring. Fallback chain when `plant_window` is None:
+
+    1. `plant_window` is supplied → derive `anchor_day =
+       SingleDayPlant.at_window_end(plant_window).day` (matches the
+       audit window's right edge — the day plants intended for the
+       window will be picked up by an audit run over that window).
+    2. `anchor` is supplied → use it as `anchor_day` (backward-compat
+       with pre-BC.4 callers like `cli/data.py::data apply`).
+    3. Neither → fall back to `scenarios.today` (the plant
+       collection's pinned reference date).
+
+    `as_of` defaults to `anchor_day` at noon (StuckPending /
+    StuckUnbundled generators need a wall-clock).
 
     `prefix` defaults to "spec_example" (the in-process test harness
     shape). Production callers (AY.4.d `build_full_seed_sql`) pass
@@ -136,7 +152,12 @@ def scenario_to_generators(
     `self.prefix = prefix` so `insert_tx` / `insert_balance` writes
     to the correctly-prefixed tables.
     """
-    anchor_day = anchor if anchor is not None else scenarios.today
+    if plant_window is not None:
+        anchor_day = SingleDayPlant.at_window_end(plant_window).day
+    elif anchor is not None:
+        anchor_day = anchor
+    else:
+        anchor_day = scenarios.today
     wall_clock = as_of if as_of is not None else datetime(
         anchor_day.year, anchor_day.month, anchor_day.day, 12, 0, 0,
     )
@@ -144,13 +165,24 @@ def scenario_to_generators(
     out: list[ViolationGenerator] = []
 
     # L1 accounting plants — straightforward 1:1 maps via factories.
+    # When ``plant_window`` is set, the L1-invariant factories below
+    # re-derive their per-generator ``anchor_day`` via
+    # ``SingleDayPlant.at_window_end(plant_window)`` so the day-pick
+    # policy is encoded in the constructor name. When None (legacy
+    # callers passing ``anchor=...``), they fall through to the
+    # already-resolved ``anchor_day`` above unchanged.
     for dp in scenarios.drift_plants:
-        out.append(_adapt_drift(dp, instance, scenarios, anchor_day))
+        out.append(_adapt_drift(
+            dp, instance, scenarios, anchor_day, plant_window,
+        ))
     for op in scenarios.overdraft_plants:
-        out.append(_adapt_overdraft(op, instance, scenarios, anchor_day))
+        out.append(_adapt_overdraft(
+            op, instance, scenarios, anchor_day, plant_window,
+        ))
     for lp in scenarios.limit_breach_plants:
         lb_gen = _adapt_limit_breach(
-            lp, instance, scenarios, anchor_day, direction="Outbound",
+            lp, instance, scenarios, anchor_day,
+            direction="Outbound", plant_window=plant_window,
         )
         out.append(lb_gen)
         out.extend(_chain_completion_for_rail(
@@ -158,7 +190,7 @@ def scenario_to_generators(
         ))
     for icp in scenarios.inbound_cap_breach_plants:
         ib_gen = _adapt_inbound_cap_breach(
-            icp, instance, scenarios, anchor_day,
+            icp, instance, scenarios, anchor_day, plant_window,
         )
         out.append(ib_gen)
         out.extend(_chain_completion_for_rail(
@@ -240,7 +272,7 @@ def scenario_to_generators(
 
 def _adapt_drift(
     plant: DriftPlant, instance: L2Instance, scenarios: ScenarioPlant,
-    anchor_day: date,
+    anchor_day: date, plant_window: DateInterval | None = None,
 ) -> ViolationGenerator:
     """AY.4.f — direct-construct DriftGenerator. Bypasses the
     factory's `scenario_for(role)` which raises on roles only present
@@ -250,7 +282,15 @@ def _adapt_drift(
     L2-singleton + template-instance accounts), then look up the
     parent account by role IF the L2 declares one as a singleton
     (template-instance parents aren't typically materialized for
-    drift; the OLD path tolerated the None case)."""
+    drift; the OLD path tolerated the None case).
+
+    BC.4b: when `plant_window` is supplied, re-derive `anchor_day`
+    via `SingleDayPlant.at_window_end(plant_window)` so the
+    most-recently-closed auditable day is the landing day by
+    construction (kills the v11.10.0 off-by-one — plant lands
+    INSIDE the audit window, not on `today`)."""
+    if plant_window is not None:
+        anchor_day = SingleDayPlant.at_window_end(plant_window).day
     role, _scope, parent_role = _resolve_account_triple(
         instance, scenarios, plant.account_id,
     )
@@ -279,8 +319,13 @@ def _adapt_drift(
 
 def _adapt_overdraft(
     plant: OverdraftPlant, instance: L2Instance, scenarios: ScenarioPlant,
-    anchor_day: date,
+    anchor_day: date, plant_window: DateInterval | None = None,
 ) -> ViolationGenerator:
+    """BC.4b: when `plant_window` is supplied, re-derive `anchor_day`
+    via `SingleDayPlant.at_window_end(plant_window)` — plant lands
+    on the most-recently-closed auditable day."""
+    if plant_window is not None:
+        anchor_day = SingleDayPlant.at_window_end(plant_window).day
     role, _scope, parent_role = _resolve_account_triple(
         instance, scenarios, plant.account_id,
     )
@@ -296,10 +341,16 @@ def _adapt_overdraft(
 def _adapt_limit_breach(
     plant: LimitBreachPlant, instance: L2Instance, scenarios: ScenarioPlant,
     anchor_day: date, *, direction: str = "Outbound",
+    plant_window: DateInterval | None = None,
 ) -> ViolationGenerator:
     """AY.4.f — direct-construct LimitBreachGenerator. Looks up the
     LimitSchedule's cap by (parent_role, rail, direction) from the
-    L2 instance."""
+    L2 instance.
+
+    BC.4b: when `plant_window` is supplied, re-derive `anchor_day`
+    via `SingleDayPlant.at_window_end(plant_window)`."""
+    if plant_window is not None:
+        anchor_day = SingleDayPlant.at_window_end(plant_window).day
     role, _scope, parent_role = _resolve_account_triple(
         instance, scenarios, plant.account_id,
     )
@@ -327,8 +378,14 @@ def _adapt_limit_breach(
 def _adapt_inbound_cap_breach(
     plant: InboundCapBreachPlant, instance: L2Instance,
     scenarios: ScenarioPlant, anchor_day: date,
+    plant_window: DateInterval | None = None,
 ) -> ViolationGenerator:
-    """Mirror of `_adapt_limit_breach` with `direction='Inbound'`."""
+    """Mirror of `_adapt_limit_breach` with `direction='Inbound'`.
+
+    BC.4b: when `plant_window` is supplied, re-derive `anchor_day`
+    via `SingleDayPlant.at_window_end(plant_window)`."""
+    if plant_window is not None:
+        anchor_day = SingleDayPlant.at_window_end(plant_window).day
     role, _scope, parent_role = _resolve_account_triple(
         instance, scenarios, plant.account_id,
     )

@@ -15,6 +15,7 @@ from datetime import date
 from typing import Any
 
 from recon_gen.common.db import execute_script
+from recon_gen.common.intervals import DateInterval
 from recon_gen.common.l2 import (
     L2Instance,
     emit_schema,
@@ -45,6 +46,7 @@ def apply_db_seed(
     prefix: str,
     mode: ScenarioMode = "l1_plus_broad",
     today: date | None = None,
+    plant_window: DateInterval | None = None,
     dialect: Dialect = Dialect.POSTGRES,
     include_baseline: bool = False,
 ) -> ScenarioPlant:
@@ -65,6 +67,21 @@ def apply_db_seed(
         off (pass ``cfg.db_table_prefix``). The L2 yaml no longer
         carries an ``instance:`` field, so the prefix is a required
         kwarg.
+      today (legacy, BC.4 superseded by `plant_window`): the reference
+        date the scenario builder uses to compute plant `days_ago`
+        offsets. Kept for backward-compat with callers that don't yet
+        thread an audit window through (e.g. `test_pdf_matches_scenario`
+        / `test_inv_dashboard_agreement`); when both `today` AND
+        `plant_window` are supplied, `plant_window.end` wins for
+        spine-generator anchoring (the day plants land on) while
+        `today` continues to drive the scenario's `days_ago` math.
+      plant_window (BC.4c): when supplied, threaded into
+        `scenario_to_generators(plant_window=...)` so the L1-invariant
+        spine generators anchor each plant on
+        `SingleDayPlant.at_window_end(plant_window).day` — the
+        most-recently-closed auditable day. Fixes the chronic v11.10.0
+        off-by-one (plant landed on `today`, audit window was
+        `[today-7, today-1]`).
       include_baseline (R.5.b): when True, the seed step uses
         ``emit_full_seed`` + the densify+broken+boost pipeline that
         the CLI's ``demo apply`` uses. Adds ~60k baseline rows on top
@@ -110,7 +127,10 @@ def apply_db_seed(
             scenario_to_generators,
         )
         generators = scenario_to_generators(
-            scenario, instance, anchor=today_ref, prefix=prefix,
+            scenario, instance,
+            anchor=today_ref,
+            plant_window=plant_window,
+            prefix=prefix,
         )
         cap = dry_run_capture(dialect)
         ctx = ScenarioContext(
