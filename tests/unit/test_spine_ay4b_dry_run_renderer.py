@@ -221,3 +221,68 @@ def test_round_trip_with_drift_generator_produces_valid_inserts() -> None:
     assert "test-ay4b-roundtrip" in sql
     # Statement terminator pattern.
     assert ";\n" in sql
+
+
+# ---------------------------------------------------------------------
+# BC.14 — Oracle TIMESTAMP wrapping for ANSI-form date literals.
+# ---------------------------------------------------------------------
+
+def test_oracle_wraps_timestamp_shaped_string_with_ansi_form() -> None:
+    """`YYYY-MM-DD HH:MM:SS` (24-hour) is the spine's canonical
+    stored-timestamp shape. Oracle's default NLS_DATE_FORMAT is
+    `DD-MON-RR`; bare quoted strings of the spine's shape trip
+    ORA-01843. BC.14 fix: wrap with ANSI `TIMESTAMP '...'` which
+    Oracle accepts unambiguously."""
+    out = render_captured_sql(
+        [("INSERT INTO t (posting) VALUES (:1)", ("2026-05-24 12:00:00",))],
+        dialect=Dialect.ORACLE,
+    )
+    assert "VALUES (TIMESTAMP '2026-05-24 12:00:00')" in out
+    # NOT bare quoted (the pre-BC.14 shape that ORA-01843s).
+    assert "VALUES ('2026-05-24 12:00:00')" not in out
+
+
+def test_oracle_does_not_wrap_non_timestamp_strings() -> None:
+    """Other strings (account IDs, JSON metadata, descriptions) stay
+    bare-quoted. The wrap is shape-gated on
+    `YYYY-MM-DD HH:MM:SS` exactly."""
+    out = render_captured_sql(
+        [("INSERT INTO t (id, descr) VALUES (:1, :2)",
+          ("acct-001", "not a date"))],
+        dialect=Dialect.ORACLE,
+    )
+    assert "'acct-001'" in out
+    assert "'not a date'" in out
+    assert "TIMESTAMP" not in out
+
+
+def test_oracle_wraps_timestamp_with_microseconds() -> None:
+    """Sub-second precision (e.g. CURRENT_TIMESTAMP-derived values) —
+    the wrap regex allows optional `.NNNNNN` after seconds."""
+    out = render_captured_sql(
+        [("INSERT INTO t (ts) VALUES (:1)",
+          ("2026-05-24 12:00:00.123456",))],
+        dialect=Dialect.ORACLE,
+    )
+    assert "TIMESTAMP '2026-05-24 12:00:00.123456'" in out
+
+
+def test_postgres_does_not_wrap_timestamp_strings() -> None:
+    """PG accepts bare quoted timestamp strings (no NLS_DATE_FORMAT
+    sensitivity). The wrap is Oracle-only — keep PG output unchanged."""
+    out = render_captured_sql(
+        [("INSERT INTO t (posting) VALUES (%s)", ("2026-05-24 12:00:00",))],
+        dialect=Dialect.POSTGRES,
+    )
+    assert "VALUES ('2026-05-24 12:00:00')" in out
+    assert "TIMESTAMP" not in out
+
+
+def test_sqlite_does_not_wrap_timestamp_strings() -> None:
+    """SQLite stores TEXT for timestamps; the wrap is Oracle-only."""
+    out = render_captured_sql(
+        [("INSERT INTO t (posting) VALUES (?)", ("2026-05-24 12:00:00",))],
+        dialect=Dialect.SQLITE,
+    )
+    assert "VALUES ('2026-05-24 12:00:00')" in out
+    assert "TIMESTAMP" not in out

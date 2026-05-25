@@ -20,15 +20,14 @@ Literal escaping is type-dispatched:
     matches the OLD `_sql_str(money)` shape)
   - `bool` → `1` / `0` (no dialect uses bool yet but defensive)
 
-What the renderer does NOT handle yet:
-
-  - **Oracle TIMESTAMP wrapping.** The OLD `_sql_timestamp_literal`
-    wraps Oracle timestamp values in `TIMESTAMP '...'`. The renderer
-    can't tell which string is a timestamp without column context.
-    AY.4.b ships SQLite + Postgres parity; Oracle output is
-    syntactically valid (bare quoted strings) but Oracle's TIMESTAMP
-    column may reject. AY.5's re-lock pass either accepts the bare
-    form or adds a per-column wrapper at the spine emit layer.
+BC.14 (2026-05-24) — **Oracle TIMESTAMP wrapping** now handled
+shape-detection-side. The renderer detects `YYYY-MM-DD HH:MM:SS`
+strings (the spine's canonical timestamp format) and wraps them with
+ANSI SQL `TIMESTAMP 'YYYY-MM-DD HH24:MI:SS'` when dialect is Oracle.
+Oracle accepts the ANSI form unambiguously regardless of
+NLS_DATE_FORMAT. PG + SQLite still emit bare quoted strings (which
+both accept). Surfaced as ORA-01843 at stmt #2368 of data apply
+post-BC.12 (the bug was masked by the earlier BC.12 ORA-32368 wall).
 """
 
 from __future__ import annotations
@@ -63,16 +62,16 @@ def _render_one(
     """Substitute placeholders in `sql` with literal renderings of
     `params`. Picks the substitution strategy from `dialect`."""
     if dialect is Dialect.SQLITE:
-        return _substitute_sequential(sql, params, "?")
+        return _substitute_sequential(sql, params, "?", dialect)
     if dialect is Dialect.POSTGRES:
-        return _substitute_sequential(sql, params, "%s")
+        return _substitute_sequential(sql, params, "%s", dialect)
     if dialect is Dialect.ORACLE:
-        return _substitute_numeric(sql, params)
+        return _substitute_numeric(sql, params, dialect)
     raise ValueError(f"unknown dialect: {dialect!r}")
 
 
 def _substitute_sequential(
-    sql: str, params: tuple[object, ...], marker: str,
+    sql: str, params: tuple[object, ...], marker: str, dialect: Dialect,
 ) -> str:
     """SQLite + Postgres: walk the SQL, replacing each `marker`
     occurrence with the next param's literal rendering in order.
@@ -94,7 +93,7 @@ def _substitute_sequential(
     for i, part in enumerate(parts):
         out.append(part)
         if i < len(params):
-            out.append(_render_literal(params[i]))
+            out.append(_render_literal(params[i], dialect=dialect))
     return "".join(out)
 
 
@@ -102,7 +101,7 @@ _ORACLE_PLACEHOLDER = re.compile(r":(\d+)")
 
 
 def _substitute_numeric(
-    sql: str, params: tuple[object, ...],
+    sql: str, params: tuple[object, ...], dialect: Dialect,
 ) -> str:
     """Oracle: replace each `:N` (1-indexed) with the corresponding
     param's literal rendering. Re-substitution-safe because the
@@ -116,16 +115,31 @@ def _substitute_numeric(
                 f"Oracle placeholder :{idx + 1} has no matching param "
                 f"(got {len(params)} params). SQL: {sql!r}"
             )
-        return _render_literal(params[idx])
+        return _render_literal(params[idx], dialect=dialect)
     return _ORACLE_PLACEHOLDER.sub(_sub, sql)
 
 
-def _render_literal(value: object) -> str:
+# BC.14 — `YYYY-MM-DD HH:MM:SS` (24-hour) is the spine's canonical
+# stored-timestamp format. Used by `insert_balance` / `insert_tx` for
+# `posting` / `business_day_start` / `business_day_end`. Oracle's
+# default NLS_DATE_FORMAT is `DD-MON-RR` which doesn't parse this
+# shape → ORA-01843. Wrap-as-ANSI-TIMESTAMP makes the literal
+# unambiguous regardless of session settings.
+_TIMESTAMP_LITERAL_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$",
+)
+
+
+def _render_literal(value: object, *, dialect: Dialect) -> str:
     """Render a Python value as a SQL literal token.
 
     - `None` → `NULL`
     - `bool` → `1` / `0` (defensive; spine doesn't emit bools today)
     - `int` / `float` → bare numeric
+    - `str` matching the spine's canonical timestamp shape AND
+      `dialect is Oracle` → `TIMESTAMP 'YYYY-MM-DD HH:MM:SS'` (ANSI
+      form; unambiguous regardless of NLS_DATE_FORMAT). BC.14 fix
+      for ORA-01843 at data-apply time.
     - `str` → `'escaped'` (single-quote doubled)
     - other → fall through to `str(value)` quoted (defensive — any
       future date/Decimal/etc. lands here; consumers should add a
@@ -139,6 +153,11 @@ def _render_literal(value: object) -> str:
     if isinstance(value, (int, float)):
         return str(value)
     if isinstance(value, str):
+        if (
+            dialect is Dialect.ORACLE
+            and _TIMESTAMP_LITERAL_RE.match(value)
+        ):
+            return f"TIMESTAMP '{value}'"
         return "'" + value.replace("'", "''") + "'"
     # Defensive fallback — quote stringification.
     return "'" + str(value).replace("'", "''") + "'"
