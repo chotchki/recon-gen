@@ -1,5 +1,126 @@
 # Release Notes
 
+## v11.19.0 — Phase BC: typed time-range intervals + chronic v11.10.0 e2e gate cleared + Oracle 19c CI green
+
+Phase BC closes out three months of release-pipeline pain in one tag.
+The chronic `e2e-against-testpypi` regression that has blocked PyPI
+publish on **every release since v11.10.0** (8 consecutive — only
+TestPyPI publishes have gone through) is fixed. Both CI integration
+red lights (`integration-pg/sasquatch` + `integration-oracle`) are
+green. Two production-side bugs the chronic gate masked — empty
+limit_breach + stuck_pending + stuck_unbundled dashboards for every
+deployed customer — are also fixed.
+
+### BC.0-BC.6 — Typed time-range intervals + chronic regression fix
+
+`common/intervals.py` ships four value types: `DateInterval`
+(closed-closed `[start, end]` over calendar dates),
+`DateTimeInterval` (half-open over NAIVE timestamps; aware datetimes
+rejected at construction per the single-TZ invariant), `SingleDayPlant`
++ `MultiDayPlant` (plant schedules — each generator declares which
+shape it consumes). Two AST lints in `tests/unit/test_typing_smells.py`:
+`no-naked-interval-ctor` (enabled — wiring sites must use named
+classmethods) + `no-raw-temporal-args` (staged-disabled until the
+broader migration sweep clears).
+
+The chronic v11.10.0 bug: plant `anchor_day = date.today()`; audit
+window is `[today-7, today-1]` (today excluded). Plants landed
+OUTSIDE the audit window → matview detection saw 0 of 1 planted.
+BC.4 threads `plant_window: DateInterval` through
+`scenario_to_generators` + derives per-plant `anchor_day` from the
+window. Mismatch unrepresentable at the wiring site. BC.6 verified
+6/6 invariants pass in the local PG repro.
+
+### BC.7 + BC.8 — Production-side bugs the chronic gate masked
+
+**BC.7** — `recon-gen schema apply` now populates `<prefix>_config`
+at deploy time. The L1 matviews JOIN to it for per-rail caps; the
+production CLI never populated it, so every deployed customer saw
+empty limit_breach / stuck_pending / stuck_unbundled. Only the
+unit-test fixtures manually populated. Lifecycle locked: `schema
+apply` is the deploy event (re-populates from `--l2`); `data refresh`
+only touches matviews.
+
+**BC.8** — `serialize_l2` emits `max_pending_age_seconds` +
+`max_unbundled_age_seconds` companions on Rails. The matview SQL
+expected integer seconds via `JSON_VALUE`; the serializer only
+emitted Duration ISO strings. Even with BC.7's populate, JSON_VALUE
+returned NULL → stuck_* stayed empty. Both fixes together: production
+dashboards now show data.
+
+### BC.9 — Narrow temporal-tuple sweep
+
+`StudioState.window_start + window_end` collapsed to `window:
+DateInterval | None` (the "both set together or both None" invariant
+now enforced by the type). `TestGeneratorCache._window_start /
+_window_end → _window: DateInterval`; `get_window() -> DateInterval`.
+
+### BC.11 — sasquatch_pr CI red (varchar(100) overflow) cleared
+
+Chain-completion plant adapter synthesizes long IDs (101 chars for
+sasquatch's verbose rail names). Widened `id` / `transfer_id` /
+`transfer_parent_id` / `bundle_id` from `vc100` to `vc255` in
+`<prefix>_transactions`. Regression test at
+`tests/data/test_seed_id_column_widths.py` parametrized over
+spec_example + sasquatch_pr.
+
+### BC.12 — integration-oracle CI red (ORA-32368) cleared via EAV refactor
+
+Oracle 19c is our LTS floor; it rejects matviews whose source is
+`JSON_TABLE(<col>, ...)` on a CLOB/TEXT column. PG 17 + SQLite
+happily build the matview. Workaround: decompose the L2 JSON into an
+EAV table at populate time + project via typed views that matviews
+JOIN against.
+
+Per-prefix schema collapses to **3 base tables**: `<prefix>_config_kv`
+(generic key/value/parent_id store; replaces the old 3-column
+`<prefix>_config`) + `<prefix>_transactions` + `<prefix>_daily_balances`.
+Typed projection views `<prefix>_v_config_rails` +
+`<prefix>_v_config_limit_schedules` (plain self-join, not recursive
+CTE — L2 paths are depth-2). Matviews JOIN typed views.
+
+Four Oracle quirks surfaced + worked around in `common/sql/dialect.py`:
+ORA-32368 (the original), ORA-22849 (`MAX(<CLOB>)` rejected →
+`MAX(DBMS_LOB.SUBSTR(...))`), ORA-00932 (`CAST(CLOB AS TIMESTAMP)`
+rejected → `TO_TIMESTAMP(DBMS_LOB.SUBSTR(...))`), ORA-01704 (string
+literal cap ~4000 → chunked `TO_CLOB` required for the deferred
+`l2_yaml_raw` provenance rows, backlogged).
+
+Side-fixes (correctness, not 19c workarounds):
+- `_split_oracle_script_impl` quote-aware (was line-by-line; mis-split
+  mid-literal whenever an L2 description had an embedded `;`).
+- `CAST(NULL AS BIGINT)` in 4 todays_exceptions sites routed through
+  `{null_bigint}` placeholder (Oracle rejects BIGINT type).
+
+Documented in `docs/audits/bc_12_config_kv_spike.md` +
+`docs/reference/oracle-19c-constraints.md`. The EAV layer is the
+price of supporting Oracle 19c; trigger condition for deleting it
+when 19c falls off our support floor is captured in the latter.
+
+### BC.14 — Oracle data-apply ORA-01843 (TIMESTAMP literal NLS-format)
+
+Surfaced behind BC.12's ORA-32368 wall. The spine's dry-run renderer
+emitted bare quoted `'YYYY-MM-DD HH:MM:SS'` strings; Oracle's default
+NLS_DATE_FORMAT (`DD-MON-RR`) rejected them. Fix: shape-detect the
+canonical timestamp format + wrap with ANSI `TIMESTAMP '...'` for
+Oracle (PG + SQLite unchanged). End-to-end verified: schema apply →
+data apply → data refresh all succeed for spec_example against the
+Oracle container.
+
+### Migration / breaking changes
+
+- **`<prefix>_config(as_of, cfg_yaml, l2_yaml)` table replaced by
+  `<prefix>_config_kv(node_id, parent_id, key, value)`.** No data
+  loss — production deploys had the v1 config table empty. Just
+  re-run `schema apply --execute` against the v11.19.0 schema.
+- **`audit apply` CLI: `--from X --to Y` → `--period <shape>`.**
+  Accepted shapes: `trailing:N` (N days ending yesterday),
+  `today` / `yesterday`, `YYYY-MM-DD..YYYY-MM-DD`, single `YYYY-MM-DD`.
+  Default unchanged (`trailing:7`).
+- **`StudioState` sidefile**: yaml shape (`trainer_window: {start,
+  end}`) unchanged; in-memory dataclass field collapsed from
+  `window_start` + `window_end` to `window: DateInterval | None`.
+
 ## v11.18.0 — Phase AO closeout: AO.5 + AO.L.gate + AO.9 + AO.S + AO.C + Oracle CI fix
 
 Closes the remaining post-v11.17.0 Phase AO items so the next
