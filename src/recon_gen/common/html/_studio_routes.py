@@ -58,7 +58,7 @@ _BOOT_ID: str = secrets.token_hex(4)
 def asset_url(path: str) -> str:
     """Versioned URL for a Studio asset.
 
-    ``asset_url("diagram.css")`` → ``/studio/static/diagram.css?cb=<boot>``
+    ``asset_url("diagram-svg.css")`` → ``/studio/static/diagram-svg.css?cb=<boot>``
     ``asset_url("/studio/wasm-graphviz/index.js")`` →
         ``/studio/wasm-graphviz/index.js?cb=<boot>`` (absolute path
     passes through unchanged except for the cb suffix).
@@ -338,8 +338,7 @@ def _render_home_page(
   <meta charset="utf-8">
   <title>Studio — {prefix}</title>
   {devlog_meta}{studio_theme_head(instance)}
-  <link rel="stylesheet" href="{asset_url("diagram.css")}">
-  <link rel="stylesheet" href="{asset_url("editor.css")}">
+  <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <script>
     // X.4.e.5 — swap 4xx response bodies (validator returns 400 + the
@@ -719,7 +718,7 @@ def _render_diagram_page(
   <meta charset="utf-8">
   <title>Studio diagram — {prefix}</title>
   {devlog_meta}{coverage_meta}{trainer_meta}{studio_theme_head(instance)}
-  <link rel="stylesheet" href="{asset_url("diagram.css")}">
+  <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
   {devlog_script}</head>
 <body class="{"block m-0 p-0 font-sans bg-surface-bg text-primary-fg" if embed else "block min-h-screen font-sans bg-surface-bg text-primary-fg"}">
   {_demo_mode_banner(demo_mode and not embed)}
@@ -1706,8 +1705,6 @@ def _render_data_page(
   <meta charset="utf-8">
   <title>Studio · data — {prefix}</title>
   {devlog_meta}{studio_theme_head(instance)}
-  <link rel="stylesheet" href="{asset_url("diagram.css")}">
-  <link rel="stylesheet" href="{asset_url("data.css")}">
   {devlog_script}</head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {demo_banner}

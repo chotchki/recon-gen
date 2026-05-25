@@ -1,0 +1,105 @@
+/* AM.4 (2026-05-25) — irreducible SVG-only stylesheet.
+ *
+ * Renamed from `diagram.css` after AM.2 migrated the chrome rules
+ * (studio-header / nav-link / diagram-chrome / layer-btn / etc.) to
+ * raw Tailwind utilities. What remains: rules that bind to the
+ * graphviz-emitted `<g class="node">` / `<g class="edge">` attribute
+ * selectors (`[data-kind]`, `[data-scope]`, `[data-presence]`,
+ * `[data-trainer-kinds]`) and `.topology-svg` modifier classes the
+ * JS shim toggles. These don't translate cleanly to utility classes
+ * per AM.0 lock L4 — they're attribute-driven cascades over an SVG
+ * subtree the renderer can't directly annotate.
+ *
+ * Loaded by `_render_diagram_page` only (the home page's iframe
+ * also loads it transitively via the embedded diagram URL).
+ */
+
+/* Base SVG affordances — drag cursor + click ripple. */
+.topology-svg {
+  cursor: grab;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.topology-svg:active {
+  cursor: grabbing;
+}
+
+/* Click affordance on nodes. Hover highlight stays — click-to-focus
+ * is URL navigation (X.4.b focus), not in-place dimming. */
+.topology-svg g.node:hover {
+  filter: brightness(1.05) drop-shadow(0 0 3px rgba(31, 78, 121, 0.4));
+}
+
+.topology-svg text {
+  user-select: none;
+}
+
+/* Visibility toggles — driven by checkboxes via JS adding
+ * `hide-<kind>` classes on the SVG root. Role-scope split per
+ * X.4.b chrome iteration D. */
+.topology-svg.hide-role-internal g.node[data-kind="role"][data-scope="internal"] { display: none; }
+.topology-svg.hide-role-external g.node[data-kind="role"][data-scope="external"] { display: none; }
+.topology-svg.hide-rail g.node[data-kind="rail"] { display: none; }
+.topology-svg.hide-template g.node[data-kind="template"] { display: none; }
+.topology-svg.hide-chain g.edge[data-kind="chain"] { display: none; }
+
+/* Hiding a role-scope also hides edges whose endpoint is that scope. */
+.topology-svg.hide-role-internal g.edge[data-source^="role__"][data-target^="role__"] {
+  /* Conservatively keep the edge unless BOTH endpoints are hidden
+   * (not trivially expressible in CSS without per-edge data-scope
+   * flags). */
+}
+
+/* When templates are hidden, hide their member edges. */
+.topology-svg.hide-template g.edge[data-kind="template_member"] {
+  display: none;
+}
+
+/* Per-kind edge-label toggles. The SVG's `<text>` elements inside
+ * `g.edge` are graphviz's edge labels. */
+.topology-svg.hide-edge-label-rail_bundle g.edge[data-kind="rail_bundle"] text { display: none; }
+.topology-svg.hide-edge-label-self_loop g.edge[data-kind="self_loop"] text { display: none; }
+.topology-svg.hide-edge-label-chain g.edge[data-kind="chain"] text { display: none; }
+
+/* Per-kind hide for control_parent edges (the chrome edge-label
+ * toggle). */
+.topology-svg.hide-control_parent g.edge[data-kind="control_parent"] {
+  display: none;
+}
+.topology-svg.hide-edge-label-control_parent g.edge[data-kind="control_parent"] text {
+  display: none;
+}
+
+/* X.4.c.5.d/e — Coverage overlay. The chrome's #toggle-coverage
+ * checkbox toggles `.coverage-on` on the SVG root; the JS shim has
+ * already stamped `data-presence="yes|no"` per node + edge by then.
+ * Absent (`no`) entities desaturate to a muted grey so the operator's
+ * eye lands on the missing-ETL gaps; present entities stay normal. */
+.topology-svg.coverage-on g.node[data-presence="no"] > polygon,
+.topology-svg.coverage-on g.node[data-presence="no"] > ellipse,
+.topology-svg.coverage-on g.node[data-presence="no"] > path {
+  fill: #f1f5f9 !important;
+  stroke: #cbd5e1 !important;
+}
+.topology-svg.coverage-on g.node[data-presence="no"] text {
+  fill: #94a3b8 !important;
+}
+.topology-svg.coverage-on g.edge[data-presence="no"] path,
+.topology-svg.coverage-on g.edge[data-presence="no"] polygon {
+  stroke: #cbd5e1 !important;
+  fill: #cbd5e1 !important;
+  opacity: 0.5;
+}
+
+/* X.4.c.6 — Trainer overlay. Nodes with planted exceptions get a
+ * warning-coloured outline (amber) + a thicker stroke so the trainer
+ * spots them at a glance. Combines additively with the coverage tint
+ * — a trainer-marked absent node is still grey, just with the amber
+ * outline. */
+.topology-svg.trainer-on g.node[data-trainer-kinds] > polygon,
+.topology-svg.trainer-on g.node[data-trainer-kinds] > ellipse,
+.topology-svg.trainer-on g.node[data-trainer-kinds] > path {
+  stroke: #f59e0b !important;
+  stroke-width: 3px !important;
+}

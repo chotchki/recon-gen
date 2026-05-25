@@ -128,18 +128,23 @@ def test_studio_static_serves_diagram_js() -> None:
         assert "wasm-graphviz/index.js" in body
 
 
-def test_studio_static_serves_diagram_css() -> None:
+def test_studio_static_serves_diagram_svg_css() -> None:
+    """AM.4 (2026-05-25) renamed diagram.css → diagram-svg.css after
+    AM.2's chrome migration left only the SVG-attribute-selector
+    rules. The chrome-specific assertions (`.diagram-chrome` /
+    `.layer-btn`) were retired alongside the rules they pinned —
+    those classes no longer exist anywhere in the source. SVG rules
+    pin the served file's identity now."""
     app = _build_studio_app(FIXTURES / "spec_example.yaml")
     with TestClient(app) as client:
-        resp = client.get("/studio/static/diagram.css")
+        resp = client.get("/studio/static/diagram-svg.css")
         assert resp.status_code == 200
         body = resp.text
-        # Sanity: a chrome class the page actually uses. (Pre-X.4.b
-        # cleanup this checked .topology-svg.focused / .dim — both
-        # CSS classes were dropped when click-to-focus moved to URL
-        # navigation.)
-        assert ".diagram-chrome" in body
-        assert ".layer-btn" in body
+        # SVG-attribute-selector rules — the irreducible non-utility
+        # remainder per AM.0 lock L4 (they bind to graphviz-emitted
+        # `[data-kind]` / `[data-presence]` attributes on the SVG).
+        assert ".topology-svg" in body
+        assert "[data-kind=" in body
 
 
 def test_studio_wasm_graphviz_mount_serves_index_js() -> None:
