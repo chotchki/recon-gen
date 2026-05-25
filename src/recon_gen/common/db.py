@@ -628,24 +628,58 @@ def batch_oracle_inserts(
 def _split_oracle_script_impl(sql: str) -> list[str]:
     """Inner implementation kept separate to avoid recursion through the
     public ``split_oracle_script`` symbol when adding tests that mock it.
+
+    BC.12 (2026-05-24): the splitter now tracks single-quote state across
+    lines so a ``;`` embedded inside a multi-line string literal
+    (e.g. a `<prefix>_config_kv` description field that itself contains
+    semicolons + newlines) doesn't false-split the statement. The
+    pre-BC.12 line-by-line scan treated every ``;`` at end-of-line as a
+    statement terminator, which is correct only when every literal is
+    single-line — false for the BC.12 kv populate path on L2s with
+    multi-line / semicolon-bearing descriptions.
+
+    Quote-state semantics: a single quote toggles in-string state;
+    inside a string, ``--`` is NOT a comment start, ``;`` is NOT a
+    terminator, ``BEGIN``/``END`` aren't PL/SQL keywords. SQL's
+    doubled-quote escape (``''``) is naturally handled because two
+    toggles cancel.
     """
     statements: list[str] = []
     buffer: list[str] = []
     in_plsql = False
+    in_string = False
     for raw_line in sql.splitlines():
         line = raw_line.rstrip()
-        # Strip the trailing ``-- comment`` before checking for the
-        # statement terminator; a ``;`` inside a SQL line-comment is
-        # commentary, not a statement boundary, and treating it as one
-        # falsely splits the next CREATE block off into a comment-only
-        # "statement" that Oracle rejects with ORA-00900.
-        code = line.split("--", 1)[0].rstrip()
+        # Scan the line char-by-char to track quote state and find the
+        # boundary between code and comment.
+        # ``code`` accumulates only the chars outside any string; the
+        # ``--`` comment check applies only when not inside a string.
+        code_chars: list[str] = []
+        i = 0
+        n = len(line)
+        while i < n:
+            c = line[i]
+            if c == "'":
+                in_string = not in_string
+                code_chars.append(c)
+                i += 1
+                continue
+            if not in_string and c == "-" and i + 1 < n and line[i + 1] == "-":
+                # Rest of line is a comment.
+                break
+            code_chars.append(c)
+            i += 1
+        code = "".join(code_chars).rstrip()
         stripped_code = code.strip()
-        if not in_plsql and stripped_code.upper().startswith(
-            ("BEGIN ", "DECLARE")
+        if not in_string and not in_plsql and stripped_code.upper().startswith(
+            ("BEGIN ", "DECLARE"),
         ):
             in_plsql = True
         buffer.append(line)
+        if in_string:
+            # Multi-line string literal in flight — don't even consider
+            # this line as a statement-terminator candidate.
+            continue
         if in_plsql:
             # PL/SQL block ends at "END;" (the ; is the PL/SQL
             # statement terminator — keep it, the parser needs it).

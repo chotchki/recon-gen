@@ -130,14 +130,9 @@ def test_transactions_includes_amount_invariant_check() -> None:
 
 
 def test_transactions_includes_transfer_parent_id() -> None:
-    """L1 SPEC: Transfer.Parent recursive chain (Phase L addition).
-
-    BC.11.2: transfer_parent_id widened vc100 → vc255 alongside id /
-    transfer_id / bundle_id because chain-completion plant adapters
-    synthesize IDs by concatenating parent IDs + rail names; sasquatch
-    rails hit 101 chars on the vc100 cap (CI run 26373578977)."""
+    """L1 SPEC: Transfer.Parent recursive chain (Phase L addition)."""
     sql = emit_schema(_instance("tp"), prefix="tp")
-    assert "transfer_parent_id   VARCHAR(255)" in sql
+    assert "transfer_parent_id   VARCHAR(100)" in sql
 
 
 def test_transactions_includes_transfer_completion_and_origin() -> None:
@@ -376,14 +371,10 @@ def test_transactions_includes_template_name_nullable() -> None:
 
 
 def test_transactions_includes_bundle_id_nullable() -> None:
-    """SPEC: L1 Transaction.BundleId — populated by AggregatingRail bundlers.
-
-    BC.11.2: bundle_id widened vc100 → vc255 alongside id /
-    transfer_id / transfer_parent_id (see BC.11.2 note on the
-    transfer_parent_id test)."""
+    """SPEC: L1 Transaction.BundleId — populated by AggregatingRail bundlers."""
     sql = emit_schema(_instance("v11"), prefix="v11")
     assert re.search(
-        r"\bbundle_id\s+VARCHAR\(255\)(?!\s+NOT NULL)",
+        r"\bbundle_id\s+VARCHAR\(100\)(?!\s+NOT NULL)",
         sql,
     ), "bundle_id should be nullable"
 
@@ -584,32 +575,36 @@ def test_expected_eod_balance_breach_excludes_null_expectations() -> None:
     assert "money <> sb.expected_eod_balance" in body
 
 
-def test_limit_breach_reads_limit_schedule_caps_from_config() -> None:
-    """AW.4 (2026-05-23): per-LimitSchedule caps no longer baked as
-    CASE branches at emit time. The matview LEFT JOINs `<prefix>_config
-    .l2_yaml.$.limit_schedules` and reads cap per-row via JSON path
-    (multi-key filter: parent_role + rail + direction). Matview is
-    persona-blind — same SQL across all L2s."""
+def test_limit_breach_reads_limit_schedule_caps_from_typed_view() -> None:
+    """BC.12 (2026-05-24): per-LimitSchedule caps still aren't baked as
+    CASE branches at emit time. AW.4's JSON_TABLE-of-CLOB pattern was
+    swapped for a typed projection view (`<prefix>_v_config_limit_
+    schedules`) the matview LEFT JOINs against — same persona-blind
+    matview body, relational source so Oracle accepts the matview
+    build (ORA-32368 fixed)."""
     sql = emit_schema(_instance_with_limits("lb"), prefix="lb")
     # No per-LimitSchedule literals baked.
     assert (
         "WHEN tx.account_parent_role = 'DDAControl' "
         "AND tx.rail_name = 'ach' THEN 12000"
     ) not in sql
-    # The JOIN clause reads from the config table's l2_yaml.
-    assert "FROM lb_config" in sql
-    # JSON_VALUE on PG/Oracle reads the cap field.
-    assert "JSON_VALUE(ls.value, '$.cap')" in sql
+    # The matview JOINs the typed view (BC.12).
+    assert "lb_v_config_limit_schedules ls" in sql
+    # BC.12 invariant: no JSON_TABLE / JSON_VALUE-from-CLOB anywhere.
+    assert "JSON_VALUE(ls.value, '$.cap')" not in sql
+    assert "JSON_TABLE" not in sql
     # Direction filter lives in the JOIN's ON clause.
-    assert "= 'Outbound'" in sql
-    assert "= 'Inbound'" in sql
+    assert "ls.direction = 'Outbound'" in sql
+    assert "ls.direction = 'Inbound'" in sql
+    # The typed view itself was emitted in the same script.
+    assert "CREATE VIEW lb_v_config_limit_schedules AS" in sql
 
 
 def test_limit_breach_view_emits_uniform_body_with_no_limit_schedules() -> None:
-    """AW.4 (2026-05-23): matview body is the same whether or not the
-    L2 declares LimitSchedules. With no schedules in the JSON, the LEFT
-    JOIN finds no matches → cap is NULL → outer WHERE `cap IS NOT NULL`
-    filters → matview is inert."""
+    """BC.12 (2026-05-24): matview body is the same whether or not the
+    L2 declares LimitSchedules. With no schedules in the kv, the typed
+    view returns zero rows → matview LEFT JOIN finds no matches → cap
+    is NULL → outer WHERE `cap IS NOT NULL` filters → matview is inert."""
     sql = emit_schema(_instance("nolim"), prefix="nolim")  # _instance has no limit_schedules
     assert "CREATE MATERIALIZED VIEW nolim_limit_breach" in sql
     body_match = re.search(
@@ -619,8 +614,8 @@ def test_limit_breach_view_emits_uniform_body_with_no_limit_schedules() -> None:
     )
     assert body_match is not None
     body = body_match.group(1)
-    # New shape: LEFT JOIN to config's l2_yaml limit_schedules iteration.
-    assert "FROM nolim_config" in body
+    # BC.12 shape: LEFT JOIN to typed projection view (not config_kv directly).
+    assert "nolim_v_config_limit_schedules ls" in body
     # Outer WHERE still filters `cap IS NOT NULL`.
     assert "WHERE cap IS NOT NULL" in body
 
@@ -794,39 +789,40 @@ def test_stuck_pending_emits_with_status_and_age_filter() -> None:
     assert "ct.status = 'Pending'" in body
     assert "max_pending_age_seconds IS NOT NULL" in body
     assert "age_seconds > tx.max_pending_age_seconds" in body
-    # AW.2 (2026-05-23): age is computed against the owned temporal
-    # frame `<prefix>_config.as_of`, not the matview engine's wall-clock
-    # CURRENT_TIMESTAMP. Audit §6 "own the temporal frame."
-    assert (
-        "EXTRACT(EPOCH FROM ((SELECT as_of FROM "
-    ) in body
-    assert "_config) - ct.posting))" in body
+    # BC.12 (2026-05-24): age is computed against the owned temporal
+    # frame stored in <prefix>_config_kv's `as_of` scalar row.
+    # ``kv_as_of_as_timestamp_sql`` handles the dialect-specific coercion;
+    # the matview body references that scalar subquery wrapped per
+    # dialect (PG: ``CAST(... AS TIMESTAMP)`` over SELECT value FROM
+    # config_kv).
+    assert "_config_kv" in body
+    assert "key = 'as_of'" in body
 
 
-def test_stuck_pending_reads_rail_max_pending_age_from_config() -> None:
-    """AW.3 (2026-05-23): per-rail caps no longer baked as CASE branches.
-    The matview body LEFT JOINs `<prefix>_config.l2_yaml` via the
-    dialect-portable rails-iteration; the cap is extracted from the
-    iteration row's JSON field. Matview is now persona-blind — same SQL
-    across all L2 instances."""
+def test_stuck_pending_reads_rail_max_pending_age_from_typed_view() -> None:
+    """BC.12 (2026-05-24): per-rail caps no longer baked as CASE branches.
+    AW.3's JSON_VALUE-of-CLOB pattern (which Oracle rejected as a matview
+    source — ORA-32368) swapped for a LEFT JOIN against the typed
+    projection view ``<prefix>_v_config_rails``. Matview body stays
+    persona-blind."""
     sql = emit_schema(_instance_with_pending_age("sp2"), prefix="sp2")
     # No per-rail literals baked.
     assert "WHEN ct.rail_name = 'ach-credit' THEN 86400" not in sql
-    # The JOIN clause reads from the config table's l2_yaml.
-    assert "FROM sp2_config" in sql
-    # JSON_VALUE on PG/Oracle reads the field via SQL/JSON path.
-    assert "JSON_VALUE(rail.value, '$.max_pending_age_seconds')" in sql
+    # The matview JOINs the typed view (BC.12).
+    assert "sp2_v_config_rails rail" in sql
+    # The matview reads the typed view's column (no JSON_VALUE).
+    assert "rail.max_pending_age_seconds" in sql
+    assert "JSON_VALUE(rail.value, '$.max_pending_age_seconds')" not in sql
+    # The typed view itself is emitted.
+    assert "CREATE VIEW sp2_v_config_rails AS" in sql
 
 
 def test_stuck_pending_view_emits_uniform_body_with_no_aging_rails() -> None:
-    """After AW.3, the matview body shape is the SAME whether or not
-    any rails have `max_pending_age` set — the body iterates the
-    `l2_yaml.rails` JSON array at refresh time and per-row evaluates
-    the extracted cap. An L2 instance whose rails have NO
-    `max_pending_age` set produces rows where `max_pending_age_seconds`
-    is NULL (no field in the JSON) → outer WHERE filters them out →
-    matview is inert. The matview's CREATE SQL is the same regardless
-    of L2 contents."""
+    """BC.12 (2026-05-24): the matview body shape is the SAME whether or
+    not any rails have `max_pending_age` set — the matview LEFT JOINs
+    the typed projection view at refresh time; rails without a cap
+    project ``max_pending_age_seconds = NULL`` (the CASE in the view
+    never matches), the matview's outer WHERE filters them out → inert."""
     sql = emit_schema(_instance("noage"), prefix="noage")
     assert "CREATE MATERIALIZED VIEW noage_stuck_pending" in sql
     body_match = re.search(
@@ -836,10 +832,9 @@ def test_stuck_pending_view_emits_uniform_body_with_no_aging_rails() -> None:
     )
     assert body_match is not None
     body = body_match.group(1)
-    # New shape: LEFT JOIN to config's l2_yaml rails iteration.
-    assert "FROM noage_config" in body
-    # Outer WHERE still filters NULL caps so an inert NULL excludes
-    # every row.
+    # BC.12 shape: LEFT JOIN to typed projection view.
+    assert "noage_v_config_rails rail" in body
+    # Outer WHERE still filters NULL caps so inert NULL excludes every row.
     assert "max_pending_age_seconds IS NOT NULL" in body
 
 
@@ -895,27 +890,28 @@ def test_stuck_unbundled_emits_with_bundle_status_and_age_filter() -> None:
     assert "ct.status = 'Posted'" in body
     assert "max_unbundled_age_seconds IS NOT NULL" in body
     assert "age_seconds > tx.max_unbundled_age_seconds" in body
-    # AW.2 (2026-05-23): age reads from <prefix>_config.as_of.
-    assert (
-        "EXTRACT(EPOCH FROM ((SELECT as_of FROM "
-    ) in body
-    assert "_config) - ct.posting))" in body
+    # BC.12 (2026-05-24): age reads from kv `as_of` scalar row.
+    assert "_config_kv" in body
+    assert "key = 'as_of'" in body
 
 
-def test_stuck_unbundled_reads_rail_max_unbundled_age_from_config() -> None:
-    """AW.3 (2026-05-23): same as stuck_pending — caps read from
-    `<prefix>_config.l2_yaml` via LEFT JOIN; matview body is
-    persona-blind."""
+def test_stuck_unbundled_reads_rail_max_unbundled_age_from_typed_view() -> None:
+    """BC.12 (2026-05-24): same as stuck_pending — caps read from the
+    typed projection view ``<prefix>_v_config_rails`` (relational
+    source, Oracle-matview-safe vs AW.3's JSON_VALUE-of-CLOB that
+    Oracle rejected with ORA-32368)."""
     sql = emit_schema(_instance_with_unbundled_age("su2"), prefix="su2")
     assert "WHEN ct.rail_name = 'ach-orig' THEN 86400" not in sql
-    assert "FROM su2_config" in sql
-    assert "JSON_VALUE(rail.value, '$.max_unbundled_age_seconds')" in sql
+    assert "su2_v_config_rails rail" in sql
+    assert "rail.max_unbundled_age_seconds" in sql
+    assert "JSON_VALUE(rail.value, '$.max_unbundled_age_seconds')" not in sql
 
 
 def test_stuck_unbundled_view_emits_uniform_body_with_no_bundling_rails() -> None:
-    """AW.3 (2026-05-23): the matview body is the same regardless of
+    """BC.12 (2026-05-24): the matview body is the same regardless of
     L2 rails contents. With no rails carrying `max_unbundled_age`, the
-    JSON path returns NULL → outer WHERE filters → matview inert."""
+    typed projection view's CASE never matches → max_unbundled_age_seconds
+    NULL → outer WHERE filters → matview inert."""
     sql = emit_schema(_instance("nobun"), prefix="nobun")
     assert "CREATE MATERIALIZED VIEW nobun_stuck_unbundled" in sql
     body_match = re.search(
@@ -925,8 +921,8 @@ def test_stuck_unbundled_view_emits_uniform_body_with_no_bundling_rails() -> Non
     )
     assert body_match is not None
     body = body_match.group(1)
-    # New shape: LEFT JOIN to config's l2_yaml rails iteration.
-    assert "FROM nobun_config" in body
+    # BC.12 shape: LEFT JOIN to typed projection view.
+    assert "nobun_v_config_rails rail" in body
     # Outer WHERE still filters NULL caps.
     assert "max_unbundled_age_seconds IS NOT NULL" in body
 

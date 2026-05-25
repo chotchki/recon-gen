@@ -520,6 +520,36 @@ def json_field_extract(value_expr: str, field_path: str, dialect: Dialect) -> st
     return f"JSON_VALUE({value_expr}, '{field_path}')"
 
 
+def lob_substr(expr: str, n: int, dialect: Dialect) -> str:
+    """Coerce a (potentially CLOB-typed) expression to a bounded VARCHAR
+    by extracting its first ``n`` characters.
+
+    Needed for BC.12's ``<prefix>_config_kv.value CLOB`` column: Oracle
+    rejects ``MAX(CASE WHEN k='X' THEN value END)`` with **ORA-22849**
+    when ``value`` is CLOB (the MAX aggregate doesn't accept LOB types).
+    Wrap the CLOB read in ``DBMS_LOB.SUBSTR(value, n, 1)`` to coerce to
+    VARCHAR2 inside the aggregate. PG + SQLite use plain ``SUBSTRING`` /
+    ``SUBSTR`` so the same dialect-blind expression shape compiles
+    everywhere.
+
+    - **Oracle**: ``DBMS_LOB.SUBSTR(<expr>, <n>, 1)`` — extract ``n``
+      chars from offset 1; result is VARCHAR2(n) capped at 4000.
+    - **PG**: ``SUBSTRING(<expr> FROM 1 FOR <n>)`` — SQL-standard
+      substring on TEXT.
+    - **SQLite**: ``SUBSTR(<expr>, 1, <n>)`` — standard.
+
+    Callers wrap the matview-consumed leaf fields (``name``,
+    ``max_pending_age_seconds``, cap, etc.) in this helper inside the
+    typed projection views' ``MAX(CASE WHEN ...)`` aggregates so the
+    matview-source view body stays Oracle-LOB-safe.
+    """
+    if dialect is Dialect.ORACLE:
+        return f"DBMS_LOB.SUBSTR({expr}, {n}, 1)"
+    if dialect is Dialect.POSTGRES:
+        return f"SUBSTRING({expr} FROM 1 FOR {n})"
+    return f"SUBSTR({expr}, 1, {n})"
+
+
 def json_check(col: str, dialect: Dialect) -> str:
     """``CHECK (col IS NULL OR col IS JSON)`` in PG / Oracle; SQLite
     uses ``CHECK (col IS NULL OR json_valid(col))``.

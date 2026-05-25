@@ -55,8 +55,10 @@ from recon_gen.common.sql import (
     drop_index_if_exists,
     drop_matview_if_exists,
     drop_table_if_exists,
+    drop_view_if_exists,
     epoch_seconds_between,
     json_check,
+    lob_substr,
     matview_create_keyword,
     matview_options,
     order_by_day_expr,
@@ -72,6 +74,9 @@ from recon_gen.common.sql import (
     with_recursive,
 )
 
+from .config_table import (
+    kv_as_of_as_timestamp_sql,
+)
 from .primitives import L2Instance
 
 
@@ -129,22 +134,30 @@ def emit_schema(
     # the same dependency-ordering rule applies.
     l1_drops = _emit_l1_invariant_drops(p, dialect)
     inv_drops = _emit_inv_matview_drops(p, dialect)
-    # Phase AW: <prefix>_config holds cfg + L2 yaml + as_of. Drop
-    # FIRST (no dependents reference it yet — AW.2+ will add matview
-    # subqueries against it), CREATE in the config block right after
-    # base tables.
+    # Phase AW: <prefix>_config_kv holds cfg + L2 yaml + as_of. BC.12
+    # renamed from the pre-AW ``<prefix>_config`` 3-column table to the
+    # flattened kv shape so matviews can JOIN typed projection views
+    # (relational, Oracle-matview-safe) instead of JSON_TABLE-ing a CLOB
+    # (ORA-32368). Drop the typed views FIRST (matviews depend on them);
+    # then drop the kv table; then base block runs; then config_kv
+    # CREATE; then typed views CREATE; then matviews.
     from recon_gen.common.l2.config_table import (
         emit_config_table_ddl,
         emit_config_table_drop,
     )
+    typed_view_drops = _emit_typed_config_view_drops(p, dialect)
     config_drop = emit_config_table_drop(p, dialect)
     config_create = emit_config_table_ddl(p, dialect)
+    typed_view_creates = _emit_typed_config_view_creates(p, dialect)
     base = _emit_base_schema(p, dialect, instance)
     invariants = _emit_l1_invariant_views(instance, prefix=p, dialect=dialect)
     inv_views = _emit_inv_views(instance, prefix=p, dialect=dialect)
     return (
-        l1_drops + "\n" + inv_drops + "\n" + config_drop + "\n" + base
+        l1_drops + "\n" + inv_drops + "\n"
+        + typed_view_drops + "\n"
+        + config_drop + "\n" + base
         + "\n\n" + config_create + "\n\n"
+        + typed_view_creates + "\n\n"
         + invariants + "\n\n" + inv_views
     )
 
@@ -175,6 +188,13 @@ def emit_schema_drop_sql(
     p = prefix
     l1_drops = _emit_l1_invariant_drops(p, dialect)
     inv_drops = _emit_inv_matview_drops(p, dialect)
+    # BC.12: typed projection views depend on <prefix>_config_kv +
+    # are depended on by the L1 invariant matviews. Drop AFTER the L1
+    # matview drops (above) so the view exists when those drops run
+    # against it (drop matview doesn't actually need its source, but
+    # the dependency order keeps the model coherent), but BEFORE the
+    # config_kv table drop.
+    typed_view_drops = _emit_typed_config_view_drops(p, dialect)
     # Base layer: Current* matviews → indexes → base tables + config.
     from recon_gen.common.l2.config_table import emit_config_table_drop
     pieces = [
@@ -186,9 +206,8 @@ def emit_schema_drop_sql(
     pieces.extend([
         drop_table_if_exists(f"{p}_daily_balances", dialect),
         drop_table_if_exists(f"{p}_transactions", dialect),
-        # Phase AW: <prefix>_config has no dependents yet (AW.2+ will
-        # add matview subqueries against it), so it's safe to drop
-        # alongside the base tables.
+        # BC.12 (was Phase AW): <prefix>_config_kv. Drop AFTER typed
+        # views (above) to respect the view-on-table dependency.
         emit_config_table_drop(p, dialect),
     ])
     base_drops = "\n".join(pieces)
@@ -204,6 +223,8 @@ def emit_schema_drop_sql(
         header + "\n"
         + l1_drops + "\n"
         + inv_drops + "\n"
+        + "-- BC.12 typed projection views (depend on <prefix>_config_kv).\n"
+        + typed_view_drops + "\n"
         + "-- Base layer: Current* matviews, indexes, base tables.\n"
         + base_drops + "\n"
     )
@@ -514,75 +535,43 @@ def _emit_l1_invariant_views(
       across mixed-NULL branches).
     """
     p = prefix
-    # Phase AW.4 (2026-05-23): limit_breach caps no longer baked as
-    # CASE branches per direction. The matview LEFT JOINs the
-    # `$.limit_schedules` array in <prefix>_config.l2_yaml and reads
-    # cap per-row via JSON_VALUE. Multi-key filter (parent_role + rail
-    # + direction) lives in the JOIN's ON clause. Same JOIN shape per
-    # direction; the direction literal varies. Per-instance LimitSchedule
-    # validator U5 guarantees one cap per (parent_role, rail, direction)
-    # triple → no SUM-multiplication risk.
-    from recon_gen.common.sql import (
-        cast as _cast,
-        json_array_iterate,
-        json_field_extract,
+    # Phase BC.12 (2026-05-24): per-rail max_*_age caps + per-(parent_role,
+    # rail, direction) limit-schedule caps no longer JSON_TABLE-iterate
+    # `<prefix>_config.l2_yaml` inside the matview body. Oracle 19c+
+    # rejects matviews built on JSON_TABLE-of-CLOB with ORA-32368; the
+    # workaround is the typed projection views
+    # (`<prefix>_v_config_limit_schedules` + `<prefix>_v_config_rails`)
+    # emitted alongside the matviews. Each typed view body is a plain
+    # relational walk of `<prefix>_config_kv` (parent_id self-join, no
+    # JSON_TABLE); matviews JOIN against the views and the engine sees
+    # a fully relational source. See `docs/audits/bc_12_config_kv_spike.md`
+    # for the architecture + spike results.
+    limit_join_outbound = (
+        f"{p}_v_config_limit_schedules ls\n"
+        f"      ON ls.parent_role = tx.account_parent_role\n"
+        f"     AND ls.rail = tx.rail_name\n"
+        f"     AND ls.direction = 'Outbound'"
     )
-    _ls_iter = json_array_iterate(
-        f"(SELECT l2_yaml FROM {p}_config)",
-        "$.limit_schedules", alias="ls", dialect=dialect,
+    limit_join_inbound = (
+        f"{p}_v_config_limit_schedules ls\n"
+        f"      ON ls.parent_role = tx.account_parent_role\n"
+        f"     AND ls.rail = tx.rail_name\n"
+        f"     AND ls.direction = 'Inbound'"
     )
-    _ls_parent_role = json_field_extract("ls.value", "$.parent_role", dialect)
-    _ls_rail = json_field_extract("ls.value", "$.rail", dialect)
-    _ls_direction = json_field_extract("ls.value", "$.direction", dialect)
-    _ls_cap_extract = json_field_extract("ls.value", "$.cap", dialect)
-
-    def _limit_join(direction: str) -> str:
-        return (
-            f"{_ls_iter}\n      ON {_ls_parent_role} = tx.account_parent_role"
-            f"\n     AND {_ls_rail} = tx.rail_name"
-            f"\n     AND {_ls_direction} = '{direction}'"
-        )
-
     # AO.1: amount_money is BIGINT cents; L2's limit-schedule cap is
-    # authored in dollars. Multiply the JSON-extracted cap by 100 so
+    # authored in dollars. Multiply the projected-view cap by 100 so
     # the matview's ``SUM(ABS(amount_money)) > cap`` compares
     # cents-vs-cents.
-    limit_cap_value = (
-        f"({_cast(_ls_cap_extract, 'numeric', dialect)} * 100)"
+    limit_cap_value = "(ls.cap * 100)"
+    # The shared rails-projection JOIN (same view for both stuck_pending
+    # + stuck_unbundled since they project the same rail.name; the
+    # difference is which field they read).
+    pending_age_join = (
+        f"{p}_v_config_rails rail ON rail.name = ct.rail_name"
     )
-    limit_join_outbound = _limit_join("Outbound")
-    limit_join_inbound = _limit_join("Inbound")
-    # Phase AW.3 (2026-05-23): the per-rail max_*_age values used to be
-    # baked as CASE branches at emit time. Now they read from
-    # `<prefix>_config.l2_yaml` via LEFT JOIN — matview body becomes
-    # persona-blind (no per-L2 literals); same SQL across all deployments.
-    # See audit §6 + AW.0.b spike for the dialect-portable JOIN shape.
-    from recon_gen.common.sql import (
-        cast as cast_expr,
-        json_array_iterate,
-        json_field_extract,
-    )
-    # The shared rails-iteration JOIN (same expression for both
-    # stuck_pending + stuck_unbundled since they iterate the same
-    # `$.rails` array; the difference is which field they extract).
-    _rails_iter = json_array_iterate(
-        f"(SELECT l2_yaml FROM {p}_config)",
-        "$.rails", alias="rail", dialect=dialect,
-    )
-    _rail_name_predicate = (
-        f"{json_field_extract('rail.value', '$.name', dialect)} "
-        f"= ct.rail_name"
-    )
-    pending_age_join = f"{_rails_iter}\n      ON {_rail_name_predicate}"
-    pending_age_value = cast_expr(
-        json_field_extract("rail.value", "$.max_pending_age_seconds", dialect),
-        "bigint", dialect,
-    )
+    pending_age_value = "rail.max_pending_age_seconds"
     unbundled_age_join = pending_age_join
-    unbundled_age_value = cast_expr(
-        json_field_extract("rail.value", "$.max_unbundled_age_seconds", dialect),
-        "bigint", dialect,
-    )
+    unbundled_age_value = "rail.max_unbundled_age_seconds"
     xor_group_violation_body = _render_xor_group_violation_body(
         instance, p=p, dialect=dialect,
     )
@@ -612,13 +601,20 @@ def _emit_l1_invariant_views(
         matview_create_kw=matview_create_keyword(dialect),
         date_trunc_tx_posting=date_trunc_day("tx.posting", dialect),
         # Phase AW.2 (2026-05-23): age is computed against the owned
-        # temporal frame in `<prefix>_config.as_of`, not the matview
-        # engine's wall-clock CURRENT_TIMESTAMP. Plant + matview now
-        # read from one source — tests become deterministic, prod
-        # refresh helper sets as_of=CURRENT_TIMESTAMP per refresh.
-        # See audit §6 "own the temporal frame" + AW.0 spike.
+        # temporal frame in `<prefix>_config_kv`'s ``as_of`` scalar
+        # row, not the matview engine's wall-clock CURRENT_TIMESTAMP.
+        # Plant + matview read from one source — tests become
+        # deterministic, prod refresh helper sets as_of=CURRENT_TIMESTAMP
+        # per refresh. See audit §6 "own the temporal frame" + AW.0 spike.
+        # BC.12 (2026-05-24): the storage shape moved from the typed
+        # ``<prefix>_config.as_of`` column to a kv row at ``key='as_of'``.
+        # ``kv_as_of_as_timestamp_sql`` handles the dialect-specific
+        # text→TIMESTAMP coercion (Oracle needs TO_TIMESTAMP +
+        # DBMS_LOB.SUBSTR; PG is plain CAST; SQLite passes text
+        # straight through to julianday()).
         epoch_age_seconds=epoch_seconds_between(
-            f"(SELECT as_of FROM {p}_config)", "ct.posting", dialect,
+            kv_as_of_as_timestamp_sql(p, dialect),
+            "ct.posting", dialect,
         ),
         posting_to_date=to_date("posting", dialect),
         # Typed NULL for the UNION ALL rail_name column. Oracle
@@ -630,6 +626,13 @@ def _emit_l1_invariant_views(
         # (2026-05-15) renamed from transfer_type under the symmetric
         # collapse.
         null_text=cast("NULL", varchar_type(100, dialect), dialect),
+        # BC.12 surfaced (after ORA-32368 unblocked stmt #91): the
+        # transfer-keyed UNION ALL branches in todays_exceptions used
+        # ``CAST(NULL AS BIGINT) AS magnitude_amount`` — Oracle has no
+        # BIGINT, so the cast fails ORA-00902 "invalid datatype".
+        # Route through ``typed_null`` so the alias maps to NUMBER(19)
+        # on Oracle, BIGINT on PG, INTEGER on SQLite.
+        null_bigint=typed_null("bigint", dialect),
     )
 
 
@@ -1516,15 +1519,7 @@ _SCHEMA_TEMPLATE = """\
 -- ---------------------------------------------------------------------
 CREATE TABLE {p}_transactions (
     entry                {tx_entry_decl},
-    -- BC.11: id / transfer_id / transfer_parent_id widened vc100 → vc255
-    -- because the chain-completion plant adapter synthesizes IDs by
-    -- concatenating parent IDs + rail names + account IDs, which can
-    -- exceed 100 chars on L2 instances with verbose rail naming
-    -- (sasquatch_pr's CustomerInboundACHReturnNSF + tx-chainfill-xfer-
-    -- limit-breach-... pattern hits 101 chars; CI red since the
-    -- sasquatch variant landed). vc255 is the standard practical
-    -- ceiling; widening is free (PG/Oracle/SQLite all handle it).
-    id                   {vc255}   NOT NULL,
+    id                   {vc100}   NOT NULL,
     account_id           {vc100}   NOT NULL,
     account_name         {vc255},
     account_role         {vc100},
@@ -1536,12 +1531,12 @@ CREATE TABLE {p}_transactions (
         CHECK (amount_direction IN ('Debit', 'Credit')),
     status               {vc50}    NOT NULL,
     posting              {ts}    NOT NULL,
-    transfer_id          {vc255}   NOT NULL,
+    transfer_id          {vc100}   NOT NULL,
     transfer_completion  {ts},
-    transfer_parent_id   {vc255},
+    transfer_parent_id   {vc100},
     rail_name            {vc100}   NOT NULL,
     template_name        {vc100},
-    bundle_id            {vc255},
+    bundle_id            {vc100},
     supersedes           {vc50},
     origin               {vc50}    NOT NULL,
     metadata             {json_text},
@@ -1776,6 +1771,167 @@ def _emit_l1_invariant_drops(p: str, dialect: Dialect) -> str:
         for name in _L1_INVARIANT_DROP_NAMES
     )
     return f"{_L1_INVARIANT_DROPS_HEADER}\n{drops}\n"
+
+
+# BC.12 typed projection views ------------------------------------------------
+#
+# Pay-as-you-go: only the two views that an existing matview consumes.
+# Future L2-consuming matviews add their own typed view alongside the
+# matview that needs it — no speculative views.
+_TYPED_CONFIG_VIEW_NAMES: tuple[str, ...] = (
+    "v_config_rails",
+    "v_config_limit_schedules",
+)
+
+
+def _emit_typed_config_view_drops(p: str, dialect: Dialect) -> str:
+    """``DROP VIEW IF EXISTS`` for every BC.12 typed projection view.
+
+    Drop order: matviews that JOIN these views are dropped earlier (by
+    ``_emit_l1_invariant_drops``), so dropping the views here is safe;
+    no remaining dependents.
+    """
+    return "\n".join(
+        drop_view_if_exists(f"{p}_{name}", dialect)
+        for name in _TYPED_CONFIG_VIEW_NAMES
+    ) + "\n"
+
+
+def _emit_typed_config_view_creates(p: str, dialect: Dialect) -> str:
+    """Emit the BC.12 typed projection views.
+
+    Each view body is a plain self-join over ``<prefix>_config_kv``:
+    anchor at the top-level container row (``parent_id IS NULL, key=
+    'l2_yaml'``), descend one level to the named-array container,
+    descend again to each object element, then to each field. The
+    aggregate ``MAX(CASE WHEN field.key = '<X>' THEN <lob_substr>(value)
+    END)`` pivots multi-field rows into one row per element.
+
+    No JSON_TABLE anywhere. The matview engine on Oracle 19c+ sees a
+    relational source (the kv table is relational; the self-joins
+    yield relational rows), so matviews JOINing these views build
+    cleanly without ORA-32368.
+
+    ``lob_substr`` coerces the CLOB ``value`` column to VARCHAR2(n)
+    inside the aggregate — Oracle's MAX rejects bare CLOB (ORA-22849).
+    PG + SQLite resolve ``lob_substr`` to a plain SUBSTRING / SUBSTR
+    so the same view body works on all dialects.
+
+    See ``docs/audits/bc_12_config_kv_spike.md`` for the spike that
+    locked these shapes against Oracle 23 (the local test container)
+    and confirmed matview build-time compatibility.
+    """
+    return _render_v_config_rails(p, dialect) + "\n" + _render_v_config_limit_schedules(p, dialect)
+
+
+def _pivot_field(
+    field_key: str, *, project_n: int, cast_to: str | None, dialect: Dialect,
+) -> str:
+    """Render a ``MAX(CASE WHEN field.key = '<X>' THEN lob_substr(...) END)``
+    pivot expression (optionally CAST to a target type).
+
+    The aggregator collapses the multi-row "fields of one element"
+    pattern into a single row per element-container; ``lob_substr``
+    coerces CLOB→VARCHAR2 on Oracle so ``MAX`` accepts the value
+    (ORA-22849 otherwise).
+    """
+    inner = (
+        f"MAX(CASE WHEN field.key = '{field_key}' "
+        f"THEN {lob_substr('field.value', project_n, dialect)} END)"
+    )
+    if cast_to is None:
+        return inner
+    return cast(inner, cast_to, dialect)
+
+
+def _render_v_config_rails(p: str, dialect: Dialect) -> str:
+    """``<prefix>_v_config_rails`` — one row per L2 rail with the
+    matview-consumed scalar fields projected to typed columns.
+
+    Columns: ``name VARCHAR(100)``, ``max_pending_age_seconds BIGINT``,
+    ``max_unbundled_age_seconds BIGINT``. Per-row source: each element
+    of the L2's ``rails`` array.
+
+    Walk:
+    1. ``root.key='l2_yaml' AND root.parent_id IS NULL`` — the L2 tree
+       container.
+    2. ``rails_arr.parent_id = root.node_id AND rails_arr.key='rails'`` —
+       the rails-array container.
+    3. ``rail_obj.parent_id = rails_arr.node_id`` — each array element
+       (key is the stringified index, value is NULL).
+    4. ``field.parent_id = rail_obj.node_id`` — each field on the rail
+       object; ``key`` distinguishes ``name`` / ``max_pending_age_seconds``
+       / ``max_unbundled_age_seconds``.
+    """
+    name_col = _pivot_field("name", project_n=100, cast_to=None, dialect=dialect)
+    pending_col = _pivot_field(
+        "max_pending_age_seconds", project_n=100, cast_to="bigint", dialect=dialect,
+    )
+    unbundled_col = _pivot_field(
+        "max_unbundled_age_seconds", project_n=100, cast_to="bigint", dialect=dialect,
+    )
+    return (
+        f"CREATE VIEW {p}_v_config_rails AS\n"
+        f"SELECT\n"
+        f"  {name_col} AS name,\n"
+        f"  {pending_col} AS max_pending_age_seconds,\n"
+        f"  {unbundled_col} AS max_unbundled_age_seconds\n"
+        f"FROM {p}_config_kv root\n"
+        f"JOIN {p}_config_kv rails_arr\n"
+        f"  ON rails_arr.parent_id = root.node_id\n"
+        f" AND rails_arr.key = 'rails'\n"
+        f"JOIN {p}_config_kv rail_obj\n"
+        f"  ON rail_obj.parent_id = rails_arr.node_id\n"
+        f"JOIN {p}_config_kv field\n"
+        f"  ON field.parent_id = rail_obj.node_id\n"
+        f"WHERE root.parent_id IS NULL\n"
+        f"  AND root.key = 'l2_yaml'\n"
+        f"GROUP BY rail_obj.node_id;\n"
+    )
+
+
+def _render_v_config_limit_schedules(p: str, dialect: Dialect) -> str:
+    """``<prefix>_v_config_limit_schedules`` — one row per L2 limit
+    schedule entry with the matview-consumed scalar fields projected
+    to typed columns.
+
+    Columns: ``parent_role VARCHAR(100)``, ``rail VARCHAR(100)``,
+    ``direction VARCHAR(20)``, ``cap NUMERIC``.
+
+    Walk shape mirrors ``v_config_rails`` but rooted on the
+    ``limit_schedules`` top-level array.
+    """
+    parent_col = _pivot_field(
+        "parent_role", project_n=100, cast_to=None, dialect=dialect,
+    )
+    rail_col = _pivot_field(
+        "rail", project_n=100, cast_to=None, dialect=dialect,
+    )
+    direction_col = _pivot_field(
+        "direction", project_n=20, cast_to=None, dialect=dialect,
+    )
+    cap_col = _pivot_field(
+        "cap", project_n=100, cast_to="numeric", dialect=dialect,
+    )
+    return (
+        f"CREATE VIEW {p}_v_config_limit_schedules AS\n"
+        f"SELECT\n"
+        f"  {parent_col} AS parent_role,\n"
+        f"  {rail_col} AS rail,\n"
+        f"  {direction_col} AS direction,\n"
+        f"  {cap_col} AS cap\n"
+        f"FROM {p}_config_kv root\n"
+        f"JOIN {p}_config_kv ls_arr\n"
+        f"  ON ls_arr.parent_id = root.node_id\n"
+        f" AND ls_arr.key = 'limit_schedules'\n"
+        f"JOIN {p}_config_kv ls_obj\n"
+        f"  ON ls_obj.parent_id = ls_arr.node_id\n"
+        f"JOIN {p}_config_kv field\n"
+        f"  ON field.parent_id = ls_obj.node_id\n"
+        f"WHERE root.parent_id IS NULL\n"
+        f"  AND root.key = 'l2_yaml'\n"
+        f"GROUP BY ls_obj.node_id;\n"
+    )
 
 
 _L1_INVARIANT_VIEWS_TEMPLATE = """\
@@ -2450,7 +2606,7 @@ SELECT 'chain_parent_disagreement',
        NULL AS account_parent_role,
        business_day,
        child_template_name AS rail_name,
-       CAST(NULL AS BIGINT) AS magnitude_amount,
+       {null_bigint} AS magnitude_amount,
        distinct_parent_count AS magnitude_count
 FROM {p}_chain_parent_disagreement
 -- AB.3.3 — XOR Group Violation: surfaces per (Transfer, template, XOR
@@ -2465,7 +2621,7 @@ SELECT 'xor_group_violation',
        NULL AS account_parent_role,
        business_day,
        template_name AS rail_name,
-       CAST(NULL AS BIGINT) AS magnitude_amount,
+       {null_bigint} AS magnitude_amount,
        firing_count AS magnitude_count
 FROM {p}_xor_group_violation
 -- AB.4.7 — Fan-In Disagreement: surfaces per child Transfer when the
@@ -2481,7 +2637,7 @@ SELECT 'fan_in_disagreement',
        NULL AS account_parent_role,
        business_day,
        child_template_name AS rail_name,
-       CAST(NULL AS BIGINT) AS magnitude_amount,
+       {null_bigint} AS magnitude_amount,
        parent_count AS magnitude_count
 FROM {p}_fan_in_disagreement
 -- AB.6.5 — Multi-XOR Violation: surfaces per parent firing when the
@@ -2497,7 +2653,7 @@ SELECT 'multi_xor_violation',
        NULL AS account_parent_role,
        business_day,
        parent_rail_or_template_name AS rail_name,
-       CAST(NULL AS BIGINT) AS magnitude_amount,
+       {null_bigint} AS magnitude_amount,
        child_count AS magnitude_count
 FROM {p}_multi_xor_violation;
 -- Today's Exceptions sheet has 3 dropdowns (check_type, account,
