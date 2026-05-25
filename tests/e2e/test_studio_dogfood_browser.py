@@ -195,15 +195,15 @@ def test_browser_operator_creates_rail_with_role_checkbox(
 
 @pytest.mark.skip(
     reason=(
-        "AI.10 (xor_groups textarea) + AI.13 (aggregator-two-leg "
-        "expected_net + origin) shipped 2026-05-25; piece 3 now "
-        "reaches wave 5/6 of the base `create_l2` walk and hits "
-        "AttributeError on `_edit` — the browser driver doesn't "
-        "yet implement the per-kind EDIT verb the wave 5 reorder "
-        "pass + wave 6 max_unbundled_age edits need. Piece 4 will "
-        "add `_edit` (navigate to /l2_shape/<kind>/<id>/edit, fill, "
-        "submit) so the full walk runs end-to-end. Per the no-skip-"
-        "without-pointer rule, this skip IS that pointer."
+        "Piece 4's `_edit` verb shipped + the full create_l2 walk "
+        "runs end-to-end via real browser, BUT the AI.4 structural "
+        "diff still fails on optional rail fields the BB.2 "
+        "create-new sub-form doesn't expose (metadata_keys, "
+        "amount_typical_range, etc. — only validator-required "
+        "minima fit on the inline sub-form). Logged as AI.15. "
+        "Reconciler entities created via BB.2 are then non-trivially "
+        "re-editable to fill the missing fields — solvable via a "
+        "post-create wave or BB.2 form expansion."
     ),
 )
 @pytest.mark.browser

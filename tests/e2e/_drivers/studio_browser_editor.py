@@ -205,6 +205,41 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
 
     # -- entity creation -------------------------------------------------
 
+    def _edit(
+        self, kind: str, entity_id: str,
+        data: "dict[str, list[str]]",
+    ) -> None:
+        """AI.2.d.2 piece 4 — partial edit verb. Mirrors the HTTP
+        driver's `_edit`: navigates to the entity's edit page,
+        applies the (partial) form data, submits. Wave 5 of the
+        base `create_l2` walk uses this for TT.leg_rails /
+        aggregator.bundles_activity reorder; wave 6 for
+        max_unbundled_age fills.
+
+        Navigation chain (all click-through, no URL editing per the
+        operator-fidelity contract): home → list page → entity
+        card's Edit link → form. Composite entity_ids (e.g. chain's
+        `Parent::Child::...`) get URL-encoded via Playwright's
+        href-selector machinery — passing the raw entity_id in the
+        selector works because the editor's rendered link also
+        carries the raw `::` (no URL encoding on the editor side
+        per AI.2.d/X.4.f.7 design).
+        """
+        from urllib.parse import quote  # noqa: PLC0415 — lazy
+
+        # Some entity IDs have :: (chains, limit_schedules); rendered
+        # hrefs match the URL-side encoding (raw `::` per X.4.f.7's
+        # composite-key contract).
+        edit_href = f"/l2_shape/{kind}/{quote(entity_id, safe=':')}/edit"
+        # Step 1: home → list (assumes browser is at home; every verb
+        # leaves it there via the 303 redirect).
+        self._page.click(f'a[href="/l2_shape/{kind}/"]')
+        # Step 2: find the entity's card + click its Edit link.
+        self._page.click(f'a.edit-link[href="{edit_href}"]')
+        # Step 3: apply the partial form data + submit.
+        self._apply_form_data(data)
+        self._submit_create_form(f"edit {kind} {entity_id!r}")
+
     def _submit_create_form(self, kind_label: str) -> None:
         """Click the create form's Submit button + assert the success
         303 lands us at home (`/`). On validation failure, the server
