@@ -41,6 +41,9 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 
+from recon_gen.common.html._studio_assets.tw_classes import (
+    primary_button_classes,
+)
 from recon_gen.common.html._studio_routes import asset_url, studio_theme_head
 from recon_gen.common.l2.cache import L2InstanceCache
 from recon_gen.common.l2.editor import (
@@ -2497,32 +2500,43 @@ def _render_create_page(
         f" ({'two-leg' if subtype == 'two_leg' else 'single-leg'})"
         if subtype is not None else ""
     )
+    # AM.1 step 3 — page-shell chrome migrated to raw Tailwind
+    # utilities per AM.0 locks L1-L5. editor.css still loaded for
+    # the inner form-field markup (step 4 migrates `_render_field`'s
+    # output); diagram.css link dropped (.studio-header migrated to
+    # utilities, no other diagram.css class consumed here).
+    # `form.create-form` class kept ONLY as a hook for the
+    # `tests/e2e/_drivers/studio_browser_editor.py::_submit_create_form`
+    # locator (selects `form.create-form button[type="submit"]`);
+    # editor.css's `.create-form` rule is empty so it's a pure
+    # locator hook. Once browser-driver locators are updated to
+    # `form[action^="/l2_shape/"]` (AM.4 cleanup), this class drops.
+    primary_btn = primary_button_classes()
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>Create new {escape(kind)}{escape(title_suffix)} — Studio</title>
   {studio_theme_head(instance)}
-  <link rel="stylesheet" href="{asset_url("diagram.css")}">
   <link rel="stylesheet" href="{asset_url("editor.css")}">
 </head>
-<body class="create-page">
-  <header class="studio-header">
-    <h1>Create new {escape(kind)}{escape(title_suffix)}</h1>
-    <a class="nav-link" href="/">← back to Studio</a>
-    <a class="nav-link" href="/l2_shape/{escape(kind)}/">→ list all {escape(kind)}s</a>
+<body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
+  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
+    <h1 class="text-base m-0 font-semibold text-accent">Create new {escape(kind)}{escape(title_suffix)}</h1>
+    <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
+    <a class="text-accent no-underline text-sm hover:underline" href="/l2_shape/{escape(kind)}/">→ list all {escape(kind)}s</a>
   </header>
-  <main class="create-page-main">
-    <section class="create-intro">{intro_html}</section>
-    <section class="create-form-wrap">
+  <main class="grid grid-cols-1 lg:[grid-template-columns:22rem_1fr] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
+    <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{intro_html}</section>
+    <section class="bg-white border border-surface-border rounded-md p-5">
       <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form">
         {global_err_html}
         {subtype_html}
         {fields_html}
         {reconciler_html}
-        <div class="form-actions">
-          <button type="submit">Create</button>
-          <a class="cancel-link" href="/">Cancel</a>
+        <div class="flex items-center gap-3 mt-4">
+          <button type="submit" class="{primary_btn}">Create</button>
+          <a class="text-accent no-underline text-xs cursor-pointer hover:underline" href="/">Cancel</a>
         </div>
       </form>
     </section>

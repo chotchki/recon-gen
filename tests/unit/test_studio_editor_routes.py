@@ -302,7 +302,12 @@ def test_get_new_form_returns_full_page_with_intro_prose(
     # Full HTML page chrome.
     assert "<!doctype" in body.lower()
     assert "<html" in body
-    assert 'class="studio-header"' in body
+    # AM.1 step 3 (2026-05-25): chrome migrated to Tailwind utilities;
+    # was `class="studio-header"`. Check the stable behavior — a
+    # `<header>` element with the back-nav link — not the
+    # implementation-detail class name.
+    assert "<header" in body
+    assert "← back to Studio" in body
     # Back nav to home.
     assert 'href="/"' in body
     # Per-kind intro prose explaining what an Account is.
@@ -361,8 +366,11 @@ def test_post_create_with_duplicate_id_returns_400_full_page(
     assert resp.status_code == 400, resp.text
     body = resp.text
     assert "already exists" in body
-    # Full page re-rendered (chrome + intro stays).
-    assert 'class="studio-header"' in body
+    # Full page re-rendered (chrome + intro stays). AM.1 step 3:
+    # behavior-based check (header element + back-nav text) instead
+    # of semantic class.
+    assert "<header" in body
+    assert "← back to Studio" in body
     assert "An Account" in body
     # User's typed name preserved so they can fix just the id.
     assert 'value="Conflicting"' in body
