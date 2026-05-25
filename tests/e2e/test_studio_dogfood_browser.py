@@ -195,12 +195,15 @@ def test_browser_operator_creates_rail_with_role_checkbox(
 
 @pytest.mark.skip(
     reason=(
-        "AI.2.d.2 piece 3 infrastructure (driver + create_l2 walk + "
-        "l2_path plumbing) is in place; the full walk currently "
-        "hits BB.2 sub-form gaps: AI.10 (xor_groups form-pairing), "
-        "AI.13 (aggregator-two-leg missing expected_net field). Fix "
-        "those + re-enable. Per the no-skip-without-pointer rule, "
-        "this skip is the AI.10+AI.13 pointer."
+        "AI.10 (xor_groups textarea) + AI.13 (aggregator-two-leg "
+        "expected_net + origin) shipped 2026-05-25; piece 3 now "
+        "reaches wave 5/6 of the base `create_l2` walk and hits "
+        "AttributeError on `_edit` — the browser driver doesn't "
+        "yet implement the per-kind EDIT verb the wave 5 reorder "
+        "pass + wave 6 max_unbundled_age edits need. Piece 4 will "
+        "add `_edit` (navigate to /l2_shape/<kind>/<id>/edit, fill, "
+        "submit) so the full walk runs end-to-end. Per the no-skip-"
+        "without-pointer rule, this skip IS that pointer."
     ),
 )
 @pytest.mark.browser
@@ -323,10 +326,12 @@ def test_browser_operator_creates_rail_with_bb2_create_new_reconciler(
             "didn't register, or the server rejected the composite."
             f"\nList page (first 2KB):\n{driver.page_body()[:2048]}"
         )
-        # AI.8 workaround — sub-pages don't link to other entity
-        # lists; browser back gets us home so we can click the next
-        # list link.
-        driver.go_back()
+        # Click the rail-list page's "← landing" chrome link to
+        # return home (real operator action), then nav to TT list.
+        # Earlier draft used browser back-button via go_back() —
+        # functional, but the chrome link is the actual editor
+        # affordance.
+        driver.goto_home()
         driver.goto_transfer_template_list()
         assert driver.transfer_template_list_contains("TT_BB2"), (
             "BB.2 create-new composite failed: 'TT_BB2' didn't "

@@ -2188,6 +2188,10 @@ def _render_reconciler_section(
         for v in ("single_leg", "two_leg")
     )
 
+    rnn_xor_groups_text_override = str(
+        overrides.get("leg_rail_xor_groups_text") or "",
+    )
+
     return (
         '<fieldset class="reconciler-section">'
         '<legend>Reconciler<span class="required"> *</span></legend>'
@@ -2226,6 +2230,20 @@ def _render_reconciler_section(
         f'<optgroup label="Aggregating Rails">{agg_opts}</optgroup>'
         '</select>'
         '<small class="field-helper">Pick from the optgroup matching the kind above; mismatches return 400.</small>'
+        '</div>'
+        # AI.10 (2026-05-25) — leg_rail_xor_groups partitioning for
+        # the TT case. Optional textarea: one group per line, comma-
+        # separated rail names. Required only when attaching a
+        # Variable-direction rail to a TT that already has another
+        # Variable rail (otherwise C1 fires). Operator can leave
+        # blank for the common case. Server (_studio_editor_routes
+        # create handler) parses + rewrites into the BB.3 wire
+        # shape (leg_rail_xor_groups_<i> per group + the present /
+        # num_groups markers).
+        '<div class="field-row">'
+        '<label for="field-leg_rail_xor_groups_text">XOR groups (TT only, optional)</label>'
+        f'<textarea id="field-leg_rail_xor_groups_text" name="leg_rail_xor_groups_text" rows="3" placeholder="rail_a, rail_b\\nrail_c, rail_d">{escape(rnn_xor_groups_text_override)}</textarea>'
+        '<small class="field-helper">One group per line, comma-separated rail names. Required when attaching a Variable-direction rail to a TT with existing Variables (SPEC C1 partitioning); leave blank for the common case.</small>'
         '</div>'
         '</div>'
         # Create-new sub-form (kind + new-name + per-kind required minima).
@@ -2285,6 +2303,15 @@ def _render_reconciler_section(
         '<span class="required"> *</span></label>'
         f'<input type="text" id="field-reconciler_new_cadence" name="reconciler_new_cadence" value="{escape(rnn_cadence_override)}" placeholder="daily">'
         '</div>'
+        # AI.13 follow-on (2026-05-25): origin is validator-required
+        # (O1: every leg resolves to an Origin). Single-leg + two-leg
+        # both need it. Same form-pairing principle as expected_net.
+        '<div class="field-row">'
+        '<label for="field-reconciler_new_origin_agg">Origin'
+        '<span class="required"> *</span></label>'
+        '<input type="text" id="field-reconciler_new_origin_agg" name="reconciler_new_origin" placeholder="InternalInitiated">'
+        '<small class="field-helper">InternalInitiated / ExternalForcePosted (rail-level — applies to all legs).</small>'
+        '</div>'
         # Single-leg aggregator: leg_role + leg_direction
         f'<div class="reconciler-new-single-leg-fields" data-reconciler-new-subtype-fields="single_leg"{"" if rnn_subtype_override == "single_leg" else " hidden"}>'
         '<div class="field-row">'
@@ -2302,7 +2329,13 @@ def _render_reconciler_section(
         '</select>'
         '</div>'
         '</div>'
-        # Two-leg aggregator: source_role + destination_role
+        # Two-leg aggregator: source_role + destination_role + expected_net.
+        # AI.13 (2026-05-25): expected_net is required for a standalone
+        # two-leg rail (validator: "standalone two-leg rail … MUST
+        # declare expected_net (typically 0)"). The BB.0 form-pairing
+        # principle says the form should expose every validator-required
+        # field — without this, BB.2's aggregator-two-leg create-new
+        # 400s on submit. AI.2.d.2 piece 3 surfaced it.
         f'<div class="reconciler-new-two-leg-fields" data-reconciler-new-subtype-fields="two_leg"{"" if rnn_subtype_override == "two_leg" else " hidden"}>'
         '<div class="field-row">'
         '<label for="field-reconciler_new_source_role">Source role'
@@ -2316,6 +2349,12 @@ def _render_reconciler_section(
         f'<input type="text" id="field-reconciler_new_destination_role" name="reconciler_new_destination_role" value="{escape(rnn_destination_role_override)}">'
         '<input type="hidden" name="reconciler_new_destination_role__present" value="1">'
         '</div>'
+        '<div class="field-row">'
+        '<label for="field-reconciler_new_expected_net_agg">Expected net'
+        '<span class="required"> *</span></label>'
+        f'<input type="text" id="field-reconciler_new_expected_net_agg" name="reconciler_new_expected_net" value="{escape(rnn_expected_net_override)}" placeholder="0.00">'
+        '<small class="field-helper">Money — typically 0 for a standalone aggregator (validator: standalone two-leg rail MUST declare expected_net).</small>'
+        '</div>'
         '</div>'
         '</div>'
         '</div>'
@@ -2324,14 +2363,34 @@ def _render_reconciler_section(
         # posture; falls back to "all sections visible" if disabled
         # (server still validates so the operator can't ship bad
         # state — the UX is just messier).
+        #
+        # AI.13 (2026-05-25): `setBlockHidden` toggles `disabled` on
+        # contained inputs in lock-step with `hidden`. Required
+        # because the BB.2 form has fields with duplicate `name`
+        # values across kind/subtype blocks (e.g.
+        # `reconciler_new_expected_net` is in BOTH the TT-kind block
+        # AND the aggregator-two-leg block — operator fills the
+        # visible one, the hidden one's empty value would otherwise
+        # ALSO submit and the server's `FormData.get()` would return
+        # whichever comes first in document order). Disabling hidden
+        # inputs ensures only the visible/active one submits.
         '<script>'
         "(function(){"
         "const fs=document.currentScript.parentElement;"
+        # setBlockHidden(block, hide) — toggle hidden + disable
+        # contained inputs in lock-step so hidden inputs don't
+        # submit duplicate-name values.
+        "function setBlockHidden(b, hide){"
+        "b.hidden = hide;"
+        "b.querySelectorAll('input,select,textarea').forEach(el=>{"
+        "el.disabled = hide;"
+        "});"
+        "}"
         # Mode radio toggle (attach vs create_new blocks).
         "fs.querySelectorAll('[data-reconciler-mode]').forEach(r=>{"
         "r.addEventListener('change',()=>{"
         "fs.querySelectorAll('[data-reconciler-block]').forEach(b=>{"
-        "b.hidden = b.dataset.reconcilerBlock !== r.value;"
+        "setBlockHidden(b, b.dataset.reconcilerBlock !== r.value);"
         "});"
         "});"
         "});"
@@ -2339,7 +2398,7 @@ def _render_reconciler_section(
         "const k=fs.querySelector('[data-reconciler-new-kind]');"
         "if(k){k.addEventListener('change',()=>{"
         "fs.querySelectorAll('[data-reconciler-new-kind-fields]').forEach(b=>{"
-        "b.hidden = b.dataset.reconcilerNewKindFields !== k.value;"
+        "setBlockHidden(b, b.dataset.reconcilerNewKindFields !== k.value);"
         "});"
         # Mirror create-new-kind into reconciler_kind so the BB.1
         # server reads the same field for both modes.
@@ -2350,13 +2409,23 @@ def _render_reconciler_section(
         "const st=fs.querySelector('[data-reconciler-new-subtype]');"
         "if(st){st.addEventListener('change',()=>{"
         "fs.querySelectorAll('[data-reconciler-new-subtype-fields]').forEach(b=>{"
-        "b.hidden = b.dataset.reconcilerNewSubtypeFields !== st.value;"
+        "setBlockHidden(b, b.dataset.reconcilerNewSubtypeFields !== st.value);"
         "});"
         # The server's _create_new_reconciler_with_rail reads
         # `reconciler_new_subtype` directly via sub_form.get('subtype'),
         # so mirror create-side subtype into the bare `subtype` key
         # under the prefix.
         "});}"
+        # AI.13 (2026-05-25) — init pass: sync `disabled` state on
+        # every block that's already `[hidden]` at first render. The
+        # change-listeners above only fire on operator interaction;
+        # without this init, hidden inputs on page-load would still
+        # submit their (empty) value, colliding with duplicate-name
+        # fields in visible blocks (e.g. `reconciler_new_expected_net`
+        # in BOTH TT-kind and aggregator-two-leg blocks).
+        "fs.querySelectorAll("
+        "'[data-reconciler-block],[data-reconciler-new-kind-fields],[data-reconciler-new-subtype-fields]'"
+        ").forEach(b=>{setBlockHidden(b, b.hidden);});"
         "})();"
         '</script>'
         '</fieldset>'
@@ -3121,6 +3190,40 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
             str(form.get("reconciler_mode") or "attach").strip()
             or "attach"
         )
+        # AI.10 (2026-05-25) — parse the leg_rail_xor_groups_text
+        # textarea (one group per line, comma-separated rail names)
+        # into the BB.3 wire shape that
+        # `_apply_xor_groups_update_to_tt` consumes:
+        # `leg_rail_xor_groups__present` + `leg_rail_xor_groups_<i>`
+        # per group. The text input is a UI affordance; the wire
+        # format is unchanged. Caller-tolerant: empty / whitespace-
+        # only lines drop (1-element groups too — XOR needs >=2).
+        xor_groups_text = str(form.get("leg_rail_xor_groups_text") or "")
+        if xor_groups_text.strip():
+            parsed_xor_groups: list[list[str]] = []
+            for line in xor_groups_text.splitlines():
+                rails = [
+                    r.strip() for r in line.split(",") if r.strip()
+                ]
+                if len(rails) >= 2:
+                    parsed_xor_groups.append(rails)
+            if parsed_xor_groups:
+                # Rebuild form as a mutable dict-of-lists so we can
+                # splice the parsed groups in alongside the original
+                # form payload. Starlette's FormData is immutable.
+                from starlette.datastructures import FormData as _FD  # noqa: PLC0415
+                synth_items = list(form.multi_items())
+                synth_items.append(("leg_rail_xor_groups__present", "1"))
+                synth_items.append((
+                    "leg_rail_xor_groups__num_groups",
+                    str(len(parsed_xor_groups)),
+                ))
+                for i, group in enumerate(parsed_xor_groups):
+                    for rail in group:
+                        synth_items.append(
+                            (f"leg_rail_xor_groups_{i}", rail),
+                        )
+                form = _FD(synth_items)  # type: ignore[assignment]: re-binding form to the synthesized FormData; downstream reads see the BB.3 wire shape
         # BB.2 — capture the reconciler picker values into
         # ``coerced_overrides`` regardless of whether needs_reconciler
         # fires, so a re-render on validation failure preserves the

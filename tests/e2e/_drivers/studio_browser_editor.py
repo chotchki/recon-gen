@@ -440,52 +440,63 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
                         continue
                     field_name = f"reconciler_new_{key}"
                     loc = self._page.locator(f'[name="{field_name}"]')
-                    if loc.count() == 0:
+                    count = loc.count()
+                    if count == 0:
                         # Field isn't in the create-new sub-form
                         # (e.g., metadata_keys for aggregator —
                         # not part of the minimum required set).
                         # Skip; the editor's validator runs on
                         # submit + surfaces any real omissions.
                         continue
-                    # AI.2.d.2 piece 3 — only fill the fields the
-                    # current kind/subtype EXPOSES. The BB.2 form
-                    # renders BOTH the TT-kind block + the
-                    # aggregator-kind block; one is hidden based on
-                    # `reconciler_new_kind`. Filling hidden inputs
-                    # with `force=True` caused WebKit to corrupt
-                    # adjacent fields (AI.12 surfaced this) — skip
-                    # any field whose closest ancestor div has
-                    # `[hidden]` set.
-                    if not loc.first.is_visible():
+                    # AI.2.d.2 piece 3 + AI.13 — pick the VISIBLE
+                    # element when multiple inputs share a name
+                    # (`reconciler_new_expected_net` appears in BOTH
+                    # the TT-kind block AND the aggregator-two-leg
+                    # block; `loc.first` would silently target the
+                    # hidden TT one). Iterate + pick the first
+                    # visible match.
+                    target = None
+                    for i in range(count):
+                        candidate = loc.nth(i)
+                        if candidate.is_visible():
+                            target = candidate
+                            break
+                    if target is None:
+                        # All same-name inputs hidden — server-managed
+                        # state, no field to fill.
                         continue
                     # `force=True` still used because the per-kind
                     # block's `hidden` toggle races the radio-click
                     # → kind-select → field-reveal chain in WebKit;
                     # visible-but-not-yet-actionable is a real
                     # race. Operator-fidelity-equivalent.
-                    tag = loc.first.evaluate("el => el.tagName.toLowerCase()")
+                    tag = target.evaluate("el => el.tagName.toLowerCase()")
                     if tag == "select":
-                        loc.first.select_option(values[0], force=True)
+                        target.select_option(values[0], force=True)
                     elif tag == "input":
-                        input_type = (
-                            loc.first.get_attribute("type") or "text"
-                        )
+                        input_type = target.get_attribute("type") or "text"
                         if input_type == "checkbox":
                             for v in values:
                                 self._page.locator(
                                     f'input[type=checkbox][name="{field_name}"][value="{v}"]',
                                 ).check(force=True)
                         elif input_type != "hidden":
-                            loc.first.fill(values[0], force=True)
+                            target.fill(values[0], force=True)
                     else:
-                        loc.first.fill(values[0], force=True)
-        # partial_xor_groups (BB.3 — TT reconcilers): the form has
-        # the `leg_rail_xor_groups_<i>` multi-select fields when
-        # `leg_rail_xor_groups__present=1` is set. The browser form
-        # doesn't render these on the rail-create page; they're
-        # edit-only on the TT itself. Not exercised in piece 3 first
-        # pass; deferred to piece 4 if needed.
-        _ = partial_xor_groups
+                        target.fill(values[0], force=True)
+        # AI.10 (2026-05-25) — partial_xor_groups via the
+        # `leg_rail_xor_groups_text` textarea (BB-style form-pairing).
+        # Server parses one-group-per-line / comma-separated rails
+        # and rewrites into the BB.3 wire shape. Driver writes the
+        # textarea when partial_xor_groups is supplied.
+        if partial_xor_groups:
+            text_value = "\n".join(
+                ", ".join(rail for rail in group)
+                for group in partial_xor_groups
+            )
+            self._page.fill(
+                'textarea[name="leg_rail_xor_groups_text"]', text_value,
+            )
         self._submit_create_form(f"rail {data.get('name', ['?'])[0]!r}")
 
     def create_rail_with_new_reconciler(
