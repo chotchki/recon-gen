@@ -3747,3 +3747,43 @@ Per [[feedback_invariants_in_types]]: make the bug shape unrepresentable.
 - [x] BD.7 - Verify + commit. AO.10 + AO.S2.a + AO.11 reproduction tests all green (`test_studio_data_route.py`, `test_sql_dialect.py`, `test_l1_dashboard.py` — 263 tests). Bumped v11.20.0 + RELEASE_NOTES entry. Tag push pending v11.19.2 release pipeline green-confirm + operator merge to main.
 
 
+---
+
+## 2026-05-25
+
+## Phase BB - Reconciler form-pairing for non-aggregating single-leg rails
+
+Surfaced 2026-05-24 during AI.2.d.1.a. Per-save full `validate()` is
+too strict for **two bilateral-circular validator checks** (S3 + C3,
+both about non-aggregating single-leg rails needing a reconciler).
+Rest of the 38 validator checks (35 structural + 1 deferrable
+already handled in `studio_editor.py`) are fine — see
+`docs/audits/bb_0_a_validator_circulars.md` for the catalog.
+
+User-locked direction (2026-05-24): **surgical form-pairing** at the
+2 actual circular points; NO validator split, NO invalid-state UX,
+NO defer-validation cheat. Editor's "Create non-aggregating
+single-leg rail" form requires the operator to pick (or create
+inline) a reconciler at the same time. Server commits both
+atomically; validator stays strict; no invalid in-flight state
+ever exists.
+
+Rationale: only 2 bilateral cases (5% of validator surface);
+form-pairing matches the operator's actual mental model better
+than "save can be incomplete + show warnings". Avoids the
+combinatorial UX explosion (every entity might be in invalid
+state → flags + filters everywhere).
+
+- [x] BB.0 - Locks.
+  - [x] BB.0.a - **Catalog circular-tension cases.** Output: `docs/audits/bb_0_a_validator_circulars.md`. 38 checks classified — 35 structural / reference / deferrable stay in `validate()`; only 2 bilateral-circular (S3 single-leg reconciliation + C3 Variable single-leg in some template) need the form-pairing fix.
+  - **Direction** (Lock 1, 2026-05-24): surgical form-pairing per case. Validator unchanged. No invalid-state UX.
+  - **Atomic commit semantics** (Lock 2): the create POST takes the rail's form data PLUS the reconciler choice (`reconciler_kind`: `transfer_template` | `aggregating_rail`; `reconciler_name`: existing-name | `__create_new__`; if create-new, the nested form for the new reconciler). Server mutates the cache in memory (add rail; edit reconciler.leg_rails or .bundles_activity OR create the new reconciler with the new rail in its list), then runs full `validate()`, THEN saves. If validate fails, the whole composite mutation rolls back; nothing persists.
+  - **Form UI** (Lock 3): on the "Create Rail" form, when `subtype=single_leg` AND `aggregating=false`, a "Reconciler" section appears below the rail-specific fields. Required (form-level validator + client-side gate). Two sub-radios — "Attach to existing reconciler" (dropdown of TTs + aggregators) and "Create new reconciler" (nested mini-form for picking TT vs aggregator + the new entity's name + minimum fields). The C3 Variable case is a sub-variant: when `leg_direction=Variable`, only TTs appear in the picker (aggregators don't reconcile Variable per the validator).
+- [x] BB.1 - Server-side atomic create-rail-with-reconciler handler. POST /l2_shape/rail/ accepts both attach + create-new paths via `reconciler_mode` (BB.3 already shipped the create-new server path; BB.1 closeout split the missing-required gate on mode so create_new requires `reconciler_kind` + `reconciler_new_name`, attach requires `reconciler_kind` + `reconciler_name`). All `reconciler_new_*` fields mirror to overrides for re-render preservation.
+- [x] BB.2 - Editor form UI: "Reconciler" section. `_render_reconciler_section` emits a mode radio at the top (Attach / Create new) + the existing attach picker wrapped in a toggleable block + a new create-new sub-form with per-kind minimum-required fields (TT: name + expected_net + transfer_key + completion; aggregator: name + subtype + cadence + role/direction). Tiny inline JS for show/hide toggling (mode + kind + subtype); dependency-free; no-JS submit still works via the server's `reconciler_new_kind` fallback. Variable-direction restriction enforced server-side (validator C3); UI shows helper text. 3 new BB.2 tests in `test_studio_editor_routes.py`.
+- [x] BB.3 - Driver wiring (commit `c1939621`). Per-rail reconciler choice computed from reference; first-occupant create-new + subsequent attach-existing with partial xor_groups update; extended to two-leg-without-expected_net (S5 bilateral). Server-side: also handles `_create_new_reconciler_with_rail` + `_apply_xor_groups_update_to_tt`. Editor-side AI.2.a-class fix: TT create no longer drops `firings_typical_per_period`.
+- [x] BB.4 - Dogfood test un-skipped + parametrized over spec_example AND sasquatch_pr (commit `934b274e`). Added final reorder pass (`_reorder_leg_rails_form_data` + `_reorder_bundles_activity_form_data`) so wave-3a reconcilers' rail-lists match reference-yaml order. Order-insensitive structural comparator + description-trailing-whitespace normalization.
+- [x] BB.5 - Resume AI.2.d.1.a downstream. AI.2.d.1 + AI.2.d.1.a ticked above as DONE-via-Phase-BB. AI.2.d.2 (Playwright transport) + AI.3-7 still genuinely open work; tracked under Phase AI not BB.
+- [x] BB.6 - Verify + commit + tag. Full unit suite green (2756 passed, 74 skipped). Bumped v11.20.1 + RELEASE_NOTES entry. Tag push pending operator merge. Visual-confirm by operator on a fresh studio session is the post-tag hand-off.
+
+
