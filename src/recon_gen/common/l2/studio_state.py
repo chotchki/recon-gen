@@ -52,6 +52,7 @@ from recon_gen.common.config import (
     ScopeKind,
     TestGeneratorConfig,
 )
+from recon_gen.common.intervals import DateInterval
 from recon_gen.common.l2.cache import save_yaml_atomic
 
 
@@ -90,9 +91,12 @@ class StudioState:
     derive_balances: bool | None = None
 
     # Scenario window — Studio-only concept (not in TestGeneratorConfig).
-    # Both must be set together or both None.
-    window_start: date | None = None
-    window_end: date | None = None
+    # BC.9 — `window: DateInterval | None` replaces the v1
+    # `window_start: date | None` + `window_end: date | None` pair so
+    # the "both set together or both None" invariant is enforced by
+    # construction. yaml schema stays the same shape (`trainer_window:
+    # {start, end}`); parser/serializer converts at the boundary.
+    window: DateInterval | None = None
 
     # X.4.h.etl-toggle — etl_hook + etl_datasource pair enable/disable.
     # None = "trainer never touched, use cfg-as-written behavior."
@@ -189,27 +193,30 @@ def _from_yaml_dict(raw: dict[str, Any]) -> StudioState:  # typing-smell: ignore
     derive_raw = tgen_dict.get("derive_balances")
     derive_balances = derive_raw if isinstance(derive_raw, bool) else None
 
-    window = raw.get("trainer_window")
-    window_start: date | None = None
-    window_end: date | None = None
-    if isinstance(window, dict):
-        window_dict = cast(dict[str, Any], window)  # typing-smell: ignore[explicit-any]: parsed yaml dict
+    window_raw = raw.get("trainer_window")
+    window: DateInterval | None = None
+    if isinstance(window_raw, dict):
+        window_dict = cast(dict[str, Any], window_raw)  # typing-smell: ignore[explicit-any]: parsed yaml dict
         ws_raw = window_dict.get("start")
         we_raw = window_dict.get("end")
+        ws: date | None = None
+        we: date | None = None
         if isinstance(ws_raw, date):
-            window_start = ws_raw
+            ws = ws_raw
         elif isinstance(ws_raw, str):
             try:
-                window_start = date.fromisoformat(ws_raw)
+                ws = date.fromisoformat(ws_raw)
             except ValueError:
                 pass
         if isinstance(we_raw, date):
-            window_end = we_raw
+            we = we_raw
         elif isinstance(we_raw, str):
             try:
-                window_end = date.fromisoformat(we_raw)
+                we = date.fromisoformat(we_raw)
             except ValueError:
                 pass
+        if ws is not None and we is not None and ws <= we:
+            window = DateInterval.closed(ws, we)
 
     etl = raw.get("etl_hook")
     etl_hook_enabled: bool | None = None
@@ -226,8 +233,7 @@ def _from_yaml_dict(raw: dict[str, Any]) -> StudioState:  # typing-smell: ignore
         plants=plants,
         only_template=only_template,
         derive_balances=derive_balances,
-        window_start=window_start,
-        window_end=window_end,
+        window=window,
         etl_hook_enabled=etl_hook_enabled,
     )
 
@@ -252,10 +258,10 @@ def _to_yaml_text(state: StudioState) -> str:
     payload: dict[str, Any] = {}  # typing-smell: ignore[explicit-any]: yaml-bound dict; values are heterogeneous primitives
     if tgen:
         payload["test_generator"] = tgen
-    if state.window_start is not None and state.window_end is not None:
+    if state.window is not None:
         payload["trainer_window"] = {
-            "start": state.window_start.isoformat(),
-            "end": state.window_end.isoformat(),
+            "start": state.window.start.isoformat(),
+            "end": state.window.end.isoformat(),
         }
     if state.etl_hook_enabled is not None:
         payload["etl_hook"] = {"enabled": state.etl_hook_enabled}

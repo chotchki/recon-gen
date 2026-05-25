@@ -769,7 +769,8 @@ def _build_state_url(tg_cache: TestGeneratorCache) -> str:
     from urllib.parse import urlencode  # noqa: PLC0415
 
     tg = tg_cache.get()
-    window_start, window_end = tg_cache.get_window()
+    _window = tg_cache.get_window()
+    window_start, window_end = _window.start, _window.end
     today = date.today()  # typing-smell: ignore[no-datetime-now]: trainer-mode URL default-detection — wall-clock today defines the omit-when-default threshold; not a determinism path
     default_window_end = today
     default_window_start = today - timedelta(
@@ -1343,7 +1344,8 @@ def _render_timeline_section(
     """
     if tg_cache is not None:
         effective_tg = tg_cache.get()
-        window_start, window_end = tg_cache.get_window()
+        _window = tg_cache.get_window()
+        window_start, window_end = _window.start, _window.end
         up_to = tg_cache.get_up_to()
     else:
         from recon_gen.common.config import (  # noqa: PLC0415
@@ -1553,7 +1555,8 @@ def _render_data_page(
     )
     plants_strip = _render_plants_strip(selected_plants)
     if tg_cache is not None:
-        window_start, window_end = tg_cache.get_window()
+        _window = tg_cache.get_window()
+        window_start, window_end = _window.start, _window.end
         up_to = tg_cache.get_up_to()
     else:
         # Unit-test page-shell surface — no cache wired. Materialize
@@ -1899,7 +1902,8 @@ def make_studio_routes(
                 - Invalid date string: silently drop (cache holds prior).
             """
             form = await request.form()
-            window_start, window_end = bound_tg.get_window()
+            _window = bound_tg.get_window()
+            window_start, window_end = _window.start, _window.end
             current = bound_tg.get_up_to()
 
             delta_raw = form.get("delta")
@@ -1959,7 +1963,8 @@ def make_studio_routes(
             put_end_date call will clamp.
             """
             form = await request.form()
-            cur_start, cur_end = bound_tg.get_window()
+            _cur_window = bound_tg.get_window()
+            cur_start, cur_end = _cur_window.start, _cur_window.end
 
             reset_raw = form.get("reset")
             if isinstance(reset_raw, str) and reset_raw.strip():
@@ -1982,7 +1987,8 @@ def make_studio_routes(
                     except ValueError:
                         pass  # silent drop
                 bound_tg.update_window(start=new_start, end=new_end)
-            new_window_start, new_window_end = bound_tg.get_window()
+            _new_window = bound_tg.get_window()
+            new_window_start, new_window_end = _new_window.start, _new_window.end
             return HTMLResponse(
                 _render_window_strip(new_window_start, new_window_end),
                 headers={

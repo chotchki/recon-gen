@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from recon_gen.common.config import TestGeneratorConfig
+from recon_gen.common.intervals import DateInterval
 from recon_gen.common.l2.studio_state import (
     SIDEFILE_NAME,
     StudioState,
@@ -38,8 +39,7 @@ def test_round_trip_full_state(tmp_path: Path) -> None:
         plants=("drift", "overdraft"),
         only_template="MerchantSettlementCycle",
         derive_balances=True,
-        window_start=date(2026, 2, 14),
-        window_end=date(2026, 5, 14),
+        window=DateInterval.closed(date(2026, 2, 14), date(2026, 5, 14)),
         etl_hook_enabled=False,
     )
     save_studio_state(state, p)
@@ -109,8 +109,9 @@ def test_load_iso_date_strings_parse(tmp_path: Path) -> None:
     state = load_studio_state(p)
     assert state is not None
     assert state.end_date == date(2026, 5, 14)
-    assert state.window_start == date(2026, 2, 14)
-    assert state.window_end == date(2026, 5, 14)
+    assert state.window is not None
+    assert state.window.start == date(2026, 2, 14)
+    assert state.window.end == date(2026, 5, 14)
 
 
 def test_load_invalid_iso_date_drops_silently(tmp_path: Path) -> None:
@@ -196,8 +197,7 @@ def test_studio_state_default_factory_all_none() -> None:
     assert state.plants is None
     assert state.only_template is None
     assert state.derive_balances is None
-    assert state.window_start is None
-    assert state.window_end is None
+    assert state.window is None
     assert state.etl_hook_enabled is None
 
 

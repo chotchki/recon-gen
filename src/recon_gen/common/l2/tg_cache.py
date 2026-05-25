@@ -21,10 +21,11 @@ cache exists.
 from __future__ import annotations
 
 import dataclasses
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 from recon_gen.common.as_of_frame import AsOfFrame
+from recon_gen.common.intervals import DateInterval
 from recon_gen.common.config import (
     Config,
     PlantKind,
@@ -57,10 +58,11 @@ class TestGeneratorCache:
     - ``_state: TestGeneratorConfig`` — the frozen generator config
       (plants / scope / seed / end_date — where end_date is the
       simulation "up to" cutoff, mirroring tg.end_date).
-    - ``_window_start: date`` — left edge of the trainer's scenario
-      window. Defaults to ``today - (DEFAULT_BASELINE_WINDOW_DAYS - 1)``.
-    - ``_window_end: date`` — right edge of the trainer's scenario
-      window. Defaults to ``today``.
+    - ``_window: DateInterval`` — the trainer's scenario window
+      (closed-closed dates). Defaults to
+      ``trailing_days_ending_today(today, DEFAULT_BASELINE_WINDOW_DAYS)``
+      — the last N days, today included. BC.9 replaced the v1
+      ``_window_start: date`` + ``_window_end: date`` pair.
 
     The window is **Studio-only** — purely a UI concern for the timeline
     panel. It does NOT round-trip through the generator (Deploy reads
@@ -75,38 +77,33 @@ class TestGeneratorCache:
     """
 
     __slots__ = (
-        "_state", "_window_start", "_window_end", "_etl_hook_enabled",
+        "_state", "_window", "_etl_hook_enabled",
         "_state_path",
     )
 
     def __init__(
         self,
         state: TestGeneratorConfig,
-        window_start: date | None = None,
-        window_end: date | None = None,
+        window: DateInterval | None = None,
         *,
         etl_hook_enabled: bool = True,
         state_path: Path | None = None,
     ) -> None:
-        if window_end is None:
-            # The scenario-end / plant-projection anchor. Defaults to
-            # wall-clock today for the live trainer (scenario ends "now");
-            # it is DISTINCT from the load-up-to scrub head (up_to =
-            # state.end_date), which the trainer slides independently
-            # (start early to show good days, advance to reveal the issue).
-            # Deterministic surfaces (tests, authored scenarios) pin it via
-            # the window_end arg rather than relying on wall-clock.
-            # AQ.3 funnel: live trainer ends at "now" via AsOfFrame.live()
-            # — the sole blessed wall-clock site. Deterministic surfaces
-            # (tests, authored scenarios) still pin via the window_end arg.
-            window_end = AsOfFrame.live().as_of
-        if window_start is None:
-            window_start = window_end - timedelta(
-                days=DEFAULT_BASELINE_WINDOW_DAYS - 1,
+        # BC.9 — `window: DateInterval | None` replaces v1
+        # `window_start: date | None` + `window_end: date | None` pair.
+        # The "both set together or both None" invariant is enforced
+        # by the type. Default window for the live trainer:
+        # `trailing_days_ending_today(today, DEFAULT_BASELINE_WINDOW_DAYS)`
+        # — `today` from AsOfFrame.live() (the AQ.3 wall-clock seam);
+        # deterministic surfaces (tests, authored scenarios) still pin
+        # by passing an explicit `DateInterval`.
+        if window is None:
+            window = DateInterval.trailing_days_ending_today(
+                AsOfFrame.live().as_of,
+                DEFAULT_BASELINE_WINDOW_DAYS,
             )
         self._state = state
-        self._window_start = window_start
-        self._window_end = window_end
+        self._window = window
         # X.4.h.etl-toggle — when False, patched_config nukes
         # cfg.etl_hook for that deploy without erasing the configured
         # command. Lets the trainer skip the upstream re-seed step on
@@ -153,8 +150,7 @@ class TestGeneratorCache:
             return cls(merged, state_path=path)
         return cls(
             merged,
-            window_start=sidefile.window_start,
-            window_end=sidefile.window_end,
+            window=sidefile.window,
             etl_hook_enabled=(
                 sidefile.etl_hook_enabled
                 if sidefile.etl_hook_enabled is not None else True
@@ -178,8 +174,7 @@ class TestGeneratorCache:
             plants=self._state.plants,
             only_template=self._state.only_template,
             derive_balances=self._state.derive_balances,
-            window_start=self._window_start,
-            window_end=self._window_end,
+            window=self._window,
             etl_hook_enabled=self._etl_hook_enabled,
         )
         save_studio_state(snapshot, self._state_path)
@@ -192,9 +187,9 @@ class TestGeneratorCache:
         """
         return self._state
 
-    def get_window(self) -> tuple[date, date]:
-        """Return ``(window_start, window_end)`` — always concrete dates."""
-        return (self._window_start, self._window_end)
+    def get_window(self) -> DateInterval:
+        """Return the trainer's scenario window (closed-closed dates)."""
+        return self._window
 
     def is_etl_hook_enabled(self) -> bool:
         """Return whether ``cfg.etl_hook`` will run on the next Deploy.
@@ -215,10 +210,10 @@ class TestGeneratorCache:
         """Resolve the "up to" / scrub-head date.
 
         ``tg.end_date`` is the cached value; when it's None the cache
-        falls back to ``window_end`` (the trainer's intent: "render up
-        through the right edge of my scenario window").
+        falls back to ``self._window.end`` (the trainer's intent:
+        "render up through the right edge of my scenario window").
         """
-        return self._state.end_date or self._window_end
+        return self._state.end_date or self._window.end
 
     def replace(self, new_state: TestGeneratorConfig) -> None:
         """Swap the cached generator state (window untouched)."""
@@ -277,13 +272,13 @@ class TestGeneratorCache:
         *,
         start: date | object = _UNSET,
         end: date | object = _UNSET,
-    ) -> tuple[date, date]:
+    ) -> DateInterval:
         """Partial update of the trainer's scenario window.
 
         Both bounds optional — pass only what changed. After update
         if ``start > end``, swap them (operator typed in a confusing
         order; preserve the intent rather than reject). Returns the
-        new ``(start, end)`` tuple for caller logging.
+        new ``DateInterval`` for caller logging.
 
         Window changes do NOT touch ``end_date`` (the up_to scrub head)
         — it stays where the operator set it. The renderer clamps
@@ -291,15 +286,14 @@ class TestGeneratorCache:
         panel will overwrite to a valid date anyway.
         """
         new_start = (
-            start if isinstance(start, date) else self._window_start
+            start if isinstance(start, date) else self._window.start
         )
-        new_end = end if isinstance(end, date) else self._window_end
+        new_end = end if isinstance(end, date) else self._window.end
         if new_start > new_end:
             new_start, new_end = new_end, new_start
-        self._window_start = new_start
-        self._window_end = new_end
+        self._window = DateInterval.closed(new_start, new_end)
         self._persist()
-        return (new_start, new_end)
+        return self._window
 
     def patched_config(self, cfg: Config) -> Config:
         """Return a clone of ``cfg`` with ``test_generator`` swapped in.
@@ -328,11 +322,11 @@ class TestGeneratorCache:
         ``cutoff_date`` defaults to None (no truncation, current
         byte-identical-to-locked-seeds behavior).
         """
-        cfg_anchor = self._window_end
+        cfg_anchor = self._window.end
         cfg_cutoff: date | None = (
             self._state.end_date
             if self._state.end_date is not None
-            and self._state.end_date < self._window_end
+            and self._state.end_date < self._window.end
             else None
         )
         resolved = dataclasses.replace(

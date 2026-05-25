@@ -18,6 +18,7 @@ from datetime import date
 
 from pathlib import Path
 
+from recon_gen.common.intervals import DateInterval
 from recon_gen.common.config import (
     EtlDatasourceConfig,
     PlantKind,
@@ -253,13 +254,14 @@ def test_from_cfg_with_state_sidefile_window_used(tmp_path: Path) -> None:
     sidefile = tmp_path / SIDEFILE_NAME
     save_studio_state(
         StudioState(
-            window_start=date(2025, 12, 1),
-            window_end=date(2026, 3, 1),
+            window=DateInterval.closed(date(2025, 12, 1), date(2026, 3, 1)),
         ),
         sidefile,
     )
     cache = TestGeneratorCache.from_cfg_with_state(cfg, cfg_path)
-    assert cache.get_window() == (date(2025, 12, 1), date(2026, 3, 1))
+    assert cache.get_window() == DateInterval.closed(
+        date(2025, 12, 1), date(2026, 3, 1),
+    )
 
 
 def test_from_cfg_with_state_sidefile_no_etl_field_keeps_default(
@@ -304,8 +306,9 @@ def test_update_window_persists_to_sidefile(tmp_path: Path) -> None:
     cache.update_window(start=date(2026, 1, 1), end=date(2026, 4, 1))
     reloaded = load_studio_state(tmp_path / SIDEFILE_NAME)
     assert reloaded is not None
-    assert reloaded.window_start == date(2026, 1, 1)
-    assert reloaded.window_end == date(2026, 4, 1)
+    assert reloaded.window == DateInterval.closed(
+        date(2026, 1, 1), date(2026, 4, 1),
+    )
 
 
 def test_set_etl_hook_enabled_persists_to_sidefile(tmp_path: Path) -> None:
@@ -350,5 +353,7 @@ def test_full_round_trip_via_two_cache_instances(tmp_path: Path) -> None:
     assert cache_b.get().scope == "exceptions_only"
     assert cache_b.get().seed == 99
     assert cache_b.get().plants == ("limit_breach",)
-    assert cache_b.get_window() == (date(2026, 2, 1), date(2026, 5, 14))
+    assert cache_b.get_window() == DateInterval.closed(
+        date(2026, 2, 1), date(2026, 5, 14),
+    )
     assert cache_b.is_etl_hook_enabled() is False

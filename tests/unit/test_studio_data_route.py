@@ -24,6 +24,7 @@ starlette = pytest.importorskip("starlette")
 TestClient = pytest.importorskip("starlette.testclient").TestClient
 
 from recon_gen.common.config import TestGeneratorConfig
+from recon_gen.common.intervals import DateInterval
 from recon_gen.common.html._smoke_app import (
     SMOKE_FILTER_SPECS,
     build_smoke_app,
@@ -433,8 +434,7 @@ def test_end_date_strip_form_targets_put_route(
     scrub head within the trainer's scenario window (h.3.window)."""
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(end_date=date(2026, 5, 14)),
-        window_start=date(2026, 4, 1),
-        window_end=date(2026, 5, 31),
+        window=DateInterval.closed(date(2026, 4, 1), date(2026, 5, 31)),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -473,8 +473,7 @@ def test_put_end_date_absolute_date_set(
     with the new value."""
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(end_date=None),
-        window_start=date(2026, 5, 1),
-        window_end=date(2026, 6, 30),
+        window=DateInterval.closed(date(2026, 5, 1), date(2026, 6, 30)),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -495,8 +494,7 @@ def test_put_end_date_clamps_to_window(
     scenario window, not the wide-open calendar."""
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(end_date=date(2026, 5, 14)),
-        window_start=date(2026, 5, 1),
-        window_end=date(2026, 5, 31),
+        window=DateInterval.closed(date(2026, 5, 1), date(2026, 5, 31)),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -516,8 +514,7 @@ def test_put_end_date_empty_string_snaps_to_window_end(
     stable even if the window moves later."""
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(end_date=date(2026, 5, 14)),
-        window_start=date(2026, 5, 1),
-        window_end=date(2026, 5, 31),
+        window=DateInterval.closed(date(2026, 5, 1), date(2026, 5, 31)),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -534,8 +531,7 @@ def test_put_end_date_delta_steps_from_cached_value(
     The cache's stored date is the anchor; results clamp to the window."""
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(end_date=date(2026, 5, 14)),
-        window_start=date(2026, 5, 1),
-        window_end=date(2026, 5, 31),
+        window=DateInterval.closed(date(2026, 5, 1), date(2026, 5, 31)),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -555,8 +551,7 @@ def test_put_end_date_delta_anchors_on_window_end_when_cache_none(
     back to window_end (since up_to can't exceed it)."""
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(end_date=None),
-        window_start=date(2026, 5, 1),
-        window_end=date(2026, 5, 31),
+        window=DateInterval.closed(date(2026, 5, 1), date(2026, 5, 31)),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -608,8 +603,7 @@ def test_put_end_date_delta_wins_over_end_date(
     explicit avoids ambiguous behavior."""
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(end_date=date(2026, 5, 14)),
-        window_start=date(2026, 5, 1),
-        window_end=date(2026, 5, 31),
+        window=DateInterval.closed(date(2026, 5, 1), date(2026, 5, 31)),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -917,8 +911,7 @@ def test_put_emits_hx_push_url_with_state(
     state. Bookmark + share + reload all flow through this URL."""
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(),
-        window_start=date(2026, 5, 1),
-        window_end=date(2026, 5, 31),
+        window=DateInterval.closed(date(2026, 5, 1), date(2026, 5, 31)),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -964,7 +957,9 @@ def test_get_data_with_url_params_restores_cache(
         )
     assert resp.status_code == 200
     # Cache mutated by the GET parsing.
-    assert tg_cache.get_window() == (date(2026, 4, 1), date(2026, 5, 31))
+    assert tg_cache.get_window() == DateInterval.closed(
+        date(2026, 4, 1), date(2026, 5, 31),
+    )
     assert tg_cache.get().end_date == date(2026, 5, 15)
     assert tg_cache.get().scope == "exceptions_only"
     assert tg_cache.get().seed == 12345
@@ -979,8 +974,7 @@ def test_get_data_invalid_url_params_silently_drop(
     truncated bookmark or stale share-link still loads the page."""
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(end_date=date(2026, 5, 14)),
-        window_start=date(2026, 5, 1),
-        window_end=date(2026, 5, 31),
+        window=DateInterval.closed(date(2026, 5, 1), date(2026, 5, 31)),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -990,7 +984,9 @@ def test_get_data_invalid_url_params_silently_drop(
         )
     assert resp.status_code == 200
     # Window untouched (window_start was junk).
-    assert tg_cache.get_window() == (date(2026, 5, 1), date(2026, 5, 31))
+    assert tg_cache.get_window() == DateInterval.closed(
+        date(2026, 5, 1), date(2026, 5, 31),
+    )
     # end_date untouched (junk silently dropped).
     assert tg_cache.get().end_date == date(2026, 5, 14)
     # seed untouched.
@@ -1019,7 +1015,9 @@ def test_data_page_renders_timeline_section(
     # render as data-days (not the dimmed "future" zone).
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(end_date=date(2026, 5, 14), scope="full"),
-        window_end=date(2026, 5, 14),
+        # Restore the v1 implicit default (window_start = window_end - 89);
+        # BC.9 made the window typed but didn't change the default policy.
+        window=DateInterval.trailing_days_ending_today(date(2026, 5, 14), 90),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -1056,10 +1054,10 @@ def test_timeline_plants_anchor_on_scenario_end_not_load_up_to() -> None:
     def plant_days(up_to: date) -> list[date]:
         tg = TestGeneratorCache(
             TestGeneratorConfig(end_date=up_to, scope="full"),
-            window_end=scenario_end,
+            window=DateInterval.trailing_days_ending_today(scenario_end, 90),
         )
-        # _render_timeline_section projects plants on window_end, NOT up_to.
-        proj = _dc.replace(tg.get(), end_date=tg.get_window()[1])
+        # _render_timeline_section projects plants on window.end, NOT up_to.
+        proj = _dc.replace(tg.get(), end_date=tg.get_window().end)
         return [td.day for td in compute_plant_timeline(inst, proj)]  # type: ignore[arg-type]: instance shape is Any-ish; compute_plant_timeline narrows internally
 
     early = plant_days(date(2026, 5, 10))   # loaded only through good days
@@ -1151,13 +1149,11 @@ def test_timeline_dense_window_renders_anchor_and_full_window(
     # (which defaults to date.today()), NOT cfg.end_date. Without this
     # pin the test rolls a day every midnight.
     window_end = date(2026, 5, 14)
-    window_start = window_end - timedelta(
-        days=DEFAULT_BASELINE_WINDOW_DAYS - 1,
-    )
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(end_date=window_end, scope="full"),
-        window_start=window_start,
-        window_end=window_end,
+        window=DateInterval.trailing_days_ending_today(
+            window_end, DEFAULT_BASELINE_WINDOW_DAYS,
+        ),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -1174,6 +1170,7 @@ def test_timeline_dense_window_renders_anchor_and_full_window(
     # Inline script wires the scrollIntoView call.
     assert "scrollIntoView" in body
     # First (oldest) row is window_days - 1 days back from anchor.
+    window_start = window_end - timedelta(days=DEFAULT_BASELINE_WINDOW_DAYS - 1)
     assert f'>{window_start.isoformat()}<' in body
 
 
@@ -1209,7 +1206,9 @@ def test_timeline_day_button_writes_end_date(
     # render as data-days (not the dimmed "future" zone).
     tg_cache = TestGeneratorCache(
         TestGeneratorConfig(end_date=date(2026, 5, 14), scope="full"),
-        window_end=date(2026, 5, 14),
+        # Restore the v1 implicit default (window_start = window_end - 89);
+        # BC.9 made the window typed but didn't change the default policy.
+        window=DateInterval.trailing_days_ending_today(date(2026, 5, 14), 90),
     )
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
