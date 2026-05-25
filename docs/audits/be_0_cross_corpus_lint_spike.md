@@ -133,6 +133,17 @@ The 144 hits split into FOUR rough categories based on the constant's role + the
   - Leave at 100 and accept those 5 as the baseline.
   **Recommendation: lower the threshold to 50 in BE.1 after migrating the 5 hits.** Stricter floor; the migration is small + valuable.
 
+- **D8 — Planted-violation fixtures per lint (user-flagged 2026-05-24).** Both approaches face the same "silent lint death" risk: once BE.4 sweeps approach 3's 144 hits to 0 and BE.1's threshold-50 migration clears approach 1 to 0, we lose the smoke signal that the lint visitors are even wired correctly. A regex breakage in the SQL fingerprint, an AST-walker traversal bug, an indexing-loop bug — any of those could silently flip the lint from "catches drift" to "always-empty" and we'd never know.
+
+  **Fix: planted-violation fixture files**, same pattern as the existing `no-naked-interval-ctor` lint at `tests/unit/test_typing_smells.py`. Each lint gets a dedicated fixture file with a deliberate violation; a positive-signal test asserts the visitor finds it. If the visitor regresses to always-empty, the positive test goes red.
+
+  Concretely for BE.1 + BE.2:
+  - `tests/unit/_fixtures/be_1_planted_sql_duplication.py` — a file with one >=100-char SQL string literal that ALSO appears in src/. Positive test: approach 1 finds it.
+  - `tests/unit/_fixtures/be_2_planted_constant_duplication.py` — a test-style file with an `assert "<value>" == X` where `<value>` is a known src constant. Positive test: approach 3 finds it.
+  - Both fixtures sit OUTSIDE the lint's scope (the `files=` filter excludes `_fixtures/`); positive tests invoke the visitor directly on the fixture content.
+
+  **Recommendation: ship fixtures in BE.1 + BE.2 alongside the lint code itself.** The user's framing: "the 50→100 threshold lowering is a good test if approach 1 is even working." After the sweep we lose that natural smoke test; the planted fixtures restore it.
+
 ## Recommended sequencing
 
 1. **BE.1** ships approach 1 at threshold 100 (immediate 0-hit baseline). After BE.4 lands, lower threshold to 50.
