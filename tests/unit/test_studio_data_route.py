@@ -407,7 +407,10 @@ def test_end_date_strip_renders_blank_input_when_none(
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/data").text
 
-    assert 'class="end-date-input"' in body
+    # AM.2 step 4 (2026-05-25): `.end-date-input` semantic class
+    # retired; the date input identity is the `name="end_date"` form
+    # field. Blank value + the chip pin the user-visible behavior.
+    assert 'name="end_date"' in body
     assert 'value=""' in body  # blank value
     assert "(default)" in body  # current-value chip
 
@@ -634,7 +637,8 @@ def test_seed_strip_renders_blank_input_when_none(
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/data").text
 
-    assert 'class="seed-input"' in body
+    # AM.2 step 4 (2026-05-25): `.seed-input` semantic class retired.
+    # `name="seed"` + the blank-value + placeholder pin behavior.
     # Number input renders blank.
     assert 'name="seed" value=""' in body
     assert 'placeholder="(default)"' in body
@@ -1029,13 +1033,23 @@ def test_data_page_renders_timeline_section(
 
     # Section landmark (the h.1 placeholder is replaced).
     assert 'id="data-timeline"' in body
-    # Timeline header surfaces total count + at least one chip kind.
-    assert 'class="timeline-header"' in body
-    # spec_example yields plants ⇒ at least one row with hx-put writing
-    # end_date (the click-to-jump-day affordance).
-    assert 'class="timeline-day"' in body
-    # Each row's chips carry a per-kind class.
-    assert "timeline-chip--" in body
+    # Timeline header surfaces total count. AM.2 step 4 (2026-05-25):
+    # `.timeline-header` retired — check the `<header` element +
+    # the prose marker "plant" that always lands in the count line.
+    assert "<header" in body
+    assert "plant" in body
+    # AM.2 step 4: `.timeline-day` retired; the hx-put writing
+    # end_date IS the click-to-jump-day affordance, so count those.
+    assert 'hx-target="#data-knob-end-date"' in body
+    # Each row's chips carry a kind-specific aria title — pick the
+    # pretty label that one of the spec_example plant kinds renders
+    # ("Drift" / "Limit breach" / "Overdraft" / etc., per
+    # `_PLANT_LABELS` in _studio_routes).
+    assert (
+        'title="Drift ' in body
+        or 'title="Overdraft ' in body
+        or 'title="Limit breach ' in body
+    )
 
 
 def test_timeline_plants_anchor_on_scenario_end_not_load_up_to() -> None:
@@ -1090,11 +1104,25 @@ def test_data_page_timeline_uncovered_rails_renders_dense_window(
     # Header surfaces the no-plants hint.
     assert "scope=uncovered_rails" in body
     # Dense window: 90 rows still render.
-    assert body.count('<button type="button" class="timeline-day') == 90
+    # AM.2 step 4 (2026-05-25): timeline-day rows now carry the
+    # `data-role="timeline-day"` semantic attribute (stable hook,
+    # styling-free) — count those instead of the retired
+    # `.timeline-day` class.
+    assert body.count('data-role="timeline-day"') == 90
     # Anchor row exists (= end_date).
     assert 'id="timeline-anchor-row"' in body
-    # No chips because no plants emitted.
-    assert "timeline-chip--" not in body
+    # No chips because no plants emitted. AM.2 step 4 (2026-05-25):
+    # `.timeline-chip--*` semantic classes retired; each chip carries
+    # a `title="<kind> ×N"` attribute which IS the visible info.
+    # An uncovered_rails scope means no plants → no chips → no plant
+    # kind titles in the body.
+    for kind_label in (
+        "Drift", "Overdraft", "Limit breach", "Stuck pending",
+        "Stuck unbundled", "Supersession",
+    ):
+        # ×N count is the chip's title suffix; "(no plants ..." prose
+        # uses different framing so the false-positive risk is low.
+        assert f'title="{kind_label} ×' not in body
 
 
 def test_get_data_timeline_returns_section_fragment(
@@ -1164,11 +1192,16 @@ def test_timeline_dense_window_renders_anchor_and_full_window(
         body = c.get("/data").text
 
     # One row per day in the window.
-    assert body.count('<button type="button" class="timeline-day') == DEFAULT_BASELINE_WINDOW_DAYS
+    # AM.2 step 4 (2026-05-25): timeline-day rows now use the
+    # `data-role="timeline-day"` semantic attribute (see other tests
+    # in this file) — count those instead of the retired class.
+    assert body.count('data-role="timeline-day"') == DEFAULT_BASELINE_WINDOW_DAYS
     # The anchor row gets a stable id so the scrollIntoView script can
-    # find it after every HTMX swap.
+    # find it after every HTMX swap. AM.2 step 4 (2026-05-25):
+    # `.timeline-day--anchor` retired; `data-state="anchor"` is the
+    # semantic state marker.
     assert 'id="timeline-anchor-row"' in body
-    assert "timeline-day--anchor" in body
+    assert 'data-state="anchor"' in body
     # Anchor row's date is the cached end_date.
     assert 'value="2026-05-14"' in body  # end_date strip
     # Inline script wires the scrollIntoView call.
@@ -1221,7 +1254,10 @@ def test_timeline_day_button_writes_end_date(
     # Some specific timeline day in spec_example's plant set falls on
     # an ISO date matching this regex; the timeline-day button carries
     # the hx-vals end_date payload + targets the end_date strip.
-    assert 'class="timeline-day"' in body
+    # AM.2 step 4 (2026-05-25): `.timeline-day` retired; the
+    # `data-role="timeline-day"` semantic attribute is the stable
+    # hook the home-page focus filter walks too.
+    assert 'data-role="timeline-day"' in body
     assert "hx-target=\"#data-knob-end-date\"" in body
     # hx-vals end_date payload — the JSON structure we emit.
     assert 'hx-vals=\'{"end_date": "' in body
@@ -1244,7 +1280,9 @@ def test_etl_hook_strip_renders_not_configured_without_cfg(
 
     assert 'id="data-knob-etl-hook"' in body
     assert "(not configured)" in body
-    assert "etl-hook-command--missing" in body
+    # AM.2 step 4 (2026-05-25): `.etl-hook-command--missing` retired;
+    # "(not configured)" prose IS the visible state; the disabled
+    # checkbox below also pins the user-facing inert-toggle behavior.
     assert 'type="checkbox" disabled' in body
 
 
@@ -1262,10 +1300,15 @@ def test_etl_hook_strip_renders_command_when_configured(
     assert 'id="data-knob-etl-hook"' in body
     # Command surfaces in a <code> with title= for full hover text.
     assert "echo upstream-pull &amp;&amp; sync" in body
-    assert "etl-hook-toggle" in body
+    # AM.2 step 4 (2026-05-25): `.etl-hook-toggle` /
+    # `.etl-hook-command--missing` semantic classes retired. The
+    # checked checkbox + the configured command text in <code>
+    # are the user-visible "command is set + active" pins. The
+    # "(not configured)" prose check below confirms we're NOT in
+    # the inert state.
+    assert "(not configured)" not in body
     # Default = enabled ⇒ checkbox checked.
     assert 'type="checkbox" name="enabled" value="on" checked' in body
-    assert "etl-hook-command--missing" not in body
 
 
 def test_etl_hook_strip_renders_disabled_state(
@@ -1288,9 +1331,12 @@ def test_etl_hook_strip_renders_disabled_state(
     # Unchecked: the rendered tag must not have ``checked`` after value=on.
     assert 'name="enabled" value="on" checked' not in body
     assert 'name="enabled" value="on"' in body
-    # Command still shown, but with the disabled style class.
+    # Command still shown, with the disabled visual cue. AM.2 step 4
+    # (2026-05-25): `.etl-hook-command--disabled` retired; the
+    # `line-through` utility is the visible greyed-out cue (renders
+    # as strike-through CSS).
     assert "echo upstream-pull" in body
-    assert "etl-hook-command--disabled" in body
+    assert "line-through" in body
 
 
 def test_put_etl_hook_disable(
@@ -1308,8 +1354,10 @@ def test_put_etl_hook_disable(
         resp = _put_form(c, "/data/knobs/etl_hook", [])
     assert resp.status_code == 200  # type: ignore[attr-defined]: TestClient stub return is Any
     assert tg_cache.is_etl_hook_enabled() is False
-    # Returned strip has the disabled-state styling.
-    assert "etl-hook-command--disabled" in resp.text  # type: ignore[attr-defined]: TestClient stub return is Any
+    # Returned strip has the disabled-state styling. AM.2 step 4
+    # (2026-05-25): `.etl-hook-command--disabled` retired; `line-through`
+    # utility class on the <code> renders the strike-through cue.
+    assert "line-through" in resp.text  # type: ignore[attr-defined]: TestClient stub return is Any
 
 
 def test_put_etl_hook_enable(

@@ -1006,19 +1006,19 @@ def _render_plants_strip(
     for kind, label in _PLANT_LABELS:
         checked = "checked " if (select_all or kind in (selected or ())) else ""
         items.append(
-            f'<label class="plant-toggle">'
+            f'<label class="inline-flex items-center gap-1 cursor-pointer text-sm text-primary-fg">'
             f'<input type="checkbox" name="plant" value="{kind}" {checked}/>'
             f' {escape(label)}'
             f"</label>"
         )
     body = "".join(items)
     return (
-        f'<form id="data-knob-plants" class="data-knob data-knob-plants" '
+        f'<form id="data-knob-plants" class="{knob_wrapper_classes()} flex-wrap" '
         f'hx-put="/data/knobs/plants" '
         f'hx-trigger="change" '
         f'hx-target="#data-knob-plants" '
         f'hx-swap="outerHTML">'
-        f'<span class="data-knob-label">plants:</span>'
+        f'<span class="font-mono text-sm text-secondary-fg">plants:</span>'
         f"{body}"
         f"</form>"
     )
@@ -1059,32 +1059,32 @@ def _render_etl_hook_strip(
         'hx-swap="outerHTML" '
         'hx-trigger="change"'
     )
+    code_base = "font-mono text-xs px-2 py-0.5 rounded-sm bg-surface-bg"
     if command is None:
+        cmd_class = f"{code_base} text-secondary-fg italic"
         body = (
             '<input type="checkbox" disabled '
             'aria-label="etl_hook (not configured)"/>'
-            '<code class="etl-hook-command etl-hook-command--missing">'
-            "(not configured)</code>"
+            f'<code class="{cmd_class}">(not configured)</code>'
         )
     else:
         checked = "checked " if enabled else ""
         cmd_class = (
-            "etl-hook-command"
+            f"{code_base} text-primary-fg"
             if enabled
-            else "etl-hook-command etl-hook-command--disabled"
+            else f"{code_base} text-secondary-fg line-through"
         )
         body = (
             f'<input type="checkbox" name="enabled" value="on" '
             f'{checked}'
-            f'class="etl-hook-toggle" '
             f'aria-label="Run etl_hook on next deploy" '
             f"{common_attrs}/>"
             f'<code class="{cmd_class}" title="{escape(command)}">'
             f"{escape(command)}</code>"
         )
     return (
-        f'<form id="data-knob-etl-hook" class="data-knob data-knob-etl-hook">'
-        f'<span class="data-knob-label">etl hook:</span>'
+        f'<form id="data-knob-etl-hook" class="{knob_wrapper_classes()}">'
+        f'<span class="font-mono text-sm text-secondary-fg">etl hook:</span>'
         f"{body}"
         f"</form>"
     )
@@ -1109,23 +1109,24 @@ def _render_window_strip(window_start: date, window_end: date) -> str:
         'hx-target="#data-knob-window" '
         'hx-swap="outerHTML"'
     )
+    input_cls = compact_input_classes()
     return (
-        f'<form id="data-knob-window" class="data-knob data-knob-window">'
-        f'<span class="data-knob-label">window:</span>'
+        f'<form id="data-knob-window" class="{knob_wrapper_classes()}">'
+        f'<span class="font-mono text-sm text-secondary-fg">window:</span>'
         f'<input type="date" name="window_start" '
         f'value="{escape(window_start.isoformat())}" '
-        f'class="window-input" '
+        f'class="{input_cls}" '
         f'aria-label="Window start date" '
         f'hx-trigger="change" '
         f"{common_attrs}/>"
-        f'<span class="window-sep">→</span>'
+        f'<span class="text-secondary-fg">→</span>'
         f'<input type="date" name="window_end" '
         f'value="{escape(window_end.isoformat())}" '
-        f'class="window-input" '
+        f'class="{input_cls}" '
         f'aria-label="Window end date" '
         f'hx-trigger="change" '
         f"{common_attrs}/>"
-        f'<button type="button" class="window-reset" '
+        f'<button type="button" class="{ghost_button_classes()}" '
         f'title="Reset to last 90 days from today" '
         f"{common_attrs} "
         f"hx-vals='{{\"reset\": \"1\"}}'>last 90 days</button>"
@@ -1160,29 +1161,31 @@ def _render_up_to_strip(
         'hx-swap="outerHTML"'
     )
     snap_payload = f'{{"end_date": "{escape(window_end.isoformat())}"}}'
+    btn_cls = ghost_button_classes()
+    input_cls = compact_input_classes()
     return (
-        f'<form id="data-knob-end-date" class="data-knob data-knob-end-date">'
-        f'<span class="data-knob-label">up to:</span>'
-        f'<button type="button" class="end-date-step" '
+        f'<form id="data-knob-end-date" class="{knob_wrapper_classes()}">'
+        f'<span class="font-mono text-sm text-secondary-fg">up to:</span>'
+        f'<button type="button" class="{btn_cls}" '
         f'title="Step back 1 day (within window)" '
         f"{common_attrs} "
         f"hx-vals='{{\"delta\": \"-1\"}}'>←</button>"
         f'<input type="date" name="end_date" value="{escape(iso)}" '
         f'min="{escape(window_start.isoformat())}" '
         f'max="{escape(window_end.isoformat())}" '
-        f'class="end-date-input" '
+        f'class="{input_cls}" '
         f'aria-label="Pick simulation cutoff date" '
         f'hx-trigger="change" '
         f"{common_attrs}/>"
-        f'<button type="button" class="end-date-step" '
+        f'<button type="button" class="{btn_cls}" '
         f'title="Step forward 1 day (within window)" '
         f"{common_attrs} "
         f"hx-vals='{{\"delta\": \"1\"}}'>→</button>"
-        f'<button type="button" class="end-date-reset" '
+        f'<button type="button" class="{btn_cls}" '
         f'title="Snap to window end ({escape(window_end.isoformat())})" '
         f"{common_attrs} "
         f"hx-vals='{snap_payload}'>snap to end</button>"
-        f'<span class="end-date-current" '
+        f'<span class="font-mono text-xs text-primary-fg tabular-nums" '
         f'aria-label="Current up_to">{escape(iso)}</span>'
         f"</form>"
     )
@@ -1212,25 +1215,28 @@ def _render_seed_strip(selected: int | None) -> str:
         'hx-target="#data-knob-seed" '
         'hx-swap="outerHTML"'
     )
+    btn_cls = ghost_button_classes()
+    input_cls = compact_input_classes()
+    roll_btn_cls = f"{btn_cls} border-accent"
     return (
-        f'<form id="data-knob-seed" class="data-knob data-knob-seed">'
-        f'<span class="data-knob-label">seed:</span>'
+        f'<form id="data-knob-seed" class="{knob_wrapper_classes()}">'
+        f'<span class="font-mono text-sm text-secondary-fg">seed:</span>'
         f'<input type="number" name="seed" value="{escape(val_str)}" '
         f'min="0" max="4294967295" '
-        f'class="seed-input" '
+        f'class="{input_cls} w-[12ch] tabular-nums" '
         f'aria-label="Pin a random seed (uint32)" '
         f'placeholder="(default)" '
         f'hx-trigger="change" '
         f"{common_attrs}/>"
-        f'<button type="button" class="seed-roll" '
+        f'<button type="button" class="{roll_btn_cls}" '
         f'title="Pick a fresh random seed" '
         f"{common_attrs} "
         f"hx-vals='{{\"roll\": \"1\"}}'>roll</button>"
-        f'<button type="button" class="seed-clear" '
+        f'<button type="button" class="{btn_cls}" '
         f'title="Clear to default (None ⇒ locked _BASELINE_BASE_SEED)" '
         f"{common_attrs} "
         f"hx-vals='{{\"seed\": \"\"}}'>clear</button>"
-        f'<span class="seed-current" '
+        f'<span class="font-mono text-xs text-primary-fg tabular-nums" '
         f'aria-label="Current seed">{escape(pretty)}</span>'
         f"</form>"
     )
@@ -1259,10 +1265,11 @@ def _render_scope_strip(selected: ScopeKind) -> str:
         'hx-trigger="change"'
     )
     items: list[str] = []
+    radio_label_cls = "inline-flex items-center gap-1 cursor-pointer text-sm text-primary-fg"
     for value, short, hint in _SCOPE_LABELS:
         checked = "checked " if value == selected else ""
         items.append(
-            f'<label class="scope-radio" title="{escape(hint)}">'
+            f'<label class="{radio_label_cls}" title="{escape(hint)}">'
             f'<input type="radio" name="scope" value="{escape(value)}" '
             f'{checked}{common_attrs}/>'
             f' {escape(short)}'
@@ -1270,8 +1277,8 @@ def _render_scope_strip(selected: ScopeKind) -> str:
         )
     body = "".join(items)
     return (
-        f'<form id="data-knob-scope" class="data-knob data-knob-scope">'
-        f'<span class="data-knob-label">scope:</span>'
+        f'<form id="data-knob-scope" class="{knob_wrapper_classes()} flex-wrap">'
+        f'<span class="font-mono text-sm text-secondary-fg">scope:</span>'
         f"{body}"
         f"</form>"
     )
@@ -1296,16 +1303,16 @@ def _render_only_template_strip(selected: str | None) -> str:
     )
     return (
         f'<form id="data-knob-only-template" '
-        f'class="data-knob data-knob-only-template">'
-        f'<span class="data-knob-label">only_template:</span>'
+        f'class="{knob_wrapper_classes()}">'
+        f'<span class="font-mono text-sm text-secondary-fg">only_template:</span>'
         f'<input type="text" name="only_template" '
         f'value="{escape(val_str)}" '
-        f'class="only-template-input" '
+        f'class="{compact_input_classes()} w-64" '
         f'aria-label="TransferTemplate name to scope to" '
         f'placeholder="(none — required for scope=only_template)" '
         f'hx-trigger="change" '
         f"{common_attrs}/>"
-        f'<span class="only-template-current" '
+        f'<span class="font-mono text-xs text-primary-fg" '
         f'aria-label="Current only_template">{escape(pretty)}</span>'
         f"</form>"
     )
@@ -1340,13 +1347,13 @@ def _render_derive_balances_strip(
     )
     return (
         f'<form id="data-knob-derive-balances" '
-        f'class="data-knob data-knob-derive-balances">'
-        f'<label class="data-knob-label">'
+        f'class="{knob_wrapper_classes()}">'
+        f'<label class="inline-flex items-center gap-1 cursor-pointer font-mono text-sm text-primary-fg">'
         f'<input type="checkbox" name="enabled" '
         f'{checked}{common_attrs}/>'
         f' derive_balances'
         f"</label>"
-        f'<span class="derive-balances-current" '
+        f'<span class="text-xs text-secondary-fg italic" '
         f'title="Account roles being derived; configure per-L2 via '
         f'test_generator.derive_balances_account_roles" '
         f'aria-label="Derive scope">{escape(chip)}</span>'
@@ -1464,17 +1471,17 @@ def _render_timeline_section(
             for k, n in kind_counts.items()
         )
     header_html = (
-        f'<header class="timeline-header">'
-        f'<span class="timeline-total">{total} '
+        f'<header class="flex flex-col gap-1 px-3 py-2 border-b border-surface-border bg-surface-bg">'
+        f'<span class="text-sm font-semibold text-primary-fg">{total} '
         f'plant{"" if total == 1 else "s"} across '
         f'{n_hit_days} day{"" if n_hit_days == 1 else "s"} '
-        f'<span class="timeline-window-note">'
+        f'<span class="text-xs text-secondary-fg font-normal">'
         f"(window: {escape(window_start.isoformat())} → "
         f"{escape(window_end.isoformat())} · "
         f"{n_data_days} day{'' if n_data_days == 1 else 's'} of data, "
         f"{n_future_days} future)"
         f"</span></span>"
-        f'<span class="timeline-kinds">{escape(kind_summary)}</span>'
+        f'<span class="text-xs text-secondary-fg">{escape(kind_summary)}</span>'
         f"</header>"
     )
 
@@ -1498,6 +1505,15 @@ def _render_timeline_section(
         day_kinds: dict[PlantKind, int] = {}
         for hit in hits:
             day_kinds[hit.kind] = day_kinds.get(hit.kind, 0) + 1
+        chip_base = timeline_chip_base_classes()
+        chip_kind_variants: dict[PlantKind, str] = {
+            "drift": " bg-accent/12 text-accent border-accent/25",
+            "overdraft": " bg-danger/12 text-danger border-danger/25",
+            "limit_breach": " bg-danger/12 text-danger border-danger/25",
+            "stuck_pending": " bg-warning/12 text-warning border-warning/25",
+            "stuck_unbundled": " bg-warning/12 text-warning border-warning/25",
+            "supersession": " bg-success/12 text-success border-success/25",
+        }
         chip_html: list[str] = []
         for kind, abbrv in _PLANT_KIND_ABBRV:
             if kind not in day_kinds:
@@ -1505,22 +1521,25 @@ def _render_timeline_section(
             n = day_kinds[kind]
             count_suffix = f" {n}" if n > 1 else ""
             title = _PLANT_KIND_LABELS.get(kind, kind)
+            variant = chip_kind_variants.get(kind, "")
             chip_html.append(
-                f'<span class="timeline-chip timeline-chip--{kind}" '
+                f'<span class="{chip_base}{variant}" '
                 f'title="{escape(title)} ×{n}">'
                 f"{escape(abbrv)}{escape(count_suffix)}"
                 f"</span>"
             )
         chips = "".join(chip_html)
 
-        classes = ["timeline-day"]
+        cls_attr = timeline_day_classes()
         if is_future:
-            classes.append("timeline-day--future")
+            cls_attr += " py-px px-2 border-transparent text-secondary-fg"
         elif not hits:
-            classes.append("timeline-day--empty")
+            cls_attr += " py-px px-2 border-transparent text-secondary-fg"
         if is_anchor:
-            classes.append("timeline-day--anchor")
-        cls_attr = " ".join(classes)
+            cls_attr += (
+                " border-accent border-2 px-1.5 py-1.5 bg-accent/6 "
+                "font-semibold relative hover:bg-accent/10"
+            )
         # Anchor row gets a stable id so the JS scrollIntoView can find
         # it after every HTMX swap.
         id_attr = ' id="timeline-anchor-row"' if is_anchor else ""
@@ -1530,19 +1549,31 @@ def _render_timeline_section(
             title_text = f"Click to advance up_to → {iso}"
         else:
             title_text = f"Click to rewind up_to → {iso}"
+        # AM.2 step 4: data-role + data-state attributes give tests a
+        # stable, styling-free hook for "is this a timeline-day row?"
+        # + "is this row the anchor / future / data?"
+        if is_anchor:
+            day_state = "anchor"
+        elif is_future:
+            day_state = "future"
+        elif not hits:
+            day_state = "empty"
+        else:
+            day_state = "data"
         rows.append(
-            f'<button type="button" class="{cls_attr}"{id_attr} '
+            f'<button type="button" data-role="timeline-day" '
+            f'data-state="{day_state}" class="{cls_attr}"{id_attr} '
             f'title="{escape(title_text)}" '
             f"{put_attrs} "
             f"hx-vals='{{\"end_date\": \"{escape(iso)}\"}}'>"
-            f'<span class="timeline-day-date">{escape(iso)}</span>'
-            f'<span class="timeline-day-chips">{chips}</span>'
+            f'<span class="font-mono text-xs tabular-nums shrink-0">{escape(iso)}</span>'
+            f'<span class="flex flex-wrap items-center gap-1">{chips}</span>'
             f"</button>"
         )
     rows_html = "".join(rows)
     body = (
         f"{header_html}"
-        f'<div class="timeline-rows">{rows_html}</div>'
+        f'<div class="flex flex-col gap-1 p-2 overflow-y-auto max-h-[60vh]">{rows_html}</div>'
         # Scroll the anchor row into view ONLY when it's not already
         # visible. On initial /data load the anchor is at the bottom of
         # a 90-row column so we need to scroll it in. On a click swap
@@ -1554,7 +1585,10 @@ def _render_timeline_section(
         f'<script>(function() {{'
         f'var a = document.getElementById("timeline-anchor-row");'
         f'if (!a) return;'
-        f'var c = a.closest(".timeline-rows");'
+        # AM.2 step 4 (2026-05-25): scroll-container detection now
+        # walks to the parent .flex.flex-col wrapper via parentElement
+        # since the `.timeline-rows` semantic class was retired.
+        f'var c = a.parentElement;'
         f'if (!c) return;'
         f'var ar = a.getBoundingClientRect();'
         f'var cr = c.getBoundingClientRect();'
@@ -1565,7 +1599,8 @@ def _render_timeline_section(
     )
 
     return (
-        f'<section class="data-timeline" id="data-timeline" '
+        f'<section class="bg-white border border-surface-border rounded-md '
+        f'overflow-hidden" id="data-timeline" '
         f'aria-label="Plant timeline" '
         f'hx-get="/data/timeline" '
         f'hx-trigger="trainer-knobs-changed from:body" '
@@ -1730,7 +1765,7 @@ def _render_data_page(
   </script>
 
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-  <div class="data-knobs" id="data-knobs">
+  <div class="flex flex-col gap-2 px-4 py-3 border-b border-surface-border bg-surface-bg" id="data-knobs">
     {etl_hook_strip}
     {scope_strip}
     {only_template_strip}
@@ -1741,9 +1776,9 @@ def _render_data_page(
     {plants_strip}
   </div>
 
-  <main class="data-main">
+  <main class="grid grid-cols-1 lg:[grid-template-columns:24rem_1fr] gap-4 max-w-7xl mx-auto p-4">
     {timeline_section}
-    <section class="data-training" id="data-training" aria-label="Training pane">
+    <section id="data-training" aria-label="Training pane" class="bg-white border border-surface-border rounded-md p-4 overflow-auto">
 {training_pane}
     </section>
   </main>
