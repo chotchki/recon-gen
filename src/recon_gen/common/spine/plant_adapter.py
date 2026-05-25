@@ -284,13 +284,23 @@ def _adapt_drift(
     (template-instance parents aren't typically materialized for
     drift; the OLD path tolerated the None case).
 
-    BC.4b: when `plant_window` is supplied, re-derive `anchor_day`
-    via `SingleDayPlant.at_window_end(plant_window)` so the
-    most-recently-closed auditable day is the landing day by
-    construction (kills the v11.10.0 off-by-one — plant lands
-    INSIDE the audit window, not on `today`)."""
+    BC.4b: when `plant_window` is supplied, derive THIS plant's
+    `anchor_day` from its `days_ago` field via
+    `SingleDayPlant.at_offset_from_end(plant_window, plant.days_ago - 1)` —
+    each plant lands at `plant_window.end - (days_ago - 1) =
+    scenarios.today - days_ago` (matches `expected_audit_counts._eff`).
+    days_ago=1 → window.end (yesterday); days_ago=N → N days back from
+    today. Latent pre-BC.4 bug: every drift plant landed at the same
+    `anchor_day` (whatever the batch had), ignoring per-plant
+    `days_ago`. The count check passed by coincidence; the row-identity
+    check (X.2.j.B.3) caught the mismatch."""
     if plant_window is not None:
-        anchor_day = SingleDayPlant.at_window_end(plant_window).day
+        # days_ago is 1-indexed in the audit window convention (1 = yesterday).
+        # at_offset_from_end takes 0-indexed offsets from window.end.
+        offset = max(plant.days_ago - 1, 0)
+        anchor_day = SingleDayPlant.at_offset_from_end(
+            plant_window, offset,
+        ).day
     role, _scope, parent_role = _resolve_account_triple(
         instance, scenarios, plant.account_id,
     )
@@ -321,11 +331,13 @@ def _adapt_overdraft(
     plant: OverdraftPlant, instance: L2Instance, scenarios: ScenarioPlant,
     anchor_day: date, plant_window: DateInterval | None = None,
 ) -> ViolationGenerator:
-    """BC.4b: when `plant_window` is supplied, re-derive `anchor_day`
-    via `SingleDayPlant.at_window_end(plant_window)` — plant lands
-    on the most-recently-closed auditable day."""
+    """BC.4b: per-plant `anchor_day` from `days_ago` (see _adapt_drift
+    docstring for the offset math)."""
     if plant_window is not None:
-        anchor_day = SingleDayPlant.at_window_end(plant_window).day
+        offset = max(plant.days_ago - 1, 0)
+        anchor_day = SingleDayPlant.at_offset_from_end(
+            plant_window, offset,
+        ).day
     role, _scope, parent_role = _resolve_account_triple(
         instance, scenarios, plant.account_id,
     )
@@ -347,10 +359,13 @@ def _adapt_limit_breach(
     LimitSchedule's cap by (parent_role, rail, direction) from the
     L2 instance.
 
-    BC.4b: when `plant_window` is supplied, re-derive `anchor_day`
-    via `SingleDayPlant.at_window_end(plant_window)`."""
+    BC.4b: per-plant `anchor_day` from `days_ago` (see _adapt_drift
+    docstring for the offset math)."""
     if plant_window is not None:
-        anchor_day = SingleDayPlant.at_window_end(plant_window).day
+        offset = max(plant.days_ago - 1, 0)
+        anchor_day = SingleDayPlant.at_offset_from_end(
+            plant_window, offset,
+        ).day
     role, _scope, parent_role = _resolve_account_triple(
         instance, scenarios, plant.account_id,
     )
@@ -382,10 +397,13 @@ def _adapt_inbound_cap_breach(
 ) -> ViolationGenerator:
     """Mirror of `_adapt_limit_breach` with `direction='Inbound'`.
 
-    BC.4b: when `plant_window` is supplied, re-derive `anchor_day`
-    via `SingleDayPlant.at_window_end(plant_window)`."""
+    BC.4b: per-plant `anchor_day` from `days_ago` (see _adapt_drift
+    docstring for the offset math)."""
     if plant_window is not None:
-        anchor_day = SingleDayPlant.at_window_end(plant_window).day
+        offset = max(plant.days_ago - 1, 0)
+        anchor_day = SingleDayPlant.at_offset_from_end(
+            plant_window, offset,
+        ).day
     role, _scope, parent_role = _resolve_account_triple(
         instance, scenarios, plant.account_id,
     )

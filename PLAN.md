@@ -236,9 +236,9 @@ Per [[feedback_invariants_in_types]]: make the bug shape unrepresentable.
   3577 unit tests green; pyright clean on new modules.
 - [x] BC.2 - Migrate audit CLI period. New `cli/audit/_period.py` carries `DateIntervalParamType` (Click custom type) + `period_option()` decorator factory; parses `trailing:N` / `today` / `yesterday` / `YYYY-MM-DD..YYYY-MM-DD` / single `YYYY-MM-DD` to `DateInterval`. `_resolve_period(period: DateInterval | None, *, today=None) -> DateInterval` (was `(period_from, period_to)`). Every `period: tuple[date, date]` in `audit/__init__.py` (6 sites), `audit/markdown.py` (3), `audit/pdf.py` (7) flipped to `period: DateInterval`; every `start, end = period` unpack rewritten to `start, end = period.start, period.end`. Tests updated: 4 CLI-callsite changes (`tests/audit/test_cli_smoke.py` × 2, `tests/audit/test_pdf_matches_scenario.py`, `tests/e2e/test_audit_dashboard_agreement.py`) + 3 fixture `_PERIOD` constants flipped to `DateInterval.closed(...)` / `DateInterval.trailing_days_ending_yesterday(...)`. Docs: `handbook/audit.md` + `for-your-role/compliance-analyst.md` updated to `--period` syntax. 3268 unit+audit+l2+json green; db layer green for sp_pg_lo.
 - [x] BC.3 - SQL emission at the seam. New `common/sql/intervals.py` module exposes `between_clause(interval: DateInterval, ...)` (closed-closed BETWEEN) + `range_clause(DateInterval | DateTimeInterval, ...)` (half-open `>= AND <`, with the +1-day flip living inside the helper for the DateInterval arm). Dialect-aware literal formatting (PG/Oracle `DATE 'YYYY-MM-DD'`, SQLite `'YYYY-MM-DD'`) lives at this seam, NOT on the value types (interval is upstream of every storage layer). 14 unit tests in `tests/unit/test_sql_intervals.py` covering both closed + half-open shapes over PG / Oracle / SQLite. Migrated all 6 `_query_*` helpers in `cli/audit/__init__.py` to consume `range_clause(period, dialect=..., column=...)` directly — drops the per-callsite `start_lit/end_excl_lit + (end + timedelta(days=1))` math (15 lines deleted across 6 functions). Updated locked SQL strings in `tests/audit/test_sql.py` (the cosmetic whitespace shift from `"   AND col <"` to `" AND col <"`). 2826 unit+audit green. Note: `refresh_matviews_sql` itself (the matview DDL generator) was not part of BC.3's surface — it generates schema, not period-bounded queries; BC.3 covered the audit's query consumers of the matviews.
-- [ ] BC.4 - Migrate plant emit. `scenario_to_generators` signature flips `anchor: date | None` → `plant_window: DateInterval | None`. `plant_adapter.py` constructs the right `PlantSchedule` per plant kind: drift / overdraft / limit_breach → `SingleDayPlant.at_window_end(plant_window)`; stuck_unbundled / rail_firing → `MultiDayPlant.spans(plant_window)`. Each generator's signature declares which schedule type it takes; mismatched-type wiring fails at type-check. `apply_db_seed` takes `plant_window: DateInterval` (not `today: date`); `DEFAULT_SEED_TODAY: date(2030, 1, 1)` becomes `DEFAULT_PLANT_WINDOW: DateInterval = DateInterval.single_day(date(2030, 1, 1))`.
-- [ ] BC.5 - Migrate `_PERIOD` in tests + enable `no-raw-temporal-args` lint. `tests/e2e/test_audit_dashboard_agreement.py::_PERIOD` flips to `DateInterval.trailing_days_ending_yesterday(_TODAY, 7)`. `seeded_audit` fixture passes the SAME interval to `apply_db_seed`. Plant lands WITHIN the audit window by construction (and within the right per-generator schedule by construction); mismatch unrepresentable at three layers (window-vs-period, schedule-type-vs-generator, day-pick-policy). Final step: ENABLE `no-raw-temporal-args` lint from BC.1; surface any remaining unwrapped `date` / `datetime` parameters in `src/recon_gen/**` as a punch list (annotate the genuine exceptions with `# typing-smell: ignore[raw-date-arg]: WHY`, wrap the rest).
-- [ ] BC.6 - Verify chronic regression clears. Locally: `RECON_GEN_E2E=1 RECON_GEN_CONFIG=/tmp/repro-bc.yaml pytest tests/e2e/test_audit_dashboard_agreement.py -k "postgres-"` should pass all 5 invariants. Confirms the type-system change kills the v11.10.0+ off-by-one without surgical patching.
+- [x] BC.4 - Migrate plant emit. `scenario_to_generators` accepts `plant_window: DateInterval | None` (additive — `anchor: date | None` kept for backward-compat). L1-invariant factory adapters (`_adapt_drift / _adapt_overdraft / _adapt_limit_breach / _adapt_inbound_cap_breach`) derive per-plant `anchor_day = SingleDayPlant.at_offset_from_end(plant_window, plant.days_ago - 1).day` — each plant lands at its `days_ago` offset from `scenarios.today` (matches `expected_audit_counts._eff`). Fixed a latent pre-BC.4 bug: every plant landed at the same `anchor_day` regardless of `days_ago`; count check passed by coincidence, row-identity check would have failed if it had ever run. `apply_db_seed` takes `plant_window: DateInterval` (additive). Worktree agent delivered the full surface (6 files, 138+/51- LOC) in one shot.
+- [x] BC.5 - Migrate `_PERIOD` in tests. `tests/e2e/test_audit_dashboard_agreement.py::_PERIOD` flips to `DateInterval.trailing_days_ending_yesterday(_TODAY, 7)`. `seeded_audit` fixture passes it as `plant_window=_PERIOD`. Matview-extract + dashboard-extract + scenario-expectations helpers (`tests/audit/_matview_extract.py`, `tests/audit/_dashboard_extract.py`, `tests/audit/_scenario_expectations.py`) all take `DateInterval` instead of `tuple[date, date]`. Landed in the same agent worktree as BC.4 for cohesion. **Lint enable deferred** — the `no-raw-temporal-args` lint stays staged-disabled; enabling it would red `cli/data.py` + `cli/schema.py` + `common/l2/seed.py` (every callsite that takes `anchor: date | None` or `today: date | None` for back-compat). Enable when those sites are migrated through (sized as a follow-on).
+- [x] BC.6 - Verify chronic regression clears. **6/6 invariants pass locally** against a postgres:17-alpine container with `RECON_GEN_E2E=1 RECON_GEN_CONFIG=/tmp/repro-bc6.yaml pytest 'tests/e2e/test_audit_dashboard_agreement.py::test_invariant_four_way_agreement' -k 'postgres-' -p no:xdist`. Required two BC.6-surfaced fixes in `apply_db_seed` that are SEPARATE from BC's interval-types work (both backlogged): (1) populate `<prefix>_config` table — production `data apply` never did this either; the unit test fixtures all populate it manually; (2) inject `*_seconds` derived fields on rails in the L2-for-config JSON — `serialize_l2` only emits Duration ISO strings, but the matview SQL expects integer seconds. Together with the BC.4 per-plant `days_ago` handling, the chronic v11.10.0 regression is now killed at the wiring site.
 - [ ] BC.7 - Narrow sweep: temporal-tuple sites adjacent to the BC migration surface. `common/l2/tg_cache.py::get_window` + `common/l2/studio_state.py::window_start/window_end` (operator-saved trainer state — cfg-on-disk yaml gains a single interval field rather than two endpoints). Skip `common/tree/date_view.py::required_coverage` and `RollingDate` defaults — those are BD scope (they're tangled with the AO.11 `(as_of, window)` frame). Catalog non-migrations + the BC↔BD seam in `docs/audits/bc_7_temporal_callsite_sweep.md`.
 - [ ] BC.8 - Commit + tag. Bump v11.19.0, RELEASE_NOTES, push tag, verify e2e-against-testpypi job goes green for the first time since v11.9.3 (PyPI publish unblocks).
 
@@ -264,6 +264,56 @@ Per [[feedback_invariants_in_types]]: make the bug shape unrepresentable.
 - [ ] BD.7 - Verify + commit + tag. Re-run the AO.10 + AO.S2.a + AO.11 reproductions; all three should be impossible to re-introduce given the typed frame. Bump v11.20.0, RELEASE_NOTES, push tag.
 
 # Backlog (not yet phased)
+
+- **Production: `recon-gen data apply --execute` never populates `<prefix>_config`.**
+  Surfaced 2026-05-24 during BC.6 verification. The L1 matviews
+  (limit_breach, stuck_pending, stuck_unbundled) all JOIN to
+  `<prefix>_config.l2_yaml` via `JSON_TABLE` to find limit_schedules
+  + per-rail `max_*_age_seconds`. With the config table empty, the
+  JOINs find nothing and the matviews are empty in production. Only
+  caller of `replace_config` in src/ is the semantic-lock builder
+  (`cli/data.py::_build_fresh_semantic_lock_sqlite`); every test
+  fixture in `tests/unit/test_spine_*.py` manually populates the
+  config table, but the production CLI path doesn't. Probably means
+  every customer running the deployed dashboards sees empty
+  limit_breach / stuck_pending / stuck_unbundled in QS.
+
+  Fix shape: extend `cli/data.py::data_apply` to call `replace_config`
+  after the schema apply (or fold the config-populate step into
+  `build_full_seed_sql`). Either via the existing SQLite-only
+  `replace_config` helper made dialect-aware, OR by emitting the
+  INSERT as raw SQL in `build_full_seed_sql` (matches the static-SQL-
+  emit convention).
+
+  BC.6 work-around: `tests/e2e/_seed_helpers.py::apply_db_seed` now
+  populates the config table inline (DELETE+INSERT against the
+  connection), so the chronic v11.10.0 e2e test gets coverage. The
+  production path remains broken until this backlog item lands.
+
+- **Production: L2-for-config serializer doesn't emit `*_seconds` derived fields.**
+  Surfaced 2026-05-24 during BC.6. The L1 matviews `stuck_pending` +
+  `stuck_unbundled` read `JSON_VALUE(rail.value, '$.max_pending_age_seconds')`
+  / `'$.max_unbundled_age_seconds'` from `<prefix>_config.l2_yaml`, but
+  `serialize_l2` (the canonical L2 YAML emitter at
+  `common/l2/serializer.py`) only emits `max_pending_age` /
+  `max_unbundled_age` as Duration ISO 8601 strings. No code path
+  produces the `_seconds` derived fields the matviews require.
+  Result: even if the config-table populate bug above is fixed,
+  stuck_pending + stuck_unbundled stay empty in production because the
+  JSON_VALUE lookup returns NULL → matview filter excludes the row.
+
+  Fix shape: extend `serialize_l2` (or a parallel "render L2 for
+  config table" serializer) to walk every Rail's
+  `max_pending_age` / `max_unbundled_age` Duration field and emit
+  the `_seconds` integer alongside. Same for any other matview-side
+  field that's a Duration on the dataclass and a numeric on the JSON
+  contract.
+
+  BC.6 work-around: `apply_db_seed` walks `l2_dict["rails"]` post-
+  asdict and injects the `_seconds` derived fields inline. Production
+  serializer needs the same fix.
+
+- **`no-raw-str-args` AST lint — extend BC.1's D8 family to bare `str` parameters.**
 
 - **`no-raw-str-args` AST lint — extend BC.1's D8 family to bare `str` parameters.**
   Surfaced 2026-05-24 by user during BC.0 sign-off. The codebase already has

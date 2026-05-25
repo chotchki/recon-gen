@@ -96,6 +96,59 @@ def apply_db_seed(
         execute_script(cur, schema_sql, dialect=dialect)
     conn.commit()
 
+    # 1b. Populate <prefix>_config (BC.4 follow-on). The L1 matviews
+    # JOIN to <prefix>_config.l2_yaml via JSON_TABLE to find
+    # limit_schedules / per-rail max_*_age — without a row, those
+    # matviews are empty (limit_breach / stuck_pending / stuck_unbundled
+    # all see no caps → 0 rows). The production `recon-gen data apply`
+    # path has the same gap; the unit-test fixtures (test_spine_*.py)
+    # all populate this manually. Centralizing here so every
+    # apply_db_seed caller picks up the population by construction.
+    # `replace_config` is sqlite3-only (its placeholder shape is `?`);
+    # build the INSERT as a literal SQL string via execute_script so
+    # it works across PG / Oracle / SQLite uniformly.
+    #
+    # Serializer note (separate BC.6-surfaced latent bug, backlogged):
+    # the matview SQL expects `max_pending_age_seconds` /
+    # `max_unbundled_age_seconds` (int seconds) on each rail entry, but
+    # `dataclasses.asdict` emits `max_pending_age` /
+    # `max_unbundled_age` (timedelta strings). Walk the rails list and
+    # add the derived _seconds fields inline so the stuck_* matviews
+    # find their per-rail age caps. Production-side `serialize_l2`
+    # has the same gap and needs the same fix (backlogged).
+    import dataclasses as _dc
+    import json as _json
+    from datetime import timedelta as _td
+    config_name = f"{prefix}_config"
+    l2_dict = _dc.asdict(instance)
+    for _rail in l2_dict.get("rails", []):
+        for _field, _seconds_field in (
+            ("max_pending_age", "max_pending_age_seconds"),
+            ("max_unbundled_age", "max_unbundled_age_seconds"),
+        ):
+            _val = _rail.get(_field)
+            if isinstance(_val, _td):
+                _rail[_seconds_field] = int(_val.total_seconds())
+            elif _val is not None:
+                # asdict on timedelta returns timedelta (above branch).
+                # Defensive fallback: if somewhere upstream pre-serialized
+                # it, attempt to parse — skip silently otherwise so the
+                # stuck_* matview just sees a NULL and excludes the rail.
+                pass
+    l2_json_text = _json.dumps(l2_dict, default=str)
+    as_of_iso = today_ref.strftime("%Y-%m-%d") + " 12:00:00"
+    # SQL-escape the JSON text (single quotes). JSON is well-formed so
+    # backslash escapes shouldn't bite; the only quoting risk is `'`.
+    escaped_l2 = l2_json_text.replace("'", "''")
+    populate_sql = (
+        f"DELETE FROM {config_name};\n"
+        f"INSERT INTO {config_name} (as_of, cfg_yaml, l2_yaml) "
+        f"VALUES ('{as_of_iso}', '{{}}', '{escaped_l2}');\n"
+    )
+    with conn.cursor() as cur:
+        execute_script(cur, populate_sql, dialect=dialect)
+    conn.commit()
+
     # 2. Seed (mode-aware via M.4.2).
     report = default_scenario_for(instance, today=today_ref, mode=mode)
     if include_baseline:
