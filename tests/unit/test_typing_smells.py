@@ -1193,6 +1193,158 @@ class NoPlaywrightLeakCheck(Check):
 
 
 # ---------------------------------------------------------------------------
+# Check: no-naked-interval-ctor (BC.1, D7)
+# ---------------------------------------------------------------------------
+
+
+# The typed interval / plant-schedule wrappers. Bare ``Cls(...)`` calls
+# outside ``common/intervals.py`` are off-limits — wiring sites must
+# use one of the named-convention classmethods (``.closed()``,
+# ``.single_day()``, ``.at_window_end()``, etc.) so the call site
+# declares its policy. Per
+# ``feedback_invariants_in_types``: types bring meaning with them,
+# convention hides it.
+_INTERVAL_TYPES: frozenset[str] = frozenset({
+    "DateInterval",
+    "DateTimeInterval",
+    "SingleDayPlant",
+    "MultiDayPlant",
+})
+
+
+class _NoNakedIntervalCtorVisitor(ast.NodeVisitor):
+    """Flag bare ``Cls(...)`` construction of an interval / plant-schedule
+    type — wiring sites must call one of the named classmethods."""
+
+    def __init__(self, file: Path) -> None:
+        self.file = file
+        self.smells: list[Smell] = []
+
+    def visit_Call(self, node: ast.Call) -> None:
+        callee = node.func
+        # ``DateInterval(...)`` — bare Name call. Forbidden outside the
+        # wrapper module.
+        if isinstance(callee, ast.Name) and callee.id in _INTERVAL_TYPES:
+            self.smells.append(Smell(
+                file=self.file,
+                lineno=node.lineno,
+                checker="no-naked-interval-ctor",
+                message=(
+                    f"bare ``{callee.id}(...)`` constructor — wiring "
+                    f"sites must use a named-convention classmethod "
+                    f"(``.closed()`` / ``.single_day()`` / "
+                    f"``.trailing_days_ending_yesterday()`` / "
+                    f"``.at_window_end()`` / ``.spans()`` / etc.) so "
+                    f"the call site declares its policy. See "
+                    f"common/intervals.py for the full constructor "
+                    f"surface."
+                ),
+            ))
+        self.generic_visit(node)
+
+
+class NoNakedIntervalCtorCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        v = _NoNakedIntervalCtorVisitor(file)
+        v.visit(tree)
+        return v.smells
+
+
+# ---------------------------------------------------------------------------
+# Check: no-raw-temporal-args (BC.1, D8 — STAGED DISABLED until end of BC.5)
+# ---------------------------------------------------------------------------
+
+
+# When BC.5 finishes wrapping every src/ callsite that takes a raw
+# ``date`` / ``datetime`` param, register this check in ``_build_checks``
+# (the registration block carries the "ENABLE AT BC.5" marker). Until
+# then, the lint exists as code but doesn't run — otherwise BC.1 reds
+# the whole tree before BC has anywhere to migrate to.
+_TEMPORAL_NAMES: frozenset[str] = frozenset({"date", "datetime"})
+
+
+def _annotation_mentions_temporal(ann: ast.AST | None) -> str | None:
+    """If ``ann`` is one of the temporal annotation shapes we forbid as a
+    parameter type, return the offending name; otherwise None.
+
+    Catches:
+    - ``date`` / ``datetime`` (bare Name)
+    - ``date | None`` / ``datetime | None`` (BinOp Union)
+    - ``Optional[date]`` / ``Optional[datetime]`` (Subscript of Optional)
+    - ``list[date]`` etc. — only if the innermost name is temporal AND
+      it's the sole arg (so ``list[date]`` flags but ``dict[str, date]``
+      doesn't, since the date is then a value-shape not a policy-carrier).
+    Conservative — false-negatives are fine since the wrap migration
+    pulls these into typed wrappers anyway.
+    """
+    if ann is None:
+        return None
+    if isinstance(ann, ast.Name) and ann.id in _TEMPORAL_NAMES:
+        return ann.id
+    # ``date | None`` / ``datetime | None`` — PEP 604 union.
+    if isinstance(ann, ast.BinOp) and isinstance(ann.op, ast.BitOr):
+        for side in (ann.left, ann.right):
+            sub = _annotation_mentions_temporal(side)
+            if sub is not None:
+                return sub
+    # ``Optional[date]`` etc.
+    if isinstance(ann, ast.Subscript):
+        outer = ann.value
+        if isinstance(outer, ast.Name) and outer.id == "Optional":
+            return _annotation_mentions_temporal(ann.slice)
+    return None
+
+
+class _NoRawTemporalArgsVisitor(ast.NodeVisitor):
+    """Flag function/method parameters annotated ``date`` / ``datetime``
+    (or ``... | None`` variants). Wrap in ``DateInterval`` /
+    ``DateTimeInterval`` / ``SingleDayPlant`` / ``MultiDayPlant`` /
+    ``RunContext`` (BD)."""
+
+    def __init__(self, file: Path) -> None:
+        self.file = file
+        self.smells: list[Smell] = []
+
+    def _check_args(self, args: list[ast.arg]) -> None:
+        for arg in args:
+            offender = _annotation_mentions_temporal(arg.annotation)
+            if offender is not None:
+                self.smells.append(Smell(
+                    file=self.file,
+                    lineno=arg.lineno,
+                    checker="no-raw-temporal-args",
+                    message=(
+                        f"parameter {arg.arg!r} typed as raw ``{offender}``; "
+                        f"wrap in ``DateInterval`` / ``DateTimeInterval`` / "
+                        f"``SingleDayPlant`` / ``MultiDayPlant`` / "
+                        f"``RunContext`` instead (see common/intervals.py). "
+                        f"Dataclass fields are exempt (point values, not "
+                        f"params). Suppress with ``# typing-smell: ignore"
+                        f"[no-raw-temporal-args]: <reason>``."
+                    ),
+                ))
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._check_args(node.args.args)
+        self._check_args(node.args.kwonlyargs)
+        self._check_args(node.args.posonlyargs)
+        self.generic_visit(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._check_args(node.args.args)
+        self._check_args(node.args.kwonlyargs)
+        self._check_args(node.args.posonlyargs)
+        self.generic_visit(node)
+
+
+class NoRawTemporalArgsCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        v = _NoRawTemporalArgsVisitor(file)
+        v.visit(tree)
+        return v.smells
+
+
+# ---------------------------------------------------------------------------
 # Suppression filtering
 # ---------------------------------------------------------------------------
 
@@ -1293,6 +1445,27 @@ def _build_checks() -> list[Check]:
         if e2e_drivers_dir not in p.parents
         and str(p.relative_to(REPO_ROOT)) not in _PLAYWRIGHT_LEAK_LEGACY
     ]
+    # BC.1 D7 — no-naked-interval-ctor: spans src/ + tests/, except the
+    # wrapper module itself (where the bare constructors ARE the
+    # underlying primitives that the named classmethods delegate to).
+    intervals_module = REPO_ROOT / "src/recon_gen/common/intervals.py"
+    _naked_interval_scope = [
+        p for p in (
+            _expand_paths([REPO_ROOT / "src/recon_gen"])
+            + _expand_paths([REPO_ROOT / "tests"])
+        )
+        if p != intervals_module
+    ]
+    # BC.1 D8 (STAGED DISABLED until end of BC.5) — no-raw-temporal-args:
+    # src/recon_gen/** function/method param annotations. Built but
+    # currently unused — the registration is commented out below.
+    _raw_temporal_scope = [
+        p for p in _expand_paths([REPO_ROOT / "src/recon_gen"])
+        if p != intervals_module
+    ]
+    # Keep _raw_temporal_scope referenced so the linter doesn't complain
+    # about an unused local while the check is staged disabled.
+    _ = _raw_temporal_scope
     return [
         BareStrIdCheck(
             name="bare-str-id",
@@ -1473,6 +1646,39 @@ def _build_checks() -> list[Check]:
             ),
             files=no_playwright_scope,
         ),
+        NoNakedIntervalCtorCheck(
+            name="no-naked-interval-ctor",
+            description=(
+                "bare ``DateInterval(...)`` / ``DateTimeInterval(...)`` / "
+                "``SingleDayPlant(...)`` / ``MultiDayPlant(...)`` "
+                "construction outside ``common/intervals.py`` — wiring "
+                "sites must use a named-convention classmethod so the "
+                "call site declares its policy (closed vs trailing, "
+                "single-day vs multi-day, at_window_end vs spans). Per "
+                "feedback_invariants_in_types: types bring meaning with "
+                "them, convention hides it."
+            ),
+            files=_naked_interval_scope,
+        ),
+        # BC.1, D8 — STAGED DISABLED until end of BC.5. To enable: drop
+        # the ``# `` comment from the registration below. Enabling it
+        # before the BC.4/BC.5 migration completes will red the whole
+        # tree (every callsite that takes a raw ``date`` / ``datetime``
+        # parameter — and there are dozens). The migration wraps each
+        # callsite into a ``DateInterval`` / ``DateTimeInterval`` /
+        # ``SingleDayPlant`` / ``MultiDayPlant`` / ``RunContext`` (BD).
+        # NoRawTemporalArgsCheck(
+        #     name="no-raw-temporal-args",
+        #     description=(
+        #         "function/method parameter annotated raw ``date`` / "
+        #         "``datetime`` in src/recon_gen/** — wrap in "
+        #         "``DateInterval`` / ``DateTimeInterval`` / "
+        #         "``SingleDayPlant`` / ``MultiDayPlant`` / "
+        #         "``RunContext`` (BD). Dataclass fields exempt (point "
+        #         "values, not policy)."
+        #     ),
+        #     files=_raw_temporal_scope,
+        # ),
     ]
 
 

@@ -34,8 +34,8 @@ The dashboards-match assertion is the user-facing acceptance: "the editor produc
   - [x] AI.2.b - AI.2.b TransferTemplate transfer_key field (FieldSpec + create wiring)
   - [x] AI.2.c - AI.2.c Top-level L2 editor for description + role_business_day_offsets (new singleton kind)
   - [ ] AI.2.d - AI.2.d StudioEditorDriver verbs + create_l2(reference) bulk helper
-    - [ ] AI.2.d.1 - AI.2.d.1 Protocol + HTTP transport + create_l2 bulk *(WIP — protocol + encoders + HTTP transport + create_l2 walk + build_editor_app shipped; rebuild round-trip blocked, see AI.2.d.1.a)*
-      - [ ] AI.2.d.1.a - Defer-validation bulk-load path. The rebuild round-trip (`test_studio_editor_driver.py`, currently SKIPPED) surfaced that the editor runs full `validate()` after EACH create/save, so an incremental bulk rebuild hits invalid intermediate states (an AccountTemplate whose `parent_role` isn't yet on any Account → 400). Two candidate fixes: (1) a defer-validation bulk path that validates ONCE at the end; (2) a topological create order over the reference graph (parent-accounts → child-accounts → templates → rails → transfer_templates → chains → limits) IF every validator check is reference-resolution (no completeness checks on partial graphs). Spike (2) first — no editor-surface change; fall back to (1) if completeness checks fail on partial graphs. Un-skip the rebuild test once green.
+    - [x] AI.2.d.1 - AI.2.d.1 Protocol + HTTP transport + create_l2 bulk — **DONE via Phase BB** (commits c1939621 + 934b274e). Dogfood round-trip un-skipped + passes for spec_example AND sasquatch_pr through HTTP form-POSTs with full validate() on every save.
+      - [x] AI.2.d.1.a - Defer-validation bilateral. **Resolved via Phase BB** (surgical reconciler form-pairing; no validator split, no defer-validation cheat). Catalog: `docs/audits/bb_0_a_validator_circulars.md`. Server-side composite handler (BB.1) + Reconciler picker UI (BB.2) + driver wiring (BB.3) + dogfood un-skip (BB.4).
     - [ ] AI.2.d.2 - AI.2.d.2 Playwright transport (spec_example pass)
   - [x] AI.2.e - AI.2.e Route diagram edit/add affordance to dedicated screens (drop inline-on-diagram editing)
 - [ ] AI.3 - Test harness — `tests/e2e/test_studio_dogfood.py`. Parameterized over L2 yaml input:
@@ -192,12 +192,10 @@ state → flags + filters everywhere).
   - **Form UI** (Lock 3): on the "Create Rail" form, when `subtype=single_leg` AND `aggregating=false`, a "Reconciler" section appears below the rail-specific fields. Required (form-level validator + client-side gate). Two sub-radios — "Attach to existing reconciler" (dropdown of TTs + aggregators) and "Create new reconciler" (nested mini-form for picking TT vs aggregator + the new entity's name + minimum fields). The C3 Variable case is a sub-variant: when `leg_direction=Variable`, only TTs appear in the picker (aggregators don't reconcile Variable per the validator).
 - [ ] BB.1 - Server-side atomic create-rail-with-reconciler handler. Extend `POST /l2_shape/rail/` to accept the reconciler fields; build the composite mutation (add rail + edit/create reconciler); run full `validate()`; on success, `cache.save()` the new instance atomically.
 - [ ] BB.2 - Editor form UI: "Reconciler" section. Render conditionally per subtype + aggregating + leg_direction. Required-field validation client-side + server-side. Dropdown lists existing TTs + (non-Variable case) aggregators; "create new" sub-form for the inline-create path. Form spec entries in `_FIELD_SPECS_BY_KIND` for the new fields.
-- [ ] BB.3 - Driver wiring: `StudioHttpEditorDriver.create_rail` for non-aggregating single-leg rails computes the reconciler-choice from the reference L2 (find which TT or aggregator in the reference contains this rail), passes it in the POST. `create_l2` walk no longer needs the 2-wave + deferred-edit dance for max_unbundled_age (still keep that for the DEFER category).
-- [ ] BB.4 - Un-skip `tests/unit/test_studio_editor_driver.py::test_http_driver_rebuilds_spec_example_structurally`. Confirm structural-equivalence passes for spec_example AND sasquatch_pr.
-- [ ] BB.5 - Resume AI.2.d.1.a downstream: tick AI.2.d.1, AI.2.d.2 Playwright transport, AI.3 test harness, AI.4 L2-equivalence, AI.5 dashboard-equivalence, AI.6 fuzz wiring, AI.7 commit.
+- [x] BB.3 - Driver wiring (commit `c1939621`). Per-rail reconciler choice computed from reference; first-occupant create-new + subsequent attach-existing with partial xor_groups update; extended to two-leg-without-expected_net (S5 bilateral). Server-side: also handles `_create_new_reconciler_with_rail` + `_apply_xor_groups_update_to_tt`. Editor-side AI.2.a-class fix: TT create no longer drops `firings_typical_per_period`.
+- [x] BB.4 - Dogfood test un-skipped + parametrized over spec_example AND sasquatch_pr (commit `934b274e`). Added final reorder pass (`_reorder_leg_rails_form_data` + `_reorder_bundles_activity_form_data`) so wave-3a reconcilers' rail-lists match reference-yaml order. Order-insensitive structural comparator + description-trailing-whitespace normalization.
+- [x] BB.5 - Resume AI.2.d.1.a downstream. AI.2.d.1 + AI.2.d.1.a ticked above as DONE-via-Phase-BB. AI.2.d.2 (Playwright transport) + AI.3-7 still genuinely open work; tracked under Phase AI not BB.
 - [ ] BB.6 - Verify + commit + tag. Full unit/schema/data/json/audit/cli/l2/js green. `./run_tests.sh up_to=db` green. Bump v11.19.0 + release notes. Operator visual-confirms the new Reconciler picker on a fresh studio session.
-- [ ] BB.6 - Resume AI.2.d.1.a + downstream (AI.2.d.2 Playwright transport, AI.3 test harness, AI.4 equivalence assertion, AI.5 dashboard equivalence, AI.6 fuzz wiring, AI.7 commit).
-- [ ] BB.7 - Verify + commit. Full unit/schema/data/json/audit/cli/l2/js + ./run_tests.sh up_to=db green. Bump v11.19.0 + release notes. Operator visual-confirms the invalid-state UX (banner + flags + filter) on a sasquatch_pr deploy.
 
 ## Phase BA
 
@@ -223,7 +221,78 @@ state → flags + filters everywhere).
   payoff. *(Sized as its own phase when picker complexity surfaces as
   friction.)*
 
+## Phase BC - Typed time-range intervals (`DateInterval` + `DateTimeInterval`)
+
+**Motivation.** `e2e-against-testpypi` has been silently red on every release since v11.10.0 (PyPI publish blocked 8 releases). Root cause is an off-by-one between plant emit and audit-window selection: plants land at `anchor_day = date.today()` but the audit window is `[today-7, today-1]` (closed, today-excluded). The `_PERIOD` tuple's policy lives only in a comment; nothing forces the wiring to honor it. The codebase has 19+ `period: tuple[date, date]` declarations (audit/__init__.py, audit/pdf.py, audit/markdown.py) plus `window_start`/`window_end` shapes on tg_cache and studio_state. Every callsite re-litigates inclusive-vs-exclusive + date-vs-datetime + which-TZ.
+
+**Goal.** Single typed `DateInterval` (closed `[start, end]`) + `DateTimeInterval` (half-open `[start, end)`) in `common/intervals.py`. Wiring sites cannot construct a "from yesterday to today" interval without naming the convention. Plant generators take a window (sample within it) instead of an anchor. The chronic v11.10.0+ regression falls out as a downstream consumer test.
+
+Per [[feedback_invariants_in_types]]: make the bug shape unrepresentable.
+
+- [x] BC.0 - **API spike** (NO implementation yet). Doc at `docs/audits/bc_0_interval_api_spike.md`. Covers four types: `DateInterval` (closed-closed dates, business convention), `DateTimeInterval` (half-open naive datetimes, math/SQL convention), `SingleDayPlant` (one-day plant, derived via `at_window_end` / `at_window_start` / `at_offset_from_end`), `MultiDayPlant` (spans every day, via `spans`). Single-TZ invariant: naive datetimes only, no `tzinfo`, no conversion offered. Operator signed off on D1-D8 (incl. D8 `no-raw-temporal-args` AST lint, staged disabled-until-BC.5). *Per [[feedback_invariants_in_types]]: types bring meaning with them, convention hides it.*
+- [x] BC.1 - Implementation + unit tests + AST lints. `src/recon_gen/common/intervals.py` (4 types: DateInterval / DateTimeInterval / SingleDayPlant / MultiDayPlant + PlantSchedule union) + `tests/unit/test_intervals.py` (38 tests, all green). Two AST lints in `tests/unit/test_typing_smells.py`:
+  - `no-naked-interval-ctor` (ENABLED): bare `DateInterval(...)` / `DateTimeInterval(...)` / `SingleDayPlant(...)` / `MultiDayPlant(...)` outside `common/intervals.py` must be a `.classmethod_name(...)` form. test_intervals.py file-suppresses (the test module IS the bare-constructor invariant tests).
+  - `no-raw-temporal-args` (STAGED DISABLED until BC.5): visitor + Check class written; registration commented out in `_build_checks` with "ENABLE AT END OF BC.5" marker. Enabling before the BC.4/BC.5 migration completes reds the whole tree.
+  3577 unit tests green; pyright clean on new modules.
+- [ ] BC.2 - Migrate audit CLI period. Click surface: drop `--from X --to Y` (two raw `datetime` params, lint-fail), add a single `--period` option with a custom Click type that produces `DateInterval` (`--period trailing:7` for default, `--period 2026-05-17..2026-05-23` for explicit). Every `period: tuple[date, date]` in `audit/__init__.py`, `audit/pdf.py`, `audit/markdown.py` flips to `period: DateInterval`. Per-callsite: replace `start, end = period` unpacks with `.start` / `.end` attribute access.
+- [ ] BC.3 - SQL emission at the seam. New `common/sql/intervals.py` module exposes `between_clause(interval: DateInterval, dialect, col)` + `range_clause(interval: DateTimeInterval, dialect, col)`. Dialect-aware literal formatting (PG/Oracle `DATE 'YYYY-MM-DD'`, SQLite `'YYYY-MM-DD'`) lives here, not on the value types (interval is upstream of every storage layer). Migrate `refresh_matviews_sql` + L1 invariant matview `WHERE business_day_start BETWEEN x AND y` clauses to consume this module.
+- [ ] BC.4 - Migrate plant emit. `scenario_to_generators` signature flips `anchor: date | None` → `plant_window: DateInterval | None`. `plant_adapter.py` constructs the right `PlantSchedule` per plant kind: drift / overdraft / limit_breach → `SingleDayPlant.at_window_end(plant_window)`; stuck_unbundled / rail_firing → `MultiDayPlant.spans(plant_window)`. Each generator's signature declares which schedule type it takes; mismatched-type wiring fails at type-check. `apply_db_seed` takes `plant_window: DateInterval` (not `today: date`); `DEFAULT_SEED_TODAY: date(2030, 1, 1)` becomes `DEFAULT_PLANT_WINDOW: DateInterval = DateInterval.single_day(date(2030, 1, 1))`.
+- [ ] BC.5 - Migrate `_PERIOD` in tests + enable `no-raw-temporal-args` lint. `tests/e2e/test_audit_dashboard_agreement.py::_PERIOD` flips to `DateInterval.trailing_days_ending_yesterday(_TODAY, 7)`. `seeded_audit` fixture passes the SAME interval to `apply_db_seed`. Plant lands WITHIN the audit window by construction (and within the right per-generator schedule by construction); mismatch unrepresentable at three layers (window-vs-period, schedule-type-vs-generator, day-pick-policy). Final step: ENABLE `no-raw-temporal-args` lint from BC.1; surface any remaining unwrapped `date` / `datetime` parameters in `src/recon_gen/**` as a punch list (annotate the genuine exceptions with `# typing-smell: ignore[raw-date-arg]: WHY`, wrap the rest).
+- [ ] BC.6 - Verify chronic regression clears. Locally: `RECON_GEN_E2E=1 RECON_GEN_CONFIG=/tmp/repro-bc.yaml pytest tests/e2e/test_audit_dashboard_agreement.py -k "postgres-"` should pass all 5 invariants. Confirms the type-system change kills the v11.10.0+ off-by-one without surgical patching.
+- [ ] BC.7 - Narrow sweep: temporal-tuple sites adjacent to the BC migration surface. `common/l2/tg_cache.py::get_window` + `common/l2/studio_state.py::window_start/window_end` (operator-saved trainer state — cfg-on-disk yaml gains a single interval field rather than two endpoints). Skip `common/tree/date_view.py::required_coverage` and `RollingDate` defaults — those are BD scope (they're tangled with the AO.11 `(as_of, window)` frame). Catalog non-migrations + the BC↔BD seam in `docs/audits/bc_7_temporal_callsite_sweep.md`.
+- [ ] BC.8 - Commit + tag. Bump v11.19.0, RELEASE_NOTES, push tag, verify e2e-against-testpypi job goes green for the first time since v11.9.3 (PyPI publish unblocks).
+
+## Phase BD - `AsOfFrame` rollout — AO.11 frame consumes the BC types
+
+**Motivation.** AO.11 (`date_range_model_audit.md`) introduced the `(as_of, window, seed)` frame as the conceptual fix for the date-model chaos that has produced AO.10 (QS Daily Statement KPIs empty), AO.S2.a (trainer date-rollover), and v11.10.0+ audit-window mismatch. The audit closed as a doc; the rollout was never scheduled. Per [[feedback_no_silent_defer]], it shouldn't stay in "later" prose. BC ships the value-types; BD threads the frame through every temporal callsite using them.
+
+**Goal.** A typed `AsOfFrame(as_of: datetime, window: DateInterval, seed: int)` dataclass (or three explicit fields on a `RunContext`) is the single source of truth for "what time is this run anchored to + what range does it cover + what's the deterministic RNG seed?". Threaded through:
+- Audit CLI (`audit apply` derives the frame, every PDF section reads from it).
+- Plant emit (`scenario_to_generators(frame=...)` instead of separate `anchor`/`window`/`seed` args).
+- Dashboard defaults — QS `RollingDate` parameter expressions in `apps/*/app.py` are DERIVED from `frame.window` (closed-closed date math) rather than hand-written `now()-7d` strings. App2 uses the same derivation. Parity between renderers by construction.
+- Trainer (`tg_cache.py` + `studio_state.py`) — frame as the cached unit instead of loose `window_start` / `window_end` / `as_of` / `up_to`.
+
+**Per the design principle.** [[feedback_invariants_in_types]] — make wrong unrepresentable. A frame is one value; sites that want "the as_of" or "the window" reach into the frame; sites that want to mint a NEW frame go through a `RunContext.live()` / `RunContext.locked(anchor)` / `RunContext.test(...)` named constructor. No bare 3-tuple construction.
+
+- [ ] BD.0 - Frame design spike. `docs/audits/bd_0_asofframe_spike.md`. Settle: is it `AsOfFrame` (3 fields, no behavior) or `RunContext` (frame + a few helpers)? Where does it live — `common/run_context.py`? Constructor surface (`live(now=None)`, `locked(anchor=date(2030, 1, 1))`, `for_audit(today, lookback_days)`, `for_test(window, seed, as_of=None)`). Open-decisions-style review like BC.0.
+- [ ] BD.1 - Implementation + AST lint. `RunContext` dataclass; `no-naked-runcontext-ctor` lint mirroring BC.1's `no-naked-interval-ctor`. Property tests (frame invariants + constructor coverage).
+- [ ] BD.2 - Audit CLI threads `RunContext`. `audit apply` builds the frame at entry; every PDF section (`pdf.py`, `markdown.py`) receives the frame; current `period: DateInterval` + `as_of: datetime` arg pairs collapse into one `frame: RunContext` arg.
+- [ ] BD.3 - Plant emit threads `RunContext`. `apply_db_seed(frame=...)`, `scenario_to_generators(frame=...)`. Each generator's `(anchor, window, seed)` triple becomes one frame field-set. Lock anchor + live anchor + test anchor all flow through the same constructor.
+- [ ] BD.4 - QS / App2 dashboard defaults derive from frame. `apps/*/app.py` parameter defaults (RollingDate expressions, static date brackets) are functions of the frame's window. `RollingDate` → derived expression. Parity QS↔App2 by construction (both consume the same derivation).
+- [ ] BD.5 - Trainer cache + studio state thread `RunContext`. `tg_cache.py::get_window` returns `frame.window`; `studio_state.py` persists the frame instead of loose endpoints.
+- [ ] BD.6 - Sweep + retire dead constants. `DEFAULT_SEED_TODAY` / `_CANONICAL_LOCK_ANCHOR` / `_DATE_START_DEFAULT_EXPR` / etc. — every callsite either consumes a frame or constructs one via a named factory. Catalog retired constants in `docs/audits/bd_6_retired_temporal_constants.md`.
+- [ ] BD.7 - Verify + commit + tag. Re-run the AO.10 + AO.S2.a + AO.11 reproductions; all three should be impossible to re-introduce given the typed frame. Bump v11.20.0, RELEASE_NOTES, push tag.
+
 # Backlog (not yet phased)
+
+- **`no-raw-str-args` AST lint — extend BC.1's D8 family to bare `str` parameters.**
+  Surfaced 2026-05-24 by user during BC.0 sign-off. The codebase already has
+  typed string newtypes (`SheetId`, `VisualId`, `FilterGroupId`, `ParameterName`,
+  `DashboardId` in `common/ids.py`; `AccountId`, `RailName`, etc.) but a sweep
+  for bare `str` parameters across `src/recon_gen/**` would surface every
+  callsite that slipped through. Same shape as D8 (`no-raw-temporal-args`):
+  AST-walk function/method signatures, flag any param annotated `str` (or
+  `str | None`), require migration to a NewType wrapper OR a
+  `# typing-smell: ignore[raw-str-arg]: WHY` escape.
+
+  Expected to be a BIG migration — `str` is everywhere. Whitelist surface
+  needs care:
+  - SQL fragments + column names (low value to wrap; they're already
+    SQL-injected territory if the caller is wrong).
+  - User-facing display strings (titles, descriptions, error messages —
+    these are content, not identifiers).
+  - Dataclass field annotations stay unaffected (point values, not policy).
+  - Stdlib-facing seams (Click string opts, env-var reads, file paths via
+    `os.PathLike[str]`).
+  - The `# typing-smell: ignore[raw-str-arg]: WHY` escape with required
+    WHY.
+
+  Staged like D8 — disabled during the migration, enabled at end. Probably
+  a dedicated phase rather than a sub-task: scale similar to a full
+  Phase BC × N.
+
+  Sequenced after BC + BD land (those validate the AST-lint + named-
+  constructor pattern is workable on a smaller migration before scaling).
 
 - **BB.2.b — Reconciler picker: inline "create new" sub-form.** BB.2
   shipped attach-existing only (operator picks from existing TTs /
@@ -302,4 +371,3 @@ state → flags + filters everywhere).
 - **Per-table CSV / XLSX export.** Operators expect "export to spreadsheet" on tables (QS has it). Lower priority than feature parity — punt unless it's a small agent task. The audit PDF already covers the "regulator-ready snapshot" case; spreadsheet export is for analyst self-serve.
 - ~~**Fold the biome JS lint into the test runner, like pyright.**~~ *(done, 2026-05-12.)* `conftest.py::pytest_sessionstart` now runs `biome check --max-diagnostics=400` alongside the pyright gate — `biome check` exits non-zero on lint *errors* (e.g. `noInnerDeclarations`) and zero on warnings, so the gate fires before any test collects (`pytest.exit(returncode=2)`); opt out with `QS_GEN_SKIP_BIOME=1`. `biome` is a standalone Rust binary (brew locally; `biomejs/setup-biome@v2` in CI), not an npm/pip package — when it's not on `PATH` the gate skips cleanly (same posture pyright has if it's missing). Bare `pytest tests/`, `./run_tests.sh up_to=unit`, and `ci.yml::test` all enforce it. (Why not a `[dev]` dep like `pyright` / `pytailwindcss`? The Biome project hasn't published an *official* PyPI package yet — in flight at biomejs/biome#8818. The unofficial `biome-js` wrapper bundles the Rust binary like `ruff` does, but ships only a `manylinux_2_28_x86_64` wheel — no macOS / arm64 / sdist, and it's a stale single release on Biome 2.3.x — so adding it would break `uv sync --extra dev` off linux-x86_64. Biome therefore stays a system binary; the `[dev]` block carries a NB comment recording this + a "revisit when biomejs/biome#8818 merges" pointer. `dev_setup`: `brew install biome`, or any of biome's install methods. **Follow-on when biomejs/biome#8818 lands:** add the official package to `[dev]`, drop the `setup-biome` CI step + the system-binary fallback in conftest / install.md.)
 - **Drop `_oracle_lowercase_alias_wrapper`; emit dialect-natural identifier case from the generator** (was Y.3.f, parked 2026-05-09). DDL is emitted unquoted (PG folds lowercase, Oracle UPPERCASE → divergent storage); `_oracle_lowercase_alias_wrapper` (`common/dataset_contract.py`) bolts an outer `SELECT qs_inner."ACCOUNT_ID" AS "account_id" ...` so QuickSight (which builds `SELECT "account_id" FROM (...)` from its declared lowercase Columns) finds matching aliases. The proper fix — generator emits dialect-natural case in `DatasetContract.to_input_columns()`, QS quotes UPPERCASE on Oracle natively, wrapper gone — is bigger than it looks: QuickSight's analysis-side validation is *case-sensitive* against `Dataset.Columns` (Y.3.f.2's reverted Oracle-deploy probe surfaced 45 column-missing errors), so it requires case-folding ~30+ analysis-side column refs per dialect (visuals / filters / calc-fields / drills), not just the Columns declaration. The original App2 Oracle column-casing bug it would have fixed was instead fixed narrowly by Y.3.f.alt (`wrap_for_visual` quotes its column refs). Re-spike if the dialect-helper count grows past ~60, or if SQLite gets dropped from the matrix. See `project_qs_analysis_validates_columns_case_sensitive` memory.
-- **BB.4: dogfood test covers sasquatch_pr too** — added 2026-05-24.
