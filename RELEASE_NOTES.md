@@ -1,5 +1,24 @@
 # Release Notes
 
+## v11.19.1 — BC.7 regression test rewritten for the BC.12 kv shape
+
+v11.19.0's release pipeline went red at the Tests + pyright step:
+`tests/audit/test_data_apply_populates_config.py` (added by BC.7)
+asserted on `<prefix>_config` — but BC.12 replaced that 3-column
+table with the EAV `<prefix>_config_kv`. The agent's BC.12 work
+updated `test_aw1_config_table.py` for the new shape but missed
+the sibling test created by a different BC.7 worktree. The
+integration sweep used `--ignore=tests/audit/test_data_apply_populates_config.py`
+locally (it needs docker), so the bug only surfaced in CI.
+
+Fix in this patch: assert against `<prefix>_config_kv` rows and the
+typed projection view's pass-through (`<prefix>_limit_breach` is
+non-empty post-refresh). Same contract as the v11.19.0 test —
+"deploy event populated the config layer; matview JOIN finds caps."
+
+Production behavior unchanged from v11.19.0; PyPI publish gate
+unblocks.
+
 ## v11.19.0 — Phase BC: typed time-range intervals + chronic v11.10.0 e2e gate cleared + Oracle 19c CI green
 
 Phase BC closes out three months of release-pipeline pain in one tag.

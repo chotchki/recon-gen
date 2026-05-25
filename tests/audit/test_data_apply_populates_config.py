@@ -152,21 +152,29 @@ def test_data_apply_populates_config_and_limit_breach(
     assert refresh_result.exit_code == 0, refresh_result.output
 
     cfg = load_config(str(cfg_path))
-    config_rows = _scalar(cfg, "SELECT COUNT(*) FROM spec_example_config")
-    assert config_rows == 1, (
-        f"BC.7.2 regression: data apply did not populate "
-        f"spec_example_config (rows={config_rows!r}). The L1 invariant "
-        f"matviews JSON_TABLE-join on this row's l2_yaml for per-rail "
-        f"caps; without it, limit_breach / stuck_pending / "
-        f"stuck_unbundled stay empty in production."
+    # BC.7 wrote one row to <prefix>_config. BC.12 replaced that 3-column
+    # table with the EAV <prefix>_config_kv (per the Oracle 19c
+    # ORA-32368 fix — see docs/audits/bc_12_config_kv_spike.md +
+    # docs/reference/oracle-19c-constraints.md). The contract is the
+    # same: schema apply populates the table; if it's empty, the L1
+    # matviews see no caps and the dashboards stay blank in production.
+    # Assertion now: kv has >0 rows AND the typed projection view that
+    # limit_breach consumes has the L2's limit_schedules in it.
+    kv_rows = _scalar(cfg, "SELECT COUNT(*) FROM spec_example_config_kv")
+    assert kv_rows is not None and kv_rows > 0, (
+        f"BC.7+BC.12 regression: schema apply did not populate "
+        f"spec_example_config_kv (rows={kv_rows!r}). The L1 invariant "
+        f"matviews JOIN typed projection views over this EAV; without "
+        f"the populate, limit_breach / stuck_pending / stuck_unbundled "
+        f"stay empty in production."
     )
 
     breach_rows = _scalar(
         cfg, "SELECT COUNT(*) FROM spec_example_limit_breach",
     )
     assert breach_rows is not None and breach_rows > 0, (
-        f"BC.7 fix did not unblock the matview JOIN: "
+        f"BC.7+BC.12 fix did not unblock the matview JOIN: "
         f"spec_example_limit_breach is still empty (rows={breach_rows!r}). "
-        f"The config row populated but limit_schedules JSON_TABLE found "
-        f"no caps — check emit_config_populate_sql's l2_json shape."
+        f"The kv populated but the typed view found no limit_schedules — "
+        f"check emit_config_populate_sql + v_config_limit_schedules."
     )
