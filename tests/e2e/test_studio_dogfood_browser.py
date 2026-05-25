@@ -63,6 +63,7 @@ from decimal import Decimal
 from recon_gen.common.l2.primitives import (
     Identifier,
     L2Instance,
+    SingleLegRail,
     TwoLegRail,
 )
 from tests.e2e._drivers.studio_browser_editor import (
@@ -186,4 +187,80 @@ def test_browser_operator_creates_rail_with_role_checkbox(
             "discovery), the validator rejected the commit, or the "
             "list view doesn't project new rails.\n"
             f"List page body (first 2KB):\n{driver.page_body()[:2048]}"
+        )
+
+
+@pytest.mark.browser
+def test_browser_operator_creates_rail_with_bb2_create_new_reconciler(
+    tmp_path: Path,
+) -> None:
+    """Piece 2c — THE highest-value Playwright catch: the BB.2
+    inline JS toggle for the create-new reconciler sub-form.
+
+    The form's default reconciler mode is "Attach existing"; the
+    operator must click the "Create new reconciler" radio for the
+    inline JS to swap visibility (attach-block hidden →
+    create-new block revealed). NO other test layer exercises that
+    JS — HTTP TestClient submits whatever payload it likes
+    regardless of which fields are visible. A regression to the JS
+    (selector typo, event-name change, hidden-attribute drift)
+    would silently leave operators with a form whose create-new
+    fields can't be reached → composite atomic mutation
+    un-invocable → BB.0's whole motivation broken.
+
+    Test shape: create one account (provides a role), then create
+    a non-aggregating single-leg rail that needs a reconciler
+    (S3/C3 bilateral). Use create-new mode for the reconciler:
+    operator clicks the radio → fills the TT's create-new fields →
+    submits. Both the rail AND the new TT must surface on their
+    respective list pages."""
+    cache = L2InstanceCache(
+        tmp_path / "bb2_smoke.yaml", _empty_l2(),
+    )
+    asgi = _build_studio_asgi(cache)
+    with StudioBrowserEditorDriver.serving(asgi) as driver:
+        driver.create_account(account_id="acct_leg", role="LegRole")
+        rail = SingleLegRail(
+            name=Identifier("Rail_BB2"),
+            metadata_keys=(),
+            leg_role=(Identifier("LegRole"),),  # type: ignore[arg-type]: RoleExpression tuple per AI.9
+            leg_direction="Credit",  # type: ignore[arg-type]: LegDirection literal accepts validated str
+            origin="InternalInitiated",  # type: ignore[arg-type]: Origin literal accepts validated str
+        )
+        # Click "Create new" radio → fill TT's required fields →
+        # submit. Both the rail AND the new TT land atomically (BB.1
+        # composite mutation) — same as the BB.2 unit test, but via
+        # real browser interaction with the inline JS toggle.
+        driver.create_rail_with_new_reconciler(
+            rail,
+            reconciler_kind="transfer_template",
+            reconciler_new_name="TT_BB2",
+            reconciler_new_fields={
+                "reconciler_new_expected_net": "0.00",
+                "reconciler_new_completion": "business_day_end",
+            },
+        )
+        # Verify both halves of the composite via the UI: rail
+        # surfaces on rail list, TT surfaces on TT list.
+        driver.goto_rail_list()
+        assert driver.rail_list_contains("Rail_BB2"), (
+            "BB.2 create-new composite failed: 'Rail_BB2' didn't "
+            "surface on the rail list. Either the inline JS toggle "
+            "left the create-new fields hidden, the radio click "
+            "didn't register, or the server rejected the composite."
+            f"\nList page (first 2KB):\n{driver.page_body()[:2048]}"
+        )
+        # AI.8 workaround — sub-pages don't link to other entity
+        # lists; browser back gets us home so we can click the next
+        # list link.
+        driver.go_back()
+        driver.goto_transfer_template_list()
+        assert driver.transfer_template_list_contains("TT_BB2"), (
+            "BB.2 create-new composite failed: 'TT_BB2' didn't "
+            "surface on the TT list. The rail landed (above) but "
+            "the new TT didn't — atomicity contract violated, OR "
+            "the BB.2 sub-form's fields weren't read by the server "
+            "(would indicate a name/wire mismatch between BB.2 UI "
+            "+ _create_new_reconciler_with_rail)."
+            f"\nList page (first 2KB):\n{driver.page_body()[:2048]}"
         )

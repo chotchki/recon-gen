@@ -267,13 +267,122 @@ class StudioBrowserEditorDriver:
         self._apply_form_data(data)
         self._submit_create_form(f"rail {data.get('name', ['?'])[0]!r}")
 
+    def create_rail_with_new_reconciler(
+        self,
+        rail: object,
+        *,
+        reconciler_kind: str,
+        reconciler_new_name: str,
+        reconciler_new_fields: "dict[str, str]",
+    ) -> None:
+        """AI.2.d.2 piece 2c — BB.2 create-new sub-form via the
+        inline JS toggle.
+
+        The form's default mode is "Attach to existing". The
+        operator clicks the "Create new reconciler" radio → BB.2's
+        inline JS toggles the attach-block hidden + the create-new
+        block visible. Then the operator fills the create-new
+        sub-form (name + kind + per-kind required fields like
+        TT.expected_net + TT.completion).
+
+        This is THE highest-value Playwright catch: the BB.2 inline
+        JS toggle is the only renderer-layer behavior no HTTP-based
+        layer can exercise. A regression to the JS (selector typo,
+        event-name change, `[hidden]` attribute behavior drift) would
+        leave operators with the create-new fields un-revealed →
+        form un-fillable → composite atomic mutation un-invocable.
+
+        ``reconciler_kind`` ∈ ``{transfer_template, aggregating_rail}``.
+        ``reconciler_new_fields`` carries the per-kind required
+        minima (e.g., for TT: ``{"reconciler_new_expected_net":
+        "0.00", "reconciler_new_completion": "business_day_end"}``).
+
+        Per AI.9 workaround: `rail` dataclass should have its
+        `RoleExpression` fields as tuples even when single-role.
+        """
+        from tests.e2e._drivers.studio_editor import (  # noqa: PLC0415 — lazy
+            _rail_subtype_of, create_form_data,
+        )
+
+        subtype = _rail_subtype_of(rail)
+        # Step 1: home → subtype picker → form.
+        self._page.click('a[href="/l2_shape/rail/new"]')
+        self._page.click(
+            f'a[href="/l2_shape/rail/new?subtype={subtype}"]',
+        )
+        # Fill the rail's own fields (subtype, name, role, etc.).
+        data = create_form_data("rail", rail)
+        self._apply_form_data(data)
+        # BB.2 inline JS toggle: click the "Create new" radio. The
+        # JS handler swaps the attach-block hidden + reveals the
+        # create-new block. force=True bypasses Playwright
+        # actionability — the radio sits inside a `<label>` and
+        # WebKit can hit one or the other inconsistently.
+        self._page.check(
+            'input[name="reconciler_mode"][value="create_new"]',
+        )
+        # Pick the reconciler kind in the create-new sub-form's kind
+        # dropdown (BB.2's `reconciler_new_kind`; the JS mirrors it
+        # into `reconciler_kind` for the server's gate).
+        self._page.select_option(
+            'select[name="reconciler_new_kind"]', reconciler_kind,
+        )
+        # Fill the reconciler-new-name + kind-specific required
+        # fields (caller supplies them).
+        self._page.fill(
+            'input[name="reconciler_new_name"]', reconciler_new_name,
+        )
+        # Also subtype if it's an aggregating_rail reconciler — fills
+        # the aggregator's sub-subtype picker.
+        for field_name, value in reconciler_new_fields.items():
+            # All create-new sub-form fields are plain text inputs or
+            # selects per BB.2's _render_reconciler_section.
+            loc = self._page.locator(f'[name="{field_name}"]')
+            if loc.count() == 0:
+                raise AssertionError(
+                    f"create-new sub-form has no field "
+                    f"{field_name!r}; check the FieldSpec or the "
+                    f"BB.2 sub-form rendering."
+                )
+            tag = loc.first.evaluate("el => el.tagName.toLowerCase()")
+            if tag == "select":
+                self._page.select_option(
+                    f'select[name="{field_name}"]', value,
+                )
+            else:
+                self._page.fill(f'input[name="{field_name}"]', value)
+        # Submit + assert success (303 home).
+        self._submit_create_form(
+            f"rail {data.get('name', ['?'])[0]!r} with new reconciler",
+        )
+
+    def go_back(self) -> None:
+        """Click the browser's back button — a real-operator action
+        that, in the current editor, is the ONLY way to get from a
+        sub-page (list / read-card / edit form) back to the studio
+        home. AI.8 logs the editor-side gap that makes this verb
+        necessary; once AI.8 lands a home-link in the sub-page
+        chrome, this verb becomes redundant + can be retired."""
+        self._page.go_back()
+
     def goto_rail_list(self) -> None:
-        """Click home → rail list."""
+        """Click home → rail list. Precondition: page is at home
+        (`/`). Use `go_back()` to return home first if you're on a
+        sub-page (AI.8 — no home link in sub-page chrome)."""
         self._page.click('a[href="/l2_shape/rail/"]')
+
+    def goto_transfer_template_list(self) -> None:
+        """Click home → transfer_template list. Same precondition
+        as `goto_rail_list`."""
+        self._page.click('a[href="/l2_shape/transfer_template/"]')
 
     def rail_list_contains(self, rail_name: str) -> bool:
         """True iff the rail-list page shows ``rail_name``."""
         return rail_name in self._page.content()
+
+    def transfer_template_list_contains(self, tt_name: str) -> bool:
+        """True iff the TT-list page shows ``tt_name``."""
+        return tt_name in self._page.content()
 
     # -- DOM queries (the test's assertion seam) -------------------------
 
