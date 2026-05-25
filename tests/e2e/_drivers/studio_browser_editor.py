@@ -40,11 +40,23 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
+from tests.e2e._drivers.studio_editor import _BaseStudioEditorDriver
 
-class StudioBrowserEditorDriver:
-    """Verb protocol over a real WebKit-driven Studio editor."""
+
+class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
+    """Verb protocol over a real WebKit-driven Studio editor.
+
+    Inherits ``create_l2(reference)`` (the wave-structured bulk
+    walk: accounts → templates → wave 3a non-agg rails → wave 3b
+    agg rails → TTs → reorder pass → max_unbundled_age edits →
+    chains → limit_schedules → instance settings) from
+    ``_BaseStudioEditorDriver``. Each per-kind verb below is the
+    browser implementation of the same Protocol the HTTP driver
+    implements; ``create_l2`` resolves verb dispatch statically and
+    works for both transports."""
 
     # AI.2.d.2 piece-2 (2026-05-25, user): dev-iteration timeout — 30s
     # default kills iteration when fail-fast surfaces the actual error
@@ -53,15 +65,24 @@ class StudioBrowserEditorDriver:
     # takes longer (e.g., dashboards mount under a future verb).
     DEFAULT_TIMEOUT_MS = 10_000
 
-    def __init__(self, page: Any, base_url: str) -> None:  # typing-smell: ignore[explicit-any]: Playwright `Page` — kept Any to stay import-light at the test-file seam
+    def __init__(
+        self, page: Any, base_url: str,  # typing-smell: ignore[explicit-any]: Playwright `Page` — kept Any to stay import-light at the test-file seam
+        l2_path: Path | None = None,
+    ) -> None:
         self._page = page
         self._base = base_url.rstrip("/")
+        # AI.2.d.2 piece 3 — `l2_path` is the cache's bound yaml file
+        # (save-on-mutate flushes there on every successful commit).
+        # ``save_l2_to_path`` copies it elsewhere if asked. Optional
+        # to keep piece-1/2 smoke tests un-coupled.
+        self._l2_path = l2_path
         page.set_default_timeout(self.DEFAULT_TIMEOUT_MS)
 
     @classmethod
     @contextmanager
     def serving(
         cls, asgi_app: object, *, headless: bool = True,
+        l2_path: Path | None = None,
     ) -> Iterator["StudioBrowserEditorDriver"]:
         """Spin a uvicorn server on an ephemeral port + open a WebKit
         page + land on the studio home (the single `goto` for the
@@ -70,6 +91,12 @@ class StudioBrowserEditorDriver:
         ``asgi_app`` is the Starlette app the test built — typically
         wrapping ``make_studio_routes(cache)`` directly so the test
         exercises the same routes the operator hits.
+
+        ``l2_path`` (piece 3) is the cache's bound yaml file. When
+        supplied, ``save_l2_to_path(dest)`` copies it (or returns the
+        path unchanged when ``dest == l2_path``). The cache is
+        save-on-mutate so the file is already current; the verb is
+        a thin confirmation hook.
         """
         from recon_gen.common.browser.helpers import webkit_page  # noqa: PLC0415 — lazy
         from tests.e2e._harness_studio_editor import studio_editor_server  # noqa: PLC0415 — lazy
@@ -78,7 +105,7 @@ class StudioBrowserEditorDriver:
             studio_editor_server(asgi_app) as base_url,
             webkit_page(headless=headless) as page,
         ):
-            driver = cls(page, base_url)
+            driver = cls(page, base_url, l2_path=l2_path)
             driver.open()
             yield driver
 
@@ -209,62 +236,256 @@ class StudioBrowserEditorDriver:
             f"editor's inline error: {error_text.strip()}"
         )
 
-    def create_account(
-        self, *, account_id: str, role: str, scope: str = "internal",
+    def _create_simple(
+        self, kind: str, entity: object, kind_label: str | None = None,
     ) -> None:
-        """Fill + submit the account-create form. Waits for the
-        server's 303 redirect back home before returning so the
-        caller can chain another verb without racing the commit.
+        """Generic create flow for non-discriminated entity kinds.
 
-        ``account_id`` / ``role`` are operator-fresh strings the
-        caller invents (per the discovery-only contract — these
-        aren't read from any cache; the caller is recreating a
-        known L2 and types each identifier explicitly).
-        """
-        self.goto_account_create_form()
-        self._page.fill('input[name="id"]', account_id)
-        self._page.fill('input[name="role"]', role)
-        self._page.select_option('select[name="scope"]', scope)
-        self._submit_create_form("account")
-
-    def create_rail(self, rail: object) -> None:
-        """Fill + submit the rail-create form for ``rail``.
-
-        Rails are a discriminated union (single_leg / two_leg). The
-        editor's create flow is 2-step: click the home link to land
-        on the subtype picker, then click the subtype-matching
-        button to land on the actual form. Both navigations are
-        link-clicks per the no-URL-editing constraint.
-
-        Uses ``create_form_data("rail", rail)`` (the same encoder
-        the HTTP driver uses) to build the FormData dict, then
-        translates it into Playwright fills via ``_apply_form_data``.
-
-        BB.1 reconciler gate: this verb does NOT yet attach a
-        reconciler — non-aggregating single-leg rails will 400 at
-        submit time. The BB.1/BB.2 reconciler-aware verb is piece-2b.
-
-        Precondition: page is at the studio home (``/``). Every
-        create verb's success path 303-redirects there, so chaining
-        ``create_X`` → ``create_Y`` works without explicit
-        navigation between.
+        Click home → `/l2_shape/<kind>/new` link → apply form data
+        → submit. Used by ``create_account_template`` /
+        ``create_transfer_template`` / ``create_chain`` /
+        ``create_limit_schedule``. Rails go through ``create_rail``
+        (subtype picker click-through) + reconciler handling.
         """
         from tests.e2e._drivers.studio_editor import (  # noqa: PLC0415 — lazy
-            _rail_subtype_of, create_form_data,
+            create_form_data,
+        )
+
+        self._page.click(f'a[href="/l2_shape/{kind}/new"]')
+        data = create_form_data(kind, entity)  # type: ignore[arg-type]: EntityKind literal narrows from kind str at the seam
+        self._apply_form_data(data)
+        self._submit_create_form(kind_label or kind)
+
+    def create_account(self, account: object | None = None, **kwargs: object) -> None:
+        """Fill + submit the account-create form. Two surfaces:
+
+        - ``create_account(account_object)`` — Protocol-shape (matches
+          ``StudioEditorDriver``); reuses ``create_form_data`` for
+          full-fidelity field-fill (description, expected_eod_balance,
+          etc.).
+        - ``create_account(account_id=..., role=..., scope=...)`` —
+          piece-1 quick form for smoke tests; fills the 3 required
+          fields directly.
+
+        Discovery-only contract: operator-fresh strings for new
+        identifiers; any role/parent_role referenced must already
+        exist on the page (recreate dependencies first).
+        """
+        if account is not None:
+            self._create_simple("account", account, kind_label="account")
+            return
+        self.goto_account_create_form()
+        self._page.fill('input[name="id"]', str(kwargs["account_id"]))
+        self._page.fill('input[name="role"]', str(kwargs["role"]))
+        self._page.select_option(
+            'select[name="scope"]', str(kwargs.get("scope", "internal")),
+        )
+        self._submit_create_form("account")
+
+    def create_account_template(self, template: object) -> None:
+        """Create an AccountTemplate via the dedicated form."""
+        self._create_simple("account_template", template)
+
+    def create_transfer_template(self, template: object) -> None:
+        """Create a TransferTemplate via the dedicated form."""
+        self._create_simple("transfer_template", template)
+
+    def create_chain(self, chain: object) -> None:
+        """Create a Chain via the dedicated form. The chain_children
+        widget encodes children + per-child fan_in / epc — handled
+        by the shared `create_form_data` encoder + `_apply_form_data`
+        translator (chain_children renders as a multi-select
+        checkbox group keyed `children`)."""
+        self._create_simple("chain", chain)
+
+    def create_limit_schedule(self, schedule: object) -> None:
+        """Create a LimitSchedule via the dedicated form."""
+        self._create_simple("limit_schedule", schedule)
+
+    def set_instance_settings(
+        self,
+        *,
+        description: str | None,
+        role_business_day_offsets: "dict[str, int] | None",
+    ) -> None:
+        """Fill + submit the singleton instance form (description +
+        role_business_day_offsets). The editor renders this as a
+        YAML-block textarea named `yaml`; submit POSTs to
+        `/l2_shape/instance/` (with `_method=PUT` hidden) and
+        303s home on success.
+
+        No-op when both args are None (no settings to set; preserves
+        the empty-block default)."""
+        from tests.e2e._drivers.studio_editor import (  # noqa: PLC0415 — lazy
+            instance_yaml_text,
+        )
+
+        yaml_text = instance_yaml_text(description, role_business_day_offsets)
+        if not yaml_text:
+            return
+        # Navigate to the instance singleton form via the home link.
+        self._page.click('a[href="/l2_shape/instance/"]')
+        self._page.fill('textarea[name="yaml"]', yaml_text)
+        self._submit_create_form("instance settings")
+
+    def save_l2_to_path(self, path: Path) -> Path:
+        """Confirm the rebuilt L2 lands at ``path``.
+
+        Save-on-mutate already flushed every successful commit to
+        the cache's bound ``l2_path``; if ``path != l2_path``, copy.
+        Requires ``l2_path`` to be set on the driver (see
+        ``serving(l2_path=...)``).
+        """
+        path = Path(path)
+        if self._l2_path is None:
+            raise RuntimeError(
+                "save_l2_to_path: driver wasn't constructed with "
+                "an l2_path; pass `serving(l2_path=cache_path)` "
+                "to enable the save-confirmation verb."
+            )
+        if path != self._l2_path:
+            import shutil  # noqa: PLC0415 — lazy
+            shutil.copyfile(self._l2_path, path)
+        return path
+
+    def create_rail(
+        self,
+        rail: object,
+        *,
+        reconciler: "tuple[str, tuple[str, str]] | None" = None,
+        reference: "object | None" = None,
+        partial_xor_groups: "tuple[tuple[str, ...], ...] | None" = None,
+    ) -> None:
+        """BB.3 — thread the reconciler payload + optional xor_groups
+        update through the browser form.
+
+        ``reconciler`` is ``(mode, (rec_kind, rec_name))`` where
+        ``mode`` ∈ ``{"attach", "create_new"}``. For "create_new",
+        ``reference`` (L2Instance) is required so the driver can
+        look up the new reconciler's fields from the reference
+        (the same shape the HTTP driver uses).
+
+        Per-kind UI:
+        - ``attach``: select reconciler_kind + reconciler_name
+          dropdowns inside the (default-visible) attach-block
+        - ``create_new``: click the "Create new" radio (BB.2 inline
+          JS toggle reveals the create-new block) + fill the kind +
+          name + per-kind required fields read from the reference
+          entity via ``create_form_data``
+        """
+        from tests.e2e._drivers.studio_editor import (  # noqa: PLC0415 — lazy
+            _find_reconciler_in_reference,
+            _rail_subtype_of,
+            _strip_rail_lists,
+            create_form_data,
         )
 
         subtype = _rail_subtype_of(rail)
-        # Step 1: home → subtype picker (the click of rail/new link
-        # on the home page).
+        # Step 1+2: home → subtype picker → form.
         self._page.click('a[href="/l2_shape/rail/new"]')
-        # Step 2: subtype picker → form. The picker renders both
-        # subtype links; click the matching one.
         self._page.click(
             f'a[href="/l2_shape/rail/new?subtype={subtype}"]',
         )
-        # Apply the FormData dict to the rendered form.
+        # Apply the rail's own fields.
         data = create_form_data("rail", rail)
         self._apply_form_data(data)
+        # Handle the reconciler (BB.1 attach / BB.2 create-new).
+        if reconciler is not None:
+            mode, (rec_kind, rec_name) = reconciler
+            self._page.check(
+                f'input[name="reconciler_mode"][value="{mode}"]',
+            )
+            if mode == "attach":
+                self._page.select_option(
+                    'select[name="reconciler_kind"]', rec_kind,
+                )
+                self._page.select_option(
+                    'select[name="reconciler_name"]', rec_name,
+                )
+            else:  # "create_new"
+                if reference is None:
+                    raise ValueError(
+                        "create_rail(reconciler=('create_new', ...)) "
+                        "requires `reference` (L2Instance) to look up "
+                        "the new reconciler's fields"
+                    )
+                reconciler_entity = _find_reconciler_in_reference(
+                    reference, rec_kind, rec_name,
+                )
+                stripped = _strip_rail_lists(reconciler_entity, rec_kind)
+                rec_form_kind = (
+                    "transfer_template"
+                    if rec_kind == "transfer_template" else "rail"
+                )
+                rec_form = create_form_data(rec_form_kind, stripped)  # type: ignore[arg-type]: EntityKind narrows from local literal
+                # Prefix every reconciler-new field. The BB.2 sub-form
+                # uses `reconciler_new_<orig_name>` keys. Hidden
+                # markers (__present, __num_groups, subtype) stay
+                # un-prefixed; skip them.
+                self._page.locator(
+                    'select[name="reconciler_new_kind"]',
+                ).select_option(rec_kind, force=True)
+                for key, values in rec_form.items():
+                    if key == "subtype":
+                        # Aggregator rail subtype — pick via the
+                        # BB.2 reconciler_new_subtype select.
+                        self._page.locator(
+                            'select[name="reconciler_new_subtype"]',
+                        ).select_option(values[0], force=True)
+                        continue
+                    if (
+                        key.endswith("__present")
+                        or key.endswith("__num_groups")
+                    ):
+                        continue
+                    field_name = f"reconciler_new_{key}"
+                    loc = self._page.locator(f'[name="{field_name}"]')
+                    if loc.count() == 0:
+                        # Field isn't in the create-new sub-form
+                        # (e.g., metadata_keys for aggregator —
+                        # not part of the minimum required set).
+                        # Skip; the editor's validator runs on
+                        # submit + surfaces any real omissions.
+                        continue
+                    # AI.2.d.2 piece 3 — only fill the fields the
+                    # current kind/subtype EXPOSES. The BB.2 form
+                    # renders BOTH the TT-kind block + the
+                    # aggregator-kind block; one is hidden based on
+                    # `reconciler_new_kind`. Filling hidden inputs
+                    # with `force=True` caused WebKit to corrupt
+                    # adjacent fields (AI.12 surfaced this) — skip
+                    # any field whose closest ancestor div has
+                    # `[hidden]` set.
+                    if not loc.first.is_visible():
+                        continue
+                    # `force=True` still used because the per-kind
+                    # block's `hidden` toggle races the radio-click
+                    # → kind-select → field-reveal chain in WebKit;
+                    # visible-but-not-yet-actionable is a real
+                    # race. Operator-fidelity-equivalent.
+                    tag = loc.first.evaluate("el => el.tagName.toLowerCase()")
+                    if tag == "select":
+                        loc.first.select_option(values[0], force=True)
+                    elif tag == "input":
+                        input_type = (
+                            loc.first.get_attribute("type") or "text"
+                        )
+                        if input_type == "checkbox":
+                            for v in values:
+                                self._page.locator(
+                                    f'input[type=checkbox][name="{field_name}"][value="{v}"]',
+                                ).check(force=True)
+                        elif input_type != "hidden":
+                            loc.first.fill(values[0], force=True)
+                    else:
+                        loc.first.fill(values[0], force=True)
+        # partial_xor_groups (BB.3 — TT reconcilers): the form has
+        # the `leg_rail_xor_groups_<i>` multi-select fields when
+        # `leg_rail_xor_groups__present=1` is set. The browser form
+        # doesn't render these on the rail-create page; they're
+        # edit-only on the TT itself. Not exercised in piece 3 first
+        # pass; deferred to piece 4 if needed.
+        _ = partial_xor_groups
         self._submit_create_form(f"rail {data.get('name', ['?'])[0]!r}")
 
     def create_rail_with_new_reconciler(

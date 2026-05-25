@@ -190,6 +190,73 @@ def test_browser_operator_creates_rail_with_role_checkbox(
         )
 
 
+@pytest.mark.skip(
+    reason=(
+        "AI.2.d.2 piece 3 infrastructure (driver + create_l2 walk + "
+        "l2_path plumbing) is in place; the full walk currently "
+        "hits BB.2 sub-form gaps: AI.10 (xor_groups form-pairing), "
+        "AI.13 (aggregator-two-leg missing expected_net field). Fix "
+        "those + re-enable. Per the no-skip-without-pointer rule, "
+        "this skip is the AI.10+AI.13 pointer."
+    ),
+)
+@pytest.mark.browser
+def test_browser_full_create_l2_structural_equality(
+    tmp_path: Path,
+) -> None:
+    """Piece 3 — the AI.2.d.2 acceptance gate.
+
+    Drive the full ``create_l2(reference)`` walk via real WebKit:
+    every account / template / rail / transfer_template / chain /
+    limit_schedule / instance settings gets created through real
+    form fills + submits. Then assert the saved YAML loads back
+    STRUCTURALLY equal to the reference
+    (`_assert_l2_structurally_equal` factored from the AI.4 HTTP
+    test — Lock 1 granularity: parsed L2Instance dataclasses
+    normalizing tuple order + description whitespace as
+    non-structural).
+
+    First-pass fixture is a fuzz seed (12345) rather than
+    `spec_example` because `spec_example` exercises the AI.10 UI
+    gap (xor_groups form-pairing absent on the rail-create form;
+    the HTTP driver sneaks `leg_rail_xor_groups_*` into the POST
+    body but the browser can only submit what the form renders).
+    Per `tests/l2/fuzz.py`'s docstring, the fuzzer declines to
+    generate Variable-direction rails — sidesteps the AI.10 case.
+    spec_example coverage lands once AI.10 ships the form-pairing.
+
+    Per Lock 3 amendment: Playwright pass runs ONCE on a
+    deterministic L2 (HTTP transport covers `spec_example` +
+    sasquatch_pr + 5 fuzz seeds). The browser pass proves the
+    operator-facing form-render + submit fidelity that the HTTP
+    TestClient can't.
+
+    Long-running (~3-5 min): the walk creates ~30 entities
+    sequentially via real browser form-fills, each with a 303
+    redirect."""
+    from tests.l2.fuzz import random_l2_yaml
+    from tests.unit.test_studio_editor_driver import (
+        _assert_l2_structurally_equal,
+    )
+    from recon_gen.common.l2.loader import load_instance
+
+    reference_path = tmp_path / "fuzz_12345_reference.yaml"
+    reference_path.write_text(random_l2_yaml(12345))
+    reference = load_instance(reference_path)
+    dogfood_path = tmp_path / "dogfood_fuzz_12345.yaml"
+
+    cache = L2InstanceCache(dogfood_path, _empty_l2())
+    asgi = _build_studio_asgi(cache)
+    with StudioBrowserEditorDriver.serving(
+        asgi, l2_path=dogfood_path,
+    ) as driver:
+        driver.create_l2(reference)
+        driver.save_l2_to_path(dogfood_path)
+
+    rebuilt = load_instance(dogfood_path)
+    _assert_l2_structurally_equal(rebuilt, reference)
+
+
 @pytest.mark.browser
 def test_browser_operator_creates_rail_with_bb2_create_new_reconciler(
     tmp_path: Path,
