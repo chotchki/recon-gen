@@ -258,13 +258,38 @@ Per [[feedback_invariants_in_types]]: make the bug shape unrepresentable.
   - [ ] BC.12.1 - Identify stmt #91. Reproduce locally against the Oracle container (`./run_tests.sh up_to=db --variants=sp_or_lo` should hit it); capture the failing SQL. Stmt #91 is almost certainly one of the L1-invariant matviews that JSON-JOINs to `<prefix>_config.l2_yaml` (limit_breach / stuck_pending / stuck_unbundled) — the same matviews BC.6 surfaced as bugged in PG.
   - [ ] BC.12.2 - **Constraint: Oracle 19c is the floor** ([[project_oracle_19c_compat]]). The Oracle 21c+ native `JSON` column type is NOT available; the `<prefix>_config.l2_yaml` column has to stay `CLOB` (Oracle) / `TEXT` (PG). Oracle 19c's `JSON_TABLE` works as a SELECT-time expression but Oracle's matview engine rejects matviews whose source is a JSON_TABLE on a CLOB literal/subquery — ORA-32368.
 
-    **Fix shape: pull the JSON-referenced columns OUT into relational tables.** Instead of one `<prefix>_config(as_of, cfg_yaml, l2_yaml)` table that matviews JSON_TABLE-query into, explode the L2 yaml into typed sub-tables at config-populate time:
-    - `<prefix>_config_rails(name, max_pending_age_seconds, max_unbundled_age_seconds, ...)` — one row per Rail.
-    - `<prefix>_config_limit_schedules(parent_role, rail, direction, cap)` — one row per LimitSchedule.
-    - Keep `<prefix>_config(as_of, cfg_yaml, l2_yaml)` for provenance + display, but the matviews JOIN against the exploded sub-tables (real relational columns; Oracle's matview engine accepts this).
+    **Why we're paying this cost — supporting old Oracle sucks.** The EAV + typed-view detour exists ENTIRELY because of Oracle 19c. PG 17 and SQLite 3.38 would happily let the matviews `JSON_TABLE` directly off `<prefix>_config.l2_yaml` (the CLOB column); we'd ship zero extra tables, zero typed views, zero recursive CTEs. Oracle 21c+ would too (native JSON column type). But 19c is the LTS that midsize FIs are still running, and dropping it costs us deployments — so every dialect pays the EAV tax for portability. If/when 19c falls off our support floor, approach A (direct `JSON_TABLE` from `<prefix>_config.l2_yaml`) becomes the simplification — the EAV + views go away, the matview SQL collapses to one-liner JSON_VALUEs, and `<prefix>_config_kv` becomes dead weight to drop. Document the trigger condition in `docs/reference/quicksight-quirks.md`'s neighbor file (or a new `docs/reference/oracle-19c-constraints.md`) so the "we can finally delete this" PR has a clear signpost.
 
-    **BC.7 coupling**: BC.7's config-populate work needs to populate these exploded sub-tables ALONGSIDE the existing JSON-as-CLOB column. The integration step (after both BC.7 + BC.12 agents return) needs to reconcile: BC.7's populate path becomes "populate the JSON column + populate the exploded sub-tables." Re-brief BC.7 if its work landed only the JSON-as-CLOB path.
-  - [ ] BC.12.3 - Fix the schema emitter. Per BC.12.2: emit the exploded sub-tables in `emit_schema`; rewrite the matview DDL for limit_breach / stuck_pending / stuck_unbundled to JOIN against the sub-tables instead of JSON_TABLE-ing the CLOB. PG + SQLite consume the same shape (the exploded tables work on every dialect; just slower than native JSON for PG, but consistent). Verify locally + push for the integration-oracle gate.
+    **Fix shape (approach C — Hybrid EAV storage + typed views, locked 2026-05-24):** Generic EAV table holds the decomposed JSON; typed views project it into the matview-friendly shapes; matviews JOIN typed views (and don't see the EAV).
+
+    - **Storage** (one table, replaces the existing `<prefix>_config`):
+      ```
+      <prefix>_config_kv(node_id BIGINT PK, parent_id BIGINT NULL, key VARCHAR(...), value VARCHAR(...))
+      ```
+      Populated by walking the L2 + cfg JSON once at config-populate time. Top-level scalars (`as_of`, etc.) live at `parent_id=NULL`; the matview-consumed leaves (rail caps, limit schedule caps) live at their natural depth. ONE-table operational story: shape change → `TRUNCATE <prefix>_config_kv` + re-populate; no DDL migration ever needed when L2 grows.
+
+      Post-BC.12 the per-prefix schema is **3 base tables**: `<prefix>_config_kv` + `<prefix>_transactions` + `<prefix>_daily_balances` (plus the typed views BC.12.2 adds and the matviews built on top). The existing `<prefix>_config(as_of, cfg_yaml, l2_yaml)` table goes away — its three columns become rows in the kv (`as_of` as a top-level scalar; `cfg_yaml`/`l2_yaml` either decompose fully into per-field rows OR live as opaque-CLOB `(key='*_raw', value=<json>)` rows for provenance/display).
+    - **Provenance**: handled INSIDE `<prefix>_config_kv` via opaque-CLOB rows (`key='l2_yaml_raw'`, `value=<full JSON>`, `parent_id=NULL`) — the operator can still read the original yaml back; just one SELECT WHERE key='l2_yaml_raw' away.
+    - **Typed projection views** (emit_schema boilerplate, **pay-as-you-go** — locked 2026-05-24): only build the views that an existing matview actually consumes. BC.12.3 ships exactly two: `<prefix>_v_config_limit_schedules` (limit_breach) + `<prefix>_v_config_rails` (stuck_pending / stuck_unbundled). Future matviews that need a new L2 field add their typed view alongside the matview that consumes it — no speculative views for fields no matview reads. Keeps the BC.12 surface tight; matches the codebase's "don't add abstractions beyond the task" preference.
+      ```
+      CREATE VIEW <prefix>_v_config_limit_schedules AS
+        WITH RECURSIVE walk AS (...) SELECT pivot(...);
+      CREATE VIEW <prefix>_v_config_rails AS
+        WITH RECURSIVE walk AS (...) SELECT pivot(...);
+      ```
+      Per-collection view; absorbs the recursive-CTE + pivot complexity once. Matviews see typed-column views; the EAV stays hidden.
+    - **Matview JOINs** become natural:
+      ```
+      JOIN <prefix>_v_config_limit_schedules ls
+        ON ls.parent_role = tx.account_parent_role AND ls.rail = tx.rail_name
+      ```
+
+    **User motivation (locked 2026-05-24):** "Allows the main schema to pretend the complexity of the JSON isn't there while keeping the deployment flexibility of just truncate this one table when you have a shape change."
+
+    **BC.7 coupling**: BC.7's populate path (currently in-flight) writes to `<prefix>_config.l2_yaml` (the CLOB column). BC.12 ADDS the EAV walk: a separate `emit_kv_populate_sql(prefix, l2_dict, dialect)` helper walks the dict and emits N inserts into `<prefix>_config_kv`. Integration is additive — BC.7 lands the CLOB populate, BC.12 lands the kv populate + the typed views + the matview rewrites. No re-brief needed for in-flight BC.7.
+
+    **Oracle 19c CTE syntax:** Oracle uses `WITH ... AS (...)` for recursive CTEs (same SQL standard as PG); the RECURSIVE keyword is implicit in Oracle (it's required in PG/SQLite). Helper around this seam in `common/sql/dialect.py` if not already there.
+  - [ ] BC.12.3 - Land the schema emitter changes per BC.12.2. Files: `common/l2/schema.py` (add EAV table DDL + typed projection views; rewrite limit_breach / stuck_pending / stuck_unbundled matview DDLs to JOIN typed views); `common/l2/config_table.py` (add `emit_kv_populate_sql` helper); thread into BC.7's populate path. PG + SQLite consume the same shape. Verify locally against `./run_tests.sh up_to=db --variants=sp_or_lo,sp_pg_lo,sp_sl_lo`.
 - [ ] BC.13 - Commit + tag. Bump v11.19.0, RELEASE_NOTES, push tag, verify e2e-against-testpypi job goes green for the first time since v11.9.3 (PyPI publish unblocks) AND the integration-pg/sasquatch + integration-oracle jobs green for the first time since v11.10.0+.
 
 ## Phase BD - `AsOfFrame` rollout — AO.11 frame consumes the BC types
