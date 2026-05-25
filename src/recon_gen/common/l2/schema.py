@@ -1517,9 +1517,18 @@ _SCHEMA_TEMPLATE = """\
 --                 ORA-00932); 4000 chars covers every JSON metadata
 --                 document the L2 schema emits.
 -- ---------------------------------------------------------------------
+    -- BC.11 re-applied (2026-05-25): id / transfer_id / transfer_parent_id
+    -- / bundle_id widened vc100 → vc255. The chain-completion plant
+    -- adapter synthesizes IDs by concatenating parent IDs + rail names
+    -- + account IDs (sasquatch_pr's CustomerInboundACHReturnNSF +
+    -- tx-chainfill-xfer-limit-breach-... pattern hits 101 chars and
+    -- Oracle rejects with ORA-12899). The original BC.11 fix was
+    -- reverted at some point; this re-applies it. vc255 is the
+    -- standard practical ceiling; widening is free (PG/Oracle/SQLite
+    -- all handle it).
 CREATE TABLE {p}_transactions (
     entry                {tx_entry_decl},
-    id                   {vc100}   NOT NULL,
+    id                   {vc255}   NOT NULL,
     account_id           {vc100}   NOT NULL,
     account_name         {vc255},
     account_role         {vc100},
@@ -1531,12 +1540,12 @@ CREATE TABLE {p}_transactions (
         CHECK (amount_direction IN ('Debit', 'Credit')),
     status               {vc50}    NOT NULL,
     posting              {ts}    NOT NULL,
-    transfer_id          {vc100}   NOT NULL,
+    transfer_id          {vc255}   NOT NULL,
     transfer_completion  {ts},
-    transfer_parent_id   {vc100},
+    transfer_parent_id   {vc255},
     rail_name            {vc100}   NOT NULL,
     template_name        {vc100},
-    bundle_id            {vc100},
+    bundle_id            {vc255},
     supersedes           {vc50},
     origin               {vc50}    NOT NULL,
     metadata             {json_text},

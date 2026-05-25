@@ -130,9 +130,15 @@ def test_transactions_includes_amount_invariant_check() -> None:
 
 
 def test_transactions_includes_transfer_parent_id() -> None:
-    """L1 SPEC: Transfer.Parent recursive chain (Phase L addition)."""
+    """L1 SPEC: Transfer.Parent recursive chain (Phase L addition).
+
+    Column width re-widened to VARCHAR(255) (re-applies BC.11 fix
+    that was reverted at some point; sasquatch_pr's chain-completion
+    plant adapter concatenates parent IDs + rail names + account IDs
+    and hits 101 chars on `tx-chainfill-xfer-limit-breach-...` —
+    Oracle rejects with ORA-12899)."""
     sql = emit_schema(_instance("tp"), prefix="tp")
-    assert "transfer_parent_id   VARCHAR(100)" in sql
+    assert "transfer_parent_id   VARCHAR(255)" in sql
 
 
 def test_transactions_includes_transfer_completion_and_origin() -> None:
@@ -371,10 +377,13 @@ def test_transactions_includes_template_name_nullable() -> None:
 
 
 def test_transactions_includes_bundle_id_nullable() -> None:
-    """SPEC: L1 Transaction.BundleId — populated by AggregatingRail bundlers."""
+    """SPEC: L1 Transaction.BundleId — populated by AggregatingRail
+    bundlers. Width VARCHAR(255) (re-applies BC.11 widening per the
+    Oracle 101-char overflow described on the transfer_parent_id
+    test above)."""
     sql = emit_schema(_instance("v11"), prefix="v11")
     assert re.search(
-        r"\bbundle_id\s+VARCHAR\(100\)(?!\s+NOT NULL)",
+        r"\bbundle_id\s+VARCHAR\(255\)(?!\s+NOT NULL)",
         sql,
     ), "bundle_id should be nullable"
 
