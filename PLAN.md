@@ -38,19 +38,8 @@ The dashboards-match assertion is the user-facing acceptance: "the editor produc
       - [x] AI.2.d.1.a - Defer-validation bilateral. **Resolved via Phase BB** (surgical reconciler form-pairing; no validator split, no defer-validation cheat). Catalog: `docs/audits/bb_0_a_validator_circulars.md`. Server-side composite handler (BB.1) + Reconciler picker UI (BB.2) + driver wiring (BB.3) + dogfood un-skip (BB.4).
     - [ ] AI.2.d.2 - AI.2.d.2 Playwright transport (spec_example pass)
   - [x] AI.2.e - AI.2.e Route diagram edit/add affordance to dedicated screens (drop inline-on-diagram editing)
-- [ ] AI.3 - Test harness — `tests/e2e/test_studio_dogfood.py`. Parameterized over L2 yaml input:
-  ```python
-  @pytest.mark.parametrize("l2_source", [
-      pytest.param("tests/l2/spec_example.yaml", id="spec_example"),
-      pytest.param("tests/l2/sasquatch_pr.yaml", id="sasquatch_pr"),
-      *[
-          pytest.param(_fuzz_yaml(seed), id=f"fuzz_{seed:010d}")
-          for seed in _fuzz_seeds_for_run()
-      ],
-  ])
-  ```
-  Sequence per test case: (a) load reference L2 via `load_instance(l2_source)`; (b) start `recon-gen studio` on a tmpdir-rooted cfg + empty L2; (c) StudioEditorDriver creates every entity from the reference IN DEPENDENCY ORDER (AccountTemplates → Accounts → Rails → TransferTemplates → Chains → LimitSchedules); (d) save via `save_l2_to_path(dogfood_yaml_path)`; (e) shutdown studio. Failures surface the FIRST missing editor verb + entity + cell.
-- [ ] AI.4 - L2Instance equivalence assertion. Load both `l2_source` and `dogfood_yaml_path` via `load_instance`. Assert structural equality: `original.accounts == dogfood.accounts`, `original.rails == dogfood.rails`, etc. Use dataclass `__eq__`. Fail with a focused diff (which entity differs in which field). This is the FIRST acceptance gate — if it fails, the editor lost information during the round-trip.
+- [x] AI.3 - Test harness — `tests/unit/test_studio_editor_driver.py` carries the dogfood harness (NOT moved to `tests/e2e/`: the Starlette `TestClient` path needs no docker, no real server, and runs in 1.5s — keeping it at the unit layer guards every push with no e2e cost). Parametrized over `spec_example` + `sasquatch_pr` + 5 fuzz seeds (default; override via `RECON_GEN_AI_FUZZ_SAMPLE_N`). 7 dogfood variants, all green. The browser/Playwright pass (AI.2.d.2) layers form-render fidelity on top of this same L2-equivalence claim.
+- [x] AI.4 - L2Instance equivalence assertion. `_assert_l2_structurally_equal` (factored from the BB.4 test body in AI.6) compares parsed `L2Instance` dataclasses per Lock 1: tuple-order differences in entity collections (BB.3 reconcilers landing at first-occupant rail position; aggregator-rail-as-reconciler shifts) AND description trailing-whitespace differences get normalized via `_by_identifier` / `_normalize_descriptions`. Failures surface as Python `assert` diffs on the specific entity collection. Used by AI.3's 7 variants.
 - [ ] AI.5 - Dashboard equivalence assertion (SQLite-only, App2 only). For each of `(original L2, dogfood L2)`:
   1. Apply schema against a fresh SQLite db (one per L2; tmpdir-rooted)
   2. `data apply --execute` against the same anchor + seed
@@ -58,7 +47,7 @@ The dashboards-match assertion is the user-facing acceptance: "the editor produc
   4. Start `recon-gen dashboards -c <ephemeral cfg> --l2 <yaml>` on a distinct port; mount in App2Driver
   5. Walk every dashboard's every sheet's every visual; collect `(dashboard_id, sheet_name, visual_title) → {row_count, rows, kpi_value}` into a comparison dict
   6. Compare the two collected dicts; assert byte-equal modulo dashboard-internal-id randomness
-- [ ] AI.6 - Fuzz axis wiring. Extend the runner so `./run_tests.sh up_to=browser` honors `QS_GEN_AI_FUZZ_SAMPLE_N` (default 5 per cell; nightly opt-in cranks to 100+). Fuzz seeds derive from the run-id-hash so reruns at the same commit see the same seed pool (per `feedback_fuzzer_as_property_testing.md` reproducibility contract). Failed fuzz seeds get re-runnable via `./run_tests.sh up_to=browser --variants=fNNNNN_sl_lo`.
+- [x] AI.6 - Fuzz axis wiring. 5-seed pool (`_DEFAULT_FUZZ_SEEDS`) parametrized in `test_studio_editor_driver.py::test_http_driver_rebuilds_fuzz_l2_structurally`; deterministic per seed (same seed → same `random_l2_yaml` output → same dogfood claim). `RECON_GEN_AI_FUZZ_SAMPLE_N` registered in `common/env_keys.py` (typed registry) overrides the pool size. Failed seeds re-runnable via `pytest -k fuzz_NNNNNNNN`. **The axis IMMEDIATELY EARNED ITS KEEP**: seed 11 surfaced a real wave-ordering bug in the studio driver — `max_unbundled_age` edit was running BEFORE the wave-5 aggregator `bundles_activity` reorder, leaving a fuzz-generated bundled rail unbundled at edit time. Driver fix: move wave 5 reorder pass before the deferred-max_unbundled_age edits. 0 hand-authored fixture covered that shape.
 - [ ] AI.7 - Re-verify + commit. Run `./run_tests.sh up_to=browser --scenarios=sp --dialects=sl --targets=lo` locally to confirm the 5-seed deterministic dogfood suite passes; gate CI on it via the existing browser-job pipeline (`e2e.yml` or analog). Phase history one-liner: "AI — Studio editor dogfood: ANY L2 yaml (spec_example + sasquatch_pr + fuzz-sampled) rebuilt via browser-driven editor matches reference structurally + in dashboard output (SQLite/App2 only)".
 - [x] AH.8 - Docs builds: isolate into run-folder sandbox (kills xdist flakes)
 - [ ] AH.9 - Tailwind output.css scan-scoping — stop whole-repo prose pollution

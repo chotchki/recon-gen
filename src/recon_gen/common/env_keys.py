@@ -383,6 +383,24 @@ RECON_GEN_FUZZ_SEED: Final = EnvVar(
     validator=positive_int,
 )
 
+# AI.6 — Studio editor dogfood fuzz axis (per
+# `tests/unit/test_studio_editor_driver.py`). Override the default
+# 5-seed pool for this run. ``N=0`` disables fuzz parametrization;
+# ``N>5`` stretches the default pool deterministically. Nightly
+# opt-in cranks via this var.
+RECON_GEN_AI_FUZZ_SAMPLE_N: Final = EnvVar(
+    name="RECON_GEN_AI_FUZZ_SAMPLE_N",
+    legacy_name="QS_GEN_AI_FUZZ_SAMPLE_N",
+    description=(
+        "Int — Studio dogfood fuzz axis sample size. N=0 disables; "
+        "N>0 truncates / extends the default 5-seed pool. Absent → "
+        "default 5."
+    ),
+    coercer=int,
+    optional=True,
+    # No positive_int validator — N=0 (disable fuzz) is a valid input.
+)
+
 # Y.2.gate.b.14.3 — destructive-op opt-in. ``./run_tests.sh down`` /
 # ``./run_tests.sh sweep`` / dirty-state deploy bypass all check
 # this when their explicit ``--yes`` flag is absent.

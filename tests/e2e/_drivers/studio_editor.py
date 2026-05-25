@@ -294,11 +294,27 @@ class _BaseStudioEditorDriver:
               attach-existing as needed). max_unbundled_age deferred.
           3b. Aggregating rails (any not already created via wave 3a's
               create-new path).
-          3c. Edit-in deferred max_unbundled_age.
           4. TransferTemplates (any not already created via wave 3a).
-          5. Chains.
-          6. LimitSchedules.
-          7. Top-level instance settings.
+          5. Reorder pass: PUT each reconciler-via-wave-3a TT /
+              aggregator with the reference's full leg_rails /
+              bundles_activity (was driver-walk order). MUST run
+              before wave 6 — wave-3a create-new starts an
+              aggregator with only its first-occupant rail in
+              bundles_activity; later non-agg rails (those NOT
+              choosing this aggregator as reconciler but appearing
+              in its reference bundles_activity) wait until wave 5
+              to land there. The validator for
+              `max_unbundled_age + bundles_activity coverage` (S5
+              shape) needs every bundled rail wired before wave 6.
+              Fuzz seed 11 surfaced this gap — Rail_05's max_unbundled
+              edit failed because the wave-3a-created Rail_03 only
+              had `[Rail_02]` in bundles_activity (its first-occupant
+              rail), not `[Rail_00, Rail_02, Rail_05]`.
+          6. Edit-in deferred max_unbundled_age (after wave 5 fixes
+              the aggregator bundles_activity coverage).
+          7. Chains.
+          8. LimitSchedules.
+          9. Top-level instance settings.
         """
         for account in _topo_accounts_by_parent(reference.accounts):
             self.create_account(account)
@@ -360,11 +376,6 @@ class _BaseStudioEditorDriver:
             if ("aggregating_rail", str(rail.name)) in created_reconcilers:
                 continue
             self.create_rail(rail, reconciler=None, reference=reference)
-        for rail in deferred_max_unbundled_age:
-            self._edit(
-                "rail", str(rail.name),
-                _max_unbundled_age_edit_form_data(rail),
-            )
 
         for template in reference.transfer_templates:
             # TTs may have ALREADY been created in wave 3a if some
@@ -380,6 +391,16 @@ class _BaseStudioEditorDriver:
         # declared order. PUT each TT / aggregator with the
         # reference's leg_rails / bundles_activity order so the
         # struct equality holds.
+        #
+        # AI.6 (2026-05-25): MUST run BEFORE the deferred
+        # max_unbundled_age wave below. Aggregating rails created via
+        # wave-3a create-new start with only their first-occupant
+        # rail in bundles_activity; the rest of the reference
+        # bundles_activity arrives here. Without this, a deferred
+        # max_unbundled_age edit on a bundled rail fails the
+        # validator (the aggregator hasn't yet declared the rail as
+        # one it bundles, so the watch "can never fire"). Fuzz seed
+        # 11 surfaced the ordering gap.
         for tt_name in {n for (k, n) in created_reconcilers if k == "transfer_template"}:
             ref_tt = next(
                 t for t in reference.transfer_templates if str(t.name) == tt_name
@@ -396,6 +417,12 @@ class _BaseStudioEditorDriver:
             self._edit(
                 "rail", agg_name,
                 _reorder_bundles_activity_form_data(ref_agg),
+            )
+
+        for rail in deferred_max_unbundled_age:
+            self._edit(
+                "rail", str(rail.name),
+                _max_unbundled_age_edit_form_data(rail),
             )
 
         for chain in reference.chains:
