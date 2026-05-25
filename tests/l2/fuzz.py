@@ -23,11 +23,20 @@ Design notes:
   insertion order survives — humans triaging a fuzz failure read it
   in the order the generator built it.
 
-- The generator deliberately declines to fuzz some primitives that
-  the SPEC permits but make construction-time validity hard:
-  Variable-direction single-leg rails (need template + last-leg-posted
-  semantics — overhead vs payoff is poor for an in-process generator).
-  Add them in a later substep if real-world PR shapes need it.
+- Variable-direction single-leg rails are generated EVERY seed via
+  the ``_maybe_inject_xor_template`` injector (AI.11, 2026-05-25 —
+  was ~50% probability; lifted to unconditional after AI.2.d.2
+  piece 3 surfaced AI.10's BB.2 form-pairing gap that was invisible
+  to fuzz on seeds without Variable rails). The injector pairs the
+  Variable rails with a TransferTemplate that closes them, plus a
+  ``leg_rail_xor_groups`` partition where appropriate — every shape
+  the SPEC C1 rule cares about.
+- The base random-rail generator (``_random_single_leg_rail``) still
+  picks Debit/Credit only — Variable rails require template-bound
+  context (last-leg-posted semantics), which the injector synthesizes
+  atomically. Adding Variable rails to the base generator
+  independently would need to retroactively bind them to a TT or
+  aggregator, which conflicts with the build order.
 """
 
 from __future__ import annotations
@@ -583,9 +592,16 @@ def _maybe_inject_xor_template(
     Variable-direction SingleLegRail leg_rails grouped via
     ``leg_rail_xor_groups``.
 
-    Fires with ~50% probability per seed; ~half of META_GUARD_SEEDS
-    will land XOR coverage. The injected template + 3 variant rails
-    satisfy validator C1a-d:
+    AI.11 (2026-05-25): fires unconditionally now (was ~50% probability)
+    so every seed exercises the Variable-leg / XOR coverage paths.
+    The motivation came from AI.2.d.2 piece 3 surfacing the AI.10
+    BB.2 form-pairing gap on Variable rails — that gap was invisible
+    to fuzz on the HTTP transport because half the seeds had no
+    Variable rails at all. Always-on injection means every fuzz
+    seed exercises the operator path Variable-direction rails
+    require.
+
+    The injected template + 3 variant rails satisfy validator C1a-d:
     - C1a: members ⊆ leg_rails (members are the 3 variant names)
     - C1b: members are Variable-direction SingleLegRails (set inline)
     - C1c: no rail appears in two groups (only 1 group)
@@ -599,8 +615,7 @@ def _maybe_inject_xor_template(
     All injected names are prefixed so collisions with the seeded
     naming scheme (`Rail_NN` / `TransferTemplate_NN`) can't happen.
     """
-    if rng.random() > 0.5:
-        return
+    # AI.11 — was `if rng.random() > 0.5: return`. Now always fires.
     if not state.all_role_names:
         return  # degenerate — nothing to bind leg_role to
 
