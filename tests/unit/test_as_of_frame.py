@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from recon_gen.cli.data import _CANONICAL_LOCK_ANCHOR
 from recon_gen.common.as_of_frame import LOCKED_ANCHOR, AsOfFrame
 from recon_gen.common.intervals import DateInterval
 
@@ -71,13 +70,14 @@ def test_frame_is_frozen() -> None:
         frame.as_of = date(2031, 1, 1)  # type: ignore[misc]: pyright correctly flags assignment to a frozen dataclass; the test asserts the runtime FrozenInstanceError fires, which requires actually attempting the mutation
 
 
-def test_locked_anchor_is_the_single_source_of_truth() -> None:
-    # AQ.3 collapsed the two constants: `cli/data.py::_CANONICAL_LOCK_ANCHOR`
-    # is now an alias for `as_of_frame.LOCKED_ANCHOR` (the locked-SQL
-    # emitter's call site stayed for caller compat, but the value sources
-    # off LOCKED_ANCHOR). Identity check — if these ever drift, something
-    # went around the funnel.
-    assert _CANONICAL_LOCK_ANCHOR is LOCKED_ANCHOR
+def test_locked_anchor_value_pinned() -> None:
+    # BD.6 retired the `cli/data.py::_CANONICAL_LOCK_ANCHOR` alias (the
+    # AQ.3 funnel's transition shim) — there's now ONE constant,
+    # `as_of_frame.LOCKED_ANCHOR`, with no parallel name. This test
+    # locks the value itself (`date(2030, 1, 1)`) so an inadvertent
+    # change to the anchor would break loudly — every locked seed +
+    # semantic lock + AsOfFrame.locked() emit depends on it.
+    assert LOCKED_ANCHOR == date(2030, 1, 1)
 
 
 # ---------------------------------------------------------------------------

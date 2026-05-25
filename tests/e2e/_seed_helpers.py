@@ -32,11 +32,13 @@ from recon_gen.common.l2.seed import (
     ScenarioPlant,
     emit_full_seed,
 )
+from recon_gen.common.as_of_frame import LOCKED_ANCHOR
 from recon_gen.common.sql import Dialect
 
 
-# Pinned reference date for hash-locked seed determinism (M.2a.8).
-DEFAULT_SEED_TODAY = date(2030, 1, 1)
+# BD.6 — `DEFAULT_SEED_TODAY` retired (was `date(2030, 1, 1)` — same value
+# as `LOCKED_ANCHOR`); callers default `today` to `LOCKED_ANCHOR` directly,
+# one source of truth for the canonical demo anchor.
 
 
 def apply_db_seed(
@@ -88,7 +90,7 @@ def apply_db_seed(
         of the lean planted scenarios. Default False — fast feedback,
         plants only.
     """
-    today_ref = today or DEFAULT_SEED_TODAY
+    today_ref = today or LOCKED_ANCHOR
 
     # 1. Schema.
     schema_sql = emit_schema(instance, prefix=prefix, dialect=dialect)

@@ -50,11 +50,10 @@ encapsulated by the ``window_start`` property which now derives from
 ``live()`` / ``locked()`` as a construction-time ergonomic shortcut —
 construction-time ergonomics ≠ runtime escape hatch.
 
-`LOCKED_ANCHOR` will become the single source of truth in AQ.3; today
-`cli/data.py::_CANONICAL_LOCK_ANCHOR` carries the same value and is the
-caller for byte-locked seed emission. A unit-level link-test in
-`tests/unit/test_as_of_frame.py` asserts they agree, catching drift until
-the AQ.3 funnel collapses them.
+`LOCKED_ANCHOR` is the single source of truth for the demo anchor (AQ.3
+funneled the value here; BD.6 retired the `cli/data.py::_CANONICAL_LOCK_ANCHOR`
+alias kept for caller-compat). Every locked seed + every locked-binding
+frame anchors here.
 """
 
 from __future__ import annotations
@@ -66,8 +65,8 @@ from typing import Final
 from recon_gen.common.intervals import DateInterval
 
 #: The canonical demo anchor — every locked seed + every locked-binding
-#: frame anchors here. Matches `cli/data.py::_CANONICAL_LOCK_ANCHOR`
-#: pending the AQ.3 funnel that makes this the sole source.
+#: frame anchors here. Single source of truth post-BD.6
+#: (`_CANONICAL_LOCK_ANCHOR` alias in `cli/data.py` retired).
 LOCKED_ANCHOR: Final[date] = date(2030, 1, 1)
 
 
