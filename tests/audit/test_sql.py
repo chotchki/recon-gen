@@ -205,7 +205,7 @@ _DRIFT_SQL = (
     "       stored_balance, computed_balance, drift"
     "  FROM ut_drift"
     " WHERE business_day_start >= DATE '2030-01-01'"
-    "   AND business_day_start < DATE '2030-01-08'"
+    " AND business_day_start < DATE '2030-01-08'"
     " ORDER BY business_day_end DESC, ABS(drift) DESC, account_id"
 )
 
@@ -215,7 +215,7 @@ _OVERDRAFT_SQL = (
     "       stored_balance"
     "  FROM ut_overdraft"
     " WHERE business_day_start >= DATE '2030-01-01'"
-    "   AND business_day_start < DATE '2030-01-08'"
+    " AND business_day_start < DATE '2030-01-08'"
     " ORDER BY business_day_end DESC,"
     "          ABS(stored_balance) DESC, account_id"
 )
@@ -226,7 +226,7 @@ _LIMIT_BREACH_SQL = (
     "       rail_name, direction, outbound_total, cap"
     "  FROM ut_limit_breach"
     " WHERE business_day >= DATE '2030-01-01'"
-    "   AND business_day < DATE '2030-01-08'"
+    " AND business_day < DATE '2030-01-08'"
     " ORDER BY business_day DESC,"
     "          (outbound_total - cap) DESC, account_id"
 )
@@ -252,7 +252,7 @@ _STUCK_UNBUNDLED_SQL = (
 _SUPERSESSION_AGGREGATES_TXNS_SQL = (
     "SELECT supersedes, COUNT(*) AS total,"
     " SUM(CASE WHEN posting >= DATE '2030-01-01'"
-    "          AND posting < DATE '2030-01-08'"
+    " AND posting < DATE '2030-01-08'"
     "          THEN 1 ELSE 0 END) AS new_in_period"
     " FROM ut_transactions"
     " WHERE supersedes IS NOT NULL"
@@ -263,7 +263,7 @@ _SUPERSESSION_AGGREGATES_TXNS_SQL = (
 _SUPERSESSION_AGGREGATES_DAILY_SQL = (
     "SELECT supersedes, COUNT(*) AS total,"
     " SUM(CASE WHEN business_day_start >= DATE '2030-01-01'"
-    "          AND business_day_start < DATE '2030-01-08'"
+    " AND business_day_start < DATE '2030-01-08'"
     "          THEN 1 ELSE 0 END) AS new_in_period"
     " FROM ut_daily_balances"
     " WHERE supersedes IS NOT NULL"
@@ -276,8 +276,7 @@ _SUPERSESSION_TXN_DETAILS_SQL = (
     "       posting, amount_money"
     "  FROM ut_transactions"
     " WHERE supersedes IS NOT NULL"
-    "   AND posting >= DATE '2030-01-01'"
-    "   AND posting < DATE '2030-01-08'"
+    "   AND posting >= DATE '2030-01-01' AND posting < DATE '2030-01-08'"
     " ORDER BY posting DESC, id"
 )
 
@@ -286,8 +285,7 @@ _SUPERSESSION_DAILY_DETAILS_SQL = (
     "       supersedes, money"
     "  FROM ut_daily_balances"
     " WHERE supersedes IS NOT NULL"
-    "   AND business_day_start >= DATE '2030-01-01'"
-    "   AND business_day_start < DATE '2030-01-08'"
+    "   AND business_day_start >= DATE '2030-01-01' AND business_day_start < DATE '2030-01-08'"
     " ORDER BY business_day_start DESC, account_id"
 )
 
@@ -385,8 +383,7 @@ def test_executive_summary_query_sql_locked(captured_sql, patched_connect):
             " COUNT(DISTINCT transfer_id)"
             " FROM ut_transactions"
             " WHERE status = 'Posted'"
-            "   AND posting >= DATE '2030-01-01'"
-            "   AND posting < DATE '2030-01-08'"
+            "   AND posting >= DATE '2030-01-01' AND posting < DATE '2030-01-08'"
         ),
         # Volume: gross + net dollars per-transfer aggregate.
         (
@@ -397,31 +394,26 @@ def test_executive_summary_query_sql_locked(captured_sql, patched_connect):
             "          SUM(amount_money) AS transfer_net"
             "   FROM ut_transactions"
             "   WHERE status = 'Posted'"
-            "     AND posting >= DATE '2030-01-01'"
-            "     AND posting < DATE '2030-01-08'"
+            "     AND posting >= DATE '2030-01-01' AND posting < DATE '2030-01-08'"
             "   GROUP BY transfer_id"
             " ) per_transfer"
         ),
         # Date-scoped exception counts.
         (
             "SELECT COUNT(*) FROM ut_drift"
-            " WHERE business_day_start >= DATE '2030-01-01'"
-            "   AND business_day_start < DATE '2030-01-08'"
+            " WHERE business_day_start >= DATE '2030-01-01' AND business_day_start < DATE '2030-01-08'"
         ),
         (
             "SELECT COUNT(*) FROM ut_ledger_drift"
-            " WHERE business_day_start >= DATE '2030-01-01'"
-            "   AND business_day_start < DATE '2030-01-08'"
+            " WHERE business_day_start >= DATE '2030-01-01' AND business_day_start < DATE '2030-01-08'"
         ),
         (
             "SELECT COUNT(*) FROM ut_overdraft"
-            " WHERE business_day_start >= DATE '2030-01-01'"
-            "   AND business_day_start < DATE '2030-01-08'"
+            " WHERE business_day_start >= DATE '2030-01-01' AND business_day_start < DATE '2030-01-08'"
         ),
         (
             "SELECT COUNT(*) FROM ut_limit_breach"
-            " WHERE business_day >= DATE '2030-01-01'"
-            "   AND business_day < DATE '2030-01-08'"
+            " WHERE business_day >= DATE '2030-01-01' AND business_day < DATE '2030-01-08'"
         ),
         # Current-state matview counts (no date filter).
         "SELECT COUNT(*) FROM ut_stuck_pending",

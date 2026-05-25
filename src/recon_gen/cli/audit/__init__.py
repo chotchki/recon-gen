@@ -38,7 +38,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -69,6 +69,7 @@ from recon_gen.common.provenance import (
     recon_gen_code_identity,
 )
 from recon_gen.common.sql.dialect import date_literal
+from recon_gen.common.sql.intervals import range_clause
 from recon_gen.common.theme import DEFAULT_PRESET, resolve_l2_theme
 
 
@@ -266,10 +267,8 @@ def _query_executive_summary(
     from recon_gen.common.db import connect_demo_db
 
     prefix = cfg.db_table_prefix
-    start, end = period.start, period.end
-    start_lit = date_literal(start.isoformat(), cfg.dialect)
-    end_excl_lit = date_literal(
-        (end + timedelta(days=1)).isoformat(), cfg.dialect,
+    posting_range = range_clause(
+        period, dialect=cfg.dialect, column="posting",
     )
 
     conn = connect_demo_db(cfg)
@@ -281,8 +280,7 @@ def _query_executive_summary(
             f" COUNT(DISTINCT transfer_id)"
             f" FROM {prefix}_transactions"
             f" WHERE status = 'Posted'"
-            f"   AND posting >= {start_lit}"
-            f"   AND posting < {end_excl_lit}"
+            f"   AND {posting_range}"
         )
         leg_count, transfer_count = cur.fetchone()
 
@@ -294,8 +292,7 @@ def _query_executive_summary(
             f"          SUM(amount_money) AS transfer_net"
             f"   FROM {prefix}_transactions"
             f"   WHERE status = 'Posted'"
-            f"     AND posting >= {start_lit}"
-            f"     AND posting < {end_excl_lit}"
+            f"     AND {posting_range}"
             f"   GROUP BY transfer_id"
             f" ) per_transfer"
         )
@@ -311,8 +308,7 @@ def _query_executive_summary(
             else:
                 sql = (
                     f"SELECT COUNT(*) FROM {prefix}_{suffix}"
-                    f" WHERE {date_col} >= {start_lit}"
-                    f"   AND {date_col} < {end_excl_lit}"
+                    f" WHERE {range_clause(period, dialect=cfg.dialect, column=date_col)}"
                 )
             cur.execute(sql)
             (count,) = cur.fetchone()
@@ -393,10 +389,8 @@ def _query_drift_violations(
     from recon_gen.common.db import connect_demo_db
 
     prefix = cfg.db_table_prefix
-    start, end = period.start, period.end
-    start_lit = date_literal(start.isoformat(), cfg.dialect)
-    end_excl_lit = date_literal(
-        (end + timedelta(days=1)).isoformat(), cfg.dialect,
+    period_clause = range_clause(
+        period, dialect=cfg.dialect, column="business_day_start",
     )
 
     conn = connect_demo_db(cfg)
@@ -407,8 +401,7 @@ def _query_drift_violations(
             f"       account_parent_role, business_day_end,"
             f"       stored_balance, computed_balance, drift"
             f"  FROM {prefix}_drift"
-            f" WHERE business_day_start >= {start_lit}"
-            f"   AND business_day_start < {end_excl_lit}"
+            f" WHERE {period_clause}"
             f" ORDER BY business_day_end DESC, ABS(drift) DESC, account_id"
         )
         rows = cur.fetchall()
@@ -471,10 +464,8 @@ def _query_overdraft_violations(
     from recon_gen.common.db import connect_demo_db
 
     prefix = cfg.db_table_prefix
-    start, end = period.start, period.end
-    start_lit = date_literal(start.isoformat(), cfg.dialect)
-    end_excl_lit = date_literal(
-        (end + timedelta(days=1)).isoformat(), cfg.dialect,
+    period_clause = range_clause(
+        period, dialect=cfg.dialect, column="business_day_start",
     )
 
     conn = connect_demo_db(cfg)
@@ -485,8 +476,7 @@ def _query_overdraft_violations(
             f"       account_parent_role, business_day_end,"
             f"       stored_balance"
             f"  FROM {prefix}_overdraft"
-            f" WHERE business_day_start >= {start_lit}"
-            f"   AND business_day_start < {end_excl_lit}"
+            f" WHERE {period_clause}"
             f" ORDER BY business_day_end DESC,"
             f"          ABS(stored_balance) DESC, account_id"
         )
@@ -613,10 +603,8 @@ def _query_limit_breach_violations(
     from recon_gen.common.db import connect_demo_db
 
     prefix = cfg.db_table_prefix
-    start, end = period.start, period.end
-    start_lit = date_literal(start.isoformat(), cfg.dialect)
-    end_excl_lit = date_literal(
-        (end + timedelta(days=1)).isoformat(), cfg.dialect,
+    period_clause = range_clause(
+        period, dialect=cfg.dialect, column="business_day",
     )
 
     conn = connect_demo_db(cfg)
@@ -627,8 +615,7 @@ def _query_limit_breach_violations(
             f"       account_parent_role, business_day,"
             f"       rail_name, direction, outbound_total, cap"
             f"  FROM {prefix}_limit_breach"
-            f" WHERE business_day >= {start_lit}"
-            f"   AND business_day < {end_excl_lit}"
+            f" WHERE {period_clause}"
             f" ORDER BY business_day DESC,"
             f"          (outbound_total - cap) DESC, account_id"
         )
@@ -1051,10 +1038,11 @@ def _query_supersession(
     from recon_gen.common.db import connect_demo_db
 
     prefix = cfg.db_table_prefix
-    start, end = period.start, period.end
-    start_lit = date_literal(start.isoformat(), cfg.dialect)
-    end_excl_lit = date_literal(
-        (end + timedelta(days=1)).isoformat(), cfg.dialect,
+    posting_range = range_clause(
+        period, dialect=cfg.dialect, column="posting",
+    )
+    bds_range = range_clause(
+        period, dialect=cfg.dialect, column="business_day_start",
     )
 
     conn = connect_demo_db(cfg)
@@ -1065,10 +1053,12 @@ def _query_supersession(
             ("transactions", "posting"),
             ("daily_balances", "business_day_start"),
         ):
+            date_col_range = range_clause(
+                period, dialect=cfg.dialect, column=date_col,
+            )
             cur.execute(
                 f"SELECT supersedes, COUNT(*) AS total,"
-                f" SUM(CASE WHEN {date_col} >= {start_lit}"
-                f"          AND {date_col} < {end_excl_lit}"
+                f" SUM(CASE WHEN {date_col_range}"
                 f"          THEN 1 ELSE 0 END) AS new_in_period"
                 f" FROM {prefix}_{table_name}"
                 f" WHERE supersedes IS NOT NULL"
@@ -1088,8 +1078,7 @@ def _query_supersession(
             f"       posting, amount_money"
             f"  FROM {prefix}_transactions"
             f" WHERE supersedes IS NOT NULL"
-            f"   AND posting >= {start_lit}"
-            f"   AND posting < {end_excl_lit}"
+            f"   AND {posting_range}"
             f" ORDER BY posting DESC, id"
         )
         transaction_details = [
@@ -1111,8 +1100,7 @@ def _query_supersession(
             f"       supersedes, money"
             f"  FROM {prefix}_daily_balances"
             f" WHERE supersedes IS NOT NULL"
-            f"   AND business_day_start >= {start_lit}"
-            f"   AND business_day_start < {end_excl_lit}"
+            f"   AND {bds_range}"
             f" ORDER BY business_day_start DESC, account_id"
         )
         daily_balance_details = [
@@ -1214,10 +1202,8 @@ def _query_daily_statement_walks(
     from recon_gen.common.db import connect_demo_db
 
     prefix = cfg.db_table_prefix
-    start, end = period.start, period.end
-    start_lit = date_literal(start.isoformat(), cfg.dialect)
-    end_excl_lit = date_literal(
-        (end + timedelta(days=1)).isoformat(), cfg.dialect,
+    period_clause = range_clause(
+        period, dialect=cfg.dialect, column="business_day_start",
     )
 
     conn = connect_demo_db(cfg)
@@ -1227,8 +1213,7 @@ def _query_daily_statement_walks(
         cur.execute(
             f"SELECT account_id, business_day_start, business_day_end, drift"
             f"  FROM {prefix}_drift"
-            f" WHERE business_day_start >= {start_lit}"
-            f"   AND business_day_start < {end_excl_lit}"
+            f" WHERE {period_clause}"
         )
         drift_rows = cur.fetchall()
         # 2) Parent (singleton) accounts: every (parent, day) in the
@@ -1239,8 +1224,7 @@ def _query_daily_statement_walks(
                 f"SELECT account_id, business_day_start, business_day_end,"
                 f"       drift"
                 f"  FROM {prefix}_daily_statement_summary"
-                f" WHERE business_day_start >= {start_lit}"
-                f"   AND business_day_start < {end_excl_lit}"
+                f" WHERE {period_clause}"
             )
             parent_rows = [
                 r for r in cur.fetchall()
@@ -1276,14 +1260,17 @@ def _query_daily_statement_walks(
             day_start_date = (
                 _coerce_to_date(day_start)
             )
+            # Single-day window for this iteration's per-account walk.
+            # The +1-day flip from closed-end → exclusive-end lives
+            # inside `range_clause` so the dialect-specific INTERVAL
+            # syntax (PG: `+ INTERVAL '1 day'`; Oracle: `+ INTERVAL '1' DAY`)
+            # never appears at the callsite.
+            day_window = DateInterval.single_day(day_start_date)
             day_start_lit = date_literal(
                 day_start_date.isoformat(), cfg.dialect,
             )
-            # Next-day date computed in Python (avoids dialect-specific
-            # INTERVAL syntax: PG = ``+ INTERVAL '1 day'``,
-            # Oracle = ``+ INTERVAL '1' DAY``).
-            day_end_excl_lit = date_literal(
-                (day_start_date + timedelta(days=1)).isoformat(), cfg.dialect,
+            day_posting_range = range_clause(
+                day_window, dialect=cfg.dialect, column="posting",
             )
 
             # 2) Daily statement summary: 5 KPIs precomputed.
@@ -1315,8 +1302,7 @@ def _query_daily_statement_walks(
                 f"       amount_money, amount_direction, status, posting"
                 f"  FROM {prefix}_current_transactions"
                 f" WHERE account_id = '{account_id}'"
-                f"   AND posting >= {day_start_lit}"
-                f"   AND posting < {day_end_excl_lit}"
+                f"   AND {day_posting_range}"
                 f" ORDER BY posting"
             )
             transactions = [
