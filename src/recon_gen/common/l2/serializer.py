@@ -303,11 +303,22 @@ def _dump_limit_schedule(ls: LimitSchedule) -> dict[str, Any]:  # typing-smell: 
         "parent_role": str(ls.parent_role),
         "rail": str(ls.rail),
         "cap": _dump_money(ls.cap),
+        # BC.12.5 fix (2026-05-25, was: AB.1's omit-when-default emit
+        # rule): always emit `direction`. Pre-BC.12 the matview read
+        # `direction` from a JSON_VALUE on `<prefix>_config.l2_yaml`
+        # where SQL's NULL-default-Outbound semantics happened to work
+        # (`JSON_VALUE(... direction)` returned NULL ⇒ COALESCE'd to
+        # 'Outbound' implicitly via the omitted JOIN side). Post-BC.12
+        # the typed view `<prefix>_v_config_limit_schedules` projects
+        # `direction` as its own column from the kv; rows missing the
+        # `direction` kv-entry project NULL → the limit_breach matview's
+        # strict `ls.direction = 'Outbound'` JOIN filters them out
+        # → false negative (Outbound breach plant didn't show in the
+        # matview). Same shape as BC.8's `_seconds` omit-fix (the dataclass
+        # default must be in the data, not the dataclass alone — the
+        # populate code doesn't know about Python-side defaults).
+        "direction": str(ls.direction),
     }
-    # AB.1 (2026-05-19): only emit direction when non-default — keeps every
-    # pre-AB.1 YAML byte-equivalent through a load+dump round-trip.
-    if ls.direction != "Outbound":
-        out["direction"] = ls.direction
     if ls.description is not None:
         out["description"] = ls.description
     return out
