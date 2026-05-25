@@ -93,18 +93,22 @@ is unset, the renderer falls back to a skeleton-mode placeholder
 in every numeric cell so the layout is still previewable.
 
 **Period default: a 7-day window ending yesterday.** `[today − 7,
-today − 1]` inclusive. Override either endpoint:
+today − 1]` inclusive. Override via the typed `--period` flag:
 
 ```bash
 recon-gen audit apply -c config.yaml --l2 instance.yaml \
-    --from 2026-04-01 --to 2026-04-30 \
+    --period 2026-04-01..2026-04-30 \
     --execute -o april-report.pdf
 ```
 
-Both endpoints are inclusive dates. `--execute` is the universal
-opt-in across the CLI — without it, `audit apply` only emits the
-Markdown rendering (handy for content review without committing to
-a real PDF write).
+The `--period` flag accepts several shapes: `trailing:N` ("last N
+days ending yesterday"; default is `trailing:7`), `yesterday`,
+`today`, `YYYY-MM-DD..YYYY-MM-DD` for an explicit closed-closed
+range, or a single `YYYY-MM-DD` for a one-day report. Both
+endpoints in the range form are inclusive. `--execute` is the
+universal opt-in across the CLI — without it, `audit apply` only
+emits the Markdown rendering (handy for content review without
+committing to a real PDF write).
 
 `audit clean -o report.pdf` removes the file. Like the other
 groups, it dry-runs by default; pass `--execute` to actually

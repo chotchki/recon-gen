@@ -21,6 +21,7 @@ from pathlib import Path
 
 import click
 
+from recon_gen.common.intervals import DateInterval
 from recon_gen.common.pdf.audit_chrome import (
     BookmarkedDocTemplate,
     bookmarked_h1,
@@ -56,7 +57,7 @@ def _write_audit_pdf(
     path: Path,
     *,
     institution: str,
-    period: tuple[date, date],
+    period: DateInterval,
     generated_at: datetime,
     exec_summary: ExecSummary | None,
     drift_rows: list[DriftViolation] | None,
@@ -182,7 +183,7 @@ def _write_audit_pdf(
             textColor=HexColor(theme.secondary_fg),
         ),
     ]
-    start, end = period
+    start, end = period.start, period.end
     # Cover-page Title: bookmark at level 0 so the auditor can jump
     # back to the cover from anywhere via the sidebar nav, and so it
     # appears at the top of the rendered TOC. We attach
@@ -337,7 +338,7 @@ def _write_audit_pdf(
 def _executive_summary_story(
     summary: ExecSummary | None,
     styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
-    period: tuple[date, date],
+    period: DateInterval,
     theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
 ) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.2 executive summary page.
@@ -357,7 +358,7 @@ def _executive_summary_story(
         TableStyle,
     )
 
-    start, end = period
+    start, end = period.start, period.end
     elements: list = [
         PageBreak(),
         bookmarked_h1("Executive Summary", styles),
@@ -442,7 +443,7 @@ def _executive_summary_story(
 def _drift_story(
     rows: list[DriftViolation] | None,
     styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
-    period: tuple[date, date],
+    period: DateInterval,
     theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
 ) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.3.a Drift violations page.
@@ -462,7 +463,7 @@ def _drift_story(
         TableStyle,
     )
 
-    start, end = period
+    start, end = period.start, period.end
     elements: list = [
         PageBreak(),
         bookmarked_h1("Drift Violations", styles),
@@ -567,7 +568,7 @@ def _drift_story(
 def _overdraft_story(
     rows: list[OverdraftViolation] | None,
     styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
-    period: tuple[date, date],
+    period: DateInterval,
     singleton_ids: set[str],
     theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
 ) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
@@ -593,7 +594,7 @@ def _overdraft_story(
         TableStyle,
     )
 
-    start, end = period
+    start, end = period.start, period.end
     elements: list = [
         PageBreak(),
         bookmarked_h1("Overdraft Violations", styles),
@@ -722,7 +723,7 @@ def _overdraft_story(
 def _limit_breach_story(
     rows: list[LimitBreachViolation] | None,
     styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
-    period: tuple[date, date],
+    period: DateInterval,
     singleton_ids: set[str],
     theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
 ) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
@@ -746,7 +747,7 @@ def _limit_breach_story(
         TableStyle,
     )
 
-    start, end = period
+    start, end = period.start, period.end
     elements: list = [
         PageBreak(),
         bookmarked_h1("Limit Breach Violations", styles),
@@ -1189,7 +1190,7 @@ def _stuck_unbundled_story(
 def _supersession_story(
     data: SupersessionAuditData | None,
     styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
-    period: tuple[date, date],
+    period: DateInterval,
     theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
 ) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.3.f Supersession audit page.
@@ -1208,7 +1209,7 @@ def _supersession_story(
         TableStyle,
     )
 
-    start, end = period
+    start, end = period.start, period.end
     elements: list = [
         PageBreak(),
         bookmarked_h1("Supersession Audit", styles),
@@ -1547,7 +1548,7 @@ def _signoff_story(
     theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
     *,
     institution: str,
-    period: tuple[date, date],
+    period: DateInterval,
     generated_at: datetime,
     version: str,
     l2_label: str,
@@ -1574,7 +1575,7 @@ def _signoff_story(
         TableStyle,
     )
 
-    start, end = period
+    start, end = period.start, period.end
     cell_style = ParagraphStyle(
         "SignoffCell",
         parent=styles["BodyText"],

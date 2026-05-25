@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+from recon_gen.common.intervals import DateInterval
 from recon_gen.common.provenance import (
     ProvenanceFingerprint,
     l2_fingerprint_placeholder,
@@ -41,7 +42,7 @@ from recon_gen.cli.audit import (
 def _render_audit_markdown(
     *,
     institution: str,
-    period: tuple[date, date],
+    period: DateInterval,
     generated_at: datetime,
     exec_summary: ExecSummary | None,
     drift_rows: list[DriftViolation] | None,
@@ -66,7 +67,7 @@ def _render_audit_markdown(
     — so an integrator can review the report's content before
     committing to a real PDF write.
     """
-    start, end = period
+    start, end = period.start, period.end
     fingerprint = (
         provenance.composite_sha
         if provenance is not None
@@ -518,7 +519,7 @@ def _render_stuck_unbundled_markdown(
 
 def _render_supersession_markdown(
     data: SupersessionAuditData | None,
-    period: tuple[date, date],
+    period: DateInterval,
 ) -> str:
     """Supersession audit section in Markdown form.
 
@@ -530,7 +531,7 @@ def _render_supersession_markdown(
     Detail tables stay bounded; aggregate carries the historical
     accumulation.
     """
-    start, end = period
+    start, end = period.start, period.end
     header = (
         "\n"
         "---\n"
@@ -688,7 +689,7 @@ def _render_daily_statement_walks_markdown(
 def _render_signoff_markdown(
     *,
     institution: str,
-    period: tuple[date, date],
+    period: DateInterval,
     generated_at: datetime,
     version: str,
     l2_label: str,
@@ -704,7 +705,7 @@ def _render_signoff_markdown(
     machine attestation. The cryptographic seal over the system block
     lands in U.7.
     """
-    start, end = period
+    start, end = period.start, period.end
     fingerprint = (
         provenance.composite_sha
         if provenance is not None

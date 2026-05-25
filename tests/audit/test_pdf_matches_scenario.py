@@ -36,6 +36,7 @@ from click.testing import CliRunner
 from recon_gen.cli import main
 from recon_gen.common.config import load_config
 from recon_gen.common.db import connect_demo_db
+from recon_gen.common.intervals import DateInterval
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
     RECON_GEN_CONFIG,
@@ -65,10 +66,7 @@ _SPEC_EXAMPLE = _FIXTURES / "spec_example.yaml"
 # can see them. Days-ago offsets stay deterministic; only the
 # absolute calendar date varies.
 _TODAY = date.today()  # typing-smell: ignore[test-module-nondeterminism]: stuck_pending/stuck_unbundled matviews use CURRENT_TIMESTAMP — plants must be in the past relative to NOW (see WHY block above)
-_PERIOD: tuple[date, date] = (
-    _TODAY - timedelta(days=7),
-    _TODAY - timedelta(days=1),
-)
+_PERIOD: DateInterval = DateInterval.trailing_days_ending_yesterday(_TODAY, 7)
 
 
 # Every L1 invariant the audit covers + the U.8.a expectations
@@ -191,8 +189,7 @@ def seeded_pdf(db_cfg, db_cfg_path, tmp_path_factory) -> tuple[Path, object]:
             "audit", "apply",
             "-c", str(db_cfg_path),
             "--l2", str(_SPEC_EXAMPLE),
-            "--from", _PERIOD[0].isoformat(),
-            "--to", _PERIOD[1].isoformat(),
+            "--period", f"{_PERIOD.start.isoformat()}..{_PERIOD.end.isoformat()}",
             "-o", str(out),
             "--execute",
         ],

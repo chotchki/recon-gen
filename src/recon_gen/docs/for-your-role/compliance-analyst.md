@@ -137,9 +137,14 @@ Override the period for a custom window:
 ```bash
 recon-gen audit apply -c config.yaml \
     --l2 path/to/instance.yaml \
-    --from 2026-04-01 --to 2026-04-30 \
+    --period 2026-04-01..2026-04-30 \
     --execute -o april-report.pdf
 ```
+
+The `--period` flag accepts several shapes: `trailing:N` for "last N
+days ending yesterday" (default `trailing:7`), `yesterday`, `today`,
+`YYYY-MM-DD..YYYY-MM-DD` for an explicit closed-closed range, or a
+single `YYYY-MM-DD` for a one-day report.
 
 Verify a report's provenance against current source data:
 

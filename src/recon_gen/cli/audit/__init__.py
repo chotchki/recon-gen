@@ -27,8 +27,10 @@ fingerprint lands in U.7). Per-invariant violation tables, the
 per-account-day Daily Statement walk, and the sign-off block land
 in U.3+.
 
-Period default: ``yesterday + last 7 days`` (a 7-day window ending
-yesterday). Override with ``--from YYYY-MM-DD`` / ``--to YYYY-MM-DD``.
+Period default: ``trailing:7`` (a 7-day window ending yesterday).
+Override with ``--period <shape>`` — see ``--help`` for the full
+accepted-shapes list (``trailing:N``, ``today``, ``yesterday``,
+``YYYY-MM-DD..YYYY-MM-DD``, or single ``YYYY-MM-DD``).
 """
 
 from __future__ import annotations
@@ -42,7 +44,9 @@ from pathlib import Path
 
 import click
 
+from recon_gen.cli.audit._period import period_option
 from recon_gen.common.as_of_frame import AsOfFrame
+from recon_gen.common.intervals import DateInterval
 from recon_gen.cli._helpers import (
     config_option,
     execute_option,
@@ -144,49 +148,23 @@ def audit() -> None:
     """Per-instance PDF reconciliation report (cover, summary, exceptions)."""
 
 
-def _period_option_from():  # type: ignore[no-untyped-def]: Click decorator strips the function-decorator return type
-    return click.option(
-        "--from", "period_from",
-        type=click.DateTime(formats=["%Y-%m-%d"]), default=None,
-        help=(
-            "Period start (YYYY-MM-DD, inclusive). Default: today − 7 days "
-            "(start of the 7-day window ending yesterday)."
-        ),
-    )
-
-
-def _period_option_to():  # type: ignore[no-untyped-def]: Click decorator strips the function-decorator return type
-    return click.option(
-        "--to", "period_to",
-        type=click.DateTime(formats=["%Y-%m-%d"]), default=None,
-        help=(
-            "Period end (YYYY-MM-DD, inclusive). Default: yesterday "
-            "(today − 1)."
-        ),
-    )
-
-
 def _resolve_period(
-    period_from: datetime | None, period_to: datetime | None,
-    *, today: date | None = None,
-) -> tuple[date, date]:
+    period: DateInterval | None,
+    *, today: date | None = None,  # typing-smell: ignore[no-raw-temporal-args]: test-override hook; the staged no-raw-temporal-args lint will allowlist this seam pre-enable
+) -> DateInterval:
     """Resolve the report period.
 
-    Default: a 7-day window ending yesterday — i.e. ``[today − 7,
-    today − 1]`` inclusive. Both endpoints are inclusive dates.
-    Override either endpoint via ``--from`` / ``--to``.
+    When ``period`` is supplied (operator passed ``--period <shape>``),
+    return it as-is. Otherwise default to ``trailing:7`` — a 7-day
+    window ending yesterday (``[today-7, today-1]`` closed-closed). The
+    ``today`` arg is a test-override hook; production callers leave it
+    None so the default routes through ``AsOfFrame.live()`` (the
+    canonical blessed wall-clock seam per AQ.3).
     """
-    # AQ.3 funnel: default report anchor routes through AsOfFrame.live()
-    # — the sole blessed wall-clock site. Operators override via --today.
+    if period is not None:
+        return period
     anchor = today or AsOfFrame.live().as_of
-    end = period_to.date() if period_to is not None else anchor - timedelta(days=1)
-    start = period_from.date() if period_from is not None else anchor - timedelta(days=7)
-    if start > end:
-        raise click.UsageError(
-            f"--from ({start.isoformat()}) must not be after --to "
-            f"({end.isoformat()})."
-        )
-    return start, end
+    return DateInterval.trailing_days_ending_yesterday(anchor, 7)
 
 
 def _institution_name(instance, cfg) -> str:  # type: ignore[no-untyped-def]: instance is L2Instance, cfg is Config — untyped pending audit-CLI sweep
@@ -265,7 +243,7 @@ _EXCEPTION_INVARIANTS: list[tuple[str, str, str | None]] = [
 
 
 def _query_executive_summary(
-    cfg, instance, period: tuple[date, date],  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg, instance, period: DateInterval,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> ExecSummary | None:
     """Aggregate the executive-summary totals against the demo DB.
 
@@ -288,7 +266,7 @@ def _query_executive_summary(
     from recon_gen.common.db import connect_demo_db
 
     prefix = cfg.db_table_prefix
-    start, end = period
+    start, end = period.start, period.end
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
         (end + timedelta(days=1)).isoformat(), cfg.dialect,
@@ -396,7 +374,7 @@ class DriftViolation:
 
 
 def _query_drift_violations(
-    cfg, instance, period: tuple[date, date],  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg, instance, period: DateInterval,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> list[DriftViolation] | None:
     """Pull drift rows whose business day falls in the period.
 
@@ -415,7 +393,7 @@ def _query_drift_violations(
     from recon_gen.common.db import connect_demo_db
 
     prefix = cfg.db_table_prefix
-    start, end = period
+    start, end = period.start, period.end
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
         (end + timedelta(days=1)).isoformat(), cfg.dialect,
@@ -477,7 +455,7 @@ class OverdraftViolation:
 
 
 def _query_overdraft_violations(
-    cfg, instance, period: tuple[date, date],  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg, instance, period: DateInterval,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> list[OverdraftViolation] | None:
     """Pull overdraft rows whose business day falls in the period.
 
@@ -493,7 +471,7 @@ def _query_overdraft_violations(
     from recon_gen.common.db import connect_demo_db
 
     prefix = cfg.db_table_prefix
-    start, end = period
+    start, end = period.start, period.end
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
         (end + timedelta(days=1)).isoformat(), cfg.dialect,
@@ -622,7 +600,7 @@ class LimitBreachViolation:
 
 
 def _query_limit_breach_violations(
-    cfg, instance, period: tuple[date, date],  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg, instance, period: DateInterval,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> list[LimitBreachViolation] | None:
     """Pull limit_breach rows whose business day falls in the period.
 
@@ -635,7 +613,7 @@ def _query_limit_breach_violations(
     from recon_gen.common.db import connect_demo_db
 
     prefix = cfg.db_table_prefix
-    start, end = period
+    start, end = period.start, period.end
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
         (end + timedelta(days=1)).isoformat(), cfg.dialect,
@@ -1057,7 +1035,7 @@ class SupersessionAuditData:
 
 
 def _query_supersession(
-    cfg, instance, period: tuple[date, date],  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg, instance, period: DateInterval,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> SupersessionAuditData | None:
     """Aggregate supersession counts + in-window detail rows.
 
@@ -1073,7 +1051,7 @@ def _query_supersession(
     from recon_gen.common.db import connect_demo_db
 
     prefix = cfg.db_table_prefix
-    start, end = period
+    start, end = period.start, period.end
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
         (end + timedelta(days=1)).isoformat(), cfg.dialect,
@@ -1208,7 +1186,7 @@ class DailyStatementWalk:
 
 def _query_daily_statement_walks(
     cfg, instance,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
-    period: tuple[date, date],
+    period: DateInterval,
     singleton_ids: set[str],
 ) -> list[DailyStatementWalk] | None:
     """Pull a Daily Statement walk for every drifted (account, day) pair.
@@ -1236,7 +1214,7 @@ def _query_daily_statement_walks(
     from recon_gen.common.db import connect_demo_db
 
     prefix = cfg.db_table_prefix
-    start, end = period
+    start, end = period.start, period.end
     start_lit = date_literal(start.isoformat(), cfg.dialect)
     end_excl_lit = date_literal(
         (end + timedelta(days=1)).isoformat(), cfg.dialect,
@@ -1458,8 +1436,7 @@ def _query_matview_evidence(
 @audit.command("apply")
 @l2_instance_option()
 @config_option(required_for_dialect_only=True)
-@_period_option_from()
-@_period_option_to()
+@period_option()
 @click.option(
     "-o", "--output", "output",
     type=click.Path(), default=None,
@@ -1473,8 +1450,7 @@ def _query_matview_evidence(
 def audit_apply(
     l2_instance_path: str | None,
     config: str,
-    period_from: datetime | None,
-    period_to: datetime | None,
+    period: DateInterval | None,
     output: str | None,
     execute: bool,
 ) -> None:
@@ -1491,7 +1467,7 @@ def audit_apply(
     from recon_gen import __version__ as _qsg_version
 
     _cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
-    start, end = _resolve_period(period_from, period_to)
+    resolved_period = _resolve_period(period)
     institution = _institution_name(instance, _cfg)
     generated_at = datetime.now()
     l2_label = (
@@ -1499,19 +1475,19 @@ def audit_apply(
         if l2_instance_path is not None
         else f"{_cfg.deployment_name} (bundled)"
     )
-    exec_summary = _query_executive_summary(_cfg, instance, (start, end))
-    drift_rows = _query_drift_violations(_cfg, instance, (start, end))
-    overdraft_rows = _query_overdraft_violations(_cfg, instance, (start, end))
+    exec_summary = _query_executive_summary(_cfg, instance, resolved_period)
+    drift_rows = _query_drift_violations(_cfg, instance, resolved_period)
+    overdraft_rows = _query_overdraft_violations(_cfg, instance, resolved_period)
     limit_breach_rows = _query_limit_breach_violations(
-        _cfg, instance, (start, end),
+        _cfg, instance, resolved_period,
     )
     stuck_pending_rows = _query_stuck_pending_violations(_cfg, instance)
     stuck_unbundled_rows = _query_stuck_unbundled_violations(_cfg, instance)
-    supersession_data = _query_supersession(_cfg, instance, (start, end))
+    supersession_data = _query_supersession(_cfg, instance, resolved_period)
     singleton_ids = _singleton_account_ids(instance)
     internal_singleton_ids = _internal_singleton_account_ids(instance)
     daily_statement_walks = _query_daily_statement_walks(
-        _cfg, instance, (start, end), internal_singleton_ids,
+        _cfg, instance, resolved_period, internal_singleton_ids,
     )
     provenance = compute_provenance(
         _cfg, instance,
@@ -1531,7 +1507,7 @@ def audit_apply(
         _write_audit_pdf(
             out_path,
             institution=institution,
-            period=(start, end),
+            period=resolved_period,
             generated_at=generated_at,
             exec_summary=exec_summary,
             drift_rows=drift_rows,
@@ -1560,13 +1536,14 @@ def audit_apply(
             )
         click.echo(
             f"Wrote audit report to {out_path} "
-            f"(institution={institution}, period={start}–{end})."
+            f"(institution={institution}, "
+            f"period={resolved_period.start}–{resolved_period.end})."
         )
         return
 
     markdown = _render_audit_markdown(
         institution=institution,
-        period=(start, end),
+        period=resolved_period,
         generated_at=generated_at,
         exec_summary=exec_summary,
         drift_rows=drift_rows,

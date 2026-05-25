@@ -52,6 +52,7 @@ from recon_gen.cli.audit import (
     _query_stuck_unbundled_violations,
     _query_supersession,
 )
+from recon_gen.common.intervals import DateInterval
 from recon_gen.common.sql.dialect import Dialect
 
 
@@ -183,7 +184,7 @@ def patched_connect(captured_sql, monkeypatch):
         yield
 
 
-_PERIOD: tuple[date, date] = (date(2030, 1, 1), date(2030, 1, 7))
+_PERIOD: DateInterval = DateInterval.closed(date(2030, 1, 1), date(2030, 1, 7))
 _INSTANCE = _FakeInstance(instance="ut")
 _CFG = _FakeCfg()
 

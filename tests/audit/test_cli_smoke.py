@@ -525,8 +525,7 @@ def test_audit_apply_period_overrides(min_config: Path):
             "audit", "apply",
             "-c", str(min_config),
             "--l2", str(_SPEC_EXAMPLE),
-            "--from", "2026-01-01",
-            "--to", "2026-01-07",
+            "--period", "2026-01-01..2026-01-07",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -542,8 +541,7 @@ def test_audit_apply_period_from_after_to_errors(min_config: Path):
             "audit", "apply",
             "-c", str(min_config),
             "--l2", str(_SPEC_EXAMPLE),
-            "--from", "2026-01-08",
-            "--to", "2026-01-01",
+            "--period", "2026-01-08..2026-01-01",
         ],
     )
     assert result.exit_code != 0
@@ -752,7 +750,7 @@ def test_audit_clean_missing_file_is_noop(tmp_path: Path):
 def test_resolve_period_default_is_seven_day_window():
     """Default = today − 7 ... today − 1 (inclusive). 7 days, ending yesterday."""
     today = date(2026, 5, 15)
-    start, end = _resolve_period(None, None, today=today)
-    assert start == date(2026, 5, 8)
-    assert end == date(2026, 5, 14)
-    assert (end - start).days == 6  # inclusive 7-day window
+    period = _resolve_period(None, today=today)
+    assert period.start == date(2026, 5, 8)
+    assert period.end == date(2026, 5, 14)
+    assert period.days == 7  # inclusive 7-day window
