@@ -1,5 +1,65 @@
 # Release Notes
 
+## v11.20.1 — Phase BB closeout: Reconciler "Create new" sub-form (BB.2)
+
+BB.1 (server-side composite create-rail-with-reconciler) and BB.3
+(driver-side wiring) shipped earlier as part of the AI.2.d.1.a
+dogfood track. The operator-facing HTMX form, however, only
+implemented the "attach to existing reconciler" half — operators
+hitting `recon-gen studio` to create a non-aggregating single-leg
+rail could not invoke the server's existing `mode=create_new` path
+(only the test-driver API could). This release closes that gap.
+
+### BB.2 — Reconciler "Create new" sub-form
+
+`_render_reconciler_section` now emits:
+
+- A mode radio at the top: **Attach to existing reconciler** (default)
+  / **Create new reconciler**.
+- The existing attach sub-form (kind + name dropdowns) wrapped in a
+  block toggled by the radio.
+- A new create-new sub-form with the per-kind minimum-required
+  fields:
+  - **TransferTemplate**: name + expected_net + transfer_key
+    (optional) + completion.
+  - **Aggregating Rail**: name + subtype + cadence + (single_leg →
+    leg_role + leg_direction | two_leg → source_role +
+    destination_role).
+- A small inline JS for show/hide toggling (mode radio, kind
+  picker, subtype picker). Dependency-free — falls back to "all
+  sections visible" when JS is disabled; server still validates
+  + atomically commits.
+
+### BB.1 — Server gate adjustment
+
+The create-POST handler's missing-required gate now splits on
+`reconciler_mode`:
+
+- `attach` (default): requires `reconciler_kind` + `reconciler_name`.
+- `create_new`: requires `reconciler_kind` + `reconciler_new_name`.
+
+When mode=create_new, the operator's kind choice can arrive on
+either `reconciler_kind` (mirrored by the inline JS) OR
+`reconciler_new_kind` (no-JS submit fallback). All `reconciler_new_*`
+fields mirror to overrides for re-render preservation on validation
+failure.
+
+### BB.6 — Verification
+
+7 BB.2 tests in `test_studio_editor_routes.py` (4 pre-existing + 3
+new) cover: form-rendering shape (mode radio + per-kind required
+fields), atomic create-rail-with-new-TT round-trip,
+missing-required → 400 + no partial persist, validator-failure →
+400 + atomic rollback. Full unit sweep green (2756 passed, 74
+skipped).
+
+Phase BB now functionally complete: dogfood path (BB.3/BB.4) +
+operator-facing HTMX form (BB.2) both deliver atomic
+rail-with-reconciler composite creation against an unmodified
+validator. The BB.0 lock direction holds (surgical form-pairing
+at the 2 actual S3+C3 bilateral-circular points; no validator
+split, no invalid-state UX).
+
 ## v11.20.0 — Phase BD: `AsOfFrame` rollout
 
 Phase BD makes `AsOfFrame(as_of, window, seed)` the single typed value

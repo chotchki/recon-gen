@@ -1811,3 +1811,173 @@ def test_bb1_aggregating_single_leg_rail_unaffected_by_reconciler_gate(
     assert resp.status_code == 303, resp.text
     reloaded = load_instance(writable_l2_yaml)
     assert any(str(r.name) == "BB1SelfReconciling" for r in reloaded.rails)
+
+
+# =============================================================================
+# BB.2 — Reconciler "Create new" sub-form (UI + server gate + round-trip).
+# =============================================================================
+
+
+def test_bb2_create_form_renders_mode_radio_and_create_new_subform(
+    writable_l2_yaml: Path,
+) -> None:
+    """BB.2 — the Reconciler section carries a mode radio (attach |
+    create_new) AND an inline create-new sub-form with the per-kind
+    required-minimum fields (TT: expected_net + completion;
+    aggregator: subtype + cadence + role/direction)."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI; make_app return inferred Any
+        resp = c.get("/l2_shape/rail/new?subtype=single_leg")
+    assert resp.status_code == 200, resp.text
+    body = resp.text
+    # Mode radio with both options.
+    assert 'name="reconciler_mode"' in body
+    assert 'value="attach"' in body
+    assert 'value="create_new"' in body
+    # Attach block (existing behavior).
+    assert 'data-reconciler-block="attach"' in body
+    # Create-new block + the kind picker.
+    assert 'data-reconciler-block="create_new"' in body
+    assert 'name="reconciler_new_kind"' in body
+    assert 'name="reconciler_new_name"' in body
+    # Per-kind minimum field-sets (both rendered; client-side JS
+    # hides the inactive one — a no-JS submit picks whichever has
+    # values).
+    assert 'data-reconciler-new-kind-fields="transfer_template"' in body
+    assert 'data-reconciler-new-kind-fields="aggregating_rail"' in body
+    # TT minimum: expected_net + completion.
+    assert 'name="reconciler_new_expected_net"' in body
+    assert 'name="reconciler_new_completion"' in body
+    # Aggregator minimum: subtype + cadence + role/direction.
+    assert 'name="reconciler_new_subtype"' in body
+    assert 'name="reconciler_new_cadence"' in body
+    assert 'name="reconciler_new_leg_role"' in body
+    assert 'name="reconciler_new_leg_direction"' in body
+
+
+def test_bb2_create_new_tt_atomically_creates_rail_plus_reconciler(
+    writable_l2_yaml: Path,
+) -> None:
+    """BB.2 — POST with mode=create_new + kind=transfer_template
+    creates BOTH the rail AND the new TT (with the rail auto-appended
+    to leg_rails) atomically. Single 303 on success; both entities
+    appear in the round-tripped L2."""
+    app = _build_app(writable_l2_yaml)
+    data = {
+        "subtype": "single_leg",
+        "name": "BB2NewRail",
+        "leg_role": "CustomerLedger",
+        "leg_role__present": "1",
+        "leg_direction": "Credit",
+        "aggregating": "false",
+        "origin": "InternalInitiated",
+        "reconciler_mode": "create_new",
+        "reconciler_kind": "transfer_template",
+        "reconciler_new_kind": "transfer_template",
+        "reconciler_new_name": "BB2NewTT",
+        "reconciler_new_expected_net": "0.00",
+        "reconciler_new_completion": "business_day_end",
+    }
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI; make_app return inferred Any
+        resp = c.post(
+            "/l2_shape/rail/", data=data, follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    reloaded = load_instance(writable_l2_yaml)
+    new_rail = next(
+        (r for r in reloaded.rails if str(r.name) == "BB2NewRail"),
+        None,
+    )
+    assert new_rail is not None, "new rail missing — composite mutation dropped"
+    new_tt = next(
+        (
+            t for t in reloaded.transfer_templates
+            if str(t.name) == "BB2NewTT"
+        ),
+        None,
+    )
+    assert new_tt is not None, "new TT missing — create-new path didn't fire"
+    # The new rail must be in the new TT's leg_rails (the atomicity
+    # contract — both halves landed).
+    assert "BB2NewRail" in [str(n) for n in new_tt.leg_rails]
+
+
+def test_bb2_create_new_missing_required_returns_400_no_partial_persist(
+    writable_l2_yaml: Path,
+) -> None:
+    """BB.2 — mode=create_new without the required reconciler_new_name
+    returns 400 + neither the rail nor a new reconciler persist. The
+    re-rendered form preserves the operator's typed mode + create-new
+    field overrides so the operator doesn't retype."""
+    app = _build_app(writable_l2_yaml)
+    snapshot = load_instance(writable_l2_yaml)
+    rail_count_before = len(snapshot.rails)
+    tt_count_before = len(snapshot.transfer_templates)
+    data = {
+        "subtype": "single_leg",
+        "name": "BB2MissingName",
+        "leg_role": "CustomerLedger",
+        "leg_role__present": "1",
+        "leg_direction": "Credit",
+        "aggregating": "false",
+        "origin": "InternalInitiated",
+        "reconciler_mode": "create_new",
+        "reconciler_kind": "transfer_template",
+        "reconciler_new_kind": "transfer_template",
+        # reconciler_new_name OMITTED — should 400.
+        "reconciler_new_expected_net": "0.00",
+        "reconciler_new_completion": "business_day_end",
+    }
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI; make_app return inferred Any
+        resp = c.post(
+            "/l2_shape/rail/", data=data, follow_redirects=False,
+        )
+    assert resp.status_code == 400, resp.text
+    body = resp.text
+    # Re-rendered form preserves mode=create_new + the typed-but-
+    # missing-required fields.
+    assert 'value="create_new"' in body
+    # No partial persist on the L2 disk.
+    reloaded = load_instance(writable_l2_yaml)
+    assert len(reloaded.rails) == rail_count_before
+    assert len(reloaded.transfer_templates) == tt_count_before
+
+
+def test_bb2_create_new_validation_failure_rolls_back_atomically(
+    writable_l2_yaml: Path,
+) -> None:
+    """BB.2 — when validate() rejects the composite (rail + new
+    reconciler), NEITHER persists. Atomic semantics: the composite
+    is the unit, not the individual entities. Reproduce by creating
+    a TT with an invalid completion expression."""
+    app = _build_app(writable_l2_yaml)
+    snapshot = load_instance(writable_l2_yaml)
+    rail_count_before = len(snapshot.rails)
+    tt_count_before = len(snapshot.transfer_templates)
+    data = {
+        "subtype": "single_leg",
+        "name": "BB2RollbackRail",
+        "leg_role": "CustomerLedger",
+        "leg_role__present": "1",
+        "leg_direction": "Credit",
+        "aggregating": "false",
+        "origin": "InternalInitiated",
+        "reconciler_mode": "create_new",
+        "reconciler_kind": "transfer_template",
+        "reconciler_new_kind": "transfer_template",
+        "reconciler_new_name": "BB2RollbackTT",
+        "reconciler_new_expected_net": "0.00",
+        # Completion is required; this rejection-path tests that a
+        # downstream validator failure ALSO rolls back.
+        "reconciler_new_completion": "not-a-valid-completion-expr",
+    }
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI; make_app return inferred Any
+        resp = c.post(
+            "/l2_shape/rail/", data=data, follow_redirects=False,
+        )
+    # Either coerce-time or validate-time rejection, both => 400 +
+    # nothing on disk.
+    assert resp.status_code == 400, resp.text
+    reloaded = load_instance(writable_l2_yaml)
+    assert len(reloaded.rails) == rail_count_before
+    assert len(reloaded.transfer_templates) == tt_count_before

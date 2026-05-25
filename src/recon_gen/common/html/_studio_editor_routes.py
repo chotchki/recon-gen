@@ -2104,21 +2104,53 @@ def _render_reconciler_section(
 ) -> str:
     """BB.2 — render the Reconciler picker for non-aggregating single-leg
     rails. Pairs with BB.1's create-POST handler reading
-    ``reconciler_kind`` + ``reconciler_name`` from the form.
+    ``reconciler_mode`` + ``reconciler_kind`` + (``reconciler_name`` |
+    ``reconciler_new_*``) from the form.
 
-    Two selects + grouped name options:
-    - **Kind** — ``transfer_template`` (closes TT's expected_net) or
-      ``aggregating_rail`` (gets swept into the aggregator's bundle).
-    - **Name** — dropdown grouped by kind so the operator picks from
-      the matching optgroup. Mismatched picks (e.g., TT name with
-      aggregating_rail kind) reach the server and surface as a 400 +
-      inline error.
+    Two top-level modes (radio):
+    - **Attach existing** (default) — pick a kind + a name from a
+      grouped dropdown of declared TTs / aggregating Rails. Mismatched
+      picks (TT name with aggregating_rail kind) return 400.
+    - **Create new** — inline mini-form for the new reconciler's
+      minimum required fields per kind. The new reconciler is created
+      with the new rail auto-appended to its rail-list (`leg_rails`
+      for TT; `bundles_activity` for aggregating Rail) — see
+      ``_create_new_reconciler_with_rail``.
 
-    Variable-direction sub-case is documented in the helper text; the
-    server enforces (only TTs can reconcile Variable per validator C3).
+    Variable-direction sub-case (validator C3): aggregating Rails
+    can't reconcile Variable. The server enforces; the UI shows
+    helper text. A future refinement could disable the
+    aggregating_rail radio when the operator picks
+    leg_direction=Variable (client-side JS), kept out for the
+    minimal-JS posture.
     """
+    rmode_override = str(overrides.get("reconciler_mode") or "attach")
     rk_override = str(overrides.get("reconciler_kind") or "")
     rn_override = str(overrides.get("reconciler_name") or "")
+    # Create-new sub-form overrides (validation-failure round-trip
+    # preserves these so the operator doesn't retype).
+    rnn_name_override = str(overrides.get("reconciler_new_name") or "")
+    rnn_subtype_override = str(overrides.get("reconciler_new_subtype") or "")
+    rnn_cadence_override = str(overrides.get("reconciler_new_cadence") or "")
+    rnn_leg_role_override = str(overrides.get("reconciler_new_leg_role") or "")
+    rnn_leg_direction_override = str(
+        overrides.get("reconciler_new_leg_direction") or "",
+    )
+    rnn_source_role_override = str(
+        overrides.get("reconciler_new_source_role") or "",
+    )
+    rnn_destination_role_override = str(
+        overrides.get("reconciler_new_destination_role") or "",
+    )
+    rnn_expected_net_override = str(
+        overrides.get("reconciler_new_expected_net") or "",
+    )
+    rnn_transfer_key_override = str(
+        overrides.get("reconciler_new_transfer_key") or "",
+    )
+    rnn_completion_override = str(
+        overrides.get("reconciler_new_completion") or "",
+    )
 
     tt_names = sorted(str(t.name) for t in instance.transfer_templates)
     agg_names = sorted(
@@ -2135,34 +2167,59 @@ def _render_reconciler_section(
         for v, lbl in kind_options
     )
 
-    def _opt(n: str) -> str:
-        sel = " selected" if rn_override == n else ""
+    def _opt(n: str, override: str) -> str:
+        sel = " selected" if override == n else ""
         return f'<option value="{escape(n)}"{sel}>{escape(n)}</option>'
 
-    tt_opts = "".join(_opt(n) for n in tt_names) or '<option disabled>(no TransferTemplates declared yet)</option>'
-    agg_opts = "".join(_opt(n) for n in agg_names) or '<option disabled>(no aggregating Rails declared yet)</option>'
+    tt_opts = "".join(_opt(n, rn_override) for n in tt_names) or '<option disabled>(no TransferTemplates declared yet)</option>'
+    agg_opts = "".join(_opt(n, rn_override) for n in agg_names) or '<option disabled>(no aggregating Rails declared yet)</option>'
+
+    attach_checked = " checked" if rmode_override != "create_new" else ""
+    create_checked = " checked" if rmode_override == "create_new" else ""
+    attach_hidden = ' hidden' if rmode_override == "create_new" else ''
+    create_hidden = ' hidden' if rmode_override != "create_new" else ''
+
+    leg_dir_opts = "".join(
+        f'<option value="{v}"{" selected" if rnn_leg_direction_override == v else ""}>{v}</option>'
+        for v in ("Debit", "Credit", "Variable")
+    )
+    subtype_opts = "".join(
+        f'<option value="{v}"{" selected" if rnn_subtype_override == v else ""}>{v}</option>'
+        for v in ("single_leg", "two_leg")
+    )
 
     return (
         '<fieldset class="reconciler-section">'
         '<legend>Reconciler<span class="required"> *</span></legend>'
         '<p class="reconciler-helper">'
         "Non-aggregating single-leg rails don't reconcile their own drift. "
-        "Per SPEC §S3 + C3, this rail must attach to either a "
-        "TransferTemplate (closes its expected_net) OR an aggregating Rail "
-        "(gets swept into its bundle). Save commits the rail + the "
-        "attach atomically (BB.1) — either both land or neither. "
+        "Per SPEC §S3 + C3, this rail must attach to a reconciler — either "
+        "a TransferTemplate (closes its expected_net) OR an aggregating Rail "
+        "(gets swept into its bundle). Save commits the rail + the reconciler "
+        "mutation atomically (BB.1) — either both land or neither. "
         "Variable-direction single-legs must attach to a TransferTemplate "
         "only (per validator C3)."
         "</p>"
+        # Mode radio — Attach existing vs Create new.
+        '<div class="field-row reconciler-mode-row">'
+        '<label class="reconciler-mode-label">'
+        f'<input type="radio" name="reconciler_mode" value="attach" data-reconciler-mode="attach"{attach_checked}>'
+        ' Attach to existing reconciler</label>'
+        '<label class="reconciler-mode-label">'
+        f'<input type="radio" name="reconciler_mode" value="create_new" data-reconciler-mode="create_new"{create_checked}>'
+        ' Create new reconciler</label>'
+        '</div>'
+        # Attach-existing sub-form (kind + name dropdowns).
+        f'<div class="reconciler-attach-block" data-reconciler-block="attach"{attach_hidden}>'
         '<div class="field-row">'
-        '<label for="field-reconciler_kind">Reconciler kind<span class="required"> *</span></label>'
+        '<label for="field-reconciler_kind">Reconciler kind</label>'
         '<select id="field-reconciler_kind" name="reconciler_kind">'
         f'<option value=""{" selected" if not rk_override else ""}>— pick —</option>'
         f'{kind_html}'
         '</select>'
         '</div>'
         '<div class="field-row">'
-        '<label for="field-reconciler_name">Reconciler name<span class="required"> *</span></label>'
+        '<label for="field-reconciler_name">Reconciler name</label>'
         '<select id="field-reconciler_name" name="reconciler_name">'
         f'<option value=""{" selected" if not rn_override else ""}>— pick —</option>'
         f'<optgroup label="TransferTemplates">{tt_opts}</optgroup>'
@@ -2170,6 +2227,138 @@ def _render_reconciler_section(
         '</select>'
         '<small class="field-helper">Pick from the optgroup matching the kind above; mismatches return 400.</small>'
         '</div>'
+        '</div>'
+        # Create-new sub-form (kind + new-name + per-kind required minima).
+        f'<div class="reconciler-create-block" data-reconciler-block="create_new"{create_hidden}>'
+        '<p class="reconciler-helper">'
+        "The new reconciler is created in the same atomic save as the rail. "
+        "Required fields below match the reconciler kind's validator minimum "
+        "(rejected POSTs re-render with an inline error)."
+        "</p>"
+        '<div class="field-row">'
+        '<label for="field-reconciler_new_name">New reconciler name'
+        '<span class="required"> *</span></label>'
+        f'<input type="text" id="field-reconciler_new_name" name="reconciler_new_name" value="{escape(rnn_name_override)}">'
+        '</div>'
+        '<div class="field-row">'
+        '<label for="field-reconciler_new_kind">New reconciler kind'
+        '<span class="required"> *</span></label>'
+        '<select id="field-reconciler_new_kind" name="reconciler_new_kind" data-reconciler-new-kind>'
+        f'<option value=""{" selected" if not rk_override else ""}>— pick —</option>'
+        f'<option value="transfer_template"{" selected" if rk_override == "transfer_template" else ""}>TransferTemplate</option>'
+        f'<option value="aggregating_rail"{" selected" if rk_override == "aggregating_rail" else ""}>Aggregating Rail</option>'
+        '</select>'
+        '<small class="field-helper">Server reads `reconciler_kind` from this when mode=create_new.</small>'
+        '</div>'
+        # TT-specific minimum fields.
+        f'<div class="reconciler-new-tt-fields" data-reconciler-new-kind-fields="transfer_template"{"" if rk_override == "transfer_template" else " hidden"}>'
+        '<div class="field-row">'
+        '<label for="field-reconciler_new_expected_net">Expected net'
+        '<span class="required"> *</span></label>'
+        f'<input type="text" id="field-reconciler_new_expected_net" name="reconciler_new_expected_net" value="{escape(rnn_expected_net_override)}" placeholder="0.00">'
+        '<small class="field-helper">Money — must equal the sum of leg amounts at close.</small>'
+        '</div>'
+        '<div class="field-row">'
+        '<label for="field-reconciler_new_transfer_key">Transfer key</label>'
+        f'<input type="text" id="field-reconciler_new_transfer_key" name="reconciler_new_transfer_key" value="{escape(rnn_transfer_key_override)}" placeholder="metadata_key_1, metadata_key_2">'
+        '<small class="field-helper">Comma-separated metadata keys that scope a transfer instance.</small>'
+        '</div>'
+        '<div class="field-row">'
+        '<label for="field-reconciler_new_completion">Completion'
+        '<span class="required"> *</span></label>'
+        f'<input type="text" id="field-reconciler_new_completion" name="reconciler_new_completion" value="{escape(rnn_completion_override)}" placeholder="all_legs_posted">'
+        '<small class="field-helper">CompletionExpression — when this TT is considered done.</small>'
+        '</div>'
+        '</div>'
+        # Aggregating-rail minimum fields.
+        f'<div class="reconciler-new-agg-fields" data-reconciler-new-kind-fields="aggregating_rail"{"" if rk_override == "aggregating_rail" else " hidden"}>'
+        '<div class="field-row">'
+        '<label for="field-reconciler_new_subtype">Subtype'
+        '<span class="required"> *</span></label>'
+        '<select id="field-reconciler_new_subtype" name="reconciler_new_subtype" data-reconciler-new-subtype>'
+        f'<option value=""{" selected" if not rnn_subtype_override else ""}>— pick —</option>'
+        f'{subtype_opts}'
+        '</select>'
+        '</div>'
+        '<div class="field-row">'
+        '<label for="field-reconciler_new_cadence">Cadence'
+        '<span class="required"> *</span></label>'
+        f'<input type="text" id="field-reconciler_new_cadence" name="reconciler_new_cadence" value="{escape(rnn_cadence_override)}" placeholder="daily">'
+        '</div>'
+        # Single-leg aggregator: leg_role + leg_direction
+        f'<div class="reconciler-new-single-leg-fields" data-reconciler-new-subtype-fields="single_leg"{"" if rnn_subtype_override == "single_leg" else " hidden"}>'
+        '<div class="field-row">'
+        '<label for="field-reconciler_new_leg_role">Leg role'
+        '<span class="required"> *</span></label>'
+        f'<input type="text" id="field-reconciler_new_leg_role" name="reconciler_new_leg_role" value="{escape(rnn_leg_role_override)}">'
+        '<input type="hidden" name="reconciler_new_leg_role__present" value="1">'
+        '</div>'
+        '<div class="field-row">'
+        '<label for="field-reconciler_new_leg_direction">Leg direction'
+        '<span class="required"> *</span></label>'
+        '<select id="field-reconciler_new_leg_direction" name="reconciler_new_leg_direction">'
+        f'<option value=""{" selected" if not rnn_leg_direction_override else ""}>— pick —</option>'
+        f'{leg_dir_opts}'
+        '</select>'
+        '</div>'
+        '</div>'
+        # Two-leg aggregator: source_role + destination_role
+        f'<div class="reconciler-new-two-leg-fields" data-reconciler-new-subtype-fields="two_leg"{"" if rnn_subtype_override == "two_leg" else " hidden"}>'
+        '<div class="field-row">'
+        '<label for="field-reconciler_new_source_role">Source role'
+        '<span class="required"> *</span></label>'
+        f'<input type="text" id="field-reconciler_new_source_role" name="reconciler_new_source_role" value="{escape(rnn_source_role_override)}">'
+        '<input type="hidden" name="reconciler_new_source_role__present" value="1">'
+        '</div>'
+        '<div class="field-row">'
+        '<label for="field-reconciler_new_destination_role">Destination role'
+        '<span class="required"> *</span></label>'
+        f'<input type="text" id="field-reconciler_new_destination_role" name="reconciler_new_destination_role" value="{escape(rnn_destination_role_override)}">'
+        '<input type="hidden" name="reconciler_new_destination_role__present" value="1">'
+        '</div>'
+        '</div>'
+        '</div>'
+        '</div>'
+        # Tiny vanilla-JS show/hide for the radio + per-kind/subtype.
+        # Kept inline + dependency-free per the studio's minimal-JS
+        # posture; falls back to "all sections visible" if disabled
+        # (server still validates so the operator can't ship bad
+        # state — the UX is just messier).
+        '<script>'
+        "(function(){"
+        "const fs=document.currentScript.parentElement;"
+        # Mode radio toggle (attach vs create_new blocks).
+        "fs.querySelectorAll('[data-reconciler-mode]').forEach(r=>{"
+        "r.addEventListener('change',()=>{"
+        "fs.querySelectorAll('[data-reconciler-block]').forEach(b=>{"
+        "b.hidden = b.dataset.reconcilerBlock !== r.value;"
+        "});"
+        "});"
+        "});"
+        # Create-new-kind dropdown toggle (TT vs aggregator field-sets).
+        "const k=fs.querySelector('[data-reconciler-new-kind]');"
+        "if(k){k.addEventListener('change',()=>{"
+        "fs.querySelectorAll('[data-reconciler-new-kind-fields]').forEach(b=>{"
+        "b.hidden = b.dataset.reconcilerNewKindFields !== k.value;"
+        "});"
+        # Mirror create-new-kind into reconciler_kind so the BB.1
+        # server reads the same field for both modes.
+        "const rk=fs.querySelector('[name=reconciler_kind]');"
+        "if(rk){rk.value=k.value;}"
+        "});}"
+        # Create-new subtype toggle (single_leg vs two_leg field-sets).
+        "const st=fs.querySelector('[data-reconciler-new-subtype]');"
+        "if(st){st.addEventListener('change',()=>{"
+        "fs.querySelectorAll('[data-reconciler-new-subtype-fields]').forEach(b=>{"
+        "b.hidden = b.dataset.reconcilerNewSubtypeFields !== st.value;"
+        "});"
+        # The server's _create_new_reconciler_with_rail reads
+        # `reconciler_new_subtype` directly via sub_form.get('subtype'),
+        # so mirror create-side subtype into the bare `subtype` key
+        # under the prefix.
+        "});}"
+        "})();"
+        '</script>'
         '</fieldset>'
     )
 
@@ -2924,25 +3113,62 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
         needs_reconciler = (
             non_agg_single_leg or two_leg_without_expected_net
         )
+        # BB.2 — resolve reconciler_mode UP-FRONT (needs to gate the
+        # missing-required validation below + drive both the attach
+        # and create-new server paths). Default "attach" preserves
+        # the BB.1 contract.
+        reconciler_mode = (
+            str(form.get("reconciler_mode") or "attach").strip()
+            or "attach"
+        )
         # BB.2 — capture the reconciler picker values into
         # ``coerced_overrides`` regardless of whether needs_reconciler
         # fires, so a re-render on validation failure preserves the
         # operator's typed picker state. The reconciler fields aren't
-        # FieldSpecs so they don't come through _coerce_form.
+        # FieldSpecs so they don't come through _coerce_form. The
+        # create-new sub-form (BB.2 mode=create_new) carries its own
+        # `reconciler_new_*` prefix-set; mirror those to overrides
+        # too so the operator doesn't retype on a re-render.
+        coerced_overrides["reconciler_mode"] = reconciler_mode
         raw_rk_form = form.get("reconciler_kind")
+        # When mode=create_new the operator's kind choice lives on
+        # `reconciler_new_kind` (the inline JS mirrors it to
+        # `reconciler_kind`, but a no-JS submit needs the fallback).
+        raw_rk_new_form = form.get("reconciler_new_kind")
+        if raw_rk_new_form and not raw_rk_form:
+            raw_rk_form = raw_rk_new_form
         raw_rn_form = form.get("reconciler_name")
         if raw_rk_form is not None:
             coerced_overrides["reconciler_kind"] = str(raw_rk_form)
         if raw_rn_form is not None:
             coerced_overrides["reconciler_name"] = str(raw_rn_form)
+        # Mirror every reconciler_new_* into overrides so a re-render
+        # round-trip preserves the inline sub-form state.
+        for fk, fv in form.multi_items():
+            if str(fk).startswith("reconciler_new_"):
+                coerced_overrides[str(fk)] = str(fv)
         reconciler_kind: str | None = None
         reconciler_name: str | None = None
         if needs_reconciler:
-            raw_rk = form.get("reconciler_kind")
+            raw_rk = raw_rk_form
             raw_rn = form.get("reconciler_name")
+            raw_rn_new = form.get("reconciler_new_name")
             reconciler_kind = str(raw_rk).strip() if raw_rk else ""
             reconciler_name = str(raw_rn).strip() if raw_rn else ""
-            if not reconciler_kind or not reconciler_name:
+            reconciler_new_name = (
+                str(raw_rn_new).strip() if raw_rn_new else ""
+            )
+            # Required-input gate splits on mode: attach needs both
+            # kind + existing name; create_new needs kind + new-name.
+            if reconciler_mode == "create_new":
+                missing_required = (
+                    not reconciler_kind or not reconciler_new_name
+                )
+            else:
+                missing_required = (
+                    not reconciler_kind or not reconciler_name
+                )
+            if missing_required:
                 return HTMLResponse(
                     _render_create_page(
                         kind, cache.get(),
@@ -2994,15 +3220,11 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
         # create reconciler) is the unit of atomicity: either both
         # land or neither. Two paths:
         #   reconciler_mode = "attach" (BB.1) — append to existing.
-        #   reconciler_mode = "create_new" (BB.3) — create a new
+        #   reconciler_mode = "create_new" (BB.2/BB.3) — create a new
         #     reconciler with the new rail in its rail-list field.
-        # Driver computes the right path; operator UI defaults to
-        # attach (the BB.2 picker; BB.2.b backlog adds the
-        # create-new sub-form).
-        reconciler_mode = (
-            str(form.get("reconciler_mode") or "attach").strip()
-            or "attach"
-        )
+        # Driver computes the right path; operator UI offers both
+        # modes via the BB.2 radio (create-new sub-form lives inside
+        # _render_reconciler_section).
         if needs_reconciler:
             if reconciler_mode == "create_new":
                 try:
