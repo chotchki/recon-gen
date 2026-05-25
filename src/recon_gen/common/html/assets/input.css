@@ -16,6 +16,7 @@
  * regardless of quote style or string interpolation. */
 @source "../_studio_routes.py";
 @source "../_studio_editor_routes.py";
+@source "../_studio_assets/tw_classes.py";
 
 /*
  * X.2.l — Semantic theme tokens.
