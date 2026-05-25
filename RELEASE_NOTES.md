@@ -1,5 +1,114 @@
 # Release Notes
 
+## v11.20.0 — Phase BD: `AsOfFrame` rollout
+
+Phase BD makes `AsOfFrame(as_of, window, seed)` the single typed value
+every temporal-and-determinism callsite reads or constructs. The
+post-BC typed time-range intervals (Phase BC's `DateInterval`) become
+the frame's `window`; the `seed: int | None` field captures the third
+frame leg per AO.11; named constructors (`locked` / `live` /
+`for_audit` / `for_test`) replace bare-3-tuple construction.
+
+### BD.0 — Frame design spike
+
+`docs/audits/bd_0_asofframe_spike.md`. **Decision: extend `AsOfFrame`
+in place, do NOT rename to `RunContext`** (109 callsites → continuity
+wins over fresh naming). Three field-level changes locked: `window:
+DateInterval` (was `window_days: int`), `seed: int | None` field
+added, two new named constructors (`for_audit(today, *, lookback_days)`,
+`for_test(*, window, seed, as_of=None)`). D6 revised mid-spike per the
+no-compat-shim posture: drop the `window_days` property shim ENTIRELY,
+not "later cleanup" — pre-stable codebase, accumulating cruft is the
+bigger trap than breaking compat.
+
+### BD.1 — `AsOfFrame` shape extended
+
+`window: DateInterval` field replaces `window_days: int`. `seed: int |
+None` added. `for_audit` / `for_test` named constructors land.
+`window_days` property shim DROPPED (no compat). 12 existing tests
+updated + 7 new BD.1 tests pin the BD shape (including a regression
+test that rejects bare-int construction). Commit `609fa5f7`.
+
+### BD.2 — Audit CLI threads `AsOfFrame`
+
+`audit apply` builds the frame at entry (`_resolve_frame`); every PDF
+section (`pdf.py` × 7 sigs, `markdown.py` × 3 sigs) receives `frame:
+AsOfFrame` instead of `period: DateInterval`. `range_clause(frame.window,
+...)` at the SQL layer. Commit `6d932ecf`.
+
+### BD.3 — Plant emit threads `AsOfFrame`
+
+`scenario_to_generators(frame=AsOfFrame)` is now the only temporal
+seam. Legacy `anchor` / `plant_window` / `as_of` kwargs DROPPED
+(no-compat-shim). All 4 production callers migrated:
+
+- `cli/data.py::semantic-lock` builds a 91-day window matching the
+  baseline emit
+- `common/l2/seed.py::emit_seed` + `::emit_full_seed` use the
+  baseline-window-aligned frame
+- `tests/e2e/_seed_helpers.py::apply_db_seed` folds `(today,
+  plant_window)` into one frame
+
+Semantic locks regenerated: pre-BD.3 lock encoded the latent
+"all plants stack on anchor" bug (BC.4's docstring called it out —
+when `plant_window` was None, ALL densified drift plants ignored
+per-plant `days_ago` and landed at the same anchor; the lock captured
+that buggy behavior). Post-BD.3 locks show BC.4-correct per-day
+spreading. Commit `8ea61f44`.
+
+### BD.4 — Dashboard defaults derive from frame
+
+**Verification + tick, no new code.** AR.4 already landed the wiring:
+`apps/l1_dashboard/app.py:2628` + `apps/executives/app.py:821` both
+construct `DateView(frame=cfg.test_generator.as_of_frame(...))`; every
+QS analysis-param default + dataset-param default + App2 bind emits
+from one frame via `DateView.emit_*` (`common/tree/date_view.py:148-203`).
+Strict-collapse: `StaticValues` baked at deploy, NOT `RollingDate`
+expressions (App2 can't evaluate QS rolling-date expressions, so
+strict-collapse is the parity contract). L2FT intentionally bypasses
+DateView (doesn't filter on date).
+
+### BD.5 — Trainer cache exposes `get_frame()`
+
+`TestGeneratorCache.get_frame() -> AsOfFrame` added, derived from
+`(get_up_to(), _window, _state.seed)`. Bundles the three pieces the
+trainer mutates independently into the post-BD.1 frame shape; callers
+that want all-3 take one frame. Underlying storage stays field-based
+(restructuring `TestGeneratorConfig` + `StudioState` persistence for
+marginal ergonomic win wasn't justified). 3 round-trip + mutation
+tests in `test_tg_cache.py`.
+
+### BD.6 — Retired temporal constants
+
+Catalog at `docs/audits/bd_6_retired_temporal_constants.md`. Two
+transition-shim constants dropped:
+
+- `cli/data.py::_CANONICAL_LOCK_ANCHOR` — AQ.3 funnel's
+  caller-compat alias for `LOCKED_ANCHOR`. Only callers were one
+  self-use + one identity test.
+- `tests/e2e/_seed_helpers.py::DEFAULT_SEED_TODAY` — duplicate of
+  `LOCKED_ANCHOR` predating the AQ.3 funnel.
+
+NOT retired (per BD.0's D6 + the no-compat-shim memory's lifecycle
+default): `window_days: int` ergonomic kwarg on `AsOfFrame.locked/.live`
++ `Config.as_of_frame()` (construction-time ergonomics ≠ runtime
+escape hatch); 3 studio_routes `date.today()` reads (operator-facing,
+not determinism path); audit cover-page `generated_at = datetime.now()`
+(PDF generation timestamp, distinct from audit `as_of`).
+
+`LOCKED_ANCHOR` is now the codebase's sole source of truth for the
+demo anchor — every locked seed, every locked semantic-lock, every
+`AsOfFrame.locked()` reads it; no parallel name.
+
+### BD.7 — Reproductions stay impossible to re-introduce
+
+AO.10 + AO.S2.a + AO.11 reproduction tests all green
+(`tests/unit/test_studio_data_route.py`,
+`tests/schema/test_sql_dialect.py`, `tests/json/test_l1_dashboard.py`
+— 263 tests covering the typed-frame-protected reproductions, all
+pass). The frame's invariants make the three reproductions
+unrepresentable at the wiring site.
+
 ## v11.19.2 — BC.12.5 hotfix: `serialize_l2` emits `direction` on every `LimitSchedule`
 
 v11.19.1's release pipeline still goes red at the
