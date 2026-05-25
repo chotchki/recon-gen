@@ -1,5 +1,149 @@
 # Release Notes
 
+## v11.21.0 — Phase AM closeout: Tailwind utility migration + BF.1 banner
+
+Closes **Phase AM** (Standardize on Tailwind) by migrating every
+remaining studio chrome surface off hand-written CSS onto raw
+Tailwind utilities, and lands **BF.1** (subtype-requirements
+banner on the rail create + edit pages) as the first piece of
+Phase BF. Also re-applies a regressed BC.11 Oracle width fix that
+made the sasquatch_pr Oracle cell red.
+
+### AM.1 — Editor screens migration (steps 4-7)
+
+After AM.1 steps 1-3 (helpers + create-page chrome) shipped in
+v11.20.0a, steps 4-7 finish the editor module:
+
+- `_render_field` + every field-shape sub-renderer
+  (`_render_multi_select_groups_field`, `_render_xor_group_row`,
+  `_render_chain_children_field`, `_render_reconciler_section`)
+  switch from `.field-row` / `.multi-select-group` / `.field-error`
+  / etc. semantic classes to raw Tailwind utilities composed via
+  `field_row_classes()` + `field_input_classes()` helpers.
+- `_render_edit_page` / `_render_list_page` / `_render_read_card`
+  / `_render_singleton_page` / `_render_rail_subtype_picker` page
+  shells all on raw utilities; `editor.css` link dropped from
+  every editor page-shell.
+- Inline error blocks now carry `role="alert"` (ARIA semantic).
+- Browser drivers (`studio_browser_editor.py`, `studio_editor.py`)
+  switched to user-facing locators (`get_by_role("alert")`,
+  `article:has(h3:has-text(...))`) — no CSS classes anywhere in
+  the locator set.
+
+### AM.2 — Diagram + data-page chrome migration
+
+In four step commits:
+
+- **Step 1: shared chrome** — `studio-header`, `nav-link`,
+  `deploy-btn`, `deploy-status`, `count`, `instance`, page-body
+  shapes across all three page-shells (home, diagram, data).
+  Deploy-status state markers move from CSS classes to a
+  `data-state="running|halted|ok|error"` ARIA-like attribute;
+  the e2e browser test's selector follows.
+- **Step 2: home-page sections** — `home-section`,
+  `home-section-add/-link/-body/-loading`, `home-diagram`,
+  `home-entities`. The focus-filter JS migrates from
+  `.entity-card[data-kind][data-entity-id]` + a CSS-class
+  `is-hidden-by-focus` toggle to a `[data-kind][data-entity-id]`
+  attribute selector + the native HTML `hidden` attribute (so
+  assistive tech picks up visibility automatically). The
+  `entity-card` / `entity-card-title` marker classes drop —
+  `data-focus-node` is the JS hook now.
+- **Step 3: diagram-page chrome** — `diagram-chrome`,
+  `layer-stepper`, `layer-btn`, `chrome-section-label`,
+  `chrome-coverage-toggle`, `chrome-trainer-toggle`,
+  `focus-indicator`, `engine-link`, `status`, `diagram-viewport`.
+  Layer-stepper button uses `chrome_button_classes()` with an
+  accent-fill override for the active layer.
+- **Step 4: data-page chrome** — all 8 trainer-strip helpers
+  + the timeline section + the data-page shell on raw utilities
+  via `knob_wrapper_classes`, `compact_input_classes`,
+  `ghost_button_classes`, `timeline_day_classes`,
+  `timeline_chip_base_classes`. Timeline-day buttons gain
+  `data-role="timeline-day"` + `data-state="anchor|future|empty|data"`
+  semantic attributes (stable, styling-free test hooks).
+
+### AM.4 — Drop dead CSS files
+
+- `editor.css` (475 LOC) — every editor render function uses raw
+  utilities now; no remaining consumer. **Deleted.**
+- `data.css` (554 LOC) — every trainer-mode strip widget uses
+  raw utilities now; no remaining consumer. **Deleted.**
+- `diagram.css` (376 LOC) — chrome rules (271 LOC) retired in
+  AM.2 steps 1 + 3. The irreducible 105 LOC of SVG-attribute-
+  selector cascades stay (per AM.0 lock L4 — they bind to
+  graphviz-emitted `[data-kind]` / `[data-presence]` /
+  `[data-trainer-kinds]` on the SVG subtree where utilities don't
+  reach). **Renamed to `diagram-svg.css`** to make the SVG-only
+  scope obvious. 6 `<link>` references in `_studio_routes.py`
+  updated (3 swap to the new name, 3 drop entirely).
+
+**Net retirement: 1,300 LOC of hand-written CSS removed; 105 LOC
+of irreducible SVG remainder kept.**
+
+### BF.0 — Editor field completeness spike
+
+Per-field migration table at
+`docs/audits/bf_0_field_completeness_spike.md` walking
+`_FIELD_SPECS_BY_KIND` for rail (17 fields) + transfer_template
+(8 fields). Headline gap: **12 of 17 Rail fields missing on the
+BB.2 aggregator-rail sub-form, 2 of 8 TT fields missing on the
+BB.2 TT sub-form**. Locks L1-L5 + open decisions P1-P3 land for
+sign-off before BF.2+ implementation fires.
+
+### BF.1 — Subtype-requirements banner on rail form
+
+Per-subtype prose dict (`_RAIL_SUBTYPE_REQUIREMENTS_BANNER`) +
+`_render_subtype_requirements_banner` helper. Renders above the
+field list on `/l2_shape/rail/new?subtype=<...>` AND the rail
+edit page (subtype derived from the loaded entity). Single-leg
+banner names the reconciler-attachment requirement (SPEC §S3 +
+C3), the Variable-direction TT-only constraint, and the
+aggregating-single-leg self-reconciling exemption. Two-leg banner
+names source_role + destination_role + expected_net auto-balance.
+Surfaces `aria-label="Subtype requirements"` as the ARIA landmark
+(no CSS-class coupling).
+
+Per BF.0 L4: additive — the per-kind intro card stays; banner
+sits in the right column above the form. Uses AM-landed
+`bg-link-tint` surface + accent left-rule.
+
+### Schema fix — Oracle ID column width
+
+Re-applies the BC.11 vc100 → vc255 widening for the four ID-
+shaped columns on `<prefix>_transactions` (id / transfer_id /
+transfer_parent_id / bundle_id). The chain-completion plant
+adapter synthesizes IDs by concatenating parent IDs + rail names
++ account IDs — sasquatch_pr's
+`tx-chainfill-xfer-limit-breach-...` pattern hits 101 chars
+which Oracle rejects with ORA-12899. The original BC.11 fix was
+reverted at some point; this re-applies it with a header comment
+explaining the regression history. vc255 is the standard
+practical ceiling; widening is free on PG/Oracle/SQLite.
+
+### Verification
+
+- Full unit suite (2797 passed, 74 skipped) across every
+  intermediate AM step + BF.1 + the schema fix.
+- Studio browser dogfood: 3/3 passing.
+- Local pre-push proxy: `./run_tests.sh up_to=db
+  --dialects=pg,or --targets=lo` green across `sp_pg_lo`,
+  `sp_or_lo`, `sq_pg_lo`, `sq_or_lo` (Oracle leg passes after
+  the width bump).
+
+### Operator-visible changes
+
+- Studio chrome looks visually different — theme-driven `--color-*`
+  tokens replace the `--studio-*` aliases AM retired. Layout +
+  affordances unchanged.
+- The rail create + edit pages now carry a new "Subtype
+  requirements" callout above the form (single-leg / two-leg
+  rules, depending on the rail's subtype).
+- Operators upgrading from v11.20.1 see no schema migration —
+  the `id` / `transfer_id` / `transfer_parent_id` / `bundle_id`
+  width bump applies on the NEXT `recon-gen schema apply`
+  (CREATE TABLE emits the wider column).
+
 ## v11.20.1 — Phase BB closeout: Reconciler "Create new" sub-form (BB.2)
 
 BB.1 (server-side composite create-rail-with-reconciler) and BB.3
