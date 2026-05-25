@@ -130,9 +130,14 @@ def test_transactions_includes_amount_invariant_check() -> None:
 
 
 def test_transactions_includes_transfer_parent_id() -> None:
-    """L1 SPEC: Transfer.Parent recursive chain (Phase L addition)."""
+    """L1 SPEC: Transfer.Parent recursive chain (Phase L addition).
+
+    BC.11.2: transfer_parent_id widened vc100 → vc255 alongside id /
+    transfer_id / bundle_id because chain-completion plant adapters
+    synthesize IDs by concatenating parent IDs + rail names; sasquatch
+    rails hit 101 chars on the vc100 cap (CI run 26373578977)."""
     sql = emit_schema(_instance("tp"), prefix="tp")
-    assert "transfer_parent_id   VARCHAR(100)" in sql
+    assert "transfer_parent_id   VARCHAR(255)" in sql
 
 
 def test_transactions_includes_transfer_completion_and_origin() -> None:
@@ -371,10 +376,14 @@ def test_transactions_includes_template_name_nullable() -> None:
 
 
 def test_transactions_includes_bundle_id_nullable() -> None:
-    """SPEC: L1 Transaction.BundleId — populated by AggregatingRail bundlers."""
+    """SPEC: L1 Transaction.BundleId — populated by AggregatingRail bundlers.
+
+    BC.11.2: bundle_id widened vc100 → vc255 alongside id /
+    transfer_id / transfer_parent_id (see BC.11.2 note on the
+    transfer_parent_id test)."""
     sql = emit_schema(_instance("v11"), prefix="v11")
     assert re.search(
-        r"\bbundle_id\s+VARCHAR\(100\)(?!\s+NOT NULL)",
+        r"\bbundle_id\s+VARCHAR\(255\)(?!\s+NOT NULL)",
         sql,
     ), "bundle_id should be nullable"
 

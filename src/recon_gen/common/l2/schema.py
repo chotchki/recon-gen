@@ -1516,7 +1516,15 @@ _SCHEMA_TEMPLATE = """\
 -- ---------------------------------------------------------------------
 CREATE TABLE {p}_transactions (
     entry                {tx_entry_decl},
-    id                   {vc100}   NOT NULL,
+    -- BC.11: id / transfer_id / transfer_parent_id widened vc100 → vc255
+    -- because the chain-completion plant adapter synthesizes IDs by
+    -- concatenating parent IDs + rail names + account IDs, which can
+    -- exceed 100 chars on L2 instances with verbose rail naming
+    -- (sasquatch_pr's CustomerInboundACHReturnNSF + tx-chainfill-xfer-
+    -- limit-breach-... pattern hits 101 chars; CI red since the
+    -- sasquatch variant landed). vc255 is the standard practical
+    -- ceiling; widening is free (PG/Oracle/SQLite all handle it).
+    id                   {vc255}   NOT NULL,
     account_id           {vc100}   NOT NULL,
     account_name         {vc255},
     account_role         {vc100},
@@ -1528,12 +1536,12 @@ CREATE TABLE {p}_transactions (
         CHECK (amount_direction IN ('Debit', 'Credit')),
     status               {vc50}    NOT NULL,
     posting              {ts}    NOT NULL,
-    transfer_id          {vc100}   NOT NULL,
+    transfer_id          {vc255}   NOT NULL,
     transfer_completion  {ts},
-    transfer_parent_id   {vc100},
+    transfer_parent_id   {vc255},
     rail_name            {vc100}   NOT NULL,
     template_name        {vc100},
-    bundle_id            {vc100},
+    bundle_id            {vc255},
     supersedes           {vc50},
     origin               {vc50}    NOT NULL,
     metadata             {json_text},
