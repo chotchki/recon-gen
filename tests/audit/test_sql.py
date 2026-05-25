@@ -52,6 +52,7 @@ from recon_gen.cli.audit import (
     _query_stuck_unbundled_violations,
     _query_supersession,
 )
+from recon_gen.common.as_of_frame import AsOfFrame
 from recon_gen.common.intervals import DateInterval
 from recon_gen.common.sql.dialect import Dialect
 
@@ -184,7 +185,10 @@ def patched_connect(captured_sql, monkeypatch):
         yield
 
 
-_PERIOD: DateInterval = DateInterval.closed(date(2030, 1, 1), date(2030, 1, 7))
+_FRAME: AsOfFrame = AsOfFrame(
+    as_of=date(2030, 1, 7),
+    window=DateInterval.closed(date(2030, 1, 1), date(2030, 1, 7)),
+)
 _INSTANCE = _FakeInstance(instance="ut")
 _CFG = _FakeCfg()
 
@@ -302,7 +306,7 @@ def _diff_msg(label: str, want: str, got: str) -> str:
 
 
 def test_drift_query_sql_locked(captured_sql, patched_connect):
-    _query_drift_violations(_CFG, _INSTANCE, _PERIOD)
+    _query_drift_violations(_CFG, _INSTANCE, _FRAME)
     assert len(captured_sql) == 1
     assert captured_sql[0] == _DRIFT_SQL, _diff_msg(
         "drift", _DRIFT_SQL, captured_sql[0],
@@ -310,7 +314,7 @@ def test_drift_query_sql_locked(captured_sql, patched_connect):
 
 
 def test_overdraft_query_sql_locked(captured_sql, patched_connect):
-    _query_overdraft_violations(_CFG, _INSTANCE, _PERIOD)
+    _query_overdraft_violations(_CFG, _INSTANCE, _FRAME)
     assert len(captured_sql) == 1
     assert captured_sql[0] == _OVERDRAFT_SQL, _diff_msg(
         "overdraft", _OVERDRAFT_SQL, captured_sql[0],
@@ -318,7 +322,7 @@ def test_overdraft_query_sql_locked(captured_sql, patched_connect):
 
 
 def test_limit_breach_query_sql_locked(captured_sql, patched_connect):
-    _query_limit_breach_violations(_CFG, _INSTANCE, _PERIOD)
+    _query_limit_breach_violations(_CFG, _INSTANCE, _FRAME)
     assert len(captured_sql) == 1
     assert captured_sql[0] == _LIMIT_BREACH_SQL, _diff_msg(
         "limit_breach", _LIMIT_BREACH_SQL, captured_sql[0],
@@ -342,7 +346,7 @@ def test_stuck_unbundled_query_sql_locked(captured_sql, patched_connect):
 
 
 def test_supersession_query_sql_locked(captured_sql, patched_connect):
-    _query_supersession(_CFG, _INSTANCE, _PERIOD)
+    _query_supersession(_CFG, _INSTANCE, _FRAME)
     # Four queries in fixed order: aggregates × 2 base tables, then
     # txn details, then daily-balance details.
     assert len(captured_sql) == 4, (
@@ -370,7 +374,7 @@ def test_executive_summary_query_sql_locked(captured_sql, patched_connect):
     6 invariant counts (drift / ledger_drift / overdraft / limit_breach
     / stuck_pending / stuck_unbundled) + 2 supersession totals (one per
     base table). Asserts each one's SQL matches its locked value."""
-    _query_executive_summary(_CFG, _INSTANCE, _PERIOD)
+    _query_executive_summary(_CFG, _INSTANCE, _FRAME)
     assert len(captured_sql) == 10, (
         f"expected 10 executive-summary queries (2 volume + 6 "
         f"invariant counts + 2 supersession totals), got "
@@ -445,7 +449,7 @@ def test_skeleton_mode_short_circuits_drift(captured_sql, patched_connect):
     skeleton-mode preview suddenly requires a live DB.
     """
     cfg = _FakeCfg(demo_database_url=None)  # type: ignore[arg-type]: _FakeCfg is a stand-in for Config in skeleton-mode tests
-    result = _query_drift_violations(cfg, _INSTANCE, _PERIOD)
+    result = _query_drift_violations(cfg, _INSTANCE, _FRAME)
     assert result is None
     assert captured_sql == []
 
@@ -456,6 +460,6 @@ def test_skeleton_mode_short_circuits_supersession(
     """Same skeleton-mode short-circuit as drift — repeated for the
     multi-query function to confirm no SQL leaks before the cfg check."""
     cfg = _FakeCfg(demo_database_url=None)  # type: ignore[arg-type]: _FakeCfg is a stand-in for Config in skeleton-mode tests
-    result = _query_supersession(cfg, _INSTANCE, _PERIOD)
+    result = _query_supersession(cfg, _INSTANCE, _FRAME)
     assert result is None
     assert captured_sql == []

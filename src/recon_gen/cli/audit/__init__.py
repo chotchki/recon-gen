@@ -149,23 +149,31 @@ def audit() -> None:
     """Per-instance PDF reconciliation report (cover, summary, exceptions)."""
 
 
-def _resolve_period(
+def _resolve_frame(
     period: DateInterval | None,
     *, today: date | None = None,  # typing-smell: ignore[no-raw-temporal-args]: test-override hook; the staged no-raw-temporal-args lint will allowlist this seam pre-enable
-) -> DateInterval:
-    """Resolve the report period.
+) -> AsOfFrame:
+    """Resolve the report's `AsOfFrame` from the operator's ``--period``.
+
+    BD.2 — was ``_resolve_period`` returning ``DateInterval``; now
+    returns the full ``AsOfFrame`` so the (as_of, window, seed) triple
+    threads through the audit code as one value. ``frame.window`` is
+    the reporting period; ``frame.as_of`` is the day the audit runs
+    (today, the day the operator pressed the button). Seed defaults
+    to None (audit is a read-only report; no RNG).
 
     When ``period`` is supplied (operator passed ``--period <shape>``),
-    return it as-is. Otherwise default to ``trailing:7`` — a 7-day
-    window ending yesterday (``[today-7, today-1]`` closed-closed). The
-    ``today`` arg is a test-override hook; production callers leave it
-    None so the default routes through ``AsOfFrame.live()`` (the
+    construct a frame anchored at today with that period as the window.
+    Otherwise default to ``AsOfFrame.for_audit(today, lookback_days=7)``
+    — N days ending yesterday (today EXCLUDED per the audit convention).
+    The ``today`` arg is a test-override hook; production callers leave
+    it None so the default routes through ``AsOfFrame.live()`` (the
     canonical blessed wall-clock seam per AQ.3).
     """
-    if period is not None:
-        return period
     anchor = today or AsOfFrame.live().as_of
-    return DateInterval.trailing_days_ending_yesterday(anchor, 7)
+    if period is not None:
+        return AsOfFrame(as_of=anchor, window=period)
+    return AsOfFrame.for_audit(anchor, lookback_days=7)
 
 
 def _institution_name(instance, cfg) -> str:  # type: ignore[no-untyped-def]: instance is L2Instance, cfg is Config — untyped pending audit-CLI sweep
@@ -244,7 +252,7 @@ _EXCEPTION_INVARIANTS: list[tuple[str, str, str | None]] = [
 
 
 def _query_executive_summary(
-    cfg, instance, period: DateInterval,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg, instance, frame: AsOfFrame,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> ExecSummary | None:
     """Aggregate the executive-summary totals against the demo DB.
 
@@ -268,7 +276,7 @@ def _query_executive_summary(
 
     prefix = cfg.db_table_prefix
     posting_range = range_clause(
-        period, dialect=cfg.dialect, column="posting",
+        frame.window, dialect=cfg.dialect, column="posting",
     )
 
     conn = connect_demo_db(cfg)
@@ -308,7 +316,7 @@ def _query_executive_summary(
             else:
                 sql = (
                     f"SELECT COUNT(*) FROM {prefix}_{suffix}"
-                    f" WHERE {range_clause(period, dialect=cfg.dialect, column=date_col)}"
+                    f" WHERE {range_clause(frame.window, dialect=cfg.dialect, column=date_col)}"
                 )
             cur.execute(sql)
             (count,) = cur.fetchone()
@@ -370,7 +378,7 @@ class DriftViolation:
 
 
 def _query_drift_violations(
-    cfg, instance, period: DateInterval,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg, instance, frame: AsOfFrame,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> list[DriftViolation] | None:
     """Pull drift rows whose business day falls in the period.
 
@@ -390,7 +398,7 @@ def _query_drift_violations(
 
     prefix = cfg.db_table_prefix
     period_clause = range_clause(
-        period, dialect=cfg.dialect, column="business_day_start",
+        frame.window, dialect=cfg.dialect, column="business_day_start",
     )
 
     conn = connect_demo_db(cfg)
@@ -448,7 +456,7 @@ class OverdraftViolation:
 
 
 def _query_overdraft_violations(
-    cfg, instance, period: DateInterval,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg, instance, frame: AsOfFrame,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> list[OverdraftViolation] | None:
     """Pull overdraft rows whose business day falls in the period.
 
@@ -465,7 +473,7 @@ def _query_overdraft_violations(
 
     prefix = cfg.db_table_prefix
     period_clause = range_clause(
-        period, dialect=cfg.dialect, column="business_day_start",
+        frame.window, dialect=cfg.dialect, column="business_day_start",
     )
 
     conn = connect_demo_db(cfg)
@@ -590,7 +598,7 @@ class LimitBreachViolation:
 
 
 def _query_limit_breach_violations(
-    cfg, instance, period: DateInterval,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg, instance, frame: AsOfFrame,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> list[LimitBreachViolation] | None:
     """Pull limit_breach rows whose business day falls in the period.
 
@@ -604,7 +612,7 @@ def _query_limit_breach_violations(
 
     prefix = cfg.db_table_prefix
     period_clause = range_clause(
-        period, dialect=cfg.dialect, column="business_day",
+        frame.window, dialect=cfg.dialect, column="business_day",
     )
 
     conn = connect_demo_db(cfg)
@@ -1022,7 +1030,7 @@ class SupersessionAuditData:
 
 
 def _query_supersession(
-    cfg, instance, period: DateInterval,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg, instance, frame: AsOfFrame,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
 ) -> SupersessionAuditData | None:
     """Aggregate supersession counts + in-window detail rows.
 
@@ -1039,10 +1047,10 @@ def _query_supersession(
 
     prefix = cfg.db_table_prefix
     posting_range = range_clause(
-        period, dialect=cfg.dialect, column="posting",
+        frame.window, dialect=cfg.dialect, column="posting",
     )
     bds_range = range_clause(
-        period, dialect=cfg.dialect, column="business_day_start",
+        frame.window, dialect=cfg.dialect, column="business_day_start",
     )
 
     conn = connect_demo_db(cfg)
@@ -1054,7 +1062,7 @@ def _query_supersession(
             ("daily_balances", "business_day_start"),
         ):
             date_col_range = range_clause(
-                period, dialect=cfg.dialect, column=date_col,
+                frame.window, dialect=cfg.dialect, column=date_col,
             )
             cur.execute(
                 f"SELECT supersedes, COUNT(*) AS total,"
@@ -1174,7 +1182,7 @@ class DailyStatementWalk:
 
 def _query_daily_statement_walks(
     cfg, instance,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
-    period: DateInterval,
+    frame: AsOfFrame,
     singleton_ids: set[str],
 ) -> list[DailyStatementWalk] | None:
     """Pull a Daily Statement walk for every drifted (account, day) pair.
@@ -1203,7 +1211,7 @@ def _query_daily_statement_walks(
 
     prefix = cfg.db_table_prefix
     period_clause = range_clause(
-        period, dialect=cfg.dialect, column="business_day_start",
+        frame.window, dialect=cfg.dialect, column="business_day_start",
     )
 
     conn = connect_demo_db(cfg)
@@ -1453,7 +1461,7 @@ def audit_apply(
     from recon_gen import __version__ as _qsg_version
 
     _cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
-    resolved_period = _resolve_period(period)
+    frame = _resolve_frame(period)
     institution = _institution_name(instance, _cfg)
     generated_at = datetime.now()
     l2_label = (
@@ -1461,19 +1469,19 @@ def audit_apply(
         if l2_instance_path is not None
         else f"{_cfg.deployment_name} (bundled)"
     )
-    exec_summary = _query_executive_summary(_cfg, instance, resolved_period)
-    drift_rows = _query_drift_violations(_cfg, instance, resolved_period)
-    overdraft_rows = _query_overdraft_violations(_cfg, instance, resolved_period)
+    exec_summary = _query_executive_summary(_cfg, instance, frame)
+    drift_rows = _query_drift_violations(_cfg, instance, frame)
+    overdraft_rows = _query_overdraft_violations(_cfg, instance, frame)
     limit_breach_rows = _query_limit_breach_violations(
-        _cfg, instance, resolved_period,
+        _cfg, instance, frame,
     )
     stuck_pending_rows = _query_stuck_pending_violations(_cfg, instance)
     stuck_unbundled_rows = _query_stuck_unbundled_violations(_cfg, instance)
-    supersession_data = _query_supersession(_cfg, instance, resolved_period)
+    supersession_data = _query_supersession(_cfg, instance, frame)
     singleton_ids = _singleton_account_ids(instance)
     internal_singleton_ids = _internal_singleton_account_ids(instance)
     daily_statement_walks = _query_daily_statement_walks(
-        _cfg, instance, resolved_period, internal_singleton_ids,
+        _cfg, instance, frame, internal_singleton_ids,
     )
     provenance = compute_provenance(
         _cfg, instance,
@@ -1493,7 +1501,7 @@ def audit_apply(
         _write_audit_pdf(
             out_path,
             institution=institution,
-            period=resolved_period,
+            frame=frame,
             generated_at=generated_at,
             exec_summary=exec_summary,
             drift_rows=drift_rows,
@@ -1523,13 +1531,13 @@ def audit_apply(
         click.echo(
             f"Wrote audit report to {out_path} "
             f"(institution={institution}, "
-            f"period={resolved_period.start}–{resolved_period.end})."
+            f"period={frame.window.start}–{frame.window.end})."
         )
         return
 
     markdown = _render_audit_markdown(
         institution=institution,
-        period=resolved_period,
+        frame=frame,
         generated_at=generated_at,
         exec_summary=exec_summary,
         drift_rows=drift_rows,

@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from recon_gen.common.intervals import DateInterval
+from recon_gen.common.as_of_frame import AsOfFrame
+from recon_gen.common.intervals import DateInterval  # noqa: F401 — kept for tests that import via this module; BD.2 hides direct period reads
 from recon_gen.common.provenance import (
     ProvenanceFingerprint,
     l2_fingerprint_placeholder,
@@ -42,7 +43,7 @@ from recon_gen.cli.audit import (
 def _render_audit_markdown(
     *,
     institution: str,
-    period: DateInterval,
+    frame: AsOfFrame,
     generated_at: datetime,
     exec_summary: ExecSummary | None,
     drift_rows: list[DriftViolation] | None,
@@ -67,7 +68,7 @@ def _render_audit_markdown(
     — so an integrator can review the report's content before
     committing to a real PDF write.
     """
-    start, end = period.start, period.end
+    start, end = frame.window.start, frame.window.end
     fingerprint = (
         provenance.composite_sha
         if provenance is not None
@@ -102,11 +103,11 @@ def _render_audit_markdown(
         + _render_stuck_unbundled_markdown(
             stuck_unbundled_rows, singleton_ids,
         )
-        + _render_supersession_markdown(supersession_data, period)
+        + _render_supersession_markdown(supersession_data, frame)
         + _render_daily_statement_walks_markdown(daily_statement_walks)
         + _render_signoff_markdown(
             institution=institution,
-            period=period,
+            frame=frame,
             generated_at=generated_at,
             version=version,
             l2_label=l2_label,
@@ -519,7 +520,7 @@ def _render_stuck_unbundled_markdown(
 
 def _render_supersession_markdown(
     data: SupersessionAuditData | None,
-    period: DateInterval,
+    frame: AsOfFrame,
 ) -> str:
     """Supersession audit section in Markdown form.
 
@@ -531,7 +532,7 @@ def _render_supersession_markdown(
     Detail tables stay bounded; aggregate carries the historical
     accumulation.
     """
-    start, end = period.start, period.end
+    start, end = frame.window.start, frame.window.end
     header = (
         "\n"
         "---\n"
@@ -689,7 +690,7 @@ def _render_daily_statement_walks_markdown(
 def _render_signoff_markdown(
     *,
     institution: str,
-    period: DateInterval,
+    frame: AsOfFrame,
     generated_at: datetime,
     version: str,
     l2_label: str,
@@ -705,7 +706,7 @@ def _render_signoff_markdown(
     machine attestation. The cryptographic seal over the system block
     lands in U.7.
     """
-    start, end = period.start, period.end
+    start, end = frame.window.start, frame.window.end
     fingerprint = (
         provenance.composite_sha
         if provenance is not None

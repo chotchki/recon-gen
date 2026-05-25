@@ -58,6 +58,7 @@ from recon_gen.cli.audit import (
     _query_stuck_unbundled_violations,
     _query_supersession,
 )
+from recon_gen.common.as_of_frame import AsOfFrame
 from recon_gen.common.intervals import DateInterval
 from recon_gen.common.sql.dialect import Dialect
 
@@ -92,7 +93,10 @@ class _FakeInstance:
     instance: str = "ut"
 
 
-_PERIOD: DateInterval = DateInterval.closed(date(2030, 1, 1), date(2030, 1, 7))
+_FRAME: AsOfFrame = AsOfFrame(
+    as_of=date(2030, 1, 7),
+    window=DateInterval.closed(date(2030, 1, 1), date(2030, 1, 7)),
+)
 _INSTANCE = _FakeInstance(instance="ut")
 _CFG = _FakeCfg()
 
@@ -203,7 +207,7 @@ def _create_audit_schema(conn: sqlite3.Connection) -> None:
 def _seed_audit_data(conn: sqlite3.Connection) -> None:
     """Plant a minimal but representative violation per matview.
 
-    Dates are inside the ``_PERIOD`` window where the helper is
+    Dates are inside the ``_FRAME`` window where the helper is
     period-scoped (drift / overdraft / limit_breach / supersession
     details). ``stuck_*`` are current-state — no period filter — so any
     row at all suffices to prove the SELECT works.
@@ -332,7 +336,7 @@ def patched_connect(db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch) -> 
 def test_drift_query_runs_against_sqlite(patched_connect: None) -> None:
     """``CAST('YYYY-MM-DD' AS DATE)`` → SQLite accepts the form, the
     drift query returns the planted in-period rows."""
-    rows = _query_drift_violations(_CFG, _INSTANCE, _PERIOD)
+    rows = _query_drift_violations(_CFG, _INSTANCE, _FRAME)
     assert rows is not None, "skeleton-mode short-circuit fired unexpectedly"
     assert len(rows) == 2
     # Sort: business_day DESC, |drift| DESC. Acct-002 day=2030-01-05 first.
@@ -345,7 +349,7 @@ def test_drift_query_runs_against_sqlite(patched_connect: None) -> None:
 def test_overdraft_query_runs_against_sqlite(patched_connect: None) -> None:
     """Period-scoped overdraft helper. Single planted in-period row
     comes back with the correct stored_balance."""
-    rows = _query_overdraft_violations(_CFG, _INSTANCE, _PERIOD)
+    rows = _query_overdraft_violations(_CFG, _INSTANCE, _FRAME)
     assert rows is not None
     assert len(rows) == 1
     assert rows[0].account_id == "acct-003"
@@ -359,7 +363,7 @@ def test_limit_breach_query_runs_against_sqlite(patched_connect: None) -> None:
     Confirms the CAST sweep covers every WHERE-clause site, not just
     business_day_start ones. AB.1 (2026-05-19): also verifies both
     Outbound + Inbound rows surface via the new ``direction`` column."""
-    rows = _query_limit_breach_violations(_CFG, _INSTANCE, _PERIOD)
+    rows = _query_limit_breach_violations(_CFG, _INSTANCE, _FRAME)
     assert rows is not None
     assert len(rows) == 2
     by_direction = {r.direction: r for r in rows}
@@ -395,7 +399,7 @@ def test_supersession_query_runs_against_sqlite(patched_connect: None) -> None:
     txn details + daily-balance details. Both detail queries period-filter
     via CAST. Aggregates use a CASE WHEN with two CAST sites apiece.
     Eight total CAST sites in this one helper — broadest coverage."""
-    data = _query_supersession(_CFG, _INSTANCE, _PERIOD)
+    data = _query_supersession(_CFG, _INSTANCE, _FRAME)
     assert data is not None
 
     # Aggregates: void_redo from each base table.
@@ -426,7 +430,7 @@ def test_executive_summary_query_runs_against_sqlite(
     """Exec summary unrolls into 10 SELECTs: 2 volume + 6 invariant
     counts + 2 supersession totals. Most carry CAST sites in the period
     filter. Round-trip through SQLite proves the whole helper."""
-    summary = _query_executive_summary(_CFG, _INSTANCE, _PERIOD)
+    summary = _query_executive_summary(_CFG, _INSTANCE, _FRAME)
     assert summary is not None
 
     # Volume: one in-period Posted txn (txn-100; txn-099 is out, txn-101
@@ -458,10 +462,10 @@ def test_skeleton_mode_short_circuits_against_sqlite() -> None:
     repeat here so the SQLite cell isn't blind to a regression that
     breaks skeleton mode for the local-iteration loop."""
     cfg = _FakeCfg(demo_database_url=None)  # type: ignore[arg-type]: _FakeCfg is a stand-in for Config in skeleton-mode tests
-    assert _query_drift_violations(cfg, _INSTANCE, _PERIOD) is None
-    assert _query_overdraft_violations(cfg, _INSTANCE, _PERIOD) is None
-    assert _query_limit_breach_violations(cfg, _INSTANCE, _PERIOD) is None
+    assert _query_drift_violations(cfg, _INSTANCE, _FRAME) is None
+    assert _query_overdraft_violations(cfg, _INSTANCE, _FRAME) is None
+    assert _query_limit_breach_violations(cfg, _INSTANCE, _FRAME) is None
     assert _query_stuck_pending_violations(cfg, _INSTANCE) is None
     assert _query_stuck_unbundled_violations(cfg, _INSTANCE) is None
-    assert _query_supersession(cfg, _INSTANCE, _PERIOD) is None
-    assert _query_executive_summary(cfg, _INSTANCE, _PERIOD) is None
+    assert _query_supersession(cfg, _INSTANCE, _FRAME) is None
+    assert _query_executive_summary(cfg, _INSTANCE, _FRAME) is None
