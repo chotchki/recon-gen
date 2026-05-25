@@ -114,9 +114,14 @@ def studio_theme_head(instance: object) -> str:
     build-time defaults via ``input.css``'s ``@theme`` block) AND
     injects a per-L2-instance ``:root { --color-accent: ...; }``
     override so the studio inherits the active institution's brand
-    palette. ``_studio_assets/diagram.css``'s ``--studio-*`` tokens
-    alias the ``--color-*`` tokens (X.4.f.13) so the existing editor
-    CSS picks up the override automatically.
+    palette. Post-AM, every chrome surface reads ``--color-*`` tokens
+    directly via Tailwind utilities (`bg-accent`, `text-primary-fg`,
+    etc.) — the ``--studio-*`` alias layer in the retired
+    ``editor.css`` / ``data.css`` / ``diagram.css`` chrome rules is
+    gone with those files. Only ``diagram-svg.css`` remains, and its
+    SVG-only rules use literal hex values inside ``!important``
+    overrides where Tailwind utilities can't reach SVG attribute
+    selectors per AM.0 lock L4.
 
     Pass the L2Instance (``cache.get()``) — its optional ``theme``
     attribute drives the override. ``None`` falls back to

@@ -2606,16 +2606,10 @@ def _render_create_page(
         f" ({'two-leg' if subtype == 'two_leg' else 'single-leg'})"
         if subtype is not None else ""
     )
-    # AM.1 steps 3 + 4 — page-shell chrome + inner form-field markup
-    # all migrated to raw Tailwind utilities per AM.0 locks L1-L5.
-    # editor.css link dropped — _render_field + _render_reconciler_section
-    # + _render_chain_children_field + _render_multi_select_groups_field
-    # no longer emit any editor.css class. `form.create-form` kept ONLY
-    # as a hook for `tests/e2e/_drivers/studio_browser_editor.py::
-    # _submit_create_form` (selects `form.create-form button[type="submit"]`);
-    # editor.css's `.create-form` rule is empty so it's a pure locator
-    # hook. Once browser-driver locators are updated to
-    # `form[action^="/l2_shape/"]` (AM.4 cleanup), this class drops.
+    # `form.create-form` retained as a pure locator hook for
+    # `tests/e2e/_drivers/studio_browser_editor.py::_submit_create_form`
+    # (selects `form.create-form button[type="submit"]`). Drops when
+    # the driver migrates to `form[action^="/l2_shape/"]`.
     primary_btn = primary_button_classes()
     return f"""<!doctype html>
 <html lang="en">
@@ -2694,14 +2688,9 @@ def _render_edit_page(
         f" ({'two-leg' if rail_subtype == 'two_leg' else 'single-leg'})"
         if rail_subtype is not None else ""
     )
-    # AM.1 step 5 — edit-page chrome migrated. Body now drops
-    # `.create-page` / `.edit-page` semantic shells; structure mirrors
-    # _render_create_page's grid-based main + bg-surface-bg body.
-    # `form.edit-form` class kept ONLY as a hook for browser-driver
-    # locators (selects `form.edit-form button[type="submit"]`) —
-    # editor.css's `.edit-form` rule is empty so it's a pure locator
-    # hook. AM.4 cleanup will swap drivers to
-    # `form[action^="/l2_shape/{kind}/{id}"]`.
+    # `form.edit-form` retained as a pure locator hook for
+    # browser-driver `form.edit-form button[type="submit"]`. Drops
+    # when the driver migrates to `form[action^="/l2_shape/{kind}/{id}"]`.
     primary_btn = primary_button_classes()
     return f"""<!doctype html>
 <html lang="en">

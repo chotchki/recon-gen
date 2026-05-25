@@ -260,8 +260,10 @@ recon_gen = [
     "common/html/assets/vendor/js/*.js",
     "common/html/assets/vendor/css/*.css",
     "common/html/assets/vendor/vendor.lock",
-    # X.4.b/f/h — Studio chrome assets (diagram.css/diagram.js/editor.css
-    # and the X.4.h.1 data.css) the ``/studio/static`` mount serves.
+    # X.4.b/f/h — Studio chrome assets (diagram-svg.css for the SVG-only
+    # cascades + diagram.js) the ``/studio/static`` mount serves.
+    # Post-AM.4: only diagram-svg.css remains (editor.css / data.css
+    # retired; diagram.css renamed). Glob still picks up the .css/.js.
     # Loaded at runtime via ``Path(__file__).parent / "_studio_assets"``;
     # without this glob the wheel ships an empty directory and the studio
     # 404s on its own CSS / JS.
