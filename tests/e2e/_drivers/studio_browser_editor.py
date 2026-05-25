@@ -46,9 +46,17 @@ from typing import Any
 class StudioBrowserEditorDriver:
     """Verb protocol over a real WebKit-driven Studio editor."""
 
+    # AI.2.d.2 piece-2 (2026-05-25, user): dev-iteration timeout — 30s
+    # default kills iteration when fail-fast surfaces the actual error
+    # via the rendered page. 10s is generous for any in-process click
+    # / navigation; raise per-call when an expected operation legit
+    # takes longer (e.g., dashboards mount under a future verb).
+    DEFAULT_TIMEOUT_MS = 10_000
+
     def __init__(self, page: Any, base_url: str) -> None:  # typing-smell: ignore[explicit-any]: Playwright `Page` — kept Any to stay import-light at the test-file seam
         self._page = page
         self._base = base_url.rstrip("/")
+        page.set_default_timeout(self.DEFAULT_TIMEOUT_MS)
 
     @classmethod
     @contextmanager
@@ -87,7 +95,10 @@ class StudioBrowserEditorDriver:
 
     def goto_home(self) -> None:
         """Click any rendered home link. Studio's nav menu / breadcrumbs
-        carry a link to /."""
+        carry a link to /. On pages where home isn't linked (e.g.,
+        the home page itself), use ``goto_home_via_back()`` instead.
+        Most callers won't need this — every create-verb's 303
+        leaves the browser at /."""
         self._page.click('a[href="/"]')
 
     def goto_account_list(self) -> None:
@@ -99,7 +110,104 @@ class StudioBrowserEditorDriver:
         # elsewhere.
         self._page.click('a[href="/l2_shape/account/"]')
 
+    # -- form-fill helpers (transport-agnostic, page-driven) -------------
+
+    def _apply_form_data(self, data: "dict[str, list[str]]") -> None:
+        """Translate a `FormData` dict (the same shape
+        ``create_form_data(kind, entity)`` builds for the HTTP
+        driver) into Playwright form-fills on the currently-rendered
+        page.
+
+        Field-type dispatch reads the rendered DOM (`tagName` +
+        `type`) rather than the FieldSpec — keeps the helper
+        independent of the FieldSpec module and naturally tolerant
+        of subtype-conditional rendering.
+
+        Hidden markers (`__present`, `__num_groups`, `subtype`)
+        are server-managed (set by the URL or pre-rendered as hidden
+        inputs); the helper SKIPS them — the form already carries
+        the correct values.
+        """
+        for name, values in data.items():
+            if name == "subtype":
+                # Set by the URL the rail subtype picker navigates to.
+                continue
+            if name.endswith("__present") or name.endswith("__num_groups"):
+                # Server-rendered hidden marker — already present.
+                continue
+            locator = self._page.locator(f'[name="{name}"]')
+            count = locator.count()
+            if count == 0:
+                if values:
+                    raise AssertionError(
+                        f"_apply_form_data: form has no field named "
+                        f"{name!r} but caller supplied {values!r}. "
+                        f"Either the form isn't rendering the field "
+                        f"(UI gap) or the FieldSpec for this kind "
+                        f"doesn't match the form's field-name."
+                    )
+                continue
+            first = locator.first
+            tag = first.evaluate("el => el.tagName.toLowerCase()")
+            if tag == "select":
+                self._page.select_option(f'select[name="{name}"]', values[0])
+            elif tag == "textarea":
+                self._page.fill(f'textarea[name="{name}"]', values[0])
+            elif tag == "input":
+                input_type = first.get_attribute("type") or "text"
+                if input_type == "checkbox":
+                    # Multi-select checkbox group. Check each matching
+                    # value; the rest stay unchecked (form's initial
+                    # state). Force=True bypasses Playwright's "visible
+                    # + stable" actionability checks when the box is
+                    # inside a fieldset that's `hidden` for the
+                    # currently-inactive subtype.
+                    for v in values:
+                        self._page.check(
+                            f'input[type=checkbox][name="{name}"][value="{v}"]',
+                        )
+                elif input_type == "hidden":
+                    continue
+                else:
+                    self._page.fill(f'input[name="{name}"]', values[0])
+            else:
+                raise AssertionError(
+                    f"_apply_form_data: unexpected tag {tag!r} for "
+                    f"field {name!r}; fill strategy unknown."
+                )
+
     # -- entity creation -------------------------------------------------
+
+    def _submit_create_form(self, kind_label: str) -> None:
+        """Click the create form's Submit button + assert the success
+        303 lands us at home (`/`). On validation failure, the server
+        re-renders the form at the POST target with a 400 + an inline
+        error banner — fail FAST with that error visible in the message
+        rather than time out waiting for a redirect that won't happen.
+
+        ``kind_label`` is for the error message (e.g., "account",
+        "rail") — surfaces which verb failed when the test harness
+        prints the AssertionError.
+        """
+        # Wait for ANY navigation (success → /, failure → POST target
+        # re-render). expect_navigation with no url= matches any.
+        with self._page.expect_navigation():
+            self._page.click('form.create-form button[type="submit"]')
+        landed = self._page.url
+        if landed.rstrip("/") == self._base:
+            return  # success path: 303 → home
+        # Failure path: extract the inline error the editor renders.
+        error_locator = self._page.locator(".form-global-error")
+        error_text = (
+            error_locator.first.text_content() or ""
+            if error_locator.count() > 0
+            else "(no .form-global-error block on the rendered page)"
+        )
+        raise AssertionError(
+            f"create {kind_label}: submit failed to redirect home. "
+            f"Landed at {landed!r} (expected {self._base + '/'!r}); "
+            f"editor's inline error: {error_text.strip()}"
+        )
 
     def create_account(
         self, *, account_id: str, role: str, scope: str = "internal",
@@ -117,8 +225,55 @@ class StudioBrowserEditorDriver:
         self._page.fill('input[name="id"]', account_id)
         self._page.fill('input[name="role"]', role)
         self._page.select_option('select[name="scope"]', scope)
-        with self._page.expect_navigation(url=f"{self._base}/"):
-            self._page.click('form.create-form button[type="submit"]')
+        self._submit_create_form("account")
+
+    def create_rail(self, rail: object) -> None:
+        """Fill + submit the rail-create form for ``rail``.
+
+        Rails are a discriminated union (single_leg / two_leg). The
+        editor's create flow is 2-step: click the home link to land
+        on the subtype picker, then click the subtype-matching
+        button to land on the actual form. Both navigations are
+        link-clicks per the no-URL-editing constraint.
+
+        Uses ``create_form_data("rail", rail)`` (the same encoder
+        the HTTP driver uses) to build the FormData dict, then
+        translates it into Playwright fills via ``_apply_form_data``.
+
+        BB.1 reconciler gate: this verb does NOT yet attach a
+        reconciler — non-aggregating single-leg rails will 400 at
+        submit time. The BB.1/BB.2 reconciler-aware verb is piece-2b.
+
+        Precondition: page is at the studio home (``/``). Every
+        create verb's success path 303-redirects there, so chaining
+        ``create_X`` → ``create_Y`` works without explicit
+        navigation between.
+        """
+        from tests.e2e._drivers.studio_editor import (  # noqa: PLC0415 — lazy
+            _rail_subtype_of, create_form_data,
+        )
+
+        subtype = _rail_subtype_of(rail)
+        # Step 1: home → subtype picker (the click of rail/new link
+        # on the home page).
+        self._page.click('a[href="/l2_shape/rail/new"]')
+        # Step 2: subtype picker → form. The picker renders both
+        # subtype links; click the matching one.
+        self._page.click(
+            f'a[href="/l2_shape/rail/new?subtype={subtype}"]',
+        )
+        # Apply the FormData dict to the rendered form.
+        data = create_form_data("rail", rail)
+        self._apply_form_data(data)
+        self._submit_create_form(f"rail {data.get('name', ['?'])[0]!r}")
+
+    def goto_rail_list(self) -> None:
+        """Click home → rail list."""
+        self._page.click('a[href="/l2_shape/rail/"]')
+
+    def rail_list_contains(self, rail_name: str) -> bool:
+        """True iff the rail-list page shows ``rail_name``."""
+        return rail_name in self._page.content()
 
     # -- DOM queries (the test's assertion seam) -------------------------
 

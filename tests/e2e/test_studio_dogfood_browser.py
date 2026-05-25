@@ -58,7 +58,13 @@ from pathlib import Path
 
 from recon_gen.common.html._studio_routes import make_studio_routes
 from recon_gen.common.l2.cache import L2InstanceCache
-from recon_gen.common.l2.primitives import L2Instance
+from decimal import Decimal
+
+from recon_gen.common.l2.primitives import (
+    Identifier,
+    L2Instance,
+    TwoLegRail,
+)
 from tests.e2e._drivers.studio_browser_editor import (
     StudioBrowserEditorDriver,
 )
@@ -130,4 +136,54 @@ def test_browser_operator_creates_account_via_studio_nav(
             "view may not project it. (Indicates a UI gap in the "
             "list-view rendering rather than a commit failure, since "
             "'acct_smoke' check above passed.)"
+        )
+
+
+@pytest.mark.browser
+def test_browser_operator_creates_rail_with_role_checkbox(
+    tmp_path: Path,
+) -> None:
+    """Piece 2a — exercises the rail subtype picker click-through +
+    multi-select role-checkbox encoding (source_role +
+    destination_role on a TwoLegRail). Picks two-leg because it's
+    self-standing under S5 when `expected_net` is set — no
+    BB.1/BB.2 reconciler attach needed (that's piece 2b).
+
+    Discovery-only contract holds: the test creates two accounts
+    with roles 'RoleA' / 'RoleB' FIRST so the rail-create form's
+    source_role + destination_role checkbox groups have those
+    options to discover. If the editor's multi-select field
+    rendered roles from somewhere other than declared accounts,
+    those checkboxes wouldn't appear and the rail-create would
+    400 — exactly the kind of regression HTTP TestClient with
+    hand-built form payloads can't catch."""
+    cache = L2InstanceCache(tmp_path / "rail_smoke.yaml", _empty_l2())
+    asgi = _build_studio_asgi(cache)
+    with StudioBrowserEditorDriver.serving(asgi) as driver:
+        # Plant two roles via account-create so the rail form's
+        # checkbox groups have options to discover.
+        driver.create_account(account_id="acct_src", role="RoleA")
+        driver.create_account(account_id="acct_dst", role="RoleB")
+        # Build a two-leg rail. expected_net=0 makes it self-standing
+        # (S5 doesn't fire for two-leg with expected_net set).
+        rail = TwoLegRail(
+            name=Identifier("Rail_Smoke"),
+            metadata_keys=(),
+            # AI.9 workaround — RoleExpression union; pass tuples.
+            source_role=(Identifier("RoleA"),),  # type: ignore[arg-type]: RoleExpression tuple per AI.9
+            destination_role=(Identifier("RoleB"),),  # type: ignore[arg-type]: RoleExpression tuple per AI.9
+            expected_net=Decimal("0.00"),  # type: ignore[arg-type]: Money accepts Decimal at runtime
+            origin="InternalInitiated",  # type: ignore[arg-type]: Origin literal accepts validated str at runtime
+        )
+        driver.create_rail(rail)
+        # Verify via the rail list — same operator-facing UI surface
+        # as the account test, no cache reads.
+        driver.goto_rail_list()
+        assert driver.rail_list_contains("Rail_Smoke"), (
+            "Rail create round-trip failed: 'Rail_Smoke' didn't "
+            "surface on the rail list page after the form submit. "
+            "Either the role-checkbox-pick failed (missing role "
+            "discovery), the validator rejected the commit, or the "
+            "list view doesn't project new rails.\n"
+            f"List page body (first 2KB):\n{driver.page_body()[:2048]}"
         )
