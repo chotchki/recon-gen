@@ -10,6 +10,12 @@
 @source "../render.py";
 @source "../__main__.py";
 @source "../assets/js/bootstrap.js";
+/* AM.1 (2026-05-25) — studio editor + routes scan-scoping. The
+ * editor templates live as f-string-embedded class= attributes in
+ * the route modules. Tailwind v4's regex scanner finds class names
+ * regardless of quote style or string interpolation. */
+@source "../_studio_routes.py";
+@source "../_studio_editor_routes.py";
 
 /*
  * X.2.l — Semantic theme tokens.
