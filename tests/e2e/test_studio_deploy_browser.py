@@ -139,11 +139,15 @@ def test_deploy_button_drives_pipeline_and_dashboards_render(
             page.wait_for_selector("#deploy-btn", timeout=10000)
 
             page.click("#deploy-btn")
-            # Status flips to running, then ok. Wait for the ok class.
+            # Status flips to running, then ok. Wait for the ok
+            # data-state. AM.2 step 1 (2026-05-25): switched from
+            # `.deploy-status--ok` class to `[data-state="ok"]`
+            # semantic attribute so the selector doesn't couple to
+            # the Tailwind utility classes the JS writes for color.
             # Deploy takes ~30-60s on sasquatch_pr (etl_hook re-runs
             # data apply). 120s is comfortable headroom.
             page.wait_for_selector(
-                "#deploy-status.deploy-status--ok",
+                '#deploy-status[data-state="ok"]',
                 timeout=120_000,
             )
             status_text = page.locator("#deploy-status").text_content() or ""

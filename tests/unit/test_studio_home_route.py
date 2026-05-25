@@ -144,13 +144,15 @@ def test_home_page_renders_deploy_button_in_header(
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/").text
 
-    # Button + status indicator land in the studio-header (not buried
-    # in an entity section).
-    header_start = body.index('<header class="studio-header">')
+    # Button + status indicator land in the page header (not buried
+    # in an entity section). AM.2 step 1 (2026-05-25): `.studio-header`
+    # semantic class retired in favor of raw Tailwind utilities; the
+    # only `<header` element on the page is the studio chrome, so
+    # locate by tag + the back-link text that pins identity.
+    header_start = body.index('<header')
     header_end = body.index('</header>', header_start)
     header_html = body[header_start:header_end]
     assert 'id="deploy-btn"' in header_html
-    assert 'class="deploy-btn"' in header_html
     assert 'onclick="quicksightDeploy()"' in header_html
     assert 'id="deploy-status"' in header_html
 
@@ -335,13 +337,19 @@ def test_diagram_embed_mode_drops_studio_header(
         embedded = c.get("/diagram?embed=1").text
         standalone = c.get("/diagram").text
 
-    # Standalone diagram keeps the chrome.
-    assert '<header class="studio-header">' in standalone
+    # Standalone diagram keeps the chrome. AM.2 step 1 (2026-05-25):
+    # `.studio-header` / `.diagram-embed` semantic classes retired in
+    # favor of raw Tailwind utilities. Check the stable user-facing
+    # behavior — standalone shows the "Studio · diagram" h1 + a back-
+    # link to landing; embedded variant shows neither (the iframe
+    # carries no nav chrome).
+    assert "<header" in standalone
     assert "Studio · diagram" in standalone
-    # Embedded variant drops it; body is tagged so CSS / JS can detect.
-    assert '<header class="studio-header">' not in embedded
+    assert "← landing" in standalone
+    # Embedded variant drops the chrome entirely.
+    assert "<header" not in embedded
     assert "Studio · diagram" not in embedded
-    assert 'class="diagram-embed"' in embedded
+    assert "← landing" not in embedded
 
 
 def test_home_page_carries_diagram_filter_listener(

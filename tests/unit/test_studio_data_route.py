@@ -120,8 +120,11 @@ def test_data_route_carries_back_to_landing_link(
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/data").text
 
-    assert '<a class="nav-link" href="/">← landing</a>' in body
-    assert '<a class="nav-link" href="/diagram">→ diagram</a>' in body
+    # AM.2 step 1 (2026-05-25): `.nav-link` semantic class retired;
+    # check the href + visible text instead (what the operator
+    # actually clicks).
+    assert 'href="/">← landing</a>' in body
+    assert 'href="/diagram">→ diagram</a>' in body
 
 
 def test_data_route_training_pane_replaces_x4_h9_placeholder(
@@ -181,7 +184,8 @@ def test_home_chrome_links_to_data(writable_l2_yaml: Path) -> None:
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/").text
 
-    assert '<a class="nav-link" href="/data">→ data</a>' in body
+    # AM.2 step 1: same locator change as `_data_route_carries_back`.
+    assert 'href="/data">→ data</a>' in body
 
 
 def test_diagram_chrome_links_to_data(writable_l2_yaml: Path) -> None:
@@ -190,7 +194,7 @@ def test_diagram_chrome_links_to_data(writable_l2_yaml: Path) -> None:
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/diagram").text
 
-    assert '<a class="nav-link" href="/data">→ data</a>' in body
+    assert 'href="/data">→ data</a>' in body
 
 
 def test_diagram_chrome_omits_data_link_in_embed_mode(

@@ -109,7 +109,10 @@ def test_studio_mount_overrides_root_with_landing() -> None:
     # prior `str(cache.get().instance) in body` check (the L2Instance
     # `instance` field is gone; identity now lives on cfg, not the L2).
     instance = cache.get()
-    assert f'<span class="count">({len(instance.accounts)})</span>' in body, body
+    # AM.2 step 1 (2026-05-25): `.count` semantic class retired in
+    # favor of utility classes. Check the visible content `(N)` next
+    # to the section heading instead.
+    assert f">({len(instance.accounts)})</span>" in body, body
 
 
 def test_studio_mount_keeps_dashboards_routes_alive() -> None:

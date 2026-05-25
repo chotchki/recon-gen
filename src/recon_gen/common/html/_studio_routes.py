@@ -243,7 +243,7 @@ def _render_home_page(
         section_blocks.append(
             f'<details class="home-section" data-kind="{escape(kind)}"{open_attr}>'
             f"<summary>{escape(label)} "
-            f'<span class="count">({n})</span> '
+            f'<span class="text-xs text-secondary-fg font-normal">({n})</span> '
             f"{add_link}"
             f'<a class="home-section-link" href="/l2_shape/{kind}/" '
             f'onclick="event.stopPropagation()" '
@@ -288,7 +288,7 @@ def _render_home_page(
         section_blocks.append(
             f'<details class="home-section" data-kind="{escape(kind)}">'
             f'<summary>{escape(label)} '
-            f'<span class="count">({escape(status)})</span> '
+            f'<span class="text-xs text-secondary-fg font-normal">({escape(status)})</span> '
             f"{singleton_link}"
             f"</summary>"
             f'<div class="home-section-body">'
@@ -299,9 +299,13 @@ def _render_home_page(
     sections_html = "\n    ".join(section_blocks)
     demo_banner = _demo_mode_banner(demo_mode)
     deploy_controls = "" if demo_mode else (
-        '<button id="deploy-btn" class="deploy-btn" type="button"\n'
+        '<button id="deploy-btn" class="ml-auto bg-accent text-accent-fg border '
+        'border-accent px-3 py-1 rounded-sm cursor-pointer text-sm '
+        'hover:opacity-85 disabled:opacity-60 disabled:cursor-not-allowed" '
+        'type="button"\n'
         '            onclick="quicksightDeploy()">Deploy changes</button>\n'
-        '    <span id="deploy-status" class="deploy-status" aria-live="polite"></span>'
+        '    <span id="deploy-status" class="text-xs text-secondary-fg" '
+        'aria-live="polite"></span>'
     )
 
     return f"""<!doctype html>
@@ -449,11 +453,11 @@ def _render_home_page(
     }});
   </script>
   {devlog_script}</head>
-<body class="home-page">
+<body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {demo_banner}
-  <header class="studio-header">
+  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
     <h1>Studio</h1>
-    <span class="instance">{prefix}</span>
+    <span class="text-sm text-secondary-fg font-mono">{prefix}</span>
     <a class="nav-link" href="/diagram">→ diagram (full)</a>
     <a class="nav-link" href="/data">→ data</a>
     <a class="nav-link" href="/dashboards">→ dashboards</a>
@@ -466,7 +470,8 @@ def _render_home_page(
       var btn = document.getElementById('deploy-btn');
       var status = document.getElementById('deploy-status');
       btn.disabled = true;
-      status.className = 'deploy-status deploy-status--running';
+      status.className = 'text-xs text-secondary-fg';
+      status.dataset.state = 'running';
       status.textContent = 'Deploying…';
       fetch('/deploy', {{ method: 'POST' }})
         .then(function(resp) {{
@@ -477,23 +482,27 @@ def _render_home_page(
         .then(function(result) {{
           btn.disabled = false;
           if (result.body.halted) {{
-            status.className = 'deploy-status deploy-status--halted';
+            status.className = 'text-xs text-warning font-semibold';
+            status.dataset.state = 'halted';
             status.textContent = 'Halted: ' + result.body.halt_reason;
           }} else if (result.ok) {{
             var s3 = result.body.step3_generator;
-            status.className = 'deploy-status deploy-status--ok';
+            status.className = 'text-xs text-success';
+            status.dataset.state = 'ok';
             status.textContent = (
               'Deployed (gen ' + result.body.step5_data_generation_id +
               ', ' + s3.transactions_after + ' tx)'
             );
           }} else {{
-            status.className = 'deploy-status deploy-status--error';
+            status.className = 'text-xs text-danger font-semibold';
+            status.dataset.state = 'error';
             status.textContent = 'Failed: HTTP ' + result.status;
           }}
         }})
         .catch(function(err) {{
           btn.disabled = false;
-          status.className = 'deploy-status deploy-status--error';
+          status.className = 'text-xs text-danger font-semibold';
+          status.dataset.state = 'error';
           status.textContent = 'Failed: ' + (err && err.message || err);
         }});
     }}
@@ -667,12 +676,12 @@ def _render_diagram_page(
   {devlog_meta}{coverage_meta}{trainer_meta}{studio_theme_head(instance)}
   <link rel="stylesheet" href="{asset_url("diagram.css")}">
   {devlog_script}</head>
-<body class="{"diagram-embed" if embed else ""}">
+<body class="{"block m-0 p-0 font-sans bg-surface-bg text-primary-fg" if embed else "block min-h-screen font-sans bg-surface-bg text-primary-fg"}">
   {_demo_mode_banner(demo_mode and not embed)}
   {("" if embed else (
-    '<header class="studio-header">'
+    '<header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">'
     f'<h1>Studio · diagram</h1>'
-    f'<span class="instance">{prefix}</span>'
+    f'<span class="text-sm text-secondary-fg font-mono">{prefix}</span>'
     '<a class="nav-link" href="/">← landing</a>'
     '<a class="nav-link" href="/data">→ data</a>'
     '<a class="nav-link" href="/dashboards">→ dashboards</a>'
@@ -694,40 +703,40 @@ def _render_diagram_page(
     <strong class="chrome-section-label">Show:</strong>
     <label>
       <input type="checkbox" id="toggle-role-internal" checked>
-      Internal roles <span class="count">({n_role_internal})</span>
+      Internal roles <span class="text-xs text-secondary-fg font-normal">({n_role_internal})</span>
     </label>
     <label>
       <input type="checkbox" id="toggle-role-external" checked>
-      External roles <span class="count">({n_role_external})</span>
+      External roles <span class="text-xs text-secondary-fg font-normal">({n_role_external})</span>
     </label>
     <label>
       <input type="checkbox" id="toggle-rail" checked>
-      Rails <span class="count">({n_rail})</span>
+      Rails <span class="text-xs text-secondary-fg font-normal">({n_rail})</span>
     </label>
     <label>
       <input type="checkbox" id="toggle-template" checked>
-      Templates <span class="count">({n_template})</span>
+      Templates <span class="text-xs text-secondary-fg font-normal">({n_template})</span>
     </label>
     <label>
       <input type="checkbox" id="toggle-chain" checked>
-      Chains <span class="count">({n_chain})</span>
+      Chains <span class="text-xs text-secondary-fg font-normal">({n_chain})</span>
     </label>
     <label>
       <input type="checkbox" id="toggle-control_parent" checked>
-      Control hierarchy <span class="count">({n_control_parent})</span>
+      Control hierarchy <span class="text-xs text-secondary-fg font-normal">({n_control_parent})</span>
     </label>
     <strong class="chrome-section-label">Edge labels:</strong>
     <label>
       <input type="checkbox" id="toggle-edge-label-rail_bundle" checked>
-      Bundles <span class="count">({n_bundle})</span>
+      Bundles <span class="text-xs text-secondary-fg font-normal">({n_bundle})</span>
     </label>
     <label>
       <input type="checkbox" id="toggle-edge-label-self_loop" checked>
-      Self-loops <span class="count">({n_self_loop})</span>
+      Self-loops <span class="text-xs text-secondary-fg font-normal">({n_self_loop})</span>
     </label>
     <label>
       <input type="checkbox" id="toggle-edge-label-chain" checked>
-      Chain badges <span class="count">({n_chain})</span>
+      Chain badges <span class="text-xs text-secondary-fg font-normal">({n_chain})</span>
     </label>
     <label>
       <input type="checkbox" id="toggle-edge-label-control_parent" checked>
@@ -1602,9 +1611,13 @@ def _render_data_page(
     training_pane = render_training_pane()
     demo_banner = _demo_mode_banner(demo_mode)
     deploy_controls = "" if demo_mode else (
-        '<button id="deploy-btn" class="deploy-btn" type="button"\n'
+        '<button id="deploy-btn" class="ml-auto bg-accent text-accent-fg border '
+        'border-accent px-3 py-1 rounded-sm cursor-pointer text-sm '
+        'hover:opacity-85 disabled:opacity-60 disabled:cursor-not-allowed" '
+        'type="button"\n'
         '            onclick="quicksightDeploy()">Deploy changes</button>\n'
-        '    <span id="deploy-status" class="deploy-status" aria-live="polite"></span>'
+        '    <span id="deploy-status" class="text-xs text-secondary-fg" '
+        'aria-live="polite"></span>'
     )
 
     return f"""<!doctype html>
@@ -1616,12 +1629,12 @@ def _render_data_page(
   <link rel="stylesheet" href="{asset_url("diagram.css")}">
   <link rel="stylesheet" href="{asset_url("data.css")}">
   {devlog_script}</head>
-<body class="data-page">
+<body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {demo_banner}
-  <header class="studio-header">
+  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
     <h1>Studio · data shaping</h1>
-    <span class="instance">{prefix}</span>
-    <a class="nav-link" href="/">← landing</a>
+    <span class="text-sm text-secondary-fg font-mono">{prefix}</span>
+    <a class="text-accent no-underline text-sm hover:underline" href="/">← landing</a>
     <a class="nav-link" href="/diagram">→ diagram</a>
     <a class="nav-link" href="/dashboards">→ dashboards</a>
     {deploy_controls}
@@ -1633,7 +1646,8 @@ def _render_data_page(
       var btn = document.getElementById('deploy-btn');
       var status = document.getElementById('deploy-status');
       btn.disabled = true;
-      status.className = 'deploy-status deploy-status--running';
+      status.className = 'text-xs text-secondary-fg';
+      status.dataset.state = 'running';
       status.textContent = 'Deploying…';
       fetch('/deploy', {{ method: 'POST' }})
         .then(function(resp) {{
@@ -1644,23 +1658,27 @@ def _render_data_page(
         .then(function(result) {{
           btn.disabled = false;
           if (result.body.halted) {{
-            status.className = 'deploy-status deploy-status--halted';
+            status.className = 'text-xs text-warning font-semibold';
+            status.dataset.state = 'halted';
             status.textContent = 'Halted: ' + result.body.halt_reason;
           }} else if (result.ok) {{
             var s3 = result.body.step3_generator;
-            status.className = 'deploy-status deploy-status--ok';
+            status.className = 'text-xs text-success';
+            status.dataset.state = 'ok';
             status.textContent = (
               'Deployed (gen ' + result.body.step5_data_generation_id +
               ', ' + s3.transactions_after + ' tx)'
             );
           }} else {{
-            status.className = 'deploy-status deploy-status--error';
+            status.className = 'text-xs text-danger font-semibold';
+            status.dataset.state = 'error';
             status.textContent = 'Failed: HTTP ' + result.status;
           }}
         }})
         .catch(function(err) {{
           btn.disabled = false;
-          status.className = 'deploy-status deploy-status--error';
+          status.className = 'text-xs text-danger font-semibold';
+          status.dataset.state = 'error';
           status.textContent = 'Failed: ' + (err && err.message || err);
         }});
     }}
