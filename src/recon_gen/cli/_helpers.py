@@ -26,6 +26,7 @@ from recon_gen.common.config import load_config
 
 __all__ = [
     "APPS",
+    "build_config_populate_sql",
     "build_full_seed_sql",
     "connect_and_apply",
     "emit_to_target",
@@ -162,6 +163,14 @@ def build_full_seed_sql(cfg, instance, *, anchor=None, density: float = 1.0, pla
 
     See ``build_default_scenario`` for the scenario construction +
     density + plants-filter semantics.
+
+    BC.7 + BC.12 note (revised 2026-05-24): the ``<prefix>_config``
+    row populate does NOT live here — it lives in ``schema apply``
+    per the three-event lifecycle (schema apply = deploy event = L2
+    changes; data apply = transaction data; data refresh = matview
+    refresh). ``build_config_populate_sql`` is still exposed below
+    for test fixtures and any caller that wants the same shape
+    inline.
     """
     from recon_gen.common.l2.seed import emit_full_seed
 
@@ -171,6 +180,56 @@ def build_full_seed_sql(cfg, instance, *, anchor=None, density: float = 1.0, pla
     return emit_full_seed(
         instance, final, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
         anchor=anchor, base_seed=base_seed,
+    )
+
+
+def build_config_populate_sql(cfg, instance, *, anchor=None) -> str:  # type: ignore[no-untyped-def]: cfg/instance/anchor untyped pending CLI-wide sweep
+    """BC.7.1+2 — emit the ``<prefix>_config`` row populate SQL.
+
+    Single seam shared by ``schema apply`` (production deploy event
+    per the BC.12 three-event lifecycle) and any test fixture that
+    wants the same shape. Routes the L2 through
+    ``serialize_l2(instance)`` so the BC.8 ``_seconds`` derived
+    fields land on rails for the stuck_pending / stuck_unbundled
+    matviews. yaml → dict → JSON keeps the embedded-payload
+    compact-JSON shape.
+
+    The anchor wallclock seam mirrors ``cli/audit/__init__.py``:
+    when the caller passes an explicit ``anchor`` we use it (locked
+    SQL paths); otherwise we route through ``AsOfFrame.live().as_of``
+    so every wall-clock read funnels through the AQ.3 seam.
+    """
+    import json
+    from datetime import datetime
+
+    import yaml as _yaml
+    from recon_gen.common.as_of_frame import AsOfFrame
+    from recon_gen.common.l2.config_table import emit_config_populate_sql
+    from recon_gen.common.l2.serializer import serialize_l2
+
+    l2_yaml_text = serialize_l2(instance)
+    l2_dict = _yaml.safe_load(l2_yaml_text)
+    # Compact separators — JSON is embedded as a SQL literal, not a
+    # human-diffed file; the matview JSON_TABLE parser is whitespace-
+    # tolerant either way. (json-indent typing-smell: compact form is
+    # the deliberate choice for the embedded-payload case.)
+    l2_json = json.dumps(l2_dict, default=str, separators=(",", ":"))
+    # cfg_json carries an empty object today — the matviews only read
+    # l2_yaml at present, and serializing the full Config dataclass
+    # pulls in non-JSON-safe types (Dialect enum / Decimal / path).
+    # If a matview ever needs cfg fields, expand here.
+    cfg_json = "{}"
+    if anchor is not None:
+        as_of_dt = datetime(anchor.year, anchor.month, anchor.day, 12, 0, 0)
+    else:
+        live = AsOfFrame.live().as_of
+        as_of_dt = datetime(live.year, live.month, live.day, 12, 0, 0)
+    return emit_config_populate_sql(
+        prefix=cfg.db_table_prefix,
+        cfg_json=cfg_json,
+        l2_json=l2_json,
+        as_of=as_of_dt,
+        dialect=cfg.dialect,
     )
 
 

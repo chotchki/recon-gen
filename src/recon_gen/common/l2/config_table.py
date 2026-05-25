@@ -41,6 +41,30 @@ from recon_gen.common.sql.dialect import (
 )
 
 
+def _sql_quote(text: str) -> str:
+    """SQL single-quote a literal string (doubles embedded ``'``).
+
+    Portable across the three dialects we target; cfg_yaml + l2_yaml
+    are JSON text so backslashes don't need PG's ``E''`` escape — only
+    the ``'`` quote does.
+    """
+    return "'" + text.replace("'", "''") + "'"
+
+
+def _sql_timestamp(as_of: datetime, dialect: Dialect) -> str:
+    """Dialect-appropriate TIMESTAMP literal for ``as_of``.
+
+    Mirrors ``seed.py::_sql_timestamp_literal`` so the populate SQL
+    aligns with the rest of the apply pipeline. PG / SQLite accept the
+    bare ISO string; Oracle requires the ``TIMESTAMP '...'`` typed
+    form.
+    """
+    ts = as_of.strftime("%Y-%m-%d %H:%M:%S")
+    if dialect is Dialect.ORACLE:
+        return f"TIMESTAMP '{ts}'"
+    return _sql_quote(ts)
+
+
 def config_table_name(prefix: str) -> str:
     """The canonical ``<prefix>_config`` table name."""
     return f"{prefix}_config"
@@ -106,13 +130,20 @@ def replace_config(
     l2_json: str,
     as_of: datetime,
 ) -> None:
-    """**Deploy event** — full-row replace.
+    """**Deploy event** — full-row replace (sqlite3 conn API).
 
     DELETE + INSERT preserves the single-row invariant without relying
     on dialect-specific UPSERT. The caller is responsible for
     serializing cfg + L2 to JSON strings (typically via
     ``dataclasses.asdict`` + ``json.dumps``, or by reading the source
     YAML and re-serializing to JSON).
+
+    Sqlite-typed connection signature for the test-fixture callers
+    (every ``tests/unit/test_spine_*.py`` populates the config row
+    against an in-memory sqlite). Production / cross-dialect callers
+    use :func:`emit_config_populate_sql` instead — same DELETE+INSERT,
+    emitted as static SQL the apply pipeline runs through
+    ``execute_script`` (BC.7.1).
     """
     name = config_table_name(prefix)
     conn.execute(f"DELETE FROM {name}")
@@ -121,6 +152,47 @@ def replace_config(
         (as_of.strftime("%Y-%m-%d %H:%M:%S"), cfg_json, l2_json),
     )
     conn.commit()
+
+
+def emit_config_populate_sql(
+    *,
+    prefix: str,
+    cfg_json: str,
+    l2_json: str,
+    as_of: datetime,
+    dialect: Dialect,
+) -> str:
+    """**Deploy event SQL** — dialect-static DELETE + INSERT for the
+    single config row (BC.7.1).
+
+    The shape ``cli/data.py::data_apply`` consumes alongside
+    ``build_full_seed_sql``: emits a literal SQL string the apply
+    pipeline runs via ``common/db.execute_script``. Matches the
+    convention of every other emit_* helper in this package
+    (``emit_schema`` / ``emit_full_seed`` / ``emit_truncate_sql``) so
+    the emit-vs-execute split (operator pipes ``-o file.sql`` vs.
+    ``--execute``) keeps holding.
+
+    BC.7 fixes the chronic empty-matview production bug: the L1
+    invariant matviews (``limit_breach`` / ``stuck_pending`` /
+    ``stuck_unbundled``) all ``JSON_TABLE``-join to
+    ``<prefix>_config.l2_yaml`` for their per-rail caps; without a row
+    they find zero caps and stay empty.
+
+    Caller's contract: ``cfg_json`` + ``l2_json`` are valid JSON text
+    (the ``json_check`` CHECK constraint on PG/Oracle rejects
+    malformed input; SQLite tolerates it but the matview readers
+    return NULL on path extracts so the outer WHERE filters those rows
+    out). Single-quote escaping happens here; backslash escapes are
+    not the JSON contract's concern (no PG ``E''`` form needed).
+    """
+    name = config_table_name(prefix)
+    return (
+        f"DELETE FROM {name};\n"
+        f"INSERT INTO {name} (as_of, cfg_yaml, l2_yaml) "
+        f"VALUES ({_sql_timestamp(as_of, dialect)}, "
+        f"{_sql_quote(cfg_json)}, {_sql_quote(l2_json)});\n"
+    )
 
 
 def set_as_of(

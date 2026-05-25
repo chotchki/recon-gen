@@ -55,16 +55,27 @@ def schema_apply(
     and actually run every CREATE.
     """
     from recon_gen.common.l2.schema import emit_schema
+    from recon_gen.cli._helpers import build_config_populate_sql
 
     cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
-    sql = emit_schema(
+    schema_sql = emit_schema(
         instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
     )
+    # BC.7 + BC.12: schema apply IS the L2-deploy event. After DDL,
+    # populate the <prefix>_config row from the operator-passed L2 yaml.
+    # The L1 matviews JSON_TABLE-JOIN against this row for their per-rail
+    # caps (limit_breach / stuck_pending / stuck_unbundled); without the
+    # populate, those matviews stay empty for every customer (BC.6-
+    # surfaced production bug). The populate is part of the deploy event
+    # by lifecycle: it changes when L2 changes, NOT when transactions
+    # arrive — data refresh stays focused on matview REFRESH.
+    populate_sql = build_config_populate_sql(cfg, instance)
+    sql = schema_sql + "\n" + populate_sql
 
     if execute:
-        connect_and_apply(cfg, sql, label="schema DDL")
+        connect_and_apply(cfg, sql, label="schema DDL + config populate")
     else:
-        emit_to_target(sql, output, label="schema DDL")
+        emit_to_target(sql, output, label="schema DDL + config populate")
 
 
 @schema.command("clean")

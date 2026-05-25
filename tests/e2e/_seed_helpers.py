@@ -96,54 +96,35 @@ def apply_db_seed(
         execute_script(cur, schema_sql, dialect=dialect)
     conn.commit()
 
-    # 1b. Populate <prefix>_config (BC.4 follow-on). The L1 matviews
-    # JOIN to <prefix>_config.l2_yaml via JSON_TABLE to find
-    # limit_schedules / per-rail max_*_age — without a row, those
-    # matviews are empty (limit_breach / stuck_pending / stuck_unbundled
-    # all see no caps → 0 rows). The production `recon-gen data apply`
-    # path has the same gap; the unit-test fixtures (test_spine_*.py)
-    # all populate this manually. Centralizing here so every
-    # apply_db_seed caller picks up the population by construction.
-    # `replace_config` is sqlite3-only (its placeholder shape is `?`);
-    # build the INSERT as a literal SQL string via execute_script so
-    # it works across PG / Oracle / SQLite uniformly.
+    # 1b. Populate <prefix>_config. The plants-only path bypasses
+    # `build_full_seed_sql` (it composes through the spine pipeline),
+    # so we mirror the production schema-apply populate inline using
+    # the same `build_config_populate_sql` helper. Production has the
+    # populate in `schema apply` (BC.7 / BC.12); this fixture keeps it
+    # here because the schema-apply equivalent in `apply_db_seed`
+    # (`emit_schema` above) doesn't go through the Click CLI layer that
+    # wires the populate.
     #
-    # Serializer note (separate BC.6-surfaced latent bug, backlogged):
-    # the matview SQL expects `max_pending_age_seconds` /
-    # `max_unbundled_age_seconds` (int seconds) on each rail entry, but
-    # `dataclasses.asdict` emits `max_pending_age` /
-    # `max_unbundled_age` (timedelta strings). Walk the rails list and
-    # add the derived _seconds fields inline so the stuck_* matviews
-    # find their per-rail age caps. Production-side `serialize_l2`
-    # has the same gap and needs the same fix (backlogged).
-    import dataclasses as _dc
-    import json as _json
-    from datetime import timedelta as _td
-    config_name = f"{prefix}_config"
-    l2_dict = _dc.asdict(instance)
-    for _rail in l2_dict.get("rails", []):
-        for _field, _seconds_field in (
-            ("max_pending_age", "max_pending_age_seconds"),
-            ("max_unbundled_age", "max_unbundled_age_seconds"),
-        ):
-            _val = _rail.get(_field)
-            if isinstance(_val, _td):
-                _rail[_seconds_field] = int(_val.total_seconds())
-            elif _val is not None:
-                # asdict on timedelta returns timedelta (above branch).
-                # Defensive fallback: if somewhere upstream pre-serialized
-                # it, attempt to parse — skip silently otherwise so the
-                # stuck_* matview just sees a NULL and excludes the rail.
-                pass
-    l2_json_text = _json.dumps(l2_dict, default=str)
-    as_of_iso = today_ref.strftime("%Y-%m-%d") + " 12:00:00"
-    # SQL-escape the JSON text (single quotes). JSON is well-formed so
-    # backslash escapes shouldn't bite; the only quoting risk is `'`.
-    escaped_l2 = l2_json_text.replace("'", "''")
-    populate_sql = (
-        f"DELETE FROM {config_name};\n"
-        f"INSERT INTO {config_name} (as_of, cfg_yaml, l2_yaml) "
-        f"VALUES ('{as_of_iso}', '{{}}', '{escaped_l2}');\n"
+    # BC.8 retired the Duration→seconds walk hack — `serialize_l2` now
+    # emits `max_pending_age_seconds` / `max_unbundled_age_seconds`
+    # natively, and `build_config_populate_sql` consumes it.
+    import json as _yaml_json
+    from datetime import datetime as _datetime
+
+    import yaml as _yaml
+    from recon_gen.common.l2.config_table import emit_config_populate_sql
+    from recon_gen.common.l2.serializer import serialize_l2
+
+    l2_yaml_text = serialize_l2(instance)
+    l2_dict_from_yaml = _yaml.safe_load(l2_yaml_text)
+    populate_sql = emit_config_populate_sql(
+        prefix=prefix,
+        cfg_json="{}",
+        l2_json=_yaml_json.dumps(
+            l2_dict_from_yaml, default=str, separators=(",", ":"),
+        ),
+        as_of=_datetime(today_ref.year, today_ref.month, today_ref.day, 12, 0, 0),
+        dialect=dialect,
     )
     with conn.cursor() as cur:
         execute_script(cur, populate_sql, dialect=dialect)

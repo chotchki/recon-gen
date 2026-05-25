@@ -156,8 +156,15 @@ def _dump_two_leg_rail(r: TwoLegRail) -> dict[str, Any]:  # typing-smell: ignore
         out["posted_requirements"] = [str(k) for k in r.posted_requirements]
     if r.max_pending_age is not None:
         out["max_pending_age"] = _dump_duration(r.max_pending_age)
+        # BC.8 — emit `_seconds` companion so the `<prefix>_config.l2_yaml`
+        # matview readers (stuck_pending / stuck_unbundled) can JSON_VALUE
+        # the cap as a numeric without re-parsing the ISO 8601 duration
+        # in SQL. The loader ignores unknown keys; round-trip is
+        # field-equal (the loader reads `max_pending_age`, not `_seconds`).
+        out["max_pending_age_seconds"] = int(r.max_pending_age.total_seconds())
     if r.max_unbundled_age is not None:
         out["max_unbundled_age"] = _dump_duration(r.max_unbundled_age)
+        out["max_unbundled_age_seconds"] = int(r.max_unbundled_age.total_seconds())
     if r.aggregating:
         out["aggregating"] = True
     if r.bundles_activity:
@@ -197,8 +204,11 @@ def _dump_single_leg_rail(r: SingleLegRail) -> dict[str, Any]:  # typing-smell: 
         out["posted_requirements"] = [str(k) for k in r.posted_requirements]
     if r.max_pending_age is not None:
         out["max_pending_age"] = _dump_duration(r.max_pending_age)
+        # BC.8 — emit `_seconds` companion (same rationale as TwoLegRail).
+        out["max_pending_age_seconds"] = int(r.max_pending_age.total_seconds())
     if r.max_unbundled_age is not None:
         out["max_unbundled_age"] = _dump_duration(r.max_unbundled_age)
+        out["max_unbundled_age_seconds"] = int(r.max_unbundled_age.total_seconds())
     if r.aggregating:
         out["aggregating"] = True
     if r.bundles_activity:
