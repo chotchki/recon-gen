@@ -407,9 +407,45 @@ def test_bg2_daily_statement_kpis_match_summary_matview(
             f"rendered={rendered_day1[title]} vs "
             f"summary-matview={expected_day1[title]}. The KPI is "
             f"binding a column whose value doesn't match what the "
-            f"deployed matview holds — v11.21.0 cold-read finding #1 "
-            f"(Drift) / #3 (negative Opening Balance) lives here."
+            f"deployed matview holds. (For finding-shape disambiguation: "
+            f"if THIS fails, the bug is in the KPI binding; if this "
+            f"PASSES but the narrative-formula assertion below fails, "
+            f"the bug is in the matview's `drift` column definition vs "
+            f"the sheet's stated formula — cold-read finding #1.)"
         )
+
+    # Narrative-formula invariant (cold-read finding #1, complete-catch
+    # half). The Daily Statement sheet narrates
+    #   Drift = Closing Stored − (Opening + signed_net_flow)
+    # and the matview's `drift` column MUST equal that formula on the
+    # same row's `closing_balance_stored`, `opening_balance`, `net_flow`
+    # columns. The identity assertion above catches "KPI binding ≠
+    # matview" cases; this catches the orthogonal "matview value ≠
+    # what the narrative says it should be" case. Both must hold for
+    # finding #1 to be fully closed.
+    expected_drift_from_formula = (
+        expected_day1["Closing Stored"]
+        - (expected_day1["Opening Balance"] + Decimal(str(
+            _net_flow_for(
+                driver, sql=sql,
+                dataset_parameters=dataset_parameters,
+                account_display=picked_account, day_iso=effective_day1,
+            )
+        )))
+    )
+    assert expected_day1["Drift"] == expected_drift_from_formula, (
+        f"day1={effective_day1!r}: matview's `drift` column "
+        f"({expected_day1['Drift']}) doesn't equal the sheet's "
+        f"narrative formula "
+        f"Closing Stored - (Opening + net_flow) = "
+        f"{expected_day1['Closing Stored']} - "
+        f"({expected_day1['Opening Balance']} + …net_flow…) "
+        f"= {expected_drift_from_formula}. v11.21.0 cold-read finding "
+        f"#1 — the matview's `drift` definition is whatever it is, "
+        f"but the sheet promises this exact formula. Either fix the "
+        f"matview to match the narrative, or fix the narrative to "
+        f"match the matview."
+    )
 
     # Delta — only meaningful on the QS leg. On App2 the picker is a
     # no-op (App2 skips ``add_parameter_datetime_picker`` during
@@ -446,6 +482,26 @@ def test_bg2_daily_statement_kpis_match_summary_matview(
         f"chain; the SQL pushdown wire is intact (this same SQL + "
         f"binds returns distinct values for the two days)."
     )
+
+
+def _net_flow_for(
+    driver, *, sql, dataset_parameters, account_display, day_iso,  # type: ignore[no-untyped-def]: driver / dataset_parameters are runtime values — annotating cascades imports
+) -> object:
+    """Pull the matview row's ``net_flow`` column (NOT a KPI on the
+    sheet — the narrative-formula check needs it but the 5 KPIs don't
+    surface it directly). Reuses the same SQL the visual issues so
+    drift between visual + ground truth stays impossible by
+    construction."""
+    rows = driver.query_db(
+        sql,
+        binds={
+            "param_pL1DsAccount": account_display,
+            "param_pL1DsBalanceDate": day_iso,
+        },
+        dataset_parameters=dataset_parameters,
+    )
+    assert len(rows) == 1
+    return rows[0]["net_flow"]
 
 
 def _summary_default_day(dataset_parameters) -> str:  # type: ignore[no-untyped-def]: list of DatasetParameter — annotating would import the wrapper here
