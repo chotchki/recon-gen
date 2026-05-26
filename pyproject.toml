@@ -101,6 +101,14 @@ serve = [
     # SQLite cfg without blocking the asyncio loop. Cheap dependency
     # (~30 KB), pulls nothing extra.
     "aiosqlite>=0.19",
+    # BF.9 — markdown rendering for the Studio editor's textarea
+    # Preview tab (description fields opt-in via FieldSpec.preview_
+    # markdown). Lazy-imported in `_studio_editor_routes.py`; pulled
+    # in here so the [serve] extras pin all Studio-runtime needs in
+    # one place. v11.22.0 CI failure (missing in pyproject) catches
+    # this: a Studio routes unit test exercises the preview path and
+    # ModuleNotFoundError'd in CI even though it worked locally.
+    "markdown>=3.6",
 ]
 dev = [
     "pytest>=7.0",

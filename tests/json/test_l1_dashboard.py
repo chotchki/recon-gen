@@ -1211,7 +1211,10 @@ def test_unbundled_aging_sheet_has_kpi_bar_table() -> None:
     titles = [v.title for v in ua.visuals]
     assert titles == [
         "Stuck Unbundled",
-        "Stuck Unbundled — $ Exposure",
+        # BH.20 (2026-05-25) — was "Stuck Unbundled — $ Exposure";
+        # the $ glyph now lives on the value via currency=True, no
+        # redundant literal in the title.
+        "Stuck Unbundled Exposure",
         "Stuck Unbundled by Age Bucket",
         "Stuck Unbundled Detail",
     ]

@@ -1,5 +1,78 @@
 # Release Notes
 
+## v11.22.1 — patch: v11.22.0 CI fix + Phase BJ marker-selection
+
+Two CI fixes the v11.22.0 push surfaced + the Phase BJ workflow
+collapse landed on the same release.
+
+### Patch fixes
+
+- **`markdown>=3.6`** added to `[serve]` extras. BF.9 (textarea
+  Preview-tab markdown rendering) lazy-imports `markdown` in
+  `_studio_editor_routes.py`; v11.22.0's pyproject didn't pin it.
+  CI's fresh-install path tripped `ModuleNotFoundError: markdown`
+  during the studio routes unit test that exercises the preview
+  path. Local dev worked because `markdown` was already in the
+  venv from earlier work.
+- **`tests/json/test_l1_dashboard.py::test_unbundled_aging_sheet_
+  has_kpi_bar_table`** updated. BH.20 in v11.22.0 renamed the
+  Stuck Unbundled exposure KPI title but missed the JSON pin
+  asserting the visual title list. Test updated.
+
+### Phase BJ — CI marker-selection (collapses workflow hand-lists)
+
+`e2e.yml::e2e-pg-browser` + `release.yml::e2e-against-testpypi`
+previously hand-listed 17 test files each. BG.7 caught a parity
+gap (4 files missing from both); the maintenance pattern itself
+was the underlying bug.
+
+Both workflows now use:
+
+```yaml
+.venv/bin/pytest tests/e2e/ \
+  -m browser \
+  --ignore=tests/e2e/test_audit_dashboard_agreement.py \
+  -v -n 2 --cov=recon_gen
+```
+
+The `--ignore` carves out the 4-way agreement test that runs in
+its own step (re-seeds spec_example; can't share a worker pool).
+
+**BG.7-class parity gap is now structurally unreachable** — adding
+any new `@pytest.mark.browser` test auto-includes it in both
+workflows; no workflow edit needed.
+
+**Surprise win**: marker-selection collected 136 browser tests
+where the hand-list had 17. Two entire files were silently missing
+all along: `test_parameter_anchored_sheets.py` (u.4.e.4) +
+`test_studio_dogfood_browser.py` (AI.2.d.2). They were authored
+after the last hand-list reconciliation and never got added.
+
+History (per `docs/audits/bj_1_ci_test_selection_rationale.md`):
+the hand-list shape was a historical artifact — an attempted
+runner-dispatch migration (v8.8.0a16, Y.2.gate.k.1.thin-wrapper)
+got reverted when shared local/CI AWS infra made the cutover too
+risky. The unblocker (`Y.2.gate.l` ephemeral AWS infra) shipped
+between v8.8.0a17 and v8.8.0a18, but the workflow migration never
+resumed until BJ.
+
+### BH.24.6 — drop the BH.24.1 backwards-compat fallback
+
+Per user 2026-05-25 ("the fallback contract option, that's example
+of backwards compatibility that bites, needs to be gone by the end
+of BH.24") + `feedback_no_compat_shims`. The BH.24.1 no-contract
+fallback paths in `_wants_cents_divide` + `_resolve_money_columns`
+hid the exact bug class BH.24 was created to fix; removed cleanly.
+Contract registration is now mandatory for any visual-served
+dataset (production was always so; test fixtures registered theirs
+upfront). Future double-convert-class bugs now RAISE loudly at
+runtime instead of misbehaving silently.
+
+The BH.24 architectural loop closes here: contract-driven gating
+(BH.24.1) + no-fallback enforcement (BH.24.6). Type-system
+reinforcement via `Cents` (BH.24.4) is queued as a follow-up
+architectural shift.
+
 ## v11.22.0 — Phase BG honest-gate suite + BH cascade (v11.21.0 cold-read fixes)
 
 Lands **Phase BG** (dashboard browser-test honesty audit + identity-and-
