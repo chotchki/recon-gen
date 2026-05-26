@@ -263,6 +263,15 @@ class _VisualPlan:
     column_formats: Mapping[str, str]
     chart: _ChartMeta | None
     money_columns: frozenset[str]
+    #: KPI's value format (``"currency"`` / ``"number"``), derived
+    #: from the visual's first value measure's ``currency`` flag at
+    #: plan-build time. ``None`` for non-KPI visuals. v11.21.0 cold-
+    #: read finding #14 fix (BH.14): without this, KPIs emitted no
+    #: ``format`` field → JS fell to the no-format toLocaleString
+    #: path → currency values rendered with 3 decimal places (vs the
+    #: 2-decimal contract that ``feedback_kpi_currency_decimals_strict``
+    #: pins).
+    kpi_format: str | None
 
 
 def _apply_cents_to_dollars(
@@ -416,6 +425,26 @@ def _chart_meta(visual: Any) -> _ChartMeta | None:  # typing-smell: ignore[expli
     )
 
 
+def _kpi_format(visual: object) -> str | None:
+    """v11.21.0 finding #14 (BH.14) — return ``"currency"`` when the
+    visual is a KPI whose first value measure carries ``currency=True``,
+    else ``"number"`` for non-currency KPIs, else ``None`` for non-KPI
+    visuals.
+
+    Mirrors ``_chart_meta``'s value_format derivation for charts: a
+    KPI value measure's currency flag is the source of truth for the
+    rendered format. Plumbing this into ``shape_kpi``'s ``format``
+    kwarg drives the JS formatter's currency-2-decimal path (vs the
+    no-format default that emits 3-decimal toLocaleString output).
+    """
+    if type(visual).__name__ != "KPI":
+        return None
+    vals = getattr(visual, "values", []) or []
+    if not vals:
+        return None
+    return "currency" if getattr(vals[0], "currency", False) else "number"
+
+
 def make_tree_db_fetcher(
     tree_app: App,
     cfg: Config,
@@ -493,6 +522,7 @@ def make_tree_db_fetcher(
                 column_labels=col_labels, column_formats=col_formats,
                 chart=_chart_meta(visual),
                 money_columns=money_cols,
+                kpi_format=_kpi_format(visual),
             )
 
     async def fetcher(visual_id: VisualId, params: Mapping[str, list[str]]) -> Any:  # typing-smell: ignore[explicit-any]: per-visual-kind shape (KPI float, Sankey {nodes,links}, etc.) — JSON-serialized downstream, so a real union here would be every renderer's shape
@@ -586,6 +616,19 @@ def make_tree_db_fetcher(
             if kind == "BarChart":
                 chart_kwargs["stacked"] = plan.chart.stacked
             return shape_for_kind(kind, rows, columns, **chart_kwargs)
+        if kind == "KPI":
+            # v11.21.0 finding #14 fix (BH.14): pass the visual's
+            # value-measure format to shape_kpi so the emitted payload
+            # carries ``format="currency"``. Without this, JS's
+            # formatKPIValue falls to the no-format toLocaleString
+            # path, which emits 3-decimal output on values like
+            # ``-11993.097`` — the cold-read's literal misread-risk
+            # shape. The JS currency branch forces ``minimumFractionDigits
+            # = maximumFractionDigits = 2``.
+            kpi_kwargs: dict[str, Any] = {}  # typing-smell: ignore[explicit-any]: heterogeneous shape-fn kwargs — same justification as chart_kwargs
+            if plan.kpi_format is not None:
+                kpi_kwargs["format"] = plan.kpi_format
+            return shape_for_kind(kind, rows, columns, **kpi_kwargs)
         # ForceGraph + Sankey have specialized projectors today
         # (_db_fetcher._topology_to_force_graph, etc.); the generic
         # SQL path handles KPI / Table / Sankey via shape_for_kind.
