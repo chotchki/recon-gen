@@ -197,43 +197,140 @@ def test_bg2_identity_trips_when_rendered_drift_disagrees_with_matview(
 # ─── Finding #1, half-B — matview's drift column violates narrative ──
 
 
-def test_bg2_narrative_formula_trips_when_matview_drift_disagrees_with_formula(
+def test_bg2_narrative_formula_against_independent_truth_catches_matview_net_flow_bug(
     planted_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
 ) -> None:
-    """v11.21.0 finding #1, half-B: even if the KPI binding faithfully
-    reads the matview's `drift`, the matview's own computation may
-    diverge from the sheet's stated formula
-    ``Drift = Closing Stored − (Opening + signed_net_flow)``. The
-    narrative-formula assertion catches this orthogonal case."""
+    """v11.21.0 finding #1 root cause (2026-05-25 BH.0 share): the
+    matview's `net_flow` formula at `schema.py:2502-2504` uses
+    ``SUM(CASE WHEN Credit THEN amount_money ELSE -amount_money END)``
+    which assumed v5's unsigned `amount_money`. v6 made
+    `amount_money` already-signed (Credit positive, Debit negative)
+    so `-amount_money` for Debit rows over-flips → matview's net_flow
+    becomes ``credits + abs(debits)`` = gross magnitude, not signed
+    net. Matview's `drift` column then = ``closing − (opening +
+    gross)`` = wrong.
+
+    **The original BG.2 narrative-formula assertion was tautological**:
+    it pulled both `drift` and `net_flow` from the SAME matview row,
+    so the assertion `matview.drift == closing − (opening +
+    matview.net_flow)` held by construction even when both columns
+    were wrong together. Strengthened 2026-05-25: pull the ground-
+    truth `net_flow` DIRECTLY from `<prefix>_current_transactions`
+    via plain `SUM(amount_money)` (v6's signed convention gives
+    signed net by construction), bypassing the matview's CASE
+    expression.
+
+    This test plants both shapes side-by-side to prove the
+    strengthened assertion catches the bug:
+
+    1. **Matview row with the bug** — `net_flow` carries the gross
+       magnitude; drift = closing − (opening + gross). Tautological
+       check passes; strengthened check trips.
+    2. **Base-transactions ground truth** — plain SUM gives signed
+       net (= credits + debits where debits are negative).
+    3. **Strengthened assertion**: matview.drift vs closing −
+       (opening + independent_sum) trips because matview.net_flow
+       diverges from independent_sum.
+    """
     cfg = planted_sqlite
-    # Plant a third row whose stored `drift` column doesn't match the
-    # formula.
     conn = sqlite3.connect(cfg.demo_database_url)
+    # Plant a base-transactions table mirroring the matview's input
+    # shape. In v6 amount_money is signed: Credit positive, Debit
+    # negative.
+    conn.execute(
+        "CREATE TABLE pfx_current_transactions ("
+        "  account_id TEXT, amount_money INTEGER,"
+        "  amount_direction TEXT, status TEXT, posting TEXT"
+        ")"
+    )
+    # acc-3 on 2026-05-24: Credit +30,000, Debit -20,000
+    # Signed net = -20,000 + 30,000 = +10,000 (matches truth)
+    # Buggy matview net_flow = abs(-20,000) + 30,000 = 50,000 (wrong)
+    conn.executemany(
+        "INSERT INTO pfx_current_transactions VALUES (?,?,?,?,?)",
+        [
+            ("acc-3", 30_000, "Credit", "Posted", "2026-05-24 10:00:00"),
+            ("acc-3", -20_000, "Debit", "Posted", "2026-05-24 14:00:00"),
+        ],
+    )
+    # Matview row carrying the BUG-SHAPE net_flow (gross magnitude).
     conn.execute(
         "INSERT INTO pfx_daily_statement_summary VALUES "
         "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
-            "acc-2", "Account Two", "dda", None, "internal",
+            "acc-3", "Account Three", "dda", None, "internal",
             "2026-05-24 00:00:00", "2026-05-24 23:59:59",
-            10_000, -2_000, 3_000, 1_000, 3, 11_000, 11_000,
-            # Stored `drift` = -809184 (cents) — bug-shape divergence
-            # from the formula's expected 0.
-            -809_184,
+            # opening=0, debits=-20000, credits=30000
+            0, -20_000, 30_000,
+            # BUGGY net_flow = abs(-20000) + 30000 = 50000 cents
+            50_000,
+            2,
+            # closing_stored = opening + true_signed_net = 0 + 10000 = 10000
+            10_000,
+            # closing_recomputed = opening + buggy_net_flow = 50000
+            50_000,
+            # matview drift = closing_stored - closing_recomputed
+            #               = 10000 - 50000 = -40000 cents
+            -40_000,
         ),
     )
     conn.commit()
     conn.close()
-    row = _query_day(cfg, "Account Two (acc-2)", "2026-05-24")
-    formula = (
-        row["closing_balance_stored"]
-        - (row["opening_balance"] + row["net_flow"])
+
+    matview_row = _query_day(cfg, "Account Three (acc-3)", "2026-05-24")
+
+    # === Tautological check (the OLD weak assertion) — passes
+    # silently on the buggy data. Proves the bug class the old
+    # assertion missed.
+    tautological_formula = (
+        Decimal(str(matview_row["closing_balance_stored"]))
+        - (
+            Decimal(str(matview_row["opening_balance"]))
+            + Decimal(str(matview_row["net_flow"]))
+        )
     )
-    # The matview's drift column != the formula. The browser test
-    # asserts equality here; we mirror that as the trip signal.
-    assert row["drift"] != formula, (
-        "Test setup error — planted row should violate the formula but "
-        f"row['drift']={row['drift']} equals "
-        f"closing - (opening + net)={formula}"
+    assert Decimal(str(matview_row["drift"])) == tautological_formula, (
+        "Old (tautological) assertion silently passes on buggy data "
+        "— this is the bug class BG.2 missed"
+    )
+
+    # === Strengthened check — pulls signed net DIRECTLY from
+    # current_transactions, bypassing the matview's CASE expression.
+    independent_net_rows = query_db_via_cfg(
+        cfg,
+        "SELECT COALESCE(SUM(amount_money), 0) / 100.0 AS net "
+        "FROM pfx_current_transactions "
+        "WHERE account_id = :acc AND posting >= :start AND posting < :end "
+        "AND status <> 'Failed'",
+        binds={
+            "acc": "acc-3",
+            "start": "2026-05-24 00:00:00",
+            "end": "2026-05-25 00:00:00",
+        },
+    )
+    independent_net = Decimal(str(independent_net_rows[0]["net"]))
+    # True signed net on this plant: +10,000 cents = +$100.00
+    assert independent_net == Decimal("100"), (
+        f"Plant arithmetic — independent SUM should be $100 (=+10000 "
+        f"cents), got {independent_net}"
+    )
+
+    strengthened_formula = (
+        Decimal(str(matview_row["closing_balance_stored"]))
+        - (
+            Decimal(str(matview_row["opening_balance"]))
+            + independent_net
+        )
+    )
+    # strengthened_formula = $100 − ($0 + $100) = $0 (the narrative
+    # says drift should be $0 on this plant). Matview holds drift =
+    # -$400. ASSERTION TRIPS.
+    assert Decimal(str(matview_row["drift"])) != strengthened_formula, (
+        f"Strengthened assertion should trip on buggy net_flow: "
+        f"matview.drift={matview_row['drift']} vs "
+        f"closing - (opening + independent_net) = "
+        f"{strengthened_formula}. If THIS passes, the strengthened "
+        f"gate is ALSO tautological — review."
     )
 
 

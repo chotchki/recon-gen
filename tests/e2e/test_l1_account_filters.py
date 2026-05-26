@@ -374,37 +374,56 @@ def test_bg2_daily_statement_kpis_match_summary_matview(
             f"the sheet's stated formula — cold-read finding #1.)"
         )
 
-    # Narrative-formula invariant (cold-read finding #1, complete-catch
-    # half). The Daily Statement sheet narrates
+    # Narrative-formula invariant against INDEPENDENT ground truth
+    # (cold-read finding #1, BH.0 post-share strengthening 2026-05-25).
+    #
+    # The Daily Statement sheet narrates
     #   Drift = Closing Stored − (Opening + signed_net_flow)
-    # and the matview's `drift` column MUST equal that formula on the
-    # same row's `closing_balance_stored`, `opening_balance`, `net_flow`
-    # columns. The identity assertion above catches "KPI binding ≠
-    # matview" cases; this catches the orthogonal "matview value ≠
-    # what the narrative says it should be" case. Both must hold for
-    # finding #1 to be fully closed.
-    expected_drift_from_formula = (
-        expected_day1["Closing Stored"]
-        - (expected_day1["Opening Balance"] + Decimal(str(
-            _net_flow_for(
-                driver, sql=sql,
-                dataset_parameters=dataset_parameters,
-                account_display=picked_account, day_iso=effective_day1,
-            )
-        )))
+    # The matview's `drift` column MUST equal that formula. **Critical
+    # subtlety**: we must NOT pull `net_flow` from the SAME matview row
+    # we're checking — that's tautological (matview.drift was BUILT as
+    # closing − (opening + matview.net_flow) so they'll agree even if
+    # matview.net_flow itself computes something wrong, which is
+    # exactly v11.21.0 finding #1's root cause: the matview's net_flow
+    # formula at `schema.py:2502-2504` uses
+    # `SUM(CASE WHEN Credit THEN amount_money ELSE -amount_money END)`
+    # which assumed v5's unsigned amount; v6 made amount_money already
+    # signed → the -amount_money for Debit rows over-flips → net_flow
+    # = credits + abs(debits) = gross magnitude not signed net.
+    #
+    # Ground truth: SUM(amount_money) from the base transactions table
+    # for the same (account_id, business_day) — bypasses the matview's
+    # CASE-expression bug entirely. In v6 amount_money is signed
+    # (Credit positive, Debit negative); plain SUM gives signed net.
+    matview_account_id = str(_row_for(
+        driver, sql=sql, dataset_parameters=dataset_parameters,
+        account_display=picked_account, day_iso=effective_day1,
+    )["account_id"])
+    independent_net_flow = _independent_net_flow_for(
+        driver, cfg=cfg, account_id=matview_account_id,
+        day_iso=effective_day1,
     )
-    assert expected_day1["Drift"] == expected_drift_from_formula, (
-        f"day1={effective_day1!r}: matview's `drift` column "
-        f"({expected_day1['Drift']}) doesn't equal the sheet's "
-        f"narrative formula "
-        f"Closing Stored - (Opening + net_flow) = "
-        f"{expected_day1['Closing Stored']} - "
-        f"({expected_day1['Opening Balance']} + …net_flow…) "
-        f"= {expected_drift_from_formula}. v11.21.0 cold-read finding "
-        f"#1 — the matview's `drift` definition is whatever it is, "
-        f"but the sheet promises this exact formula. Either fix the "
-        f"matview to match the narrative, or fix the narrative to "
-        f"match the matview."
+    expected_drift_from_narrative = (
+        expected_day1["Closing Stored"]
+        - (expected_day1["Opening Balance"] + independent_net_flow)
+    )
+    assert expected_day1["Drift"] == expected_drift_from_narrative, (
+        f"day1={effective_day1!r} account={picked_account!r}: matview's "
+        f"`drift` column ({expected_day1['Drift']}) doesn't equal "
+        f"closing − (opening + INDEPENDENT_signed_net_flow) = "
+        f"{expected_day1['Closing Stored']} − "
+        f"({expected_day1['Opening Balance']} + "
+        f"{independent_net_flow}) = "
+        f"{expected_drift_from_narrative}. v11.21.0 cold-read finding "
+        f"#1: matview's `net_flow` formula at `schema.py:2502-2504` "
+        f"uses `CASE WHEN Credit THEN amount_money ELSE -amount_money` "
+        f"which assumed v5's unsigned amount; v6 made amount_money "
+        f"already-signed so -amount_money for Debit rows over-flips → "
+        f"matview's net_flow becomes gross magnitude (credits + "
+        f"abs(debits)), not signed net. Fix: drop the CASE → "
+        f"`SUM(tx.amount_money) AS net_flow`. (If matview's net_flow "
+        f"differs from independent SUM, the matview's drift is also "
+        f"wrong — fixing net_flow fixes drift by construction.)"
     )
 
     # Delta — only meaningful on the QS leg. On App2 the picker is a
@@ -444,14 +463,13 @@ def test_bg2_daily_statement_kpis_match_summary_matview(
     )
 
 
-def _net_flow_for(
+def _row_for(
     driver, *, sql, dataset_parameters, account_display, day_iso,  # type: ignore[no-untyped-def]: driver / dataset_parameters are runtime values — annotating cascades imports
-) -> object:
-    """Pull the matview row's ``net_flow`` column (NOT a KPI on the
-    sheet — the narrative-formula check needs it but the 5 KPIs don't
-    surface it directly). Reuses the same SQL the visual issues so
-    drift between visual + ground truth stays impossible by
-    construction."""
+):
+    """Pull the matview row for the picked (account, day). Used to
+    extract the matview's `account_id` (the dataset filters on
+    `(name || ' (' || id || ')') = pL1DsAccount`, so the row carries
+    the raw id we need for the independent ground-truth query)."""
     rows = driver.query_db(
         sql,
         binds={
@@ -461,7 +479,54 @@ def _net_flow_for(
         dataset_parameters=dataset_parameters,
     )
     assert len(rows) == 1
-    return rows[0]["net_flow"]
+    return rows[0]
+
+
+def _independent_net_flow_for(driver, *, cfg, account_id, day_iso) -> Decimal:  # type: ignore[no-untyped-def]: driver / cfg are runtime fixture values
+    """Compute the day's signed net flow DIRECTLY from
+    ``<prefix>_current_transactions``, bypassing the
+    `daily_statement_summary` matview's `net_flow` column entirely.
+
+    Why bypass: the matview's `net_flow` formula
+    (`schema.py:2502-2504`) carries a v5→v6 sign-convention regression
+    (`CASE WHEN Credit THEN amount_money ELSE -amount_money END`
+    over-negates Debit rows because v6's `amount_money` is already
+    signed). Pulling `net_flow` from the matview to validate the
+    narrative formula `drift = closing − (opening + signed_net_flow)`
+    is tautological — the same wrong formula appears on both sides
+    and the assertion silently passes. Pulling the ground truth from
+    the base transactions table with a plain `SUM(amount_money)`
+    gives the true signed net (in v6 amount_money is signed: Credit
+    positive, Debit negative; SUM is signed net by construction).
+
+    Day boundary: posting ranges from start-of-day to start-of-next-
+    day. `business_day_start` truncation in the matview matches this
+    half-open interval. ``status != 'Failed'`` mirrors the matview's
+    today_flows CTE filter.
+    """
+    from datetime import date, timedelta
+
+    prefix = cfg.db_table_prefix
+    day = date.fromisoformat(day_iso)
+    next_day = day + timedelta(days=1)
+    sql = (
+        f"SELECT COALESCE(SUM(amount_money), 0) AS net_cents "
+        f"FROM {prefix}_current_transactions "
+        f"WHERE account_id = :account_id "
+        f"  AND posting >= :day_start "
+        f"  AND posting < :day_end "
+        f"  AND status <> 'Failed'"
+    )
+    rows = driver.query_db(
+        sql,
+        binds={
+            "account_id": account_id,
+            "day_start": day.isoformat() + " 00:00:00",
+            "day_end": next_day.isoformat() + " 00:00:00",
+        },
+    )
+    assert len(rows) == 1
+    return Decimal(str(rows[0]["net_cents"])) / Decimal("100")
 
 
 def _summary_default_day(dataset_parameters) -> str:  # type: ignore[no-untyped-def]: list of DatasetParameter — annotating would import the wrapper here
