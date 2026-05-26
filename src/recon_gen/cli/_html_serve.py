@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from starlette.routing import Mount, Route
 
     from recon_gen.common.db import AsyncConnectionPool
+    from recon_gen.common.html.server import ServedDashboard
 
 
 # The four real apps. Dashboards + Studio both serve them; Studio
@@ -114,10 +115,10 @@ def build_real_app(app_name: str, cfg: Any, instance: Any) -> tuple[Any, Any]:  
 
 def build_real_dashboards(
     real_apps: list[tuple[str, Any, Any]],
-    cfg: Any,  # type: ignore[no-untyped-def]: cfg untyped pending CLI-wide sweep
+    cfg: Any,  # WHY: cfg is Config but importing it at module top pulls a heavy graph
     *,
-    pool: Any,  # AsyncConnectionPool — Any keeps the no-[serve] install importable
-    theme: Any = None,  # ThemePreset | None
+    pool: Any,  # WHY: AsyncConnectionPool; Any keeps the no-[serve] install importable
+    theme: Any = None,  # WHY: ThemePreset | None (heavy import)
 ) -> dict[str, ServedDashboard]:
     """Compose the ``{name: ServedDashboard}`` map for the real apps.
 
@@ -242,7 +243,7 @@ def run_html_server(
         docs_tmp = tempfile.TemporaryDirectory(prefix="qs-html-docs-")
         # strict=False — a stray mkdocs warning shouldn't take the server
         # down; `docs apply --strict` is the place that gates on those.
-        rc = build_docs_site(l2_instance_path, docs_tmp.name, strict=False)
+        rc = build_docs_site(str(l2_instance_path), docs_tmp.name, strict=False)
         if rc == 0 and (Path(docs_tmp.name) / "index.html").is_file():
             docs_dir = Path(docs_tmp.name)
             click.echo("docs: embedded handbook at /docs/")
@@ -258,6 +259,12 @@ def run_html_server(
     # populates the shared SQL registry (per-app-prefixed IDs → no
     # collisions) that ``make_tree_db_fetcher`` reads in ``_serve``, so
     # a missing entry fails loudly now, not inside a hot HTMX swap.
+    # smoke_tree/sheet only consumed when app_name == "smoke"; declared
+    # outside the if so pyright can see them as bound in the inner _serve
+    # closure (pyright can't carry the app_name == "smoke" narrowing
+    # across the nested function boundary).
+    smoke_tree: Any = None
+    smoke_sheet: Any = None
     if app_name == "smoke":
         smoke_tree, smoke_sheet = build_smoke_app(cfg)
         real_apps: list[tuple[str, Any, Any]] = []

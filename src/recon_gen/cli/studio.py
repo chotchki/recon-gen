@@ -20,6 +20,8 @@ those iteration loops.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 
 from recon_gen.cli._helpers import (
@@ -106,9 +108,9 @@ from recon_gen.cli._html_serve import run_html_server
         "regardless of this flag."
     ),
 )
-def studio(  # type: ignore[no-untyped-def]: Click decorator strips the function-decorator return type
-    config,
-    l2_instance_path,
+def studio(
+    config: str,
+    l2_instance_path: str | None,
     host: str,
     port: int,
     dev_log: bool,
@@ -172,10 +174,11 @@ def studio(  # type: ignore[no-untyped-def]: Click decorator strips the function
         tg_cache=tg_cache,
         demo_mode=demo_mode,
     )
+    l2_path = Path(l2_instance_path) if l2_instance_path is not None else None
     run_html_server(
         cfg=cfg,
         instance=instance,
-        l2_instance_path=l2_instance_path,
+        l2_instance_path=l2_path,
         host=host, port=port, dev_log=dev_log,
         app_name=app_name,
         stub=False,            # Studio always reads the real DB.

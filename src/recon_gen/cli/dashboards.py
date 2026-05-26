@@ -15,6 +15,8 @@ bigger surface that adds the Studio mount on top.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 
 from recon_gen.cli._helpers import (
@@ -93,9 +95,9 @@ from recon_gen.cli._html_serve import run_html_server
         "either way."
     ),
 )
-def dashboards(  # type: ignore[no-untyped-def]: Click decorator strips the function-decorator return type
-    config,
-    l2_instance_path,
+def dashboards(
+    config: str,
+    l2_instance_path: str | None,
     host: str,
     port: int,
     dev_log: bool,
@@ -124,10 +126,11 @@ def dashboards(  # type: ignore[no-untyped-def]: Click decorator strips the func
     matter. ``dashboards`` is the lean read-only mount.
     """
     cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
+    l2_path = Path(l2_instance_path) if l2_instance_path is not None else None
     run_html_server(
         cfg=cfg,
         instance=instance,
-        l2_instance_path=l2_instance_path,
+        l2_instance_path=l2_path,
         host=host, port=port, dev_log=dev_log,
         app_name=app_name, stub=stub, embed_docs=embed_docs,
         studio_routes_factory=None,  # Dashboards-only: no Studio mount.

@@ -9,7 +9,8 @@ data-class shapes — the renderers walk the same dataclass instances
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
+from typing import TYPE_CHECKING
 
 from recon_gen.common.as_of_frame import AsOfFrame
 from recon_gen.common.intervals import DateInterval  # noqa: F401 — kept for tests that import via this module; BD.2 hides direct period reads
@@ -39,6 +40,14 @@ from recon_gen.cli.audit import (
     _split_stuck_unbundled_by_account_class,
 )
 
+if TYPE_CHECKING:
+    from recon_gen.cli.audit import MatviewEvidence
+
+
+__all__ = [
+    "_render_audit_markdown",
+]
+
 
 def _render_audit_markdown(
     *,
@@ -57,7 +66,7 @@ def _render_audit_markdown(
     version: str,
     l2_label: str,
     provenance: ProvenanceFingerprint | None,
-    matview_evidence: list | None,  # list[MatviewEvidence] | None
+    matview_evidence: list[MatviewEvidence] | None,
     l2_instance_path: str | None,
 ) -> str:
     """Markdown rendering of the audit report.
@@ -760,8 +769,8 @@ def _render_appendix_markdown(
     *,
     version: str,
     l2_label: str,
-    provenance,
-    matview_evidence,
+    provenance: ProvenanceFingerprint | None,
+    matview_evidence: list[MatviewEvidence] | None,
 ) -> str:
     """Provenance Appendix in Markdown (U.7.c).
 
