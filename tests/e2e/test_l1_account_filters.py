@@ -455,9 +455,10 @@ def test_bg2_daily_statement_kpis_match_summary_matview(
         f"and day2={day2!r} produced byte-identical KPI sets "
         f"({rendered_day1!r}). v11.21.0 cold-read finding #2 — the "
         f"picker's value isn't reaching the dataset's WHERE clause. "
-        f"Drill into the flatpickr → hidden-input → form-refresh "
-        f"chain; the SQL pushdown wire is intact (this same SQL + "
-        f"binds returns distinct values for the two days)."
+        f"Drill into the flatpickr → form-refresh chain (BH.2 closed "
+        f"this class via App2's set_date driver verb); the SQL "
+        f"pushdown wire is intact (this same SQL + binds returns "
+        f"distinct values for the two days)."
     )
 
 

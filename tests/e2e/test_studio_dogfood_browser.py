@@ -321,7 +321,7 @@ def test_browser_operator_creates_rail_with_bb2_create_new_reconciler(
         assert driver.rail_list_contains("Rail_BB2"), (
             "BB.2 create-new composite failed: 'Rail_BB2' didn't "
             "surface on the rail list. Either the inline JS toggle "
-            "left the create-new fields hidden, the radio click "
+            "left the create-new fields collapsed, the radio click "
             "didn't register, or the server rejected the composite."
             f"\nList page (first 2KB):\n{driver.page_body()[:2048]}"
         )

@@ -100,6 +100,18 @@ Four checks today, all extensible — drop a new ``Check`` into
   (the JS-unit harness, which drives Playwright directly by design)
   isn't under ``tests/e2e/`` so it's out of scope automatically.
 
+- **no-hidden-in-e2e** (BH.24-class, 2026-05-25) — any string literal
+  containing the substring ``hidden`` (case-insensitive) in a
+  ``tests/e2e/test_*.py`` file. v11.21.0 cold-read finding #2 + AI.12
+  WebKit fill-on-hidden quirk are both "hidden input drives the wire,
+  events/state get fragile around it" — driving hidden DOM details
+  from a test body bypasses the user-facing locator contract (see
+  ``feedback_browser_drivers_user_facing_locators``). The driver
+  layer (``tests/e2e/_drivers/``) is allowed to bridge to hidden
+  inputs; renderer-emission unit tests (``tests/unit/test_html_*.py``)
+  legitimately assert the HTML wire format. Suppress a one-off with
+  ``# typing-smell: ignore[no-hidden-in-e2e]: <reason>``.
+
 Suppression
 -----------
 
@@ -1193,6 +1205,76 @@ class NoPlaywrightLeakCheck(Check):
 
 
 # ---------------------------------------------------------------------------
+# Check: no-hidden-in-e2e (BH.24-class, 2026-05-25 — per user "I kinda
+# want to have you write an AST to scream if the string 'hidden' appears
+# in any test")
+# ---------------------------------------------------------------------------
+#
+# v11.21.0 cold-read finding #2 + AI.12's WebKit fill-on-hidden quirk are
+# both the same bug class: "hidden input drives the wire, events/state
+# get fragile around it." The fix in both cases is to drive USER-FACING
+# elements (the visible widget label, the dropdown option text) and let
+# the driver layer bridge to whatever hidden inputs the renderer uses.
+#
+# Scope: ``tests/e2e/test_*.py`` — top-level e2e test bodies. NOT the
+# driver implementations (``tests/e2e/_drivers/`` legitimately writes to
+# hidden inputs to bridge the visible widget → form submission wire).
+# NOT unit tests (``tests/unit/test_html_*.py`` asserts the renderer
+# EMITS the right hidden-input HTML — different concern). NOT JS tests
+# (``tests/js/`` tests the select→hidden sync directly).
+#
+# Per ``feedback_browser_drivers_user_facing_locators``: tests should
+# locate by labels / ARIA roles / visible text, never by hidden DOM
+# state.
+
+_HIDDEN_RE = re.compile(r"hidden", re.IGNORECASE)
+
+
+class _NoHiddenInE2EVisitor(ast.NodeVisitor):
+    """Walk Constant string nodes; flag any string containing the
+    substring ``hidden`` (case-insensitive). Skips docstrings + ignore-
+    line suppressions."""
+
+    def __init__(self, file: Path, docstring_ids: set[int]) -> None:
+        self.file = file
+        self.docstring_ids = docstring_ids
+        self.smells: list[Smell] = []
+
+    def visit_Constant(self, node: ast.Constant) -> None:
+        if not isinstance(node.value, str):
+            return
+        if id(node) in self.docstring_ids:
+            return
+        if not _HIDDEN_RE.search(node.value):
+            return
+        self.smells.append(Smell(
+            file=self.file,
+            lineno=node.lineno,
+            checker="no-hidden-in-e2e",
+            message=(
+                f"e2e test references {node.value!r} containing "
+                f"``hidden`` — tests should drive USER-FACING locators "
+                f"(label text / ARIA role / visible widget) and let the "
+                f"driver layer bridge to hidden inputs. v11.21.0 cold-"
+                f"read finding #2 + AI.12 WebKit fill-on-hidden quirk "
+                f"are both this bug class. If THIS test really needs to "
+                f"poke at a hidden DOM detail (e.g. asserting a "
+                f"renderer-emission unit-test moved to e2e by mistake), "
+                f"either move it to ``tests/unit/`` or suppress with "
+                f"``# typing-smell: ignore[no-hidden-in-e2e]: <reason>``."
+            ),
+        ))
+
+
+class NoHiddenInE2ECheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        docstring_ids = _docstring_node_ids(tree)
+        v = _NoHiddenInE2EVisitor(file, docstring_ids)
+        v.visit(tree)
+        return v.smells
+
+
+# ---------------------------------------------------------------------------
 # Check: no-naked-interval-ctor (BC.1, D7)
 # ---------------------------------------------------------------------------
 
@@ -1445,6 +1527,18 @@ def _build_checks() -> list[Check]:
         if e2e_drivers_dir not in p.parents
         and str(p.relative_to(REPO_ROOT)) not in _PLAYWRIGHT_LEAK_LEGACY
     ]
+    # no-hidden-in-e2e: scoped TIGHTLY to ``tests/e2e/test_*.py`` (top-
+    # level e2e test bodies) so the driver layer's legitimate hidden-
+    # input bridging stays exempt + the renderer-emission unit tests
+    # (under ``tests/unit/``) keep asserting the HTML wire format
+    # (which legitimately contains the string "hidden"). BH.24-class
+    # lint per user 2026-05-25.
+    no_hidden_scope = [
+        p for p in _expand_paths([REPO_ROOT / "tests/e2e"])
+        if p.parent == REPO_ROOT / "tests/e2e"
+        and p.name.startswith("test_")
+        and p.suffix == ".py"
+    ]
     # BC.1 D7 — no-naked-interval-ctor: spans src/ + tests/, except the
     # wrapper module itself (where the bare constructors ARE the
     # underlying primitives that the named classmethods delegate to).
@@ -1645,6 +1739,18 @@ def _build_checks() -> list[Check]:
                 "the X.2.q.3 migration backlog (it can only shrink)."
             ),
             files=no_playwright_scope,
+        ),
+        NoHiddenInE2ECheck(
+            name="no-hidden-in-e2e",
+            description=(
+                "any string literal containing ``hidden`` (case-"
+                "insensitive) in a ``tests/e2e/test_*.py`` file. "
+                "v11.21.0 cold-read finding #2 + AI.12's WebKit fill-"
+                "on-hidden quirk are the same bug class — hidden DOM "
+                "details get fragile around. Drive user-facing locators; "
+                "let the driver layer bridge to hidden inputs."
+            ),
+            files=no_hidden_scope,
         ),
         NoNakedIntervalCtorCheck(
             name="no-naked-interval-ctor",
