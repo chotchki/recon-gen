@@ -183,7 +183,7 @@ CREATE INDEX idx_{{ l2_instance_name }}_transactions_bundler_eligibility
 
 ---
 
-## Table 2 — `{{ l2_instance_name }}_daily_balances`
+## Table 2 — `{{ l2_instance_name }}_daily_balances` {: #table-2-prefix_daily_balances}
 
 One row per `(account_id, business_day_start)` snapshot. The bank's
 end-of-day stored balance for each account each day.

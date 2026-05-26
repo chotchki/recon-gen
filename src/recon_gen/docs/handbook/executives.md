@@ -45,7 +45,7 @@ contribution.
 
 Aggregate money-moved totals per day, broken down by `rail_name`
 (ACH origination, wire settlement, internal transfer, etc.). Sums
-absolute `amount` values across all postings in the window.
+absolute `amount_money` values across all postings in the window.
 
 KPI: total money moved during window. Stacked bar: per-transfer-type
 contribution. Useful for a CFO asking "how much did we settle today?"

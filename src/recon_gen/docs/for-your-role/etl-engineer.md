@@ -75,6 +75,7 @@ the proof your ETL is observable, not just running.**
    [Walkthroughs → ETL](../walkthroughs/index.md#etl) in this
    order:
     - [How do I populate transactions?](../walkthroughs/etl/how-do-i-populate-transactions.md)
+    - [How do I populate daily_balances?](../walkthroughs/etl/how-do-i-populate-daily-balances.md)
     - [How do I validate a single account-day?](../walkthroughs/etl/how-do-i-validate-a-single-account-day.md)
     - [How do I prove my ETL is working?](../walkthroughs/etl/how-do-i-prove-my-etl-is-working.md)
     - [How do I tag a force-posted transfer?](../walkthroughs/etl/how-do-i-tag-a-force-posted-transfer.md)

@@ -112,6 +112,7 @@ nav:
       - What Does This Account's Money Network Look Like?: walkthroughs/investigation/what-does-this-accounts-money-network-look-like.md
     - ETL:
       - How do I populate transactions?: walkthroughs/etl/how-do-i-populate-transactions.md
+      - How do I populate daily_balances?: walkthroughs/etl/how-do-i-populate-daily-balances.md
       - How do I validate a single account-day?: walkthroughs/etl/how-do-i-validate-a-single-account-day.md
       - How do I prove my ETL is working?: walkthroughs/etl/how-do-i-prove-my-etl-is-working.md
       - How do I tag a force-posted transfer?: walkthroughs/etl/how-do-i-tag-a-force-posted-transfer.md

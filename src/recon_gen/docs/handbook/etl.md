@@ -103,6 +103,10 @@ full refresh contract.
     <h3>How do I populate <code>transactions</code> from my core banking system?</h3>
     <p>Canonical projection from a hypothetical `gl_postings` source table into the two-table target. The first walkthrough a new team member reads.</p>
   </a>
+  <a class="snb-card" href="../../walkthroughs/etl/how-do-i-populate-daily-balances/">
+    <h3>How do I populate <code>daily_balances</code> from my core banking system?</h3>
+    <p>The companion feed to transactions — stored end-of-day balances, integer cents, day-boundary alignment. Drift checks need both.</p>
+  </a>
   <a class="snb-card" href="../../walkthroughs/etl/how-do-i-prove-my-etl-is-working/">
     <h3>How do I prove my ETL is working before going live?</h3>
     <p>Three pre-flight invariants (net-to-zero, balance recompute, orphan chains) with copy-paste SQL. Run these before the dashboard sees the data.</p>

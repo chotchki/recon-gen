@@ -89,8 +89,11 @@ For every row your ETL writes, you're committing to a contract:
    keys per the catalog). The catalog tables in Schema_v6 list the
    keys + what each one drives.
 
-Everything else (`memo`, `external_system`, `account_parent_role`)
-is conditional — populate when the downstream consumer demands it.
+Everything else (`account_parent_role`, `transfer_completion`,
+`template_name`, `bundle_id`, `supersedes`) is conditional —
+populate when the downstream consumer demands it. See [Schema_v6.md
+→ ETL contract / minimum viable feed](../../Schema_v6.md#etl-contract-minimum-viable-feed)
+for the full column-by-column gate.
 
 ## Drilling in
 
@@ -99,28 +102,26 @@ The mapping pattern looks like this for a customer-DDA posting
 
 ```sql
 INSERT INTO {{ l2_instance_name }}_transactions (
-    transaction_id, transfer_id, rail_name, origin,
+    id, transfer_id, rail_name, origin,
     account_id, account_name, account_parent_role, account_role,
-    account_scope, amount_money, amount, status,
-    posting, business_day_start, memo, metadata
+    account_scope, amount_money, amount_direction, status,
+    posting, metadata
 )
 SELECT
-    p.posting_id,                                      -- your PK
+    p.posting_id                         AS id,        -- your PK (column is `id`, not `transaction_id`)
     p.transfer_id,                                     -- your transfer grouping
-    p.rail_name,                                   -- map your enum to ours
-    'InternalInitiated'                  AS origin,    -- or ExternalForcePosted for Fed
+    p.rail_name,                                       -- map your enum to ours
+    'InternalInitiated'                  AS origin,    -- or 'ExternalForcePosted' for Fed
     p.account_number                     AS account_id,
     a.account_name,
     a.parent_role                        AS account_parent_role,
     a.account_role,
-    a.account_scope,                                   -- Internal / External
-    CAST(ROUND(p.signed_amount * 100) AS BIGINT) AS amount_money,  -- dollars → cents (AO.1)
-    ABS(p.signed_amount)                 AS amount,
-    CASE WHEN p.posting_status = 'P' THEN 'Posted' ELSE 'Failed' END,
+    a.account_scope,                                   -- 'internal' / 'external'
+    CAST(ROUND(p.signed_amount * 100) AS BIGINT)                                   AS amount_money,      -- dollars → cents (AO.1)
+    CASE WHEN p.signed_amount < 0 THEN 'Debit' ELSE 'Credit' END                   AS amount_direction,  -- NOT NULL; must agree with amount_money's sign
+    CASE WHEN p.posting_status = 'P' THEN 'Posted' ELSE 'Failed' END               AS status,
     p.posting_timestamp                  AS posting,
-    p.posting_timestamp::date            AS business_day_start,
-    p.memo,
-    JSON_OBJECT('source' VALUE 'core_banking')
+    JSON_OBJECT('source' VALUE 'core_banking')                                     AS metadata
 FROM core_banking.gl_postings p
 JOIN core_banking.accounts a ON a.account_number = p.account_number
 WHERE p.posting_date >= CURRENT_DATE - INTERVAL '7 days';
@@ -128,28 +129,31 @@ WHERE p.posting_date >= CURRENT_DATE - INTERVAL '7 days';
 
 A few things to note about this projection:
 
-- **`business_day_start`** is denormalized from `posting`
-  deliberately — fast date filters in the dashboard datasets need a
-  column they can range-scan without an expression cast. It's
-  redundancy for query speed; the cost is your ETL writes one
-  extra column.
 - **`status`** maps from your status enum to ours. Anything that's
   not `Posted` MUST be `Pending` or `Failed` (no fourth state) —
   the drift check and net-zero check both `WHERE status = 'Posted'`
   to exclude in-flight or rejected legs.
-- **`amount_money`** is `+` for money flowing INTO the account
-  (a `debit` in bank's-bookkeeping terms), `−` for money flowing
-  OUT (a `credit`). `{{ l2_instance_name }}_daily_balances.money` for any
-  account-day equals `SUM(amount_money)` up to that day, so getting
-  this sign right is what makes the drift check honest. If your
-  upstream uses the opposite sign convention, flip it here, not
-  later in a view. Every check assumes our sign convention.
+- **`amount_money`** is signed by the v6 sign convention:
+  `Credit ⇒ amount_money ≥ 0` (money IN to the account),
+  `Debit ⇒ amount_money ≤ 0` (money OUT). The schema enforces this
+  pairing via a CHECK constraint, so a row with conflicting sign +
+  direction won't INSERT. `{{ l2_instance_name }}_daily_balances.money`
+  for any account-day equals `SUM(amount_money)` up to that day, so
+  getting this sign right is what makes the drift check honest. If
+  your upstream uses the opposite sign convention, flip it here, not
+  later in a view — every downstream check assumes the v6 convention.
   **Stored as integer cents** (Phase AO.1) — the projection above
   multiplies by 100 + casts to BIGINT at the ETL boundary; see
   [Schema_v6 → Money is stored as integer cents](../../Schema_v6.md#money-is-stored-as-integer-cents).
   Python ETLs should reach for `recon_gen.common.money.Cents`
   instead of the inline SQL CAST — `Cents.from_dollars(...).value`
   rejects float-init Decimals that re-introduce float dust.
+- **`amount_direction`** is a required `'Debit' | 'Credit'` enum.
+  Derive it from your upstream's signed amount via the
+  `CASE WHEN p.signed_amount < 0 THEN 'Debit' ELSE 'Credit' END`
+  shape above. The base table's CHECK pairs direction with money's
+  sign (Debit ⇒ money ≤ 0, Credit ⇒ money ≥ 0), so the two columns
+  *must* agree or the row fails to land.
 - **`metadata`** carries `source` on every row from this projection
   (driven by the `JSON_OBJECT(... VALUE 'core_banking')` literal).
   That single key is enough to satisfy the Investigation
@@ -161,7 +165,12 @@ Once your projection is wired up:
 
 1. **Populate a small slice** — one day, one source system. Don't
    try to backfill 90 days on the first run.
-2. **Run the validation walkthrough**
+2. **Wire the companion daily_balances feed**
+   ([How do I populate `{{ l2_instance_name }}_daily_balances` from my core banking system?](how-do-i-populate-daily-balances.md)).
+   Drift checks compare *stored* balance (daily_balances.money)
+   against *recomputed* (SUM amount_money) — without both feeds,
+   the drift surface is meaningless.
+3. **Run the validation walkthrough**
    ([How do I prove my ETL is working before going live?](how-do-i-prove-my-etl-is-working.md))
    — it walks you through the net-zero, drift-recompute, and
    parent-chain integrity checks you should run before declaring
@@ -186,6 +195,9 @@ applies regardless of source.
 
 ## Related walkthroughs
 
+- [How do I populate `{{ l2_instance_name }}_daily_balances` from my core banking system?](how-do-i-populate-daily-balances.md) —
+  the **sibling walkthrough**. Drift checks need both feeds; ship
+  them together.
 - [How do I prove my ETL is working before going live?](how-do-i-prove-my-etl-is-working.md) —
   the **next step** after writing the projection. Validates the
   invariants the dashboards depend on.
