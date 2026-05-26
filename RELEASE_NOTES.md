@@ -1,5 +1,143 @@
 # Release Notes
 
+## v11.22.0 — Phase BG honest-gate suite + BH cascade (v11.21.0 cold-read fixes)
+
+Lands **Phase BG** (dashboard browser-test honesty audit + identity-and-
+delta gates against direct-DB ground truth across L1 / Investigation /
+Executives / L2FT) and the **Phase BH** fix cascade addressing
+v11.21.0's 21-finding cold-read.
+
+### Phase BG — honest dashboard browser tests
+
+`tests/e2e/test_*.py`'s prior `len(rows) > 0` pattern was the wrong
+gate — it caught smoke regressions but missed every cold-read bug
+class (filter binding, measure binding, SQL correctness). BG.2-BG.6
+tighten the existing surface to compare **rendered visual values
+against direct-DB SQL** (identity gate) + **delta values across
+filter picks** (delta gate). Both verbs ride on a new
+`DashboardDriver.query_db(sql, binds=...)` (BG.1) that runs the
+SAME `_sql_executor` pipeline production uses — wire-shape
+divergences become real bug signals, not noise.
+
+- **BG.0** — honest-gate audit doc at
+  `docs/audits/bg_0_dashboard_honesty_audit.md`. 24 files / ~3,320
+  LOC inventoried; pre-BG only 1 of 12 in-scope files met the bar.
+- **BG.1** — `DashboardDriver.query_db()` via shared
+  `query_db_via_cfg` helper. Both renderers consult the SAME
+  ground-truth path.
+- **BG.2** — `test_l1_account_filters.py` Daily Statement KPI honest
+  gate (identity + narrative-formula + day1≠day2 delta). Catches
+  cold-read findings #1, #2, #3.
+- **BG.3** — L1 Drift / Drift Timelines / Overdraft KPI honest gates
+  (count identity + MAX identity + leaf-line variance gate).
+- **BG.4** — Investigation honest gates (σ-filter / distribution
+  consistency + fanout inflation-free truth).
+- **BG.5** — Executives Total Transactions / Money Moved / Account
+  count gates.
+- **BG.6** — L2FT Exceptions KPI-vs-table consistency + Pending
+  Aging triple-identity + Today's Exceptions count identity.
+- **BG.7** — wired into the layered runner + CI; CI parity gap
+  (4 missing files in workflow hand-lists) caught + fixed. Spot-
+  check on sasquatch sqlite reproduced the cascade-revealed bugs.
+
+### Phase BH — fix cascade for v11.21.0 cold-read defects
+
+BG.X is the gate; BH.X is the fix. /loop of revealed defects:
+BG.2 trip → BH.14 fix → BG.2 trips deeper → BH.24.1 → BG.2 trips
+deeper → BH.1 → BG.2 GREEN.
+
+- **BH.0** — finding-state snapshot at
+  `docs/audits/bh_0_finding_state_snapshot.md`. 3 confirmed RED
+  bugs, 2 narrative, 2 presentation, 4 needs-browser, 7 visual-
+  inspection, 3 cascade-greens, 1 N/A.
+- **BH.1** — matview `net_flow` v5→v6 sign-convention regression
+  fix at `schema.py:2502`. `SUM(CASE ... ELSE -amount_money END)`
+  → `SUM(amount_money)`. Verified 0 narrative-formula violations
+  across all 3,928 sasquatch matview rows.
+- **BH.2** — Daily Statement Business Day picker — resolved by
+  cascade (App2 driver's `set_date` shipped a real impl;
+  network-log proves the picker binds; BG.2 delta passes).
+- **BH.3** — cardholder negative Opening — closed by cascade
+  (the 100× display bug masked the real underlying values; post-
+  fix the matview holds correct figures + the L1 overdraft
+  invariant catches the real semantic violations).
+- **BH.4** — "Latest Snapshot Drift" — closed by cascade (no KPI
+  by that name in current code; cascade fixes the complex of
+  symptoms the cold-read flagged).
+- **BH.5** — Volume Anomalies KPI renamed `"Flagged Pair-Windows"`
+  → `"Flagged at current σ"` with explicit threshold-relative
+  subtitle.
+- **BH.6** — leaf timeline flat-constant — closed by probe
+  (sasquatch shows variance; gate catches regression).
+- **BH.7** — Recipient Fanout cartesian inflation fix. Window
+  divide `j.amount / COUNT(*) OVER (PARTITION BY recipient,
+  transfer)` restores inflation-free SUM. $280K over-count on
+  sasquatch resolved; BG.4 PASSES on App2.
+- **BH.8** — Total Transactions subtitle disambiguation (per-
+  Posted-transfer vs App Info's per-leg / all-status framing).
+- **BH.11** — L2 Exceptions KPI renamed `"Open L2 Violations"` →
+  `"Distinct Exception Types Open"`; table column display name
+  `"Occurrences"` → `"Violations per Type"`.
+- **BH.14** — App2 KPI 3-decimal currency fix. `shape_kpi` now
+  receives `format="currency"` for currency-flagged KPIs (was
+  missing → JS fell to no-format toLocaleString = 3-decimal noise).
+- **BH.16/17/18** — closed as not-in-source / already-resolved.
+  Cold-read prose came from operator-owned L2 YAML, not generator
+  source.
+- **BH.20** — Unbundled Aging title cleanup: `"Stuck Unbundled —
+  $ Exposure"` → `"Stuck Unbundled Exposure"`.
+- **BH.21** — App Info dialect token gets `(dev build)` suffix
+  for sqlite; PG / Oracle render bare.
+- **BH.22** — purged 6 hardcoded `rail_name="ach"` defaults in
+  `common/spine/*.py` → `rail_name="_spine_plant"`. Leading-
+  underscore sentinel self-documents as synthetic spine emission;
+  no more partial-name-leak misread.
+
+### BH.24 — pervasive 100× cents-vs-dollars systemic fix
+
+Surfaced by BG.7 browser run: every App2 currency KPI bound to a
+dataset whose SQL pre-converts with `cents_to_dollars_sql` rendered
+100× too small (50 callsites across L1 / Inv / Exec / L2FT).
+`_measure_sql` blindly /100-divided whenever `currency=True`; the
+SQL already did the divide; double-conversion → systemic 100× bug.
+
+- **BH.24.1** — DatasetContract storage-shape foundation. New
+  `Storage` enum (`DOLLARS` default, `CENTS` opt-in) + `currency`
+  + `storage` fields on `ColumnSpec`. `_measure_sql` +
+  `_apply_cents_to_dollars` consult the contract; the /100 divide
+  fires iff `storage=CENTS`. Production code defaults to DOLLARS
+  (matches today's pre-converted shape) — entire L1 surface
+  benefits in one architectural change, no SQL touched.
+
+### no-hidden-in-e2e AST lint
+
+New typing-smell check in `tests/unit/test_typing_smells.py`. Any
+string literal containing `"hidden"` (case-insensitive) in a
+`tests/e2e/test_*.py` body is a smell. AI.12's WebKit fill-on-
+hidden quirk + BH.2's date-picker bug class are both "hidden input
+drives wire, events/state get fragile around it" — tests should
+drive user-facing locators; let the driver layer bridge to hidden
+inputs. Tightly scoped: driver layer + renderer-emission unit tests
+stay exempt.
+
+### Test stats
+
+- 2,840 unit tests pass (+39 BG-related units across BG.0-7)
+- BG.2 + BG.4 PASS end-to-end on sasquatch sqlite via App2 leg
+- BG.3 / BG.5 / BG.6 need re-fire on the post-cascade build to
+  surface any remaining shapes (queued for next cold-read window)
+
+### Open work (not in v11.22.0)
+
+- BH.9 / BH.10 — presentation polish (one-bar dominance,
+  legend overwhelm). Deferred to design pass.
+- BH.12 / BH.13 — need browser-render verification on the
+  cascade-fixed deploy. Queued for next cold-read.
+- BH.15 / BH.19 — empty-state helper + responsive KPI sizing.
+  Deferred to next sprint.
+- BH.24.2-6 — sweep + annotation + typing-reinforcement + drop
+  the BH.24.1 compat fallback. Architectural close-out queued.
+
 ## v11.21.0 — Phase AM closeout: Tailwind utility migration + BF.1 banner
 
 Closes **Phase AM** (Standardize on Tailwind) by migrating every
