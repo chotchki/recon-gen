@@ -101,10 +101,10 @@ def test_bg5_transaction_volume_kpis_match_dataset_aggregates(
     sql, params = _sql_for(build_transaction_summary_dataset, cfg)
     rows = driver.query_db(sql, dataset_parameters=params)
     # The deployed KPI is scoped by the Exec dashboard's default 30-day
-    # window (cfg.as_of_frame(window_days=30); see exec/app.py:670). Our
+    # window (cfg.test_generator.as_of_frame(window_days=30); see exec/app.py:869). Our
     # direct DB query sees all 90 days; narrow rows to the same window
     # before summing or the assertion compares apples-to-oranges.
-    frame = cfg.as_of_frame(window_days=30)
+    frame = cfg.test_generator.as_of_frame(window_days=30)
     in_window = [
         r for r in rows
         if frame.window.contains(_as_date(r["posted_date"]))
@@ -145,9 +145,9 @@ def test_bg5_money_moved_kpis_match_dataset_sums(exec_dashboard_driver, cfg):
     sql, params = _sql_for(build_transaction_summary_dataset, cfg)
     rows = driver.query_db(sql, dataset_parameters=params)
     # Window-narrow per the Exec dashboard's default 30-day scope
-    # (cfg.as_of_frame(window_days=30); see exec/app.py:670). The
+    # (cfg.test_generator.as_of_frame(window_days=30); see exec/app.py:869). The
     # KPI sees this window; direct DB query sees all 90 days.
-    frame = cfg.as_of_frame(window_days=30)
+    frame = cfg.test_generator.as_of_frame(window_days=30)
     in_window = [
         r for r in rows
         if frame.window.contains(_as_date(r["posted_date"]))
@@ -201,11 +201,11 @@ def test_bg5_account_summary_kpis_match_dataset_counts(
     active_rows = driver.query_db(active_sql, dataset_parameters=active_params)
 
     # Window-narrow Active accounts per the dashboard's 30-day scope
-    # (cfg.as_of_frame(window_days=30); see exec/app.py:670). Total
+    # (cfg.test_generator.as_of_frame(window_days=30); see exec/app.py:869). Total
     # Open uses null_option=ALL_VALUES (FilterGroup keeps every
     # account regardless of last_activity_date), so its KPI count
     # matches the full dataset's row count without window narrowing.
-    frame = cfg.as_of_frame(window_days=30)
+    frame = cfg.test_generator.as_of_frame(window_days=30)
     active_in_window = [
         r for r in active_rows
         if r.get("last_activity_date") is not None

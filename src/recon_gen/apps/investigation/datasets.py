@@ -366,7 +366,7 @@ SELECT
     -- inflow amount on every sender-side row, so SUM(amount)
     -- inflated by the per-transfer sender-leg count. Cold-read
     -- finding #7: "Total Inbound = $1.54B across 11 distinct
-    -- senders feeding 4 qualifying recipients ... 58% of the
+    -- senders feeding 4 qualifying recipients ... 58 percent of the
     -- entire deploy's gross handle." Window-function divide by the
     -- per-(recipient, transfer) row count restores the
     -- inflation-free amount: SUM over the M rows for one transfer

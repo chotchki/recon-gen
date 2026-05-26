@@ -41,7 +41,11 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 def _sql_and_params_for(builder, *args):  # type: ignore[no-untyped-def]: builder takes (cfg) or (cfg, l2) at runtime — annotating would force imports here
     ds = builder(*args)
     sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
-    return sql, list(ds.DatasetParameters)
+    # DataSet.DatasetParameters is `None` when the dataset declares no
+    # `<<$pName>>` parameters (e.g. the volume-anomalies distribution
+    # dataset, which reads a single matview with no param-bind columns).
+    # `list(None)` would TypeError — fall back to an empty list.
+    return sql, list(ds.DatasetParameters or ())
 
 
 def test_min_sigma_slider_shrinks_anomalies_kpi(inv_dashboard_driver):
@@ -291,7 +295,7 @@ def test_bg4_recipient_fanout_kpis_match_inflows_only_truth(
         f"Total Inbound KPI: rendered ${rendered_total} ≠ "
         f"inflation-free ground truth ${expected_total} (sum of "
         f"distinct (recipient, transfer) inflow amounts across "
-        f"{len(unique_inflows)} unique recipient legs vs "
+        f"{len(amount_per_pair)} unique recipient legs vs "
         f"{len(rows)} joined rows in the fanout dataset). v11.21.0 "
         f"cold-read finding #7 — the fanout dataset CTE pattern "
         f"(inflows × outflows JOIN ON transfer_id) is cartesian for "
