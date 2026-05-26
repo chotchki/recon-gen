@@ -201,9 +201,12 @@ Approach 2 (token-stream tool like jscpd/PMD CPD) deliberately not pursued — b
 - [ ] BE.6 - Verify + commit + tag. Lint stays green in the prelude (or runs cleanly on opt-in). The catalog from BE.4 + the spike from BE.0 land in the same PR. No version bump unless the sweep fixed a real production-affecting bug — usually this kind of work doesn't shift the release tag.
 - [ ] BE.7 - **Expand pyright strict-scope to `tests/` (sibling to BE's catch-at-compile theme; spun out of AI.9 2026-05-25)**. `pyproject.toml::tool.pyright.include` currently covers only `src/`; tests aren't typechecked, so type-hint violations in test code silently slip past and surface as runtime explosions. AI.9 shipped a runtime guard; the better long-term fix is compile-time enforcement. **The original "~50-200 violations" estimate was 25× off** — BE.7.A spike measured **5,201 errors** (4,302 unknown_cascade + 746 actionable + 128 hygiene + 25 other) across 310 files. The phase splits below.
   - [x] BE.7.A - **Spike**. Shipped 2026-05-26. Doc at `docs/audits/be_7_pyright_tests_spike.md`. Three paths surfaced: **A** scope down to actionable rules (~770 visible hits, suppress 7 unknown_cascade rules at config layer), **B** tighter slice to 3-5 actively-iterated files (~500 hits), **C** multi-phase BE.7 mirroring BE.4 (full sweep, 10-20 hours wall-clock). Spike author recommends Path A.
-  - [ ] BE.7.B - BE.7.B — boto3-stubs prep + fixture annotation pass
-  - [ ] BE.7.C - **Execute the chosen path** (A / B / C — principal re-decides after BE.7.B's measurement).
-  - [ ] BE.7.D - **Verify + tick**. After execution: confirm pyright integrates cleanly with the existing src/-strict scope; assert zero unsuppressed errors at the chosen scope; commit.
+  - [x] BE.7.B - BE.7.B — boto3-stubs prep + fixture annotation pass
+  - [ ] BE.7.C - BE.7.C — Path C full sweep (survey → annotate → triage)
+    - [ ] BE.7.C.1 - **Survey** all AWS-fixture sites + dict-returning fixtures across tests/. Produce target-list doc partitioned by subtree for the C.2 fan-out. Single-agent (~30 min).
+    - [ ] BE.7.C.2 - **Annotation fan-out**. Parallel worktree agents per tests/ subtree slice apply the BE.7.B pattern (fixture + consumers). Goal: every AWS-fixture site carries its proper TypedDict + every consumer is annotated. Expected residual ~3,500-4,000 errors of mixed unknown_cascade + actionable.
+    - [ ] BE.7.C.3 - **Triage residual**. After C.2 measures, decide per-rule disposition: (a) keep enforcing (fix or `# type: ignore[<rule>]: <why>`); (b) suppress at config layer for residual unknown_cascade noise.
+  - [ ] BE.7.D - **Verify + tick**. After C.3: flip `pyright.include`, assert zero unsuppressed errors at the chosen scope, commit.
 ## Phase BK - v11.22.1 cold-read second-pass + deferrals
 
 Cold-read at `docs/audits/v11_22_1_feedback.md`. Closed in v11.22.3 small-fix batch (2026-05-26): #1 Daily Statement signed-labels, #10 Drift Timelines parent-vs-leaf scope explainer, #14 Overdraft scope label, #17 Open/Active KPI disambiguation, #18 Avg-Daily-Volume integer format (new `Measure.decimals=` kwarg), #19 strip internal-phase-ref language from exec subtitles. Remaining items below survived the small-fix pass — they need design work, fresh data, or operator clarification.
@@ -220,6 +223,8 @@ Cold-read at `docs/audits/v11_22_1_feedback.md`. Closed in v11.22.3 small-fix ba
 - [ ] BK.10 - **#20 Empty-state discipline**. Several sheets show blank visuals when filters narrow to zero rows. Convention candidates: empty-state banner ("No rows match these filters; try widening the date range"), or pre-loaded counter ("0 of 12,345 rows match"). Cross-sheet design pass — needs a convention before rolling out.
 
 # Backlog (not yet phased)
+
+- **Promote BE.7's pattern to src/: expand pyright strict-scope to the remaining 70 src/ files.** Discovered during BE.7.B's annotation pass (2026-05-26): the existing `pyproject.toml::tool.pyright.include` covers only 91 of 161 src/recon_gen/**/*.py files (57%). The 70 unchecked files are dominated by the `apps/{executives,investigation,l1_dashboard,l2_flow_tracing}/` layer + `cli/*.py` + runtime entry points (`__init__.py`, `__main__.py`, etc.) — exactly the modules whose return types now feed the BE.7-strict tests via the TypedDict cascade. After BE.7 closes (BE.7.D ticks), promote this to a new phase (BF or similar) that mirrors BE.7's shape: spike → annotate producer-side returns + class attrs + module-level constants → triage residual → flip `pyright.include` to add the `apps/` + `cli/` paths. Sequenced AFTER BE.7 to avoid conflating tests-side cascade vs src-side cascade signal sources in one phase.
 
 - **BC.12 deferred: `l2_yaml_raw` / `cfg_yaml_raw` opaque-provenance kv rows.**
   Surfaced 2026-05-24 during BC.12 integration. The original design
