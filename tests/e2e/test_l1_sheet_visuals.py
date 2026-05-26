@@ -20,17 +20,24 @@ hack is gone.)
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from .tree_validator import TreeValidator
 
+
+
+if TYPE_CHECKING:
+    from recon_gen.common.tree import App
+    from tests.e2e._drivers import DashboardDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 L1_VISUAL_TIMEOUT_MS = 90_000
 
 
-def test_l1_dashboard_structure_matches_tree(l1_dashboard_driver, l1_app) -> None:
+def test_l1_dashboard_structure_matches_tree(l1_dashboard_driver: tuple["DashboardDriver", str], l1_app: "App") -> None:
     driver, dashboard_arg = l1_dashboard_driver
     # App 2 is a local server — anything not loaded in ~12 s is a 500 /
     # broken visual, not a cold-start; the 90 s budget is QS-deploy-fresh

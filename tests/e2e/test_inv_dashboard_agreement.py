@@ -627,7 +627,7 @@ def test_invariant_three_way_agreement(
     seeded_l2_db,
     per_l2_app2_results,
     qs_inv_driver,
-    inv_dashboard_id,
+    inv_dashboard_id: str,
     db_conn,
     isolated_inv_cfg,
     planted_l2_bounds,

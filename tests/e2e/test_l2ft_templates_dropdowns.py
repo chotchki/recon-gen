@@ -14,16 +14,23 @@ template instances covering all three Completion outcomes (X.2.u.3.fix.demo).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from ._l2ft_dropdown_walk import walk_dropdown
 
 
+
+if TYPE_CHECKING:
+    from recon_gen.common.l2 import L2Instance
+    from tests.e2e._drivers import DashboardDriver
+
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
 @pytest.fixture(autouse=True)
-def _require_templates(l2ft_l2_instance) -> None:
+def _require_templates(l2ft_l2_instance: "L2Instance") -> None:
     # Fast-exit when the deployed L2 declares zero transfer templates —
     # see `conftest.require_l2ft_feature`. (A fuzz seed or operator-supplied
     # L2 may declare none; spec_example declares two.)
@@ -33,7 +40,7 @@ def _require_templates(l2ft_l2_instance) -> None:
 
 @pytest.mark.parametrize("dropdown_title", ["Template", "Completion"])
 def test_templates_dropdown_narrows_does_not_empty(
-    l2ft_dashboard_driver, dropdown_title,
+    l2ft_dashboard_driver: tuple["DashboardDriver", str], dropdown_title,
 ) -> None:
     """Each declared Template name — and each Completion status
     (Complete / Imbalanced / Orphaned) — must leave the Template

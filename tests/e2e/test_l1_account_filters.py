@@ -21,6 +21,8 @@ choice.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from decimal import Decimal
 
 import pytest
@@ -33,7 +35,13 @@ from tests.e2e._daily_statement_pick import (
     find_two_days_for_same_account,
 )
 from tests.e2e._kpi_parse import parse_currency_kpi as _parse_currency_kpi
+from recon_gen.common.config import Config
 
+
+
+if TYPE_CHECKING:
+    from recon_gen.common.l2 import L2Instance
+    from tests.e2e._drivers import DashboardDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
@@ -51,8 +59,8 @@ def _summary_sql_and_params(cfg, l2):  # type: ignore[no-untyped-def]: cfg/l2 ar
 
 
 def test_daily_statement_role_then_account_populates_table(
-    l1_dashboard_driver, cfg,
-):
+    l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config,
+) -> None:
     """AA.B.1 workflow — picking a Role THEN an Account renders the
     Posted Money Records table populated for that account.
 
@@ -136,8 +144,8 @@ def test_daily_statement_role_then_account_populates_table(
     "Transactions",
 ])
 def test_account_dropdown_shows_display_form(
-    l1_dashboard_driver, sheet_name: str,
-):
+    l1_dashboard_driver: tuple["DashboardDriver", str], sheet_name: str,
+) -> None:
     """AA.E.2 — every L1 Account dropdown advertises options in the
     ``"<name> (<id>)"`` display form (substring-searchable by either
     name or id), not the bare-id form.
@@ -174,8 +182,8 @@ def test_account_dropdown_shows_display_form(
 
 
 def test_daily_statement_picked_account_narrows_table(
-    l1_dashboard_driver, cfg,
-):
+    l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config,
+) -> None:
     """AA.E.2 fix + AA.B.4 — after picking an Account from the Daily
     Statement dropdown, the per-account-day Daily Statement table
     surfaces rows for that account.
@@ -296,8 +304,8 @@ def _expected_row_for(
 
 
 def test_bg2_daily_statement_kpis_match_summary_matview(
-    l1_dashboard_driver, cfg, l2,
-):
+    l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance",
+) -> None:
     """BG.2 — honest gate for the 5 Daily Statement KPIs.
 
     For the renderer that DOES bind the Business Day picker to the SQL

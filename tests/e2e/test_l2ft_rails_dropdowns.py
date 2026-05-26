@@ -10,17 +10,23 @@ renderers (Y.2's QS/App2 convergence).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from ._l2ft_dropdown_walk import walk_dropdown
 
+
+
+if TYPE_CHECKING:
+    from tests.e2e._drivers import DashboardDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
 @pytest.mark.parametrize("dropdown_title", ["Rail", "Status", "Bundle"])
 def test_rails_dropdown_narrows_does_not_empty(
-    l2ft_dashboard_driver, dropdown_title,
+    l2ft_dashboard_driver: tuple["DashboardDriver", str], dropdown_title,
 ) -> None:
     """Picking a single Rail / Status / Bundle value must leave the
     Transactions table with > 0 rows — the X.1.g param-bound narrowing

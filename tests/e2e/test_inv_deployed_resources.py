@@ -9,7 +9,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.api]
 
 
 class TestInvDashboardExists:
-    def test_dashboard_status(self, qs_client, account_id, inv_dashboard_id):
+    def test_dashboard_status(self, qs_client, account_id: str, inv_dashboard_id: str) -> None:
         resp = qs_client.describe_dashboard(
             AwsAccountId=account_id,
             DashboardId=inv_dashboard_id,
@@ -20,7 +20,7 @@ class TestInvDashboardExists:
             "expected CREATION_SUCCESSFUL"
         )
 
-    def test_dashboard_has_name(self, qs_client, account_id, inv_dashboard_id):
+    def test_dashboard_has_name(self, qs_client, account_id: str, inv_dashboard_id: str) -> None:
         resp = qs_client.describe_dashboard(
             AwsAccountId=account_id,
             DashboardId=inv_dashboard_id,
@@ -29,7 +29,7 @@ class TestInvDashboardExists:
 
 
 class TestInvAnalysisExists:
-    def test_analysis_status(self, qs_client, account_id, inv_analysis_id):
+    def test_analysis_status(self, qs_client, account_id: str, inv_analysis_id: str) -> None:
         resp = qs_client.describe_analysis(
             AwsAccountId=account_id,
             AnalysisId=inv_analysis_id,
@@ -42,7 +42,7 @@ class TestInvAnalysisExists:
 
 
 class TestInvDatasetsExist:
-    def test_all_datasets_exist(self, qs_client, account_id, inv_dataset_ids):
+    def test_all_datasets_exist(self, qs_client, account_id: str, inv_dataset_ids: list[str]) -> None:
         for ds_id in inv_dataset_ids:
             resp = qs_client.describe_data_set(
                 AwsAccountId=account_id,

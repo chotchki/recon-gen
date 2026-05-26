@@ -46,8 +46,14 @@ What's *not* asserted here (verb / quirk gaps, covered elsewhere):
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
+
+
+if TYPE_CHECKING:
+    from tests.e2e._drivers import DashboardDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
@@ -109,7 +115,7 @@ def _assert_anchor_present_and_populated(
     ],
 )
 def test_inv_anchor_control_present_and_populated(
-    inv_dashboard_driver, sheet_name, anchor_label, visual_title,
+    inv_dashboard_driver: tuple["DashboardDriver", str], sheet_name, anchor_label, visual_title,
 ) -> None:
     driver, dashboard_arg = inv_dashboard_driver
     _assert_anchor_present_and_populated(
@@ -119,7 +125,7 @@ def test_inv_anchor_control_present_and_populated(
 
 
 def test_l2ft_transfer_templates_anchor_control_present_and_populated(
-    l2ft_dashboard_driver,
+    l2ft_dashboard_driver: tuple["DashboardDriver", str],
 ) -> None:
     driver, dashboard_arg = l2ft_dashboard_driver
     _assert_anchor_present_and_populated(
@@ -129,7 +135,7 @@ def test_l2ft_transfer_templates_anchor_control_present_and_populated(
 
 
 def test_money_trail_anchor_pick_narrows_hop_by_hop_table(
-    inv_dashboard_driver,
+    inv_dashboard_driver: tuple["DashboardDriver", str],
 ) -> None:
     """Picking a real Chain root transfer narrows the Hop-by-Hop table.
 

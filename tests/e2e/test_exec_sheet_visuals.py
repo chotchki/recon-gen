@@ -10,6 +10,8 @@ in the DOM; failures across sheets accumulate into one AssertionError.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -23,7 +25,13 @@ from recon_gen.apps.executives.datasets import (
 from tests.e2e._kpi_parse import parse_currency_kpi, parse_int_kpi
 
 from .tree_validator import TreeValidator
+from recon_gen.common.config import Config
 
+
+
+if TYPE_CHECKING:
+    from recon_gen.common.tree import App
+    from tests.e2e._drivers import DashboardDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
@@ -49,7 +57,7 @@ def _as_date(value: object) -> date:
     )
 
 
-def test_exec_dashboard_structure_matches_tree(exec_dashboard_driver, exec_app) -> None:
+def test_exec_dashboard_structure_matches_tree(exec_dashboard_driver: tuple["DashboardDriver", str], exec_app: "App") -> None:
     driver, dashboard_arg = exec_dashboard_driver
     # App 2 is local + fast — see test_l1_sheet_visuals for the rationale.
     timeout_ms = 12_000 if driver.dialect == "app2" else 30_000
@@ -68,8 +76,8 @@ def _sql_for(builder, *args):  # type: ignore[no-untyped-def]: builder takes (cf
 
 
 def test_bg5_transaction_volume_kpis_match_dataset_aggregates(
-    exec_dashboard_driver, cfg,
-):
+    exec_dashboard_driver: tuple["DashboardDriver", str], cfg: Config,
+) -> None:
     """BG.5 — Transaction Volume sheet KPIs must equal aggregates over
     the production transaction summary dataset.
 
@@ -127,7 +135,7 @@ def test_bg5_transaction_volume_kpis_match_dataset_aggregates(
     driver.screenshot()
 
 
-def test_bg5_money_moved_kpis_match_dataset_sums(exec_dashboard_driver, cfg):
+def test_bg5_money_moved_kpis_match_dataset_sums(exec_dashboard_driver: tuple["DashboardDriver", str], cfg: Config) -> None:
     """BG.5 — Money Moved sheet KPIs (Gross + Net) must equal sums
     over the production transaction summary dataset.
 
@@ -175,8 +183,8 @@ def test_bg5_money_moved_kpis_match_dataset_sums(exec_dashboard_driver, cfg):
 
 
 def test_bg5_account_summary_kpis_match_dataset_counts(
-    exec_dashboard_driver, cfg,
-):
+    exec_dashboard_driver: tuple["DashboardDriver", str], cfg: Config,
+) -> None:
     """BG.5 — Open Accounts sheet KPIs (Total Open / Active) must
     equal row counts of the production account summary datasets.
 

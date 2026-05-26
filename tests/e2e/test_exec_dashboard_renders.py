@@ -8,14 +8,21 @@ sheet-tab assertion derives the expected set from the tree
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
+
+
+if TYPE_CHECKING:
+    from recon_gen.common.tree import App
+    from tests.e2e._drivers import QsEmbedDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
 def test_exec_dashboard_opens_and_screenshots(
-    qs_driver, exec_dashboard_id, exec_app, tmp_path,
+    qs_driver: "QsEmbedDriver", exec_dashboard_id: str, exec_app: "App", tmp_path,
 ) -> None:
     """The deployed Executives dashboard loads, screenshots, and a data
     sheet renders visuals. (`open()` mints + uses the embed URL — its
@@ -31,7 +38,7 @@ def test_exec_dashboard_opens_and_screenshots(
 
 
 def test_exec_dashboard_lists_all_sheet_tabs(
-    qs_driver, exec_dashboard_id, exec_app,
+    qs_driver: "QsEmbedDriver", exec_dashboard_id: str, exec_app: "App",
 ) -> None:
     """Every sheet the tree declares shows up as a tab on the deployed
     dashboard. Switching the L2 instance changes the names but the

@@ -13,8 +13,15 @@ pulled from the matview at runtime — queued as X.1.g.11.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
+
+
+if TYPE_CHECKING:
+    from recon_gen.common.l2 import L2Instance
+    from tests.e2e._drivers import QsEmbedDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
@@ -28,8 +35,8 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
     ),
 )
 def test_metadata_value_pick_does_not_empty_transactions_table(
-    qs_driver, l2ft_dashboard_id,
-):
+    qs_driver: "QsEmbedDriver", l2ft_dashboard_id: str,
+) -> None:
     """Picking a (Key, Value) pair must leave the Transactions table
     with > 0 rows — the v8.6.5 cascade-source regression class.
 

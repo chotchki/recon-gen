@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     )
 
 
+    from recon_gen.common.tree import App
 pytestmark = [pytest.mark.e2e, pytest.mark.api]
 
 
@@ -70,7 +71,7 @@ def _visual_titles(sheet: dict) -> set[str]:
     return out
 
 
-def _tree_visual_titles(inv_app, sheet_name: str) -> set[str]:
+def _tree_visual_titles(inv_app: "App", sheet_name: str) -> set[str]:
     sheet = next(
         s for s in inv_app.analysis.sheets if s.name == sheet_name
     )
@@ -167,7 +168,7 @@ class TestVisuals:
     def test_money_trail_has_sankey_and_table(
         self,
         inv_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
-        inv_app,
+        inv_app: "App",
     ) -> None:
         sheet = next(
             s for s in inv_dashboard_definition["Sheets"]
@@ -183,7 +184,7 @@ class TestVisuals:
     def test_account_network_has_two_directional_sankeys_and_table(
         self,
         inv_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
-        inv_app,
+        inv_app: "App",
     ) -> None:
         """K.4.8i invariant — direction must be encoded in geometry. A
         regression that drops one Sankey or merges them back into one
@@ -222,7 +223,7 @@ class TestParameters:
     def test_all_parameters_declared(
         self,
         inv_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
-        inv_app,
+        inv_app: "App",
     ) -> None:
         # The tree's parameter set is the source of truth — deployed must
         # match exactly. K.4.3 fanout-threshold + K.4.4 anomalies-sigma +
@@ -236,7 +237,7 @@ class TestFilterGroups:
     def test_filter_group_ids(
         self,
         inv_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
-        inv_app,
+        inv_app: "App",
     ) -> None:
         groups = inv_dashboard_definition.get("FilterGroups", [])
         deployed = {g["FilterGroupId"] for g in groups}
@@ -256,7 +257,7 @@ class TestDatasetDeclarations:
     def test_all_datasets_declared(
         self,
         inv_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
-        inv_dataset_ids,
+        inv_dataset_ids: list[str],
     ) -> None:
         decls = inv_dashboard_definition["DataSetIdentifierDeclarations"]
         declared_ds_ids = {d["DataSetArn"].split("/")[-1] for d in decls}

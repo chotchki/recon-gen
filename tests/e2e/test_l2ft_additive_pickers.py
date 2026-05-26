@@ -48,6 +48,8 @@ parity gap = real wiring divergence.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from recon_gen.apps.l2_flow_tracing.datasets import (
@@ -67,7 +69,13 @@ from tests.e2e._picker_anchor import (
     picker_value,
     visual_column_label,
 )
+from recon_gen.common.config import Config
 
+
+
+if TYPE_CHECKING:
+    from recon_gen.common.l2 import L2Instance
+    from tests.e2e._drivers import DashboardDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
@@ -189,8 +197,8 @@ L2FT_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
     "spec", L2FT_PICKER_SPECS, ids=lambda s: s.sheet_name,
 )
 def test_l2ft_additive_pickers_keep_anchor_row(
-    l2ft_dashboard_driver, cfg, l2, spec: SheetAnchorSpec,
-):
+    l2ft_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance", spec: SheetAnchorSpec,
+) -> None:
     """For each L2FT sheet with ≥2 pickers: fetch a known-good anchor
     row, drive every picker to that row's values, assert the target
     table still has ≥1 row. Mirror of AA.A.6's L1 contract; see
@@ -238,8 +246,8 @@ def test_l2ft_additive_pickers_keep_anchor_row(
     "spec", L2FT_PICKER_SPECS, ids=lambda s: s.sheet_name,
 )
 def test_l2ft_dropdown_pickers_inverse_excludes_anchor(
-    l2ft_dashboard_driver, cfg, l2, spec: SheetAnchorSpec,
-):
+    l2ft_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance", spec: SheetAnchorSpec,
+) -> None:
     """For each L2FT sheet with ≥2 pickers: after the AA.A.6 all-
     pickers-anchored state, iterate over the dropdown pickers and
     verify each excludes the anchor when toggled to a non-matching

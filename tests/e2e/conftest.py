@@ -16,12 +16,13 @@ Optional env vars for tuning:
 
 from __future__ import annotations
 
-import os
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
+from recon_gen.common.config import Config
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
     RECON_E2E_IDENTITY_REGION,
@@ -37,11 +38,21 @@ if TYPE_CHECKING:
     # BE.7.B — type-only imports for boto3-stubs annotations. Lazy
     # import to avoid pulling mypy-boto3 modules at test-collection
     # time (they're [dev] deps; not present in production wheel).
+    # BE.7.C.2 slice 1 — type-only imports for the App/L2Instance/
+    # driver fixtures. Quoted-string annotations keep the test
+    # process light at collection time.
     from mypy_boto3_quicksight.client import QuickSightClient
 
+    from recon_gen.common.l2 import L2Instance
+    from recon_gen.common.tree import App
+    from tests.e2e._drivers import DashboardDriver, QsEmbedDriver
 
-def pytest_collection_modifyitems(config, items):
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item],
+) -> None:
     """Skip all e2e tests unless RECON_GEN_E2E=1."""
+    del config  # unused; required by the pytest hook signature
     if RECON_GEN_E2E.get_or_none():
         return
     skip = pytest.mark.skip(reason="e2e tests disabled (set RECON_GEN_E2E=1)")
@@ -51,15 +62,18 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_makereport(item, call):
+def pytest_runtest_makereport(
+    item: pytest.Item, call: pytest.CallInfo[None],
+) -> Iterator[None]:
     """Expose per-phase test outcome to fixtures via item.rep_<phase>.
 
     M.4.1.f's harness fixtures consult ``item.rep_call.failed`` during
     teardown to decide whether to dump the failure triage manifest.
     Standard pytest idiom.
     """
+    del call  # unused; required by the pytest hook signature
     outcome = yield
-    rep = outcome.get_result()
+    rep = outcome.get_result()  # type: ignore[attr-defined]: pytest hookwrapper yield-result outcome shape isn't pre-typed
     setattr(item, f"rep_{rep.when}", rep)
 
 
@@ -77,7 +91,7 @@ IDENTITY_REGION = RECON_E2E_IDENTITY_REGION.get_or_none() or "us-east-1"
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="session")
-def cfg():
+def cfg() -> Config:
     """Load project config — checks the legacy single-file location, then
     the per-dialect copies (Phase P), then env vars.
 
@@ -110,17 +124,17 @@ def cfg():
 
 
 @pytest.fixture(scope="session")
-def account_id(cfg) -> str:
+def account_id(cfg: Config) -> str:
     return cfg.aws_account_id
 
 
 @pytest.fixture(scope="session")
-def region(cfg) -> str:
+def region(cfg: Config) -> str:
     return cfg.aws_region
 
 
 @pytest.fixture(scope="session")
-def deployment_name(cfg) -> str:
+def deployment_name(cfg: Config) -> str:
     """Z.C — replaces the prior ``resource_prefix`` fixture; the
     deployment_name IS the single per-deploy QS-resource-ID prefix."""
     return cfg.deployment_name
@@ -143,7 +157,12 @@ def qs_client(region: str) -> "QuickSightClient":
 
 
 @pytest.fixture
-def qs_driver(request, cfg, region, account_id):  # type: ignore[no-untyped-def]: return-type annotation would force a QsEmbedDriver import at module scope
+def qs_driver(
+    request: pytest.FixtureRequest,
+    cfg: Config,
+    region: str,
+    account_id: str,
+) -> Iterator["QsEmbedDriver"]:
     """X.2.q — ``QsEmbedDriver`` over a fresh WebKit page, for browser
     e2e tests that drive a deployed QuickSight dashboard through the
     ``DashboardDriver`` protocol (``open(dashboard_id)`` mints the embed
@@ -167,7 +186,7 @@ def qs_driver(request, cfg, region, account_id):  # type: ignore[no-untyped-def]
         yield driver
 
 
-def _resolve_test_l2_instance():  # type: ignore[no-untyped-def]: return-type annotation would force an L2Instance import at module scope, slowing collection
+def _resolve_test_l2_instance() -> "L2Instance":
     """Resolve the L2 instance the e2e tests should mirror.
 
     Honors ``RECON_GEN_TEST_L2_INSTANCE`` (the runner / release.yml inject
@@ -188,7 +207,7 @@ def _resolve_test_l2_instance():  # type: ignore[no-untyped-def]: return-type an
 
 
 @pytest.fixture(scope="session")
-def l2(cfg):  # type: ignore[no-untyped-def]: return-type annotation would force an L2Instance import at module scope
+def l2(cfg: Config) -> "L2Instance":
     """Session-scoped L2Instance matching what the deploy used.
 
     Mirrors the L2 ``json apply`` / ``data apply`` were driven with for
@@ -207,7 +226,9 @@ def l2(cfg):  # type: ignore[no-untyped-def]: return-type annotation would force
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _refresh_matviews_once_per_session(cfg, l2):  # type: ignore[no-untyped-def]: see ``l2`` comment
+def _refresh_matviews_once_per_session(  # pyright: ignore[reportUnusedFunction]: pytest autouse fixture — invoked by pytest via name, not directly accessed
+    cfg: Config, l2: "L2Instance",
+) -> None:
     """AA.A.qs-triage.5.followon — refresh deployed-DB matviews once per
     test session so picker tests + agreement tests always see live data.
 
@@ -277,19 +298,19 @@ def _refresh_matviews_once_per_session(cfg, l2):  # type: ignore[no-untyped-def]
 
 
 @pytest.fixture(scope="session")
-def inv_dashboard_id(deployment_name) -> str:
+def inv_dashboard_id(deployment_name: str) -> str:
     """Z.C — single-prefix ``<deployment_name>-investigation-dashboard``
     (was M.2d.3's two-segment ``<resource_prefix>-<l2_prefix>-...``)."""
     return f"{deployment_name}-investigation-dashboard"
 
 
 @pytest.fixture(scope="session")
-def inv_analysis_id(deployment_name) -> str:
+def inv_analysis_id(deployment_name: str) -> str:
     return f"{deployment_name}-investigation-analysis"
 
 
 @pytest.fixture(scope="session")
-def inv_dataset_ids(inv_app) -> list[str]:
+def inv_dataset_ids(inv_app: "App") -> list[str]:
     """Investigation dataset IDs derived from the tree.
 
     Drift-resistant: the App's registered datasets ARE the source of
@@ -303,18 +324,18 @@ def inv_dataset_ids(inv_app) -> list[str]:
 
 
 @pytest.fixture(scope="session")
-def exec_dashboard_id(deployment_name) -> str:
+def exec_dashboard_id(deployment_name: str) -> str:
     """Z.C — single-prefix; see ``inv_dashboard_id`` rationale."""
     return f"{deployment_name}-executives-dashboard"
 
 
 @pytest.fixture(scope="session")
-def exec_analysis_id(deployment_name) -> str:
+def exec_analysis_id(deployment_name: str) -> str:
     return f"{deployment_name}-executives-analysis"
 
 
 @pytest.fixture(scope="session")
-def exec_dataset_ids(exec_app) -> list[str]:
+def exec_dataset_ids(exec_app: "App") -> list[str]:
     """Executives dataset IDs derived from the tree (drift-resistant)."""
     return [ds.arn.rsplit("/", 1)[-1] for ds in exec_app.datasets]
 
@@ -327,17 +348,17 @@ def exec_dataset_ids(exec_app) -> list[str]:
 
 
 @pytest.fixture(scope="session")
-def l1_dashboard_id(deployment_name) -> str:
+def l1_dashboard_id(deployment_name: str) -> str:
     return f"{deployment_name}-l1-dashboard"
 
 
 @pytest.fixture(scope="session")
-def l1_analysis_id(deployment_name) -> str:
+def l1_analysis_id(deployment_name: str) -> str:
     return f"{deployment_name}-l1-dashboard-analysis"
 
 
 @pytest.fixture(scope="session")
-def l1_dataset_ids(l1_app) -> list[str]:
+def l1_dataset_ids(l1_app: "App") -> list[str]:
     """L1 dashboard dataset IDs derived from the tree (drift-resistant).
 
     Switched from the M.2c.1 hand-listed form after the v8.8.0a23
@@ -356,7 +377,7 @@ def l1_dataset_ids(l1_app) -> list[str]:
 
 
 @pytest.fixture(scope="session")
-def l2ft_l2_instance():
+def l2ft_l2_instance() -> "L2Instance":
     """The loaded ``L2Instance`` the e2e session targets — same resolution
     as `l2ft_l2_prefix`, but the object, not just the prefix string."""
     from recon_gen.common.l2 import default_l2_instance
@@ -392,7 +413,7 @@ _L2FT_FEATURE_DECLARED = {
 }
 
 
-def require_l2ft_feature(l2_instance, feature: str) -> None:
+def require_l2ft_feature(l2_instance: "L2Instance", feature: str) -> None:
     """`pytest.skip` if ``l2_instance`` declares zero of ``feature``
     (``"chains"`` | ``"templates"``). Call from an autouse fixture in an
     L2FT browser test module that only applies when that feature exists."""
@@ -410,12 +431,12 @@ def require_l2ft_feature(l2_instance, feature: str) -> None:
 
 
 @pytest.fixture(scope="session")
-def l2ft_dashboard_id(deployment_name) -> str:
+def l2ft_dashboard_id(deployment_name: str) -> str:
     return f"{deployment_name}-l2-flow-tracing"
 
 
 @pytest.fixture(scope="session")
-def l2ft_analysis_id(deployment_name) -> str:
+def l2ft_analysis_id(deployment_name: str) -> str:
     return f"{deployment_name}-l2-flow-tracing-analysis"
 
 
@@ -429,7 +450,7 @@ def l2ft_analysis_id(deployment_name) -> str:
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="session")
-def inv_app(cfg):
+def inv_app(cfg: Config) -> "App":
     """Tree-built Investigation App (post-emit, auto-IDs resolved).
 
     Honors ``RECON_GEN_TEST_L2_INSTANCE`` so the tree's dataset ARNs
@@ -448,7 +469,7 @@ def inv_app(cfg):
 
 
 @pytest.fixture(scope="session")
-def exec_app(cfg):
+def exec_app(cfg: Config) -> "App":
     """Tree-built Executives App (post-emit, auto-IDs resolved).
     See ``inv_app`` for the L2-instance-honoring rationale."""
     from recon_gen.apps.executives.app import build_executives_app
@@ -461,7 +482,7 @@ def exec_app(cfg):
 
 
 @pytest.fixture(scope="session")
-def l1_app(cfg):
+def l1_app(cfg: Config) -> "App":
     """Tree-built L1 Reconciliation Dashboard App.
 
     Honors ``RECON_GEN_TEST_L2_INSTANCE`` — the same L2 the CLI's
@@ -480,7 +501,7 @@ def l1_app(cfg):
 
 
 @pytest.fixture(scope="session")
-def l2ft_app(cfg):
+def l2ft_app(cfg: Config) -> "App":
     """Tree-built L2 Flow Tracing App (post-emit, auto-IDs resolved).
     See ``inv_app`` for the L2-instance-honoring rationale.
     ``build_l2_flow_tracing_app`` registers its datasets' CustomSQL +
@@ -528,9 +549,16 @@ def l2ft_app(cfg):
 from tests.e2e._capture import maybe_capture_on_failure as _maybe_capture_on_failure  # noqa: E402
 
 
-def _parametrized_dashboard_driver(  # type: ignore[no-untyped-def]: return-type annotation would force a driver import at module scope
-    request, *, cfg, region, account_id, dashboard_id, app, short,
-):
+def _parametrized_dashboard_driver(
+    request: pytest.FixtureRequest,
+    *,
+    cfg: Config,
+    region: str,
+    account_id: str,
+    dashboard_id: str,
+    app: "App",
+    short: str,
+) -> Iterator[tuple["DashboardDriver", str]]:
     if request.param == "qs":
         import boto3
 
@@ -581,7 +609,14 @@ def _parametrized_dashboard_driver(  # type: ignore[no-untyped-def]: return-type
 
 
 @pytest.fixture(params=["qs", "app2"])
-def l1_dashboard_driver(request, cfg, region, account_id, l1_dashboard_id, l1_app):  # type: ignore[no-untyped-def]: return-type annotation would force a driver import at module scope
+def l1_dashboard_driver(
+    request: pytest.FixtureRequest,
+    cfg: Config,
+    region: str,
+    account_id: str,
+    l1_dashboard_id: str,
+    l1_app: "App",
+) -> Iterator[tuple["DashboardDriver", str]]:
     yield from _parametrized_dashboard_driver(
         request, cfg=cfg, region=region, account_id=account_id,
         dashboard_id=l1_dashboard_id, app=l1_app, short="l1",
@@ -589,7 +624,14 @@ def l1_dashboard_driver(request, cfg, region, account_id, l1_dashboard_id, l1_ap
 
 
 @pytest.fixture(params=["qs", "app2"])
-def inv_dashboard_driver(request, cfg, region, account_id, inv_dashboard_id, inv_app):  # type: ignore[no-untyped-def]: return-type annotation would force a driver import at module scope
+def inv_dashboard_driver(
+    request: pytest.FixtureRequest,
+    cfg: Config,
+    region: str,
+    account_id: str,
+    inv_dashboard_id: str,
+    inv_app: "App",
+) -> Iterator[tuple["DashboardDriver", str]]:
     yield from _parametrized_dashboard_driver(
         request, cfg=cfg, region=region, account_id=account_id,
         dashboard_id=inv_dashboard_id, app=inv_app, short="inv",
@@ -597,7 +639,14 @@ def inv_dashboard_driver(request, cfg, region, account_id, inv_dashboard_id, inv
 
 
 @pytest.fixture(params=["qs", "app2"])
-def exec_dashboard_driver(request, cfg, region, account_id, exec_dashboard_id, exec_app):  # type: ignore[no-untyped-def]: return-type annotation would force a driver import at module scope
+def exec_dashboard_driver(
+    request: pytest.FixtureRequest,
+    cfg: Config,
+    region: str,
+    account_id: str,
+    exec_dashboard_id: str,
+    exec_app: "App",
+) -> Iterator[tuple["DashboardDriver", str]]:
     yield from _parametrized_dashboard_driver(
         request, cfg=cfg, region=region, account_id=account_id,
         dashboard_id=exec_dashboard_id, app=exec_app, short="exec",
@@ -605,7 +654,14 @@ def exec_dashboard_driver(request, cfg, region, account_id, exec_dashboard_id, e
 
 
 @pytest.fixture(params=["qs", "app2"])
-def l2ft_dashboard_driver(request, cfg, region, account_id, l2ft_dashboard_id, l2ft_app):  # type: ignore[no-untyped-def]: return-type annotation would force a driver import at module scope
+def l2ft_dashboard_driver(
+    request: pytest.FixtureRequest,
+    cfg: Config,
+    region: str,
+    account_id: str,
+    l2ft_dashboard_id: str,
+    l2ft_app: "App",
+) -> Iterator[tuple["DashboardDriver", str]]:
     yield from _parametrized_dashboard_driver(
         request, cfg=cfg, region=region, account_id=account_id,
         dashboard_id=l2ft_dashboard_id, app=l2ft_app, short="l2ft",
@@ -663,7 +719,7 @@ _WARMUP_QUERIES = (
 
 
 @pytest.fixture(scope="session", autouse=True)
-def warm_aurora(cfg):
+def warm_aurora(cfg: Config) -> None:
     """Pre-warm Aurora before any e2e visual hits the dashboard."""
     if not cfg.demo_database_url:
         return
@@ -703,7 +759,9 @@ def warm_aurora(cfg):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def capture_top_queries(cfg, request):
+def capture_top_queries(
+    cfg: Config, request: pytest.FixtureRequest,
+) -> Iterator[None]:
     """Session-end perf-snapshot hook.
 
     Yields immediately; on teardown, if ``RECON_GEN_RUN_DIR`` is set AND

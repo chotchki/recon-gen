@@ -24,6 +24,8 @@ data-agnostic per the no-hardcoded-data rule:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from decimal import Decimal
 
 import pytest
@@ -38,7 +40,13 @@ from recon_gen.apps.l1_dashboard.datasets import (
     build_todays_exceptions_dataset,
 )
 from tests.e2e._kpi_parse import parse_currency_kpi, parse_int_kpi
+from recon_gen.common.config import Config
 
+
+
+if TYPE_CHECKING:
+    from recon_gen.common.l2 import L2Instance
+    from tests.e2e._drivers import DashboardDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
@@ -64,7 +72,7 @@ def _sql_and_params_for(builder, cfg, l2):  # type: ignore[no-untyped-def]: buil
     ),
     strict=False,
 )
-def test_date_range_filter_narrows_drift_sheet(l1_dashboard_driver):
+def test_date_range_filter_narrows_drift_sheet(l1_dashboard_driver: tuple["DashboardDriver", str]) -> None:
     """Setting the date range to a 2099 future window must empty (or at
     least shrink) the Leaf Account Drift table — no L2 instance plants
     drift in 2099.
@@ -93,7 +101,7 @@ def test_date_range_filter_narrows_drift_sheet(l1_dashboard_driver):
     )
 
 
-def test_check_type_dropdown_exposes_options(l1_dashboard_driver):
+def test_check_type_dropdown_exposes_options(l1_dashboard_driver: tuple["DashboardDriver", str]) -> None:
     """The Check Type dropdown on Today's Exceptions exposes the L1
     invariant view names (drift / ledger_drift / overdraft / …) as
     selectable values. The option universe comes from the data — we
@@ -110,7 +118,7 @@ def test_check_type_dropdown_exposes_options(l1_dashboard_driver):
 # BG.3 — L1 Drift / Drift Timelines / Overdraft KPI honest gates -----------
 
 
-def test_bg3_drift_sheet_kpis_match_matview_counts(l1_dashboard_driver, cfg, l2):
+def test_bg3_drift_sheet_kpis_match_matview_counts(l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance") -> None:
     """BG.3 — the two Drift sheet KPIs (Leaf Accounts in Drift / Parent
     Accounts in Drift) must equal the row count of their respective
     drift matview, queried via the same dataset SQL the visual issues.
@@ -154,8 +162,8 @@ def test_bg3_drift_sheet_kpis_match_matview_counts(l1_dashboard_driver, cfg, l2)
 
 
 def test_bg3_drift_timelines_kpis_and_series_identity_plus_delta(
-    l1_dashboard_driver, cfg, l2,
-):
+    l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance",
+) -> None:
     """BG.3 — the Drift Timelines headline KPIs (Largest Leaf/Parent
     Drift Day) must equal ``MAX(abs_drift)`` over the timeline dataset.
     AND the leaf line chart must NOT be a flat constant — its daily
@@ -235,8 +243,8 @@ def test_bg3_drift_timelines_kpis_and_series_identity_plus_delta(
 
 
 def test_bg6_pending_aging_kpi_chart_table_triple_identity(
-    l1_dashboard_driver, cfg, l2,
-):
+    l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance",
+) -> None:
     """BG.6 — Pending Aging sheet's three surfaces (KPI + bar chart +
     detail table) must all read the same population.
 
@@ -280,8 +288,8 @@ def test_bg6_pending_aging_kpi_chart_table_triple_identity(
 
 
 def test_bg6_todays_exceptions_kpi_matches_dataset_count(
-    l1_dashboard_driver, cfg, l2,
-):
+    l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance",
+) -> None:
     """BG.6 — Today's Exceptions Open Exceptions KPI must equal the
     row count of the todays_exceptions dataset.
 
@@ -311,7 +319,7 @@ def test_bg6_todays_exceptions_kpi_matches_dataset_count(
     driver.screenshot()
 
 
-def test_bg3_overdraft_kpi_matches_matview_count(l1_dashboard_driver, cfg, l2):
+def test_bg3_overdraft_kpi_matches_matview_count(l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance") -> None:
     """BG.3 — "Accounts in Overdraft" KPI count must equal the
     Overdraft dataset's row count under default binds (no filter
     picked). Direct catch for v11.21.0 cold-read finding #12 (KPI=0

@@ -23,6 +23,8 @@ and the App2 substitution path by ``test_html2_*`` / ``test_dashboard_driver``.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from decimal import Decimal
 
 import pytest
@@ -33,7 +35,12 @@ from recon_gen.apps.investigation.datasets import (
     build_volume_anomalies_distribution_dataset,
 )
 from tests.e2e._kpi_parse import parse_currency_kpi, parse_int_kpi
+from recon_gen.common.config import Config
 
+
+
+if TYPE_CHECKING:
+    from tests.e2e._drivers import DashboardDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
@@ -48,7 +55,7 @@ def _sql_and_params_for(builder, *args):  # type: ignore[no-untyped-def]: builde
     return sql, list(ds.DatasetParameters or ())
 
 
-def test_min_sigma_slider_shrinks_anomalies_kpi(inv_dashboard_driver):
+def test_min_sigma_slider_shrinks_anomalies_kpi(inv_dashboard_driver: tuple["DashboardDriver", str]) -> None:
     """Pushing the "Min sigma" slider to its max (4) must drop the
     Flagged Pair-Windows KPI below its default-σ value.
 
@@ -85,7 +92,7 @@ def test_min_sigma_slider_shrinks_anomalies_kpi(inv_dashboard_driver):
     )
 
 
-def test_min_hop_amount_slider_shrinks_money_trail_table(inv_dashboard_driver):
+def test_min_hop_amount_slider_shrinks_money_trail_table(inv_dashboard_driver: tuple["DashboardDriver", str]) -> None:
     """Pushing the "Min hop amount ($)" slider to its max ($1,000) must
     shrink the Money Trail Hop-by-Hop table vs its default ($0).
 
@@ -120,8 +127,8 @@ def test_min_hop_amount_slider_shrinks_money_trail_table(inv_dashboard_driver):
 
 
 def test_bg4_volume_anomalies_kpi_matches_filtered_matview_and_distribution(
-    inv_dashboard_driver, cfg,
-):
+    inv_dashboard_driver: tuple["DashboardDriver", str], cfg: Config,
+) -> None:
     """BG.4 — the Flagged Pair-Windows KPI must equal both:
     (a) the row count of the σ-filtered Volume Anomalies dataset
         (the dataset the table on this sheet binds), AND
@@ -193,8 +200,8 @@ def test_bg4_volume_anomalies_kpi_matches_filtered_matview_and_distribution(
 
 
 def test_bg4_recipient_fanout_kpis_match_inflows_only_truth(
-    inv_dashboard_driver, cfg,
-):
+    inv_dashboard_driver: tuple["DashboardDriver", str], cfg: Config,
+) -> None:
     """BG.4 — the Recipient Fanout KPIs (Qualifying Recipients, Distinct
     Senders, Total Inbound) must NOT exceed inflows-only ground truth
     (one row per recipient leg per transfer, NO cartesian inflation

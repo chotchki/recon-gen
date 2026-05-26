@@ -14,7 +14,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.api]
 
 
 class TestL1DashboardExists:
-    def test_dashboard_status(self, qs_client, account_id, l1_dashboard_id):
+    def test_dashboard_status(self, qs_client, account_id: str, l1_dashboard_id: str) -> None:
         resp = qs_client.describe_dashboard(
             AwsAccountId=account_id,
             DashboardId=l1_dashboard_id,
@@ -26,8 +26,8 @@ class TestL1DashboardExists:
         )
 
     def test_dashboard_has_name(
-        self, qs_client, account_id, l1_dashboard_id,
-    ):
+        self, qs_client, account_id: str, l1_dashboard_id: str,
+    ) -> None:
         resp = qs_client.describe_dashboard(
             AwsAccountId=account_id,
             DashboardId=l1_dashboard_id,
@@ -36,7 +36,7 @@ class TestL1DashboardExists:
 
 
 class TestL1AnalysisExists:
-    def test_analysis_status(self, qs_client, account_id, l1_analysis_id):
+    def test_analysis_status(self, qs_client, account_id: str, l1_analysis_id: str) -> None:
         resp = qs_client.describe_analysis(
             AwsAccountId=account_id,
             AnalysisId=l1_analysis_id,
@@ -50,8 +50,8 @@ class TestL1AnalysisExists:
 
 class TestL1DatasetsExist:
     def test_all_datasets_exist(
-        self, qs_client, account_id, l1_dataset_ids,
-    ):
+        self, qs_client, account_id: str, l1_dataset_ids: list[str],
+    ) -> None:
         for ds_id in l1_dataset_ids:
             resp = qs_client.describe_data_set(
                 AwsAccountId=account_id,

@@ -31,8 +31,14 @@ anchor; re-light the app2 leg once the remaining two are addressed):
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
+
+
+if TYPE_CHECKING:
+    from tests.e2e._drivers import DashboardDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
@@ -49,7 +55,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
         "docstring."
     )
 )
-def test_account_network_table_walk_rerenders_table(inv_dashboard_driver):
+def test_account_network_table_walk_rerenders_table(inv_dashboard_driver: tuple["DashboardDriver", str]) -> None:
     """Activating a row in the Account Network touching-edges table walks
     the anchor over to that row's counterparty; the table is filtered to
     "edges touching anchor", so the new anchor narrows it to a different

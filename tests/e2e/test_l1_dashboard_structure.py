@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     )
 
 
+    from recon_gen.common.tree import App
 pytestmark = [pytest.mark.e2e, pytest.mark.api]
 
 
@@ -53,7 +54,7 @@ def _visual_titles(sheet: dict) -> set[str]:
     return out
 
 
-def _tree_visual_titles(l1_app, sheet_name: str) -> set[str]:
+def _tree_visual_titles(l1_app: "App", sheet_name: str) -> set[str]:
     sheet = next(
         s for s in l1_app.analysis.sheets if s.name == sheet_name
     )
@@ -67,7 +68,7 @@ class TestSheets:
     def test_sheet_count_matches_tree(
         self,
         l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
-        l1_app,
+        l1_app: "App",
     ) -> None:
         deployed = len(l1_dashboard_definition["Sheets"])
         expected = len(l1_app.analysis.sheets)
@@ -76,7 +77,7 @@ class TestSheets:
     def test_sheet_order_matches_tree(
         self,
         l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
-        l1_app,
+        l1_app: "App",
     ) -> None:
         deployed = [s["Name"] for s in l1_dashboard_definition["Sheets"]]
         expected = [s.name for s in l1_app.analysis.sheets]
@@ -100,7 +101,7 @@ class TestVisuals:
     def test_visual_titles_match_tree(
         self,
         l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
-        l1_app,
+        l1_app: "App",
     ) -> None:
         """For every sheet on the deployed dashboard, the visual titles
         must include every title declared on the corresponding sheet in
@@ -122,7 +123,7 @@ class TestVisuals:
     def test_visual_count_matches_tree(
         self,
         l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
-        l1_app,
+        l1_app: "App",
     ) -> None:
         for sheet in l1_dashboard_definition["Sheets"]:
             name = sheet["Name"]
@@ -170,7 +171,7 @@ class TestParameters:
     def test_all_parameters_declared(
         self,
         l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
-        l1_app,
+        l1_app: "App",
     ) -> None:
         """Tree's parameter set is the source of truth — deployed must
         match exactly. M.2b.1 added P_L1_DATE_START + P_L1_DATE_END;
@@ -187,7 +188,7 @@ class TestFilterGroups:
     def test_filter_group_ids_match_tree(
         self,
         l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
-        l1_app,
+        l1_app: "App",
     ) -> None:
         groups = l1_dashboard_definition.get("FilterGroups", [])
         deployed = {g["FilterGroupId"] for g in groups}
@@ -212,7 +213,7 @@ class TestDatasetDeclarations:
     def test_all_datasets_declared(
         self,
         l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
-        l1_dataset_ids,
+        l1_dataset_ids: list[str],
     ) -> None:
         """Every L1 dataset id (derived from resource_prefix) must
         appear in the dashboard's DataSetIdentifierDeclarations."""

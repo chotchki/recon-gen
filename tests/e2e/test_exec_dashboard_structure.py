@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     )
 
 
+    from recon_gen.common.tree import App
 pytestmark = [pytest.mark.e2e, pytest.mark.api]
 
 
@@ -146,8 +147,8 @@ class TestParameters:
     def test_all_parameters_declared(
         self,
         exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
-        exec_app,
-    ):
+        exec_app: "App",
+    ) -> None:
         # Executives has no parameters today — no cross-app drills
         # (L.6.7 dropped per QS URL parameter sync defect), no UI
         # parameter controls. The tree-walked set is the source of
@@ -161,7 +162,7 @@ class TestFilterGroups:
     def test_filter_group_ids(
         self,
         exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
-        exec_app,
+        exec_app: "App",
     ) -> None:
         groups = exec_dashboard_definition.get("FilterGroups", [])
         deployed = {g["FilterGroupId"] for g in groups}
@@ -204,8 +205,8 @@ class TestDatasetDeclarations:
     def test_all_datasets_declared(
         self,
         exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
-        exec_dataset_ids,
-    ):
+        exec_dataset_ids: list[str],
+    ) -> None:
         decls = exec_dashboard_definition["DataSetIdentifierDeclarations"]
         declared_ds_ids = {d["DataSetArn"].split("/")[-1] for d in decls}
         for ds_id in exec_dataset_ids:
