@@ -342,7 +342,16 @@ def populate_app_info_sheet(
         ],
     )
 
-    # Row 2: deploy stamp text box.
+    # Row 2: deploy stamp text box. BH.21 (2026-05-25) — sqlite is a
+    # dev-only dialect (Postgres / Oracle ship prod); flag sqlite with
+    # an explicit "(dev build)" tag so operators reading the dialect
+    # don't mistake a local dev capture for a production deploy. PG /
+    # Oracle render bare (those ARE prod dialects).
+    dialect_line = (
+        f"dialect: {dialect} (dev build)"
+        if cfg.dialect is Dialect.SQLITE
+        else f"dialect: {dialect}"
+    )
     sheet.layout.row(height=_TEXT_HEIGHT).add_text_box(
         TextBox(
             text_box_id="app-info-deploy-stamp",
@@ -352,7 +361,7 @@ def populate_app_info_sheet(
                     f"recon-gen: v{version}",
                     f"git: {sha}",
                     f"generated: {ts}",
-                    f"dialect: {dialect}",
+                    dialect_line,
                     f"prefix: {prefix}",
                 ]),
             ),

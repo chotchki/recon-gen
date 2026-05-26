@@ -167,7 +167,7 @@ class ChainParentDisagreementGenerator:
     anchor_day: date
     parent_a_transfer_id: str = field(default="tr-cpd-parent-a")
     parent_b_transfer_id: str = field(default="tr-cpd-parent-b")
-    rail_name: str = "ach"
+    rail_name: str = "_spine_plant"
     prefix: str = "spec_example"
     account_id_override: str | None = None
 

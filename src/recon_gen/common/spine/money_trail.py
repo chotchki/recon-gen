@@ -254,7 +254,7 @@ class MoneyTrailGenerator:
             out.append(Transfer(
                 day=day,
                 transfer_id=self._transfer_id(i),
-                rail_name="ach",
+                rail_name="_spine_plant",
                 status="Posted",
                 parent_transfer_id=parent,
                 legs=(

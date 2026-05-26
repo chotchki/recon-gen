@@ -1264,7 +1264,13 @@ def _populate_unbundled_aging_sheet(
     )
     unbundled_kpi_row.add_kpi(
         width=_HALF,
-        title="Stuck Unbundled — $ Exposure",
+        # BH.20 (2026-05-25) — title was "Stuck Unbundled — $ Exposure";
+        # the "$ Exposure" suffix read as a concatenated literal label
+        # (cold-read finding: "Stuck Unbundled = $ Exposure 490,826").
+        # Reframing as "Stuck Unbundled Exposure" — the value below is
+        # already $-prefixed by currency=True format, so the title
+        # doesn't need its own dollar glyph.
+        title="Stuck Unbundled Exposure",
         subtitle=(
             "Sum of amount across the stuck-unbundled legs. The dollar "
             "side of the reconciliation gap — how much money is sitting "

@@ -66,7 +66,7 @@ class InvFanoutFactory:
         *,
         sender_count: int = 2,
         recipient_account_id: str = "acct-inv-fanout-recipient",
-        rail_name: str = "ach",
+        rail_name: str = "_spine_plant",
         amount_per_transfer: float = 100.0,
         anchor_day: date = date(2030, 1, 1),
     ) -> "InvFanoutGenerator":

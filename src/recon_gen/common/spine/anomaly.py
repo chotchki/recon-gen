@@ -265,7 +265,7 @@ class AnomalyGenerator:
         return Transfer(
             day=self.anchor_day,
             transfer_id=transfer_id,
-            rail_name="ach",
+            rail_name="_spine_plant",
             status="Posted",
             legs=(
                 TransferLeg(

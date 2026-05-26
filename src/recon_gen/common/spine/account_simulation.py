@@ -249,7 +249,7 @@ class AccountSimulation:
                     amount_money=amount, amount_direction=direction,
                     status="Posted", posting=_ts(em.day),
                     transfer_id=f"xfer-{self.account_id}-{tag}",
-                    rail_name="ach", origin="etl",
+                    rail_name="_spine_plant", origin="etl",
                     metadata=metadata,
                 )
         start, end = _day_bounds(em.day)

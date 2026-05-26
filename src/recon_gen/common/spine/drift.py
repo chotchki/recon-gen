@@ -265,7 +265,7 @@ class DriftGenerator:
             status="Posted",
             posting=ts(self.anchor_day),
             transfer_id=f"xfer-drift-{self.child_role}-{self.child_account_id}-1",
-            rail_name="ach",
+            rail_name="_spine_plant",
             origin="etl",
             metadata=metadata,
         )
