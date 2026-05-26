@@ -31,6 +31,7 @@ import pytest
 
 from recon_gen.common.l2 import (
     Identifier,
+    L2Instance,
     Name,
     load_instance,
 )
@@ -69,13 +70,13 @@ _PERSONA_BLOCKLIST = (
 
 
 @pytest.fixture(scope="module")
-def spec_instance():
+def spec_instance() -> L2Instance:
     """The SPEC-shaped L2 instance used as the persona-clean substrate."""
     return load_instance(SPEC_YAML)
 
 
 @pytest.fixture(scope="module")
-def spec_scenario(spec_instance) -> ScenarioPlant:
+def spec_scenario(spec_instance: L2Instance) -> ScenarioPlant:
     """A scenario that exercises every plant type using only spec_example.yaml's
     accounts + rails. No Sasquatch identifiers anywhere."""
     instances = (
@@ -147,11 +148,11 @@ def spec_scenario(spec_instance) -> ScenarioPlant:
 
 
 @pytest.fixture(scope="module")
-def spec_seed_sql(spec_instance, spec_scenario) -> str:
+def spec_seed_sql(spec_instance: L2Instance, spec_scenario: ScenarioPlant) -> str:
     return emit_seed(spec_instance, spec_scenario, prefix="spec_example")
 
 
-def test_seed_emits_against_spec_example_yaml(spec_seed_sql) -> None:
+def test_seed_emits_against_spec_example_yaml(spec_seed_sql: str) -> None:
     """The lifted seed primitives can run against an arbitrary L2 instance.
 
     Smoke: emit_seed(spec_example, ...) produces non-empty SQL with both
@@ -162,7 +163,7 @@ def test_seed_emits_against_spec_example_yaml(spec_seed_sql) -> None:
     assert "INSERT INTO spec_example_daily_balances" in spec_seed_sql
 
 
-def test_no_persona_literals_in_generated_sql(spec_seed_sql) -> None:
+def test_no_persona_literals_in_generated_sql(spec_seed_sql: str) -> None:
     """The headline cleanliness check: no persona literals appear anywhere.
 
     Iterates the blocklist and asserts each is absent (case-insensitive).
@@ -180,7 +181,7 @@ def test_no_persona_literals_in_generated_sql(spec_seed_sql) -> None:
     )
 
 
-def test_seed_includes_only_spec_example_account_ids(spec_seed_sql) -> None:
+def test_seed_includes_only_spec_example_account_ids(spec_seed_sql: str) -> None:
     """Every account_id literal in the SQL came from spec_example.yaml.
 
     Stronger version of the persona-blocklist: the only account-id
@@ -211,7 +212,7 @@ def test_seed_includes_only_spec_example_account_ids(spec_seed_sql) -> None:
     )
 
 
-def test_seed_does_not_leak_sasquatch_persona_names(spec_seed_sql) -> None:
+def test_seed_does_not_leak_sasquatch_persona_names(spec_seed_sql: str) -> None:
     """No Sasquatch persona name leaks into the spec_example seed.
 
     Pre-AY.4 the seed read account names directly from L2

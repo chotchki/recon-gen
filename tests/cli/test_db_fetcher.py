@@ -25,6 +25,7 @@ import pytest
 from click.testing import CliRunner
 
 from recon_gen.cli import main
+from recon_gen.common.config import Config
 from recon_gen.common.html._db_fetcher import (
     _money_trail_to_sankey,
     _topology_to_force_graph,
@@ -165,7 +166,8 @@ class _FakeConnection:
 
 
 @pytest.fixture
-def cfg_with_prefix(tmp_path: Path):  # type: ignore[no-untyped-def]: returns Config with the Z.C deployment_name + db_table_prefix stamped on it
+def cfg_with_prefix(tmp_path: Path) -> Config:
+    """Config with the Z.C deployment_name + db_table_prefix stamped on it."""
     from recon_gen.common.config import load_config
 
     cfg_file = tmp_path / "config.yaml"
@@ -180,7 +182,7 @@ def cfg_with_prefix(tmp_path: Path):  # type: ignore[no-untyped-def]: returns Co
     return load_config(str(cfg_file))
 
 
-def test_db_fetcher_force_branch_skips_db(cfg_with_prefix) -> None:  # type: ignore[no-untyped-def]: cfg_with_prefix is the fixture above (Config)
+def test_db_fetcher_force_branch_skips_db(cfg_with_prefix: Config) -> None:
     """The smoke-force path projects from the L2 instance — it must
     never open the connection (calling the factory would force the
     psycopg2 / oracledb import; the test must pass without them)."""
@@ -200,7 +202,7 @@ def test_db_fetcher_force_branch_skips_db(cfg_with_prefix) -> None:  # type: ign
     assert "nodes" in out and "links" in out
 
 
-def test_db_fetcher_sankey_branch_runs_query(cfg_with_prefix) -> None:  # type: ignore[no-untyped-def]: cfg_with_prefix is the fixture above (Config)
+def test_db_fetcher_sankey_branch_runs_query(cfg_with_prefix: Config) -> None:
     """smoke-sankey opens the connection, runs the SQL, and shapes
     the rows into d3-sankey form."""
     instance = load_instance(str(_SPEC_EXAMPLE))
@@ -221,8 +223,8 @@ def test_db_fetcher_sankey_branch_runs_query(cfg_with_prefix) -> None:  # type: 
     assert len(out["links"]) == 2  # CustomerDDA→GL summed, GL→Concentration
 
 
-def test_db_fetcher_sankey_passes_date_filters_as_bound_params(  # type: ignore[no-untyped-def]: cfg_with_prefix is the fixture above (Config)
-    cfg_with_prefix,
+def test_db_fetcher_sankey_passes_date_filters_as_bound_params(
+    cfg_with_prefix: Config,
 ) -> None:
     """Date filters must go through bound params, NOT string
     interpolation — defends against SQL injection from the form."""
@@ -242,7 +244,7 @@ def test_db_fetcher_sankey_passes_date_filters_as_bound_params(  # type: ignore[
     assert cursor.executed_params == ["2026-01-01", "2026-12-31"]
 
 
-def test_db_fetcher_unknown_visual_id_raises(cfg_with_prefix) -> None:  # type: ignore[no-untyped-def]: cfg_with_prefix is the fixture above (Config)
+def test_db_fetcher_unknown_visual_id_raises(cfg_with_prefix: Config) -> None:
     instance = load_instance(str(_SPEC_EXAMPLE))
     fetcher = make_db_fetcher(
         cfg_with_prefix, instance,

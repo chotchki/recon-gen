@@ -36,6 +36,7 @@ applying the seed:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -68,7 +69,7 @@ def _demo_database_url() -> str | None:
 
 
 @pytest.fixture(scope="module")
-def demo_db_conn() -> Any:
+def demo_db_conn() -> Iterator[Any]:
     """Module-scoped psycopg2 connection to the demo DB.
 
     Skips the entire module when the DB is not reachable — e.g.,
