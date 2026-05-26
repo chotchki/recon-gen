@@ -1,5 +1,131 @@
 # Release Notes
 
+## v11.22.4 — ETL doc accuracy + browser-tier infrastructure unblock (CI not yet green)
+
+**Posture note (2026-05-26).** This release tags progress on two
+independent work streams the v11.22.4 chase surfaced. Browser-tier
+CI is **expected to still fail** on this tag — there's a documented
+backlog of ~30 real test bugs / open product questions that didn't
+make this cut. The tag is honest about that state; the next cut
+will absorb the residual fixes.
+
+### ETL walkthrough accuracy + new daily_balances walkthrough
+
+Cold-read flagged that `how-do-i-populate-transactions.md`'s
+canonical INSERT example would fail at the schema gate (wrong
+column names, missing required column, extra non-existent columns,
+muddled sign convention). Fixed end-to-end + sign-convention bullet
+rewritten to cite the v6 CHECK constraint directly.
+
+New companion walkthrough `how-do-i-populate-daily-balances.md`
+covers the second feed (stored end-of-day balance) — canonical
+INSERT-SELECT projection, day-boundary alignment trap, cents
+storage + `Cents.from_dollars()` helper, `metadata.limits` per-day
+override pattern, "every transactions-day has a daily-balance
+row" sanity gate. Nav + card-grid + onboarding-list cross-refs
+wired through.
+
+Schema_v6 Table 2 heading got an explicit `{: #table-2-prefix_
+daily_balances}` anchor matching Table 1's pattern.
+
+### Browser-tier infrastructure unblock
+
+The v11.22.4 chase identified ONE root cause behind a cascade of
+~55 browser-tier failures: `test_inv_dashboard_agreement.py`'s
+module-scoped `seeded_l2_db` fixture called `apply_db_seed`
+against `cfg.db_table_prefix`, which `DROP CASCADE`'d the shared
+schema. When the xdist scheduler put this fixture on one worker
+while the other workers were reading the runner's broad seed,
+every co-tenant browser test saw empty tables. Same shape as the
+historical `test_audit_dashboard_agreement.py` issue that CI's
+`e2e.yml` already carved out via `--ignore`.
+
+Fix split into two:
+
+- **Architectural — per-test prefix isolation.** New
+  `isolated_inv_cfg` module-scope fixture derives
+  `<cfg.db_table_prefix>_iagree` + `<cfg.deployment_name>-iagree`
+  via `dataclasses.replace`. The fixture, plant generators,
+  `planted_l2_bounds`, `db_conn`, and the test function all swap
+  to the isolated cfg. New `isolated_inv_app` (Investigation tree
+  built off the isolated cfg) feeds App2Driver.serving. Per-module
+  `inv_dashboard_id` override points QS leg at the isolated
+  dashboard ID; `qs_inv_driver` gracefully skips when the
+  isolated dashboard isn't deployed (the existing
+  `ResourceNotFoundException` path). Teardown `DROP CASCADE` on
+  the isolated prefix.
+
+- **Date-math bug in `_seed_helpers.py`.** The plants-only seed
+  path's `AsOfFrame` fallback used `DateInterval.single_day(today_
+  ref)` when `plant_window=None`, rejecting any plant with
+  `days_ago > 0` (drift/overdraft default to 4). Switched to a
+  91-day trailing window — matches `plant_adapter.py`'s own
+  `frame=None` fallback.
+
+Verified the chain end-to-end: post-fix runner shows tables at
+127,554 transactions / 3,928 daily_balances (vs 0/0 with the
+clobber), and 80 browser tests passing (vs 35).
+
+### v11.22.4 chase — additional test-side fixes
+
+Four runtime bugs caught via the chase (all would have been
+pyright errors under `tests/`-strict-scope — see [[BE.7]]):
+
+- `test_exec_sheet_visuals.py`: `cfg.as_of_frame(...)` →
+  `cfg.test_generator.as_of_frame(...)`. The method lives on
+  `TestGeneratorConfig`, not `Config` directly. Affected all
+  6 BG.5 tests.
+- `test_inv_filters.py::_sql_and_params_for`: `list(ds.Dataset
+  Parameters)` raised `TypeError` because `DatasetParameters` is
+  `tuple[...] | None`. Guard with `or ()`.
+- `test_inv_filters.py::test_bg4_recipient_fanout_kpis_match_
+  inflows_only_truth`: assertion-message path referenced
+  `unique_inflows` (undefined). Should be `amount_per_pair`.
+- `apps/investigation/datasets.py`: SQL comment "58% of …"
+  tripped psycopg's named-binds format-string interpretation
+  with "incomplete placeholder: '%'". Replaced with "58 percent".
+
+Earlier in the chase:
+
+- BG.5 sheet renames (`Transaction Volume` → `Transaction Volume
+  Over Time`, `Open Accounts` → `Account Coverage`) — tests
+  missed these from the v11.22.x cycle.
+- BG.5 30-day window narrowing — the deployed exec KPIs are
+  scoped by `cfg.test_generator.as_of_frame(window_days=30)`,
+  while the test's direct DB query saw all 90 days. Post-filter
+  by `frame.window.contains(posted_date)`.
+- BH.11 column-rename in `test_l2ft_exceptions.py` (`count` →
+  `Violations per Type` display name on DOM row keys).
+- Visual-count pin bump on `test_exec_dashboard_structure.py`
+  (Transaction Volume sheet 4 → 5 visuals from BH.8 sibling
+  KPI).
+- Two `App2Driver.serving()` call sites in
+  `test_html2_executives.py` missing the BG.0 `cfg=` kwarg.
+
+### Known residual failures (~30)
+
+- `test_l1_additive_pickers` (20): mix of real picker semantics +
+  Playwright timeouts, including one "target visual empty BEFORE
+  any pick" (Limit Breach) that's a real bug.
+- `test_l1_filters` bg3_drift / bg3_overdraft / bg6_todays_
+  exceptions (4): KPI `.count()` binding returns COUNT DISTINCT
+  values that disagree with the dataset's row count. Real
+  product question on intended KPI semantics.
+- `test_inv_filters` bg4 volume-anomalies (2): now unblocked by
+  the `or ()` guard but may surface a downstream issue once it
+  runs.
+- `test_l2ft_templates_dropdowns` (2), `test_l2ft_exceptions`
+  (2), `test_l2ft_additive_pickers` (1), `test_dashboard_driver`
+  (1): various.
+
+These are tracked under PLAN.md task #40 (Chase v11.22.4
+CI-green: B/C/D test-side fixes).
+
+### Phase BK unchanged
+
+The 10 deferred items from the v11.22.1 cold-read second pass
+remain in Phase BK. Nothing closes in v11.22.4.
+
 ## v11.22.3 — v11.22.1 cold-read second-pass small-fix batch + Phase BK opened
 
 The v11.22.1 cold-read (`docs/audits/v11_22_1_feedback.md`)
