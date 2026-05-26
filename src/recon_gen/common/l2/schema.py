@@ -2499,9 +2499,22 @@ today_flows AS (
                     THEN tx.amount_money ELSE 0 END) AS total_debits,
            SUM(CASE WHEN tx.amount_direction = 'Credit'
                     THEN tx.amount_money ELSE 0 END) AS total_credits,
-           SUM(CASE WHEN tx.amount_direction = 'Credit'
-                    THEN tx.amount_money
-                    ELSE -tx.amount_money END) AS net_flow,
+           -- BH.1 (2026-05-25): v5→v6 sign-convention regression fix.
+           -- Pre-BH.1 used CASE Direction='Credit' THEN amount_money
+           -- ELSE -amount_money to derive a signed net from v5's
+           -- *unsigned* amount column. v6 made amount_money already
+           -- SIGNED (Credit positive, Debit negative — see the
+           -- `transactions` table SIGN check constraint), so the
+           -- -amount_money branch over-flipped Debit rows back to
+           -- positive: net_flow became `credits + abs(debits)` =
+           -- gross magnitude, NOT signed net. Downstream `drift`
+           -- column (= closing_stored − (opening + net_flow)) inherited
+           -- the error — surfaced by BG.2's strengthened narrative-
+           -- formula assertion against an independent SUM(amount_money)
+           -- on cust-0011-snb 2026-02-24: matview drift -$46,986.60
+           -- vs correct $0.00. Plain SUM(amount_money) IS the signed
+           -- net by construction in v6.
+           SUM(tx.amount_money) AS net_flow,
            COUNT(*) AS leg_count
     FROM {p}_current_transactions tx
     WHERE tx.status <> 'Failed'
