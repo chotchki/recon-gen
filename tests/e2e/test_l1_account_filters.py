@@ -21,7 +21,6 @@ choice.
 
 from __future__ import annotations
 
-import re
 from decimal import Decimal
 
 import pytest
@@ -33,49 +32,10 @@ from tests.e2e._daily_statement_pick import (
     find_account_day_with_data,
     find_two_days_for_same_account,
 )
+from tests.e2e._kpi_parse import parse_currency_kpi as _parse_currency_kpi
 
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
-
-
-_CURRENCY_RE = re.compile(r"[^0-9.\-]")
-_DECIMAL_PART_RE = re.compile(r"\.(\d+)")
-
-
-def _parse_currency_kpi(text: str | None) -> Decimal:
-    """Parse the rendered KPI string (``"$1,234.56"``, ``"-$1,234.56"``,
-    ``"$-1,234.56"``) into a Decimal. Both renderers format with the
-    leading ``$`` + thousands commas.
-
-    **Strict ≤2 decimal-place contract** (v11.21.0 cold-read finding #14,
-    user-confirmed 2026-05-25 as a test failure shape, not a tolerated
-    edge): currency KPIs must render with 0, 1, or 2 decimal digits.
-    3+ decimals (``"308,535.982"``) is a real misread risk (cold-read:
-    two of four judges misread ``-308,535.982`` as ``-$308M``) AND
-    indicates the KPI's numeric-format is unset / wrong. Parser raises
-    on 3+ — the test trip surfaces the bug at the call site instead of
-    silently rounding away the noise.
-
-    ``None`` raises — a missing KPI is a different failure shape than a
-    parse failure."""
-    if text is None:
-        raise AssertionError("KPI value was None — visual didn't render?")
-    cleaned = _CURRENCY_RE.sub("", text)
-    if cleaned in ("", "-"):
-        raise AssertionError(f"KPI value {text!r} parses to empty after cleanup")
-    # Strict precision gate — see docstring.
-    decimal_match = _DECIMAL_PART_RE.search(cleaned)
-    if decimal_match is not None and len(decimal_match.group(1)) > 2:
-        raise AssertionError(
-            f"KPI value {text!r} renders with "
-            f"{len(decimal_match.group(1))} decimal places; currency "
-            f"KPIs must render with ≤2 decimals (v11.21.0 cold-read "
-            f"finding #14 — 3-decimal rendering creates real misread "
-            f"risk vs $-millions scale). Audit the visual's "
-            f"numerical(currency=True) wiring + the common/models.py "
-            f"format string."
-        )
-    return Decimal(cleaned)
 
 
 def _summary_sql_and_params(cfg, l2):  # type: ignore[no-untyped-def]: cfg/l2 are runtime fixture values — annotating would force imports here
