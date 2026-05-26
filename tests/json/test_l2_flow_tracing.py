@@ -39,11 +39,30 @@ from click.testing import CliRunner
 
 from recon_gen.common.l2 import default_l2_instance
 from recon_gen.apps.l2_flow_tracing.app import (
+    _CHAINS_NAME,
+    _GETTING_STARTED_NAME,
+    _GETTING_STARTED_TITLE,
+    _L2_EXCEPTIONS_NAME,
+    _RAILS_NAME,
+    _TRANSFER_TEMPLATES_NAME,
     build_l2_flow_tracing_app,
+)
+from recon_gen.apps.l2_flow_tracing.datasets import (
+    DS_CHAIN_INSTANCES,
+    DS_META_VALUES,
+    DS_POSTINGS,
+    DS_TT_INSTANCES,
+    DS_TT_LEGS,
+    DS_UNIFIED_L2_EXCEPTIONS,
 )
 from recon_gen.cli import main
 from recon_gen.cli._helpers import APPS
 from recon_gen.common.l2 import L2Instance, load_instance
+from recon_gen.common.sheets.app_info import (
+    APP_INFO_SHEET_NAME,
+    DS_APP_INFO_LIVENESS,
+    DS_APP_INFO_MATVIEWS,
+)
 from tests._test_helpers import make_test_config
 
 
@@ -108,7 +127,7 @@ def test_analysis_registered_with_deployment_aware_name() -> None:
     app = build_l2_flow_tracing_app(_CFG)
     assert app.analysis is not None
     assert _CFG.deployment_name in app.analysis.name
-    assert "L2 Flow Tracing" in app.analysis.name
+    assert _GETTING_STARTED_TITLE in app.analysis.name
 
 
 def test_dashboard_registered() -> None:
@@ -174,8 +193,8 @@ def test_six_sheets_in_display_order() -> None:
     app = build_l2_flow_tracing_app(_CFG)
     assert app.analysis is not None
     assert [s.name for s in app.analysis.sheets] == [
-        "Getting Started", "Rails", "Chains",
-        "Transfer Templates", "L2 Exceptions", "Info",
+        _GETTING_STARTED_NAME, _RAILS_NAME, _CHAINS_NAME,
+        _TRANSFER_TEMPLATES_NAME, _L2_EXCEPTIONS_NAME, APP_INFO_SHEET_NAME,
     ]
 
 
@@ -198,14 +217,14 @@ def test_dataset_count_matches_populated_sheets() -> None:
     # M.4.4.5 added 2 App Info datasets to every shipped app.
     assert len(app.datasets) == 8
     assert {d.identifier for d in app.datasets} == {
-        "l2ft-postings-ds",
-        "l2ft-meta-values-ds",
-        "l2ft-chain-instances-ds",
-        "l2ft-tt-instances-ds",
-        "l2ft-tt-legs-ds",
-        "l2ft-unified-exceptions-ds",
-        "app-info-liveness-ds",
-        "app-info-matviews-ds",
+        DS_POSTINGS,
+        DS_META_VALUES,
+        DS_CHAIN_INSTANCES,
+        DS_TT_INSTANCES,
+        DS_TT_LEGS,
+        DS_UNIFIED_L2_EXCEPTIONS,
+        DS_APP_INFO_LIVENESS,
+        DS_APP_INFO_MATVIEWS,
     }
 
 
@@ -239,8 +258,8 @@ def test_getting_started_title_is_constant_ui_vocabulary() -> None:
     pulled from L2). Per the M.2a.4 design note: titles stay
     hardcoded, subtitles + bodies pull from L2 descriptions."""
     app = build_l2_flow_tracing_app(_CFG)
-    gs = _sheet_by_name(app, "Getting Started")
-    assert "L2 Flow Tracing" in gs.text_boxes[0].content
+    gs = _sheet_by_name(app, _GETTING_STARTED_NAME)
+    assert _GETTING_STARTED_TITLE in gs.text_boxes[0].content
 
 
 # -- Placeholder sheets — substep pointers (removed when populated) ----------
@@ -359,10 +378,10 @@ def test_rails_table_sources_from_postings_dataset() -> None:
     M.3.5 declared-rails aggregate that moved to a future Docs tab)."""
     from recon_gen.common.tree import Table
     app = build_l2_flow_tracing_app(_CFG)
-    rails = _sheet_by_name(app, "Rails")
+    rails = _sheet_by_name(app, _RAILS_NAME)
     table = next(v for v in rails.visuals if isinstance(v, Table))
     table_dataset_ids = {c.column.dataset.identifier for c in table.columns}
-    assert table_dataset_ids == {"l2ft-postings-ds"}
+    assert table_dataset_ids == {DS_POSTINGS}
 
 
 def test_rails_sheet_has_seven_filter_controls() -> None:
@@ -551,12 +570,12 @@ def test_chains_sheet_is_a_single_table() -> None:
     Multi-leg Sankey visualization belongs on TransferTemplates."""
     from recon_gen.common.tree import Table
     app = build_l2_flow_tracing_app(_CFG)
-    chains = _sheet_by_name(app, "Chains")
+    chains = _sheet_by_name(app, _CHAINS_NAME)
     table_visuals = [v for v in chains.visuals if isinstance(v, Table)]
     assert len(table_visuals) == 1
     # Table reads from chain-instances, not the aggregate chains dataset.
     table = table_visuals[0]
-    assert table.columns[0].column.dataset.identifier == "l2ft-chain-instances-ds"
+    assert table.columns[0].column.dataset.identifier == DS_CHAIN_INSTANCES
 
 
 def test_chains_table_carries_completion_status_column() -> None:
@@ -680,7 +699,7 @@ def test_chains_pushdown_params_bridge_to_chain_instances_dataset() -> None:
         assert p.mapped_dataset_params is not None
         assert {
             (ds.identifier, name) for ds, name in p.mapped_dataset_params
-        } == {("l2ft-chain-instances-ds", pname)}
+        } == {(DS_CHAIN_INSTANCES, pname)}
     fg_ids = {str(fg.filter_group_id) for fg in app.analysis.filter_groups}
     assert not (fg_ids & {"fg-l2ft-chains-chain", "fg-l2ft-chains-completion"})
 
@@ -818,7 +837,7 @@ def test_tt_pushdown_params_bridge_to_both_datasets() -> None:
         assert p.mapped_dataset_params is not None
         assert {
             (ds.identifier, name) for ds, name in p.mapped_dataset_params
-        } == {("l2ft-tt-instances-ds", pname), ("l2ft-tt-legs-ds", pname)}
+        } == {(DS_TT_INSTANCES, pname), (DS_TT_LEGS, pname)}
     fg_ids = {str(fg.filter_group_id) for fg in app.analysis.filter_groups}
     assert not (fg_ids & {"fg-l2ft-tt-template", "fg-l2ft-tt-completion"})
 
@@ -1236,7 +1255,7 @@ def test_rails_pushdown_params_bridge_to_postings_dataset() -> None:
         assert p.mapped_dataset_params is not None
         assert {
             (ds.identifier, name) for ds, name in p.mapped_dataset_params
-        } == {("l2ft-postings-ds", dsname)}
+        } == {(DS_POSTINGS, dsname)}
     fg_ids = {
         str(fg.filter_group_id) for fg in app.analysis.filter_groups
     }
@@ -1280,7 +1299,7 @@ def test_meta_key_param_maps_to_postings_only() -> None:
         (ds.identifier, name) for ds, name in p_key.mapped_dataset_params
     }
     assert mapped_pairs == {
-        ("l2ft-postings-ds", "pKey"),
+        (DS_POSTINGS, "pKey"),
     }
 
 
@@ -1301,7 +1320,7 @@ def test_meta_value_param_maps_to_postings_only() -> None:
     assert p_val.mapped_dataset_params is not None
     assert len(p_val.mapped_dataset_params) == 1
     ds, name = p_val.mapped_dataset_params[0]
-    assert ds.identifier == "l2ft-postings-ds"
+    assert ds.identifier == DS_POSTINGS
     assert name == "pValues"
 
 

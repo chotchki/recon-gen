@@ -25,8 +25,34 @@ import pytest
 from click.testing import CliRunner
 
 from recon_gen.common.l2 import default_l2_instance
-from recon_gen.apps.l1_dashboard.app import build_l1_dashboard_app
+from recon_gen.apps.l1_dashboard.app import (
+    _DAILY_STATEMENT_NAME,
+    _DAILY_STATEMENT_TITLE,
+    _DRIFT_NAME,
+    _DRIFT_TIMELINES_NAME,
+    _DRIFT_TIMELINES_TITLE,
+    _DRIFT_TITLE,
+    _DRILL_RESET_SENTINEL,
+    _GETTING_STARTED_NAME,
+    _GETTING_STARTED_TITLE,
+    _LIMIT_BREACH_NAME,
+    _LIMIT_BREACH_TITLE,
+    _OVERDRAFT_NAME,
+    _OVERDRAFT_TITLE,
+    _PENDING_AGING_NAME,
+    _PENDING_AGING_TITLE,
+    _SUPERSESSION_AUDIT_NAME,
+    _SUPERSESSION_AUDIT_TITLE,
+    _TODAYS_EXCEPTIONS_NAME,
+    _TODAYS_EXCEPTIONS_TITLE,
+    _TRANSACTIONS_NAME,
+    _TRANSACTIONS_TITLE,
+    _UNBUNDLED_AGING_NAME,
+    _UNBUNDLED_AGING_TITLE,
+    build_l1_dashboard_app,
+)
 from recon_gen.cli import main
+from recon_gen.common.sheets.app_info import APP_INFO_SHEET_NAME
 from tests._test_helpers import make_test_config
 from recon_gen.common.l2 import L2Instance
 
@@ -109,11 +135,11 @@ def test_twelve_sheets_after_m445() -> None:
     assert app.analysis is not None
     sheet_names = [s.name for s in app.analysis.sheets]
     assert sheet_names == [
-        "Getting Started", "Drift", "Drift Timelines",
-        "Overdraft", "Limit Breach",
-        "Pending Aging", "Unbundled Aging", "Supersession Audit",
-        "Today's Exceptions", "Daily Statement", "Transactions",
-        "Info",  # M.4.4.5 — App Info canary, always last
+        _GETTING_STARTED_NAME, _DRIFT_NAME, _DRIFT_TIMELINES_NAME,
+        _OVERDRAFT_NAME, _LIMIT_BREACH_NAME,
+        _PENDING_AGING_NAME, _UNBUNDLED_AGING_NAME, _SUPERSESSION_AUDIT_NAME,
+        _TODAYS_EXCEPTIONS_NAME, _DAILY_STATEMENT_NAME, _TRANSACTIONS_NAME,
+        APP_INFO_SHEET_NAME,  # M.4.4.5 — App Info canary, always last
     ]
 
 
@@ -156,7 +182,7 @@ def test_getting_started_title_is_constant_ui_vocabulary() -> None:
     hardcoded, subtitles + bodies pull from L2 descriptions."""
     app = build_l1_dashboard_app(_CFG)
     gs = app.analysis.sheets[0]
-    assert "L1 Reconciliation Dashboard" in gs.text_boxes[0].content
+    assert _GETTING_STARTED_TITLE in gs.text_boxes[0].content
 
 
 # -- Drift sheet (M.2a.3) ----------------------------------------------------
@@ -167,8 +193,8 @@ def test_drift_sheet_present_after_m2a3() -> None:
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
     drift = app.analysis.sheets[1]
-    assert drift.name == "Drift"
-    assert drift.title == "Account Balance Drift"
+    assert drift.name == _DRIFT_NAME
+    assert drift.title == _DRIFT_TITLE
 
 
 def test_drift_sheet_has_four_kpis_and_two_tables() -> None:
@@ -245,8 +271,8 @@ def test_drift_timelines_sheet_present_after_m2b6() -> None:
     """M.2b.6 lands the Drift Timelines sheet — line-chart trends
     that complement the per-violation Drift table sheet."""
     app = build_l1_dashboard_app(_CFG)
-    timelines = _sheet_by_name(app, "Drift Timelines")
-    assert timelines.title == "Drift Magnitude Over Time"
+    timelines = _sheet_by_name(app, _DRIFT_TIMELINES_NAME)
+    assert timelines.title == _DRIFT_TIMELINES_TITLE
 
 
 def test_drift_timelines_has_two_kpis_and_two_line_charts() -> None:
@@ -327,8 +353,8 @@ def test_overdraft_sheet_present_after_m2a4() -> None:
     """M.2a.4 lands the Overdraft sheet — referenced by name (M.2b.6
     inserted Drift Timelines so positional index would shift)."""
     app = build_l1_dashboard_app(_CFG)
-    overdraft = _sheet_by_name(app, "Overdraft")
-    assert overdraft.title == "Internal Account Overdrafts"
+    overdraft = _sheet_by_name(app, _OVERDRAFT_NAME)
+    assert overdraft.title == _OVERDRAFT_TITLE
 
 
 def test_overdraft_sheet_has_kpi_and_table() -> None:
@@ -372,15 +398,15 @@ def test_overdraft_dataset_registered_and_targets_l1_view() -> None:
 def test_limit_breach_sheet_present_after_m2a5() -> None:
     """M.2a.5 lands the Limit Breach sheet — referenced by name."""
     app = build_l1_dashboard_app(_CFG)
-    lb = _sheet_by_name(app, "Limit Breach")
-    assert lb.title == "Outbound Transfer Limit Breaches"
+    lb = _sheet_by_name(app, _LIMIT_BREACH_NAME)
+    assert lb.title == _LIMIT_BREACH_TITLE
 
 
 def test_limit_breach_sheet_has_kpi_and_table() -> None:
     """Limit Breach sheet structure: 1 KPI (count of breach cells) +
     1 detail table that puts outbound_total + cap side-by-side."""
     app = build_l1_dashboard_app(_CFG)
-    lb = _sheet_by_name(app, "Limit Breach")
+    lb = _sheet_by_name(app, _LIMIT_BREACH_NAME)
     titles = [v.title for v in lb.visuals]
     assert titles == ["Limit Breach Cells", "Limit Breach Detail"]
 
@@ -413,15 +439,15 @@ def test_limit_breach_dataset_registered_and_targets_l1_view() -> None:
 def test_todays_exceptions_sheet_present_after_m2a6() -> None:
     """M.2a.6 lands the Today's Exceptions sheet — referenced by name."""
     app = build_l1_dashboard_app(_CFG)
-    te = _sheet_by_name(app, "Today's Exceptions")
-    assert te.title == "Today's Exceptions"
+    te = _sheet_by_name(app, _TODAYS_EXCEPTIONS_NAME)
+    assert te.title == _TODAYS_EXCEPTIONS_TITLE
 
 
 def test_todays_exceptions_sheet_has_kpi_bar_table() -> None:
     """Today's Exceptions structure: 1 KPI (count) + 1 BarChart by
     check_type + 1 detail table sorted by magnitude DESC."""
     app = build_l1_dashboard_app(_CFG)
-    te = _sheet_by_name(app, "Today's Exceptions")
+    te = _sheet_by_name(app, _TODAYS_EXCEPTIONS_NAME)
     titles = [v.title for v in te.visuals]
     assert titles == [
         "Open Exceptions",
@@ -463,17 +489,17 @@ def test_todays_exceptions_dataset_reads_matview() -> None:
 def test_transactions_sheet_present_after_m2b5() -> None:
     """M.2b.5 lands the Transactions sheet — referenced by name."""
     app = build_l1_dashboard_app(_CFG)
-    tx = _sheet_by_name(app, "Transactions")
-    assert tx.title == "Posting Ledger"
+    tx = _sheet_by_name(app, _TRANSACTIONS_NAME)
+    assert tx.title == _TRANSACTIONS_TITLE
 
 
 def test_transactions_sheet_has_single_table() -> None:
     """Transactions has 1 detail table and no KPIs — its value is
     'show me every leg + filter'."""
     app = build_l1_dashboard_app(_CFG)
-    tx = _sheet_by_name(app, "Transactions")
+    tx = _sheet_by_name(app, _TRANSACTIONS_NAME)
     titles = [v.title for v in tx.visuals]
-    assert titles == ["Posting Ledger"]
+    assert titles == [_TRANSACTIONS_TITLE]
 
 
 def test_transactions_dataset_registered_and_targets_matview() -> None:
@@ -505,22 +531,22 @@ def test_transactions_dataset_registered_and_targets_matview() -> None:
 def test_daily_statement_sheet_present_after_m2b4() -> None:
     """M.2b.4 lands the Daily Statement sheet — referenced by name."""
     app = build_l1_dashboard_app(_CFG)
-    ds = _sheet_by_name(app, "Daily Statement")
-    assert ds.title == "Per-Account Daily Statement"
+    ds = _sheet_by_name(app, _DAILY_STATEMENT_NAME)
+    assert ds.title == _DAILY_STATEMENT_TITLE
 
 
 def test_daily_statement_has_five_kpis_and_one_table() -> None:
     """Daily Statement structure: 5 KPIs side-by-side (Opening / Debits /
     Credits / Closing Stored / Drift) + 1 detail table."""
     app = build_l1_dashboard_app(_CFG)
-    ds = _sheet_by_name(app, "Daily Statement")
+    ds = _sheet_by_name(app, _DAILY_STATEMENT_NAME)
     titles = [v.title for v in ds.visuals]
     assert titles == [
         "Opening Balance",
         "Debits (signed)",
         "Credits (signed)",
         "Closing Stored",
-        "Drift",
+        "Drift",  # typing-smell: ignore[no-inline-production-constants]: visual title (drift KPI in Daily Statement sheet); shares spelling with _DRIFT_NAME (separate sheet name) but unrelated concepts — see docs/audits/be_4_phase_b_json_review.md
         "Posted Money Records",
     ]
 
@@ -538,7 +564,7 @@ def test_daily_statement_parameters_and_controls() -> None:
     assert P_L1_DS_ACCOUNT in param_names
     assert P_L1_DS_BALANCE_DATE in param_names
 
-    ds = _sheet_by_name(app, "Daily Statement")
+    ds = _sheet_by_name(app, _DAILY_STATEMENT_NAME)
     control_titles = [
         c.title for c in ds.parameter_controls
         if hasattr(c, "title")
@@ -851,7 +877,7 @@ def test_aa_c_3_e_todays_exceptions_intro_panel_lists_every_kind() -> None:
         )
     # Supersession Audit is referenced as "not a SHOULD" and pointed
     # at its own sheet — verify the cross-reference is present.
-    assert "Supersession Audit" in intro.content
+    assert _SUPERSESSION_AUDIT_NAME in intro.content
 
 
 # -- Per-sheet filter controls (M.2b.3) --------------------------------------
@@ -883,15 +909,15 @@ def test_per_sheet_filter_dropdowns() -> None:
             if hasattr(ctrl, "title")
         }
 
-    assert {"Account", "Account Role"}.issubset(_filter_titles("Drift"))
-    assert {"Account Role"}.issubset(_filter_titles("Drift Timelines"))
-    assert {"Account", "Account Role"}.issubset(_filter_titles("Overdraft"))
-    assert {"Account", "Transfer Type"}.issubset(_filter_titles("Limit Breach"))
+    assert {"Account", "Account Role"}.issubset(_filter_titles(_DRIFT_NAME))
+    assert {"Account Role"}.issubset(_filter_titles(_DRIFT_TIMELINES_NAME))
+    assert {"Account", "Account Role"}.issubset(_filter_titles(_OVERDRAFT_NAME))
+    assert {"Account", "Transfer Type"}.issubset(_filter_titles(_LIMIT_BREACH_NAME))
     assert {"Check Type", "Account", "Transfer Type"}.issubset(
-        _filter_titles("Today's Exceptions"),
+        _filter_titles(_TODAYS_EXCEPTIONS_NAME),
     )
     assert {"Account", "Transfer", "Status", "Origin", "Transfer Type"}.issubset(
-        _filter_titles("Transactions"),
+        _filter_titles(_TRANSACTIONS_NAME),
     )
 
 
@@ -1072,8 +1098,8 @@ def test_date_range_filter_targets_correct_columns() -> None:
 def test_pending_aging_sheet_present_after_m2b10() -> None:
     """M.2b.10 lands the Pending Aging sheet — referenced by name."""
     app = build_l1_dashboard_app(_CFG)
-    pa = _sheet_by_name(app, "Pending Aging")
-    assert pa.title == "Pending Transactions Aging Past Cap"
+    pa = _sheet_by_name(app, _PENDING_AGING_NAME)
+    assert pa.title == _PENDING_AGING_TITLE
 
 
 def test_pending_aging_sheet_has_kpi_bar_table() -> None:
@@ -1083,7 +1109,7 @@ def test_pending_aging_sheet_has_kpi_bar_table() -> None:
     from recon_gen.common.tree import BarChart, KPI, Table
 
     app = build_l1_dashboard_app(_CFG)
-    pa = _sheet_by_name(app, "Pending Aging")
+    pa = _sheet_by_name(app, _PENDING_AGING_NAME)
     titles = [v.title for v in pa.visuals]
     assert titles == [
         "Stuck Pending",
@@ -1159,13 +1185,13 @@ def test_pending_aging_drill_to_transactions() -> None:
     from recon_gen.common.tree import Drill
 
     app = build_l1_dashboard_app(_CFG)
-    pa = _sheet_by_name(app, "Pending Aging")
+    pa = _sheet_by_name(app, _PENDING_AGING_NAME)
     table = next(v for v in pa.visuals if v.title == "Stuck Pending Detail")
     drills = [a for a in table.actions if isinstance(a, Drill)]
     assert len(drills) == 1
     drill = drills[0]
     assert drill.trigger == "DATA_POINT_MENU"
-    assert drill.target_sheet.name == "Transactions"
+    assert drill.target_sheet.name == _TRANSACTIONS_NAME
 
 
 def test_pending_aging_dataset_registered() -> None:
@@ -1200,8 +1226,8 @@ def test_pending_aging_dataset_registered() -> None:
 def test_unbundled_aging_sheet_present_after_m2b11() -> None:
     """M.2b.11 lands the Unbundled Aging sheet — referenced by name."""
     app = build_l1_dashboard_app(_CFG)
-    ua = _sheet_by_name(app, "Unbundled Aging")
-    assert ua.title == "Unbundled Posted Legs Aging Past Cap"
+    ua = _sheet_by_name(app, _UNBUNDLED_AGING_NAME)
+    assert ua.title == _UNBUNDLED_AGING_TITLE
 
 
 def test_unbundled_aging_sheet_has_kpi_bar_table() -> None:
@@ -1211,7 +1237,7 @@ def test_unbundled_aging_sheet_has_kpi_bar_table() -> None:
     from recon_gen.common.tree import BarChart, KPI, Table
 
     app = build_l1_dashboard_app(_CFG)
-    ua = _sheet_by_name(app, "Unbundled Aging")
+    ua = _sheet_by_name(app, _UNBUNDLED_AGING_NAME)
     titles = [v.title for v in ua.visuals]
     assert titles == [
         "Stuck Unbundled",
@@ -1256,13 +1282,13 @@ def test_unbundled_aging_drill_to_transactions() -> None:
     from recon_gen.common.tree import Drill
 
     app = build_l1_dashboard_app(_CFG)
-    ua = _sheet_by_name(app, "Unbundled Aging")
+    ua = _sheet_by_name(app, _UNBUNDLED_AGING_NAME)
     table = next(v for v in ua.visuals if v.title == "Stuck Unbundled Detail")
     drills = [a for a in table.actions if isinstance(a, Drill)]
     assert len(drills) == 1
     drill = drills[0]
     assert drill.trigger == "DATA_POINT_MENU"
-    assert drill.target_sheet.name == "Transactions"
+    assert drill.target_sheet.name == _TRANSACTIONS_NAME
 
 
 def test_unbundled_aging_dataset_registered() -> None:
@@ -1296,8 +1322,8 @@ def test_unbundled_aging_dataset_registered() -> None:
 def test_supersession_audit_sheet_present_after_m2b12() -> None:
     """M.2b.12 lands the Supersession Audit sheet — referenced by name."""
     app = build_l1_dashboard_app(_CFG)
-    sa = _sheet_by_name(app, "Supersession Audit")
-    assert sa.title == "Supersession Audit Trail"
+    sa = _sheet_by_name(app, _SUPERSESSION_AUDIT_NAME)
+    assert sa.title == _SUPERSESSION_AUDIT_TITLE
 
 
 def test_supersession_audit_has_kpis_and_two_tables() -> None:
@@ -1307,7 +1333,7 @@ def test_supersession_audit_has_kpis_and_two_tables() -> None:
     from recon_gen.common.tree import KPI, Table
 
     app = build_l1_dashboard_app(_CFG)
-    sa = _sheet_by_name(app, "Supersession Audit")
+    sa = _sheet_by_name(app, _SUPERSESSION_AUDIT_NAME)
     titles = [v.title for v in sa.visuals]
     assert titles == [
         "Logical Keys with Supersession",
@@ -1368,7 +1394,7 @@ def test_supersession_audit_has_supersedes_filter() -> None:
     (Y.2.g — now a parameter-backed pushdown control). Daily-balances
     doesn't get a paired filter (low signal)."""
     app = build_l1_dashboard_app(_CFG)
-    sa = _sheet_by_name(app, "Supersession Audit")
+    sa = _sheet_by_name(app, _SUPERSESSION_AUDIT_NAME)
     titles = {
         ctrl.title
         for ctrl in (*sa.filter_controls, *sa.parameter_controls)
@@ -1395,8 +1421,8 @@ def test_drill_target_parameters_registered() -> None:
     assert P_L1_FILTER_ACCOUNT in by_name
     assert P_L1_TX_TRANSFER in by_name
     # Both default to the sentinel string.
-    assert by_name[P_L1_FILTER_ACCOUNT].default == ["__ALL__"]
-    assert by_name[P_L1_TX_TRANSFER].default == ["__ALL__"]
+    assert by_name[P_L1_FILTER_ACCOUNT].default == [_DRILL_RESET_SENTINEL]
+    assert by_name[P_L1_TX_TRANSFER].default == [_DRILL_RESET_SENTINEL]
 
 
 def test_drill_calc_fields_present() -> None:
@@ -1458,7 +1484,7 @@ def test_todays_exceptions_table_carries_two_drills() -> None:
     from recon_gen.common.tree import Drill
 
     app = build_l1_dashboard_app(_CFG)
-    te = _sheet_by_name(app, "Today's Exceptions")
+    te = _sheet_by_name(app, _TODAYS_EXCEPTIONS_NAME)
     detail = next(v for v in te.visuals if v.title == "Exception Detail")
     drills = [a for a in detail.actions if isinstance(a, Drill)]
     assert len(drills) == 2
@@ -1469,10 +1495,10 @@ def test_todays_exceptions_table_carries_two_drills() -> None:
 
     # DATA_POINT_CLICK targets Drift (back-toward source).
     click = by_trigger["DATA_POINT_CLICK"]
-    assert click.target_sheet.name == "Drift"
+    assert click.target_sheet.name == _DRIFT_NAME
     # DATA_POINT_MENU targets Daily Statement (forward).
     menu = by_trigger["DATA_POINT_MENU"]
-    assert menu.target_sheet.name == "Daily Statement"
+    assert menu.target_sheet.name == _DAILY_STATEMENT_NAME
 
 
 def test_per_invariant_sheets_drill_to_daily_statement() -> None:
@@ -1484,10 +1510,10 @@ def test_per_invariant_sheets_drill_to_daily_statement() -> None:
 
     app = build_l1_dashboard_app(_CFG)
     expected: list[tuple[str, str]] = [
-        ("Drift", "Leaf Account Drift"),
-        ("Drift", "Parent Account Drift"),
-        ("Overdraft", "Overdraft Violations"),
-        ("Limit Breach", "Limit Breach Detail"),
+        (_DRIFT_NAME, "Leaf Account Drift"),
+        (_DRIFT_NAME, "Parent Account Drift"),
+        (_OVERDRAFT_NAME, "Overdraft Violations"),
+        (_LIMIT_BREACH_NAME, "Limit Breach Detail"),
     ]
     for sheet_name, table_title in expected:
         sheet = _sheet_by_name(app, sheet_name)
@@ -1498,7 +1524,7 @@ def test_per_invariant_sheets_drill_to_daily_statement() -> None:
             f"{sheet_name}/{table_title}: expected 1 menu drill, got "
             f"{len(menu_drills)}"
         )
-        assert menu_drills[0].target_sheet.name == "Daily Statement"
+        assert menu_drills[0].target_sheet.name == _DAILY_STATEMENT_NAME
 
 
 def test_daily_statement_drills_to_transactions() -> None:
@@ -1507,13 +1533,13 @@ def test_daily_statement_drills_to_transactions() -> None:
     from recon_gen.common.tree import Drill
 
     app = build_l1_dashboard_app(_CFG)
-    ds = _sheet_by_name(app, "Daily Statement")
+    ds = _sheet_by_name(app, _DAILY_STATEMENT_NAME)
     table = next(v for v in ds.visuals if v.title == "Posted Money Records")
     drills = [a for a in table.actions if isinstance(a, Drill)]
     assert len(drills) == 1
     drill = drills[0]
     assert drill.trigger == "DATA_POINT_MENU"
-    assert drill.target_sheet.name == "Transactions"
+    assert drill.target_sheet.name == _TRANSACTIONS_NAME
 
 
 def test_drill_emission_navigation_plus_set_parameters() -> None:

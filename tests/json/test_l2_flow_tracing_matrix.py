@@ -36,12 +36,18 @@ from collections import Counter
 import pytest
 
 from recon_gen.apps.l2_flow_tracing.app import (
+    _CHAINS_NAME,
+    _GETTING_STARTED_NAME,
+    _L2_EXCEPTIONS_NAME,
+    _RAILS_NAME,
+    _TRANSFER_TEMPLATES_NAME,
     build_l2_flow_tracing_app,
 )
 from recon_gen.apps.l2_flow_tracing.datasets import (
     declared_metadata_keys,
 )
 from recon_gen.common.l2 import L2Instance, load_instance
+from recon_gen.common.sheets.app_info import APP_INFO_SHEET_NAME
 from recon_gen.common.tree import KPI, Sankey, Table
 
 # Reuse the matrix definition from the seed-contract test so every
@@ -69,8 +75,8 @@ def test_six_sheets_in_display_order(l2_instance: L2Instance) -> None:
     ("i") canary as the always-last sheet."""
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
     assert [s.name for s in app.analysis.sheets] == [
-        "Getting Started", "Rails", "Chains",
-        "Transfer Templates", "L2 Exceptions", "Info",
+        _GETTING_STARTED_NAME, _RAILS_NAME, _CHAINS_NAME,
+        _TRANSFER_TEMPLATES_NAME, _L2_EXCEPTIONS_NAME, APP_INFO_SHEET_NAME,
     ]
 
 

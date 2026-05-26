@@ -15,7 +15,13 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from recon_gen.common.cleanup import _collect_stale, _read_managed_tags
+from recon_gen.common.cleanup import (
+    DEPLOYMENT_TAG_KEY,
+    MANAGED_TAG_KEY,
+    MANAGED_TAG_VALUE,
+    _collect_stale,
+    _read_managed_tags,
+)
 
 
 # -- A minimal stub that mimics the QuickSight client surface ----------------
@@ -98,7 +104,10 @@ def test_read_managed_tags_returns_map_for_managed_resource():
         summaries_by_kind={},
     )
     tags = _read_managed_tags(client, "arn:dash:1")
-    assert tags == {"ManagedBy": "recon-gen", "Deployment": "recon-test"}
+    assert tags == {
+        MANAGED_TAG_KEY: MANAGED_TAG_VALUE,
+        DEPLOYMENT_TAG_KEY: "recon-test",
+    }
 
 
 def test_read_managed_tags_returns_none_for_unmanaged():

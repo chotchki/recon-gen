@@ -1537,9 +1537,9 @@ def test_anetwork_calc_fields_pushed_into_dataset_sql():
 
     # 1. Contract carries the three new columns.
     cols = ACCOUNT_NETWORK_CONTRACT.column_names
-    assert "is_inbound_edge" in cols
-    assert "is_outbound_edge" in cols
-    assert "counterparty_display" in cols
+    assert CF_INV_ANETWORK_IS_INBOUND_EDGE in cols
+    assert CF_INV_ANETWORK_IS_OUTBOUND_EDGE in cols
+    assert CF_INV_ANETWORK_COUNTERPARTY_DISPLAY in cols
 
     # 2. Dataset SQL has the CASE expressions referencing the anchor.
     ds = build_account_network_dataset(_TEST_CFG)
