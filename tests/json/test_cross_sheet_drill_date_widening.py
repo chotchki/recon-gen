@@ -47,16 +47,16 @@ _EXPECTED_WIDE_END = "2099-12-31T00:00:00.000Z"
 
 
 @pytest.fixture(scope="module")
-def emitted() -> Any:
+def emitted() -> dict[str, Any]:
     cfg = make_test_config()
     app = build_l1_dashboard_app(cfg)
     return app.emit_analysis().to_aws_json()
 
 
-def _drills_into_transactions(emitted: Any) -> list[tuple[str, str, dict]]:
+def _drills_into_transactions(emitted: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:
     """Yield ``(source_sheet_id, source_visual_id, drill_action_dict)`` for
     every drill whose target sheet is the Transactions sheet."""
-    out: list[tuple[str, str, dict]] = []
+    out: list[tuple[str, str, dict[str, Any]]] = []
     for sheet in emitted.get("Definition", {}).get("Sheets", []):
         sheet_id = sheet.get("SheetId", "<unknown>")
         if sheet_id == _TRANSACTIONS_SHEET_ID:
@@ -79,7 +79,7 @@ def _drills_into_transactions(emitted: Any) -> list[tuple[str, str, dict]]:
     return out
 
 
-def _find_target_sheet(action: dict) -> str | None:
+def _find_target_sheet(action: dict[str, Any]) -> str | None:
     """Return the action's NavigationOperation target sheet id, or None
     if the action isn't a navigation drill."""
     for op in action.get("ActionOperations") or []:
@@ -91,7 +91,7 @@ def _find_target_sheet(action: dict) -> str | None:
     return None
 
 
-def _written_param_values(action: dict) -> dict[str, str]:
+def _written_param_values(action: dict[str, Any]) -> dict[str, str]:
     """Return ``{param_name: static_string_value}`` for every parameter
     write on the action that uses CustomValues (DateTimeValues or
     StringValues). SourceField writes are excluded — they don't carry a
@@ -113,7 +113,7 @@ def _written_param_values(action: dict) -> dict[str, str]:
     return out
 
 
-def test_drills_into_transactions_widen_date_range(emitted: Any) -> None:
+def test_drills_into_transactions_widen_date_range(emitted: dict[str, Any]) -> None:
     """Every cross-sheet drill into the Transactions sheet must write
     the wide-window date-range params so the target row survives the
     destination's universal date filter."""
@@ -148,7 +148,7 @@ def test_drills_into_transactions_widen_date_range(emitted: Any) -> None:
 
 
 def test_drills_into_transactions_count_matches_known_sites(
-    emitted: Any,
+    emitted: dict[str, Any],
 ) -> None:
     """Sanity check: there should be exactly 3 cross-sheet drills into
     Transactions (Pending Aging / Unbundled Aging / Supersession Audit

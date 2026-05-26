@@ -94,7 +94,7 @@ class TestCaptureWithStateUrlConstruction:
     """
 
     @pytest.fixture(autouse=True)
-    def _require_playwright(self):
+    def _require_playwright(self) -> None:
         pytest.importorskip("playwright")
 
     def test_url_fragment_built_from_parameter_object_refs(self, tmp_path):
