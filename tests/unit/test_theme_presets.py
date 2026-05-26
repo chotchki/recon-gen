@@ -13,6 +13,7 @@ import pytest
 from recon_gen.common.theme import (
     DEFAULT_PRESET,
     ThemePreset,
+    _DARK_BLUE,
     build_theme,
 )
 from tests._test_helpers import make_test_config
@@ -30,7 +31,7 @@ class TestDefaultPreset:
         assert DEFAULT_PRESET.analysis_name_prefix is None
 
     def test_accent_is_blue(self):
-        assert DEFAULT_PRESET.accent == "#2E5090"
+        assert DEFAULT_PRESET.accent == _DARK_BLUE
 
     def test_eight_data_colors(self):
         assert len(DEFAULT_PRESET.data_colors) == 8

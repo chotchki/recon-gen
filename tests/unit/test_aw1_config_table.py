@@ -45,6 +45,7 @@ from recon_gen.common.l2.config_table import (
 )
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.sql import Dialect
 
 _PREFIX = "spec_example"
@@ -88,7 +89,7 @@ def _fresh_db_with_full_schema() -> sqlite3.Connection:
 def test_config_table_name_follows_kv_suffix_convention() -> None:
     """BC.12 renamed from ``<prefix>_config`` → ``<prefix>_config_kv``
     so the suffix announces the shape change."""
-    assert config_table_name("spec_example") == "spec_example_config_kv"
+    assert config_table_name(DEFAULT_PREFIX) == f"{DEFAULT_PREFIX}_config_kv"
     assert config_table_name("recon_prod") == "recon_prod_config_kv"
 
 

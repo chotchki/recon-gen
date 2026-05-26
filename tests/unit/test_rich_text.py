@@ -11,6 +11,7 @@ handles paragraph + line breaks AND inline ``[text](url)`` links.
 from __future__ import annotations
 
 from recon_gen.common import rich_text as rt
+from recon_gen.common.rich_text import BR
 
 
 class TestBody:
@@ -182,7 +183,7 @@ class TestBullets:
         with _w.catch_warnings(record=True) as caught:
             _w.simplefilter("always")
             out = rt.bullets(["line one\nline two"])
-        assert "<br/>" not in out
+        assert BR not in out
         assert "line one line two" in out
         assert caught == []
 
@@ -194,7 +195,7 @@ class TestBullets:
         with _w.catch_warnings(record=True) as caught:
             _w.simplefilter("always")
             out = rt.bullets(["para one\n\npara two"])
-        assert "<br/>" not in out
+        assert BR not in out
         assert "para one" in out and "para two" in out
         assert len(caught) == 1
 
@@ -222,7 +223,7 @@ class TestBullets:
             _w.simplefilter("ignore")
             out = rt.bullets(["see [docs](https://x.com)\nfor details"])
         assert '<a href="https://x.com" target="_self">docs</a>' in out
-        assert "<br/>" not in out
+        assert BR not in out
 
     def test_bullets_one_warning_per_offending_item(self) -> None:
         # If multiple items contain a \n\n paragraph break (which
@@ -271,7 +272,7 @@ class TestMarkdownInline:
             "[link](https://x.com)\nthen text",
             "\n\nleading\n\nbody\n\ntrailing\n\n",
         ]:
-            assert "<br/>" not in rt.markdown_inline(inp), inp
+            assert BR not in rt.markdown_inline(inp), inp
 
     def test_pure_spaces_preserved(self) -> None:
         # Authored intra-line spacing survives — only newline-bearing
@@ -353,7 +354,7 @@ class TestMarkdownEmphasisAndBullets:
         assert out.endswith("</ul>")
         assert out.count("<ul>") == 1
         assert out.count('<li class="ql-indent-0">') == 3
-        assert "<br/>" not in out
+        assert BR not in out
 
     def test_bold_inside_bullet(self) -> None:
         out = rt.markdown("- **Drift.** the sub-ledger drifted")
@@ -379,7 +380,7 @@ class TestMarkdownEmphasisAndBullets:
         # introduce <ul>/<br/> even when the source looks list-shaped.
         out = rt.markdown_inline("- a\n- b")
         assert "<ul>" not in out
-        assert "<br/>" not in out
+        assert BR not in out
 
     def test_blockquote_renders_italic(self) -> None:
         # QS has no <blockquote>; the L1 invariant panels' "> SHOULD"

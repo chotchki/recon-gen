@@ -36,7 +36,13 @@ from recon_gen.common.html import (
     ParameterMultiSelectSpec,
     ParameterNumberSpec,
 )
-from recon_gen.common.html.render import emit_dashboards_list, emit_html
+from recon_gen.common.html.render import (
+    _D3_SANKEY_SRC,
+    _D3_SRC,
+    _HTMX_SRC,
+    emit_dashboards_list,
+    emit_html,
+)
 from recon_gen.common.ids import SheetId, VisualId
 from recon_gen.common.tree.structure import Analysis, App, Sheet
 from recon_gen.common.tree.visuals import KPI
@@ -107,9 +113,9 @@ def test_existing_runtime_libs_still_present() -> None:
     """htmx / d3 / d3-sankey are in the vendor-JS block too (X.2.p:
     served from /static/vendor/, not a CDN — must not drop any)."""
     for shell in _shells():
-        assert "/static/vendor/js/htmx.min.js" in shell
-        assert "/static/vendor/js/d3.min.js" in shell
-        assert "/static/vendor/js/d3-sankey.min.js" in shell
+        assert _HTMX_SRC in shell
+        assert _D3_SRC in shell
+        assert _D3_SANKEY_SRC in shell
 
 
 def test_vendor_css_before_theme_style_before_vendor_js() -> None:

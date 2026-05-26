@@ -19,6 +19,7 @@ from recon_gen.common.spine import (
     RuleViolation,
     lock_to_json,
 )
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.sql import Dialect
 
 
@@ -42,14 +43,14 @@ def _v_audit(name: str, **identity: object) -> AuditFixture:
 def test_empty_lock_renders_top_level_shape() -> None:
     out = lock_to_json(
         {},
-        instance="spec_example",
+        instance=DEFAULT_PREFIX,
         dialect=Dialect.SQLITE,
         canonical_anchor=date(2030, 1, 1),
     )
     parsed = json.loads(out)
     assert set(parsed.keys()) == {"_comment", "scenario_fingerprint", "violations"}
     assert parsed["scenario_fingerprint"] == {
-        "instance": "spec_example",
+        "instance": DEFAULT_PREFIX,
         "dialect": "sqlite",
         "canonical_anchor": "2030-01-01",
         "schema_version": 1,

@@ -33,6 +33,7 @@ from recon_gen.common.l2.topology import (
     TopologyNode,
     topology_graph_for,
 )
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 
 
 FIXTURES = Path(__file__).parent.parent / "l2"
@@ -441,7 +442,7 @@ def test_topology_graph_for_spec_example_smoke() -> None:
     inst = load_instance(FIXTURES / "spec_example.yaml")
     g = topology_graph_for(inst, db_table_prefix="spec_example")
     # Carries the instance name for page titles + JSON output.
-    assert g.instance_name == "spec_example"
+    assert g.instance_name == DEFAULT_PREFIX
     role_labels = {n.label for n in g.nodes if n.kind == "role"}
     assert "ClearingSuspense" in role_labels
     assert "ExternalCounterparty" in role_labels

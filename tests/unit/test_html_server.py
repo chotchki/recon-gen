@@ -39,6 +39,7 @@ from recon_gen.common.html import (
     ParameterMultiSelectSpec,
     ParameterNumberSpec,
 )
+from recon_gen.common.html.render import _D3_SANKEY_SRC, _D3_SRC, _HTMX_SRC
 from recon_gen.common.html.server import ServedDashboard, make_app
 from recon_gen.common.ids import SheetId, VisualId
 from recon_gen.common.tree.structure import Analysis, App, Sheet
@@ -126,9 +127,9 @@ def test_get_dashboard_returns_full_sheet_html() -> None:
     resp = client.get(_DASHBOARD_PATH)
     assert resp.status_code == 200
     body = resp.text
-    assert "/static/vendor/js/htmx.min.js" in body
-    assert "/static/vendor/js/d3.min.js" in body
-    assert "/static/vendor/js/d3-sankey.min.js" in body
+    assert _HTMX_SRC in body
+    assert _D3_SRC in body
+    assert _D3_SANKEY_SRC in body
     assert 'id="filter-form"' in body
     assert 'name="date_from"' in body
     assert 'name="date_to"' in body

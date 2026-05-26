@@ -52,6 +52,11 @@ from recon_gen.common.models import (
     Visual,
     VisualTitleLabelOptions,
 )
+from recon_gen.common.cleanup import (
+    DEPLOYMENT_TAG_KEY,
+    MANAGED_TAG_KEY,
+    MANAGED_TAG_VALUE,
+)
 from recon_gen.common.config import Config
 from tests._test_helpers import make_test_config
 from recon_gen.common.datasource import build_datasource
@@ -339,10 +344,10 @@ class TestTagSerialization:
             Name="T",
             BaseThemeId="CLASSIC",
             Configuration=ThemeConfiguration(),
-            Tags=[Tag(Key="ManagedBy", Value="recon-gen")],
+            Tags=[Tag(Key=MANAGED_TAG_KEY, Value=MANAGED_TAG_VALUE)],
         )
         out = theme.to_aws_json()
-        assert out["Tags"] == [{"Key": "ManagedBy", "Value": "recon-gen"}]
+        assert out["Tags"] == [{"Key": MANAGED_TAG_KEY, "Value": MANAGED_TAG_VALUE}]
 
     def test_tag_in_dataset(self):
         ds = DataSet(
@@ -350,11 +355,14 @@ class TestTagSerialization:
             DataSetId="ds-1",
             Name="Test",
             PhysicalTableMap={},
-            Tags=[Tag(Key="ManagedBy", Value="recon-gen"), Tag(Key="Env", Value="dev")],
+            Tags=[
+                Tag(Key=MANAGED_TAG_KEY, Value=MANAGED_TAG_VALUE),
+                Tag(Key="Env", Value="dev"),
+            ],
         )
         out = ds.to_aws_json()
         assert len(out["Tags"]) == 2
-        assert out["Tags"][0] == {"Key": "ManagedBy", "Value": "recon-gen"}
+        assert out["Tags"][0] == {"Key": MANAGED_TAG_KEY, "Value": MANAGED_TAG_VALUE}
         assert out["Tags"][1] == {"Key": "Env", "Value": "dev"}
 
     def test_tag_in_analysis(self):
@@ -367,10 +375,10 @@ class TestTagSerialization:
                     DataSetIdentifierDeclaration(Identifier="ds", DataSetArn="arn:x")
                 ],
             ),
-            Tags=[Tag(Key="ManagedBy", Value="recon-gen")],
+            Tags=[Tag(Key=MANAGED_TAG_KEY, Value=MANAGED_TAG_VALUE)],
         )
         out = analysis.to_aws_json()
-        assert out["Tags"] == [{"Key": "ManagedBy", "Value": "recon-gen"}]
+        assert out["Tags"] == [{"Key": MANAGED_TAG_KEY, "Value": MANAGED_TAG_VALUE}]
 
     def test_no_tags_stripped(self):
         ds = DataSet(
@@ -392,8 +400,8 @@ class TestConfigTags:
         cfg = make_test_config()
         tags_by_key = {t.Key: t.Value for t in cfg.tags()}
         assert tags_by_key == {
-            "ManagedBy": "recon-gen",
-            "Deployment": "recon-test",
+            MANAGED_TAG_KEY: MANAGED_TAG_VALUE,
+            DEPLOYMENT_TAG_KEY: "recon-test",
         }
 
     def test_extra_tags_merged(self):
@@ -404,22 +412,22 @@ class TestConfigTags:
         # ManagedBy + Deployment (always emitted) + Environment + Team
         assert len(tags) == 4
         keys = [t.Key for t in tags]
-        assert "ManagedBy" in keys
-        assert "Deployment" in keys
+        assert MANAGED_TAG_KEY in keys
+        assert DEPLOYMENT_TAG_KEY in keys
         assert "Environment" in keys
         assert "Team" in keys
 
     def test_common_tag_always_first(self):
         cfg = make_test_config(extra_tags={"Foo": "bar"})
         tags = cfg.tags()
-        assert tags[0].Key == "ManagedBy"
+        assert tags[0].Key == MANAGED_TAG_KEY
 
     def test_deployment_tag_carries_cfg_value(self):
         """Z.C — Deployment tag value mirrors cfg.deployment_name so
         cleanup's per-deploy filter has something to match against."""
         cfg = make_test_config(deployment_name="qs-ci-12345-pg")
         tags_by_key = {t.Key: t.Value for t in cfg.tags()}
-        assert tags_by_key["Deployment"] == "qs-ci-12345-pg"
+        assert tags_by_key[DEPLOYMENT_TAG_KEY] == "qs-ci-12345-pg"
 
 
 class TestConfigPrefixed:
@@ -509,10 +517,10 @@ class TestDataSourceSerialization:
                     Host="h", Port=5432, Database="db",
                 ),
             ),
-            Tags=[Tag(Key="ManagedBy", Value="recon-gen")],
+            Tags=[Tag(Key=MANAGED_TAG_KEY, Value=MANAGED_TAG_VALUE)],
         )
         out = ds.to_aws_json()
-        assert out["Tags"] == [{"Key": "ManagedBy", "Value": "recon-gen"}]
+        assert out["Tags"] == [{"Key": MANAGED_TAG_KEY, "Value": MANAGED_TAG_VALUE}]
 
 
 # ---------------------------------------------------------------------------
@@ -544,7 +552,7 @@ class TestBuildDatasource:
     def test_has_managed_by_tag(self):
         ds = build_datasource(_DEMO_CFG)
         tag_keys = {t.Key for t in ds.Tags}
-        assert "ManagedBy" in tag_keys
+        assert MANAGED_TAG_KEY in tag_keys
 
     def test_has_permissions_when_principal_set(self):
         ds = build_datasource(_DEMO_CFG)
