@@ -1427,6 +1427,143 @@ class NoRawTemporalArgsCheck(Check):
 
 
 # ---------------------------------------------------------------------------
+# Check: no-test-src-sql-duplication  (BE.1, approach 1 of BE.0 spike)
+# ---------------------------------------------------------------------------
+
+
+def _sql_fingerprint(s: str) -> str:
+    """Normalize a string literal for cross-file duplication matching.
+
+    Whitespace-collapse + strip + lowercase. Tests routinely re-indent
+    the same SQL when copy-paste lands inside a fixture function;
+    normalization makes the fingerprint robust to layout differences
+    without giving up the "byte-equivalent contents" guarantee.
+    """
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
+# SQL-shape filter: only flag string literals that look like SQL,
+# not arbitrary long strings (docstrings, error messages, ASCII-art).
+# Same filter the BE.0 spike used to land its 0-hit baseline at
+# threshold 100 — without this, every long module docstring would
+# trip. The regex is intentionally broad: any one of these tokens
+# is enough signal that the literal carries SQL semantics worth
+# guarding for drift. Case-insensitive.
+_SQL_SHAPE_RE = re.compile(
+    r"\b("
+    r"SELECT|FROM|WHERE|INSERT\s+INTO|UPDATE\s+\w+\s+SET"
+    r"|CREATE\s+(TABLE|VIEW|MATERIALIZED\s+VIEW|INDEX)"
+    r"|DROP\s+(TABLE|VIEW|MATERIALIZED\s+VIEW|INDEX)"
+    r"|JOIN|GROUP\s+BY|ORDER\s+BY|HAVING|UNION"
+    r"|<<\$p"  # QS dataset parameter placeholder
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_sql(value: str) -> bool:
+    """True iff ``value`` contains at least one SQL-shape token.
+
+    The BE.1 lint scope is "long SQL copied across src/ ↔ tests/" —
+    arbitrary long strings (e.g. module docstrings, error message
+    templates, ASCII-art help text) aren't in scope. Skipping
+    everything that doesn't smell like SQL keeps the rule tight and
+    avoids the docstring-FP class.
+    """
+    return bool(_SQL_SHAPE_RE.search(value))
+
+
+@dataclass
+class NoTestSrcSqlDuplicationCheck(Check):
+    """BE.1, approach 1 of BE.0's spike — flag string literals in
+    ``tests/`` that ALSO appear verbatim (mod whitespace) in
+    ``src/recon_gen/``. Catches the "test inlines a long SQL that
+    drifted from production" regression class.
+
+    Threshold ``min_length`` defaults to 100 chars (the spike's 0-hit
+    baseline). Cuts later (BE.4) lower it to 50 once the sweep
+    migrates the 5 known 50-90-char hits.
+
+    Implementation: lazily build a src-side index (fingerprint →
+    location) on first ``find_smells`` call, then per-test-file walk
+    the AST for matching literals.
+
+    Allowlist via the existing sibling-comment convention:
+    ``# typing-smell: ignore[no-test-src-sql-duplication]: <why>``.
+    Always require a WHY — the lint exists to catch drift, an
+    allowlisted dup needs justification for why the contract is
+    deliberately decoupled.
+    """
+    min_length: int = 100
+    src_root: Path = field(default_factory=lambda: REPO_ROOT / "src/recon_gen")
+    # Lazily-populated cache: fingerprint → list of (src_file, lineno).
+    # Cleared between `_build_checks()` invocations because the Check
+    # is reconstructed each call; intentional — pytest sessions are
+    # short-lived enough that a fresh index per run is cheap.
+    _src_index: dict[str, tuple[Path, int]] = field(
+        default_factory=dict, init=False, repr=False,
+    )
+
+    def _build_src_index(self) -> None:
+        if self._src_index:
+            return
+        for p in sorted(self.src_root.rglob("*.py")):
+            try:
+                tree = ast.parse(p.read_text(encoding="utf-8"))
+            except (SyntaxError, UnicodeDecodeError):
+                continue
+            for node in ast.walk(tree):
+                if not (
+                    isinstance(node, ast.Constant)
+                    and isinstance(node.value, str)
+                ):
+                    continue
+                if len(node.value) < self.min_length:
+                    continue
+                if not _looks_like_sql(node.value):
+                    continue
+                fp = _sql_fingerprint(node.value)
+                # Only record the FIRST occurrence — the message names
+                # one site to migrate from, so a second site is just
+                # noise. Duplications within src/ itself are a separate
+                # concern (would be caught by a future BE.X dedup-
+                # within-src lint).
+                self._src_index.setdefault(fp, (p, node.lineno))
+
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        self._build_src_index()
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+            ):
+                continue
+            if len(node.value) < self.min_length:
+                continue
+            if not _looks_like_sql(node.value):
+                continue
+            fp = _sql_fingerprint(node.value)
+            hit = self._src_index.get(fp)
+            if hit is None:
+                continue
+            src_file, src_lineno = hit
+            rel_src = src_file.relative_to(REPO_ROOT)
+            yield Smell(
+                file=file,
+                lineno=node.lineno,
+                checker="no-test-src-sql-duplication",
+                message=(
+                    f"string literal (≥{self.min_length} chars, whitespace-"
+                    f"normalized) also appears in {rel_src}:{src_lineno} — "
+                    f"import from src/ instead of copying; if the test must "
+                    f"hold its own contract independent of src/, suppress "
+                    f"with ``# typing-smell: ignore[no-test-src-sql-"
+                    f"duplication]: <why>``"
+                ),
+            )
+
+
+# ---------------------------------------------------------------------------
 # Suppression filtering
 # ---------------------------------------------------------------------------
 
@@ -1560,6 +1697,16 @@ def _build_checks() -> list[Check]:
     # Keep _raw_temporal_scope referenced so the linter doesn't complain
     # about an unused local while the check is staged disabled.
     _ = _raw_temporal_scope
+    # BE.1 — no-test-src-sql-duplication: every ``tests/`` .py file
+    # EXCEPT the planted-fixture directory (which deliberately holds
+    # the planted duplicate that the smoke test invokes the visitor
+    # against directly). Per BE.0 D8: the fixtures sit OUTSIDE the
+    # lint's normal scope so they don't self-trip the rule.
+    fixtures_dir = REPO_ROOT / "tests/unit/_fixtures"
+    no_test_src_sql_dup_scope = [
+        p for p in _expand_paths([REPO_ROOT / "tests"])
+        if fixtures_dir not in p.parents
+    ]
     return [
         BareStrIdCheck(
             name="bare-str-id",
@@ -1766,6 +1913,23 @@ def _build_checks() -> list[Check]:
             ),
             files=_naked_interval_scope,
         ),
+        NoTestSrcSqlDuplicationCheck(
+            name="no-test-src-sql-duplication",
+            description=(
+                "string literal in ``tests/`` (whitespace-normalized, "
+                "≥100 chars) that also appears in ``src/recon_gen/`` — "
+                "the test should import the constant from src/ instead "
+                "of copying. Catches the BE-class regression: production "
+                "SQL drifts but the test's copy doesn't, so the test "
+                "keeps passing against a stale contract. Allowlist via "
+                "``# typing-smell: ignore[no-test-src-sql-duplication]: "
+                "<why>`` when the test deliberately holds a contract "
+                "independent of src/ (rare). BE.0 spike measured the "
+                "current corpus at 0 hits — this lint locks that "
+                "baseline as a future-drift guard."
+            ),
+            files=no_test_src_sql_dup_scope,
+        ),
         # BC.1, D8 — STAGED DISABLED until end of BC.5. To enable: drop
         # the ``# `` comment from the registration below. Enabling it
         # before the BC.4/BC.5 migration completes will red the whole
@@ -1818,3 +1982,72 @@ def test_no_typing_smells() -> None:
         rel = s.file.relative_to(REPO_ROOT)
         lines.append(f"  {rel}:{s.lineno} [{s.checker}] {s.message}")
     pytest.fail("\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# Planted-fixture smoke tests (BE.0 D8)
+# ---------------------------------------------------------------------------
+#
+# Each lint that's intended to land at 0 hits in the real corpus
+# (BE.1, the future BE.2, etc.) needs a positive smoke test against a
+# planted-violation fixture. Without it, a regex breakage, AST-walker
+# traversal bug, or indexing-loop bug could silently flip the lint
+# from "catches drift" to "always-empty" and we'd never know.
+#
+# Pattern: physical fixture files under ``tests/unit/_fixtures/`` that
+# are EXCLUDED from the lint's normal ``check.files`` scope (via the
+# ``fixtures_dir`` filter in ``_build_checks``). The smoke test then
+# invokes the visitor directly on the fixture content + asserts the
+# expected hit count. Both directions of the contract — the lint
+# scope excludes fixtures (so a real run is unaffected); the smoke
+# test invokes directly (so a regression flips the smoke red).
+
+
+def test_be_1_no_test_src_sql_duplication_finds_planted_dup() -> None:
+    """BE.0 D8 smoke test for ``no-test-src-sql-duplication``.
+
+    Construct the check pointed at ``tests/unit/_fixtures/`` as both
+    the src-side index source AND the file to walk; assert it finds
+    exactly the planted duplicate.
+
+    If this regresses (visitor stops walking, fingerprint normalizer
+    drifts, src-index lookup breaks), the smoke goes red even when
+    the real-corpus lint reports 0 (which it always should — that's
+    the point of the planted-fixture invariant).
+    """
+    fixtures_dir = REPO_ROOT / "tests/unit/_fixtures"
+    test_fixture = fixtures_dir / "be_1_planted_test.py"
+    src_fixture = fixtures_dir / "be_1_planted_src.py"
+    assert test_fixture.exists(), (
+        f"BE.1 smoke fixture missing: {test_fixture} — re-create per "
+        f"BE.0 D8's planted-fixture contract"
+    )
+    assert src_fixture.exists(), (
+        f"BE.1 smoke fixture missing: {src_fixture}"
+    )
+
+    check = NoTestSrcSqlDuplicationCheck(
+        name="no-test-src-sql-duplication",
+        description="smoke-test instance",
+        files=[test_fixture],
+        # Point the src-side index at the fixtures dir so the planted
+        # _src.py file's PLANTED_SRC_SQL literal is indexed and the
+        # planted _test.py file's identical literal trips the rule.
+        src_root=fixtures_dir,
+    )
+    src = test_fixture.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    smells = list(check.find_smells(src, tree, test_fixture))
+
+    assert len(smells) == 1, (
+        f"BE.1 smoke expected exactly 1 hit on the planted fixture; "
+        f"got {len(smells)}: {smells!r}. Either the visitor stopped "
+        f"walking, the fingerprint normalizer drifted, or the src "
+        f"index lookup broke."
+    )
+    smell = smells[0]
+    assert smell.checker == "no-test-src-sql-duplication"
+    assert "be_1_planted_src.py" in smell.message, (
+        f"BE.1 smoke: expected the message to name the src-side "
+        f"fixture, got {smell.message!r}"
+    )
