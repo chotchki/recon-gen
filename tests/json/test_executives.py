@@ -109,11 +109,12 @@ def test_every_sheet_has_a_description(exec_analysis):
 # ---------------------------------------------------------------------------
 
 def test_datasets_in_expected_order():
-    """4 content datasets (Y.2.h split account into base + active;
-    AO.5 added daily rollup for the avg-daily KPI denominator) + 2
-    M.4.4.5 App Info datasets, in order."""
+    """5 content datasets (BH.8 follow-up added the transaction-legs
+    per-leg / all-status counter for the sibling KPI; Y.2.h split
+    account into base + active; AO.5 added daily rollup) + 2 M.4.4.5
+    App Info datasets, in order."""
     datasets = build_all_datasets(_TEST_CFG)
-    assert len(datasets) == 6
+    assert len(datasets) == 7
     assert datasets[0].DataSetId == _TEST_CFG.prefixed(
         "exec-transaction-summary-dataset",
     )
@@ -121,25 +122,30 @@ def test_datasets_in_expected_order():
         "exec-transaction-daily-dataset",
     )
     assert datasets[2].DataSetId == _TEST_CFG.prefixed(
-        "exec-account-summary-dataset",
+        "exec-transaction-legs-dataset",
     )
     assert datasets[3].DataSetId == _TEST_CFG.prefixed(
-        "exec-account-summary-active-dataset",
+        "exec-account-summary-dataset",
     )
     assert datasets[4].DataSetId == _TEST_CFG.prefixed(
-        "exec-app-info-liveness-dataset",
+        "exec-account-summary-active-dataset",
     )
     assert datasets[5].DataSetId == _TEST_CFG.prefixed(
+        "exec-app-info-liveness-dataset",
+    )
+    assert datasets[6].DataSetId == _TEST_CFG.prefixed(
         "exec-app-info-matviews-dataset",
     )
 
 
 def test_datasets_declared_in_analysis(exec_analysis):
-    """4 content datasets (Y.2.h split account into base + active;
-    AO.5 added daily rollup) + the 2 M.4.4.5 App Info datasets."""
+    """5 content datasets (BH.8 added transaction-legs; Y.2.h split
+    account into base + active; AO.5 added daily rollup) + the 2
+    M.4.4.5 App Info datasets."""
     from recon_gen.apps.executives.datasets import (
         DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
         DS_EXEC_TRANSACTION_DAILY,
+        DS_EXEC_TRANSACTION_LEGS,
     )
     from recon_gen.common.sheets.app_info import (
         DS_APP_INFO_LIVENESS, DS_APP_INFO_MATVIEWS,
@@ -149,6 +155,7 @@ def test_datasets_declared_in_analysis(exec_analysis):
     assert [d.Identifier for d in decls] == [
         DS_EXEC_TRANSACTION_SUMMARY,
         DS_EXEC_TRANSACTION_DAILY,
+        DS_EXEC_TRANSACTION_LEGS,
         DS_EXEC_ACCOUNT_SUMMARY,
         DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
         DS_APP_INFO_LIVENESS,
@@ -203,21 +210,34 @@ def test_account_summary_sql_left_joins_activity():
     NULL, activity_count 0) — the active-only filter narrows the KPI
     while the open-side counts every row."""
     datasets = build_all_datasets(_TEST_CFG)
-    # AO.5 shifted the account_summary dataset to index 2 (after the
-    # new transaction-daily rollup at index 1).
-    acct_ds = datasets[2]
+    # BH.8 follow-up shifted account_summary to index 3 (after the
+    # transaction-legs dataset at index 2; transaction-daily is index 1).
+    acct_ds = datasets[3]
     sql = next(iter(acct_ds.PhysicalTableMap.values())).CustomSql.SqlQuery
     assert "LEFT JOIN activity" in sql
 
 
 def test_both_content_datasets_filter_to_status_posted():
     """Failed legs were recorded but didn't move money — including them
-    pollutes executive trends with operational noise. Scoped to the 4
-    content datasets (Y.2.h split account base + active; AO.5 added
-    daily rollup) — the M.4.4.5 App Info datasets read schema/matview
-    metadata and don't carry a status column."""
-    content = build_all_datasets(_TEST_CFG)[:4]
-    for ds in content:
+    pollutes executive trends with operational noise. Scoped to the
+    transaction-summary + transaction-daily + 2 account-summary content
+    datasets — **the BH.8 transaction-legs dataset deliberately does
+    NOT filter** (its whole purpose is to surface the per-leg /
+    all-status count matching App Info's row_count). M.4.4.5 App Info
+    datasets read schema/matview metadata + don't carry a status
+    column either."""
+    from recon_gen.apps.executives.datasets import DS_EXEC_TRANSACTION_LEGS
+
+    skip_ids = {
+        _TEST_CFG.prefixed("exec-app-info-liveness-dataset"),
+        _TEST_CFG.prefixed("exec-app-info-matviews-dataset"),
+        # BH.8 — transaction-legs deliberately skips the Posted filter
+        # so its count matches App Info's per-leg / all-status row_count.
+        _TEST_CFG.prefixed("exec-transaction-legs-dataset"),
+    }
+    for ds in build_all_datasets(_TEST_CFG):
+        if ds.DataSetId in skip_ids:
+            continue
         sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
         assert "status = 'Posted'" in sql, (
             f"{ds.DataSetId} must filter status='Posted'"
@@ -293,6 +313,8 @@ def test_transaction_volume_visuals(exec_analysis):
     )
     expected = {
         "exec-txn-kpi-total",
+        # BH.8 follow-up — sibling KPI added 2026-05-26.
+        "exec-txn-kpi-legs",
         "exec-txn-kpi-avg-daily",
         "exec-txn-bar-daily-stacked",
         "exec-txn-bar-by-type",

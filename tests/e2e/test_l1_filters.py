@@ -312,10 +312,13 @@ def test_bg6_todays_exceptions_kpi_matches_dataset_count(
 
 
 def test_bg3_overdraft_kpi_matches_matview_count(l1_dashboard_driver, cfg, l2):
-    """BG.3 — Internal Accounts in Overdraft KPI count must equal the
+    """BG.3 — "Accounts in Overdraft" KPI count must equal the
     Overdraft dataset's row count under default binds (no filter
     picked). Direct catch for v11.21.0 cold-read finding #12 (KPI=0
-    while the table directly below is fully populated).
+    while the table directly below is fully populated). v11.22.1
+    cold-read finding #14 dropped the "Internal" qualifier — the
+    matview surfaces every internal-scope account incl. customer
+    DDAs (cardholder cust-*), not just pool/sweep.
 
     The KPI binds ``ds_overdraft["account_id"].count()``; the table
     binds the same dataset. The dataset's WHERE narrows on
@@ -333,9 +336,9 @@ def test_bg3_overdraft_kpi_matches_matview_count(l1_dashboard_driver, cfg, l2):
         build_overdraft_dataset, cfg, l2,
     )
     rows = driver.query_db(sql, dataset_parameters=dataset_parameters)
-    rendered = parse_int_kpi(driver.kpi_value("Internal Accounts in Overdraft"))
+    rendered = parse_int_kpi(driver.kpi_value("Accounts in Overdraft"))
     assert rendered == len(rows), (
-        f"Internal Accounts in Overdraft: rendered {rendered} ≠ "
+        f"Accounts in Overdraft: rendered {rendered} ≠ "
         f"len(query_db(overdraft_sql)) = {len(rows)}. v11.21.0 cold-"
         f"read finding #12 — KPI's COUNT binding disagrees with the "
         f"row count of the dataset the table on the same sheet binds. "

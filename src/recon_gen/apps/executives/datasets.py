@@ -77,6 +77,14 @@ DS_EXEC_ACCOUNT_SUMMARY = "exec-account-summary-ds"
 # correctly across both renderers. Same shape + columns as the base
 # `exec-account-summary-ds` so visuals can be re-pointed without changes.
 DS_EXEC_ACCOUNT_SUMMARY_ACTIVE = "exec-account-summary-active-ds"
+#: BH.8 follow-up (2026-05-26) — per-leg / all-status counter dataset
+#: bound to a sibling KPI on Transaction Volume to disclose the
+#: documented gap vs the deduped-Posted-only "Total Transactions" KPI.
+#: Cold-read agents read the difference between Total Transactions and
+#: App Info's matview row_count as a bug; surfacing both numbers
+#: side-by-side in the headline tile makes the predicate-mismatch
+#: visible.
+DS_EXEC_TRANSACTION_LEGS = "exec-transaction-legs-ds"
 
 
 # ---------------------------------------------------------------------------
@@ -351,11 +359,46 @@ def build_account_summary_active_dataset(cfg: Config) -> DataSet:
     )
 
 
+EXEC_TRANSACTION_LEGS_CONTRACT = DatasetContract(columns=[
+    ColumnSpec("leg_count", "INTEGER"),
+])
+
+
+def build_transaction_legs_dataset(cfg: Config) -> DataSet:
+    """BH.8 follow-up (2026-05-26) — single-row dataset returning the
+    per-leg / all-status row count of `<prefix>_transactions`. Used by
+    the Transaction Volume sheet's sibling "Transfer Legs (all statuses)"
+    KPI to surface the documented gap vs the deduped-Posted-only "Total
+    Transactions" KPI. Cold-read agents (v11.22.1) read the
+    Total-Transactions-vs-App-Info-row-count delta as a defect; putting
+    both numbers in the headline row makes the predicate mismatch
+    visible instead of mysterious.
+
+    Two reasons NOT to add this measure on the existing transaction-
+    summary dataset:
+    1. The summary dataset filters `status = 'Posted'` + GROUPs by
+       (transfer_id, rail_name). Asking it for an all-leg / all-status
+       count means dropping those filters → different dataset.
+    2. The point of THIS KPI is the App Info parity. App Info reads
+       `<prefix>_transactions` raw; this dataset matches that exactly.
+    """
+    return build_dataset(
+        cfg,
+        cfg.prefixed("exec-transaction-legs-dataset"),
+        "Executives Transaction Legs (all statuses)",
+        "exec-transaction-legs",
+        f"SELECT COUNT(*) AS leg_count FROM {cfg.db_table_prefix}_transactions",
+        EXEC_TRANSACTION_LEGS_CONTRACT,
+        visual_identifier=DS_EXEC_TRANSACTION_LEGS,
+    )
+
+
 def build_all_datasets(cfg: Config) -> list[DataSet]:
     """Return every dataset used by the Executives app."""
     return [
         build_transaction_summary_dataset(cfg),
         build_transaction_daily_dataset(cfg),
+        build_transaction_legs_dataset(cfg),
         build_account_summary_dataset(cfg),
         build_account_summary_active_dataset(cfg),
         # M.4.4.5 — App Info ("i") sheet datasets, ALWAYS LAST.
@@ -375,6 +418,7 @@ def build_all_datasets(cfg: Config) -> list[DataSet]:
 _CONTRACT_REGISTRATIONS: tuple[tuple[str, DatasetContract], ...] = (
     (DS_EXEC_TRANSACTION_SUMMARY, EXEC_TRANSACTION_SUMMARY_CONTRACT),
     (DS_EXEC_TRANSACTION_DAILY, EXEC_TRANSACTION_DAILY_CONTRACT),
+    (DS_EXEC_TRANSACTION_LEGS, EXEC_TRANSACTION_LEGS_CONTRACT),
     (DS_EXEC_ACCOUNT_SUMMARY, EXEC_ACCOUNT_SUMMARY_CONTRACT),
     # Y.2.h — same shape as the base; reuses the contract.
     (DS_EXEC_ACCOUNT_SUMMARY_ACTIVE, EXEC_ACCOUNT_SUMMARY_CONTRACT),

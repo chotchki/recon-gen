@@ -67,6 +67,7 @@ from recon_gen.apps.executives.datasets import (
     DS_EXEC_ACCOUNT_SUMMARY,
     DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
     DS_EXEC_TRANSACTION_DAILY,
+    DS_EXEC_TRANSACTION_LEGS,
     DS_EXEC_TRANSACTION_SUMMARY,
     build_all_datasets,
 )
@@ -255,6 +256,9 @@ def _datasets(cfg: Config) -> dict[str, Dataset]:
         DS_EXEC_TRANSACTION_SUMMARY,
         # AO.5 — per-active-day rollup for the avg-daily KPI.
         DS_EXEC_TRANSACTION_DAILY,
+        # BH.8 follow-up — per-leg / all-status counter for the
+        # sibling "Transfer Legs (all statuses)" KPI.
+        DS_EXEC_TRANSACTION_LEGS,
         DS_EXEC_ACCOUNT_SUMMARY,
         # Y.2.h — second account dataset; same shape, baked WHERE.
         DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
@@ -309,16 +313,25 @@ def _populate_account_coverage(
         width=_HALF,
         visual_id=VisualId("exec-account-kpi-open"),
         title="Total Open Accounts",
-        subtitle="Every account that has ever appeared in daily_balances",
+        subtitle=(
+            "Every account that has ever appeared in daily_balances. "
+            "**When this equals Active Accounts (right) every open "
+            "account had at least one transaction in the window** — a "
+            "healthy fully-utilized state. A larger gap = idle accounts "
+            "worth follow-up. v11.22.1 cold-read finding #17 noted the "
+            "numbers matched on the captured deploy without an explainer "
+            "for WHY they could match."
+        ),
         values=[ds_acct["account_id"].count(field_id="exec-acct-open-count")],
     )
     kpi_row.add_kpi(
         width=_HALF,
         visual_id=VisualId("exec-account-kpi-active"),
-        title="Active Accounts",
+        title="Active Accounts (this window)",
         subtitle=(
-            "Accounts with at least one successful transaction in the "
-            "selected date window"
+            "Subset of Open Accounts (left) with ≥1 successful "
+            "transaction in the selected date window. Always ≤ Total "
+            "Open. Equality means every open account transacted."
         ),
         values=[
             ds_acct_active["account_id"].count(
@@ -419,38 +432,65 @@ def _populate_transaction_volume(
     # AO.5 — Avg Daily Volume uses the per-active-day rollup so its
     # AVG denominator is days-with-activity, not days × rails.
     ds_daily = datasets[DS_EXEC_TRANSACTION_DAILY]
+    ds_legs = datasets[DS_EXEC_TRANSACTION_LEGS]
 
-    # Row 1: two KPIs.
+    # Row 1: three KPIs (BH.8 follow-up 2026-05-26 after v11.22.1
+    # cold-read). Was two KPIs (Total Transactions + Avg Daily Volume);
+    # the cold-read agent flagged the Total-vs-App-Info-row-count gap
+    # AGAIN despite v11.22.0's subtitle-only fix. The subtitle wasn't
+    # enough — operators see two numbers, can't tell why they differ.
+    # New sibling "Transfer Legs (all statuses)" KPI exposes the
+    # per-leg / all-status count that App Info reports, side-by-side
+    # with the deduped Posted count, so the predicate gap is VISIBLE
+    # not mysterious.
+    third = _FULL // 3
     kpi_row = sheet.layout.row(height=_KPI_ROW_SPAN)
     kpi_row.add_kpi(
-        width=_HALF,
+        width=third,
         visual_id=VisualId("exec-txn-kpi-total"),
-        title="Total Transactions",
+        title="Total Transactions (Posted, per-transfer)",
         subtitle=(
-            "Count of distinct **Posted** transfers across the selected "
-            "period and all transfer types — multi-leg transfers (a "
-            "wire + its receiver leg, an ACH batch + its individual "
-            "credits) count ONCE per transfer_id. **Expect this to "
-            "differ from the per-leg / all-status row count the App "
-            "Info sheet reports** — App Info exposes the raw matview "
-            "fact (one row per leg, including failed), this KPI "
-            "narrows to the posted-transaction-event metric leadership "
-            "asks about (BH.8 narrative clarification: cold-read read "
-            "the gap as a bug; it's a documented predicate-mismatch)."
+            "Count of distinct **Posted** transfers — multi-leg "
+            "transfers (a wire + its receiver leg, an ACH batch + its "
+            "individual credits) count ONCE per transfer_id. The "
+            "metric leadership asks about. Sibling **Transfer Legs** "
+            "KPI exposes the raw matview row count (all statuses, per "
+            "leg) — the gap is the documented predicate scope, not a "
+            "defect."
         ),
         values=[ds_txn["transfer_count"].sum(field_id="exec-txn-total-count")],
     )
     kpi_row.add_kpi(
-        width=_HALF,
+        width=third,
+        visual_id=VisualId("exec-txn-kpi-legs"),
+        title="Transfer Legs (all statuses)",
+        subtitle=(
+            "Raw count of all transaction legs in the period — "
+            "per-leg (not per-transfer), all statuses (incl. failed). "
+            "Matches the **App Info sheet's `<prefix>_transactions` "
+            "row_count** exactly. Headline pair (this + Total "
+            "Transactions) makes the documented predicate-scope gap "
+            "visible. BH.8 sibling-KPI fix added 2026-05-26 after "
+            "v11.22.1 cold-read still flagged the gap-as-bug despite "
+            "v11.22.0's subtitle-only disambiguation."
+        ),
+        values=[ds_legs["leg_count"].sum(field_id="exec-txn-legs-count")],
+    )
+    kpi_row.add_kpi(
+        width=third,
         visual_id=VisualId("exec-txn-kpi-avg-daily"),
         title="Average Daily Volume",
         subtitle=(
             "Total transfer count per active business day. Averaged "
             "over days that had any activity; zero-volume days don't "
-            "surface in the underlying dataset."
+            "surface in the underlying dataset. Rendered as integer — "
+            "v11.22.1 cold-read finding #18 noted QS's default "
+            "3-decimal display ('2.000') for AVERAGE aggregations was "
+            "wrong for a count-of-things."
         ),
         values=[ds_daily["daily_transfer_count"].average(
             field_id="exec-txn-avg-daily-count",
+            decimals=0,
         )],
     )
 
@@ -464,7 +504,7 @@ def _populate_transaction_volume(
         subtitle=(
             "Each day's transfer count, stacked by rail_name so "
             "rail composition + trend show together. "
-            "**Note (AO.S.2):** apparent multi-week empty stretches + "
+            "**Demo-data caveat:** apparent multi-week empty stretches + "
             "weekend gaps reflect the bundled demo's short seed window "
             "(90 days) + non-business-day cadence — not data outages. "
             "Real deploys with full-history ETL won't show them."
@@ -557,7 +597,7 @@ def _populate_money_moved(
         title="Daily Gross Dollars Moved by Type",
         subtitle=(
             "Each day's gross dollar volume, stacked by rail_name. "
-            "**Note (AO.S.2):** apparent multi-week empty stretches + "
+            "**Demo-data caveat:** apparent multi-week empty stretches + "
             "weekend gaps reflect the bundled demo's short seed window "
             "(90 days) + non-business-day cadence — not data outages."
         ),

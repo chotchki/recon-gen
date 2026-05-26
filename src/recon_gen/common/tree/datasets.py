@@ -149,34 +149,42 @@ class Column:
 
     def sum(
         self, *, field_id: str | AutoResolved = AUTO, currency: bool = False,
+        decimals: int | None = None,
     ) -> Measure:
         from recon_gen.common.tree.fields import Measure
         return Measure.sum(
             self.dataset, self, field_id=field_id, currency=currency,
+            decimals=decimals,
         )
 
     def max(
         self, *, field_id: str | AutoResolved = AUTO, currency: bool = False,
+        decimals: int | None = None,
     ) -> Measure:
         from recon_gen.common.tree.fields import Measure
         return Measure.max(
             self.dataset, self, field_id=field_id, currency=currency,
+            decimals=decimals,
         )
 
     def min(
         self, *, field_id: str | AutoResolved = AUTO, currency: bool = False,
+        decimals: int | None = None,
     ) -> Measure:
         from recon_gen.common.tree.fields import Measure
         return Measure.min(
             self.dataset, self, field_id=field_id, currency=currency,
+            decimals=decimals,
         )
 
     def average(
         self, *, field_id: str | AutoResolved = AUTO, currency: bool = False,
+        decimals: int | None = None,
     ) -> Measure:
         from recon_gen.common.tree.fields import Measure
         return Measure.average(
             self.dataset, self, field_id=field_id, currency=currency,
+            decimals=decimals,
         )
 
     def count(self, *, field_id: str | AutoResolved = AUTO) -> Measure:

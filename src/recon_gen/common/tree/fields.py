@@ -257,45 +257,58 @@ class Measure:
     # distinct_count don't aggregate money. The emit-time assert below
     # catches the misuse loud rather than silently dropping the format.
     currency: bool = field(default=False, kw_only=True)
+    # v11.22.1 cold-read finding #18 (2026-05-26) — when QS sees an
+    # AVERAGE aggregation with no FormatConfiguration it renders 3
+    # decimals by default ("2.000"). For count-of-things averages
+    # (Avg Daily Volume = avg(transfer_count_per_day)) the right
+    # rendering is an integer or 1-decimal. Setting decimals=N on a
+    # non-currency Measure emits a NumberDisplayFormatConfiguration with
+    # DecimalPlaces=N + comma thousands separator. Mutually exclusive
+    # with currency=True (currency already pins 2 decimals).
+    decimals: int | None = field(default=None, kw_only=True)
 
     @classmethod
     def sum(
         cls, dataset: Dataset, column: ColumnRef,
         *, field_id: str | AutoResolved = AUTO, currency: bool = False,
+        decimals: int | None = None,
     ) -> Measure:
         return cls(
             dataset=dataset, column=column, kind="sum",
-            field_id=field_id, currency=currency,
+            field_id=field_id, currency=currency, decimals=decimals,
         )
 
     @classmethod
     def max(
         cls, dataset: Dataset, column: ColumnRef,
         *, field_id: str | AutoResolved = AUTO, currency: bool = False,
+        decimals: int | None = None,
     ) -> Measure:
         return cls(
             dataset=dataset, column=column, kind="max",
-            field_id=field_id, currency=currency,
+            field_id=field_id, currency=currency, decimals=decimals,
         )
 
     @classmethod
     def min(
         cls, dataset: Dataset, column: ColumnRef,
         *, field_id: str | AutoResolved = AUTO, currency: bool = False,
+        decimals: int | None = None,
     ) -> Measure:
         return cls(
             dataset=dataset, column=column, kind="min",
-            field_id=field_id, currency=currency,
+            field_id=field_id, currency=currency, decimals=decimals,
         )
 
     @classmethod
     def average(
         cls, dataset: Dataset, column: ColumnRef,
         *, field_id: str | AutoResolved = AUTO, currency: bool = False,
+        decimals: int | None = None,
     ) -> Measure:
         return cls(
             dataset=dataset, column=column, kind="average",
-            field_id=field_id, currency=currency,
+            field_id=field_id, currency=currency, decimals=decimals,
         )
 
     @classmethod
@@ -343,6 +356,18 @@ class Measure:
                     AggregationFunction=_CATEGORICAL_AGG[self.kind],
                 ),
             )
+        assert not (self.currency and self.decimals is not None), (
+            "Measure cannot set both currency=True and decimals=N — "
+            "currency already pins 2 decimals via _USD_FORMAT. Drop "
+            "decimals= or drop currency=True."
+        )
+        fmt: NumberFormatConfiguration | None
+        if self.currency:
+            fmt = _USD_FORMAT
+        elif self.decimals is not None:
+            fmt = _integer_format(self.decimals)
+        else:
+            fmt = None
         return MeasureField(
             NumericalMeasureField=NumericalMeasureField(
                 FieldId=self.field_id,
@@ -350,7 +375,7 @@ class Measure:
                 AggregationFunction=NumericalAggregationFunction(
                     SimpleNumericalAggregation=_NUMERICAL_AGG[self.kind],
                 ),
-                FormatConfiguration=_USD_FORMAT if self.currency else None,
+                FormatConfiguration=fmt,
             ),
         )
 
@@ -373,6 +398,30 @@ _USD_FORMAT = NumberFormatConfiguration(
         ),
     ),
 )
+
+
+# v11.22.1 cold-read finding #18 (2026-05-26) — per-Measure integer /
+# fixed-decimal format. Constructed per (decimals,) so the resulting
+# wire shape is stable across emits and JSON pin tests don't churn.
+# NumberDisplayFormatConfiguration is the QS NumericFormatConfiguration
+# branch for plain numbers (vs the Currency / Percentage branches).
+def _integer_format(decimals: int) -> NumberFormatConfiguration:
+    assert decimals >= 0, (
+        f"Measure.decimals must be >= 0, got {decimals!r}"
+    )
+    return NumberFormatConfiguration(
+        FormatConfiguration=NumericFormatConfiguration(
+            NumberDisplayFormatConfiguration={
+                "DecimalPlacesConfiguration": {"DecimalPlaces": decimals},
+                "SeparatorConfiguration": {
+                    "ThousandsSeparator": {
+                        "Symbol": "COMMA",
+                        "Visibility": "VISIBLE",
+                    },
+                },
+            },
+        ),
+    )
 
 
 # Type alias used everywhere a sort/drill plumbing slot accepts either

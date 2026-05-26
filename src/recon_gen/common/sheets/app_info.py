@@ -326,14 +326,21 @@ def populate_app_info_sheet(
     )
     top.add_table(
         width=_HALF,
-        title="Matview Status",
+        title="Matview Status — sources this app reads from",
         subtitle=(
-            "Row counts + most-recent date per matview (and base "
-            "tables for comparison). Freshly-loaded matviews showing "
-            "0 mean the ETL has not refreshed them yet. If a base "
-            "table's `latest_date` moves past a matview's "
-            "`latest_date`, the matview is stale relative to fresh "
-            "ETL data — re-run `recon-gen data refresh --execute`."
+            "Row counts + most-recent date for the matviews + base "
+            "tables **this dashboard depends on directly**. Per-app "
+            "scope by design — Executives reads only 2 base tables; "
+            "L1 reads ~12 matviews. For total deploy freshness, check "
+            "every app's App Info sheet. (BH.18 follow-up 2026-05-26 "
+            "after v11.22.1 cold-read: the panel was being read as "
+            "'all deploy matviews' and an Exec-app shot reading '1-2 "
+            "of 2' looked like the dashboard had silently lost 10 "
+            "matviews — the per-app scope is explicit in the title + "
+            "subtitle now.) Freshly-loaded matviews showing 0 = ETL "
+            "hasn't refreshed them yet. If a base table's "
+            "`latest_date` moves past a matview's, the matview is "
+            "stale — re-run `recon-gen data refresh --execute`."
         ),
         columns=[
             matview_status_ds["view_name"].dim(),

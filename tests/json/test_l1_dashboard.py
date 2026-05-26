@@ -171,17 +171,21 @@ def test_drift_sheet_present_after_m2a3() -> None:
     assert drift.title == "Account Balance Drift"
 
 
-def test_drift_sheet_has_two_kpis_and_two_tables() -> None:
-    """Drift sheet structure: 2 KPIs side-by-side + leaf table + parent
-    table. KPIs surface the "how many violations" headline; tables surface
-    "which accounts on which days"."""
+def test_drift_sheet_has_four_kpis_and_two_tables() -> None:
+    """Drift sheet structure: 4 KPIs (count + max paired per kind) +
+    leaf table + parent table. BH.4 follow-up 2026-05-26 added the
+    Largest Leaf Drift + Largest Parent Drift sibling KPIs so a count
+    of zero next to non-zero adjacent magnitude doesn't read as
+    "all clear" (the v11.22.1 cold-read failure mode)."""
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
     drift = app.analysis.sheets[1]
     titles = [v.title for v in drift.visuals]
     assert titles == [
         "Leaf Accounts in Drift",
+        "Largest Leaf Drift",
         "Parent Accounts in Drift",
+        "Largest Parent Drift",
         "Leaf Account Drift",
         "Parent Account Drift",
     ]
@@ -334,7 +338,7 @@ def test_overdraft_sheet_has_kpi_and_table() -> None:
     overdraft = _sheet_by_name(app, "Overdraft")
     titles = [v.title for v in overdraft.visuals]
     assert titles == [
-        "Internal Accounts in Overdraft",
+        "Accounts in Overdraft",
         "Overdraft Violations",
     ]
 
@@ -513,8 +517,8 @@ def test_daily_statement_has_five_kpis_and_one_table() -> None:
     titles = [v.title for v in ds.visuals]
     assert titles == [
         "Opening Balance",
-        "Debits",
-        "Credits",
+        "Debits (signed)",
+        "Credits (signed)",
         "Closing Stored",
         "Drift",
         "Posted Money Records",

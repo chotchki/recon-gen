@@ -1,5 +1,91 @@
 # Release Notes
 
+## v11.22.3 — v11.22.1 cold-read second-pass small-fix batch + Phase BK opened
+
+The v11.22.1 cold-read (`docs/audits/v11_22_1_feedback.md`)
+flagged 23 findings; this release lands the 6 small-fix items
+that don't need design work or fresh deploy data. Remaining
+items moved to a new **Phase BK** for proper sequencing — see
+`PLAN.md` for the per-item gate (operator input, spike, or
+design Q).
+
+### Cold-read findings closed
+
+- **#1 — Per-Account Daily Statement Debits / Credits KPI
+  labels didn't disclose their sign convention.** Post-BH.24
+  cents-vs-dollars fix, the underlying measure became signed
+  (v6 amount_money convention: Debit = negative, Credit =
+  positive). The KPI labels still read plain "Debits" /
+  "Credits", which suggested positive magnitudes with the
+  sign to be applied via the formula. Renamed to "Debits
+  (signed)" / "Credits (signed)" + expanded subtitles
+  documenting the formula: **Closing = Opening + Credits +
+  Debits** (the signs already carry direction; do NOT
+  subtract).
+
+- **#10 — Drift Timelines parent-vs-leaf scope explainer.**
+  The two line charts ("Leaf Account Drift Over Time" +
+  "Parent Account Drift Over Time") plot the same shape over
+  different scopes, but the subtitles didn't explain WHAT
+  "leaf" vs "parent" meant. Expanded subtitles to spell out
+  scope (leaf = cardholder DDAs / merchant DDAs / external
+  counters; parent = GL controls / concentration masters /
+  funds pools) + cross-reference the sibling chart for
+  drift-event triage.
+
+- **#14 — "Internal Accounts in Overdraft" scope label.** The
+  KPI suggested pool/sweep accounts but detail rows include
+  leaf-cardholder accounts (`cust-*`). Renamed to "Accounts in
+  Overdraft" — matches the matview's actual scope (any
+  internal-scope account incl. customer DDAs).
+
+- **#17 — Exec Open vs Active KPI duplicate-looking value.**
+  When every open account had transactions in the window
+  Total Open Accounts == Active Accounts; cold-read flagged
+  this as KPI duplication. Subtitle disambiguation:
+  - **Total Open Accounts** now spells out "When this equals
+    Active Accounts every open account had at least one
+    transaction in the window — a healthy fully-utilized
+    state. A larger gap = idle accounts worth follow-up."
+  - **Active Accounts** renamed to **"Active Accounts (this
+    window)"** + subtitle clarifies "Always ≤ Total Open;
+    equality means every open account transacted."
+
+- **#18 — "Average Daily Volume" rendered with 3 decimals on a
+  count.** QS's default rendering for AVERAGE aggregations is
+  3 decimals ("36,388.424"). For count-of-things averages
+  that's wrong. New `Measure.decimals=` kwarg plumbs through
+  `.average() / .sum() / .max() / .min()` on a Dataset column
+  ref → emits a `NumberDisplayFormatConfiguration` with the
+  requested decimal count + comma thousands separator. Avg
+  Daily Volume now passes `decimals=0` (integer rendering).
+  Mutually exclusive with `currency=True` (currency already
+  pins 2 decimals via `_USD_FORMAT`); emit-time assert catches
+  misuse.
+
+- **#19 — Internal phase-reference language leaked into
+  user-facing copy.** Two exec sheet subtitles carried
+  `**Note (AO.S.2):**` (a developer-internal phase id from
+  the original write-up). Replaced with **"Demo-data
+  caveat:"** — describes the same thing without the
+  internal reference.
+
+### Phase BK opened
+
+10 items deferred from this round: #3 ($0.01 plant — needs
+operator repro on v11.22.3), #5/#16 (KPI conditional
+formatting wire — spike before lock), #6/#7 (one-bar
+dominance presentation, design Q), #8 (Investigation
+blank-by-default — default-pick design), #9 (L2 Exceptions
+KPI-vs-bars count mismatch — probe), #12 (Limit Breach
+KPI=0/5 rows — needs operator L2 to repro; sasquatch is
+1/1 clean), #13 (Chains Required Total measure clarification),
+#15 (cust-019 / Customer 18 off-by-one — needs operator
+L2), #20 (empty-state convention design pass).
+
+Verification: full PG + SQLite DB layer green (50/50 + 50/50);
+3,707-test unit suite green.
+
 ## v11.22.2 — patch: mirror `markdown` into [dev] + [e2e] extras
 
 v11.22.1 added `markdown>=3.6` to `[serve]`, but the unit-test CI

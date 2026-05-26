@@ -248,8 +248,8 @@ def test_daily_statement_picked_account_narrows_table(
 
 _KPI_TO_COLUMN = {
     "Opening Balance": "opening_balance",
-    "Debits": "total_debits",
-    "Credits": "total_credits",
+    "Debits (signed)": "total_debits",
+    "Credits (signed)": "total_credits",
     "Closing Stored": "closing_balance_stored",
     "Drift": "drift",
 }

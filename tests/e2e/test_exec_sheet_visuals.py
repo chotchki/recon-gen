@@ -158,7 +158,9 @@ def test_bg5_account_summary_kpis_match_dataset_counts(
         f"Total Open Accounts: rendered {rendered_open} ≠ "
         f"len(query_db(account_summary)) = {len(all_rows)}."
     )
-    rendered_active = parse_int_kpi(driver.kpi_value("Active Accounts"))
+    rendered_active = parse_int_kpi(
+        driver.kpi_value("Active Accounts (this window)"),
+    )
     assert rendered_active == len(active_rows), (
         f"Active Accounts: rendered {rendered_active} ≠ "
         f"len(query_db(account_summary_active)) = {len(active_rows)}."

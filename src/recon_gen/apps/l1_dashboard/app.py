@@ -597,20 +597,44 @@ def _populate_drift_sheet(
         width=_FULL,
     )
 
-    # Row 2: two KPIs side-by-side — one count per drift-violation kind.
-    half = _FULL // 2
+    # Row 2: four KPIs (BH.4 follow-up 2026-05-26 after v11.22.1
+    # cold-read). Previously two counts ("Leaf Accounts in Drift",
+    # "Parent Accounts in Drift"); cold-read agents read a count of
+    # zero as "no drift problem" and stopped investigating even when
+    # adjacent table had populated rows from a different scope (e.g.
+    # leaf=0 in current window but parent timeline shows persistent
+    # drift across the window). Add sibling MAX(ABS) money-amount
+    # KPIs so the headline carries TWO signals: how MANY accounts
+    # have drift today AND the LARGEST magnitude. The pair makes
+    # "0 accounts AND $0 max" the unambiguous healthy state; any
+    # divergence between the two surfaces the scope confusion that
+    # bit the cold-read.
+    quarter = _FULL // 4
     kpi_row = sheet.layout.row(height=_KPI_ROW_SPAN)
     kpi_row.add_kpi(
-        width=half,
+        width=quarter,
         title="Leaf Accounts in Drift",
         subtitle=(
             "Count of leaf-account day-rows where stored balance "
-            "disagrees with the cumulative net of posted Money records."
+            "disagrees with the cumulative net of posted Money records "
+            "in the current date window."
         ),
         values=[ds_drift["account_id"].count()],
     )
     kpi_row.add_kpi(
-        width=half,
+        width=quarter,
+        title="Largest Leaf Drift",
+        subtitle=(
+            "Max |drift| across any single leaf-account day-row in the "
+            "current date window. **Sibling of the count KPI** — count "
+            "+ magnitude together rule out the cold-read failure mode "
+            "where a SUM-based KPI cancels positives + negatives to ~0 "
+            "while per-account drifts remain non-trivial."
+        ),
+        values=[ds_drift["drift"].max(currency=True)],
+    )
+    kpi_row.add_kpi(
+        width=quarter,
         title="Parent Accounts in Drift",
         subtitle=(
             "Count of parent-account day-rows where stored balance "
@@ -623,6 +647,16 @@ def _populate_drift_sheet(
             "rollup gap."
         ),
         values=[ds_ledger_drift["account_id"].count()],
+    )
+    kpi_row.add_kpi(
+        width=quarter,
+        title="Largest Parent Drift",
+        subtitle=(
+            "Max |drift| across any single parent-account day-row in "
+            "the current date window. Sibling magnitude KPI to the "
+            "Parent count — see Leaf sibling subtitle for rationale."
+        ),
+        values=[ds_ledger_drift["drift"].max(currency=True)],
     )
 
     # Row 2: leaf-drift table. Pull account_id + business_day_start Dims
@@ -778,10 +812,16 @@ def _populate_drift_timelines_sheet(
         width=_FULL,
         title="Leaf Account Drift Over Time",
         subtitle=(
-            "Σ ABS(drift) per BusinessDay end for leaf accounts, one "
-            "line per role. A role hugging zero is healthy; persistent "
+            "Σ ABS(drift) per BusinessDay end for **leaf accounts** "
+            "(cardholder DDAs, merchant DDAs, external counters — every "
+            "non-aggregate L2 instance in the system). One line per "
+            "account_role so a single recurring-drift role separates "
+            "from a one-off spike. Companion: 'Parent Account Drift "
+            "Over Time' (below) shows the same shape for aggregate "
+            "accounts. A role hugging zero is healthy; persistent "
             "non-zero ⇒ ongoing feed divergence; one-off spike ⇒ "
-            "isolated event worth drilling into."
+            "isolated event worth drilling into. v11.22.1 cold-read "
+            "finding #10 — distinguish leaf vs parent scope explicitly."
         ),
         category=[leaf_day_col],
         values=[ds_drift_timeline["abs_drift"].sum(currency=True)],
@@ -797,9 +837,14 @@ def _populate_drift_timelines_sheet(
         width=_FULL,
         title="Parent Account Drift Over Time",
         subtitle=(
-            "Σ ABS(drift) per BusinessDay end for parent accounts, one "
-            "line per role. Non-zero ⇒ child postings didn't roll up "
-            "correctly that day."
+            "Σ ABS(drift) per BusinessDay end for **parent accounts** "
+            "(GL controls + concentration masters + funds pools — every "
+            "aggregate L2 instance that should equal SUM(its leaves)). "
+            "One line per account_role. Non-zero ⇒ child postings "
+            "didn't roll up correctly that day. Compare with 'Leaf "
+            "Account Drift Over Time' (above) to triage whether a "
+            "drift event lives at the leaf or at the rollup. v11.22.1 "
+            "cold-read finding #10 — explicit scope contrast."
         ),
         category=[parent_day_col],
         values=[ds_ledger_drift_timeline["abs_drift"].sum(currency=True)],
@@ -829,7 +874,12 @@ def _populate_overdraft_sheet(
 
     sheet.layout.row(height=_KPI_ROW_SPAN).add_kpi(
         width=_FULL,
-        title="Internal Accounts in Overdraft",
+        # BH.14 follow-up (2026-05-26) — v11.22.1 cold-read finding #14
+        # noted "Internal Accounts in Overdraft" suggests pool/sweep
+        # accounts but detail rows include leaf-cardholder (cust-*).
+        # Broader title matches the matview's actual scope (any
+        # internal-scope account incl. customer DDAs).
+        title="Accounts in Overdraft",
         subtitle=(
             "Count of internal-account day-rows holding negative stored "
             "balance — every row in the table below is one violation."
@@ -1552,14 +1602,27 @@ def _populate_daily_statement_sheet(
     )
     kpi_row.add_kpi(
         width=kpi_width,
-        title="Debits",
-        subtitle="Sum of Debit-direction Money records posted today.",
+        title="Debits (signed)",
+        subtitle=(
+            "Sum of `amount_money` over Debit-direction legs posted "
+            "today, signed by v6 convention (Debit = negative). "
+            "**Closing = Opening + Credits + Debits** (the signs already "
+            "carry direction; do NOT subtract). v11.22.1 cold-read "
+            "finding #1: the previous 'Debits' label suggested positive "
+            "magnitude + sign-via-formula; the post-cents-fix signed "
+            "values needed the explicit (signed) tag."
+        ),
         values=[ds_summary["total_debits"].max(currency=True)],
     )
     kpi_row.add_kpi(
         width=kpi_width,
-        title="Credits",
-        subtitle="Sum of Credit-direction Money records posted today.",
+        title="Credits (signed)",
+        subtitle=(
+            "Sum of `amount_money` over Credit-direction legs posted "
+            "today, signed by v6 convention (Credit = positive). See "
+            "Debits subtitle for the formula. v11.22.1 cold-read "
+            "finding #1 sibling rename."
+        ),
         values=[ds_summary["total_credits"].max(currency=True)],
     )
     kpi_row.add_kpi(
