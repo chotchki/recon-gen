@@ -62,7 +62,9 @@ class TestVisuals:
         # Getting Started is text-only (welcome + clickability legend +
         # 3 per-sheet description blocks).
         "Account Coverage": 5,            # 2 KPIs + 2 bars + table
-        "Transaction Volume Over Time": 4,  # 2 KPIs + daily bar + per-type bar
+        # v11.22.3 BH.8 follow-up — 3 KPIs (Total Transactions + Transfer
+        # Legs sibling + Avg Daily Volume) + 2 bars.
+        "Transaction Volume Over Time": 5,
         "Money Moved": 4,                  # 2 KPIs + daily bar + per-type bar
     }
 
