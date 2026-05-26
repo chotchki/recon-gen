@@ -298,16 +298,25 @@ def _render_home_page(
         status = "set" if is_set else "not set"
         # AH.4 — demo-mode hides the singleton Edit affordance (its form
         # route is 404'd) and drops the "click Edit" prompt.
+        # BF.7+BF.8 (2026-05-25): theme + persona are structured forms
+        # now (per-field controls, not yaml blocks). Only `instance`
+        # is still a single YAML block (two top-level scalars don't
+        # warrant a decomposed form). Title + body reflect the
+        # actual editor surface so the home-page prose doesn't lie.
+        singleton_form_kind = (
+            "structured form" if kind in ("theme", "persona")
+            else "single YAML block"
+        )
         singleton_link = "" if demo_mode else (
             f'<a class="ml-2 text-accent no-underline font-semibold text-sm hover:underline" '
             f'href="/l2_shape/{kind}/" '
             f'onclick="event.stopPropagation()" '
-            f'title="Edit {escape(label)} (single YAML block)">Edit</a>'
+            f'title="Edit {escape(label)} ({singleton_form_kind})">Edit</a>'
         )
         singleton_body = (
-            f"{escape(label)} is a single YAML block."
+            f"{escape(label)} is a {singleton_form_kind}."
             if demo_mode else
-            f"{escape(label)} is a single YAML block — "
+            f"{escape(label)} is a {singleton_form_kind} — "
             f"click <strong>Edit</strong> to view / change it."
         )
         section_blocks.append(
@@ -659,12 +668,18 @@ def _render_diagram_page(
     # walk, no DB). The meta tag mirrors the coverage shape so the JS
     # shim's gate is symmetrical.
     trainer_meta = '<meta name="diagram-trainer-available" content="1">\n'
-    # Build URL fragments so layer / focus links preserve the other
-    # param. Order: focus first, then layer (matches the natural read).
+    # Build URL fragments so layer / focus / clear-focus links
+    # preserve the other params, INCLUDING ``embed=1`` (2026-05-25
+    # user dogfood: clicking a layer link inside the home-page
+    # iframe was dropping the embed flag, so the iframe re-rendered
+    # with the standalone diagram's full studio chrome stacked
+    # below the home page's own chrome → two nav bars).
     def _qs(*, layer_val: int, focus_val: str | None) -> str:
         bits: list[str] = [f"layer={layer_val}"]
         if focus_val:
             bits.append(f"focus={escape(focus_val)}")
+        if embed:
+            bits.append("embed=1")
         return "?" + "&".join(bits)
 
     # AM.2 step 3 — chrome buttons share the chrome_button_classes()
@@ -741,7 +756,7 @@ def _render_diagram_page(
     <span class="inline-flex items-center gap-2 text-sm text-secondary-fg" aria-label="Conceptual layers">
       layer: {layer_links}
     </span>
-    <a id="toggle-reset" class="{chrome_button_classes()}" href="?">Reset</a>
+    <a id="toggle-reset" class="{chrome_button_classes()}" href="{"?embed=1" if embed else "?"}">Reset</a>
     {coverage_toggle_html}
     {trainer_toggle_html}
     {focus_indicator}

@@ -1792,7 +1792,25 @@ def _render_read_value(spec: FieldSpec, value: object) -> str:
                 )
             items.append(f"<li>{escape(name)}{tag}</li>")
         return f'<ul class="{ul_cls}">{"".join(items)}</ul>'
-    return escape(_value_to_input_str(value)) or "—"
+    raw = _value_to_input_str(value)
+    if not raw:
+        return "—"
+    # BF.9 follow-on (2026-05-25): render description / markdown
+    # fields as HTML on the read card so an operator sees the
+    # actual formatted prose (bullets, code spans, bold) — same
+    # render path as the edit-form's Preview tab. Catches the
+    # common case where description prose is markdown-flavored
+    # (the field helper explicitly says "markdown OK").
+    if spec.kind == "textarea" and spec.preview_markdown:
+        import markdown as _md  # noqa: PLC0415 — lazy
+        rendered = _md.markdown(
+            raw, extensions=["fenced_code", "tables"],
+        )
+        return (
+            f'<div class="prose-sm max-w-none text-sm text-primary-fg">'
+            f'{rendered}</div>'
+        )
+    return escape(raw)
 
 
 def _render_read_card(
@@ -1843,7 +1861,12 @@ def _render_read_card(
         subtype_badge = (
             f' <span class="{badge_cls}">{escape(subtype_label)}</span>'
         )
-    h3_base = "text-base font-semibold m-0 text-primary-fg"
+    # `min-w-0` lets the h3 shrink inside the flex header so
+    # `break-all` can wrap composite IDs (chain / limit_schedule
+    # use `::` separators which aren't natural break points;
+    # without break-all + min-w-0 they overflow into the
+    # Edit/Delete actions column — user dogfood 2026-05-25).
+    h3_base = "text-base font-semibold m-0 text-primary-fg min-w-0 break-all"
     if focus_node is None:
         title_html = f'<h3 class="{h3_base}">{escape(entity_id)}{subtype_badge}</h3>'
     else:
@@ -2119,6 +2142,25 @@ _RAIL_SUBTYPE_REQUIREMENTS_BANNER: Mapping[RailSubtype, str] = {
 }
 
 
+def _render_intro_details(intro_html: str) -> str:
+    """Wrap a per-kind / per-singleton intro card in a collapsible
+    ``<details>`` so it doesn't push the actual form down the page
+    (user 2026-05-25, dogfood: the dense theme structured form +
+    the always-visible intro card made the page very tall). Native
+    HTML — no JS required for the toggle. Default-closed; operator
+    clicks "ⓘ Reference" to expand."""
+    return (
+        '<details class="bg-white border border-surface-border '
+        'rounded-md overflow-hidden">'
+        '<summary class="cursor-pointer px-5 py-3 font-semibold '
+        'text-accent bg-surface-bg select-none hover:bg-link-tint">'
+        'ⓘ Reference'
+        '</summary>'
+        f'<div class="px-5 py-4 text-sm leading-normal text-primary-fg">{intro_html}</div>'
+        '</details>'
+    )
+
+
 def _render_subtype_requirements_banner(subtype: RailSubtype | None) -> str:
     """Render the BF.1 banner. Empty string when subtype is None
     (non-rail entities; rail-subtype-picker landing page)."""
@@ -2190,7 +2232,8 @@ def _render_rail_subtype_picker(
     <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
     <a class="text-accent no-underline text-sm hover:underline" href="/l2_shape/rail/">→ list all rails</a>
   </header>
-  <main class="grid grid-cols-1 lg:[grid-template-columns:1fr_22rem] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
+  <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
+    {_render_intro_details(_RAIL_SUBTYPE_PICKER_INTRO)}
     <section class="bg-white border border-surface-border rounded-md p-5">
       <div class="flex flex-col gap-3">
         <a class="{picker_btn_cls}" href="/l2_shape/rail/new?subtype=two_leg">
@@ -2203,7 +2246,6 @@ def _render_rail_subtype_picker(
         </a>
       </div>
     </section>
-    <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{_RAIL_SUBTYPE_PICKER_INTRO}</section>
   </main>
 </body>
 </html>
@@ -2765,8 +2807,8 @@ def _render_create_page(
     <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
     <a class="text-accent no-underline text-sm hover:underline" href="/l2_shape/{escape(kind)}/">→ list all {escape(kind)}s</a>
   </header>
-  <main class="grid grid-cols-1 lg:[grid-template-columns:1fr_22rem] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
-    <div>
+  <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
+    {_render_intro_details(intro_html)}
     {subtype_banner_html}
     <section class="bg-white border border-surface-border rounded-md p-5">
       <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form">
@@ -2780,8 +2822,6 @@ def _render_create_page(
         </div>
       </form>
     </section>
-    </div>
-    <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{intro_html}</section>
   </main>
 </body>
 </html>
@@ -2857,8 +2897,8 @@ def _render_edit_page(
     <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
     <a class="text-accent no-underline text-sm hover:underline" href="/l2_shape/{escape(kind)}/">→ list all {escape(kind)}s</a>
   </header>
-  <main class="grid grid-cols-1 lg:[grid-template-columns:1fr_22rem] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
-    <div>
+  <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
+    {_render_intro_details(intro_html)}
     {subtype_banner_html}
     <section class="bg-white border border-surface-border rounded-md p-5">
       <form method="post" action="/l2_shape/{escape(kind)}/{escape(entity_id)}" class="edit-form">
@@ -2870,8 +2910,6 @@ def _render_edit_page(
         </div>
       </form>
     </section>
-    </div>
-    <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{intro_html}</section>
   </main>
 </body>
 </html>
@@ -3630,7 +3668,8 @@ def _render_singleton_page(
     <h1 class="text-base m-0 font-semibold text-accent">{escape(label)}</h1>
     <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
   </header>
-  <main class="grid grid-cols-1 lg:[grid-template-columns:1fr_22rem] gap-5 max-w-4xl mx-auto pt-6 px-4 pb-12">
+  <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
+    {_render_intro_details(intro_html)}
     <section class="bg-white border border-surface-border rounded-md p-5">
       <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form">
         <input type="hidden" name="_method" value="PUT">
@@ -3642,7 +3681,6 @@ def _render_singleton_page(
         </div>
       </form>
     </section>
-    <section class="bg-white border border-surface-border rounded-md px-5 py-4 text-sm leading-normal text-primary-fg">{intro_html}</section>
   </main>
 </body>
 </html>
