@@ -323,10 +323,20 @@ def test_get_new_form_returns_full_page_with_intro_prose(
     # Per-kind intro prose explaining what an Account is.
     assert "An Account" in body
     assert "chart of accounts" in body
-    # Form is plain HTML POST (no hx-post, no hx-target).
+    # Form is plain HTML POST (no hx-post on the <form> element).
+    # BF.9 (2026-05-25): individual form-field controls MAY use
+    # HTMX for in-place affordances (e.g. the description Edit/
+    # Preview tab `hx-post="/preview/markdown"`) — those are
+    # additive UI sugar, not the form submit. Pin the <form>'s
+    # plain-POST shape directly.
     assert 'method="post"' in body
     assert 'action="/l2_shape/account/"' in body
-    assert "hx-post" not in body
+    # The <form> itself has no hx-post (the form submits via plain
+    # HTML — only field-internal previews use HTMX).
+    form_start = body.index('<form ')
+    form_close = body.index('</form>', form_start)
+    form_open_tag = body[form_start:body.index('>', form_start) + 1]
+    assert "hx-post" not in form_open_tag
     # No prefilled values on a blank form.
     assert 'value=""' in body
 
@@ -1557,45 +1567,54 @@ def test_rail_metadata_value_examples_bad_yaml_returns_400(
     assert "Invalid YAML" in resp.text or "Field coercion failed" in resp.text
 
 
-def test_singleton_theme_get_renders_yaml_block(
+def test_singleton_theme_get_renders_structured_form(
     writable_l2_yaml: Path,
 ) -> None:
-    """X.4.f.12 — GET /l2_shape/theme/ renders the singleton edit page
-    with the existing theme dumped as YAML in the textarea (or empty
-    when the L2 has no theme block declared)."""
+    """X.4.f.12 + BF.8 (2026-05-25): GET /l2_shape/theme/ renders
+    the singleton edit page. BF.8 swapped the YAML textarea for a
+    structured per-field form; pin the new shape via the
+    ThemePreset identity fields + at least one color-picker pair
+    + a representative section legend."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.get("/l2_shape/theme/")
     assert resp.status_code == 200, resp.text
-    assert 'name="yaml"' in resp.text
-    # AM.1 step 7 (2026-05-25): `.yaml-block` semantic class retired —
-    # the `<textarea name="yaml">` itself is the stable shape; the
-    # font-mono utility now drives the monospace styling at the call
-    # site (still readable in the page, not load-bearing on identity).
-    assert '<textarea' in resp.text
+    body = resp.text
+    # Identity fields land.
+    assert 'name="theme_name"' in body
+    assert 'name="version_description"' in body
+    # The color-picker pair (color input + hex text) for accent.
+    assert 'name="accent"' in body
+    assert 'id="field-accent-color"' in body  # <input type="color">
+    assert 'id="field-accent-hex"' in body
+    # Section legend for the brand group.
+    assert "UI palette — brand" in body
 
 
 def test_singleton_persona_save_round_trips(
     writable_l2_yaml: Path,
 ) -> None:
-    """X.4.f.12 — POST /l2_shape/persona/ with a YAML map updates
-    L2Instance.persona and the round-trip survives reload. Spec_example
-    has no persona by default, so this exercises the create path."""
+    """X.4.f.12 + BF.7 (2026-05-25): POST /l2_shape/persona/ with
+    the structured form data updates L2Instance.persona; round-trip
+    survives reload. spec_example has no persona by default — this
+    exercises the create path through the new per-field controls."""
     app = _build_app(writable_l2_yaml)
-    yaml_text = (
-        "institution:\n"
-        "  - 'Test Bank'\n"
-        "  - 'TB'\n"
-        "stakeholders:\n"
-        "  - 'Federal Reserve Bank'\n"
-        "merchants:\n"
-        "  - 'Acme Coffee'\n"
-        "  - 'Beta Bakery'\n"
-    )
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.post(
             "/l2_shape/persona/",
-            data={"yaml": yaml_text},
+            data={
+                "institution_name": "Test Bank",
+                "institution_acronym": "TB",
+                "institution_region": "",
+                "institution_legacy_entity": "",
+                "stakeholders__count": "1",
+                "stakeholders_0": "Federal Reserve Bank",
+                "merchants__count": "2",
+                "merchants_0": "Acme Coffee",
+                "merchants_1": "Beta Bakery",
+                "flavor__count": "0",
+                "gl_accounts__count": "0",
+            },
             follow_redirects=False,
         )
     assert resp.status_code == 303, resp.text
@@ -1608,27 +1627,33 @@ def test_singleton_persona_save_round_trips(
     assert list(persona.merchants) == ["Acme Coffee", "Beta Bakery"]
 
 
-def test_singleton_theme_bad_yaml_returns_400(
+def test_singleton_theme_missing_required_fields_returns_400(
     writable_l2_yaml: Path,
 ) -> None:
-    """X.4.f.12 — bad YAML in the singleton form returns 400 + the
-    operator's typed content preserved + the validator error inline."""
+    """X.4.f.12 + BF.8 (2026-05-25): the theme form has many
+    required fields (theme_name, version_description, data_colors,
+    empty_fill_color, gradient + the 17 UI palette colors).
+    Submitting with just a single hex color fails the loader's
+    missing-required check → 400 + the form re-renders with the
+    operator's partial input preserved via structured_overrides."""
     app = _build_app(writable_l2_yaml)
-    bad_yaml = "theme_name: 'unclosed\n  data_colors:\n    - '#abc'"
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.post(
             "/l2_shape/theme/",
-            data={"yaml": bad_yaml},
+            data={
+                "theme_name": "test-only",
+                "version_description": "only one field",
+                "data_colors__count": "0",
+                "accent": "#1f4e79",
+            },
             follow_redirects=False,
         )
     assert resp.status_code == 400, resp.text
-    # The form re-renders with a global-error block (either "Invalid
-    # YAML" if the parser choked, or a loader/validator error if the
-    # YAML parsed but the shape is wrong). AM.1 step 5 (2026-05-25):
-    # `.form-global-error` semantic class retired; the 400 status +
-    # YAML round-trip below pins the stable behavior (operator's bad
-    # input survives the rejection).
-    assert "yaml" in resp.text
+    # The form re-renders with the operator's partial input + the
+    # validator error inline. The accent color survives so the
+    # operator doesn't have to retype.
+    assert "#1f4e79" in resp.text
+    assert "test-only" in resp.text
 
 
 def test_singleton_instance_get_renders_description(

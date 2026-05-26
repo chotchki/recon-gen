@@ -131,6 +131,12 @@ class FieldSpec:
     # operator authors the sibling field first, then edits to add the
     # group-shaped layer.
     edit_only: bool = False
+    # BF.9 (2026-05-25) — textarea fields with markdown content get
+    # an Edit / Preview tab affordance. The Preview tab HTMX-fetches
+    # ``/preview/markdown`` with the current textarea value + swaps
+    # in the rendered HTML. Limit to ``kind="textarea"`` per BF.0 L2
+    # (free-form prose; description fields are the canonical use).
+    preview_markdown: bool = False
 
 
 _ACCOUNT_FIELDS: tuple[FieldSpec, ...] = (
@@ -185,6 +191,7 @@ _ACCOUNT_FIELDS: tuple[FieldSpec, ...] = (
         label="Description",
         helper="Free-form prose; markdown OK. Read by handbook templates.",
         kind="textarea",
+        preview_markdown=True,
     ),
 )
 
@@ -223,6 +230,7 @@ _ACCOUNT_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         label="Description",
         helper="Free-form prose; markdown OK.",
         kind="textarea",
+        preview_markdown=True,
     ),
     FieldSpec(
         name="instance_id_template",
@@ -480,6 +488,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         label="Description",
         helper="Free-form prose; markdown OK.",
         kind="textarea",
+        preview_markdown=True,
     ),
 )
 
@@ -532,6 +541,7 @@ _CHAIN_FIELDS: tuple[FieldSpec, ...] = (
         label="Description",
         helper="Free-form prose.",
         kind="textarea",
+        preview_markdown=True,
     ),
 )
 
@@ -647,6 +657,7 @@ _TRANSFER_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         label="Description",
         helper="Free-form prose.",
         kind="textarea",
+        preview_markdown=True,
     ),
 )
 
@@ -697,6 +708,7 @@ _LIMIT_SCHEDULE_FIELDS: tuple[FieldSpec, ...] = (
         label="Description",
         helper="Free-form prose.",
         kind="textarea",
+        preview_markdown=True,
     ),
 )
 
@@ -1252,10 +1264,59 @@ def _render_field(
         )
     elif spec.kind == "textarea":
         val_str = _value_to_input_str(value)
-        input_html = (
+        textarea_html = (
             f'<textarea id="field-{spec.name}" name="{escape(spec.name)}" '
             f'rows="3" class="{input_cls} resize-y min-h-16">{escape(val_str)}</textarea>'
         )
+        if spec.preview_markdown:
+            # BF.9 (2026-05-25) — Edit / Preview tabs. Pure HTMX:
+            # the Preview tab POSTs the textarea text to
+            # /preview/markdown which returns rendered HTML; swap
+            # into the preview pane. Toggle visibility via JS
+            # (5-line `oninput` — minimal-JS posture). Edit tab
+            # stays the source of truth; Preview is read-only.
+            tab_btn_active = (
+                "border-b-2 border-accent text-accent font-semibold "
+                "px-3 py-1 text-sm cursor-pointer"
+            )
+            tab_btn_inactive = (
+                "border-b-2 border-transparent text-secondary-fg "
+                "px-3 py-1 text-sm cursor-pointer hover:text-primary-fg"
+            )
+            preview_pane_cls = (
+                "hidden prose-sm max-w-none px-3 py-2 border "
+                "border-surface-border rounded-sm bg-white min-h-16"
+            )
+            preview_id = f"field-{spec.name}-preview"
+            edit_id = f"field-{spec.name}-edit"
+            tab_edit_id = f"field-{spec.name}-tab-edit"
+            tab_preview_id = f"field-{spec.name}-tab-preview"
+            # JS that swaps tab+pane visibility. Inlined per
+            # AM.0 minimal-JS posture.
+            input_html = (
+                f'<div class="flex items-center gap-2 border-b border-surface-border">'
+                f'<button type="button" id="{tab_edit_id}" '
+                f'class="{tab_btn_active}" '
+                f'onclick="document.getElementById(&quot;{edit_id}&quot;).classList.remove(&quot;hidden&quot;);'
+                f'document.getElementById(&quot;{preview_id}&quot;).classList.add(&quot;hidden&quot;);'
+                f'this.className=&quot;{tab_btn_active}&quot;;'
+                f'document.getElementById(&quot;{tab_preview_id}&quot;).className=&quot;{tab_btn_inactive}&quot;;">Edit</button>'
+                f'<button type="button" id="{tab_preview_id}" '
+                f'class="{tab_btn_inactive}" '
+                f'hx-post="/preview/markdown" '
+                f'hx-include="#field-{spec.name}" '
+                f'hx-target="#{preview_id}" '
+                f'hx-swap="innerHTML" '
+                f'onclick="document.getElementById(&quot;{edit_id}&quot;).classList.add(&quot;hidden&quot;);'
+                f'document.getElementById(&quot;{preview_id}&quot;).classList.remove(&quot;hidden&quot;);'
+                f'this.className=&quot;{tab_btn_active}&quot;;'
+                f'document.getElementById(&quot;{tab_edit_id}&quot;).className=&quot;{tab_btn_inactive}&quot;;">Preview</button>'
+                f'</div>'
+                f'<div id="{edit_id}">{textarea_html}</div>'
+                f'<div id="{preview_id}" class="{preview_pane_cls}"></div>'
+            )
+        else:
+            input_html = textarea_html
     elif spec.kind == "yaml_block":
         # X.4.f.11.6.5 — Tier-3 YAML escape hatch for the
         # nested-shape field (metadata_value_examples). Same wire as
@@ -2821,32 +2882,34 @@ def _render_edit_page(
 _SINGLETON_INTRO_BY_KIND: Mapping[EntityKind, tuple[str, str]] = {
     "theme": (
         "Theme",
-        "<p><strong>Theme</strong> is the institution's brand palette — the "
-        "colors that drive every dashboard, the studio chrome, and the "
-        "audit PDF cover. Edit the YAML below; an empty block clears the "
-        "theme and the bundled DEFAULT_PRESET takes over.</p>"
-        "<p>The shape mirrors <code>ThemePreset</code> in "
-        "<code>common/l2/theme.py</code> — every field is required when "
-        "the block is set: <code>theme_name</code>, "
-        "<code>version_description</code>, "
-        "<code>analysis_name_prefix</code> (or null), "
-        "<code>data_colors</code> (≥1 hex), <code>empty_fill_color</code>, "
-        "<code>gradient</code> ([light, dark] hex pair), plus the UI "
-        "palette (<code>accent</code>, <code>primary_fg</code>, etc.).</p>"
+        "<p><strong>Theme</strong> is the institution's brand palette — "
+        "the colors that drive every dashboard, the studio chrome, and "
+        "the audit PDF cover. Save with every section blank ⇒ theme "
+        "clears and the bundled DEFAULT_PRESET takes over.</p>"
+        "<p>The form below decomposes <code>ThemePreset</code> "
+        "(<code>common/l2/theme.py</code>) into per-field controls. "
+        "Required: <code>theme_name</code> + <code>version_description</code> "
+        "+ at least one <code>data_colors</code> entry + <code>empty_fill_color</code> "
+        "+ <code>gradient</code> (low/high hex pair). The UI palette "
+        "groups by purpose — surfaces+text, brand, state colours, "
+        "chart-axis chips — with pair-previews showing the actual bg/fg "
+        "combo so contrast issues surface before deploy.</p>"
     ),
     "persona": (
         "Persona",
         "<p><strong>Persona</strong> is the institution's flavor strings "
         "— name, acronym, upstream stakeholders, GL chart, merchant names, "
         "free-form prose. The handbook templates read these to render "
-        "branded prose; an empty block falls back to neutral "
-        "L2-primitive-derived language.</p>"
-        "<p>The shape mirrors <code>DemoPersona</code> in "
-        "<code>common/persona.py</code>. Each top-level key is optional; "
-        "omit the keys you don't want to populate. <code>gl_accounts</code> "
-        "items are <code>{code, name, note}</code> sub-maps — see the "
-        "bundled <code>tests/l2/sasquatch_pr.yaml</code> for a reference "
-        "shape.</p>"
+        "branded prose; save with every section blank ⇒ persona clears "
+        "and the templates fall back to neutral L2-primitive-derived "
+        "language.</p>"
+        "<p>The form below decomposes <code>DemoPersona</code> "
+        "(<code>common/persona.py</code>) into per-field controls. "
+        "Repeating list fields (stakeholders, merchants, flavor, "
+        "gl_accounts) carry one trailing empty slot for adding new "
+        "rows; blank rows are dropped on save. <code>institution</code> "
+        "is a positional tuple — fill name + acronym; region + legacy "
+        "entity are optional callouts.</p>"
     ),
     "instance": (
         "Instance settings",
@@ -2907,11 +2970,606 @@ def _singleton_yaml_text(instance: object, kind: EntityKind) -> str:
     return yaml.safe_dump(as_dict, default_flow_style=False, sort_keys=False).rstrip() + "\n"
 
 
+# BF.7 (2026-05-25) — labeled positional fields for the persona
+# `institution` tuple. The dataclass stores it as
+# `tuple[str, ...]` (per the persona doc: "name, acronym, optional
+# region and legacy_entity follow-ons") — the structured form
+# decomposes it into 4 labeled inputs at fixed positions.
+_PERSONA_INSTITUTION_FIELDS: tuple[tuple[str, str, str, bool], ...] = (
+    # (form-name, label, helper, required)
+    ("name", "Name", "Institution full name (e.g. \"South National Bank\").", True),
+    ("acronym", "Acronym", "Short label used in dashboard titles + audit footer.", False),
+    ("region", "Region", "Optional geographic descriptor (e.g. \"Pacific Northwest\").", False),
+    ("legacy_entity", "Legacy entity", "Optional pre-merger / legacy name callout.", False),
+)
+
+
+def _persona_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
+    """BF.7 — read the structured persona form data + build the dict
+    shape `singleton_save_l2` expects (which then yaml.safe_load-s
+    + dispatches to `_load_persona`).
+
+    Field naming convention:
+    - ``institution_name`` / ``institution_acronym`` / ``institution_region``
+      / ``institution_legacy_entity`` — positional fields per the
+      DemoPersona doc.
+    - ``stakeholders_<N>`` / ``merchants_<N>`` / ``flavor_<N>`` —
+      repeating string fields (operator types one per slot; trailing
+      always-empty slot lets them add without JS). Blanks filtered.
+    - ``gl_accounts_<N>_code`` / ``gl_accounts_<N>_name`` /
+      ``gl_accounts_<N>_note`` — repeating record fields. A row
+      with blank code is filtered.
+    - ``<field>__count`` — hidden int, the number of slots rendered
+      (so server knows how many positional indices to read).
+
+    Empty lists collapse cleanly — `DemoPersona` defaults all
+    fields to `tuple()`.
+    """
+    out: dict[str, object] = {}
+
+    # institution — fixed positional shape from
+    # _PERSONA_INSTITUTION_FIELDS. Trailing blanks trimmed.
+    institution: list[str] = []
+    for fname, _, _, _ in _PERSONA_INSTITUTION_FIELDS:
+        institution.append(str(form.get(f"institution_{fname}", "")).strip())
+    while institution and not institution[-1]:
+        institution.pop()
+    if institution:
+        out["institution"] = institution
+
+    for repeating in ("stakeholders", "merchants", "flavor"):
+        n_str = form.get(f"{repeating}__count", "0")
+        try:
+            n = int(str(n_str))
+        except ValueError:
+            n = 0
+        entries = [
+            str(form.get(f"{repeating}_{i}", "")).strip()
+            for i in range(n)
+        ]
+        entries = [e for e in entries if e]
+        if entries:
+            out[repeating] = entries
+
+    gl_n_str = form.get("gl_accounts__count", "0")
+    try:
+        gl_n = int(str(gl_n_str))
+    except ValueError:
+        gl_n = 0
+    gl_rows: list[dict[str, str]] = []
+    for i in range(gl_n):
+        code = str(form.get(f"gl_accounts_{i}_code", "")).strip()
+        name = str(form.get(f"gl_accounts_{i}_name", "")).strip()
+        note = str(form.get(f"gl_accounts_{i}_note", "")).strip()
+        if not code:
+            continue
+        row: dict[str, str] = {"code": code, "name": name}
+        if note:
+            row["note"] = note
+        gl_rows.append(row)
+    if gl_rows:
+        out["gl_accounts"] = gl_rows
+
+    return out
+
+
+def _persona_dict_from_instance(instance: Any) -> dict[str, object]:  # typing-smell: ignore[explicit-any]: L2Instance dataclass shape
+    """BF.7 — extract the current persona's dict shape for pre-
+    populating the structured form. Mirror's _persona_form_to_dict's
+    key shape so the round-trip is byte-stable when the operator
+    doesn't change anything."""
+    import dataclasses as dc  # noqa: PLC0415 — lazy
+
+    persona = getattr(instance, "persona", None)
+    if persona is None:
+        return {}
+    raw = dc.asdict(persona)  # pyright: ignore[reportUnknownArgumentType,reportUnknownVariableType]  # WHY: DemoPersona dataclass; asdict returns plain dict[str, Any]
+    # Drop empty tuples so the form renders blank rather than
+    # showing "0 stakeholders" etc.
+    return {k: v for k, v in raw.items() if v}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]  # WHY: dict[str, Any] from asdict
+
+
+def _render_persona_form(
+    persona_dict: Mapping[str, object],
+    *,
+    extra_slots: int = 1,
+) -> str:
+    """BF.7 — render the structured persona form body (everything
+    between the <form> tags, replacing the single yaml_block textarea).
+
+    ``persona_dict`` is the current persona's dict (from
+    ``_persona_dict_from_instance`` or a re-render override after
+    validation failure). ``extra_slots=1`` renders 1 trailing
+    always-empty slot per repeating field for add-row affordance.
+    """
+    row_cls = field_row_classes()
+    input_cls = field_input_classes()
+    label_cls = "font-semibold text-xs text-primary-fg"
+    helper_cls = "text-xs text-secondary-fg"
+    section_cls = (
+        "border border-surface-border rounded-md p-4 mb-4 "
+        "bg-surface-bg flex flex-col gap-3"
+    )
+    section_label_cls = (
+        "font-semibold text-sm text-primary-fg flex items-center gap-2"
+    )
+
+    parts: list[str] = []
+
+    # institution — 4 labeled positional inputs
+    inst = persona_dict.get("institution", [])
+    inst_values: list[str] = list(inst) if isinstance(inst, list) else []  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]  # WHY: from form-derived dict
+    inst_values += [""] * max(0, len(_PERSONA_INSTITUTION_FIELDS) - len(inst_values))
+    parts.append(
+        f'<fieldset class="{section_cls}">'
+        f'<legend class="{section_label_cls}">Institution</legend>'
+        f'<p class="{helper_cls} m-0">Identity fields the handbook templates substitute into per-institution prose.</p>'
+    )
+    for i, (fname, label, helper, required) in enumerate(_PERSONA_INSTITUTION_FIELDS):
+        req = '<span class="text-danger"> *</span>' if required else ""
+        parts.append(
+            f'<div class="{row_cls}">'
+            f'<label for="field-institution_{fname}" class="{label_cls}">{escape(label)}{req}</label>'
+            f'<input type="text" id="field-institution_{fname}" '
+            f'name="institution_{fname}" '
+            f'value="{escape(inst_values[i])}" '
+            f'class="{input_cls}">'
+            f'<small class="{helper_cls}">{escape(helper)}</small>'
+            f'</div>'
+        )
+    parts.append('</fieldset>')
+
+    for repeating, label, helper in (
+        ("stakeholders", "Stakeholders",
+         "Upstream-counterparty display strings (e.g. \"Federal Reserve Bank\", \"the Fed\"). One per row. Blank rows are dropped on save."),
+        ("merchants", "Merchants",
+         "Display names for merchant DDAs the seed plants. One per row. Blank rows are dropped on save."),
+        ("flavor", "Flavor",
+         "Free-form persona strings (sample customer name, region descriptor, legacy-entity callout). One per row. Blank rows are dropped on save."),
+    ):
+        values = persona_dict.get(repeating, [])
+        items = list(values) if isinstance(values, list) else []  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]  # WHY: from form-derived dict
+        total = len(items) + extra_slots
+        parts.append(
+            f'<fieldset class="{section_cls}">'
+            f'<legend class="{section_label_cls}">{escape(label)}</legend>'
+            f'<p class="{helper_cls} m-0">{escape(helper)}</p>'
+            f'<input type="hidden" name="{repeating}__count" value="{total}">'
+        )
+        for i in range(total):
+            v = items[i] if i < len(items) else ""
+            parts.append(
+                f'<input type="text" '
+                f'name="{repeating}_{i}" '
+                f'value="{escape(str(v))}" '
+                f'placeholder="(add row)" '
+                f'class="{input_cls}">'
+            )
+        parts.append('</fieldset>')
+
+    gl_values = persona_dict.get("gl_accounts", [])
+    gl_items = list(gl_values) if isinstance(gl_values, list) else []  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]  # WHY: form-derived dict carries Any element type
+    gl_total = len(gl_items) + extra_slots
+    grid_cls = "grid grid-cols-[10rem_1fr_2fr] gap-2 items-center"
+    sub_label_cls = "font-mono text-xs text-secondary-fg uppercase tracking-wide"
+    parts.append(
+        f'<fieldset class="{section_cls}">'
+        f'<legend class="{section_label_cls}">GL accounts</legend>'
+        f'<p class="{helper_cls} m-0">Chart-of-accounts display labels surfaced in handbook prose. Each row: <code>code</code> (joins to seed roster) / <code>name</code> (canonical display) / <code>note</code> (one-line hint). Rows with blank code are dropped on save.</p>'
+        f'<input type="hidden" name="gl_accounts__count" value="{gl_total}">'
+        f'<div class="{grid_cls}">'
+        f'<span class="{sub_label_cls}">code</span>'
+        f'<span class="{sub_label_cls}">name</span>'
+        f'<span class="{sub_label_cls}">note</span>'
+        f'</div>'
+    )
+    for i in range(gl_total):
+        item = gl_items[i] if i < len(gl_items) else {}
+        if not isinstance(item, dict):
+            item = {}
+        code = str(item.get("code", ""))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]  # WHY: form-derived dict carries Any element type
+        name = str(item.get("name", ""))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]  # WHY: form-derived dict carries Any element type
+        note = str(item.get("note", ""))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]  # WHY: form-derived dict carries Any element type
+        parts.append(
+            f'<div class="{grid_cls}">'
+            f'<input type="text" name="gl_accounts_{i}_code" value="{escape(code)}" placeholder="gl-1010" class="{input_cls}">'
+            f'<input type="text" name="gl_accounts_{i}_name" value="{escape(name)}" placeholder="Cash" class="{input_cls}">'
+            f'<input type="text" name="gl_accounts_{i}_note" value="{escape(note)}" placeholder="optional hint" class="{input_cls}">'
+            f'</div>'
+        )
+    parts.append('</fieldset>')
+
+    return "".join(parts)
+
+
+# BF.8 (2026-05-25) — ThemePreset structured form. 18 hex-color
+# fields + a few text fields + the data_colors / gradient lists.
+# The hex inputs use `type="color"` for an OS-native picker;
+# fallback to `type="text"` would be a stretch (every modern
+# browser supports color inputs).
+_THEME_TEXT_FIELDS: tuple[tuple[str, str, str, bool], ...] = (
+    # (form-name, label, helper, required)
+    ("theme_name", "Theme name", "Short identifier (e.g. \"snb-classic\").", True),
+    ("version_description", "Version description", "One-line summary surfaced on the audit PDF cover.", True),
+    ("analysis_name_prefix", "Analysis name prefix", "Optional prefix applied to QS analysis names (\"Demo\" / null for default).", False),
+)
+
+_THEME_OPTIONAL_URL_FIELDS: tuple[tuple[str, str, str], ...] = (
+    ("logo", "Logo URL or path", "Optional. URL (http/https/protocol-relative) or absolute file path; absolute paths copy into the docs build."),
+    ("favicon", "Favicon URL or path", "Optional. Same shape as logo."),
+)
+
+# Each tuple: (form-name, label, helper). All hex colors, rendered
+# as a paired `<input type="color">` + visible text field so the
+# operator can type a hex directly OR pick visually.
+_THEME_COLOR_FIELDS: tuple[tuple[str, str, str], ...] = (
+    ("primary_bg", "Primary background", "Page background — most surfaces."),
+    ("secondary_bg", "Secondary background", "Off-card / subtle stripe surfaces."),
+    ("primary_fg", "Primary text", "Body text colour."),
+    ("secondary_fg", "Secondary text", "Muted text, helpers, axis ticks."),
+    ("accent", "Accent", "Primary brand colour (titles, links, primary buttons)."),
+    ("accent_fg", "Accent foreground", "Text colour ON accent backgrounds (white on accent buttons)."),
+    ("link_tint", "Link tint", "Pale-accent cell tint for right-click drill backgrounds."),
+    ("danger", "Danger", "Error / negative-delta indicator."),
+    ("danger_fg", "Danger foreground", "Text on danger backgrounds."),
+    ("warning", "Warning", "Warning indicator."),
+    ("warning_fg", "Warning foreground", "Text on warning backgrounds."),
+    ("success", "Success", "Positive-delta indicator."),
+    ("success_fg", "Success foreground", "Text on success backgrounds."),
+    ("dimension", "Dimension", "Dimension-axis chip background."),
+    ("dimension_fg", "Dimension foreground", "Text on dimension chips."),
+    ("measure", "Measure", "Measure-axis chip background."),
+    ("measure_fg", "Measure foreground", "Text on measure chips."),
+)
+
+
+def _theme_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
+    """BF.8 — read the structured theme form data + build the dict
+    `singleton_save_l2` expects.
+
+    Form-name convention mirrors the persona helper:
+    - ``<field>`` for scalars (theme_name, version_description, etc.)
+    - ``data_colors_<N>`` for the data-color list (with
+      ``data_colors__count`` hidden int)
+    - ``gradient_low`` / ``gradient_high`` for the [light, dark] pair
+    """
+    out: dict[str, object] = {}
+
+    for fname, _, _, required in _THEME_TEXT_FIELDS:
+        v = str(form.get(fname, "")).strip()
+        if v:
+            out[fname] = v
+        elif required:
+            # Required scalar empty ⇒ surface as None so the loader
+            # raises its own actionable message rather than the
+            # studio guessing at validation messaging.
+            pass
+
+    # analysis_name_prefix: explicit "null"/"none" / blank ⇒ omit
+    # (None default). Anything else passes through above.
+    apn = str(form.get("analysis_name_prefix", "")).strip()
+    if apn.lower() in ("null", "none", ""):
+        out.pop("analysis_name_prefix", None)
+
+    # Optional URL fields.
+    for fname, _, _ in _THEME_OPTIONAL_URL_FIELDS:
+        v = str(form.get(fname, "")).strip()
+        if v:
+            out[fname] = v
+
+    # data_colors list.
+    n_str = form.get("data_colors__count", "0")
+    try:
+        n = int(str(n_str))
+    except ValueError:
+        n = 0
+    data_colors = [
+        str(form.get(f"data_colors_{i}", "")).strip() for i in range(n)
+    ]
+    data_colors = [c for c in data_colors if c]
+    if data_colors:
+        out["data_colors"] = data_colors
+
+    # empty_fill_color scalar.
+    efc = str(form.get("empty_fill_color", "")).strip()
+    if efc:
+        out["empty_fill_color"] = efc
+
+    # gradient: [low, high] paired pickers.
+    low = str(form.get("gradient_low", "")).strip()
+    high = str(form.get("gradient_high", "")).strip()
+    if low and high:
+        out["gradient"] = [low, high]
+
+    # All 17 UI colors.
+    for fname, _, _ in _THEME_COLOR_FIELDS:
+        v = str(form.get(fname, "")).strip()
+        if v:
+            out[fname] = v
+
+    return out
+
+
+def _theme_dict_from_instance(instance: Any) -> dict[str, object]:  # typing-smell: ignore[explicit-any]: L2Instance dataclass shape
+    """BF.8 — extract current theme dict for pre-populating the form.
+    Mirrors `_theme_form_to_dict`'s key shape."""
+    import dataclasses as dc  # noqa: PLC0415 — lazy
+
+    theme = getattr(instance, "theme", None)
+    if theme is None:
+        return {}
+    raw = dc.asdict(theme)  # pyright: ignore[reportUnknownArgumentType,reportUnknownVariableType]  # WHY: ThemePreset dataclass; asdict returns plain dict[str, Any]
+    # Drop None-valued optional fields so the form renders blank.
+    return {k: v for k, v in raw.items() if v is not None}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]  # WHY: dataclasses.asdict returns dict[str, Any]
+
+
+def _render_color_picker_row(
+    name: str, label: str, helper: str, value: str,
+    *, pair_with: tuple[str, str] | None = None,
+) -> str:
+    """BF.8 — paired `<input type="color">` + hex text input + a
+    visible preview chip.
+
+    Bound JS keeps the color picker + hex text in sync (typing
+    a hex updates the picker; picking a colour updates the text)
+    AND updates the preview chip's background-color so the operator
+    sees the colour rendered at size.
+
+    ``pair_with``: optional ``(other_hex, sample_text)``. When set,
+    renders the preview chip with the OTHER colour as the
+    background + this colour as the text (or vice versa per the
+    convention — bg/fg pairing), letting the operator eyeball the
+    contrast in context. Without it the preview chip just fills
+    with this colour solid.
+    """
+    row_cls = field_row_classes()
+    label_cls = "font-semibold text-xs text-primary-fg"
+    helper_cls = "text-xs text-secondary-fg"
+    input_cls = field_input_classes()
+    # Default to a neutral grey when unset so the color picker
+    # doesn't open at #000.
+    hex_value = value if value else "#cccccc"
+    # Preview chip — bigger swatch (24x10) rendered with the
+    # color as background. For bg/fg pairs, the chip shows the
+    # actual usage (text in one colour on the other's bg).
+    if pair_with is not None:
+        other_hex, sample_text = pair_with
+        other_safe = other_hex if other_hex else "#ffffff"
+        # The chip uses the pair's bg as its background + this
+        # colour as its text — operator eyeballs the actual contrast.
+        preview = (
+            f'<div id="field-{name}-preview" '
+            f'class="flex items-center justify-center px-3 py-2 rounded-sm '
+            f'text-sm font-semibold border border-surface-border w-32" '
+            f'style="background:{escape(other_safe)};color:{escape(hex_value)};">'
+            f'{escape(sample_text)}</div>'
+        )
+    else:
+        preview = (
+            f'<div id="field-{name}-preview" '
+            f'class="rounded-sm border border-surface-border w-32 h-9" '
+            f'style="background:{escape(hex_value)};"></div>'
+        )
+    return (
+        f'<div class="{row_cls}">'
+        f'<label for="field-{name}-hex" class="{label_cls}">{escape(label)}</label>'
+        f'<div class="flex items-center gap-3">'
+        f'<input type="color" id="field-{name}-color" '
+        f'value="{escape(hex_value)}" '
+        f'class="w-10 h-9 p-0 border border-surface-border rounded-sm cursor-pointer" '
+        f'oninput="var v=this.value;document.getElementById(&quot;field-{name}-hex&quot;).value=v;'
+        f'var p=document.getElementById(&quot;field-{name}-preview&quot;);'
+        f'if(p){{ if(p.style.background){{p.style.background=v;}}'
+        f'if(p.style.color){{p.style.color=v;}} }}">'
+        f'<input type="text" id="field-{name}-hex" name="{name}" '
+        f'value="{escape(value)}" '
+        f'placeholder="#aabbcc" '
+        f'class="{input_cls} font-mono tabular-nums w-32" '
+        f'oninput="if (/^#[0-9a-fA-F]{{6}}$/.test(this.value)){{'
+        f'document.getElementById(&quot;field-{name}-color&quot;).value=this.value;'
+        f'var p=document.getElementById(&quot;field-{name}-preview&quot;);'
+        f'if(p){{ if(p.style.background){{p.style.background=this.value;}}'
+        f'if(p.style.color){{p.style.color=this.value;}} }} }}">'
+        f'{preview}'
+        f'</div>'
+        f'<small class="{helper_cls}">{escape(helper)}</small>'
+        f'</div>'
+    )
+
+
+def _render_theme_form(
+    theme_dict: Mapping[str, object],
+    *,
+    extra_data_color_slots: int = 1,
+) -> str:
+    """BF.8 — render the structured theme form body."""
+    row_cls = field_row_classes()
+    input_cls = field_input_classes()
+    label_cls = "font-semibold text-xs text-primary-fg"
+    helper_cls = "text-xs text-secondary-fg"
+    section_cls = (
+        "border border-surface-border rounded-md p-4 mb-4 "
+        "bg-surface-bg flex flex-col gap-3"
+    )
+    section_label_cls = (
+        "font-semibold text-sm text-primary-fg flex items-center gap-2"
+    )
+
+    parts: list[str] = []
+
+    # Identity section.
+    parts.append(
+        f'<fieldset class="{section_cls}">'
+        f'<legend class="{section_label_cls}">Identity</legend>'
+    )
+    for fname, label, helper, required in _THEME_TEXT_FIELDS:
+        req = '<span class="text-danger"> *</span>' if required else ""
+        v = str(theme_dict.get(fname, "") or "")
+        parts.append(
+            f'<div class="{row_cls}">'
+            f'<label for="field-{fname}" class="{label_cls}">{escape(label)}{req}</label>'
+            f'<input type="text" id="field-{fname}" name="{fname}" '
+            f'value="{escape(v)}" class="{input_cls}">'
+            f'<small class="{helper_cls}">{escape(helper)}</small>'
+            f'</div>'
+        )
+    parts.append('</fieldset>')
+
+    # Data colour palette.
+    data_colors = theme_dict.get("data_colors", [])
+    dc_items = list(data_colors) if isinstance(data_colors, list) else []  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]  # WHY: form-derived dict carries Any element type
+    dc_total = len(dc_items) + extra_data_color_slots
+    parts.append(
+        f'<fieldset class="{section_cls}">'
+        f'<legend class="{section_label_cls}">Data colour palette</legend>'
+        f'<p class="{helper_cls} m-0">Hex colours cycled per series in QS charts. At least one required. Blank slots dropped on save.</p>'
+        f'<input type="hidden" name="data_colors__count" value="{dc_total}">'
+    )
+    for i in range(dc_total):
+        v = str(dc_items[i]) if i < len(dc_items) else ""
+        parts.append(
+            _render_color_picker_row(
+                f"data_colors_{i}",
+                f"Series {i + 1}",
+                "Hex (e.g. #1f4e79).",
+                v,
+            )
+        )
+    parts.append('</fieldset>')
+
+    # Empty fill + gradient.
+    efc = str(theme_dict.get("empty_fill_color", "") or "")
+    gradient = theme_dict.get("gradient", [])
+    grad_items = list(gradient) if isinstance(gradient, list) else []  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]  # WHY: form-derived dict carries Any element type
+    low = str(grad_items[0]) if len(grad_items) > 0 else ""
+    high = str(grad_items[1]) if len(grad_items) > 1 else ""
+    parts.append(
+        f'<fieldset class="{section_cls}">'
+        f'<legend class="{section_label_cls}">Empty + gradient</legend>'
+        + _render_color_picker_row(
+            "empty_fill_color", "Empty fill",
+            "Colour used when a chart cell has no data.", efc,
+        )
+        + _render_color_picker_row(
+            "gradient_low", "Gradient (low)",
+            "Light end of the heatmap gradient.", low,
+        )
+        + _render_color_picker_row(
+            "gradient_high", "Gradient (high)",
+            "Dark end of the heatmap gradient.", high,
+        )
+        + '</fieldset>'
+    )
+
+    # UI palette — 17 colors grouped by purpose so the operator
+    # understands what each role drives. Pair-renders bg/fg colors
+    # side-by-side with a preview showing actual usage (sample
+    # text in the fg colour on the bg colour) so contrast issues
+    # surface visually before deploy.
+    def _color_value(fname: str) -> str:
+        return str(theme_dict.get(fname, "") or "")
+
+    def _color_label(fname: str) -> str:
+        for (n, lbl, _) in _THEME_COLOR_FIELDS:
+            if n == fname:
+                return lbl
+        return fname
+
+    def _color_helper(fname: str) -> str:
+        for (n, _, h) in _THEME_COLOR_FIELDS:
+            if n == fname:
+                return h
+        return ""
+
+    def _render_solo(fname: str) -> str:
+        return _render_color_picker_row(
+            fname, _color_label(fname), _color_helper(fname),
+            _color_value(fname),
+        )
+
+    def _render_pair(bg_name: str, fg_name: str, sample: str) -> str:
+        """Render the bg + fg colors with each preview showing the
+        ACTUAL pair (fg text on bg surface) so contrast is visible
+        at a glance."""
+        return (
+            _render_color_picker_row(
+                bg_name, _color_label(bg_name), _color_helper(bg_name),
+                _color_value(bg_name),
+                pair_with=(_color_value(fg_name), sample),
+            )
+            + _render_color_picker_row(
+                fg_name, _color_label(fg_name), _color_helper(fg_name),
+                _color_value(fg_name),
+                pair_with=(_color_value(bg_name), sample),
+            )
+        )
+
+    parts.append(
+        f'<fieldset class="{section_cls}">'
+        f'<legend class="{section_label_cls}">UI palette — surfaces + text</legend>'
+        f'<p class="{helper_cls} m-0">Page backgrounds + body text. Every panel / card across QS dashboards, the studio chrome, and the audit PDF reads from these. <strong>Pair-previews</strong> show the actual surface/text combo.</p>'
+        + _render_solo("primary_bg")
+        + _render_solo("secondary_bg")
+        + _render_solo("primary_fg")
+        + _render_solo("secondary_fg")
+        + '</fieldset>'
+    )
+
+    parts.append(
+        f'<fieldset class="{section_cls}">'
+        f'<legend class="{section_label_cls}">UI palette — brand</legend>'
+        f'<p class="{helper_cls} m-0">Accent is the primary brand colour — titles, links, primary buttons, focus rings. <code>accent_fg</code> is the text colour ON accent backgrounds (white-on-accent buttons). <code>link_tint</code> is the pale-accent wash used as the background for right-click-drill table cells.</p>'
+        + _render_pair("accent", "accent_fg", "Sample button")
+        + _render_solo("link_tint")
+        + '</fieldset>'
+    )
+
+    parts.append(
+        f'<fieldset class="{section_cls}">'
+        f'<legend class="{section_label_cls}">UI palette — state colours</legend>'
+        f'<p class="{helper_cls} m-0">Three state pairs — danger (errors, breach indicators), warning (heads-up signals), success (positive-delta / closed-clean indicators). Each pair pre-previews the bg + fg combo: aim for AA contrast minimum.</p>'
+        + _render_pair("danger", "danger_fg", "Error")
+        + _render_pair("warning", "warning_fg", "Warning")
+        + _render_pair("success", "success_fg", "Closed clean")
+        + '</fieldset>'
+    )
+
+    parts.append(
+        f'<fieldset class="{section_cls}">'
+        f'<legend class="{section_label_cls}">UI palette — chart axis chips</legend>'
+        f'<p class="{helper_cls} m-0">QS visuals carry dimension / measure chips in the field-wells. <code>dimension</code> + <code>measure</code> are the chip backgrounds; <code>*_fg</code> the chip text.</p>'
+        + _render_pair("dimension", "dimension_fg", "by Account")
+        + _render_pair("measure", "measure_fg", "SUM(amount)")
+        + '</fieldset>'
+    )
+
+    # Optional brand assets.
+    parts.append(
+        f'<fieldset class="{section_cls}">'
+        f'<legend class="{section_label_cls}">Brand assets (optional)</legend>'
+    )
+    for fname, label, helper in _THEME_OPTIONAL_URL_FIELDS:
+        v = str(theme_dict.get(fname, "") or "")
+        parts.append(
+            f'<div class="{row_cls}">'
+            f'<label for="field-{fname}" class="{label_cls}">{escape(label)}</label>'
+            f'<input type="text" id="field-{fname}" name="{fname}" '
+            f'value="{escape(v)}" placeholder="https://… or /abs/path.png" '
+            f'class="{input_cls}">'
+            f'<small class="{helper_cls}">{escape(helper)}</small>'
+            f'</div>'
+        )
+    parts.append('</fieldset>')
+
+    return "".join(parts)
+
+
 def _render_singleton_page(
     kind: EntityKind,
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — read attribute + theme head
     yaml_text: str | None = None,
     global_error: str | None = None,
+    structured_overrides: Mapping[str, object] | None = None,
 ) -> str:
     """X.4.f.12 — singleton edit page (Theme / Persona).
 
@@ -2922,7 +3580,6 @@ def _render_singleton_page(
     out high enough to warrant it.
     """
     label, intro_html = _SINGLETON_INTRO_BY_KIND[kind]
-    current_yaml = yaml_text if yaml_text is not None else _singleton_yaml_text(instance, kind)
     global_err_html = (
         f'<div role="alert" class="text-sm text-danger bg-red-50 border '
         f'border-danger rounded-sm px-3 py-2 mb-3">{escape(global_error)}</div>'
@@ -2931,6 +3588,36 @@ def _render_singleton_page(
     primary_btn = primary_button_classes()
     input_cls = field_input_classes()
     row_cls = field_row_classes()
+    # BF.7 / BF.8 — persona + theme singletons render as structured
+    # forms. instance singleton stays as the YAML textarea (only two
+    # top-level scalars — structured form would be overkill).
+    if kind == "persona":
+        persona_dict = (
+            dict(structured_overrides) if structured_overrides is not None
+            else _persona_dict_from_instance(instance)
+        )
+        form_body = _render_persona_form(persona_dict)
+    elif kind == "theme":
+        theme_dict = (
+            dict(structured_overrides) if structured_overrides is not None
+            else _theme_dict_from_instance(instance)
+        )
+        form_body = _render_theme_form(theme_dict)
+    else:
+        current_yaml = yaml_text if yaml_text is not None else _singleton_yaml_text(instance, kind)
+        form_body = (
+            f'<div class="{row_cls}">'
+            f'<label for="field-yaml" class="font-semibold text-xs text-primary-fg">YAML</label>'
+            f'<textarea id="field-yaml" name="yaml" rows="22" '
+            f'class="{input_cls} font-mono whitespace-pre resize-y min-h-16" '
+            f'spellcheck="false">{escape(current_yaml)}</textarea>'
+            f'<small class="text-xs text-secondary-fg">'
+            f'Empty block ⇒ clears the {escape(kind)} (silent-fallback). '
+            f'Bad YAML or missing required fields ⇒ form re-renders with '
+            f'your typed content + the validator error inline.'
+            f'</small>'
+            f'</div>'
+        )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -2948,15 +3635,7 @@ def _render_singleton_page(
       <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form">
         <input type="hidden" name="_method" value="PUT">
         {global_err_html}
-        <div class="{row_cls}">
-          <label for="field-yaml" class="font-semibold text-xs text-primary-fg">YAML</label>
-          <textarea id="field-yaml" name="yaml" rows="22" class="{input_cls} font-mono whitespace-pre resize-y min-h-16" spellcheck="false">{escape(current_yaml)}</textarea>
-          <small class="text-xs text-secondary-fg">
-            Empty block ⇒ clears the {escape(kind)} (silent-fallback).
-            Bad YAML or missing required fields ⇒ form re-renders with
-            your typed content + the validator error inline.
-          </small>
-        </div>
+        {form_body}
         <div class="flex items-center gap-3 mt-4">
           <button type="submit" class="{primary_btn}">Save</button>
           <a class="text-accent no-underline text-xs cursor-pointer hover:underline" href="/">Cancel</a>
@@ -3303,13 +3982,37 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
 
         form = await request.form()
 
-        # X.4.f.12 — singleton POST (Theme / Persona). The form's
-        # hidden ``_method=PUT`` confirms intent (browser form-method
-        # is POST; the route table can't distinguish a singleton-save
-        # from a list-create POST otherwise). The yaml field carries
-        # the raw text; singleton_save_l2 parses + dispatches.
+        # X.4.f.12 — singleton POST (Theme / Persona / Instance).
+        # The form's hidden ``_method=PUT`` confirms intent (browser
+        # form-method is POST; the route table can't distinguish a
+        # singleton-save from a list-create POST otherwise).
+        #
+        # BF.7 (persona) + BF.8 (theme): structured forms POST per-
+        # field controls. Server collects them into the dict shape
+        # the YAML loader expects, dumps to YAML, then reuses the
+        # existing `singleton_save_l2` path so validation stays the
+        # single source of truth. instance singleton stays as the
+        # raw `yaml` field (two-scalar block doesn't warrant a
+        # structured form).
         if kind in SINGLETON_KINDS:
-            yaml_text = str(form.get("yaml", ""))
+            import yaml as _yaml  # noqa: PLC0415
+            structured_dict: dict[str, object] | None = None
+            if kind == "persona":
+                structured_dict = _persona_form_to_dict(
+                    {k: str(v) for k, v in form.multi_items()},
+                )
+                yaml_text = _yaml.safe_dump(
+                    structured_dict, default_flow_style=False, sort_keys=False,
+                ) if structured_dict else ""
+            elif kind == "theme":
+                structured_dict = _theme_form_to_dict(
+                    {k: str(v) for k, v in form.multi_items()},
+                )
+                yaml_text = _yaml.safe_dump(
+                    structured_dict, default_flow_style=False, sort_keys=False,
+                ) if structured_dict else ""
+            else:
+                yaml_text = str(form.get("yaml", ""))
             try:
                 new_inst = singleton_save_l2(cache.get(), kind, yaml_text)
             except ValueError as exc:
@@ -3318,6 +4021,7 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
                         kind, cache.get(),
                         yaml_text=yaml_text,
                         global_error=str(exc),
+                        structured_overrides=structured_dict,
                     ),
                     status_code=400,
                 )
@@ -3329,6 +4033,7 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
                         kind, cache.get(),
                         yaml_text=yaml_text,
                         global_error=str(exc),
+                        structured_overrides=structured_dict,
                     ),
                     status_code=400,
                 )
@@ -3664,6 +4369,39 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
         resp.headers["HX-Trigger"] = "l2-cascade-reload"
         return resp
 
+    async def preview_markdown(request: Request) -> HTMLResponse:
+        """BF.9 (2026-05-25) — markdown → HTML preview endpoint.
+
+        POST body is a form-encoded payload with ONE field name
+        (any name; HTMX's ``hx-include`` scopes the source). Reads
+        the FIRST non-meta form value + renders via Python-Markdown.
+        Returns the rendered HTML for the htmx swap target.
+
+        Lazy-imports `markdown` so the studio surface boots without
+        a hard dep on Python-Markdown (it ships transitively via
+        mkdocs but isn't in the studio's required-extras list).
+        """
+        import markdown as _md  # noqa: PLC0415 — lazy
+        form = await request.form()
+        # Take the first non-empty value; HTMX's hx-include scopes
+        # the include set so there's exactly one textarea on POST.
+        text = ""
+        for k, v in form.multi_items():
+            if k.startswith("_") or k == "csrf":
+                continue
+            text = str(v)
+            if text:
+                break
+        if not text.strip():
+            return HTMLResponse(
+                '<p class="text-secondary-fg italic m-0">(empty — nothing to preview)</p>',
+            )
+        # extras=[]: stay vanilla. The handbook templates render at
+        # build time + escape per their own template logic; the
+        # studio preview is informational, NOT load-bearing.
+        rendered = _md.markdown(text, extensions=["fenced_code", "tables"])
+        return HTMLResponse(rendered)
+
     return {
         "list_view": list_view,
         "read_card": read_card,
@@ -3672,6 +4410,7 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
         "delete": delete_handler,
         "new_form": new_form,
         "create": create,
+        "preview_markdown": preview_markdown,
     }
 
 
@@ -3803,6 +4542,13 @@ def make_editor_routes(
             Route(
                 "/l2_shape/{kind}/{entity_id}", h["delete"],
                 methods=["DELETE"], name="l2_shape_delete",
+            ),
+            # BF.9 (2026-05-25) — markdown preview endpoint for the
+            # description-field Edit/Preview tabs. Demo-mode strips
+            # it (the form doesn't render either).
+            Route(
+                "/preview/markdown", h["preview_markdown"],
+                methods=["POST"], name="preview_markdown",
             ),
         ])
     return routes
