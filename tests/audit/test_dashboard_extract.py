@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _cfg_env(monkeypatch_module: pytest.MonkeyPatch) -> None:
+def _cfg_env(monkeypatch_module: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]: autouse pytest fixture
     """Stamp the cfg-shaped env vars `load_config(None)` needs in the
     `l1_app` fixture below. Module-scoped so the env doesn't leak into
     other test modules (pre-Z.C.7 this was module-level

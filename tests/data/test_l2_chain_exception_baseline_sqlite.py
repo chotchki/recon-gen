@@ -363,7 +363,9 @@ def test_chain_orphans_fan_in_aware_not_naive_subtraction() -> None:
         dialect=Dialect.SQLITE,
     )
     aws_ds = ds_mod.build_exc_chain_orphans_dataset(cfg, inst)
-    sql = list(aws_ds.PhysicalTableMap.values())[0].CustomSql.SqlQuery
+    custom_sql = list(aws_ds.PhysicalTableMap.values())[0].CustomSql
+    assert custom_sql is not None
+    sql = custom_sql.SqlQuery
     rows = cur.execute(sql).fetchall()
 
     fan_in_parents = {

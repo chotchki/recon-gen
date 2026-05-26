@@ -15,7 +15,7 @@ See ``be_2_planted_src.py`` for the rationale.
 """
 
 
-def _planted_assert_public() -> bool:
+def _planted_assert_public() -> bool:  # pyright: ignore[reportUnusedFunction]: invoked by AST walker, not Python
     """Inline-assert against the public planted constant — should
     trip the lint with a message naming PLANTED_PROD_CONSTANT in
     be_2_planted_src.py."""
@@ -26,7 +26,7 @@ def _planted_assert_public() -> bool:
     return True
 
 
-def _planted_assert_private() -> bool:
+def _planted_assert_private() -> bool:  # pyright: ignore[reportUnusedFunction]: invoked by AST walker, not Python
     """Inline-assert against the private planted constant — should
     trip the lint naming _PLANTED_PRIVATE_PROD_CONSTANT."""
     actual = "be_2_planted_private_sentinel"

@@ -10,7 +10,7 @@ See ``be_1_planted_src.py`` for the rationale.
 """
 
 
-def _planted_duplicate() -> str:
+def _planted_duplicate() -> str:  # pyright: ignore[reportUnusedFunction]: invoked by AST walker, not Python
     """Returns the duplicated SQL — same fingerprint as
     ``PLANTED_SRC_SQL`` in ``be_1_planted_src.py``."""
     return (

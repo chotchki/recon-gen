@@ -168,6 +168,7 @@ def test_render_uses_semantic_tokens() -> None:
     app, sheet = _build_app()
     # Add a second sheet so the tab strip renders with bg-accent
     # on the active tab.
+    assert app.analysis is not None
     app.analysis.add_sheet(Sheet(
         sheet_id=SheetId("theme-sheet-2"),
         name="Two", title="Two", description="x",

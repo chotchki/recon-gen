@@ -9,7 +9,7 @@ See ``be_5_planted_driver.py`` for the rationale.
 """
 
 
-def _planted_assert() -> bool:
+def _planted_assert() -> bool:  # pyright: ignore[reportUnusedFunction]: invoked by AST walker, not Python
     """Inline-assert against the planted driver constant — should
     trip the BE.5 lint naming PLANTED_DRIVER_CONSTANT."""
     actual = "be_5_planted_driver_sentinel_value"

@@ -186,7 +186,7 @@ def test_coverage_chain_edge_derived_from_endpoints(
     ReconciliationClosing``. Both endpoints have 0 rows in the seed →
     edge is absent. (Reflects the seed-data shape, not a bug.)
     """
-    nodes, edges = _run_coverage(seeded_pool, spec_example_instance)
+    _, edges = _run_coverage(seeded_pool, spec_example_instance)
 
     # Spot-check at least one chain edge is reported (every declared
     # ChainEntry should land in the edges map).

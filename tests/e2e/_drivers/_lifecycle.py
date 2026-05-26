@@ -23,7 +23,7 @@ policy.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Generator
 from typing import TYPE_CHECKING
 
 import pytest
@@ -43,7 +43,7 @@ def qs_driver_or_none(
     account_id: str,
     region: str,
     viewport: tuple[int, int] = (1600, 1000),
-) -> Iterator["QsEmbedDriver | None"]:
+) -> Generator["QsEmbedDriver | None", None, None]:
     """Context manager: yield a ``QsEmbedDriver`` if QS is available,
     else yield ``None``. On exit (success or failure) fires the
     failure-capture hook iff a driver was yielded.

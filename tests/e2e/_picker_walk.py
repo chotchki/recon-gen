@@ -174,6 +174,7 @@ def enumerate_picker_sheets() -> list[PickerSheet]:
     out: list[PickerSheet] = []
     for app_name, app in _build_apps():
         dashboard_id = str(app.name)
+        assert app.analysis is not None
         for sheet in app.analysis.sheets:
             specs = _picker_specs_for_sheet(sheet)
             if not specs:

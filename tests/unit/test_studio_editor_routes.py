@@ -334,7 +334,6 @@ def test_get_new_form_returns_full_page_with_intro_prose(
     # The <form> itself has no hx-post (the form submits via plain
     # HTML — only field-internal previews use HTMX).
     form_start = body.index('<form ')
-    form_close = body.index('</form>', form_start)
     form_open_tag = body[form_start:body.index('>', form_start) + 1]
     assert "hx-post" not in form_open_tag
     # No prefilled values on a blank form.
@@ -577,8 +576,6 @@ def test_put_rail_name_rename_cascades_to_templates_and_chains(
     )
 
     new_name = f"{referenced_rail_name}_RENAMED"
-    # Pull the existing rail's other fields to round-trip cleanly.
-    pre_rail = next(r for r in pre.rails if str(r.name) == referenced_rail_name)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.put(
             f"/l2_shape/rail/{referenced_rail_name}",
