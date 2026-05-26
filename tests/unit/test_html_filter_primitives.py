@@ -417,7 +417,7 @@ def test_server_passes_prefix_keyed_params_to_fetcher() -> None:
     asgi = make_app(dashboards={
         "filters": ServedDashboard(
             tree_app=app, sheet=sheet,
-            title="Filters", data_fetcher=fetcher,
+            title="Filters", data_fetcher=fetcher,  # pyright: ignore[reportArgumentType]: inline fetcher closure; structural DataFetcher contract holds at runtime
         ),
     })
     client = TestClient(asgi)

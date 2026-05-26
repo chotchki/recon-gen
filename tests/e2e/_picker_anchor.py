@@ -240,7 +240,7 @@ def fetch_anchor_row(
 
     with psycopg.connect(cfg.demo_database_url, connect_timeout=60) as conn:
         with conn.cursor() as cur:
-            cur.execute(wrapped)
+            cur.execute(wrapped)  # pyright: ignore[reportCallIssue]: psycopg.execute overload tolerance
             row = cur.fetchone()
             cols = [d.name for d in cur.description] if cur.description else []
 

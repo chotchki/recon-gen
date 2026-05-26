@@ -21,15 +21,18 @@ from datetime import timedelta
 
 import pytest
 
+from decimal import Decimal
+
 from recon_gen.common.l2 import (
     Identifier,
     L2Instance,
+    Money,
+    RailName,
     emit_schema,
     refresh_matviews_sql,
 )
 from recon_gen.common.l2.primitives import (
     LimitSchedule,
-    RoleExpression,
     SingleLegRail,
 )
 from recon_gen.common.sql import Dialect
@@ -58,7 +61,7 @@ def _full_instance(prefix: str) -> L2Instance:
                 name=Identifier("SettlementRail"),
                 description="Settlement rail with aging",
                 metadata_keys=(),
-                leg_role=RoleExpression(Identifier("gl_control")),
+                leg_role=(Identifier("gl_control"),),
                 leg_direction="Debit",
                 posted_requirements=(),
                 max_pending_age=timedelta(days=1),
@@ -71,8 +74,8 @@ def _full_instance(prefix: str) -> L2Instance:
             LimitSchedule(
                 description="cap on settle from gl_control",
                 parent_role=Identifier("gl_control"),
-                rail=Identifier("SettlementRail"),
-                cap=10000,
+                rail=RailName("SettlementRail"),
+                cap=Money(Decimal(10000)),
             ),
         ),
     )

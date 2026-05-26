@@ -237,6 +237,7 @@ def test_bg2_narrative_formula_against_independent_truth_catches_matview_net_flo
        diverges from independent_sum.
     """
     cfg = planted_sqlite
+    assert cfg.demo_database_url is not None
     conn = sqlite3.connect(cfg.demo_database_url)
     # Plant a base-transactions table mirroring the matview's input
     # shape. In v6 amount_money is signed: Credit positive, Debit

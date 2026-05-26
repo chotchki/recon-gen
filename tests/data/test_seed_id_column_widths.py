@@ -82,7 +82,7 @@ def _cfg_for_test(prefix: str) -> Config:
         # demo_database_url required so Config skips the datasource_arn
         # gate; we never actually connect.
         demo_database_url=f"postgresql://noconn:noconn@localhost:1/{prefix}",
-        principal_arns=(),
+        principal_arns=[],
     )
 
 

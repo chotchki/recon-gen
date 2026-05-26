@@ -246,7 +246,7 @@ def test_visual_data_fetch_works_for_non_default_sheet() -> None:
     asgi = make_app(dashboards={
         "L1": ServedDashboard(
             tree_app=app, sheet=sheets[0],  # Default = home
-            title="L1", data_fetcher=fetcher,
+            title="L1", data_fetcher=fetcher,  # pyright: ignore[reportArgumentType]: inline fetcher closure; structural DataFetcher contract holds at runtime
         ),
     })
     client = TestClient(asgi)

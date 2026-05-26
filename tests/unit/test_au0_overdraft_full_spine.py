@@ -70,6 +70,8 @@ The AU.0 audit subsection (`docs/audits/date_range_model_audit.md` §5
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -277,7 +279,7 @@ def _insert_balance(conn: sqlite3.Connection, **vals: object) -> None:
     for col in ("money", "expected_eod_balance"):
         raw = vals.get(col)
         if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-            vals[col] = int(Cents.from_dollars(raw))
+            vals[col] = int(Cents.from_dollars(raw if isinstance(raw, int) else Decimal(str(raw))))
     placeholders = ", ".join("?" for _ in _DB_COLS)
     conn.execute(
         f"INSERT INTO {_PREFIX}_daily_balances ({', '.join(_DB_COLS)}) "

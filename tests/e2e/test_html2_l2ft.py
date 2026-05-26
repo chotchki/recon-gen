@@ -96,7 +96,7 @@ def l2ft_driver() -> Iterator[App2Driver]:
     with App2Driver.serving(
         cfg=_TEST_CFG,
         tree_app=tree_app, sheet=landing_sheet,
-        data_fetcher=_l2ft_stub_fetcher,
+        data_fetcher=_l2ft_stub_fetcher,  # pyright: ignore[reportArgumentType]: inline fetcher closure; structural DataFetcher contract holds at runtime
         dashboard_id=_DASHBOARD_ID,
         dashboard_title="L2 Flow Tracing",
     ) as driver:

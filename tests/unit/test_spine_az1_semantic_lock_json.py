@@ -157,11 +157,11 @@ def test_two_runs_of_same_scenario_produce_byte_identical_output() -> None:
         }),
     }
     out_a = lock_to_json(
-        lock_a, instance="i", dialect=Dialect.SQLITE,
+        lock_a, instance="i", dialect=Dialect.SQLITE,  # pyright: ignore[reportArgumentType]: RuleViolation is the test alias for Violation; same runtime shape
         canonical_anchor=date(2030, 1, 1),
     )
     out_b = lock_to_json(
-        lock_b, instance="i", dialect=Dialect.SQLITE,
+        lock_b, instance="i", dialect=Dialect.SQLITE,  # pyright: ignore[reportArgumentType]: RuleViolation is the test alias for Violation; same runtime shape
         canonical_anchor=date(2030, 1, 1),
     )
     assert out_a == out_b

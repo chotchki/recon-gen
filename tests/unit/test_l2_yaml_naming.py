@@ -32,6 +32,7 @@ from textwrap import dedent
 import pytest
 
 from recon_gen.common.l2 import (
+    Identifier,
     L2LoaderError,
     L2ValidationError,
     TwoLegRail,
@@ -260,8 +261,8 @@ def test_metadata_value_examples_load(tmp_path: Path) -> None:
     rail = inst.rails[0]
     assert isinstance(rail, TwoLegRail)
     examples = dict(rail.metadata_value_examples)
-    assert examples["merchant_id"] == ("m-001", "m-002", "m-003")
-    assert examples["settlement_period"] == ("2026-04", "2026-05")
+    assert examples[Identifier("merchant_id")] == ("m-001", "m-002", "m-003")
+    assert examples[Identifier("settlement_period")] == ("2026-04", "2026-05")
 
 
 def test_metadata_value_examples_default_empty(tmp_path: Path) -> None:

@@ -99,7 +99,7 @@ def exec_driver() -> Iterator[App2Driver]:
     with App2Driver.serving(
         cfg=_TEST_CFG,
         tree_app=tree_app, sheet=primary_sheet,
-        data_fetcher=_exec_stub_fetcher,
+        data_fetcher=_exec_stub_fetcher,  # pyright: ignore[reportArgumentType]: inline fetcher closure; structural DataFetcher contract holds at runtime
         dashboard_id=_DASHBOARD_ID,
         dashboard_title="Executives",
     ) as driver:
@@ -208,7 +208,7 @@ def test_dev_log_events_land_in_server_log() -> None:
     with App2Driver.serving(
         cfg=_TEST_CFG,
         tree_app=tree_app, sheet=primary_sheet,
-        data_fetcher=_exec_stub_fetcher,
+        data_fetcher=_exec_stub_fetcher,  # pyright: ignore[reportArgumentType]: inline fetcher closure; structural DataFetcher contract holds at runtime
         dashboard_id=_DASHBOARD_ID,
         dashboard_title="Executives",
         dev_log=True,
