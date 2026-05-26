@@ -232,22 +232,39 @@ def test_bg4_recipient_fanout_kpis_match_inflows_only_truth(
             "uses the same skip pattern). Plant fanout spikes to re-light."
         )
 
-    # Dedupe by (recipient_account_id, transfer_id) — counts each
-    # recipient-leg-of-transfer ONCE, regardless of how many sender
-    # legs it joined to.
-    unique_inflows: dict[tuple[str, str], Decimal] = {}
+    # Compute inflation-free ground truth that's invariant to whether
+    # BH.7's window divide is applied at the dataset layer. For each
+    # (recipient, transfer) pair, the JOINED rows share the same
+    # underlying inflow amount, but the per-row `amount` value either
+    # repeats (pre-BH.7) or pre-divides by sender-count (post-BH.7).
+    # `amount_per_pair × rows_per_pair` reconstructs the per-pair
+    # inflow in BOTH worlds: pre-BH.7 amount=I, rows=M → I×M (BUG —
+    # over-counts), post-BH.7 amount=I/M, rows=M → I (correct). The
+    # ground truth across all pairs is then SUM of per-pair inflows.
+    from collections import defaultdict
+
+    rows_per_pair: dict[tuple[str, str], int] = defaultdict(int)
+    amount_per_pair: dict[tuple[str, str], Decimal] = {}
     qualifying_recipients: set[str] = set()
     transfer_ids: set[str] = set()
     senders: set[str] = set()
     for row in rows:
         recipient = str(row["recipient_account_id"])
         transfer = str(row["transfer_id"])
-        unique_inflows[(recipient, transfer)] = Decimal(str(row["amount"]))
+        key = (recipient, transfer)
+        rows_per_pair[key] += 1
+        amount_per_pair[key] = Decimal(str(row["amount"]))
         qualifying_recipients.add(recipient)
         transfer_ids.add(transfer)
         senders.add(str(row["sender_account_id"]))
 
-    expected_total = sum(unique_inflows.values(), Decimal("0"))
+    # Ground-truth inflation-free total: per-pair inflow × per-pair
+    # rows, summed. Robust to pre- or post-BH.7 dataset shape (per
+    # the docstring above).
+    expected_total = sum(
+        (amount_per_pair[k] * rows_per_pair[k] for k in amount_per_pair),
+        Decimal("0"),
+    )
 
     # (1) Qualifying Recipients == distinct recipient_account_ids in
     # the fanout dataset (already distinct_count() in the binding —

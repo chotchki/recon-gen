@@ -360,7 +360,25 @@ SELECT
     j.sender_account_type,
     j.transfer_id,
     j.posted_at,
-    j.amount,
+    -- BH.7 (2026-05-25) — cartesian inflation fix. The joined CTE
+    -- emits one row per (recipient leg × sender leg); pre-BH.7's
+    -- bare ``j.amount`` projection repeated the per-recipient-leg
+    -- inflow amount on every sender-side row, so SUM(amount)
+    -- inflated by the per-transfer sender-leg count. Cold-read
+    -- finding #7: "Total Inbound = $1.54B across 11 distinct
+    -- senders feeding 4 qualifying recipients ... 58% of the
+    -- entire deploy's gross handle." Window-function divide by the
+    -- per-(recipient, transfer) row count restores the
+    -- inflation-free amount: SUM over the M rows for one transfer
+    -- = (inflow/M) × M = inflow. Window expression works on
+    -- PG/Oracle/SQLite (SQLite gained window functions in 3.25,
+    -- 2018; AO.1.impl already targets ≥3.38). Verified by
+    -- BG.4's ``test_bg4_recipient_fanout_kpis_match_inflows_only_truth``
+    -- which compares the SUM to a deduped-by-(recipient,transfer)
+    -- ground truth.
+    j.amount / COUNT(*) OVER (
+        PARTITION BY j.recipient_account_id, j.transfer_id
+    ) AS amount,
     dpr.distinct_senders
 FROM joined j
 JOIN distinct_per_recipient dpr
