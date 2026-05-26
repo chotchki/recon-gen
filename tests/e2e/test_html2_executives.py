@@ -97,6 +97,7 @@ def exec_driver() -> Iterator[App2Driver]:
     assert tree_app.analysis is not None
     primary_sheet = tree_app.analysis.sheets[0]
     with App2Driver.serving(
+        cfg=_TEST_CFG,
         tree_app=tree_app, sheet=primary_sheet,
         data_fetcher=_exec_stub_fetcher,
         dashboard_id=_DASHBOARD_ID,
@@ -205,6 +206,7 @@ def test_dev_log_events_land_in_server_log() -> None:
     assert tree_app.analysis is not None
     primary_sheet = tree_app.analysis.sheets[0]
     with App2Driver.serving(
+        cfg=_TEST_CFG,
         tree_app=tree_app, sheet=primary_sheet,
         data_fetcher=_exec_stub_fetcher,
         dashboard_id=_DASHBOARD_ID,
