@@ -100,13 +100,18 @@ def test_bg6_l2ft_exceptions_table_count_column_sums_to_dataset_total(
         )
     expected_sum = sum(int(row["count"]) for row in rows)
 
-    # Read the table's `count` column values (rendered as integers
-    # via .numerical() — no $ prefix, no decimals).
+    # Read the table's count column values (rendered as integers via
+    # .numerical() — no $ prefix, no decimals). BH.11 (v11.22.3)
+    # renamed the column's display_name from "Count" → "Violations
+    # per Type"; the underlying SQL column stays "count". DOM rows
+    # are keyed by display name; the dataset query rows are keyed by
+    # the underlying column name.
     table_rows = driver.table_rows(
-        "L2 Violation Detail", columns=["count"],
+        "L2 Violation Detail", columns=["Violations per Type"],
     )
     rendered_sum = sum(
-        int(str(row["count"]).replace(",", "")) for row in table_rows
+        int(str(row["Violations per Type"]).replace(",", ""))
+        for row in table_rows
     )
     # The DOM-rendered window may cap at ~50 rows (QS / App2 paging),
     # so we tighten the contract to "the rendered window's count sum
