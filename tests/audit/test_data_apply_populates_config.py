@@ -103,7 +103,7 @@ def cfg_path(tmp_path: Path, pg_url: str) -> Path:
 
 def _scalar(cfg, sql: str):  # type: ignore[no-untyped-def]: cfg untyped, return is row[0] of unknown driver type
     """Fetch a single scalar value from the demo DB via the cfg's driver."""
-    conn = connect_demo_db(cfg)
+    conn = connect_demo_db(cfg)  # pyright: ignore[reportUnknownArgumentType]: connect_demo_db cfg from untyped fixture
     try:
         cur = conn.cursor()
         try:

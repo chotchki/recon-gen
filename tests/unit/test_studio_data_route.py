@@ -290,7 +290,7 @@ def _put_form(c: TestClient, url: str, fields: list[tuple[str, str]]) -> "object
     + Content-Type header is the route around that. Used everywhere
     the test needs to round-trip multiple checkbox values."""
     body = "&".join(f"{k}={v}" for k, v in fields)
-    return c.put(
+    return c.put(  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]: Starlette response.put_data shape
         url,
         content=body,
         headers={"Content-Type": "application/x-www-form-urlencoded"},

@@ -352,10 +352,13 @@ precision = 1
 # reachable through the tree but stay outside strict; pyright still
 # resolves them via extraPaths for inference.
 [tool.pyright]
-# BF.3 — entire src/recon_gen/ is strict-clean after BF.1 slices 1-4.
-# Include broadened from a curated file list to the whole package.
+# BF.3 + BE.7.D — entire src/recon_gen/ strict-clean (BF.1) AND all of
+# tests/ strict-clean (BE.7.B + BE.7.C.2 + BE.7.C.3 / BF.4). Include
+# now spans the whole code surface, not a curated subset. Default
+# `pyright` (no args) runs at strict and lands at 0 errors.
 include = [
     "src/recon_gen",
+    "tests",
 ]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"

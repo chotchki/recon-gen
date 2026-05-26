@@ -1500,7 +1500,7 @@ class NoTestSrcSqlDuplicationCheck(Check):
     # Cleared between `_build_checks()` invocations because the Check
     # is reconstructed each call; intentional — pytest sessions are
     # short-lived enough that a fresh index per run is cheap.
-    _src_index: dict[str, tuple[Path, int]] = field(
+    _src_index: dict[str, tuple[Path, int]] = field(  # pyright: ignore[reportUnknownVariableType]: _src_index is dict[str, str] from glob walk
         default_factory=dict, init=False, repr=False,
     )
 
@@ -1724,7 +1724,7 @@ class NoInlineProductionConstantsCheck(Check):
     # syntax. Defaults preserve the BE.2 behavior.
     checker_name: str = "no-inline-production-constants"
     src_label: str = "src/"
-    _src_index: dict[str, tuple[Path, int, str]] = field(
+    _src_index: dict[str, tuple[Path, int, str]] = field(  # pyright: ignore[reportUnknownVariableType]: _src_index is dict[str, str] from glob walk
         default_factory=dict, init=False, repr=False,
     )
 

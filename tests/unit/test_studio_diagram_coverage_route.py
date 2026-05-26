@@ -221,7 +221,7 @@ def test_trainer_route_returns_json_without_pool() -> None:
         # Each entry is {plant_kind: count}; counts must be positive ints.
         for node_id, kinds in nodes.items():
             assert isinstance(kinds, dict)
-            assert all(isinstance(c, int) and c > 0 for c in kinds.values())
+            assert all(isinstance(c, int) and c > 0 for c in kinds.values())  # pyright: ignore[reportUnknownVariableType]: d3 coverage report row dict
             # Node IDs match the topology prefix scheme.
             assert (
                 node_id.startswith("role__")

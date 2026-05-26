@@ -102,7 +102,7 @@ def _anchor_or_skip(cfg, l2, spec: SheetAnchorSpec):  # type: ignore[no-untyped-
     `before > 0` assertion failure.
     """
     try:
-        return fetch_anchor_row(cfg, l2, spec)
+        return fetch_anchor_row(cfg, l2, spec)  # pyright: ignore[reportUnknownArgumentType]: fetch_anchor_row cfg/l2 from untyped fixtures
     except RuntimeError as exc:
         pytest.skip(f"{spec.sheet_name!r}: {exc}")
 

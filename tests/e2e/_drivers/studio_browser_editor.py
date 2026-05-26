@@ -452,7 +452,7 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
                         "the new reconciler's fields"
                     )
                 reconciler_entity = _find_reconciler_in_reference(
-                    reference, rec_kind, rec_name,
+                    reference, rec_kind, rec_name,  # pyright: ignore[reportArgumentType]: reference loaded from untyped yaml; runtime L2Instance
                 )
                 stripped = _strip_rail_lists(reconciler_entity, rec_kind)
                 rec_form_kind = (

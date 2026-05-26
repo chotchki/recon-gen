@@ -78,7 +78,7 @@ def build_handbook(
     if not _BUNDLED_MKDOCS_YML.exists():
         pytest.skip(f"mkdocs.yml not found at {_BUNDLED_MKDOCS_YML}")
     try:
-        import   # noqa: F401
+        import mkdocs as mkdocs  # noqa: F401  pyright: ignore[reportMissingImports]: optional dep
     except ImportError:
         pytest.skip("mkdocs not installed")
 

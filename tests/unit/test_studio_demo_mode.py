@@ -90,7 +90,7 @@ def _build_routes_with_demo_mode(
     cfg = _sqlite_cfg(tmp_path)
     cache = L2InstanceCache.from_path(yaml_path)
     tg_cache = TestGeneratorCache(cfg.test_generator)
-    return make_studio_routes(
+    return make_studio_routes(  # pyright: ignore[reportReturnType]: Starlette routes is list[Route | Mount]; widening is intentional
         cache,
         cfg=cfg,
         tg_cache=tg_cache,

@@ -7,6 +7,9 @@ leg_direction. No matching matview Invariant; `intended` returns a
 `CoverageObservation` per the AY.2.a evidence-currency layering.
 """
 
+# pytest.approx() typeshed stubs are partial — kill the resulting noise here.
+# pyright: reportUnknownMemberType=false
+
 from __future__ import annotations
 
 import json

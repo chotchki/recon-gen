@@ -80,7 +80,7 @@ class KPI:
 class BarChart:
     category: list[_StubDim]
     values: list[_StubMeasure]
-    colors: list[_StubDim] = field(default_factory=list)
+    colors: list[_StubDim] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]: colors list from QS theme dict walk
 
 
 @dataclass

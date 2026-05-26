@@ -8,6 +8,9 @@ every leg so the L2 Flow Tracing Transfer Templates sheet reads
 firings by template. `intended` returns a `CoverageObservation`.
 """
 
+# pytest.approx() typeshed stubs are partial — kill the resulting noise here.
+# pyright: reportUnknownMemberType=false
+
 from __future__ import annotations
 
 import json

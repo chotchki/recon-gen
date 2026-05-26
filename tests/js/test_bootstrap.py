@@ -225,7 +225,7 @@ def test_fire_anchor_request_logs_when_section_missing() -> None:
         page.on(
             "console",
             lambda msg: console_errors.append(msg.text)  # pyright: ignore[reportUnknownLambdaType, reportUnknownMemberType, reportUnknownArgumentType]: page.on stubs leak Unknown through lambda
-            if msg.type == "error" else None,
+            if msg.type == "error" else None,  # pyright: ignore[reportUnknownMemberType]: rapidjson Value.type stubs partial
         )
         page.goto(fixture_url)
         page.wait_for_function(

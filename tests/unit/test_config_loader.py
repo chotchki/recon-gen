@@ -52,7 +52,7 @@ def _required_yaml(extras: dict[str, object] | None = None) -> dict[str, object]
     return out
 
 
-def _write_yaml(tmp_path: Path, body: dict) -> Path:
+def _write_yaml(tmp_path: Path, body: dict) -> Path:  # pyright: ignore[reportUnknownParameterType, reportMissingTypeArgument]: body kwarg is the loose yaml dict shape
     p = tmp_path / "config.yaml"
     p.write_text(yaml.safe_dump(body), encoding="utf-8")
     return p
