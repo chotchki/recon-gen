@@ -493,16 +493,30 @@ class App2Driver:
 
     def _filter_control(self, label: str) -> Any:
         """Locator for the ``#filter-form`` control group whose visible
-        text contains ``label`` — a ``<label>`` for dropdown / multi-select
-        / numeric-range, or a ``.category-filter`` ``<div>`` for a
-        CategoryFilter."""
+        text starts with ``label`` — a ``<label>`` for dropdown /
+        multi-select / numeric-range, or a ``.category-filter`` ``<div>``
+        for a CategoryFilter.
+
+        BG.7 bug-2026-05-25: was `has_text=label` (substring + matches
+        ANY descendant text). A `<label>Role <select><option>ZBA**Sub**
+        Account</option>...</select></label>` matches `has_text=
+        "Account"` because the descendant `<option>` text contains
+        "Account". `.first` then returns the Role label by DOM order
+        and `filter_options("Account")` reads the wrong dropdown.
+        Anchor with a prefix-match regex so "Account" matches only the
+        label whose visible text STARTS with "Account" — `<label>Account
+        <select>...</select></label>` matches; `<label>Role <select>
+        ...ZBASubAccount...</select></label>` doesn't."""
+        import re
+
+        anchored = re.compile(r"^\s*" + re.escape(label) + r"\b")
         in_label = self._page.locator(
-            "#filter-form label", has_text=label,
+            "#filter-form label", has_text=anchored,
         )
         if in_label.count() > 0:
             return in_label.first
         return self._page.locator(
-            "#filter-form .category-filter", has_text=label,
+            "#filter-form .category-filter", has_text=anchored,
         ).first
 
     def pick_filter(self, label: str, values: Sequence[str]) -> None:
@@ -569,18 +583,60 @@ class App2Driver:
         ))
 
     def set_date(self, label: str, iso: str | None) -> None:
-        # AA.B.5.followon — App2 doesn't render single-value
-        # ``add_parameter_datetime_picker`` controls today (skipped
-        # during ``_tree_filter_specs.py::specs_for_sheet``). The
-        # dataset SQL pushdown for Daily Statement (DS_DAILY_STATEMENT_*)
-        # narrows on account only — date narrowing is QS-only via the
-        # analysis-level TimeEqualityFilter. So this is a no-op: the
-        # test can call it unconditionally for renderer-agnosticism;
-        # on App2 the unnarrowed result is the intended behavior. When
-        # X.4's renderer-parity sweep adds a date widget here, this
-        # turns into a real driver impl.
-        del label, iso  # explicitly unused
-        return
+        """BG.7 (2026-05-25, per user "why wouldn't it run against
+        both?" + feedback_build_verbs_not_skip): real impl that
+        drives the App2 single-date picker.
+
+        Wire shape (per `render.py:_render_parameter_date`): the
+        ``ParameterDateSpec`` renders a ``<label>...<input data-widget=
+        "flatpickr-single" data-target-input="param_<name>" ...></label>``
+        + a sibling ``<input type="hidden" name="param_<name>" ...>``.
+        Bootstrap.js's ``wireFlatpickrSingle`` writes the hidden input
+        + dispatches a bubbling change → ``wireFilterAutoRefresh``'s
+        300ms debounce → form refresh.
+
+        Driver path: locate the visible flatpickr input by its label
+        text, read its ``data-target-input`` attribute to find the
+        hidden input's name, then write both inputs + dispatch change
+        (mirrors the flatpickr → bootstrap wire without depending on
+        the widget itself being responsive in a headless context).
+        """
+        if iso is None:
+            return
+        self._wait_for_refetch(lambda: self._page.evaluate(
+            """({ label, iso }) => {
+                const form = document.querySelector('#filter-form');
+                if (!form) throw new Error('set_date: #filter-form missing');
+                const labels = Array.from(form.querySelectorAll('label'));
+                const match = labels.find(l => l.textContent.trim().startsWith(label));
+                if (!match) {
+                    throw new Error(
+                        'set_date: no label starting with ' + JSON.stringify(label)
+                        + ' (have: ' + labels.map(l => l.textContent.trim()).join(' | ') + ')'
+                    );
+                }
+                const visible = match.querySelector('input[data-widget="flatpickr-single"]');
+                if (!visible) {
+                    throw new Error(
+                        'set_date: label ' + JSON.stringify(label)
+                        + ' carries no [data-widget="flatpickr-single"] input — '
+                        + 'the picker spec changed shape?'
+                    );
+                }
+                const target = visible.getAttribute('data-target-input');
+                const hidden = form.querySelector('input[type="hidden"][name="' + target + '"]');
+                if (!hidden) {
+                    throw new Error(
+                        'set_date: hidden input for ' + JSON.stringify(target)
+                        + ' missing — bootstrap.js wire shape changed?'
+                    );
+                }
+                visible.value = iso;
+                hidden.value = iso;
+                hidden.dispatchEvent(new Event('change', { bubbles: true }));
+            }""",
+            {"label": label, "iso": iso},
+        ))
 
     def set_slider(
         self, label: str, lo: float | None, hi: float | None,

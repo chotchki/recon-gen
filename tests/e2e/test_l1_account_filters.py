@@ -345,17 +345,13 @@ def test_bg2_daily_statement_kpis_match_summary_matview(
 
     sql, dataset_parameters = _summary_sql_and_params(cfg, l2)
 
-    # Identity — day1.
+    # Identity — day1. BG.7 strengthening 2026-05-25: App2 now drives
+    # the flatpickr-single picker (was a no-op), so both renderers
+    # narrow to the same picked day. effective_day1 == day1 on both.
     driver.set_date("Business Day", day1)
     driver.wait_loaded("Opening Balance")
     rendered_day1 = _read_kpis_as_decimals(driver)
-    # App2 doesn't render the Business Day picker → the dataset's
-    # param binds to its default (as_of anchor). Bind the SAME default
-    # for the ground-truth query so the identity comparison is honest
-    # on both legs.
-    effective_day1 = day1 if driver.dialect == "qs" else _summary_default_day(
-        dataset_parameters,
-    )
+    effective_day1 = day1
     expected_day1 = _expected_row_for(
         driver, sql=sql, dataset_parameters=dataset_parameters,
         account_display=picked_account, day_iso=effective_day1,
@@ -426,13 +422,15 @@ def test_bg2_daily_statement_kpis_match_summary_matview(
         f"wrong — fixing net_flow fixes drift by construction.)"
     )
 
-    # Delta — only meaningful on the QS leg. On App2 the picker is a
-    # no-op (App2 skips ``add_parameter_datetime_picker`` during
-    # filter-spec derivation), so day1 == day2 == default-day; the
-    # picker-narrows-data contract doesn't apply.
-    if driver.dialect != "qs":
-        return
-
+    # Delta runs on BOTH legs (BG.7 strengthening 2026-05-25 per user
+    # + feedback_build_verbs_not_skip): App2's `set_date` now drives
+    # the rendered flatpickr-single widget (see _drivers/app2.py).
+    # Both renderers bind the picked date through the dataset SQL
+    # pushdown (`pL1DsBalanceDate` → `<<$pL1DsBalanceDate>>` on QS,
+    # `:param_pL1DsBalanceDate` on App2), so day1 ≠ day2 must produce
+    # distinct KPI sets on either leg. The cold-read's finding #2
+    # ("byte-identical KPIs regardless of picked day") trips here on
+    # both renderers when the wire is broken.
     driver.set_date("Business Day", day2)
     driver.wait_loaded("Opening Balance")
     rendered_day2 = _read_kpis_as_decimals(driver)

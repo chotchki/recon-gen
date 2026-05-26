@@ -32,9 +32,8 @@ expands to it — SQLite.
 
 from __future__ import annotations
 
-import psycopg
-
 from recon_gen.common.config import Config
+from recon_gen.common.db import connect_demo_db
 from recon_gen.common.sql.dialect import Dialect, date_trunc_day
 
 
@@ -57,10 +56,10 @@ def find_two_days_for_same_account(
     account in the matching role has ≥2 distinct days of data — typically
     a thin local seed.
     """
-    if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE):
+    if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.SQLITE):
         raise RuntimeError(
             f"find_two_days_for_same_account: unsupported dialect "
-            f"{cfg.dialect!r} — only Postgres + Oracle wired"
+            f"{cfg.dialect!r}"
         )
     if not cfg.demo_database_url:
         raise RuntimeError(
@@ -94,10 +93,16 @@ def find_two_days_for_same_account(
     # Need the top 2 rows for the lowest-id account. We sort by
     # (account_id ASC, bday DESC), so the first 2 rows belong to the
     # same account (lowest_id) — most-recent + next-most-recent days.
-    with psycopg.connect(cfg.demo_database_url, connect_timeout=60) as conn:
-        with conn.cursor() as cur:
+    conn = connect_demo_db(cfg)
+    try:
+        cur = conn.cursor()
+        try:
             cur.execute(sql)
             rows = cur.fetchmany(2)
+        finally:
+            cur.close()
+    finally:
+        conn.close()
     if len(rows) < 2:
         raise RuntimeError(
             f"find_two_days_for_same_account: no account in role-narrowed "
@@ -117,8 +122,8 @@ def find_two_days_for_same_account(
     return (
         f"{name1} ({id1})",
         str(role1),
-        bday1.date().isoformat(),
-        bday2.date().isoformat(),
+        _iso_day(bday1),
+        _iso_day(bday2),
     )
 
 
@@ -160,10 +165,10 @@ def find_account_day_with_data(cfg: Config) -> tuple[str, str, str]:
     doesn't dispatch browser e2e against SQLite — QS can't reach a
     sqlite tempfile).
     """
-    if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE):
+    if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.SQLITE):
         raise RuntimeError(
             f"find_account_day_with_data: unsupported dialect "
-            f"{cfg.dialect!r} — only Postgres + Oracle wired"
+            f"{cfg.dialect!r}"
         )
     if not cfg.demo_database_url:
         raise RuntimeError(
@@ -198,17 +203,22 @@ def find_account_day_with_data(cfg: Config) -> tuple[str, str, str]:
         f"HAVING COUNT(*) > 0 "
         f"ORDER BY account_id ASC, bday DESC, n DESC "
     )
-    if cfg.dialect is Dialect.POSTGRES:
-        sql += "LIMIT 1"
-    else:
+    if cfg.dialect is Dialect.ORACLE:
         sql += "FETCH FIRST 1 ROWS ONLY"
+    else:
+        # Postgres + SQLite both speak LIMIT.
+        sql += "LIMIT 1"
 
-    # Match warm_aurora's connect timeout (60s) — Aurora cold-start
-    # tolerance, harmless on a warm cluster.
-    with psycopg.connect(cfg.demo_database_url, connect_timeout=60) as conn:
-        with conn.cursor() as cur:
+    conn = connect_demo_db(cfg)
+    try:
+        cur = conn.cursor()
+        try:
             cur.execute(sql)
             row = cur.fetchone()
+        finally:
+            cur.close()
+    finally:
+        conn.close()
     if row is None:
         raise RuntimeError(
             f"find_account_day_with_data: no (account, day) pair with "
@@ -219,5 +229,14 @@ def find_account_day_with_data(cfg: Config) -> tuple[str, str, str]:
     return (
         f"{name} ({acct_id})",
         str(role),
-        bday.date().isoformat(),
+        _iso_day(bday),
     )
+
+
+def _iso_day(value) -> str:  # type: ignore[no-untyped-def]: cross-dialect column value — psycopg returns datetime, sqlite3 returns str
+    """Return ``YYYY-MM-DD`` from a `bday` column value. Postgres /
+    Oracle drivers return ``datetime``; SQLite returns ``str``."""
+    if hasattr(value, "date"):
+        return value.date().isoformat()
+    text = str(value)
+    return text[:10]
