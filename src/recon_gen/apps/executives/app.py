@@ -427,8 +427,16 @@ def _populate_transaction_volume(
         visual_id=VisualId("exec-txn-kpi-total"),
         title="Total Transactions",
         subtitle=(
-            "Sum of transfer count across the selected period and "
-            "all transfer types"
+            "Count of distinct **Posted** transfers across the selected "
+            "period and all transfer types — multi-leg transfers (a "
+            "wire + its receiver leg, an ACH batch + its individual "
+            "credits) count ONCE per transfer_id. **Expect this to "
+            "differ from the per-leg / all-status row count the App "
+            "Info sheet reports** — App Info exposes the raw matview "
+            "fact (one row per leg, including failed), this KPI "
+            "narrows to the posted-transaction-event metric leadership "
+            "asks about (BH.8 narrative clarification: cold-read read "
+            "the gap as a bug; it's a documented predicate-mismatch)."
         ),
         values=[ds_txn["transfer_count"].sum(field_id="exec-txn-total-count")],
     )

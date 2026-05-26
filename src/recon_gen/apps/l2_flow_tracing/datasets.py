@@ -404,7 +404,14 @@ UNIFIED_L2_EXCEPTIONS_CONTRACT = DatasetContract(columns=[
     # otherwise sees "39 violations" above a column headed "Count" whose
     # values run to the hundreds — the v11.9.4 cold-sweep's #6
     # "count overloaded on L2 Exceptions".
-    ColumnSpec("count", "INTEGER", display_name="Occurrences"),
+    # BH.11 rename (2026-05-25) — "Occurrences" was an earlier
+    # rename of bare "Count" but still left the unit-shift vs the
+    # KPI's row-count opaque to operators (cold-read finding #11:
+    # "KPI=41 / table column values in the thousands — two
+    # different units, same page, no signposting"). "Violations per
+    # Type" makes the per-row unit explicit against the KPI's
+    # "Distinct Exception Types Open" headline rename.
+    ColumnSpec("count", "INTEGER", display_name="Violations per Type"),
 ])
 
 

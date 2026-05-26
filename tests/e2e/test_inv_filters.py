@@ -54,8 +54,8 @@ def test_min_sigma_slider_shrinks_anomalies_kpi(inv_dashboard_driver):
     """
     driver, dashboard_arg = inv_dashboard_driver
     driver.open(dashboard_arg, sheet="Volume Anomalies")
-    driver.wait_loaded("Flagged Pair-Windows")
-    before = driver.kpi_value("Flagged Pair-Windows")
+    driver.wait_loaded("Flagged at current σ")
+    before = driver.kpi_value("Flagged at current σ")
     try:
         before_count = int((before or "0").replace(",", "").lstrip("$"))
     except ValueError:
@@ -71,8 +71,8 @@ def test_min_sigma_slider_shrinks_anomalies_kpi(inv_dashboard_driver):
         )
 
     driver.set_slider("Min sigma", 4, None)
-    driver.wait_loaded("Flagged Pair-Windows")
-    after = driver.kpi_value("Flagged Pair-Windows")
+    driver.wait_loaded("Flagged at current σ")
+    after = driver.kpi_value("Flagged at current σ")
 
     driver.screenshot()
     assert after != before, (
@@ -139,7 +139,7 @@ def test_bg4_volume_anomalies_kpi_matches_filtered_matview_and_distribution(
     """
     driver, dashboard_arg = inv_dashboard_driver
     driver.open(dashboard_arg, sheet="Volume Anomalies")
-    driver.wait_loaded("Flagged Pair-Windows")
+    driver.wait_loaded("Flagged at current σ")
 
     filtered_sql, filtered_params = _sql_and_params_for(
         build_volume_anomalies_dataset, cfg,
@@ -156,7 +156,7 @@ def test_bg4_volume_anomalies_kpi_matches_filtered_matview_and_distribution(
     )
 
     # (a) KPI == filtered-dataset row count.
-    rendered_kpi = parse_int_kpi(driver.kpi_value("Flagged Pair-Windows"))
+    rendered_kpi = parse_int_kpi(driver.kpi_value("Flagged at current σ"))
     assert rendered_kpi == len(filtered_rows), (
         f"Flagged Pair-Windows KPI: rendered {rendered_kpi} ≠ "
         f"len(query_db(σ-filtered anomalies SQL)) = {len(filtered_rows)}. "

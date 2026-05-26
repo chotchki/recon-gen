@@ -489,13 +489,18 @@ def _build_volume_anomalies_sheet(
     row1 = sheet.layout.row(height=_KPI_ROW_SPAN * 2)
     row1.add_kpi(
         width=_THIRD,
-        title="Flagged Pair-Windows",
+        title="Flagged at current σ",
         subtitle=(
             "Pair-windows whose 2-day rolling SUM clears the σ "
-            "threshold. **Zero at default σ** means no pair currently "
-            "exceeds the bar — the distribution chart on the right "
-            "shows the full population so you can see how far the "
-            "data sits from the threshold and whether to lower σ."
+            "threshold (set by the slider). **Zero is expected at the "
+            "default σ** when the seed's z-score population sits below "
+            "the bar — the distribution chart on the right shows the "
+            "full pair-window population bucketed by |z|, so you can "
+            "see how far the data sits from the threshold and decide "
+            "whether to lower σ to widen the flagged set. BH.5 rename "
+            "(2026-05-25): was 'Flagged Pair-Windows' — operators "
+            "read zero as 'broken'; making the threshold-relativity "
+            "explicit in the title prevents the misread."
         ),
         values=[ds_anomalies["recipient_account_id"].count()],
     )

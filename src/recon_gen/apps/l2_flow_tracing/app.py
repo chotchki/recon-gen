@@ -1264,9 +1264,17 @@ def _populate_l2_exceptions_sheet(
     top_row = sheet.layout.row(height=10)
     top_row.add_kpi(
         width=12,
-        title="Open L2 Violations",
+        title="Distinct Exception Types Open",
         subtitle=(
-            "Total count across all six L2 hygiene checks."
+            "Count of distinct exception ROWS across all six L2 hygiene "
+            "checks — one row = one detected (check_type, entity_a, "
+            "entity_b, detail) violation. **Detail table's `Violations "
+            "per Type` column counts the occurrences PER row** — those "
+            "are two different units measuring different things, both "
+            "correct. BH.11 rename (2026-05-25): title was 'Open L2 "
+            "Violations'; cold-read read the kpi-vs-table-column "
+            "magnitude gap as a unit mismatch — the new title + the "
+            "table column's matching rename make the units explicit."
         ),
         values=[ds["check_type"].count()],
     )
