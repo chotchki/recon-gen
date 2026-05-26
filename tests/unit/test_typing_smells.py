@@ -1637,9 +1637,17 @@ class _NoInlineProductionConstantsVisitor(ast.NodeVisitor):
         self,
         file: Path,
         src_index: dict[str, tuple[Path, int, str]],
+        checker_name: str = "no-inline-production-constants",
+        src_label: str = "src/",
     ) -> None:
         self.file = file
         self.src_index = src_index
+        # BE.5 — second instance scopes src_root to tests/e2e/_drivers/
+        # under a distinct checker name so allowlists are categorized
+        # separately. The visitor stays one class; the wrapping Check
+        # instance picks the names.
+        self.checker_name = checker_name
+        self.src_label = src_label
         self.smells: list[Smell] = []
         # De-duplicate per-line: an assert with the same literal
         # repeated (e.g. `assert x == "foo" or y == "foo"`) only
@@ -1665,16 +1673,16 @@ class _NoInlineProductionConstantsVisitor(ast.NodeVisitor):
             self.smells.append(Smell(
                 file=self.file,
                 lineno=node.lineno,
-                checker="no-inline-production-constants",
+                checker=self.checker_name,
                 message=(
                     f"string literal {node.value!r} matches "
-                    f"production constant ``{src_name}`` declared "
-                    f"at {rel_src}:{src_lineno} — import from src/ "
-                    f"so a rename in production fires the test "
-                    f"loudly (instead of leaving the test asserting "
-                    f"the stale value silently). Allowlist with "
-                    f"``# typing-smell: ignore[no-inline-production-"
-                    f"constants]: <why>`` for deliberate "
+                    f"constant ``{src_name}`` declared "
+                    f"at {rel_src}:{src_lineno} — import from "
+                    f"{self.src_label} so a rename in production "
+                    f"fires the test loudly (instead of leaving the "
+                    f"test asserting the stale value silently). "
+                    f"Allowlist with ``# typing-smell: ignore"
+                    f"[{self.checker_name}]: <why>`` for deliberate "
                     f"contract-independence cases (rare)"
                 ),
             ))
@@ -1691,23 +1699,31 @@ class _NoInlineProductionConstantsVisitor(ast.NodeVisitor):
 @dataclass
 class NoInlineProductionConstantsCheck(Check):
     """BE.2, approach 3 of BE.0's spike — flag string literals inside
-    ``ast.Assert`` statements that match a known src/ UPPER_SNAKE
+    ``ast.Assert`` statements that match a known src-side UPPER_SNAKE
     module-level constant. Catches the "test inlines a production
     constant" drift class (sheet names, dataset IDs, sentinel
-    values, etc.) — a rename in src silently leaves the test
-    asserting the stale string.
+    values, etc.) — a rename silently leaves the test asserting the
+    stale string.
 
-    **STAGED DISABLED in this commit** — the BE.0 spike measured 144
-    current hits across the corpus. Enabling now would red the whole
-    tree. BE.4 sweeps these into either imports (preferred, ~60),
-    allowlists with WHY (~40), or src refactors (~10). After BE.4's
-    sweep, the registration in ``_build_checks`` un-comments and the
-    lint enforces 0 hits going forward.
+    BE.4 swept the corpus to 0 unsuppressed hits on 2026-05-26; the
+    lint now locks that baseline + catches future drift.
 
-    The planted-fixture smoke test invokes the Check directly so the
-    staged-disabled state doesn't degrade lint-stay-wired confidence.
+    Parameterized over ``src_root`` so the same Check class drives
+    BOTH the original BE.2 (src/recon_gen/ → tests/) AND BE.5's
+    extension (tests/e2e/_drivers/ → tests/e2e/test_*.py). The
+    ``checker_name`` field lets each instance carry its own rule
+    identifier so allowlists are categorized separately.
+
+    Planted-fixture smoke tests invoke the Check directly so any
+    visitor regression goes red even if the real corpus stays
+    at 0 hits.
     """
     src_root: Path = field(default_factory=lambda: REPO_ROOT / "src/recon_gen")
+    # BE.5: a sibling instance uses a different checker_name +
+    # src_label so smell messages name the right scope and allowlist
+    # syntax. Defaults preserve the BE.2 behavior.
+    checker_name: str = "no-inline-production-constants"
+    src_label: str = "src/"
     _src_index: dict[str, tuple[Path, int, str]] = field(
         default_factory=dict, init=False, repr=False,
     )
@@ -1719,7 +1735,11 @@ class NoInlineProductionConstantsCheck(Check):
 
     def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
         self._build_src_index()
-        v = _NoInlineProductionConstantsVisitor(file, self._src_index)
+        v = _NoInlineProductionConstantsVisitor(
+            file, self._src_index,
+            checker_name=self.checker_name,
+            src_label=self.src_label,
+        )
         v.visit(tree)
         return v.smells
 
@@ -1867,6 +1887,24 @@ def _build_checks() -> list[Check]:
     no_test_src_sql_dup_scope = [
         p for p in _expand_paths([REPO_ROOT / "tests"])
         if fixtures_dir not in p.parents
+    ]
+    # BE.5 — no-test-e2e-driver-internals: walk ``tests/e2e/test_*.py``
+    # for string literals inside asserts that match UPPER_SNAKE
+    # module-level constants in ``tests/e2e/_drivers/``. Same
+    # provenance-drift class as BE.2, applied to the driver layer's
+    # internals → test-layer assertions seam. The driver layer is
+    # already sealed via ``no-playwright-leak`` (no raw Playwright
+    # imports outside _drivers/); BE.5 closes the value-side of the
+    # same boundary (no inlined driver-internal constant values).
+    # Scope: tests/e2e/test_*.py only (driver bodies + e2e harness
+    # modules are out of scope — those legitimately reference their
+    # own internals).
+    e2e_drivers_dir = REPO_ROOT / "tests/e2e/_drivers"
+    no_test_e2e_driver_internals_scope = [
+        p for p in _expand_paths([REPO_ROOT / "tests/e2e"])
+        if p.parent == REPO_ROOT / "tests/e2e"
+        and p.name.startswith("test_")
+        and p.suffix == ".py"
     ]
     return [
         BareStrIdCheck(
@@ -2133,6 +2171,33 @@ def _build_checks() -> list[Check]:
             ),
             files=no_test_src_sql_dup_scope,
         ),
+        # BE.5 — same Check class, second instance scoped to the
+        # tests/e2e/_drivers/ ↔ tests/e2e/test_*.py seam. Catches the
+        # "e2e test inlines a driver-internal constant" drift class.
+        # The driver layer is already sealed at the import level by
+        # `no-playwright-leak`; BE.5 closes the value side of the
+        # same boundary. Expected to land at 0 hits at registration
+        # (locks the future-drift guard). Distinct ``checker_name``
+        # so allowlists for this rule are categorized separately
+        # from BE.2's src-coupling rule.
+        NoInlineProductionConstantsCheck(
+            name="no-test-e2e-driver-internals",
+            description=(
+                "string literal inside an ``assert`` in tests/e2e/"
+                "test_*.py that matches a module-level UPPER_SNAKE "
+                "constant in tests/e2e/_drivers/** — import from the "
+                "driver layer instead of inlining. Same drift class "
+                "as no-inline-production-constants, applied to the "
+                "driver-internals ↔ e2e-test seam. Allowlist via "
+                "``# typing-smell: ignore[no-test-e2e-driver-"
+                "internals]: <why>`` for deliberate independence "
+                "cases (rare)."
+            ),
+            files=no_test_e2e_driver_internals_scope,
+            src_root=REPO_ROOT / "tests/e2e/_drivers",
+            checker_name="no-test-e2e-driver-internals",
+            src_label="tests/e2e/_drivers/",
+        ),
     ]
 
 
@@ -2300,4 +2365,65 @@ def test_be_2_no_inline_production_constants_finds_planted_dup() -> None:
     assert "_PLANTED_PRIVATE_PROD_CONSTANT" in messages, (
         f"BE.2 smoke: expected the private planted constant name "
         f"in some smell message; got {messages!r}"
+    )
+
+
+def test_be_5_no_test_e2e_driver_internals_finds_planted_dup() -> None:
+    """BE.0 D8 smoke test for ``no-test-e2e-driver-internals``.
+
+    BE.5 registers a second NoInlineProductionConstantsCheck instance
+    parameterized with ``src_root=tests/e2e/_drivers/`` +
+    ``checker_name="no-test-e2e-driver-internals"``. This smoke
+    points BOTH the file scope AND the src_root at the planted
+    fixtures dir so the visitor runs end-to-end on a controlled
+    pair, independently of the real e2e corpus.
+
+    Asserts: (1) exactly 1 hit on the planted e2e-test fixture,
+    (2) the checker name reflects the BE.5 instance (not BE.2's),
+    (3) the message names the driver-side fixture as the
+    migration target + the BE.5 allowlist syntax.
+
+    If the visitor regresses (parameterization breaks the
+    checker_name plumbing, ast.Assert walk regresses, src-index
+    lookup breaks), this smoke goes red even when the real e2e
+    corpus stays at 0 hits.
+    """
+    fixtures_dir = REPO_ROOT / "tests/unit/_fixtures"
+    test_fixture = fixtures_dir / "be_5_planted_e2e_test.py"
+    driver_fixture = fixtures_dir / "be_5_planted_driver.py"
+    assert test_fixture.exists(), (
+        f"BE.5 smoke fixture missing: {test_fixture}"
+    )
+    assert driver_fixture.exists(), (
+        f"BE.5 smoke fixture missing: {driver_fixture}"
+    )
+
+    check = NoInlineProductionConstantsCheck(
+        name="no-test-e2e-driver-internals",
+        description="smoke-test instance",
+        files=[test_fixture],
+        src_root=fixtures_dir,
+        checker_name="no-test-e2e-driver-internals",
+        src_label="tests/e2e/_drivers/",
+    )
+    src = test_fixture.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    smells = list(check.find_smells(src, tree, test_fixture))
+
+    assert len(smells) == 1, (
+        f"BE.5 smoke expected exactly 1 hit on the planted fixture; "
+        f"got {len(smells)}: {[(s.lineno, s.message[:60]) for s in smells]!r}"
+    )
+    smell = smells[0]
+    assert smell.checker == "no-test-e2e-driver-internals", (
+        f"BE.5 smoke: expected checker name to reflect the BE.5 "
+        f"instance, got {smell.checker!r}"
+    )
+    assert "PLANTED_DRIVER_CONSTANT" in smell.message, (
+        f"BE.5 smoke: expected the driver-side constant name in "
+        f"the message; got {smell.message!r}"
+    )
+    assert "be_5_planted_driver.py" in smell.message, (
+        f"BE.5 smoke: expected the message to name the driver-side "
+        f"fixture as the migration target; got {smell.message!r}"
     )
