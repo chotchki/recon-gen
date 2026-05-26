@@ -244,6 +244,13 @@ exclude = ["recon_gen._dev", "recon_gen._dev.*"]
 
 [tool.setuptools.package-data]
 recon_gen = [
+    # PEP 561 marker — signals to downstream consumers (pyright /
+    # mypy / pyre) that this package ships inline type hints they
+    # should honor. Without the marker, type-checkers fall back to
+    # treating every public API as `Any`, defeating the strict-typed
+    # surface this codebase invests in. Empty file by convention; the
+    # presence at the package root is the signal.
+    "py.typed",
     "apps/l1_dashboard/_default_l2.yaml",
     # Bundled mkdocs config so ``docs apply`` works from an installed
     # wheel. Lives one level up from ``docs/`` (mkdocs rejects
