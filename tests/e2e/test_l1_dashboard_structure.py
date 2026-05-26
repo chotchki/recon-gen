@@ -9,14 +9,26 @@ nothing here knows about specific Sasquatch values.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from mypy_boto3_quicksight.client import QuickSightClient
+    from mypy_boto3_quicksight.type_defs import (
+        DashboardVersionDefinitionOutputTypeDef,
+    )
 
 
 pytestmark = [pytest.mark.e2e, pytest.mark.api]
 
 
 @pytest.fixture(scope="module")
-def l1_dashboard_definition(qs_client, account_id, l1_dashboard_id) -> dict:
+def l1_dashboard_definition(
+    qs_client: "QuickSightClient",
+    account_id: str,
+    l1_dashboard_id: str,
+) -> "DashboardVersionDefinitionOutputTypeDef":
     resp = qs_client.describe_dashboard_definition(
         AwsAccountId=account_id,
         DashboardId=l1_dashboard_id,
@@ -52,17 +64,28 @@ def _tree_visual_titles(l1_app, sheet_name: str) -> set[str]:
 
 
 class TestSheets:
-    def test_sheet_count_matches_tree(self, l1_dashboard_definition, l1_app):
+    def test_sheet_count_matches_tree(
+        self,
+        l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+        l1_app,
+    ) -> None:
         deployed = len(l1_dashboard_definition["Sheets"])
         expected = len(l1_app.analysis.sheets)
         assert deployed == expected
 
-    def test_sheet_order_matches_tree(self, l1_dashboard_definition, l1_app):
+    def test_sheet_order_matches_tree(
+        self,
+        l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+        l1_app,
+    ) -> None:
         deployed = [s["Name"] for s in l1_dashboard_definition["Sheets"]]
         expected = [s.name for s in l1_app.analysis.sheets]
         assert deployed == expected
 
-    def test_every_sheet_has_description(self, l1_dashboard_definition):
+    def test_every_sheet_has_description(
+        self,
+        l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         for sheet in l1_dashboard_definition["Sheets"]:
             desc = sheet.get("Description", "")
             assert len(desc) > 20, (
@@ -74,7 +97,11 @@ class TestSheets:
 
 
 class TestVisuals:
-    def test_visual_titles_match_tree(self, l1_dashboard_definition, l1_app):
+    def test_visual_titles_match_tree(
+        self,
+        l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+        l1_app,
+    ) -> None:
         """For every sheet on the deployed dashboard, the visual titles
         must include every title declared on the corresponding sheet in
         the tree. (Deployed may carry extra titles from the model
@@ -92,7 +119,11 @@ class TestVisuals:
             f"{missing_per_sheet}"
         )
 
-    def test_visual_count_matches_tree(self, l1_dashboard_definition, l1_app):
+    def test_visual_count_matches_tree(
+        self,
+        l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+        l1_app,
+    ) -> None:
         for sheet in l1_dashboard_definition["Sheets"]:
             name = sheet["Name"]
             tree_sheet = next(
@@ -105,7 +136,10 @@ class TestVisuals:
                 f"tree expects {expected_count}"
             )
 
-    def test_every_visual_has_subtitle(self, l1_dashboard_definition):
+    def test_every_visual_has_subtitle(
+        self,
+        l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         for sheet in l1_dashboard_definition["Sheets"]:
             for v in sheet.get("Visuals", []):
                 for vtype in v.values():
@@ -133,7 +167,11 @@ class TestParameters:
                     names.add(decl["Name"])
         return names
 
-    def test_all_parameters_declared(self, l1_dashboard_definition, l1_app):
+    def test_all_parameters_declared(
+        self,
+        l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+        l1_app,
+    ) -> None:
         """Tree's parameter set is the source of truth — deployed must
         match exactly. M.2b.1 added P_L1_DATE_START + P_L1_DATE_END;
         if M.2b.4+ adds parameters they show up here automatically."""
@@ -147,8 +185,10 @@ class TestParameters:
 
 class TestFilterGroups:
     def test_filter_group_ids_match_tree(
-        self, l1_dashboard_definition, l1_app,
-    ):
+        self,
+        l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+        l1_app,
+    ) -> None:
         groups = l1_dashboard_definition.get("FilterGroups", [])
         deployed = {g["FilterGroupId"] for g in groups}
         expected = {
@@ -156,7 +196,10 @@ class TestFilterGroups:
         }
         assert deployed == expected
 
-    def test_filter_group_ids_unique(self, l1_dashboard_definition):
+    def test_filter_group_ids_unique(
+        self,
+        l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         groups = l1_dashboard_definition.get("FilterGroups", [])
         ids = [g["FilterGroupId"] for g in groups]
         assert len(ids) == len(set(ids))
@@ -167,8 +210,10 @@ class TestFilterGroups:
 
 class TestDatasetDeclarations:
     def test_all_datasets_declared(
-        self, l1_dashboard_definition, l1_dataset_ids,
-    ):
+        self,
+        l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+        l1_dataset_ids,
+    ) -> None:
         """Every L1 dataset id (derived from resource_prefix) must
         appear in the dashboard's DataSetIdentifierDeclarations."""
         decls = l1_dashboard_definition["DataSetIdentifierDeclarations"]

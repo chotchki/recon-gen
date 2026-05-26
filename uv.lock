@@ -122,6 +122,12 @@ quicksight = [
 rds = [
     { name = "mypy-boto3-rds" },
 ]
+s3 = [
+    { name = "mypy-boto3-s3" },
+]
+sts = [
+    { name = "mypy-boto3-sts" },
+]
 
 [[package]]
 name = "botocore"
@@ -1033,6 +1039,24 @@ wheels = [
 ]
 
 [[package]]
+name = "mypy-boto3-s3"
+version = "1.43.14"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/04/2c/fc409f9ff5904a02cf4c2c1518c34d20cb56f22b2368b35fd0adda2926f3/mypy_boto3_s3-1.43.14.tar.gz", hash = "sha256:73d54c1d0999c73c403dc9a9a3da4a9722715aba116595af08c0d4675f8bc670", size = 77078, upload-time = "2026-05-22T20:48:28.251Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/61/e8e74a3f4c729719efc8b1d00179bc16c302202eac32a1b56a842a997ed2/mypy_boto3_s3-1.43.14-py3-none-any.whl", hash = "sha256:ce77096d6c5f90020c45e34c83d2268ca2bb17726149ce5033751870f7fb4e97", size = 84277, upload-time = "2026-05-22T20:48:25.032Z" },
+]
+
+[[package]]
+name = "mypy-boto3-sts"
+version = "1.43.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/af/fd/74a557327cc0a5f6cecb9671ab983bc186bcabb9ae95372c467f4fd32669/mypy_boto3_sts-1.43.0.tar.gz", hash = "sha256:7c38cffd0f07ff226d0b8016610bf5fa19bd6fa2a75a04cfdeecba2cabea8a4c", size = 16808, upload-time = "2026-04-29T23:06:35.018Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/61/1e/0a49da78a63c4ae8b315bb786364d0262578b70273aa42f82609136be3ec/mypy_boto3_sts-1.43.0-py3-none-any.whl", hash = "sha256:a7523d0a5c67af3ff814eaa93458087fcf6d389402c50f4bd3c1e82a5ebdd94a", size = 20845, upload-time = "2026-04-29T23:06:32.539Z" },
+]
+
+[[package]]
 name = "nh3"
 version = "0.3.5"
 source = { registry = "https://pypi.org/simple" }
@@ -1607,7 +1631,7 @@ deploy = [
 dev = [
     { name = "aiosqlite" },
     { name = "boto3" },
-    { name = "boto3-stubs", extra = ["quicksight", "rds"] },
+    { name = "boto3-stubs", extra = ["quicksight", "rds", "s3", "sts"] },
     { name = "botocore", extra = ["crt"] },
     { name = "build" },
     { name = "httpx" },
@@ -1671,7 +1695,7 @@ requires-dist = [
     { name = "boto3", marker = "extra == 'deploy'", specifier = ">=1.34" },
     { name = "boto3", marker = "extra == 'dev'", specifier = ">=1.34" },
     { name = "boto3", marker = "extra == 'e2e'", specifier = ">=1.34" },
-    { name = "boto3-stubs", extras = ["quicksight", "rds"], marker = "extra == 'dev'", specifier = ">=1.34" },
+    { name = "boto3-stubs", extras = ["quicksight", "rds", "s3", "sts"], marker = "extra == 'dev'", specifier = ">=1.34" },
     { name = "botocore", extras = ["crt"], marker = "extra == 'deploy'", specifier = ">=1.34" },
     { name = "botocore", extras = ["crt"], marker = "extra == 'dev'", specifier = ">=1.34" },
     { name = "botocore", extras = ["crt"], marker = "extra == 'e2e'", specifier = ">=1.34" },

@@ -129,7 +129,12 @@ dev = [
     # credential provider, which trips MissingDependencyException at
     # boto3 client init when developers use AWS SSO / `aws sso login`.
     "botocore[crt]>=1.34",
-    "boto3-stubs[quicksight,rds]>=1.34",
+    # BE.7.B (2026-05-26) — `sts` + `s3` added on top of the existing
+    # `quicksight,rds` so pyright can resolve the full surface tests/
+    # touches via boto3-stubs. The stubs only help once test-side
+    # fixtures are also annotated (the test fixtures' `-> dict`
+    # returns erase the TypedDict at the consumer boundary).
+    "boto3-stubs[quicksight,rds,sts,s3]>=1.34",
     # Y.2.gate.b.2.impl — Docker-backed local DB containers.
     # PG (b.2.impl.schema) + Oracle (b.2.impl.oracle). Oracle's
     # container is multi-GB and slower to start (~20-30s on

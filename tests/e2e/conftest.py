@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -31,6 +32,12 @@ from recon_gen.common.env_keys import (
     RECON_GEN_RUN_DIR,
     RECON_GEN_TEST_L2_INSTANCE,
 )
+
+if TYPE_CHECKING:
+    # BE.7.B — type-only imports for boto3-stubs annotations. Lazy
+    # import to avoid pulling mypy-boto3 modules at test-collection
+    # time (they're [dev] deps; not present in production wheel).
+    from mypy_boto3_quicksight.client import QuickSightClient
 
 
 def pytest_collection_modifyitems(config, items):
@@ -120,8 +127,17 @@ def deployment_name(cfg) -> str:
 
 
 @pytest.fixture(scope="session")
-def qs_client(region):
-    """Boto3 QuickSight client for the dashboard region."""
+def qs_client(region: str) -> "QuickSightClient":
+    """Boto3 QuickSight client for the dashboard region.
+
+    Return type is the boto3-stubs ``QuickSightClient`` TypedClient so
+    pyright resolves the rich AWS-API shapes downstream — e.g.
+    ``qs_client.describe_dashboard_definition(...)`` returns the
+    proper ``DescribeDashboardDefinitionResponseTypeDef`` instead of
+    ``Unknown``. BE.7.B annotation pass (2026-05-26): without this,
+    every dashboard-definition consumer cascades into reportUnknown*
+    noise.
+    """
     import boto3
     return boto3.client("quicksight", region_name=region)
 

@@ -9,14 +9,26 @@ load-bearing — without it both visuals would count every account
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from mypy_boto3_quicksight.client import QuickSightClient
+    from mypy_boto3_quicksight.type_defs import (
+        DashboardVersionDefinitionOutputTypeDef,
+    )
 
 
 pytestmark = [pytest.mark.e2e, pytest.mark.api]
 
 
 @pytest.fixture(scope="module")
-def exec_dashboard_definition(qs_client, account_id, exec_dashboard_id) -> dict:
+def exec_dashboard_definition(
+    qs_client: "QuickSightClient",
+    account_id: str,
+    exec_dashboard_id: str,
+) -> "DashboardVersionDefinitionOutputTypeDef":
     resp = qs_client.describe_dashboard_definition(
         AwsAccountId=account_id,
         DashboardId=exec_dashboard_id,
@@ -42,14 +54,23 @@ class TestSheets:
         "Info",  # M.4.4.5 — App Info canary, always last
     ]
 
-    def test_has_five_sheets(self, exec_dashboard_definition):
+    def test_has_five_sheets(
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         assert len(exec_dashboard_definition["Sheets"]) == 5
 
-    def test_sheet_order(self, exec_dashboard_definition):
+    def test_sheet_order(
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         names = [s["Name"] for s in exec_dashboard_definition["Sheets"]]
         assert names == self.EXPECTED_NAMES
 
-    def test_every_sheet_has_description(self, exec_dashboard_definition):
+    def test_every_sheet_has_description(
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         for sheet in exec_dashboard_definition["Sheets"]:
             desc = sheet.get("Description", "")
             assert len(desc) > 20, (
@@ -68,7 +89,10 @@ class TestVisuals:
         "Money Moved": 4,                  # 2 KPIs + daily bar + per-type bar
     }
 
-    def test_visual_counts_per_sheet(self, exec_dashboard_definition):
+    def test_visual_counts_per_sheet(
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         for sheet in exec_dashboard_definition["Sheets"]:
             name = sheet["Name"]
             expected = self.EXPECTED_VISUAL_COUNTS.get(name)
@@ -79,7 +103,10 @@ class TestVisuals:
                 f"Sheet '{name}' has {actual} visuals, expected {expected}"
             )
 
-    def test_all_visual_ids_unique(self, exec_dashboard_definition):
+    def test_all_visual_ids_unique(
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         all_ids: list[str] = []
         for sheet in exec_dashboard_definition["Sheets"]:
             all_ids.extend(_visual_ids(sheet))
@@ -88,7 +115,10 @@ class TestVisuals:
             f"{[vid for vid in all_ids if all_ids.count(vid) > 1]}"
         )
 
-    def test_every_visual_has_subtitle(self, exec_dashboard_definition):
+    def test_every_visual_has_subtitle(
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         for sheet in exec_dashboard_definition["Sheets"]:
             for v in sheet.get("Visuals", []):
                 for vtype in v.values():
@@ -114,7 +144,9 @@ class TestParameters:
         return names
 
     def test_all_parameters_declared(
-        self, exec_dashboard_definition, exec_app,
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+        exec_app,
     ):
         # Executives has no parameters today — no cross-app drills
         # (L.6.7 dropped per QS URL parameter sync defect), no UI
@@ -126,7 +158,11 @@ class TestParameters:
 
 
 class TestFilterGroups:
-    def test_filter_group_ids(self, exec_dashboard_definition, exec_app):
+    def test_filter_group_ids(
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+        exec_app,
+    ) -> None:
         groups = exec_dashboard_definition.get("FilterGroups", [])
         deployed = {g["FilterGroupId"] for g in groups}
         expected = {
@@ -136,7 +172,8 @@ class TestFilterGroups:
         assert deployed == expected
 
     def test_active_only_filter_dropped_after_y2h(
-        self, exec_dashboard_definition,
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
     ):
         """Y.2.h — `fg-exec-account-active-only` is gone. The
         `activity_count >= 1` narrowing now lives in the
@@ -154,7 +191,10 @@ class TestFilterGroups:
             "dataset split"
         )
 
-    def test_filter_group_ids_unique(self, exec_dashboard_definition):
+    def test_filter_group_ids_unique(
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         groups = exec_dashboard_definition.get("FilterGroups", [])
         ids = [g["FilterGroupId"] for g in groups]
         assert len(ids) == len(set(ids))
@@ -162,7 +202,9 @@ class TestFilterGroups:
 
 class TestDatasetDeclarations:
     def test_all_datasets_declared(
-        self, exec_dashboard_definition, exec_dataset_ids,
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+        exec_dataset_ids,
     ):
         decls = exec_dashboard_definition["DataSetIdentifierDeclarations"]
         declared_ds_ids = {d["DataSetArn"].split("/")[-1] for d in decls}
