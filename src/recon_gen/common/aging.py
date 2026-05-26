@@ -25,7 +25,7 @@ from recon_gen.common.models import (
 
 
 def aging_bar_visual(
-    visual_id: str,
+    visual_id: str,  # typing-smell: ignore[bare-str-id]: callers pass raw analyst-facing visual IDs
     title: str,
     subtitle: str,
     dataset_id: str,

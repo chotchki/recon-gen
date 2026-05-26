@@ -239,7 +239,7 @@ def test_visual_data_fetch_works_for_non_default_sheet() -> None:
     ])
     seen: dict[str, dict[str, str]] = {}
 
-    def fetcher(visual_id: str, params: dict[str, str]) -> dict[str, list[float]]:
+    def fetcher(visual_id: str, params: dict[str, str]) -> dict[str, list[float]]:  # typing-smell: ignore[bare-str-id]: visual_id comes from callers as raw analyst string
         seen[visual_id] = dict(params)
         return {"values": []}
 

@@ -57,7 +57,7 @@ _calls_log: list[tuple[str, dict[str, list[str]]]] = []
 
 
 def _l2ft_stub_fetcher(
-    visual_id: str, params: dict[str, list[str]],
+    visual_id: str, params: dict[str, list[str]],  # typing-smell: ignore[bare-str-id]: visual_id comes from callers as raw analyst string
 ) -> dict[str, Any]:
     """Deterministic per-visual-kind stub. Records every call into
     ``_calls_log`` so the dropdown-selection assertion can inspect what

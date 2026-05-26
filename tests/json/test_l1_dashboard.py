@@ -32,6 +32,7 @@ from recon_gen.apps.l1_dashboard.app import (
     _DRIFT_TIMELINES_NAME,
     _DRIFT_TIMELINES_TITLE,
     _DRIFT_TITLE,
+    _DRILL_RESET_SENTINEL,
     _GETTING_STARTED_NAME,
     _GETTING_STARTED_TITLE,
     _LIMIT_BREACH_NAME,
@@ -532,7 +533,7 @@ def test_transactions_sheet_has_single_table() -> None:
     app = build_l1_dashboard_app(_CFG)
     tx = _sheet_by_name(app, "Transactions")
     titles = [_visual_title(v) for v in tx.visuals]
-    assert titles == ["Posting Ledger"]
+    assert titles == [_TRANSACTIONS_TITLE]
 
 
 def test_transactions_dataset_registered_and_targets_matview() -> None:
@@ -1483,8 +1484,8 @@ def test_drill_target_parameters_registered() -> None:
     p_transfer = by_name[P_L1_TX_TRANSFER]
     assert isinstance(p_account, StringParam)
     assert isinstance(p_transfer, StringParam)
-    assert p_account.default == ["__ALL__"]
-    assert p_transfer.default == ["__ALL__"]
+    assert p_account.default == [_DRILL_RESET_SENTINEL]
+    assert p_transfer.default == [_DRILL_RESET_SENTINEL]
 
 
 def test_drill_calc_fields_present() -> None:
@@ -1620,7 +1621,7 @@ def test_drill_emission_navigation_plus_set_parameters() -> None:
                 if not isinstance(body, dict):
                     continue
                 # body narrowed to dict via isinstance.
-                body_d: dict[str, Any] = body  # type: ignore[assignment]
+                body_d: dict[str, Any] = body  # type: ignore[assignment]: third-party stub or test scaffolding cascade
                 actions: list[dict[str, Any]] = body_d.get("Actions") or []
                 for action in actions:
                     ops: list[dict[str, Any]] = (

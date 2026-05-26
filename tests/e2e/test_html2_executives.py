@@ -53,7 +53,7 @@ _DASHBOARD_ID = "exec"
 # Deterministic per-visual stub data — visual_id → response. Tests don't
 # have to write a fetcher inline; just look up by id.
 def _exec_stub_fetcher(
-    visual_id: str, params: dict[str, list[str]],
+    visual_id: str, params: dict[str, list[str]],  # typing-smell: ignore[bare-str-id]: visual_id comes from callers as raw analyst string
 ) -> dict[str, Any]:
     """Stub fetcher matching the shape adapters in ``_data_shape``.
 

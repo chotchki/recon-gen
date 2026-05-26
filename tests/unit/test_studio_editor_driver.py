@@ -160,7 +160,7 @@ def _normalize_descriptions(entities: tuple[object, ...]) -> list[object]:
             if isinstance(desc, str):
                 stripped = desc.rstrip()
                 if stripped != desc:
-                    e = _dc.replace(e, description=stripped)  # pyright: ignore[reportArgumentType, reportUnknownArgumentType]: see _by_identifier
+                    e = _dc.replace(e, description=stripped)  # pyright: ignore[reportArgumentType, reportUnknownArgumentType]: see _by_identifier: third-party stub or test scaffolding cascade
         out.append(e)
     return out
 

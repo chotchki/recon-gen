@@ -1909,7 +1909,7 @@ def _add_empty_signature_fields(
             )
             append_signature_field(w, spec)
         out = io.BytesIO()
-        w.write(out)  # pyright: ignore[reportUnknownMemberType] — pyHanko stubs are partial
+        w.write(out)  # pyright: ignore[reportUnknownMemberType]: pyHanko IncrementalPdfFileWriter stubs are partial
     pdf_path.write_bytes(out.getvalue())
 
 

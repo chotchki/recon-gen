@@ -228,7 +228,7 @@ def test_visual_id_routing_passes_correct_id_to_fetcher() -> None:
     arg — no swapping with a query-string field, no shadowing."""
     captured_ids: list[str] = []
 
-    def capture(visual_id: str, _params: dict[str, str]) -> Any:
+    def capture(visual_id: str, _params: dict[str, str]) -> Any:  # typing-smell: ignore[bare-str-id]: visual_id comes from callers as raw analyst string
         captured_ids.append(visual_id)
         return {}
 

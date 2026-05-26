@@ -448,7 +448,7 @@ def test_rails_table_sources_from_postings_dataset() -> None:
         # practice (defensive).
         if isinstance(col, Column):
             table_dataset_ids.add(col.dataset.identifier)
-    assert table_dataset_ids == {"l2ft-postings-ds"}
+    assert table_dataset_ids == {DS_POSTINGS}
 
 
 def test_rails_sheet_has_seven_filter_controls() -> None:
@@ -643,7 +643,7 @@ def test_chains_sheet_is_a_single_table() -> None:
     assert len(table_visuals) == 1
     # Table reads from chain-instances, not the aggregate chains dataset.
     table = table_visuals[0]
-    assert _typed_column(table.columns[0].column).dataset.identifier == "l2ft-chain-instances-ds"
+    assert _typed_column(table.columns[0].column).dataset.identifier == DS_CHAIN_INSTANCES
 
 
 def test_chains_table_carries_completion_status_column() -> None:

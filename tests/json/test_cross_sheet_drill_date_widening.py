@@ -80,7 +80,7 @@ def _drills_into_transactions(
                 if not isinstance(visual_body, dict):
                     continue
                 # visual_body narrowed to dict[str, Any] via isinstance.
-                visual_body_d: _JsonDict = visual_body  # type: ignore[assignment]
+                visual_body_d: _JsonDict = visual_body  # type: ignore[assignment]: third-party stub or test scaffolding cascade
                 visual_id: str = visual_body_d.get("VisualId", "<unknown>")
                 actions: list[_JsonDict] = visual_body_d.get("Actions") or []
                 for action in actions:

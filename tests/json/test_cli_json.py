@@ -174,7 +174,7 @@ def test_apply_demo_database_url_auto_emits_datasource_json(
     out_dir = tmp_path / "out"
     _patch_generators(monkeypatch)
     import recon_gen.common.deploy as dep
-    monkeypatch.setattr(dep, "deploy", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+    monkeypatch.setattr(dep, "deploy", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
 
     rc = CliRunner().invoke(json_, [
         "apply", "-c", str(cfg), "-o", str(out_dir),
@@ -204,7 +204,7 @@ def test_apply_no_demo_database_url_skips_datasource_emit(
     out_dir = tmp_path / "out"
     _patch_generators(monkeypatch)
     import recon_gen.common.deploy as dep
-    monkeypatch.setattr(dep, "deploy", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+    monkeypatch.setattr(dep, "deploy", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
 
     rc = CliRunner().invoke(json_, [
         "apply", "-c", str(cfg), "-o", str(out_dir), "--execute",
@@ -246,7 +246,7 @@ def test_clean_with_execute_runs_cleanup_for_real(tmp_path: Path, monkeypatch: p
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "run_cleanup",
-        lambda *_a, **kwargs: cleanup_calls.append(kwargs) or 0,  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+        lambda *_a, **kwargs: cleanup_calls.append(kwargs) or 0,  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
     )
 
     rc = CliRunner().invoke(json_, [
@@ -267,7 +267,7 @@ def test_clean_all_flag_threads_purge_all_through(tmp_path: Path, monkeypatch: p
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "run_cleanup",
-        lambda *_a, **kwargs: cleanup_calls.append(kwargs) or 0,  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+        lambda *_a, **kwargs: cleanup_calls.append(kwargs) or 0,  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
     )
 
     rc = CliRunner().invoke(json_, [
@@ -287,7 +287,7 @@ def test_clean_all_without_execute_is_dry_run(tmp_path: Path, monkeypatch: pytes
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "run_cleanup",
-        lambda *_a, **kwargs: cleanup_calls.append(kwargs) or 0,  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+        lambda *_a, **kwargs: cleanup_calls.append(kwargs) or 0,  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
     )
 
     rc = CliRunner().invoke(json_, [
@@ -301,7 +301,7 @@ def test_clean_all_without_execute_is_dry_run(tmp_path: Path, monkeypatch: pytes
 def test_clean_propagates_cleanup_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = _make_yaml_config(tmp_path)
     import recon_gen.common.cleanup as cu
-    monkeypatch.setattr(cu, "run_cleanup", lambda *_a, **_k: 3)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+    monkeypatch.setattr(cu, "run_cleanup", lambda *_a, **_k: 3)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
 
     rc = CliRunner().invoke(json_, [
         "clean", "-c", str(cfg), "-o", str(tmp_path / "out"),
@@ -325,7 +325,7 @@ def test_probe_iterates_every_app_and_prints_a_report(
     import recon_gen.cli._app_builders as ab
     monkeypatch.setattr(
         ab, "_dashboard_id_for_app",
-        lambda app, _out: f"qs-{app}-dashboard-id",  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+        lambda app, _out: f"qs-{app}-dashboard-id",  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
     )
 
     seen: list[str] = []
@@ -333,9 +333,9 @@ def test_probe_iterates_every_app_and_prints_a_report(
     import recon_gen.common.probe as prob
     monkeypatch.setattr(
         prob, "probe_dashboard",
-        lambda **kw: seen.append(kw["dashboard_id"]) or [],  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+        lambda **kw: seen.append(kw["dashboard_id"]) or [],  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
     )
-    monkeypatch.setattr(prob, "format_report", lambda did, _r: f"report:{did}")  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+    monkeypatch.setattr(prob, "format_report", lambda did, _r: f"report:{did}")  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
 
     rc = CliRunner().invoke(json_, [
         "probe", "-c", str(cfg), "-o", str(tmp_path / "out"),
@@ -375,7 +375,7 @@ def test_test_subcommand_invokes_pytest_and_pyright(monkeypatch: pytest.MonkeyPa
 def test_test_subcommand_aggregates_failures_into_one_error(monkeypatch: pytest.MonkeyPatch) -> None:
     import subprocess as _sp
     # Both fail.
-    monkeypatch.setattr(_sp, "call", lambda _a: 1)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+    monkeypatch.setattr(_sp, "call", lambda _a: 1)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
 
     rc = CliRunner().invoke(json_, ["test"])
     assert rc.exit_code != 0

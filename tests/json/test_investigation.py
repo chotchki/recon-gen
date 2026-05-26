@@ -142,7 +142,7 @@ def _parameter_declarations(
     return decls
 
 
-def _sheet_by_id(sheet_id: str, cfg: Config = _TEST_CFG) -> SheetDefinition:
+def _sheet_by_id(sheet_id: str, cfg: Config = _TEST_CFG) -> SheetDefinition:  # typing-smell: ignore[bare-str-id]: sheet_id comes from callers as raw analyst string
     """Find an emitted Sheet by its `SheetId`."""
     sheets = build_analysis(cfg).Definition.Sheets
     assert sheets is not None, "Investigation analysis must declare Sheets"
@@ -150,13 +150,13 @@ def _sheet_by_id(sheet_id: str, cfg: Config = _TEST_CFG) -> SheetDefinition:
 
 
 def _filter_controls(
-    sheet_id: str, cfg: Config = _TEST_CFG,
+    sheet_id: str, cfg: Config = _TEST_CFG,  # typing-smell: ignore[bare-str-id]: sheet_id comes from callers as raw analyst string
 ) -> list[FilterControl]:
     return _sheet_by_id(sheet_id, cfg).FilterControls or []
 
 
 def _parameter_controls(
-    sheet_id: str, cfg: Config = _TEST_CFG,
+    sheet_id: str, cfg: Config = _TEST_CFG,  # typing-smell: ignore[bare-str-id]: sheet_id comes from callers as raw analyst string
 ) -> list[ParameterControl]:
     return _sheet_by_id(sheet_id, cfg).ParameterControls or []
 
@@ -226,7 +226,7 @@ def _plain_title(visual_subobject: object) -> str | None:
     if title is None or title.FormatText is None:
         return None
     fmt = title.FormatText  # pyright: ignore[reportAny]: dict[str, str] | None inferred
-    plain: object = fmt.get("PlainText")  # pyright: ignore[reportAny]
+    plain: object = fmt.get("PlainText")  # pyright: ignore[reportAny]: third-party stub or test scaffolding cascade
     return plain if isinstance(plain, str) else None
 
 

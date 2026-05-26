@@ -396,7 +396,7 @@ def _patched_boto3_client(monkeypatch: pytest.MonkeyPatch, stub: Any) -> None:
     """Make ``boto3.client('quicksight', ...)`` return our stub instead
     of trying to talk to AWS."""
     import boto3
-    monkeypatch.setattr(boto3, "client", lambda *_a, **_k: stub)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+    monkeypatch.setattr(boto3, "client", lambda *_a, **_k: stub)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
 
 
 def _make_cfg(tagging_enabled: bool = True) -> Config:
@@ -423,7 +423,7 @@ def test_run_cleanup_short_circuits_when_no_stale(tmp_path: Path, monkeypatch: p
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "_collect_stale",
-        lambda *_a, **_k: {kind: [] for kind in (  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+        lambda *_a, **_k: {kind: [] for kind in (  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
             "dashboard", "analysis", "dataset", "theme", "datasource",
         )},
     )
@@ -441,7 +441,7 @@ def test_run_cleanup_dry_run_skips_delete(tmp_path: Path, monkeypatch: pytest.Mo
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "_collect_stale",
-        lambda *_a, **_k: {  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+        lambda *_a, **_k: {  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
             "dashboard": [("d-1", "arn:1")],
             "analysis": [], "dataset": [], "theme": [], "datasource": [],
         },
@@ -462,7 +462,7 @@ def test_run_cleanup_skip_confirm_executes_delete(tmp_path: Path, monkeypatch: p
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "_collect_stale",
-        lambda *_a, **_k: {  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+        lambda *_a, **_k: {  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
             "dashboard": [("d-1", "arn:1")],
             "analysis": [], "dataset": [], "theme": [], "datasource": [],
         },
@@ -481,7 +481,7 @@ def test_run_cleanup_confirm_no_aborts(tmp_path: Path, monkeypatch: pytest.Monke
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "_collect_stale",
-        lambda *_a, **_k: {  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+        lambda *_a, **_k: {  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
             "dashboard": [("d-1", "arn:1")],
             "analysis": [], "dataset": [], "theme": [], "datasource": [],
         },
@@ -489,7 +489,7 @@ def test_run_cleanup_confirm_no_aborts(tmp_path: Path, monkeypatch: pytest.Monke
     _patched_boto3_client(monkeypatch, stub)
     # Simulate the user answering "no" to the prompt.
     monkeypatch.setattr(
-        "click.confirm", lambda *_a, **_k: False,  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+        "click.confirm", lambda *_a, **_k: False,  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
     )
 
     rc = run_cleanup(_make_cfg(), tmp_path)
@@ -508,7 +508,7 @@ def test_run_cleanup_no_tagging_announces_id_prefix_mode(
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "_collect_stale",
-        lambda *_a, **_k: {kind: [] for kind in (  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+        lambda *_a, **_k: {kind: [] for kind in (  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
             "dashboard", "analysis", "dataset", "theme", "datasource",
         )},
     )
@@ -564,7 +564,7 @@ def test_run_cleanup_purge_all_announces_purge_mode(
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "_collect_stale",
-        lambda *_a, **_k: {kind: [] for kind in (  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda
+        lambda *_a, **_k: {kind: [] for kind in (  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
             "dashboard", "analysis", "dataset", "theme", "datasource",
         )},
     )

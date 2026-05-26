@@ -45,7 +45,7 @@ def _load_harness(page: Any) -> None:
 
 def _render(
     page: Any, data: dict[str, Any], row_drills: list[dict[str, Any]] | None,
-    visual_id: str = "drill-vid",
+    visual_id: str = "drill-vid",  # typing-smell: ignore[bare-str-id]: visual_id comes from callers as raw analyst string
 ) -> None:
     """Inject a ``<section data-row-drills=...>`` carrying a Table, run
     ``renderTable`` then ``wireRowDrills`` exactly as ``hydrateSection``

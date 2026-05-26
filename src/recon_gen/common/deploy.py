@@ -85,7 +85,7 @@ def _wait_for_analysis(
 
 
 def _wait_for_dashboard(
-    client: QuickSightClient, account_id: str, dashboard_id: str,
+    client: QuickSightClient, account_id: str, dashboard_id: str,  # typing-smell: ignore[bare-str-id]: dashboard_id comes from callers as raw analyst string
 ) -> bool:
     """Poll describe-dashboard until a terminal state. Returns True on success."""
     for attempt in range(1, POLL_MAX_ATTEMPTS + 1):

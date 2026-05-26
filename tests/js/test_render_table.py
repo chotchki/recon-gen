@@ -45,7 +45,7 @@ def _load_harness(page: Any) -> None:
 
 
 def _render_into_target(
-    page: Any, data: dict[str, Any], visual_id: str = "test-vid",
+    page: Any, data: dict[str, Any], visual_id: str = "test-vid",  # typing-smell: ignore[bare-str-id]: visual_id comes from callers as raw analyst string
     fetch_url: str | None = (
         "/dashboards/x/sheets/y/visuals/test-vid/data"
     ),

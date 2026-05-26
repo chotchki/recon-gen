@@ -59,7 +59,7 @@ def probe_dashboard(
     *,
     aws_account_id: str,
     aws_region: str,
-    dashboard_id: str,
+    dashboard_id: str,  # typing-smell: ignore[bare-str-id]: dashboard_id comes from callers as raw analyst string
     initial_settle_ms: int = 8000,
     sheet_settle_ms: int = 8000,
 ) -> dict[str, list[ProbedError]]:
@@ -152,7 +152,7 @@ def assert_no_datasource_errors(
 
 
 def format_report(
-    dashboard_id: str, results: dict[str, list[ProbedError]],
+    dashboard_id: str, results: dict[str, list[ProbedError]],  # typing-smell: ignore[bare-str-id]: dashboard_id comes from callers as raw analyst string
 ) -> str:
     """Render a probe result as a CLI-friendly text block."""
     lines = [f"== {dashboard_id} =="]

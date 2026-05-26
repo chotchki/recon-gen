@@ -727,7 +727,7 @@ def _category_filter(
 
 class TestFilterGroupScope:
     def _make_sheet_with_visuals(
-        self, sheet_id: str, *visual_ids: str,
+        self, sheet_id: str, *visual_ids: str,  # typing-smell: ignore[bare-str-id]: sheet_id comes from callers as raw analyst string
     ) -> tuple[Sheet, list[KPI]]:
         sheet = Sheet(
             sheet_id=SheetId(sheet_id),

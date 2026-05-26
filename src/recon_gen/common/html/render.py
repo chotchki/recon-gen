@@ -695,7 +695,7 @@ def _render_parameter_date(spec: ParameterDateSpec) -> str:
 
 
 def _visual_fetch_url(
-    dashboard_id: str, sheet_id: str, visual_id: str,
+    dashboard_id: str, sheet_id: str, visual_id: str,  # typing-smell: ignore[bare-str-id,bare-str-id,bare-str-id]: dashboard_id comes from callers as raw analyst string / sheet_id comes from callers as raw analyst string / visual_id comes from callers as raw analyst string
 ) -> str:
     """Build the GET data URL for one visual.
 
@@ -1030,7 +1030,7 @@ def _render_text_box_in_grid(text_box: Any, *, col_span: int) -> str:
 
 
 def _render_sheet_tabs(
-    dashboard_id: str,
+    dashboard_id: str,  # typing-smell: ignore[bare-str-id]: dashboard_id comes from callers as raw analyst string
     sheets: Sequence[Sheet],
     active_sheet_id: str,
 ) -> str:
@@ -1077,7 +1077,7 @@ def _render_sheet_tabs(
 
 def emit_html(
     app: App, sheet: Sheet, *,
-    dashboard_id: str,
+    dashboard_id: str,  # typing-smell: ignore[bare-str-id]: dashboard_id comes from callers as raw analyst string
     dev_log: bool = False,
     theme: ThemePreset | None = None,
     filter_specs: Sequence[FilterSpec] = (),
@@ -1229,7 +1229,7 @@ def emit_html(
 
 
 def emit_visual_data_fragment(
-    visual_id: str,
+    visual_id: str,  # typing-smell: ignore[bare-str-id]: visual_id comes from callers as raw analyst string
     data: Any,
     *,
     url_params: Mapping[str, list[str]] | None = None,
@@ -1316,7 +1316,7 @@ def _row_drill_source_column(source: Any) -> str | None:
     return None
 
 
-def _serialize_table_row_drills(visual: Any, dashboard_id: str) -> str:
+def _serialize_table_row_drills(visual: Any, dashboard_id: str) -> str:  # typing-smell: ignore[bare-str-id]: dashboard_id comes from callers as raw analyst string
     """Serialize a Table visual's row-level ``Drill`` actions to the
     ``data-row-drills`` attribute JSON (``""`` when there are none).
 
@@ -1365,7 +1365,7 @@ def _serialize_table_row_drills(visual: Any, dashboard_id: str) -> str:
 
 
 def _render_visual(
-    visual: Any, dashboard_id: str, sheet_id: str,
+    visual: Any, dashboard_id: str, sheet_id: str,  # typing-smell: ignore[bare-str-id,bare-str-id]: dashboard_id comes from callers as raw analyst string / sheet_id comes from callers as raw analyst string
     *,
     col_span: int | None = None,
 ) -> str:

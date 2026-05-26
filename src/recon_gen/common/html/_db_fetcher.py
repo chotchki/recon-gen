@@ -92,7 +92,7 @@ def make_db_fetcher(
 
         connection_factory = _default_factory
 
-    def fetcher(visual_id: str, params: Mapping[str, list[str]]) -> Any:
+    def fetcher(visual_id: str, params: Mapping[str, list[str]]) -> Any:  # typing-smell: ignore[bare-str-id]: visual_id comes from callers as raw analyst string
         if visual_id == "smoke-force":
             return _topology_to_force_graph(instance)
         if visual_id == "smoke-sankey":

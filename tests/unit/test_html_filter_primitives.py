@@ -409,7 +409,7 @@ def test_server_passes_prefix_keyed_params_to_fetcher() -> None:
     seen: dict[str, dict[str, list[str]]] = {}
 
     def fetcher(
-        visual_id: str, params: dict[str, list[str]],
+        visual_id: str, params: dict[str, list[str]],  # typing-smell: ignore[bare-str-id]: visual_id comes from callers as raw analyst string
     ) -> dict[str, list[float]]:
         seen[visual_id] = dict(params)
         return {"values": []}

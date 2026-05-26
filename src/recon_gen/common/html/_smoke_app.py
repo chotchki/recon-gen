@@ -372,7 +372,7 @@ def _showcase_demo_table(params: dict[str, str]) -> dict[str, Any]:
 
 
 def stub_money_trail_fetcher(
-    visual_id: str, params_multi: Mapping[str, list[str]],
+    visual_id: str, params_multi: Mapping[str, list[str]],  # typing-smell: ignore[bare-str-id]: visual_id comes from callers as raw analyst string
 ) -> dict[str, Any]:
     """Deterministic stub responsive to filter params.
 

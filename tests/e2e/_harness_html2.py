@@ -130,7 +130,7 @@ def html2_server(
     tree_app: App,
     sheet: Sheet,
     data_fetcher: DataFetcher,
-    dashboard_id: str = "harness",
+    dashboard_id: str = "harness",  # typing-smell: ignore[bare-str-id]: dashboard_id comes from callers as raw analyst string
     dashboard_title: str = "Harness",
     filter_specs: Sequence[FilterSpec] = (),
     options_fetcher: OptionsFetcher | None = None,
