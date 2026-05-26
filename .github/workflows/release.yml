@@ -572,27 +572,14 @@ jobs:
           # AB.7.1a — coverage from the release-gate browser e2e.
           COVERAGE_FILE: .coverage.release-e2e-browser
         run: |
-          /tmp/qs-release-e2e/bin/pytest \
-            tests/e2e/test_l1_dashboard_renders.py \
-            tests/e2e/test_l1_sheet_visuals.py \
-            tests/e2e/test_l1_filters.py \
-            tests/e2e/test_l1_account_filters.py \
-            tests/e2e/test_l1_additive_pickers.py \
-            tests/e2e/test_inv_dashboard_renders.py \
-            tests/e2e/test_inv_sheet_visuals.py \
-            tests/e2e/test_inv_filters.py \
-            tests/e2e/test_inv_drilldown.py \
-            tests/e2e/test_exec_dashboard_renders.py \
-            tests/e2e/test_exec_sheet_visuals.py \
-            tests/e2e/test_l2ft_rails_dropdowns.py \
-            tests/e2e/test_l2ft_chains_dropdowns.py \
-            tests/e2e/test_l2ft_templates_dropdowns.py \
-            tests/e2e/test_l2ft_additive_pickers.py \
-            tests/e2e/test_l2ft_exceptions.py \
-            tests/e2e/test_dashboard_driver.py \
-            tests/e2e/test_l1_cross_sheet_drill_date_widening.py \
-            tests/e2e/test_l2ft_metadata_cascade.py \
-            -m browser -v -n 2 \
+          # BJ.3 (2026-05-25) — marker-selection over hand-list per
+          # docs/audits/bj_1_ci_test_selection_rationale.md. Matches
+          # e2e.yml's invocation exactly (per
+          # feedback_ci_release_workflow_parity).
+          /tmp/qs-release-e2e/bin/pytest tests/e2e/ \
+            -m browser \
+            --ignore=tests/e2e/test_audit_dashboard_agreement.py \
+            -v -n 2 \
             --cov=recon_gen
 
       # X.2.j — the 4-way cross-tool agreement test, separate invocation
