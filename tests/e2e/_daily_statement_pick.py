@@ -38,6 +38,90 @@ from recon_gen.common.config import Config
 from recon_gen.common.sql.dialect import Dialect, date_trunc_day
 
 
+def find_two_days_for_same_account(
+    cfg: Config,
+) -> tuple[str, str, str, str]:
+    """BG.2 — return ``(account_display, account_role, day1_iso, day2_iso)``
+    for an account with **at least two distinct business days** of data
+    in the deployed transactions table.
+
+    BG.2's delta assertion needs to switch the Daily Statement Business
+    Day picker between two days on the SAME account and prove the KPIs
+    change. ``find_account_day_with_data`` returns only one day — this
+    sibling returns two. ``day1`` is the most-recent populated day for
+    the account; ``day2`` is the next-most-recent (older).
+
+    Same role-narrowing as ``find_account_day_with_data`` (alphabetically-
+    first role so the picked account survives the Daily Statement Role
+    cascade's initial-load defaults). Raises ``RuntimeError`` if no
+    account in the matching role has ≥2 distinct days of data — typically
+    a thin local seed.
+    """
+    if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE):
+        raise RuntimeError(
+            f"find_two_days_for_same_account: unsupported dialect "
+            f"{cfg.dialect!r} — only Postgres + Oracle wired"
+        )
+    if not cfg.demo_database_url:
+        raise RuntimeError(
+            "find_two_days_for_same_account: cfg.demo_database_url is unset"
+        )
+    bday_expr = date_trunc_day("posting", cfg.dialect)
+    prefix = cfg.db_table_prefix
+    # Find the lowest-id account (by the dropdown-window rationale in
+    # find_account_day_with_data) WITH ≥2 distinct days, within the
+    # alphabetically-first role. Returns one row carrying both days.
+    sql = (
+        f"WITH per_account AS ("
+        f"  SELECT account_name, account_id, account_role, {bday_expr} AS bday "
+        f"  FROM {prefix}_transactions "
+        f"  WHERE account_role = ("
+        f"    SELECT MIN(account_role) FROM {prefix}_current_daily_balances"
+        f"  ) "
+        f"  GROUP BY account_name, account_id, account_role, {bday_expr}"
+        f"), "
+        f"distinct_day_count AS ("
+        f"  SELECT account_id, COUNT(*) AS day_count "
+        f"  FROM per_account "
+        f"  GROUP BY account_id "
+        f"  HAVING COUNT(*) >= 2"
+        f") "
+        f"SELECT pa.account_name, pa.account_id, pa.account_role, pa.bday "
+        f"FROM per_account pa "
+        f"JOIN distinct_day_count dc ON dc.account_id = pa.account_id "
+        f"ORDER BY pa.account_id ASC, pa.bday DESC "
+    )
+    # Need the top 2 rows for the lowest-id account. We sort by
+    # (account_id ASC, bday DESC), so the first 2 rows belong to the
+    # same account (lowest_id) — most-recent + next-most-recent days.
+    with psycopg.connect(cfg.demo_database_url, connect_timeout=60) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            rows = cur.fetchmany(2)
+    if len(rows) < 2:
+        raise RuntimeError(
+            f"find_two_days_for_same_account: no account in role-narrowed "
+            f"{prefix}_transactions has ≥2 distinct business days — thin "
+            f"seed? Re-run `recon-gen data apply --execute` with the "
+            f"default density."
+        )
+    name1, id1, role1, bday1 = rows[0]
+    name2, id2, _role2, bday2 = rows[1]
+    if id1 != id2:
+        raise RuntimeError(
+            f"find_two_days_for_same_account: lowest-id account "
+            f"{id1!r} has only one populated day; next-lowest "
+            f"{id2!r} would split the (day1, day2) pair across "
+            f"accounts. Helper invariant violated."
+        )
+    return (
+        f"{name1} ({id1})",
+        str(role1),
+        bday1.date().isoformat(),
+        bday2.date().isoformat(),
+    )
+
+
 def find_account_day_with_data(cfg: Config) -> tuple[str, str, str]:
     """Return ``(account_display, account_role, business_day_iso)`` for
     a known-good Daily Statement filter combination in the deployed

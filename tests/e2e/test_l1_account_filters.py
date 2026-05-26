@@ -21,12 +21,70 @@ choice.
 
 from __future__ import annotations
 
+import re
+from decimal import Decimal
+
 import pytest
 
-from tests.e2e._daily_statement_pick import find_account_day_with_data
+from recon_gen.apps.l1_dashboard.datasets import (
+    build_daily_statement_summary_dataset,
+)
+from tests.e2e._daily_statement_pick import (
+    find_account_day_with_data,
+    find_two_days_for_same_account,
+)
 
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
+
+
+_CURRENCY_RE = re.compile(r"[^0-9.\-]")
+_DECIMAL_PART_RE = re.compile(r"\.(\d+)")
+
+
+def _parse_currency_kpi(text: str | None) -> Decimal:
+    """Parse the rendered KPI string (``"$1,234.56"``, ``"-$1,234.56"``,
+    ``"$-1,234.56"``) into a Decimal. Both renderers format with the
+    leading ``$`` + thousands commas.
+
+    **Strict ≤2 decimal-place contract** (v11.21.0 cold-read finding #14,
+    user-confirmed 2026-05-25 as a test failure shape, not a tolerated
+    edge): currency KPIs must render with 0, 1, or 2 decimal digits.
+    3+ decimals (``"308,535.982"``) is a real misread risk (cold-read:
+    two of four judges misread ``-308,535.982`` as ``-$308M``) AND
+    indicates the KPI's numeric-format is unset / wrong. Parser raises
+    on 3+ — the test trip surfaces the bug at the call site instead of
+    silently rounding away the noise.
+
+    ``None`` raises — a missing KPI is a different failure shape than a
+    parse failure."""
+    if text is None:
+        raise AssertionError("KPI value was None — visual didn't render?")
+    cleaned = _CURRENCY_RE.sub("", text)
+    if cleaned in ("", "-"):
+        raise AssertionError(f"KPI value {text!r} parses to empty after cleanup")
+    # Strict precision gate — see docstring.
+    decimal_match = _DECIMAL_PART_RE.search(cleaned)
+    if decimal_match is not None and len(decimal_match.group(1)) > 2:
+        raise AssertionError(
+            f"KPI value {text!r} renders with "
+            f"{len(decimal_match.group(1))} decimal places; currency "
+            f"KPIs must render with ≤2 decimals (v11.21.0 cold-read "
+            f"finding #14 — 3-decimal rendering creates real misread "
+            f"risk vs $-millions scale). Audit the visual's "
+            f"numerical(currency=True) wiring + the common/models.py "
+            f"format string."
+        )
+    return Decimal(cleaned)
+
+
+def _summary_sql_and_params(cfg, l2):  # type: ignore[no-untyped-def]: cfg/l2 are runtime fixture values — annotating would force imports here
+    """Lift the Daily Statement Summary dataset's SQL + DatasetParameters
+    by calling the production builder. BG.2's honest gate compares
+    rendered KPI values to the SAME SQL the dashboard issues."""
+    ds = build_daily_statement_summary_dataset(cfg, l2)
+    sql_str = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+    return sql_str, list(ds.DatasetParameters)
 
 
 # AA.B — Daily Statement Role cascade --------------------------------------
@@ -222,4 +280,193 @@ def test_daily_statement_picked_account_narrows_table(
         f"empty regression — Daily Statement's Account dropdown must "
         f"bind to 'account_display' for the WHERE clause to match "
         f"(JSON pin: test_aa_e_2_daily_statement_account_dropdown_binds_display_column)."
+    )
+
+
+# BG.2 — Daily Statement KPI honest gate -----------------------------------
+
+
+_KPI_TO_COLUMN = {
+    "Opening Balance": "opening_balance",
+    "Debits": "total_debits",
+    "Credits": "total_credits",
+    "Closing Stored": "closing_balance_stored",
+    "Drift": "drift",
+}
+
+
+def _read_kpis_as_decimals(driver) -> dict[str, Decimal]:  # type: ignore[no-untyped-def]: driver is a DashboardDriver — annotating would force the import at module scope
+    return {
+        title: _parse_currency_kpi(driver.kpi_value(title))
+        for title in _KPI_TO_COLUMN
+    }
+
+
+def _expected_row_for(
+    driver, *, sql: str, dataset_parameters, account_display: str, day_iso: str,  # type: ignore[no-untyped-def]: driver/dataset_parameters are runtime values — annotating cascades imports
+) -> dict[str, Decimal]:
+    """Issue the same Daily Statement Summary SQL the visual would, with
+    the picker-derived binds, via ``driver.query_db``. Returns each KPI
+    title → Decimal (matview-projected dollar value).
+
+    BG.2's ground truth: the matview is the source of fact; the KPI
+    binding either matches it or doesn't. Identity assertions compare
+    parsed-KPI ↔ this dict; the cold-read findings #1 / #3 surface as
+    column-vs-rendered mismatches on the Drift / Opening Balance rows.
+    """
+    rows = driver.query_db(
+        sql,
+        binds={
+            "param_pL1DsAccount": account_display,
+            "param_pL1DsBalanceDate": day_iso,
+        },
+        dataset_parameters=dataset_parameters,
+    )
+    assert len(rows) == 1, (
+        f"Daily Statement Summary SQL returned {len(rows)} rows for "
+        f"({account_display!r}, {day_iso!r}); expected exactly 1. "
+        f"Helper picked a (account, day) without a matview row, or the "
+        f"matview is stale."
+    )
+    row = rows[0]
+    return {
+        title: Decimal(str(row[col]))
+        for title, col in _KPI_TO_COLUMN.items()
+    }
+
+
+def test_bg2_daily_statement_kpis_match_summary_matview(
+    l1_dashboard_driver, cfg, l2,
+):
+    """BG.2 — honest gate for the 5 Daily Statement KPIs.
+
+    For the renderer that DOES bind the Business Day picker to the SQL
+    (the QS leg via the analysis-side ``pL1DsBalanceDate`` param;
+    Y.2.f/g + AR.2 narrowed it to strict day equality at the dataset
+    layer), pick (account, day1), read each KPI, query the same SQL
+    against the deployed DB through ``driver.query_db``, assert
+    KPI[title] == row[column] for all 5 KPIs.
+
+    Then pick day2 (different business day, SAME account): re-read +
+    re-assert identity, AND assert the new KPI set differs from day1's
+    (delta — proves the picker actually narrows). The v11.21.0
+    cold-read's finding #2 (date picker non-functional → byte-identical
+    KPIs across days) trips on the delta assertion when the wiring is
+    broken; finding #1 (Drift KPI ≠ formula) and finding #3 (negative
+    Opening Balance on a class-restricted role) trip on the identity
+    assertion's per-column comparison.
+
+    App2 leg: the single-value ``ParameterDateTimePicker`` for Business
+    Day is skipped during App2's filter-spec derivation
+    (``add_parameter_datetime_picker`` is App2-no-op today —
+    ``tests/e2e/_drivers/base.py::set_date`` doc), so the dataset binds
+    the param's default (the as_of anchor). The identity assertion
+    still runs on App2 — it just compares against the anchor-day
+    matview row instead of the picked-day row. The delta block runs
+    only on the QS leg.
+    """
+    driver, dashboard_arg = l1_dashboard_driver
+    driver.open(dashboard_arg, sheet="Daily Statement")
+
+    picked_account, _picked_role, day1, day2 = (
+        find_two_days_for_same_account(cfg)
+    )
+
+    # Sanity: Account dropdown advertises the helper's pick (the AA.E.2
+    # display-form binding contract); fail loud if not — the BG.2
+    # KPI assertions below would otherwise read pre-pick state.
+    options = driver.filter_options("Account")
+    assert picked_account in options, (
+        f"Helper picked {picked_account!r} but Account dropdown options "
+        f"don't include it (first 5: {options[:5]}). AA.E.2 binding "
+        f"likely out of sync with the dataset's WHERE clause."
+    )
+    driver.pick_filter("Account", [picked_account])
+
+    sql, dataset_parameters = _summary_sql_and_params(cfg, l2)
+
+    # Identity — day1.
+    driver.set_date("Business Day", day1)
+    driver.wait_loaded("Opening Balance")
+    rendered_day1 = _read_kpis_as_decimals(driver)
+    # App2 doesn't render the Business Day picker → the dataset's
+    # param binds to its default (as_of anchor). Bind the SAME default
+    # for the ground-truth query so the identity comparison is honest
+    # on both legs.
+    effective_day1 = day1 if driver.dialect == "qs" else _summary_default_day(
+        dataset_parameters,
+    )
+    expected_day1 = _expected_row_for(
+        driver, sql=sql, dataset_parameters=dataset_parameters,
+        account_display=picked_account, day_iso=effective_day1,
+    )
+    driver.screenshot()
+    for title in _KPI_TO_COLUMN:
+        assert rendered_day1[title] == expected_day1[title], (
+            f"day1={effective_day1!r} KPI mismatch for {title!r}: "
+            f"rendered={rendered_day1[title]} vs "
+            f"summary-matview={expected_day1[title]}. The KPI is "
+            f"binding a column whose value doesn't match what the "
+            f"deployed matview holds — v11.21.0 cold-read finding #1 "
+            f"(Drift) / #3 (negative Opening Balance) lives here."
+        )
+
+    # Delta — only meaningful on the QS leg. On App2 the picker is a
+    # no-op (App2 skips ``add_parameter_datetime_picker`` during
+    # filter-spec derivation), so day1 == day2 == default-day; the
+    # picker-narrows-data contract doesn't apply.
+    if driver.dialect != "qs":
+        return
+
+    driver.set_date("Business Day", day2)
+    driver.wait_loaded("Opening Balance")
+    rendered_day2 = _read_kpis_as_decimals(driver)
+    expected_day2 = _expected_row_for(
+        driver, sql=sql, dataset_parameters=dataset_parameters,
+        account_display=picked_account, day_iso=day2,
+    )
+    driver.screenshot()
+    for title in _KPI_TO_COLUMN:
+        assert rendered_day2[title] == expected_day2[title], (
+            f"day2={day2!r} KPI mismatch for {title!r}: "
+            f"rendered={rendered_day2[title]} vs "
+            f"summary-matview={expected_day2[title]}."
+        )
+    # The narrative invariant: every KPI MAY equal (e.g. zero rows on
+    # both days), but the rendered SET must change in at least ONE
+    # KPI between day1 and day2. Byte-identical KPIs across two
+    # known-distinct-data days is the v11.21.0 cold-read finding #2
+    # signature.
+    assert rendered_day1 != rendered_day2, (
+        f"Business Day picker is a no-op on this leg: day1={day1!r} "
+        f"and day2={day2!r} produced byte-identical KPI sets "
+        f"({rendered_day1!r}). v11.21.0 cold-read finding #2 — the "
+        f"picker's value isn't reaching the dataset's WHERE clause. "
+        f"Drill into the flatpickr → hidden-input → form-refresh "
+        f"chain; the SQL pushdown wire is intact (this same SQL + "
+        f"binds returns distinct values for the two days)."
+    )
+
+
+def _summary_default_day(dataset_parameters) -> str:  # type: ignore[no-untyped-def]: list of DatasetParameter — annotating would import the wrapper here
+    """Return the YYYY-MM-DD default static value declared on the
+    ``pL1DsBalanceDate`` dataset parameter. App2's leg binds this when
+    no URL param is supplied (since the date picker isn't rendered)."""
+    for dp in dataset_parameters:
+        dt = dp.DateTimeDatasetParameter
+        if dt is None or str(dt.Name) != "pL1DsBalanceDate":
+            continue
+        defaults = dt.DefaultValues
+        if defaults is None or not defaults.StaticValues:
+            raise RuntimeError(
+                "pL1DsBalanceDate DatasetParameter has no static default; "
+                "App2 leg can't compute the bound day."
+            )
+        raw = str(defaults.StaticValues[0])
+        # QS DateTime defaults serialize as ISO timestamps; take the
+        # leading day-shape.
+        return raw[:10]
+    raise RuntimeError(
+        "pL1DsBalanceDate DatasetParameter not found on the summary "
+        "dataset; production builder shape changed."
     )
