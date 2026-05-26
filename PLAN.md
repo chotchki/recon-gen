@@ -205,8 +205,21 @@ Approach 2 (token-stream tool like jscpd/PMD CPD) deliberately not pursued — b
   - [ ] BE.7.C - BE.7.C — Path C full sweep (survey → annotate → triage)
     - [ ] BE.7.C.1 - **Survey** all AWS-fixture sites + dict-returning fixtures across tests/. Produce target-list doc partitioned by subtree for the C.2 fan-out. Single-agent (~30 min).
     - [ ] BE.7.C.2 - **Annotation fan-out**. Parallel worktree agents per tests/ subtree slice apply the BE.7.B pattern (fixture + consumers). Goal: every AWS-fixture site carries its proper TypedDict + every consumer is annotated. Expected residual ~3,500-4,000 errors of mixed unknown_cascade + actionable.
-    - [ ] BE.7.C.3 - **Triage residual**. After C.2 measures, decide per-rule disposition: (a) keep enforcing (fix or `# type: ignore[<rule>]: <why>`); (b) suppress at config layer for residual unknown_cascade noise.
+    - [x] BE.7.C.2 measurement — Shipped 2026-05-26. All 6 slices merged: 5,201 → 3,250 errors (-1,951, -37.5%). All unknown_cascade rules collapsed substantially. ~80 newly-visible lurking-bug shapes (32 NotRequired, 16 NewType-leak, 16+12 missing None-guards, ...). Some fixed inline by slice agents; rest documented for C.3.
+    - [ ] BE.7.C.3 - **Triage residual**. **PAUSED 2026-05-26 PENDING PHASE BF.** Empirical investigation post-C.2: 611 of the 2,271 residual cascade errors (27%) trace to 3 hottest test files (`test_investigation.py`, `test_cli_json.py`, `test_l1_dashboard.py`), and EVERY one of their src imports points at un-included src/ files (`apps/investigation/*.py`, `apps/l1_dashboard/*.py`, `cli/json.py`, `cli/main.py`, `common/sheets/app_info.py`). The cascade noise in tests/ is downstream of unchecked src/ producers. Phase BF (src/ pyright expansion) is sequenced AHEAD of C.3 so it can collapse src-side cascade first, leaving C.3 a smaller residual to triage. Resume after BF.3.
   - [ ] BE.7.D - **Verify + tick**. After C.3: flip `pyright.include`, assert zero unsuppressed errors at the chosen scope, commit.
+
+## Phase BF - Expand pyright strict-scope to remaining src/ (~70 files)
+
+Promoted from backlog 2026-05-26 after BE.7.C.2's measurement found that 27% of the residual tests/ cascade traces to un-included src/ files. The "70 unchecked src/ files" is `apps/{executives,investigation,l1_dashboard,l2_flow_tracing}/*.py` + `cli/*.py` + runtime entry points — exactly the modules feeding the strict-scope tests/ work. Sequenced BEFORE BE.7.C.3 so producer-side cascade collapses before tests-side triage.
+
+Why interleave Phase BF here rather than ship after BE.7 closes: user's "the more we punt the more it bites us" principle. Every tests/-side `# type: ignore` we'd add in C.3 to mask cascade-from-un-typed-src/ would be re-touched when BF lands. Better order: BF first → BE.7.C.3 with cleaner residual → BE.7.D tick + BE.6 release tag.
+
+- [ ] BF.0 - **Spike**. Measure pyright on all 70 unchecked src/ files (+ extrapolate to "what if pyright.include = src/recon_gen/**"). Categorize by error type + by app. Identify producer-side annotation patterns (function returns, class attrs, module-level constants). Output: `docs/audits/bf_0_pyright_src_spike.md` decision table partitioned by app for BF.1 fan-out.
+- [ ] BF.1 - **Annotation fan-out**. Parallel worktree agents per app slice (executives / investigation / l1_dashboard / l2_flow_tracing / cli / sheets+app_info). Same BE.7.B/C.2 pattern but on the producer side: return-type annotations on factory functions, TypedDict class attrs, public-facing constants. Expected: each app's annotation cascade-collapses both the app file's own errors AND the test-side consumer cascade.
+- [ ] BF.2 - **Triage residual**. After BF.1: decide per-rule disposition. Same shape as BE.7.C.3 will become.
+- [ ] BF.3 - **Flip src/ scope + re-measure tests/**. Add the apps/ + cli/ + sheets/ paths to `pyright.include`. Re-run BE.7.A's spike script on tests/; expect a substantial cascade-collapse (the cross-corpus validation that BF was the right sequencing).
+- [ ] BF.4 - **Resume BE.7.C.3** with the reduced residual.
 ## Phase BK - v11.22.1 cold-read second-pass + deferrals
 
 Cold-read at `docs/audits/v11_22_1_feedback.md`. Closed in v11.22.3 small-fix batch (2026-05-26): #1 Daily Statement signed-labels, #10 Drift Timelines parent-vs-leaf scope explainer, #14 Overdraft scope label, #17 Open/Active KPI disambiguation, #18 Avg-Daily-Volume integer format (new `Measure.decimals=` kwarg), #19 strip internal-phase-ref language from exec subtitles. Remaining items below survived the small-fix pass — they need design work, fresh data, or operator clarification.
@@ -223,8 +236,6 @@ Cold-read at `docs/audits/v11_22_1_feedback.md`. Closed in v11.22.3 small-fix ba
 - [ ] BK.10 - **#20 Empty-state discipline**. Several sheets show blank visuals when filters narrow to zero rows. Convention candidates: empty-state banner ("No rows match these filters; try widening the date range"), or pre-loaded counter ("0 of 12,345 rows match"). Cross-sheet design pass — needs a convention before rolling out.
 
 # Backlog (not yet phased)
-
-- **Promote BE.7's pattern to src/: expand pyright strict-scope to the remaining 70 src/ files.** Discovered during BE.7.B's annotation pass (2026-05-26): the existing `pyproject.toml::tool.pyright.include` covers only 91 of 161 src/recon_gen/**/*.py files (57%). The 70 unchecked files are dominated by the `apps/{executives,investigation,l1_dashboard,l2_flow_tracing}/` layer + `cli/*.py` + runtime entry points (`__init__.py`, `__main__.py`, etc.) — exactly the modules whose return types now feed the BE.7-strict tests via the TypedDict cascade. After BE.7 closes (BE.7.D ticks), promote this to a new phase (BF or similar) that mirrors BE.7's shape: spike → annotate producer-side returns + class attrs + module-level constants → triage residual → flip `pyright.include` to add the `apps/` + `cli/` paths. Sequenced AFTER BE.7 to avoid conflating tests-side cascade vs src-side cascade signal sources in one phase.
 
 - **BC.12 deferred: `l2_yaml_raw` / `cfg_yaml_raw` opaque-provenance kv rows.**
   Surfaced 2026-05-24 during BC.12 integration. The original design
