@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import pytest
 
@@ -229,7 +229,7 @@ _DATASETS_BY_ID = {ds.DataSetId: ds for ds in _DATASETS}
 
 
 @pytest.fixture(scope="module")
-def smoke_conn():
+def smoke_conn() -> Iterator[Any]:
     """Module-scoped DB connection — opened once, reused across every
     parametrized test, set to autocommit so AccessShareLocks release
     statement-by-statement.
@@ -269,7 +269,7 @@ def smoke_conn():
 
 @pytest.mark.parametrize("dataset_id", sorted(_DATASETS_BY_ID))
 def test_dataset_sql_parses_and_executes(
-    dataset_id: str, smoke_conn,
+    dataset_id: str, smoke_conn: Any,
 ) -> None:
     """The dataset's CustomSQL parses, binds default-value
     substitutions, and executes against the live demo DB without

@@ -19,7 +19,7 @@ which matview is empty. Cfg-driven dialect dispatch via
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import pytest
 
@@ -92,7 +92,7 @@ _PREFIX = _CFG.db_table_prefix
 
 
 @pytest.fixture(scope="module")
-def smoke_conn() -> Any:
+def smoke_conn() -> Iterator[Any]:
     conn = connect_demo_db(_CFG)
     try:
         yield conn

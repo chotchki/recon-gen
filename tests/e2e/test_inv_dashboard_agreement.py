@@ -44,11 +44,19 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Iterator, Mapping
 
 import pytest
 
 from recon_gen.common.db import connect_demo_db, execute_script
 from recon_gen.common.env_keys import RECON_GEN_E2E
+
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config
+    from recon_gen.common.spine.anomaly import AnomalyGenerator
+    from recon_gen.common.spine.money_trail import MoneyTrailGenerator
+    from recon_gen.common.tree import App
+    from tests.e2e._drivers import QsEmbedDriver
 
 
 # Module-level cfg load can't fire under the unit-only CI job — match
@@ -159,7 +167,9 @@ _PLANTED_CHAIN_ROOT = "xfer-money-trail-0"
 _ALL_L2_INVARIANTS: tuple[str, ...] = ("anomaly", "money_trail")
 
 
-def _build_anomaly_generator(cfg, anchor_day):  # type: ignore[no-untyped-def]: cfg is recon_gen Config; annotation would force the import to module scope
+def _build_anomaly_generator(
+    cfg: "Config", anchor_day: date,
+) -> "AnomalyGenerator":
     """Construct the AnomalyGenerator the seed + agreement test share.
 
     Hoisted so both ``seeded_l2_db`` (which emits) and
@@ -180,7 +190,9 @@ def _build_anomaly_generator(cfg, anchor_day):  # type: ignore[no-untyped-def]: 
     return gen
 
 
-def _build_money_trail_generator(cfg, anchor_day):  # type: ignore[no-untyped-def]: cfg is recon_gen Config; see _build_anomaly_generator
+def _build_money_trail_generator(
+    cfg: "Config", anchor_day: date,
+) -> "MoneyTrailGenerator":
     """Construct the MoneyTrailGenerator the seed + agreement test share.
     See ``_build_anomaly_generator`` for the rationale."""
     gen = MoneyTrailInvariant().scenario_for(
@@ -202,7 +214,7 @@ def _plant_anchor_day() -> date:
 
 
 @pytest.fixture(scope="module")
-def isolated_inv_cfg(cfg):  # type: ignore[no-untyped-def]: cfg is recon_gen Config; return is a fresh Config sibling
+def isolated_inv_cfg(cfg) -> "Iterator[Config]":  # cfg is conftest's Config — cross-slice rule: don't annotate it (slice 1 owns conftest)
     """Per-test cfg with an isolated table prefix + deployment name.
 
     The Investigation agreement test's seeded_l2_db is destructive —
@@ -263,7 +275,7 @@ def isolated_inv_cfg(cfg):  # type: ignore[no-untyped-def]: cfg is recon_gen Con
 
 
 @pytest.fixture(scope="module")
-def isolated_inv_app(isolated_inv_cfg):  # type: ignore[no-untyped-def]: returns a build_investigation_app result; annotating would force the App import to module scope
+def isolated_inv_app(isolated_inv_cfg: "Config") -> "App":
     """Investigation App tree built against the ISOLATED cfg.
 
     The session-scoped ``inv_app`` (conftest.py) is built off the
@@ -286,7 +298,7 @@ def isolated_inv_app(isolated_inv_cfg):  # type: ignore[no-untyped-def]: returns
 
 
 @pytest.fixture(scope="module")
-def inv_dashboard_id(isolated_inv_cfg) -> str:  # type: ignore[no-untyped-def]: pytest overrides the conftest's `inv_dashboard_id` so qs_inv_driver looks for the isolated dashboard
+def inv_dashboard_id(isolated_inv_cfg: "Config") -> str:
     """Override the conftest's ``inv_dashboard_id`` so ``qs_inv_driver``
     looks for the isolated deployment's dashboard. When the isolated
     dashboard isn't deployed (default — the runner deploys against
@@ -304,7 +316,7 @@ def inv_dashboard_id(isolated_inv_cfg) -> str:  # type: ignore[no-untyped-def]: 
 
 
 @pytest.fixture(scope="module")
-def seeded_l2_db(isolated_inv_cfg):  # type: ignore[no-untyped-def]: returns nothing the test introspects — the fixture's contract is "DB is seeded"
+def seeded_l2_db(isolated_inv_cfg: "Config") -> None:
     """Apply the schema + broad seed + L2 spine plants + matview refresh
     against the ISOLATED cfg's table prefix.
 
@@ -367,7 +379,7 @@ def seeded_l2_db(isolated_inv_cfg):  # type: ignore[no-untyped-def]: returns not
 
 
 @pytest.fixture(scope="module")
-def planted_l2_bounds(isolated_inv_cfg) -> ExpectedL2AuditCounts:  # type: ignore[no-untyped-def]: isolated_inv_cfg is recon_gen Config
+def planted_l2_bounds(isolated_inv_cfg: "Config") -> ExpectedL2AuditCounts:
     """AT.5.f — the lower-bound counts + key projections the spine
     generators planted. The 3-way test asserts every renderer's count
     is ``>=`` ``X_count`` and every renderer's key set is ``>=``
@@ -386,7 +398,11 @@ def planted_l2_bounds(isolated_inv_cfg) -> ExpectedL2AuditCounts:  # type: ignor
 
 
 @pytest.fixture(scope="module")
-def per_l2_app2_results(isolated_inv_cfg, isolated_inv_app, seeded_l2_db):  # type: ignore[no-untyped-def]: returns a dict; annotating would force the driver imports below to module scope
+def per_l2_app2_results(
+    isolated_inv_cfg: "Config",
+    isolated_inv_app: "App",
+    seeded_l2_db: None,
+) -> "Mapping[str, Mapping[str, object]]":
     """The App2 leg's data, read once up-front (mirrors L1's
     ``per_dialect_app2_results``).
 
@@ -438,7 +454,14 @@ def per_l2_app2_results(isolated_inv_cfg, isolated_inv_app, seeded_l2_db):  # ty
 
 
 @pytest.fixture
-def qs_inv_driver(request, cfg, region, account_id, inv_dashboard_id, inv_app):  # type: ignore[no-untyped-def]: return-type annotation would force a QsEmbedDriver import at module scope
+def qs_inv_driver(
+    request: pytest.FixtureRequest,
+    cfg,  # conftest fixture (Config); cross-slice rule — slice 1 annotates
+    region,  # conftest fixture (str); cross-slice rule
+    account_id,  # conftest fixture (str); cross-slice rule
+    inv_dashboard_id: str,
+    inv_app,  # conftest fixture (App); cross-slice rule
+) -> "Iterator[QsEmbedDriver | None]":
     """Function-scoped ``QsEmbedDriver`` aimed at the deployed
     Investigation dashboard (mirrors L1's ``per_dialect_qs_driver``).
 
@@ -479,7 +502,9 @@ def qs_inv_driver(request, cfg, region, account_id, inv_dashboard_id, inv_app): 
 
 
 @pytest.fixture
-def db_conn(isolated_inv_cfg):  # type: ignore[no-untyped-def]: live PG/Oracle/SQLite connection — concrete type varies per dialect, no shared protocol
+def db_conn(isolated_inv_cfg: "Config") -> "Iterator[Any]":
+    # WHY Iterator[Any]: live PG/Oracle/SQLite connection — concrete type
+    # varies per dialect, no shared Protocol across the three drivers.
     """Function-scoped raw DB connection for the direct-SELECT anchor
     + the spine ``detect()`` call. Points at the ISOLATED cfg so the
     direct SELECTs read the same per-test prefix the App2 leg reads.
@@ -624,14 +649,14 @@ def _money_trail_root_edge_keys(
 
 @pytest.mark.parametrize("invariant", _ALL_L2_INVARIANTS)
 def test_invariant_three_way_agreement(
-    seeded_l2_db,
-    per_l2_app2_results,
-    qs_inv_driver,
+    seeded_l2_db: None,
+    per_l2_app2_results: "Mapping[str, Mapping[str, object]]",
+    qs_inv_driver: "QsEmbedDriver | None",
     inv_dashboard_id: str,
-    db_conn,
-    isolated_inv_cfg,
-    planted_l2_bounds,
-    invariant,
+    db_conn: Any,
+    isolated_inv_cfg: "Config",
+    planted_l2_bounds: ExpectedL2AuditCounts,
+    invariant: str,
 ) -> None:
     """Per-invariant 3-renderer agreement (AT.5.e) — the chain
 
