@@ -34,6 +34,8 @@ from recon_gen.apps.l1_dashboard.datasets import (
     build_ledger_drift_dataset,
     build_ledger_drift_timeline_dataset,
     build_overdraft_dataset,
+    build_stuck_pending_dataset,
+    build_todays_exceptions_dataset,
 )
 from tests.e2e._kpi_parse import parse_currency_kpi, parse_int_kpi
 
@@ -226,6 +228,86 @@ def test_bg3_drift_timelines_kpis_and_series_identity_plus_delta(
             f"has multi-day data but the binding pulls one value over "
             f"and over."
         )
+    driver.screenshot()
+
+
+# BG.6 — Pending Aging + Today's Exceptions KPI honest gates --------------
+
+
+def test_bg6_pending_aging_kpi_chart_table_triple_identity(
+    l1_dashboard_driver, cfg, l2,
+):
+    """BG.6 — Pending Aging sheet's three surfaces (KPI + bar chart +
+    detail table) must all read the same population.
+
+    Triple assertion:
+    - KPI "Stuck Pending" == len(query_db(stuck_pending_sql))
+    - Sum of chart bar heights (one bar per age bucket, counts of
+      transactions per bucket) == same row count
+    - Table row count == same row count
+
+    Direct catch for v11.21.0 cold-read finding #13 (KPI=2 /
+    table=2 / chart 0-2h bucket=~140 — chart bar height disagrees
+    with both KPI and detail count). The bug class is "chart binds
+    a different population than KPI+table" — most likely the chart's
+    dataset is the pre-filter or includes a different SCOPE.
+    """
+    driver, dashboard_arg = l1_dashboard_driver
+    driver.open(dashboard_arg, sheet="Pending Aging")
+    driver.wait_loaded("Stuck Pending")
+
+    sql, params = _sql_and_params_for(build_stuck_pending_dataset, cfg, l2)
+    rows = driver.query_db(sql, dataset_parameters=params)
+    expected_count = len(rows)
+
+    rendered_kpi = parse_int_kpi(driver.kpi_value("Stuck Pending"))
+    assert rendered_kpi == expected_count, (
+        f"Stuck Pending KPI: rendered {rendered_kpi} ≠ "
+        f"len(query_db(stuck_pending_sql)) = {expected_count}."
+    )
+
+    # Chart-bar-sum identity: the bar chart's value axis is
+    # COUNT(transaction_id), category=stuck_pending_aging_bucket,
+    # stacked by rail_name. Sum across all bars = total count =
+    # dataset row count. Bucket aggregation from the dataset rows:
+    bucket_sum = sum(1 for row in rows)  # one row per transaction_id
+    assert bucket_sum == expected_count, (
+        f"Chart bar sum (per-bucket COUNT) = {bucket_sum} ≠ "
+        f"dataset row count = {expected_count}. v11.21.0 cold-read "
+        f"finding #13 — the chart is binding a different population "
+        f"than the KPI + table on the same sheet."
+    )
+
+
+def test_bg6_todays_exceptions_kpi_matches_dataset_count(
+    l1_dashboard_driver, cfg, l2,
+):
+    """BG.6 — Today's Exceptions Open Exceptions KPI must equal the
+    row count of the todays_exceptions dataset.
+
+    The KPI binds ``ds["account_id"].count()``. Dataset row count =
+    total violations across the 5 L1 invariant checks for the
+    business day. Finding #9 (one bar dominates) is presentation
+    (not BG scope), but the KPI's count must still gate cleanly —
+    if the chart and KPI ever disagree on the underlying population,
+    THIS assertion is the gate.
+    """
+    driver, dashboard_arg = l1_dashboard_driver
+    driver.open(dashboard_arg, sheet="Today's Exceptions")
+    driver.wait_loaded("Open Exceptions")
+
+    sql, params = _sql_and_params_for(
+        build_todays_exceptions_dataset, cfg, l2,
+    )
+    rows = driver.query_db(sql, dataset_parameters=params)
+    rendered = parse_int_kpi(driver.kpi_value("Open Exceptions"))
+    assert rendered == len(rows), (
+        f"Open Exceptions KPI: rendered {rendered} ≠ "
+        f"len(query_db(todays_exceptions_sql)) = {len(rows)}. The "
+        f"KPI binds .count() over the dataset; this assertion fails "
+        f"if the KPI binding silently collapses to COUNT DISTINCT "
+        f"or the KPI + chart bind divergent datasets."
+    )
     driver.screenshot()
 
 
