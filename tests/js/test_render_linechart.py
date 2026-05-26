@@ -50,11 +50,17 @@ def _render_into_target(page: Any, data: dict[str, Any]) -> None:
     )
 
 
+# Neutral series names (not the dashboard's sheet names) so the
+# BE.2 cross-corpus lint doesn't false-positive on coincidental
+# value match against `_DRIFT_NAME` / `_OVERDRAFT_NAME` — these
+# chart-renderer tests aren't asserting anything about the L1
+# dashboard, just that arbitrary series labels round-trip through
+# the SVG legend. Cf. BE.4 Phase C sweep.
 _DATE_DATA: dict[str, Any] = {
     "x_values": ["2026-01-01", "2026-02-01", "2026-03-01", "2026-04-01"],
     "series": [
-        {"name": "Drift", "values": [12, 7, 9, 14]},
-        {"name": "Overdraft", "values": [3, 5, 2, 6]},
+        {"name": "Series A", "values": [12, 7, 9, 14]},
+        {"name": "Series B", "values": [3, 5, 2, 6]},
     ],
     "x_label": "Month",
     "y_label": "Violations",
@@ -109,8 +115,8 @@ def test_linechart_legend_renders_for_multi_series() -> None:
         ))
         browser.close()
     assert legend_entries == 2
-    assert "Drift" in legend_text
-    assert "Overdraft" in legend_text
+    assert "Series A" in legend_text
+    assert "Series B" in legend_text
 
 
 def test_linechart_legend_suppressed_for_single_series() -> None:

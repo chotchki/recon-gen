@@ -95,13 +95,13 @@ def test_theme_full_block_round_trips(tmp_path: Path) -> None:
     assert t.data_colors == ["#2D6A4F", "#C49A2A", "#5C4033"]
     assert t.gradient == ["#C5DDD3", "#1B4332"]
     assert t.empty_fill_color == "#D6D6CE"
-    assert t.primary_bg == "#FFFFFF"
+    assert t.primary_bg == "#FFFFFF"  # typing-smell: ignore[no-inline-production-constants]: theme yaml roundtrip fixture, not coupled to _WHITE
     assert t.accent == "#2D6A4F"
     assert t.measure == "#1B4332"
     # Spot-check the rest — full field set already enforced by the YAML
     # _require() calls; here we just prove the kwargs landed.
     assert t.danger == "#B71C1C"
-    assert t.success_fg == "#FFFFFF"
+    assert t.success_fg == "#FFFFFF"  # typing-smell: ignore[no-inline-production-constants]: theme yaml roundtrip fixture, not coupled to _WHITE
 
 
 def test_theme_analysis_name_prefix_omitted_is_none(tmp_path: Path) -> None:

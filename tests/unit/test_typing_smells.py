@@ -2110,29 +2110,29 @@ def _build_checks() -> list[Check]:
         #     ),
         #     files=_raw_temporal_scope,
         # ),
-        # BE.2 — STAGED DISABLED until BE.4's sweep clears the 144 hits
-        # the BE.0 spike measured. To enable: drop the ``# `` comment
-        # from the registration below. Enabling now would red the whole
-        # tree. BE.4 splits the 144 into (~60 migrate to imports, ~40
-        # allowlist with WHY, ~10 src refactor). The planted-fixture
-        # smoke test (``test_be_2_no_inline_production_constants_finds_
-        # planted_dup``) invokes the Check directly so this staged-
-        # disabled state doesn't degrade lint-stay-wired confidence.
-        # NoInlineProductionConstantsCheck(
-        #     name="no-inline-production-constants",
-        #     description=(
-        #         "string literal inside an ``assert`` in tests/ that "
-        #         "matches a module-level UPPER_SNAKE constant in "
-        #         "src/recon_gen/** — import the constant instead of "
-        #         "inlining the value, so a rename in production fires "
-        #         "the test loudly. Catches the provenance-drift class "
-        #         "(sheet names, dataset IDs, sentinel values). BE.0 "
-        #         "spike: 144 current hits. Allowlist via ``# typing-"
-        #         "smell: ignore[no-inline-production-constants]: "
-        #         "<why>`` for deliberate contract-independence cases."
-        #     ),
-        #     files=no_test_src_sql_dup_scope,
-        # ),
+        # BE.2 — ENABLED 2026-05-26 (BE.4.C). The Phase A spike found
+        # 144 hits; Phase B's three parallel agents migrated 129 to
+        # direct imports + flagged 15 for principal review; Phase C
+        # applied per-line suppressions with WHY on 11 illustrative-
+        # literal cases + refactored 4 chart-renderer fixtures to
+        # neutral strings. Net: 0 unsuppressed hits. The lint now
+        # locks the migrated baseline + catches future drift.
+        NoInlineProductionConstantsCheck(
+            name="no-inline-production-constants",
+            description=(
+                "string literal inside an ``assert`` in tests/ that "
+                "matches a module-level UPPER_SNAKE constant in "
+                "src/recon_gen/** — import the constant instead of "
+                "inlining the value, so a rename in production fires "
+                "the test loudly. Catches the provenance-drift class "
+                "(sheet names, dataset IDs, sentinel values). BE.4 "
+                "swept the corpus to 0 unsuppressed hits on "
+                "2026-05-26. Allowlist via ``# typing-smell: ignore"
+                "[no-inline-production-constants]: <why>`` for "
+                "deliberate contract-independence cases."
+            ),
+            files=no_test_src_sql_dup_scope,
+        ),
     ]
 
 

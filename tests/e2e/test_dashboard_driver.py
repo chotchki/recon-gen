@@ -167,7 +167,7 @@ def test_app2_filter_options_lists_dropdown_values(
     # The smoke app's "View" ParameterDropdown advertises these three.
     assert driver.filter_options("View") == ["summary", "detail", "drill"]
     # Multi-select reads the same way.
-    assert set(driver.filter_options("Rails")) == {
+    assert set(driver.filter_options("Rails")) == {  # typing-smell: ignore[no-inline-production-constants]: smoke-app filter label declared inline at common/html/_smoke_app.py; coincidentally matches _RAILS_NAME (L2FT sheet name) — different surface
         "ach", "wire", "check", "internal", "zba",
     }
 

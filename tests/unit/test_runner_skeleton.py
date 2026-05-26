@@ -535,7 +535,7 @@ def test_layer_command_deploy_returns_cmd_with_variant_env(tmp_path: Path) -> No
     )
     assert cmd_env is not None
     cmd, _env = cmd_env
-    assert "recon-gen" in cmd[0]
+    assert "recon-gen" in cmd[0]  # typing-smell: ignore[no-inline-production-constants]: CLI binary / package name; matches MANAGED_TAG_VALUE by package-name reuse, not by tag-value coupling
     assert "json" in cmd
     assert "apply" in cmd
     assert "--execute" in cmd

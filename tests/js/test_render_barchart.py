@@ -198,8 +198,14 @@ def test_barchart_renders_x_axis_category_ticks() -> None:
         browser = p.webkit.launch(headless=True)
         page = browser.new_page()
         _load_harness(page)
+        # Use neutral strings (not the dashboard's sheet names) so the
+        # BE.2 cross-corpus lint doesn't false-positive on coincidental
+        # value match against `_DRIFT_NAME` / `_OVERDRAFT_NAME` — the
+        # chart-renderer round-trip test isn't asserting anything about
+        # the L1 dashboard, just that an arbitrary category label
+        # survives render-to-SVG-text. Cf. BE.4 Phase C sweep.
         _render_into_target(page, {
-            "categories": ["Drift", "Overdraft", "Limit"],
+            "categories": ["Cat A", "Cat B", "Cat C"],
             "series": [{"values": [1, 2, 3]}],
         })
         ticks = cast(list[str], page.evaluate(
@@ -208,9 +214,9 @@ def test_barchart_renders_x_axis_category_ticks() -> None:
             ).map((t) => t.textContent || '')""",
         ))
         browser.close()
-    assert "Drift" in ticks
-    assert "Overdraft" in ticks
-    assert "Limit" in ticks
+    assert "Cat A" in ticks
+    assert "Cat B" in ticks
+    assert "Cat C" in ticks
 
 
 def test_barchart_currency_format_applied_to_y_ticks() -> None:

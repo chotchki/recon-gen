@@ -1652,7 +1652,7 @@ def test_singleton_theme_missing_required_fields_returns_400(
     # The form re-renders with the operator's partial input + the
     # validator error inline. The accent color survives so the
     # operator doesn't have to retype.
-    assert "#1f4e79" in resp.text
+    assert "#1f4e79" in resp.text  # typing-smell: ignore[no-inline-production-constants]: operator form-input hex; coincidentally matches _BUNDLE_EDGE_COLOR (topology), not coupled to it
     assert "test-only" in resp.text
 
 

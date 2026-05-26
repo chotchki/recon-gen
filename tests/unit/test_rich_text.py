@@ -32,7 +32,7 @@ class TestInline:
         )
 
     def test_color(self) -> None:
-        assert rt.inline("hi", color="#2E5090") == '<inline color="#2E5090">hi</inline>'
+        assert rt.inline("hi", color="#2E5090") == '<inline color="#2E5090">hi</inline>'  # typing-smell: ignore[no-inline-production-constants]: illustrative hex for inline() passthrough; coincidentally matches _DARK_BLUE (theme), not theme constant
 
     def test_xml_escapes_body(self) -> None:
         assert "&lt;" in rt.inline("a < b")
@@ -294,7 +294,7 @@ class TestBoldCodeHelpers:
     """AO.R.3 — bold / code primitives."""
 
     def test_bold(self) -> None:
-        assert rt.bold("Drift") == "<b>Drift</b>"
+        assert rt.bold("Drift") == "<b>Drift</b>"  # typing-smell: ignore[no-inline-production-constants]: illustrative input for rt.bold(); coincidentally matches _DRIFT_NAME (L1 sheet name), not the sheet
 
     def test_bold_xml_escapes(self) -> None:
         assert rt.bold("a < b") == "<b>a &lt; b</b>"
