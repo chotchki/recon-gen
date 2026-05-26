@@ -10,14 +10,19 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import boto3
 import click
 from botocore.exceptions import ClientError
 
 from recon_gen.common.config import Config
+
+if TYPE_CHECKING:
+    from mypy_boto3_quicksight.client import QuickSightClient
 
 
 POLL_INTERVAL_SECONDS = 5
@@ -41,11 +46,16 @@ def _load_app_files(out_dir: Path, app: str) -> AppFiles | None:
     return AppFiles(name=app, analysis_path=analysis_path, dashboard_path=dashboard_path)
 
 
-def _read_json(path: Path) -> dict:
+def _read_json(path: Path) -> dict[str, Any]:
+    # WHY Any: QS JSON payloads are deeply heterogeneous + sometimes carry
+    # boto3-flavored nested dicts we re-emit verbatim; full typing would
+    # require mirroring the entire QS create-* TypedDict tree.
     return json.loads(path.read_text())
 
 
-def _wait_for_analysis(client, account_id: str, analysis_id: str) -> bool:
+def _wait_for_analysis(
+    client: QuickSightClient, account_id: str, analysis_id: str,
+) -> bool:
     """Poll describe-analysis until a terminal state. Returns True on success."""
     for attempt in range(1, POLL_MAX_ATTEMPTS + 1):
         try:
@@ -74,7 +84,9 @@ def _wait_for_analysis(client, account_id: str, analysis_id: str) -> bool:
     return False
 
 
-def _wait_for_dashboard(client, account_id: str, dashboard_id: str) -> bool:
+def _wait_for_dashboard(
+    client: QuickSightClient, account_id: str, dashboard_id: str,
+) -> bool:
     """Poll describe-dashboard until a terminal state. Returns True on success."""
     for attempt in range(1, POLL_MAX_ATTEMPTS + 1):
         try:
@@ -100,7 +112,9 @@ def _wait_for_dashboard(client, account_id: str, dashboard_id: str) -> bool:
     return False
 
 
-def _resource_exists(describe_fn, **kwargs) -> bool:
+def _resource_exists(
+    describe_fn: Callable[..., Any], **kwargs: Any,
+) -> bool:
     try:
         describe_fn(**kwargs)
         return True
@@ -110,7 +124,9 @@ def _resource_exists(describe_fn, **kwargs) -> bool:
         raise
 
 
-def _delete_dashboards(client, account_id: str, apps: list[AppFiles]) -> None:
+def _delete_dashboards(
+    client: QuickSightClient, account_id: str, apps: list[AppFiles],
+) -> None:
     for app in apps:
         if not app.dashboard_path.exists():
             continue
@@ -124,7 +140,9 @@ def _delete_dashboards(client, account_id: str, apps: list[AppFiles]) -> None:
             client.delete_dashboard(AwsAccountId=account_id, DashboardId=dash_id)
 
 
-def _delete_analyses(client, account_id: str, apps: list[AppFiles]) -> None:
+def _delete_analyses(
+    client: QuickSightClient, account_id: str, apps: list[AppFiles],
+) -> None:
     for app in apps:
         if not app.analysis_path.exists():
             continue
@@ -168,7 +186,10 @@ def _dataset_ids_for_apps(apps: list[AppFiles]) -> set[str]:
 
 
 def _delete_datasets(
-    client, account_id: str, out_dir: Path, allowed_ids: set[str] | None,
+    client: QuickSightClient,
+    account_id: str,
+    out_dir: Path,
+    allowed_ids: set[str] | None,
 ) -> None:
     datasets_dir = out_dir / "datasets"
     if not datasets_dir.is_dir():
@@ -186,7 +207,9 @@ def _delete_datasets(
             client.delete_data_set(AwsAccountId=account_id, DataSetId=ds_id)
 
 
-def _delete_theme(client, account_id: str, theme_path: Path) -> None:
+def _delete_theme(
+    client: QuickSightClient, account_id: str, theme_path: Path,
+) -> None:
     if not theme_path.exists():
         return
     theme_id = _read_json(theme_path)["ThemeId"]
@@ -198,7 +221,9 @@ def _delete_theme(client, account_id: str, theme_path: Path) -> None:
         client.delete_theme(AwsAccountId=account_id, ThemeId=theme_id)
 
 
-def _delete_datasource(client, account_id: str, datasource_path: Path) -> None:
+def _delete_datasource(
+    client: QuickSightClient, account_id: str, datasource_path: Path,
+) -> None:
     if not datasource_path.exists():
         return
     ds_id = _read_json(datasource_path)["DataSourceId"]
@@ -211,7 +236,9 @@ def _delete_datasource(client, account_id: str, datasource_path: Path) -> None:
         client.delete_data_source(AwsAccountId=account_id, DataSourceId=ds_id)
 
 
-def _create_datasource(client, datasource_path: Path) -> None:
+def _create_datasource(
+    client: QuickSightClient, datasource_path: Path,
+) -> None:
     if not datasource_path.exists():
         return
     payload = _read_json(datasource_path)
@@ -219,7 +246,7 @@ def _create_datasource(client, datasource_path: Path) -> None:
     client.create_data_source(**payload)
 
 
-def _create_theme(client, theme_path: Path) -> None:
+def _create_theme(client: QuickSightClient, theme_path: Path) -> None:
     if not theme_path.exists():
         # N.4.k silent-fallback: when the L2 instance carried no inline
         # ``theme:`` block, ``build_theme`` returned None and the
@@ -233,7 +260,9 @@ def _create_theme(client, theme_path: Path) -> None:
 
 
 def _create_datasets(
-    client, out_dir: Path, allowed_ids: set[str] | None,
+    client: QuickSightClient,
+    out_dir: Path,
+    allowed_ids: set[str] | None,
 ) -> None:
     datasets_dir = out_dir / "datasets"
     if not datasets_dir.is_dir():
@@ -246,7 +275,9 @@ def _create_datasets(
         client.create_data_set(**payload)
 
 
-def _create_analyses(client, apps: list[AppFiles]) -> list[str]:
+def _create_analyses(
+    client: QuickSightClient, apps: list[AppFiles],
+) -> list[str]:
     created: list[str] = []
     for app in apps:
         if not app.analysis_path.exists():
@@ -286,7 +317,9 @@ def _create_analyses(client, apps: list[AppFiles]) -> list[str]:
     return created
 
 
-def _create_dashboards(client, apps: list[AppFiles]) -> list[str]:
+def _create_dashboards(
+    client: QuickSightClient, apps: list[AppFiles],
+) -> list[str]:
     created: list[str] = []
     for app in apps:
         if not app.dashboard_path.exists():
@@ -306,7 +339,15 @@ def deploy(cfg: Config, out_dir: Path, app_names: list[str]) -> int:
     Theme / datasets / datasource are shared across apps and deployed
     from whatever is present in ``out_dir``.
     """
-    client = boto3.client("quicksight", region_name=cfg.aws_region)
+    # BF.1.S2: boto3.client overloaded signature picks the right service
+    # client at runtime; ``boto3-stubs[quicksight]`` provides the per-service
+    # overload but pyright still surfaces the umbrella signature as
+    # `partially unknown` until the call is anchored to a typed var. The
+    # suppression covers the call expression itself; the annotation pins
+    # the var.
+    client: QuickSightClient = boto3.client(  # pyright: ignore[reportUnknownMemberType]: boto3.client overloaded union; QuickSightClient annotation anchors the right stub
+        "quicksight", region_name=cfg.aws_region,
+    )
     account_id = cfg.aws_account_id
 
     click.echo(f"Deploying QuickSight resources from {out_dir}")

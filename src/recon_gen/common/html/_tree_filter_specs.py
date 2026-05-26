@@ -130,14 +130,19 @@ def make_filter_specs_for_sheet(sheet: "Sheet") -> list[FilterSpec]:
             # Initial value = the bound parameter's analysis-level default
             # if it declares one (== the SQL static-default), else the
             # slider minimum.
-            default_vals = getattr(ctrl.parameter, "default", None) or []
+            # BF.1.S2: parameter.default is dynamically typed across the
+            # parameter union (numeric for IntegerParameter, etc.); take
+            # the first element as a float for the slider default.
+            default_vals: list[object] = (
+                getattr(ctrl.parameter, "default", None) or []
+            )
             specs.append(ParameterNumberSpec(
                 name=str(ctrl.parameter.name),
                 label=ctrl.title,
                 minimum=float(ctrl.minimum_value),
                 maximum=float(ctrl.maximum_value),
                 step=float(ctrl.step_size),
-                default=float(default_vals[0]) if default_vals else None,
+                default=float(default_vals[0]) if default_vals else None,  # pyright: ignore[reportArgumentType]: default_vals element is object but parameter.default is numeric per-Spec
             ))
             continue
         if isinstance(ctrl, ParameterDateTimePicker):

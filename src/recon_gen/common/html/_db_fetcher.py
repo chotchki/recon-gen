@@ -200,7 +200,7 @@ def _topology_to_force_graph(instance: L2Instance) -> dict[str, Any]:
                     links.append({
                         "source": str(source), "target": str(target),
                     })
-        elif isinstance(rail, SingleLegRail):
+        elif isinstance(rail, SingleLegRail):  # pyright: ignore[reportUnnecessaryIsInstance]  # BF.1.S2: defensive; Rail is a 2-member union today but the elif documents the contract
             for role in rail.leg_role:
                 links.append({"source": str(role), "target": str(role)})
     return {"nodes": nodes, "links": links}

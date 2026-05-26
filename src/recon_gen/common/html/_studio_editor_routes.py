@@ -862,15 +862,17 @@ def _coerce_field(spec: FieldSpec, raw: str, kind: EntityKind) -> object:
                 f"got {type(parsed).__name__}",
             )
         result: list[tuple[Identifier, tuple[str, ...]]] = []
-        for k, v in parsed.items():  # pyright: ignore[reportUnknownVariableType]  # WHY: yaml.safe_load returns Any-typed dict
+        # WHY suppress: yaml.safe_load returns Any-typed dict; the
+        # per-line cascade hits the inner str() + type().__name__ calls too.
+        for k, v in parsed.items():  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]: yaml.safe_load dict carries Any-typed entries
             if not isinstance(v, list):
                 raise ValueError(
                     f"Key {k!r}: expected a list of strings, "
-                    f"got {type(v).__name__}",
+                    f"got {type(v).__name__}",  # pyright: ignore[reportUnknownArgumentType]: yaml-derived v has Any type
                 )
             result.append((
-                Identifier(str(k)),
-                tuple(str(item) for item in v),  # pyright: ignore[reportUnknownVariableType]  # WHY: list element type from yaml is Any
+                Identifier(str(k)),  # pyright: ignore[reportUnknownArgumentType]: yaml-derived k stringifies safely
+                tuple(str(item) for item in v),  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]: list element type from yaml is Any
             ))
         return tuple(result)
     if spec.name in ("id", "role", "parent_role", "parent", "name"):
@@ -1247,7 +1249,7 @@ def _render_field(
             )
         else:
             options, allow_empty = spec.options, False
-        opt_blocks = []
+        opt_blocks: list[str] = []
         if allow_empty:
             opt_blocks.append(
                 f'<option value=""{" selected" if val_str == "" else ""}>'
@@ -1531,11 +1533,15 @@ def _chain_children_value_as_specs(
         return ()
     if isinstance(value, (list, tuple)):
         out: list[tuple[str, bool, int | None]] = []
-        for item in value:  # pyright: ignore[reportUnknownVariableType]  # WHY: form-typed; isinstance gates below narrow per item
-            if hasattr(item, "name") and hasattr(item, "fan_in"):
-                name = str(getattr(item, "name"))
-                fan_in = bool(getattr(item, "fan_in", False))
-                epc_raw = getattr(item, "expected_parent_count", None)
+        # WHY suppress (item-side): value is list|tuple via isinstance gate
+        # but the element type is unknown (form-typed payloads carry
+        # ChildSpec dataclasses OR bare strings depending on validation
+        # state); the hasattr branch below picks one shape.
+        for item in value:  # pyright: ignore[reportUnknownVariableType]: form-typed payloads carry mixed dataclass / bare-string elements
+            if hasattr(item, "name") and hasattr(item, "fan_in"):  # pyright: ignore[reportUnknownArgumentType]: item is form-typed Any
+                name = str(getattr(item, "name"))  # pyright: ignore[reportUnknownArgumentType]: item is form-typed Any
+                fan_in = bool(getattr(item, "fan_in", False))  # pyright: ignore[reportUnknownArgumentType]: item is form-typed Any
+                epc_raw = getattr(item, "expected_parent_count", None)  # pyright: ignore[reportUnknownArgumentType]: item is form-typed Any
                 epc: int | None = (
                     int(epc_raw) if epc_raw is not None and epc_raw != "" else None
                 )
@@ -1545,7 +1551,7 @@ def _chain_children_value_as_specs(
                 # last submission). fan_in / epc came from sibling form
                 # fields, not the value itself — defaulted here; the
                 # form_overrides dict carries the per-child shape.
-                out.append((str(item), False, None))
+                out.append((str(item), False, None))  # pyright: ignore[reportUnknownArgumentType]: item is form-typed Any but stringifies safely
         return tuple(out)
     return ()
 
@@ -1767,11 +1773,14 @@ def _render_read_value(spec: FieldSpec, value: object) -> str:
         groups = _multi_select_groups_value_as_groups(value)
         if not groups:
             return "—"
-        items = "".join(
+        # BF.1.S2: renamed `items` -> `groups_html` so the str-typed
+        # local doesn't collide with the `items: list[str]` declared in
+        # the sibling chain_children branch below.
+        groups_html = "".join(
             f'<li>group {i + 1}: {escape(", ".join(g))}</li>'
             for i, g in enumerate(groups)
         )
-        return f'<ul class="{ul_cls}">{items}</ul>'
+        return f'<ul class="{ul_cls}">{groups_html}</ul>'
     if spec.kind == "chain_children":
         children = _chain_children_value_as_specs(value)
         if not children:
@@ -2324,21 +2333,31 @@ def _create_new_reconciler_with_rail(
     (typically empty for the first occupant; subsequent rails use
     attach-existing).
     """
-    from starlette.datastructures import FormData as _FD
+    from starlette.datastructures import FormData as _FD, UploadFile
     from recon_gen.common.l2.primitives import Identifier
 
     # Strip the prefix; build a Starlette FormData over the sub-payload.
+    # BF.1.S2: FormData expects `list[tuple[str, str | UploadFile]]`;
+    # list type param is invariant so `list[tuple[str, str]]` doesn't satisfy.
     prefix = "reconciler_new_"
-    sub_items: list[tuple[str, str]] = []
+    sub_items: list[tuple[str, str | UploadFile]] = []
     for k, v in form.multi_items():
         if k.startswith(prefix):
             sub_items.append((k[len(prefix):], str(v)))
     sub_form = _FD(sub_items)
 
+    # BF.1.S2: ``sub_fields`` is dict[str, object] (heterogeneous coerced form);
+    # the ``or ()`` collapse + tuple() conversion go through ``object`` so
+    # pyright can't see the tuple-iterable narrowing — cast + suppress the
+    # corresponding upstream errors.
+    from typing import cast as _cast
     if reconciler_kind == "transfer_template":
         target_kind: EntityKind = "transfer_template"
         sub_fields, _overrides = _coerce_form(target_kind, sub_form)
-        existing = tuple(sub_fields.get("leg_rails", ()) or ())
+        existing: tuple[Identifier, ...] = _cast(
+            "tuple[Identifier, ...]",
+            tuple(sub_fields.get("leg_rails") or ()),  # pyright: ignore[reportArgumentType]: sub_fields stores leg_rails as tuple[Identifier, ...] but typed as object
+        )
         sub_fields["leg_rails"] = (*existing, Identifier(new_rail_name))
         return create_l2_entity(instance, target_kind, sub_fields)
     if reconciler_kind == "aggregating_rail":
@@ -2353,7 +2372,10 @@ def _create_new_reconciler_with_rail(
                 "'aggregating_rail' (single_leg | two_leg)"
             )
         sub_fields["subtype"] = str(subtype)
-        existing = tuple(sub_fields.get("bundles_activity", ()) or ())
+        existing = _cast(
+            "tuple[Identifier, ...]",
+            tuple(sub_fields.get("bundles_activity") or ()),  # pyright: ignore[reportArgumentType]: sub_fields stores bundles_activity as tuple[Identifier, ...] but typed as object
+        )
         sub_fields["bundles_activity"] = (
             *existing, Identifier(new_rail_name),
         )
@@ -3166,7 +3188,12 @@ def _render_persona_form(
          "Free-form persona strings (sample customer name, region descriptor, legacy-entity callout). One per row. Blank rows are dropped on save."),
     ):
         values = persona_dict.get(repeating, [])
-        items = list(values) if isinstance(values, list) else []  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]  # WHY: from form-derived dict
+        # WHY suppress: persona_dict carries Any-typed values; list() over
+        # the unknown sequence preserves the element-Unknown cascade.
+        items: list[object] = (
+            list(values) if isinstance(values, list)  # pyright: ignore[reportUnknownArgumentType]: persona_dict element type is Any
+            else []
+        )
         total = len(items) + extra_slots
         parts.append(
             f'<fieldset class="{section_cls}">'
@@ -3186,7 +3213,11 @@ def _render_persona_form(
         parts.append('</fieldset>')
 
     gl_values = persona_dict.get("gl_accounts", [])
-    gl_items = list(gl_values) if isinstance(gl_values, list) else []  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]  # WHY: form-derived dict carries Any element type
+    # WHY: persona_dict is form-derived; element type is Any.
+    gl_items: list[object] = (
+        list(gl_values) if isinstance(gl_values, list)  # pyright: ignore[reportUnknownArgumentType]: persona_dict element type is Any
+        else []
+    )
     gl_total = len(gl_items) + extra_slots
     grid_cls = "grid grid-cols-[10rem_1fr_2fr] gap-2 items-center"
     sub_label_cls = "font-mono text-xs text-secondary-fg uppercase tracking-wide"
@@ -3202,7 +3233,7 @@ def _render_persona_form(
         f'</div>'
     )
     for i in range(gl_total):
-        item = gl_items[i] if i < len(gl_items) else {}
+        item: object = gl_items[i] if i < len(gl_items) else {}
         if not isinstance(item, dict):
             item = {}
         code = str(item.get("code", ""))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]  # WHY: form-derived dict carries Any element type
@@ -3455,7 +3486,11 @@ def _render_theme_form(
 
     # Data colour palette.
     data_colors = theme_dict.get("data_colors", [])
-    dc_items = list(data_colors) if isinstance(data_colors, list) else []  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]  # WHY: form-derived dict carries Any element type
+    # WHY: theme_dict is form-derived; element type is Any.
+    dc_items: list[object] = (
+        list(data_colors) if isinstance(data_colors, list)  # pyright: ignore[reportUnknownArgumentType]: theme_dict element type is Any
+        else []
+    )
     dc_total = len(dc_items) + extra_data_color_slots
     parts.append(
         f'<fieldset class="{section_cls}">'
@@ -3478,7 +3513,11 @@ def _render_theme_form(
     # Empty fill + gradient.
     efc = str(theme_dict.get("empty_fill_color", "") or "")
     gradient = theme_dict.get("gradient", [])
-    grad_items = list(gradient) if isinstance(gradient, list) else []  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]  # WHY: form-derived dict carries Any element type
+    # WHY: theme_dict is form-derived; element type is Any.
+    grad_items: list[object] = (
+        list(gradient) if isinstance(gradient, list)  # pyright: ignore[reportUnknownArgumentType]: theme_dict element type is Any
+        else []
+    )
     low = str(grad_items[0]) if len(grad_items) > 0 else ""
     high = str(grad_items[1]) if len(grad_items) > 1 else ""
     parts.append(

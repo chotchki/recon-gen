@@ -41,7 +41,7 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Union
+from typing import Any, Literal, Union
 
 from recon_gen.common.dataset_contract import (
     ColumnShape,
@@ -183,7 +183,12 @@ def set_drill_parameters(
         )
 
     seen: set[str] = set()
-    configs: list[dict] = []
+    # BF.1.S2: each config is a heterogeneous AWS QS SetParametersOperation
+    # value dict; the union of shapes (SourceField / CustomValuesConfiguration
+    # with StringValues or DateTimeValues) is wide enough that `Any` here is
+    # accurate without spelling each variant — the to_aws_json emitter mirrors
+    # the shape verbatim.
+    configs: list[dict[str, Any]] = []
     for param, value in writes:
         if param.name in seen:
             raise ValueError(
@@ -219,7 +224,7 @@ def set_drill_parameters(
                     },
                 },
             })
-        elif isinstance(value, DrillStaticDateTime):
+        elif isinstance(value, DrillStaticDateTime):  # pyright: ignore[reportUnnecessaryIsInstance]  # BF.1.S2: defensive; value is a closed 3-member union but the else branch documents the contract
             # DateTime params take ``DateTimeValues`` rather than
             # StringValues. Shape compatibility is implicit — only
             # DATETIME_DAY-shaped params accept this write; we

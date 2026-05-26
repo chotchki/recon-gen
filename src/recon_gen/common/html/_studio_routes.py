@@ -91,7 +91,6 @@ from recon_gen.common.l2.seed import DEFAULT_BASELINE_WINDOW_DAYS
 from recon_gen.common.l2.tg_cache import TestGeneratorCache
 from recon_gen.common.l2.trainer_timeline import (
     PlantHit,
-    TimelineDay,
     compute_plant_timeline,
     hits_by_kind,
 )
@@ -956,8 +955,11 @@ def _apply_state_url_to_cache(
         if raw_plants == "":
             tg_cache.update(plants=())
         else:
+            # BF.1.S2: `if p in known` narrows `p` to `PlantKind` since
+            # `known: set[PlantKind]`; previous `_cast(PlantKind, p)` was
+            # redundant — pyright would now flag it.
             picked = tuple(
-                _cast(PlantKind, p)
+                p
                 for p in raw_plants.split(",")
                 if p in known
             )
@@ -1978,19 +1980,25 @@ def make_studio_routes(
         bound_tg = tg_cache
 
         async def put_plants(request: Request) -> HTMLResponse:
-            from typing import cast as _cast  # noqa: PLC0415
             form = await request.form()
             # The form serializes only checked checkboxes (HTML form
             # default — `unchecked` boxes don't appear in the payload),
             # so the incoming list IS the new selection. Filter to
             # known PlantKind values to ignore any junk a curl test
             # might send; bad values silently drop rather than 500.
+            # BF.1.S2: `raw in known` narrows `raw` to `PlantKind` since
+            # `known: set[PlantKind]`; the previous `_cast(PlantKind, raw)`
+            # call is now flagged unnecessary by pyright.
             known: set[PlantKind] = {kind for kind, _ in _PLANT_LABELS}
             new_plants_set: set[PlantKind] = set()
             for raw in form.getlist("plant"):
                 if isinstance(raw, str) and raw in known:
-                    new_plants_set.add(_cast(PlantKind, raw))
-            new_plants = tuple(
+                    new_plants_set.add(raw)
+            # BF.1.S2: explicit tuple[PlantKind, ...] — without the
+            # annotation pyright widens the generator's element type to
+            # `str` after the `if kind in new_plants_set` membership
+            # narrowing collapses against the Literal-union shape.
+            new_plants: tuple[PlantKind, ...] = tuple(
                 kind for kind, _ in _PLANT_LABELS if kind in new_plants_set
             )
             bound_tg.update(plants=new_plants)
@@ -2183,8 +2191,6 @@ def make_studio_routes(
             generator's default is ``"full"``, set explicitly via
             ``TestGeneratorConfig.scope`` default.
             """
-            from typing import cast as _cast  # noqa: PLC0415
-
             form = await request.form()
             current = bound_tg.get().scope
             new_scope: ScopeKind = current
@@ -2192,7 +2198,9 @@ def make_studio_routes(
             scope_raw = form.get("scope")
             known: set[ScopeKind] = {value for value, _, _ in _SCOPE_LABELS}
             if isinstance(scope_raw, str) and scope_raw in known:
-                new_scope = _cast(ScopeKind, scope_raw)
+                # BF.1.S2: `scope_raw in known` narrows to ScopeKind via
+                # the `set[ScopeKind]` membership test.
+                new_scope = scope_raw
             bound_tg.update(scope=new_scope)
             return HTMLResponse(
                 _render_scope_strip(new_scope),
