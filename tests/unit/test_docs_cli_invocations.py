@@ -49,7 +49,7 @@ _GLOBAL_FLAGS: frozenset[str] = frozenset({
 
 
 def _walk_cli_tree(
-    cmd: click.BaseCommand, path: list[str],
+    cmd: click.Command, path: list[str],
 ) -> dict[str, frozenset[str]]:
     """Map ``"group sub leaf"`` → frozenset of allowed flag tokens
     (``-x`` and ``--xxx`` forms both included)."""

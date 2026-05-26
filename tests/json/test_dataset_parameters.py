@@ -30,7 +30,7 @@ from recon_gen.common.dataset_contract import (
 )
 from recon_gen.common.ids import ParameterName
 from recon_gen.common.models import (
-    DataSet,
+    DataSet as DataSet,
     DatasetParameter,
     DateTimeDatasetParameter,
     DateTimeDatasetParameterDefaultValues,
@@ -287,6 +287,7 @@ def test_dataset_param_mapping_uses_dataset_identifier_not_arn() -> None:
     decl = p.emit()
     sd = decl.StringParameterDeclaration
     assert sd is not None
+    assert sd.MappedDataSetParameters is not None
     mapping = sd.MappedDataSetParameters[0]
     assert mapping.DataSetIdentifier == "my-pretty-name"
     assert "arn" not in mapping.DataSetIdentifier

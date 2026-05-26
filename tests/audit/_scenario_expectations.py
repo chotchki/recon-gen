@@ -36,6 +36,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
+from typing import Any
 
 from recon_gen.common.intervals import DateInterval
 from recon_gen.common.l2.seed import ScenarioPlant
@@ -87,10 +88,10 @@ def expected_audit_counts(
     (BC.4d — was ``tuple[date, date]``).
     """
 
-    def _eff(p) -> date:  # type: ignore[no-untyped-def]: p is one of the union of plant dataclasses; all carry days_ago
+    def _eff(p: Any) -> date:
         return scenario.today - timedelta(days=p.days_ago)
 
-    def _in_period(p) -> bool:  # type: ignore[no-untyped-def]: p is one of the union of plant dataclasses; all carry days_ago
+    def _in_period(p: Any) -> bool:
         return period.contains(_eff(p))
 
     drift = tuple(p for p in scenario.drift_plants if _in_period(p))
