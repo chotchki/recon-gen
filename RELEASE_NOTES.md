@@ -1,5 +1,17 @@
 # Release Notes
 
+## v11.22.2 — patch: mirror `markdown` into [dev] + [e2e] extras
+
+v11.22.1 added `markdown>=3.6` to `[serve]`, but the unit-test CI
+job uses `uv sync --frozen --extra dev --extra audit` (no `--extra
+serve`). Studio routes test still tripped `ModuleNotFoundError:
+markdown` because it spins a Starlette TestClient that hits the
+markdown-preview route.
+
+Mirror `markdown>=3.6` into `[dev]` + `[e2e]` to match the
+existing starlette/aiosqlite mirror pattern. `uv.lock` re-locked.
+Once any of dev/serve/e2e is installed, markdown is available.
+
 ## v11.22.1 — patch: v11.22.0 CI fix + Phase BJ marker-selection
 
 Two CI fixes the v11.22.0 push surfaced + the Phase BJ workflow
