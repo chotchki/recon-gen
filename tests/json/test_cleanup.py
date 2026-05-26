@@ -11,6 +11,12 @@ into a single ``Deployment`` tag keyed off ``cfg.deployment_name``):
   matches the supplied ``deployment_name``.
 """
 
+# pyright: reportArgumentType=false
+# _StubClient / _DeleteStubClient are structural fakes; pyright wants
+# nominal QuickSightClient compatibility. Disabling at file scope keeps
+# the stub-vs-real-client signal clear at the producer (common/cleanup.py)
+# where the boto3 type matters.
+
 from __future__ import annotations
 
 from collections.abc import Iterator

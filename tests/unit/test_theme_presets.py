@@ -8,11 +8,9 @@ each L2 YAML's ``theme:`` block.
 
 import json
 
-import pytest
 
 from recon_gen.common.theme import (
     DEFAULT_PRESET,
-    ThemePreset,
     _DARK_BLUE,
     build_theme,
 )

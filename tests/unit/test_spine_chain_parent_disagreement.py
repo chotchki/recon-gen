@@ -31,7 +31,6 @@ from recon_gen.common.spine import (
     ClaimedAccountsGenerator,
     DriftInvariant,
     LedgerDriftInvariant,
-    Violation,
 )
 from recon_gen.common.sql import Dialect
 

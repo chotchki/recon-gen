@@ -29,7 +29,6 @@ from recon_gen.common.spine import (
     ClaimedAccountsGenerator,
     DriftInvariant,
     LedgerDriftInvariant,
-    Violation,
     XorGroupMissedFiringGenerator,
     XorGroupOverlapGenerator,
     XorGroupViolationInvariant,

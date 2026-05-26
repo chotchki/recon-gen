@@ -15,7 +15,6 @@ import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
-import pytest
 
 from recon_gen.common.db import _register_sqlite_aggregates, execute_script
 from recon_gen.common.l2.config_table import replace_config

@@ -15,7 +15,6 @@ The CLI surface (``demo seed-l2``) has its own smoke tests in
 
 from __future__ import annotations
 
-import hashlib
 from datetime import date
 from pathlib import Path
 
@@ -23,7 +22,6 @@ import pytest
 
 from recon_gen.common.l2 import Identifier, L2Instance, load_instance
 from recon_gen.common.l2.auto_scenario import (
-    AutoScenarioReport,
     default_scenario_for,
 )
 from recon_gen.common.l2.seed import emit_seed

@@ -34,7 +34,6 @@ import pytest
 from recon_gen.common.l2 import (
     L2LoaderError,
     L2ValidationError,
-    SingleLegRail,
     TwoLegRail,
     load_instance,
     validate,

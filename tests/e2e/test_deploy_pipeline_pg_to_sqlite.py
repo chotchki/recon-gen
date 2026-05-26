@@ -51,7 +51,6 @@ from testcontainers.postgres import PostgresContainer  # type: ignore[import-unt
 from recon_gen.cli._html_serve import REAL_APPS
 from recon_gen.common.config import Config, EtlDatasourceConfig
 from recon_gen.common.db import make_connection_pool
-from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.sql import Dialect
 
 from tests.e2e._studio_deploy_helpers import (

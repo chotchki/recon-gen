@@ -20,7 +20,6 @@ import pytest
 
 
 if TYPE_CHECKING:
-    from recon_gen.common.l2 import L2Instance
     from tests.e2e._drivers import QsEmbedDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]

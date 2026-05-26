@@ -457,7 +457,6 @@ class TestEmitFullSeed:
         # R.3.d — boost_inv_fanout_plants scales the per-transfer amount
         # so the fanout cluster stands out against the baseline customer
         # ACH median (~$665).
-        from decimal import Decimal
         from recon_gen.common.l2.auto_scenario import (
             boost_inv_fanout_plants,
         )

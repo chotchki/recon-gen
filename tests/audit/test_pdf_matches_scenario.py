@@ -26,8 +26,7 @@ Skips entirely when:
 
 from __future__ import annotations
 
-import os
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -43,7 +42,6 @@ from recon_gen.common.env_keys import (
     RECON_GEN_DB_TESTS,
 )
 from recon_gen.common.l2 import load_instance
-from recon_gen.common.l2.auto_scenario import default_scenario_for
 from recon_gen.common.l2.seed import ScenarioPlant
 from recon_gen.common.sql import Dialect
 

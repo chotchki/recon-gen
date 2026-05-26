@@ -29,12 +29,10 @@ from __future__ import annotations
 import functools
 from pathlib import Path
 
-import pytest
 
 from recon_gen.common.l2 import (
     L2Instance,
     SingleLegRail,
-    TwoLegRail,
     load_instance,
     posted_requirements_for,
 )

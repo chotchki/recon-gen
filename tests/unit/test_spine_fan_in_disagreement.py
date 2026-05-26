@@ -36,7 +36,6 @@ from recon_gen.common.spine import (
     FanInChainGenerator,
     FanInDisagreementInvariant,
     LedgerDriftInvariant,
-    Violation,
 )
 from recon_gen.common.sql import Dialect
 
