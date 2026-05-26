@@ -20,8 +20,8 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
+from typing import Any
 
-import pytest
 from click.testing import CliRunner
 
 from recon_gen.common.l2 import default_l2_instance
@@ -32,7 +32,6 @@ from recon_gen.apps.l1_dashboard.app import (
     _DRIFT_TIMELINES_NAME,
     _DRIFT_TIMELINES_TITLE,
     _DRIFT_TITLE,
-    _DRILL_RESET_SENTINEL,
     _GETTING_STARTED_NAME,
     _GETTING_STARTED_TITLE,
     _LIMIT_BREACH_NAME,
@@ -52,15 +51,46 @@ from recon_gen.apps.l1_dashboard.app import (
     build_l1_dashboard_app,
 )
 from recon_gen.cli import main
+from recon_gen.common.models import DataSet
 from recon_gen.common.sheets.app_info import APP_INFO_SHEET_NAME
+from recon_gen.common.tree import App, Sheet, TextBox, VisualLike
+from recon_gen.common.tree.controls import (
+    FilterControlLike, ParameterControlLike,
+)
+from recon_gen.common.tree.actions import Action
 from tests._test_helpers import make_test_config
-from recon_gen.common.l2 import L2Instance
 
 
 _CFG = make_test_config()
 
 
-def _sheet_by_name(app, name: str):
+# VisualLike / *ControlLike are stripped-down Protocols (just the bits
+# the App walker needs). Concrete subtypes all carry a ``title: str``
+# field, but the Protocol doesn't surface it (adding it would force
+# every implementer to declare it; not worth the cost when the only
+# consumer of ``.title`` is the test surface). These helpers narrow at
+# the test layer.
+def _visual_title(v: VisualLike) -> str:
+    """Read ``title`` off a tree-level visual. Every concrete subtype
+    (``KPI`` / ``Table`` / ``BarChart`` / ``LineChart`` / ``Sankey`` /
+    ``ForceGraph``) carries ``title: str``."""
+    return getattr(v, "title")
+
+
+def _visual_actions(v: VisualLike) -> list[Action]:
+    """Read ``actions`` off a tree-level visual. Every concrete subtype
+    that supports actions carries ``actions: list[Action]``; KPI (the
+    only no-actions subtype) returns an empty list."""
+    return getattr(v, "actions", [])
+
+
+def _control_title(c: ParameterControlLike | FilterControlLike) -> str:
+    """Read ``title`` off a tree-level control. Every concrete subtype
+    used in the L1 dashboard carries ``title: str``."""
+    return getattr(c, "title")
+
+
+def _sheet_by_name(app: App, name: str) -> Sheet:
     """Look up a Sheet by display name. Position-agnostic — sheet order
     can be reshuffled without breaking these tests, per CLAUDE.md
     "key off stable analyst-facing identifiers" rule."""
@@ -156,6 +186,7 @@ def test_getting_started_welcome_uses_l2_instance_description() -> None:
     M.2a.7 added a second text box (L2 Coverage block) below the
     welcome — both are description-driven."""
     app = build_l1_dashboard_app(_CFG)
+    assert app.analysis is not None
     gs = app.analysis.sheets[0]
     assert len(gs.text_boxes) == 2
     welcome_xml = gs.text_boxes[0].content
@@ -171,6 +202,7 @@ def test_getting_started_welcome_falls_back_when_l2_description_missing() -> Non
     explicit = default_l2_instance()
     minimal = replace(explicit, description=None)
     app = build_l1_dashboard_app(_CFG, l2_instance=minimal)
+    assert app.analysis is not None
     gs = app.analysis.sheets[0]
     welcome_xml = gs.text_boxes[0].content
     assert "L2 instance description missing" in welcome_xml
@@ -181,6 +213,7 @@ def test_getting_started_title_is_constant_ui_vocabulary() -> None:
     (NOT pulled from L2). Per the M.2a.4 design note: titles stay
     hardcoded, subtitles + bodies pull from L2 descriptions."""
     app = build_l1_dashboard_app(_CFG)
+    assert app.analysis is not None
     gs = app.analysis.sheets[0]
     assert _GETTING_STARTED_TITLE in gs.text_boxes[0].content
 
@@ -206,7 +239,7 @@ def test_drift_sheet_has_four_kpis_and_two_tables() -> None:
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
     drift = app.analysis.sheets[1]
-    titles = [v.title for v in drift.visuals]
+    titles = [_visual_title(v) for v in drift.visuals]
     assert titles == [
         "Leaf Accounts in Drift",
         "Largest Leaf Drift",
@@ -283,7 +316,7 @@ def test_drift_timelines_has_two_kpis_and_two_line_charts() -> None:
 
     app = build_l1_dashboard_app(_CFG)
     timelines = _sheet_by_name(app, "Drift Timelines")
-    titles = [v.title for v in timelines.visuals]
+    titles = [_visual_title(v) for v in timelines.visuals]
     assert titles == [
         "Largest Leaf Drift Day",
         "Largest Parent Drift Day",
@@ -362,7 +395,7 @@ def test_overdraft_sheet_has_kpi_and_table() -> None:
     Single-dataset sheet — every row in the table IS one violation."""
     app = build_l1_dashboard_app(_CFG)
     overdraft = _sheet_by_name(app, "Overdraft")
-    titles = [v.title for v in overdraft.visuals]
+    titles = [_visual_title(v) for v in overdraft.visuals]
     assert titles == [
         "Accounts in Overdraft",
         "Overdraft Violations",
@@ -406,8 +439,8 @@ def test_limit_breach_sheet_has_kpi_and_table() -> None:
     """Limit Breach sheet structure: 1 KPI (count of breach cells) +
     1 detail table that puts outbound_total + cap side-by-side."""
     app = build_l1_dashboard_app(_CFG)
-    lb = _sheet_by_name(app, _LIMIT_BREACH_NAME)
-    titles = [v.title for v in lb.visuals]
+    lb = _sheet_by_name(app, "Limit Breach")
+    titles = [_visual_title(v) for v in lb.visuals]
     assert titles == ["Limit Breach Cells", "Limit Breach Detail"]
 
 
@@ -447,8 +480,8 @@ def test_todays_exceptions_sheet_has_kpi_bar_table() -> None:
     """Today's Exceptions structure: 1 KPI (count) + 1 BarChart by
     check_type + 1 detail table sorted by magnitude DESC."""
     app = build_l1_dashboard_app(_CFG)
-    te = _sheet_by_name(app, _TODAYS_EXCEPTIONS_NAME)
-    titles = [v.title for v in te.visuals]
+    te = _sheet_by_name(app, "Today's Exceptions")
+    titles = [_visual_title(v) for v in te.visuals]
     assert titles == [
         "Open Exceptions",
         "Exceptions by Check Type",
@@ -497,9 +530,9 @@ def test_transactions_sheet_has_single_table() -> None:
     """Transactions has 1 detail table and no KPIs — its value is
     'show me every leg + filter'."""
     app = build_l1_dashboard_app(_CFG)
-    tx = _sheet_by_name(app, _TRANSACTIONS_NAME)
-    titles = [v.title for v in tx.visuals]
-    assert titles == [_TRANSACTIONS_TITLE]
+    tx = _sheet_by_name(app, "Transactions")
+    titles = [_visual_title(v) for v in tx.visuals]
+    assert titles == ["Posting Ledger"]
 
 
 def test_transactions_dataset_registered_and_targets_matview() -> None:
@@ -539,8 +572,8 @@ def test_daily_statement_has_five_kpis_and_one_table() -> None:
     """Daily Statement structure: 5 KPIs side-by-side (Opening / Debits /
     Credits / Closing Stored / Drift) + 1 detail table."""
     app = build_l1_dashboard_app(_CFG)
-    ds = _sheet_by_name(app, _DAILY_STATEMENT_NAME)
-    titles = [v.title for v in ds.visuals]
+    ds = _sheet_by_name(app, "Daily Statement")
+    titles = [_visual_title(v) for v in ds.visuals]
     assert titles == [
         "Opening Balance",
         "Debits (signed)",
@@ -566,8 +599,7 @@ def test_daily_statement_parameters_and_controls() -> None:
 
     ds = _sheet_by_name(app, _DAILY_STATEMENT_NAME)
     control_titles = [
-        c.title for c in ds.parameter_controls
-        if hasattr(c, "title")
+        _control_title(c) for c in ds.parameter_controls
     ]
     assert "Account" in control_titles
     assert "Business Day" in control_titles
@@ -665,14 +697,17 @@ def test_daily_statement_transactions_business_day_is_dialect_aware() -> None:
     cfg_pg = replace(_CFG, dialect=Dialect.POSTGRES)
     cfg_or = replace(_CFG, dialect=Dialect.ORACLE)
 
-    sql_pg = next(iter(
+    pg_cs = next(iter(
         build_daily_statement_transactions_dataset(cfg_pg, instance)
         .PhysicalTableMap.values()
-    )).CustomSql.SqlQuery
-    sql_or = next(iter(
+    )).CustomSql
+    or_cs = next(iter(
         build_daily_statement_transactions_dataset(cfg_or, instance)
         .PhysicalTableMap.values()
-    )).CustomSql.SqlQuery
+    )).CustomSql
+    assert pg_cs is not None and or_cs is not None
+    sql_pg = pg_cs.SqlQuery
+    sql_or = or_cs.SqlQuery
 
     assert "DATE_TRUNC('day', tx.posting) AS business_day" in sql_pg
     assert "CAST(TRUNC(tx.posting) AS TIMESTAMP) AS business_day" in sql_or
@@ -722,9 +757,11 @@ def test_daily_statement_balance_date_narrow_renders_a_portable_day_string() -> 
             build_daily_statement_summary_dataset,
             build_daily_statement_transactions_dataset,
         ):
-            sql = next(iter(
+            cs = next(iter(
                 build(cfg, instance).PhysicalTableMap.values()
-            )).CustomSql.SqlQuery
+            )).CustomSql
+            assert cs is not None
+            sql = cs.SqlQuery
             # The bug shape — the param fed into a day-trunc.
             assert f"TRUNC({param}" not in sql
             # The bug shape we hit at AR.2 — SUBSTR on a timestamp param.
@@ -742,6 +779,7 @@ def test_getting_started_coverage_lists_l2_inventory() -> None:
     inventory (account counts, rail counts, etc.) — switching L2
     instance changes the numbers, proving the seam."""
     app = build_l1_dashboard_app(_CFG)
+    assert app.analysis is not None
     gs = app.analysis.sheets[0]
     assert len(gs.text_boxes) == 2
     coverage_xml = gs.text_boxes[1].content
@@ -754,7 +792,7 @@ def test_getting_started_coverage_lists_l2_inventory() -> None:
     assert "limit schedules" in coverage_xml
 
 
-def _text_box_by_id(sheet, text_box_id: str):
+def _text_box_by_id(sheet: Sheet, text_box_id: str) -> TextBox:
     """Lookup helper — find one TextBox on ``sheet`` by its id. AA.C.3
     added per-invariant panels at sheet bottom, so tests can no longer
     rely on a sheet having exactly one TextBox; key off the specific
@@ -773,6 +811,7 @@ def test_drift_sheet_lists_internal_accounts_from_l2() -> None:
     + roles from the L2 instance — analysts see the universe drift can
     surface against without leaving the sheet."""
     app = build_l1_dashboard_app(_CFG)
+    assert app.analysis is not None
     drift = app.analysis.sheets[1]
     accounts_xml = _text_box_by_id(drift, "l1-drift-accounts").content
     assert "Internal Accounts in Scope" in accounts_xml
@@ -904,9 +943,8 @@ def test_per_sheet_filter_dropdowns() -> None:
     def _filter_titles(sheet_name: str) -> set[str]:
         sheet = _sheet_by_name(app, sheet_name)
         return {
-            ctrl.title
+            _control_title(ctrl)
             for ctrl in (*sheet.filter_controls, *sheet.parameter_controls)
-            if hasattr(ctrl, "title")
         }
 
     assert {"Account", "Account Role"}.issubset(_filter_titles(_DRIFT_NAME))
@@ -983,10 +1021,18 @@ def test_account_id_link_tints_on_every_table_with_account_id() -> None:
         for visual in sheet.visuals:
             if not isinstance(visual, Table):
                 continue
-            col_names = {
-                c.column.name for c in visual.columns
-                if hasattr(c, "column") and hasattr(c.column, "name")
-            }
+            col_names: set[str] = set()
+            for c in visual.columns:
+                col = c.column
+                # ColumnRef is str | CalcField | Column. The bare-string
+                # branch (the ``allow_bare_strings=True`` opt-out) drops
+                # out here. CalcField.name may be ``AUTO`` until resolve;
+                # skip the unresolved case rather than crash.
+                if isinstance(col, str):
+                    continue
+                col_name = col.name
+                if isinstance(col_name, str):
+                    col_names.add(col_name)
             if "account_id" not in col_names:
                 continue
             cf = visual.conditional_formatting or []
@@ -1059,8 +1105,7 @@ def test_date_range_pickers_on_every_data_sheet() -> None:
     ):
         sheet = _sheet_by_name(app, sheet_name)
         picker_titles = [
-            ctrl.title for ctrl in sheet.parameter_controls
-            if hasattr(ctrl, "title")
+            _control_title(ctrl) for ctrl in sheet.parameter_controls
         ]
         assert "Date From" in picker_titles, (
             f"sheet {sheet.name!r} missing Date From picker"
@@ -1075,15 +1120,23 @@ def test_date_range_filter_targets_correct_columns() -> None:
     `business_day_start` (the daily-balance column); limit_breach +
     todays_exceptions target `business_day` (the truncated-posting
     column). The mismatch is what motivates per-dataset filter groups."""
+    from recon_gen.common.ids import FilterGroupId
+    from recon_gen.common.tree import TimeRangeFilter
+    from recon_gen.common.tree.datasets import Column
+
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
     by_id = {fg.filter_group_id: fg for fg in app.analysis.filter_groups}
 
     def _column_name(fg_id: str) -> str:
-        fg = by_id[fg_id]
+        fg = by_id[FilterGroupId(fg_id)]
         flt = fg.filters[0]
-        # TimeRangeFilter.column is a Column ref; .name exposes the col.
-        return flt.column.name  # type: ignore[union-attr]: TimeRangeFilter always carries a Column by construction
+        # TimeRangeFilter is the only date filter shape in this app;
+        # narrow + assert the Column ref so the typed Column.name read
+        # is type-checkable.
+        assert isinstance(flt, TimeRangeFilter)
+        assert isinstance(flt.column, Column)
+        return flt.column.name
 
     assert _column_name("fg-l1-date-drift") == "business_day_start"
     assert _column_name("fg-l1-date-ledger-drift") == "business_day_start"
@@ -1106,11 +1159,11 @@ def test_pending_aging_sheet_has_kpi_bar_table() -> None:
     """Pending Aging structure: 1 KPI (count) + 1 horizontal BarChart
     (5 aging buckets) + 1 detail table sorted naturally by the
     number-prefixed bucket labels."""
-    from recon_gen.common.tree import BarChart, KPI, Table
+    from recon_gen.common.tree import BarChart
 
     app = build_l1_dashboard_app(_CFG)
-    pa = _sheet_by_name(app, _PENDING_AGING_NAME)
-    titles = [v.title for v in pa.visuals]
+    pa = _sheet_by_name(app, "Pending Aging")
+    titles = [_visual_title(v) for v in pa.visuals]
     assert titles == [
         "Stuck Pending",
         "Stuck Pending by Age Bucket",
@@ -1143,7 +1196,8 @@ def test_aging_sheets_bar_chart_stacked_by_rail_per_variant_rollup() -> None:
         )
         # Color dim must reference rail_name from the dataset.
         col = bar.colors[0].column
-        col_name = col.name if hasattr(col, "name") else str(col)
+        # ColumnRef = str | CalcField | Column; only typed branches expose ``name``.
+        col_name = col if isinstance(col, str) else col.name
         assert col_name == "rail_name", (
             f"{sheet_name}: expected color dim to be rail_name; "
             f"got {col_name!r}"
@@ -1161,10 +1215,12 @@ def test_pending_aging_buckets_computed_in_dataset_sql() -> None:
         build_stuck_pending_dataset,
     )
 
-    sql = next(iter(
+    cs = next(iter(
         build_stuck_pending_dataset(_CFG, default_l2_instance())
         .PhysicalTableMap.values()
-    )).CustomSql.SqlQuery
+    )).CustomSql
+    assert cs is not None
+    sql = cs.SqlQuery
     assert "CASE" in sql and "age_seconds" in sql
     assert "AS stuck_pending_aging_bucket" in sql
     for label in ("'1: 0-6h'", "'2: 6-24h'", "'3: 1-3d'",
@@ -1185,9 +1241,9 @@ def test_pending_aging_drill_to_transactions() -> None:
     from recon_gen.common.tree import Drill
 
     app = build_l1_dashboard_app(_CFG)
-    pa = _sheet_by_name(app, _PENDING_AGING_NAME)
-    table = next(v for v in pa.visuals if v.title == "Stuck Pending Detail")
-    drills = [a for a in table.actions if isinstance(a, Drill)]
+    pa = _sheet_by_name(app, "Pending Aging")
+    table = next(v for v in pa.visuals if _visual_title(v) == "Stuck Pending Detail")
+    drills = [a for a in _visual_actions(table) if isinstance(a, Drill)]
     assert len(drills) == 1
     drill = drills[0]
     assert drill.trigger == "DATA_POINT_MENU"
@@ -1234,11 +1290,11 @@ def test_unbundled_aging_sheet_has_kpi_bar_table() -> None:
     """KPI row (count + $ exposure, AO.9) + horizontal BarChart +
     detail table. Same structural shape as Pending Aging, backed by
     stuck_unbundled."""
-    from recon_gen.common.tree import BarChart, KPI, Table
+    from recon_gen.common.tree import BarChart
 
     app = build_l1_dashboard_app(_CFG)
-    ua = _sheet_by_name(app, _UNBUNDLED_AGING_NAME)
-    titles = [v.title for v in ua.visuals]
+    ua = _sheet_by_name(app, "Unbundled Aging")
+    titles = [_visual_title(v) for v in ua.visuals]
     assert titles == [
         "Stuck Unbundled",
         # BH.20 (2026-05-25) — was "Stuck Unbundled — $ Exposure";
@@ -1264,10 +1320,12 @@ def test_unbundled_aging_uses_4_buckets() -> None:
         build_stuck_unbundled_dataset,
     )
 
-    sql = next(iter(
+    cs = next(iter(
         build_stuck_unbundled_dataset(_CFG, default_l2_instance())
         .PhysicalTableMap.values()
-    )).CustomSql.SqlQuery
+    )).CustomSql
+    assert cs is not None
+    sql = cs.SqlQuery
     assert "CASE" in sql and "age_seconds" in sql
     assert "AS stuck_unbundled_aging_bucket" in sql
     for label in ("'1: <1d'", "'2: 1-2d'", "'3: 2-7d'", "'4: >7d'"):
@@ -1282,9 +1340,9 @@ def test_unbundled_aging_drill_to_transactions() -> None:
     from recon_gen.common.tree import Drill
 
     app = build_l1_dashboard_app(_CFG)
-    ua = _sheet_by_name(app, _UNBUNDLED_AGING_NAME)
-    table = next(v for v in ua.visuals if v.title == "Stuck Unbundled Detail")
-    drills = [a for a in table.actions if isinstance(a, Drill)]
+    ua = _sheet_by_name(app, "Unbundled Aging")
+    table = next(v for v in ua.visuals if _visual_title(v) == "Stuck Unbundled Detail")
+    drills = [a for a in _visual_actions(table) if isinstance(a, Drill)]
     assert len(drills) == 1
     drill = drills[0]
     assert drill.trigger == "DATA_POINT_MENU"
@@ -1330,11 +1388,9 @@ def test_supersession_audit_has_kpis_and_two_tables() -> None:
     """Supersession Audit structure: 3 KPIs side-by-side (AO.9 added
     $ exposure between logical-keys count and no-reason count) + 1
     transactions audit table + 1 daily-balances audit table."""
-    from recon_gen.common.tree import KPI, Table
-
     app = build_l1_dashboard_app(_CFG)
-    sa = _sheet_by_name(app, _SUPERSESSION_AUDIT_NAME)
-    titles = [v.title for v in sa.visuals]
+    sa = _sheet_by_name(app, "Supersession Audit")
+    titles = [_visual_title(v) for v in sa.visuals]
     assert titles == [
         "Logical Keys with Supersession",
         "Supersession $ Exposure",
@@ -1396,9 +1452,8 @@ def test_supersession_audit_has_supersedes_filter() -> None:
     app = build_l1_dashboard_app(_CFG)
     sa = _sheet_by_name(app, _SUPERSESSION_AUDIT_NAME)
     titles = {
-        ctrl.title
+        _control_title(ctrl)
         for ctrl in (*sa.filter_controls, *sa.parameter_controls)
-        if hasattr(ctrl, "title")
     }
     assert "Supersedes Reason" in titles
 
@@ -1414,15 +1469,22 @@ def test_drill_target_parameters_registered() -> None:
     from recon_gen.apps.l1_dashboard.app import (
         P_L1_FILTER_ACCOUNT, P_L1_TX_TRANSFER,
     )
+    from recon_gen.common.tree import StringParam
 
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
     by_name = {p.name: p for p in app.analysis.parameters}
     assert P_L1_FILTER_ACCOUNT in by_name
     assert P_L1_TX_TRANSFER in by_name
-    # Both default to the sentinel string.
-    assert by_name[P_L1_FILTER_ACCOUNT].default == [_DRILL_RESET_SENTINEL]
-    assert by_name[P_L1_TX_TRANSFER].default == [_DRILL_RESET_SENTINEL]
+    # Both default to the sentinel string — drill-target params are
+    # always StringParams (sentinel is text), so the runtime narrow
+    # is safe.
+    p_account = by_name[P_L1_FILTER_ACCOUNT]
+    p_transfer = by_name[P_L1_TX_TRANSFER]
+    assert isinstance(p_account, StringParam)
+    assert isinstance(p_transfer, StringParam)
+    assert p_account.default == ["__ALL__"]
+    assert p_transfer.default == ["__ALL__"]
 
 
 def test_drill_calc_fields_present() -> None:
@@ -1484,9 +1546,9 @@ def test_todays_exceptions_table_carries_two_drills() -> None:
     from recon_gen.common.tree import Drill
 
     app = build_l1_dashboard_app(_CFG)
-    te = _sheet_by_name(app, _TODAYS_EXCEPTIONS_NAME)
-    detail = next(v for v in te.visuals if v.title == "Exception Detail")
-    drills = [a for a in detail.actions if isinstance(a, Drill)]
+    te = _sheet_by_name(app, "Today's Exceptions")
+    detail = next(v for v in te.visuals if _visual_title(v) == "Exception Detail")
+    drills = [a for a in _visual_actions(detail) if isinstance(a, Drill)]
     assert len(drills) == 2
 
     by_trigger = {d.trigger: d for d in drills}
@@ -1517,8 +1579,8 @@ def test_per_invariant_sheets_drill_to_daily_statement() -> None:
     ]
     for sheet_name, table_title in expected:
         sheet = _sheet_by_name(app, sheet_name)
-        table = next(v for v in sheet.visuals if v.title == table_title)
-        drills = [a for a in table.actions if isinstance(a, Drill)]
+        table = next(v for v in sheet.visuals if _visual_title(v) == table_title)
+        drills = [a for a in _visual_actions(table) if isinstance(a, Drill)]
         menu_drills = [d for d in drills if d.trigger == "DATA_POINT_MENU"]
         assert len(menu_drills) == 1, (
             f"{sheet_name}/{table_title}: expected 1 menu drill, got "
@@ -1533,9 +1595,9 @@ def test_daily_statement_drills_to_transactions() -> None:
     from recon_gen.common.tree import Drill
 
     app = build_l1_dashboard_app(_CFG)
-    ds = _sheet_by_name(app, _DAILY_STATEMENT_NAME)
-    table = next(v for v in ds.visuals if v.title == "Posted Money Records")
-    drills = [a for a in table.actions if isinstance(a, Drill)]
+    ds = _sheet_by_name(app, "Daily Statement")
+    table = next(v for v in ds.visuals if _visual_title(v) == "Posted Money Records")
+    drills = [a for a in _visual_actions(table) if isinstance(a, Drill)]
     assert len(drills) == 1
     drill = drills[0]
     assert drill.trigger == "DATA_POINT_MENU"
@@ -1547,18 +1609,24 @@ def test_drill_emission_navigation_plus_set_parameters() -> None:
     sheet) and a SetParametersOperation (writes + auto-reset). End-to-
     end check via to_aws_json walk."""
     app = build_l1_dashboard_app(_CFG)
-    j = app.emit_analysis().to_aws_json()
+    j: dict[str, Any] = app.emit_analysis().to_aws_json()
     drill_count = 0
-    for sheet in j["Definition"]["Sheets"]:
-        for visual in sheet.get("Visuals") or []:
-            for kind, body in visual.items():
+    definition: dict[str, Any] = j["Definition"]
+    sheets: list[dict[str, Any]] = definition["Sheets"]
+    for sheet in sheets:
+        visuals: list[dict[str, Any]] = sheet.get("Visuals") or []
+        for visual in visuals:
+            for _kind, body in visual.items():
                 if not isinstance(body, dict):
                     continue
-                for action in body.get("Actions") or []:
-                    op_kinds = {
-                        next(iter(op.keys()))
-                        for op in action.get("ActionOperations") or []
-                    }
+                # body narrowed to dict via isinstance.
+                body_d: dict[str, Any] = body  # type: ignore[assignment]
+                actions: list[dict[str, Any]] = body_d.get("Actions") or []
+                for action in actions:
+                    ops: list[dict[str, Any]] = (
+                        action.get("ActionOperations") or []
+                    )
+                    op_kinds = {next(iter(op.keys())) for op in ops}
                     assert "NavigationOperation" in op_kinds, (
                         f"action {action['Name']!r} missing nav op"
                     )
@@ -1693,7 +1761,7 @@ def test_y2g_enum_value_helpers_reflect_l2_instance() -> None:
     ]
 
 
-def _dataset_param_names(ds) -> list[str]:
+def _dataset_param_names(ds: DataSet) -> list[str]:
     """The ``Name`` of each StringDatasetParameter on a built DataSet."""
     out: list[str] = []
     for dp in ds.DatasetParameters or []:
@@ -1752,7 +1820,9 @@ def test_y2g_datasets_declare_pushdown_params() -> None:
         ds = builder(_CFG, inst)
         names = set(_dataset_param_names(ds))
         assert names == expected, f"{builder.__name__}: {names} != {expected}"
-        sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+        cs = next(iter(ds.PhysicalTableMap.values())).CustomSql
+        assert cs is not None
+        sql = cs.SqlQuery
         for pn in expected:
             assert f"<<${pn}>>" in sql, f"{builder.__name__} SQL missing <<${pn}>>"
 
@@ -1788,7 +1858,9 @@ def test_y2g_companion_datasets_registered_and_unparameterized() -> None:
     ):
         ds = builder(_CFG, inst)
         assert not ds.DatasetParameters, f"{builder.__name__} should be unparameterized"
-        sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+        cs = next(iter(ds.PhysicalTableMap.values())).CustomSql
+        assert cs is not None
+        sql = cs.SqlQuery
         assert sql.startswith(frag)
         assert "<<$" not in sql
 
@@ -1810,7 +1882,9 @@ def test_aa_b_1_l1_accounts_dataset_is_role_cascaded() -> None:
 
     inst = default_l2_instance()
     ds = build_l1_accounts_dataset(_CFG, inst)
-    sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+    cs = next(iter(ds.PhysicalTableMap.values())).CustomSql
+    assert cs is not None
+    sql = cs.SqlQuery
     assert "SELECT DISTINCT account_id, account_role" in sql
     assert f"<<${P_L1_DS_ROLE_DSP}>>" in sql
     # Sentinel-OR pushdown shape — both disjuncts present.
@@ -1826,6 +1900,7 @@ def test_aa_b_1_l1_accounts_dataset_is_role_cascaded() -> None:
     rp = role_params[0].StringDatasetParameter
     assert rp is not None
     assert rp.ValueType == "SINGLE_VALUED"
+    assert rp.DefaultValues is not None
     assert rp.DefaultValues.StaticValues == [L1_ALL_SENTINEL]
 
 
@@ -1842,27 +1917,35 @@ def test_aa_e_2_daily_statement_account_dropdown_binds_display_column() -> None:
     display-format WHERE). This test pins the fix so the regression
     can't recur.
     """
+    from recon_gen.common.tree import ParameterDropdown
+    from recon_gen.common.tree.controls import LinkedValues
+
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
     daily_statement = _sheet_by_name(app, "Daily Statement")
-    # Find the Account ParameterDropdown control.
+    # Find the Account ParameterDropdown control. Concrete dropdown
+    # subtypes carry ``title``; the *ControlLike Protocol doesn't, hence
+    # the helper.
     accountish = [
         c for c in daily_statement.parameter_controls
-        if hasattr(c, "title") and c.title == "Account"
+        if _control_title(c) == "Account"
     ]
     assert len(accountish) == 1, (
         f"Daily Statement should have exactly one 'Account' control; "
-        f"found {len(accountish)}: {[c.title for c in daily_statement.controls if hasattr(c, 'title')]}"
+        f"found {len(accountish)}: "
+        f"{[_control_title(c) for c in daily_statement.parameter_controls]}"
     )
     account_ctrl = accountish[0]
     # The Account dropdown's selectable_values must read account_display
     # — see the AA.E.2 fix comment in apps/l1_dashboard/app.py.
-    assert hasattr(account_ctrl, "selectable_values"), (
-        f"Account control should carry selectable_values; got "
+    assert isinstance(account_ctrl, ParameterDropdown), (
+        f"Account control should be ParameterDropdown; got "
         f"{type(account_ctrl).__name__}"
     )
     linked = account_ctrl.selectable_values
-    assert linked is not None, "Account dropdown must have LinkedValues"
+    assert isinstance(linked, LinkedValues), (
+        "Account dropdown must have LinkedValues source"
+    )
     # LinkedValues carries ``dataset`` + ``column_name`` — assert the
     # name is account_display, not account_id (QS's single-column
     # LinkToDataSetColumn means the bound value IS the displayed string).
@@ -1907,13 +1990,14 @@ def test_y2g_drift_dropdowns_bridge_to_both_drift_datasets() -> None:
     ledger-drift datasets. AA.A.3 — both dropdowns are SINGLE_VALUED
     (drill-to-one default; multi-select pre-AA.A.3 lacked a one-click
     pick-this-value gesture)."""
+    from recon_gen.common.ids import ParameterName
     from recon_gen.common.tree import StringParam
 
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
     by_name = {p.name: p for p in app.analysis.parameters}
     for pname in ("pL1DriftAccount", "pL1DriftRole"):
-        param = by_name[pname]
+        param = by_name[ParameterName(pname)]
         assert isinstance(param, StringParam)
         assert not param.multi_valued, (
             f"{pname}: post-AA.A.3 every L1 pushdown dropdown is SINGLE_VALUED"

@@ -38,6 +38,10 @@ from tests._test_helpers import make_test_config
 
 _CFG = make_test_config()
 
+# Type aliases — AWS QS JSON dicts have heterogeneous nested shapes; using
+# Any here matches the dynamic-dict walk these tests perform.
+_JsonDict = dict[str, Any]
+
 
 # Same shape as ``test_table_column_headers.py``: all-lowercase with
 # at least one underscore. The smart-title pass always produces at
@@ -45,18 +49,23 @@ _CFG = make_test_config()
 _SNAKE_CASE_LABEL = re.compile(r"^[a-z]+(_[a-z0-9]+)+$")
 
 
-def _all_bar_chart_visuals(emitted: Any) -> Iterator[tuple[str, str, dict]]:
+def _all_bar_chart_visuals(
+    emitted: _JsonDict,
+) -> Iterator[tuple[str, str, _JsonDict]]:
     """Yield ``(sheet_id, visual_id, bar_chart_visual_dict)`` for every
     BarChartVisual in the emitted analysis."""
-    for sheet in emitted.get("Definition", {}).get("Sheets", []):
-        sheet_id = sheet.get("SheetId", "<unknown>")
-        for v in sheet.get("Visuals") or []:
-            bv = v.get("BarChartVisual")
+    definition: _JsonDict = emitted.get("Definition") or {}
+    sheets: list[_JsonDict] = definition.get("Sheets") or []
+    for sheet in sheets:
+        sheet_id: str = sheet.get("SheetId", "<unknown>")
+        visuals: list[_JsonDict] = sheet.get("Visuals") or []
+        for v in visuals:
+            bv: _JsonDict | None = v.get("BarChartVisual")
             if bv is not None:
                 yield sheet_id, bv.get("VisualId", "<unknown>"), bv
 
 
-def _build_all_apps():
+def _build_all_apps() -> Iterator[tuple[str, _JsonDict]]:
     from recon_gen.apps.l1_dashboard.app import build_l1_dashboard_app
     from recon_gen.apps.l2_flow_tracing.app import (
         build_l2_flow_tracing_app,
@@ -76,16 +85,16 @@ def _build_all_apps():
         yield name, emitted
 
 
-def _axes_present(bv: dict) -> dict[str, dict]:
-    """Return ``{axis_name: well_dict}`` for every populated field well
+def _axes_present(bv: _JsonDict) -> dict[str, list[_JsonDict]]:
+    """Return ``{axis_name: well_list}`` for every populated field well
     on a BarChartVisual. ``axis_name`` is one of ``"Category"`` /
-    ``"Values"`` / ``"Colors"``; ``well_dict`` is the raw list."""
-    chart = bv.get("ChartConfiguration") or {}
-    field_wells = chart.get("FieldWells") or {}
-    agg = field_wells.get("BarChartAggregatedFieldWells") or {}
-    out: dict[str, dict] = {}
+    ``"Values"`` / ``"Colors"``; ``well_list`` is the raw list of leaves."""
+    chart: _JsonDict = bv.get("ChartConfiguration") or {}
+    field_wells: _JsonDict = chart.get("FieldWells") or {}
+    agg: _JsonDict = field_wells.get("BarChartAggregatedFieldWells") or {}
+    out: dict[str, list[_JsonDict]] = {}
     for axis_name in ("Category", "Values", "Colors"):
-        wells = agg.get(axis_name) or []
+        wells: list[_JsonDict] = agg.get(axis_name) or []
         if wells:
             out[axis_name] = wells
     return out
@@ -102,14 +111,14 @@ _AXIS_TO_LABEL_OPT = {
 
 @pytest.mark.parametrize("app_name,emitted", list(_build_all_apps()))
 def test_every_populated_bar_chart_axis_emits_label_options(
-    app_name: str, emitted: Any,
+    app_name: str, emitted: _JsonDict,
 ) -> None:
     """Class regression: every populated BarChart axis must emit a
     label-options entry so QuickSight has an explicit axis title
     instead of falling back to the raw column name."""
     bad: list[str] = []
     for sheet_id, visual_id, bv in _all_bar_chart_visuals(emitted):
-        chart = bv.get("ChartConfiguration") or {}
+        chart: _JsonDict = bv.get("ChartConfiguration") or {}
         present = _axes_present(bv)
         for axis_name in present:
             opt_key = _AXIS_TO_LABEL_OPT[axis_name]
@@ -127,7 +136,7 @@ def test_every_populated_bar_chart_axis_emits_label_options(
 
 @pytest.mark.parametrize("app_name,emitted", list(_build_all_apps()))
 def test_no_bar_chart_axis_label_renders_as_snake_case(
-    app_name: str, emitted: Any,
+    app_name: str, emitted: _JsonDict,
 ) -> None:
     """Class regression: no axis label on any BarChart survives in raw
     snake_case form (e.g. ``account_id``, ``signed_amount``).
@@ -141,10 +150,11 @@ def test_no_bar_chart_axis_label_renders_as_snake_case(
     """
     bad: list[str] = []
     for sheet_id, visual_id, bv in _all_bar_chart_visuals(emitted):
-        chart = bv.get("ChartConfiguration") or {}
+        chart: _JsonDict = bv.get("ChartConfiguration") or {}
         for opt_key in _AXIS_TO_LABEL_OPT.values():
-            opts = chart.get(opt_key) or {}
-            for entry in opts.get("AxisLabelOptions") or []:
+            opts: _JsonDict = chart.get(opt_key) or {}
+            entries: list[_JsonDict] = opts.get("AxisLabelOptions") or []
+            for entry in entries:
                 label = entry.get("CustomLabel", "")
                 if label and _SNAKE_CASE_LABEL.match(label):
                     bad.append(
@@ -163,7 +173,7 @@ def test_no_bar_chart_axis_label_renders_as_snake_case(
 
 @pytest.mark.parametrize("app_name,emitted", list(_build_all_apps()))
 def test_every_bar_chart_axis_label_carries_apply_to(
-    app_name: str, emitted: Any,
+    app_name: str, emitted: _JsonDict,
 ) -> None:
     """Class regression (v8.6.1): every ``CustomLabel`` must carry an
     ``ApplyTo`` ref binding it to the field-well leaf.
@@ -178,10 +188,11 @@ def test_every_bar_chart_axis_label_carries_apply_to(
     """
     bad: list[str] = []
     for sheet_id, visual_id, bv in _all_bar_chart_visuals(emitted):
-        chart = bv.get("ChartConfiguration") or {}
+        chart: _JsonDict = bv.get("ChartConfiguration") or {}
         for opt_key in _AXIS_TO_LABEL_OPT.values():
-            opts = chart.get(opt_key) or {}
-            for entry in opts.get("AxisLabelOptions") or []:
+            opts: _JsonDict = chart.get(opt_key) or {}
+            entries: list[_JsonDict] = opts.get("AxisLabelOptions") or []
+            for entry in entries:
                 if entry.get("CustomLabel") and not entry.get("ApplyTo"):
                     bad.append(
                         f"  sheet={sheet_id!r} visual={visual_id!r} "

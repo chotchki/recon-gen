@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -57,11 +58,16 @@ from recon_gen.apps.l2_flow_tracing.datasets import (
 )
 from recon_gen.cli import main
 from recon_gen.cli._helpers import APPS
-from recon_gen.common.l2 import L2Instance, load_instance
+from recon_gen.common.l2 import load_instance
+from recon_gen.common.models import DataSet
 from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_NAME,
     DS_APP_INFO_LIVENESS,
     DS_APP_INFO_MATVIEWS,
+)
+from recon_gen.common.tree import App, Sheet, TextBox
+from recon_gen.common.tree.controls import (
+    FilterControlLike, ParameterControlLike,
 )
 from tests._test_helpers import make_test_config
 
@@ -74,7 +80,58 @@ SASQUATCH_PR_YAML = (
 )
 
 
-def _sheet_by_name(app, name: str):
+# *ControlLike Protocols don't expose ``title`` (every concrete subtype
+# does). This helper narrows at the test layer — same pattern as
+# ``test_l1_dashboard.py::_control_title``.
+def _control_title(c: ParameterControlLike | FilterControlLike) -> str:
+    return getattr(c, "title")
+
+
+def _typed_column(col: Any) -> Any:
+    """Narrow a ColumnRef (str | CalcField | Column) to its typed form.
+    Bare strings are rejected here because every Table on the L2FT app
+    uses ``ds["col"]`` references (no ``allow_bare_strings=True`` opt-in)."""
+    from recon_gen.common.tree.datasets import Column
+    assert isinstance(col, Column), (
+        f"expected Column ref; got {type(col).__name__}"
+    )
+    return col
+
+
+def _string_ds_params(params: list[Any]) -> dict[str, Any]:
+    """Index the StringDatasetParameter on each DatasetParameter by Name —
+    the dominant pattern in this file. Asserts every entry is a string
+    parameter (the L2FT datasets are all string-shaped); other shapes
+    would land in a different by-Name index in a future test."""
+    out: dict[str, Any] = {}
+    for p in params:
+        sdp = p.StringDatasetParameter
+        assert sdp is not None, (
+            f"expected StringDatasetParameter; got {p!r}"
+        )
+        out[sdp.Name] = sdp
+    return out
+
+
+def _ds_sql(aws_ds: DataSet) -> str:
+    """Pull the CustomSql.SqlQuery off the first PhysicalTableMap entry
+    of a built dataset, with the None-narrow built in. Every dataset we
+    build here is CustomSql-shaped (``build_dataset`` always sets it),
+    so the assert is a defensive type-narrow, not a behavioral guard."""
+    cs = list(aws_ds.PhysicalTableMap.values())[0].CustomSql
+    assert cs is not None
+    return cs.SqlQuery
+
+
+def _ds_columns(aws_ds: DataSet) -> list[Any]:
+    """Pull the CustomSql.Columns off the first PhysicalTableMap entry —
+    same None-narrow shape as ``_ds_sql``."""
+    cs = list(aws_ds.PhysicalTableMap.values())[0].CustomSql
+    assert cs is not None
+    return list(cs.Columns)
+
+
+def _sheet_by_name(app: App, name: str) -> Sheet:
     """Look up a Sheet by display name. Position-agnostic so sheet
     insertion order can be reshuffled without re-keying these tests."""
     assert app.analysis is not None
@@ -202,6 +259,7 @@ def test_every_sheet_has_a_description() -> None:
     """Subtitle text drives the per-sheet prose — every sheet must
     have one (description-driven-prose contract from M.2a.7)."""
     app = build_l2_flow_tracing_app(_CFG)
+    assert app.analysis is not None
     for s in app.analysis.sheets:
         assert s.description, f"sheet {s.name!r} missing description"
 
@@ -270,6 +328,7 @@ def test_no_remaining_placeholder_sheets() -> None:
     should retain the M.3.4 'skeleton' placeholder marker — every
     sheet has its real visuals + prose now."""
     app = build_l2_flow_tracing_app(_CFG)
+    assert app.analysis is not None
     for s in app.analysis.sheets:
         body_blob = "".join(tb.content for tb in s.text_boxes)
         assert "Skeleton at M.3.4" not in body_blob, (
@@ -377,11 +436,19 @@ def test_rails_table_sources_from_postings_dataset() -> None:
     """The transactions Table reads from the postings dataset (not the
     M.3.5 declared-rails aggregate that moved to a future Docs tab)."""
     from recon_gen.common.tree import Table
+    from recon_gen.common.tree.datasets import Column
     app = build_l2_flow_tracing_app(_CFG)
     rails = _sheet_by_name(app, _RAILS_NAME)
     table = next(v for v in rails.visuals if isinstance(v, Table))
-    table_dataset_ids = {c.column.dataset.identifier for c in table.columns}
-    assert table_dataset_ids == {DS_POSTINGS}
+    table_dataset_ids: set[str] = set()
+    for c in table.columns:
+        col = c.column
+        # Bare-string ColumnRef has no dataset — skip; the table doesn't
+        # opt into ``allow_bare_strings``, so this branch never fires in
+        # practice (defensive).
+        if isinstance(col, Column):
+            table_dataset_ids.add(col.dataset.identifier)
+    assert table_dataset_ids == {"l2ft-postings-ds"}
 
 
 def test_rails_sheet_has_seven_filter_controls() -> None:
@@ -405,7 +472,7 @@ def test_rails_sheet_parameter_controls_titled_for_analyst() -> None:
     catches accidental retitling."""
     app = build_l2_flow_tracing_app(_CFG)
     rails = _sheet_by_name(app, "Rails")
-    titles = {ctrl.title for ctrl in rails.parameter_controls}
+    titles = {_control_title(ctrl) for ctrl in rails.parameter_controls}
     assert {
         "Date From", "Date To", "Rail", "Status", "Bundle",
         "Metadata Key", "Metadata Value",
@@ -435,6 +502,7 @@ def _chains_dataset_sql_against(yaml_path: Path) -> str:
     cfg = replace(_CFG, db_table_prefix=yaml_path.stem)
     aws_ds = build_chains_dataset(cfg, inst)
     table = list(aws_ds.PhysicalTableMap.values())[0]
+    assert table.CustomSql is not None
     return table.CustomSql.SqlQuery
 
 
@@ -517,7 +585,7 @@ def test_chains_dataset_contract_columns_match_builder() -> None:
     )
     aws_ds = build_chains_dataset(_CFG, default_l2_instance())
     cols = {
-        c.Name for c in list(aws_ds.PhysicalTableMap.values())[0].CustomSql.Columns
+        c.Name for c in _ds_columns(aws_ds)
     }
     expected = {c.name for c in CHAINS_CONTRACT.columns}
     assert cols == expected
@@ -535,7 +603,7 @@ def test_chains_dataset_handles_empty_chains_list() -> None:
     )
     no_chains = replace(default_l2_instance(), chains=())
     aws_ds = build_chains_dataset(_CFG, no_chains)
-    sql = list(aws_ds.PhysicalTableMap.values())[0].CustomSql.SqlQuery
+    sql = _ds_sql(aws_ds)
     assert "WHERE 1=0" in sql
     assert "WITH declared AS" in sql
 
@@ -575,7 +643,7 @@ def test_chains_sheet_is_a_single_table() -> None:
     assert len(table_visuals) == 1
     # Table reads from chain-instances, not the aggregate chains dataset.
     table = table_visuals[0]
-    assert table.columns[0].column.dataset.identifier == DS_CHAIN_INSTANCES
+    assert _typed_column(table.columns[0].column).dataset.identifier == "l2ft-chain-instances-ds"
 
 
 def test_chains_table_carries_completion_status_column() -> None:
@@ -586,7 +654,7 @@ def test_chains_table_carries_completion_status_column() -> None:
     app = build_l2_flow_tracing_app(_CFG)
     chains = _sheet_by_name(app, "Chains")
     table = next(v for v in chains.visuals if isinstance(v, Table))
-    cols = {c.column.name for c in table.columns}
+    cols = {_typed_column(c.column).name for c in table.columns}
     assert "completion_status" in cols
     assert "parent_chain_name" in cols
     assert "parent_transfer_id" in cols
@@ -598,9 +666,9 @@ def test_chains_sheet_has_six_filter_controls() -> None:
     Key + Metadata Value)."""
     app = build_l2_flow_tracing_app(_CFG)
     chains = _sheet_by_name(app, "Chains")
-    titles = (
-        [c.title for c in chains.parameter_controls]
-        + [c.title for c in chains.filter_controls]
+    titles: list[str] = (
+        [_control_title(c) for c in chains.parameter_controls]
+        + [_control_title(c) for c in chains.filter_controls]
     )
     assert set(titles) == {
         "Date From", "Date To", "Chain", "Completion",
@@ -613,6 +681,7 @@ def test_chains_metadata_params_are_chain_scoped() -> None:
     from Rails' pL2ftMeta{Key,Value} so per-sheet selection doesn't
     bleed across tabs."""
     app = build_l2_flow_tracing_app(_CFG)
+    assert app.analysis is not None
     param_names = {str(p.name) for p in app.analysis.parameters}
     assert "pL2ftChainsMetaKey" in param_names
     assert "pL2ftChainsMetaValue" in param_names
@@ -639,7 +708,7 @@ def test_chain_instances_dataset_declares_cascade_and_pushdown_parameters() -> N
     assert declared_chain_parents(inst)  # sasquatch_pr declares chains
     params = build_chain_instances_dataset(_CFG, inst).DatasetParameters
     assert params is not None and len(params) == 4
-    by_name = {p.StringDatasetParameter.Name: p.StringDatasetParameter for p in params}
+    by_name = _string_ds_params(params)
     assert by_name["pKey"].ValueType == "SINGLE_VALUED"
     assert by_name["pValues"].ValueType == "SINGLE_VALUED"
     assert by_name["pL2ftChainsChain"].ValueType == "SINGLE_VALUED"
@@ -654,9 +723,7 @@ def test_chain_instances_dataset_declares_cascade_and_pushdown_parameters() -> N
     assert not declared_chain_parents(no_chains)
     nc_params = build_chain_instances_dataset(_CFG, no_chains).DatasetParameters
     assert nc_params is not None
-    nc_by_name = {
-        p.StringDatasetParameter.Name: p.StringDatasetParameter for p in nc_params
-    }
+    nc_by_name = _string_ds_params(nc_params)
     assert nc_by_name["pL2ftChainsChain"].DefaultValues.StaticValues == [
         L2FT_ALL_SENTINEL,
     ]
@@ -671,10 +738,9 @@ def test_chain_instances_dataset_pushes_chain_completion_into_sql() -> None:
     from recon_gen.apps.l2_flow_tracing.datasets import (
         build_chain_instances_dataset,
     )
-    sql = list(
+    sql = _ds_sql(
         build_chain_instances_dataset(_CFG, load_instance(SASQUATCH_PR_YAML))
-        .PhysicalTableMap.values()
-    )[0].CustomSql.SqlQuery
+    )
     assert "parent_chain_name = <<$pL2ftChainsChain>>" in sql
     assert "completion_status = <<$pL2ftChainsCompletion>>" in sql
     # AA.A.3 — chain predicate is the SINGLE_VALUED sentinel-guarded form
@@ -693,9 +759,13 @@ def test_chains_pushdown_params_bridge_to_chain_instances_dataset() -> None:
     their namesake dataset parameter on the chain-instances dataset
     (and nothing else); no `fg-l2ft-chains-{chain,completion}`
     FilterGroups remain."""
+    from recon_gen.common.tree import StringParam
+
     app = build_l2_flow_tracing_app(_CFG)
+    assert app.analysis is not None
     for pname in ("pL2ftChainsChain", "pL2ftChainsCompletion"):
         p = next(p for p in app.analysis.parameters if str(p.name) == pname)
+        assert isinstance(p, StringParam)
         assert p.mapped_dataset_params is not None
         assert {
             (ds.identifier, name) for ds, name in p.mapped_dataset_params
@@ -732,7 +802,7 @@ def test_metadata_value_control_is_text_field() -> None:
         try:
             value_ctrl = next(
                 c for c in sheet.parameter_controls
-                if c.title == "Metadata Value"
+                if _control_title(c) == "Metadata Value"
             )
         except StopIteration:
             continue
@@ -766,9 +836,7 @@ def test_tt_datasets_declare_cascade_and_pushdown_parameters() -> None:
     for build in (build_tt_instances_dataset, build_tt_legs_dataset):
         params = build(_CFG, inst).DatasetParameters
         assert params is not None and len(params) == 4, build.__name__
-        by_name = {
-            p.StringDatasetParameter.Name: p.StringDatasetParameter for p in params
-        }
+        by_name = _string_ds_params(params)
         assert by_name["pKey"].ValueType == "SINGLE_VALUED"
         assert by_name["pValues"].ValueType == "SINGLE_VALUED"
         assert by_name["pL2ftTtTemplate"].ValueType == "SINGLE_VALUED"
@@ -785,9 +853,7 @@ def test_tt_datasets_declare_cascade_and_pushdown_parameters() -> None:
     assert not declared_template_names(no_tt)
     params = build_tt_instances_dataset(_CFG, no_tt).DatasetParameters
     assert params is not None
-    by_name = {
-        p.StringDatasetParameter.Name: p.StringDatasetParameter for p in params
-    }
+    by_name = _string_ds_params(params)
     assert by_name["pL2ftTtTemplate"].DefaultValues.StaticValues == [
         L2FT_ALL_SENTINEL,
     ]
@@ -804,12 +870,8 @@ def test_tt_datasets_push_template_completion_into_sql() -> None:
         build_tt_instances_dataset, build_tt_legs_dataset,
     )
     inst = load_instance(SASQUATCH_PR_YAML)
-    inst_sql = list(
-        build_tt_instances_dataset(_CFG, inst).PhysicalTableMap.values()
-    )[0].CustomSql.SqlQuery
-    legs_sql = list(
-        build_tt_legs_dataset(_CFG, inst).PhysicalTableMap.values()
-    )[0].CustomSql.SqlQuery
+    inst_sql = _ds_sql(build_tt_instances_dataset(_CFG, inst))
+    legs_sql = _ds_sql(build_tt_legs_dataset(_CFG, inst))
     for sql, alias in ((inst_sql, "tt_instances"), (legs_sql, "tt_legs")):
         # AA.A.3 — template predicate is the SINGLE_VALUED sentinel-guarded
         # form in the OUTER WHERE over the CASE-aliased subquery.
@@ -831,9 +893,13 @@ def test_tt_pushdown_params_bridge_to_both_datasets() -> None:
     their namesake param on BOTH tt-instances AND tt-legs (so the Table
     and the Sankey narrow together); no `fg-l2ft-tt-{template,completion}`
     FilterGroups remain."""
+    from recon_gen.common.tree import StringParam
+
     app = build_l2_flow_tracing_app(_CFG)
+    assert app.analysis is not None
     for pname in ("pL2ftTtTemplate", "pL2ftTtCompletion"):
         p = next(p for p in app.analysis.parameters if str(p.name) == pname)
+        assert isinstance(p, StringParam)
         assert p.mapped_dataset_params is not None
         assert {
             (ds.identifier, name) for ds, name in p.mapped_dataset_params
@@ -866,9 +932,8 @@ def _exc_dataset_sql(builder_name: str, yaml_path: Path) -> str:
     inst = load_instance(yaml_path)
     cfg = replace(_CFG, db_table_prefix=yaml_path.stem)
     builder = getattr(ds_mod, builder_name)
-    aws_ds = builder(cfg, inst)
-    table = list(aws_ds.PhysicalTableMap.values())[0]
-    return table.CustomSql.SqlQuery
+    aws_ds: DataSet = builder(cfg, inst)
+    return _ds_sql(aws_ds)
 
 
 @pytest.mark.parametrize("ds_id,builder_name", _EXC_DATASETS)
@@ -1006,7 +1071,7 @@ def test_exc_dataset_contract_columns_match_builder(
     builder = getattr(ds_mod, builder_name)
     aws_ds = builder(_CFG, load_instance(SASQUATCH_PR_YAML))
     cols = {
-        c.Name for c in list(aws_ds.PhysicalTableMap.values())[0].CustomSql.Columns
+        c.Name for c in _ds_columns(aws_ds)
     }
     expected = {c.name for c in contract.columns}
     assert cols == expected
@@ -1037,17 +1102,17 @@ def test_exceptions_sheet_visuals_read_unified_dataset() -> None:
     expected_ds = "l2ft-unified-exceptions-ds"
     for v in exc.visuals:
         if isinstance(v, KPI):
-            assert v.values[0].column.dataset.identifier == expected_ds
+            assert _typed_column(v.values[0].column).dataset.identifier == expected_ds
         elif isinstance(v, BarChart):
-            assert v.category[0].column.dataset.identifier == expected_ds
+            assert _typed_column(v.category[0].column).dataset.identifier == expected_ds
         elif isinstance(v, Table):
-            assert v.columns[0].column.dataset.identifier == expected_ds
+            assert _typed_column(v.columns[0].column).dataset.identifier == expected_ds
 
 
 # -- AA.C.6 hygiene-exceptions panel pin (mirrors AA.C.3.f's L1 check) ------
 
 
-def _l2ft_text_box_by_id(sheet, text_box_id: str):
+def _l2ft_text_box_by_id(sheet: Sheet, text_box_id: str) -> TextBox:
     """Lookup helper — find one TextBox on ``sheet`` by its id. Mirrors
     ``tests/json/test_l1_dashboard.py::_text_box_by_id`` for the L2FT
     sheets (AA.C.4 added the bottom hygiene panel TextBox, so the
@@ -1107,7 +1172,7 @@ def test_unified_exceptions_dataset_unions_all_six_check_types() -> None:
     )
     inst = load_instance(SASQUATCH_PR_YAML)
     aws_ds = build_unified_l2_exceptions_dataset(_CFG, inst)
-    sql = list(aws_ds.PhysicalTableMap.values())[0].CustomSql.SqlQuery
+    sql = _ds_sql(aws_ds)
     for check_type in (
         "Chain Orphans",
         # Z.B (2026-05-15) — was "Unmatched Transfer Type"; renamed to
@@ -1157,7 +1222,7 @@ def test_postings_dataset_targets_prefixed_current_transactions() -> None:
     inst = load_instance(SASQUATCH_PR_YAML)
     cfg = replace(_CFG, db_table_prefix="sasquatch_pr")
     aws_ds = build_postings_dataset(cfg, inst)
-    sql = list(aws_ds.PhysicalTableMap.values())[0].CustomSql.SqlQuery
+    sql = _ds_sql(aws_ds)
     assert "FROM sasquatch_pr_current_transactions" in sql
 
 
@@ -1170,9 +1235,7 @@ def test_postings_dataset_uses_cascade_substitution() -> None:
         build_postings_dataset, META_KEY_ALL_SENTINEL,
     )
     inst = load_instance(SASQUATCH_PR_YAML)
-    sql = list(
-        build_postings_dataset(_CFG, inst).PhysicalTableMap.values()
-    )[0].CustomSql.SqlQuery
+    sql = _ds_sql(build_postings_dataset(_CFG, inst))
     assert f"<<$pKey>> = '{META_KEY_ALL_SENTINEL}'" in sql
     # Spot-check one declared key picks the literal-path branch shape.
     assert (
@@ -1198,7 +1261,7 @@ def test_postings_dataset_declares_cascade_and_pushdown_parameters() -> None:
     aws_ds = build_postings_dataset(_CFG, inst)
     params = aws_ds.DatasetParameters
     assert params is not None and len(params) == 5
-    by_name = {p.StringDatasetParameter.Name: p.StringDatasetParameter for p in params}
+    by_name = _string_ds_params(params)
     # Metadata cascade pair.
     assert by_name["pKey"].ValueType == "SINGLE_VALUED"
     # Y.1.m: SINGLE_VALUED (was MULTI_VALUED until the cascade
@@ -1229,9 +1292,7 @@ def test_postings_dataset_pushes_rail_status_bundle_into_sql() -> None:
         build_postings_dataset,
     )
     inst = load_instance(SASQUATCH_PR_YAML)
-    sql = list(
-        build_postings_dataset(_CFG, inst).PhysicalTableMap.values()
-    )[0].CustomSql.SqlQuery
+    sql = _ds_sql(build_postings_dataset(_CFG, inst))
     assert "rail_name = <<$pL2ftRail>>" in sql
     assert "status = <<$pL2ftStatus>>" in sql
     assert "bundle_status = <<$pL2ftBundle>>" in sql
@@ -1245,13 +1306,17 @@ def test_rails_pushdown_params_bridge_to_postings_dataset() -> None:
     to their namesake dataset parameter on the postings dataset (and
     nothing else), and there are no ``fg-l2ft-rails-{rail,status,bundle}``
     FilterGroups left."""
+    from recon_gen.common.tree import StringParam
+
     app = build_l2_flow_tracing_app(_CFG)
+    assert app.analysis is not None
     for pname, dsname in (
         ("pL2ftRail", "pL2ftRail"),
         ("pL2ftStatus", "pL2ftStatus"),
         ("pL2ftBundle", "pL2ftBundle"),
     ):
         p = next(p for p in app.analysis.parameters if str(p.name) == pname)
+        assert isinstance(p, StringParam)
         assert p.mapped_dataset_params is not None
         assert {
             (ds.identifier, name) for ds, name in p.mapped_dataset_params
@@ -1274,7 +1339,7 @@ def test_meta_values_dataset_is_long_form_with_metadata_key_column() -> None:
     )
     inst = load_instance(SASQUATCH_PR_YAML)
     aws_ds = build_meta_values_dataset(_CFG, inst)
-    sql = list(aws_ds.PhysicalTableMap.values())[0].CustomSql.SqlQuery
+    sql = _ds_sql(aws_ds)
     # Long-form: UNION ALL one branch per declared key.
     assert "UNION ALL" in sql
     assert "AS metadata_key" in sql
@@ -1289,11 +1354,15 @@ def test_meta_key_param_maps_to_postings_only() -> None:
     transactions table). The meta-values dataset doesn't take a `pKey`
     parameter — QS's CascadingControlConfiguration filters its rows by
     metadata_key column-match instead."""
+    from recon_gen.common.tree import StringParam
+
     app = build_l2_flow_tracing_app(_CFG)
+    assert app.analysis is not None
     p_key = next(
         p for p in app.analysis.parameters
         if str(p.name) == "pL2ftMetaKey"
     )
+    assert isinstance(p_key, StringParam)
     assert p_key.mapped_dataset_params is not None
     mapped_pairs = {
         (ds.identifier, name) for ds, name in p_key.mapped_dataset_params
@@ -1307,11 +1376,15 @@ def test_meta_value_param_maps_to_postings_only() -> None:
     """The Value analysis-param maps to `pValues` on the postings
     dataset only — meta-values doesn't need the value back since it
     drives the dropdown's selectable_values, not its own filter."""
+    from recon_gen.common.tree import StringParam
+
     app = build_l2_flow_tracing_app(_CFG)
+    assert app.analysis is not None
     p_val = next(
         p for p in app.analysis.parameters
         if str(p.name) == "pL2ftMetaValue"
     )
+    assert isinstance(p_val, StringParam)
     # Y.1.m: single-valued (was multi_valued=True until the cascade
     # diagnosis revealed text-field controls can't commit non-empty
     # values to multi-valued params — analyst now filters one value at
@@ -1330,10 +1403,14 @@ def test_meta_key_dropdown_includes_sentinel_plus_declared_keys() -> None:
     from recon_gen.apps.l2_flow_tracing.datasets import (
         META_KEY_ALL_SENTINEL, declared_metadata_keys,
     )
-    from recon_gen.common.tree import StaticValues
+    from recon_gen.common.tree import ParameterDropdown, StaticValues
     app = build_l2_flow_tracing_app(_CFG)
     rails = _sheet_by_name(app, "Rails")
-    key_ctrl = next(c for c in rails.parameter_controls if c.title == "Metadata Key")
+    key_ctrl = next(
+        c for c in rails.parameter_controls
+        if _control_title(c) == "Metadata Key"
+    )
+    assert isinstance(key_ctrl, ParameterDropdown)
     assert isinstance(key_ctrl.selectable_values, StaticValues)
     expected = [META_KEY_ALL_SENTINEL] + declared_metadata_keys(default_l2_instance())
     assert key_ctrl.selectable_values.values == expected
@@ -1347,9 +1424,15 @@ def test_meta_value_control_is_bound_to_pl2ftmetavalue_param() -> None:
     from the meta-values dataset. Either way the bound parameter is
     the same — this test catches a wiring bug where the control gets
     bound to the wrong parameter."""
+    from recon_gen.common.tree import ParameterTextField
+
     app = build_l2_flow_tracing_app(_CFG)
     rails = _sheet_by_name(app, "Rails")
-    val_ctrl = next(c for c in rails.parameter_controls if c.title == "Metadata Value")
+    val_ctrl = next(
+        c for c in rails.parameter_controls
+        if _control_title(c) == "Metadata Value"
+    )
+    assert isinstance(val_ctrl, ParameterTextField)
     assert val_ctrl.parameter.name == "pL2ftMetaValue"
 
 
@@ -1381,14 +1464,8 @@ def test_unified_l2_exceptions_empty_metadata_branch_is_dialect_aware() -> None:
     cfg_pg = replace(_CFG, dialect=Dialect.POSTGRES)
     cfg_or = replace(_CFG, dialect=Dialect.ORACLE)
 
-    sql_pg = next(iter(
-        build_unified_l2_exceptions_dataset(cfg_pg, empty)
-        .PhysicalTableMap.values()
-    )).CustomSql.SqlQuery
-    sql_or = next(iter(
-        build_unified_l2_exceptions_dataset(cfg_or, empty)
-        .PhysicalTableMap.values()
-    )).CustomSql.SqlQuery
+    sql_pg = _ds_sql(build_unified_l2_exceptions_dataset(cfg_pg, empty))
+    sql_or = _ds_sql(build_unified_l2_exceptions_dataset(cfg_or, empty))
 
     # Empty-fallback NULLs use bounded VARCHAR(4000) so they UNION
     # cleanly with the real branches' string columns on both dialects

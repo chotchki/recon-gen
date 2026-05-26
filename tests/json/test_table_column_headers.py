@@ -30,6 +30,10 @@ from tests._test_helpers import make_test_config
 
 _CFG = make_test_config()
 
+# Type alias — AWS QS JSON dicts have heterogeneous nested shapes; using
+# Any matches the dynamic-dict walk these tests perform.
+_JsonDict = dict[str, Any]
+
 
 # A label that looks like a raw snake_case column name: all lowercase,
 # at least one underscore. The smart-title pipeline always emits at
@@ -38,18 +42,23 @@ _CFG = make_test_config()
 _SNAKE_CASE_LABEL = re.compile(r"^[a-z]+(_[a-z0-9]+)+$")
 
 
-def _all_table_visuals(emitted: Any) -> Iterator[tuple[str, str, dict]]:
+def _all_table_visuals(
+    emitted: _JsonDict,
+) -> Iterator[tuple[str, str, _JsonDict]]:
     """Yield ``(sheet_id, visual_id, table_visual_dict)`` for every
     Table visual in the emitted analysis."""
-    for sheet in emitted.get("Definition", {}).get("Sheets", []):
-        sheet_id = sheet.get("SheetId", "<unknown>")
-        for v in sheet.get("Visuals") or []:
-            tv = v.get("TableVisual")
+    definition: _JsonDict = emitted.get("Definition") or {}
+    sheets: list[_JsonDict] = definition.get("Sheets") or []
+    for sheet in sheets:
+        sheet_id: str = sheet.get("SheetId", "<unknown>")
+        visuals: list[_JsonDict] = sheet.get("Visuals") or []
+        for v in visuals:
+            tv: _JsonDict | None = v.get("TableVisual")
             if tv is not None:
                 yield sheet_id, tv.get("VisualId", "<unknown>"), tv
 
 
-def _build_all_apps():
+def _build_all_apps() -> Iterator[tuple[str, _JsonDict]]:
     from recon_gen.apps.l1_dashboard.app import build_l1_dashboard_app
     from recon_gen.apps.l2_flow_tracing.app import (
         build_l2_flow_tracing_app,
@@ -71,7 +80,7 @@ def _build_all_apps():
 
 @pytest.mark.parametrize("app_name,emitted", list(_build_all_apps()))
 def test_every_table_visual_has_field_options(
-    app_name: str, emitted: Any,
+    app_name: str, emitted: _JsonDict,
 ) -> None:
     """Class regression: every Table visual must carry
     ``ChartConfiguration.FieldOptions`` so QuickSight has explicit
@@ -79,8 +88,8 @@ def test_every_table_visual_has_field_options(
     column name."""
     bad: list[str] = []
     for sheet_id, visual_id, tv in _all_table_visuals(emitted):
-        chart = tv.get("ChartConfiguration") or {}
-        field_options = chart.get("FieldOptions")
+        chart: _JsonDict = tv.get("ChartConfiguration") or {}
+        field_options: _JsonDict | None = chart.get("FieldOptions")
         if field_options is None:
             bad.append(f"  sheet={sheet_id!r} visual={visual_id!r}")
     assert not bad, (
@@ -92,7 +101,7 @@ def test_every_table_visual_has_field_options(
 
 @pytest.mark.parametrize("app_name,emitted", list(_build_all_apps()))
 def test_no_table_column_header_renders_as_snake_case(
-    app_name: str, emitted: Any,
+    app_name: str, emitted: _JsonDict,
 ) -> None:
     """Class regression: no CustomLabel on any Table column survives
     in raw snake_case form (e.g. ``account_id``, ``business_day_start``).
@@ -106,10 +115,11 @@ def test_no_table_column_header_renders_as_snake_case(
     """
     bad: list[str] = []
     for sheet_id, visual_id, tv in _all_table_visuals(emitted):
-        chart = tv.get("ChartConfiguration") or {}
-        field_options = chart.get("FieldOptions") or {}
-        for opt in field_options.get("SelectedFieldOptions") or []:
-            label = opt.get("CustomLabel", "")
+        chart: _JsonDict = tv.get("ChartConfiguration") or {}
+        field_options: _JsonDict = chart.get("FieldOptions") or {}
+        opts: list[_JsonDict] = field_options.get("SelectedFieldOptions") or []
+        for opt in opts:
+            label: str = opt.get("CustomLabel", "")
             if label and _SNAKE_CASE_LABEL.match(label):
                 bad.append(
                     f"  sheet={sheet_id!r} visual={visual_id!r} "
@@ -126,7 +136,7 @@ def test_no_table_column_header_renders_as_snake_case(
 
 @pytest.mark.parametrize("app_name,emitted", list(_build_all_apps()))
 def test_field_options_count_matches_field_well_leaves(
-    app_name: str, emitted: Any,
+    app_name: str, emitted: _JsonDict,
 ) -> None:
     """Class regression: the SelectedFieldOptions list must have
     exactly one entry per field-well leaf (Dim or Measure). A
@@ -135,17 +145,17 @@ def test_field_options_count_matches_field_well_leaves(
     snake_case headers and others with the override."""
     bad: list[str] = []
     for sheet_id, visual_id, tv in _all_table_visuals(emitted):
-        chart = tv.get("ChartConfiguration") or {}
-        field_wells = chart.get("FieldWells") or {}
-        field_options = chart.get("FieldOptions") or {}
+        chart: _JsonDict = tv.get("ChartConfiguration") or {}
+        field_wells: _JsonDict = chart.get("FieldWells") or {}
+        field_options: _JsonDict = chart.get("FieldOptions") or {}
 
         # Count leaves across both well shapes.
         leaf_count = 0
-        agg = field_wells.get("TableAggregatedFieldWells")
+        agg: _JsonDict | None = field_wells.get("TableAggregatedFieldWells")
         if agg is not None:
             leaf_count += len(agg.get("GroupBy") or [])
             leaf_count += len(agg.get("Values") or [])
-        unagg = field_wells.get("TableUnaggregatedFieldWells")
+        unagg: _JsonDict | None = field_wells.get("TableUnaggregatedFieldWells")
         if unagg is not None:
             leaf_count += len(unagg.get("Values") or [])
 
