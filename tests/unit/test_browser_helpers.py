@@ -12,6 +12,7 @@ site, fail loud.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -27,7 +28,7 @@ from recon_gen.common.env_keys import RECON_E2E_USER_ARN, RECON_GEN_RUN_DIR
 
 
 class TestGetUserArn:
-    def test_returns_env_var_when_set(self, monkeypatch):
+    def test_returns_env_var_when_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(
             RECON_E2E_USER_ARN.name,
             "arn:aws:quicksight:us-east-1:111122223333:user/default/test-user",
@@ -36,12 +37,12 @@ class TestGetUserArn:
             "arn:aws:quicksight:us-east-1:111122223333:user/default/test-user"
         )
 
-    def test_raises_when_env_var_unset(self, monkeypatch):
+    def test_raises_when_env_var_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(RECON_E2E_USER_ARN.name, raising=False)
         with pytest.raises(RuntimeError, match="RECON_E2E_USER_ARN is not set"):
             get_user_arn()
 
-    def test_raises_when_env_var_empty_string(self, monkeypatch):
+    def test_raises_when_env_var_empty_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # An empty string is treated as unset — same fail-loud path.
         # Otherwise an unset-via-``export RECON_E2E_USER_ARN=`` shell
         # idiom would slip through with an empty UserArn that AWS
@@ -50,7 +51,7 @@ class TestGetUserArn:
         with pytest.raises(RuntimeError, match="RECON_E2E_USER_ARN is not set"):
             get_user_arn()
 
-    def test_error_message_points_at_e2e_setup_runbook(self, monkeypatch):
+    def test_error_message_points_at_e2e_setup_runbook(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # The runbook reference is the documented path for fixing
         # this in CI; if the doc moves, this test fails loud and
         # reminds the editor to update the message.
@@ -118,15 +119,15 @@ class TestTestIdFromPytestEnv:
             "tests/e2e/test_foo.py::TestFoo::test_bar (call)"
         ) == "tests_e2e_test_foo__TestFoo__test_bar"
 
-    def test_returns_unknown_when_env_var_unset(self, monkeypatch):
+    def test_returns_unknown_when_env_var_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         assert _test_id_from_pytest_env() == "unknown"
 
-    def test_returns_unknown_when_env_var_empty(self, monkeypatch):
+    def test_returns_unknown_when_env_var_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("PYTEST_CURRENT_TEST", "")
         assert _test_id_from_pytest_env() == "unknown"
 
-    def test_reads_env_var_when_no_arg_supplied(self, monkeypatch):
+    def test_reads_env_var_when_no_arg_supplied(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(
             "PYTEST_CURRENT_TEST",
             "tests/foo.py::bar (call)",
@@ -140,7 +141,7 @@ class TestCaptureDirAndPath:
     test layer chain runner; fall back to the legacy
     ``<SCREENSHOT_DIR>/_failures/`` flat dir otherwise."""
 
-    def test_capture_dir_runner_mode(self, monkeypatch, tmp_path) -> None:
+    def test_capture_dir_runner_mode(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         # Y.2.gate.b.15 — registry's must_be_dir validator requires the
         # path to exist; mkdir before setting the env so the test
         # exercises the runner-mode path (not the soft-fall legacy
@@ -151,13 +152,13 @@ class TestCaptureDirAndPath:
         out = _capture_dir_for("tests_e2e_test_foo__bar")
         assert out == run_dir / "browser" / "tests_e2e_test_foo__bar"
 
-    def test_capture_dir_legacy_mode(self, monkeypatch) -> None:
+    def test_capture_dir_legacy_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(RECON_GEN_RUN_DIR.name, raising=False)
         out = _capture_dir_for("any_test_id")
         assert out == SCREENSHOT_DIR / "_failures"
 
     def test_capture_path_runner_mode_uses_short_filenames(
-        self, monkeypatch, tmp_path,
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
     ) -> None:
         """Per-test directory means we don't need the test_id prefix
         on every file — names like ``screenshot.png`` are already
@@ -178,7 +179,7 @@ class TestCaptureDirAndPath:
         )
 
     def test_capture_path_legacy_mode_keeps_test_id_prefix(
-        self, monkeypatch,
+        self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Flat-dir legacy mode needs the test_id prefix so files
         from concurrent test runs don't collide. Special-case:
@@ -235,7 +236,7 @@ class TestCaptureFailureDbCounts:
     """v11.0.0a4 — db_counts.txt artifact answers "is the data even
     there?" for blank-visual triage. Sidecar contract: never raise."""
 
-    def _make_cfg(self, db_path, prefix: str):
+    def _make_cfg(self, db_path: Path, prefix: str) -> object:
         """Build a tiny duck-typed cfg sufficient for the helper's
         attribute reads + connect_demo_db(SQLITE) path. Real Config
         carries other fields the helper doesn't touch.
@@ -256,7 +257,9 @@ class TestCaptureFailureDbCounts:
             demo_database_url=f"sqlite:///{db_path}",
         )
 
-    def test_writes_per_table_counts_for_prefixed_tables(self, tmp_path, monkeypatch):
+    def test_writes_per_table_counts_for_prefixed_tables(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         import sqlite3
 
         from recon_gen.common.browser.helpers import _capture_failure_db_counts
@@ -293,7 +296,9 @@ class TestCaptureFailureDbCounts:
         # other_table is non-prefixed so it must NOT appear.
         assert "other_table" not in out
 
-    def test_empty_file_when_no_prefixed_tables(self, tmp_path, monkeypatch):
+    def test_empty_file_when_no_prefixed_tables(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         import sqlite3
 
         from recon_gen.common.browser.helpers import _capture_failure_db_counts
@@ -316,7 +321,9 @@ class TestCaptureFailureDbCounts:
         # Empty file IS the signal — schema was never applied / prefix is wrong.
         assert out == ""
 
-    def test_sidecar_swallows_bad_dialect(self, tmp_path, monkeypatch):
+    def test_sidecar_swallows_bad_dialect(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         from recon_gen.common.browser.helpers import _capture_failure_db_counts
 
         # RECON_GEN_RUN_DIR takes priority over SCREENSHOT_DIR (set by

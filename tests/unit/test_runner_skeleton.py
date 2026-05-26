@@ -5,10 +5,27 @@ and the destructive-op refusal pattern. These shapes are stable contracts the
 rest of the c-stage implementation (capture, diff, dispatch) builds on.
 """
 
+# pyright: reportUnknownLambdaType=false
+# pyright: reportUnknownArgumentType=false
+#
+# BF.4 slice E — this skeleton stubs runner internals through a long
+# tail of ``monkeypatch.setattr(runner, "_helper", lambda *a, **kw: ...)``
+# patterns. Pinning every lambda's parameter types would require either
+# a per-stub typed factory or 100+ named-function rewrites; both bloat
+# the test surface without meaningfully tightening the contract — the
+# REAL invariant ("does the runner orchestrate correctly?") rides on
+# the assertions below, not on stub parameter types. Producer
+# (`recon_gen._dev.runner`) is strict-typed; consumers wire whatever
+# shape the producer's API documents. Keep file-level for now; revisit
+# if pyright's lambda-inference improves or if a generic ``stub_for``
+# decorator helper lands across tests/.
+
 from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -23,11 +40,11 @@ from recon_gen.common.env_keys import (
     RECON_GEN_RUNNER_YES,
     RECON_GEN_TEST_L2_INSTANCE,
 )
-from recon_gen.common.variant import ScenarioCode, VariantSpec
+from recon_gen.common.variant import ScenarioCode, VariantName, VariantSpec
 
 
 @pytest.fixture(autouse=True)
-def _stub_perf_dump(monkeypatch: Any) -> None:
+def _stub_perf_dump(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]: autouse fixture, invoked by pytest's collection not direct callers
     """``_dump_top_queries_for_variant`` connects to the cell's live DB
     (operator's Aurora/Oracle for ``aw`` cells, the container for ``lo``).
     Unit tests must never touch a live DB — stub it module-wide so tests
@@ -1033,7 +1050,7 @@ def test_drift_entry_delta_pct() -> None:
 
 def test_drift_entry_under_threshold() -> None:
     entry = runner.DriftEntry(layer="unit", current_seconds=11.0, prior_seconds=10.0)
-    assert entry.delta_pct == pytest.approx(0.1)
+    assert entry.delta_pct == pytest.approx(0.1)  # pyright: ignore[reportUnknownMemberType]: pytest.approx() has loose typing; comparison is correct at runtime
     assert entry.is_drift is False
 
 
@@ -1808,7 +1825,7 @@ def test_cmd_sweep_with_yes_invokes_sweep(monkeypatch: Any, capsys: Any) -> None
     """--yes → sweep_qs_resources_by_tag is called; not _collect."""
     _install_fake_aws(monkeypatch)
     monkeypatch.delenv(RECON_GEN_RUNNER_YES.name, raising=False)
-    collect_calls, sweep_calls = _install_fake_harness_cleanup(
+    _collect_calls, sweep_calls = _install_fake_harness_cleanup(
         monkeypatch,
         matched={
             "dashboard": [], "analysis": [],
@@ -2024,8 +2041,8 @@ def test_oracle_container_name_is_per_cell() -> None:
     Oracle cells (e.g., sp_or_lo + sq_or_lo) would collide on
     `containers.create(name=...)` with a 409 Conflict if they shared
     the same name. Per-cell suffix solves the parallel-create race."""
-    sp_spec = VariantSpec(scenario="sp", dialect="or", target="lo")
-    sq_spec = VariantSpec(scenario="sq", dialect="or", target="lo")
+    sp_spec = VariantSpec(scenario=ScenarioCode("sp"), dialect="or", target="lo")
+    sq_spec = VariantSpec(scenario=ScenarioCode("sq"), dialect="or", target="lo")
     assert runner._oracle_container_name_for(sp_spec) == "quicksight-test-oracle-sp_or_lo"
     assert runner._oracle_container_name_for(sq_spec) == "quicksight-test-oracle-sq_or_lo"
     assert runner._oracle_container_name_for(sp_spec) != runner._oracle_container_name_for(sq_spec)
@@ -3249,10 +3266,10 @@ def test_cmd_up_to_multi_variant_nests_run_dir_per_variant(
     # Per-cell run_dir is the top-level run_dir suffixed with the
     # spec name. The top-level run_dir lives under RUNS_DIR.
     by_name = {spec.name: rd for spec, rd in invocations}
-    assert by_name["sp_pg_lo"].name == "sp_pg_lo"
-    assert by_name["sp_or_lo"].name == "sp_or_lo"
-    assert by_name["sp_pg_lo"].parent == by_name["sp_or_lo"].parent
-    assert by_name["sp_pg_lo"].parent.parent == tmp_path / "runs"
+    assert by_name[VariantName("sp_pg_lo")].name == "sp_pg_lo"
+    assert by_name[VariantName("sp_or_lo")].name == "sp_or_lo"
+    assert by_name[VariantName("sp_pg_lo")].parent == by_name[VariantName("sp_or_lo")].parent
+    assert by_name[VariantName("sp_pg_lo")].parent.parent == tmp_path / "runs"
 
 
 def test_cmd_up_to_multi_variant_threads_terminal_prefix(

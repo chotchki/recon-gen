@@ -12,13 +12,15 @@ the import-error branches in ``connect_demo_db`` are covered here with
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from recon_gen.common.config import Config
 from tests._test_helpers import make_test_config
 from recon_gen.common.db import (
-    AsyncConnectionPool,
+    AsyncConnectionPool as AsyncConnectionPool,  # re-exported for protocol smoke
     connect_demo_db,
     execute_script,
     make_connection_pool,
@@ -129,7 +131,7 @@ class TestConnectDemoDb:
         with pytest.raises(ValueError, match="demo_database_url is unset"):
             connect_demo_db(_cfg(dialect=Dialect.POSTGRES, url=None))
 
-    def test_postgres_branch_invokes_psycopg(self, monkeypatch) -> None:
+    def test_postgres_branch_invokes_psycopg(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Stub psycopg so we don't need an actual DB. Verifies the
         # POSTGRES branch routes to ``psycopg.connect`` with the
         # raw URL (no DSN translation).
@@ -156,7 +158,7 @@ class TestConnectDemoDb:
         assert called["url"] == "postgresql://user:pw@host:5432/db"
 
     def test_oracle_branch_invokes_oracledb_with_translated_dsn(
-        self, monkeypatch,
+        self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         # Stub oracledb. Verifies the ORACLE branch routes through
         # ``oracle_dsn`` so SQLAlchemy-style URLs translate before
@@ -197,7 +199,7 @@ class TestConnectDemoDb:
         finally:
             conn.close()
 
-    def test_sqlite_branch_opens_file(self, tmp_path) -> None:
+    def test_sqlite_branch_opens_file(self, tmp_path: Path) -> None:
         # SQLAlchemy-style ``sqlite:///path`` translates to the file
         # path correctly. Round-trip a CREATE/INSERT/SELECT to confirm
         # the connection is a real DB-API 2.0 sqlite3.Connection.
@@ -423,10 +425,13 @@ class TestExecuteOracleStmtLockRetry:
     tests don't actually wait the 2s/4s/8s backoff.
     """
 
-    def test_retries_then_succeeds_on_ora_04021(self, monkeypatch) -> None:
+    def test_retries_then_succeeds_on_ora_04021(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from recon_gen.common import db as db_mod
 
-        monkeypatch.setattr(db_mod.time, "sleep", lambda _s: None)
+        def _noop_sleep(_s: float) -> None:
+            return None
+
+        monkeypatch.setattr(db_mod.time, "sleep", _noop_sleep)
         cur = _RaiseThenSucceedCursor(
             fail_times=2,
             exc=_FakeOracleLockError(
@@ -437,10 +442,13 @@ class TestExecuteOracleStmtLockRetry:
         db_mod._execute_oracle_stmt_with_lock_retry(cur, "DROP TABLE foo")
         assert cur.calls == 3  # 1 initial + 2 retries
 
-    def test_retries_then_succeeds_on_ora_00054(self, monkeypatch) -> None:
+    def test_retries_then_succeeds_on_ora_00054(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from recon_gen.common import db as db_mod
 
-        monkeypatch.setattr(db_mod.time, "sleep", lambda _s: None)
+        def _noop_sleep(_s: float) -> None:
+            return None
+
+        monkeypatch.setattr(db_mod.time, "sleep", _noop_sleep)
         cur = _RaiseThenSucceedCursor(
             fail_times=1,
             exc=_FakeOracleLockError(
@@ -450,10 +458,13 @@ class TestExecuteOracleStmtLockRetry:
         db_mod._execute_oracle_stmt_with_lock_retry(cur, "ALTER TABLE foo ADD x INT")
         assert cur.calls == 2
 
-    def test_exhausts_retries_then_reraises_lock_error(self, monkeypatch) -> None:
+    def test_exhausts_retries_then_reraises_lock_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from recon_gen.common import db as db_mod
 
-        monkeypatch.setattr(db_mod.time, "sleep", lambda _s: None)
+        def _noop_sleep(_s: float) -> None:
+            return None
+
+        monkeypatch.setattr(db_mod.time, "sleep", _noop_sleep)
         cur = _RaiseThenSucceedCursor(
             fail_times=99,  # never recovers
             exc=_FakeOracleLockError("ORA-04021: timeout"),
@@ -464,11 +475,15 @@ class TestExecuteOracleStmtLockRetry:
         # tuple so it stays correct if the backoff schedule changes.
         assert cur.calls == len(db_mod._ORACLE_LOCK_RETRY_BACKOFF_S) + 1
 
-    def test_non_lock_error_propagates_immediately(self, monkeypatch) -> None:
+    def test_non_lock_error_propagates_immediately(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from recon_gen.common import db as db_mod
 
         sleep_calls: list[float] = []
-        monkeypatch.setattr(db_mod.time, "sleep", lambda s: sleep_calls.append(s))
+
+        def _record_sleep(s: float) -> None:
+            sleep_calls.append(s)
+
+        monkeypatch.setattr(db_mod.time, "sleep", _record_sleep)
         cur = _RaiseThenSucceedCursor(
             fail_times=99,
             exc=_FakeOracleLockError("ORA-00942: table or view does not exist"),
@@ -507,8 +522,16 @@ class TestMakeConnectionPool:
             try:
                 async with pool.acquire() as conn:
                     cur = await conn.execute("SELECT 1 AS n")
-                    row = await cur.fetchone()
-                    return (type(row), int(row[0]))
+                    # ``fetchone`` isn't on the AsyncCursor Protocol (only
+                    # ``fetchall``); aiosqlite supports it at runtime, but
+                    # pyright can't see through. Use ``fetchall`` to stay
+                    # protocol-faithful.
+                    rows: list[Any] = await cur.fetchall()
+                    row: Any = rows[0]
+                    # ``type(row)`` infers as ``type[Unknown]`` since row is
+                    # Any; pyright-noise without value. We don't actually use
+                    # the type at runtime beyond a not-None check.
+                    return (type(row), int(row[0]))  # pyright: ignore[reportUnknownVariableType]: row is Any (aiosqlite Row), type() inference is partial
             finally:
                 await pool.close()
 
