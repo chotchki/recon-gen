@@ -10,6 +10,7 @@ behaviour is its own test.
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Any
 
 import pytest
 
@@ -25,13 +26,14 @@ from recon_gen.common.l2 import (
     TwoLegRail,
     posted_requirements_for,
 )
+from recon_gen.common.l2.primitives import Rail
 
 
 def _make_instance(
     *,
-    rails: tuple = (),
-    transfer_templates: tuple = (),
-    chains: tuple = (),
+    rails: tuple[Rail, ...] = (),
+    transfer_templates: tuple[TransferTemplate, ...] = (),
+    chains: tuple[Chain, ...] = (),
 ) -> L2Instance:
     """Minimal L2Instance for isolating one derivation source at a time."""
     return L2Instance(
@@ -47,9 +49,9 @@ def _make_instance(
     )
 
 
-def _two_leg(name: str, **kwargs) -> TwoLegRail:
+def _two_leg(name: str, **kwargs: Any) -> TwoLegRail:
     """Helper: TwoLegRail with sane defaults; override via kwargs."""
-    defaults = dict(
+    defaults: dict[str, Any] = dict(
         name=Identifier(name),
         metadata_keys=(),
         source_role=(Identifier("A"),),
@@ -61,9 +63,9 @@ def _two_leg(name: str, **kwargs) -> TwoLegRail:
     return TwoLegRail(**defaults)
 
 
-def _single_leg(name: str, **kwargs) -> SingleLegRail:
+def _single_leg(name: str, **kwargs: Any) -> SingleLegRail:
     """Helper: SingleLegRail with sane defaults; override via kwargs."""
-    defaults = dict(
+    defaults: dict[str, Any] = dict(
         name=Identifier(name),
         metadata_keys=(),
         leg_role=(Identifier("A"),),

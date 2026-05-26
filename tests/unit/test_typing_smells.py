@@ -199,7 +199,7 @@ class Check:
     """
     name: str
     description: str
-    files: list[Path] = field(default_factory=list)
+    files: list[Path] = field(default_factory=lambda: [])
 
     def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
         raise NotImplementedError
