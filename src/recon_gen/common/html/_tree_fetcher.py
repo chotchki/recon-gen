@@ -51,7 +51,6 @@ from typing import Any
 
 from recon_gen.common.config import Config
 from recon_gen.common.dataset_contract import (
-    DatasetContract,
     Storage,
     get_contract,
     get_dataset_params,
@@ -427,56 +426,38 @@ def _chart_meta(visual: Any) -> _ChartMeta | None:  # typing-smell: ignore[expli
     )
 
 
-def _safe_get_contract(ds_id: str) -> DatasetContract | None:
-    """BH.24.1 — lookup helper. Returns the registered contract for
-    ``ds_id`` (so renderers can consult per-column storage shape) or
-    ``None`` when no contract is registered (Studio editor preview,
-    test smoke datasets — caller falls back to today's pre-BH.24.1
-    "divide whenever currency=True" behavior). KeyError-on-miss is
-    soft-handled because ``register_contract`` only fires for built
-    datasets; not every visual-served dataset is contract-tracked
-    yet."""
-    try:
-        return get_contract(ds_id)
-    except KeyError:
-        return None
-
-
 def _resolve_money_columns(
     ds_id: str | None, col_formats: Mapping[str, str],
 ) -> frozenset[str]:
-    """BH.24.1 — `_apply_cents_to_dollars` needs the set of columns
+    """BH.24.6 — `_apply_cents_to_dollars` needs the set of columns
     whose raw cursor value is BIGINT cents AND whose visual wants
     currency display. Both halves must hold: the visual's
     ``currency=True`` flag says "format as $-prefixed money," and the
-    contract's ``storage=CENTS`` says "the value is raw cents — divide
-    by 100 to get dollars."
+    contract's ``storage=CENTS`` says "the value is raw cents —
+    divide by 100 to get dollars."
 
-    Pre-BH.24.1: every ``currency=True`` column was treated as cents,
-    so production Tables whose dataset SQL pre-converted got rendered
-    100× too small. The contract gate disambiguates: only CENTS-storage
-    columns get the renderer-side divide; DOLLARS-storage columns
-    (today's production default) keep their pre-converted SQL value.
-
-    A column is ALSO required to be currency-flagged on the visual —
-    a CENTS-storage column rendered as a raw integer (Dim with
-    ``currency=False``) shouldn't auto-convert (the renderer doesn't
-    know whether the operator wants "200 cents" or "$2.00"). Both
-    halves required.
-
-    Fallback (no contract): the pre-BH.24.1 heuristic — currency-
-    flagged columns are assumed to be cents. Studio / smoke / ad-hoc
-    callers that haven't yet annotated their contracts still get the
-    today's behavior.
+    Contract REQUIRED post-BH.24.6 (user 2026-05-25, per
+    `feedback_no_compat_shims`): the pre-BH.24.6 no-contract
+    fallback ("currency=True == cents") hid the BG.7 100× systemic
+    bug. Any visual-served dataset must register a contract via
+    `build_dataset` (production) or `register_contract` (tests).
+    Production already does this; tests register contracts in
+    module-level setup. ds_id None (visual without a SQL-backed
+    dataset, e.g. text-box) returns empty set — no money columns to
+    convert.
     """
     currency_cols = {
         name for name, fmt in col_formats.items() if fmt == "currency"
     }
     if not currency_cols:
         return frozenset()
-    contract = _safe_get_contract(ds_id) if ds_id else None
-    if contract is None:
-        return frozenset(currency_cols)
+    if ds_id is None:
+        # Visual without a dataset — no money columns to convert.
+        # (Caller's currency_cols would be empty anyway since
+        # _table_column_meta needs a contract to populate; defensive
+        # short-circuit.)
+        return frozenset()
+    contract = get_contract(ds_id)  # raises KeyError if not registered
     cents_names = {
         getattr(col, "name", "")
         for col in contract.columns
@@ -573,14 +554,14 @@ def make_tree_db_fetcher(
             sql: str | None = None
             if ds_id is not None:
                 base_sql = get_sql(ds_id)
-                # BH.24.1 — pass the dataset's contract to wrap_for_visual
-                # so the cents→dollars divide is gated on the column's
-                # storage shape (DOLLARS = skip divide, CENTS = divide).
-                # Without this, the visual wrap divides whenever
-                # currency=True is set on the measure — double-converting
-                # when the dataset SQL already pre-converts (the BG.7
-                # 100×-off bug on App2 Daily Statement KPIs).
-                contract = _safe_get_contract(ds_id)
+                # BH.24.6 — contract is REQUIRED; raises if not
+                # registered. The pre-BH.24.6 _safe_get_contract
+                # fallback hid the BG.7 100× systemic bug class.
+                # Every visual-served dataset registers a contract
+                # via build_dataset (production) or register_contract
+                # (tests). Raises loudly if missing — the actionable
+                # signal vs the silent-misbehavior fallback shape.
+                contract = get_contract(ds_id)
                 sql = wrap_for_visual(base_sql, visual, contract=contract)
             col_labels, col_formats = _table_column_meta(visual, ds_id)
             money_cols = _resolve_money_columns(ds_id, col_formats)

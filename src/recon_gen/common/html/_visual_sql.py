@@ -70,29 +70,23 @@ def _quote_col(name: str) -> str:
     return f'"{name}"'
 
 
-def _measure_sql(measure: Any, *, contract: Any = None) -> str:
+def _measure_sql(measure: Any, *, contract: Any) -> str:
     """Render one Measure as an aggregation expression.
 
     ``Measure.kind`` is "sum" / "max" / "min" / "average" / "count" /
     "distinct_count". ``Measure.column.name`` is the column to
     aggregate (gets quoted via ``_quote_col`` — see Y.3.f.alt.1).
 
-    BH.24.1 (2026-05-25): cents → dollars divide is gated on the
-    column's ``DatasetContract`` storage shape, NOT on the measure's
-    ``currency`` flag alone. The divide fires iff the contract
-    declares the column ``storage=CENTS``; for ``storage=DOLLARS``
-    (the default, matching today's production datasets that pre-
-    convert via ``cents_to_dollars_sql`` in the SELECT), the divide
-    is skipped — preventing the BG.7 100× double-conversion bug
-    (App2 Daily Statement KPIs rendered 100× too small because both
-    the dataset SQL AND ``_measure_sql`` divided).
-
-    Backwards-compatible: when ``contract`` is None, falls back to
-    the OLD behavior (divide whenever ``currency=True``). Callers
-    that have a contract handy (the production
-    ``wrap_for_visual``-via-``_tree_fetcher`` path) pass it; ad-hoc
-    callers (Studio editor preview, tests, smoke harness) keep
-    today's "currency=True → divide" semantic.
+    BH.24.6 (2026-05-25): contract is now **required** — the BH.24.1
+    backwards-compat "no contract → divide on currency=True alone"
+    fallback was an escape hatch that hid the exact bug class BH.24
+    was created to fix (per ``feedback_no_compat_shims`` + user
+    "needs to be gone by the end of BH.24"). Callers MUST register a
+    contract for any dataset whose visuals route through this
+    function. Production does this via ``build_dataset`` already;
+    tests register contracts in their module-level setup. The
+    cents → dollars /100 divide fires iff the contract declares
+    the column ``storage=CENTS``.
 
     ``count`` / ``distinct_count`` never divide (they're row counts,
     not cents sums) regardless of contract.
@@ -121,21 +115,27 @@ def _measure_sql(measure: Any, *, contract: Any = None) -> str:
 
 
 def _wants_cents_divide(column: str, contract: Any) -> bool:
-    """BH.24.1 — return True iff ``_measure_sql`` should emit a /100
+    """BH.24.6 — return True iff ``_measure_sql`` should emit a /100
     divide for this column.
 
-    Decision:
-    - No contract → backwards-compat: divide whenever ``currency=True``
-      (the caller's flag is the sole signal, since we have no shape
-      info — preserves pre-BH.24.1 behavior for Studio / smoke / tests).
+    Decision (contract REQUIRED post-BH.24.6):
     - Contract has the column declared ``storage=CENTS`` → divide.
     - Contract has the column declared ``storage=DOLLARS`` (the
       default) → skip divide.
-    - Contract doesn't declare the column → backwards-compat:
-      divide (defensive — same as the no-contract path).
+    - Contract is None → raises (no silent fallback; the BH.24 bug
+      class lived in exactly that "fall back to old heuristic" path).
+    - Contract declared but missing the column → raises (same
+      reason — silent assumption is a bug-hiding fallback).
     """
     if contract is None:
-        return True
+        raise RuntimeError(
+            f"_wants_cents_divide({column!r}): contract is None. "
+            "Per BH.24.6, every visual-served dataset must register "
+            "a DatasetContract via build_dataset (production) or "
+            "register_contract (tests / fixtures). The pre-BH.24.6 "
+            "no-contract fallback ('divide whenever currency=True') "
+            "hid the BG.7 100× systemic bug — removed."
+        )
     # Local import keeps this module free of a hard dependency on
     # dataset_contract at import time (avoids circular import shapes).
     from recon_gen.common.dataset_contract import Storage
@@ -143,7 +143,13 @@ def _wants_cents_divide(column: str, contract: Any) -> bool:
     for col in getattr(contract, "columns", []):
         if getattr(col, "name", None) == column:
             return getattr(col, "storage", Storage.DOLLARS) is Storage.CENTS
-    return True
+    raise RuntimeError(
+        f"_wants_cents_divide({column!r}): contract has columns "
+        f"{[getattr(c, 'name', None) for c in getattr(contract, 'columns', [])]!r} "
+        "but not this column. Either add a ColumnSpec for it or "
+        "verify the visual's field reference matches the dataset's "
+        "projected column name."
+    )
 
 
 def _dim_sql(dim: Any) -> str:

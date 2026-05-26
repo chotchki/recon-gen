@@ -16,7 +16,38 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from recon_gen.common.dataset_contract import ColumnSpec, DatasetContract, Storage
 from recon_gen.common.html._visual_sql import wrap_for_visual
+
+
+# BH.24.6 — wrap_for_visual's `contract` arg is now required by
+# `_wants_cents_divide` whenever a currency=True Measure asks for
+# the /100 divide. These tests synthesize a CENTS-storage stub
+# contract for every column name they use in currency=True
+# Measures; non-currency tests can pass `contract=None` (the
+# `_wants_cents_divide` path doesn't fire without is_currency).
+_CENTS_CONTRACT = DatasetContract(columns=[
+    ColumnSpec(
+        name="amount_money", type="INTEGER",
+        currency=True, storage=Storage.CENTS,
+    ),
+    ColumnSpec(
+        name="abs_drift", type="INTEGER",
+        currency=True, storage=Storage.CENTS,
+    ),
+    ColumnSpec(
+        name="hop_amount", type="INTEGER",
+        currency=True, storage=Storage.CENTS,
+    ),
+    # Non-currency column for the count-currency=True nonsense test
+    # — kind="count" never divides regardless of storage, but
+    # _wants_cents_divide still gets called (and would raise on a
+    # missing column), so declare it.
+    ColumnSpec(
+        name="account_id", type="STRING",
+        # Not money, so storage irrelevant; default DOLLARS is fine.
+    ),
+])
 
 
 @dataclass
@@ -174,7 +205,7 @@ class TestCurrencyMeasureDividesByHundred:
                 currency=True,
             ),
         ])
-        wrapped = wrap_for_visual(_BASE, kpi)
+        wrapped = wrap_for_visual(_BASE, kpi, contract=_CENTS_CONTRACT)
         assert '(SUM("amount_money") / 100.0)' in wrapped
 
     def test_non_currency_sum_unchanged(self):
@@ -199,7 +230,7 @@ class TestCurrencyMeasureDividesByHundred:
                 currency=True,
             ),
         ])
-        wrapped = wrap_for_visual(_BASE, kpi)
+        wrapped = wrap_for_visual(_BASE, kpi, contract=_CENTS_CONTRACT)
         assert 'COUNT("account_id")' in wrapped
         assert "/ 100.0" not in wrapped
 
@@ -212,7 +243,7 @@ class TestCurrencyMeasureDividesByHundred:
                 currency=True,
             ),
         ])
-        wrapped = wrap_for_visual(_BASE, kpi)
+        wrapped = wrap_for_visual(_BASE, kpi, contract=_CENTS_CONTRACT)
         assert '(MAX("abs_drift") / 100.0)' in wrapped
 
     def test_sankey_weight_currency_divides(self):
@@ -228,5 +259,5 @@ class TestCurrencyMeasureDividesByHundred:
                 currency=True,
             ),
         )
-        wrapped = wrap_for_visual(_BASE, sankey)
+        wrapped = wrap_for_visual(_BASE, sankey, contract=_CENTS_CONTRACT)
         assert '(SUM("hop_amount") / 100.0)' in wrapped
