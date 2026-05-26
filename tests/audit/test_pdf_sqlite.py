@@ -49,6 +49,7 @@ from typing import Any
 
 import pytest
 
+from recon_gen.apps.l1_dashboard.app import _DRIFT_NAME, _OVERDRAFT_NAME
 from recon_gen.cli.audit import (
     _query_drift_violations,
     _query_executive_summary,
@@ -443,9 +444,9 @@ def test_executive_summary_query_runs_against_sqlite(
     # rows planted above all fall in-period; ledger_drift has one in-period
     # row. stuck_* are current-state (no date filter).
     counts = dict(summary.exception_counts)
-    assert counts["Drift"] == 2
+    assert counts[_DRIFT_NAME] == 2
     assert counts["Ledger drift"] == 1
-    assert counts["Overdraft"] == 1
+    assert counts[_OVERDRAFT_NAME] == 1
     # AB.1: 2 limit_breach rows planted (1 Outbound + 1 Inbound) — both
     # surface in the exec summary count.
     assert counts["Limit breach"] == 2
