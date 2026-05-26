@@ -30,7 +30,6 @@ Substep landmarks (each tab gets its own substep):
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Literal
 
 from recon_gen.apps.l2_flow_tracing.datasets import (
@@ -73,12 +72,12 @@ from recon_gen.common.sheets.app_info import (
 )
 from recon_gen.common.l2 import ThemePreset
 from recon_gen.common.theme import resolve_l2_theme
+from recon_gen.common.tree.actions import DrillWrite
 from recon_gen.common.tree import (
     Analysis,
     App,
     CalcField,
     CategoryFilter,
-    CellAccentText,
     Dataset,
     DateTimeParam,
     Drill,
@@ -436,68 +435,6 @@ _DATE_START_STATIC = "1900-01-01T00:00:00.000Z"
 _DATE_END_STATIC = "2099-12-31T23:59:59.999Z"
 
 
-def _populate_param_filter_dropdown(
-    *,
-    sheet: Sheet,
-    analysis: Analysis,
-    dataset: Dataset,
-    fg_id: FilterGroupId,
-    filter_id: str,
-    param_name: ParameterName,
-    col: str,
-    title: str,
-    all_values: list[str],
-    cross_dataset: Literal["SINGLE_DATASET", "ALL_DATASETS"] = "SINGLE_DATASET",
-) -> None:
-    """X.1.g — replacement for the FilterDropdown(empty CategoryFilter)
-    pattern that pre-X.1.g triggered QS's lazy
-    ``tenK-sample-values-V2`` fetch (the cold-CI 404 source).
-
-    Wires three things in lock-step:
-
-    1. A multi-valued ``StringParam`` whose default is the full list
-       of declared values (so "no narrowing" is the analyst's starting
-       state — every row matches because every value is selected).
-    2. A ``ParameterDropdown(MULTI_SELECT, StaticValues)`` that lets
-       the analyst deselect values to narrow.
-    3. A parameter-bound ``CategoryFilter`` scoped to ``sheet`` that
-       does ``column EQUALS pXxx`` (interpreted as IN-style for
-       multi-valued params).
-
-    ``all_values`` is closed-set: callers pass either an L2-derived
-    list (rail / chain / template names) or a hardcoded enum
-    (transaction status / bundle status / completion status). Either
-    way, the universe is bounded at deploy time → no runtime fetch.
-
-    ``cross_dataset`` defaults ``SINGLE_DATASET``; pass ``ALL_DATASETS``
-    when the parameter should narrow several joined datasets that share
-    the same column name (the Templates sheet's ``template_name`` /
-    ``completion_status`` filters across tt-instances + tt-legs).
-    """
-    p = analysis.add_parameter(StringParam(
-        name=param_name,
-        multi_valued=True,
-        default=list(all_values),
-    ))
-    fg = analysis.add_filter_group(FilterGroup(
-        filter_group_id=fg_id,
-        cross_dataset=cross_dataset,
-        filters=[CategoryFilter.with_parameter(
-            filter_id=filter_id,
-            dataset=dataset,
-            column=dataset[col],
-            parameter=p,
-        )],
-    ))
-    fg.scope_sheet(sheet)
-    sheet.add_parameter_dropdown(
-        parameter=p,
-        title=title,
-        type="MULTI_SELECT",
-        selectable_values=StaticValues(values=list(all_values)),
-    )
-
-
 def _populate_pushdown_dropdown(
     *,
     sheet: Sheet,
@@ -687,7 +624,7 @@ def _populate_rails_sheet(
         ],
     ))
     declared_keys = declared_metadata_keys(l2_instance)
-    key_dropdown = sheet.add_parameter_dropdown(
+    sheet.add_parameter_dropdown(
         parameter=p_meta_key,
         title="Metadata Key",
         type="SINGLE_SELECT",
@@ -850,7 +787,7 @@ def _populate_chains_sheet(
         ],
     ))
     declared_keys = declared_metadata_keys(l2_instance)
-    key_dropdown = sheet.add_parameter_dropdown(
+    sheet.add_parameter_dropdown(
         parameter=p_meta_key,
         title="Metadata Key",
         type="SINGLE_SELECT",
@@ -1017,7 +954,7 @@ def _populate_transfer_templates_sheet(
         ],
     ))
     declared_keys = declared_metadata_keys(l2_instance)
-    key_dropdown = sheet.add_parameter_dropdown(
+    sheet.add_parameter_dropdown(
         parameter=p_meta_key,
         title="Metadata Key",
         type="SINGLE_SELECT",
@@ -1192,7 +1129,7 @@ def _l2ft_drill(
     *,
     target_sheet: Sheet,
     name: str,
-    writes: list,
+    writes: list[DrillWrite],
     trigger: Literal["DATA_POINT_CLICK", "DATA_POINT_MENU"] = "DATA_POINT_MENU",
 ) -> Drill:
     """L2FT cross-sheet drill helper. Mirrors L1's `_l1_drill`: any
@@ -1350,36 +1287,6 @@ def _populate_l2_exceptions_sheet(
         TextBox(
             text_box_id="l2ft-hygiene-panel",
             content=rt.text_box(rt.markdown(l2ft_panel_markdown(sections))),
-        ),
-        width=36,
-    )
-
-
-def _populate_placeholder(
-    cfg: Config,
-    sheet: Sheet,
-    *,
-    title: str,
-    body: str,
-    substep: str,
-    text_box_id: str,
-    theme: ThemePreset,
-) -> None:
-    """Stub a placeholder sheet with the tab description + a 'lands at <substep>'
-    note. Removed when the substep populator replaces this call."""
-    accent = theme.accent
-    sheet.layout.row(height=8).add_text_box(
-        TextBox(
-            text_box_id=text_box_id,
-            content=rt.text_box(
-                rt.inline(title, font_size="24px", color=accent),
-                rt.BR, rt.BR,
-                rt.markdown(body),
-                rt.BR, rt.BR,
-                rt.markdown(
-                    f"(Skeleton at M.3.4 — visuals + datasets land at {substep}.)"
-                ),
-            ),
         ),
         width=36,
     )

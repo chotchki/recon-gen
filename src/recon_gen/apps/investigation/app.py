@@ -48,9 +48,7 @@ from recon_gen.apps.investigation.constants import (
 # ds["col"] ref in the visuals below. Without this, build_investigation_app()
 # would only work after some other module (CLI, test_investigation) had
 # loaded datasets first.
-from dataclasses import replace
-
-from recon_gen.apps.investigation import datasets as _register_contracts  # noqa: F401
+from recon_gen.apps.investigation import datasets as _register_contracts  # noqa: F401  # pyright: ignore[reportUnusedImport]: import-for-side-effect (register_contract calls)
 # N.3.f: Investigation reads the same default institution YAML as L1
 # (per the N.2 audit's "one institution YAML drives all apps" framing).
 # The default lives under apps/l1_dashboard/ for now because L1 was the
@@ -75,25 +73,17 @@ from recon_gen.common.theme import resolve_l2_theme
 from recon_gen.common.models import Analysis as ModelAnalysis
 from recon_gen.common.models import Dashboard as ModelDashboard
 from recon_gen.common.tree import (
-    KPI,
     Analysis,
     App,
-    BarChart,
     CategoryFilter,
-    Dashboard,
     Dataset,
     Drill,
     DrillParam,
-    FilterDateTimePicker,
     FilterGroup,
     IntegerParam,
     LinkedValues,
-    ParameterDropdown,
-    ParameterSlider,
-    Sankey,
     Sheet,
     StringParam,
-    Table,
     TextBox,
     TimeRangeFilter,
 )
@@ -957,7 +947,7 @@ def _build_account_network_sheet(
     # there's no longer a CalcField indirection.
     counterparty_dim = counterparty_display.dim()
     table_amount = ds_anet["hop_amount"].sum(currency=True)
-    table = sheet.layout.row(height=_TABLE_ROW_SPAN).add_table(
+    sheet.layout.row(height=_TABLE_ROW_SPAN).add_table(
         width=_FULL,
         title="Account Network — Touching Edges",
         subtitle=(
