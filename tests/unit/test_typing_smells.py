@@ -1564,6 +1564,167 @@ class NoTestSrcSqlDuplicationCheck(Check):
 
 
 # ---------------------------------------------------------------------------
+# Check: no-inline-production-constants  (BE.2, approach 3 of BE.0 spike)
+# ---------------------------------------------------------------------------
+
+
+# UPPER_SNAKE module-level constant name pattern. Matches both public
+# (``DRILL_RESET_SENTINEL_VALUE``) and private (``_DRIFT_NAME``)
+# styles — the spike confirmed src uses both. First-char allows the
+# optional leading underscore; rest is `[A-Z][A-Z0-9_]*`.
+_UPPER_SNAKE_RE = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
+
+
+def _collect_src_module_constants(
+    src_root: Path,
+) -> dict[str, tuple[Path, int, str]]:
+    """Index ``src_root``'s module-level UPPER_SNAKE string constants.
+
+    Walks every ``*.py`` under ``src_root`` and indexes top-level
+    assignments of the shape ``NAME = "value"`` where ``NAME`` is
+    UPPER_SNAKE (private leading-underscore allowed) and ``value``
+    is a plain string of length 3-200 (the spike's filter range —
+    too-short hits are false positives on tokens like "x"; too-long
+    cross into the SQL-duplication territory BE.1 already covers).
+
+    Returns ``{value: (file, lineno, name)}``. First occurrence
+    wins on collisions (rare — two src files assigning the same
+    UPPER_SNAKE value to different names is itself a code smell).
+    """
+    out: dict[str, tuple[Path, int, str]] = {}
+    for p in sorted(src_root.rglob("*.py")):
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        # Module-level only — class attributes + function-local
+        # constants don't apply (the spike scoped to module-level
+        # to keep the FP rate manageable). Walk tree.body, not
+        # ast.walk.
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            if len(node.targets) != 1:
+                continue
+            target = node.targets[0]
+            if not isinstance(target, ast.Name):
+                continue
+            if not _UPPER_SNAKE_RE.match(target.id):
+                continue
+            if not isinstance(node.value, ast.Constant):
+                continue
+            value = node.value.value
+            if not isinstance(value, str):
+                continue
+            if not (3 <= len(value) <= 200):
+                continue
+            out.setdefault(value, (p, node.lineno, target.id))
+    return out
+
+
+class _NoInlineProductionConstantsVisitor(ast.NodeVisitor):
+    """Walk ``ast.Assert`` nodes; flag string literals matching an
+    indexed src constant.
+
+    Why scoped to ``ast.Assert``: the lint's purpose is to catch
+    "test inlines a production constant in an assertion" — bare
+    string literals at module scope (test-fixture data, etc.) are
+    a different drift class. Asserts narrow to the high-signal
+    zone the spike measured.
+    """
+
+    def __init__(
+        self,
+        file: Path,
+        src_index: dict[str, tuple[Path, int, str]],
+    ) -> None:
+        self.file = file
+        self.src_index = src_index
+        self.smells: list[Smell] = []
+        # De-duplicate per-line: an assert with the same literal
+        # repeated (e.g. `assert x == "foo" or y == "foo"`) only
+        # surfaces ONE smell per line.
+        self._seen: set[tuple[int, str]] = set()
+
+    def _scan_for_literals(self, root: ast.AST) -> None:
+        for node in ast.walk(root):
+            if not (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+            ):
+                continue
+            hit = self.src_index.get(node.value)
+            if hit is None:
+                continue
+            key = (node.lineno, node.value)
+            if key in self._seen:
+                continue
+            self._seen.add(key)
+            src_file, src_lineno, src_name = hit
+            rel_src = src_file.relative_to(REPO_ROOT)
+            self.smells.append(Smell(
+                file=self.file,
+                lineno=node.lineno,
+                checker="no-inline-production-constants",
+                message=(
+                    f"string literal {node.value!r} matches "
+                    f"production constant ``{src_name}`` declared "
+                    f"at {rel_src}:{src_lineno} — import from src/ "
+                    f"so a rename in production fires the test "
+                    f"loudly (instead of leaving the test asserting "
+                    f"the stale value silently). Allowlist with "
+                    f"``# typing-smell: ignore[no-inline-production-"
+                    f"constants]: <why>`` for deliberate "
+                    f"contract-independence cases (rare)"
+                ),
+            ))
+
+    def visit_Assert(self, node: ast.Assert) -> None:
+        self._scan_for_literals(node.test)
+        if node.msg is not None:
+            self._scan_for_literals(node.msg)
+        # Don't generic_visit — nested asserts are vanishingly rare
+        # and walking them again risks double-counting. The walk in
+        # _scan_for_literals already descends into nested expressions.
+
+
+@dataclass
+class NoInlineProductionConstantsCheck(Check):
+    """BE.2, approach 3 of BE.0's spike — flag string literals inside
+    ``ast.Assert`` statements that match a known src/ UPPER_SNAKE
+    module-level constant. Catches the "test inlines a production
+    constant" drift class (sheet names, dataset IDs, sentinel
+    values, etc.) — a rename in src silently leaves the test
+    asserting the stale string.
+
+    **STAGED DISABLED in this commit** — the BE.0 spike measured 144
+    current hits across the corpus. Enabling now would red the whole
+    tree. BE.4 sweeps these into either imports (preferred, ~60),
+    allowlists with WHY (~40), or src refactors (~10). After BE.4's
+    sweep, the registration in ``_build_checks`` un-comments and the
+    lint enforces 0 hits going forward.
+
+    The planted-fixture smoke test invokes the Check directly so the
+    staged-disabled state doesn't degrade lint-stay-wired confidence.
+    """
+    src_root: Path = field(default_factory=lambda: REPO_ROOT / "src/recon_gen")
+    _src_index: dict[str, tuple[Path, int, str]] = field(
+        default_factory=dict, init=False, repr=False,
+    )
+
+    def _build_src_index(self) -> None:
+        if self._src_index:
+            return
+        self._src_index = _collect_src_module_constants(self.src_root)
+
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        self._build_src_index()
+        v = _NoInlineProductionConstantsVisitor(file, self._src_index)
+        v.visit(tree)
+        return v.smells
+
+
+# ---------------------------------------------------------------------------
 # Suppression filtering
 # ---------------------------------------------------------------------------
 
@@ -1949,6 +2110,29 @@ def _build_checks() -> list[Check]:
         #     ),
         #     files=_raw_temporal_scope,
         # ),
+        # BE.2 — STAGED DISABLED until BE.4's sweep clears the 144 hits
+        # the BE.0 spike measured. To enable: drop the ``# `` comment
+        # from the registration below. Enabling now would red the whole
+        # tree. BE.4 splits the 144 into (~60 migrate to imports, ~40
+        # allowlist with WHY, ~10 src refactor). The planted-fixture
+        # smoke test (``test_be_2_no_inline_production_constants_finds_
+        # planted_dup``) invokes the Check directly so this staged-
+        # disabled state doesn't degrade lint-stay-wired confidence.
+        # NoInlineProductionConstantsCheck(
+        #     name="no-inline-production-constants",
+        #     description=(
+        #         "string literal inside an ``assert`` in tests/ that "
+        #         "matches a module-level UPPER_SNAKE constant in "
+        #         "src/recon_gen/** — import the constant instead of "
+        #         "inlining the value, so a rename in production fires "
+        #         "the test loudly. Catches the provenance-drift class "
+        #         "(sheet names, dataset IDs, sentinel values). BE.0 "
+        #         "spike: 144 current hits. Allowlist via ``# typing-"
+        #         "smell: ignore[no-inline-production-constants]: "
+        #         "<why>`` for deliberate contract-independence cases."
+        #     ),
+        #     files=no_test_src_sql_dup_scope,
+        # ),
     ]
 
 
@@ -2050,4 +2234,70 @@ def test_be_1_no_test_src_sql_duplication_finds_planted_dup() -> None:
     assert "be_1_planted_src.py" in smell.message, (
         f"BE.1 smoke: expected the message to name the src-side "
         f"fixture, got {smell.message!r}"
+    )
+
+
+def test_be_2_no_inline_production_constants_finds_planted_dup() -> None:
+    """BE.0 D8 smoke test for ``no-inline-production-constants``.
+
+    Construct the check pointed at ``tests/unit/_fixtures/`` as the
+    src-side index source AND walk ``be_2_planted_test.py``; assert
+    it finds exactly the two planted inline duplicates (one for the
+    public constant, one for the private).
+
+    Critically the lint stays STAGED DISABLED in ``_build_checks()``
+    until BE.4's sweep — this smoke is the ONLY signal that the
+    visitor stays wired during the staged-disabled period. Without
+    it, an AST-walker regression could silently flip the visitor to
+    "always-empty" and we'd only catch it months later when
+    enabling.
+    """
+    fixtures_dir = REPO_ROOT / "tests/unit/_fixtures"
+    test_fixture = fixtures_dir / "be_2_planted_test.py"
+    src_fixture = fixtures_dir / "be_2_planted_src.py"
+    assert test_fixture.exists(), (
+        f"BE.2 smoke fixture missing: {test_fixture}"
+    )
+    assert src_fixture.exists(), (
+        f"BE.2 smoke fixture missing: {src_fixture}"
+    )
+
+    check = NoInlineProductionConstantsCheck(
+        name="no-inline-production-constants",
+        description="smoke-test instance",
+        files=[test_fixture],
+        src_root=fixtures_dir,
+    )
+    src = test_fixture.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    smells = list(check.find_smells(src, tree, test_fixture))
+
+    # 4 hits expected: 2 per function (the actual value + the
+    # equality-comparison RHS), times 2 functions. The dedup-by-line
+    # filter only suppresses repeated literals on the SAME line — the
+    # assignment + assert on different lines both surface.
+    #
+    # Actually 4 is overly conservative; the function body is:
+    #   actual = "be_2_planted_sentinel_value"      # line N
+    #   assert actual == "be_2_planted_sentinel_value", "..."  # line N+1
+    # Only the assert's literal is inside an Assert node; the
+    # assignment's literal is at function scope, not under an Assert.
+    # So 1 hit per function, 2 functions = 2 hits.
+    assert len(smells) == 2, (
+        f"BE.2 smoke expected exactly 2 hits on the planted fixture "
+        f"(one per planted-inline assert); got {len(smells)}: "
+        f"{[(s.lineno, s.message[:60]) for s in smells]!r}. Either "
+        f"the Assert-walker regressed, the UPPER_SNAKE name regex "
+        f"changed, or the constant-value index lookup broke."
+    )
+    checkers = {s.checker for s in smells}
+    assert checkers == {"no-inline-production-constants"}, checkers
+    messages = " ".join(s.message for s in smells)
+    assert "PLANTED_PROD_CONSTANT" in messages, (
+        f"BE.2 smoke: expected the public planted constant name "
+        f"in some smell message; got {messages!r}"
+    )
+    assert "_PLANTED_PRIVATE_PROD_CONSTANT" in messages, (
+        f"BE.2 smoke: expected the private planted constant name "
+        f"in some smell message; got {messages!r}"
     )
