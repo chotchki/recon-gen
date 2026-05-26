@@ -379,6 +379,7 @@ def seeded_audit(dialect_cfg, tmp_path_factory):
 @pytest.fixture
 def per_dialect_qs_driver(
     request,
+    per_dialect_cfg,
     per_dialect_region,
     per_dialect_account_id,
     per_dialect_l1_dashboard_id,
@@ -435,6 +436,7 @@ def per_dialect_qs_driver(
 
     with qs_driver_or_none(
         request,
+        cfg=per_dialect_cfg,
         account_id=per_dialect_account_id,
         region=per_dialect_region,
         viewport=(1600, 4000),
@@ -516,6 +518,7 @@ def per_dialect_app2_results(per_dialect_cfg, seeded_audit):  # type: ignore[no-
     )
     results: dict[str, dict[str, object]] = {}
     with App2Driver.serving(
+        cfg=per_dialect_cfg,
         tree_app=tree_app, sheet=tree_app.analysis.sheets[0],
         data_fetcher=visual_fetcher, options_fetcher=options_fetcher,
         dashboard_id="l1", dashboard_title="L1 Dashboard",

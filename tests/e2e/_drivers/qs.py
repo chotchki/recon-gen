@@ -43,7 +43,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from tests.e2e._drivers.base import rekey_by_columns
+from recon_gen.common.config import Config
+from recon_gen.common.models import DatasetParameter
+from tests.e2e._drivers.base import query_db_via_cfg, rekey_by_columns
 
 from recon_gen.common.browser.helpers import (
     bump_table_page_size_to_10000,
@@ -304,6 +306,7 @@ class QsEmbedDriver:
         self,
         *,
         page: Any,
+        cfg: Config,
         aws_account_id: str,
         aws_region: str,
         user_arn: str | None = None,
@@ -311,6 +314,7 @@ class QsEmbedDriver:
         visual_timeout_ms: int = _DEFAULT_VISUAL_TIMEOUT_MS,
     ) -> None:
         self._page = page
+        self._cfg = cfg
         self._account_id = aws_account_id
         self._region = aws_region
         self._user_arn = user_arn
@@ -338,6 +342,7 @@ class QsEmbedDriver:
     def embed(
         cls,
         *,
+        cfg: Config,
         aws_account_id: str,
         aws_region: str,
         user_arn: str | None = None,
@@ -361,6 +366,7 @@ class QsEmbedDriver:
         with webkit_page(headless=headless, viewport=viewport) as page:
             yield cls(
                 page=page,
+                cfg=cfg,
                 aws_account_id=aws_account_id,
                 aws_region=aws_region,
                 user_arn=user_arn,
@@ -605,6 +611,17 @@ class QsEmbedDriver:
             return read_kpi_value(self._page, visual_title)
         except AssertionError:
             return None
+
+    def query_db(
+        self,
+        sql: str,
+        *,
+        binds: Mapping[str, str] | None = None,
+        dataset_parameters: Sequence[DatasetParameter] = (),
+    ) -> list[dict[str, Any]]:  # typing-smell: ignore[explicit-any]: ground-truth row dicts; same justification as the Protocol method
+        return query_db_via_cfg(
+            self._cfg, sql, binds=binds, dataset_parameters=dataset_parameters,
+        )
 
     # -- writes ----------------------------------------------------------
 

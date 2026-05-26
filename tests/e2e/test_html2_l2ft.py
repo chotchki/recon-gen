@@ -94,6 +94,7 @@ def l2ft_driver() -> Iterator[App2Driver]:
     assert tree_app.analysis is not None
     landing_sheet = tree_app.analysis.sheets[0]  # Getting Started
     with App2Driver.serving(
+        cfg=_TEST_CFG,
         tree_app=tree_app, sheet=landing_sheet,
         data_fetcher=_l2ft_stub_fetcher,
         dashboard_id=_DASHBOARD_ID,

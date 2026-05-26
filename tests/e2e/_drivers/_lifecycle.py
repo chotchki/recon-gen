@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 from tests.e2e._capture import maybe_capture_on_failure
 
 if TYPE_CHECKING:
+    from recon_gen.common.config import Config
     from tests.e2e._drivers.qs import QsEmbedDriver
 
 
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
 def qs_driver_or_none(
     request,  # type: ignore[no-untyped-def]: pytest FixtureRequest — Untyped Any cascade if annotated
     *,
+    cfg: "Config",
     account_id: str,
     region: str,
     viewport: tuple[int, int] = (1600, 1000),
@@ -79,6 +81,7 @@ def qs_driver_or_none(
         yield None
         return
     with QsEmbedDriver.embed(
+        cfg=cfg,
         aws_account_id=account_id, aws_region=region, viewport=viewport,
     ) as driver:
         try:

@@ -28,7 +28,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
+
+from recon_gen.common.config import Config
+from recon_gen.common.db import connect_demo_db
+from recon_gen.common.html._sql_executor import execute_visual_sql
+from recon_gen.common.models import DatasetParameter
 
 
 def _title_case_header(sql_column: str) -> str:
@@ -83,6 +88,43 @@ def rekey_by_columns(
             )
         out.append(projected)
     return out
+
+
+def query_db_via_cfg(
+    cfg: Config,
+    sql: str,
+    *,
+    binds: Mapping[str, str] | None = None,
+    dataset_parameters: Sequence[DatasetParameter] = (),
+) -> list[dict[str, Any]]:  # typing-smell: ignore[explicit-any]: cell values are heterogeneous per-column — coercion happens at the assert site
+    """BG.1 — ground-truth direct-SQL helper shared by both
+    ``DashboardDriver`` impls. Runs ``sql`` against ``cfg.demo_database_url``
+    (the same DB the deployed dashboard reads), with ``binds`` substituted
+    via the same ``_sql_executor`` pipeline App2 uses, and returns rows
+    as ``{column: value}`` dicts.
+
+    Why a shared helper, not per-driver impl: identity assertions
+    (``rendered_kpi == query_db(sql, binds=…)``) compare against ONE
+    ground truth. Differences between QS and App2 must be wire-shape
+    differences, not different SQL paths to the same answer.
+
+    ``binds`` keys map to App2's URL convention (``param_<name>`` for
+    QS ``<<$pName>>`` placeholders; ``date_from`` / ``date_to`` for the
+    universal date filter; ``filter_<col>`` for ``IN``-list narrows).
+    ``execute_visual_sql`` translates ``<<$pName>>`` → ``:param_pName``
+    + applies ``dataset_parameters`` defaults for unsupplied ones.
+    """
+    url_params: dict[str, list[str]] = {
+        key: [value] for key, value in (binds or {}).items()
+    }
+    rows, columns = execute_visual_sql(
+        lambda: connect_demo_db(cfg),
+        sql,
+        url_params,
+        dialect=cfg.dialect,
+        dataset_parameters=list(dataset_parameters),
+    )
+    return [dict(zip(columns, row, strict=True)) for row in rows]
 
 
 class DashboardDriver(Protocol):
@@ -200,6 +242,32 @@ class DashboardDriver(Protocol):
     def kpi_value(self, visual_title: str) -> str | None:
         """The headline value text of a KPI visual, or ``None`` if the
         named visual isn't a KPI / has no value rendered yet."""
+        ...
+
+    def query_db(
+        self,
+        sql: str,
+        *,
+        binds: Mapping[str, str] | None = None,
+        dataset_parameters: Sequence[DatasetParameter] = (),
+    ) -> list[dict[str, Any]]:  # typing-smell: ignore[explicit-any]: heterogeneous cell values — same justification as ``query_db_via_cfg``
+        """BG.1 — direct-SQL ground truth for honest-gate assertions.
+
+        Runs ``sql`` against the same DB the deployed dashboard reads
+        (``cfg.demo_database_url`` stored on the driver at factory time),
+        with ``binds`` substituted via the same ``_sql_executor``
+        pipeline App2 uses, and returns rows as ``{column: value}``
+        dicts. Both impls delegate to the shared
+        ``query_db_via_cfg`` helper so the QS and App2 legs of an
+        identity assertion compare against ONE ground truth — wire-shape
+        differences are real bugs, not "two SQL paths produced two
+        answers."
+
+        ``binds`` keys: ``param_<name>`` for QS ``<<$pName>>``
+        placeholders, ``date_from`` / ``date_to`` for the universal
+        date filter, ``filter_<col>`` for ``IN``-list narrows. Mirror
+        the App2 URL contract.
+        """
         ...
 
     # -- writes ----------------------------------------------------------

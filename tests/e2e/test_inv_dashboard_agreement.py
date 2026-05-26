@@ -283,6 +283,7 @@ def per_l2_app2_results(cfg, inv_app, seeded_l2_db):  # type: ignore[no-untyped-
     )
     results: dict[str, dict[str, object]] = {}
     with App2Driver.serving(
+        cfg=cfg,
         tree_app=inv_app, sheet=inv_app.analysis.sheets[0],
         data_fetcher=visual_fetcher, options_fetcher=options_fetcher,
         dashboard_id="inv", dashboard_title="Investigation (live)",
@@ -341,7 +342,7 @@ def qs_inv_driver(request, cfg, region, account_id, inv_dashboard_id, inv_app): 
     from tests.e2e._drivers._lifecycle import qs_driver_or_none
 
     with qs_driver_or_none(
-        request, account_id=account_id, region=region,
+        request, cfg=cfg, account_id=account_id, region=region,
         viewport=(1600, 3000),
     ) as driver:
         yield driver  # may be None if get_user_arn failed

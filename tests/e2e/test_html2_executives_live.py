@@ -136,6 +136,7 @@ def live_db_exec_driver(cfg: Any) -> Iterator[_LiveDriver]:
     )
     primary_sheet = tree_app.analysis.sheets[0]
     with App2Driver.serving(
+        cfg=cfg,
         tree_app=tree_app, sheet=primary_sheet,
         data_fetcher=fetcher,
         dashboard_id=_DASHBOARD_ID,

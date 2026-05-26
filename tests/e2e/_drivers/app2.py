@@ -59,9 +59,10 @@ from recon_gen.common.html._smoke_app import (
 from recon_gen.common.html._tree_fetcher import OptionsFetcher
 from recon_gen.common.html.render import FilterSpec
 from recon_gen.common.html.server import DataFetcher
+from recon_gen.common.models import DatasetParameter
 from recon_gen.common.tree.structure import App, Sheet
 from tests._test_helpers import make_test_config
-from tests.e2e._drivers.base import rekey_by_columns
+from tests.e2e._drivers.base import query_db_via_cfg, rekey_by_columns
 from tests.e2e._harness_html2 import html2_server
 
 
@@ -83,10 +84,12 @@ class App2Driver:
 
     def __init__(
         self, *, base_url: str, page: Any,
+        cfg: Config,
         sheet_id_by_name: Mapping[str, str],
     ) -> None:
         self._base = base_url.rstrip("/")
         self._page = page
+        self._cfg = cfg
         # name → SheetId, from the served tree. The protocol's `sheet`
         # arg (open/goto_sheet) is a sheet *name* (matches the QS impl,
         # which matches tab text); App2's route segment is the SheetId,
@@ -106,6 +109,7 @@ class App2Driver:
         cfg = cfg or make_test_config()
         tree_app, sheet = build_smoke_app(cfg)
         with cls.serving(
+            cfg=cfg,
             tree_app=tree_app, sheet=sheet,
             data_fetcher=stub_money_trail_fetcher,
             dashboard_id="smoke", dashboard_title="Smoke",
@@ -117,6 +121,7 @@ class App2Driver:
     @contextlib.contextmanager
     def serving(
         cls, *,
+        cfg: Config,
         tree_app: App,
         sheet: Sheet,
         data_fetcher: DataFetcher,
@@ -160,7 +165,8 @@ class App2Driver:
             dev_log=dev_log,
         ) as url, webkit_page() as page:
             yield cls(
-                base_url=url, page=page, sheet_id_by_name=sheet_id_by_name,
+                base_url=url, page=page, cfg=cfg,
+                sheet_id_by_name=sheet_id_by_name,
             )
 
     # -- raw access (escape hatch for App2-internal assertions) ---------
@@ -436,6 +442,17 @@ class App2Driver:
         if loc.count() == 0:
             return None
         return loc.inner_text().strip()
+
+    def query_db(
+        self,
+        sql: str,
+        *,
+        binds: Mapping[str, str] | None = None,
+        dataset_parameters: Sequence[DatasetParameter] = (),
+    ) -> list[dict[str, Any]]:  # typing-smell: ignore[explicit-any]: ground-truth row dicts; same justification as the Protocol method
+        return query_db_via_cfg(
+            self._cfg, sql, binds=binds, dataset_parameters=dataset_parameters,
+        )
 
     # -- writes ----------------------------------------------------------
 

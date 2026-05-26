@@ -144,7 +144,7 @@ def qs_driver(request, cfg, region, account_id):  # type: ignore[no-untyped-def]
     from tests.e2e._drivers._lifecycle import qs_driver_or_none
 
     with qs_driver_or_none(
-        request, account_id=account_id, region=region,
+        request, cfg=cfg, account_id=account_id, region=region,
     ) as driver:
         if driver is None:
             pytest.skip("RECON_E2E_USER_ARN unavailable — cannot derive QS user ARN")
@@ -535,7 +535,7 @@ def _parametrized_dashboard_driver(  # type: ignore[no-untyped-def]: return-type
         # the [qs, app2] parametrize already covers the App2 leg
         # separately; the qs branch needs a real QS embed.
         with qs_driver_or_none(
-            request, account_id=account_id, region=region,
+            request, cfg=cfg, account_id=account_id, region=region,
         ) as driver:
             if driver is None:
                 pytest.skip("RECON_E2E_USER_ARN unavailable — cannot derive QS user ARN")
@@ -554,6 +554,7 @@ def _parametrized_dashboard_driver(  # type: ignore[no-untyped-def]: return-type
             tree_app=app, cfg=cfg,
         )
         with App2Driver.serving(
+            cfg=cfg,
             tree_app=app, sheet=app.analysis.sheets[0],
             data_fetcher=data_fetcher, options_fetcher=options_fetcher,
             dashboard_id=short, dashboard_title=f"{short} (live)",
