@@ -12,6 +12,8 @@ constraint matters.
 
 from __future__ import annotations
 
+from typing import Protocol
+
 import pytest
 
 from recon_gen.apps.executives.app import build_executives_app
@@ -20,12 +22,19 @@ from recon_gen.apps.l1_dashboard.app import build_l1_dashboard_app
 from recon_gen.apps.l2_flow_tracing.app import (
     build_l2_flow_tracing_app,
 )
+from recon_gen.common.config import Config
+from recon_gen.common.tree import App
 from tests._test_helpers import make_test_config
 from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_NAME,
     DS_APP_INFO_LIVENESS,
     DS_APP_INFO_MATVIEWS,
 )
+
+
+class _AppBuilder(Protocol):
+    def __call__(self, cfg: Config) -> App: ...
+    __name__: str
 
 
 _CFG = make_test_config(aws_region="us-east-2")
@@ -40,7 +49,7 @@ SHIPPED_APP_BUILDERS = [
 
 
 @pytest.mark.parametrize("builder", SHIPPED_APP_BUILDERS)
-def test_last_sheet_is_app_info(builder):
+def test_last_sheet_is_app_info(builder: _AppBuilder) -> None:
     """The last sheet on every shipped app must be the "i" canary.
 
     Diagnostic value: when a sheet renders blank in QS, the operator
@@ -49,6 +58,7 @@ def test_last_sheet_is_app_info(builder):
     broken (the CLAUDE.md spinner-forever footgun).
     """
     app = builder(_CFG)
+    assert app.analysis is not None, f"{app.name} has no analysis"
     sheets = app.analysis.sheets
     assert sheets[-1].name == APP_INFO_SHEET_NAME, (
         f"{app.name}'s last sheet is {sheets[-1].name!r}, not "
@@ -58,11 +68,12 @@ def test_last_sheet_is_app_info(builder):
 
 
 @pytest.mark.parametrize("builder", SHIPPED_APP_BUILDERS)
-def test_app_info_sheet_carries_liveness_kpi(builder):
+def test_app_info_sheet_carries_liveness_kpi(builder: _AppBuilder) -> None:
     """The "i" sheet must contain a KPI sourced from the liveness
     dataset — that's what makes it a meaningful diagnostic canary
     rather than just a label."""
     app = builder(_CFG)
+    assert app.analysis is not None, f"{app.name} has no analysis"
     info_sheet = app.analysis.sheets[-1]
     visual_kinds = {type(v).__name__ for v in info_sheet.visuals}
     assert "KPI" in visual_kinds, (
@@ -80,7 +91,7 @@ def test_app_info_sheet_carries_liveness_kpi(builder):
 
 
 @pytest.mark.parametrize("builder", SHIPPED_APP_BUILDERS)
-def test_app_info_datasets_declared(builder):
+def test_app_info_datasets_declared(builder: _AppBuilder) -> None:
     """Both App Info datasets (liveness + matview status) must be
     declared on the App so deploy ships them."""
     app = builder(_CFG)
@@ -95,7 +106,7 @@ def test_app_info_datasets_declared(builder):
     )
 
 
-def test_liveness_sql_resolves_per_dialect():
+def test_liveness_sql_resolves_per_dialect() -> None:
     """P.9c: the Liveness KPI's SQL is dialect-aware.
 
     Postgres branch queries ``information_schema.tables`` (Postgres
@@ -126,7 +137,7 @@ def test_liveness_sql_resolves_per_dialect():
     )
 
 
-def test_matview_status_sql_omits_postgres_only_casts():
+def test_matview_status_sql_omits_postgres_only_casts() -> None:
     """P.9c: the Matview Status SQL has no ``::text`` / ``::integer``
     casts. The column types are pinned by ``MATVIEW_STATUS_CONTRACT``,
     so the casts were no-ops on Postgres and silently broke the
@@ -154,7 +165,7 @@ def test_matview_status_sql_omits_postgres_only_casts():
 
 
 @pytest.mark.parametrize("builder", SHIPPED_APP_BUILDERS)
-def test_app_info_deploy_stamp_reads_dialect_and_prefix_from_cfg(builder):
+def test_app_info_deploy_stamp_reads_dialect_and_prefix_from_cfg(builder: _AppBuilder) -> None:
     """AO.C1 lock — the App Info deploy-stamp TextBox must render
     ``dialect: <cfg.dialect>`` + ``prefix: <cfg.deployment_name>``,
     NOT the literals "sqlite" / "dev" / any other hardcoded value.
@@ -183,6 +194,8 @@ def test_app_info_deploy_stamp_reads_dialect_and_prefix_from_cfg(builder):
         app = builder(cfg)
         analysis = app.emit_analysis()
         # Find the App Info sheet ("i") and pull its deploy-stamp text box.
+        assert analysis.Definition is not None, "analysis missing Definition"
+        assert analysis.Definition.Sheets is not None, "analysis missing Sheets"
         info_sheet = next(
             s for s in analysis.Definition.Sheets
             if s.Name == APP_INFO_SHEET_NAME
@@ -212,7 +225,7 @@ def test_app_info_deploy_stamp_reads_dialect_and_prefix_from_cfg(builder):
         )
 
 
-def test_no_two_apps_share_an_app_info_data_set_id():
+def test_no_two_apps_share_an_app_info_data_set_id() -> None:
     """Each shipped app's App Info datasets carry a per-app segment in
     their AWS DataSetId so deploying app A doesn't delete-then-create
     app B's App Info dataset out from under it (M.4.4.7).

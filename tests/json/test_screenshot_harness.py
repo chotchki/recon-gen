@@ -33,26 +33,26 @@ def _empty_app() -> App:
 
 
 class TestConstruction:
-    def test_creates_output_dir(self, tmp_path):
+    def test_creates_output_dir(self, tmp_path: Path) -> None:
         out = tmp_path / "screenshots"
         assert not out.exists()
         ScreenshotHarness(_empty_app(), page=MagicMock(), output_dir=out)
         assert out.exists()
 
-    def test_existing_output_dir_ok(self, tmp_path):
+    def test_existing_output_dir_ok(self, tmp_path: Path) -> None:
         out = tmp_path / "screenshots"
         out.mkdir()
         # No exception on double-create
         ScreenshotHarness(_empty_app(), page=MagicMock(), output_dir=out)
 
-    def test_no_analysis_capture_all_sheets_raises(self, tmp_path):
+    def test_no_analysis_capture_all_sheets_raises(self, tmp_path: Path) -> None:
         h = ScreenshotHarness(
             _empty_app(), page=MagicMock(), output_dir=tmp_path,
         )
         with pytest.raises(ValueError, match="has no Analysis"):
             h.capture_all_sheets()
 
-    def test_capture_with_state_requires_embed_url(self, tmp_path):
+    def test_capture_with_state_requires_embed_url(self, tmp_path: Path) -> None:
         app = _empty_app()
         app.set_analysis(Analysis(analysis_id_suffix="t", name="T"))
         h = ScreenshotHarness(
@@ -63,19 +63,19 @@ class TestConstruction:
 
 
 class TestSafeIdSanitization:
-    def test_passes_through_kebab_case(self, tmp_path):
+    def test_passes_through_kebab_case(self, tmp_path: Path) -> None:
         h = ScreenshotHarness(
             _empty_app(), page=MagicMock(), output_dir=tmp_path,
         )
         assert h._safe_id("inv-sheet-account-network") == "inv-sheet-account-network"
 
-    def test_replaces_slashes(self, tmp_path):
+    def test_replaces_slashes(self, tmp_path: Path) -> None:
         h = ScreenshotHarness(
             _empty_app(), page=MagicMock(), output_dir=tmp_path,
         )
         assert h._safe_id("foo/bar") == "foo_bar"
 
-    def test_replaces_colons(self, tmp_path):
+    def test_replaces_colons(self, tmp_path: Path) -> None:
         h = ScreenshotHarness(
             _empty_app(), page=MagicMock(), output_dir=tmp_path,
         )
@@ -97,7 +97,7 @@ class TestCaptureWithStateUrlConstruction:
     def _require_playwright(self) -> None:
         pytest.importorskip("playwright")
 
-    def test_url_fragment_built_from_parameter_object_refs(self, tmp_path):
+    def test_url_fragment_built_from_parameter_object_refs(self, tmp_path: Path) -> None:
         app = _empty_app()
         analysis = app.set_analysis(Analysis(
             analysis_id_suffix="t", name="T",
@@ -121,7 +121,7 @@ class TestCaptureWithStateUrlConstruction:
         assert url.startswith("https://test.example/dashboard#")
         assert "p.pSigma=99" in url
 
-    def test_url_value_is_url_encoded(self, tmp_path):
+    def test_url_value_is_url_encoded(self, tmp_path: Path) -> None:
         app = _empty_app()
         analysis = app.set_analysis(Analysis(
             analysis_id_suffix="t", name="T",
