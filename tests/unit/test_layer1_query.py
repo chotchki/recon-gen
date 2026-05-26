@@ -60,7 +60,7 @@ class _FakeConn:
 
 
 @pytest.fixture
-def db():
+def db() -> _FakeConn:
     conn = sqlite3.connect(":memory:")
     conn.execute(
         "CREATE TABLE drift (account_id TEXT, business_day DATE, magnitude REAL)"
@@ -77,19 +77,19 @@ def db():
     return _FakeConn(conn)
 
 
-def test_query_matview_rows_unfiltered(db) -> None:
+def test_query_matview_rows_unfiltered(db: _FakeConn) -> None:
     rows = _LAYER1.query_matview_rows(db, "drift")
     assert len(rows) == 3
 
 
-def test_query_matview_rows_with_where(db) -> None:
+def test_query_matview_rows_with_where(db: _FakeConn) -> None:
     rows = _LAYER1.query_matview_rows(
         db, "drift", {"account_id": "cust-0001-snb"},
     )
     assert len(rows) == 2
 
 
-def test_query_matview_rows_with_columns_and_limit(db) -> None:
+def test_query_matview_rows_with_columns_and_limit(db: _FakeConn) -> None:
     rows = _LAYER1.query_matview_rows(
         db, "drift", columns=["account_id", "magnitude"], limit=2,
     )
@@ -136,31 +136,31 @@ def test_oracle_limit_branch_renders_fetch_first() -> None:
     assert "LIMIT" not in received["sql"]
 
 
-def test_matview_row_count_unfiltered(db) -> None:
+def test_matview_row_count_unfiltered(db: _FakeConn) -> None:
     assert _LAYER1.matview_row_count(db, "drift") == 3
 
 
-def test_matview_row_count_with_where(db) -> None:
+def test_matview_row_count_with_where(db: _FakeConn) -> None:
     assert _LAYER1.matview_row_count(
         db, "drift", {"account_id": "cust-0001-snb"},
     ) == 2
 
 
-def test_assert_matview_has_row_passes(db) -> None:
+def test_assert_matview_has_row_passes(db: _FakeConn) -> None:
     # Shouldn't raise.
     _LAYER1.assert_matview_has_row(
         db, "drift", {"account_id": "cust-0001-snb"},
     )
 
 
-def test_assert_matview_has_row_raises_with_total_count_in_message(db) -> None:
+def test_assert_matview_has_row_raises_with_total_count_in_message(db: _FakeConn) -> None:
     with pytest.raises(AssertionError, match=r"Total rows in matview: 3"):
         _LAYER1.assert_matview_has_row(
             db, "drift", {"account_id": "nope"},
         )
 
 
-def test_assert_matview_has_row_distinguishes_empty_vs_drift(db) -> None:
+def test_assert_matview_has_row_distinguishes_empty_vs_drift(db: _FakeConn) -> None:
     """Error message branches on total — 0 → seed regression; >0 →
     column / filter drift. Helps the diagnostic ladder."""
     # Empty matview path (different table).
@@ -178,7 +178,7 @@ def test_assert_matview_has_row_distinguishes_empty_vs_drift(db) -> None:
         )
 
 
-def test_assert_matview_has_row_carries_context(db) -> None:
+def test_assert_matview_has_row_carries_context(db: _FakeConn) -> None:
     with pytest.raises(AssertionError, match=r"^test_x_drill"):
         _LAYER1.assert_matview_has_row(
             db, "drift", {"account_id": "ghost"},
@@ -186,16 +186,16 @@ def test_assert_matview_has_row_carries_context(db) -> None:
         )
 
 
-def test_assert_account_in_matview_passes(db) -> None:
+def test_assert_account_in_matview_passes(db: _FakeConn) -> None:
     _LAYER1.assert_account_in_matview(db, "drift", "cust-0001-snb")
 
 
-def test_assert_account_in_matview_raises(db) -> None:
+def test_assert_account_in_matview_raises(db: _FakeConn) -> None:
     with pytest.raises(AssertionError, match=r"Layer 1 miss"):
         _LAYER1.assert_account_in_matview(db, "drift", "ghost-acct")
 
 
-def test_multiple_where_clauses_and_joined(db) -> None:
+def test_multiple_where_clauses_and_joined(db: _FakeConn) -> None:
     """AND-joining multiple where keys is the most common shape —
     (account_id, business_day) pair queries on per-day matviews."""
     matched = _LAYER1.matview_row_count(
@@ -205,7 +205,7 @@ def test_multiple_where_clauses_and_joined(db) -> None:
     assert matched == 1
 
 
-def test_oracle_placeholder_branch_translates(db) -> None:
+def test_oracle_placeholder_branch_translates(db: _FakeConn) -> None:
     """Smoke that the Oracle branch yields :1/:2/... that the fake
     cursor translates to ? and produces the same row set."""
     from recon_gen.common.sql.dialect import Dialect

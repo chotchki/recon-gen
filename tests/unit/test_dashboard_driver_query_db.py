@@ -30,6 +30,7 @@ import os
 import sqlite3
 import tempfile
 from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -42,9 +43,12 @@ from recon_gen.common.sql.dialect import Dialect
 from tests._test_helpers import make_test_config
 from tests.e2e._drivers.base import query_db_via_cfg
 
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config
+
 
 @pytest.fixture
-def sqlite_cfg() -> Iterator[object]:
+def sqlite_cfg() -> Iterator["Config"]:
     """Spin up a tiny SQLite-backed cfg with one table. ``query_db_via_cfg``
     opens / closes the connection per call, so the test fixture only needs
     to plant the data + return the cfg."""
@@ -75,7 +79,7 @@ def sqlite_cfg() -> Iterator[object]:
         os.unlink(path)
 
 
-def test_query_db_returns_rows_as_column_keyed_dicts(sqlite_cfg) -> None:  # type: ignore[no-untyped-def]: sqlite_cfg fixture yields a recon-gen Config; annotation would force the import
+def test_query_db_returns_rows_as_column_keyed_dicts(sqlite_cfg: "Config") -> None:
     rows = query_db_via_cfg(
         sqlite_cfg,
         "SELECT account_id, balance FROM accounts ORDER BY account_id",
@@ -87,7 +91,7 @@ def test_query_db_returns_rows_as_column_keyed_dicts(sqlite_cfg) -> None:  # typ
     ]
 
 
-def test_query_db_with_named_binds_narrows_result(sqlite_cfg) -> None:  # type: ignore[no-untyped-def]: sqlite_cfg fixture yields a Config — annotating would force the import here
+def test_query_db_with_named_binds_narrows_result(sqlite_cfg: "Config") -> None:
     """The App2 URL contract: ``:name`` placeholders bind from the
     ``binds`` dict directly. Picker-derived test code drives this shape."""
     rows = query_db_via_cfg(
@@ -102,7 +106,7 @@ def test_query_db_with_named_binds_narrows_result(sqlite_cfg) -> None:  # type: 
     ]
 
 
-def test_query_db_translates_qs_dataset_params_to_binds(sqlite_cfg) -> None:  # type: ignore[no-untyped-def]: sqlite_cfg fixture yields a Config — annotating would force the import here
+def test_query_db_translates_qs_dataset_params_to_binds(sqlite_cfg: "Config") -> None:
     """Y.1.e — the production datasets carry ``<<$pName>>`` literals
     (QS's substitution shape). The shared helper translates → binds via
     the same pipeline App2 uses, so the SAME SQL string the deployed
@@ -119,7 +123,7 @@ def test_query_db_translates_qs_dataset_params_to_binds(sqlite_cfg) -> None:  # 
     assert rows == [{"account_id": "acc-3"}]
 
 
-def test_query_db_unsupplied_param_falls_back_to_dataset_default(sqlite_cfg) -> None:  # type: ignore[no-untyped-def]: sqlite_cfg fixture yields a Config — annotating would force the import here
+def test_query_db_unsupplied_param_falls_back_to_dataset_default(sqlite_cfg: "Config") -> None:
     """Y.2.app2.cde — when ``binds`` doesn't supply a ``param_<name>``
     referenced in the SQL, the matching ``dataset_parameters`` default
     substitutes inline (same as App2's initial-page-load behavior +

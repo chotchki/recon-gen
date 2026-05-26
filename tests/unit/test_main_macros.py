@@ -10,11 +10,15 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from recon_gen.common.l2 import load_instance
 from recon_gen.main import _apply_l2_theme_css
+
+if TYPE_CHECKING:
+    from recon_gen.common.l2 import ThemePreset
 
 
 _SPEC_EXAMPLE = (
@@ -24,7 +28,7 @@ _SPEC_EXAMPLE = (
 
 
 @pytest.fixture
-def spec_example_theme():
+def spec_example_theme() -> "ThemePreset":
     """Load the bundled spec_example L2 — its ``theme:`` block is the
     canonical test fixture for the docs theming code path."""
     inst = load_instance(_SPEC_EXAMPLE)
@@ -33,7 +37,7 @@ def spec_example_theme():
 
 
 def test_writes_css_with_l2_accent_palette(
-    tmp_path: Path, spec_example_theme,
+    tmp_path: Path, spec_example_theme: "ThemePreset",
 ) -> None:
     extra_css: list[object] = []
     _apply_l2_theme_css(
@@ -56,7 +60,7 @@ def test_writes_css_with_l2_accent_palette(
 
 
 def test_registers_css_in_extra_css(
-    tmp_path: Path, spec_example_theme,
+    tmp_path: Path, spec_example_theme: "ThemePreset",
 ) -> None:
     extra_css: list[object] = []
     _apply_l2_theme_css(
@@ -66,7 +70,7 @@ def test_registers_css_in_extra_css(
 
 
 def test_idempotent_on_repeat_apply(
-    tmp_path: Path, spec_example_theme,
+    tmp_path: Path, spec_example_theme: "ThemePreset",
 ) -> None:
     """Calling twice (e.g. mkdocs serve auto-reload) must not double-
     register the stylesheet — Material would load it twice and the
@@ -83,7 +87,7 @@ def test_idempotent_on_repeat_apply(
 
 
 def test_underscore_prefix_keeps_asset_out_of_git(
-    tmp_path: Path, spec_example_theme,
+    tmp_path: Path, spec_example_theme: "ThemePreset",
 ) -> None:
     """The generated CSS is build output, not source. Same convention as
     the logo / favicon copies (``img/_l2_logo.<ext>``). The
@@ -97,7 +101,7 @@ def test_underscore_prefix_keeps_asset_out_of_git(
 
 
 def test_uses_alternate_theme_palette(
-    tmp_path: Path, spec_example_theme,
+    tmp_path: Path, spec_example_theme: "ThemePreset",
 ) -> None:
     """The CSS reflects whatever palette is on the passed-in theme —
     not a hardcoded constant. Synthesizes a theme with a recognizable
