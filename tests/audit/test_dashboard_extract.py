@@ -17,6 +17,8 @@ hit a "no visual with title 'X'" assertion deep in CI.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Iterator
+
 import pytest
 
 from tests.audit._dashboard_extract import (
@@ -25,9 +27,15 @@ from tests.audit._dashboard_extract import (
     count_l1_invariant_rows,
 )
 
+if TYPE_CHECKING:
+    # BE.7.C.2 — type-only import. App lives in recon_gen.common.tree
+    # which transitively pulls a heavy subtree; defer the import to
+    # type-check time so test collection stays cheap.
+    from recon_gen.common.tree import App
+
 
 @pytest.fixture(scope="module", autouse=True)
-def _cfg_env(monkeypatch_module: pytest.MonkeyPatch):
+def _cfg_env(monkeypatch_module: pytest.MonkeyPatch) -> None:
     """Stamp the cfg-shaped env vars `load_config(None)` needs in the
     `l1_app` fixture below. Module-scoped so the env doesn't leak into
     other test modules (pre-Z.C.7 this was module-level
@@ -44,7 +52,7 @@ def _cfg_env(monkeypatch_module: pytest.MonkeyPatch):
 
 
 @pytest.fixture(scope="module")
-def monkeypatch_module():
+def monkeypatch_module() -> Iterator[pytest.MonkeyPatch]:
     """Module-scoped monkeypatch — pytest's built-in is function-scoped."""
     mp = pytest.MonkeyPatch()
     yield mp
@@ -52,7 +60,7 @@ def monkeypatch_module():
 
 
 @pytest.fixture(scope="module")
-def l1_app():
+def l1_app() -> "App":
     """Build + emit the default L1 dashboard tree.
 
     Pure-Python — no AWS calls. The tree is the source of truth for
@@ -69,17 +77,26 @@ def l1_app():
 
 
 @pytest.fixture(scope="module")
-def sheet_visual_titles(l1_app) -> dict[str, set[str]]:
+def sheet_visual_titles(l1_app: "App") -> dict[str, set[str]]:
     """Map sheet name → set of visual titles on that sheet."""
     out: dict[str, set[str]] = {}
+    # `l1_app` fixture above calls `emit_analysis()`, which sets the
+    # analysis attribute — never None here. Asserting narrows for
+    # pyright (App.analysis is declared Optional).
+    assert l1_app.analysis is not None
     for sheet in l1_app.analysis.sheets:
         out[sheet.name] = {
-            v.title for v in sheet.visuals if getattr(v, "title", None)
+            # VisualLike Protocol doesn't declare `title`; concrete
+            # subtypes (KPI/Table/BarChart/...) all do. The
+            # `getattr(..., None)` guard handles any Protocol-impl
+            # that genuinely lacks one.
+            getattr(v, "title")
+            for v in sheet.visuals if getattr(v, "title", None)
         }
     return out
 
 
-def test_layout_covers_every_invariant():
+def test_layout_covers_every_invariant() -> None:
     """Every L1Invariant Literal value has a layout entry."""
     expected: set[L1Invariant] = {
         "drift", "overdraft", "limit_breach",
@@ -90,8 +107,8 @@ def test_layout_covers_every_invariant():
 
 @pytest.mark.parametrize("invariant", list(_DASHBOARD_LAYOUT.keys()))
 def test_layout_sheet_exists_on_l1_dashboard(
-    sheet_visual_titles, invariant,
-):
+    sheet_visual_titles: dict[str, set[str]], invariant: L1Invariant,
+) -> None:
     """Each layout entry's sheet name matches a real L1 sheet."""
     sheet_name, _, _ = _DASHBOARD_LAYOUT[invariant]
     assert sheet_name in sheet_visual_titles, (
@@ -103,8 +120,8 @@ def test_layout_sheet_exists_on_l1_dashboard(
 
 @pytest.mark.parametrize("invariant", list(_DASHBOARD_LAYOUT.keys()))
 def test_layout_visual_title_exists_on_sheet(
-    sheet_visual_titles, invariant,
-):
+    sheet_visual_titles: dict[str, set[str]], invariant: L1Invariant,
+) -> None:
     """Each layout entry's table title matches a real visual on
     the named sheet."""
     sheet_name, table_title, _ = _DASHBOARD_LAYOUT[invariant]
@@ -116,7 +133,7 @@ def test_layout_visual_title_exists_on_sheet(
     )
 
 
-def test_count_l1_invariant_rows_is_callable():
+def test_count_l1_invariant_rows_is_callable() -> None:
     """Smoke-import the extractor entry point — catches signature
     drift without spinning up a browser."""
     assert callable(count_l1_invariant_rows)

@@ -34,7 +34,7 @@ import pytest
 from click.testing import CliRunner
 
 from recon_gen.cli import main
-from recon_gen.common.config import load_config
+from recon_gen.common.config import Config, load_config
 from recon_gen.common.db import connect_demo_db
 from recon_gen.common.intervals import DateInterval
 from recon_gen.common.env_keys import (
@@ -44,6 +44,7 @@ from recon_gen.common.env_keys import (
 )
 from recon_gen.common.l2 import load_instance
 from recon_gen.common.l2.auto_scenario import default_scenario_for
+from recon_gen.common.l2.seed import ScenarioPlant
 from recon_gen.common.sql import Dialect
 
 from tests.audit._pdf_extract import (
@@ -100,7 +101,7 @@ def _resolve_explicit_qs_gen_config() -> Path | None:
 
 
 @pytest.fixture(scope="module")
-def db_cfg():
+def db_cfg() -> Config:
     """Load cfg from the standard candidates; skip if no DB configured."""
     explicit = _resolve_explicit_qs_gen_config()
     candidates: tuple[Path, ...]
@@ -124,11 +125,12 @@ def db_cfg():
             "RECON_GEN_DEMO_DATABASE_URL or point RECON_GEN_CONFIG at "
             "a config.yaml carrying it."
         )
+    assert cfg is not None  # narrow for pyright; the skip above is NoReturn
     return cfg
 
 
 @pytest.fixture(scope="module")
-def db_cfg_path(db_cfg) -> Path:
+def db_cfg_path(db_cfg: Config) -> Path:
     """Locate the cfg file on disk so we can pass `-c` to ``audit apply``."""
     explicit = _resolve_explicit_qs_gen_config()
     if explicit is not None:
@@ -145,10 +147,15 @@ def db_cfg_path(db_cfg) -> Path:
         "db_cfg loaded but no candidate config path on disk — "
         "RECON_GEN_CONFIG override resolution mismatch."
     )
+    # Unreachable — pytest.fail is NoReturn. Explicit raise satisfies
+    # pyright's path-coverage analysis (BE.7.C.2 surfacing).
+    raise AssertionError("unreachable")
 
 
 @pytest.fixture(scope="module")
-def seeded_pdf(db_cfg, db_cfg_path, tmp_path_factory) -> tuple[Path, object]:
+def seeded_pdf(
+    db_cfg: Config, db_cfg_path: Path, tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Path, ScenarioPlant]:
     """Seed DB with the spec_example scenario, render audit PDF.
 
     Module-scoped so the expensive seed + render runs once and
@@ -198,7 +205,9 @@ def seeded_pdf(db_cfg, db_cfg_path, tmp_path_factory) -> tuple[Path, object]:
     return (out, scenario)
 
 
-def test_at_least_one_invariant_has_planted_rows(seeded_pdf):
+def test_at_least_one_invariant_has_planted_rows(
+    seeded_pdf: tuple[Path, ScenarioPlant],
+) -> None:
     """Sanity guard: spec_example's auto-scenario plants at least
     one row in some invariant — otherwise every per-invariant
     assert below would be a vacuous 0 == 0."""
@@ -221,7 +230,9 @@ def test_at_least_one_invariant_has_planted_rows(seeded_pdf):
 
 
 @pytest.mark.parametrize("invariant", _ALL_INVARIANTS)
-def test_pdf_includes_planted_rows(seeded_pdf, invariant):
+def test_pdf_includes_planted_rows(
+    seeded_pdf: tuple[Path, ScenarioPlant], invariant: Invariant,
+) -> None:
     """Inclusion assert: PDF section shows AT LEAST as many rows
     as the scenario planted for this invariant.
 
@@ -258,8 +269,8 @@ def test_pdf_includes_planted_rows(seeded_pdf, invariant):
 
 
 def test_audit_verify_pins_to_embedded_hwm_against_newer_rows(
-    seeded_pdf, db_cfg, db_cfg_path,
-):
+    seeded_pdf: tuple[Path, ScenarioPlant], db_cfg: Config, db_cfg_path: Path,
+) -> None:
     """Re-verifiability under append: rows added to the base tables
     AFTER a PDF is rendered must NOT cause ``audit verify`` to flag
     a diff.

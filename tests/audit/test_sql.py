@@ -38,7 +38,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
+from typing import Any, Iterator
 from unittest.mock import patch
 
 import pytest
@@ -169,7 +169,9 @@ def captured_sql() -> list[str]:
 
 
 @pytest.fixture
-def patched_connect(captured_sql, monkeypatch):
+def patched_connect(
+    captured_sql: list[str], monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[None]:
     """Patch ``connect_demo_db`` with the recording stub.
 
     The query functions do a lazy ``from recon_gen.common.db
@@ -305,7 +307,9 @@ def _diff_msg(label: str, want: str, got: str) -> str:
     )
 
 
-def test_drift_query_sql_locked(captured_sql, patched_connect):
+def test_drift_query_sql_locked(
+    captured_sql: list[str], patched_connect: None,
+) -> None:
     _query_drift_violations(_CFG, _INSTANCE, _FRAME)
     assert len(captured_sql) == 1
     assert captured_sql[0] == _DRIFT_SQL, _diff_msg(
@@ -313,7 +317,9 @@ def test_drift_query_sql_locked(captured_sql, patched_connect):
     )
 
 
-def test_overdraft_query_sql_locked(captured_sql, patched_connect):
+def test_overdraft_query_sql_locked(
+    captured_sql: list[str], patched_connect: None,
+) -> None:
     _query_overdraft_violations(_CFG, _INSTANCE, _FRAME)
     assert len(captured_sql) == 1
     assert captured_sql[0] == _OVERDRAFT_SQL, _diff_msg(
@@ -321,7 +327,9 @@ def test_overdraft_query_sql_locked(captured_sql, patched_connect):
     )
 
 
-def test_limit_breach_query_sql_locked(captured_sql, patched_connect):
+def test_limit_breach_query_sql_locked(
+    captured_sql: list[str], patched_connect: None,
+) -> None:
     _query_limit_breach_violations(_CFG, _INSTANCE, _FRAME)
     assert len(captured_sql) == 1
     assert captured_sql[0] == _LIMIT_BREACH_SQL, _diff_msg(
@@ -329,7 +337,9 @@ def test_limit_breach_query_sql_locked(captured_sql, patched_connect):
     )
 
 
-def test_stuck_pending_query_sql_locked(captured_sql, patched_connect):
+def test_stuck_pending_query_sql_locked(
+    captured_sql: list[str], patched_connect: None,
+) -> None:
     _query_stuck_pending_violations(_CFG, _INSTANCE)
     assert len(captured_sql) == 1
     assert captured_sql[0] == _STUCK_PENDING_SQL, _diff_msg(
@@ -337,7 +347,9 @@ def test_stuck_pending_query_sql_locked(captured_sql, patched_connect):
     )
 
 
-def test_stuck_unbundled_query_sql_locked(captured_sql, patched_connect):
+def test_stuck_unbundled_query_sql_locked(
+    captured_sql: list[str], patched_connect: None,
+) -> None:
     _query_stuck_unbundled_violations(_CFG, _INSTANCE)
     assert len(captured_sql) == 1
     assert captured_sql[0] == _STUCK_UNBUNDLED_SQL, _diff_msg(
@@ -345,7 +357,9 @@ def test_stuck_unbundled_query_sql_locked(captured_sql, patched_connect):
     )
 
 
-def test_supersession_query_sql_locked(captured_sql, patched_connect):
+def test_supersession_query_sql_locked(
+    captured_sql: list[str], patched_connect: None,
+) -> None:
     _query_supersession(_CFG, _INSTANCE, _FRAME)
     # Four queries in fixed order: aggregates × 2 base tables, then
     # txn details, then daily-balance details.
@@ -369,7 +383,9 @@ def test_supersession_query_sql_locked(captured_sql, patched_connect):
         assert got == want, _diff_msg(label, want, got)
 
 
-def test_executive_summary_query_sql_locked(captured_sql, patched_connect):
+def test_executive_summary_query_sql_locked(
+    captured_sql: list[str], patched_connect: None,
+) -> None:
     """Executive summary unrolls into multiple queries: 2 volume +
     6 invariant counts (drift / ledger_drift / overdraft / limit_breach
     / stuck_pending / stuck_unbundled) + 2 supersession totals (one per
@@ -441,7 +457,9 @@ def test_executive_summary_query_sql_locked(captured_sql, patched_connect):
 # --- Sanity guards -----------------------------------------------------------
 
 
-def test_skeleton_mode_short_circuits_drift(captured_sql, patched_connect):
+def test_skeleton_mode_short_circuits_drift(
+    captured_sql: list[str], patched_connect: None,
+) -> None:
     """``demo_database_url=None`` returns None without touching the DB.
 
     Mirrors the audit's emit-vs-execute contract: skeleton mode must
@@ -455,8 +473,8 @@ def test_skeleton_mode_short_circuits_drift(captured_sql, patched_connect):
 
 
 def test_skeleton_mode_short_circuits_supersession(
-    captured_sql, patched_connect,
-):
+    captured_sql: list[str], patched_connect: None,
+) -> None:
     """Same skeleton-mode short-circuit as drift — repeated for the
     multi-query function to confirm no SQL leaks before the cfg check."""
     cfg = _FakeCfg(demo_database_url=None)  # type: ignore[arg-type]: _FakeCfg is a stand-in for Config in skeleton-mode tests
