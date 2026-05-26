@@ -10,6 +10,7 @@ in the DOM; failures across sheets accumulate into one AssertionError.
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
@@ -25,6 +26,27 @@ from .tree_validator import TreeValidator
 
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
+
+
+def _as_date(value: object) -> date:
+    """Coerce a DB cell value to ``date`` for window-membership checks.
+
+    Postgres returns ``datetime``/``date`` natively; SQLite may return
+    a string. Tests narrow rows by the analysis-layer date window
+    (``frame.window.contains(...)``) — DateInterval expects a ``date``.
+    """
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        # ISO-8601 either bare date or full timestamp; split at "T" so
+        # we don't need a full parse.
+        return date.fromisoformat(value.split("T", 1)[0].split(" ", 1)[0])
+    raise TypeError(
+        f"_as_date: cannot coerce {type(value).__name__} → date "
+        f"(value={value!r})"
+    )
 
 
 def test_exec_dashboard_structure_matches_tree(exec_dashboard_driver, exec_app) -> None:
@@ -71,13 +93,26 @@ def test_bg5_transaction_volume_kpis_match_dataset_aggregates(
     or the binding has drifted. This test enforces that contract.
     """
     driver, dashboard_arg = exec_dashboard_driver
-    driver.open(dashboard_arg, sheet="Transaction Volume")
-    driver.wait_loaded("Total Transactions")
+    # Sheet renamed "Transaction Volume" → "Transaction Volume Over
+    # Time" earlier in the v11.22.x cycle; test was missed.
+    driver.open(dashboard_arg, sheet="Transaction Volume Over Time")
+    driver.wait_loaded("Total Transactions (Posted, per-transfer)")
 
     sql, params = _sql_for(build_transaction_summary_dataset, cfg)
     rows = driver.query_db(sql, dataset_parameters=params)
-    expected_total = sum(int(row["transfer_count"]) for row in rows)
-    rendered = parse_int_kpi(driver.kpi_value("Total Transactions"))
+    # The deployed KPI is scoped by the Exec dashboard's default 30-day
+    # window (cfg.as_of_frame(window_days=30); see exec/app.py:670). Our
+    # direct DB query sees all 90 days; narrow rows to the same window
+    # before summing or the assertion compares apples-to-oranges.
+    frame = cfg.as_of_frame(window_days=30)
+    in_window = [
+        r for r in rows
+        if frame.window.contains(_as_date(r["posted_date"]))
+    ]
+    expected_total = sum(int(row["transfer_count"]) for row in in_window)
+    rendered = parse_int_kpi(
+        driver.kpi_value("Total Transactions (Posted, per-transfer)"),
+    )
     assert rendered == expected_total, (
         f"Total Transactions: rendered {rendered} ≠ "
         f"SUM(transfer_count) over transaction-summary dataset = "
@@ -109,11 +144,21 @@ def test_bg5_money_moved_kpis_match_dataset_sums(exec_dashboard_driver, cfg):
 
     sql, params = _sql_for(build_transaction_summary_dataset, cfg)
     rows = driver.query_db(sql, dataset_parameters=params)
+    # Window-narrow per the Exec dashboard's default 30-day scope
+    # (cfg.as_of_frame(window_days=30); see exec/app.py:670). The
+    # KPI sees this window; direct DB query sees all 90 days.
+    frame = cfg.as_of_frame(window_days=30)
+    in_window = [
+        r for r in rows
+        if frame.window.contains(_as_date(r["posted_date"]))
+    ]
     expected_gross = sum(
-        (Decimal(str(row["gross_amount"])) for row in rows), Decimal("0"),
+        (Decimal(str(row["gross_amount"])) for row in in_window),
+        Decimal("0"),
     )
     expected_net = sum(
-        (Decimal(str(row["net_amount"])) for row in rows), Decimal("0"),
+        (Decimal(str(row["net_amount"])) for row in in_window),
+        Decimal("0"),
     )
 
     rendered_gross = parse_currency_kpi(driver.kpi_value("Gross Money Moved"))
@@ -143,7 +188,9 @@ def test_bg5_account_summary_kpis_match_dataset_counts(
     a regression where the two KPIs accidentally re-merge onto the
     same dataset (Active would jump to match Total Open)."""
     driver, dashboard_arg = exec_dashboard_driver
-    driver.open(dashboard_arg, sheet="Open Accounts")
+    # Sheet renamed "Open Accounts" → "Account Coverage" earlier in
+    # the v11.22.x cycle; test was missed.
+    driver.open(dashboard_arg, sheet="Account Coverage")
     driver.wait_loaded("Total Open Accounts")
 
     all_sql, all_params = _sql_for(build_account_summary_dataset, cfg)
@@ -153,6 +200,18 @@ def test_bg5_account_summary_kpis_match_dataset_counts(
     all_rows = driver.query_db(all_sql, dataset_parameters=all_params)
     active_rows = driver.query_db(active_sql, dataset_parameters=active_params)
 
+    # Window-narrow Active accounts per the dashboard's 30-day scope
+    # (cfg.as_of_frame(window_days=30); see exec/app.py:670). Total
+    # Open uses null_option=ALL_VALUES (FilterGroup keeps every
+    # account regardless of last_activity_date), so its KPI count
+    # matches the full dataset's row count without window narrowing.
+    frame = cfg.as_of_frame(window_days=30)
+    active_in_window = [
+        r for r in active_rows
+        if r.get("last_activity_date") is not None
+        and frame.window.contains(_as_date(r["last_activity_date"]))
+    ]
+
     rendered_open = parse_int_kpi(driver.kpi_value("Total Open Accounts"))
     assert rendered_open == len(all_rows), (
         f"Total Open Accounts: rendered {rendered_open} ≠ "
@@ -161,9 +220,10 @@ def test_bg5_account_summary_kpis_match_dataset_counts(
     rendered_active = parse_int_kpi(
         driver.kpi_value("Active Accounts (this window)"),
     )
-    assert rendered_active == len(active_rows), (
-        f"Active Accounts: rendered {rendered_active} ≠ "
-        f"len(query_db(account_summary_active)) = {len(active_rows)}."
+    assert rendered_active == len(active_in_window), (
+        f"Active Accounts (this window): rendered {rendered_active} ≠ "
+        f"len(window-filtered account_summary_active) = "
+        f"{len(active_in_window)} (of {len(active_rows)} total)."
     )
     # Sanity gate: Active ≤ Total Open. A regression that
     # accidentally bound Active to the wider dataset would flip this.
