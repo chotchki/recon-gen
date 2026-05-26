@@ -780,6 +780,15 @@ def _layer_command(
         nworkers = str(opts.parallel) if opts.parallel > 1 else "4"
         only = ["-k", opts.only] if opts.only else []
         agree_file = "tests/e2e/test_audit_dashboard_agreement.py"
+        # Note (2026-05-26): test_inv_dashboard_agreement.py *also*
+        # used to need an --ignore here — its seeded_l2_db fixture
+        # DROP CASCADE'd the shared schema, clobbering the runner's
+        # broad seed for every co-tenant browser test. That's now
+        # fixed at the test side: the fixture builds an
+        # ``isolated_inv_cfg`` (suffix "_iagree") so the destructive
+        # seed lands in its own per-test prefix and can't affect
+        # other tests. No --ignore needed — it runs as a normal
+        # browser-tier member.
         main_cmd = [
             str(_VENV_BIN / "pytest"), "tests/e2e/",
             f"--ignore={agree_file}",

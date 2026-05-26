@@ -166,9 +166,14 @@ def apply_db_seed(
         # BD.3 — fold (today, plant_window) into one AsOfFrame.
         # When the caller supplies `plant_window`, it becomes
         # `frame.window` (audit window) and `frame.as_of` anchors on
-        # its right edge — the BC.4 day-pick policy. When absent,
-        # degenerate single-day frame on `today_ref` preserves the
-        # pre-BC.4 "plants land on scenarios.today" test shape.
+        # its right edge — the BC.4 day-pick policy. When absent, use
+        # a 91-day trailing window (matches plant_adapter.py's own
+        # `frame=None` fallback) so plants with `days_ago > 0` (drift/
+        # overdraft default to 4) pass SingleDayPlant.at_offset_from_end
+        # validation. The pre-2026-05-26 single-day fallback rejected
+        # every plant with days_ago>0 — surfaced via
+        # `test_inv_dashboard_agreement`'s seeded_l2_db ERROR'ing on
+        # `target 2026-05-22 falls outside window [2026-05-26, …]`.
         if plant_window is not None:
             seed_frame = AsOfFrame(
                 as_of=plant_window.end, window=plant_window,
@@ -176,7 +181,9 @@ def apply_db_seed(
         else:
             seed_frame = AsOfFrame(
                 as_of=today_ref,
-                window=DateInterval.single_day(today_ref),
+                window=DateInterval.trailing_days_ending_today(
+                    today_ref, days=91,
+                ),
             )
         generators = scenario_to_generators(
             scenario, instance, frame=seed_frame, prefix=prefix,

@@ -123,6 +123,16 @@ _TODAY = date.today()  # typing-smell: ignore[test-module-nondeterminism]: stuck
 _DEFAULT_SIGMA = 2.0
 
 
+# Per-test isolation suffix appended to isolated_inv_cfg.db_table_prefix +
+# cfg.deployment_name. The agreement test's seeded_l2_db drops the
+# schema CASCADE and re-seeds with plants-only — without isolation,
+# every other browser test reading the runner's broad seed sees empty
+# tables when their xdist worker happens to run after this fixture.
+# The suffix carves out a dedicated table namespace + deployment ID
+# so the destructive seed can't touch the runner's prefix.
+_ISOLATION_SUFFIX = "iagree"
+
+
 # A high-magnitude anomaly plant — 1000× the baseline amount with 100
 # background pairs feeding the population stddev. AT.0's finding: a
 # spike against a too-thin population shifts the mean toward itself
@@ -192,8 +202,111 @@ def _plant_anchor_day() -> date:
 
 
 @pytest.fixture(scope="module")
-def seeded_l2_db(cfg):  # type: ignore[no-untyped-def]: returns nothing the test introspects — the fixture's contract is "DB is seeded"
-    """Apply the schema + broad seed + L2 spine plants + matview refresh.
+def isolated_inv_cfg(cfg):  # type: ignore[no-untyped-def]: cfg is recon_gen Config; return is a fresh Config sibling
+    """Per-test cfg with an isolated table prefix + deployment name.
+
+    The Investigation agreement test's seeded_l2_db is destructive —
+    it DROPs the schema CASCADE then re-seeds plants-only. Sharing
+    ``cfg`` with the rest of the browser tier meant every other test
+    reading the runner's broad seed saw empty tables when their xdist
+    worker fired after this fixture. The isolated cfg carves out
+    ``<prefix>_iagree`` table names + ``<deployment_name>-iagree``
+    QS resource IDs so the destructive seed lands in its own
+    namespace and can't touch the shared deploy.
+
+    Module-scoped so the per-test deploy + seed cost amortizes
+    across both the anomaly + money_trail parametrizations.
+
+    Same demo_database_url + dialect + auth as the parent cfg —
+    only the namespace bits change. The fixture is responsible for
+    cleaning up the isolated DB tables on teardown via DROP CASCADE
+    (QS-side resources stay until the next clean — they're cheap to
+    leave around and the runner's `sweep` verb covers them).
+    """
+    from dataclasses import replace
+
+    iso_cfg = replace(
+        cfg,
+        db_table_prefix=f"{cfg.db_table_prefix}_{_ISOLATION_SUFFIX}",
+        deployment_name=f"{cfg.deployment_name}-{_ISOLATION_SUFFIX}",
+    )
+    yield iso_cfg
+
+    # Teardown: DROP every isolated table so the next run starts
+    # fresh. Best-effort — if the connect fails (RDS stopped between
+    # test + teardown), log + continue rather than fail the fixture.
+    try:
+        teardown_conn = connect_demo_db(iso_cfg)
+    except Exception as exc:  # noqa: BLE001 — never break the chain
+        print(
+            f"isolated_inv_cfg teardown: connect failed: {exc!r} — "
+            f"isolated tables {iso_cfg.db_table_prefix}_* may persist; "
+            f"run `recon-gen schema clean -c <iso_cfg>` to drop them."
+        )
+        return
+    try:
+        from recon_gen.common.l2.schema import emit_schema_drop_sql
+        clean_sql = emit_schema_drop_sql(
+            _INSTANCE,
+            prefix=iso_cfg.db_table_prefix,
+            dialect=iso_cfg.dialect,
+        )
+        with teardown_conn.cursor() as cur:
+            execute_script(cur, clean_sql, dialect=iso_cfg.dialect)
+        teardown_conn.commit()
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"isolated_inv_cfg teardown: schema clean failed: {exc!r}"
+        )
+    finally:
+        teardown_conn.close()
+
+
+@pytest.fixture(scope="module")
+def isolated_inv_app(isolated_inv_cfg):  # type: ignore[no-untyped-def]: returns a build_investigation_app result; annotating would force the App import to module scope
+    """Investigation App tree built against the ISOLATED cfg.
+
+    The session-scoped ``inv_app`` (conftest.py) is built off the
+    SHARED cfg — its dataset SQL has the shared ``<prefix>_*`` table
+    names baked in. App2Driver pointed at the isolated DB would read
+    via this tree, hit the shared-prefix tables, and report zero
+    rows (the isolated tables hold the seed, the shared tables don't
+    have the agreement test's plants).
+
+    Module-scoped to amortize the build cost across the two
+    parametrizations (anomaly + money_trail).
+    """
+    from recon_gen.apps.investigation.app import build_investigation_app
+
+    app = build_investigation_app(
+        isolated_inv_cfg, l2_instance=_INSTANCE,
+    )
+    app.emit_analysis()
+    return app
+
+
+@pytest.fixture(scope="module")
+def inv_dashboard_id(isolated_inv_cfg) -> str:  # type: ignore[no-untyped-def]: pytest overrides the conftest's `inv_dashboard_id` so qs_inv_driver looks for the isolated dashboard
+    """Override the conftest's ``inv_dashboard_id`` so ``qs_inv_driver``
+    looks for the isolated deployment's dashboard. When the isolated
+    dashboard isn't deployed (default — the runner deploys against
+    the shared cfg only), ``qs_inv_driver`` catches the
+    ``ResourceNotFoundException`` and yields None, and the test runs
+    as a 2-way (App2 + direct) agreement.
+
+    Re-enabling the QS leg requires the fixture (or a future runner
+    step) to also `recon-gen json apply` against ``isolated_inv_cfg``
+    before the test runs. Tracked separately as a follow-on; the
+    isolation work landed first because that's what unblocked the
+    rest of the browser tier.
+    """
+    return f"{isolated_inv_cfg.deployment_name}-investigation-dashboard"
+
+
+@pytest.fixture(scope="module")
+def seeded_l2_db(isolated_inv_cfg):  # type: ignore[no-untyped-def]: returns nothing the test introspects — the fixture's contract is "DB is seeded"
+    """Apply the schema + broad seed + L2 spine plants + matview refresh
+    against the ISOLATED cfg's table prefix.
 
     Two-phase seed: ``apply_db_seed`` lays the schema + L1 plants +
     initial refresh (the shape ``recon-gen data apply --execute``
@@ -202,17 +315,23 @@ def seeded_l2_db(cfg):  # type: ignore[no-untyped-def]: returns nothing the test
 
     Module-scoped — seeding is the expensive setup and the anomaly +
     money_trail asserts both read the same matview state.
+
+    Isolation contract: the destructive DROP CASCADE in apply_db_seed
+    only touches ``<iso_prefix>_*`` tables, not the runner's
+    ``<isolated_inv_cfg.db_table_prefix>_*`` broad-seed tables that the rest of
+    the browser tier reads. Per-prefix table namespaces on the shared
+    AWS RDS cluster.
     """
     from tests.e2e._seed_helpers import apply_db_seed
 
-    conn = connect_demo_db(cfg)
+    conn = connect_demo_db(isolated_inv_cfg)
     try:
         apply_db_seed(
             conn, _INSTANCE,
-            prefix=cfg.db_table_prefix,
+            prefix=isolated_inv_cfg.db_table_prefix,
             mode="l1_plus_broad",
             today=_TODAY,
-            dialect=cfg.dialect,
+            dialect=isolated_inv_cfg.dialect,
             include_baseline=False,
         )
 
@@ -225,8 +344,10 @@ def seeded_l2_db(cfg):  # type: ignore[no-untyped-def]: returns nothing the test
         # helpers (AT.5.b refactor of ``_emit_helpers.insert_tx``)
         # make this work against PG / Oracle as well as SQLite.
         anchor = _plant_anchor_day()
-        anomaly_gen = _build_anomaly_generator(cfg, anchor)
-        money_trail_gen = _build_money_trail_generator(cfg, anchor)
+        anomaly_gen = _build_anomaly_generator(isolated_inv_cfg, anchor)
+        money_trail_gen = _build_money_trail_generator(
+            isolated_inv_cfg, anchor,
+        )
         anomaly_gen.emit(conn)
         money_trail_gen.emit(conn)
         conn.commit()
@@ -235,41 +356,49 @@ def seeded_l2_db(cfg):  # type: ignore[no-untyped-def]: returns nothing the test
         # ran a refresh before the spine plants landed).
         refresh_sql = refresh_matviews_sql(
             _INSTANCE,
-            prefix=cfg.db_table_prefix,
-            dialect=cfg.dialect,
+            prefix=isolated_inv_cfg.db_table_prefix,
+            dialect=isolated_inv_cfg.dialect,
         )
         with conn.cursor() as cur:
-            execute_script(cur, refresh_sql, dialect=cfg.dialect)
+            execute_script(cur, refresh_sql, dialect=isolated_inv_cfg.dialect)
         conn.commit()
     finally:
         conn.close()
 
 
 @pytest.fixture(scope="module")
-def planted_l2_bounds(cfg) -> ExpectedL2AuditCounts:  # type: ignore[no-untyped-def]: cfg is recon_gen Config
+def planted_l2_bounds(isolated_inv_cfg) -> ExpectedL2AuditCounts:  # type: ignore[no-untyped-def]: isolated_inv_cfg is recon_gen Config
     """AT.5.f — the lower-bound counts + key projections the spine
     generators planted. The 3-way test asserts every renderer's count
     is ``>=`` ``X_count`` and every renderer's key set is ``>=``
-    ``X_keys`` (subset/equality depends on the invariant)."""
+    ``X_keys`` (subset/equality depends on the invariant).
+
+    Uses ``isolated_inv_cfg`` so the generator's table-prefix matches
+    what the seeded_l2_db fixture wrote against.
+    """
     anchor = _plant_anchor_day()
     return expected_l2_audit_counts(
-        anomaly_gen=_build_anomaly_generator(cfg, anchor),
-        money_trail_gen=_build_money_trail_generator(cfg, anchor),
+        anomaly_gen=_build_anomaly_generator(isolated_inv_cfg, anchor),
+        money_trail_gen=_build_money_trail_generator(
+            isolated_inv_cfg, anchor,
+        ),
     )
 
 
 @pytest.fixture(scope="module")
-def per_l2_app2_results(cfg, inv_app, seeded_l2_db):  # type: ignore[no-untyped-def]: returns a dict; annotating would force the driver imports below to module scope
+def per_l2_app2_results(isolated_inv_cfg, isolated_inv_app, seeded_l2_db):  # type: ignore[no-untyped-def]: returns a dict; annotating would force the driver imports below to module scope
     """The App2 leg's data, read once up-front (mirrors L1's
     ``per_dialect_app2_results``).
 
-    Spins the Investigation app tree via ``App2Driver.serving`` against
-    the seeded DB, walks both L2 invariant sheets to collect each one's
-    ``{"count": int, "seen": int, "keys": set}``, then **tears the
-    App2 server + browser down before returning** so the per-test
-    ``qs_inv_driver`` (a second Playwright sync context) doesn't
-    collide with App2's. Sync Playwright is one-context-per-thread:
-    two open at once → "Playwright Sync API inside the asyncio loop".
+    Spins the Investigation app tree (built off ``isolated_inv_cfg``,
+    so its dataset SQL references the isolated table prefix) via
+    ``App2Driver.serving`` against the ISOLATED seeded DB. Walks both
+    L2 invariant sheets to collect each one's ``{"count": int,
+    "seen": int, "keys": set}``, then **tears the App2 server +
+    browser down before returning** so the per-test ``qs_inv_driver``
+    (a second Playwright sync context) doesn't collide with App2's.
+    Sync Playwright is one-context-per-thread: two open at once →
+    "Playwright Sync API inside the asyncio loop".
 
     Depends on ``seeded_l2_db`` so the seed + plants land before the
     reads. Module-scoped — the App2 walk is the expensive setup.
@@ -277,14 +406,15 @@ def per_l2_app2_results(cfg, inv_app, seeded_l2_db):  # type: ignore[no-untyped-
     _ = seeded_l2_db  # ordering dep — see docstring
     from tests.e2e._harness_html2 import make_live_db_fetchers_for_app
 
-    assert inv_app.analysis is not None
+    assert isolated_inv_app.analysis is not None
     visual_fetcher, options_fetcher = make_live_db_fetchers_for_app(
-        tree_app=inv_app, cfg=cfg,
+        tree_app=isolated_inv_app, cfg=isolated_inv_cfg,
     )
     results: dict[str, dict[str, object]] = {}
     with App2Driver.serving(
-        cfg=cfg,
-        tree_app=inv_app, sheet=inv_app.analysis.sheets[0],
+        cfg=isolated_inv_cfg,
+        tree_app=isolated_inv_app,
+        sheet=isolated_inv_app.analysis.sheets[0],
         data_fetcher=visual_fetcher, options_fetcher=options_fetcher,
         dashboard_id="inv", dashboard_title="Investigation (live)",
     ) as driver:
@@ -349,10 +479,12 @@ def qs_inv_driver(request, cfg, region, account_id, inv_dashboard_id, inv_app): 
 
 
 @pytest.fixture
-def db_conn(cfg):  # type: ignore[no-untyped-def]: live PG/Oracle/SQLite connection — concrete type varies per dialect, no shared protocol
+def db_conn(isolated_inv_cfg):  # type: ignore[no-untyped-def]: live PG/Oracle/SQLite connection — concrete type varies per dialect, no shared protocol
     """Function-scoped raw DB connection for the direct-SELECT anchor
-    + the spine ``detect()`` call."""
-    conn = connect_demo_db(cfg)
+    + the spine ``detect()`` call. Points at the ISOLATED cfg so the
+    direct SELECTs read the same per-test prefix the App2 leg reads.
+    """
+    conn = connect_demo_db(isolated_inv_cfg)
     try:
         yield conn
     finally:
@@ -497,7 +629,7 @@ def test_invariant_three_way_agreement(
     qs_inv_driver,
     inv_dashboard_id,
     db_conn,
-    cfg,
+    isolated_inv_cfg,
     planted_l2_bounds,
     invariant,
 ) -> None:
@@ -540,28 +672,28 @@ def test_invariant_three_way_agreement(
     # --- direct matview SELECT — the ground truth ---
     if invariant == "anomaly":
         direct_count = count_anomaly_matview_rows(
-            db_conn, cfg.db_table_prefix, sigma_threshold=_DEFAULT_SIGMA,
+            db_conn, isolated_inv_cfg.db_table_prefix, sigma_threshold=_DEFAULT_SIGMA,
         )
         direct_keys = anomaly_matview_row_keys(
-            db_conn, cfg.db_table_prefix, sigma_threshold=_DEFAULT_SIGMA,
+            db_conn, isolated_inv_cfg.db_table_prefix, sigma_threshold=_DEFAULT_SIGMA,
         )
     elif invariant == "money_trail":
-        roots = distinct_money_trail_roots(db_conn, cfg.db_table_prefix)
+        roots = distinct_money_trail_roots(db_conn, isolated_inv_cfg.db_table_prefix)
         assert _PLANTED_CHAIN_ROOT in roots, (
             f"Producer-side regression (money_trail): the planted "
             f"chain's root ({_PLANTED_CHAIN_ROOT!r}) is missing from "
-            f"{cfg.db_table_prefix}_inv_money_trail_edges. Found roots: "
+            f"{isolated_inv_cfg.db_table_prefix}_inv_money_trail_edges. Found roots: "
             f"{sorted(roots)[:10]} (+ {max(len(roots) - 10, 0)} more). "
             f"Plant→matview path broken, matview not refreshed after "
             f"the L2 plants, or the generator's transfer-id naming "
             f"changed."
         )
         direct_count = count_money_trail_matview_rows(
-            db_conn, cfg.db_table_prefix,
+            db_conn, isolated_inv_cfg.db_table_prefix,
             root_transfer_id=_PLANTED_CHAIN_ROOT,
         )
         direct_keys = money_trail_matview_row_keys(
-            db_conn, cfg.db_table_prefix,
+            db_conn, isolated_inv_cfg.db_table_prefix,
             root_transfer_id=_PLANTED_CHAIN_ROOT,
         )
     else:
@@ -602,7 +734,7 @@ def test_invariant_three_way_agreement(
     )
 
     # --- spine ⋈ direct matview (the AT.5.a contract) ---
-    spine_keys = _spine_keys_for(invariant, db_conn, cfg.db_table_prefix)
+    spine_keys = _spine_keys_for(invariant, db_conn, isolated_inv_cfg.db_table_prefix)
     assert spine_keys == direct_keys, (
         f"Spine.detect disagrees with the matview ({invariant}):\n"
         f"  spine-only: {sorted(spine_keys - direct_keys)[:5]}\n"  # type: ignore[type-var]: set difference produces sortable tuples
