@@ -1,3 +1,6 @@
+# pyright: reportArgumentType=false
+# BF.4/F: _DryRunBase is a structural fake that quacks like a Connection;
+# the dry-run capture path emit/compose accept it via duck typing.
 """AY.4.a — unit tests for `dry_run_capture` + `ScenarioContext.compose(dry_run=True)`.
 
 The dry-run capture infrastructure that AY.4.b's renderer + AY.4.c's
@@ -23,7 +26,6 @@ What's pinned:
 from __future__ import annotations
 
 import sqlite3
-from datetime import date
 from pathlib import Path
 
 import pytest

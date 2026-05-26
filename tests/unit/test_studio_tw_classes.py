@@ -18,6 +18,7 @@ These tests catch:
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -43,7 +44,7 @@ _HELPERS = (
 
 
 @pytest.mark.parametrize("helper", _HELPERS, ids=lambda h: h.__name__)
-def test_helper_returns_nonempty_utility_string(helper) -> None:  # type: ignore[no-untyped-def]: parametrize seam over zero-param helpers; runtime type-narrowing not needed
+def test_helper_returns_nonempty_utility_string(helper: "Callable[[], str]") -> None:
     """Every helper returns a non-empty `str` of space-separated
     Tailwind utilities."""
     result = helper()
@@ -63,7 +64,7 @@ def test_helper_returns_nonempty_utility_string(helper) -> None:  # type: ignore
 
 
 @pytest.mark.parametrize("helper", _HELPERS, ids=lambda h: h.__name__)
-def test_helper_takes_zero_params(helper) -> None:  # type: ignore[no-untyped-def]: parametrize seam over zero-param helpers; helper signature is constrained by L2.a guardrail not pyright
+def test_helper_takes_zero_params(helper: "Callable[[], str]") -> None:
     """L2.a guardrail enforcement — every helper is zero-param.
 
     A `card_classes(variant="editing")` that switches internally

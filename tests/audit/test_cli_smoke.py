@@ -1,3 +1,8 @@
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
+# BF.4/F: pypdf + pyHanko interop is essentially untyped (Any returned from
+# .get_object() / page.get('/Annots') / cert.subject / etc). Disabling the
+# Unknown family file-wide keeps the PDF-layout smoke readable without an
+# avalanche of cast(...) wrappers around library calls.
 """CLI smoke for ``recon-gen audit`` — shape + cover-page render.
 
 Verifies:
@@ -674,6 +679,7 @@ def test_audit_pdf_bookmarks_resolve_to_real_pages(
                 walk(item, depth + 1)
             else:
                 page_idx = reader.get_destination_page_number(item)
+                assert page_idx is not None, "bookmark missing page index"
                 entries.append((depth, item.title, page_idx + 1))
 
     walk(reader.outline)

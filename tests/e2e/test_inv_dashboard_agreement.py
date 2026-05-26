@@ -214,7 +214,7 @@ def _plant_anchor_day() -> date:
 
 
 @pytest.fixture(scope="module")
-def isolated_inv_cfg(cfg) -> "Iterator[Config]":  # cfg is conftest's Config — cross-slice rule: don't annotate it (slice 1 owns conftest)
+def isolated_inv_cfg(cfg: "Config") -> "Iterator[Config]":
     """Per-test cfg with an isolated table prefix + deployment name.
 
     The Investigation agreement test's seeded_l2_db is destructive —
@@ -456,11 +456,11 @@ def per_l2_app2_results(
 @pytest.fixture
 def qs_inv_driver(
     request: pytest.FixtureRequest,
-    cfg,  # conftest fixture (Config); cross-slice rule — slice 1 annotates
-    region,  # conftest fixture (str); cross-slice rule
-    account_id,  # conftest fixture (str); cross-slice rule
+    cfg: "Config",
+    region: str,
+    account_id: str,
     inv_dashboard_id: str,
-    inv_app,  # conftest fixture (App); cross-slice rule
+    inv_app: "App",
 ) -> "Iterator[QsEmbedDriver | None]":
     """Function-scoped ``QsEmbedDriver`` aimed at the deployed
     Investigation dashboard (mirrors L1's ``per_dialect_qs_driver``).
@@ -483,7 +483,7 @@ def qs_inv_driver(
     del inv_app  # only ensure ordering / tree-load — driver doesn't use it
     import boto3
 
-    qs = boto3.client("quicksight", region_name=region)
+    qs = boto3.client("quicksight", region_name=region)  # pyright: ignore[reportUnknownMemberType]: boto3.client is dynamic; service lookups are untyped without mypy_boto3_quicksight at runtime
     try:
         qs.describe_dashboard(
             AwsAccountId=account_id, DashboardId=inv_dashboard_id,
@@ -570,7 +570,7 @@ def _money_trail_spine_keys(
 
 def _spine_keys_for(
     invariant: str, conn: object, prefix: str,
-) -> set[object]:
+) -> set[Any]:
     """Run the spine ``Invariant.detect(conn)`` for the named
     invariant and project to the matview's natural-key tuple shape.
 

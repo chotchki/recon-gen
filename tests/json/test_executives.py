@@ -1,3 +1,7 @@
+# pyright: reportOptionalIterable=false, reportOptionalMemberAccess=false
+# BF.4/F: tests walk emitted-tree where Optional fields are populated by the
+# builder. Suppressing the Optional family at file scope keeps the assertions
+# readable without per-line asserts.
 """Unit tests for the Executives app.
 
 Greenfield app built directly on the Phase L tree primitives — no
@@ -20,11 +24,9 @@ from recon_gen.apps.executives.app import (
     SHEET_EXEC_MONEY_MOVED,
     SHEET_EXEC_TRANSACTION_VOLUME,
     build_executives_app,
-    build_executives_dashboard,
 )
 from recon_gen.apps.executives.datasets import (
     DS_EXEC_ACCOUNT_SUMMARY,
-    DS_EXEC_TRANSACTION_SUMMARY,
     EXEC_ACCOUNT_SUMMARY_CONTRACT,
     EXEC_TRANSACTION_SUMMARY_CONTRACT,
     build_all_datasets,
@@ -97,6 +99,7 @@ def test_dashboard_mirrors_analysis(exec_app: "_App") -> None:
     assert dashboard.DashboardId == _TEST_CFG.prefixed(
         "executives-dashboard",
     )
+    assert dashboard.Definition.Sheets is not None
     assert (
         len(dashboard.Definition.Sheets)
         == len(exec_app.analysis.sheets)
@@ -152,6 +155,7 @@ def test_datasets_declared_in_analysis(exec_analysis: "_ModelsAnalysis") -> None
         DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
         DS_EXEC_TRANSACTION_DAILY,
         DS_EXEC_TRANSACTION_LEGS,
+        DS_EXEC_TRANSACTION_SUMMARY,
     )
     from recon_gen.common.sheets.app_info import (
         DS_APP_INFO_LIVENESS, DS_APP_INFO_MATVIEWS,
@@ -232,8 +236,6 @@ def test_both_content_datasets_filter_to_status_posted():
     all-status count matching App Info's row_count). M.4.4.5 App Info
     datasets read schema/matview metadata + don't carry a status
     column either."""
-    from recon_gen.apps.executives.datasets import DS_EXEC_TRANSACTION_LEGS
-
     skip_ids = {
         _TEST_CFG.prefixed("exec-app-info-liveness-dataset"),
         _TEST_CFG.prefixed("exec-app-info-matviews-dataset"),

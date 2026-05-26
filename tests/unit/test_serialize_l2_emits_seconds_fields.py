@@ -31,6 +31,7 @@ import json
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -81,7 +82,7 @@ def test_serialize_l2_emits_seconds_companion_for_every_rail_with_cap() -> None:
         "model. Re-check the fixture before changing this test."
     )
 
-    raw_by_name: dict[str, dict] = {r["name"]: r for r in parsed["rails"]}
+    raw_by_name: dict[str, dict[str, Any]] = {r["name"]: r for r in parsed["rails"]}
     for rail in capped_rails:
         raw = raw_by_name[str(rail.name)]
         if rail.max_pending_age is not None:
@@ -116,7 +117,7 @@ def test_serialize_l2_does_not_emit_seconds_for_rails_without_cap() -> None:
     yaml_text = serialize_l2(instance)
     parsed = yaml.safe_load(yaml_text)
 
-    raw_by_name: dict[str, dict] = {r["name"]: r for r in parsed["rails"]}
+    raw_by_name: dict[str, dict[str, Any]] = {r["name"]: r for r in parsed["rails"]}
     for rail in instance.rails:
         raw = raw_by_name[str(rail.name)]
         if rail.max_pending_age is None:
@@ -195,6 +196,7 @@ def test_serialize_l2_drives_stuck_pending_matview_end_to_end() -> None:
         # Plant ONE Pending leg whose age >> cap. The matview's outer
         # filter is `WHERE max_pending_age_seconds IS NOT NULL AND
         # age_seconds > max_pending_age_seconds`.
+        assert pending_rail.max_pending_age is not None
         posting = _TEST_AS_OF - timedelta(
             seconds=int(pending_rail.max_pending_age.total_seconds()) + 3600,
         )
@@ -267,6 +269,7 @@ def test_serialize_l2_drives_stuck_unbundled_matview_end_to_end() -> None:
             r for r in instance.rails
             if r.max_unbundled_age is not None
         )
+        assert unbundled_rail.max_unbundled_age is not None
         posting = _TEST_AS_OF - timedelta(
             seconds=int(unbundled_rail.max_unbundled_age.total_seconds()) + 3600,
         )

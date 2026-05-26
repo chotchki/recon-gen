@@ -33,8 +33,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from recon_gen.common.db import _register_sqlite_aggregates, execute_script
 from recon_gen.common.l2.config_table import replace_config
@@ -88,7 +89,7 @@ def test_anomaly_lock_stable_across_runs() -> None:
     """Two independent fresh DBs running the same anomaly scenario
     produce equal locks. The property a checked-in semantic-lock
     artifact depends on."""
-    def _run() -> dict[str, frozenset]:
+    def _run() -> dict[str, frozenset[Any]]:
         gen = AnomalyInvariant().scenario_for(
             "CustomerSubledger", "CustomerSubledger",
             baseline_pair_count=20, spike_magnitude=100_000.0,
@@ -105,7 +106,7 @@ def test_anomaly_lock_stable_across_runs() -> None:
 
 def test_money_trail_lock_stable_across_runs() -> None:
     """Same property for the recursive-graph case."""
-    def _run() -> dict[str, frozenset]:
+    def _run() -> dict[str, frozenset[Any]]:
         gen = MoneyTrailInvariant().scenario_for(
             "CustomerSubledger", chain_length=3,
         )
@@ -259,7 +260,7 @@ def test_anomaly_lock_changes_when_spike_changes() -> None:
     stay the same, the spike's `intended` Violation identity differs
     only by bucket value; here we use small vs large spike to swing
     between '0-1' and '4+' sigma."""
-    def _lock(spike: float) -> dict[str, frozenset]:
+    def _lock(spike: float) -> dict[str, frozenset[Any]]:
         gen = AnomalyInvariant().scenario_for(
             "CustomerSubledger", "CustomerSubledger",
             baseline_pair_count=20, spike_magnitude=spike,
@@ -281,7 +282,7 @@ def test_anomaly_lock_changes_when_spike_changes() -> None:
 
 def test_money_trail_lock_changes_when_chain_length_changes() -> None:
     """Longer chain → more edges → different lock content."""
-    def _lock(chain_length: int) -> dict[str, frozenset]:
+    def _lock(chain_length: int) -> dict[str, frozenset[Any]]:
         gen = MoneyTrailInvariant().scenario_for(
             "CustomerSubledger", chain_length=chain_length,
         )
@@ -312,7 +313,7 @@ def test_l1_drift_and_l2_anomaly_compose_independently() -> None:
     """Final cross-cutting check: L2 invariants live alongside L1 in
     the same apply_scenario call. Each invariant fires from its own
     plant; the substrate doesn't care about layer."""
-    from recon_gen.common.spine import DriftGenerator, DriftInvariant
+    from recon_gen.common.spine import DriftInvariant
 
     drift_gen = DriftInvariant().scenario_for("CustomerSubledger", magnitude=5.0)
     anomaly_gen = AnomalyInvariant().scenario_for(
@@ -352,7 +353,7 @@ def test_view_sliced_lock_is_also_stable() -> None:
     semantic_lock + View.slice gives test code the choice of either
     the full detector output (raw lock) or the analyst-visible subset.
     """
-    def _sliced_run() -> dict[str, frozenset]:
+    def _sliced_run() -> dict[str, frozenset[Any]]:
         gen = AnomalyInvariant().scenario_for(
             "CustomerSubledger", "CustomerSubledger",
             baseline_pair_count=20, spike_magnitude=100_000.0,
@@ -374,7 +375,7 @@ def test_view_sliced_lock_is_also_stable() -> None:
 
 def test_money_trail_view_sliced_lock_stability() -> None:
     """Same property for the depth-threshold View on money_trail."""
-    def _sliced_run() -> dict[str, frozenset]:
+    def _sliced_run() -> dict[str, frozenset[Any]]:
         gen = MoneyTrailInvariant().scenario_for(
             "CustomerSubledger", chain_length=4,
         )

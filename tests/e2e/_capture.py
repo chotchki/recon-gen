@@ -21,8 +21,16 @@ fixture this test uses (``per_dialect_qs_driver``) wasn't wired.
 
 from __future__ import annotations
 
+from typing import Any
 
-def maybe_capture_on_failure(request, driver) -> None:  # type: ignore[no-untyped-def]: pytest types + driver duck-typing
+import pytest
+
+
+def maybe_capture_on_failure(request: pytest.FixtureRequest, driver: Any) -> None:  # noqa: ARG001
+    _maybe_capture_impl(request, driver)
+
+
+def _maybe_capture_impl(request: Any, driver: Any) -> None:
     """Bridge the pytest yield-fixture gap.
 
     Invoked from a fixture's teardown (after ``yield``), this consults

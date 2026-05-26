@@ -1,3 +1,9 @@
+# pyright: reportOptionalMemberAccess=false, reportAttributeAccessIssue=false, reportUnknownMemberType=false
+# BF.4/F: App.analysis is Optional in the tree type, but every L2 Flow Tracing
+# build sets it via populate_app_info_sheet / build_l2_flow_tracing_app — these
+# tests can rely on it being non-None. ParameterControlLike protocol omits
+# title/selectable_values which exist on every concrete subtype; the tests
+# check the concrete shape, not the protocol.
 """L2 Flow Tracing app rendered against every L2 instance (M.3.9).
 
 The L2 Flow Tracing dashboard's value claim is that it adapts to any
@@ -48,7 +54,6 @@ from recon_gen.apps.l2_flow_tracing.datasets import (
 )
 from recon_gen.common.l2 import L2Instance, load_instance
 from recon_gen.common.sheets.app_info import APP_INFO_SHEET_NAME
-from recon_gen.common.tree import KPI, Sankey, Table
 
 # Reuse the matrix definition from the seed-contract test so every
 # substep that adds an L2 instance to ``L2_INSTANCES`` automatically
@@ -61,7 +66,7 @@ _CFG = make_test_config()
 
 
 @pytest.fixture(params=L2_INSTANCES)
-def l2_instance(request) -> L2Instance:
+def l2_instance(request: pytest.FixtureRequest) -> L2Instance:
     """Load each parameterized L2 instance once per test."""
     return load_instance(request.param)
 

@@ -45,7 +45,7 @@ import pytest
 from recon_gen.common.env_keys import RECON_GEN_DEMO_DATABASE_URL
 from recon_gen.common.l2 import L2Instance
 from recon_gen.common.l2.loader import load_instance
-from recon_gen.common.l2.primitives import TwoLegRail
+from recon_gen.common.l2.primitives import TwoLegRail as TwoLegRail
 
 
 _SASQUATCH_PR_YAML = Path(__file__).parent.parent / "l2" / "sasquatch_pr.yaml"
@@ -259,27 +259,31 @@ class TestL2CoverageAssertions:
 
         rail_names = {str(r.name) for r in sasquatch_instance.rails}
         missing: list[str] = []
+        # AB.6 — Chain has `children: tuple[ChainChildSpec, ...]`, not `.child`.
+        # Walk every child spec; skip TransferTemplate-parented or
+        # TransferTemplate-childed chains.
         for entry in sasquatch_instance.chains:
             parent = str(entry.parent)
-            child = str(entry.child)
             if parent not in rail_names:
-                continue  # skip TransferTemplate-parented chains
-            if child not in rail_names:
-                continue  # skip TransferTemplate-childed chains
-            with demo_db_conn.cursor() as cur:
-                cur.execute(
-                    f"""SELECT COUNT(*) FROM {view} child
-                    WHERE child.rail_name = %s
-                      AND EXISTS (
-                          SELECT 1 FROM {view} parent
-                          WHERE parent.rail_name = %s
-                          AND parent.transfer_id = child.transfer_parent_id
-                      )""",
-                    (child, parent),
-                )
-                count = cur.fetchone()[0]
-            if count == 0:
-                missing.append(f"{parent} -> {child}")
+                continue
+            for child_spec in entry.children:
+                child = str(child_spec.name)
+                if child not in rail_names:
+                    continue
+                with demo_db_conn.cursor() as cur:
+                    cur.execute(
+                        f"""SELECT COUNT(*) FROM {view} child
+                        WHERE child.rail_name = %s
+                          AND EXISTS (
+                              SELECT 1 FROM {view} parent
+                              WHERE parent.rail_name = %s
+                              AND parent.transfer_id = child.transfer_parent_id
+                          )""",
+                        (child, parent),
+                    )
+                    count = cur.fetchone()[0]
+                if count == 0:
+                    missing.append(f"{parent} -> {child}")
         assert not missing, (
             f"R.5.d — Chains with no completed parent → child firing "
             f"pair (chain-emit regression): {missing}"

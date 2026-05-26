@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from starlette.testclient import TestClient
 
@@ -161,7 +161,7 @@ def test_get_visual_data_returns_swap_fragment() -> None:
     ``<script type="application/json" class="chart-data">`` tag
     with the d3 chart data."""
     client = _make_test_app(
-        lambda _vid, _params: {
+        lambda _vid, _params: {  # pyright: ignore[reportUnknownLambdaType]: _make_test_app accepts (str, dict[str,str])->Any
             "nodes": [{"name": "A"}, {"name": "B"}],
             "links": [{"source": 0, "target": 1, "value": 5}],
         },
@@ -291,7 +291,7 @@ def test_response_payload_round_trips_through_json() -> None:
     ``JSON.parse``)."""
     payload = {"nodes": [{"name": "X"}], "links": [], "extra": 42}
 
-    client = _make_test_app(lambda _v, _p: payload)
+    client = _make_test_app(lambda _v, _p: payload)  # pyright: ignore[reportUnknownLambdaType]: _make_test_app accepts (str, dict[str,str])->Any
     body = client.get(_VISUAL_DATA_PATH).text
     start = body.index(">") + 1
     end = body.index("</script>", start)
@@ -331,9 +331,9 @@ def test_multi_dashboard_listing_and_per_dashboard_routing() -> None:
 
     fetcher_calls: dict[str, list[str]] = {"a": [], "b": []}
 
-    def make_fetcher(label: str):  # type: ignore[no-untyped-def]: returns a closure with non-trivial fetch signature
-        def fetch(visual_id: str, _params: dict[str, str]) -> Any:
-            fetcher_calls[label].append(visual_id)
+    def make_fetcher(label: str) -> "Callable[[Any, Any], Any]":
+        def fetch(visual_id: Any, _params: Any) -> Any:
+            fetcher_calls[label].append(str(visual_id))
             return {"label": label}
         return fetch
 

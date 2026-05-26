@@ -1,3 +1,4 @@
+# pyright: reportTypedDictNotRequiredAccess=false
 """API tests: validate the deployed Executives dashboard definition.
 
 Four sheets: Getting Started + Account Coverage + Transaction Volume
@@ -9,7 +10,7 @@ load-bearing — without it both visuals would count every account
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -37,12 +38,13 @@ def exec_dashboard_definition(
     return resp["Definition"]
 
 
-def _visual_ids(sheet: dict) -> list[str]:
+def _visual_ids(sheet: dict[str, Any]) -> list[str]:
     out: list[str] = []
-    for v in sheet.get("Visuals", []):
+    for v in cast("list[dict[str, Any]]", sheet.get("Visuals", [])):
         for vtype in v.values():
             if isinstance(vtype, dict) and "VisualId" in vtype:
-                out.append(vtype["VisualId"])
+                vt = cast("dict[str, Any]", vtype)
+                out.append(str(vt["VisualId"]))
     return out
 
 
@@ -110,7 +112,7 @@ class TestVisuals:
     ) -> None:
         all_ids: list[str] = []
         for sheet in exec_dashboard_definition["Sheets"]:
-            all_ids.extend(_visual_ids(sheet))
+            all_ids.extend(_visual_ids(cast("dict[str, Any]", sheet)))
         assert len(all_ids) == len(set(all_ids)), (
             f"Duplicate visual IDs: "
             f"{[vid for vid in all_ids if all_ids.count(vid) > 1]}"
@@ -121,27 +123,27 @@ class TestVisuals:
         exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
     ) -> None:
         for sheet in exec_dashboard_definition["Sheets"]:
-            for v in sheet.get("Visuals", []):
+            for v in cast("list[dict[str, Any]]", sheet.get("Visuals", [])):
                 for vtype in v.values():
                     if not (isinstance(vtype, dict) and "VisualId" in vtype):
                         continue
-                    text = (
-                        vtype.get("Subtitle", {})
-                             .get("FormatText", {})
-                             .get("PlainText", "")
-                    )
+                    vt = cast("dict[str, Any]", vtype)
+                    subtitle_dict = cast("dict[str, Any]", vt.get("Subtitle", {}))
+                    fmt_dict = cast("dict[str, Any]", subtitle_dict.get("FormatText", {}))
+                    text = str(fmt_dict.get("PlainText", ""))
                     assert len(text) > 10, (
-                        f"Visual '{vtype['VisualId']}' missing subtitle"
+                        f"Visual '{vt['VisualId']}' missing subtitle"
                     )
 
 
 class TestParameters:
-    def _names(self, definition: dict) -> set[str]:
+    def _names(self, definition: dict[str, Any]) -> set[str]:
         names: set[str] = set()
-        for p in definition.get("ParameterDeclarations", []):
+        for p in cast("list[dict[str, Any]]", definition.get("ParameterDeclarations", [])):
             for decl in p.values():
                 if isinstance(decl, dict) and "Name" in decl:
-                    names.add(decl["Name"])
+                    d = cast("dict[str, Any]", decl)
+                    names.add(str(d["Name"]))
         return names
 
     def test_all_parameters_declared(
@@ -154,8 +156,9 @@ class TestParameters:
         # parameter controls. The tree-walked set is the source of
         # truth; if a param ever gets added, this catches the
         # deploy-side miss.
+        assert exec_app.analysis is not None
         expected = {str(p.name) for p in exec_app.analysis.parameters}
-        assert self._names(exec_dashboard_definition) == expected
+        assert self._names(cast("dict[str, Any]", exec_dashboard_definition)) == expected
 
 
 class TestFilterGroups:
@@ -166,6 +169,7 @@ class TestFilterGroups:
     ) -> None:
         groups = exec_dashboard_definition.get("FilterGroups", [])
         deployed = {g["FilterGroupId"] for g in groups}
+        assert exec_app.analysis is not None
         expected = {
             str(fg.filter_group_id)
             for fg in exec_app.analysis.filter_groups

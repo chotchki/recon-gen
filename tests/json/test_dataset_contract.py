@@ -7,12 +7,17 @@ after M.4.3 + M.4.4 deleted the AR + PR apps.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, Callable
+
 import pytest
 
 from recon_gen.common.config import Config
 from tests._test_helpers import make_test_config
 from recon_gen.common.dataset_contract import ColumnSpec, DatasetContract
 from recon_gen.apps.investigation import datasets as inv_datasets
+
+if TYPE_CHECKING:
+    from recon_gen.common.models import DataSet
 
 
 @pytest.fixture()
@@ -27,10 +32,12 @@ def cfg() -> Config:
     )
 
 
-def _extract_column_names(dataset) -> list[str]:
+def _extract_column_names(dataset: "DataSet") -> list[str]:
     """Pull the InputColumn names out of a built DataSet."""
     for physical in dataset.PhysicalTableMap.values():
-        return [c.Name for c in physical.CustomSql.Columns]
+        assert physical.CustomSql is not None
+        cols = physical.CustomSql.Columns or []
+        return [c.Name for c in cols]
     raise AssertionError("No PhysicalTable found")
 
 
@@ -54,7 +61,12 @@ class TestInvContracts:
         INV_BUILDERS_AND_CONTRACTS,
         ids=[c.columns[0].name for _, c in INV_BUILDERS_AND_CONTRACTS],
     )
-    def test_columns_match_contract(self, cfg, builder, contract):
+    def test_columns_match_contract(
+        self,
+        cfg: Config,
+        builder: "Callable[..., Any]",
+        contract: DatasetContract,
+    ) -> None:
         ds = builder(cfg)
         actual = _extract_column_names(ds)
         assert actual == contract.column_names
@@ -65,14 +77,14 @@ class TestInvContracts:
 # ---------------------------------------------------------------------------
 
 class TestDatasetContract:
-    def test_column_names_property(self):
+    def test_column_names_property(self) -> None:
         c = DatasetContract(columns=[
             ColumnSpec("a", "STRING"),
             ColumnSpec("b", "DECIMAL"),
         ])
         assert c.column_names == ["a", "b"]
 
-    def test_to_input_columns_types(self):
+    def test_to_input_columns_types(self) -> None:
         c = DatasetContract(columns=[
             ColumnSpec("x", "INTEGER"),
         ])
@@ -122,10 +134,11 @@ class TestOracleLowercaseAliasWrapper:
             visual_identifier=f"probe-vi-{id(contract)}",  # unique per call
         )
         for physical in ds.PhysicalTableMap.values():
+            assert physical.CustomSql is not None
             return physical.CustomSql.SqlQuery
         raise AssertionError("no PhysicalTable")
 
-    def test_oracle_wraps_sql_with_lowercase_aliases(self):
+    def test_oracle_wraps_sql_with_lowercase_aliases(self) -> None:
         wrapped = self._build(
             self._oracle_cfg(),
             "SELECT * FROM spec_example_drift",
@@ -134,12 +147,12 @@ class TestOracleLowercaseAliasWrapper:
         assert 'qs_inner."AMOUNT" AS "amount"' in wrapped
         assert "FROM (\nSELECT * FROM spec_example_drift\n) qs_inner" in wrapped
 
-    def test_postgres_passes_sql_through_unchanged(self):
+    def test_postgres_passes_sql_through_unchanged(self) -> None:
         sql = "SELECT * FROM spec_example_drift"
         emitted = self._build(self._pg_cfg(), sql)
         assert emitted == sql
 
-    def test_oracle_wrapper_alias_avoids_leading_underscore(self):
+    def test_oracle_wrapper_alias_avoids_leading_underscore(self) -> None:
         # Oracle ORA-00911: identifiers must start with a letter, so
         # an alias like ``_qs`` would fail at parse time. The chosen
         # ``qs_inner`` alias starts with a letter and is unlikely to

@@ -47,7 +47,7 @@ class _FakeCursor:
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(self, *exc: object) -> bool:
         return False
 
 
@@ -112,20 +112,20 @@ def test_oracle_limit_branch_renders_fetch_first() -> None:
             received["sql"] = sql
             received["params"] = params
 
-        def fetchall(self):
+        def fetchall(self) -> list[Any]:
             return []
 
         def close(self) -> None:
             pass
 
-        def __enter__(self):
+        def __enter__(self) -> "_SnoopCursor":
             return self
 
-        def __exit__(self, *exc):
+        def __exit__(self, *exc: object) -> bool:
             return False
 
     class _SnoopConn:
-        def cursor(self):
+        def cursor(self) -> "_SnoopCursor":
             return _SnoopCursor()
 
     _LAYER1.query_matview_rows(

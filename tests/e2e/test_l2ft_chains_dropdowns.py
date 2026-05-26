@@ -28,7 +28,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
 @pytest.fixture(autouse=True)
-def _require_chains(l2ft_l2_instance: "L2Instance") -> None:
+def _require_chains(l2ft_l2_instance: "L2Instance") -> None:  # pyright: ignore[reportUnusedFunction]: pytest autouse fixture — invoked by name, not directly accessed
     # Fast-exit when the deployed L2 declares zero chains — see
     # `conftest.require_l2ft_feature`. A non-zero `declared_chain_parents`
     # is necessary but not sufficient (a fuzz seed may fire no instances),
@@ -39,7 +39,7 @@ def _require_chains(l2ft_l2_instance: "L2Instance") -> None:
 
 @pytest.mark.parametrize("dropdown_title", ["Chain", "Completion"])
 def test_chains_dropdown_narrows_does_not_empty(
-    l2ft_dashboard_driver: tuple["DashboardDriver", str], dropdown_title,
+    l2ft_dashboard_driver: tuple["DashboardDriver", str], dropdown_title: str,
 ) -> None:
     """Each declared Chain parent — and each Completion status
     (Completed / Incomplete) — must leave the Chain Instances table

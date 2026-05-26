@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -72,9 +72,9 @@ def pytest_runtest_makereport(
     Standard pytest idiom.
     """
     del call  # unused; required by the pytest hook signature
-    outcome = yield
-    rep = outcome.get_result()  # type: ignore[attr-defined]: pytest hookwrapper yield-result outcome shape isn't pre-typed
-    setattr(item, f"rep_{rep.when}", rep)
+    outcome = yield  # pyright: ignore[reportUnknownVariableType]: pytest hookwrapper yield is Generator[None, _Result, None] — _Result private
+    rep: Any = outcome.get_result()  # type: ignore[attr-defined]
+    setattr(item, f"rep_{rep.when!s}", rep)  # pyright: ignore[reportUnknownMemberType]: outcome.get_result() return is Any-cascaded
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +153,7 @@ def qs_client(region: str) -> "QuickSightClient":
     noise.
     """
     import boto3
-    return boto3.client("quicksight", region_name=region)
+    return boto3.client("quicksight", region_name=region)  # pyright: ignore[reportUnknownMemberType]: boto3.client dynamic service overload
 
 
 @pytest.fixture
@@ -564,7 +564,7 @@ def _parametrized_dashboard_driver(
 
         from tests.e2e._drivers._lifecycle import qs_driver_or_none
 
-        qs = boto3.client("quicksight", region_name=region)
+        qs = boto3.client("quicksight", region_name=region)  # pyright: ignore[reportUnknownMemberType]: boto3.client dynamic
         try:
             qs.describe_dashboard(
                 AwsAccountId=account_id, DashboardId=dashboard_id,

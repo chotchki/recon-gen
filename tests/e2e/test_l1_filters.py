@@ -24,7 +24,7 @@ data-agnostic per the no-hardcoded-data rule:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 
 from decimal import Decimal
 
@@ -46,19 +46,24 @@ from recon_gen.common.config import Config
 
 if TYPE_CHECKING:
     from recon_gen.common.l2 import L2Instance
+    from recon_gen.common.models import DatasetParameter
     from tests.e2e._drivers import DashboardDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
-def _sql_and_params_for(builder, cfg, l2):  # type: ignore[no-untyped-def]: builder is a (cfg, l2)→DataSet callable; cfg/l2 are runtime fixture values
+def _sql_and_params_for(
+    builder: "Callable[..., Any]", cfg: Config, l2: "L2Instance",
+) -> tuple[str, list["DatasetParameter"]]:
     """Lift a dataset's CustomSql + DatasetParameters by calling the
     production builder (single source of truth). Mirrors BG.2's
     ``_summary_sql_and_params`` shape — every BG.X honest gate runs
     the SAME SQL the visual issues."""
     ds = builder(cfg, l2)
-    sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
-    return sql, list(ds.DatasetParameters)
+    physical = next(iter(ds.PhysicalTableMap.values()))
+    assert physical.CustomSql is not None, "Dataset missing CustomSql"
+    sql = physical.CustomSql.SqlQuery
+    return sql, list(ds.DatasetParameters or [])
 
 
 @pytest.mark.xfail(
@@ -278,7 +283,7 @@ def test_bg6_pending_aging_kpi_chart_table_triple_identity(
     # COUNT(transaction_id), category=stuck_pending_aging_bucket,
     # stacked by rail_name. Sum across all bars = total count =
     # dataset row count. Bucket aggregation from the dataset rows:
-    bucket_sum = sum(1 for row in rows)  # one row per transaction_id
+    bucket_sum = sum(1 for _row in rows)  # one row per transaction_id
     assert bucket_sum == expected_count, (
         f"Chart bar sum (per-bucket COUNT) = {bucket_sum} ≠ "
         f"dataset row count = {expected_count}. v11.21.0 cold-read "

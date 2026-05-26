@@ -1,3 +1,5 @@
+# pyright: reportArgumentType=false, reportCallIssue=false, reportUntypedFunctionDecorator=false
+# BF.4/F: see test_html_executives_wiring.py.
 """Y.2.app2.cde.l2ft-wiring — L2 Flow Tracing → App2 wiring smoke test.
 
 Builds the real L2FT tree + datasets, hands them to

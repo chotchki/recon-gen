@@ -1,3 +1,4 @@
+# pyright: reportTypedDictNotRequiredAccess=false
 """API tests: validate the deployed L1 dashboard definition.
 
 M.2c.3. EVERY assertion derives from the `l1_app` tree per the
@@ -9,7 +10,7 @@ nothing here knows about specific Sasquatch values.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -37,28 +38,33 @@ def l1_dashboard_definition(
     return resp["Definition"]
 
 
-def _visual_titles(sheet: dict) -> set[str]:
+def _visual_titles(sheet: dict[str, Any]) -> set[str]:
     """Pull the analyst-facing titles off every visual on a sheet."""
     out: set[str] = set()
-    for v in sheet.get("Visuals", []):
+    for v in cast("list[dict[str, Any]]", sheet.get("Visuals", [])):
         for vtype in v.values():
             if not isinstance(vtype, dict) or "VisualId" not in vtype:
                 continue
-            text = (
-                vtype.get("Title", {})
-                     .get("FormatText", {})
-                     .get("PlainText", "")
-            )
+            vt = cast("dict[str, Any]", vtype)
+            title_dict = cast("dict[str, Any]", vt.get("Title", {}))
+            fmt_dict = cast("dict[str, Any]", title_dict.get("FormatText", {}))
+            text = str(fmt_dict.get("PlainText", ""))
             if text:
                 out.add(text)
     return out
 
 
 def _tree_visual_titles(l1_app: "App", sheet_name: str) -> set[str]:
+    assert l1_app.analysis is not None, "l1_app has no analysis"
     sheet = next(
         s for s in l1_app.analysis.sheets if s.name == sheet_name
     )
-    return {v.title for v in sheet.visuals if getattr(v, "title", None)}
+    out: set[str] = set()
+    for v in sheet.visuals:
+        title = getattr(v, "title", None)
+        if title:
+            out.add(str(title))
+    return out
 
 
 # -- Sheets ------------------------------------------------------------------
@@ -71,6 +77,7 @@ class TestSheets:
         l1_app: "App",
     ) -> None:
         deployed = len(l1_dashboard_definition["Sheets"])
+        assert l1_app.analysis is not None
         expected = len(l1_app.analysis.sheets)
         assert deployed == expected
 
@@ -80,6 +87,7 @@ class TestSheets:
         l1_app: "App",
     ) -> None:
         deployed = [s["Name"] for s in l1_dashboard_definition["Sheets"]]
+        assert l1_app.analysis is not None
         expected = [s.name for s in l1_app.analysis.sheets]
         assert deployed == expected
 
@@ -110,7 +118,7 @@ class TestVisuals:
         missing_per_sheet: dict[str, set[str]] = {}
         for sheet in l1_dashboard_definition["Sheets"]:
             name = sheet["Name"]
-            deployed = _visual_titles(sheet)
+            deployed = _visual_titles(cast("dict[str, Any]", sheet))
             expected = _tree_visual_titles(l1_app, name)
             missing = expected - deployed
             if missing:
@@ -125,6 +133,7 @@ class TestVisuals:
         l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
         l1_app: "App",
     ) -> None:
+        assert l1_app.analysis is not None
         for sheet in l1_dashboard_definition["Sheets"]:
             name = sheet["Name"]
             tree_sheet = next(
@@ -142,17 +151,16 @@ class TestVisuals:
         l1_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
     ) -> None:
         for sheet in l1_dashboard_definition["Sheets"]:
-            for v in sheet.get("Visuals", []):
+            for v in cast("list[dict[str, Any]]", sheet.get("Visuals", [])):
                 for vtype in v.values():
                     if not (isinstance(vtype, dict) and "VisualId" in vtype):
                         continue
-                    text = (
-                        vtype.get("Subtitle", {})
-                             .get("FormatText", {})
-                             .get("PlainText", "")
-                    )
+                    vt = cast("dict[str, Any]", vtype)
+                    subtitle_dict = cast("dict[str, Any]", vt.get("Subtitle", {}))
+                    fmt_dict = cast("dict[str, Any]", subtitle_dict.get("FormatText", {}))
+                    text = str(fmt_dict.get("PlainText", ""))
                     assert len(text) > 10, (
-                        f"Visual {vtype['VisualId']!r} missing subtitle"
+                        f"Visual {vt['VisualId']!r} missing subtitle"
                     )
 
 
@@ -160,12 +168,13 @@ class TestVisuals:
 
 
 class TestParameters:
-    def _names(self, definition: dict) -> set[str]:
+    def _names(self, definition: dict[str, Any]) -> set[str]:
         names: set[str] = set()
-        for p in definition.get("ParameterDeclarations", []):
+        for p in cast("list[dict[str, Any]]", definition.get("ParameterDeclarations", [])):
             for decl in p.values():
                 if isinstance(decl, dict) and "Name" in decl:
-                    names.add(decl["Name"])
+                    d = cast("dict[str, Any]", decl)
+                    names.add(str(d["Name"]))
         return names
 
     def test_all_parameters_declared(
@@ -176,7 +185,8 @@ class TestParameters:
         """Tree's parameter set is the source of truth — deployed must
         match exactly. M.2b.1 added P_L1_DATE_START + P_L1_DATE_END;
         if M.2b.4+ adds parameters they show up here automatically."""
-        deployed = self._names(l1_dashboard_definition)
+        deployed = self._names(cast("dict[str, Any]", l1_dashboard_definition))
+        assert l1_app.analysis is not None
         expected = {str(p.name) for p in l1_app.analysis.parameters}
         assert deployed == expected
 
@@ -192,6 +202,7 @@ class TestFilterGroups:
     ) -> None:
         groups = l1_dashboard_definition.get("FilterGroups", [])
         deployed = {g["FilterGroupId"] for g in groups}
+        assert l1_app.analysis is not None
         expected = {
             str(fg.filter_group_id) for fg in l1_app.analysis.filter_groups
         }

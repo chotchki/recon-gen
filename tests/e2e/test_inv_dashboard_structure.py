@@ -1,3 +1,4 @@
+# pyright: reportTypedDictNotRequiredAccess=false
 """API tests: validate the deployed Investigation dashboard definition.
 
 Five sheets: Getting Started + four investigation surfaces (Recipient
@@ -15,7 +16,7 @@ positionally).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -46,36 +47,42 @@ def inv_dashboard_definition(
 # L.11.1 — `inv_app` fixture promoted to session scope in conftest.py.
 
 
-def _visual_ids(sheet: dict) -> list[str]:
+def _visual_ids(sheet: dict[str, Any]) -> list[str]:
     out: list[str] = []
-    for v in sheet.get("Visuals", []):
+    for v in cast("list[dict[str, Any]]", sheet.get("Visuals", [])):
         for vtype in v.values():
             if isinstance(vtype, dict) and "VisualId" in vtype:
-                out.append(vtype["VisualId"])
+                vt = cast("dict[str, Any]", vtype)
+                out.append(str(vt["VisualId"]))
     return out
 
 
-def _visual_titles(sheet: dict) -> set[str]:
+def _visual_titles(sheet: dict[str, Any]) -> set[str]:
     out: set[str] = set()
-    for v in sheet.get("Visuals", []):
+    for v in cast("list[dict[str, Any]]", sheet.get("Visuals", [])):
         for vtype in v.values():
             if not isinstance(vtype, dict) or "VisualId" not in vtype:
                 continue
-            text = (
-                vtype.get("Title", {})
-                     .get("FormatText", {})
-                     .get("PlainText", "")
-            )
+            vt = cast("dict[str, Any]", vtype)
+            title_dict = cast("dict[str, Any]", vt.get("Title", {}))
+            fmt_dict = cast("dict[str, Any]", title_dict.get("FormatText", {}))
+            text = str(fmt_dict.get("PlainText", ""))
             if text:
                 out.add(text)
     return out
 
 
 def _tree_visual_titles(inv_app: "App", sheet_name: str) -> set[str]:
+    assert inv_app.analysis is not None, "inv_app has no analysis"
     sheet = next(
         s for s in inv_app.analysis.sheets if s.name == sheet_name
     )
-    return {v.title for v in sheet.visuals if getattr(v, "title", None)}
+    out: set[str] = set()
+    for v in sheet.visuals:
+        title = getattr(v, "title", None)
+        if title:
+            out.add(str(title))
+    return out
 
 
 class TestSheets:
@@ -141,7 +148,7 @@ class TestVisuals:
     ) -> None:
         all_ids: list[str] = []
         for sheet in inv_dashboard_definition["Sheets"]:
-            all_ids.extend(_visual_ids(sheet))
+            all_ids.extend(_visual_ids(cast("dict[str, Any]", sheet)))
         assert len(all_ids) == len(set(all_ids)), (
             f"Duplicate visual IDs: "
             f"{[vid for vid in all_ids if all_ids.count(vid) > 1]}"
@@ -152,17 +159,16 @@ class TestVisuals:
         inv_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
     ) -> None:
         for sheet in inv_dashboard_definition["Sheets"]:
-            for v in sheet.get("Visuals", []):
+            for v in cast("list[dict[str, Any]]", sheet.get("Visuals", [])):
                 for vtype in v.values():
                     if not (isinstance(vtype, dict) and "VisualId" in vtype):
                         continue
-                    text = (
-                        vtype.get("Subtitle", {})
-                             .get("FormatText", {})
-                             .get("PlainText", "")
-                    )
+                    vt = cast("dict[str, Any]", vtype)
+                    subtitle_dict = cast("dict[str, Any]", vt.get("Subtitle", {}))
+                    fmt_dict = cast("dict[str, Any]", subtitle_dict.get("FormatText", {}))
+                    text = str(fmt_dict.get("PlainText", ""))
                     assert len(text) > 10, (
-                        f"Visual '{vtype['VisualId']}' missing subtitle"
+                        f"Visual '{vt['VisualId']}' missing subtitle"
                     )
 
     def test_money_trail_has_sankey_and_table(
@@ -174,7 +180,7 @@ class TestVisuals:
             s for s in inv_dashboard_definition["Sheets"]
             if s["Name"] == "Money Trail"
         )
-        deployed = _visual_titles(sheet)
+        deployed = _visual_titles(cast("dict[str, Any]", sheet))
         expected = _tree_visual_titles(inv_app, "Money Trail")
         missing = expected - deployed
         assert not missing, (
@@ -198,7 +204,7 @@ class TestVisuals:
             s for s in inv_dashboard_definition["Sheets"]
             if s["Name"] == "Account Network"
         )
-        deployed = _visual_titles(sheet)
+        deployed = _visual_titles(cast("dict[str, Any]", sheet))
         expected = _tree_visual_titles(inv_app, "Account Network")
         missing = expected - deployed
         assert not missing, (
@@ -212,12 +218,13 @@ class TestVisuals:
 
 
 class TestParameters:
-    def _names(self, definition: dict) -> set[str]:
+    def _names(self, definition: dict[str, Any]) -> set[str]:
         names: set[str] = set()
-        for p in definition.get("ParameterDeclarations", []):
+        for p in cast("list[dict[str, Any]]", definition.get("ParameterDeclarations", [])):
             for decl in p.values():
                 if isinstance(decl, dict) and "Name" in decl:
-                    names.add(decl["Name"])
+                    d = cast("dict[str, Any]", decl)
+                    names.add(str(d["Name"]))
         return names
 
     def test_all_parameters_declared(
@@ -229,8 +236,9 @@ class TestParameters:
         # match exactly. K.4.3 fanout-threshold + K.4.4 anomalies-sigma +
         # K.4.5 money-trail-root + max-hops + min-amount + K.4.8 anchor +
         # min-amount = 7 today; the assert tracks adds/removes automatically.
+        assert inv_app.analysis is not None
         expected = {str(p.name) for p in inv_app.analysis.parameters}
-        assert self._names(inv_dashboard_definition) == expected
+        assert self._names(cast("dict[str, Any]", inv_dashboard_definition)) == expected
 
 
 class TestFilterGroups:
@@ -241,6 +249,7 @@ class TestFilterGroups:
     ) -> None:
         groups = inv_dashboard_definition.get("FilterGroups", [])
         deployed = {g["FilterGroupId"] for g in groups}
+        assert inv_app.analysis is not None
         expected = {str(fg.filter_group_id) for fg in inv_app.analysis.filter_groups}
         assert deployed == expected
 

@@ -1,3 +1,6 @@
+# pyright: reportOptionalIterable=false, reportOptionalSubscript=false
+# BF.4/F: tests build models with Optional fields set; iterating/subscripting
+# the returned dataclasses needs Optional carve-outs that runtime asserts cover.
 """Unit tests for model serialization."""
 
 import json
@@ -81,7 +84,6 @@ class TestStripNones:
             Subtitle=None,
         )
         visual = Visual(KPIVisual=kpi)
-        out = visual.to_aws_json() if hasattr(visual, "to_aws_json") else {}
         # Use the internal helper directly
         from recon_gen.common.models import _strip_nones, asdict
         out = _strip_nones(asdict(visual))
@@ -409,6 +411,7 @@ class TestConfigTags:
             extra_tags={"Environment": "prod", "Team": "finance"},
         )
         tags = cfg.tags()
+        assert tags is not None
         # ManagedBy + Deployment (always emitted) + Environment + Team
         assert len(tags) == 4
         keys = [t.Key for t in tags]
@@ -420,6 +423,7 @@ class TestConfigTags:
     def test_common_tag_always_first(self):
         cfg = make_test_config(extra_tags={"Foo": "bar"})
         tags = cfg.tags()
+        assert tags is not None
         assert tags[0].Key == MANAGED_TAG_KEY
 
     def test_deployment_tag_carries_cfg_value(self):
@@ -651,6 +655,7 @@ class TestConfigDatasourceArnDerivation:
             datasource_arn="arn:aws:quicksight:us-west-2:111122223333:datasource/custom",
             demo_database_url="postgresql://u:p@h:5432/db",
         )
+        assert cfg.datasource_arn is not None
         assert "custom" in cfg.datasource_arn
 
     def test_raises_without_arn_or_demo_url(self):

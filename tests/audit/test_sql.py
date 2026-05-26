@@ -1,3 +1,6 @@
+# pyright: reportArgumentType=false
+# BF.4/F: test uses structural _FakeCfg / _FakeInstance fakes that satisfy
+# the runtime contract of Config / L2Instance but aren't subclasses.
 """Locked SQL snapshots for the per-invariant audit queries (U.8.c).
 
 The audit PDF queries the L1 invariant matviews + base tables directly

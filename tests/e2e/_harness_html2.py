@@ -29,10 +29,9 @@ get the dialect parity tests in the same run as the QS tests.
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -125,7 +124,7 @@ def _detach_app2_log_handler(handler: logging.FileHandler | None) -> None:
         pass
 
 
-@contextmanager
+@contextmanager  # pyright: ignore[reportDeprecated]: contextlib.contextmanager not actually deprecated; pyright false positive on stack
 def html2_server(
     *,
     tree_app: App,
@@ -345,7 +344,7 @@ def make_live_db_fetchers_for_app(
             cached["pool"] = pool
         return pool
 
-    async def visual_fetcher(visual_id: str, params: Any) -> Any:
+    async def visual_fetcher(visual_id: Any, params: Any) -> Any:
         fn = cached.get("vf")
         if fn is None:
             fn = make_tree_db_fetcher(tree_app, cfg, pool=await _pool())
@@ -386,8 +385,8 @@ def make_recording_fetcher(
     """
     calls: list[tuple[str, dict[str, str]]] = []
 
-    def fetcher(visual_id: str, params: dict[str, str]) -> dict[str, Any]:
-        calls.append((visual_id, dict(params)))
+    def fetcher(visual_id: Any, params: Any) -> dict[str, Any]:
+        calls.append((str(visual_id), dict(params)))
         return response
 
     return fetcher, calls

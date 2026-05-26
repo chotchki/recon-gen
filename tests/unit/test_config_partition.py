@@ -14,15 +14,14 @@ then the first ``principal_arns`` entry, then ``aws`` as fallback.
 
 from __future__ import annotations
 
-import pytest
+from typing import Any
 
 from recon_gen.common.config import Config
-from recon_gen.common.sql import Dialect
 
 
-def _cfg(**overrides) -> Config:
+def _cfg(**overrides: Any) -> Config:
     """Minimal Config with one of every required field; override per test."""
-    base = dict(
+    base: dict[str, Any] = dict(
         aws_account_id="111122223333",
         aws_region="us-east-1",
         datasource_arn="arn:aws:quicksight:us-east-1:111122223333:datasource/x",

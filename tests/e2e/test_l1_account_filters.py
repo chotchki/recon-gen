@@ -21,7 +21,7 @@ choice.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from decimal import Decimal
 
@@ -41,18 +41,23 @@ from recon_gen.common.config import Config
 
 if TYPE_CHECKING:
     from recon_gen.common.l2 import L2Instance
+    from recon_gen.common.models import DatasetParameter
     from tests.e2e._drivers import DashboardDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
-def _summary_sql_and_params(cfg, l2):  # type: ignore[no-untyped-def]: cfg/l2 are runtime fixture values — annotating would force imports here
+def _summary_sql_and_params(
+    cfg: Config, l2: "L2Instance",
+) -> tuple[str, list["DatasetParameter"]]:
     """Lift the Daily Statement Summary dataset's SQL + DatasetParameters
     by calling the production builder. BG.2's honest gate compares
     rendered KPI values to the SAME SQL the dashboard issues."""
     ds = build_daily_statement_summary_dataset(cfg, l2)
-    sql_str = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
-    return sql_str, list(ds.DatasetParameters)
+    physical = next(iter(ds.PhysicalTableMap.values()))
+    assert physical.CustomSql is not None, "Dataset missing CustomSql"
+    sql_str = physical.CustomSql.SqlQuery
+    return sql_str, list(ds.DatasetParameters or [])
 
 
 # AA.B — Daily Statement Role cascade --------------------------------------
@@ -263,7 +268,7 @@ _KPI_TO_COLUMN = {
 }
 
 
-def _read_kpis_as_decimals(driver) -> dict[str, Decimal]:  # type: ignore[no-untyped-def]: driver is a DashboardDriver — annotating would force the import at module scope
+def _read_kpis_as_decimals(driver: "DashboardDriver") -> dict[str, Decimal]:
     return {
         title: _parse_currency_kpi(driver.kpi_value(title))
         for title in _KPI_TO_COLUMN
@@ -271,7 +276,12 @@ def _read_kpis_as_decimals(driver) -> dict[str, Decimal]:  # type: ignore[no-unt
 
 
 def _expected_row_for(
-    driver, *, sql: str, dataset_parameters, account_display: str, day_iso: str,  # type: ignore[no-untyped-def]: driver/dataset_parameters are runtime values — annotating cascades imports
+    driver: "DashboardDriver",
+    *,
+    sql: str,
+    dataset_parameters: list["DatasetParameter"],
+    account_display: str,
+    day_iso: str,
 ) -> dict[str, Decimal]:
     """Issue the same Daily Statement Summary SQL the visual would, with
     the picker-derived binds, via ``driver.query_db``. Returns each KPI
@@ -471,8 +481,13 @@ def test_bg2_daily_statement_kpis_match_summary_matview(
 
 
 def _row_for(
-    driver, *, sql, dataset_parameters, account_display, day_iso,  # type: ignore[no-untyped-def]: driver / dataset_parameters are runtime values — annotating cascades imports
-):
+    driver: "DashboardDriver",
+    *,
+    sql: str,
+    dataset_parameters: list["DatasetParameter"],
+    account_display: str,
+    day_iso: str,
+) -> dict[str, Any]:
     """Pull the matview row for the picked (account, day). Used to
     extract the matview's `account_id` (the dataset filters on
     `(name || ' (' || id || ')') = pL1DsAccount`, so the row carries
@@ -489,7 +504,9 @@ def _row_for(
     return rows[0]
 
 
-def _independent_net_flow_for(driver, *, cfg, account_id, day_iso) -> Decimal:  # type: ignore[no-untyped-def]: driver / cfg are runtime fixture values
+def _independent_net_flow_for(
+    driver: "DashboardDriver", *, cfg: Config, account_id: str, day_iso: str,
+) -> Decimal:
     """Compute the day's signed net flow DIRECTLY from
     ``<prefix>_current_transactions``, bypassing the
     `daily_statement_summary` matview's `net_flow` column entirely.
@@ -536,7 +553,7 @@ def _independent_net_flow_for(driver, *, cfg, account_id, day_iso) -> Decimal:  
     return Decimal(str(rows[0]["net_cents"])) / Decimal("100")
 
 
-def _summary_default_day(dataset_parameters) -> str:  # type: ignore[no-untyped-def]: list of DatasetParameter — annotating would import the wrapper here
+def _summary_default_day(dataset_parameters: list["DatasetParameter"]) -> str:  # pyright: ignore[reportUnusedFunction]: helper for App2 leg defaults, kept for symmetry with cross-app callers
     """Return the YYYY-MM-DD default static value declared on the
     ``pL1DsBalanceDate`` dataset parameter. App2's leg binds this when
     no URL param is supplied (since the date picker isn't rendered)."""

@@ -29,6 +29,10 @@ import pytest
 
 from .tree_validator import TreeValidator
 
+if TYPE_CHECKING:
+    from recon_gen.common.tree import App
+    from tests.e2e._drivers import DashboardDriver
+
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 

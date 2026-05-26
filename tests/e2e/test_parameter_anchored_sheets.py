@@ -59,7 +59,11 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
 def _assert_anchor_present_and_populated(
-    driver, dashboard_arg, *, sheet_name: str, anchor_label: str,
+    driver: "DashboardDriver",
+    dashboard_arg: str,
+    *,
+    sheet_name: str,
+    anchor_label: str,
     visual_title: str,
 ) -> None:
     """Open ``sheet_name``, wait for ``visual_title`` to render, then
@@ -115,7 +119,10 @@ def _assert_anchor_present_and_populated(
     ],
 )
 def test_inv_anchor_control_present_and_populated(
-    inv_dashboard_driver: tuple["DashboardDriver", str], sheet_name, anchor_label, visual_title,
+    inv_dashboard_driver: tuple["DashboardDriver", str],
+    sheet_name: str,
+    anchor_label: str,
+    visual_title: str,
 ) -> None:
     driver, dashboard_arg = inv_dashboard_driver
     _assert_anchor_present_and_populated(

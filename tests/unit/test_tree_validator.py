@@ -15,18 +15,18 @@ from unittest.mock import MagicMock
 import pytest
 
 from tests._test_helpers import make_test_config
-from recon_gen.common.ids import SheetId, VisualId
+from recon_gen.common.ids import SheetId, VisualId as VisualId
 from recon_gen.common.tree import (
-    KPI,
+    KPI as KPI,
     Analysis,
     App,
-    BarChart,
+    BarChart as BarChart,
     Dataset,
     Dim,
     Measure,
-    Sankey,
+    Sankey as Sankey,
     Sheet,
-    Table,
+    Table as Table,
 )
 from tests.e2e.tree_validator import TreeValidator, ValidationFailure
 
@@ -102,11 +102,12 @@ class TestFailureCollection:
 class TestPerKindDispatch:
     def test_kind_specific_method_invoked(self):
         v = TreeValidator(_make_app(), driver=MagicMock())
+        assert v.app.analysis is not None
         sheet = v.app.analysis.sheets[0]
         kpi = sheet.visuals[0]
         # Wrap _validate_kpi with a tracker — confirm dispatch hits it.
-        called = []
-        v._validate_kpi = lambda s, x: called.append(x)
+        called: list[object] = []
+        v._validate_kpi = lambda s, x: called.append(x)  # pyright: ignore[reportAttributeAccessIssue]: dynamic monkey-patch on TreeValidator for dispatch trace
         v.validate_visual(sheet, kpi)
         assert called == [kpi]
 
@@ -114,6 +115,7 @@ class TestPerKindDispatch:
         """A visual without _AUTO_KIND (e.g. a hypothetical untyped node)
         doesn't crash — dispatch is best-effort."""
         v = TreeValidator(_make_app(), driver=MagicMock())
+        assert v.app.analysis is not None
         sheet = v.app.analysis.sheets[0]
         fake_visual = MagicMock(spec=[])  # no _AUTO_KIND attr
         # Doesn't raise, doesn't add a failure

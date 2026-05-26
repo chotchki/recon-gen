@@ -14,17 +14,18 @@ X.2.n.4: ``make_tree_db_fetcher`` now takes an
 never reached during the construction-only assertions.
 """
 
+# pyright: reportArgumentType=false, reportCallIssue=false, reportUntypedFunctionDecorator=false
+# BF.4/F: _NoConnectPool is a structural fake substituting for AsyncConnectionPool;
+# asynccontextmanager + AsyncConnectionPool stubs disagree on the protocol shape,
+# the runtime contract is satisfied.
 from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 
-import pytest
-
 from recon_gen.apps.executives.app import build_executives_app
 from recon_gen.apps.executives.datasets import build_all_datasets
-from recon_gen.common.db import AsyncConnectionPool
 from recon_gen.common.html._tree_fetcher import make_tree_db_fetcher
 from tests._test_helpers import make_test_config
 

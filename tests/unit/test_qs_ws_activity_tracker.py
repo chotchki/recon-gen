@@ -19,6 +19,7 @@ Covers:
 from __future__ import annotations
 
 import json
+from typing import Callable
 
 from tests.e2e._drivers.qs import WsSnapshot, _QsWsActivityTracker
 
@@ -28,9 +29,9 @@ class _MockWebSocket:
     listener so a test can synthesize frames."""
 
     def __init__(self) -> None:
-        self.framesent_cb = None
+        self.framesent_cb: "Callable[[str], None] | None" = None
 
-    def on(self, event: str, cb) -> None:  # type: ignore[no-untyped-def]: mocks Playwright's untyped event API; matching signature would force a Callable bound for every event kind
+    def on(self, event: str, cb: "Callable[[str], None]") -> None:
         if event == "framesent":
             self.framesent_cb = cb
 
@@ -46,9 +47,9 @@ class _MockPage:
     listener so a test can attach a mock WS."""
 
     def __init__(self) -> None:
-        self.websocket_cb = None
+        self.websocket_cb: "Callable[[_MockWebSocket], None] | None" = None
 
-    def on(self, event: str, cb) -> None:  # type: ignore[no-untyped-def]: mocks Playwright's untyped event API; matching signature would force a Callable bound for every event kind
+    def on(self, event: str, cb: "Callable[[_MockWebSocket], None]") -> None:
         if event == "websocket":
             self.websocket_cb = cb
 

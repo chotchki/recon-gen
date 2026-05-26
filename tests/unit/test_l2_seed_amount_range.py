@@ -1,3 +1,7 @@
+# pyright: reportArgumentType=false
+# BF.4/F: tests pass string literal "internal_transfer" where `_RailKind` Literal
+# is expected. Literal narrowing is a runtime no-op; loud-fail at the call site
+# would surface a different value mismatch.
 """AB.5 (E7): seed log-uniform amount-range picker — shape contracts.
 
 Pins the `_baseline_amount_sample`'s AB.5 path (rail with

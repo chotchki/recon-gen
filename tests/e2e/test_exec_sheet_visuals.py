@@ -10,7 +10,7 @@ in the DOM; failures across sheets accumulate into one AssertionError.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 
 from datetime import date, datetime
 from decimal import Decimal
@@ -30,6 +30,7 @@ from recon_gen.common.config import Config
 
 
 if TYPE_CHECKING:
+    from recon_gen.common.models import DatasetParameter
     from recon_gen.common.tree import App
     from tests.e2e._drivers import DashboardDriver
 
@@ -69,10 +70,14 @@ def test_exec_dashboard_structure_matches_tree(exec_dashboard_driver: tuple["Das
 # BG.5 — Executives KPI honest gates ---------------------------------------
 
 
-def _sql_for(builder, *args):  # type: ignore[no-untyped-def]: builder takes (cfg) at runtime — annotating would force imports here
+def _sql_for(
+    builder: "Callable[..., Any]", *args: Any,
+) -> tuple[str, list["DatasetParameter"]]:
     ds = builder(*args)
-    sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
-    return sql, list(ds.DatasetParameters or ())
+    physical = next(iter(ds.PhysicalTableMap.values()))
+    assert physical.CustomSql is not None, "Dataset missing CustomSql"
+    sql = physical.CustomSql.SqlQuery
+    return sql, list(ds.DatasetParameters or [])
 
 
 def test_bg5_transaction_volume_kpis_match_dataset_aggregates(

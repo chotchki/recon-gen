@@ -29,6 +29,7 @@ directly; the QS-vs-App2 mechanics are sealed in the driver.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from recon_gen.common.tree import (
     App,
@@ -125,7 +126,7 @@ class TreeValidator:
     app: App
     driver: DashboardDriver
     timeout_ms: int = 30_000
-    failures: list[ValidationFailure] = field(default_factory=list)
+    failures: list[ValidationFailure] = field(default_factory=list[ValidationFailure])
 
     # ------------------------------------------------------------------
     # Top-level entry points
@@ -156,8 +157,8 @@ class TreeValidator:
             return
 
         # Visual titles — factory-wrapper visuals may not expose one.
-        expected_titles = {
-            v.title for v in sheet.visuals if getattr(v, "title", None)
+        expected_titles: set[str] = {
+            str(getattr(v, "title")) for v in sheet.visuals if getattr(v, "title", None)
         }
         for title in expected_titles:
             try:
@@ -203,10 +204,10 @@ class TreeValidator:
         need a divergence carve-out yet. If one lands, add ``"slider"``
         back here *or* auto-derive a ``NumericRangeSpec`` for it.)
         """
-        filter_ctrls = getattr(sheet, "filter_controls", None) or []
-        param_ctrls = getattr(sheet, "parameter_controls", None) or []
+        filter_ctrls: list[Any] = getattr(sheet, "filter_controls", None) or []
+        param_ctrls: list[Any] = getattr(sheet, "parameter_controls", None) or []
         _renderer_divergent = {"datetime"}
-        comparable = [
+        comparable: list[Any] = [
             c
             for c in (*filter_ctrls, *param_ctrls)
             if getattr(c, "_AUTO_KIND", None) not in _renderer_divergent

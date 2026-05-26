@@ -8,6 +8,7 @@ sheet-tab assertion derives the expected set from the tree
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -22,7 +23,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
 def test_exec_dashboard_opens_and_screenshots(
-    qs_driver: "QsEmbedDriver", exec_dashboard_id: str, exec_app: "App", tmp_path,
+    qs_driver: "QsEmbedDriver", exec_dashboard_id: str, exec_app: "App", tmp_path: Path,
 ) -> None:
     """The deployed Executives dashboard loads, screenshots, and a data
     sheet renders visuals. (`open()` mints + uses the embed URL — its
@@ -44,6 +45,7 @@ def test_exec_dashboard_lists_all_sheet_tabs(
     dashboard. Switching the L2 instance changes the names but the
     assertion stays valid."""
     qs_driver.open(exec_dashboard_id)
+    assert exec_app.analysis is not None
     expected = {s.name for s in exec_app.analysis.sheets}
     tabs = set(qs_driver.sheet_names())
     missing = expected - tabs

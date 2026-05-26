@@ -13,7 +13,7 @@ import pytest
 
 from recon_gen.common.handbook import (
     HandbookVocabulary,
-    InvestigationPersonaVocabulary,
+    InvestigationPersonaVocabulary as InvestigationPersonaVocabulary,
     MerchantVocabulary,
     vocabulary_for,
 )
@@ -294,6 +294,8 @@ class TestDemoScenarioVocabulary:
         # vocab silently sourcing from the wrong fixture.
         spec = vocabulary_for(_load("spec_example"))
         snb = vocabulary_for(_load("sasquatch_pr"))
+        assert spec.demo.drift_account is not None
+        assert snb.demo.drift_account is not None
         assert "snb" not in spec.demo.drift_account.id
         assert "snb" in snb.demo.drift_account.id
 
@@ -309,6 +311,7 @@ class TestDemoScenarioVocabulary:
         # role, so the layering_chain on sasquatch_pr surfaces the
         # curated "Shell Company A/B/C" labels (not raw account_ids).
         vocab = vocabulary_for(_load("sasquatch_pr"))
+        assert vocab.demo.investigation is not None
         chain = vocab.demo.investigation.layering_chain
         assert len(chain) == 3
         assert all("Shell Company" in acc.name for acc in chain)

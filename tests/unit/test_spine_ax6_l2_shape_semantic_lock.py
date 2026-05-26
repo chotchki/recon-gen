@@ -33,6 +33,8 @@ already covers.
 
 from __future__ import annotations
 
+from typing import Any
+
 import json
 import sqlite3
 from datetime import date, datetime
@@ -88,7 +90,7 @@ def _fresh_db() -> sqlite3.Connection:
 
 
 def test_chain_parent_disagreement_lock_stable_across_runs() -> None:
-    def _run() -> dict[str, frozenset]:
+    def _run() -> dict[str, frozenset[Any]]:
         gen = ChainParentDisagreementInvariant().scenario_for(
             anchor_day=_ANCHOR,
         )
@@ -105,7 +107,7 @@ def test_chain_parent_disagreement_lock_stable_across_runs() -> None:
 
 
 def test_xor_group_missed_lock_stable_across_runs() -> None:
-    def _run() -> dict[str, frozenset]:
+    def _run() -> dict[str, frozenset[Any]]:
         gen = XorGroupViolationInvariant().scenario_for_missed(
             anchor_day=_ANCHOR,
         )
@@ -120,7 +122,7 @@ def test_xor_group_missed_lock_stable_across_runs() -> None:
 
 
 def test_xor_group_overlap_lock_stable_across_runs() -> None:
-    def _run() -> dict[str, frozenset]:
+    def _run() -> dict[str, frozenset[Any]]:
         gen = XorGroupViolationInvariant().scenario_for_overlap(
             anchor_day=_ANCHOR,
         )
@@ -135,7 +137,7 @@ def test_xor_group_overlap_lock_stable_across_runs() -> None:
 
 
 def test_fan_in_missing_lock_stable_across_runs() -> None:
-    def _run() -> dict[str, frozenset]:
+    def _run() -> dict[str, frozenset[Any]]:
         gen = FanInDisagreementInvariant().scenario_for_missing_parent(
             anchor_day=_ANCHOR,
         )
@@ -150,7 +152,7 @@ def test_fan_in_missing_lock_stable_across_runs() -> None:
 
 
 def test_fan_in_extra_lock_stable_across_runs() -> None:
-    def _run() -> dict[str, frozenset]:
+    def _run() -> dict[str, frozenset[Any]]:
         gen = FanInDisagreementInvariant().scenario_for_extra_parent(
             anchor_day=_ANCHOR,
         )
@@ -165,7 +167,7 @@ def test_fan_in_extra_lock_stable_across_runs() -> None:
 
 
 def test_multi_xor_missed_lock_stable_across_runs() -> None:
-    def _run() -> dict[str, frozenset]:
+    def _run() -> dict[str, frozenset[Any]]:
         gen = MultiXorViolationInvariant().scenario_for_missed(
             anchor_day=_ANCHOR,
         )
@@ -180,7 +182,7 @@ def test_multi_xor_missed_lock_stable_across_runs() -> None:
 
 
 def test_multi_xor_overlap_lock_stable_across_runs() -> None:
-    def _run() -> dict[str, frozenset]:
+    def _run() -> dict[str, frozenset[Any]]:
         gen = MultiXorViolationInvariant().scenario_for_overlap(
             anchor_day=_ANCHOR,
         )
@@ -261,7 +263,7 @@ def test_xor_missed_and_overlap_produce_different_locks() -> None:
     """The missed + overlap variants land different Violations in the
     same lock dict key (`xor_group_violation`). Equality on the lock
     surfaces the difference."""
-    def _lock_for(scenario_kind: str) -> frozenset:
+    def _lock_for(scenario_kind: str) -> frozenset[Any]:
         if scenario_kind == "missed":
             gen = XorGroupViolationInvariant().scenario_for_missed(
                 anchor_day=_ANCHOR,
@@ -282,7 +284,7 @@ def test_xor_missed_and_overlap_produce_different_locks() -> None:
 
 
 def test_fan_in_missing_and_extra_produce_different_locks() -> None:
-    def _lock_for(scenario_kind: str) -> frozenset:
+    def _lock_for(scenario_kind: str) -> frozenset[Any]:
         inv = FanInDisagreementInvariant()
         if scenario_kind == "missing":
             gen = inv.scenario_for_missing_parent(anchor_day=_ANCHOR)

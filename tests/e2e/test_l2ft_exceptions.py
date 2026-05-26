@@ -25,8 +25,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from decimal import Decimal
-
 import pytest
 
 from recon_gen.apps.l2_flow_tracing.datasets import (
@@ -39,15 +37,20 @@ from recon_gen.common.config import Config
 
 if TYPE_CHECKING:
     from recon_gen.common.l2 import L2Instance
+    from recon_gen.common.models import DatasetParameter
     from tests.e2e._drivers import DashboardDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
-def _l2ft_exceptions_sql_and_params(cfg, l2):  # type: ignore[no-untyped-def]: cfg/l2 are runtime fixture values — annotating would force imports here
+def _l2ft_exceptions_sql_and_params(
+    cfg: Config, l2: "L2Instance",
+) -> tuple[str, list["DatasetParameter"]]:
     ds = build_unified_l2_exceptions_dataset(cfg, l2)
-    sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
-    return sql, list(ds.DatasetParameters or ())
+    physical = next(iter(ds.PhysicalTableMap.values()))
+    assert physical.CustomSql is not None
+    sql = physical.CustomSql.SqlQuery
+    return sql, list(ds.DatasetParameters or [])
 
 
 def test_bg6_l2ft_exceptions_kpi_matches_dataset_row_count(

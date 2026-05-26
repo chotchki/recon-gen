@@ -1,3 +1,7 @@
+# pyright: reportOptionalMemberAccess=false, reportOptionalIterable=false
+# BF.4/F: kitchen-sink tests build App via API that sets .analysis post-construction.
+# The tree's App.analysis stays Optional in the type model; tests rely on the
+# post-build invariant.
 """Unit tests for the L.1.10.6 kitchen-sink app.
 
 These tests confirm the kitchen-sink builds + emits cleanly + actually
@@ -282,14 +286,11 @@ class TestEmissionRoundTrip:
 
 from recon_gen.common.config import Config as _Cfg
 from recon_gen.common.tree import (
-    KPI as _KPI,
     Analysis as _An,
     App as _A,
     Dataset as _DS,
     IntegerParam as _IP,
-    Measure as _M,
     NumericRangeFilter as _NRF,
-    ParameterSlider as _PS,
     Sheet as _Sh,
 )
 from recon_gen.common.ids import (
@@ -318,7 +319,7 @@ class TestValidationHooksAudit:
     def _app(self) -> _A:
         app = _A(name="t", cfg=self._CFG)
         app.add_dataset(self._DS_X)
-        analysis = app.set_analysis(_An(analysis_id_suffix="t", name="T"))
+        app.set_analysis(_An(analysis_id_suffix="t", name="T"))
         return app
 
     # L.1.21 — `test_place_rejects_duplicate_visual` deleted: the layout

@@ -1,3 +1,7 @@
+# pyright: reportArgumentType=false
+# BF.4/F: _ALL_INVARIANTS is `tuple[str, ...]` but `count_l1_invariant_rows`
+# takes the narrower `L1Invariant` Literal. Runtime correctness is enforced by
+# the matview-extract helpers' own dict lookups (raises on unknown name).
 """U.8.b / X.2.j.B — 4-way cross-tool agreement test (release gate).
 
 Per-invariant contract — the chain
@@ -326,7 +330,7 @@ def per_dialect_qs_client(per_dialect_region: str) -> "QuickSightClient":
     invariants in this module.
     """
     import boto3
-    return boto3.client("quicksight", region_name=per_dialect_region)
+    return boto3.client("quicksight", region_name=per_dialect_region)  # pyright: ignore[reportUnknownMemberType]: boto3.client dynamic service overload
 
 
 @pytest.fixture(scope="module")
@@ -534,6 +538,7 @@ def per_dialect_app2_results(
         tree_app=tree_app, cfg=per_dialect_cfg,
     )
     results: dict[str, dict[str, object]] = {}
+    assert tree_app.analysis is not None
     with App2Driver.serving(
         cfg=per_dialect_cfg,
         tree_app=tree_app, sheet=tree_app.analysis.sheets[0],

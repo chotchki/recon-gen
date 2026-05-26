@@ -33,6 +33,7 @@ polish — because that's the exact failure mode it exists to catch.
 from __future__ import annotations
 
 import sqlite3
+from typing import Any
 from pathlib import Path
 
 import pytest
@@ -113,8 +114,8 @@ def _violation_keys(violations: set[Violation]) -> set[tuple[str, str]]:
     return out
 
 
-def _direct_matview_keys(  # type: ignore[no-untyped-def]: conn is psycopg/oracledb/sqlite3 — no shared dbapi protocol typed in this project
-    conn,
+def _direct_matview_keys(
+    conn: Any,
     prefix: str,
     matview_suffix: str,
 ) -> set[tuple[str, str]]:
@@ -203,8 +204,8 @@ def _anomaly_keys_from_violations(
     return out
 
 
-def _direct_anomaly_matview_keys(  # type: ignore[no-untyped-def]: live conn — see _direct_matview_keys
-    conn,
+def _direct_anomaly_matview_keys(
+    conn: Any,
     prefix: str,
 ) -> set[tuple[str, str, str, str]]:
     """Direct SELECT against the anomaly matview, projected to match
@@ -239,8 +240,8 @@ def _money_trail_keys_from_violations(
     return out
 
 
-def _direct_money_trail_matview_keys(  # type: ignore[no-untyped-def]: live conn is psycopg/oracledb/sqlite3 — no shared dbapi protocol typed in this project
-    conn,
+def _direct_money_trail_matview_keys(
+    conn: Any,
     prefix: str,
 ) -> set[tuple[str, str, int]]:
     """Direct SELECT against the money_trail matview, projected to

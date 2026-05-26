@@ -120,30 +120,30 @@ class _BuildState:
 
     plan: _FuzzPlan
     # Singleton-account roles: parent-template candidates (R3).
-    singleton_internal_roles: list[str] = field(default_factory=list)
-    singleton_external_roles: list[str] = field(default_factory=list)
+    singleton_internal_roles: list[str] = field(default_factory=list[str])
+    singleton_external_roles: list[str] = field(default_factory=list[str])
     # Template roles: child-leaf roles. Disjoint from singletons.
-    template_roles: list[str] = field(default_factory=list)
+    template_roles: list[str] = field(default_factory=list[str])
     # Rails by name; we track which are aggregating + their leg
     # categorization for downstream constraint satisfaction.
-    rail_names: list[str] = field(default_factory=list)
+    rail_names: list[str] = field(default_factory=list[str])
     # Z.B (2026-05-15): rail.transfer_type collapsed; rail names alone identify rails.
-    aggregating_rail_names: set[str] = field(default_factory=set)
-    non_aggregating_rail_names: list[str] = field(default_factory=list)
-    single_leg_rail_names: list[str] = field(default_factory=list)
-    two_leg_rail_names: list[str] = field(default_factory=list)
+    aggregating_rail_names: set[str] = field(default_factory=set[str])
+    non_aggregating_rail_names: list[str] = field(default_factory=list[str])
+    single_leg_rail_names: list[str] = field(default_factory=list[str])
+    two_leg_rail_names: list[str] = field(default_factory=list[str])
     # Rails that need reconciliation (S3): non-aggregating single-leg
     # rails not yet in any TransferTemplate.leg_rails AND not yet in
     # any aggregating rail's bundles_activity.
-    needs_reconciliation: set[str] = field(default_factory=set)
+    needs_reconciliation: set[str] = field(default_factory=set[str])
     # Rails that have been added to some TransferTemplate.leg_rails
     # (S2: must NOT carry expected_net).
-    template_leg_rail_names: set[str] = field(default_factory=set)
+    template_leg_rail_names: set[str] = field(default_factory=set[str])
     # TransferTemplates: name + leg_rails for chain target sampling.
-    transfer_template_names: list[str] = field(default_factory=list)
+    transfer_template_names: list[str] = field(default_factory=list[str])
     # All declared role names (singleton ∪ template) for role-reference
     # sampling (R1, R6).
-    all_role_names: list[str] = field(default_factory=list)
+    all_role_names: list[str] = field(default_factory=list[str])
 
 
 # ---------------------------------------------------------------------------

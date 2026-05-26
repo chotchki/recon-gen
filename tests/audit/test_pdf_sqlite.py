@@ -1,3 +1,9 @@
+# pyright: reportArgumentType=false
+# BF.4/F: test uses structural _FakeCfg / _FakeInstance fakes that satisfy
+# the runtime contract of Config / L2Instance but aren't subclasses. The
+# query helpers only call a small subset of attributes; the fakes provide
+# exactly those. Disabling reportArgumentType file-wide keeps the test
+# fixtures readable without forcing a Protocol carve-out.
 """X.3.g.2 — Audit PDF query layer wired against SQLite.
 
 The Audit PDF reconciliation report queries the L1 invariant matviews
@@ -327,7 +333,7 @@ def patched_connect(db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch) -> 
     fake_conn = _NoCloseConn(db)
     monkeypatch.setattr(
         "recon_gen.common.db.connect_demo_db",
-        lambda _cfg: fake_conn,
+        lambda _cfg: fake_conn,  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: monkeypatch.setattr accepts Any
     )
 
 

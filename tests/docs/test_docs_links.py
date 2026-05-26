@@ -60,7 +60,8 @@ def _sweep(site: Path) -> list[tuple[Path, str, str]]:
     dead: list[tuple[Path, str, str]] = []
     for html in site.rglob("*.html"):
         text = html.read_text(errors="replace")
-        for raw in HREF_RE.findall(text):
+        for raw_match in HREF_RE.findall(text):
+            raw: str = raw_match
             if not raw:
                 continue
             # Pure fragment — same-page anchor.

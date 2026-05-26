@@ -19,6 +19,9 @@ skips cleanly without Playwright.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any, cast
+
 from collections.abc import Iterator
 
 import pytest
@@ -145,7 +148,7 @@ def test_app2_pick_filter_persists_in_underlying_select(
     driver.wait_loaded("Open Exceptions")
     driver.pick_filter("View", ["detail"])
     driver.wait_loaded("Open Exceptions")
-    page = driver.page  # type: ignore[attr-defined]  # WHY: DashboardDriver protocol doesn't expose `page` -- this test reaches into the App2Driver escape hatch (smoke-only) to assert against the underlying DOM
+    page = cast("Any", driver).page  # WHY Any: DashboardDriver protocol doesn't expose page; App2Driver escape hatch (smoke-only)
     value = page.evaluate(
         """() => {
             const s = document.querySelector('select[name="param_view"]');
@@ -204,7 +207,7 @@ def test_qs_l1_dashboard_drift_sheet_lists_visuals(
 @pytest.mark.e2e
 @pytest.mark.browser
 def test_qs_l1_dashboard_screenshot(
-    qs_driver: QsEmbedDriver, l1_dashboard_id: str, tmp_path,
+    qs_driver: QsEmbedDriver, l1_dashboard_id: str, tmp_path: Path,
 ) -> None:
     qs_driver.open(l1_dashboard_id)
     png = qs_driver.screenshot(tmp_path / "l1_initial.png")

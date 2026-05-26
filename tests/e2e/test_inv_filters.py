@@ -23,7 +23,7 @@ and the App2 substitution path by ``test_html2_*`` / ``test_dashboard_driver``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 
 from decimal import Decimal
 
@@ -40,14 +40,19 @@ from recon_gen.common.config import Config
 
 
 if TYPE_CHECKING:
+    from recon_gen.common.models import DatasetParameter
     from tests.e2e._drivers import DashboardDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
-def _sql_and_params_for(builder, *args):  # type: ignore[no-untyped-def]: builder takes (cfg) or (cfg, l2) at runtime — annotating would force imports here
+def _sql_and_params_for(
+    builder: "Callable[..., Any]", *args: Any,
+) -> tuple[str, list["DatasetParameter"]]:
     ds = builder(*args)
-    sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+    physical = next(iter(ds.PhysicalTableMap.values()))
+    assert physical.CustomSql is not None, "Dataset missing CustomSql"
+    sql = physical.CustomSql.SqlQuery
     # DataSet.DatasetParameters is `None` when the dataset declares no
     # `<<$pName>>` parameters (e.g. the volume-anomalies distribution
     # dataset, which reads a single matview with no param-bind columns).
@@ -314,7 +319,7 @@ def test_bg4_recipient_fanout_kpis_match_inflows_only_truth(
     driver.screenshot()
 
 
-def _default_sigma_from(dataset_parameters) -> Decimal:  # type: ignore[no-untyped-def]: list[DatasetParameter] — annotating would import the wrapper here
+def _default_sigma_from(dataset_parameters: list["DatasetParameter"]) -> Decimal:
     """Pull the default σ value from the Volume Anomalies dataset
     parameter. Same source-of-truth pattern BG.2's
     ``_summary_default_day`` uses for the Daily Statement balance-

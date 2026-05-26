@@ -30,7 +30,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
 @pytest.fixture(autouse=True)
-def _require_templates(l2ft_l2_instance: "L2Instance") -> None:
+def _require_templates(l2ft_l2_instance: "L2Instance") -> None:  # pyright: ignore[reportUnusedFunction]: pytest autouse fixture
     # Fast-exit when the deployed L2 declares zero transfer templates —
     # see `conftest.require_l2ft_feature`. (A fuzz seed or operator-supplied
     # L2 may declare none; spec_example declares two.)
@@ -40,7 +40,7 @@ def _require_templates(l2ft_l2_instance: "L2Instance") -> None:
 
 @pytest.mark.parametrize("dropdown_title", ["Template", "Completion"])
 def test_templates_dropdown_narrows_does_not_empty(
-    l2ft_dashboard_driver: tuple["DashboardDriver", str], dropdown_title,
+    l2ft_dashboard_driver: tuple["DashboardDriver", str], dropdown_title: str,
 ) -> None:
     """Each declared Template name — and each Completion status
     (Complete / Imbalanced / Orphaned) — must leave the Template

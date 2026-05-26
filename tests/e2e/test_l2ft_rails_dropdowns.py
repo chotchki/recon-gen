@@ -26,7 +26,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 @pytest.mark.parametrize("dropdown_title", ["Rail", "Status", "Bundle"])
 def test_rails_dropdown_narrows_does_not_empty(
-    l2ft_dashboard_driver: tuple["DashboardDriver", str], dropdown_title,
+    l2ft_dashboard_driver: tuple["DashboardDriver", str], dropdown_title: str,
 ) -> None:
     """Picking a single Rail / Status / Bundle value must leave the
     Transactions table with > 0 rows — the X.1.g param-bound narrowing

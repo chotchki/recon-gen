@@ -1,3 +1,7 @@
+# pyright: reportArgumentType=false
+# BF.4/F: test fixtures pass bare strings for Identifier-typed fields. Identifier
+# is a NewType — runtime no-op. Wrapping every literal would add ~24 Identifier(...)
+# wraps for no behavioral gain in test data.
 """``compute_plant_timeline`` unit tests (X.4.h.6.a).
 
 Locks the contract for the trainer-mode timeline projection:

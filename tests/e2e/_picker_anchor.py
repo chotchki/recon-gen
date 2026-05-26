@@ -101,7 +101,7 @@ class PickerSpec:
     label: str
     kind: PickerKind
     column: str
-    format: object = field(default=None)  # Callable[[Mapping[str, Any]], str] | None — typed as object to avoid pyright generic-callable infer noise
+    format: "Callable[[Mapping[str, Any]], str] | None" = field(default=None)
 
 
 @dataclass(frozen=True)

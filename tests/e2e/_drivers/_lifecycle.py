@@ -26,6 +26,8 @@ import contextlib
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
+import pytest
+
 from tests.e2e._capture import maybe_capture_on_failure
 
 if TYPE_CHECKING:
@@ -35,7 +37,7 @@ if TYPE_CHECKING:
 
 @contextlib.contextmanager
 def qs_driver_or_none(
-    request,  # type: ignore[no-untyped-def]: pytest FixtureRequest — Untyped Any cascade if annotated
+    request: "pytest.FixtureRequest",
     *,
     cfg: "Config",
     account_id: str,

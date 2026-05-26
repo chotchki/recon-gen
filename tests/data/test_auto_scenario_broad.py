@@ -56,8 +56,8 @@ L2_FIXTURES = [
 
 
 @pytest.fixture(params=L2_FIXTURES)
-def _l2_yaml_path(request) -> Path:
-    return request.param
+def _l2_yaml_path(request: pytest.FixtureRequest) -> Path:  # pyright: ignore[reportUnusedFunction]: pytest indirect fixture — consumed via name lookup
+    return Path(request.param)
 
 
 @pytest.fixture
