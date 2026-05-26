@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from recon_gen.common.as_of_frame import AsOfFrame
-from recon_gen.common.intervals import DateInterval  # noqa: F401 — kept for tests that import via this module; BD.2 hides direct period reads
+from recon_gen.common.intervals import DateInterval as DateInterval  # noqa: F401 — kept for tests that import via this module; BD.2 hides direct period reads
 from recon_gen.common.provenance import (
     ProvenanceFingerprint,
     l2_fingerprint_placeholder,

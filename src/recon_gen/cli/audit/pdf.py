@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from recon_gen.common.as_of_frame import AsOfFrame
-from recon_gen.common.intervals import DateInterval  # noqa: F401 — kept for type/test imports
+from recon_gen.common.intervals import DateInterval as DateInterval  # noqa: F401 — kept for type/test imports
 from recon_gen.common.pdf.audit_chrome import (
     BookmarkedDocTemplate,
     bookmarked_h1,
@@ -1909,7 +1909,7 @@ def _add_empty_signature_fields(
             )
             append_signature_field(w, spec)
         out = io.BytesIO()
-        w.write(out)
+        w.write(out)  # pyright: ignore[reportUnknownMemberType] — pyHanko stubs are partial
     pdf_path.write_bytes(out.getvalue())
 
 

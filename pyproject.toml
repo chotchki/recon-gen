@@ -352,31 +352,10 @@ precision = 1
 # reachable through the tree but stay outside strict; pyright still
 # resolves them via extraPaths for inference.
 [tool.pyright]
+# BF.3 — entire src/recon_gen/ is strict-clean after BF.1 slices 1-4.
+# Include broadened from a curated file list to the whole package.
 include = [
-    "src/recon_gen/common/tree",
-    "src/recon_gen/common/l2",
-    "src/recon_gen/common/sql",
-    "src/recon_gen/common/browser",
-    "src/recon_gen/common/dataset_contract.py",
-    "src/recon_gen/common/env_keys.py",
-    "src/recon_gen/common/models.py",
-    "src/recon_gen/common/money.py",
-    "src/recon_gen/common/variant.py",
-    # X.2.o.1 — async DB / App2 server surfaces. Added at strict
-    # together because they form one cohesive subsystem (pool →
-    # executor → fetcher → server route). Config gets pulled in
-    # alongside since X.2.n.6's ``app2_db_pool_size`` validation
-    # logic lives there.
-    "src/recon_gen/common/db.py",
-    "src/recon_gen/common/config.py",
-    "src/recon_gen/common/html/_sql_executor.py",
-    "src/recon_gen/common/html/_tree_fetcher.py",
-    "src/recon_gen/common/html/server.py",
-    # Y.2.gate runner — dev tooling, kept strict from the start.
-    "src/recon_gen/_dev",
-    # AY.2.aa — spine in strict scope; AY.2.b's new generators
-    # born strict-clean.
-    "src/recon_gen/common/spine",
+    "src/recon_gen",
 ]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
