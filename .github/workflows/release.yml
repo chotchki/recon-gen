@@ -576,6 +576,8 @@ jobs:
             tests/e2e/test_l1_dashboard_renders.py \
             tests/e2e/test_l1_sheet_visuals.py \
             tests/e2e/test_l1_filters.py \
+            tests/e2e/test_l1_account_filters.py \
+            tests/e2e/test_l1_additive_pickers.py \
             tests/e2e/test_inv_dashboard_renders.py \
             tests/e2e/test_inv_sheet_visuals.py \
             tests/e2e/test_inv_filters.py \
@@ -585,6 +587,8 @@ jobs:
             tests/e2e/test_l2ft_rails_dropdowns.py \
             tests/e2e/test_l2ft_chains_dropdowns.py \
             tests/e2e/test_l2ft_templates_dropdowns.py \
+            tests/e2e/test_l2ft_additive_pickers.py \
+            tests/e2e/test_l2ft_exceptions.py \
             tests/e2e/test_dashboard_driver.py \
             tests/e2e/test_l1_cross_sheet_drill_date_widening.py \
             tests/e2e/test_l2ft_metadata_cascade.py \
