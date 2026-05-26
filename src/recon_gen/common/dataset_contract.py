@@ -113,6 +113,35 @@ class ColumnShape(Enum):
         return False
 
 
+class Storage(Enum):
+    """BH.24 (2026-05-25) — per-column storage shape.
+
+    Distinguishes columns whose values come back from the DB driver as
+    **raw BIGINT cents** (the AO.1.impl Studio slice's matview storage
+    contract) from columns whose values come back as **already-converted
+    float / Decimal dollars** (the legacy pre-AO.1 pattern where the
+    dataset SELECT wraps with ``cents_to_dollars_sql``).
+
+    Why this matters: App2's ``_measure_sql`` and ``_apply_cents_to_dollars``
+    both divide currency values by 100 at the renderer layer per AO.1's
+    "matview is cents, renderer converts" convention. If the dataset SQL
+    ALSO divides (the production L1 / Inv / Exec / L2FT datasets all do
+    today via ``cents_to_dollars_sql``), the result is 100× off (BG.7
+    surfaced this on the Daily Statement KPIs: rendered -$11,993.10 vs
+    matview -$1,199,309.68).
+
+    Default ``DOLLARS`` — matches today's production behavior (every
+    dataset pre-converts in SQL). Storage.CENTS is explicitly opt-in
+    for columns that legitimately project raw cents (typically Studio
+    bare-matview reads). ``currency=True`` becomes a pure FORMAT flag
+    (USD symbol + 2-decimal QS format / "$" prefix on App2); the
+    cents→dollars divide is gated on Storage.CENTS, not on currency=True.
+    """
+
+    DOLLARS = "dollars"
+    CENTS = "cents"
+
+
 @dataclass
 class ColumnSpec:
     """Declared column on a dataset's contract.
@@ -126,11 +155,25 @@ class ColumnSpec:
     Money", but Investigation tables read better with the explicit
     override "Amount" since the surrounding context already implies
     money.
+
+    ``currency`` + ``storage`` (BH.24, 2026-05-25): explicit currency-
+    column declaration. ``currency=True`` tells renderers to apply USD
+    formatting (``$`` prefix, 2 decimals). ``storage`` declares how
+    the value comes back from the DB driver — ``DOLLARS`` (default,
+    matches today's "dataset SQL pre-converts via cents_to_dollars_sql"
+    production pattern) or ``CENTS`` (raw BIGINT cents, renderer must
+    divide). The two are independent: a column can be currency=True
+    + storage=DOLLARS (the production case), currency=True + storage=
+    CENTS (raw-matview Studio access), currency=False + storage=DOLLARS
+    (a non-money decimal), etc. Renderers consult ``storage`` to decide
+    whether to apply the /100 divide; ``currency`` only drives format.
     """
     name: str
     type: str  # STRING | DECIMAL | INTEGER | DATETIME | BIT
     shape: ColumnShape | None = None  # only set for drill-eligible columns
     display_name: str | None = None
+    currency: bool = False
+    storage: Storage = Storage.DOLLARS
 
     @property
     def human_name(self) -> str:

@@ -23,6 +23,7 @@ import pytest
 from recon_gen.common.dataset_contract import (
     ColumnSpec,
     DatasetContract,
+    Storage,
     register_contract,
     register_sql,
 )
@@ -50,7 +51,14 @@ _TEST_CFG_SQLITE = make_test_config(dialect=Dialect.SQLITE)
 # collide. The contracts here describe the shared SQLite fixture.
 _X2G_TEST_CONTRACT = DatasetContract(columns=[
     ColumnSpec(name="status", type="STRING"),
-    ColumnSpec(name="amount", type="INTEGER"),
+    # BH.24.1 — `amount` is raw BIGINT cents (the aiosqlite fixture
+    # seeds [100, 50, 200, 25] in cents per AO.1.impl). Renderers
+    # consult ``storage=CENTS`` to decide whether to apply the /100
+    # cents→dollars divide.
+    ColumnSpec(
+        name="amount", type="INTEGER",
+        currency=True, storage=Storage.CENTS,
+    ),
 ])
 register_contract("x2g-test-ds", _X2G_TEST_CONTRACT)
 register_contract("x2g-multi-ds", _X2G_TEST_CONTRACT)

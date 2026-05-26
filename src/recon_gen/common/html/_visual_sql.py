@@ -70,18 +70,32 @@ def _quote_col(name: str) -> str:
     return f'"{name}"'
 
 
-def _measure_sql(measure: Any) -> str:
+def _measure_sql(measure: Any, *, contract: Any = None) -> str:
     """Render one Measure as an aggregation expression.
 
     ``Measure.kind`` is "sum" / "max" / "min" / "average" / "count" /
     "distinct_count". ``Measure.column.name`` is the column to
     aggregate (gets quoted via ``_quote_col`` — see Y.3.f.alt.1).
 
-    AO.1.impl (Studio slice) — when ``Measure.currency=True`` the
-    aggregated column is BIGINT cents per the AO.1 storage contract;
-    divide the aggregate by 100.0 so App2 renders dollars. ``count`` /
-    ``distinct_count`` aren't sums of cents (they're row counts) so
-    the divide is skipped for those kinds even when the flag is set.
+    BH.24.1 (2026-05-25): cents → dollars divide is gated on the
+    column's ``DatasetContract`` storage shape, NOT on the measure's
+    ``currency`` flag alone. The divide fires iff the contract
+    declares the column ``storage=CENTS``; for ``storage=DOLLARS``
+    (the default, matching today's production datasets that pre-
+    convert via ``cents_to_dollars_sql`` in the SELECT), the divide
+    is skipped — preventing the BG.7 100× double-conversion bug
+    (App2 Daily Statement KPIs rendered 100× too small because both
+    the dataset SQL AND ``_measure_sql`` divided).
+
+    Backwards-compatible: when ``contract`` is None, falls back to
+    the OLD behavior (divide whenever ``currency=True``). Callers
+    that have a contract handy (the production
+    ``wrap_for_visual``-via-``_tree_fetcher`` path) pass it; ad-hoc
+    callers (Studio editor preview, tests, smoke harness) keep
+    today's "currency=True → divide" semantic.
+
+    ``count`` / ``distinct_count`` never divide (they're row counts,
+    not cents sums) regardless of contract.
     """
     kind = getattr(measure, "kind", None)
     column = getattr(getattr(measure, "column", None), "name", None)
@@ -97,13 +111,39 @@ def _measure_sql(measure: Any) -> str:
         # _AGG_SQL_FN entry is "COUNT(DISTINCT" — needs a closing paren.
         return f"COUNT(DISTINCT {quoted})"
     expr = f"{fn}({quoted})"
-    if is_currency and not counting:
+    if is_currency and not counting and _wants_cents_divide(column, contract):
         # cents → dollars at the SQL boundary; matches
         # cents_to_dollars_sql's PG/Oracle/SQLite shape (the implicit
         # NUMERIC promotion of `int / 100.0` works on every dialect
         # the App2 path supports).
         expr = f"({expr} / 100.0)"
     return expr
+
+
+def _wants_cents_divide(column: str, contract: Any) -> bool:
+    """BH.24.1 — return True iff ``_measure_sql`` should emit a /100
+    divide for this column.
+
+    Decision:
+    - No contract → backwards-compat: divide whenever ``currency=True``
+      (the caller's flag is the sole signal, since we have no shape
+      info — preserves pre-BH.24.1 behavior for Studio / smoke / tests).
+    - Contract has the column declared ``storage=CENTS`` → divide.
+    - Contract has the column declared ``storage=DOLLARS`` (the
+      default) → skip divide.
+    - Contract doesn't declare the column → backwards-compat:
+      divide (defensive — same as the no-contract path).
+    """
+    if contract is None:
+        return True
+    # Local import keeps this module free of a hard dependency on
+    # dataset_contract at import time (avoids circular import shapes).
+    from recon_gen.common.dataset_contract import Storage
+
+    for col in getattr(contract, "columns", []):
+        if getattr(col, "name", None) == column:
+            return getattr(col, "storage", Storage.DOLLARS) is Storage.CENTS
+    return True
 
 
 def _dim_sql(dim: Any) -> str:
@@ -123,7 +163,7 @@ def _dim_sql(dim: Any) -> str:
     return _quote_col(name) if name else ""
 
 
-def wrap_for_visual(base_sql: str, visual: Any) -> str:
+def wrap_for_visual(base_sql: str, visual: Any, *, contract: Any = None) -> str:
     """Wrap ``base_sql`` with the aggregation declared on ``visual``.
 
     The wrap shape depends on the visual kind:
@@ -141,13 +181,21 @@ def wrap_for_visual(base_sql: str, visual: Any) -> str:
     The dataset SQL is wrapped as ``FROM (<base_sql>) sub`` so any
     parameter binds, CTEs, or dialect quirks in the inner SQL pass
     through unchanged.
+
+    BH.24.1 (2026-05-25): ``contract`` (a ``DatasetContract``)
+    threads through to ``_measure_sql`` so the cents→dollars divide
+    is gated on the column's storage shape (not on ``currency=True``
+    alone). Production caller (``_tree_fetcher.make_tree_db_fetcher``)
+    looks up the contract via ``get_contract(ds_id)`` and passes it;
+    ad-hoc callers (tests, Studio preview) can omit it and keep the
+    pre-BH.24.1 "divide whenever currency=True" behavior.
     """
     kind = type(visual).__name__
     if kind == "KPI":
         measures = getattr(visual, "values", []) or []
         if not measures:
             return base_sql
-        cols = [_measure_sql(m) for m in measures]
+        cols = [_measure_sql(m, contract=contract) for m in measures]
         cols = [c for c in cols if c]
         if not cols:
             return base_sql
@@ -167,7 +215,7 @@ def wrap_for_visual(base_sql: str, visual: Any) -> str:
         # ``colors`` field, so ``color_cols`` is empty there — no change.)
         color_dims = getattr(visual, "colors", []) or []
         color_cols = [c for c in (_dim_sql(d) for d in color_dims) if c]
-        meas_cols = [c for c in (_measure_sql(m) for m in measures) if c]
+        meas_cols = [c for c in (_measure_sql(m, contract=contract) for m in measures) if c]
         if not cat_cols or not meas_cols:
             return base_sql
         select_clause = ", ".join(cat_cols + color_cols + meas_cols)
@@ -195,7 +243,7 @@ def wrap_for_visual(base_sql: str, visual: Any) -> str:
             return base_sql
         src_col = _dim_sql(source)
         tgt_col = _dim_sql(target)
-        wt_expr = _measure_sql(weight)
+        wt_expr = _measure_sql(weight, contract=contract)
         if not src_col or not tgt_col or not wt_expr:
             return base_sql
         return (
