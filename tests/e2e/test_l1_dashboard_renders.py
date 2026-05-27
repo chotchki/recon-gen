@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from recon_gen.apps.l1_dashboard.app import _DRIFT_NAME
+
 
 
 if TYPE_CHECKING:
@@ -31,9 +33,9 @@ def test_l1_dashboard_opens_and_screenshots(
     qs_driver.open(l1_dashboard_id)
     png = qs_driver.screenshot(tmp_path / "l1_initial.png")
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
-    qs_driver.goto_sheet("Drift")
+    qs_driver.goto_sheet(_DRIFT_NAME)
     assert qs_driver.visual_titles(), (
-        "L1 dashboard 'Drift' sheet rendered no visual titles"
+        f"L1 dashboard {_DRIFT_NAME!r} sheet rendered no visual titles"
     )
 
 

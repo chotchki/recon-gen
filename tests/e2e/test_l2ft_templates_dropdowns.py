@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from recon_gen.apps.l2_flow_tracing.app import _TRANSFER_TEMPLATES_NAME
+
 from ._l2ft_dropdown_walk import walk_dropdown
 
 
@@ -51,10 +53,10 @@ def test_templates_dropdown_narrows_does_not_empty(
     (X.2.u.3.fix.demo). A value that empties the table is a regression —
     stale enum, missing plants, or a pushdown break."""
     driver, dashboard_arg = l2ft_dashboard_driver
-    driver.open(dashboard_arg, sheet="Transfer Templates")
+    driver.open(dashboard_arg, sheet=_TRANSFER_TEMPLATES_NAME)
     walk_dropdown(
         driver,
-        sheet_label="Transfer Templates",
+        sheet_label=_TRANSFER_TEMPLATES_NAME,
         dropdown_title=dropdown_title,
         table_title="Template Instances",
     )

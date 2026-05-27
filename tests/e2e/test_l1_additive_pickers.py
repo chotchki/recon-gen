@@ -58,6 +58,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from recon_gen.apps.l1_dashboard.app import (
+    _DRIFT_NAME,
+    _LIMIT_BREACH_NAME,
+    _OVERDRAFT_NAME,
+    _PENDING_AGING_NAME,
+    _TODAYS_EXCEPTIONS_NAME,
+    _TRANSACTIONS_NAME,
+    _TRANSACTIONS_TITLE,
+    _UNBUNDLED_AGING_NAME,
+)
 from recon_gen.apps.l1_dashboard.datasets import (
     DRIFT_CONTRACT,
     LIMIT_BREACH_CONTRACT,
@@ -119,7 +129,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 # when the seed plants something — confirm via ``data apply`` first.
 L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
     SheetAnchorSpec(
-        sheet_name="Drift",
+        sheet_name=_DRIFT_NAME,
         target_visual="Leaf Account Drift",
         dataset_builder=build_drift_dataset,
         contract=DRIFT_CONTRACT,
@@ -149,7 +159,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         ),
     ),
     SheetAnchorSpec(
-        sheet_name="Overdraft",
+        sheet_name=_OVERDRAFT_NAME,
         target_visual="Overdraft Violations",
         dataset_builder=build_overdraft_dataset,
         contract=OVERDRAFT_CONTRACT,
@@ -174,7 +184,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         ),
     ),
     SheetAnchorSpec(
-        sheet_name="Limit Breach",
+        sheet_name=_LIMIT_BREACH_NAME,
         target_visual="Limit Breach Detail",
         dataset_builder=build_limit_breach_dataset,
         contract=LIMIT_BREACH_CONTRACT,
@@ -211,7 +221,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
     # ``l1_rail_universe_values`` vs ``l1_rail_values``) — the anchor
     # row's single rail_name value satisfies both pickers.
     SheetAnchorSpec(
-        sheet_name="Pending Aging",
+        sheet_name=_PENDING_AGING_NAME,
         target_visual="Stuck Pending Detail",
         dataset_builder=build_stuck_pending_dataset,
         contract=STUCK_PENDING_CONTRACT,
@@ -233,7 +243,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         ),
     ),
     SheetAnchorSpec(
-        sheet_name="Unbundled Aging",
+        sheet_name=_UNBUNDLED_AGING_NAME,
         target_visual="Stuck Unbundled Detail",
         dataset_builder=build_stuck_unbundled_dataset,
         contract=STUCK_UNBUNDLED_CONTRACT,
@@ -268,7 +278,7 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
     # AA.A.qs-triage.5 — same shape as the Transactions fix (AA.A.993):
     # constrain the anchor account to the dropdown's advertised universe.
     SheetAnchorSpec(
-        sheet_name="Today's Exceptions",
+        sheet_name=_TODAYS_EXCEPTIONS_NAME,
         target_visual="Exception Detail",
         dataset_builder=build_todays_exceptions_dataset,
         contract=TODAYS_EXCEPTIONS_CONTRACT,
@@ -331,8 +341,8 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
     # until the underlying typeahead lands. Re-include with the rest
     # of the pickers once App2 grows typeahead support.
     SheetAnchorSpec(
-        sheet_name="Transactions",
-        target_visual="Posting Ledger",
+        sheet_name=_TRANSACTIONS_NAME,
+        target_visual=_TRANSACTIONS_TITLE,
         dataset_builder=build_transactions_dataset,
         contract=TRANSACTIONS_CONTRACT,
         anchor_order="account_id ASC, posting DESC",

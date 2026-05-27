@@ -30,6 +30,13 @@ from decimal import Decimal
 
 import pytest
 
+from recon_gen.apps.l1_dashboard.app import (
+    _DRIFT_NAME,
+    _DRIFT_TIMELINES_NAME,
+    _OVERDRAFT_NAME,
+    _PENDING_AGING_NAME,
+    _TODAYS_EXCEPTIONS_NAME,
+)
 from recon_gen.apps.l1_dashboard.datasets import (
     build_drift_dataset,
     build_drift_timeline_dataset,
@@ -88,7 +95,7 @@ def test_date_range_filter_narrows_drift_sheet(l1_dashboard_driver: tuple["Dashb
     :date_to`` bind narrows the same dataset SQL.
     """
     driver, dashboard_arg = l1_dashboard_driver
-    driver.open(dashboard_arg, sheet="Drift")
+    driver.open(dashboard_arg, sheet=_DRIFT_NAME)
     driver.wait_loaded("Leaf Account Drift")
     before = len(driver.table_rows("Leaf Account Drift"))
     assert before > 0, (
@@ -113,7 +120,7 @@ def test_check_type_dropdown_exposes_options(l1_dashboard_driver: tuple["Dashboa
     only assert the dropdown is populated, not which values appear.
     """
     driver, dashboard_arg = l1_dashboard_driver
-    driver.open(dashboard_arg, sheet="Today's Exceptions")
+    driver.open(dashboard_arg, sheet=_TODAYS_EXCEPTIONS_NAME)
     options = driver.filter_options("Check Type")
     assert len(options) >= 1, (
         f"Check Type dropdown should expose ≥1 value, got {options}"
@@ -143,7 +150,7 @@ def test_bg3_drift_sheet_kpis_match_matview_counts(l1_dashboard_driver: tuple["D
     agree.
     """
     driver, dashboard_arg = l1_dashboard_driver
-    driver.open(dashboard_arg, sheet="Drift")
+    driver.open(dashboard_arg, sheet=_DRIFT_NAME)
     driver.wait_loaded("Leaf Account Drift")
 
     for kpi_title, builder in (
@@ -183,7 +190,7 @@ def test_bg3_drift_timelines_kpis_and_series_identity_plus_delta(
     read trips here.
     """
     driver, dashboard_arg = l1_dashboard_driver
-    driver.open(dashboard_arg, sheet="Drift Timelines")
+    driver.open(dashboard_arg, sheet=_DRIFT_TIMELINES_NAME)
     driver.wait_loaded("Largest Leaf Drift Day")
 
     leaf_sql, leaf_params = _sql_and_params_for(
@@ -266,7 +273,7 @@ def test_bg6_pending_aging_kpi_chart_table_triple_identity(
     dataset is the pre-filter or includes a different SCOPE.
     """
     driver, dashboard_arg = l1_dashboard_driver
-    driver.open(dashboard_arg, sheet="Pending Aging")
+    driver.open(dashboard_arg, sheet=_PENDING_AGING_NAME)
     driver.wait_loaded("Stuck Pending")
 
     sql, params = _sql_and_params_for(build_stuck_pending_dataset, cfg, l2)
@@ -306,7 +313,7 @@ def test_bg6_todays_exceptions_kpi_matches_dataset_count(
     THIS assertion is the gate.
     """
     driver, dashboard_arg = l1_dashboard_driver
-    driver.open(dashboard_arg, sheet="Today's Exceptions")
+    driver.open(dashboard_arg, sheet=_TODAYS_EXCEPTIONS_NAME)
     driver.wait_loaded("Open Exceptions")
 
     sql, params = _sql_and_params_for(
@@ -342,7 +349,7 @@ def test_bg3_overdraft_kpi_matches_matview_count(l1_dashboard_driver: tuple["Das
     collapse to 0 when rows exist.
     """
     driver, dashboard_arg = l1_dashboard_driver
-    driver.open(dashboard_arg, sheet="Overdraft")
+    driver.open(dashboard_arg, sheet=_OVERDRAFT_NAME)
     driver.wait_loaded("Overdraft Violations")
 
     sql, dataset_parameters = _sql_and_params_for(

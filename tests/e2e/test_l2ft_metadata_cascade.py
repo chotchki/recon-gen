@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from recon_gen.apps.l2_flow_tracing.app import _RAILS_NAME
+
 
 
 if TYPE_CHECKING:
@@ -43,9 +45,12 @@ def test_metadata_value_pick_does_not_empty_transactions_table(
     refreshed dropdown; skips with an informational message if no such
     pair exists for the deployed L2.
     """
-    qs_driver.open(l2ft_dashboard_id, sheet="Rails")
-    qs_driver.wait_loaded("Transactions")
-    before = len(qs_driver.table_rows("Transactions"))
+    qs_driver.open(l2ft_dashboard_id, sheet=_RAILS_NAME)
+    # The L2FT Rails sheet's transactions-table visual title happens
+    # to match L1's _TRANSACTIONS_NAME constant; they're independent
+    # uses of the same word and L2FT has no exported constant.
+    qs_driver.wait_loaded("Transactions")  # typing-smell: ignore[no-inline-production-constants]: L2FT visual title; no L2FT constant exists
+    before = len(qs_driver.table_rows("Transactions"))  # typing-smell: ignore[no-inline-production-constants]: L2FT visual title; no L2FT constant exists
     assert before > 0, (
         f"Transactions table must have rows pre-filter, got {before}"
     )
@@ -69,7 +74,7 @@ def test_metadata_value_pick_does_not_empty_transactions_table(
     chosen_value = value_options[0]
     qs_driver.pick_filter("Metadata Value", [chosen_value])
 
-    after = len(qs_driver.table_rows("Transactions"))
+    after = len(qs_driver.table_rows("Transactions"))  # typing-smell: ignore[no-inline-production-constants]: L2FT visual title; no L2FT constant exists
     qs_driver.screenshot()
     assert after > 0, (
         f"Transactions table emptied after picking "

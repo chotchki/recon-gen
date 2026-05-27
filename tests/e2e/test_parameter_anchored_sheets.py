@@ -50,6 +50,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from recon_gen.apps.l2_flow_tracing.app import _TRANSFER_TEMPLATES_NAME
+
 
 
 if TYPE_CHECKING:
@@ -136,7 +138,7 @@ def test_l2ft_transfer_templates_anchor_control_present_and_populated(
 ) -> None:
     driver, dashboard_arg = l2ft_dashboard_driver
     _assert_anchor_present_and_populated(
-        driver, dashboard_arg, sheet_name="Transfer Templates",
+        driver, dashboard_arg, sheet_name=_TRANSFER_TEMPLATES_NAME,
         anchor_label="Template", visual_title="Template Instances",
     )
 

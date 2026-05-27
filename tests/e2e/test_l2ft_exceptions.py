@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from recon_gen.apps.l2_flow_tracing.app import _L2_EXCEPTIONS_NAME
 from recon_gen.apps.l2_flow_tracing.datasets import (
     build_unified_l2_exceptions_dataset,
 )
@@ -65,7 +66,7 @@ def test_bg6_l2ft_exceptions_kpi_matches_dataset_row_count(
     6 — the number of L2 hygiene check kinds), the assertion trips.
     """
     driver, dashboard_arg = l2ft_dashboard_driver
-    driver.open(dashboard_arg, sheet="L2 Exceptions")
+    driver.open(dashboard_arg, sheet=_L2_EXCEPTIONS_NAME)
     driver.wait_loaded("Open L2 Violations")
 
     sql, params = _l2ft_exceptions_sql_and_params(cfg, l2)
@@ -98,7 +99,7 @@ def test_bg6_l2ft_exceptions_table_count_column_sums_to_dataset_total(
     surfaces at the right callsite.
     """
     driver, dashboard_arg = l2ft_dashboard_driver
-    driver.open(dashboard_arg, sheet="L2 Exceptions")
+    driver.open(dashboard_arg, sheet=_L2_EXCEPTIONS_NAME)
     driver.wait_loaded("L2 Violation Detail")
 
     sql, params = _l2ft_exceptions_sql_and_params(cfg, l2)
