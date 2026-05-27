@@ -68,3 +68,52 @@ on a *numeric* column appears to render row count correctly — the
 quirk seems specific to string columns that double as Dims. We did
 not search for a config flag to opt out; the CalcField-1 fix is the
 operational answer regardless of what the underlying flag would be.
+
+## `TimeRangeFilter(time_granularity="DAY")` excludes upper-edge late-day rows — 2026-05-27
+
+### Symptom
+
+An analysis-level `TimeRangeFilter` with `time_granularity="DAY"` and
+`IncludeMaximum=True` over a `TIMESTAMP` column was claimed (per the
+codebase's `app2_date_filter` docstring) to truncate the column at
+the day boundary during filter evaluation and INCLUDE the full upper-
+edge day. App2's mirror clause uses `column < CAST(:date_to AS DATE)
++ 1 day` for the same effect.
+
+Observation on bg5 Exec KPI parity:
+
+- App2: `Total Transactions = 2392`, `Gross Money Moved = $4,779,478.81`
+- QS:   `Total Transactions = 2390`, `Gross Money Moved = $4,771,878.81`
+
+The 2 missing transactions and $7,600 delta are 2030-01-01 rows with
+`posting` > 00:00:00 — late-day timestamps that fall on the window's
+upper edge. App2 includes them; QS excludes them. So QS's behavior is
+effectively `column <= '2030-01-01 00:00:00'` even with
+`time_granularity="DAY"` + `IncludeMaximum=True`.
+
+### Workaround
+
+For tests that compare App2 ↔ QS, the renderers disagree by the
+late-day-row count on the upper-edge day. Two test-side options:
+
+- xfail the [qs] param with this quirk reason (current state on
+  `tests/e2e/test_exec_sheet_visuals.py::test_bg5_*`).
+- Tighten the test to assert App2 == dataset-SQL-with-binds and skip
+  the QS comparison.
+
+Operational fix candidates (not yet attempted):
+
+- Shift the analysis-level `TimeRangeFilter.max_bound` by +1 day so
+  QS effectively includes the full upper-edge day.
+- Switch QS's date filter to a dataset-level `<<$pDateTo>>`
+  parameter pushdown (unifies the date filter, lands the backlog
+  spike for "date-picker pushdown unification").
+
+### Notes
+
+The asymmetry only matters when the source column is a `TIMESTAMP`
+with non-midnight values. Matview columns that are date-truncated at
+create time (`business_day_start`, `posted_date`) don't trip the
+quirk — both renderers see the same coarse-granularity values.
+The transaction_summary case uses `t.posting` directly (raw
+timestamp), so the asymmetry surfaces.
