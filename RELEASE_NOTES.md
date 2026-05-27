@@ -1,5 +1,84 @@
 # Release Notes
 
+## v11.22.9 — BL.1 + BL.2 (close out Phase BL)
+
+Two model/wire fixes that retire the BL.1 and BL.2 xfail clusters
+(7 honest-gate KPI tests total; still strict=False pending live
+QS verification — the next-release CI's e2e leg is the gate).
+
+### BL.1 — `.count()` model-level wire flip (kills the QS distinct quirk)
+
+QS's `CategoricalMeasureField(AggregationFunction="COUNT")` silently
+renders DISTINCT count when the column also appears as a Dim
+elsewhere on the same visual / sheet. Affected 5 honest-gate KPI
+tests with the same shape ("App2 leg passes raw `COUNT(col)`; QS
+renders distinct"):
+
+- `tests/e2e/test_l1_filters.py::test_bg3_drift_sheet_kpis_match_matview_counts`
+- `tests/e2e/test_l1_filters.py::test_bg6_todays_exceptions_kpi_matches_dataset_count`
+- `tests/e2e/test_l1_filters.py::test_bg3_overdraft_kpi_matches_matview_count`
+- `tests/e2e/test_l2ft_exceptions.py::test_bg6_l2ft_exceptions_kpi_matches_dataset_row_count`
+- `tests/e2e/test_inv_filters.py::test_bg4_recipient_fanout_kpis_match_inflows_only_truth`
+
+Fix is model-level — both renderers stay symmetric:
+
+- **QS**: `Measure.kind == "count"` now emits
+  `NumericalMeasureField(SUM)` over an auto-registered
+  `_row_one_<sanitized-dataset-id>` CalcField with `Expression="1"`.
+  The CalcField is registered on the Analysis by
+  `App.resolve_auto_ids` — one per `Dataset` referenced by a count
+  Measure, no per-callsite changes.
+- **App2**: `_visual_sql._measure_sql` emits `SUM(1)` for
+  `kind == "count"` (was `COUNT(col)` — same numeric result for
+  non-null columns, now matches QS's intent explicitly).
+
+14 `.count()` callsites across the four apps benefit transparently
+— BL.1.C ("sweep other untested KPIs") is subsumed by the model
+fix.
+
+Quirk documented at `docs/reference/quicksight-quirks.md` (new
+file per `feedback_quirks_log_ever_growing`: same-branch entry,
+not a follow-up). Lists all five affected tests, symptom shape,
+and the workaround.
+
+### BL.2 — App2 bind-layer default for empty date params
+
+App2 saw empty `?date_from=&date_to=` on initial page load, fell
+back to the dataset SQL's match-all sentinel, and read all 90
+days of seed data — while QS in the same situation applies the
+analysis-level `TimeRangeFilter`'s parameter defaults and narrows
+to its declared window (30 days on Exec, 7 days on L1). The
+90/30 ratio matched the bg5 Exec KPI test failures exactly.
+
+Affected:
+
+- `tests/e2e/test_exec_sheet_visuals.py::test_bg5_transaction_volume_kpis_match_dataset_aggregates`
+- `tests/e2e/test_exec_sheet_visuals.py::test_bg5_money_moved_kpis_match_dataset_sums`
+
+Fix lives at the **bind layer**, not the form layer (user framing:
+*"why aren't we fixing how app2 responds to empty parameters"*).
+The form is presentation; the bind layer is the contract for
+"what narrows what."
+
+- `Analysis` gains a `default_universal_date_range: DateView | None`
+  field. Set by L1 + Exec apps where their universal range view
+  is constructed. L2FT + Investigation stay `None` (intentionally
+  no date narrowing — unchanged behavior).
+- `_tree_fetcher.make_tree_db_fetcher` reads the field once at
+  build time + applies it in the per-request fetcher via the new
+  `_apply_default_date_range` helper. Empty URL → default; mixed-
+  empty → only-empty gets default; both populated → user pick wins.
+- Hidden form inputs stay empty (no form-side prepop).
+
+### Phase BL closeout
+
+BL.0 (test-boundary registry isolation) and BL.3 (Today's
+Exceptions picker UNION) landed in earlier releases. With BL.1 +
+BL.2 ticked, the architectural arc of Phase BL is complete.
+Remaining sub-tasks (BL.1.B.1, BL.2.B) gate on live QS deploy
+verification: confirm the QS-side fixes work, then drop the
+strict=False xfail markers on the 7 affected tests.
+
 ## v11.22.8 — hotfix v11.22.7 Today's Exceptions picker + BL.0 land
 
 Two changes on top of v11.22.7:
