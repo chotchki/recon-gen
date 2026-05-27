@@ -366,3 +366,4 @@ Cold-read at `docs/audits/v11_22_1_feedback.md`. Closed in v11.22.3 small-fix ba
 - **Chase v11.22.4 CI-green: B/C/D test-side fixes** — added 2026-05-26.
 - **BL.0 — Refactor shared-state registries (SQL + L2 yaml vs config_kv)** — added 2026-05-27.
 - **BL.1 — Fix QS .count() distinct-vs-rows rendering quirk** — added 2026-05-27.
+- **BL.2 — App2 default date-filter on initial render** — added 2026-05-27.

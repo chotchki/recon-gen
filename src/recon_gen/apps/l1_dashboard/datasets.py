@@ -1498,6 +1498,17 @@ def build_l1_accounts_dataset(
         f"   UNION"
         f"   SELECT account_id, account_role, account_name"
         f"   FROM {prefix}_current_transactions"
+        f"   UNION"
+        # BL.3 — `<prefix>_todays_exceptions` is a UNION ALL of 5
+        # invariant matviews; some branches (multi_xor_violation,
+        # chain_parent_disagreement, etc.) carry account_id values
+        # that aren't in either daily_balances OR current_transactions
+        # (they key off a template/rail rather than a transaction). The
+        # Today's Exceptions sheet's Account dropdown needs to surface
+        # those accounts too — picker tests timed out before this
+        # third union term landed.
+        f"   SELECT account_id, account_role, account_name"
+        f"   FROM {prefix}_todays_exceptions"
         f" ) accounts_universe"
         f" WHERE {_data_value_clause('account_role', P_L1_DS_ROLE_DSP)}"
     )
