@@ -139,6 +139,11 @@ _RAILS_DESCRIPTION = (
     "to populate the Value dropdown; pick one or more Values to narrow "
     "the table to legs carrying that metadata."
 )
+# Visual title for the legs table inside the Rails sheet. Exported so
+# tests can import it instead of inlining the literal — see BE.2
+# suppressions in test_l2ft_{metadata_cascade,additive_pickers,
+# rails_dropdowns}.py before the 2026-05-27 sweep.
+_RAILS_TRANSACTIONS_TITLE = "Transactions"
 
 
 _CHAINS_NAME = "Chains"
@@ -650,7 +655,7 @@ def _populate_rails_sheet(
     # category filters narrow further.
     sheet.layout.row(height=21).add_table(
         width=36,
-        title="Transactions",
+        title=_RAILS_TRANSACTIONS_TITLE,
         subtitle=(
             "One row per leg matching all the filters above. With no "
             "Metadata Key picked, every leg in the date window appears; "

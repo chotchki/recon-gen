@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from recon_gen.apps.l2_flow_tracing.app import _RAILS_NAME
+from recon_gen.apps.l2_flow_tracing.app import _RAILS_NAME, _RAILS_TRANSACTIONS_TITLE
 
 from ._l2ft_dropdown_walk import walk_dropdown
 
@@ -43,5 +43,5 @@ def test_rails_dropdown_narrows_does_not_empty(
         dropdown_title=dropdown_title,
         # "Transactions" is the L2FT visual title (not L1's
         # _TRANSACTIONS_NAME sheet); L2FT has no constant.
-        table_title="Transactions",  # typing-smell: ignore[no-inline-production-constants]: L2FT visual title; no L2FT constant exists
+        table_title=_RAILS_TRANSACTIONS_TITLE,
     )

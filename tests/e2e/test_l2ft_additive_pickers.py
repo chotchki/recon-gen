@@ -55,6 +55,7 @@ import pytest
 from recon_gen.apps.l2_flow_tracing.app import (
     _CHAINS_NAME,
     _RAILS_NAME,
+    _RAILS_TRANSACTIONS_TITLE,
     _TRANSFER_TEMPLATES_NAME,
 )
 from recon_gen.apps.l2_flow_tracing.datasets import (
@@ -131,7 +132,7 @@ L2FT_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         sheet_name=_RAILS_NAME,
         # "Transactions" here is the L2FT Rails-sheet visual title
         # (not L1's _TRANSACTIONS_NAME sheet); L2FT has no constant.
-        target_visual="Transactions",  # typing-smell: ignore[no-inline-production-constants]: L2FT visual title; no L2FT constant exists
+        target_visual=_RAILS_TRANSACTIONS_TITLE,
         dataset_builder=build_postings_dataset,
         contract=POSTINGS_CONTRACT,
         anchor_order="posting DESC, id ASC",
