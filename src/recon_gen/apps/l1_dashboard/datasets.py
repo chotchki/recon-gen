@@ -1466,12 +1466,18 @@ def build_l1_accounts_dataset(
     via ``LinkedValues`` (the Daily Statement sheet's account dropdown
     re-points here too).
 
-    Reads ``<prefix>_current_daily_balances`` (one row per account-day,
-    so every account is present) rather than ``current_transactions``
-    (an account with no movement still has daily-balance rows). Same
-    DISTINCT-inside-SELECT shape as Investigation's
-    ``build_account_network_accounts_dataset`` (K.4.8k) — keeps the
-    dropdown's option fetch cheap as the matview grows.
+    Reads the UNION of ``<prefix>_current_daily_balances`` and
+    ``<prefix>_current_transactions`` so every account that's reachable
+    from ANY L1 sheet's matview appears in the dropdown. The earlier
+    daily-balances-only source missed accounts that only show up in
+    Pending-state transactions (StuckPendingGenerator emits a Pending
+    transaction with NO balance row — see
+    ``spine/stuck_pending.py:10``). Spine-planted ``tmpl-cust-*``
+    accounts only have Pending rows, so the old dropdown excluded
+    them — picking them was impossible even though the Pending Aging
+    sheet's table surfaced the matching matview rows. Same
+    DISTINCT-inside-UNION shape stays cheap as the matview grows
+    (DISTINCT on the (small) account column, not on full rows).
 
     AA.B.1 — carries ``account_role`` so the Daily Statement Role
     cascade can narrow the account picker via the ``pL1DsRole``
@@ -1486,7 +1492,13 @@ def build_l1_accounts_dataset(
     sql = (
         f"SELECT DISTINCT account_id, account_role, account_name,"
         f" (account_name || ' (' || account_id || ')') AS account_display"
-        f" FROM {prefix}_current_daily_balances"
+        f" FROM ("
+        f"   SELECT account_id, account_role, account_name"
+        f"   FROM {prefix}_current_daily_balances"
+        f"   UNION"
+        f"   SELECT account_id, account_role, account_name"
+        f"   FROM {prefix}_current_transactions"
+        f" ) accounts_universe"
         f" WHERE {_data_value_clause('account_role', P_L1_DS_ROLE_DSP)}"
     )
     return build_dataset(
