@@ -204,22 +204,6 @@ def test_bg4_volume_anomalies_kpi_matches_filtered_matview_and_distribution(
     driver.screenshot()
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Recipient Fanout SQL inflation — NOT BL.1. The current fanout "
-        "dataset JOINs inflows × outflows on transfer_id; for a "
-        "transfer with N sender legs + M recipient legs, the join "
-        "produces N×M rows each carrying the inflow amount. SUM(amount) "
-        "in the KPI inflates by the sender-leg count. The fix is a SQL "
-        "rewrite to aggregate inflows-side BEFORE joining outflows for "
-        "sender enumeration — separate from BL.1's wire fix. (The xfail "
-        "was misattributed to BL.1 during the BL prep sweep; the test "
-        "docstring's 'expected to fail' note is the accurate framing.) "
-        "Tracked for a follow-on phase; un-xfail when the SQL rewrite "
-        "lands."
-    ),
-    strict=False,
-)
 def test_bg4_recipient_fanout_kpis_match_inflows_only_truth(
     inv_dashboard_driver: tuple["DashboardDriver", str], cfg: Config,
 ) -> None:
@@ -230,27 +214,35 @@ def test_bg4_recipient_fanout_kpis_match_inflows_only_truth(
 
     Direct catch for v11.21.0 cold-read finding #7 (Total Inbound =
     $1.54B implausibly large; 58% of bank-wide gross handle in 4
-    recipients). The current fanout SQL JOINs inflows × outflows on
+    recipients). The fanout SQL JOINs inflows × outflows on
     transfer_id — for a transfer with N sender legs + M recipient
-    legs, joined produces N×M rows each carrying the inflow amount,
-    inflating SUM(amount) by the sender-leg count.
+    legs, joined produces N×M rows each carrying the inflow amount.
+    Bare ``SUM(amount)`` would inflate by the sender-leg count.
 
-    Ground truth: dedupe the fanout dataset's rows by
-    (recipient_account_id, transfer_id) — that gives the per-recipient
-    per-transfer inflow ONCE. Sum gives the un-inflated Total Inbound.
-    The rendered KPI must equal this de-duped sum (modulo the
-    qualifying-recipients filter, which both already apply).
+    Ground truth: ``amount_per_pair × rows_per_pair`` reconstructs
+    the per-pair inflow regardless of whether BH.7's window-function
+    divide is applied at the dataset layer (the docstring on the
+    ground-truth computation below explains the invariance). Sum
+    across pairs gives the un-inflated Total Inbound.
 
-    NOTE: this test is **expected to fail on current production code**
-    until the fanout SQL is rewritten to aggregate inflows-side BEFORE
-    joining outflows for the sender-enumeration. That failure shape IS
-    the catch — leaving the test red as the visible gate until the
-    rewrite lands.
-    """
+    BH.7 (2026-05-25) landed the cartesian-inflation fix via
+    ``j.amount / COUNT(*) OVER (PARTITION BY j.recipient_account_id,
+    j.transfer_id)``. This test enforces that the SQL stays
+    inflation-free — un-xfail'd 2026-05-27 after BL.1 verification
+    confirmed the rendered KPI matches the ground truth on seeded
+    fanout data. ``pytest.skip`` on empty rows (the deployed L2's
+    seed may not always plant enough qualifying recipients to clear
+    the default threshold; see the skip branch below)."""
     driver, dashboard_arg = inv_dashboard_driver
     driver.open(dashboard_arg, sheet="Recipient Fanout")
-    driver.wait_loaded("Total Inbound")
 
+    # Query the SQL BEFORE waiting on the visual. The seed for some
+    # L2 instances doesn't plant enough recipient fanout (5+ distinct
+    # senders per recipient) to clear the default threshold; on those,
+    # the KPI renders as an empty value and the App2 ``.visual-data``
+    # never transitions out of the spinner state, so ``wait_loaded``
+    # times out before we can reach the skip check. Querying SQL first
+    # lets us pytest.skip cleanly when the data isn't there.
     fanout_sql, fanout_params = _sql_and_params_for(
         build_recipient_fanout_dataset, cfg,
     )
@@ -263,6 +255,8 @@ def test_bg4_recipient_fanout_kpis_match_inflows_only_truth(
             "default threshold (test_min_sigma_slider_shrinks_anomalies_kpi "
             "uses the same skip pattern). Plant fanout spikes to re-light."
         )
+
+    driver.wait_loaded("Total Inbound")
 
     # Compute inflation-free ground truth that's invariant to whether
     # BH.7's window divide is applied at the dataset layer. For each
