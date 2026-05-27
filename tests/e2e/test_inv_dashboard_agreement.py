@@ -288,7 +288,7 @@ def isolated_inv_cfg(cfg: "Config") -> "Iterator[Config]":
 
 
 @pytest.fixture(scope="module")
-def isolated_inv_app(isolated_inv_cfg: "Config") -> "App":
+def isolated_inv_app(isolated_inv_cfg: "Config") -> "Iterator[App]":
     """Investigation App tree built against the ISOLATED cfg.
 
     The session-scoped ``inv_app`` (conftest.py) is built off the
@@ -300,14 +300,44 @@ def isolated_inv_app(isolated_inv_cfg: "Config") -> "App":
 
     Module-scoped to amortize the build cost across the two
     parametrizations (anomaly + money_trail).
+
+    **Registry snapshot/restore** (2026-05-27): ``build_investigation_app``
+    calls ``build_dataset`` for every Investigation dataset, which
+    calls ``register_sql(visual_identifier, sql)`` against a
+    module-level ``_SQL_REGISTRY``. The registry is keyed by
+    ``visual_identifier`` (a CONSTANT like ``DS_INV_VOLUME_ANOMALIES``,
+    shared across cfgs) — NOT by cfg.db_table_prefix. So this build's
+    iagree-prefixed SQL overwrites the canonical inv_app's SQL,
+    causing subsequent tests that share the same registry (e.g.
+    ``test_inv_filters[app2]``) to query the now-dropped iagree
+    schema and 500. Snapshot the affected registry entries on setup,
+    restore on teardown — surgical workaround for the global-state
+    leak until the registry gets cfg-scoped properly.
     """
     from recon_gen.apps.investigation.app import build_investigation_app
+    from recon_gen.common import dataset_contract as _dc
+
+    # Snapshot the SQL + dataset-params + contract registries before
+    # the isolated app's build pollutes them.
+    sql_snapshot = dict(_dc._SQL_REGISTRY)  # pyright: ignore[reportPrivateUsage]: surgical access to module-level registry; production helper would expose a public snapshot/restore API
+    dsp_snapshot = dict(_dc._DSP_REGISTRY)  # pyright: ignore[reportPrivateUsage]: see _SQL_REGISTRY comment
+    contract_snapshot = dict(_dc._CONTRACT_REGISTRY)  # pyright: ignore[reportPrivateUsage]: see _SQL_REGISTRY comment
 
     app = build_investigation_app(
         isolated_inv_cfg, l2_instance=_INSTANCE,
     )
     app.emit_analysis()
-    return app
+    try:
+        yield app
+    finally:
+        # Restore the canonical registrations so post-agreement tests
+        # see the SQL their session-scoped `inv_app` originally built.
+        _dc._SQL_REGISTRY.clear()  # pyright: ignore[reportPrivateUsage]: see setup comment
+        _dc._SQL_REGISTRY.update(sql_snapshot)  # pyright: ignore[reportPrivateUsage]: see setup comment
+        _dc._DSP_REGISTRY.clear()  # pyright: ignore[reportPrivateUsage]: see setup comment
+        _dc._DSP_REGISTRY.update(dsp_snapshot)  # pyright: ignore[reportPrivateUsage]: see setup comment
+        _dc._CONTRACT_REGISTRY.clear()  # pyright: ignore[reportPrivateUsage]: see setup comment
+        _dc._CONTRACT_REGISTRY.update(contract_snapshot)  # pyright: ignore[reportPrivateUsage]: see setup comment
 
 
 @pytest.fixture(scope="module")
