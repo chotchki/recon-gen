@@ -95,10 +95,19 @@ def _measure_sql(measure: Any, *, contract: Any) -> str:
     column = getattr(getattr(measure, "column", None), "name", None)
     if not kind or not column:
         return ""
+    if kind == "count":
+        # BL.1 — App2 + QS stay symmetric: QS emits
+        # NumericalMeasureField(SUM) over a literal-1 CalcField; App2
+        # emits ``SUM(1)``. Both compute the same row count without
+        # tripping QS's "COUNT on string-dim column renders distinct"
+        # quirk. The Measure's column ref is intentionally ignored
+        # for row-count semantics (any non-null column would give the
+        # same number; SUM(1) makes the intent explicit).
+        return "SUM(1)"
     quoted = _quote_col(column)
     fn = _AGG_SQL_FN.get(kind)
     is_currency = bool(getattr(measure, "currency", False))
-    counting = kind in ("count", "distinct_count")
+    counting = kind == "distinct_count"
     if fn is None:
         return f"COUNT({quoted})"  # safe fallback
     if kind == "distinct_count":

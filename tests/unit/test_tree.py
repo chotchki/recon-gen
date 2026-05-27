@@ -322,11 +322,26 @@ class TestMeasure:
             assert emitted.NumericalMeasureField.AggregationFunction is not None
             assert emitted.NumericalMeasureField.AggregationFunction.SimpleNumericalAggregation == expected
 
-    def test_count_emits_categorical_field(self):
+    def test_count_emits_numerical_sum_over_row_one_calc_field(self):
+        # BL.1 — kind="count" emits NumericalMeasureField(SUM) over the
+        # auto-registered ``_row_one_<dataset_id>`` CalcField (literal
+        # ``1`` per row). The original CategoricalMeasureField(COUNT)
+        # wire silently rendered DISTINCT when QS saw the column as a
+        # Dim elsewhere on the same visual; SUM-over-1 is a pure row
+        # count with no quirky distinct behavior.
         m = Measure.count(dataset=_DS_FOO, field_id="f-1", column="account_id")
         emitted = m.emit()
-        assert emitted.CategoricalMeasureField is not None
-        assert emitted.CategoricalMeasureField.AggregationFunction == "COUNT"
+        assert emitted.CategoricalMeasureField is None
+        nmf = emitted.NumericalMeasureField
+        assert nmf is not None
+        assert nmf.AggregationFunction is not None
+        assert nmf.AggregationFunction.SimpleNumericalAggregation == "SUM"
+        # The Column ref points at the row-one CalcField, not the
+        # original column. ``App.resolve_auto_ids`` registers the
+        # matching CalcField on the Analysis.
+        from recon_gen.common.tree.fields import row_one_calc_name
+        assert nmf.Column.ColumnName == row_one_calc_name(_DS_FOO)
+        assert nmf.Column.DataSetIdentifier == _DS_FOO.identifier
 
     def test_distinct_count_emits_categorical_field(self):
         m = Measure.distinct_count(dataset=_DS_FOO, field_id="f-1", column="account_id")
@@ -1496,12 +1511,23 @@ class TestColumnRefAcceptsCalcField:
         assert dim.calc_field() is None
 
     def test_measure_accepts_calc_field(self):
+        # BL.1 — kind="count" now emits NumericalMeasureField(SUM)
+        # over a row-one CalcField (literal 1 per row) regardless of
+        # the source column. The original column ref (CalcField or
+        # real column) is still preserved on the Measure (via
+        # ``m.calc_field()``) for the dependency walk — the CalcField
+        # ref is what registers the underlying dataset as a dep — but
+        # the emitted wire uses the literal-1 CalcField, not the
+        # source column.
+        from recon_gen.common.tree.fields import row_one_calc_name
         cf = _make_is_anchor()
         m = Measure.count(_DS_FOO, cf, field_id="f-1")
         emitted = m.emit()
-        assert emitted.CategoricalMeasureField is not None
-        assert emitted.CategoricalMeasureField.Column.ColumnName == "is_anchor_edge"
-        assert m.calc_field() is cf
+        assert emitted.CategoricalMeasureField is None
+        nmf = emitted.NumericalMeasureField
+        assert nmf is not None
+        assert nmf.Column.ColumnName == row_one_calc_name(_DS_FOO)
+        assert m.calc_field() is cf  # source ref preserved on Measure
 
     def test_category_filter_accepts_calc_field(self):
         cf = _make_is_anchor()

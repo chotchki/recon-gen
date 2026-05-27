@@ -56,6 +56,36 @@ from recon_gen.common.tree.datasets import Dataset
 DimKind = Literal["categorical", "date", "numerical"]
 
 
+# BL.1 — kind="count" Measures emit ``NumericalMeasureField(SUM)`` over
+# an auto-registered CalcField with ``Expression="1"`` (one per
+# referenced ``Dataset``). The convention name carries the dataset
+# identifier so two datasets in the same Analysis don't collide on the
+# global ``Analysis.calc_fields`` name registry. ``App.resolve_auto_ids``
+# is the registrar; ``Measure.emit`` reads through to the convention
+# name.
+#
+# Why this shape rather than ``CategoricalMeasureField(COUNT)``: QS's
+# CategoricalMeasureField COUNT silently renders DISTINCT when the
+# column also appears as a Dim elsewhere on the same visual / sheet
+# (BL.1 bug). NumericalMeasureField(SUM) over a literal-1 CalcField
+# is a pure row count with no quirky distinct behavior. App2's
+# ``_visual_sql`` translates ``kind="count"`` → ``SUM(1)``; the two
+# renderers stay symmetric (both compute SUM(1) over the dataset).
+ROW_ONE_CALC_PREFIX = "_row_one_"
+
+
+def row_one_calc_name(dataset: Dataset) -> str:
+    """Convention name for the literal-1 CalcField backing
+    ``Measure.kind == "count"`` row-count semantics on ``dataset``.
+
+    Returns ``"_row_one_<sanitized-dataset-id>"``. Dashes in the
+    dataset identifier are replaced with underscores so the name is
+    QS-safe (QS calc field names accept underscores; dashes are
+    allowed too but underscores stay closer to convention).
+    """
+    return f"{ROW_ONE_CALC_PREFIX}{dataset.identifier.replace('-', '_')}"
+
+
 @dataclass(eq=False)
 class Dim:
     """One dimension field-well entry — typed wrapper that emits a
@@ -342,6 +372,31 @@ class Measure:
             DataSetIdentifier=self.dataset.identifier,
             ColumnName=resolve_column(self.column),
         )
+        if self.kind == "count":
+            # BL.1 — read through to the literal-1 CalcField. The
+            # CalcField itself is registered on the Analysis by
+            # ``App.resolve_auto_ids`` (one per ``Dataset`` referenced
+            # by a count Measure); here we just emit the
+            # NumericalMeasureField(SUM) pointing at that CalcField's
+            # convention name.
+            assert not self.currency, (
+                f"Measure(currency=True) is only valid for numerical "
+                f"aggregations (sum/max/min/average), not "
+                f"{self.kind!r} — count returns row counts, never money."
+            )
+            row_one_col = ColumnIdentifier(
+                DataSetIdentifier=self.dataset.identifier,
+                ColumnName=row_one_calc_name(self.dataset),
+            )
+            return MeasureField(
+                NumericalMeasureField=NumericalMeasureField(
+                    FieldId=self.field_id,
+                    Column=row_one_col,
+                    AggregationFunction=NumericalAggregationFunction(
+                        SimpleNumericalAggregation="SUM",
+                    ),
+                ),
+            )
         if self.kind in _CATEGORICAL_AGG:
             assert not self.currency, (
                 f"Measure(currency=True) is only valid for numerical "

@@ -105,13 +105,19 @@ _BASE = "SELECT * FROM probe_dataset"
 
 
 class TestKPIWrap:
-    def test_count_quotes_column_ref(self):
+    def test_count_emits_sum_one_row_count_semantic(self):
+        # BL.1 — kind="count" emits ``SUM(1)`` on the App2 side, not
+        # ``COUNT(col)``. The Measure's column ref is intentionally
+        # ignored (any non-null column would give the same row count;
+        # SUM(1) makes the intent explicit and stays symmetric with
+        # the QS-side NumericalMeasureField(SUM) over a literal-1
+        # CalcField).
         kpi = KPI(values=[
             _StubMeasure(kind="count", column=_StubColumn("account_id")),
         ])
         wrapped = wrap_for_visual(_BASE, kpi)
-        assert 'COUNT("account_id")' in wrapped
-        assert "COUNT(account_id)" not in wrapped  # unquoted form gone
+        assert "SUM(1)" in wrapped
+        assert 'COUNT("account_id")' not in wrapped
 
     def test_distinct_count_quotes_column_ref(self):
         kpi = KPI(values=[
@@ -221,7 +227,12 @@ class TestCurrencyMeasureDividesByHundred:
         """COUNT / DISTINCT_COUNT aren't sums of cents; the divide
         skips them even when the flag is set (defensive — a counting
         currency measure is nonsense but the wrap shouldn't corrupt
-        it into ``COUNT(...) / 100.0``)."""
+        it into ``COUNT(...) / 100.0``).
+
+        BL.1: kind="count" now emits ``SUM(1)`` row-count semantic
+        regardless of column. The divide-by-100 cents→dollars logic
+        still must not apply to SUM(1) (it's a row count, not a
+        cents sum)."""
         kpi = KPI(values=[
             _StubMeasure(
                 kind="count",
@@ -230,7 +241,7 @@ class TestCurrencyMeasureDividesByHundred:
             ),
         ])
         wrapped = wrap_for_visual(_BASE, kpi, contract=_CENTS_CONTRACT)
-        assert 'COUNT("account_id")' in wrapped
+        assert "SUM(1)" in wrapped
         assert "/ 100.0" not in wrapped
 
     def test_currency_max_divides(self):

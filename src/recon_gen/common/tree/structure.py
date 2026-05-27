@@ -56,7 +56,7 @@ from recon_gen.common.tree.controls import (
     SelectableValues,
 )
 from recon_gen.common.tree.datasets import Column, Dataset
-from recon_gen.common.tree.fields import Dim, FieldRef, Measure
+from recon_gen.common.tree.fields import Dim, FieldRef, Measure, row_one_calc_name
 from recon_gen.common.tree.filters import FilterGroup, FilterLike
 from recon_gen.common.tree.parameters import ParameterDeclLike
 from recon_gen.common.tree.text_boxes import TextBox
@@ -1431,6 +1431,36 @@ class App:
                     filt.filter_id = auto_id(
                         f"f-{kind}-fg{fg_idx}-{filt_idx}"
                     )
+        # BL.1 — auto-register the literal-1 CalcField that backs
+        # ``Measure.kind == "count"`` row-count semantics. One CalcField
+        # per ``Dataset`` referenced by a count Measure. Runs BEFORE
+        # the calc-field name resolver below so the auto-registered
+        # CalcFields' explicit names survive (they don't pass through
+        # the auto-name sentinel path). See
+        # ``recon_gen.common.tree.fields.row_one_calc_name``.
+        count_datasets: set[Dataset] = set()
+        for sheet in self.analysis.sheets:
+            for visual in sheet.visuals:
+                for attr, _role in _FIELD_SLOTS:
+                    slot: object = getattr(visual, attr, None)
+                    if slot is None:
+                        continue
+                    leaves: list[object] = (
+                        list(slot) if isinstance(slot, list) else [slot]  # type: ignore[arg-type]: list(object) is list of leaves; slot narrowed by isinstance
+                    )
+                    for leaf in leaves:
+                        if isinstance(leaf, Measure) and leaf.kind == "count":
+                            count_datasets.add(leaf.dataset)
+        existing_calc_names = {
+            c.name for c in self.analysis.calc_fields
+            if not isinstance(c.name, _AutoSentinel)
+        }
+        for dataset in sorted(count_datasets, key=lambda d: d.identifier):
+            name = row_one_calc_name(dataset)
+            if name not in existing_calc_names:
+                self.analysis.calc_fields.append(CalcField(
+                    dataset=dataset, expression="1", name=name,
+                ))
         # CalcField names — analysis-scoped position index. KEPT AS
         # SLUG: calc field names are analyst-facing (they show in the
         # field-well dropdowns and visual subtitles); UUIDs would be

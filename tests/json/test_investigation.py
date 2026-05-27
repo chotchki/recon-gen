@@ -615,16 +615,25 @@ def test_fanout_sheet_serializes_to_aws_json():
     # in dataset SQL, threshold pushed via <<$pInvFanoutThreshold>>
     # — leaving 1 fanout window + 1 anomalies window + 1 money-trail
     # window + 2 account network directional (inbound/outbound)).
-    # 0 calc fields after Y.3.a + Y.3.b: Y.3.a dropped fanout
-    # distinct_senders calc; Y.3.b dropped is_inbound_edge +
+    # 0 hand-authored calc fields after Y.3.a + Y.3.b: Y.3.a dropped
+    # fanout distinct_senders calc; Y.3.b dropped is_inbound_edge +
     # is_outbound_edge + counterparty_display — all four are now
-    # dataset columns.
+    # dataset columns. BL.1 (2026-05-27): every Dataset referenced by
+    # a kind="count" Measure now gets an auto-registered
+    # ``_row_one_<dataset_id>`` CalcField (literal 1 per row, backs
+    # NumericalMeasureField(SUM) row-count semantic — sidesteps the
+    # CategoricalMeasureField(COUNT) distinct quirk). All calc fields
+    # below this filter are BL.1's row-ones.
     # 7 parameters (fanout threshold + sigma + money-trail
     # root/hops/amount + account-network anchor/min-amount) — unchanged
     # by Y.3.a/b since the slider/dropdown params still drive controls.
     assert len(j["Definition"]["FilterGroups"]) == 5
-    cfs: list[object] = j["Definition"].get("CalculatedFields") or []
-    assert len(cfs) == 0
+    from recon_gen.common.tree.fields import ROW_ONE_CALC_PREFIX
+    cfs: list[dict[str, str]] = j["Definition"].get("CalculatedFields") or []
+    hand_authored = [
+        cf for cf in cfs if not cf["Name"].startswith(ROW_ONE_CALC_PREFIX)
+    ]
+    assert hand_authored == []
     assert len(j["Definition"]["ParameterDeclarations"]) == 7
 
 
