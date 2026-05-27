@@ -827,13 +827,23 @@ def _layer_command(
             # costs ~one test re-run, not a whole ``unit→…→browser``
             # cycle. A test that's genuinely broken fails 3× → still
             # halts.
-            "--reruns", "2", "--reruns-delay", "10",
+            #
+            # 2026-05-27 — bumped ``--reruns-delay`` from 10s → 60s after
+            # the v11.22.12 ``test_l1_additive_pickers_keep_anchor_row
+            # [qs-Overdraft]`` flake hit all 3 attempts before the
+            # ``gh rerun`` cleared it. Pattern matches the known
+            # Sasquatch L1 dashboard render flake (task backlog #466):
+            # QS's analysis cache takes longer than 10s × 3 attempts to
+            # clear after a fresh deploy. 60s × 2 reruns = ~2 min of
+            # recovery time per affected test, well within the chain's
+            # tolerance.
+            "--reruns", "2", "--reruns-delay", "60",
         ]
         agree_cmd = [
             str(_VENV_BIN / "pytest"), agree_file, "-q",
             *only, *_cov_args,
             "-n", "1",
-            "--reruns", "2", "--reruns-delay", "10",
+            "--reruns", "2", "--reruns-delay", "60",
         ]
         # ``bash -c '… && …'`` chains the two pytest invocations
         # sequentially; the shell exits non-zero if EITHER fails, which

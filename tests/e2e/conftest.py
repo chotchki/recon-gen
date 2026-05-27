@@ -440,6 +440,63 @@ def l2ft_analysis_id(deployment_name: str) -> str:
     return f"{deployment_name}-l2-flow-tracing-analysis"
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _qs_pre_warm_dashboards(  # pyright: ignore[reportUnusedFunction]: pytest autouse fixture — invoked by pytest via name, not directly accessed
+    cfg: "Config",
+    qs_client: "QuickSightClient",
+    account_id: str,
+    l1_dashboard_id: str,
+    inv_dashboard_id: str,
+    exec_dashboard_id: str,
+    l2ft_dashboard_id: str,
+) -> None:
+    """BL.3 follow-on (Task #466 mitigation): pre-warm each deployed
+    dashboard via ``describe_dashboard_definition`` ONCE at session
+    start. Forces QS to load the full analysis definition into its
+    cache before the first browser-tier test fires.
+
+    Why: the Sasquatch L1 dashboard render flake intermittently
+    surfaces as "visual empty on first render after fresh deploy" —
+    QS-side cache staleness, not data. Touching the definition once
+    per dashboard at session start gives QS time to materialize
+    before tests start asserting. Cheap (one API call per
+    dashboard); only fires when ``QS_GEN_E2E=1`` (else skipped) so
+    unit / non-e2e sessions don't pay the cost.
+
+    Combined with the runner's bumped ``--reruns-delay`` (10s →
+    60s; ``_dev/runner.py``), this should cut the bedrock flake
+    rate substantially without requiring per-test retries.
+    """
+    import os
+    if os.environ.get(RECON_GEN_E2E.name) != "1":
+        return
+    if not cfg.aws_account_id or not account_id:
+        return
+    dashboard_ids = (
+        ("l1", l1_dashboard_id),
+        ("inv", inv_dashboard_id),
+        ("exec", exec_dashboard_id),
+        ("l2ft", l2ft_dashboard_id),
+    )
+    for label, dashboard_id in dashboard_ids:
+        try:
+            qs_client.describe_dashboard_definition(
+                AwsAccountId=account_id, DashboardId=dashboard_id,
+            )
+        except qs_client.exceptions.ResourceNotFoundException:
+            # Not every L2 instance deploys every dashboard (e.g.
+            # the isolated_inv test cfg may only deploy
+            # investigation); skip silently.
+            continue
+        except Exception as exc:  # noqa: BLE001
+            # Pre-warm is best-effort; log the failure but don't
+            # gate the session on it.
+            print(
+                f"qs-prewarm[{label} {dashboard_id}] non-fatal: "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+
 # ---------------------------------------------------------------------------
 # Tree-built App fixtures (L.11)
 #
