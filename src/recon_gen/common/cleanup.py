@@ -13,12 +13,19 @@ from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import boto3
 import click
-from botocore.exceptions import ClientError
 
 from recon_gen.common.config import Config
 
+# boto3 / botocore are imported lazily inside the functions that use
+# them. Hard top-level imports would force the boto3 dep on every
+# wheel install — but boto3 lives in the ``[deploy]`` extras (and
+# `cleanup` is the deploy-cleanup CLI, only useful with that extras).
+# release.yml's smoke step installs the bare wheel + runs
+# ``pytest tests/unit/`` — an unconditional ``import boto3`` here
+# (caught 2026-05-27 in v11.22.5 release) crashed test collection
+# because test_models.py imports from this module to exercise the
+# `_StubClient` test double.
 if TYPE_CHECKING:
     from mypy_boto3_quicksight.client import QuickSightClient
 
@@ -38,6 +45,7 @@ def _read_managed_tags(
     when ``cfg.deployment_name`` is set (Z.C — collapsed from the prior
     ``ResourcePrefix`` + ``L2Instance`` two-tag scope).
     """
+    from botocore.exceptions import ClientError  # noqa: PLC0415 — lazy
     try:
         resp = client.list_tags_for_resource(ResourceArn=resource_arn)
     except ClientError:
@@ -237,6 +245,7 @@ def _delete_stale(
     stale: dict[str, list[tuple[str, str]]],
 ) -> int:
     """Delete stale resources in dependency order. Returns failure count."""
+    from botocore.exceptions import ClientError  # noqa: PLC0415 — lazy
     failures = 0
 
     for rid, _ in stale["dashboard"]:
@@ -301,6 +310,7 @@ def run_cleanup(
     from a QS account (e.g. tearing down a CI run, decommissioning an
     L2 instance).
     """
+    import boto3  # noqa: PLC0415 — lazy; boto3 lives in [deploy] extras
     # BF.1.S2: boto3.client returns the right per-service stub at runtime
     # but pyright sees the umbrella overload; anchor to QuickSightClient.
     client: QuickSightClient = boto3.client(  # pyright: ignore[reportUnknownMemberType]: boto3.client overloaded union; QuickSightClient annotation anchors the right stub

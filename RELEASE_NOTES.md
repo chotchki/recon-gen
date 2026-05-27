@@ -1,5 +1,21 @@
 # Release Notes
 
+## v11.22.6 — hotfix v11.22.5 wheel-smoke (boto3 import in cleanup.py)
+
+v11.22.5's release workflow failed at the wheel-smoke step (release.yml
+installs the bare wheel + `pytest tests/unit/`). `tests/unit/test_models.py`
+imports from `recon_gen.common.cleanup`, which had a top-level
+`import boto3`. boto3 lives in the `[deploy]` extras — not installed in
+the bare-wheel smoke env. Collection crashed with
+`ModuleNotFoundError: No module named 'boto3'`.
+
+Lazy-imported boto3 + `botocore.exceptions.ClientError` inside the
+functions that use them. The `TYPE_CHECKING` `QuickSightClient` import
+stays at top scope (annotation-only, no runtime cost).
+
+Mirrors the earlier `tests/conftest.py` guard for `_dev` imports —
+same anti-pattern, different module. Worth a sweep at some point.
+
 ## v11.22.5 — typing + aiosqlite + CI perf + browser-tier triage cycle
 
 ### Strict-typing reach
