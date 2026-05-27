@@ -316,7 +316,7 @@ def test_drift_timelines_has_two_kpis_and_two_line_charts() -> None:
     from recon_gen.common.tree import KPI, LineChart
 
     app = build_l1_dashboard_app(_CFG)
-    timelines = _sheet_by_name(app, "Drift Timelines")
+    timelines = _sheet_by_name(app, _DRIFT_TIMELINES_NAME)
     titles = [_visual_title(v) for v in timelines.visuals]
     assert titles == [
         "Largest Leaf Drift Day",
@@ -395,7 +395,7 @@ def test_overdraft_sheet_has_kpi_and_table() -> None:
     """Overdraft sheet structure: 1 KPI (count) + 1 violations table.
     Single-dataset sheet — every row in the table IS one violation."""
     app = build_l1_dashboard_app(_CFG)
-    overdraft = _sheet_by_name(app, "Overdraft")
+    overdraft = _sheet_by_name(app, _OVERDRAFT_NAME)
     titles = [_visual_title(v) for v in overdraft.visuals]
     assert titles == [
         "Accounts in Overdraft",
@@ -440,7 +440,7 @@ def test_limit_breach_sheet_has_kpi_and_table() -> None:
     """Limit Breach sheet structure: 1 KPI (count of breach cells) +
     1 detail table that puts outbound_total + cap side-by-side."""
     app = build_l1_dashboard_app(_CFG)
-    lb = _sheet_by_name(app, "Limit Breach")
+    lb = _sheet_by_name(app, _LIMIT_BREACH_NAME)
     titles = [_visual_title(v) for v in lb.visuals]
     assert titles == ["Limit Breach Cells", "Limit Breach Detail"]
 
@@ -481,7 +481,7 @@ def test_todays_exceptions_sheet_has_kpi_bar_table() -> None:
     """Today's Exceptions structure: 1 KPI (count) + 1 BarChart by
     check_type + 1 detail table sorted by magnitude DESC."""
     app = build_l1_dashboard_app(_CFG)
-    te = _sheet_by_name(app, "Today's Exceptions")
+    te = _sheet_by_name(app, _TODAYS_EXCEPTIONS_NAME)
     titles = [_visual_title(v) for v in te.visuals]
     assert titles == [
         "Open Exceptions",
@@ -531,7 +531,7 @@ def test_transactions_sheet_has_single_table() -> None:
     """Transactions has 1 detail table and no KPIs — its value is
     'show me every leg + filter'."""
     app = build_l1_dashboard_app(_CFG)
-    tx = _sheet_by_name(app, "Transactions")
+    tx = _sheet_by_name(app, _TRANSACTIONS_NAME)
     titles = [_visual_title(v) for v in tx.visuals]
     assert titles == [_TRANSACTIONS_TITLE]
 
@@ -573,7 +573,7 @@ def test_daily_statement_has_five_kpis_and_one_table() -> None:
     """Daily Statement structure: 5 KPIs side-by-side (Opening / Debits /
     Credits / Closing Stored / Drift) + 1 detail table."""
     app = build_l1_dashboard_app(_CFG)
-    ds = _sheet_by_name(app, "Daily Statement")
+    ds = _sheet_by_name(app, _DAILY_STATEMENT_NAME)
     titles = [_visual_title(v) for v in ds.visuals]
     assert titles == [
         "Opening Balance",
@@ -835,7 +835,7 @@ def test_limit_breach_sheet_lists_l2_caps() -> None:
     LimitSchedule with its cap + L2-supplied prose. Analysts see "what's
     configured" before "what got breached"."""
     app = build_l1_dashboard_app(_CFG)
-    lb = _sheet_by_name(app, "Limit Breach")
+    lb = _sheet_by_name(app, _LIMIT_BREACH_NAME)
     config_xml = _text_box_by_id(lb, "l1-lb-config").content
     assert "Configured Caps" in config_xml
     # Each LimitSchedule renders a `parent_role × transfer_type: $cap`
@@ -851,7 +851,7 @@ def test_todays_exceptions_footer_carries_l2_description() -> None:
     instance's top-level description — same prose as the Getting Started
     welcome, anchored at the bottom of the unified-view landing page."""
     app = build_l1_dashboard_app(_CFG)
-    te = _sheet_by_name(app, "Today's Exceptions")
+    te = _sheet_by_name(app, _TODAYS_EXCEPTIONS_NAME)
     footer_xml = _text_box_by_id(te, "l1-te-l2-footer").content
     assert "Institution Context" in footer_xml
     # Same fixture string the Getting Started welcome uses (M.3.2:
@@ -903,7 +903,7 @@ def test_aa_c_3_e_todays_exceptions_intro_panel_lists_every_kind() -> None:
     at the per-kind sheets — not seven stacked per-kind panels. The
     intro names every invariant kind so analysts know where to drill."""
     app = build_l1_dashboard_app(_CFG)
-    te = _sheet_by_name(app, "Today's Exceptions")
+    te = _sheet_by_name(app, _TODAYS_EXCEPTIONS_NAME)
     intro = _text_box_by_id(te, "l1-todays-exceptions-panel")
     # Every L1 invariant the dashboard surfaces gets a mention so
     # analysts know which kinds the aggregated table covers.
@@ -1097,7 +1097,7 @@ def test_date_range_pickers_on_every_data_sheet() -> None:
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
     # Getting Started has no data → no date pickers.
-    gs = _sheet_by_name(app, "Getting Started")
+    gs = _sheet_by_name(app, _GETTING_STARTED_NAME)
     assert len(gs.parameter_controls) == 0
     # Each of the 5 data-bearing universal-date sheets has 2 pickers.
     for sheet_name in (
@@ -1163,7 +1163,7 @@ def test_pending_aging_sheet_has_kpi_bar_table() -> None:
     from recon_gen.common.tree import BarChart
 
     app = build_l1_dashboard_app(_CFG)
-    pa = _sheet_by_name(app, "Pending Aging")
+    pa = _sheet_by_name(app, _PENDING_AGING_NAME)
     titles = [_visual_title(v) for v in pa.visuals]
     assert titles == [
         "Stuck Pending",
@@ -1242,7 +1242,7 @@ def test_pending_aging_drill_to_transactions() -> None:
     from recon_gen.common.tree import Drill
 
     app = build_l1_dashboard_app(_CFG)
-    pa = _sheet_by_name(app, "Pending Aging")
+    pa = _sheet_by_name(app, _PENDING_AGING_NAME)
     table = next(v for v in pa.visuals if _visual_title(v) == "Stuck Pending Detail")
     drills = [a for a in _visual_actions(table) if isinstance(a, Drill)]
     assert len(drills) == 1
@@ -1294,7 +1294,7 @@ def test_unbundled_aging_sheet_has_kpi_bar_table() -> None:
     from recon_gen.common.tree import BarChart
 
     app = build_l1_dashboard_app(_CFG)
-    ua = _sheet_by_name(app, "Unbundled Aging")
+    ua = _sheet_by_name(app, _UNBUNDLED_AGING_NAME)
     titles = [_visual_title(v) for v in ua.visuals]
     assert titles == [
         "Stuck Unbundled",
@@ -1341,7 +1341,7 @@ def test_unbundled_aging_drill_to_transactions() -> None:
     from recon_gen.common.tree import Drill
 
     app = build_l1_dashboard_app(_CFG)
-    ua = _sheet_by_name(app, "Unbundled Aging")
+    ua = _sheet_by_name(app, _UNBUNDLED_AGING_NAME)
     table = next(v for v in ua.visuals if _visual_title(v) == "Stuck Unbundled Detail")
     drills = [a for a in _visual_actions(table) if isinstance(a, Drill)]
     assert len(drills) == 1
@@ -1390,7 +1390,7 @@ def test_supersession_audit_has_kpis_and_two_tables() -> None:
     $ exposure between logical-keys count and no-reason count) + 1
     transactions audit table + 1 daily-balances audit table."""
     app = build_l1_dashboard_app(_CFG)
-    sa = _sheet_by_name(app, "Supersession Audit")
+    sa = _sheet_by_name(app, _SUPERSESSION_AUDIT_NAME)
     titles = [_visual_title(v) for v in sa.visuals]
     assert titles == [
         "Logical Keys with Supersession",
@@ -1547,7 +1547,7 @@ def test_todays_exceptions_table_carries_two_drills() -> None:
     from recon_gen.common.tree import Drill
 
     app = build_l1_dashboard_app(_CFG)
-    te = _sheet_by_name(app, "Today's Exceptions")
+    te = _sheet_by_name(app, _TODAYS_EXCEPTIONS_NAME)
     detail = next(v for v in te.visuals if _visual_title(v) == "Exception Detail")
     drills = [a for a in _visual_actions(detail) if isinstance(a, Drill)]
     assert len(drills) == 2
@@ -1596,7 +1596,7 @@ def test_daily_statement_drills_to_transactions() -> None:
     from recon_gen.common.tree import Drill
 
     app = build_l1_dashboard_app(_CFG)
-    ds = _sheet_by_name(app, "Daily Statement")
+    ds = _sheet_by_name(app, _DAILY_STATEMENT_NAME)
     table = next(v for v in ds.visuals if _visual_title(v) == "Posted Money Records")
     drills = [a for a in _visual_actions(table) if isinstance(a, Drill)]
     assert len(drills) == 1
@@ -1923,7 +1923,7 @@ def test_aa_e_2_daily_statement_account_dropdown_binds_display_column() -> None:
 
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
-    daily_statement = _sheet_by_name(app, "Daily Statement")
+    daily_statement = _sheet_by_name(app, _DAILY_STATEMENT_NAME)
     # Find the Account ParameterDropdown control. Concrete dropdown
     # subtypes carry ``title``; the *ControlLike Protocol doesn't, hence
     # the helper.

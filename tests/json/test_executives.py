@@ -32,6 +32,7 @@ from recon_gen.apps.executives.datasets import (
     build_all_datasets,
 )
 from recon_gen.cli import main
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from tests._test_helpers import make_test_config
 
 if TYPE_CHECKING:
@@ -44,7 +45,7 @@ if TYPE_CHECKING:
 # to render its dataset SQL. Z.C — db_table_prefix replaces the prior
 # auto-stamped l2_instance_prefix; pin to spec_example since
 # ``build_executives_app`` defaults to the spec_example L2 fixture.
-_TEST_CFG = make_test_config(db_table_prefix="spec_example")
+_TEST_CFG = make_test_config(db_table_prefix=DEFAULT_PREFIX)
 
 
 @pytest.fixture(scope="module")
