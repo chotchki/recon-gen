@@ -96,6 +96,13 @@ DS_APP_INFO_LIVENESS = "app-info-liveness-ds"
 DS_APP_INFO_MATVIEWS = "app-info-matviews-ds"
 
 
+# Visual titles — exported so tests can import them rather than inline
+# the literal (which silently rots when the title changes; v11.22.3's
+# BH.18 cold-read rename caught test_qs_table_rows_well_formed flat).
+APP_INFO_LIVENESS_TITLE = "Liveness"
+APP_INFO_MATVIEW_STATUS_TITLE = "Matview Status — sources this app reads from"
+
+
 # Module-level contract instances — must be the same object every time
 # `build_dataset()` is called, otherwise the registry rejects the
 # second call with a different-instance error. Module-level singletons
@@ -315,7 +322,7 @@ def populate_app_info_sheet(
     top = sheet.layout.row(height=_TABLE_HEIGHT)
     top.add_kpi(
         width=_HALF,
-        title="Liveness",
+        title=APP_INFO_LIVENESS_TITLE,
         subtitle=(
             "Count of public-schema tables. Real query against the "
             "database via Direct Query -- if this shows a number, "
@@ -326,7 +333,7 @@ def populate_app_info_sheet(
     )
     top.add_table(
         width=_HALF,
-        title="Matview Status — sources this app reads from",
+        title=APP_INFO_MATVIEW_STATUS_TITLE,
         subtitle=(
             "Row counts + most-recent date for the matviews + base "
             "tables **this dashboard depends on directly**. Per-app "

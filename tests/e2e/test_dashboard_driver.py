@@ -29,6 +29,10 @@ import pytest
 
 playwright_sync_api = pytest.importorskip("playwright.sync_api")
 
+from recon_gen.common.sheets.app_info import (
+    APP_INFO_MATVIEW_STATUS_TITLE,
+    APP_INFO_SHEET_NAME,
+)
 from tests.e2e._drivers import App2Driver, DashboardDriver, QsEmbedDriver
 
 # `qs_driver` lives in conftest.py — shared with the other QS browser
@@ -224,9 +228,9 @@ def test_qs_table_rows_well_formed(
     dicts. Data is whatever's seeded against the deployed dashboard's DB
     — assert structure; if rows came back, their keys are the column
     headers and the dicts are non-empty."""
-    qs_driver.open(l1_dashboard_id, sheet="Info")
-    qs_driver.wait_loaded("Matview Status")
-    rows = qs_driver.table_rows("Matview Status")
+    qs_driver.open(l1_dashboard_id, sheet=APP_INFO_SHEET_NAME)
+    qs_driver.wait_loaded(APP_INFO_MATVIEW_STATUS_TITLE)
+    rows = qs_driver.table_rows(APP_INFO_MATVIEW_STATUS_TITLE)
     assert isinstance(rows, list)
     if rows:
         assert all(isinstance(r, dict) and r for r in rows)
