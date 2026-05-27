@@ -1216,9 +1216,16 @@ def _populate_l2_exceptions_sheet(
             "correct. BH.11 rename (2026-05-25): title was 'Open L2 "
             "Violations'; cold-read read the kpi-vs-table-column "
             "magnitude gap as a unit mismatch — the new title + the "
-            "table column's matching rename make the units explicit."
+            "table column's matching rename make the units explicit. "
+            "BL.1 follow-up (2026-05-27): binding flipped to "
+            "``.distinct_count()`` to match the 'Distinct' intent — "
+            "pre-BL.1 ``.count()`` rendered DISTINCT on QS (the "
+            "CategoricalMeasureField(COUNT)-on-string-dim quirk); "
+            "post-BL.1 ``.count()`` renders row count (SUM(1)). The "
+            "title was authored under the quirk's behavior; the "
+            "explicit distinct_count binding survives the wire fix."
         ),
-        values=[ds["check_type"].count()],
+        values=[ds["check_type"].distinct_count()],
     )
     top_row.add_bar_chart(
         width=24,

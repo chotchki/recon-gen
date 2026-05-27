@@ -206,10 +206,17 @@ def test_bg4_volume_anomalies_kpi_matches_filtered_matview_and_distribution(
 
 @pytest.mark.xfail(
     reason=(
-        "BL.1 / BK.6 — same QS-side .count() distinct-vs-rows quirk "
-        "family. The fanout KPIs include a row-count measure that "
-        "renders distinct under QS / App2's measure aggregation. See "
-        "PLAN.md::BL.1."
+        "Recipient Fanout SQL inflation — NOT BL.1. The current fanout "
+        "dataset JOINs inflows × outflows on transfer_id; for a "
+        "transfer with N sender legs + M recipient legs, the join "
+        "produces N×M rows each carrying the inflow amount. SUM(amount) "
+        "in the KPI inflates by the sender-leg count. The fix is a SQL "
+        "rewrite to aggregate inflows-side BEFORE joining outflows for "
+        "sender enumeration — separate from BL.1's wire fix. (The xfail "
+        "was misattributed to BL.1 during the BL prep sweep; the test "
+        "docstring's 'expected to fail' note is the accurate framing.) "
+        "Tracked for a follow-on phase; un-xfail when the SQL rewrite "
+        "lands."
     ),
     strict=False,
 )

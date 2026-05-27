@@ -54,42 +54,41 @@ def _l2ft_exceptions_sql_and_params(
     return sql, list(ds.DatasetParameters or [])
 
 
-@pytest.mark.xfail(
-    reason=(
-        "BL.1 / BK.6 — QS-side .count() renders distinct check_types "
-        "(6 in the spec_example matview) instead of total rows. The "
-        "App2 leg also fails by the same shape. See PLAN.md::BL.1."
-    ),
-    strict=False,
-)
-def test_bg6_l2ft_exceptions_kpi_matches_dataset_row_count(
+def test_bg6_l2ft_exceptions_kpi_matches_dataset_distinct_check_types(
     l2ft_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance",
 ) -> None:
-    """BG.6 — Open L2 Violations KPI must equal the row count of the
-    unified L2 exceptions dataset. The KPI binding is
-    ``ds["check_type"].count()`` — same as "count of rows."
+    """BG.6 — Distinct Exception Types Open KPI must equal the
+    distinct ``check_type`` count of the unified L2 exceptions
+    dataset. The KPI binding is ``ds["check_type"].distinct_count()``
+    — explicit distinct semantic post-BL.1.
 
-    Direct catch for v11.21.0 finding #11's KPI half: if the binding
-    silently switches to COUNT(DISTINCT check_type) (which would give
-    6 — the number of L2 hygiene check kinds), the assertion trips.
-    """
+    Pre-BL.1 history: the KPI bound ``.count()`` but rendered DISTINCT
+    on QS due to the CategoricalMeasureField(COUNT)-on-string-dim
+    quirk; the title was renamed in BH.11 to match that quirk's
+    output. BL.1 fixed the wire (now row count on both renderers),
+    so the binding was flipped to ``.distinct_count()`` to match the
+    'Distinct' title intent. This test enforces the new contract."""
     driver, dashboard_arg = l2ft_dashboard_driver
     driver.open(dashboard_arg, sheet=_L2_EXCEPTIONS_NAME)
-    driver.wait_loaded("Open L2 Violations")
+    driver.wait_loaded("Distinct Exception Types Open")
 
     sql, params = _l2ft_exceptions_sql_and_params(cfg, l2)
     rows = driver.query_db(sql, dataset_parameters=params)
+    expected_distinct = len({row["check_type"] for row in rows})
 
-    rendered = parse_int_kpi(driver.kpi_value("Open L2 Violations"))
-    assert rendered == len(rows), (
-        f"Open L2 Violations KPI: rendered {rendered} ≠ "
-        f"len(query_db(unified_l2_exceptions_sql)) = {len(rows)}. "
-        f"v11.21.0 cold-read finding #11 KPI-half — KPI binding "
-        f"disagrees with its dataset. (Note: the table's `count` "
-        f"column on the same sheet sums to a DIFFERENT number — that's "
-        f"the per-violation occurrence count, a different measure. "
-        f"BG.6 enforces that each measure matches ITS binding, not "
-        f"that the two measures agree with each other.)"
+    rendered = parse_int_kpi(
+        driver.kpi_value("Distinct Exception Types Open"),
+    )
+    assert rendered == expected_distinct, (
+        f"Distinct Exception Types Open KPI: rendered {rendered} ≠ "
+        f"len({{row.check_type for row in rows}}) = "
+        f"{expected_distinct} (over {len(rows)} total rows). "
+        f"v11.21.0 cold-read finding #11 KPI-half + BH.11 title "
+        f"alignment + BL.1 wire fix together — the KPI's "
+        f"``.distinct_count()`` binding must equal the distinct "
+        f"check_type count of its dataset. (The table's `count` "
+        f"column on the same sheet sums to a DIFFERENT number — "
+        f"the per-violation occurrence count, a different measure.)"
     )
     driver.screenshot()
 

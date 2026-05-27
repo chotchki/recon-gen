@@ -1,5 +1,78 @@
 # Release Notes
 
+## v11.22.10 — Today's Exceptions picker perf + BL.1 follow-on test fixes
+
+Four changes that close out the Phase BL acceptance:
+
+### Today's Exceptions picker UNION ALL — release-CI unblock
+
+v11.22.7→v11.22.8→v11.22.9 release CI all failed on the same 4
+Today's Exceptions picker tests with 15s/30s timeouts. The BL.3
+third UNION term + the existing two UNIONs compounded sort-distinct
+cost at sasquatch scale: three sort-distinct passes over the wide
+current_transactions matview blew the picker dropdown's
+`/visuals/.../data` fetch past the timeout.
+
+Fix: switch the three subqueries to `UNION ALL`; the outer
+`SELECT DISTINCT` handles dedup in one hash-distinct pass.
+Same result set, dramatically less work.
+
+### 3 of 5 BL.1 .count() tests un-xfail'd
+
+Live QS deploy verified the BL.1 `NumericalMeasureField(SUM)` over
+`_row_one_<id>` CalcField wire renders row count correctly on both
+renderers. The test logic needed an additional fix to use the
+App2-form SQL (via `get_sql(DS_*)` from the dataset registry) +
+pass `date_from` / `date_to` binds matching the analysis default
+— the previous form used `CustomSql.SqlQuery` which carries the
+QS-side empty-`{date_filter}` template (the dual-SQL exception for
+the universal date filter).
+
+Un-xfail'd + passing on both renderers:
+
+- `tests/e2e/test_l1_filters.py::test_bg3_drift_sheet_kpis_match_matview_counts`
+- `tests/e2e/test_l1_filters.py::test_bg6_todays_exceptions_kpi_matches_dataset_count`
+- `tests/e2e/test_l1_filters.py::test_bg3_overdraft_kpi_matches_matview_count`
+
+Test helper added: `_l1_default_date_binds(cfg)` + `_sql_and_params_for(
+..., visual_identifier=DS_*)`.
+
+### L2FT "Distinct Exception Types Open" KPI — binding alignment
+
+The KPI was renamed in BH.11 (2026-05-25) from `"Open L2 Violations"`
+→ `"Distinct Exception Types Open"` because the cold-read read the
+KPI-vs-table-column magnitude gap as a unit mismatch. The title was
+authored under the pre-BL.1 QS distinct-quirk behavior: `.count()`
+rendered as distinct on QS, matching the "Distinct" intent. Post-BL.1
+`.count()` correctly renders row count, breaking the title's intent.
+
+Flipped the binding to `.distinct_count()` — explicit distinct
+semantic that survives the BL.1 wire fix. Test
+`test_bg6_l2ft_exceptions_kpi_matches_dataset_distinct_check_types`
+renamed accordingly + un-xfail'd.
+
+### Inv Recipient Fanout xfail re-attribution
+
+`test_bg4_recipient_fanout_kpis_match_inflows_only_truth` was
+xfail'd citing BL.1 during the BL prep sweep — misattribution. The
+test's own docstring describes the actual issue: the fanout dataset
+SQL joins inflows × outflows on `transfer_id`, producing N×M rows
+per transfer that inflate `SUM(amount)`. That's a SQL-rewrite
+target separate from BL.1's wire fix. Xfail reason corrected;
+remains xfail strict=False with the right framing. Tracked for a
+follow-on phase.
+
+### Backlog addition
+
+Date-picker pushdown unification — Phase Y pushed MOST filters to
+dataset-SQL `<<$paramName>>` placeholders that both renderers
+honor. The universal date filter is the explicit exception: QS uses
+the analysis-level `TimeRangeFilter`; App2 uses dataset-SQL binds.
+Same intent, two SQL forms. Question for future spike: should the
+date filter unify to `<<$pDateFrom>>` / `<<$pDateTo>>` parameters
+the way categorical filters did, dissolving the dual-SQL form?
+Cost: lose the analysis-chrome date widget. See PLAN.md backlog.
+
 ## v11.22.9 — BL.1 + BL.2 (close out Phase BL)
 
 Two model/wire fixes that retire the BL.1 and BL.2 xfail clusters
