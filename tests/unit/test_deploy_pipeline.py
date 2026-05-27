@@ -46,6 +46,7 @@ from recon_gen.common.l2.schema import (
     emit_schema,
     wipe_demo_data_sql,
 )
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.sql import Dialect
 
 
@@ -56,7 +57,7 @@ def _base_cfg() -> Config:
         # Z.C — Config requires deployment_name + db_table_prefix.
         # spec_example matches the bundled L2 fixture used downstream.
         deployment_name="recon-spec-example",
-        db_table_prefix="spec_example",
+        db_table_prefix=DEFAULT_PREFIX,
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),
@@ -78,7 +79,7 @@ def _sqlite_cfg(tmp_path: Path) -> Config:
         # Z.C — Config requires deployment_name + db_table_prefix.
         # spec_example matches the bundled L2 fixture used downstream.
         deployment_name="recon-spec-example",
-        db_table_prefix="spec_example",
+        db_table_prefix=DEFAULT_PREFIX,
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),

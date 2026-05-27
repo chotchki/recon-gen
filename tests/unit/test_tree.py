@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from tests._test_helpers import make_test_config
+from recon_gen.apps.l2_flow_tracing.datasets import META_VALUE_PLACEHOLDER_SENTINEL
 from recon_gen.common.ids import (
     FilterGroupId,
     ParameterName,
@@ -2056,7 +2057,7 @@ class TestParameterTextField:
         default on non-empty commit. Construction must fail."""
         p = StringParam(
             name=ParameterName("pValues"),
-            default=["__placeholder__"],
+            default=[META_VALUE_PLACEHOLDER_SENTINEL],
             multi_valued=True,
         )
         with pytest.raises(ValueError, match="multi-valued parameter"):

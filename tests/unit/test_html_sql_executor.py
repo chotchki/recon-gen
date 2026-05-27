@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 
+from recon_gen.apps.l1_dashboard.app import _DRILL_RESET_SENTINEL
 from recon_gen.common.db import AsyncConnectionPool, make_connection_pool
 from recon_gen.common.html._sql_executor import (
     apply_dataset_param_defaults,
@@ -143,9 +144,9 @@ def test_translate_then_rewrite_pg_yields_pyformat_binds() -> None:
 
 def test_apply_defaults_single_string_default_splices_quoted_literal() -> None:
     sql = "SELECT * FROM t WHERE k = '<<$pKey>>'"
-    params = [_string_dsp("pKey", value_type="SINGLE_VALUED", defaults=["__ALL__"])]
+    params = [_string_dsp("pKey", value_type="SINGLE_VALUED", defaults=[_DRILL_RESET_SENTINEL])]
     out = apply_dataset_param_defaults(sql, params, {})
-    assert out == "SELECT * FROM t WHERE k = '__ALL__'"
+    assert out == f"SELECT * FROM t WHERE k = '{_DRILL_RESET_SENTINEL}'"
 
 
 def test_apply_defaults_bare_string_default_splices_quoted_literal() -> None:
@@ -249,13 +250,13 @@ def test_apply_defaults_then_translate_yields_clean_bound_sql() -> None:
         "AND rail IN (<<$pRail>>) AND z >= <<$pSigma>>"
     )
     params = [
-        _string_dsp("pKey", value_type="SINGLE_VALUED", defaults=["__ALL__"]),
+        _string_dsp("pKey", value_type="SINGLE_VALUED", defaults=[_DRILL_RESET_SENTINEL]),
         _string_dsp("pRail", value_type="MULTI_VALUED", defaults=["A", "B"]),
         _int_dsp("pSigma", value_type="SINGLE_VALUED", defaults=[2]),
     ]
     out = translate_qs_dataset_params(apply_dataset_param_defaults(sql, params, {}))
     assert out == (
-        "SELECT * FROM t WHERE k = '__ALL__' "
+        f"SELECT * FROM t WHERE k = '{_DRILL_RESET_SENTINEL}' "
         "AND rail IN ('A','B') AND z >= 2"
     )
 

@@ -95,7 +95,7 @@ def test_emit_html_renders_no_tabs_for_single_sheet_analysis() -> None:
 
 def test_emit_html_renders_tab_per_sheet_when_multiple() -> None:
     app, sheets = _build_app_with_sheets([
-        ("home", "Home"), ("drift", "Drift"), ("audit", "Audit"),
+        ("home", "Home"), ("drift", "Drift"), ("audit", "Audit"),  # typing-smell: ignore[no-inline-production-constants]: synthetic test-fixture sheet names; "Drift" coincides with L1 _DRIFT_NAME but is unrelated — this test exercises tab-strip rendering, not L1 sheet identity
     ])
     out = emit_html(
         app, sheets[0], dashboard_id="x", all_sheets=sheets,
@@ -111,7 +111,7 @@ def test_emit_html_active_tab_uses_accent_background() -> None:
     """The active sheet's tab carries ``bg-accent`` — the user can
     see where they are in the tab strip."""
     app, sheets = _build_app_with_sheets([
-        ("home", "Home"), ("drift", "Drift"),
+        ("home", "Home"), ("drift", "Drift"),  # typing-smell: ignore[no-inline-production-constants]: synthetic test-fixture sheet names; "Drift" coincides with L1 _DRIFT_NAME but is unrelated — this test exercises tab-strip rendering, not L1 sheet identity
     ])
     out = emit_html(
         app, sheets[1], dashboard_id="x", all_sheets=sheets,
@@ -134,7 +134,7 @@ def test_emit_html_tab_hrefs_use_sheets_route() -> None:
     """Tab anchors target ``/dashboards/:d/sheets/:s`` so they round-
     trip via the new sheet_view route."""
     app, sheets = _build_app_with_sheets([
-        ("home", "Home"), ("drift", "Drift"),
+        ("home", "Home"), ("drift", "Drift"),  # typing-smell: ignore[no-inline-production-constants]: synthetic test-fixture sheet names; "Drift" coincides with L1 _DRIFT_NAME but is unrelated — this test exercises tab-strip rendering, not L1 sheet identity
     ])
     out = emit_html(
         app, sheets[0], dashboard_id="L1-dash", all_sheets=sheets,
@@ -147,7 +147,7 @@ def test_emit_html_tabs_appear_above_filter_form() -> None:
     """Tabs should sit above the filter form so the user picks the
     sheet first, then narrows by filter."""
     app, sheets = _build_app_with_sheets([
-        ("home", "Home"), ("drift", "Drift"),
+        ("home", "Home"), ("drift", "Drift"),  # typing-smell: ignore[no-inline-production-constants]: synthetic test-fixture sheet names; "Drift" coincides with L1 _DRIFT_NAME but is unrelated — this test exercises tab-strip rendering, not L1 sheet identity
     ])
     out = emit_html(
         app, sheets[0], dashboard_id="x", all_sheets=sheets,
@@ -166,7 +166,7 @@ def test_dashboard_view_renders_tabs_when_analysis_has_multiple_sheets() -> None
     """The default landing page (``/dashboards/:d``) shows the tab
     strip when its analysis has more than one sheet."""
     app, sheets = _build_app_with_sheets([
-        ("home", "Home"), ("drift", "Drift"),
+        ("home", "Home"), ("drift", "Drift"),  # typing-smell: ignore[no-inline-production-constants]: synthetic test-fixture sheet names; "Drift" coincides with L1 _DRIFT_NAME but is unrelated — this test exercises tab-strip rendering, not L1 sheet identity
     ])
     asgi = make_app(dashboards={
         "L1": ServedDashboard(
@@ -182,7 +182,7 @@ def test_dashboard_view_renders_tabs_when_analysis_has_multiple_sheets() -> None
 
 def test_sheet_view_renders_a_specific_sheet() -> None:
     app, sheets = _build_app_with_sheets([
-        ("home", "Home"), ("drift", "Drift"),
+        ("home", "Home"), ("drift", "Drift"),  # typing-smell: ignore[no-inline-production-constants]: synthetic test-fixture sheet names; "Drift" coincides with L1 _DRIFT_NAME but is unrelated — this test exercises tab-strip rendering, not L1 sheet identity
     ])
     asgi = make_app(dashboards={
         "L1": ServedDashboard(
@@ -235,7 +235,7 @@ def test_visual_data_fetch_works_for_non_default_sheet() -> None:
     one — otherwise tabs would render but visuals on those tabs
     wouldn't load."""
     app, sheets = _build_app_with_sheets([
-        ("home", "Home"), ("drift", "Drift"),
+        ("home", "Home"), ("drift", "Drift"),  # typing-smell: ignore[no-inline-production-constants]: synthetic test-fixture sheet names; "Drift" coincides with L1 _DRIFT_NAME but is unrelated — this test exercises tab-strip rendering, not L1 sheet identity
     ])
     seen: dict[str, dict[str, str]] = {}
 

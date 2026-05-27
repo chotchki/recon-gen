@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TESTS_L2_DIR = _REPO_ROOT / "tests" / "l2"
@@ -26,7 +28,7 @@ _DOCS_FIXTURES_DIR = (
 )
 
 
-@pytest.mark.parametrize("name", ["spec_example", "sasquatch_pr"])
+@pytest.mark.parametrize("name", [DEFAULT_PREFIX, "sasquatch_pr"])
 def test_bundled_l2_fixture_matches_tests_l2_source(name: str) -> None:
     src = _TESTS_L2_DIR / f"{name}.yaml"
     bundled = _BUNDLED_L2_DIR / f"{name}.yaml"

@@ -366,7 +366,7 @@ def test_panel_markdown_omits_blockquote_for_descriptive_section() -> None:
     # panel skips that section instead of rendering an empty `>`.
     section = InvariantSection(
         kind="supersession_audit",
-        title="Supersession Audit",
+        title=_SUPERSESSION_AUDIT_NAME,
         short_statement="",
         body="Diagnostic view body.",
         columns=(),
@@ -375,7 +375,7 @@ def test_panel_markdown_omits_blockquote_for_descriptive_section() -> None:
     md = panel_markdown(section)
     assert "> " not in md, "empty short_statement should not render as a blockquote"
     assert md == (
-        "**Supersession Audit**\n\n"
+        f"**{_SUPERSESSION_AUDIT_NAME}**\n\n"
         "Diagnostic view body.\n\n"
         "**Action.** Diff entries when count is unusually high."
     )

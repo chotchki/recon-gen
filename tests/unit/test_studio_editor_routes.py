@@ -1641,7 +1641,7 @@ def test_singleton_theme_missing_required_fields_returns_400(
                 "theme_name": "test-only",
                 "version_description": "only one field",
                 "data_colors__count": "0",
-                "accent": "#1f4e79",
+                "accent": "#1f4e79",  # typing-smell: ignore[no-inline-production-constants]: operator form-input hex; coincidentally matches _BUNDLE_EDGE_COLOR (topology), not coupled to it
             },
             follow_redirects=False,
         )

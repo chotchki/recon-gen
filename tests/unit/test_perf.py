@@ -16,6 +16,7 @@ from recon_gen._dev.perf import (
     format_skipped,
     format_top_queries_markdown,
 )
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.sql import Dialect
 
 
@@ -26,7 +27,7 @@ def test_format_markdown_with_rows() -> None:
     md = format_top_queries_markdown(
         title="Top expensive queries (postgres)",
         dialect="postgres",
-        like_pattern="spec_example",
+        like_pattern=DEFAULT_PREFIX,
         rows=[
             (10, 1234.5, 123.45, 5000, "SELECT * FROM spec_example_x"),
             (3, 99.0, 33.0, 12, "INSERT INTO spec_example_y VALUES (1)"),
@@ -46,7 +47,7 @@ def test_format_markdown_with_empty_rows() -> None:
     md = format_top_queries_markdown(
         title="Top expensive queries (postgres)",
         dialect="postgres",
-        like_pattern="spec_example",
+        like_pattern=DEFAULT_PREFIX,
         rows=[],
     )
     assert "**Rows returned:** 0" in md
@@ -140,7 +141,7 @@ def test_fetch_top_queries_postgres_uses_pg_sql_and_substring_pattern() -> None:
     conn = _FakeConn(cur)
 
     out = fetch_top_queries(
-        conn, Dialect.POSTGRES, like_pattern="spec_example", top=50,
+        conn, Dialect.POSTGRES, like_pattern=DEFAULT_PREFIX, top=50,
     )
 
     assert out == rows
@@ -157,7 +158,7 @@ def test_fetch_top_queries_oracle_uses_v_sqlstats_and_bind_params() -> None:
     conn = _FakeConn(cur)
 
     out = fetch_top_queries(
-        conn, Dialect.ORACLE, like_pattern="spec_example", top=10,
+        conn, Dialect.ORACLE, like_pattern=DEFAULT_PREFIX, top=10,
     )
 
     assert out == rows

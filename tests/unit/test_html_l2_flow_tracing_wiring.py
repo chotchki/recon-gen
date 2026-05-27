@@ -35,6 +35,7 @@ from recon_gen.apps.l2_flow_tracing.datasets import (
 from recon_gen.common.l2 import default_l2_instance
 from recon_gen.common.html._tree_fetcher import make_tree_db_fetcher
 from recon_gen.common.ids import VisualId
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from tests._test_helpers import make_test_config
 
 
@@ -43,7 +44,7 @@ from tests._test_helpers import make_test_config
 # Rails/Chains/Templates pushdown params' declared-value defaults are
 # L2-derived).
 _TEST_INSTANCE = default_l2_instance()
-_TEST_CFG = make_test_config(db_table_prefix="spec_example")
+_TEST_CFG = make_test_config(db_table_prefix=DEFAULT_PREFIX)
 
 
 class _NoConnectPool:

@@ -33,13 +33,14 @@ from recon_gen.apps.investigation.datasets import build_all_datasets
 from recon_gen.common.ids import VisualId
 from recon_gen.common.html._tree_fetcher import make_tree_db_fetcher
 from recon_gen.common.l2 import default_l2_instance
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from tests._test_helpers import make_test_config
 
 
 # Investigation's build_all_datasets needs both cfg + L2 instance —
 # the App Info matview names are derived from cfg.db_table_prefix.
 _TEST_INSTANCE = default_l2_instance()
-_TEST_CFG = make_test_config(db_table_prefix="spec_example")
+_TEST_CFG = make_test_config(db_table_prefix=DEFAULT_PREFIX)
 
 
 class _NoConnectPool:

@@ -17,6 +17,7 @@ from datetime import date, timedelta
 
 from recon_gen.common.as_of_frame import LOCKED_ANCHOR, AsOfFrame
 from recon_gen.common.intervals import DateInterval
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 
 
 def test_locked_is_deterministic() -> None:
@@ -153,7 +154,7 @@ def test_locked_binding_emits_byte_identical_seed_twice_via_frame() -> None:
     from tests._test_helpers import make_test_config
 
     cfg = make_test_config(
-        db_table_prefix="spec_example",
+        db_table_prefix=DEFAULT_PREFIX,
         test_generator=TestGeneratorConfig(end_date=LOCKED_ANCHOR),
     )
     instance = load_instance(_spec_example_path())
@@ -176,7 +177,7 @@ def test_live_binding_emits_seed_ending_at_today_via_frame() -> None:
     from tests._test_helpers import make_test_config
 
     cfg = make_test_config(
-        db_table_prefix="spec_example",
+        db_table_prefix=DEFAULT_PREFIX,
         test_generator=TestGeneratorConfig(),  # no end_date → live
     )
     instance = load_instance(_spec_example_path())

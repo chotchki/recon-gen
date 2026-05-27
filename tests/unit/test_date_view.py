@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from recon_gen.common.as_of_frame import LOCKED_ANCHOR, AsOfFrame
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.tree import DateView, EmptyBehavior
 
 
@@ -231,7 +232,7 @@ def test_balance_date_view_required_coverage_is_satisfied_by_locked_seed() -> No
     from tests._test_helpers import make_test_config
 
     cfg = make_test_config(
-        db_table_prefix="spec_example",
+        db_table_prefix=DEFAULT_PREFIX,
         test_generator=TestGeneratorConfig(end_date=LOCKED_ANCHOR),
     )
     instance = load_instance(
