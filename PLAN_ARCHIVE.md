@@ -1,3 +1,33 @@
+# PLAN — Phases BE + BL (archived 2026-05-27)
+
+## Phase BE — Cross-corpus duplication lint (test ↔ src), paired approaches 1+3
+
+Promoted from backlog AA.A.11 2026-05-24. Every duplicated SQL string between `tests/` and `src/` is a second codebase that can pass while production breaks. Paired-approach design: (1) content-based AST lint flagging SQL-fingerprinted literals in tests/ that match src/ substrings; (3) provenance lint requiring test assertions to import production constants rather than re-define them. Approach 2 (jscpd/PMD CPD) deliberately not pursued — non-Rust against the standalone-binary preference.
+
+**Shipped 2026-05-26**:
+- `BE.0` — Spike. Approach 1 = 0 hits at threshold 100+ (codebase empirically disciplined on long-form SQL); approach 3 = 144 hits dominated by sheet-name + sentinel + dataset-identifier categories. Both checks ~0.6s walk. Audit: `docs/audits/be_0_cross_corpus_lint_spike.md`.
+- `BE.1` — Approach 1 (`no-test-src-sql-duplication`) shipped enabled at 0-hit baseline.
+- `BE.2` — Approach 3 (`no-inline-production-constants`) shipped staged-disabled.
+- `BE.3` — Prelude mode (both checks ~0.6s, fold into `test_no_typing_smells`).
+- `BE.4` — Sweep + fix true positives. 144 hits across 101 unique src constants; 6 categories. 3-slice parallel worktree fan-out (json: 77, unit: 52, small-tail: 15) cleared the corpus. Approach 3 enabled.
+- `BE.5` — Lint extended to `tests/e2e/_drivers/` ↔ `tests/e2e/` to catch driver-internals leakage.
+- `BE.6` — Verify + commit + tag. Lint stays green in the prelude.
+- `BE.7` — Expand pyright strict-scope to `tests/`. Original "~50-200 violations" estimate was 25× off — spike measured 5,201 errors across 310 files. Multi-phase fan-out (Path C): `BE.7.A` spike, `BE.7.B` boto3-stubs prep, `BE.7.C` 6-slice annotation fan-out (5,201 → 3,250 → 116 via BF.4 → 0). `BE.7.D` flipped `[tool.pyright].include` to `["src/recon_gen", "tests"]`. Default `pyright` (no args) lands at 0 errors across the entire code surface. Silent-drift channel for tests/ pyright closed.
+
+## Phase BL — Renderer parity + shared-state architectural cleanup
+
+Three architectural / parity concerns surfaced during the v11.22.7 release cycle. User explicit guidance 2026-05-27: "I want a clean release for now but we'll address eventually (or sooner since every piece of tech eventually seems to bite us)." Audit: `docs/audits/bl_0_shared_state_keying_smell.md`.
+
+**Shipped 2026-05-27 across v11.22.7 → v11.22.12**:
+- `BL.3` — L1 Accounts dropdown universe widened with third UNION term sourcing from `<prefix>_todays_exceptions` so accounts that ONLY appear in invariant matviews (e.g. `multi_xor_violation`) are pickable in the Account dropdown. `BL.3.a` — NULL-account-row filter on `chain_parent_disagreement` / `xor_group_violation` branches (those invariants key on `transfer_id`, not account; NULL row was choking the picker). Picker UNION → UNION ALL perf fix in v11.22.10 (three sort-distinct passes blew the picker dropdown's `/visuals/.../data` fetch past 15s at sasquatch scale; outer DISTINCT dedupes in one hash-distinct pass).
+- `BL.0` — Test-boundary isolation for shared in-process state. User framing: *"why can't we further compartmentalize the test execution with the prefix. you shouldn't need to mass edit the code"* — production has exactly one cfg per process, the registry is fine there. The bleed is a TEST-ONLY problem (two cfgs in one process to validate isolation). `BL.0.A` — `isolated_dataset_registries()` public context manager in `common/dataset_contract.py` replaces the 11-line ad-hoc snapshot/restore in `tests/e2e/test_inv_dashboard_agreement.py::isolated_inv_app`. `BL.0.A.1` — autouse fixture evaluated, declined (would clobber module-scope builds). `BL.0.B` — config_kv wipe-and-repopulate contract documented; no Studio / ETL / non-deploy callers write to the table. `BL.0.C` — `no-dataset-registry-leak` AST lint flags direct registry access outside `common/dataset_contract.py`.
+- `BL.1` — QS `.count()` distinct-vs-rows rendering quirk. QS's `CategoricalMeasureField(AggregationFunction="COUNT")` against a string column that also appears as a Dim on the same visual silently renders DISTINCT count. Model-level fix: `Measure.kind == "count"` emits `NumericalMeasureField(SUM)` over an auto-registered literal-1 CalcField (`_row_one_<sanitized-dataset-id>`); App2 mirrors with `SUM(1)`. Auto-registered by `App.resolve_auto_ids` — 14 callsites benefit transparently. 5 honest-gate KPI tests verified post-deploy: 3/5 un-xfail'd on both renderers (drift, todays_exceptions, overdraft); test logic needed `_l1_default_date_binds(cfg)` + App2-form SQL via `get_sql(DS_*)`. Remaining 2/5 (L2FT exceptions, Inv recipient_fanout) handled separately — L2FT KPI binding flipped to `.distinct_count()` to match BH.11's title rename ("Distinct Exception Types Open"); Inv fanout test reordered to skip-on-empty before wait_loaded (BH.7's cartesian-inflation fix already landed). Quirk documented at `docs/reference/quicksight-quirks.md`.
+- `BL.2` — App2 default date-filter on initial render. App2 saw empty `?date_from=&date_to=` URL params and fell back to the dataset SQL's match-all sentinel; QS narrowed via analysis-level TimeRangeFilter. User framing: *"why aren't we fixing how app2 responds to empty parameters"* — fix at the bind layer (where the actual narrowing decision lives). `BL.2.A` — `_apply_default_date_range()` helper in `common/html/_tree_fetcher.py`; `Analysis.default_universal_date_range: DateView | None` field set by L1 + Exec apps. `BL.2.B` — bg5 tests rewired to App2-form SQL + Exec default date binds; App2 leg XPASS, QS leg xfail strict=False due to a separate newly-discovered QS day-edge quirk (`TimeRangeFilter(time_granularity="DAY", include_maximum=True)` compares the raw timestamp at midnight, excluding late-day rows on the upper edge; documented in `quicksight-quirks.md`). `BL.2.C` deferred to backlog as polish (visible Flatpickr widget shows "All dates" placeholder even when bind layer narrows).
+
+**Releases**: v11.22.7 (BL.3 third UNION) → v11.22.8 (NULL-row filter) → v11.22.9 (BL.1 + BL.2 wires) → v11.22.10 (picker UNION ALL + 3 L1 un-xfails) → v11.22.11 (bg5 rewire + Inv test fix) → v11.22.12 (Today's Exceptions picker xfail for App2 expect_response race; first CI-green release since v11.22.6).
+
+**New finds documented along the way**: QS `TimeRangeFilter(DAY)` day-edge quirk + App2 picker driver `expect_response` race + Sasquatch L1 dashboard render flake mitigation (pre-warm fixture + `--reruns-delay` 10s → 60s).
+
 # PLAN — Phases AM + BA + BF (archived 2026-05-27)
 
 ## Phase AM — Standardize on tailwind
