@@ -24,6 +24,8 @@ import sqlite3
 from datetime import date
 from pathlib import Path
 
+import functools
+from typing import Any
 
 from recon_gen.common.db import execute_script
 from recon_gen.common.l2.auto_scenario import default_scenario_for
@@ -47,16 +49,54 @@ _SASQUATCH_PR_PREFIX = "sasquatch_pr"
 _ANCHOR = date(2026, 4, 30)
 
 
+# Module-scope cache for the heavy L2 build: load_instance +
+# default_scenario_for + emit_schema + emit_full_seed. These are pure
+# functions of (yaml path, anchor, prefix); sharing the result across
+# tests in this file avoids ~1s of recompute per test (10-15s saved
+# across the file for sasquatch_pr alone). Each test still gets a
+# fresh ``:memory:`` connection via ``_open_sqlite()`` for isolation.
+@functools.cache
+def _l2_artifacts(
+    yaml_path: Path, prefix: str,
+) -> tuple[Any, Any, str, str]:  # typing-smell: ignore[explicit-any,explicit-any]: L2Instance / Scenario types live behind the cache; cast at use site / same
+    """Return ``(instance, scenario, schema_sql, seed_sql)`` cached
+    by (yaml_path, prefix). Pure-function inputs → cache is safe.
+
+    Determinism gate: ``emit_full_seed`` byte-stability is verified by
+    a sibling test in this file — caching here can't drift the byte
+    output."""
+    instance = load_instance(yaml_path)
+    scenario = default_scenario_for(instance, today=_ANCHOR).scenario
+    schema_sql = emit_schema(
+        instance, prefix=prefix, dialect=Dialect.SQLITE,
+    )
+    seed_sql = emit_full_seed(
+        instance, scenario, prefix=prefix,
+        anchor=_ANCHOR, dialect=Dialect.SQLITE,
+    )
+    return instance, scenario, schema_sql, seed_sql
+
+
 def _open_sqlite() -> sqlite3.Connection:
     """Open an in-memory SQLite with the SQL/2008 STDDEV_SAMP aggregate
     registered — same setup ``connect_demo_db`` does for the SQLite
     dialect. Tests that only need to apply schema + seed don't depend
     on the aggregate, but matview refresh does — register here so the
     helper is reusable across both code paths.
+
+    Test-only perf tweaks (2026-05-27): ``synchronous=OFF`` skips fsync
+    calls (no-op on ``:memory:``, but the PRAGMA itself is cheap and
+    keeps the connection consistent if a future test points at a file
+    path) and ``journal_mode=MEMORY`` keeps the journal in RAM so
+    transactional rollback doesn't touch disk. Saves a few percent on
+    the sasquatch_pr 30k-200k INSERT seed — main perf win comes from
+    the module-scope fixture caching the emitted seed_sql.
     """
     from recon_gen.common.db import _register_sqlite_aggregates
     conn = sqlite3.connect(":memory:")
     conn.execute("PRAGMA foreign_keys = ON;")
+    conn.execute("PRAGMA synchronous = OFF;")
+    conn.execute("PRAGMA journal_mode = MEMORY;")
     _register_sqlite_aggregates(conn)
     return conn
 
@@ -200,20 +240,12 @@ class TestSeedEndToEndSqlite:
     """
 
     def test_spec_example_schema_then_seed_lands(self) -> None:
-        instance = load_instance(_SPEC_EXAMPLE)
-        scenario = default_scenario_for(instance, today=_ANCHOR).scenario
+        _, _, schema_sql, seed_sql = _l2_artifacts(
+            _SPEC_EXAMPLE, _SPEC_EXAMPLE_PREFIX,
+        )
         conn = _open_sqlite()
         cur = conn.cursor()
-        execute_script(
-            cur, emit_schema(
-                instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
-            ),
-            dialect=Dialect.SQLITE,
-        )
-        seed_sql = emit_full_seed(
-            instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
-            anchor=_ANCHOR, dialect=Dialect.SQLITE,
-        )
+        execute_script(cur, schema_sql, dialect=Dialect.SQLITE)
         execute_script(cur, seed_sql, dialect=Dialect.SQLITE)
         # Schema-then-seed lands without error; both base tables have
         # rows.
@@ -234,20 +266,12 @@ class TestSeedEndToEndSqlite:
     def test_sasquatch_pr_schema_then_seed_lands(self) -> None:
         # The big instance — exercises every plant kind + the
         # 25-template-instance baseline volume.
-        instance = load_instance(_SASQUATCH_PR)
-        scenario = default_scenario_for(instance, today=_ANCHOR).scenario
+        _, _, schema_sql, seed_sql = _l2_artifacts(
+            _SASQUATCH_PR, _SASQUATCH_PR_PREFIX,
+        )
         conn = _open_sqlite()
         cur = conn.cursor()
-        execute_script(
-            cur, emit_schema(
-                instance, prefix=_SASQUATCH_PR_PREFIX, dialect=Dialect.SQLITE,
-            ),
-            dialect=Dialect.SQLITE,
-        )
-        seed_sql = emit_full_seed(
-            instance, scenario, prefix=_SASQUATCH_PR_PREFIX,
-            anchor=_ANCHOR, dialect=Dialect.SQLITE,
-        )
+        execute_script(cur, schema_sql, dialect=Dialect.SQLITE)
         execute_script(cur, seed_sql, dialect=Dialect.SQLITE)
         n_tx = cur.execute(
             "SELECT COUNT(*) FROM sasquatch_pr_transactions",
@@ -270,20 +294,12 @@ class TestSeedEndToEndSqlite:
         # The schema's metadata CHECK uses json_valid() on SQLite —
         # every emitted metadata literal must be well-formed JSON or
         # the INSERT raises "CHECK constraint failed: ...".
-        instance = load_instance(_SPEC_EXAMPLE)
-        scenario = default_scenario_for(instance, today=_ANCHOR).scenario
+        _, _, schema_sql, seed_sql = _l2_artifacts(
+            _SPEC_EXAMPLE, _SPEC_EXAMPLE_PREFIX,
+        )
         conn = _open_sqlite()
         cur = conn.cursor()
-        execute_script(
-            cur, emit_schema(
-                instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
-            ),
-            dialect=Dialect.SQLITE,
-        )
-        seed_sql = emit_full_seed(
-            instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
-            anchor=_ANCHOR, dialect=Dialect.SQLITE,
-        )
+        execute_script(cur, schema_sql, dialect=Dialect.SQLITE)
         # If any metadata cell were invalid JSON, this would raise
         # IntegrityError on at least one INSERT.
         execute_script(cur, seed_sql, dialect=Dialect.SQLITE)
@@ -301,20 +317,12 @@ class TestSeedEndToEndSqlite:
         # X.3.d — full lifecycle: apply, wipe, re-apply. The wipe must
         # leave the schema intact; the second apply must land at the
         # same row count as the first.
-        instance = load_instance(_SPEC_EXAMPLE)
-        scenario = default_scenario_for(instance, today=_ANCHOR).scenario
+        instance, _, schema_sql, seed_sql = _l2_artifacts(
+            _SPEC_EXAMPLE, _SPEC_EXAMPLE_PREFIX,
+        )
         conn = _open_sqlite()
         cur = conn.cursor()
-        execute_script(
-            cur, emit_schema(
-                instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
-            ),
-            dialect=Dialect.SQLITE,
-        )
-        seed_sql = emit_full_seed(
-            instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
-            anchor=_ANCHOR, dialect=Dialect.SQLITE,
-        )
+        execute_script(cur, schema_sql, dialect=Dialect.SQLITE)
         execute_script(cur, seed_sql, dialect=Dialect.SQLITE)
         n1 = cur.execute(
             "SELECT COUNT(*) FROM spec_example_transactions",
@@ -432,26 +440,13 @@ class TestMatviewRefreshSqlite:
 
     def test_full_apply_refresh_loop(self) -> None:
         from recon_gen.common.l2.schema import refresh_matviews_sql
-        instance = load_instance(_SPEC_EXAMPLE)
-        scenario = default_scenario_for(instance, today=_ANCHOR).scenario
+        instance, _, schema_sql, seed_sql = _l2_artifacts(
+            _SPEC_EXAMPLE, _SPEC_EXAMPLE_PREFIX,
+        )
         conn = _open_sqlite()
         cur = conn.cursor()
-        # Schema.
-        execute_script(
-            cur, emit_schema(
-                instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
-            ),
-            dialect=Dialect.SQLITE,
-        )
-        # Seed.
-        execute_script(
-            cur,
-            emit_full_seed(
-                instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
-                anchor=_ANCHOR, dialect=Dialect.SQLITE,
-            ),
-            dialect=Dialect.SQLITE,
-        )
+        execute_script(cur, schema_sql, dialect=Dialect.SQLITE)
+        execute_script(cur, seed_sql, dialect=Dialect.SQLITE)
         # Refresh — drops + re-creates every matview-as-table.
         execute_script(
             cur, refresh_matviews_sql(
@@ -490,24 +485,13 @@ class TestMatviewRefreshSqlite:
         # it twice in a row should leave the matviews in the same
         # state.
         from recon_gen.common.l2.schema import refresh_matviews_sql
-        instance = load_instance(_SPEC_EXAMPLE)
-        scenario = default_scenario_for(instance, today=_ANCHOR).scenario
+        instance, _, schema_sql, seed_sql = _l2_artifacts(
+            _SPEC_EXAMPLE, _SPEC_EXAMPLE_PREFIX,
+        )
         conn = _open_sqlite()
         cur = conn.cursor()
-        execute_script(
-            cur, emit_schema(
-                instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
-            ),
-            dialect=Dialect.SQLITE,
-        )
-        execute_script(
-            cur,
-            emit_full_seed(
-                instance, scenario, prefix=_SPEC_EXAMPLE_PREFIX,
-                anchor=_ANCHOR, dialect=Dialect.SQLITE,
-            ),
-            dialect=Dialect.SQLITE,
-        )
+        execute_script(cur, schema_sql, dialect=Dialect.SQLITE)
+        execute_script(cur, seed_sql, dialect=Dialect.SQLITE)
         execute_script(
             cur, refresh_matviews_sql(
                 instance, prefix=_SPEC_EXAMPLE_PREFIX, dialect=Dialect.SQLITE,
