@@ -105,7 +105,7 @@ def test_bucket_lower_bound_semantics_are_inclusive() -> None:
 
 @pytest.mark.parametrize(
     "threshold,expected_buckets",
-    [
+    [  # pyright: ignore[reportUnknownArgumentType]: argvalues to pytest.parametrize
         (0.0, {"0-1 sigma", "1-2 sigma", "2-3 sigma", "3-4 sigma", "4+ sigma"}),
         (1.0, {"1-2 sigma", "2-3 sigma", "3-4 sigma", "4+ sigma"}),
         (2.0, {"2-3 sigma", "3-4 sigma", "4+ sigma"}),

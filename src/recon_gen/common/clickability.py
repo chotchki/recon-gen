@@ -17,6 +17,8 @@ holds. Literal booleans, ``1 = 1``, and self-equality are all rejected.
 
 from __future__ import annotations
 
+from typing import Any
+
 
 _SENTINEL = "__recon_never_matches__"
 
@@ -25,7 +27,9 @@ def _always_true(column_name: str) -> str:
     return f'{{{column_name}}} <> "{_SENTINEL}"'
 
 
-def link_text_format(field_id: str, column_name: str, color: str) -> dict:
+def link_text_format(
+    field_id: str, column_name: str, color: str,
+) -> dict[str, Any]:
     """Render a drill-source cell in ``color`` to cue left-click drill-down."""
     return {
         "Cell": {
@@ -47,7 +51,7 @@ def menu_link_text_format(
     column_name: str,
     text_color: str,
     bg_color: str,
-) -> dict:
+) -> dict[str, Any]:
     """Render a drill-source cell in ``text_color`` on a ``bg_color`` tint
     to cue a right-click (DATA_POINT_MENU) drill — distinguishes from the
     plain-accent left-click style produced by ``link_text_format``."""

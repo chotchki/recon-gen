@@ -135,7 +135,7 @@ class _FakeConn:
 
 
 def test_fetch_top_queries_postgres_uses_pg_sql_and_substring_pattern() -> None:
-    rows = [(5, 100.0, 20.0, 50, "SELECT * FROM spec_example_t")]
+    rows: list[tuple[object, ...]] = [(5, 100.0, 20.0, 50, "SELECT * FROM spec_example_t")]
     cur = _FakeCursor(rows)
     conn = _FakeConn(cur)
 
@@ -152,7 +152,7 @@ def test_fetch_top_queries_postgres_uses_pg_sql_and_substring_pattern() -> None:
 
 
 def test_fetch_top_queries_oracle_uses_v_sqlstats_and_bind_params() -> None:
-    rows = [(3, 250.0, 83.3, 5, "SELECT * FROM spec_example_t")]
+    rows: list[tuple[object, ...]] = [(3, 250.0, 83.3, 5, "SELECT * FROM spec_example_t")]
     cur = _FakeCursor(rows)
     conn = _FakeConn(cur)
 
@@ -193,7 +193,7 @@ def test_fetch_top_queries_oracle_reads_clob_on_last_column() -> None:
         def read(self) -> str:
             return self._value
 
-    rows = [(1, 10.0, 10.0, 1, _LOB("SELECT 1 FROM dual"))]
+    rows: list[tuple[object, ...]] = [(1, 10.0, 10.0, 1, _LOB("SELECT 1 FROM dual"))]
     cur = _FakeCursor(rows)
     conn = _FakeConn(cur)
 

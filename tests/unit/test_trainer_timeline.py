@@ -1,3 +1,7 @@
+# pyright: reportArgumentType=false
+# BF.4/F: test fixtures pass bare strings for Identifier-typed fields. Identifier
+# is a NewType — runtime no-op. Wrapping every literal would add ~24 Identifier(...)
+# wraps for no behavioral gain in test data.
 """``compute_plant_timeline`` unit tests (X.4.h.6.a).
 
 Locks the contract for the trainer-mode timeline projection:
@@ -17,6 +21,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -38,12 +43,15 @@ from recon_gen.common.l2.trainer_timeline import (
     hits_by_kind,
 )
 
+if TYPE_CHECKING:
+    from recon_gen.common.l2 import L2Instance
+
 
 _FIXTURES = Path(__file__).resolve().parent.parent / "l2"
 
 
 @pytest.fixture
-def spec_example() -> object:
+def spec_example() -> "L2Instance":
     return load_instance(_FIXTURES / "spec_example.yaml")
 
 
@@ -206,7 +214,7 @@ def test_zero_day_plants_omitted_from_timeline() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_compute_against_spec_example_full_scope(spec_example: object) -> None:
+def test_compute_against_spec_example_full_scope(spec_example: "L2Instance") -> None:
     """Default tg (scope=full, all plants) against the bundled L2 fixture
     yields a non-empty timeline. spec_example carries enough rails to
     auto-derive each L1 plant kind."""
@@ -214,7 +222,7 @@ def test_compute_against_spec_example_full_scope(spec_example: object) -> None:
         end_date=date(2026, 5, 14),
         scope="full",
     )
-    timeline = compute_plant_timeline(spec_example, tg)  # type: ignore[arg-type]: load_instance return type narrowed by L2Instance shape; fixture cast to object for pytest collection ergonomics
+    timeline = compute_plant_timeline(spec_example, tg)
     assert len(timeline) > 0
     # Every hit's date is within 30 days of the anchor (plant cap_days
     # for stuck_unbundled can extend the back-of-window).
@@ -224,7 +232,7 @@ def test_compute_against_spec_example_full_scope(spec_example: object) -> None:
 
 
 def test_uncovered_rails_scope_yields_empty_timeline(
-    spec_example: object,
+    spec_example: "L2Instance",
 ) -> None:
     """In uncovered_rails mode the deploy pipeline emits no plants —
     just baseline fill — so the timeline is empty."""
@@ -232,11 +240,11 @@ def test_uncovered_rails_scope_yields_empty_timeline(
         end_date=date(2026, 5, 14),
         scope="uncovered_rails",
     )
-    assert compute_plant_timeline(spec_example, tg) == []  # type: ignore[arg-type]: same L2Instance fixture cast as above
+    assert compute_plant_timeline(spec_example, tg) == []
 
 
 def test_exceptions_only_scope_yields_same_plants_as_full(
-    spec_example: object,
+    spec_example: "L2Instance",
 ) -> None:
     """``exceptions_only`` and ``full`` both emit the same plant set
     (full also emits baseline; exceptions_only doesn't). Timeline is
@@ -247,10 +255,10 @@ def test_exceptions_only_scope_yields_same_plants_as_full(
     tg_exc = TestGeneratorConfig(
         end_date=date(2026, 5, 14), scope="exceptions_only",
     )
-    assert compute_plant_timeline(spec_example, tg_full) == compute_plant_timeline(spec_example, tg_exc)  # type: ignore[arg-type]: same L2Instance fixture cast as above
+    assert compute_plant_timeline(spec_example, tg_full) == compute_plant_timeline(spec_example, tg_exc)
 
 
-def test_plants_filter_narrows_timeline(spec_example: object) -> None:
+def test_plants_filter_narrows_timeline(spec_example: "L2Instance") -> None:
     """When tg.plants restricts to a subset, the timeline only shows
     those kinds."""
     tg = TestGeneratorConfig(
@@ -258,17 +266,17 @@ def test_plants_filter_narrows_timeline(spec_example: object) -> None:
         scope="full",
         plants=("drift",),
     )
-    timeline = compute_plant_timeline(spec_example, tg)  # type: ignore[arg-type]: same L2Instance fixture cast as above
+    timeline = compute_plant_timeline(spec_example, tg)
     kinds = {hit.kind for td in timeline for hit in td.hits}
     assert kinds == {"drift"}
 
 
-def test_end_date_anchors_window(spec_example: object) -> None:
+def test_end_date_anchors_window(spec_example: "L2Instance") -> None:
     """A different end_date shifts every plant date by the same delta."""
     tg_a = TestGeneratorConfig(end_date=date(2026, 5, 14), scope="full")
     tg_b = TestGeneratorConfig(end_date=date(2026, 6, 14), scope="full")
-    days_a = sorted(td.day for td in compute_plant_timeline(spec_example, tg_a))  # type: ignore[arg-type]: same L2Instance fixture cast as above
-    days_b = sorted(td.day for td in compute_plant_timeline(spec_example, tg_b))  # type: ignore[arg-type]: same L2Instance fixture cast as above
+    days_a = sorted(td.day for td in compute_plant_timeline(spec_example, tg_a))
+    days_b = sorted(td.day for td in compute_plant_timeline(spec_example, tg_b))
     # Same shape — same number of distinct plant-days.
     assert len(days_a) == len(days_b)
     # b is a-shifted by exactly 31 days for every entry.

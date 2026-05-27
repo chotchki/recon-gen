@@ -44,6 +44,7 @@ from recon_gen.common.spine import (
     Transfer,
     TransferLeg,
 )
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.sql import Dialect
 
 _SPEC_EXAMPLE = (
@@ -161,7 +162,7 @@ def test_ledger_simulation_transfers_defaults_to_empty() -> None:
     sim = LedgerSimulation()
     assert sim.transfers == []
     assert sim.accounts == []
-    assert sim.prefix == "spec_example"
+    assert sim.prefix == DEFAULT_PREFIX
 
 
 def test_ledger_simulation_with_transfers_only_no_accounts() -> None:

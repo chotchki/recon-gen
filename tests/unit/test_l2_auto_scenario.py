@@ -1,3 +1,7 @@
+# pyright: reportArgumentType=false
+# BF.4/F: tests pass bare Identifier where RoleExpression Union is expected,
+# and bare-object factory results where TwoLegRail|SingleLegRail|None is expected.
+# Identifier/RoleExpression are NewType-style narrowings — runtime no-ops.
 """Tests for ``common.l2.auto_scenario`` — focused on the scenario
 transforms (``filter_scenario_plants`` etc.) rather than the full
 ``default_scenario_for`` walker, which is exercised end-to-end through
@@ -347,8 +351,8 @@ def test_pick_multi_xor_chain_inputs_skips_per_child_fan_in_entries() -> None:
         ChainChildSpec,
         Identifier,
         L2Instance,
-        LegDirection,
-        Money,
+        LegDirection as LegDirection,
+        Money as Money,
         Name,
         SingleLegRail,
         TransferTemplate,
@@ -430,7 +434,7 @@ def test_pick_multi_xor_chain_inputs_returns_none_for_singleton_chain() -> None:
         ChainChildSpec,
         Identifier,
         L2Instance,
-        Money,
+        Money as Money,
         Name,
         SingleLegRail,
     )

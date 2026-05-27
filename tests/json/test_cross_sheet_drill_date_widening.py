@@ -45,33 +45,45 @@ _DATE_END_PARAM = "pL1DateEnd"
 _EXPECTED_WIDE_START = "1990-01-01T00:00:00.000Z"
 _EXPECTED_WIDE_END = "2099-12-31T00:00:00.000Z"
 
+# Type alias — AWS QS JSON dicts have heterogeneous nested shapes; using
+# Any matches the dynamic-dict walk these tests perform.
+_JsonDict = dict[str, Any]
+
 
 @pytest.fixture(scope="module")
-def emitted() -> Any:
+def emitted() -> _JsonDict:
     cfg = make_test_config()
     app = build_l1_dashboard_app(cfg)
     return app.emit_analysis().to_aws_json()
 
 
-def _drills_into_transactions(emitted: Any) -> list[tuple[str, str, dict]]:
+def _drills_into_transactions(
+    emitted: _JsonDict,
+) -> list[tuple[str, str, _JsonDict]]:
     """Yield ``(source_sheet_id, source_visual_id, drill_action_dict)`` for
     every drill whose target sheet is the Transactions sheet."""
-    out: list[tuple[str, str, dict]] = []
-    for sheet in emitted.get("Definition", {}).get("Sheets", []):
-        sheet_id = sheet.get("SheetId", "<unknown>")
+    out: list[tuple[str, str, _JsonDict]] = []
+    definition: _JsonDict = emitted.get("Definition") or {}
+    sheets: list[_JsonDict] = definition.get("Sheets") or []
+    for sheet in sheets:
+        sheet_id: str = sheet.get("SheetId", "<unknown>")
         if sheet_id == _TRANSACTIONS_SHEET_ID:
             # Skip drills that target the same sheet — only cross-sheet
             # drills INTO Transactions are the bug class.
             continue
-        for v in sheet.get("Visuals") or []:
+        visuals: list[_JsonDict] = sheet.get("Visuals") or []
+        for v in visuals:
             # Drill actions live under ``ChartConfiguration``-adjacent
             # ``Actions``; the wrapping VisualVisual key varies by
             # visual type, so we walk all visual subtypes uniformly.
             for visual_kind, visual_body in v.items():
                 if not isinstance(visual_body, dict):
                     continue
-                visual_id = visual_body.get("VisualId", "<unknown>")
-                for action in visual_body.get("Actions") or []:
+                # visual_body narrowed to dict[str, Any] via isinstance.
+                visual_body_d: _JsonDict = visual_body  # type: ignore[assignment]: third-party stub or test scaffolding cascade
+                visual_id: str = visual_body_d.get("VisualId", "<unknown>")
+                actions: list[_JsonDict] = visual_body_d.get("Actions") or []
+                for action in actions:
                     nav = _find_target_sheet(action)
                     if nav == _TRANSACTIONS_SHEET_ID:
                         out.append((sheet_id, visual_id, action))
@@ -79,41 +91,47 @@ def _drills_into_transactions(emitted: Any) -> list[tuple[str, str, dict]]:
     return out
 
 
-def _find_target_sheet(action: dict) -> str | None:
+def _find_target_sheet(action: _JsonDict) -> str | None:
     """Return the action's NavigationOperation target sheet id, or None
     if the action isn't a navigation drill."""
-    for op in action.get("ActionOperations") or []:
-        nav = (op.get("NavigationOperation") or {})
-        local = nav.get("LocalNavigationConfiguration") or {}
-        target = local.get("TargetSheetId")
+    ops: list[_JsonDict] = action.get("ActionOperations") or []
+    for op in ops:
+        nav: _JsonDict = op.get("NavigationOperation") or {}
+        local: _JsonDict = nav.get("LocalNavigationConfiguration") or {}
+        target: str | None = local.get("TargetSheetId")
         if target:
             return target
     return None
 
 
-def _written_param_values(action: dict) -> dict[str, str]:
+def _written_param_values(action: _JsonDict) -> dict[str, str]:
     """Return ``{param_name: static_string_value}`` for every parameter
     write on the action that uses CustomValues (DateTimeValues or
     StringValues). SourceField writes are excluded — they don't carry a
     static value."""
     out: dict[str, str] = {}
-    for op in action.get("ActionOperations") or []:
-        sp = op.get("SetParametersOperation") or {}
-        for cfg in sp.get("ParameterValueConfigurations") or []:
-            name = cfg.get("DestinationParameterName")
-            value = (
-                (cfg.get("Value") or {})
-                .get("CustomValuesConfiguration") or {}
-            ).get("CustomValues") or {}
+    ops: list[_JsonDict] = action.get("ActionOperations") or []
+    for op in ops:
+        sp: _JsonDict = op.get("SetParametersOperation") or {}
+        configs: list[_JsonDict] = sp.get("ParameterValueConfigurations") or []
+        for cfg in configs:
+            name: str | None = cfg.get("DestinationParameterName")
+            if name is None:
+                continue
+            value_outer: _JsonDict = cfg.get("Value") or {}
+            value_cv: _JsonDict = (
+                value_outer.get("CustomValuesConfiguration") or {}
+            )
+            value: _JsonDict = value_cv.get("CustomValues") or {}
             for key in ("DateTimeValues", "StringValues"):
-                vals = value.get(key) or []
+                vals: list[str] = value.get(key) or []
                 if vals:
                     out[name] = vals[0]
                     break
     return out
 
 
-def test_drills_into_transactions_widen_date_range(emitted: Any) -> None:
+def test_drills_into_transactions_widen_date_range(emitted: _JsonDict) -> None:
     """Every cross-sheet drill into the Transactions sheet must write
     the wide-window date-range params so the target row survives the
     destination's universal date filter."""
@@ -148,7 +166,7 @@ def test_drills_into_transactions_widen_date_range(emitted: Any) -> None:
 
 
 def test_drills_into_transactions_count_matches_known_sites(
-    emitted: Any,
+    emitted: _JsonDict,
 ) -> None:
     """Sanity check: there should be exactly 3 cross-sheet drills into
     Transactions (Pending Aging / Unbundled Aging / Supersession Audit

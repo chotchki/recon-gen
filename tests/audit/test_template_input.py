@@ -61,7 +61,7 @@ def _shape(cls: type) -> tuple[tuple[str, str], ...]:
     )
 
 
-def _diff_msg(cls_name: str, want, got) -> str:
+def _diff_msg(cls_name: str, want: object, got: object) -> str:
     return (
         f"\n{cls_name} field shape drifted. The dataclass now declares:\n"
         f"-----8<-----\n{got}\n-----8<-----\n"

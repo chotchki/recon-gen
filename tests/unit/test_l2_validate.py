@@ -128,7 +128,7 @@ def test_baseline_passes_validation() -> None:
     validate(_baseline_instance())
 
 
-def _replace(inst: L2Instance, **changes) -> L2Instance:
+def _replace(inst: L2Instance, **changes) -> L2Instance:  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType]: changes is yaml dict
     return dataclasses.replace(inst, **changes)
 
 

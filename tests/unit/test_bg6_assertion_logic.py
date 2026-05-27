@@ -11,6 +11,7 @@ import os
 import sqlite3
 import tempfile
 from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -18,9 +19,12 @@ from recon_gen.common.sql.dialect import Dialect
 from tests._test_helpers import make_test_config
 from tests.e2e._drivers.base import query_db_via_cfg
 
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config
+
 
 @pytest.fixture
-def planted_l2ft_l1_sqlite() -> Iterator[object]:
+def planted_l2ft_l1_sqlite() -> Iterator["Config"]:
     fd, path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
     conn = sqlite3.connect(path)
@@ -96,7 +100,7 @@ _TODAYS_EXCEPTIONS_SQL = "SELECT * FROM pfx_todays_exceptions"
 
 
 def test_bg6_l2_exceptions_kpi_passes_when_matches_dataset_row_count(
-    planted_l2ft_l1_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_l2ft_l1_sqlite: "Config",
 ) -> None:
     cfg = planted_l2ft_l1_sqlite
     rows = query_db_via_cfg(cfg, _L2_EXCEPTIONS_SQL)
@@ -105,7 +109,7 @@ def test_bg6_l2_exceptions_kpi_passes_when_matches_dataset_row_count(
 
 
 def test_bg6_l2_exceptions_table_count_sum_passes_on_healthy_data(
-    planted_l2ft_l1_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_l2ft_l1_sqlite: "Config",
 ) -> None:
     cfg = planted_l2ft_l1_sqlite
     rows = query_db_via_cfg(cfg, _L2_EXCEPTIONS_SQL)
@@ -117,7 +121,7 @@ def test_bg6_l2_exceptions_table_count_sum_passes_on_healthy_data(
 
 
 def test_bg6_l2_exceptions_table_count_trips_when_table_underreports(
-    planted_l2ft_l1_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_l2ft_l1_sqlite: "Config",
 ) -> None:
     """v11.21.0 finding #11 table-half: table column renders something
     different from the dataset's projection. Identity trips."""
@@ -129,7 +133,7 @@ def test_bg6_l2_exceptions_table_count_trips_when_table_underreports(
 
 
 def test_bg6_l2_exceptions_kpi_and_table_intentionally_different_units(
-    planted_l2ft_l1_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_l2ft_l1_sqlite: "Config",
 ) -> None:
     """Finding #11 framing: KPI (rows) and table count column (per-row
     occurrence) are two correct measures with different units. BG.6
@@ -150,7 +154,7 @@ def test_bg6_l2_exceptions_kpi_and_table_intentionally_different_units(
 
 
 def test_bg6_pending_aging_triple_identity_passes_on_healthy_data(
-    planted_l2ft_l1_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_l2ft_l1_sqlite: "Config",
 ) -> None:
     cfg = planted_l2ft_l1_sqlite
     rows = query_db_via_cfg(cfg, _STUCK_PENDING_SQL)
@@ -163,7 +167,7 @@ def test_bg6_pending_aging_triple_identity_passes_on_healthy_data(
 
 
 def test_bg6_pending_aging_triple_identity_trips_when_chart_population_diverges(
-    planted_l2ft_l1_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_l2ft_l1_sqlite: "Config",
 ) -> None:
     """v11.21.0 finding #13: KPI=2 / table=2 / chart bar=~140 — chart
     binds a different population than KPI+table. Triple identity
@@ -183,7 +187,7 @@ def test_bg6_pending_aging_triple_identity_trips_when_chart_population_diverges(
 
 
 def test_bg6_todays_exceptions_kpi_passes_when_matches_dataset_count(
-    planted_l2ft_l1_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_l2ft_l1_sqlite: "Config",
 ) -> None:
     cfg = planted_l2ft_l1_sqlite
     rows = query_db_via_cfg(cfg, _TODAYS_EXCEPTIONS_SQL)

@@ -64,12 +64,27 @@ from recon_gen.apps.investigation.datasets import (
     MONEY_TRAIL_ROOTS_CONTRACT,
     RECIPIENT_FANOUT_CONTRACT,
     VOLUME_ANOMALIES_CONTRACT,
-    build_all_datasets,
+    build_all_datasets,  # pyright: ignore[reportUnknownVariableType]: L2Instance import alias reads as Unknown here despite datasets.py being typed
 )
 from recon_gen.cli import main
+from recon_gen.common.config import Config
 from recon_gen.common.models import (
+    Analysis,
+    DataSet,
+    FilterControl,
+    FilterGroup,
+    IntegerDatasetParameter,
     IntegerDatasetParameterDefaultValues,
+    IntegerParameterDeclaration,
+    ParameterControl,
+    ParameterDeclaration,
+    PhysicalTable,
+    SankeyDiagramVisual,
+    SheetDefinition,
     SheetVisualScopingConfiguration,
+    StringDatasetParameter,
+    StringParameterDeclaration,
+    TableVisual,
 )
 from tests._test_helpers import make_test_config
 
@@ -84,9 +99,9 @@ _TEST_CFG = make_test_config(db_table_prefix="spec_example")
 # Investigation's ``build_all_datasets`` requires an L2Instance for
 # the App Info matview names (P.9f.f — dropped silent fallback). Tests
 # pass the spec_example default so prefix derivation matches _TEST_CFG.
-from recon_gen.common.l2 import default_l2_instance  # noqa: E402
+from recon_gen.common.l2 import L2Instance, default_l2_instance  # noqa: E402
 
-_TEST_L2 = default_l2_instance()
+_TEST_L2: L2Instance = default_l2_instance()
 
 
 # L.2.13 — Persona-defaults that the imperative ``filters.py`` carried as
@@ -109,38 +124,119 @@ AMOUNT_SLIDER_MAX = 1000
 DEFAULT_MONEY_TRAIL_MIN_AMOUNT = 0
 
 
-def _filter_groups(cfg: Config = _TEST_CFG) -> list:
+def _filter_groups(cfg: Config = _TEST_CFG) -> list[FilterGroup]:
     """Walk the tree's emitted filter groups (post-resolve)."""
-    return build_analysis(cfg).Definition.FilterGroups
+    fgs = build_analysis(cfg).Definition.FilterGroups
+    assert fgs is not None, "Investigation analysis must declare FilterGroups"
+    return fgs
 
 
-def _parameter_declarations(cfg: Config = _TEST_CFG) -> list:
+def _parameter_declarations(
+    cfg: Config = _TEST_CFG,
+) -> list[ParameterDeclaration]:
     """Walk the tree's emitted parameter declarations (post-resolve)."""
-    return build_analysis(cfg).Definition.ParameterDeclarations
-
-
-def _sheet_by_id(sheet_id: str, cfg: Config = _TEST_CFG):
-    """Find an emitted Sheet by its `SheetId`."""
-    return next(
-        s for s in build_analysis(cfg).Definition.Sheets
-        if s.SheetId == sheet_id
+    decls = build_analysis(cfg).Definition.ParameterDeclarations
+    assert decls is not None, (
+        "Investigation analysis must declare ParameterDeclarations"
     )
+    return decls
 
 
-def _filter_controls(sheet_id: str, cfg: Config = _TEST_CFG) -> list:
+def _sheet_by_id(sheet_id: str, cfg: Config = _TEST_CFG) -> SheetDefinition:  # typing-smell: ignore[bare-str-id]: sheet_id comes from callers as raw analyst string
+    """Find an emitted Sheet by its `SheetId`."""
+    sheets = build_analysis(cfg).Definition.Sheets
+    assert sheets is not None, "Investigation analysis must declare Sheets"
+    return next(s for s in sheets if s.SheetId == sheet_id)
+
+
+def _filter_controls(
+    sheet_id: str, cfg: Config = _TEST_CFG,  # typing-smell: ignore[bare-str-id]: sheet_id comes from callers as raw analyst string
+) -> list[FilterControl]:
     return _sheet_by_id(sheet_id, cfg).FilterControls or []
 
 
-def _parameter_controls(sheet_id: str, cfg: Config = _TEST_CFG) -> list:
+def _parameter_controls(
+    sheet_id: str, cfg: Config = _TEST_CFG,  # typing-smell: ignore[bare-str-id]: sheet_id comes from callers as raw analyst string
+) -> list[ParameterControl]:
     return _sheet_by_id(sheet_id, cfg).ParameterControls or []
 
 
-def _visual_id_by_title(sheet, title: str) -> str:
+def _sheets(analysis: Analysis) -> list[SheetDefinition]:
+    """Optional-cascade strip: every Investigation analysis must declare Sheets."""
+    assert analysis.Definition.Sheets is not None, (
+        "Investigation analysis must declare Sheets"
+    )
+    return analysis.Definition.Sheets
+
+
+def _filter_groups_of(analysis: Analysis) -> list[FilterGroup]:
+    assert analysis.Definition.FilterGroups is not None, (
+        "Investigation analysis must declare FilterGroups"
+    )
+    return analysis.Definition.FilterGroups
+
+
+def _parameter_declarations_of(
+    analysis: Analysis,
+) -> list[ParameterDeclaration]:
+    assert analysis.Definition.ParameterDeclarations is not None, (
+        "Investigation analysis must declare ParameterDeclarations"
+    )
+    return analysis.Definition.ParameterDeclarations
+
+
+def _custom_sql(ds: DataSet, key: str | None = None) -> str:
+    """Optional-cascade strip: pull the CustomSql.SqlQuery from a dataset.
+
+    All Investigation datasets are CustomSql-backed by construction, so
+    the ``CustomSql is not None`` assertion can never fail in practice.
+    """
+    table: PhysicalTable = (
+        ds.PhysicalTableMap[key] if key is not None
+        else next(iter(ds.PhysicalTableMap.values()))
+    )
+    assert table.CustomSql is not None, "Dataset must be CustomSql-backed"
+    return table.CustomSql.SqlQuery
+
+
+def _sheet_scopes(
+    fg: FilterGroup,
+) -> list[SheetVisualScopingConfiguration]:
+    """Optional-cascade strip:
+    fg.ScopeConfiguration.SelectedSheets.SheetVisualScopingConfigurations.
+    Every Investigation filter group declares its scope via SelectedSheets.
+    """
+    sel = fg.ScopeConfiguration.SelectedSheets
+    assert sel is not None, f"FilterGroup {fg.FilterGroupId} missing SelectedSheets"
+    scopes = sel.SheetVisualScopingConfigurations
+    assert scopes is not None, (
+        f"FilterGroup {fg.FilterGroupId} missing SheetVisualScopingConfigurations"
+    )
+    return scopes
+
+
+def _plain_title(visual_subobject: object) -> str | None:
+    """Optional-cascade strip: read ``visual.Title.FormatText['PlainText']``.
+
+    Every typed Visual subtype carries Title (a VisualTitleLabelOptions),
+    which itself is | None on the field declaration but always set by the
+    tree builder. Returns None when title text isn't populated.
+    """
+    title = getattr(visual_subobject, "Title", None)
+    if title is None or title.FormatText is None:
+        return None
+    fmt = title.FormatText  # pyright: ignore[reportAny]: dict[str, str] | None inferred
+    plain: object = fmt.get("PlainText")  # pyright: ignore[reportAny]: third-party stub or test scaffolding cascade
+    return plain if isinstance(plain, str) else None
+
+
+def _visual_id_by_title(sheet: SheetDefinition, title: str) -> str:
     """Find a visual's auto-generated ID by walking the sheet's emitted
     Visuals list and matching on title. Visual_ids are auto-derived
     post-L.1.21; titles are the stable identifier for tests that pin
     individual visuals.
     """
+    assert sheet.Visuals is not None, f"Sheet {sheet.SheetId} has no Visuals"
     for v in sheet.Visuals:
         for inner_name in (
             "KPIVisual", "TableVisual", "BarChartVisual",
@@ -149,17 +245,17 @@ def _visual_id_by_title(sheet, title: str) -> str:
             inner = getattr(v, inner_name, None)
             if inner is None:
                 continue
-            inner_title = inner.Title.FormatText.get("PlainText")
-            if inner_title == title:
-                return inner.VisualId
+            if _plain_title(inner) == title:
+                return inner.VisualId  # pyright: ignore[reportAny]: VisualId is str on every typed Visual subtype
     raise AssertionError(f"No visual on sheet matches title={title!r}")
 
 
-def _visual_kinds(sheet) -> list[str]:
+def _visual_kinds(sheet: SheetDefinition) -> list[str]:
     """Return the kind ('KPIVisual', 'TableVisual', ...) of each visual
     on the sheet in order. Used in lieu of explicit visual_ids for
     "this sheet has [KPI, BarChart, Table] in this order" structure
     checks (visual_ids are auto-generated post-L.1.21)."""
+    assert sheet.Visuals is not None, f"Sheet {sheet.SheetId} has no Visuals"
     kinds: list[str] = []
     for v in sheet.Visuals:
         for inner_name in (
@@ -181,7 +277,7 @@ def test_analysis_has_six_sheets_in_expected_order():
     from recon_gen.apps.investigation.constants import SHEET_INV_APP_INFO
 
     analysis = build_analysis(_TEST_CFG)
-    sheet_ids = [s.SheetId for s in analysis.Definition.Sheets]
+    sheet_ids = [s.SheetId for s in _sheets(analysis)]
     assert sheet_ids == [
         SHEET_INV_GETTING_STARTED,
         SHEET_INV_FANOUT,
@@ -204,6 +300,8 @@ def test_dashboard_mirrors_analysis_definition():
     analysis = build_analysis(_TEST_CFG)
     dashboard = build_investigation_dashboard(_TEST_CFG)
     # Both wrap the same definition builder, so sheet counts align.
+    assert dashboard.Definition.Sheets is not None
+    assert analysis.Definition.Sheets is not None
     assert len(dashboard.Definition.Sheets) == len(analysis.Definition.Sheets)
     assert dashboard.DashboardId == _TEST_CFG.prefixed("investigation-dashboard")
 
@@ -211,7 +309,7 @@ def test_dashboard_mirrors_analysis_definition():
 def test_every_sheet_has_a_description():
     """Plain-language description per sheet — enforced across all apps."""
     analysis = build_analysis(_TEST_CFG)
-    for sheet in analysis.Definition.Sheets:
+    for sheet in _sheets(analysis):
         assert sheet.Description, f"{sheet.SheetId} is missing a description"
 
 
@@ -293,7 +391,7 @@ def test_recipient_fanout_sql_filters_recipient_to_leaf_internal_accounts():
     have ``parent_role IS NULL`` and get filtered out, so the fanout
     signal stays focused on real customer recipients."""
     ds = build_all_datasets(_TEST_CFG, _TEST_L2)[0]
-    sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+    sql = _custom_sql(ds)
     assert "t.account_scope = 'internal'" in sql
     assert "t.account_parent_role IS NOT NULL" in sql
 
@@ -344,7 +442,7 @@ def test_fanout_threshold_pushed_into_dataset_sql():
     from recon_gen.common.dataset_contract import get_sql
 
     ds = build_recipient_fanout_dataset(_TEST_CFG)
-    sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+    sql = _custom_sql(ds)
     assert (
         f"WHERE dpr.distinct_senders >= <<${P_INV_FANOUT_THRESHOLD}>>"
         in sql
@@ -455,14 +553,14 @@ def test_distinct_sender_calc_field_dropped_in_y3a():
 def test_fanout_sheet_has_three_kpis_and_one_table():
     analysis = build_analysis(_TEST_CFG)
     fanout = next(
-        s for s in analysis.Definition.Sheets if s.SheetId == SHEET_INV_FANOUT
+        s for s in _sheets(analysis) if s.SheetId == SHEET_INV_FANOUT
     )
     assert fanout.Visuals is not None
     # Three KPIs followed by one Table (visual_ids are auto-generated
     # post-L.1.21; titles are the stable identifier for asserting order).
     titles = [
-        (v.KPIVisual.Title.FormatText["PlainText"] if v.KPIVisual else
-         v.TableVisual.Title.FormatText["PlainText"] if v.TableVisual else None)
+        _plain_title(v.KPIVisual) if v.KPIVisual else
+        _plain_title(v.TableVisual) if v.TableVisual else None
         for v in fanout.Visuals
     ]
     assert titles == [
@@ -476,12 +574,16 @@ def test_fanout_sheet_has_three_kpis_and_one_table():
 def test_fanout_table_aggregates_to_recipient_grain():
     analysis = build_analysis(_TEST_CFG)
     fanout = next(
-        s for s in analysis.Definition.Sheets if s.SheetId == SHEET_INV_FANOUT
+        s for s in _sheets(analysis) if s.SheetId == SHEET_INV_FANOUT
     )
+    assert fanout.Visuals is not None
     table = next(v.TableVisual for v in fanout.Visuals if v.TableVisual)
+    assert table.ChartConfiguration is not None
     field_wells = table.ChartConfiguration.FieldWells
+    assert field_wells is not None
     # Aggregated, not unaggregated — table groups by recipient identity.
     assert field_wells.TableAggregatedFieldWells is not None
+    assert field_wells.TableAggregatedFieldWells.GroupBy is not None
     group_by_cols = [
         d.CategoricalDimensionField.Column.ColumnName
         for d in field_wells.TableAggregatedFieldWells.GroupBy
@@ -520,7 +622,7 @@ def test_fanout_sheet_serializes_to_aws_json():
     # root/hops/amount + account-network anchor/min-amount) — unchanged
     # by Y.3.a/b since the slider/dropdown params still drive controls.
     assert len(j["Definition"]["FilterGroups"]) == 5
-    cfs = j["Definition"].get("CalculatedFields") or []
+    cfs: list[object] = j["Definition"].get("CalculatedFields") or []
     assert len(cfs) == 0
     assert len(j["Definition"]["ParameterDeclarations"]) == 7
 
@@ -556,7 +658,7 @@ def test_volume_anomalies_dataset_reads_from_matview():
     """
     datasets = build_all_datasets(_TEST_CFG, _TEST_L2)
     anomalies = datasets[1]
-    sql = next(iter(anomalies.PhysicalTableMap.values())).CustomSql.SqlQuery
+    sql = _custom_sql(anomalies)
     assert "FROM spec_example_inv_pair_rolling_anomalies" in sql
     # Don't reach back into transactions / daily_balances at dataset load.
     # (The prefixed base table name is NOT in this dataset's SQL — it
@@ -625,7 +727,7 @@ def test_sigma_pushdown_sql_contains_qs_placeholder():
         build_volume_anomalies_dataset,
     )
     ds = build_volume_anomalies_dataset(_TEST_CFG)
-    sql = ds.PhysicalTableMap["inv-volume-anomalies"].CustomSql.SqlQuery
+    sql = _custom_sql(ds, "inv-volume-anomalies")
     assert "<<$pInvAnomaliesSigma>>" in sql
     assert "z_score >=" in sql
 
@@ -640,24 +742,29 @@ def test_distribution_chart_binds_to_companion_dataset_unfiltered():
     scope."""
     analysis = build_analysis(_TEST_CFG)
     sheet = next(
-        s for s in analysis.Definition.Sheets
+        s for s in _sheets(analysis)
         if s.SheetId == SHEET_INV_ANOMALIES
     )
     # Walk every visual on the sheet; collect dataset bindings.
     # Distribution chart is a BarChart titled "Pair-Window σ Distribution"
     # — find it and assert its dataset.
+    assert sheet.Visuals is not None
     bar_visuals = [
         v.BarChartVisual for v in sheet.Visuals
         if v.BarChartVisual is not None
     ]
     dist = next(
         b for b in bar_visuals
-        if b.Title.FormatText["PlainText"] == "Pair-Window σ Distribution"
+        if _plain_title(b) == "Pair-Window σ Distribution"
     )
+    assert dist.ChartConfiguration is not None
+    assert dist.ChartConfiguration.FieldWells is not None
     fw = dist.ChartConfiguration.FieldWells.BarChartAggregatedFieldWells
+    assert fw is not None
     bar_ds_ids = {
         cat.CategoricalDimensionField.Column.DataSetIdentifier
         for cat in (fw.Category or [])
+        if cat.CategoricalDimensionField is not None
     }
     assert bar_ds_ids == {DS_INV_VOLUME_ANOMALIES_DISTRIBUTION}
 
@@ -671,7 +778,7 @@ def test_sigma_param_bridges_to_dataset_param_via_mapping():
     analysis = build_analysis(_TEST_CFG)
     integer_decls = [
         p.IntegerParameterDeclaration
-        for p in analysis.Definition.ParameterDeclarations
+        for p in _parameter_declarations_of(analysis)
         if p.IntegerParameterDeclaration is not None
     ]
     sigma_decl = next(
@@ -689,9 +796,7 @@ def test_anomalies_window_filter_is_all_visuals_scope():
     KPI/table and the distribution chart should respect the date range."""
     groups = {g.FilterGroupId: g for g in _filter_groups()}
     window = groups[FG_INV_ANOMALIES_WINDOW]
-    sheet_scopes = (
-        window.ScopeConfiguration.SelectedSheets.SheetVisualScopingConfigurations
-    )
+    sheet_scopes = _sheet_scopes(window)
     assert len(sheet_scopes) == 1
     assert sheet_scopes[0].Scope == SheetVisualScopingConfiguration.ALL_VISUALS
 
@@ -717,7 +822,7 @@ def test_anomalies_sheet_carries_window_filter_and_sigma_slider():
 def test_anomalies_sheet_has_kpi_distribution_and_table():
     analysis = build_analysis(_TEST_CFG)
     sheet = next(
-        s for s in analysis.Definition.Sheets
+        s for s in _sheets(analysis)
         if s.SheetId == SHEET_INV_ANOMALIES
     )
     assert sheet.Visuals is not None
@@ -732,32 +837,45 @@ def test_distribution_chart_categorises_by_z_bucket():
     '0-1 sigma', '1-2 sigma', ...). The Y-axis counts pair-window rows."""
     analysis = build_analysis(_TEST_CFG)
     sheet = next(
-        s for s in analysis.Definition.Sheets
+        s for s in _sheets(analysis)
         if s.SheetId == SHEET_INV_ANOMALIES
     )
+    assert sheet.Visuals is not None
     chart = next(v.BarChartVisual for v in sheet.Visuals if v.BarChartVisual)
+    assert chart.ChartConfiguration is not None
+    assert chart.ChartConfiguration.FieldWells is not None
     fields = chart.ChartConfiguration.FieldWells.BarChartAggregatedFieldWells
+    assert fields is not None
+    assert fields.Category is not None
     cat_cols = [
         d.CategoricalDimensionField.Column.ColumnName
         for d in fields.Category if d.CategoricalDimensionField
     ]
     assert cat_cols == ["z_bucket"]
+    assert fields.Values is not None
     assert len(fields.Values) == 1
 
 
 def test_anomalies_table_sorted_by_z_score_desc():
     analysis = build_analysis(_TEST_CFG)
     sheet = next(
-        s for s in analysis.Definition.Sheets
+        s for s in _sheets(analysis)
         if s.SheetId == SHEET_INV_ANOMALIES
     )
+    assert sheet.Visuals is not None
     table = next(v.TableVisual for v in sheet.Visuals if v.TableVisual)
+    assert table.ChartConfiguration is not None
+    assert table.ChartConfiguration.SortConfiguration is not None
     sort = table.ChartConfiguration.SortConfiguration["RowSort"][0]["FieldSort"]
     # Field-ids are auto-derived (L.1.16). Look up the z_score field's
     # auto-id by walking the table's Values list and matching column name.
+    assert table.ChartConfiguration.FieldWells is not None
+    table_fw = table.ChartConfiguration.FieldWells.TableAggregatedFieldWells
+    assert table_fw is not None
+    assert table_fw.Values is not None
     z_score_field_id = next(
         v.NumericalMeasureField.FieldId
-        for v in table.ChartConfiguration.FieldWells.TableAggregatedFieldWells.Values
+        for v in table_fw.Values
         if v.NumericalMeasureField
         and v.NumericalMeasureField.Column.ColumnName == "z_score"
     )
@@ -810,7 +928,7 @@ def test_money_trail_dataset_reads_from_matview_with_pushdown_where():
     """
     datasets = build_all_datasets(_TEST_CFG, _TEST_L2)
     money_trail = datasets[3]  # Y.1.b.companion shifted index by +1
-    sql = next(iter(money_trail.PhysicalTableMap.values())).CustomSql.SqlQuery
+    sql = _custom_sql(money_trail)
     assert "FROM spec_example_inv_money_trail_edges" in sql
     # Don't reach back into the prefixed base table at dataset load.
     assert "spec_example_transactions" not in sql
@@ -832,7 +950,7 @@ def test_money_trail_dataset_declares_three_pushdown_parameters():
     datasets = build_all_datasets(_TEST_CFG, _TEST_L2)
     money_trail = datasets[3]
     params = money_trail.DatasetParameters or []
-    by_name = {}
+    by_name: dict[str, StringDatasetParameter | IntegerDatasetParameter] = {}
     for dp in params:
         if dp.StringDatasetParameter is not None:
             by_name[dp.StringDatasetParameter.Name] = dp.StringDatasetParameter
@@ -865,7 +983,9 @@ def test_money_trail_dataset_declares_three_pushdown_parameters():
     # Root dataset parameter has a sentinel default that matches no
     # row in the matview — initial paint of Sankey + table is empty
     # until the dropdown commits a real chain root.
-    root_default = by_name[str(P_INV_MONEY_TRAIL_ROOT)].DefaultValues
+    root_param = by_name[str(P_INV_MONEY_TRAIL_ROOT)]
+    assert isinstance(root_param, StringDatasetParameter)
+    root_default = root_param.DefaultValues
     assert root_default is not None
     assert root_default.StaticValues is not None
     assert len(root_default.StaticValues) == 1
@@ -878,7 +998,9 @@ def test_money_trail_analysis_params_bridge_to_dataset_params():
     same-named parameter. QS resolves <<$pInvMoneyTrail*>> in the
     dataset SQL by walking the bridge."""
     decls = _parameter_declarations()
-    by_name = {}
+    by_name: dict[
+        str, IntegerParameterDeclaration | StringParameterDeclaration,
+    ] = {}
     for d in decls:
         if d.IntegerParameterDeclaration:
             by_name[d.IntegerParameterDeclaration.Name] = (
@@ -916,7 +1038,7 @@ def test_money_trail_roots_companion_dataset_is_unfiltered():
     assert roots.DataSetId == _TEST_CFG.prefixed(
         "inv-money-trail-roots-dataset",
     )
-    sql = next(iter(roots.PhysicalTableMap.values())).CustomSql.SqlQuery
+    sql = _custom_sql(roots)
     assert "SELECT DISTINCT root_transfer_id" in sql
     assert "FROM spec_example_inv_money_trail_edges" in sql
     # Critical: NO pushdown parameters here — the dropdown's option
@@ -944,6 +1066,7 @@ def test_money_trail_root_dropdown_links_to_companion_dataset():
     assert dropdown is not None
     assert dropdown.SourceParameterName == P_INV_MONEY_TRAIL_ROOT
     assert dropdown.Type == "SINGLE_SELECT"
+    assert dropdown.SelectableValues is not None
     link = dropdown.SelectableValues["LinkToDataSetColumn"]
     assert link["DataSetIdentifier"] == DS_INV_MONEY_TRAIL_ROOTS
     assert link["ColumnName"] == "root_transfer_id"
@@ -989,7 +1112,7 @@ def test_money_trail_sheet_has_one_date_range_filter_control():
 def test_money_trail_sheet_has_sankey_and_table():
     analysis = build_analysis(_TEST_CFG)
     sheet = next(
-        s for s in analysis.Definition.Sheets
+        s for s in _sheets(analysis)
         if s.SheetId == SHEET_INV_MONEY_TRAIL
     )
     assert sheet.Visuals is not None
@@ -1002,13 +1125,20 @@ def test_money_trail_sankey_field_wells_use_account_names_and_sum_hop_amount():
     read as banking entities, not opaque identifiers."""
     analysis = build_analysis(_TEST_CFG)
     sheet = next(
-        s for s in analysis.Definition.Sheets
+        s for s in _sheets(analysis)
         if s.SheetId == SHEET_INV_MONEY_TRAIL
     )
+    assert sheet.Visuals is not None
     sankey = next(
         v.SankeyDiagramVisual for v in sheet.Visuals if v.SankeyDiagramVisual
     )
+    assert sankey.ChartConfiguration is not None
+    assert sankey.ChartConfiguration.FieldWells is not None
     fw = sankey.ChartConfiguration.FieldWells.SankeyDiagramAggregatedFieldWells
+    assert fw is not None
+    assert fw.Source is not None
+    assert fw.Destination is not None
+    assert fw.Weight is not None
     src = [
         d.CategoricalDimensionField.Column.ColumnName
         for d in fw.Source if d.CategoricalDimensionField
@@ -1020,7 +1150,9 @@ def test_money_trail_sankey_field_wells_use_account_names_and_sum_hop_amount():
     assert src == ["source_account_name"]
     assert dst == ["target_account_name"]
     weight = fw.Weight[0].NumericalMeasureField
+    assert weight is not None
     assert weight.Column.ColumnName == "hop_amount"
+    assert weight.AggregationFunction is not None
     assert weight.AggregationFunction.SimpleNumericalAggregation == "SUM"
 
 
@@ -1031,14 +1163,20 @@ def test_money_trail_sankey_sort_weight_desc_with_node_cap():
     siblings at the same depth)."""
     analysis = build_analysis(_TEST_CFG)
     sheet = next(
-        s for s in analysis.Definition.Sheets
+        s for s in _sheets(analysis)
         if s.SheetId == SHEET_INV_MONEY_TRAIL
     )
+    assert sheet.Visuals is not None
     sankey = next(
         v.SankeyDiagramVisual for v in sheet.Visuals if v.SankeyDiagramVisual
     )
+    assert sankey.ChartConfiguration is not None
     sort = sankey.ChartConfiguration.SortConfiguration
+    assert sort is not None
+    assert sort.WeightSort is not None
     assert sort.WeightSort[0]["FieldSort"]["Direction"] == "DESC"
+    assert sort.SourceItemsLimit is not None
+    assert sort.DestinationItemsLimit is not None
     assert sort.SourceItemsLimit["OtherCategories"] == "INCLUDE"
     assert sort.DestinationItemsLimit["OtherCategories"] == "INCLUDE"
     # Both caps match (50) — using the same constant so the diagram is
@@ -1055,12 +1193,17 @@ def test_money_trail_table_sorted_by_depth_asc_with_full_chain_grain():
     ASC so chains read top-to-bottom from root → leaf."""
     analysis = build_analysis(_TEST_CFG)
     sheet = next(
-        s for s in analysis.Definition.Sheets
+        s for s in _sheets(analysis)
         if s.SheetId == SHEET_INV_MONEY_TRAIL
     )
+    assert sheet.Visuals is not None
     table = next(v.TableVisual for v in sheet.Visuals if v.TableVisual)
+    assert table.ChartConfiguration is not None
+    assert table.ChartConfiguration.FieldWells is not None
     fields = table.ChartConfiguration.FieldWells.TableAggregatedFieldWells
-    group_by_cols = []
+    assert fields is not None
+    assert fields.GroupBy is not None
+    group_by_cols: list[str] = []
     for d in fields.GroupBy:
         if d.CategoricalDimensionField:
             group_by_cols.append(d.CategoricalDimensionField.Column.ColumnName)
@@ -1076,12 +1219,13 @@ def test_money_trail_table_sorted_by_depth_asc_with_full_chain_grain():
         "target_account_name",
         "posted_at",
     ]
+    assert table.ChartConfiguration.SortConfiguration is not None
     sort = table.ChartConfiguration.SortConfiguration["RowSort"][0]["FieldSort"]
     # Field-ids are auto-derived (L.1.16). Look up the depth field's
     # auto-id by walking the table's GroupBy and matching column name.
     depth_field_id = next(
         d.NumericalDimensionField.FieldId
-        for d in table.ChartConfiguration.FieldWells.TableAggregatedFieldWells.GroupBy
+        for d in fields.GroupBy
         if d.NumericalDimensionField
         and d.NumericalDimensionField.Column.ColumnName == "depth"
     )
@@ -1137,7 +1281,7 @@ def test_account_network_dataset_reuses_money_trail_matview_with_pushdown_where(
     # Index 5 post-Y.2.a (Y.1.b.companion + Y.2.a.companion shifted +2).
     ds = build_all_datasets(_TEST_CFG, _TEST_L2)[5]
     assert ds.DataSetId == _TEST_CFG.prefixed("inv-account-network-dataset")
-    sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+    sql = _custom_sql(ds)
     # N.3.d: matview name is per-instance prefixed.
     assert "FROM spec_example_inv_money_trail_edges" in sql
     assert "AS source_display" in sql
@@ -1155,7 +1299,7 @@ def test_account_network_dataset_declares_two_pushdown_parameters():
     ``apps/investigation/app.py``."""
     ds = build_all_datasets(_TEST_CFG, _TEST_L2)[5]
     params = ds.DatasetParameters or []
-    by_name = {}
+    by_name: dict[str, StringDatasetParameter | IntegerDatasetParameter] = {}
     for dp in params:
         if dp.StringDatasetParameter is not None:
             by_name[dp.StringDatasetParameter.Name] = dp.StringDatasetParameter
@@ -1181,7 +1325,9 @@ def test_account_network_dataset_declares_two_pushdown_parameters():
     # source_display / target_display in the matview — initial paint
     # of the Sankeys + table is empty until the dropdown commits a
     # real anchor.
-    anchor_default = by_name[str(P_INV_ANETWORK_ANCHOR)].DefaultValues
+    anchor_param = by_name[str(P_INV_ANETWORK_ANCHOR)]
+    assert isinstance(anchor_param, StringDatasetParameter)
+    anchor_default = anchor_param.DefaultValues
     assert anchor_default is not None
     assert anchor_default.StaticValues is not None
     assert len(anchor_default.StaticValues) == 1
@@ -1194,7 +1340,9 @@ def test_account_network_analysis_params_bridge_to_dataset_params():
     same-named parameter. QS resolves <<$pInvANetwork*>> in the
     dataset SQL by walking the bridge."""
     decls = _parameter_declarations()
-    by_name = {}
+    by_name: dict[
+        str, IntegerParameterDeclaration | StringParameterDeclaration,
+    ] = {}
     for d in decls:
         if d.IntegerParameterDeclaration:
             by_name[d.IntegerParameterDeclaration.Name] = (
@@ -1229,14 +1377,13 @@ def test_anchor_calc_field_dropped_after_y2b():
 def test_anetwork_inbound_filter_is_inbound_sankey_only():
     """K.4.8i: inbound filter scoped to the inbound Sankey only."""
     analysis = build_analysis(_TEST_CFG)
-    groups = {g.FilterGroupId: g for g in analysis.Definition.FilterGroups}
-    sc = groups[FG_INV_ANETWORK_INBOUND].ScopeConfiguration
-    configs = sc.SelectedSheets.SheetVisualScopingConfigurations
+    groups = {g.FilterGroupId: g for g in _filter_groups_of(analysis)}
+    configs = _sheet_scopes(groups[FG_INV_ANETWORK_INBOUND])
     assert len(configs) == 1
     assert configs[0].SheetId == SHEET_INV_ACCOUNT_NETWORK
     assert configs[0].Scope == SheetVisualScopingConfiguration.SELECTED_VISUALS
     sheet = next(
-        s for s in analysis.Definition.Sheets
+        s for s in _sheets(analysis)
         if s.SheetId == SHEET_INV_ACCOUNT_NETWORK
     )
     assert configs[0].VisualIds == [
@@ -1247,14 +1394,13 @@ def test_anetwork_inbound_filter_is_inbound_sankey_only():
 def test_anetwork_outbound_filter_is_outbound_sankey_only():
     """K.4.8i: outbound filter scoped to the outbound Sankey only."""
     analysis = build_analysis(_TEST_CFG)
-    groups = {g.FilterGroupId: g for g in analysis.Definition.FilterGroups}
-    sc = groups[FG_INV_ANETWORK_OUTBOUND].ScopeConfiguration
-    configs = sc.SelectedSheets.SheetVisualScopingConfigurations
+    groups = {g.FilterGroupId: g for g in _filter_groups_of(analysis)}
+    configs = _sheet_scopes(groups[FG_INV_ANETWORK_OUTBOUND])
     assert len(configs) == 1
     assert configs[0].SheetId == SHEET_INV_ACCOUNT_NETWORK
     assert configs[0].Scope == SheetVisualScopingConfiguration.SELECTED_VISUALS
     sheet = next(
-        s for s in analysis.Definition.Sheets
+        s for s in _sheets(analysis)
         if s.SheetId == SHEET_INV_ACCOUNT_NETWORK
     )
     assert configs[0].VisualIds == [
@@ -1276,6 +1422,7 @@ def test_anetwork_directional_filters_are_category_filters_on_calc_fields():
         assert cf.Column.ColumnName == expected_col
         assert cf.Column.DataSetIdentifier == DS_INV_ACCOUNT_NETWORK
         flc = cf.Configuration.FilterListConfiguration
+        assert flc is not None
         assert flc["MatchOperator"] == "CONTAINS"
         assert flc["CategoryValues"] == ["yes"]
 
@@ -1296,6 +1443,7 @@ def test_anetwork_anchor_dropdown_links_to_narrow_accounts_dataset():
     assert dropdown is not None
     assert dropdown.SourceParameterName == P_INV_ANETWORK_ANCHOR
     assert dropdown.Type == "SINGLE_SELECT"
+    assert dropdown.SelectableValues is not None
     link = dropdown.SelectableValues["LinkToDataSetColumn"]
     assert link["DataSetIdentifier"] == DS_INV_ANETWORK_ACCOUNTS
     assert link["ColumnName"] == "source_display"
@@ -1326,7 +1474,7 @@ def test_account_network_sheet_has_two_sankeys_and_table():
     meets in the middle of the row."""
     analysis = build_analysis(_TEST_CFG)
     sheet = next(
-        s for s in analysis.Definition.Sheets
+        s for s in _sheets(analysis)
         if s.SheetId == SHEET_INV_ACCOUNT_NETWORK
     )
     assert sheet.Visuals is not None
@@ -1342,7 +1490,13 @@ def test_account_network_sankeys_field_wells_use_account_names_and_sum_hop_amoun
     in the per-Sankey filter, not the field wells."""
     inbound, outbound, _ = _account_network_visuals()
     for sankey in (inbound, outbound):
+        assert sankey.ChartConfiguration is not None
+        assert sankey.ChartConfiguration.FieldWells is not None
         fw = sankey.ChartConfiguration.FieldWells.SankeyDiagramAggregatedFieldWells
+        assert fw is not None
+        assert fw.Source is not None
+        assert fw.Destination is not None
+        assert fw.Weight is not None
         src = [
             d.CategoricalDimensionField.Column.ColumnName
             for d in fw.Source if d.CategoricalDimensionField
@@ -1356,12 +1510,14 @@ def test_account_network_sankeys_field_wells_use_account_names_and_sum_hop_amoun
         assert src == ["source_display"]
         assert dst == ["target_display"]
         weight = fw.Weight[0].NumericalMeasureField
+        assert weight is not None
         assert weight.Column.ColumnName == "hop_amount"
+        assert weight.AggregationFunction is not None
         assert weight.AggregationFunction.SimpleNumericalAggregation == "SUM"
         # Confirm sankey is sourced from the K.4.8 dataset, not K.4.5.
-        assert fw.Source[0].CategoricalDimensionField.Column.DataSetIdentifier == (
-            DS_INV_ACCOUNT_NETWORK
-        )
+        src_first = fw.Source[0].CategoricalDimensionField
+        assert src_first is not None
+        assert src_first.Column.DataSetIdentifier == DS_INV_ACCOUNT_NETWORK
 
 
 def test_account_network_sheet_serializes_to_aws_json():
@@ -1377,20 +1533,24 @@ def test_account_network_sheet_serializes_to_aws_json():
     assert len(sheet["ParameterControls"]) == 2
 
 
-def _account_network_visuals():
+def _account_network_visuals() -> tuple[
+    SankeyDiagramVisual, SankeyDiagramVisual, TableVisual,
+]:
     """Helper: returns (inbound_sankey, outbound_sankey, table) from
     the deployed Account Network sheet — mirrors the K.4.8i layout.
     Visual_ids are auto-derived (L.1.21); look up by title."""
     analysis = build_analysis(_TEST_CFG)
     sheet = next(
-        s for s in analysis.Definition.Sheets
+        s for s in _sheets(analysis)
         if s.SheetId == SHEET_INV_ACCOUNT_NETWORK
     )
-    sankeys_by_title = {}
+    assert sheet.Visuals is not None
+    sankeys_by_title: dict[str, SankeyDiagramVisual] = {}
     for v in sheet.Visuals:
         if v.SankeyDiagramVisual:
-            title = v.SankeyDiagramVisual.Title.FormatText["PlainText"]
-            sankeys_by_title[title] = v.SankeyDiagramVisual
+            title = _plain_title(v.SankeyDiagramVisual)
+            if title is not None:
+                sankeys_by_title[title] = v.SankeyDiagramVisual
     inbound = sankeys_by_title["Inbound — counterparties → anchor"]
     outbound = sankeys_by_title["Outbound — anchor → counterparties"]
     table = next(
@@ -1399,13 +1559,22 @@ def _account_network_visuals():
     return inbound, outbound, table
 
 
-def _sankey_field_id_for_column(sankey, role: str, column_name: str) -> str:
+def _sankey_field_id_for_column(
+    sankey: SankeyDiagramVisual, role: str, column_name: str,
+) -> str:
     """Look up the auto-derived field_id of a Sankey leaf by role +
     column. Field-ids are auto-derived (L.1.16) so tests resolve them
     via column-name lookup rather than hardcoded strings."""
+    assert sankey.ChartConfiguration is not None
+    assert sankey.ChartConfiguration.FieldWells is not None
     field_wells = sankey.ChartConfiguration.FieldWells.SankeyDiagramAggregatedFieldWells
-    slot_attr = {"source": "Source", "target": "Destination"}[role]
-    leaves = getattr(field_wells, slot_attr) or []
+    assert field_wells is not None
+    if role == "source":
+        leaves = field_wells.Source or []
+    elif role == "target":
+        leaves = field_wells.Destination or []
+    else:
+        raise ValueError(f"Unknown role: {role!r}")
     for leaf in leaves:
         if leaf.CategoricalDimensionField:
             if leaf.CategoricalDimensionField.Column.ColumnName == column_name:
@@ -1415,10 +1584,15 @@ def _sankey_field_id_for_column(sankey, role: str, column_name: str) -> str:
     )
 
 
-def _table_groupby_field_id_for_column(table, column_name: str) -> str:
+def _table_groupby_field_id_for_column(
+    table: TableVisual, column_name: str,
+) -> str:
     """Look up the auto-derived field_id of a Table GroupBy leaf by
     column name."""
+    assert table.ChartConfiguration is not None
+    assert table.ChartConfiguration.FieldWells is not None
     field_wells = table.ChartConfiguration.FieldWells.TableAggregatedFieldWells
+    assert field_wells is not None
     for leaf in field_wells.GroupBy or []:
         for sub in (
             leaf.CategoricalDimensionField,
@@ -1450,6 +1624,7 @@ def test_anetwork_inbound_sankey_left_click_walks_to_source_counterparty():
         SHEET_INV_ACCOUNT_NETWORK
     )
     set_params = walk.ActionOperations[1].SetParametersOperation
+    assert set_params is not None
     cfg = set_params.ParameterValueConfigurations
     assert len(cfg) == 1
     assert cfg[0]["DestinationParameterName"] == P_INV_ANETWORK_ANCHOR
@@ -1476,6 +1651,7 @@ def test_anetwork_outbound_sankey_left_click_walks_to_target_counterparty():
         SHEET_INV_ACCOUNT_NETWORK
     )
     set_params = walk.ActionOperations[1].SetParametersOperation
+    assert set_params is not None
     cfg = set_params.ParameterValueConfigurations
     assert len(cfg) == 1
     assert cfg[0]["DestinationParameterName"] == P_INV_ANETWORK_ANCHOR
@@ -1498,6 +1674,7 @@ def test_anetwork_table_wires_single_counterparty_walk_action():
     assert walk.Name == "Walk to other account on this edge"
     assert walk.Trigger == "DATA_POINT_MENU"
     set_params = walk.ActionOperations[1].SetParametersOperation
+    assert set_params is not None
     cfg = set_params.ParameterValueConfigurations
     assert len(cfg) == 1
     assert cfg[0]["DestinationParameterName"] == P_INV_ANETWORK_ANCHOR
@@ -1511,8 +1688,12 @@ def test_anetwork_table_columns_use_display_strings():
     counterparty_display calc field is exposed as a column so the
     single-action walk has a SourceField to read off."""
     _, _, table = _account_network_visuals()
+    assert table.ChartConfiguration is not None
+    assert table.ChartConfiguration.FieldWells is not None
     fields = table.ChartConfiguration.FieldWells.TableAggregatedFieldWells
-    cols = []
+    assert fields is not None
+    assert fields.GroupBy is not None
+    cols: list[str] = []
     for d in fields.GroupBy:
         if d.CategoricalDimensionField:
             cols.append(d.CategoricalDimensionField.Column.ColumnName)
@@ -1537,13 +1718,13 @@ def test_anetwork_calc_fields_pushed_into_dataset_sql():
 
     # 1. Contract carries the three new columns.
     cols = ACCOUNT_NETWORK_CONTRACT.column_names
-    assert "is_inbound_edge" in cols
-    assert "is_outbound_edge" in cols
-    assert "counterparty_display" in cols
+    assert CF_INV_ANETWORK_IS_INBOUND_EDGE in cols
+    assert CF_INV_ANETWORK_IS_OUTBOUND_EDGE in cols
+    assert CF_INV_ANETWORK_COUNTERPARTY_DISPLAY in cols
 
     # 2. Dataset SQL has the CASE expressions referencing the anchor.
     ds = build_account_network_dataset(_TEST_CFG)
-    sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+    sql = _custom_sql(ds)
     anchor = f"<<${P_INV_ANETWORK_ANCHOR}>>"
     assert (
         f"CASE WHEN target_display = {anchor} "

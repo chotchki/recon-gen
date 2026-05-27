@@ -11,9 +11,11 @@ Per the M.1 testing principle: every load-bearing schema feature
 invariant CHECK, portable JSON storage) gets a guard.
 """
 
+# pyright: reportArgumentType=false
+# BF.4/F: tests pass Identifier where RailName / RoleExpression Union expected;
+# both are NewType-style narrowings — runtime no-ops.
 from __future__ import annotations
 
-import dataclasses
 import re
 
 import pytest

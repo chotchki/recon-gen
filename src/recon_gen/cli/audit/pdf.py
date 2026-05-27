@@ -14,15 +14,14 @@ audit-specific story content.
 
 from __future__ import annotations
 
-import json as _json
-from datetime import date, datetime
-from decimal import Decimal
+from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import click
 
 from recon_gen.common.as_of_frame import AsOfFrame
-from recon_gen.common.intervals import DateInterval  # noqa: F401 — kept for type/test imports
+from recon_gen.common.intervals import DateInterval as DateInterval  # noqa: F401 — kept for type/test imports
 from recon_gen.common.pdf.audit_chrome import (
     BookmarkedDocTemplate,
     bookmarked_h1,
@@ -40,7 +39,6 @@ from recon_gen.cli.audit import (
     DriftViolation,
     ExecSummary,
     LimitBreachViolation,
-    MatviewEvidence,
     OverdraftViolation,
     StuckPendingViolation,
     StuckUnbundledViolation,
@@ -52,6 +50,15 @@ from recon_gen.cli.audit import (
     _split_stuck_pending_by_account_class,
     _split_stuck_unbundled_by_account_class,
 )
+
+if TYPE_CHECKING:
+    from recon_gen.cli.audit import MatviewEvidence
+    from recon_gen.common.l2.theme import ThemePreset
+
+
+__all__ = [
+    "_write_audit_pdf",
+]
 
 
 def _write_audit_pdf(
@@ -69,11 +76,11 @@ def _write_audit_pdf(
     supersession_data: SupersessionAuditData | None,
     daily_statement_walks: list[DailyStatementWalk] | None,
     singleton_ids: set[str],
-    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
+    theme: ThemePreset,
     version: str,
     l2_label: str,
     provenance: ProvenanceFingerprint | None,
-    matview_evidence: list | None,  # list[MatviewEvidence] | None
+    matview_evidence: list[MatviewEvidence] | None,
     l2_instance_path: str | None,
 ) -> None:
     """Render the audit report as a PDF.
@@ -200,7 +207,10 @@ def _write_audit_pdf(
     # Optional: institutional logo above the title when theme.logo
     # is a loadable absolute file path.
     logo_flowable = _cover_logo_flowable(theme)
-    story: list = []
+    # reportlab.platypus has no PEP 561 stubs — every Flowable returns
+    # Unknown. Using ``list[object]`` keeps the type checker quiet while
+    # preserving the heterogeneous Flowable element semantics.
+    story: list[object] = []
     if logo_flowable is not None:
         story.extend([logo_flowable, Spacer(1, 0.25 * inch)])
     story.extend([
@@ -270,7 +280,8 @@ def _write_audit_pdf(
     # (name, page_idx, rect) here at draw time; pyHanko reads the
     # list post-multiBuild to drop empty signature widgets at the
     # exact spots the layout reserved.
-    signature_field_registry: list = []
+    # Tuples are appended by _SigFieldPlaceholder.drawOn — (name, page_idx, box).
+    signature_field_registry: list[tuple[str, int, tuple[float, float, float, float]]] = []
     story.extend(_signoff_story(
         styles, theme,
         institution=institution,
@@ -295,7 +306,7 @@ def _write_audit_pdf(
     # _allSatisfied override stamps the final page count into
     # total_pages_holder between passes so pass 2's footer drawer
     # can render "Page X of N" (U.6).
-    doc.multiBuild(story)
+    doc.multiBuild(story)  # type: ignore[arg-type]: story is list[object] for typing-quiet but elements are reportlab Flowable subclasses
 
     # U.7.c — embed the L2 YAML + verify-provenance.py recipe as PDF
     # file attachments (post-multiBuild, pre-signing). Verifiers
@@ -338,10 +349,10 @@ def _write_audit_pdf(
 
 def _executive_summary_story(
     summary: ExecSummary | None,
-    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
+    styles: Any,  # WHY: reportlab StyleSheet1 lacks PEP 561 stubs; runtime-imported in render fn
     frame: AsOfFrame,
-    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
-) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
+    theme: ThemePreset,
+) -> list[object]:  # WHY: reportlab Flowable list — runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.2 executive summary page.
 
     Caller appends to the doc story after the cover page. Renders a
@@ -360,7 +371,7 @@ def _executive_summary_story(
     )
 
     start, end = frame.window.start, frame.window.end
-    elements: list = [
+    elements: list[object] = [
         PageBreak(),
         bookmarked_h1("Executive Summary", styles),
         Paragraph(
@@ -443,10 +454,10 @@ def _executive_summary_story(
 
 def _drift_story(
     rows: list[DriftViolation] | None,
-    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
+    styles: Any,  # WHY: reportlab StyleSheet1 lacks PEP 561 stubs; runtime-imported in render fn
     frame: AsOfFrame,
-    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
-) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
+    theme: ThemePreset,
+) -> list[object]:  # WHY: reportlab Flowable list — runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.3.a Drift violations page.
 
     LongTable auto-paginates with the header row repeated. None = no
@@ -465,7 +476,7 @@ def _drift_story(
     )
 
     start, end = frame.window.start, frame.window.end
-    elements: list = [
+    elements: list[object] = [
         PageBreak(),
         bookmarked_h1("Drift Violations", styles),
         Paragraph(
@@ -510,7 +521,7 @@ def _drift_story(
         spaceBefore=0,
         spaceAfter=0,
     )
-    header = [
+    header: list[object] = [
         "Account ID",
         "Account name",
         "Role",
@@ -519,7 +530,7 @@ def _drift_story(
         "Computed",
         "Drift",
     ]
-    data: list[list] = [header]
+    data: list[list[object]] = [header]
     for r in rows:
         data.append([
             Paragraph(r.account_id, cell_style),
@@ -568,11 +579,11 @@ def _drift_story(
 
 def _overdraft_story(
     rows: list[OverdraftViolation] | None,
-    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
+    styles: Any,  # WHY: reportlab StyleSheet1 lacks PEP 561 stubs; runtime-imported in render fn
     frame: AsOfFrame,
     singleton_ids: set[str],
-    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
-) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
+    theme: ThemePreset,
+) -> list[object]:  # WHY: reportlab Flowable list — runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.3.b Overdraft violations page.
 
     Renders up to TWO sub-tables:
@@ -596,7 +607,7 @@ def _overdraft_story(
     )
 
     start, end = frame.window.start, frame.window.end
-    elements: list = [
+    elements: list[object] = [
         PageBreak(),
         bookmarked_h1("Overdraft Violations", styles),
         Paragraph(
@@ -668,7 +679,7 @@ def _overdraft_story(
             bookmarked_h3("Parent Accounts (Per-Row Detail)", styles),
             Spacer(1, 0.05 * inch),
         ])
-        detail_data: list[list] = [
+        detail_data: list[list[object]] = [
             ["Account ID", "Account name", "Role", "Day", "Stored balance"],
         ]
         for r in parent_rows:
@@ -699,7 +710,7 @@ def _overdraft_story(
             ),
             Spacer(1, 0.05 * inch),
         ])
-        group_data: list[list] = [
+        group_data: list[list[object]] = [
             ["Parent role", "Children negative", "Total peak negative"],
         ]
         for s in child_groups:
@@ -723,11 +734,11 @@ def _overdraft_story(
 
 def _limit_breach_story(
     rows: list[LimitBreachViolation] | None,
-    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
+    styles: Any,  # WHY: reportlab StyleSheet1 lacks PEP 561 stubs; runtime-imported in render fn
     frame: AsOfFrame,
     singleton_ids: set[str],
-    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
-) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
+    theme: ThemePreset,
+) -> list[object]:  # WHY: reportlab Flowable list — runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.3.c Limit breach violations page.
 
     Same parent-vs-child split as Overdraft. Children grouped by
@@ -749,7 +760,7 @@ def _limit_breach_story(
     )
 
     start, end = frame.window.start, frame.window.end
-    elements: list = [
+    elements: list[object] = [
         PageBreak(),
         bookmarked_h1("Limit Breach Violations", styles),
         Paragraph(
@@ -819,7 +830,7 @@ def _limit_breach_story(
             bookmarked_h3("Parent Accounts (Per-Row Detail)", styles),
             Spacer(1, 0.05 * inch),
         ])
-        detail_data: list[list] = [
+        detail_data: list[list[object]] = [
             ["Account ID", "Account name", "Role", "Day",
              "Transfer type", "Direction", "Flow", "Cap", "Overshoot"],
         ]
@@ -859,7 +870,7 @@ def _limit_breach_story(
             ),
             Spacer(1, 0.05 * inch),
         ])
-        group_data: list[list] = [
+        group_data: list[list[object]] = [
             ["Parent role", "Transfer type",
              "Children breaching", "Total overshoot"],
         ]
@@ -886,10 +897,10 @@ def _limit_breach_story(
 
 def _stuck_pending_story(
     rows: list[StuckPendingViolation] | None,
-    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
+    styles: Any,  # WHY: reportlab StyleSheet1 lacks PEP 561 stubs; runtime-imported in render fn
     singleton_ids: set[str],
-    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
-) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
+    theme: ThemePreset,
+) -> list[object]:  # WHY: reportlab Flowable list — runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.3.d Stuck pending transactions page.
 
     Current-state matview: NO date filter (mirrors L1 dashboard).
@@ -909,7 +920,7 @@ def _stuck_pending_story(
         TableStyle,
     )
 
-    elements: list = [
+    elements: list[object] = [
         PageBreak(),
         bookmarked_h1("Stuck Pending Transactions", styles),
         Paragraph(
@@ -975,7 +986,7 @@ def _stuck_pending_story(
             bookmarked_h3("Parent Accounts (Per-Row Detail)", styles),
             Spacer(1, 0.05 * inch),
         ])
-        detail_data: list[list] = [
+        detail_data: list[list[object]] = [
             ["Account ID", "Account name", "Transfer type",
              "Posted", "Amount", "Age", "Cap"],
         ]
@@ -1011,7 +1022,7 @@ def _stuck_pending_story(
             ),
             Spacer(1, 0.05 * inch),
         ])
-        group_data: list[list] = [
+        group_data: list[list[object]] = [
             ["Parent role", "Transfer type", "Children affected",
              "Stuck transactions", "Total amount"],
         ]
@@ -1039,10 +1050,10 @@ def _stuck_pending_story(
 
 def _stuck_unbundled_story(
     rows: list[StuckUnbundledViolation] | None,
-    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
+    styles: Any,  # WHY: reportlab StyleSheet1 lacks PEP 561 stubs; runtime-imported in render fn
     singleton_ids: set[str],
-    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
-) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
+    theme: ThemePreset,
+) -> list[object]:  # WHY: reportlab Flowable list — runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.3.e Stuck unbundled transactions page.
 
     Same shape as Stuck pending; cap is ``max_unbundled_age_seconds``.
@@ -1059,7 +1070,7 @@ def _stuck_unbundled_story(
         TableStyle,
     )
 
-    elements: list = [
+    elements: list[object] = [
         PageBreak(),
         bookmarked_h1("Stuck Unbundled Transactions", styles),
         Paragraph(
@@ -1126,7 +1137,7 @@ def _stuck_unbundled_story(
             bookmarked_h3("Parent Accounts (Per-Row Detail)", styles),
             Spacer(1, 0.05 * inch),
         ])
-        detail_data: list[list] = [
+        detail_data: list[list[object]] = [
             ["Account ID", "Account name", "Transfer type",
              "Posted", "Amount", "Age", "Cap"],
         ]
@@ -1162,7 +1173,7 @@ def _stuck_unbundled_story(
             ),
             Spacer(1, 0.05 * inch),
         ])
-        group_data: list[list] = [
+        group_data: list[list[object]] = [
             ["Parent role", "Transfer type", "Children affected",
              "Stuck transactions", "Total amount"],
         ]
@@ -1190,10 +1201,10 @@ def _stuck_unbundled_story(
 
 def _supersession_story(
     data: SupersessionAuditData | None,
-    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
+    styles: Any,  # WHY: reportlab StyleSheet1 lacks PEP 561 stubs; runtime-imported in render fn
     frame: AsOfFrame,
-    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
-) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
+    theme: ThemePreset,
+) -> list[object]:  # WHY: reportlab Flowable list — runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.3.f Supersession audit page.
 
     Aggregate table covers entire dataset; detail tables limited to
@@ -1211,7 +1222,7 @@ def _supersession_story(
     )
 
     start, end = frame.window.start, frame.window.end
-    elements: list = [
+    elements: list[object] = [
         PageBreak(),
         bookmarked_h1("Supersession Audit", styles),
         Paragraph(
@@ -1274,7 +1285,7 @@ def _supersession_story(
         bookmarked_h3("Aggregate (Entire Dataset)", styles),
         Spacer(1, 0.05 * inch),
     ])
-    aggregate_data: list[list] = [
+    aggregate_data: list[list[object]] = [
         ["Base table", "Reason category", "Total", "New in period"],
     ]
     for r in data.aggregates:
@@ -1303,7 +1314,7 @@ def _supersession_story(
             ),
             Spacer(1, 0.05 * inch),
         ])
-        txn_data: list[list] = [
+        txn_data: list[list[object]] = [
             ["Transaction ID", "Reason", "Account ID", "Account name",
              "Posted", "Amount"],
         ]
@@ -1336,7 +1347,7 @@ def _supersession_story(
             ),
             Spacer(1, 0.05 * inch),
         ])
-        bal_data: list[list] = [
+        bal_data: list[list[object]] = [
             ["Account ID", "Account name", "Day", "Reason", "Balance"],
         ]
         for d in data.daily_balance_details:
@@ -1374,9 +1385,9 @@ def _supersession_story(
 
 def _daily_statement_walks_story(
     walks: list[DailyStatementWalk] | None,
-    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
-    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
-) -> list:  # type: ignore[type-arg]: list of reportlab Flowables, runtime-imported to avoid hard reportlab dep
+    styles: Any,  # WHY: reportlab StyleSheet1 lacks PEP 561 stubs; runtime-imported in render fn
+    theme: ThemePreset,
+) -> list[object]:  # WHY: reportlab Flowable list — runtime-imported to avoid hard reportlab dep
     """Platypus elements for the U.4 per-account Daily Statement walk pages.
 
     Section header at level-0 outline; one sub-section per walk at
@@ -1397,7 +1408,7 @@ def _daily_statement_walks_story(
         TableStyle,
     )
 
-    elements: list = [
+    elements: list[object] = [
         PageBreak(),
         bookmarked_h1("Per-Account Daily Statement Walk", styles),
         Paragraph(
@@ -1481,7 +1492,7 @@ def _daily_statement_walks_story(
         elements.append(Spacer(1, 0.1 * inch))
 
         # 5-KPI summary table (one row, currency-formatted).
-        kpi_data: list[list] = [
+        kpi_data: list[list[object]] = [
             ["Opening", "Debits", "Credits", "Closing stored", "Drift"],
             [
                 f"${w.opening_balance:,.2f}",
@@ -1512,7 +1523,7 @@ def _daily_statement_walks_story(
             elements.append(Paragraph(
                 "Posted Money records", styles["Heading3"],
             ))
-            txn_data: list[list] = [
+            txn_data: list[list[object]] = [
                 ["Posted", "Transaction ID", "Transfer type",
                  "Direction", "Amount", "Status"],
             ]
@@ -1545,8 +1556,8 @@ def _daily_statement_walks_story(
 
 
 def _signoff_story(
-    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
-    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
+    styles: Any,  # WHY: reportlab StyleSheet1 lacks PEP 561 stubs; runtime-imported in render fn
+    theme: ThemePreset,
     *,
     institution: str,
     frame: AsOfFrame,
@@ -1554,8 +1565,8 @@ def _signoff_story(
     version: str,
     l2_label: str,
     provenance: ProvenanceFingerprint | None,
-    signature_field_registry: list,  # mutable; populated at draw time
-) -> list:
+    signature_field_registry: list[tuple[str, int, tuple[float, float, float, float]]],  # mutable; populated at draw time
+) -> list[object]:
     """Final-page sign-off block with system + auditor attestation (U.5).
 
     System block carries machine-attestable provenance (code version,
@@ -1728,14 +1739,14 @@ def _signoff_story(
 
 
 
-def _make_fillable_notes_field(  # type: ignore[no-untyped-def]: returns reportlab Flowable, runtime-imported
+def _make_fillable_notes_field(
     *,
     name: str,
     width: float,
     height: float,
-    border_color,
+    border_color: Any,  # WHY: reportlab colors.Color; runtime-imported
     tooltip: str,
-):
+) -> Any:  # WHY: reportlab Flowable; runtime-imported
     """Build a platypus Flowable that emits an AcroForm text field (U.7.c).
 
     Stays fillable in the generated PDF so a reviewer can type
@@ -1761,16 +1772,16 @@ def _make_fillable_notes_field(  # type: ignore[no-untyped-def]: returns reportl
     """
     from reportlab.platypus import Flowable
 
-    class _FillableNotesField(Flowable):
-        def __init__(self):
+    class _FillableNotesField(Flowable):  # type: ignore[misc]: reportlab.Flowable has no PEP 561 stubs
+        def __init__(self) -> None:
             super().__init__()
             self.width = width
             self.height = height
 
-        def wrap(self, availWidth, availHeight):
+        def wrap(self, availWidth: float, availHeight: float) -> tuple[float, float]:  # type: ignore[override]: reportlab.Flowable.wrap signature is Untyped
             return (self.width, self.height)
 
-        def drawOn(self, canvas, x, y, _sW=0):
+        def drawOn(self, canvas: Any, x: float, y: float, _sW: float = 0) -> None:  # type: ignore[override]: reportlab Flowable.drawOn signature differs
             # No canvas.saveState/translate dance — acroForm uses
             # absolute page coords, so feed (x, y) directly.
             canvas.acroForm.textfield(
@@ -1789,13 +1800,13 @@ def _make_fillable_notes_field(  # type: ignore[no-untyped-def]: returns reportl
     return _FillableNotesField()
 
 
-def _make_signature_field_placeholder(  # type: ignore[no-untyped-def]: returns reportlab Flowable, runtime-imported
+def _make_signature_field_placeholder(
     *,
     name: str,
     width: float,
     height: float,
-    registry: list,
-):
+    registry: list[tuple[str, int, tuple[float, float, float, float]]],
+) -> Any:  # WHY: reportlab Flowable; runtime-imported
     """Reserve layout space for an empty reviewer signature field.
 
     Reportlab can lay out the *space* for a signature widget but
@@ -1813,16 +1824,16 @@ def _make_signature_field_placeholder(  # type: ignore[no-untyped-def]: returns 
     """
     from reportlab.platypus import Flowable
 
-    class _SigFieldPlaceholder(Flowable):
-        def __init__(self):
+    class _SigFieldPlaceholder(Flowable):  # type: ignore[misc]: reportlab.Flowable has no PEP 561 stubs
+        def __init__(self) -> None:
             super().__init__()
             self.width = width
             self.height = height
 
-        def wrap(self, availWidth, availHeight):
+        def wrap(self, availWidth: float, availHeight: float) -> tuple[float, float]:  # type: ignore[override]: reportlab.Flowable.wrap signature is Untyped
             return (self.width, self.height)
 
-        def drawOn(self, canvas, x, y, _sW=0):
+        def drawOn(self, canvas: Any, x: float, y: float, _sW: float = 0) -> None:  # type: ignore[override]: reportlab Flowable.drawOn signature differs
             # canvas.getPageNumber() is 1-indexed; pyHanko's
             # SigFieldSpec.on_page is 0-indexed — translate here.
             page_idx = canvas.getPageNumber() - 1
@@ -1851,7 +1862,7 @@ def _read_l2_yaml_bytes(l2_instance_path: str | None) -> bytes:
 def _add_empty_signature_fields(
     pdf_path: Path,
     *,
-    fields: list,  # list[tuple[str, int, tuple[float, float, float, float]]]
+    fields: list[tuple[str, int, tuple[float, float, float, float]]],
 ) -> None:
     """Append empty reviewer signature widgets via pyHanko (U.7.c).
 
@@ -1882,22 +1893,23 @@ def _add_empty_signature_fields(
     # _SigFieldPlaceholder.drawOn fires twice and registers the
     # same name twice. Dedupe by name keeping the LAST entry, which
     # is the final pass's resolved coordinates.
-    deduped: dict = {}
+    deduped: dict[str, tuple[str, int, tuple[float, float, float, float]]] = {}
     for entry in fields:
         deduped[entry[0]] = entry
 
     with pdf_path.open("rb") as inf:
         w = IncrementalPdfFileWriter(inf)
         for name, page_idx, box in deduped.values():
+            x1, y1, x2, y2 = box
             spec = SigFieldSpec(
                 sig_field_name=name,
                 on_page=page_idx,
-                box=tuple(int(round(v)) for v in box),
+                box=(int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2))),
                 empty_field_appearance=True,
             )
             append_signature_field(w, spec)
         out = io.BytesIO()
-        w.write(out)
+        w.write(out)  # pyright: ignore[reportUnknownMemberType]: pyHanko IncrementalPdfFileWriter stubs are partial
     pdf_path.write_bytes(out.getvalue())
 
 
@@ -1982,15 +1994,15 @@ def _build_verify_recipe_script(
 
 
 def _appendix_story(
-    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
-    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
+    styles: Any,  # WHY: reportlab StyleSheet1 lacks PEP 561 stubs; runtime-imported in render fn
+    theme: ThemePreset,
     *,
     version: str,
     l2_label: str,
     l2_instance_path: str | None,
     provenance: ProvenanceFingerprint | None,
-    matview_evidence: list | None,  # list[MatviewEvidence] | None
-) -> list:
+    matview_evidence: list[MatviewEvidence] | None,
+) -> list[object]:
     """Provenance Appendix page (U.7.c).
 
     Targets the regulator who wants to audit the auditor: enough
@@ -2265,7 +2277,7 @@ def _appendix_story(
     ]
 
 
-def _cover_logo_flowable(theme):  # type: ignore[no-untyped-def]: theme is ThemePreset; returns reportlab Image or None
+def _cover_logo_flowable(theme: ThemePreset) -> Any:  # WHY: reportlab Image | None; runtime-imported
     """Cover-page logo Image flowable (or None if no logo / can't load).
 
     Reads ``theme.logo`` (string accepting either a URL or absolute
@@ -2321,13 +2333,13 @@ def _cover_logo_flowable(theme):  # type: ignore[no-untyped-def]: theme is Theme
 
 
 def _provenance_block_story(
-    styles,  # type: ignore[no-untyped-def]: reportlab StyleSheet1, untyped to avoid runtime import in render fn
-    theme,  # type: ignore[no-untyped-def]: ThemePreset, untyped to avoid runtime import in render fn
+    styles: Any,  # WHY: reportlab StyleSheet1 lacks PEP 561 stubs; runtime-imported in render fn
+    theme: ThemePreset,
     *,
     version: str,
     l2_label: str,
     provenance: ProvenanceFingerprint | None,
-) -> list:
+) -> list[object]:
     """Cover-page long-form source-data provenance block (U.6).
 
     Lists the source artifacts that, together, fully determine this
@@ -2374,7 +2386,7 @@ def _provenance_block_story(
         "<", "&lt;",
     ).replace(">", "&gt;")
 
-    def _row(source: str, hwm: str, hash_text: str) -> list:
+    def _row(source: str, hwm: str, hash_text: str) -> list[object]:
         return [
             Paragraph(source, cell_style),
             Paragraph(hwm, code_style),

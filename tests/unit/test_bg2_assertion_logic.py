@@ -32,6 +32,7 @@ import sqlite3
 import tempfile
 from collections.abc import Iterator
 from decimal import Decimal
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -41,9 +42,12 @@ from tests.e2e._drivers.base import query_db_via_cfg
 from tests.e2e._kpi_parse import parse_currency_kpi as _parse_currency_kpi
 from tests.e2e.test_l1_account_filters import _KPI_TO_COLUMN
 
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config
+
 
 @pytest.fixture
-def planted_sqlite() -> Iterator[object]:
+def planted_sqlite() -> Iterator["Config"]:
     """Spin up a SQLite holding a synthetic ``daily_statement_summary``
     matview with two rows for one account (two distinct days). Values
     are chosen so the narrative formula
@@ -122,14 +126,14 @@ _SUMMARY_SQL_FOR_TEST = (
 )
 
 
-def _query_day(cfg, account, day):  # type: ignore[no-untyped-def]: cfg yielded by sqlite-fixture, account/day are plain str
+def _query_day(cfg: "Config", account: str, day: str) -> dict[str, Any]:
     return query_db_via_cfg(
         cfg, _SUMMARY_SQL_FOR_TEST,
         binds={"param_pL1DsAccount": account, "param_pL1DsBalanceDate": day},
     )[0]
 
 
-def _kpis_from_matview_row(row) -> dict[str, Decimal]:  # type: ignore[no-untyped-def]: row is dict[str, Any] — the heterogeneous SQL row already documented in query_db_via_cfg
+def _kpis_from_matview_row(row: dict[str, Any]) -> dict[str, Decimal]:
     return {
         title: Decimal(str(row[col])) for title, col in _KPI_TO_COLUMN.items()
     }
@@ -139,7 +143,7 @@ def _kpis_from_matview_row(row) -> dict[str, Decimal]:  # type: ignore[no-untype
 
 
 def test_bg2_assertion_passes_when_kpis_match_matview_on_healthy_data(
-    planted_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config — same justification used elsewhere
+    planted_sqlite: "Config",
 ) -> None:
     """When rendered KPIs equal the matview's values AND day1 ≠ day2,
     BG.2's full assertion chain passes. Establishes the test isn't
@@ -168,7 +172,7 @@ def test_bg2_assertion_passes_when_kpis_match_matview_on_healthy_data(
 
 
 def test_bg2_identity_trips_when_rendered_drift_disagrees_with_matview(
-    planted_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_sqlite: "Config",
 ) -> None:
     """v11.21.0 finding #1, half-A: rendered KPI binds a different
     measure than the matview's `drift` column. Identity assertion fails
@@ -198,7 +202,7 @@ def test_bg2_identity_trips_when_rendered_drift_disagrees_with_matview(
 
 
 def test_bg2_narrative_formula_against_independent_truth_catches_matview_net_flow_bug(
-    planted_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_sqlite: "Config",
 ) -> None:
     """v11.21.0 finding #1 root cause (2026-05-25 BH.0 share): the
     matview's `net_flow` formula at `schema.py:2502-2504` uses
@@ -233,6 +237,7 @@ def test_bg2_narrative_formula_against_independent_truth_catches_matview_net_flo
        diverges from independent_sum.
     """
     cfg = planted_sqlite
+    assert cfg.demo_database_url is not None
     conn = sqlite3.connect(cfg.demo_database_url)
     # Plant a base-transactions table mirroring the matview's input
     # shape. In v6 amount_money is signed: Credit positive, Debit
@@ -338,7 +343,7 @@ def test_bg2_narrative_formula_against_independent_truth_catches_matview_net_flo
 
 
 def test_bg2_delta_trips_when_day1_and_day2_produce_identical_kpis(
-    planted_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_sqlite: "Config",
 ) -> None:
     """v11.21.0 finding #2: the Business Day picker is non-functional;
     KPIs are byte-identical across distinct days. The delta assertion
@@ -365,7 +370,7 @@ def test_bg2_delta_trips_when_day1_and_day2_produce_identical_kpis(
 
 
 def test_bg2_identity_trips_when_cardholder_opening_disagrees(
-    planted_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_sqlite: "Config",
 ) -> None:
     """v11.21.0 finding #3: cardholder class shows negative Opening
     Balance KPI on a class whose semantic forbids it. The bug surfaces

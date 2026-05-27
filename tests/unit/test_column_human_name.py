@@ -78,4 +78,4 @@ class TestColumnSpecHumanName:
     def test_default_for_calc_field_shaped_name(self) -> None:
         # Calc field-shaped names (no underscores) round-trip cleanly.
         c = ColumnSpec(name="drift", type="DECIMAL")
-        assert c.human_name == "Drift"
+        assert c.human_name == "Drift"  # typing-smell: ignore[no-inline-production-constants]: column-title-case output of _smart_title("drift"); coincidentally matches _DRIFT_NAME (L1 sheet name) — different concept

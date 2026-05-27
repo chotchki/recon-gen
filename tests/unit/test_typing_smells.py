@@ -199,7 +199,7 @@ class Check:
     """
     name: str
     description: str
-    files: list[Path] = field(default_factory=list)
+    files: list[Path] = field(default_factory=lambda: [])
 
     def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
         raise NotImplementedError
@@ -1427,6 +1427,324 @@ class NoRawTemporalArgsCheck(Check):
 
 
 # ---------------------------------------------------------------------------
+# Check: no-test-src-sql-duplication  (BE.1, approach 1 of BE.0 spike)
+# ---------------------------------------------------------------------------
+
+
+def _sql_fingerprint(s: str) -> str:
+    """Normalize a string literal for cross-file duplication matching.
+
+    Whitespace-collapse + strip + lowercase. Tests routinely re-indent
+    the same SQL when copy-paste lands inside a fixture function;
+    normalization makes the fingerprint robust to layout differences
+    without giving up the "byte-equivalent contents" guarantee.
+    """
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
+# SQL-shape filter: only flag string literals that look like SQL,
+# not arbitrary long strings (docstrings, error messages, ASCII-art).
+# Same filter the BE.0 spike used to land its 0-hit baseline at
+# threshold 100 — without this, every long module docstring would
+# trip. The regex is intentionally broad: any one of these tokens
+# is enough signal that the literal carries SQL semantics worth
+# guarding for drift. Case-insensitive.
+_SQL_SHAPE_RE = re.compile(
+    r"\b("
+    r"SELECT|FROM|WHERE|INSERT\s+INTO|UPDATE\s+\w+\s+SET"
+    r"|CREATE\s+(TABLE|VIEW|MATERIALIZED\s+VIEW|INDEX)"
+    r"|DROP\s+(TABLE|VIEW|MATERIALIZED\s+VIEW|INDEX)"
+    r"|JOIN|GROUP\s+BY|ORDER\s+BY|HAVING|UNION"
+    r"|<<\$p"  # QS dataset parameter placeholder
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_sql(value: str) -> bool:
+    """True iff ``value`` contains at least one SQL-shape token.
+
+    The BE.1 lint scope is "long SQL copied across src/ ↔ tests/" —
+    arbitrary long strings (e.g. module docstrings, error message
+    templates, ASCII-art help text) aren't in scope. Skipping
+    everything that doesn't smell like SQL keeps the rule tight and
+    avoids the docstring-FP class.
+    """
+    return bool(_SQL_SHAPE_RE.search(value))
+
+
+@dataclass
+class NoTestSrcSqlDuplicationCheck(Check):
+    """BE.1, approach 1 of BE.0's spike — flag string literals in
+    ``tests/`` that ALSO appear verbatim (mod whitespace) in
+    ``src/recon_gen/``. Catches the "test inlines a long SQL that
+    drifted from production" regression class.
+
+    Threshold ``min_length`` defaults to 100 chars (the spike's 0-hit
+    baseline). Cuts later (BE.4) lower it to 50 once the sweep
+    migrates the 5 known 50-90-char hits.
+
+    Implementation: lazily build a src-side index (fingerprint →
+    location) on first ``find_smells`` call, then per-test-file walk
+    the AST for matching literals.
+
+    Allowlist via the existing sibling-comment convention:
+    ``# typing-smell: ignore[no-test-src-sql-duplication]: <why>``.
+    Always require a WHY — the lint exists to catch drift, an
+    allowlisted dup needs justification for why the contract is
+    deliberately decoupled.
+    """
+    min_length: int = 100
+    src_root: Path = field(default_factory=lambda: REPO_ROOT / "src/recon_gen")
+    # Lazily-populated cache: fingerprint → list of (src_file, lineno).
+    # Cleared between `_build_checks()` invocations because the Check
+    # is reconstructed each call; intentional — pytest sessions are
+    # short-lived enough that a fresh index per run is cheap.
+    _src_index: dict[str, tuple[Path, int]] = field(  # pyright: ignore[reportUnknownVariableType]: _src_index is dict[str, str] from glob walk
+        default_factory=dict, init=False, repr=False,
+    )
+
+    def _build_src_index(self) -> None:
+        if self._src_index:
+            return
+        for p in sorted(self.src_root.rglob("*.py")):
+            try:
+                tree = ast.parse(p.read_text(encoding="utf-8"))
+            except (SyntaxError, UnicodeDecodeError):
+                continue
+            for node in ast.walk(tree):
+                if not (
+                    isinstance(node, ast.Constant)
+                    and isinstance(node.value, str)
+                ):
+                    continue
+                if len(node.value) < self.min_length:
+                    continue
+                if not _looks_like_sql(node.value):
+                    continue
+                fp = _sql_fingerprint(node.value)
+                # Only record the FIRST occurrence — the message names
+                # one site to migrate from, so a second site is just
+                # noise. Duplications within src/ itself are a separate
+                # concern (would be caught by a future BE.X dedup-
+                # within-src lint).
+                self._src_index.setdefault(fp, (p, node.lineno))
+
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        self._build_src_index()
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+            ):
+                continue
+            if len(node.value) < self.min_length:
+                continue
+            if not _looks_like_sql(node.value):
+                continue
+            fp = _sql_fingerprint(node.value)
+            hit = self._src_index.get(fp)
+            if hit is None:
+                continue
+            src_file, src_lineno = hit
+            rel_src = src_file.relative_to(REPO_ROOT)
+            yield Smell(
+                file=file,
+                lineno=node.lineno,
+                checker="no-test-src-sql-duplication",
+                message=(
+                    f"string literal (≥{self.min_length} chars, whitespace-"
+                    f"normalized) also appears in {rel_src}:{src_lineno} — "
+                    f"import from src/ instead of copying; if the test must "
+                    f"hold its own contract independent of src/, suppress "
+                    f"with ``# typing-smell: ignore[no-test-src-sql-"
+                    f"duplication]: <why>``"
+                ),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Check: no-inline-production-constants  (BE.2, approach 3 of BE.0 spike)
+# ---------------------------------------------------------------------------
+
+
+# UPPER_SNAKE module-level constant name pattern. Matches both public
+# (``DRILL_RESET_SENTINEL_VALUE``) and private (``_DRIFT_NAME``)
+# styles — the spike confirmed src uses both. First-char allows the
+# optional leading underscore; rest is `[A-Z][A-Z0-9_]*`.
+_UPPER_SNAKE_RE = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
+
+
+def _collect_src_module_constants(
+    src_root: Path,
+) -> dict[str, tuple[Path, int, str]]:
+    """Index ``src_root``'s module-level UPPER_SNAKE string constants.
+
+    Walks every ``*.py`` under ``src_root`` and indexes top-level
+    assignments of the shape ``NAME = "value"`` where ``NAME`` is
+    UPPER_SNAKE (private leading-underscore allowed) and ``value``
+    is a plain string of length 3-200 (the spike's filter range —
+    too-short hits are false positives on tokens like "x"; too-long
+    cross into the SQL-duplication territory BE.1 already covers).
+
+    Returns ``{value: (file, lineno, name)}``. First occurrence
+    wins on collisions (rare — two src files assigning the same
+    UPPER_SNAKE value to different names is itself a code smell).
+    """
+    out: dict[str, tuple[Path, int, str]] = {}
+    for p in sorted(src_root.rglob("*.py")):
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        # Module-level only — class attributes + function-local
+        # constants don't apply (the spike scoped to module-level
+        # to keep the FP rate manageable). Walk tree.body, not
+        # ast.walk.
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            if len(node.targets) != 1:
+                continue
+            target = node.targets[0]
+            if not isinstance(target, ast.Name):
+                continue
+            if not _UPPER_SNAKE_RE.match(target.id):
+                continue
+            if not isinstance(node.value, ast.Constant):
+                continue
+            value = node.value.value
+            if not isinstance(value, str):
+                continue
+            if not (3 <= len(value) <= 200):
+                continue
+            out.setdefault(value, (p, node.lineno, target.id))
+    return out
+
+
+class _NoInlineProductionConstantsVisitor(ast.NodeVisitor):
+    """Walk ``ast.Assert`` nodes; flag string literals matching an
+    indexed src constant.
+
+    Why scoped to ``ast.Assert``: the lint's purpose is to catch
+    "test inlines a production constant in an assertion" — bare
+    string literals at module scope (test-fixture data, etc.) are
+    a different drift class. Asserts narrow to the high-signal
+    zone the spike measured.
+    """
+
+    def __init__(
+        self,
+        file: Path,
+        src_index: dict[str, tuple[Path, int, str]],
+        checker_name: str = "no-inline-production-constants",
+        src_label: str = "src/",
+    ) -> None:
+        self.file = file
+        self.src_index = src_index
+        # BE.5 — second instance scopes src_root to tests/e2e/_drivers/
+        # under a distinct checker name so allowlists are categorized
+        # separately. The visitor stays one class; the wrapping Check
+        # instance picks the names.
+        self.checker_name = checker_name
+        self.src_label = src_label
+        self.smells: list[Smell] = []
+        # De-duplicate per-line: an assert with the same literal
+        # repeated (e.g. `assert x == "foo" or y == "foo"`) only
+        # surfaces ONE smell per line.
+        self._seen: set[tuple[int, str]] = set()
+
+    def _scan_for_literals(self, root: ast.AST) -> None:
+        for node in ast.walk(root):
+            if not (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+            ):
+                continue
+            hit = self.src_index.get(node.value)
+            if hit is None:
+                continue
+            key = (node.lineno, node.value)
+            if key in self._seen:
+                continue
+            self._seen.add(key)
+            src_file, src_lineno, src_name = hit
+            rel_src = src_file.relative_to(REPO_ROOT)
+            self.smells.append(Smell(
+                file=self.file,
+                lineno=node.lineno,
+                checker=self.checker_name,
+                message=(
+                    f"string literal {node.value!r} matches "
+                    f"constant ``{src_name}`` declared "
+                    f"at {rel_src}:{src_lineno} — import from "
+                    f"{self.src_label} so a rename in production "
+                    f"fires the test loudly (instead of leaving the "
+                    f"test asserting the stale value silently). "
+                    f"Allowlist with ``# typing-smell: ignore"
+                    f"[{self.checker_name}]: <why>`` for deliberate "
+                    f"contract-independence cases (rare)"
+                ),
+            ))
+
+    def visit_Assert(self, node: ast.Assert) -> None:
+        self._scan_for_literals(node.test)
+        if node.msg is not None:
+            self._scan_for_literals(node.msg)
+        # Don't generic_visit — nested asserts are vanishingly rare
+        # and walking them again risks double-counting. The walk in
+        # _scan_for_literals already descends into nested expressions.
+
+
+@dataclass
+class NoInlineProductionConstantsCheck(Check):
+    """BE.2, approach 3 of BE.0's spike — flag string literals inside
+    ``ast.Assert`` statements that match a known src-side UPPER_SNAKE
+    module-level constant. Catches the "test inlines a production
+    constant" drift class (sheet names, dataset IDs, sentinel
+    values, etc.) — a rename silently leaves the test asserting the
+    stale string.
+
+    BE.4 swept the corpus to 0 unsuppressed hits on 2026-05-26; the
+    lint now locks that baseline + catches future drift.
+
+    Parameterized over ``src_root`` so the same Check class drives
+    BOTH the original BE.2 (src/recon_gen/ → tests/) AND BE.5's
+    extension (tests/e2e/_drivers/ → tests/e2e/test_*.py). The
+    ``checker_name`` field lets each instance carry its own rule
+    identifier so allowlists are categorized separately.
+
+    Planted-fixture smoke tests invoke the Check directly so any
+    visitor regression goes red even if the real corpus stays
+    at 0 hits.
+    """
+    src_root: Path = field(default_factory=lambda: REPO_ROOT / "src/recon_gen")
+    # BE.5: a sibling instance uses a different checker_name +
+    # src_label so smell messages name the right scope and allowlist
+    # syntax. Defaults preserve the BE.2 behavior.
+    checker_name: str = "no-inline-production-constants"
+    src_label: str = "src/"
+    _src_index: dict[str, tuple[Path, int, str]] = field(  # pyright: ignore[reportUnknownVariableType]: _src_index is dict[str, str] from glob walk
+        default_factory=dict, init=False, repr=False,
+    )
+
+    def _build_src_index(self) -> None:
+        if self._src_index:
+            return
+        self._src_index = _collect_src_module_constants(self.src_root)
+
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        self._build_src_index()
+        v = _NoInlineProductionConstantsVisitor(
+            file, self._src_index,
+            checker_name=self.checker_name,
+            src_label=self.src_label,
+        )
+        v.visit(tree)
+        return v.smells
+
+
+# ---------------------------------------------------------------------------
 # Suppression filtering
 # ---------------------------------------------------------------------------
 
@@ -1560,6 +1878,34 @@ def _build_checks() -> list[Check]:
     # Keep _raw_temporal_scope referenced so the linter doesn't complain
     # about an unused local while the check is staged disabled.
     _ = _raw_temporal_scope
+    # BE.1 — no-test-src-sql-duplication: every ``tests/`` .py file
+    # EXCEPT the planted-fixture directory (which deliberately holds
+    # the planted duplicate that the smoke test invokes the visitor
+    # against directly). Per BE.0 D8: the fixtures sit OUTSIDE the
+    # lint's normal scope so they don't self-trip the rule.
+    fixtures_dir = REPO_ROOT / "tests/unit/_fixtures"
+    no_test_src_sql_dup_scope = [
+        p for p in _expand_paths([REPO_ROOT / "tests"])
+        if fixtures_dir not in p.parents
+    ]
+    # BE.5 — no-test-e2e-driver-internals: walk ``tests/e2e/test_*.py``
+    # for string literals inside asserts that match UPPER_SNAKE
+    # module-level constants in ``tests/e2e/_drivers/``. Same
+    # provenance-drift class as BE.2, applied to the driver layer's
+    # internals → test-layer assertions seam. The driver layer is
+    # already sealed via ``no-playwright-leak`` (no raw Playwright
+    # imports outside _drivers/); BE.5 closes the value-side of the
+    # same boundary (no inlined driver-internal constant values).
+    # Scope: tests/e2e/test_*.py only (driver bodies + e2e harness
+    # modules are out of scope — those legitimately reference their
+    # own internals).
+    e2e_drivers_dir = REPO_ROOT / "tests/e2e/_drivers"
+    no_test_e2e_driver_internals_scope = [
+        p for p in _expand_paths([REPO_ROOT / "tests/e2e"])
+        if p.parent == REPO_ROOT / "tests/e2e"
+        and p.name.startswith("test_")
+        and p.suffix == ".py"
+    ]
     return [
         BareStrIdCheck(
             name="bare-str-id",
@@ -1766,6 +2112,23 @@ def _build_checks() -> list[Check]:
             ),
             files=_naked_interval_scope,
         ),
+        NoTestSrcSqlDuplicationCheck(
+            name="no-test-src-sql-duplication",
+            description=(
+                "string literal in ``tests/`` (whitespace-normalized, "
+                "≥100 chars) that also appears in ``src/recon_gen/`` — "
+                "the test should import the constant from src/ instead "
+                "of copying. Catches the BE-class regression: production "
+                "SQL drifts but the test's copy doesn't, so the test "
+                "keeps passing against a stale contract. Allowlist via "
+                "``# typing-smell: ignore[no-test-src-sql-duplication]: "
+                "<why>`` when the test deliberately holds a contract "
+                "independent of src/ (rare). BE.0 spike measured the "
+                "current corpus at 0 hits — this lint locks that "
+                "baseline as a future-drift guard."
+            ),
+            files=no_test_src_sql_dup_scope,
+        ),
         # BC.1, D8 — STAGED DISABLED until end of BC.5. To enable: drop
         # the ``# `` comment from the registration below. Enabling it
         # before the BC.4/BC.5 migration completes will red the whole
@@ -1785,6 +2148,56 @@ def _build_checks() -> list[Check]:
         #     ),
         #     files=_raw_temporal_scope,
         # ),
+        # BE.2 — ENABLED 2026-05-26 (BE.4.C). The Phase A spike found
+        # 144 hits; Phase B's three parallel agents migrated 129 to
+        # direct imports + flagged 15 for principal review; Phase C
+        # applied per-line suppressions with WHY on 11 illustrative-
+        # literal cases + refactored 4 chart-renderer fixtures to
+        # neutral strings. Net: 0 unsuppressed hits. The lint now
+        # locks the migrated baseline + catches future drift.
+        NoInlineProductionConstantsCheck(
+            name="no-inline-production-constants",
+            description=(
+                "string literal inside an ``assert`` in tests/ that "
+                "matches a module-level UPPER_SNAKE constant in "
+                "src/recon_gen/** — import the constant instead of "
+                "inlining the value, so a rename in production fires "
+                "the test loudly. Catches the provenance-drift class "
+                "(sheet names, dataset IDs, sentinel values). BE.4 "
+                "swept the corpus to 0 unsuppressed hits on "
+                "2026-05-26. Allowlist via ``# typing-smell: ignore"
+                "[no-inline-production-constants]: <why>`` for "
+                "deliberate contract-independence cases."
+            ),
+            files=no_test_src_sql_dup_scope,
+        ),
+        # BE.5 — same Check class, second instance scoped to the
+        # tests/e2e/_drivers/ ↔ tests/e2e/test_*.py seam. Catches the
+        # "e2e test inlines a driver-internal constant" drift class.
+        # The driver layer is already sealed at the import level by
+        # `no-playwright-leak`; BE.5 closes the value side of the
+        # same boundary. Expected to land at 0 hits at registration
+        # (locks the future-drift guard). Distinct ``checker_name``
+        # so allowlists for this rule are categorized separately
+        # from BE.2's src-coupling rule.
+        NoInlineProductionConstantsCheck(
+            name="no-test-e2e-driver-internals",
+            description=(
+                "string literal inside an ``assert`` in tests/e2e/"
+                "test_*.py that matches a module-level UPPER_SNAKE "
+                "constant in tests/e2e/_drivers/** — import from the "
+                "driver layer instead of inlining. Same drift class "
+                "as no-inline-production-constants, applied to the "
+                "driver-internals ↔ e2e-test seam. Allowlist via "
+                "``# typing-smell: ignore[no-test-e2e-driver-"
+                "internals]: <why>`` for deliberate independence "
+                "cases (rare)."
+            ),
+            files=no_test_e2e_driver_internals_scope,
+            src_root=REPO_ROOT / "tests/e2e/_drivers",
+            checker_name="no-test-e2e-driver-internals",
+            src_label="tests/e2e/_drivers/",
+        ),
     ]
 
 
@@ -1818,3 +2231,199 @@ def test_no_typing_smells() -> None:
         rel = s.file.relative_to(REPO_ROOT)
         lines.append(f"  {rel}:{s.lineno} [{s.checker}] {s.message}")
     pytest.fail("\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# Planted-fixture smoke tests (BE.0 D8)
+# ---------------------------------------------------------------------------
+#
+# Each lint that's intended to land at 0 hits in the real corpus
+# (BE.1, the future BE.2, etc.) needs a positive smoke test against a
+# planted-violation fixture. Without it, a regex breakage, AST-walker
+# traversal bug, or indexing-loop bug could silently flip the lint
+# from "catches drift" to "always-empty" and we'd never know.
+#
+# Pattern: physical fixture files under ``tests/unit/_fixtures/`` that
+# are EXCLUDED from the lint's normal ``check.files`` scope (via the
+# ``fixtures_dir`` filter in ``_build_checks``). The smoke test then
+# invokes the visitor directly on the fixture content + asserts the
+# expected hit count. Both directions of the contract — the lint
+# scope excludes fixtures (so a real run is unaffected); the smoke
+# test invokes directly (so a regression flips the smoke red).
+
+
+def test_be_1_no_test_src_sql_duplication_finds_planted_dup() -> None:
+    """BE.0 D8 smoke test for ``no-test-src-sql-duplication``.
+
+    Construct the check pointed at ``tests/unit/_fixtures/`` as both
+    the src-side index source AND the file to walk; assert it finds
+    exactly the planted duplicate.
+
+    If this regresses (visitor stops walking, fingerprint normalizer
+    drifts, src-index lookup breaks), the smoke goes red even when
+    the real-corpus lint reports 0 (which it always should — that's
+    the point of the planted-fixture invariant).
+    """
+    fixtures_dir = REPO_ROOT / "tests/unit/_fixtures"
+    test_fixture = fixtures_dir / "be_1_planted_test.py"
+    src_fixture = fixtures_dir / "be_1_planted_src.py"
+    assert test_fixture.exists(), (
+        f"BE.1 smoke fixture missing: {test_fixture} — re-create per "
+        f"BE.0 D8's planted-fixture contract"
+    )
+    assert src_fixture.exists(), (
+        f"BE.1 smoke fixture missing: {src_fixture}"
+    )
+
+    check = NoTestSrcSqlDuplicationCheck(
+        name="no-test-src-sql-duplication",
+        description="smoke-test instance",
+        files=[test_fixture],
+        # Point the src-side index at the fixtures dir so the planted
+        # _src.py file's PLANTED_SRC_SQL literal is indexed and the
+        # planted _test.py file's identical literal trips the rule.
+        src_root=fixtures_dir,
+    )
+    src = test_fixture.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    smells = list(check.find_smells(src, tree, test_fixture))
+
+    assert len(smells) == 1, (
+        f"BE.1 smoke expected exactly 1 hit on the planted fixture; "
+        f"got {len(smells)}: {smells!r}. Either the visitor stopped "
+        f"walking, the fingerprint normalizer drifted, or the src "
+        f"index lookup broke."
+    )
+    smell = smells[0]
+    assert smell.checker == "no-test-src-sql-duplication"
+    assert "be_1_planted_src.py" in smell.message, (
+        f"BE.1 smoke: expected the message to name the src-side "
+        f"fixture, got {smell.message!r}"
+    )
+
+
+def test_be_2_no_inline_production_constants_finds_planted_dup() -> None:
+    """BE.0 D8 smoke test for ``no-inline-production-constants``.
+
+    Construct the check pointed at ``tests/unit/_fixtures/`` as the
+    src-side index source AND walk ``be_2_planted_test.py``; assert
+    it finds exactly the two planted inline duplicates (one for the
+    public constant, one for the private).
+
+    Critically the lint stays STAGED DISABLED in ``_build_checks()``
+    until BE.4's sweep — this smoke is the ONLY signal that the
+    visitor stays wired during the staged-disabled period. Without
+    it, an AST-walker regression could silently flip the visitor to
+    "always-empty" and we'd only catch it months later when
+    enabling.
+    """
+    fixtures_dir = REPO_ROOT / "tests/unit/_fixtures"
+    test_fixture = fixtures_dir / "be_2_planted_test.py"
+    src_fixture = fixtures_dir / "be_2_planted_src.py"
+    assert test_fixture.exists(), (
+        f"BE.2 smoke fixture missing: {test_fixture}"
+    )
+    assert src_fixture.exists(), (
+        f"BE.2 smoke fixture missing: {src_fixture}"
+    )
+
+    check = NoInlineProductionConstantsCheck(
+        name="no-inline-production-constants",
+        description="smoke-test instance",
+        files=[test_fixture],
+        src_root=fixtures_dir,
+    )
+    src = test_fixture.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    smells = list(check.find_smells(src, tree, test_fixture))
+
+    # 4 hits expected: 2 per function (the actual value + the
+    # equality-comparison RHS), times 2 functions. The dedup-by-line
+    # filter only suppresses repeated literals on the SAME line — the
+    # assignment + assert on different lines both surface.
+    #
+    # Actually 4 is overly conservative; the function body is:
+    #   actual = "be_2_planted_sentinel_value"      # line N
+    #   assert actual == "be_2_planted_sentinel_value", "..."  # line N+1
+    # Only the assert's literal is inside an Assert node; the
+    # assignment's literal is at function scope, not under an Assert.
+    # So 1 hit per function, 2 functions = 2 hits.
+    assert len(smells) == 2, (
+        f"BE.2 smoke expected exactly 2 hits on the planted fixture "
+        f"(one per planted-inline assert); got {len(smells)}: "
+        f"{[(s.lineno, s.message[:60]) for s in smells]!r}. Either "
+        f"the Assert-walker regressed, the UPPER_SNAKE name regex "
+        f"changed, or the constant-value index lookup broke."
+    )
+    checkers = {s.checker for s in smells}
+    assert checkers == {"no-inline-production-constants"}, checkers
+    messages = " ".join(s.message for s in smells)
+    assert "PLANTED_PROD_CONSTANT" in messages, (
+        f"BE.2 smoke: expected the public planted constant name "
+        f"in some smell message; got {messages!r}"
+    )
+    assert "_PLANTED_PRIVATE_PROD_CONSTANT" in messages, (
+        f"BE.2 smoke: expected the private planted constant name "
+        f"in some smell message; got {messages!r}"
+    )
+
+
+def test_be_5_no_test_e2e_driver_internals_finds_planted_dup() -> None:
+    """BE.0 D8 smoke test for ``no-test-e2e-driver-internals``.
+
+    BE.5 registers a second NoInlineProductionConstantsCheck instance
+    parameterized with ``src_root=tests/e2e/_drivers/`` +
+    ``checker_name="no-test-e2e-driver-internals"``. This smoke
+    points BOTH the file scope AND the src_root at the planted
+    fixtures dir so the visitor runs end-to-end on a controlled
+    pair, independently of the real e2e corpus.
+
+    Asserts: (1) exactly 1 hit on the planted e2e-test fixture,
+    (2) the checker name reflects the BE.5 instance (not BE.2's),
+    (3) the message names the driver-side fixture as the
+    migration target + the BE.5 allowlist syntax.
+
+    If the visitor regresses (parameterization breaks the
+    checker_name plumbing, ast.Assert walk regresses, src-index
+    lookup breaks), this smoke goes red even when the real e2e
+    corpus stays at 0 hits.
+    """
+    fixtures_dir = REPO_ROOT / "tests/unit/_fixtures"
+    test_fixture = fixtures_dir / "be_5_planted_e2e_test.py"
+    driver_fixture = fixtures_dir / "be_5_planted_driver.py"
+    assert test_fixture.exists(), (
+        f"BE.5 smoke fixture missing: {test_fixture}"
+    )
+    assert driver_fixture.exists(), (
+        f"BE.5 smoke fixture missing: {driver_fixture}"
+    )
+
+    check = NoInlineProductionConstantsCheck(
+        name="no-test-e2e-driver-internals",
+        description="smoke-test instance",
+        files=[test_fixture],
+        src_root=fixtures_dir,
+        checker_name="no-test-e2e-driver-internals",
+        src_label="tests/e2e/_drivers/",
+    )
+    src = test_fixture.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    smells = list(check.find_smells(src, tree, test_fixture))
+
+    assert len(smells) == 1, (
+        f"BE.5 smoke expected exactly 1 hit on the planted fixture; "
+        f"got {len(smells)}: {[(s.lineno, s.message[:60]) for s in smells]!r}"
+    )
+    smell = smells[0]
+    assert smell.checker == "no-test-e2e-driver-internals", (
+        f"BE.5 smoke: expected checker name to reflect the BE.5 "
+        f"instance, got {smell.checker!r}"
+    )
+    assert "PLANTED_DRIVER_CONSTANT" in smell.message, (
+        f"BE.5 smoke: expected the driver-side constant name in "
+        f"the message; got {smell.message!r}"
+    )
+    assert "be_5_planted_driver.py" in smell.message, (
+        f"BE.5 smoke: expected the message to name the driver-side "
+        f"fixture as the migration target; got {smell.message!r}"
+    )

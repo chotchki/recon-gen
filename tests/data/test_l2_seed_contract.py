@@ -40,12 +40,12 @@ Contracts asserted here:
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import secrets
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -106,7 +106,7 @@ def _fuzz_yaml_path() -> Path:
     return p
 
 
-def _write_temp(text: str) -> Path:
+def _write_temp(text: str) -> Path:  # pyright: ignore[reportUnusedFunction]: helper kept for ad-hoc triage / re-seeding from fuzz dump
     """Write to a sibling tmp file just for the pre-lock load."""
     tmp = _FUZZ_DUMP_DIR / f"_tmp_seed_{FUZZ_SEED}_pid_{os.getpid()}.yaml"
     tmp.write_text(text)
@@ -133,8 +133,8 @@ L2_INSTANCES = [
 
 
 @pytest.fixture(params=L2_INSTANCES)
-def l2_yaml(request) -> Path:
-    return request.param
+def l2_yaml(request: pytest.FixtureRequest) -> Path:
+    return Path(request.param)
 
 
 @pytest.fixture
@@ -163,10 +163,10 @@ def auto_seed_sql(instance: L2Instance, db_prefix: str) -> str:
 
 
 @pytest.fixture(autouse=True, scope="session")
-def _announce_fuzz_seed(request) -> None:
+def _announce_fuzz_seed(request: pytest.FixtureRequest) -> None:  # pyright: ignore[reportUnusedFunction]: pytest autouse fixture — invoked by name, not directly accessed
     """Print the fuzz seed at session start so passing runs surface it,
     and the matrix's `fuzz-seed-N` test id matches the printed seed."""
-    reporter = request.config.pluginmanager.get_plugin("terminalreporter")
+    reporter: Any = request.config.pluginmanager.get_plugin("terminalreporter")
     if reporter is not None:
         override = "RECON_GEN_FUZZ_SEED" in os.environ
         suffix = " (from RECON_GEN_FUZZ_SEED)" if override else " (random; pin via RECON_GEN_FUZZ_SEED=N)"
@@ -217,7 +217,7 @@ def _columns_in_insert(sql: str, table: str) -> list[str]:
     return []
 
 
-def _value_rows(sql: str) -> list[list[str]]:
+def _value_rows(sql: str) -> list[list[str]]:  # pyright: ignore[reportUnusedFunction]: helper kept for ad-hoc SQL VALUES extraction in triage
     """Pull each VALUES row as a list of textual literals.
 
     Lightweight — splits on ``,`` outside quotes. Good enough for
@@ -259,7 +259,7 @@ def _split_csv_quoted(line: str) -> list[str]:
     return parts
 
 
-def _quoted_strings(text: str) -> set[str]:
+def _quoted_strings(text: str) -> set[str]:  # pyright: ignore[reportUnusedFunction]: helper kept for ad-hoc SQL string-literal scan in triage
     """All single-quoted string literals in the input."""
     return set(re.findall(r"'((?:[^']|'')*)'", text))
 
@@ -324,7 +324,7 @@ def _columns_documented_for(table_suffix: str) -> set[str]:
 
 
 def test_auto_seed_is_byte_deterministic(
-    instance, db_prefix, auto_seed_sql,
+    instance: L2Instance, db_prefix: str, auto_seed_sql: str,
 ) -> None:
     """Two emit_seed runs with the same instance + canonical today =
     byte-identical output. The YAML's seed_hash assumes this."""
@@ -357,7 +357,7 @@ def test_seed_account_roles_resolve_to_instance(
     role_idx_db = db_cols.index("account_role") if "account_role" in db_cols else None
 
     seen_roles: set[str] = set()
-    in_txn = "INSERT INTO " in auto_seed_sql.split("VALUES")[0]
+    _in_txn = "INSERT INTO " in auto_seed_sql.split("VALUES")[0]
     # Walk the rows: parse out the `account_role` column from each.
     # We find INSERT chunks and process them in order.
     chunks = re.split(r"INSERT INTO \w+_(\w+) \([^)]+\) VALUES\n", auto_seed_sql)

@@ -37,6 +37,7 @@ from recon_gen.common.l2.seed import (
     ScenarioPlant,
     SupersessionPlant,
 )
+from recon_gen.common.l2.primitives import Identifier, L2Instance
 from recon_gen.common.spine import (
     DriftGenerator,
     InvFanoutGenerator,
@@ -55,7 +56,7 @@ _SPEC_EXAMPLE = (
 )
 
 
-def _load_instance() -> object:
+def _load_instance() -> L2Instance:
     return load_instance(_SPEC_EXAMPLE)
 
 
@@ -70,7 +71,7 @@ def test_empty_scenario_returns_empty_tuple() -> None:
     inst = _load_instance()
     gens = scenario_to_generators(
         ScenarioPlant(template_instances=(), today=date(2030, 1, 1)),
-        inst,  # type: ignore[arg-type]: load_instance returns L2Instance at runtime
+        inst,
     )
     assert gens == ()
 
@@ -81,7 +82,7 @@ def test_drift_plant_dispatches_to_drift_generator() -> None:
     inst = _load_instance()
     # Pick the first CustomerSubledger account on spec_example.
     cust = next(
-        a for a in inst.accounts  # type: ignore[attr-defined]: dynamic L2 attr access at test seam
+        a for a in inst.accounts
         if str(a.role) == "CustomerSubledger" and str(a.scope) == "internal"
         and a.parent_role is not None
     )
@@ -89,15 +90,15 @@ def test_drift_plant_dispatches_to_drift_generator() -> None:
         account_id=cust.id,
         days_ago=1,
         delta_money=Decimal("5.0"),
-        rail_name="ExternalRailInbound",  # type: ignore[arg-type]: Identifier accepts str at runtime
-        counter_account_id="ext-counter",  # type: ignore[arg-type]: Identifier str compat at test seam
+        rail_name=Identifier("ExternalRailInbound"),
+        counter_account_id=Identifier("ext-counter"),
     )
     scenarios = ScenarioPlant(
         template_instances=(),
         drift_plants=(plant,),
         today=date(2030, 1, 1),
     )
-    gens = scenario_to_generators(scenarios, inst)  # type: ignore[arg-type]: Identifier str compat at test seam
+    gens = scenario_to_generators(scenarios, inst)
     assert len(gens) == 1
     assert isinstance(gens[0], DriftGenerator)
     # account_id override threaded through.
@@ -107,7 +108,7 @@ def test_drift_plant_dispatches_to_drift_generator() -> None:
 def test_overdraft_plant_dispatches_to_overdraft_generator() -> None:
     inst = _load_instance()
     cust = next(
-        a for a in inst.accounts  # type: ignore[attr-defined]: dynamic L2 attr access at test seam
+        a for a in inst.accounts
         if str(a.role) == "CustomerSubledger" and str(a.scope) == "internal"
     )
     plant = OverdraftPlant(
@@ -120,7 +121,7 @@ def test_overdraft_plant_dispatches_to_overdraft_generator() -> None:
         overdraft_plants=(plant,),
         today=date(2030, 1, 1),
     )
-    gens = scenario_to_generators(scenarios, inst)  # type: ignore[arg-type]: Identifier str compat at test seam
+    gens = scenario_to_generators(scenarios, inst)
     assert len(gens) == 1
     assert isinstance(gens[0], OverdraftGenerator)
     assert gens[0].account_id == str(cust.id)
@@ -132,10 +133,10 @@ def test_inv_fanout_plant_dispatches_to_inv_fanout_generator() -> None:
     the right fields."""
     inst = _load_instance()
     plant = InvFanoutPlant(
-        recipient_account_id="acct-r",  # type: ignore[arg-type]: Identifier str compat at test seam
-        sender_account_ids=("s-1", "s-2", "s-3"),  # type: ignore[arg-type]: Identifier str compat at test seam
+        recipient_account_id=Identifier("acct-r"),
+        sender_account_ids=(Identifier("s-1"), Identifier("s-2"), Identifier("s-3")),
         days_ago=3,
-        rail_name="ach",  # type: ignore[arg-type]: Identifier str compat at test seam
+        rail_name=Identifier("ach"),
         amount_per_transfer=Decimal("100.0"),
     )
     scenarios = ScenarioPlant(
@@ -143,7 +144,7 @@ def test_inv_fanout_plant_dispatches_to_inv_fanout_generator() -> None:
         inv_fanout_plants=(plant,),
         today=date(2030, 1, 1),
     )
-    gens = scenario_to_generators(scenarios, inst)  # type: ignore[arg-type]: Identifier str compat at test seam
+    gens = scenario_to_generators(scenarios, inst)
     assert len(gens) == 1
     g = gens[0]
     assert isinstance(g, InvFanoutGenerator)
@@ -157,13 +158,13 @@ def test_supersession_plant_dispatches_to_supersession_generator() -> None:
     from the L2 instance, threads through to the generator."""
     inst = _load_instance()
     cust = next(
-        a for a in inst.accounts  # type: ignore[attr-defined]: dynamic L2 attr access at test seam
+        a for a in inst.accounts
         if str(a.role) == "CustomerSubledger" and str(a.scope) == "internal"
     )
     plant = SupersessionPlant(
         account_id=cust.id,
         days_ago=1,
-        rail_name="SubledgerCharge",  # type: ignore[arg-type]: Identifier str compat at test seam
+        rail_name=Identifier("SubledgerCharge"),
         original_amount=Decimal("250.0"),
         corrected_amount=Decimal("200.0"),
     )
@@ -172,7 +173,7 @@ def test_supersession_plant_dispatches_to_supersession_generator() -> None:
         supersession_plants=(plant,),
         today=date(2030, 1, 1),
     )
-    gens = scenario_to_generators(scenarios, inst)  # type: ignore[arg-type]: Identifier str compat at test seam
+    gens = scenario_to_generators(scenarios, inst)
     assert len(gens) == 1
     g = gens[0]
     assert isinstance(g, SupersessionGenerator)
@@ -194,7 +195,7 @@ def test_n_drift_plants_produce_n_distinct_generators() -> None:
     inst = _load_instance()
     # Pick 2 distinct CustomerSubledger leaf accounts.
     cust_accounts = [
-        a for a in inst.accounts  # type: ignore[attr-defined]: dynamic L2 attr access at test seam
+        a for a in inst.accounts
         if str(a.role) == "CustomerSubledger" and str(a.scope) == "internal"
         and a.parent_role is not None
     ][:2]
@@ -207,8 +208,8 @@ def test_n_drift_plants_produce_n_distinct_generators() -> None:
             account_id=a.id,
             days_ago=1,
             delta_money=Decimal("5.0"),  # same delta for both plants
-            rail_name="ExternalRailInbound",  # type: ignore[arg-type]: Identifier str compat at test seam
-            counter_account_id="ext-counter",  # type: ignore[arg-type]: Identifier str compat at test seam
+            rail_name=Identifier("ExternalRailInbound"),
+            counter_account_id=Identifier("ext-counter"),
         )
         for a in cust_accounts
     )
@@ -217,11 +218,15 @@ def test_n_drift_plants_produce_n_distinct_generators() -> None:
         drift_plants=plants,
         today=date(2030, 1, 1),
     )
-    gens = scenario_to_generators(scenarios, inst)  # type: ignore[arg-type]: Identifier str compat at test seam
+    gens = scenario_to_generators(scenarios, inst)
     assert len(gens) == 2
     # Distinct account_ids on the resulting generators — no collision.
+    # ``child_account_id`` is on DriftGenerator only; the generator union
+    # is broader, so narrow before reading the attribute.
+    drift_gens = [g for g in gens if isinstance(g, DriftGenerator)]
+    assert len(drift_gens) == 2
     assert (
-        {g.child_account_id for g in gens}  # type: ignore[attr-defined]: dynamic L2 attr access at test seam
+        {g.child_account_id for g in drift_gens}
         == {str(a.id) for a in cust_accounts}
     )
 
@@ -248,11 +253,11 @@ def test_default_scenario_full_corpus_adapts_without_error() -> None:
     """
     inst = _load_instance()
     scenario_bundle = default_scenario_for(
-        inst,  # type: ignore[arg-type]: Identifier str compat at test seam
+        inst,
         today=date(2030, 1, 1),
     )
     gens = scenario_to_generators(
-        scenario_bundle.scenario, inst,  # type: ignore[arg-type]: Identifier str compat at test seam
+        scenario_bundle.scenario, inst,
     )
     assert len(gens) > 0, (
         "default_scenario_for(spec_example) produces a non-empty "
@@ -312,14 +317,14 @@ def test_default_scenario_full_corpus_composes_via_dry_run() -> None:
     """
     inst = _load_instance()
     scenario_bundle = default_scenario_for(
-        inst, today=date(2030, 1, 1),  # type: ignore[arg-type]: Identifier str compat at test seam
+        inst, today=date(2030, 1, 1),
     )
     gens = scenario_to_generators(
-        scenario_bundle.scenario, inst,  # type: ignore[arg-type]: Identifier str compat at test seam
+        scenario_bundle.scenario, inst,
     )
     cap = dry_run_capture(Dialect.SQLITE)
     ctx = ScenarioContext(scenario_id="ay4c4-smoke", prefix="spec_example")
-    captured = ctx.compose(cap, *gens, dry_run=True)
+    captured = ctx.compose(cap, *gens, dry_run=True)  # pyright: ignore[reportArgumentType]: ``cap`` is _DryRunBase (duck-typed Connection for dry-run); ViolationGenerator narrows to ClaimedAccountsGenerator Protocol at runtime — same seam as tests/e2e/_seed_helpers.py
     assert captured is not None
     assert len(captured) > 0
     sql = render_captured_sql(captured, dialect=Dialect.SQLITE)
@@ -336,7 +341,7 @@ def test_focused_single_plant_round_trips_through_compose_render() -> None:
     """
     inst = _load_instance()
     cust = next(
-        a for a in inst.accounts  # type: ignore[attr-defined]: dynamic L2 attr access at test seam
+        a for a in inst.accounts
         if str(a.role) == "CustomerSubledger" and str(a.scope) == "internal"
         and a.parent_role is not None
     )
@@ -344,18 +349,18 @@ def test_focused_single_plant_round_trips_through_compose_render() -> None:
         account_id=cust.id,
         days_ago=1,
         delta_money=Decimal("5.0"),
-        rail_name="ExternalRailInbound",  # type: ignore[arg-type]: Identifier str compat at test seam
-        counter_account_id="ext-counter",  # type: ignore[arg-type]: Identifier str compat at test seam
+        rail_name=Identifier("ExternalRailInbound"),
+        counter_account_id=Identifier("ext-counter"),
     )
     scenarios = ScenarioPlant(
         template_instances=(),
         drift_plants=(plant,),
         today=date(2030, 1, 1),
     )
-    gens = scenario_to_generators(scenarios, inst)  # type: ignore[arg-type]: Identifier str compat at test seam
+    gens = scenario_to_generators(scenarios, inst)
     cap = dry_run_capture(Dialect.SQLITE)
     ctx = ScenarioContext(scenario_id="ay4c3-smoke", prefix="spec_example")
-    captured = ctx.compose(cap, *gens, dry_run=True)
+    captured = ctx.compose(cap, *gens, dry_run=True)  # pyright: ignore[reportArgumentType]: ``cap`` is _DryRunBase (duck-typed Connection for dry-run); ViolationGenerator narrows to ClaimedAccountsGenerator Protocol at runtime — same seam as tests/e2e/_seed_helpers.py
     assert captured is not None
     assert len(captured) > 0
     sql = render_captured_sql(captured, dialect=Dialect.SQLITE)
@@ -375,11 +380,11 @@ def test_unknown_account_id_raises_loudly() -> None:
     construction that fails later at compose-time."""
     inst = _load_instance()
     plant = DriftPlant(
-        account_id="acct-does-not-exist",  # type: ignore[arg-type]: Identifier str compat at test seam
+        account_id=Identifier("acct-does-not-exist"),
         days_ago=1,
         delta_money=Decimal("5.0"),
-        rail_name="ExternalRailInbound",  # type: ignore[arg-type]: Identifier str compat at test seam
-        counter_account_id="ext-counter",  # type: ignore[arg-type]: Identifier str compat at test seam
+        rail_name=Identifier("ExternalRailInbound"),
+        counter_account_id=Identifier("ext-counter"),
     )
     scenarios = ScenarioPlant(
         template_instances=(),
@@ -387,4 +392,4 @@ def test_unknown_account_id_raises_loudly() -> None:
         today=date(2030, 1, 1),
     )
     with pytest.raises(ValueError, match="not declared on the L2"):
-        scenario_to_generators(scenarios, inst)  # type: ignore[arg-type]: Identifier str compat at test seam
+        scenario_to_generators(scenarios, inst)

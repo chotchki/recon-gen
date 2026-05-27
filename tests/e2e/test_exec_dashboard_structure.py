@@ -1,3 +1,4 @@
+# pyright: reportTypedDictNotRequiredAccess=false
 """API tests: validate the deployed Executives dashboard definition.
 
 Four sheets: Getting Started + Account Coverage + Transaction Volume
@@ -9,14 +10,27 @@ load-bearing — without it both visuals would count every account
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, cast
+
 import pytest
 
+if TYPE_CHECKING:
+    from mypy_boto3_quicksight.client import QuickSightClient
+    from mypy_boto3_quicksight.type_defs import (
+        DashboardVersionDefinitionOutputTypeDef,
+    )
 
+
+    from recon_gen.common.tree import App
 pytestmark = [pytest.mark.e2e, pytest.mark.api]
 
 
 @pytest.fixture(scope="module")
-def exec_dashboard_definition(qs_client, account_id, exec_dashboard_id) -> dict:
+def exec_dashboard_definition(
+    qs_client: "QuickSightClient",
+    account_id: str,
+    exec_dashboard_id: str,
+) -> "DashboardVersionDefinitionOutputTypeDef":
     resp = qs_client.describe_dashboard_definition(
         AwsAccountId=account_id,
         DashboardId=exec_dashboard_id,
@@ -24,12 +38,13 @@ def exec_dashboard_definition(qs_client, account_id, exec_dashboard_id) -> dict:
     return resp["Definition"]
 
 
-def _visual_ids(sheet: dict) -> list[str]:
+def _visual_ids(sheet: dict[str, Any]) -> list[str]:
     out: list[str] = []
-    for v in sheet.get("Visuals", []):
+    for v in cast("list[dict[str, Any]]", sheet.get("Visuals", [])):
         for vtype in v.values():
             if isinstance(vtype, dict) and "VisualId" in vtype:
-                out.append(vtype["VisualId"])
+                vt = cast("dict[str, Any]", vtype)
+                out.append(str(vt["VisualId"]))
     return out
 
 
@@ -42,14 +57,23 @@ class TestSheets:
         "Info",  # M.4.4.5 — App Info canary, always last
     ]
 
-    def test_has_five_sheets(self, exec_dashboard_definition):
+    def test_has_five_sheets(
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         assert len(exec_dashboard_definition["Sheets"]) == 5
 
-    def test_sheet_order(self, exec_dashboard_definition):
+    def test_sheet_order(
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         names = [s["Name"] for s in exec_dashboard_definition["Sheets"]]
         assert names == self.EXPECTED_NAMES
 
-    def test_every_sheet_has_description(self, exec_dashboard_definition):
+    def test_every_sheet_has_description(
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         for sheet in exec_dashboard_definition["Sheets"]:
             desc = sheet.get("Description", "")
             assert len(desc) > 20, (
@@ -68,7 +92,10 @@ class TestVisuals:
         "Money Moved": 4,                  # 2 KPIs + daily bar + per-type bar
     }
 
-    def test_visual_counts_per_sheet(self, exec_dashboard_definition):
+    def test_visual_counts_per_sheet(
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         for sheet in exec_dashboard_definition["Sheets"]:
             name = sheet["Name"]
             expected = self.EXPECTED_VISUAL_COUNTS.get(name)
@@ -79,56 +106,70 @@ class TestVisuals:
                 f"Sheet '{name}' has {actual} visuals, expected {expected}"
             )
 
-    def test_all_visual_ids_unique(self, exec_dashboard_definition):
+    def test_all_visual_ids_unique(
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         all_ids: list[str] = []
         for sheet in exec_dashboard_definition["Sheets"]:
-            all_ids.extend(_visual_ids(sheet))
+            all_ids.extend(_visual_ids(cast("dict[str, Any]", sheet)))
         assert len(all_ids) == len(set(all_ids)), (
             f"Duplicate visual IDs: "
             f"{[vid for vid in all_ids if all_ids.count(vid) > 1]}"
         )
 
-    def test_every_visual_has_subtitle(self, exec_dashboard_definition):
+    def test_every_visual_has_subtitle(
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         for sheet in exec_dashboard_definition["Sheets"]:
-            for v in sheet.get("Visuals", []):
+            for v in cast("list[dict[str, Any]]", sheet.get("Visuals", [])):
                 for vtype in v.values():
                     if not (isinstance(vtype, dict) and "VisualId" in vtype):
                         continue
-                    text = (
-                        vtype.get("Subtitle", {})
-                             .get("FormatText", {})
-                             .get("PlainText", "")
-                    )
+                    vt = cast("dict[str, Any]", vtype)
+                    subtitle_dict = cast("dict[str, Any]", vt.get("Subtitle", {}))
+                    fmt_dict = cast("dict[str, Any]", subtitle_dict.get("FormatText", {}))
+                    text = str(fmt_dict.get("PlainText", ""))
                     assert len(text) > 10, (
-                        f"Visual '{vtype['VisualId']}' missing subtitle"
+                        f"Visual '{vt['VisualId']}' missing subtitle"
                     )
 
 
 class TestParameters:
-    def _names(self, definition: dict) -> set[str]:
+    def _names(self, definition: dict[str, Any]) -> set[str]:
         names: set[str] = set()
-        for p in definition.get("ParameterDeclarations", []):
+        for p in cast("list[dict[str, Any]]", definition.get("ParameterDeclarations", [])):
             for decl in p.values():
                 if isinstance(decl, dict) and "Name" in decl:
-                    names.add(decl["Name"])
+                    d = cast("dict[str, Any]", decl)
+                    names.add(str(d["Name"]))
         return names
 
     def test_all_parameters_declared(
-        self, exec_dashboard_definition, exec_app,
-    ):
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+        exec_app: "App",
+    ) -> None:
         # Executives has no parameters today — no cross-app drills
         # (L.6.7 dropped per QS URL parameter sync defect), no UI
         # parameter controls. The tree-walked set is the source of
         # truth; if a param ever gets added, this catches the
         # deploy-side miss.
+        assert exec_app.analysis is not None
         expected = {str(p.name) for p in exec_app.analysis.parameters}
-        assert self._names(exec_dashboard_definition) == expected
+        assert self._names(cast("dict[str, Any]", exec_dashboard_definition)) == expected
 
 
 class TestFilterGroups:
-    def test_filter_group_ids(self, exec_dashboard_definition, exec_app):
+    def test_filter_group_ids(
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+        exec_app: "App",
+    ) -> None:
         groups = exec_dashboard_definition.get("FilterGroups", [])
         deployed = {g["FilterGroupId"] for g in groups}
+        assert exec_app.analysis is not None
         expected = {
             str(fg.filter_group_id)
             for fg in exec_app.analysis.filter_groups
@@ -136,7 +177,8 @@ class TestFilterGroups:
         assert deployed == expected
 
     def test_active_only_filter_dropped_after_y2h(
-        self, exec_dashboard_definition,
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
     ):
         """Y.2.h — `fg-exec-account-active-only` is gone. The
         `activity_count >= 1` narrowing now lives in the
@@ -154,7 +196,10 @@ class TestFilterGroups:
             "dataset split"
         )
 
-    def test_filter_group_ids_unique(self, exec_dashboard_definition):
+    def test_filter_group_ids_unique(
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+    ) -> None:
         groups = exec_dashboard_definition.get("FilterGroups", [])
         ids = [g["FilterGroupId"] for g in groups]
         assert len(ids) == len(set(ids))
@@ -162,8 +207,10 @@ class TestFilterGroups:
 
 class TestDatasetDeclarations:
     def test_all_datasets_declared(
-        self, exec_dashboard_definition, exec_dataset_ids,
-    ):
+        self,
+        exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
+        exec_dataset_ids: list[str],
+    ) -> None:
         decls = exec_dashboard_definition["DataSetIdentifierDeclarations"]
         declared_ds_ids = {d["DataSetArn"].split("/")[-1] for d in decls}
         for ds_id in exec_dataset_ids:

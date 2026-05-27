@@ -29,12 +29,12 @@ from recon_gen.common.l2.editor import (
 )
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import (
-    Account,
+    Account as Account,
     ChainChildSpec,
     Identifier,
     L2Instance,
-    Rail,
-    TransferTemplate,
+    Rail as Rail,
+    TransferTemplate as TransferTemplate,
 )
 from recon_gen.common.l2.validate import (
     L2ValidationError,
@@ -467,13 +467,13 @@ def test_rename_role_walks_account_role_plus_every_reference(
     # of every rail flipped.
     for r in new_inst.rails:
         if hasattr(r, "source_role"):
-            for role in r.source_role:
+            for role in getattr(r, "source_role"):
                 assert role != Identifier("CustomerSubledger")
         if hasattr(r, "destination_role"):
-            for role in r.destination_role:
+            for role in getattr(r, "destination_role"):
                 assert role != Identifier("CustomerSubledger")
         if hasattr(r, "leg_role"):
-            for role in r.leg_role:
+            for role in getattr(r, "leg_role"):
                 assert role != Identifier("CustomerSubledger")
 
     # And the model still validates (rename is a clean cascade — every

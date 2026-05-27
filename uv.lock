@@ -122,6 +122,12 @@ quicksight = [
 rds = [
     { name = "mypy-boto3-rds" },
 ]
+s3 = [
+    { name = "mypy-boto3-s3" },
+]
+sts = [
+    { name = "mypy-boto3-sts" },
+]
 
 [[package]]
 name = "botocore"
@@ -1033,6 +1039,24 @@ wheels = [
 ]
 
 [[package]]
+name = "mypy-boto3-s3"
+version = "1.43.14"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/04/2c/fc409f9ff5904a02cf4c2c1518c34d20cb56f22b2368b35fd0adda2926f3/mypy_boto3_s3-1.43.14.tar.gz", hash = "sha256:73d54c1d0999c73c403dc9a9a3da4a9722715aba116595af08c0d4675f8bc670", size = 77078, upload-time = "2026-05-22T20:48:28.251Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/61/e8e74a3f4c729719efc8b1d00179bc16c302202eac32a1b56a842a997ed2/mypy_boto3_s3-1.43.14-py3-none-any.whl", hash = "sha256:ce77096d6c5f90020c45e34c83d2268ca2bb17726149ce5033751870f7fb4e97", size = 84277, upload-time = "2026-05-22T20:48:25.032Z" },
+]
+
+[[package]]
+name = "mypy-boto3-sts"
+version = "1.43.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/af/fd/74a557327cc0a5f6cecb9671ab983bc186bcabb9ae95372c467f4fd32669/mypy_boto3_sts-1.43.0.tar.gz", hash = "sha256:7c38cffd0f07ff226d0b8016610bf5fa19bd6fa2a75a04cfdeecba2cabea8a4c", size = 16808, upload-time = "2026-04-29T23:06:35.018Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/61/1e/0a49da78a63c4ae8b315bb786364d0262578b70273aa42f82609136be3ec/mypy_boto3_sts-1.43.0-py3-none-any.whl", hash = "sha256:a7523d0a5c67af3ff814eaa93458087fcf6d389402c50f4bd3c1e82a5ebdd94a", size = 20845, upload-time = "2026-04-29T23:06:32.539Z" },
+]
+
+[[package]]
 name = "nh3"
 version = "0.3.5"
 source = { registry = "https://pypi.org/simple" }
@@ -1607,7 +1631,7 @@ deploy = [
 dev = [
     { name = "aiosqlite" },
     { name = "boto3" },
-    { name = "boto3-stubs", extra = ["quicksight", "rds"] },
+    { name = "boto3-stubs", extra = ["quicksight", "rds", "s3", "sts"] },
     { name = "botocore", extra = ["crt"] },
     { name = "build" },
     { name = "httpx" },
@@ -1671,7 +1695,7 @@ requires-dist = [
     { name = "boto3", marker = "extra == 'deploy'", specifier = ">=1.34" },
     { name = "boto3", marker = "extra == 'dev'", specifier = ">=1.34" },
     { name = "boto3", marker = "extra == 'e2e'", specifier = ">=1.34" },
-    { name = "boto3-stubs", extras = ["quicksight", "rds"], marker = "extra == 'dev'", specifier = ">=1.34" },
+    { name = "boto3-stubs", extras = ["quicksight", "rds", "s3", "sts"], marker = "extra == 'dev'", specifier = ">=1.34" },
     { name = "botocore", extras = ["crt"], marker = "extra == 'deploy'", specifier = ">=1.34" },
     { name = "botocore", extras = ["crt"], marker = "extra == 'dev'", specifier = ">=1.34" },
     { name = "botocore", extras = ["crt"], marker = "extra == 'e2e'", specifier = ">=1.34" },
@@ -1712,9 +1736,9 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "reportlab", marker = "extra == 'audit'", specifier = ">=4.0" },
     { name = "reportlab", marker = "extra == 'dev'", specifier = ">=4.0" },
-    { name = "starlette", marker = "extra == 'dev'", specifier = ">=0.40" },
-    { name = "starlette", marker = "extra == 'e2e'", specifier = ">=0.40" },
-    { name = "starlette", marker = "extra == 'serve'", specifier = ">=0.40" },
+    { name = "starlette", marker = "extra == 'dev'", specifier = ">=1.1.0" },
+    { name = "starlette", marker = "extra == 'e2e'", specifier = ">=1.1.0" },
+    { name = "starlette", marker = "extra == 'serve'", specifier = ">=1.1.0" },
     { name = "testcontainers", extras = ["oracle", "postgres"], marker = "extra == 'dev'", specifier = ">=3.7" },
     { name = "twine", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'dev'", specifier = ">=0.30" },
@@ -1863,14 +1887,14 @@ wheels = [
 
 [[package]]
 name = "starlette"
-version = "1.0.0"
+version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/81/69/17425771797c36cded50b7fe44e850315d039f28b15901ab44839e70b593/starlette-1.0.0.tar.gz", hash = "sha256:6a4beaf1f81bb472fd19ea9b918b50dc3a77a6f2e190a12954b25e6ed5eea149", size = 2655289, upload-time = "2026-03-22T18:29:46.779Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/95/66/4d20cdf39a8d6a51e663b7038e3b828ff211d3891a43a713fe7e4643f3a8/starlette-1.1.0.tar.gz", hash = "sha256:e83c7fe0ddecd8719c5b840080325aec0260acec86e9832899e377b91d65e90f", size = 2660060, upload-time = "2026-05-23T16:55:41.376Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0b/c9/584bc9651441b4ba60cc4d557d8a547b5aff901af35bda3a4ee30c819b82/starlette-1.0.0-py3-none-any.whl", hash = "sha256:d3ec55e0bb321692d275455ddfd3df75fff145d009685eb40dc91fc66b03d38b", size = 72651, upload-time = "2026-03-22T18:29:45.111Z" },
+    { url = "https://files.pythonhosted.org/packages/93/79/920b8e0a8b20f793e8d64855095cb8febabf6175b8550b6f7a547d813891/starlette-1.1.0-py3-none-any.whl", hash = "sha256:7f0dfd38e428aad5cb6f9f667f0ca1d2d8ca3f3385dccac8305f79ec98458382", size = 72899, upload-time = "2026-05-23T16:55:39.201Z" },
 ]
 
 [[package]]

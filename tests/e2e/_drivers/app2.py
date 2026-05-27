@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import contextlib
 import re
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -102,7 +102,7 @@ class App2Driver:
 
     @classmethod
     @contextlib.contextmanager
-    def smoke(cls, cfg: Config | None = None) -> Iterator["App2Driver"]:
+    def smoke(cls, cfg: Config | None = None) -> Generator["App2Driver", None, None]:
         """Spin a local App 2 server serving the smoke app + the stub
         fetcher + ``SMOKE_FILTER_SPECS``, open a WebKit page, yield the
         driver, tear both down."""
@@ -125,12 +125,12 @@ class App2Driver:
         tree_app: App,
         sheet: Sheet,
         data_fetcher: DataFetcher,
-        dashboard_id: str = "harness",
+        dashboard_id: str = "harness",  # typing-smell: ignore[bare-str-id]: dashboard_id comes from callers as raw analyst string
         dashboard_title: str = "Harness",
         filter_specs: Sequence[FilterSpec] = (),
         options_fetcher: OptionsFetcher | None = None,
         dev_log: bool = False,
-    ) -> Iterator["App2Driver"]:
+    ) -> Generator["App2Driver", None, None]:
         """Spin a local App 2 server serving any tree + fetcher and yield
         a driver pointed at it.
 

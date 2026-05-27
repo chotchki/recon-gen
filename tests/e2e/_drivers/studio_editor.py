@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import yaml
 
@@ -277,6 +277,16 @@ class _BaseStudioEditorDriver:
         description: str | None,
         role_business_day_offsets: dict[str, int] | None,
     ) -> None:
+        raise NotImplementedError
+
+    def _edit(
+        self, kind: EntityKind, entity_id: str, data: FormData,
+    ) -> None:
+        """Transport-specific PUT to ``/l2_shape/<kind>/<entity_id>``.
+        Base raises; concrete transports override. The base method is
+        declared here so ``create_l2``'s post-create reorder/edit pass
+        type-checks against the base type rather than only the
+        concrete subclass."""
         raise NotImplementedError
 
     def create_l2(self, reference: L2Instance) -> None:
@@ -545,7 +555,7 @@ def _find_reconciler_in_reference(
     )
 
 
-def _strip_rail_lists(reconciler: object, reconciler_kind: str) -> object:
+def _strip_rail_lists(reconciler: Any, reconciler_kind: str) -> Any:
     """BB.3 — strip the rail-list field (leg_rails for TTs;
     bundles_activity for aggregating Rails) on the reconciler entity
     being passed to the server's create-new path.
@@ -662,12 +672,19 @@ def _topo_accounts_by_parent(
 
 
 @runtime_checkable
+class _HttpResponse(Protocol):
+    """Minimal response surface for the in-process / httpx clients."""
+    status_code: int
+    text: str
+
+
+@runtime_checkable
 class _HttpClient(Protocol):
     """Minimal client surface shared by Starlette ``TestClient`` (in-
     process) and ``httpx.Client`` (real server)."""
 
-    def post(self, url: str, *, data: object, follow_redirects: bool): ...  # noqa: ANN201
-    def put(self, url: str, *, data: object, follow_redirects: bool): ...  # noqa: ANN201
+    def post(self, url: str, *, data: object, follow_redirects: bool) -> _HttpResponse: ...
+    def put(self, url: str, *, data: object, follow_redirects: bool) -> _HttpResponse: ...
 
 
 class StudioHttpEditorDriver(_BaseStudioEditorDriver):

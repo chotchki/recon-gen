@@ -15,7 +15,7 @@ that param, not a failure.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Generator
 
 import pytest
 
@@ -32,7 +32,7 @@ __all__ = [
 
 
 @contextlib.contextmanager
-def skips_if_unsupported() -> Iterator[None]:
+def skips_if_unsupported() -> Generator[None, None, None]:
     """Run the body; convert a driver verb's ``NotImplementedError`` into
     a ``pytest.skip`` carrying that verb's message.
 

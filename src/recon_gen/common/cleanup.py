@@ -9,8 +9,9 @@ confirmation) deletes them.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
-from typing import Iterable
+from typing import TYPE_CHECKING
 
 import boto3
 import click
@@ -18,13 +19,18 @@ from botocore.exceptions import ClientError
 
 from recon_gen.common.config import Config
 
+if TYPE_CHECKING:
+    from mypy_boto3_quicksight.client import QuickSightClient
+
 
 MANAGED_TAG_KEY = "ManagedBy"
 MANAGED_TAG_VALUE = "recon-gen"
 DEPLOYMENT_TAG_KEY = "Deployment"
 
 
-def _read_managed_tags(client, resource_arn: str) -> dict[str, str] | None:
+def _read_managed_tags(
+    client: QuickSightClient, resource_arn: str,
+) -> dict[str, str] | None:
     """Return the resource's tag map IF it carries ``ManagedBy: recon-gen``.
 
     Returns None if the resource is not ours (or we can't read its tags).
@@ -36,12 +42,10 @@ def _read_managed_tags(client, resource_arn: str) -> dict[str, str] | None:
         resp = client.list_tags_for_resource(ResourceArn=resource_arn)
     except ClientError:
         return None
-    tag_map: dict[str, str] = {}
-    for tag in resp.get("Tags", []):
-        key = tag.get("Key")
-        value = tag.get("Value")
-        if isinstance(key, str) and isinstance(value, str):
-            tag_map[key] = value
+    # BF.1.S2: boto3-stubs declares Tag.Key + Tag.Value as required `str`;
+    # the previous `isinstance(str)` guard was defensive code from the
+    # pre-stub days.
+    tag_map: dict[str, str] = {tag["Key"]: tag["Value"] for tag in resp.get("Tags", [])}
     if tag_map.get(MANAGED_TAG_KEY) != MANAGED_TAG_VALUE:
         return None
     return tag_map
@@ -85,45 +89,77 @@ def _expected_ids_from_out(out_dir: Path, cfg: Config) -> dict[str, set[str]]:
     return expected
 
 
-def _iter_dashboards(client, account_id: str) -> Iterable[tuple[str, str]]:
+# BF.1.S2: boto3-stubs marks ``<Resource>Id`` + ``Arn`` NotRequired on
+# every Summary TypedDict, even though AWS always populates them on
+# list responses in practice. Skip summaries where either key is
+# missing — surfaces a malformed-response edge case as a no-op
+# instead of a KeyError mid-cleanup.
+
+
+def _iter_dashboards(
+    client: QuickSightClient, account_id: str,
+) -> Iterator[tuple[str, str]]:
     paginator = client.get_paginator("list_dashboards")
     for page in paginator.paginate(AwsAccountId=account_id):
         for item in page.get("DashboardSummaryList", []):
-            yield item["DashboardId"], item["Arn"]
+            did = item.get("DashboardId")
+            arn = item.get("Arn")
+            if did is not None and arn is not None:
+                yield did, arn
 
 
-def _iter_analyses(client, account_id: str) -> Iterable[tuple[str, str]]:
+def _iter_analyses(
+    client: QuickSightClient, account_id: str,
+) -> Iterator[tuple[str, str]]:
     paginator = client.get_paginator("list_analyses")
     for page in paginator.paginate(AwsAccountId=account_id):
         for item in page.get("AnalysisSummaryList", []):
             if item.get("Status") == "DELETED":
                 continue
-            yield item["AnalysisId"], item["Arn"]
+            aid = item.get("AnalysisId")
+            arn = item.get("Arn")
+            if aid is not None and arn is not None:
+                yield aid, arn
 
 
-def _iter_datasets(client, account_id: str) -> Iterable[tuple[str, str]]:
+def _iter_datasets(
+    client: QuickSightClient, account_id: str,
+) -> Iterator[tuple[str, str]]:
     paginator = client.get_paginator("list_data_sets")
     for page in paginator.paginate(AwsAccountId=account_id):
         for item in page.get("DataSetSummaries", []):
-            yield item["DataSetId"], item["Arn"]
+            dsid = item.get("DataSetId")
+            arn = item.get("Arn")
+            if dsid is not None and arn is not None:
+                yield dsid, arn
 
 
-def _iter_themes(client, account_id: str) -> Iterable[tuple[str, str]]:
+def _iter_themes(
+    client: QuickSightClient, account_id: str,
+) -> Iterator[tuple[str, str]]:
     paginator = client.get_paginator("list_themes")
     for page in paginator.paginate(AwsAccountId=account_id, Type="CUSTOM"):
         for item in page.get("ThemeSummaryList", []):
-            yield item["ThemeId"], item["Arn"]
+            tid = item.get("ThemeId")
+            arn = item.get("Arn")
+            if tid is not None and arn is not None:
+                yield tid, arn
 
 
-def _iter_datasources(client, account_id: str) -> Iterable[tuple[str, str]]:
+def _iter_datasources(
+    client: QuickSightClient, account_id: str,
+) -> Iterator[tuple[str, str]]:
     paginator = client.get_paginator("list_data_sources")
     for page in paginator.paginate(AwsAccountId=account_id):
         for item in page.get("DataSources", []):
-            yield item["DataSourceId"], item["Arn"]
+            dsid = item.get("DataSourceId")
+            arn = item.get("Arn")
+            if dsid is not None and arn is not None:
+                yield dsid, arn
 
 
 def _collect_stale(
-    client,
+    client: QuickSightClient,
     account_id: str,
     expected: dict[str, set[str]],
     *,
@@ -161,7 +197,9 @@ def _collect_stale(
         "theme": [],
         "datasource": [],
     }
-    iterators = {
+    iterators: dict[
+        str, Callable[[QuickSightClient, str], Iterable[tuple[str, str]]],
+    ] = {
         "dashboard": _iter_dashboards,
         "analysis": _iter_analyses,
         "dataset": _iter_datasets,
@@ -194,7 +232,9 @@ def _collect_stale(
 
 
 def _delete_stale(
-    client, account_id: str, stale: dict[str, list[tuple[str, str]]],
+    client: QuickSightClient,
+    account_id: str,
+    stale: dict[str, list[tuple[str, str]]],
 ) -> int:
     """Delete stale resources in dependency order. Returns failure count."""
     failures = 0
@@ -261,7 +301,11 @@ def run_cleanup(
     from a QS account (e.g. tearing down a CI run, decommissioning an
     L2 instance).
     """
-    client = boto3.client("quicksight", region_name=cfg.aws_region)
+    # BF.1.S2: boto3.client returns the right per-service stub at runtime
+    # but pyright sees the umbrella overload; anchor to QuickSightClient.
+    client: QuickSightClient = boto3.client(  # pyright: ignore[reportUnknownMemberType]: boto3.client overloaded union; QuickSightClient annotation anchors the right stub
+        "quicksight", region_name=cfg.aws_region,
+    )
     account_id = cfg.aws_account_id
 
     scope_label = f" scoped to Deployment={cfg.deployment_name!r}"
@@ -279,9 +323,9 @@ def run_cleanup(
         f"Scanning QuickSight resources in {account_id} "
         f"({cfg.aws_region}){scope_label}..."
     )
-    expected = (
+    expected: dict[str, set[str]] = (
         # Empty carve-out = every matching resource is stale.
-        {kind: set() for kind in (
+        {kind: set[str]() for kind in (
             "dashboard", "analysis", "dataset", "theme", "datasource",
         )}
         if purge_all

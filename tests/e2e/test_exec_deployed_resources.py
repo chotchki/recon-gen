@@ -1,15 +1,21 @@
+# pyright: reportTypedDictNotRequiredAccess=false
 """API tests: verify the Executives dashboard/analysis/datasets exist."""
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from mypy_boto3_quicksight.client import QuickSightClient
 
 
 pytestmark = [pytest.mark.e2e, pytest.mark.api]
 
 
 class TestExecDashboardExists:
-    def test_dashboard_status(self, qs_client, account_id, exec_dashboard_id):
+    def test_dashboard_status(self, qs_client: "QuickSightClient", account_id: str, exec_dashboard_id: str) -> None:
         resp = qs_client.describe_dashboard(
             AwsAccountId=account_id,
             DashboardId=exec_dashboard_id,
@@ -21,8 +27,8 @@ class TestExecDashboardExists:
         )
 
     def test_dashboard_has_name(
-        self, qs_client, account_id, exec_dashboard_id,
-    ):
+        self, qs_client: "QuickSightClient", account_id: str, exec_dashboard_id: str,
+    ) -> None:
         resp = qs_client.describe_dashboard(
             AwsAccountId=account_id,
             DashboardId=exec_dashboard_id,
@@ -31,7 +37,7 @@ class TestExecDashboardExists:
 
 
 class TestExecAnalysisExists:
-    def test_analysis_status(self, qs_client, account_id, exec_analysis_id):
+    def test_analysis_status(self, qs_client: "QuickSightClient", account_id: str, exec_analysis_id: str) -> None:
         resp = qs_client.describe_analysis(
             AwsAccountId=account_id,
             AnalysisId=exec_analysis_id,
@@ -45,8 +51,8 @@ class TestExecAnalysisExists:
 
 class TestExecDatasetsExist:
     def test_all_datasets_exist(
-        self, qs_client, account_id, exec_dataset_ids,
-    ):
+        self, qs_client: "QuickSightClient", account_id: str, exec_dataset_ids: list[str],
+    ) -> None:
         for ds_id in exec_dataset_ids:
             resp = qs_client.describe_data_set(
                 AwsAccountId=account_id,

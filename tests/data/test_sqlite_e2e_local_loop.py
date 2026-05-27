@@ -22,7 +22,6 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-import pytest
 
 from recon_gen.cli._helpers import (
     build_full_seed_sql,
@@ -30,9 +29,7 @@ from recon_gen.cli._helpers import (
 )
 from recon_gen.common.config import Config
 from recon_gen.common.db import (
-    _register_sqlite_aggregates,
     connect_demo_db,
-    execute_script,
 )
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import (

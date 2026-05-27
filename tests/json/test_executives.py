@@ -1,3 +1,7 @@
+# pyright: reportOptionalIterable=false, reportOptionalMemberAccess=false
+# BF.4/F: tests walk emitted-tree where Optional fields are populated by the
+# builder. Suppressing the Optional family at file scope keeps the assertions
+# readable without per-line asserts.
 """Unit tests for the Executives app.
 
 Greenfield app built directly on the Phase L tree primitives — no
@@ -9,6 +13,7 @@ for invariant checks (dataset / filter / visual presence).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from click.testing import CliRunner
@@ -19,17 +24,20 @@ from recon_gen.apps.executives.app import (
     SHEET_EXEC_MONEY_MOVED,
     SHEET_EXEC_TRANSACTION_VOLUME,
     build_executives_app,
-    build_executives_dashboard,
 )
 from recon_gen.apps.executives.datasets import (
     DS_EXEC_ACCOUNT_SUMMARY,
-    DS_EXEC_TRANSACTION_SUMMARY,
     EXEC_ACCOUNT_SUMMARY_CONTRACT,
     EXEC_TRANSACTION_SUMMARY_CONTRACT,
     build_all_datasets,
 )
 from recon_gen.cli import main
 from tests._test_helpers import make_test_config
+
+if TYPE_CHECKING:
+    from recon_gen.common.models import Analysis as _ModelsAnalysis
+    from recon_gen.common.models import SheetDefinition as _SheetDefinition
+    from recon_gen.common.tree import App as _App
 
 
 # N.4.b: Executives is now L2-fed and requires the cfg's db_table_prefix
@@ -40,7 +48,7 @@ _TEST_CFG = make_test_config(db_table_prefix="spec_example")
 
 
 @pytest.fixture(scope="module")
-def exec_app():
+def exec_app() -> "_App":
     """Tree-built Executives App (post-emit, auto-IDs resolved)."""
     app = build_executives_app(_TEST_CFG)
     app.emit_analysis()
@@ -48,7 +56,7 @@ def exec_app():
 
 
 @pytest.fixture(scope="module")
-def exec_analysis(exec_app):
+def exec_analysis(exec_app: "_App") -> "_ModelsAnalysis":
     return exec_app.emit_analysis()
 
 
@@ -56,7 +64,7 @@ def exec_analysis(exec_app):
 # Top-level shape
 # ---------------------------------------------------------------------------
 
-def test_analysis_has_five_sheets_in_expected_order(exec_analysis):
+def test_analysis_has_five_sheets_in_expected_order(exec_analysis: "_ModelsAnalysis") -> None:
     """4 content sheets + the M.4.4.5 App Info ("i") sheet last."""
     from recon_gen.apps.executives.app import SHEET_EXEC_APP_INFO
 
@@ -70,7 +78,7 @@ def test_analysis_has_five_sheets_in_expected_order(exec_analysis):
     ]
 
 
-def test_analysis_name_is_executives(exec_analysis):
+def test_analysis_name_is_executives(exec_analysis: "_ModelsAnalysis") -> None:
     # Z.C — every L2-fed app's analysis name follows the
     # ``Name (deployment_name)`` shape so multi-deploy QS accounts are
     # visually distinguishable in the dashboard list. Replaces the
@@ -79,25 +87,26 @@ def test_analysis_name_is_executives(exec_analysis):
     assert exec_analysis.Name == f"Executives ({_TEST_CFG.deployment_name})"
 
 
-def test_analysis_serializes_to_aws_json(exec_analysis):
+def test_analysis_serializes_to_aws_json(exec_analysis: "_ModelsAnalysis") -> None:
     """to_aws_json() must succeed end-to-end — no None-strip crashes."""
     j = exec_analysis.to_aws_json()
     assert j["AnalysisId"] == _TEST_CFG.prefixed("executives-analysis")
     assert len(j["Definition"]["Sheets"]) == 5
 
 
-def test_dashboard_mirrors_analysis(exec_app):
+def test_dashboard_mirrors_analysis(exec_app: "_App") -> None:
     dashboard = exec_app.emit_dashboard()
     assert dashboard.DashboardId == _TEST_CFG.prefixed(
         "executives-dashboard",
     )
+    assert dashboard.Definition.Sheets is not None
     assert (
         len(dashboard.Definition.Sheets)
         == len(exec_app.analysis.sheets)
     )
 
 
-def test_every_sheet_has_a_description(exec_analysis):
+def test_every_sheet_has_a_description(exec_analysis: "_ModelsAnalysis") -> None:
     for sheet in exec_analysis.Definition.Sheets:
         assert sheet.Description, (
             f"{sheet.SheetId} is missing a description"
@@ -138,7 +147,7 @@ def test_datasets_in_expected_order():
     )
 
 
-def test_datasets_declared_in_analysis(exec_analysis):
+def test_datasets_declared_in_analysis(exec_analysis: "_ModelsAnalysis") -> None:
     """5 content datasets (BH.8 added transaction-legs; Y.2.h split
     account into base + active; AO.5 added daily rollup) + the 2
     M.4.4.5 App Info datasets."""
@@ -146,6 +155,7 @@ def test_datasets_declared_in_analysis(exec_analysis):
         DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
         DS_EXEC_TRANSACTION_DAILY,
         DS_EXEC_TRANSACTION_LEGS,
+        DS_EXEC_TRANSACTION_SUMMARY,
     )
     from recon_gen.common.sheets.app_info import (
         DS_APP_INFO_LIVENESS, DS_APP_INFO_MATVIEWS,
@@ -226,8 +236,6 @@ def test_both_content_datasets_filter_to_status_posted():
     all-status count matching App Info's row_count). M.4.4.5 App Info
     datasets read schema/matview metadata + don't carry a status
     column either."""
-    from recon_gen.apps.executives.datasets import DS_EXEC_TRANSACTION_LEGS
-
     skip_ids = {
         _TEST_CFG.prefixed("exec-app-info-liveness-dataset"),
         _TEST_CFG.prefixed("exec-app-info-matviews-dataset"),
@@ -248,7 +256,7 @@ def test_both_content_datasets_filter_to_status_posted():
 # Account Coverage sheet
 # ---------------------------------------------------------------------------
 
-def _visual_ids(sheet) -> list[str]:
+def _visual_ids(sheet: "_SheetDefinition") -> list[str]:
     out: list[str] = []
     for v in sheet.Visuals or []:
         for body in vars(v).values():
@@ -257,7 +265,7 @@ def _visual_ids(sheet) -> list[str]:
     return out
 
 
-def test_account_coverage_has_kpis_bars_and_table(exec_analysis):
+def test_account_coverage_has_kpis_bars_and_table(exec_analysis: "_ModelsAnalysis") -> None:
     sheet = next(
         s for s in exec_analysis.Definition.Sheets
         if s.SheetId == SHEET_EXEC_ACCOUNT_COVERAGE
@@ -272,7 +280,7 @@ def test_account_coverage_has_kpis_bars_and_table(exec_analysis):
     assert set(_visual_ids(sheet)) == expected
 
 
-def test_account_coverage_legacy_active_filter_dropped(exec_analysis):
+def test_account_coverage_legacy_active_filter_dropped(exec_analysis: "_ModelsAnalysis") -> None:
     """Y.2.h — the visual-pinned ``NumericRangeFilter`` that narrowed
     the Active KPI + bar to ``activity_count >= 1`` is gone, replaced
     by ``DS_EXEC_ACCOUNT_SUMMARY_ACTIVE`` whose SQL bakes the
@@ -289,7 +297,7 @@ def test_account_coverage_legacy_active_filter_dropped(exec_analysis):
     )
 
 
-def test_account_coverage_active_dataset_declared(exec_analysis):
+def test_account_coverage_active_dataset_declared(exec_analysis: "_ModelsAnalysis") -> None:
     """The Y.2.h active-only dataset is declared on the Executives
     analysis (so the active KPI + bar can reference it)."""
     from recon_gen.apps.executives.datasets import (
@@ -306,7 +314,7 @@ def test_account_coverage_active_dataset_declared(exec_analysis):
 # Transaction Volume + Money Moved sheets
 # ---------------------------------------------------------------------------
 
-def test_transaction_volume_visuals(exec_analysis):
+def test_transaction_volume_visuals(exec_analysis: "_ModelsAnalysis") -> None:
     sheet = next(
         s for s in exec_analysis.Definition.Sheets
         if s.SheetId == SHEET_EXEC_TRANSACTION_VOLUME
@@ -322,7 +330,7 @@ def test_transaction_volume_visuals(exec_analysis):
     assert set(_visual_ids(sheet)) == expected
 
 
-def test_money_moved_visuals(exec_analysis):
+def test_money_moved_visuals(exec_analysis: "_ModelsAnalysis") -> None:
     sheet = next(
         s for s in exec_analysis.Definition.Sheets
         if s.SheetId == SHEET_EXEC_MONEY_MOVED

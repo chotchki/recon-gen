@@ -53,7 +53,7 @@ _DASHBOARD_ID = "exec"
 # Deterministic per-visual stub data — visual_id → response. Tests don't
 # have to write a fetcher inline; just look up by id.
 def _exec_stub_fetcher(
-    visual_id: str, params: dict[str, list[str]],
+    visual_id: str, params: dict[str, list[str]],  # typing-smell: ignore[bare-str-id]: visual_id comes from callers as raw analyst string
 ) -> dict[str, Any]:
     """Stub fetcher matching the shape adapters in ``_data_shape``.
 
@@ -99,7 +99,7 @@ def exec_driver() -> Iterator[App2Driver]:
     with App2Driver.serving(
         cfg=_TEST_CFG,
         tree_app=tree_app, sheet=primary_sheet,
-        data_fetcher=_exec_stub_fetcher,
+        data_fetcher=_exec_stub_fetcher,  # pyright: ignore[reportArgumentType]: inline fetcher closure; structural DataFetcher contract holds at runtime
         dashboard_id=_DASHBOARD_ID,
         dashboard_title="Executives",
     ) as driver:
@@ -208,7 +208,7 @@ def test_dev_log_events_land_in_server_log() -> None:
     with App2Driver.serving(
         cfg=_TEST_CFG,
         tree_app=tree_app, sheet=primary_sheet,
-        data_fetcher=_exec_stub_fetcher,
+        data_fetcher=_exec_stub_fetcher,  # pyright: ignore[reportArgumentType]: inline fetcher closure; structural DataFetcher contract holds at runtime
         dashboard_id=_DASHBOARD_ID,
         dashboard_title="Executives",
         dev_log=True,

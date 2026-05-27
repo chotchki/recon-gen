@@ -25,19 +25,17 @@ Sheets land per L.6 sub-step:
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 # Importing datasets registers each Executives DatasetContract via its
 # module-level register_contract() side effect — required so the L.1.17
 # bare-string / unvalidated-Column emit-time validator can resolve
 # every ds["col"] ref in the visuals below.
-from recon_gen.apps.executives import datasets as _register_contracts  # noqa: F401
+from recon_gen.apps.executives import datasets as _register_contracts  # noqa: F401  # pyright: ignore[reportUnusedImport]: import-for-side-effect (register_contract calls)
 # N.4.b: Executives reads the same default institution YAML as L1
 # (per the N.2 audit's "one institution YAML drives all apps" framing).
 from recon_gen.common.l2 import default_l2_instance
 from recon_gen.common import rich_text as rt
 from recon_gen.common.config import Config
-from recon_gen.common.ids import FilterGroupId, SheetId, VisualId
+from recon_gen.common.ids import FilterGroupId, ParameterName, SheetId, VisualId
 from recon_gen.common.l2 import L2Instance, ThemePreset
 from recon_gen.common.models import Analysis as ModelAnalysis
 from recon_gen.common.models import Dashboard as ModelDashboard
@@ -53,7 +51,6 @@ from recon_gen.common.theme import resolve_l2_theme
 from recon_gen.common.tree import (
     Analysis,
     App,
-    CategoryFilter,
     Dataset,
     DateTimeParam,
     DateView,
@@ -283,9 +280,9 @@ def _datasets(cfg: Config) -> dict[str, Dataset]:
 # ---------------------------------------------------------------------------
 
 # Q.1.b — Universal date-range filter parameter names + filter group IDs.
-P_EXEC_DATE_START = "pExecDateStart"
-P_EXEC_DATE_END = "pExecDateEnd"
-_FG_EXEC_DATE_TXN = "fg-exec-date-transaction-summary"
+P_EXEC_DATE_START = ParameterName("pExecDateStart")
+P_EXEC_DATE_END = ParameterName("pExecDateEnd")
+_FG_EXEC_DATE_TXN = FilterGroupId("fg-exec-date-transaction-summary")
 _FG_EXEC_DATE_ACCT = FilterGroupId("fg-exec-date-account-summary")
 
 # AR.4 — Exec sheets show daily-grain summaries rather than per-leg

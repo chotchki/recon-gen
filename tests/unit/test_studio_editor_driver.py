@@ -1,3 +1,7 @@
+# pyright: reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownMemberType=false, reportAttributeAccessIssue=false
+# BF.4/F: dataclass-introspection helpers traffic in `object` to handle every
+# L2 entity uniformly. The Unknown family + AttributeAccess on .parent / etc.
+# come from is_dataclass-narrowed + getattr lookups that pyright can't follow.
 """AI.3 + AI.4 + AI.6 — Studio editor dogfood harness (HTTP transport).
 
 Drives the Studio editor over a Starlette ``TestClient`` (no browser,
@@ -140,7 +144,7 @@ def _by_identifier(entities: tuple[object, ...], key: str) -> list[object]:
         if isinstance(desc, str):
             stripped = desc.rstrip()
             if stripped != desc:
-                e = _dc.replace(e, description=stripped)
+                e = _dc.replace(e, description=stripped)  # pyright: ignore[reportArgumentType, reportUnknownArgumentType]: is_dataclass narrows to DataclassInstance|type at runtime; pyright loses through getattr
         normed.append(e)
     return sorted(normed, key=lambda x: str(getattr(x, key)))
 
@@ -156,7 +160,7 @@ def _normalize_descriptions(entities: tuple[object, ...]) -> list[object]:
             if isinstance(desc, str):
                 stripped = desc.rstrip()
                 if stripped != desc:
-                    e = _dc.replace(e, description=stripped)
+                    e = _dc.replace(e, description=stripped)  # pyright: ignore[reportArgumentType, reportUnknownArgumentType]: see _by_identifier: third-party stub or test scaffolding cascade
         out.append(e)
     return out
 

@@ -15,15 +15,13 @@ The CLI surface (``demo seed-l2``) has its own smoke tests in
 
 from __future__ import annotations
 
-import hashlib
 from datetime import date
 from pathlib import Path
 
 import pytest
 
-from recon_gen.common.l2 import Identifier, load_instance
+from recon_gen.common.l2 import Identifier, L2Instance, load_instance
 from recon_gen.common.l2.auto_scenario import (
-    AutoScenarioReport,
     default_scenario_for,
 )
 from recon_gen.common.l2.seed import emit_seed
@@ -35,12 +33,12 @@ CANONICAL_TODAY = date(2030, 1, 1)
 
 
 @pytest.fixture(scope="module")
-def spec_instance():
+def spec_instance() -> L2Instance:
     return load_instance(SPEC_YAML)
 
 
 @pytest.fixture(scope="module")
-def sasquatch_instance():
+def sasquatch_instance() -> L2Instance:
     return load_instance(SASQUATCH_YAML)
 
 
@@ -48,7 +46,7 @@ def sasquatch_instance():
 
 
 def test_auto_scenario_against_spec_example_covers_all_six_plant_kinds(
-    spec_instance,
+    spec_instance: L2Instance,
 ) -> None:
     """spec_example.yaml is intentionally complete enough that the
     auto-scenario derives one of every L1-invariant plant kind. Its
@@ -97,7 +95,7 @@ def test_auto_scenario_against_spec_example_covers_all_six_plant_kinds(
 
 
 def test_auto_scenario_against_sasquatch_pr_covers_all_six_plant_kinds(
-    sasquatch_instance,
+    sasquatch_instance: L2Instance,
 ) -> None:
     """The full AR fixture also has enough surface for full coverage.
     Sasquatch's MerchantSettlementCycle's first leg_rail is a TwoLeg
@@ -188,7 +186,7 @@ def test_auto_scenario_with_no_template_omits_everything(tmp_path: Path) -> None
 #    tests/data/_locked_seeds/) ----------------------------------------
 
 
-def test_auto_scenario_emit_is_byte_deterministic(spec_instance) -> None:
+def test_auto_scenario_emit_is_byte_deterministic(spec_instance: L2Instance) -> None:
     """Two runs of (default_scenario_for + emit_seed) on the same
     instance with the same canonical today produce byte-identical SQL."""
     report_a = default_scenario_for(spec_instance, today=CANONICAL_TODAY)
@@ -201,7 +199,7 @@ def test_auto_scenario_emit_is_byte_deterministic(spec_instance) -> None:
 # -- Persona-cleanliness (the M.2d.5 guard, applied to auto-scenario) ------
 
 
-def test_auto_seed_against_spec_example_has_zero_persona_leaks(spec_instance) -> None:
+def test_auto_seed_against_spec_example_has_zero_persona_leaks(spec_instance: L2Instance) -> None:
     """The auto-scenario itself is persona-blind: against spec_example.yaml,
     the generated SQL contains no Sasquatch / SNB / FRB / etc. literals."""
     report = default_scenario_for(spec_instance, today=CANONICAL_TODAY)
@@ -221,7 +219,7 @@ def test_auto_seed_against_spec_example_has_zero_persona_leaks(spec_instance) ->
 
 
 def test_auto_scenario_drift_picks_external_counter_from_instance(
-    spec_instance,
+    spec_instance: L2Instance,
 ) -> None:
     """The drift plant's counter_account_id resolves to a real
     instance.accounts entry."""
@@ -232,7 +230,7 @@ def test_auto_scenario_drift_picks_external_counter_from_instance(
     assert drift.rail_name == Identifier("ExternalRailInbound")
 
 
-def test_auto_scenario_breach_amount_exceeds_cap(spec_instance) -> None:
+def test_auto_scenario_breach_amount_exceeds_cap(spec_instance: L2Instance) -> None:
     """The limit-breach plant's amount = cap * 1.5, guaranteed to breach."""
     report = default_scenario_for(spec_instance, today=CANONICAL_TODAY)
     breach = report.scenario.limit_breach_plants[0]
@@ -244,7 +242,7 @@ def test_auto_scenario_breach_amount_exceeds_cap(spec_instance) -> None:
 
 
 def test_auto_scenario_stuck_pending_age_exceeds_picked_rail_cap(
-    spec_instance,
+    spec_instance: L2Instance,
 ) -> None:
     """The stuck_pending plant's days_ago must exceed the picked rail's
     `max_pending_age` (in days) so the matview surfaces the row.
@@ -270,7 +268,7 @@ def test_auto_scenario_stuck_pending_age_exceeds_picked_rail_cap(
 
 
 def test_auto_scenario_stuck_unbundled_age_exceeds_picked_rail_cap(
-    spec_instance,
+    spec_instance: L2Instance,
 ) -> None:
     """Sister test of stuck_pending — the unbundled plant must
     similarly clear the picked rail's `max_unbundled_age` cap."""
@@ -289,7 +287,7 @@ def test_auto_scenario_stuck_unbundled_age_exceeds_picked_rail_cap(
 
 
 def test_auto_scenario_inv_fanout_recipient_is_leaf_internal(
-    spec_instance,
+    spec_instance: L2Instance,
 ) -> None:
     """The InvFanoutPlant recipient MUST resolve to a leaf-internal
     account: its template_role is the materialized customer template's
@@ -315,7 +313,7 @@ def test_auto_scenario_inv_fanout_recipient_is_leaf_internal(
 
 
 def test_auto_scenario_inv_fanout_has_at_least_two_distinct_senders(
-    spec_instance,
+    spec_instance: L2Instance,
 ) -> None:
     """A fanout with one sender is structurally a degenerate single
     edge — the picker omits the plant rather than emit one. spec_example

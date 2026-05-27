@@ -32,6 +32,7 @@ import sqlite3
 import tempfile
 from collections.abc import Iterator
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -39,9 +40,12 @@ from recon_gen.common.sql.dialect import Dialect
 from tests._test_helpers import make_test_config
 from tests.e2e._drivers.base import query_db_via_cfg
 
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config
+
 
 @pytest.fixture
-def planted_drift_sqlite() -> Iterator[object]:
+def planted_drift_sqlite() -> Iterator["Config"]:
     """Spin up a SQLite holding synthetic ``drift`` /
     ``drift_timeline`` / ``overdraft`` matviews. Values chosen so the
     healthy-path assertions pass cleanly; per-bug tests modify or
@@ -152,7 +156,7 @@ _OVERDRAFT_SQL = (
 
 
 def test_bg3_drift_kpi_passes_when_count_matches_matview_rows(
-    planted_drift_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_drift_sqlite: "Config",
 ) -> None:
     cfg = planted_drift_sqlite
     rows = query_db_via_cfg(cfg, _DRIFT_SQL)
@@ -161,7 +165,7 @@ def test_bg3_drift_kpi_passes_when_count_matches_matview_rows(
 
 
 def test_bg3_drift_kpi_trips_when_count_disagrees(
-    planted_drift_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_drift_sqlite: "Config",
 ) -> None:
     """v11.21.0 finding #12-shape (KPI disagrees with row count of the
     dataset the table on the same sheet binds). Identity assertion
@@ -179,7 +183,7 @@ def test_bg3_drift_kpi_trips_when_count_disagrees(
 
 
 def test_bg3_drift_timeline_kpi_max_identity_holds_on_healthy_data(
-    planted_drift_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_drift_sqlite: "Config",
 ) -> None:
     cfg = planted_drift_sqlite
     rows = query_db_via_cfg(cfg, _DRIFT_TIMELINE_SQL)
@@ -189,7 +193,7 @@ def test_bg3_drift_timeline_kpi_max_identity_holds_on_healthy_data(
 
 
 def test_bg3_leaf_timeline_variance_gate_trips_on_flat_constant(
-    planted_drift_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_drift_sqlite: "Config",
 ) -> None:
     """v11.21.0 finding #6: "Leaf Account Drift Over Time" renders flat
     at $15.00 across 30+ days. Bug-shape: same value on every day. The
@@ -210,7 +214,7 @@ def test_bg3_leaf_timeline_variance_gate_trips_on_flat_constant(
 
 
 def test_bg3_leaf_timeline_variance_gate_passes_on_varying_data(
-    planted_drift_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_drift_sqlite: "Config",
 ) -> None:
     """Healthy path: when daily Σ abs_drift varies across days, the
     variance gate passes. (The planted fixture has day-23=$8.00,
@@ -231,7 +235,7 @@ def test_bg3_leaf_timeline_variance_gate_passes_on_varying_data(
 
 
 def test_bg3_overdraft_count_passes_on_healthy_data(
-    planted_drift_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_drift_sqlite: "Config",
 ) -> None:
     cfg = planted_drift_sqlite
     rows = query_db_via_cfg(cfg, _OVERDRAFT_SQL)
@@ -240,7 +244,7 @@ def test_bg3_overdraft_count_passes_on_healthy_data(
 
 
 def test_bg3_overdraft_count_trips_when_kpi_underflows_vs_table(
-    planted_drift_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_drift_sqlite: "Config",
 ) -> None:
     """v11.21.0 finding #12 direct: KPI=0 while table is populated.
     Identity assertion trips with both counts named."""

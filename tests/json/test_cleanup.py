@@ -11,11 +11,28 @@ into a single ``Deployment`` tag keyed off ``cfg.deployment_name``):
   matches the supplied ``deployment_name``.
 """
 
+# pyright: reportArgumentType=false
+# _StubClient / _DeleteStubClient are structural fakes; pyright wants
+# nominal QuickSightClient compatibility. Disabling at file scope keeps
+# the stub-vs-real-client signal clear at the producer (common/cleanup.py)
+# where the boto3 type matters.
+
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 
-from recon_gen.common.cleanup import _collect_stale, _read_managed_tags
+import pytest
+
+from recon_gen.common.cleanup import (  # pyright: ignore[reportUnknownVariableType]: imported helpers take untyped boto3 client
+    DEPLOYMENT_TAG_KEY,
+    MANAGED_TAG_KEY,
+    MANAGED_TAG_VALUE,
+    _collect_stale,
+    _read_managed_tags,
+)
+from recon_gen.common.config import Config
 
 
 # -- A minimal stub that mimics the QuickSight client surface ----------------
@@ -38,7 +55,7 @@ class _StubClient:
         self._tags = tags_by_arn
         self._summaries = summaries_by_kind
 
-    def list_tags_for_resource(self, *, ResourceArn: str) -> dict:
+    def list_tags_for_resource(self, *, ResourceArn: str) -> dict[str, list[dict[str, str]]]:
         return {"Tags": self._tags.get(ResourceArn, [])}
 
     def get_paginator(self, op: str) -> "_StubPaginator":
@@ -63,7 +80,7 @@ class _StubPaginator:
         self._page_key = page_key
         self._id_field = id_field
 
-    def paginate(self, **_kwargs) -> Iterator[dict]:
+    def paginate(self, **_kwargs: Any) -> Iterator[dict[str, list[dict[str, str]]]]:
         yield {
             self._page_key: [
                 {self._id_field: rid, "Arn": arn} for rid, arn in self._items
@@ -87,7 +104,7 @@ def _empty_expected() -> dict[str, set[str]]:
 # -- _read_managed_tags ------------------------------------------------------
 
 
-def test_read_managed_tags_returns_map_for_managed_resource():
+def test_read_managed_tags_returns_map_for_managed_resource() -> None:
     client = _StubClient(
         tags_by_arn={
             "arn:dash:1": [
@@ -98,10 +115,13 @@ def test_read_managed_tags_returns_map_for_managed_resource():
         summaries_by_kind={},
     )
     tags = _read_managed_tags(client, "arn:dash:1")
-    assert tags == {"ManagedBy": "recon-gen", "Deployment": "recon-test"}
+    assert tags == {
+        MANAGED_TAG_KEY: MANAGED_TAG_VALUE,
+        DEPLOYMENT_TAG_KEY: "recon-test",
+    }
 
 
-def test_read_managed_tags_returns_none_for_unmanaged():
+def test_read_managed_tags_returns_none_for_unmanaged() -> None:
     client = _StubClient(
         tags_by_arn={"arn:other:1": [_mk_tag("Owner", "someone-else")]},
         summaries_by_kind={},
@@ -109,7 +129,7 @@ def test_read_managed_tags_returns_none_for_unmanaged():
     assert _read_managed_tags(client, "arn:other:1") is None
 
 
-def test_read_managed_tags_returns_none_when_arn_unknown():
+def test_read_managed_tags_returns_none_when_arn_unknown() -> None:
     client = _StubClient(tags_by_arn={}, summaries_by_kind={})
     assert _read_managed_tags(client, "arn:missing") is None
 
@@ -129,7 +149,7 @@ def test_read_managed_tags_returns_none_when_arn_unknown():
 #    not in separate tags.
 
 
-def test_collect_stale_deployment_only_sweeps_matching():
+def test_collect_stale_deployment_only_sweeps_matching() -> None:
     """Z.C — with deployment_name='qs-ci-12345-pg', only sweep resources
     whose Deployment tag matches that exact value. Other-deploy
     resources (concurrent CI run, local deploy) skipped."""
@@ -169,7 +189,7 @@ def test_collect_stale_deployment_only_sweeps_matching():
     assert stale_dash_ids == {"ci-run-12345-dash"}
 
 
-def test_collect_stale_deployment_fails_closed_on_missing_tag():
+def test_collect_stale_deployment_fails_closed_on_missing_tag() -> None:
     """Z.C — resources without a Deployment tag are NEVER swept by a
     deploy-scoped cleanup. Operators must re-deploy (which adds the
     tag) before deploy-scoped cleanup can touch them."""
@@ -194,7 +214,7 @@ def test_collect_stale_deployment_fails_closed_on_missing_tag():
     )
 
 
-def test_collect_stale_skips_resources_in_expected_set():
+def test_collect_stale_skips_resources_in_expected_set() -> None:
     """Even matching-Deployment resources are skipped if they're in
     ``expected`` (the carve-out for the live deploy's own resources)."""
     client = _StubClient(
@@ -227,7 +247,7 @@ def test_collect_stale_skips_resources_in_expected_set():
 # -- _collect_stale: tagging_enabled=False (v8.6.11) ------------------------
 
 
-def test_collect_stale_no_tagging_matches_by_id_prefix():
+def test_collect_stale_no_tagging_matches_by_id_prefix() -> None:
     """With ``tagging_enabled=False`` the tag check is bypassed and
     sweep eligibility is just ID-prefix membership. Resources that
     don't share the prefix stay safe; resources that do — regardless
@@ -258,7 +278,7 @@ def test_collect_stale_no_tagging_matches_by_id_prefix():
     }
 
 
-def test_collect_stale_no_tagging_skips_id_in_expected():
+def test_collect_stale_no_tagging_skips_id_in_expected() -> None:
     """Even with tagging off, IDs in the current ``out/`` set stay safe —
     they're the live deploy, not stale."""
     client = _StubClient(
@@ -328,8 +348,8 @@ class _DeleteStubClient:
         self._maybe_fail("delete_data_source", DataSourceId)
 
 
-def test_delete_stale_dispatches_per_kind():
-    from recon_gen.common.cleanup import _delete_stale
+def test_delete_stale_dispatches_per_kind() -> None:
+    from recon_gen.common.cleanup import _delete_stale  # pyright: ignore[reportUnknownVariableType]: imported helper takes untyped boto3 client
     client = _DeleteStubClient()
     failures = _delete_stale(client, "111", {
         "dashboard": [("d-1", "arn:d:1")],
@@ -349,8 +369,8 @@ def test_delete_stale_dispatches_per_kind():
     ]
 
 
-def test_delete_stale_counts_failures_and_continues():
-    from recon_gen.common.cleanup import _delete_stale
+def test_delete_stale_counts_failures_and_continues() -> None:
+    from recon_gen.common.cleanup import _delete_stale  # pyright: ignore[reportUnknownVariableType]: imported helper takes untyped boto3 client
     client = _DeleteStubClient(fail_on_id="ds-failing")
     failures = _delete_stale(client, "111", {
         "dashboard": [("d-1", "arn:d:1")],
@@ -372,15 +392,14 @@ def test_delete_stale_counts_failures_and_continues():
 # -- run_cleanup --------------------------------------------------------------
 
 
-def _patched_boto3_client(monkeypatch, stub) -> None:
+def _patched_boto3_client(monkeypatch: pytest.MonkeyPatch, stub: Any) -> None:
     """Make ``boto3.client('quicksight', ...)`` return our stub instead
     of trying to talk to AWS."""
     import boto3
-    monkeypatch.setattr(boto3, "client", lambda *_a, **_k: stub)
+    monkeypatch.setattr(boto3, "client", lambda *_a, **_k: stub)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
 
 
-def _make_cfg(tagging_enabled: bool = True):
-    from recon_gen.common.config import Config
+def _make_cfg(tagging_enabled: bool = True) -> Config:
     # Z.C — deployment_name + db_table_prefix are now required cfg fields.
     return Config(
         aws_account_id="111",
@@ -392,19 +411,19 @@ def _make_cfg(tagging_enabled: bool = True):
     )
 
 
-def test_run_cleanup_short_circuits_when_no_stale(tmp_path, monkeypatch):
+def test_run_cleanup_short_circuits_when_no_stale(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Empty inventory + empty expected → nothing to do, exit 0
     without dispatching any delete calls."""
     from recon_gen.common.cleanup import run_cleanup
     stub = _DeleteStubClient()
     # Patch the listing surface too — give it the tagged stub shape.
-    listing = _StubClient(summaries_by_kind={}, tags_by_arn={})
+    _ = _StubClient(summaries_by_kind={}, tags_by_arn={})
     # Compose: when run_cleanup grabs boto3.client it gets a thing with
     # both surfaces. Easier: monkey-patch the cleanup module's helpers.
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "_collect_stale",
-        lambda *_a, **_k: {kind: [] for kind in (
+        lambda *_a, **_k: {kind: [] for kind in (  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
             "dashboard", "analysis", "dataset", "theme", "datasource",
         )},
     )
@@ -415,14 +434,14 @@ def test_run_cleanup_short_circuits_when_no_stale(tmp_path, monkeypatch):
     assert stub.calls == []
 
 
-def test_run_cleanup_dry_run_skips_delete(tmp_path, monkeypatch):
+def test_run_cleanup_dry_run_skips_delete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``dry_run=True`` prints the plan but never invokes boto3 delete."""
     from recon_gen.common.cleanup import run_cleanup
     stub = _DeleteStubClient()
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "_collect_stale",
-        lambda *_a, **_k: {
+        lambda *_a, **_k: {  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
             "dashboard": [("d-1", "arn:1")],
             "analysis": [], "dataset": [], "theme": [], "datasource": [],
         },
@@ -434,7 +453,7 @@ def test_run_cleanup_dry_run_skips_delete(tmp_path, monkeypatch):
     assert stub.calls == []
 
 
-def test_run_cleanup_skip_confirm_executes_delete(tmp_path, monkeypatch):
+def test_run_cleanup_skip_confirm_executes_delete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``skip_confirm=True`` bypasses the click prompt and runs the
     delete loop directly. Mirrors the path the standalone CI cleanup
     job hits when there's no terminal."""
@@ -443,7 +462,7 @@ def test_run_cleanup_skip_confirm_executes_delete(tmp_path, monkeypatch):
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "_collect_stale",
-        lambda *_a, **_k: {
+        lambda *_a, **_k: {  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
             "dashboard": [("d-1", "arn:1")],
             "analysis": [], "dataset": [], "theme": [], "datasource": [],
         },
@@ -455,14 +474,14 @@ def test_run_cleanup_skip_confirm_executes_delete(tmp_path, monkeypatch):
     assert ("delete_dashboard", "d-1") in stub.calls
 
 
-def test_run_cleanup_confirm_no_aborts(tmp_path, monkeypatch):
+def test_run_cleanup_confirm_no_aborts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Operator typed ``n`` at the prompt — no delete fires."""
     from recon_gen.common.cleanup import run_cleanup
     stub = _DeleteStubClient()
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "_collect_stale",
-        lambda *_a, **_k: {
+        lambda *_a, **_k: {  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
             "dashboard": [("d-1", "arn:1")],
             "analysis": [], "dataset": [], "theme": [], "datasource": [],
         },
@@ -470,7 +489,7 @@ def test_run_cleanup_confirm_no_aborts(tmp_path, monkeypatch):
     _patched_boto3_client(monkeypatch, stub)
     # Simulate the user answering "no" to the prompt.
     monkeypatch.setattr(
-        "click.confirm", lambda *_a, **_k: False,
+        "click.confirm", lambda *_a, **_k: False,  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
     )
 
     rc = run_cleanup(_make_cfg(), tmp_path)
@@ -479,8 +498,8 @@ def test_run_cleanup_confirm_no_aborts(tmp_path, monkeypatch):
 
 
 def test_run_cleanup_no_tagging_announces_id_prefix_mode(
-    tmp_path, monkeypatch, capsys,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     """The startup banner must call out the weakened isolation when
     tagging is disabled — operators relying on the warning to spot
     misconfiguration depend on the message landing in stdout."""
@@ -489,7 +508,7 @@ def test_run_cleanup_no_tagging_announces_id_prefix_mode(
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "_collect_stale",
-        lambda *_a, **_k: {kind: [] for kind in (
+        lambda *_a, **_k: {kind: [] for kind in (  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
             "dashboard", "analysis", "dataset", "theme", "datasource",
         )},
     )
@@ -501,17 +520,17 @@ def test_run_cleanup_no_tagging_announces_id_prefix_mode(
     assert "ID prefix only" in out
 
 
-def test_run_cleanup_purge_all_ignores_out_dir(tmp_path, monkeypatch):
+def test_run_cleanup_purge_all_ignores_out_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """v8.6.13 — purge mode must NOT consult ``out_dir``. Even when
     the directory holds JSON files for the live deploy, every
     matching resource gets queued for sweep."""
     from recon_gen.common.cleanup import run_cleanup
     stub = _DeleteStubClient()
-    expected_seen: list[dict] = []
+    expected_seen: list[dict[str, set[str]]] = []
 
     import recon_gen.common.cleanup as cu
 
-    def _capture(_client, _account, expected, **_kwargs):
+    def _capture(_client: Any, _account: Any, expected: dict[str, set[str]], **_kwargs: Any) -> dict[str, list[tuple[str, str]]]:
         expected_seen.append(expected)
         # Pretend we found nothing so the test exits cleanly.
         return {kind: [] for kind in (
@@ -535,8 +554,8 @@ def test_run_cleanup_purge_all_ignores_out_dir(tmp_path, monkeypatch):
 
 
 def test_run_cleanup_purge_all_announces_purge_mode(
-    tmp_path, monkeypatch, capsys,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     """The startup banner must call out PURGE-ALL mode so the operator
     can spot it in shell history and CI logs — distinguishes from
     everyday ``clean`` output."""
@@ -545,7 +564,7 @@ def test_run_cleanup_purge_all_announces_purge_mode(
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "_collect_stale",
-        lambda *_a, **_k: {kind: [] for kind in (
+        lambda *_a, **_k: {kind: [] for kind in (  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
             "dashboard", "analysis", "dataset", "theme", "datasource",
         )},
     )

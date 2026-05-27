@@ -198,7 +198,7 @@ def json_test(pytest_args: str, browser: bool) -> None:
         sys.executable, "-m", "pyright",
         "src/recon_gen/apps/",
     ]
-    failed = []
+    failed: list[str] = []
     click.echo(f"$ {' '.join(pytest_argv)}")
     if subprocess.call(pytest_argv) != 0:
         failed.append("pytest")

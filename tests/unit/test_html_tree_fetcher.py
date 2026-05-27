@@ -15,7 +15,7 @@ shape stays familiar.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 import pytest
@@ -43,6 +43,19 @@ from tests._test_helpers import make_test_config
 
 _TEST_CFG = make_test_config()
 _TEST_CFG_SQLITE = make_test_config(dialect=Dialect.SQLITE)
+
+
+# The producer's ``DataFetcher`` is typed ``Callable[..., Awaitable[Any]]``,
+# but ``asyncio.run`` needs ``Coroutine``. The fetcher IS an ``async def``
+# at runtime — bridge through this thin coroutine helper so the test calls
+# stay legible.
+def _run_fetcher(
+    fetcher: Any, visual_id: VisualId, params: Mapping[str, list[str]],
+) -> dict[str, Any]:
+    async def _go() -> dict[str, Any]:
+        result: dict[str, Any] = await fetcher(visual_id, params)
+        return result
+    return asyncio.run(_go())
 
 
 # Register contracts ONCE at module level — register_contract raises
@@ -206,7 +219,7 @@ def test_make_tree_db_fetcher_dispatches_kpi(
     fetcher = make_tree_db_fetcher(
         app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
     )
-    out = asyncio.run(fetcher("v-kpi", {}))
+    out = _run_fetcher(fetcher, VisualId("v-kpi"), {})
     # KPI shape: {values: [{value, ...}]}
     assert "values" in out
     assert out["values"][0]["value"] == 375  # 100+50+200+25
@@ -224,7 +237,7 @@ def test_make_tree_db_fetcher_dispatches_bar_chart(
     fetcher = make_tree_db_fetcher(
         app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
     )
-    out = asyncio.run(fetcher("v-bar", {}))
+    out = _run_fetcher(fetcher, VisualId("v-bar"), {})
     # BarChart shape: {categories, values, x_label, y_label}
     assert out["categories"] == ["closed", "open", "pending"]
     assert out["values"] == [200, 150, 25]
@@ -245,7 +258,7 @@ def test_make_tree_db_fetcher_paginates_table(
         app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
     )
     # No params → first page; default size > 4 ⇒ all 4 rows back.
-    out = asyncio.run(fetcher("v-tbl", {}))
+    out = _run_fetcher(fetcher, VisualId("v-tbl"), {})
     assert len(out["rows"]) == 4
     assert out["total_rows"] == 4
     assert out["page_offset"] == 0
@@ -253,15 +266,15 @@ def test_make_tree_db_fetcher_paginates_table(
     assert [c["name"] for c in out["columns"]] == ["status", "amount"]
     assert all(len(r) == 2 for r in out["rows"])
     # Page 2 of size 2 ⇒ 2 rows, but total_rows stays 4.
-    out2 = asyncio.run(
-        fetcher("v-tbl", {"page_size": ["2"], "page_offset": ["2"]})
+    out2 = _run_fetcher(
+        fetcher, VisualId("v-tbl"), {"page_size": ["2"], "page_offset": ["2"]},
     )
     assert len(out2["rows"]) == 2
     assert out2["total_rows"] == 4
     assert out2["page_offset"] == 2
     assert out2["page_size"] == 2
     # A crafted huge page_size is clamped (no OOM).
-    out3 = asyncio.run(fetcher("v-tbl", {"page_size": ["99999999999"]}))
+    out3 = _run_fetcher(fetcher, VisualId("v-tbl"), {"page_size": ["99999999999"]})
     assert out3["page_size"] == 10_000  # _TABLE_PAGE_SIZE_MAX
     assert len(out3["rows"]) == 4  # only 4 rows exist
 
@@ -279,21 +292,21 @@ def test_make_tree_db_fetcher_sorts_table(
     fetcher = make_tree_db_fetcher(
         app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
     )
-    desc = asyncio.run(fetcher("v-tbl", {"sort_column": ["amount:desc"]}))
+    desc = _run_fetcher(fetcher, VisualId("v-tbl"), {"sort_column": ["amount:desc"]})
     assert [r[1] for r in desc["rows"]] == [200, 100, 50, 25]
     assert desc["sort_column"] == "amount:desc"
-    asc = asyncio.run(fetcher("v-tbl", {"sort_column": ["amount:asc"]}))
+    asc = _run_fetcher(fetcher, VisualId("v-tbl"), {"sort_column": ["amount:asc"]})
     assert [r[1] for r in asc["rows"]] == [25, 50, 100, 200]
     assert asc["sort_column"] == "amount:asc"
     # Injection attempt → bare-identifier guard rejects it → ORDER BY 1
     # (status asc), echo "" — and the DROP never reaches the DB.
-    safe = asyncio.run(
-        fetcher("v-tbl", {"sort_column": ["amount); DROP TABLE t; --:desc"]})
+    safe = _run_fetcher(
+        fetcher, VisualId("v-tbl"), {"sort_column": ["amount); DROP TABLE t; --:desc"]},
     )
     assert safe["sort_column"] == ""
     assert [r[0] for r in safe["rows"]] == ["closed", "open", "open", "pending"]
     # Sanity: table still there.
-    again = asyncio.run(fetcher("v-tbl", {}))
+    again = _run_fetcher(fetcher, VisualId("v-tbl"), {})
     assert again["total_rows"] == 4
 
 
@@ -311,7 +324,7 @@ def test_make_tree_db_fetcher_substitutes_filters(
     fetcher = make_tree_db_fetcher(
         app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
     )
-    out = asyncio.run(fetcher("v-kpi", {"param_status": ["open"]}))
+    out = _run_fetcher(fetcher, VisualId("v-kpi"), {"param_status": ["open"]})
     assert out["values"][0]["value"] == 150  # only "open" rows
 
 
@@ -325,7 +338,7 @@ def test_make_tree_db_fetcher_unknown_visual_id_returns_empty(
     fetcher = make_tree_db_fetcher(
         app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
     )
-    out = asyncio.run(fetcher("v-does-not-exist", {}))
+    out = _run_fetcher(fetcher, VisualId("v-does-not-exist"), {})
     assert out == {}
 
 
@@ -347,7 +360,7 @@ def test_make_tree_db_fetcher_visual_without_dataset_returns_empty(
     fetcher = make_tree_db_fetcher(
         app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
     )
-    out = asyncio.run(fetcher("v-x", {}))
+    out = _run_fetcher(fetcher, VisualId("v-x"), {})
     assert out == {}
 
 
@@ -407,8 +420,8 @@ def test_make_tree_db_fetcher_indexes_visuals_across_sheets(
         app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
     )
     # Both visuals are reachable via the single fetcher.
-    assert asyncio.run(fetcher("v-a", {}))["values"][0]["value"] == 375
-    assert asyncio.run(fetcher("v-b", {}))["values"][0]["value"] == 375
+    assert _run_fetcher(fetcher, VisualId("v-a"), {})["values"][0]["value"] == 375
+    assert _run_fetcher(fetcher, VisualId("v-b"), {})["values"][0]["value"] == 375
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +509,7 @@ def test_make_tree_db_fetcher_dispatches_sankey_with_aggregation(
     fetcher = make_tree_db_fetcher(
         app, _TEST_CFG_SQLITE, pool=aiosqlite_sankey_pool,
     )
-    out = asyncio.run(fetcher("v-sk", {}))
+    out = _run_fetcher(fetcher, VisualId("v-sk"), {})
     # Sankey shape: {nodes, links}.
     assert "nodes" in out and "links" in out
     names = [n["name"] for n in out["nodes"]]
@@ -545,7 +558,7 @@ def test_make_tree_db_fetcher_sankey_passthrough_without_fields(
     fetcher = make_tree_db_fetcher(
         app, _TEST_CFG_SQLITE, pool=aiosqlite_sankey_pool,
     )
-    out = asyncio.run(fetcher("v-ske", {}))
+    out = _run_fetcher(fetcher, VisualId("v-ske"), {})
     # No fields → no dataset detected → empty payload.
     assert out == {}
 
@@ -635,7 +648,7 @@ def test_table_fetcher_converts_currency_columns_to_dollars(
     fetcher = make_tree_db_fetcher(
         app, _TEST_CFG_SQLITE, pool=aiosqlite_pool,
     )
-    out = asyncio.run(fetcher("v-tbl-cur", {}))
+    out = _run_fetcher(fetcher, VisualId("v-tbl-cur"), {})
     # The aiosqlite fixture seeds amount values [100, 50, 200, 25] in
     # cents (BIGINT per AO.1). The currency-marked column converts to
     # dollars in the row output: 100 cents → $1.00, etc.

@@ -1,3 +1,8 @@
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
+# BF.4/F: pypdf + pyHanko interop is essentially untyped (Any returned from
+# .get_object() / page.get('/Annots') / cert.subject / etc). Disabling the
+# Unknown family file-wide keeps the PDF-layout smoke readable without an
+# avalanche of cast(...) wrappers around library calls.
 """CLI smoke for ``recon-gen audit`` — shape + cover-page render.
 
 Verifies:
@@ -25,8 +30,13 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from recon_gen.apps.l1_dashboard.app import (
+    _DRIFT_NAME,
+    _SUPERSESSION_AUDIT_NAME,
+)
 from recon_gen.cli import main
 from recon_gen.cli.audit import _resolve_frame
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 
 
 _FIXTURES = Path(__file__).parent.parent / "l2"
@@ -473,7 +483,7 @@ def test_audit_apply_emits_markdown_to_stdout(min_config: Path):
     assert "### Volume" in result.output
     assert "### Exception Counts" in result.output
     assert "Transactions (legs)" in result.output
-    assert "Drift" in result.output
+    assert _DRIFT_NAME in result.output
     assert "Supersession" in result.output
     # No DB configured → placeholder notice rendered.
     assert "Database not configured" in result.output
@@ -574,7 +584,7 @@ def test_audit_apply_execute_writes_pdf(min_config: Path, tmp_path: Path):
     assert len(reader.pages) >= 2
     text = "\n".join(page.extract_text() or "" for page in reader.pages)
     assert "audit report" in text.lower()
-    assert "spec_example" in text  # institution heading rendered
+    assert DEFAULT_PREFIX in text  # institution heading rendered
     assert "Reporting period" in text  # period band rendered
     assert "Provenance" in text  # page footer rendered
     assert "U.7" in text  # fingerprint placeholder cites where it lands
@@ -592,7 +602,7 @@ def test_audit_apply_execute_writes_pdf(min_config: Path, tmp_path: Path):
     assert "Volume" in text
     assert "Exception Counts" in text
     assert "Transactions (legs)" in text
-    assert "Drift" in text
+    assert _DRIFT_NAME in text
     assert "Supersession" in text
     # No DB → placeholder notice on the exec summary page.
     assert "Database not configured" in text
@@ -607,7 +617,7 @@ def test_audit_apply_execute_writes_pdf(min_config: Path, tmp_path: Path):
     # U.3.e Stuck unbundled transactions page.
     assert "Stuck Unbundled Transactions" in text
     # U.3.f Supersession audit page.
-    assert "Supersession Audit" in text
+    assert _SUPERSESSION_AUDIT_NAME in text
     # U.5 Sign-off page.
     assert "Sign-Off" in text
     assert "System Attestation" in text
@@ -669,6 +679,7 @@ def test_audit_pdf_bookmarks_resolve_to_real_pages(
                 walk(item, depth + 1)
             else:
                 page_idx = reader.get_destination_page_number(item)
+                assert page_idx is not None, "bookmark missing page index"
                 entries.append((depth, item.title, page_idx + 1))
 
     walk(reader.outline)

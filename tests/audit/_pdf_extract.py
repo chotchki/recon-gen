@@ -1,3 +1,6 @@
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
+# BF.4/F: pypdf interop is mostly Any — outline / pages / get_destination_page_number
+# all return untyped. The PDF parser uses dynamic walks that don't surface in stubs.
 """Extract per-invariant table row counts from a rendered audit PDF (U.8.b.1).
 
 The audit emits violation tables per L1 invariant under a
@@ -78,7 +81,7 @@ _EMPTY_MARKERS: tuple[str, ...] = (
 
 # Signals that a line carries cell data (vs. header / prose /
 # section sub-heading). Any one match is sufficient.
-_DATA_SIGNAL_PATTERNS: tuple[re.Pattern, ...] = (
+_DATA_SIGNAL_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),          # ISO date
     re.compile(r"\$-?[\d,]+\.\d{2}"),               # dollar amount
     re.compile(r"\b\d+\.\d+d\b"),                   # age "5.2d"

@@ -36,6 +36,11 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config
+    from recon_gen.common.l2.primitives import L2Instance
 
 
 def l2_fingerprint_placeholder() -> str:
@@ -99,7 +104,7 @@ class ProvenanceFingerprint:
     def short(self) -> str:
         return self.composite_sha[:8]
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, str | int]:
         return {
             "schema": "qsg-audit-provenance-v1",
             "composite_sha": self.composite_sha,
@@ -112,7 +117,7 @@ class ProvenanceFingerprint:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "ProvenanceFingerprint":
+    def from_dict(cls, d: dict[str, Any]) -> "ProvenanceFingerprint":
         if d.get("schema") != "qsg-audit-provenance-v1":
             raise ValueError(
                 f"Unrecognized provenance schema: {d.get('schema')!r}"
@@ -127,7 +132,7 @@ class ProvenanceFingerprint:
         )
 
 
-def canonical_value(v) -> bytes:  # type: ignore[no-untyped-def]: v is any DB cell value (Decimal, datetime, str, bytes, None)
+def canonical_value(v: object) -> bytes:
     """Stable bytes repr for one cell value when hashing rows.
 
     Cross-dialect goal: PG and Oracle return the same logical row
@@ -152,7 +157,9 @@ def canonical_value(v) -> bytes:  # type: ignore[no-untyped-def]: v is any DB ce
 
 
 def hash_table_rows(
-    cur,  # type: ignore[no-untyped-def]: psycopg/oracledb sync cursor — drivers lack PEP 561 stubs
+    # WHY Any: psycopg + oracledb sync cursors share the DB-API 2.0
+    # surface but neither ships PEP 561 stubs.
+    cur: Any,
     *,
     table: str,
     hwm: int,
@@ -182,9 +189,13 @@ def hash_table_rows(
         f" WHERE entry <= {hwm}"
         f" ORDER BY entry"
     )
+    # BF.1.S2: cur is Any (DB-API 2.0; psycopg/oracledb lack PEP 561 stubs);
+    # `description` is a 7-tuple sequence per spec — narrow locally so the
+    # sort key is typed.
+    description: list[tuple[str, object, object, object, object, object, object]] = list(cur.description)
     sorted_indices = [
         idx for idx, _ in sorted(
-            enumerate(cur.description),
+            enumerate(description),
             key=lambda i_d: i_d[1][0].lower(),
         )
     ]
@@ -198,7 +209,8 @@ def hash_table_rows(
 
 
 def hash_matview_rows(
-    cur,  # type: ignore[no-untyped-def]: psycopg/oracledb sync cursor — drivers lack PEP 561 stubs
+    # WHY Any: same DB-API 2.0 sync cursor case — see ``hash_table_rows``.
+    cur: Any,
     *,
     matview: str,
 ) -> tuple[int, str]:
@@ -221,9 +233,10 @@ def hash_matview_rows(
     show both side by side.
     """
     cur.execute(f"SELECT * FROM {matview}")
+    description: list[tuple[str, object, object, object, object, object, object]] = list(cur.description)
     sorted_indices = [
         idx for idx, _ in sorted(
-            enumerate(cur.description),
+            enumerate(description),
             key=lambda i_d: i_d[1][0].lower(),
         )
     ]
@@ -284,7 +297,8 @@ def recon_gen_code_identity(version: str) -> str:
 
 
 def compute_provenance(
-    cfg, instance,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg: Config,
+    instance: L2Instance,  # noqa: ARG001 — preserved for caller symmetry  # pyright: ignore[reportUnusedParameter]: kept for caller symmetry across audit-CLI subcommands
     *,
     l2_instance_path: str | None,
     version: str,

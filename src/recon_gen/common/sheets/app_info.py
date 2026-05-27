@@ -181,7 +181,7 @@ def _matview_status_sql(
             "SELECT '(no matviews registered)' AS view_name, "
             f"0 AS row_count, NULL AS latest_date{dual_from(dialect)}"
         )
-    parts = []
+    parts: list[str] = []
     for name, date_col in view_specs:
         date_expr = f"MAX({date_col})" if date_col else "NULL"
         parts.append(

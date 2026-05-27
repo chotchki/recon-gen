@@ -1,3 +1,12 @@
+# BF.1.S2: `graphviz` ships without type stubs (PyPI `graphviz` is the
+# project's own untyped distribution; no `graphviz-stubs` exists). The
+# library API is `g.attr(**kwargs) / g.node(name, **kwargs) /
+# g.edge(t, h, **kwargs)` — all `Unknown` to pyright. Rather than wrap
+# every call site, suppress the three stub-cascade rules at file scope
+# and keep producer signatures (`_build_*_graph -> Digraph`) precise
+# so callers stay typed. `reportMissingTypeStubs` covers the import
+# itself; the two unknown-type rules absorb the call-site cascade.
+# pyright: reportMissingTypeStubs=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """Diagram render pipeline for the unified mkdocs site.
 
 Three diagram families:
@@ -26,8 +35,9 @@ binary is invoked at build time (Phase T migration).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import graphviz
 
@@ -38,9 +48,14 @@ from recon_gen.common.l2.primitives import (
     L2Instance,
     Rail,
     SingleLegRail,
-    TransferTemplate,
     TwoLegRail,
 )
+# BF.1.S2: `TransferTemplate` previously imported here was unused (only
+# referenced in docstrings) — dropped.
+
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config
+    from recon_gen.common.tree.structure import App
 
 
 # -- Public API --------------------------------------------------------------
@@ -175,7 +190,7 @@ def render_l2_rail_focus(l2_instance: L2Instance) -> str | None:
             acc = role_to_account.get(r)
             if acc is not None:
                 _add_account_node(g, acc)
-    elif isinstance(rail, SingleLegRail):
+    elif isinstance(rail, SingleLegRail):  # pyright: ignore[reportUnnecessaryIsInstance]  # BF.1.S2: defensive; Rail is a 2-member union today but the elif documents the contract
         for r in _expand_role_expression(rail.leg_role):
             acc = role_to_account.get(r)
             if acc is not None:
@@ -212,7 +227,7 @@ def render_l2_transfer_template_focus(l2_instance: L2Instance) -> str | None:
         rail = rails_by_name.get(rail_name)
         if isinstance(rail, TwoLegRail):
             kind = "TwoLeg"
-        elif isinstance(rail, SingleLegRail):
+        elif isinstance(rail, SingleLegRail):  # pyright: ignore[reportUnnecessaryIsInstance]  # BF.1.S2: defensive; Rail is a 2-member union today but the elif documents the contract
             kind = "SingleLeg"
         else:
             kind = ""
@@ -301,13 +316,20 @@ def render_dataflow(app_name: str) -> str:
     visual sourced from it. TextBox visuals (no field wells) are
     skipped via ``hasattr(visual, "datasets")``.
     """
-    from recon_gen.common.tree.structure import App
-
+    # BF.1.S2: previous local `import App` was unused (only for runtime narrowing
+    # — `_build_app` now returns `App` from TYPE_CHECKING import).
     app = _build_app(app_name)
     g = graphviz.Digraph(format="svg")
     g.attr(rankdir="LR", nodesep="0.4", ranksep="1.2")
     g.attr("node", fontsize="11")
 
+    # BF.1.S2: `App.analysis` is typed Optional; every bundled-app builder
+    # attaches one, but assert it here so a future builder regression surfaces
+    # as an explicit AssertionError rather than `NoneType has no attribute
+    # 'sheets'` deep inside the diagram walk.
+    assert app.analysis is not None, (
+        f"render_dataflow({app_name!r}): app.analysis is None — builder bug"
+    )
     # Node IDs use single ``__`` (not ``::``) — graphviz's edge writer
     # treats ``::`` inside a bare-word ID as a port-reference separator
     # (``node:port``), which mangles `g.edge(...)` output and trips the
@@ -561,7 +583,10 @@ def _build_layered_graph(l2_instance: L2Instance) -> graphviz.Digraph:
     g = graphviz.Digraph(format="svg")
     g.attr(rankdir="TB", nodesep="0.4", ranksep="1.4")
 
-    with g.subgraph(name="cluster_accounts") as c:
+    # BF.1.S2: graphviz's `subgraph(name=...)` form returns a CM at runtime;
+    # the lib's untyped signature ORs in a `None` return for the unrelated
+    # `subgraph(graph=...)` shape, so pyright can't see this branch is CM-safe.
+    with g.subgraph(name="cluster_accounts") as c:  # pyright: ignore[reportOptionalContextManager]: graphviz subgraph(name=) is CM-safe at runtime
         c.attr(label="Accounts + Rails", style="rounded", color="#90caf9")
         c.attr("node", fontsize="11", style="filled")
         role_to_account = _role_to_account(l2_instance)
@@ -572,7 +597,7 @@ def _build_layered_graph(l2_instance: L2Instance) -> graphviz.Digraph:
             _collect_rail_edges_for_accounts(rail, role_to_account, bundle)
         bundle.emit(c)
 
-    with g.subgraph(name="cluster_chains") as c:
+    with g.subgraph(name="cluster_chains") as c:  # pyright: ignore[reportOptionalContextManager]: graphviz subgraph(name=) is CM-safe at runtime
         c.attr(label="Chains", style="rounded", color="#a5d6a7")
         c.attr(
             "node", fontsize="11", shape="box", style="filled,rounded"
@@ -789,7 +814,7 @@ def _collect_rail_edges_for_accounts(
                     str(src_acc.id), str(dst_acc.id),
                     "two_leg", _rail_label(rail),
                 )
-    elif isinstance(rail, SingleLegRail):
+    elif isinstance(rail, SingleLegRail):  # pyright: ignore[reportUnnecessaryIsInstance]  # BF.1.S2: defensive; Rail is a 2-member union today but the elif documents the contract
         for leg_role in _expand_role_expression(rail.leg_role):
             acc = role_to_account.get(leg_role)
             if acc is None:
@@ -826,7 +851,7 @@ def _add_rail_edges(
                     fontsize="9",
                     color="#1976d2",
                 )
-    elif isinstance(rail, SingleLegRail):
+    elif isinstance(rail, SingleLegRail):  # pyright: ignore[reportUnnecessaryIsInstance]  # BF.1.S2: defensive; Rail is a 2-member union today but the elif documents the contract
         for leg_role in _expand_role_expression(rail.leg_role):
             acc = role_to_account.get(leg_role)
             if acc is None:
@@ -879,7 +904,7 @@ def _collect_rail_edges_for_templates(
                 if dst_id is None:
                     continue
                 bundle.add(src_id, dst_id, "two_leg", _rail_label(rail))
-    elif isinstance(rail, SingleLegRail):
+    elif isinstance(rail, SingleLegRail):  # pyright: ignore[reportUnnecessaryIsInstance]  # BF.1.S2: defensive; Rail is a 2-member union today but the elif documents the contract
         for leg_role in _expand_role_expression(rail.leg_role):
             if leg_role not in template_roles:
                 continue
@@ -888,59 +913,9 @@ def _collect_rail_edges_for_templates(
             bundle.add(node_id, node_id, "single_leg", _rail_label(rail))
 
 
-def _add_template_rail_edges(
-    g: graphviz.Digraph,
-    rail: Rail,
-    template_roles: set[str],
-    role_to_template: dict[str, AccountTemplate],
-    role_to_account: dict[str, Account],
-    rendered_singletons: set[str],
-) -> None:
-    """Legacy per-rail emit. Kept as a thin wrapper for any external
-    caller — the in-tree builder uses ``_collect_rail_edges_for_templates``
-    + ``_RailEdgeBundle`` so parallel rails along the same direction
-    render as one bundled edge.
-    """
-    if isinstance(rail, TwoLegRail):
-        sources = _expand_role_expression(rail.source_role)
-        destinations = _expand_role_expression(rail.destination_role)
-        if not _rail_touches_template(sources, destinations, template_roles):
-            return
-        for src_role in sources:
-            src_id = _template_or_singleton_node_id(
-                g, src_role, template_roles, role_to_template,
-                role_to_account, rendered_singletons,
-            )
-            if src_id is None:
-                continue
-            for dst_role in destinations:
-                dst_id = _template_or_singleton_node_id(
-                    g, dst_role, template_roles, role_to_template,
-                    role_to_account, rendered_singletons,
-                )
-                if dst_id is None:
-                    continue
-                g.edge(
-                    src_id,
-                    dst_id,
-                    label=str(rail.name),
-                    fontsize="9",
-                    color="#1976d2",
-                )
-    elif isinstance(rail, SingleLegRail):
-        for leg_role in _expand_role_expression(rail.leg_role):
-            if leg_role not in template_roles:
-                continue
-            template = role_to_template[leg_role]
-            node_id = _template_node_id(template)
-            g.edge(
-                node_id,
-                node_id,
-                label=str(rail.name),
-                fontsize="9",
-                style="dashed",
-                color="#7b1fa2",
-            )
+# BF.1.S2: dropped unused `_add_template_rail_edges` legacy compat wrapper
+# (the in-tree builder uses `_collect_rail_edges_for_templates` + `_RailEdgeBundle`;
+# no external callers — `grep -rn _add_template_rail_edges` returns zero).
 
 
 def _rail_touches_template(
@@ -979,9 +954,14 @@ def _template_or_singleton_node_id(
 
 
 def _expand_role_expression(expr: object) -> tuple[str, ...]:
-    """RoleExpression is either a single Identifier or a tuple of them."""
+    """RoleExpression is either a single Identifier or a tuple of them.
+
+    BF.1.S2: accepts ``object`` so we tolerate both the typed
+    ``RoleExpression = tuple[Identifier, ...]`` and the historical
+    bare-``Identifier`` shape some persona shims pass in.
+    """
     if isinstance(expr, tuple):
-        return tuple(str(e) for e in expr)
+        return tuple(str(e) for e in expr)  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]: expr typed `object` to accept legacy bare-Identifier and modern RoleExpression tuple
     return (str(expr),)
 
 
@@ -1007,7 +987,7 @@ def _add_chain_edge(g: graphviz.Digraph, chain: Chain) -> None:
 # -- App tree builder dispatch -----------------------------------------------
 
 
-def _build_app(app_name: str):
+def _build_app(app_name: str) -> App:
     """Build the named app's tree against a default L2 + minimal Config.
 
     Used for ``render_dataflow`` — only needs the analysis structure
@@ -1033,27 +1013,30 @@ def _build_app(app_name: str):
     return _APP_BUILDERS[app_name](cfg, l2_instance=spec_example)
 
 
-def _build_l1_app(cfg, *, l2_instance):
+def _build_l1_app(cfg: Config, *, l2_instance: L2Instance) -> App:
     from recon_gen.apps.l1_dashboard.app import build_l1_dashboard_app
     return build_l1_dashboard_app(cfg, l2_instance=l2_instance)
 
 
-def _build_l2ft_app(cfg, *, l2_instance):
+def _build_l2ft_app(cfg: Config, *, l2_instance: L2Instance) -> App:
     from recon_gen.apps.l2_flow_tracing.app import build_l2_flow_tracing_app
     return build_l2_flow_tracing_app(cfg, l2_instance=l2_instance)
 
 
-def _build_inv_app(cfg, *, l2_instance):
+def _build_inv_app(cfg: Config, *, l2_instance: L2Instance) -> App:
     from recon_gen.apps.investigation.app import build_investigation_app
     return build_investigation_app(cfg, l2_instance=l2_instance)
 
 
-def _build_exec_app(cfg, *, l2_instance):
+def _build_exec_app(cfg: Config, *, l2_instance: L2Instance) -> App:
     from recon_gen.apps.executives.app import build_executives_app
     return build_executives_app(cfg, l2_instance=l2_instance)
 
 
-_APP_BUILDERS = {
+# BF.1.S2: builders take cfg positionally + l2_instance as kwarg, so the
+# value type uses `...` rather than spelling the kwarg out — `Callable[...]`
+# with a typed return is enough to kill the cascade at the dispatch site.
+_APP_BUILDERS: dict[str, Callable[..., "App"]] = {
     "l1_dashboard": _build_l1_app,
     "l2_flow_tracing": _build_l2ft_app,
     "investigation": _build_inv_app,

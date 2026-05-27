@@ -19,7 +19,7 @@ from __future__ import annotations
 import threading
 import time
 from contextlib import contextmanager
-from collections.abc import Iterator
+from collections.abc import Generator
 
 import uvicorn
 
@@ -27,7 +27,7 @@ import uvicorn
 @contextmanager
 def studio_editor_server(
     asgi_app: object, startup_timeout_s: float = 5.0,
-) -> Iterator[str]:
+) -> Generator[str, None, None]:
     """Run a Starlette / ASGI app on an ephemeral port. Yields the
     bound URL; tears down on context exit.
 

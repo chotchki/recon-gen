@@ -30,7 +30,6 @@ Substep landmarks:
 
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import timedelta
 
 from recon_gen.common.config import Config
@@ -42,6 +41,7 @@ from recon_gen.common.dataset_contract import (
 )
 from recon_gen.common.l2 import (
     L2Instance,
+    RoleExpression,
     SingleLegRail,
     TwoLegRail,
     posted_requirements_for,
@@ -64,7 +64,6 @@ from recon_gen.common.sql import (
     typed_null,
 )
 from recon_gen.common.sql.money import cents_to_dollars_sql
-from recon_gen.common.tree import Dataset
 
 
 def l2ft_matview_specs(
@@ -461,7 +460,7 @@ META_VALUES_CONTRACT = DatasetContract(columns=[
 
 def build_all_l2_flow_tracing_datasets(
     cfg: Config, l2_instance: L2Instance,
-) -> list[Dataset]:
+) -> list[DataSet]:
     """Return every Dataset the L2 Flow Tracing app needs.
 
     Mirrors `build_all_l1_dashboard_datasets`: derives an L2-aware
@@ -798,7 +797,7 @@ def build_meta_values_dataset(
         # for transactions where that key has a non-null metadata
         # value. UNION ALL stitches them; DISTINCT happens at the
         # visual level via the dropdown's distinct-values semantics.
-        branches = []
+        branches: list[str] = []
         for k in keys:
             json_path = f"$.{k}"
             jv = json_value("metadata", _sql_str(json_path), cfg.dialect)
@@ -1697,7 +1696,7 @@ def _leg_shape(rail: TwoLegRail | SingleLegRail) -> str:
     return f"{arity}-aggregating" if rail.aggregating else arity
 
 
-def _role_str(role: tuple) -> str:
+def _role_str(role: RoleExpression) -> str:
     """Render a RoleExpression (tuple of Identifiers) as a display string.
 
     Single-role: the name. UNION (multi-role): joined with " | " (the

@@ -23,7 +23,7 @@ the contract that each KPI/table matches its binding.
 
 from __future__ import annotations
 
-from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -31,20 +31,31 @@ from recon_gen.apps.l2_flow_tracing.datasets import (
     build_unified_l2_exceptions_dataset,
 )
 from tests.e2e._kpi_parse import parse_int_kpi
+from recon_gen.common.config import Config
 
+
+
+if TYPE_CHECKING:
+    from recon_gen.common.l2 import L2Instance
+    from recon_gen.common.models import DatasetParameter
+    from tests.e2e._drivers import DashboardDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
-def _l2ft_exceptions_sql_and_params(cfg, l2):  # type: ignore[no-untyped-def]: cfg/l2 are runtime fixture values — annotating would force imports here
+def _l2ft_exceptions_sql_and_params(
+    cfg: Config, l2: "L2Instance",
+) -> tuple[str, list["DatasetParameter"]]:
     ds = build_unified_l2_exceptions_dataset(cfg, l2)
-    sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
-    return sql, list(ds.DatasetParameters or ())
+    physical = next(iter(ds.PhysicalTableMap.values()))
+    assert physical.CustomSql is not None
+    sql = physical.CustomSql.SqlQuery
+    return sql, list(ds.DatasetParameters or [])
 
 
 def test_bg6_l2ft_exceptions_kpi_matches_dataset_row_count(
-    l2ft_dashboard_driver, cfg, l2,
-):
+    l2ft_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance",
+) -> None:
     """BG.6 — Open L2 Violations KPI must equal the row count of the
     unified L2 exceptions dataset. The KPI binding is
     ``ds["check_type"].count()`` — same as "count of rows."
@@ -75,8 +86,8 @@ def test_bg6_l2ft_exceptions_kpi_matches_dataset_row_count(
 
 
 def test_bg6_l2ft_exceptions_table_count_column_sums_to_dataset_total(
-    l2ft_dashboard_driver, cfg, l2,
-):
+    l2ft_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance",
+) -> None:
     """BG.6 — the L2 Violation Detail table's ``count`` column values
     must sum to ``SUM(count)`` over the unified L2 exceptions dataset.
 

@@ -1,3 +1,7 @@
+# pyright: reportArgumentType=false
+# BF.4/F: _ALL_INVARIANTS is `tuple[str, ...]` but `count_l1_invariant_rows`
+# takes the narrower `L1Invariant` Literal. Runtime correctness is enforced by
+# the matview-extract helpers' own dict lookups (raises on unknown name).
 """U.8.b / X.2.j.B — 4-way cross-tool agreement test (release gate).
 
 Per-invariant contract — the chain
@@ -54,6 +58,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Iterator, Mapping
 
 import pytest
 from click.testing import CliRunner
@@ -77,6 +82,12 @@ from tests.audit._matview_extract import (
 from tests.audit._pdf_extract import count_invariant_table_rows
 from tests.audit._scenario_expectations import expected_audit_counts
 from tests.e2e._drivers import App2Driver, QsEmbedDriver
+
+if TYPE_CHECKING:
+    from mypy_boto3_quicksight.client import QuickSightClient
+
+    from recon_gen.common.config import Config
+    from recon_gen.common.l2.seed import ScenarioPlant
 
 
 pytestmark = [
@@ -173,7 +184,9 @@ _DIALECT_CONFIG_PATHS: dict[str, Path] = {
 
 
 @pytest.fixture(scope="module", params=["postgres", "oracle"])
-def dialect_cfg(request):
+def dialect_cfg(
+    request: pytest.FixtureRequest,
+) -> "tuple[Config, Path, Dialect]":
     """Per-dialect (cfg, cfg_path, dialect_enum) — module-scoped.
 
     Skips cleanly when the dialect's config file is absent OR when
@@ -287,7 +300,7 @@ def dialect_cfg(request):
 
 
 @pytest.fixture(scope="module")
-def per_dialect_cfg(dialect_cfg):
+def per_dialect_cfg(dialect_cfg: "tuple[Config, Path, Dialect]") -> "Config":
     """The loaded ``Config`` for this dialect cell.
 
     Distinct from the conftest session-scoped ``cfg`` fixture (which
@@ -299,17 +312,17 @@ def per_dialect_cfg(dialect_cfg):
 
 
 @pytest.fixture(scope="module")
-def per_dialect_account_id(per_dialect_cfg) -> str:
+def per_dialect_account_id(per_dialect_cfg: "Config") -> str:
     return per_dialect_cfg.aws_account_id
 
 
 @pytest.fixture(scope="module")
-def per_dialect_region(per_dialect_cfg) -> str:
+def per_dialect_region(per_dialect_cfg: "Config") -> str:
     return per_dialect_cfg.aws_region
 
 
 @pytest.fixture(scope="module")
-def per_dialect_qs_client(per_dialect_region):
+def per_dialect_qs_client(per_dialect_region: str) -> "QuickSightClient":
     """Boto3 QuickSight client for this dialect's dashboard region.
 
     Module-scoped — one client per (region, dialect). Cheaper than
@@ -317,11 +330,11 @@ def per_dialect_qs_client(per_dialect_region):
     invariants in this module.
     """
     import boto3
-    return boto3.client("quicksight", region_name=per_dialect_region)
+    return boto3.client("quicksight", region_name=per_dialect_region)  # pyright: ignore[reportUnknownMemberType]: boto3.client dynamic service overload
 
 
 @pytest.fixture(scope="module")
-def per_dialect_l1_dashboard_id(per_dialect_cfg) -> str:
+def per_dialect_l1_dashboard_id(per_dialect_cfg: "Config") -> str:
     """L1 dashboard ID under this dialect's deployment_name prefix.
 
     Z.C — derives the same way the L1 app's deploy does:
@@ -332,7 +345,10 @@ def per_dialect_l1_dashboard_id(per_dialect_cfg) -> str:
 
 
 @pytest.fixture(scope="module")
-def seeded_audit(dialect_cfg, tmp_path_factory):
+def seeded_audit(
+    dialect_cfg: "tuple[Config, Path, Dialect]",
+    tmp_path_factory: pytest.TempPathFactory,
+) -> "tuple[Path, ScenarioPlant]":
     """Seed dialect-specific DB with the spec_example scenario, render
     audit PDF against the same DB.
 
@@ -378,13 +394,13 @@ def seeded_audit(dialect_cfg, tmp_path_factory):
 
 @pytest.fixture
 def per_dialect_qs_driver(
-    request,
-    per_dialect_cfg,
-    per_dialect_region,
-    per_dialect_account_id,
-    per_dialect_l1_dashboard_id,
-    per_dialect_qs_client,
-):  # type: ignore[no-untyped-def]: return-type annotation would force a QsEmbedDriver import at module scope
+    request: pytest.FixtureRequest,
+    per_dialect_cfg: "Config",
+    per_dialect_region: str,
+    per_dialect_account_id: str,
+    per_dialect_l1_dashboard_id: str,
+    per_dialect_qs_client: "QuickSightClient",
+) -> "Iterator[QsEmbedDriver | None]":
     """Function-scoped ``QsEmbedDriver`` aimed at this dialect's L1
     dashboard. Embed URLs are single-use, so the driver gets a fresh
     page per test.
@@ -445,7 +461,7 @@ def per_dialect_qs_driver(
 
 
 @pytest.fixture(scope="module")
-def per_dialect_matview_prefix(per_dialect_cfg) -> str:
+def per_dialect_matview_prefix(per_dialect_cfg: "Config") -> str:
     """The matview-name prefix this dialect cell's DB was seeded with —
     ``cfg.db_table_prefix`` (Z.C: replaces the prior
     ``L2Instance.instance`` field, which doubled as the DB-table prefix).
@@ -456,7 +472,9 @@ def per_dialect_matview_prefix(per_dialect_cfg) -> str:
 
 
 @pytest.fixture
-def per_dialect_conn(per_dialect_cfg):  # type: ignore[no-untyped-def]: yields a per-driver DB connection (psycopg/oracledb/sqlite3) — no shared type
+def per_dialect_conn(per_dialect_cfg: "Config") -> "Iterator[Any]":
+    # WHY Iterator[Any]: yields a per-driver DB connection
+    # (psycopg/oracledb/sqlite3) — no shared Protocol across the three.
     """Function-scoped raw DB connection to this dialect cell's seeded DB.
 
     The direct-SQL anchor (the 5th leg in ``scenario ⊆ direct_SQL ==
@@ -472,7 +490,10 @@ def per_dialect_conn(per_dialect_cfg):  # type: ignore[no-untyped-def]: yields a
 
 
 @pytest.fixture(scope="module")
-def per_dialect_app2_results(per_dialect_cfg, seeded_audit):  # type: ignore[no-untyped-def]: returns a dict; annotating would force the imports below to module scope
+def per_dialect_app2_results(
+    per_dialect_cfg: "Config",
+    seeded_audit: "tuple[Path, ScenarioPlant]",
+) -> "Mapping[str, Mapping[str, object]]":
     """The App2 leg's data, read once up-front (X.2.j.B.1).
 
     Spins this dialect cell's L1 dashboard tree via ``App2Driver.serving``
@@ -517,6 +538,7 @@ def per_dialect_app2_results(per_dialect_cfg, seeded_audit):  # type: ignore[no-
         tree_app=tree_app, cfg=per_dialect_cfg,
     )
     results: dict[str, dict[str, object]] = {}
+    assert tree_app.analysis is not None
     with App2Driver.serving(
         cfg=per_dialect_cfg,
         tree_app=tree_app, sheet=tree_app.analysis.sheets[0],
@@ -572,15 +594,15 @@ _ALL_INVARIANTS: tuple[str, ...] = (
 
 @pytest.mark.parametrize("invariant", _ALL_INVARIANTS)
 def test_invariant_four_way_agreement(
-    seeded_audit,
-    per_dialect_qs_driver,
-    per_dialect_app2_results,
-    per_dialect_l1_dashboard_id,
-    per_dialect_conn,
-    per_dialect_matview_prefix,
-    per_dialect_cfg,
-    invariant,
-):
+    seeded_audit: "tuple[Path, ScenarioPlant]",
+    per_dialect_qs_driver: "QsEmbedDriver | None",
+    per_dialect_app2_results: "Mapping[str, Mapping[str, object]]",
+    per_dialect_l1_dashboard_id: str,
+    per_dialect_conn: Any,
+    per_dialect_matview_prefix: str,
+    per_dialect_cfg: "Config",
+    invariant: str,
+) -> None:
     """Per-invariant 4-renderer agreement (X.2.j.B): the chain
 
         scenario_plants  ⊆  direct_matview_SELECT  ==  QS  ==  App2

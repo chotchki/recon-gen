@@ -13,6 +13,7 @@ Two layers:
 
 from __future__ import annotations
 
+from recon_gen.apps.l1_dashboard.app import _SUPERSESSION_AUDIT_NAME
 from recon_gen.common.handbook.invariants import (
     INVARIANT_KIND_TO_SHEET,
     InvariantSection,
@@ -110,7 +111,7 @@ Reads from BASE tables.
     sections = parse_l1_invariants(md)
     assert "supersession_audit" in sections
     sup = sections["supersession_audit"]
-    assert sup.title == "Supersession Audit"
+    assert sup.title == _SUPERSESSION_AUDIT_NAME
     assert sup.short_statement == ""  # Descriptive section, no blockquote.
     assert "not** a SHOULD-constraint" in sup.body
     assert sup.columns == ()

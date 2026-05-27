@@ -24,7 +24,6 @@ import sqlite3
 from datetime import date
 from pathlib import Path
 
-import pytest
 
 from recon_gen.common.db import execute_script
 from recon_gen.common.l2.auto_scenario import default_scenario_for

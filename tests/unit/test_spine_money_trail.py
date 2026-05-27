@@ -43,7 +43,6 @@ from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.spine import (
     Invariant,
-    MoneyTrailGenerator,
     MoneyTrailInvariant,
     MoneyTrailView,
     Violation,

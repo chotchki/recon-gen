@@ -1,3 +1,6 @@
+# pyright: reportUnknownLambdaType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
+# BF.4/F: Playwright expect_request lambda receives a Request whose .url is str;
+# Playwright stubs leak Unknown through the lambda parameter.
 """HTML2 Money Trail layer-2 e2e tests.
 
 Lifted from ``tests/spike/test_html_layer2.py`` (X.2.a.5) and re-pointed

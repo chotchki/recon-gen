@@ -59,7 +59,6 @@ import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
-import pytest
 
 from recon_gen.common.db import _register_sqlite_aggregates, execute_script
 from recon_gen.common.l2.auto_scenario import (
@@ -142,12 +141,14 @@ def _fresh_db() -> sqlite3.Connection:
 
 def _apply_old_path(
     conn: sqlite3.Connection,
-    scenario,  # type: ignore[no-untyped-def]: scenario is ScenarioPlant; annotation forces import to module scope
+    scenario: object,
 ) -> None:
     """Execute the OLD `emit_seed` SQL against the connection +
-    refresh the matviews."""
+    refresh the matviews. `scenario` is `ScenarioPlant` at runtime; typed
+    as `object` here to keep the import lazy (avoids the module-load
+    cycle the test pinned-fixture cared about)."""
     instance = load_instance(_SPEC_EXAMPLE)
-    sql = emit_seed(instance, scenario, prefix=_PREFIX, dialect=_DIALECT)
+    sql = emit_seed(instance, scenario, prefix=_PREFIX, dialect=_DIALECT)  # pyright: ignore[reportUnknownArgumentType, reportArgumentType]: scenario is ScenarioPlant at runtime; see docstring
     cur = conn.cursor()
     execute_script(cur, sql, dialect=_DIALECT)
     conn.commit()

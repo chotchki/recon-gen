@@ -1,3 +1,8 @@
+# pyright: reportUnknownLambdaType=false, reportUnknownMemberType=false
+# BF.4/F: Playwright `expect_response` lambda receives a `Response` whose `.url`
+# is `str`, but Playwright's stubs leak `Unknown` through the lambda parameter.
+# These tests exercise raw Playwright as App2Driver escape-hatch; suppressing
+# Unknown keeps the lambda calls readable.
 """X.2.h.5 — App 2's Table sort + pagination round-trip (browser).
 
 The Table renderer (``bootstrap.js::renderTable``) renders the server's

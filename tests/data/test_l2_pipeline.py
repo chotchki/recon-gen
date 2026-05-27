@@ -61,7 +61,7 @@ def test_pipeline_singleton_account(tmp_path: Path) -> None:
 
 def test_pipeline_account_template(tmp_path: Path) -> None:
     """AccountTemplate + the singleton Account it parents under."""
-    inst, sql = _pipeline(dedent("""\
+    inst, _ = _pipeline(dedent("""\
         accounts:
           - id: gl-control
             role: ControlAccount

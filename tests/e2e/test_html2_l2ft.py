@@ -57,7 +57,7 @@ _calls_log: list[tuple[str, dict[str, list[str]]]] = []
 
 
 def _l2ft_stub_fetcher(
-    visual_id: str, params: dict[str, list[str]],
+    visual_id: str, params: dict[str, list[str]],  # typing-smell: ignore[bare-str-id]: visual_id comes from callers as raw analyst string
 ) -> dict[str, Any]:
     """Deterministic per-visual-kind stub. Records every call into
     ``_calls_log`` so the dropdown-selection assertion can inspect what
@@ -96,7 +96,7 @@ def l2ft_driver() -> Iterator[App2Driver]:
     with App2Driver.serving(
         cfg=_TEST_CFG,
         tree_app=tree_app, sheet=landing_sheet,
-        data_fetcher=_l2ft_stub_fetcher,
+        data_fetcher=_l2ft_stub_fetcher,  # pyright: ignore[reportArgumentType]: inline fetcher closure; structural DataFetcher contract holds at runtime
         dashboard_id=_DASHBOARD_ID,
         dashboard_title="L2 Flow Tracing",
     ) as driver:

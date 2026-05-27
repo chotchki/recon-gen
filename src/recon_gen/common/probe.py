@@ -19,7 +19,10 @@ from __future__ import annotations
 
 import json
 import re
-from typing import NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
+
+if TYPE_CHECKING:
+    from playwright.sync_api import ConsoleMessage
 
 
 class ProbedError(NamedTuple):
@@ -37,15 +40,15 @@ def _parse_stream_error(text: str) -> ProbedError | None:
     if not m:
         return None
     try:
-        payload = json.loads(m.group(0))
+        payload: dict[str, Any] = json.loads(m.group(0))
     except json.JSONDecodeError:
         return None
-    hierarchy = payload.get("errorCodeHierarchyPrimitiveModel") or []
-    error_class = next(
-        (h.get("name", "?") for h in hierarchy if h.get("type") == "ERROR"),
+    hierarchy: list[dict[str, Any]] = payload.get("errorCodeHierarchyPrimitiveModel") or []
+    error_class: str = next(
+        (str(h.get("name", "?")) for h in hierarchy if h.get("type") == "ERROR"),
         "UNKNOWN",
     )
-    msg = payload.get("internalMessage") or payload.get("error") or ""
+    msg: str = payload.get("internalMessage") or payload.get("error") or ""
     msg = msg.replace("\\n", " ").strip()
     if msg.endswith("https://docs.oracle.com/error-help/db/ora-00904/"):
         msg = msg.rsplit("https://", 1)[0].strip()
@@ -56,7 +59,7 @@ def probe_dashboard(
     *,
     aws_account_id: str,
     aws_region: str,
-    dashboard_id: str,
+    dashboard_id: str,  # typing-smell: ignore[bare-str-id]: dashboard_id comes from callers as raw analyst string
     initial_settle_ms: int = 8000,
     sheet_settle_ms: int = 8000,
 ) -> dict[str, list[ProbedError]]:
@@ -80,7 +83,7 @@ def probe_dashboard(
 
     captured: list[str] = []
 
-    def grab(message) -> None:
+    def grab(message: ConsoleMessage) -> None:
         text = message.text
         if "Stream error" in text and "internalMessage" in text:
             captured.append(text)
@@ -149,7 +152,7 @@ def assert_no_datasource_errors(
 
 
 def format_report(
-    dashboard_id: str, results: dict[str, list[ProbedError]],
+    dashboard_id: str, results: dict[str, list[ProbedError]],  # typing-smell: ignore[bare-str-id]: dashboard_id comes from callers as raw analyst string
 ) -> str:
     """Render a probe result as a CLI-friendly text block."""
     lines = [f"== {dashboard_id} =="]

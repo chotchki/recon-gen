@@ -31,8 +31,14 @@ stuck-pending rows to drill from.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
+
+
+if TYPE_CHECKING:
+    from tests.e2e._drivers import DashboardDriver
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
@@ -51,7 +57,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
     ),
     strict=False,
 )
-def test_pending_aging_drill_to_transactions_shows_target(l1_dashboard_driver):
+def test_pending_aging_drill_to_transactions_shows_target(l1_dashboard_driver: tuple["DashboardDriver", str]) -> None:
     """Drill from a Pending Aging row → "View Transactions for this
     transfer" must land on a Transactions sheet that actually shows the
     target transfer (≥1 row in the Posting Ledger table).

@@ -17,11 +17,19 @@ implementations are thin wrappers around the production library
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import click
 
 from recon_gen.common.config import load_config
+
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config, PlantKind
+    from recon_gen.common.l2.primitives import L2Instance
+    from recon_gen.common.l2.seed import ScenarioPlant
 
 
 __all__ = [
@@ -37,7 +45,7 @@ __all__ = [
 ]
 
 
-APPS = (
+APPS: tuple[str, ...] = (
     "investigation",
     "executives",
     "l1-dashboard",
@@ -45,7 +53,7 @@ APPS = (
 )
 
 
-def write_json(path: Path, data: dict) -> None:
+def write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n")
     click.echo(f"  wrote {path}")
@@ -67,7 +75,7 @@ def prune_stale_files(directory: Path, *, keep: set[str]) -> None:
 
 def resolve_l2_for_demo(
     config_path: str, l2_instance_path: str | None,
-):  # type: ignore[no-untyped-def]: returns (Config, L2Instance) — both typed but tuple unpacks at every caller
+) -> tuple[Config, L2Instance]:
     """Load config + L2 instance.
 
     Returns ``(cfg, instance)``. Mirrors the prelude every ``apply``
@@ -92,7 +100,13 @@ _DEFAULT_BROKEN_COUNT = 15
 _DEFAULT_FANOUT_MULTIPLIER = 5
 
 
-def build_default_scenario(instance, *, anchor=None, density: float = 1.0, plants=None):  # type: ignore[no-untyped-def]: instance/anchor/plants untyped pending CLI-wide sweep
+def build_default_scenario(
+    instance: L2Instance,
+    *,
+    anchor: date | None = None,
+    density: float = 1.0,
+    plants: tuple[PlantKind, ...] | None = None,
+) -> ScenarioPlant:
     """Build the densified+broken+boosted default scenario.
 
     Shared by ``build_full_seed_sql`` (X.4.g.8 scope:full) and
@@ -145,7 +159,15 @@ def build_default_scenario(instance, *, anchor=None, density: float = 1.0, plant
     return filter_scenario_plants(boosted, plants)
 
 
-def build_full_seed_sql(cfg, instance, *, anchor=None, density: float = 1.0, plants=None, base_seed=None) -> str:  # type: ignore[no-untyped-def]: cfg/instance/anchor/plants/base_seed untyped pending CLI-wide sweep
+def build_full_seed_sql(
+    cfg: Config,
+    instance: L2Instance,
+    *,
+    anchor: date | None = None,
+    density: float = 1.0,
+    plants: tuple[PlantKind, ...] | None = None,
+    base_seed: int | None = None,
+) -> str:
     """Compose the demo seed pipeline (90-day baseline + plant overlays).
 
     ``anchor`` pins the calendar date used by both ``default_scenario_for``
@@ -183,7 +205,9 @@ def build_full_seed_sql(cfg, instance, *, anchor=None, density: float = 1.0, pla
     )
 
 
-def build_config_populate_sql(cfg, instance, *, anchor=None) -> str:  # type: ignore[no-untyped-def]: cfg/instance/anchor untyped pending CLI-wide sweep
+def build_config_populate_sql(
+    cfg: Config, instance: L2Instance, *, anchor: date | None = None,
+) -> str:
     """BC.7.1+2 — emit the ``<prefix>_config`` row populate SQL.
 
     Single seam shared by ``schema apply`` (production deploy event
@@ -257,7 +281,7 @@ def emit_to_target(
 
 
 def connect_and_apply(
-    cfg, sql: str, *, label: str,  # type: ignore[no-untyped-def]: cfg untyped pending CLI-wide sweep
+    cfg: Config, sql: str, *, label: str,
 ) -> None:
     """Open the demo DB connection, run ``sql``, commit; rollback on error.
 
@@ -309,7 +333,7 @@ def connect_and_apply(
 
 # Common click options shared across artifact subcommands.
 
-def l2_instance_option():  # type: ignore[no-untyped-def]: Click decorator stubs erase the function-decorator return type
+def l2_instance_option() -> Callable[..., Any]:
     """``--l2 PATH`` — defaults to bundled spec_example."""
     return click.option(
         "--l2", "l2_instance_path",
@@ -318,7 +342,7 @@ def l2_instance_option():  # type: ignore[no-untyped-def]: Click decorator stubs
     )
 
 
-def config_option(*, required_for_dialect_only: bool = False):  # type: ignore[no-untyped-def]: Click decorator stubs erase the function-decorator return type
+def config_option(*, required_for_dialect_only: bool = False) -> Callable[..., Any]:
     """``--config / -c PATH`` — config.yaml.
 
     Pass ``required_for_dialect_only=True`` for emit-only commands that
@@ -336,7 +360,7 @@ def config_option(*, required_for_dialect_only: bool = False):  # type: ignore[n
     )
 
 
-def output_option(*, default: str | None = None):  # type: ignore[no-untyped-def]: Click decorator stubs erase the function-decorator return type
+def output_option(*, default: str | None = None) -> Callable[..., Any]:
     """``-o FILE`` — output redirect.
 
     For schema/data: omit ``-o`` to emit to stdout. Pass ``-o FILE`` to
@@ -359,7 +383,7 @@ def output_option(*, default: str | None = None):  # type: ignore[no-untyped-def
     )
 
 
-def execute_option():  # type: ignore[no-untyped-def]: Click decorator stubs erase the function-decorator return type
+def execute_option() -> Callable[..., Any]:
     """``--execute`` — actually do the destructive thing.
 
     Without this flag, apply/clean commands emit the script they would

@@ -14,15 +14,33 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
 
 from recon_gen.common.config import load_config
 from recon_gen.common.theme import build_theme
 
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config
+    from recon_gen.common.l2.primitives import L2Instance
 
-def _write_json(path: Path, data: dict) -> None:
+
+# Module-internal helpers are still imported across cli/ submodules
+# (cli/json.py dispatches to ``_generate_<app>`` here). Declaring
+# them in __all__ keeps pyright's reportUnusedFunction quiet while
+# preserving the leading-underscore convention that signals
+# package-private.
+__all__ = [
+    "_dashboard_id_for_app",
+    "_generate_executives",
+    "_generate_investigation",
+    "_generate_l1_dashboard",
+    "_generate_l2_flow_tracing",
+]
+
+
+def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n")
     click.echo(f"  wrote {path}")
@@ -43,7 +61,16 @@ def _prune_stale_files(directory: Path, *, keep: set[str]) -> None:
 
 
 def _all_dataset_filenames(
-    cfg, *, keep_current: list, l2_instance=None,
+    cfg: Config,
+    *,
+    # LURKING-BUG (BF.1.S4): apps/l2_flow_tracing/datasets.py annotates
+    # ``build_all_l2_flow_tracing_datasets`` as ``list[Dataset]`` (tree
+    # node) but every element is actually a ``DataSet`` (AWS model with
+    # ``DataSetId`` + ``to_aws_json``). The other three apps return
+    # ``list[DataSet]``. Until the apps/ annotation gets straightened,
+    # widen here to ``list[Any]`` so the dispatch tolerates the divergence.
+    keep_current: list[Any],
+    l2_instance: L2Instance | None = None,
 ) -> set[str]:
     """Expected dataset filenames for all four apps combined.
 
@@ -75,6 +102,9 @@ def _all_dataset_filenames(
 
     active_l2 = l2_instance if l2_instance is not None else default_l2_instance()
 
+    # Element type is the AWS ``DataSet`` model — see LURKING-BUG note
+    # above; l2ft's annotation is currently the tree ``Dataset``, but
+    # the runtime values are AWS-model and carry ``DataSetId``.
     names: set[str] = {f"{ds.DataSetId}.json" for ds in keep_current}
     names.update(f"{ds.DataSetId}.json" for ds in _inv(cfg, active_l2))
     names.update(f"{ds.DataSetId}.json" for ds in _exec(cfg))
@@ -83,13 +113,13 @@ def _all_dataset_filenames(
         for ds in _l1(cfg, active_l2)
     )
     names.update(
-        f"{ds.DataSetId}.json"
+        f"{ds.DataSetId}.json"  # type: ignore[attr-defined]: l2ft return-type annotation is wrong; runtime is DataSet (AWS)
         for ds in _l2ft(cfg, active_l2)
     )
     return names
 
 
-def _resolve_l2(l2_instance_path: str | None):  # type: ignore[no-untyped-def]: returns L2Instance, untyped pending CLI-wide sweep
+def _resolve_l2(l2_instance_path: str | None) -> L2Instance:
     """Load + return the L2 instance, defaulting to the bundled spec_example."""
     from recon_gen.common.l2 import default_l2_instance
     from recon_gen.common.l2 import load_instance
@@ -276,7 +306,8 @@ def _generate_l2_flow_tracing(
         ),
     )
     for ds in datasets:
-        _write_json(out / "datasets" / f"{ds.DataSetId}.json", ds.to_aws_json())
+        # See LURKING-BUG above — runtime is the AWS DataSet model.
+        _write_json(out / "datasets" / f"{ds.DataSetId}.json", ds.to_aws_json())  # type: ignore[attr-defined]: l2ft datasets return-type annotation is wrong
 
     app = build_l2_flow_tracing_app(cfg, l2_instance=l2_instance)
     _write_json(

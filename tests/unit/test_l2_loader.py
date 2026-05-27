@@ -1,3 +1,6 @@
+# pyright: reportArgumentType=false
+# BF.4/F: test indexes dict-keyed-by-Identifier using bare strings; Identifier
+# is a NewType — runtime no-op.
 """Loader tests for ``common.l2.load_instance``.
 
 Coverage split:

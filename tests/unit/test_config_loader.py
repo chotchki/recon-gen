@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from recon_gen.common.cleanup import DEPLOYMENT_TAG_KEY, MANAGED_TAG_KEY
 from recon_gen.common.config import load_config
 from recon_gen.common.env_keys import (
     RECON_GEN_AWS_ACCOUNT_ID,
@@ -51,7 +52,7 @@ def _required_yaml(extras: dict[str, object] | None = None) -> dict[str, object]
     return out
 
 
-def _write_yaml(tmp_path: Path, body: dict) -> Path:
+def _write_yaml(tmp_path: Path, body: dict) -> Path:  # pyright: ignore[reportUnknownParameterType, reportMissingTypeArgument]: body kwarg is the loose yaml dict shape
     p = tmp_path / "config.yaml"
     p.write_text(yaml.safe_dump(body), encoding="utf-8")
     return p
@@ -118,12 +119,12 @@ def test_tagging_enabled_true_populates_tags_kwarg(tmp_path: Path) -> None:
     tags = cfg.tags()
     assert tags is not None
     keys = {tag.Key for tag in tags}
-    assert {"ManagedBy", "Deployment", "Owner"} <= keys
+    assert {MANAGED_TAG_KEY, DEPLOYMENT_TAG_KEY, "Owner"} <= keys
     # The legacy two-tag pair must not regress.
     assert "ResourcePrefix" not in keys
     assert "L2Instance" not in keys
     by_key = {tag.Key: tag.Value for tag in tags}
-    assert by_key["Deployment"] == "recon-customprefix"
+    assert by_key[DEPLOYMENT_TAG_KEY] == "recon-customprefix"
 
 
 def test_tagging_enabled_non_bool_rejected(tmp_path: Path) -> None:

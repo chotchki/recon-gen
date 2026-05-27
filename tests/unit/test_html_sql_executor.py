@@ -17,7 +17,7 @@ infrastructure.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytest
@@ -327,7 +327,7 @@ def test_expand_multivalued_quoted_form_drops_author_quotes() -> None:
 
 
 def test_execute_visual_sql_expands_multivalued_in_list_against_db(
-    sqlite_factory: Any,
+    sqlite_factory: Callable[[], Any],
 ) -> None:
     """End-to-end: a MULTI_VALUED ``<<$pName>>`` in an ``IN (...)`` with
     2 URL values filters the DB to exactly those rows — proving the
@@ -345,7 +345,7 @@ def test_execute_visual_sql_expands_multivalued_in_list_against_db(
 
 
 def test_execute_visual_sql_multivalued_single_value_against_db(
-    sqlite_factory: Any,
+    sqlite_factory: Callable[[], Any],
 ) -> None:
     """One URL value through the same pipeline — the non-expanded
     ``:param_pName`` bind path still produces ``IN ('beta')``."""
@@ -361,7 +361,7 @@ def test_execute_visual_sql_multivalued_single_value_against_db(
 
 
 def test_execute_visual_sql_multivalued_emptied_falls_to_default_against_db(
-    sqlite_factory: Any,
+    sqlite_factory: Callable[[], Any],
 ) -> None:
     """Emptied multi-select (``?param_pName=``) → static default applies
     (QS reverts there too) → ``IN ('alpha')`` → only the alpha row."""
@@ -524,7 +524,7 @@ def test_collect_bind_params_drops_unreferenced_url_params() -> None:
 
 
 @pytest.fixture
-def sqlite_factory() -> Iterator[Any]:
+def sqlite_factory() -> Iterator[Callable[[], Any]]:
     """In-memory SQLite seeded with a tiny test table. Yields the
     factory the executor expects (returns a fresh connection per
     call); the fixture closes the underlying conn at teardown."""
@@ -556,7 +556,7 @@ def sqlite_factory() -> Iterator[Any]:
         conn.close()
 
 
-def test_execute_visual_sql_returns_rows_and_columns(sqlite_factory: Any) -> None:
+def test_execute_visual_sql_returns_rows_and_columns(sqlite_factory: Callable[[], Any]) -> None:
     rows, cols = execute_visual_sql(
         sqlite_factory,
         "SELECT id, name, amount FROM t ORDER BY id",
@@ -567,7 +567,7 @@ def test_execute_visual_sql_returns_rows_and_columns(sqlite_factory: Any) -> Non
     assert cols == ["id", "name", "amount"]
 
 
-def test_execute_visual_sql_substitutes_named_filter(sqlite_factory: Any) -> None:
+def test_execute_visual_sql_substitutes_named_filter(sqlite_factory: Callable[[], Any]) -> None:
     """``:min_amount`` from URL params lands as a bind value, not
     string-formatted into the SQL — proves the parameterized path."""
     rows, _cols = execute_visual_sql(
@@ -579,7 +579,7 @@ def test_execute_visual_sql_substitutes_named_filter(sqlite_factory: Any) -> Non
     assert [r[1] for r in rows] == ["beta", "gamma"]
 
 
-def test_execute_visual_sql_handles_multiple_filters(sqlite_factory: Any) -> None:
+def test_execute_visual_sql_handles_multiple_filters(sqlite_factory: Callable[[], Any]) -> None:
     rows, _cols = execute_visual_sql(
         sqlite_factory,
         (
@@ -594,7 +594,7 @@ def test_execute_visual_sql_handles_multiple_filters(sqlite_factory: Any) -> Non
 
 
 def test_execute_visual_sql_unreferenced_url_params_dont_break_execution(
-    sqlite_factory: Any,
+    sqlite_factory: Callable[[], Any],
 ) -> None:
     """The form serializes every input on every Refresh — extra
     params for filters this visual doesn't use must be silently
@@ -613,7 +613,7 @@ def test_execute_visual_sql_unreferenced_url_params_dont_break_execution(
     assert {r[0] for r in rows} == {2, 3}
 
 
-def test_execute_visual_sql_empty_result_set(sqlite_factory: Any) -> None:
+def test_execute_visual_sql_empty_result_set(sqlite_factory: Callable[[], Any]) -> None:
     rows, cols = execute_visual_sql(
         sqlite_factory,
         "SELECT id, name FROM t WHERE amount > :min_amount",

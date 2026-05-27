@@ -1,3 +1,6 @@
+# pyright: reportArgumentType=false, reportCallIssue=false, reportUntypedFunctionDecorator=false
+# BF.4/F: see test_html_executives_wiring.py — structural _NoConnectPool fake
+# for AsyncConnectionPool; asynccontextmanager stubs disagree with the test shape.
 """X.2.g.2.a — Investigation → App2 wiring smoke test.
 
 Builds the real Investigation tree + datasets, hands them to

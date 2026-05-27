@@ -32,7 +32,6 @@ from recon_gen.common.spine import (
     MultiXorMissedGenerator,
     MultiXorOverlapGenerator,
     MultiXorViolationInvariant,
-    Violation,
 )
 from recon_gen.common.sql import Dialect
 

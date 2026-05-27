@@ -193,27 +193,6 @@ def l1_check_type_values() -> list[str]:
     return list(_L1_CHECK_TYPE_VALUES)
 
 
-def _mv_dataset_param(
-    name: str, default: list[str],
-) -> DatasetParameter:
-    """A MULTI_VALUED string dataset parameter. ``default`` must be
-    non-empty (an empty default substitutes as ``IN ()``, invalid SQL)
-    AND ≤ 32 elements (AWS caps ``DefaultValues.StaticValues``).
-
-    Post-AA.A.3 no L1 dropdown uses this shape — every pushdown flipped
-    to SINGLE_VALUED with ``_sv_dataset_param`` / ``_all_sentinel_sv_param``.
-    Kept in the module for the helper-completeness invariant and as the
-    documented shape for any future genuinely-multi keeper (none in L1
-    today).
-    """
-    return DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-        Name=name, ValueType="MULTI_VALUED",
-        DefaultValues=StringDatasetParameterDefaultValues(
-            StaticValues=list(default),
-        ),
-    ))
-
-
 def _all_sentinel_sv_param(name: str) -> DatasetParameter:
     """AA.A.3 — a SINGLE_VALUED string dataset param whose static default
     is the bare ``L1_ALL_SENTINEL`` (wrapped in a 1-element list per the

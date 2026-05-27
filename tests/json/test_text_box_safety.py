@@ -48,8 +48,8 @@ def _all_text_box_contents(emitted: Any) -> Iterator[tuple[str, str]]:
     definition = emitted.get("Definition", {})
     for sheet in definition.get("Sheets", []):
         sheet_id = sheet.get("SheetId", "<unknown>")
-        for tb in sheet.get("TextBoxes") or []:
-            yield sheet_id, tb.get("Content", "")
+        for tb in sheet.get("TextBoxes") or []:  # pyright: ignore[reportUnknownVariableType]: TextBox.to_aws_json dict shape
+            yield sheet_id, tb.get("Content", "")  # pyright: ignore[reportUnknownMemberType]: TextBox.to_aws_json dict shape
 
 
 def _build_all_apps():

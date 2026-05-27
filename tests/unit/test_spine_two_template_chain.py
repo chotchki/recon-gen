@@ -16,8 +16,6 @@ import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
-import pytest
-
 from recon_gen.common.db import _register_sqlite_aggregates, execute_script
 from recon_gen.common.l2.config_table import replace_config
 from recon_gen.common.l2.loader import load_instance
@@ -274,7 +272,7 @@ def test_two_template_chain_account_id_override_used_when_set() -> None:
 def test_two_template_chain_default_derivation_preserved_when_unset() -> None:
     """Default behavior unchanged when override is None — every
     existing test caller stays byte-stable."""
-    base_args = dict(
+    gen_a = TwoTemplateChainGenerator(
         chain_parent_name="ParentRail",
         parent_rail_name="ParentRail",
         parent_template_name=None,
@@ -282,7 +280,13 @@ def test_two_template_chain_default_derivation_preserved_when_unset() -> None:
         child_leg_rails=("leg1",),
         anchor_day=date(2030, 1, 1),
     )
-    gen_a = TwoTemplateChainGenerator(**base_args)
-    gen_b = TwoTemplateChainGenerator(**base_args)
+    gen_b = TwoTemplateChainGenerator(
+        chain_parent_name="ParentRail",
+        parent_rail_name="ParentRail",
+        parent_template_name=None,
+        child_template_name="SomeChildTemplate",
+        child_leg_rails=("leg1",),
+        anchor_day=date(2030, 1, 1),
+    )
     assert gen_a.account_id == gen_b.account_id
     assert "acct-ttc-SomeChildTemplate" == gen_a.account_id

@@ -210,7 +210,7 @@ def test_round_trip_with_drift_generator_produces_valid_inserts() -> None:
     gen = DriftInvariant().scenario_for(
         "CustomerSubledger", magnitude=5.0,
     )
-    captured = ctx.compose(cap, gen, dry_run=True)
+    captured = ctx.compose(cap, gen, dry_run=True)  # pyright: ignore[reportArgumentType]: _DryRunBase is a test double of Connection
     assert captured is not None
     sql = render_captured_sql(captured, dialect=Dialect.SQLITE)
     # No leftover placeholders.

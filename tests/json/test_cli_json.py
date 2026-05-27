@@ -53,18 +53,18 @@ def _make_demo_yaml_config(tmp_path: Path) -> Path:
     return p
 
 
-def _patch_generators(monkeypatch) -> dict[str, list]:
+def _patch_generators(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[tuple[str, str, str | None]]]:
     """Replace the four per-app generator helpers with no-op spies that
     record their args. The underlying generator is exercised by the
     per-app contract test suites — here we only assert the CLI hands
     each generator the right config + output dir."""
-    calls: dict[str, list] = {
+    calls: dict[str, list[tuple[str, str, str | None]]] = {
         "investigation": [], "executives": [],
         "l1_dashboard": [], "l2_flow_tracing": [],
     }
 
-    def _spy(name: str):
-        def fn(config: str, output: str, *, l2_instance_path: str | None = None):
+    def _spy(name: str) -> "Any":
+        def fn(config: str, output: str, *, l2_instance_path: str | None = None) -> None:
             calls[name].append((config, output, l2_instance_path))
         return fn
 
@@ -80,8 +80,8 @@ def _patch_generators(monkeypatch) -> dict[str, list]:
 
 
 def test_apply_without_execute_writes_jsons_and_skips_deploy(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Default behavior: emit JSON to ``out/`` (or ``-o DIR``), do NOT
     talk to AWS. The bottom-of-output line must announce that
     ``--execute`` is the next step."""
@@ -90,7 +90,7 @@ def test_apply_without_execute_writes_jsons_and_skips_deploy(
     calls = _patch_generators(monkeypatch)
     deploy_called: list[Any] = []
     import recon_gen.common.deploy as dep
-    monkeypatch.setattr(dep, "deploy", lambda *a, **k: deploy_called.append((a, k)) or 0)
+    monkeypatch.setattr(dep, "deploy", lambda *a, **k: deploy_called.append((a, k)) or 0)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda recording args
 
     rc = CliRunner().invoke(json_, [
         "apply", "-c", str(cfg), "-o", str(out_dir),
@@ -107,12 +107,12 @@ def test_apply_without_execute_writes_jsons_and_skips_deploy(
     assert "Re-run with --execute" in rc.output
 
 
-def test_apply_with_execute_invokes_deploy(tmp_path, monkeypatch):
+def test_apply_with_execute_invokes_deploy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = _make_yaml_config(tmp_path)
     _patch_generators(monkeypatch)
-    deploy_calls: list[tuple] = []
+    deploy_calls: list[tuple[Any, Any, list[Any]]] = []
 
-    def _spy_deploy(cfg_arg, out_arg, app_list):
+    def _spy_deploy(cfg_arg: Any, out_arg: Any, app_list: Any) -> int:
         deploy_calls.append((cfg_arg, out_arg, list(app_list)))
         return 0
 
@@ -124,7 +124,7 @@ def test_apply_with_execute_invokes_deploy(tmp_path, monkeypatch):
     ])
     assert rc.exit_code == 0, rc.output
     assert len(deploy_calls) == 1
-    cfg_arg, out_arg, app_list = deploy_calls[0]
+    _cfg_arg, out_arg, app_list = deploy_calls[0]
     # APPS list must include all four bundled apps; ordering is the
     # CLI's source-of-truth.
     assert set(app_list) == {
@@ -134,13 +134,13 @@ def test_apply_with_execute_invokes_deploy(tmp_path, monkeypatch):
     assert str(out_arg).endswith("out")
 
 
-def test_apply_with_execute_propagates_deploy_failure(tmp_path, monkeypatch):
+def test_apply_with_execute_propagates_deploy_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A non-zero deploy exit becomes a ``ClickException`` so the shell
     sees a non-zero CLI exit too — the ``--execute`` contract."""
     cfg = _make_yaml_config(tmp_path)
     _patch_generators(monkeypatch)
     import recon_gen.common.deploy as dep
-    monkeypatch.setattr(dep, "deploy", lambda *_a, **_k: 7)
+    monkeypatch.setattr(dep, "deploy", lambda *_a, **_k: 7)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda intentionally untyped
 
     rc = CliRunner().invoke(json_, [
         "apply", "-c", str(cfg), "-o", str(tmp_path / "out"), "--execute",
@@ -150,8 +150,8 @@ def test_apply_with_execute_propagates_deploy_failure(tmp_path, monkeypatch):
 
 
 def test_apply_demo_database_url_auto_emits_datasource_json(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """V.1.a — when ``demo_database_url`` is set (and no explicit
     ``datasource_arn``), the derived ARN is one we own, so the deploy
     expects a ``datasource.json`` next to the dataset JSONs. Without
@@ -174,7 +174,7 @@ def test_apply_demo_database_url_auto_emits_datasource_json(
     out_dir = tmp_path / "out"
     _patch_generators(monkeypatch)
     import recon_gen.common.deploy as dep
-    monkeypatch.setattr(dep, "deploy", lambda *_a, **_k: 0)
+    monkeypatch.setattr(dep, "deploy", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
 
     rc = CliRunner().invoke(json_, [
         "apply", "-c", str(cfg), "-o", str(out_dir),
@@ -187,8 +187,8 @@ def test_apply_demo_database_url_auto_emits_datasource_json(
 
 
 def test_apply_no_demo_database_url_skips_datasource_emit(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """When the integrator uses their own pre-existing datasource
     (production deploys), don't write a ``datasource.json`` —
     deploy would otherwise overwrite the customer-managed resource."""
@@ -204,7 +204,7 @@ def test_apply_no_demo_database_url_skips_datasource_emit(
     out_dir = tmp_path / "out"
     _patch_generators(monkeypatch)
     import recon_gen.common.deploy as dep
-    monkeypatch.setattr(dep, "deploy", lambda *_a, **_k: 0)
+    monkeypatch.setattr(dep, "deploy", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
 
     rc = CliRunner().invoke(json_, [
         "apply", "-c", str(cfg), "-o", str(out_dir), "--execute",
@@ -217,14 +217,14 @@ def test_apply_no_demo_database_url_skips_datasource_emit(
 
 
 def test_clean_without_execute_calls_run_cleanup_in_dry_run(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Default: dry-run, ``skip_confirm=True`` (the ``--execute``
     flag itself is the confirmation; no extra prompt either way)."""
     cfg = _make_yaml_config(tmp_path)
-    cleanup_calls: list[dict] = []
+    cleanup_calls: list[dict[str, Any]] = []
 
-    def _spy(cfg_arg, out_dir, **kwargs) -> int:
+    def _spy(_cfg_arg: Any, out_dir: Any, **kwargs: Any) -> int:
         cleanup_calls.append({"out_dir": out_dir, **kwargs})
         return 0
 
@@ -240,13 +240,13 @@ def test_clean_without_execute_calls_run_cleanup_in_dry_run(
     assert cleanup_calls[0]["skip_confirm"] is True
 
 
-def test_clean_with_execute_runs_cleanup_for_real(tmp_path, monkeypatch):
+def test_clean_with_execute_runs_cleanup_for_real(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = _make_yaml_config(tmp_path)
-    cleanup_calls: list[dict] = []
+    cleanup_calls: list[dict[str, Any]] = []
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "run_cleanup",
-        lambda *_a, **kwargs: cleanup_calls.append(kwargs) or 0,
+        lambda *_a, **kwargs: cleanup_calls.append(kwargs) or 0,  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
     )
 
     rc = CliRunner().invoke(json_, [
@@ -259,15 +259,15 @@ def test_clean_with_execute_runs_cleanup_for_real(tmp_path, monkeypatch):
     assert cleanup_calls[0]["purge_all"] is False
 
 
-def test_clean_all_flag_threads_purge_all_through(tmp_path, monkeypatch):
+def test_clean_all_flag_threads_purge_all_through(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """v8.6.13 — ``--all`` opts into purge mode (ignore out/, sweep
     every matching resource including the live deploy)."""
     cfg = _make_yaml_config(tmp_path)
-    cleanup_calls: list[dict] = []
+    cleanup_calls: list[dict[str, Any]] = []
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "run_cleanup",
-        lambda *_a, **kwargs: cleanup_calls.append(kwargs) or 0,
+        lambda *_a, **kwargs: cleanup_calls.append(kwargs) or 0,  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
     )
 
     rc = CliRunner().invoke(json_, [
@@ -279,15 +279,15 @@ def test_clean_all_flag_threads_purge_all_through(tmp_path, monkeypatch):
     assert cleanup_calls[0]["dry_run"] is False
 
 
-def test_clean_all_without_execute_is_dry_run(tmp_path, monkeypatch):
+def test_clean_all_without_execute_is_dry_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``--all`` alone (no ``--execute``) previews what purge would
     sweep without deleting — independent flags."""
     cfg = _make_yaml_config(tmp_path)
-    cleanup_calls: list[dict] = []
+    cleanup_calls: list[dict[str, Any]] = []
     import recon_gen.common.cleanup as cu
     monkeypatch.setattr(
         cu, "run_cleanup",
-        lambda *_a, **kwargs: cleanup_calls.append(kwargs) or 0,
+        lambda *_a, **kwargs: cleanup_calls.append(kwargs) or 0,  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
     )
 
     rc = CliRunner().invoke(json_, [
@@ -298,10 +298,10 @@ def test_clean_all_without_execute_is_dry_run(tmp_path, monkeypatch):
     assert cleanup_calls[0]["dry_run"] is True
 
 
-def test_clean_propagates_cleanup_failures(tmp_path, monkeypatch):
+def test_clean_propagates_cleanup_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = _make_yaml_config(tmp_path)
     import recon_gen.common.cleanup as cu
-    monkeypatch.setattr(cu, "run_cleanup", lambda *_a, **_k: 3)
+    monkeypatch.setattr(cu, "run_cleanup", lambda *_a, **_k: 3)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
 
     rc = CliRunner().invoke(json_, [
         "clean", "-c", str(cfg), "-o", str(tmp_path / "out"),
@@ -314,8 +314,8 @@ def test_clean_propagates_cleanup_failures(tmp_path, monkeypatch):
 
 
 def test_probe_iterates_every_app_and_prints_a_report(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``json probe`` reads ``-o DIR`` to find each app's
     ``DashboardId`` and walks the dashboards via
     ``probe_dashboard``. Patch the boto-touching path; assert
@@ -325,7 +325,7 @@ def test_probe_iterates_every_app_and_prints_a_report(
     import recon_gen.cli._app_builders as ab
     monkeypatch.setattr(
         ab, "_dashboard_id_for_app",
-        lambda app, out: f"qs-{app}-dashboard-id",
+        lambda app, _out: f"qs-{app}-dashboard-id",  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
     )
 
     seen: list[str] = []
@@ -333,9 +333,9 @@ def test_probe_iterates_every_app_and_prints_a_report(
     import recon_gen.common.probe as prob
     monkeypatch.setattr(
         prob, "probe_dashboard",
-        lambda **kw: seen.append(kw["dashboard_id"]) or [],
+        lambda **kw: seen.append(kw["dashboard_id"]) or [],  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
     )
-    monkeypatch.setattr(prob, "format_report", lambda did, _r: f"report:{did}")
+    monkeypatch.setattr(prob, "format_report", lambda did, _r: f"report:{did}")  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
 
     rc = CliRunner().invoke(json_, [
         "probe", "-c", str(cfg), "-o", str(tmp_path / "out"),
@@ -351,13 +351,13 @@ def test_probe_iterates_every_app_and_prints_a_report(
 # -- json test ---------------------------------------------------------------
 
 
-def test_test_subcommand_invokes_pytest_and_pyright(monkeypatch):
+def test_test_subcommand_invokes_pytest_and_pyright(monkeypatch: pytest.MonkeyPatch) -> None:
     """``json test`` shells out to pytest + pyright; both must run.
     Failures bubble up as a single ClickException listing what
     failed."""
     invoked: list[list[str]] = []
 
-    def _fake_call(argv) -> int:
+    def _fake_call(argv: list[str]) -> int:
         invoked.append(list(argv))
         return 0  # both pass
 
@@ -372,10 +372,10 @@ def test_test_subcommand_invokes_pytest_and_pyright(monkeypatch):
     assert ["-m", "pyright"] in cmds
 
 
-def test_test_subcommand_aggregates_failures_into_one_error(monkeypatch):
+def test_test_subcommand_aggregates_failures_into_one_error(monkeypatch: pytest.MonkeyPatch) -> None:
     import subprocess as _sp
     # Both fail.
-    monkeypatch.setattr(_sp, "call", lambda _a: 1)
+    monkeypatch.setattr(_sp, "call", lambda _a: 1)  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: spy lambda: third-party stub or test scaffolding cascade
 
     rc = CliRunner().invoke(json_, ["test"])
     assert rc.exit_code != 0
@@ -384,7 +384,7 @@ def test_test_subcommand_aggregates_failures_into_one_error(monkeypatch):
 
 
 @pytest.mark.parametrize("subcmd", ["apply", "clean", "test", "probe"])
-def test_subcommand_help_renders(subcmd):
+def test_subcommand_help_renders(subcmd: str) -> None:
     """Cheap sanity: every sub-command's --help renders without
     raising. Catches Click decorator regressions early."""
     rc = CliRunner().invoke(json_, [subcmd, "--help"])

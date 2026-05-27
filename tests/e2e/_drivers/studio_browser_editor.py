@@ -39,7 +39,7 @@ the test file consumes verbs.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
@@ -83,7 +83,7 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
     def serving(
         cls, asgi_app: object, *, headless: bool = True,
         l2_path: Path | None = None,
-    ) -> Iterator["StudioBrowserEditorDriver"]:
+    ) -> Generator["StudioBrowserEditorDriver", None, None]:
         """Spin a uvicorn server on an ephemeral port + open a WebKit
         page + land on the studio home (the single `goto` for the
         whole test lifecycle).
@@ -225,12 +225,6 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         carries the raw `::` (no URL encoding on the editor side
         per AI.2.d/X.4.f.7 design).
         """
-        from urllib.parse import quote  # noqa: PLC0415 — lazy
-
-        # Some entity IDs have :: (chains, limit_schedules); rendered
-        # hrefs match the URL-side encoding (raw `::` per X.4.f.7's
-        # composite-key contract).
-        edit_href = f"/l2_shape/{kind}/{quote(entity_id, safe=':')}/edit"
         # Step 1: home → list (assumes browser is at home; every verb
         # leaves it there via the 303 redirect).
         self._page.click(f'a[href="/l2_shape/{kind}/"]')
@@ -458,7 +452,7 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
                         "the new reconciler's fields"
                     )
                 reconciler_entity = _find_reconciler_in_reference(
-                    reference, rec_kind, rec_name,
+                    reference, rec_kind, rec_name,  # pyright: ignore[reportArgumentType]: reference loaded from untyped yaml; runtime L2Instance
                 )
                 stripped = _strip_rail_lists(reconciler_entity, rec_kind)
                 rec_form_kind = (

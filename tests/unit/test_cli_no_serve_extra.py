@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -38,9 +39,9 @@ _BLOCKED_PREFIXES = ("uvicorn", "starlette")
 class _BlockedImport:
     """``sys.meta_path`` finder that ImportErrors on ``[serve]``-only deps."""
 
-    def find_spec(  # type: ignore[no-untyped-def]: stdlib import-protocol shape
-        self, name: str, path=None, target=None,
-    ):
+    def find_spec(
+        self, name: str, path: Any = None, target: Any = None,
+    ) -> None:
         for prefix in _BLOCKED_PREFIXES:
             if name == prefix or name.startswith(prefix + "."):
                 raise ImportError(f"simulated missing: {name}")

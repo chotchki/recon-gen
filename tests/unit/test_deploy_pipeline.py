@@ -1780,11 +1780,11 @@ def test_deploy_summary_to_json_serializes_every_field(
     assert "step2_wipe" in payload
     assert "step3_generator" in payload
     assert payload["step4_matviews_done"] is True
-    assert payload["step5_data_generation_id"] > 0
+    assert payload["step5_data_generation_id"] > 0  # pyright: ignore[reportOperatorIssue]: evt comparison against int sentinel; runtime dict[str, Any]
     assert isinstance(payload["events"], list)
     # Every event entry MUST be a plain dict (json-safe), not a Mapping
     # subclass that JSONResponse can't serialize.
-    for evt in payload["events"]:
+    for evt in payload["events"]:  # pyright: ignore[reportUnknownVariableType]: evt is dict[str, Any] from boto3 paginator
         assert isinstance(evt, dict)
 
 

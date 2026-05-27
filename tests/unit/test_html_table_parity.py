@@ -84,8 +84,8 @@ def _table_leaves(visual: Any) -> list[tuple[str, Dim | Measure]]:  # typing-sme
         fv: Any = getattr(visual, field_name, None)  # typing-smell: ignore[explicit-any]: dynamic field well off a visual subtype, narrowed by the isinstance walk below
         if fv is None:
             continue
-        items = fv if isinstance(fv, list) else [fv]
-        for item in items:
+        items = fv if isinstance(fv, list) else [fv]  # pyright: ignore[reportUnknownVariableType]: pyHanko reader iterator
+        for item in items:  # pyright: ignore[reportUnknownVariableType]: pyHanko reader iterator
             if isinstance(item, (Dim, Measure)):
                 name = _leaf_column_name(item)
                 if name is not None:

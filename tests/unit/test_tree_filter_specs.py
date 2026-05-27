@@ -32,6 +32,8 @@ from recon_gen.common.html.render import (
     ParameterDateSpec,
     _render_filter_form,
 )
+from recon_gen.apps.l1_dashboard.app import _DRILL_RESET_SENTINEL
+from recon_gen.apps.l1_dashboard.datasets import P_L1_DS_BALANCE_DATE_DSP
 from recon_gen.common.ids import ParameterName, SheetId
 from recon_gen.common.tree import (
     Analysis,
@@ -105,7 +107,7 @@ def test_make_filter_specs_derives_dropdown_for_single_select_static_dropdown() 
     (spec,) = drops
     assert spec.name == "pKey"
     assert spec.label == "Metadata Key"
-    assert spec.options == ("__ALL__", "memo_kind")
+    assert spec.options == (_DRILL_RESET_SENTINEL, "memo_kind")
 
 
 def test_make_filter_specs_derives_parameter_number_for_slider() -> None:
@@ -200,7 +202,7 @@ def test_date_control_shape_comes_from_the_tree() -> None:
     ds_specs = make_filter_specs_for_sheet(ds_sheet)
     date_specs = [s for s in ds_specs if isinstance(s, ParameterDateSpec)]
     assert len(date_specs) == 1
-    assert date_specs[0].name == "pL1DsBalanceDate"
+    assert date_specs[0].name == P_L1_DS_BALANCE_DATE_DSP
     ds_form = _render_filter_form([], tuple(ds_specs))
     assert 'data-widget="flatpickr-single"' in ds_form
     assert 'data-widget="flatpickr-range"' not in ds_form

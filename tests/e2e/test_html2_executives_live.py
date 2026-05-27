@@ -156,12 +156,14 @@ def test_account_coverage_kpi_renders_with_real_data(
     driver.open(_DASHBOARD_ID, sheet="Account Coverage")
     # Find a KPI title on the Account Coverage sheet to ask the driver
     # for its value. Tree-walk: the first KPI on the sheet.
+    analysis = live_db_exec_driver.tree_app.analysis
+    assert analysis is not None
     sheet = next(
-        s for s in live_db_exec_driver.tree_app.analysis.sheets
+        s for s in analysis.sheets
         if str(s.sheet_id) == "exec-sheet-account-coverage"
     )
     kpi_title = next(
-        v.title for v in sheet.visuals if type(v).__name__ == "KPI"
+        getattr(v, "title") for v in sheet.visuals if type(v).__name__ == "KPI"
     )
     driver.wait_loaded(kpi_title)
     kpi_text = driver.kpi_value(kpi_title)
@@ -200,12 +202,14 @@ def test_date_filter_does_not_error_when_applied(
     """
     driver = live_db_exec_driver.driver
     driver.open(_DASHBOARD_ID, sheet="Account Coverage")
+    analysis = live_db_exec_driver.tree_app.analysis
+    assert analysis is not None
     sheet = next(
-        s for s in live_db_exec_driver.tree_app.analysis.sheets
+        s for s in analysis.sheets
         if str(s.sheet_id) == "exec-sheet-account-coverage"
     )
     kpi_title = next(
-        v.title for v in sheet.visuals if type(v).__name__ == "KPI"
+        getattr(v, "title") for v in sheet.visuals if type(v).__name__ == "KPI"
     )
     # Initial render with empty filter — proves the COALESCE+sentinel-date
     # pattern works against PG without raising "invalid input syntax for

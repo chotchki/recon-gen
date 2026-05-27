@@ -21,6 +21,7 @@ import sqlite3
 import tempfile
 from collections.abc import Iterator
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -28,9 +29,12 @@ from recon_gen.common.sql.dialect import Dialect
 from tests._test_helpers import make_test_config
 from tests.e2e._drivers.base import query_db_via_cfg
 
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config
+
 
 @pytest.fixture
-def planted_exec_sqlite() -> Iterator[object]:
+def planted_exec_sqlite() -> Iterator["Config"]:
     """Spin up a SQLite with synthetic transaction summary rows. Values
     chosen so the KPI aggregates have non-trivial sums + the per-day +
     per-rail combinatorial stays visible."""
@@ -85,7 +89,7 @@ _ACCT_SUMMARY_ACTIVE_SQL = (
 
 
 def test_bg5_total_transactions_passes_when_kpi_matches_sum(
-    planted_exec_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_exec_sqlite: "Config",
 ) -> None:
     cfg = planted_exec_sqlite
     rows = query_db_via_cfg(cfg, _TXN_SUMMARY_SQL)
@@ -97,7 +101,7 @@ def test_bg5_total_transactions_passes_when_kpi_matches_sum(
 
 
 def test_bg5_total_transactions_trips_when_kpi_binding_drifts(
-    planted_exec_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_exec_sqlite: "Config",
 ) -> None:
     """v11.21.0 finding #8 root-contract shape: KPI binding drifts from
     SUM(transfer_count) to a different aggregate. Identity trips."""
@@ -118,7 +122,7 @@ def test_bg5_total_transactions_trips_when_kpi_binding_drifts(
 
 
 def test_bg5_money_moved_kpis_pass_on_healthy_data(
-    planted_exec_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_exec_sqlite: "Config",
 ) -> None:
     cfg = planted_exec_sqlite
     rows = query_db_via_cfg(cfg, _TXN_SUMMARY_SQL)
@@ -135,7 +139,7 @@ def test_bg5_money_moved_kpis_pass_on_healthy_data(
 
 
 def test_bg5_money_moved_trips_when_gross_binds_net(
-    planted_exec_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_exec_sqlite: "Config",
 ) -> None:
     """Bug shape: Gross KPI accidentally binds the net_amount column
     instead of gross_amount. Identity trips with both column-sums
@@ -155,7 +159,7 @@ def test_bg5_money_moved_trips_when_gross_binds_net(
 
 
 def test_bg5_account_counts_pass_with_active_subset_of_open(
-    planted_exec_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_exec_sqlite: "Config",
 ) -> None:
     cfg = planted_exec_sqlite
     open_rows = query_db_via_cfg(cfg, _ACCT_SUMMARY_SQL)
@@ -169,7 +173,7 @@ def test_bg5_account_counts_pass_with_active_subset_of_open(
 
 
 def test_bg5_active_kpi_trips_when_bound_to_wider_dataset(
-    planted_exec_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_exec_sqlite: "Config",
 ) -> None:
     """Bug shape: Active KPI accidentally re-bound to the all-accounts
     dataset (regression where the SQL pushdown narrowing was

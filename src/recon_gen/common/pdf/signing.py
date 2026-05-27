@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 from recon_gen.common.config import SigningConfig
 
@@ -62,7 +63,7 @@ def sign_pdf_in_place(
             )
         passphrase = env_val.encode("utf-8")
 
-    signer = signers.SimpleSigner.load(
+    signer = signers.SimpleSigner.load(  # pyright: ignore[reportUnknownMemberType]: pyHanko unstubbed (no py.typed)
         key_file=str(key_path),
         cert_file=str(cert_path),
         key_passphrase=passphrase,
@@ -86,6 +87,12 @@ def sign_pdf_in_place(
     # original signature + their own as separate revisions.
     with pdf_path.open("rb") as f:
         writer = IncrementalPdfFileWriter(f)
-        signed = signers.sign_pdf(writer, signature_meta, signer=signer)
+        # ``sign_pdf`` returns a ``BytesIO`` whose .getvalue() is the
+        # signed PDF bytes; pyHanko is unstubbed so the return type is
+        # ``Unknown``. Bind through ``Any`` so we can call .getvalue()
+        # without a per-call ignore on every reference.
+        signed: Any = signers.sign_pdf(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]: pyHanko unstubbed (no py.typed)
+            writer, signature_meta, signer=signer,
+        )
 
-    pdf_path.write_bytes(signed.getvalue())
+    pdf_path.write_bytes(signed.getvalue())  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]: pyHanko BytesIO unstubbed

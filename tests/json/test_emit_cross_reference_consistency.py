@@ -33,7 +33,7 @@ from __future__ import annotations
 import json as _json
 import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 import pytest
 
@@ -77,15 +77,15 @@ def _write_min_config(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def emitted_bundle(
-    tmp_path: pytest.TempPathFactory,
+    tmp_path: Path,
     request: pytest.FixtureRequest,
 ) -> tuple[str, Path]:
     """Run a single per-app generator into its own tmpdir. Parametrize
     via ``indirect`` to specify which generator."""
-    generator_name = request.param
+    generator_name = str(request.param)
     generator = _GENERATORS[generator_name]
-    cfg = _write_min_config(tmp_path)  # type: ignore[arg-type]: tmp_path is pathlib.Path; helper takes str-or-Path
-    out = tmp_path / "out"  # type: ignore[operator]: tmp_path Path / str is Path (pyright loses inference here)
+    cfg = _write_min_config(tmp_path)
+    out = tmp_path / "out"
     out.mkdir()
     generator(
         str(cfg), str(out), l2_instance_path=str(_SASQUATCH_L2),
@@ -118,13 +118,13 @@ def _walk_dataset_arn_strings(node: Any) -> list[str]:
     """Pull every ``DataSetArn`` string out of a nested dict/list."""
     out: list[str] = []
     if isinstance(node, dict):
-        for k, v in node.items():
+        for k, v in cast("dict[str, Any]", node).items():
             if k == "DataSetArn" and isinstance(v, str):
                 out.append(v)
             else:
                 out.extend(_walk_dataset_arn_strings(v))
     elif isinstance(node, list):
-        for item in node:
+        for item in cast("list[Any]", node):
             out.extend(_walk_dataset_arn_strings(item))
     return out
 

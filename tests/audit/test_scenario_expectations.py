@@ -1,3 +1,8 @@
+# pyright: reportArgumentType=false
+# BF.4/F: test fixtures pass bare strings for Identifier-typed fields (account_id /
+# rail_name / counter_account_id). Identifier is a NewType — runtime no-op. Wrapping
+# every literal would add ~30 Identifier(...) wraps for no behavioral gain in
+# test data. Disabling at file scope keeps the test code readable.
 """Unit tests for the scenario-expectations helper (U.8.a).
 
 Verifies period filtering at endpoints, current-state semantics
@@ -18,6 +23,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 from recon_gen.common.intervals import DateInterval
 from recon_gen.common.l2.auto_scenario import default_scenario_for
@@ -48,7 +54,7 @@ _SPEC_EXAMPLE = (
 _TODAY = date(2026, 5, 1)
 
 
-def _make_scenario(**plants) -> ScenarioPlant:  # type: ignore[no-untyped-def]: **plants is the union of all plant kw-tuples
+def _make_scenario(**plants: Any) -> ScenarioPlant:
     """Build a minimal ScenarioPlant pinned to ``_TODAY``."""
     return ScenarioPlant(
         template_instances=(),

@@ -1,3 +1,9 @@
+# pyright: reportArgumentType=false
+# BF.4/F: test uses structural _FakeCfg / _FakeInstance fakes that satisfy
+# the runtime contract of Config / L2Instance but aren't subclasses. The
+# query helpers only call a small subset of attributes; the fakes provide
+# exactly those. Disabling reportArgumentType file-wide keeps the test
+# fixtures readable without forcing a Protocol carve-out.
 """X.3.g.2 — Audit PDF query layer wired against SQLite.
 
 The Audit PDF reconciliation report queries the L1 invariant matviews
@@ -49,6 +55,7 @@ from typing import Any
 
 import pytest
 
+from recon_gen.apps.l1_dashboard.app import _DRIFT_NAME, _OVERDRAFT_NAME
 from recon_gen.cli.audit import (
     _query_drift_violations,
     _query_executive_summary,
@@ -326,7 +333,7 @@ def patched_connect(db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch) -> 
     fake_conn = _NoCloseConn(db)
     monkeypatch.setattr(
         "recon_gen.common.db.connect_demo_db",
-        lambda _cfg: fake_conn,
+        lambda _cfg: fake_conn,  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]: monkeypatch.setattr accepts Any
     )
 
 
@@ -443,9 +450,9 @@ def test_executive_summary_query_runs_against_sqlite(
     # rows planted above all fall in-period; ledger_drift has one in-period
     # row. stuck_* are current-state (no date filter).
     counts = dict(summary.exception_counts)
-    assert counts["Drift"] == 2
+    assert counts[_DRIFT_NAME] == 2
     assert counts["Ledger drift"] == 1
-    assert counts["Overdraft"] == 1
+    assert counts[_OVERDRAFT_NAME] == 1
     # AB.1: 2 limit_breach rows planted (1 Outbound + 1 Inbound) — both
     # surface in the exec summary count.
     assert counts["Limit breach"] == 2

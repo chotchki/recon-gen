@@ -25,7 +25,10 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    from recon_gen.common.l2 import L2Instance
 
 
 # Bundled L2 fixtures ship inside the package at
@@ -201,7 +204,7 @@ def define_env(env: Any) -> None:
         )
 
     @env.macro
-    def diagram(family: str, **kwargs: Any) -> str:  # noqa: ARG001
+    def diagram(family: str, **kwargs: Any) -> str:  # noqa: ARG001  # pyright: ignore[reportUnusedFunction]: mkdocs-macros registers via decorator side effect
         """Emit a diagram block for in-browser graphviz WASM rendering.
 
         Phase T (v8.1.0): every render_* helper now returns the DOT
@@ -270,7 +273,10 @@ def define_env(env: Any) -> None:
     _spec_example_l2 = load_instance(_BUNDLED_L2_DIR / "spec_example.yaml")
     _sasquatch_pr_l2 = load_instance(_BUNDLED_L2_DIR / "sasquatch_pr.yaml")
 
-    def _l2_focus(render_fn, *, primitive: str, alt: str) -> str:
+    def _l2_focus(
+        render_fn: Callable[["L2Instance"], str | None],
+        *, primitive: str, alt: str,
+    ) -> str:
         """Try active → spec_example → sasquatch_pr; wrap with fallback note."""
         active_name = default_l2_path.stem
         for candidate, label in (
@@ -302,7 +308,7 @@ def define_env(env: Any) -> None:
         )
 
     @env.macro
-    def l2_account_focus() -> str:
+    def l2_account_focus() -> str:  # pyright: ignore[reportUnusedFunction]: mkdocs-macros registers via decorator side effect
         from recon_gen.common.handbook.diagrams import (
             render_l2_account_focus,
         )
@@ -312,7 +318,7 @@ def define_env(env: Any) -> None:
         )
 
     @env.macro
-    def l2_account_template_focus() -> str:
+    def l2_account_template_focus() -> str:  # pyright: ignore[reportUnusedFunction]: mkdocs-macros registers via decorator side effect
         from recon_gen.common.handbook.diagrams import (
             render_l2_account_template_focus,
         )
@@ -323,7 +329,7 @@ def define_env(env: Any) -> None:
         )
 
     @env.macro
-    def l2_rail_focus() -> str:
+    def l2_rail_focus() -> str:  # pyright: ignore[reportUnusedFunction]: mkdocs-macros registers via decorator side effect
         from recon_gen.common.handbook.diagrams import (
             render_l2_rail_focus,
         )
@@ -333,7 +339,7 @@ def define_env(env: Any) -> None:
         )
 
     @env.macro
-    def l2_transfer_template_focus() -> str:
+    def l2_transfer_template_focus() -> str:  # pyright: ignore[reportUnusedFunction]: mkdocs-macros registers via decorator side effect
         from recon_gen.common.handbook.diagrams import (
             render_l2_transfer_template_focus,
         )
@@ -344,7 +350,7 @@ def define_env(env: Any) -> None:
         )
 
     @env.macro
-    def l2_chain_focus() -> str:
+    def l2_chain_focus() -> str:  # pyright: ignore[reportUnusedFunction]: mkdocs-macros registers via decorator side effect
         from recon_gen.common.handbook.diagrams import (
             render_l2_chain_focus,
         )
@@ -354,7 +360,7 @@ def define_env(env: Any) -> None:
         )
 
     @env.macro
-    def l2_limit_schedule_focus() -> str:
+    def l2_limit_schedule_focus() -> str:  # pyright: ignore[reportUnusedFunction]: mkdocs-macros registers via decorator side effect
         from recon_gen.common.handbook.diagrams import (
             render_l2_limit_schedule_focus,
         )
@@ -365,7 +371,7 @@ def define_env(env: Any) -> None:
         )
 
     @env.macro
-    def scenario_summary(mode: str = "l1_plus_broad") -> dict[str, Any]:
+    def scenario_summary(mode: str = "l1_plus_broad") -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction]: mkdocs-macros registers via decorator side effect
         """Render the active L2's auto-scenario plant counts + samples.
 
         Pulls ``default_scenario_for(l2, mode=...)`` against the active

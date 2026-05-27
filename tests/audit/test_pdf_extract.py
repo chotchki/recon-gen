@@ -25,6 +25,7 @@ from click.testing import CliRunner
 from recon_gen.cli import main
 
 from tests.audit._pdf_extract import (
+    Invariant,
     _count_data_rows,
     _is_data_row,
     count_invariant_table_rows,
@@ -188,7 +189,7 @@ def test_count_data_rows_mixed_sub_tables_with_continuations():
     "supersession",
 ])
 def test_count_invariant_table_rows_skeleton_pdf_zero(
-    skeleton_pdf: Path, invariant: str,
+    skeleton_pdf: Path, invariant: Invariant,
 ):
     """Without a DB, every invariant table emits the
     'Database not configured' placeholder → row count 0."""

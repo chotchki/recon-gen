@@ -32,6 +32,8 @@ expands to it — SQLite.
 
 from __future__ import annotations
 
+from typing import Any
+
 from recon_gen.common.config import Config
 from recon_gen.common.db import connect_demo_db
 from recon_gen.common.sql.dialect import Dialect, date_trunc_day
@@ -111,7 +113,7 @@ def find_two_days_for_same_account(
             f"default density."
         )
     name1, id1, role1, bday1 = rows[0]
-    name2, id2, _role2, bday2 = rows[1]
+    _name2, id2, _role2, bday2 = rows[1]
     if id1 != id2:
         raise RuntimeError(
             f"find_two_days_for_same_account: lowest-id account "
@@ -233,10 +235,10 @@ def find_account_day_with_data(cfg: Config) -> tuple[str, str, str]:
     )
 
 
-def _iso_day(value) -> str:  # type: ignore[no-untyped-def]: cross-dialect column value — psycopg returns datetime, sqlite3 returns str
+def _iso_day(value: Any) -> str:
     """Return ``YYYY-MM-DD`` from a `bday` column value. Postgres /
     Oracle drivers return ``datetime``; SQLite returns ``str``."""
     if hasattr(value, "date"):
-        return value.date().isoformat()
+        return str(value.date().isoformat())
     text = str(value)
     return text[:10]

@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from starlette.testclient import TestClient
 
@@ -39,6 +39,7 @@ from recon_gen.common.html import (
     ParameterMultiSelectSpec,
     ParameterNumberSpec,
 )
+from recon_gen.common.html.render import _D3_SANKEY_SRC, _D3_SRC, _HTMX_SRC
 from recon_gen.common.html.server import ServedDashboard, make_app
 from recon_gen.common.ids import SheetId, VisualId
 from recon_gen.common.tree.structure import Analysis, App, Sheet
@@ -126,9 +127,9 @@ def test_get_dashboard_returns_full_sheet_html() -> None:
     resp = client.get(_DASHBOARD_PATH)
     assert resp.status_code == 200
     body = resp.text
-    assert "/static/vendor/js/htmx.min.js" in body
-    assert "/static/vendor/js/d3.min.js" in body
-    assert "/static/vendor/js/d3-sankey.min.js" in body
+    assert _HTMX_SRC in body
+    assert _D3_SRC in body
+    assert _D3_SANKEY_SRC in body
     assert 'id="filter-form"' in body
     assert 'name="date_from"' in body
     assert 'name="date_to"' in body
@@ -160,7 +161,7 @@ def test_get_visual_data_returns_swap_fragment() -> None:
     ``<script type="application/json" class="chart-data">`` tag
     with the d3 chart data."""
     client = _make_test_app(
-        lambda _vid, _params: {
+        lambda _vid, _params: {  # pyright: ignore[reportUnknownLambdaType]: _make_test_app accepts (str, dict[str,str])->Any
             "nodes": [{"name": "A"}, {"name": "B"}],
             "links": [{"source": 0, "target": 1, "value": 5}],
         },
@@ -227,7 +228,7 @@ def test_visual_id_routing_passes_correct_id_to_fetcher() -> None:
     arg — no swapping with a query-string field, no shadowing."""
     captured_ids: list[str] = []
 
-    def capture(visual_id: str, _params: dict[str, str]) -> Any:
+    def capture(visual_id: str, _params: dict[str, str]) -> Any:  # typing-smell: ignore[bare-str-id]: visual_id comes from callers as raw analyst string
         captured_ids.append(visual_id)
         return {}
 
@@ -290,7 +291,7 @@ def test_response_payload_round_trips_through_json() -> None:
     ``JSON.parse``)."""
     payload = {"nodes": [{"name": "X"}], "links": [], "extra": 42}
 
-    client = _make_test_app(lambda _v, _p: payload)
+    client = _make_test_app(lambda _v, _p: payload)  # pyright: ignore[reportUnknownLambdaType]: _make_test_app accepts (str, dict[str,str])->Any
     body = client.get(_VISUAL_DATA_PATH).text
     start = body.index(">") + 1
     end = body.index("</script>", start)
@@ -330,9 +331,9 @@ def test_multi_dashboard_listing_and_per_dashboard_routing() -> None:
 
     fetcher_calls: dict[str, list[str]] = {"a": [], "b": []}
 
-    def make_fetcher(label: str):  # type: ignore[no-untyped-def]: returns a closure with non-trivial fetch signature
-        def fetch(visual_id: str, _params: dict[str, str]) -> Any:
-            fetcher_calls[label].append(visual_id)
+    def make_fetcher(label: str) -> "Callable[[Any, Any], Any]":
+        def fetch(visual_id: Any, _params: Any) -> Any:
+            fetcher_calls[label].append(str(visual_id))
             return {"label": label}
         return fetch
 

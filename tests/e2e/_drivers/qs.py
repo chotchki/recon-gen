@@ -41,7 +41,7 @@ import time
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from recon_gen.common.config import Config
 from recon_gen.common.models import DatasetParameter
@@ -229,10 +229,13 @@ class _QsWsActivityTracker:
         if not isinstance(payload, str):
             return
         try:
-            msg = json.loads(payload)
+            msg_raw = json.loads(payload)
         except (ValueError, TypeError):
             return
-        kind = msg.get("type") if isinstance(msg, dict) else None
+        if not isinstance(msg_raw, dict):
+            return
+        msg = cast("dict[str, Any]", msg_raw)
+        kind = msg.get("type")
         if kind == "START_VIS":
             cid = msg.get("cid")
             if isinstance(cid, str):
@@ -242,7 +245,7 @@ class _QsWsActivityTracker:
         elif kind == "STOP_VIS":
             cids = msg.get("cids", [])
             if isinstance(cids, list):
-                for cid in cids:
+                for cid in cast("list[Any]", cids):
                     if isinstance(cid, str):
                         self._pending.discard(cid)
 
@@ -338,7 +341,7 @@ class QsEmbedDriver:
     # -- factories -------------------------------------------------------
 
     @classmethod
-    @contextlib.contextmanager
+    @contextlib.contextmanager  # pyright: ignore[reportDeprecated]: contextmanager-as-classmethod-decorator; pyright's deprecation tag triggers on @classmethod+@contextlib stacking even though usage is correct
     def embed(
         cls,
         *,

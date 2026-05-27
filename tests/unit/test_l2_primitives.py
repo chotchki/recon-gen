@@ -21,6 +21,7 @@ from recon_gen.common.l2 import (
     Identifier,
     L2Instance,
     LimitSchedule,
+    Name,
     RailName,
     SingleLegRail,
     TransferTemplate,
@@ -35,7 +36,7 @@ def _example_instance() -> L2Instance:
             Account(
                 id=Identifier("int-001"),
                 scope="internal",
-                name="Internal Operations Account",
+                name=Name("Internal Operations Account"),
                 role=Identifier("InternalDDA"),
             ),
         ),

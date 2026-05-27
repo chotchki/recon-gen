@@ -92,7 +92,7 @@ serve = [
     # python-multipart is required for Starlette to parse HTMX form
     # POSTs (the swap-on-mutation pattern). httpx is pulled in for
     # Starlette's TestClient (tests/unit/test_html_server.py).
-    "starlette>=0.40",
+    "starlette>=1.1.0",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.18",
     "httpx>=0.27",
@@ -129,7 +129,12 @@ dev = [
     # credential provider, which trips MissingDependencyException at
     # boto3 client init when developers use AWS SSO / `aws sso login`.
     "botocore[crt]>=1.34",
-    "boto3-stubs[quicksight,rds]>=1.34",
+    # BE.7.B (2026-05-26) — `sts` + `s3` added on top of the existing
+    # `quicksight,rds` so pyright can resolve the full surface tests/
+    # touches via boto3-stubs. The stubs only help once test-side
+    # fixtures are also annotated (the test fixtures' `-> dict`
+    # returns erase the TypedDict at the consumer boundary).
+    "boto3-stubs[quicksight,rds,sts,s3]>=1.34",
     # Y.2.gate.b.2.impl — Docker-backed local DB containers.
     # PG (b.2.impl.schema) + Oracle (b.2.impl.oracle). Oracle's
     # container is multi-GB and slower to start (~20-30s on
@@ -173,7 +178,7 @@ dev = [
     # unit tests. Pulled into [dev] so the spike's tests run in the
     # default `uv sync --extra dev` developer setup without a separate
     # `--extra serve`.
-    "starlette>=0.40",
+    "starlette>=1.1.0",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.18",
     "httpx>=0.27",
@@ -220,7 +225,7 @@ e2e = [
     # — keep this list in sync with [serve]. (Caught by the nightly
     # e2e-pg-browser cron: `uv sync --extra e2e` without these →
     # ModuleNotFoundError: No module named 'starlette' at collection.)
-    "starlette>=0.40",
+    "starlette>=1.1.0",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.18",
     "httpx>=0.27",
@@ -244,6 +249,13 @@ exclude = ["recon_gen._dev", "recon_gen._dev.*"]
 
 [tool.setuptools.package-data]
 recon_gen = [
+    # PEP 561 marker — signals to downstream consumers (pyright /
+    # mypy / pyre) that this package ships inline type hints they
+    # should honor. Without the marker, type-checkers fall back to
+    # treating every public API as `Any`, defeating the strict-typed
+    # surface this codebase invests in. Empty file by convention; the
+    # presence at the package root is the signal.
+    "py.typed",
     "apps/l1_dashboard/_default_l2.yaml",
     # Bundled mkdocs config so ``docs apply`` works from an installed
     # wheel. Lives one level up from ``docs/`` (mkdocs rejects
@@ -340,31 +352,13 @@ precision = 1
 # reachable through the tree but stay outside strict; pyright still
 # resolves them via extraPaths for inference.
 [tool.pyright]
+# BF.3 + BE.7.D — entire src/recon_gen/ strict-clean (BF.1) AND all of
+# tests/ strict-clean (BE.7.B + BE.7.C.2 + BE.7.C.3 / BF.4). Include
+# now spans the whole code surface, not a curated subset. Default
+# `pyright` (no args) runs at strict and lands at 0 errors.
 include = [
-    "src/recon_gen/common/tree",
-    "src/recon_gen/common/l2",
-    "src/recon_gen/common/sql",
-    "src/recon_gen/common/browser",
-    "src/recon_gen/common/dataset_contract.py",
-    "src/recon_gen/common/env_keys.py",
-    "src/recon_gen/common/models.py",
-    "src/recon_gen/common/money.py",
-    "src/recon_gen/common/variant.py",
-    # X.2.o.1 — async DB / App2 server surfaces. Added at strict
-    # together because they form one cohesive subsystem (pool →
-    # executor → fetcher → server route). Config gets pulled in
-    # alongside since X.2.n.6's ``app2_db_pool_size`` validation
-    # logic lives there.
-    "src/recon_gen/common/db.py",
-    "src/recon_gen/common/config.py",
-    "src/recon_gen/common/html/_sql_executor.py",
-    "src/recon_gen/common/html/_tree_fetcher.py",
-    "src/recon_gen/common/html/server.py",
-    # Y.2.gate runner — dev tooling, kept strict from the start.
-    "src/recon_gen/_dev",
-    # AY.2.aa — spine in strict scope; AY.2.b's new generators
-    # born strict-clean.
-    "src/recon_gen/common/spine",
+    "src/recon_gen",
+    "tests",
 ]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"

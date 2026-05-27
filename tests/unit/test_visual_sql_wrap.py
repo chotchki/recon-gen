@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import pytest
 
 from recon_gen.common.dataset_contract import ColumnSpec, DatasetContract, Storage
 from recon_gen.common.html._visual_sql import wrap_for_visual
@@ -81,7 +80,7 @@ class KPI:
 class BarChart:
     category: list[_StubDim]
     values: list[_StubMeasure]
-    colors: list[_StubDim] = field(default_factory=list)
+    colors: list[_StubDim] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]: colors list from QS theme dict walk
 
 
 @dataclass

@@ -12,21 +12,32 @@ the load-bearing K.4.8 invariant — both must hydrate, with their
 distinct directional titles ("Inbound — counterparties → anchor",
 "Outbound — anchor → counterparties"), so an analyst can tell inbound
 from outbound by geometry; the tree declares both and ``validate_structure``
+
+if TYPE_CHECKING:
+    from recon_gen.common.tree import App
+    from tests.e2e._drivers import DashboardDriver
+
 asserts both render, so a regression that silently merged them surfaces
 as a missing title — on either renderer.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from .tree_validator import TreeValidator
+
+if TYPE_CHECKING:
+    from recon_gen.common.tree import App
+    from tests.e2e._drivers import DashboardDriver
 
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 
-def test_inv_dashboard_structure_matches_tree(inv_dashboard_driver, inv_app) -> None:
+def test_inv_dashboard_structure_matches_tree(inv_dashboard_driver: tuple["DashboardDriver", str], inv_app: "App") -> None:
     driver, dashboard_arg = inv_dashboard_driver
     # App 2 is local + fast — see test_l1_sheet_visuals for the rationale.
     timeout_ms = 12_000 if driver.dialect == "app2" else 30_000

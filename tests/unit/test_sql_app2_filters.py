@@ -10,6 +10,7 @@ compares lexicographically with no cast needed.
 from __future__ import annotations
 
 from recon_gen.common.sql import Dialect, app2_date_filter
+from recon_gen.common.sql.app2_filters import _DATE_FROM_SENTINEL, _DATE_TO_SENTINEL
 
 
 class TestPostgres:
@@ -26,8 +27,8 @@ class TestPostgres:
 
     def test_uses_sentinel_dates(self):
         sql = app2_date_filter("t.posting", Dialect.POSTGRES)
-        assert "1900-01-01" in sql
-        assert "9999-12-30" in sql
+        assert _DATE_FROM_SENTINEL in sql
+        assert _DATE_TO_SENTINEL in sql
 
     def test_leading_AND(self):
         sql = app2_date_filter("t.posting", Dialect.POSTGRES)
@@ -52,8 +53,8 @@ class TestOracle:
 
     def test_uses_sentinel_dates(self):
         sql = app2_date_filter("t.posting", Dialect.ORACLE)
-        assert "1900-01-01" in sql
-        assert "9999-12-30" in sql
+        assert _DATE_FROM_SENTINEL in sql
+        assert _DATE_TO_SENTINEL in sql
 
 
 class TestSQLite:
@@ -71,8 +72,8 @@ class TestSQLite:
 
     def test_uses_sentinel_dates(self):
         sql = app2_date_filter("t.posting", Dialect.SQLITE)
-        assert "1900-01-01" in sql
-        assert "9999-12-30" in sql
+        assert _DATE_FROM_SENTINEL in sql
+        assert _DATE_TO_SENTINEL in sql
 
 
 class TestColumnInterpolation:

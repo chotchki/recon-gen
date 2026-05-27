@@ -13,13 +13,14 @@ import pytest
 
 from recon_gen.common.handbook import (
     HandbookVocabulary,
-    InvestigationPersonaVocabulary,
+    InvestigationPersonaVocabulary as InvestigationPersonaVocabulary,
     MerchantVocabulary,
     vocabulary_for,
 )
 from recon_gen.common.handbook.vocabulary import (
     _extract_institution_name,
     _institution_acronym,
+    _SASQUATCH_PERSONA_ACRONYM,
 )
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import L2Instance
@@ -59,7 +60,7 @@ class TestSasquatchPRVocabulary:
     def test_picks_snb_branch(self):
         vocab = vocabulary_for(_load("sasquatch_pr"))
         assert vocab.institution.name == "Sasquatch National Bank"
-        assert vocab.institution.acronym == "SNB"
+        assert vocab.institution.acronym == _SASQUATCH_PERSONA_ACRONYM
 
     def test_carries_region_and_legacy_entity(self):
         vocab = vocabulary_for(_load("sasquatch_pr"))
@@ -213,7 +214,10 @@ class TestExtractInstitutionName:
 class TestInstitutionAcronym:
     def test_multi_word_makes_initials(self):
         assert _institution_acronym("First National Bank") == "FNB"
-        assert _institution_acronym("Sasquatch National Bank") == "SNB"
+        assert (
+            _institution_acronym("Sasquatch National Bank")
+            == _SASQUATCH_PERSONA_ACRONYM
+        )
 
     def test_single_word_falls_back_to_phrase(self):
         assert _institution_acronym("Acme") == "the institution"
@@ -290,6 +294,8 @@ class TestDemoScenarioVocabulary:
         # vocab silently sourcing from the wrong fixture.
         spec = vocabulary_for(_load("spec_example"))
         snb = vocabulary_for(_load("sasquatch_pr"))
+        assert spec.demo.drift_account is not None
+        assert snb.demo.drift_account is not None
         assert "snb" not in spec.demo.drift_account.id
         assert "snb" in snb.demo.drift_account.id
 
@@ -305,6 +311,7 @@ class TestDemoScenarioVocabulary:
         # role, so the layering_chain on sasquatch_pr surfaces the
         # curated "Shell Company A/B/C" labels (not raw account_ids).
         vocab = vocabulary_for(_load("sasquatch_pr"))
+        assert vocab.demo.investigation is not None
         chain = vocab.demo.investigation.layering_chain
         assert len(chain) == 3
         assert all("Shell Company" in acc.name for acc in chain)

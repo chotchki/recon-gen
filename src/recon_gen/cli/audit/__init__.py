@@ -41,8 +41,31 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import click
+
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config
+    from recon_gen.common.l2.primitives import L2Instance
+
+
+# Module-private helpers used by sibling modules (cli/audit/pdf.py +
+# cli/audit/markdown.py both import these). Listing in __all__ keeps
+# pyright's reportUnusedFunction quiet without renaming.
+__all__ = [
+    "_EXCEPTION_INVARIANTS",
+    "_format_age",
+    "_split_limit_breach_by_account_class",
+    "_split_overdraft_by_account_class",
+    "_split_stuck_pending_by_account_class",
+    "_split_stuck_unbundled_by_account_class",
+    "audit",
+    "audit_apply",
+    "audit_clean",
+    "audit_test",
+    "audit_verify",
+]
 
 from recon_gen.cli.audit._period import period_option
 from recon_gen.common.as_of_frame import AsOfFrame
@@ -54,17 +77,10 @@ from recon_gen.cli._helpers import (
     resolve_l2_for_demo,
 )
 from recon_gen.common.money import Cents
-from recon_gen.common.pdf.audit_chrome import (
-    BookmarkedDocTemplate,
-    bookmarked_h1,
-    bookmarked_h3,
-    make_footer_drawer,
-)
 from recon_gen.common.provenance import (
     ProvenanceFingerprint,
     compute_provenance,
     hash_table_rows,
-    l2_fingerprint_placeholder,
     l2_yaml_sha256,
     recon_gen_code_identity,
 )
@@ -89,7 +105,11 @@ def _cents_to_dollars(raw: object) -> Decimal:
     """
     if raw is None:
         return Decimal(0)
-    return Cents.from_db(int(raw)).to_dollars()
+    # raw is typed ``object`` because DB-API rows return dynamic types
+    # per dialect (PG psycopg → int, Oracle → Decimal, SQLite → int).
+    # int(...) accepts all three; ``int(raw)`` raises TypeError on
+    # anything else, which is the intended loud-fail behavior.
+    return Cents.from_db(int(raw)).to_dollars()  # type: ignore[arg-type]: see docstring — accept anything int() accepts
 
 
 def _coerce_to_date(v: object) -> date:
@@ -176,7 +196,7 @@ def _resolve_frame(
     return AsOfFrame.for_audit(anchor, lookback_days=7)
 
 
-def _institution_name(instance, cfg) -> str:  # type: ignore[no-untyped-def]: instance is L2Instance, cfg is Config — untyped pending audit-CLI sweep
+def _institution_name(instance: L2Instance, cfg: Config) -> str:
     """Pull the institution display name from the L2 persona block.
 
     Falls back to the cfg's deployment name when no persona block is
@@ -188,7 +208,7 @@ def _institution_name(instance, cfg) -> str:  # type: ignore[no-untyped-def]: in
     return str(cfg.deployment_name)
 
 
-def _singleton_account_ids(instance) -> set[str]:  # type: ignore[no-untyped-def]: instance is L2Instance, untyped pending audit-CLI sweep
+def _singleton_account_ids(instance: L2Instance) -> set[str]:
     """IDs of L2 ``Account`` singletons (the N-N "shared" accounts).
 
     Used by the U.3 per-invariant tables to split rows: account_ids
@@ -202,7 +222,7 @@ def _singleton_account_ids(instance) -> set[str]:  # type: ignore[no-untyped-def
 
 
 def _internal_singleton_account_ids(
-    instance,  # type: ignore[no-untyped-def]: instance is L2Instance, untyped pending audit-CLI sweep
+    instance: L2Instance,
 ) -> set[str]:
     """IDs of internal-scope L2 ``Account`` singletons only.
 
@@ -252,7 +272,7 @@ _EXCEPTION_INVARIANTS: list[tuple[str, str, str | None]] = [
 
 
 def _query_executive_summary(
-    cfg, instance, frame: AsOfFrame,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg: Config, instance: L2Instance, frame: AsOfFrame,
 ) -> ExecSummary | None:
     """Aggregate the executive-summary totals against the demo DB.
 
@@ -378,7 +398,7 @@ class DriftViolation:
 
 
 def _query_drift_violations(
-    cfg, instance, frame: AsOfFrame,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg: Config, instance: L2Instance, frame: AsOfFrame,
 ) -> list[DriftViolation] | None:
     """Pull drift rows whose business day falls in the period.
 
@@ -456,7 +476,7 @@ class OverdraftViolation:
 
 
 def _query_overdraft_violations(
-    cfg, instance, frame: AsOfFrame,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg: Config, instance: L2Instance, frame: AsOfFrame,
 ) -> list[OverdraftViolation] | None:
     """Pull overdraft rows whose business day falls in the period.
 
@@ -598,7 +618,7 @@ class LimitBreachViolation:
 
 
 def _query_limit_breach_violations(
-    cfg, instance, frame: AsOfFrame,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg: Config, instance: L2Instance, frame: AsOfFrame,
 ) -> list[LimitBreachViolation] | None:
     """Pull limit_breach rows whose business day falls in the period.
 
@@ -741,7 +761,7 @@ class StuckPendingViolation:
 
 
 def _query_stuck_pending_violations(
-    cfg, instance,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg: Config, instance: L2Instance,
 ) -> list[StuckPendingViolation] | None:
     """Pull all rows from the ``<prefix>_stuck_pending`` matview.
 
@@ -884,7 +904,7 @@ class StuckUnbundledViolation:
 
 
 def _query_stuck_unbundled_violations(
-    cfg, instance,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg: Config, instance: L2Instance,
 ) -> list[StuckUnbundledViolation] | None:
     """Pull all rows from the ``<prefix>_stuck_unbundled`` matview.
 
@@ -1030,7 +1050,7 @@ class SupersessionAuditData:
 
 
 def _query_supersession(
-    cfg, instance, frame: AsOfFrame,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg: Config, instance: L2Instance, frame: AsOfFrame,
 ) -> SupersessionAuditData | None:
     """Aggregate supersession counts + in-window detail rows.
 
@@ -1181,7 +1201,7 @@ class DailyStatementWalk:
 
 
 def _query_daily_statement_walks(
-    cfg, instance,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg: Config, instance: L2Instance,
     frame: AsOfFrame,
     singleton_ids: set[str],
 ) -> list[DailyStatementWalk] | None:
@@ -1226,7 +1246,7 @@ def _query_daily_statement_walks(
         drift_rows = cur.fetchall()
         # 2) Parent (singleton) accounts: every (parent, day) in the
         # period from daily_statement_summary, even with zero drift.
-        parent_rows: list = []
+        parent_rows: list[Any] = []
         if singleton_ids:
             cur.execute(
                 f"SELECT account_id, business_day_start, business_day_end,"
@@ -1392,7 +1412,7 @@ _APPENDIX_MATVIEWS: tuple[str, ...] = (
 
 
 def _query_matview_evidence(
-    cfg, instance,  # type: ignore[no-untyped-def]: cfg/instance untyped pending audit-CLI sweep
+    cfg: Config, instance: L2Instance,
 ) -> list[MatviewEvidence] | None:
     """Hash every matview the appendix advertises (U.7.c).
 
@@ -1613,7 +1633,7 @@ def audit_test(pytest_args: str) -> None:
         sys.executable, "-m", "pyright",
         "src/recon_gen/cli/audit/",
     ]
-    failed = []
+    failed: list[str] = []
     click.echo(f"$ {' '.join(pytest_argv)}")
     if subprocess.call(pytest_argv) != 0:
         failed.append("pytest")
@@ -1672,7 +1692,8 @@ def audit_verify(
             f"Embedded provenance in {pdf_path} is unreadable: {e}"
         )
 
-    cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
+    # L2 instance not consumed by verify — only DB hash recompute matters.
+    cfg, _instance = resolve_l2_for_demo(config, l2_instance_path)
     if cfg.demo_database_url is None:
         raise click.ClickException(
             "audit verify needs --config with demo_database_url set "

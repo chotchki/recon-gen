@@ -33,7 +33,7 @@ Substep landmarks:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Literal
 
 from recon_gen.common.l2 import default_l2_instance
@@ -97,7 +97,6 @@ from recon_gen.common.handbook.invariants import (
 )
 from recon_gen.common.ids import FilterGroupId, ParameterName, SheetId
 from recon_gen.common.l2 import L2Instance
-from recon_gen.common.models import DateTimeDefaultValues
 from recon_gen.common.dataset_contract import ColumnShape
 from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_DESCRIPTION,
@@ -109,6 +108,7 @@ from recon_gen.common.sheets.app_info import (
 )
 from recon_gen.common.l2 import ThemePreset
 from recon_gen.common.theme import resolve_l2_theme
+from recon_gen.common.tree.actions import DrillWrite
 from recon_gen.common.tree import (
     AUTO,
     Analysis,
@@ -125,13 +125,11 @@ from recon_gen.common.tree import (
     DrillResetSentinel,
     DrillStaticDateTime,
     FilterGroup,
-    LineChart,
     LinkedValues,
     Sheet,
     StaticValues,
     StringParam,
     TextBox,
-    TimeEqualityFilter,
     TimeRangeFilter,
 )
 
@@ -1780,9 +1778,9 @@ def _wire_date_range_filter(
     # Drift sheet — both leaf-drift + parent-drift datasets share
     # business_day_start.
     _scope_one(DS_DRIFT, "business_day_start", drift_sheet,
-               "fg-l1-date-drift")
+               FilterGroupId("fg-l1-date-drift"))
     _scope_one(DS_LEDGER_DRIFT, "business_day_start", drift_sheet,
-               "fg-l1-date-ledger-drift")
+               FilterGroupId("fg-l1-date-ledger-drift"))
     # Drift Timelines uses pre-aggregated datasets keyed on
     # business_day_end (one row per (day, role)).
     _scope_one(DS_DRIFT_TIMELINE, "business_day_end",
@@ -1790,17 +1788,17 @@ def _wire_date_range_filter(
     _scope_one(DS_LEDGER_DRIFT_TIMELINE, "business_day_end",
                drift_timelines_sheet, FilterGroupId("fg-l1-date-ledger-drift-timeline"))
     _scope_one(DS_OVERDRAFT, "business_day_start", overdraft_sheet,
-               "fg-l1-date-overdraft")
+               FilterGroupId("fg-l1-date-overdraft"))
     # Limit breach + today's exceptions expose `business_day` (truncated
     # posting), not `business_day_start`.
     _scope_one(DS_LIMIT_BREACH, "business_day", limit_breach_sheet,
-               "fg-l1-date-limit-breach")
+               FilterGroupId("fg-l1-date-limit-breach"))
     _scope_one(DS_TODAYS_EXCEPTIONS, "business_day",
                todays_exceptions_sheet, FilterGroupId("fg-l1-date-todays-exceptions"))
     # Q.1.b — Transactions sheet over the per-leg ledger; same `posting`
     # column shape as Pending/Unbundled Aging.
     _scope_one(DS_TRANSACTIONS, "posting", transactions_sheet,
-               "fg-l1-date-transactions")
+               FilterGroupId("fg-l1-date-transactions"))
     # NOTE: stuck_pending / stuck_unbundled / supersession sheets
     # intentionally skip date scoping. Their matviews are current-state
     # (no posting/business_day filter on the audit query side either) —
@@ -2262,7 +2260,7 @@ def _l1_drill(
     *,
     target_sheet: Sheet,
     name: str,
-    writes: list,  # list[tuple[DrillParam, ...]]
+    writes: list[DrillWrite],
     trigger: Literal["DATA_POINT_CLICK", "DATA_POINT_MENU"] = "DATA_POINT_CLICK",
     action_id: str | AutoResolved = AUTO,
 ) -> Drill:

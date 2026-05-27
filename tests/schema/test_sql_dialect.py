@@ -8,6 +8,8 @@ Oracle 19c-compatible equivalent.
 
 from __future__ import annotations
 
+from typing import Any, Callable
+
 import pytest
 
 from recon_gen.common.sql import (
@@ -569,6 +571,8 @@ class TestDialectIsRequired:
             (analyze_table, ("foo",)),
         ],
     )
-    def test_omitting_dialect_is_a_typeerror(self, fn, args):
+    def test_omitting_dialect_is_a_typeerror(
+        self, fn: "Callable[..., Any]", args: tuple[Any, ...],
+    ) -> None:
         with pytest.raises(TypeError, match="missing.*positional"):
             fn(*args)

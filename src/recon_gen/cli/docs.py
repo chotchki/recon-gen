@@ -291,8 +291,9 @@ def _warm_db_for_screenshots(database_url: str) -> None:
             )
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT 1 FROM dual")
-                cur.fetchall()
+                # oracledb lacks PEP 561 stubs — cursor methods come back as Unknown.
+                cur.execute("SELECT 1 FROM dual")  # type: ignore[unknown-member]: oracledb cursor is Unknown without stubs
+                cur.fetchall()  # type: ignore[unknown-member]: oracledb cursor is Unknown without stubs
         finally:
             conn.close()
         return
@@ -463,7 +464,7 @@ def docs_test(pytest_args: str) -> None:
         "src/recon_gen/common/handbook/",
         "main.py",
     ]
-    failed = []
+    failed: list[str] = []
     click.echo(f"$ {' '.join(pytest_argv)}")
     if subprocess.call(pytest_argv, cwd=_REPO_ROOT) != 0:
         failed.append("pytest")
@@ -607,8 +608,9 @@ def docs_screenshot(
     if app is not None and all_apps:
         raise click.UsageError("Pass either --app or --all, not both.")
 
-    apps_to_capture = (
-        sorted(SCREENSHOT_APPS.keys()) if all_apps else [app]
+    # After the guard above, exactly one of `app` / `all_apps` is set.
+    apps_to_capture: list[str] = (
+        sorted(SCREENSHOT_APPS.keys()) if all_apps else [app]  # type: ignore[list-item]: app is not None per the guard
     )
 
     cfg = load_config(config_path)
@@ -648,6 +650,9 @@ def docs_screenshot(
         l2_instance = load_instance(Path(l2_instance_path))
 
     if not skip_warmup:
+        # Demo URL is guaranteed non-None here — the guard above raises
+        # ClickException when skip_warmup is False AND demo_database_url is unset.
+        assert cfg.demo_database_url is not None
         click.echo(
             f"-> Warming DB ({cfg.demo_database_url.split('@')[-1]}, "
             f"SELECT 1)...", nl=False,

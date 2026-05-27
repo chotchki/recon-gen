@@ -14,6 +14,7 @@ import sqlite3
 import tempfile
 from collections.abc import Iterator
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -21,9 +22,12 @@ from recon_gen.common.sql.dialect import Dialect
 from tests._test_helpers import make_test_config
 from tests.e2e._drivers.base import query_db_via_cfg
 
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config
+
 
 @pytest.fixture
-def planted_inv_sqlite() -> Iterator[object]:
+def planted_inv_sqlite() -> Iterator["Config"]:
     fd, path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
     conn = sqlite3.connect(path)
@@ -112,7 +116,7 @@ _FANOUT_SQL = "SELECT * FROM pfx_fanout"
 
 
 def test_bg4_anomalies_kpi_matches_filtered_count_on_healthy_data(
-    planted_inv_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_inv_sqlite: "Config",
 ) -> None:
     """KPI == σ-filtered dataset row count, and that count == bin sum
     of distribution above threshold. Healthy-path: all assertions
@@ -131,7 +135,7 @@ def test_bg4_anomalies_kpi_matches_filtered_count_on_healthy_data(
 
 
 def test_bg4_anomalies_kpi_trips_when_kpi_underflows_vs_filtered_count(
-    planted_inv_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_inv_sqlite: "Config",
 ) -> None:
     """v11.21.0 finding #5: KPI shows 0 while populated bins exist
     above the threshold. Identity (KPI == filtered count) trips."""
@@ -144,7 +148,7 @@ def test_bg4_anomalies_kpi_trips_when_kpi_underflows_vs_filtered_count(
 
 
 def test_bg4_anomalies_distribution_consistency_trips_on_threshold_mismatch(
-    planted_inv_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_inv_sqlite: "Config",
 ) -> None:
     """v11.21.0 finding #5 (variant): the chart and the KPI compute
     different things. Simulate: KPI uses σ=4 but the test pulls
@@ -171,7 +175,7 @@ def test_bg4_anomalies_distribution_consistency_trips_on_threshold_mismatch(
 
 
 def test_bg4_fanout_total_trips_when_cartesian_inflation_exists(
-    planted_inv_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_inv_sqlite: "Config",
 ) -> None:
     """v11.21.0 finding #7 direct: the fanout JOIN is cartesian for
     multi-leg transfers; SUM(amount) inflates by sender-leg count.
@@ -218,7 +222,7 @@ def test_bg4_fanout_total_trips_when_cartesian_inflation_exists(
 
 
 def test_bg4_fanout_total_passes_when_no_inflation(
-    planted_inv_sqlite,  # type: ignore[no-untyped-def]: fixture-yield cascade from the sqlite-backed Config
+    planted_inv_sqlite: "Config",
 ) -> None:
     """Healthy path: when every transfer has exactly 1 recipient leg ×
     1 sender leg, the cartesian JOIN produces no inflation and the
