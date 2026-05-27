@@ -6,6 +6,19 @@ on:
   pull_request:
     branches: [main]
 
+# Auto-cancel superseded runs on the same branch. A rapid follow-up
+# push doesn't need the older commit's CI to finish — it's been
+# obsoleted. Cuts wasted minutes + clears the queue for the newest
+# truth. (Added 2026-05-27 after a manual `gh run cancel` round on
+# the c4dcdfec→83b5d5d2 push pair surfaced the gap.)
+#
+# E2E intentionally keeps cancel-in-progress: false because mid-flight
+# runs hold deployed AWS dashboards + cleanup expects an orderly
+# teardown — those need to finish.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
