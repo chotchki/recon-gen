@@ -1,3 +1,39 @@
+# PLAN — Phases AM + BA + BF (archived 2026-05-27)
+
+## Phase AM — Standardize on tailwind
+
+Unified the HTML surface on a single styling system: Studio editor / diagram chrome / data-knob panel migrated from 1,615 lines of hand-written CSS (`editor.css` + `diagram.css` + `data.css`) to raw Tailwind utilities matching App2's existing pattern. Same Tailwind dialect across dashboards + Studio + diagram chrome.
+
+**Sequenced after AI deliberately** so the AI dogfood round-trip pinned the editor's behavior + emitted HTML structure first — CSS refactor landed with the regression safety net.
+
+**AM.0 locks (user 2026-05-25)**: standardize on Tailwind defaults (don't preserve odd hand-coded values), raw utilities only (no `@apply` component classes; helpers return one utility string instead), bundle `data.css` into scope, SVG keeps semantic CSS (`diagram-svg.css`), L2 theme inheritance flows through Tailwind utilities via the existing `--color-*` token system.
+
+**Shipped 2026-05-25**:
+- `AM.0.1` — 146 distinct semantic classes audited; single-PR migration sized at 2-3 days.
+- `AM.1` — Editor screens (create / edit / list / singleton / read-card / xor-group / chain-children / reconciler / read-value bullets / rail-subtype-picker) converted to raw utilities. Drivers switched to user-facing locators (`role="alert"`, `article:has(h3:text(...))`) — never CSS classes — per the new `feedback_browser_drivers_user_facing_locators`.
+- `AM.2` — Diagram chrome + studio-header + data-knob panel converted across four step commits. Home-page focus-filter JS now walks `[data-kind][data-entity-id]` attribute selectors + native HTML `hidden`. Deploy-status state markers switched from CSS classes to `data-state` attribute. Marker classes (`entity-card`, `entity-card-title`) retired.
+- `AM.3` — Full unit suite (2793 passed, 74 skipped) + studio browser dogfood (3/3) green after each step. Visual screenshot parity deferred — chrome migration changed visual surfaces deliberately (theme-driven tokens replaced hand-coded `--studio-*` aliases per AM.0.L1).
+- `AM.4` — `editor.css` + `data.css` dropped entirely; `diagram.css` slimmed to SVG-only rules and renamed `diagram-svg.css`. All 6 `<link>` references updated. Test `test_studio_static_serves_diagram_svg_css` updated. **Total CSS LOC retired: 1,300; 105 lines of irreducible SVG remainder.**
+
+## Phase BA — Dashboard pickers sourced from `<prefix>_config.l2_yaml` (deferred)
+
+Single proposal entry, archived as not-pursued-yet. The post-AW DB-resident `<prefix>_config` table opened a third option for dashboard picker sourcing: JOIN to `l2_yaml` for picker options rather than hardcoded `StaticValues` or dataset-derived `SELECT DISTINCT`. Unlocks pickers showing only L2-declared values, pickers that JOIN to L2 metadata (descriptions / types / classifications), pickers that survive deploys without re-emitting JSON, cross-dashboard consistency without re-encoding the L2 in each dataset. **Caveat**: requires changing the dashboard JSON's filter shape from `StaticValues` to `LinkToDataSetColumn`.
+
+Archived as deferred — sized as its own phase when picker complexity surfaces as friction. The Studio/Dashboards rethink backlog item (2026-05-23) absorbs the broader question.
+
+## Phase BF — Expand pyright strict-scope to remaining src/ (~70 files)
+
+Promoted from backlog 2026-05-26 after BE.7.C.2's measurement found that 27% of the residual tests/ cascade traced to un-included src/ files. The "70 unchecked src/ files" were `apps/{executives,investigation,l1_dashboard,l2_flow_tracing}/*.py` + `cli/*.py` + runtime entry points — exactly the modules feeding the strict-scope tests/ work. Sequenced BEFORE BE.7.C.3 so producer-side cascade collapses before tests-side triage.
+
+Rationale for interleaving here vs after BE.7: user's "the more we punt the more it bites us" principle. Every tests/-side `# type: ignore` we'd add in C.3 to mask cascade-from-un-typed-src/ would be re-touched when BF lands.
+
+**Shipped 2026-05-26**:
+- `BF.0` — Spike: 1,193 errors across 161 unchecked src/ files. cli/ = 700 (58%), common/ = 411 (34%), apps/ = 70 (6%), main = 12. 86% unknown_cascade — same producer-side annotation pattern as BE.7. Audit: `docs/audits/bf_0_pyright_src_spike.md`.
+- `BF.1` — Annotation fan-out across 4 parallel worktree slices: (1) apps/+sheets/+main = 26 → 0; (2) common/ = 371 → 0; (3) common/pdf/ = 38 → 0; (4) cli/ = 700 → 16. Found + fixed ~15 lurking bugs inline (NewType-leaks, `build_all_l2_flow_tracing_datasets` annotation drift, mypy-style rule codes pyright silently ignored, `_oracle_lowercase_alias_wrapper` cleanup).
+- `BF.2` — Triage residual: two `noqa F401` re-exports needed `as` form for PEP 484 explicit re-export, one pyHanko `IncrementalPdfFileWriter.write()` partial stub.
+- `BF.3` — `[tool.pyright].include` flipped from a curated file list to `src/recon_gen`. Default `pyright` (no args) lands at 0 errors. tests/ re-measure: 3,250 → 3,227 (-23, -0.7%) — cascade-leverage hypothesis was wrong (most tests/ cascade is intra-tests/, not downstream of un-included src/). BF still shipped substantial independent value: src/ now strict-clean + ~15 lurking bugs fixed.
+- `BF.4` — Resumed BE.7.C.3 via 6-slice parallel worktree fan-out (A=test_investigation 484, B=test_tree+l2_derived+typing_smells 284, C=cli_json+cleanup+app_info+screenshot 387, D=l2ft+l1+axis+headers+drill 466, E=runner+browser+html_tree+aging+spine+common_db 402, F=e2e+audit+data+tail 1216). All slices landed individually clean. Cherry-pick merge into `be-cross-corpus-lint` had 3 conflict files (test_cleanup, test_l2_flow_tracing, test_l1_dashboard) resolved by union-of-imports. Merge polish + 30 unused-import sweep + final triage pass brought residual 116 → 77 → 30 → 0. Real bugs found and fixed inline: missing None-guards, NewType wraps in schema tests, `RoleExpression(Identifier(x))` calling tuple.__new__ on single value, mkdocs import truncated by unused-import sweep.
+
 # PLAN — Phase Z (archived 2026-05-15)
 
 ## Phase Z — L2 grammar cleanup: chain collapse + transfer_type subsumption
