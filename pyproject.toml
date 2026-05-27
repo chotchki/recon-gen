@@ -101,6 +101,10 @@ serve = [
     # SQLite cfg without blocking the asyncio loop. Cheap dependency
     # (~30 KB), pulls nothing extra.
     "aiosqlite>=0.19",
+    # aiosqlitepool — connection pool wrapper for aiosqlite.
+    # Mitigates aiosqlite#258 thread-lock leak on per-request connect+close
+    # patterns. See common/db.py::_AsyncSqlitePool for the integration.
+    "aiosqlitepool>=1.0.0",
     # BF.9 — markdown rendering for the Studio editor's textarea
     # Preview tab (description fields opt-in via FieldSpec.preview_
     # markdown). Lazy-imported in `_studio_editor_routes.py`; pulled
@@ -146,6 +150,10 @@ dev = [
     "testcontainers[postgres,oracle]>=3.7",
     "psycopg[binary,pool]>=3.1",
     "aiosqlite>=0.19",
+    # aiosqlitepool — connection pool wrapper for aiosqlite.
+    # Mitigates aiosqlite#258 thread-lock leak on per-request connect+close
+    # patterns. See common/db.py::_AsyncSqlitePool for the integration.
+    "aiosqlitepool>=1.0.0",
     # P.9d — oracledb thin client so the e2e harness can connect to
     # an Oracle dialect config without a separate `[demo-oracle]` install.
     "oracledb>=2.0",
@@ -230,6 +238,10 @@ e2e = [
     "python-multipart>=0.0.18",
     "httpx>=0.27",
     "aiosqlite>=0.19",
+    # aiosqlitepool — connection pool wrapper for aiosqlite.
+    # Mitigates aiosqlite#258 thread-lock leak on per-request connect+close
+    # patterns. See common/db.py::_AsyncSqlitePool for the integration.
+    "aiosqlitepool>=1.0.0",
     # BF.9 — same mirror as [dev]; the e2e suite spins App2Driver
     # which hits the studio editor's markdown-preview route in some
     # cells. Keep in sync with [serve] + [dev].

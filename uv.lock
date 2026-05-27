@@ -12,6 +12,15 @@ wheels = [
 ]
 
 [[package]]
+name = "aiosqlitepool"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c6/5a/f3184cdfd195a748bbb330894e34e5b274fec0e9b8dfac4c1fc71f36fc8b/aiosqlitepool-1.0.0.tar.gz", hash = "sha256:397f79993d7f34a5740939fb6e52ff29563fad5c400ef8b70990e64331957409", size = 16491, upload-time = "2025-07-11T10:15:43.029Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/65/4d9a7eb8a4cf6a586f14abcce9d774d5b4a986e3c3028a9c88801c9648d2/aiosqlitepool-1.0.0-py3-none-any.whl", hash = "sha256:832acb166bb9afef7f46b320d024b343083c90f4eb4bdc8c0d794a79e1fd1b4d", size = 12946, upload-time = "2025-07-11T10:15:41.953Z" },
+]
+
+[[package]]
 name = "anyio"
 version = "4.13.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1630,6 +1639,7 @@ deploy = [
 ]
 dev = [
     { name = "aiosqlite" },
+    { name = "aiosqlitepool" },
     { name = "boto3" },
     { name = "boto3-stubs", extra = ["quicksight", "rds", "s3", "sts"] },
     { name = "botocore", extra = ["crt"] },
@@ -1662,6 +1672,7 @@ docs = [
 ]
 e2e = [
     { name = "aiosqlite" },
+    { name = "aiosqlitepool" },
     { name = "boto3" },
     { name = "botocore", extra = ["crt"] },
     { name = "httpx" },
@@ -1675,6 +1686,7 @@ e2e = [
 ]
 serve = [
     { name = "aiosqlite" },
+    { name = "aiosqlitepool" },
     { name = "httpx" },
     { name = "markdown" },
     { name = "python-multipart" },
@@ -1692,6 +1704,9 @@ requires-dist = [
     { name = "aiosqlite", marker = "extra == 'dev'", specifier = ">=0.19" },
     { name = "aiosqlite", marker = "extra == 'e2e'", specifier = ">=0.19" },
     { name = "aiosqlite", marker = "extra == 'serve'", specifier = ">=0.19" },
+    { name = "aiosqlitepool", marker = "extra == 'dev'", specifier = ">=1.0.0" },
+    { name = "aiosqlitepool", marker = "extra == 'e2e'", specifier = ">=1.0.0" },
+    { name = "aiosqlitepool", marker = "extra == 'serve'", specifier = ">=1.0.0" },
     { name = "boto3", marker = "extra == 'deploy'", specifier = ">=1.34" },
     { name = "boto3", marker = "extra == 'dev'", specifier = ">=1.34" },
     { name = "boto3", marker = "extra == 'e2e'", specifier = ">=1.34" },

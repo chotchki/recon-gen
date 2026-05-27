@@ -822,29 +822,50 @@ class _AsyncOraclePool:
 
 
 class _AsyncSqlitePool:
-    """No-pool wrapper around ``aiosqlite.connect``.
+    """``aiosqlitepool``-backed pool for the App2 async SQLite path.
 
-    SQLite is local file (or in-memory) access — pooling would just
-    hold open file handles to the same file. Each ``acquire()``
-    opens a fresh connection and closes it on context exit; the
-    ``max_size`` argument is accepted upstream but ignored here.
+    Upstream aiosqlite#258 (https://github.com/omnilib/aiosqlite/issues/258,
+    still open on 0.22.1) — `async with aiosqlite.connect(...) as db` leaks
+    thread locks on close. The old per-acquire connect+close pattern here
+    accumulated memory until OOM (caught locally during a 13-variant
+    browser e2e sweep in v11.22.4-followon: each test spun a fresh
+    App2Driver pool, each request opened+closed an aiosqlite connection).
+
+    ``aiosqlitepool.SQLiteConnectionPool`` is a third-party pool that reuses
+    long-lived aiosqlite connections (the upstream-issue workaround pattern,
+    productized). Same shape as ``psycopg_pool.AsyncConnectionPool`` on the
+    PG path — consistent ``.connection()`` async-cm + ``.close()``.
+
+    The factory opens the underlying aiosqlite connection lazily on first
+    acquire + applies our PRAGMA setup. NOTE: STDDEV_SAMP is NOT registered
+    on this async pool (aiosqlite doesn't expose create_aggregate); the
+    inv_pair_rolling_anomalies matview holds pre-computed rows from the
+    sync `connect_demo_db` path which does register the aggregate, so the
+    async App2 read-only workload never needs it.
     """
 
-    def __init__(self, path: str) -> None:
-        self._path = path
+    def __init__(self, path: str, *, max_size: int = 10) -> None:
+        from aiosqlitepool import SQLiteConnectionPool  # type: ignore[import-untyped]: aiosqlitepool lacks PEP 561 stubs  # noqa: PLC0415
+
+        async def _factory() -> Any:  # typing-smell: ignore[explicit-any]: aiosqlite.Connection conforms to aiosqlitepool's Connection Protocol at runtime; static stubs disagree
+            import aiosqlite  # noqa: PLC0415
+
+            conn = await aiosqlite.connect(path)
+            await conn.execute("PRAGMA foreign_keys = ON;")
+            return conn
+
+        self._pool = SQLiteConnectionPool(_factory, pool_size=max_size)
 
     def acquire(self) -> AbstractAsyncContextManager[AsyncConnection]:
         return self._acquire()
 
     @asynccontextmanager
     async def _acquire(self) -> AsyncGenerator[AsyncConnection, None]:
-        import aiosqlite  # noqa: PLC0415
-
-        async with aiosqlite.connect(self._path) as conn:
+        async with self._pool.connection() as conn:
             yield conn  # type: ignore[misc]: aiosqlite Connection conforms to AsyncConnection protocol
 
     async def close(self) -> None:
-        return None
+        await self._pool.close()
 
 
 async def make_connection_pool(
@@ -922,7 +943,9 @@ async def make_connection_pool(
                 "Install it with: pip install 'recon-gen[serve]'"
             ) from e
         del _aiosqlite_probe
-        return _AsyncSqlitePool(sqlite_path(cfg.demo_database_url))
+        return _AsyncSqlitePool(
+            sqlite_path(cfg.demo_database_url), max_size=max_size,
+        )
     raise ValueError(
         f"Unknown dialect {cfg.dialect!r}. "
         "Set 'dialect: postgres', 'dialect: oracle', or 'dialect: sqlite' "

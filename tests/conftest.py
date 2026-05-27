@@ -97,6 +97,117 @@ def pytest_configure(config: Any) -> None:
     runner.RUNS_DIR = session_runs_tmp  # type: ignore[misc]: patching module-level Final at session start; the Final mark documents intent for prod, tests legitimately rebind
 
 
+# ---------------------------------------------------------------------------
+# SQLite connection-leak detector (opt-in via RECON_GEN_SQLITE_LEAK_GATE=1)
+# ---------------------------------------------------------------------------
+#
+# Surfaced 2026-05-27 — aiosqlite#258 (still open) leaks thread locks on
+# per-request connect+close, and `with sqlite3.connect(...)` (Python's
+# sqlite3 context manager handles transactions, NOT close) is a common
+# foot-gun. Both shapes accumulate live Connection objects until OOM —
+# explains the local browser-tier OOM during the 13-variant sweep.
+#
+# This fixture snapshots the live sqlite3 / aiosqlite Connection count
+# before each test + asserts no net growth after. Defaults OFF because
+# (a) a few legitimately-session-scoped DB fixtures hold connections
+# across tests, (b) third-party libs may also leak; user opts in per
+# branch / per release-gate run when the leak surface needs sweeping.
+#
+# Usage:  `RECON_GEN_SQLITE_LEAK_GATE=1 pytest tests/...`
+
+
+def _count_live_sqlite_connections() -> int:
+    """Sweep ``gc.get_objects()`` for live sqlite3 / aiosqlite Connections.
+
+    Forces a ``gc.collect()`` first so legitimately-out-of-scope
+    connections are reaped before the count. aiosqlite import is
+    soft — environments without it count only stdlib sqlite3 conns.
+    """
+    import gc as _gc  # noqa: PLC0415
+    import sqlite3 as _sqlite3  # noqa: PLC0415
+
+    aiosqlite_conn_cls: tuple[type, ...]
+    try:
+        import aiosqlite as _aiosqlite  # noqa: PLC0415
+
+        aiosqlite_conn_cls = (_aiosqlite.Connection,)
+    except ImportError:
+        aiosqlite_conn_cls = ()
+
+    # Count only OPEN sqlite3 / aiosqlite connections — a closed
+    # Connection object can linger in pytest's traceback / fixture-result
+    # caches even after the test's own `conn.close()` ran, which would
+    # false-positive the gate. We probe each candidate by calling
+    # `execute("SELECT 1")` and only count it if it doesn't raise
+    # `ProgrammingError("Cannot operate on a closed database.")`.
+    for _ in range(3):
+        _gc.collect()
+    live = 0
+    for o in _gc.get_objects():
+        if isinstance(o, _sqlite3.Connection):
+            try:
+                o.execute("SELECT 1")
+                live += 1
+            except _sqlite3.ProgrammingError:
+                pass
+        elif aiosqlite_conn_cls and isinstance(o, aiosqlite_conn_cls):
+            # aiosqlite.Connection wraps a background thread; the thread's
+            # presence is the leak signal. `aiosqlite.Connection._running`
+            # is True while the worker thread is alive.
+            if getattr(o, "_running", False):
+                live += 1
+    return live
+
+
+_SQLITE_LEAK_BASELINE: dict[str, int] = {}
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_setup(item: Any) -> Generator[None, None, None]:  # typing-smell: ignore[explicit-any]: pytest Item from late import
+    """Stash the pre-setup sqlite-conn count when the leak gate is enabled.
+
+    Pair with ``pytest_runtest_teardown`` (below) which compares after
+    ALL fixture finalizers have run — fixes the autouse-fixture timing
+    bug where the gate fires before per-test fixtures close their conns.
+    """
+    if os.environ.get("RECON_GEN_SQLITE_LEAK_GATE") == "1":
+        _SQLITE_LEAK_BASELINE[item.nodeid] = _count_live_sqlite_connections()
+    yield
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_teardown(item: Any) -> Generator[None, None, None]:  # typing-smell: ignore[explicit-any]: pytest Item from late import
+    """Fail if the test left more sqlite conns than it found (gate opt-in).
+
+    Surfaced 2026-05-27 — aiosqlite#258 leaks thread locks on per-request
+    connect+close, and `with sqlite3.connect(...)` (Python's sqlite3
+    context manager handles transactions, NOT close) is a common
+    foot-gun. Both accumulate live Connection objects until OOM.
+
+    Opt in via ``RECON_GEN_SQLITE_LEAK_GATE=1`` — default OFF because
+    legitimate session-scoped DB fixtures hold connections across tests
+    and would false-positive without explicit baseline-shift tracking.
+    """
+    yield  # let all other teardown hooks + finalizers run first
+    if os.environ.get("RECON_GEN_SQLITE_LEAK_GATE") != "1":
+        return
+    before = _SQLITE_LEAK_BASELINE.pop(item.nodeid, None)
+    if before is None:
+        return
+    after = _count_live_sqlite_connections()
+    leaked = after - before
+    if leaked > 0:
+        raise AssertionError(
+            f"sqlite-leak-gate: test {item.nodeid!r} leaked {leaked} "
+            f"Connection instance(s) (before={before} → after={after}). "
+            f"Likely culprits: `with sqlite3.connect(...) as c:` "
+            f"(commits transaction, DOES NOT close) or "
+            f"`async with aiosqlite.connect(...)` (aiosqlite#258 leaks "
+            f"thread locks). Use the `aiosqlitepool`-backed pool from "
+            f"common/db.py or close connections explicitly in a try/finally."
+        )
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item: Any, call: Any) -> Generator[None, Any, None]:
     """Y.2.gate.c.2 — write per-test timing JSONL when the runner is driving.
