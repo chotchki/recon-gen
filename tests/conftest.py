@@ -26,6 +26,7 @@ from recon_gen.common.env_keys import (
     RECON_GEN_FUZZ_SEED,
     RECON_GEN_LAYER,
     RECON_GEN_RUN_DIR,
+    RECON_GEN_SQLITE_LEAK_GATE,
 )
 
 
@@ -170,7 +171,7 @@ def pytest_runtest_setup(item: Any) -> Generator[None, None, None]:  # typing-sm
     ALL fixture finalizers have run — fixes the autouse-fixture timing
     bug where the gate fires before per-test fixtures close their conns.
     """
-    if os.environ.get("RECON_GEN_SQLITE_LEAK_GATE") == "1":
+    if RECON_GEN_SQLITE_LEAK_GATE.get_or_none():
         _SQLITE_LEAK_BASELINE[item.nodeid] = _count_live_sqlite_connections()
     yield
 
@@ -189,7 +190,7 @@ def pytest_runtest_teardown(item: Any) -> Generator[None, None, None]:  # typing
     and would false-positive without explicit baseline-shift tracking.
     """
     yield  # let all other teardown hooks + finalizers run first
-    if os.environ.get("RECON_GEN_SQLITE_LEAK_GATE") != "1":
+    if not RECON_GEN_SQLITE_LEAK_GATE.get_or_none():
         return
     before = _SQLITE_LEAK_BASELINE.pop(item.nodeid, None)
     if before is None:

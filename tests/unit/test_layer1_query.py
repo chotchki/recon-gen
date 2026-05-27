@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -60,21 +61,24 @@ class _FakeConn:
 
 
 @pytest.fixture
-def db() -> _FakeConn:
+def db() -> Iterator[_FakeConn]:
     conn = sqlite3.connect(":memory:")
-    conn.execute(
-        "CREATE TABLE drift (account_id TEXT, business_day DATE, magnitude REAL)"
-    )
-    conn.executemany(
-        "INSERT INTO drift VALUES (?, ?, ?)",
-        [
-            ("cust-0001-snb", "2030-01-01", 250.00),
-            ("cust-0002-snb", "2030-01-01", 12.34),
-            ("cust-0001-snb", "2030-01-02", 99.99),
-        ],
-    )
-    conn.commit()
-    return _FakeConn(conn)
+    try:
+        conn.execute(
+            "CREATE TABLE drift (account_id TEXT, business_day DATE, magnitude REAL)"
+        )
+        conn.executemany(
+            "INSERT INTO drift VALUES (?, ?, ?)",
+            [
+                ("cust-0001-snb", "2030-01-01", 250.00),
+                ("cust-0002-snb", "2030-01-01", 12.34),
+                ("cust-0001-snb", "2030-01-02", 99.99),
+            ],
+        )
+        conn.commit()
+        yield _FakeConn(conn)
+    finally:
+        conn.close()
 
 
 def test_query_matview_rows_unfiltered(db: _FakeConn) -> None:

@@ -335,6 +335,23 @@ RECON_GEN_E2E: Final = EnvVar(
     optional=True,
 )
 
+# Opt-in gate for the per-test sqlite-leak detector wired in
+# tests/conftest.py::pytest_runtest_teardown. Detects unclosed
+# sqlite3 + aiosqlite Connection instances; documented at the use
+# site. Off by default to avoid false positives from legitimately-
+# session-scoped DB fixtures.
+RECON_GEN_SQLITE_LEAK_GATE: Final = EnvVar(
+    name="RECON_GEN_SQLITE_LEAK_GATE",
+    description=(
+        "Bool — set to any non-empty value to enable the sqlite-leak "
+        "detector in tests/conftest.py. Fails any test that ends with "
+        "more open sqlite3 / aiosqlite Connection instances than it "
+        "started with."
+    ),
+    coercer=_bool_coercer,
+    optional=True,
+)
+
 # Y.2.gate.b.2.impl — variant DB connection URL threaded by the
 # runner to subprocess pytest. ``connect_demo_db`` reads via
 # ``load_config`` env-override path so the variant container URL
