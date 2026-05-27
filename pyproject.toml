@@ -92,7 +92,7 @@ serve = [
     # python-multipart is required for Starlette to parse HTMX form
     # POSTs (the swap-on-mutation pattern). httpx is pulled in for
     # Starlette's TestClient (tests/unit/test_html_server.py).
-    "starlette>=0.40",
+    "starlette>=1.1.0",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.18",
     "httpx>=0.27",
@@ -178,7 +178,7 @@ dev = [
     # unit tests. Pulled into [dev] so the spike's tests run in the
     # default `uv sync --extra dev` developer setup without a separate
     # `--extra serve`.
-    "starlette>=0.40",
+    "starlette>=1.1.0",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.18",
     "httpx>=0.27",
@@ -225,7 +225,7 @@ e2e = [
     # — keep this list in sync with [serve]. (Caught by the nightly
     # e2e-pg-browser cron: `uv sync --extra e2e` without these →
     # ModuleNotFoundError: No module named 'starlette' at collection.)
-    "starlette>=0.40",
+    "starlette>=1.1.0",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.18",
     "httpx>=0.27",
