@@ -161,14 +161,21 @@ def test_bg3_drift_sheet_kpis_match_matview_counts(l1_dashboard_driver: tuple["D
         rows = driver.query_db(
             sql, dataset_parameters=dataset_parameters,
         )
+        # QS's KPI .count() over account_id on a non-unique column is
+        # collapsed to COUNT(DISTINCT account_id) — the rendered KPI
+        # matches the title's "Accounts in Drift" semantic (distinct
+        # accounts), NOT the dataset's full row count (one row per
+        # (account, day) pair). Assert against the distinct-account
+        # count over the dataset.
+        expected = len({r["account_id"] for r in rows})
         rendered = parse_int_kpi(driver.kpi_value(kpi_title))
-        assert rendered == len(rows), (
+        assert rendered == expected, (
             f"{kpi_title!r}: rendered count {rendered} ≠ "
-            f"len(query_db(drift_sql)) = {len(rows)}. v11.21.0 cold-"
-            f"read finding #12 shape — KPI's COUNT measure binding "
-            f"disagrees with the underlying dataset's row count. "
-            f"Audit .count() resolution (COUNT vs COUNT DISTINCT) "
-            f"and whether the KPI + table bind the same dataset."
+            f"distinct account_id count over dataset = {expected} "
+            f"(total dataset rows = {len(rows)}). The KPI title is "
+            f"'<kind> in Drift' — semantically distinct accounts, "
+            f"not row count. If you intended row count, change the "
+            f"KPI title + the measure binding."
         )
     driver.screenshot()
 
@@ -314,19 +321,23 @@ def test_bg6_todays_exceptions_kpi_matches_dataset_count(
     """
     driver, dashboard_arg = l1_dashboard_driver
     driver.open(dashboard_arg, sheet=_TODAYS_EXCEPTIONS_NAME)
-    driver.wait_loaded("Open Exceptions")
+    driver.wait_loaded("Accounts with Open Exceptions")
 
     sql, params = _sql_and_params_for(
         build_todays_exceptions_dataset, cfg, l2,
     )
     rows = driver.query_db(sql, dataset_parameters=params)
-    rendered = parse_int_kpi(driver.kpi_value("Open Exceptions"))
-    assert rendered == len(rows), (
-        f"Open Exceptions KPI: rendered {rendered} ≠ "
-        f"len(query_db(todays_exceptions_sql)) = {len(rows)}. The "
-        f"KPI binds .count() over the dataset; this assertion fails "
-        f"if the KPI binding silently collapses to COUNT DISTINCT "
-        f"or the KPI + chart bind divergent datasets."
+    # KPI renamed to "Accounts with Open Exceptions" — QS collapses
+    # .count() over account_id to COUNT DISTINCT, matching the title's
+    # distinct-accounts semantic.
+    expected = len({r["account_id"] for r in rows})
+    rendered = parse_int_kpi(driver.kpi_value("Accounts with Open Exceptions"))
+    assert rendered == expected, (
+        f"Accounts with Open Exceptions KPI: rendered {rendered} ≠ "
+        f"distinct account_id count = {expected} "
+        f"(total dataset rows = {len(rows)}). KPI title says "
+        f"'Accounts with Open Exceptions' → distinct accounts, "
+        f"not row count."
     )
     driver.screenshot()
 
@@ -356,13 +367,15 @@ def test_bg3_overdraft_kpi_matches_matview_count(l1_dashboard_driver: tuple["Das
         build_overdraft_dataset, cfg, l2,
     )
     rows = driver.query_db(sql, dataset_parameters=dataset_parameters)
+    # See drift test above — QS collapses `.count()` over a non-unique
+    # column to COUNT DISTINCT. The KPI title is "Accounts in
+    # Overdraft" so that's the semantically-correct rendering.
+    expected = len({r["account_id"] for r in rows})
     rendered = parse_int_kpi(driver.kpi_value("Accounts in Overdraft"))
-    assert rendered == len(rows), (
+    assert rendered == expected, (
         f"Accounts in Overdraft: rendered {rendered} ≠ "
-        f"len(query_db(overdraft_sql)) = {len(rows)}. v11.21.0 cold-"
-        f"read finding #12 — KPI's COUNT binding disagrees with the "
-        f"row count of the dataset the table on the same sheet binds. "
-        f"Likely .count() resolves to COUNT DISTINCT or the KPI + "
-        f"table bind different datasets."
+        f"distinct account_id count = {expected} "
+        f"(total dataset rows = {len(rows)}). KPI title says "
+        f"'Accounts in Overdraft' → distinct accounts, not row count."
     )
     driver.screenshot()

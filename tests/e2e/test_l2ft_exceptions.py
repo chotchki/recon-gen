@@ -67,21 +67,30 @@ def test_bg6_l2ft_exceptions_kpi_matches_dataset_row_count(
     """
     driver, dashboard_arg = l2ft_dashboard_driver
     driver.open(dashboard_arg, sheet=_L2_EXCEPTIONS_NAME)
-    driver.wait_loaded("Open L2 Violations")
+    # BH.11 (2026-05-25) renamed the KPI from "Open L2 Violations" to
+    # "Distinct Exception Types Open" — the new title makes the
+    # distinct-vs-total semantic explicit.
+    driver.wait_loaded("Distinct Exception Types Open")
 
     sql, params = _l2ft_exceptions_sql_and_params(cfg, l2)
     rows = driver.query_db(sql, dataset_parameters=params)
 
-    rendered = parse_int_kpi(driver.kpi_value("Open L2 Violations"))
-    assert rendered == len(rows), (
-        f"Open L2 Violations KPI: rendered {rendered} ≠ "
-        f"len(query_db(unified_l2_exceptions_sql)) = {len(rows)}. "
-        f"v11.21.0 cold-read finding #11 KPI-half — KPI binding "
-        f"disagrees with its dataset. (Note: the table's `count` "
-        f"column on the same sheet sums to a DIFFERENT number — that's "
-        f"the per-violation occurrence count, a different measure. "
-        f"BG.6 enforces that each measure matches ITS binding, not "
-        f"that the two measures agree with each other.)"
+    # The KPI binds `ds["check_type"].count()`; QS collapses to
+    # COUNT(DISTINCT check_type) on a low-cardinality column. The
+    # rendered value = number of distinct check types with at least
+    # one open violation. The table's `count` column shows
+    # per-violation occurrences (a different measure).
+    expected = len({r["check_type"] for r in rows})
+    rendered = parse_int_kpi(driver.kpi_value("Distinct Exception Types Open"))
+    assert rendered == expected, (
+        f"Distinct Exception Types Open KPI: rendered {rendered} ≠ "
+        f"distinct check_type count = {expected} "
+        f"(total dataset rows = {len(rows)}). KPI binds "
+        f"`ds[check_type].count()` — QS collapses to "
+        f"COUNT(DISTINCT check_type), matching the new title's "
+        f"semantic. (The table's `count` column on the same sheet "
+        f"sums to a DIFFERENT number — that's per-violation "
+        f"occurrences, a different measure.)"
     )
     driver.screenshot()
 

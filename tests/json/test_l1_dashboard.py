@@ -484,7 +484,7 @@ def test_todays_exceptions_sheet_has_kpi_bar_table() -> None:
     te = _sheet_by_name(app, _TODAYS_EXCEPTIONS_NAME)
     titles = [_visual_title(v) for v in te.visuals]
     assert titles == [
-        "Open Exceptions",
+        "Accounts with Open Exceptions",
         "Exceptions by Check Type",
         "Exception Detail",
     ]
