@@ -1,5 +1,56 @@
 # Release Notes
 
+## v11.22.11 — bg5 BL.2 rewire + Inv recipient_fanout test fix + new QS day-edge quirk
+
+Three test-side follow-ons to v11.22.10:
+
+### bg5 BL.2 — App2 leg passes; isolate QS day-edge quirk
+
+Rewired the bg5 Transaction Volume / Money Moved tests to use the
+App2-form SQL (via `_sql_for(..., visual_identifier=DS_*)`) + pass
+`_exec_default_date_binds(cfg)` so query_db narrows
+filter-then-group, matching the deployed App2 KPI semantics.
+
+App2 leg now XPASSes. QS leg still off by ~2 transactions /
+~$7,600 on the bg5 cell — separate QS quirk newly documented at
+`docs/reference/quicksight-quirks.md`:
+
+> `TimeRangeFilter(time_granularity="DAY", include_maximum=True)`
+> was claimed (per `common/sql/app2_filters.py` docstring) to
+> day-truncate the upper bound, but observation shows it actually
+> compares the raw timestamp against `:date_to` at midnight,
+> excluding late-day rows on the upper edge. App2's
+> `column < :date_to + 1 day` includes them.
+
+xfail reason updated to call out the QS day-edge quirk
+specifically (was misattributed to "App2 default date-filter" —
+that's BL.2 which IS fixed; this is a NEW finding). strict=False
+keeps CI green.
+
+### Inv recipient_fanout — query SQL first, skip on empty
+
+BH.7's cartesian-inflation fix already landed; the test docstring's
+"expected to fail until SQL rewrite" framing was stale. The blocker
+was a test control-flow issue: when the deployed L2's seed plants
+<5 distinct senders per recipient, the fanout SQL returns zero rows
+after the default threshold WHERE clause. On empty data App2's KPI
+doesn't transition out of the spinner state → `wait_loaded` timed
+out before reaching the `pytest.skip` for empty rows.
+
+Reorder: query the SQL first, skip cleanly when empty, then wait
+for the visual. xfail removed; skip is the right control flow.
+Test now passes ([qs] + [app2] both skip cleanly on the current
+seed; would assert when fanout plants land).
+
+### Backlog
+
+QS day-edge quirk — spike candidate to either:
+
+- shift `max_bound` by +1 day on QS so the analysis-level filter
+  matches App2's day-inclusive behavior, or
+- unify to a dataset-SQL `<<$pDateTo>>` pushdown (lands the
+  date-picker pushdown unification backlog item).
+
 ## v11.22.10 — Today's Exceptions picker perf + BL.1 follow-on test fixes
 
 Four changes that close out the Phase BL acceptance:
