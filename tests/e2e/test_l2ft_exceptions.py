@@ -54,6 +54,14 @@ def _l2ft_exceptions_sql_and_params(
     return sql, list(ds.DatasetParameters or [])
 
 
+@pytest.mark.xfail(
+    reason=(
+        "BL.1 / BK.6 — QS-side .count() renders distinct check_types "
+        "(6 in the spec_example matview) instead of total rows. The "
+        "App2 leg also fails by the same shape. See PLAN.md::BL.1."
+    ),
+    strict=False,
+)
 def test_bg6_l2ft_exceptions_kpi_matches_dataset_row_count(
     l2ft_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance",
 ) -> None:

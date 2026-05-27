@@ -1,5 +1,76 @@
 # Release Notes
 
+## v11.22.5 — typing + aiosqlite + CI perf + browser-tier triage cycle
+
+### Strict-typing reach
+
+- **All of `src/recon_gen` and `tests/` now passes `pyright --strict`
+  at zero errors** (`[tool.pyright].include` broadened from a curated
+  list to both trees). Previous coverage was ~91 files; the sweep
+  took 6,394 → 0 errors (BE.7 + BF.1). Surfaced + fixed ~20 latent
+  bugs inline.
+- `tests/conftest.py` ships an opt-in **sqlite-leak detector**
+  (`RECON_GEN_SQLITE_LEAK_GATE=1`).
+
+### Security
+
+- **Starlette bumped 1.0.0 → 1.1.0** for GHSA-wqp7-x3pw-xc5r (High):
+  SSRF + NTLM credential theft via UNC paths in StaticFiles on
+  Windows.
+
+### App2 fixes
+
+- **aiosqlite#258 thread-lock leak plugged.** `_AsyncSqlitePool`
+  swapped from per-acquire `aiosqlite.connect()` to
+  `aiosqlitepool.SQLiteConnectionPool`. Per-request connect/close
+  was leaking thread locks on every `App2Driver.serving()` cycle,
+  accumulating until OOM during the 13-variant browser-tier sweep.
+- **L1 Account dropdown universe widened.** Now sources from
+  `UNION(current_daily_balances, current_transactions)`. Pre-fix,
+  spine-planted Pending-state accounts were invisible in the
+  picker even though their matview rows surfaced in the same
+  sheet's tables.
+
+### CI
+
+- **Matrix dispatch ~25-30 min faster.** Static gates (pyright +
+  biome) run once in the unit prelude, not per cell × layer. Measured
+  per-cell drift: `db` 34s → 3s (-91%), `app2` 41s → 12s (-69%).
+- **`ci.yml` auto-cancels superseded runs** via `concurrency.cancel-in-progress`.
+
+### Tests
+
+- **`test_inv_dashboard_agreement` registry-pollution fix**.
+  `isolated_inv_app` was overwriting the shared `_SQL_REGISTRY`
+  with iagree-prefixed SQL — downstream tests then queried the
+  dropped iagree schema. Surgical snapshot/restore on fixture
+  setup/teardown. Underlying shared-state-keying smell documented
+  at `docs/audits/bl_0_shared_state_keying_smell.md` (PLAN::BL.0).
+- `test_inv_dashboard_agreement` now carries `xdist_group` so its
+  parametrized variants pin to a single worker.
+- **187 inline production constants swept into imports** across
+  54 test files (BE.2 extended to scan `ast.Call` args +
+  keywords).
+
+### Known failing tests (xfail'd, tracked as BL.1 / BK.6)
+
+**`.count()` measure rendering quirk on QS.** QS's
+`CategoricalMeasureField(AggregationFunction=COUNT)` renders the
+**distinct** count of the column instead of the row count on KPIs
+that bind a string column also used as a Dim elsewhere on the
+same sheet. Cold-read finding #12 (KPI=0 with detail table
+populated) is the user-facing version. Five tests carry
+`@pytest.mark.xfail(reason="BL.1 / BK.6 — ...", strict=False)`:
+`test_bg3_drift_sheet_kpis_match_matview_counts`,
+`test_bg3_overdraft_kpi_matches_matview_count`,
+`test_bg6_todays_exceptions_kpi_matches_dataset_count`,
+`test_bg6_l2ft_exceptions_kpi_matches_dataset_row_count`,
+`test_bg4_recipient_fanout_kpis_match_inflows_only_truth`.
+
+Leading candidate fix is adding `1 AS row_one` synthetic columns
+to each affected dataset's SQL + binding KPIs to `SUM(row_one)`;
+tracked at PLAN.md::BL.1.
+
 ## v11.22.4 — ETL doc accuracy + browser-tier infrastructure unblock (CI not yet green)
 
 **Posture note (2026-05-26).** This release tags progress on two

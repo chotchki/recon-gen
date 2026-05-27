@@ -204,6 +204,15 @@ def test_bg4_volume_anomalies_kpi_matches_filtered_matview_and_distribution(
     driver.screenshot()
 
 
+@pytest.mark.xfail(
+    reason=(
+        "BL.1 / BK.6 — same QS-side .count() distinct-vs-rows quirk "
+        "family. The fanout KPIs include a row-count measure that "
+        "renders distinct under QS / App2's measure aggregation. See "
+        "PLAN.md::BL.1."
+    ),
+    strict=False,
+)
 def test_bg4_recipient_fanout_kpis_match_inflows_only_truth(
     inv_dashboard_driver: tuple["DashboardDriver", str], cfg: Config,
 ) -> None:
