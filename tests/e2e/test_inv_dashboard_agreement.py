@@ -102,7 +102,20 @@ from tests.audit._scenario_expectations import (  # noqa: E402
 from tests.e2e._drivers import App2Driver  # noqa: E402
 
 
-pytestmark = [pytest.mark.e2e, pytest.mark.browser]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.browser,
+    # The module-scope ``seeded_l2_db`` + ``isolated_inv_cfg`` fixtures
+    # build a shared ``<prefix>_iagree`` schema. Under pytest-xdist's
+    # default ``load`` distribution each parametrized variant of the
+    # agreement test can land on a DIFFERENT worker, which causes the
+    # second worker's setup to DROP CASCADE the first worker's tables
+    # (or vice versa, the first worker's module-teardown drops while
+    # the second is still querying). Pin every test in this module to a
+    # single worker via xdist_group + the conftest's loadgroup
+    # promotion so the module-scope fixtures run exactly once.
+    pytest.mark.xdist_group("inv_dashboard_agreement"),
+]
 
 
 # Bundled persona-neutral L2 — the same yaml every other e2e test
