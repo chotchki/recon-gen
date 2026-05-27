@@ -169,3 +169,34 @@ sooner since every piece of tech eventually seems to bit us)" — so
 queue this as a real phase (BL.x?) post-release. The band-aid keeps
 the agreement test from polluting downstream tests; the architectural
 fix removes the smell.
+
+## Decision recorded 2026-05-27 — prefix-everywhere over Family A/B
+
+User framing rejected both audit-proposed families in favor of a
+simpler "extend the discipline we already have":
+
+> *"the whole point of the prefix was avoiding collisions — my gut is
+> adding more into the prefix if we're having collisions"*
+
+The SQL registry bleed happened because the registry KEY skipped the
+prefix discipline (key was `visual_identifier` only) while the SQL
+VALUE had the prefix baked in. The fix is to propagate the prefix into
+the key — not lift state out of the global (Family A's tree-Dataset
+surgery), not add a parallel `l2_yaml_sha` axis (Family B's per-deploy
+versioning).
+
+For config_kv, the user has decided the table is part of the
+deployment artifact (wipe-and-repopulate on every `data apply
+--execute`), not a runtime database. The temporal-drift case Family B
+hedged against is operationally impossible by construction. The
+recorded plan in PLAN.md::BL.0 captures the trimmed scope:
+
+- **BL.0.A** — extend `(prefix, visual_identifier)` keying on the
+  three module-globals. Removes the `isolated_inv_app` band-aid.
+- **BL.0.B** — enforce + document the wipe-and-repopulate kv
+  contract; no `l2_yaml_sha` key needed.
+- **BL.0.C** — lint to prevent new prefix-less module-globals.
+
+Family A is still available as a future architectural cleanup if the
+prefix-in-key approach stops scaling (e.g. if we grow a state carrier
+where the natural home really is per-Dataset). Family B is shelved.

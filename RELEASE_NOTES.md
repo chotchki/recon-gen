@@ -1,5 +1,60 @@
 # Release Notes
 
+## v11.22.8 — hotfix v11.22.7 Today's Exceptions picker + BL.0 land
+
+Two changes on top of v11.22.7:
+
+### Today's Exceptions picker — NULL-account filter
+
+v11.22.7's third-UNION fix (BL.3) widened the L1 Accounts dropdown
+universe to include rows from `<prefix>_todays_exceptions`. The
+matview is a UNION ALL across 7 invariant branches; two of those
+(`chain_parent_disagreement`, `xor_group_violation`) are
+transfer-keyed rather than account-keyed and emit NULL `account_id`.
+A NULL row landed in the dropdown universe and choked the picker —
+App2's `/visuals/.../data` hung on the NULL serialization; QS's
+listbox never populated. All 4 Today's Exceptions picker tests
+timed out on v11.22.7's release E2E:
+
+- `test_l1_additive_pickers_keep_anchor_row[qs|app2-Today's Exceptions]`
+- `test_l1_dropdown_pickers_inverse_excludes_anchor[qs|app2-Today's Exceptions]`
+
+Fix: `WHERE account_id IS NOT NULL` on the third UNION term in
+`build_l1_accounts_dataset`. Keeps the surface to account-keyed
+branches (`multi_xor_violation` + the per-(account, day) invariants)
+which is the original BL.3 motivation — transfer-keyed branches were
+never in scope for an "accounts picker." Closes BL.3.a.
+
+### BL.0 — Test-boundary isolation for shared dataset registries
+
+Test-only architectural cleanup; zero production-code-path changes.
+
+- **`isolated_dataset_registries()` public context manager** added to
+  `common/dataset_contract.py`. Replaces the 11-line ad-hoc
+  snapshot/restore band-aid (with six
+  `# pyright: ignore[reportPrivateUsage]` comments) in
+  `tests/e2e/test_inv_dashboard_agreement.py::isolated_inv_app` —
+  the fixture that builds a second-cfg-in-process app tree for the
+  4-way agreement test.
+- **`config_table.py` module docstring** now spells out the deploy-
+  artifact-not-runtime-database contract for `<prefix>_config_kv`:
+  the table is part of the deployment bundle, edits land via
+  `schema apply --execute` / `data apply --execute` (DELETE +
+  INSERT-N already enforces this); no Studio mutations / ETL UPDATEs
+  write to it.
+- **`no-dataset-registry-leak` AST lint** (typing-smells) flags any
+  direct attribute access or import of `_SQL_REGISTRY` /
+  `_DSP_REGISTRY` / `_CONTRACT_REGISTRY` outside their defining
+  module. Forces future test-isolation needs through the public
+  context manager instead of accumulating new `reportPrivateUsage`
+  ignores.
+
+User framing recorded in audit: production has exactly one cfg per
+process — the registries are fine there. The bleed was test-only
+(two cfgs in one process to validate isolation); the fix belongs at
+the test boundary, not in ~25 production files. Audit doc:
+`docs/audits/bl_0_shared_state_keying_smell.md`.
+
 ## v11.22.7 — Today's Exceptions picker + xfail two App2 KPI tests
 
 Two changes on top of v11.22.6:

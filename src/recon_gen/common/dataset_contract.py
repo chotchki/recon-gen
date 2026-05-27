@@ -8,6 +8,8 @@ drill-downs) binds to contract columns, not SQL specifics.
 
 from __future__ import annotations
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from enum import Enum
 
@@ -361,6 +363,51 @@ def get_sql(visual_identifier: str) -> str:
             f"the app's build_all_datasets(cfg)) before constructing the "
             f"App2 tree fetcher."
         )
+
+
+@contextmanager
+def isolated_dataset_registries() -> Generator[None, None, None]:
+    """Snapshot the three dataset registries on enter; restore on exit.
+
+    Production has exactly one ``cfg`` per process — the module-level
+    ``_SQL_REGISTRY`` / ``_DSP_REGISTRY`` / ``_CONTRACT_REGISTRY`` are
+    fine in that mode. Tests that build a second app tree with a
+    non-canonical ``cfg.db_table_prefix`` in the same process (e.g.
+    ``tests/e2e/test_inv_dashboard_agreement.py::isolated_inv_app``,
+    which builds an `iagree`-prefixed clone for the 4-way agreement
+    test) overwrite the canonical entries on a shared key — downstream
+    tests then read the polluted SQL and 500 against the dropped
+    isolation schema.
+
+    Wrap the second-cfg build in this manager so its writes are
+    discarded on teardown:
+
+    .. code-block:: python
+
+        @pytest.fixture(scope="module")
+        def isolated_inv_app(isolated_inv_cfg):
+            with isolated_dataset_registries():
+                app = build_investigation_app(isolated_inv_cfg, l2_instance=_INSTANCE)
+                app.emit_analysis()
+                yield app
+
+    See BL.0 in PLAN.md + ``docs/audits/bl_0_shared_state_keying_smell.md``
+    for the architectural reasoning (rejected: lift state out of
+    globals / extend the key with prefix; accepted: scope the band-aid
+    at the test boundary since production is unaffected).
+    """
+    sql_snapshot = dict(_SQL_REGISTRY)
+    dsp_snapshot = dict(_DSP_REGISTRY)
+    contract_snapshot = dict(_CONTRACT_REGISTRY)
+    try:
+        yield
+    finally:
+        _SQL_REGISTRY.clear()
+        _SQL_REGISTRY.update(sql_snapshot)
+        _DSP_REGISTRY.clear()
+        _DSP_REGISTRY.update(dsp_snapshot)
+        _CONTRACT_REGISTRY.clear()
+        _CONTRACT_REGISTRY.update(contract_snapshot)
 
 
 DATASET_ACTIONS = [

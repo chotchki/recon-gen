@@ -1427,6 +1427,75 @@ class NoRawTemporalArgsCheck(Check):
 
 
 # ---------------------------------------------------------------------------
+# Check: no-dataset-registry-leak (BL.0.C)
+# ---------------------------------------------------------------------------
+#
+# ``_SQL_REGISTRY`` / ``_DSP_REGISTRY`` / ``_CONTRACT_REGISTRY`` are
+# module-level dicts on ``common/dataset_contract.py``. Production
+# accesses them through the public ``register_*`` / ``get_*`` helpers;
+# tests that need to clean up writes from a second-cfg-in-process build
+# use ``isolated_dataset_registries()`` (BL.0.A). Direct attribute
+# access outside ``dataset_contract.py`` (the previous band-aid in
+# ``test_inv_dashboard_agreement.py`` carried six
+# ``# pyright: ignore[reportPrivateUsage]`` comments to skip the
+# private-name complaint) is the smell — it papers over a missing
+# public API. This lint forces future test-isolation needs through the
+# context manager instead of accumulating new ignore comments.
+
+_DATASET_REGISTRY_NAMES = frozenset({
+    "_SQL_REGISTRY", "_DSP_REGISTRY", "_CONTRACT_REGISTRY",
+})
+
+
+class _NoDatasetRegistryLeakVisitor(ast.NodeVisitor):
+    """Flag attribute access or import of the three private dataset
+    registries outside their defining module."""
+
+    def __init__(self, file: Path) -> None:
+        self.file = file
+        self.smells: list[Smell] = []
+
+    def _msg(self, what: str) -> str:
+        return (
+            f"{what} — the three dataset registries are module-private "
+            "to ``common/dataset_contract.py``. Production code uses the "
+            "``register_*`` / ``get_*`` helpers; tests that need to "
+            "scope writes from a second-cfg-in-process build wrap them "
+            "in ``isolated_dataset_registries()`` (BL.0.A). Don't reach "
+            "into the dicts directly."
+        )
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if node.attr in _DATASET_REGISTRY_NAMES:
+            self.smells.append(Smell(
+                file=self.file, lineno=node.lineno,
+                checker="no-dataset-registry-leak",
+                message=self._msg(f"``{node.attr}`` attribute access"),
+            ))
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.module == "recon_gen.common.dataset_contract":
+            for alias in node.names:
+                if alias.name in _DATASET_REGISTRY_NAMES:
+                    self.smells.append(Smell(
+                        file=self.file, lineno=node.lineno,
+                        checker="no-dataset-registry-leak",
+                        message=self._msg(
+                            f"``from … import {alias.name}``"
+                        ),
+                    ))
+        self.generic_visit(node)
+
+
+class NoDatasetRegistryLeakCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        v = _NoDatasetRegistryLeakVisitor(file)
+        v.visit(tree)
+        return v.smells
+
+
+# ---------------------------------------------------------------------------
 # Check: no-test-src-sql-duplication  (BE.1, approach 1 of BE.0 spike)
 # ---------------------------------------------------------------------------
 
@@ -2123,6 +2192,30 @@ def _build_checks() -> list[Check]:
                 "let the driver layer bridge to hidden inputs."
             ),
             files=no_hidden_scope,
+        ),
+        NoDatasetRegistryLeakCheck(
+            name="no-dataset-registry-leak",
+            description=(
+                "direct attribute access or import of "
+                "``_SQL_REGISTRY`` / ``_DSP_REGISTRY`` / "
+                "``_CONTRACT_REGISTRY`` outside their defining module "
+                "(``common/dataset_contract.py``). Use the public "
+                "``register_*`` / ``get_*`` helpers, or — for tests "
+                "that need to scope writes from a second-cfg-in-"
+                "process build — ``isolated_dataset_registries()``. "
+                "Replaces the six ``# pyright: ignore[reportPrivateUsage]`` "
+                "comments the old band-aid carried (BL.0.A, 2026-05-27)."
+            ),
+            files=[
+                p for p in _expand_paths([
+                    REPO_ROOT / "src/recon_gen",
+                    REPO_ROOT / "tests",
+                ])
+                # The check's allowed home — the dicts are defined here
+                # and the public helpers (register_* / get_* / isolated_*)
+                # touch them directly.
+                if p != REPO_ROOT / "src/recon_gen/common/dataset_contract.py"
+            ],
         ),
         NoNakedIntervalCtorCheck(
             name="no-naked-interval-ctor",

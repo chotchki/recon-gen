@@ -1507,8 +1507,18 @@ def build_l1_accounts_dataset(
         # Today's Exceptions sheet's Account dropdown needs to surface
         # those accounts too — picker tests timed out before this
         # third union term landed.
+        #
+        # 2026-05-27 fix — chain_parent_disagreement + xor_group_violation
+        # branches emit NULL account_id (the violation is keyed on
+        # transfer_id, not account). A NULL row in the dropdown
+        # universe chokes the picker: App2's `/visuals/.../data` hangs
+        # on the NULL serialization; QS's listbox never populates. The
+        # ``WHERE account_id IS NOT NULL`` keeps the surface to
+        # account-keyed branches (multi_xor_violation, the per-(account,
+        # day) invariants) which is the original BL.3 motivation.
         f"   SELECT account_id, account_role, account_name"
         f"   FROM {prefix}_todays_exceptions"
+        f"   WHERE account_id IS NOT NULL"
         f" ) accounts_universe"
         f" WHERE {_data_value_clause('account_role', P_L1_DS_ROLE_DSP)}"
     )

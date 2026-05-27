@@ -36,6 +36,22 @@ Operational lifecycle (BC.12 lock):
    from the parsed cfg+L2 JSON).
 3. **Daily** (post-ETL) — ``data refresh --execute`` REFRESHes matviews.
 
+**Deploy-artifact contract (BL.0.B, 2026-05-27)**:
+``<prefix>_config_kv`` is part of the deployment artifact bundle —
+NOT a runtime database. Reads off the table are reads of *whatever
+the last ``schema apply --execute`` or ``data apply --execute``
+wrote*. Edits land via re-deploy; never via SQL ``UPDATE`` /
+``INSERT`` from Studio mutations, ETL pipelines, or operator
+patches. The DELETE-then-INSERT at the top of
+``emit_config_populate_sql`` / ``replace_config`` makes "what's in
+the table" == "what's in the on-disk yaml at deploy time" by
+construction. This is the discipline that obviates the
+``(prefix, l2_yaml_sha)`` keying spike the BL.0 audit considered:
+since edits always go through the wipe, the temporal-drift case
+("yaml v1 deployed Monday, yaml v2 on disk by Friday, kv still
+holds v1") is operationally impossible — Friday's deploy wipes
+Monday's rows before INSERTing v2.
+
 Indexed on ``(parent_id, key)`` — the typed views' filter shape. No
 index on ``value`` (CLOB-incompatible on Oracle without a function-
 based index; the typed views walk by parent_id+key, never by value).
