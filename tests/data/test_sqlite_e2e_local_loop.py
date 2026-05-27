@@ -36,6 +36,7 @@ from recon_gen.common.l2.schema import (
     emit_schema,
     refresh_matviews_sql,
 )
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.sql import Dialect
 
 
@@ -52,7 +53,7 @@ def _sqlite_cfg(db_path: Path) -> Config:
         aws_account_id="111122223333",
         aws_region="us-west-2",
         deployment_name="recon-sqlite-loop",
-        db_table_prefix="spec_example",
+        db_table_prefix=DEFAULT_PREFIX,
         datasource_arn=(
             "arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds"
         ),

@@ -49,6 +49,7 @@ from recon_gen.common.html._tree_fetcher import (
     _table_column_meta,
 )
 from recon_gen.common.l2 import default_l2_instance
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.tree.fields import Dim, Measure
 from recon_gen.common.tree.structure import App
 from tests._test_helpers import make_test_config
@@ -56,7 +57,7 @@ from tests._test_helpers import make_test_config
 
 def _build_app(app_name: str) -> App:
     """Build a real app (+ register its datasets) for ``app_name``."""
-    cfg = make_test_config(db_table_prefix="spec_example")
+    cfg = make_test_config(db_table_prefix=DEFAULT_PREFIX)
     inst = default_l2_instance()
     if app_name == "l1_dashboard":
         build_all_l1_dashboard_datasets(cfg, inst)

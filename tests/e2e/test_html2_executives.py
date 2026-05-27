@@ -39,6 +39,7 @@ import pytest
 from recon_gen.apps.executives.app import build_executives_app
 from recon_gen.apps.executives.datasets import build_all_datasets
 from recon_gen.common.env_keys import RECON_GEN_RUN_DIR
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from tests._test_helpers import make_test_config
 from tests.e2e._drivers import App2Driver
 
@@ -46,7 +47,7 @@ from tests.e2e._drivers import App2Driver
 # Test cfg with the DB-table prefix set explicitly. Z.C — replaces
 # the v8.x `with_l2_instance_prefix` pipe; db_table_prefix lives on
 # cfg now (was previously stamped from L2Instance.instance).
-_TEST_CFG = make_test_config(db_table_prefix="spec_example")
+_TEST_CFG = make_test_config(db_table_prefix=DEFAULT_PREFIX)
 _DASHBOARD_ID = "exec"
 
 

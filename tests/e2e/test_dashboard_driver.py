@@ -29,6 +29,7 @@ import pytest
 
 playwright_sync_api = pytest.importorskip("playwright.sync_api")
 
+from recon_gen.apps.l1_dashboard.app import _DRIFT_NAME
 from recon_gen.common.sheets.app_info import (
     APP_INFO_MATVIEW_STATUS_TITLE,
     APP_INFO_SHEET_NAME,
@@ -201,9 +202,9 @@ def test_app2_goto_sheet(driver: DashboardDriver) -> None:
 def test_qs_l1_dashboard_drift_sheet_lists_visuals(
     qs_driver: QsEmbedDriver, l1_dashboard_id: str,
 ) -> None:
-    qs_driver.open(l1_dashboard_id, sheet="Drift")
+    qs_driver.open(l1_dashboard_id, sheet=_DRIFT_NAME)
     titles = qs_driver.visual_titles()
-    assert titles, f"L1 dashboard {l1_dashboard_id!r} Drift sheet rendered no visual titles"
+    assert titles, f"L1 dashboard {l1_dashboard_id!r} {_DRIFT_NAME} sheet rendered no visual titles"
     # Exercise wait_loaded against whatever rendered — must not raise.
     qs_driver.wait_loaded(titles[0])
 

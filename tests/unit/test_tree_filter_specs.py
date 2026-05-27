@@ -32,9 +32,11 @@ from recon_gen.common.html.render import (
     ParameterDateSpec,
     _render_filter_form,
 )
-from recon_gen.apps.l1_dashboard.app import _DRILL_RESET_SENTINEL
+from recon_gen.apps.l1_dashboard.app import _DAILY_STATEMENT_NAME, _DRILL_RESET_SENTINEL
 from recon_gen.apps.l1_dashboard.datasets import P_L1_DS_BALANCE_DATE_DSP
+from recon_gen.apps.l2_flow_tracing.app import _RAILS_NAME
 from recon_gen.common.ids import ParameterName, SheetId
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.tree import (
     Analysis,
     App,
@@ -68,7 +70,7 @@ def _sheet_with_controls() -> Sheet:
     p_key = analysis.add_parameter(StringParam(name=ParameterName("pKey")))
     sheet.add_parameter_dropdown(
         parameter=p_key, title="Metadata Key",
-        selectable_values=StaticValues(values=["__ALL__", "memo_kind"]),
+        selectable_values=StaticValues(values=[_DRILL_RESET_SENTINEL, "memo_kind"]),
     )
     # A slider — becomes a ParameterNumberSpec (X.2.u.4.e). Default [3]
     # so the derived spec carries default=3.0 (matches the dataset SQL's
@@ -152,12 +154,12 @@ def test_l2ft_rails_sheet_auto_derives_post_aa_a_3_pushdown_specs() -> None:
     )
 
     inst = default_l2_instance()
-    cfg = make_test_config(db_table_prefix="spec_example")
+    cfg = make_test_config(db_table_prefix=DEFAULT_PREFIX)
     build_all_l2_flow_tracing_datasets(cfg, inst)
     tree_app = build_l2_flow_tracing_app(cfg, l2_instance=inst)
     assert tree_app.analysis is not None
     rails_sheet = next(
-        s for s in tree_app.analysis.sheets if s.name == "Rails"
+        s for s in tree_app.analysis.sheets if s.name == _RAILS_NAME
     )
     specs = make_filter_specs_for_sheet(rails_sheet)
     names = [s.name for s in specs if isinstance(s, ParameterDropdownSpec)]
@@ -191,14 +193,14 @@ def test_date_control_shape_comes_from_the_tree() -> None:
     )
     from recon_gen.common.l2 import default_l2_instance
 
-    cfg = make_test_config(db_table_prefix="spec_example")
+    cfg = make_test_config(db_table_prefix=DEFAULT_PREFIX)
     inst = default_l2_instance()
 
     # Lone picker → single date, range suppressed.
     build_all_l1_dashboard_datasets(cfg, inst)
     l1 = build_l1_dashboard_app(cfg, l2_instance=inst)
     assert l1.analysis is not None
-    ds_sheet = next(s for s in l1.analysis.sheets if s.name == "Daily Statement")
+    ds_sheet = next(s for s in l1.analysis.sheets if s.name == _DAILY_STATEMENT_NAME)
     ds_specs = make_filter_specs_for_sheet(ds_sheet)
     date_specs = [s for s in ds_specs if isinstance(s, ParameterDateSpec)]
     assert len(date_specs) == 1
@@ -211,7 +213,7 @@ def test_date_control_shape_comes_from_the_tree() -> None:
     build_all_l2_flow_tracing_datasets(cfg, inst)
     l2ft = build_l2_flow_tracing_app(cfg, l2_instance=inst)
     assert l2ft.analysis is not None
-    rails = next(s for s in l2ft.analysis.sheets if s.name == "Rails")
+    rails = next(s for s in l2ft.analysis.sheets if s.name == _RAILS_NAME)
     rails_specs = make_filter_specs_for_sheet(rails)
     assert not [s for s in rails_specs if isinstance(s, ParameterDateSpec)]
     rails_form = _render_filter_form([], tuple(rails_specs))

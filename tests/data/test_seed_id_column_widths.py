@@ -187,7 +187,7 @@ def _walk_inserts_for_overflows(sql_text: str) -> list[str]:
 @pytest.mark.parametrize(
     "fixture_name",
     [
-        pytest.param("spec_example", id="spec_example"),
+        pytest.param("spec_example", id="spec_example"),  # typing-smell: ignore[no-inline-production-constants]: pytest param value tracks the L2 fixture filename, not the DEFAULT_PREFIX domain constant
         pytest.param("sasquatch_pr", id="sasquatch_pr"),
     ],
 )

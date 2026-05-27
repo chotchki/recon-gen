@@ -120,7 +120,7 @@ def _write_temp(text: str) -> Path:  # pyright: ignore[reportUnusedFunction]: he
 # id reflects the actual seed in the test name (helps when triaging
 # failures).
 L2_INSTANCES = [
-    pytest.param(L2_DIR / "spec_example.yaml", id="spec_example"),
+    pytest.param(L2_DIR / "spec_example.yaml", id="spec_example"),  # typing-smell: ignore[no-inline-production-constants]: pytest param id tracks the L2 fixture filename, not the DEFAULT_PREFIX domain constant
     pytest.param(L2_DIR / "sasquatch_pr.yaml", id="sasquatch_pr"),
     pytest.param(
         _fuzz_yaml_path(),

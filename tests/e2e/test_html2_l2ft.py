@@ -38,7 +38,13 @@ from typing import Any
 import pytest
 
 from recon_gen.common.l2 import default_l2_instance
-from recon_gen.apps.l2_flow_tracing.app import build_l2_flow_tracing_app
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
+from recon_gen.apps.l2_flow_tracing.app import (
+    _CHAINS_NAME,
+    _GETTING_STARTED_TITLE,
+    _RAILS_NAME,
+    build_l2_flow_tracing_app,
+)
 from recon_gen.apps.l2_flow_tracing.datasets import (
     build_all_l2_flow_tracing_datasets,
 )
@@ -49,7 +55,7 @@ from tests.e2e._drivers import App2Driver
 _TEST_INSTANCE = default_l2_instance()
 # Z.C — db_table_prefix is required on cfg. Pin to "spec_example" since
 # default_l2_instance() returns the spec_example fixture.
-_TEST_CFG = make_test_config(db_table_prefix="spec_example")
+_TEST_CFG = make_test_config(db_table_prefix=DEFAULT_PREFIX)
 _DASHBOARD_ID = "l2ft"
 
 
@@ -98,7 +104,7 @@ def l2ft_driver() -> Iterator[App2Driver]:
         tree_app=tree_app, sheet=landing_sheet,
         data_fetcher=_l2ft_stub_fetcher,  # pyright: ignore[reportArgumentType]: inline fetcher closure; structural DataFetcher contract holds at runtime
         dashboard_id=_DASHBOARD_ID,
-        dashboard_title="L2 Flow Tracing",
+        dashboard_title=_GETTING_STARTED_TITLE,
     ) as driver:
         yield driver
 
@@ -127,7 +133,7 @@ def test_l2ft_rails_sheet_renders_three_single_select_dropdowns(
     AA.A.3 flipped them to scalar-default + ``= <<$p>>`` push down,
     so the App2 widget renders single-select."""
     driver = l2ft_driver
-    driver.open(_DASHBOARD_ID, sheet="Rails")
+    driver.open(_DASHBOARD_ID, sheet=_RAILS_NAME)
     page = driver.page
     for param in ("pL2ftRail", "pL2ftStatus", "pL2ftBundle"):
         sel = page.locator(f'select[name="param_{param}"]')
@@ -148,7 +154,7 @@ def test_l2ft_chains_sheet_renders_its_dropdowns(
     the ``<select>`` widgets are present (wiring proof) and rendered as
     single-select post-AA.A.3."""
     driver = l2ft_driver
-    driver.open(_DASHBOARD_ID, sheet="Chains")
+    driver.open(_DASHBOARD_ID, sheet=_CHAINS_NAME)
     page = driver.page
     for param in ("pL2ftChainsChain", "pL2ftChainsCompletion"):
         sel = page.locator(f'select[name="param_{param}"]')
@@ -169,7 +175,7 @@ def test_l2ft_rail_dropdown_selection_refetches_with_param(
     ``driver.pick_filter(label, ...)``); asserts on ``_calls_log`` (the
     fetcher's recorded URL params) for the wire-shape proof."""
     driver = l2ft_driver
-    driver.open(_DASHBOARD_ID, sheet="Rails")
+    driver.open(_DASHBOARD_ID, sheet=_RAILS_NAME)
     page = driver.page
     # Wait past the initial auto-load fetch before clearing the log.
     page.wait_for_timeout(400)

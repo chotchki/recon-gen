@@ -35,6 +35,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from recon_gen.apps.l1_dashboard.app import (
+    _PENDING_AGING_NAME,
+    _TRANSACTIONS_TITLE,
+)
+
 
 
 if TYPE_CHECKING:
@@ -68,7 +73,7 @@ def test_pending_aging_drill_to_transactions_shows_target(l1_dashboard_driver: t
     view at the destination.
     """
     driver, dashboard_arg = l1_dashboard_driver
-    driver.open(dashboard_arg, sheet="Pending Aging")
+    driver.open(dashboard_arg, sheet=_PENDING_AGING_NAME)
     driver.wait_loaded("Stuck Pending Detail")
     pre_drill_rows = len(driver.table_rows("Stuck Pending Detail"))
     if pre_drill_rows == 0:
@@ -81,8 +86,8 @@ def test_pending_aging_drill_to_transactions_shows_target(l1_dashboard_driver: t
     driver.drill_from_first_row_via_menu(
         "Stuck Pending Detail", "View Transactions for this transfer",
     )
-    driver.wait_loaded("Posting Ledger")
-    post_drill_rows = len(driver.table_rows("Posting Ledger"))
+    driver.wait_loaded(_TRANSACTIONS_TITLE)
+    post_drill_rows = len(driver.table_rows(_TRANSACTIONS_TITLE))
 
     if post_drill_rows == 0:
         driver.screenshot()

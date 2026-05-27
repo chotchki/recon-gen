@@ -409,8 +409,8 @@ def test_make_tree_db_fetcher_indexes_visuals_across_sheets(
         values=[ds["amount"].sum()],
     ))
     s2 = analysis.add_sheet(Sheet(
-        sheet_id=SheetId("drift"), name="Drift",
-        title="Drift", description="x",
+        sheet_id=SheetId("drift"), name="Drift",  # typing-smell: ignore[no-inline-production-constants]: synthetic test-fixture sheet name; "Drift" coincides with L1 _DRIFT_NAME but is unrelated — this test exercises the fetcher's multi-sheet plumbing
+        title="Drift", description="x",  # typing-smell: ignore[no-inline-production-constants]: synthetic test-fixture sheet title (mirrors name above)
     ))
     s2.visuals.append(KPI(
         title="B", subtitle="t", visual_id=VisualId("v-b"),

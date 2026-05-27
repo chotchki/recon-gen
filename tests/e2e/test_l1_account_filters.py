@@ -27,6 +27,14 @@ from decimal import Decimal
 
 import pytest
 
+from recon_gen.apps.l1_dashboard.app import (
+    _DAILY_STATEMENT_NAME,
+    _DRIFT_NAME,
+    _LIMIT_BREACH_NAME,
+    _OVERDRAFT_NAME,
+    _TODAYS_EXCEPTIONS_NAME,
+    _TRANSACTIONS_NAME,
+)
 from recon_gen.apps.l1_dashboard.datasets import (
     build_daily_statement_summary_dataset,
 )
@@ -102,7 +110,7 @@ def test_daily_statement_role_then_account_populates_table(
     day) pair with rows, drive all three pickers to those values.
     """
     driver, dashboard_arg = l1_dashboard_driver
-    driver.open(dashboard_arg, sheet="Daily Statement")
+    driver.open(dashboard_arg, sheet=_DAILY_STATEMENT_NAME)
     target_visual = "Posted Money Records"
     driver.wait_loaded(target_visual)
 
@@ -141,12 +149,12 @@ def test_daily_statement_role_then_account_populates_table(
 
 
 @pytest.mark.parametrize("sheet_name", [
-    "Drift",
-    "Overdraft",
-    "Limit Breach",
-    "Today's Exceptions",
-    "Daily Statement",
-    "Transactions",
+    _DRIFT_NAME,
+    _OVERDRAFT_NAME,
+    _LIMIT_BREACH_NAME,
+    _TODAYS_EXCEPTIONS_NAME,
+    _DAILY_STATEMENT_NAME,
+    _TRANSACTIONS_NAME,
 ])
 def test_account_dropdown_shows_display_form(
     l1_dashboard_driver: tuple["DashboardDriver", str], sheet_name: str,
@@ -210,7 +218,7 @@ def test_daily_statement_picked_account_narrows_table(
     pickers to those values.
     """
     driver, dashboard_arg = l1_dashboard_driver
-    driver.open(dashboard_arg, sheet="Daily Statement")
+    driver.open(dashboard_arg, sheet=_DAILY_STATEMENT_NAME)
 
     picked_account, _picked_role, picked_day = find_account_day_with_data(cfg)
 
@@ -344,7 +352,7 @@ def test_bg2_daily_statement_kpis_match_summary_matview(
     only on the QS leg.
     """
     driver, dashboard_arg = l1_dashboard_driver
-    driver.open(dashboard_arg, sheet="Daily Statement")
+    driver.open(dashboard_arg, sheet=_DAILY_STATEMENT_NAME)
 
     picked_account, _picked_role, day1, day2 = (
         find_two_days_for_same_account(cfg)

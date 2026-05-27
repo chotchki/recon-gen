@@ -13,6 +13,8 @@ from typing import Any, cast
 
 import pytest
 
+from recon_gen.apps.l1_dashboard.app import _DRIFT_NAME, _OVERDRAFT_NAME
+
 
 playwright_sync_api = pytest.importorskip("playwright.sync_api")
 
@@ -56,7 +58,7 @@ def test_barchart_renders_one_rect_per_category_single_series() -> None:
         page = browser.new_page()
         _load_harness(page)
         _render_into_target(page, {
-            "categories": ["Drift", "Overdraft", "Limit"],
+            "categories": [_DRIFT_NAME, _OVERDRAFT_NAME, "Limit"],
             "series": [{"name": "count", "values": [12, 7, 3]}],
         })
         bars = page.locator("#barchart-target svg rect.barchart-bar").count()
@@ -153,7 +155,7 @@ def test_barchart_renders_x_and_y_axis_labels() -> None:
         page = browser.new_page()
         _load_harness(page)
         _render_into_target(page, {
-            "categories": ["Drift", "Overdraft"],
+            "categories": [_DRIFT_NAME, _OVERDRAFT_NAME],
             "series": [{"name": "count", "values": [12, 7]}],
             "x_label": "Invariant",
             "y_label": "Violations",

@@ -48,6 +48,7 @@ from recon_gen.common.spine import (
     render_captured_sql,
     scenario_to_generators,
 )
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.sql import Dialect
 
 
@@ -323,7 +324,7 @@ def test_default_scenario_full_corpus_composes_via_dry_run() -> None:
         scenario_bundle.scenario, inst,
     )
     cap = dry_run_capture(Dialect.SQLITE)
-    ctx = ScenarioContext(scenario_id="ay4c4-smoke", prefix="spec_example")
+    ctx = ScenarioContext(scenario_id="ay4c4-smoke", prefix=DEFAULT_PREFIX)
     captured = ctx.compose(cap, *gens, dry_run=True)  # pyright: ignore[reportArgumentType]: ``cap`` is _DryRunBase (duck-typed Connection for dry-run); ViolationGenerator narrows to ClaimedAccountsGenerator Protocol at runtime — same seam as tests/e2e/_seed_helpers.py
     assert captured is not None
     assert len(captured) > 0
@@ -359,7 +360,7 @@ def test_focused_single_plant_round_trips_through_compose_render() -> None:
     )
     gens = scenario_to_generators(scenarios, inst)
     cap = dry_run_capture(Dialect.SQLITE)
-    ctx = ScenarioContext(scenario_id="ay4c3-smoke", prefix="spec_example")
+    ctx = ScenarioContext(scenario_id="ay4c3-smoke", prefix=DEFAULT_PREFIX)
     captured = ctx.compose(cap, *gens, dry_run=True)  # pyright: ignore[reportArgumentType]: ``cap`` is _DryRunBase (duck-typed Connection for dry-run); ViolationGenerator narrows to ClaimedAccountsGenerator Protocol at runtime — same seam as tests/e2e/_seed_helpers.py
     assert captured is not None
     assert len(captured) > 0

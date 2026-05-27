@@ -108,8 +108,8 @@ def test_read_managed_tags_returns_map_for_managed_resource() -> None:
     client = _StubClient(
         tags_by_arn={
             "arn:dash:1": [
-                _mk_tag("ManagedBy", "recon-gen"),
-                _mk_tag("Deployment", "recon-test"),
+                _mk_tag(MANAGED_TAG_KEY, MANAGED_TAG_VALUE),
+                _mk_tag(DEPLOYMENT_TAG_KEY, "recon-test"),
             ],
         },
         summaries_by_kind={},
@@ -164,19 +164,19 @@ def test_collect_stale_deployment_only_sweeps_matching() -> None:
         },
         tags_by_arn={
             "arn:ci-12345": [
-                _mk_tag("ManagedBy", "recon-gen"),
-                _mk_tag("Deployment", "qs-ci-12345-pg"),
+                _mk_tag(MANAGED_TAG_KEY, MANAGED_TAG_VALUE),
+                _mk_tag(DEPLOYMENT_TAG_KEY,"qs-ci-12345-pg"),
             ],
             "arn:ci-67890": [
-                _mk_tag("ManagedBy", "recon-gen"),
-                _mk_tag("Deployment", "qs-ci-67890-pg"),
+                _mk_tag(MANAGED_TAG_KEY, MANAGED_TAG_VALUE),
+                _mk_tag(DEPLOYMENT_TAG_KEY,"qs-ci-67890-pg"),
             ],
             "arn:local": [
-                _mk_tag("ManagedBy", "recon-gen"),
-                _mk_tag("Deployment", "recon-postgres"),
+                _mk_tag(MANAGED_TAG_KEY, MANAGED_TAG_VALUE),
+                _mk_tag(DEPLOYMENT_TAG_KEY,"recon-postgres"),
             ],
             # Pre-Z.C deploy: no Deployment tag at all.
-            "arn:legacy": [_mk_tag("ManagedBy", "recon-gen")],
+            "arn:legacy": [_mk_tag(MANAGED_TAG_KEY, MANAGED_TAG_VALUE)],
         },
     )
     stale = _collect_stale(
@@ -199,7 +199,7 @@ def test_collect_stale_deployment_fails_closed_on_missing_tag() -> None:
         },
         tags_by_arn={
             # Only ManagedBy — no Deployment tag.
-            "arn:untagged": [_mk_tag("ManagedBy", "recon-gen")],
+            "arn:untagged": [_mk_tag(MANAGED_TAG_KEY, MANAGED_TAG_VALUE)],
         },
     )
     stale = _collect_stale(
@@ -226,12 +226,12 @@ def test_collect_stale_skips_resources_in_expected_set() -> None:
         },
         tags_by_arn={
             "arn:live": [
-                _mk_tag("ManagedBy", "recon-gen"),
-                _mk_tag("Deployment", "recon-test"),
+                _mk_tag(MANAGED_TAG_KEY, MANAGED_TAG_VALUE),
+                _mk_tag(DEPLOYMENT_TAG_KEY,"recon-test"),
             ],
             "arn:stale": [
-                _mk_tag("ManagedBy", "recon-gen"),
-                _mk_tag("Deployment", "recon-test"),
+                _mk_tag(MANAGED_TAG_KEY, MANAGED_TAG_VALUE),
+                _mk_tag(DEPLOYMENT_TAG_KEY,"recon-test"),
             ],
         },
     )

@@ -294,7 +294,7 @@ def test_getting_started_welcome_uses_l2_instance_description() -> None:
     hardcoded persona string. Switching L2 instance switches the
     prose — same contract the L1 dashboard's Getting Started follows."""
     app = build_l2_flow_tracing_app(_CFG)
-    gs = _sheet_by_name(app, "Getting Started")
+    gs = _sheet_by_name(app, _GETTING_STARTED_NAME)
     welcome_xml = gs.text_boxes[0].content
     # Default L2 instance is spec_example — its description is what shows.
     assert "Generic SPEC-shaped instance" in welcome_xml
@@ -307,7 +307,7 @@ def test_getting_started_welcome_falls_back_when_l2_description_missing() -> Non
     explicit = default_l2_instance()
     minimal = replace(explicit, description=None)
     app = build_l2_flow_tracing_app(_CFG, l2_instance=minimal)
-    gs = _sheet_by_name(app, "Getting Started")
+    gs = _sheet_by_name(app, _GETTING_STARTED_NAME)
     assert "L2 instance description missing" in gs.text_boxes[0].content
 
 
@@ -427,7 +427,7 @@ def test_rails_sheet_has_a_table_visual() -> None:
     """The Rails sheet hosts the transactions Table (postings dataset)."""
     from recon_gen.common.tree import Table
     app = build_l2_flow_tracing_app(_CFG)
-    rails = _sheet_by_name(app, "Rails")
+    rails = _sheet_by_name(app, _RAILS_NAME)
     table_visuals = [v for v in rails.visuals if isinstance(v, Table)]
     assert len(table_visuals) == 1
 
@@ -459,7 +459,7 @@ def test_rails_sheet_has_seven_filter_controls() -> None:
     rewrite moved them onto parameter-bound CategoryFilters with
     StaticValues source so QS doesn't lazy-fetch dropdown options."""
     app = build_l2_flow_tracing_app(_CFG)
-    rails = _sheet_by_name(app, "Rails")
+    rails = _sheet_by_name(app, _RAILS_NAME)
     # 7 parameter controls (date×2 + rail + status + bundle + meta-key
     # + meta-value)
     assert len(rails.parameter_controls) == 7
@@ -471,7 +471,7 @@ def test_rails_sheet_parameter_controls_titled_for_analyst() -> None:
     """The analyst-facing titles match the filter-bar UX spec —
     catches accidental retitling."""
     app = build_l2_flow_tracing_app(_CFG)
-    rails = _sheet_by_name(app, "Rails")
+    rails = _sheet_by_name(app, _RAILS_NAME)
     titles = {_control_title(ctrl) for ctrl in rails.parameter_controls}
     assert {
         "Date From", "Date To", "Rail", "Status", "Bundle",
@@ -652,7 +652,7 @@ def test_chains_table_carries_completion_status_column() -> None:
     visibly affect."""
     from recon_gen.common.tree import Table
     app = build_l2_flow_tracing_app(_CFG)
-    chains = _sheet_by_name(app, "Chains")
+    chains = _sheet_by_name(app, _CHAINS_NAME)
     table = next(v for v in chains.visuals if isinstance(v, Table))
     cols = {_typed_column(c.column).name for c in table.columns}
     assert "completion_status" in cols
@@ -665,7 +665,7 @@ def test_chains_sheet_has_six_filter_controls() -> None:
     dropdowns (Chain + Completion), 2 parameter dropdowns (Metadata
     Key + Metadata Value)."""
     app = build_l2_flow_tracing_app(_CFG)
-    chains = _sheet_by_name(app, "Chains")
+    chains = _sheet_by_name(app, _CHAINS_NAME)
     titles: list[str] = (
         [_control_title(c) for c in chains.parameter_controls]
         + [_control_title(c) for c in chains.filter_controls]
@@ -1085,7 +1085,7 @@ def test_exceptions_sheet_unified_shape() -> None:
     scroll) collapses to one screen-sized view."""
     from collections import Counter
     app = build_l2_flow_tracing_app(_CFG)
-    exc = _sheet_by_name(app, "L2 Exceptions")
+    exc = _sheet_by_name(app, _L2_EXCEPTIONS_NAME)
     counts = Counter(type(v).__name__ for v in exc.visuals)
     assert counts == Counter(["KPI", "BarChart", "Table"]), (
         f"unexpected visual mix: {counts}"
@@ -1098,7 +1098,7 @@ def test_exceptions_sheet_visuals_read_unified_dataset() -> None:
     isn't in the deployed dataset list anymore."""
     from recon_gen.common.tree import BarChart, KPI, Table
     app = build_l2_flow_tracing_app(_CFG)
-    exc = _sheet_by_name(app, "L2 Exceptions")
+    exc = _sheet_by_name(app, _L2_EXCEPTIONS_NAME)
     expected_ds = "l2ft-unified-exceptions-ds"
     for v in exc.visuals:
         if isinstance(v, KPI):
@@ -1136,7 +1136,7 @@ def test_aa_c_4_l2ft_exceptions_sheet_carries_hygiene_panel() -> None:
     every-kind-appears contract at JSON-emit level."""
     inst = load_instance(SASQUATCH_PR_YAML)
     app = build_l2_flow_tracing_app(_CFG, l2_instance=inst)
-    sheet = _sheet_by_name(app, "L2 Exceptions")
+    sheet = _sheet_by_name(app, _L2_EXCEPTIONS_NAME)
     panel = _l2ft_text_box_by_id(sheet, "l2ft-hygiene-panel")
     # Roll-up framing — the operator should know at a glance why this
     # sheet exists.
@@ -1405,7 +1405,7 @@ def test_meta_key_dropdown_includes_sentinel_plus_declared_keys() -> None:
     )
     from recon_gen.common.tree import ParameterDropdown, StaticValues
     app = build_l2_flow_tracing_app(_CFG)
-    rails = _sheet_by_name(app, "Rails")
+    rails = _sheet_by_name(app, _RAILS_NAME)
     key_ctrl = next(
         c for c in rails.parameter_controls
         if _control_title(c) == "Metadata Key"
@@ -1427,7 +1427,7 @@ def test_meta_value_control_is_bound_to_pl2ftmetavalue_param() -> None:
     from recon_gen.common.tree import ParameterTextField
 
     app = build_l2_flow_tracing_app(_CFG)
-    rails = _sheet_by_name(app, "Rails")
+    rails = _sheet_by_name(app, _RAILS_NAME)
     val_ctrl = next(
         c for c in rails.parameter_controls
         if _control_title(c) == "Metadata Value"

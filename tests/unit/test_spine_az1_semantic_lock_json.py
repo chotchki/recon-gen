@@ -65,7 +65,7 @@ def test_terminating_newline_present() -> None:
     would break byte-equality."""
     out = lock_to_json(
         {},
-        instance="spec_example",
+        instance=DEFAULT_PREFIX,
         dialect=Dialect.SQLITE,
         canonical_anchor=date(2030, 1, 1),
     )

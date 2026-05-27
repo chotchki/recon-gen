@@ -40,6 +40,7 @@ from recon_gen.common.env_keys import RECON_GEN_AI_FUZZ_SAMPLE_N
 from recon_gen.common.l2.cache import L2InstanceCache
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from tests.e2e._drivers.studio_editor import (
     StudioHttpEditorDriver,
     build_editor_app,
@@ -219,7 +220,7 @@ def _assert_l2_structurally_equal(
 @pytest.mark.parametrize(
     "fixture_name",
     [
-        pytest.param("spec_example", id="spec_example"),
+        pytest.param(DEFAULT_PREFIX, id="spec_example"),  # typing-smell: ignore[no-inline-production-constants]: pytest param id= is a display label for test-discovery output, not a contract value; mirrors DEFAULT_PREFIX by convention
         pytest.param("sasquatch_pr", id="sasquatch_pr"),
     ],
 )
@@ -447,7 +448,7 @@ def _assert_matview_rows_equal(
 @pytest.mark.parametrize(
     "fixture_name",
     [
-        pytest.param("spec_example", id="spec_example"),
+        pytest.param(DEFAULT_PREFIX, id="spec_example"),  # typing-smell: ignore[no-inline-production-constants]: pytest param id= is a display label for test-discovery output, not a contract value; mirrors DEFAULT_PREFIX by convention
         pytest.param("sasquatch_pr", id="sasquatch_pr"),
     ],
 )

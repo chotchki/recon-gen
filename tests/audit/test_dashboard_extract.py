@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Iterator
 
 import pytest
 
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from tests.audit._dashboard_extract import (
     _DASHBOARD_LAYOUT,
     L1Invariant,
@@ -47,8 +48,8 @@ def _cfg_env(monkeypatch_module: pytest.MonkeyPatch) -> None:  # pyright: ignore
         "RECON_GEN_DATASOURCE_ARN",
         "arn:aws:quicksight:us-west-2:111122223333:datasource/ds",
     )
-    monkeypatch_module.setenv("RECON_GEN_DEPLOYMENT_NAME", "spec_example")
-    monkeypatch_module.setenv("RECON_GEN_DB_TABLE_PREFIX", "spec_example")
+    monkeypatch_module.setenv("RECON_GEN_DEPLOYMENT_NAME", DEFAULT_PREFIX)
+    monkeypatch_module.setenv("RECON_GEN_DB_TABLE_PREFIX", DEFAULT_PREFIX)
 
 
 @pytest.fixture(scope="module")

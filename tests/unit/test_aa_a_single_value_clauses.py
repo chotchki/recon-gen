@@ -28,6 +28,11 @@ from __future__ import annotations
 
 from recon_gen.apps.l1_dashboard.datasets import (
     L1_ALL_SENTINEL,
+    P_L1_DRIFT_ACCOUNT,
+    P_L1_OVERDRAFT_ACCOUNT,
+    P_L1_TX_ACCOUNT,
+    P_L1_TX_ORIGIN,
+    P_L1_TX_STATUS,
     _account_display_clause,
     _data_value_clause,
 )
@@ -38,23 +43,23 @@ from recon_gen.apps.l2_flow_tracing.datasets import (
 
 
 def test_l1_data_value_clause_shape() -> None:
-    clause = _data_value_clause("account_id", "pL1DriftAccount")
+    clause = _data_value_clause("account_id", P_L1_DRIFT_ACCOUNT)
     assert clause == (
-        "('__l1_all__' = <<$pL1DriftAccount>>"
-        " OR account_id = <<$pL1DriftAccount>>)"
+        f"('{L1_ALL_SENTINEL}' = <<${P_L1_DRIFT_ACCOUNT}>>"
+        f" OR account_id = <<${P_L1_DRIFT_ACCOUNT}>>)"
     )
 
 
 def test_l1_data_value_clause_uses_scalar_eq_not_in() -> None:
     """Regression guard: must be ``=``, never ``IN (...)``. A scalar bind
     against ``IN`` parses but narrows to zero rows."""
-    clause = _data_value_clause("status", "pL1TxStatus")
-    assert " = <<$pL1TxStatus>>" in clause
-    assert " IN (<<$pL1TxStatus>>)" not in clause
+    clause = _data_value_clause("status", P_L1_TX_STATUS)
+    assert f" = <<${P_L1_TX_STATUS}>>" in clause
+    assert f" IN (<<${P_L1_TX_STATUS}>>)" not in clause
 
 
 def test_l1_data_value_clause_uses_l1_sentinel() -> None:
-    clause = _data_value_clause("origin", "pL1TxOrigin")
+    clause = _data_value_clause("origin", P_L1_TX_ORIGIN)
     assert f"'{L1_ALL_SENTINEL}'" in clause
 
 
@@ -87,10 +92,10 @@ def test_aa_e_2_account_display_clause_shape() -> None:
     + ``account_id`` columns. Sentinel-guard same as
     :func:`_data_value_clause`, so a show-all default keeps every row on
     initial load."""
-    clause = _account_display_clause("pL1DriftAccount")
+    clause = _account_display_clause(P_L1_DRIFT_ACCOUNT)
     assert clause == (
-        "('__l1_all__' = <<$pL1DriftAccount>>"
-        " OR (account_name || ' (' || account_id || ')') = <<$pL1DriftAccount>>)"
+        f"('{L1_ALL_SENTINEL}' = <<${P_L1_DRIFT_ACCOUNT}>>"
+        f" OR (account_name || ' (' || account_id || ')') = <<${P_L1_DRIFT_ACCOUNT}>>)"
     )
 
 
@@ -99,7 +104,7 @@ def test_aa_e_2_account_display_clause_uses_l1_sentinel() -> None:
     ``_data_value_clause`` uses — flipping a single dropdown's WHERE
     to the display clause shouldn't change which sentinel its
     ``_all_sentinel_sv_param`` default already emits."""
-    clause = _account_display_clause("pL1OverdraftAccount")
+    clause = _account_display_clause(P_L1_OVERDRAFT_ACCOUNT)
     assert f"'{L1_ALL_SENTINEL}'" in clause
 
 
@@ -109,5 +114,5 @@ def test_aa_e_2_account_display_clause_concats_name_then_id() -> None:
     ``DS_L1_ACCOUNTS`` SQL aliases ``account_name || ' (' || account_id
     || ')' AS account_display``). If the two ever diverge, every L1
     account dropdown silently narrows to zero rows."""
-    clause = _account_display_clause("pL1TxAccount")
+    clause = _account_display_clause(P_L1_TX_ACCOUNT)
     assert "account_name || ' (' || account_id || ')'" in clause

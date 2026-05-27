@@ -52,6 +52,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from recon_gen.apps.l2_flow_tracing.app import (
+    _CHAINS_NAME,
+    _RAILS_NAME,
+    _TRANSFER_TEMPLATES_NAME,
+)
 from recon_gen.apps.l2_flow_tracing.datasets import (
     CHAIN_INSTANCES_CONTRACT,
     POSTINGS_CONTRACT,
@@ -123,8 +128,10 @@ def _anchor_or_skip(cfg, l2, spec: SheetAnchorSpec):  # type: ignore[no-untyped-
 # row that's likely on the first page of the table.
 L2FT_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
     SheetAnchorSpec(
-        sheet_name="Rails",
-        target_visual="Transactions",
+        sheet_name=_RAILS_NAME,
+        # "Transactions" here is the L2FT Rails-sheet visual title
+        # (not L1's _TRANSACTIONS_NAME sheet); L2FT has no constant.
+        target_visual="Transactions",  # typing-smell: ignore[no-inline-production-constants]: L2FT visual title; no L2FT constant exists
         dataset_builder=build_postings_dataset,
         contract=POSTINGS_CONTRACT,
         anchor_order="posting DESC, id ASC",
@@ -147,7 +154,7 @@ L2FT_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         ),
     ),
     SheetAnchorSpec(
-        sheet_name="Chains",
+        sheet_name=_CHAINS_NAME,
         target_visual="Chain Instances",
         dataset_builder=build_chain_instances_dataset,
         contract=CHAIN_INSTANCES_CONTRACT,
@@ -169,7 +176,7 @@ L2FT_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         ),
     ),
     SheetAnchorSpec(
-        sheet_name="Transfer Templates",
+        sheet_name=_TRANSFER_TEMPLATES_NAME,
         target_visual="Template Instances",
         dataset_builder=build_tt_instances_dataset,
         contract=TT_INSTANCES_CONTRACT,

@@ -89,7 +89,7 @@ def test_rails_sheet_visuals_invariant(l2_instance: L2Instance) -> None:
     """Rails sheet always has exactly 1 Table visual + the header
     text-box — the visual count doesn't bend with the L2."""
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
-    rails = next(s for s in app.analysis.sheets if s.name == "Rails")
+    rails = next(s for s in app.analysis.sheets if s.name == _RAILS_NAME)
     counts = Counter(type(v).__name__ for v in rails.visuals)
     assert counts == Counter(["Table"])
 
@@ -101,7 +101,7 @@ def test_chains_sheet_visuals_invariant(l2_instance: L2Instance) -> None:
     pre-M.3.10d declared-topology view (which moved to the M.7 docs
     render)."""
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
-    chains = next(s for s in app.analysis.sheets if s.name == "Chains")
+    chains = next(s for s in app.analysis.sheets if s.name == _CHAINS_NAME)
     counts = Counter(type(v).__name__ for v in chains.visuals)
     assert counts == Counter(["Table"])
 
@@ -114,7 +114,7 @@ def test_l2_exceptions_sheet_visuals_invariant_M3_10l(
     Today's Exceptions). Pre-M.3.10l shape was 12 KPIs + 6 Tables
     across 6 vertical sections."""
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
-    exc = next(s for s in app.analysis.sheets if s.name == "L2 Exceptions")
+    exc = next(s for s in app.analysis.sheets if s.name == _L2_EXCEPTIONS_NAME)
     counts = Counter(type(v).__name__ for v in exc.visuals)
     assert counts == Counter(["KPI", "BarChart", "Table"])
 
@@ -210,7 +210,7 @@ def test_metadata_key_dropdown_options_scale_with_declared_keys(
     from recon_gen.common.tree import StaticValues
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
     n_keys = len(declared_metadata_keys(l2_instance))
-    rails = next(s for s in app.analysis.sheets if s.name == "Rails")
+    rails = next(s for s in app.analysis.sheets if s.name == _RAILS_NAME)
     key_ctrl = next(
         c for c in rails.parameter_controls if c.title == "Metadata Key"
     )

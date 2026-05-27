@@ -68,6 +68,7 @@ from recon_gen.apps.investigation.datasets import (
 )
 from recon_gen.cli import main
 from recon_gen.common.config import Config
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.models import (
     Analysis,
     DataSet,
@@ -94,7 +95,7 @@ from tests._test_helpers import make_test_config
 # matview names. Z.C — db_table_prefix replaces the prior auto-stamped
 # l2_instance_prefix; pin to spec_example since
 # ``build_investigation_app`` defaults to the spec_example L2 fixture.
-_TEST_CFG = make_test_config(db_table_prefix="spec_example")
+_TEST_CFG = make_test_config(db_table_prefix=DEFAULT_PREFIX)
 
 # Investigation's ``build_all_datasets`` requires an L2Instance for
 # the App Info matview names (P.9f.f — dropped silent fallback). Tests
@@ -457,7 +458,7 @@ def test_fanout_threshold_pushed_into_dataset_sql():
         "Y.3.a — distinct_per_recipient JOIN missing"
     )
     # App2-side SQL is registered too (same string when no app2_sql=).
-    app2_sql = get_sql("inv-recipient-fanout-ds")
+    app2_sql = get_sql(DS_INV_RECIPIENT_FANOUT)
     assert (
         f"WHERE dpr.distinct_senders >= <<${P_INV_FANOUT_THRESHOLD}>>"
         in app2_sql

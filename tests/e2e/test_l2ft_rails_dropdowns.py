@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from recon_gen.apps.l2_flow_tracing.app import _RAILS_NAME
+
 from ._l2ft_dropdown_walk import walk_dropdown
 
 
@@ -34,10 +36,12 @@ def test_rails_dropdown_narrows_does_not_empty(
     Pending/Posted/Failed enum; every value should narrow to a proper
     non-empty subset on a populated demo.)"""
     driver, dashboard_arg = l2ft_dashboard_driver
-    driver.open(dashboard_arg, sheet="Rails")
+    driver.open(dashboard_arg, sheet=_RAILS_NAME)
     walk_dropdown(
         driver,
-        sheet_label="Rails",
+        sheet_label=_RAILS_NAME,
         dropdown_title=dropdown_title,
-        table_title="Transactions",
+        # "Transactions" is the L2FT visual title (not L1's
+        # _TRANSACTIONS_NAME sheet); L2FT has no constant.
+        table_title="Transactions",  # typing-smell: ignore[no-inline-production-constants]: L2FT visual title; no L2FT constant exists
     )

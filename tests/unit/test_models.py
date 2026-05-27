@@ -100,7 +100,7 @@ class TestThemeSerialization:
             BaseThemeId="CLASSIC",
             Configuration=ThemeConfiguration(
                 DataColorPalette=DataColorPalette(Colors=["#000", "#FFF"]),
-                UIColorPalette=UIColorPalette(PrimaryBackground="#FFFFFF"),
+                UIColorPalette=UIColorPalette(PrimaryBackground="#FFFFFF"),  # typing-smell: ignore[no-inline-production-constants]: arbitrary hex for Theme roundtrip; coincidentally matches _WHITE but the test exercises dataclass serialization, not theme.color tokens
             ),
         )
         raw = theme.to_json_string()

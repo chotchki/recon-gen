@@ -1,15 +1,18 @@
 """Planted "test-side" fixture for BE.2's no-inline-production-constants smoke test.
 
-The two assertions below inline the literal values of
+The planted call-sites below inline the literal values of
 ``PLANTED_PROD_CONSTANT`` and ``_PLANTED_PRIVATE_PROD_CONSTANT``
-from ``be_2_planted_src.py`` — the smoke test invokes
-``NoInlineProductionConstantsCheck.find_smells`` on this file and
-asserts 2 hits (one per planted-inline-literal).
+from ``be_2_planted_src.py`` across both the ``ast.Assert`` scan
+shape AND the ``ast.Call`` arg/keyword shape — the smoke test
+invokes ``NoInlineProductionConstantsCheck.find_smells`` on this
+file and asserts 4 hits (one per inline literal across both
+shapes).
 
-The check scans EVERY string literal inside an ``ast.Assert``
-node, including nested expressions inside the assertion message —
-that's why the planted contract uses both an `assert` test arg
-AND an assertion message string.
+Why both shapes: the original BE.2 scope was just ``ast.Assert``,
+which silently missed visual titles passed to driver verbs
+(``driver.wait_loaded("Matview Status")`` etc — caught by CI as
+test_qs_table_rows_well_formed in 2026-05-27). The extended scope
+adds ``ast.Call`` args + keywords. The fixture exercises both.
 
 See ``be_2_planted_src.py`` for the rationale.
 """
@@ -34,3 +37,24 @@ def _planted_assert_private() -> bool:  # pyright: ignore[reportUnusedFunction]:
         "private planted constant mismatch"
     )
     return True
+
+
+def _noop(*args: object, **kwargs: object) -> None:
+    """Stub call target — exists so the planted Call shapes below
+    compile + walk through the visitor; the body never runs (the
+    enclosing _planted_call_* functions are AST-fixtures, not
+    invoked at runtime).
+    """
+    del args, kwargs
+
+
+def _planted_call_arg() -> None:  # pyright: ignore[reportUnusedFunction]: invoked by AST walker, not Python
+    """Inline the public planted constant as a positional CALL arg
+    — should trip the lint (extended scope covers ast.Call args)."""
+    _noop("be_2_planted_sentinel_value")
+
+
+def _planted_call_keyword() -> None:  # pyright: ignore[reportUnusedFunction]: invoked by AST walker, not Python
+    """Inline the private planted constant as a keyword CALL arg —
+    should trip the lint (extended scope covers ast.Call keywords)."""
+    _noop(value="be_2_planted_private_sentinel")
