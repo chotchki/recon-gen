@@ -613,10 +613,9 @@ def _populate_drift_sheet(
         width=quarter,
         title="Leaf Accounts in Drift",
         subtitle=(
-            "Distinct count of leaf accounts with at least one day-row "
-            "where stored balance disagrees with the cumulative net of "
-            "posted Money records in the current date window. The table "
-            "below lists every individual day-row violation."
+            "Count of leaf-account day-rows where stored balance "
+            "disagrees with the cumulative net of posted Money records "
+            "in the current date window."
         ),
         values=[ds_drift["account_id"].count()],
     )
@@ -880,11 +879,8 @@ def _populate_overdraft_sheet(
         # internal-scope account incl. customer DDAs).
         title="Accounts in Overdraft",
         subtitle=(
-            "Distinct count of internal accounts holding negative stored "
-            "balance on at least one day in the current window. The "
-            "table below lists every individual day-row violation — "
-            "the KPI count is lower than the table row count when an "
-            "account is in overdraft on multiple days."
+            "Count of internal-account day-rows holding negative stored "
+            "balance — every row in the table below is one violation."
         ),
         values=[ds_overdraft["account_id"].count()],
     )
@@ -958,13 +954,10 @@ def _populate_todays_exceptions_sheet(
     # Row 1: total count KPI (full width — single headline number).
     sheet.layout.row(height=_KPI_ROW_SPAN).add_kpi(
         width=_FULL,
-        title="Accounts with Open Exceptions",
+        title="Open Exceptions",
         subtitle=(
-            "Distinct count of accounts with at least one L1 "
-            "SHOULD-constraint violation on today's business day. "
-            "The table below lists every individual violation across "
-            "all 5 invariant checks — the KPI count is lower than the "
-            "table row count when an account has multiple violations."
+            "Total count of L1 SHOULD-constraint violations on today's "
+            "business day across all 5 invariant checks."
         ),
         values=[ds["account_id"].count()],
     )
