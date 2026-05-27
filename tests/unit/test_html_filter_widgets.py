@@ -197,7 +197,14 @@ def test_date_range_is_flatpickr_with_hidden_from_to_inputs() -> None:
     """The visible date control is one Flatpickr-range text input (no
     ``name`` — Flatpickr writes the range string into it); the two
     hidden ``date_from`` / ``date_to`` inputs are the wire elements,
-    synced by ``wireFlatpickrRange``."""
+    synced by ``wireFlatpickrRange``.
+
+    BL.2: hidden inputs always render empty regardless of analysis-
+    level default range. The default lives in the bind layer
+    (``_tree_fetcher`` maps empty URL params to
+    ``analysis.default_universal_date_range``), not in the form —
+    keeps "where do narrowing decisions live?" answerable with one
+    pointer."""
     app, sheet = _build_app()
     form = _filter_form(emit_html(app, sheet, dashboard_id="x"))
     assert 'data-widget="flatpickr-range"' in form

@@ -647,6 +647,13 @@ def _render_filter_form(
         # field can't take typed garbage; Flatpickr opens it on click. If
         # Flatpickr fails to load the text input just sits inert and the
         # hidden inputs stay empty → no date narrowing (degraded, not broken).
+        #
+        # BL.2 — hidden inputs stay EMPTY on initial render. The
+        # bind layer (``_tree_fetcher.make_tree_db_fetcher``) maps
+        # empty ``date_from`` / ``date_to`` URL values to the
+        # analysis's ``default_universal_date_range`` when one is
+        # declared; analyses without a default (L2FT, Investigation)
+        # see empty → match-all (unchanged behavior).
         parts.append(
             f'    <label class="{_FORM_LABEL_CLASS}">Date range '
             f'<input type="text" data-widget="flatpickr-range" readonly '

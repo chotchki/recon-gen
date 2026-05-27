@@ -855,16 +855,23 @@ def build_executives_app(
     # Q.1.b — Universal date-range filter across all 3 data-bearing
     # sheets (mirrors L1's M.2b.1 pattern: shared analysis-level
     # DateTimeParams + per-dataset SINGLE_DATASET FilterGroups).
+    # AR.4 — 30-day window per the pre-AR.4 RollingDate defaults.
+    exec_range_view = DateView(
+        frame=cfg.test_generator.as_of_frame(window_days=30),
+    )
+    # BL.2 — record the analysis-level default range so App2's
+    # ``_render_filter_form`` can pre-populate date_from / date_to
+    # hidden inputs on initial page load (matching QS's behavior:
+    # the analysis-level TimeRangeFilter's parameter defaults apply
+    # before any user interaction).
+    analysis.default_universal_date_range = exec_range_view
     _wire_date_range_filter(
         analysis,
         datasets=datasets,
         account_coverage_sheet=sheets[SHEET_EXEC_ACCOUNT_COVERAGE],
         transaction_volume_sheet=sheets[SHEET_EXEC_TRANSACTION_VOLUME],
         money_moved_sheet=sheets[SHEET_EXEC_MONEY_MOVED],
-        # AR.4 — 30-day window per the pre-AR.4 RollingDate defaults.
-        exec_range_view=DateView(
-            frame=cfg.test_generator.as_of_frame(window_days=30),
-        ),
+        exec_range_view=exec_range_view,
     )
 
     # M.4.4.5 — App Info ("i") sheet, ALWAYS LAST. Diagnostic canary;

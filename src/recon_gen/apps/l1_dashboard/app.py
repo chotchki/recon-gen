@@ -2678,6 +2678,13 @@ def build_l1_dashboard_app(
     # M.2b.1 — Universal date-range filter wires the sheets together.
     # Lands AFTER all sheets are populated since the FilterGroups scope
     # by sheet ref + the controls register on the sheets directly.
+    # AR.4 — 7-day window per the pre-AR.4 RollingDate defaults.
+    # BL.2 — record the analysis-level default range so App2 can
+    # pre-populate date_from / date_to on initial render (matches QS).
+    _universal_range_view = DateView(
+        frame=cfg.test_generator.as_of_frame(window_days=7),
+    )
+    analysis.default_universal_date_range = _universal_range_view
     _wire_date_range_filter(
         analysis,
         datasets=datasets,
@@ -2691,9 +2698,7 @@ def build_l1_dashboard_app(
         todays_exceptions_sheet=todays_exceptions_sheet,
         transactions_sheet=transactions_sheet,
         # AR.4 — 7-day window per the pre-AR.4 RollingDate defaults.
-        universal_range_view=DateView(
-            frame=cfg.test_generator.as_of_frame(window_days=7),
-        ),
+        universal_range_view=_universal_range_view,
     )
 
     # M.2b.3 + M.2b.5 + M.2b.10 + M.2b.11 + M.2b.12 — Per-sheet

@@ -56,6 +56,7 @@ from recon_gen.common.tree.controls import (
     SelectableValues,
 )
 from recon_gen.common.tree.datasets import Column, Dataset
+from recon_gen.common.tree.date_view import DateView
 from recon_gen.common.tree.fields import Dim, FieldRef, Measure, row_one_calc_name
 from recon_gen.common.tree.filters import FilterGroup, FilterLike
 from recon_gen.common.tree.parameters import ParameterDeclLike
@@ -959,6 +960,15 @@ class Analysis:
     parameters: list[ParameterDeclLike] = field(default_factory=list[ParameterDeclLike])
     filter_groups: list[FilterGroup] = field(default_factory=list[FilterGroup])
     calc_fields: list[CalcField] = field(default_factory=list[CalcField])
+    # BL.2 — the universal date-range default for this analysis (if any).
+    # App2 reads this at render time to pre-populate the date_from /
+    # date_to hidden inputs so the initial page load lands on the same
+    # window QS does (QS applies the analysis-level TimeRangeFilter's
+    # parameter defaults; App2 previously saw empty URL params and
+    # fell back to the dataset's match-all sentinel → all-spine window).
+    # When None, App2 leaves the hidden inputs empty (current behavior;
+    # correct for single-date and explicit-all-time dashboards).
+    default_universal_date_range: DateView | None = None
     # DataSetIdentifierDeclarations come from the App at emit time
 
     def add_sheet(self, sheet: Sheet) -> Sheet:
