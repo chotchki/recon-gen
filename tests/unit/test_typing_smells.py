@@ -1623,14 +1623,28 @@ def _collect_src_module_constants(
 
 
 class _NoInlineProductionConstantsVisitor(ast.NodeVisitor):
-    """Walk ``ast.Assert`` nodes; flag string literals matching an
-    indexed src constant.
+    """Walk ``ast.Assert`` + ``ast.Call`` nodes; flag string literals
+    matching an indexed src constant.
 
-    Why scoped to ``ast.Assert``: the lint's purpose is to catch
-    "test inlines a production constant in an assertion" — bare
-    string literals at module scope (test-fixture data, etc.) are
-    a different drift class. Asserts narrow to the high-signal
-    zone the spike measured.
+    Two scan surfaces:
+
+    - ``ast.Assert`` — original BE.2 scope: catches the
+      ``assert x == "foo"`` pattern when ``"foo"`` matches a
+      production constant.
+    - ``ast.Call`` args + keywords — BE.2 extension (followup to
+      `test_qs_table_rows_well_formed` Matview-title drift in CI
+      2026-05-27): catches the same shape when the literal is passed
+      to a driver verb (``qs_driver.wait_loaded("Matview Status")``,
+      ``driver.pick_filter("Account", "cust-001")``) rather than
+      compared in an assert. Same hit shape, same import-the-constant
+      fix.
+
+    Bare string literals at module scope (test-fixture data, etc.)
+    stay out of scope — they're a different drift class. The
+    src_index's >=3 chars + UPPER_SNAKE_CASE source rule keeps false
+    positives bounded. Per-(line, value) dedupe ensures a literal
+    that appears under BOTH an Assert and a nested Call only emits
+    once.
     """
 
     def __init__(
@@ -1691,9 +1705,21 @@ class _NoInlineProductionConstantsVisitor(ast.NodeVisitor):
         self._scan_for_literals(node.test)
         if node.msg is not None:
             self._scan_for_literals(node.msg)
-        # Don't generic_visit — nested asserts are vanishingly rare
-        # and walking them again risks double-counting. The walk in
-        # _scan_for_literals already descends into nested expressions.
+        # Continue descending so visit_Call fires for Calls nested
+        # inside the Assert's children — `_seen` dedupes any literal
+        # _scan_for_literals's ast.walk already counted.
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        # Scan each positional arg + each keyword value's subtree.
+        # ast.walk on each handles nested expressions (f-strings,
+        # tuples, etc.) the same way _scan_for_literals does for
+        # asserts.
+        for arg in node.args:
+            self._scan_for_literals(arg)
+        for kw in node.keywords:
+            self._scan_for_literals(kw.value)
+        self.generic_visit(node)
 
 
 @dataclass
@@ -2337,22 +2363,20 @@ def test_be_2_no_inline_production_constants_finds_planted_dup() -> None:
     tree = ast.parse(src)
     smells = list(check.find_smells(src, tree, test_fixture))
 
-    # 4 hits expected: 2 per function (the actual value + the
-    # equality-comparison RHS), times 2 functions. The dedup-by-line
-    # filter only suppresses repeated literals on the SAME line — the
-    # assignment + assert on different lines both surface.
-    #
-    # Actually 4 is overly conservative; the function body is:
-    #   actual = "be_2_planted_sentinel_value"      # line N
-    #   assert actual == "be_2_planted_sentinel_value", "..."  # line N+1
-    # Only the assert's literal is inside an Assert node; the
-    # assignment's literal is at function scope, not under an Assert.
-    # So 1 hit per function, 2 functions = 2 hits.
-    assert len(smells) == 2, (
-        f"BE.2 smoke expected exactly 2 hits on the planted fixture "
-        f"(one per planted-inline assert); got {len(smells)}: "
+    # 4 hits expected — one per planted call-site across two shapes:
+    #   _planted_assert_public:   1 hit (Assert RHS literal)
+    #   _planted_assert_private:  1 hit (Assert RHS literal)
+    #   _planted_call_arg:        1 hit (positional Call arg literal)
+    #   _planted_call_keyword:    1 hit (keyword Call value literal)
+    # The dedup-by-(line, value) filter suppresses any cross-walker
+    # double-counts (Assert's ast.walk + Call's visit overlap on the
+    # same line) — each planted literal is on its own line so 4 stands.
+    assert len(smells) == 4, (
+        f"BE.2 smoke expected exactly 4 hits on the planted fixture "
+        f"(one per planted-inline literal across Assert + Call shapes); "
+        f"got {len(smells)}: "
         f"{[(s.lineno, s.message[:60]) for s in smells]!r}. Either "
-        f"the Assert-walker regressed, the UPPER_SNAKE name regex "
+        f"the Assert/Call walker regressed, the UPPER_SNAKE name regex "
         f"changed, or the constant-value index lookup broke."
     )
     checkers = {s.checker for s in smells}
