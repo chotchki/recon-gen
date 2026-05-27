@@ -50,6 +50,7 @@ from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import L2Instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.l2.seed import emit_full_seed
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.sql import Dialect
 from recon_gen.cli._helpers import build_full_seed_sql
 
@@ -61,7 +62,7 @@ _SASQUATCH_PR = _L2_DIR / "sasquatch_pr.yaml"
 _ANCHOR = date(2026, 4, 30)
 
 _FIXTURES = [
-    pytest.param(_SPEC_EXAMPLE, "spec_example", id="spec_example"),
+    pytest.param(_SPEC_EXAMPLE, DEFAULT_PREFIX, id="spec_example"),  # typing-smell: ignore[no-inline-production-constants]: pytest param id tracks the L2 fixture filename, not the DEFAULT_PREFIX domain constant
     pytest.param(_SASQUATCH_PR, "sasquatch_pr", id="sasquatch_pr"),
 ]
 
@@ -249,7 +250,7 @@ def test_multi_leg_template_e8_fires_as_coupled_unit() -> None:
     its legs) pairs them → GREEN. spec_example-only (the fixture lives
     there); non-densified is enough (the unit-firing is a baseline path).
     """
-    _inst, cur = _seed_refresh(_SPEC_EXAMPLE, "spec_example")
+    _inst, cur = _seed_refresh(_SPEC_EXAMPLE, DEFAULT_PREFIX)
     paired = cur.execute(
         "SELECT transfer_id FROM spec_example_transactions "
         "WHERE rail_name IN ('CardLoadCardholderCredit', 'CardLoadSweepDebit') "
@@ -282,7 +283,7 @@ def test_chain_parent_template_legs_keep_independent_counts() -> None:
     SHOULD couple). spec_example-only; non-densified is enough (the per-rail
     loop is a baseline path).
     """
-    _inst, cur = _seed_refresh(_SPEC_EXAMPLE, "spec_example")
+    _inst, cur = _seed_refresh(_SPEC_EXAMPLE, DEFAULT_PREFIX)
     accrual = cur.execute(
         "SELECT COUNT(*) FROM spec_example_transactions "
         "WHERE rail_name = 'DisbursementAccrual'"

@@ -120,14 +120,14 @@ class TestSasquatchPRVocabulary:
 
 class TestSpecExampleNeutralFallback:
     def test_picks_neutral_branch(self):
-        vocab = vocabulary_for(_load("spec_example"))
+        vocab = vocabulary_for(_load("spec_example"))  # typing-smell: ignore[no-inline-production-constants]: _load() takes the L2 fixture filename stem, not the DEFAULT_PREFIX domain constant
         # spec_example's description opens with "Generic SPEC-shaped
         # instance…" — no proper-noun run, so we get the placeholder.
         assert vocab.institution.name == "Your Institution"
         assert vocab.institution.acronym == "the institution"
 
     def test_no_persona_leakage(self):
-        vocab = vocabulary_for(_load("spec_example"))
+        vocab = vocabulary_for(_load("spec_example"))  # typing-smell: ignore[no-inline-production-constants]: _load() takes the L2 fixture filename stem, not the DEFAULT_PREFIX domain constant
         # Hard contract — the audit's central O.0 finding is "zero
         # Sasquatch / Bigfoot / SNB / FRB strings in spec_example
         # output". The vocabulary is the substitution surface that has
@@ -143,7 +143,7 @@ class TestSpecExampleNeutralFallback:
                 assert forbidden not in p.name
 
     def test_neutral_branch_has_empty_persona_tuples(self):
-        vocab = vocabulary_for(_load("spec_example"))
+        vocab = vocabulary_for(_load("spec_example"))  # typing-smell: ignore[no-inline-production-constants]: _load() takes the L2 fixture filename stem, not the DEFAULT_PREFIX domain constant
         assert vocab.stakeholders == ()
         assert vocab.merchants == ()
         assert vocab.investigation_personas == ()
@@ -266,7 +266,7 @@ class TestFixtureName:
         # gates on `{% if vocab.fixture_name %}` simply suppresses the
         # "the bundled X fixture" sentence — matches spec_example's
         # actual unflavored shape.
-        vocab = vocabulary_for(_load("spec_example"))
+        vocab = vocabulary_for(_load("spec_example"))  # typing-smell: ignore[no-inline-production-constants]: _load() takes the L2 fixture filename stem, not the DEFAULT_PREFIX domain constant
         assert vocab.fixture_name is None
 
     def test_integrator_fixture_is_unnamed(self):
@@ -292,7 +292,7 @@ class TestDemoScenarioVocabulary:
         # Plants for spec_example use generic ids (cust-NNN); plants for
         # sasquatch_pr use the -snb suffix. This guards against the
         # vocab silently sourcing from the wrong fixture.
-        spec = vocabulary_for(_load("spec_example"))
+        spec = vocabulary_for(_load("spec_example"))  # typing-smell: ignore[no-inline-production-constants]: _load() takes the L2 fixture filename stem, not the DEFAULT_PREFIX domain constant
         snb = vocabulary_for(_load("sasquatch_pr"))
         assert spec.demo.drift_account is not None
         assert snb.demo.drift_account is not None
@@ -321,7 +321,7 @@ class TestDemoScenarioVocabulary:
         # shell_entity role, so the layering chain stays empty — the
         # walkthrough's worked-example admonition uses {% if chain %}
         # to skip the chain section in that case.
-        vocab = vocabulary_for(_load("spec_example"))
+        vocab = vocabulary_for(_load("spec_example"))  # typing-smell: ignore[no-inline-production-constants]: _load() takes the L2 fixture filename stem, not the DEFAULT_PREFIX domain constant
         assert vocab.demo.investigation is not None
         assert vocab.demo.investigation.layering_chain == ()
         assert vocab.demo.investigation.anomaly_pair_sender is None

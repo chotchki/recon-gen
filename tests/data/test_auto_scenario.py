@@ -25,6 +25,7 @@ from recon_gen.common.l2.auto_scenario import (
     default_scenario_for,
 )
 from recon_gen.common.l2.seed import emit_seed
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 
 
 SPEC_YAML = Path(__file__).parent.parent / "l2" / "spec_example.yaml"
@@ -191,8 +192,8 @@ def test_auto_scenario_emit_is_byte_deterministic(spec_instance: L2Instance) -> 
     instance with the same canonical today produce byte-identical SQL."""
     report_a = default_scenario_for(spec_instance, today=CANONICAL_TODAY)
     report_b = default_scenario_for(spec_instance, today=CANONICAL_TODAY)
-    sql_a = emit_seed(spec_instance, report_a.scenario, prefix="spec_example")
-    sql_b = emit_seed(spec_instance, report_b.scenario, prefix="spec_example")
+    sql_a = emit_seed(spec_instance, report_a.scenario, prefix=DEFAULT_PREFIX)
+    sql_b = emit_seed(spec_instance, report_b.scenario, prefix=DEFAULT_PREFIX)
     assert sql_a == sql_b
 
 
@@ -204,7 +205,7 @@ def test_auto_seed_against_spec_example_has_zero_persona_leaks(spec_instance: L2
     the generated SQL contains no Sasquatch / SNB / FRB / etc. literals."""
     report = default_scenario_for(spec_instance, today=CANONICAL_TODAY)
     sql = emit_seed(
-        spec_instance, report.scenario, prefix="spec_example",
+        spec_instance, report.scenario, prefix=DEFAULT_PREFIX,
     ).lower()
     blocklist = ("sasquatch", "bigfoot", "yeti", "snb", "frb",
                  "cascadia", "juniper", "farmers exchange")

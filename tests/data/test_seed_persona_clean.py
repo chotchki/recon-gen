@@ -46,6 +46,7 @@ from recon_gen.common.l2.seed import (
     TemplateInstance,
     emit_seed,
 )
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 
 
 SPEC_YAML = Path(__file__).parent.parent / "l2" / "spec_example.yaml"
@@ -149,7 +150,7 @@ def spec_scenario(spec_instance: L2Instance) -> ScenarioPlant:
 
 @pytest.fixture(scope="module")
 def spec_seed_sql(spec_instance: L2Instance, spec_scenario: ScenarioPlant) -> str:
-    return emit_seed(spec_instance, spec_scenario, prefix="spec_example")
+    return emit_seed(spec_instance, spec_scenario, prefix=DEFAULT_PREFIX)
 
 
 def test_seed_emits_against_spec_example_yaml(spec_seed_sql: str) -> None:
