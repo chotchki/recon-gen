@@ -38,6 +38,10 @@ from recon_gen.apps.l1_dashboard.app import (
     _TODAYS_EXCEPTIONS_NAME,
 )
 from recon_gen.apps.l1_dashboard.datasets import (
+    DS_DRIFT,
+    DS_LEDGER_DRIFT,
+    DS_OVERDRAFT,
+    DS_TODAYS_EXCEPTIONS,
     build_drift_dataset,
     build_drift_timeline_dataset,
     build_ledger_drift_dataset,
@@ -46,6 +50,7 @@ from recon_gen.apps.l1_dashboard.datasets import (
     build_stuck_pending_dataset,
     build_todays_exceptions_dataset,
 )
+from recon_gen.common.dataset_contract import get_sql
 from tests.e2e._kpi_parse import parse_currency_kpi, parse_int_kpi
 from recon_gen.common.config import Config
 
@@ -61,16 +66,55 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 def _sql_and_params_for(
     builder: "Callable[..., Any]", cfg: Config, l2: "L2Instance",
+    *,
+    visual_identifier: str | None = None,
 ) -> tuple[str, list["DatasetParameter"]]:
     """Lift a dataset's CustomSql + DatasetParameters by calling the
     production builder (single source of truth). Mirrors BG.2's
     ``_summary_sql_and_params`` shape — every BG.X honest gate runs
-    the SAME SQL the visual issues."""
+    the SAME SQL the visual issues.
+
+    ``visual_identifier`` (optional): when supplied, fetches the
+    App2-form SQL from the registry instead of CustomSql.SqlQuery.
+    Datasets with ``app2_date_column=`` set (Y.5.a pattern) store
+    DIFFERENT SQL under the two paths — CustomSql carries the QS-side
+    form (no ``:date_from`` / ``:date_to`` binds; the analysis's
+    TimeRangeFilter narrows at the QS layer), while the registered
+    App2-form has explicit date-bind clauses. For honest-gate KPI
+    tests that need to compare a windowed KPI against a windowed
+    SQL row count, pass the dataset's ``DS_*`` identifier so the
+    helper returns the bind-capable form."""
     ds = builder(cfg, l2)
-    physical = next(iter(ds.PhysicalTableMap.values()))
-    assert physical.CustomSql is not None, "Dataset missing CustomSql"
-    sql = physical.CustomSql.SqlQuery
+    if visual_identifier is not None:
+        # BL.2 — App2-form SQL has ``:date_from`` / ``:date_to`` binds
+        # baked in via Y.5.a's ``{date_filter}`` substitution. Tests
+        # that pass date binds to ``query_db`` need this form, not
+        # the QS-side ``CustomSql.SqlQuery`` (which has the
+        # ``{date_filter}`` slot replaced with empty).
+        sql = get_sql(visual_identifier)
+    else:
+        physical = next(iter(ds.PhysicalTableMap.values()))
+        assert physical.CustomSql is not None, "Dataset missing CustomSql"
+        sql = physical.CustomSql.SqlQuery
     return sql, list(ds.DatasetParameters or [])
+
+
+def _l1_default_date_binds(cfg: Config) -> dict[str, str]:
+    """BL.2 — produce ``{date_from, date_to}`` binds matching the L1
+    analysis's default universal-range view (7 days ending at the
+    cfg's anchor day). Honest-gate KPI tests pass these to
+    ``query_db`` so the unfiltered SQL match-all sentinel doesn't fire
+    — KPI sums (over the narrowed window) match the SQL row count
+    (over the same window).
+
+    Mirrors ``apps/l1_dashboard/app.py`` where
+    ``analysis.default_universal_date_range = DateView(
+    frame=cfg.test_generator.as_of_frame(window_days=7))`` is set."""
+    frame = cfg.test_generator.as_of_frame(window_days=7)
+    return {
+        "date_from": frame.window.start.isoformat(),
+        "date_to": frame.as_of.isoformat(),
+    }
 
 
 @pytest.mark.xfail(
@@ -130,19 +174,6 @@ def test_check_type_dropdown_exposes_options(l1_dashboard_driver: tuple["Dashboa
 # BG.3 — L1 Drift / Drift Timelines / Overdraft KPI honest gates -----------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "BL.1 / BK.6 — QS-side .count() rendering renders distinct values "
-        "instead of row count for a CategoricalMeasureField(COUNT) over "
-        "a string column also used as a Dim on the same sheet. The "
-        "App2 leg passes (raw COUNT(column)); the QS leg fails. Tracked "
-        "for a proper fix at docs/audits/bl_0_shared_state_keying_smell.md "
-        "+ PLAN.md::BL.1 — adding a `1 AS row_one` synthetic column to "
-        "each affected dataset + binding KPIs to SUM(row_one) is the "
-        "leading candidate."
-    ),
-    strict=False,
-)
 def test_bg3_drift_sheet_kpis_match_matview_counts(l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance") -> None:
     """BG.3 — the two Drift sheet KPIs (Leaf Accounts in Drift / Parent
     Accounts in Drift) must equal the row count of their respective
@@ -166,22 +197,31 @@ def test_bg3_drift_sheet_kpis_match_matview_counts(l1_dashboard_driver: tuple["D
     driver.open(dashboard_arg, sheet=_DRIFT_NAME)
     driver.wait_loaded("Leaf Account Drift")
 
-    for kpi_title, builder in (
-        ("Leaf Accounts in Drift", build_drift_dataset),
-        ("Parent Accounts in Drift", build_ledger_drift_dataset),
+    # BL.2 — the L1 dashboard has an analysis-level 7-day date range
+    # default; both QS and App2 narrow to it on initial render.
+    # query_db needs the same binds so we don't compare a narrowed KPI
+    # against an unfiltered SQL count.
+    binds = _l1_default_date_binds(cfg)
+
+    for kpi_title, builder, ds_id in (
+        ("Leaf Accounts in Drift", build_drift_dataset, DS_DRIFT),
+        ("Parent Accounts in Drift", build_ledger_drift_dataset, DS_LEDGER_DRIFT),
     ):
-        sql, dataset_parameters = _sql_and_params_for(builder, cfg, l2)
+        sql, dataset_parameters = _sql_and_params_for(
+            builder, cfg, l2, visual_identifier=ds_id,
+        )
         rows = driver.query_db(
-            sql, dataset_parameters=dataset_parameters,
+            sql, binds=binds, dataset_parameters=dataset_parameters,
         )
         rendered = parse_int_kpi(driver.kpi_value(kpi_title))
         assert rendered == len(rows), (
             f"{kpi_title!r}: rendered count {rendered} ≠ "
-            f"len(query_db(drift_sql)) = {len(rows)}. v11.21.0 cold-"
-            f"read finding #12 shape — KPI's COUNT measure binding "
-            f"disagrees with the underlying dataset's row count. "
-            f"Audit .count() resolution (COUNT vs COUNT DISTINCT) "
-            f"and whether the KPI + table bind the same dataset."
+            f"len(query_db(drift_sql, default_window)) = {len(rows)}. "
+            f"v11.21.0 cold-read finding #12 shape — KPI's COUNT "
+            f"measure binding disagrees with the dataset's row count "
+            f"under the same date window. Audit .count() resolution "
+            f"(COUNT vs COUNT DISTINCT — pre-BL.1 QS quirk) and "
+            f"whether the KPI + table bind the same dataset."
         )
     driver.screenshot()
 
@@ -312,14 +352,6 @@ def test_bg6_pending_aging_kpi_chart_table_triple_identity(
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "BL.1 / BK.6 — QS-side .count() renders distinct values; the "
-        "App2 leg also fails because the matview has 209 rows but only "
-        "26 distinct account_ids. See PLAN.md::BL.1 for the fix."
-    ),
-    strict=False,
-)
 def test_bg6_todays_exceptions_kpi_matches_dataset_count(
     l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance",
 ) -> None:
@@ -339,28 +371,25 @@ def test_bg6_todays_exceptions_kpi_matches_dataset_count(
 
     sql, params = _sql_and_params_for(
         build_todays_exceptions_dataset, cfg, l2,
+        visual_identifier=DS_TODAYS_EXCEPTIONS,
     )
-    rows = driver.query_db(sql, dataset_parameters=params)
+    # BL.2 — narrow query_db to the same 7-day window the L1 dashboard
+    # applies on initial render.
+    rows = driver.query_db(
+        sql, binds=_l1_default_date_binds(cfg), dataset_parameters=params,
+    )
     rendered = parse_int_kpi(driver.kpi_value("Open Exceptions"))
     assert rendered == len(rows), (
         f"Open Exceptions KPI: rendered {rendered} ≠ "
-        f"len(query_db(todays_exceptions_sql)) = {len(rows)}. The "
-        f"KPI binds .count() over the dataset; this assertion fails "
-        f"if the KPI binding silently collapses to COUNT DISTINCT "
-        f"or the KPI + chart bind divergent datasets."
+        f"len(query_db(todays_exceptions_sql, default_window)) = "
+        f"{len(rows)}. The KPI binds .count() over the dataset under "
+        f"the default 7-day window; this assertion fails if the KPI "
+        f"binding silently collapses to COUNT DISTINCT (pre-BL.1 QS "
+        f"quirk) or the KPI + chart bind divergent datasets."
     )
     driver.screenshot()
 
 
-@pytest.mark.xfail(
-    reason=(
-        "BL.1 / BK.6 — same QS-side .count() distinct-vs-rows quirk as "
-        "the drift KPI test. App2 leg passes (raw COUNT(account_id)); "
-        "QS leg renders 138 distinct accounts instead of 811 day-rows. "
-        "See PLAN.md::BL.1."
-    ),
-    strict=False,
-)
 def test_bg3_overdraft_kpi_matches_matview_count(l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance") -> None:
     """BG.3 — "Accounts in Overdraft" KPI count must equal the
     Overdraft dataset's row count under default binds (no filter
@@ -384,15 +413,21 @@ def test_bg3_overdraft_kpi_matches_matview_count(l1_dashboard_driver: tuple["Das
 
     sql, dataset_parameters = _sql_and_params_for(
         build_overdraft_dataset, cfg, l2,
+        visual_identifier=DS_OVERDRAFT,
     )
-    rows = driver.query_db(sql, dataset_parameters=dataset_parameters)
+    # BL.2 — narrow query_db to the same 7-day window the L1 dashboard
+    # applies on initial render.
+    rows = driver.query_db(
+        sql, binds=_l1_default_date_binds(cfg),
+        dataset_parameters=dataset_parameters,
+    )
     rendered = parse_int_kpi(driver.kpi_value("Accounts in Overdraft"))
     assert rendered == len(rows), (
         f"Accounts in Overdraft: rendered {rendered} ≠ "
-        f"len(query_db(overdraft_sql)) = {len(rows)}. v11.21.0 cold-"
-        f"read finding #12 — KPI's COUNT binding disagrees with the "
-        f"row count of the dataset the table on the same sheet binds. "
-        f"Likely .count() resolves to COUNT DISTINCT or the KPI + "
-        f"table bind different datasets."
+        f"len(query_db(overdraft_sql, default_window)) = {len(rows)}. "
+        f"v11.21.0 cold-read finding #12 — KPI's COUNT binding "
+        f"disagrees with the dataset's row count under the same date "
+        f"window. Likely .count() resolves to COUNT DISTINCT (pre-"
+        f"BL.1 QS quirk) or the KPI + table bind different datasets."
     )
     driver.screenshot()

@@ -1492,30 +1492,32 @@ def build_l1_accounts_dataset(
     sql = (
         f"SELECT DISTINCT account_id, account_role, account_name,"
         f" (account_name || ' (' || account_id || ')') AS account_display"
+        # BL.3 perf (2026-05-27, v11.22.7→v11.22.8→v11.22.9 release CI
+        # picker timeouts): UNION ALL — not UNION — across the three
+        # subqueries. The outer DISTINCT dedupes the merged set; the
+        # inner per-step DISTINCT that UNION implies was making the
+        # picker dropdown's /visuals/.../data fetch exceed 15s at
+        # sasquatch scale (three sort-distinct passes over the wide
+        # current_transactions matview).
         f" FROM ("
         f"   SELECT account_id, account_role, account_name"
         f"   FROM {prefix}_current_daily_balances"
-        f"   UNION"
+        f"   UNION ALL"
         f"   SELECT account_id, account_role, account_name"
         f"   FROM {prefix}_current_transactions"
-        f"   UNION"
-        # BL.3 — `<prefix>_todays_exceptions` is a UNION ALL of 5
-        # invariant matviews; some branches (multi_xor_violation,
-        # chain_parent_disagreement, etc.) carry account_id values
-        # that aren't in either daily_balances OR current_transactions
-        # (they key off a template/rail rather than a transaction). The
-        # Today's Exceptions sheet's Account dropdown needs to surface
-        # those accounts too — picker tests timed out before this
-        # third union term landed.
-        #
-        # 2026-05-27 fix — chain_parent_disagreement + xor_group_violation
-        # branches emit NULL account_id (the violation is keyed on
-        # transfer_id, not account). A NULL row in the dropdown
-        # universe chokes the picker: App2's `/visuals/.../data` hangs
-        # on the NULL serialization; QS's listbox never populates. The
-        # ``WHERE account_id IS NOT NULL`` keeps the surface to
-        # account-keyed branches (multi_xor_violation, the per-(account,
-        # day) invariants) which is the original BL.3 motivation.
+        f"   UNION ALL"
+        # BL.3 — `<prefix>_todays_exceptions` is a UNION ALL of 9
+        # invariant matviews; some branches (chain_parent_disagreement,
+        # xor_group_violation) emit NULL account_id (the violation is
+        # keyed on transfer_id, not account). A NULL row in the
+        # dropdown universe chokes the picker: App2's
+        # `/visuals/.../data` hangs on the NULL serialization; QS's
+        # listbox never populates. ``WHERE account_id IS NOT NULL``
+        # keeps the surface to account-keyed branches
+        # (multi_xor_violation, the per-(account, day) invariants)
+        # which is the original BL.3 motivation — those rows are
+        # accounts that appear ONLY in todays_exceptions (no balance,
+        # no transaction).
         f"   SELECT account_id, account_role, account_name"
         f"   FROM {prefix}_todays_exceptions"
         f"   WHERE account_id IS NOT NULL"
