@@ -569,6 +569,22 @@ def _layer_command(
         env_addl[RECON_GEN_TRACE_ALL.name] = "1"
     if opts.fuzz_seed_value is not None:
         env_addl[RECON_GEN_FUZZ_SEED.name] = str(opts.fuzz_seed_value)
+    # Y.2.gate-followon (2026-05-27) — conftest.py's `pytest_sessionstart`
+    # runs `pyright` + `biome` before every pytest invocation. Pre-BE.7.D
+    # those gates each fired against a ~91-file curated include + a thin
+    # JS surface (a few seconds). Post-BE.7.D the pyright scope is the
+    # whole `src/recon_gen` + `tests/` (~470 files, ~15-30s) and the
+    # matrix dispatches 5 layers × N cells = repeats those static gates
+    # dozens of times across a single `up_to=browser` sweep.
+    #
+    # The unit prelude (`_run_unit_prelude`, runs ONCE) is the
+    # authoritative static-gate run. Per-cell layers (db / app2 / deploy /
+    # api / browser) are runtime gates; they don't need to re-run the
+    # static checks. Set the opt-out env vars on their subprocess env so
+    # the conftest skips both. Cuts a full-matrix sweep by ~15-30 min.
+    if layer != "unit":
+        env_addl["RECON_GEN_SKIP_PYRIGHT"] = "1"
+        env_addl["RECON_GEN_SKIP_BIOME"] = "1"
     # Y.2.gate.k.1.coverage — every pytest layer (everything except `deploy`,
     # which is a `recon-gen json apply` CLI call) writes a per-(variant,
     # layer) `.coverage.<variant>.<layer>` data file when `--coverage` is set.
