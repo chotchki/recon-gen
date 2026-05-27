@@ -265,7 +265,13 @@ class TestCaptureFailureDbCounts:
         from recon_gen.common.browser.helpers import _capture_failure_db_counts
 
         db_path = tmp_path / "smoke.db"
-        with sqlite3.connect(db_path) as conn:
+        # `with sqlite3.connect(...) as c` only commits on exit — it
+        # does NOT close the connection (Python stdlib foot-gun).
+        # Explicit try/finally so the conn actually closes (otherwise
+        # the leak gate fires + each test's leftover Connection
+        # accumulates memory across the suite).
+        conn = sqlite3.connect(db_path)
+        try:
             cur = conn.cursor()
             cur.execute("CREATE TABLE smoke_transactions (id INTEGER)")
             cur.execute("INSERT INTO smoke_transactions VALUES (1), (2), (3)")
@@ -274,6 +280,8 @@ class TestCaptureFailureDbCounts:
             cur.execute("CREATE TABLE other_table (id INTEGER)")
             cur.execute("INSERT INTO other_table VALUES (99)")
             conn.commit()
+        finally:
+            conn.close()
 
         # Route capture output to tmp_path via the legacy SCREENSHOT_DIR
         # path. RECON_GEN_RUN_DIR must be unset (it takes priority over
@@ -304,9 +312,14 @@ class TestCaptureFailureDbCounts:
         from recon_gen.common.browser.helpers import _capture_failure_db_counts
 
         db_path = tmp_path / "empty.db"
-        with sqlite3.connect(db_path) as conn:
+        # See sibling test: `with sqlite3.connect(...) as c` commits but
+        # doesn't close. Explicit try/finally for the actual close.
+        conn = sqlite3.connect(db_path)
+        try:
             conn.execute("CREATE TABLE unrelated_table (id INTEGER)")
             conn.commit()
+        finally:
+            conn.close()
 
         # RECON_GEN_RUN_DIR takes priority over SCREENSHOT_DIR (set by
         # the runner per-cell); force the legacy branch.
