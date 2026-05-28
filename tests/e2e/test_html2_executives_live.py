@@ -336,9 +336,10 @@ def test_date_filter_narrows_every_date_sensitive_count_kpi(
     A no-op date filter (bind not reaching SQL, wrap_for_visual silently
     dropping the WHERE clause, or any future regression) fails this test
     loudly across every applicable KPI rather than a single hand-picked
-    one. As more apps wire ``app2_date_filter`` into their datasets the
-    same harness pattern picks them up automatically — copy this test
-    verbatim against the new server fixture.
+    one. As more apps wire the Phase BM ``<<$pXxxDate*>>`` pushdown
+    into their datasets the same harness pattern picks them up
+    automatically — copy this test verbatim against the new server
+    fixture.
 
     Reuses the module-scoped driver — calls ``open(...)`` per target
     sheet, then reads each KPI's value via ``driver.kpi_value(title)``.

@@ -18,7 +18,6 @@ from decimal import Decimal
 import pytest
 
 from recon_gen.apps.executives.datasets import (
-    DS_EXEC_TRANSACTION_SUMMARY,
     build_account_summary_active_dataset,
     build_account_summary_dataset,
     build_transaction_summary_dataset,
@@ -73,59 +72,20 @@ def test_exec_dashboard_structure_matches_tree(exec_dashboard_driver: tuple["Das
 
 def _sql_for(
     builder: "Callable[..., Any]", *args: Any,
-    visual_identifier: str | None = None,
 ) -> tuple[str, list["DatasetParameter"]]:
+    """Phase BM — single SQL form across QS + App2. The pre-BM
+    ``visual_identifier=`` dance that fetched the App2-form variant
+    from the registry is gone (CustomSql.SqlQuery == registered SQL
+    now). Universal date defaults flow through the dataset's
+    DatasetParameters via ``apply_dataset_param_defaults`` when the
+    URL binds omit them — no ``_exec_default_date_binds(cfg)`` helper.
+    """
     ds = builder(*args)
-    if visual_identifier is not None:
-        # BL.2 — Y.5.a dual-SQL datasets (``app2_date_column=`` set)
-        # store the App2-form SQL (with ``:date_from`` / ``:date_to``
-        # bind clauses) in the dataset registry; ``CustomSql.SqlQuery``
-        # carries the QS-side form with empty ``{date_filter}`` slot.
-        # Honest-gate KPI tests need the bind-capable form to apply
-        # the same window narrowing the dashboard does. See L1
-        # ``_sql_and_params_for`` for the matching pattern.
-        from recon_gen.common.dataset_contract import get_sql
-        sql = get_sql(visual_identifier)
-    else:
-        physical = next(iter(ds.PhysicalTableMap.values()))
-        assert physical.CustomSql is not None, "Dataset missing CustomSql"
-        sql = physical.CustomSql.SqlQuery
-    return sql, list(ds.DatasetParameters or [])
+    physical = next(iter(ds.PhysicalTableMap.values()))
+    assert physical.CustomSql is not None, "Dataset missing CustomSql"
+    return physical.CustomSql.SqlQuery, list(ds.DatasetParameters or [])
 
 
-def _exec_default_date_binds(cfg: Config) -> dict[str, str]:
-    """BL.2 — produce ``{date_from, date_to}`` binds matching the
-    Exec analysis's default universal-range view (30 days ending at
-    the cfg's anchor day). Mirrors ``apps/executives/app.py`` where
-    the universal range is set to
-    ``cfg.test_generator.as_of_frame(window_days=30)``."""
-    frame = cfg.test_generator.as_of_frame(window_days=30)
-    return {
-        "date_from": frame.window.start.isoformat(),
-        "date_to": frame.as_of.isoformat(),
-    }
-
-
-@pytest.mark.xfail(
-    reason=(
-        "QS upper-bound day-inclusivity quirk (separate from BL.2). "
-        "App2's date filter uses ``column < :date_to + 1 day`` so all "
-        "of ``date_to`` is included (e.g., posting at 2030-01-01 "
-        "23:59:59 passes). QS's ``TimeRangeFilter`` with "
-        "``time_granularity=DAY``+``include_maximum=True`` was claimed "
-        "to behave the same per ``common/sql/app2_filters.py`` "
-        "docstring, but observation shows it actually compares the "
-        "raw timestamp against the day boundary at 00:00:00 — late-"
-        "day rows on the upper edge are excluded. App2 leg passes "
-        "(parity with dataset SQL); QS leg renders 2390 vs App2's "
-        "2392 (2 late-day rows on 2030-01-01). Documented in "
-        "docs/reference/quicksight-quirks.md. Spike-target: either "
-        "shift max_bound by +1 day on QS, or document the day-edge "
-        "asymmetry as expected. strict=False so the App2 XPASS "
-        "doesn't break CI."
-    ),
-    strict=False,
-)
 def test_bg5_transaction_volume_kpis_match_dataset_aggregates(
     exec_dashboard_driver: tuple["DashboardDriver", str], cfg: Config,
 ) -> None:
@@ -157,23 +117,16 @@ def test_bg5_transaction_volume_kpis_match_dataset_aggregates(
     driver.open(dashboard_arg, sheet="Transaction Volume Over Time")
     driver.wait_loaded("Total Transactions (Posted, per-transfer)")
 
-    # BL.2 — pass the Exec dashboard's default 30-day binds to
-    # query_db AND use the App2-form SQL (with bind clauses baked in
-    # via Y.5.a's ``{date_filter}`` substitution). The earlier
-    # Python-side ``frame.window.contains(_as_date(posted_date))``
-    # narrowing compared group-then-filter (test) against
-    # filter-then-group (dataset SQL) — multi-leg transfers
-    # straddling the window's left edge bucket differently in the
-    # two paths. Passing binds to query_db routes both through
-    # filter-then-group → identical semantics.
-    sql, params = _sql_for(
-        build_transaction_summary_dataset, cfg,
-        visual_identifier=DS_EXEC_TRANSACTION_SUMMARY,
-    )
-    rows = driver.query_db(
-        sql, binds=_exec_default_date_binds(cfg),
-        dataset_parameters=params,
-    )
+    # Phase BM — the dataset SQL embeds the universal-range pushdown
+    # via ``<<$pExecDate*>>`` placeholders; query_db substitutes the
+    # 30-day defaults from the DatasetParameters when binds omit them,
+    # matching the dashboard's initial render. Both renderers run the
+    # same filter-then-group SQL, so no test-side window narrowing
+    # vs dataset SQL mismatch (the pre-BM "group-then-filter in test
+    # / filter-then-group in dataset" multi-leg straddle bug
+    # dissolves by construction).
+    sql, params = _sql_for(build_transaction_summary_dataset, cfg)
+    rows = driver.query_db(sql, dataset_parameters=params)
     expected_total = sum(int(row["transfer_count"]) for row in rows)
     rendered = parse_int_kpi(
         driver.kpi_value("Total Transactions (Posted, per-transfer)"),
@@ -192,16 +145,6 @@ def test_bg5_transaction_volume_kpis_match_dataset_aggregates(
     driver.screenshot()
 
 
-@pytest.mark.xfail(
-    reason=(
-        "QS upper-bound day-inclusivity quirk — same root as the "
-        "sibling test_bg5_transaction_volume KPI test. App2 leg "
-        "passes; QS leg renders the per-day money sums missing the "
-        "upper-edge day's late-time rows. See sibling test for the "
-        "full investigation + the quirks log entry."
-    ),
-    strict=False,
-)
 def test_bg5_money_moved_kpis_match_dataset_sums(exec_dashboard_driver: tuple["DashboardDriver", str], cfg: Config) -> None:
     """BG.5 — Money Moved sheet KPIs (Gross + Net) must equal sums
     over the production transaction summary dataset.
@@ -217,18 +160,9 @@ def test_bg5_money_moved_kpis_match_dataset_sums(exec_dashboard_driver: tuple["D
     driver.open(dashboard_arg, sheet="Money Moved")
     driver.wait_loaded("Gross Money Moved")
 
-    # BL.2 — pass the Exec dashboard's default 30-day binds to
-    # query_db + use the App2-form SQL (filter-then-group matches
-    # the deployed KPI). See sibling Transaction Volume test for the
-    # filter-then-group vs group-then-filter explanation.
-    sql, params = _sql_for(
-        build_transaction_summary_dataset, cfg,
-        visual_identifier=DS_EXEC_TRANSACTION_SUMMARY,
-    )
-    rows = driver.query_db(
-        sql, binds=_exec_default_date_binds(cfg),
-        dataset_parameters=params,
-    )
+    # Phase BM — see sibling Transaction Volume test; same shape.
+    sql, params = _sql_for(build_transaction_summary_dataset, cfg)
+    rows = driver.query_db(sql, dataset_parameters=params)
     expected_gross = sum(
         (Decimal(str(row["gross_amount"])) for row in rows),
         Decimal("0"),

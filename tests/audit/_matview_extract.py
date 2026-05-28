@@ -101,8 +101,8 @@ def _period_where(
 ) -> str:
     """The ``WHERE`` clause narrowing ``day_col`` to ``period`` — the
     audit's ``>= start AND < (end + 1 day)`` window, so a same-day
-    non-midnight timestamp is included (matches QS DAY-granularity and
-    the X.2.j.dateparity-fixed ``app2_date_filter``).
+    non-midnight timestamp is included (matches Phase BM's unified
+    ``universal_date_range_clause`` semantics on both renderers).
 
     Returns ``""`` when there's no day column or no period."""
     if day_col is None or period is None:

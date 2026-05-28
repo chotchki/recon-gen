@@ -38,10 +38,6 @@ from recon_gen.apps.l1_dashboard.app import (
     _TODAYS_EXCEPTIONS_NAME,
 )
 from recon_gen.apps.l1_dashboard.datasets import (
-    DS_DRIFT,
-    DS_LEDGER_DRIFT,
-    DS_OVERDRAFT,
-    DS_TODAYS_EXCEPTIONS,
     build_drift_dataset,
     build_drift_timeline_dataset,
     build_ledger_drift_dataset,
@@ -50,7 +46,6 @@ from recon_gen.apps.l1_dashboard.datasets import (
     build_stuck_pending_dataset,
     build_todays_exceptions_dataset,
 )
-from recon_gen.common.dataset_contract import get_sql
 from tests.e2e._kpi_parse import parse_currency_kpi, parse_int_kpi
 from recon_gen.common.config import Config
 
@@ -66,55 +61,25 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 def _sql_and_params_for(
     builder: "Callable[..., Any]", cfg: Config, l2: "L2Instance",
-    *,
-    visual_identifier: str | None = None,
 ) -> tuple[str, list["DatasetParameter"]]:
-    """Lift a dataset's CustomSql + DatasetParameters by calling the
+    """Lift a dataset's SQL + DatasetParameters by calling the
     production builder (single source of truth). Mirrors BG.2's
     ``_summary_sql_and_params`` shape — every BG.X honest gate runs
     the SAME SQL the visual issues.
 
-    ``visual_identifier`` (optional): when supplied, fetches the
-    App2-form SQL from the registry instead of CustomSql.SqlQuery.
-    Datasets with ``app2_date_column=`` set (Y.5.a pattern) store
-    DIFFERENT SQL under the two paths — CustomSql carries the QS-side
-    form (no ``:date_from`` / ``:date_to`` binds; the analysis's
-    TimeRangeFilter narrows at the QS layer), while the registered
-    App2-form has explicit date-bind clauses. For honest-gate KPI
-    tests that need to compare a windowed KPI against a windowed
-    SQL row count, pass the dataset's ``DS_*`` identifier so the
-    helper returns the bind-capable form."""
+    Phase BM — single SQL form across QS + App2. The pre-BM
+    ``visual_identifier=`` kwarg that fetched the App2-form variant
+    from the registry is gone: CustomSql.SqlQuery == registered SQL
+    now, so reading from PhysicalTableMap is the one-true source.
+    The dataset's ``DatasetParameters`` carry the
+    ``DateTimeDatasetParameter`` defaults; ``query_db_via_cfg``
+    applies those defaults when the URL binds omit them — no
+    ``_l1_default_date_binds(cfg)`` helper needed.
+    """
     ds = builder(cfg, l2)
-    if visual_identifier is not None:
-        # BL.2 — App2-form SQL has ``:date_from`` / ``:date_to`` binds
-        # baked in via Y.5.a's ``{date_filter}`` substitution. Tests
-        # that pass date binds to ``query_db`` need this form, not
-        # the QS-side ``CustomSql.SqlQuery`` (which has the
-        # ``{date_filter}`` slot replaced with empty).
-        sql = get_sql(visual_identifier)
-    else:
-        physical = next(iter(ds.PhysicalTableMap.values()))
-        assert physical.CustomSql is not None, "Dataset missing CustomSql"
-        sql = physical.CustomSql.SqlQuery
-    return sql, list(ds.DatasetParameters or [])
-
-
-def _l1_default_date_binds(cfg: Config) -> dict[str, str]:
-    """BL.2 — produce ``{date_from, date_to}`` binds matching the L1
-    analysis's default universal-range view (7 days ending at the
-    cfg's anchor day). Honest-gate KPI tests pass these to
-    ``query_db`` so the unfiltered SQL match-all sentinel doesn't fire
-    — KPI sums (over the narrowed window) match the SQL row count
-    (over the same window).
-
-    Mirrors ``apps/l1_dashboard/app.py`` where
-    ``analysis.default_universal_date_range = DateView(
-    frame=cfg.test_generator.as_of_frame(window_days=7))`` is set."""
-    frame = cfg.test_generator.as_of_frame(window_days=7)
-    return {
-        "date_from": frame.window.start.isoformat(),
-        "date_to": frame.as_of.isoformat(),
-    }
+    physical = next(iter(ds.PhysicalTableMap.values()))
+    assert physical.CustomSql is not None, "Dataset missing CustomSql"
+    return physical.CustomSql.SqlQuery, list(ds.DatasetParameters or [])
 
 
 @pytest.mark.xfail(
@@ -197,22 +162,18 @@ def test_bg3_drift_sheet_kpis_match_matview_counts(l1_dashboard_driver: tuple["D
     driver.open(dashboard_arg, sheet=_DRIFT_NAME)
     driver.wait_loaded("Leaf Account Drift")
 
-    # BL.2 — the L1 dashboard has an analysis-level 7-day date range
-    # default; both QS and App2 narrow to it on initial render.
-    # query_db needs the same binds so we don't compare a narrowed KPI
-    # against an unfiltered SQL count.
-    binds = _l1_default_date_binds(cfg)
+    # Phase BM — the L1 dashboard's date narrowing is built into each
+    # dataset's SQL via ``<<$pL1Date*>>`` placeholders + their
+    # DateTimeDatasetParameter defaults; ``query_db_via_cfg`` substitutes
+    # the same defaults the QS picker shows on initial render when binds
+    # omit ``param_pL1Date*``. No explicit ``binds=`` needed.
 
-    for kpi_title, builder, ds_id in (
-        ("Leaf Accounts in Drift", build_drift_dataset, DS_DRIFT),
-        ("Parent Accounts in Drift", build_ledger_drift_dataset, DS_LEDGER_DRIFT),
+    for kpi_title, builder in (
+        ("Leaf Accounts in Drift", build_drift_dataset),
+        ("Parent Accounts in Drift", build_ledger_drift_dataset),
     ):
-        sql, dataset_parameters = _sql_and_params_for(
-            builder, cfg, l2, visual_identifier=ds_id,
-        )
-        rows = driver.query_db(
-            sql, binds=binds, dataset_parameters=dataset_parameters,
-        )
+        sql, dataset_parameters = _sql_and_params_for(builder, cfg, l2)
+        rows = driver.query_db(sql, dataset_parameters=dataset_parameters)
         rendered = parse_int_kpi(driver.kpi_value(kpi_title))
         assert rendered == len(rows), (
             f"{kpi_title!r}: rendered count {rendered} ≠ "
@@ -369,15 +330,11 @@ def test_bg6_todays_exceptions_kpi_matches_dataset_count(
     driver.open(dashboard_arg, sheet=_TODAYS_EXCEPTIONS_NAME)
     driver.wait_loaded("Open Exceptions")
 
-    sql, params = _sql_and_params_for(
-        build_todays_exceptions_dataset, cfg, l2,
-        visual_identifier=DS_TODAYS_EXCEPTIONS,
-    )
-    # BL.2 — narrow query_db to the same 7-day window the L1 dashboard
-    # applies on initial render.
-    rows = driver.query_db(
-        sql, binds=_l1_default_date_binds(cfg), dataset_parameters=params,
-    )
+    sql, params = _sql_and_params_for(build_todays_exceptions_dataset, cfg, l2)
+    # Phase BM — dataset SQL declares its own pL1Date* defaults; the
+    # query_db substitution picks them up from `dataset_parameters` when
+    # the URL binds omit them, matching the L1 picker's initial render.
+    rows = driver.query_db(sql, dataset_parameters=params)
     rendered = parse_int_kpi(driver.kpi_value("Open Exceptions"))
     assert rendered == len(rows), (
         f"Open Exceptions KPI: rendered {rendered} ≠ "
@@ -411,16 +368,11 @@ def test_bg3_overdraft_kpi_matches_matview_count(l1_dashboard_driver: tuple["Das
     driver.open(dashboard_arg, sheet=_OVERDRAFT_NAME)
     driver.wait_loaded("Overdraft Violations")
 
-    sql, dataset_parameters = _sql_and_params_for(
-        build_overdraft_dataset, cfg, l2,
-        visual_identifier=DS_OVERDRAFT,
-    )
-    # BL.2 — narrow query_db to the same 7-day window the L1 dashboard
-    # applies on initial render.
-    rows = driver.query_db(
-        sql, binds=_l1_default_date_binds(cfg),
-        dataset_parameters=dataset_parameters,
-    )
+    sql, dataset_parameters = _sql_and_params_for(build_overdraft_dataset, cfg, l2)
+    # Phase BM — dataset SQL declares its own pL1Date* defaults; the
+    # query_db substitution picks them up from `dataset_parameters` when
+    # the URL binds omit them, matching the L1 picker's initial render.
+    rows = driver.query_db(sql, dataset_parameters=dataset_parameters)
     rendered = parse_int_kpi(driver.kpi_value("Accounts in Overdraft"))
     assert rendered == len(rows), (
         f"Accounts in Overdraft: rendered {rendered} ≠ "

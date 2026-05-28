@@ -210,14 +210,10 @@ class DateView:
         start_iso = f"{self.window_start.isoformat()}T00:00:00"
         return DateTimeDatasetParameterDefaultValues(StaticValues=[start_iso])
 
-    def emit_app2_date_to(self) -> str:
-        """The App2 `:date_to` bind value (or single-date filter value)
-        — the anchor day as `YYYY-MM-DD`. For range views this is the
-        right edge; for single-date views this is the day."""
-        return self.anchor_day.isoformat()
-
-    def emit_app2_date_from(self) -> str:
-        """The App2 `:date_from` bind value — the look-back lower bound
-        (`window_start`). Equals `emit_app2_date_to()` for single-date
-        views (span=0)."""
-        return self.window_start.isoformat()
+    # Phase BM — ``emit_app2_date_from`` / ``emit_app2_date_to`` removed.
+    # Pre-BM they emitted ``YYYY-MM-DD`` bind values for App2's
+    # ``:date_from`` / ``:date_to`` bind layer (the BL.2 prepop). BM
+    # routes App2's date narrowing through the same
+    # ``DateTimeDatasetParameter.DefaultValues`` defaults QS uses, via
+    # the existing ``apply_dataset_param_defaults`` substitution path
+    # — so the App2-shape helpers became dead code.

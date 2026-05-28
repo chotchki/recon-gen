@@ -153,40 +153,36 @@ def test_qs_dataset_default_emits_the_same_day_as_analysis() -> None:
     assert analysis.StaticValues == dataset.StaticValues
 
 
-def test_app2_date_to_matches_qs_dataset_value() -> None:
-    # App2 reads dataset.StaticValues[0] directly; the bind value the
-    # view emits and the dataset StaticValues must encode the same day.
-    view = DateView(frame=AsOfFrame.locked())
-    dataset = view.emit_qs_dataset_default()
-    assert dataset.StaticValues is not None
-    assert dataset.StaticValues[0].startswith(view.emit_app2_date_to())
-
-
-def test_single_date_app2_date_from_equals_date_to() -> None:
-    # Span=0 ⇒ the look-back collapses; date_from == date_to (the
-    # single picked day).
-    view = DateView(frame=AsOfFrame.locked())
-    assert view.emit_app2_date_from() == view.emit_app2_date_to()
-
-
-def test_range_app2_date_from_is_the_window_start() -> None:
+def test_range_dataset_start_default_matches_window_start() -> None:
+    """Phase BM — for a range view, the dataset-side start default is
+    the window's left edge (``window_start``) while the end default is
+    the anchor day. The two QS-shape emissions land on the same days
+    the analysis-side picker shows."""
     view = DateView(frame=AsOfFrame.locked(window_days=7))
-    assert view.emit_app2_date_from() == "2029-12-25"  # 2030-01-01 minus 7d
-    assert view.emit_app2_date_to() == "2030-01-01"
+    analysis_start = view.emit_qs_analysis_default_start()
+    dataset_start = view.emit_qs_dataset_default_start()
+    analysis_end = view.emit_qs_analysis_default_end()
+    dataset_end = view.emit_qs_dataset_default_end()
+    assert analysis_start.StaticValues == dataset_start.StaticValues
+    assert analysis_end.StaticValues == dataset_end.StaticValues
+    assert dataset_start.StaticValues is not None
+    assert dataset_start.StaticValues[0] == "2029-12-25T00:00:00"
+    assert dataset_end.StaticValues is not None
+    assert dataset_end.StaticValues[0] == "2030-01-01T00:00:00"
 
 
 def test_all_three_renderer_bindings_share_one_source() -> None:
     # The audit's derivation-inversion claim made into a property test:
-    # picker / dataset / App2 all carry the same concrete day, because
-    # they all read from anchor_day. There's literally one source.
+    # picker / dataset (start + end) carry the same concrete day(s)
+    # because they all read from anchor_day / window_start. There's
+    # literally one source.
     view = DateView(frame=AsOfFrame.locked())
     analysis = view.emit_qs_analysis_default()
     dataset = view.emit_qs_dataset_default()
     assert analysis.StaticValues is not None
     assert dataset.StaticValues is not None
-    iso_day = view.emit_app2_date_to()
-    assert analysis.StaticValues[0] == f"{iso_day}T00:00:00"
-    assert dataset.StaticValues[0] == f"{iso_day}T00:00:00"
+    assert analysis.StaticValues[0] == dataset.StaticValues[0]
+    assert analysis.StaticValues[0].endswith("T00:00:00")
 
 
 # ---------------------------------------------------------------------------
