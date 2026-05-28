@@ -40,6 +40,7 @@ from recon_gen.apps.l1_dashboard.datasets import (
 )
 from tests.e2e._daily_statement_pick import (
     find_account_day_with_data,
+    find_one_account_day_per_role,
     find_two_days_for_same_account,
 )
 from tests.e2e._kpi_parse import parse_currency_kpi as _parse_currency_kpi
@@ -142,6 +143,105 @@ def test_daily_statement_role_then_account_populates_table(
         f"broke the combined-filter shape — the Account's row should "
         f"survive both the role-narrowed accounts dataset AND the "
         f"per-account-day matview's Account WHERE clause."
+    )
+
+
+def test_bo_1_daily_statement_picks_reconcile_per_role(
+    l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config,
+) -> None:
+    """BO.1 contract (v11.23.0 cold-read F1, triple-convergent) — for
+    every ``account_role`` that has ≥1 row in
+    ``<prefix>_current_daily_balances``: picking that role on Daily
+    Statement narrows the Account dropdown to ≥1 advertised account,
+    AND picking that first account + a transactions-bearing day
+    produces a non-blank KPI row (Opening + Closing both render
+    parseable currency values).
+
+    Pre-BO.1 the picker source (``DS_L1_ACCOUNTS``) UNIONed three
+    matviews including ``current_transactions`` + ``todays_exceptions``,
+    so the dropdown advertised owner-rollup IDs that had NO
+    daily_balances row. Pre-BM the filter was a no-op so the FK gap
+    was invisible; BM made the picker strict, so cardholder-rollup
+    picks went blank (five empty KPI cards, 0 rows). The
+    triple-convergent cold-read NEW top blocker.
+
+    BO.1 splits the picker source: Daily Statement uses the new
+    ``DS_L1_DS_ACCOUNTS`` (sourced from
+    ``<prefix>_current_daily_balances`` only); the 7 other L1 sheets
+    keep using ``DS_L1_ACCOUNTS`` for the BL.3-wider universe their
+    Pending-only / spine-planted accounts need.
+
+    Per-role coverage: a one-role test would miss the regression
+    mode "role X's accounts in the dropdown still don't have balance
+    rows" — operator-driven, real deployments have many roles
+    (cardholder DDA, GL control, suspense, sweep), each can break
+    independently. ``find_one_account_day_per_role`` enumerates them
+    from the deployed DB and asserts the contract for each.
+    """
+    driver, dashboard_arg = l1_dashboard_driver
+
+    triples = find_one_account_day_per_role(cfg)
+    assert triples, (
+        "Daily Statement seed should expose ≥1 role with rows; "
+        "deploy / refresh skipped or wrong prefix."
+    )
+
+    failures: list[str] = []
+    for account_display, role, day in triples:
+        driver.open(dashboard_arg, sheet=_DAILY_STATEMENT_NAME)
+        driver.wait_loaded("Opening Balance")
+
+        # Role dropdown must offer this role at all.
+        role_opts = driver.filter_options("Role")
+        if role not in role_opts:
+            failures.append(
+                f"role {role!r}: missing from Role dropdown "
+                f"(advertised: {sorted(role_opts)[:5]}...)"
+            )
+            continue
+        driver.pick_filter("Role", [role])
+
+        # After picking the role, the Account dropdown must advertise
+        # at least the account we expect (the BO.1 contract: every
+        # option has a balance row of the picked role).
+        account_opts = driver.filter_options("Account")
+        if account_display not in account_opts:
+            failures.append(
+                f"role {role!r}: account {account_display!r} not in "
+                f"Account dropdown after Role pick. Advertised: "
+                f"{sorted(account_opts)[:5]}... — this is the BO.1 "
+                f"regression mode (picker source not narrowed to "
+                f"daily_balances)."
+            )
+            continue
+        driver.pick_filter("Account", [account_display])
+        driver.set_date("Business Day", day)
+        driver.wait_loaded("Opening Balance")
+
+        # Reconciliation contract — Opening + Closing both render
+        # as parseable currency. ``parse_currency_kpi`` raises on
+        # blank/missing/non-currency text, surfacing the "five blank
+        # KPI cards" failure shape as a clear assertion-error message.
+        try:
+            opening = _parse_currency_kpi(driver.kpi_value("Opening Balance"))
+            closing = _parse_currency_kpi(driver.kpi_value("Closing Stored"))
+        except Exception as exc:  # noqa: BLE001
+            failures.append(
+                f"role {role!r}, account {account_display!r}, "
+                f"day {day!r}: KPI parse failed — {exc!r}. This is "
+                f"the cold-read F1 failure shape (five blank KPI "
+                f"cards on a picked rollup-only account)."
+            )
+            continue
+        # Belt + suspenders — both KPIs rendered SOMETHING numeric.
+        # Don't pin specific values (per-role seeds vary); the
+        # ``parse_currency_kpi`` succeeding IS the contract.
+        del opening, closing
+
+    driver.screenshot()
+    assert not failures, (
+        f"BO.1 per-role contract failed for {len(failures)} of "
+        f"{len(triples)} roles:\n  " + "\n  ".join(failures)
     )
 
 

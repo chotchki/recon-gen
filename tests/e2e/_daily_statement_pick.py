@@ -242,3 +242,112 @@ def _iso_day(value: Any) -> str:
         return str(value.date().isoformat())
     text = str(value)
     return text[:10]
+
+
+def find_one_account_day_per_role(
+    cfg: Config,
+) -> list[tuple[str, str, str]]:
+    """BO.1 — one ``(account_display, account_role, business_day_iso)``
+    triple PER role that has ≥1 row in
+    ``<prefix>_current_daily_balances``. Each triple is a known-good
+    Daily Statement filter combination for its role:
+
+      * Picked account has a daily_balances row (the BO.1 contract —
+        picker source narrowed to balance-only).
+      * Picked account has ≥1 transaction on the picked day (so the
+        per-(account, day) detail table renders ≥1 row).
+
+    Iterates every role in ``<prefix>_current_daily_balances`` so the
+    e2e test exercises the contract for every role the operator can
+    pick on first load, not just the alphabetically-first one
+    ``find_account_day_with_data`` returns. Operator-driven: real
+    deployments have multiple roles (cardholder DDA, GL control,
+    suspense, sweep, etc.); the BO.1 regression mode is "role X's
+    accounts in the dropdown still don't have balance rows", which
+    a one-role test would miss.
+
+    Same low-account-id / most-recent-day biases as
+    ``find_account_day_with_data`` so each role's picked account lands
+    inside QS's virtualized dropdown window.
+
+    Raises ``RuntimeError`` if no role has rows — the seed state is
+    broken upstream and the test would be useless either way.
+    """
+    if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.SQLITE):
+        raise RuntimeError(
+            f"find_one_account_day_per_role: unsupported dialect "
+            f"{cfg.dialect!r}"
+        )
+    if not cfg.demo_database_url:
+        raise RuntimeError(
+            "find_one_account_day_per_role: cfg.demo_database_url unset"
+        )
+
+    bday_expr = date_trunc_day("posting", cfg.dialect)
+    prefix = cfg.db_table_prefix
+
+    # 1) Enumerate roles that have ≥1 row in current_daily_balances —
+    #    that's the universe BO.1 narrows the picker source to.
+    roles_sql = (
+        f"SELECT DISTINCT account_role FROM {prefix}_current_daily_balances"
+    )
+
+    results: list[tuple[str, str, str]] = []
+    conn = connect_demo_db(cfg)
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(roles_sql)
+            roles = [str(r[0]) for r in cur.fetchall()]
+
+            # 2) For each role, find the (account, day) pair with the
+            #    most transactions among accounts that DO have a
+            #    daily_balances row of that role. Same low-id /
+            #    most-recent biases as ``find_account_day_with_data``
+            #    (operator clicks first-visible in the virtualized
+            #    dropdown). Role names come from our own DB query
+            #    (above); splice-as-literal is safe + dialect-portable.
+            for role in roles:
+                role_literal = role.replace("'", "''")
+                # f-string is safe — role came from our own SELECT.
+                per_role_sql = (
+                    f"SELECT account_name, account_id, {bday_expr} AS bday, "
+                    f"       COUNT(*) AS n "
+                    f"FROM {prefix}_transactions "
+                    f"WHERE account_role = '{role_literal}' "
+                    f"  AND account_id IN ("
+                    f"    SELECT account_id FROM {prefix}_current_daily_balances"
+                    f"    WHERE account_role = '{role_literal}'"
+                    f"  ) "
+                    f"GROUP BY account_name, account_id, {bday_expr} "
+                    f"HAVING COUNT(*) > 0 "
+                    f"ORDER BY account_id ASC, bday DESC, n DESC "
+                )
+                per_role_sql += (
+                    "FETCH FIRST 1 ROWS ONLY"
+                    if cfg.dialect is Dialect.ORACLE else "LIMIT 1"
+                )
+                cur.execute(per_role_sql)
+                row = cur.fetchone()
+                if row is None:
+                    # Role has a daily_balances row but no transactions
+                    # — picker would still offer the account, but the
+                    # Posted Money Records table would correctly be
+                    # empty. Skip from the e2e set; the dataset SQL
+                    # test already pinned the picker source contract.
+                    continue
+                name, acct_id, bday, _ = row
+                results.append((
+                    f"{name} ({acct_id})", role, _iso_day(bday),
+                ))
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+    if not results:
+        raise RuntimeError(
+            f"find_one_account_day_per_role: no role in "
+            f"{prefix}_current_daily_balances has matching transactions "
+            f"— deploy skipped? wrong cfg? wrong prefix?"
+        )
+    return results

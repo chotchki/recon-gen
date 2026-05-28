@@ -313,9 +313,29 @@ DS_L1_TX_IDS = "l1-tx-ids-ds"
 DS_L1_TX_FACETS = "l1-tx-facets-ds"
 # AA.B.1 — Daily Statement Role cascade: distinct ``account_role`` over
 # the daily-balances universe. Feeds the new Role dropdown on Daily
-# Statement, which cascades into ``DS_L1_ACCOUNTS`` via the
+# Statement, which cascades into ``DS_L1_DS_ACCOUNTS`` via the
 # ``pL1DsRole`` dataset parameter (role-narrowed account picker).
 DS_L1_DS_ROLES = "l1-ds-roles-ds"
+# BO.1 (2026-05-29) — Daily-Statement-specific account picker source.
+# Pre-BO.1 the Daily Statement account dropdown re-used ``DS_L1_ACCOUNTS``
+# which BL.3 widened to UNION (current_daily_balances ∪
+# current_transactions ∪ todays_exceptions) so Pending-only accounts +
+# spine-planted accounts that have NO ``daily_balances`` row would
+# still be pickable on the Pending Aging / Today's Exceptions sheets.
+# That widening was right for those sheets — but wrong for Daily
+# Statement, which reconciles per-(account, day) against the
+# daily-balances matview. Picking a balance-less account on Daily
+# Statement post-BM (where the picker actually narrows) returns
+# five blank KPI cards + a 0-row table — the v11.23.0 cold-read's
+# triple-convergent NEW top blocker (F1).
+#
+# DS_L1_DS_ACCOUNTS sources ONLY from ``<prefix>_current_daily_balances``
+# so every option in the Daily Statement dropdown is guaranteed to
+# have a balance row. DS_L1_ACCOUNTS stays unchanged — the 7 other
+# L1 sheets (Drift / Drift Timelines / Overdraft / Limit Breach /
+# Today's Exceptions / Pending Aging / Transactions) keep the wider
+# universe BL.3 wired for them.
+DS_L1_DS_ACCOUNTS = "l1-ds-accounts-ds"
 
 
 # Contracts — column shapes the M.1a.7 views project.
@@ -1601,6 +1621,43 @@ def build_l1_accounts_dataset(
     )
 
 
+def build_l1_ds_accounts_dataset(
+    cfg: Config, l2_instance: L2Instance,
+) -> DataSet:
+    """BO.1 — Daily-Statement-specific account picker source.
+
+    Same shape as ``build_l1_accounts_dataset`` but sourced ONLY from
+    ``<prefix>_current_daily_balances`` so every option in the picker
+    is guaranteed to have a balance row. See ``DS_L1_DS_ACCOUNTS``
+    docstring above for the rationale (v11.23.0 cold-read F1: pre-BM
+    the picker was a no-op so the FK gap was invisible; BM made the
+    filter strict, exposing the mismatch between the BL.3-widened
+    universe and Daily Statement's per-(account, day) reconciliation
+    contract).
+
+    Same contract + same ``pL1DsRole`` cascade param as
+    ``DS_L1_ACCOUNTS``; the Daily Statement Role dropdown bridges
+    here so picking a role narrows the account dropdown without
+    breaking the BL.3-widened source for the 7 other L1 sheets.
+    """
+    prefix = cfg.db_table_prefix
+    sql = (
+        f"SELECT DISTINCT account_id, account_role, account_name,"
+        f" (account_name || ' (' || account_id || ')') AS account_display"
+        f" FROM {prefix}_current_daily_balances"
+        f" WHERE {_data_value_clause('account_role', P_L1_DS_ROLE_DSP)}"
+    )
+    return build_dataset(
+        cfg, cfg.prefixed("l1-ds-accounts-dataset"),
+        "L1 Daily Statement Accounts", "l1-ds-accounts",
+        sql, L1_ACCOUNTS_CONTRACT,
+        visual_identifier=DS_L1_DS_ACCOUNTS,
+        dataset_parameters=[
+            _all_sentinel_sv_param(P_L1_DS_ROLE_DSP),
+        ],
+    )
+
+
 def build_l1_ds_roles_dataset(
     cfg: Config, l2_instance: L2Instance,
 ) -> DataSet:
@@ -1691,6 +1748,8 @@ def build_all_l1_dashboard_datasets(
         build_supersession_daily_balances_dataset(cfg, l2_instance),
         # Y.2.g — companion datasets for the data-value dropdowns.
         build_l1_accounts_dataset(cfg, l2_instance),
+        # BO.1 — Daily-Statement-specific picker source (balance-only).
+        build_l1_ds_accounts_dataset(cfg, l2_instance),
         build_l1_ds_roles_dataset(cfg, l2_instance),
         build_l1_tx_ids_dataset(cfg, l2_instance),
         build_l1_tx_facets_dataset(cfg, l2_instance),

@@ -43,6 +43,7 @@ from recon_gen.apps.l1_dashboard.datasets import (
     DS_DRIFT,
     DS_DRIFT_TIMELINE,
     DS_L1_ACCOUNTS,
+    DS_L1_DS_ACCOUNTS,
     DS_L1_DS_ROLES,
     DS_L1_TX_FACETS,
     DS_L1_TX_IDS,
@@ -492,7 +493,8 @@ def _l1_datasets(
         DS_DRIFT_TIMELINE, DS_LEDGER_DRIFT_TIMELINE,
         DS_STUCK_PENDING, DS_STUCK_UNBUNDLED,
         DS_SUPERSESSION_TRANSACTIONS, DS_SUPERSESSION_DAILY_BALANCES,
-        DS_L1_ACCOUNTS, DS_L1_DS_ROLES, DS_L1_TX_IDS, DS_L1_TX_FACETS,
+        DS_L1_ACCOUNTS, DS_L1_DS_ACCOUNTS,
+        DS_L1_DS_ROLES, DS_L1_TX_IDS, DS_L1_TX_FACETS,
         DS_APP_INFO_LIVENESS, DS_APP_INFO_MATVIEWS,
     ]
     return {
@@ -2123,14 +2125,23 @@ def _wire_daily_statement_filters(
         ],
     ))
     # AA.B.1 — Role cascade. The role dropdown's value bridges into
-    # the ``DS_L1_ACCOUNTS`` companion's ``pL1DsRole`` dataset param,
-    # narrowing the Account dropdown's options. Sentinel default
-    # (``L1_ALL_SENTINEL``) means "show every account regardless of
-    # role" — preserves the un-picked behaviour exactly.
+    # the ``DS_L1_DS_ACCOUNTS`` companion's ``pL1DsRole`` dataset
+    # param, narrowing the Account dropdown's options. Sentinel
+    # default (``L1_ALL_SENTINEL``) means "show every account
+    # regardless of role" — preserves the un-picked behaviour
+    # exactly.
+    # BO.1 — switched the cascade target from ``DS_L1_ACCOUNTS`` to
+    # ``DS_L1_DS_ACCOUNTS`` (Daily-Statement-specific, sourced from
+    # ``<prefix>_current_daily_balances`` only). The wider
+    # ``DS_L1_ACCOUNTS`` includes Pending-only + spine-planted
+    # accounts that have no balance row — picking one on Daily
+    # Statement returns blank KPIs (the v11.23.0 cold-read's
+    # triple-convergent NEW top blocker). The 7 other L1 sheets
+    # still bridge through ``DS_L1_ACCOUNTS`` for the wider universe.
     ds_role = analysis.add_parameter(StringParam(
         name=P_L1_DS_ROLE,
         mapped_dataset_params=[
-            (datasets[DS_L1_ACCOUNTS], P_L1_DS_ROLE_DSP),
+            (datasets[DS_L1_DS_ACCOUNTS], P_L1_DS_ROLE_DSP),
         ],
     ))
     # AO.2 — the balance date pushes DOWN into both datasets' SQL via
@@ -2158,10 +2169,11 @@ def _wire_daily_statement_filters(
 
     # Sheet controls — Role → Account → Business Day. AA.B.1 added the
     # Role dropdown above Account so the cascade direction is visually
-    # explicit (left/top narrows the right/bottom). The Account dropdown's
-    # options come from the DS_L1_ACCOUNTS companion, which now carries
-    # a ``pL1DsRole`` dataset param; picking a role re-fetches the
-    # account options narrowed to that role.
+    # explicit (left/top narrows the right/bottom). The Account
+    # dropdown's options come from the DS_L1_DS_ACCOUNTS companion
+    # (BO.1 — Daily-Statement-specific balance-only source), which
+    # carries a ``pL1DsRole`` dataset param; picking a role re-fetches
+    # the account options narrowed to that role.
     #
     # Role dropdown is SINGLE_SELECT with the show-all sentinel default
     # (the standard AA.A pattern), so first-load lists every account
@@ -2187,7 +2199,9 @@ def _wire_daily_statement_filters(
             # ``add_parameter_dropdown`` call — Daily Statement stayed
             # silently broken (account picked → page empty) until
             # AA.E.3's browser test caught it.
-            datasets[DS_L1_ACCOUNTS]["account_display"],
+            # BO.1 — sourced from ``DS_L1_DS_ACCOUNTS`` (balance-only)
+            # so every option has a matching ``daily_balances`` row.
+            datasets[DS_L1_DS_ACCOUNTS]["account_display"],
         ),
         hidden_select_all=True,
     )

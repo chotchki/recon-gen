@@ -2010,6 +2010,105 @@ def test_aa_e_2_daily_statement_account_dropdown_binds_display_column() -> None:
     )
 
 
+def test_bo_1_daily_statement_account_picker_sources_balance_only() -> None:
+    """BO.1 (v11.23.0 cold-read F1) — the Daily Statement Account
+    dropdown sources options from ``DS_L1_DS_ACCOUNTS``
+    (``<prefix>_current_daily_balances`` only), NOT from
+    ``DS_L1_ACCOUNTS`` (the BL.3-widened UNION across
+    current_daily_balances ∪ current_transactions ∪ todays_exceptions).
+
+    Daily Statement reconciles per-(account, day) against the
+    daily-balances matview. The BL.3 wider universe was added for
+    the Pending Aging / Today's Exceptions sheets where spine-planted
+    accounts that have NO daily-balances row are still legitimately
+    pickable. But the wider source on Daily Statement guaranteed
+    every cardholder/owner-rollup pick returned five blank KPI cards
+    + a zero-row table — pre-BM the filter was a no-op so the FK
+    gap was invisible, post-BM the filter strictly narrows so the
+    gap surfaces. Triple-convergent in the v11.23.0 cold-read.
+
+    Two contracts on one test (matches the BO.1 fix shape):
+      1. ``DS_L1_DS_ACCOUNTS`` exists, sources from
+         ``<prefix>_current_daily_balances`` only, and carries the
+         same ``pL1DsRole`` cascade param as ``DS_L1_ACCOUNTS``.
+      2. The Daily Statement Account dropdown's ``LinkedValues``
+         binds to ``DS_L1_DS_ACCOUNTS`` (not ``DS_L1_ACCOUNTS``).
+    """
+    from recon_gen.apps.l1_dashboard.datasets import (
+        DS_L1_DS_ACCOUNTS,
+        L1_ALL_SENTINEL,
+        P_L1_DS_ROLE_DSP,
+        build_l1_ds_accounts_dataset,
+    )
+    from recon_gen.common.tree import ParameterDropdown
+    from recon_gen.common.tree.controls import LinkedValues
+
+    inst = default_l2_instance()
+
+    # Contract 1: source is balance-only.
+    ds = build_l1_ds_accounts_dataset(_CFG, inst)
+    cs = next(iter(ds.PhysicalTableMap.values())).CustomSql
+    assert cs is not None
+    sql = cs.SqlQuery
+    assert "SELECT DISTINCT account_id, account_role" in sql
+    # Must source from current_daily_balances ONLY — no UNION across
+    # the wider universe.
+    assert f"FROM {_CFG.db_table_prefix}_current_daily_balances" in sql, (
+        f"DS_L1_DS_ACCOUNTS must source from current_daily_balances "
+        f"only (BO.1). SQL is:\n{sql}"
+    )
+    assert "UNION" not in sql, (
+        f"DS_L1_DS_ACCOUNTS must NOT UNION other sources (BO.1 — "
+        f"every option must have a daily_balances row). SQL is:\n{sql}"
+    )
+    assert "current_transactions" not in sql, (
+        f"DS_L1_DS_ACCOUNTS must NOT pull from current_transactions "
+        f"(those accounts may lack daily_balances rows). SQL is:\n{sql}"
+    )
+    assert "todays_exceptions" not in sql, (
+        f"DS_L1_DS_ACCOUNTS must NOT pull from todays_exceptions "
+        f"(BL.3-era widening that the Daily Statement reconciliation "
+        f"can't support). SQL is:\n{sql}"
+    )
+    # Role cascade preserved.
+    assert f"<<${P_L1_DS_ROLE_DSP}>>" in sql, (
+        "DS_L1_DS_ACCOUNTS must carry the same pL1DsRole cascade as "
+        "DS_L1_ACCOUNTS — the Daily Statement Role dropdown bridges "
+        "into it."
+    )
+    role_params = [
+        p for p in (ds.DatasetParameters or [])
+        if p.StringDatasetParameter
+        and p.StringDatasetParameter.Name == P_L1_DS_ROLE_DSP
+    ]
+    assert len(role_params) == 1
+    rp = role_params[0].StringDatasetParameter
+    assert rp is not None
+    assert rp.DefaultValues is not None
+    assert rp.DefaultValues.StaticValues == [L1_ALL_SENTINEL]
+
+    # Contract 2: Daily Statement dropdown points at the new dataset.
+    app = build_l1_dashboard_app(_CFG)
+    assert app.analysis is not None
+    daily_statement = _sheet_by_name(app, _DAILY_STATEMENT_NAME)
+    account_ctrls = [
+        c for c in daily_statement.parameter_controls
+        if _control_title(c) == "Account"
+    ]
+    assert len(account_ctrls) == 1
+    account_ctrl = account_ctrls[0]
+    assert isinstance(account_ctrl, ParameterDropdown)
+    linked = account_ctrl.selectable_values
+    assert isinstance(linked, LinkedValues)
+    assert linked.dataset.identifier == DS_L1_DS_ACCOUNTS, (
+        f"Daily Statement Account dropdown must source from "
+        f"DS_L1_DS_ACCOUNTS (balance-only), got "
+        f"{linked.dataset.identifier!r}. This is the BO.1 fix — "
+        f"reverting to DS_L1_ACCOUNTS re-introduces the v11.23.0 "
+        f"F1 blank-KPI-on-rollup-pick failure."
+    )
+
+
 def test_y2g_no_per_sheet_category_filter_groups_remain() -> None:
     """The X.1.g/M.2b.3 per-sheet ``fg-l1-<sheet>-<col>`` category-filter
     FilterGroups (the cold-fetch footgun source) are gone — the
