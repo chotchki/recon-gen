@@ -397,6 +397,64 @@ class TestMeasure:
         with _pytest.raises(AssertionError, match="numerical aggregations"):
             m.emit()
 
+    def test_v11_24_1_rejects_numerical_aggregation_over_datetime_column(self):
+        """v11.24.1 regression guard: ``Measure.{sum,max,min,average}``
+        over a DATETIME-declared column has to fail at emit time. QS
+        rejects ``NumericalMeasureField`` over non-INTEGER/DECIMAL
+        columns at analysis-create time; v11.24.0's BO.12 "Latest Leg"
+        KPI bound ``postings["posting"].max()`` over a DATETIME column
+        and took out the L2 Flow Tracing deploy in CI. The guard now
+        fires at emit time so the same shape fails the unit + json
+        layers before deploy ever runs.
+
+        The check leans on a registered ``DatasetContract`` declaring
+        the column's type; without that ground truth it stays
+        permissive (CalcField refs, missing contracts, missing columns
+        all skip). This test uses a fresh test-local identifier so the
+        registration doesn't pollute other tests' ``ds-foo`` state."""
+        import pytest as _pytest
+        from recon_gen.common.dataset_contract import (
+            ColumnSpec, DatasetContract, register_contract,
+        )
+
+        ds = Dataset(
+            identifier="ds-v11241-guard-test",
+            arn="arn:aws:quicksight:::dataset/ds-v11241-guard-test",
+        )
+        register_contract("ds-v11241-guard-test", DatasetContract(columns=[
+            ColumnSpec("posting", "DATETIME"),
+            ColumnSpec("amount", "DECIMAL"),
+        ]))
+
+        # The numeric column emits cleanly under every numerical kind.
+        for kind in ("sum", "max", "min", "average"):
+            ok = getattr(Measure, kind)(
+                dataset=ds, field_id=f"f-ok-{kind}", column="amount",
+            )
+            assert ok.emit().NumericalMeasureField is not None
+
+        # The DATETIME column trips the v11.24.1 guard on every
+        # numerical kind. Pinning all four because QS rejects the same
+        # field-well shape regardless of which aggregation it carries.
+        for kind in ("sum", "max", "min", "average"):
+            bad = getattr(Measure, kind)(
+                dataset=ds, field_id=f"f-bad-{kind}", column="posting",
+            )
+            with _pytest.raises(
+                AssertionError,
+                match=r"INTEGER or DECIMAL columns, but 'posting' is declared",
+            ):
+                bad.emit()
+
+        # distinct_count emits a CategoricalMeasureField — QS accepts
+        # those over any column type — so the v11.24.1 guard MUST NOT
+        # fire even when pointed at the DATETIME column.
+        ok = Measure(
+            dataset=ds, column="posting", kind="distinct_count",
+            field_id="f-cat-distinct-count",
+        )
+        assert ok.emit().CategoricalMeasureField is not None
+
 
 # ---------------------------------------------------------------------------
 # L.1.3 — Typed Visual subtypes

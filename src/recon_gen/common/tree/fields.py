@@ -256,6 +256,67 @@ _CATEGORICAL_AGG = {
     "count": "COUNT", "distinct_count": "DISTINCT_COUNT",
 }
 
+# v11.24.1 — QS rejects ``NumericalMeasureField`` over non-numeric
+# columns at analysis-create time with:
+#   "Object NumericalMeasureField can only refer to columns of types
+#    [INTEGER, DECIMAL], but the column <name> is of type <type>."
+# Before v11.24.1 this only surfaced in CI's deploy probe (BO.12's
+# ``ds_postings["posting"].max()`` over a DATETIME column took out the
+# L2 Flow Tracing analysis + dashboard in v11.24.0). Catching it here
+# at JSON-emit time fails the unit + json layers FAST so deploys never
+# burn on this class of typo. The QS-numerical column types — kept as
+# a tight whitelist that mirrors the QS error.
+_QS_NUMERICAL_COLUMN_TYPES: frozenset[str] = frozenset({"INTEGER", "DECIMAL"})
+
+
+def _assert_numerical_column_type(
+    dataset: Dataset, column: ColumnRef, kind: str,
+) -> None:
+    """Fail-fast guard: numerical aggregations (sum/max/min/average)
+    require an INTEGER/DECIMAL column at the contract level.
+
+    Permissive on the inputs the contract can't reason about:
+    - ``CalcField`` refs (analysis-level calculated columns — their
+      expression's type is opaque to the dataset contract).
+    - Missing contract (``KeyError`` from ``get_contract``) — only
+      possible in narrow test-harness paths where the contract didn't
+      register; production datasets always register at module import.
+    - Missing column on the contract (``KeyError`` from
+      ``contract.column``) — leaves the existing L.1.17 validator to
+      catch the typo at construction time.
+
+    Loud on the case that bit v11.24.0 — a Column / str ref whose
+    contract declares a non-numeric type used under a numerical
+    aggregation.
+    """
+    from recon_gen.common.dataset_contract import get_contract  # noqa: PLC0415
+
+    if calc_field_in(column) is not None:
+        return
+    try:
+        contract = get_contract(dataset.identifier)
+    except KeyError:
+        return
+    name = resolve_column(column)
+    try:
+        col_spec = contract.column(name)
+    except KeyError:
+        return
+    if col_spec.type in _QS_NUMERICAL_COLUMN_TYPES:
+        return
+    raise AssertionError(
+        f"Measure.{kind}() on dataset {dataset.identifier!r} column "
+        f"{name!r} fails QS validation: numerical aggregations require "
+        f"INTEGER or DECIMAL columns, but {name!r} is declared as "
+        f"{col_spec.type!r} on the contract. QS rejects this at "
+        f"analysis-create time with: "
+        f'"Object NumericalMeasureField can only refer to columns of '
+        f"types [INTEGER, DECIMAL], but the column {name} is of type "
+        f'{col_spec.type}.\" Either change the column type at the '
+        f"dataset boundary or drop the aggregation (a DATETIME freshness "
+        f"signal lives more naturally on a Table column than a KPI)."
+    )
+
 
 @dataclass(eq=False)
 class Measure:
@@ -416,6 +477,7 @@ class Measure:
             "currency already pins 2 decimals via _USD_FORMAT. Drop "
             "decimals= or drop currency=True."
         )
+        _assert_numerical_column_type(self.dataset, self.column, self.kind)
         fmt: NumberFormatConfiguration | None
         if self.currency:
             fmt = _USD_FORMAT

@@ -1,5 +1,35 @@
 # Release Notes
 
+## v11.24.2 — Emit-time guard for NumericalMeasureField over non-numeric columns
+
+Backstop for the v11.24.1 fix. The tree's ``Measure.emit()`` now
+fails loud at JSON-emit time when a numerical aggregation
+(`sum` / `max` / `min` / `average`) is bound to a column whose
+contract declares a non-INTEGER/non-DECIMAL type:
+
+> AssertionError: Measure.max() on dataset 'l2ft-postings-ds' column
+> 'posting' fails QS validation: numerical aggregations require
+> INTEGER or DECIMAL columns, but 'posting' is declared as 'DATETIME'
+> on the contract. ...
+
+Pre-v11.24.2 this class of typo only surfaced in CI's deploy probe
+("Object NumericalMeasureField can only refer to columns of types
+[INTEGER, DECIMAL], but the column ... is of type DATETIME" — the
+v11.24.0 → v11.24.1 break). Now it fails the unit + json layers
+locally; deploys never burn on it.
+
+Permissive on inputs the contract can't reason about — CalcField refs
+(opaque expression type), missing contract registration (narrow
+test-harness paths), missing column on the contract (existing L.1.17
+validator catches the typo). Loud on the v11.24.0 shape.
+
+Pinned by `test_v11_24_1_rejects_numerical_aggregation_over_datetime_column`
+in `tests/unit/test_tree.py` (sum/max/min/average → AssertionError;
+distinct_count → CategoricalMeasureField emits cleanly; numeric column
+under every numerical kind emits cleanly).
+
+4,070 non-e2e tests green.
+
 ## v11.24.1 — BO.12 fix: drop "Latest Leg" KPI (QS rejects DATETIME-MAX)
 
 v11.24.0's deploy-probe CI caught a regression introduced by BO.12.
