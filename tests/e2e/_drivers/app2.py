@@ -570,17 +570,20 @@ class App2Driver:
         ))
 
     def set_date_range(self, from_: str | None, to: str | None) -> None:
-        self._wait_for_refetch(lambda: self._page.evaluate(
-            """({ f, t }) => {
-                const form = document.querySelector('#filter-form');
-                const df = form.querySelector('input[name="date_from"]');
-                const dt = form.querySelector('input[name="date_to"]');
-                if (df) df.value = f || '';
-                if (dt) dt.value = t || '';
-                if (df) df.dispatchEvent(new Event('change', { bubbles: true }));
-            }""",
-            {"f": from_, "t": to},
-        ))
+        """Phase BM — the pre-BM universal date-RANGE Flatpickr widget
+        (one visible text input + two hidden ``date_from`` / ``date_to``
+        inputs) dissolved. A Date From + Date To pair now renders as
+        two ``ParameterDateSpec`` single-date pickers, each carrying a
+        ``?param_<name>=YYYY-MM-DD`` URL key (same wire shape as Daily
+        Statement's Business Day picker). Delegate to ``set_date`` for
+        each leg — only one ``_wait_for_refetch`` cost regardless of
+        how many bounds get written, since ``set_date`` already calls
+        through the refetch waiter per write.
+        """
+        if from_ is not None:
+            self.set_date("Date From", from_)
+        if to is not None:
+            self.set_date("Date To", to)
 
     def set_date(self, label: str, iso: str | None) -> None:
         """BG.7 (2026-05-25, per user "why wouldn't it run against

@@ -121,13 +121,21 @@ def test_app2_clear_filters_resets_kpi(driver: DashboardDriver) -> None:
     assert driver.kpi_value("Open Exceptions") == base
 
 
-def test_app2_set_date_range_and_slider_survive_refetch(
+def test_app2_set_slider_survives_refetch(
     driver: DashboardDriver,
 ) -> None:
+    """Phase BM — pre-BM the smoke app's Showcase sheet rendered the
+    universal hidden ``date_from`` / ``date_to`` inputs on every
+    data-bearing sheet, so ``set_date_range`` had a target. Post-BM
+    each ParameterDateTimePicker is its own ParameterDateSpec
+    (``param_<name>=YYYY-MM-DD`` URL key) gated on
+    ``mapped_dataset_params`` — the smoke app declares no date
+    pickers, so ``set_date_range`` has nothing to drive there. The
+    slider half of the original test still pins the refetch contract.
+    """
     driver.open("smoke", sheet="Showcase")
-    driver.set_date_range("2030-01-01", "2030-01-31")
     driver.set_slider("Amount", 1000, 50_000)
-    # Both verbs block on the re-fetch; the page is still a live dashboard.
+    # The slider write blocks on re-fetch; the page is still a live dashboard.
     assert "Daily Volume" in driver.visual_titles()
 
 

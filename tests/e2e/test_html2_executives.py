@@ -129,24 +129,30 @@ def test_getting_started_sheet_renders_text_boxes(
 def test_filter_change_refetches_visuals(
     exec_driver: App2Driver,
 ) -> None:
-    """Setting the date filter fires an auto-refresh that re-fetches the
-    sheet's visuals with ``date_from`` in the query string. Verifies the
-    X.2.d filter form → visual data fetch round-trip.
+    """Setting the date filter fires an auto-refresh that re-fetches
+    the sheet's visuals with the Phase BM date-picker URL key set.
+    Verifies the X.2.d filter form → visual data fetch round-trip.
+
+    Pre-BM the URL key was ``date_from`` (bare, from a hidden Flatpickr-
+    range aggregator); post-BM each picker writes its own
+    ``param_<param-name>`` key (here ``param_pExecDateStart``).
 
     ``driver.set_date_range`` blocks on the App2 refetch (per the App2
     write-verb contract); the wire-shape assertion (URL key landed)
     needs the fetcher's ``_calls_log`` — App2-internal."""
+    from recon_gen.apps.executives.datasets import P_EXEC_DATE_START
+
     exec_driver.open(
         _DASHBOARD_ID, sheet="Account Coverage",
     )
     _calls_log.clear()
     exec_driver.set_date_range("2030-02-01", None)
-    # The fetcher should have been called with date_from set.
+    target_key = f"param_{P_EXEC_DATE_START}"
     assert any(
-        params.get("date_from") == ["2030-02-01"]
+        params.get(target_key) == ["2030-02-01"]
         for _vid, params in _calls_log
     ), (
-        f"No fetch saw date_from=2030-02-01. Calls: "
+        f"No fetch saw {target_key}=2030-02-01. Calls: "
         f"{[(vid, dict(p)) for vid, p in _calls_log[:5]]}"
     )
 

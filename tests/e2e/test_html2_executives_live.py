@@ -196,9 +196,14 @@ def test_date_filter_does_not_error_when_applied(
     which walks the tree for date-sensitive count KPIs and asserts each
     one's number drops when the window narrows.
 
-    Kept here as the boundary check on the COALESCE+sentinel-date
-    pattern: ``CAST(:date_from AS DATE)`` must not error when the bind
-    value is empty (the PG OR-short-circuit gotcha).
+    Phase BM — the pre-BM COALESCE+sentinel-date pattern dissolved
+    along with ``:date_from`` / ``:date_to`` binds. Same intent
+    survives: the BM-shape ``<<$pExecDate*>>`` dataset-param defaults
+    flow through ``apply_dataset_param_defaults`` on initial render
+    (empty URL params), and the picker write must thread through the
+    universal_date_range_clause cast (CAST AS TIMESTAMP on PG /
+    TO_DATE with ISO-T format on Oracle / datetime() on SQLite)
+    without raising.
     """
     driver = live_db_exec_driver.driver
     driver.open(_DASHBOARD_ID, sheet="Account Coverage")
@@ -271,8 +276,9 @@ def _date_sensitive_count_kpis(
     tree_app: App,
 ) -> list[tuple[str, str, str]]:
     """Walk the tree, return ``(sheet_name, visual_id, title)`` for every
-    KPI whose underlying dataset SQL references ``:date_from`` AND whose
-    measure aggregation is sum/count (i.e. value MUST drop as the window
+    KPI whose underlying dataset SQL references the Phase BM
+    universal-range parameter placeholders AND whose measure
+    aggregation is sum/count (i.e. value MUST drop as the window
     narrows).
 
     Excludes KPIs whose value is constant across windows by design (avg
@@ -281,6 +287,25 @@ def _date_sensitive_count_kpis(
     KPI that depends on one would behave the same as one without
     (covered by the wrap_for_visual gap, not this test).
     """
+    from recon_gen.apps.executives.datasets import (
+        P_EXEC_DATE_END,
+        P_EXEC_DATE_START,
+    )
+    from recon_gen.apps.l1_dashboard.datasets import (
+        P_L1_DATE_END,
+        P_L1_DATE_START,
+    )
+
+    # Phase BM — pre-BM probe was ``":date_from" in base_sql``; post-BM
+    # the same intent is "does the SQL reference any of the universal
+    # date-range pushdown placeholders?". L1 + Exec span the relevant
+    # set; other apps don't have date pushdowns today.
+    date_placeholders = tuple(
+        f"<<${name}>>" for name in (
+            P_EXEC_DATE_START, P_EXEC_DATE_END,
+            P_L1_DATE_START, P_L1_DATE_END,
+        )
+    )
     assert tree_app.analysis is not None
     countable = {"sum", "count", "distinct_count"}
     results: list[tuple[str, str, str]] = []
@@ -301,7 +326,7 @@ def _date_sensitive_count_kpis(
                 base_sql = get_sql(ds_id)
             except KeyError:
                 continue
-            if ":date_from" not in base_sql:
+            if not any(p in base_sql for p in date_placeholders):
                 continue
             results.append((
                 sheet.name,  # protocol's open(sheet=) takes the sheet *name*
