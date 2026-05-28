@@ -44,6 +44,7 @@ from typing import ClassVar
 
 from recon_gen.common.l2.primitives import L2Instance
 from recon_gen.common.money import Cents
+from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     day_bounds,
     find_internal_with_role,
@@ -71,10 +72,11 @@ class OverdraftInvariant:
     prefix: str = "spec_example"
 
     def detect(self, conn: sqlite3.Connection) -> set[Violation]:
-        rows = conn.execute(
+        rows = fetch_all(
+            conn,
             f"SELECT account_id, business_day_start, stored_balance "
             f"FROM {self.prefix}_overdraft",
-        ).fetchall()
+        )
         # AO.1: stored_balance is BIGINT cents — project to dollars at
         # the detect boundary so violation identities still round-trip
         # against generators that author in dollars.

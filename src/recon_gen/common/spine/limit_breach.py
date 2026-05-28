@@ -42,6 +42,7 @@ from typing import ClassVar
 from recon_gen.common.l2.primitives import (
     Account, L2Instance, LimitDirection, LimitSchedule,
 )
+from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     insert_tx,
     load_spec_example,
@@ -63,10 +64,11 @@ class LimitBreachInvariant:
     prefix: str = "spec_example"
 
     def detect(self, conn: sqlite3.Connection) -> set[Violation]:
-        rows = conn.execute(
+        rows = fetch_all(
+            conn,
             f"SELECT account_id, business_day, rail_name, direction "
             f"FROM {self.prefix}_limit_breach",
-        ).fetchall()
+        )
         return {
             RuleViolation.of(
                 "limit_breach",

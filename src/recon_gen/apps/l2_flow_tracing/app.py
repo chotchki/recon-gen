@@ -42,6 +42,12 @@ from recon_gen.apps.l2_flow_tracing.datasets import (
     L2FT_ALL_SENTINEL,
     META_KEY_ALL_SENTINEL,
     META_VALUE_PLACEHOLDER_SENTINEL,
+    P_L2FT_CHAINS_DATE_END as _P_L2FT_CHAINS_DATE_END,
+    P_L2FT_CHAINS_DATE_START as _P_L2FT_CHAINS_DATE_START,
+    P_L2FT_RAILS_DATE_END as _P_L2FT_RAILS_DATE_END,
+    P_L2FT_RAILS_DATE_START as _P_L2FT_RAILS_DATE_START,
+    P_L2FT_TT_DATE_END as _P_L2FT_TT_DATE_END,
+    P_L2FT_TT_DATE_START as _P_L2FT_TT_DATE_START,
     build_all_l2_flow_tracing_datasets,
     bundle_status_values,
     chain_completion_status_values,
@@ -88,7 +94,6 @@ from recon_gen.common.tree import (
     StaticValues,
     StringParam,
     TextBox,
-    TimeRangeFilter,
 )
 
 
@@ -436,8 +441,15 @@ def _populate_getting_started(
 # data/deadline-derived / subjective-view windows; this is a fourth
 # kind. Switching to a RollingDate-or-anchored view would require the
 # L2 instance to carry production data with current timestamps.
-_DATE_START_STATIC = "1900-01-01T00:00:00.000Z"
-_DATE_END_STATIC = "2099-12-31T23:59:59.999Z"
+# Phase BM — drop the trailing ``.NNNZ`` UTC-Z suffix that the pre-BM
+# analysis-only default carried. Post-BM the analysis-level value
+# propagates to dataset-SQL substitution via ``MappedDataSetParameters``;
+# the universal_date_range_clause helper expects the canonical
+# ``YYYY-MM-DDT00:00:00`` shape (Oracle SUBSTR(1, 10) handles either
+# but PG / SQLite are cleaner without the suffix). Both renderers
+# match-all from these literal bounds.
+_DATE_START_STATIC = "1900-01-01T00:00:00"
+_DATE_END_STATIC = "2099-12-31T00:00:00"
 
 
 def _populate_pushdown_dropdown(
@@ -534,34 +546,25 @@ def _populate_rails_sheet(
     """
     ds_postings = datasets[DS_POSTINGS]
 
-    # 1+2. Date range — params + TimeRangeFilter scoped to this sheet.
+    # 1+2. Date range — Phase BM pushdown via ``<<$pL2ftDate*>>`` on
+    # ``posting``. ``mapped_dataset_params`` bridges the analysis-level
+    # params into the postings dataset's matching DateTime dataset
+    # params; the picker write goes through to the SQL substitution on
+    # BOTH renderers. Pre-BM was a per-sheet ``TimeRangeFilter`` FG
+    # narrowing only on QS — App2 saw the picker widget but the
+    # dataset SQL had no bind for it (the UX lie BM dissolves).
     date_start = analysis.add_parameter(DateTimeParam(
-        name=ParameterName("pL2ftDateStart"),
+        name=ParameterName(_P_L2FT_RAILS_DATE_START),
         time_granularity="DAY",
         default=DateTimeDefaultValues(StaticValues=[_DATE_START_STATIC]),
+        mapped_dataset_params=[(ds_postings, _P_L2FT_RAILS_DATE_START)],
     ))
     date_end = analysis.add_parameter(DateTimeParam(
-        name=ParameterName("pL2ftDateEnd"),
+        name=ParameterName(_P_L2FT_RAILS_DATE_END),
         time_granularity="DAY",
         default=DateTimeDefaultValues(StaticValues=[_DATE_END_STATIC]),
+        mapped_dataset_params=[(ds_postings, _P_L2FT_RAILS_DATE_END)],
     ))
-    fg_date = analysis.add_filter_group(FilterGroup(
-        filter_group_id=FilterGroupId("fg-l2ft-rails-date"),
-        cross_dataset="SINGLE_DATASET",
-        filters=[TimeRangeFilter(
-            filter_id="filter-l2ft-rails-date",
-            dataset=ds_postings,
-            column=ds_postings["posting"],
-            null_option="NON_NULLS_ONLY",
-            time_granularity="DAY",
-            minimum={"Parameter": "pL2ftDateStart"},
-            maximum={"Parameter": "pL2ftDateEnd"},
-            # AA.A.daterange — inclusive-both, see L1 _scope_one.
-            include_minimum=True,
-            include_maximum=True,
-        )],
-    ))
-    fg_date.scope_sheet(sheet)
     sheet.add_parameter_datetime_picker(parameter=date_start, title="Date From")
     sheet.add_parameter_datetime_picker(parameter=date_end, title="Date To")
 
@@ -717,36 +720,28 @@ def _populate_chains_sheet(
     """
     ds_chain_instances = datasets[DS_CHAIN_INSTANCES]
 
-    # 1+2. Date range — params + TimeRangeFilter scoped to this sheet.
-    # Separate from Rails' date params so the analyst's chains-window
-    # selection doesn't perturb the rails view (and vice versa).
+    # 1+2. Date range — Phase BM pushdown via ``<<$pL2ftChainsDate*>>``
+    # on ``parent_posting``. Separate from Rails' date params so the
+    # analyst's chains-window selection doesn't perturb the rails view
+    # (and vice versa). Pre-BM was a per-sheet TimeRangeFilter FG
+    # narrowing only on QS — App2 saw the picker but the SQL didn't
+    # bind it.
     date_start = analysis.add_parameter(DateTimeParam(
-        name=ParameterName("pL2ftChainsDateStart"),
+        name=ParameterName(_P_L2FT_CHAINS_DATE_START),
         time_granularity="DAY",
         default=DateTimeDefaultValues(StaticValues=[_DATE_START_STATIC]),
+        mapped_dataset_params=[
+            (ds_chain_instances, _P_L2FT_CHAINS_DATE_START),
+        ],
     ))
     date_end = analysis.add_parameter(DateTimeParam(
-        name=ParameterName("pL2ftChainsDateEnd"),
+        name=ParameterName(_P_L2FT_CHAINS_DATE_END),
         time_granularity="DAY",
         default=DateTimeDefaultValues(StaticValues=[_DATE_END_STATIC]),
+        mapped_dataset_params=[
+            (ds_chain_instances, _P_L2FT_CHAINS_DATE_END),
+        ],
     ))
-    fg_date = analysis.add_filter_group(FilterGroup(
-        filter_group_id=FilterGroupId("fg-l2ft-chains-date"),
-        cross_dataset="SINGLE_DATASET",
-        filters=[TimeRangeFilter(
-            filter_id="filter-l2ft-chains-date",
-            dataset=ds_chain_instances,
-            column=ds_chain_instances["parent_posting"],
-            null_option="NON_NULLS_ONLY",
-            time_granularity="DAY",
-            minimum={"Parameter": "pL2ftChainsDateStart"},
-            maximum={"Parameter": "pL2ftChainsDateEnd"},
-            # AA.A.daterange — inclusive-both, see L1 _scope_one.
-            include_minimum=True,
-            include_maximum=True,
-        )],
-    ))
-    fg_date.scope_sheet(sheet)
     sheet.add_parameter_datetime_picker(parameter=date_start, title="Date From")
     sheet.add_parameter_datetime_picker(parameter=date_end, title="Date To")
 
@@ -876,34 +871,31 @@ def _populate_transfer_templates_sheet(
     ds_tt_instances = datasets[DS_TT_INSTANCES]
     ds_tt_legs = datasets[DS_TT_LEGS]
 
-    # 1+2. Date range. ALL_DATASETS so tt-legs narrows in lockstep.
+    # 1+2. Date range — Phase BM pushdown via ``<<$pL2ftTtDate*>>``.
+    # Both tt-instances + tt-legs carry the same dataset params (the
+    # pre-BM ``cross_dataset='ALL_DATASETS'`` TimeRangeFilter narrowed
+    # both together; the BM bridge writes through to each per its own
+    # ``<<$pL2ftTtDate*>>`` placeholder).
+    tt_start_bridges = [
+        (ds_tt_instances, _P_L2FT_TT_DATE_START),
+        (ds_tt_legs, _P_L2FT_TT_DATE_START),
+    ]
+    tt_end_bridges = [
+        (ds_tt_instances, _P_L2FT_TT_DATE_END),
+        (ds_tt_legs, _P_L2FT_TT_DATE_END),
+    ]
     date_start = analysis.add_parameter(DateTimeParam(
-        name=ParameterName("pL2ftTtDateStart"),
+        name=ParameterName(_P_L2FT_TT_DATE_START),
         time_granularity="DAY",
         default=DateTimeDefaultValues(StaticValues=[_DATE_START_STATIC]),
+        mapped_dataset_params=tt_start_bridges,
     ))
     date_end = analysis.add_parameter(DateTimeParam(
-        name=ParameterName("pL2ftTtDateEnd"),
+        name=ParameterName(_P_L2FT_TT_DATE_END),
         time_granularity="DAY",
         default=DateTimeDefaultValues(StaticValues=[_DATE_END_STATIC]),
+        mapped_dataset_params=tt_end_bridges,
     ))
-    fg_date = analysis.add_filter_group(FilterGroup(
-        filter_group_id=FilterGroupId("fg-l2ft-tt-date"),
-        cross_dataset="ALL_DATASETS",
-        filters=[TimeRangeFilter(
-            filter_id="filter-l2ft-tt-date",
-            dataset=ds_tt_instances,
-            column=ds_tt_instances["posting"],
-            null_option="NON_NULLS_ONLY",
-            time_granularity="DAY",
-            minimum={"Parameter": "pL2ftTtDateStart"},
-            maximum={"Parameter": "pL2ftTtDateEnd"},
-            # AA.A.daterange — inclusive-both, see L1 _scope_one.
-            include_minimum=True,
-            include_maximum=True,
-        )],
-    ))
-    fg_date.scope_sheet(sheet)
     sheet.add_parameter_datetime_picker(parameter=date_start, title="Date From")
     sheet.add_parameter_datetime_picker(parameter=date_end, title="Date To")
 

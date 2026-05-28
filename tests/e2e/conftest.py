@@ -445,10 +445,7 @@ def _qs_pre_warm_dashboards(  # pyright: ignore[reportUnusedFunction]: pytest au
     cfg: "Config",
     qs_client: "QuickSightClient",
     account_id: str,
-    l1_dashboard_id: str,
-    inv_dashboard_id: str,
-    exec_dashboard_id: str,
-    l2ft_dashboard_id: str,
+    deployment_name: str,
 ) -> None:
     """BL.3 follow-on (Task #466 mitigation): pre-warm each deployed
     dashboard via ``describe_dashboard_definition`` ONCE at session
@@ -466,6 +463,15 @@ def _qs_pre_warm_dashboards(  # pyright: ignore[reportUnusedFunction]: pytest au
     Combined with the runner's bumped ``--reruns-delay`` (10s →
     60s; ``_dev/runner.py``), this should cut the bedrock flake
     rate substantially without requiring per-test retries.
+
+    Phase BM (2026-05-28): take ``deployment_name`` directly and
+    compute each ``<deployment>-<app>-dashboard`` id locally instead
+    of depending on the per-app dashboard_id fixtures. The
+    ``inv_dashboard_id`` fixture is module-scope-overridable in
+    ``test_inv_dashboard_agreement.py`` (the isolated cfg per BL.0),
+    which collides with this session-scope fixture's resolution and
+    raises ``ScopeMismatch`` on collection. Computing the IDs here
+    sidesteps the override without breaking the BL.0 isolation.
     """
     import os
     if os.environ.get(RECON_GEN_E2E.name) != "1":
@@ -473,10 +479,10 @@ def _qs_pre_warm_dashboards(  # pyright: ignore[reportUnusedFunction]: pytest au
     if not cfg.aws_account_id or not account_id:
         return
     dashboard_ids = (
-        ("l1", l1_dashboard_id),
-        ("inv", inv_dashboard_id),
-        ("exec", exec_dashboard_id),
-        ("l2ft", l2ft_dashboard_id),
+        ("l1", f"{deployment_name}-l1-dashboard"),
+        ("inv", f"{deployment_name}-investigation-dashboard"),
+        ("exec", f"{deployment_name}-executives-dashboard"),
+        ("l2ft", f"{deployment_name}-l2-flow-tracing"),
     )
     for label, dashboard_id in dashboard_ids:
         try:

@@ -36,6 +36,7 @@ from typing import ClassVar
 
 from recon_gen.common.l2.primitives import L2Instance
 from recon_gen.common.money import Cents
+from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     day_bounds,
     find_internal_with_role,
@@ -57,10 +58,11 @@ class ExpectedEodBalanceInvariant:
     prefix: str = "spec_example"
 
     def detect(self, conn: sqlite3.Connection) -> set[Violation]:
-        rows = conn.execute(
+        rows = fetch_all(
+            conn,
             f"SELECT account_id, business_day_start, variance "
             f"FROM {self.prefix}_expected_eod_balance_breach",
-        ).fetchall()
+        )
         # AO.1: variance is BIGINT cents — see overdraft.detect note.
         return {
             RuleViolation.of(

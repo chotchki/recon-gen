@@ -182,11 +182,10 @@ def test_date_control_shape_comes_from_the_tree() -> None:
     ``mapped_dataset_params``: a picker bound to a SQL-pushed-down
     dataset param (BM-shape — L1 Daily Statement's single Business
     Day picker, L1 universal Date From/To pair, Exec Date From/To
-    pair) emits a ``ParameterDateSpec`` per picker. A picker bound
-    to a parameter that's narrowed only via analysis-level
-    ``TimeRangeFilter`` (L2FT's three sheets — pre-BM dual-SQL
-    holdouts) DOES NOT emit a spec: App2's SQL doesn't bind those
-    URL keys, so rendering the picker would be a UX lie.
+    pair, L2FT per-sheet Date From/To pairs) emits a
+    ``ParameterDateSpec`` per picker. Pickers WITHOUT
+    ``mapped_dataset_params`` don't emit — App2's SQL wouldn't bind
+    the URL keys, so rendering the picker would be a UX lie.
     """
     from recon_gen.apps.l1_dashboard.app import build_l1_dashboard_app
     from recon_gen.apps.l1_dashboard.datasets import (
@@ -194,6 +193,8 @@ def test_date_control_shape_comes_from_the_tree() -> None:
     )
     from recon_gen.apps.l2_flow_tracing.app import build_l2_flow_tracing_app
     from recon_gen.apps.l2_flow_tracing.datasets import (
+        P_L2FT_RAILS_DATE_END,
+        P_L2FT_RAILS_DATE_START,
         build_all_l2_flow_tracing_datasets,
     )
     from recon_gen.common.l2 import default_l2_instance
@@ -214,14 +215,18 @@ def test_date_control_shape_comes_from_the_tree() -> None:
     assert 'data-widget="flatpickr-single"' in ds_form
     assert 'data-widget="flatpickr-range"' not in ds_form
 
-    # L2FT picker pair — narrowed only via analysis-level
-    # TimeRangeFilter (pre-BM dual-SQL holdout, no dataset-side
-    # ``<<$pL2ftDate*>>`` pushdown). App2 emits no ParameterDateSpec
-    # for those pickers — wiring up a URL key without a SQL bind
-    # would render a non-functional widget in App2.
+    # L2FT picker pair (post-BM) — narrows on the per-sheet dataset
+    # via ``<<$pL2ftDate*>>`` pushdown; mapped_dataset_params bridges
+    # the picker write through, so App2 emits the per-picker
+    # ParameterDateSpec entries as expected.
     build_all_l2_flow_tracing_datasets(cfg, inst)
     l2ft = build_l2_flow_tracing_app(cfg, l2_instance=inst)
     assert l2ft.analysis is not None
     rails = next(s for s in l2ft.analysis.sheets if s.name == _RAILS_NAME)
     rails_specs = make_filter_specs_for_sheet(rails)
-    assert not [s for s in rails_specs if isinstance(s, ParameterDateSpec)]
+    rails_date_specs = [
+        s for s in rails_specs if isinstance(s, ParameterDateSpec)
+    ]
+    rails_names = {s.name for s in rails_date_specs}
+    assert P_L2FT_RAILS_DATE_START in rails_names
+    assert P_L2FT_RAILS_DATE_END in rails_names

@@ -32,6 +32,7 @@ from datetime import datetime, timedelta
 from typing import ClassVar
 
 from recon_gen.common.l2.primitives import L2Instance, SingleLegRail, TwoLegRail
+from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     find_internal_with_role,
     insert_tx,
@@ -53,10 +54,11 @@ class StuckUnbundledInvariant:
     prefix: str = "spec_example"
 
     def detect(self, conn: sqlite3.Connection) -> set[Violation]:
-        rows = conn.execute(
+        rows = fetch_all(
+            conn,
             f"SELECT transaction_id, rail_name "
             f"FROM {self.prefix}_stuck_unbundled",
-        ).fetchall()
+        )
         return {
             RuleViolation.of(
                 "stuck_unbundled",

@@ -100,15 +100,15 @@ def _typed_column(col: Any) -> Any:
 
 def _string_ds_params(params: list[Any]) -> dict[str, Any]:
     """Index the StringDatasetParameter on each DatasetParameter by Name —
-    the dominant pattern in this file. Asserts every entry is a string
-    parameter (the L2FT datasets are all string-shaped); other shapes
-    would land in a different by-Name index in a future test."""
+    the dominant pattern in this file. Skips DateTime / Integer / Decimal
+    variants (Phase BM added DateTimeDatasetParameter entries for the
+    per-sheet date pickers); callers that want those can grep the same
+    ``params`` list for the matching variant attribute."""
     out: dict[str, Any] = {}
     for p in params:
         sdp = p.StringDatasetParameter
-        assert sdp is not None, (
-            f"expected StringDatasetParameter; got {p!r}"
-        )
+        if sdp is None:
+            continue
         out[sdp.Name] = sdp
     return out
 
@@ -680,14 +680,19 @@ def test_chains_metadata_params_are_chain_scoped() -> None:
     """Chains uses its own pL2ftChainsMeta{Key,Value} params — separate
     from Rails' pL2ftMeta{Key,Value} so per-sheet selection doesn't
     bleed across tabs."""
+    from recon_gen.apps.l2_flow_tracing.datasets import (
+        P_L2FT_CHAINS_DATE_END,
+        P_L2FT_CHAINS_DATE_START,
+    )
+
     app = build_l2_flow_tracing_app(_CFG)
     assert app.analysis is not None
     param_names = {str(p.name) for p in app.analysis.parameters}
     assert "pL2ftChainsMetaKey" in param_names
     assert "pL2ftChainsMetaValue" in param_names
     # And the date params are independent too — chains has its own.
-    assert "pL2ftChainsDateStart" in param_names
-    assert "pL2ftChainsDateEnd" in param_names
+    assert P_L2FT_CHAINS_DATE_START in param_names
+    assert P_L2FT_CHAINS_DATE_END in param_names
 
 
 def test_chain_instances_dataset_declares_cascade_and_pushdown_parameters() -> None:
@@ -706,8 +711,15 @@ def test_chain_instances_dataset_declares_cascade_and_pushdown_parameters() -> N
     # Instance WITH chains.
     inst = load_instance(SASQUATCH_PR_YAML)
     assert declared_chain_parents(inst)  # sasquatch_pr declares chains
+    from recon_gen.apps.l2_flow_tracing.datasets import (
+        P_L2FT_CHAINS_DATE_END,
+        P_L2FT_CHAINS_DATE_START,
+    )
+
     params = build_chain_instances_dataset(_CFG, inst).DatasetParameters
-    assert params is not None and len(params) == 4
+    # Phase BM — 4 pre-BM (pKey/pValues + pL2ftChainsChain/Completion)
+    # + 2 BM date params (pL2ftChainsDateStart/End) = 6.
+    assert params is not None and len(params) == 6
     by_name = _string_ds_params(params)
     assert by_name["pKey"].ValueType == "SINGLE_VALUED"
     assert by_name["pValues"].ValueType == "SINGLE_VALUED"
@@ -717,6 +729,13 @@ def test_chain_instances_dataset_declares_cascade_and_pushdown_parameters() -> N
     assert by_name["pL2ftChainsCompletion"].DefaultValues.StaticValues == [
         L2FT_ALL_SENTINEL,
     ]
+    # BM date params declared (defaults asserted via DateTime variant).
+    date_param_names = {
+        p.DateTimeDatasetParameter.Name
+        for p in params if p.DateTimeDatasetParameter is not None
+    }
+    assert P_L2FT_CHAINS_DATE_START in date_param_names
+    assert P_L2FT_CHAINS_DATE_END in date_param_names
     # Instance WITHOUT chains → same sentinel default.
     from dataclasses import replace
     no_chains = replace(load_instance(SASQUATCH_PR_YAML), chains=())
@@ -829,13 +848,18 @@ def test_tt_datasets_declare_cascade_and_pushdown_parameters() -> None:
     ``_match_all_in_clause``. An instance with zero templates lands on
     the same sentinel default."""
     from recon_gen.apps.l2_flow_tracing.datasets import (
-        L2FT_ALL_SENTINEL, build_tt_instances_dataset,
+        L2FT_ALL_SENTINEL,
+        P_L2FT_TT_DATE_END,
+        P_L2FT_TT_DATE_START,
+        build_tt_instances_dataset,
         build_tt_legs_dataset, declared_template_names,
     )
     inst = load_instance(SASQUATCH_PR_YAML)
     for build in (build_tt_instances_dataset, build_tt_legs_dataset):
         params = build(_CFG, inst).DatasetParameters
-        assert params is not None and len(params) == 4, build.__name__
+        # Phase BM — 4 pre-BM (pKey/pValues + Template/Completion) + 2
+        # BM date params (pL2ftTtDateStart/End) = 6.
+        assert params is not None and len(params) == 6, build.__name__
         by_name = _string_ds_params(params)
         assert by_name["pKey"].ValueType == "SINGLE_VALUED"
         assert by_name["pValues"].ValueType == "SINGLE_VALUED"
@@ -847,6 +871,12 @@ def test_tt_datasets_declare_cascade_and_pushdown_parameters() -> None:
         assert by_name["pL2ftTtCompletion"].DefaultValues.StaticValues == [
             L2FT_ALL_SENTINEL,
         ]
+        date_param_names = {
+            p.DateTimeDatasetParameter.Name
+            for p in params if p.DateTimeDatasetParameter is not None
+        }
+        assert P_L2FT_TT_DATE_START in date_param_names, build.__name__
+        assert P_L2FT_TT_DATE_END in date_param_names, build.__name__
     # Empty-templates instance → same sentinel default.
     from dataclasses import replace
     no_tt = replace(inst, transfer_templates=[])
@@ -1254,13 +1284,24 @@ def test_postings_dataset_declares_cascade_and_pushdown_parameters() -> None:
     sentinel-list default (X.2.t.2). AA.A.3 unified all three on the
     SINGLE shape per the drill-to-one default."""
     from recon_gen.apps.l2_flow_tracing.datasets import (
-        L2FT_ALL_SENTINEL, build_postings_dataset, META_KEY_ALL_SENTINEL,
+        L2FT_ALL_SENTINEL,
+        P_L2FT_RAILS_DATE_END,
+        P_L2FT_RAILS_DATE_START,
+        build_postings_dataset, META_KEY_ALL_SENTINEL,
         META_VALUE_PLACEHOLDER_SENTINEL,
     )
     inst = load_instance(SASQUATCH_PR_YAML)
     aws_ds = build_postings_dataset(_CFG, inst)
     params = aws_ds.DatasetParameters
-    assert params is not None and len(params) == 5
+    # Phase BM — 5 pre-BM (pKey/pValues + Rail/Status/Bundle) + 2 BM
+    # date params (pL2ftDateStart/End) = 7.
+    assert params is not None and len(params) == 7
+    date_param_names = {
+        p.DateTimeDatasetParameter.Name
+        for p in params if p.DateTimeDatasetParameter is not None
+    }
+    assert P_L2FT_RAILS_DATE_START in date_param_names
+    assert P_L2FT_RAILS_DATE_END in date_param_names
     by_name = _string_ds_params(params)
     # Metadata cascade pair.
     assert by_name["pKey"].ValueType == "SINGLE_VALUED"

@@ -34,6 +34,7 @@ from datetime import date
 from typing import ClassVar
 
 from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     find_internal_with_role,
     load_spec_example,
@@ -74,11 +75,12 @@ class AnomalyInvariant:
     prefix: str = "spec_example"
 
     def detect(self, conn: sqlite3.Connection) -> set[Violation]:
-        rows = conn.execute(
+        rows = fetch_all(
+            conn,
             f"SELECT sender_account_id, recipient_account_id, window_end, "
             f"z_bucket "
             f"FROM {self.prefix}_inv_pair_rolling_anomalies",
-        ).fetchall()
+        )
         return {
             RuleViolation.of(
                 "inv_pair_rolling_anomalies",

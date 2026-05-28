@@ -40,6 +40,7 @@ from datetime import date
 from typing import ClassVar
 
 from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     insert_tx,
     load_spec_example,
@@ -61,10 +62,11 @@ class MultiXorViolationInvariant:
     prefix: str = "spec_example"
 
     def detect(self, conn: sqlite3.Connection) -> set[Violation]:
-        rows = conn.execute(
+        rows = fetch_all(
+            conn,
             f"SELECT parent_transfer_id, disagreement_kind "
             f"FROM {self.prefix}_multi_xor_violation",
-        ).fetchall()
+        )
         return {
             RuleViolation.of(
                 "multi_xor_violation",

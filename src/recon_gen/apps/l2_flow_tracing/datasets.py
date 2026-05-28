@@ -49,6 +49,8 @@ from recon_gen.common.l2 import (
 from recon_gen.common.models import (
     DataSet,
     DatasetParameter,
+    DateTimeDatasetParameter,
+    DateTimeDatasetParameterDefaultValues,
     StringDatasetParameter,
     StringDatasetParameterDefaultValues,
 )
@@ -62,6 +64,7 @@ from recon_gen.common.sql import (
     greatest,
     json_value,
     typed_null,
+    universal_date_range_clause,
 )
 from recon_gen.common.sql.money import cents_to_dollars_sql
 
@@ -83,6 +86,73 @@ def l2ft_matview_specs(
         (f"{p}_current_transactions", "posting"),
         (f"{p}_current_daily_balances", "business_day_start"),
     ]
+
+
+# Phase BM — per-sheet date-range filter param names. Each L2FT
+# sheet (Rails / Chains / Transfer Templates) carries its own pair so
+# the analyst's window on one sheet doesn't perturb another. Pre-BM
+# these were analysis-only (declared in ``app.py``) and narrowed via
+# per-sheet ``TimeRangeFilter`` FilterGroups on the QS side; App2
+# saw the picker widget but didn't actually narrow (no
+# ``{date_filter}`` slot in the L2FT dataset SQL). BM unifies via
+# dataset-SQL pushdown — both renderers narrow at the DB.
+P_L2FT_RAILS_DATE_START = "pL2ftDateStart"
+P_L2FT_RAILS_DATE_END = "pL2ftDateEnd"
+P_L2FT_CHAINS_DATE_START = "pL2ftChainsDateStart"
+P_L2FT_CHAINS_DATE_END = "pL2ftChainsDateEnd"
+P_L2FT_TT_DATE_START = "pL2ftTtDateStart"
+P_L2FT_TT_DATE_END = "pL2ftTtDateEnd"
+
+# Match-all sentinel dates — the L2FT default state shows ALL data
+# (operator narrows down from there). Differs from L1 / Exec which
+# default to a 7-day / 30-day window centered on the as-of anchor —
+# L2FT is a triage surface, not a daily-operations dashboard, so the
+# full window is the right default. The ``T00:00:00`` form is the
+# canonical ISO-8601 shape ``universal_date_range_clause`` expects on
+# both renderers (QS substitutes the literal; App2 binds the string).
+_L2FT_DATE_START_STATIC = "1900-01-01T00:00:00"
+_L2FT_DATE_END_STATIC = "2099-12-31T00:00:00"
+
+
+def _l2ft_match_all_range_params(
+    start_param: str, end_param: str,
+) -> list[DatasetParameter]:
+    """Phase BM — the two ``DateTimeDatasetParameter``s for an L2FT
+    date-range pickup pair. Defaults are the match-all sentinels.
+    ``app.py``'s analysis-level ``DateTimeParam`` declarations bridge
+    into the same names via ``MappedDataSetParameters``.
+    """
+    return [
+        DatasetParameter(DateTimeDatasetParameter=DateTimeDatasetParameter(
+            Name=start_param, ValueType="SINGLE_VALUED",
+            TimeGranularity="DAY",
+            DefaultValues=DateTimeDatasetParameterDefaultValues(
+                StaticValues=[_L2FT_DATE_START_STATIC],
+            ),
+        )),
+        DatasetParameter(DateTimeDatasetParameter=DateTimeDatasetParameter(
+            Name=end_param, ValueType="SINGLE_VALUED",
+            TimeGranularity="DAY",
+            DefaultValues=DateTimeDatasetParameterDefaultValues(
+                StaticValues=[_L2FT_DATE_END_STATIC],
+            ),
+        )),
+    ]
+
+
+def _l2ft_date_range_clause(
+    date_column: str, start_param: str, end_param: str, cfg: Config,
+) -> str:
+    """Phase BM — day-inclusive predicate fragment narrowing
+    ``date_column`` by the supplied ``start_param`` / ``end_param``
+    dataset-param names. Thin wrapper over
+    :func:`universal_date_range_clause`."""
+    return universal_date_range_clause(
+        date_column,
+        start_param=start_param,
+        end_param=end_param,
+        dialect=cfg.dialect,
+    )
 
 
 # Visual identifiers — keys for the Dataset registry on App.
@@ -657,13 +727,19 @@ def build_postings_dataset(
       ``status`` and ``bundle_status`` are CASE-aliases (not visible to
       a WHERE in the same SELECT) so the projection wraps in a subquery.
 
-    Date range stays an analysis-level TimeRangeFilter (Y.2.f territory).
+    Phase BM — date narrowing pushes down via ``<<$pL2ftDateStart>>``
+    / ``<<$pL2ftDateEnd>>`` (replaces the pre-BM per-sheet
+    ``TimeRangeFilter`` on QS + no-narrow on App2). One SQL form
+    across both renderers.
     """
     prefix = cfg.db_table_prefix
     # AO.1.impl — amount_money is BIGINT cents on the base table; wrap
     # to dollars at projection (inner subquery so the outer SELECT *
     # passes the already-dollar form through).
     amount = cents_to_dollars_sql("amount_money", dialect=cfg.dialect)
+    date_clause = _l2ft_date_range_clause(
+        "posting", P_L2FT_RAILS_DATE_START, P_L2FT_RAILS_DATE_END, cfg,
+    )
     sql = (
         f"SELECT * FROM (\n"
         f"  SELECT\n"
@@ -691,6 +767,7 @@ def build_postings_dataset(
         # picked values. See `metadata_filter_clause` for the
         # per-dialect-safe WHERE shape.
         f"{metadata_filter_clause(l2_instance, 'metadata', cfg.dialect)}"
+        f"    AND {date_clause}\n"
         f") postings\n"
         # AA.A.3 — rail / status / bundle all pushed into SQL via the
         # single-valued sentinel-guard form (`('sentinel' = <<$p>> OR col
@@ -753,6 +830,9 @@ def build_postings_dataset(
                     StaticValues=[L2FT_ALL_SENTINEL],
                 ),
             )),
+            *_l2ft_match_all_range_params(
+                P_L2FT_RAILS_DATE_START, P_L2FT_RAILS_DATE_END,
+            ),
         ],
     )
 
@@ -1049,8 +1129,12 @@ def build_chain_instances_dataset(
         # default; AA.A.3 flipped every pushdown to SINGLE per the
         # drill-to-one default. Clearing a dropdown reverts to the
         # sentinel default (= all rows match).
+        # Phase BM — Chains-sheet date pickers narrow ``parent_posting``
+        # via the unified ``<<$pL2ftChainsDate*>>`` pushdown (replaces
+        # the pre-BM TimeRangeFilter FG).
         f"WHERE {_match_all_in_clause('parent_chain_name', 'pL2ftChainsChain')}\n"
         f"  AND {_match_all_in_clause('completion_status', 'pL2ftChainsCompletion')}\n"
+        f"  AND {_l2ft_date_range_clause('parent_posting', P_L2FT_CHAINS_DATE_START, P_L2FT_CHAINS_DATE_END, cfg)}\n"
         f"ORDER BY parent_posting DESC"
     )
     return build_dataset(
@@ -1096,6 +1180,9 @@ def build_chain_instances_dataset(
                     StaticValues=[L2FT_ALL_SENTINEL],
                 ),
             )),
+            *_l2ft_match_all_range_params(
+                P_L2FT_CHAINS_DATE_START, P_L2FT_CHAINS_DATE_END,
+            ),
         ],
     )
 
@@ -2051,8 +2138,13 @@ def build_tt_instances_dataset(
         # default; AA.A.3 flipped every pushdown to SINGLE per the
         # drill-to-one default. Clearing a dropdown reverts to the
         # sentinel default (= all rows match).
+        # Phase BM — TT-sheet date pickers narrow ``posting`` via
+        # ``<<$pL2ftTtDate*>>`` (shared with tt_legs so both Sankey +
+        # Table narrow together — the pre-BM ALL_DATASETS TimeRangeFilter
+        # FG dissolves).
         f"WHERE {_match_all_in_clause('template_name', 'pL2ftTtTemplate')}\n"
         f"  AND {_match_all_in_clause('completion_status', 'pL2ftTtCompletion')}\n"
+        f"  AND {_l2ft_date_range_clause('posting', P_L2FT_TT_DATE_START, P_L2FT_TT_DATE_END, cfg)}\n"
         f"ORDER BY posting DESC, template_name, transfer_id"
     )
     return build_dataset(
@@ -2112,6 +2204,9 @@ def _tt_dataset_parameters(
                 StaticValues=[L2FT_ALL_SENTINEL],
             ),
         )),
+        *_l2ft_match_all_range_params(
+            P_L2FT_TT_DATE_START, P_L2FT_TT_DATE_END,
+        ),
     ]
 
 
@@ -2327,8 +2422,12 @@ def build_tt_legs_dataset(
         # tt-instances so the Template / Completion dropdowns narrow the
         # Sankey + Table together — the M.3.10k denormalization made this
         # pair available).
+        # Phase BM — same TT-sheet date narrowing on ``posting`` as
+        # tt-instances; both datasets carry the BM-shape ``<<$pL2ftTtDate*>>``
+        # placeholders so the picker pair drives them in lockstep.
         f"WHERE {_match_all_in_clause('template_name', 'pL2ftTtTemplate')}\n"
         f"  AND {_match_all_in_clause('completion_status', 'pL2ftTtCompletion')}\n"
+        f"  AND {_l2ft_date_range_clause('posting', P_L2FT_TT_DATE_START, P_L2FT_TT_DATE_END, cfg)}\n"
         f"ORDER BY posting DESC, template_name, transfer_id"
     )
     return build_dataset(

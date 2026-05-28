@@ -585,6 +585,16 @@ def _layer_command(
     if layer != "unit":
         env_addl["RECON_GEN_SKIP_PYRIGHT"] = "1"
         env_addl["RECON_GEN_SKIP_BIOME"] = "1"
+        # BM.5 (2026-05-28) — also skip the Tailwind output.css drift
+        # check on per-cell layers. The check rebuilds via Bun which
+        # extracts a bundled native lib (lightningcss) to /tmp; 13
+        # parallel cell pytest sessions racing on the same /tmp
+        # extraction can crash any cell with
+        # ``dlopen(lightningcss.darwin-arm64-XXX.node): no such file``
+        # (Bun ERR_DLOPEN_FAILED, surfaced under `sp_sl_lo`). The
+        # unit prelude already ran the gate cleanly once at session
+        # start — per-cell pytest invocations don't need to re-run.
+        env_addl["RECON_GEN_SKIP_TAILWIND"] = "1"
     # Y.2.gate.k.1.coverage — every pytest layer (everything except `deploy`,
     # which is a `recon-gen json apply` CLI call) writes a per-(variant,
     # layer) `.coverage.<variant>.<layer>` data file when `--coverage` is set.
