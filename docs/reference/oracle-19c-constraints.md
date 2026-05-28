@@ -20,6 +20,30 @@ deletion path.
 
 ## Active workarounds (BC.12, 2026-05-24)
 
+### `oracledb` bind scanner trips on `:MI` / `:SS` inside TO_DATE format literals (BM.5, 2026-05-28)
+
+**Constraint:** the `oracledb` driver scans pre-execution SQL for
+`:name` tokens to identify bind variables. Its scanner does NOT
+respect SQL string-literal quoting — `TO_DATE(:p, 'YYYY-MM-DD"T"
+HH24:MI:SS')` makes the driver see `:MI` and `:SS` inside the
+single-quoted format literal as undeclared binds and rejects the
+query with `DPY-4008: no bind placeholder named ":MI" was found`.
+
+**Workaround layer:** the BM `universal_date_range_clause` helper
+sidesteps the issue with `TO_DATE(SUBSTR(<param>, 1, 10),
+'YYYY-MM-DD')` — chops the `YYYY-MM-DD` prefix off either input
+shape (`'2026-05-20'` or `'2026-05-20T00:00:00'`) and parses with
+a colon-free format string. The picker is day-aligned
+(`TimeGranularity="DAY"`) so the sub-day precision the SUBSTR drops
+carries no meaning for narrowing; day-inclusive `+ 1` (Oracle DATE
+arithmetic) lands the upper bound on day-after-end's midnight.
+
+**Cost:** the SUBSTR + colon-free format adds a small functional
+overhead per row evaluation vs a direct format match. Negligible on
+the matview row counts the date filter narrows (≤6 figures); would
+need re-evaluation if the same shape ever runs against
+hundreds-of-millions-of-rows tables.
+
 ### `<prefix>_config_kv` flattened JSON tree (BC.12)
 
 **Constraint:** **ORA-32368: cannot create JSON materialized view

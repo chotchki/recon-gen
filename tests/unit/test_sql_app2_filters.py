@@ -58,14 +58,25 @@ class TestPostgres:
 
 
 class TestOracle:
-    def test_uses_to_date_with_format_string(self) -> None:
+    def test_uses_to_date_with_substr_and_colon_free_format(self) -> None:
         """Oracle's default NLS_DATE_FORMAT doesn't parse ISO-T
-        strings via bare CAST, so the helper routes through TO_DATE
-        with an explicit ISO format string."""
+        strings via bare CAST, so the helper routes through TO_DATE.
+
+        The format string is ``'YYYY-MM-DD'`` (NOT the time-tokened
+        ``'YYYY-MM-DD"T"HH24:MI:SS'``) because oracledb's pre-execution
+        bind-name scanner trips on ``:MI`` / ``:SS`` inside string
+        literals (DPY-4008). SUBSTR(p, 1, 10) chops both the bare
+        ``YYYY-MM-DD`` and the ``YYYY-MM-DDTHH:MM:SS`` input shapes
+        to the date prefix.
+        """
         sql = _clause(Dialect.ORACLE)
         assert "TO_DATE(" in sql
-        # ISO-T format Oracle parses regardless of NLS_DATE_FORMAT.
-        assert "'YYYY-MM-DD\"T\"HH24:MI:SS'" in sql
+        assert "SUBSTR(" in sql
+        assert "'YYYY-MM-DD'" in sql
+        # The ":MI" / ":SS" tokens must NOT appear — they break
+        # oracledb's bind scanner.
+        assert ":MI" not in sql
+        assert ":SS" not in sql
         assert "CAST" not in sql
 
     def test_includes_both_param_placeholders(self) -> None:

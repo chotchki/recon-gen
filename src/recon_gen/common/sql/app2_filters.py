@@ -56,14 +56,24 @@ def universal_date_range_clause(
     if dialect is Dialect.ORACLE:
         # Oracle's default NLS_DATE_FORMAT (``DD-MON-RR``) doesn't
         # parse ISO-T strings via bare CAST, so route through TO_DATE
-        # with an explicit format string that matches both QS's
-        # ``'YYYY-MM-DDTHH24:MI:SS'`` substitution AND App2's URL-bound
-        # binding. ``+ 1`` adds one day (Oracle DATE arithmetic).
+        # with an explicit format string.
+        #
+        # Critically — the format string CANNOT contain ``:`` tokens
+        # like ``HH24:MI:SS``: oracledb's pre-execution bind-name
+        # scanner finds ``:MI`` / ``:SS`` inside the string literal
+        # and rejects them as undeclared binds (DPY-4008). Sidestep
+        # with ``SUBSTR(<param>, 1, 10)`` to chop the ``YYYY-MM-DD``
+        # prefix off both the ``YYYY-MM-DD`` and ``YYYY-MM-DDTHH:MM:SS``
+        # input shapes, then parse with a colon-free format string.
+        # The picker is day-aligned (``TimeGranularity="DAY"``) so the
+        # sub-day precision the SUBSTR drops carries no meaning for
+        # narrowing; ``+ 1`` (Oracle DATE arithmetic) lands the
+        # day-inclusive upper bound on the day-after-end's midnight.
         return (
-            f"{date_column} >= TO_DATE({p_start}, "
-            f"'YYYY-MM-DD\"T\"HH24:MI:SS') "
-            f"AND {date_column} < TO_DATE({p_end}, "
-            f"'YYYY-MM-DD\"T\"HH24:MI:SS') + 1"
+            f"{date_column} >= TO_DATE(SUBSTR({p_start}, 1, 10), "
+            f"'YYYY-MM-DD') "
+            f"AND {date_column} < TO_DATE(SUBSTR({p_end}, 1, 10), "
+            f"'YYYY-MM-DD') + 1"
         )
     if dialect is Dialect.SQLITE:
         # SQLite has no DATE type — stored timestamps are ISO TEXT.
