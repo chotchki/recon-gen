@@ -467,44 +467,6 @@ def _resolve_money_columns(
     return frozenset(currency_cols & cents_names)
 
 
-def _apply_default_date_range(
-    params: Mapping[str, list[str]],
-    default_date_from: str,
-    default_date_to: str,
-) -> Mapping[str, list[str]]:
-    """BL.2 — substitute the analysis's default date range when the URL's
-    ``date_from`` / ``date_to`` are absent OR empty.
-
-    Mirrors QuickSight's "analysis-level TimeRangeFilter parameter
-    defaults apply on first render" behavior. Without this, App2 sees
-    ``?date_from=&date_to=`` (the form's auto-submit on page load),
-    binds them to empty strings, and the dataset SQL's match-all
-    sentinel (``WHERE col >= :date_from OR :date_from = ''``) fires
-    → all-spine read. QS in the same situation applies the 30-day /
-    7-day default and narrows.
-
-    Substitution rule: ONE pair, BOTH together. Either both URL
-    values are non-empty (user picked a range; honor it as-is) or
-    both fall back to the analysis defaults. Mixed-empty doesn't
-    happen via the form widget (Flatpickr's onChange writes both
-    inputs or neither), but if it ever does the function still
-    behaves predictably — present values win, absent ones get
-    defaults.
-
-    Returns a NEW Mapping; never mutates the input.
-    """
-    raw_from = (params.get("date_from") or [""])[-1]
-    raw_to = (params.get("date_to") or [""])[-1]
-    if raw_from and raw_to:
-        return params  # both present — honor user's pick
-    new_params: dict[str, list[str]] = dict(params)
-    if not raw_from:
-        new_params["date_from"] = [default_date_from]
-    if not raw_to:
-        new_params["date_to"] = [default_date_to]
-    return new_params
-
-
 def _kpi_format(visual: object) -> str | None:
     """v11.21.0 finding #14 (BH.14) — return ``"currency"`` when the
     visual is a KPI whose first value measure carries ``currency=True``,
@@ -568,21 +530,13 @@ def make_tree_db_fetcher(
             f"can't build a fetcher with no visuals."
         )
 
-    # BL.2 — pre-resolve the analysis's default universal date range
-    # (if any) once at fetcher build time. The per-request fetcher
-    # patches empty ``date_from`` / ``date_to`` URL params with these
-    # values, mirroring QS's analysis-level TimeRangeFilter parameter
-    # defaults. Analyses that intentionally don't narrow on date
-    # (L2FT / Investigation) leave ``default_universal_date_range``
-    # as ``None`` and see the previous "empty URL param → dataset
-    # match-all sentinel" behavior unchanged.
-    _default_range = tree_app.analysis.default_universal_date_range
-    _default_date_from: str = (
-        _default_range.emit_app2_date_from() if _default_range else ""
-    )
-    _default_date_to: str = (
-        _default_range.emit_app2_date_to() if _default_range else ""
-    )
+    # Phase BM — BL.2's pre-resolved default-date-range capture +
+    # per-request bind-layer patch both dissolved. Date narrowing
+    # lives in each date-scoped dataset's `<<$pXxxDateStart>>` /
+    # `<<$pXxxDateEnd>>` SQL parameters, whose StaticValues defaults
+    # are picked up by the existing
+    # `apply_dataset_param_defaults` substitution when the URL omits
+    # `param_pXxxDate*` keys.
 
     # Pre-resolve every visual's (kind, sql) at build time. Failures
     # surface here, not at request time. Visuals without datasets
@@ -640,19 +594,13 @@ def make_tree_db_fetcher(
             # Empty payload renders as a blank visual — fine for
             # the page-chrome-only case.
             return {}
-        # BL.2 — when the analysis declares a universal date range
-        # default AND the URL's ``date_from`` / ``date_to`` are
-        # empty (initial page load before user picks; or user-cleared
-        # picker submitting empty values), substitute the default.
-        # Mirrors QS's behavior where the analysis-level TimeRangeFilter's
-        # parameter defaults apply on first render.
-        if _default_date_from and _default_date_to:
-            params = _apply_default_date_range(
-                params, _default_date_from, _default_date_to,
-            )
         # Y.2.app2.cde — resolve `<<$paramName>>` defaults from the
         # dataset's QS parameters when the URL doesn't supply them
-        # (keeps the freshly-loaded page consistent with QS).
+        # (keeps the freshly-loaded page consistent with QS). Phase BM —
+        # this same path now resolves the universal date-range pickers'
+        # initial-load defaults; the BL.2 bind-layer prepop dissolved
+        # because the date-pushdown DateTimeDatasetParameters carry the
+        # same StaticValues defaults the analysis picker shows.
         dataset_params = get_dataset_params(ds_id) if ds_id else []
         if kind == "Table":
             # X.2.g.5.followon + X.2.h.5 — page (and sort) the table

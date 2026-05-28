@@ -632,36 +632,13 @@ def _render_filter_form(
         "bg-surface rounded-lg shadow-sm border border-surface-border"
     )
     parts = [f'  <form id="filter-form" class="{form_class}">']
-    # AO.2 — a sheet with a single-date control (ParameterDateSpec, e.g.
-    # the Daily Statement's Business Day) is a single-DAY sheet; the
-    # universal date-RANGE makes no sense there (and its datasets don't
-    # even bind date_from/date_to), so suppress it. Every other sheet
-    # keeps the range.
-    has_single_date = any(
-        isinstance(spec, ParameterDateSpec) for spec in filter_specs
-    )
-    if not has_single_date:
-        # X.2.l.4 — one Flatpickr range popover (the visible, un-named text
-        # input) feeding two hidden ``date_from`` / ``date_to`` inputs (the
-        # wire-serialized ones — URL keys unchanged). ``readonly`` so the
-        # field can't take typed garbage; Flatpickr opens it on click. If
-        # Flatpickr fails to load the text input just sits inert and the
-        # hidden inputs stay empty → no date narrowing (degraded, not broken).
-        #
-        # BL.2 — hidden inputs stay EMPTY on initial render. The
-        # bind layer (``_tree_fetcher.make_tree_db_fetcher``) maps
-        # empty ``date_from`` / ``date_to`` URL values to the
-        # analysis's ``default_universal_date_range`` when one is
-        # declared; analyses without a default (L2FT, Investigation)
-        # see empty → match-all (unchanged behavior).
-        parts.append(
-            f'    <label class="{_FORM_LABEL_CLASS}">Date range '
-            f'<input type="text" data-widget="flatpickr-range" readonly '
-            f'placeholder="All dates" class="{_DATE_INPUT_CLASS}"'
-            f' style="{_DATE_INPUT_STYLE}"></label>'
-            f'<input type="hidden" name="date_from" value="">'
-            f'<input type="hidden" name="date_to" value="">'
-        )
+    # Phase BM — the pre-BM hidden ``date_from`` / ``date_to`` block
+    # for the universal date-RANGE dissolved. Each
+    # ParameterDateTimePicker is now its own ParameterDateSpec entry
+    # rendering a single-date Flatpickr widget bound to a
+    # ``?param_<name>=YYYY-MM-DD`` URL key, so Date From + Date To
+    # pairs come through the same per-spec render path as the
+    # single-date Daily Statement picker.
     for spec in filter_specs:
         if isinstance(spec, ParameterDropdownSpec):
             parts.append(_render_parameter_dropdown(spec))

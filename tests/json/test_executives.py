@@ -287,10 +287,14 @@ def test_account_coverage_legacy_active_filter_dropped(exec_analysis: "_ModelsAn
     by ``DS_EXEC_ACCOUNT_SUMMARY_ACTIVE`` whose SQL bakes the
     predicate in. The pinned filter narrowed in QS but not in App2;
     baking it into a second dataset fixes both renderers.
+
+    Phase BM — ``FilterGroups`` may be None entirely now (the per-
+    dataset date ``TimeRangeFilter`` FGs dissolved with the dual-SQL
+    form); coerce to a list before scanning.
     """
+    fgs = exec_analysis.Definition.FilterGroups or []
     legacy_fg_ids = [
-        g.FilterGroupId
-        for g in exec_analysis.Definition.FilterGroups
+        g.FilterGroupId for g in fgs
         if g.FilterGroupId == "fg-exec-account-active-only"
     ]
     assert legacy_fg_ids == [], (

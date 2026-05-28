@@ -178,11 +178,16 @@ def test_l2ft_rails_sheet_auto_derives_post_aa_a_3_pushdown_specs() -> None:
 
 
 def test_date_control_shape_comes_from_the_tree() -> None:
-    """AO.2 — range vs single date is the TREE's call; the renderer
-    implements it. L1 Daily Statement's LONE Business Day picker →
-    a single-date ``ParameterDateSpec`` (and the universal date-RANGE is
-    suppressed on that sheet); L2FT's Date From/To PAIR → no
-    ``ParameterDateSpec`` (the universal range keeps driving it)."""
+    """Phase BM — emission is gated on the parameter's
+    ``mapped_dataset_params``: a picker bound to a SQL-pushed-down
+    dataset param (BM-shape — L1 Daily Statement's single Business
+    Day picker, L1 universal Date From/To pair, Exec Date From/To
+    pair) emits a ``ParameterDateSpec`` per picker. A picker bound
+    to a parameter that's narrowed only via analysis-level
+    ``TimeRangeFilter`` (L2FT's three sheets — pre-BM dual-SQL
+    holdouts) DOES NOT emit a spec: App2's SQL doesn't bind those
+    URL keys, so rendering the picker would be a UX lie.
+    """
     from recon_gen.apps.l1_dashboard.app import build_l1_dashboard_app
     from recon_gen.apps.l1_dashboard.datasets import (
         build_all_l1_dashboard_datasets,
@@ -196,7 +201,7 @@ def test_date_control_shape_comes_from_the_tree() -> None:
     cfg = make_test_config(db_table_prefix=DEFAULT_PREFIX)
     inst = default_l2_instance()
 
-    # Lone picker → single date, range suppressed.
+    # BM-shape picker (L1 Daily Statement Business Day) → single date.
     build_all_l1_dashboard_datasets(cfg, inst)
     l1 = build_l1_dashboard_app(cfg, l2_instance=inst)
     assert l1.analysis is not None
@@ -209,12 +214,14 @@ def test_date_control_shape_comes_from_the_tree() -> None:
     assert 'data-widget="flatpickr-single"' in ds_form
     assert 'data-widget="flatpickr-range"' not in ds_form
 
-    # From/To pair → range (no single-date spec; universal range stays).
+    # L2FT picker pair — narrowed only via analysis-level
+    # TimeRangeFilter (pre-BM dual-SQL holdout, no dataset-side
+    # ``<<$pL2ftDate*>>`` pushdown). App2 emits no ParameterDateSpec
+    # for those pickers — wiring up a URL key without a SQL bind
+    # would render a non-functional widget in App2.
     build_all_l2_flow_tracing_datasets(cfg, inst)
     l2ft = build_l2_flow_tracing_app(cfg, l2_instance=inst)
     assert l2ft.analysis is not None
     rails = next(s for s in l2ft.analysis.sheets if s.name == _RAILS_NAME)
     rails_specs = make_filter_specs_for_sheet(rails)
     assert not [s for s in rails_specs if isinstance(s, ParameterDateSpec)]
-    rails_form = _render_filter_form([], tuple(rails_specs))
-    assert 'data-widget="flatpickr-range"' in rails_form

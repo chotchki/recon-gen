@@ -514,8 +514,6 @@ def build_dataset(
     contract: DatasetContract,
     visual_identifier: str,
     dataset_parameters: list[DatasetParameter] | None = None,
-    *,
-    app2_date_column: str | None = None,
 ) -> DataSet:
     """Build an AWS-shape DataSet.
 
@@ -524,46 +522,17 @@ def build_dataset(
     syntax at QuickSight query time. Bridge to analysis params via
     ``MappedDataSetParameters`` on the analysis ParameterDeclaration.
 
-    ``app2_date_column`` (Y.5.a, replaced raw ``app2_sql=``): name of
-    the date column the universal date-range filter narrows on. When
-    set, ``sql`` is treated as a template containing a literal
-    ``{date_filter}`` placeholder, and ``build_dataset`` emits both
-    SQL variants:
-
-    - QS gets ``sql.format(date_filter="")`` — the analysis-level
-      ``TimeRangeFilter`` narrows after-the-fact.
-    - App2 gets ``sql.format(date_filter=app2_date_filter(
-      app2_date_column, cfg.dialect))`` — the ``:date_from`` /
-      ``:date_to`` URL binds narrow at the DB.
-
-    Pre-Y.5.a callers passed an already-formatted ``app2_sql=`` string
-    plus an empty ``{date_filter}`` substitution into ``sql``. That
-    repeated boilerplate (``sql_template.format(date_filter=
-    app2_date_filter("col", cfg.dialect))``) at every call site and
-    silently broke when the operator forgot the App2 variant. The
-    new shape lets the dataset declare *the date column*, and
-    ``build_dataset`` handles substitution + registration.
+    Phase BM dissolved the pre-BM ``app2_date_column=`` kwarg + the
+    ``{date_filter}`` template slot in favor of unified
+    ``<<$pXxxDateStart>>`` / ``<<$pXxxDateEnd>>`` pushdown via the
+    same ``dataset_parameters`` mechanism (see
+    ``common/sql/app2_filters.py::universal_date_range_clause``).
+    One SQL form across QS + App2; the day-edge quirk dissolves.
     """
-    if app2_date_column is not None:
-        # Y.5.a — sql is a template with a {date_filter} slot.
-        from recon_gen.common.sql import app2_date_filter
-        qs_sql = sql.format(date_filter="")
-        app2_sql: str | None = sql.format(
-            date_filter=app2_date_filter(app2_date_column, cfg.dialect),
-        )
-    else:
-        qs_sql = sql
-        app2_sql = None
-    sql = _oracle_lowercase_alias_wrapper(qs_sql, contract, cfg)
-    # X.2.g.0 / X.2.g.1.b — register the dialect-correct SQL so the
-    # App2 tree fetcher can resolve a Visual's dataset SQL by
-    # visual_identifier. App2-specific variant wins when provided
-    # (same Oracle alias-wrapper transform applied for parity).
-    if app2_sql is not None:
-        app2_sql = _oracle_lowercase_alias_wrapper(app2_sql, contract, cfg)
-        register_sql(visual_identifier, app2_sql)
-    else:
-        register_sql(visual_identifier, sql)
+    sql = _oracle_lowercase_alias_wrapper(sql, contract, cfg)
+    # X.2.g.0 — register the dialect-correct SQL so the App2 tree
+    # fetcher can resolve a Visual's dataset SQL by visual_identifier.
+    register_sql(visual_identifier, sql)
     # Y.2.app2.cde — register the dataset's QS parameters too, so the
     # App2 executor can resolve a `<<$paramName>>` placeholder's default
     # (string-substituted) when the URL doesn't supply that param.

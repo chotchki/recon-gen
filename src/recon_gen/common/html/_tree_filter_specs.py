@@ -110,15 +110,6 @@ def make_filter_specs_for_sheet(sheet: "Sheet") -> list[FilterSpec]:
     separately). Skipped controls just don't get a widget.
     """
     specs: list[FilterSpec] = []
-    # AO.2 — a LONE datetime picker is a single-date sheet (Daily
-    # Statement's Business Day); a From/To PAIR is a date RANGE (L2FT /
-    # Executives / L1 invariant sheets). Only the lone case becomes a
-    # single-date control + suppresses the universal range; the pair stays
-    # out-of-scope so the universal date-range form keeps driving it.
-    n_date_pickers = sum(
-        isinstance(c, ParameterDateTimePicker)
-        for c in sheet.parameter_controls
-    )
     for ctrl in sheet.parameter_controls:
         if isinstance(ctrl, ParameterSlider):
             # X.2.u.4.e — a slider bound to a numeric parameter
@@ -146,15 +137,24 @@ def make_filter_specs_for_sheet(sheet: "Sheet") -> list[FilterSpec]:
             ))
             continue
         if isinstance(ctrl, ParameterDateTimePicker):
-            # AO.2 — a LONE datetime picker is a single date (Daily
-            # Statement's Business Day, bound to a SQL-pushed-down param):
-            # render a Flatpickr single-date input → ``?param_<name>=
-            # YYYY-MM-DD`` (the same ``<<$param>>`` narrowing QS does via
-            # the bridged dataset param), and the resulting spec suppresses
-            # the universal date-RANGE on the sheet. A From/To PAIR (count
-            # > 1) is a range — leave those out-of-scope so the universal
-            # date-range form keeps driving them (pre-AO.2 behaviour).
-            if n_date_pickers == 1:
+            # Phase BM — a datetime picker bound to a parameter that
+            # bridges to a SQL-pushed-down dataset param via
+            # ``MappedDataSetParameters`` renders as a Flatpickr
+            # single-date input → ``?param_<name>=YYYY-MM-DD`` (the same
+            # ``<<$param>>`` narrowing QS does via the bridged dataset
+            # param). A From/To pair on a BM-shape sheet (L1, Exec) is
+            # two ParameterDateSpec entries, each with its own URL key.
+            #
+            # Pickers WITHOUT mapped_dataset_params (currently L2FT's
+            # three sheets — pre-BM dual-SQL holdouts) don't render in
+            # App2's filter form: their narrowing was never wired into
+            # App2's SQL (the dataset SQL has no ``<<$pX>>`` placeholder
+            # for the date param), so adding the URL key would be a
+            # UX lie. They keep working in QS via the surviving
+            # ``TimeRangeFilter`` FilterGroup; App2 stays "date-pickerless"
+            # on those sheets until they migrate to the BM-shape too.
+            bridges = getattr(ctrl.parameter, "mapped_dataset_params", None)
+            if bridges:
                 specs.append(ParameterDateSpec(
                     name=str(ctrl.parameter.name), label=ctrl.title,
                 ))

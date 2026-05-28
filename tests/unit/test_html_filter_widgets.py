@@ -193,26 +193,38 @@ def _filter_form(out: str) -> str:
     return out[start:end]
 
 
-def test_date_range_is_flatpickr_with_hidden_from_to_inputs() -> None:
-    """The visible date control is one Flatpickr-range text input (no
-    ``name`` — Flatpickr writes the range string into it); the two
-    hidden ``date_from`` / ``date_to`` inputs are the wire elements,
-    synced by ``wireFlatpickrRange``.
+def test_date_pickers_render_as_per_param_flatpickr_singles() -> None:
+    """Phase BM — the pre-BM universal date-RANGE block (one
+    Flatpickr-range text input feeding two hidden ``date_from`` /
+    ``date_to`` inputs) dissolved. Every ParameterDateTimePicker is
+    now its own ParameterDateSpec → Flatpickr single-date input
+    bound to a ``?param_<name>=YYYY-MM-DD`` URL key. A From/To pair
+    renders as TWO single-date inputs, each with its own
+    ``param_*`` URL key (no hidden range-aggregator).
+    """
+    from recon_gen.apps.l1_dashboard.datasets import (
+        P_L1_DATE_END,
+        P_L1_DATE_START,
+    )
+    from recon_gen.common.html import ParameterDateSpec
 
-    BL.2: hidden inputs always render empty regardless of analysis-
-    level default range. The default lives in the bind layer
-    (``_tree_fetcher`` maps empty URL params to
-    ``analysis.default_universal_date_range``), not in the form —
-    keeps "where do narrowing decisions live?" answerable with one
-    pointer."""
     app, sheet = _build_app()
-    form = _filter_form(emit_html(app, sheet, dashboard_id="x"))
-    assert 'data-widget="flatpickr-range"' in form
-    assert '<input type="hidden" name="date_from" value="">' in form
-    assert '<input type="hidden" name="date_to" value="">' in form
-    # No more native <input type="date" name="date_from"> — Flatpickr
-    # owns the picker now.
-    assert 'type="date" name="date_from"' not in form
+    form = _filter_form(emit_html(
+        app, sheet, dashboard_id="x",
+        filter_specs=[
+            ParameterDateSpec(name=P_L1_DATE_START, label="Date From"),
+            ParameterDateSpec(name=P_L1_DATE_END, label="Date To"),
+        ],
+    ))
+    # Each picker is a Flatpickr-single widget targeting a per-name
+    # hidden input — same shape as Daily Statement's Business Day.
+    assert form.count('data-widget="flatpickr-single"') == 2
+    assert f'name="param_{P_L1_DATE_START}"' in form
+    assert f'name="param_{P_L1_DATE_END}"' in form
+    # The pre-BM hidden range-aggregator inputs are GONE.
+    assert 'name="date_from"' not in form
+    assert 'name="date_to"' not in form
+    assert 'data-widget="flatpickr-range"' not in form
 
 
 def test_parameter_dropdown_is_tomselect() -> None:

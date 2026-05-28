@@ -36,14 +36,19 @@ from recon_gen.common.dataset_contract import (
     build_dataset,
     register_contract,
 )
-from recon_gen.common.models import DataSet
+from recon_gen.common.models import (
+    DataSet,
+    DatasetParameter,
+    DateTimeDatasetParameter,
+)
 from recon_gen.common.sheets.app_info import (
     build_liveness_dataset,
     build_matview_status_dataset,
 )
-from recon_gen.common.sql import to_date
+from recon_gen.common.sql import to_date, universal_date_range_clause
 from recon_gen.common.sql.dialect import Dialect
 from recon_gen.common.sql.money import cents_to_dollars_sql
+from recon_gen.common.tree import DateView
 
 
 # M.4.4.5 — Executives reads base tables only; no app-specific
@@ -85,6 +90,57 @@ DS_EXEC_ACCOUNT_SUMMARY_ACTIVE = "exec-account-summary-active-ds"
 #: side-by-side in the headline tile makes the predicate-mismatch
 #: visible.
 DS_EXEC_TRANSACTION_LEGS = "exec-transaction-legs-ds"
+
+
+# Phase BM — universal date-range filter param names. Pre-BM Exec used
+# analysis-level ``TimeRangeFilter`` FilterGroups + an App2
+# ``{date_filter}`` template slot. BM pushes the narrowing into dataset
+# SQL via two ``DateTimeDatasetParameter``s named ``pExecDateStart`` /
+# ``pExecDateEnd`` (the same names ``app.py`` bridges from the picker
+# via ``MappedDataSetParameters``).
+P_EXEC_DATE_START = "pExecDateStart"
+P_EXEC_DATE_END = "pExecDateEnd"
+
+
+def _exec_universal_range_view(cfg: Config) -> DateView:
+    """AR.4 — 30-day window anchored at ``cfg.test_generator.as_of_frame()``'s
+    as-of. One DateView per cfg drives both the analysis-param defaults
+    (picker initial state) AND the dataset-param defaults (BM-shape
+    pushdown defaults).
+    """
+    return DateView(frame=cfg.test_generator.as_of_frame(window_days=30))
+
+
+def _exec_universal_range_params(cfg: Config) -> list[DatasetParameter]:
+    """Phase BM — the two ``DateTimeDatasetParameter``s every Exec
+    date-scoped dataset declares (mirrors L1's
+    ``_l1_universal_range_params``).
+    """
+    view = _exec_universal_range_view(cfg)
+    return [
+        DatasetParameter(DateTimeDatasetParameter=DateTimeDatasetParameter(
+            Name=P_EXEC_DATE_START, ValueType="SINGLE_VALUED",
+            TimeGranularity="DAY",
+            DefaultValues=view.emit_qs_dataset_default_start(),
+        )),
+        DatasetParameter(DateTimeDatasetParameter=DateTimeDatasetParameter(
+            Name=P_EXEC_DATE_END, ValueType="SINGLE_VALUED",
+            TimeGranularity="DAY",
+            DefaultValues=view.emit_qs_dataset_default_end(),
+        )),
+    ]
+
+
+def _exec_date_range_clause(date_column: str, cfg: Config) -> str:
+    """Phase BM — day-inclusive predicate fragment narrowing
+    ``date_column`` by ``<<$pExecDateStart>>`` / ``<<$pExecDateEnd>>``.
+    """
+    return universal_date_range_clause(
+        date_column,
+        start_param=P_EXEC_DATE_START,
+        end_param=P_EXEC_DATE_END,
+        dialect=cfg.dialect,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -138,11 +194,9 @@ def build_transaction_summary_dataset(cfg: Config) -> DataSet:
     ``ABS(amount_money)`` (the per-leg signed Decimal — magnitude is
     abs); signed_amount → amount_money (already signed in v6).
     """
-    # X.2.g.1.b — single SQL template; ``{date_filter}`` slot
-    # interpolates per target runtime. QS gets ``""`` (its date
-    # filter comes from the analysis-level FilterGroup); App2 gets
-    # the bind-clause snippet from ``app2_date_filter`` so X.2.d's
-    # filter form actually narrows the query.
+    # Phase BM — single SQL form via ``<<$pExecDate*>>`` pushdown over
+    # ``t.posting`` (TIMESTAMP); the helper's upper bound expands to
+    # "+1 day" so same-day non-midnight rows on the end day are included.
     p = cfg.db_table_prefix
     posted_date_expr = to_date("MIN(t.posting)", cfg.dialect)
     # AO.1.impl — per_transfer's transfer_amount / transfer_net are
@@ -156,7 +210,8 @@ def build_transaction_summary_dataset(cfg: Config) -> DataSet:
     net = cents_to_dollars_sql(
         "SUM(transfer_net)", dialect=cfg.dialect,
     )
-    sql_template = f"""\
+    date_clause = _exec_date_range_clause("t.posting", cfg)
+    sql = f"""\
 WITH per_transfer AS (
     SELECT
         {posted_date_expr}     AS posted_date,
@@ -166,7 +221,7 @@ WITH per_transfer AS (
         SUM(t.amount_money)      AS transfer_net
     FROM {p}_transactions t
     WHERE t.status = 'Posted'
-      {{date_filter}}
+      AND {date_clause}
     GROUP BY t.transfer_id, t.rail_name
 )
 SELECT
@@ -182,10 +237,10 @@ GROUP BY posted_date, rail_name"""
         cfg.prefixed("exec-transaction-summary-dataset"),
         "Executives Transaction Summary",
         "exec-transaction-summary",
-        sql_template,
+        sql,
         EXEC_TRANSACTION_SUMMARY_CONTRACT,
         visual_identifier=DS_EXEC_TRANSACTION_SUMMARY,
-        app2_date_column="t.posting",
+        dataset_parameters=_exec_universal_range_params(cfg),
     )
 
 
@@ -216,7 +271,9 @@ def build_transaction_daily_dataset(cfg: Config) -> DataSet:
     net = cents_to_dollars_sql(
         "SUM(transfer_net)", dialect=cfg.dialect,
     )
-    sql_template = f"""\
+    # Phase BM — single SQL form via ``<<$pExecDate*>>`` pushdown.
+    date_clause = _exec_date_range_clause("t.posting", cfg)
+    sql = f"""\
 WITH per_transfer AS (
     SELECT
         {posted_date_expr}     AS posted_date,
@@ -225,7 +282,7 @@ WITH per_transfer AS (
         SUM(t.amount_money)      AS transfer_net
     FROM {p}_transactions t
     WHERE t.status = 'Posted'
-      {{date_filter}}
+      AND {date_clause}
     GROUP BY t.transfer_id
 )
 SELECT
@@ -240,10 +297,10 @@ GROUP BY posted_date"""
         cfg.prefixed("exec-transaction-daily-dataset"),
         "Executives Transaction Daily Rollup",
         "exec-transaction-daily",
-        sql_template,
+        sql,
         EXEC_TRANSACTION_DAILY_CONTRACT,
         visual_identifier=DS_EXEC_TRANSACTION_DAILY,
-        app2_date_column="t.posting",
+        dataset_parameters=_exec_universal_range_params(cfg),
     )
 
 
@@ -334,28 +391,25 @@ def build_account_summary_active_dataset(cfg: Config) -> DataSet:
     into a second dataset and re-pointing the visuals fixes both
     renderers without growing App2's filter coverage.
 
-    Keeps the X.2.g.1.b dual-SQL ``{date_filter}`` pattern so the
-    Account Coverage date picker narrows this dataset on both QS
-    (via ``app2_date_filter("")`` → analysis-level FilterGroup) and
-    App2 (``:date_from`` / ``:date_to`` URL binds).
+    Phase BM — date narrowing pushes down via ``<<$pExecDate*>>`` over
+    ``t.posting`` (one SQL form across QS + App2; the day-edge quirk
+    dissolves).
     """
     p = cfg.db_table_prefix
-    # Pre-substitute the {active_only} slot (identical on both QS + App2
-    # sides), leaving {date_filter} for build_dataset's app2_date_column
-    # path to fill in per dialect. .replace (not .format) — leaves the
-    # remaining {date_filter} placeholder intact for build_dataset.
-    template = _account_summary_sql_template(p, cfg.dialect).replace(
-        "{active_only}", "WHERE COALESCE(act.activity_count, 0) > 0",
+    date_clause = _exec_date_range_clause("t.posting", cfg)
+    sql = _account_summary_sql_template(p, cfg.dialect).format(
+        date_filter=f"AND {date_clause}",
+        active_only="WHERE COALESCE(act.activity_count, 0) > 0",
     )
     return build_dataset(
         cfg,
         cfg.prefixed("exec-account-summary-active-dataset"),
         "Executives Account Summary — Active",
         "exec-account-summary-active",
-        template,
+        sql,
         EXEC_ACCOUNT_SUMMARY_CONTRACT,
         visual_identifier=DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
-        app2_date_column="t.posting",
+        dataset_parameters=_exec_universal_range_params(cfg),
     )
 
 

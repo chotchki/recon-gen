@@ -372,7 +372,14 @@ def test_multiple_filter_specs_render_in_order() -> None:
 
 def test_all_filter_inputs_live_inside_filter_form() -> None:
     """``hx-include="#filter-form"`` only catches inputs inside the
-    form — verify all controls are children of ``<form id="filter-form">``."""
+    form — verify all controls are children of ``<form id="filter-form">``.
+
+    Phase BM dropped the hidden ``date_from`` / ``date_to`` block that
+    the pre-BM universal date-RANGE rendered on every range-bearing
+    sheet; date narrowing now flows through ``ParameterDateSpec``
+    entries with ``param_<name>`` URL keys, which the parametrized
+    filter-spec input tests in this module already cover.
+    """
     app, sheet = _build_app()
     out = emit_html(
         app, sheet, dashboard_id="x",
@@ -386,8 +393,6 @@ def test_all_filter_inputs_live_inside_filter_form() -> None:
     form_end = out.index('</form>', form_start)
     form_block = out[form_start:form_end]
     for needle in (
-        'name="date_from"',
-        'name="date_to"',
         'name="param_x"',
         'name="filter_y"',
         'name="min_z"',

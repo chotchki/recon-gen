@@ -36,7 +36,12 @@ from recon_gen.common.sheets.app_info import (
     build_liveness_dataset,
     build_matview_status_dataset,
 )
-from recon_gen.common.sql import Dialect, date_trunc_day, day_text
+from recon_gen.common.sql import (
+    Dialect,
+    date_trunc_day,
+    day_text,
+    universal_date_range_clause,
+)
 from recon_gen.common.sql.money import cents_to_dollars_sql
 from recon_gen.common.tree import DateView
 
@@ -644,6 +649,62 @@ L1_TX_FACETS_CONTRACT = DatasetContract(columns=[
 # -- Builders ----------------------------------------------------------------
 
 
+# Phase BM — universal date-range filter param names. Pre-BM these were
+# analysis-only (declared in ``app.py``) and narrowed via per-dataset
+# ``TimeRangeFilter`` FilterGroups + an App2 ``{date_filter}`` template
+# slot. BM pushes the narrowing into the dataset SQL itself: every L1
+# date-scoped dataset declares two ``DateTimeDatasetParameter``s named
+# ``pL1DateStart`` / ``pL1DateEnd`` (the same names the analysis-side
+# picker bridges into via ``MappedDataSetParameters``). One SQL form
+# across QS + App2; the day-edge / dual-SQL artifacts dissolve.
+P_L1_DATE_START = "pL1DateStart"
+P_L1_DATE_END = "pL1DateEnd"
+
+# AR.4 — the universal date-range is a 7-day window anchored at
+# ``cfg.test_generator.as_of_frame()``'s as-of. One DateView per cfg
+# drives both the analysis-param defaults (picker initial state) AND
+# the dataset-param defaults (BM-shape pushdown defaults).
+def _l1_universal_range_view(cfg: Config) -> DateView:
+    return DateView(frame=cfg.test_generator.as_of_frame(window_days=7))
+
+
+def _l1_universal_range_params(cfg: Config) -> list[DatasetParameter]:
+    """Phase BM — the two ``DateTimeDatasetParameter``s every L1
+    date-scoped dataset declares. ``pL1DateStart`` defaults to the
+    window's left edge; ``pL1DateEnd`` to the anchor. App2 reads the
+    defaults directly when the URL omits the param; QS picks the same
+    defaults up via ``MappedDataSetParameters`` from the analysis-side
+    picker.
+    """
+    view = _l1_universal_range_view(cfg)
+    return [
+        DatasetParameter(DateTimeDatasetParameter=DateTimeDatasetParameter(
+            Name=P_L1_DATE_START, ValueType="SINGLE_VALUED",
+            TimeGranularity="DAY",
+            DefaultValues=view.emit_qs_dataset_default_start(),
+        )),
+        DatasetParameter(DateTimeDatasetParameter=DateTimeDatasetParameter(
+            Name=P_L1_DATE_END, ValueType="SINGLE_VALUED",
+            TimeGranularity="DAY",
+            DefaultValues=view.emit_qs_dataset_default_end(),
+        )),
+    ]
+
+
+def _l1_date_range_clause(date_column: str, cfg: Config) -> str:
+    """Phase BM — day-inclusive predicate fragment narrowing
+    ``date_column`` by ``<<$pL1DateStart>>`` / ``<<$pL1DateEnd>>``.
+    Shorthand around :func:`universal_date_range_clause` so per-dataset
+    builders stay tidy.
+    """
+    return universal_date_range_clause(
+        date_column,
+        start_param=P_L1_DATE_START,
+        end_param=P_L1_DATE_END,
+        dialect=cfg.dialect,
+    )
+
+
 # Y.2.g — the Drift sheet's Account + Account-Role dropdowns are
 # cross_dataset=ALL_DATASETS: one control narrows BOTH the leaf-drift
 # and ledger-drift tables. The analysis param bridges to a same-named
@@ -669,11 +730,11 @@ def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
     ``IN (...)``). Same dataset-param names on ``build_ledger_drift_dataset``
     so one ALL_DATASETS dropdown narrows both.
 
-    Y.2.f — App2-side date pushdown via ``{date_filter}`` template
-    slot (X.2.g.1.b dual-SQL pattern). QS continues to filter via the
-    analysis-level ``TimeRangeFilter`` FG (zero behavior change); App2
-    binds ``:date_from`` / ``:date_to`` from the URL into
-    ``business_day_start``.
+    Phase BM — date narrowing pushes down via the unified
+    ``<<$pL1DateStart>>`` / ``<<$pL1DateEnd>>`` dataset-SQL parameters
+    (replaces the pre-BM dual-SQL ``{date_filter}`` template +
+    analysis-level ``TimeRangeFilter`` FG). One SQL form across QS +
+    App2; the day-edge quirk dissolves.
 
     AO.1.impl — money columns (stored_balance / computed_balance /
     drift) project as BIGINT cents from the matview; wrap each with
@@ -685,7 +746,7 @@ def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
     sb = cents_to_dollars_sql("stored_balance", dialect=cfg.dialect)
     cb = cents_to_dollars_sql("computed_balance", dialect=cfg.dialect)
     drift = cents_to_dollars_sql("drift", dialect=cfg.dialect)
-    sql_template = (
+    sql = (
         f"SELECT account_id, account_name, account_role,"
         f" account_parent_role, business_day_start, business_day_end,"
         f" {sb} AS stored_balance,"
@@ -694,18 +755,18 @@ def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
         f"FROM {prefix}_drift\n"
         f"WHERE {_account_display_clause(P_L1_DRIFT_ACCOUNT)}\n"
         f"  AND {_data_value_clause('account_role', P_L1_DRIFT_ROLE)}\n"
-        f"  {{date_filter}}"
+        f"  AND {_l1_date_range_clause('business_day_start', cfg)}"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-drift-dataset"),
         "L1 Drift", "l1-drift",
-        sql_template, DRIFT_CONTRACT,
+        sql, DRIFT_CONTRACT,
         visual_identifier=DS_DRIFT,
         dataset_parameters=[
             _all_sentinel_sv_param(P_L1_DRIFT_ACCOUNT),
             _all_sentinel_sv_param(P_L1_DRIFT_ROLE),
+            *_l1_universal_range_params(cfg),
         ],
-        app2_date_column="business_day_start",
     )
 
 
@@ -719,7 +780,8 @@ def build_ledger_drift_dataset(
     view). Carries the same Y.2.g dataset-param names as the leaf-drift
     dataset so the Drift sheet's ALL_DATASETS dropdowns narrow both.
 
-    Y.2.f — App2-side date pushdown matches ``build_drift_dataset``.
+    Phase BM — date pushdown via ``<<$pL1Date*>>`` matches
+    ``build_drift_dataset`` (same shared universal-range params).
 
     AO.1.impl — cents → dollars wrap mirrors ``build_drift_dataset``.
     """
@@ -727,7 +789,7 @@ def build_ledger_drift_dataset(
     sb = cents_to_dollars_sql("stored_balance", dialect=cfg.dialect)
     cb = cents_to_dollars_sql("computed_balance", dialect=cfg.dialect)
     drift = cents_to_dollars_sql("drift", dialect=cfg.dialect)
-    sql_template = (
+    sql = (
         f"SELECT account_id, account_name, account_role,"
         f" business_day_start, business_day_end,"
         f" {sb} AS stored_balance,"
@@ -736,18 +798,18 @@ def build_ledger_drift_dataset(
         f"FROM {prefix}_ledger_drift\n"
         f"WHERE {_account_display_clause(P_L1_DRIFT_ACCOUNT)}\n"
         f"  AND {_data_value_clause('account_role', P_L1_DRIFT_ROLE)}\n"
-        f"  {{date_filter}}"
+        f"  AND {_l1_date_range_clause('business_day_start', cfg)}"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-ledger-drift-dataset"),
         "L1 Ledger Drift", "l1-ledger-drift",
-        sql_template, LEDGER_DRIFT_CONTRACT,
+        sql, LEDGER_DRIFT_CONTRACT,
         visual_identifier=DS_LEDGER_DRIFT,
         dataset_parameters=[
             _all_sentinel_sv_param(P_L1_DRIFT_ACCOUNT),
             _all_sentinel_sv_param(P_L1_DRIFT_ROLE),
+            *_l1_universal_range_params(cfg),
         ],
-        app2_date_column="business_day_start",
     )
 
 
@@ -770,31 +832,32 @@ def build_overdraft_dataset(
     Y.2.g — Account dropdown pushes down via ``account_id`` (data-value,
     sentinel-OR); Account-Role dropdown via ``account_role IN (...)``.
 
-    Y.2.f — App2-side date pushdown via ``business_day_start``.
+    Phase BM — date pushdown via ``<<$pL1Date*>>`` matches
+    ``build_drift_dataset``.
 
     AO.1.impl — wrap ``stored_balance`` (BIGINT cents) → dollars.
     """
     prefix = cfg.db_table_prefix
     sb = cents_to_dollars_sql("stored_balance", dialect=cfg.dialect)
-    sql_template = (
+    sql = (
         f"SELECT account_id, account_name, account_role,"
         f" account_parent_role, business_day_start, business_day_end,"
         f" {sb} AS stored_balance\n"
         f"FROM {prefix}_overdraft\n"
         f"WHERE {_account_display_clause(P_L1_OVERDRAFT_ACCOUNT)}\n"
         f"  AND {_data_value_clause('account_role', P_L1_OVERDRAFT_ROLE)}\n"
-        f"  {{date_filter}}"
+        f"  AND {_l1_date_range_clause('business_day_start', cfg)}"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-overdraft-dataset"),
         "L1 Overdraft", "l1-overdraft",
-        sql_template, OVERDRAFT_CONTRACT,
+        sql, OVERDRAFT_CONTRACT,
         visual_identifier=DS_OVERDRAFT,
         dataset_parameters=[
             _all_sentinel_sv_param(P_L1_OVERDRAFT_ACCOUNT),
             _all_sentinel_sv_param(P_L1_OVERDRAFT_ROLE),
+            *_l1_universal_range_params(cfg),
         ],
-        app2_date_column="business_day_start",
     )
 
 
@@ -811,7 +874,7 @@ def build_limit_breach_dataset(
     Y.2.g — Account dropdown pushes down via ``account_id`` (data-value,
     sentinel-OR); Transfer Type dropdown via ``rail_name IN (...)``.
 
-    Y.2.f — App2-side date pushdown via ``business_day``.
+    Phase BM — date pushdown via ``<<$pL1Date*>>`` over ``business_day``.
 
     AO.1.impl — both ``outbound_total`` (SUM(ABS(amount_money)) in
     matview) and ``cap`` (multiplied ×100 in the matview per foundation
@@ -821,7 +884,7 @@ def build_limit_breach_dataset(
     prefix = cfg.db_table_prefix
     outbound = cents_to_dollars_sql("outbound_total", dialect=cfg.dialect)
     cap = cents_to_dollars_sql("cap", dialect=cfg.dialect)
-    sql_template = (
+    sql = (
         f"SELECT account_id, account_name, account_role,"
         f" account_parent_role, business_day, rail_name, direction,"
         f" {outbound} AS outbound_total,"
@@ -829,18 +892,18 @@ def build_limit_breach_dataset(
         f"FROM {prefix}_limit_breach\n"
         f"WHERE {_account_display_clause(P_L1_LIMIT_BREACH_ACCOUNT)}\n"
         f"  AND {_data_value_clause('rail_name', P_L1_LIMIT_BREACH_TYPE)}\n"
-        f"  {{date_filter}}"
+        f"  AND {_l1_date_range_clause('business_day', cfg)}"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-limit-breach-dataset"),
         "L1 Limit Breach", "l1-limit-breach",
-        sql_template, LIMIT_BREACH_CONTRACT,
+        sql, LIMIT_BREACH_CONTRACT,
         visual_identifier=DS_LIMIT_BREACH,
         dataset_parameters=[
             _all_sentinel_sv_param(P_L1_LIMIT_BREACH_ACCOUNT),
             _all_sentinel_sv_param(P_L1_LIMIT_BREACH_TYPE),
+            *_l1_universal_range_params(cfg),
         ],
-        app2_date_column="business_day",
     )
 
 
@@ -868,7 +931,7 @@ def build_todays_exceptions_dataset(
     (and while narrowing) — matching the FILTER_ALL_VALUES behavior it
     replaces.
 
-    Y.2.f — App2-side date pushdown via ``business_day``.
+    Phase BM — date pushdown via ``<<$pL1Date*>>`` over ``business_day``.
 
     AO.4 — the matview now splits ``magnitude`` into two columns by
     source-branch unit: ``magnitude_amount`` (BIGINT cents — money
@@ -880,7 +943,7 @@ def build_todays_exceptions_dataset(
     magnitude_amount = cents_to_dollars_sql(
         "magnitude_amount", dialect=cfg.dialect,
     )
-    sql_template = (
+    sql = (
         f"SELECT check_type, account_id, account_name, account_role,"
         f" account_parent_role, business_day, rail_name,"
         f" {magnitude_amount} AS magnitude_amount,"
@@ -890,12 +953,12 @@ def build_todays_exceptions_dataset(
         f"  AND {_account_display_clause(P_L1_TODAYS_EXC_ACCOUNT)}\n"
         f"  AND ({_data_value_clause('rail_name', P_L1_TODAYS_EXC_TYPE)}"
         f" OR rail_name IS NULL)\n"
-        f"  {{date_filter}}"
+        f"  AND {_l1_date_range_clause('business_day', cfg)}"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-todays-exceptions-dataset"),
         "L1 Today's Exceptions", "l1-todays-exceptions",
-        sql_template, TODAYS_EXCEPTIONS_CONTRACT,
+        sql, TODAYS_EXCEPTIONS_CONTRACT,
         visual_identifier=DS_TODAYS_EXCEPTIONS,
         dataset_parameters=[
             # AA.A.3 — all three dropdowns flipped from MULTI to SINGLE per
@@ -906,8 +969,8 @@ def build_todays_exceptions_dataset(
             _all_sentinel_sv_param(P_L1_TODAYS_EXC_CHECK_TYPE),
             _all_sentinel_sv_param(P_L1_TODAYS_EXC_ACCOUNT),
             _all_sentinel_sv_param(P_L1_TODAYS_EXC_TYPE),
+            *_l1_universal_range_params(cfg),
         ],
-        app2_date_column="business_day",
     )
 
 
@@ -1137,13 +1200,15 @@ def build_transactions_dataset(
     transfer_id / status / origin via the sentinel-OR data-value guard,
     rail_name via ``IN (...)``.
 
-    Y.2.f — App2-side date pushdown via ``posting``.
+    Phase BM — date pushdown via ``<<$pL1Date*>>`` over ``posting``
+    (TIMESTAMP); the helper's upper-bound expands to "+1 day" so
+    same-day non-midnight rows on the end day are included.
     """
     prefix = cfg.db_table_prefix
     # AO.1.impl — amount_money is BIGINT cents on the matview; wrap to
     # dollars at projection.
     amount = cents_to_dollars_sql("amount_money", dialect=cfg.dialect)
-    sql_template = (
+    sql = (
         f"SELECT id AS transaction_id, account_id, account_name,"
         f" account_role, account_parent_role,"
         f" transfer_id, transfer_parent_id, rail_name,"
@@ -1155,12 +1220,12 @@ def build_transactions_dataset(
         f"  AND {_data_value_clause('status', P_L1_TX_STATUS)}\n"
         f"  AND {_data_value_clause('origin', P_L1_TX_ORIGIN)}\n"
         f"  AND {_data_value_clause('rail_name', P_L1_TX_TYPE)}\n"
-        f"  {{date_filter}}"
+        f"  AND {_l1_date_range_clause('posting', cfg)}"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-transactions-dataset"),
         "L1 Transactions", "l1-transactions",
-        sql_template, TRANSACTIONS_CONTRACT,
+        sql, TRANSACTIONS_CONTRACT,
         visual_identifier=DS_TRANSACTIONS,
         dataset_parameters=[
             _all_sentinel_sv_param(P_L1_TX_ACCOUNT),
@@ -1168,8 +1233,8 @@ def build_transactions_dataset(
             _all_sentinel_sv_param(P_L1_TX_STATUS),
             _all_sentinel_sv_param(P_L1_TX_ORIGIN),
             _all_sentinel_sv_param(P_L1_TX_TYPE),
+            *_l1_universal_range_params(cfg),
         ],
-        app2_date_column="posting",
     )
 
 
@@ -1186,9 +1251,9 @@ def build_drift_timeline_dataset(
     BOTH timeline datasets via the same ``pL1DriftTlRole`` dataset param;
     the predicate sits before the GROUP BY.
 
-    Y.2.f — App2-side date pushdown via ``business_day_end``; the
-    ``{date_filter}`` slot lands BEFORE the GROUP BY so the AND-clause
-    is part of the WHERE.
+    Phase BM — date pushdown via ``<<$pL1Date*>>`` over
+    ``business_day_end``; the date-range AND-clause lands BEFORE the
+    GROUP BY so the narrowing is part of the WHERE.
     """
     prefix = cfg.db_table_prefix
     # AO.1.impl — SUM(ABS(drift)) is BIGINT cents from the matview;
@@ -1196,24 +1261,24 @@ def build_drift_timeline_dataset(
     abs_drift = cents_to_dollars_sql(
         "SUM(ABS(drift))", dialect=cfg.dialect,
     )
-    sql_template = (
+    sql = (
         f"SELECT business_day_end,"
         f"       account_role,"
         f"       {abs_drift} AS abs_drift"
         f" FROM {prefix}_drift"
         f" WHERE {_data_value_clause('account_role', P_L1_DRIFT_TL_ROLE)}"
-        f" {{date_filter}}"
+        f"   AND {_l1_date_range_clause('business_day_end', cfg)}"
         f" GROUP BY business_day_end, account_role"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-drift-timeline-dataset"),
         "L1 Drift Timeline", "l1-drift-timeline",
-        sql_template, DRIFT_TIMELINE_CONTRACT,
+        sql, DRIFT_TIMELINE_CONTRACT,
         visual_identifier=DS_DRIFT_TIMELINE,
         dataset_parameters=[
             _all_sentinel_sv_param(P_L1_DRIFT_TL_ROLE),
+            *_l1_universal_range_params(cfg),
         ],
-        app2_date_column="business_day_end",
     )
 
 
@@ -1227,7 +1292,8 @@ def build_ledger_drift_timeline_dataset(
     ``pL1DriftTlRole`` Y.2.g param so the ALL_DATASETS dropdown narrows
     both timelines.
 
-    Y.2.f — App2-side date pushdown matches ``build_drift_timeline_dataset``.
+    Phase BM — date pushdown via ``<<$pL1Date*>>`` matches
+    ``build_drift_timeline_dataset``.
     """
     prefix = cfg.db_table_prefix
     # AO.1.impl — same as build_drift_timeline_dataset: aggregate of
@@ -1235,24 +1301,24 @@ def build_ledger_drift_timeline_dataset(
     abs_drift = cents_to_dollars_sql(
         "SUM(ABS(drift))", dialect=cfg.dialect,
     )
-    sql_template = (
+    sql = (
         f"SELECT business_day_end,"
         f"       account_role,"
         f"       {abs_drift} AS abs_drift"
         f" FROM {prefix}_ledger_drift"
         f" WHERE {_data_value_clause('account_role', P_L1_DRIFT_TL_ROLE)}"
-        f" {{date_filter}}"
+        f"   AND {_l1_date_range_clause('business_day_end', cfg)}"
         f" GROUP BY business_day_end, account_role"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-ledger-drift-timeline-dataset"),
         "L1 Ledger Drift Timeline", "l1-ledger-drift-timeline",
-        sql_template, DRIFT_TIMELINE_CONTRACT,
+        sql, DRIFT_TIMELINE_CONTRACT,
         visual_identifier=DS_LEDGER_DRIFT_TIMELINE,
         dataset_parameters=[
             _all_sentinel_sv_param(P_L1_DRIFT_TL_ROLE),
+            *_l1_universal_range_params(cfg),
         ],
-        app2_date_column="business_day_end",
     )
 
 

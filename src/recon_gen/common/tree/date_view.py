@@ -185,10 +185,30 @@ class DateView:
         """The QS dataset-param default — the SAME literal day as the
         analysis default. App2 reads this directly; QS receives it via
         `MappedDataSetParameters` from the analysis side. Both renderers
-        land on the same day."""
+        land on the same day.
+
+        For single-date views (Daily Statement) this is unambiguously
+        the anchor. Range views use the start / end variants below;
+        this is kept as an alias of the END for symmetry with
+        ``emit_qs_analysis_default``.
+        """
+        return self.emit_qs_dataset_default_end()
+
+    def emit_qs_dataset_default_end(self) -> DateTimeDatasetParameterDefaultValues:
+        """Phase BM — dataset-param default for the END of a range view
+        (the anchor day). Mirrors ``emit_qs_analysis_default_end``."""
         return DateTimeDatasetParameterDefaultValues(
             StaticValues=[self._anchor_iso()],
         )
+
+    def emit_qs_dataset_default_start(self) -> DateTimeDatasetParameterDefaultValues:
+        """Phase BM — dataset-param default for the START of a range view
+        (``window_start``). Mirrors ``emit_qs_analysis_default_start``;
+        used by L1 + Exec date-pushdown datasets so the BM-shape
+        ``DateTimeDatasetParameter`` for the start picks up the same
+        7-day / 30-day window the analysis-level picker shows."""
+        start_iso = f"{self.window_start.isoformat()}T00:00:00"
+        return DateTimeDatasetParameterDefaultValues(StaticValues=[start_iso])
 
     def emit_app2_date_to(self) -> str:
         """The App2 `:date_to` bind value (or single-date filter value)

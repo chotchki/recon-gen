@@ -1071,22 +1071,48 @@ def test_date_range_parameters_registered() -> None:
     assert P_L1_DATE_END in param_names
 
 
-def test_date_range_filter_groups_per_dataset() -> None:
-    """One SINGLE_DATASET filter group lands per data-bearing dataset
-    (5 total: drift, ledger_drift, overdraft, limit_breach, todays_exc)
-    so the column-name mismatch (business_day_start vs business_day) is
-    handled per-dataset rather than via cross-dataset matching."""
+def test_date_range_params_bridge_to_dataset_pushdown_params() -> None:
+    """Phase BM — date narrowing pushes down to dataset SQL via
+    ``<<$pL1DateStart>>`` / ``<<$pL1DateEnd>>``. The analysis-level
+    ``DateTimeParam`` declarations bridge to the matching dataset
+    params on every date-scoped dataset via ``MappedDataSetParameters``
+    so the picker writes through to the SQL substitution.
+
+    Pre-BM this was one ``SINGLE_DATASET`` ``TimeRangeFilter``
+    FilterGroup per data-bearing dataset (``fg-l1-date-*``); the
+    FilterGroups dissolved with the dual-SQL form.
+    """
+    from recon_gen.apps.l1_dashboard.datasets import (
+        P_L1_DATE_END,
+        P_L1_DATE_START,
+    )
+    from recon_gen.common.tree.parameters import DateTimeParam
+
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
-    fg_ids = {fg.filter_group_id for fg in app.analysis.filter_groups}
-    expected = {
-        "fg-l1-date-drift",
-        "fg-l1-date-ledger-drift",
-        "fg-l1-date-overdraft",
-        "fg-l1-date-limit-breach",
-        "fg-l1-date-todays-exceptions",
+    date_params: dict[str, DateTimeParam] = {
+        str(p.name): p
+        for p in app.analysis.parameters
+        if isinstance(p, DateTimeParam) and str(p.name) in {
+            P_L1_DATE_START, P_L1_DATE_END,
+        }
     }
-    assert expected.issubset(fg_ids)
+    assert set(date_params) == {P_L1_DATE_START, P_L1_DATE_END}, (
+        "L1 analysis must declare both universal date-range params"
+    )
+    # Both params must bridge to all 8 date-scoped datasets — one
+    # ``MappedDataSetParameters`` entry per (dataset, dataset_param)
+    # pair so QS's bridge wires the picker through to the per-dataset
+    # ``<<$pL1Date*>>`` substitution.
+    for pname, param in date_params.items():
+        bridges = param.mapped_dataset_params or []
+        assert len(bridges) == 8, (
+            f"{pname} must bridge to 8 datasets, got {len(bridges)}"
+        )
+        for _ds, ds_param in bridges:
+            assert ds_param == pname, (
+                f"{pname} bridge must target same-named dataset param"
+            )
 
 
 def test_date_range_pickers_on_every_data_sheet() -> None:
@@ -1116,34 +1142,60 @@ def test_date_range_pickers_on_every_data_sheet() -> None:
         )
 
 
-def test_date_range_filter_targets_correct_columns() -> None:
-    """Per-dataset filter binding: drift/ledger_drift/overdraft target
-    `business_day_start` (the daily-balance column); limit_breach +
-    todays_exceptions target `business_day` (the truncated-posting
-    column). The mismatch is what motivates per-dataset filter groups."""
-    from recon_gen.common.ids import FilterGroupId
-    from recon_gen.common.tree import TimeRangeFilter
-    from recon_gen.common.tree.datasets import Column
+def test_date_range_pushdown_clause_per_dataset_targets_correct_column() -> None:
+    """Phase BM — each date-scoped dataset's SQL embeds the
+    universal-range pushdown clause against its own date column
+    (``business_day_start`` for drift / ledger_drift / overdraft,
+    ``business_day`` for limit_breach / todays_exceptions,
+    ``business_day_end`` for the drift-timeline aggregates, ``posting``
+    for transactions). Verified by inspecting the registered SQL
+    rather than walking analysis-level FilterGroups (which dissolved
+    with the dual-SQL form).
+    """
+    from recon_gen.common.dataset_contract import get_sql
+    from recon_gen.apps.l1_dashboard.datasets import (
+        DS_DRIFT,
+        DS_DRIFT_TIMELINE,
+        DS_LEDGER_DRIFT,
+        DS_LEDGER_DRIFT_TIMELINE,
+        DS_LIMIT_BREACH,
+        DS_OVERDRAFT,
+        DS_TODAYS_EXCEPTIONS,
+        DS_TRANSACTIONS,
+        P_L1_DATE_END,
+        P_L1_DATE_START,
+    )
 
+    # Build the app to ensure all datasets are constructed + their
+    # SQL is registered against the visual identifiers.
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
-    by_id = {fg.filter_group_id: fg for fg in app.analysis.filter_groups}
 
-    def _column_name(fg_id: str) -> str:
-        fg = by_id[FilterGroupId(fg_id)]
-        flt = fg.filters[0]
-        # TimeRangeFilter is the only date filter shape in this app;
-        # narrow + assert the Column ref so the typed Column.name read
-        # is type-checkable.
-        assert isinstance(flt, TimeRangeFilter)
-        assert isinstance(flt.column, Column)
-        return flt.column.name
-
-    assert _column_name("fg-l1-date-drift") == "business_day_start"
-    assert _column_name("fg-l1-date-ledger-drift") == "business_day_start"
-    assert _column_name("fg-l1-date-overdraft") == "business_day_start"
-    assert _column_name("fg-l1-date-limit-breach") == "business_day"
-    assert _column_name("fg-l1-date-todays-exceptions") == "business_day"
+    expected = {
+        DS_DRIFT: "business_day_start",
+        DS_LEDGER_DRIFT: "business_day_start",
+        DS_OVERDRAFT: "business_day_start",
+        DS_DRIFT_TIMELINE: "business_day_end",
+        DS_LEDGER_DRIFT_TIMELINE: "business_day_end",
+        DS_LIMIT_BREACH: "business_day",
+        DS_TODAYS_EXCEPTIONS: "business_day",
+        DS_TRANSACTIONS: "posting",
+    }
+    for ds_id, date_col in expected.items():
+        sql = get_sql(ds_id)
+        # Both BM pushdown placeholders must appear, gated on the
+        # expected date column.
+        assert f"<<${P_L1_DATE_START}>>" in sql, (
+            f"{ds_id} missing pL1DateStart placeholder"
+        )
+        assert f"<<${P_L1_DATE_END}>>" in sql, (
+            f"{ds_id} missing pL1DateEnd placeholder"
+        )
+        # The column being narrowed must be the one we expect for
+        # this dataset shape (matview-day-aligned vs raw timestamp).
+        assert f"{date_col} >=" in sql, (
+            f"{ds_id} should narrow on {date_col} but SQL is:\n{sql}"
+        )
 
 
 # -- Pending Aging sheet (M.2b.10) -------------------------------------------

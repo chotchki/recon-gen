@@ -35,7 +35,7 @@ from recon_gen.apps.executives import datasets as _register_contracts  # noqa: F
 from recon_gen.common.l2 import default_l2_instance
 from recon_gen.common import rich_text as rt
 from recon_gen.common.config import Config
-from recon_gen.common.ids import FilterGroupId, ParameterName, SheetId, VisualId
+from recon_gen.common.ids import ParameterName, SheetId, VisualId
 from recon_gen.common.l2 import L2Instance, ThemePreset
 from recon_gen.common.models import Analysis as ModelAnalysis
 from recon_gen.common.models import Dashboard as ModelDashboard
@@ -54,10 +54,8 @@ from recon_gen.common.tree import (
     Dataset,
     DateTimeParam,
     DateView,
-    FilterGroup,
     Sheet,
     TextBox,
-    TimeRangeFilter,
 )
 
 from recon_gen.apps.executives.datasets import (
@@ -66,6 +64,8 @@ from recon_gen.apps.executives.datasets import (
     DS_EXEC_TRANSACTION_DAILY,
     DS_EXEC_TRANSACTION_LEGS,
     DS_EXEC_TRANSACTION_SUMMARY,
+    P_EXEC_DATE_END as _P_EXEC_DATE_END,
+    P_EXEC_DATE_START as _P_EXEC_DATE_START,
     build_all_datasets,
 )
 
@@ -279,11 +279,14 @@ def _datasets(cfg: Config) -> dict[str, Dataset]:
 # which narrowed in QS but not in App2.
 # ---------------------------------------------------------------------------
 
-# Q.1.b — Universal date-range filter parameter names + filter group IDs.
-P_EXEC_DATE_START = ParameterName("pExecDateStart")
-P_EXEC_DATE_END = ParameterName("pExecDateEnd")
-_FG_EXEC_DATE_TXN = FilterGroupId("fg-exec-date-transaction-summary")
-_FG_EXEC_DATE_ACCT = FilterGroupId("fg-exec-date-account-summary")
+# Q.1.b — Universal date-range filter parameter names. Phase BM
+# pushed the narrowing into dataset SQL; the per-dataset FilterGroupIds
+# that lived here dissolved with the analysis-level TimeRangeFilters.
+# The underlying string literals live in ``datasets.py`` so the
+# dataset-side ``<<$pExecDate*>>`` placeholders bridge to the same NAME
+# the analysis-side declares (one source).
+P_EXEC_DATE_START = ParameterName(_P_EXEC_DATE_START)
+P_EXEC_DATE_END = ParameterName(_P_EXEC_DATE_END)
 
 # AR.4 — Exec sheets show daily-grain summaries rather than per-leg
 # detail, so 30 days reads as one trend page (vs L1's 7-day operator
@@ -649,107 +652,49 @@ def _wire_date_range_filter(
     """Q.1.b — Universal date-range filter across the 3 data-bearing
     Exec sheets, mirroring L1's M.2b.1 pattern.
 
-    Adds 2 DateTimeParams (P_EXEC_DATE_START + P_EXEC_DATE_END) with
-    rolling 30-day defaults; one SINGLE_DATASET FilterGroup per dataset
-    scoped to the sheet that uses it; paired ParameterDateTimePicker
-    controls on every data-bearing sheet so the analyst sets the window
-    once and it propagates.
+    Phase BM — the per-dataset ``TimeRangeFilter`` FilterGroups dissolved
+    in favor of dataset-SQL pushdown via ``<<$pExecDateStart>>`` /
+    ``<<$pExecDateEnd>>`` (see ``datasets.py::_exec_universal_range_params``).
+    This wire now declares only:
 
-    Account Coverage filters on ``last_activity_date`` (one row per
-    account, NULL when never-active). Transaction Volume + Money Moved
-    both read from ``exec_transaction_summary`` and filter on
-    ``posted_date`` (per-(day, rail_name) summary).
+    1. Two analysis-level ``DateTimeParam``s with ``mapped_dataset_params``
+       bridging the 2 BM-shape datasets' ``pExecDateStart`` /
+       ``pExecDateEnd`` (the active account-summary variant + the
+       transaction summary). The base ``DS_EXEC_ACCOUNT_SUMMARY`` is
+       date-INDEPENDENT (its semantic IS "every account that exists")
+       and intentionally excluded from the bridge.
+    2. Paired ``ParameterDateTimePicker`` controls on every data-bearing
+       sheet so the analyst sets the window once and it propagates.
     """
-    ds_acct = datasets[DS_EXEC_ACCOUNT_SUMMARY]
+    # Phase BM — bridge to the 2 date-scoped datasets. The base
+    # ``DS_EXEC_ACCOUNT_SUMMARY`` is intentionally excluded (date-
+    # independent snapshot of every account — the "Total Open Accounts"
+    # KPI binds it specifically because the all-time count is the
+    # operator-facing semantic). The active variant + the transaction
+    # summary carry the BM-shape dataset params.
     ds_acct_active = datasets[DS_EXEC_ACCOUNT_SUMMARY_ACTIVE]
     ds_txn = datasets[DS_EXEC_TRANSACTION_SUMMARY]
-
+    start_bridges = [
+        (ds_acct_active, str(P_EXEC_DATE_START)),
+        (ds_txn, str(P_EXEC_DATE_START)),
+    ]
+    end_bridges = [
+        (ds_acct_active, str(P_EXEC_DATE_END)),
+        (ds_txn, str(P_EXEC_DATE_END)),
+    ]
     # AR.4 — 30-day window via DateView (pre-AR.4 RollingDate exprs gone).
     date_start = analysis.add_parameter(DateTimeParam(
         name=P_EXEC_DATE_START,
         time_granularity="DAY",
         default=exec_range_view.emit_qs_analysis_default_start(),
+        mapped_dataset_params=start_bridges,
     ))
     date_end = analysis.add_parameter(DateTimeParam(
         name=P_EXEC_DATE_END,
         time_granularity="DAY",
         default=exec_range_view.emit_qs_analysis_default_end(),
+        mapped_dataset_params=end_bridges,
     ))
-
-    min_bound: dict[str, str] = {"Parameter": P_EXEC_DATE_START}
-    max_bound: dict[str, str] = {"Parameter": P_EXEC_DATE_END}
-
-    # exec_account_summary — Account Coverage sheet only.
-    # NON_NULLS_ONLY would hide accounts that have never had activity
-    # (last_activity_date IS NULL). Those rows are part of "Total Open
-    # Accounts" by design, so use ALL_VALUES to keep them visible
-    # regardless of date window.
-    acct_fg = analysis.add_filter_group(FilterGroup(
-        filter_group_id=_FG_EXEC_DATE_ACCT,
-        cross_dataset="SINGLE_DATASET",
-        filters=[TimeRangeFilter(
-            filter_id="filter-exec-date-account-summary",
-            dataset=ds_acct,
-            column=ds_acct["last_activity_date"],
-            null_option="ALL_VALUES",
-            time_granularity="DAY",
-            minimum=min_bound,
-            maximum=max_bound,
-            # AA.A.daterange — inclusive-both, see L1 _scope_one.
-            include_minimum=True,
-            include_maximum=True,
-        )],
-    ))
-    acct_fg.scope_sheet(account_coverage_sheet)
-
-    # Y.2.h — same TimeRangeFilter on the active variant. The dataset
-    # SQL already narrows to ``activity_count > 0``; this FG narrows to
-    # the date window so the active KPI + bar count accounts active in
-    # the SELECTED period, not all-time. NON_NULLS_ONLY because the
-    # baked WHERE guarantees activity rows exist.
-    acct_active_fg = analysis.add_filter_group(FilterGroup(
-        filter_group_id=FilterGroupId("fg-exec-date-account-summary-active"),
-        cross_dataset="SINGLE_DATASET",
-        filters=[TimeRangeFilter(
-            filter_id="filter-exec-date-account-summary-active",
-            dataset=ds_acct_active,
-            column=ds_acct_active["last_activity_date"],
-            null_option="NON_NULLS_ONLY",
-            time_granularity="DAY",
-            minimum=min_bound,
-            maximum=max_bound,
-            # AA.A.daterange — inclusive-both, see L1 _scope_one.
-            include_minimum=True,
-            include_maximum=True,
-        )],
-    ))
-    acct_active_fg.scope_sheet(account_coverage_sheet)
-
-    # exec_transaction_summary — Transaction Volume + Money Moved.
-    # Two FilterGroups (one per sheet) so each FG scopes narrowly;
-    # cross_dataset stays SINGLE_DATASET because the binding is to
-    # the same dataset on both sheets.
-    for sheet, fg_id in (
-        (transaction_volume_sheet, FilterGroupId("fg-exec-date-txn-volume")),
-        (money_moved_sheet, FilterGroupId("fg-exec-date-money-moved")),
-    ):
-        fg = analysis.add_filter_group(FilterGroup(
-            filter_group_id=fg_id,
-            cross_dataset="SINGLE_DATASET",
-            filters=[TimeRangeFilter(
-                filter_id=f"filter-{fg_id}",
-                dataset=ds_txn,
-                column=ds_txn["posted_date"],
-                null_option="NON_NULLS_ONLY",
-                time_granularity="DAY",
-                minimum=min_bound,
-                maximum=max_bound,
-                # AA.A.daterange — inclusive-both, see L1 _scope_one.
-                include_minimum=True,
-                include_maximum=True,
-            )],
-        ))
-        fg.scope_sheet(sheet)
 
     for sheet in (
         account_coverage_sheet, transaction_volume_sheet, money_moved_sheet,
@@ -854,24 +799,20 @@ def build_executives_app(
 
     # Q.1.b — Universal date-range filter across all 3 data-bearing
     # sheets (mirrors L1's M.2b.1 pattern: shared analysis-level
-    # DateTimeParams + per-dataset SINGLE_DATASET FilterGroups).
+    # DateTimeParams bridged into dataset-SQL pushdown).
     # AR.4 — 30-day window per the pre-AR.4 RollingDate defaults.
-    exec_range_view = DateView(
-        frame=cfg.test_generator.as_of_frame(window_days=30),
-    )
-    # BL.2 — record the analysis-level default range so App2's
-    # ``_render_filter_form`` can pre-populate date_from / date_to
-    # hidden inputs on initial page load (matching QS's behavior:
-    # the analysis-level TimeRangeFilter's parameter defaults apply
-    # before any user interaction).
-    analysis.default_universal_date_range = exec_range_view
+    # Phase BM — narrowing pushed into dataset SQL via
+    # ``<<$pExecDate*>>``; analysis-level FilterGroups + BL.2's
+    # default_universal_date_range bind-layer fallback both dissolved.
     _wire_date_range_filter(
         analysis,
         datasets=datasets,
         account_coverage_sheet=sheets[SHEET_EXEC_ACCOUNT_COVERAGE],
         transaction_volume_sheet=sheets[SHEET_EXEC_TRANSACTION_VOLUME],
         money_moved_sheet=sheets[SHEET_EXEC_MONEY_MOVED],
-        exec_range_view=exec_range_view,
+        exec_range_view=DateView(
+            frame=cfg.test_generator.as_of_frame(window_days=30),
+        ),
     )
 
     # M.4.4.5 — App Info ("i") sheet, ALWAYS LAST. Diagnostic canary;

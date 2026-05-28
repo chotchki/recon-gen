@@ -14,7 +14,7 @@ return expression-level SQL).
 
 from __future__ import annotations
 
-from .app2_filters import app2_date_filter
+from .app2_filters import universal_date_range_clause
 from .money import cents_to_dollars_sql
 from .dialect import (
     Dialect,
@@ -61,7 +61,6 @@ from .dialect import (
 __all__ = [
     "Dialect",
     "analyze_table",
-    "app2_date_filter",
     "bigint_type",
     "boolean_type",
     "cast",
@@ -98,6 +97,7 @@ __all__ = [
     "timestamp_type",
     "to_date",
     "typed_null",
+    "universal_date_range_clause",
     "varchar_type",
     "with_recursive",
 ]

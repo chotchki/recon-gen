@@ -1,113 +1,114 @@
-"""Unit tests for ``common.sql.app2_filters.app2_date_filter``.
+"""Unit tests for
+``common.sql.app2_filters.universal_date_range_clause``.
 
-Y.3.f.alt.4a: dialect-aware date filter. Oracle's default
-``NLS_DATE_FORMAT`` rejects ISO-8601 strings via ``CAST(... AS DATE)``
-(``ORA-01847``); use ``TO_DATE(..., 'YYYY-MM-DD')`` instead. PG's
-``CAST`` parses ISO natively; SQLite stores dates as TEXT and
-compares lexicographically with no cast needed.
+Phase BM dissolved the pre-BM ``app2_date_filter`` helper (which
+emitted dialect-specific ``:date_from`` / ``:date_to`` bind clauses
+for the App2 leg of the dual-SQL date-pushdown form). Its replacement
+emits a single ``<<$pXxxDateStart>>`` / ``<<$pXxxDateEnd>>`` predicate
+fragment that both renderers consume identically — QS substitutes
+the parameter literal, App2 binds via ``:param_pXxxDate*``. These
+tests pin the per-dialect shape so a future cast / format change is
+caught at the smell-test layer.
 """
 
 from __future__ import annotations
 
-from recon_gen.common.sql import Dialect, app2_date_filter
-from recon_gen.common.sql.app2_filters import _DATE_FROM_SENTINEL, _DATE_TO_SENTINEL
+from recon_gen.apps.executives.datasets import (
+    P_EXEC_DATE_END,
+    P_EXEC_DATE_START,
+)
+from recon_gen.apps.l1_dashboard.datasets import P_L1_DATE_END, P_L1_DATE_START
+from recon_gen.common.sql import Dialect, universal_date_range_clause
+
+
+_START = P_L1_DATE_START
+_END = P_L1_DATE_END
+
+
+def _clause(dialect: Dialect, column: str = "business_day_start") -> str:
+    return universal_date_range_clause(
+        column, start_param=_START, end_param=_END, dialect=dialect,
+    )
 
 
 class TestPostgres:
-    def test_uses_cast_as_date(self):
-        sql = app2_date_filter("t.posting", Dialect.POSTGRES)
+    def test_uses_cast_as_timestamp(self) -> None:
+        sql = _clause(Dialect.POSTGRES)
         assert "CAST(" in sql
-        assert " AS DATE)" in sql
+        assert " AS TIMESTAMP)" in sql
         assert "TO_DATE" not in sql
 
-    def test_includes_both_bind_placeholders(self):
-        sql = app2_date_filter("t.posting", Dialect.POSTGRES)
-        assert ":date_from" in sql
-        assert ":date_to" in sql
+    def test_includes_both_param_placeholders(self) -> None:
+        sql = _clause(Dialect.POSTGRES)
+        assert f"<<${_START}>>" in sql
+        assert f"<<${_END}>>" in sql
 
-    def test_uses_sentinel_dates(self):
-        sql = app2_date_filter("t.posting", Dialect.POSTGRES)
-        assert _DATE_FROM_SENTINEL in sql
-        assert _DATE_TO_SENTINEL in sql
+    def test_upper_bound_expands_by_one_day(self) -> None:
+        """The end bound is day-inclusive: ``< end + 1 day`` so
+        same-day non-midnight TIMESTAMP rows on the end day are
+        included."""
+        sql = _clause(Dialect.POSTGRES)
+        assert "+ INTERVAL '1 day'" in sql
 
-    def test_leading_AND(self):
-        sql = app2_date_filter("t.posting", Dialect.POSTGRES)
-        assert sql.startswith("AND ")
+    def test_no_leading_AND(self) -> None:
+        """Phase BM dropped the leading ``AND`` — callers compose the
+        clause via explicit ``WHERE ... AND <clause>``."""
+        sql = _clause(Dialect.POSTGRES)
+        assert not sql.startswith("AND ")
 
 
 class TestOracle:
-    def test_uses_to_date_with_format_string(self):
-        """Oracle: must use TO_DATE with explicit format, not CAST.
-        CAST honors session NLS_DATE_FORMAT (default DD-MON-RR) and
-        rejects ISO strings with ORA-01847."""
-        sql = app2_date_filter("t.posting", Dialect.ORACLE)
+    def test_uses_to_date_with_format_string(self) -> None:
+        """Oracle's default NLS_DATE_FORMAT doesn't parse ISO-T
+        strings via bare CAST, so the helper routes through TO_DATE
+        with an explicit ISO format string."""
+        sql = _clause(Dialect.ORACLE)
         assert "TO_DATE(" in sql
-        assert "'YYYY-MM-DD'" in sql
-        # No bare CAST(... AS DATE) on Oracle
-        assert " AS DATE)" not in sql
-
-    def test_includes_both_bind_placeholders(self):
-        sql = app2_date_filter("t.posting", Dialect.ORACLE)
-        assert ":date_from" in sql
-        assert ":date_to" in sql
-
-    def test_uses_sentinel_dates(self):
-        sql = app2_date_filter("t.posting", Dialect.ORACLE)
-        assert _DATE_FROM_SENTINEL in sql
-        assert _DATE_TO_SENTINEL in sql
-
-
-class TestSQLite:
-    def test_no_cast_needed(self):
-        """SQLite has no native DATE type; ISO-8601 TEXT comparisons
-        work lexicographically. No CAST or TO_DATE call."""
-        sql = app2_date_filter("t.posting", Dialect.SQLITE)
+        # ISO-T format Oracle parses regardless of NLS_DATE_FORMAT.
+        assert "'YYYY-MM-DD\"T\"HH24:MI:SS'" in sql
         assert "CAST" not in sql
-        assert "TO_DATE" not in sql
 
-    def test_includes_both_bind_placeholders(self):
-        sql = app2_date_filter("t.posting", Dialect.SQLITE)
-        assert ":date_from" in sql
-        assert ":date_to" in sql
+    def test_includes_both_param_placeholders(self) -> None:
+        sql = _clause(Dialect.ORACLE)
+        assert f"<<${_START}>>" in sql
+        assert f"<<${_END}>>" in sql
 
-    def test_uses_sentinel_dates(self):
-        sql = app2_date_filter("t.posting", Dialect.SQLITE)
-        assert _DATE_FROM_SENTINEL in sql
-        assert _DATE_TO_SENTINEL in sql
-
-
-class TestColumnInterpolation:
-    def test_column_name_appears_per_dialect(self):
-        for dialect in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.SQLITE):
-            sql = app2_date_filter("t.posting", dialect)
-            assert "t.posting" in sql
-            assert sql.count("t.posting") == 2  # >= lower and < upper clauses
+    def test_upper_bound_adds_one_day(self) -> None:
+        """Oracle DATE arithmetic: ``+ 1`` adds one day to the
+        right-hand TO_DATE call. Day-inclusive semantics same as PG."""
+        sql = _clause(Dialect.ORACLE)
+        assert "') + 1" in sql
 
 
-class TestDayInclusiveUpperBound:
-    """X.2.j.dateparity — the upper bound is exclusive-of-the-next-day
-    (``column < date_to + 1 day``), not ``column <= date_to``, so a
-    same-day non-midnight ``TIMESTAMP`` row is included — matching
-    QuickSight's DAY-granularity ``TimeRangeFilter``. Regression guard
-    against re-introducing the ``<=`` form."""
-
-    def test_upper_bound_is_strict_less_than(self):
-        for dialect in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.SQLITE):
-            sql = app2_date_filter("t.posting", dialect)
-            assert "t.posting <" in sql, sql
-            # The old buggy form.
-            assert "t.posting <=" not in sql, sql
-
-    def test_postgres_adds_one_day_interval(self):
-        sql = app2_date_filter("t.posting", Dialect.POSTGRES)
-        assert "+ INTERVAL '1 day'" in sql
-
-    def test_oracle_adds_one(self):
-        sql = app2_date_filter("t.posting", Dialect.ORACLE)
-        # ``TO_DATE(...) + 1`` adds a day on Oracle DATE arithmetic.
-        assert "'YYYY-MM-DD') + 1" in sql
-
-    def test_sqlite_uses_date_plus_one_day(self):
-        sql = app2_date_filter("t.posting", Dialect.SQLITE)
-        assert "date(" in sql
+class TestSqlite:
+    def test_uses_datetime_function(self) -> None:
+        """SQLite has no native DATE type — ``datetime(...)``
+        normalizes ISO TEXT inputs + supports the ``'+1 day'``
+        modifier for the day-inclusive upper bound."""
+        sql = _clause(Dialect.SQLITE)
+        assert "datetime(" in sql
         assert "'+1 day'" in sql
+
+    def test_includes_both_param_placeholders(self) -> None:
+        sql = _clause(Dialect.SQLITE)
+        assert f"<<${_START}>>" in sql
+        assert f"<<${_END}>>" in sql
+
+
+class TestColumnSubstitution:
+    def test_column_name_appears_verbatim(self) -> None:
+        sql = _clause(Dialect.POSTGRES, column="t.posting")
+        # Once on the lower bound, once on the upper.
+        assert sql.count("t.posting") == 2
+
+    def test_param_names_are_caller_specified(self) -> None:
+        sql = universal_date_range_clause(
+            "posted_date",
+            start_param=P_EXEC_DATE_START,
+            end_param=P_EXEC_DATE_END,
+            dialect=Dialect.POSTGRES,
+        )
+        assert f"<<${P_EXEC_DATE_START}>>" in sql
+        assert f"<<${P_EXEC_DATE_END}>>" in sql
+        # No leakage of the L1 names from the helper.
+        assert P_L1_DATE_START not in sql

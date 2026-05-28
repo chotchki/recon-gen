@@ -57,6 +57,8 @@ from recon_gen.apps.l1_dashboard.datasets import (
     DS_TODAYS_EXCEPTIONS,
     DS_TRANSACTIONS,
     L1_ALL_SENTINEL,
+    P_L1_DATE_END as _P_L1_DATE_END,
+    P_L1_DATE_START as _P_L1_DATE_START,
     P_L1_DRIFT_ACCOUNT,
     P_L1_DRIFT_ROLE,
     P_L1_DRIFT_TL_ROLE,
@@ -130,7 +132,6 @@ from recon_gen.common.tree import (
     StaticValues,
     StringParam,
     TextBox,
-    TimeRangeFilter,
 )
 
 
@@ -164,9 +165,12 @@ SHEET_APP_INFO = SheetId("l1-sheet-app-info")
 # Parameter names — analysis-level parameters that drive the universal
 # date-range filter (M.2b.1). Each data-bearing sheet has paired
 # date-time picker controls bound to these params, so all 4 sheets'
-# pickers stay in sync via shared parameter values.
-P_L1_DATE_START = ParameterName("pL1DateStart")
-P_L1_DATE_END = ParameterName("pL1DateEnd")
+# pickers stay in sync via shared parameter values. Phase BM —
+# the underlying string literals live in ``datasets.py`` so the
+# dataset-side ``<<$pL1DateStart>>`` / ``<<$pL1DateEnd>>`` placeholders
+# bridge to the same NAME the analysis-side declares (one source).
+P_L1_DATE_START = ParameterName(_P_L1_DATE_START)
+P_L1_DATE_END = ParameterName(_P_L1_DATE_END)
 
 # M.2b.4 — Daily Statement parameters. Single-value account_id +
 # single-value business_day_start drive the per-account-day filter on
@@ -1716,102 +1720,59 @@ def _wire_date_range_filter(
     transactions_sheet: Sheet,
     universal_range_view: DateView,
 ) -> None:
-    """Wire the universal date-range filter (params + groups + controls).
+    """Wire the universal date-range filter (params + bridges + controls).
 
-    Adds 2 DateTimeParams (P_L1_DATE_START + P_L1_DATE_END) with the
-    7-day range from ``universal_range_view``; 5 SINGLE_DATASET
-    FilterGroups (one per data-bearing dataset, each scoped to its
-    sheet); paired ParameterDateTimePicker controls on every
-    data-bearing sheet so the analyst sets the window once and it
-    propagates.
+    Phase BM — the per-dataset ``TimeRangeFilter`` FilterGroups dissolved
+    in favor of dataset-SQL pushdown via ``<<$pL1DateStart>>`` /
+    ``<<$pL1DateEnd>>`` (see ``datasets.py::_l1_universal_range_params``).
+    This wire now declares only:
+
+    1. Two analysis-level ``DateTimeParam``s with ``mapped_dataset_params``
+       bridging each of the 8 data-bearing datasets' ``pL1DateStart`` /
+       ``pL1DateEnd`` dataset params.
+    2. Paired ``ParameterDateTimePicker`` controls on every data-bearing
+       sheet so the analyst sets the window once and it propagates.
+
+    Pre-BM dual-SQL ``{date_filter}`` template + analysis-level
+    ``TimeRangeFilter`` are gone; one SQL form across renderers; the
+    day-edge quirk dissolves by construction.
     """
+    # Phase BM — the 8 data-bearing datasets the universal date range
+    # narrows (current-state sheets — pending_aging, unbundled_aging,
+    # supersession_audit — intentionally skip; "stuck" is stuck until
+    # cleared regardless of the analyst's period of interest, and
+    # adding a date filter here would diverge from the audit PDF /
+    # break U.8.b's three-way agreement contract).
+    date_scoped_datasets = (
+        DS_DRIFT, DS_LEDGER_DRIFT,
+        DS_DRIFT_TIMELINE, DS_LEDGER_DRIFT_TIMELINE,
+        DS_OVERDRAFT,
+        DS_LIMIT_BREACH, DS_TODAYS_EXCEPTIONS,
+        DS_TRANSACTIONS,
+    )
+    start_bridges = [
+        (datasets[k], str(P_L1_DATE_START)) for k in date_scoped_datasets
+    ]
+    end_bridges = [
+        (datasets[k], str(P_L1_DATE_END)) for k in date_scoped_datasets
+    ]
     date_start = analysis.add_parameter(DateTimeParam(
         name=P_L1_DATE_START,
         time_granularity="DAY",
         default=universal_range_view.emit_qs_analysis_default_start(),
+        mapped_dataset_params=start_bridges,
     ))
     date_end = analysis.add_parameter(DateTimeParam(
         name=P_L1_DATE_END,
         time_granularity="DAY",
         default=universal_range_view.emit_qs_analysis_default_end(),
+        mapped_dataset_params=end_bridges,
     ))
-
-    # Param-bound dict literals — TimeRangeFilter.minimum/maximum are
-    # passthrough dicts; {"Parameter": "<name>"} is the AWS shape for
-    # parameter-driven bounds (mirrors how DateTimeDefaultValues
-    # passthrough works).
-    min_bound: dict[str, str] = {"Parameter": P_L1_DATE_START}
-    max_bound: dict[str, str] = {"Parameter": P_L1_DATE_END}
-
-    def _scope_one(
-        dataset_key: str, date_col: str, sheet: Sheet, fg_id: FilterGroupId,
-    ) -> None:
-        ds = datasets[dataset_key]
-        fg = analysis.add_filter_group(FilterGroup(
-            filter_group_id=fg_id,
-            cross_dataset="SINGLE_DATASET",
-            filters=[TimeRangeFilter(
-                filter_id=f"filter-{fg_id}",
-                dataset=ds,
-                column=ds[date_col],
-                null_option="NON_NULLS_ONLY",
-                time_granularity="DAY",
-                minimum=min_bound,
-                maximum=max_bound,
-                # AA.A.daterange.5 — Both bounds INCLUSIVE. With
-                # defaults (None / exclusive both), QS compiles to
-                # ``business_day_start >= addDateTime(1, 'DD',
-                # truncDate('DD', date_from)) AND <
-                # truncDate('DD', date_to))``, which when ``date_from
-                # == date_to`` produces an inverted (empty) range —
-                # AA.A.qs-triage Shape A. Inclusive-both compiles to
-                # ``>= truncDate(date_from) AND <= truncDate(date_to)``,
-                # so picking the anchor's exact day matches it. App2
-                # already had the symmetric fix (X.2.j.dateparity:
-                # ``column < date_to + 1 day``).
-                include_minimum=True,
-                include_maximum=True,
-            )],
-        ))
-        fg.scope_sheet(sheet)
-
-    # Drift sheet — both leaf-drift + parent-drift datasets share
-    # business_day_start.
-    _scope_one(DS_DRIFT, "business_day_start", drift_sheet,
-               FilterGroupId("fg-l1-date-drift"))
-    _scope_one(DS_LEDGER_DRIFT, "business_day_start", drift_sheet,
-               FilterGroupId("fg-l1-date-ledger-drift"))
-    # Drift Timelines uses pre-aggregated datasets keyed on
-    # business_day_end (one row per (day, role)).
-    _scope_one(DS_DRIFT_TIMELINE, "business_day_end",
-               drift_timelines_sheet, FilterGroupId("fg-l1-date-drift-timeline"))
-    _scope_one(DS_LEDGER_DRIFT_TIMELINE, "business_day_end",
-               drift_timelines_sheet, FilterGroupId("fg-l1-date-ledger-drift-timeline"))
-    _scope_one(DS_OVERDRAFT, "business_day_start", overdraft_sheet,
-               FilterGroupId("fg-l1-date-overdraft"))
-    # Limit breach + today's exceptions expose `business_day` (truncated
-    # posting), not `business_day_start`.
-    _scope_one(DS_LIMIT_BREACH, "business_day", limit_breach_sheet,
-               FilterGroupId("fg-l1-date-limit-breach"))
-    _scope_one(DS_TODAYS_EXCEPTIONS, "business_day",
-               todays_exceptions_sheet, FilterGroupId("fg-l1-date-todays-exceptions"))
-    # Q.1.b — Transactions sheet over the per-leg ledger; same `posting`
-    # column shape as Pending/Unbundled Aging.
-    _scope_one(DS_TRANSACTIONS, "posting", transactions_sheet,
-               FilterGroupId("fg-l1-date-transactions"))
-    # NOTE: stuck_pending / stuck_unbundled / supersession sheets
-    # intentionally skip date scoping. Their matviews are current-state
-    # (no posting/business_day filter on the audit query side either) —
-    # a "stuck" item is stuck until cleared, regardless of the analyst's
-    # period of interest. Adding a date filter here makes the dashboard
-    # diverge from the audit PDF (PDF surfaces every current-state row;
-    # filtered dashboard could drop them) and breaks U.8.b's three-way
-    # agreement contract.
 
     # Per-sheet date pickers — bound to the shared params so every
     # date-scoped sheet's pickers sync. The current-state sheets
     # (pending_aging, unbundled_aging, supersession_audit) are
-    # intentionally absent — see _scope_one note above.
+    # intentionally absent — see date_scoped_datasets note above.
     for sheet in (
         drift_sheet, drift_timelines_sheet, overdraft_sheet,
         limit_breach_sheet, todays_exceptions_sheet,
@@ -2676,15 +2637,12 @@ def build_l1_dashboard_app(
     )
 
     # M.2b.1 — Universal date-range filter wires the sheets together.
-    # Lands AFTER all sheets are populated since the FilterGroups scope
-    # by sheet ref + the controls register on the sheets directly.
+    # Lands AFTER all sheets are populated since the per-sheet picker
+    # controls register on the sheets directly.
     # AR.4 — 7-day window per the pre-AR.4 RollingDate defaults.
-    # BL.2 — record the analysis-level default range so App2 can
-    # pre-populate date_from / date_to on initial render (matches QS).
-    _universal_range_view = DateView(
-        frame=cfg.test_generator.as_of_frame(window_days=7),
-    )
-    analysis.default_universal_date_range = _universal_range_view
+    # Phase BM — narrowing pushed into dataset SQL via
+    # ``<<$pL1Date*>>``; analysis-level FilterGroups + BL.2's
+    # default_universal_date_range bind-layer fallback both dissolved.
     _wire_date_range_filter(
         analysis,
         datasets=datasets,
@@ -2697,8 +2655,9 @@ def build_l1_dashboard_app(
         supersession_audit_sheet=supersession_audit_sheet,
         todays_exceptions_sheet=todays_exceptions_sheet,
         transactions_sheet=transactions_sheet,
-        # AR.4 — 7-day window per the pre-AR.4 RollingDate defaults.
-        universal_range_view=_universal_range_view,
+        universal_range_view=DateView(
+            frame=cfg.test_generator.as_of_frame(window_days=7),
+        ),
     )
 
     # M.2b.3 + M.2b.5 + M.2b.10 + M.2b.11 + M.2b.12 — Per-sheet
