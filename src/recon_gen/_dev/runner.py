@@ -1737,7 +1737,21 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
         from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
 
         # Pin to the exact PG version we run in production (Aurora 17).
-        container = PostgresContainer("postgres:17-alpine")
+        # BM.5 (2026-05-28) — bump max_connections from the
+        # postgres:17-alpine default of 100. Per browser cell, pytest
+        # spawns ~16 xdist workers; each browser fixture spins its own
+        # App2 uvicorn server with its own psycopg pool (max_size=10
+        # in ``_tree_fetcher.make_tree_db_fetcher``) → ~160 connections
+        # potentially in-flight against the cell's single Docker PG.
+        # The default cap was tight enough to surface
+        # ``psycopg_pool.PoolTimeout: couldn't get a connection after
+        # 30.00 sec`` on sp_pg_lo's app2 layer
+        # (``test_date_filter_does_not_error_when_applied`` networkidle
+        # timeout downstream). 300 leaves headroom for the matrix
+        # without pushing PG anywhere near its real limits.
+        container = PostgresContainer("postgres:17-alpine").with_command(
+            "postgres -c max_connections=300",
+        )
         container.start()
         raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
         return {RECON_GEN_DEMO_DATABASE_URL.name: _normalize_pg_url(raw_url)}, container
