@@ -1,3 +1,30 @@
+# PLAN — Phase BO (archived 2026-05-29)
+
+## Phase BO — v11.23.0 cold-read defects (NEW findings exposed by BM landing)
+
+**Trigger** (cold-read 2026-05-28, `docs/audits/v11_23_0_feedback.md`): three context-isolated judges against the v11.23.0 dashboard bundle. Phase BM landed correctly — the headline reconciliation works penny-perfect on Daily Statement and v11.22.0 #2 closes. But making the pickers strict exposed pre-existing bugs that the no-op pickers had been masking. This phase ships fixes for the 12 NEW cold-read findings that weren't already tracked under Phase BK.
+
+The 6 findings overlapping Phase BK (F5 → BK.4/BK.10, F6 → BK.9, F10 → BK.3, F12 → BK.2, F14 → adjacent to BK.9, F18 → BK.3) stay in BK; this round promoted them with operator-confidence evidence that they're real and worth shipping.
+
+**Shipped 2026-05-29 (v11.24.0)**:
+
+- **BO.1 — Daily Statement account-picker FK mismatch (F1, top blocker)**. Split picker source: new `DS_L1_DS_ACCOUNTS` sourced from `<prefix>_current_daily_balances` only (same `pL1DsRole` cascade) feeds the Daily Statement Account dropdown via `LinkedValues`. The 7 other L1 sheets keep `DS_L1_ACCOUNTS` for the BL.3-wider universe. Pinned by `test_bo_1_daily_statement_account_picker_sources_balance_only` + per-role e2e `test_bo_1_daily_statement_picks_reconcile_per_role[qs|app2]`.
+- **BO.2 — Investigation Account Network Sankey blank (F2)**. App2 silently drops visual-scoped `sheet.scope(FilterGroup)`s, so both directional Sankeys received bidirectional rows and d3-sankey crashed silently on cycles. Fix: split into two directional sibling datasets — `DS_INV_ACCOUNT_NETWORK_INBOUND` (`AND target_display = anchor`) and `..._OUTBOUND` (`AND source_display = anchor`). Each Sankey reads its own sibling; Touching-Edges Table keeps the bidirectional dataset. All three bridge from the same anchor + min-amount params.
+- **BO.3 — L2FT Multi-Leg Flow Sankey blank (F3)**. Did not reproduce locally (sasquatch_pr+sqlite shows 65 nodes / 80 links on default load). Per user direction "Ship the empty-state copy regardless": added explicit empty-state to `bootstrap.js::renderSankey` — when `data.nodes`/`data.links` is empty, paints "No flows match the current filters..." with `.sankey-empty-state` Tailwind styling. Renderer-level — applies to every Sankey on the site.
+- **BO.4 — L1 Drift vs Drift Timelines ~$415K gap + sign flip (F4)**. (1) Added `abs_drift = ABS(drift)` to both DRIFT + LEDGER_DRIFT contracts/SQL. Drift sheet KPIs switched from signed `drift.max()` to `abs_drift.max()` to match Drift Timelines' precomputed unsigned values. (2) Labels disambiguate scope: "Largest * Drift (anywhere in window)" (row-grain peak) vs "Largest * Drift Day (peak business day)" (day-grain peak). Subtitles cross-reference siblings and explain why numbers can legitimately differ.
+- **BO.5 — App Info Matview Status byte-identical across all 4 apps (F7)**. Root cause: shared `DS_APP_INFO_*` constants used as `visual_identifier` collided in the process-global App2 `_SQL_REGISTRY`. Last-registered (Executives) won → all 4 dashboards showed Executives' scope. Per-app QS deploy was unaffected. Fix: replaced shared constants with `app_info_liveness_id(seg)` / `app_info_matviews_id(seg)` helpers; each app computes its own ID at module top.
+- **BO.6 — "Drift" labeled two materially different invariants (F8)**. Daily Statement KPI "Drift" → "Posting Drift" (closing stored − (opening + signed-net flow), single-day). Drift sheet description uses **ledger drift** (postings vs stored) / **aggregation drift** (parent stored vs child stored sum) vocabulary. Operator now has three distinct concepts: Posting / Ledger / Aggregation Drift.
+- **BO.7 — Recipient Fanout "Distinct Senders" label collision (F9)**. KPI relabeled "Distinct Senders (Union)" with a subtitle explaining sheet-level COUNT(DISTINCT) vs per-row count. Table column got `display_name="Senders Feeding This Recipient"` on `RECIPIENT_FANOUT_CONTRACT::distinct_senders`.
+- **BO.8 — Overdraft vs Drift orthogonality SPEC (F11)**. Overdraft sheet description spells out: Overdraft = sign check (stored < 0), Drift = reconciliation check (stored vs computed). A chronically-negative account whose postings always sum to the same negative number is overdrafted but NOT drifted. Expect Overdraft rows that don't appear on the Drift sheet.
+- **BO.9 — Strip sprint archaeology from operator copy (F13)**. Sweep on user-facing subtitles + descriptions across all 4 apps + the shared App Info panel. Stripped `v11.*` / `BH.*` / `BL.*` / `BO.*` / `cold-read finding #N` phrases. Substantive prose stayed; remediation-cycle bread-crumbs came off. Code comments + docstrings keep their phase references — that's the right home for code archaeology.
+- **BO.10 — `Latest day` placeholder mis-signals BM-shape range pickers (F15)**. Date filter works (probed: default ⇒ 3,700 rows; narrowed ⇒ 0 rows). Surprise came from the placeholder text. Added `placeholder` field to `ParameterDateSpec`; "Date From" → "Earliest day", "Date To" → "Latest day". Daily Statement single-day picker keeps "Latest day" (its sentinel default resolves to latest available day).
+- **BO.11 — L1 Limit Breach top-line KPI placement (F16)**. KPI existed pre-BO.11 but sat below an 8-grid-row tall TextBox. Hoisted to first row, renamed "Limit Breach Cells" → "Breaches in Window".
+- **BO.12 — L2FT Rails sheet orientation (F17)**. Intent-leading description ("Use this sheet to look up an individual transfer leg by ID..."). Added 3-KPI orientation row above the Transactions table: **Legs in Window** (count) / **Latest Leg** (max posting timestamp) / **Largest Leg** (max amount). Sheet order: filter form → KPI row → Transactions table.
+
+**Closing stats**: 4,069 non-e2e tests green; pyright clean across `src/` + `tests/`. Resolved 6 pre-existing pre-AO.1 spine-file conflict markers (drift/expected_eod/limit_breach/overdraft/stuck_pending/stuck_unbundled.py) to HEAD as part of BO.5's verification gate.
+
+---
+
 # PLAN — Phases BE + BL (archived 2026-05-27)
 
 ## Phase BE — Cross-corpus duplication lint (test ↔ src), paired approaches 1+3

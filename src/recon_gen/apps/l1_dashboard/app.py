@@ -105,10 +105,18 @@ from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_DESCRIPTION,
     APP_INFO_SHEET_NAME,
     APP_INFO_SHEET_TITLE,
-    DS_APP_INFO_LIVENESS,
-    DS_APP_INFO_MATVIEWS,
+    app_info_liveness_id,
+    app_info_matviews_id,
     populate_app_info_sheet,
 )
+
+# BO.5 — per-app App Info dataset identifiers. Pre-BO.5 these were the
+# shared ``"app-info-liveness-ds"`` / ``"app-info-matviews-ds"`` strings
+# from app_info.py; the shared name corrupted the App2 SQL registry on
+# ``dashboards --app all`` so every dashboard rendered the last-registered
+# app's matview-status panel. Per-segment IDs let all four coexist.
+_DS_APP_INFO_LIVENESS = app_info_liveness_id("l1")
+_DS_APP_INFO_MATVIEWS = app_info_matviews_id("l1")
 from recon_gen.common.l2 import ThemePreset
 from recon_gen.common.theme import resolve_l2_theme
 from recon_gen.common.tree.actions import DrillWrite
@@ -265,11 +273,16 @@ _DRIFT_NAME = "Drift"
 _DRIFT_TITLE = "Account Balance Drift"
 _DRIFT_DESCRIPTION = (
     "Stored vs computed balance disagreements at end-of-day. Leaf table "
-    "covers individual posting accounts (computed = cumulative net of "
-    "every Money record through that BusinessDay's end). Ledger table "
-    "covers parent accounts (computed = sum of child accounts' stored "
-    "balances). Both tables only show rows where stored ≠ computed — "
-    "every row is one SHOULD-constraint violation."
+    "covers individual posting accounts — **ledger drift** (computed = "
+    "cumulative net of every Money record through that BusinessDay's "
+    "end; stored ≠ computed ⇒ ledger doesn't agree with the postings). "
+    "Ledger table covers parent accounts — **aggregation drift** "
+    "(computed = sum of child accounts' stored balances; stored ≠ "
+    "computed ⇒ rollup doesn't match the children). Both tables only "
+    "show rows where stored ≠ computed — every row is one "
+    "SHOULD-constraint violation. Distinct from Daily Statement's "
+    "\"Posting Drift\" KPI (single-day flow drift); both are correct, "
+    "they answer different questions at different time grains."
 )
 
 
@@ -292,7 +305,15 @@ _OVERDRAFT_DESCRIPTION = (
     "invariant is 'no internal account holds negative balance' — every "
     "row in the table below is one violation. External accounts are "
     "excluded by the underlying view (banks may legitimately overdraft "
-    "us; we MUST NOT overdraft them)."
+    "us; we MUST NOT overdraft them). "
+    "**Orthogonal to Drift**: Overdraft asks 'is stored < 0?' "
+    "(an absolute sign check). Drift asks 'does stored agree with the "
+    "cumulative net of postings?' (a reconciliation check). A "
+    "chronically-negative account whose postings have always summed to "
+    "the same negative number is **overdrafted but NOT drifted** — its "
+    "ledger is internally consistent, it's just consistently in the "
+    "red. Same datum, two independent SHOULD-constraints; expect "
+    "Overdraft rows that don't appear on the Drift sheet."
 )
 
 
@@ -495,7 +516,7 @@ def _l1_datasets(
         DS_SUPERSESSION_TRANSACTIONS, DS_SUPERSESSION_DAILY_BALANCES,
         DS_L1_ACCOUNTS, DS_L1_DS_ACCOUNTS,
         DS_L1_DS_ROLES, DS_L1_TX_IDS, DS_L1_TX_FACETS,
-        DS_APP_INFO_LIVENESS, DS_APP_INFO_MATVIEWS,
+        _DS_APP_INFO_LIVENESS, _DS_APP_INFO_MATVIEWS,
     ]
     return {
         vid: Dataset(identifier=vid, arn=cfg.dataset_arn(aws.DataSetId))
@@ -627,15 +648,19 @@ def _populate_drift_sheet(
     )
     kpi_row.add_kpi(
         width=quarter,
-        title="Largest Leaf Drift",
+        title="Largest Leaf Drift (anywhere in window)",
         subtitle=(
             "Max |drift| across any single leaf-account day-row in the "
             "current date window. **Sibling of the count KPI** — count "
-            "+ magnitude together rule out the cold-read failure mode "
-            "where a SUM-based KPI cancels positives + negatives to ~0 "
-            "while per-account drifts remain non-trivial."
+            "+ magnitude together prevent the failure mode where a "
+            "SUM-based KPI cancels positives + negatives to ~0 while "
+            "per-account drifts remain non-trivial. Distinct from "
+            "Drift Timelines' \"Largest Leaf Drift Day\" KPI, which is "
+            "the peak Σ|drift| on the worst single business day "
+            "(day-grain rollup) — this one is the peak account-day "
+            "(row-grain peak)."
         ),
-        values=[ds_drift["drift"].max(currency=True)],
+        values=[ds_drift["abs_drift"].max(currency=True)],
     )
     kpi_row.add_kpi(
         width=quarter,
@@ -654,13 +679,17 @@ def _populate_drift_sheet(
     )
     kpi_row.add_kpi(
         width=quarter,
-        title="Largest Parent Drift",
+        title="Largest Parent Drift (anywhere in window)",
         subtitle=(
             "Max |drift| across any single parent-account day-row in "
             "the current date window. Sibling magnitude KPI to the "
-            "Parent count — see Leaf sibling subtitle for rationale."
+            "Parent count — see Leaf sibling subtitle for rationale. "
+            "Distinct from Drift Timelines' \"Largest Parent Drift "
+            "Day\" — that one rolls up to a per-business-day Σ before "
+            "taking the max, so it answers \"worst SINGLE day in the "
+            "window\" rather than \"worst single account-day row\"."
         ),
-        values=[ds_ledger_drift["drift"].max(currency=True)],
+        values=[ds_ledger_drift["abs_drift"].max(currency=True)],
     )
 
     # Row 2: leaf-drift table. Pull account_id + business_day_start Dims
@@ -793,19 +822,29 @@ def _populate_drift_timelines_sheet(
     kpi_row = sheet.layout.row(height=_KPI_ROW_SPAN)
     kpi_row.add_kpi(
         width=half,
-        title="Largest Leaf Drift Day",
+        title="Largest Leaf Drift Day (peak business day)",
         subtitle=(
             "Max Σ ABS(drift) on any single BusinessDay across leaf "
-            "accounts in the visible date range. Healthy = $0."
+            "accounts in the visible date range. Healthy = $0. "
+            "Distinct from the Drift sheet's \"Largest Leaf Drift\" "
+            "KPI: that one is the worst single account-day row; this "
+            "one is the day when total |drift| across all leaves was "
+            "largest, so it can be smaller (one big drift on a "
+            "quiet day) or larger (many medium drifts on a busy day) "
+            "than the row-grain peak."
         ),
         values=[ds_drift_timeline["abs_drift"].max(currency=True)],
     )
     kpi_row.add_kpi(
         width=half,
-        title="Largest Parent Drift Day",
+        title="Largest Parent Drift Day (peak business day)",
         subtitle=(
             "Max Σ ABS(drift) on any single BusinessDay across parent "
-            "accounts in the visible date range. Healthy = $0."
+            "accounts in the visible date range. Healthy = $0. "
+            "Distinct from the Drift sheet's \"Largest Parent Drift\" "
+            "— that one is the worst single account-day row, this one "
+            "is the worst single business day's roll-up. See \"Largest "
+            "Leaf Drift Day\" subtitle for the why."
         ),
         values=[ds_ledger_drift_timeline["abs_drift"].max(currency=True)],
     )
@@ -824,8 +863,7 @@ def _populate_drift_timelines_sheet(
             "Over Time' (below) shows the same shape for aggregate "
             "accounts. A role hugging zero is healthy; persistent "
             "non-zero ⇒ ongoing feed divergence; one-off spike ⇒ "
-            "isolated event worth drilling into. v11.22.1 cold-read "
-            "finding #10 — distinguish leaf vs parent scope explicitly."
+            "isolated event worth drilling into."
         ),
         category=[leaf_day_col],
         values=[ds_drift_timeline["abs_drift"].sum(currency=True)],
@@ -847,8 +885,7 @@ def _populate_drift_timelines_sheet(
             "One line per account_role. Non-zero ⇒ child postings "
             "didn't roll up correctly that day. Compare with 'Leaf "
             "Account Drift Over Time' (above) to triage whether a "
-            "drift event lives at the leaf or at the rollup. v11.22.1 "
-            "cold-read finding #10 — explicit scope contrast."
+            "drift event lives at the leaf or at the rollup."
         ),
         category=[parent_day_col],
         values=[ds_ledger_drift_timeline["abs_drift"].sum(currency=True)],
@@ -1093,6 +1130,27 @@ def _populate_limit_breach_sheet(
     accent = theme.accent
     ds_lb = datasets[DS_LIMIT_BREACH]
 
+    # BO.11 — count KPI is now the TOP row so an operator landing on
+    # this sheet sees the answer ("how many breaches?") before the
+    # reference material. Pre-BO.11 the KPI sat under the Configured
+    # Caps TextBox; the cold-read author scrolled past it and reported
+    # the sheet as "no top-line KPI" — the placement, not the absence,
+    # was the bug.
+    sheet.layout.row(height=_KPI_ROW_SPAN).add_kpi(
+        width=_FULL,
+        title="Breaches in Window",
+        subtitle=(
+            "Count of (account, day, rail_name, direction) cells where "
+            "the flow on the breaching side exceeded the L2-configured "
+            "cap, across the visible date range. **Zero** = no rule "
+            "violations in the window — the unambiguous healthy state. "
+            "If the limit_breach matview hasn't refreshed since the "
+            "last ETL load, the App Info sheet's matview-status table "
+            "shows the lag — a stale matview can also read zero."
+        ),
+        values=[ds_lb["account_id"].count()],
+    )
+
     sheet.layout.row(height=8).add_text_box(
         TextBox(
             text_box_id="l1-lb-config",
@@ -1108,20 +1166,6 @@ def _populate_limit_breach_sheet(
             ),
         ),
         width=_FULL,
-    )
-
-    sheet.layout.row(height=_KPI_ROW_SPAN).add_kpi(
-        width=_FULL,
-        title="Limit Breach Cells",
-        subtitle=(
-            "Count of (account, day, rail_name) cells where the "
-            "outbound total exceeded the L2-configured cap. **Zero** = "
-            "no rule violations on the most recent business day (the "
-            "matview's anchor). If the matview hasn't refreshed since "
-            "the last ETL load, the App Info sheet's matview-status "
-            "table shows the lag — a stale matview can also read zero."
-        ),
-        values=[ds_lb["account_id"].count()],
     )
 
     account_col = ds_lb["account_id"].dim()
@@ -1611,10 +1655,7 @@ def _populate_daily_statement_sheet(
             "Sum of `amount_money` over Debit-direction legs posted "
             "today, signed by v6 convention (Debit = negative). "
             "**Closing = Opening + Credits + Debits** (the signs already "
-            "carry direction; do NOT subtract). v11.22.1 cold-read "
-            "finding #1: the previous 'Debits' label suggested positive "
-            "magnitude + sign-via-formula; the post-cents-fix signed "
-            "values needed the explicit (signed) tag."
+            "carry direction; do NOT subtract)."
         ),
         values=[ds_summary["total_debits"].max(currency=True)],
     )
@@ -1624,8 +1665,7 @@ def _populate_daily_statement_sheet(
         subtitle=(
             "Sum of `amount_money` over Credit-direction legs posted "
             "today, signed by v6 convention (Credit = positive). See "
-            "Debits subtitle for the formula. v11.22.1 cold-read "
-            "finding #1 sibling rename."
+            "Debits subtitle for the formula."
         ),
         values=[ds_summary["total_credits"].max(currency=True)],
     )
@@ -1637,9 +1677,15 @@ def _populate_daily_statement_sheet(
     )
     kpi_row.add_kpi(
         width=kpi_width,
-        title="Drift",
+        title="Posting Drift",
         subtitle=(
-            "Stored − recomputed. Non-zero ⇒ feed doesn't reconcile."
+            "Closing stored − (opening + signed-net flow) for THIS "
+            "account-day. Non-zero ⇒ today's postings don't reconcile "
+            "with today's stored balance change. Distinct from the "
+            "Drift sheet's leaf/parent drift (stored vs cumulative "
+            "computed; whole-history rather than per-day) and from "
+            "parent aggregation drift (parent stored vs Σ child "
+            "stored)."
         ),
         values=[ds_summary["drift"].max(currency=True)],
     )
@@ -2645,8 +2691,8 @@ def build_l1_dashboard_app(
     )
     populate_app_info_sheet(
         cfg, app_info_sheet,
-        liveness_ds=datasets[DS_APP_INFO_LIVENESS],
-        matview_status_ds=datasets[DS_APP_INFO_MATVIEWS],
+        liveness_ds=datasets[_DS_APP_INFO_LIVENESS],
+        matview_status_ds=datasets[_DS_APP_INFO_MATVIEWS],
         theme=theme,
     )
 

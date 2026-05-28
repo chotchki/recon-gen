@@ -155,8 +155,22 @@ def make_filter_specs_for_sheet(sheet: "Sheet") -> list[FilterSpec]:
             # on those sheets until they migrate to the BM-shape too.
             bridges = getattr(ctrl.parameter, "mapped_dataset_params", None)
             if bridges:
+                # BO.10 — picker placeholder describes what the empty
+                # state really does. ``"Date From"`` / ``"Date To"``
+                # range pickers on BM-shape sheets default to wide-open
+                # 1900-01-01 / 2099-12-31 dataset-param defaults, so an
+                # empty range picker IS the full data window — the
+                # placeholder names the bound the picker is anchored to.
+                # Single-day pickers (no "From"/"To" in the title) keep
+                # ``"Latest day"`` (which matches their sentinel-default
+                # semantic).
+                if ctrl.title == "Date From":
+                    placeholder = "Earliest day"
+                else:
+                    placeholder = "Latest day"
                 specs.append(ParameterDateSpec(
                     name=str(ctrl.parameter.name), label=ctrl.title,
+                    placeholder=placeholder,
                 ))
             continue
         if not isinstance(ctrl, ParameterDropdown):

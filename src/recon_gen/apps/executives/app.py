@@ -43,10 +43,14 @@ from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_DESCRIPTION,
     APP_INFO_SHEET_NAME,
     APP_INFO_SHEET_TITLE,
-    DS_APP_INFO_LIVENESS,
-    DS_APP_INFO_MATVIEWS,
+    app_info_liveness_id,
+    app_info_matviews_id,
     populate_app_info_sheet,
 )
+
+# BO.5 — per-app App Info dataset identifiers; see l1_dashboard/app.py.
+_DS_APP_INFO_LIVENESS = app_info_liveness_id("exec")
+_DS_APP_INFO_MATVIEWS = app_info_matviews_id("exec")
 from recon_gen.common.theme import resolve_l2_theme
 from recon_gen.common.tree import (
     Analysis,
@@ -259,8 +263,8 @@ def _datasets(cfg: Config) -> dict[str, Dataset]:
         DS_EXEC_ACCOUNT_SUMMARY,
         # Y.2.h — second account dataset; same shape, baked WHERE.
         DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
-        DS_APP_INFO_LIVENESS,
-        DS_APP_INFO_MATVIEWS,
+        _DS_APP_INFO_LIVENESS,
+        _DS_APP_INFO_MATVIEWS,
     ]
     return {
         name: Dataset(identifier=name, arn=cfg.dataset_arn(ds.DataSetId))
@@ -318,9 +322,7 @@ def _populate_account_coverage(
             "**When this equals Active Accounts (right) every open "
             "account had at least one transaction in the window** — a "
             "healthy fully-utilized state. A larger gap = idle accounts "
-            "worth follow-up. v11.22.1 cold-read finding #17 noted the "
-            "numbers matched on the captured deploy without an explainer "
-            "for WHY they could match."
+            "worth follow-up."
         ),
         values=[ds_acct["account_id"].count(field_id="exec-acct-open-count")],
     )
@@ -470,9 +472,7 @@ def _populate_transaction_volume(
             "Matches the **App Info sheet's `<prefix>_transactions` "
             "row_count** exactly. Headline pair (this + Total "
             "Transactions) makes the documented predicate-scope gap "
-            "visible. BH.8 sibling-KPI fix added 2026-05-26 after "
-            "v11.22.1 cold-read still flagged the gap-as-bug despite "
-            "v11.22.0's subtitle-only disambiguation."
+            "visible."
         ),
         values=[ds_legs["leg_count"].sum(field_id="exec-txn-legs-count")],
     )
@@ -483,10 +483,8 @@ def _populate_transaction_volume(
         subtitle=(
             "Total transfer count per active business day. Averaged "
             "over days that had any activity; zero-volume days don't "
-            "surface in the underlying dataset. Rendered as integer — "
-            "v11.22.1 cold-read finding #18 noted QS's default "
-            "3-decimal display ('2.000') for AVERAGE aggregations was "
-            "wrong for a count-of-things."
+            "surface in the underlying dataset. Rendered as integer "
+            "because the underlying datum is a count."
         ),
         values=[ds_daily["daily_transfer_count"].average(
             field_id="exec-txn-avg-daily-count",
@@ -828,8 +826,8 @@ def build_executives_app(
     ))
     populate_app_info_sheet(
         cfg, app_info_sheet,
-        liveness_ds=datasets[DS_APP_INFO_LIVENESS],
-        matview_status_ds=datasets[DS_APP_INFO_MATVIEWS],
+        liveness_ds=datasets[_DS_APP_INFO_LIVENESS],
+        matview_status_ds=datasets[_DS_APP_INFO_MATVIEWS],
         theme=theme,
     )
 

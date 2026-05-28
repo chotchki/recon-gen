@@ -17,14 +17,14 @@ from __future__ import annotations
 
 from recon_gen.apps.investigation.constants import (
     DS_INV_ACCOUNT_NETWORK,
+    DS_INV_ACCOUNT_NETWORK_INBOUND,
+    DS_INV_ACCOUNT_NETWORK_OUTBOUND,
     DS_INV_ANETWORK_ACCOUNTS,
     DS_INV_MONEY_TRAIL,
     DS_INV_MONEY_TRAIL_ROOTS,
     DS_INV_RECIPIENT_FANOUT,
     DS_INV_VOLUME_ANOMALIES,
     DS_INV_VOLUME_ANOMALIES_DISTRIBUTION,
-    FG_INV_ANETWORK_INBOUND,
-    FG_INV_ANETWORK_OUTBOUND,
     FG_INV_ANOMALIES_WINDOW,
     FG_INV_FANOUT_WINDOW,
     FG_INV_MONEY_TRAIL_WINDOW,
@@ -63,19 +63,22 @@ from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_DESCRIPTION,
     APP_INFO_SHEET_NAME,
     APP_INFO_SHEET_TITLE,
-    DS_APP_INFO_LIVENESS,
-    DS_APP_INFO_MATVIEWS,
+    app_info_liveness_id,
+    app_info_matviews_id,
     build_liveness_dataset,
     build_matview_status_dataset,
     populate_app_info_sheet,
 )
+
+# BO.5 — per-app App Info dataset identifiers; see l1_dashboard/app.py.
+_DS_APP_INFO_LIVENESS = app_info_liveness_id("inv")
+_DS_APP_INFO_MATVIEWS = app_info_matviews_id("inv")
 from recon_gen.common.theme import resolve_l2_theme
 from recon_gen.common.models import Analysis as ModelAnalysis
 from recon_gen.common.models import Dashboard as ModelDashboard
 from recon_gen.common.tree import (
     Analysis,
     App,
-    CategoryFilter,
     Dataset,
     Drill,
     DrillParam,
@@ -326,9 +329,16 @@ def _build_recipient_fanout_sheet(
     )
     kpi_row.add_kpi(
         width=_THIRD,
-        title="Distinct Senders",
+        title="Distinct Senders (Union)",
         subtitle=(
-            "Distinct sender accounts feeding the qualifying recipients."
+            "Distinct sender accounts feeding the qualifying recipients "
+            "AS A WHOLE — `COUNT(DISTINCT sender_account_id)` across "
+            "every qualifying recipient's senders, deduped at the sheet "
+            "level. Distinct from the table's "
+            "\"Senders Feeding This Recipient\" column, which is the "
+            "per-recipient count and can be SMALLER than this KPI "
+            "(a sender feeding two qualifying recipients only counts "
+            "once here but twice across rows)."
         ),
         values=[ds_fanout["sender_account_id"].distinct_count()],
     )
@@ -487,10 +497,7 @@ def _build_volume_anomalies_sheet(
             "the bar — the distribution chart on the right shows the "
             "full pair-window population bucketed by |z|, so you can "
             "see how far the data sits from the threshold and decide "
-            "whether to lower σ to widen the flagged set. BH.5 rename "
-            "(2026-05-25): was 'Flagged Pair-Windows' — operators "
-            "read zero as 'broken'; making the threshold-relativity "
-            "explicit in the title prevents the misread."
+            "whether to lower σ to widen the flagged set."
         ),
         values=[ds_anomalies["recipient_account_id"].count()],
     )
@@ -789,49 +796,50 @@ def _build_account_network_sheet(
 ) -> Sheet:
     """Account Network — directional Sankeys + touching-edges table.
 
-    The L.1.15 spike (`_account_network_full_port.py`) already proved
-    byte-identity for this sheet via the typed primitives. L.2.5 folds
-    that wiring into the main app builder so the full app emits one
-    coherent Analysis, dropping the standalone spike fixture.
-
-    Datasets: the matview wrapper (visuals + filters) plus the K.4.8k
-    narrow accounts dataset (anchor dropdown). Two parameters
-    (anchor + min amount), four analysis-level calc fields (the
-    direction-specific edge-touching predicates plus the counterparty
-    display picker), three drill actions (left-click on each Sankey
-    walks the anchor; right-click on a table row walks via the
-    counterparty calc field), four filter groups (anchor → table only,
-    inbound direction → inbound Sankey only, outbound direction →
-    outbound Sankey only, amount → all three).
+    Datasets (BO.2): one bidirectional + two directional siblings of
+    the K.4.5 ``inv_money_trail_edges`` matview, plus the K.4.8k narrow
+    accounts dataset feeding the anchor dropdown. Each Sankey reads its
+    directional sibling (target=anchor → inbound; source=anchor →
+    outbound); the Touching-Edges Table reads the bidirectional one.
+    Two parameters (anchor + min-amount) bridge into all three via
+    ``mapped_dataset_params`` so the dropdown's first commit narrows
+    everything in lock-step.
 
     Layout: two Sankeys side-by-side on top (½ width each), full-width
     table below.
 
-    App2 alpha gap (X.2.g.2.c, deferred from v8.8.0a1)
-    --------------------------------------------------
-    The QS dialect drives anchor + direction filtering through the
-    ``pInvANetworkAnchor`` StringParam + four analysis-level calc
-    fields, all evaluated inside the QuickSight engine at render
-    time. App2 has no equivalent calc-field-to-SQL translator yet,
-    so under App2 this sheet renders **all flows from the matview
-    without anchor or direction filtering** — both directional
-    Sankeys show identical content (the full edge set), the table
-    is unfiltered, and the anchor dropdown's value is ignored.
-    Basic Sankey rendering still works (X.2.g.2.b), the page is
-    not broken — just less interactive than the QS view.
-
-    Closing the gap before v8.8.0 stable means either: (1) building
-    a calc-field-to-SQL emitter for the inbound / outbound direction
-    flags and the anchor predicate, OR (2) templating the dataset
-    SQL with App2-specific ``WHERE`` clauses bound to ``:param_*``
-    placeholders (mirroring the X.2.g.1.b ``app2_date_filter``
-    pattern). Tracked as task #646 / X.2.g.2.c follow-up.
+    BO.2 (2026-05-28) — pre-BO.2 both Sankeys shared the bidirectional
+    dataset and were narrowed by visual-scoped FilterGroups
+    (``CategoryFilter(is_inbound_edge='yes')``). App2's wrapper SQL
+    doesn't consult ``sheet.scope()``, so both Sankeys received
+    bidirectional rows; d3-sankey crashed silently on the resulting
+    cycles. Splitting into directional datasets makes "bidirectional
+    rows reach a directional Sankey" unrepresentable and aligns with
+    the Phase Y deprecation of FilterGroup-for-filtering in favor of
+    ``<<$pX>>`` pushdown.
     """
     del cfg
 
     ds_anet = app.add_dataset(Dataset(
         identifier=DS_INV_ACCOUNT_NETWORK,
         arn=app.cfg.dataset_arn(app.cfg.prefixed("inv-account-network-dataset")),
+    ))
+    # BO.2 — directional siblings of ds_anet. The bidirectional ds_anet
+    # feeds the Touching-Edges table; each Sankey reads its own pre-
+    # directional dataset so QS + App2 see byte-symmetric (already-
+    # directional) row sets. See ``_account_network_sql`` for why the
+    # split exists.
+    ds_anet_inbound = app.add_dataset(Dataset(
+        identifier=DS_INV_ACCOUNT_NETWORK_INBOUND,
+        arn=app.cfg.dataset_arn(
+            app.cfg.prefixed("inv-account-network-inbound-dataset"),
+        ),
+    ))
+    ds_anet_outbound = app.add_dataset(Dataset(
+        identifier=DS_INV_ACCOUNT_NETWORK_OUTBOUND,
+        arn=app.cfg.dataset_arn(
+            app.cfg.prefixed("inv-account-network-outbound-dataset"),
+        ),
     ))
     ds_accounts = app.add_dataset(Dataset(
         identifier=DS_INV_ANETWORK_ACCOUNTS,
@@ -842,9 +850,11 @@ def _build_account_network_sheet(
     # twin. QS resolves <<$pInvANetworkAnchor>> / <<$pInvANetworkMinAmount>>
     # in ds_anet's SQL by walking MappedDataSetParameters → finding the
     # analysis param of the same name → substituting its current value
-    # at query time. The K.4.8k narrow accounts dataset
-    # (DS_INV_ANETWORK_ACCOUNTS) feeding the dropdown has no parameters;
-    # nothing bridges into it.
+    # at query time. BO.2 — the bridge fan-out grew to three datasets
+    # (bidirectional + inbound + outbound) so each Sankey + the table
+    # all narrow off the same anchor pick. The K.4.8k narrow accounts
+    # dataset (DS_INV_ANETWORK_ACCOUNTS) feeding the dropdown has no
+    # parameters; nothing bridges into it.
     anchor_param = analysis.add_parameter(StringParam(
         name=P_INV_ANETWORK_ANCHOR,
         # No analysis-level default — SelectAll=HIDDEN forces dropdown
@@ -855,6 +865,8 @@ def _build_account_network_sheet(
         default=[],
         mapped_dataset_params=[
             (ds_anet, str(P_INV_ANETWORK_ANCHOR)),
+            (ds_anet_inbound, str(P_INV_ANETWORK_ANCHOR)),
+            (ds_anet_outbound, str(P_INV_ANETWORK_ANCHOR)),
         ],
     ))
     min_amount_param = analysis.add_parameter(IntegerParam(
@@ -862,22 +874,23 @@ def _build_account_network_sheet(
         default=[_DEFAULT_MONEY_TRAIL_MIN_AMOUNT],
         mapped_dataset_params=[
             (ds_anet, str(P_INV_ANETWORK_MIN_AMOUNT)),
+            (ds_anet_inbound, str(P_INV_ANETWORK_MIN_AMOUNT)),
+            (ds_anet_outbound, str(P_INV_ANETWORK_MIN_AMOUNT)),
         ],
     ))
 
     # Y.2.b — is_anchor_edge calc field removed (only consumer was the
     # now-dropped FG_INV_ANETWORK_ANCHOR; ds_anet's SQL now pre-narrows
     # to anchor-touching edges so every row is_anchor_edge='yes' by
-    # construction). Direction-specific calc fields below stay — they
-    # partition the pre-narrowed set into per-Sankey directions; Y.3.b
-    # will push them into SQL CASE expressions too.
+    # construction).
     # Y.3.b — is_inbound_edge / is_outbound_edge / counterparty_display
-    # are now real dataset columns computed via CASE expressions over
+    # are real dataset columns computed via CASE expressions over
     # <<$pInvANetworkAnchor>>. Pre-Y.3 they were analysis-level
-    # CalcFields; pushdown means QS + App2 see one shape and the
-    # Sankey direction filters can target real columns directly.
-    is_inbound_edge = ds_anet["is_inbound_edge"]
-    is_outbound_edge = ds_anet["is_outbound_edge"]
+    # CalcFields. BO.2 — the direction predicates (is_inbound_edge='yes' /
+    # is_outbound_edge='yes') that pre-BO.2 fed visual-scoped FilterGroups
+    # are now baked into the directional datasets' WHERE clauses, so
+    # neither column is read here anymore. counterparty_display stays —
+    # the Touching-Edges table reads it off the bidirectional dataset.
     counterparty_display = ds_anet["counterparty_display"]
 
     sheet = analysis.add_sheet(Sheet(
@@ -896,10 +909,16 @@ def _build_account_network_sheet(
     )
 
     # Row 1: two Sankeys side-by-side (inbound on left, outbound on right).
+    # BO.2 — each Sankey reads its directional dataset (target=anchor for
+    # inbound, source=anchor for outbound). Pre-BO.2 both pointed at the
+    # bidirectional ds_anet and were scoped by visual-level FilterGroups;
+    # App2 doesn't honor visual-scoped FilterGroups, so both Sankeys
+    # received bidirectional rows and d3-sankey crashed silently on the
+    # resulting cycles.
     half_width = _FULL // 2
     sankey_row = sheet.layout.row(height=_TABLE_ROW_SPAN)
-    inbound_source_dim = ds_anet["source_display"].dim()
-    inbound_sankey = sankey_row.add_sankey(
+    inbound_source_dim = ds_anet_inbound["source_display"].dim()
+    sankey_row.add_sankey(
         width=half_width,
         title="Inbound — counterparties → anchor",
         subtitle=(
@@ -909,8 +928,8 @@ def _build_account_network_sheet(
             "counterparty."
         ),
         source=inbound_source_dim,
-        target=ds_anet["target_display"].dim(),
-        weight=ds_anet["hop_amount"].sum(currency=True),
+        target=ds_anet_inbound["target_display"].dim(),
+        weight=ds_anet_inbound["hop_amount"].sum(currency=True),
         items_limit=_SANKEY_NODE_CAP,
         actions=[Drill(
             writes=[(anchor_param_drill, inbound_source_dim)],
@@ -919,8 +938,8 @@ def _build_account_network_sheet(
             action_id="action-anetwork-sankey-inbound-walk",
         )],
     )
-    outbound_target_dim = ds_anet["target_display"].dim()
-    outbound_sankey = sankey_row.add_sankey(
+    outbound_target_dim = ds_anet_outbound["target_display"].dim()
+    sankey_row.add_sankey(
         width=half_width,
         title="Outbound — anchor → counterparties",
         subtitle=(
@@ -929,9 +948,9 @@ def _build_account_network_sheet(
             "node (or its ribbon) to walk the anchor over to that "
             "counterparty."
         ),
-        source=ds_anet["source_display"].dim(),
+        source=ds_anet_outbound["source_display"].dim(),
         target=outbound_target_dim,
-        weight=ds_anet["hop_amount"].sum(currency=True),
+        weight=ds_anet_outbound["hop_amount"].sum(currency=True),
         items_limit=_SANKEY_NODE_CAP,
         actions=[Drill(
             writes=[(anchor_param_drill, outbound_target_dim)],
@@ -984,37 +1003,18 @@ def _build_account_network_sheet(
     # ds_anet's SQL via <<$pInvANetworkAnchor>>. Every row in the
     # dataset is anchor-touching by construction; the table doesn't
     # need a calc-field-based anchor filter.
-
-    # Inbound direction filter — inbound Sankey only.
-    sheet.scope(
-        analysis.add_filter_group(FilterGroup(
-            filter_group_id=FG_INV_ANETWORK_INBOUND,
-            filters=[CategoryFilter.with_values(
-                filter_id="filter-inv-anetwork-inbound",
-                dataset=ds_anet,
-                column=is_inbound_edge,
-                values=["yes"],
-                match_operator="CONTAINS",
-            )],
-        )),
-        [inbound_sankey],
-    )
-
-    # Outbound direction filter — outbound Sankey only.
-    sheet.scope(
-        analysis.add_filter_group(FilterGroup(
-            filter_group_id=FG_INV_ANETWORK_OUTBOUND,
-            filters=[CategoryFilter.with_values(
-                filter_id="filter-inv-anetwork-outbound",
-                dataset=ds_anet,
-                column=is_outbound_edge,
-                values=["yes"],
-                match_operator="CONTAINS",
-            )],
-        )),
-        [outbound_sankey],
-    )
-
+    #
+    # BO.2 — FG_INV_ANETWORK_INBOUND + FG_INV_ANETWORK_OUTBOUND removed.
+    # Pre-BO.2 each Sankey was narrowed to its direction by a visual-
+    # scoped FilterGroup of ``CategoryFilter(is_*_edge='yes')``. App2
+    # silently drops visual-scoped FilterGroups (the QS engine applies
+    # them; the App2 SQL wrapper does not consult ``sheet.scope()``).
+    # Both Sankeys therefore received the bidirectional dataset and
+    # d3-sankey crashed silently on the resulting cycles
+    # (counterparty↔anchor edges in both directions). Fix: each Sankey
+    # reads its directional sibling dataset; the bidirectional dataset
+    # feeds the Touching-Edges table only.
+    #
     # Y.2.b — FG_INV_ANETWORK_AMOUNT removed; the min-amount cutoff
     # now lives in ds_anet's SQL via
     # ``hop_amount >= <<$pInvANetworkMinAmount>>``. Slider widget still
@@ -1143,11 +1143,11 @@ def _build_app_info_sheet(
         cfg, app_segment="inv", view_specs=inv_matview_specs(cfg),
     )
     liveness_ds = app.add_dataset(Dataset(
-        identifier=DS_APP_INFO_LIVENESS,
+        identifier=_DS_APP_INFO_LIVENESS,
         arn=cfg.dataset_arn(liveness_aws.DataSetId),
     ))
     matviews_ds = app.add_dataset(Dataset(
-        identifier=DS_APP_INFO_MATVIEWS,
+        identifier=_DS_APP_INFO_MATVIEWS,
         arn=cfg.dataset_arn(matviews_aws.DataSetId),
     ))
     sheet = analysis.add_sheet(Sheet(

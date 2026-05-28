@@ -72,10 +72,14 @@ from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_DESCRIPTION,
     APP_INFO_SHEET_NAME,
     APP_INFO_SHEET_TITLE,
-    DS_APP_INFO_LIVENESS,
-    DS_APP_INFO_MATVIEWS,
+    app_info_liveness_id,
+    app_info_matviews_id,
     populate_app_info_sheet,
 )
+
+# BO.5 — per-app App Info dataset identifiers; see l1_dashboard/app.py.
+_DS_APP_INFO_LIVENESS = app_info_liveness_id("l2ft")
+_DS_APP_INFO_MATVIEWS = app_info_matviews_id("l2ft")
 from recon_gen.common.l2 import ThemePreset
 from recon_gen.common.theme import resolve_l2_theme
 from recon_gen.common.tree.actions import DrillWrite
@@ -139,10 +143,14 @@ _GETTING_STARTED_DESCRIPTION = (
 _RAILS_NAME = "Rails"
 _RAILS_TITLE = "Rails — Transactions Explorer"
 _RAILS_DESCRIPTION = (
+    "Use this sheet to look up an individual transfer leg by ID or to "
+    "inspect the journal rows on a specific rail / metadata slice. "
     "Filter the postings ledger by date range, rail, status, bundle "
     "status, and (cascading) metadata key + value. Pick a Metadata Key "
     "to populate the Value dropdown; pick one or more Values to narrow "
-    "the table to legs carrying that metadata."
+    "the table to legs carrying that metadata. The KPI row above the "
+    "table orients you: how many legs are in the current window, when "
+    "the most recent one posted, and how big the largest one is."
 )
 # Visual title for the legs table inside the Rails sheet. Exported so
 # tests can import it instead of inlining the literal — see BE.2
@@ -320,8 +328,8 @@ def build_l2_flow_tracing_app(
     ))
     populate_app_info_sheet(
         cfg, app_info_sheet,
-        liveness_ds=datasets[DS_APP_INFO_LIVENESS],
-        matview_status_ds=datasets[DS_APP_INFO_MATVIEWS],
+        liveness_ds=datasets[_DS_APP_INFO_LIVENESS],
+        matview_status_ds=datasets[_DS_APP_INFO_MATVIEWS],
         theme=theme,
     )
 
@@ -364,7 +372,7 @@ def _l2ft_datasets(
         DS_TT_INSTANCES,
         DS_TT_LEGS,
         DS_UNIFIED_L2_EXCEPTIONS,
-        DS_APP_INFO_LIVENESS, DS_APP_INFO_MATVIEWS,  # M.4.4.5
+        _DS_APP_INFO_LIVENESS, _DS_APP_INFO_MATVIEWS,  # M.4.4.5; BO.5 per-app
     ]
     return {
         vid: Dataset(identifier=vid, arn=cfg.dataset_arn(aws.DataSetId))
@@ -651,6 +659,45 @@ def _populate_rails_sheet(
     sheet.add_parameter_text_field(
         parameter=p_meta_value,
         title="Metadata Value",
+    )
+
+    # BO.12 — orientation KPI row above the table. The wide ledger dump
+    # below was hostile as a cold-land target: an operator who hadn't
+    # touched filters yet had no top-line signal for "how much is in
+    # here?" The three KPIs answer the orientation questions the
+    # cold-read asked for — count of legs in the current filter set,
+    # most recent posting timestamp, largest single leg amount.
+    third = 36 // 3
+    kpi_row = sheet.layout.row(height=8)
+    kpi_row.add_kpi(
+        width=third,
+        title="Legs in Window",
+        subtitle=(
+            "Count of postings rows matching all filters above. With "
+            "no narrowing this is every leg in the visible date range "
+            "across every status; pick a Status to scope to Posted-only."
+        ),
+        values=[ds_postings["id"].count()],
+    )
+    kpi_row.add_kpi(
+        width=third,
+        title="Latest Leg",
+        subtitle=(
+            "Most recent `posting` timestamp across the filtered legs — "
+            "tells you how fresh the visible slice is at a glance."
+        ),
+        values=[ds_postings["posting"].max()],
+    )
+    kpi_row.add_kpi(
+        width=third,
+        title="Largest Leg",
+        subtitle=(
+            "Largest single-leg `amount_money` across the filtered "
+            "rows. Sibling to Legs in Window — count + magnitude "
+            "together tell you whether the visible slice is a long "
+            "tail of small legs or a few outliers."
+        ),
+        values=[ds_postings["amount_money"].max(currency=True)],
     )
 
     # Transactions table — the postings dataset's SQL handles the
@@ -1200,22 +1247,11 @@ def _populate_l2_exceptions_sheet(
         width=12,
         title="Distinct Exception Types Open",
         subtitle=(
-            "Count of distinct exception ROWS across all six L2 hygiene "
-            "checks — one row = one detected (check_type, entity_a, "
-            "entity_b, detail) violation. **Detail table's `Violations "
-            "per Type` column counts the occurrences PER row** — those "
-            "are two different units measuring different things, both "
-            "correct. BH.11 rename (2026-05-25): title was 'Open L2 "
-            "Violations'; cold-read read the kpi-vs-table-column "
-            "magnitude gap as a unit mismatch — the new title + the "
-            "table column's matching rename make the units explicit. "
-            "BL.1 follow-up (2026-05-27): binding flipped to "
-            "``.distinct_count()`` to match the 'Distinct' intent — "
-            "pre-BL.1 ``.count()`` rendered DISTINCT on QS (the "
-            "CategoricalMeasureField(COUNT)-on-string-dim quirk); "
-            "post-BL.1 ``.count()`` renders row count (SUM(1)). The "
-            "title was authored under the quirk's behavior; the "
-            "explicit distinct_count binding survives the wire fix."
+            "Count of distinct exception TYPES (one of the six L2 "
+            "hygiene checks) currently with at least one open violation. "
+            "**The detail table's `Violations per Type` column counts "
+            "occurrences PER row** — these are two different units "
+            "measuring different things, both correct."
         ),
         values=[ds["check_type"].distinct_count()],
     )

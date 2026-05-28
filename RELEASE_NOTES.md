@@ -1,5 +1,158 @@
 # Release Notes
 
+## v11.24.0 — Phase BO: 12 v11.23.0 cold-read defects
+
+Three context-isolated cold-read judges hit v11.23.0 against a sample
+L2 instance and surfaced 18 findings (`docs/audits/v11_23_0_feedback.md`).
+12 were NEW (not already in the Phase BK carryover backlog). All 12
+landed this release; the remaining 6 stay scoped to BK.
+
+Phase BM landed correctly — the headline Daily Statement reconciliation
+works penny-perfect and v11.22.0 #2 closes. But making the pickers
+strict exposed pre-existing bugs that the no-op pickers had been
+masking. Phase BO ships those fixes.
+
+### BO.1 — Daily Statement account-picker FK mismatch (top blocker)
+
+Split picker source: new `DS_L1_DS_ACCOUNTS` (sourced from
+`<prefix>_current_daily_balances` only, same `pL1DsRole` cascade) feeds
+the Daily Statement Account dropdown. The 7 other L1 sheets keep
+`DS_L1_ACCOUNTS` for the BL.3-wider Pending-only / spine-planted
+universe. Pre-BM the picker was a no-op so every selection showed all
+data, masking the FK mismatch; post-BM cardholder/owner-rollup picks
+correctly return zero rows. Pinned by unit test +
+`test_bo_1_daily_statement_picks_reconcile_per_role[qs|app2]`
+(enumerates one (account, day) per role with a balance row, drives
+Role → Account → Day, asserts Opening + Closing KPIs parse as currency).
+
+### BO.2 — Investigation Account Network Sankey blank
+
+App2 silently drops visual-scoped `sheet.scope(FilterGroup)`s — the
+two `CategoryFilter(is_inbound_edge='yes')` / `is_outbound_edge='yes'`
+predicates that QS uses to direction-narrow each Sankey did nothing in
+App2; both Sankeys received the bidirectional row set and d3-sankey
+silently bailed on the resulting cycles. Fix: split into two directional
+sibling datasets (`DS_INV_ACCOUNT_NETWORK_INBOUND` /
+`..._OUTBOUND`). Each Sankey reads its own sibling; the Touching-Edges
+Table keeps the bidirectional dataset. All three bridge from the same
+anchor + min-amount params so a single dropdown pick narrows
+everything in lock-step. QS parity: QS would have rendered fine
+pre-fix; post-fix both renderers see identical pre-narrowed row sets,
+removing one source of QS↔App2 divergence.
+
+### BO.3 — L2FT Multi-Leg Flow Sankey blank (empty-state copy)
+
+Did not reproduce on local App2 (sasquatch_pr+sqlite shows 65 nodes /
+80 links on default load). Per user direction, shipped the defensive
+fix anyway: added explicit empty-state to `bootstrap.js::renderSankey`.
+When `data.nodes` / `data.links` is empty the renderer paints "No
+flows match the current filters. Try widening the date range or
+clearing the dropdown filters above." instead of an empty SVG.
+Renderer-level — applies to every Sankey on the site.
+
+### BO.4 — Drift vs Drift Timelines: $415K gap + sign flip
+
+Two-part fix: (1) added `abs_drift = ABS(drift)` column to
+DRIFT_CONTRACT + LEDGER_DRIFT_CONTRACT and both dataset SQLs. Drift
+sheet KPIs switched from signed `drift.max()` (which on
+negative-drift seeds returns the LEAST negative, not max magnitude) to
+`abs_drift.max()` to match Drift Timelines' precomputed unsigned
+values. (2) Labels disambiguate scope: "Largest Leaf Drift (anywhere in
+window)" / "Largest Parent Drift (anywhere in window)" (row-grain peak
+— worst single account-day row) vs "Largest Leaf Drift Day (peak
+business day)" / "Largest Parent Drift Day (peak business day)"
+(day-grain peak — worst single day's Σ|drift|). Subtitles cross-
+reference siblings and explain why numbers can legitimately differ.
+
+### BO.5 — App Info Matview Status byte-identical across all 4 apps
+
+`DS_APP_INFO_LIVENESS` / `DS_APP_INFO_MATVIEWS` were shared global
+constants used as `visual_identifier`. The App2 `_SQL_REGISTRY` is
+process-global + keyed by `visual_identifier`, so in the multi-app
+`dashboards --app all` server each app's matview-status SQL silently
+overwrote the previous. `REAL_APPS` tuple order is `(l1, l2ft, inv,
+exec)` → Executives last → Executives wins → exactly matches the
+cold-read's "all four show Executives' 2-base-table scope". Per-app
+QS deploy was unaffected. Fix: replaced shared constants with
+`app_info_liveness_id(seg)` / `app_info_matviews_id(seg)` helpers.
+Each of the 4 apps now computes its own ID at module top. L1 → 12
+rows, L2FT → 4, Investigation → 4, Executives → 2 (verified locally).
+
+### BO.6 — "Drift" labels two materially different invariants
+
+Daily Statement's bare "Drift" KPI is renamed "Posting Drift" with a
+subtitle clarifying it's `closing stored − (opening + signed-net
+flow)` for THAT account-day. Drift sheet description uses **ledger
+drift** (postings vs stored) / **aggregation drift** (parent stored vs
+child stored sum) vocabulary. Operator now has three distinct
+concepts: Posting / Ledger / Aggregation Drift.
+
+### BO.7 — Recipient Fanout "Distinct Senders" label collision
+
+Math was self-consistent (union vs per-recipient), just identically
+labeled. KPI relabeled "Distinct Senders (Union)" with a subtitle
+explaining sheet-level COUNT(DISTINCT) vs per-row count. Table column
+got `display_name="Senders Feeding This Recipient"` on the
+`RECIPIENT_FANOUT_CONTRACT::distinct_senders` ColumnSpec.
+
+### BO.8 — Overdraft vs Drift orthogonality (SPEC enhancement)
+
+Overdraft sheet description spells out: Overdraft = sign check
+(stored < 0), Drift = reconciliation check (stored vs computed). A
+chronically-negative account whose postings have always summed to the
+same negative number is overdrafted but NOT drifted — its ledger is
+internally consistent, just consistently in the red. Expect Overdraft
+rows that don't appear on the Drift sheet.
+
+### BO.9 — Strip sprint archaeology from operator copy
+
+Sweep on user-facing strings (subtitles + descriptions) across all 4
+apps + the shared App Info panel. Stripped `v11.*` / `BH.*` / `BL.*` /
+`BO.*` / `cold-read finding #N` phrases. Substantive prose stayed;
+remediation-cycle bread-crumbs came off. The cold-read's exemplar leak
+— `(BH.18 follow-up 2026-05-26 after v11.22.1 cold-read: ...)` on the
+App Info Matview Status panel — is gone. Code comments + docstrings
+keep their phase references — that's the right home for code
+archaeology.
+
+### BO.10 — "Latest day" placeholder mis-signals BM-shape range pickers
+
+Probed first: the date filter on L1 Transactions IS working (default
+⇒ 3,700 rows; narrowed ⇒ 0 rows). Surprise came from the placeholder
+text on the From/To pair both reading "Latest day", which the cold-
+read read as "pinned to one day" even though empty means the full
+1900-2099 wide-open default. Fix: added `placeholder` field to
+`ParameterDateSpec`; "Date From" → "Earliest day", "Date To" →
+"Latest day". Daily Statement single-day picker keeps "Latest day"
+(its sentinel default resolves to the latest available day).
+
+### BO.11 — Limit Breach top-line KPI placement
+
+KPI existed pre-BO.11 ("Limit Breach Cells") but sat below an
+8-grid-row-tall "Configured Caps" reference TextBox. The cold-read
+author scrolled past it and reported the sheet as having no top-line
+KPI — placement was the bug, not absence. Hoisted to the FIRST row,
+renamed "Limit Breach Cells" → "Breaches in Window".
+
+### BO.12 — L2FT Rails sheet orientation
+
+Two-part fix: (1) sheet description rewritten to lead with intent
+("Use this sheet to look up an individual transfer leg by ID..."). (2)
+added a three-KPI orientation row ABOVE the Transactions table:
+**Legs in Window** (`postings.id.count()`), **Latest Leg** (max
+posting timestamp), **Largest Leg** (max amount). Sheet order: filter
+form → KPI row → Transactions table.
+
+### Closing stats
+
+- 4,069 non-e2e tests green
+- pyright clean across `src/` + `tests/`
+- App2 reproduction verified for BO.2 / BO.5 / BO.10 (per-app behavior
+  now matches the design intent)
+- 6 pre-existing pre-AO.1 spine-file conflict markers resolved to HEAD
+  as part of BO.5's verification gate
+  (drift/expected_eod/limit_breach/overdraft/stuck_pending/stuck_unbundled.py)
+
 ## v11.23.0 — Phase BM: date-picker pushdown unification + 5 infra root-cause fixes
 
 Includes everything in v11.22.12 plus the full Phase BM landing

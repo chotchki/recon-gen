@@ -86,12 +86,13 @@ def test_six_sheets_in_display_order(l2_instance: L2Instance) -> None:
 
 
 def test_rails_sheet_visuals_invariant(l2_instance: L2Instance) -> None:
-    """Rails sheet always has exactly 1 Table visual + the header
-    text-box — the visual count doesn't bend with the L2."""
+    """Rails sheet has the 3 BO.12 orientation KPIs (Legs in Window /
+    Latest Leg / Largest Leg) + 1 Table visual. The visual SHAPE doesn't
+    bend with the L2 — the postings dataset's column set is fixed."""
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
     rails = next(s for s in app.analysis.sheets if s.name == _RAILS_NAME)
     counts = Counter(type(v).__name__ for v in rails.visuals)
-    assert counts == Counter(["Table"])
+    assert counts == Counter({"KPI": 3, "Table": 1})
 
 
 def test_chains_sheet_visuals_invariant(l2_instance: L2Instance) -> None:

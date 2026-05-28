@@ -55,6 +55,17 @@ DS_INV_MONEY_TRAIL = "inv-money-trail-ds"                    # K.4.5
 # DS_INV_VOLUME_ANOMALIES_DISTRIBUTION (Y.1.b.companion).
 DS_INV_MONEY_TRAIL_ROOTS = "inv-money-trail-roots-ds"        # Y.2.a
 DS_INV_ACCOUNT_NETWORK = "inv-account-network-ds"            # K.4.8
+# BO.2 — directional siblings of DS_INV_ACCOUNT_NETWORK. Same matview,
+# same anchor + min-amount pushdown bridge, but each pre-narrows to its
+# Sankey's direction via a SQL WHERE (``target_display = anchor`` for
+# inbound, ``source_display = anchor`` for outbound). Pre-BO.2 the two
+# Sankeys shared the bidirectional dataset and were narrowed by visual-
+# scoped ``FilterGroup``s — which QS applied but App2 silently dropped,
+# so both Sankeys saw bidirectional rows and d3-sankey bailed out on
+# the resulting cycles (blank canvas). The split makes "bidirectional
+# rows reach a directional Sankey" unrepresentable.
+DS_INV_ACCOUNT_NETWORK_INBOUND = "inv-account-network-inbound-ds"    # BO.2
+DS_INV_ACCOUNT_NETWORK_OUTBOUND = "inv-account-network-outbound-ds"  # BO.2
 # Narrow accounts dataset for the anchor dropdown only — K.4.8k. The
 # main DS_INV_ACCOUNT_NETWORK wraps the matview with per-row concat
 # (source_account_name||'('||source_account_id||')'); when QuickSight
@@ -89,11 +100,14 @@ FG_INV_MONEY_TRAIL_WINDOW = FilterGroupId("fg-inv-money-trail-window")  # Q.1.b
 # ``build_account_network_dataset``'s SQL via
 # ``<<$pInvANetworkAnchor>>`` / ``<<$pInvANetworkMinAmount>>``.
 # Bridges: ``apps/investigation/app.py``::``mapped_dataset_params``.
-# The directional FGs below stay — they partition the pre-narrowed
-# anchor-touching set into per-Sankey directions; Y.3.b will push
-# those into SQL CASE expressions too.
-FG_INV_ANETWORK_INBOUND = FilterGroupId("fg-inv-anetwork-inbound")      # K.4.8 — inbound Sankey only
-FG_INV_ANETWORK_OUTBOUND = FilterGroupId("fg-inv-anetwork-outbound")    # K.4.8 — outbound Sankey only
+# BO.2 (2026-05-28) — the directional FilterGroups (FG_INV_ANETWORK_INBOUND
+# / _OUTBOUND) were removed too. They scoped each Sankey to its
+# direction via ``CategoryFilter(is_inbound_edge='yes')`` at the QS
+# analysis layer; App2 doesn't apply visual-scoped FilterGroups, so both
+# Sankeys received the bidirectional row set and d3-sankey crashed
+# silently on the resulting cycles. The direction predicate now lives
+# in the dataset SQL (``DS_INV_ACCOUNT_NETWORK_INBOUND`` /
+# ``..._OUTBOUND``), keeping QS + App2 byte-symmetric for the wire shape.
 
 # ---------------------------------------------------------------------------
 # Calculated fields

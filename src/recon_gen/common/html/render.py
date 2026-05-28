@@ -237,12 +237,19 @@ class ParameterDateSpec:
     of a tree ``ParameterDateTimePicker`` (AO.2). Renders a Flatpickr
     single-date input feeding a hidden ``param_<name>``; URL key on submit
     ``?param_<name>=YYYY-MM-DD``. Empty → no key → the executor's
-    static-default fallback (the dataset param's sentinel default, which
-    the SQL resolves to the latest available day — so an empty picker opens
-    the statement on the account's most recent day, not blank). A sheet
-    that carries one of these is a single-day sheet (Daily Statement), so
-    ``_render_filter_form`` suppresses the universal date-RANGE there — the
-    operator-flagged "range doesn't make sense, it's one day" fix.
+    static-default fallback (the dataset param's sentinel default).
+
+    BO.10 — ``placeholder`` describes what happens when the picker is
+    empty: ``"Latest day"`` for single-day pickers (Daily Statement —
+    the SQL sentinel default resolves to the latest available day),
+    ``"Earliest day"`` / ``"Latest day"`` for the Phase BM Date From /
+    Date To range pickers (the dataset-param defaults are wide-open
+    ``1900-01-01`` / ``2099-12-31``, so an empty range picker really
+    does include the entire data window — the placeholder names the
+    end of that window the picker is anchored to). The pre-BO.10
+    hardcoded ``"Latest day"`` placeholder mis-signalled the BM-shape
+    range pickers as "pinned to one day," producing the cold-read F15
+    "five-digit row count with Date From/To = Latest day" surprise.
 
     ``selected`` is filled from a ``?param_<name>=<v>`` page-URL key by
     ``server.py::_apply_url_param_overrides`` so a bookmark / drill lands on
@@ -251,6 +258,7 @@ class ParameterDateSpec:
     name: str
     label: str
     selected: str = ""
+    placeholder: str = "Latest day"
 
 
 FilterSpec = (
@@ -668,10 +676,11 @@ def _render_parameter_date(spec: ParameterDateSpec) -> str:
     """
     target = f"param_{spec.name}"
     val = html.escape(spec.selected)
+    placeholder = html.escape(spec.placeholder)
     return (
         f'    <label class="{_FORM_LABEL_CLASS}">{html.escape(spec.label)} '
         f'<input type="text" data-widget="flatpickr-single" '
-        f'data-target-input="{target}" readonly placeholder="Latest day" '
+        f'data-target-input="{target}" readonly placeholder="{placeholder}" '
         f'class="{_DATE_INPUT_CLASS}" style="{_DATE_INPUT_STYLE}"'
         f' value="{val}"></label>'
         f'<input type="hidden" name="{target}" value="{val}">'

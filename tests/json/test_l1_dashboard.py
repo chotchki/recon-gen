@@ -241,11 +241,15 @@ def test_drift_sheet_has_four_kpis_and_two_tables() -> None:
     assert app.analysis is not None
     drift = app.analysis.sheets[1]
     titles = [_visual_title(v) for v in drift.visuals]
+    # BO.4 added "(anywhere in window)" scope qualifier so operators can
+    # tell these row-grain peak KPIs apart from Drift Timelines' day-
+    # grain rollup KPIs (Largest * Drift Day). The same sheet name +
+    # row/parent table titles stay unchanged.
     assert titles == [
         "Leaf Accounts in Drift",
-        "Largest Leaf Drift",
+        "Largest Leaf Drift (anywhere in window)",
         "Parent Accounts in Drift",
-        "Largest Parent Drift",
+        "Largest Parent Drift (anywhere in window)",
         "Leaf Account Drift",
         "Parent Account Drift",
     ]
@@ -298,6 +302,85 @@ def test_drift_dataset_sql_targets_prefixed_l1_views() -> None:
     assert f"FROM {prefix}_ledger_drift" in ledger_sql.SqlQuery
 
 
+def test_bo_4_drift_kpis_use_abs_drift_to_match_timelines_sign_convention() -> None:
+    """BO.4 — both "Largest * Drift" KPIs on the Drift sheet (row-grain
+    peak) and both "Largest * Drift Day" KPIs on Drift Timelines (day-
+    grain peak) read off ``abs_drift``, NOT the signed ``drift``.
+
+    Pre-BO.4 the Drift sheet KPIs used ``MAX(drift)`` (signed max — the
+    most positive value), while Drift Timelines pre-aggregated ABS()
+    into ``abs_drift`` (unsigned max). On seeds where the worst drift
+    is negative, this produced a sign-flipped + magnitude-different KPI
+    pair between sister sheets — cold-read F4 flagged a ~$415K gap.
+    Pinning the column binding here means a regression that re-introduces
+    the signed pickup fails at unit time."""
+    from recon_gen.apps.l1_dashboard.datasets import (
+        DS_DRIFT,
+        DS_DRIFT_TIMELINE,
+        DS_LEDGER_DRIFT,
+        DS_LEDGER_DRIFT_TIMELINE,
+        build_drift_dataset,
+        build_ledger_drift_dataset,
+    )
+    from recon_gen.common.tree import KPI
+    from recon_gen.common.tree.calc_fields import resolve_column
+
+    app = build_l1_dashboard_app(_CFG)
+    assert app.analysis is not None
+
+    def _kpi_value_column(sheet_name: str, kpi_title_prefix: str) -> tuple[str, str]:
+        sheet = _sheet_by_name(app, sheet_name)
+        kpi = next(
+            v for v in sheet.visuals
+            if isinstance(v, KPI) and v.title.startswith(kpi_title_prefix)
+        )
+        # ``Measure.column`` is a ``ColumnRef`` (str | CalcField | Column);
+        # ``resolve_column`` flattens to the bare column-name string.
+        m = kpi.values[0]
+        return m.dataset.identifier, resolve_column(m.column)
+
+    # Drift sheet KPIs — both must read abs_drift.
+    drift_leaf_ds, drift_leaf_col = _kpi_value_column(
+        _DRIFT_NAME, "Largest Leaf Drift (",
+    )
+    assert drift_leaf_ds == DS_DRIFT
+    assert drift_leaf_col == "abs_drift"
+    drift_parent_ds, drift_parent_col = _kpi_value_column(
+        _DRIFT_NAME, "Largest Parent Drift (",
+    )
+    assert drift_parent_ds == DS_LEDGER_DRIFT
+    assert drift_parent_col == "abs_drift"
+
+    # Drift Timelines KPIs — same unsigned convention (was already
+    # abs_drift pre-BO.4; pin it explicitly so a refactor doesn't
+    # silently flip either side).
+    tl_leaf_ds, tl_leaf_col = _kpi_value_column(
+        _DRIFT_TIMELINES_NAME, "Largest Leaf Drift Day",
+    )
+    assert tl_leaf_ds == DS_DRIFT_TIMELINE
+    assert tl_leaf_col == "abs_drift"
+    tl_parent_ds, tl_parent_col = _kpi_value_column(
+        _DRIFT_TIMELINES_NAME, "Largest Parent Drift Day",
+    )
+    assert tl_parent_ds == DS_LEDGER_DRIFT_TIMELINE
+    assert tl_parent_col == "abs_drift"
+
+    # And the underlying drift / ledger-drift datasets actually project
+    # an abs_drift column — without this the KPI binding above would
+    # fail at deploy / fetch time.
+    instance = default_l2_instance()
+    drift_sql = next(iter(
+        build_drift_dataset(_CFG, instance).PhysicalTableMap.values(),
+    )).CustomSql
+    ledger_sql = next(iter(
+        build_ledger_drift_dataset(_CFG, instance).PhysicalTableMap.values(),
+    )).CustomSql
+    assert drift_sql is not None
+    assert ledger_sql is not None
+    assert " AS abs_drift" in drift_sql.SqlQuery
+    assert " AS abs_drift" in ledger_sql.SqlQuery
+
+
 # -- Drift Timelines sheet (M.2b.6) ------------------------------------------
 
 
@@ -318,9 +401,12 @@ def test_drift_timelines_has_two_kpis_and_two_line_charts() -> None:
     app = build_l1_dashboard_app(_CFG)
     timelines = _sheet_by_name(app, _DRIFT_TIMELINES_NAME)
     titles = [_visual_title(v) for v in timelines.visuals]
+    # BO.4 added "(peak business day)" scope qualifier so operators can
+    # tell these day-grain rollup KPIs apart from the Drift sheet's
+    # row-grain peak KPIs (Largest * Drift, anywhere in window).
     assert titles == [
-        "Largest Leaf Drift Day",
-        "Largest Parent Drift Day",
+        "Largest Leaf Drift Day (peak business day)",
+        "Largest Parent Drift Day (peak business day)",
         "Leaf Account Drift Over Time",
         "Parent Account Drift Over Time",
     ]
@@ -437,12 +523,15 @@ def test_limit_breach_sheet_present_after_m2a5() -> None:
 
 
 def test_limit_breach_sheet_has_kpi_and_table() -> None:
-    """Limit Breach sheet structure: 1 KPI (count of breach cells) +
-    1 detail table that puts outbound_total + cap side-by-side."""
+    """Limit Breach sheet structure: 1 KPI (count of breaches) + 1
+    detail table that puts outbound_total + cap side-by-side. BO.11 —
+    KPI renamed to "Breaches in Window" and hoisted to the FIRST row
+    (above the Configured Caps TextBox) so the answer is anchored at
+    the top instead of after the reference panel."""
     app = build_l1_dashboard_app(_CFG)
     lb = _sheet_by_name(app, _LIMIT_BREACH_NAME)
     titles = [_visual_title(v) for v in lb.visuals]
-    assert titles == ["Limit Breach Cells", "Limit Breach Detail"]
+    assert titles == ["Breaches in Window", "Limit Breach Detail"]
 
 
 def test_limit_breach_dataset_registered_and_targets_l1_view() -> None:
@@ -571,7 +660,9 @@ def test_daily_statement_sheet_present_after_m2b4() -> None:
 
 def test_daily_statement_has_five_kpis_and_one_table() -> None:
     """Daily Statement structure: 5 KPIs side-by-side (Opening / Debits /
-    Credits / Closing Stored / Drift) + 1 detail table."""
+    Credits / Closing Stored / Posting Drift) + 1 detail table. BO.6 —
+    the bare "Drift" KPI got the "Posting Drift" rename to disambiguate
+    from the Drift sheet's leaf/parent drift (different math)."""
     app = build_l1_dashboard_app(_CFG)
     ds = _sheet_by_name(app, _DAILY_STATEMENT_NAME)
     titles = [_visual_title(v) for v in ds.visuals]
@@ -580,7 +671,7 @@ def test_daily_statement_has_five_kpis_and_one_table() -> None:
         "Debits (signed)",
         "Credits (signed)",
         "Closing Stored",
-        "Drift",  # typing-smell: ignore[no-inline-production-constants]: visual title (drift KPI in Daily Statement sheet); shares spelling with _DRIFT_NAME (separate sheet name) but unrelated concepts — see docs/audits/be_4_phase_b_json_review.md
+        "Posting Drift",
         "Posted Money Records",
     ]
 

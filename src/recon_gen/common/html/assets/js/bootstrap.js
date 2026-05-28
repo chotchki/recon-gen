@@ -1030,6 +1030,27 @@
   }
 
   function renderSankey(target, data, visualId) {
+    // BO.3 — explicit empty-state copy. d3-sankey on `{nodes:[],links:[]}`
+    // produces an empty SVG that reads as a broken panel ("blank white
+    // card"). Cold-read F3 flagged this on the L2FT Multi-Leg Flow Sankey:
+    // when filters narrowed both Sankey + Table to zero rows the Table
+    // showed its 0-row state but the Sankey was indistinguishable from a
+    // render bug. Same problem hits every Sankey on this site, so the fix
+    // lives in the renderer (not per-sheet content).
+    var empty;
+    var nodes = (data && data.nodes) || [];
+    var links = (data && data.links) || [];
+    if (nodes.length === 0 || links.length === 0) {
+      empty = document.createElement("div");
+      empty.className =
+        "sankey-empty-state flex h-96 items-center justify-center " +
+        "text-sm text-secondary-fg p-8 text-center";
+      empty.textContent =
+        "No flows match the current filters. Try widening the date " +
+        "range or clearing the dropdown filters above.";
+      target.appendChild(empty);
+      return;
+    }
     var width = target.clientWidth || 800;
     var height = 400;
     var svg = d3
@@ -1046,8 +1067,8 @@
         [width - 1, height - 6],
       ]);
     var graph = sankey({
-      nodes: data.nodes.map((d) => Object.assign({}, d)),
-      links: data.links.map((d) => Object.assign({}, d)),
+      nodes: nodes.map((d) => Object.assign({}, d)),
+      links: links.map((d) => Object.assign({}, d)),
     });
     svg
       .append("g")

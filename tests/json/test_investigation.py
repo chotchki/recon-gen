@@ -35,14 +35,14 @@ from recon_gen.apps.investigation.constants import (
     CF_INV_ANETWORK_IS_OUTBOUND_EDGE,
     CF_INV_FANOUT_DISTINCT_SENDERS,
     DS_INV_ACCOUNT_NETWORK,
+    DS_INV_ACCOUNT_NETWORK_INBOUND,
+    DS_INV_ACCOUNT_NETWORK_OUTBOUND,
     DS_INV_ANETWORK_ACCOUNTS,
     DS_INV_MONEY_TRAIL,
     DS_INV_MONEY_TRAIL_ROOTS,
     DS_INV_RECIPIENT_FANOUT,
     DS_INV_VOLUME_ANOMALIES,
     DS_INV_VOLUME_ANOMALIES_DISTRIBUTION,
-    FG_INV_ANETWORK_INBOUND,
-    FG_INV_ANETWORK_OUTBOUND,
     FG_INV_ANOMALIES_WINDOW,
     FG_INV_FANOUT_WINDOW,
     FG_INV_MONEY_TRAIL_WINDOW,
@@ -170,13 +170,6 @@ def _sheets(analysis: Analysis) -> list[SheetDefinition]:
     return analysis.Definition.Sheets
 
 
-def _filter_groups_of(analysis: Analysis) -> list[FilterGroup]:
-    assert analysis.Definition.FilterGroups is not None, (
-        "Investigation analysis must declare FilterGroups"
-    )
-    return analysis.Definition.FilterGroups
-
-
 def _parameter_declarations_of(
     analysis: Analysis,
 ) -> list[ParameterDeclaration]:
@@ -229,26 +222,6 @@ def _plain_title(visual_subobject: object) -> str | None:
     fmt = title.FormatText  # pyright: ignore[reportAny]: dict[str, str] | None inferred
     plain: object = fmt.get("PlainText")  # pyright: ignore[reportAny]: third-party stub or test scaffolding cascade
     return plain if isinstance(plain, str) else None
-
-
-def _visual_id_by_title(sheet: SheetDefinition, title: str) -> str:
-    """Find a visual's auto-generated ID by walking the sheet's emitted
-    Visuals list and matching on title. Visual_ids are auto-derived
-    post-L.1.21; titles are the stable identifier for tests that pin
-    individual visuals.
-    """
-    assert sheet.Visuals is not None, f"Sheet {sheet.SheetId} has no Visuals"
-    for v in sheet.Visuals:
-        for inner_name in (
-            "KPIVisual", "TableVisual", "BarChartVisual",
-            "SankeyDiagramVisual", "PieChartVisual",
-        ):
-            inner = getattr(v, inner_name, None)
-            if inner is None:
-                continue
-            if _plain_title(inner) == title:
-                return inner.VisualId  # pyright: ignore[reportAny]: VisualId is str on every typed Visual subtype
-    raise AssertionError(f"No visual on sheet matches title={title!r}")
 
 
 def _visual_kinds(sheet: SheetDefinition) -> list[str]:
@@ -333,33 +306,38 @@ def test_investigation_datasets_in_expected_order():
     the unfiltered distribution chart), K.4.5 money-trail matview
     dataset fourth, Y.2.a.companion roots dataset fifth (no parameter
     pushdown — feeds only the chain-root dropdown), K.4.8
-    account-network wrapper sixth, K.4.8k narrow accounts dataset
-    seventh. M.4.4.5 appended the 2 App Info datasets last. Order
-    matters — analysis.py's DataSetIdentifierDeclarations zip relies
-    on it."""
+    account-network wrapper sixth, BO.2 inbound + outbound directional
+    siblings seventh + eighth (one Sankey each), K.4.8k narrow
+    accounts dataset ninth. M.4.4.5 appended the 2 App Info datasets
+    last. Order matters — analysis.py's DataSetIdentifierDeclarations
+    zip relies on it."""
     datasets = build_all_datasets(_TEST_CFG, _TEST_L2)
-    assert len(datasets) == 9
+    assert len(datasets) == 11
     assert datasets[0].DataSetId == _TEST_CFG.prefixed("inv-recipient-fanout-dataset")
     assert datasets[1].DataSetId == _TEST_CFG.prefixed("inv-volume-anomalies-dataset")
     assert datasets[2].DataSetId == _TEST_CFG.prefixed("inv-volume-anomalies-distribution-dataset")
     assert datasets[3].DataSetId == _TEST_CFG.prefixed("inv-money-trail-dataset")
     assert datasets[4].DataSetId == _TEST_CFG.prefixed("inv-money-trail-roots-dataset")
     assert datasets[5].DataSetId == _TEST_CFG.prefixed("inv-account-network-dataset")
-    assert datasets[6].DataSetId == _TEST_CFG.prefixed("inv-anetwork-accounts-dataset")
-    assert datasets[7].DataSetId == _TEST_CFG.prefixed("inv-app-info-liveness-dataset")
-    assert datasets[8].DataSetId == _TEST_CFG.prefixed("inv-app-info-matviews-dataset")
+    assert datasets[6].DataSetId == _TEST_CFG.prefixed("inv-account-network-inbound-dataset")
+    assert datasets[7].DataSetId == _TEST_CFG.prefixed("inv-account-network-outbound-dataset")
+    assert datasets[8].DataSetId == _TEST_CFG.prefixed("inv-anetwork-accounts-dataset")
+    assert datasets[9].DataSetId == _TEST_CFG.prefixed("inv-app-info-liveness-dataset")
+    assert datasets[10].DataSetId == _TEST_CFG.prefixed("inv-app-info-matviews-dataset")
 
 
 def test_investigation_datasets_declared_in_analysis():
-    """7 content datasets + the 2 M.4.4.5 App Info datasets.
+    """9 content datasets + the 2 M.4.4.5 App Info datasets.
     Y.1.b.companion added DS_INV_VOLUME_ANOMALIES_DISTRIBUTION;
-    Y.2.a.companion added DS_INV_MONEY_TRAIL_ROOTS."""
+    Y.2.a.companion added DS_INV_MONEY_TRAIL_ROOTS;
+    BO.2 added DS_INV_ACCOUNT_NETWORK_INBOUND + _OUTBOUND."""
     from recon_gen.common.sheets.app_info import (
-        DS_APP_INFO_LIVENESS, DS_APP_INFO_MATVIEWS,
+        app_info_liveness_id, app_info_matviews_id,
     )
 
     analysis = build_analysis(_TEST_CFG)
     decls = analysis.Definition.DataSetIdentifierDeclarations
+    # BO.5 — App Info datasets carry per-app identifiers.
     assert [d.Identifier for d in decls] == [
         DS_INV_RECIPIENT_FANOUT,
         DS_INV_VOLUME_ANOMALIES,
@@ -367,9 +345,11 @@ def test_investigation_datasets_declared_in_analysis():
         DS_INV_MONEY_TRAIL,
         DS_INV_MONEY_TRAIL_ROOTS,
         DS_INV_ACCOUNT_NETWORK,
+        DS_INV_ACCOUNT_NETWORK_INBOUND,
+        DS_INV_ACCOUNT_NETWORK_OUTBOUND,
         DS_INV_ANETWORK_ACCOUNTS,
-        DS_APP_INFO_LIVENESS,
-        DS_APP_INFO_MATVIEWS,
+        app_info_liveness_id("inv"),
+        app_info_matviews_id("inv"),
     ]
 
 
@@ -422,12 +402,13 @@ def test_filter_groups_in_expected_order():
         FG_INV_FANOUT_WINDOW,
         FG_INV_ANOMALIES_WINDOW,
         FG_INV_MONEY_TRAIL_WINDOW,  # Q.1.b
-        # Y.2.b dropped FG_INV_ANETWORK_ANCHOR (broad anchor narrow now
-        # in dataset SQL) + FG_INV_ANETWORK_AMOUNT (min-amount cutoff
-        # too); the directional FGs remain to partition the
-        # pre-narrowed anchor-touching set per Sankey.
-        FG_INV_ANETWORK_INBOUND,
-        FG_INV_ANETWORK_OUTBOUND,
+        # Y.2.b dropped FG_INV_ANETWORK_ANCHOR / FG_INV_ANETWORK_AMOUNT
+        # (broad anchor narrow + min-amount cutoff pushed into dataset
+        # SQL). BO.2 dropped FG_INV_ANETWORK_INBOUND / _OUTBOUND too:
+        # the direction predicate now lives in the directional dataset
+        # SQL (``target_display = anchor`` for inbound, ``source = anchor``
+        # for outbound). The remaining three filter groups are all
+        # universal date-window filters.
     ]
 
 
@@ -564,9 +545,11 @@ def test_fanout_sheet_has_three_kpis_and_one_table():
         _plain_title(v.TableVisual) if v.TableVisual else None
         for v in fanout.Visuals
     ]
+    # BO.7 — KPI is now "Distinct Senders (Union)" to disambiguate from
+    # the per-recipient table column "Senders Feeding This Recipient".
     assert titles == [
         "Qualifying Recipients",
-        "Distinct Senders",
+        "Distinct Senders (Union)",
         "Total Inbound",
         "Recipient Fanout — Ranked",
     ]
@@ -607,14 +590,15 @@ def test_fanout_sheet_serializes_to_aws_json():
     assert len(fanout["Visuals"]) == 4
     assert len(fanout["FilterControls"]) == 1
     assert len(fanout["ParameterControls"]) == 1
-    # Top-level: 5 filter groups (Y.1.d dropped FG_INV_ANOMALIES_SIGMA
+    # Top-level: 3 filter groups (Y.1.d dropped FG_INV_ANOMALIES_SIGMA
     # — σ now lives in dataset SQL; Y.2.a dropped the 3 parameter-bound
     # FGs for money-trail root/hops/amount; Y.2.b dropped the broad
     # anchor + min-amount account-network FGs; Y.3.a dropped
     # FG_INV_FANOUT_THRESHOLD — distinct_senders is now a window column
-    # in dataset SQL, threshold pushed via <<$pInvFanoutThreshold>>
-    # — leaving 1 fanout window + 1 anomalies window + 1 money-trail
-    # window + 2 account network directional (inbound/outbound)).
+    # in dataset SQL, threshold pushed via <<$pInvFanoutThreshold>>;
+    # BO.2 dropped FG_INV_ANETWORK_INBOUND + _OUTBOUND — direction now
+    # in dataset SQL via the directional sibling datasets — leaving
+    # 1 fanout window + 1 anomalies window + 1 money-trail window).
     # 0 hand-authored calc fields after Y.3.a + Y.3.b: Y.3.a dropped
     # fanout distinct_senders calc; Y.3.b dropped is_inbound_edge +
     # is_outbound_edge + counterparty_display — all four are now
@@ -626,8 +610,9 @@ def test_fanout_sheet_serializes_to_aws_json():
     # below this filter are BL.1's row-ones.
     # 7 parameters (fanout threshold + sigma + money-trail
     # root/hops/amount + account-network anchor/min-amount) — unchanged
-    # by Y.3.a/b since the slider/dropdown params still drive controls.
-    assert len(j["Definition"]["FilterGroups"]) == 5
+    # by Y.3.a/b/BO.2 since the slider/dropdown params still drive
+    # controls.
+    assert len(j["Definition"]["FilterGroups"]) == 3
     from recon_gen.common.tree.fields import ROW_ONE_CALC_PREFIX
     cfs: list[dict[str, str]] = j["Definition"].get("CalculatedFields") or []
     hand_authored = [
@@ -1345,10 +1330,12 @@ def test_account_network_dataset_declares_two_pushdown_parameters():
 
 
 def test_account_network_analysis_params_bridge_to_dataset_params():
-    """Y.2.b — both analysis-level parameters declare a
-    MappedDataSetParameter pointing at the account-network dataset's
-    same-named parameter. QS resolves <<$pInvANetwork*>> in the
-    dataset SQL by walking the bridge."""
+    """Y.2.b + BO.2 — both analysis-level parameters declare a
+    MappedDataSetParameter pointing at each of the three account-network
+    datasets' same-named parameters: the bidirectional dataset (Table)
+    and the two directional siblings (one Sankey each). QS resolves
+    <<$pInvANetwork*>> in each dataset SQL by walking the bridge so all
+    three render off a single anchor pick."""
     decls = _parameter_declarations()
     by_name: dict[
         str, IntegerParameterDeclaration | StringParameterDeclaration,
@@ -1362,15 +1349,20 @@ def test_account_network_analysis_params_bridge_to_dataset_params():
             by_name[d.StringParameterDeclaration.Name] = (
                 d.StringParameterDeclaration
             )
+    expected_bridges = {
+        DS_INV_ACCOUNT_NETWORK,
+        DS_INV_ACCOUNT_NETWORK_INBOUND,
+        DS_INV_ACCOUNT_NETWORK_OUTBOUND,
+    }
     for pname in (P_INV_ANETWORK_ANCHOR, P_INV_ANETWORK_MIN_AMOUNT):
         decl = by_name[pname]
         bridges = decl.MappedDataSetParameters or []
-        assert len(bridges) == 1, (
-            f"{pname} should bridge to one dataset parameter; "
-            f"got {bridges}"
+        assert {b.DataSetIdentifier for b in bridges} == expected_bridges, (
+            f"{pname} should bridge to all three account-network "
+            f"datasets; got {bridges}"
         )
-        assert bridges[0].DataSetIdentifier == DS_INV_ACCOUNT_NETWORK
-        assert bridges[0].DataSetParameterName == str(pname)
+        for bridge in bridges:
+            assert bridge.DataSetParameterName == str(pname)
 
 
 def test_anchor_calc_field_dropped_after_y2b():
@@ -1384,57 +1376,75 @@ def test_anchor_calc_field_dropped_after_y2b():
     assert "is_anchor_edge" not in cf_names
 
 
-def test_anetwork_inbound_filter_is_inbound_sankey_only():
-    """K.4.8i: inbound filter scoped to the inbound Sankey only."""
-    analysis = build_analysis(_TEST_CFG)
-    groups = {g.FilterGroupId: g for g in _filter_groups_of(analysis)}
-    configs = _sheet_scopes(groups[FG_INV_ANETWORK_INBOUND])
-    assert len(configs) == 1
-    assert configs[0].SheetId == SHEET_INV_ACCOUNT_NETWORK
-    assert configs[0].Scope == SheetVisualScopingConfiguration.SELECTED_VISUALS
-    sheet = next(
-        s for s in _sheets(analysis)
-        if s.SheetId == SHEET_INV_ACCOUNT_NETWORK
+def test_bo_2_sankeys_source_from_directional_datasets():
+    """BO.2 — each Sankey reads its directional sibling dataset, NOT
+    the bidirectional ds_anet. Pre-BO.2 both Sankeys shared ds_anet
+    and were narrowed by visual-scoped FilterGroups; App2 silently
+    dropped that scoping, both Sankeys received bidirectional rows,
+    and d3-sankey crashed on the resulting cycles → blank canvas.
+    Pinning the dataset binding here means a stray rewire back to
+    ds_anet would fail at unit time, not at the cold-read."""
+    inbound, outbound, table = _account_network_visuals()
+    # Inbound Sankey: source + target + weight all from the inbound dataset.
+    assert inbound.ChartConfiguration is not None
+    assert inbound.ChartConfiguration.FieldWells is not None
+    inb_fw = inbound.ChartConfiguration.FieldWells.SankeyDiagramAggregatedFieldWells
+    assert inb_fw is not None
+    assert inb_fw.Source is not None
+    assert inb_fw.Source[0].CategoricalDimensionField is not None
+    assert (
+        inb_fw.Source[0].CategoricalDimensionField.Column.DataSetIdentifier
+        == DS_INV_ACCOUNT_NETWORK_INBOUND
     )
-    assert configs[0].VisualIds == [
-        _visual_id_by_title(sheet, "Inbound — counterparties → anchor"),
-    ]
-
-
-def test_anetwork_outbound_filter_is_outbound_sankey_only():
-    """K.4.8i: outbound filter scoped to the outbound Sankey only."""
-    analysis = build_analysis(_TEST_CFG)
-    groups = {g.FilterGroupId: g for g in _filter_groups_of(analysis)}
-    configs = _sheet_scopes(groups[FG_INV_ANETWORK_OUTBOUND])
-    assert len(configs) == 1
-    assert configs[0].SheetId == SHEET_INV_ACCOUNT_NETWORK
-    assert configs[0].Scope == SheetVisualScopingConfiguration.SELECTED_VISUALS
-    sheet = next(
-        s for s in _sheets(analysis)
-        if s.SheetId == SHEET_INV_ACCOUNT_NETWORK
+    # Outbound Sankey: same, against the outbound dataset.
+    assert outbound.ChartConfiguration is not None
+    assert outbound.ChartConfiguration.FieldWells is not None
+    out_fw = outbound.ChartConfiguration.FieldWells.SankeyDiagramAggregatedFieldWells
+    assert out_fw is not None
+    assert out_fw.Source is not None
+    assert out_fw.Source[0].CategoricalDimensionField is not None
+    assert (
+        out_fw.Source[0].CategoricalDimensionField.Column.DataSetIdentifier
+        == DS_INV_ACCOUNT_NETWORK_OUTBOUND
     )
-    assert configs[0].VisualIds == [
-        _visual_id_by_title(sheet, "Outbound — anchor → counterparties"),
-    ]
+    # Touching-Edges Table keeps the bidirectional dataset (it shows
+    # both directions by design).
+    assert table.ChartConfiguration is not None
+    assert table.ChartConfiguration.FieldWells is not None
+    tbl_fw = table.ChartConfiguration.FieldWells.TableAggregatedFieldWells
+    assert tbl_fw is not None
+    assert tbl_fw.GroupBy is not None
+    assert tbl_fw.GroupBy[0].CategoricalDimensionField is not None
+    assert (
+        tbl_fw.GroupBy[0].CategoricalDimensionField.Column.DataSetIdentifier
+        == DS_INV_ACCOUNT_NETWORK
+    )
 
 
-def test_anetwork_directional_filters_are_category_filters_on_calc_fields():
-    """K.4.8i: each directional Sankey's filter is a CategoryFilter
-    matching the calc field to 'yes' — the standard pattern for using
-    a calc field as a boolean filter."""
-    groups = {g.FilterGroupId: g for g in _filter_groups()}
-    for fg_id, expected_col in (
-        (FG_INV_ANETWORK_INBOUND, CF_INV_ANETWORK_IS_INBOUND_EDGE),
-        (FG_INV_ANETWORK_OUTBOUND, CF_INV_ANETWORK_IS_OUTBOUND_EDGE),
-    ):
-        cf = groups[fg_id].Filters[0].CategoryFilter
-        assert cf is not None
-        assert cf.Column.ColumnName == expected_col
-        assert cf.Column.DataSetIdentifier == DS_INV_ACCOUNT_NETWORK
-        flc = cf.Configuration.FilterListConfiguration
-        assert flc is not None
-        assert flc["MatchOperator"] == "CONTAINS"
-        assert flc["CategoryValues"] == ["yes"]
+def test_bo_2_directional_datasets_apply_direction_predicate_in_sql():
+    """BO.2 — the inbound dataset SQL narrows to ``target_display = anchor``
+    only; the outbound to ``source_display = anchor`` only. Catches an
+    accidental refactor that broadens either side back to the
+    bidirectional predicate."""
+    from recon_gen.apps.investigation.datasets import (
+        build_account_network_inbound_dataset,
+        build_account_network_outbound_dataset,
+    )
+    inbound = build_account_network_inbound_dataset(_TEST_CFG)
+    outbound = build_account_network_outbound_dataset(_TEST_CFG)
+    # ``PhysicalTableMap`` carries the CustomSql; pull it out via the
+    # existing ``_custom_sql`` helper which already handles the unwrap +
+    # None-guards.
+    inb_sql = _custom_sql(inbound)
+    out_sql = _custom_sql(outbound)
+    assert "target_display = <<$pInvANetworkAnchor>>" in inb_sql
+    # Inbound should NOT carry the OR-broadened bidirectional predicate.
+    assert "source_display = <<$pInvANetworkAnchor>>\n    OR" not in inb_sql
+    assert "source_display = <<$pInvANetworkAnchor>>" in out_sql
+    assert "target_display = <<$pInvANetworkAnchor>>\n    OR" not in out_sql
+    # Both still apply the min-amount cutoff.
+    for sql in (inb_sql, out_sql):
+        assert "hop_amount >= <<$pInvANetworkMinAmount>>" in sql
 
 
 def test_anetwork_anchor_dropdown_links_to_narrow_accounts_dataset():
@@ -1495,9 +1505,11 @@ def test_account_network_sheet_has_two_sankeys_and_table():
 
 def test_account_network_sankeys_field_wells_use_account_names_and_sum_hop_amount():
     """K.4.8i: both directional Sankeys carry the same field-well shape
-    (source_display → target_display, weight = SUM(hop_amount)),
-    sourced from the K.4.8 dataset wrapper. Direction encoding lives
-    in the per-Sankey filter, not the field wells."""
+    (source_display → target_display, weight = SUM(hop_amount)). BO.2
+    splits the dataset binding by direction — column names + aggregation
+    stay identical, only the underlying dataset identifier differs.
+    Per-Sankey dataset identity is pinned by
+    ``test_bo_2_sankeys_source_from_directional_datasets``."""
     inbound, outbound, _ = _account_network_visuals()
     for sankey in (inbound, outbound):
         assert sankey.ChartConfiguration is not None
@@ -1524,10 +1536,6 @@ def test_account_network_sankeys_field_wells_use_account_names_and_sum_hop_amoun
         assert weight.Column.ColumnName == "hop_amount"
         assert weight.AggregationFunction is not None
         assert weight.AggregationFunction.SimpleNumericalAggregation == "SUM"
-        # Confirm sankey is sourced from the K.4.8 dataset, not K.4.5.
-        src_first = fw.Source[0].CategoricalDimensionField
-        assert src_first is not None
-        assert src_first.Column.DataSetIdentifier == DS_INV_ACCOUNT_NETWORK
 
 
 def test_account_network_sheet_serializes_to_aws_json():

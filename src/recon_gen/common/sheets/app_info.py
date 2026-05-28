@@ -24,7 +24,7 @@ Usage from an app's `build_*_app(cfg, ...)`:
 ```python
 from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_NAME, APP_INFO_SHEET_TITLE, APP_INFO_SHEET_DESCRIPTION,
-    DS_APP_INFO_LIVENESS, DS_APP_INFO_MATVIEWS,
+    app_info_liveness_id, app_info_matviews_id,
     build_liveness_dataset, build_matview_status_dataset,
     populate_app_info_sheet,
 )
@@ -39,9 +39,9 @@ matviews_aws = build_matview_status_dataset(
         ...,
     ],
 )
-liveness_ds = Dataset(identifier=DS_APP_INFO_LIVENESS,
+liveness_ds = Dataset(identifier=app_info_liveness_id("l1"),
                      arn=cfg.dataset_arn(liveness_aws.DataSetId))
-matviews_ds = Dataset(identifier=DS_APP_INFO_MATVIEWS,
+matviews_ds = Dataset(identifier=app_info_matviews_id("l1"),
                      arn=cfg.dataset_arn(matviews_aws.DataSetId))
 
 # As LAST sheet on the analysis:
@@ -90,10 +90,25 @@ APP_INFO_SHEET_DESCRIPTION = (
 )
 
 
-# Visual identifiers — same string used by every app, registered once
-# per process via the contract registry's identity-equality check.
-DS_APP_INFO_LIVENESS = "app-info-liveness-ds"
-DS_APP_INFO_MATVIEWS = "app-info-matviews-ds"
+# Visual identifiers — per-app-segmented (BO.5). Pre-BO.5 these were
+# shared ``"app-info-liveness-ds"`` / ``"app-info-matviews-ds"`` strings
+# across all four apps. The shared name was fine for QS deploys (each
+# analysis's ``DataSetIdentifierDeclaration`` maps the same logical name
+# to a different per-app ARN) but corrupted App2: the process-global
+# ``_SQL_REGISTRY`` is keyed by ``visual_identifier``, so when the
+# ``dashboards --app all`` server registered all four apps' datasets in
+# sequence, whichever app ran LAST silently overwrote the others. The
+# operator saw the same Executives-only 2-base-table panel on every
+# dashboard. Cold-read F7 flagged this byte-identity. Per-segment IDs
+# let the registry hold all four simultaneously.
+def app_info_liveness_id(app_segment: str) -> str:
+    """Return the per-app liveness-dataset visual_identifier."""
+    return f"{app_segment}-app-info-liveness-ds"
+
+
+def app_info_matviews_id(app_segment: str) -> str:
+    """Return the per-app matview-status-dataset visual_identifier."""
+    return f"{app_segment}-app-info-matviews-ds"
 
 
 # Visual titles — exported so tests can import them rather than inline
@@ -213,10 +228,10 @@ def build_liveness_dataset(cfg: Config, *, app_segment: str) -> DataSet:
     Becomes part of the AWS DataSetId so each app gets its own
     physical dataset and ``deploy <single-app>`` doesn't delete-then-
     create another app's App Info dataset out from under it (M.4.4.7).
-    The visual_identifier (``DS_APP_INFO_LIVENESS``) stays shared
-    because it's analysis-internal — every app's analysis JSON has
-    its own ``DataSetIdentifierDeclaration`` mapping the same logical
-    name to its own per-app ARN.
+    BO.5 — also drives the ``visual_identifier`` (via
+    ``app_info_liveness_id``) so all four apps' liveness datasets
+    coexist in the App2 process-global SQL registry without overwriting
+    each other.
     """
     return build_dataset(
         cfg,
@@ -225,7 +240,7 @@ def build_liveness_dataset(cfg: Config, *, app_segment: str) -> DataSet:
         "app-info-liveness",
         _liveness_sql(cfg.dialect),
         LIVENESS_CONTRACT,
-        visual_identifier=DS_APP_INFO_LIVENESS,
+        visual_identifier=app_info_liveness_id(app_segment),
     )
 
 
@@ -255,7 +270,7 @@ def build_matview_status_dataset(
         "app-info-matviews",
         _matview_status_sql(view_specs, cfg.dialect),
         MATVIEW_STATUS_CONTRACT,
-        visual_identifier=DS_APP_INFO_MATVIEWS,
+        visual_identifier=app_info_matviews_id(app_segment),
     )
 
 
@@ -339,15 +354,10 @@ def populate_app_info_sheet(
             "tables **this dashboard depends on directly**. Per-app "
             "scope by design — Executives reads only 2 base tables; "
             "L1 reads ~12 matviews. For total deploy freshness, check "
-            "every app's App Info sheet. (BH.18 follow-up 2026-05-26 "
-            "after v11.22.1 cold-read: the panel was being read as "
-            "'all deploy matviews' and an Exec-app shot reading '1-2 "
-            "of 2' looked like the dashboard had silently lost 10 "
-            "matviews — the per-app scope is explicit in the title + "
-            "subtitle now.) Freshly-loaded matviews showing 0 = ETL "
-            "hasn't refreshed them yet. If a base table's "
-            "`latest_date` moves past a matview's, the matview is "
-            "stale — re-run `recon-gen data refresh --execute`."
+            "every app's App Info sheet. Freshly-loaded matviews "
+            "showing 0 = ETL hasn't refreshed them yet. If a base "
+            "table's `latest_date` moves past a matview's, the matview "
+            "is stale — re-run `recon-gen data refresh --execute`."
         ),
         columns=[
             matview_status_ds["view_name"].dim(),

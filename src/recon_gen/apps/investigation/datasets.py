@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from recon_gen.apps.investigation.constants import (
     DS_INV_ACCOUNT_NETWORK,
+    DS_INV_ACCOUNT_NETWORK_INBOUND,
+    DS_INV_ACCOUNT_NETWORK_OUTBOUND,
     DS_INV_ANETWORK_ACCOUNTS,
     DS_INV_MONEY_TRAIL,
     DS_INV_MONEY_TRAIL_ROOTS,
@@ -115,7 +117,16 @@ RECIPIENT_FANOUT_CONTRACT = DatasetContract(columns=[
     # `recipient_distinct_sender_count` analysis-level CalcField; pushed
     # down here so the threshold WHERE narrows at the DB and both QS +
     # App2 see one shape.
-    ColumnSpec("distinct_senders", "INTEGER"),
+    # BO.6/BO.7 — display_name disambiguates this PER-RECIPIENT column
+    # from the SHEET-LEVEL "Distinct Senders (Union)" KPI (which
+    # COUNT(DISTINCT)s sender_account_id over the qualifying recipients
+    # as a whole). Cold-read F9 flagged that the auto-titled "Distinct
+    # Senders" header read as "the same number as the KPI" even though
+    # the column is per-row.
+    ColumnSpec(
+        "distinct_senders", "INTEGER",
+        display_name="Senders Feeding This Recipient",
+    ),
 ])
 
 
@@ -665,6 +676,111 @@ def build_money_trail_roots_dataset(cfg: Config) -> DataSet:
 _ANETWORK_ANCHOR_SENTINEL = "__no_anchor_selected__"
 
 
+def _account_network_sql(
+    prefix: str, dialect: Dialect, *, direction: str,
+) -> str:
+    """Account-network SQL shared by the bidirectional + two directional
+    datasets. ``direction`` ∈ {``"both"``, ``"inbound"``, ``"outbound"``}
+    controls the anchor predicate:
+
+    - ``both``:     ``source_display = anchor OR target_display = anchor``
+                    (the bidirectional Touching-Edges table)
+    - ``inbound``:  ``target_display = anchor`` (Inbound Sankey)
+    - ``outbound``: ``source_display = anchor`` (Outbound Sankey)
+
+    BO.2 (2026-05-28): the directional variants exist to make
+    ``bidirectional rows reach a directional Sankey`` unrepresentable.
+    Pre-BO.2 the two Sankeys shared the bidirectional dataset and a
+    visual-scoped ``FilterGroup`` with ``CategoryFilter(is_inbound_edge='yes')``
+    narrowed each at the QS analysis layer. App2 doesn't apply
+    visual-scoped FilterGroups, so both Sankeys received the full
+    bidirectional row set and d3-sankey silently bailed out on the
+    resulting cycles (e.g. ``counterparty → anchor`` AND
+    ``anchor → counterparty`` both present) — blank canvas while the
+    Touching-Edges table populated. Pushing the direction predicate
+    into the SQL means QS + App2 see the same already-directional rows.
+    Also aligns with the Phase Y deprecation of FilterGroup-for-filtering
+    in favor of ``<<$pX>>`` pushdown.
+    """
+    if direction not in ("both", "inbound", "outbound"):
+        raise ValueError(f"direction must be both/inbound/outbound, got {direction!r}")
+    # CTE wrap: ``source_display`` / ``target_display`` are SELECT-list
+    # aliases over concat expressions, not real matview columns. PG /
+    # Oracle / SQLite all evaluate WHERE before SELECT, so the aliases
+    # aren't visible to a same-query WHERE — `WHERE source_display = ...`
+    # raises ``UndefinedColumn``. Wrapping the projection in a CTE moves
+    # the WHERE one scope outward, where the alias IS in scope. Caught
+    # by ``tests/integration/verify_dataset_sql.py`` in seconds.
+    base = _money_trail_base_sql(prefix, dialect)
+    anchor = f"<<${P_INV_ANETWORK_ANCHOR}>>"
+    if direction == "inbound":
+        anchor_predicate = f"target_display = {anchor}"
+    elif direction == "outbound":
+        anchor_predicate = f"source_display = {anchor}"
+    else:
+        anchor_predicate = (
+            f"(\n"
+            f"    source_display = {anchor}\n"
+            f"    OR target_display = {anchor}\n"
+            f"  )"
+        )
+    # Y.3.b — computed columns inline via CASE; the outer WHERE narrows
+    # by anchor + min-amount. ``base.*`` projects the MONEY_TRAIL_CONTRACT
+    # columns (incl. source_display / target_display from the inner
+    # CTE), then we add the three anchor-derived columns. The CASE
+    # columns stay even on the directional variants — the Touching-Edges
+    # table reads counterparty_display off the bidirectional dataset and
+    # the contract is shared (one ACCOUNT_NETWORK_CONTRACT covers all
+    # three datasets), so the projection has to match.
+    #
+    # AO.1.impl — the base CTE already wraps hop_amount cents → dollars
+    # (see ``_money_trail_base_sql``). The min-amount slider is also in
+    # dollars, so the outer ``hop_amount >= <<$pInvANetworkMinAmount>>``
+    # compares dollars-vs-dollars; no ``* 100`` lift needed here (unlike
+    # ``build_money_trail_dataset``, which puts its WHERE on the inner
+    # matview row, not on a wrapped CTE).
+    return (
+        f"WITH base AS (\n"
+        f"{base}"
+        f")\n"
+        f"SELECT base.*,\n"
+        f"  CASE WHEN target_display = {anchor} "
+        f"THEN 'yes' ELSE 'no' END AS is_inbound_edge,\n"
+        f"  CASE WHEN source_display = {anchor} "
+        f"THEN 'yes' ELSE 'no' END AS is_outbound_edge,\n"
+        f"  CASE WHEN source_display = {anchor} "
+        f"THEN target_display ELSE source_display END "
+        f"AS counterparty_display\n"
+        f"FROM base\n"
+        f"WHERE 1=1\n"
+        f"  AND {anchor_predicate}\n"
+        f"  AND hop_amount >= <<${P_INV_ANETWORK_MIN_AMOUNT}>>"
+    )
+
+
+def _account_network_dataset_parameters() -> list[DatasetParameter]:
+    """Shared dataset-parameter declarations for the three account-network
+    datasets (bidirectional + the two directional BO.2 variants). All
+    three bridge from the same two analysis-level parameters
+    (``pInvANetworkAnchor`` / ``pInvANetworkMinAmount``)."""
+    return [
+        DatasetParameter(StringDatasetParameter=StringDatasetParameter(
+            Name=str(P_INV_ANETWORK_ANCHOR),
+            ValueType="SINGLE_VALUED",
+            DefaultValues=StringDatasetParameterDefaultValues(
+                StaticValues=[_ANETWORK_ANCHOR_SENTINEL],
+            ),
+        )),
+        DatasetParameter(IntegerDatasetParameter=IntegerDatasetParameter(
+            Name=str(P_INV_ANETWORK_MIN_AMOUNT),
+            ValueType="SINGLE_VALUED",
+            DefaultValues=IntegerDatasetParameterDefaultValues(
+                StaticValues=[_DEFAULT_MONEY_TRAIL_MIN_AMOUNT],
+            ),
+        )),
+    ]
+
+
 def build_account_network_dataset(cfg: Config) -> DataSet:
     """Per-edge account-network rows — Y.2.b SQL pushdown.
 
@@ -681,10 +797,11 @@ def build_account_network_dataset(cfg: Config) -> DataSet:
     - ``pInvANetworkMinAmount`` → ``AND hop_amount >= <<$...>>``.
       Default 0 = keep all on first paint.
 
-    Per-Sankey direction partitioning happens via the
-    ``is_inbound_edge`` / ``is_outbound_edge`` real columns (Y.3.b
-    pushed those calc fields into the dataset SQL via CASE
-    expressions over ``<<$pInvANetworkAnchor>>``).
+    BO.2 (2026-05-28) — this bidirectional dataset now feeds the
+    Touching-Edges Table only; each Sankey reads its directional
+    sibling (``build_account_network_inbound_dataset`` /
+    ``..._outbound_dataset``). See ``_account_network_sql`` for the
+    reasoning behind the split.
 
     The K.4.5 chain-root filters that pre-Y.2 lived on a separate
     dataset registration (Money Trail's chain-root context) are now
@@ -696,71 +813,53 @@ def build_account_network_dataset(cfg: Config) -> DataSet:
     (K.4.8k) — already an unfiltered companion shape. No new
     companion dataset needed for Y.2.b.
     """
-    p = cfg.db_table_prefix
-    # CTE wrap: ``source_display`` / ``target_display`` are SELECT-list
-    # aliases over concat expressions, not real matview columns. PG /
-    # Oracle / SQLite all evaluate WHERE before SELECT, so the aliases
-    # aren't visible to a same-query WHERE — `WHERE source_display = ...`
-    # raises ``UndefinedColumn``. Wrapping the projection in a CTE moves
-    # the WHERE one scope outward, where the alias IS in scope. Caught
-    # by ``tests/integration/verify_dataset_sql.py`` in seconds.
-    base = _money_trail_base_sql(p, cfg.dialect)
-    # Y.3.b — computed columns inline via CASE; the outer WHERE narrows
-    # by anchor + min-amount. ``base.*`` projects the MONEY_TRAIL_CONTRACT
-    # columns (incl. source_display / target_display from the inner
-    # CTE), then we add the three anchor-derived columns.
-    #
-    # AO.1.impl — the base CTE already wraps hop_amount cents → dollars
-    # (see ``_money_trail_base_sql``). The min-amount slider is also in
-    # dollars, so the outer ``hop_amount >= <<$pInvANetworkMinAmount>>``
-    # compares dollars-vs-dollars; no ``* 100`` lift needed here (unlike
-    # ``build_money_trail_dataset``, which puts its WHERE on the inner
-    # matview row, not on a wrapped CTE).
-    anchor = f"<<${P_INV_ANETWORK_ANCHOR}>>"
-    sql = (
-        f"WITH base AS (\n"
-        f"{base}"
-        f")\n"
-        f"SELECT base.*,\n"
-        f"  CASE WHEN target_display = {anchor} "
-        f"THEN 'yes' ELSE 'no' END AS is_inbound_edge,\n"
-        f"  CASE WHEN source_display = {anchor} "
-        f"THEN 'yes' ELSE 'no' END AS is_outbound_edge,\n"
-        f"  CASE WHEN source_display = {anchor} "
-        f"THEN target_display ELSE source_display END "
-        f"AS counterparty_display\n"
-        f"FROM base\n"
-        f"WHERE 1=1\n"
-        f"  AND (\n"
-        f"    source_display = {anchor}\n"
-        f"    OR target_display = {anchor}\n"
-        f"  )\n"
-        f"  AND hop_amount >= <<${P_INV_ANETWORK_MIN_AMOUNT}>>"
-    )
     return build_dataset(
         cfg,
         cfg.prefixed("inv-account-network-dataset"),
         "Investigation Account Network",
         "inv-account-network",
-        sql,
+        _account_network_sql(cfg.db_table_prefix, cfg.dialect, direction="both"),
         ACCOUNT_NETWORK_CONTRACT,
         visual_identifier=DS_INV_ACCOUNT_NETWORK,
-        dataset_parameters=[
-            DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-                Name=str(P_INV_ANETWORK_ANCHOR),
-                ValueType="SINGLE_VALUED",
-                DefaultValues=StringDatasetParameterDefaultValues(
-                    StaticValues=[_ANETWORK_ANCHOR_SENTINEL],
-                ),
-            )),
-            DatasetParameter(IntegerDatasetParameter=IntegerDatasetParameter(
-                Name=str(P_INV_ANETWORK_MIN_AMOUNT),
-                ValueType="SINGLE_VALUED",
-                DefaultValues=IntegerDatasetParameterDefaultValues(
-                    StaticValues=[_DEFAULT_MONEY_TRAIL_MIN_AMOUNT],
-                ),
-            )),
-        ],
+        dataset_parameters=_account_network_dataset_parameters(),
+    )
+
+
+def build_account_network_inbound_dataset(cfg: Config) -> DataSet:
+    """BO.2 directional dataset — rows where ``target_display = anchor``.
+
+    Feeds the Inbound Sankey only. Same anchor + min-amount pushdown
+    bridge as the bidirectional dataset; same contract. See
+    ``_account_network_sql`` for why the directional split exists.
+    """
+    return build_dataset(
+        cfg,
+        cfg.prefixed("inv-account-network-inbound-dataset"),
+        "Investigation Account Network — Inbound",
+        "inv-account-network-inbound",
+        _account_network_sql(cfg.db_table_prefix, cfg.dialect, direction="inbound"),
+        ACCOUNT_NETWORK_CONTRACT,
+        visual_identifier=DS_INV_ACCOUNT_NETWORK_INBOUND,
+        dataset_parameters=_account_network_dataset_parameters(),
+    )
+
+
+def build_account_network_outbound_dataset(cfg: Config) -> DataSet:
+    """BO.2 directional dataset — rows where ``source_display = anchor``.
+
+    Feeds the Outbound Sankey only. Same anchor + min-amount pushdown
+    bridge as the bidirectional dataset; same contract. See
+    ``_account_network_sql`` for why the directional split exists.
+    """
+    return build_dataset(
+        cfg,
+        cfg.prefixed("inv-account-network-outbound-dataset"),
+        "Investigation Account Network — Outbound",
+        "inv-account-network-outbound",
+        _account_network_sql(cfg.db_table_prefix, cfg.dialect, direction="outbound"),
+        ACCOUNT_NETWORK_CONTRACT,
+        visual_identifier=DS_INV_ACCOUNT_NETWORK_OUTBOUND,
+        dataset_parameters=_account_network_dataset_parameters(),
     )
 
 
@@ -807,6 +906,8 @@ def build_all_datasets(
         build_money_trail_dataset(cfg),
         build_money_trail_roots_dataset(cfg),
         build_account_network_dataset(cfg),
+        build_account_network_inbound_dataset(cfg),
+        build_account_network_outbound_dataset(cfg),
         build_account_network_accounts_dataset(cfg),
         # M.4.4.5 — App Info ("i") sheet datasets, ALWAYS LAST.
         # M.4.4.7 — per-app segment so deploy <single-app> doesn't
@@ -829,6 +930,8 @@ _CONTRACT_REGISTRATIONS: tuple[tuple[str, DatasetContract], ...] = (
     (DS_INV_MONEY_TRAIL, MONEY_TRAIL_CONTRACT),
     (DS_INV_MONEY_TRAIL_ROOTS, MONEY_TRAIL_ROOTS_CONTRACT),
     (DS_INV_ACCOUNT_NETWORK, ACCOUNT_NETWORK_CONTRACT),
+    (DS_INV_ACCOUNT_NETWORK_INBOUND, ACCOUNT_NETWORK_CONTRACT),
+    (DS_INV_ACCOUNT_NETWORK_OUTBOUND, ACCOUNT_NETWORK_CONTRACT),
     (DS_INV_ANETWORK_ACCOUNTS, ANETWORK_ACCOUNTS_CONTRACT),
 )
 for _vid, _contract in _CONTRACT_REGISTRATIONS:

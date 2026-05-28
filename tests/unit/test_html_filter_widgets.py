@@ -227,6 +227,38 @@ def test_date_pickers_render_as_per_param_flatpickr_singles() -> None:
     assert 'data-widget="flatpickr-range"' not in form
 
 
+def test_bo_10_date_picker_placeholder_signals_empty_state() -> None:
+    """BO.10 — ``placeholder`` attribute on the Flatpickr single-date
+    input is taken from ``ParameterDateSpec.placeholder``, NOT
+    hardcoded to ``"Latest day"``. Pre-BO.10 every range-bound picker
+    showed the same ``"Latest day"`` text, so operators read a Date From
+    / Date To pair as "pinned to one day" even though empty means the
+    full data window. Pin the per-spec value so a regression that
+    re-hardcodes the placeholder fails at unit time."""
+    from recon_gen.common.html import ParameterDateSpec
+
+    app, sheet = _build_app()
+    form = _filter_form(emit_html(
+        app, sheet, dashboard_id="x",
+        filter_specs=[
+            ParameterDateSpec(
+                name="p_a", label="Date From",
+                placeholder="Earliest day",
+            ),
+            ParameterDateSpec(
+                name="p_b", label="Date To",
+                placeholder="Latest day",
+            ),
+            ParameterDateSpec(name="p_c", label="Business Day"),
+        ],
+    ))
+    assert 'placeholder="Earliest day"' in form
+    assert form.count('placeholder="Latest day"') == 2  # p_b + p_c default
+    # Default placeholder for a vanilla single-day picker stays "Latest day".
+    default_spec = ParameterDateSpec(name="p_default", label="Pick a day")
+    assert default_spec.placeholder == "Latest day"
+
+
 def test_parameter_dropdown_is_tomselect() -> None:
     app, sheet = _build_app()
     spec = ParameterDropdownSpec(

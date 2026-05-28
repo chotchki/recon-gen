@@ -27,9 +27,21 @@ from recon_gen.common.tree import App
 from tests._test_helpers import make_test_config
 from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_NAME,
-    DS_APP_INFO_LIVENESS,
-    DS_APP_INFO_MATVIEWS,
+    app_info_liveness_id,
+    app_info_matviews_id,
 )
+
+
+# BO.5 — per-app identifier prefixes match the ``app_segment`` passed to
+# ``build_liveness_dataset`` / ``build_matview_status_dataset`` by each
+# app's ``build_all_*_datasets``. The map drives the per-builder
+# parametrize so the harness asserts the right identifier on each app.
+_APP_SEGMENTS: dict[str, str] = {
+    "build_l1_dashboard_app": "l1",
+    "build_l2_flow_tracing_app": "l2ft",
+    "build_investigation_app": "inv",
+    "build_executives_app": "exec",
+}
 
 
 class _AppBuilder(Protocol):
@@ -84,24 +96,30 @@ def test_app_info_sheet_carries_liveness_kpi(builder: _AppBuilder) -> None:
     # KPI's measures resolve to.
     kpi = next(v for v in info_sheet.visuals if type(v).__name__ == "KPI")
     kpi_dataset_ids = {ds.identifier for ds in kpi.datasets()}
-    assert DS_APP_INFO_LIVENESS in kpi_dataset_ids, (
+    expected_id = app_info_liveness_id(_APP_SEGMENTS[builder.__name__])
+    assert expected_id in kpi_dataset_ids, (
         f"{app.name}'s App Info KPI doesn't read from "
-        f"{DS_APP_INFO_LIVENESS!r}; reads from {kpi_dataset_ids}."
+        f"{expected_id!r}; reads from {kpi_dataset_ids}."
     )
 
 
 @pytest.mark.parametrize("builder", SHIPPED_APP_BUILDERS)
 def test_app_info_datasets_declared(builder: _AppBuilder) -> None:
     """Both App Info datasets (liveness + matview status) must be
-    declared on the App so deploy ships them."""
+    declared on the App so deploy ships them. BO.5 — identifiers are
+    per-app-segmented so the four-app App2 server's process-global SQL
+    registry can hold all four simultaneously without overwriting."""
     app = builder(_CFG)
     declared = {ds.identifier for ds in app.datasets}
-    assert DS_APP_INFO_LIVENESS in declared, (
-        f"{app.name} is missing {DS_APP_INFO_LIVENESS!r} — the "
+    segment = _APP_SEGMENTS[builder.__name__]
+    liveness_id = app_info_liveness_id(segment)
+    matviews_id = app_info_matviews_id(segment)
+    assert liveness_id in declared, (
+        f"{app.name} is missing {liveness_id!r} — the "
         f"liveness KPI dataset isn't registered."
     )
-    assert DS_APP_INFO_MATVIEWS in declared, (
-        f"{app.name} is missing {DS_APP_INFO_MATVIEWS!r} — the "
+    assert matviews_id in declared, (
+        f"{app.name} is missing {matviews_id!r} — the "
         f"matview status table dataset isn't registered."
     )
 

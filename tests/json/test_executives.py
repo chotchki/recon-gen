@@ -159,18 +159,21 @@ def test_datasets_declared_in_analysis(exec_analysis: "_ModelsAnalysis") -> None
         DS_EXEC_TRANSACTION_SUMMARY,
     )
     from recon_gen.common.sheets.app_info import (
-        DS_APP_INFO_LIVENESS, DS_APP_INFO_MATVIEWS,
+        app_info_liveness_id, app_info_matviews_id,
     )
 
     decls = exec_analysis.Definition.DataSetIdentifierDeclarations
+    # BO.5 — App Info dataset identifiers are per-app-segmented now (the
+    # process-global App2 SQL registry would otherwise collide across the
+    # four-app server).
     assert [d.Identifier for d in decls] == [
         DS_EXEC_TRANSACTION_SUMMARY,
         DS_EXEC_TRANSACTION_DAILY,
         DS_EXEC_TRANSACTION_LEGS,
         DS_EXEC_ACCOUNT_SUMMARY,
         DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
-        DS_APP_INFO_LIVENESS,
-        DS_APP_INFO_MATVIEWS,
+        app_info_liveness_id("exec"),
+        app_info_matviews_id("exec"),
     ]
 
 

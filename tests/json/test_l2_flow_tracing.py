@@ -62,8 +62,8 @@ from recon_gen.common.l2 import load_instance
 from recon_gen.common.models import DataSet
 from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_NAME,
-    DS_APP_INFO_LIVENESS,
-    DS_APP_INFO_MATVIEWS,
+    app_info_liveness_id,
+    app_info_matviews_id,
 )
 from recon_gen.common.tree import App, Sheet, TextBox
 from recon_gen.common.tree.controls import (
@@ -281,8 +281,8 @@ def test_dataset_count_matches_populated_sheets() -> None:
         DS_TT_INSTANCES,
         DS_TT_LEGS,
         DS_UNIFIED_L2_EXCEPTIONS,
-        DS_APP_INFO_LIVENESS,
-        DS_APP_INFO_MATVIEWS,
+        app_info_liveness_id("l2ft"),
+        app_info_matviews_id("l2ft"),
     }
 
 

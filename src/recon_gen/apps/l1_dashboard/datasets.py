@@ -391,6 +391,12 @@ DRIFT_CONTRACT = DatasetContract(columns=[
     ColumnSpec("stored_balance", "DECIMAL"),
     ColumnSpec("computed_balance", "DECIMAL"),
     ColumnSpec("drift", "DECIMAL"),
+    # BO.4 — magnitude companion to the signed ``drift`` column. Tables
+    # keep ``drift`` (operators need direction in detail rows); the
+    # "Largest * Drift" KPIs read ``abs_drift`` so the sign convention
+    # matches Drift Timelines' precomputed ``abs_drift`` and the
+    # subtitle's "Max |drift|" wording matches the underlying SQL.
+    ColumnSpec("abs_drift", "DECIMAL"),
 ])
 
 
@@ -403,6 +409,8 @@ LEDGER_DRIFT_CONTRACT = DatasetContract(columns=[
     ColumnSpec("stored_balance", "DECIMAL"),
     ColumnSpec("computed_balance", "DECIMAL"),
     ColumnSpec("drift", "DECIMAL"),
+    # BO.4 — same magnitude companion as DRIFT_CONTRACT; see comment there.
+    ColumnSpec("abs_drift", "DECIMAL"),
 ])
 
 
@@ -766,12 +774,19 @@ def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
     sb = cents_to_dollars_sql("stored_balance", dialect=cfg.dialect)
     cb = cents_to_dollars_sql("computed_balance", dialect=cfg.dialect)
     drift = cents_to_dollars_sql("drift", dialect=cfg.dialect)
+    # BO.4 — ABS wrap goes OUTSIDE cents_to_dollars_sql so the
+    # cents-to-dollars float divide doesn't flip sign on weird DB-driver
+    # types; the inner result is a dollar-valued number, ABS of a number
+    # is always positive. Same expression on the ledger-drift sibling
+    # below so both datasets carry the same column shape.
+    abs_drift = f"ABS({drift})"
     sql = (
         f"SELECT account_id, account_name, account_role,"
         f" account_parent_role, business_day_start, business_day_end,"
         f" {sb} AS stored_balance,"
         f" {cb} AS computed_balance,"
-        f" {drift} AS drift\n"
+        f" {drift} AS drift,"
+        f" {abs_drift} AS abs_drift\n"
         f"FROM {prefix}_drift\n"
         f"WHERE {_account_display_clause(P_L1_DRIFT_ACCOUNT)}\n"
         f"  AND {_data_value_clause('account_role', P_L1_DRIFT_ROLE)}\n"
@@ -809,12 +824,14 @@ def build_ledger_drift_dataset(
     sb = cents_to_dollars_sql("stored_balance", dialect=cfg.dialect)
     cb = cents_to_dollars_sql("computed_balance", dialect=cfg.dialect)
     drift = cents_to_dollars_sql("drift", dialect=cfg.dialect)
+    abs_drift = f"ABS({drift})"  # BO.4 — see build_drift_dataset comment.
     sql = (
         f"SELECT account_id, account_name, account_role,"
         f" business_day_start, business_day_end,"
         f" {sb} AS stored_balance,"
         f" {cb} AS computed_balance,"
-        f" {drift} AS drift\n"
+        f" {drift} AS drift,"
+        f" {abs_drift} AS abs_drift\n"
         f"FROM {prefix}_ledger_drift\n"
         f"WHERE {_account_display_clause(P_L1_DRIFT_ACCOUNT)}\n"
         f"  AND {_data_value_clause('account_role', P_L1_DRIFT_ROLE)}\n"
