@@ -77,7 +77,29 @@ def pytest_configure(config: Any) -> None:
     # (the CI `test` job, the wheel-smoke job) chokes on an unrecognized
     # `--dist`. An explicit `--dist <mode>` on the command line still wins
     # (only the implicit "load" default — set by `-n` alone — gets bumped).
-    if config.pluginmanager.hasplugin("xdist") and getattr(config.option, "dist", "no") == "load":
+    # BM.5 (2026-05-28) — pre-BM the check was
+    # ``getattr(config.option, "dist", "no") == "load"`` but on at least
+    # pytest-xdist 3.8 `pytest -n 4` doesn't set `config.option.dist`
+    # to `"load"` by the time our `pytest_configure` runs — the bare
+    # `-n` shortcut's implicit dist defaulting happens later in xdist's
+    # own configure path. Result: our bump never fired under bare `-n
+    # N`, so every variant cell's `-n 4` invocation effectively ran in
+    # `dist=load` mode + ignored every `@pytest.mark.xdist_group` marker.
+    # The sp_pg_aw browser layer's `test_invariant_three_way_agreement`
+    # is the symptom: with default `load` the two parametrizations
+    # distribute to different workers, each races to `apply_db_seed`
+    # on the same iagree prefix, and one worker's DROP CASCADE wipes
+    # the matview the other just CREATEd. With `loadgroup` actually
+    # active, both parametrizations land on the same worker and share
+    # the module-scoped seed.
+    #
+    # Bump on EITHER `"load"` (explicit) OR `"no"` (default-when-
+    # xdist-plugin-loaded), so the `-n N` shortcut also gets bumped.
+    # An explicit user-supplied `--dist=<something-else>` would set
+    # `config.option.dist` to that other value and skip the bump (the
+    # NOT in {"load", "no"} branch).
+    dist = getattr(config.option, "dist", "no")
+    if config.pluginmanager.hasplugin("xdist") and dist in ("load", "no"):
         config.option.dist = "loadgroup"
 
     # #741 — redirect runner.RUNS_DIR so in-process runner.main calls

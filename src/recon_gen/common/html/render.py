@@ -1266,18 +1266,30 @@ def emit_visual_data_fragment(
                 or k in ("date_from", "date_to")
             )
         }
-        if relevant:
-            # AA.A.9.race — ``separators=(',', ':')`` keeps the JSON byte-
-            # identical to JS's ``JSON.stringify(...)`` so the bootstrap.js
-            # ``requestedParams === renderedParams`` comparison reduces to
-            # a string equality check (no canonicalization needed). Python's
-            # default (``{"a": 1}`` with space-after-colon) would mismatch
-            # JS's compact form on every key, defeating the provenance check.
-            bound_json = html.escape(
-                json.dumps(relevant, sort_keys=True, separators=(",", ":")),  # typing-smell: ignore[json-indent]: compact embedded attr value — must fit on one line
-                quote=True,
-            )
-            bound_attr = f' data-bound-params="{bound_json}"'
+        # AA.A.9.race — ``separators=(',', ':')`` keeps the JSON byte-
+        # identical to JS's ``JSON.stringify(...)`` so the bootstrap.js
+        # ``requestedParams === renderedParams`` comparison reduces to
+        # a string equality check (no canonicalization needed). Python's
+        # default (``{"a": 1}`` with space-after-colon) would mismatch
+        # JS's compact form on every key, defeating the provenance check.
+        #
+        # BM.5 (2026-05-28) — stamp ``data-bound-params`` even when
+        # ``relevant`` is empty (serialize to ``{}``). The pre-BM.5
+        # ``if relevant`` guard skipped the attribute on sheets with
+        # zero filter controls (L2 Exceptions). That left
+        # ``data-rendered-params`` perpetually unset on those
+        # visuals, while ``data-requested-params`` always got the
+        # matching ``"{}"`` from bootstrap.js's beforeRequest stamp.
+        # ``wait_loaded``'s freshness oracle (``req === ren``)
+        # therefore timed out forever ("freshness wait timed out:
+        # req={} ren=undefined") even though the visual data fetch
+        # completed normally. Always emit so the oracle has both
+        # sides to compare.
+        bound_json = html.escape(
+            json.dumps(relevant, sort_keys=True, separators=(",", ":")),  # typing-smell: ignore[json-indent]: compact embedded attr value — must fit on one line
+            quote=True,
+        )
+        bound_attr = f' data-bound-params="{bound_json}"'
     return (
         f'<script type="application/json" class="chart-data"'
         f'{bound_attr}>{payload}</script>'
