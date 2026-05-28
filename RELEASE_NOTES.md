@@ -1,5 +1,25 @@
 # Release Notes
 
+## v11.24.1 — BO.12 fix: drop "Latest Leg" KPI (QS rejects DATETIME-MAX)
+
+v11.24.0's deploy-probe CI caught a regression introduced by BO.12.
+The "Latest Leg" KPI bound `ds_postings["posting"].max()` — a
+`NumericalMeasureField(MAX)` over a DATETIME column. QS validates the
+analysis at create time and rejects:
+
+> Object NumericalMeasureField can only refer to columns of types
+> [INTEGER, DECIMAL], but the column posting is of type DATETIME.
+
+Both the L2 Flow Tracing analysis + dashboard failed creation; the
+other 3 apps deployed clean. Fix: dropped the "Latest Leg" KPI. The
+Rails sheet now carries 2 orientation KPIs (Legs in Window + Largest
+Leg). The freshness signal the cold-read also asked for is on the
+Posting column of the Table one row below.
+
+114 L2FT JSON tests green; the matrix test invariant (KPI count) was
+updated from 3 to 2. No other DATETIME-numerical-aggregation pairings
+exist in the apps (verified by grep).
+
 ## v11.24.0 — Phase BO: 12 v11.23.0 cold-read defects
 
 Three context-isolated cold-read judges hit v11.23.0 against a sample

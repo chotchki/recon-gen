@@ -149,8 +149,8 @@ _RAILS_DESCRIPTION = (
     "status, and (cascading) metadata key + value. Pick a Metadata Key "
     "to populate the Value dropdown; pick one or more Values to narrow "
     "the table to legs carrying that metadata. The KPI row above the "
-    "table orients you: how many legs are in the current window, when "
-    "the most recent one posted, and how big the largest one is."
+    "table orients you: how many legs are in the current window and "
+    "how big the largest one is."
 )
 # Visual title for the legs table inside the Rails sheet. Exported so
 # tests can import it instead of inlining the literal — see BE.2
@@ -664,13 +664,18 @@ def _populate_rails_sheet(
     # BO.12 — orientation KPI row above the table. The wide ledger dump
     # below was hostile as a cold-land target: an operator who hadn't
     # touched filters yet had no top-line signal for "how much is in
-    # here?" The three KPIs answer the orientation questions the
-    # cold-read asked for — count of legs in the current filter set,
-    # most recent posting timestamp, largest single leg amount.
-    third = 36 // 3
+    # here?" Two KPIs answer the count + magnitude orientation
+    # questions; the freshness signal the cold-read also asked for
+    # (Latest Leg = MAX(posting)) can't render as a typed KPI Measure
+    # because QS rejects NumericalMeasureField over a DATETIME column
+    # ("can only refer to columns of types [INTEGER, DECIMAL]" at
+    # analysis-create time — caught by the v11.24.0 CI deploy probe).
+    # The Posting column on the Table below carries the same freshness
+    # signal one row down.
+    half = 36 // 2
     kpi_row = sheet.layout.row(height=8)
     kpi_row.add_kpi(
-        width=third,
+        width=half,
         title="Legs in Window",
         subtitle=(
             "Count of postings rows matching all filters above. With "
@@ -680,16 +685,7 @@ def _populate_rails_sheet(
         values=[ds_postings["id"].count()],
     )
     kpi_row.add_kpi(
-        width=third,
-        title="Latest Leg",
-        subtitle=(
-            "Most recent `posting` timestamp across the filtered legs — "
-            "tells you how fresh the visible slice is at a glance."
-        ),
-        values=[ds_postings["posting"].max()],
-    )
-    kpi_row.add_kpi(
-        width=third,
+        width=half,
         title="Largest Leg",
         subtitle=(
             "Largest single-leg `amount_money` across the filtered "
