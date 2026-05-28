@@ -1,5 +1,110 @@
 # Release Notes
 
+## v11.23.0 — Phase BM: date-picker pushdown unification + 5 infra root-cause fixes
+
+Includes everything in v11.22.12 plus the full Phase BM landing
+plus six infra root-causes diagnosed + fixed during BM.5 verification
+(each one a real latent bug, none xfail'd).
+
+### Phase BM (dissolve the dual-SQL date-filter form)
+
+Replaces the pre-BM dual SQL form (analysis-level `TimeRangeFilter`
+on QS + `{date_filter}` template + `app2_date_filter()` for App2)
+with a unified `<<$pXxxDateStart>>` / `<<$pXxxDateEnd>>` dataset
+parameter pushdown across both renderers. Same `<<$pX>>` pattern
+Phase Y used for categorical / slider filters. Both renderers narrow
+at the DB; the QS day-edge quirk + `visual_identifier=` test dance
+artifacts dissolve by construction.
+
+Coverage:
+
+- **L1 dashboard** (8 datasets) — shared `pL1DateStart` /
+  `pL1DateEnd` across drift, ledger_drift, overdraft, limit_breach,
+  todays_exceptions, transactions, drift_timeline,
+  ledger_drift_timeline.
+- **Executives** (3 datasets) — `pExecDateStart` / `pExecDateEnd`
+  for transaction_summary, transaction_daily,
+  account_summary_active.
+- **L2 Flow Tracing** (4 datasets, BM.5 sweep) — per-sheet pair
+  (`pL2ftDate*` for Rails-on-postings, `pL2ftChainsDate*` for
+  chain_instances, `pL2ftTtDate*` shared across tt_instances +
+  tt_legs). Pre-BM L2FT's App2 pickers were UX lies (widget shown,
+  no SQL narrowing); now both renderers narrow.
+
+Dead machinery removed:
+
+- `build_dataset.app2_date_column` kwarg + `{date_filter}` slot.
+- `common/sql/app2_filters.py::app2_date_filter()` (file rewritten
+  to expose only `universal_date_range_clause`).
+- `Analysis.default_universal_date_range` field + the BL.2 bind-
+  layer prepop helper.
+- `DateView.emit_app2_date_from` / `emit_app2_date_to`.
+- App2 universal-range hidden `date_from` / `date_to` block — each
+  picker now renders as its own `ParameterDateSpec` with a
+  `param_<name>` URL key, symmetric with other categorical
+  pickups.
+- Both bg5 [qs] xfails (`test_bg5_transaction_volume_kpis_*` +
+  `test_bg5_money_moved_kpis_*`) — the day-edge quirk dissolves by
+  construction so the strict=False xfails are gone.
+
+### BM.5 infra root-cause fixes (each diagnosed, not xfail'd)
+
+1. **xdist `dist=loadgroup` never fired under bare `pytest -n N`**:
+   the conftest's pre-BM check matched only `dist == "load"` but
+   xdist's default-to-load happens after our hook runs. Bump now
+   matches `"load"` OR `"no"`. Fixes
+   `test_invariant_three_way_agreement[anomaly]` DROP-race between
+   two xdist workers racing on the same iagree-prefixed matview.
+
+2. **Freshness oracle deadlock on filter-control-free sheets**:
+   `emit_visual_data_fragment` skipped `data-bound-params` when no
+   `param_*` / `filter_*` URL keys were present (L2 Exceptions
+   sheet shape). bootstrap.js's `beforeRequest` always stamped
+   `data-requested-params="{}"`, leaving the oracle deadlocked on
+   `req="{}" === ren=undefined`. Always emit (`"{}"` when empty).
+   Fixes `test_bg6_l2ft_exceptions_*[app2]`.
+
+3. **Oracle DPY-4008 from `:MI`/`:SS` inside TO_DATE format
+   literals**: oracledb's pre-execution bind-name scanner doesn't
+   respect SQL string-literal quoting and tripped on
+   `'YYYY-MM-DD"T"HH24:MI:SS'`. Sidestep with
+   `TO_DATE(SUBSTR(<param>, 1, 10), 'YYYY-MM-DD')`. Documented in
+   `docs/reference/oracle-19c-constraints.md`. Fixes the entire
+   Oracle leg of the BM date pushdown.
+
+4. **Spine `Invariant.detect()` portable cursor helper**: pre-BM
+   the 12 detect methods called `conn.execute(sql).fetchall()`
+   relying on sqlite3.Connection's convenience shim. oracledb +
+   psycopg only support DB-API 2.0 cursor-then-execute. New
+   `common/spine/_db.py::fetch_all(conn, sql)` swept across all
+   12 modules. Fixes 4 `test_spine_live_agreement` tests on the
+   Oracle/AWS variant.
+
+5. **Bun lightningcss DLOPEN race on parallel cell pytest
+   invocations**: the tailwind drift check fires Bun which
+   extracts a native lib to /tmp; 13 parallel cell pytest sessions
+   racing on the same extraction crashed cells with
+   `ERR_DLOPEN_FAILED`. Runner now sets `RECON_GEN_SKIP_TAILWIND=1`
+   on per-cell layer subprocesses (the unit prelude already runs
+   the gate cleanly once at session start). Fixes sp_sl_lo
+   app2-layer crash.
+
+6. **Docker PG `max_connections` bump**: postgres:17-alpine
+   defaults to 100. Per-cell `pytest -n auto` × ~16 xdist workers
+   × per-fixture App2 pool size 10 = ~160 connections in-flight.
+   Bump to 300 via `.with_command()`. Fixes sp_pg_lo PoolTimeout
+   cascade.
+
+### Test surface
+
+- 3,582 non-e2e tests green throughout.
+- sp_pg_aw browser layer green end-to-end (the major PG/AWS
+  variant) — proves the BM core + 5 root-cause fixes hold under
+  live AWS load.
+- Remaining sasquatch+AWS variant failures (sq_pg_aw / sq_or_aw /
+  sp_or_aw) filed as Phase BN (sasquatch seed-vs-BM-date-window
+  + Oracle/AWS load-scaling). Independent of BM-the-mechanism.
+
 ## v11.22.12 — xfail Today's Exceptions picker tests (App2 expect_response race)
 
 Includes everything in v11.22.11 plus:
