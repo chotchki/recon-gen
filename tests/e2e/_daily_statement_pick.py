@@ -310,18 +310,29 @@ def find_one_account_day_per_role(
             for role in roles:
                 role_literal = role.replace("'", "''")
                 # f-string is safe — role came from our own SELECT.
+                # BR.x — pull ``account_name`` from
+                # ``current_daily_balances`` (the picker's display source),
+                # NOT ``transactions``. Sasquatch's StuckPendingGenerator
+                # overrides ``transactions.account_name`` for accounts
+                # with planted Pending legs (e.g. "Stuck Pending
+                # (ConcentrationToFRBSweep)"); the picker shows the
+                # balance-side name ("SNB Customer 1"). Joining to
+                # balances and selecting its name gives the display
+                # string the dropdown will actually advertise.
                 per_role_sql = (
-                    f"SELECT account_name, account_id, {bday_expr} AS bday, "
-                    f"       COUNT(*) AS n "
-                    f"FROM {prefix}_transactions "
-                    f"WHERE account_role = '{role_literal}' "
-                    f"  AND account_id IN ("
-                    f"    SELECT account_id FROM {prefix}_current_daily_balances"
-                    f"    WHERE account_role = '{role_literal}'"
-                    f"  ) "
-                    f"GROUP BY account_name, account_id, {bday_expr} "
-                    f"HAVING COUNT(*) > 0 "
-                    f"ORDER BY account_id ASC, bday DESC, n DESC "
+                    f"SELECT b.account_name, b.account_id, "
+                    f"       t.bday, t.n "
+                    f"FROM {prefix}_current_daily_balances b "
+                    f"JOIN ("
+                    f"  SELECT account_id, {bday_expr} AS bday, "
+                    f"         COUNT(*) AS n "
+                    f"  FROM {prefix}_transactions "
+                    f"  WHERE account_role = '{role_literal}' "
+                    f"  GROUP BY account_id, {bday_expr} "
+                    f"  HAVING COUNT(*) > 0"
+                    f") t ON t.account_id = b.account_id "
+                    f"WHERE b.account_role = '{role_literal}' "
+                    f"ORDER BY b.account_id ASC, t.bday DESC, t.n DESC "
                 )
                 per_role_sql += (
                     "FETCH FIRST 1 ROWS ONLY"
