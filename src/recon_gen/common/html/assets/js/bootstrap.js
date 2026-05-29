@@ -232,7 +232,14 @@
         })
       );
     }
-    return value.toLocaleString("en-US");
+    // C21 (cold-read v11.26.1) — Executives "Average Daily Volume"
+    // KPI showed 3 decimals on a transaction count (36,388.424).
+    // For non-currency KPIs the underlying measure is count-shaped
+    // (count / sum-of-int / avg-of-int) → integer is the right
+    // presentation. ``toLocaleString`` without options preserves
+    // source precision (3 decimals on a SQLite AVG result); explicit
+    // ``maximumFractionDigits: 0`` rounds to integer.
+    return value.toLocaleString("en-US", { maximumFractionDigits: 0 });
   }
 
   // Table — sortable columns + page-offset pagination + a "0–50 of

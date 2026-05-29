@@ -246,9 +246,9 @@ def test_drift_sheet_has_four_kpis_and_two_tables() -> None:
     # grain rollup KPIs (Largest * Drift Day). The same sheet name +
     # row/parent table titles stay unchanged.
     assert titles == [
-        "Leaf Accounts in Drift",
+        "Leaf Account-Days in Drift",
         "Largest Leaf Drift (anywhere in window)",
-        "Parent Accounts in Drift",
+        "Parent Account-Days in Drift",
         "Largest Parent Drift (anywhere in window)",
         "Leaf Account Drift",
         "Parent Account Drift",
@@ -484,7 +484,7 @@ def test_overdraft_sheet_has_kpi_and_table() -> None:
     overdraft = _sheet_by_name(app, _OVERDRAFT_NAME)
     titles = [_visual_title(v) for v in overdraft.visuals]
     assert titles == [
-        "Accounts in Overdraft",
+        "Account-Days in Overdraft",
         "Overdraft Violations",
     ]
 

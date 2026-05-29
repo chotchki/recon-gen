@@ -169,8 +169,8 @@ def test_bg3_drift_sheet_kpis_match_matview_counts(l1_dashboard_driver: tuple["D
     # omit ``param_pL1Date*``. No explicit ``binds=`` needed.
 
     for kpi_title, builder in (
-        ("Leaf Accounts in Drift", build_drift_dataset),
-        ("Parent Accounts in Drift", build_ledger_drift_dataset),
+        ("Leaf Account-Days in Drift", build_drift_dataset),
+        ("Parent Account-Days in Drift", build_ledger_drift_dataset),
     ):
         sql, dataset_parameters = _sql_and_params_for(builder, cfg, l2)
         rows = driver.query_db(sql, dataset_parameters=dataset_parameters)
@@ -353,7 +353,7 @@ def test_bg6_todays_exceptions_kpi_matches_dataset_count(
 
 
 def test_bg3_overdraft_kpi_matches_matview_count(l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance") -> None:
-    """BG.3 — "Accounts in Overdraft" KPI count must equal the
+    """BG.3 — "Account-Days in Overdraft" KPI count must equal the
     Overdraft dataset's row count under default binds (no filter
     picked). Direct catch for v11.21.0 cold-read finding #12 (KPI=0
     while the table directly below is fully populated). v11.22.1
@@ -378,7 +378,7 @@ def test_bg3_overdraft_kpi_matches_matview_count(l1_dashboard_driver: tuple["Das
     # query_db substitution picks them up from `dataset_parameters` when
     # the URL binds omit them, matching the L1 picker's initial render.
     rows = driver.query_db(sql, dataset_parameters=dataset_parameters)
-    rendered = parse_int_kpi(driver.kpi_value("Accounts in Overdraft"))
+    rendered = parse_int_kpi(driver.kpi_value("Account-Days in Overdraft"))
     assert rendered == len(rows), (
         f"Accounts in Overdraft: rendered {rendered} ≠ "
         f"len(query_db(overdraft_sql, default_window)) = {len(rows)}. "

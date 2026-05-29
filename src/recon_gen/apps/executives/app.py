@@ -105,9 +105,12 @@ _ACCOUNT_COVERAGE_DESCRIPTION = (
 )
 
 _TRANSACTION_VOLUME_DESCRIPTION = (
+    # C20 (cold-read v11.26.1) — sheet renders a stacked bar by rail,
+    # not a line chart. Copy synced to the rendered visual.
     "Transaction throughput over time, sliced by rail_name so you "
-    "can see which rails are growing or contracting. The line chart is "
-    "the trend; the bar chart is the period total per type."
+    "can see which rails are growing or contracting. The stacked bar "
+    "is the daily-rail trend; the clustered bar is the period total "
+    "per type."
 )
 
 _MONEY_MOVED_DESCRIPTION = (

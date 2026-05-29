@@ -639,7 +639,11 @@ def _populate_drift_sheet(
     kpi_row = sheet.layout.row(height=_KPI_ROW_SPAN)
     kpi_row.add_kpi(
         width=quarter,
-        title="Leaf Accounts in Drift",
+        # C8 (cold-read v11.26.1) — title relabeled to "Account-Days"
+        # to match what the count actually measures (one row per
+        # leaf-account-day in the matview, not distinct accounts).
+        # Same fix class as C18 (Overdraft title/subtitle mismatch).
+        title="Leaf Account-Days in Drift",
         subtitle=(
             "Count of leaf-account day-rows where stored balance "
             "disagrees with the cumulative net of posted Money records "
@@ -668,7 +672,8 @@ def _populate_drift_sheet(
     )
     kpi_row.add_kpi(
         width=quarter,
-        title="Parent Accounts in Drift",
+        # C8 (cold-read v11.26.1) — same relabel as the leaf KPI above.
+        title="Parent Account-Days in Drift",
         subtitle=(
             "Count of parent-account day-rows where stored balance "
             "disagrees with the sum of child accounts' stored balances. "
@@ -931,7 +936,10 @@ def _populate_overdraft_sheet(
         # accounts but detail rows include leaf-cardholder (cust-*).
         # Broader title matches the matview's actual scope (any
         # internal-scope account incl. customer DDAs).
-        title="Accounts in Overdraft",
+        # C18 (v11.26.1 cold-read) — title/subtitle grain mismatch:
+        # subtitle says "day-rows" but title said "Accounts." Same
+        # class as C8. Relabel matches the matview's actual unit.
+        title="Account-Days in Overdraft",
         subtitle=(
             "Count of internal-account day-rows holding negative stored "
             "balance — every row in the table below is one violation."
@@ -1011,7 +1019,14 @@ def _populate_todays_exceptions_sheet(
         title="Open Exceptions",
         subtitle=(
             "Total count of L1 SHOULD-constraint violations on today's "
-            "business day across all 5 invariant checks."
+            "business day across all 5 invariant checks. "
+            # C15 (cold-read v11.26.1) — operators get confused when
+            # this count is far smaller than the App-Info row count of
+            # ``<prefix>_todays_exceptions``. Make the today's-scope
+            # explicit so the gap reads as expected, not as broken.
+            "Scoped to TODAY ONLY — the matview itself holds historical "
+            "violation rows; expect the App Info matview row-count to "
+            "be 16-30× this number across a typical 7-30-day window."
         ),
         values=[ds["account_id"].count()],
     )

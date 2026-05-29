@@ -15,7 +15,7 @@ Two parsers, two contracts:
   individual tightenings don't need to re-enforce.
 
 - ``_parse_int_kpi`` — count KPIs (e.g. "Internal Accounts in
-  Overdraft", "Leaf Accounts in Drift"). Accepts integer-shaped
+  Overdraft", "Leaf Account-Days in Drift"). Accepts integer-shaped
   strings with optional thousands commas. Decimal-point content
   raises — a count KPI showing ``"3.5"`` is a wrong-binding bug
   shape worth tripping the test, not a parser tolerance.
