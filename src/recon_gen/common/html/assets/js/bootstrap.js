@@ -896,12 +896,22 @@
           .attr("width", 12)
           .attr("height", 12)
           .attr("fill", color(name));
-        row
+        // C22 (cold-read v11.26.1) — legend labels for long rail
+        // names (MerchantSettlementCycle, BulkAccrualSettlement…)
+        // clipped to "..." in the 132 px right gutter. Truncate at
+        // 18 chars with ellipsis + native ``<title>`` tooltip for the
+        // full name on hover. Rails can now be told apart by the
+        // truncated prefix + the tooltip.
+        var label = name.length > 18 ? name.slice(0, 17) + "…" : name;
+        var txt = row
           .append("text")
           .attr("x", 16)
           .attr("y", 10)
           .attr("class", "text-xs fill-primary-fg")
-          .text(name);
+          .text(label);
+        if (label !== name) {
+          txt.append("title").text(name);
+        }
       });
     }
   }

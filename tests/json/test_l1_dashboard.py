@@ -1536,9 +1536,9 @@ def test_supersession_audit_has_kpis_and_two_tables() -> None:
     sa = _sheet_by_name(app, _SUPERSESSION_AUDIT_NAME)
     titles = [_visual_title(v) for v in sa.visuals]
     assert titles == [
-        "Logical Keys with Supersession",
+        "Logical Keys (Transactions) with Supersession",
         "Supersession $ Exposure",
-        "Supersessions with No Reason",
+        "Supersession Rows with No Reason",
         "Transactions Audit",
         "Daily Balances Audit",
     ]

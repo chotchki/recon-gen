@@ -1550,12 +1550,21 @@ def _populate_supersession_audit_sheet(
     kpi_row = sheet.layout.row(height=_KPI_ROW_SPAN)
     kpi_row.add_kpi(
         width=_THIRD,
-        title="Logical Keys with Supersession",
+        # C14 (cold-read v11.26.1) — title clarified to make the
+        # "keys, not rows" unit explicit. Sibling KPI on the right
+        # counts ROWS (higher-entry rows with blank reason), so a
+        # naive side-by-side read on the original titles flagged them
+        # as contradictory. They aren't — they measure different
+        # populations against different units.
+        title="Logical Keys (Transactions) with Supersession",
         subtitle=(
-            "Count of distinct transaction_id values whose append-only "
-            "`entry` column has more than one row. Healthy demos may "
-            "be 0; production workloads typically have a small steady "
-            "trickle of TechnicalCorrection / BundleAssignment events."
+            "Count of distinct transaction_id values (logical keys) "
+            "whose append-only `entry` column has more than one row. "
+            "**Unit: distinct keys.** The 'no-reason' KPI to the right "
+            "counts ROWS, not keys — a key may have multiple "
+            "no-reason rows. Healthy demos may be 0; production "
+            "workloads typically have a small steady trickle of "
+            "TechnicalCorrection / BundleAssignment events."
         ),
         values=[ds_tx["transaction_id"].distinct_count()],
     )
@@ -1572,12 +1581,18 @@ def _populate_supersession_audit_sheet(
     )
     kpi_row.add_kpi(
         width=_THIRD,
-        title="Supersessions with No Reason",
+        # C14 (cold-read v11.26.1) — title clarified to match the
+        # "rows, not keys" unit. See "Logical Keys" KPI on the left for
+        # the cross-reference.
+        title="Supersession Rows with No Reason",
         subtitle=(
             "Count of higher-Entry rows whose `supersedes` reason is "
-            "blank. Target value = 0 — every supersession SHOULD "
-            "declare its cause (Inflight / BundleAssignment / "
-            "TechnicalCorrection) per the L1 SPEC."
+            "blank. **Unit: rows, not distinct keys** — one logical "
+            "key may have multiple no-reason rows. Target value = 0; "
+            "every supersession SHOULD declare its cause (Inflight / "
+            "BundleAssignment / TechnicalCorrection) per the L1 SPEC. "
+            "Drill into the detail table below to see which rows lack "
+            "a reason."
         ),
         values=[ds_tx["l1_supersession_no_reason"].sum()],
     )
