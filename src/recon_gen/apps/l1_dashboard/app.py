@@ -2246,7 +2246,7 @@ def _wire_daily_statement_filters(
     # exactly like before AA.B.1. ``hidden_select_all=True`` on Account
     # mirrors pre-AA.B.1 behaviour: SINGLE_SELECT semantically requires
     # picking exactly one — "All" doesn't apply.
-    daily_statement_sheet.add_parameter_dropdown(
+    role_dropdown = daily_statement_sheet.add_parameter_dropdown(
         parameter=ds_role, title="Role",
         type="SINGLE_SELECT",
         selectable_values=LinkedValues.from_column(
@@ -2269,6 +2269,20 @@ def _wire_daily_statement_filters(
             # so every option has a matching ``daily_balances`` row.
             datasets[DS_L1_DS_ACCOUNTS]["account_display"],
         ),
+        # BO.1.cascade fix (v11.26.x release-CI loop, controls.py:188
+        # docstring — "Required for cascading filters even when the
+        # source dataset's params are bridged via MappedDataSetParameters
+        # — QS won't refresh the dropdown widget without explicit UI-
+        # level cascade wiring (M.3.10c finding)"). The MappedDataSet-
+        # Parameters bridge fires for VISUAL queries but NOT for
+        # LinkedValues option refetches — that's what broke
+        # ``test_bo_1_daily_statement_picks_reconcile_per_role[qs]`` on
+        # every release since BO.1 (the Account dropdown showed all
+        # accounts regardless of the picked Role). The native QS
+        # CascadingControlConfiguration filters the option fetch by
+        # ``account_role = <source>`` on the dropdown's dataset.
+        cascade_source=role_dropdown,
+        cascade_match_column=datasets[DS_L1_DS_ACCOUNTS]["account_role"],
         hidden_select_all=True,
     )
     daily_statement_sheet.add_parameter_datetime_picker(
