@@ -804,6 +804,27 @@ def _layer_command(
         #      ``e2e-pg-browser`` job already follows this pattern (the
         #      file runs as a separate step).
         nworkers = str(opts.parallel) if opts.parallel > 1 else "4"
+        # BR.x — Oracle cells lower the cap to 2. Oracle SE2 19c has no
+        # DRCP (project_drcp_on_aws_oracle_dead_end) so every worker
+        # opens a fresh session against the small connection ceiling;
+        # 4 browser workers × 4 apps × concurrent picker tests
+        # exhausted sessions mid-run and produced cascading
+        # "rendered: []" structure failures only on Oracle AWS cells
+        # (PG cells with the same 4-worker setting had ≤9 failures
+        # while Oracle had 71-74). The narrow 2-worker cap costs ~2×
+        # wall on Oracle browser but turns catastrophic failure into
+        # signal.
+        ve = variant_env or {}
+        cfg_path_str = ve.get(RECON_GEN_CONFIG.name)
+        if cfg_path_str and opts.parallel <= 1:
+            try:
+                from recon_gen.common.config import load_config  # noqa: PLC0415 — lazy
+                from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+                cfg_peek = load_config(cfg_path_str)
+                if cfg_peek.dialect is Dialect.ORACLE:
+                    nworkers = "2"
+            except Exception:  # noqa: BLE001 — peek failure shouldn't gate the layer
+                pass
         only = ["-k", opts.only] if opts.only else []
         agree_file = "tests/e2e/test_audit_dashboard_agreement.py"
         # Note (2026-05-26): test_inv_dashboard_agreement.py *also*
