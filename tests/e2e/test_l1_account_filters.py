@@ -554,7 +554,7 @@ def test_bg2_daily_statement_kpis_match_summary_matview(
         expected_day1["Closing Stored"]
         - (expected_day1["Opening Balance"] + independent_net_flow)
     )
-    assert expected_day1["Drift"] == expected_drift_from_narrative, (  # typing-smell: ignore[no-inline-production-constants]: Daily Statement KPI column dict key; coincidentally matches _DRIFT_NAME (sheet name) — column title is local to the KPI, not the sheet
+    assert expected_day1["Posting Drift"] == expected_drift_from_narrative, (  # typing-smell: ignore[no-inline-production-constants]: Daily Statement KPI column dict key; coincidentally matches _DRIFT_NAME (sheet name) — column title is local to the KPI, not the sheet
         f"day1={effective_day1!r} account={picked_account!r}: matview's "
         f"`drift` column ({expected_day1['Drift']}) doesn't equal "  # typing-smell: ignore[no-inline-production-constants]: f-string interpolation re-reads the same column key as line 406 — same Daily Statement KPI; not coupled to _DRIFT_NAME
         f"closing − (opening + INDEPENDENT_signed_net_flow) = "

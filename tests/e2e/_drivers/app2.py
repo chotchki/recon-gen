@@ -378,6 +378,16 @@ class App2Driver:
         columns: Sequence[str] | None = None,
     ) -> list[dict[str, str]]:
         section = self._section(visual_title)
+        # BQ.1 follow-up — when the filter narrows the table to zero
+        # rows, renderTable paints ``.table-empty-state`` IN PLACE of
+        # ``table.table-data``. Pre-fix this verb waited 30s for the
+        # table to appear (it never did) → every
+        # ``test_*_inverse_excludes_anchor[app2-*]`` test timed out on
+        # the v11.26.x release CI. Short-circuit empty-state to an
+        # empty row list — the test's "table contains no offender" or
+        # "0 rows after narrow" contracts hold by construction.
+        if section.locator(".table-empty-state").first.count() > 0:
+            return []
         table = section.locator("table.table-data").first
         table.wait_for(state="visible")
         # Header <th>s carry a sort badge (▲/▼) + a clickable <a>; the
@@ -411,6 +421,13 @@ class App2Driver:
         # next clicks go through HTMX which carries the live form state,
         # avoiding the divergence entirely.
         section = self._section(visual_title)
+        # BQ.1 follow-up — empty-state banner means no table chrome
+        # exists at all; there are no rows to match the predicate so
+        # the absent-row contract trivially holds. ``table_rows`` would
+        # return ``[]`` here too, but checking once at the entry avoids
+        # the wait-for-table loop entirely.
+        if section.locator(".table-empty-state").first.count() > 0:
+            return None
         # Hard cap on pages walked — protects against runaway loops if
         # the pager's aria-disabled isn't surfaced correctly.
         for _ in range(200):
@@ -440,6 +457,11 @@ class App2Driver:
         # to ``len(table_rows())`` only when there's no pager at all (a
         # tiny single-page table the renderer didn't bother paginating).
         section = self._section(visual_title)
+        # BQ.1 follow-up — empty-state banner short-circuit, mirrors
+        # ``table_rows``. The banner replaces the entire table chrome
+        # so there's no pager to read either.
+        if section.locator(".table-empty-state").first.count() > 0:
+            return 0
         pager = section.locator(".table-pager-range").first
         if pager.count() > 0:
             text = pager.inner_text()
