@@ -633,7 +633,7 @@ Two interventions, both small, in parallel:
 | `"voucher"` | MERCHANT_PAYOUT-like or new VOUCHER kind | Voucher batches are periodic per merchant |
 | `"interest"` | new INTEREST kind or AGGREGATING_MONTHLY-like | Monthly accrual cadence |
 | `"emit"` | AGGREGATING_MONTHLY-like | Voucher / batch emit per cycle |
-| `"cash"` | new CASH kind | Cash-handling at branch / NCAO |
+| `"cash"` | new CASH kind | Cash-handling at branch |
 
 2. **Tighten the `"inbound"` pattern's over-match.** Either require `"inbound"` NOT also contain `"payroll"` / `"batch"` (route those to a new system-wide PAYROLL_BATCH kind), OR add `"payroll"` / `"batch"` as higher-priority patterns that win the matcher first.
 
