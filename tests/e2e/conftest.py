@@ -99,6 +99,17 @@ def cfg() -> Config:
     falling back to the dialect-specific files. Override with the
     ``RECON_GEN_CONFIG`` env var when both per-dialect files exist and
     you need to pin to one.
+
+    BG.3 / BG.6 anchor-drift fix: after loading, pin
+    ``test_generator.end_date`` to the demo DB's ``<prefix>_config_kv``
+    ``as_of`` row (stamped at ``data apply`` time). Without this,
+    ``cfg.test_generator.as_of_frame`` falls through to ``AsOfFrame.live()``
+    at test-call time — and when CI crosses the UTC midnight boundary
+    between deploy and test, ``query_db_via_cfg`` ends up shifted one
+    day past the window QS baked into its dataset defaults at deploy.
+    The kv row IS the deploy-time anchor; reading it back makes both
+    paths land on the same day. Fall-through (unpinned cfg) when the
+    DB isn't reachable — keeps offline unit-shape probes working.
     """
     from recon_gen.common.config import load_config
 
@@ -109,18 +120,66 @@ def cfg() -> Config:
     except EnvVarInvalid:
         explicit = None
     if explicit is not None:
-        return load_config(str(explicit))
+        loaded = load_config(str(explicit))
+    else:
+        candidates = (
+            Path("config.yaml"),
+            Path("run/config.yaml"),
+            Path("run/config.postgres.yaml"),
+            Path("run/config.oracle.yaml"),
+        )
+        loaded = None
+        for candidate in candidates:
+            if candidate.exists():
+                loaded = load_config(str(candidate))
+                break
+        if loaded is None:
+            loaded = load_config(None)
+    return _pin_cfg_to_kv_as_of(loaded)
 
-    candidates = (
-        Path("config.yaml"),
-        Path("run/config.yaml"),
-        Path("run/config.postgres.yaml"),
-        Path("run/config.oracle.yaml"),
-    )
-    for candidate in candidates:
-        if candidate.exists():
-            return load_config(str(candidate))
-    return load_config(None)
+
+def _pin_cfg_to_kv_as_of(cfg: Config) -> Config:
+    """Pin ``cfg.test_generator.end_date`` to the demo DB's kv ``as_of``
+    row when reachable. See ``cfg`` fixture docstring for the why.
+
+    Idempotent: already-pinned ``end_date`` round-trips unchanged when
+    kv.as_of agrees. Silently falls through (returns ``cfg`` unmodified)
+    when the DB isn't reachable or the kv row is absent — offline emit
+    paths must not crash here.
+    """
+    import dataclasses
+    import sys
+
+    try:
+        from recon_gen.common.db import connect_demo_db
+        from recon_gen.common.l2.config_table import get_as_of
+        conn = connect_demo_db(cfg)
+    except Exception as exc:
+        print(
+            f"[cfg.pin_to_kv_as_of] DB unreachable ({exc!r}); falling "
+            f"through to cfg.test_generator.end_date={cfg.test_generator.end_date!r}",
+            file=sys.stderr,
+        )
+        return cfg
+
+    try:
+        as_of = get_as_of(conn, prefix=cfg.db_table_prefix)
+    except Exception as exc:
+        print(
+            f"[cfg.pin_to_kv_as_of] kv.as_of read failed ({exc!r}); "
+            f"falling through to cfg.test_generator.end_date="
+            f"{cfg.test_generator.end_date!r}",
+            file=sys.stderr,
+        )
+        return cfg
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    pinned_tg = dataclasses.replace(cfg.test_generator, end_date=as_of.date())
+    return dataclasses.replace(cfg, test_generator=pinned_tg)
 
 
 @pytest.fixture(scope="session")
