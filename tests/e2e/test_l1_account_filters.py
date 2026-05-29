@@ -179,6 +179,20 @@ def test_bo_1_daily_statement_picks_reconcile_per_role(
     from the deployed DB and asserts the contract for each.
     """
     driver, dashboard_arg = l1_dashboard_driver
+    if driver.dialect == "qs":
+        pytest.xfail(
+            "BR.x renderer divergence — QS's "
+            "GetUniqueAttributeValuesSyncForAnalysis endpoint 400s on "
+            "parameterized datasets (verified via pg_stat_activity: "
+            "zero queries reach Postgres on cascade refetch). The "
+            "Account dropdown shows the full unfiltered universe on "
+            "QS regardless of Role pick; QS's virtualized listbox "
+            "only mounts the first ~20 visible options so "
+            "non-CustomerLedger roles' accounts are off-screen and "
+            "the per-role contract fails. App2 implements the "
+            "cascade correctly via its _sql_executor. See "
+            "docs/reference/quicksight-quirks.md."
+        )
 
     triples = find_one_account_day_per_role(cfg)
     assert triples, (
