@@ -659,14 +659,18 @@ def test_daily_statement_sheet_present_after_m2b4() -> None:
 
 
 def test_daily_statement_has_five_kpis_and_one_table() -> None:
-    """Daily Statement structure: 5 KPIs side-by-side (Opening / Debits /
-    Credits / Closing Stored / Posting Drift) + 1 detail table. BO.6 —
-    the bare "Drift" KPI got the "Posting Drift" rename to disambiguate
+    """Daily Statement structure: 2 context KPIs (Accounts available /
+    Roles available — BR.x, bind the cascade-source datasets as
+    configured-on-sheet) + 5 statement KPIs (Opening / Debits / Credits
+    / Closing Stored / Posting Drift) + 1 detail table. BO.6 — the
+    bare "Drift" KPI got the "Posting Drift" rename to disambiguate
     from the Drift sheet's leaf/parent drift (different math)."""
     app = build_l1_dashboard_app(_CFG)
     ds = _sheet_by_name(app, _DAILY_STATEMENT_NAME)
     titles = [_visual_title(v) for v in ds.visuals]
     assert titles == [
+        "Accounts available",
+        "Roles available",
         "Opening Balance",
         "Debits (signed)",
         "Credits (signed)",
@@ -2009,19 +2013,23 @@ def test_y2g_companion_datasets_registered_and_unparameterized() -> None:
         assert "<<$" not in sql
 
 
-def test_aa_b_1_l1_accounts_dataset_is_role_cascaded() -> None:
-    """AA.B.1 — ``DS_L1_ACCOUNTS`` carries a ``pL1DsRole`` SINGLE_VALUED
-    dataset param that the Daily Statement Role dropdown bridges into.
-    Default value is the show-all sentinel (``L1_ALL_SENTINEL``), so
-    every L1 sheet that re-uses the companion for its Account dropdown
-    keeps seeing every account on first load; the Daily Statement sheet
-    overrides the param when the analyst picks a role.
+def test_aa_b_1_l1_accounts_dataset_is_unparameterized() -> None:
+    """BR.x — ``DS_L1_ACCOUNTS`` no longer carries ``pL1DsRole``.
 
-    The SQL's WHERE clause is the standard ``_data_value_clause`` shape:
-    ``('__l1_all__' = <<$pL1DsRole>>) OR (account_role = <<$pL1DsRole>>)``.
+    Pre-BR.x AA.B.1 wired the Role cascade through this wider dataset
+    (used by 7 non-Daily-Statement L1 sheets) with a show-all sentinel
+    default. The role narrowing only fires on Daily Statement, which
+    sources its Account picker from ``DS_L1_DS_ACCOUNTS`` (the
+    balance-only companion) — the wider dataset never had an analysis
+    param bridge into it, so the ``<<$pL1DsRole>>`` substitution + DSP
+    declaration were dead. The unmapped DatasetParameter surfaced as
+    "You have an unmapped dataset parameter." on the analysis editor
+    (see docs/reference/quicksight-quirks.md). Dead-code removed at
+    BR.x; the dataset now returns every (account, role) tuple
+    unconditionally.
     """
     from recon_gen.apps.l1_dashboard.datasets import (
-        L1_ALL_SENTINEL, P_L1_DS_ROLE_DSP, build_l1_accounts_dataset,
+        P_L1_DS_ROLE_DSP, build_l1_accounts_dataset,
     )
 
     inst = default_l2_instance()
@@ -2030,22 +2038,17 @@ def test_aa_b_1_l1_accounts_dataset_is_role_cascaded() -> None:
     assert cs is not None
     sql = cs.SqlQuery
     assert "SELECT DISTINCT account_id, account_role" in sql
-    assert f"<<${P_L1_DS_ROLE_DSP}>>" in sql
-    # Sentinel-OR pushdown shape — both disjuncts present.
-    assert "'__l1_all__'" in sql or f"'{L1_ALL_SENTINEL}'" in sql
-    # Dataset param declared with show-all default.
-    assert ds.DatasetParameters
-    role_params = [
-        p for p in ds.DatasetParameters
-        if p.StringDatasetParameter
-        and p.StringDatasetParameter.Name == P_L1_DS_ROLE_DSP
-    ]
-    assert len(role_params) == 1
-    rp = role_params[0].StringDatasetParameter
-    assert rp is not None
-    assert rp.ValueType == "SINGLE_VALUED"
-    assert rp.DefaultValues is not None
-    assert rp.DefaultValues.StaticValues == [L1_ALL_SENTINEL]
+    # No <<$pX>> substitutions, no WHERE on account_role.
+    assert "<<$" not in sql, (
+        f"unexpected dataset param substitution in unparameterized "
+        f"l1-accounts-ds SQL: {sql!r}"
+    )
+    assert P_L1_DS_ROLE_DSP not in sql
+    # No DatasetParameters declared.
+    assert not ds.DatasetParameters, (
+        f"l1-accounts-ds should be unparameterized post-BR.x, but "
+        f"DatasetParameters={ds.DatasetParameters!r}"
+    )
 
 
 def test_aa_e_2_daily_statement_account_dropdown_binds_display_column() -> None:
