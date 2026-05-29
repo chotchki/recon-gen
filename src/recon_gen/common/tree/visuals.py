@@ -270,6 +270,90 @@ _KPI_INDICATOR_AGG_FN = {
 }
 
 
+_KPI_INFLOW_ICON_QS = "ARROW_UP"
+_KPI_OUTFLOW_ICON_QS = "ARROW_DOWN"
+# Same WCAG-AA hex palette as the zero indicator — green-700 for the
+# inflow/healthy side, red-700 for the outflow/broken side.
+_KPI_INFLOW_COLOR_HEX = "#15803D"
+_KPI_OUTFLOW_COLOR_HEX = "#B91C1C"
+
+
+def _emit_kpi_sign_indicator(value_measure: "Measure") -> dict[str, Any]:
+    """BK.9 — render the KPIValueSignIndicator pair as a QS
+    ``KPIConditionalFormatting`` block. Two ``ConditionalFormattingOption``
+    entries on ``PrimaryValue.Icon`` — first matches non-negative
+    (ARROW_UP + green), second matches negative (ARROW_DOWN + red).
+
+    Same three shape gotchas as ``_emit_kpi_zero_indicator`` apply
+    (uppercase hex, column-name expression refs, aggregation-fn
+    wrap). The comparison flips: ``>= 0`` for inflow, ``< 0`` for
+    outflow. Use this on a SIGNED currency KPI where the operator
+    needs the direction (sign) as a glance-readable signal — Exec
+    Net Money Moved being the BK.9 motivating example.
+    """
+    column_name = resolve_column(value_measure.column)
+    kind = value_measure.kind
+    if kind not in _KPI_INDICATOR_AGG_FN:
+        raise AssertionError(
+            f"KPIValueSignIndicator on Measure(kind={kind!r}) — only "
+            f"numerical aggregations sum/max/min/average can drive the "
+            f"indicator (count / distinct_count return row counts). "
+            f"Drop the indicator or change the aggregation."
+        )
+    agg = _KPI_INDICATOR_AGG_FN[kind]
+    aggregated_ref = f"{agg}({{{column_name}}})"
+    return {
+        "ConditionalFormattingOptions": [
+            {
+                "PrimaryValue": {
+                    "Icon": {
+                        "CustomCondition": {
+                            "Expression": f"{aggregated_ref} >= 0",
+                            "IconOptions": {"Icon": _KPI_INFLOW_ICON_QS},
+                            "Color": _KPI_INFLOW_COLOR_HEX,
+                            "DisplayConfiguration": {
+                                "IconDisplayOption": "ICON_ONLY",
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                "PrimaryValue": {
+                    "Icon": {
+                        "CustomCondition": {
+                            "Expression": f"{aggregated_ref} < 0",
+                            "IconOptions": {"Icon": _KPI_OUTFLOW_ICON_QS},
+                            "Color": _KPI_OUTFLOW_COLOR_HEX,
+                            "DisplayConfiguration": {
+                                "IconDisplayOption": "ICON_ONLY",
+                            },
+                        },
+                    },
+                },
+            },
+        ],
+    }
+
+
+@dataclass(frozen=True)
+class KPIValueSignIndicator:
+    """BK.9 — sign-aware (▲ inflow / ▼ outflow) state indicator for a
+    KPI's primary value. Renders ARROW_UP in green when the aggregated
+    value is non-negative, ARROW_DOWN in red when it's negative.
+
+    Accessibility: icon is the load-bearing channel (▲ vs ▼ is
+    distinguishable to all viewers regardless of color perception);
+    color rides along as a parallel signal.
+
+    Same QS wire shape as ``KPIValueZeroIndicator`` (see for the
+    three layered gotchas around hex case + expression DSL); the
+    semantic differs — sign of the aggregated value, not zero-vs-
+    not-zero. Currently used on Exec "Net Money Moved" (signed flow).
+    """
+    inflow_is_healthy: bool = True
+
+
 @dataclass(frozen=True)
 class KPIValueZeroIndicator:
     """BK.2 — binary healthy-when-zero state indicator for a KPI's
@@ -319,15 +403,31 @@ class KPI:
     subtitle: str
     values: list[Measure] = field(default_factory=list[Measure])
     value_zero_indicator: KPIValueZeroIndicator | None = None
+    value_sign_indicator: KPIValueSignIndicator | None = None
     visual_id: VisualId | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "kpi"
 
     def __post_init__(self) -> None:
         _require_non_blank_subtitle(self)
-        if self.value_zero_indicator is not None and len(self.values) != 1:
+        if (
+            self.value_zero_indicator is not None
+            and self.value_sign_indicator is not None
+        ):
             raise ValueError(
-                f"KPI(value_zero_indicator=...) only supports single-"
+                f"KPI on {self.title!r}: pick ONE of "
+                f"value_zero_indicator (healthy = $0) or "
+                f"value_sign_indicator (healthy = inflow). They emit "
+                f"competing ConditionalFormattingOptions and QS picks "
+                f"the first match — mixing them produces an undefined "
+                f"render."
+            )
+        if (
+            self.value_zero_indicator is not None
+            or self.value_sign_indicator is not None
+        ) and len(self.values) != 1:
+            raise ValueError(
+                f"KPI(value_*_indicator=...) only supports single-"
                 f"value KPIs; got {len(self.values)} values on "
                 f"{self.title!r}. Drop the indicator or split the "
                 f"KPI into one-value tiles."
@@ -356,11 +456,12 @@ class KPI:
         # KPI doesn't carry Actions per the QuickSight model — KPIs aren't
         # data-point-clickable. If we ever need drill on a KPI, switch to
         # a different visual type.
-        kpi_conditional = (
-            _emit_kpi_zero_indicator(self.values[0])
-            if self.value_zero_indicator is not None
-            else None
-        )
+        if self.value_zero_indicator is not None:
+            kpi_conditional = _emit_kpi_zero_indicator(self.values[0])
+        elif self.value_sign_indicator is not None:
+            kpi_conditional = _emit_kpi_sign_indicator(self.values[0])
+        else:
+            kpi_conditional = None
         return Visual(
             KPIVisual=KPIVisual(
                 VisualId=self.visual_id,

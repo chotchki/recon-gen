@@ -659,9 +659,12 @@ def _populate_drift_sheet(
             "Drift Timelines' \"Largest Leaf Drift Day\" KPI, which is "
             "the peak Σ|drift| on the worst single business day "
             "(day-grain rollup) — this one is the peak account-day "
-            "(row-grain peak)."
+            "(row-grain peak). The ✓/✗ glyph next to the number is "
+            "the accessible state signal — green ✓ when the largest "
+            "absolute drift in the window is $0, red ✗ otherwise."
         ),
         values=[ds_drift["abs_drift"].max(currency=True)],
+        value_zero_indicator=KPIValueZeroIndicator(),
     )
     kpi_row.add_kpi(
         width=quarter,
@@ -688,9 +691,13 @@ def _populate_drift_sheet(
             "Distinct from Drift Timelines' \"Largest Parent Drift "
             "Day\" — that one rolls up to a per-business-day Σ before "
             "taking the max, so it answers \"worst SINGLE day in the "
-            "window\" rather than \"worst single account-day row\"."
+            "window\" rather than \"worst single account-day row\". "
+            "The ✓/✗ glyph next to the number is the accessible state "
+            "signal — green ✓ when the largest parent drift in the "
+            "window is $0, red ✗ otherwise."
         ),
         values=[ds_ledger_drift["abs_drift"].max(currency=True)],
+        value_zero_indicator=KPIValueZeroIndicator(),
     )
 
     # Row 2: leaf-drift table. Pull account_id + business_day_start Dims
@@ -826,28 +833,31 @@ def _populate_drift_timelines_sheet(
         title="Largest Leaf Drift Day (peak business day)",
         subtitle=(
             "Max Σ ABS(drift) on any single BusinessDay across leaf "
-            "accounts in the visible date range. Healthy = $0. "
-            "Distinct from the Drift sheet's \"Largest Leaf Drift\" "
-            "KPI: that one is the worst single account-day row; this "
-            "one is the day when total |drift| across all leaves was "
-            "largest, so it can be smaller (one big drift on a "
-            "quiet day) or larger (many medium drifts on a busy day) "
-            "than the row-grain peak."
+            "accounts in the visible date range. Healthy = $0 (green "
+            "✓); red ✗ otherwise. Distinct from the Drift sheet's "
+            "\"Largest Leaf Drift\" KPI: that one is the worst single "
+            "account-day row; this one is the day when total |drift| "
+            "across all leaves was largest, so it can be smaller (one "
+            "big drift on a quiet day) or larger (many medium drifts "
+            "on a busy day) than the row-grain peak."
         ),
         values=[ds_drift_timeline["abs_drift"].max(currency=True)],
+        value_zero_indicator=KPIValueZeroIndicator(),
     )
     kpi_row.add_kpi(
         width=half,
         title="Largest Parent Drift Day (peak business day)",
         subtitle=(
             "Max Σ ABS(drift) on any single BusinessDay across parent "
-            "accounts in the visible date range. Healthy = $0. "
-            "Distinct from the Drift sheet's \"Largest Parent Drift\" "
-            "— that one is the worst single account-day row, this one "
-            "is the worst single business day's roll-up. See \"Largest "
-            "Leaf Drift Day\" subtitle for the why."
+            "accounts in the visible date range. Healthy = $0 (green "
+            "✓); red ✗ otherwise. Distinct from the Drift sheet's "
+            "\"Largest Parent Drift\" — that one is the worst single "
+            "account-day row, this one is the worst single business "
+            "day's roll-up. See \"Largest Leaf Drift Day\" subtitle "
+            "for the why."
         ),
         values=[ds_ledger_drift_timeline["abs_drift"].max(currency=True)],
+        value_zero_indicator=KPIValueZeroIndicator(),
     )
 
     # Row 2: leaf drift line chart — one line per account_role.

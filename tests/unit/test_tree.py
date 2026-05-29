@@ -591,6 +591,66 @@ class TestKPIVisual:
             f"hex fails CreateAnalysis."
         )
 
+    def test_bk_9_value_sign_indicator_emits_qs_conditional_formatting(self):
+        """BK.9 — single-value KPI with KPIValueSignIndicator emits a
+        sign-aware ConditionalFormatting pair: ARROW_UP + green-700
+        when the aggregated value >= 0 (inflow / healthy direction),
+        ARROW_DOWN + red-700 when < 0 (outflow). Same three QS shape
+        gotchas as BK.2 apply (uppercase hex, column-name expression
+        refs, aggregation-fn wrap). The boundary is at zero: zero
+        itself is treated as inflow (operator-friendly default for
+        "balanced book" KPIs)."""
+        from recon_gen.common.tree import KPIValueSignIndicator
+        from recon_gen.common.tree.visuals import (
+            _KPI_INFLOW_COLOR_HEX,
+            _KPI_INFLOW_ICON_QS,
+            _KPI_OUTFLOW_COLOR_HEX,
+            _KPI_OUTFLOW_ICON_QS,
+        )
+        kpi = KPI(
+            visual_id=VisualId("v-kpi"),
+            title="Net Money Moved",
+            subtitle="Direction = sign of the period sum",
+            values=[Measure.sum(_DS_FOO, "net_amount", field_id="f-net")],
+            value_sign_indicator=KPIValueSignIndicator(),
+        )
+        emitted = kpi.emit()
+        assert emitted.KPIVisual is not None
+        cf = emitted.KPIVisual.ConditionalFormatting
+        assert cf is not None
+        options = cf["ConditionalFormattingOptions"]
+        assert len(options) == 2
+
+        # Inflow side — value >= 0 → ARROW_UP + green.
+        up = options[0]["PrimaryValue"]["Icon"]["CustomCondition"]
+        assert up["Expression"] == "sum({net_amount}) >= 0"
+        assert up["IconOptions"]["Icon"] == _KPI_INFLOW_ICON_QS
+        assert up["Color"] == _KPI_INFLOW_COLOR_HEX
+
+        # Outflow side — value < 0 → ARROW_DOWN + red.
+        down = options[1]["PrimaryValue"]["Icon"]["CustomCondition"]
+        assert down["Expression"] == "sum({net_amount}) < 0"
+        assert down["IconOptions"]["Icon"] == _KPI_OUTFLOW_ICON_QS
+        assert down["Color"] == _KPI_OUTFLOW_COLOR_HEX
+
+    def test_bk_9_value_sign_indicator_blocks_mixed_indicators(self):
+        """BK.2 + BK.9 — both indicators on the same KPI raises at
+        construction. They emit competing ConditionalFormattingOptions
+        and QS picks the first match, so mixing produces an undefined
+        render. Fail loud rather than silent."""
+        from recon_gen.common.tree import (
+            KPIValueSignIndicator, KPIValueZeroIndicator,
+        )
+        with pytest.raises(ValueError, match="pick ONE"):
+            KPI(
+                visual_id=VisualId("v-kpi"),
+                title="Mixed-indicator test",  # typing-smell: ignore[no-inline-production-constants]: arbitrary test label; the KPI never emits — construction raises
+                subtitle="should fail at __post_init__",
+                values=[Measure.sum(_DS_FOO, "amount", field_id="f-a")],
+                value_zero_indicator=KPIValueZeroIndicator(),
+                value_sign_indicator=KPIValueSignIndicator(),
+            )
+
     def test_bk_2_value_zero_indicator_off_by_default_emits_no_cf(self):
         """BK.2 — KPIs without ``value_zero_indicator`` (the default)
         must NOT emit a ``ConditionalFormatting`` block. The QS

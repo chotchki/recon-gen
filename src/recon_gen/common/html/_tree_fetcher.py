@@ -279,6 +279,11 @@ class _VisualPlan:
     #: the QS-side ``KPIValueZeroIndicator`` emit on the same Visual).
     #: False for KPIs without a zero-indicator + every non-KPI.
     kpi_zero_is_healthy: bool
+    #: BK.9 — when True, ``shape_kpi`` stamps the sign-indicator pair
+    #: (▲ green when value ≥ 0, ▼ red when value < 0) — App2 parity
+    #: with the QS-side ``KPIValueSignIndicator``. Mutually exclusive
+    #: with ``kpi_zero_is_healthy`` (the KPI constructor blocks both).
+    kpi_inflow_is_healthy: bool
 
 
 def _apply_cents_to_dollars(
@@ -507,6 +512,17 @@ def _kpi_zero_is_healthy(visual: object) -> bool:
     return bool(getattr(indicator, "healthy_when_zero", False))
 
 
+def _kpi_inflow_is_healthy(visual: object) -> bool:
+    """BK.9 — read the tree KPI's ``value_sign_indicator`` setting.
+    Mirror of ``_kpi_zero_is_healthy`` for the sign-aware shape."""
+    if type(visual).__name__ != "KPI":
+        return False
+    indicator: Any = getattr(visual, "value_sign_indicator", None)  # typing-smell: ignore[explicit-any]: dynamic getattr against KPI subtype — narrowing to KPIValueSignIndicator | None would force a tree → html dependency that inverts the existing layer
+    if indicator is None:
+        return False
+    return bool(getattr(indicator, "inflow_is_healthy", False))
+
+
 def make_tree_db_fetcher(
     tree_app: App,
     cfg: Config,
@@ -600,6 +616,7 @@ def make_tree_db_fetcher(
                 money_columns=money_cols,
                 kpi_format=_kpi_format(visual),
                 kpi_zero_is_healthy=_kpi_zero_is_healthy(visual),
+                kpi_inflow_is_healthy=_kpi_inflow_is_healthy(visual),
             )
 
     async def fetcher(visual_id: VisualId, params: Mapping[str, list[str]]) -> Any:  # typing-smell: ignore[explicit-any]: per-visual-kind shape (KPI float, Sankey {nodes,links}, etc.) — JSON-serialized downstream, so a real union here would be every renderer's shape
@@ -711,6 +728,8 @@ def make_tree_db_fetcher(
                 kpi_kwargs["format"] = plan.kpi_format
             if plan.kpi_zero_is_healthy:
                 kpi_kwargs["zero_is_healthy"] = True
+            if plan.kpi_inflow_is_healthy:
+                kpi_kwargs["inflow_is_healthy"] = True
             return shape_for_kind(kind, rows, columns, **kpi_kwargs)
         # ForceGraph + Sankey have specialized projectors today
         # (_db_fetcher._topology_to_force_graph, etc.); the generic

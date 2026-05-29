@@ -58,6 +58,7 @@ from recon_gen.common.tree import (
     Dataset,
     DateTimeParam,
     DateView,
+    KPIValueSignIndicator,
     Sheet,
     TextBox,
 )
@@ -566,12 +567,15 @@ def _populate_money_moved(
             "asymmetries surface. Large positive = net inflow to the "
             "bank's books (deposits exceeding payouts in the window); "
             "large negative = net outflow you should be able to "
-            "explain. Compare against **Gross Money Moved** on the "
-            "right for the per-period handle."
+            "explain. The ▲/▼ glyph next to the number is the "
+            "accessible sign signal — green ▲ when net ≥ 0 (inflow), "
+            "red ▼ when net < 0 (outflow). Compare against **Gross "
+            "Money Moved** on the right for the per-period handle."
         ),
         values=[ds_txn["net_amount"].sum(
             field_id="exec-money-net-sum", currency=True,
         )],
+        value_sign_indicator=KPIValueSignIndicator(),
     )
     kpi_row.add_kpi(
         width=_HALF,

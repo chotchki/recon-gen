@@ -38,6 +38,7 @@ def shape_kpi(
     format: str | None = None,
     delta: float | None = None,
     zero_is_healthy: bool = False,
+    inflow_is_healthy: bool = False,
 ) -> dict[str, Any]:
     """Shape one or more SQL rows as a KPI payload.
 
@@ -82,6 +83,12 @@ def shape_kpi(
             is_zero = row[0] == 0
             entry["state_icon"] = "✓" if is_zero else "✗"
             entry["state_color"] = "success" if is_zero else "danger"
+        elif inflow_is_healthy and row[0] is not None:
+            # BK.9 — same neutral-on-null treatment as zero_is_healthy;
+            # the sign comparison flips below zero / on-or-above.
+            is_inflow = row[0] >= 0
+            entry["state_icon"] = "▲" if is_inflow else "▼"
+            entry["state_color"] = "success" if is_inflow else "danger"
         values.append(entry)
     return {"values": values}
 
