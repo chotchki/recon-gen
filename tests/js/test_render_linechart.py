@@ -276,10 +276,28 @@ def test_linechart_handles_empty_series_without_crashing() -> None:
             "series": [{"values": []}],
         })
         svg_count = page.locator("#linechart-target svg").count()
-        line_count = page.locator(
-            "#linechart-target svg path.linechart-line",
+        empty_count = page.locator(
+            "#linechart-target .line-chart-empty-state",
         ).count()
         browser.close()
-    assert svg_count == 1
-    # 1 path element rendered with empty 'd' — no crash.
-    assert line_count == 1
+    # BQ.1 — empty data paints the empty-state banner (no SVG).
+    # Pre-BQ.1 the empty case rendered an empty path; that read as
+    # broken. The "no crash" intent still holds; visual flipped.
+    assert svg_count == 0
+    assert empty_count == 1
+
+
+def test_linechart_empty_renders_empty_state_banner() -> None:
+    """BQ.1 — empty x_values + values → banner instead of empty axis."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_into_target(page, {"x_values": [], "values": []})
+        empty_count = page.locator(
+            "#linechart-target .line-chart-empty-state",
+        ).count()
+        svg_count = page.locator("#linechart-target svg").count()
+        browser.close()
+    assert empty_count == 1
+    assert svg_count == 0

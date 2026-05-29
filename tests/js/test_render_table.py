@@ -273,7 +273,10 @@ def test_table_sort_link_cycles_desc_to_off() -> None:
 
 
 def test_table_renders_zero_rows_without_crashing() -> None:
-    """Empty result set renders an empty tbody + "0 of 0" pager."""
+    """BQ.1 — empty result set renders the empty-state banner (no
+    tbody rows, no pager). Pre-BQ.1 the empty case rendered just the
+    header + a "0 of 0" pager — visually a still-loading state.
+    The "no crash" intent still holds; visual flipped."""
     with playwright_sync_api.sync_playwright() as p:
         browser = p.webkit.launch(headless=True)
         page = browser.new_page()
@@ -283,12 +286,10 @@ def test_table_renders_zero_rows_without_crashing() -> None:
         empty["total_rows"] = 0
         _render_into_target(page, empty)
         body_rows = page.locator("#table-host tbody tr").count()
-        range_text = page.locator(
-            "#table-host .table-pager-range",
-        ).first.inner_text()
+        empty_count = page.locator("#table-host .table-empty-state").count()
         browser.close()
     assert body_rows == 0
-    assert range_text == "0–0 of 0"
+    assert empty_count == 1
 
 
 def test_next_sort_direction_cycle() -> None:
@@ -335,3 +336,36 @@ def test_build_table_url_drops_empty_params() -> None:
     assert "sort_column" not in url
     assert "page_offset=0" in url
     assert "page_size=50" in url
+
+
+def test_table_empty_rows_renders_empty_state_banner() -> None:
+    """BQ.1 — when ``total_rows === 0``, renderTable paints the
+    empty-state banner instead of just the sticky header row over
+    a blank body. Pre-BQ.1 an empty table looked indistinguishable
+    from a still-loading state.
+    """
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_into_target(page, {
+            "columns": [{"name": "id"}, {"name": "amount"}],
+            "rows": [],
+            "page_offset": 0,
+            "page_size": 50,
+            "total_rows": 0,
+            "sort_column": "",
+        })
+        empty_count = page.locator(
+            "#visual-data-test-vid .table-empty-state",
+        ).count()
+        table_count = page.locator("#visual-data-test-vid table").count()
+        message = cast(str, page.evaluate(
+            """() => document.querySelector(
+                '#visual-data-test-vid .table-empty-state',
+            )?.textContent || ''""",
+        ))
+        browser.close()
+    assert empty_count == 1
+    assert table_count == 0
+    assert "No rows match" in message

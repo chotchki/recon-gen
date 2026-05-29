@@ -149,6 +149,26 @@
     var values = data.values
       ? data.values
       : [{ value: data.value, label: data.label || "", format: data.format }];
+    var emptyKpi;
+
+    // BQ.2 — empty-state banner when shape_kpi flagged no usable rows
+    // (zero rows from SQL OR all values are NULL after SUM/MAX/MIN).
+    // COUNT KPIs are NOT empty when value=0 — they still have a row;
+    // shape_kpi only sets data.empty when there's literally nothing to
+    // render. Mirrors BO.3 Sankey + BQ.1 Table/Bar/Line/Graph.
+    if (data.empty) {
+      emptyKpi = document.createElement("div");
+      emptyKpi.className =
+        "kpi-empty-state flex h-32 items-center justify-center " +
+        "text-sm text-secondary-fg p-8 text-center";
+      emptyKpi.setAttribute("role", "status");
+      emptyKpi.textContent =
+        "No data matches the current filters. Try widening the date " +
+        "range or clearing the dropdown filters above.";
+      target.appendChild(emptyKpi);
+      return;
+    }
+
     var container = d3
       .select(target)
       .append("div")
@@ -240,6 +260,26 @@
     var totalRows =
       typeof data.total_rows === "number" ? data.total_rows : rows.length;
     var currentSort = data.sort_column || "";
+    var emptyTable;
+
+    // BQ.1 — explicit empty-state copy mirroring BO.3's Sankey treatment.
+    // Without this, an empty table shows just the sticky header row with
+    // no body — visually indistinguishable from a still-loading state.
+    // Triggers on the SQL-returned-zero case (totalRows === 0); preserves
+    // the header-only-but-paginated case where current page is empty but
+    // earlier pages had rows (pageOffset > 0 with totalRows > 0).
+    if (totalRows === 0) {
+      emptyTable = document.createElement("div");
+      emptyTable.className =
+        "table-empty-state flex h-48 items-center justify-center " +
+        "text-sm text-secondary-fg p-8 text-center";
+      emptyTable.setAttribute("role", "status");
+      emptyTable.textContent =
+        "No rows match the current filters. Try widening the date " +
+        "range or clearing the dropdown filters above.";
+      target.appendChild(emptyTable);
+      return;
+    }
 
     // Outer wrapper — overflow-x-auto so wide tables scroll
     // horizontally rather than overflowing the dashboard layout.
@@ -578,6 +618,28 @@
     var multi = series.length > 1;
     var stacked = !!data.stacked && multi;
 
+    // BQ.1 — explicit empty-state mirroring BO.3's Sankey + BQ.1's Table.
+    // Detects "no bars to draw" via either zero categories OR every series
+    // having zero non-numeric values. Without this, an empty bar chart
+    // renders an axis frame with no marks — visually a broken-render
+    // signature, not the actually-empty signal it is.
+    var hasAnyBar =
+      categories.length > 0 &&
+      series.some((s) => (s.values || []).some((v) => typeof v === "number"));
+    var emptyBar;
+    if (!hasAnyBar) {
+      emptyBar = document.createElement("div");
+      emptyBar.className =
+        "bar-chart-empty-state flex h-80 items-center justify-center " +
+        "text-sm text-secondary-fg p-8 text-center";
+      emptyBar.setAttribute("role", "status");
+      emptyBar.textContent =
+        "No data matches the current filters. Try widening the date " +
+        "range or clearing the dropdown filters above.";
+      target.appendChild(emptyBar);
+      return;
+    }
+
     var width = target.clientWidth || 800;
     var plotH = 320; // fixed plot area; bars scale to this, not the legend
     var rotateX =
@@ -589,17 +651,17 @@
     // For stacked, sum per-category; otherwise max single value.
     var estMaxAbs = 0;
     if (stacked) {
-      categories.forEach(function (_c, ci) {
+      categories.forEach((_c, ci) => {
         var colSum = 0;
-        series.forEach(function (s) {
+        series.forEach((s) => {
           var v = s.values && s.values[ci];
           if (typeof v === "number") colSum += v;
         });
         if (Math.abs(colSum) > estMaxAbs) estMaxAbs = Math.abs(colSum);
       });
     } else {
-      series.forEach(function (s) {
-        (s.values || []).forEach(function (v) {
+      series.forEach((s) => {
+        (s.values || []).forEach((v) => {
           if (typeof v === "number" && Math.abs(v) > estMaxAbs) {
             estMaxAbs = Math.abs(v);
           }
@@ -680,11 +742,22 @@
           ),
         ) || 0;
     }
-    var y = d3
-      .scaleLinear()
-      .domain([0, maxVal || 1])
-      .nice()
-      .range([innerH, 0]);
+    // BQ.5 — log-scale Y axis for one-bar-dominance presentation.
+    // ``data.log_scale`` flag from shape_bar_chart switches to d3
+    // scaleLog (parity with QS BarChartConfiguration.ValueAxis →
+    // NumericAxisOptions.Scale.Logarithmic). Log scale rejects ≤0 →
+    // domain floor at 1 (the implicit "one observation" floor; QS
+    // does the same on its log-scale axes by default).
+    var y;
+    if (data.log_scale && maxVal > 0) {
+      y = d3.scaleLog().base(10).domain([1, maxVal]).range([innerH, 0]).nice();
+    } else {
+      y = d3
+        .scaleLinear()
+        .domain([0, maxVal || 1])
+        .nice()
+        .range([innerH, 0]);
+    }
 
     // Axes — y formatted via formatKPIValue so currency / number stays
     // consistent; x labels rotate when long/many.
@@ -831,11 +904,31 @@
       : [{ name: data.label || "", values: data.values || [] }];
     var format = data.format;
     var xKind = data.x_kind || "date";
+
+    // BQ.1 — empty-state mirroring BO.3's Sankey + BQ.1's Bar / Table.
+    // No x-axis values OR no numeric series values → render the banner
+    // instead of an empty axis frame.
+    var hasAnyPoint =
+      xValues.length > 0 &&
+      series.some((s) => (s.values || []).some((v) => typeof v === "number"));
+    var emptyLine;
+    if (!hasAnyPoint) {
+      emptyLine = document.createElement("div");
+      emptyLine.className =
+        "line-chart-empty-state flex h-80 items-center justify-center " +
+        "text-sm text-secondary-fg p-8 text-center";
+      emptyLine.setAttribute("role", "status");
+      emptyLine.textContent =
+        "No data matches the current filters. Try widening the date " +
+        "range or clearing the dropdown filters above.";
+      target.appendChild(emptyLine);
+      return;
+    }
     // AO.9 — same left-margin scaling as the BarChart; without it
     // currency labels above $1M clip to ``0,000,000``.
     var estMaxAbs = 0;
-    series.forEach(function (s) {
-      (s.values || []).forEach(function (v) {
+    series.forEach((s) => {
+      (s.values || []).forEach((v) => {
         if (typeof v === "number" && Math.abs(v) > estMaxAbs) {
           estMaxAbs = Math.abs(v);
         }
@@ -1141,6 +1234,28 @@
   function renderForceGraph(target, data, visualId) {
     var width = target.clientWidth || 800;
     var height = 400;
+
+    // BQ.1 — empty-state mirroring BO.3 Sankey + BQ.1 Bar / Line / Table.
+    // No nodes or no links → render the banner. The Investigation Account
+    // Network sheet hits this on a no-plant scenario; without the explicit
+    // empty-state the panel is indistinguishable from a still-loading
+    // force-graph simulation.
+    var fgNodes = (data && data.nodes) || [];
+    var fgLinks = (data && data.links) || [];
+    var emptyFg;
+    if (fgNodes.length === 0 || fgLinks.length === 0) {
+      emptyFg = document.createElement("div");
+      emptyFg.className =
+        "force-graph-empty-state flex h-96 items-center justify-center " +
+        "text-sm text-secondary-fg p-8 text-center";
+      emptyFg.setAttribute("role", "status");
+      emptyFg.textContent =
+        "No connections match the current filters. Try widening the " +
+        "date range or clearing the dropdown filters above.";
+      target.appendChild(emptyFg);
+      return;
+    }
+
     var svg = d3
       .select(target)
       .append("svg")

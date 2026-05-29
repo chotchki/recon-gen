@@ -1034,7 +1034,12 @@ def test_money_trail_roots_companion_dataset_is_unfiltered():
         "inv-money-trail-roots-dataset",
     )
     sql = _custom_sql(roots)
-    assert "SELECT DISTINCT root_transfer_id" in sql
+    # BQ.7 — outer SELECT is bare `SELECT root_transfer_id` (no DISTINCT)
+    # because the inner GROUP BY already dedupes. The ORDER BY chain_total
+    # DESC inside the subquery is the BQ.7 contract: QS's auto-pick-first
+    # default lands on the largest chain.
+    assert "SELECT root_transfer_id" in sql
+    assert "ORDER BY SUM(hop_amount) DESC" in sql
     assert "FROM spec_example_inv_money_trail_edges" in sql
     # Critical: NO pushdown parameters here — the dropdown's option
     # fetch must see every chain.

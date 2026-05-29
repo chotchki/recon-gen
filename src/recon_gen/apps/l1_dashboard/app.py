@@ -1019,19 +1019,25 @@ def _populate_todays_exceptions_sheet(
     # Row 2: bar chart broken out by check_type (count per check kind).
     # Q.1.c — plain-English axis labels in place of the raw column
     # names QuickSight defaults to ("check_type" / "Count of account_id").
+    # BQ.5 (cold-read F6): one check_type (typically stuck_unbundled)
+    # swamps the others at ~5000 vs near-zero; log_scale keeps the
+    # short bars readable so the rarer error classes still register.
     sheet.layout.row(height=_CHART_ROW_SPAN).add_bar_chart(
         width=_FULL,
         title="Exceptions by Check Type",
         subtitle=(
             "How today's open exceptions distribute across the 5 L1 "
             "invariants. Spikes in one check kind point at a recurring "
-            "error class to investigate first."
+            "error class to investigate first. **Log-scale Y axis:** "
+            "the dominant check kind would otherwise swamp the rarer "
+            "ones — log scale lets you read all 5 at once."
         ),
         category=[ds["check_type"].dim()],
         values=[ds["account_id"].count()],
         orientation="HORIZONTAL",
         category_label="Check Type",
-        value_label="Open Exceptions",
+        value_label="Open Exceptions (log)",
+        log_scale=True,
     )
 
     # Row 3: detail table — every row is one violation, sorted by

@@ -12,14 +12,19 @@ from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
 
 from recon_gen.common.ids import VisualId
 from recon_gen.common.models import (
+    AxisDataOptions,
+    AxisDisplayOptions,
     AxisLabelOptions,
     AxisLabelReferenceOptions,
+    AxisLogarithmicScale,
+    AxisScale,
     BarChartAggregatedFieldWells,
     BarChartConfiguration,
     BarChartFieldWells,
     BarChartSortConfiguration,
     BarChartVisual,
     ChartAxisLabelOptions,
+    NumericAxisOptions,
     ColumnIdentifier,
     KPIConfiguration,
     KPIFieldWells,
@@ -733,6 +738,14 @@ class BarChart:
     color_label: str | None = None
     sort_by: tuple[FieldRef, Literal["ASC", "DESC"]] | None = None
     actions: list[Action] = field(default_factory=list[Action])
+    # BQ.5 — value-axis log scale for one-bar-dominance presentation
+    # (cold-read F6 + F7). When True, emits the
+    # ``BarChartConfiguration.ValueAxis`` path with a base-10
+    # ``AxisLogarithmicScale``. App2 mirrors via d3's ``scaleLog``.
+    # Default False keeps QS's linear default behavior on every existing
+    # chart. Documented in the value_label subtitle when set so trainees
+    # know the y-axis isn't linear.
+    log_scale: bool = False
     visual_id: VisualId | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "bar"
@@ -840,10 +853,26 @@ class BarChart:
                         if color_label is not None and self.colors else None
                     ),
                     SortConfiguration=sort_config,
+                    ValueAxis=_emit_log_scale_axis() if self.log_scale else None,
                 ),
                 Actions=[a.emit() for a in self.actions] if self.actions else None,
             ),
         )
+
+
+def _emit_log_scale_axis() -> "AxisDisplayOptions":
+    """BQ.5 — the 5-level AWS QS path for "use a log scale on the value
+    axis." See ``common/models.py``'s axis section for the path diagram.
+    Base 10 is left implicit (QS schema defaults to 10) — explicit base
+    would just be ``Base=10.0`` on the inner ``AxisLogarithmicScale``.
+    """
+    return AxisDisplayOptions(
+        DataOptions=AxisDataOptions(
+            NumericAxisOptions=NumericAxisOptions(
+                Scale=AxisScale(Logarithmic=AxisLogarithmicScale()),
+            ),
+        ),
+    )
 
 
 @dataclass(eq=False)

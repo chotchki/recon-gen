@@ -112,7 +112,7 @@
   // (so DevTools still shows everything), then forward to /log.
   ["error", "warn"].forEach((level) => {
     var orig = console[level];
-    console[level] = function (...args) {
+    console[level] = (...args) => {
       try {
         orig.apply(console, args);
       } catch {}

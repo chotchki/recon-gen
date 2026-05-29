@@ -648,6 +648,7 @@ class Row:
         color_label: str | None = None,
         sort_by: tuple[FieldRef, Literal["ASC", "DESC"]] | None = None,
         actions: list[Action] | None = None,
+        log_scale: bool = False,
         visual_id: VisualId | AutoResolved = AUTO,
     ) -> BarChart:
         """Construct + register + place a BarChart in this row."""
@@ -659,7 +660,8 @@ class Row:
             orientation=orientation, bars_arrangement=bars_arrangement,
             category_label=category_label, value_label=value_label,
             color_label=color_label,
-            sort_by=sort_by, actions=actions or [], visual_id=visual_id,
+            sort_by=sort_by, actions=actions or [],
+            log_scale=log_scale, visual_id=visual_id,
         )
         self.sheet.visuals.append(bar)
         self.sheet.grid_slots.append(GridSlot(
@@ -840,13 +842,15 @@ class AbsoluteSlot:
         ] | None = None,
         sort_by: tuple[FieldRef, Literal["ASC", "DESC"]] | None = None,
         actions: list[Action] | None = None,
+        log_scale: bool = False,
         visual_id: VisualId | AutoResolved = AUTO,
     ) -> BarChart:
         bar = BarChart(
             title=title, subtitle=subtitle,
             category=category or [], values=values or [],
             orientation=orientation, bars_arrangement=bars_arrangement,
-            sort_by=sort_by, actions=actions or [], visual_id=visual_id,
+            sort_by=sort_by, actions=actions or [],
+            log_scale=log_scale, visual_id=visual_id,
         )
         self.sheet.visuals.append(bar)
         self._place(bar)

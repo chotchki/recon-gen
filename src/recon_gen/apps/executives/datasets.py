@@ -193,6 +193,17 @@ def build_transaction_summary_dataset(cfg: Config) -> DataSet:
     base table). v6 column rename: posted_at → posting; amount →
     ``ABS(amount_money)`` (the per-leg signed Decimal — magnitude is
     abs); signed_amount → amount_money (already signed in v6).
+
+    BQ.6 (cold-read F7) — top-N + Other rollup on ``rail_name``. The
+    executive dashboards display this dataset stacked by ``rail_name``
+    (Daily Stacked) or grouped by ``rail_name`` (Period Total). With
+    60-80 distinct rails in sasquatch_pr, the legend takes ~30% of the
+    canvas and the long tail of small rails is illegible. Rolling
+    everything past the top-20 by gross volume into ``"Other"`` caps
+    the legend at 21 entries and keeps the long-tail aggregate visible
+    instead of invisibly dispersed. Rank is by GROSS (the most
+    operator-meaningful sort for executive scanning); counts +
+    net-amount aggregate cleanly under the same partition.
     """
     # Phase BM — single SQL form via ``<<$pExecDate*>>`` pushdown over
     # ``t.posting`` (TIMESTAMP); the helper's upper bound expands to
@@ -205,12 +216,19 @@ def build_transaction_summary_dataset(cfg: Config) -> DataSet:
     # dollars at the outermost projection so the executive dashboard
     # receives dollars on the two money columns.
     gross = cents_to_dollars_sql(
-        "SUM(transfer_amount)", dialect=cfg.dialect,
+        "SUM(pt.transfer_amount)", dialect=cfg.dialect,
     )
     net = cents_to_dollars_sql(
-        "SUM(transfer_net)", dialect=cfg.dialect,
+        "SUM(pt.transfer_net)", dialect=cfg.dialect,
     )
     date_clause = _exec_date_range_clause("t.posting", cfg)
+    # BQ.6 top-N + Other rollup. DENSE_RANK over the per-rail gross
+    # total (cents-cents math stays integer-safe). CASE folds non-top
+    # rails to the string literal "Other" so QS sees one extra series
+    # at the bottom of the legend. Top-N is 20 — chosen to keep the
+    # legend chunked but not aggressive enough to flatten interesting
+    # mid-volume rails (sasquatch_pr has ~30 rails firing; 20 covers
+    # the visible top, 10 collapse).
     sql = f"""\
 WITH per_transfer AS (
     SELECT
@@ -223,15 +241,29 @@ WITH per_transfer AS (
     WHERE t.status = 'Posted'
       AND {date_clause}
     GROUP BY t.transfer_id, t.rail_name
+),
+rail_totals AS (
+    SELECT
+        rail_name,
+        SUM(transfer_amount) AS rail_gross_cents
+    FROM per_transfer
+    GROUP BY rail_name
+),
+rail_ranks AS (
+    SELECT
+        rail_name,
+        DENSE_RANK() OVER (ORDER BY rail_gross_cents DESC) AS rail_rank
+    FROM rail_totals
 )
 SELECT
-    posted_date,
-    rail_name,
-    COUNT(*)                   AS transfer_count,
-    {gross}       AS gross_amount,
-    {net}          AS net_amount
-FROM per_transfer
-GROUP BY posted_date, rail_name"""
+    pt.posted_date                 AS posted_date,
+    CASE WHEN rr.rail_rank <= 20 THEN pt.rail_name ELSE 'Other' END AS rail_name,
+    COUNT(*)                       AS transfer_count,
+    {gross} AS gross_amount,
+    {net}   AS net_amount
+FROM per_transfer pt
+JOIN rail_ranks rr ON pt.rail_name = rr.rail_name
+GROUP BY pt.posted_date, CASE WHEN rr.rail_rank <= 20 THEN pt.rail_name ELSE 'Other' END"""
     return build_dataset(
         cfg,
         cfg.prefixed("exec-transaction-summary-dataset"),

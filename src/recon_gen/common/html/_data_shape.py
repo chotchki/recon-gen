@@ -61,8 +61,17 @@ def shape_kpi(
     """
     del columns  # name preserved for parity with other shape fns
     values: list[dict[str, Any]] = []
+    # BQ.2 — track whether ANY input row has a non-None first column. SQL
+    # SUM/MAX/MIN over zero rows returns NULL → renderer treats that as
+    # empty-state (banner instead of "$0.00" / "—"). COUNT over zero rows
+    # returns the literal 0 → legit zero count, not empty-state. The
+    # signal we emit lets the renderer make that distinction without
+    # peeking at the binding kind.
+    has_any_value = False
     for row in rows:
         entry: dict[str, Any] = {"value": row[0]}
+        if row[0] is not None:
+            has_any_value = True
         if label is not None:
             entry["label"] = label
         elif len(row) > 1:
@@ -90,7 +99,17 @@ def shape_kpi(
             entry["state_icon"] = "▲" if is_inflow else "▼"
             entry["state_color"] = "success" if is_inflow else "danger"
         values.append(entry)
-    return {"values": values}
+    payload: dict[str, Any] = {"values": values}
+    # BQ.2 — empty-state signal for the App2 KPI renderer. Two shapes get
+    # the banner instead of the value: (1) zero input rows (no SQL row
+    # at all); (2) every input row has a None first column (NULL from
+    # SUM/MAX/MIN over an empty source). COUNT-bound KPIs return 1 row
+    # with the literal 0 → has_any_value=True → renders "0" as the legit
+    # count, not the banner. Only the "no rows OR all-NULL" case is
+    # ambiguous-without-this-signal.
+    if not values or not has_any_value:
+        payload["empty"] = True
+    return payload
 
 
 def shape_table(
@@ -160,6 +179,7 @@ def shape_bar_chart(
     series_column: int | None = None,
     format: str | None = None,
     stacked: bool = False,
+    log_scale: bool = False,
 ) -> dict[str, Any]:
     """Shape SQL rows as a bar chart.
 
@@ -189,6 +209,8 @@ def shape_bar_chart(
             out["format"] = format
         if stacked:
             out["stacked"] = True
+        if log_scale:
+            out["log_scale"] = True
         return out
 
     if series_column is None:

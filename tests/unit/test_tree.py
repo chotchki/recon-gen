@@ -726,6 +726,58 @@ class TestBarChartVisual:
         assert wells.Values is not None
         assert len(wells.Values) == 1
 
+    def test_bq_5_log_scale_emits_value_axis_logarithmic_block(self):
+        """BQ.5 — when ``log_scale=True``, BarChart emits the
+        five-level QS path ValueAxis → DataOptions → NumericAxisOptions
+        → Scale → Logarithmic. Without all five wrappers QS rejects
+        the analysis at deploy time (the QS-schema spike caught this
+        on the v11.24.x BK.2 conditional-formatting probe — same
+        deeply-nested wrapping pattern)."""
+        bar = BarChart(
+            visual_id=VisualId("v-bar-log"),
+            title="Log Bars",
+            category=[Dim(dataset=_DS, field_id="f-bucket", column="z_bucket")],
+            values=[Measure.count(dataset=_DS, field_id="f-cnt", column="recipient_id")],
+            subtitle="t",
+            log_scale=True,
+        )
+        cfg = bar.emit().BarChartVisual.ChartConfiguration  # type: ignore[union-attr]: BarChart.emit() always sets BarChartVisual; pyright sees the wider Visual union
+        assert cfg is not None
+        axis = cfg.ValueAxis
+        assert axis is not None, (
+            "ValueAxis must be set when log_scale=True; QS-side log "
+            "scale lives ONLY inside the ValueAxis sub-tree."
+        )
+        assert axis.DataOptions is not None
+        assert axis.DataOptions.NumericAxisOptions is not None
+        scale = axis.DataOptions.NumericAxisOptions.Scale
+        assert scale is not None
+        assert scale.Logarithmic is not None, (
+            "Scale.Logarithmic must be set (not Linear) when log_scale=True. "
+            "Linear is QS's default — leaving Logarithmic unset would silently "
+            "render as linear."
+        )
+        assert scale.Linear is None, (
+            "Both Linear and Logarithmic set is rejected by QS as an "
+            "invalid discriminated-union state — exactly one wins."
+        )
+
+    def test_bq_5_no_log_scale_leaves_value_axis_unset(self):
+        """BQ.5 — default ``log_scale=False`` (every existing BarChart's
+        shape pre-BQ.5) MUST leave ``ValueAxis`` None so QS's linear
+        default still applies. Setting an empty ValueAxis would
+        regress every existing chart — pin the default."""
+        bar = BarChart(
+            visual_id=VisualId("v-bar-default"),
+            title="Default Bars",
+            category=[Dim(dataset=_DS, field_id="f-bucket", column="z_bucket")],
+            values=[Measure.count(dataset=_DS, field_id="f-cnt", column="recipient_id")],
+            subtitle="t",
+        )
+        cfg = bar.emit().BarChartVisual.ChartConfiguration  # type: ignore[union-attr]: BarChart.emit() always sets BarChartVisual; pyright sees the wider Visual union
+        assert cfg is not None
+        assert cfg.ValueAxis is None
+
 
 class TestSankeyVisual:
     def test_emits_sankey_with_source_target_weight(self):
