@@ -193,6 +193,10 @@ def scenario_to_generators(
             lp, instance, scenarios, anchor_day,
             direction="Outbound", plant_window=plant_window,
         )
+        # None when the (parent_role, rail, Outbound) triple has no
+        # declared LimitSchedule — skip the plant (no cap → no breach).
+        if lb_gen is None:
+            continue
         out.append(lb_gen)
         out.extend(_chain_completion_for_rail(
             lb_gen, instance, anchor_day,  # type: ignore[arg-type]: LimitBreachGenerator has rail-keyed transfer_id; structural narrowing not inferred
@@ -201,6 +205,8 @@ def scenario_to_generators(
         ib_gen = _adapt_inbound_cap_breach(
             icp, instance, scenarios, anchor_day, plant_window,
         )
+        if ib_gen is None:
+            continue
         out.append(ib_gen)
         out.extend(_chain_completion_for_rail(
             ib_gen, instance, anchor_day,  # type: ignore[arg-type]: LimitBreachGenerator has rail-keyed transfer_id; structural narrowing not inferred
@@ -363,10 +369,12 @@ def _adapt_limit_breach(
     plant: LimitBreachPlant, instance: L2Instance, scenarios: ScenarioPlant,
     anchor_day: date, *, direction: str = "Outbound",
     plant_window: DateInterval | None = None,
-) -> ViolationGenerator:
+) -> ViolationGenerator | None:
     """AY.4.f — direct-construct LimitBreachGenerator. Looks up the
     LimitSchedule's cap by (parent_role, rail, direction) from the
-    L2 instance.
+    L2 instance. Returns None when the L2 declares no cap for the
+    triple — no cap means no breach to plant. Surfaced by fuzz seed
+    3450143659.
 
     BC.4b: per-plant `anchor_day` from `days_ago` (see _adapt_drift
     docstring for the offset math)."""
@@ -387,6 +395,8 @@ def _adapt_limit_breach(
     cap = _resolve_limit_schedule_cap(
         instance, parent_role, str(plant.rail_name), direction,
     )
+    if cap is None:
+        return None
     return LimitBreachGenerator(
         account_id=str(plant.account_id),
         account_role=role,
@@ -403,8 +413,9 @@ def _adapt_inbound_cap_breach(
     plant: InboundCapBreachPlant, instance: L2Instance,
     scenarios: ScenarioPlant, anchor_day: date,
     plant_window: DateInterval | None = None,
-) -> ViolationGenerator:
+) -> ViolationGenerator | None:
     """Mirror of `_adapt_limit_breach` with `direction='Inbound'`.
+    Returns None when the L2 declares no cap for the triple.
 
     BC.4b: per-plant `anchor_day` from `days_ago` (see _adapt_drift
     docstring for the offset math)."""
@@ -424,6 +435,8 @@ def _adapt_inbound_cap_breach(
     cap = _resolve_limit_schedule_cap(
         instance, parent_role, str(plant.rail_name), "Inbound",
     )
+    if cap is None:
+        return None
     return LimitBreachGenerator(
         account_id=str(plant.account_id),
         account_role=role,
@@ -913,13 +926,18 @@ def _is_chain_parent(instance: L2Instance, name: str) -> bool:
 def _resolve_limit_schedule_cap(
     instance: L2Instance, parent_role: str, rail_name: str,
     direction: str,
-) -> float:
+) -> float | None:
     """Look up the LimitSchedule.cap for the given (parent_role, rail,
     direction) triple. AY.4.f's direct-construct adapter needs the
     cap to compute the breach overshoot.
 
-    Raises ValueError when no schedule matches — the plant references
-    a (parent_role, rail, direction) the L2 doesn't declare a cap for.
+    Returns None when no schedule matches. LimitSchedule is not
+    required by the L2 grammar — a (parent_role, rail, direction)
+    triple can legitimately have no declared cap. Callers should
+    treat None as "skip this plant" (no schedule → no cap → no
+    breach can be planted on the data). Surfaced by fuzz seed
+    3450143659 (random_l2_yaml emits a Rail without a matching
+    LimitSchedule); previously raised, broke 7 seed-contract tests.
     """
     for sched in instance.limit_schedules:
         if (
@@ -928,12 +946,7 @@ def _resolve_limit_schedule_cap(
             and str(sched.direction) == direction
         ):
             return float(sched.cap)
-    raise ValueError(
-        f"plant adapter: no LimitSchedule declared on the L2 for "
-        f"parent_role={parent_role!r}, rail={rail_name!r}, "
-        f"direction={direction!r}. Check the L2 instance's "
-        f"limit_schedules block."
-    )
+    return None
 
 
 def _resolve_fan_in_expected_count(
