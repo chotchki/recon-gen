@@ -192,9 +192,24 @@ class ServedDashboard:
     options_fetcher: OptionsFetcher | None = None
 
 
+def _query_params_as_multidict(
+    query_params: QueryParams,
+) -> dict[str, list[str]]:
+    """BN.1 — Starlette ``QueryParams`` → the
+    ``Mapping[str, list[str]]`` shape the sql-executor + options
+    fetcher expect (a repeated ``?param_x=a&param_x=b`` keeps both
+    values). Same conversion ``_apply_url_param_overrides`` does
+    locally; lifted to a shared helper now that two callers need it."""
+    by_name: dict[str, list[str]] = {}
+    for key, value in query_params.multi_items():
+        by_name.setdefault(key, []).append(value)
+    return by_name
+
+
 async def _resolve_linked_options(
     specs: tuple[FilterSpec, ...],
     options_fetcher: OptionsFetcher,
+    url_params: Mapping[str, list[str]],
 ) -> tuple[FilterSpec, ...]:
     """Fill in the ``<option>`` list for any dataset-sourced dropdown
     spec (X.2.u.4.b).
@@ -204,6 +219,12 @@ async def _resolve_linked_options(
     server queries the source dataset — one small ``SELECT DISTINCT``
     per such spec. Specs without ``options_dataset`` (static enums,
     category filters, numeric ranges) pass through unchanged.
+
+    BN.1 (2026-05-29) — ``url_params`` threads the form's current
+    state into the picker source SQL so cascading dropdowns narrow
+    (Role pick → Account narrows to that role's accounts). Pre-BN.1
+    fetcher saw ``{}``, so the picker source always ran with
+    dataset-parameter defaults and the cascade silently no-op'd.
     """
     resolved: list[FilterSpec] = []
     for spec in specs:
@@ -212,7 +233,9 @@ async def _resolve_linked_options(
             and spec.options_dataset is not None
             and spec.options_column is not None
         ):
-            opts = await options_fetcher(spec.options_dataset, spec.options_column)
+            opts = await options_fetcher(
+                spec.options_dataset, spec.options_column, url_params,
+            )
             resolved.append(replace(spec, options=opts))
         else:
             resolved.append(spec)
@@ -412,6 +435,7 @@ def make_app(
         if served.options_fetcher is not None:
             filter_specs = await _resolve_linked_options(
                 filter_specs, served.options_fetcher,
+                _query_params_as_multidict(request.query_params),
             )
         # u.4.e.4 — ?param_<name>=<v> in the page URL (a drill that walked
         # an anchor, or a bookmark) pre-selects the matching widget so the
@@ -457,6 +481,7 @@ def make_app(
         if served.options_fetcher is not None:  # X.2.u.4.b — see dashboard_view
             filter_specs = await _resolve_linked_options(
                 filter_specs, served.options_fetcher,
+                _query_params_as_multidict(request.query_params),
             )
         # u.4.e.4 — see dashboard_view; a ?param_<name>=<v> in the URL
         # pre-selects the matching widget so the load fetch is narrowed.

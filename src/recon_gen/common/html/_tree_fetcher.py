@@ -747,7 +747,9 @@ def make_tree_db_fetcher(
 # ``ParameterDropdown`` with a ``LinkedValues`` source) as ``<select>``
 # widgets with an empty ``<option>`` list (``make_filter_specs_for_sheet``);
 # the server calls this before rendering a sheet to fill them.
-OptionsFetcher = Callable[[str, str], Awaitable[tuple[str, ...]]]
+OptionsFetcher = Callable[
+    [str, str, Mapping[str, list[str]]], Awaitable[tuple[str, ...]],
+]
 
 
 # Hard cap on a dataset-sourced dropdown's option count — a ``<select>``
@@ -770,8 +772,23 @@ def make_options_fetcher(
     still resolves. ``<col>`` is the dialect-correct quoted ref
     (``column_name``); ``<limit>`` is ``LIMIT n`` (PG / SQLite) or
     ``FETCH FIRST n ROWS ONLY`` (Oracle).
+
+    BN.1 (2026-05-29) — ``url_params`` threads the form's current
+    state through to ``execute_visual_sql_async`` so cascading
+    parameter dropdowns narrow their options when a parent dropdown
+    fires. Pre-BN.1 the fetcher passed ``{}``, so the Daily Statement
+    Account picker always saw every role's accounts regardless of
+    the Role pick (the v11.24.x BO.1 e2e flake on spec_example, where
+    the cascade contract is "after Role=ExternalCounterparty, Account
+    dropdown contains only ExternalCounterparty accounts"). Reproduced
+    on local App2 / spec_example sqlite: pre-fix 30 options after
+    role pick, post-fix the role-matching subset only.
     """
-    async def fetch(dataset_identifier: str, column: str) -> tuple[str, ...]:
+    async def fetch(
+        dataset_identifier: str,
+        column: str,
+        url_params: Mapping[str, list[str]],
+    ) -> tuple[str, ...]:
         base_sql = get_sql(dataset_identifier)
         col_ref = column_name(column, cfg.dialect)
         limit_clause = (
@@ -784,7 +801,7 @@ def make_options_fetcher(
             f"WHERE {col_ref} IS NOT NULL ORDER BY 1{limit_clause}"
         )
         rows, _columns = await execute_visual_sql_async(
-            pool, options_sql, {}, dialect=cfg.dialect,
+            pool, options_sql, url_params, dialect=cfg.dialect,
             dataset_parameters=get_dataset_params(dataset_identifier),
         )
         return tuple(str(r[0]) for r in rows if r[0] is not None)
