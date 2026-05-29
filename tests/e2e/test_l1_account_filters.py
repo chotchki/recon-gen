@@ -199,12 +199,32 @@ def test_bo_1_daily_statement_picks_reconcile_per_role(
                 f"(advertised: {sorted(role_opts)[:5]}...)"
             )
             continue
+        # BO.1 race fix (v11.25.0 CI): capture the pre-pick Account
+        # options to detect the cascade actually firing. QS's WebSocket
+        # ``_settle_after_param_change`` settles on visual fetches but
+        # the Account-dropdown LinkedValues re-fetch is debounced AND
+        # bound to a control (not a visual) — neither signal QS sends is
+        # the right one. Without polling the dropdown directly, the
+        # test reads stale options every time and the assertion fails
+        # on every role even though the cascade WILL eventually fire.
+        before_account = set(driver.filter_options("Account"))
         driver.pick_filter("Role", [role])
 
         # After picking the role, the Account dropdown must advertise
         # at least the account we expect (the BO.1 contract: every
-        # option has a balance row of the picked role).
+        # option has a balance row of the picked role). Poll until the
+        # option set actually changes — the strongest signal that QS's
+        # cascade fetched the role-narrowed dataset. Capped at 8s so a
+        # genuinely-broken cascade still surfaces as a clear timeout
+        # rather than hanging.
+        import time as _time
+        deadline = _time.monotonic() + 8.0
         account_opts = driver.filter_options("Account")
+        while (
+            set(account_opts) == before_account
+            and _time.monotonic() < deadline
+        ):
+            account_opts = driver.filter_options("Account")
         if account_display not in account_opts:
             failures.append(
                 f"role {role!r}: account {account_display!r} not in "
