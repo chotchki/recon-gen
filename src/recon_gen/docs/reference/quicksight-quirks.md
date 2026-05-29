@@ -700,8 +700,11 @@ absent.
 
 ### 5.0 `KPIConditionalFormatting` shape gotchas
 
-Two distinct constraints, both caught on the BK.2 spike deploy probe
-(2026-05-29):
+Three layered constraints, all caught on the BK.2 spike deploy probe
+(2026-05-29). The boto3 SDK shape names "Expression" + "Color" but
+the model neither documents the expression DSL grammar nor mentions
+the case sensitivity on Color — both can ONLY be discovered by
+deploying.
 
 **(a) Color must be uppercase hex.** `CreateAnalysis` validates the
 `Color` field on `KPIVisual.ConditionalFormatting
@@ -731,8 +734,27 @@ use in `common/tree/formatting.py::_always_true`). The field_id
 reference works fine inside `SortConfiguration` / `FieldSort` blocks
 but not inside conditional-formatting expressions.
 
-**Workaround.** Uppercase the hex constants AND resolve via
-`resolve_column(value_measure.column)` instead of `field_id`.
+**(c) Aggregation function must wrap the column ref.** Second
+emit used the bare column-name form (matching Table cells). QS
+rejects:
+
+> Aggregation Function can not be null in conditional formatting
+> expression for sourceColumn: drift
+
+The expression DSL requires the aggregation function (lowercase) to
+wrap the column reference: `max({drift}) = 0`, `sum({revenue}) > 0`,
+`avg({age}) < 18`. Table cells don't need this because their value
+is unaggregated — the row-grain pattern uses the bare `{column}`
+ref. KPIs aggregate at the field-well, so the conditional-formatting
+expression has to name the aggregation explicitly.
+
+The lowercase function names — `sum` / `max` / `min` / `avg` —
+mirror what QS's UI dropdown produces. (`avg`, not `average`, even
+though the SDK enum is `AVERAGE`.)
+
+**Workaround.** Uppercase the hex constants, resolve the column via
+`resolve_column(value_measure.column)` (NOT `field_id`), AND wrap
+with the aggregation function looked up by `Measure.kind`.
 Pinned by `tests/unit/test_tree.py::TestKPIVisual
 ::test_bk_2_kpi_hex_colors_are_uppercase` and
 `...::test_bk_2_value_zero_indicator_emits_qs_conditional_formatting`

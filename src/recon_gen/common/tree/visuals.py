@@ -195,21 +195,43 @@ def _emit_kpi_zero_indicator(value_measure: "Measure") -> dict[str, Any]:
     green), second matches non-zero (X + red). QS picks the first
     matching expression at render time.
 
-    Expression form (caught by run_tests deploy probe 2026-05-29 on
-    the v11.24.x BK.2 spike): QS rejected the auto-derived field_id
-    reference with "Didn't find field <uuid>" — KPI conditional-
-    formatting expressions reference the COLUMN by name, matching the
-    Table-cell pattern in ``formatting.py::_always_true``. Resolve via
-    ``resolve_column`` and emit ``{<column_name>} = 0`` / ``<> 0``.
+    Expression form (three layered shape gotchas, all caught by
+    run_tests deploy probe 2026-05-29 on the v11.24.x BK.2 spike):
+
+    1. Colors must be UPPERCASE hex (``^#[A-F0-9]{6}$``).
+    2. Expression references the COLUMN name, NOT the auto-derived
+       field_id — QS rejects ``{<uuid>} = 0`` with "Didn't find
+       field <uuid>".
+    3. The KPI's value is aggregated (sum / max / min / average), and
+       QS requires the aggregation function to wrap the column ref
+       in the expression — bare ``{drift} = 0`` fails with
+       "Aggregation Function can not be null in conditional
+       formatting expression for sourceColumn: drift". The lowercase
+       ``sum`` / ``max`` / ``min`` / ``avg`` function names work.
+
+    Aggregation kinds outside ``_NUMERICAL_AGG`` can't drive a zero
+    indicator (count / distinct_count are row counts, never directly
+    zero-vs-broken state); the construction-time guard above blocks
+    those cases before they reach emit.
     """
     column_name = resolve_column(value_measure.column)
+    kind = value_measure.kind
+    if kind not in _KPI_INDICATOR_AGG_FN:
+        raise AssertionError(
+            f"KPIValueZeroIndicator on Measure(kind={kind!r}) — only "
+            f"numerical aggregations sum/max/min/average can drive the "
+            f"indicator (count / distinct_count return row counts). "
+            f"Drop the indicator or change the aggregation."
+        )
+    agg = _KPI_INDICATOR_AGG_FN[kind]
+    aggregated_ref = f"{agg}({{{column_name}}})"
     return {
         "ConditionalFormattingOptions": [
             {
                 "PrimaryValue": {
                     "Icon": {
                         "CustomCondition": {
-                            "Expression": f"{{{column_name}}} = 0",
+                            "Expression": f"{aggregated_ref} = 0",
                             "IconOptions": {"Icon": _KPI_HEALTHY_ICON_QS},
                             "Color": _KPI_HEALTHY_COLOR_HEX,
                             "DisplayConfiguration": {
@@ -223,7 +245,7 @@ def _emit_kpi_zero_indicator(value_measure: "Measure") -> dict[str, Any]:
                 "PrimaryValue": {
                     "Icon": {
                         "CustomCondition": {
-                            "Expression": f"{{{column_name}}} <> 0",
+                            "Expression": f"{aggregated_ref} <> 0",
                             "IconOptions": {"Icon": _KPI_BROKEN_ICON_QS},
                             "Color": _KPI_BROKEN_COLOR_HEX,
                             "DisplayConfiguration": {
@@ -235,6 +257,17 @@ def _emit_kpi_zero_indicator(value_measure: "Measure") -> dict[str, Any]:
             },
         ],
     }
+
+
+# Aggregation function names QS accepts inside the KPI conditional-
+# formatting expression grammar (lowercase). Mirrors
+# ``_NUMERICAL_AGG`` but lowercased for the expression DSL.
+_KPI_INDICATOR_AGG_FN = {
+    "sum": "sum",
+    "max": "max",
+    "min": "min",
+    "average": "avg",
+}
 
 
 @dataclass(frozen=True)

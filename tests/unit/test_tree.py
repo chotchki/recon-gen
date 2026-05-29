@@ -528,17 +528,20 @@ class TestKPIVisual:
             _KPI_HEALTHY_COLOR_HEX,
             _KPI_HEALTHY_ICON_QS,
         )
-        # Expression must reference the COLUMN name, not the field_id.
-        # QS's deploy probe (2026-05-29) rejected field_id refs with
-        # "Didn't find field <uuid>". Same shape Table cells use.
+        # Expression must reference the COLUMN name (not the field_id)
+        # AND wrap it with the lowercase aggregation function name —
+        # QS's deploy probe (2026-05-29) successively rejected:
+        #   field_id refs   → "Didn't find field <uuid>"
+        #   bare column ref → "Aggregation Function can not be null"
+        # So a max() KPI emits ``max({drift}) = 0``.
         healthy = options[0]["PrimaryValue"]["Icon"]["CustomCondition"]
-        assert healthy["Expression"] == "{drift} = 0"
+        assert healthy["Expression"] == "max({drift}) = 0"
         assert healthy["IconOptions"]["Icon"] == _KPI_HEALTHY_ICON_QS
         assert healthy["Color"] == _KPI_HEALTHY_COLOR_HEX
 
         # Broken — non-zero → X + WCAG-AA red.
         broken = options[1]["PrimaryValue"]["Icon"]["CustomCondition"]
-        assert broken["Expression"] == "{drift} <> 0"
+        assert broken["Expression"] == "max({drift}) <> 0"
         assert broken["IconOptions"]["Icon"] == _KPI_BROKEN_ICON_QS
         assert broken["Color"] == _KPI_BROKEN_COLOR_HEX
 
