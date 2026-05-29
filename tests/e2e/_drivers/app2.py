@@ -306,9 +306,21 @@ class App2Driver:
         # Defense in depth: also confirm content actually rendered (a
         # ``.visual-data`` div whose initial-load failed silently would
         # still satisfy the no-skeleton check). Tables / charts / KPIs
-        # show up here.
+        # show up here — AND the BQ.1 empty-state banners count as
+        # "rendered" too: when a filter narrows to zero rows, the
+        # renderer paints ``.<kind>-empty-state`` IN PLACE of the
+        # table/svg/kpi-value, so the original three-selector OR
+        # would time out waiting for content that no longer exists
+        # (regression that broke ``test_l1_dropdown_pickers_inverse_
+        # excludes_anchor[app2-*]`` on the v11.26.0 deploy).
         section.locator(
-            ".visual-data table, .visual-data svg, .visual-data .kpi-value"
+            ".visual-data table, .visual-data svg, .visual-data .kpi-value, "
+            ".visual-data .table-empty-state, "
+            ".visual-data .bar-chart-empty-state, "
+            ".visual-data .line-chart-empty-state, "
+            ".visual-data .sankey-empty-state, "
+            ".visual-data .force-graph-empty-state, "
+            ".visual-data .kpi-empty-state"
         ).first.wait_for(state="visible", timeout=timeout_ms)
         # AA.A.9.race — freshness oracle: the visual is settled iff
         # the content rendered in the DOM was produced by the LATEST
