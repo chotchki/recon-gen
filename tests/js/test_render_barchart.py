@@ -307,3 +307,39 @@ def test_barchart_empty_categories_renders_empty_state_banner() -> None:
     assert empty_count == 1
     assert svg_count == 0
     assert "No data matches" in message
+
+
+def test_barchart_log_scale_renders_log_axis_ticks() -> None:
+    """BQ.5 — when ``data.log_scale`` is set, renderBarChart paints
+    a d3 scaleLog Y axis instead of scaleLinear. Pinning the marker
+    by reading the y-axis tick text — log scale ticks are powers of
+    10 (1, 10, 100...), not the linear-scale's equal-spaced ticks.
+    """
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_into_target(page, {
+            "categories": ["A", "B", "C", "D"],
+            # 1, 10, 100, 1000 — log-scale renders all four bars with
+            # comparable heights; linear-scale would crush A-C.
+            "values": [1, 10, 100, 1000],
+            "log_scale": True,
+        })
+        bars = page.locator("#barchart-target svg rect.barchart-bar").count()
+        # Sample y-axis tick labels. Log-scale .nice() typically yields
+        # tick text like "1", "10", "100", "1k" (or "1,000").
+        y_ticks = cast(list[str], page.evaluate(
+            """() => Array.from(
+                document.querySelectorAll('#barchart-target .barchart-y-axis text'),
+            ).map((t) => t.textContent || '')""",
+        ))
+        browser.close()
+    assert bars == 4
+    # Log scale guarantees ≥1 power-of-10 tick (1, 10, 100, 1000 are
+    # standard scaleLog default ticks).
+    assert any(t in ("1", "10", "100", "1,000") for t in y_ticks if t), (
+        f"Expected log-scale Y axis to render at least one power-of-10 "
+        f"tick label; got {y_ticks}. If log_scale didn't take effect "
+        f"the ticks would be equally-spaced linear values."
+    )

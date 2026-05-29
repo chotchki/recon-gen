@@ -179,6 +179,7 @@ def shape_bar_chart(
     series_column: int | None = None,
     format: str | None = None,
     stacked: bool = False,
+    log_scale: bool = False,
 ) -> dict[str, Any]:
     """Shape SQL rows as a bar chart.
 
@@ -208,6 +209,8 @@ def shape_bar_chart(
             out["format"] = format
         if stacked:
             out["stacked"] = True
+        if log_scale:
+            out["log_scale"] = True
         return out
 
     if series_column is None:

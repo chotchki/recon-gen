@@ -578,6 +578,63 @@ class ChartAxisLabelOptions:
     AxisLabelOptions: list[AxisLabelOptions] | None = None
 
 
+# -- Axis display (BQ.5 — log-scale Y for one-bar-dominance charts) --
+#
+# AWS QS API path (BarChart): BarChartConfiguration.ValueAxis is an
+# AxisDisplayOptions. The "Logarithmic vs Linear scale" knob lives FIVE
+# levels deep:
+#
+#     ValueAxis: AxisDisplayOptions
+#       └── DataOptions: AxisDataOptions
+#             └── NumericAxisOptions: NumericAxisOptions
+#                   └── Scale: AxisScale
+#                         └── Logarithmic: AxisLogarithmicScale (Base float)
+#                                  OR  Linear: AxisLinearScale (Step / StepCount)
+#
+# We only need the Logarithmic shape (default base 10) — Linear is QS's
+# default so we never set it explicitly. The dataclasses still model both
+# variants so the discriminated union shape stays representable for any
+# future Linear-step override.
+
+@dataclass
+class AxisLogarithmicScale:
+    Base: float | None = None  # default 10 per QS schema
+
+
+@dataclass
+class AxisLinearScale:
+    StepCount: float | None = None
+    StepSize: float | None = None
+
+
+@dataclass
+class AxisScale:
+    """Discriminated union — set exactly one variant. QS rejects the
+    payload if both Linear AND Logarithmic are non-null."""
+    Linear: AxisLinearScale | None = None
+    Logarithmic: AxisLogarithmicScale | None = None
+
+
+@dataclass
+class NumericAxisOptions:
+    Scale: AxisScale | None = None
+
+
+@dataclass
+class AxisDataOptions:
+    NumericAxisOptions: NumericAxisOptions | None = None
+
+
+@dataclass
+class AxisDisplayOptions:
+    """The QS AxisDisplayOptions shape — we only populate ``DataOptions``
+    for the log-scale path. The other AxisDisplayOptions sub-fields
+    (``TickLabelOptions`` / ``AxisLineVisibility`` / ``GridLineVisibility``
+    / ``ScrollbarOptions`` / ``AxisOffset``) stay None so QS defaults take
+    over (we want default tick + grid styling on every axis we touch)."""
+    DataOptions: AxisDataOptions | None = None
+
+
 # -- Bar chart --
 
 @dataclass
@@ -606,6 +663,7 @@ class BarChartConfiguration:
     CategoryLabelOptions: ChartAxisLabelOptions | None = None
     ValueLabelOptions: ChartAxisLabelOptions | None = None
     ColorLabelOptions: ChartAxisLabelOptions | None = None
+    ValueAxis: AxisDisplayOptions | None = None  # BQ.5 log-scale wire
 
 
 @dataclass

@@ -238,6 +238,7 @@ class _ChartMeta:
     y_label: str
     value_format: str
     stacked: bool
+    log_scale: bool = False  # BQ.5 — BarChart.log_scale parity for App2
 
 
 @dataclass(frozen=True)
@@ -428,12 +429,14 @@ def _chart_meta(visual: Any) -> _ChartMeta | None:  # typing-smell: ignore[expli
     stacked = getattr(visual, "bars_arrangement", None) in (
         "STACKED", "STACKED_PERCENT",
     )
+    log_scale = bool(getattr(visual, "log_scale", False))
     return _ChartMeta(
         series_column_name=series_name,
         x_label=str(x_label),
         y_label=str(y_label),
         value_format=value_format,
         stacked=stacked,
+        log_scale=log_scale,
     )
 
 
@@ -713,6 +716,7 @@ def make_tree_db_fetcher(
             }
             if kind == "BarChart":
                 chart_kwargs["stacked"] = plan.chart.stacked
+                chart_kwargs["log_scale"] = plan.chart.log_scale
             return shape_for_kind(kind, rows, columns, **chart_kwargs)
         if kind == "KPI":
             # v11.21.0 finding #14 fix (BH.14): pass the visual's

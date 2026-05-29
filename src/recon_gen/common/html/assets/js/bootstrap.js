@@ -742,11 +742,22 @@
           ),
         ) || 0;
     }
-    var y = d3
-      .scaleLinear()
-      .domain([0, maxVal || 1])
-      .nice()
-      .range([innerH, 0]);
+    // BQ.5 — log-scale Y axis for one-bar-dominance presentation.
+    // ``data.log_scale`` flag from shape_bar_chart switches to d3
+    // scaleLog (parity with QS BarChartConfiguration.ValueAxis →
+    // NumericAxisOptions.Scale.Logarithmic). Log scale rejects ≤0 →
+    // domain floor at 1 (the implicit "one observation" floor; QS
+    // does the same on its log-scale axes by default).
+    var y;
+    if (data.log_scale && maxVal > 0) {
+      y = d3.scaleLog().base(10).domain([1, maxVal]).range([innerH, 0]).nice();
+    } else {
+      y = d3
+        .scaleLinear()
+        .domain([0, maxVal || 1])
+        .nice()
+        .range([innerH, 0]);
+    }
 
     // Axes — y formatted via formatKPIValue so currency / number stays
     // consistent; x labels rotate when long/many.

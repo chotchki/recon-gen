@@ -523,11 +523,19 @@ def _populate_transaction_volume(
     # Row 3: full-width vertical clustered bar — period total per
     # rail_name. Reads the same dataset, aggregates across the
     # date axis to give the "where did the volume come from" snapshot.
+    # BQ.5 (cold-read F7): with 60-80 rail_names, one rail dominates
+    # at the period level and the rest read as microscopic bars;
+    # log_scale keeps every rail readable for the executive skim.
     sheet.layout.row(height=_CHART_ROW_SPAN).add_bar_chart(
         width=_FULL,
         visual_id=VisualId("exec-txn-bar-by-type"),
         title="Period Total by Type",
-        subtitle="Total transfer count over the selected period, per rail_name",
+        subtitle=(
+            "Total transfer count over the selected period, per "
+            "rail_name. **Log-scale Y axis** — one rail typically "
+            "dominates an executive period; log scale makes the rest "
+            "still readable at the same glance."
+        ),
         category=[
             ds_txn["rail_name"].dim(field_id="exec-txn-type-dim"),
         ],
@@ -535,7 +543,8 @@ def _populate_transaction_volume(
         orientation="VERTICAL",
         bars_arrangement="CLUSTERED",
         category_label="Transfer Type",
-        value_label="Transactions",
+        value_label="Transactions (log)",
+        log_scale=True,
     )
 
 
@@ -621,13 +630,18 @@ def _populate_money_moved(
 
     # Row 3: full-width vertical clustered bar — period total per
     # rail_name.
+    # BQ.5 (cold-read F7): with 60-80 rail_names, one rail's gross
+    # dollars typically swamp the rest — log_scale lets the long
+    # tail stay readable for the executive skim.
     sheet.layout.row(height=_CHART_ROW_SPAN).add_bar_chart(
         width=_FULL,
         visual_id=VisualId("exec-money-bar-by-type"),
         title="Period Total Gross Dollars by Type",
         subtitle=(
             "Total gross dollar volume over the period, per "
-            "rail_name"
+            "rail_name. **Log-scale Y axis** — one rail typically "
+            "dominates an executive period; log scale makes the rest "
+            "still readable at the same glance."
         ),
         category=[
             ds_txn["rail_name"].dim(field_id="exec-money-type-dim"),
@@ -638,7 +652,8 @@ def _populate_money_moved(
         orientation="VERTICAL",
         bars_arrangement="CLUSTERED",
         category_label="Transfer Type",
-        value_label="Gross Dollars Moved",
+        value_label="Gross Dollars Moved (log)",
+        log_scale=True,
     )
 
 
