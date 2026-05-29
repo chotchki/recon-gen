@@ -343,3 +343,37 @@ def test_barchart_log_scale_renders_log_axis_ticks() -> None:
         f"tick label; got {y_ticks}. If log_scale didn't take effect "
         f"the ticks would be equally-spaced linear values."
     )
+
+
+def test_barchart_log_scale_y_axis_labels_only_decades() -> None:
+    """C5 (cold-read v11.26.1) — log-scale Y axis must label decades
+    only (1, 10, 100, ...) not every minor tick (1, 2, 3, ... 9, 10,
+    20, ...). Pre-C5 d3's bare ``.ticks(5)`` on a scaleLog produced
+    overprinted labels at every position; the QS Executives log chart
+    only shows decades and is readable. The fix overrides tickValues
+    to powers of 10 only."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_into_target(page, {
+            "categories": ["A", "B", "C", "D"],
+            "values": [1, 10, 100, 1000],
+            "log_scale": True,
+        })
+        y_ticks = cast(list[str], page.evaluate(
+            """() => Array.from(
+                document.querySelectorAll('#barchart-target .barchart-y-axis text'),
+            ).map((t) => t.textContent || '').filter((t) => t)""",
+        ))
+        browser.close()
+    # All labeled ticks should be powers of 10 (1 / 10 / 100 / 1,000).
+    # Pre-fix the list would include intermediate values like "2", "5",
+    # "20", "50" overlapping the decade labels.
+    expected = {"1", "10", "100", "1,000"}
+    unexpected = [t for t in y_ticks if t not in expected]
+    assert not unexpected, (
+        f"Log-scale Y axis labeled non-decade values {unexpected!r}; "
+        f"only powers of 10 should be labeled. Pre-C5 d3 .ticks(5) on "
+        f"a scaleLog produced this overlap."
+    )

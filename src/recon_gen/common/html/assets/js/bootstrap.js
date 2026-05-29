@@ -774,14 +774,27 @@
         .attr("dx", "-0.4em")
         .attr("dy", "0.3em");
     }
+    // C5 (cold-read v11.26.1) — log-scale ticks default to ALL
+    // positions (1, 2, 3, ... 9, 10, 20, ...) which overprints into an
+    // unreadable blob on a typical chart height. d3's scaleLog with a
+    // bare ``.ticks(5)`` doesn't filter to major decades. Override
+    // ``tickValues`` to powers of 10 only — matches the QS Executives
+    // log chart's behavior (decade ticks only).
+    var yAxis = d3.axisLeft(y).tickFormat((v) => formatKPIValue(v, format));
+    var decades;
+    var p;
+    if (data.log_scale && maxVal > 0) {
+      decades = [];
+      for (p = 0; p <= Math.ceil(Math.log10(maxVal)); p++) {
+        decades.push(10 ** p);
+      }
+      yAxis.tickValues(decades);
+    } else {
+      yAxis.ticks(5);
+    }
     g.append("g")
       .attr("class", "barchart-y-axis")
-      .call(
-        d3
-          .axisLeft(y)
-          .ticks(5)
-          .tickFormat((v) => formatKPIValue(v, format)),
-      )
+      .call(yAxis)
       .selectAll("text")
       .attr("class", "text-xs fill-primary-fg");
 
