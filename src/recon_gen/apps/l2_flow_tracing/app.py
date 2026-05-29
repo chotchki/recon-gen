@@ -680,7 +680,16 @@ def _populate_rails_sheet(
         subtitle=(
             "Count of postings rows matching all filters above. With "
             "no narrowing this is every leg in the visible date range "
-            "across every status; pick a Status to scope to Posted-only."
+            "across every status; pick a Status to scope to Posted-only. "
+            # C9 (cold-read v11.26.1) — this count is windowed (current
+            # date range only); the Executives KPIs + App Info matview
+            # row counts are all-history. Cross-reference so the cross-
+            # app delta reads as expected scope, not as disagreement.
+            "**Scope note:** this is the **windowed** count — the "
+            "Executives 'Total Transactions' KPI + App Info "
+            "transactions matview show all-history rows. The gap "
+            "between this number and either of those = legs outside "
+            "the picker's date window."
         ),
         values=[ds_postings["id"].count()],
     )

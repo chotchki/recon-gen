@@ -699,7 +699,16 @@ def _populate_drift_sheet(
             "window\" rather than \"worst single account-day row\". "
             "The ✓/✗ glyph next to the number is the accessible state "
             "signal — green ✓ when the largest parent drift in the "
-            "window is $0, red ✗ otherwise."
+            "window is $0, red ✗ otherwise. "
+            # C11 (cold-read v11.26.1) — sasquatch_pr's bundled demo
+            # plants a persistent ~$2.8M ledger drift on the DDAControl
+            # parent to exercise this surface. Read as expected on
+            # demo deploys, not as a conservation failure.
+            "**Closed-loop pool note:** demo pools accumulate "
+            "pre-settlement value at the parent layer by design "
+            "(the SPEC's L1 example); a persistent non-zero parent "
+            "drift on a known pool account is **expected for the "
+            "demo seed**, not a real ledger gap."
         ),
         values=[ds_ledger_drift["abs_drift"].max(currency=True)],
         value_zero_indicator=KPIValueZeroIndicator(),
@@ -1388,7 +1397,16 @@ def _populate_unbundled_aging_sheet(
         title="Stuck Unbundled",
         subtitle=(
             "Count of Posted transactions whose `bundle_id` is still "
-            "NULL past their rail's `max_unbundled_age` cap. Healthy = 0."
+            "NULL past their rail's `max_unbundled_age` cap. Healthy = 0. "
+            # C19 (cold-read v11.26.1) — bundled demo seeds plant
+            # stuck-unbundled rows to exercise this surface, so a
+            # non-zero count here on a demo deploy is **expected**, not
+            # a conservation issue. The dollar exposure beside it is
+            # tiny by design; real production deploys without planted
+            # demos should read 0 here.
+            "**Demo-seed note:** the bundled demo plants stuck-"
+            "unbundled rows so this view has something to show — "
+            "expect a non-zero count on demo deploys."
         ),
         values=[ds["transaction_id"].count()],
     )

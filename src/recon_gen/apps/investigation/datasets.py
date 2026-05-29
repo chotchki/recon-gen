@@ -71,9 +71,17 @@ from recon_gen.common.sql.money import cents_to_dollars_sql
 # `inv_money_trail_edges` is a recursive-CTE walk over edge metadata
 # with no natural date dimension (each row is a hop, not a posting),
 # so it gets None.
+# C12 (cold-read v11.26.1) — ``inv_money_trail_edges`` had ``None`` for
+# its freshness date column on the rationale "each row is a hop, not a
+# posting." But every edge IS keyed to a target-leg posting timestamp
+# (``posted_at``), and the App Info freshness oracle reads as broken
+# when this matview's latest-date is blank (cold-read flagged the gap
+# as "the panel doing its job — surfacing what looks like stale data").
+# Map ``posted_at`` so MAX(posted_at) shows the freshness signal: how
+# recently was a leg recorded that this edge walk traverses.
 _INV_MATVIEW_BARE_SPECS: list[tuple[str, str | None]] = [
     ("inv_pair_rolling_anomalies", "window_end"),
-    ("inv_money_trail_edges", None),
+    ("inv_money_trail_edges", "posted_at"),
 ]
 
 
