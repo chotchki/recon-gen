@@ -112,11 +112,18 @@ class TestKPIWrap:
         # SUM(1) makes the intent explicit and stays symmetric with
         # the QS-side NumericalMeasureField(SUM) over a literal-1
         # CalcField).
+        #
+        # C2 (cold-read v11.26.1) — wrapped in COALESCE(..., 0) so
+        # zero-row subqueries return 0 not NULL. Without this, shape_kpi
+        # flags ``value is None`` as empty-state and paints the "No
+        # data matches the current filters" banner over what should
+        # render as a literal "0" (Limit Breach's "Breaches in Window"
+        # KPI on a healthy day was the v11.26.1 cold-read C2 example).
         kpi = KPI(values=[
             _StubMeasure(kind="count", column=_StubColumn("account_id")),
         ])
         wrapped = wrap_for_visual(_BASE, kpi)
-        assert "SUM(1)" in wrapped
+        assert "COALESCE(SUM(1), 0)" in wrapped
         assert 'COUNT("account_id")' not in wrapped
 
     def test_distinct_count_quotes_column_ref(self):
@@ -241,7 +248,9 @@ class TestCurrencyMeasureDividesByHundred:
             ),
         ])
         wrapped = wrap_for_visual(_BASE, kpi, contract=_CENTS_CONTRACT)
-        assert "SUM(1)" in wrapped
+        # C2 — kind="count" now wraps in COALESCE(..., 0); the row-count
+        # semantic + the divide-suppression both still hold.
+        assert "COALESCE(SUM(1), 0)" in wrapped
         assert "/ 100.0" not in wrapped
 
     def test_currency_max_divides(self):

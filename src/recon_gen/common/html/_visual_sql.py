@@ -103,7 +103,17 @@ def _measure_sql(measure: Any, *, contract: Any) -> str:
         # quirk. The Measure's column ref is intentionally ignored
         # for row-count semantics (any non-null column would give the
         # same number; SUM(1) makes the intent explicit).
-        return "SUM(1)"
+        #
+        # C2 (cold-read v11.26.1) — ``SUM(1)`` over a subquery returning
+        # zero rows is NULL, not 0. ``shape_kpi``'s BQ.2 empty-state
+        # sentinel then paints "No data matches the current filters"
+        # instead of the literal "0" the COUNT semantic expects.
+        # Limit Breach's "Breaches in Window" subtitle literally calls
+        # "Zero = no rule violations in the window — the unambiguous
+        # healthy state"; the COALESCE makes the rendered value match.
+        # The fix is COUNT-specific: SUM/MAX/MIN over empty input
+        # legitimately read as "no data" (banner is correct there).
+        return "COALESCE(SUM(1), 0)"
     quoted = _quote_col(column)
     fn = _AGG_SQL_FN.get(kind)
     is_currency = bool(getattr(measure, "currency", False))
