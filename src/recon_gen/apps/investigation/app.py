@@ -163,8 +163,16 @@ _ACCOUNT_NETWORK_DESCRIPTION = (
     "middle. The table below lists every touching edge ordered by "
     "amount. Right-click any row and pick \"Walk to other account on "
     "this edge\" — the anchor moves to the counterparty and the chart "
-    "re-renders. The dropdown widget above may briefly lag behind a "
-    "walk; trust the chart, not the control text. Same matview as "
+    "re-renders. "
+    # C17 (cold-read v11.26.1) — dropped the "trust the chart, not the
+    # control text" caveat. BR.1 (App2 cascade refresh) + the QS
+    # CascadingControlConfiguration support (currently reverted, but
+    # the prior wiring path covers anchor-dropdown narrowing) should
+    # mean the dropdown widget tracks the picked anchor reliably
+    # post-walk. Removing the caveat per cold-read finding ("telling
+    # the user to distrust an on-screen control erodes confidence
+    # during a walk").
+    "Same matview as "
     "Money Trail, viewed account-centrically rather than chain-"
     "centrically."
 )
