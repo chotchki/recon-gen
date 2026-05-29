@@ -133,6 +133,35 @@ The phase closes when `test_browser_full_create_l2_structural_equality` flips fr
 - [ ] BF.10 - **Composite-scalar fields: field-level validation + inline help** (per BF.0 L2 user comment 2026-05-25). `amount_typical_range` / `firings_typical_per_period` / `max_pending_age` / `max_unbundled_age` (Duration) stay as `kind="text"` (composite scalar with optional discriminator — out of L2's textarea carve-out scope). User signed off on keeping these as text inputs IF we add field-level format validation + a more explicit inline help/example. Today the spec.helper carries a verbose example but the validator only fires on POST. Add: (a) a small example chip next to the input (e.g. `e.g. 50, 500` for amount_typical_range), (b) optional inline JS that runs the same regex the validator uses + surfaces a per-field warning before submit. Server-side validator is the truth source either way.
 - [ ] BF.6 - **Verify + close.** Full unit suite (~2800 tests including new picker unit-tests on `_FIELD_SPECS_BY_KIND` shape) + 4/4 studio browser dogfood tests (including the newly-active structural-equality test) + HTTP dogfood 14 variants. Update `feedback_browser_drivers_user_facing_locators` if any new picker surface needs a locator hook. Tick BF.0-5 + BF.7-10, archive Phase BF to PLAN_ARCHIVE.md.
 
+## Phase BR - v11.26.1 cold-read sweep + App2 cascade refresh
+
+Cold-read at `docs/audits/v11_26_1_feedback.md`. Net-positive vs prior baseline: no blockers; top defects (C2 Limit Breach "No data", C5 log-axis label overlap, C8/C18 Account-vs-day-rows mismatch) all addressed in the sweep below. Autonomous run 2026-05-29 — user asleep, push authorized post-v11.26.3.
+
+- [x] BR.1 — **App2 cascade refresh via per-dropdown options endpoint** (commit 94d6428e). Mirror of the BO.1 QS CascadingControlConfiguration fix on the App2 side: per-dropdown ``/dropdown-options/<dataset>/<col>`` endpoint, HTMX ``hx-get`` + ``hx-trigger="change from:[name='param_<source>'] delay:300ms"`` on cascading ``<select>``s, JS ``htmx:afterSwap`` re-syncs Tom Select against the new option list. Five-piece fix; pinned by 2 render tests.
+- [x] BR.2 — **C2** Limit Breach "Breaches in Window" KPI rendered "No data" on a healthy day instead of "0" (commit 954d9c39). App2's count branch wrapped in ``COALESCE(SUM(1), 0)`` so zero-row inputs return 0, not NULL. shape_kpi empty-state then doesn't fire over a legit zero count.
+- [x] BR.3 — **C5** App2 log-scale Y-axis labeled every minor tick (1, 2, 3, ... 9, 10, 20, ...) — overprinted blob (commit 91cfb0bd). Override ``tickValues`` to powers of 10 only (decade-only ticks). Matches QS Executives log chart's behavior.
+- [x] BR.4 — **C8/C18** L1 Drift "Leaf/Parent Accounts in Drift" + Overdraft "Accounts in Overdraft" titles relabeled to "Account-Days in" — matches the matview's actual grain (one row per account-day, not distinct accounts) (commit 912d24b0). Closes C16 (drift cross-reference) as a byproduct.
+- [x] BR.5 — **C20** Executives Getting Started copy "the line chart is the trend; the bar chart is the period total" — sheet actually renders a stacked bar + clustered bar (commit 912d24b0). Copy synced to rendered visuals.
+- [x] BR.6 — **C21** App2 non-currency KPI shape rendered ``36388.424`` (3 decimals from SQLite AVG) — pass ``maximumFractionDigits: 0`` so counts read as integer (commit 912d24b0).
+- [x] BR.7 — **C15** Today's Exceptions "Open Exceptions" KPI subtitle adds "Scoped to TODAY ONLY" + 16-30× gap explainer with App Info matview row count (commit 912d24b0).
+- [x] BR.8 — **C9** L2FT Rails "Legs in Window" subtitle adds explicit scope cross-reference with Executives all-history KPIs + App Info matview row count (commit 45e243a6).
+- [x] BR.9 — **C11** L1 Drift "Largest Parent Drift" subtitle adds "Closed-loop pool note" explaining sasquatch_pr's bundled $2.8M plant as expected for the demo seed (commit 45e243a6).
+- [x] BR.10 — **C12** Investigation App Info ``inv_money_trail_edges`` now maps ``posted_at`` for the freshness probe (was ``None``) (commit 45e243a6). MAX(posted_at) shows freshness signal.
+- [x] BR.11 — **C19** L1 Pending Aging "Stuck Unbundled" subtitle adds "Demo-seed note" explaining the bundled demo plants the non-zero count (commit 45e243a6).
+- [x] BR.12 — **C6/C7** Today's Exceptions copy + WHERE narrowing: copy updated from "5 L1 invariants" to "10" (balance + chain/cardinality + time taxonomy); dataset SQL filters degenerate rows where both magnitude columns are NULL/zero (commit 49231910).
+- [x] BR.13 — **C17** Account Network "trust the chart, not the control text" caveat dropped (commit 839abcb8). BR.1's App2 cascade refresh covers the lag the caveat was hedging against.
+- [x] BR.14 — **C14** Supersession KPI titles clarified — "Logical Keys (Transactions) with Supersession" vs "Supersession Rows with No Reason" — explicit "keys vs rows" unit chips so the side-by-side counts read as different populations, not a contradiction. Subtitles cross-reference each other (commit d7c75e9d).
+- [x] BR.15 — **C22 (legend half)** App2 bar-chart legend truncates long rail names (MerchantSettlementCycle…) at 18 chars with ellipsis + native ``<title>`` tooltip (commit d7c75e9d).
+
+**Reverted / skipped:**
+
+- **BO.1 QS CascadingControlConfiguration** (commit 2367227a) — reverted in 3a6c688e. The emitted JSON was correct, but QS rendered the configured Account dropdown permanently empty regardless of source state. Returned to the MappedDataSetParameters-only bridge (cascade narrows on the visual side but the dropdown widget shows the full universe). Test polling fix retained. **Re-spike needed** — likely the source dataset's ``account_role`` column needs to be in the dataset's PROJECTION not just the WHERE.
+- **C3** Transfer Templates Multi-Leg Flow Sankey blank — cannot reproduce on spec_example (29 valid edges); needs operator data.
+- **C4** Money Trail hop table missing columns — current source code has all 7 columns the cold-read said were missing; likely a viewport / older-deploy artifact.
+- **C10** Drift vs Drift-Timelines twin figures — addressed via C8/C18 title relabel + existing sibling subtitles.
+- **C13** App Info freshness mixed signals — confirm-on-aws (sqlite-dev-build vs real refresh cadence).
+- **C22 verification items** — confirm-on-aws (per-recipient sender count, Open vs Active filter, Account Coverage page gap).
+
 ## Phase BK - v11.22.1 cold-read second-pass + deferrals
 
 Cold-read at `docs/audits/v11_22_1_feedback.md`. Closed in v11.22.3 small-fix batch (2026-05-26): #1 Daily Statement signed-labels, #10 Drift Timelines parent-vs-leaf scope explainer, #14 Overdraft scope label, #17 Open/Active KPI disambiguation, #18 Avg-Daily-Volume integer format (new `Measure.decimals=` kwarg), #19 strip internal-phase-ref language from exec subtitles. Remaining items below survived the small-fix pass — they need design work, fresh data, or operator clarification.
