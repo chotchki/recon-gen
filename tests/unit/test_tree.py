@@ -556,6 +556,35 @@ class TestKPIVisual:
                 value_zero_indicator=KPIValueZeroIndicator(),
             )
 
+    def test_bk_2_kpi_hex_colors_are_uppercase(self):
+        """v11.24.x BK.2 spike deploy probe (2026-05-29) caught QS's
+        ``CreateAnalysis`` validation rejecting lowercase hex on the
+        ``KPIConditionalFormatting.PrimaryValue.Icon.CustomCondition``
+        Color field:
+
+            Member must satisfy regular expression pattern:
+            ^#[A-F0-9]{6}$
+
+        Pin the indicator's color constants to the uppercase form so a
+        future re-theme that types ``#15803d`` again fails at unit time
+        rather than at the deploy gate."""
+        import re
+        from recon_gen.common.tree.visuals import (
+            _KPI_BROKEN_COLOR_HEX,
+            _KPI_HEALTHY_COLOR_HEX,
+        )
+        pattern = re.compile(r"^#[A-F0-9]{6}$")
+        assert pattern.match(_KPI_HEALTHY_COLOR_HEX), (
+            f"Healthy color {_KPI_HEALTHY_COLOR_HEX!r} must match QS's "
+            f"uppercase-hex constraint ^#[A-F0-9]{{6}}$ — lowercase "
+            f"hex fails CreateAnalysis."
+        )
+        assert pattern.match(_KPI_BROKEN_COLOR_HEX), (
+            f"Broken color {_KPI_BROKEN_COLOR_HEX!r} must match QS's "
+            f"uppercase-hex constraint ^#[A-F0-9]{{6}}$ — lowercase "
+            f"hex fails CreateAnalysis."
+        )
+
     def test_bk_2_value_zero_indicator_off_by_default_emits_no_cf(self):
         """BK.2 — KPIs without ``value_zero_indicator`` (the default)
         must NOT emit a ``ConditionalFormatting`` block. The QS

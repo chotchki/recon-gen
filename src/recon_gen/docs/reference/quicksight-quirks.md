@@ -698,6 +698,36 @@ absent.
 
 ## 5. Backend / refresh quirks
 
+### 5.0 `KPIConditionalFormatting.CustomCondition.Color` rejects lowercase hex
+
+**Observed.** `CreateAnalysis` validates the `Color` field on
+`KPIVisual.ConditionalFormatting.ConditionalFormattingOptions[*]
+.PrimaryValue.Icon.CustomCondition.Color` against the regex
+`^#[A-F0-9]{6}$`. Lowercase hex (`#15803d`) fails with:
+
+> 2 validation errors detected: Value '#15803d' at
+> 'definition.sheets.10.member.visuals.5.member.kPIVisual
+> .conditionalFormatting.conditionalFormattingOptions.1.member
+> .primaryValue.icon.customCondition.color' failed to satisfy
+> constraint: Member must satisfy regular expression pattern:
+> ^#[A-F0-9]{6}$
+
+Same field shape on Table cells (`CellAccentText` / `CellAccentMenu`)
+appears to accept lowercase hex — the validation is field-path-
+specific to KPI conditional formatting. Worth re-probing the table
+side to confirm.
+
+**Workaround.** Emit uppercase hex on the KPI indicator constants.
+Pinned by `tests/unit/test_tree.py::TestKPIVisual
+::test_bk_2_kpi_hex_colors_are_uppercase` so a future re-theme can't
+silently slip lowercase past the unit gate.
+
+**Suggested fix.** AWS QS team — normalize hex case in the validator
+or document the constraint inline (the SDK shape doesn't mention it;
+SAM templates accept either case, KPI fields don't).
+
+---
+
 ### 5.1 Embed URL must be signed by the dashboard's region (not
 the QuickSight identity region)
 

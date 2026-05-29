@@ -180,8 +180,12 @@ def _require_non_blank_subtitle(visual: object) -> None:
 # import that would invert the layering.
 _KPI_HEALTHY_ICON_QS = "CHECKMARK"
 _KPI_BROKEN_ICON_QS = "X"
-_KPI_HEALTHY_COLOR_HEX = "#15803d"  # tailwind green-700
-_KPI_BROKEN_COLOR_HEX = "#b91c1c"   # tailwind red-700
+# QS validation rejects lowercase hex with regex
+# ``^#[A-F0-9]{6}$`` (caught via run_tests up_to=deploy probe
+# 2026-05-29 on the v11.24.x BK.2 spike — lowercase ``#15803d`` /
+# ``#b91c1c`` failed `CreateAnalysis`). Uppercase form.
+_KPI_HEALTHY_COLOR_HEX = "#15803D"  # tailwind green-700
+_KPI_BROKEN_COLOR_HEX = "#B91C1C"   # tailwind red-700
 
 
 def _emit_kpi_zero_indicator(value_measure: "Measure") -> dict[str, Any]:
