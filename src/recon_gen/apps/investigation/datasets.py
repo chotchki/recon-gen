@@ -284,6 +284,9 @@ def _anetwork_accounts_sql(prefix: str) -> str:
     # Account Network Sankey paints empty on first load. Group by the
     # display string + sum hop_amount across rows referencing that
     # account, then order outer-most.
+    #
+    # Oracle quirk: ``AS`` on a derived-table alias raises ORA-00907.
+    # The bare ``) ranked`` form is portable.
     return (
         f"SELECT source_display\n"
         f"FROM (\n"
@@ -294,7 +297,7 @@ def _anetwork_accounts_sql(prefix: str) -> str:
         f"    FROM {prefix}_inv_money_trail_edges\n"
         f"    GROUP BY source_account_name || ' (' || source_account_id || ')'\n"
         f"    ORDER BY SUM(hop_amount) DESC\n"
-        f") AS ranked\n"
+        f") ranked\n"
     )
 
 
@@ -680,6 +683,10 @@ def build_money_trail_roots_dataset(cfg: Config) -> DataSet:
     money movement first").
     """
     p = cfg.db_table_prefix
+    # Oracle rejects ``AS`` on derived-table aliases (ORA-00907 missing
+    # right parenthesis — the parser expects ``AS <col>`` inside the
+    # subquery's projection then trips on the alias). Bare alias is
+    # portable across PG / Oracle / SQLite.
     sql = (
         f"SELECT root_transfer_id\n"
         f"FROM (\n"
@@ -687,7 +694,7 @@ def build_money_trail_roots_dataset(cfg: Config) -> DataSet:
         f"    FROM {p}_inv_money_trail_edges\n"
         f"    GROUP BY root_transfer_id\n"
         f"    ORDER BY SUM(hop_amount) DESC\n"
-        f") AS ranked"
+        f") ranked"
     )
     return build_dataset(
         cfg,
