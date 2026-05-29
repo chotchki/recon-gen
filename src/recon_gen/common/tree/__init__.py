@@ -169,6 +169,7 @@ from recon_gen.common.tree.text_boxes import TextBox
 from recon_gen.common.tree.visuals import (
     KPI,
     BarChart,
+    KPIValueZeroIndicator,
     LineChart,
     Sankey,
     Table,
@@ -192,6 +193,8 @@ __all__ = [
     "ParameterDeclLike", "StringParam", "IntegerParam", "DateTimeParam",
     # Visuals
     "VisualLike", "KPI", "Table", "BarChart", "LineChart", "Sankey",
+    # KPI conditional formatting (BK.2)
+    "KPIValueZeroIndicator",
     # Text boxes (typed wrapper for landing-page rich text)
     "TextBox",
     # Layout

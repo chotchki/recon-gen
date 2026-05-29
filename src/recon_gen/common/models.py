@@ -730,6 +730,12 @@ class KPIVisual:
     Title: VisualTitleLabelOptions | None = None
     Subtitle: VisualSubtitleLabelOptions | None = None
     ChartConfiguration: KPIConfiguration | None = None
+    # BK.2 — KPIConditionalFormatting free-form dict (QS's KPI
+    # conditional-formatting shape is a typed nested-dict of options;
+    # the tree's KPIValueZeroIndicator emits the canonical pair-of-
+    # CHECKMARK/X options). Same pass-through pattern Table's
+    # ConditionalFormatting follows.
+    ConditionalFormatting: dict[str, Any] | None = None
 
 
 # -- Table --

@@ -136,6 +136,7 @@ from recon_gen.common.tree import (
     DrillResetSentinel,
     DrillStaticDateTime,
     FilterGroup,
+    KPIValueZeroIndicator,
     LinkedValues,
     Sheet,
     StaticValues,
@@ -1685,9 +1686,12 @@ def _populate_daily_statement_sheet(
             "Drift sheet's leaf/parent drift (stored vs cumulative "
             "computed; whole-history rather than per-day) and from "
             "parent aggregation drift (parent stored vs Σ child "
-            "stored)."
+            "stored). The ✓/✗ glyph next to the number is the "
+            "accessible state signal — green ✓ when drift = $0 "
+            "(healthy reconciliation), red ✗ otherwise."
         ),
         values=[ds_summary["drift"].max(currency=True)],
+        value_zero_indicator=KPIValueZeroIndicator(),
     )
 
     # Row 2: detail table — every Money record posted that day for the

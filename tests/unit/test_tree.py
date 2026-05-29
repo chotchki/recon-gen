@@ -494,6 +494,83 @@ class TestKPIVisual:
         kpi = KPI(visual_id=VisualId("v-kpi"), title="Test", subtitle="t")
         assert isinstance(kpi, VisualLike)
 
+    def test_bk_2_value_zero_indicator_emits_qs_conditional_formatting(self):
+        """BK.2 — single-value KPI with KPIValueZeroIndicator emits a
+        ``KPIVisual.ConditionalFormatting`` block carrying TWO
+        ConditionalFormattingOptions entries: CHECKMARK + green for
+        ``{field_id} = 0``, X + red for ``{field_id} <> 0``. Pinning the
+        icon-first ordering + the icon enum values + the WCAG-AA hex
+        colors against a future refactor that re-orders or re-themes
+        the indicator and silently swaps the load-bearing icon channel
+        for colorblind users."""
+        from recon_gen.common.tree import KPIValueZeroIndicator
+        from recon_gen.apps.l1_dashboard.app import _DRIFT_NAME
+        kpi = KPI(
+            visual_id=VisualId("v-kpi"),
+            title=_DRIFT_NAME,
+            subtitle="Healthy = $0",
+            values=[Measure.max(_DS_FOO, "drift", field_id="f-drift")],
+            value_zero_indicator=KPIValueZeroIndicator(),
+        )
+        emitted = kpi.emit()
+        assert emitted.KPIVisual is not None
+        cf = emitted.KPIVisual.ConditionalFormatting
+        assert cf is not None
+        options = cf["ConditionalFormattingOptions"]
+        assert len(options) == 2
+
+        # Healthy first — zero → CHECKMARK + WCAG-AA green. Constants
+        # imported from production so a future re-theme of the indicator
+        # fires this test loudly instead of asserting the stale colour.
+        from recon_gen.common.tree.visuals import (
+            _KPI_BROKEN_COLOR_HEX,
+            _KPI_BROKEN_ICON_QS,
+            _KPI_HEALTHY_COLOR_HEX,
+            _KPI_HEALTHY_ICON_QS,
+        )
+        healthy = options[0]["PrimaryValue"]["Icon"]["CustomCondition"]
+        assert healthy["Expression"] == "{f-drift} = 0"
+        assert healthy["IconOptions"]["Icon"] == _KPI_HEALTHY_ICON_QS
+        assert healthy["Color"] == _KPI_HEALTHY_COLOR_HEX
+
+        # Broken — non-zero → X + WCAG-AA red.
+        broken = options[1]["PrimaryValue"]["Icon"]["CustomCondition"]
+        assert broken["Expression"] == "{f-drift} <> 0"
+        assert broken["IconOptions"]["Icon"] == _KPI_BROKEN_ICON_QS
+        assert broken["Color"] == _KPI_BROKEN_COLOR_HEX
+
+    def test_bk_2_value_zero_indicator_rejects_multi_value_kpis(self):
+        """BK.2 — the binary zero indicator is only meaningful for a
+        single-value KPI. Multi-value KPIs would need per-value icons;
+        that's not supported, fail loud at construction."""
+        from recon_gen.common.tree import KPIValueZeroIndicator
+        with pytest.raises(ValueError, match="single-value KPIs"):
+            KPI(
+                visual_id=VisualId("v-kpi"),
+                title="Multi-value test",  # typing-smell: ignore[no-inline-production-constants]: arbitrary test label; the KPI never emits — construction raises
+                subtitle="Healthy = $0",
+                values=[
+                    Measure.max(_DS_FOO, "drift_a", field_id="f-a"),
+                    Measure.max(_DS_FOO, "drift_b", field_id="f-b"),
+                ],
+                value_zero_indicator=KPIValueZeroIndicator(),
+            )
+
+    def test_bk_2_value_zero_indicator_off_by_default_emits_no_cf(self):
+        """BK.2 — KPIs without ``value_zero_indicator`` (the default)
+        must NOT emit a ``ConditionalFormatting`` block. The QS
+        ``KPIVisual`` field is optional; emitting an empty / unintended
+        CF block would change the visual's QS shape silently."""
+        kpi = KPI(
+            visual_id=VisualId("v-kpi"),
+            title="Total",
+            subtitle="Sum of amounts",
+            values=[Measure.sum(_DS_FOO, "amount", field_id="f-val")],
+        )
+        emitted = kpi.emit()
+        assert emitted.KPIVisual is not None
+        assert emitted.KPIVisual.ConditionalFormatting is None
+
 
 class TestTableVisual:
     def test_emits_table_with_group_by_and_values(self):

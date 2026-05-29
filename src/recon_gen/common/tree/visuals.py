@@ -173,12 +173,109 @@ def _require_non_blank_subtitle(visual: object) -> None:
         )
 
 
+# BK.2 — QS-side icon enum + WCAG-AA hex colors for the KPI zero
+# indicator. The App2-side glyph (``"✓"`` / ``"✗"``) and Tailwind
+# color class (``"success"`` / ``"danger"``) live in
+# ``common/html/_data_shape.py::shape_kpi`` to avoid a html→tree
+# import that would invert the layering.
+_KPI_HEALTHY_ICON_QS = "CHECKMARK"
+_KPI_BROKEN_ICON_QS = "X"
+_KPI_HEALTHY_COLOR_HEX = "#15803d"  # tailwind green-700
+_KPI_BROKEN_COLOR_HEX = "#b91c1c"   # tailwind red-700
+
+
+def _emit_kpi_zero_indicator(value_measure: "Measure") -> dict[str, Any]:
+    """BK.2 — render the KPIValueZeroIndicator pair as a QS
+    ``KPIConditionalFormatting`` block. Two ``ConditionalFormattingOption``
+    entries on ``PrimaryValue.Icon`` — first matches zero (CHECKMARK +
+    green), second matches non-zero (X + red). QS picks the first
+    matching expression at render time.
+
+    Expression form follows the QS-confirmed shape: ``{<field_id>} =
+    0`` and ``{<field_id>} <> 0``. KPI conditional-formatting
+    expressions reference the value FIELD (not the column directly),
+    so we resolve ``Measure.field_id`` which the App walker has
+    already auto-assigned by this point.
+    """
+    assert not isinstance(value_measure.field_id, _AutoSentinel), (
+        "KPIValueZeroIndicator: Measure.field_id wasn't resolved — "
+        "App.resolve_auto_ids() must run before KPI.emit()."
+    )
+    field_id = value_measure.field_id
+    return {
+        "ConditionalFormattingOptions": [
+            {
+                "PrimaryValue": {
+                    "Icon": {
+                        "CustomCondition": {
+                            "Expression": f"{{{field_id}}} = 0",
+                            "IconOptions": {"Icon": _KPI_HEALTHY_ICON_QS},
+                            "Color": _KPI_HEALTHY_COLOR_HEX,
+                            "DisplayConfiguration": {
+                                "IconDisplayOption": "ICON_ONLY",
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                "PrimaryValue": {
+                    "Icon": {
+                        "CustomCondition": {
+                            "Expression": f"{{{field_id}}} <> 0",
+                            "IconOptions": {"Icon": _KPI_BROKEN_ICON_QS},
+                            "Color": _KPI_BROKEN_COLOR_HEX,
+                            "DisplayConfiguration": {
+                                "IconDisplayOption": "ICON_ONLY",
+                            },
+                        },
+                    },
+                },
+            },
+        ],
+    }
+
+
+@dataclass(frozen=True)
+class KPIValueZeroIndicator:
+    """BK.2 — binary healthy-when-zero state indicator for a KPI's
+    primary value. Renders a CHECKMARK in green when the aggregated
+    value equals zero, an X in red otherwise.
+
+    Accessibility (per user 2026-05-29 — colorblind users in the loop):
+    the ICON is the load-bearing channel. Color is a parallel signal
+    for users who can read it, but the icon alone fully communicates
+    healthy/broken state to red/green-colorblind viewers.
+
+    Wire shape:
+    - **QS**: emits ``KPIVisual.ConditionalFormatting`` with two
+      ``ConditionalFormattingOptions`` entries, each carrying a
+      ``PrimaryValue.Icon.CustomCondition`` block — the first matches
+      ``zero``, the second matches ``non-zero``. QS evaluates the
+      expression at render time against the displayed primary value.
+    - **App2**: the data-fetcher reads the primary value and emits
+      ``state_icon`` (Unicode glyph) + ``state_color`` (semantic
+      keyword) on each ``values`` entry. ``bootstrap.js::renderKPI``
+      prepends the glyph + applies the color class.
+
+    The TWO renderers see different payloads but render the
+    semantically-equivalent shape — same icon glyph, same color
+    intent — so the operator gets the same signal on either surface.
+    """
+    healthy_when_zero: bool = True
+
+
 @dataclass(eq=False)
 class KPI:
     """KPI visual — single number per ``values`` entry, no grouping.
 
     Field-well shape: ``Values=[Measure, ...]``. Most KPIs use one
     measure; multiple are allowed and render as side-by-side numbers.
+
+    ``value_zero_indicator`` (BK.2) — optional binary check/X+color
+    state on the primary value. See ``KPIValueZeroIndicator``. Only
+    fires on single-value KPIs (multi-value KPIs would need per-value
+    indicators; not currently supported).
 
     ``visual_id`` is optional (L.1.8.5 auto-ID). When omitted, the
     App's tree walker assigns ``v-kpi-s{sheet_idx}-{visual_idx}`` at
@@ -187,12 +284,20 @@ class KPI:
     title: str
     subtitle: str
     values: list[Measure] = field(default_factory=list[Measure])
+    value_zero_indicator: KPIValueZeroIndicator | None = None
     visual_id: VisualId | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "kpi"
 
     def __post_init__(self) -> None:
         _require_non_blank_subtitle(self)
+        if self.value_zero_indicator is not None and len(self.values) != 1:
+            raise ValueError(
+                f"KPI(value_zero_indicator=...) only supports single-"
+                f"value KPIs; got {len(self.values)} values on "
+                f"{self.title!r}. Drop the indicator or split the "
+                f"KPI into one-value tiles."
+            )
 
     @property
     def element_id(self) -> str:
@@ -217,11 +322,17 @@ class KPI:
         # KPI doesn't carry Actions per the QuickSight model — KPIs aren't
         # data-point-clickable. If we ever need drill on a KPI, switch to
         # a different visual type.
+        kpi_conditional = (
+            _emit_kpi_zero_indicator(self.values[0])
+            if self.value_zero_indicator is not None
+            else None
+        )
         return Visual(
             KPIVisual=KPIVisual(
                 VisualId=self.visual_id,
                 Title=title_label(self.title),
                 Subtitle=subtitle_label(self.subtitle) if self.subtitle else None,
+                ConditionalFormatting=kpi_conditional,
                 ChartConfiguration=KPIConfiguration(
                     FieldWells=KPIFieldWells(
                         Values=[m.emit() for m in self.values] if self.values else None,

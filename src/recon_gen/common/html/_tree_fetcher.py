@@ -273,6 +273,12 @@ class _VisualPlan:
     #: 2-decimal contract that ``feedback_kpi_currency_decimals_strict``
     #: pins).
     kpi_format: str | None
+    #: BK.2 — when True, ``shape_kpi`` stamps ``state_icon`` +
+    #: ``state_color`` on each value entry so the renderer paints the
+    #: accessible icon-with-color state next to the number (parity with
+    #: the QS-side ``KPIValueZeroIndicator`` emit on the same Visual).
+    #: False for KPIs without a zero-indicator + every non-KPI.
+    kpi_zero_is_healthy: bool
 
 
 def _apply_cents_to_dollars(
@@ -487,6 +493,20 @@ def _kpi_format(visual: object) -> str | None:
     return "currency" if getattr(vals[0], "currency", False) else "number"
 
 
+def _kpi_zero_is_healthy(visual: object) -> bool:
+    """BK.2 — read the tree KPI's ``value_zero_indicator`` setting.
+    Returns True when a single-value KPI carries a
+    ``KPIValueZeroIndicator(healthy_when_zero=True)`` — the App2-side
+    payload then ships ``state_icon`` / ``state_color`` for each value
+    entry (mirrors the QS-side ConditionalFormatting emit)."""
+    if type(visual).__name__ != "KPI":
+        return False
+    indicator: Any = getattr(visual, "value_zero_indicator", None)  # typing-smell: ignore[explicit-any]: dynamic getattr against KPI subtype — narrowing to KPIValueZeroIndicator | None would force a tree → html dependency that inverts the existing layer
+    if indicator is None:
+        return False
+    return bool(getattr(indicator, "healthy_when_zero", False))
+
+
 def make_tree_db_fetcher(
     tree_app: App,
     cfg: Config,
@@ -579,6 +599,7 @@ def make_tree_db_fetcher(
                 chart=_chart_meta(visual),
                 money_columns=money_cols,
                 kpi_format=_kpi_format(visual),
+                kpi_zero_is_healthy=_kpi_zero_is_healthy(visual),
             )
 
     async def fetcher(visual_id: VisualId, params: Mapping[str, list[str]]) -> Any:  # typing-smell: ignore[explicit-any]: per-visual-kind shape (KPI float, Sankey {nodes,links}, etc.) — JSON-serialized downstream, so a real union here would be every renderer's shape
@@ -688,6 +709,8 @@ def make_tree_db_fetcher(
             kpi_kwargs: dict[str, Any] = {}  # typing-smell: ignore[explicit-any]: heterogeneous shape-fn kwargs — same justification as chart_kwargs
             if plan.kpi_format is not None:
                 kpi_kwargs["format"] = plan.kpi_format
+            if plan.kpi_zero_is_healthy:
+                kpi_kwargs["zero_is_healthy"] = True
             return shape_for_kind(kind, rows, columns, **kpi_kwargs)
         # ForceGraph + Sankey have specialized projectors today
         # (_db_fetcher._topology_to_force_graph, etc.); the generic

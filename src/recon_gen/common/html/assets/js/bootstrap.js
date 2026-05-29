@@ -159,10 +159,28 @@
       .enter()
       .append("div")
       .attr("class", "kpi-card flex-1 min-w-[180px] text-center");
+    // BK.2 — KPIs carrying ``state_icon`` (the App2-side payload from
+    // ``shape_kpi`` when the tree's ``KPIValueZeroIndicator`` is set)
+    // get the icon glyph rendered AS the value's prefix and the
+    // semantic color class swapped in for ``text-accent``. The icon
+    // is the load-bearing channel for colorblind users; color is the
+    // parallel signal. Mirrors what the QS-side conditional-formatting
+    // emits on the same Visual.
     cards
       .append("div")
-      .attr("class", "kpi-value text-4xl font-bold text-accent tabular-nums")
-      .text((d) => formatKPIValue(d.value, d.format));
+      .attr("class", (d) => {
+        var color =
+          d.state_color === "success"
+            ? "text-success"
+            : d.state_color === "danger"
+              ? "text-danger"
+              : "text-accent";
+        return "kpi-value text-4xl font-bold " + color + " tabular-nums";
+      })
+      .text((d) => {
+        var prefix = d.state_icon ? d.state_icon + " " : "";
+        return prefix + formatKPIValue(d.value, d.format);
+      });
     cards
       .filter((d) => typeof d.delta === "number")
       .append("div")
