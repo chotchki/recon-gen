@@ -980,6 +980,13 @@ def build_todays_exceptions_dataset(
     magnitude_amount = cents_to_dollars_sql(
         "magnitude_amount", dialect=cfg.dialect,
     )
+    # C7 (cold-read v11.26.1) — suppress degenerate rows where neither
+    # magnitude_amount nor magnitude_count carries a real value. The
+    # matview emits one row per detected violation, but on some seeds
+    # branches surface rows with magnitude_amount = 0 AND magnitude_count
+    # = 0 (or NULL on both). Those rows pad the headline count without
+    # naming an actionable violation. Keep rows where at least one
+    # magnitude column is non-NULL AND > 0.
     sql = (
         f"SELECT check_type, account_id, account_name, account_role,"
         f" account_parent_role, business_day, rail_name,"
@@ -990,7 +997,11 @@ def build_todays_exceptions_dataset(
         f"  AND {_account_display_clause(P_L1_TODAYS_EXC_ACCOUNT)}\n"
         f"  AND ({_data_value_clause('rail_name', P_L1_TODAYS_EXC_TYPE)}"
         f" OR rail_name IS NULL)\n"
-        f"  AND {_l1_date_range_clause('business_day', cfg)}"
+        f"  AND {_l1_date_range_clause('business_day', cfg)}\n"
+        f"  AND ("
+        f"     (magnitude_amount IS NOT NULL AND magnitude_amount > 0)"
+        f"  OR (magnitude_count IS NOT NULL AND magnitude_count > 0)"
+        f")"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-todays-exceptions-dataset"),

@@ -374,13 +374,24 @@ _SUPERSESSION_AUDIT_DESCRIPTION = (
 _TODAYS_EXCEPTIONS_NAME = "Today's Exceptions"
 _TODAYS_EXCEPTIONS_TITLE = "Today's Exceptions"
 _TODAYS_EXCEPTIONS_DESCRIPTION = (
-    "The 9am scan — every L1 SHOULD-constraint violation across all 5 "
-    "invariant views (drift, ledger drift, overdraft, limit breach, "
-    "expected EOD balance), scoped to the most recent business day in "
-    "the data. Replaces v5's ar_unified_exceptions matview with a live "
-    "UNION; no REFRESH contract. KPI tracks total open count; bar chart "
-    "breaks down by check_type; detail table sorts by magnitude so the "
-    "biggest variances surface first."
+    # C6 (cold-read v11.26.1) — copy used to claim "5 L1 invariants" but
+    # the matview UNIONs across 10 check kinds: 5 balance/numeric checks
+    # (drift / ledger_drift / overdraft / limit_breach /
+    # expected_eod_balance_breach), 3 chain/cardinality checks
+    # (chain_parent_disagreement / fan_in_disagreement /
+    # multi_xor_violation), and 2 time-based stuck checks (stuck_pending
+    # / stuck_unbundled). Updated to the full taxonomy so the chart's
+    # bars match the prose.
+    "The 9am scan — every L1 SHOULD-constraint violation across all "
+    "10 invariant views: **balance** (drift, ledger drift, overdraft, "
+    "limit breach, expected EOD balance), **chain/cardinality** (chain "
+    "parent disagreement, fan-in disagreement, multi-XOR violation), "
+    "and **time** (stuck pending, stuck unbundled), scoped to the most "
+    "recent business day in the data. Replaces v5's "
+    "ar_unified_exceptions matview with a live UNION; no REFRESH "
+    "contract. KPI tracks total open count; bar chart breaks down by "
+    "check_type; detail table sorts by magnitude so the biggest "
+    "variances surface first."
 )
 
 
@@ -1027,8 +1038,11 @@ def _populate_todays_exceptions_sheet(
         width=_FULL,
         title="Open Exceptions",
         subtitle=(
+            # C6 (cold-read v11.26.1) — was "5 invariant checks" but
+            # the matview UNIONs 10; updated for accuracy. See the
+            # sheet description for the full taxonomy.
             "Total count of L1 SHOULD-constraint violations on today's "
-            "business day across all 5 invariant checks. "
+            "business day across all 10 invariant checks. "
             # C15 (cold-read v11.26.1) — operators get confused when
             # this count is far smaller than the App-Info row count of
             # ``<prefix>_todays_exceptions``. Make the today's-scope
@@ -1050,11 +1064,20 @@ def _populate_todays_exceptions_sheet(
         width=_FULL,
         title="Exceptions by Check Type",
         subtitle=(
-            "How today's open exceptions distribute across the 5 L1 "
+            # C6 (cold-read v11.26.1) — same "5 → 10" copy fix as KPI
+            # above. The bar chart's GROUP BY check_type covers every
+            # branch of the todays_exceptions UNION ALL, so a check
+            # type with rows in the detail table always renders a bar
+            # (the cold-read flagged fan_in_disagreement showing in
+            # the table but not on the chart — addressed by the
+            # ``COALESCE(SUM(1), 0)`` count semantics fix in C2,
+            # which also makes the GROUP BY emit zero-bar entries
+            # for ANY check_type present in the day's matview slice).
+            "How today's open exceptions distribute across the 10 L1 "
             "invariants. Spikes in one check kind point at a recurring "
             "error class to investigate first. **Log-scale Y axis:** "
             "the dominant check kind would otherwise swamp the rarer "
-            "ones — log scale lets you read all 5 at once."
+            "ones — log scale lets you read all 10 at once."
         ),
         category=[ds["check_type"].dim()],
         values=[ds["account_id"].count()],
