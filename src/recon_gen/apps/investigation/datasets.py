@@ -269,11 +269,24 @@ ANETWORK_ACCOUNTS_CONTRACT = DatasetContract(columns=[
 ])
 
 def _anetwork_accounts_sql(prefix: str) -> str:
+    # BQ.7 (cold-read F8) — order by aggregate hop_amount DESC so the
+    # auto-pick-first default lands on the account with the largest
+    # network presence (the operator's most likely target). Pre-BQ.7
+    # the SELECT DISTINCT returned in matview-physical order and the
+    # Account Network Sankey paints empty on first load. Group by the
+    # display string + sum hop_amount across rows referencing that
+    # account, then order outer-most.
     return (
-        f"SELECT DISTINCT\n"
-        f"    source_account_name || ' (' || source_account_id || ')' "
-        f"AS source_display\n"
-        f"FROM {prefix}_inv_money_trail_edges\n"
+        f"SELECT source_display\n"
+        f"FROM (\n"
+        f"    SELECT\n"
+        f"        source_account_name || ' (' || source_account_id || ')' "
+        f"AS source_display,\n"
+        f"        SUM(hop_amount) AS network_total\n"
+        f"    FROM {prefix}_inv_money_trail_edges\n"
+        f"    GROUP BY source_account_name || ' (' || source_account_id || ')'\n"
+        f"    ORDER BY SUM(hop_amount) DESC\n"
+        f") AS ranked\n"
     )
 
 
@@ -648,11 +661,25 @@ def build_money_trail_roots_dataset(cfg: Config) -> DataSet:
     Same pattern as ``build_volume_anomalies_distribution_dataset``
     (Y.1.b.companion) and ``build_account_network_accounts_dataset``
     (K.4.8k).
+
+    BQ.7 (cold-read F8) — order by chain magnitude DESC so QS's
+    SelectAll=HIDDEN auto-pick-first lands on the LARGEST chain.
+    Pre-BQ.7 the SELECT DISTINCT returned rows in matview-physical
+    order; the first row was the smallest / oldest chain and the
+    Money Trail Sankey paints empty for ~30s while the operator
+    realizes they have to pick something interesting. Now the default
+    pick IS the operator's most likely target ("show me the biggest
+    money movement first").
     """
     p = cfg.db_table_prefix
     sql = (
-        f"SELECT DISTINCT root_transfer_id\n"
-        f"FROM {p}_inv_money_trail_edges"
+        f"SELECT root_transfer_id\n"
+        f"FROM (\n"
+        f"    SELECT root_transfer_id, SUM(hop_amount) AS chain_total\n"
+        f"    FROM {p}_inv_money_trail_edges\n"
+        f"    GROUP BY root_transfer_id\n"
+        f"    ORDER BY SUM(hop_amount) DESC\n"
+        f") AS ranked"
     )
     return build_dataset(
         cfg,
