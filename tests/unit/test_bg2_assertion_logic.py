@@ -181,13 +181,13 @@ def test_bg2_identity_trips_when_rendered_drift_disagrees_with_matview(
     account = "Account One (acc-1)"
     row = _query_day(cfg, account, "2026-05-24")
     rendered = _kpis_from_matview_row(row)
-    # Simulate the bug: the rendered Drift KPI shows an arbitrary
+    # Simulate the bug: the rendered Posting Drift KPI shows an arbitrary
     # different value (the cold-read's "-8091.841" vs the formula
     # "+6.000" shape).
-    rendered["Drift"] = Decimal("-80.91")
+    rendered["Posting Drift"] = Decimal("-80.91")
 
     # Run the per-KPI identity loop the browser test runs. We expect
-    # the Drift entry to fail.
+    # the Posting Drift entry to fail.
     failures: list[str] = []
     for title in _KPI_TO_COLUMN:
         expected = Decimal(str(row[_KPI_TO_COLUMN[title]]))
@@ -195,7 +195,7 @@ def test_bg2_identity_trips_when_rendered_drift_disagrees_with_matview(
             failures.append(
                 f"{title}: rendered={rendered[title]} vs matview={expected}"
             )
-    assert failures == ["Drift: rendered=-80.91 vs matview=0.0"]
+    assert failures == ["Posting Drift: rendered=-80.91 vs matview=0.0"]
 
 
 # ─── Finding #1, half-B — matview's drift column violates narrative ──

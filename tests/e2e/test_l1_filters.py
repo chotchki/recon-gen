@@ -205,7 +205,12 @@ def test_bg3_drift_timelines_kpis_and_series_identity_plus_delta(
     """
     driver, dashboard_arg = l1_dashboard_driver
     driver.open(dashboard_arg, sheet=_DRIFT_TIMELINES_NAME)
-    driver.wait_loaded("Largest Leaf Drift Day")
+    # BO.4 added ``(peak business day)`` to both Drift Timelines KPI
+    # titles for disambiguation from the Drift sheet's row-grain KPIs.
+    # Test wasn't synced — pre-fix kpi_value("Largest Leaf Drift Day")
+    # returned None on v11.25.0 CI because that bare title no longer
+    # renders, so `wait_loaded` timed out at 15s.
+    driver.wait_loaded("Largest Leaf Drift Day (peak business day)")
 
     leaf_sql, leaf_params = _sql_and_params_for(
         build_drift_timeline_dataset, cfg, l2,
@@ -219,8 +224,8 @@ def test_bg3_drift_timelines_kpis_and_series_identity_plus_delta(
 
     # Identity: KPI value matches the matview's MAX(abs_drift).
     for kpi_title, rows in (
-        ("Largest Leaf Drift Day", leaf_rows),
-        ("Largest Parent Drift Day", parent_rows),
+        ("Largest Leaf Drift Day (peak business day)", leaf_rows),
+        ("Largest Parent Drift Day (peak business day)", parent_rows),
     ):
         if not rows:
             # No drift planted at all → KPI legitimately reads $0.

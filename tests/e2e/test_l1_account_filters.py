@@ -372,7 +372,12 @@ _KPI_TO_COLUMN = {
     "Debits (signed)": "total_debits",
     "Credits (signed)": "total_credits",
     "Closing Stored": "closing_balance_stored",
-    "Drift": "drift",
+    # BO.6 (project_drift_vocabulary) renamed the Daily Statement
+    # drift KPI from "Drift" → "Posting Drift" to disambiguate from
+    # the L1 Drift sheet's leaf/parent drift KPIs. Test wasn't
+    # synced — kpi_value("Drift") returned None on v11.25.0 CI
+    # because that title no longer renders.
+    "Posting Drift": "drift",
 }
 
 
