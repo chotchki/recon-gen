@@ -289,8 +289,26 @@ CHAIN_INSTANCES_CONTRACT = DatasetContract(columns=[
     ColumnSpec("parent_posting", "DATETIME"),
     ColumnSpec("parent_status", "STRING"),
     ColumnSpec("parent_amount_money", "DECIMAL"),
-    ColumnSpec("required_total", "INTEGER"),
-    ColumnSpec("required_fired", "INTEGER"),
+    # BK.7 — display names disambiguate "Required" at the chain-grammar
+    # level (a child the L2 declares as MUST FOLLOW the parent) from the
+    # operator's natural read "legs of a multi-leg transfer". A
+    # singleton-children chain row is marked Required by the
+    # `_declared_chains_cte` (Z.A: "always fires when parent fires");
+    # multi-children chain rows are XOR siblings and ALL marked
+    # Optional, so required_total=0 there is the correct count.
+    # ``required_fired`` is the per-firing count of those declared
+    # Required children that actually fired against the parent's
+    # transfer_id. Pre-BK.7 the auto-titled headers ("Required Total" /
+    # "Required Fired") read as transfer-leg counts; the rename makes
+    # the chain-grammar scope explicit.
+    ColumnSpec(
+        "required_total", "INTEGER",
+        display_name="Required Children Declared",
+    ),
+    ColumnSpec(
+        "required_fired", "INTEGER",
+        display_name="Required Children Fired",
+    ),
     ColumnSpec("completion_status", "STRING"),
 ])
 

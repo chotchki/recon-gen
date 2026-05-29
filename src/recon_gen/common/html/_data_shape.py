@@ -37,17 +37,27 @@ def shape_kpi(
     label: str | None = None,
     format: str | None = None,
     delta: float | None = None,
+    zero_is_healthy: bool = False,
+    inflow_is_healthy: bool = False,
 ) -> dict[str, Any]:
     """Shape one or more SQL rows as a KPI payload.
 
-    Single-row case → ``{values: [{value, label, format, delta?}]}``.
-    Multi-row case  → one entry per row in ``values``.
+    Single-row case → ``{values: [{value, label, format, delta?,
+    state_icon?, state_color?}]}``. Multi-row case → one entry per row.
 
     First column is the ``value``. ``label`` defaults to the second
     column's value (when present) or the kwarg. ``format`` /
     ``delta`` come from the kwargs (per-Visual config) when not
     obviously columnar — KPI typically carries one number, with the
     metadata supplied at the tree level rather than from SQL.
+
+    BK.2 — ``zero_is_healthy`` adds the App2-side binary state
+    indicator (parity with the QS-side ``KPIValueZeroIndicator``):
+    each value entry gets ``state_icon`` = ``"✓"`` (when value == 0)
+    or ``"✗"`` (otherwise) plus ``state_color`` = ``"success"`` /
+    ``"danger"`` (semantic keywords the renderer maps to Tailwind
+    ``text-success`` / ``text-danger``). Icon is the load-bearing
+    channel for colorblind users; color is a parallel signal.
     """
     del columns  # name preserved for parity with other shape fns
     values: list[dict[str, Any]] = []
@@ -61,6 +71,24 @@ def shape_kpi(
             entry["format"] = format
         if delta is not None:
             entry["delta"] = delta
+        if zero_is_healthy and row[0] is not None:
+            # Null values stay neutral — the "no data picked yet"
+            # state on the Daily Statement Posting Drift KPI doesn't
+            # deserve a red ✗ verdict, that's reserved for "you have
+            # a number AND it isn't zero". DB drivers return numerics
+            # as int / float / Decimal depending on column type, so
+            # we use the duck-typed `== 0` comparison rather than an
+            # isinstance gate (Decimal is the common surprise on the
+            # JSON-cast path).
+            is_zero = row[0] == 0
+            entry["state_icon"] = "✓" if is_zero else "✗"
+            entry["state_color"] = "success" if is_zero else "danger"
+        elif inflow_is_healthy and row[0] is not None:
+            # BK.9 — same neutral-on-null treatment as zero_is_healthy;
+            # the sign comparison flips below zero / on-or-above.
+            is_inflow = row[0] >= 0
+            entry["state_icon"] = "▲" if is_inflow else "▼"
+            entry["state_color"] = "success" if is_inflow else "danger"
         values.append(entry)
     return {"values": values}
 

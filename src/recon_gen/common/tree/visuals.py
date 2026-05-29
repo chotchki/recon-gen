@@ -55,7 +55,7 @@ from recon_gen.common.tree._helpers import (
 )
 from recon_gen.common.tree.actions import Action
 from recon_gen.common.tree.formatting import CellFormat
-from recon_gen.common.tree.calc_fields import CalcField
+from recon_gen.common.tree.calc_fields import CalcField, resolve_column
 from recon_gen.common.tree.datasets import Dataset
 from recon_gen.common.tree.fields import Dim, FieldRef, Measure, resolve_field_id
 
@@ -173,12 +173,227 @@ def _require_non_blank_subtitle(visual: object) -> None:
         )
 
 
+# BK.2 — QS-side icon enum + WCAG-AA hex colors for the KPI zero
+# indicator. The App2-side glyph (``"✓"`` / ``"✗"``) and Tailwind
+# color class (``"success"`` / ``"danger"``) live in
+# ``common/html/_data_shape.py::shape_kpi`` to avoid a html→tree
+# import that would invert the layering.
+_KPI_HEALTHY_ICON_QS = "CHECKMARK"
+_KPI_BROKEN_ICON_QS = "X"
+# QS validation rejects lowercase hex with regex
+# ``^#[A-F0-9]{6}$`` (caught via run_tests up_to=deploy probe
+# 2026-05-29 on the v11.24.x BK.2 spike — lowercase ``#15803d`` /
+# ``#b91c1c`` failed `CreateAnalysis`). Uppercase form.
+_KPI_HEALTHY_COLOR_HEX = "#15803D"  # tailwind green-700
+_KPI_BROKEN_COLOR_HEX = "#B91C1C"   # tailwind red-700
+
+
+def _emit_kpi_zero_indicator(value_measure: "Measure") -> dict[str, Any]:
+    """BK.2 — render the KPIValueZeroIndicator pair as a QS
+    ``KPIConditionalFormatting`` block. Two ``ConditionalFormattingOption``
+    entries on ``PrimaryValue.Icon`` — first matches zero (CHECKMARK +
+    green), second matches non-zero (X + red). QS picks the first
+    matching expression at render time.
+
+    Expression form (three layered shape gotchas, all caught by
+    run_tests deploy probe 2026-05-29 on the v11.24.x BK.2 spike):
+
+    1. Colors must be UPPERCASE hex (``^#[A-F0-9]{6}$``).
+    2. Expression references the COLUMN name, NOT the auto-derived
+       field_id — QS rejects ``{<uuid>} = 0`` with "Didn't find
+       field <uuid>".
+    3. The KPI's value is aggregated (sum / max / min / average), and
+       QS requires the aggregation function to wrap the column ref
+       in the expression — bare ``{drift} = 0`` fails with
+       "Aggregation Function can not be null in conditional
+       formatting expression for sourceColumn: drift". The lowercase
+       ``sum`` / ``max`` / ``min`` / ``avg`` function names work.
+
+    Aggregation kinds outside ``_NUMERICAL_AGG`` can't drive a zero
+    indicator (count / distinct_count are row counts, never directly
+    zero-vs-broken state); the construction-time guard above blocks
+    those cases before they reach emit.
+    """
+    column_name = resolve_column(value_measure.column)
+    kind = value_measure.kind
+    if kind not in _KPI_INDICATOR_AGG_FN:
+        raise AssertionError(
+            f"KPIValueZeroIndicator on Measure(kind={kind!r}) — only "
+            f"numerical aggregations sum/max/min/average can drive the "
+            f"indicator (count / distinct_count return row counts). "
+            f"Drop the indicator or change the aggregation."
+        )
+    agg = _KPI_INDICATOR_AGG_FN[kind]
+    aggregated_ref = f"{agg}({{{column_name}}})"
+    return {
+        "ConditionalFormattingOptions": [
+            {
+                "PrimaryValue": {
+                    "Icon": {
+                        "CustomCondition": {
+                            "Expression": f"{aggregated_ref} = 0",
+                            "IconOptions": {"Icon": _KPI_HEALTHY_ICON_QS},
+                            "Color": _KPI_HEALTHY_COLOR_HEX,
+                            "DisplayConfiguration": {
+                                "IconDisplayOption": "ICON_ONLY",
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                "PrimaryValue": {
+                    "Icon": {
+                        "CustomCondition": {
+                            "Expression": f"{aggregated_ref} <> 0",
+                            "IconOptions": {"Icon": _KPI_BROKEN_ICON_QS},
+                            "Color": _KPI_BROKEN_COLOR_HEX,
+                            "DisplayConfiguration": {
+                                "IconDisplayOption": "ICON_ONLY",
+                            },
+                        },
+                    },
+                },
+            },
+        ],
+    }
+
+
+# Aggregation function names QS accepts inside the KPI conditional-
+# formatting expression grammar (lowercase). Mirrors
+# ``_NUMERICAL_AGG`` but lowercased for the expression DSL.
+_KPI_INDICATOR_AGG_FN = {
+    "sum": "sum",
+    "max": "max",
+    "min": "min",
+    "average": "avg",
+}
+
+
+_KPI_INFLOW_ICON_QS = "ARROW_UP"
+_KPI_OUTFLOW_ICON_QS = "ARROW_DOWN"
+# Same WCAG-AA hex palette as the zero indicator — green-700 for the
+# inflow/healthy side, red-700 for the outflow/broken side.
+_KPI_INFLOW_COLOR_HEX = "#15803D"
+_KPI_OUTFLOW_COLOR_HEX = "#B91C1C"
+
+
+def _emit_kpi_sign_indicator(value_measure: "Measure") -> dict[str, Any]:
+    """BK.9 — render the KPIValueSignIndicator pair as a QS
+    ``KPIConditionalFormatting`` block. Two ``ConditionalFormattingOption``
+    entries on ``PrimaryValue.Icon`` — first matches non-negative
+    (ARROW_UP + green), second matches negative (ARROW_DOWN + red).
+
+    Same three shape gotchas as ``_emit_kpi_zero_indicator`` apply
+    (uppercase hex, column-name expression refs, aggregation-fn
+    wrap). The comparison flips: ``>= 0`` for inflow, ``< 0`` for
+    outflow. Use this on a SIGNED currency KPI where the operator
+    needs the direction (sign) as a glance-readable signal — Exec
+    Net Money Moved being the BK.9 motivating example.
+    """
+    column_name = resolve_column(value_measure.column)
+    kind = value_measure.kind
+    if kind not in _KPI_INDICATOR_AGG_FN:
+        raise AssertionError(
+            f"KPIValueSignIndicator on Measure(kind={kind!r}) — only "
+            f"numerical aggregations sum/max/min/average can drive the "
+            f"indicator (count / distinct_count return row counts). "
+            f"Drop the indicator or change the aggregation."
+        )
+    agg = _KPI_INDICATOR_AGG_FN[kind]
+    aggregated_ref = f"{agg}({{{column_name}}})"
+    return {
+        "ConditionalFormattingOptions": [
+            {
+                "PrimaryValue": {
+                    "Icon": {
+                        "CustomCondition": {
+                            "Expression": f"{aggregated_ref} >= 0",
+                            "IconOptions": {"Icon": _KPI_INFLOW_ICON_QS},
+                            "Color": _KPI_INFLOW_COLOR_HEX,
+                            "DisplayConfiguration": {
+                                "IconDisplayOption": "ICON_ONLY",
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                "PrimaryValue": {
+                    "Icon": {
+                        "CustomCondition": {
+                            "Expression": f"{aggregated_ref} < 0",
+                            "IconOptions": {"Icon": _KPI_OUTFLOW_ICON_QS},
+                            "Color": _KPI_OUTFLOW_COLOR_HEX,
+                            "DisplayConfiguration": {
+                                "IconDisplayOption": "ICON_ONLY",
+                            },
+                        },
+                    },
+                },
+            },
+        ],
+    }
+
+
+@dataclass(frozen=True)
+class KPIValueSignIndicator:
+    """BK.9 — sign-aware (▲ inflow / ▼ outflow) state indicator for a
+    KPI's primary value. Renders ARROW_UP in green when the aggregated
+    value is non-negative, ARROW_DOWN in red when it's negative.
+
+    Accessibility: icon is the load-bearing channel (▲ vs ▼ is
+    distinguishable to all viewers regardless of color perception);
+    color rides along as a parallel signal.
+
+    Same QS wire shape as ``KPIValueZeroIndicator`` (see for the
+    three layered gotchas around hex case + expression DSL); the
+    semantic differs — sign of the aggregated value, not zero-vs-
+    not-zero. Currently used on Exec "Net Money Moved" (signed flow).
+    """
+    inflow_is_healthy: bool = True
+
+
+@dataclass(frozen=True)
+class KPIValueZeroIndicator:
+    """BK.2 — binary healthy-when-zero state indicator for a KPI's
+    primary value. Renders a CHECKMARK in green when the aggregated
+    value equals zero, an X in red otherwise.
+
+    Accessibility (per user 2026-05-29 — colorblind users in the loop):
+    the ICON is the load-bearing channel. Color is a parallel signal
+    for users who can read it, but the icon alone fully communicates
+    healthy/broken state to red/green-colorblind viewers.
+
+    Wire shape:
+    - **QS**: emits ``KPIVisual.ConditionalFormatting`` with two
+      ``ConditionalFormattingOptions`` entries, each carrying a
+      ``PrimaryValue.Icon.CustomCondition`` block — the first matches
+      ``zero``, the second matches ``non-zero``. QS evaluates the
+      expression at render time against the displayed primary value.
+    - **App2**: the data-fetcher reads the primary value and emits
+      ``state_icon`` (Unicode glyph) + ``state_color`` (semantic
+      keyword) on each ``values`` entry. ``bootstrap.js::renderKPI``
+      prepends the glyph + applies the color class.
+
+    The TWO renderers see different payloads but render the
+    semantically-equivalent shape — same icon glyph, same color
+    intent — so the operator gets the same signal on either surface.
+    """
+    healthy_when_zero: bool = True
+
+
 @dataclass(eq=False)
 class KPI:
     """KPI visual — single number per ``values`` entry, no grouping.
 
     Field-well shape: ``Values=[Measure, ...]``. Most KPIs use one
     measure; multiple are allowed and render as side-by-side numbers.
+
+    ``value_zero_indicator`` (BK.2) — optional binary check/X+color
+    state on the primary value. See ``KPIValueZeroIndicator``. Only
+    fires on single-value KPIs (multi-value KPIs would need per-value
+    indicators; not currently supported).
 
     ``visual_id`` is optional (L.1.8.5 auto-ID). When omitted, the
     App's tree walker assigns ``v-kpi-s{sheet_idx}-{visual_idx}`` at
@@ -187,12 +402,36 @@ class KPI:
     title: str
     subtitle: str
     values: list[Measure] = field(default_factory=list[Measure])
+    value_zero_indicator: KPIValueZeroIndicator | None = None
+    value_sign_indicator: KPIValueSignIndicator | None = None
     visual_id: VisualId | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "kpi"
 
     def __post_init__(self) -> None:
         _require_non_blank_subtitle(self)
+        if (
+            self.value_zero_indicator is not None
+            and self.value_sign_indicator is not None
+        ):
+            raise ValueError(
+                f"KPI on {self.title!r}: pick ONE of "
+                f"value_zero_indicator (healthy = $0) or "
+                f"value_sign_indicator (healthy = inflow). They emit "
+                f"competing ConditionalFormattingOptions and QS picks "
+                f"the first match — mixing them produces an undefined "
+                f"render."
+            )
+        if (
+            self.value_zero_indicator is not None
+            or self.value_sign_indicator is not None
+        ) and len(self.values) != 1:
+            raise ValueError(
+                f"KPI(value_*_indicator=...) only supports single-"
+                f"value KPIs; got {len(self.values)} values on "
+                f"{self.title!r}. Drop the indicator or split the "
+                f"KPI into one-value tiles."
+            )
 
     @property
     def element_id(self) -> str:
@@ -217,11 +456,18 @@ class KPI:
         # KPI doesn't carry Actions per the QuickSight model — KPIs aren't
         # data-point-clickable. If we ever need drill on a KPI, switch to
         # a different visual type.
+        if self.value_zero_indicator is not None:
+            kpi_conditional = _emit_kpi_zero_indicator(self.values[0])
+        elif self.value_sign_indicator is not None:
+            kpi_conditional = _emit_kpi_sign_indicator(self.values[0])
+        else:
+            kpi_conditional = None
         return Visual(
             KPIVisual=KPIVisual(
                 VisualId=self.visual_id,
                 Title=title_label(self.title),
                 Subtitle=subtitle_label(self.subtitle) if self.subtitle else None,
+                ConditionalFormatting=kpi_conditional,
                 ChartConfiguration=KPIConfiguration(
                     FieldWells=KPIFieldWells(
                         Values=[m.emit() for m in self.values] if self.values else None,

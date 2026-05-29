@@ -41,6 +41,8 @@ from tests._test_helpers import make_test_config
 from tests.e2e._drivers.base import query_db_via_cfg
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from recon_gen.common.config import Config
 
 
@@ -252,3 +254,88 @@ def test_bg3_overdraft_count_trips_when_kpi_underflows_vs_table(
     rows = query_db_via_cfg(cfg, _OVERDRAFT_SQL)
     rendered_count = 0  # the cold-read bug shape
     assert rendered_count != len(rows)
+
+
+# ─── BG.3 v11.24.x CI failure: kv.as_of pin ──────────────────────────
+#
+# Root cause of the v11.24.x main-branch QS-only test_bg3_overdraft_kpi
+# failure (rendered 136 vs query_db 120): CI crosses the UTC midnight
+# boundary between deploy and test. QS bakes pL1DateEnd at deploy time
+# (5/28); query_db_via_cfg's _sql_and_params_for re-evaluates the
+# dataset at test time (5/29 via AsOfFrame.live()) — different day,
+# different SQL substitution, off-by-one row count.
+#
+# Fix: tests/e2e/conftest.py::_pin_cfg_to_kv_as_of reads the demo DB's
+# <prefix>_config_kv key='as_of' row (stamped at data apply time) and
+# pins cfg.test_generator.end_date to that day. Both deploy and test
+# now land on the same anchor.
+
+
+def test_bg3_kv_pin_anchors_test_to_deploy_day_across_midnight(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: "Path",
+) -> None:
+    """Simulates CI's deploy-then-cross-midnight-then-test shape:
+    kv.as_of stamped at 5/28; test runs on 5/29 (live()). Unpinned
+    cfg resolves to 5/29 (the bug); pinned cfg resolves to 5/28
+    (matches what QS baked at deploy).
+
+    Builds a tmp_path sqlite with a hand-stamped kv row at 5/28 so
+    the assertion isn't coupled to the dev box's `data apply` history.
+    """
+    from datetime import date, datetime
+
+    import recon_gen.common.as_of_frame as af_mod
+    from recon_gen.common.l2.config_table import (
+        emit_config_table_ddl,
+        replace_config,
+    )
+    from tests.e2e.conftest import _pin_cfg_to_kv_as_of
+
+    # 1) Stamp an isolated sqlite with kv.as_of = 5/28 (the "deploy day").
+    db_path = tmp_path / "bg3_kv_pin.sqlite"
+    prefix = "bg3kv"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.executescript(
+            emit_config_table_ddl(prefix, dialect=Dialect.SQLITE),
+        )
+        replace_config(
+            conn, prefix=prefix,
+            cfg_json="{}", l2_json="{}",
+            as_of=datetime(2026, 5, 28, 12, 0, 0),
+        )
+    finally:
+        conn.close()
+
+    # 2) Force AsOfFrame.live() to return 5/29 — simulates test running
+    # AFTER the UTC midnight boundary that broke v11.24.x in CI.
+    class _Date_2026_05_29(date):
+        @classmethod
+        def today(cls) -> date:
+            return date(2026, 5, 29)
+
+    monkeypatch.setattr(af_mod, "date", _Date_2026_05_29)
+
+    # 3) Build a cfg pointed at the stamped sqlite.
+    cfg = make_test_config(
+        dialect=Dialect.SQLITE,
+        db_table_prefix=prefix,
+        demo_database_url=f"sqlite:///{db_path}",
+    )
+
+    unpinned = cfg.test_generator.as_of_frame(window_days=7).as_of
+    pinned = _pin_cfg_to_kv_as_of(cfg).test_generator.as_of_frame(
+        window_days=7,
+    ).as_of
+
+    assert unpinned == date(2026, 5, 29), (
+        f"Unpinned cfg should drift to the simulated test-time live() "
+        f"date (5/29), got {unpinned}. If this fails, AsOfFrame.live() "
+        f"no longer reads `date.today` from `as_of_frame.date`."
+    )
+    assert pinned == date(2026, 5, 28), (
+        f"Pinned cfg should anchor to the kv-stamped as_of (5/28), "
+        f"got {pinned}. If this fails, the _pin_cfg_to_kv_as_of helper "
+        f"regressed or get_as_of doesn't read the value we wrote."
+    )

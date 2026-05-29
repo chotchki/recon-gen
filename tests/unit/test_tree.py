@@ -494,6 +494,178 @@ class TestKPIVisual:
         kpi = KPI(visual_id=VisualId("v-kpi"), title="Test", subtitle="t")
         assert isinstance(kpi, VisualLike)
 
+    def test_bk_2_value_zero_indicator_emits_qs_conditional_formatting(self):
+        """BK.2 — single-value KPI with KPIValueZeroIndicator emits a
+        ``KPIVisual.ConditionalFormatting`` block carrying TWO
+        ConditionalFormattingOptions entries: CHECKMARK + green for
+        ``{field_id} = 0``, X + red for ``{field_id} <> 0``. Pinning the
+        icon-first ordering + the icon enum values + the WCAG-AA hex
+        colors against a future refactor that re-orders or re-themes
+        the indicator and silently swaps the load-bearing icon channel
+        for colorblind users."""
+        from recon_gen.common.tree import KPIValueZeroIndicator
+        from recon_gen.apps.l1_dashboard.app import _DRIFT_NAME
+        kpi = KPI(
+            visual_id=VisualId("v-kpi"),
+            title=_DRIFT_NAME,
+            subtitle="Healthy = $0",
+            values=[Measure.max(_DS_FOO, "drift", field_id="f-drift")],
+            value_zero_indicator=KPIValueZeroIndicator(),
+        )
+        emitted = kpi.emit()
+        assert emitted.KPIVisual is not None
+        cf = emitted.KPIVisual.ConditionalFormatting
+        assert cf is not None
+        options = cf["ConditionalFormattingOptions"]
+        assert len(options) == 2
+
+        # Healthy first — zero → CHECKMARK + WCAG-AA green. Constants
+        # imported from production so a future re-theme of the indicator
+        # fires this test loudly instead of asserting the stale colour.
+        from recon_gen.common.tree.visuals import (
+            _KPI_BROKEN_COLOR_HEX,
+            _KPI_BROKEN_ICON_QS,
+            _KPI_HEALTHY_COLOR_HEX,
+            _KPI_HEALTHY_ICON_QS,
+        )
+        # Expression must reference the COLUMN name (not the field_id)
+        # AND wrap it with the lowercase aggregation function name —
+        # QS's deploy probe (2026-05-29) successively rejected:
+        #   field_id refs   → "Didn't find field <uuid>"
+        #   bare column ref → "Aggregation Function can not be null"
+        # So a max() KPI emits ``max({drift}) = 0``.
+        healthy = options[0]["PrimaryValue"]["Icon"]["CustomCondition"]
+        assert healthy["Expression"] == "max({drift}) = 0"
+        assert healthy["IconOptions"]["Icon"] == _KPI_HEALTHY_ICON_QS
+        assert healthy["Color"] == _KPI_HEALTHY_COLOR_HEX
+
+        # Broken — non-zero → X + WCAG-AA red.
+        broken = options[1]["PrimaryValue"]["Icon"]["CustomCondition"]
+        assert broken["Expression"] == "max({drift}) <> 0"
+        assert broken["IconOptions"]["Icon"] == _KPI_BROKEN_ICON_QS
+        assert broken["Color"] == _KPI_BROKEN_COLOR_HEX
+
+    def test_bk_2_value_zero_indicator_rejects_multi_value_kpis(self):
+        """BK.2 — the binary zero indicator is only meaningful for a
+        single-value KPI. Multi-value KPIs would need per-value icons;
+        that's not supported, fail loud at construction."""
+        from recon_gen.common.tree import KPIValueZeroIndicator
+        with pytest.raises(ValueError, match="single-value KPIs"):
+            KPI(
+                visual_id=VisualId("v-kpi"),
+                title="Multi-value test",  # typing-smell: ignore[no-inline-production-constants]: arbitrary test label; the KPI never emits — construction raises
+                subtitle="Healthy = $0",
+                values=[
+                    Measure.max(_DS_FOO, "drift_a", field_id="f-a"),
+                    Measure.max(_DS_FOO, "drift_b", field_id="f-b"),
+                ],
+                value_zero_indicator=KPIValueZeroIndicator(),
+            )
+
+    def test_bk_2_kpi_hex_colors_are_uppercase(self):
+        """v11.24.x BK.2 spike deploy probe (2026-05-29) caught QS's
+        ``CreateAnalysis`` validation rejecting lowercase hex on the
+        ``KPIConditionalFormatting.PrimaryValue.Icon.CustomCondition``
+        Color field:
+
+            Member must satisfy regular expression pattern:
+            ^#[A-F0-9]{6}$
+
+        Pin the indicator's color constants to the uppercase form so a
+        future re-theme that types ``#15803d`` again fails at unit time
+        rather than at the deploy gate."""
+        import re
+        from recon_gen.common.tree.visuals import (
+            _KPI_BROKEN_COLOR_HEX,
+            _KPI_HEALTHY_COLOR_HEX,
+        )
+        pattern = re.compile(r"^#[A-F0-9]{6}$")
+        assert pattern.match(_KPI_HEALTHY_COLOR_HEX), (
+            f"Healthy color {_KPI_HEALTHY_COLOR_HEX!r} must match QS's "
+            f"uppercase-hex constraint ^#[A-F0-9]{{6}}$ — lowercase "
+            f"hex fails CreateAnalysis."
+        )
+        assert pattern.match(_KPI_BROKEN_COLOR_HEX), (
+            f"Broken color {_KPI_BROKEN_COLOR_HEX!r} must match QS's "
+            f"uppercase-hex constraint ^#[A-F0-9]{{6}}$ — lowercase "
+            f"hex fails CreateAnalysis."
+        )
+
+    def test_bk_9_value_sign_indicator_emits_qs_conditional_formatting(self):
+        """BK.9 — single-value KPI with KPIValueSignIndicator emits a
+        sign-aware ConditionalFormatting pair: ARROW_UP + green-700
+        when the aggregated value >= 0 (inflow / healthy direction),
+        ARROW_DOWN + red-700 when < 0 (outflow). Same three QS shape
+        gotchas as BK.2 apply (uppercase hex, column-name expression
+        refs, aggregation-fn wrap). The boundary is at zero: zero
+        itself is treated as inflow (operator-friendly default for
+        "balanced book" KPIs)."""
+        from recon_gen.common.tree import KPIValueSignIndicator
+        from recon_gen.common.tree.visuals import (
+            _KPI_INFLOW_COLOR_HEX,
+            _KPI_INFLOW_ICON_QS,
+            _KPI_OUTFLOW_COLOR_HEX,
+            _KPI_OUTFLOW_ICON_QS,
+        )
+        kpi = KPI(
+            visual_id=VisualId("v-kpi"),
+            title="Net Money Moved",
+            subtitle="Direction = sign of the period sum",
+            values=[Measure.sum(_DS_FOO, "net_amount", field_id="f-net")],
+            value_sign_indicator=KPIValueSignIndicator(),
+        )
+        emitted = kpi.emit()
+        assert emitted.KPIVisual is not None
+        cf = emitted.KPIVisual.ConditionalFormatting
+        assert cf is not None
+        options = cf["ConditionalFormattingOptions"]
+        assert len(options) == 2
+
+        # Inflow side — value >= 0 → ARROW_UP + green.
+        up = options[0]["PrimaryValue"]["Icon"]["CustomCondition"]
+        assert up["Expression"] == "sum({net_amount}) >= 0"
+        assert up["IconOptions"]["Icon"] == _KPI_INFLOW_ICON_QS
+        assert up["Color"] == _KPI_INFLOW_COLOR_HEX
+
+        # Outflow side — value < 0 → ARROW_DOWN + red.
+        down = options[1]["PrimaryValue"]["Icon"]["CustomCondition"]
+        assert down["Expression"] == "sum({net_amount}) < 0"
+        assert down["IconOptions"]["Icon"] == _KPI_OUTFLOW_ICON_QS
+        assert down["Color"] == _KPI_OUTFLOW_COLOR_HEX
+
+    def test_bk_9_value_sign_indicator_blocks_mixed_indicators(self):
+        """BK.2 + BK.9 — both indicators on the same KPI raises at
+        construction. They emit competing ConditionalFormattingOptions
+        and QS picks the first match, so mixing produces an undefined
+        render. Fail loud rather than silent."""
+        from recon_gen.common.tree import (
+            KPIValueSignIndicator, KPIValueZeroIndicator,
+        )
+        with pytest.raises(ValueError, match="pick ONE"):
+            KPI(
+                visual_id=VisualId("v-kpi"),
+                title="Mixed-indicator test",  # typing-smell: ignore[no-inline-production-constants]: arbitrary test label; the KPI never emits — construction raises
+                subtitle="should fail at __post_init__",
+                values=[Measure.sum(_DS_FOO, "amount", field_id="f-a")],
+                value_zero_indicator=KPIValueZeroIndicator(),
+                value_sign_indicator=KPIValueSignIndicator(),
+            )
+
+    def test_bk_2_value_zero_indicator_off_by_default_emits_no_cf(self):
+        """BK.2 — KPIs without ``value_zero_indicator`` (the default)
+        must NOT emit a ``ConditionalFormatting`` block. The QS
+        ``KPIVisual`` field is optional; emitting an empty / unintended
+        CF block would change the visual's QS shape silently."""
+        kpi = KPI(
+            visual_id=VisualId("v-kpi"),
+            title="Total",
+            subtitle="Sum of amounts",
+            values=[Measure.sum(_DS_FOO, "amount", field_id="f-val")],
+        )
+        emitted = kpi.emit()
+        assert emitted.KPIVisual is not None
+        assert emitted.KPIVisual.ConditionalFormatting is None
+
 
 class TestTableVisual:
     def test_emits_table_with_group_by_and_values(self):

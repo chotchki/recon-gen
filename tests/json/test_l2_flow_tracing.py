@@ -1139,6 +1139,51 @@ def test_exceptions_sheet_visuals_read_unified_dataset() -> None:
             assert _typed_column(v.columns[0].column).dataset.identifier == expected_ds
 
 
+def test_bk_5_distinct_types_kpi_matches_barchart_category_count() -> None:
+    """BK.5 — cold-read F9 (CARRYOVER) flagged the "Distinct Exception
+    Types Open" KPI as not matching the visible bar count. The
+    underlying math: KPI is ``check_type.distinct_count()`` (post-BL.1
+    binding), BarChart is one bar per distinct ``check_type``. Both
+    answer "how many distinct check_types have at least one open
+    violation?" — they're constrained to render the same number by
+    construction.
+
+    Pin the two bindings together so a future refactor (e.g., a
+    follow-up that re-flips the KPI to ``.count()`` chasing a different
+    rendering quirk) fails at unit time. Specifically: the KPI's
+    measure must be ``distinct_count`` over ``check_type``; the
+    BarChart's category dim must reference ``check_type`` on the same
+    dataset.
+    """
+    from recon_gen.common.tree import BarChart, KPI
+    app = build_l2_flow_tracing_app(_CFG)
+    exc = _sheet_by_name(app, _L2_EXCEPTIONS_NAME)
+
+    kpi = next(v for v in exc.visuals if isinstance(v, KPI))
+    assert kpi.title == "Distinct Exception Types Open"
+    assert len(kpi.values) == 1
+    kpi_measure = kpi.values[0]
+    assert kpi_measure.kind == "distinct_count", (
+        f"KPI must use distinct_count to match the visible bar count; "
+        f"got kind={kpi_measure.kind!r}. Pre-BL.1 ``.count()`` rendered "
+        f"DISTINCT on QS via the CategoricalMeasureField(COUNT) quirk "
+        f"and equal-counted on App2 — the explicit distinct_count "
+        f"binding makes both renderers agree."
+    )
+    assert _typed_column(kpi_measure.column).name == "check_type"
+
+    bar = next(v for v in exc.visuals if isinstance(v, BarChart))
+    assert bar.title == "L2 Violations by Check Type"
+    assert len(bar.category) == 1
+    assert _typed_column(bar.category[0].column).name == "check_type"
+    # KPI dataset must equal BarChart dataset — both reading the same
+    # unified-exceptions row set is what makes the counts agree.
+    assert (
+        _typed_column(kpi_measure.column).dataset.identifier
+        == _typed_column(bar.category[0].column).dataset.identifier
+    )
+
+
 # -- AA.C.6 hygiene-exceptions panel pin (mirrors AA.C.3.f's L1 check) ------
 
 

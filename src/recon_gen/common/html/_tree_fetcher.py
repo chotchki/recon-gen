@@ -273,6 +273,17 @@ class _VisualPlan:
     #: 2-decimal contract that ``feedback_kpi_currency_decimals_strict``
     #: pins).
     kpi_format: str | None
+    #: BK.2 — when True, ``shape_kpi`` stamps ``state_icon`` +
+    #: ``state_color`` on each value entry so the renderer paints the
+    #: accessible icon-with-color state next to the number (parity with
+    #: the QS-side ``KPIValueZeroIndicator`` emit on the same Visual).
+    #: False for KPIs without a zero-indicator + every non-KPI.
+    kpi_zero_is_healthy: bool
+    #: BK.9 — when True, ``shape_kpi`` stamps the sign-indicator pair
+    #: (▲ green when value ≥ 0, ▼ red when value < 0) — App2 parity
+    #: with the QS-side ``KPIValueSignIndicator``. Mutually exclusive
+    #: with ``kpi_zero_is_healthy`` (the KPI constructor blocks both).
+    kpi_inflow_is_healthy: bool
 
 
 def _apply_cents_to_dollars(
@@ -487,6 +498,31 @@ def _kpi_format(visual: object) -> str | None:
     return "currency" if getattr(vals[0], "currency", False) else "number"
 
 
+def _kpi_zero_is_healthy(visual: object) -> bool:
+    """BK.2 — read the tree KPI's ``value_zero_indicator`` setting.
+    Returns True when a single-value KPI carries a
+    ``KPIValueZeroIndicator(healthy_when_zero=True)`` — the App2-side
+    payload then ships ``state_icon`` / ``state_color`` for each value
+    entry (mirrors the QS-side ConditionalFormatting emit)."""
+    if type(visual).__name__ != "KPI":
+        return False
+    indicator: Any = getattr(visual, "value_zero_indicator", None)  # typing-smell: ignore[explicit-any]: dynamic getattr against KPI subtype — narrowing to KPIValueZeroIndicator | None would force a tree → html dependency that inverts the existing layer
+    if indicator is None:
+        return False
+    return bool(getattr(indicator, "healthy_when_zero", False))
+
+
+def _kpi_inflow_is_healthy(visual: object) -> bool:
+    """BK.9 — read the tree KPI's ``value_sign_indicator`` setting.
+    Mirror of ``_kpi_zero_is_healthy`` for the sign-aware shape."""
+    if type(visual).__name__ != "KPI":
+        return False
+    indicator: Any = getattr(visual, "value_sign_indicator", None)  # typing-smell: ignore[explicit-any]: dynamic getattr against KPI subtype — narrowing to KPIValueSignIndicator | None would force a tree → html dependency that inverts the existing layer
+    if indicator is None:
+        return False
+    return bool(getattr(indicator, "inflow_is_healthy", False))
+
+
 def make_tree_db_fetcher(
     tree_app: App,
     cfg: Config,
@@ -579,6 +615,8 @@ def make_tree_db_fetcher(
                 chart=_chart_meta(visual),
                 money_columns=money_cols,
                 kpi_format=_kpi_format(visual),
+                kpi_zero_is_healthy=_kpi_zero_is_healthy(visual),
+                kpi_inflow_is_healthy=_kpi_inflow_is_healthy(visual),
             )
 
     async def fetcher(visual_id: VisualId, params: Mapping[str, list[str]]) -> Any:  # typing-smell: ignore[explicit-any]: per-visual-kind shape (KPI float, Sankey {nodes,links}, etc.) — JSON-serialized downstream, so a real union here would be every renderer's shape
@@ -688,6 +726,10 @@ def make_tree_db_fetcher(
             kpi_kwargs: dict[str, Any] = {}  # typing-smell: ignore[explicit-any]: heterogeneous shape-fn kwargs — same justification as chart_kwargs
             if plan.kpi_format is not None:
                 kpi_kwargs["format"] = plan.kpi_format
+            if plan.kpi_zero_is_healthy:
+                kpi_kwargs["zero_is_healthy"] = True
+            if plan.kpi_inflow_is_healthy:
+                kpi_kwargs["inflow_is_healthy"] = True
             return shape_for_kind(kind, rows, columns, **kpi_kwargs)
         # ForceGraph + Sankey have specialized projectors today
         # (_db_fetcher._topology_to_force_graph, etc.); the generic
@@ -705,7 +747,9 @@ def make_tree_db_fetcher(
 # ``ParameterDropdown`` with a ``LinkedValues`` source) as ``<select>``
 # widgets with an empty ``<option>`` list (``make_filter_specs_for_sheet``);
 # the server calls this before rendering a sheet to fill them.
-OptionsFetcher = Callable[[str, str], Awaitable[tuple[str, ...]]]
+OptionsFetcher = Callable[
+    [str, str, Mapping[str, list[str]]], Awaitable[tuple[str, ...]],
+]
 
 
 # Hard cap on a dataset-sourced dropdown's option count — a ``<select>``
@@ -728,8 +772,23 @@ def make_options_fetcher(
     still resolves. ``<col>`` is the dialect-correct quoted ref
     (``column_name``); ``<limit>`` is ``LIMIT n`` (PG / SQLite) or
     ``FETCH FIRST n ROWS ONLY`` (Oracle).
+
+    BN.1 (2026-05-29) — ``url_params`` threads the form's current
+    state through to ``execute_visual_sql_async`` so cascading
+    parameter dropdowns narrow their options when a parent dropdown
+    fires. Pre-BN.1 the fetcher passed ``{}``, so the Daily Statement
+    Account picker always saw every role's accounts regardless of
+    the Role pick (the v11.24.x BO.1 e2e flake on spec_example, where
+    the cascade contract is "after Role=ExternalCounterparty, Account
+    dropdown contains only ExternalCounterparty accounts"). Reproduced
+    on local App2 / spec_example sqlite: pre-fix 30 options after
+    role pick, post-fix the role-matching subset only.
     """
-    async def fetch(dataset_identifier: str, column: str) -> tuple[str, ...]:
+    async def fetch(
+        dataset_identifier: str,
+        column: str,
+        url_params: Mapping[str, list[str]],
+    ) -> tuple[str, ...]:
         base_sql = get_sql(dataset_identifier)
         col_ref = column_name(column, cfg.dialect)
         limit_clause = (
@@ -742,7 +801,7 @@ def make_options_fetcher(
             f"WHERE {col_ref} IS NOT NULL ORDER BY 1{limit_clause}"
         )
         rows, _columns = await execute_visual_sql_async(
-            pool, options_sql, {}, dialect=cfg.dialect,
+            pool, options_sql, url_params, dialect=cfg.dialect,
             dataset_parameters=get_dataset_params(dataset_identifier),
         )
         return tuple(str(r[0]) for r in rows if r[0] is not None)

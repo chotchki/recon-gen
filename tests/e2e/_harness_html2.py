@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -351,12 +351,15 @@ def make_live_db_fetchers_for_app(
             cached["vf"] = fn
         return await fn(visual_id, params)
 
-    async def options_fetcher(dataset_id: str, column: str) -> tuple[str, ...]:
+    async def options_fetcher(
+        dataset_id: str, column: str,
+        url_params: Mapping[str, list[str]],
+    ) -> tuple[str, ...]:
         fn = cached.get("of")
         if fn is None:
             fn = make_options_fetcher(cfg, pool=await _pool())
             cached["of"] = fn
-        return await fn(dataset_id, column)
+        return await fn(dataset_id, column, url_params)
 
     return visual_fetcher, options_fetcher
 

@@ -698,6 +698,76 @@ absent.
 
 ## 5. Backend / refresh quirks
 
+### 5.0 `KPIConditionalFormatting` shape gotchas
+
+Three layered constraints, all caught on the BK.2 spike deploy probe
+(2026-05-29). The boto3 SDK shape names "Expression" + "Color" but
+the model neither documents the expression DSL grammar nor mentions
+the case sensitivity on Color — both can ONLY be discovered by
+deploying.
+
+**(a) Color must be uppercase hex.** `CreateAnalysis` validates the
+`Color` field on `KPIVisual.ConditionalFormatting
+.ConditionalFormattingOptions[*].PrimaryValue.Icon.CustomCondition
+.Color` against the regex `^#[A-F0-9]{6}$`. Lowercase hex
+(`#15803d`) fails with:
+
+> Value '#15803d' at '...primaryValue.icon.customCondition.color'
+> failed to satisfy constraint: Member must satisfy regular
+> expression pattern: ^#[A-F0-9]{6}$
+
+Same field shape on Table cells (`CellAccentText` /
+`CellAccentMenu`) appears to accept lowercase hex — the case
+constraint is field-path-specific to KPI conditional formatting.
+
+**(b) Expression references the COLUMN, not the field_id.** First
+emit used `{<field_id>}` (the auto-derived UUID-shape id the App
+walker assigns). QS rejects:
+
+> Error while parsing conditional formatting expression:
+> {b545460d-55c3-5a35-8330-3189be491a50} = 0. Error : Unsupported
+> expression... Errors: Didn't find field
+> b545460d-55c3-5a35-8330-3189be491a50
+
+The expression grammar uses the column name (same shape Table cells
+use in `common/tree/formatting.py::_always_true`). The field_id
+reference works fine inside `SortConfiguration` / `FieldSort` blocks
+but not inside conditional-formatting expressions.
+
+**(c) Aggregation function must wrap the column ref.** Second
+emit used the bare column-name form (matching Table cells). QS
+rejects:
+
+> Aggregation Function can not be null in conditional formatting
+> expression for sourceColumn: drift
+
+The expression DSL requires the aggregation function (lowercase) to
+wrap the column reference: `max({drift}) = 0`, `sum({revenue}) > 0`,
+`avg({age}) < 18`. Table cells don't need this because their value
+is unaggregated — the row-grain pattern uses the bare `{column}`
+ref. KPIs aggregate at the field-well, so the conditional-formatting
+expression has to name the aggregation explicitly.
+
+The lowercase function names — `sum` / `max` / `min` / `avg` —
+mirror what QS's UI dropdown produces. (`avg`, not `average`, even
+though the SDK enum is `AVERAGE`.)
+
+**Workaround.** Uppercase the hex constants, resolve the column via
+`resolve_column(value_measure.column)` (NOT `field_id`), AND wrap
+with the aggregation function looked up by `Measure.kind`.
+Pinned by `tests/unit/test_tree.py::TestKPIVisual
+::test_bk_2_kpi_hex_colors_are_uppercase` and
+`...::test_bk_2_value_zero_indicator_emits_qs_conditional_formatting`
+so both fail at unit time rather than the deploy gate.
+
+**Suggested fix.** AWS QS team — (a) normalize hex case in the
+validator (SDK shape doesn't mention the constraint; SAM templates
+accept either case); (b) document the expression grammar's
+identifier resolution (the SDK shape calls it "Expression" without
+saying it's a column-name reference, not a field_id reference).
+
+---
+
 ### 5.1 Embed URL must be signed by the dashboard's region (not
 the QuickSight identity region)
 

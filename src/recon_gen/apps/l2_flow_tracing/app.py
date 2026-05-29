@@ -848,11 +848,20 @@ def _populate_chains_sheet(
         width=36,
         title="Chain Instances",
         subtitle=(
-            "One row per parent transfer firing. completion_status reads "
-            "'Completed' iff every Required child declared for the parent "
-            "fired against this transfer_id; 'Incomplete' if any required "
-            "child is missing. With no Metadata Key picked, every firing "
-            "in the date window appears."
+            "One row per parent transfer firing. The two `Required "
+            "Children` columns count CHILD CHAINS the L2 declares (not "
+            "legs of a multi-leg transfer — a Debit+Credit pair is one "
+            "transfer with two legs, not two children): `Required "
+            "Children Declared` is the count of Required follow-on "
+            "child chains the L2 declared for this parent; `Required "
+            "Children Fired` is how many of those actually showed up "
+            "for this transfer_id. A chain with only XOR-sibling "
+            "children declares zero Required (exactly one fires by "
+            "design), so a 0/0 row is normal for those. "
+            "`completion_status` reads 'Completed' iff every Required "
+            "child fired; 'Incomplete' if any is missing. With no "
+            "Metadata Key picked, every firing in the date window "
+            "appears."
         ),
         columns=[
             ds_chain_instances["parent_posting"].date(),

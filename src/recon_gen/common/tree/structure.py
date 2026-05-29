@@ -63,6 +63,8 @@ from recon_gen.common.tree.text_boxes import TextBox
 from recon_gen.common.tree.visuals import (
     KPI,
     BarChart,
+    KPIValueSignIndicator,
+    KPIValueZeroIndicator,
     LineChart,
     Sankey,
     Table,
@@ -568,12 +570,17 @@ class Row:
         title: str,
         values: list[Measure] | None = None,
         subtitle: str,
+        value_zero_indicator: KPIValueZeroIndicator | None = None,
+        value_sign_indicator: KPIValueSignIndicator | None = None,
         visual_id: VisualId | AutoResolved = AUTO,
     ) -> KPI:
         """Construct + register + place a KPI in this row."""
         col_index = self._consume(width)
         kpi = KPI(
-            title=title, subtitle=subtitle, values=values or [], visual_id=visual_id,
+            title=title, subtitle=subtitle, values=values or [],
+            value_zero_indicator=value_zero_indicator,
+            value_sign_indicator=value_sign_indicator,
+            visual_id=visual_id,
         )
         self.sheet.visuals.append(kpi)
         self.sheet.grid_slots.append(GridSlot(
@@ -777,10 +784,15 @@ class AbsoluteSlot:
         title: str,
         values: list[Measure] | None = None,
         subtitle: str,
+        value_zero_indicator: KPIValueZeroIndicator | None = None,
+        value_sign_indicator: KPIValueSignIndicator | None = None,
         visual_id: VisualId | AutoResolved = AUTO,
     ) -> KPI:
         kpi = KPI(
-            title=title, subtitle=subtitle, values=values or [], visual_id=visual_id,
+            title=title, subtitle=subtitle, values=values or [],
+            value_zero_indicator=value_zero_indicator,
+            value_sign_indicator=value_sign_indicator,
+            visual_id=visual_id,
         )
         self.sheet.visuals.append(kpi)
         self._place(kpi)
