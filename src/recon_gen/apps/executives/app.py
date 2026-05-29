@@ -686,21 +686,33 @@ def _wire_date_range_filter(
     2. Paired ``ParameterDateTimePicker`` controls on every data-bearing
        sheet so the analyst sets the window once and it propagates.
     """
-    # Phase BM — bridge to the 2 date-scoped datasets. The base
+    # Phase BM — bridge to the date-scoped datasets. The base
     # ``DS_EXEC_ACCOUNT_SUMMARY`` is intentionally excluded (date-
     # independent snapshot of every account — the "Total Open Accounts"
     # KPI binds it specifically because the all-time count is the
     # operator-facing semantic). The active variant + the transaction
-    # summary carry the BM-shape dataset params.
+    # summary + the daily rollup carry the BM-shape dataset params.
+    #
+    # BR.x — added ``ds_daily`` to the bridge list. ``DS_EXEC_TRANSACTION_DAILY``
+    # declares ``pExecDateStart`` / ``pExecDateEnd`` (via
+    # ``datasets.py::_exec_universal_range_params``) and its SQL
+    # substitutes them. Pre-BR.x the analysis only bridged the two other
+    # date-scoped datasets — QS flagged the daily rollup with "You have
+    # an unmapped dataset parameter." on analysis-editor open. See
+    # ``docs/reference/quicksight-quirks.md`` unmapped DatasetParameter
+    # entry for the full failure shape.
     ds_acct_active = datasets[DS_EXEC_ACCOUNT_SUMMARY_ACTIVE]
     ds_txn = datasets[DS_EXEC_TRANSACTION_SUMMARY]
+    ds_daily = datasets[DS_EXEC_TRANSACTION_DAILY]
     start_bridges = [
         (ds_acct_active, str(P_EXEC_DATE_START)),
         (ds_txn, str(P_EXEC_DATE_START)),
+        (ds_daily, str(P_EXEC_DATE_START)),
     ]
     end_bridges = [
         (ds_acct_active, str(P_EXEC_DATE_END)),
         (ds_txn, str(P_EXEC_DATE_END)),
+        (ds_daily, str(P_EXEC_DATE_END)),
     ]
     # AR.4 — 30-day window via DateView (pre-AR.4 RollingDate exprs gone).
     date_start = analysis.add_parameter(DateTimeParam(

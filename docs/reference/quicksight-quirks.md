@@ -114,3 +114,216 @@ timestamp), which was the failure shape. Post-BM the same column
 is narrowed via `TO_DATE(<<$pExecDateEnd>>, ...) + 1` on Oracle /
 the equivalent on PG + SQLite, so late-day rows on the upper-edge
 day are included on both renderers.
+
+## Unmapped `DatasetParameter` is invisible to API + dashboard viewers, errors only in the analysis editor — BR.x, 2026-05-29
+
+### Symptom
+
+A dataset declares `DatasetParameters: [{Name: "pSomething", …}]` so
+its CustomSql can substitute `<<$pSomething>>`. No analysis-side
+`ParameterDeclaration.MappedDataSetParameters` bridges any analysis
+parameter to it. The analysis deploys cleanly. `describe_analysis`
+returns `Status: CREATION_SUCCESSFUL, Errors: []`. Same for
+`describe_analysis_definition`. The published dashboard renders
+cleanly for end users — a DOM dump of the deployed dashboard has
+zero hits for any error keyword.
+
+But open the **analysis editor URL** (`/sn/analyses/<id>` in the QS
+console) and a banner appears: **"You have an unmapped dataset
+parameter."** Downstream of that — if any `ParameterControl` with
+`CascadingControlConfiguration` cascades on a control whose source
+dataset has the unmapped param — the cascade target's dropdown
+renders with a red error icon, tooltip: **"A calculated field
+contains invalid syntax. Correct the syntax and try again."** The
+"calculated field" wording is misleading: nothing in the analysis's
+`CalculatedFields` list has invalid syntax. The error originates
+from QS's internal expression evaluator failing on the unresolvable
+substitution.
+
+### Where the error does + does not surface
+
+| Surface                                          | Banner?  | Cascade error? |
+|--------------------------------------------------|----------|----------------|
+| `describe_analysis` (boto3)                      | NO       | NO             |
+| `describe_analysis_definition` (boto3)           | NO       | NO             |
+| Published dashboard URL — end-user view          | NO       | NO             |
+| Published dashboard URL — DOM dump               | NO       | NO             |
+| Analysis editor URL (`/sn/analyses/<id>`)        | **YES**  | **YES**        |
+
+Implication: every defensive layer except an analysis-editor browser
+probe is blind to this class of bug. The deploy succeeds, the API
+reports CREATION_SUCCESSFUL, the dashboard renders to viewers — and
+the analyst who opens the analysis to make changes is the first to
+hit the wall.
+
+### Confirmed-via
+
+- `tests/json/test_emit_cross_reference_consistency.py::test_dataset_parameters_are_bridged_from_analysis`
+  walks every emitted dataset, collects declared `DatasetParameters`
+  names, and asserts each one is bridged from at least one
+  `ParameterDeclaration.MappedDataSetParameters` via the analysis's
+  short-id (`DataSetIdentifierDeclarations[].Identifier`). Cheap,
+  JSON-only, runs in the standard unit-tier matrix.
+- A **browser-layer analysis-editor probe** that opens the analysis
+  editor URL and asserts no "You have an unmapped dataset parameter"
+  banner is on the backlog (need to wire the
+  `generate_embed_url_for_registered_user` ExperienceConfiguration
+  for QuickSightConsole + editor mode auth).
+
+### Workaround / fix
+
+Whenever a dataset's CustomSql contains `<<$pX>>` substitutions, the
+dataset MUST declare `dataset_parameters=[…]` AND at least one
+analysis-side `ParameterDeclaration` must bridge to it via
+`mapped_dataset_params=[(dataset, "pX"), …]` on the analysis-side
+`StringParam` / `DateTimeParam` / `IntegerParam`. The new unit test
+gates against forgetting either side.
+
+Same param with empty `default=[]` on the analysis-side `StringParam`
+emits cleanly but cascade matching breaks the same way ("calculated
+field has invalid syntax" on the dropdown). Always pass explicit
+`default=[<sentinel>]` matching the dataset-side default.
+
+### Browser-test selector (DOM-confirmed shape)
+
+The error markers' visible text + their stable QS automation
+attributes give two robust selector paths. QS class names rotate
+between UI revs (`MuiAutocomplete-option-825` /
+`css-896ft2-…erxi0re0`) so don't anchor on those; the
+`data-automation-id` + `data-automation-context` pair + the literal
+title string are the durable contract.
+
+- **Analysis-editor banner** (analysis editor URL only, NOT
+  dashboard): the literal string `"You have an unmapped dataset
+  parameter."` appears in a banner near the sheet chrome.
+- **Cascade-control red error icon** (both analysis editor AND
+  dashboard, fires when the cascade tries to evaluate the unmapped
+  param): the error tooltip is on a bare `<span title="…">` nested
+  inside `[data-automation-id="sheet_control"]`. The
+  `data-automation-context` attribute on the sheet_control names the
+  parameter whose control errored (e.g. `Account`). The tooltip text
+  is verbatim: `"A calculated field contains invalid syntax. Correct
+  the syntax and try again."`
+
+**DOM shape** (verified 2026-05-29, BR.x probe):
+
+```html
+<div class="sheet-control" data-automation-id="sheet_control"
+     data-automation-context="Account">
+  <div class="sheet-control-header">
+    <div class="sheet-control-name"
+         data-automation-id="sheet_control_name"
+         data-automation-context="Account">
+      <div style="display: flex;">
+        <span class style="display: inline-grid;">…</span>
+        <!-- ↓↓↓ this is the error marker — bare span, no class -->
+        <span class title="A calculated field contains invalid
+              syntax. Correct the syntax and try again.">…</span>
+      </div>
+    </div>
+  </div>
+</div>
+```
+
+Reference JS for a browser-layer assertion (gotcha: error text is on
+the `title` ATTRIBUTE — `innerText` is empty, the prior version of
+this probe missed every hit because it only checked visible text):
+
+```javascript
+() => {
+    const out = [];
+    // Cascade-control errors — nested span[title] on sheet_control
+    document.querySelectorAll('[data-automation-id="sheet_control"]')
+        .forEach(ctrl => {
+            const param = ctrl.getAttribute('data-automation-context') || '';
+            ctrl.querySelectorAll('span[title]').forEach(span => {
+                const title = span.getAttribute('title') || '';
+                if (title.includes('invalid syntax')
+                    || title.includes('calculated field')) {
+                    out.push({ kind: 'cascade_error', param, title });
+                }
+            });
+        });
+    // Analysis-editor banner — full-text scan since the banner DOM
+    // doesn't have a stable automation-id.
+    const banner = document.body.innerText || '';
+    if (banner.includes('You have an unmapped dataset parameter')) {
+        out.push({
+            kind: 'unmapped_dataset_parameter_banner', param: null, title: null,
+        });
+    }
+    return out;
+}
+```
+
+The cascade-control error is action-triggered (fires on the
+parameter pick), not on initial load. Browser test must drive the
+cascade (pick the source role/control) before asserting.
+
+## `GetUniqueAttributeValuesSyncForAnalysis` 400s on parameterized datasets — BR.x, 2026-05-29
+
+### Symptom
+
+A `ParameterDropDownControl` whose `SelectableValues.LinkedValues`
+points at a column on a parameterized dataset (a dataset with
+declared `DatasetParameters` that its CustomSql substitutes via
+`<<$pX>>`) fails to populate. The browser DevTools network tab
+shows a 400 on:
+
+```
+/sn/account/<acct>/api/analyses/<analysis-id>/prepared-data-sources/<dataset-id>/columns/<logical-table>.<column>/unique-attributes?Operation=GetUniqueAttributeValuesSyncForAnalysis
+```
+
+Verified with a `pg_stat_activity` capture during a triggered fetch:
+**zero QS-originated queries reach Postgres**. The 400 fires entirely
+on QS's side BEFORE any SQL is sent. The endpoint appears to refuse
+to execute against parameterized datasets — no clever SQL escape can
+help because we never reach SQL execution.
+
+### What we tried (all blocked)
+
+1. `value_when_unset.CustomValue = '<sentinel>'` on the analysis
+   param. Fixes the "calculated field has invalid syntax" cascade
+   tooltip but doesn't change the unique-values 400.
+2. `'<<$pX>>' = <<$pX>>` always-true short-circuit in the WHERE.
+   boto3 `CreateDataSet` rejects with
+   `InvalidParameterValueException: Sql contains one/many quote
+   wrapped parameters.`
+3. `'<<$' || 'pX>>' = <<$pX>>` split-concat to bypass the boto3
+   validator. Accepted by boto3, deployed cleanly, did NOT change
+   the 400 behavior — QS still rejects the parameterized dataset
+   before any SQL fires.
+4. Removing `CascadingControlConfiguration` while keeping the
+   parameterized dataset. Doesn't help — the LinkedValues fetch
+   itself is what 400s, separately from cascade.
+
+### The viable shapes
+
+- **Cascade source dataset MUST be unparameterized** (no
+  `DatasetParameters`, no `<<$pX>>` in SQL). The cascade narrows
+  UI-side via `ColumnToMatch`.
+- **OR drop cascade entirely.** Parameter dropdown sources can be
+  parameterized datasets *if* you accept that the LinkedValues
+  refresh doesn't fire on bridge param change — the operator sees
+  the full universe in the dropdown. The dropdown pick + bridge
+  re-fetch on data visuals still works correctly; only the dropdown
+  options themselves don't narrow.
+
+### Renderer divergence
+
+This is a QS-only failure. App2 (the HTMX renderer) implements
+`<<$pX>>` substitution at the `_sql_executor` layer and re-fetches
+LinkedValues options on bridge param change. So an analysis that
+needs the cascade narrowing CAN have it on App2 — declare the
+divergence in the sheet description + ship the wider universe on
+QS. Affected today: Daily Statement's Role → Account cascade
+(L1.app2 narrows; L1.qs does not).
+
+### Diagnostic JS — does this dataset's dropdown 400?
+
+Open browser DevTools → Network → filter for `unique-attributes` →
+trigger the dropdown / cascade. Any 400 with
+`Operation=GetUniqueAttributeValuesSyncForAnalysis` confirms the
+shape. The dataset id is in the URL path; verify it has declared
+`DatasetParameters` in the emitted JSON. If yes, this quirk
+applies.

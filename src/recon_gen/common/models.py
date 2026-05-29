@@ -1420,6 +1420,15 @@ class StringParameterDeclaration:
     Name: str
     DefaultValues: dict[str, Any]
     MappedDataSetParameters: list[MappedDataSetParameter] | None = None
+    # BR.x — QS analysis-editor "Set reserved value" advanced setting.
+    # Shape: {"ValueWhenUnsetOption": "RECOMMENDED_VALUE"|"NULL", "CustomValue": "<str>"}.
+    # Required when a parameter feeds a CascadingControlConfiguration —
+    # cascade's internal match expression substitutes this value when
+    # the parameter is "unset"; the QS UI default of NULL makes the
+    # cascade expression invalid ("calculated field has invalid syntax"
+    # on the target control). See docs/reference/quicksight-quirks.md
+    # — unmapped DatasetParameter entry, cascade tooltip section.
+    ValueWhenUnset: dict[str, Any] | None = None
 
 
 @dataclass
@@ -1428,6 +1437,7 @@ class IntegerParameterDeclaration:
     Name: str
     DefaultValues: dict[str, Any]  # {"StaticValues": [int]}
     MappedDataSetParameters: list[MappedDataSetParameter] | None = None
+    ValueWhenUnset: dict[str, Any] | None = None
 
 
 @dataclass

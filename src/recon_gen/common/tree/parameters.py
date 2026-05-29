@@ -78,11 +78,22 @@ class StringParam:
     pairs binding this analysis parameter to one or more dataset-level
     parameters substituted via ``<<$name>>`` in the dataset's
     CustomSql.
+
+    ``value_when_unset``: optional string value QS substitutes when
+    this parameter is "unset" at evaluation time. REQUIRED when this
+    parameter feeds a ``CascadingControlConfiguration`` — the cascade
+    machinery substitutes this value into its internal match
+    expression; the QS UI default of NULL makes the expression
+    invalid ("calculated field has invalid syntax" tooltip on the
+    target control). Set to the same sentinel used for the dataset's
+    default so cascade-without-pick is a no-op narrowing instead of
+    a NULL comparison. See ``docs/reference/quicksight-quirks.md``.
     """
     name: ParameterName
     default: list[str] = field(default_factory=list[str])
     multi_valued: bool = False
     mapped_dataset_params: list[DatasetParamMapping] | None = None
+    value_when_unset: str | None = None
 
     def emit(self) -> ParameterDeclaration:
         return ParameterDeclaration(
@@ -94,6 +105,14 @@ class StringParam:
                 DefaultValues={"StaticValues": self.default},
                 MappedDataSetParameters=_emit_mappings(
                     self.mapped_dataset_params,
+                ),
+                # QS API constraint: ValueWhenUnsetOption (NULL|
+                # RECOMMENDED_VALUE) is mutually exclusive with
+                # CustomValue. For a string custom value, emit
+                # ``CustomValue`` alone — no ValueWhenUnsetOption.
+                ValueWhenUnset=(
+                    {"CustomValue": self.value_when_unset}
+                    if self.value_when_unset is not None else None
                 ),
             ),
         )

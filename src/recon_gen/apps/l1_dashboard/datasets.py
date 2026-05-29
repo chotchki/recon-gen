@@ -1593,14 +1593,17 @@ def build_l1_accounts_dataset(
     DISTINCT-inside-UNION shape stays cheap as the matview grows
     (DISTINCT on the (small) account column, not on full rows).
 
-    AA.B.1 — carries ``account_role`` so the Daily Statement Role
-    cascade can narrow the account picker via the ``pL1DsRole``
-    dataset param. Default = ``L1_ALL_SENTINEL`` (show every account
-    regardless of role); picking a role in the Role dropdown narrows
-    the account dropdown to that role's accounts. The companion stays
-    used by *every* L1 sheet's Account dropdown — sheets that don't
-    bridge a role param into ``pL1DsRole`` get the sentinel default
-    and see every account, preserving today's behaviour.
+    BR.x — the dead ``<<$pL1DsRole>>`` WHERE clause + matching
+    ``dataset_parameters`` declaration removed. Only Daily Statement
+    has a Role control, and Daily Statement's Account dropdown sources
+    from ``DS_L1_DS_ACCOUNTS`` (the narrower balance-only companion),
+    not this wider dataset. No analysis param bridged into
+    ``l1-accounts-ds.pL1DsRole`` — QS flagged the dataset with "You
+    have an unmapped dataset parameter." on analysis-editor open and
+    the cascade tooltip on the Daily Statement Account dropdown read
+    "A calculated field contains invalid syntax." (see
+    ``docs/reference/quicksight-quirks.md`` — unmapped DatasetParameter
+    entry). Dropping the dead substitution dissolves both errors.
     """
     prefix = cfg.db_table_prefix
     sql = (
@@ -1636,16 +1639,12 @@ def build_l1_accounts_dataset(
         f"   FROM {prefix}_todays_exceptions"
         f"   WHERE account_id IS NOT NULL"
         f" ) accounts_universe"
-        f" WHERE {_data_value_clause('account_role', P_L1_DS_ROLE_DSP)}"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-accounts-dataset"),
         "L1 Accounts", "l1-accounts",
         sql, L1_ACCOUNTS_CONTRACT,
         visual_identifier=DS_L1_ACCOUNTS,
-        dataset_parameters=[
-            _all_sentinel_sv_param(P_L1_DS_ROLE_DSP),
-        ],
     )
 
 

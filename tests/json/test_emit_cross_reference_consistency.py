@@ -217,3 +217,153 @@ def test_dataset_arns_resolve_to_emitted_dataset_files(
         f"{generator_name}: dashboard / analysis cites datasets the "
         f"bundle didn't emit:\n" + "\n".join(failures)
     )
+
+
+def _dataset_parameter_names(ds_doc: dict[str, Any]) -> list[str]:
+    """Extract declared ``DatasetParameters`` names from a dataset
+    JSON. Each entry is wrapped in a kind-discriminator dict —
+    ``{StringDatasetParameter|IntegerDatasetParameter|…: {Name: ...}}``.
+    """
+    out: list[str] = []
+    for entry in cast(
+        "list[dict[str, Any]]", ds_doc.get("DatasetParameters", []) or [],
+    ):
+        for decl_any in entry.values():
+            if not isinstance(decl_any, dict):
+                continue
+            decl = cast("dict[str, Any]", decl_any)
+            name = decl.get("Name")
+            if isinstance(name, str):
+                out.append(name)
+    return out
+
+
+def _analysis_param_bridges(
+    analysis_doc: dict[str, Any],
+) -> set[tuple[str, str]]:
+    """Collect every ``(DataSetIdentifier, DataSetParameterName)`` pair
+    that any analysis-side ``ParameterDeclaration`` bridges via
+    ``MappedDataSetParameters``. These are the (short_ds_id, ds_param)
+    pairs that QS knows how to substitute at fetch time."""
+    bridged: set[tuple[str, str]] = set()
+    defn = cast("dict[str, Any]", analysis_doc.get("Definition", {}))
+    for decl_wrapper in cast(
+        "list[dict[str, Any]]",
+        defn.get("ParameterDeclarations", []) or [],
+    ):
+        for decl_any in decl_wrapper.values():
+            if not isinstance(decl_any, dict):
+                continue
+            decl = cast("dict[str, Any]", decl_any)
+            mappings = cast(
+                "list[dict[str, Any]]",
+                decl.get("MappedDataSetParameters") or [],
+            )
+            for m in mappings:
+                ds_id = m.get("DataSetIdentifier")
+                param = m.get("DataSetParameterName")
+                if isinstance(ds_id, str) and isinstance(param, str):
+                    bridged.add((ds_id, param))
+    return bridged
+
+
+def _analysis_short_id_for_arn(
+    analysis_doc: dict[str, Any],
+) -> dict[str, str]:
+    """Build ``DataSetArn → short Identifier`` lookup from the analysis's
+    ``DataSetIdentifierDeclarations``. The short id is what
+    ``MappedDataSetParameters.DataSetIdentifier`` references; the ARN
+    points at the emitted dataset file's id."""
+    out: dict[str, str] = {}
+    defn = analysis_doc.get("Definition", {})
+    for d in cast(
+        "list[dict[str, Any]]",
+        defn.get("DataSetIdentifierDeclarations", []) or [],
+    ):
+        ident = d.get("Identifier")
+        arn = d.get("DataSetArn")
+        if isinstance(ident, str) and isinstance(arn, str):
+            out[arn] = ident
+    return out
+
+
+@pytest.mark.parametrize(
+    "emitted_bundle", list(_GENERATORS.keys()), indirect=True,
+)
+def test_dataset_parameters_are_bridged_from_analysis(
+    emitted_bundle: tuple[str, Path],
+) -> None:
+    """Every ``DatasetParameter`` a dataset declares MUST be mapped
+    from at least one analysis-side ``ParameterDeclaration`` via
+    ``MappedDataSetParameters`` — otherwise QS errors with "dataset
+    has unmapped parameter" on analysis load, and any cascade /
+    SQL-pushdown path downstream of it fails with a misleading
+    "calculated field has invalid syntax".
+
+    Surfaced by BR.x: ``l1-accounts-ds`` declared ``pL1DsRole`` (the
+    role-cascade param) but the analysis only bridged ``pL1DsRole`` →
+    ``l1-ds-accounts-ds`` (the Daily-Statement companion). The wider
+    ``l1-accounts-ds`` had ``<<$pL1DsRole>>`` in its SQL with no
+    analysis-param feeding it — QS surfaced this as a load-time
+    notification, and the cascade-driven Account dropdown refetch on
+    Daily Statement hit "calculated field has invalid syntax".
+    """
+    generator_name, out = emitted_bundle
+    datasets_dir = out / "datasets"
+    if not datasets_dir.exists():
+        pytest.skip(f"{generator_name}: no datasets directory")
+
+    analysis_paths = sorted(out.glob("*-analysis.json"))
+    assert analysis_paths, (
+        f"{generator_name}: no *-analysis.json emitted under {out}"
+    )
+
+    failures: list[str] = []
+    for analysis_path in analysis_paths:
+        analysis_doc = cast(
+            "dict[str, Any]", _json.loads(analysis_path.read_text()),
+        )
+        bridged = _analysis_param_bridges(analysis_doc)
+        arn_to_short = _analysis_short_id_for_arn(analysis_doc)
+
+        for ds_path in sorted(datasets_dir.glob("*.json")):
+            ds_doc = cast(
+                "dict[str, Any]", _json.loads(ds_path.read_text()),
+            )
+            ds_id = ds_doc.get("DataSetId")
+            if not isinstance(ds_id, str):
+                continue
+            declared = _dataset_parameter_names(ds_doc)
+            if not declared:
+                continue
+            # Match the dataset to its analysis-side short identifier.
+            # ARN shape: arn:aws:quicksight:R:A:dataset/<DataSetId>.
+            matching_arn = next(
+                (
+                    arn for arn in arn_to_short
+                    if arn.endswith(f"dataset/{ds_id}")
+                ),
+                None,
+            )
+            if matching_arn is None:
+                # Dataset emitted but not referenced by this analysis
+                # — skip; it belongs to a different app's bundle.
+                continue
+            short_id = arn_to_short[matching_arn]
+            for param_name in declared:
+                if (short_id, param_name) not in bridged:
+                    failures.append(
+                        f"  {analysis_path.name}: dataset "
+                        f"{ds_id!r} (analysis short id {short_id!r}) "
+                        f"declares ``DatasetParameter`` "
+                        f"{param_name!r} but no ``ParameterDeclaration`` "
+                        f"bridges it via ``MappedDataSetParameters``. "
+                        f"QS will error with \"dataset has unmapped "
+                        f"parameter\" on analysis load and any cascade "
+                        f"path downstream will surface as \"calculated "
+                        f"field has invalid syntax\"."
+                    )
+    assert not failures, (
+        f"{generator_name}: dataset parameters declared but not "
+        f"bridged from the analysis:\n" + "\n".join(failures)
+    )
