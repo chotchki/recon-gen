@@ -55,7 +55,7 @@ from recon_gen.common.tree._helpers import (
 )
 from recon_gen.common.tree.actions import Action
 from recon_gen.common.tree.formatting import CellFormat
-from recon_gen.common.tree.calc_fields import CalcField
+from recon_gen.common.tree.calc_fields import CalcField, resolve_column
 from recon_gen.common.tree.datasets import Dataset
 from recon_gen.common.tree.fields import Dim, FieldRef, Measure, resolve_field_id
 
@@ -195,24 +195,21 @@ def _emit_kpi_zero_indicator(value_measure: "Measure") -> dict[str, Any]:
     green), second matches non-zero (X + red). QS picks the first
     matching expression at render time.
 
-    Expression form follows the QS-confirmed shape: ``{<field_id>} =
-    0`` and ``{<field_id>} <> 0``. KPI conditional-formatting
-    expressions reference the value FIELD (not the column directly),
-    so we resolve ``Measure.field_id`` which the App walker has
-    already auto-assigned by this point.
+    Expression form (caught by run_tests deploy probe 2026-05-29 on
+    the v11.24.x BK.2 spike): QS rejected the auto-derived field_id
+    reference with "Didn't find field <uuid>" — KPI conditional-
+    formatting expressions reference the COLUMN by name, matching the
+    Table-cell pattern in ``formatting.py::_always_true``. Resolve via
+    ``resolve_column`` and emit ``{<column_name>} = 0`` / ``<> 0``.
     """
-    assert not isinstance(value_measure.field_id, _AutoSentinel), (
-        "KPIValueZeroIndicator: Measure.field_id wasn't resolved — "
-        "App.resolve_auto_ids() must run before KPI.emit()."
-    )
-    field_id = value_measure.field_id
+    column_name = resolve_column(value_measure.column)
     return {
         "ConditionalFormattingOptions": [
             {
                 "PrimaryValue": {
                     "Icon": {
                         "CustomCondition": {
-                            "Expression": f"{{{field_id}}} = 0",
+                            "Expression": f"{{{column_name}}} = 0",
                             "IconOptions": {"Icon": _KPI_HEALTHY_ICON_QS},
                             "Color": _KPI_HEALTHY_COLOR_HEX,
                             "DisplayConfiguration": {
@@ -226,7 +223,7 @@ def _emit_kpi_zero_indicator(value_measure: "Measure") -> dict[str, Any]:
                 "PrimaryValue": {
                     "Icon": {
                         "CustomCondition": {
-                            "Expression": f"{{{field_id}}} <> 0",
+                            "Expression": f"{{{column_name}}} <> 0",
                             "IconOptions": {"Icon": _KPI_BROKEN_ICON_QS},
                             "Color": _KPI_BROKEN_COLOR_HEX,
                             "DisplayConfiguration": {

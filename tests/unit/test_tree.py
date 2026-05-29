@@ -528,14 +528,17 @@ class TestKPIVisual:
             _KPI_HEALTHY_COLOR_HEX,
             _KPI_HEALTHY_ICON_QS,
         )
+        # Expression must reference the COLUMN name, not the field_id.
+        # QS's deploy probe (2026-05-29) rejected field_id refs with
+        # "Didn't find field <uuid>". Same shape Table cells use.
         healthy = options[0]["PrimaryValue"]["Icon"]["CustomCondition"]
-        assert healthy["Expression"] == "{f-drift} = 0"
+        assert healthy["Expression"] == "{drift} = 0"
         assert healthy["IconOptions"]["Icon"] == _KPI_HEALTHY_ICON_QS
         assert healthy["Color"] == _KPI_HEALTHY_COLOR_HEX
 
         # Broken — non-zero → X + WCAG-AA red.
         broken = options[1]["PrimaryValue"]["Icon"]["CustomCondition"]
-        assert broken["Expression"] == "{f-drift} <> 0"
+        assert broken["Expression"] == "{drift} <> 0"
         assert broken["IconOptions"]["Icon"] == _KPI_BROKEN_ICON_QS
         assert broken["Color"] == _KPI_BROKEN_COLOR_HEX
 

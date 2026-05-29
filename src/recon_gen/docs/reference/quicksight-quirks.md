@@ -698,33 +698,51 @@ absent.
 
 ## 5. Backend / refresh quirks
 
-### 5.0 `KPIConditionalFormatting.CustomCondition.Color` rejects lowercase hex
+### 5.0 `KPIConditionalFormatting` shape gotchas
 
-**Observed.** `CreateAnalysis` validates the `Color` field on
-`KPIVisual.ConditionalFormatting.ConditionalFormattingOptions[*]
-.PrimaryValue.Icon.CustomCondition.Color` against the regex
-`^#[A-F0-9]{6}$`. Lowercase hex (`#15803d`) fails with:
+Two distinct constraints, both caught on the BK.2 spike deploy probe
+(2026-05-29):
 
-> 2 validation errors detected: Value '#15803d' at
-> 'definition.sheets.10.member.visuals.5.member.kPIVisual
-> .conditionalFormatting.conditionalFormattingOptions.1.member
-> .primaryValue.icon.customCondition.color' failed to satisfy
-> constraint: Member must satisfy regular expression pattern:
-> ^#[A-F0-9]{6}$
+**(a) Color must be uppercase hex.** `CreateAnalysis` validates the
+`Color` field on `KPIVisual.ConditionalFormatting
+.ConditionalFormattingOptions[*].PrimaryValue.Icon.CustomCondition
+.Color` against the regex `^#[A-F0-9]{6}$`. Lowercase hex
+(`#15803d`) fails with:
 
-Same field shape on Table cells (`CellAccentText` / `CellAccentMenu`)
-appears to accept lowercase hex — the validation is field-path-
-specific to KPI conditional formatting. Worth re-probing the table
-side to confirm.
+> Value '#15803d' at '...primaryValue.icon.customCondition.color'
+> failed to satisfy constraint: Member must satisfy regular
+> expression pattern: ^#[A-F0-9]{6}$
 
-**Workaround.** Emit uppercase hex on the KPI indicator constants.
+Same field shape on Table cells (`CellAccentText` /
+`CellAccentMenu`) appears to accept lowercase hex — the case
+constraint is field-path-specific to KPI conditional formatting.
+
+**(b) Expression references the COLUMN, not the field_id.** First
+emit used `{<field_id>}` (the auto-derived UUID-shape id the App
+walker assigns). QS rejects:
+
+> Error while parsing conditional formatting expression:
+> {b545460d-55c3-5a35-8330-3189be491a50} = 0. Error : Unsupported
+> expression... Errors: Didn't find field
+> b545460d-55c3-5a35-8330-3189be491a50
+
+The expression grammar uses the column name (same shape Table cells
+use in `common/tree/formatting.py::_always_true`). The field_id
+reference works fine inside `SortConfiguration` / `FieldSort` blocks
+but not inside conditional-formatting expressions.
+
+**Workaround.** Uppercase the hex constants AND resolve via
+`resolve_column(value_measure.column)` instead of `field_id`.
 Pinned by `tests/unit/test_tree.py::TestKPIVisual
-::test_bk_2_kpi_hex_colors_are_uppercase` so a future re-theme can't
-silently slip lowercase past the unit gate.
+::test_bk_2_kpi_hex_colors_are_uppercase` and
+`...::test_bk_2_value_zero_indicator_emits_qs_conditional_formatting`
+so both fail at unit time rather than the deploy gate.
 
-**Suggested fix.** AWS QS team — normalize hex case in the validator
-or document the constraint inline (the SDK shape doesn't mention it;
-SAM templates accept either case, KPI fields don't).
+**Suggested fix.** AWS QS team — (a) normalize hex case in the
+validator (SDK shape doesn't mention the constraint; SAM templates
+accept either case); (b) document the expression grammar's
+identifier resolution (the SDK shape calls it "Expression" without
+saying it's a column-name reference, not a field_id reference).
 
 ---
 
