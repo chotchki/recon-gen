@@ -73,10 +73,13 @@ edge / browser layers — the URL IS the cache key, by design.
 
 from __future__ import annotations
 
+import html as _html_module
 import inspect
 import json
 import logging
 import traceback
+
+html_escape = _html_module.escape
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Union
@@ -554,6 +557,65 @@ def make_app(
             headers={"Cache-Control": visual_data_cache_header},
         )
 
+    async def dropdown_options(request: Request) -> Response:
+        """BR.1 — App2 cascade refresh endpoint.
+
+        Returns the ``<option>`` HTML fragments for a cascading
+        dropdown's source dataset, narrowed by the current form state.
+        The rendered ``<select>`` carries ``hx-get`` against this URL +
+        ``hx-trigger="change from:[name='param_<source>']"`` so HTMX
+        swaps the option list whenever the source picker changes.
+
+        Without this route, ``_resolve_linked_options`` only fires at
+        page-load — picking the Role dropdown refreshes only visuals,
+        the Account dropdown's options stay stale (the QS-side BO.1
+        bug's App2 twin; see ``apps/l1_dashboard/app.py`` cascade fix).
+
+        Preserves the user's current selection when it remains in the
+        new option universe (re-emits a ``selected`` attribute);
+        otherwise the swap clears it and the form's next fire narrows
+        to "no selection" until the user picks again — exactly the
+        QS cascade behavior.
+        """
+        dash_id = str(request.path_params["dashboard_id"])
+        served = dashboards.get(dash_id)
+        if served is None:
+            raise HTTPException(status_code=404)
+        sheet_id = str(request.path_params["sheet_id"])
+        if sheet_id not in all_sheets[dash_id]:
+            raise HTTPException(status_code=404)
+        if served.options_fetcher is None:
+            return HTMLResponse('<option value=""></option>')
+        dataset_id = str(request.path_params["dataset"])
+        column = str(request.path_params["column"])
+        url_params = _query_params_as_multidict(request.query_params)
+        opts = await served.options_fetcher(dataset_id, column, url_params)
+        # Preserve user's current pick if it survives the narrow. The
+        # form's `param_<self>` key lives in the same query_params we
+        # already parsed; look it up by walking the spec's URL key.
+        # Self-name comes from the form params via the same `param_X`
+        # convention every dropdown uses (the renderer's <select
+        # name="param_X">), so we just check if any URL key matches
+        # one of the new options.
+        selected = ""
+        for key, vals in url_params.items():
+            if not key.startswith("param_"):
+                continue
+            for v in vals:
+                if v and v in opts:
+                    selected = v
+                    break
+            if selected:
+                break
+        parts = ['<option value=""></option>']
+        for opt in opts:
+            esc = html_escape(opt)
+            if opt == selected:
+                parts.append(f'<option value="{esc}" selected>{esc}</option>')
+            else:
+                parts.append(f'<option value="{esc}">{esc}</option>')
+        return HTMLResponse("".join(parts))
+
     async def log_event(request: Request) -> Response:
         try:
             payload = await request.json()
@@ -666,6 +728,11 @@ def make_app(
             "/visuals/{visual_id}/data",
             visual_data,
             methods=["GET"],
+        ),
+        Route(
+            "/dashboards/{dashboard_id}/sheets/{sheet_id}"
+            "/dropdown-options/{dataset}/{column}",
+            dropdown_options, methods=["GET"],
         ),
         Mount(
             "/static",

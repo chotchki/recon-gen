@@ -1438,6 +1438,26 @@
   document.addEventListener("htmx:afterSwap", (evt) => {
     hydrate(evt.detail.target);
     wireFilterWidgets(evt.detail.target);
+    // BR.1 — cascading <select> swapped its <option> list. Tom Select
+    // shadow-DOM holds the OLD options visible until we re-sync it.
+    // The swap target is the <select> itself; destroy + re-init keeps
+    // the user's pick when it survives the narrow (server emitted
+    // ``selected``) and resets to "no selection" when it doesn't.
+    var swapTgt = evt.detail.target;
+    if (
+      swapTgt &&
+      swapTgt.tagName === "SELECT" &&
+      swapTgt.dataset.cascadeSourceParam
+    ) {
+      if (swapTgt.tomselect) {
+        // Tom Select stashes the instance back on the underlying <select>;
+        // ``destroy`` tears down the wrapper + listeners cleanly so the
+        // re-init below paints fresh from the swapped <option>s.
+        swapTgt.tomselect.destroy();
+      }
+      delete swapTgt.dataset.widgetWired;
+      wireTomSelect(swapTgt);
+    }
     // AA.A.9.race — mirror the response's data-bound-params onto the
     // visual-data div so it sits next to the requested-params snapshot
     // from beforeRequest. ``hydrateSection`` already copies the script

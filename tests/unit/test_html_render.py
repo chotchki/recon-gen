@@ -469,3 +469,54 @@ class TestQsRichtextToHtml:
             "<text-box><expression>${pL1UnbundledRail}</expression></text-box>"
         )
         assert "${pL1UnbundledRail}" in out
+
+
+class TestParameterDropdownCascade:
+    """BR.1 — App2 cascade refresh on cascading dropdowns.
+
+    The renderer emits ``hx-get`` / ``hx-trigger`` / ``hx-target`` /
+    ``hx-swap`` on the ``<select>`` only when ``cascade_source_param``
+    is set. Static-enum + parameter-free LinkedValues dropdowns stay
+    inert (no HTMX wiring overhead). The JS handler in bootstrap.js
+    looks for ``data-cascade-source-param`` to detect which swaps need
+    Tom Select re-init.
+    """
+
+    def test_cascade_attrs_emit_when_source_set(self) -> None:
+        from recon_gen.common.html.render import (
+            ParameterDropdownSpec, _render_parameter_dropdown,
+        )
+        from recon_gen.apps.l1_dashboard.datasets import (
+            DS_L1_DS_ACCOUNTS, P_L1_DS_ACCOUNT_DSP, P_L1_DS_ROLE_DSP,
+        )
+        spec = ParameterDropdownSpec(
+            name=P_L1_DS_ACCOUNT_DSP, label="Account",
+            options=("Acct A", "Acct B"),
+            options_dataset=DS_L1_DS_ACCOUNTS,
+            options_column="account_display",
+            cascade_source_param=P_L1_DS_ROLE_DSP,
+        )
+        out = _render_parameter_dropdown(spec)
+        assert f'hx-get="dropdown-options/{DS_L1_DS_ACCOUNTS}/account_display"' in out
+        assert f"hx-trigger=\"change from:[name='param_{P_L1_DS_ROLE_DSP}']" in out
+        assert 'hx-target="this"' in out
+        assert 'hx-swap="innerHTML"' in out
+        assert f'data-cascade-source-param="{P_L1_DS_ROLE_DSP}"' in out
+
+    def test_no_cascade_attrs_when_source_unset(self) -> None:
+        from recon_gen.common.html.render import (
+            ParameterDropdownSpec, _render_parameter_dropdown,
+        )
+        from recon_gen.apps.l1_dashboard.datasets import (
+            DS_L1_DS_ROLES, P_L1_DS_ROLE_DSP,
+        )
+        spec = ParameterDropdownSpec(
+            name=P_L1_DS_ROLE_DSP, label="Role",
+            options=("SouthPool", "NorthPool"),
+            options_dataset=DS_L1_DS_ROLES,
+            options_column="account_role",
+        )
+        out = _render_parameter_dropdown(spec)
+        assert "hx-get=" not in out
+        assert "hx-trigger=" not in out
+        assert "data-cascade-source-param" not in out

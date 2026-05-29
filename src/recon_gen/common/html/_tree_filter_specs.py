@@ -198,9 +198,19 @@ def make_filter_specs_for_sheet(sheet: "Sheet") -> list[FilterSpec]:
                 name=name, label=ctrl.title, options=tuple(sv.values),
             ))
         elif ctrl.type == "SINGLE_SELECT" and isinstance(sv, LinkedValues):
+            # BR.1 — App2 cascade. When the tree control declares
+            # ``cascade_source`` (QS's CascadingControlConfiguration
+            # source), thread the source control's parameter name into
+            # the spec so the render layer can wire HTMX option refresh
+            # against the per-sheet ``dropdown-options`` endpoint.
+            cascade_src: str | None = None
+            tree_cascade = getattr(ctrl, "cascade_source", None)
+            if tree_cascade is not None:
+                cascade_src = str(tree_cascade.parameter.name)
             specs.append(ParameterDropdownSpec(
                 name=name, label=ctrl.title, options=(),
                 options_dataset=sv.dataset.identifier,
                 options_column=sv.column_name,
+                cascade_source_param=cascade_src,
             ))
     return specs

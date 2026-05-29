@@ -126,6 +126,14 @@ class ParameterDropdownSpec:
     options_dataset: str | None = None
     options_column: str | None = None
     selected: str = ""
+    # BR.1 — App2 cascade. When this dropdown's option universe should
+    # refresh after another picker changes (Daily Statement
+    # Role → Account, mirrors the tree's ``cascade_source`` ↔
+    # QS's ``CascadingControlConfiguration``), set this to the source
+    # parameter's name (sans the ``param_`` prefix). The renderer wires
+    # ``hx-get`` against the per-sheet ``dropdown-options`` endpoint;
+    # the JS re-syncs Tom Select against the swapped ``<option>`` list.
+    cascade_source_param: str | None = None
 
 
 @dataclass(frozen=True)
@@ -455,13 +463,39 @@ def _render_parameter_dropdown(spec: ParameterDropdownSpec) -> str:
     that ``<option>`` so the visuals' ``hx-include="#filter-form"`` load
     fetch is already narrowed; a value not in the (resolved) option list
     is still rendered as a selected ``<option>`` so the form submits it
-    (stale-bookmark / sibling-dataset case)."""
+    (stale-bookmark / sibling-dataset case).
+
+    BR.1 — when ``cascade_source_param`` is set, the ``<select>`` carries
+    ``hx-get`` against the per-sheet ``dropdown-options/<dataset>/<col>``
+    route + ``hx-trigger`` listening for changes to the source parameter.
+    The 300 ms debounce mirrors ``wireFilterAutoRefresh``'s debounce
+    against the visual-refresh chain. JS re-syncs Tom Select after the
+    swap so the user's pick survives if it's still in the new option
+    list, otherwise clears."""
     name = html.escape(spec.name)
     sel = spec.selected
+    cascade_attrs = ""
+    if (
+        spec.cascade_source_param is not None
+        and spec.options_dataset is not None
+        and spec.options_column is not None
+    ):
+        cs = html.escape(spec.cascade_source_param)
+        ds = html.escape(spec.options_dataset)
+        col = html.escape(spec.options_column)
+        cascade_attrs = (
+            f' hx-get="dropdown-options/{ds}/{col}"'
+            f' hx-trigger="change from:[name=\'param_{cs}\']'
+            f' delay:300ms"'
+            f' hx-target="this"'
+            f' hx-swap="innerHTML"'
+            f' hx-include="#filter-form"'
+            f' data-cascade-source-param="{cs}"'
+        )
     parts = [
         f'    <label class="{_FORM_LABEL_CLASS}">{html.escape(spec.label)} '
         f'<select name="param_{name}" class="{_TS_SELECT_CLASS}"'
-        f'{_TOM_SELECT_ATTR}>'
+        f'{_TOM_SELECT_ATTR}{cascade_attrs}>'
         f'<option value=""></option>'
     ]
     rendered_sel = False
