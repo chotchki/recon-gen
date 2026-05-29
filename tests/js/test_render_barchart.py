@@ -256,12 +256,17 @@ def test_barchart_handles_empty_categories_without_crashing() -> None:
         })
         bars = page.locator("#barchart-target svg rect.barchart-bar").count()
         svg_count = page.locator("#barchart-target svg").count()
+        empty_count = page.locator(
+            "#barchart-target .bar-chart-empty-state",
+        ).count()
         browser.close()
-    # No bars but the SVG itself is rendered — empty-data state
-    # shows axes-only chart (intentional; communicates "no data"
-    # rather than blank space).
+    # BQ.1 — empty data paints the empty-state banner (no SVG,
+    # no bars). Pre-BQ.1 the empty case rendered an axes-only frame
+    # which read as a broken visual. The "no crash" intent still
+    # holds; the visual signal flipped from axes-only → banner.
     assert bars == 0
-    assert svg_count == 1
+    assert svg_count == 0
+    assert empty_count == 1
 
 
 def test_barchart_skips_non_numeric_values_safely() -> None:
@@ -278,3 +283,27 @@ def test_barchart_skips_non_numeric_values_safely() -> None:
         bars = page.locator("#barchart-target svg rect.barchart-bar").count()
         browser.close()
     assert bars == 3
+
+
+def test_barchart_empty_categories_renders_empty_state_banner() -> None:
+    """BQ.1 — when no categories OR no numeric series values,
+    renderBarChart paints the empty-state banner instead of an
+    empty axis frame."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_into_target(page, {"categories": [], "values": []})
+        empty_count = page.locator(
+            "#barchart-target .bar-chart-empty-state",
+        ).count()
+        svg_count = page.locator("#barchart-target svg").count()
+        message = cast(str, page.evaluate(
+            """() => document.querySelector(
+                '#barchart-target .bar-chart-empty-state',
+            )?.textContent || ''""",
+        ))
+        browser.close()
+    assert empty_count == 1
+    assert svg_count == 0
+    assert "No data matches" in message

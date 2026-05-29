@@ -204,3 +204,44 @@ def test_format_kpi_value_handles_non_numeric() -> None:
     # passed missing data, render blank not "null"). Non-numeric
     # strings pass through unchanged.
     assert results == ["", "", "n/a"]
+
+
+def test_kpi_empty_flag_renders_empty_state_banner() -> None:
+    """BQ.2 — when ``data.empty`` is set by shape_kpi (zero rows OR
+    all NULL aggregates), renderKPI paints the empty-state banner
+    instead of "0" / "$0.00" / "—". Distinguishes "no data" from a
+    legit zero count."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_into_target(page, {"values": [], "empty": True})
+        empty_count = page.locator("#kpi-target .kpi-empty-state").count()
+        card_count = page.locator("#kpi-target .kpi-card").count()
+        message = cast(str, page.evaluate(
+            """() => document.querySelector(
+                '#kpi-target .kpi-empty-state',
+            )?.textContent || ''""",
+        ))
+        browser.close()
+    assert empty_count == 1
+    assert card_count == 0
+    assert "No data matches" in message
+
+
+def test_kpi_value_zero_not_treated_as_empty() -> None:
+    """BQ.2 — a COUNT KPI returning 0 over filtered-but-existent
+    source rows MUST still render as "0" with the value card. Only
+    ``data.empty=true`` triggers the banner; value=0 alone doesn't."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_into_target(page, {
+            "values": [{"value": 0, "label": "Open Exceptions", "format": "number"}],
+        })
+        empty_count = page.locator("#kpi-target .kpi-empty-state").count()
+        value_text = page.locator("#kpi-target .kpi-value").first.inner_text()
+        browser.close()
+    assert empty_count == 0
+    assert "0" in value_text
