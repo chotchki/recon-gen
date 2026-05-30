@@ -80,6 +80,17 @@ Same cold-read → triage → design → implement → re-cold-read pattern that
 
 **Sequencing vs BTa:** BX.0 + BX.0.5 can run in parallel with BTa implementation (different file surface — BTa is ETL Support pages, BX cold-read is L2 Editor pages). BX.0.7 onwards waits until BTa has stabilized (to avoid two simultaneous editor-touching phases).
 
+## Phase BXa - Persona nuke + instance singleton structured form (standalone)
+
+Discovery output of `docs/audits/bx_persona_audit.md` v2: `DemoPersona` is doubly dead (Sasquatch vocab hardcodes stakeholders + merchants, then those hardcoded values aren't substituted in any docs page either). Full NUKE — promote `institution_name` + `institution_acronym` to top-level `L2Instance` fields alongside the existing top-level `description`; remove `DemoPersona` + `/l2_shape/persona/` route + `_sasquatch_pr_vocabulary` intercept + the entire stakeholder/merchant/gl_accounts/flavor surface. Collapses BX P1.1 (Instance singleton structured form) into BXa.2. **Independent of BTa + BX; can fire anytime.**
+
+- [ ] BXa.0 - **REPLAN** (~30-60 min). Lock two open questions: (a) drop the now-unused `HandbookVocabulary.stakeholders/merchants/gl_accounts/flavor` fields entirely, OR keep as empty tuples for the docs-substitution promise; (b) fixture-migration order — sasquatch_pr.yaml first vs code-first. Output: `docs/audits/bxa_0_replan.md`.
+- [ ] BXa.1 - **Schema + vocab refactor** (~2-3h). Drop `L2Instance.persona`; add top-level `institution_name: str | None` + `institution_acronym: str | None`. Update loader / serializer / validator. Delete `common/persona.py`, `_sasquatch_pr_vocabulary`, `_has_sasquatch_persona`, `_SASQUATCH_PERSONA_ACRONYM`, the routing gate. Rename `_neutral_vocabulary_for` → `vocabulary_for_l2`. Update `vocabulary.py` + Investigation app + audit PDF to read the new top-level fields. Migrate `tests/l2/sasquatch_pr.yaml` in the same commit (no compat shim per `[[feedback_no_compat_shims]]`). Update + delete persona test files. Spot-check locked-seeds (should be unchanged — persona was already persona-blind for seeds).
+- [ ] BXa.2 - **Editor singleton rebuild** (~2-3h, closes BX P1.1). Replace `/l2_shape/persona/` route + `/l2_shape/instance/` raw YAML textarea with a single structured `/l2_shape/instance/` form (3 fields: institution_name + institution_acronym + description with markdown preview per BF.9 pattern). Drop `_render_persona_form` + `_persona_form_to_dict` + `_persona_dict_from_instance` + `_PERSONA_INSTITUTION_FIELDS`. Rewrite `docs/walkthroughs/customization/how-do-i-brand-my-handbook-prose.md` to reflect that custom prose substitution requires forking the docs templates (the per-institution substitution promise dies with the nuked vocab fields). Update browser-dogfood test for the new instance form. Address operator's BX comment in §1: "I like this segmentation [BUILD vs VIEW top nav], maybe group the top nav parts and color code" — defer to BX.7 (not BXa).
+- [ ] BXa.3 - **Verify + close** (~30 min). Full unit suite green; manual /l2_shape/instance/ + diagram render check; archive Phase BXa to PLAN_ARCHIVE.md.
+
+**Phase BXa total estimate:** ~5-7h. Net code-removal + one structured-form upgrade. **Dependencies:** none — independent of BTa, BX, and any in-flight release work.
+
 ## Phase BU - L2 plant generation + Training mode (provisional)
 
 **Provisional** — replan at BU.0. Could run in parallel with BT after BS; sequencing decided at BU.0. SPEC.md::Phase BU for the design.
