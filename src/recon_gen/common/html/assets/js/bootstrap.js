@@ -649,8 +649,25 @@
 
     var width = target.clientWidth || 800;
     var plotH = 320; // fixed plot area; bars scale to this, not the legend
-    var rotateX =
-      categories.length > 8 || categories.some((c) => String(c).length > 6);
+    var maxCatLen = categories.reduce(
+      (m, c) => Math.max(m, String(c).length),
+      0,
+    );
+    var rotateX = categories.length > 8 || maxCatLen > 6;
+    // Bottom margin is dynamic when labels rotate — pre-fix used a
+    // fixed 92px which clipped at the "ExternalCounterparty"-class
+    // (19 char) labels: rotated -40° they extended down into the
+    // x_label slot, visually overlapping with "Account Type". The
+    // rotated vertical extent scales with label length (≈ char_width
+    // * sin(40°) per char at text-xs); compute it + leave room for
+    // the axis tick marks + the optional axis label below the ticks.
+    var rotatedLabelH = rotateX ? Math.ceil(maxCatLen * 4.5) : 0;
+    var xAxisLabelH = data.x_label ? 18 : 0;
+    var bottomMargin = rotateX
+      ? 12 + rotatedLabelH + xAxisLabelH + 8 // tick gap + labels + label + buffer
+      : data.x_label
+        ? 40
+        : 24;
     // AO.9 — estimate left margin from the max y-axis label width.
     // 64px clips ``$10,000,000``-class labels into ``0,000,000`` on
     // currency-format charts. Scale margin from the data magnitude +
@@ -687,15 +704,22 @@
     var margin = {
       top: 16,
       right: multi ? 132 : 24, // legend gutter when multi-series
-      bottom: rotateX ? 92 : 56,
+      bottom: bottomMargin,
       left: leftMargin,
     };
     var innerW = Math.max(0, width - margin.left - margin.right);
-    var innerH = plotH - margin.top - margin.bottom;
     // Grow the SVG (not the plot) so a tall multi-series legend doesn't
-    // clip — a dense instance can have dozens of series.
+    // clip — a dense instance can have dozens of series. Also grow it
+    // when the rotated-label bottom margin would crush the bar area
+    // below ~200px (the cold-read floor for visually-comparable bars).
     var legendH = multi ? margin.top + series.length * 18 + 8 : 0;
-    var height = Math.max(plotH, legendH);
+    var minInnerH = 200;
+    var height = Math.max(
+      plotH,
+      margin.top + minInnerH + margin.bottom,
+      legendH,
+    );
+    var innerH = height - margin.top - margin.bottom;
 
     var svg = d3
       .select(target)
@@ -1170,6 +1194,63 @@
     return u.pathname + u.search;
   }
 
+  // BS.3 follow-up (2026-05-30): detect + strip back-edges so d3-sankey
+  // doesn't throw "circular link" on closed-loop L2 topologies. The
+  // L2 can legitimately declare cycles (e.g. ClearingSuspense →
+  // CardLoadCycle → Customer → DisbursementCycle → ClearingSuspense for
+  // the closed-loop-pool pattern), but d3-sankey is strictly DAG-only.
+  // Iterative DFS marks back-edges (target is GRAY = ancestor on the
+  // current path); we render the resulting DAG and surface a banner
+  // listing how many edges were hidden. Operators get a usable Sankey
+  // + a hint to switch to Money Trail / Account Network for the full
+  // directed-graph view.
+  var _SANKEY_WHITE = 0;
+  var _SANKEY_GRAY = 1;
+  var _SANKEY_BLACK = 2;
+  function _stripSankeyCycles(nodes, links) {
+    var g = {};
+    links.forEach((l, i) => {
+      if (!g[l.source]) g[l.source] = [];
+      g[l.source].push({ to: l.target, idx: i });
+    });
+    var color = new Array(nodes.length).fill(_SANKEY_WHITE);
+    var dropIdx = new Set();
+    var root;
+    var stack;
+    var frame;
+    var edges;
+    var edge;
+    // Iterative DFS — recursion would blow the stack on large graphs.
+    for (root = 0; root < nodes.length; root++) {
+      if (color[root] !== _SANKEY_WHITE) continue;
+      stack = [{ u: root, it: 0 }];
+      color[root] = _SANKEY_GRAY;
+      while (stack.length > 0) {
+        frame = stack[stack.length - 1];
+        edges = g[frame.u] || [];
+        if (frame.it >= edges.length) {
+          color[frame.u] = _SANKEY_BLACK;
+          stack.pop();
+          continue;
+        }
+        edge = edges[frame.it];
+        frame.it += 1;
+        if (color[edge.to] === _SANKEY_GRAY) {
+          // Back-edge — would create a cycle. Drop it.
+          dropIdx.add(edge.idx);
+        } else if (color[edge.to] === _SANKEY_WHITE) {
+          color[edge.to] = _SANKEY_GRAY;
+          stack.push({ u: edge.to, it: 0 });
+        }
+        // BLACK target = cross- or forward-edge, fine for a DAG.
+      }
+    }
+    return {
+      droppedCount: dropIdx.size,
+      cleanLinks: links.filter((_, i) => !dropIdx.has(i)),
+    };
+  }
+
   function renderSankey(target, data, visualId) {
     // BO.3 — explicit empty-state copy. d3-sankey on `{nodes:[],links:[]}`
     // produces an empty SVG that reads as a broken panel ("blank white
@@ -1192,6 +1273,39 @@
       target.appendChild(empty);
       return;
     }
+    // BS.3 follow-up: strip cycles before handing to d3-sankey.
+    var pruned = _stripSankeyCycles(nodes, links);
+    var banner;
+    if (pruned.droppedCount > 0) {
+      banner = document.createElement("div");
+      banner.setAttribute("role", "status");
+      banner.className =
+        "sankey-cycle-banner mx-2 mb-2 p-2 text-xs text-secondary-fg " +
+        "bg-link-tint border border-surface-border rounded";
+      banner.textContent =
+        "Note: " +
+        pruned.droppedCount +
+        " cyclic edge" +
+        (pruned.droppedCount === 1 ? "" : "s") +
+        " hidden so this Sankey can render. The L2 declares closed-loop " +
+        "flows here — use Money Trail or Account Network for the full " +
+        "directed-graph view.";
+      target.appendChild(banner);
+    }
+    if (pruned.cleanLinks.length === 0) {
+      // Every edge was a back-edge (degenerate case) — fall through
+      // to the standard empty-state instead of trying to render zero
+      // links into a sankey.
+      empty = document.createElement("div");
+      empty.className =
+        "sankey-empty-state flex h-96 items-center justify-center " +
+        "text-sm text-secondary-fg p-8 text-center";
+      empty.textContent =
+        "All flows in this view are cyclic — Sankey can't render the " +
+        "topology. Use Money Trail or Account Network instead.";
+      target.appendChild(empty);
+      return;
+    }
     var width = target.clientWidth || 800;
     var height = 400;
     var svg = d3
@@ -1209,7 +1323,7 @@
       ]);
     var graph = sankey({
       nodes: nodes.map((d) => Object.assign({}, d)),
-      links: links.map((d) => Object.assign({}, d)),
+      links: pruned.cleanLinks.map((d) => Object.assign({}, d)),
     });
     svg
       .append("g")

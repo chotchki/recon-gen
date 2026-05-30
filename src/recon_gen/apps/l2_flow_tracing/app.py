@@ -65,7 +65,7 @@ from recon_gen.common.handbook.l2ft_exceptions import (
     load_bundled_l2ft_exceptions,
     panel_markdown as l2ft_panel_markdown,
 )
-from recon_gen.common.ids import FilterGroupId, ParameterName, SheetId
+from recon_gen.common.ids import ParameterName, SheetId
 from recon_gen.common.l2 import L2Instance
 from recon_gen.common.models import DateTimeDefaultValues
 from recon_gen.common.sheets.app_info import (
@@ -86,14 +86,10 @@ from recon_gen.common.tree.actions import DrillWrite
 from recon_gen.common.tree import (
     Analysis,
     App,
-    CalcField,
-    CategoryFilter,
     Dataset,
     DateTimeParam,
     Drill,
     DrillParam,
-    DrillResetSentinel,
-    FilterGroup,
     Sheet,
     StaticValues,
     StringParam,
@@ -111,21 +107,22 @@ SHEET_L2_EXCEPTIONS = SheetId("l2ft-sheet-l2-exceptions")
 SHEET_APP_INFO = SheetId("l2ft-sheet-app-info")  # M.4.4.5
 
 
-# M.3.10m — drill from the L2 Exceptions table to the per-rail or
-# per-chain explorer. Two parameters mirror the L1 dashboard's
-# sentinel-pattern drill machinery: default '__ALL__' acts as a
-# "no narrowing" pass-through; a real value sets the destination
-# sheet's filter to that one rail / chain parent. The 2 drills
-# (DATA_POINT_MENU triggers) appear as right-click menu items on
-# every row of the L2 Exceptions table.
-P_L2FT_RAIL_DRILL = ParameterName("pL2ftRailDrill")
-P_L2FT_CHAIN_DRILL = ParameterName("pL2ftChainDrill")
-_DRILL_RESET_SENTINEL = "__ALL__"
-_DP_RAIL_DRILL = DrillParam(P_L2FT_RAIL_DRILL, ColumnShape.L2_DECLARED_NAME)
-_DP_CHAIN_DRILL = DrillParam(
-    P_L2FT_CHAIN_DRILL, ColumnShape.L2_DECLARED_NAME,
+# M.3.10m + BS.3 follow-up (2026-05-30) — drill from the L2 Exceptions
+# table to the per-rail or per-chain explorer. The drill writes the
+# DESTINATION SHEET'S OWN PICKER PARAMETER (``pL2ftRail`` /
+# ``pL2ftChainsChain``) directly, so the URL-pushed value flows through
+# the existing dataset-param-pushdown SQL path that both QS + App2
+# share. Pre-fix this used dedicated ``pL2ftRailDrill`` /
+# ``pL2ftChainDrill`` parameters bridged into a CalcField +
+# FilterGroup, which worked on QS but didn't narrow the SQL on App2
+# (the drill param never reached a ``<<$pL2ftRailDrill>>`` placeholder).
+# Writing the picker param directly = one mechanism, both renderers.
+_DP_RAIL_DRILL = DrillParam(
+    ParameterName("pL2ftRail"), ColumnShape.L2_DECLARED_NAME,
 )
-_L2FT_DRILL_RESET_PARAMS = (_DP_RAIL_DRILL, _DP_CHAIN_DRILL)
+_DP_CHAIN_DRILL = DrillParam(
+    ParameterName("pL2ftChainsChain"), ColumnShape.L2_DECLARED_NAME,
+)
 
 
 _GETTING_STARTED_NAME = "Getting Started"
@@ -298,16 +295,12 @@ def build_l2_flow_tracing_app(
         analysis=analysis, datasets=datasets, l2_instance=l2_instance,
         theme=theme,
     )
-    # M.3.10m — declare the 2 drill parameters + sentinel-pattern
-    # filter groups on the destination sheets (Rails / Chains) BEFORE
-    # populating the L2 Exceptions sheet, since the Exceptions
-    # populator wires drill actions referencing both params.
-    _wire_l2ft_drill_filter_groups(
-        analysis,
-        datasets=datasets,
-        rails_sheet=rails_sheet,
-        chains_sheet=chains_sheet,
-    )
+    # M.3.10m + BS.3 follow-up (2026-05-30) — L2 Exceptions drills now
+    # write the destination sheet's own picker parameter directly
+    # (pL2ftRail / pL2ftChainsChain). The pre-fix sentinel-pattern
+    # CalcField + FilterGroup wiring (was _wire_l2ft_drill_filter_groups)
+    # is gone — picker params are declared by _populate_rails_sheet /
+    # _populate_chains_sheet, which already run above.
     _populate_l2_exceptions_sheet(
         cfg, l2_exceptions_sheet,
         datasets=datasets,
@@ -1097,92 +1090,6 @@ def _populate_transfer_templates_sheet(
     )
 
 
-def _wire_l2ft_drill_filter_groups(
-    analysis: Analysis,
-    *,
-    datasets: dict[str, Dataset],
-    rails_sheet: Sheet,
-    chains_sheet: Sheet,
-) -> None:
-    """Declare the 2 L2 Exceptions drill parameters + their sentinel-
-    pattern destination filter groups (M.3.10m).
-
-    Mirrors the L1 dashboard's drill machinery (see
-    ``_wire_drill_filter_groups`` in ``apps/l1_dashboard/app.py``):
-
-    - 2 parameters with default ``__ALL__`` — when un-narrowed the
-      sentinel short-circuits the calc field to ``'PASS'`` so the
-      destination shows everything; on a real drill the calc returns
-      ``'PASS'`` only for matching rows.
-    - 2 calc fields (sentinel-or-match expression) — one on the
-      postings dataset for Rails, one on the chain-instances dataset
-      for Chains.
-    - 2 filter groups, each ``CategoryFilter.with_literal(value='PASS')``
-      against the calc field, scoped to the destination sheet.
-
-    The literal filter pattern sidesteps QS's parameter-bound
-    CategoryFilter empty-string narrowing bug — same workaround AR
-    uses; same workaround L1 uses.
-    """
-    analysis.add_parameter(StringParam(
-        name=P_L2FT_RAIL_DRILL,
-        default=[_DRILL_RESET_SENTINEL],
-    ))
-    analysis.add_parameter(StringParam(
-        name=P_L2FT_CHAIN_DRILL,
-        default=[_DRILL_RESET_SENTINEL],
-    ))
-
-    ds_postings = datasets[DS_POSTINGS]
-    ds_chain_instances = datasets[DS_CHAIN_INSTANCES]
-
-    rail_calc = analysis.add_calc_field(CalcField(
-        name="_drill_pass_pL2ftRailDrill_on_postings",
-        dataset=ds_postings,
-        expression=(
-            f"ifelse(${{{P_L2FT_RAIL_DRILL}}} = '{_DRILL_RESET_SENTINEL}', "
-            f"'PASS', "
-            f"ifelse({{rail_name}} = ${{{P_L2FT_RAIL_DRILL}}}, "
-            f"'PASS', 'FAIL'))"
-        ),
-    ))
-    fg_rail = analysis.add_filter_group(FilterGroup(
-        filter_group_id=FilterGroupId("fg-l2ft-drill-rail-on-postings"),
-        cross_dataset="SINGLE_DATASET",
-        filters=[CategoryFilter.with_literal(
-            filter_id="filter-fg-l2ft-drill-rail-on-postings",
-            dataset=ds_postings,
-            column=rail_calc,
-            value="PASS",
-            null_option="NON_NULLS_ONLY",
-        )],
-    ))
-    fg_rail.scope_sheet(rails_sheet)
-
-    chain_calc = analysis.add_calc_field(CalcField(
-        name="_drill_pass_pL2ftChainDrill_on_chain_instances",
-        dataset=ds_chain_instances,
-        expression=(
-            f"ifelse(${{{P_L2FT_CHAIN_DRILL}}} = '{_DRILL_RESET_SENTINEL}', "
-            f"'PASS', "
-            f"ifelse({{parent_chain_name}} = ${{{P_L2FT_CHAIN_DRILL}}}, "
-            f"'PASS', 'FAIL'))"
-        ),
-    ))
-    fg_chain = analysis.add_filter_group(FilterGroup(
-        filter_group_id=FilterGroupId("fg-l2ft-drill-chain-on-instances"),
-        cross_dataset="SINGLE_DATASET",
-        filters=[CategoryFilter.with_literal(
-            filter_id="filter-fg-l2ft-drill-chain-on-instances",
-            dataset=ds_chain_instances,
-            column=chain_calc,
-            value="PASS",
-            null_option="NON_NULLS_ONLY",
-        )],
-    ))
-    fg_chain.scope_sheet(chains_sheet)
-
-
 def _l2ft_drill(
     *,
     target_sheet: Sheet,
@@ -1190,18 +1097,23 @@ def _l2ft_drill(
     writes: list[DrillWrite],
     trigger: Literal["DATA_POINT_CLICK", "DATA_POINT_MENU"] = "DATA_POINT_MENU",
 ) -> Drill:
-    """L2FT cross-sheet drill helper. Mirrors L1's `_l1_drill`: any
-    drill param the caller doesn't write gets a DrillResetSentinel
-    so a prior drill's value can't leak across navigations.
+    """L2FT cross-sheet drill helper.
+
+    BS.3 follow-up (2026-05-30): drill writes target the destination
+    sheet's user-facing picker parameter directly (pL2ftRail /
+    pL2ftChainsChain). The pre-fix machinery used dedicated
+    pL2ftRailDrill / pL2ftChainDrill params that fed a CalcField +
+    FilterGroup on the QS analysis layer — which left App2 unable
+    to narrow (the SQL had no ``<<$pL2ftRailDrill>>`` placeholder).
+    By writing the picker param directly, the existing
+    ``_match_all_in_clause`` SQL pushdown narrows on both renderers.
+    No reset-sentinel needed: the picker is the user-visible filter
+    and any drill is a one-shot override (the picker becomes sticky
+    until the user clears it, same as if they'd typed the value).
     """
-    written = {param.name for param, _ in writes}
-    full_writes = list(writes)
-    for param in _L2FT_DRILL_RESET_PARAMS:
-        if param.name not in written:
-            full_writes.append((param, DrillResetSentinel()))
     return Drill(
         target_sheet=target_sheet,
-        writes=full_writes,
+        writes=writes,
         name=name,
         trigger=trigger,
     )
