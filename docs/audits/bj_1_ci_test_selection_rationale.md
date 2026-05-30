@@ -18,7 +18,7 @@ the cutover too risky. The unblocker (ephemeral AWS infra via
    from both workflows).
 
 2. **`9d9f46f3`** — hotfix: the runner-driven jobs pulled in the
-   runner's full unit layer which needed `--extra serve` for
+   runner's full unit layer which needed the App2 server stack (now part of `--extra prod`) for
    aiosqlite + starlette deps. Added to all 3 e2e jobs.
 
 3. **`f3a824da` (revert of 8a7ea10 + 9d9f46f)** — reverted because:

@@ -87,7 +87,7 @@ uv sync --all-extras            # everything, locked from uv.lock
 For a leaner dev install, pick only the extras you need:
 
 ```bash
-uv sync --frozen --extra dev --extra audit
+uv sync --frozen --extra dev --extra prod
 ```
 
 (`uv sync` always installs the `[dev]` group + any extras you ask

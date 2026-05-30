@@ -46,7 +46,7 @@ jobs:
         # empty reviewer signature widgets land via pyhanko on every
         # render, regardless of whether `signing:` is configured.
         # `--frozen` fails the build if the lock is out of date.
-        run: uv sync --frozen --extra dev --extra audit
+        run: uv sync --frozen --extra dev --extra prod
 
       - name: Install Playwright WebKit browser
         # X.2.a.2 added a Playwright JS unit harness under tests/js/
@@ -139,13 +139,13 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies (V.2 — uv sync from uv.lock)
-        # `--extra audit` adds pyhanko on top of reportlab + pypdf
+        # `--extra prod` provides reportlab + pypdf + pyhanko
         # (already in [dev]) so `audit apply --execute` can land its
         # empty reviewer-signature widgets without ImportError.
         # `--extra e2e` adds pytest-xdist which the runner's unit layer
         # invokes via ``-n auto`` (k.1.proof — without it the runner
         # fails with ``pytest: error: unrecognized arguments: -n``).
-        run: uv sync --frozen --extra dev --extra demo --extra audit --extra e2e
+        run: uv sync --frozen --extra dev --extra e2e --extra prod
 
       - name: Generate per-job config.yaml
         # Cfg lives in /tmp so the runner picks it up via RECON_GEN_CONFIG.
@@ -300,7 +300,7 @@ jobs:
       - name: Install dependencies (V.2 — uv sync from uv.lock)
         # `--extra e2e` brings in pytest-xdist which the runner's unit
         # layer invokes via `-n auto`.
-        run: uv sync --frozen --extra dev --extra demo-oracle --extra audit --extra e2e
+        run: uv sync --frozen --extra dev --extra e2e --extra prod
 
       - name: Generate per-job config.yaml
         run: |
@@ -448,15 +448,15 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies (V.2 — uv sync from uv.lock)
-        # `--extra serve` brings the App2 server stack (starlette /
+        # `--extra prod` brings the App2 server stack (starlette /
         # uvicorn / aiosqlite) — the `app2` layer serves the HTMX
-        # renderer in-process. `--extra audit` adds pyhanko on top of
+        # renderer in-process + reportlab/pypdf/pyhanko for audit. `--extra prod` covers it. Pre-BS.6 split was
         # reportlab + pypdf so the `db` layer's audit-PDF render/verify
         # lands its empty reviewer-signature widgets. `--extra e2e`
         # pulls pytest-xdist for the runner's `-n auto` unit prelude.
-        # No `--extra demo` — SQLite uses stdlib `sqlite3` + aiosqlite,
+        # No separate demo extra needed — SQLite uses stdlib `sqlite3` + aiosqlite,
         # not psycopg.
-        run: uv sync --frozen --extra dev --extra serve --extra audit --extra e2e
+        run: uv sync --frozen --extra dev --extra e2e --extra prod
 
       - name: Install Playwright WebKit browser
         # The `app2` chain layer runs `tests/e2e/test_html2_*` which

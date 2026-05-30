@@ -129,7 +129,7 @@ jobs:
         # pytest-xdist + boto3-stubs, ``dev`` for pytest-cov (AB.7.1a
         # coverage aggregation). Skip ``[docs]``. Skip
         # ``playwright install`` — API tests don't render anything.
-        run: uv sync --frozen --extra deploy --extra demo --extra audit --extra e2e --extra dev
+        run: uv sync --frozen --extra dev --extra e2e --extra prod
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -331,7 +331,7 @@ jobs:
         # ``[e2e]`` extra brings in playwright + pytest-xdist; ``[dev]``
         # adds pytest-cov (AB.7.1a coverage aggregation). The other
         # extras match e2e-pg-api so the deploy steps work.
-        run: uv sync --frozen --extra deploy --extra demo --extra audit --extra e2e --extra dev
+        run: uv sync --frozen --extra dev --extra e2e --extra prod
 
       - name: Install Playwright WebKit browser
         # Only WebKit — that's what ``common/browser/helpers.py``
@@ -513,7 +513,7 @@ jobs:
   # cancel-in-progress: false discipline applies (one Oracle deploy at
   # a time on the shared external DB).
   #
-  # Driver: ``--extra demo-oracle`` instead of ``--extra demo`` —
+  # Driver: ``--extra prod`` covers both PG + Oracle drivers —
   # pulls ``oracledb`` (thin client, no Instant Client install) instead
   # of ``psycopg2``. Same other extras as the PG job.
   #
@@ -541,10 +541,10 @@ jobs:
 
       - name: Install dependencies
         # ``demo-oracle`` brings in ``oracledb>=2.0`` (thin mode, no
-        # Instant Client install needed). Skip ``--extra demo`` —
+        # Instant Client install needed). `--extra prod` includes oracledb —
         # ``psycopg2`` would just sit unused on this leg. ``[dev]`` adds
         # pytest-cov (AB.7.1a coverage aggregation).
-        run: uv sync --frozen --extra deploy --extra demo-oracle --extra audit --extra e2e --extra dev
+        run: uv sync --frozen --extra dev --extra e2e --extra prod
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -780,7 +780,7 @@ jobs:
         # ``deploy`` for boto3 (json clean), ``demo`` for psycopg2
         # (schema clean drops PG tables). Skip ``audit`` / ``e2e`` —
         # cleanup doesn't need the seed pipeline or pytest.
-        run: uv sync --frozen --extra deploy --extra demo
+        run: uv sync --frozen --extra prod
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -890,7 +890,7 @@ jobs:
         # ``oracledb`` (schema clean drops Oracle tables). Skip
         # ``audit`` / ``e2e`` — cleanup doesn't need the seed pipeline
         # or pytest.
-        run: uv sync --frozen --extra deploy --extra demo-oracle
+        run: uv sync --frozen --extra prod-oracle
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4

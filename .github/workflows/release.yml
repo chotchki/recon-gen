@@ -48,7 +48,7 @@ jobs:
         # `[audit]` brings in reportlab + pypdf + pyhanko; tests/audit/
         # invokes `audit apply --execute` which needs pyhanko on every
         # render (empty reviewer signature widgets).
-        run: uv sync --frozen --extra dev --extra audit
+        run: uv sync --frozen --extra dev --extra prod
 
       - name: Install Playwright WebKit browser
         # Mirrors ci.yml's step. tests/js/test_render_table.py launches

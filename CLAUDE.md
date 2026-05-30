@@ -21,8 +21,8 @@ Five artifact groups (**schema** | **data** | **json** | **docs** | **audit**), 
 ```bash
 # Install (uv handles env + lock; add extras as needed)
 uv sync --all-extras                       # everything (recommended for dev)
-uv sync --extra dev --extra audit          # just unit tests + audit PDF
-uv sync --extra dev --extra demo --extra demo-oracle  # for `data apply --execute`
+uv sync --extra dev --extra prod          # just unit tests + audit PDF
+uv sync --extra dev --extra prod  # for `data apply --execute`
 
 # Generate all JSON for the four bundled apps
 recon-gen json apply -c config.yaml -o out/

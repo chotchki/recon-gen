@@ -41,78 +41,58 @@ Issues = "https://github.com/chotchki/recon-gen/issues"
 Changelog = "https://github.com/chotchki/recon-gen/blob/main/RELEASE_NOTES.md"
 
 [project.optional-dependencies]
-deploy = [
-    # `recon-gen json apply --execute` (push JSON to AWS) +
-    # `json clean --execute` (sweep ManagedBy:recon-gen resources)
-    # both go through boto3. botocore[crt] pulls awscrt — required for
-    # the SSO / login credential provider, which trips
-    # MissingDependencyException at boto3 client init when operators
-    # use AWS SSO / `aws sso login`. Bare install (without this extra)
-    # is fine for emit-only — `json apply` writes JSON to disk without
-    # touching AWS — boto3 is lazily imported in the `--execute` branch.
+# Phase BS.6 (2026-05-29) — collapsed 8 extras → 3: `prod` + `dev` +
+# `e2e`. Pre-BS.6 the split was per-feature-dimension (deploy / demo
+# / demo-oracle / audit / serve / docs); BS-arc operator-feedback was
+# the granularity created confusion without proportional value
+# (operators always wanted "production run" or "dev run" or "e2e run").
+# Net effect: simpler install, one knob per persona. Specific dep
+# annotations preserved in the prod-bucket below.
+prod = [
+    # ETL Engineer / Integrator running a production App2 deploy +
+    # any QS deploy via `json apply --execute` get every runtime dep
+    # under one extras name. Subset usable for QS-only deploys (boto3
+    # + audit) just installs a bit extra — net win on operator
+    # complexity. Set studio_enabled=false in cfg for dashboards-only
+    # prod App2; the markdown dep stays installed but inert.
+    #
+    # AWS deploy + cleanup (was [deploy]). botocore[crt] pulls awscrt
+    # for the SSO credential provider; absent it boto3 trips
+    # MissingDependencyException when operators use `aws sso login`.
     "boto3>=1.34",
     "botocore[crt]>=1.34",
-]
-demo = [
-    # Phase X.2.n — psycopg3 (the `psycopg` package, not psycopg2).
-    # Async-capable via psycopg.AsyncConnection while keeping the same
-    # `:name` placeholder format we use across PG / Oracle / SQLite.
-    # The ``[pool]`` extra pulls in psycopg_pool for the X.2.n.2
-    # AsyncConnectionPool — the App2 server uses it to bound DB
-    # concurrency separately from the asyncio worker pool.
-    "psycopg[binary,pool]>=3.1",
-]
-demo-oracle = [
-    # Phase P — oracledb thin client. No Oracle Instant Client install
-    # needed in thin mode; falls back to thick mode automatically when
-    # the client libraries are present (and faster).
-    "oracledb>=2.0",
-]
-audit = [
-    # Phase U — `recon-gen audit apply --execute` writes a PDF
-    # reconciliation report. reportlab is pure Python (PyPI wheels,
-    # no system deps — preserves the Phase T win). pypdf is used by
-    # the U.8 end-to-end smoke test to extract text from the
-    # generated PDF + assert sentinel sections are present.
-    "reportlab>=4.0",
-    "pypdf>=4.0",
-    # U.7.b — auto-sign the rendered PDF via pyHanko when
-    # config.yaml carries a `signing:` block (PEM RSA key + cert).
-    # Optional at runtime: only loaded when signing kicks in;
-    # absent config.yaml signing block = unsigned PDF (back-compat).
-    "pyhanko>=0.30",
-]
-serve = [
-    # Phase X.2 — self-hosted dashboard renderer. The browser-side
-    # JS/CSS (htmx, d3, the filter widgets, the Tailwind output) ship
-    # *inside the wheel* and are served from /static/ — App 2 needs no
-    # internet at runtime (X.2.p). Starlette is the ASGI framework;
-    # uvicorn[standard] bundles uvloop + httptools for the
-    # production-grade server.
-    # python-multipart is required for Starlette to parse HTMX form
-    # POSTs (the swap-on-mutation pattern). httpx is pulled in for
-    # Starlette's TestClient (tests/unit/test_html_server.py).
+    # App2 runtime — Starlette + uvicorn + multipart (HTMX form POST
+    # parsing) + httpx (TestClient + outbound). The browser-side
+    # JS/CSS ships inside the wheel — App2 needs no internet at
+    # runtime (X.2.p). (was [serve])
     "starlette>=1.1.0",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.18",
     "httpx>=0.27",
-    # Phase X.2.n — async DB drivers. Stdlib sqlite3 is sync-only;
-    # aiosqlite is the async wrapper that lets the App2 server use a
-    # SQLite cfg without blocking the asyncio loop. Cheap dependency
-    # (~30 KB), pulls nothing extra.
+    # Async DB drivers. aiosqlite wraps stdlib sqlite3 for the async
+    # path; aiosqlitepool mitigates aiosqlite#258 thread-lock leak on
+    # per-request connect+close. (was [serve])
     "aiosqlite>=0.19",
-    # aiosqlitepool — connection pool wrapper for aiosqlite.
-    # Mitigates aiosqlite#258 thread-lock leak on per-request connect+close
-    # patterns. See common/db.py::_AsyncSqlitePool for the integration.
     "aiosqlitepool>=1.0.0",
-    # BF.9 — markdown rendering for the Studio editor's textarea
-    # Preview tab (description fields opt-in via FieldSpec.preview_
-    # markdown). Lazy-imported in `_studio_editor_routes.py`; pulled
-    # in here so the [serve] extras pin all Studio-runtime needs in
-    # one place. v11.22.0 CI failure (missing in pyproject) catches
-    # this: a Studio routes unit test exercises the preview path and
-    # ModuleNotFoundError'd in CI even though it worked locally.
+    # PG driver — psycopg3 with [pool] for AsyncConnectionPool used
+    # by the App2 server to bound DB concurrency. (was [demo])
+    "psycopg[binary,pool]>=3.1",
+    # Oracle driver — oracledb thin client (no Oracle Instant Client
+    # install needed; thick mode kicks in if client libs present).
+    # Pure PyPI wheel; install cost minor. (was [demo-oracle])
+    "oracledb>=2.0",
+    # Markdown for the Studio editor's textarea Preview tab (BF.9 —
+    # description fields opt-in via FieldSpec.preview_markdown).
+    # Lazy-imported in `_studio_editor_routes.py`; inert when
+    # studio_enabled=false. (was [serve])
     "markdown>=3.6",
+    # Audit PDF generation. reportlab is pure Python; pypdf used by
+    # the end-to-end smoke test. pyHanko optional at runtime —
+    # loaded only when cfg.signing is set; absent block = unsigned
+    # PDF (back-compat). (was [audit])
+    "reportlab>=4.0",
+    "pypdf>=4.0",
+    "pyhanko>=0.30",
 ]
 dev = [
     "pytest>=7.0",
@@ -185,7 +165,7 @@ dev = [
     # Phase X.2 spike — Starlette server + TestClient for HTML renderer
     # unit tests. Pulled into [dev] so the spike's tests run in the
     # default `uv sync --extra dev` developer setup without a separate
-    # `--extra serve`.
+    # `--extra prod`.
     "starlette>=1.1.0",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.18",
@@ -194,28 +174,22 @@ dev = [
     # Preview tab. Mirror of [serve] (also pinned there). v11.22.1
     # CI failure: adding to [serve] alone wasn't enough; the
     # unit-test CI job uses `uv sync --extra dev --extra audit`
-    # (no `--extra serve`), so studio routes tests (which spin a
+    # (no `--extra prod`), so studio routes tests (which spin a
     # Starlette TestClient + hit the markdown-preview path) still
     # tripped ModuleNotFoundError. Pin here so [dev] is self-
     # sufficient for the test surface — matches the existing
     # starlette mirror pattern.
     "markdown>=3.6",
-]
-docs = [
+    # Docs site build (BS.6 — was [docs]). mkdocs-macros for Jinja2
+    # templating; mkdocs-click for auto-generated CLI reference;
+    # graphviz Python wrapper for L2 topology + dataflow diagram
+    # construction (Phase T moved rendering to browser via
+    # @hpcc-js/wasm-graphviz, so no system `dot` binary needed).
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.26",
-    # Auto-generated CLI reference page from the Click command tree
-    # (consumed by docs/reference/cli.md via the ``::: mkdocs-click`` directive).
     "mkdocs-click>=0.8",
-    # Phase O.1.a — Jinja2 templating in markdown (vocabulary substitution)
-    # + ``{{ diagram(...) }}`` macro hook for the O.1.c render pipeline.
     "mkdocs-macros-plugin>=1.3",
-    # Graphviz Python wrapper for L2 topology + dataflow diagram
-    # construction. Phase T (v8.1.0) moved rendering to the browser
-    # via @hpcc-js/wasm-graphviz, so the system ``dot`` binary is no
-    # longer required — the Python lib only constructs DOT source
-    # strings (``Digraph().source``), never invokes ``.pipe()``.
     "graphviz>=0.20",
 ]
 e2e = [

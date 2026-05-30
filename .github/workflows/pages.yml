@@ -31,7 +31,7 @@ jobs:
           enable-cache: true
 
       - name: Install docs dependencies (V.2 — uv sync from uv.lock)
-        run: uv sync --frozen --extra docs
+        run: uv sync --frozen --extra dev
 
       - name: Build site
         # Goes through ``recon-gen docs apply`` instead of bare
