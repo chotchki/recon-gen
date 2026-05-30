@@ -289,6 +289,14 @@ class Config:
     # ``resource_prefix`` — significantly weaker isolation. See the
     # docs reference for the loss-of-safety details before opting in.
     tagging_enabled: bool = True
+    # Phase BS.2 (D1 nav contract) — toggles the Studio surface on/off
+    # in the App2 binary. When False, the Studio top-nav entries (L2
+    # Editor / ETL Support / Training) hide and the `/studio/*` routes
+    # are not mounted. Dashboards + Docs are baseline (always mounted).
+    # Default True for dev (Studio is the authoring path); production
+    # cfgs that ship dashboards-only set `studio_enabled: false`.
+    # See SPEC.md::D1 + PLAN.md::Phase BS BS.0 Lock 1.
+    studio_enabled: bool = True
     # X.2.n.6 — Max concurrent DB connections in the App2 server's
     # async pool (``common/db.py::make_connection_pool``). Default 10
     # is sized for "one user opening a sheet with ~10 visuals" or
@@ -471,7 +479,8 @@ _CONFIG_ALLOWED_KEYS: frozenset[str] = frozenset({
     "aws_account_id", "aws_region", "datasource_arn",
     "deployment_name", "db_table_prefix",
     "principal_arns", "principal_arn", "extra_tags", "demo_database_url",
-    "dialect", "signing", "tagging_enabled", "app2_db_pool_size", "auth",
+    "dialect", "signing", "tagging_enabled", "studio_enabled",
+    "app2_db_pool_size", "auth",
     "default_l2_instance", "aws_pg_cluster_id", "aws_oracle_instance_id",
     # X.4.g.1-3 — deploy pipeline knobs.
     "etl_hook", "etl_datasource", "test_generator",
@@ -756,6 +765,12 @@ def load_config(path: str | Path | None = None) -> Config:
             f"tagging_enabled must be a bool; got {raw_tagging!r}."
         )
 
+    raw_studio_enabled = values.get("studio_enabled", True)
+    if not isinstance(raw_studio_enabled, bool):
+        raise ValueError(
+            f"studio_enabled must be a bool; got {raw_studio_enabled!r}."
+        )
+
     # X.4.g.2 — optional etl_datasource block.
     raw_etl_ds = values.get("etl_datasource")
     etl_datasource: EtlDatasourceConfig | None = None
@@ -965,6 +980,7 @@ def load_config(path: str | Path | None = None) -> Config:
         auth=auth,
         default_l2_instance=_opt_str(values, "default_l2_instance"),
         tagging_enabled=raw_tagging,
+        studio_enabled=raw_studio_enabled,
         app2_db_pool_size=pool_size,
         aws_pg_cluster_id=_opt_str(values, "aws_pg_cluster_id"),
         aws_oracle_instance_id=_opt_str(values, "aws_oracle_instance_id"),

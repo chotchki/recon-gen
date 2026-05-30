@@ -135,6 +135,32 @@ def test_tagging_enabled_non_bool_rejected(tmp_path: Path) -> None:
         load_config(p)
 
 
+# Phase BS.2 — Studio toggle (D1 nav contract).
+
+def test_studio_enabled_defaults_to_true(tmp_path: Path) -> None:
+    """Default-on for dev. Production cfgs that ship dashboards-only
+    set ``studio_enabled: false`` per BS.0 Lock 1."""
+    cfg = load_config(_write_yaml(tmp_path, _required_yaml()))
+    assert cfg.studio_enabled is True
+
+
+def test_studio_enabled_false_loads(tmp_path: Path) -> None:
+    """Explicit opt-out keeps the cfg valid (no Studio surface mounted
+    on the binary, no Studio top-nav entries)."""
+    cfg = load_config(_write_yaml(tmp_path, _required_yaml({
+        "studio_enabled": False,
+    })))
+    assert cfg.studio_enabled is False
+
+
+def test_studio_enabled_non_bool_rejected(tmp_path: Path) -> None:
+    p = _write_yaml(tmp_path, _required_yaml({
+        "studio_enabled": "false",  # YAML string, not bool
+    }))
+    with pytest.raises(ValueError, match="studio_enabled must be a bool"):
+        load_config(p)
+
+
 @pytest.mark.parametrize("leaked_key", [
     "theme", "persona", "rails", "accounts", "chains",
     "transfer_templates", "account_templates", "limit_schedules",
