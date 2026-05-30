@@ -572,6 +572,119 @@ def _render_home_page(
 """
 
 
+# -- BT.1 — /studio/etl landing page ----------------------------------------
+
+
+# Per BT.0.5 design mockup §5 navigation flow: 3-card index, one per
+# child page + one-line description. Title + summary + "coming in BT.N"
+# hint pulled from the mockup doc; the cards link to the eventual route
+# targets so when BT.2/3/4 land they go live automatically — no edit
+# back to this list. Order: Probe (investigate) → Run (execute) →
+# Triage (find + fix) — matches the operator's natural flow per the
+# mockup's narrative.
+_ETL_LANDING_CARDS: tuple[tuple[str, str, str, str], ...] = (
+    (
+        "Probe",
+        "/etl/probe",
+        "BT.2",
+        "Investigate one L2 slice — pick a rail, template, or chain "
+        "and see L2-declared column expectations side-by-side with "
+        "the runtime rows that match.",
+    ),
+    (
+        "Run",
+        "/etl/run",
+        "BT.3",
+        "Execute the ETL pipeline (wipe → hook → matview refresh) and "
+        "render a per-kind coverage tally so you can confirm every "
+        "declared primitive landed at least one row.",
+    ),
+    (
+        "Triage",
+        "/etl/triage",
+        "BT.4",
+        "Find + fix gaps — diff declared contracts against observed "
+        "runtime; each gap renders a card with the diagnosis + a deep "
+        "link to the relevant L2 editor page.",
+    ),
+)
+
+
+def _render_etl_landing_page(
+    cache: L2InstanceCache,
+    dev_log: bool,
+    *,
+    cfg: Config | None = None,
+    demo_mode: bool = False,
+    top_nav_html: str = "",
+) -> str:
+    """BT.1 — ``/studio/etl`` landing page.
+
+    3-card index of the Phase BT ETL Support surfaces per the BT.0.5
+    design mockup (§5 cross-page navigation flow). Mirrors the home
+    page's chrome (top-nav + Studio header) so the operator's mental
+    model stays consistent across `/`, `/data`, `/diagram`, `/etl/`.
+
+    Each card links to its target sub-route. BT.2/3/4 land those
+    routes — until then, a click 404s; the "coming in BT.N" hint on
+    the card primes the operator that the destination isn't ready.
+
+    Demo-mode keeps the same surface (operators reading a deployed
+    dashboards-only instance see the same landing if Studio is
+    enabled; no destructive affordance on this page to gate). The
+    sub-pages will make their own demo-mode decisions when they land.
+    """
+    instance = cache.get()
+    prefix = escape(cfg.deployment_name if cfg is not None else cache.path.stem)
+    devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
+    demo_banner = _demo_mode_banner(demo_mode)
+
+    card_blocks: list[str] = []
+    for title, href, phase, description in _ETL_LANDING_CARDS:
+        card_blocks.append(
+            '<a class="block p-5 bg-white border border-surface-border '
+            'rounded-md shadow-sm hover:border-accent hover:shadow-md '
+            'transition-shadow no-underline text-primary-fg" '
+            f'href="{escape(href)}">'
+            f'<h2 class="text-xl font-semibold text-accent m-0 mb-1">{escape(title)}</h2>'
+            f'<p class="text-xs text-secondary-fg font-mono m-0 mb-2">'
+            f'{escape(href)} · coming in {escape(phase)}</p>'
+            f'<p class="text-sm text-primary-fg m-0">{escape(description)}</p>'
+            "</a>"
+        )
+    cards_html = "\n    ".join(card_blocks)
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Studio · ETL Support — {prefix}</title>
+  {devlog_meta}{studio_theme_head(instance)}
+  <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
+  {devlog_script}</head>
+<body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
+  {top_nav_html}
+  {demo_banner}
+  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
+    <h1>Studio · ETL Support</h1>
+    <span class="text-sm text-secondary-fg font-mono">{prefix}</span>
+  </header>
+  <section class="px-8 pt-6 pb-3">
+    <p class="text-sm text-secondary-fg max-w-3xl m-0">
+      Three workflows for getting your customer's ETL feed landing
+      cleanly: <strong>Probe</strong> one slice, <strong>Run</strong>
+      the pipeline + score, <strong>Triage</strong> gaps + link back
+      to the L2 editor to close them.
+    </p>
+  </section>
+  <section class="px-8 pb-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3" id="etl-landing-cards">
+    {cards_html}
+  </section>
+</body>
+</html>
+"""
+
+
 def _render_diagram_page(
     cache: L2InstanceCache,
     dev_log: bool,
@@ -1888,6 +2001,15 @@ def make_studio_routes(
             ),
         )
 
+    async def etl_landing(_request: Request) -> HTMLResponse:
+        # BT.1 — /etl/ landing index. 3-card pointer to BT.2/3/4 sub-pages.
+        return HTMLResponse(
+            _render_etl_landing_page(
+                cache, dev_log, cfg=cfg, demo_mode=demo_mode,
+                top_nav_html=_top_nav_html("/etl/"),
+            ),
+        )
+
     async def data(request: Request) -> HTMLResponse:
         # X.4.h.url — read URL query params into the cache so a
         # bookmarked / reloaded /data?... restores trainer state.
@@ -1946,6 +2068,7 @@ def make_studio_routes(
         Route("/data", data, methods=["GET"]),
         Route("/data/timeline", data_timeline, methods=["GET"]),
         Route("/diagram", diagram, methods=["GET"]),
+        Route("/etl/", etl_landing, methods=["GET"]),
         Mount(
             "/studio/static",
             app=StaticFiles(directory=str(_STUDIO_ASSETS_DIR)),
