@@ -114,6 +114,10 @@ from recon_gen.common.l2.probe import (
     evaluate_predicate,
     fetch_probe_rows,
 )
+from recon_gen.common.l2.triage import (
+    Gap,
+    detect_gaps,
+)
 from recon_gen.common.l2.seed import DEFAULT_BASELINE_WINDOW_DAYS
 from recon_gen.common.l2.tg_cache import TestGeneratorCache
 from recon_gen.common.l2.trainer_timeline import (
@@ -631,7 +635,7 @@ _ETL_LANDING_CARDS: tuple[tuple[str, str, str | None, str], ...] = (
     (
         "Triage",
         "/etl/triage",
-        "BT.4",
+        None,  # BT.4 landed; no "coming in" hint
         "Find + fix gaps — diff declared contracts against observed "
         "runtime; each gap renders a card with the diagnosis + a deep "
         "link to the relevant L2 editor page.",
@@ -1537,6 +1541,150 @@ def _render_metadata_coverage_card(
       </p>
       <ul class="list-none m-0 p-0">{''.join(rows)}</ul>
     </div>
+"""
+
+
+# -- BT.4 — /studio/etl/triage page ------------------------------------------
+
+
+_GAP_KIND_LABELS: Mapping[str, str] = {
+    "unmatched_rail": "Unmatched rail_name",
+    "unmatched_template": "Unmatched template_name",
+    "missing_limit_schedule": "Missing LimitSchedule",
+    "missing_metadata_key": "Missing required metadata key",
+}
+
+_GAP_KIND_EDITOR_LABELS: Mapping[str, str] = {
+    "unmatched_rail": "Open Rails editor",
+    "unmatched_template": "Open Templates editor",
+    "missing_limit_schedule": "Open Limits editor",
+    "missing_metadata_key": "Open template editor",
+}
+
+
+async def _render_etl_triage_page(
+    cache: L2InstanceCache,
+    dev_log: bool,
+    *,
+    db_pool: AsyncConnectionPool | None,
+    dialect: Dialect | None,
+    prefix_override: str | None,
+    cfg: Config | None = None,
+    demo_mode: bool = False,
+    top_nav_html: str = "",
+) -> str:
+    """BT.4 — ``/etl/triage`` exception triage page.
+
+    Runs ``detect_gaps`` against the cached L2 + the demo DB; renders
+    one decision card per gap with the diagnosis prose + evidence +
+    deep link to the editor (link-only v1 per BT.0 lock 5).
+    Empty-state when no gaps detected.
+    """
+    instance = cache.get()
+    devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
+    demo_banner = _demo_mode_banner(demo_mode)
+    prefix_label = escape(
+        cfg.deployment_name if cfg is not None else cache.path.stem,
+    )
+    prefix = (
+        prefix_override
+        if prefix_override is not None
+        else (cfg.db_table_prefix if cfg is not None else cache.path.stem)
+    )
+
+    if db_pool is None or dialect is None:
+        body_html = (
+            '<section class="px-8 py-10 text-center text-secondary-fg">'
+            '<p class="m-0"><strong>No DB pool wired.</strong> '
+            f'Connect Studio to <code>{escape(prefix)}_transactions</code> '
+            'to run the gap detector.</p></section>'
+        )
+    else:
+        contracts = derive_column_contracts(instance)
+        gaps = await detect_gaps(
+            db_pool, prefix, instance, contracts, dialect=dialect,
+        )
+        body_html = _render_triage_body(gaps)
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Studio · ETL · Triage — {prefix_label}</title>
+  {devlog_meta}{studio_theme_head(instance)}
+  <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
+  {devlog_script}</head>
+<body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
+  {top_nav_html}
+  {demo_banner}
+  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
+    <h1>Studio · ETL · Triage</h1>
+    <span class="text-sm text-secondary-fg font-mono">{prefix_label}</span>
+  </header>
+  {body_html}
+</body>
+</html>
+"""
+
+
+def _render_triage_body(gaps: tuple[Gap, ...]) -> str:
+    """Header + gap-cards list (or empty-state)."""
+    if not gaps:
+        return """
+  <section class="px-8 py-10 text-center" id="triage-empty">
+    <p class="text-base font-semibold text-success m-0 mb-2">● No gaps detected.</p>
+    <p class="text-sm text-secondary-fg m-0 mb-1">
+      Every row produced by the last ETL run matches the L2's declared contracts.
+    </p>
+    <p class="text-sm text-secondary-fg m-0">
+      → Re-check on the next ETL run, or after editing the L2.
+    </p>
+  </section>
+"""
+    cards = "\n".join(_render_gap_card(g) for g in gaps)
+    count_label = f"{len(gaps)} gap{'s' if len(gaps) != 1 else ''} detected"
+    return f"""
+  <section class="px-8 py-4 border-b border-surface-border bg-white" id="triage-header">
+    <p class="text-sm m-0"><strong>{count_label}.</strong></p>
+  </section>
+  <section class="px-8 py-6 grid grid-cols-1 lg:grid-cols-2 gap-4" id="triage-gaps">
+    {cards}
+  </section>
+"""
+
+
+def _render_gap_card(gap: Gap) -> str:
+    """One decision card per gap."""
+    label = _GAP_KIND_LABELS.get(gap.kind, gap.kind)
+    cta_label = _GAP_KIND_EDITOR_LABELS.get(gap.kind, "Open editor")
+    extras_html = ""
+    if gap.evidence.extras:
+        extras_lines = [
+            f'<li class="text-xs text-secondary-fg font-mono">'
+            f'<span class="font-semibold">{escape(k)}:</span> '
+            f'{escape(v)}</li>'
+            for k, v in gap.evidence.extras.items()
+        ]
+        extras_html = (
+            '<ul class="list-none m-0 p-0 mb-2">' + "".join(extras_lines) + '</ul>'
+        )
+    sample_html = ""
+    if gap.evidence.sample_transaction_id:
+        sample_html = (
+            '<p class="text-xs text-secondary-fg m-0 mb-2 font-mono">'
+            f'sample: {escape(gap.evidence.sample_transaction_id)}</p>'
+        )
+    return f"""
+    <article class="bg-white border border-surface-border rounded-md p-4 shadow-sm" data-test-gap-kind="{escape(gap.kind)}">
+      <h2 class="text-base font-semibold text-warning m-0 mb-2">⚠ {escape(label)}</h2>
+      <p class="text-sm m-0 mb-3">{escape(gap.diagnosis)}</p>
+      {extras_html}
+      {sample_html}
+      <p class="m-0">
+        <a class="inline-block px-3 py-1 bg-accent text-accent-fg rounded-sm border border-accent text-sm hover:opacity-85"
+           href="{escape(gap.link_target)}">→ {escape(cta_label)}</a>
+      </p>
+    </article>
 """
 
 
@@ -2911,6 +3059,20 @@ def make_studio_routes(
         )
         return HTMLResponse(html)
 
+    async def etl_triage(_request: Request) -> HTMLResponse:
+        # BT.4 — exception triage. Renders gap cards diffing the L2's
+        # declared contracts (BT.5) against the observed runtime; each
+        # card carries a deep link to the relevant editor list page
+        # (link-only v1 per BT.0 lock 5).
+        html = await _render_etl_triage_page(
+            cache, dev_log,
+            db_pool=db_pool, dialect=dialect,
+            prefix_override=prefix_override,
+            cfg=cfg, demo_mode=demo_mode,
+            top_nav_html=_top_nav_html("/etl/triage"),
+        )
+        return HTMLResponse(html)
+
     async def etl_probe(request: Request) -> HTMLResponse:
         # BT.2 — L2-slice probe. Reads (kind, name, date_from, date_to)
         # from query params; renders the L2-declared contract for the
@@ -2990,6 +3152,7 @@ def make_studio_routes(
         Route("/etl/", etl_landing, methods=["GET"]),
         Route("/etl/probe", etl_probe, methods=["GET"]),
         Route("/etl/run", etl_run, methods=["GET", "POST"]),
+        Route("/etl/triage", etl_triage, methods=["GET"]),
         Mount(
             "/studio/static",
             app=StaticFiles(directory=str(_STUDIO_ASSETS_DIR)),
