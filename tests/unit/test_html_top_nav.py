@@ -1,4 +1,5 @@
-"""Phase BS.2 — `emit_top_nav` shared chrome wrapper.
+"""Phase BS.2 / BS.3 — `emit_top_nav` shared chrome wrapper +
+`build_top_nav_entries` deployed-state assembly.
 
 The wrapper is the single source of truth for App2's flat top-nav (BS.3
 will migrate callsites). Tests pin the contract:
@@ -11,7 +12,9 @@ will migrate callsites). Tests pin the contract:
 """
 from __future__ import annotations
 
-from recon_gen.common.html.render import TopNavEntry, emit_top_nav
+from recon_gen.common.html.render import (
+    TopNavEntry, build_top_nav_entries, emit_top_nav,
+)
 
 
 def test_empty_entries_returns_empty_string() -> None:
@@ -93,6 +96,67 @@ def test_html_escapes_labels_and_hrefs() -> None:
     assert '&quot;Title&quot;' in nav or '&#x27;Title&#x27;' in nav or "&quot;" in nav
     assert "&lt;x&gt;" in nav
     assert "&amp;id" in nav
+
+
+# ---------------------------------------------------------------------------
+# build_top_nav_entries — assembly from deployed-state
+# ---------------------------------------------------------------------------
+
+
+def test_build_entries_studio_enabled_with_dashboards_and_docs() -> None:
+    """Full deploy: Studio + dashboards + docs. Order per BS.0 Lock 2:
+    authoring entries first, then viewing, then reading."""
+    entries = build_top_nav_entries(
+        dashboards=[("l1", "L1 Dashboard"), ("inv", "Investigation")],
+        studio_enabled=True,
+        docs_url="/docs/",
+    )
+    labels = [e.label for e in entries]
+    assert labels == [
+        "L2 Editor", "ETL Support", "Training",
+        "L1 Dashboard", "Investigation",
+        "Docs",
+    ]
+    # Studio entries are authoring; dashboards viewing; Docs reading.
+    by_label = {e.label: e for e in entries}
+    assert by_label["L2 Editor"].group == "authoring"
+    assert by_label["L1 Dashboard"].group == "viewing"
+    assert by_label["Docs"].group == "reading"
+
+
+def test_build_entries_studio_disabled() -> None:
+    entries = build_top_nav_entries(
+        dashboards=[("l1", "L1 Dashboard")],
+        studio_enabled=False,
+        docs_url="/docs/",
+    )
+    labels = [e.label for e in entries]
+    assert labels == ["L1 Dashboard", "Docs"]
+
+
+def test_build_entries_no_docs_no_studio() -> None:
+    """Dashboards-only deploy: nav has just the dashboard entries."""
+    entries = build_top_nav_entries(
+        dashboards=[("l1", "L1"), ("l2", "L2")],
+        studio_enabled=False,
+        docs_url=None,
+    )
+    labels = [e.label for e in entries]
+    assert labels == ["L1", "L2"]
+
+
+def test_build_entries_studio_only_no_dashboards_no_docs() -> None:
+    """Edge case: Studio-only deploy. Nav surfaces just the 3 Studio
+    entries. (Caller would normally render no nav at all per BS.0
+    Lock 1's `single-surface = no nav`, but the helper is honest
+    about what's deployed.)"""
+    entries = build_top_nav_entries(
+        dashboards=[],
+        studio_enabled=True,
+        docs_url=None,
+    )
+    labels = [e.label for e in entries]
+    assert labels == ["L2 Editor", "ETL Support", "Training"]
 
 
 def test_divider_via_divide_x_class() -> None:

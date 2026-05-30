@@ -506,10 +506,12 @@ def test_docs_mount_serves_built_site(tmp_path: Path) -> None:
     assert sub.status_code == 200
     assert "Concepts" in sub.text
 
-    # The dashboards listing links to the embedded handbook.
+    # The dashboards listing links to the embedded handbook. BS.3 —
+    # the link now lives in the shared top-nav (`Docs` entry) instead
+    # of an inline body paragraph.
     listing = client.get("/dashboards").text
     assert "/docs/" in listing
-    assert "Handbook" in listing
+    assert ">Docs<" in listing
 
 
 def test_docs_mount_absent_when_docs_dir_unset() -> None:

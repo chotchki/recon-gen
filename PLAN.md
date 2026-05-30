@@ -29,6 +29,10 @@ needed for BS itself (deferred to BT).
 - [ ] BS.5 - Dynamic SQL conversion per BS.1's P0 recommendation (scope-positive only).
   - Gated on BS.1's audit landing an explicit "pursue these N P0 items in BS" recommendation.
   - If audit says defer everything to BT, BS.5 ticks as deferred and BS.0 Lock 6 sub-decision (c) flips deferred.
+- [ ] BS.6 - uv extras collapse — 8 → 3 (`prod` + `dev` + `e2e`).
+  - Per operator call 2026-05-29 (BS-discussion): merge `deploy + serve + demo + demo-oracle + audit` → `prod` (one knob for production-App2 / production-QS-deploy); merge `docs` → `dev` (mkdocs is dev-only); keep `e2e` opt-in for Playwright weight. Reduces operator-facing knob count from 8 → 3; smaller install for prod (one extras name to remember).
+  - Touches: `pyproject.toml::[project.optional-dependencies]`, `uv.lock` regen, `ci.yml` / `e2e.yml` / `release.yml` workflow installs, CLAUDE.md "Install" section, install.md, any other docs referencing the old extra names.
+  - Per `[[feedback_ci_release_workflow_parity]]`: verify ci.yml + release.yml Tests jobs stay in parity after the rename — historical regressions when one workflow missed an extra rename.
 
 ## Phase BT - ETL Support surface (provisional)
 

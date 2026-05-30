@@ -378,7 +378,7 @@ _PAGE_SHELL = """\
 {vendor_js}
 </head>
 <body class="bg-surface-bg text-primary-fg font-sans antialiased">
-{body}
+{nav}{body}
   <script>{bootstrap_js}</script>
   <script>{dev_log_js}</script>
 </body>
@@ -813,11 +813,43 @@ def _visual_fetch_url(
     )
 
 
+def build_top_nav_entries(
+    dashboards: list[tuple[str, str]],
+    *,
+    studio_enabled: bool,
+    docs_url: str | None,
+) -> list[TopNavEntry]:
+    """Phase BS.3 — assemble the flat top-nav entries list from the
+    App2 binary's deployed-state args.
+
+    Order per BS.0 Lock 2: Studio entries first (authoring), then
+    dashboards (viewing), then Docs (reading). Studio entries only
+    when ``studio_enabled=True``; Docs entry only when handbook is
+    embedded (caller passes ``docs_url`` or ``None``).
+
+    Callers pass the result to ``emit_top_nav`` with ``active_href``
+    matching the current page's path.
+    """
+    entries: list[TopNavEntry] = []
+    if studio_enabled:
+        entries.append(TopNavEntry("L2 Editor", "/", group="authoring"))
+        entries.append(TopNavEntry("ETL Support", "/etl/", group="authoring"))
+        entries.append(TopNavEntry("Training", "/training/", group="authoring"))
+    for dash_id, dash_title in dashboards:
+        entries.append(TopNavEntry(
+            dash_title, f"/dashboards/{dash_id}", group="viewing",
+        ))
+    if docs_url is not None:
+        entries.append(TopNavEntry("Docs", docs_url, group="reading"))
+    return entries
+
+
 def emit_dashboards_list(
     dashboards: list[tuple[str, str]],
     *,
     theme: ThemePreset | None = None,
     docs_url: str | None = None,
+    studio_enabled: bool = False,
 ) -> str:
     """Render the ``/dashboards`` landing page.
 
@@ -832,8 +864,13 @@ def emit_dashboards_list(
     a single shared theme — the listing is one page, one palette.
 
     ``docs_url`` — when the server has the handbook embedded (X.2.i,
-    ``make_app(docs_dir=...)``), pass the mount path (``"/docs/"``) and
-    a "Handbook" link renders alongside the title. ``None`` ⇒ no link.
+    ``make_app(docs_dir=...)``), pass the mount path (``"/docs/"``).
+    The Docs entry appears in the shared top-nav (BS.3). ``None``
+    ⇒ no Docs entry.
+
+    ``studio_enabled`` (BS.2 / BS.3) — when True, the shared top-nav
+    surfaces the three Studio entries (L2 Editor / ETL Support /
+    Training). Default False = dashboards-only deploy.
     """
     title_class = "text-3xl font-bold mt-8 mx-8 mb-2"
     desc_class = "mx-8 mb-6 text-secondary-fg"
@@ -849,14 +886,6 @@ def emit_dashboards_list(
         f'Pick a dashboard to view its sheets.'
         f'</p>',
     ]
-    if docs_url is not None:
-        body_parts.append(
-            f'  <p class="mx-8 mb-6 text-sm">'
-            f'<a href="{html.escape(docs_url)}" '
-            f'class="text-accent hover:underline font-semibold">'
-            f'📚 Handbook</a> — the same docs site `docs export` produces, '
-            f'served right here.</p>'
-        )
     body_parts.append(f'  <nav class="{list_class}">')
     for dash_id, dash_title in dashboards:
         esc_id = html.escape(dash_id)
@@ -867,6 +896,14 @@ def emit_dashboards_list(
             f'</a>'
         )
     body_parts.append('  </nav>')
+    top_nav = emit_top_nav(
+        entries=build_top_nav_entries(
+            dashboards,
+            studio_enabled=studio_enabled,
+            docs_url=docs_url,
+        ),
+        active_href="/dashboards",
+    )
     return _PAGE_SHELL.format(
         title="Dashboards",
         body="\n".join(body_parts),
@@ -877,6 +914,7 @@ def emit_dashboards_list(
         dev_log_meta="",
         data_generation_meta="",
         theme_style=_emit_theme_style(theme),
+        nav=top_nav,
     )
 
 
@@ -955,6 +993,7 @@ def emit_error_page(
         dev_log_meta="",
         data_generation_meta="",
         theme_style=_emit_theme_style(theme),
+        nav="",
     )
 
 
@@ -1184,6 +1223,7 @@ def emit_html(
     filter_specs: Sequence[FilterSpec] = (),
     all_sheets: Sequence[Sheet] = (),
     data_generation_id: int | None = None,
+    top_nav: str = "",
 ) -> str:
     """Render a tree ``Sheet`` as a standalone HTML page.
 
@@ -1326,6 +1366,7 @@ def emit_html(
         ),
         data_generation_meta=data_generation_meta,
         theme_style=_emit_theme_style(theme),
+        nav=top_nav,
     )
 
 

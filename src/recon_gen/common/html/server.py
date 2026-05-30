@@ -409,11 +409,33 @@ def make_app(
         return RedirectResponse("/dashboards", status_code=302)
 
     docs_url = "/docs/" if docs_dir is not None else None
+    # Phase BS.3 — studio_enabled derived from "studio_routes spliced
+    # in" since that's the upstream signal. cli/studio.py passes
+    # routes (studio surface mounted); cli/dashboards.py doesn't.
+    # Cfg.studio_enabled gates earlier in the CLI per BS.0 Lock 1.
+    studio_enabled = studio_routes is not None
+
+    def _render_top_nav(active_href: str | None) -> str:
+        """Phase BS.3 — render the shared flat top-nav for any page.
+        Caller passes the current URL path so the matching entry
+        renders as active."""
+        from recon_gen.common.html.render import (  # noqa: PLC0415
+            build_top_nav_entries, emit_top_nav,
+        )
+        return emit_top_nav(
+            entries=build_top_nav_entries(
+                listing,
+                studio_enabled=studio_enabled,
+                docs_url=docs_url,
+            ),
+            active_href=active_href,
+        )
 
     async def dashboards_list(_request: Request) -> HTMLResponse:
         return HTMLResponse(
             emit_dashboards_list(
                 listing, theme=listing_theme, docs_url=docs_url,
+                studio_enabled=studio_enabled,
             ),
         )
 
@@ -458,6 +480,7 @@ def make_app(
             all_sheets=sheets,
             filter_specs=filter_specs,
             data_generation_id=get_data_generation_id(),
+            top_nav=_render_top_nav(active_href=f"/dashboards/{dash_id}"),
         ))
 
     async def sheet_view(request: Request) -> Response:
@@ -502,6 +525,7 @@ def make_app(
             all_sheets=sheets,
             filter_specs=filter_specs,
             data_generation_id=get_data_generation_id(),
+            top_nav=_render_top_nav(active_href=f"/dashboards/{dash_id}"),
         ))
 
     async def visual_data(request: Request) -> Response:
