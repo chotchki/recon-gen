@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Pre-commit hook: auto-rebuild App2's Tailwind output.css when any
+# Tailwind-scanned source is in the staged change set.
+#
+# Tailwind's scan set is declared via @source directives in
+# `src/recon_gen/common/html/assets/input.css`; every file referenced
+# there can introduce or retire utility classes that need to land in
+# the compiled `output.css`. Without this hook, the author has to
+# notice the pytest sessionstart drift gate fail (~70s into a test
+# run), look up the rebuild recipe, run it, re-stage, re-commit.
+#
+# Loose-superset gate: any change under `src/recon_gen/common/html/`
+# triggers a rebuild. False positives are cheap (~250ms Tailwind
+# rebuild); false negatives are the silent-stale-CSS bug we're trying
+# to head off.
+#
+# Activated by the same `git config core.hooksPath .githooks` toggle
+# the pre-push hook uses. Skippable per-commit via `git commit
+# --no-verify` (discouraged — investigate the failure rather than
+# bypass, per `[[feedback_no_xfail_to_sweep_under_rug]]`).
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Find staged additions / modifications / renames under the html
+# package — Tailwind only scans Python + JS files referenced from
+# input.css, all of which live there.
+STAGED_HTML_CHANGES="$(git diff --cached --name-only --diff-filter=ACMR \
+    -- 'src/recon_gen/common/html/' || true)"
+
+if [ -z "${STAGED_HTML_CHANGES}" ]; then
+    exit 0
+fi
+
+# Need an active venv to run the rebuild — skip silently if absent
+# (operator may be on a docs-only branch with no Python tooling).
+VENV_PY="${REPO_ROOT}/.venv/bin/python"
+if [ ! -x "${VENV_PY}" ]; then
+    echo "[pre-commit] .venv/bin/python absent — skipping Tailwind rebuild."
+    echo "[pre-commit] (run \`uv sync --all-extras\` to enable the auto-rebuild.)"
+    exit 0
+fi
+
+echo "[pre-commit] common/html/ change staged — rebuilding output.css..."
+cd "${REPO_ROOT}"
+
+OUTPUT_CSS="src/recon_gen/common/html/assets/output.css"
+"${VENV_PY}" scripts/build_app2_css.py >/dev/null
+
+if git diff --quiet -- "${OUTPUT_CSS}"; then
+    echo "[pre-commit] output.css unchanged."
+else
+    git add "${OUTPUT_CSS}"
+    echo "[pre-commit] output.css rebuilt + staged."
+fi

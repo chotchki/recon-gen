@@ -90,7 +90,10 @@ Full runbook + IAM policy + onboarding steps + cfg shape: `docs/audits/y_2_gate_
 ### Test sequencing + git hooks (`Y.2.gate.d`+`k.5`+`k.7`)
 
 - **Always invoke `./run_tests.sh up_to=<layer>`** — the runner enforces `unit → db → app2 → deploy → api → browser` ordering (invoking layer N runs 1..N-1; `unit` runs once as prelude, not per-cell). Direct `pytest` is fine only for iterating on a single test you're actively writing; bare pytest for layered work has shipped silent dashboard failures (Y.2.b SELECT-alias-in-WHERE bug).
-- **Pre-push git hook (`k.5`)** — opt in once per clone with `git config core.hooksPath .githooks`; every `git push` runs `./run_tests.sh up_to=db --dialects=pg --targets=lo` (~30s). `--no-verify` is discouraged — investigate the failure rather than bypass.
+- **Git hooks (`k.5` + BT-era)** — opt in once per clone with `git config core.hooksPath .githooks`. Two hooks:
+  - **pre-commit** — when a staged change touches `src/recon_gen/common/html/`, auto-rebuild `assets/output.css` (Tailwind) + re-stage. Eliminates the "pytest sessionstart drift gate fails, author hunts for the rebuild recipe" friction loop. Skips silently when `.venv/bin/python` is absent.
+  - **pre-push** — runs `./run_tests.sh up_to=db --dialects=pg --targets=lo` (~30s).
+  - `--no-verify` discouraged on either hook — investigate the failure rather than bypass.
 - **Failure surface parity (`k.7`)** — same exit codes + artifact paths locally and in CI: `runs/<run-id>/<variant>/<layer>/{cmd.json,stdout.log,stderr.log,timings.json}` + per-cell `db-perf/top-queries.md`. Coverage data and timings upload as GHA artifacts. `EXIT_NEEDS_OPERATOR=2` for cfg / probe / boto3 failures with the actionable message in stderr; `EXIT_FAILURE=1` for pytest. No "decode the GH log" step — the artifact set IS the local triage shape.
 
 ## Project Structure
