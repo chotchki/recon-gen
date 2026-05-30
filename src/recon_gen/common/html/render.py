@@ -406,6 +406,80 @@ _THEME_TOKEN_MAP: list[tuple[str, str]] = [
 ]
 
 
+@dataclass(frozen=True)
+class TopNavEntry:
+    """Phase BS.2/BS.3 (D1+D2 nav contract) — single nav entry.
+
+    A flat top-nav across the App2 binary's surfaces. ``group`` lets
+    callers signal which role-bucket the entry belongs to (authoring
+    / viewing / reading) so the renderer can place visual dividers
+    between groups when the operator asked for them. Per BS.0 Lock 2,
+    the lock-in shipped is ``<hr>`` separator between EVERY entry —
+    ``group`` is reserved for future styling, currently unused.
+    """
+    label: str
+    href: str
+    group: str = "viewing"
+
+
+def emit_top_nav(
+    *,
+    entries: list[TopNavEntry],
+    active_href: str | None = None,
+) -> str:
+    """Phase BS.2 (D1 lock) — render the always-on flat top-nav for App2.
+
+    Per BS.0 Lock 2: the Studio container intermediate goes away;
+    Studio's three modes (when ``studio_enabled=true``) sit as
+    first-class nav entries alongside Dashboards + Docs. Divider
+    style is ``<hr>`` vertical separator between every entry.
+
+    Callers build their ``entries`` list per their cfg+deploy state:
+
+    - Studio entries (L2 Editor / ETL Support / Training) only when
+      ``cfg.studio_enabled`` is True.
+    - One entry per deployed dashboard.
+    - Docs entry only when the docs site is embedded.
+
+    ``active_href`` highlights the entry whose href the current page
+    matches (typically by exact match on the URL path the route was
+    hit at). ``None`` = no active highlight (e.g., a 404 page).
+
+    Returns an HTML ``<nav>`` element with inline styling matching
+    the ThemePreset's accent + surface tokens. Empty ``entries`` list
+    returns an empty string (a single-surface deploy doesn't need a
+    nav per BS.0 Lock 1 — caller filters to that case).
+    """
+    if not entries:
+        return ""
+    # `<hr>` between every entry per BS.0 Lock 2; render as a thin
+    # vertical separator via the `divide-x` Tailwind utility on the
+    # parent `<nav>` so we don't emit explicit <hr> markup for every
+    # gap. Same visual effect; one less DOM node per separator;
+    # accessible (no decorative <hr> noise).
+    nav_class = (
+        "flex items-center bg-surface border-b border-surface-border "
+        "divide-x divide-surface-border text-sm"
+    )
+    link_base = (
+        "px-4 py-3 text-primary-fg hover:bg-accent hover:text-accent-fg "
+        "transition-colors"
+    )
+    link_active = "font-bold text-accent"
+    parts: list[str] = [f'<nav class="{nav_class}" aria-label="App nav">']
+    for entry in entries:
+        esc_href = html.escape(entry.href)
+        esc_label = html.escape(entry.label)
+        cls = link_base
+        if active_href is not None and entry.href == active_href:
+            cls = f"{link_base} {link_active}"
+        parts.append(
+            f'  <a href="{esc_href}" class="{cls}">{esc_label}</a>'
+        )
+    parts.append('</nav>')
+    return "\n".join(parts)
+
+
 def _emit_theme_style(theme: ThemePreset | None) -> str:
     """Render the per-instance ``<style>:root { ... }</style>`` block.
 
