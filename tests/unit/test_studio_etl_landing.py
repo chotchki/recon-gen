@@ -90,19 +90,24 @@ def test_etl_landing_emits_three_cards_with_expected_routes(
         assert f">{title}</h2>" in body, f"missing card title {title!r}"
 
 
-def test_etl_landing_cards_carry_coming_in_phase_hint(
+def test_etl_landing_cards_carry_coming_in_phase_hint_for_unshipped_pages(
     writable_l2_yaml: Path,
 ) -> None:
-    """Each card surfaces the upcoming BT phase so a 404 click doesn't
-    surprise the operator before the destination sub-page lands."""
+    """Each not-yet-shipped sub-page card surfaces the upcoming BT
+    phase so a 404 click doesn't surprise the operator before the
+    destination sub-page lands. Shipped sub-pages (Probe in BT.2)
+    drop the hint."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
         body = c.get("/etl/").text
 
-    for phase in ("BT.2", "BT.3", "BT.4"):
+    # BT.3 (Run) + BT.4 (Triage) still ship "coming in" hints.
+    for phase in ("BT.3", "BT.4"):
         assert f"coming in {phase}" in body, (
             f"landing card should warn destination ships in {phase}"
         )
+    # BT.2 (Probe) is shipped — no "coming in BT.2" hint.
+    assert "coming in BT.2" not in body
 
 
 def test_etl_landing_carries_top_nav_when_factory_provided(

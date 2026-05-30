@@ -1702,6 +1702,7 @@ _TYPED_CONFIG_VIEW_NAMES: tuple[str, ...] = (
     "v_config_rails",
     "v_config_limit_schedules",
     "v_config_chain_children",
+    "v_config_transfer_templates",
 )
 
 
@@ -1748,6 +1749,8 @@ def _emit_typed_config_view_creates(p: str, dialect: Dialect) -> str:
         + _render_v_config_limit_schedules(p, dialect)
         + "\n"
         + _render_v_config_chain_children(p, dialect)
+        + "\n"
+        + _render_v_config_transfer_templates(p, dialect)
     )
 
 
@@ -1933,6 +1936,64 @@ def _render_v_config_chain_children(p: str, dialect: Dialect) -> str:
         f"WHERE root.parent_id IS NULL\n"
         f"  AND root.key = 'l2_yaml'\n"
         f"GROUP BY child_obj.node_id;\n"
+    )
+
+
+def _render_v_config_transfer_templates(p: str, dialect: Dialect) -> str:
+    """``<prefix>_v_config_transfer_templates`` — one row per L2 transfer
+    template with the scalar fields projected to typed columns.
+
+    Columns:
+    - ``name``         VARCHAR(100) — the ``TransferTemplate.name``.
+    - ``expected_net`` NUMERIC      — the closure target for L1
+      Conservation.
+    - ``completion``   VARCHAR(100) — the SPEC completion vocabulary
+      expression (``business_day_end``, ``month_end``, etc.).
+
+    Array fields (``transfer_key``, ``leg_rails``, ``leg_rail_xor_groups``)
+    are NOT projected here — they don't decompose into a single typed
+    column on Oracle without hitting ORA-40597 array-walk path-length
+    caps (BS.1 audit). Consumers needing per-element semantics walk the
+    L2 instance Python-side (``derive_column_contracts`` for BT.4
+    triage, the Studio editor's pickers for L2 edits). Future
+    follow-ons may add ``_v_config_transfer_template_leg_rails`` /
+    ``_v_config_transfer_template_keys`` row-fanout views if a
+    SQL-side consumer (e.g. an L2FT builder) materializes.
+
+    Walk shape mirrors ``_v_config_rails`` rooted on the
+    ``transfer_templates`` top-level array — same pivot-on-field
+    pattern, same Oracle CLOB/VARCHAR2 coercion via ``lob_substr``.
+
+    BT.0 lock 3 bundles this view with BT.2 (the only BS.1 carryover
+    with a real BT need); other carryovers stay deferred until their
+    consumer surfaces.
+    """
+    name_col = _pivot_field(
+        "name", project_n=100, cast_to=None, dialect=dialect,
+    )
+    expected_net_col = _pivot_field(
+        "expected_net", project_n=50, cast_to="numeric", dialect=dialect,
+    )
+    completion_col = _pivot_field(
+        "completion", project_n=100, cast_to=None, dialect=dialect,
+    )
+    return (
+        f"CREATE VIEW {p}_v_config_transfer_templates AS\n"
+        f"SELECT\n"
+        f"  {name_col} AS name,\n"
+        f"  {expected_net_col} AS expected_net,\n"
+        f"  {completion_col} AS completion\n"
+        f"FROM {p}_config_kv root\n"
+        f"JOIN {p}_config_kv tt_arr\n"
+        f"  ON tt_arr.parent_id = root.node_id\n"
+        f" AND tt_arr.key = 'transfer_templates'\n"
+        f"JOIN {p}_config_kv tt_obj\n"
+        f"  ON tt_obj.parent_id = tt_arr.node_id\n"
+        f"JOIN {p}_config_kv field\n"
+        f"  ON field.parent_id = tt_obj.node_id\n"
+        f"WHERE root.parent_id IS NULL\n"
+        f"  AND root.key = 'l2_yaml'\n"
+        f"GROUP BY tt_obj.node_id;\n"
     )
 
 

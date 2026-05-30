@@ -560,6 +560,97 @@ def test_drop_schema_includes_config_kv_drop_and_typed_view_drops() -> None:
     assert "DROP VIEW IF EXISTS spec_example_v_config_rails" in sql
     assert "DROP VIEW IF EXISTS spec_example_v_config_limit_schedules" in sql
     assert "DROP VIEW IF EXISTS spec_example_v_config_chain_children" in sql
+    assert "DROP VIEW IF EXISTS spec_example_v_config_transfer_templates" in sql
+
+
+def test_v_config_transfer_templates_projects_spec_example_templates() -> None:
+    """BT.2: ``<prefix>_v_config_transfer_templates`` projects one row per
+    declared TransferTemplate with scalar fields (name + expected_net +
+    completion) typed. Array fields (transfer_key / leg_rails /
+    leg_rail_xor_groups) stay Python-side per BT.2 view-scope decision —
+    those decompose into row-fanout views as follow-ons when a SQL-side
+    consumer materializes (BS.1 deferral)."""
+    conn = _fresh_db_with_full_schema()
+    try:
+        instance = load_instance(_SPEC_EXAMPLE)
+        from recon_gen.common.l2.serializer import serialize_l2
+        import yaml
+        l2_dict = yaml.safe_load(serialize_l2(instance))
+        replace_config(
+            conn, prefix=_PREFIX,
+            cfg_json="{}",
+            l2_json=json.dumps(l2_dict),
+            as_of=datetime(2030, 1, 1),
+        )
+        rows = conn.execute(
+            "SELECT name, expected_net, completion "
+            f"FROM {_PREFIX}_v_config_transfer_templates "
+            "ORDER BY name"
+        ).fetchall()
+        # spec_example.yaml declares one template per the L2's
+        # transfer_templates: section. Count + headline shape pins
+        # the projection works against the live fixture; specific
+        # names are spec_example.yaml-internal and not asserted to
+        # let the fixture evolve.
+        assert len(rows) == len(instance.transfer_templates), (
+            f"expected {len(instance.transfer_templates)} rows "
+            f"(one per L2 template), got {len(rows)}"
+        )
+        # Names align with the L2-declared template names (set
+        # equality so order doesn't matter beyond the SQL ORDER BY).
+        declared = {str(t.name) for t in instance.transfer_templates}
+        observed = {row[0] for row in rows}
+        assert observed == declared, (
+            f"template name set mismatch: declared={declared}, "
+            f"observed={observed}"
+        )
+        # Every row has a non-NULL completion (SPEC's completion is
+        # required on TransferTemplate construction).
+        for name, _expected_net, completion in rows:
+            assert completion is not None, (
+                f"template {name!r} missing completion projection"
+            )
+    finally:
+        conn.close()
+
+
+def test_v_config_transfer_templates_empty_when_no_templates() -> None:
+    """An L2 with no transfer templates projects zero rows — JOIN tree
+    finds no tt_arr matches and the view yields empty. No NULL-row
+    leakage from outer-join semantics."""
+    from recon_gen.common.l2 import L2Instance
+    conn = sqlite3.connect(":memory:")
+    _register_sqlite_aggregates(conn)
+    instance = L2Instance(
+        accounts=(),
+        account_templates=(),
+        rails=(),
+        transfer_templates=(),
+        chains=(),
+        limit_schedules=(),
+    )
+    try:
+        cur = conn.cursor()
+        execute_script(
+            cur, emit_schema(instance, prefix="nt", dialect=Dialect.SQLITE),
+            dialect=Dialect.SQLITE,
+        )
+        conn.commit()
+        from recon_gen.common.l2.serializer import serialize_l2
+        import yaml
+        l2_dict = yaml.safe_load(serialize_l2(instance))
+        replace_config(
+            conn, prefix="nt",
+            cfg_json="{}",
+            l2_json=json.dumps(l2_dict),
+            as_of=datetime(2030, 1, 1),
+        )
+        rows = conn.execute(
+            "SELECT * FROM nt_v_config_transfer_templates"
+        ).fetchall()
+        assert rows == []
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------

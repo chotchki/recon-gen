@@ -42,7 +42,7 @@ import secrets
 from collections.abc import Callable, Mapping
 from html import escape
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 
 # X.4.e cache-bust — boot-time random hex appended as `?cb=…` to every
@@ -84,9 +84,25 @@ from recon_gen.common.html._studio_assets.tw_classes import (
     timeline_day_classes,
 )
 from recon_gen.common.db import AsyncConnectionPool
+from recon_gen.common.l2 import L2Instance
 from recon_gen.common.l2.cache import L2InstanceCache
+from recon_gen.common.l2.contract import (
+    ChainEdgeContract,
+    ColumnContracts,
+    ColumnPredicate,
+    RailContract,
+    TemplateContract,
+    derive_column_contracts,
+)
 from recon_gen.common.l2.coverage import CoverageEntry, coverage_for
 from recon_gen.common.l2.deploy_pipeline import run_deploy_pipeline
+from recon_gen.common.l2.probe import (
+    ProbeKind,
+    ProbeResult,
+    ProbeRow,
+    evaluate_predicate,
+    fetch_probe_rows,
+)
 from recon_gen.common.l2.seed import DEFAULT_BASELINE_WINDOW_DAYS
 from recon_gen.common.l2.tg_cache import TestGeneratorCache
 from recon_gen.common.l2.trainer_timeline import (
@@ -582,11 +598,11 @@ def _render_home_page(
 # back to this list. Order: Probe (investigate) → Run (execute) →
 # Triage (find + fix) — matches the operator's natural flow per the
 # mockup's narrative.
-_ETL_LANDING_CARDS: tuple[tuple[str, str, str, str], ...] = (
+_ETL_LANDING_CARDS: tuple[tuple[str, str, str | None, str], ...] = (
     (
         "Probe",
         "/etl/probe",
-        "BT.2",
+        None,  # BT.2 landed; no "coming in" hint
         "Investigate one L2 slice — pick a rail, template, or chain "
         "and see L2-declared column expectations side-by-side with "
         "the runtime rows that match.",
@@ -641,14 +657,18 @@ def _render_etl_landing_page(
 
     card_blocks: list[str] = []
     for title, href, phase, description in _ETL_LANDING_CARDS:
+        phase_hint = (
+            f"{escape(href)} · coming in {escape(phase)}"
+            if phase is not None
+            else escape(href)
+        )
         card_blocks.append(
             '<a class="block p-5 bg-white border border-surface-border '
             'rounded-md shadow-sm hover:border-accent hover:shadow-md '
             'transition-shadow no-underline text-primary-fg" '
             f'href="{escape(href)}">'
             f'<h2 class="text-xl font-semibold text-accent m-0 mb-1">{escape(title)}</h2>'
-            f'<p class="text-xs text-secondary-fg font-mono m-0 mb-2">'
-            f'{escape(href)} · coming in {escape(phase)}</p>'
+            f'<p class="text-xs text-secondary-fg font-mono m-0 mb-2">{phase_hint}</p>'
             f'<p class="text-sm text-primary-fg m-0">{escape(description)}</p>'
             "</a>"
         )
@@ -683,6 +703,513 @@ def _render_etl_landing_page(
 </body>
 </html>
 """
+
+
+# -- BT.2 — /studio/etl/probe page ------------------------------------------
+
+
+_PROBE_DEFAULT_WINDOW_DAYS = 7
+
+
+async def _render_etl_probe_page(
+    cache: L2InstanceCache,
+    dev_log: bool,
+    request: Request,
+    *,
+    db_pool: AsyncConnectionPool | None,
+    dialect: Dialect | None,
+    prefix_override: str | None,
+    cfg: Config | None = None,
+    demo_mode: bool = False,
+    top_nav_html: str = "",
+) -> str:
+    """BT.2 — ``/etl/probe`` L2-slice probe page.
+
+    Three-step UX:
+      1. Operator picks a slice via the kind radio + name dropdown +
+         date-range picker.
+      2. Server fetches the L2 contract (via BT.5's derivation) for the
+         picked entity + the observed transactions rows narrowed by
+         the slice + window.
+      3. Page renders contract (left) and observed rows (right) so the
+         operator can scan for matches / gaps.
+
+    When no name is picked (initial page load), the right panel
+    shows an empty-state copy nudging the operator to pick.
+
+    When db_pool is None (unit-test surface), the observed-rows fetch
+    is skipped; the page renders the picker + a "no DB pool wired"
+    banner where the rows table would be. The contract pane still
+    renders so the L2-derivation surface is testable without a DB.
+    """
+    instance = cache.get()
+    devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
+    demo_banner = _demo_mode_banner(demo_mode)
+    prefix_label = escape(
+        cfg.deployment_name if cfg is not None else cache.path.stem,
+    )
+    prefix = (
+        prefix_override
+        if prefix_override is not None
+        else (cfg.db_table_prefix if cfg is not None else cache.path.stem)
+    )
+
+    qp = request.query_params
+    kind = _validate_probe_kind(qp.get("kind"))
+    name = (qp.get("name") or "").strip()
+    # BT.2 probe — wall-clock today anchors the "last 7 days" default
+    # window so the page mirrors the operator's mental model. Same
+    # justification as the trainer page's default anchor; not on a
+    # determinism path (deploy / seed locks key off explicit dates).
+    today = date.today()  # typing-smell: ignore[no-datetime-now]: probe page default-window anchor — operator-facing "last 7 days" reads wall-clock; explicit dates via ?date_from / ?date_to override
+    default_from = today - timedelta(days=_PROBE_DEFAULT_WINDOW_DAYS - 1)
+    date_from = _parse_iso_date(qp.get("date_from")) or default_from
+    date_to = _parse_iso_date(qp.get("date_to")) or today
+
+    contracts = derive_column_contracts(instance)
+    picker_html = _render_probe_picker(
+        instance, kind=kind, name=name,
+        date_from=date_from, date_to=date_to,
+    )
+
+    if name == "":
+        body_html = _render_probe_empty_initial()
+    else:
+        body_html = await _render_probe_body(
+            contracts=contracts,
+            kind=kind, name=name,
+            date_from=date_from, date_to=date_to,
+            db_pool=db_pool, prefix=prefix, dialect=dialect,
+        )
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Studio · ETL · Probe — {prefix_label}</title>
+  {devlog_meta}{studio_theme_head(instance)}
+  <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
+  {devlog_script}</head>
+<body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
+  {top_nav_html}
+  {demo_banner}
+  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
+    <h1>Studio · ETL · Probe</h1>
+    <span class="text-sm text-secondary-fg font-mono">{prefix_label}</span>
+  </header>
+  {picker_html}
+  {body_html}
+</body>
+</html>
+"""
+
+
+def _render_probe_picker(
+    instance: L2Instance, *,
+    kind: ProbeKind, name: str,
+    date_from: date, date_to: date,
+) -> str:
+    """3-radio + name dropdown + date range form. Vanilla GET-with-query-
+    params so the URL is bookmarkable + operator-shareable."""
+    rail_names = sorted(str(r.name) for r in instance.rails)
+    template_names = sorted(str(t.name) for t in instance.transfer_templates)
+    chain_parents = sorted({str(c.parent) for c in instance.chains})
+
+    def _options(active: list[str], selected: str) -> str:
+        opts = [f'<option value="">— pick one —</option>']
+        for n in active:
+            sel = " selected" if n == selected else ""
+            opts.append(f'<option value="{escape(n)}"{sel}>{escape(n)}</option>')
+        return "\n".join(opts)
+
+    # Three dropdowns, one per kind; show only the active kind's list.
+    # Server-side filtering keeps the page JS-free. A small inline
+    # script just toggles visibility of the three dropdowns when the
+    # radio changes (no submit — operator clicks Apply when ready).
+    rail_dropdown = _options(rail_names, name if kind == "rail" else "")
+    tt_dropdown = _options(template_names, name if kind == "transfer_template" else "")
+    chain_dropdown = _options(chain_parents, name if kind == "chain" else "")
+
+    def _checked(k: ProbeKind) -> str:
+        return ' checked' if kind == k else ''
+
+    return f"""
+  <form method="get" action="/etl/probe" class="px-8 pt-6 pb-3 bg-white border-b border-surface-border">
+    <p class="text-sm text-secondary-fg max-w-3xl m-0 mb-3">
+      Pick a slice of the L2 to probe. Side-by-side view shows L2-
+      declared column expectations next to the runtime rows that match.
+    </p>
+    <fieldset class="border border-surface-border rounded-md p-3 mb-3" id="probe-kind-fieldset">
+      <legend class="text-xs uppercase tracking-wide text-secondary-fg px-1">Slice kind</legend>
+      <label class="inline-flex items-center gap-1 mr-4 text-sm">
+        <input type="radio" name="kind" value="rail" data-test-kind="rail"{_checked('rail')}> Rail
+      </label>
+      <label class="inline-flex items-center gap-1 mr-4 text-sm">
+        <input type="radio" name="kind" value="transfer_template" data-test-kind="transfer_template"{_checked('transfer_template')}> Transfer Template
+      </label>
+      <label class="inline-flex items-center gap-1 mr-4 text-sm">
+        <input type="radio" name="kind" value="chain" data-test-kind="chain"{_checked('chain')}> Chain
+      </label>
+    </fieldset>
+    <div class="flex flex-wrap items-end gap-4 mb-3">
+      <label class="block">
+        <span class="block text-xs uppercase tracking-wide text-secondary-fg mb-1">Name</span>
+        <select name="name" id="probe-name-select" class="px-2 py-1 border border-surface-border rounded-sm text-sm bg-white" data-active-kind="{escape(kind)}">
+          {rail_dropdown if kind == 'rail' else tt_dropdown if kind == 'transfer_template' else chain_dropdown}
+        </select>
+      </label>
+      <label class="block">
+        <span class="block text-xs uppercase tracking-wide text-secondary-fg mb-1">From</span>
+        <input type="date" name="date_from" value="{date_from.isoformat()}" class="px-2 py-1 border border-surface-border rounded-sm text-sm bg-white">
+      </label>
+      <label class="block">
+        <span class="block text-xs uppercase tracking-wide text-secondary-fg mb-1">To</span>
+        <input type="date" name="date_to" value="{date_to.isoformat()}" class="px-2 py-1 border border-surface-border rounded-sm text-sm bg-white">
+      </label>
+      <button type="submit" class="px-3 py-1 bg-accent text-accent-fg rounded-sm border border-accent text-sm hover:opacity-85">Apply</button>
+    </div>
+    <p class="text-xs text-secondary-fg m-0">
+      Window defaults to last {_PROBE_DEFAULT_WINDOW_DAYS} days; widen for
+      backfill / mass-load scenarios where the data lives outside the
+      live window.
+    </p>
+  </form>
+"""
+
+
+def _render_probe_empty_initial() -> str:
+    """Empty-state copy shown before the operator picks a name."""
+    return """
+  <section class="px-8 py-10 text-center text-secondary-fg" id="probe-empty-initial">
+    <p class="text-sm m-0">
+      Pick a slice above to see L2-declared expectations alongside
+      observed runtime rows.
+    </p>
+  </section>
+"""
+
+
+async def _render_probe_body(
+    *,
+    contracts: ColumnContracts,
+    kind: ProbeKind, name: str,
+    date_from: date, date_to: date,
+    db_pool: AsyncConnectionPool | None,
+    prefix: str,
+    dialect: Dialect | None,
+) -> str:
+    """Side-by-side: contract (left) + observed rows (right)."""
+    contract_html = _render_probe_contract_panel(contracts, kind=kind, name=name)
+    if db_pool is None or dialect is None:
+        observed_html = (
+            '<section class="p-6 text-sm text-secondary-fg">'
+            '<p class="m-0"><strong>No DB pool wired.</strong> '
+            'The Probe needs a connection to <code>'
+            f'{escape(prefix)}_transactions</code> to read observed '
+            'rows. Run Studio against the demo DB to see live data.</p>'
+            '</section>'
+        )
+    else:
+        result = await fetch_probe_rows(
+            db_pool, prefix,
+            kind=kind, name=name,
+            date_from=date_from, date_to=date_to,
+            dialect=dialect,
+        )
+        observed_html = _render_probe_observed_panel(
+            result, contracts=contracts, kind=kind, name=name,
+            date_from=date_from, date_to=date_to,
+        )
+    return f"""
+  <section class="grid grid-cols-1 lg:grid-cols-2 gap-0 border-t border-surface-border" id="probe-body">
+    <div class="border-r border-surface-border bg-white px-6 py-4" id="probe-contract-panel">
+      <h2 class="text-base font-semibold m-0 mb-3">Expected (from L2)</h2>
+      {contract_html}
+    </div>
+    <div class="bg-surface-bg px-6 py-4" id="probe-observed-panel">
+      <h2 class="text-base font-semibold m-0 mb-3">Observed (window)</h2>
+      {observed_html}
+    </div>
+  </section>
+"""
+
+
+def _render_probe_contract_panel(
+    contracts: ColumnContracts, *, kind: ProbeKind, name: str,
+) -> str:
+    """Per-kind contract listing for the picked entity.
+
+    Rail / TransferTemplate: one contract (or "not declared" message).
+    Chain: zero-or-more chain-edge contracts whose parent matches the
+    picked name (one parent can have multiple children → multiple
+    edges).
+    """
+    if kind == "rail":
+        rail_matches = [rc for rc in contracts.rails if str(rc.rail_name) == name]
+        if not rail_matches:
+            return _probe_no_such_entity("rail", name)
+        return _render_rail_contract(rail_matches[0])
+    if kind == "transfer_template":
+        tmpl_matches = [
+            tc for tc in contracts.templates if str(tc.template_name) == name
+        ]
+        if not tmpl_matches:
+            return _probe_no_such_entity("transfer template", name)
+        return _render_template_contract(tmpl_matches[0])
+    # chain
+    edges = [e for e in contracts.chain_edges if str(e.parent) == name]
+    if not edges:
+        return _probe_no_such_entity("chain parent", name)
+    return _render_chain_contracts(edges)
+
+
+def _probe_no_such_entity(kind_label: str, name: str) -> str:
+    return (
+        '<p class="text-sm text-warning m-0">'
+        f'No {escape(kind_label)} named <code>{escape(name)}</code> in '
+        'this L2. Pick a name from the dropdown.</p>'
+    )
+
+
+def _render_rail_contract(rc: RailContract) -> str:
+    rows: list[str] = [
+        _contract_row("rail_name", "=", str(rc.selector.equals)),
+    ]
+    for pred in rc.predicates:
+        rows.append(_contract_row(pred.column, *_predicate_op_value(pred)))
+    return _contract_table(rows) + _editor_link(rc.editor_path)
+
+
+def _render_template_contract(tc: TemplateContract) -> str:
+    rows: list[str] = [
+        _contract_row("template_name", "=", str(tc.selector.equals)),
+    ]
+    for pred in tc.predicates:
+        rows.append(_contract_row(pred.column, *_predicate_op_value(pred)))
+    return _contract_table(rows) + _editor_link(tc.editor_path)
+
+
+def _render_chain_contracts(edges: list[ChainEdgeContract]) -> str:
+    """Chain parent may have N child edges; render one block per child."""
+    blocks: list[str] = []
+    for edge in edges:
+        rows: list[str] = [
+            _contract_row("parent", "=", str(edge.parent)),
+            _contract_row("child", "=", str(edge.child)),
+            _contract_row(
+                "kind", "=",
+                "Required (singleton)" if edge.is_singleton else "XOR sibling",
+            ),
+        ]
+        if edge.fan_in:
+            count = (
+                str(edge.expected_parent_count)
+                if edge.expected_parent_count is not None
+                else "(unbounded)"
+            )
+            rows.append(_contract_row("fan_in", "=", f"N:1 (parents/child: {count})"))
+        for pred in edge.predicates:
+            rows.append(_contract_row(pred.column, *_predicate_op_value(pred)))
+        blocks.append(
+            _contract_table(rows) + _editor_link(edge.editor_path)
+            + '<hr class="my-3 border-surface-border">'
+        )
+    return "".join(blocks)
+
+
+def _contract_row(column: str, op: str, value: str) -> str:
+    return (
+        '<tr>'
+        f'<td class="px-2 py-1 font-mono text-xs">{escape(column)}</td>'
+        f'<td class="px-2 py-1 text-xs text-secondary-fg">{escape(op)}</td>'
+        f'<td class="px-2 py-1 font-mono text-xs">{escape(value)}</td>'
+        '</tr>'
+    )
+
+
+def _contract_table(rows: list[str]) -> str:
+    return (
+        '<table class="w-full mb-2 border-collapse">'
+        '<thead>'
+        '<tr class="text-left text-xs uppercase tracking-wide text-secondary-fg border-b border-surface-border">'
+        '<th class="px-2 py-1">Column</th>'
+        '<th class="px-2 py-1">Op</th>'
+        '<th class="px-2 py-1">Expected</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(rows)}</tbody></table>'
+    )
+
+
+def _editor_link(path: str) -> str:
+    return (
+        '<p class="text-xs m-0">'
+        f'<a class="text-accent hover:underline" href="{escape(path)}">→ Edit in L2</a>'
+        '</p>'
+    )
+
+
+def _predicate_op_value(pred: ColumnPredicate) -> tuple[str, str]:
+    """Display ``(operator, value)`` strings for a ColumnPredicate."""
+    if pred.kind == "equals":
+        return ("=", str(pred.expected))
+    if pred.kind == "one_of":
+        values = cast(tuple[str, ...], pred.expected)
+        return ("∈", "{" + ", ".join(values) + "}")
+    # not_null
+    return ("≠", "NULL")
+
+
+def _render_probe_observed_panel(
+    result: ProbeResult, *,
+    contracts: ColumnContracts,
+    kind: ProbeKind, name: str,
+    date_from: date, date_to: date,
+) -> str:
+    """Right panel: observed rows table with per-cell ✓/✗ where the
+    contract predicates apply."""
+    window_label = (
+        f"{date_from.isoformat()} → {date_to.isoformat()}"
+    )
+    if result.total_count == 0:
+        return _render_probe_empty_observed(window_label)
+
+    showing = len(result.rows)
+    header = (
+        '<p class="text-xs text-secondary-fg m-0 mb-3">'
+        f'Showing <strong>{showing}</strong> of <strong>{result.total_count:,}</strong> '
+        f'rows in window {escape(window_label)}'
+        '</p>'
+    )
+
+    # Resolve the predicate set applicable to this slice once; reuse
+    # per-row for evaluation.
+    predicates = _predicates_for_slice(contracts, kind=kind, name=name)
+
+    body_rows: list[str] = []
+    for row in result.rows:
+        body_rows.append(_render_observed_row(row, predicates))
+    table = (
+        '<table class="w-full border-collapse text-xs">'
+        '<thead>'
+        '<tr class="text-left uppercase tracking-wide text-secondary-fg border-b border-surface-border">'
+        '<th class="px-2 py-1">Transaction</th>'
+        '<th class="px-2 py-1">Posting</th>'
+        '<th class="px-2 py-1">Rail / Template</th>'
+        '<th class="px-2 py-1">Role / Direction</th>'
+        '<th class="px-2 py-1">Predicate fit</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(body_rows)}</tbody></table>'
+    )
+    legend = (
+        '<p class="text-xs text-secondary-fg m-0 mt-3">'
+        'Predicate fit: <span class="text-success">✓</span> matches L2, '
+        '<span class="text-danger">✗</span> contradicts, '
+        '<span class="text-secondary-fg">—</span> no value to evaluate.'
+        '</p>'
+    )
+    return header + table + legend
+
+
+def _render_observed_row(
+    row: ProbeRow, predicates: tuple[ColumnPredicate, ...],
+) -> str:
+    """One row in the observed-rows table."""
+    pass_count = 0
+    fail_count = 0
+    skip_count = 0
+    for pred in predicates:
+        result = evaluate_predicate(pred, row)
+        if result is True:
+            pass_count += 1
+        elif result is False:
+            fail_count += 1
+        else:
+            skip_count += 1
+
+    rail_or_tmpl = (
+        f'{escape(row.rail_name or "—")}'
+        + (f' / {escape(row.template_name)}' if row.template_name else "")
+    )
+    role_dir = (
+        f'{escape(row.account_role or "—")} / {escape(row.amount_direction)}'
+    )
+    fit = (
+        f'<span class="text-success">{pass_count}✓</span> '
+        f'<span class="text-danger">{fail_count}✗</span> '
+        f'<span class="text-secondary-fg">{skip_count}—</span>'
+    )
+    return (
+        '<tr class="border-b border-surface-border">'
+        f'<td class="px-2 py-1 font-mono">{escape(row.transaction_id)}</td>'
+        f'<td class="px-2 py-1 font-mono">{escape(row.posting.isoformat())}</td>'
+        f'<td class="px-2 py-1 font-mono">{rail_or_tmpl}</td>'
+        f'<td class="px-2 py-1">{role_dir}</td>'
+        f'<td class="px-2 py-1">{fit}</td>'
+        '</tr>'
+    )
+
+
+def _render_probe_empty_observed(window_label: str) -> str:
+    return f"""
+    <div class="border border-dashed border-surface-border rounded-md p-6 text-center text-sm">
+      <p class="m-0 mb-2"><strong>No rows match this slice.</strong></p>
+      <p class="m-0 mb-2 text-secondary-fg">
+        The L2 declares this rail / template / chain but the ETL hook
+        hasn't produced any matching rows in the window {escape(window_label)}.
+      </p>
+      <ul class="text-left text-secondary-fg max-w-xl mx-auto list-disc list-inside m-0 mb-0">
+        <li>Widen the window — backfill / historical loads may live outside today's default.</li>
+        <li>Check <a href="/etl/run" class="text-accent hover:underline">Run + coverage</a> to see when the last ETL ran.</li>
+        <li>If the last run was recent, this slice may be a real ETL gap. Open <a href="/etl/triage" class="text-accent hover:underline">Triage</a>.</li>
+      </ul>
+    </div>
+"""
+
+
+def _predicates_for_slice(
+    contracts: ColumnContracts, *, kind: ProbeKind, name: str,
+) -> tuple[ColumnPredicate, ...]:
+    """Return the predicate set BT.5 derived for the picked entity.
+
+    Rail / TransferTemplate: the matched entity's ``predicates`` tuple.
+    Chain: the union across every edge of the matched parent (one
+    parent may have N children; the per-row fit count aggregates).
+    """
+    if kind == "rail":
+        for rc in contracts.rails:
+            if str(rc.rail_name) == name:
+                return tuple(rc.predicates)
+        return ()
+    if kind == "transfer_template":
+        for tc in contracts.templates:
+            if str(tc.template_name) == name:
+                return tuple(tc.predicates)
+        return ()
+    # chain — union predicates across all matching edges.
+    preds: list[ColumnPredicate] = []
+    for edge in contracts.chain_edges:
+        if str(edge.parent) == name:
+            preds.extend(edge.predicates)
+    return tuple(preds)
+
+
+def _validate_probe_kind(value: str | None) -> ProbeKind:
+    """Coerce the URL's ?kind= to a typed ProbeKind; default 'rail'."""
+    if value == "transfer_template":
+        return "transfer_template"
+    if value == "chain":
+        return "chain"
+    return "rail"
+
+
+def _parse_iso_date(value: str | None) -> date | None:
+    """Parse YYYY-MM-DD; tolerate empty / malformed by returning None."""
+    if value is None or value == "":
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def _render_diagram_page(
@@ -2010,6 +2537,24 @@ def make_studio_routes(
             ),
         )
 
+    async def etl_probe(request: Request) -> HTMLResponse:
+        # BT.2 — L2-slice probe. Reads (kind, name, date_from, date_to)
+        # from query params; renders the L2-declared contract for the
+        # picked entity side-by-side with observed runtime rows. When
+        # no name is picked, renders the picker + empty observed pane.
+        # When db_pool is absent (unit-test surface), the observed
+        # pane shows a "no DB pool wired" banner; picker still works.
+        html = await _render_etl_probe_page(
+            cache, dev_log, request,
+            db_pool=db_pool,
+            dialect=dialect,
+            prefix_override=prefix_override,
+            cfg=cfg,
+            demo_mode=demo_mode,
+            top_nav_html=_top_nav_html("/etl/probe"),
+        )
+        return HTMLResponse(html)
+
     async def data(request: Request) -> HTMLResponse:
         # X.4.h.url — read URL query params into the cache so a
         # bookmarked / reloaded /data?... restores trainer state.
@@ -2069,6 +2614,7 @@ def make_studio_routes(
         Route("/data/timeline", data_timeline, methods=["GET"]),
         Route("/diagram", diagram, methods=["GET"]),
         Route("/etl/", etl_landing, methods=["GET"]),
+        Route("/etl/probe", etl_probe, methods=["GET"]),
         Mount(
             "/studio/static",
             app=StaticFiles(directory=str(_STUDIO_ASSETS_DIR)),
