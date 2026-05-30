@@ -206,3 +206,117 @@ def test_etl_probe_carries_top_nav_with_probe_route_active(
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
         body = c.get("/etl/probe").text
     assert 'data-test-active="/etl/probe"' in body
+
+
+# -- BTa.5 — picker polish + chain side-panel ----------------------------
+
+
+def test_etl_probe_picker_renders_one_line_definitions_per_radio(
+    writable_l2_yaml: Path,
+) -> None:
+    """BTa.5 — every slice-kind radio carries a short definition
+    inline so first-time operators dont bounce to the glossary."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        body = c.get("/etl/probe").text
+    assert "lowest-level L2 primitive" in body  # rail definition
+    assert "multi-leg event template" in body  # transfer_template
+    assert "parent" in body and "child" in body  # chain
+
+
+def test_etl_probe_name_input_is_searchable_datalist_input(
+    writable_l2_yaml: Path,
+) -> None:
+    """BTa.5 — name input is `<input list>` + `<datalist>` (native
+    browser autocomplete; no JS), replacing the prior `<select>`."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        body = c.get("/etl/probe?kind=rail").text
+    assert "<input list=\"probe-name-suggestions\"" in body
+    assert "<datalist id=\"probe-name-suggestions\">" in body
+    # Old `<select name=\"name\">` shape gone.
+    assert "<select name=\"name\"" not in body
+    # Placeholder hints at search affordance.
+    assert "Start typing to search" in body
+
+
+def test_etl_probe_renders_four_date_chips_with_quick_windows(
+    writable_l2_yaml: Path,
+) -> None:
+    """BTa.5 — 4 date quick-pick chips (Last 7d / 30d / 90d / All time)
+    each carry an anchor link with the appropriate date_from/date_to
+    query params + the current (kind, name) forwarded."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        body = c.get("/etl/probe?kind=rail&name=ach_credit").text
+    for chip in ("Last 7d", "Last 30d", "Last 90d", "All time"):
+        assert f"data-test-date-chip=\"{chip}\"" in body
+    # Each chip preserves the current kind + name in the carryover.
+    assert "kind=rail" in body
+    assert "name=ach_credit" in body
+
+
+def test_etl_probe_chip_for_default_window_renders_as_active(
+    writable_l2_yaml: Path,
+) -> None:
+    """The default window (All time) is the operators starting state;
+    its chip ships with the active styling so the active selection is
+    visible at a glance."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        body = c.get("/etl/probe").text
+    # The All time chip is active (bg-accent text-accent-fg styling).
+    # Find the All time chip block and assert it ships the active classes.
+    chip_block = body.split("data-test-date-chip=\"All time\"", 1)[0]
+    # Walk back to the opening <a tag.
+    open_tag = chip_block.rsplit("<a ", 1)[1]
+    assert "bg-accent" in open_tag
+    assert "text-accent-fg" in open_tag
+
+
+def test_etl_probe_chain_kind_renders_side_panel_arrow_trigger(
+    writable_l2_yaml: Path,
+) -> None:
+    """BTa.5 — picking a chain parent surfaces the arrow-diagram
+    side-panel trigger above the contract table."""
+    cache = L2InstanceCache.from_path(writable_l2_yaml)
+    parent = str(cache.get().chains[0].parent)
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        body = c.get(f"/etl/probe?kind=chain&name={parent}").text
+    assert "data-test-chain-arrow-trigger" in body
+    assert f"/studio/side-panel/chain/{parent}" in body
+    assert "View arrow diagram" in body
+
+
+def test_side_panel_chain_route_renders_parent_arrow_children(
+    writable_l2_yaml: Path,
+) -> None:
+    """GET /studio/side-panel/chain/<parent> renders the parent name,
+    a down-arrow, then the child list. Singleton vs XOR labels both
+    surface based on `len(children)`."""
+    cache = L2InstanceCache.from_path(writable_l2_yaml)
+    parent = str(cache.get().chains[0].parent)
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        resp = c.get(f"/studio/side-panel/chain/{parent}")
+        assert resp.status_code == 200
+        body = resp.text
+    assert parent in body
+    assert "↓" in body
+    # Either singleton or XOR label lands.
+    assert "Singleton" in body or "XOR" in body
+
+
+def test_side_panel_chain_route_unknown_parent_404s(
+    writable_l2_yaml: Path,
+) -> None:
+    """Unknown parent ⇒ 404 + helpful pointer to /diagram."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        resp = c.get("/studio/side-panel/chain/not_a_real_parent")
+        assert resp.status_code == 404
+        body = resp.text
+    assert "No chain found" in body
+    assert "/diagram" in body
+

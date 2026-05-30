@@ -33,10 +33,14 @@ as the cold-read v3 surfaces specific pain points.
 from __future__ import annotations
 
 from html import escape
+from typing import TYPE_CHECKING
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
 from starlette.routing import Route
+
+if TYPE_CHECKING:
+    from recon_gen.common.l2.cache import L2InstanceCache
 
 
 # -- Glossary content (single source of truth) --------------------------------
@@ -318,12 +322,19 @@ def _markdown_render(text: str) -> str:
     return rendered
 
 
-def side_panel_routes() -> list[Route]:
+def side_panel_routes(
+    cache: L2InstanceCache | None = None,
+) -> list[Route]:
     """Side-panel HTML fragment routes. Mount under ``/studio/`` so
     they don't collide with Dashboards / L2 Editor / ETL Support
     surfaces.
+
+    BTa.5 — when ``cache`` is supplied, also mounts the chain-arrow
+    fragment route that resolves chain parents/children from the
+    in-memory L2 instance. Unit tests that don't need the chain
+    arrow can omit the cache.
     """
-    return [
+    routes: list[Route] = [
         Route(
             "/studio/side-panel/glossary",
             _glossary_full, methods=["GET"],
@@ -333,3 +344,78 @@ def side_panel_routes() -> list[Route]:
             _glossary_term, methods=["GET"],
         ),
     ]
+    if cache is not None:
+        routes.append(
+            Route(
+                "/studio/side-panel/chain/{parent}",
+                _chain_arrow_route_factory(cache),
+                methods=["GET"],
+            ),
+        )
+    return routes
+
+
+def _chain_arrow_route_factory(cache: L2InstanceCache):  # noqa: ANN202
+    """Closure: builds the chain-arrow route handler with the cache
+    in scope so the handler can resolve parent → children from the
+    live L2 instance.
+    """
+    async def _chain_arrow(request: Request) -> HTMLResponse:
+        """Render a small parent → child diagram for one chain parent.
+
+        Each chain in the L2 has one parent + N children; render the
+        parent at the top, an arrow down, then the children as a
+        list. Singleton vs XOR sibling distinction surfaces as a
+        per-child label. Unknown parent → 404 + pointer to /diagram.
+        """
+        parent = str(request.path_params.get("parent", ""))
+        instance = cache.get()
+        # Resolve every chain whose parent matches; one parent may
+        # have multiple chains registered.
+        matches = [c for c in instance.chains if str(c.parent) == parent]
+        if not matches:
+            return HTMLResponse(
+                f'<p class="text-warning">'
+                f'No chain found with parent <code>{escape(parent)}</code>. '
+                f'Open <a class="text-accent hover:underline" '
+                f'href="/diagram">the diagram</a> to browse the L2 topology.'
+                f'</p>',
+                status_code=404,
+            )
+        # Group children by their containing chain so the operator
+        # sees the XOR sibling structure (one chain = one set of XOR
+        # siblings; a singleton chain has 1 child).
+        chain_blocks: list[str] = []
+        for chain in matches:
+            children = list(chain.children)
+            is_singleton = len(children) == 1
+            kind_label = (
+                "Singleton (required child)"
+                if is_singleton
+                else f"XOR ({len(children)} candidate children)"
+            )
+            child_items = "".join(
+                f'<li class="font-mono text-sm py-0.5">{escape(str(c))}</li>'
+                for c in children
+            )
+            chain_blocks.append(
+                '<div class="mb-4 last:mb-0">'
+                f'<p class="text-xs text-secondary-fg m-0 mb-1">{escape(kind_label)}</p>'
+                f'<ul class="list-none m-0 p-0 pl-4 border-l-2 border-accent">'
+                f'{child_items}</ul></div>'
+            )
+        return HTMLResponse(
+            '<h3 class="text-base font-semibold m-0 mb-2">Chain · '
+            f'<span class="font-mono">{escape(parent)}</span></h3>'
+            '<div class="bg-surface-bg rounded-sm p-3 mb-3">'
+            f'<p class="font-mono text-sm m-0 mb-1">{escape(parent)}</p>'
+            '<p class="text-accent text-xl m-0 leading-none" aria-hidden="true">↓</p>'
+            '</div>'
+            + "".join(chain_blocks)
+            + '<p class="text-xs text-secondary-fg mt-3 m-0">'
+            'Open the <a class="text-accent hover:underline" '
+            f'href="/diagram?focus=chain__{escape(parent)}">'
+            'full diagram</a> for the wider topology view.</p>'
+        )
+
+    return _chain_arrow

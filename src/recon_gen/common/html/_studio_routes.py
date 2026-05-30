@@ -136,6 +136,7 @@ from recon_gen.common.l2.topology import (
 from recon_gen.common.l2.trainer import plants_per_node
 from recon_gen.common.sql.dialect import Dialect
 from recon_gen.common.html._studio_side_panel import (
+    render_side_panel_trigger,
     side_panel_routes as _side_panel_routes_imported,
 )
 from recon_gen.common.html._studio_training import render_training_pane
@@ -967,34 +968,125 @@ async def _render_etl_probe_page(
 """
 
 
+# BTa.5 — one-line slice-kind definitions (per BTa.0.5 mockup §5a).
+# Surfaced inline next to each radio so operators new to the L2
+# vocabulary don't have to bounce to the side-panel glossary.
+_PROBE_KIND_DEFINITIONS: Mapping[str, str] = {
+    "rail": (
+        "one money-movement leg shape (e.g. ACH credit, internal "
+        "GL move) — the lowest-level L2 primitive."
+    ),
+    "transfer_template": (
+        "a multi-leg event template that bundles two or more rails "
+        "into one logical transfer (e.g. card-purchase = auth + post)."
+    ),
+    "chain": (
+        "a parent → child dependency between transfers (e.g. ACH "
+        "settlement triggers GL clearing 1-2 days later)."
+    ),
+}
+
+
+# BTa.5 — date quick-pick chips. Each chip carries a (label, day-window)
+# tuple where window=None means "All time" → date_from = _PROBE_DEFAULT_FROM.
+_PROBE_DATE_CHIPS: tuple[tuple[str, int | None], ...] = (
+    ("Last 7d", 7),
+    ("Last 30d", 30),
+    ("Last 90d", 90),
+    ("All time", None),
+)
+
+
+def _chip_window_dates(
+    today: date, days: int | None,
+) -> tuple[date, date]:
+    """Resolve a chip label's day-window into a (from, to) date pair."""
+    if days is None:
+        return _PROBE_DEFAULT_FROM, today
+    from datetime import timedelta  # noqa: PLC0415
+    return today - timedelta(days=days - 1), today
+
+
 def _render_probe_picker(
     instance: L2Instance, *,
     kind: ProbeKind, name: str,
     date_from: date, date_to: date,
 ) -> str:
     """3-radio + name dropdown + date range form. Vanilla GET-with-query-
-    params so the URL is bookmarkable + operator-shareable."""
+    params so the URL is bookmarkable + operator-shareable.
+
+    BTa.5 — operator-facing polish:
+    - Per-radio one-line definition (`_PROBE_KIND_DEFINITIONS`) so first-
+      time operators don't bounce to the glossary mid-task.
+    - Name input is a searchable `<input list="">` + `<datalist>` (native
+      browser autocomplete; no JS dependency). Single input across all
+      kinds keeps the form simple — the active kind's name list seeds
+      the suggestions.
+    - Date quick-pick chips render below the form as anchor links that
+      carry the current (kind, name) forward + swap in the chip's
+      window. Server-side date math, no JS.
+    """
     rail_names = sorted(str(r.name) for r in instance.rails)
     template_names = sorted(str(t.name) for t in instance.transfer_templates)
     chain_parents = sorted({str(c.parent) for c in instance.chains})
 
-    def _options(active: list[str], selected: str) -> str:
-        opts = [f'<option value="">— pick one —</option>']
-        for n in active:
-            sel = " selected" if n == selected else ""
-            opts.append(f'<option value="{escape(n)}"{sel}>{escape(n)}</option>')
-        return "\n".join(opts)
-
-    # Three dropdowns, one per kind; show only the active kind's list.
-    # Server-side filtering keeps the page JS-free. A small inline
-    # script just toggles visibility of the three dropdowns when the
-    # radio changes (no submit — operator clicks Apply when ready).
-    rail_dropdown = _options(rail_names, name if kind == "rail" else "")
-    tt_dropdown = _options(template_names, name if kind == "transfer_template" else "")
-    chain_dropdown = _options(chain_parents, name if kind == "chain" else "")
+    # The active kind's universe seeds the datalist suggestions.
+    if kind == "rail":
+        active_names = rail_names
+    elif kind == "transfer_template":
+        active_names = template_names
+    else:
+        active_names = chain_parents
+    datalist_options = "\n      ".join(
+        f'<option value="{escape(n)}">' for n in active_names
+    )
 
     def _checked(k: ProbeKind) -> str:
         return ' checked' if kind == k else ''
+
+    def _radio_row(k: str, label: str) -> str:
+        defn = _PROBE_KIND_DEFINITIONS[k]
+        return (
+            '<label class="flex items-start gap-2 mb-2 last:mb-0 text-sm">'
+            f'<input type="radio" name="kind" value="{escape(k)}" '
+            f'data-test-kind="{escape(k)}" class="mt-1"{_checked(cast(ProbeKind, k))}>'
+            '<span>'
+            f'<span class="font-semibold">{escape(label)}</span>'
+            f'<span class="block text-xs text-secondary-fg mt-0.5">{escape(defn)}</span>'
+            '</span>'
+            '</label>'
+        )
+
+    radio_rows = "\n      ".join((
+        _radio_row("rail", "Rail"),
+        _radio_row("transfer_template", "Transfer Template"),
+        _radio_row("chain", "Chain"),
+    ))
+
+    # Quick-pick chips — anchor links that carry the picker forward.
+    today = date.today()  # typing-smell: ignore[no-datetime-now]: chip date math anchored to operator-facing today; no UTC subtlety
+    chip_blocks: list[str] = []
+    for chip_label, days in _PROBE_DATE_CHIPS:
+        chip_from, chip_to = _chip_window_dates(today, days)
+        chip_qs = (
+            f"kind={quote(kind, safe='')}&name={quote(name, safe='')}"
+            f"&date_from={chip_from.isoformat()}&date_to={chip_to.isoformat()}"
+        )
+        active = (
+            chip_from == date_from and chip_to == date_to
+        )
+        chip_classes = (
+            "bg-accent text-accent-fg border-accent"
+            if active
+            else "bg-white text-secondary-fg border-surface-border hover:border-accent"
+        )
+        chip_blocks.append(
+            f'<a class="inline-block px-3 py-1 rounded-full border text-xs '
+            f'no-underline {chip_classes}" '
+            f'href="/etl/probe?{chip_qs}" '
+            f'data-test-date-chip="{escape(chip_label)}">{escape(chip_label)}</a>'
+        )
+    chips_html = "".join(chip_blocks)
 
     return f"""
   <form method="get" action="/etl/probe" class="px-8 pt-6 pb-3 bg-white border-b border-surface-border">
@@ -1004,22 +1096,19 @@ def _render_probe_picker(
     </p>
     <fieldset class="border border-surface-border rounded-md p-3 mb-3" id="probe-kind-fieldset">
       <legend class="text-xs uppercase tracking-wide text-secondary-fg px-1">Slice kind</legend>
-      <label class="inline-flex items-center gap-1 mr-4 text-sm">
-        <input type="radio" name="kind" value="rail" data-test-kind="rail"{_checked('rail')}> Rail
-      </label>
-      <label class="inline-flex items-center gap-1 mr-4 text-sm">
-        <input type="radio" name="kind" value="transfer_template" data-test-kind="transfer_template"{_checked('transfer_template')}> Transfer Template
-      </label>
-      <label class="inline-flex items-center gap-1 mr-4 text-sm">
-        <input type="radio" name="kind" value="chain" data-test-kind="chain"{_checked('chain')}> Chain
-      </label>
+      {radio_rows}
     </fieldset>
     <div class="flex flex-wrap items-end gap-4 mb-3">
       <label class="block">
         <span class="block text-xs uppercase tracking-wide text-secondary-fg mb-1">Name</span>
-        <select name="name" id="probe-name-select" class="px-2 py-1 border border-surface-border rounded-sm text-sm bg-white" data-active-kind="{escape(kind)}">
-          {rail_dropdown if kind == 'rail' else tt_dropdown if kind == 'transfer_template' else chain_dropdown}
-        </select>
+        <input list="probe-name-suggestions" name="name" value="{escape(name)}"
+               id="probe-name-input"
+               class="px-2 py-1 border border-surface-border rounded-sm text-sm bg-white min-w-[20rem]"
+               placeholder="Start typing to search…"
+               autocomplete="off">
+        <datalist id="probe-name-suggestions">
+      {datalist_options}
+        </datalist>
       </label>
       <label class="block">
         <span class="block text-xs uppercase tracking-wide text-secondary-fg mb-1">From</span>
@@ -1031,10 +1120,13 @@ def _render_probe_picker(
       </label>
       <button type="submit" class="px-3 py-1 bg-accent text-accent-fg rounded-sm border border-accent text-sm hover:opacity-85">Apply</button>
     </div>
-    <p class="text-xs text-secondary-fg m-0">
+    <div class="flex flex-wrap items-center gap-2 mb-1" id="probe-date-chips">
+      <span class="text-xs uppercase tracking-wide text-secondary-fg">Quick window:</span>
+      {chips_html}
+    </div>
+    <p class="text-xs text-secondary-fg m-0 mt-2">
       Window defaults to <strong>All time</strong> (1900-01-01 →
-      today). Narrow to debug recent activity; BTa.5 ships quick-pick
-      chips for the common cases.
+      today). Pick a chip or set the date inputs to narrow.
     </p>
   </form>
 """
@@ -1153,8 +1245,29 @@ def _render_template_contract(tc: TemplateContract) -> str:
 
 
 def _render_chain_contracts(edges: list[ChainEdgeContract]) -> str:
-    """Chain parent may have N child edges; render one block per child."""
+    """Chain parent may have N child edges; render one block per child.
+
+    BTa.5 — surfaces a "View arrow diagram" side-panel trigger per
+    parent so the operator can see the parent → child shape without
+    bouncing to /diagram. Trigger renders once per parent (not per
+    edge, since all edges share a parent in this call).
+    """
     blocks: list[str] = []
+    # All edges in this call share the same parent (caller filters by
+    # parent in `_render_probe_contract_panel`). Surface the side-panel
+    # trigger once at the top.
+    parent = str(edges[0].parent) if edges else ""
+    if parent:
+        trigger = render_side_panel_trigger(
+            f"/studio/side-panel/chain/{quote(parent, safe='')}",
+            label="↗ View arrow diagram",
+            aria_label=f"View arrow diagram for chain {parent}",
+            extra_classes="text-xs mb-3",
+        )
+        blocks.append(
+            '<p class="m-0 mb-2" data-test-chain-arrow-trigger>'
+            f'{trigger}</p>'
+        )
     for edge in edges:
         rows: list[str] = [
             _contract_row("parent", "=", str(edge.parent)),
@@ -3539,7 +3652,7 @@ def make_studio_routes(
         # BTa.1 — side-panel fragment routes (glossary + per-term).
         # BX.12-15 + BTa.5 add more fragment routes alongside these
         # as the per-page help text + entity diagrams land.
-        *_side_panel_routes_imported(),
+        *_side_panel_routes_imported(cache),
         Mount(
             "/studio/wasm-graphviz",
             app=StaticFiles(directory=str(_WASM_GRAPHVIZ_DIR)),
