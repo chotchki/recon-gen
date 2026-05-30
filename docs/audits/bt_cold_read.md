@@ -761,76 +761,101 @@ implementation prescriptions.
    or default to "All" and let me narrow with a chip. Today's 7-day
    default means I see "no rows" for a rail that Run just told me
    was green. I'd close the tab.
+   - Comment: Default to all for now, if its bad we can shrink the default
 2. **Add a confirmation step to "Run ETL"** — either a "Preview run"
    button that shows what will happen, or a modal that says "This will
    truncate `<prefix>_transactions` and `<prefix>_daily_balances`, run
    the hook at `<path>`, and refresh 9 matviews. Continue? [Cancel]
    [Run]". I'd expect any button that wipes a table to ask me before
    firing.
+    - Comment: I HATE modals, also an extra click to confirm after the first scary press is just friction, would making the button text "Refresh Data" help?
 3. **Tell me whose hook ran.** I'd expect the post-run summary to say
    "Ran the bundled demo hook (`recon_gen._dev.etl_hook.demo_hook`).
    To wire your real hook, see `<docs link>`." Right now I have no idea
    the run was a dry placeholder.
+    - Comment: Agreed and we should show its output / error code.
 4. **Deep-link Triage CTAs to the specific entity.** I'd expect "Open
    Rails editor" on a card about rail 'Foo' to take me to a Foo-focused
    editor view (or "add Foo" form if it doesn't exist), not to the L2
    editor home.
+    - Comment: That's fair, let's fix
 5. **Add a back-breadcrumb from L2 Editor → Triage when arriving via a
    CTA.** I'd expect "← back to Triage" sticky at the top until I
    commit an edit.
+    - Comment: If its easy based on referer, let's do it.
 
 ### P2 (8 items) — friction that I'd grumble about
 
 1. **Numbered workflow on landing.** I'd expect "1. Run, 2. Triage, 3.
    Probe & fix" arrows on the landing page instead of three equal cards.
+    - Comment: That's fair, let's fix
 2. **One-line definitions next to Probe slice radios.** I'd expect "Rail
    — a single payment movement primitive" / "Transfer Template — a
    multi-leg event" / "Chain — a parent→child relationship between
    transfer events."
+    - Comment: That's fair, let's fix
 3. **Probe Name dropdown filtering.** I'd expect a search box and ✓/✗
    status badges so I can find "rails with no data" in one scan.
+  - Comment: That's fair, let's fix
 4. **Date quick-picks.** "Last 7d / Last 30d / Last 90d / All time"
    chips above the date inputs.
+  - Comment: That's fair, let's fix... however we will want to check information density once we've gotten through these changes.
 5. **"Show failures only" toggle on Run Coverage.** I'd expect to
    collapse the green entries so I can focus on what's broken.
+  - Comment: That's fair, let's fix
 6. **Fix Run Metadata roll-up math** or explain the denominator.
    "2 of 4" disagreeing with `0/4 + 2/4 + 0/2` makes me distrust the
    panel.
+  - Comment: That's fair, let's fix
 7. **Strip `declared_rails:` from individual Triage cards.** Show once
    at top of page or in a collapsible. ~60× redundant block is the
    biggest readability hit.
+  - Comment: Finding a common group by method makes complete sense otherwise its just noise.
 8. **Volume badges on Triage cards.** I'd expect the card title to
    show row count: "Unmatched rail_name • 256 rows."
+  - Comment: That's fair, let's fix
 
 ### P3 (8 items) — polish
 
 1. **Hover-tip on `qsgen-sqlite`** breadcrumb explaining dialect +
    deployment.
+  - Comment: This is backlog worth as a readdress of the cfg.yaml output.
 2. **Probe empty-state copy** should pick the right word for the slice
    ("rail" not "rail / template / chain").
+  - Comment: Defer for now
 3. **Per-stage timings + level in Run log.**
+  - Comment: That's fair, let's fix
 4. **Transient flash after Run** so I know coverage refreshed.
+  - Comment: or a "bell" in the browser tab / sound would be very helpful on real data sets. After a couple mins we all know we're multi-tasking.
 5. **Distinct color/icon per Triage gap kind.**
+  - Comment: That's fair just keep it accessible.
 6. **Columnar sample-row view** in Triage cards instead of JSON dump.
+  - Comment: That's fair, let's fix.
 7. **Arrow diagram for Chain Probe Expected** (parent → child visual).
+  - Comment: Diagrams and/or a side panel with additional help text will reduce the need for a separate doc site.
 8. **Investigate the transient Probe HTTP 500** caught in the first
    screenshot pass. Hypothesis: DB lock contention with Run's
    matview-refresh phase. Either add a retry-on-lock-busy or a
    "this slice is recomputing, try again" message instead of the
    dashboards-styled 500 page.
+ - Comment: That's fair, let's fix.
 
 ### Workflow-shaped recommendations (orthogonal to P-tier)
 
 - **First-time tutorial path.** A "First time here?" banner on `/etl/`
   that walks me through Run → Triage → fix one rail → re-run. Even a
   5-step inline checklist would orient new operators.
+ - Comment: That's fair, let's fix.
 - **Reverse-link from dashboards.** Each broken dashboard should
   point me to the ETL Support gap that's causing it. Right now I
   have to know the lineage.
+ - Comment: That would GREATLY help someone learn this.
 - **Glossary popover** keyed to bolded terms (L2, Rail, Hook, Matview,
   LimitSchedule, Chain, Slice, Singleton).
+  - Comment: this is like the diagram ask, side panel pop out for definitions would be a good approach
 - **Snapshot/restore around Run.** Even a "last 3 runs" rollback list
   would massively de-risk the destructive button.
+  - Comment: Defer, but willing to consider it, would be challenging for anything not SQLite
 
 ---
 
